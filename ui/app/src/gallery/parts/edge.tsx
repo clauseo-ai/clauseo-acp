@@ -120,7 +120,7 @@ export function EdgeParts() {
         <NoteSample why="pool" />
       </Sample>
       <Sample name="NotProtectedMark, full">
-        <NotProtectedMark />
+        <NotProtectedMark meaning="Clauseo asks before each change in this matter." />
       </Sample>
       <Sample name="NotProtectedMark, short">
         <NotProtectedMark short />

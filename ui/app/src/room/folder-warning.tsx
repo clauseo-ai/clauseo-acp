@@ -49,7 +49,7 @@ export function FolderWarning({ kind }: { kind: Warned }) {
           <Say>{fr(lang, says.head)}</Say>
         </b>
         <span className="folder-warning-rest">
-          <Say>{fr(lang, "Claude asks before every change. Codex can't work here.")}</Say>
+          <Say>{fr(lang, "Claude asks before every change. ChatGPT can't work here.")}</Say>
         </span>
         <Tooltip content={info}>
           <button type="button" className="room-info" aria-label={info}>

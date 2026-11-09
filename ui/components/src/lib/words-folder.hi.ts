@@ -16,8 +16,8 @@ export const HI = {
   Copy: "कॉपी करें",
   // FR12: a network drive's notice: its words, its tooltip and accessible name, and behind its info icon
   "On a network drive.": "नेटवर्क ड्राइव पर।",
-  "Claude asks before every change. Codex can't work here.":
-    "Claude हर बदलाव से पहले पूछता है। Codex यहाँ काम नहीं कर सकता।",
+  "Claude asks before every change. ChatGPT can't work here.":
+    "Claude हर बदलाव से पहले पूछता है। ChatGPT यहाँ काम नहीं कर सकता।",
   "This matter's folder is on a network drive": "इस मामले का फ़ोल्डर नेटवर्क ड्राइव पर है",
   "Clauseo can't keep Claude and Codex inside this folder. To work in the Safe workspace, move the matter to a folder on this computer.":
     "Clauseo, Claude और Codex को इस फ़ोल्डर के भीतर नहीं रख सकता। सुरक्षित कार्यक्षेत्र में काम करने के लिए मामले को इस कंप्यूटर के किसी फ़ोल्डर में ले जाएँ।",

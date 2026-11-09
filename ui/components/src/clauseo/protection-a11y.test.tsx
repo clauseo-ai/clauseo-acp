@@ -148,7 +148,7 @@ test("the pressable mark says it opens a dialog; the mark alone is no control", 
   await show(
     <>
       <NotProtectedMark short onPress={() => {}} />
-      <NotProtectedMark />
+      <NotProtectedMark meaning="Clauseo asks before each change in this matter." />
     </>,
   );
   const marks = document.querySelectorAll(".np-mark");

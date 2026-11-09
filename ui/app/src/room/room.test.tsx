@@ -282,7 +282,7 @@ for (const lang of ["en", "hi"] as const) {
       const text = host?.textContent ?? "";
       const workspace = rt(
         lang,
-        "Safe workspace. Clauseo works inside this matter's folder and asks before going beyond it.",
+        "Safe workspace. Clauseo works only in this matter's folder. It can't open your other files unless you allow it.",
       );
       expect(text).not.toContain(workspace.slice(0, 12));
       expect(text).not.toContain(vt(lang, "Not protected"));

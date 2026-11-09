@@ -17,6 +17,7 @@ import type {
   SetupEvent,
   SignIn,
 } from "../transport/protocol.ts";
+import { SafeWorkspaceLine } from "@clauseo/components/clauseo/safe-workspace-line.tsx";
 import type { Entry } from "./entry.ts";
 import { MATTER } from "./hosts.ts";
 import { PressInOrder } from "./press-words.tsx";
@@ -186,12 +187,12 @@ const REFUSED_INVALID: FakeProtectionHost = {
   },
 };
 
-/** UC's entries, UC-01 to UC-96, each id written as it is; ids missing are unused. */
+/** UC's entries, UC-01 to UC-106, each id written as it is; ids missing are unused. */
 export const UC: Entry[] = [
   room(
     "UC-01",
     roomWords(
-      "Safe workspace. Clauseo works inside this matter's folder and asks before going beyond it.",
+      "Safe workspace. Clauseo works only in this matter's folder. It can't open your other files unless you allow it.",
     ),
     "room/protection-line",
     { protection: P.b },
@@ -208,16 +209,10 @@ export const UC: Entry[] = [
   room(
     "UC-04",
     toolbarWords(
-      "Clauseo can change files in this matter without asking. It asks before going beyond it.",
+      "Clauseo can read any file you can open, and changes files in this matter without asking. It asks before changing files outside it.",
     ),
     "room/protection-line",
     { protection: P.refused, agent: "codex-acp" },
-  ),
-  room(
-    "UC-05",
-    toolbarWords("Clauseo can reach beyond this matter's folder without asking."),
-    "room/protection-line",
-    { protection: P.off },
   ),
   room("UC-06", toolbarWords("Not protected"), "room/protection-mark", { protection: P.refused }),
   first("UC-10", fw("Windows asks once for permission to set up the Safe workspace.")),
@@ -243,7 +238,7 @@ export const UC: Entry[] = [
   room(
     "UC-21",
     versionWords(
-      "The Safe workspace is off for {matter}. Clauseo can read and change files anywhere on this computer while it works here, without asking first.",
+      "The Safe workspace is off for {matter}. Claude asks before each change. ChatGPT can read any file you can open, and asks before changing files outside this matter's folder.",
     ),
     "room/np-note",
     note(P.off),
@@ -589,4 +584,17 @@ export const UC: Entry[] = [
     {},
     P.missing,
   ),
+  // UC-01 once the host runs Claude on its own in the Safe workspace (D2d): not shown in the app until then
+  {
+    id: "UC-106",
+    words: roomWords(
+      "Safe workspace. Clauseo changes files in this matter without asking. It can't open your other files unless you allow it.",
+    ),
+    screen: "room/protection-line",
+    render: () => (
+      <p className="room-line">
+        <SafeWorkspaceLine worksOnItsOwn />
+      </p>
+    ),
+  },
 ];

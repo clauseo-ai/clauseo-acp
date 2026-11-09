@@ -48,7 +48,7 @@ const line = () => h!.one("workspace-line");
 const safeLine = () => h!.host.querySelector(".room-line")?.textContent ?? null;
 const SAFE = rt(
   "en",
-  "Safe workspace. Clauseo works inside this matter's folder and asks before going beyond it.",
+  "Safe workspace. Clauseo works only in this matter's folder. It can't open your other files unless you allow it.",
 );
 const note = () => document.body.querySelector<HTMLElement>('[data-testid="np-note"]');
 const toolbarMark = () => h!.host.querySelector(".room-next .np-mark");
@@ -61,9 +61,8 @@ const railMark = (name = THE_MATTER.name) =>
 const CLAUDE_LINE = tbt("en", "Clauseo asks before each change in this matter.");
 const CODEX_LINE = tbt(
   "en",
-  "Clauseo can change files in this matter without asking. It asks before going beyond it.",
+  "Clauseo can read any file you can open, and changes files in this matter without asking. It asks before changing files outside it.",
 );
-const OFF_LINE = tbt("en", "Clauseo can reach beyond this matter's folder without asking.");
 
 test("a matter whose protection isn't known shows no line and no mark (QU.1)", async () => {
   await mount(undefined);
@@ -112,13 +111,16 @@ for (const [plan, agent, words] of [
     },
   );
 
-test.each(["claude-acp", "codex-acp"])(
-  "switched off on %s: the mark's own line, Clauseo reaches beyond the folder without asking",
-  async (agent) => {
+test.each([
+  ["claude-acp", CLAUDE_LINE],
+  ["codex-acp", CODEX_LINE],
+] as const)(
+  "switched off on %s: the plan's own Not protected line, as without protection",
+  async (agent, words) => {
     explained();
     await mount(PROT.off, { threads: [{ ...summary(), agent }] });
     expect(line()?.dataset["cause"]).toBe("switched_off");
-    expect(line()?.textContent).toBe(`${tbt("en", "Not protected.")} ${OFF_LINE}`);
+    expect(line()?.textContent).toBe(`${tbt("en", "Not protected.")} ${words}`);
   },
 );
 
@@ -224,8 +226,9 @@ test.each([
     vt("en", "Every change inside the matter's folder is still kept, and Versions can undo it."),
   );
   expect(noteText()).not.toContain(vt("en", "Switch the Safe workspace on"));
-  // never a promise to ask before each change (Changed, 11)
-  expect(noteText()).not.toContain("asks before each change");
+  // never a promise that Clauseo asks before each change (Changed, 11): off names the plan that does, Claude
+  expect(noteText()).not.toContain("Clauseo asks before each change");
+  if (why !== "off") expect(noteText()).not.toContain("asks before each change");
   const buttons = [...note()!.querySelectorAll("button")].map((b) => b.textContent);
   expect(buttons.at(-1)).toBe(vt("en", "Understood"));
   expect(buttons.length).toBe(why === "off" || why === "cant" ? 1 : 2);

@@ -2,7 +2,7 @@
 // matter until Close. A folder whose permissions the lawyer can't change says Clauseo asks before each edit (FR1),
 // why behind its info icon (FR2), and What to tell IT (FR3), which opens the text to send IT, selected, with Copy
 // (FR5). A network drive (FR12) and a drive without file permissions (FR15) say that Claude asks before every
-// change and Codex can't work there, how to get full protection behind the info icon. A folder the host couldn't
+// change and ChatGPT can't work there, how to get full protection behind the info icon. A folder the host couldn't
 // check says Claude asks before every change, in one line. Loaded only for such a matter (work.tsx), with its words
 // (words-folder.ts).
 import "./folder-notice.css";
@@ -38,13 +38,13 @@ const SAYS: Readonly<
   network: {
     name: "This matter's folder is on a network drive",
     head: "On a network drive.",
-    rest: "Claude asks before every change. Codex can't work here.",
+    rest: "Claude asks before every change. ChatGPT can't work here.",
     info: "Clauseo can't keep Claude and Codex inside this folder. To work in the Safe workspace, move the matter to a folder on this computer.",
   },
   no_permissions: {
     name: "This matter's folder is on a drive that doesn't keep file permissions",
     head: "No file permissions.",
-    rest: "Claude asks before every change. Codex can't work here.",
+    rest: "Claude asks before every change. ChatGPT can't work here.",
     info: "Clauseo can't keep Claude and Codex inside this folder. USB drives often don't keep permissions. To work in the Safe workspace, move the matter to a folder on this computer.",
   },
   check_failed: {

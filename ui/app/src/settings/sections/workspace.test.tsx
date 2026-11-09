@@ -239,9 +239,10 @@ test("required while protected: Managed by firm, no firm line", async () => {
   expect(one("protection-required")).toBeNull();
 });
 
-test("Not protected where the firm allows no unprotected auto mode says so; allowed says nothing", async () => {
+test("the firm's no-auto line stays hidden until the host enforces it (UC-76), whatever the policy says", async () => {
   await mount({ view: () => view(PROT.refused, { unprotected_auto_allowed: false }) });
-  expect(one("protection-no-auto")?.textContent).toBe(
+  expect(one("protection-no-auto")).toBeNull();
+  expect(document.body.textContent).not.toContain(
     st("en", "Your firm doesn't allow Clauseo to work without asking on this computer."),
   );
   await act(async () => root?.unmount());

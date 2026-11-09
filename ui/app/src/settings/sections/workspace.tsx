@@ -41,6 +41,11 @@ import type { SectionContext } from "../sections.tsx";
 import { Managed } from "./parts.tsx";
 import { removeSetUp, setUpAgain } from "./workspace-commands.ts";
 
+/** Whether the host enforces the firm's sandbox.allow_unprotected_auto = false. It doesn't yet: the key only fills
+ * ProtectionView.unprotected_auto_allowed, so UC-76's line would promise what nothing does. Set to true with the host
+ * follow-up that keeps an unprotected agent in its ask modes under that policy. */
+const FIRM_NO_AUTO_ENFORCED: boolean = false;
+
 /** The block's state, as data-state says it. */
 type Status =
   | "a-mac"
@@ -257,7 +262,7 @@ export function Workspace({ ctx }: { ctx: SectionContext }) {
           )}
         </p>
       )}
-      {off && !view.unprotected_auto_allowed && (
+      {FIRM_NO_AUTO_ENFORCED && off && !view.unprotected_auto_allowed && (
         <p className="set-note" data-testid="protection-no-auto">
           {w.say(w.s("Your firm doesn't allow Clauseo to work without asking on this computer."))}
         </p>

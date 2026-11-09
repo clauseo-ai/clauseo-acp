@@ -9,8 +9,11 @@ export const HI = {
   "Tools for this matter": "इस मामले के टूल",
   // the room's line, one line in every room, saying what the Safe workspace does and promising nothing.
   // Inside a matter it names this matter's folder; where no matter is open yet, each matter's.
-  "Safe workspace. Clauseo works inside this matter's folder and asks before going beyond it.":
-    "सुरक्षित कार्यक्षेत्र। Clauseo इस मामले के फ़ोल्डर के भीतर काम करता है और उससे बाहर जाने से पहले पूछता है।",
+  "Safe workspace. Clauseo works only in this matter's folder. It can't open your other files unless you allow it.":
+    "सुरक्षित कार्यक्षेत्र। Clauseo सिर्फ़ इस मामले के फ़ोल्डर में काम करता है। आपकी अनुमति के बिना वह आपकी दूसरी फ़ाइलें नहीं खोल सकता।",
+  // after D2d, when Claude works on its own inside the Safe workspace (safe-workspace-line.tsx)
+  "Safe workspace. Clauseo changes files in this matter without asking. It can't open your other files unless you allow it.":
+    "सुरक्षित कार्यक्षेत्र। Clauseo बिना पूछे इस मामले की फ़ाइलें बदलता है। आपकी अनुमति के बिना वह आपकी दूसरी फ़ाइलें नहीं खोल सकता।",
   // the one-time note on Windows while Smart App Control is still in evaluation (room/sac/). Windows Security's own
   // labels stay in English, as Windows shows them.
   "Only if Windows ever blocks Clauseo on this computer: open Windows Security, go to App & browser control, then Smart App Control settings, and turn it off. On an up-to-date Windows 11, you can turn it back on later. Until then, there's nothing to do.":
