@@ -20,6 +20,7 @@ mod prompts;
 mod requests;
 mod sdk_refused_lines;
 mod stdout;
+mod unread;
 mod updates;
 
 /// The agent's stdin: each write arrives as one message (the line sink writes a line at once).
