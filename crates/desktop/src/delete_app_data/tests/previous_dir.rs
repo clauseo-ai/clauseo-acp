@@ -21,6 +21,8 @@ const USER_DEFAULT: &str = r"C:\Users\me\AppData\Local\Clauseo";
 const UNINSTKEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Uninstall\Clauseo";
 const MANUPRODUCTKEY: &str = r"Software\Clauseo\Clauseo";
 const OTHER: &str = r"D:\Apps\Clauseo";
+/// What `UninstallString` names unless a test says otherwise: a program that isn't the folder's.
+const OTHER_PROGRAM: &str = r#""C:\Users\other\other.exe""#;
 /// `FILE_ATTRIBUTE_ARCHIVE`, a plain file; a folder; a reparse point (a link to a file).
 const FILE: i64 = 0x20;
 const FOLDER: i64 = 0x10;
@@ -34,6 +36,8 @@ struct World {
     mode: &'static str,
     previous: Option<&'static str>,
     install_location: Option<String>,
+    /// The uninstall key's `UninstallString`.
+    uninstall_string: &'static str,
     not_fixed: Vec<&'static str>,
     uninstallers: Vec<(String, i64)>,
     open_chains: Vec<String>,
@@ -47,6 +51,7 @@ impl World {
             mode,
             previous: Some(previous),
             install_location: None,
+            uninstall_string: OTHER_PROGRAM,
             not_fixed: Vec::new(),
             uninstallers: vec![(exe(previous), FILE)],
             open_chains: Vec::new(),
@@ -100,6 +105,7 @@ fn mode_defines(mode: &str) -> HashMap<String, String> {
         ("UNINSTKEY", UNINSTKEY),
         ("MANUPRODUCTKEY", MANUPRODUCTKEY),
         ("NSIS_PTR_SIZE", "4"),
+        ("ARCH", "x64"),
     ] {
         defines.insert(name.to_owned(), value.to_owned());
     }
@@ -113,13 +119,13 @@ fn load(machine: &mut Machine, world: &World) {
         format!(r"SHCTX\{MANUPRODUCTKEY}"),
         previous.unwrap_or_default(),
     );
-    let location = world
-        .install_location
-        .clone()
-        .map(|l| vec![("InstallLocation", Value::Text(String::leak(l)))]);
+    let mut uninstall = vec![("UninstallString", Value::Text(world.uninstall_string))];
+    if let Some(location) = world.install_location.clone() {
+        uninstall.push(("InstallLocation", Value::Text(String::leak(location))));
+    }
     machine
         .keys
-        .insert(format!(r"SHCTX\{UNINSTKEY}"), location.unwrap_or_default());
+        .insert(format!(r"SHCTX\{UNINSTKEY}"), uninstall);
     let drives: Vec<(String, String)> = world
         .not_fixed
         .iter()
@@ -155,6 +161,7 @@ fn machine(world: &World) -> Machine {
         "CLAUSEO_INSTALL_LOCATION",
         "CLAUSEO_PREVIOUS_DIR_OK",
         "CLAUSEO_PREVIOUS_DIR_GUARD",
+        "CLAUSEO_PREVIOUS_UNINSTALLER",
         "NSIS_HOOK_PREINSTALL",
     ] {
         let body = preprocess(macro_body(&code, name), &defines);
@@ -234,18 +241,22 @@ fn restore(machine: &mut Machine, mode: &str) {
 }
 
 /// The reinstall page's uninstall, from the read of the previous folder to the `ExecWait`: the
-/// read, the block, then (unless it jumped to `reinst_done`) the template's own append and start.
+/// read, the block (the guard, then the command into $R1), then (unless it jumped to
+/// `reinst_done`) the template's own appends and start. `/UPDATE` and `/P` aren't set here,
+/// so their two `${IfThen}` lines append nothing and are only checked to be there.
 fn reinstall(machine: &mut Machine, mode: &str) {
     let lines = function("PageLeaveReinstall");
     let read_at = line_with(&lines, &[READ_PREVIOUS]);
     assert_eq!(lines[read_at + 1], "; >>> clauseo: reinstall-guard");
     machine.run(&parse_all(&[READ_PREVIOUS.to_owned()]));
+    machine.set_var("$R1", "");
     machine.run(&block("reinstall-guard", mode));
     if !machine.said.iter().any(|s| s == "Goto reinst_done") {
-        machine.set_var("$R1", "\"uninstall.exe\"");
-        let append = line_with(&lines, &[APPEND]);
-        // The start right after the append (the WiX branch above has its own ExecWait).
-        assert_eq!(lines[append + 1], EXEC);
+        let end = line_with(&lines, &["; <<< clauseo: reinstall-guard"]);
+        assert!(lines[end + 1].starts_with("${IfThen} $UpdateMode = 1 "));
+        assert!(lines[end + 2].starts_with("${IfThen} $PassiveMode = 1 "));
+        assert!(lines[end + 3].starts_with(APPEND), "{}", lines[end + 3]);
+        assert_eq!(lines[end + 4], EXEC);
         machine.run(&parse_all(&[APPEND.to_owned(), EXEC.to_owned()]));
     }
 }
@@ -327,11 +338,21 @@ fn refused(world: &World) {
     refused_said(world, true, false);
 }
 
+/// The command the old uninstaller is started with: per machine the accepted folder's own
+/// uninstall.exe, per user `UninstallString`, then the folder.
+fn command(world: &World, folder: &str) -> String {
+    if world.mode == "perMachine" {
+        format!("\"{folder}\\uninstall.exe\" _?={folder}")
+    } else {
+        format!("{} _?={folder}", world.uninstall_string)
+    }
+}
+
 fn accepted_said(world: &World, folder: &str, mismatch: bool) {
     assert_eq!(
         run(world),
         Outcome {
-            started: Some(format!("\"uninstall.exe\" _?={folder}")),
+            started: Some(command(world, folder)),
             instdir: folder.to_owned(),
             told: false,
             mismatch,
@@ -372,6 +393,55 @@ fn per_machine_without_install_location_the_sound_default_is_used() {
     let mut world = World::new("perMachine", MACHINE_DEFAULT);
     world.previous = None;
     accepted(&world, MACHINE_DEFAULT);
+}
+
+#[test]
+fn per_machine_the_old_uninstaller_is_the_checked_folders_never_uninstall_string() {
+    // UninstallString names another program; the checked folder's own uninstall.exe is started.
+    let mut world = World::new("perMachine", MACHINE_DEFAULT);
+    world.uninstall_string = r#""C:\Users\other\planted.exe" _?=C:\Users\other"#;
+    assert_eq!(
+        run(&world).started.as_deref(),
+        Some(r#""C:\Program Files\Clauseo\uninstall.exe" _?=C:\Program Files\Clauseo"#)
+    );
+    // Per user the template's UninstallString stays.
+    let mut world = World::new("currentUser", USER_DEFAULT);
+    world.uninstall_string = r#""C:\Users\me\AppData\Local\Clauseo\uninstall.exe""#;
+    assert_eq!(
+        run(&world).started.as_deref(),
+        Some(
+            r#""C:\Users\me\AppData\Local\Clauseo\uninstall.exe" _?=C:\Users\me\AppData\Local\Clauseo"#
+        )
+    );
+}
+
+#[test]
+fn only_x64_or_arm64_builds_of_the_two_built_modes_compile_the_check() {
+    let code = hook_code();
+    let guard = macro_body(&code, "CLAUSEO_PREVIOUS_DIR_GUARD");
+    for part in [
+        "!if \"${INSTALLMODE}\" != \"currentUser\"",
+        "!if \"${ARCH}\" != \"x64\"",
+        "!if \"${ARCH}\" != \"arm64\"",
+    ] {
+        line_with(guard, &[part]);
+    }
+    let errors = guard.iter().filter(|l| l.starts_with("!error ")).count();
+    assert_eq!(errors, 2, "{guard:?}");
+    // Each !error survives the preprocessor only in the build it refuses.
+    let kept = |mode: &str, arch: &str| {
+        let mut defines = mode_defines(mode);
+        defines.insert("ARCH".to_owned(), arch.to_owned());
+        preprocess(guard, &defines)
+            .iter()
+            .filter(|l| l.starts_with("!error "))
+            .count()
+    };
+    assert_eq!(kept("perMachine", "x64"), 0);
+    assert_eq!(kept("perMachine", "arm64"), 0);
+    assert_eq!(kept("currentUser", "x86"), 0);
+    assert_eq!(kept("perMachine", "x86"), 1);
+    assert_eq!(kept("both", "x64"), 1);
 }
 
 #[test]
@@ -506,7 +576,7 @@ fn each_use_checks_again_so_a_change_between_them_is_still_caught() {
     reinstall(&mut machine, world.mode);
     assert_eq!(
         machine.said,
-        [format!("ExecWait \"uninstall.exe\" _?={OTHER}")]
+        [format!("ExecWait {}", command(&world, OTHER))]
     );
     assert_eq!(machine.vars["$ClauseoPreviousKeyMismatch"], "1");
 }
@@ -549,6 +619,9 @@ fn the_template_reads_the_previous_folder_only_where_a_guard_follows() {
             "BringToFront",
             "Goto reinst_done",
             "${EndIf}",
+            "!insertmacro CLAUSEO_PREVIOUS_UNINSTALLER",
+            "!else",
+            "ReadRegStr $R1 SHCTX \"${UNINSTKEY}\" \"UninstallString\"",
             "!endif",
         ]
     );
@@ -572,6 +645,13 @@ fn the_native_checks_read_the_path_itself_and_say_no_box() {
     assert_eq!(
         macro_body(&code, "CLAUSEO_FILE_ATTRIBUTES"),
         ["System::Call 'kernel32::GetFileAttributesW(w r1) i .r2'"]
+    );
+    assert_eq!(
+        preprocess(
+            macro_body(&code, "CLAUSEO_PREVIOUS_UNINSTALLER"),
+            &mode_defines("perMachine")
+        ),
+        ["StrCpy $R1 '\"$4\\uninstall.exe\"'"]
     );
     // The check, the guard and the details line show no box and stop nothing.
     for name in [

@@ -383,7 +383,10 @@ Function PageLeaveReinstall
       ; CLAUSEO_PREVIOUS_DIR_GUARD, which leaves in $4 the folder to use, per machine the uninstall
       ; key's InstallLocation, and clears it when the folder fails). A refused folder starts
       ; no uninstaller: the install goes on fresh, as when there is nothing to uninstall ($0 0), past
-      ; the checks of $0 below, so no box. Without hooks.nsh it does nothing.
+      ; the checks of $0 below, so no box. Then the command, in place of the template's read of
+      ; UninstallString (CLAUSEO_PREVIOUS_UNINSTALLER): per machine the checked folder's own
+      ; uninstall.exe, never UninstallString; per user the template's read. Without hooks.nsh, the
+      ; template's read alone.
       !ifmacrodef CLAUSEO_PREVIOUS_DIR_GUARD
         !insertmacro CLAUSEO_PREVIOUS_DIR_GUARD
         ${If} $4 == ""
@@ -391,9 +394,11 @@ Function PageLeaveReinstall
           BringToFront
           Goto reinst_done
         ${EndIf}
+        !insertmacro CLAUSEO_PREVIOUS_UNINSTALLER
+      !else
+        ReadRegStr $R1 SHCTX "${UNINSTKEY}" "UninstallString"
       !endif
       ; <<< clauseo: reinstall-guard
-      ReadRegStr $R1 SHCTX "${UNINSTKEY}" "UninstallString"
       ${IfThen} $UpdateMode = 1 ${|} StrCpy $R1 "$R1 /UPDATE" ${|} ; append /UPDATE
       ${IfThen} $PassiveMode = 1 ${|} StrCpy $R1 "$R1 /P" ${|} ; append /P
       StrCpy $R1 "$R1 _?=$4" ; append uninstall directory

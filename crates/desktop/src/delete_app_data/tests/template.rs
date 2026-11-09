@@ -60,7 +60,7 @@ const BLOCKS: [Block; 12] = [
     Block {
         name: "reinstall-guard",
         after: "      ReadRegStr $4 SHCTX \"${MANUPRODUCTKEY}\" \"\"",
-        replaces: &[],
+        replaces: &["      ReadRegStr $R1 SHCTX \"${UNINSTKEY}\" \"UninstallString\""],
     },
     Block {
         name: "finish-show",

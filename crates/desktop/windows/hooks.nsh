@@ -613,6 +613,22 @@ Var ClauseoPreviousKeyMismatch
 ; (previousInstallIgnored); $INSTDIR, when it is that folder (taken at an earlier use), goes back
 ; to the template's default folder. Keeps every other register.
 !macro CLAUSEO_PREVIOUS_DIR_GUARD
+  ; Only the two modes built: "both" would pick the mode at run time, and the !else branches
+  ; below would take an elevated install for a per-user one.
+  !if "${INSTALLMODE}" != "perMachine"
+    !if "${INSTALLMODE}" != "currentUser"
+      !error "hooks.nsh's previous-folder check supports only the currentUser and perMachine install modes"
+    !endif
+  !endif
+  ; The per-machine default is $PROGRAMFILES64\${PRODUCTNAME}, which is .onInit's choice only for
+  ; x64 and arm64 builds.
+  !if "${INSTALLMODE}" == "perMachine"
+    !if "${ARCH}" != "x64"
+      !if "${ARCH}" != "arm64"
+        !error "hooks.nsh's previous-folder check assumes an x64 or arm64 build"
+      !endif
+    !endif
+  !endif
   Push $1
   Push $2
   Push $R5
@@ -659,6 +675,18 @@ Var ClauseoPreviousKeyMismatch
   Pop $R5
   Pop $2
   Pop $1
+!macroend
+
+; The old uninstaller's command into $R1, after CLAUSEO_PREVIOUS_DIR_GUARD accepted the folder in
+; $4; the template then appends /UPDATE, /P and " _?=$4". Per machine it is that folder's own
+; uninstall.exe, the file the check looked at, never UninstallString, which nothing ties to the
+; folder. Per user, UninstallString, as the template reads it.
+!macro CLAUSEO_PREVIOUS_UNINSTALLER
+  !if "${INSTALLMODE}" == "perMachine"
+    StrCpy $R1 '"$4\uninstall.exe"'
+  !else
+    ReadRegStr $R1 SHCTX "${UNINSTKEY}" "UninstallString"
+  !endif
 !macroend
 
 ; The install's lines about the previous folder, first in `Section Install`; no box.
