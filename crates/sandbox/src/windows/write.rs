@@ -366,7 +366,7 @@ pub(crate) fn append_capped(path: &Path, rotated: &Path, bytes: &[u8], cap: u64)
         if check_owned_file(path).is_err() && !std::fs::symlink_metadata(path)?.is_dir() {
             std::fs::remove_file(path)?;
         }
-        open_log(path)
+        open_log(path, true)
     };
     let mut file = open()?;
     let len = file.metadata()?.len();
@@ -377,19 +377,22 @@ pub(crate) fn append_capped(path: &Path, rotated: &Path, bytes: &[u8], cap: u64)
             file = open()?;
         } else {
             file = open()?;
-            file.set_len(0)?;
+            // An append handle can't truncate on Windows (it lacks `FILE_WRITE_DATA`, so
+            // `SetEndOfFile` is refused), so a second handle, opened the same way, empties it.
+            open_log(path, false)?.set_len(0)?;
         }
     }
     file.write_all(bytes)
 }
 
-/// The log file `path` opened to append, made if missing, as itself
+/// The log file `path` opened to append (or, with `append` false, to write, for emptying it),
+/// made if missing, as itself
 /// (`FILE_FLAG_OPEN_REPARSE_POINT` on Windows, `O_NOFOLLOW` elsewhere, where only tests run),
 /// and refused unless it is a file and no reparse point.
 #[cfg(any(windows, test))]
-fn open_log(path: &Path) -> io::Result<File> {
+fn open_log(path: &Path, append: bool) -> io::Result<File> {
     let mut options = OpenOptions::new();
-    options.create(true).append(true);
+    options.create(true).append(append).write(!append);
     #[cfg(windows)]
     {
         use std::os::windows::fs::OpenOptionsExt as _;
