@@ -278,10 +278,10 @@ stays while the matter can't be found (a disk not plugged in), for the next try.
 running session by its probe (again every 50 ms) and waits up to `within` for the watches to
 run their final scans; a watch that doesn't finish keeps its record for the next start.
 
-The launch's walk and the watch agree on what a repository is: `objects`, `refs` and
-`commondir` links count wherever they lead, dangling ones too, in both. So every folder the
-watch leaves alone as a launch repository is one the policy made read-only; a dangling link
-can't make one the watch exempts and the policy doesn't cover.
+Every folder the watch leaves alone at launch is one the policy made read-only: the launch's
+walk lists every folder holding a `HEAD` (the agent could complete it into a git dir), and the
+watch exempts only folders holding a `HEAD`, repository-shaped or not (its `objects`, `refs`
+and `commondir` links count wherever they lead, dangling ones too).
 
 **`commondir` targets.** A launch repository's (or `.git`'s) `commondir` that names the matter,
 the state folder, a missing path or any folder no read-only rule covers would let the agent
