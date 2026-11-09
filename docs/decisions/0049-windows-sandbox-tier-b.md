@@ -1771,12 +1771,41 @@ no path, name or value there. Everything it says itself goes through `windows/ru
 `RunExit`'s codes writes exactly one `ERR` line. The sentence is the kind's own, fixed. What
 failed in detail (an error's text, a call and its code, a pid) is a closure that only a build
 with the `vm-harness-detail` feature calls, writing it on `DETAIL <text>` lines after the kind
-line; the feature is the s15 VM harness's alone (its example requires it), refuses to compile in
-a release build, and no product crate turns it on. Any other build never formats the detail, and
-no environment variable changes that. The agent's own stderr is relayed byte for byte, as before,
-and is not the runner's to vet. The `runner-stderr` xtask check fails any other write to stderr
-in the runner's files (`eprintln!`, `print!`, `write!` to stderr, `io::stderr()`), and any
-formatting of an error outside a `Detail::new` closure.
+line; the feature is the s15 VM harness's alone (its example requires it), and no product crate
+turns it on. It refuses to compile in the release profile: the build script sets
+`clauseo_release_profile` when cargo's `PROFILE` is `release` (the release profile or one that
+inherits it, whatever its `debug-assertions`), and in any build without debug assertions. When
+`clauseo-sandbox-run` joins the sidecar build (`.github/scripts/sidecars.mjs`, `SIDECARS`), that
+build must refuse the feature too: no `--features` or `--all-features` that turns it on, and a
+check of `cargo tree -e features -i clauseo-sandbox` for it. Any other build never formats the
+detail, and no environment variable changes that.
+
+A panic says nothing but its kind: each of the binary's modes (`main`, `run_outer`,
+`run_inner`) first installs a panic hook that writes one `kind=internal` refusal, in place of
+std's `panicked at <source path>:<line>`, its message and any backtrace. The process still ends
+as a panic does (an abort in a release build), so the exit code isn't `internal`'s and the host,
+by the rule below, keeps the code. std's own line for a failed allocation (`memory allocation of
+<n> bytes failed`) is not a panic and stays: it holds a byte count, no path. The runner's
+`tracing` subscriber has `log_internal_errors` off, so a log line that fails to format is
+dropped, not reported on stderr.
+
+The agent's own stderr is relayed byte for byte, as before, and is not the runner's to vet. It
+shares the stream, so the runner's own line always starts on a fresh line: when the agent's last
+relayed byte isn't a newline, the runner writes one before its `ERR` or `NOTE` line. **The agent
+can print a line that looks like the runner's.** The host therefore takes a kind only from the
+last `ERR clauseo-sandbox-run` line of the tail, and only when that kind's `RunExit` code is the
+run's actual exit code; the exit code is authoritative. A spoofed line can then at most pick
+another sentence within the class of the run's real exit (another kind sharing that code), never
+a refusal the run didn't end with; an agent that exits with one of `RunExit`'s codes itself gets
+the runner's own refusal after its output has drained, so that refusal is the last line.
+
+The `runner-stderr` xtask check fails any other write to stderr in the runner's files
+(`eprintln!`, `print!`, `write!` to stderr, `io::stderr()` called or taken as a value, a `use`
+of `io::stderr`), and any formatting of an error outside a `Detail::new` closure. It reads the
+helpers the runner calls too: the runner imports only from `crate::windows` (the check fails a
+`use crate::` of anything else in its files), so it reads every file of `crate::windows` for
+stderr writes, except tests, `#[cfg(test)]` modules and the files of modules declared under
+`#[cfg(test)]`; the setup binary is not read.
 
 **The host maps these names to its own error codes, so a name, once given, never changes.** A
 finer kind shares its `RunExit` code with the code's own kind only where the lawyer acts
