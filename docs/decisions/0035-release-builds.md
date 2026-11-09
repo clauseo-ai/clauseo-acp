@@ -268,10 +268,11 @@ S15's tools sat in `windows.conf.json` and S27's in `tauri.conf.json`.
   exactly the files that were built. SignPath (S20a) signs every PE there and `Clauseo.exe`, before
   NSIS and before the updater signature.
 - **The C runtime (2026-11-09).** Every Rust binary for Windows links the C runtime statically
-  (`-C target-feature=+crt-static` in release.yml's Windows rows, setup-exe-repro.yml and
-  `.cargo/config.toml`): a clean Windows has no VC++ Redistributable, so the set-up and
-  `clauseo-mcp`, which imported `VCRUNTIME140.dll`, failed to start there, and the set-up's
-  System32-only `/DEPENDENTLOADFLAG:0x800` rules out a copy beside it anyway. The Universal CRT
+  (`-C target-feature=+crt-static` in release.yml's Windows rows and setup-exe-repro.yml; not in
+  `.cargo/config.toml`, whose `rustflags` keys the core-io check refuses): a clean Windows has
+  no VC++ Redistributable, so the set-up and `clauseo-mcp`, which imported `VCRUNTIME140.dll`,
+  failed to start there, and the set-up's System32-only `/DEPENDENTLOADFLAG:0x800` rules out a
+  copy beside it anyway. The Universal CRT
   (`api-ms-win-crt-*`) stays allowed, being part of Windows 10 and later. Before the
   `windows-exe-<target>` upload, `.github/scripts/pe-crt-imports.mjs` reads each shipped exe's
   import and delay-import tables, agent-browser's included, and fails on a VC++ runtime DLL.
