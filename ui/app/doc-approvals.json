@@ -28,6 +28,8 @@
       "removeSkippedSilent",
       "removeExeMissing",
       "removeAdminCopyRefused",
+      "removeAdminCopyUnhashed",
+      "removeAdminCopyNoClaim",
       "setupExeRemoved",
       "adminCopyAsk",
       "adminCopyWorking",

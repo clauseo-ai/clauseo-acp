@@ -464,9 +464,10 @@ fn the_words_about_the_admin_copy_are_the_provisional_ones() {
         (
             "adminCopyBlocked",
             "Clauseo is installed, but the Safe workspace isn't set up, because your Windows \
-             account isn't allowed to approve this change. To set it up, ask whoever looks after \
-             this computer to run this installer with an administrator account, or to install \
-             Clauseo for all users.",
+             account isn't allowed to approve this change. Until it's set up, Clauseo can read any \
+             file you can open on this computer, and asks before changing anything outside a \
+             matter's folder. To set it up, run this installer from an administrator account, or \
+             install Clauseo for all users.",
         ),
         (
             "adminCopyElevationError",

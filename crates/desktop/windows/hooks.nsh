@@ -61,7 +61,8 @@
 ;
 ; The words are in English.nsh and Hindi.nsh (deleteAppDataFailed, deleteAppDataKept,
 ; removeStillRunning, removeSkippedSilent, removeExeMissing, removeAdminCopyRefused,
-; setupExeRemoved, and admin_copy.nsh's adminCopy* lines); the uninstall-declined line is S15a's.
+; removeAdminCopyUnhashed, removeAdminCopyNoClaim, setupExeRemoved, and admin_copy.nsh's adminCopy*
+; lines); the uninstall-declined line is S15a's.
 ;
 ; NSIS_HOOK_POSTINSTALL, the template's last step of `Section Install`: the per-machine installer
 ; creates $APPDATA\Clauseo (C:\ProgramData\Clauseo, where a firm's policy.json goes; see
@@ -507,11 +508,12 @@
       ; ($R4 2) says so in the details list. The hidden accounts are said to be still there
       ; (removeAdminCopyRefused, a details line and a box unless /S) only to whom
       ; CLAUSEO_OWNER_TO_TELL names an owner for; to anyone else, a details line that claims
-      ; nothing about them, in English, as NSIS's own details lines are, and no box.
+      ; nothing about them (removeAdminCopyNoClaim), and no box. The details lines are localised,
+      ; in English.nsh and Hindi.nsh, like the rest.
       !insertmacro CLAUSEO_ADMIN_COPY_VERIFIED
       ${If} $R4 <> 1
         ${If} $R4 = 2
-          DetailPrint "couldn't compute the sandbox tool's hash"
+          DetailPrint "$(removeAdminCopyUnhashed)"
         ${EndIf}
         !insertmacro CLAUSEO_OWNER_TO_TELL
         ${If} $R3 != ""
@@ -520,7 +522,7 @@
             MessageBox MB_OK|MB_ICONEXCLAMATION "$(removeAdminCopyRefused)"
           ${EndIf}
         ${ElseIf} $R4 = 0
-          DetailPrint "the sandbox tool in Program Files failed its check, so it wasn't started"
+          DetailPrint "$(removeAdminCopyNoClaim)"
         ${EndIf}
         ${If} ${Silent}
           SetErrorLevel ${CLAUSEO_EXIT_ADMIN_COPY_REFUSED}
