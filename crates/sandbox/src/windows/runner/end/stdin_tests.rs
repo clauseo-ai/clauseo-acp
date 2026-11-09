@@ -46,18 +46,18 @@ impl Steps {
 }
 
 impl EndSteps for Steps {
-    fn empty_job(&self) -> Result<(), String> {
+    fn empty_job(&self) -> Result<(), Detail> {
         note(&self.events, self.origin, "job ended");
         drop(self.unblock.lock().unwrap().take());
         // The whole wait for the job to empty.
         self.take(4);
         Ok(())
     }
-    fn next_number(&self, _: &'static str) -> Result<u64, String> {
+    fn next_number(&self, _: &'static str) -> Result<u64, Detail> {
         self.take(1);
         Ok(1)
     }
-    fn request_sweep(&self) -> Result<(), String> {
+    fn request_sweep(&self) -> Result<(), Detail> {
         self.take(2);
         Ok(())
     }
@@ -65,12 +65,12 @@ impl EndSteps for Steps {
         self.take(2);
         true
     }
-    fn settle(&self, _: &MarkerState) -> Result<(), String> {
+    fn settle(&self, _: &MarkerState) -> Result<(), Detail> {
         self.take(1);
         note(&self.events, self.origin, "settled");
         Ok(())
     }
-    fn log(&self, _: &str) {}
+    fn log(&self, _: RunnerKind, _: Detail) {}
     fn now(&self) -> Duration {
         clock().saturating_duration_since(self.origin)
     }

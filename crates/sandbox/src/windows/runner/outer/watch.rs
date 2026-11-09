@@ -23,16 +23,17 @@ use std::time::{Duration, Instant, SystemTime};
 
 use clauseo_protocol::MatterId;
 
+use super::super::LaunchMessage;
 use super::super::end::EndSignal;
 use super::super::git_watch::os::{DirWatch, Notify, Stop};
 use super::super::git_watch::{
     Cause, Changes, Dog, Guard, Paired, Pairs, Pulse, Session, Tell, feed, pairing_started,
     run_pairing, watch, watchdog,
 };
-use super::super::{LaunchMessage, RunExit};
-use super::{End, Failure, os, say};
+use super::{End, Failure, os};
 use crate::windows::denial_pipe::Record;
 use crate::windows::denial_pipe::sink::RecordSink;
+use crate::windows::runner::stderr::{self, Detail, RunnerKind};
 use crate::windows::set_aside::{Failed, GitGuard, Hooks, Live};
 
 /// How long the outer waits at its end for each watch's last rescan and stop. Past this the
@@ -55,10 +56,7 @@ impl Running {
         self.stop.set();
         for done in &self.done {
             if done.recv_timeout(STOP_WAIT).is_err() {
-                say(
-                    "clauseo-sandbox-run: git watch: still busy at the session's end; the check \
-                     after the session covers it",
-                );
+                stderr::notice(RunnerKind::GitWatchBusyAtEnd, Detail::none());
             }
         }
         self.records.drain(RECORDS_WAIT);
@@ -224,8 +222,8 @@ impl Tell for Telling<'_> {
         self.0.send(record);
     }
 
-    fn say(&self, line: &str) {
-        say(line);
+    fn say(&self, kind: RunnerKind, detail: Detail) {
+        stderr::notice(kind, detail);
     }
 }
 
@@ -299,8 +297,8 @@ impl Session for OsSession<'_> {
         self.end.kill_now(EndSignal::Failed)
     }
 
-    fn say(&self, line: &str) {
-        say(line);
+    fn say(&self, kind: RunnerKind, detail: Detail) {
+        stderr::notice(kind, detail);
     }
 
     fn record(&self, record: &Record) {
@@ -372,9 +370,12 @@ pub(super) fn keep(
     end: &End,
     records: Arc<RecordSink>,
 ) -> Result<(), Failure> {
-    let stop = Arc::new(
-        Stop::new().map_err(|error| Failure::new(RunExit::Spawn, os("the git watch", &error)))?,
-    );
+    let stop = Arc::new(Stop::new().map_err(|error| {
+        Failure::of(
+            RunnerKind::Internal,
+            Detail::new(|| os("the git watch", &error)),
+        )
+    })?);
     let mut folders = vec![(PathBuf::from(&message.matter_root), Folder::Matter)];
     folders.extend(
         message
@@ -401,17 +402,16 @@ pub(super) fn keep(
                     done,
                     records,
                 });
-                return Err(Failure::new(
-                    RunExit::Spawn,
-                    match not {
-                        NotStarted::Thread(error) => os("the git watch's thread", &error),
-                        NotStarted::Arm(error) => format!(
-                            "Clauseo can't watch the matter's folder for changes, so it didn't \
-                             start the session ({})",
-                            os("the git watch", &error)
-                        ),
-                    },
-                ));
+                return Err(match not {
+                    NotStarted::Thread(error) => Failure::of(
+                        RunnerKind::Internal,
+                        Detail::new(|| os("the git watch's thread", &error)),
+                    ),
+                    NotStarted::Arm(error) => Failure::of(
+                        RunnerKind::MatterUnwatchable,
+                        Detail::new(|| os("the git watch", &error)),
+                    ),
+                });
             }
         }
     }

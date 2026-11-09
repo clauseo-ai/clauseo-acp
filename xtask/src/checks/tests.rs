@@ -178,10 +178,10 @@ fn every_check_inspects_nothing_in_an_empty_repo() {
 }
 
 /// The checks that stop before they look in an empty folder with no workspace members: the
-/// desktop checks find no desktop crate, and docs, file-size, expect-allowlist and log-literals
-/// cannot list files without git. The others look and find nothing: budgets reads no
-/// budgets.toml, buildtime-edits no ui/app/src, dependencies and core-io no Crates table.
-const STOPS_IN_AN_EMPTY_REPO: [&str; 7] = [
+/// desktop checks find no desktop crate, and docs, file-size, expect-allowlist, log-literals and
+/// runner-stderr cannot list files without git. The others look and find nothing: budgets reads
+/// no budgets.toml, buildtime-edits no ui/app/src, dependencies and core-io no Crates table.
+const STOPS_IN_AN_EMPTY_REPO: [&str; 8] = [
     "capabilities",
     "plugins",
     "tauri-config",
@@ -189,6 +189,7 @@ const STOPS_IN_AN_EMPTY_REPO: [&str; 7] = [
     "file-size",
     "expect-allowlist",
     "log-literals",
+    "runner-stderr",
 ];
 
 /// A check that stopped on a violation prints that violation's fix and no second fix line. A

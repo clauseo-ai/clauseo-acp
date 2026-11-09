@@ -37,7 +37,7 @@ fn an_unremovable_clean_marker_doesnt_hide_one_that_owes_its_final_stop() {
     fake.fails.remove = true;
     let refused = logon_check(&mut fake, &sid(POOL_A)).unwrap_err();
     assert_eq!(refused.exit, RunExit::AwaitingStop);
-    assert!(refused.why.contains("final stop"), "{refused:?}");
+    assert!(refused.why.text().contains("final stop"), "{refused:?}");
     assert_eq!(fake.state("a1"), Some(SWEPT));
     assert_eq!(fake.state("a2"), Some(FINAL));
     assert_eq!(fake.asked("stop"), 1);
@@ -50,7 +50,7 @@ fn a_swept_marker_whose_re_mark_cant_be_written_refuses_the_logon_without_a_stop
     fake.done.sweep = 9;
     fake.fails.settle = true;
     let refused = logon_check(&mut fake, &sid(POOL_A)).unwrap_err();
-    assert_eq!(refused, Refused::sweep(STUCK_SWEPT.to_owned()));
+    assert_eq!(refused, Refused::sweep(STUCK_SWEPT.into()));
     assert_eq!(fake.state("a1"), Some(REMARKED));
     assert_eq!(fake.asked("read StopNext"), 1);
     assert_eq!(fake.asked("stop"), 0);

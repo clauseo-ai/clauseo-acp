@@ -19,9 +19,19 @@ path = "src/bin/clauseo-sandbox-setup.rs"
 name = "clauseo-sandbox-run"
 path = "src/bin/clauseo-sandbox-run.rs"
 
+# The S15 PR5 VM harness: it reads the runner's `DETAIL` lines, so it builds only with them.
+[[example]]
+name = "s15_launch_vm"
+required-features = ["vm-harness-detail"]
+
 [features]
 # Exports `windows::test_dacl`, a tests' folder with a protected DACL, for the host's tests.
 test-support = []
+# The runner's stderr adds each refusal's and notice's detail (an error's text, which can hold a
+# path) on `DETAIL` lines after its kind line (src/windows/runner/stderr.rs). For the s15 VM
+# harness alone, in a debug build: a release build with it fails to compile, and no product crate
+# turns it on. Off, the detail is never formatted.
+vm-harness-detail = []
 
 [dependencies]
 clauseo-protocol = { path = "../protocol" }

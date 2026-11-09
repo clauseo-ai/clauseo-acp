@@ -62,6 +62,7 @@ use std::fmt;
 use std::io;
 use std::time::Duration;
 
+use super::stderr::{Detail, RunnerKind};
 use crate::windows::sids::Sid;
 
 #[cfg(windows)]
@@ -256,7 +257,7 @@ pub(crate) fn sweep<P: Processes>(
     user: &Sid,
     keep: &[u32],
     point: Point,
-    log: &mut dyn FnMut(&str),
+    log: &mut dyn FnMut(RunnerKind, Detail),
 ) -> Result<Vec<u32>, SweepError> {
     let mut killed = Killed::new();
     let own = calls
@@ -329,16 +330,19 @@ pub(crate) fn sweep<P: Processes>(
                 });
                 continue;
             }
-            log(&format!(
-                "clauseo-sandbox-run: sweep ({point}) killed the sandbox user's process {} ({})",
-                found.pid, found.image
-            ));
+            let detail = Detail::new(|| {
+                format!(
+                    "clauseo-sandbox-run: sweep ({point}) killed the sandbox user's process {} ({})",
+                    found.pid, found.image
+                )
+            });
+            log(RunnerKind::SweepKilled, detail);
             killed.entries.push((found.pid, process));
             round += 1;
         }
         let (ended, left) = refused::wait_out(calls, refused);
         for gone in ended {
-            log(&gone.exited_line(point));
+            log(RunnerKind::SweepExitedAfterRefusal, gone.exited_line(point));
             killed.entries.push((gone.found.pid, gone.process));
             round += 1;
         }
@@ -402,7 +406,11 @@ struct Failures {
 }
 
 impl Failures {
-    fn add(&mut self, error: SweepError, log: &mut dyn FnMut(&str)) -> Result<(), SweepError> {
+    fn add(
+        &mut self,
+        error: SweepError,
+        log: &mut dyn FnMut(RunnerKind, Detail),
+    ) -> Result<(), SweepError> {
         if self.point == Point::Start {
             return Err(error);
         }
@@ -416,10 +424,9 @@ impl Failures {
             }
         }
         if self.logged.insert(pid_of(&error)) {
-            log(&format!(
-                "clauseo-sandbox-run: sweep ({}): {error}",
-                self.point
-            ));
+            let detail =
+                Detail::new(|| format!("clauseo-sandbox-run: sweep ({}): {error}", self.point));
+            log(RunnerKind::SweepFailed, detail);
         }
         Ok(())
     }

@@ -77,6 +77,14 @@ const BIN: &str = "clauseo-sandbox-setup";
 
 fn main() -> Result<(), Error> {
     println!("cargo:rerun-if-changed=build.rs");
+    // `clauseo_release_profile` on a build in the release profile (or one that inherits it, as
+    // `preview` does): cargo's `PROFILE` is then `release`, whatever the profile's
+    // `debug-assertions`. The runner's stderr module refuses to compile `vm-harness-detail` under
+    // it (`src/windows/runner/stderr.rs`), so no release build writes `DETAIL` lines.
+    println!("cargo:rustc-check-cfg=cfg(clauseo_release_profile)");
+    if std::env::var("PROFILE").is_ok_and(|profile| profile == "release") {
+        println!("cargo:rustc-cfg=clauseo_release_profile");
+    }
     // Every target: the app's version, which `--adopt` records as `AdminCopyVersion`
     // (`windows::admin_copy::APP_VERSION`), the same string as the exe's `FileVersion`.
     let dir = std::env::var("CARGO_MANIFEST_DIR")?;

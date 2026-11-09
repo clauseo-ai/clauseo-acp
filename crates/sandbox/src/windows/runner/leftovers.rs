@@ -22,6 +22,8 @@
 use std::fmt;
 use std::io;
 
+use super::stderr::{Detail, RunnerKind};
+
 #[cfg(windows)]
 pub(super) mod os;
 
@@ -68,7 +70,7 @@ pub(crate) fn remove_all<L: Leftovers>(
     calls: &mut L,
     kinds: &[Kind],
     who: &str,
-    log: &mut dyn FnMut(&str),
+    log: &mut dyn FnMut(RunnerKind, Detail),
 ) -> bool {
     let mut clean = true;
     for &kind in kinds {
@@ -82,15 +84,18 @@ fn remove_kind<L: Leftovers>(
     calls: &mut L,
     kind: Kind,
     who: &str,
-    log: &mut dyn FnMut(&str),
+    log: &mut dyn FnMut(RunnerKind, Detail),
 ) -> bool {
     let items = match calls.list(kind) {
         Ok(items) => items,
         Err(error) => {
-            log(&format!(
-                "clauseo-sandbox-run: cleanup ({who}): the {kind} can't be listed ({})",
-                code(&error)
-            ));
+            let detail = Detail::new(|| {
+                format!(
+                    "clauseo-sandbox-run: cleanup ({who}): the {kind} can't be listed ({})",
+                    code(&error)
+                )
+            });
+            log(RunnerKind::CleanupUnlisted, detail);
             return false;
         }
     };
@@ -108,16 +113,20 @@ fn remove_kind<L: Leftovers>(
     match failed {
         None if removed == 0 => true,
         None => {
-            log(&format!(
-                "clauseo-sandbox-run: cleanup ({who}): removed {removed} {kind}"
-            ));
+            let detail = Detail::new(|| {
+                format!("clauseo-sandbox-run: cleanup ({who}): removed {removed} {kind}")
+            });
+            log(RunnerKind::CleanupRemoved, detail);
             true
         }
         Some((count, first)) => {
-            log(&format!(
-                "clauseo-sandbox-run: cleanup ({who}): removed {removed} {kind}, {count} \
-                 couldn't be ({first})"
-            ));
+            let detail = Detail::new(|| {
+                format!(
+                    "clauseo-sandbox-run: cleanup ({who}): removed {removed} {kind}, {count} \
+                     couldn't be ({first})"
+                )
+            });
+            log(RunnerKind::CleanupIncomplete, detail);
             false
         }
     }

@@ -12,6 +12,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use super::os::{DirWatch, Notify, Stop};
 use super::{Changes, Guard, Next, Pulse, Session, Source, watch};
 use crate::windows::denial_pipe::Record;
+use crate::windows::runner::stderr::{Detail, RunnerKind};
 use crate::windows::set_aside::tests::launch_matter_on_test_volume;
 use crate::windows::set_aside::{Failed, GitGuard, Hooks, Live};
 use crate::windows::test_junction::set_mount_point;
@@ -59,8 +60,8 @@ impl Session for TestSession<'_> {
         true
     }
 
-    fn say(&self, line: &str) {
-        self.said.lock().unwrap().push(line.to_owned());
+    fn say(&self, _kind: RunnerKind, detail: Detail) {
+        self.said.lock().unwrap().push(detail.text().to_owned());
     }
 
     fn record(&self, record: &Record) {

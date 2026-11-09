@@ -163,8 +163,8 @@ impl Markers for Fake {
             self.done.sweep = self.sweeps.remove(0);
         }
     }
-    fn note(&mut self, line: &str) {
-        self.log.push(format!("note {line}"));
+    fn note(&mut self, _kind: RunnerKind, detail: Detail) {
+        self.log.push(format!("note {}", detail.text()));
     }
 }
 
@@ -185,7 +185,7 @@ fn f4_refuses_until_stop_sequence_reaches_the_markers_number() {
     let refused = logon_check(&mut fake, &sid(POOL_A)).unwrap_err();
     assert_eq!(refused.exit, RunExit::AwaitingStop);
     assert!(
-        refused.why.contains("awaits the sandbox's stop"),
+        refused.why.text().contains("awaits the sandbox's stop"),
         "{refused:?}"
     );
     assert_eq!(fake.asked("stop"), 1, "each refusal asks for the stop");
@@ -205,7 +205,7 @@ fn f4_refuses_until_stop_sequence_reaches_the_markers_number() {
     fake.sweeps = vec![2, 9];
     let refused = logon_check(&mut fake, &sid(POOL_A)).unwrap_err();
     assert_eq!(refused.exit, RunExit::AwaitingStop);
-    assert!(refused.why.contains("final stop"), "{refused:?}");
+    assert!(refused.why.text().contains("final stop"), "{refused:?}");
     assert_eq!(fake.state("a1"), Some(FINAL));
     assert_eq!(fake.asked("stop"), 3);
     assert_eq!(fake.asked("sweep"), 1);
@@ -224,7 +224,7 @@ fn f4_waits_for_the_sweep_a_re_mark_requested_and_refuses_without_a_stop_if_it_d
     let refused = logon_check(&mut fake, &sid(POOL_A)).unwrap_err();
     assert_eq!(refused.exit, RunExit::AwaitingSweep, "no stop is awaited");
     assert!(
-        refused.why.contains("didn't finish within 15 s"),
+        refused.why.text().contains("didn't finish within 15 s"),
         "{refused:?}"
     );
     // Re-marked, its sweep requested once, waited for 15 s, and no stop asked for.
@@ -442,7 +442,7 @@ fn a_marker_whose_stop_completed_but_cant_be_re_marked_refuses_a_launch() {
     // F4 refuses the logon too, without asking for the stop, which has completed.
     let refused = logon_check(&mut fake, &sid(POOL_A)).unwrap_err();
     assert_eq!(refused.exit, RunExit::AwaitingSweep, "no stop is awaited");
-    assert!(refused.why.contains("completed stop"), "{refused:?}");
+    assert!(refused.why.text().contains("completed stop"), "{refused:?}");
     assert_eq!(fake.state("a1"), Some(STOP));
     assert_eq!(fake.asked("stop"), 0);
 }
@@ -519,7 +519,7 @@ fn f4_replaces_an_unreadable_marker_with_one_awaiting_a_stop_read_now() {
     let refused = logon_check(&mut fake, &sid(POOL_A)).unwrap_err();
     assert_eq!(refused.exit, RunExit::AwaitingStop);
     assert!(
-        refused.why.contains("the stop was requested"),
+        refused.why.text().contains("the stop was requested"),
         "{refused:?}"
     );
     // Both now await the stop that begins after this read, naming no pool user, under the

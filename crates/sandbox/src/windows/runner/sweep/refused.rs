@@ -9,6 +9,7 @@ use std::io;
 use std::time::Duration;
 
 use super::{Point, Processes, Seen, code};
+use crate::windows::runner::stderr::Detail;
 
 /// How long a refused process has to end by itself.
 pub(super) const EXIT_WAIT: Duration = Duration::from_secs(2);
@@ -24,15 +25,17 @@ pub(super) struct Refused<'a, T> {
 }
 
 impl<T> Refused<'_, T> {
-    /// The line logged at `point` once it exited by itself.
-    pub(super) fn exited_line(&self, point: Point) -> String {
-        format!(
-            "clauseo-sandbox-run: sweep ({point}): the sandbox user's process {} ({}) exited by \
-             itself after its kill was refused ({})",
-            self.found.pid,
-            self.found.image,
-            code(&self.error)
-        )
+    /// The line logged at `point` once it exited by itself, in detail.
+    pub(super) fn exited_line(&self, point: Point) -> Detail {
+        Detail::new(|| {
+            format!(
+                "clauseo-sandbox-run: sweep ({point}): the sandbox user's process {} ({}) exited \
+                 by itself after its kill was refused ({})",
+                self.found.pid,
+                self.found.image,
+                code(&self.error)
+            )
+        })
     }
 }
 

@@ -53,6 +53,7 @@ use std::time::Duration;
 
 use super::RunExit;
 use super::marker::{MarkerState, Sequences, UncleanSession};
+use super::stderr::{Detail, RunnerKind};
 use crate::windows::setup::record_values::{STOP_NEXT, SWEEP_NEXT};
 use crate::windows::sids::Sid;
 
@@ -80,19 +81,19 @@ const STUCK_SWEPT: &str =
 pub struct Refused {
     /// The outer's exit.
     pub exit: RunExit,
-    /// What it says on stderr.
-    pub why: String,
+    /// What failed, in detail (`stderr::Detail`); the kind it is said with is its exit's.
+    pub why: Detail,
 }
 
 impl Refused {
-    fn stop(why: String) -> Self {
+    fn stop(why: Detail) -> Self {
         Refused {
             exit: RunExit::AwaitingStop,
             why,
         }
     }
 
-    fn sweep(why: String) -> Self {
+    fn sweep(why: Detail) -> Self {
         Refused {
             exit: RunExit::AwaitingSweep,
             why,
@@ -130,8 +131,9 @@ pub trait Markers {
     fn request_sweep(&mut self) -> Result<(), String>;
     /// Waits `pause`.
     fn pause(&mut self, pause: Duration);
-    /// Says `line` on the outer's stderr: what went wrong but refuses nothing.
-    fn note(&mut self, line: &str);
+    /// Says a notice on the outer's stderr (`stderr::notice`): what went wrong but refuses
+    /// nothing.
+    fn note(&mut self, kind: RunnerKind, detail: Detail);
 }
 
 /// The markers, the stale ones removed: those of a pool user the record no longer lists, and
@@ -250,8 +252,11 @@ fn remark_swept(
 /// completed is clean. A clean one that can't be removed refuses nothing: it is noted
 /// ([`Markers::note`]).
 pub fn logon_check(fs: &mut impl Markers, pool_user: &Sid) -> Result<(), Refused> {
-    let (sessions, known) = current(fs)
-        .map_err(|e| Refused::stop(format!("the session markers can't be read ({e})")))?;
+    let (sessions, known) = current(fs).map_err(|e| {
+        Refused::stop(Detail::new(|| {
+            format!("the session markers can't be read ({e})")
+        }))
+    })?;
     let ours: Vec<UncleanSession> = sessions
         .into_iter()
         .filter(|session| {
@@ -318,7 +323,7 @@ pub fn logon_check(fs: &mut impl Markers, pool_user: &Sid) -> Result<(), Refused
         }
     }
     if !standing && stuck {
-        return Err(Refused::sweep(STUCK.to_owned()));
+        return Err(Refused::sweep(STUCK.into()));
     }
     let mut awaits = "the sandbox's stop";
     if !standing {
@@ -330,10 +335,13 @@ pub fn logon_check(fs: &mut impl Markers, pool_user: &Sid) -> Result<(), Refused
             .into_iter()
             .partition(|session| session.state.is_some_and(|state| state.swept(done)));
         for session in unremoved {
-            fs.note(&format!(
-                "an earlier session's marker {} is clean but couldn't be removed",
-                session.id
-            ));
+            let detail = Detail::new(|| {
+                format!(
+                    "an earlier session's marker {} is clean but couldn't be removed",
+                    session.id
+                )
+            });
+            fs.note(RunnerKind::MarkerUnremoved, detail);
         }
         if swept.is_empty() {
             return Ok(());
@@ -345,7 +353,7 @@ pub fn logon_check(fs: &mut impl Markers, pool_user: &Sid) -> Result<(), Refused
             .iter()
             .any(|session| session.state.is_some_and(|state| state.swept(done)))
         {
-            return Err(Refused::sweep(STUCK_SWEPT.to_owned()));
+            return Err(Refused::sweep(STUCK_SWEPT.into()));
         }
         awaits = "the sandbox's final stop, after its sweep";
     }
@@ -354,9 +362,9 @@ pub fn logon_check(fs: &mut impl Markers, pool_user: &Sid) -> Result<(), Refused
     } else {
         "the stop couldn't be requested"
     };
-    Err(Refused::stop(format!(
-        "an earlier session of this sandbox user awaits {awaits} ({asked})"
-    )))
+    Err(Refused::stop(Detail::new(|| {
+        format!("an earlier session of this sandbox user awaits {awaits} ({asked})")
+    })))
 }
 
 /// F4's wait for this pool user's markers awaiting a sweep: those `SweepSequence` meets go;
@@ -376,8 +384,11 @@ fn wait_for_sweeps(
     if sessions.is_empty() {
         return Ok((sessions, Sequences::default()));
     }
-    let unread =
-        |e: String| Refused::sweep(format!("the sandbox's sweep sequence can't be read ({e})"));
+    let unread = |e: String| {
+        Refused::sweep(Detail::new(|| {
+            format!("the sandbox's sweep sequence can't be read ({e})")
+        }))
+    };
     let mut done = fs.sequences().map_err(unread)?;
     let left = remove_clean(fs, sessions, done);
     let wanted = left
@@ -398,11 +409,13 @@ fn wait_for_sweeps(
             return Ok((remove_clean(fs, left, done), done));
         }
     }
-    Err(Refused::sweep(format!(
-        "an earlier session of this sandbox user awaits the sandbox's sweep, which didn't \
-         finish within {} s",
-        SWEEP_WAIT.as_secs()
-    )))
+    Err(Refused::sweep(Detail::new(|| {
+        format!(
+            "an earlier session of this sandbox user awaits the sandbox's sweep, which didn't \
+             finish within {} s",
+            SWEEP_WAIT.as_secs()
+        )
+    })))
 }
 
 /// A dead outer's marker: `StopNext` read now; `None` when it can't be.
@@ -415,9 +428,15 @@ fn dead_outer(fs: &mut impl Markers) -> Option<MarkerState> {
 /// [`SWEEP_WAIT`] of a sweep this asks for; one awaiting the sweep before its final stop is
 /// waited for the same way, and is F4's once that sweep completed. `Err` says why not.
 pub fn await_sweeps(fs: &mut impl Markers) -> Result<(), String> {
-    let (sessions, _) =
-        current(fs).map_err(|e| format!("the session markers can't be read ({e})"))?;
-    let unread = |e: String| format!("the sandbox's sweep sequence can't be read ({e})");
+    // The listing's code alone, never its error's text: these words reach the host's launch check.
+    let (sessions, _) = current(fs).map_err(|failed| {
+        let code = failed
+            .raw_os_error()
+            .map_or_else(|| failed.kind().to_string(), |code| code.to_string());
+        format!("the session markers can't be read ({code})")
+    })?;
+    // `Markers` words its failures itself, path-free (`os.rs`).
+    let unread = |what: String| format!("the sandbox's sweep sequence can't be read ({what})");
     let mut done = fs.sequences().map_err(unread)?;
     let (sessions, requested) = remark(fs, sessions, done);
     if sessions

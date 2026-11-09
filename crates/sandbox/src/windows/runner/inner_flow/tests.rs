@@ -72,10 +72,13 @@ impl Inner for Record {
     }
     fn clean(&mut self) {
         self.done.push("clean".to_owned());
-        self.log("clauseo-sandbox-run: cleanup (before launch): removed 1 Run and RunOnce values");
+        self.log(
+            RunnerKind::CleanupRemoved,
+            "clauseo-sandbox-run: cleanup (before launch): removed 1 Run and RunOnce values".into(),
+        );
     }
-    fn log(&mut self, line: &str) {
-        self.lines.push((line.to_owned(), self.open));
+    fn log(&mut self, _kind: RunnerKind, detail: Detail) {
+        self.lines.push((detail.text().to_owned(), self.open));
     }
     fn connect(&mut self) -> Result<(), RunExit> {
         self.done.push("connect".to_owned());
@@ -88,14 +91,14 @@ impl Inner for Record {
     fn read_launch(&mut self) -> Result<(), Failure> {
         self.done.push("read launch".to_owned());
         if self.fail == Some("read") {
-            return Err((RunExit::Pipe, "ctl read failed (109)".to_owned()));
+            return Err((RunExit::Pipe, "ctl read failed (109)".into()));
         }
         Ok(())
     }
     fn start(&mut self) -> Result<u32, Failure> {
         self.done.push("start agent".to_owned());
         if self.fail == Some("start") {
-            return Err((RunExit::Spawn, "CreateProcessAsUserW failed (5)".to_owned()));
+            return Err((RunExit::Spawn, "CreateProcessAsUserW failed (5)".into()));
         }
         Ok(77)
     }
@@ -117,6 +120,12 @@ impl Inner for Record {
         self.done.push(format!("report {report:?}"));
         !(self.fail == Some("started") && matches!(report, InnerReport::Started { .. }))
     }
+}
+
+/// What the inner sends over `ctl` for a failure's `what`: its text in a `vm-harness-detail`
+/// build, else nothing.
+fn sent(what: &str) -> Option<String> {
+    Detail::new(|| what.to_owned()).to_send()
 }
 
 #[test]
@@ -169,8 +178,9 @@ fn a_failed_first_act_sweep_exits_sweep_and_starts_no_agent() {
             "sweep before launch".to_owned(),
             "connect".to_owned(),
             format!(
-                "report Failed {{ exit: {}, what: {what:?} }}",
-                RunExit::Sweep.code()
+                "report Failed {{ exit: {}, detail: {:?} }}",
+                RunExit::Sweep.code(),
+                sent(what)
             ),
         ]
     );
@@ -260,8 +270,9 @@ fn an_escapee_at_the_first_act_is_reported_before_ctl_opens_and_exits_escapee() 
             "sweep before launch".to_owned(),
             "connect".to_owned(),
             format!(
-                "report Failed {{ exit: {}, what: {what:?} }}",
-                RunExit::Escapee.code()
+                "report Failed {{ exit: {}, detail: {:?} }}",
+                RunExit::Escapee.code(),
+                sent(what)
             ),
         ]
     );
@@ -323,8 +334,9 @@ fn a_job_list_that_cant_be_read_fails_the_first_act_closed_and_a_tick_tries_agai
     assert_eq!(
         record.done.last().unwrap(),
         &format!(
-            "report Failed {{ exit: {}, what: {what:?} }}",
-            RunExit::Sweep.code()
+            "report Failed {{ exit: {}, detail: {:?} }}",
+            RunExit::Sweep.code(),
+            sent(what)
         )
     );
     assert!(!record.done.iter().any(|step| step == "start agent"));

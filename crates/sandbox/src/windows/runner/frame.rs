@@ -10,6 +10,7 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
 use super::LAUNCH_CAP;
+use super::stderr::RunnerKind;
 use crate::windows::sids::Sid;
 
 /// What the outer runner sends the inner runner: everything it needs to start the agent, the
@@ -61,12 +62,12 @@ pub enum InnerReport {
         pid: u32,
     },
     /// The agent didn't start: the [`RunExit`](super::RunExit) code the inner exits with, and
-    /// what failed (a call and its code, never a path or a value).
+    /// what failed in detail, sent only by a `vm-harness-detail` build (`stderr::Detail`).
     Failed {
         /// The exit code.
         exit: u32,
-        /// What failed.
-        what: String,
+        /// What failed, in detail.
+        detail: Option<String>,
     },
     /// The agent exited, with this code: sent after `Started`, so the outer can tell the agent's
     /// own end (a start that failed in it, `0xC0000142`) from the inner runner's.
@@ -74,11 +75,14 @@ pub enum InnerReport {
         /// The agent's exit code.
         code: u32,
     },
-    /// A line for the outer's stderr: a sweep's kill (pid, image name, sweep point), a sweep's
-    /// failure, or a cleanup's counts. Never a path or a value.
+    /// A notice for the outer's stderr (`stderr::notice`): a sweep's kill, a sweep's failure, or
+    /// a cleanup's counts, by its kind; the line in detail (pid, image name, sweep point) only
+    /// from a `vm-harness-detail` build.
     Log {
-        /// The line.
-        line: String,
+        /// The notice's kind.
+        kind: RunnerKind,
+        /// The line, in detail.
+        detail: Option<String>,
     },
     /// A sweep found processes of the pool user's it couldn't end (`sweep::SweepError::escapees`):
     /// the outer exits [`RunExit::Escapee`](super::RunExit::Escapee). Sent at any time, the first

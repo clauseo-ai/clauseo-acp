@@ -53,6 +53,7 @@ pub(crate) use self::records::Layout;
 #[cfg(windows)]
 pub(crate) use self::records::changes;
 pub(crate) use self::watchdog::{Dog, Pulse, watchdog};
+use super::stderr::{Detail, RunnerKind};
 use crate::windows::denial_pipe::Record;
 use crate::windows::set_aside::{Ending, Failed, Hooks, Live};
 #[cfg(doc)]
@@ -81,7 +82,8 @@ const RETRIES: u32 = 5;
 /// The pause between two of those tries, while the ended agent's handles close.
 const RETRY_PAUSE: Duration = Duration::from_millis(200);
 
-/// What starts each line the outer says on its stderr: log lines only, which nothing reads back.
+/// What starts the detail of each notice the watch says (`stderr::Detail`, written only in a
+/// `vm-harness-detail` build): log lines only, which nothing reads back.
 const SAID: &str = "clauseo-sandbox-run: ";
 
 /// What the watch saw next.
@@ -125,8 +127,9 @@ pub(crate) trait Session {
     /// Ends the session by the outer's own end path. Whether the agent's job is truly empty
     /// once it returns: only then does the watch move anything while the session runs.
     fn end(&self) -> bool;
-    /// One line on the outer's stderr, for the log: never a notice or a set-aside.
-    fn say(&self, line: &str);
+    /// One notice on the outer's stderr (`stderr::notice`), for the log: never a lawyer's
+    /// notice or a set-aside.
+    fn say(&self, kind: RunnerKind, detail: Detail);
     /// One record for the host, on its denial pipe: the lawyer's notices and the set-asides.
     fn record(&self, record: &Record);
     /// Waits up to `wait`; `true`, early, once the watch is stopped.
@@ -221,17 +224,15 @@ impl Cause {
 
 /// The lawyer's notice when the pairing is lost for the session ([`lose_pairing`]): from then on
 /// every new folder that goes before its check counts toward [`GONE_LIMIT`].
-pub(crate) const PAIRING_LOST: &str = "Clauseo can't follow folders the AI tool moves in this \
-     session, so it will stop the session if the AI tool keeps moving or removing new folders in \
-     the matter before Clauseo can check them.";
+pub(crate) use super::stderr::PAIRING_LOST;
 
 /// Where a pairing watch tells of the pairing's loss: the host's denial pipe, and the outer's
 /// stderr, whose tail the host keeps (nothing reads the denial pipe yet).
 pub(crate) trait Tell {
     /// One record for the host, on its denial pipe.
     fn record(&self, record: &Record);
-    /// One line on the outer's stderr.
-    fn say(&self, line: &str);
+    /// One notice on the outer's stderr (`stderr::notice`).
+    fn say(&self, kind: RunnerKind, detail: Detail);
 }
 
 /// Loses the pairing for the session (`Pairs::lose_for_good`): a pairing watch couldn't be
@@ -241,7 +242,10 @@ pub(crate) trait Tell {
 pub(crate) fn lose_pairing(pairs: &Pairs, tell: &impl Tell) {
     if pairs.lose_for_good() {
         tell.record(&Record::notice(PAIRING_LOST));
-        tell.say(&format!("{SAID}{PAIRING_LOST}"));
+        tell.say(
+            RunnerKind::GitPairingLost,
+            Detail::new(|| format!("{SAID}{PAIRING_LOST}")),
+        );
     }
 }
 
@@ -375,10 +379,13 @@ fn keep_watching<S: Source, T: Session>(source: &mut S, guard: &impl Guard, ende
             }
             Next::Idle => take_paired(ender),
             Next::Broken(error) => {
-                session.say(&format!(
-                    "{SAID}git watch: the watch failed ({}); ending the session",
-                    code(&error)
-                ));
+                let detail = Detail::new(|| {
+                    format!(
+                        "{SAID}git watch: the watch failed ({}); ending the session",
+                        code(&error)
+                    )
+                });
+                session.say(RunnerKind::GitWatchBroken, detail);
                 ender.stop(Cause::Broken);
                 while !session.pause(STOP_POLL) {}
                 return;
@@ -447,9 +454,10 @@ pub(crate) fn feed(
 fn overflowed<T: Session>(guard: &impl Guard, ender: &Ender<'_, T>) {
     let count = ender.overflows.get().saturating_add(1);
     ender.overflows.set(count);
-    ender.session.say(&format!(
-        "{SAID}git watch: too many changes at once; rescanning the folder"
-    ));
+    ender.session.say(
+        RunnerKind::GitWatchOverflow,
+        Detail::new(|| format!("{SAID}git watch: too many changes at once; rescanning the folder")),
+    );
     if count >= OVERFLOWS {
         ender.stop(Cause::Overflows);
     }
@@ -464,21 +472,27 @@ fn act<T: Session>(live: &Live, guard: &impl Guard, ender: &Ender<'_, T>) {
     tell(live, session);
     count_gone(&live.gone, ender);
     if !live.left.is_empty() && !ender.left_said.replace(true) {
-        session.say(&format!(
-            "{SAID}git watch: {} item(s) not set aside while the agent's processes may still \
-             run; the check after the session sets them aside",
-            live.left.len()
-        ));
+        let detail = Detail::new(|| {
+            format!(
+                "{SAID}git watch: {} item(s) not set aside while the agent's processes may still \
+                 run; the check after the session sets them aside",
+                live.left.len()
+            )
+        });
+        session.say(RunnerKind::GitItemsLeft, detail);
     }
     if live.failed.is_empty() {
         return;
     }
     for failed in &live.failed {
-        session.say(&format!(
-            "{SAID}git watch: an item couldn't be set aside ({}); trying again once the session \
-             ended",
-            failed.failure
-        ));
+        let detail = Detail::new(|| {
+            format!(
+                "{SAID}git watch: an item couldn't be set aside ({}); trying again once the \
+                 session ended",
+                failed.failure
+            )
+        });
+        session.say(RunnerKind::GitItemStuck, detail);
     }
     ender.stop(Cause::Stuck);
     let mut left = live.failed.clone();
@@ -491,11 +505,14 @@ fn act<T: Session>(live: &Live, guard: &impl Guard, ender: &Ender<'_, T>) {
         }
         session.settle(RETRY_PAUSE);
     }
-    session.say(&format!(
-        "{SAID}git watch: {} item(s) still couldn't be set aside once the session ended; the \
-         check after the session tries again",
-        left.len()
-    ));
+    let detail = Detail::new(|| {
+        format!(
+            "{SAID}git watch: {} item(s) still couldn't be set aside once the session ended; the \
+             check after the session tries again",
+            left.len()
+        )
+    });
+    session.say(RunnerKind::GitItemsStillStuck, detail);
 }
 
 /// Counts the items gone, across every path: [`GONE_LIMIT`] in all ends the session, so an

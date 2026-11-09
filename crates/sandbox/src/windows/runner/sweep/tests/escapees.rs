@@ -39,7 +39,7 @@ fn a_sweep_that_cant_read_its_own_start_kills_nothing() {
     let mut fake = machine();
     fake.procs.insert(31, pool_proc("task.exe"));
     let mut calls = NoClock(fake);
-    let got = sweep(&mut calls, &sid(POOL), &[30], Point::Tick, &mut |_| {});
+    let got = sweep(&mut calls, &sid(POOL), &[30], Point::Tick, &mut |_, _| {});
     assert_eq!(
         got,
         Err(SweepError::OwnStart {

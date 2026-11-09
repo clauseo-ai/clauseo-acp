@@ -68,8 +68,8 @@ fn run(fake: &mut Fake) -> (bool, Vec<String>) {
 
 fn run_kinds(fake: &mut Fake, kinds: &[Kind]) -> (bool, Vec<String>) {
     let mut lines = Vec::new();
-    let clean = remove_all(fake, kinds, "before launch", &mut |l| {
-        lines.push(l.to_owned());
+    let clean = remove_all(fake, kinds, "before launch", &mut |_kind, detail| {
+        lines.push(detail.text().to_owned());
     });
     (clean, lines)
 }

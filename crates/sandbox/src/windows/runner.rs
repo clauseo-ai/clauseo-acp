@@ -105,6 +105,7 @@ mod policy;
 mod spawn;
 #[cfg(any(windows, test))]
 mod start;
+pub mod stderr;
 #[cfg(any(windows, test))]
 mod sweep;
 #[cfg(any(windows, test))]
@@ -263,7 +264,9 @@ impl LaunchMessage {
     /// The message as the file's bytes, checked first.
     pub fn to_bytes(&self) -> Result<Vec<u8>, LaunchError> {
         self.check()?;
-        serde_json::to_vec(self).map_err(|error| LaunchError::Format(error.to_string()))
+        // Never serde's text, which can quote a value (the environment holds the proxy's token).
+        serde_json::to_vec(self)
+            .map_err(|_unwritten| LaunchError::Format("not serializable".to_owned()))
     }
 
     /// The rules: this version; a pool name `ClauseoSbNN`; the program, folders and paths full
@@ -390,7 +393,7 @@ pub fn write_launch(data_dir: &Path, message: &LaunchMessage) -> std::io::Result
     super::write::make_sandbox_dir(&sandbox)?;
     super::write::make_sandbox_dir(&sandbox.join(RUN_DIR))?;
     let mut bits = [0u8; 8];
-    getrandom::fill(&mut bits).map_err(|error| std::io::Error::other(error.to_string()))?;
+    getrandom::fill(&mut bits).map_err(|_failed| std::io::Error::other("random failed"))?;
     let id = super::pipe::hex(&bits);
     let path = launch_path(data_dir, &id);
     super::write::write_atomic(&path, &bytes)?;
@@ -561,11 +564,9 @@ pub fn station_name(random: [u8; 8]) -> String {
 }
 
 /// The cause when the Secondary Logon service is disabled: set-up's own words.
-pub const SECLOGON_DISABLED: &str = "the Secondary Logon service (seclogon) is disabled: IT can \
-     set it to start manually";
+pub const SECLOGON_DISABLED: &str = "the Secondary Logon service (seclogon) is disabled";
 /// The cause when the pool user's password is missing or refused.
-pub const PASSWORD_LOST: &str = "the sandbox user's saved password is missing or out of date: \
-     run the set-up again";
+pub const PASSWORD_LOST: &str = "the sandbox user's saved password is missing or out of date";
 
 fn field(field: &'static str, rule: &'static str) -> LaunchError {
     LaunchError::Field { field, rule }

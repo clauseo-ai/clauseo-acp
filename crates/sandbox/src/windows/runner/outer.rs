@@ -14,6 +14,7 @@ use super::marker::marked;
 use super::paths::{CodexReuse, WinPath};
 use super::spawn::{Process, kill_on_close_job, restrict_dll_search, system_folder};
 use super::start::start;
+use super::stderr::{self, Detail, RunnerKind};
 use super::unclean::os::check_logon;
 use super::{LaunchMessage, RunExit, agent_env, codex_reuse};
 use crate::windows::pipe::os::ServerPipe;
@@ -24,10 +25,12 @@ use crate::windows::setup::read_record_install_id;
 use crate::windows::token::os::{logon_sid, own_token, profile_folder};
 use crate::windows::token::{desktop_sddl, station_sddl};
 use end::OsEnd;
+use failure::Failure;
 use launch_file::{data_dir_of, read_launch};
 use steps::Start;
 
 mod end;
+mod failure;
 mod launch_file;
 mod steps;
 mod watch;
@@ -44,27 +47,14 @@ const NEXT_CONNECT: Duration = Duration::from_secs(15);
 const DRAIN: Duration = Duration::from_secs(2);
 /// The most `Log` lines read from `ctl` while waiting for one report.
 const LOG_CAP: usize = 100_000;
-/// What the outer says when a sweep of its session found an escapee.
-const ESCAPED: &str = "a process of the sandbox user's outlived every sweep of this session";
-
-/// A runner failure: its exit code and what to say on stderr.
-struct Failure(RunExit, String);
-
-impl Failure {
-    fn new(exit: RunExit, what: impl Into<String>) -> Failure {
-        Failure(exit, what.into())
-    }
-}
-
 /// The outer runner's whole run; its exit code. `exe` is this program's own path, which the
 /// inner runner runs as the pool user.
 pub fn run_outer(launch_file: &Path, exe: &Path) -> u32 {
+    // First of all: a panic says only its kind, never std's `panicked at <path>`.
+    stderr::install_panic_hook();
     if let Err(error) = restrict_dll_search() {
-        say(&format!(
-            "clauseo-sandbox-run: {}",
-            os("SetDefaultDllDirectories", &error)
-        ));
-        return RunExit::DllSearch.code();
+        let why = Detail::new(|| os("SetDefaultDllDirectories", &error));
+        return Failure::new(RunExit::DllSearch, why).refuse();
     }
     // The runner's log file (`log_file.rs`), before anything logs.
     if let Ok(data_dir) = data_dir_of(launch_file) {
@@ -72,10 +62,7 @@ pub fn run_outer(launch_file: &Path, exe: &Path) -> u32 {
     }
     match outer(launch_file, exe) {
         Ok(code) => code,
-        Err(Failure(exit, what)) => {
-            say(&format!("clauseo-sandbox-run: {what}"));
-            exit.code()
-        }
+        Err(failure) => failure.refuse(),
     }
 }
 
@@ -96,8 +83,8 @@ fn outer(launch_file: &Path, exe: &Path) -> Result<u32, Failure> {
     // id that can't be read refuses the same way, since a marker without it could pass for an
     // older install's and be removed as stale.
     let install = read_record_install_id().map_err(|e| {
-        let why = format!("the session marker failed (the install id: {e})");
-        Failure::new(RunExit::MarkerUnwritable, why)
+        let why = Detail::new(|| format!("the session marker failed (the install id: {e})"));
+        Failure::of(RunnerKind::InstallRecordUnreadable, why)
     })?;
     marked(
         &data_dir,
@@ -106,7 +93,10 @@ fn outer(launch_file: &Path, exe: &Path) -> Result<u32, Failure> {
         install.as_deref(),
         |marker| marked_outer(&message, data_dir.clone(), marker, exe),
     )
-    .map_err(|e| Failure::new(RunExit::MarkerUnwritable, os("the session marker", &e)))?
+    .map_err(|e| {
+        let why = Detail::new(|| os("the session marker", &e));
+        Failure::new(RunExit::MarkerUnwritable, why)
+    })?
 }
 
 /// The run once its marker is written.
@@ -116,19 +106,20 @@ fn marked_outer(
     marker: PathBuf,
     exe: &Path,
 ) -> Result<u32, Failure> {
-    let desktop =
-        current_user_sid().map_err(|e| Failure::new(RunExit::BadLaunch, os("user", &e)))?;
+    let desktop = current_user_sid()
+        .map_err(|e| Failure::new(RunExit::BadLaunch, Detail::new(|| os("user", &e))))?;
     let exe_text = exe
         .to_str()
         .ok_or_else(|| Failure::new(RunExit::Usage, "the runner's path isn't UTF-8"))?;
     // The inner runner starts in System32, a folder the Low agent can't write (no DLL planted
     // in its current folder); it gets the agent's folder over `ctl`.
-    let cwd = system_folder().map_err(|e| Failure::new(RunExit::Logon, os("system folder", &e)))?;
+    let cwd = system_folder()
+        .map_err(|e| Failure::new(RunExit::Logon, Detail::new(|| os("system folder", &e))))?;
     // The desktop user's logon SID, which the runners hold too: their process DACL grants it, so
     // one runner's sweep can end another's (`token::runner_process_sddl`).
     let logon = own_token()
         .and_then(|token| logon_sid(&token))
-        .map_err(|e| Failure::new(RunExit::Token, os("logon SID", &e)))?;
+        .map_err(|e| Failure::new(RunExit::Token, Detail::new(|| os("logon SID", &e))))?;
     // From here every end path first ends the job, waits for it to empty, reads `SweepNext` and
     // requests the `SYSTEM` sweep task (`end.rs`).
     let end: End = Arc::new(SessionEnd::new(OsEnd {
@@ -149,11 +140,15 @@ fn marked_outer(
         end.finish();
     }
     match result {
-        // An escapee found at the first act, a tick or the inner's end is the run's outcome; the
-        // failure is said first.
-        Err(Failure(exit, what)) if end.escaped() && exit != RunExit::Escapee => {
-            say(&format!("clauseo-sandbox-run: {what}"));
-            Err(Failure::new(RunExit::Escapee, ESCAPED))
+        // An escapee found at the first act, a tick or the inner's end is the run's outcome, and
+        // its refusal the run's one: the failure it replaces goes to runner.log by its kind.
+        Err(failure) if end.escaped() && failure.exit() != RunExit::Escapee => {
+            tracing::warn!(
+                kind = failure.kind.name(),
+                "a failure gave way to the escapee a sweep of the session found"
+            );
+            let replaced = failure.detail.then(|| "an escapee replaces it".to_owned());
+            Err(Failure::new(RunExit::Escapee, replaced))
         }
         other => other,
     }
@@ -164,43 +159,48 @@ fn marked_outer(
 fn session(message: &LaunchMessage, end: &End) -> Result<u32, Failure> {
     let steps = end.steps();
     let (data_dir, desktop) = (&steps.data_dir, steps.desktop.clone());
-    let profile = own_profile().map_err(|e| Failure::new(RunExit::BadLaunch, os("profile", &e)))?;
+    let profile = own_profile()
+        .map_err(|e| Failure::new(RunExit::BadLaunch, Detail::new(|| os("profile", &e))))?;
     refuse_codex_reuse(message, &profile)?;
     let env = agent_env(message, &profile)
-        .map_err(|e| Failure::new(RunExit::BadLaunch, e.to_string()))?;
-    let env = super::ca::with_firm_ca(message, &desktop, env, say);
+        .map_err(|e| Failure::new(RunExit::BadLaunch, Detail::new(|| e.to_string())))?;
+    let env = super::ca::with_firm_ca(message, &desktop, env, stderr::notice);
     let folders = super::env::profile_folders(message)
-        .map_err(|e| Failure::new(RunExit::BadLaunch, e.to_string()))?;
-    let set = PipeSet::random().map_err(|e| Failure::new(RunExit::Pipe, os("random", &e)))?;
+        .map_err(|e| Failure::new(RunExit::BadLaunch, Detail::new(|| e.to_string())))?;
+    let set = PipeSet::random()
+        .map_err(|e| Failure::new(RunExit::Pipe, Detail::new(|| os("random", &e))))?;
     let sddl = pipe_sddl(&desktop, &message.pool_user);
     let pipes = Role::ALL
         .iter()
         .map(|role| ServerPipe::create(&set.name(*role), *role, &sddl))
         .collect::<io::Result<Vec<_>>>()
-        .map_err(|e| Failure::new(RunExit::Pipe, os("CreateNamedPipeW", &e)))?;
+        .map_err(|e| Failure::new(RunExit::Pipe, Detail::new(|| os("CreateNamedPipeW", &e))))?;
     // Held by the session end's steps, so every end path ends it and waits for it to empty
     // before the sweep task is requested (`end.rs`).
-    let job =
-        steps.hold_job(kill_on_close_job().map_err(|e| Failure::new(RunExit::Job, os("job", &e)))?);
+    let job = steps.hold_job(
+        kill_on_close_job()
+            .map_err(|e| Failure::new(RunExit::Job, Detail::new(|| os("job", &e))))?,
+    );
     // Only a missing or unusable secret is the set-up's to fix; a read that failed is this
     // launch's alone, and a SID the pool doesn't hold is a bad launch.
-    let password = secret_for(data_dir, &message.pool_user).map_err(|error| match error {
-        SecretError::NoSecret { .. } => Failure::new(RunExit::NoSecret, super::PASSWORD_LOST),
-        SecretError::Io(_) => Failure::new(RunExit::Logon, error.to_string()),
-        SecretError::NotInPool { .. } => Failure::new(RunExit::BadLaunch, error.to_string()),
-        other @ (SecretError::Newer { .. }
-        | SecretError::Malformed(_)
-        | SecretError::Dpapi { .. }) => Failure::new(RunExit::NoSecret, other.to_string()),
+    let password = secret_for(data_dir, &message.pool_user).map_err(|error| {
+        let why = Detail::new(|| error.to_string());
+        match error {
+            SecretError::NoSecret { .. } => Failure::new(RunExit::NoSecret, super::PASSWORD_LOST),
+            SecretError::Io(_) => Failure::new(RunExit::Logon, why),
+            SecretError::NotInPool { .. } => Failure::of(RunnerKind::PoolUserMissing, why),
+            SecretError::Newer { .. } | SecretError::Malformed(_) | SecretError::Dpapi { .. } => {
+                Failure::new(RunExit::NoSecret, why)
+            }
+        }
     })?;
     // The agent's window station and desktop (`desktop.rs`), made here so the job can carry the
     // desktop UI limit: no process in it may make or switch desktops. They live as long as this
     // process.
     let mut random = [0u8; 8];
     getrandom::fill(&mut random).map_err(|error| {
-        Failure::new(
-            RunExit::Token,
-            format!("the window station's name: random failed ({error})"),
-        )
+        let why = Detail::new(|| format!("the window station's name: random failed ({error})"));
+        Failure::new(RunExit::Token, why)
     })?;
     let station_name = super::station_name(random);
     let matter = message.matter_sid.as_ref();
@@ -211,10 +211,8 @@ fn session(message: &LaunchMessage, end: &End) -> Result<u32, Failure> {
         &desktop_sddl(&message.pool_user, matter),
     )
     .map_err(|(call, e)| {
-        Failure::new(
-            RunExit::Token,
-            os(&format!("the agent's window station: {call}"), &e),
-        )
+        let why = Detail::new(|| os(&format!("the agent's window station: {call}"), &e));
+        Failure::new(RunExit::Token, why)
     })?;
     // The denial pipe, the git watch (`outer/watch.rs`), the logon, the user's check, the job, the
     // shut, then the resume (`start.rs`); the inner's first act is the sweep of every other process
@@ -275,7 +273,7 @@ fn serve(
     }
     if let Err(error) = write_frame(&ctl, launch) {
         // An inner whose first-act sweep failed reported it and exited without reading.
-        let failure = Failure::new(RunExit::Pipe, os("ctl write", &error));
+        let failure = Failure::new(RunExit::Pipe, Detail::new(|| os("ctl write", &error)));
         return Err(reported(&ctl, inner, end).unwrap_or(failure));
     }
     for pipe in [&stdin, &stdout, &stderr] {
@@ -286,35 +284,43 @@ fn serve(
     }
     match next_report(&ctl, end) {
         Ok(InnerReport::Started { .. }) => {}
-        Ok(InnerReport::Failed { exit, what }) => return Err(failed(inner, exit, &what)),
+        Ok(InnerReport::Failed { exit, detail }) => return Err(failed(inner, exit, detail)),
         Ok(InnerReport::Exited { .. } | InnerReport::Log { .. } | InnerReport::Escapee { .. }) => {
             return Err(Failure::new(
                 RunExit::Pipe,
                 "the inner runner skipped its start report",
             ));
         }
-        Err(error) => return Err(Failure::new(RunExit::Pipe, os("ctl read", &error))),
+        Err(error) => {
+            return Err(Failure::new(
+                RunExit::Pipe,
+                Detail::new(|| os("ctl read", &error)),
+            ));
+        }
     }
     relay(inner, ctl, [stdin, stdout, stderr], end)
 }
 
-/// The next report on `ctl` that isn't a `Log` line or an `Escapee` report; each `Log` line
-/// goes to stderr, and each `Escapee` report is kept in `end` (the run's outcome) and said.
+/// The next report on `ctl` that isn't a `Log` notice or an `Escapee` report; each `Log`
+/// notice goes to stderr, and each `Escapee` report is kept in `end` (the run's outcome) and said.
 fn next_report(ctl: &ServerPipe, end: &End) -> io::Result<InnerReport> {
     for _ in 0..LOG_CAP {
         match read_frame::<InnerReport>(ctl)? {
-            InnerReport::Log { line } => say(&line),
+            InnerReport::Log { kind, detail } => stderr::notice(kind, Detail::sent(detail)),
             InnerReport::Escapee {
                 point,
                 count,
                 images,
             } => {
                 end.mark_escapee();
-                say(&format!(
-                    "clauseo-sandbox-run: sweep ({point}): {count} of the sandbox user's processes \
-                     can't be ended ({})",
-                    images.join(", ")
-                ));
+                let detail = Detail::new(|| {
+                    format!(
+                        "clauseo-sandbox-run: sweep ({point}): {count} of the sandbox user's \
+                         processes can't be ended ({})",
+                        images.join(", ")
+                    )
+                });
+                stderr::notice(RunnerKind::SweepEscapee, detail);
             }
             report @ (InnerReport::Started { .. }
             | InnerReport::Failed { .. }
@@ -330,7 +336,7 @@ fn next_report(ctl: &ServerPipe, end: &End) -> io::Result<InnerReport> {
 /// The failure the inner runner reported on `ctl`, if it did.
 fn reported(ctl: &ServerPipe, inner: &Process, end: &End) -> Option<Failure> {
     match next_report(ctl, end) {
-        Ok(InnerReport::Failed { exit, what }) => Some(failed(inner, exit, &what)),
+        Ok(InnerReport::Failed { exit, detail }) => Some(failed(inner, exit, detail)),
         Ok(
             InnerReport::Started { .. }
             | InnerReport::Exited { .. }
@@ -345,34 +351,39 @@ fn reported(ctl: &ServerPipe, inner: &Process, end: &End) -> Option<Failure> {
 fn inner_exit(inner: &Process) -> Option<Failure> {
     let code = inner.wait(Some(Duration::ZERO)).ok().flatten()?;
     let exit = RunExit::from_code(code)?;
-    Some(Failure::new(
-        exit,
-        format!("the inner runner exited (0x{code:08X})"),
-    ))
+    let why = Detail::new(|| format!("the inner runner exited (0x{code:08X})"));
+    Some(Failure::new(exit, why))
 }
 
-/// The inner runner's own failure: its `RunExit` code when it is one, after it exited.
-fn failed(inner: &Process, exit: u32, what: &str) -> Failure {
+/// The inner runner's own failure, after it exited: its `RunExit` code's kind when it is one,
+/// else [`RunnerKind::Internal`] (whose exit is `Spawn`).
+fn failed(inner: &Process, exit: u32, detail: Option<String>) -> Failure {
     drop(inner.wait(Some(NEXT_CONNECT)));
-    Failure::new(RunExit::from_code(exit).unwrap_or(RunExit::Spawn), what)
+    Failure::of(RunnerKind::for_code(exit), Detail::sent(detail))
 }
 
 /// Waits for `pipe`'s client and refuses one that isn't the inner runner's process.
 fn accept(pipe: &ServerPipe, inner: &Process, timeout: Duration) -> Result<(), Failure> {
-    let refused = |what: String| {
+    let refused = |kind: RunnerKind, why: Detail| {
         inner.kill(RunExit::Pipe.code());
-        Failure::new(RunExit::Pipe, what)
+        Failure::of(kind, why)
     };
-    pipe.connect(inner.handle.0, timeout)
-        .map_err(|e| refused(os(pipe.role().suffix(), &e)))?;
-    let pid = pipe
-        .client_pid()
-        .map_err(|e| refused(os("client pid", &e)))?;
+    pipe.connect(inner.handle.0, timeout).map_err(|e| {
+        let why = Detail::new(|| os(pipe.role().suffix(), &e));
+        refused(RunnerKind::Pipe, why)
+    })?;
+    let pid = pipe.client_pid().map_err(|e| {
+        let why = Detail::new(|| os("client pid", &e));
+        refused(RunnerKind::Pipe, why)
+    })?;
     if pid != inner.pid {
-        return Err(refused(format!(
-            "another process connected the {} pipe",
-            pipe.role().suffix()
-        )));
+        let why = Detail::new(|| {
+            format!(
+                "another process connected the {} pipe",
+                pipe.role().suffix()
+            )
+        });
+        return Err(refused(RunnerKind::PipeIntruder, why));
     }
     Ok(())
 }
@@ -395,7 +406,8 @@ fn relay(
     [stdin, stdout, stderr]: [ServerPipe; 3],
     end: &End,
 ) -> Result<u32, Failure> {
-    let spawned = |what: &io::Error| Failure::new(RunExit::Pipe, os("relay thread", what));
+    let spawned =
+        |e: &io::Error| Failure::new(RunExit::Pipe, Detail::new(|| os("relay thread", e)));
     // It may stay blocked on the host's pipe; the process ends without it.
     let host_end = Arc::clone(end);
     thread::Builder::new()
@@ -420,7 +432,7 @@ fn relay(
                 if out {
                     copy(&from, io::stdout());
                 } else {
-                    copy(&from, io::stderr());
+                    copy(&from, stderr::agent_stream());
                 }
                 let _sent = done.send(());
             })
@@ -452,12 +464,14 @@ fn relay(
     end.steps().stop_watch();
     tell_status(last.as_ref(), code);
     end.finish();
-    if end.escaped() {
-        say(&format!(
-            "clauseo-sandbox-run: {ESCAPED}; the run would have exited 0x{code:08X}"
-        ));
+    let outcome = end.outcome(code);
+    // The run's one refusal, when it ends at one of the runner's own codes: an escapee (which
+    // replaces even the agent's 0), an agent code in the runner's range, a failed wait.
+    if RunExit::from_code(outcome).is_some() {
+        let why = Detail::new(|| format!("the run would have exited 0x{code:08X}"));
+        stderr::refuse(RunnerKind::for_code(outcome), why);
     }
-    exit_now(end.outcome(code))
+    exit_now(outcome)
 }
 
 /// The agent's stdin pipe, owned, so that closing it is dropping it.
@@ -478,17 +492,19 @@ impl Write for AgentStdin {
 /// `0xC0000142` (`STATUS_DLL_INIT_FAILED`) at start means a DLL, user32 most often, couldn't
 /// start in it: a window station or desktop its token can't open.
 fn tell_status(report: Option<&InnerReport>, code: u32) {
-    let which = match report {
+    match report {
         Some(InnerReport::Exited { code: agent }) if *agent >= 0xC000_0000 => {
-            format!("the agent ended at Windows status 0x{agent:08X}")
+            let why = Detail::new(|| format!("the agent ended at Windows status 0x{agent:08X}"));
+            stderr::notice(RunnerKind::AgentWindowsStatus, why);
         }
-        Some(InnerReport::Exited { .. }) => return,
+        Some(InnerReport::Exited { .. }) => {}
         _ if code >= 0xC000_0000 => {
-            format!("the inner runner ended at Windows status 0x{code:08X}")
+            let why =
+                Detail::new(|| format!("the inner runner ended at Windows status 0x{code:08X}"));
+            stderr::notice(RunnerKind::InnerWindowsStatus, why);
         }
-        _ => return,
-    };
-    say(&format!("clauseo-sandbox-run: {which}"));
+        _ => {}
+    }
 }
 
 /// Ends this process with `code` now: the copies still blocked on a pipe go with it, and the
@@ -520,7 +536,8 @@ fn refuse_codex_reuse(message: &LaunchMessage, profile: &WinPath) -> Result<(), 
     paths.extend(message.runtime.iter().map(|p| ("runtime", p.as_str())));
     paths.extend(message.granted.iter().map(|p| ("granted", p.as_str())));
     paths.extend(message.firm_ca.iter().map(|p| ("firm_ca", p.as_str())));
-    let refused = |reason: CodexReuse| Failure::new(RunExit::CodexReuse, reason.to_string());
+    let refused =
+        |reason: CodexReuse| Failure::new(RunExit::CodexReuse, Detail::new(|| reason.to_string()));
     codex_reuse(profile, paths, &message.env).map_err(refused)?;
     match &message.credential_link {
         Some(link) => {
@@ -534,11 +551,14 @@ fn refuse_codex_reuse(message: &LaunchMessage, profile: &WinPath) -> Result<(), 
 fn logon_failure(code: u32) -> Failure {
     match code {
         1058 => Failure::new(RunExit::SecondaryLogon, super::SECLOGON_DISABLED),
-        1385 => Failure::new(RunExit::LogonRight, crate::Blocked::LogonRight.to_string()),
+        1385 => Failure::new(
+            RunExit::LogonRight,
+            Detail::new(|| crate::Blocked::LogonRight.to_string()),
+        ),
         1326 => Failure::new(RunExit::Password, super::PASSWORD_LOST),
         other => Failure::new(
             RunExit::Logon,
-            format!("CreateProcessWithLogonW failed ({other})"),
+            Detail::new(|| format!("CreateProcessWithLogonW failed ({other})")),
         ),
     }
 }
@@ -556,10 +576,4 @@ fn os(call: &str, error: &io::Error) -> String {
         Some(code) => format!("{call} failed ({code})"),
         None => format!("{call} failed ({})", error.kind()),
     }
-}
-
-/// One line on this process's stderr, which the host's stderr tail shows.
-fn say(line: &str) {
-    let mut stderr = io::stderr().lock();
-    drop(writeln!(stderr, "{line}").and_then(|()| stderr.flush()));
 }

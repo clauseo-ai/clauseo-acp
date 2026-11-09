@@ -366,7 +366,8 @@ build 26100):
     watch that can't be armed, gets only the plain records (a network share, such as AppData
     redirected to a server: no file IDs, so it notes nothing), can't start its thread, panics or
     breaks loses it for the session, and the first loss of a session tells the lawyer once, on the
-    denial pipe and on the outer's stderr (`git_watch::PAIRING_LOST`); while lost, every folder
+    denial pipe and on the outer's stderr (`git_watch::PAIRING_LOST`, the `git_pairing_lost`
+    notice's sentence); while lost, every folder
     that looks just made and is gone before its scan counts, those held when it was lost too. The
     state and temp folders get watches
     of their own (recursive, extended records, names only: `FILE_NOTIFY_CHANGE_FILE_NAME` and
@@ -1371,8 +1372,8 @@ leaves that profile, both naming the part.
     lists again, so a pid reused meanwhile is left alone. One whose DACL refuses the open is
     opened with `WRITE_DAC`, which its owner (the pool user) holds unless an `OWNER RIGHTS`
     entry takes it away, given a DACL that grants the pool user the sweep's rights, and opened
-    again. Each kill is logged with its pid, image name and sweep point, through `ctl` to the
-    outer's stderr.
+    again. Each kill is said through `ctl` on the outer's stderr as a `sweep_killed` notice; its
+    pid, image name and sweep point go on its `DETAIL` line in a harness build alone.
   - **First act.** The inner's first act once resumed, before it reads the launch or makes
     anything, is that sweep. It keeps only itself, never another process of the job: the job is
     unnamed and its only handle is the outer's, and the inner has started nothing yet, so nothing
@@ -1506,8 +1507,9 @@ leaves that profile, both naming the part.
     nothing, and its result never changes the exit code. That code wins over the agent's own, even
     0, and over a cancel's: the run's
     output came through, but the host must learn that the pool user has a live process no sweep of
-    its own can end, and the exit code is the one thing the host reads. The code the run would
-    have had is said on stderr. A process that only can't be checked (its job, its start time) and
+    its own can end, and the exit code is the one thing the host reads. Its one refusal on stderr
+    is `kind=escapee`; the code the run would have had goes on its `DETAIL` line in a harness
+    build alone, and a failure it replaces goes to `runner.log` by its kind. A process that only can't be checked (its job, its start time) and
     a sweep that still found new processes after eight rounds stay `RunExit::Sweep`.
   - **Escapees until `\Clauseo\SandboxStop` (interim).** An escapee that shut its own DACL and
     survives a sweep is alive in the next inner's logon gap, and
@@ -1525,8 +1527,8 @@ leaves that profile, both naming the part.
     (the lawyer, `SYSTEM`, Administrators) as its own protected DACL and the lawyer its owner, so
     the pool user can neither write nor remove it. A marker that can't be written refuses the
     launch before anything runs as the pool user (`runner::marker::marked`): the outer exits
-    `RunExit::MarkerUnwritable` (`0xE0C15011`), a code of its own, with "the session marker
-    failed (<code>)" on stderr, and no logon follows, so no session runs that no marker names.
+    `RunExit::MarkerUnwritable` (`0xE0C15011`), a code of its own, with `kind=marker_unwritable`
+    on stderr (`install_record_unreadable` when the install id can't be read), and no logon follows, so no session runs that no marker names.
     The marker is written open (`marker::MarkerState::Open`). At its end the outer writes what it
     waits for, and never removes it itself:
     - `AwaitingSweep { sweep: M }` at every end without an escapee: a clean one, a failure, a
@@ -1757,6 +1759,121 @@ leaves that profile, both naming the part.
   by file ID (a hard link to it). The outer runner checks the same again before logon, and also
   refuses a `CODEX_HOME` in it. The path checks compare text: a short 8.3 name of the lawyer's
   profile folder isn't caught, a known gap.
+
+#### What the runner says on stderr
+
+The host copies a redacted tail (4 KiB at most) of the outer runner's stderr into the session's
+`DetachReason::Exited { stderr_tail }`, which reaches the matter's event log and the app's
+details view. Its redactor hides the home folder and secrets, not every path, so the runner puts
+no path, name or value there. Everything it says itself goes through `windows/runner/stderr.rs`:
+`refuse` writes `ERR clauseo-sandbox-run kind=<kind>: <sentence>` and `notice` writes
+`NOTE clauseo-sandbox-run kind=<kind>: <sentence>`, one line each, and a run that fails at one of
+`RunExit`'s codes writes exactly one `ERR` line. The sentence is the kind's own, fixed. What
+failed in detail (an error's text, a call and its code, a pid) is a closure that only a build
+with the `vm-harness-detail` feature calls, writing it on `DETAIL <text>` lines after the kind
+line; the feature is the s15 VM harness's alone (its example requires it), and no product crate
+turns it on. It refuses to compile in the release profile: the build script sets
+`clauseo_release_profile` when cargo's `PROFILE` is `release` (the release profile or one that
+inherits it, whatever its `debug-assertions`), and in any build without debug assertions. When
+`clauseo-sandbox-run` joins the sidecar build (`.github/scripts/sidecars.mjs`, `SIDECARS`), that
+build must refuse the feature too: no `--features` or `--all-features` that turns it on, and a
+check of `cargo tree -e features -i clauseo-sandbox` for it. Any other build never formats the
+detail, and no environment variable changes that.
+
+A panic says nothing but its kind: each of the binary's modes (`main`, `run_outer`,
+`run_inner`) first installs a panic hook that writes one `kind=internal` refusal, in place of
+std's `panicked at <source path>:<line>`, its message and any backtrace. The process still ends
+as a panic does (an abort in a release build), so the exit code isn't `internal`'s and the host,
+by the rule below, keeps the code. std's own line for a failed allocation (`memory allocation of
+<n> bytes failed`) is not a panic and stays: it holds a byte count, no path. The runner's
+`tracing` subscriber has `log_internal_errors` off, so a log line that fails to format is
+dropped, not reported on stderr.
+
+The agent's own stderr is relayed byte for byte, as before, and is not the runner's to vet. It
+shares the stream, so the runner's own line always starts on a fresh line: when the agent's last
+relayed byte isn't a newline, the runner writes one before its `ERR` or `NOTE` line. **The agent
+can print a line that looks like the runner's.** The host therefore takes a kind only from the
+last `ERR clauseo-sandbox-run` line of the tail, and only when that kind's `RunExit` code is the
+run's actual exit code; the exit code is authoritative. A spoofed line can then at most pick
+another sentence within the class of the run's real exit (another kind sharing that code), never
+a refusal the run didn't end with; an agent that exits with one of `RunExit`'s codes itself gets
+the runner's own refusal after its output has drained, so that refusal is the last line.
+
+The `runner-stderr` xtask check fails any other write to stderr in the runner's files
+(`eprintln!`, `print!`, `write!` to stderr, `io::stderr()` called or taken as a value, a `use`
+of `io::stderr`), and any formatting of an error outside a `Detail::new` closure. It reads the
+helpers the runner calls too: the runner imports only from `crate::windows` (the check fails a
+`use crate::` of anything else in its files), so it reads every file of `crate::windows` for
+stderr writes, except tests, `#[cfg(test)]` modules and the files of modules declared under
+`#[cfg(test)]`; the setup binary is not read.
+
+**The host maps these names to its own error codes, so a name, once given, never changes.** A
+finer kind shares its `RunExit` code with the code's own kind only where the lawyer acts
+differently; `PoolStop` (`0xE0C15010`) is no longer produced and has no kind. The class is what
+the lawyer can do: `setup` (the sandbox set-up runs again), `admin` (an administrator of this
+computer changes it), `transient` (a later launch may go ahead), `permanent` (nothing on this computer, as it is),
+`internal` (Clauseo's own fault), `notice` (nothing was refused). Of the refusals, `job`,
+`token` and `spawn` are the agent failing to start inside the jail; `codex_reuse`,
+`matter_unwatchable`, `sweep`, `escapee`, `awaiting_stop` and `awaiting_sweep` are the jail
+refusing. The runner checks no folder's drive (the host's admit does, before the launch), so no
+kind names one. `stderr/tests.rs` checks this table against the code.
+
+| Kind | `RunExit` (code) | Class | Sentence | What the app should offer |
+| --- | --- | --- | --- | --- |
+| `usage` | `Usage` (0xE0C15000) | internal | the sandbox runner was started the wrong way | Nothing to do on this computer; the app offers to send a report. |
+| `bad_launch` | `BadLaunch` (0xE0C15001) | internal | the sandbox runner couldn't read or accept the launch it was given | Try again; if it repeats, the app offers to send a report. |
+| `pool_user_missing` | `BadLaunch` (0xE0C15001) | setup | the matter's sandbox user isn't among those set up on this computer | Offer to run the sandbox set-up again. |
+| `no_secret` | `NoSecret` (0xE0C15002) | setup | the sandbox user's saved password is missing or can't be read | Offer to run the sandbox set-up again. |
+| `secondary_logon_disabled` | `SecondaryLogon` (0xE0C15003) | admin | the Secondary Logon service (seclogon) is disabled | Needs an administrator of this computer to set the Secondary Logon service to start manually; the app's words come from copy review. |
+| `logon_right_missing` | `LogonRight` (0xE0C15004) | admin | Windows doesn't allow the sandbox users to log on locally | Needs an administrator of this computer to let the sandbox users log on locally ("Allow log on locally"); the app's words come from copy review. |
+| `password_refused` | `Password` (0xE0C15005) | setup | the sandbox user's saved password is missing or out of date | Offer to run the sandbox set-up again. |
+| `logon` | `Logon` (0xE0C15006) | transient | the sandbox user couldn't be logged on | Try again; if it repeats, offer to run the sandbox set-up again. |
+| `codex_reuse` | `CodexReuse` (0xE0C15007) | permanent | the launch would use your own Codex folder, which the sandbox never shares | Explain how to point the AI tool's settings (`CODEX_HOME`, its credential) away from your own Codex folder, then try again. |
+| `pipe` | `Pipe` (0xE0C15008) | transient | the sandbox runner's private connection to its other half failed | Try again. |
+| `pipe_intruder` | `Pipe` (0xE0C15008) | admin | another program connected to the sandbox runner's private connection, so the session was stopped | Needs an administrator of this computer to check the computer before the session starts again; the app's words come from copy review. |
+| `job` | `Job` (0xE0C15009) | transient | the sandbox couldn't hold the agent's processes together, so the agent didn't start | Try again; if it repeats, suggest restarting the computer. |
+| `token` | `Token` (0xE0C1500A) | transient | the sandbox couldn't make the agent's restricted access, so the agent didn't start | Try again; if it repeats, suggest restarting the computer. |
+| `spawn` | `Spawn` (0xE0C1500B) | transient | the agent couldn't be started inside the sandbox | Offer a check that the AI tool is installed, then try again. |
+| `matter_unwatchable` | `Spawn` (0xE0C1500B) | transient | Clauseo can't watch the matter's folder for changes, so it didn't start the session | Try again; if it repeats, the app offers to send a report with where the matter's folder is. |
+| `internal` | `Spawn` (0xE0C1500B) | internal | the sandbox runner failed in a way it can't name | Try again; if it repeats, the app offers to send a report. |
+| `agent_reserved` | `AgentReserved` (0xE0C1500C) | internal | the agent exited with a code kept for the sandbox runner's own failures | The AI tool failed: try again; the app offers to send a report if it repeats. |
+| `ended_before_start` | `AgentReserved` (0xE0C1500C) | transient | the session ended before its agent started; the agent never ran | Offer to start the session again: it was stopped (a cancel, or the git watch) before the AI tool ran. |
+| `sweep` | `Sweep` (0xE0C1500D) | transient | the sandbox couldn't clear the sandbox user's earlier processes, so the agent didn't start | Wait a minute and try again; if it repeats, suggest restarting the computer. |
+| `dll_search` | `DllSearch` (0xE0C1500E) | internal | the sandbox runner couldn't keep Windows to its own folder for the libraries it loads | Nothing to do on this computer; the app offers to send a report. |
+| `escapee` | `Escapee` (0xE0C1500F) | transient | a process of the sandbox user's outlived every sweep of this session | Nothing to do now: Clauseo asks Windows to stop the leftover process before the next session. If the next start reports `awaiting_stop` for long, suggest restarting the computer. |
+| `marker_unwritable` | `MarkerUnwritable` (0xE0C15011) | transient | the session's marker couldn't be written, so the session didn't start | Offer a check that the disk isn't full, then try again. |
+| `install_record_unreadable` | `MarkerUnwritable` (0xE0C15011) | setup | the sandbox's install record can't be read, so the session didn't start | Offer to run the sandbox set-up again. |
+| `awaiting_stop` | `AwaitingStop` (0xE0C15012) | transient | an earlier session of this sandbox user awaits the sandbox's stop | Wait a minute and try again; if it repeats, suggest restarting the computer. |
+| `awaiting_sweep` | `AwaitingSweep` (0xE0C15013) | transient | an earlier session of this sandbox user awaits the sandbox's sweep | Wait a minute and try again. |
+| `not_windows` | none (exit 2) | permanent | it runs agents in Clauseo's sandbox on Windows only | Nothing: the sandbox runner runs on Windows only. |
+| `git_pairing_lost` | none | notice | Clauseo can't follow folders the AI tool moves in this session, so it will stop the session if the AI tool keeps moving or removing new folders in the matter before Clauseo can check them. | Nothing to do; the notice says what the session can't follow. |
+| `git_watch_broken` | none | notice | git watch: the watch failed; ending the session | Nothing: it is for the log. |
+| `git_watch_overflow` | none | notice | git watch: too many changes at once; rescanning the folder | Nothing: it is for the log. |
+| `git_items_left` | none | notice | git watch: items not set aside while the agent's processes may still run; the check after the session sets them aside | Nothing: it is for the log. |
+| `git_item_stuck` | none | notice | git watch: an item couldn't be set aside; trying again once the session ended | Nothing: Clauseo tries again once the session ended. |
+| `git_items_still_stuck` | none | notice | git watch: items still couldn't be set aside once the session ended; the check after the session tries again | Nothing: the check after the session sets them aside. |
+| `git_watch_busy_at_end` | none | notice | git watch: still busy at the session's end; the check after the session covers it | Nothing: it is for the log. |
+| `job_not_emptied` | none | notice | the session's job didn't empty; the sandbox sweep task is requested all the same | Nothing: it is for the log. |
+| `sweep_task_unrequested` | none | notice | the sandbox sweep task couldn't be requested | Nothing: it is for the log. |
+| `stop_task_unrequested` | none | notice | the sandbox stop task couldn't be requested | Nothing: it is for the log. |
+| `sequence_unreadable` | none | notice | a sandbox task's number can't be read; the session marker stays open | Nothing: it is for the log. |
+| `marker_unsettled` | none | notice | the session marker couldn't be written; it stays open | Nothing: it is for the log. |
+| `end_panicked` | none | notice | the session's end panicked on its own thread; the exit ends it again | Nothing: it is for the log. |
+| `stdin_writer_failed` | none | notice | the agent's stdin writer didn't start | Nothing: it is for the log. |
+| `marker_unremoved` | none | notice | an earlier session's marker is clean but couldn't be removed | Nothing: it is for the log. |
+| `cleanup_unlisted` | none | notice | cleanup: a kind of the sandbox user's leftovers can't be listed | Nothing: it is for the log. |
+| `cleanup_removed` | none | notice | cleanup: removed leftovers of the sandbox user's | Nothing: it is for the log. |
+| `cleanup_incomplete` | none | notice | cleanup: some of the sandbox user's leftovers couldn't be removed | Nothing: it is for the log. |
+| `sweep_killed` | none | notice | sweep: killed a process of the sandbox user's | Nothing: it is for the log. |
+| `sweep_exited_after_refusal` | none | notice | sweep: a process of the sandbox user's exited by itself after its kill was refused | Nothing: it is for the log. |
+| `sweep_failed` | none | notice | sweep: a process of the sandbox user's couldn't be checked or ended | Nothing: it is for the log. |
+| `sweep_escapee` | none | notice | sweep: processes of the sandbox user's can't be ended | Nothing now: see `escapee`. |
+| `launch_file_kept` | none | notice | the launch file couldn't be removed and stays | Nothing: it is for the log. |
+| `firm_ca_unmerged` | none | notice | the firm CA wasn't merged; the machine bundle stays | If the AI tool can't reach the firm's servers, needs an administrator of this computer to check the firm's CA certificates; the app's words come from copy review. |
+| `firm_ca_file_skipped` | none | notice | a firm CA file was left out | If the AI tool can't reach the firm's servers, needs an administrator of this computer to check the firm's CA certificates; the app's words come from copy review. |
+| `firm_ca_entries_skipped` | none | notice | firm CA entries were left out: unreadable, disallowed or not a CA | If the AI tool can't reach the firm's servers, needs an administrator of this computer to check the firm's CA certificates; the app's words come from copy review. |
+| `agent_windows_status` | none | notice | the agent ended at a Windows status | Nothing: it is for the log. |
+| `inner_windows_status` | none | notice | the inner runner ended at a Windows status | Nothing: it is for the log. |
 
 ### The network (PR7)
 

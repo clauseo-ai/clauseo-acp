@@ -28,10 +28,11 @@ use std::time::Duration;
 
 use super::RunExit;
 use super::frame::InnerReport;
+use super::stderr::{Detail, RunnerKind};
 use super::sweep::{Point, SweepError, TICK};
 
-/// A failure before the agent ran: the exit code and what failed (a call and its code).
-pub(crate) type Failure = (RunExit, String);
+/// A failure before the agent ran: the exit code and what failed, in detail (a call and its code).
+pub(crate) type Failure = (RunExit, Detail);
 
 /// The inner's calls; Windows' are `inner.rs`'s.
 pub(crate) trait Inner {
@@ -43,8 +44,8 @@ pub(crate) trait Inner {
     fn sweep(&mut self, point: Point) -> Result<(), SweepError>;
     /// Removes the leftovers (`leftovers::remove_all`), logging their counts.
     fn clean(&mut self);
-    /// A line for the outer: held until `ctl` is open, then sent on it.
-    fn log(&mut self, line: &str);
+    /// A notice for the outer: held until `ctl` is open, then sent on it.
+    fn log(&mut self, kind: RunnerKind, detail: Detail);
     /// A report for the outer that may come before `ctl` is open (`Escapee`): held until then,
     /// in order with the lines, then sent on it.
     fn tell(&mut self, report: InnerReport);
@@ -96,12 +97,12 @@ pub(crate) fn run<I: Inner>(inner: &mut I) -> u32 {
             break code;
         }
         if let Err(error) = inner.sweep(Point::Tick) {
-            inner.log(&format!("clauseo-sandbox-run: {}", at(Point::Tick, &error)));
+            inner.log(RunnerKind::SweepFailed, said(at(Point::Tick, &error)));
             escaped(inner, Point::Tick, &error);
         }
     };
     if let Err(error) = inner.sweep(Point::End) {
-        inner.log(&format!("clauseo-sandbox-run: {}", at(Point::End, &error)));
+        inner.log(RunnerKind::SweepFailed, said(at(Point::End, &error)));
         escaped(inner, Point::End, &error);
     }
     // The outer may be gone already; the exit code says it anyway.
@@ -113,7 +114,7 @@ pub(crate) fn run<I: Inner>(inner: &mut I) -> u32 {
 fn failed<I: Inner>(inner: &mut I, (exit, what): Failure) -> u32 {
     inner.report(&InnerReport::Failed {
         exit: exit.code(),
-        what,
+        detail: what.to_send(),
     });
     exit.code()
 }
@@ -139,9 +140,14 @@ fn escaped<I: Inner>(inner: &mut I, point: Point, error: &SweepError) {
     }
 }
 
-/// A sweep's failure at `point`, as the log says it.
-pub(crate) fn at(point: Point, error: &SweepError) -> String {
-    format!("sweep ({point}): {error}")
+/// A sweep's failure at `point`, in detail.
+pub(crate) fn at(point: Point, error: &SweepError) -> Detail {
+    Detail::new(|| format!("sweep ({point}): {error}"))
+}
+
+/// A detail as the outer's line said it.
+fn said(detail: Detail) -> Detail {
+    detail.wrap(|text| format!("clauseo-sandbox-run: {text}"))
 }
 
 #[cfg(test)]

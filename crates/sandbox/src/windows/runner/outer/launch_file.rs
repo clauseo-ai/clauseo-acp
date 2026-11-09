@@ -5,8 +5,9 @@
 use std::path::{Path, PathBuf};
 
 use super::super::{LAUNCH_CAP, LaunchMessage, RUN_DIR, RunExit, is_launch_name};
-use super::{Failure, os, say};
+use super::{Failure, os};
 use crate::windows::matters::SANDBOX_DIR;
+use crate::windows::runner::stderr::{self, Detail, RunnerKind};
 use crate::windows::{private_dir, write};
 
 /// Reads the launch file, if the desktop user owns it and only the desktop user, `SYSTEM` and
@@ -23,7 +24,7 @@ pub(super) fn read_launch(path: &Path) -> Result<LaunchMessage, Failure> {
         ));
     }
     let bytes = private_dir::read_unchanged(path, LAUNCH_CAP)
-        .map_err(|e| Failure::new(RunExit::BadLaunch, os("launch file", &e)))?
+        .map_err(|e| Failure::new(RunExit::BadLaunch, Detail::new(|| os("launch file", &e))))?
         .ok_or_else(|| {
             Failure::new(
                 RunExit::BadLaunch,
@@ -31,12 +32,16 @@ pub(super) fn read_launch(path: &Path) -> Result<LaunchMessage, Failure> {
             )
         })?;
     if let Err(error) = write::remove_owned_file(path) {
-        say(&format!(
-            "clauseo-sandbox-run: the launch file stays: {}",
-            error.kind()
-        ));
+        let detail = Detail::new(|| {
+            format!(
+                "clauseo-sandbox-run: the launch file stays: {}",
+                error.kind()
+            )
+        });
+        stderr::notice(RunnerKind::LaunchFileKept, detail);
     }
-    LaunchMessage::parse(&bytes).map_err(|e| Failure::new(RunExit::BadLaunch, e.to_string()))
+    LaunchMessage::parse(&bytes)
+        .map_err(|e| Failure::new(RunExit::BadLaunch, Detail::new(|| e.to_string())))
 }
 
 /// `<data_dir>` from `<data_dir>\sandbox\run\<id>.json`.

@@ -147,7 +147,12 @@ export const SIDECARS = [
     targets: RELEASE_TARGETS.filter(isWindows),
     place: setupExe,
   },
-  // clauseo-sandbox-run comes later (S15 PR5), Windows targets only.
+  // clauseo-sandbox-run comes later (S15 PR5), Windows targets only. Its build must refuse the
+  // clauseo-sandbox feature vm-harness-detail (the runner's DETAIL lines, which carry paths, for
+  // the s15 VM harness alone): pass no --features or --all-features that could turn it on, and
+  // fail if `cargo tree -e features -i clauseo-sandbox` for the build shows it. The crate's own
+  // compile_error! stops it in the release profile too (ADR 0049, "What the runner says on
+  // stderr").
 ];
 
 /** Every sidecar's name starts with this (ADR 0035, "Sidecars"). */
