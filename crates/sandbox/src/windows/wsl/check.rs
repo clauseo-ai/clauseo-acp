@@ -52,6 +52,10 @@ pub enum Found {
     NoWsl,
     /// WSL is here and every target's deny comes first; how many targets.
     Denied(usize),
+    /// As [`Found::Denied`], and a WSL upgrade is pending ([`Upgrade::Pending`]): [`inspect`]
+    /// gives it, so the launch check can have it installed (`clean_close::wsl_heal`); [`check`]
+    /// refuses it with [`Blocked::WslUpgradePending`].
+    UpgradePending(usize),
 }
 
 /// The launch check, as the lawyer, before a tier B launch. WSL is present when either service
@@ -78,6 +82,15 @@ pub enum Found {
 /// With no WSL nothing is refused. A record with no group names no deny, so every target is
 /// missing one.
 pub fn check(reg: &dyn WslRead) -> Result<Found, Blocked> {
+    match inspect(reg)? {
+        Found::UpgradePending(_) => Err(Blocked::WslUpgradePending),
+        found @ (Found::NoWsl | Found::Denied(_)) => Ok(found),
+    }
+}
+
+/// [`check`], with a pending upgrade given as [`Found::UpgradePending`] rather than refused:
+/// every deny is in place then, and the launch check's healing waits for the upgrade.
+pub fn inspect(reg: &dyn WslRead) -> Result<Found, Blocked> {
     let present = |name: &str| reg.service_exists(name).unwrap_or(true);
     let lifted = present(WSL_SERVICE);
     let inbox = present(LXSS_MANAGER);
@@ -129,7 +142,7 @@ pub fn check(reg: &dyn WslRead) -> Result<Found, Blocked> {
         return Err(Blocked::WslDenyUnverifiable);
     }
     if upgrade == Upgrade::Pending {
-        return Err(Blocked::WslUpgradePending);
+        return Ok(Found::UpgradePending(targets));
     }
     Ok(Found::Denied(targets))
 }

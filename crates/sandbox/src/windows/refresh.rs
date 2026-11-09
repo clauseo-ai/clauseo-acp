@@ -129,7 +129,7 @@ pub use task::{
 pub use version::version_not_older;
 #[cfg(windows)]
 pub use windows_refresher::{WindowsRefresher, event_log, run, run_wsl_deny};
-pub use wsl_phase::{WslDenyExit, wsl_deny};
+pub use wsl_phase::{WslDenyExit, WslUpgrade, WslUpgraded, wsl_deny};
 
 use crate::windows::setup::record_values::CopyOwner;
 use crate::windows::sids::Sid;

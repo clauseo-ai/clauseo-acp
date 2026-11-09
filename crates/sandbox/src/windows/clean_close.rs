@@ -72,6 +72,7 @@ pub use ntfs::NtfsJournal;
 pub(crate) use record::record_path as fake_record_path;
 #[cfg(any(windows, test))]
 pub(crate) use record::remove as remove_record;
+pub use wsl_heal::{LaunchProgress, WslHealed};
 
 /// The most changed items a targeted launch handles; see [`changes`]' docs for the choice.
 pub const MOST_TOUCHED: usize = 2_000;

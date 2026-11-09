@@ -10,7 +10,7 @@
 //!   with its one argument (`--refresh`, `--stop`, `--sweep-tasks`, `--wsl-deny`) and nothing
 //!   else, on demand (the refresh also at the record owner's logon; the WSL deny task on Windows
 //!   Installer's events, `rules::Trigger`, with no value queries), needs no network, stops after
-//!   its limit (5 minutes, 2 minutes, 2 minutes, 1 minute), and never runs twice at once: a
+//!   its limit (5 minutes, 2 minutes, 2 minutes, 5 minutes), and never runs twice at once: a
 //!   sweep asked for while one runs is queued after it, any other run is dropped. Its descriptor
 //!   ([`task_sddl`](super::task_sddl)) is owned by Administrators and lets SYSTEM and
 //!   Administrators do anything and the owner read and execute it (`FRFX`), which

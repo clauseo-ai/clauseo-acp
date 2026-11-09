@@ -9,7 +9,7 @@ use super::journal::Journal;
 use super::record::{self, CleanRecord, Unusable};
 #[cfg(windows)]
 use super::wsl_heal::WindowsDenyTask;
-use super::wsl_heal::{self, DenyTask};
+use super::wsl_heal::{self, DenyTask, LaunchProgress};
 use super::{FullReason, LaunchCheck, WalkInputs};
 use crate::Error;
 use crate::windows::acl_plan::{AdmittedPlan, in_folder};
@@ -28,12 +28,14 @@ use crate::windows::wsl::{self, WslRead};
 /// on the machine, its classes' launch permissions must deny the pool group first
 /// (`wsl::check`), or the launch is refused with `WslDenyMissing` or `WslDenyUnverifiable`,
 /// and no WSL upgrade may be pending (`WslUpgradePending`): a pool user who can start WSL gets a
-/// Linux the network filters don't see. A missing deny is healed first: the WSL deny task is
-/// asked to run and the check waits for it (`wsl_heal`); what the healing did is
-/// [`LaunchCheck::wsl_healed`], for the host's log. Then every unclean-session marker awaiting a
-/// sweep must be clean, or become clean within 15 s of a sweep this asks for
-/// (`runner::unclean::await_sweeps`), or the launch is refused with [`Error::UncleanSession`],
-/// nothing else read or removed. Then, under the
+/// Linux the network filters don't see. Both are healed first (`wsl_heal`): the WSL deny task
+/// is asked to run, as the lawyer, and the check waits for it, up to 10 s for a missing deny and
+/// up to 120 s for a pending upgrade, which its SYSTEM run installs before it re-applies the
+/// deny; `progress` hears [`LaunchProgress::UpdatingWindowsComponent`] when that wait begins, so
+/// the host can say so. A pending upgrade refuses nothing once the deny is verified; what the
+/// healing did is [`LaunchCheck::wsl_healed`], for the host's log. Then every unclean-session marker awaiting a sweep must be clean, or
+/// become clean within 15 s of a sweep this asks for (`runner::unclean::await_sweeps`), or the
+/// launch is refused with [`Error::UncleanSession`], nothing else read or removed. Then, under the
 /// matter's set-aside lock, it reads the matter's clean-close record and removes it, whatever
 /// comes next: a failed removal refuses the launch
 /// ([`Error::CleanClose`]), and a lock that can't be taken too ([`Error::SetAside`]). Then it
@@ -45,11 +47,13 @@ pub fn check_launch(
     ledger: &Ledger,
     plan: &AdmittedPlan,
     journal: &dyn Journal,
+    progress: &dyn Fn(LaunchProgress),
 ) -> Result<LaunchCheck, Error> {
     let seams = Seams {
         admin: &admin_copy::os::WindowsAdminCopy,
         wsl: &wsl::WindowsWsl::reader(),
         task: &WindowsDenyTask::new(),
+        progress,
     };
     let mut sweeps = || crate::windows::runner::unclean::os::check_sweeps(data_dir);
     check_launch_in(&seams, &mut sweeps, data_dir, ledger, plan, journal)
@@ -63,6 +67,8 @@ pub(crate) struct Seams<'a> {
     pub(crate) wsl: &'a dyn WslRead,
     /// The WSL deny task, and the clock its waits use.
     pub(crate) task: &'a dyn DenyTask,
+    /// Told when the wait for a WSL upgrade begins.
+    pub(crate) progress: &'a dyn Fn(LaunchProgress),
 }
 
 /// [`check_launch`] with no WSL deny task (a request fails, as where it isn't registered) and
@@ -96,6 +102,7 @@ pub(crate) fn check_launch_awaiting(
         admin,
         wsl,
         task: &task,
+        progress: &|_| {},
     };
     check_launch_in(&seams, sweeps, data_dir, ledger, plan, journal)
 }
@@ -110,7 +117,7 @@ pub(crate) fn check_launch_in(
     journal: &dyn Journal,
 ) -> Result<LaunchCheck, Error> {
     admin_copy::check_launchable(seams.admin).map_err(Error::Blocked)?;
-    let healed = wsl_heal::heal(&mut || wsl::check(seams.wsl), seams.task);
+    let healed = wsl_heal::heal(&mut || wsl::inspect(seams.wsl), seams.task, seams.progress);
     let (found, healed) = healed.map_err(|refused| {
         let (blocked, why) = (refused.blocked, refused.why);
         tracing::warn!(?blocked, %why, "WSL's check refused the launch");

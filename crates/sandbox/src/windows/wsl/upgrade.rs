@@ -1,11 +1,13 @@
-//! A pending WSL upgrade, as WSL's own installer judges it (`WslInstaller.cpp:114-133`,
-//! `IsUpdateNeeded`, at the commit 0049 cites): the Store package's `WslInstaller` service
+//! A pending WSL upgrade, as WSL's own installer judges it (`WslInstaller.cpp:142-165`,
+//! `IsUpdateNeeded`, at microsoft/WSL @19cd15ea): the Store package's `WslInstaller` service
 //! upgrades through the MSI when `HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Lxss\MSI`'s
 //! `Version` is empty or older than the package's own version (major, minor, revision). Any
 //! user may start that upgrade: the package's packaged COM class `WslInstaller` grants launch to
-//! Authenticated Users (`AppxManifest.in:74-78`), and the MSI rewrites WSL's launch permissions,
-//! dropping the deny until the WSL deny task puts it back. So a tier B launch is refused while
-//! one is pending ([`Blocked::WslUpgradePending`]).
+//! Authenticated Users (`AppxManifest.in:74-77`), and the MSI rewrites WSL's launch permissions,
+//! dropping the deny until the WSL deny task puts it back. So a tier B launch doesn't start while
+//! one is pending ([`Blocked::WslUpgradePending`]): it has the WSL deny task install it first,
+//! then re-apply the deny (`clean_close::wsl_heal`, `msi.rs`), and starts once the deny is
+//! verified.
 //!
 //! The package's version is read from its packaged-COM registration,
 //! `HKLM\SOFTWARE\Classes\PackagedCom\Package\<full name>`, which `Users` can read: the full name
@@ -20,7 +22,7 @@
 //! new or older is [`Upgrade::LawyerOnly`], and a version that can't be read or parsed is
 //! [`Upgrade::LawyerUnreadable`]. A pool user's hive holds no registration of it, so a pool user
 //! shouldn't be able to activate `WslInstaller`'s class, but that isn't verified, and a pending
-//! upgrade refuses the launch whoever could start it.
+//! upgrade is installed before the launch whoever could start it.
 //!
 //! [`Blocked::WslUpgradePending`]: crate::Blocked::WslUpgradePending
 
@@ -30,7 +32,15 @@ use super::seam::WslRead;
 pub const PACKAGE_NAME: &str = "MicrosoftCorporationII.WindowsSubsystemForLinux";
 
 /// A version as WSL compares them: major, minor, revision.
-type Version = (u32, u32, u32);
+pub type Version = (u32, u32, u32);
+
+/// The packaged service whose image is in the package's folder (`AppxManifest.in:50`).
+pub const INSTALLER_SERVICE: &str = "WslInstaller";
+/// The service's image, in the package's folder.
+const INSTALLER_EXE: &str = "wslinstaller.exe";
+/// WSL's MSI, in the package's folder: `GetMsiPackagePath` (`WslInstaller.cpp:21-32`) joins
+/// it to the folder of the service's own image (`GetBasePath`).
+pub const PACKAGE_MSI: &str = "wsl.msi";
 
 /// What [`upgrade`] found.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -81,6 +91,33 @@ fn package_version(full_name: &str) -> Option<Version> {
     version(rest.split('_').next()?)
 }
 
+/// The `WslInstaller` service's package folder and the package's version, from the service's
+/// `ImagePath` `image_path` (quoted or not): `None` unless the image is `wslinstaller.exe` in a
+/// WSL package's folder directly under `windows_apps` (`%ProgramFiles%\WindowsApps`, which
+/// only `TrustedInstaller` writes). WSL's own installer runs the MSI in that folder
+/// ([`PACKAGE_MSI`]). Text only, so it is tested on every OS.
+pub fn installer_package(image_path: &str, windows_apps: &str) -> Option<(String, Version)> {
+    let text = image_path.trim();
+    let exe = match text.strip_prefix('"') {
+        Some(quoted) => quoted.split('"').next()?,
+        None => text,
+    };
+    let (folder, name) = exe.rsplit_once('\\')?;
+    let (parent, package) = folder.rsplit_once('\\')?;
+    let apps = windows_apps.trim_end_matches('\\');
+    if !name.eq_ignore_ascii_case(INSTALLER_EXE) || !parent.eq_ignore_ascii_case(apps) {
+        return None;
+    }
+    Some((folder.to_owned(), package_version(package)?))
+}
+
+/// Whether the MSI version `msi` is older than `package`, as [`upgrade`] compares them for
+/// [`Upgrade::Pending`]: a missing, empty or unparsed version isn't.
+pub fn msi_behind(package: Version, msi: Option<&str>) -> bool {
+    msi.and_then(version)
+        .is_some_and(|installed| installed < package)
+}
+
 /// Whether a WSL upgrade is pending, as the module says. A listing that fails (the lawyer's
 /// own registrations' too) is [`Upgrade::Unreadable`]; a listed full name whose version doesn't
 /// parse, or an MSI version that can't be read or parsed, is [`Upgrade::Unreadable`] for a
@@ -123,5 +160,58 @@ pub fn upgrade(reg: &dyn WslRead) -> Upgrade {
             Some(installed) if installed < package => Upgrade::Pending,
             Some(_) => current,
         },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{installer_package, msi_behind};
+
+    const APPS: &str = r"C:\Program Files\WindowsApps";
+    const FOLDER: &str = concat!(
+        r"C:\Program Files\WindowsApps\",
+        "MicrosoftCorporationII.WindowsSubsystemForLinux_2.6.3.0_x64__8wekyb3d8bbwe"
+    );
+    const OTHER: &str =
+        "MicrosoftCorporationII.WindowsSubsystemForLinux_9.0.0.0_x64__8wekyb3d8bbwe";
+
+    #[test]
+    fn the_installer_service_s_folder_is_a_wsl_package_s_folder_under_windows_apps() {
+        let quoted = format!(r#""{FOLDER}\wslinstaller.exe""#);
+        let found = Some((FOLDER.to_owned(), (2, 6, 3)));
+        assert_eq!(installer_package(&quoted, APPS), found);
+        let bare = format!(r"{FOLDER}\WslInstaller.exe");
+        assert_eq!(installer_package(&bare, &format!("{APPS}\\")), found);
+        // Windows' paths are case-blind; the package's name is as the package spells it.
+        let lower = bare.replace(APPS, &APPS.to_lowercase());
+        assert!(installer_package(&lower, APPS).is_some());
+        // Anywhere else, another image, another package or a deeper folder: none.
+        let elsewhere = format!(r"C:\Temp\{OTHER}\wslinstaller.exe");
+        let deeper = format!(r"{FOLDER}\sub\wslinstaller.exe");
+        let other = format!(r"{APPS}\Contoso.Tool_9.0.0.0_x64__abc\wslinstaller.exe");
+        let climbing = format!(r"{APPS}\..\{OTHER}\wslinstaller.exe");
+        let for_image = |image: &str| installer_package(image, APPS);
+        assert_eq!(for_image(&elsewhere), None);
+        assert_eq!(for_image(&deeper), None);
+        assert_eq!(for_image(&other), None);
+        assert_eq!(for_image(&climbing), None);
+        assert_eq!(for_image(&format!(r"{FOLDER}\wsl.exe")), None);
+        assert_eq!(for_image(""), None);
+    }
+
+    #[test]
+    fn the_msi_is_behind_only_when_its_version_is_older() {
+        assert!(msi_behind((2, 6, 3), Some("2.6.1.0")));
+        assert!(msi_behind((2, 6, 3), Some("2.5.9")));
+        for msi in [
+            Some("2.6.3"),
+            Some("2.6.3.0"),
+            Some("3.0.0"),
+            Some(""),
+            Some("x"),
+            None,
+        ] {
+            assert!(!msi_behind((2, 6, 3), msi), "{msi:?}");
+        }
     }
 }
