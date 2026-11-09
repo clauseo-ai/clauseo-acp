@@ -104,6 +104,7 @@ fn safe_workspace_lines(lines: &[String]) -> Vec<String> {
         "sandbox-setup",
         "--adopt",
         "--remove",
+        "--per-machine",
         "CLAUSEO_ADMIN_EXE",
         "CLAUSEO_ADMIN_DIR",
         "CLAUSEO_RECORD_KEY",
@@ -174,7 +175,10 @@ fn off_neither_installer_elevates_runs_the_set_up_or_writes_its_record() {
             post,
             &["WriteRegStr HKCU \"${MANUPRODUCTKEY}\" \"Installer Language\""],
         );
-        // On, the same check finds the set-up: it would catch the code coming back unseen.
+        // On, the same check finds the set-up: it would catch the code coming back unseen. Per
+        // machine, `--per-machine` is the set-up's argument (CLAUSEO_ADMIN_COPY_MACHINE's
+        // CLAUSEO_ADMIN_COPY_BOUNDED line); the removal's `!define CLAUSEO_REMOVE` is gone, since
+        // `defines` has already defined it, so `!ifndef CLAUSEO_REMOVE` drops it.
         let on = reached(&compiled(mode, true));
         let found = safe_workspace_lines(&on).join("\n");
         assert!(found.contains("ShellExecuteExW"), "{mode}: {found}");
