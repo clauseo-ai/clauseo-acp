@@ -41,6 +41,7 @@ pub(crate) mod marker;
 pub(crate) mod queue;
 pub(crate) mod reuse;
 pub(crate) mod run;
+pub(crate) mod scratch;
 pub(crate) mod shim;
 pub(crate) mod stopping;
 

@@ -55,39 +55,36 @@ fn reuse(agents: &clauseo_agents::Agents, events: &Events) {
     assert_eq!(events.state(), reused());
 }
 
-/// "detection runs with `CLAUDE_CONFIG_DIR` and `CODEX_HOME` absent from the child's env". The
-/// base environment sets both (and the secure-storage variable); the fake writes the names it
-/// got to `FAKE_SIGNIN_ENV_OUT`, and detection is the last run.
+/// Detection runs with its own config folder as `CLAUDE_CONFIG_DIR` (under
+/// `<data>/agents/claude-acp/detect-scratch`, gone after the run) and
+/// `CLAUDE_SECURESTORAGE_CONFIG_DIR=""` (the lawyer's default store), never the inherited values,
+/// and without `CODEX_HOME`. The base environment sets all three; detection is the last run.
 #[test]
-fn claude_detection_runs_without_the_home_variables() {
+fn claude_detection_runs_with_its_own_config_folder() {
     let mut fx = Fixture::new("reuse-claude-env", "ok-after:0");
+    let stray = fx.data.path().join("stray").into_os_string();
     for name in [
         "CLAUDE_CONFIG_DIR",
         "CLAUDE_SECURESTORAGE_CONFIG_DIR",
         "CODEX_HOME",
     ] {
-        fx.config
-            .signin
-            .base_env
-            .insert(name.into(), fx.data.path().join("stray").into_os_string());
+        fx.config.signin.base_env.insert(name.into(), stray.clone());
     }
     plant_lawyer(&fx, "claude.ai", EMAIL);
     let (agents, events) = fx.start();
     agents.check_status(&claude()).unwrap();
     assert_eq!(events.state(), found(EMAIL));
     let names = fx.env_names();
-    for name in [
-        "CLAUDE_CONFIG_DIR",
-        "CLAUDE_SECURESTORAGE_CONFIG_DIR",
-        "CODEX_HOME",
-    ] {
-        assert!(!names.iter().any(|got| got == name), "{name}: {names:?}");
-    }
+    assert!(!names.iter().any(|got| got == "CODEX_HOME"), "{names:?}");
     let detection = fx.runs_of("status").pop().unwrap();
-    assert_eq!(
-        detection.env.get(OsStr::new("HOME")),
-        Some(&fx.user_home().into_os_string())
-    );
+    let env = |name: &str| detection.env.get(OsStr::new(name)).cloned();
+    let config = env("CLAUDE_CONFIG_DIR").unwrap();
+    let scratch = fx.marker(&claude(), "detect-scratch");
+    assert!(Path::new(&config).starts_with(&scratch), "{config:?}");
+    assert!(!Path::new(&config).exists(), "the run's folder is gone");
+    assert_eq!(env("CLAUDE_SECURESTORAGE_CONFIG_DIR"), Some("".into()));
+    assert_eq!(env("CODEX_HOME"), None);
+    assert_eq!(env("HOME"), Some(fx.user_home().into_os_string()));
 }
 
 /// No sign-in or status run gets `NODE_OPTIONS` or `NODE_PATH`, though the base environment
@@ -128,10 +125,16 @@ fn a_claude_ai_status_gives_login_found_with_no_login_run_and_no_reuse() {
     assert_eq!(events.state(), found("lawyer@example.com"));
     assert_eq!(fx.runs_of("login"), []);
     assert!(!fx.marker(&claude(), "login-source").exists());
-    // No run had the reused session's environment.
+    // No run had the reused session's environment: the one with the store variable is
+    // detection's, in its own config folder.
+    let scratch = fx.marker(&claude(), "detect-scratch");
     assert!(fx.launches().iter().all(|run| {
         !run.env
             .contains_key(OsStr::new("CLAUDE_SECURESTORAGE_CONFIG_DIR"))
+            || run
+                .env
+                .get(OsStr::new("CLAUDE_CONFIG_DIR"))
+                .is_some_and(|config| Path::new(config).starts_with(&scratch))
     }));
 }
 
@@ -305,21 +308,23 @@ fn no_claude_logout_runs_while_the_source_is_reused() {
     assert!(lawyer_signed_in(&fx));
 }
 
-/// "the run-time fallback": "If status under the session env says signed out while detection's
-/// status says signed in (the variable changed upstream), S18 logs `claude_reuse_fallback` and
-/// offers Clauseo's own sign-in." `FAKE_SIGNIN=secure-ignored` makes the fake drop
-/// `CLAUDE_SECURESTORAGE_CONFIG_DIR`, as such a Claude Code would: on "Use it", and at a later
-/// start of a login reused before the change.
+/// A Claude Code that ignores `CLAUDE_SECURESTORAGE_CONFIG_DIR` (`FAKE_SIGNIN=secure-ignored`,
+/// as one that dropped the variable would) reads its store from detection's own config folder
+/// too, so detection finds nothing: nothing is offered, and a login reused before the change
+/// ends `ReusedSignedOut` at a later start. The run-time fallback ("status under the session
+/// env says signed out while detection's status says signed in") is then never reached this
+/// way; the lawyer's own login is never touched either way.
 #[test]
-fn the_run_time_fallback_logs_and_offers_clauseo_s_own_sign_in() {
+fn a_claude_that_ignores_the_store_variable_finds_nothing_and_reuses_nothing() {
     let fx = Fixture::new("reuse-claude-fallback", "secure-ignored");
     plant_lawyer(&fx, "claude.ai", EMAIL);
     let (agents, events) = fx.start();
     agents.check_status(&claude()).unwrap();
-    assert_eq!(events.state(), found(EMAIL));
-    agents.use_found_login(&claude()).unwrap();
-    assert_eq!(events.state(), signed_out(Some(Found::ReuseOff)));
-    assert_eq!(events.notes(), [SigninNote::ClaudeReuseFallback]);
+    assert_eq!(events.state(), signed_out(Some(Found::NoLogin)));
+    assert_eq!(
+        agents.use_found_login(&claude()),
+        Err(SigninError::NothingFound(claude()))
+    );
     assert_eq!(
         SigninNote::ClaudeReuseFallback.code(),
         "claude_reuse_fallback"
@@ -339,8 +344,9 @@ fn the_run_time_fallback_logs_and_offers_clauseo_s_own_sign_in() {
         .insert("FAKE_SIGNIN".into(), "secure-ignored".into());
     let (agents, events) = fx.start();
     agents.check_status(&claude()).unwrap();
-    assert_eq!(events.state(), signed_out(Some(Found::ReuseOff)));
-    assert_eq!(events.notes(), [SigninNote::ClaudeReuseFallback]);
+    assert_eq!(events.state(), signed_out(Some(Found::ReusedSignedOut)));
+    assert!(!events.notes().contains(&SigninNote::ClaudeReuseFallback));
+    assert_eq!(fx.runs_of("logout"), []);
     assert!(lawyer_signed_in(&fx));
 }
 

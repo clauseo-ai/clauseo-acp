@@ -225,12 +225,12 @@ pub(crate) fn remove_empty_home_login(
     true
 }
 
-/// Detection's stat: whether the lawyer's login file is there ("a stat (never an open) of
-/// `~/.codex/auth.json`: present is a file-mode login, reusable; absent is a keyring or
-/// Windows secrets login"). On Windows `symlink_metadata` opens a handle with access 0, which
-/// cannot read the contents.
+/// Detection's stat: whether the lawyer's login file is there as a regular file (a stat, never
+/// an open, of `~/.codex/auth.json`). A symbolic link, a junction or any other reparse point
+/// there is no login found: "Use it" would refuse to link it. On Windows `symlink_metadata`
+/// opens a handle with access 0, which cannot read the contents.
 pub(crate) fn lawyer_login_present(lawyer_home: &Path) -> bool {
-    std::fs::symlink_metadata(lawyer_file(lawyer_home)).is_ok()
+    std::fs::symlink_metadata(lawyer_file(lawyer_home)).is_ok_and(|meta| plain_file(&meta))
 }
 
 /// Whether a Codex home's login is the lawyer's, reused: `login-source` says `reused`, or, per

@@ -22,6 +22,9 @@
 //!   when set and not empty, else `$HOME/.codex`.
 //! - Stdout carries only the lines this module prints, each flushed as it is written.
 //!   Diagnostics go to stderr.
+//! - Claude's `auth status` and Codex's `login status` and `app-server` also write into their
+//!   config folders what the real CLIs write there (`first_meet`), so a test can tell when one
+//!   ran on the lawyer's own folders.
 //! - The waits are `FAKE_SIGNIN=ok-after:<ms>`, which sleeps before the marker is written, and
 //!   `FAKE_SIGNIN=slow-save:<ms>`, which sleeps in the middle of writing Codex's login file.
 //! - `FAKE_CODEX_PORT` makes Codex's browser login listen on `127.0.0.1:<port>` as Codex does,
@@ -271,9 +274,25 @@ fn session(mode: Mode, args: &[OsString]) -> io::Result<i32> {
     else {
         return Ok(usage(mode));
     };
+    first_meet(mode, &args, &folder, &home)?;
     match mode {
         Mode::Claude => claude(&args, &script, &folder),
         Mode::Codex | Mode::CodexAdapter => codex(&args, &script, &folder),
+    }
+}
+
+/// The writes the real CLI makes into its config folder on this command ([`first_meet`]'s module).
+fn first_meet(mode: Mode, args: &[&str], folder: &Path, home: &Path) -> io::Result<()> {
+    let mut command = args.strip_prefix(&["--cli"]).unwrap_or(args);
+    while let ["-c", _, rest @ ..] = command {
+        command = rest;
+    }
+    match (mode, command) {
+        (Mode::Claude, ["auth", "status", ..]) => {
+            first_meet::claude_status(std::env::var_os("CLAUDE_CONFIG_DIR"), home)
+        }
+        (Mode::Codex, ["login", "status"] | ["app-server"]) => first_meet::codex_run(folder),
+        _ => Ok(()),
     }
 }
 
@@ -574,6 +593,7 @@ fn stderr_write(text: &str) {
 
 mod app_server;
 mod codex_login;
+mod first_meet;
 mod parent;
 #[cfg(test)]
 mod tests;
