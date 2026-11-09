@@ -214,8 +214,20 @@ fn open(
 fn information(handle: &OwnedHandle) -> io::Result<BY_HANDLE_FILE_INFORMATION> {
     let mut info = BY_HANDLE_FILE_INFORMATION::default();
     // SAFETY: the handle is open, and `info` is a valid place for the answer.
-    unsafe { GetFileInformationByHandle(HANDLE(handle.as_raw_handle()), &raw mut info) }?;
+    unsafe { GetFileInformationByHandle(HANDLE(handle.as_raw_handle()), &raw mut info) }
+        .map_err(win32_io_error)?;
     Ok(info)
+}
+
+/// `error` as an `io::Error` whose raw code is the Win32 code when the HRESULT wraps one
+/// (`FACILITY_WIN32`, 0x8007xxxx), so `kind()` and `raw_os_error()` read as std's own do.
+fn win32_io_error(error: windows::core::Error) -> io::Error {
+    let hr = error.code().0.cast_unsigned();
+    if hr & 0xFFFF_0000 == 0x8007_0000 {
+        io::Error::from_raw_os_error((hr & 0xFFFF).cast_signed())
+    } else {
+        io::Error::from(error)
+    }
 }
 
 /// A security descriptor's owner and DACL, with the memory that holds them.

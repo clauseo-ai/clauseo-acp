@@ -527,11 +527,11 @@ fn resume_thread(id: u32) -> Resume {
     }
 }
 
-/// An [`Error::Os`] saying `what` failed, with the Win32 error.
+/// An [`Error::Os`] saying `what` failed, its source the Win32 error (see `win32_io_error`).
 fn os_error(what: &'static str, error: windows::core::Error) -> Error {
     Error::Os {
         what,
-        source: io::Error::from(error),
+        source: super::win32::win32_io_error(error),
     }
 }
 
