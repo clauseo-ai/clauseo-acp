@@ -1223,8 +1223,23 @@ leaves that profile, both naming the part.
     0, and over a cancel's: the run's
     output came through, but the host must learn that the pool user has a live process no sweep of
     its own can end, and the exit code is the one thing the host reads. The code the run would
-    have had is said on stderr. A process that only can't be checked (its job, its start time) and
-    a sweep that still found new processes after eight rounds stay `RunExit::Sweep`.
+    have had is said on stderr. A process that only can't be checked (its job, its start time)
+    stays `RunExit::Sweep`.
+  - **What a sweep counts** (`runner::sweep::kill`). A kill counts only once the process handle
+    is signalled within `KILL_WAIT` (5 s): `TerminateProcess` succeeding says nothing. One still
+    running then is a survivor (`SweepError::Survived`), an escapee. The verdict is the held
+    handles', not the listings': at each round's end every survivor is asked again and its
+    handle looked at, listed or not, and a refused process still running after its window is
+    held the same way. A process that couldn't be opened has no handle, so it is counted every
+    round, however it is listed, until a later open of its pid ends it. Each process counts once
+    a round. A process is known by its pid and creation time: a later listing of one the sweep
+    already ended is no new kill, and an exited process another still holds open (WER's
+    zero-thread clone of a crashed process) is passed over and logged once, so neither can keep
+    the rounds going. One deadline, `SWEEP_DEADLINE` (60 s), caps a sweep's waits, kills' and
+    refusals' together; past it a kill waits for nothing. A tree that outruns the sweep, out of
+    rounds (`StillRunning`) or time (`Deadline`), is an escapee with a count of 0 and no name:
+    the first act exits `RunExit::Escapee`, a tick or the end reports it, and the marker awaits
+    the `SYSTEM` stop (below), which is pool-wide today.
   - **Escapees until `\Clauseo\SandboxStop` (interim).** An escapee that shut its own DACL and
     survives a sweep is alive in the next inner's logon gap, and
     can open that runner's process, thread or Medium token before the outer's shut. The job's end
@@ -1289,6 +1304,27 @@ leaves that profile, both naming the part.
     - Upgrade: an escapee marker an older build already moved to `AwaitingSweep` reads as a
       plain one, so its final stop is skipped. Only markers in flight during the upgrade are
       affected.
+
+    **Who clears a marker.** Only the counters `StopSequence` and `SweepSequence` in
+    `HKLM\SOFTWARE\Clauseo\Sandbox` do; no exit code does. The key's protected DACL is
+    `D:P(A;CI;KA;;;SY)(A;CI;KA;;;BA)(A;CI;KR;;;BU)` with Administrators its owner
+    (`setup::record_values::RECORD_SDDL`, set again on every write): `SYSTEM` and
+    Administrators write, Users read. `--stop` and `--sweep-tasks` refuse unless they run as
+    LOCAL `SYSTEM`, and write `…Sequence` only on a run that ends 0; one the owner ends early
+    writes nothing. The pool user, the agent and the lawyer can't forge a clean result: none can
+    write the key, and a run they request counts only when it reserved its number after the
+    marker's. The lawyer can delete the marker file itself, as the run folder is theirs; the pool
+    user can't. So the clear's integrity holds (C5(b) met for it), and #819's forged exit 0
+    (ending an end sweeper or a verify pass with 0 through the runners' `PROCESS_TERMINATE`
+    grant) has nothing left to forge.
+
+    **C5, launch-blocking: a per-slot `SYSTEM` process verdict.** Stop scoped per slot, so a
+    "no survivors" verdict never rests on a pool-user process's own report. Today
+    `SandboxSweep` kills nothing, so on the no-escapee path (`AwaitingSweep`) that no process
+    survived is the inner's own word, a pool-user process's, backed by the next session's first
+    act, another. Only the escapee path ends in a `SYSTEM` process verdict, and `SandboxStop`
+    is pool-wide: it ends every pool user's processes, other matters' live sessions included.
+    Routing a tree that outruns the sweep to the stop (above) widens that path, not its scope.
 
     An absent `…Sequence` counts as 0, an absent `…Next` as 1. The numbers are read as the lawyer
     **without the set-up lock**, which only an administrator's token can open (a mutex in a
