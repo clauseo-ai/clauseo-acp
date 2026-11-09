@@ -4357,6 +4357,8 @@ export type PythonFailureCause =
  *  Its retry: [`crate::SetupCommand::RetryAgentInstall`] for **any** ready agent retries
  *  Python (one for the computer); the window may send any ready plan's id. That agent's own
  *  install is left as it is: it stays `Ready`, and nothing of it is fetched or installed again.
+ *  While another agent's install runs, the retry starts nothing and pauses nothing: that install
+ *  fetches Python as its own second step.
  */
 export type PythonProgress = 
 /**  This build has no Python for this computer: nothing is fetched. */
@@ -4938,7 +4940,8 @@ export type SetupCommand =
  *  instead (when Python is missing, waiting or failed): Python is one for the computer, so
  *  retrying any ready agent's install retries it, and the window may send any ready plan's
  *  id. The ready agent's own install is left alone: it stays ready and nothing of it is
- *  fetched or installed again.
+ *  fetched or installed again. While another agent's install runs, it starts nothing and
+ *  pauses nothing: that install fetches Python as its own second step.
  */
 ({ retry_agent_install: {
 	/**  The agent. */

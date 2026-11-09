@@ -105,10 +105,20 @@ impl<T: Timer + Send + Sync + 'static> Worker<T> {
                 Some(
                     InstallState::Failed(_) | InstallState::Waiting { .. } | InstallState::Paused,
                 ) => true,
-                // Python's retry: a job for a Ready agent installs only Python.
+                // Python's retry: a job for a Ready agent installs only Python. While another
+                // agent's install runs, nothing starts (as `install`), so that install is not
+                // paused: it fetches Python as its own second step. A job already in its Python
+                // step (its agent Ready) is restarted, which pauses no agent.
                 Some(InstallState::Ready { .. }) => {
-                    python_wanted(&inner.python)
-                        || matches!(inner.python, PythonState::Waiting { .. })
+                    let wanted = python_wanted(&inner.python)
+                        || matches!(inner.python, PythonState::Waiting { .. });
+                    let installing = inner.current.as_ref().is_some_and(|current| {
+                        !matches!(
+                            inner.states.get(&current.agent),
+                            Some(InstallState::Ready { .. })
+                        )
+                    });
+                    wanted && !installing
                 }
                 _ => false,
             }

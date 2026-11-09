@@ -40,7 +40,8 @@ pub enum SetupCommand {
     /// instead (when Python is missing, waiting or failed): Python is one for the computer, so
     /// retrying any ready agent's install retries it, and the window may send any ready plan's
     /// id. The ready agent's own install is left alone: it stays ready and nothing of it is
-    /// fetched or installed again.
+    /// fetched or installed again. While another agent's install runs, it starts nothing and
+    /// pauses nothing: that install fetches Python as its own second step.
     RetryAgentInstall {
         /// The agent.
         agent: AgentId,
