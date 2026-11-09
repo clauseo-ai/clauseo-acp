@@ -1,11 +1,11 @@
-//! The installer's key, `Clauseo\Clauseo`, whose install folder the uninstaller deletes: kept
-//! only when SYSTEM, Administrators or an account in Administrators owned it and no one else
-//! could write it; otherwise deleted and made again with the uninstall key's folder.
+//! The installer's key, `Clauseo\Clauseo`, whose install folder the uninstaller deletes: deleted on
+//! every walk, whatever its owner and DACL, so no handle opened while it was weak outlives it,
+//! and made again with the uninstall key's folder.
 
 use super::owners::TRUSTED_INSTALLER;
 use super::{ADMIN_KEY, ADMIN_USER_KEY, FakeTree, GHOST_KEY, USER_KEY, under};
 use crate::windows::setup::record_key::VENDOR_KEY;
-use crate::windows::setup::vendor_key::{INHERITED_SDDL, VENDOR_SDDL, ensure};
+use crate::windows::setup::vendor_key::{INHERITED_SDDL, Report, VENDOR_SDDL, ensure};
 
 /// A key a domain account owns, with only Administrators let in.
 const DOMAIN_KEY: &str = "O:S-1-5-21-9-9-9-1105D:P(A;;KA;;;BA)";
@@ -25,62 +25,39 @@ fn installer_tree(sddl: &str) -> FakeTree {
     tree
 }
 
-/// Asserts the installer's key was deleted and made again with the uninstall key's folder.
-fn assert_remade(tree: &FakeTree, report: &crate::windows::setup::vendor_key::Report) {
-    assert_eq!(tree.deleted, [under("Clauseo")]);
+/// Asserts the installer's key was deleted and made again with the uninstall key's folder only.
+fn assert_remade(tree: &FakeTree, report: &Report, sddl: &str) {
+    assert_eq!(tree.deleted, [under("Clauseo")], "{sddl}");
     assert_eq!(
         report.install_dir_reset,
-        Some((under("Clauseo"), Some(FOLDER.to_owned())))
+        Some((under("Clauseo"), Some(FOLDER.to_owned()))),
+        "{sddl}"
     );
-    assert_eq!(tree.keys[&under("Clauseo")].values, ["(default)"]);
-    assert_eq!(tree.sddl_of(&under("Clauseo")), INHERITED_SDDL);
+    assert_eq!(tree.keys[&under("Clauseo")].values, ["(default)"], "{sddl}");
+    assert_eq!(tree.sddl_of(&under("Clauseo")), INHERITED_SDDL, "{sddl}");
     assert!(report.recreated.is_empty(), "the pinned keys' list");
+    assert!(report.taken_over.is_empty(), "{sddl}");
 }
 
 #[test]
-fn an_installer_key_admins_own_and_only_admins_could_write_is_kept_with_its_values() {
-    for sddl in [ADMIN_KEY, ADMIN_USER_KEY] {
-        let mut tree = installer_tree(sddl);
-        let report = ensure(&mut tree, VENDOR_KEY).unwrap();
-        assert_eq!(tree.deleted, Vec::<String>::new(), "{sddl}");
-        assert_eq!(report.install_dir_reset, None);
-        assert_eq!(tree.install_resets, Vec::<String>::new());
-        assert_eq!(
-            tree.keys[&under("Clauseo")].values,
-            ["(default)", "Installer Language"]
-        );
-        assert_eq!(report.taken_over, [under("Clauseo")]);
-    }
-}
-
-#[test]
-fn an_installer_key_others_could_write_is_made_again_so_no_held_handle_outlives_it() {
-    let mut tree = installer_tree(ADMIN_USERS_WRITE);
-    let report = ensure(&mut tree, VENDOR_KEY).unwrap();
-    assert_eq!(report.untrusted_installer, [under("Clauseo")]);
-    assert_remade(&tree, &report);
-}
-
-#[test]
-fn a_domain_owned_installer_key_only_admins_could_write_is_made_again() {
-    let mut tree = installer_tree(DOMAIN_KEY);
-    let report = ensure(&mut tree, VENDOR_KEY).unwrap();
-    assert_eq!(report.untrusted_installer, [under("Clauseo")]);
-    assert_eq!(report.unresolved, Vec::<(String, String)>::new());
-    assert_remade(&tree, &report);
-}
-
-#[test]
-fn installer_keys_unresolved_or_os_owned_are_made_again_while_other_such_keys_are_kept() {
+fn every_installer_key_is_made_again_whatever_its_owner_and_dacl() {
     let ti = format!("O:{TRUSTED_INSTALLER}D:P(A;;KA;;;BA)");
-    for sddl in [GHOST_KEY, ti.as_str(), "O:S-1-5-32-551D:P(A;;KA;;;BA)"] {
+    let null = "O:BAD:NO_ACCESS_CONTROL";
+    let conditional = "O:BAD:P(A;;KA;;;BA)(XA;;KA;;;BU;(WIN://SYSAPPID Contains \"x\"))";
+    for sddl in [
+        ADMIN_KEY,
+        ADMIN_USER_KEY,
+        DOMAIN_KEY,
+        ADMIN_USERS_WRITE,
+        GHOST_KEY,
+        ti.as_str(),
+        "O:S-1-5-32-551D:P(A;;KA;;;BA)",
+        null,
+        conditional,
+    ] {
         let mut tree = installer_tree(sddl);
-        tree.insert(under("Other"), sddl, false);
         let report = ensure(&mut tree, VENDOR_KEY).unwrap();
-        assert_eq!(report.untrusted_installer, [under("Clauseo")], "{sddl}");
-        assert_remade(&tree, &report);
-        assert_eq!(report.taken_over, [under("Other")], "{sddl}");
-        assert_eq!(tree.sddl_of(&under("Other")), INHERITED_SDDL);
+        assert_remade(&tree, &report, sddl);
     }
 }
 
@@ -92,6 +69,17 @@ fn a_planted_installer_key_is_made_again_without_a_folder_when_the_uninstall_key
     assert_eq!(report.planted, [under("Clauseo")]);
     assert_eq!(report.install_dir_reset, Some((under("Clauseo"), None)));
     assert_eq!(tree.keys[&under("Clauseo")].values, Vec::<String>::new());
+}
+
+#[test]
+fn other_keys_with_the_same_owners_are_kept() {
+    let ti = format!("O:{TRUSTED_INSTALLER}D:P(A;;KA;;;BA)");
+    for sddl in [ADMIN_KEY, GHOST_KEY, ti.as_str()] {
+        let mut tree = FakeTree::with(Some(VENDOR_SDDL), &[("Other", sddl, false)]);
+        let report = ensure(&mut tree, VENDOR_KEY).unwrap();
+        assert_eq!(report.taken_over, [under("Other")], "{sddl}");
+        assert_eq!(tree.deleted, Vec::<String>::new(), "{sddl}");
+    }
 }
 
 #[test]

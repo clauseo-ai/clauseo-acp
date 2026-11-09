@@ -6,7 +6,8 @@ use std::collections::VecDeque;
 
 use super::security::{self, Security};
 use super::{
-    INHERITED_SDDL, INSTALLER_NAME, LOCKED_SDDL, Report, Tree, VendorFault, pinned, unless_gone,
+    INHERITED_SDDL, INSTALLER_NAME, LOCKED_SDDL, Report, Tree, Value, VendorFault, pinned,
+    unless_gone,
 };
 
 /// What a key the walk makes again starts with, owned by Administrators (which the caller may
@@ -55,8 +56,8 @@ struct At {
 enum Visit<K> {
     /// Kept, with its frame.
     Kept(Frame<K>),
-    /// Deleted by the walk.
-    Deleted,
+    /// Deleted by the walk, with the values to copy into it when it is made again.
+    Deleted(Option<Vec<Value>>),
     /// Gone under the walk.
     Gone,
 }
@@ -110,24 +111,26 @@ pub(super) fn clean<T: Tree>(
             local: &local,
         };
         let visited = visit(tree, &frame.key, &name, &child, &judged, report)?;
-        let deleted = match visited {
+        let (deleted, carried) = match visited {
             Visit::Kept(frame) => {
                 stack.push(frame);
                 continue;
             }
-            Visit::Deleted => true,
-            Visit::Gone => false,
+            Visit::Deleted(carried) => (true, carried),
+            Visit::Gone => (false, None),
         };
         let Some(parent) = stack.last() else {
             continue;
         };
         if let Some(pinned) = pinned.as_deref() {
-            if unless_gone(
+            let made = unless_gone(
                 tree.create_child(&parent.key, &name, pinned),
                 VendorFault::Secure,
-            )?
-            .is_some()
-            {
+            )?;
+            if let Some(made) = made {
+                if let Some(values) = carried {
+                    unless_gone(tree.write_values(&made, &values), VendorFault::Secure)?;
+                }
                 report.recreated.push(child.path);
             }
         } else if deleted && child.relative.eq_ignore_ascii_case(INSTALLER_NAME) {
@@ -184,33 +187,37 @@ fn visit<T: Tree>(
     let Some(link) = unless_gone(tree.has_link_value(&key), VendorFault::CleanUp)? else {
         return Ok(Visit::Gone);
     };
-    // The SYSTEM side's keys get no benefit of the doubt.
+    // The SYSTEM side's keys get no benefit of the doubt: only an administrator's are trusted.
     let planted = match &owner {
         Owner::Planter => true,
-        Owner::Unresolved(_) => pinned.is_some(),
-        Owner::Admin | Owner::OtherAdmin | Owner::Service => false,
+        Owner::Unresolved(_) | Owner::Service => pinned.is_some(),
+        Owner::Admin | Owner::OtherAdmin => false,
     };
     let others_wrote = before.others_may_write();
-    // The installer's key is trusted only when an administrator owned it and no one else could
-    // write it: its folder is what the uninstaller deletes.
+    // The pinned keys and the installer's (whose folder the uninstaller deletes) are deleted on
+    // every walk: a handle opened while the DACL was weak outlives any DACL written since.
     let installer = at.relative.eq_ignore_ascii_case(INSTALLER_NAME);
-    let untrusted_installer =
-        installer && (others_wrote || !matches!(owner, Owner::Admin | Owner::OtherAdmin));
-    if link || planted || (pinned.is_some() && others_wrote) || untrusted_installer {
-        drain(tree, key)?;
-        let list = if link {
-            &mut report.removed
-        } else if planted {
-            &mut report.planted
-        } else if pinned.is_some() {
-            &mut report.writable_pinned
+    if link || planted || pinned.is_some() || installer {
+        let trusted = pinned.is_some() && !link && !planted && !others_wrote;
+        let carried = if trusted {
+            let Some(values) = unless_gone(tree.read_values(&key), VendorFault::CleanUp)? else {
+                return Ok(Visit::Gone);
+            };
+            Some(values)
         } else {
-            &mut report.untrusted_installer
+            None
         };
-        list.push(at.path.clone());
-        return Ok(Visit::Deleted);
+        drain(tree, key)?;
+        if link {
+            report.removed.push(at.path.clone());
+        } else if planted {
+            report.planted.push(at.path.clone());
+        } else if pinned.is_some() && others_wrote {
+            report.writable_pinned.push(at.path.clone());
+        }
+        return Ok(Visit::Deleted(carried));
     }
-    let target = pinned.unwrap_or(INHERITED_SDDL);
+    let target = INHERITED_SDDL;
     if unless_gone(tree.set_sddl(&key, target), VendorFault::Secure)?.is_none() {
         return Ok(Visit::Gone);
     }
@@ -222,13 +229,7 @@ fn visit<T: Tree>(
         Owner::Unresolved(why) => report.unresolved.push((at.path.clone(), why)),
         Owner::Admin | Owner::Service | Owner::Planter => {}
     }
-    if pinned.is_some() {
-        if before != Security::parse(target) {
-            report.resecured.push(at.path.clone());
-        }
-    } else {
-        report.taken_over.push(at.path.clone());
-    }
+    report.taken_over.push(at.path.clone());
     let names = unless_gone(tree.subkeys(&key), VendorFault::CleanUp)?.unwrap_or_default();
     Ok(Visit::Kept(Frame {
         key,

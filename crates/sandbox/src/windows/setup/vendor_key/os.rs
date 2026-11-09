@@ -38,13 +38,15 @@ use windows::Win32::System::Registry::{
 use windows::core::{HSTRING, PCWSTR, PWSTR, w};
 
 use super::security::{Security, take_over_steps};
-use super::{Miss, Tree, VENDOR_SDDL};
+use super::{Miss, Tree, VENDOR_SDDL, Value};
 use crate::windows::acl::privilege::Privileges;
 use crate::windows::record::read_string;
 use crate::windows::setup::admin_member::in_administrators;
 use crate::windows::setup::lock::Descriptor;
 use crate::windows::setup::preflight::machine_domain;
 use crate::windows::sids::Sid;
+
+mod values;
 
 /// Read access, in the 64-bit view.
 const READ: u32 = KEY_READ.0 | KEY_WOW64_64KEY.0;
@@ -157,6 +159,14 @@ impl Tree for Registry {
 
     fn create_child(&mut self, parent: &Key, name: &str, sddl: &str) -> Result<Key, Miss> {
         create(Some(parent), name, sddl)
+    }
+
+    fn read_values(&mut self, key: &Key) -> Result<Vec<Value>, Miss> {
+        values::read(key)
+    }
+
+    fn write_values(&mut self, key: &Key, values: &[Value]) -> Result<(), Miss> {
+        values::write(key, values)
     }
 
     fn retake(&mut self, key: &Key, sddl: &str) -> Result<(), Miss> {

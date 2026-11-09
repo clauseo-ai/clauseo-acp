@@ -13,6 +13,8 @@ pub(super) struct Security {
     pub(super) protected: bool,
     /// The DACL's ACEs, in order.
     pub(super) aces: Vec<Ace>,
+    /// Whether the key has a NULL DACL (`D:NO_ACCESS_CONTROL`) or none, which lets everyone in.
+    pub(super) open: bool,
 }
 
 /// One ACE: its type, its flags, its rights, its object GUIDs and its SID.
@@ -134,6 +136,10 @@ impl Security {
     pub(super) fn parse(sddl: &str) -> Security {
         let owner = normalize_sid(section(sddl, "O:", &["G:", "D:", "S:"]).trim());
         let dacl = section(sddl, "D:", &["S:"]);
+        let open = !sddl.contains("D:")
+            || dacl
+                .trim_start_matches(['P', 'A', 'I', 'R'])
+                .starts_with("NO_ACCESS_CONTROL");
         let protected = dacl.split('(').next().unwrap_or("").contains('P');
         let aces = dacl
             .split('(')
@@ -146,6 +152,7 @@ impl Security {
             owner,
             protected,
             aces,
+            open,
         }
     }
 
@@ -176,16 +183,18 @@ impl Security {
         self.allowed() == Some(expected)
     }
 
-    /// Whether an ACE that applies to the key itself lets anyone but SYSTEM and Administrators
-    /// do more than read it.
+    /// Whether a NULL DACL, or an allow ACE (conditional and object ones too) that applies to the
+    /// key itself, lets anyone but SYSTEM and Administrators do more than read it.
     pub(super) fn others_may_write(&self) -> bool {
         const READ_ONLY: [&str; 4] = ["KR", "KX", "GR", "RC"];
-        self.aces.iter().any(|ace| {
-            ace.kind == "A"
-                && !ace.flags.as_bytes().chunks(2).any(|pair| pair == b"IO")
-                && !TRUSTED_OWNERS.contains(&ace.sid.as_str())
-                && !READ_ONLY.contains(&ace.rights.as_str())
-        })
+        const ALLOWS: [&str; 4] = ["A", "XA", "OA", "ZA"];
+        self.open
+            || self.aces.iter().any(|ace| {
+                ALLOWS.contains(&ace.kind.as_str())
+                    && !ace.flags.as_bytes().chunks(2).any(|pair| pair == b"IO")
+                    && !TRUSTED_OWNERS.contains(&ace.sid.as_str())
+                    && !READ_ONLY.contains(&ace.rights.as_str())
+            })
     }
 
     /// Whether the owner is SYSTEM or Administrators.

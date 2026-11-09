@@ -296,18 +296,19 @@ build 26100):
     value that leads back to the root itself is deleted. Every subkey is taken over before its own
     subkeys are read: its owner and DACL are written in one call on a handle opened with restore
     intent (`SeRestorePrivilege`, enabled around that call alone), which no DENY or OWNER RIGHTS
-    ACE can refuse, and the owner is read back so a planter's older handle can't set it back. A
+    ACE can refuse, and the owner is read back so a planter's older handle can't set it back;
+    after three tries set-up fails closed, so that race can only deny service. A
     key holding a link value, or whose owner ordinary users hold (Users, Everyone, a local account
     outside Administrators), is deleted with its subtree; SYSTEM, Administrators, TrustedInstaller
     and the service accounts are trusted. A domain account's membership needs the domain
     controller, so its keys, like those of other built-in groups, count as unresolved: kept and
-    logged, except the keys the SYSTEM side trusts (`Sandbox`), which are deleted. Those are
-    deleted too when their DACL let others write, even under an administrator owner, so no
-    handle opened through that DACL outlives them; any of them deleted for any reason is made
-    again empty with its own SD. `Clauseo\Clauseo`, whose install folder the installer hands
-    its uninstaller as the folder to delete, is kept only when SYSTEM, Administrators or a local
-    account in Administrators owned it and no one else could write it; otherwise it is deleted
-    and made again with the folder from the uninstall key's `InstallLocation`, or none. The rest
+    logged, except the keys the SYSTEM side trusts (`Sandbox`), which are deleted. `Sandbox` and
+    `Clauseo\Clauseo` (whose install folder the installer hands its uninstaller as the folder to
+    delete) are deleted on every walk anyway, since a handle opened while a DACL was weak
+    outlives any DACL written later; a NULL DACL counts as letting everyone write. `Sandbox` is
+    made again with its own SD, its values copied through only when an administrator owned it
+    and no one else could write it; `Clauseo\Clauseo` is made again with the folder from the
+    uninstall key's `InstallLocation`, or none. The rest
     is kept with `O:SYD:AI(A;OICIID;KA;;;SY)(A;OICIID;KA;;;BA)(A;OICIID;KR;;;BU)`, written out on
     its own handle: no write uses `SetSecurityInfo`, whose propagation could reach through a
     link. A kept key's values stay, since only an administrator owned it. After the walk every

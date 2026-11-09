@@ -199,6 +199,38 @@ fn owner_handle(path: &str) -> Result<record_write::Key, String> {
     Ok(record_write::Key(key))
 }
 
+/// The key `path` opened with `KEY_SET_VALUE` alone, as a planter's handle opened while its
+/// DACL let Users write.
+fn value_handle(path: &str) -> Result<record_write::Key, String> {
+    let subkey = HSTRING::from(path);
+    let mut key = HKEY::default();
+    // SAFETY: the subkey is NUL-terminated; `key` is a live out-pointer, owned below.
+    let opened = unsafe {
+        RegOpenKeyExW(
+            HKEY_LOCAL_MACHINE,
+            &subkey,
+            None,
+            KEY_SET_VALUE | KEY_WOW64_64KEY,
+            &raw mut key,
+        )
+    };
+    check("RegOpenKeyExW", opened).map_err(|error| error.to_string())?;
+    Ok(record_write::Key(key))
+}
+
+/// Writes the `REG_SZ` value `name` through `key`, and returns the call's code.
+fn write_through(key: &record_write::Key, name: &str, text: &str) -> u32 {
+    let name = HSTRING::from(name);
+    let data: Vec<u8> = text
+        .encode_utf16()
+        .chain([0])
+        .flat_map(u16::to_le_bytes)
+        .collect();
+    // SAFETY: the handle is open (its key may be deleted); the name is NUL-terminated; `data`
+    // is live.
+    unsafe { RegSetValueExW(key.0, &name, None, REG_SZ, Some(&data)) }.0
+}
+
 /// Sets the owner of the key `key` is open on to Users, through that handle.
 fn set_owner_users(key: HKEY) -> Result<(), String> {
     let _restore = Privileges::enable(&["SeRestorePrivilege"]).map_err(|e| e.to_string())?;
@@ -215,6 +247,10 @@ fn present(root: &Key, name: &str) -> bool {
 
 #[test]
 #[ignore = "elevated: writes HKLM; CI's elevated step runs it"]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one walk and the next, over the same planted keys"
+)]
 fn elevated_a_fresh_key_is_pinned_a_weak_one_is_taken_over_and_a_link_child_goes() {
     if !elevated_tests_enabled() {
         return;
@@ -289,9 +325,10 @@ fn elevated_a_fresh_key_is_pinned_a_weak_one_is_taken_over_and_a_link_child_goes
             format!("{path}\\Shut")
         ]
     );
-    assert_eq!(
-        report.taken_over,
-        [format!("{path}\\Clauseo"), format!("{path}\\Denied")]
+    assert_eq!(report.taken_over, [format!("{path}\\Denied")]);
+    assert!(
+        report.install_dir_reset.is_some(),
+        "the installer's key is made again"
     );
 
     let mut tree = Registry::at(&path);
@@ -322,18 +359,32 @@ fn elevated_a_fresh_key_is_pinned_a_weak_one_is_taken_over_and_a_link_child_goes
         [None]
     );
 
-    // The next walk: the pinned record keeps its SD and its values; the installer's key, which
-    // Users may now write, is made again (made owned by Administrators, then taken over).
+    // The next walk, with a handle on each of Sandbox and the installer's key opened
+    // while its DACL let Users write, then the DACL tightened to admins. Both keys are deleted all
+    // the same, so the old handles write nowhere; Sandbox keeps its values, and the installer's key
+    // gets the uninstall key's folder.
     let record = format!("{path}\\Sandbox");
-    set_string(&record, "PoolSids", "kept").unwrap();
     let installer = format!("{path}\\Clauseo");
+    set_string(&record, "PoolSids", "kept").unwrap();
+    set_dacl(&record, "D:P(A;CI;KA;;;SY)(A;CI;KA;;;BA)(A;CI;KA;;;BU)").unwrap();
     set_dacl(&installer, "D:P(A;;KA;;;BA)(A;;KA;;;BU)").unwrap();
+    let held_record = value_handle(&record).unwrap();
+    let held_installer = value_handle(&installer).unwrap();
+    set_dacl(&record, RECORD_SDDL).unwrap();
+    set_dacl(&installer, "D:P(A;;KA;;;SY)(A;;KA;;;BA)").unwrap();
     let backup = Privileges::enable(&WALK).unwrap();
     let again = ensure(&mut Registry::at(&path), &path).unwrap();
     drop(backup);
-    assert!(again.recreated.is_empty(), "{again:?}");
-    assert!(again.resecured.is_empty(), "{again:?}");
+    assert_eq!(again.recreated, std::slice::from_ref(&record), "{again:?}");
+    assert!(again.writable_pinned.is_empty(), "{again:?}");
     assert!(again.retaken.is_empty(), "{again:?}");
+    assert!(again.install_dir_reset.is_some(), "{again:?}");
+    for (held, key) in [(&held_record, &record), (&held_installer, &installer)] {
+        let code = write_through(held, "Planted", "C:\\Evil");
+        assert_ne!(code, ERROR_SUCCESS.0, "{key}: the old handle's key is gone");
+        assert_eq!(read_texts(key, &["Planted"]).unwrap(), [None], "{key}");
+    }
+    drop((held_record, held_installer));
     assert_eq!(
         Security::parse(&key_sddl(&record).unwrap()),
         Security::parse(&format!("O:BA{RECORD_SDDL}"))
@@ -342,8 +393,6 @@ fn elevated_a_fresh_key_is_pinned_a_weak_one_is_taken_over_and_a_link_child_goes
         read_texts(&record, &["PoolSids"]).unwrap(),
         [Some("kept".to_owned())]
     );
-    assert_eq!(again.untrusted_installer, std::slice::from_ref(&installer));
-    assert!(again.install_dir_reset.is_some(), "{again:?}");
     let remade = Security::parse(&key_sddl(&installer).unwrap());
     assert_eq!(
         remade.owner, "S-1-5-18",

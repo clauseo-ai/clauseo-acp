@@ -259,13 +259,15 @@ fn elevated_accounts_group_hidden_user_and_record() {
     let taken = key_sddl(TEST_KEY).unwrap();
     assert!(taken.starts_with("O:BAD:P"), "{taken}");
     assert!(!taken.contains(";;;WD)"), "{taken}");
-    // The read runs the vendor-key walk on the scratch root; the pinned record keeps its SD.
+    // The read runs the vendor-key walk on the scratch root, which makes the pinned record again
+    // with its values and its SD.
     assert_eq!(machine.read_record(), Ok(Some(record.clone())));
-    assert_eq!(
-        key_sddl(TEST_KEY).unwrap(),
-        taken,
-        "the walk keeps the record's SD"
+    let after = key_sddl(TEST_KEY).unwrap();
+    assert!(
+        after.starts_with("O:BAD:P"),
+        "the walk keeps the record's SD: {after}"
     );
+    assert!(!after.contains(";;;WD)"), "{after}");
 
     // The user: made once, never adopted.
     let password = machine.new_password();

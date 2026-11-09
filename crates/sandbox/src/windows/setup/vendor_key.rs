@@ -15,17 +15,16 @@
 //!      SYSTEM, Administrators, a local account in Administrators, `TrustedInstaller`, the
 //!      service accounts and service SIDs are trusted. An alias is spelled out first. Any other
 //!      owner (a domain account, whose nested groups need the domain controller, or another
-//!      built-in group) is unresolved: its key is kept and logged, unless it is one the SYSTEM
-//!      side trusts ([`pinned`]);
-//!    - a pinned key whose DACL let anyone but SYSTEM and Administrators write is deleted too,
-//!      even when an administrator owns it, so no handle opened through that DACL outlives it;
+//!      built-in group) is unresolved: its key is kept and logged;
+//!    - a key the SYSTEM side trusts ([`pinned`], `Sandbox`) is always deleted, since a handle
+//!      opened while its DACL was weak outlives any DACL written later, and made again under the
+//!      locked root with its own SD. Its values are copied through only when SYSTEM,
+//!      Administrators or a local account in Administrators owned it and no one else could write
+//!      it (a NULL DACL lets everyone); otherwise it comes back empty;
 //!    - the installer's `Clauseo\Clauseo`, whose install folder the uninstaller deletes, is
-//!      deleted unless SYSTEM, Administrators or a local account in Administrators owned it and
-//!      no one else could write it; it is made again with the folder from the trusted
+//!      always deleted for the same reason, and made again with the folder from the trusted
 //!      `InstallLocation` of the uninstall key, or none when there is none;
-//!    - every other key is kept with its values: a pinned one gets its own SD, the rest
-//!      [`INHERITED_SDDL`];
-//!    - a pinned key that ends deleted, for any reason, is made again empty with its own SD;
+//!    - every other key is kept with its values and [`INHERITED_SDDL`];
 //! 3. checks every key it kept once more, as a handle held from before a take-over could have
 //!    changed it back: such a key is taken over again once, and refused when it changes again.
 //!
@@ -114,10 +113,10 @@ pub(super) struct Report {
     pub(super) removed: Vec<String>,
     /// The keys owned by someone other than an administrator, deleted.
     pub(super) planted: Vec<String>,
-    /// The pinned keys deleted for any reason, made again empty.
+    /// The pinned keys made again: each is deleted on every walk, so no handle outlives it, and
+    /// made again with its values when an administrator owned it and no one else could write it,
+    /// else empty.
     pub(super) recreated: Vec<String>,
-    /// The pinned keys kept whose SD differed and was set back.
-    pub(super) resecured: Vec<String>,
     /// The other keys kept, taken over.
     pub(super) taken_over: Vec<String>,
     /// The keys kept whose owner was an administrator other than SYSTEM and Administrators.
@@ -131,12 +130,17 @@ pub(super) struct Report {
     /// The installer's key, made again after it was deleted, with its install folder from the
     /// uninstall key's `InstallLocation` (`Some`), or none for want of one (`None`).
     pub(super) install_dir_reset: Option<(String, Option<String>)>,
-    /// The installer's key deleted because someone other than an administrator owned it or
-    /// could write it.
-    pub(super) untrusted_installer: Vec<String>,
     /// The kept keys whose owner or DACL had changed again after their take-over, taken over
     /// again.
     pub(super) retaken: Vec<String>,
+}
+
+/// One registry value, copied whole: its name (empty for the default value), type and data.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct Value {
+    pub(super) name: String,
+    pub(super) kind: u32,
+    pub(super) data: Vec<u8>,
 }
 
 /// The registry under `HKLM\SOFTWARE\Clauseo`, through handles. A key is opened by name from its
@@ -168,6 +172,10 @@ pub(super) trait Tree {
         name: &str,
         sddl: &str,
     ) -> Result<Self::Key, Miss>;
+    /// The key's values, each whole.
+    fn read_values(&mut self, key: &Self::Key) -> Result<Vec<Value>, Miss>;
+    /// Writes `values` to the key, each whole.
+    fn write_values(&mut self, key: &Self::Key, values: &[Value]) -> Result<(), Miss>;
     /// Takes `key` over again with `sddl` through its open handle, as a take-over writes it.
     fn retake(&mut self, key: &Self::Key, sddl: &str) -> Result<(), Miss>;
     /// Whether the key holds a `SymbolicLinkValue` of type `REG_LINK`.
@@ -298,12 +306,26 @@ fn unless_gone<V>(
 #[cfg(windows)]
 pub(super) fn secure(root: &str) -> Result<(), MachineError> {
     let fault = |text: String| MachineError::VendorKey(text);
+    walk_root(root, cfg!(test)).map_err(|found| fault(found.to_string()))?;
     let _held = Privileges::enable(&WALK_PRIVILEGES)
         .map_err(|error| fault(format!("its privileges weren't enabled: {error}")))?;
     let report =
         ensure(&mut os::Registry::at(root), root).map_err(|found| fault(found.to_string()))?;
     log(&report);
     Ok(())
+}
+
+/// Refuses a walk of any root but `record_key::VENDOR_KEY`, so no record key (`Names`' fields are
+/// public) can point the walk at, say, all of `HKLM\SOFTWARE`; the tests' scratch roots pass only
+/// when `scratch`, which only `cfg(test)` sets.
+#[cfg(any(windows, test))]
+fn walk_root(root: &str, scratch: bool) -> Result<(), VendorFault> {
+    if scratch || root.eq_ignore_ascii_case(super::record_key::VENDOR_KEY) {
+        return Ok(());
+    }
+    Err(VendorFault::Open(format!(
+        "set-up secures only HKLM\\SOFTWARE\\Clauseo, not HKLM\\{root}"
+    )))
 }
 
 /// One log line per kind of change in `report`.
@@ -329,20 +351,12 @@ fn log(report: &Report) {
             "made Clauseo keys under the vendor key again, empty",
         ),
         (
-            &report.resecured,
-            "set Clauseo keys under the vendor key back to their security",
-        ),
-        (
             &report.writable_pinned,
             "deleted Clauseo keys under the vendor key that others could write",
         ),
         (
             &report.others_could_write,
             "kept keys under the vendor key that others could write",
-        ),
-        (
-            &report.untrusted_installer,
-            "deleted the installer's key: a non-administrator owned it or could write it",
         ),
         (
             &report.retaken,

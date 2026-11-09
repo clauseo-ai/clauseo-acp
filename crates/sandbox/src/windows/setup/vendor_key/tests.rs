@@ -193,6 +193,26 @@ impl super::Tree for FakeTree {
         Ok(path)
     }
 
+    fn read_values(&mut self, key: &String) -> Result<Vec<super::Value>, Miss> {
+        Ok(self
+            .node(key)?
+            .values
+            .iter()
+            .map(|name| super::Value {
+                name: name.clone(),
+                kind: 1,
+                data: Vec::new(),
+            })
+            .collect())
+    }
+
+    fn write_values(&mut self, key: &String, values: &[super::Value]) -> Result<(), Miss> {
+        let node = self.node(key)?;
+        node.values
+            .extend(values.iter().map(|value| value.name.clone()));
+        Ok(())
+    }
+
     fn retake(&mut self, key: &String, sddl: &str) -> Result<(), Miss> {
         self.set_sddl(key, sddl)?;
         if let Some((path, undone)) = self.retake_undone.clone()
@@ -432,7 +452,6 @@ fn a_planted_sandbox_is_recreated_empty_and_its_values_are_gone() {
     assert_eq!(tree.keys[&under("Sandbox")].values, Vec::<String>::new());
     assert!(!tree.has(&under("Sandbox\\Inner")));
     assert_eq!(tree.deleted, [under("Sandbox\\Inner"), under("Sandbox")]);
-    assert_eq!(report.resecured, Vec::<String>::new());
 }
 
 #[test]
@@ -446,13 +465,14 @@ fn a_sandbox_with_a_link_value_is_deleted_and_recreated() {
 }
 
 #[test]
-fn an_admin_owned_sandbox_only_admins_could_write_keeps_its_values_and_gets_its_sd() {
+fn an_admin_owned_sandbox_only_admins_could_write_is_made_again_with_its_values() {
     let drifted = "O:BAD:P(A;CI;KA;;;BA)(A;CI;KR;;;BU)";
     let mut tree = FakeTree::with(Some(VENDOR_SDDL), &[("Sandbox", drifted, false)]);
     tree.values(&under("Sandbox"), &["PoolSids"]);
     let report = ensure(&mut tree, VENDOR_KEY).unwrap();
-    assert_eq!(report.resecured, [under("Sandbox")]);
-    assert!(report.recreated.is_empty() && tree.deleted.is_empty());
+    // Deleted all the same, so a handle opened while its DACL was weak goes with it.
+    assert_eq!(report.recreated, [under("Sandbox")]);
+    assert_eq!(tree.deleted, [under("Sandbox")]);
     assert_eq!(tree.keys[&under("Sandbox")].values, ["PoolSids"]);
     assert_eq!(tree.sddl_of(&under("Sandbox")), record_pinned());
 }
@@ -471,14 +491,15 @@ fn a_kept_key_others_could_write_to_is_logged() {
 }
 
 #[test]
-fn a_pinned_sandbox_and_root_in_another_form_are_not_changes() {
+fn a_pinned_sandbox_and_root_in_another_form_are_not_weaker() {
     let sandbox = "O:BAD:PAI(A;CI;KA;;;SY)(A;CI;KA;;;S-1-5-32-544)(A;CI;KR;;;BU)";
     let root =
         "O:S-1-5-18D:PAI(A;OICI;KA;;;S-1-5-18)(A;OICI;KA;;;S-1-5-32-544)(A;OICI;KR;;;S-1-5-32-545)";
     let mut tree = FakeTree::with(Some(root), &[("Sandbox", sandbox, false)]);
     let report = ensure(&mut tree, VENDOR_KEY).unwrap();
     assert_eq!(report.weaker_from, None);
-    assert!(report.resecured.is_empty() && report.taken_over.is_empty());
+    assert!(report.taken_over.is_empty() && report.writable_pinned.is_empty());
+    assert_eq!(report.recreated, [under("Sandbox")]);
     assert_eq!(report.others_could_write, Vec::<String>::new());
 }
 

@@ -5,7 +5,10 @@
 
 use super::{FakeTree, record_pinned, under};
 use crate::windows::setup::record_key::VENDOR_KEY;
-use crate::windows::setup::vendor_key::{INHERITED_SDDL, VENDOR_SDDL, ensure};
+use crate::windows::setup::vendor_key::security::Security;
+use crate::windows::setup::vendor_key::{
+    INHERITED_SDDL, VENDOR_SDDL, VendorFault, ensure, walk_root,
+};
 
 /// A key Administrators own whose DACL let Users write.
 const ADMIN_USERS_WRITE: &str = "O:BAD:P(A;;KA;;;BA)(A;;KA;;;BU)";
@@ -80,4 +83,50 @@ fn os_owners_are_kept_user_held_owners_planted_and_other_well_known_ones_unresol
     for kept in ["TiOwned", "Network", "Service", "Backup", "Admin", "Odd"] {
         assert_eq!(tree.sddl_of(&under(kept)), INHERITED_SDDL, "{kept}");
     }
+}
+
+#[test]
+fn a_sandbox_a_service_owns_is_planted_and_made_again_empty() {
+    let ti = format!("O:{TRUSTED_INSTALLER}D:P(A;;KA;;;BA)");
+    for sddl in [
+        ti.as_str(),
+        "O:NSD:P(A;;KA;;;BA)",
+        "O:S-1-5-80-1-2-3D:P(A;;KA;;;BA)",
+    ] {
+        let mut tree = FakeTree::with(Some(VENDOR_SDDL), &[("Sandbox", sddl, false)]);
+        tree.values(&under("Sandbox"), &["PoolSids"]);
+        let report = ensure(&mut tree, VENDOR_KEY).unwrap();
+        assert_eq!(report.planted, [under("Sandbox")], "{sddl}");
+        assert_eq!(report.recreated, [under("Sandbox")], "{sddl}");
+        assert_eq!(tree.keys[&under("Sandbox")].values, Vec::<String>::new());
+    }
+}
+
+#[test]
+fn a_null_dacl_and_a_conditional_allow_let_others_write() {
+    let null = "O:BAD:NO_ACCESS_CONTROL";
+    let conditional = "O:BAD:P(A;;KA;;;BA)(XA;;KA;;;BU;(WIN://SYSAPPID Contains \"x\"))";
+    let object = "O:BAD:P(A;;KA;;;BA)(OA;;KA;;;BU)";
+    for sddl in [null, "O:BA", conditional, object] {
+        assert!(Security::parse(sddl).others_may_write(), "{sddl}");
+        let mut tree = FakeTree::with(Some(VENDOR_SDDL), &[("Sandbox", sddl, false)]);
+        tree.values(&under("Sandbox"), &["PoolSids"]);
+        let report = ensure(&mut tree, VENDOR_KEY).unwrap();
+        assert_eq!(report.writable_pinned, [under("Sandbox")], "{sddl}");
+        assert_eq!(tree.keys[&under("Sandbox")].values, Vec::<String>::new());
+    }
+    assert!(!Security::parse("O:BAD:P(A;;KA;;;BA)(XA;;KR;;;BU;(x))").others_may_write());
+}
+
+#[test]
+fn set_up_walks_only_the_vendor_key() {
+    assert_eq!(walk_root(VENDOR_KEY, false), Ok(()));
+    assert_eq!(walk_root("software\\clauseo", false), Ok(()));
+    for root in ["SOFTWARE", "SOFTWARE\\ClauseoTestAcct", ""] {
+        assert!(
+            matches!(walk_root(root, false), Err(VendorFault::Open(_))),
+            "{root}"
+        );
+    }
+    assert_eq!(walk_root("SOFTWARE\\ClauseoTestAcct", true), Ok(()));
 }
