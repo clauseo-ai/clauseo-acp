@@ -414,7 +414,7 @@ pub(crate) fn remove_any(path: &Path) -> io::Result<()> {
 }
 
 /// Tests only: sets `path`'s Unix mode.
-#[cfg(all(test, unix))]
+#[cfg(all(unix, any(test, feature = "test-support")))]
 pub(crate) fn set_mode(path: &Path, mode: u32) -> io::Result<()> {
     use std::os::unix::fs::PermissionsExt as _;
     std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode))

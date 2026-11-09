@@ -23,10 +23,12 @@ fn lawyer_signed_in(fx: &Fixture) -> bool {
     fx.user_home().join(".claude/fake-signin-marker").is_file()
 }
 
-fn found(email: &str) -> SigninState {
+/// Detection's `LoginFound` for Claude: never an email (it runs in its own empty config folder,
+/// so the CLI does not see the lawyer's global config, where the email lives).
+fn found() -> SigninState {
     SigninState::LoginFound {
         from: LoginFrom::ClaudeCode,
-        email: Some(email.to_owned()),
+        email: None,
     }
 }
 
@@ -50,7 +52,7 @@ fn read(path: &Path) -> String {
 /// `check_status`, then `LoginFound`, then `use_found_login`, then `SignedIn { Reused }`.
 fn reuse(agents: &clauseo_agents::Agents, events: &Events) {
     agents.check_status(&claude()).unwrap();
-    assert_eq!(events.state(), found(EMAIL));
+    assert_eq!(events.state(), found());
     agents.use_found_login(&claude()).unwrap();
     assert_eq!(events.state(), reused());
 }
@@ -73,7 +75,7 @@ fn claude_detection_runs_with_its_own_config_folder() {
     plant_lawyer(&fx, "claude.ai", EMAIL);
     let (agents, events) = fx.start();
     agents.check_status(&claude()).unwrap();
-    assert_eq!(events.state(), found(EMAIL));
+    assert_eq!(events.state(), found());
     let names = fx.env_names();
     assert!(!names.iter().any(|got| got == "CODEX_HOME"), "{names:?}");
     let detection = fx.runs_of("status").pop().unwrap();
@@ -101,7 +103,7 @@ fn a_status_run_gets_neither_node_options_nor_node_path() {
     plant_lawyer(&fx, "claude.ai", EMAIL);
     let (agents, events) = fx.start();
     agents.check_status(&claude()).unwrap();
-    assert_eq!(events.state(), found(EMAIL));
+    assert_eq!(events.state(), found());
     let names = fx.env_names();
     assert!(names.iter().any(|got| got == "HOME"), "{names:?}");
     for name in clauseo_process::NODE_ENV {
@@ -122,7 +124,7 @@ fn a_claude_ai_status_gives_login_found_with_no_login_run_and_no_reuse() {
     plant_lawyer(&fx, "claude.ai", "lawyer@example.com");
     let (agents, events) = fx.start();
     agents.check_status(&claude()).unwrap();
-    assert_eq!(events.state(), found("lawyer@example.com"));
+    assert_eq!(events.state(), found());
     assert_eq!(fx.runs_of("login"), []);
     assert!(!fx.marker(&claude(), "login-source").exists());
     // No run had the reused session's environment: the one with the store variable is
@@ -148,7 +150,7 @@ fn use_found_login_reuses_and_the_next_start_reuses_without_asking() {
     reuse(&agents, &events);
     assert_eq!(
         read(&fx.marker(&claude(), "login-source")),
-        format!("reused\n{EMAIL}\n")
+        "reused\n".to_owned()
     );
     // The status before the first session ran under the session's environment.
     let home = fx.config.signin.homes[&claude()].clone();
@@ -164,33 +166,35 @@ fn use_found_login_reuses_and_the_next_start_reuses_without_asking() {
     assert_eq!(fx.runs_of("login"), []);
 }
 
-/// "a later status with another email gives `SignedOut { found: ReusedChanged }`, a signed-out
-/// one `found: ReusedSignedOut`". Each clears the reuse record only, so the next start shows
-/// `LoginFound` again.
+/// An account change while reused: detection gives no email, so it no longer tells
+/// (`ReusedChanged`); the status under the session's environment shows the new account. A
+/// signed-out detection gives `found: ReusedSignedOut`, which clears the reuse record only.
 #[test]
-fn another_email_or_a_signed_out_status_stops_reuse() {
+fn a_changed_account_shows_through_and_a_signed_out_status_stops_reuse() {
     let fx = Fixture::new("reuse-claude-stops", "ok-after:0");
     plant_lawyer(&fx, "claude.ai", EMAIL);
     let (agents, events) = fx.start();
     reuse(&agents, &events);
     plant_lawyer(&fx, "claude.ai", "other@example.com");
     agents.check_status(&claude()).unwrap();
-    assert_eq!(events.state(), signed_out(Some(Found::ReusedChanged)));
-    assert!(!fx.marker(&claude(), "login-source").exists());
-    assert!(!fx.marker(&claude(), "no-reuse").exists());
-    agents.check_status(&claude()).unwrap();
-    assert_eq!(events.state(), found("other@example.com"));
-
-    plant_lawyer(&fx, "claude.ai", EMAIL);
-    agents.check_status(&claude()).unwrap();
-    assert_eq!(events.state(), found(EMAIL));
-    agents.use_found_login(&claude()).unwrap();
-    assert_eq!(events.state(), reused());
+    assert_eq!(
+        events.state(),
+        SigninState::SignedIn {
+            email: Some("other@example.com".to_owned()),
+            plan: Some("max".to_owned()),
+            source: Source::Reused,
+            at: now(),
+        }
+    );
     remove_file(&fx.user_home().join(".claude/fake-signin-marker")).unwrap();
     agents.check_status(&claude()).unwrap();
     assert_eq!(events.state(), signed_out(Some(Found::ReusedSignedOut)));
     assert!(!fx.marker(&claude(), "login-source").exists());
+    assert!(!fx.marker(&claude(), "no-reuse").exists());
     assert_eq!(fx.runs_of("logout"), []);
+    plant_lawyer(&fx, "claude.ai", EMAIL);
+    agents.check_status(&claude()).unwrap();
+    assert_eq!(events.state(), found());
 }
 
 /// "`use_different_account` from `LoginFound` writes `no-reuse` and starts the sign-in run …
@@ -201,7 +205,7 @@ fn use_different_account_writes_no_reuse_and_signs_in_with_clauseo_s_own() {
     plant_lawyer(&fx, "claude.ai", EMAIL);
     let (agents, events) = fx.start();
     agents.check_status(&claude()).unwrap();
-    assert_eq!(events.state(), found(EMAIL));
+    assert_eq!(events.state(), found());
     agents.use_different_account(&claude()).unwrap();
     let (_, last) = events.until_end();
     assert!(
@@ -239,7 +243,7 @@ fn stop_using_login_writes_no_reuse_and_runs_no_logout() {
     agents.check_status(&claude()).unwrap();
     assert_eq!(events.state(), signed_out(Some(Found::ReuseOff)));
     agents.find_login(&claude()).unwrap();
-    assert_eq!(events.state(), found(EMAIL));
+    assert_eq!(events.state(), found());
     assert!(!fx.marker(&claude(), "no-reuse").exists());
 }
 
@@ -359,7 +363,7 @@ fn cancelling_use_it_during_its_detection_gives_cancelled() {
     plant_lawyer(&fx, "claude.ai", EMAIL);
     let (agents, events) = fx.start();
     agents.check_status(&claude()).unwrap();
-    assert_eq!(events.state(), found(EMAIL));
+    assert_eq!(events.state(), found());
     let before = fx.runs_of("status").len();
     fx.stall(Some("status"));
     agents.use_found_login(&claude()).unwrap();
