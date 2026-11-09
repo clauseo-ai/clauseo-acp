@@ -258,7 +258,51 @@ pub(super) fn active_processes(job: &Handle) -> io::Result<u32> {
     Ok(info.ActiveProcesses)
 }
 
-/// A job with no limits at all: the tests' would-be nested job.
+/// The job this process is in, if any, as `QueryInformationJobObject` with no handle reads it
+/// (the immediate one when jobs nest): its `LimitFlags` and its UI restrictions.
+#[cfg(test)]
+pub(super) fn own_job_shape() -> io::Result<Option<(u32, u32)>> {
+    use windows::Win32::System::JobObjects::IsProcessInJob;
+    use windows::Win32::System::Threading::GetCurrentProcess;
+    use windows::core::BOOL;
+    let mut inside = BOOL::default();
+    // SAFETY: the pseudo-handle of this process; no job (any job); a live out-pointer.
+    unsafe { IsProcessInJob(GetCurrentProcess(), None, &raw mut inside) }
+        .map_err(|e| os_error(&e))?;
+    if !inside.as_bool() {
+        return Ok(None);
+    }
+    let mut limits = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
+    // SAFETY: no handle: this process's own job; `limits` is the class's structure, for its size.
+    unsafe {
+        QueryInformationJobObject(
+            None,
+            JobObjectExtendedLimitInformation,
+            (&raw mut limits).cast::<c_void>(),
+            u32::try_from(size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>()).unwrap_or(0),
+            None,
+        )
+    }
+    .map_err(|e| os_error(&e))?;
+    let mut ui = JOBOBJECT_BASIC_UI_RESTRICTIONS::default();
+    // SAFETY: as above, for the UI restrictions' structure.
+    unsafe {
+        QueryInformationJobObject(
+            None,
+            JobObjectBasicUIRestrictions,
+            (&raw mut ui).cast::<c_void>(),
+            u32::try_from(size_of::<JOBOBJECT_BASIC_UI_RESTRICTIONS>()).unwrap_or(0),
+            None,
+        )
+    }
+    .map_err(|e| os_error(&e))?;
+    Ok(Some((
+        limits.BasicLimitInformation.LimitFlags.0,
+        ui.UIRestrictionsClass.0,
+    )))
+}
+
+/// A job with no limits at all, as libuv's (Node's) is for UI: the tests' nested job.
 #[cfg(test)]
 pub(super) fn plain_job() -> io::Result<Handle> {
     // SAFETY: no attributes (an unnamed job no other process can open) and no name.

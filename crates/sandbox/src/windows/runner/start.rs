@@ -112,6 +112,22 @@ mod tests {
         assert_eq!(record.done, ["log on"]);
     }
 
+    /// Clauseo started inside another product's job whose shape refuses ours as a child (a job
+    /// with UI limits: error 50): the assign fails, so the inner is killed while still
+    /// suspended, and neither it nor the agent ever runs.
+    #[test]
+    fn a_job_that_refuses_ours_fails_the_launch_before_anything_runs() {
+        let mut record = Record {
+            fail: Some("assign"),
+            ..Record::default()
+        };
+        assert_eq!(start(&mut record), Err("assign".to_owned()));
+        assert_eq!(
+            record.done,
+            ["log on", "check user", "assign", "kill 7 after assign"]
+        );
+    }
+
     #[test]
     fn a_failure_after_logon_kills_the_inner_and_never_resumes_it() {
         for (at, step) in ORDER.iter().enumerate().skip(1) {

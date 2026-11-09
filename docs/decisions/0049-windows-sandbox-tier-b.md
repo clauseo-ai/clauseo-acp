@@ -1434,19 +1434,21 @@ leaves that profile, both naming the part.
   members at refusal, one of them the agent's console host, which appears to join the job outside
   the limit check. Not confirmed in source. The cap on the agent's own programs isn't loosened.
   The Windows CI test `job_cap_tests` checks the count with a cap of 4 and detached processes
-  (no console hosts): a fifth is refused, and once it has gone the job holds exactly 4. The
-  job's UI limits also keep it from taking a nested job (Microsoft's "Nested Jobs": jobs nest
-  only when neither sets UI limits), so a process in it that is assigned to another job gets
-  error 50 and stays in the count. The same test checks that on the hosted runner. A tool the
-  agent runs that puts its children in a job of its own gets that error too.
+  (no console hosts): a fifth is refused, and once it has gone the job holds exactly 4.
+  Nesting: on the VM (probe 2, build 26100, values read back from the jobs, admin and lawyer
+  alike) error 50 (`ERROR_NOT_SUPPORTED`) came only when a job with UI limits was nested in a
+  job with UI limits. The capped agent job (`0x2008`, UI `0xFF`) took libuv's job (`0x3C00`,
+  no UI limits), so Node's children nest and still count towards the cap. A `0x2000` job with UI
+  `0xFF` refused another of the same shape, so the cap plays no part. `job_cap_tests` checks
+  both on the hosted runner: a plain nested job's processes count, and a nested job with UI
+  limits gets 50. A tool the agent runs that nests a job with UI limits of its own gets 50.
   The outer reads the job's completion port (`job_port.rs`), and the first
   `JOB_OBJECT_MSG_ACTIVE_PROCESS_LIMIT` gives one notice per session: "The AI tool tried to run
   too many programs at once, so Clauseo didn't start the extra ones. It keeps going. If it seems
-  stuck, ask it to try a smaller step." It goes
-  to the outer's stderr until #789's session-notice path lands, from a thread of its own, so a
-  blocked stderr never stops the port being read. The cap counts only processes in
-  the job. Processes outside it (M2, above) remain the per-slot SYSTEM stop item (C5), which
-  blocks launch.
+  stuck, ask it to try a smaller step." It goes to the outer's stderr until #789's
+  session-notice path lands, from a thread of its own, so a blocked stderr never stops the port
+  being read. The cap counts only processes in the job. Processes outside it (M2, above) remain
+  the per-slot SYSTEM stop item (C5), which blocks launch.
 - **The pipes** (D11's mitigation). The outer makes four named pipes per launch (`ctl`, the
   agent's stdin, stdout and stderr), one instance each, made first or refused, local clients
   only, with an explicit protected DACL giving the lawyer and the pool user read and write (no
