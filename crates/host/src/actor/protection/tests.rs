@@ -1,10 +1,13 @@
-//! The map from a detection to the wire's protection, `retry_asks_admin`, and when the view
-//! counts as changed (the settings' hook).
+//! The map from a detection to the wire's protection, `retry_asks_admin`, when the view
+//! counts as changed (the settings' hook), and, with no sandbox wired, the one warning that the
+//! `sandbox.*` keys set are ignored.
 
 use clauseo_protocol::{NotProtectedCause, Protection, ProtectionTier, UnsupportedWhy};
 use clauseo_sandbox::{Detection, NoSandbox, SetupState, Tier};
 
 use super::{Observed, ProtectionHost, asks_admin, observe, protection_of};
+
+mod ignored;
 
 fn c(reason: NoSandbox) -> Detection {
     Detection {

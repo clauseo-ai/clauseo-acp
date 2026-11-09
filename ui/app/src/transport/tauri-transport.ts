@@ -88,9 +88,10 @@ export type TauriOptions = {
 
 export class TauriTransport implements HostTransport, AppFeedSource, LimitsSource {
   readonly kind = "tauri";
-  /** UC: the desktop carries the protection wire (settings/sections/workspace-shown.ts); before R17 PR-B its host
-   * answers `command.invalid`, which hides or quiets every protection line. */
-  readonly protectionWire = true;
+  /** UC: whether the desktop carries the protection wire (settings/sections/workspace-shown.ts). Off: the Safe
+   * workspace is parked for launch (Rohan, 2026-11-09), so Settings › Safe workspace and the first-run step stay
+   * hidden; it returns when desktop wires `with_sandbox`. The updater keeps its own flag (`updateWire`). */
+  readonly protectionWire = false;
   /** R23: the desktop carries the updater (store/update.ts): `get_update`, `update_changed` and its commands. */
   readonly updateWire = true;
   readonly #reader: ChannelReader;

@@ -94,12 +94,8 @@ fn a_create_keeps_its_details_and_list_matters_shows_every_field() {
             folder_display: work.join("State v. Kunal Desai").display().to_string(),
             folder_state: FolderState::Found,
             folder_support: None,
-            // No sandbox seam: this build's protection is not built (0051).
-            protection: Some(clauseo_protocol::Protection::NotProtected {
-                cause: clauseo_protocol::NotProtectedCause::Unsupported {
-                    why: clauseo_protocol::UnsupportedWhy::NotBuilt,
-                },
-            }),
+            // No sandbox wired: the Safe workspace is parked for launch, so no protection (0051).
+            protection: None,
         }
     );
     // The Scratch matter is listed first (oldest), with no details, and outside this home it

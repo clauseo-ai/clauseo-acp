@@ -661,8 +661,9 @@ fails) is skipped and **locks each security key off**: `mcp.servers` empty, `too
 `tools.browser`, `tools.connectors`, `privacy.counts` and `privacy.crash_reports` false, `install.bundle` and
 `install.registry` unset, `skills.extra` `off`, `skills.allow_scripts` false, `skills.curated`
 empty, `update.mode` `none`, no `plans.<id>` at all, and the "Coming" keys below at their
-safe values (`sandbox.required` and `sandbox.allow_unprotected_auto` false, each `network` key
-unset, empty or false, but `network.unsafe_site_list_updates` true). The two `privacy` keys can
+safe values (`sandbox.required` and `sandbox.allow_unprotected_auto` false, which this release
+ignores: the Safe workspace comes after launch; each `network` key unset, empty or false, but
+`network.unsafe_site_list_updates` true). The two `privacy` keys can
 only be turned off by policy: a policy `true` for one is ignored with a warning, and the lawyer
 keeps their own switch. A key this version does not know is only a warning, so one profile can
 serve mixed versions, **unless its name looks like a security section's** (a section holding a
@@ -761,8 +762,8 @@ pull request that makes Clauseo act on it. Same formats as above ([decision
 
 | Key | Task | Note |
 |---|---|---|
-| `sandbox.required` | R17 | Boolean, default false, `REG_DWORD` 0 or 1. 1: on a computer that can't give the sandbox, no agent starts (`sandbox.required`). **Security key**: false if a source is unreadable; `sandbox.allow_unprotected_auto` carries the fail-closed |
-| `sandbox.allow_unprotected_auto` | R17 | Boolean, default true, `REG_DWORD` 0 or 1. 0: outside the Safe workspace Clauseo doesn't use an automatic mode: Claude asks before each change, and ChatGPT asks before changing files outside the matter's folder. **Security key**: false if a source is unreadable or the value does not type |
+| `sandbox.required` | R17 | **Ignored in this release** (the Safe workspace comes after launch); Clauseo logs once that it is set but ignored. Boolean, default false, `REG_DWORD` 0 or 1. 1: on a computer that can't give the sandbox, no agent starts (`sandbox.required`). **Security key**: false if a source is unreadable; `sandbox.allow_unprotected_auto` carries the fail-closed |
+| `sandbox.allow_unprotected_auto` | R17 | **Ignored in this release** (the Safe workspace comes after launch); Clauseo logs once that it is set but ignored. Boolean, default true, `REG_DWORD` 0 or 1. 0: outside the Safe workspace Clauseo doesn't use an automatic mode: Claude asks before each change, and ChatGPT asks before changing files outside the matter's folder. **Security key**: false if a source is unreadable or the value does not type |
 | `network.upstream_proxy` | R17 | `http` or `https` URL with a host; no user name, password, query or fragment (Clauseo stores no proxy password). Default none: the proxy the OS is set to. `REG_SZ`. **Security key**: unset if a source is unreadable |
 | `network.ca_certs` | R17 | Object: agent id to the absolute path of a CA file, trusted besides the system's. Default empty. `REG_SZ`, JSON: `{"claude-acp": "C:\\ProgramData\\Firm\\ca.pem"}`. Replaces the user's whole map; a bad entry is left out with a warning. **Security key**: empty if a source is unreadable |
 | `network.allowed_domains` | R17 | List of host names (`*.firm.example` for every name under it), added to every matter's allowlist. Default empty. `REG_MULTI_SZ`. Policy only: a `settings.json` value is ignored with a warning; a bad entry is left out with a warning. **Security key**: empty if a source is unreadable |
