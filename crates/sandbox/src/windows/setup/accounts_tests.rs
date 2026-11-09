@@ -251,11 +251,13 @@ fn elevated_accounts_group_hidden_user_and_record() {
         data_dir: PathBuf::from(r"C:\ClauseoAcct\data"),
         removing: false,
     };
+    // The SD is read before `read_record`: its vendor-key walk resets this key, which is not
+    // the pinned `Sandbox`, to the inherited SD, as it does any key it keeps.
     machine.write_record(&record).unwrap();
-    assert_eq!(machine.read_record(), Ok(Some(record.clone())));
     let taken = key_sddl(TEST_KEY).unwrap();
     assert!(taken.starts_with("O:BAD:P"), "{taken}");
     assert!(!taken.contains(";;;WD)"), "{taken}");
+    assert_eq!(machine.read_record(), Ok(Some(record.clone())));
 
     // The user: made once, never adopted.
     let password = machine.new_password();
@@ -295,13 +297,13 @@ fn elevated_accounts_group_hidden_user_and_record() {
     // The record, whole, with its protected DACL; the owner is never a pool user.
     record.removing = true;
     machine.write_record(&record).unwrap();
-    assert_eq!(machine.read_record(), Ok(Some(record.clone())));
     let sddl = key_sddl(TEST_KEY).unwrap();
     assert!(sddl.starts_with("O:BAD:P"), "{sddl}");
     for entry in ["(A;CI;KA;;;SY)", "(A;CI;KA;;;BA)", "(A;CI;KR;;;BU)"] {
         assert!(sddl.contains(entry), "{sddl} lacks {entry} ({RECORD_SDDL})");
     }
     assert_eq!(sddl.matches("(A;").count(), 3, "{sddl}");
+    assert_eq!(machine.read_record(), Ok(Some(record.clone())));
     let mut bad = record.clone();
     bad.pool.push(owner);
     assert!(machine.write_record(&bad).is_err());

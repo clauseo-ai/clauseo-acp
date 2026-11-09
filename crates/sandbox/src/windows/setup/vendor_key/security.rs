@@ -70,14 +70,27 @@ pub(super) fn take_over_steps(sddl: &str) -> [Step; 2] {
     ]
 }
 
-/// The SDDL aliases Clauseo's keys and their owners use, and the SIDs they stand for.
-const ALIASES: [(&str, &str); 6] = [
+/// The SDDL aliases Clauseo's keys and their owners use, and the SIDs they stand for, with the
+/// aliases Windows writes for the other well-known accounts and groups a key's owner can be.
+const ALIASES: [(&str, &str); 18] = [
     ("SY", "S-1-5-18"),
     ("BA", "S-1-5-32-544"),
     ("BU", "S-1-5-32-545"),
     ("WD", "S-1-1-0"),
     ("CO", "S-1-3-0"),
     ("AU", "S-1-5-11"),
+    ("AN", "S-1-5-7"),
+    ("NU", "S-1-5-2"),
+    ("IU", "S-1-5-4"),
+    ("SU", "S-1-5-6"),
+    ("RC", "S-1-5-12"),
+    ("LS", "S-1-5-19"),
+    ("NS", "S-1-5-20"),
+    ("WR", "S-1-5-33"),
+    ("BG", "S-1-5-32-546"),
+    ("PU", "S-1-5-32-547"),
+    ("BO", "S-1-5-32-551"),
+    ("AC", "S-1-15-2-1"),
 ];
 
 /// The SIDs whose ownership set-up accepts: SYSTEM and Administrators.

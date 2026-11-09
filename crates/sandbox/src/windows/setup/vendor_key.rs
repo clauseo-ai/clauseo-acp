@@ -10,7 +10,8 @@
 //!    - a key holding a link value (a link, or a fake one) is deleted with what is under it;
 //!    - a key owned by anyone but SYSTEM, Administrators or a member of Administrators was
 //!      planted, and is deleted with what is under it, which also voids the planter's open
-//!      handles. Only a local account (its SID in this machine's account domain) is judged by
+//!      handles. A well-known owner outside the account domains (Users, Everyone) is a planter.
+//!      Only a local account (its SID in this machine's account domain) is judged by
 //!      membership: a domain account's nested groups need the domain controller, so it counts
 //!      as unresolved. A key whose owner is unresolved is kept, unless it is one the SYSTEM side
 //!      trusts ([`pinned`]);
@@ -437,11 +438,19 @@ fn visit<T: Tree>(
     }))
 }
 
-/// Who `sid`, a key's owner before the take-over, is. Only a local account is judged by
-/// membership; any other is unresolved, as is everyone when the local domain can't be read.
+/// Who `sid`, a key's owner before the take-over, is. A well-known SID outside the account
+/// domains (Users, Everyone, a service) is no account in Administrators, so a planter. Only a
+/// local account is judged by membership; a domain account is unresolved, as is an alias this
+/// module can't spell out (`LA`), and everyone when the local domain can't be read.
 fn owner_of<T: Tree>(tree: &mut T, sid: &str, local: &Result<[u32; 3], String>) -> Owner {
     if security::TRUSTED_OWNERS.contains(&sid) {
         return Owner::Admin;
+    }
+    if !sid.starts_with("S-") {
+        return Owner::Unresolved("an alias set-up can't spell out".to_owned());
+    }
+    if !sid.starts_with("S-1-5-21-") {
+        return Owner::Planter;
     }
     let local = match local {
         Ok(local) => local,
