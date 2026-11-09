@@ -57,6 +57,8 @@ pub(super) struct FakeAcl {
     pub(super) panic_present: Option<PathBuf>,
     /// Runs before each write, as another process acting meanwhile.
     pub(super) on_add: Option<OnAdd>,
+    /// Runs before each check of whether an entry is there, as another process acting meanwhile.
+    pub(super) on_present: Option<OnAdd>,
     /// A hand-back walk of this root fails, `PermissionDenied` on its `child`.
     pub(super) fail_reclaim: Option<PathBuf>,
     /// Children the lawyer can't open: a strict or hand-back walk over one refuses it, once
@@ -236,6 +238,9 @@ impl AclWriter for FakeAcl {
     }
 
     fn present(&mut self, grant: &Grant) -> io::Result<bool> {
+        if let Some(hook) = self.on_present.as_mut() {
+            hook(grant);
+        }
         assert!(
             self.panic_present.as_deref() != Some(grant.path()),
             "a crash during a check"

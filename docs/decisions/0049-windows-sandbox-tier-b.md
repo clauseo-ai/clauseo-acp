@@ -875,9 +875,11 @@ shared store is shared between matters, as the store's label is. An identical `O
 entry already there when a launch first lists ours, with none of ours naming it, is IT's
 ("subfolders and files only: Modify" is a common hardening entry): the ledger records it as
 found (`Entry::found`), and forget and `--remove` (an administrator's too) drop the listing
-without removing it. Ownership is the permission entry's, not one matter's: if IT takes its own
-off and a later launch writes ours, every matter's entry naming it is marked ours, and the last
-matter forgotten removes it.
+without removing it. Ownership is the permission entry's, not one matter's: whenever a launch finds it
+missing and writes ours (a new matter's first launch too), every matter's entry naming it is
+marked ours first, and the last matter forgotten removes it. Whether a new entry is IT's is
+decided under the ledger's lock, with the record (`record_pending_with`): one beside an entry of
+ours is ours, and no forget can come between the check and the mark.
 
 **The walk's repair in a guarded tree.** Python's `tempfile.mkdtemp` and `TemporaryDirectory`
 (3.12.4 and later, CPython `posixmodule.c`) make each folder with the protected DACL

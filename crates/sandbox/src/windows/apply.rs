@@ -234,8 +234,16 @@ fn run_plan(
     plan.retain_existing(exists);
     check_credentials(plan, acl, &*around)?;
     roots::hand_back_roots(plan, ledger, acl, pool)?;
+    // #808's N2: whether an `OWNER RIGHTS` entry is IT's is read under the ledger's lock.
+    let mut present = |g: &Grant| {
+        if g.rights() == Rights::OwnerModify {
+            acl.present(g)
+        } else {
+            Ok(false)
+        }
+    };
     ledger
-        .record_pending(plan)
+        .record_pending_with(plan, &mut present)
         .map_err(|e| refused(PathKind::Matter, ApplyFailure::Ledger(e.kind())))?;
     let mut run = Run::default();
     match write_all(ledger, plan, acl, around, own, &mut run) {
@@ -325,17 +333,21 @@ fn write_all(
                 .set_file(plan, id, &file)
                 .map_err(|e| ledger_failed(grant.kind(), e))?;
         }
-        // M2 of #808: an `OWNER RIGHTS` entry already there when first listed, and none of
-        // ours, is IT's (`Entry::found`); one found that is gone is written by us, so it is
-        // marked ours first, before the write.
+        // #808's M2 and N1: an `OWNER RIGHTS` entry missing is this launch's to write, so
+        // every entry naming it is marked ours first, before the write, new matter or not.
         if grant.rights() == Rights::OwnerModify {
             let there = acl.present(grant);
             let there =
                 there.map_err(|e| Refused::new(grant.kind(), ApplyFailure::Io(e.kind())))?;
-            let found = ledger.entries().any(|e| e.id == id && e.found);
-            if there != found && (found || plan.created().contains(&id)) {
+            let found = ledger.entries().any(|e| {
+                e.found
+                    && e.path == grant.path()
+                    && e.sid == *grant.sid()
+                    && (e.rights, e.inherit) == (grant.rights(), grant.inherit())
+            });
+            if !there && found {
                 let failed = |e| ledger_failed(grant.kind(), e);
-                ledger.set_found(plan, id, there).map_err(failed)?;
+                ledger.set_found(plan, id, false).map_err(failed)?;
             }
         }
         if grant.rights().is_label() && plan.created().contains(&id) {

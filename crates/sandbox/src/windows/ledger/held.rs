@@ -7,9 +7,11 @@ use std::path::Path;
 
 use clauseo_protocol::MatterId;
 
-use super::file::{Slot, State, Trust, exists, read_state, render};
+use serde_json::Map;
+
+use super::file::{Known, Slot, State, Trust, exists, invalid, read_state, render};
 use super::{Entry, EntryId, EntryState, LEDGER_LOCK, Take, TakenBack, owed, same_ace};
-use crate::windows::acl_plan::Rights;
+use crate::windows::acl_plan::{AdmittedPlan, Grant, Rights};
 use crate::windows::write;
 
 /// The file under the lock: what was read and changed, and what was last saved.
@@ -291,6 +293,63 @@ pub(super) fn set_found(state: &mut State, id: EntryId, found: bool) -> bool {
         }
     }
     changed
+}
+
+/// Each grant's entry, and the ones just added.
+pub(super) type Recorded = (Vec<EntryId>, Vec<EntryId>);
+
+/// [`Ledger::record_pending_with`](super::Ledger::record_pending_with)'s change: each of
+/// `plan`'s grants listed (revived when being removed), the new ones added `pending`. A new
+/// `OWNER RIGHTS` entry is found when no entry of ours names the same permission entry and
+/// `present` says it is there. Returns whether anything changed, each grant's entry and the new
+/// ones.
+pub(super) fn record(
+    state: &mut State,
+    plan: &AdmittedPlan,
+    present: &mut dyn FnMut(&Grant) -> io::Result<bool>,
+) -> io::Result<(bool, Recorded)> {
+    let mut entries = Vec::with_capacity(plan.grants().len());
+    let mut created = Vec::new();
+    let mut revived = false;
+    for (grant, &matter) in plan.grants().iter().zip(plan.owners()) {
+        let listed = state
+            .entries()
+            .find(|entry| entry.lists(matter, grant))
+            .map(|entry| entry.id);
+        if let Some(id) = listed {
+            revived |= revive(state, id);
+            entries.push(id);
+            continue;
+        }
+        let id = EntryId(state.next_id);
+        state.next_id = state
+            .next_id
+            .checked_add(1)
+            .ok_or_else(|| invalid("the ACL ledger ran out of entry numbers"))?;
+        let entry = Entry {
+            id,
+            matter,
+            state: EntryState::Pending,
+            path: grant.path().to_owned(),
+            sid: grant.sid().clone(),
+            rights: grant.rights(),
+            inherit: grant.inherit(),
+            kind: grant.kind(),
+            prior_label: None,
+            file: None,
+            found: false,
+        };
+        let ours = state.entries().any(|o| !o.found && same_ace(o, &entry));
+        let found = entry.rights == Rights::OwnerModify && !ours && present(grant)?;
+        state.slots.push(Slot::Known(Known {
+            entry: Entry { found, ..entry },
+            extra: Map::new(),
+        }));
+        entries.push(id);
+        created.push(id);
+    }
+    let changed = revived || !created.is_empty();
+    Ok((changed, (entries, created)))
 }
 
 /// Marks each of `ids` still `pending` `applied`; whether any changed.

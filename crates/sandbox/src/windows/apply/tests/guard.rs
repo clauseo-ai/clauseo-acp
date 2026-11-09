@@ -152,3 +152,110 @@ fn an_owner_rights_entry_rewritten_is_ours_for_every_matter_naming_it() {
     );
     assert_eq!(ledger.entries().count(), 0);
 }
+
+/// #808's N1: a new matter's first write of an `OWNER RIGHTS` entry IT took off marks every
+/// entry naming it ours, so the last matter forgotten removes it.
+#[test]
+fn a_new_matters_write_marks_every_found_entry_ours() {
+    let w = world("apply-guard-found-new", &[]);
+    let (mut ledger, mut acl) = (ledger(&w), FakeAcl::default());
+    let matter = w.canonical("matter");
+    let mut one = guarded_plan(&w);
+    let ow = one
+        .grants()
+        .iter()
+        .find(|g| g.path() == matter && g.rights() == Rights::OwnerModify)
+        .cloned()
+        .unwrap();
+    acl.aces.insert(key(&ow));
+    apply(&mut ledger, &mut one, &mut acl, &mut around(&w)).unwrap();
+    let found = |l: &Ledger| l.entries().filter(|e| e.found).count();
+    assert_eq!(found(&ledger), 1, "matter one lists IT's");
+
+    acl.aces.remove(&key(&ow));
+    let mut two = AdmittedPlan::from_grants(matter_two(), vec![ow.clone()]);
+    apply(&mut ledger, &mut two, &mut acl, &mut around(&w)).unwrap();
+    assert!(acl.aces.contains(&key(&ow)), "matter two wrote ours");
+    assert_eq!(found(&ledger), 0, "and matter one's entry names ours now");
+
+    forget_matter(&mut ledger, matter_two(), &mut acl, &mut around(&w)).unwrap();
+    assert!(acl.aces.contains(&key(&ow)), "matter one still names it");
+    forget_matter(&mut ledger, matter_one(), &mut acl, &mut around(&w)).unwrap();
+    assert!(
+        !acl.aces.contains(&key(&ow)),
+        "the last one forgotten removes it"
+    );
+}
+
+/// #808's N2: whether a new `OWNER RIGHTS` entry is ours is decided under the ledger's lock,
+/// with the record: matter two's entry is ours, so matter one's is listed ours, and either
+/// forget order leaves nothing behind once both are forgotten.
+#[test]
+fn an_entry_listed_beside_one_of_ours_is_ours() {
+    let w = world("apply-guard-ours", &[]);
+    let (mut ledger, mut acl) = (ledger(&w), FakeAcl::default());
+    let matter = w.canonical("matter");
+    let ow = guarded_plan(&w)
+        .grants()
+        .iter()
+        .find(|g| g.path() == matter && g.rights() == Rights::OwnerModify)
+        .cloned()
+        .unwrap();
+    let mut two = AdmittedPlan::from_grants(matter_two(), vec![ow.clone()]);
+    apply(&mut ledger, &mut two, &mut acl, &mut around(&w)).unwrap();
+    assert!(acl.aces.contains(&key(&ow)), "matter two wrote ours");
+    let mut one = guarded_plan(&w);
+    apply(&mut ledger, &mut one, &mut acl, &mut around(&w)).unwrap();
+    assert_eq!(
+        ledger.entries().filter(|e| e.found).count(),
+        0,
+        "ours, not IT's"
+    );
+    forget_matter(&mut ledger, matter_two(), &mut acl, &mut around(&w)).unwrap();
+    assert!(acl.aces.contains(&key(&ow)), "matter one still names it");
+    forget_matter(&mut ledger, matter_one(), &mut acl, &mut around(&w)).unwrap();
+    assert!(
+        !acl.aces.contains(&key(&ow)),
+        "the last one forgotten removes it"
+    );
+}
+
+/// #808's N2: the check of whether a new `OWNER RIGHTS` entry is there runs with the ledger's
+/// lock held, so no forget can come between the answer and the mark: a forget then would have
+/// to wait for the lock (here, a try at it fails).
+#[test]
+fn the_check_for_its_entry_runs_under_the_ledgers_lock() {
+    use std::cell::RefCell;
+    use std::rc::Rc;
+    use std::time::Duration;
+
+    let w = world("apply-guard-found-lock", &["sib1"]);
+    let (mut ledger, mut acl) = (ledger(&w), FakeAcl::default());
+    // Another matter's entry, so the ledger file (and its lock) exists.
+    let mut two = AdmittedPlan::from_grants(matter_two(), vec![sibling_deny(&w)]);
+    ledger.record_pending(&mut two).unwrap();
+    let mut one = guarded_plan(&w);
+    let matter = w.canonical("matter");
+    let ow = one
+        .grants()
+        .iter()
+        .find(|g| g.path() == matter && g.rights() == Rights::OwnerModify)
+        .cloned()
+        .unwrap();
+    acl.aces.insert(key(&ow));
+    let lock = ledger_path(&w.at("data")).with_file_name(crate::windows::ledger::LEDGER_LOCK);
+    let seen: Rc<RefCell<Vec<bool>>> = Rc::default();
+    let record = Rc::clone(&seen);
+    let at = ow.path().to_owned();
+    acl.on_present = Some(Box::new(move |grant: &Grant| {
+        if grant.rights() == Rights::OwnerModify && grant.path() == at {
+            let free = crate::windows::write::lock_exclusive_for(&lock, Duration::ZERO).is_ok();
+            record.borrow_mut().push(free);
+        }
+    }));
+    apply(&mut ledger, &mut one, &mut acl, &mut around(&w)).unwrap();
+    acl.on_present = None;
+    // The record's check, under the lock, then the check before the write, which needs none.
+    assert_eq!(*seen.borrow(), [false, true]);
+    assert_eq!(ledger.entries().filter(|e| e.found).count(), 1, "IT's");
+}

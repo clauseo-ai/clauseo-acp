@@ -48,7 +48,6 @@ use std::path::{Path, PathBuf};
 
 use clauseo_protocol::MatterId;
 use serde::{Deserialize, Serialize};
-use serde_json::Map;
 
 use super::acl_plan::{AdmittedPlan, Grant, Inherit, Rights};
 use super::admit::PathKind;
@@ -68,7 +67,7 @@ mod settle;
 
 #[cfg(windows)]
 pub(crate) use file::from_bytes;
-use file::{Known, Slot, State, Trust, invalid, read_state};
+use file::{Slot, State, Trust, read_state};
 #[cfg(test)]
 pub(crate) use held::ByPath;
 #[cfg(not(test))]
@@ -235,53 +234,25 @@ impl Ledger {
     /// The file is untouched when every grant was listed already and none was being removed, or
     /// when the write fails.
     pub fn record_pending(&mut self, plan: &mut AdmittedPlan) -> io::Result<()> {
+        self.record_pending_with(plan, &mut |_| Ok(false))
+    }
+
+    /// [`Ledger::record_pending`], asking `present` under the same lock whether each `OWNER
+    /// RIGHTS` entry it adds is there already: one there with no entry of ours naming it is IT's
+    /// (`Entry::found`). A forget can't come between the answer and the mark (#808's N2).
+    pub fn record_pending_with(
+        &mut self,
+        plan: &mut AdmittedPlan,
+        present: &mut dyn FnMut(&Grant) -> io::Result<bool>,
+    ) -> io::Result<()> {
         if !plan.entries.is_empty() {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
                 "this plan was recorded already",
             ));
         }
-        let (entries, created) = self.update(true, |state| {
-            let mut entries = Vec::with_capacity(plan.grants().len());
-            let mut created = Vec::new();
-            let mut revived = false;
-            for (grant, &matter) in plan.grants().iter().zip(plan.owners()) {
-                let listed = state
-                    .entries()
-                    .find(|entry| entry.lists(matter, grant))
-                    .map(|entry| entry.id);
-                if let Some(id) = listed {
-                    revived |= held::revive(state, id);
-                    entries.push(id);
-                    continue;
-                }
-                let id = EntryId(state.next_id);
-                state.next_id = state
-                    .next_id
-                    .checked_add(1)
-                    .ok_or_else(|| invalid("the ACL ledger ran out of entry numbers"))?;
-                state.slots.push(Slot::Known(Known {
-                    entry: Entry {
-                        id,
-                        matter,
-                        state: EntryState::Pending,
-                        path: grant.path.clone(),
-                        sid: grant.sid.clone(),
-                        rights: grant.rights,
-                        inherit: grant.inherit,
-                        kind: grant.kind,
-                        prior_label: None,
-                        file: None,
-                        found: false,
-                    },
-                    extra: Map::new(),
-                }));
-                entries.push(id);
-                created.push(id);
-            }
-            let changed = revived || !created.is_empty();
-            Ok((changed, (entries, created)))
-        })?;
+        let record = |state: &mut State| held::record(state, plan, present);
+        let (entries, created) = self.update(true, record)?;
         plan.entries = entries;
         plan.created = created;
         Ok(())
