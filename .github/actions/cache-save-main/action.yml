@@ -1,0 +1,36 @@
+# Saves one Actions cache entry, from main only.
+#
+# - Saves only on main, in a scheduled run or a run on demand: a pull request, a merge group or a
+#   run on another branch saves nothing, so nothing they do can evict main's entries. They restore
+#   main's entries, which GitHub lets every ref do.
+# - It deletes nothing and needs no `actions: write`. Older entries of the key's family
+#   (.github/scripts/cache-families.txt) go after the saves, in the nightly prune jobs
+#   (ci.yml's cache-prune, e2e-windows.yml's e2e-cache-prune), so the entry runs restore is never
+#   gone before its replacement is saved.
+# - A failed save (the cache service down, or another job saving the same key first) is a warning
+#   from actions/cache/save.
+# - The caller checks out the repo first (`uses: ./...` reads this action from the checkout) and
+#   guards the step with whatever else must hold, such as a restore that missed.
+
+name: Save a cache entry from main
+description: Saves the key on main's scheduled and on-demand runs only; elsewhere does nothing.
+
+inputs:
+  path:
+    description: What to save, as actions/cache/save's `path`.
+    required: true
+  key:
+    description: The key to save under; cache-families.txt must have a line for it.
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Save the entry
+      if: >-
+        github.ref == 'refs/heads/main'
+        && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
+      uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ inputs.path }}
+        key: ${{ inputs.key }}

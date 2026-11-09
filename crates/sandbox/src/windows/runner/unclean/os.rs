@@ -1,6 +1,7 @@
 //! The markers' effects on Windows (`unclean.rs`), as the lawyer: the run folder's markers, the
 //! record's sequences and `PoolSids` (the record grants Users read), and requests for the stop
-//! and sweep tasks through the owner's `FRFX` entry. [`start_up_requests`] is the desktop's call.
+//! and sweep tasks through the owner's `FRFX` entry. Every Task Scheduler call here is bounded
+//! (`refresh::task_call`, 10 s). [`start_up_requests`] is the desktop's call.
 
 use std::io::{self, Write as _};
 use std::path::{Path, PathBuf};
@@ -11,9 +12,14 @@ use super::super::marker::{
     write_marker_at,
 };
 use super::super::sweep::os::{outer_seen, own_outer};
-use super::{Markers, OuterSeen, Refused, StartUp, await_sweeps, logon_check, start_up};
+use super::{
+    Markers, OuterSeen, Refused, StartUp, await_sweeps, heal_first, logon_check, start_up,
+};
 use crate::windows::record::sandbox_pool_sids;
-use crate::windows::refresh::{request_pool_stop, request_pool_sweep};
+use crate::windows::refresh::{
+    launch_admin_refresh, launch_pool_stop, launch_pool_sweep, launch_tasks_repair,
+    recorded_admin_copy_sha256,
+};
 use crate::windows::setup::record_values::{STOP_SEQUENCE, SWEEP_SEQUENCE};
 use crate::windows::setup::{read_record_install_id, read_record_value};
 use crate::windows::sids::Sid;
@@ -76,11 +82,11 @@ impl Markers for OsMarkers {
     }
 
     fn request_stop(&mut self) -> bool {
-        request_pool_stop()
+        launch_pool_stop()
     }
 
     fn request_sweep(&mut self) -> Result<(), String> {
-        request_pool_sweep().map_err(|error| error.to_string())
+        launch_pool_sweep()
     }
 
     #[expect(
@@ -99,6 +105,18 @@ impl Markers for OsMarkers {
 
     fn outer(&mut self, pid: u32) -> OuterSeen {
         outer_seen(pid)
+    }
+
+    fn task_repair(&mut self) -> Option<&'static str> {
+        launch_tasks_repair()
+    }
+
+    fn heal_tasks(&mut self) -> bool {
+        launch_admin_refresh()
+    }
+
+    fn admin_copy_stamp(&mut self) -> Option<String> {
+        recorded_admin_copy_sha256().ok().flatten()
     }
 }
 
@@ -124,6 +142,14 @@ pub(crate) fn marked_as_outer<T>(
         own_outer()?,
         session,
     )
+}
+
+/// The host's call before it starts the outer runner for a tier-B launch, off the UI thread
+/// (COM calls, up to 20 s): heals a missing or changed stop or sweep task through the refresh
+/// task, calling `on_waiting` once when it does, so the host can show `unclean::HEALING`
+/// until this returns (`unclean::heal_first`). What the tasks still need, `None` when nothing.
+pub fn heal_before_launch(data_dir: &Path, on_waiting: impl FnOnce()) -> Option<&'static str> {
+    heal_first(&mut OsMarkers::new(data_dir), on_waiting)
 }
 
 /// A launch's check, for `clean_close::check_launch` (`unclean::await_sweeps`).

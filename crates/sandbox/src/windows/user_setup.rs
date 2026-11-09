@@ -55,6 +55,7 @@ use super::marker::setup_state;
 use super::matters::MatterSids;
 use super::reclaim::hand_back_after;
 use super::record::{sandbox_group_sid, sandbox_pool_sids};
+use super::refresh::ready_with_user_tasks;
 use super::setup::SetupExit;
 use super::setup::args::quote;
 use super::setup::around::Around;
@@ -229,12 +230,16 @@ impl SandboxSetup for UserSetup {
     /// blocked and nothing is set up since (`result_file::state_with`). The copy's hash is kept
     /// for its file identity between calls (`StateAdminCopy`). Never writes: the result file is
     /// read unchanged, and ignored unless it is this user's alone
-    /// (`result_file::read_unchanged`); `run` repairs it.
+    /// (`result_file::read_unchanged`); `run` repairs it. Last, on a per-user install, a
+    /// `Ready` whose SYSTEM stop or sweep task is missing, isn't the set-up's or can't be read
+    /// is [`SetupState::Failed`] in words for it, and one whose refresh task is is
+    /// [`SetupState::RepairNeeded`], so the app offers the set-up again, which puts the task
+    /// back (`refresh::ready_with_user_tasks`).
     fn state(&self) -> SetupState {
         let last = result_file::read_unchanged(&self.data_dir);
         let marker = setup_state(&self.data_dir);
         let combined = result_file::state_with(marker.clone(), &last);
-        protection_state(&StateAdminCopy, marker, combined)
+        ready_with_user_tasks(protection_state(&StateAdminCopy, marker, combined))
     }
 
     fn run(&self) -> Result<(), SetupError> {

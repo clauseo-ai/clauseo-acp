@@ -12,6 +12,10 @@ use crate::windows::fence::RegisteredMatter;
 use crate::windows::ledger::Ledger;
 use crate::windows::marker::{Marker, MarkerState};
 use crate::windows::pool::MachineRecord;
+#[cfg(any(windows, test))]
+use crate::windows::refresh::task_identity::AccountName;
+#[cfg(any(windows, test))]
+use crate::windows::refresh::{ReadError, SystemTask, TaskIdentity};
 use crate::windows::setup::record_values::CopyOwner;
 use crate::windows::sids::Sid;
 use crate::windows::wfp::{NetworkReport, NetworkSetup};
@@ -214,6 +218,41 @@ pub trait Machine {
     /// `\Clauseo\SandboxSweep` (`refresh::POOL_TASKS`) for the pool owner `owner`
     /// (`refresh::register_task`, as `--adopt` does per user), as this process.
     fn register_stop_task(&mut self, owner: &Sid) -> Result<(), MachineError>;
+    #[cfg(any(windows, test))]
+    /// The program a per-user install's SYSTEM tasks run, the admin copy, once it passes the
+    /// whole of `admin_copy::check` (`task_identity::action_exe`): its folders up to the volume
+    /// root, what else is in its folder, its recorded hash. Else why not: no task is registered.
+    fn task_exe(&mut self) -> Result<PathBuf, MachineError>;
+    #[cfg(any(windows, test))]
+    /// `task` as registered in `\Clauseo` (`refresh::read_task`), `None` when it isn't.
+    fn task_found(&mut self, task: SystemTask) -> Result<Option<TaskIdentity>, ReadError>;
+    #[cfg(any(windows, test))]
+    /// What `refresh::register_task` registers as `task` for `owner`, running `exe`
+    /// (`TaskIdentity::expected`, its descriptor as Windows writes it back).
+    fn task_expected(
+        &mut self,
+        task: SystemTask,
+        owner: &Sid,
+        exe: &Path,
+    ) -> Result<TaskIdentity, MachineError>;
+    #[cfg(any(windows, test))]
+    /// Registers `task` for the pool owner `owner`, or updates it in place, as `--adopt` does,
+    /// running `exe`, the path [`Machine::task_exe`] checked (`refresh::replace_task`), as this
+    /// process.
+    fn replace_task(
+        &mut self,
+        task: SystemTask,
+        owner: &Sid,
+        exe: &Path,
+    ) -> Result<(), MachineError>;
+    #[cfg(any(windows, test))]
+    /// Sets `task`'s own descriptor to `task_sddl(owner)`, as this process (elevated), when
+    /// registering it in place left an older one (`refresh::heal_task_descriptor`).
+    fn heal_task_descriptor(&mut self, task: SystemTask, owner: &Sid) -> Result<(), MachineError>;
+    #[cfg(any(windows, test))]
+    /// The account `sid` names, looked up locally (`refresh::local_account_name`), for the
+    /// compare of a task's principal and logon trigger when Windows gives back a name.
+    fn task_account_name(&mut self, sid: &Sid) -> Result<Option<AccountName>, String>;
     /// The users of `pool` the reuse rule would hold back once this run has reset `resets`, for
     /// the top-up's count (`top_up.rs`, `MatterSids::held_after_resets`), the owner's ledger
     /// opened trusting `trusted`; an input that can't be read holds every user. The engine calls

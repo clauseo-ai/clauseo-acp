@@ -282,6 +282,10 @@ impl Refresher for WindowsRefresher {
     fn log(&mut self, error: bool, line: &str) {
         event_log(error, line);
     }
+
+    fn keep_tasks(&mut self, owner: &Sid) -> Result<Vec<&'static str>, Failed> {
+        super::task_keep::keep_tasks(&mut super::task_read::OsKeeper, owner)
+    }
 }
 
 /// Sets the `REG_SZ` `name` of the record's key (which must exist) to `text`, and flushes the

@@ -10,12 +10,14 @@ use std::path::{Path, PathBuf};
 use crate::windows::acl_plan::Sid;
 use crate::windows::marker::Marker;
 use crate::windows::pool::MachineRecord;
+use crate::windows::refresh::task_identity::test_descriptor;
+use crate::windows::refresh::{ReadError, SystemTask, TaskIdentity};
 use crate::windows::setup::record_values::CopyOwner;
 
 use std::cell::Cell;
 use std::rc::Rc;
 
-use super::fake::{FakeMachine, OWNER, OWNER_NAME, VOLUME, sid};
+use super::fake::{FakeMachine, OWNER, OWNER_NAME, VOLUME, rid, sid};
 use crate::test_support::TempDir;
 use crate::windows::setup::{LogonRight, MachineError, ServiceStart};
 
@@ -166,8 +168,19 @@ pub(super) struct State {
     pub(super) copy_owner: Option<CopyOwner>,
     /// The owner the task `\Clauseo\SandboxStop`'s descriptor names, while it is registered.
     pub(super) stop_task: Option<Sid>,
+    /// A per-user install's tasks in `\Clauseo`, by name, as read back (`Machine::task_found`),
+    /// or the error reading one gives.
+    pub(super) tasks: BTreeMap<String, Result<TaskIdentity, ReadError>>,
     /// The SIDs local policy denies "log on through Remote Desktop Services".
     pub(super) remote_denied: BTreeSet<Sid>,
+}
+
+/// The admin copy's path, as the fake's tasks run it.
+pub(super) const TASK_EXE: &str = r"C:\Program Files\Clauseo\Sandbox\clauseo-sandbox-setup.exe";
+
+/// What `refresh::register_task` registers as `task` for `owner`, as the fake reads it back.
+pub(super) fn registered_task(task: SystemTask, owner: &Sid) -> TaskIdentity {
+    TaskIdentity::expected(task, owner, Path::new(TASK_EXE), test_descriptor(owner))
 }
 
 /// [`FakeMachine::new`]: a machine with only the owner's account, `DeviceSync`, an empty data
@@ -196,6 +209,7 @@ pub(super) fn new_machine(test: &str) -> FakeMachine {
             secrets: BTreeMap::new(),
             copy_owner: None,
             stop_task: None,
+            tasks: BTreeMap::new(),
             remote_denied: BTreeSet::new(),
         },
         written: Vec::new(),
@@ -261,6 +275,55 @@ impl FakeMachine {
             line.to_owned(),
             MachineError::Other(format!("injected: {line}")),
         ));
+    }
+
+    /// `replace_task`'s registration, in place as Windows does it: a task already there keeps
+    /// its own descriptor (an earlier build's, as the VM read it), the rest the set-up's.
+    pub(super) fn register_in_place(&mut self, task: SystemTask, owner: &Sid) {
+        let mut registered = registered_task(task, owner);
+        if let Some(Ok(kept)) = self.state.tasks.get(task.name()) {
+            registered.descriptor = kept.descriptor.clone();
+        }
+        self.state
+            .tasks
+            .insert(task.name().to_owned(), Ok(registered));
+    }
+
+    /// `heal_task_descriptor`: the task's own descriptor set to the set-up's.
+    pub(super) fn heal_descriptor(
+        &mut self,
+        task: SystemTask,
+        owner: &Sid,
+    ) -> Result<(), MachineError> {
+        assert!(!self.acting.get(), "the descriptor is set as admin");
+        self.call(format!(
+            "heal_task_descriptor {} {}",
+            task.name(),
+            rid(owner)
+        ))?;
+        if let Some(Ok(found)) = self.state.tasks.get_mut(task.name()) {
+            found.descriptor = test_descriptor(owner);
+        }
+        Ok(())
+    }
+
+    /// `task_account_name`, as `LookupAccountSidW` answers locally: LOCAL SYSTEM, and the
+    /// machine's accounts on `PC-7`. A failure is a `task_account_name <rid>` call told to fail.
+    pub(super) fn account_name_of(
+        &mut self,
+        sid: &Sid,
+    ) -> Result<Option<(String, String)>, String> {
+        self.call(format!("task_account_name {}", rid(sid)))
+            .map_err(|error| error.to_string())?;
+        if sid.as_str() == "S-1-5-18" {
+            return Ok(Some(("SYSTEM".to_owned(), "NT AUTHORITY".to_owned())));
+        }
+        let named = self
+            .state
+            .accounts
+            .iter()
+            .find(|(_, account)| account.sid == *sid);
+        Ok(named.map(|(name, _)| (name.clone(), "PC-7".to_owned())))
     }
 
     /// The calls since `from`.

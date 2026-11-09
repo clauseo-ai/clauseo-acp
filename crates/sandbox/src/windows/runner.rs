@@ -123,10 +123,10 @@ pub use policy::{codex_reuse_in_policy, granted_paths};
 /// The s15 harness's control stations read their names the way the outer does.
 #[cfg(any(windows, test))]
 pub use station::station_name_of_path;
-#[cfg(any(windows, test))]
-pub use unclean::StartUp;
 #[cfg(windows)]
-pub use unclean::os::start_up_requests;
+pub use unclean::os::{heal_before_launch, start_up_requests};
+#[cfg(any(windows, test))]
+pub use unclean::{HEALING, StartUp};
 
 /// The runner's file name in the install folder. Kept stable: per-user installs grant it to the
 /// pool users (S15 `PR8`).

@@ -28,7 +28,10 @@ use crate::windows::wfp::{NetworkReport, NetworkSetup};
 pub(super) use super::fake_acl::FakeAcl;
 pub(super) use super::fake_more::folder_name;
 pub(super) use super::fake_more::{Account, State};
-use super::fake_more::{Around, ProfileFaults};
+use super::fake_more::{Around, ProfileFaults, TASK_EXE};
+use crate::windows::refresh::task_identity::{AccountName, test_descriptor};
+use crate::windows::refresh::{ReadError, SystemTask, TaskIdentity as Task, TaskIdentity};
+use crate::windows::setup::MachineError as Error;
 
 /// The owner's SID, and its account's name.
 pub(super) const OWNER: &str = "S-1-5-21-7-8-9-1001";
@@ -472,6 +475,40 @@ impl Machine for FakeMachine {
         self.call(format!("register_stop_task {}", rid(owner)))?;
         self.state.stop_task = Some(owner.clone());
         Ok(())
+    }
+
+    fn task_exe(&mut self) -> Result<PathBuf, MachineError> {
+        self.call("task_exe".to_owned())?;
+        Ok(PathBuf::from(TASK_EXE))
+    }
+
+    fn task_found(&mut self, task: SystemTask) -> Result<Option<TaskIdentity>, ReadError> {
+        self.state.tasks.get(task.name()).cloned().transpose()
+    }
+
+    fn task_expected(&mut self, task: SystemTask, owner: &Sid, exe: &Path) -> Result<Task, Error> {
+        let descriptor = test_descriptor(owner);
+        Ok(TaskIdentity::expected(task, owner, exe, descriptor))
+    }
+
+    fn replace_task(&mut self, task: SystemTask, owner: &Sid, exe: &Path) -> Result<(), Error> {
+        assert!(!self.acting.get(), "the task is registered as admin");
+        assert_eq!(
+            exe,
+            Path::new(TASK_EXE),
+            "the path checked is the path registered"
+        );
+        self.call(format!("replace_task {} {}", task.name(), rid(owner)))?;
+        self.register_in_place(task, owner);
+        Ok(())
+    }
+
+    fn heal_task_descriptor(&mut self, task: SystemTask, owner: &Sid) -> Result<(), Error> {
+        self.heal_descriptor(task, owner)
+    }
+
+    fn task_account_name(&mut self, sid: &Sid) -> Result<Option<AccountName>, String> {
+        self.account_name_of(sid)
     }
 
     fn held_users(

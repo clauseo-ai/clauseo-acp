@@ -129,6 +129,8 @@ fn an_unreadable_build_is_a_failed_probe() {
 fn each_setup_state_gives_its_tier_or_reason() {
     let cases = [
         (SetupState::Ready, tier_b()),
+        // Working, with a repair to offer (the refresh task gone): still tier B.
+        (SetupState::RepairNeeded("x".to_owned()), tier_b()),
         (SetupState::Needed, Detection::none(NoSandbox::NeedsSetUp)),
         (
             SetupState::Outdated {

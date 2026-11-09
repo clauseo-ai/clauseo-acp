@@ -1,0 +1,29 @@
+# The Actions cache families main keeps: one line each, a name, a regex (jq's, Oniguruma) that
+# matches a whole key, and optionally idle=<days>. cache-entries.sh prune reads it, after the saves
+# (ci.yml's nightly cache-prune job, e2e-windows.yml's e2e-cache-prune):
+# - A family is a line's name plus what the regex's capture groups match, so one line with groups
+#   can stand for many families (one per OS, one per runner image and package list).
+# - In each family every main entry but the newest is deleted; with idle=<days>, any entry not
+#   accessed for that many days is deleted too.
+# - A main entry no line matches is deleted once it has not been accessed for 3 days.
+# A job that saves a new kind of entry adds its line here in the same change;
+# cache-keys-test.rb derives the keys from the workflows and fails on one no line matches. A key
+# may match one line only.
+# Rust (Swatinem/rust-cache): <prefix-key>-<key>-<job id>-<os type>-<arch>-<env hash>-<lock hash>.
+v1-rust-aarch64-apple-darwin        ^v1-rust-aarch64-apple-darwin-build-Darwin-arm64-[0-9a-f]+-[0-9a-f]+$
+v1-rust-x86_64-pc-windows-msvc      ^v1-rust-x86_64-pc-windows-msvc-build-Windows_NT-x64-[0-9a-f]+-[0-9a-f]+$
+v1-rust-x86_64-unknown-linux-gnu    ^v1-rust-x86_64-unknown-linux-gnu-build-Linux-x64-[0-9a-f]+-[0-9a-f]+$
+rust-fast-lane                      ^v0-rust-ubuntu-22\.04-fast-lane-Linux-x64-[0-9a-f]+-[0-9a-f]+$
+rust-reducer-bench                  ^v0-rust-reducer-bench-reducer-bench-Linux-x64-[0-9a-f]+-[0-9a-f]+$
+rust-mutants                        ^v0-rust-mutants-mutants-Linux-x64-[0-9a-f]+-[0-9a-f]+$
+rust-e2e-x86_64-pc-windows-msvc     ^v0-rust-e2e-x86_64-pc-windows-msvc-smoke-Windows_NT-x64-[0-9a-f]+-[0-9a-f]+$
+rust-scoreboard-macos               ^v0-rust-scoreboard-macos-scoreboard-macos-Darwin-arm64-[0-9a-f]+-[0-9a-f]+$
+rust-scoreboard-windows-lto         ^v0-rust-scoreboard-windows-lto-scoreboard-windows-lto-Windows_NT-x64-[0-9a-f]+-[0-9a-f]+$
+# The pnpm store (.github/actions/pnpm-store): one family per OS and arch; the hash is the lockfile's.
+node-cache                          ^(node-cache-(?:Linux|Windows|macOS)-(?:x64|arm64)-pnpm)-[0-9a-f]{64}$
+# The .deb files (install-tauri-linux-deps): one family per image version and package list, as
+# old and new runner images run side by side for days; an entry goes once unused for 3 days.
+tauri-linux-debs                    ^(tauri-linux-debs-[A-Z0-9]+-[a-z0-9-]+-[0-9]{8}\.[0-9.]+-libwebkit2gtk-4\.1-dev(?:\+[a-z0-9.-]+)*)$   idle=3
+# The pinned tools (install-pinned-tools): one family per image, arch and tool list; the last
+# 16 hex digits hash the versions and checksums.
+pinned-tools                        ^(pinned-tools-v1-.+)-[0-9a-f]{16}$

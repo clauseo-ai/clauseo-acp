@@ -10,6 +10,7 @@
 //! scripts that install the tools another way. Its format is written out once, in `--help` (the
 //! `list` field of `Commands::Setup` in `main.rs`).
 
+mod bin_sha256;
 mod install;
 mod list;
 mod version;
@@ -29,6 +30,13 @@ use version::{Attempt, VersionCheck, compare_version};
 pub(crate) struct Tool {
     pub name: &'static str,
     pub version: &'static str,
+    /// The sha256 of the prebuilt binary of `version` that taiki-e/install-action installs, one
+    /// per OS and arch where it has one. install-pinned-tools checks a cached copy of the tool
+    /// against this before it saves the copy and again after it restores it
+    /// (.github/actions/install-pinned-tools/tool-cache.sh); `cargo install` here builds from
+    /// source and does not use it. They live in `setup/bin_sha256.rs`, which says where each comes
+    /// from; a version bump changes them with `version`.
+    pub bin_sha256: &'static [AssetSha256],
 }
 
 /// Bump these together with the toolchain, in their own pull request.
@@ -36,22 +44,27 @@ pub(crate) const TOOLS: &[Tool] = &[
     Tool {
         name: "cargo-nextest",
         version: "0.9.148",
+        bin_sha256: bin_sha256::CARGO_NEXTEST,
     },
     Tool {
         name: "cargo-deny",
         version: "0.20.2",
+        bin_sha256: bin_sha256::CARGO_DENY,
     },
     Tool {
         name: "cargo-shear",
         version: "1.14.0",
+        bin_sha256: bin_sha256::CARGO_SHEAR,
     },
     Tool {
         name: "typos-cli",
         version: "1.51.1",
+        bin_sha256: bin_sha256::TYPOS_CLI,
     },
     Tool {
         name: "taplo-cli",
         version: "0.10.0",
+        bin_sha256: bin_sha256::TAPLO_CLI,
     },
     CARGO_MUTANTS,
 ];
@@ -60,6 +73,7 @@ pub(crate) const TOOLS: &[Tool] = &[
 pub(crate) const CARGO_MUTANTS: Tool = Tool {
     name: "cargo-mutants",
     version: "27.1.0",
+    bin_sha256: bin_sha256::CARGO_MUTANTS,
 };
 
 /// A pinned tool that is not a cargo crate. `setup` checks that `<name> version` prints exactly
@@ -81,11 +95,12 @@ pub(crate) struct Binary {
     pub packing: Packing,
 }
 
-/// The sha256 of one release asset, for an OS and arch as in `std::env::consts`.
+/// A pinned sha256, of a release asset (`Binary`) or of a prebuilt binary (`Tool`), for an OS
+/// and arch as in `std::env::consts`.
 pub(crate) struct AssetSha256 {
     pub os: &'static str,
     pub arch: &'static str,
-    /// Lowercase hex, as in the release's checksum file.
+    /// Lowercase hex.
     pub sha256: &'static str,
 }
 

@@ -322,7 +322,7 @@ fn checked<H>(
 /// `%ProgramFiles%`, `Clauseo`, `Sandbox` and the copy; each a folder (the copy a file) that is
 /// no link, the root with a [`root_safe`] owner and DACL, every other level [`level_safe`]. A
 /// `%ProgramFiles%` that isn't on a drive letter (`above` gives nothing) is unsafe.
-fn check_chain(fs: &dyn AdminCopyFs, program_files: &Path, exe: &Path) -> Result<(), Blocked> {
+pub fn check_chain(fs: &dyn AdminCopyFs, program_files: &Path, exe: &Path) -> Result<(), Blocked> {
     let Some(above) = above(program_files) else {
         tracing::warn!("Program Files isn't a folder on a drive letter");
         return Err(Blocked::AdminCopyUnsafe);

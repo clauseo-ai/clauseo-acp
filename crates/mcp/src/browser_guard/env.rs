@@ -67,17 +67,16 @@ const PROXY_VARS_LOWER: &[&str] = &["http_proxy", "https_proxy", "all_proxy"];
 
 /// Unix `PATH`.
 const UNIX_PATH: &str = "/usr/bin:/bin:/usr/sbin:/sbin";
-/// Windows `SystemRoot` when the guard's environment has none.
-const DEFAULT_SYSTEM_ROOT: &str = r"C:\Windows";
+/// Windows folder when the Windows directory cannot be read (see [`WindowsDirs`]).
+const DEFAULT_WINDOWS_DIR: &str = r"C:\Windows";
+/// Windows `PATHEXT` when the guard's environment has none: Windows' own default.
+const DEFAULT_PATHEXT: &str = ".COM;.EXE;.BAT;.CMD";
 
-/// Passed through from the guard's environment, only when present.
+/// Passed through from the guard's environment, only when present. Windows' `SystemRoot`,
+/// `windir`, `ComSpec` and `PATHEXT` are not here: [`build`] always sets them.
 const PASS_UNIX: &[&str] = &["LANG"];
 const PASS_WINDOWS: &[&str] = &[
-    "SystemRoot",
-    "windir",
     "SystemDrive",
-    "ComSpec",
-    "PATHEXT",
     "ProgramFiles",
     "ProgramFiles(x86)",
     "ProgramW6432",
@@ -119,6 +118,17 @@ fn folder_table(os: Os) -> &'static [(&'static str, &'static [&'static str])] {
         Os::Unix => FOLDERS_UNIX,
         Os::Windows => FOLDERS_WINDOWS,
     }
+}
+
+/// The Windows folders the child's defaults come from. The caller reads them from Windows
+/// (`job/spawn.rs`) and passes them in, so [`build`] stays pure and runs on every OS. `None`
+/// where the read failed or off Windows; the defaults then are `C:\Windows` and its `System32`.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(crate) struct WindowsDirs {
+    /// The Windows directory (`GetWindowsDirectoryW`): the default `SystemRoot` and `windir`.
+    pub(crate) windows: Option<PathBuf>,
+    /// The system directory (`GetSystemDirectoryW`): where `ComSpec`'s `cmd.exe` is.
+    pub(crate) system: Option<PathBuf>,
 }
 
 /// The guard's own environment, in the order the OS gave it.
@@ -202,10 +212,13 @@ impl fmt::Display for EnvError {
 /// on the first required variable that is missing or invalid, in the order config, proxy,
 /// executable path, session, socket folder (Unix only), stream port; never falls back. The Unix
 /// socket folder is checked here only for being absolute; `socket.rs` checks the folder itself.
+/// On Windows, `dirs` supplies the defaults [`windows_defaults`] gives the variables the guard's
+/// environment lacks.
 pub(crate) fn build(
     source: &Source,
     os: Os,
     cwd: &Path,
+    dirs: &WindowsDirs,
 ) -> Result<BTreeMap<String, OsString>, EnvError> {
     let config = required(source, os, CONFIG, is_local_file, Problem::NotFile)?;
     let proxy = required(
@@ -282,18 +295,62 @@ pub(crate) fn build(
     match os {
         Os::Unix => set("PATH", OsStr::new(UNIX_PATH)),
         Os::Windows => {
-            let root = source
-                .get(os, "SystemRoot")
-                .unwrap_or(OsStr::new(DEFAULT_SYSTEM_ROOT));
-            // Windows networking needs SystemRoot; set it when the guard's own lacks it.
-            set("SystemRoot", root);
-            let mut path = root.to_owned();
-            path.push(r"\System32;");
-            path.push(root);
-            set("PATH", &path);
+            for (name, value) in windows_defaults(source, dirs) {
+                set(name, &value);
+            }
         }
     }
     Ok(env)
+}
+
+/// Windows' `SystemRoot`, `windir`, `ComSpec`, `PATHEXT` and `PATH`. The first four are the
+/// guard's own value when it has one (matched without case, first match wins); otherwise a
+/// default: `SystemRoot` the Windows directory from `dirs`, `windir` the resolved `SystemRoot`,
+/// `ComSpec` `cmd.exe` in the system directory from `dirs` (else `<SystemRoot>\System32`),
+/// `PATHEXT` Windows' own. `PATH` is that system directory, then `<SystemRoot>`. Winsock needs
+/// `SystemRoot`; agent-browser, Chrome and the relay need `windir` and `ComSpec` to run a shell,
+/// and `PATHEXT` to find `.cmd` and `.exe` programs.
+fn windows_defaults(source: &Source, dirs: &WindowsDirs) -> Vec<(&'static str, OsString)> {
+    let os = Os::Windows;
+    let windows = dirs
+        .windows
+        .clone()
+        .unwrap_or_else(|| PathBuf::from(DEFAULT_WINDOWS_DIR))
+        .into_os_string();
+    let root = source
+        .get(os, "SystemRoot")
+        .map_or(windows, OsStr::to_owned);
+    let windir = source
+        .get(os, "windir")
+        .map_or_else(|| root.clone(), OsStr::to_owned);
+    let system = dirs
+        .system
+        .clone()
+        .map_or_else(|| windows_join(&root, "System32"), PathBuf::into_os_string);
+    let comspec = source
+        .get(os, "ComSpec")
+        .map_or_else(|| windows_join(&system, "cmd.exe"), OsStr::to_owned);
+    let pathext = source
+        .get(os, "PATHEXT")
+        .map_or_else(|| OsString::from(DEFAULT_PATHEXT), OsStr::to_owned);
+    let mut path = system;
+    path.push(";");
+    path.push(&root);
+    vec![
+        ("SystemRoot", root),
+        ("windir", windir),
+        ("ComSpec", comspec),
+        ("PATHEXT", pathext),
+        ("PATH", path),
+    ]
+}
+
+/// `dir\name`: a Windows path, joined with a backslash whatever OS builds it.
+fn windows_join(dir: &OsStr, name: &str) -> OsString {
+    let mut joined = dir.to_owned();
+    joined.push(r"\");
+    joined.push(name);
+    joined
 }
 
 /// Adds [`CDP`]: the browser endpoint `chrome.rs` read and checked.

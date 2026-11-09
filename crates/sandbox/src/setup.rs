@@ -28,7 +28,8 @@ pub trait SandboxSetup: Send + Sync {
     fn remove(&self) -> Result<(), SetupError>;
 }
 
-/// What the set-up is in. Every state but [`SetupState::Ready`] keeps the machine on tier C, with
+/// What the set-up is in. Every state but [`SetupState::Ready`] and [`SetupState::RepairNeeded`]
+/// keeps the machine on tier C, with
 /// the [`NoSandbox`](crate::NoSandbox) reason [`detect`](crate::detect) maps it to.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SetupState {
@@ -56,6 +57,11 @@ pub enum SetupState {
     /// change (D-B4), and nothing has been set up since: `SetUpBlocked`. Trying again asks for
     /// an administrator again, and fails again until the setting changes.
     Blocked(Blocked),
+    /// Set up and working, tier B as [`SetupState::Ready`] is, but a repair would put back
+    /// something that keeps it current: on a per-user Windows install, the SYSTEM refresh task
+    /// that updates the admin copy is missing or changed. What to tell the lawyer. Launches go
+    /// ahead; the app offers the repair, which runs the set-up, with its administrator prompt.
+    RepairNeeded(String),
 }
 
 /// Why a set-up step failed.

@@ -347,7 +347,7 @@ fn principal(task: &IRegisteredTask) -> Result<Principal, Failed> {
 
 /// The SID of the account or group `name`, as `LookupAccountNameW` resolves it on this machine
 /// (a local, built-in, well-known or domain name). The error names the call, never `name`.
-fn lookup_account(name: &str) -> Result<Sid, Failed> {
+pub(crate) fn lookup_account(name: &str) -> Result<Sid, Failed> {
     let name = HSTRING::from(name);
     let (mut sid_size, mut domain_size) = (0u32, 0u32);
     let mut kind = SID_NAME_USE::default();

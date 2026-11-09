@@ -19,12 +19,20 @@
 //!   that sweep ran. One whose sweep completed but owes its final stop is re-marked to await
 //!   that stop, which is requested, and the logon refused. TODO: once slot groups land (two pool
 //!   users share a slot's grants on a matter), the scope becomes the pool user's slot, since an
-//!   escapee of one user still holds the slot group's grants.
+//!   escapee of one user still holds the slot group's grants. Before all that, on a per-user
+//!   install, a stop or sweep task (`refresh::POOL_TASKS`) that is missing or changed refuses
+//!   the logon up front, in the readiness check's words: its session's end couldn't ask for the
+//!   sweep, so the launch would run and only the next one would be refused. Tasks that can't be
+//!   read are read once more after [`TASK_RETRY`], then refuse it too
+//!   ([`TASKS_UNCHECKED_AT_LAUNCH`]). The refresh task never refuses a launch.
 //! - **A launch** ([`await_sweeps`], `clean_close::check_launch`, inside the host's 180 s): any
 //!   marker awaiting a sweep is clean once `SweepSequence` reaches its number. Otherwise the
 //!   launch requests a sweep and waits for it, up to [`SWEEP_WAIT`], and refuses if it still
 //!   isn't done. `Open` markers are left alone there: they may be live sessions'. So is one
 //!   awaiting a stop, first or final, or whose sweep completed and owes its final stop: F4's.
+//!   This refusal and F4's for a sweep say the sweep task is missing, changed or unreadable, in
+//!   the readiness check's words (`refresh::task_identity`), rather than that the sweep didn't
+//!   finish, when it is.
 //! - **The desktop's start** ([`start_up`], once, before any launch): every outer of the last run
 //!   is gone, so each `Open` or unreadable marker becomes `AwaitingStop`, and the stop and sweep
 //!   tasks are requested for what is still awaited. It never waits.
@@ -55,10 +63,18 @@ use std::io;
 use std::time::Duration;
 
 use super::RunExit;
-use super::marker::{MarkerState, Outer, Sequences, UncleanSession};
+use super::marker::{MarkerState, Sequences, UncleanSession};
 use crate::windows::setup::record_values::{STOP_NEXT, SWEEP_NEXT};
 use crate::windows::sids::Sid;
+use launch_tasks::tasks_ready;
+pub use launch_tasks::{
+    HEAL_POLL, HEAL_WAIT, HEALING, TASK_RETRY, TASKS_UNCHECKED_AT_LAUNCH, heal_first,
+};
+use live_outer::live_outer;
+pub use live_outer::{OuterSeen, outer_alive};
 
+mod launch_tasks;
+mod live_outer;
 #[cfg(windows)]
 pub(crate) mod os;
 #[cfg(test)]
@@ -114,42 +130,6 @@ impl Refused {
     }
 }
 
-/// What opening a marker's outer by its pid found (`unclean/os.rs`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum OuterSeen {
-    /// It opened, hasn't exited, and was created at `created`.
-    Running {
-        /// Its creation time, as [`Outer::created`] holds it.
-        created: u64,
-    },
-    /// It opened but has exited: a handle someone still holds keeps its object.
-    Exited,
-    /// No process has the pid.
-    Gone,
-    /// The open was refused. The outer runs as the lawyer, who can open every outer, so a
-    /// process the lawyer can't open isn't one.
-    Denied,
-    /// Any other failure, of the open or of a read through it.
-    Failed,
-}
-
-/// Whether `outer` still runs, strictly: a process opened by its pid that hasn't exited and
-/// whose creation time is the marker's. Anything else (`seen` gone, refused, failed, exited, or
-/// created at another time, a later process given the same pid) is a dead outer.
-pub fn outer_alive(seen: OuterSeen, outer: Outer) -> bool {
-    seen == OuterSeen::Running {
-        created: outer.created,
-    }
-}
-
-/// The id and outer pid of `session` when it is open and its outer still runs.
-fn live_outer(fs: &mut impl Markers, session: &UncleanSession) -> Option<(String, u32)> {
-    let outer = session
-        .outer
-        .filter(|_| session.state == Some(MarkerState::Open))?;
-    outer_alive(fs.outer(outer.pid), outer).then(|| (session.id.clone(), outer.pid))
-}
-
 /// The markers' effects, as the lawyer.
 pub trait Markers {
     /// Every marker in the run folder (`marker::unclean_sessions`).
@@ -184,6 +164,23 @@ pub trait Markers {
     fn note(&mut self, line: &str);
     /// Opens the process `pid` (`PROCESS_QUERY_LIMITED_INFORMATION`): what it found.
     fn outer(&mut self, pid: u32) -> OuterSeen;
+    /// What the app's repair would mend in a per-user install's stop and sweep tasks
+    /// (`refresh::POOL_TASKS`; never the refresh task), in the readiness check's words
+    /// (`refresh::tasks_repair`: missing, changed, or unreadable); `None` while each is the
+    /// set-up's, or on a per-machine install.
+    fn task_repair(&mut self) -> Option<&'static str>;
+    /// Asks for a run of the refresh task, which puts the tasks back as SYSTEM: whether it
+    /// was asked for (`refresh::launch_admin_refresh`, bounded).
+    fn heal_tasks(&mut self) -> bool;
+    /// The record's `AdminCopySha256` as the lawyer reads it, `None` when it can't be read: it
+    /// changes when a refresh run swaps a new admin copy in.
+    fn admin_copy_stamp(&mut self) -> Option<String>;
+}
+
+/// Why a sweep a marker awaits didn't complete: `waited`, unless a task is missing, changed
+/// or can't be read, which no wait mends: then the readiness check's words for it.
+fn unswept(fs: &mut impl Markers, waited: String) -> String {
+    fs.task_repair().map_or(waited, str::to_owned)
 }
 
 /// The markers, the stale ones removed: those of a pool user the record no longer lists, and
@@ -293,17 +290,21 @@ fn remark_swept(
     sessions
 }
 
-/// F4: whether `pool_user` may log on. `Err` says why not: an open marker of this pool user
-/// whose outer still runs ([`outer_alive`]) refuses it as busy ([`RunExit::PoolBusy`]), with no
-/// stop requested and no marker written; otherwise the stop task was requested when a
-/// marker awaits a stop, first or final; a marker awaiting a sweep (a re-mark's, or any other)
-/// is waited for instead, up to [`SWEEP_WAIT`], with no stop requested, since a stop ends every
+/// F4: whether `pool_user` may log on. `Err` says why not: first, a SYSTEM task the install
+/// needs that is missing or changed, or that can't be read even once more after [`TASK_RETRY`],
+/// refuses it before any marker is read ([`Markers::task_repair`], `tasks_ready`). Then an
+/// open marker of this pool user whose outer still runs ([`outer_alive`]) refuses it as busy
+/// ([`RunExit::PoolBusy`]), with no stop requested and no marker written; otherwise the stop
+/// task was requested when a marker awaits a stop, first or final; a marker awaiting a sweep (a
+/// re-mark's, or any other) is waited for instead, up to [`SWEEP_WAIT`], with no stop
+/// requested, since a stop ends every
 /// session. One whose sweep before its final stop completed (now or earlier) is re-marked to
 /// await that stop, which is requested, and refuses the logon. One whose stop or sweep completed
 /// but couldn't be re-marked refuses the logon with no stop requested. One whose final stop
 /// completed is clean. A clean one that can't be removed refuses nothing: it is noted
 /// ([`Markers::note`]).
 pub fn logon_check(fs: &mut impl Markers, pool_user: &Sid) -> Result<(), Refused> {
+    tasks_ready(fs)?;
     let (sessions, known) = current(fs)
         .map_err(|e| Refused::stop(format!("the session markers can't be read ({e})")))?;
     let ours: Vec<UncleanSession> = sessions
@@ -458,11 +459,12 @@ fn wait_for_sweeps(
             return Ok((remove_clean(fs, left, done), done));
         }
     }
-    Err(Refused::sweep(format!(
+    let waited = format!(
         "an earlier session of this sandbox user awaits the sandbox's sweep, which didn't \
          finish within {} s",
         SWEEP_WAIT.as_secs()
-    )))
+    );
+    Err(Refused::sweep(unswept(fs, waited)))
 }
 
 /// A dead outer's marker: `StopNext` read now; `None` when it can't be.
@@ -507,10 +509,11 @@ pub fn await_sweeps(fs: &mut impl Markers) -> Result<(), String> {
             return Ok(());
         }
     }
-    Err(format!(
+    let waited = format!(
         "an earlier session's sandbox sweep didn't finish within {} s",
         SWEEP_WAIT.as_secs()
-    ))
+    );
+    Err(unswept(fs, waited))
 }
 
 /// What the desktop's start found and asked for.

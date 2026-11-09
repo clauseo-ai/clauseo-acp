@@ -50,6 +50,9 @@ pub(super) struct Fake {
     pub(super) logs: Vec<(bool, String)>,
     /// The staging folder's state.
     pub(super) staging: Staging,
+    /// The owners `keep_tasks` was asked for, and what it answers.
+    pub(super) kept_for: Vec<Sid>,
+    pub(super) keep: Result<Vec<&'static str>, String>,
 }
 
 /// The fake's staging folder.
@@ -91,6 +94,8 @@ impl Fake {
             calls: Vec::new(),
             logs: Vec::new(),
             staging: Staging::Absent,
+            kept_for: Vec::new(),
+            keep: Ok(Vec::new()),
         }
     }
 
@@ -263,6 +268,11 @@ impl Refresher for Fake {
     }
     fn log(&mut self, error: bool, line: &str) {
         self.logs.push((error, line.to_owned()));
+    }
+
+    fn keep_tasks(&mut self, owner: &Sid) -> Result<Vec<&'static str>, Failed> {
+        self.kept_for.push(owner.clone());
+        self.keep.clone()
     }
 }
 

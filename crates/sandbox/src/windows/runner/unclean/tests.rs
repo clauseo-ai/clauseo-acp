@@ -5,11 +5,14 @@
 
 use std::collections::BTreeMap;
 
+use super::super::marker::Outer;
 use super::*;
 
 mod failures;
+use failures::HealRun;
 mod final_stop;
 mod install;
+mod launch;
 mod live;
 
 const POOL_A: &str = "S-1-5-21-1-2-3-1010";
@@ -49,6 +52,18 @@ struct Fake {
     outers: BTreeMap<String, Outer>,
     /// What opening each pid finds; [`OuterSeen::Gone`] for the rest.
     processes: BTreeMap<u32, OuterSeen>,
+    /// What the tasks need, in the readiness check's words.
+    task_repair: Option<&'static str>,
+    /// What the first reads of the tasks give instead, in order, before `task_repair`.
+    queued_task_repairs: Vec<Option<&'static str>>,
+    /// How many times the tasks were read.
+    task_reads: usize,
+    /// Whether the refresh task can be started, and what each run asked for does, in turn; a
+    /// run asked for past them changes nothing.
+    heal_starts: bool,
+    heal_runs: Vec<HealRun>,
+    /// The record's `AdminCopySha256`, as a count of the swaps so far.
+    swaps: u32,
     log: Vec<String>,
 }
 
@@ -67,6 +82,12 @@ impl Fake {
             fails: Fails::default(),
             outers: BTreeMap::new(),
             processes: BTreeMap::new(),
+            task_repair: None,
+            queued_task_repairs: Vec::new(),
+            task_reads: 0,
+            heal_starts: false,
+            heal_runs: Vec::new(),
+            swaps: 0,
             log: Vec::new(),
         }
     }
@@ -165,6 +186,14 @@ impl Markers for Fake {
         Ok(())
     }
     fn pause(&mut self, pause: Duration) {
+        if pause == HEAL_POLL {
+            self.log.push("pause for the heal".to_owned());
+            return;
+        }
+        if pause == TASK_RETRY {
+            self.log.push("pause for the tasks".to_owned());
+            return;
+        }
         assert_eq!(pause, SWEEP_POLL);
         self.log.push("pause".to_owned());
         if !self.sweeps.is_empty() {
@@ -177,6 +206,26 @@ impl Markers for Fake {
     fn outer(&mut self, pid: u32) -> OuterSeen {
         self.log.push(format!("open {pid}"));
         self.processes.get(&pid).copied().unwrap_or(OuterSeen::Gone)
+    }
+    fn heal_tasks(&mut self) -> bool {
+        self.log.push("heal".to_owned());
+        if self.heal_starts && !self.heal_runs.is_empty() {
+            let run = self.heal_runs.remove(0);
+            self.swaps += u32::from(run.swaps);
+            self.task_repair = run.leaves;
+        }
+        self.heal_starts
+    }
+    fn admin_copy_stamp(&mut self) -> Option<String> {
+        Some(self.swaps.to_string())
+    }
+    fn task_repair(&mut self) -> Option<&'static str> {
+        self.task_reads += 1;
+        if self.queued_task_repairs.is_empty() {
+            self.task_repair
+        } else {
+            self.queued_task_repairs.remove(0)
+        }
     }
 }
 
@@ -324,139 +373,6 @@ fn f4_makes_a_dead_outers_marker_await_a_stop_read_now() {
     fake.done.stop = 6;
     assert_eq!(logon_check(&mut fake, &sid(POOL_A)), Ok(()));
     assert!(!fake.has("a1"));
-}
-
-#[test]
-fn a_launch_clears_a_marker_whose_sweep_completed_without_waiting() {
-    let mut fake = Fake::new();
-    fake.marker(
-        "a1",
-        Some(POOL_A),
-        Some(MarkerState::AwaitingSweep { sweep: 4 }),
-    );
-    fake.marker("a2", Some(POOL_A), Some(MarkerState::Open));
-    fake.done = Sequences { stop: 0, sweep: 4 };
-    assert_eq!(await_sweeps(&mut fake), Ok(()));
-    assert!(!fake.has("a1"));
-    // An open marker may be a live session's: left alone, and nothing asked for.
-    assert_eq!(fake.state("a2"), Some(MarkerState::Open));
-    assert_eq!(fake.log, ["remove a1"]);
-}
-
-#[test]
-fn a_launch_asks_for_a_sweep_and_waits_for_it_bounded() {
-    let mut fake = Fake::new();
-    fake.marker(
-        "a1",
-        Some(POOL_A),
-        Some(MarkerState::AwaitingSweep { sweep: 6 }),
-    );
-    fake.marker(
-        "b1",
-        Some(POOL_B),
-        Some(MarkerState::AwaitingSweep { sweep: 7 }),
-    );
-    fake.done = Sequences { stop: 0, sweep: 5 };
-    // A run completes 6, then 7, on the second and third looks.
-    fake.sweeps = vec![5, 6, 7];
-    assert_eq!(await_sweeps(&mut fake), Ok(()));
-    assert_eq!(fake.asked("sweep"), 1);
-    assert_eq!(fake.asked("pause"), 3);
-    assert!(fake.markers.is_empty(), "{:?}", fake.markers);
-    // A sweep that never completes: 150 looks, 15 s, then the refusal; the marker stays.
-    let mut stuck = Fake::new();
-    stuck.marker(
-        "a1",
-        Some(POOL_A),
-        Some(MarkerState::AwaitingSweep { sweep: 6 }),
-    );
-    let refused = await_sweeps(&mut stuck).unwrap_err();
-    assert!(refused.contains("didn't finish within 15 s"), "{refused}");
-    assert_eq!(stuck.asked("pause"), 150);
-    assert_eq!(SWEEP_WAIT, Duration::from_secs(15));
-    assert!(
-        SWEEP_WAIT < Duration::from_secs(180),
-        "inside the host's launch bound"
-    );
-    assert!(stuck.has("a1"));
-}
-
-#[test]
-fn a_stop_awaiting_marker_holds_a_launch_only_once_its_stop_completed() {
-    let mut fake = Fake::new();
-    fake.marker("a1", Some(POOL_A), Some(STOP));
-    fake.done = Sequences { stop: 0, sweep: 2 };
-    // Its stop is F4's: the launch goes, the marker stays, and no sweep number is read.
-    assert_eq!(await_sweeps(&mut fake), Ok(()));
-    assert_eq!(fake.state("a1"), Some(STOP));
-    assert!(fake.log.is_empty(), "{:?}", fake.log);
-    // Sequences that can't be read refuse.
-    fake.unreadable = true;
-    assert!(await_sweeps(&mut fake).is_err());
-}
-
-#[test]
-fn a_sweep_before_the_stop_doesnt_clear_an_escapees_marker_and_one_after_it_does() {
-    let mut fake = Fake::new();
-    let escapee = MarkerState::AwaitingStop { stop: 5 };
-    fake.marker("a1", Some(POOL_A), Some(escapee));
-    // Sweeps complete while the escapee lives: it could register a task after any of them.
-    fake.done = Sequences { stop: 4, sweep: 50 };
-    assert!(logon_check(&mut fake, &sid(POOL_A)).is_err());
-    assert_eq!(await_sweeps(&mut fake), Ok(()));
-    assert_eq!(
-        fake.state("a1"),
-        Some(escapee),
-        "not cleared by an earlier sweep"
-    );
-    assert_eq!(fake.asked("read SweepNext"), 0);
-    // The stop completes, the escapee dead. `SweepNext` is read now: 51, past every sweep so far.
-    fake.done.stop = 5;
-    fake.sweep_next = 51;
-    fake.log.clear();
-    // The launch re-marks it, requests the sweep once, and waits for it. The marker then owes
-    // its final stop, which is F4's.
-    fake.sweeps = vec![50, 51];
-    assert_eq!(await_sweeps(&mut fake), Ok(()));
-    let swept = MarkerState::AwaitingSweepBeforeStop { sweep: 51 };
-    assert_eq!(
-        fake.state("a1"),
-        Some(swept),
-        "not cleared by the sweep alone"
-    );
-    let first = ["read SweepNext", "sweep", "pause", "pause"];
-    assert_eq!(fake.log, first);
-    // F4 reads the final stop's number only now and requests that stop, which clears it.
-    fake.stop_next = 6;
-    assert!(logon_check(&mut fake, &sid(POOL_A)).is_err());
-    let last = MarkerState::AwaitingFinalStop { stop: 6 };
-    assert_eq!(fake.state("a1"), Some(last));
-    assert_eq!(
-        await_sweeps(&mut fake),
-        Ok(()),
-        "a final stop doesn't hold a launch"
-    );
-    assert!(fake.has("a1"));
-    fake.done.stop = 6;
-    assert_eq!(await_sweeps(&mut fake), Ok(()));
-    assert!(!fake.has("a1"), "cleared by the final stop");
-}
-
-#[test]
-fn a_marker_whose_stop_completed_but_cant_be_re_marked_refuses_a_launch() {
-    let mut fake = Fake::new();
-    fake.marker("a1", Some(POOL_A), Some(STOP));
-    fake.done = Sequences { stop: 3, sweep: 99 };
-    fake.sweep_next_fails = true;
-    let refused = await_sweeps(&mut fake).unwrap_err();
-    assert!(refused.contains("completed stop"), "{refused}");
-    assert_eq!(fake.state("a1"), Some(STOP));
-    // F4 refuses the logon too, without asking for the stop, which has completed.
-    let refused = logon_check(&mut fake, &sid(POOL_A)).unwrap_err();
-    assert_eq!(refused.exit, RunExit::AwaitingSweep, "no stop is awaited");
-    assert!(refused.why.contains("completed stop"), "{refused:?}");
-    assert_eq!(fake.state("a1"), Some(STOP));
-    assert_eq!(fake.asked("stop"), 0);
 }
 
 #[test]

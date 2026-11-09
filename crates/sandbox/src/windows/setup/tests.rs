@@ -32,6 +32,7 @@ mod rollback;
 mod stop_resets;
 mod stop_task;
 mod top_up;
+mod user_tasks;
 
 use fake::{FakeAcl, FakeMachine, OWNER, OWNER_NAME, sid};
 

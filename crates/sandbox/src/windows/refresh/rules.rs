@@ -42,6 +42,12 @@ pub const TASKS: [SystemTask; 3] = [SystemTask::Refresh, SystemTask::Stop, Syste
 /// The tasks a per-machine install's set-up registers for the pool's owner and its `--remove`
 /// deletes (`late_steps::stop_task`, `remove::remove_stop_task`): the two that act on the pool.
 pub const POOL_TASKS: [SystemTask; 2] = [SystemTask::Stop, SystemTask::Sweep];
+/// Every task a per-user install needs, the one list its set-up's repair puts back
+/// (`setup::user_tasks`) and its readiness check reads (`task_identity::ready_with_tasks`):
+/// the three its `--adopt` registers. A launch checks only the stop and sweep tasks
+/// ([`POOL_TASKS`], `runner::unclean::logon_check`). Listed on its own: a task added to
+/// [`TASKS`] isn't a per-user one until it is named here.
+pub const USER_TASKS: [SystemTask; 3] = [SystemTask::Refresh, SystemTask::Stop, SystemTask::Sweep];
 
 impl SystemTask {
     /// Its name in `\Clauseo`.
@@ -136,6 +142,18 @@ pub const TEARDOWN: [Teardown; 6] = [
 pub fn task_sddl(owner: &Sid) -> String {
     format!("O:BAD:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;FRFX;;;{owner})")
 }
+
+/// `TASK_CREATE_OR_UPDATE`: register the task, or update the one of the name in place.
+const TASK_CREATE_OR_UPDATE: i32 = 0x6;
+/// `TASK_DONT_ADD_PRINCIPAL_ACE`: Windows adds no entry for the task's principal to the
+/// descriptor given. It changes no one's rights to run the task: the principal (LOCAL SYSTEM)
+/// is who the task runs as, and the descriptor ([`task_sddl`]) already gives SYSTEM full
+/// control.
+const TASK_DONT_ADD_PRINCIPAL_ACE: i32 = 0x10;
+/// The flags `register_task` passes to `ITaskFolder::RegisterTaskDefinition`: create or update,
+/// with the descriptor exactly as given. Without the second, Windows adds `(A;;FR;;;SY)` (read
+/// back on Server 2025), and the task read back isn't the descriptor the set-up gave.
+pub const REGISTER_FLAGS: i32 = TASK_CREATE_OR_UPDATE | TASK_DONT_ADD_PRINCIPAL_ACE;
 
 /// The task action's program: `exe`'s path in double quotes, as a command line takes a path
 /// with spaces (`C:\Program Files\...`), so no prefix of it can be read as the program.

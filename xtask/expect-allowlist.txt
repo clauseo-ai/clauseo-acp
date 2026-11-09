@@ -177,6 +177,7 @@ crates/sandbox/build.rs key unreachable_pub
 crates/sandbox/src/windows/refresh/source.rs - unsafe_code
 crates/sandbox/src/windows/refresh/staging.rs - unsafe_code
 crates/sandbox/src/windows/refresh/task.rs - unsafe_code
+crates/sandbox/src/windows/refresh/task_register.rs - unsafe_code
 # The tasks' elevated test: its Task Scheduler calls, the test user's cmd, and its bounded waits.
 crates/sandbox/src/windows/refresh/windows_tests.rs - unsafe_code
 crates/sandbox/src/windows/refresh/windows_tests.rs pause clippy::disallowed_methods
@@ -586,7 +587,7 @@ crates/sandbox/src/windows/ca_bundle/store.rs - unsafe_code
 crates/sandbox/src/windows/ca_bundle/store.rs timed clippy::disallowed_methods
 crates/sandbox/src/windows/ca_bundle/ntfs_tests.rs - unsafe_code
 crates/sandbox/src/windows/test_pool.rs - unsafe_code
-crates/sandbox/src/windows/test_pool.rs run_powershell clippy::disallowed_methods
+crates/sandbox/src/windows/test_pool.rs clock clippy::disallowed_methods
 crates/sandbox/src/windows/token/ntfs_tests.rs - unsafe_code
 crates/sandbox/src/windows/pipe/ntfs_tests.rs - unsafe_code
 # S15 PR5: the VM and CI harness for tier B's runner (examples/s15_launch_vm).

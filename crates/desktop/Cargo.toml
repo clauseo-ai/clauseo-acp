@@ -123,6 +123,7 @@ rustls = { workspace = true, features = ["ring", "std", "tls12"] }
 [target.'cfg(windows)'.dependencies]
 windows = { workspace = true, features = [
   "Win32_Foundation",
+  "Win32_Globalization",
   "Win32_Security",
   "Win32_Security_Authorization",
   "Win32_Graphics_Gdi",

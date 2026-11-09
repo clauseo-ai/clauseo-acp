@@ -92,6 +92,15 @@ impl Markers for World {
     fn outer(&mut self, pid: u32) -> OuterSeen {
         self.fake.outer(pid)
     }
+    fn task_repair(&mut self) -> Option<&'static str> {
+        self.fake.task_repair()
+    }
+    fn heal_tasks(&mut self) -> bool {
+        self.fake.heal_tasks()
+    }
+    fn admin_copy_stamp(&mut self) -> Option<String> {
+        self.fake.admin_copy_stamp()
+    }
 }
 
 #[test]

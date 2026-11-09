@@ -2,7 +2,8 @@
 //! a per-machine install the set-up registers `\Clauseo\SandboxStop` and `\Clauseo\SandboxSweep`
 //! for the owner it records (one `Machine` call, `refresh::POOL_TASKS` on Windows), a new
 //! owner's set-up replaces a previous owner's, the removal deletes them before the record, and a
-//! failed registration fails the set-up closed. A per-user install is left to `--adopt`.
+//! failed registration fails the set-up closed. A per-user install's are `--adopt`'s, put back
+//! by the set-up when missing or changed (`user_tasks.rs`).
 
 use super::fake::{FakeAcl, FakeMachine, OTHER_OWNER, rid};
 use super::remove_fake::Remover;
@@ -77,18 +78,29 @@ fn a_failed_registration_fails_the_set_up_closed() {
 }
 
 #[test]
-fn per_user_and_copyless_set_ups_register_nothing() {
-    let owner_copy = Some(CopyOwner::User(owner()));
-    for (test, copy) in [
-        ("setup-stop-task-user", owner_copy),
-        ("setup-stop-task-none", None),
-    ] {
-        let mut machine = installed(test, copy);
-        let mut acl = FakeAcl::default();
-        set_up_fresh(&mut machine, &mut acl);
-        assert_eq!(machine.calls, fresh_calls(), "{test}");
-        assert_eq!(machine.state.stop_task, None, "{test}");
-    }
+fn per_user_and_copyless_set_ups_register_no_per_machine_task() {
+    let mut machine = installed("setup-stop-task-none", None);
+    set_up_fresh(&mut machine, &mut FakeAcl::default());
+    assert_eq!(machine.calls, fresh_calls());
+    assert_eq!(machine.state.stop_task, None);
+    // Per user, the set-up puts back `--adopt`'s tasks instead, here all three missing
+    // (`user_tasks.rs`), where the per-machine one registers its own.
+    let mut machine = installed("setup-stop-task-user", Some(CopyOwner::User(owner())));
+    set_up_fresh(&mut machine, &mut FakeAcl::default());
+    assert_eq!(machine.state.stop_task, None);
+    let calls = machine.calls_since(0);
+    let at = calls.iter().position(|c| *c == "task_exe");
+    let at = at.unwrap_or_else(|| panic!("{calls:?}"));
+    let owner = rid(&owner());
+    let mut expected = fresh_calls();
+    let ensured = [
+        "task_exe".to_owned(),
+        format!("replace_task SandboxRefresh {owner}"),
+        format!("replace_task SandboxStop {owner}"),
+        format!("replace_task SandboxSweep {owner}"),
+    ];
+    expected.splice(at..at, ensured);
+    assert_eq!(calls, expected);
 }
 
 /// A pool set up on a machine whose admin copy `copy` placed, with the stop task as the

@@ -3,8 +3,10 @@
 //! pool's tasks and BITS jobs"), through the Task Scheduler's COM API (`ITaskService`), never
 //! `schtasks` text:
 //!
-//! - [`register_task`], which `--adopt` calls elevated for each of [`TASKS`](super::TASKS) per
-//!   user, and a per-machine install's set-up for the stop and sweep tasks
+//! - [`register_task`](super::register_task) (`task_register.rs`), which `--adopt` calls
+//!   elevated for each of [`TASKS`](super::TASKS) per user, a per-user set-up's repair for each
+//!   of [`USER_TASKS`](super::USER_TASKS), and a per-machine install's set-up for the stop and
+//!   sweep tasks
 //!   ([`POOL_TASKS`](super::POOL_TASKS), `late_steps::stop_task`): the task runs as LOCAL
 //!   SYSTEM, starts `<FOLDERID_ProgramFiles>\Clauseo\Sandbox\clauseo-sandbox-setup.exe` with its
 //!   one argument (`--refresh`, `--stop`, `--sweep-tasks`) and nothing else, on demand (the
@@ -13,9 +15,16 @@
 //!   runs is queued after it, any other run is dropped. Its descriptor
 //!   ([`task_sddl`](super::task_sddl)) is owned by Administrators and lets SYSTEM and
 //!   Administrators do anything and the owner read and execute it (`FRFX`), which
-//!   starts it and ends a running one, nothing more; the folder `\Clauseo` gets the same owner
-//!   and DACL, made with them, or set again when an administrator made it; one anyone else made
-//!   is deleted with what is in it and made again (`task_folder.rs`).
+//!   starts it and ends a running one, nothing more. Its definition carries the same
+//!   descriptor (the XML's `<SecurityDescriptor>`), and it is registered with
+//!   `TASK_DONT_ADD_PRINCIPAL_ACE` ([`REGISTER_FLAGS`](super::REGISTER_FLAGS)), so Windows adds
+//!   no entry of its own.
+//!   The folder `\Clauseo` gets the same owner and DACL, made with them, or set again when an
+//!   administrator made it; one anyone else made is deleted with what is in it and made again
+//!   (`task_folder.rs`).
+//! - [`read_task`]: a registered task as `task_identity.rs` compares it, its principal, actions,
+//!   triggers and descriptor, for a per-user set-up's repair and the readiness check
+//!   (`task_read.rs`), with [`read_tasks`] for several over one connection.
 //! - [`unregister_task`], which `--remove --uninstall` calls (it deletes staging itself,
 //!   taking it back if need be: `setup::admin_remove`).
 //! - [`request_admin_refresh`], which the app calls as the lawyer, unelevated, after an update,
@@ -25,31 +34,34 @@
 //!   waits for a run here: the record's `StopSequence` and `SweepSequence` say what completed.
 #![expect(unsafe_code, reason = "FFI to COM and the Task Scheduler's interfaces")]
 
-use windows::Win32::Foundation::{ERROR_FILE_NOT_FOUND, RPC_E_CHANGED_MODE, VARIANT_BOOL};
-use windows::Win32::Security::OWNER_SECURITY_INFORMATION;
+use windows::Win32::Foundation::{RPC_E_CHANGED_MODE, VARIANT_BOOL};
+use windows::Win32::Security::{DACL_SECURITY_INFORMATION, OWNER_SECURITY_INFORMATION};
 use windows::Win32::System::Com::{
     CLSCTX_INPROC_SERVER, COINIT_MULTITHREADED, CoCreateInstance, CoInitializeEx, CoUninitialize,
 };
 use windows::Win32::System::TaskScheduler::{
     IExecAction, ILogonTrigger, IRegisteredTask, ITaskFolder, ITaskService, TASK_ACTION_EXEC,
-    TASK_CREATE_OR_UPDATE, TASK_ENUM_HIDDEN, TASK_INSTANCES_IGNORE_NEW, TASK_INSTANCES_QUEUE,
-    TASK_LOGON_SERVICE_ACCOUNT, TASK_RUNLEVEL_HIGHEST, TASK_TRIGGER_LOGON, TaskScheduler,
+    TASK_ACTION_TYPE, TASK_ENUM_HIDDEN, TASK_INSTANCES_POLICY, TASK_RUNLEVEL_TYPE,
+    TASK_TRIGGER_LOGON, TASK_TRIGGER_TYPE2, TaskScheduler,
 };
-use windows::Win32::System::Variant::VARIANT;
-use windows::core::{BSTR, HRESULT, Interface};
+use windows::Win32::System::Variant::{VARIANT, VT_BSTR, VT_EMPTY, VT_NULL};
+use windows::core::{BSTR, Interface};
 
+use super::SystemTask;
 use super::last_run::{LastRun, last_run};
+use super::staging::sddl_bytes;
 use super::task_folder::{Folders, prepare};
-use super::windows_refresher::{EXE_NAME, sandbox_dir};
-use super::{SystemTask, action_path, task_sddl};
-use crate::windows::sids::Sid;
+use super::task_identity::{
+    Carried, OnBattery, TaskAction, TaskIdentity, TaskSettings, TaskTrigger, account_text,
+    not_found,
+};
 
 /// The task's folder.
 pub const TASK_FOLDER: &str = "\\Clauseo";
 /// The folder's name under the root, for creating and deleting it.
 const FOLDER_NAME: &str = "Clauseo";
 /// LOCAL SYSTEM, as the task's principal.
-const SYSTEM: &str = "S-1-5-18";
+pub(super) const SYSTEM: &str = "S-1-5-18";
 /// How many folders below `\Clauseo` a deletion of someone else's `\Clauseo` goes.
 const FOLDER_DEPTH: usize = 8;
 
@@ -81,16 +93,17 @@ fn text(call: &'static str) -> impl Fn(windows::core::Error) -> String {
 }
 
 /// `call` failed with `error`.
-fn com(call: &'static str) -> impl Fn(windows::core::Error) -> TaskError {
+pub(super) fn com(call: &'static str) -> impl Fn(windows::core::Error) -> TaskError {
     move |error| TaskError::Com {
         call,
         hresult: error.code().0.cast_unsigned(),
     }
 }
 
-/// Whether `error` says the folder or task isn't there.
+/// Whether `error` says the folder or task isn't there: `ERROR_FILE_NOT_FOUND`, or
+/// `ERROR_PATH_NOT_FOUND` for a task whose folder `\Clauseo` is gone (`task_identity::not_found`).
 fn missing(error: &windows::core::Error) -> bool {
-    error.code() == HRESULT::from_win32(ERROR_FILE_NOT_FOUND.0)
+    not_found(error.code().0.cast_unsigned())
 }
 
 /// COM on this thread for the guard's life: uninitialised on drop when this call initialised
@@ -134,7 +147,7 @@ pub(super) fn service() -> Result<ITaskService, TaskError> {
 /// The folder `\Clauseo`, as `task_folder::prepare` leaves it: an administrator's is given
 /// `sddl` (its owner and DACL) again; anyone else's is deleted with what is in it; a missing or
 /// deleted one is made with `sddl`.
-fn folder(service: &ITaskService, sddl: &str) -> Result<ITaskFolder, TaskError> {
+pub(super) fn folder(service: &ITaskService, sddl: &str) -> Result<ITaskFolder, TaskError> {
     prepare(&mut Scheduler(service), sddl).map_err(TaskError::Folder)
 }
 
@@ -235,102 +248,6 @@ impl Folders for Scheduler<'_> {
         unsafe { folder.SetSecurityDescriptor(&BSTR::from(sddl), 0) }
             .map_err(text("ITaskFolder::SetSecurityDescriptor"))
     }
-}
-
-/// Registers (or updates) the task `spec` names as the module says, for the record owner
-/// `owner_sid`. Elevated: `--adopt` calls it for each task once the admin copy is locked in
-/// place, before it writes the record's admin-copy values (a refresh before then exits 33,
-/// changing nothing). On a per-machine install, the set-up calls it for the stop and sweep tasks
-/// once the record names `owner_sid`; a task already there is replaced, descriptor included.
-pub fn register_task(spec: SystemTask, owner_sid: &Sid) -> Result<(), TaskError> {
-    let exe = sandbox_dir().map_err(TaskError::Path)?.join(EXE_NAME);
-    let sddl = task_sddl(owner_sid);
-    let _apartment = Apartment::enter()?;
-    let service = service()?;
-    let folder = folder(&service, &sddl)?;
-    // SAFETY: each call below is on a live interface the one before returned, with BSTRs and
-    // VARIANT values that outlive it; flags 0 for NewTask.
-    unsafe {
-        let task = service.NewTask(0).map_err(com("ITaskService::NewTask"))?;
-        let info = task.RegistrationInfo().map_err(com("RegistrationInfo"))?;
-        info.SetAuthor(&BSTR::from("Clauseo"))
-            .map_err(com("SetAuthor"))?;
-        info.SetDescription(&BSTR::from(spec.description()))
-            .map_err(com("SetDescription"))?;
-        let principal = task.Principal().map_err(com("Principal"))?;
-        principal
-            .SetUserId(&BSTR::from(SYSTEM))
-            .map_err(com("IPrincipal::SetUserId"))?;
-        principal
-            .SetLogonType(TASK_LOGON_SERVICE_ACCOUNT)
-            .map_err(com("SetLogonType"))?;
-        principal
-            .SetRunLevel(TASK_RUNLEVEL_HIGHEST)
-            .map_err(com("SetRunLevel"))?;
-        let settings = task.Settings().map_err(com("Settings"))?;
-        let no = VARIANT_BOOL::from(false);
-        let yes = VARIANT_BOOL::from(true);
-        settings
-            .SetRunOnlyIfNetworkAvailable(no)
-            .map_err(com("SetRunOnlyIfNetworkAvailable"))?;
-        settings
-            .SetExecutionTimeLimit(&BSTR::from(spec.execution_limit()))
-            .map_err(com("SetExecutionTimeLimit"))?;
-        let instances = if spec.queues() {
-            TASK_INSTANCES_QUEUE
-        } else {
-            TASK_INSTANCES_IGNORE_NEW
-        };
-        settings
-            .SetMultipleInstances(instances)
-            .map_err(com("SetMultipleInstances"))?;
-        settings
-            .SetAllowDemandStart(yes)
-            .map_err(com("SetAllowDemandStart"))?;
-        settings
-            .SetDisallowStartIfOnBatteries(no)
-            .map_err(com("SetDisallowStartIfOnBatteries"))?;
-        settings
-            .SetStopIfGoingOnBatteries(no)
-            .map_err(com("SetStopIfGoingOnBatteries"))?;
-        settings
-            .SetEnabled(yes)
-            .map_err(com("ITaskSettings::SetEnabled"))?;
-        if spec.at_logon() {
-            let trigger = task.Triggers().map_err(com("Triggers"))?;
-            let trigger = trigger
-                .Create(TASK_TRIGGER_LOGON)
-                .map_err(com("ITriggerCollection::Create"))?;
-            let logon: ILogonTrigger = trigger.cast().map_err(com("ILogonTrigger"))?;
-            logon
-                .SetUserId(&BSTR::from(owner_sid.as_str()))
-                .map_err(com("ILogonTrigger::SetUserId"))?;
-        }
-        let action = task.Actions().map_err(com("Actions"))?;
-        let action = action
-            .Create(TASK_ACTION_EXEC)
-            .map_err(com("IActionCollection::Create"))?;
-        let exec: IExecAction = action.cast().map_err(com("IExecAction"))?;
-        // Quoted: the path has a space (`Program Files`), and a command line split there would
-        // name another program. Every folder on it is also under %ProgramFiles%, which only
-        // administrators can write.
-        exec.SetPath(&BSTR::from(action_path(&exe)))
-            .map_err(com("IExecAction::SetPath"))?;
-        exec.SetArguments(&BSTR::from(spec.argument()))
-            .map_err(com("IExecAction::SetArguments"))?;
-        folder
-            .RegisterTaskDefinition(
-                &BSTR::from(spec.name()),
-                &task,
-                TASK_CREATE_OR_UPDATE.0,
-                &VARIANT::from(SYSTEM),
-                &VARIANT::default(),
-                TASK_LOGON_SERVICE_ACCOUNT,
-                &VARIANT::from(sddl.as_str()),
-            )
-            .map_err(com("ITaskFolder::RegisterTaskDefinition"))?;
-    }
-    Ok(())
 }
 
 /// Deletes `task`, then the folder `\Clauseo` if nothing else is in it. A task or folder that
@@ -449,4 +366,156 @@ fn with_task<T>(
         Err(error) => return Err(com("ITaskFolder::GetTask")(error)),
     };
     then(&task)
+}
+
+/// One task as [`read_tasks`] reads it: `None` when it isn't registered.
+pub type TaskRead = Result<Option<TaskIdentity>, TaskError>;
+
+/// `task` as registered in `\Clauseo`, `None` when it isn't, read as whoever calls it.
+pub fn read_task(task: SystemTask) -> Result<Option<TaskIdentity>, TaskError> {
+    read_tasks(&[task])?
+        .pop()
+        .unwrap_or(Err(TaskError::NotRegistered))
+}
+
+/// Each of `tasks` as [`read_task`] reads it, over one connection to the Task Scheduler: the
+/// readiness check reads the stop and sweep tasks together. `Err` when there is no connection.
+pub fn read_tasks(tasks: &[SystemTask]) -> Result<Vec<TaskRead>, TaskError> {
+    let _apartment = Apartment::enter()?;
+    let service = service()?;
+    // SAFETY: a live service and a BSTR that outlives the call.
+    let root =
+        unsafe { service.GetFolder(&BSTR::from("\\")) }.map_err(com("ITaskService::GetFolder"))?;
+    let read = |task: &SystemTask| {
+        let path = format!("{TASK_FOLDER}\\{}", task.name());
+        // SAFETY: a live root folder and a BSTR.
+        match unsafe { root.GetTask(&BSTR::from(path.as_str())) } {
+            Ok(task) => identity(&task).map(Some),
+            Err(error) if missing(&error) => Ok(None),
+            Err(error) => Err(com("ITaskFolder::GetTask")(error)),
+        }
+    };
+    Ok(tasks.iter().map(read).collect())
+}
+
+/// The value `read` writes through its out-pointer; `call` names it when it fails.
+fn out<T: Default>(
+    call: &'static str,
+    read: impl FnOnce(*mut T) -> windows::core::Result<()>,
+) -> Result<T, TaskError> {
+    let mut value = T::default();
+    read(&raw mut value).map_err(com(call))?;
+    Ok(value)
+}
+
+/// What makes `task` the set-up's, read from its definition, its state and its descriptor; the
+/// principal and the logon trigger's user as written (`task_identity::account_text`), never
+/// resolved forwards here (`LookupAccountNameW` may ask a domain controller).
+fn identity(task: &IRegisteredTask) -> Result<TaskIdentity, TaskError> {
+    // SAFETY: each call is on a live interface the one before returned, each out-pointer live
+    // for its call (`out`); the collections are read by 1-based index within their counts; the
+    // descriptor's VARIANT is read as a string only when its type says it holds one.
+    unsafe {
+        let definition = task
+            .Definition()
+            .map_err(com("IRegisteredTask::Definition"))?;
+        let principal = definition.Principal().map_err(com("Principal"))?;
+        let user: BSTR = out("IPrincipal::UserId", |at| principal.UserId(at))?;
+        let level: TASK_RUNLEVEL_TYPE = out("RunLevel", |at| principal.RunLevel(at))?;
+        let collection = definition.Actions().map_err(com("Actions"))?;
+        let count = out("IActionCollection::Count", |at| collection.Count(at))?;
+        let mut actions = Vec::new();
+        for at in 1..=count {
+            let action = collection
+                .get_Item(at)
+                .map_err(com("IActionCollection::Item"))?;
+            let kind: TASK_ACTION_TYPE = out("IAction::Type", |at| action.Type(at))?;
+            if kind != TASK_ACTION_EXEC {
+                actions.push(TaskAction::Other);
+                continue;
+            }
+            let exec: IExecAction = action.cast().map_err(com("IExecAction"))?;
+            let path: BSTR = out("IExecAction::Path", |at| exec.Path(at))?;
+            let arguments: BSTR = out("IExecAction::Arguments", |at| exec.Arguments(at))?;
+            actions.push(TaskAction::Exec {
+                path: path.to_string(),
+                arguments: arguments.to_string(),
+            });
+        }
+        let collection = definition.Triggers().map_err(com("Triggers"))?;
+        let count = out("ITriggerCollection::Count", |at| collection.Count(at))?;
+        let mut triggers = Vec::new();
+        for at in 1..=count {
+            let trigger = collection
+                .get_Item(at)
+                .map_err(com("ITriggerCollection::Item"))?;
+            let kind: TASK_TRIGGER_TYPE2 = out("ITrigger::Type", |at| trigger.Type(at))?;
+            if kind != TASK_TRIGGER_LOGON {
+                triggers.push(TaskTrigger::Other(kind.0));
+                continue;
+            }
+            let logon: ILogonTrigger = trigger.cast().map_err(com("ILogonTrigger"))?;
+            let user: BSTR = out("ILogonTrigger::UserId", |at| logon.UserId(at))?;
+            // As written: Windows gives it back as `MACHINE\user` though registered by SID, and
+            // `task_identity` compares names locally (`same_account`).
+            triggers.push(TaskTrigger::Logon(account_text(&user.to_string())));
+        }
+        let settings = definition.Settings().map_err(com("Settings"))?;
+        let flag =
+            |call: &'static str, read: &dyn Fn(*mut VARIANT_BOOL) -> windows::core::Result<()>| {
+                out(call, read).map(VARIANT_BOOL::as_bool)
+            };
+        let instances: TASK_INSTANCES_POLICY =
+            out("MultipleInstances", |at| settings.MultipleInstances(at))?;
+        let settings = TaskSettings {
+            enabled: task
+                .Enabled()
+                .map_err(com("IRegisteredTask::Enabled"))?
+                .as_bool(),
+            demand_start: flag("AllowDemandStart", &|at| settings.AllowDemandStart(at))?,
+            on_battery: OnBattery::of(
+                flag("DisallowStartIfOnBatteries", &|at| {
+                    settings.DisallowStartIfOnBatteries(at)
+                })?,
+                flag("StopIfGoingOnBatteries", &|at| {
+                    settings.StopIfGoingOnBatteries(at)
+                })?,
+            ),
+            instances: instances.0,
+        };
+        let info = (OWNER_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION).0;
+        let sddl = task
+            .GetSecurityDescriptor(info.cast_signed())
+            .map_err(com("IRegisteredTask::GetSecurityDescriptor"))?;
+        let descriptor = sddl_bytes(&sddl.to_string()).map_err(TaskError::Path)?;
+        let info = definition
+            .RegistrationInfo()
+            .map_err(com("RegistrationInfo"))?;
+        let carried: VARIANT = out("IRegistrationInfo::SecurityDescriptor", |at| {
+            info.SecurityDescriptor(at)
+        })?;
+        // An empty value or string carries none; any other type, or text that isn't SDDL, is
+        // one that can't be read, which is changed.
+        let definition_descriptor = match carried.vt() {
+            VT_EMPTY | VT_NULL => Carried::Absent,
+            VT_BSTR => {
+                let text = carried.Anonymous.Anonymous.Anonymous.bstrVal.to_string();
+                if text.trim().is_empty() {
+                    Carried::Absent
+                } else {
+                    sddl_bytes(&text).map_or(Carried::Unreadable, Carried::Descriptor)
+                }
+            }
+            _ => Carried::Unreadable,
+        };
+        Ok(TaskIdentity {
+            principal: account_text(&user.to_string()),
+            run_level: level.0,
+            actions,
+            triggers,
+            settings,
+            descriptor,
+            definition_descriptor,
+        })
+    }
 }

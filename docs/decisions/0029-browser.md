@@ -55,10 +55,13 @@ passed exactly as given. Anything else exits 2 with a reason and the mode's usag
 | `AGENT_BROWSER_STREAM_PORT` | from the guard's environment, set by the host; a port from 1024 to 65535, no leading zero |
 | Unix: `HOME`, `TMPDIR` | `<cwd>/home`, `<cwd>/tmp` |
 | Windows: `TEMP`, `TMP` | `<cwd>\tmp` |
-| `PATH` | Unix `/usr/bin:/bin:/usr/sbin:/sbin`; Windows `<SystemRoot>\System32;<SystemRoot>`, `C:\Windows` when `SystemRoot` is absent |
-| Windows: `SystemRoot` | passed through, or `C:\Windows` when absent (Windows networking needs it) |
+| `PATH` | Unix `/usr/bin:/bin:/usr/sbin:/sbin`; Windows `<SystemRoot>\System32;<SystemRoot>` |
+| Windows: `SystemRoot` | the guard's own, or the Windows directory (`GetWindowsDirectoryW`; `C:\Windows` if that call fails). Winsock needs it |
+| Windows: `windir` | the guard's own, or the resolved `SystemRoot` |
+| Windows: `ComSpec` | the guard's own, or `cmd.exe` in the system directory (`GetSystemDirectoryW`; else `<SystemRoot>\System32`) |
+| Windows: `PATHEXT` | the guard's own, or `.COM;.EXE;.BAT;.CMD` |
 | Unix: `LANG` | passed through when present |
-| Windows: `windir`, `SystemDrive`, `ComSpec`, `PATHEXT`, `ProgramFiles`, `ProgramFiles(x86)`, `ProgramW6432`, `LOCALAPPDATA`, `APPDATA`, `USERPROFILE` | passed through when present, matched without ASCII case, first match wins, each emitted once under this spelling |
+| Windows: `SystemDrive`, `ProgramFiles`, `ProgramFiles(x86)`, `ProgramW6432`, `LOCALAPPDATA`, `APPDATA`, `USERPROFILE` | passed through when present, matched without ASCII case, first match wins, each emitted once under this spelling |
 
 A required variable that is missing or invalid exits 2 with a stderr line naming it; the guard
 never falls back. Whatever the guard's environment says, the fixed values above win. The guard
@@ -1513,7 +1516,7 @@ The guard:
   Windows names); `ARCHITECTURE.md`'s row lists both.
 - `AGENT_BROWSER_CONFIG` and `AGENT_BROWSER_EXECUTABLE_PATH` must name existing files, and on
   Windows not network or device paths; the brief asked only for absolute paths. Windows also
-  gets `SystemRoot` set when absent.
+  gets `SystemRoot`, `windir`, `ComSpec` and `PATHEXT` set when absent.
 - Rules from the security review, beyond the brief: `newTab` and `webgpu` refused unless
   `false`, `timeoutMs` capped at 300000, a path-like screenshot `selector` refused, local and
   private `url` hosts refused, the reserved id refused, the flag shape narrowed and
