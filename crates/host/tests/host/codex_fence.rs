@@ -106,6 +106,21 @@ fn fake_install(install: &Path) -> std::path::PathBuf {
     let rg = build.join("vendor").join(triple).join("codex-path/rg");
     crate::write::write(&rg, RG.0);
     crate::write::make_executable(&rg);
+    // The layout file Codex ships beside `bin/` (round 3b), at the fake pinned version.
+    let layout = json!({
+        "layoutVersion": 1,
+        "version": "1.2.3-test",
+        "target": triple,
+        "variant": "codex",
+        "entrypoint": "bin/codex",
+        "resourcesDir": "codex-resources",
+        "pathDir": "codex-path",
+    })
+    .to_string();
+    crate::write::write(
+        &build.join("vendor").join(triple).join("codex-package.json"),
+        layout.as_bytes(),
+    );
     adapter.join("dist/index.js")
 }
 

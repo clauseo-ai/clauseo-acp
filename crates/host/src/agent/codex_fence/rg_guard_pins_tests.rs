@@ -5,7 +5,7 @@
 
 use std::path::PathBuf;
 
-use super::super::{PINNED_CODEX, PINNED_CODEX_ACP, PINNED_RG, Pins};
+use super::super::{PINNED_CODEX, PINNED_CODEX_ACP, PINNED_RG, Pins, shipped_layout};
 use super::{MISSING, RG, World, pins, refused};
 use crate::agent::codex_fence::rg_guard::{CodexPins, Inputs, Seam, runs};
 use crate::write;
@@ -69,6 +69,40 @@ fn the_pinned_hashes_are_the_published_hex() {
             rg_sha256: *bytes,
         }
     );
+}
+
+/// `package/vendor/<triple>/codex-package.json` in `npm pack @openai/codex@0.162.1-linux-x64`
+/// and `-linux-arm64` (tarballs whose sha512 equal the lock's `integrity`), byte for byte, with
+/// their SHA-256 (`sha256sum`, 2026-11-09).
+const SHIPPED_LAYOUTS: [(&str, &str, &str); 2] = [
+    (
+        "x86_64-unknown-linux-musl",
+        "f05ebff6db98bd613dd5654461985090c6416b41ad67902243d83a53b305ac05",
+        "{\n  \"layoutVersion\": 1,\n  \"version\": \"0.162.1\",\n  \"target\": \"x86_64-unknown-linux-musl\",\n  \"variant\": \"codex\",\n  \"entrypoint\": \"bin/codex\",\n  \"resourcesDir\": \"codex-resources\",\n  \"pathDir\": \"codex-path\"\n}\n",
+    ),
+    (
+        "aarch64-unknown-linux-musl",
+        "556ac63fe118801d1006e776a766ee4d11e64919fc8ce127e5b73ede846c3e15",
+        "{\n  \"layoutVersion\": 1,\n  \"version\": \"0.162.1\",\n  \"target\": \"aarch64-unknown-linux-musl\",\n  \"variant\": \"codex\",\n  \"entrypoint\": \"bin/codex\",\n  \"resourcesDir\": \"codex-resources\",\n  \"pathDir\": \"codex-path\"\n}\n",
+    ),
+];
+
+/// Round 3b: the layout files the pinned Codex ships (their bytes checked by hash here) are
+/// exactly what the guard accepts for the pinned version and each triple.
+#[test]
+fn the_shipped_layout_files_are_the_ones_the_guard_accepts() {
+    use sha2::Digest as _;
+    use std::fmt::Write as _;
+    for (triple, hex, text) in SHIPPED_LAYOUTS {
+        let hash = sha2::Sha256::digest(text.as_bytes());
+        let shown = hash.iter().fold(String::new(), |mut shown, b| {
+            write!(shown, "{b:02x}").unwrap();
+            shown
+        });
+        assert_eq!(shown, hex, "{triple}");
+        let parsed: serde_json::Value = serde_json::from_str(text).unwrap();
+        assert_eq!(parsed, shipped_layout(PINNED_CODEX, triple), "{triple}");
+    }
 }
 
 /// A Codex launch's settings running `script`, with `path` as their `PATH`.

@@ -319,7 +319,8 @@ The orchestrator's conditions, which the later pull requests must meet:
     Old notes that hold a link move entry by entry, the links left behind, since a relative link
     would name another place one level up.
   - **ripgrep.** On Linux, a Codex launch runs only with the `rg` of the pinned `@openai/codex`
-    package, found by absolute path in Node's lookup order and checked by SHA-256; `PATH` is
+    package, found by absolute path in Node's lookup order and checked by SHA-256, beside the
+    `codex-package.json` Codex ships (the file through which Codex finds `codex-path`); `PATH` is
     never searched. The residual above about a missing `codex-path/rg` is closed. Codex then
     runs that `rg` in place for the whole session: it puts `codex-path` first on its `PATH` from
     its own executable's folder, and no setting names another `rg` (codex-rs rust-v0.162.1
@@ -329,11 +330,11 @@ The orchestrator's conditions, which the later pull requests must meet:
     (`launch_checks/sandbox/tests.rs`, the Seatbelt snapshot
     `with_a_runtime_path_in_the_data_dir`, `acl_plan/tests/data.rs`), and Claude's deny rules
     name `agents/codex-acp/**` for Read and Edit.
-  - **Residual: swapping ripgrep mid-session.** Linux has no jail yet (tier C), so only Claude's
-    deny rules and the host's auto-deny keep Claude out of `agents/codex-acp`, and a script
-    Claude runs that builds the path at run time could still replace `rg` during a Codex
-    session. A process running as the user outside any agent can replace it too; that is
-    outside the threat model.
+  - **Residual: swapping ripgrep mid-session.** On Linux (no jail yet), any Bash command Claude
+    runs could replace `rg` during a Codex session, including renaming a parent folder or
+    creating the install folder before Clauseo installs it. Only Claude's deny rules and the
+    host's auto-deny stand in the way. A process running as the user outside any agent can
+    replace it too; that is outside the threat model.
 
 ## Status
 

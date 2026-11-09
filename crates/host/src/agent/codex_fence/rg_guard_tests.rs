@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use clauseo_protocol::ErrorCode;
 use sha2::Digest as _;
 
-use super::{ADAPTER, Inputs, Pins, check, node_lookup, platform};
+use super::{ADAPTER, Inputs, LAYOUT_FILE, Pins, check, node_lookup, platform, shipped_layout};
 use crate::pipeline::tests::support::TempDir;
 use crate::write;
 
@@ -98,7 +98,8 @@ impl World {
     }
 
     /// The platform package at `version` in `base`'s `node_modules` (named `@openai/codex`, as
-    /// npm's alias install names it), with an executable [`RG`]; the `rg`'s path.
+    /// npm's alias install names it), with an executable [`RG`] and the layout file Codex ships
+    /// at the pinned version ([`write_layout`]); the `rg`'s path.
     fn build(base: &Path, version: &str) -> PathBuf {
         let folder = base.join(format!("node_modules/@openai/codex-{}", npm()));
         package(&folder, "@openai/codex", version);
@@ -110,6 +111,7 @@ impl World {
         let rg = vendored.join("rg");
         write::write_file(&rg, RG).unwrap();
         write::set_mode(&rg, 0o755).unwrap();
+        write_layout(vendored.parent().unwrap(), pins().codex);
         rg
     }
 
@@ -135,6 +137,12 @@ impl World {
     }
 }
 
+/// Writes `folder/codex-package.json` as Codex `version` ships it for this machine.
+fn write_layout(folder: &Path, version: &str) {
+    let text = shipped_layout(version, platform().unwrap().triple).to_string();
+    write::write_file(&folder.join(LAYOUT_FILE), text.as_bytes()).unwrap();
+}
+
 /// Asserts `result` is an `agent.launch_failed` refusal holding `words` and no path.
 #[track_caller]
 pub(super) fn refused(result: Result<(), crate::error::Error>, words: &str) {
@@ -150,6 +158,7 @@ pub(super) const MISSING: &str = "(ripgrep) is missing. Reinstall Codex";
 const VERSION: &str = "version isn't the one this Clauseo was checked with. Reinstall Codex";
 const NOT_SHIPPED: &str = "(ripgrep) isn't the one Codex ships. Reinstall Codex";
 const WRITABLE: &str = "a folder the agent can change";
+const LAYOUT: &str = "layout file (codex-package.json) is missing or isn't the one Codex ships";
 
 #[test]
 fn the_pinned_install_passes() {
@@ -286,6 +295,51 @@ fn an_install_the_agent_can_write_refuses() {
     write::rename(&build, &real).unwrap();
     write::symlink(&real, &build).unwrap();
     refused(w.check(), WRITABLE);
+}
+
+/// Round 3b: Codex finds `codex-path` only through `codex-package.json` beside `bin/`, so
+/// the guard checks it: the shipped file passes; one missing, a link (even to the shipped
+/// bytes), a folder, at another version or target, with a field more, or not JSON refuses with
+/// its own words and no path; and one whose real path is in the matter refuses as writable.
+#[test]
+fn the_layout_file_must_be_the_one_codex_ships() {
+    let w = World::pinned("rg-guard-layout", "install");
+    let folder = w
+        .at(&format!("install/node_modules/@openai/codex-{}", npm()))
+        .join("vendor")
+        .join(platform().unwrap().triple);
+    let file = folder.join(LAYOUT_FILE);
+    w.check().unwrap();
+    // Missing.
+    write::remove_file(&file).unwrap();
+    refused(w.check(), LAYOUT);
+    // A link to a file with the shipped bytes, outside any writable folder.
+    let elsewhere = w.at("elsewhere");
+    write::create_dir_all(&elsewhere).unwrap();
+    write_layout(&elsewhere, pins().codex);
+    write::symlink(&elsewhere.join(LAYOUT_FILE), &file).unwrap();
+    refused(w.check(), LAYOUT);
+    write::remove_file(&file).unwrap();
+    // A folder.
+    write::create_dir_all(&file).unwrap();
+    refused(w.check(), LAYOUT);
+    write::remove_dir_all(&file).unwrap();
+    // Another version or target, a field more, not JSON.
+    let triple = platform().unwrap().triple;
+    let mut extra = shipped_layout(pins().codex, triple);
+    extra["codexHome"] = serde_json::json!("/tmp");
+    for wrong in [
+        shipped_layout("0.160.1", triple).to_string(),
+        shipped_layout(pins().codex, "riscv64-unknown-linux-musl").to_string(),
+        extra.to_string(),
+        "not json".to_owned(),
+    ] {
+        write::write_file(&file, wrong.as_bytes()).unwrap();
+        refused(w.check(), LAYOUT);
+    }
+    // The shipped file again passes.
+    write_layout(&folder, pins().codex);
+    w.check().unwrap();
 }
 
 #[path = "rg_guard_pins_tests.rs"]

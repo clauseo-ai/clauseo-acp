@@ -15,16 +15,20 @@
 //! (`@openai/codex-linux-x64` or `-linux-arm64`) that one loads; and in it
 //! `vendor/<triple>/codex-path/rg`. Each package's version must be the pinned one ([`Pins`]),
 //! and the `rg` a regular file (not a link), executable, whose SHA-256 is the pinned hash for
-//! this machine's triple, with its canonical path in no folder the session writes or Codex keeps
-//! (the matter, the run folder, the notes, the state folder), so it cannot be swapped after the
-//! check. Otherwise, and on any other processor (no pinned build), the launch is refused with
+//! this machine's triple. Beside `codex-path`, `vendor/<triple>/codex-package.json` must be a
+//! regular file (not a link) holding exactly the fields Codex ships ([`shipped_layout`]: the
+//! pinned version, the triple, `codex-path`): Codex finds its own folder, and so `codex-path`,
+//! only through that file beside `bin/`, and without it searches the `PATH` it inherits
+//! (codex-rs rust-v0.162.1 `install-context/src/lib.rs:286-296`). Both canonical paths must lie
+//! in no folder the session writes or Codex keeps (the matter, the run folder, the notes, the
+//! state folder), so neither can be swapped after the check. Otherwise, and on any other processor (no pinned build), the launch is refused with
 //! `agent.launch_failed`. The refusal and the log name no path.
 //!
 //! Codex runs that `rg` in place, not a checked copy: it puts `codex-path` first on its `PATH`
 //! from its own executable's folder, and no setting names another `rg` (codex-rs rust-v0.162.1
 //! `install-context/src/lib.rs:297`, `arg0/src/lib.rs:181, 458-467`). So the install is kept
 //! read-only to every agent instead (decision record 0051, with the residual on Linux, which
-//! has no jail yet: a script Claude runs that builds the path at run time).
+//! has no jail yet: any Bash command Claude runs could replace `rg` during a Codex session).
 
 use std::path::{Path, PathBuf};
 
@@ -34,6 +38,12 @@ use crate::error::Error;
 
 /// The vendored folder's name under `vendor/<triple>` that Codex puts first on its `PATH`.
 const CODEX_PATH: &str = "codex-path";
+
+/// Codex's layout file in `vendor/<triple>`, beside `bin/` and `codex-path`.
+const LAYOUT_FILE: &str = "codex-package.json";
+
+/// The most bytes of [`LAYOUT_FILE`] read; Codex ships about 200.
+const LAYOUT_MAX: u64 = 64 * 1024;
 
 /// The adapter's npm package name.
 const ADAPTER: &str = "@agentclientprotocol/codex-acp";
@@ -233,6 +243,8 @@ enum Kind {
     Writable,
     /// This processor has no pinned Codex build.
     Unsupported,
+    /// `codex-package.json` is missing, a link, not a regular file, or not what Codex ships.
+    Layout,
 }
 
 /// A refusal: its [`Kind`], and which part failed (for the log, never a path).
@@ -286,6 +298,11 @@ impl Refusal {
             Kind::Writable => {
                 "Clauseo can't start Codex safely: the search tool (ripgrep) it would run sits \
                  in a folder the agent can change."
+            }
+            Kind::Layout => {
+                "Clauseo can't start Codex safely: its install's layout file \
+                 (codex-package.json) is missing or isn't the one Codex ships. Reinstall Codex \
+                 in Clauseo's settings."
             }
             Kind::Unsupported => {
                 "Clauseo can't start Codex safely on this computer: its search tool (ripgrep) \
@@ -357,9 +374,46 @@ fn sha256(file: &Path) -> std::io::Result<[u8; 32]> {
     Ok(hasher.finalize().into())
 }
 
-/// The bundled `rg` of the install `inputs.script` belongs to (a relative script resolved in
-/// `cwd`, the folder the agent runs in), checked against `inputs.pins` (module doc).
-fn resolve(inputs: &Inputs, cwd: &Path) -> Result<PathBuf, Refusal> {
+/// The `codex-package.json` Codex `version` ships for `triple`, as its fields (the files in
+/// `npm pack @openai/codex@0.162.1-linux-x64` and `-linux-arm64`; `rg_guard_pins_tests.rs`
+/// checks both against this).
+pub(crate) fn shipped_layout(version: &str, triple: &str) -> serde_json::Value {
+    serde_json::json!({
+        "layoutVersion": 1,
+        "version": version,
+        "target": triple,
+        "variant": "codex",
+        "entrypoint": "bin/codex",
+        "resourcesDir": "codex-resources",
+        "pathDir": CODEX_PATH,
+    })
+}
+
+/// The layout file in `folder` (`vendor/<triple>`): a regular file, never a link, read up to
+/// [`LAYOUT_MAX`], whose JSON equals [`shipped_layout`] for `version` and `triple`.
+fn layout(folder: &Path, version: &str, triple: &str) -> Result<PathBuf, Refusal> {
+    use std::io::Read as _;
+    let file = folder.join(LAYOUT_FILE);
+    let meta = std::fs::symlink_metadata(&file)
+        .map_err(|error| Refusal::io(Kind::Layout, "layout file", &error))?;
+    if !meta.file_type().is_file() {
+        return Err(Refusal::new(Kind::Layout, "layout file"));
+    }
+    let mut bytes = Vec::new();
+    std::fs::File::open(&file)
+        .and_then(|opened| opened.take(LAYOUT_MAX).read_to_end(&mut bytes))
+        .map_err(|error| Refusal::io(Kind::Layout, "layout file read", &error))?;
+    let found: Option<serde_json::Value> = serde_json::from_slice(&bytes).ok();
+    if found != Some(shipped_layout(version, triple)) {
+        return Err(Refusal::new(Kind::Layout, "layout file contents"));
+    }
+    Ok(file)
+}
+
+/// The bundled `rg` and the layout file of the install `inputs.script` belongs to (a relative
+/// script resolved in `cwd`, the folder the agent runs in), checked against `inputs.pins`
+/// (module doc).
+fn resolve(inputs: &Inputs, cwd: &Path) -> Result<[PathBuf; 2], Refusal> {
     use std::os::unix::fs::PermissionsExt as _;
     let unsupported = Refusal::new(Kind::Unsupported, "processor");
     let (Some(platform), Some(pins)) = (platform(), inputs.pins.as_ref()) else {
@@ -381,11 +435,8 @@ fn resolve(inputs: &Inputs, cwd: &Path) -> Result<PathBuf, Refusal> {
         &format!("{}-{}", pins.codex, platform.npm),
         "platform package",
     )?;
-    let rg = build
-        .join("vendor")
-        .join(platform.triple)
-        .join(CODEX_PATH)
-        .join("rg");
+    let vendored = build.join("vendor").join(platform.triple);
+    let rg = vendored.join(CODEX_PATH).join("rg");
     // The `rg` itself is never a link; the folders on the way are whatever npm made.
     let meta =
         std::fs::symlink_metadata(&rg).map_err(|error| Refusal::io(Kind::Missing, "rg", &error))?;
@@ -396,21 +447,25 @@ fn resolve(inputs: &Inputs, cwd: &Path) -> Result<PathBuf, Refusal> {
     if hash != pins.rg_sha256 {
         return Err(Refusal::new(Kind::NotShipped, "rg hash"));
     }
-    Ok(rg)
+    let layout = layout(&vendored, pins.codex, platform.triple)?;
+    Ok([rg, layout])
 }
 
-/// The guard: refuses a Codex launch whose bundled `rg` ([`resolve`]) fails a check, or lies,
-/// canonically, inside one of `writable` (each compared canonical when it resolves, as given
-/// too). `cwd` is the folder the agent runs in. File system calls: off the actor.
+/// The guard: refuses a Codex launch whose bundled `rg` or layout file ([`resolve`]) fails a
+/// check, or lies, canonically, inside one of `writable` (each compared canonical when it
+/// resolves, as given too). `cwd` is the folder the agent runs in. File system calls: off the
+/// actor.
 pub(crate) fn check(inputs: &Inputs, cwd: &Path, writable: &[&Path]) -> Result<(), Error> {
-    let rg = resolve(inputs, cwd).map_err(Refusal::error)?;
-    let real = dunce::canonicalize(&rg).unwrap_or(rg);
-    let inside = writable.iter().any(|root| {
-        real.starts_with(root)
-            || dunce::canonicalize(root).is_ok_and(|canonical| real.starts_with(canonical))
-    });
-    if inside {
-        return Err(Refusal::new(Kind::Writable, "rg").error());
+    let found = resolve(inputs, cwd).map_err(Refusal::error)?;
+    for (file, part) in found.into_iter().zip(["rg", "layout file"]) {
+        let real = dunce::canonicalize(&file).unwrap_or(file);
+        let inside = writable.iter().any(|root| {
+            real.starts_with(root)
+                || dunce::canonicalize(root).is_ok_and(|canonical| real.starts_with(canonical))
+        });
+        if inside {
+            return Err(Refusal::new(Kind::Writable, part).error());
+        }
     }
     Ok(())
 }
