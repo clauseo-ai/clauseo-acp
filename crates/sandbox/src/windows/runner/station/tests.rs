@@ -252,3 +252,26 @@ fn a_default_desktop_someone_made_first_refuses() {
     // Any other code left over from an earlier call isn't this one's.
     assert_eq!(made_fresh(5), Ok(()));
 }
+
+#[test]
+fn a_runner_desktop_is_only_ever_default_on_an_unnamed_station() {
+    let desktop = StationDesktop::of(NAME).unwrap();
+    assert_eq!(desktop.as_str(), r"Service-0x0-1a2b3c$\Default");
+    let wide = desktop.wide();
+    let (nul, text) = wide.split_last().unwrap();
+    assert_eq!(*nul, 0);
+    assert_eq!(String::from_utf16(text).unwrap(), desktop.as_str());
+    assert!(StationDesktop::of("Service-0x1-ffff$").is_some());
+    for not in [
+        "",
+        "WinSta0",
+        r"WinSta0\Default",
+        "Service-0x0-$",
+        "Service-0x0-1a2b3c",
+        r"Service-0x0-1a\b$",
+        "ClauseoRun-0123456789abcdef",
+        "service-0x0-1a$",
+    ] {
+        assert_eq!(StationDesktop::of(not), None, "{not}");
+    }
+}

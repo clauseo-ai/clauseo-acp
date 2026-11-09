@@ -202,6 +202,7 @@ fn session(message: &LaunchMessage, end: &End) -> Result<u32, Failure> {
         exe: &steps.exe,
         base: set.base(),
         cwd: &steps.cwd,
+        station_desktop: &agent_desktop.path,
         job,
     };
     let inner = start(&mut steps)?;
@@ -214,7 +215,7 @@ fn session(message: &LaunchMessage, end: &End) -> Result<u32, Failure> {
         cwd: message.cwd.clone(),
         env,
         folders,
-        desktop: agent_desktop.path.clone(),
+        desktop: agent_desktop.path.as_str().to_owned(),
         folder_base: WinPath::parse(&message.state)
             .map(|state| state.display())
             .unwrap_or_default(),

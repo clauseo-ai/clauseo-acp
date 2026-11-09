@@ -42,6 +42,7 @@ use windows::Win32::System::Threading::{
 use windows::core::{HSTRING, PCWSTR, PWSTR};
 use zeroize::Zeroizing;
 
+use super::station::StationDesktop;
 use crate::windows::acl::object::{Handle, os_error};
 
 /// `SW_HIDE`.
@@ -114,14 +115,17 @@ unsafe impl Send for Job {}
 unsafe impl Sync for Job {}
 
 /// The outer's call: starts `exe <args>` (`--inner <base>`) as the pool user `name` (on this
-/// computer) with its profile loaded, suspended, hidden, in `cwd`, with the pool user's own
-/// environment. The password buffer is wiped when this returns. A failure gives the Win32 code.
+/// computer) with its profile loaded, suspended, hidden, in `cwd`, on `desktop` (never `NULL`:
+/// the Secondary Logon service would grant the pool user's logon the lawyer's
+/// `WinSta0\Default`), with the pool user's own environment. The password buffer is wiped when
+/// this returns. A failure gives the Win32 code.
 pub(super) fn log_on(
     name: &str,
     password: Zeroizing<String>,
     exe: &str,
     args: &str,
     cwd: &str,
+    desktop: &StationDesktop,
 ) -> Result<Process, u32> {
     let user = HSTRING::from(name);
     let mut secret: Zeroizing<Vec<u16>> = Zeroizing::new(Vec::with_capacity(password.len() + 1));
@@ -132,12 +136,8 @@ pub(super) fn log_on(
         .encode_utf16()
         .chain([0])
         .collect();
-    let startup = STARTUPINFOW {
-        cb: u32::try_from(size_of::<STARTUPINFOW>()).unwrap_or(0),
-        dwFlags: STARTF_USESHOWWINDOW,
-        wShowWindow: SW_HIDE,
-        ..STARTUPINFOW::default()
-    };
+    let mut desktop = desktop.wide();
+    let startup = logon_startup(&mut desktop);
     let mut info = PROCESS_INFORMATION::default();
     // SAFETY: every string is NUL-terminated and outlives the call, the command line writable as
     // the call requires; no environment, so the pool user's own is made from its profile;
@@ -161,6 +161,18 @@ pub(super) fn log_on(
     match started {
         Ok(()) => Ok(Process::from(info)),
         Err(error) => Err(u32::try_from(error.code().0 & 0xFFFF).unwrap_or(u32::MAX)),
+    }
+}
+
+/// The `STARTUPINFOW` of [`log_on`]'s call: hidden, on `desktop` (a NUL-terminated
+/// [`StationDesktop::wide`], which must outlive the call).
+pub(super) fn logon_startup(desktop: &mut [u16]) -> STARTUPINFOW {
+    STARTUPINFOW {
+        cb: u32::try_from(size_of::<STARTUPINFOW>()).unwrap_or(0),
+        lpDesktop: PWSTR(desktop.as_mut_ptr()),
+        dwFlags: STARTF_USESHOWWINDOW,
+        wShowWindow: SW_HIDE,
+        ..STARTUPINFOW::default()
     }
 }
 

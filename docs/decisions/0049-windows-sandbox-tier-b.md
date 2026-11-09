@@ -1066,6 +1066,13 @@ leaves that profile, both naming the part.
     (PowerShell and `whoami` hang). The pool user's effective rights read `0x2007F` and `0xC7`,
     and none of the pool user, the run's group or `RESTRICTED` gets `WRITE_DAC`, `WRITE_OWNER`
     or `DELETE` (read by hand on both machines).
+  - **Every runner process starts on it, never on `WinSta0`.** The inner runner's
+    `CreateProcessWithLogonW` names `<station>\Default` as `lpDesktop`, as the agent's
+    `CreateProcessAsUserW` does. With `lpDesktop` `NULL` the Secondary Logon service grants the
+    new logon access to the caller's `WinSta0\Default`, which put a Medium pool process where it
+    could reach the lawyer's windows; with a named desktop it changes no DACL. The path is a
+    `station::StationDesktop`, built only from an unnamed station's name
+    (`Service-0x<hex>-<hex>$`), so `spawn::log_on` can't be given `WinSta0` or nothing.
   - **Nothing to clean.** The station goes with its last handle: the outer's, held until its
     `serve` returns, and the inner's and the agent's own.
   - **Any failure refuses the launch**, with the call named (`the agent's window station:

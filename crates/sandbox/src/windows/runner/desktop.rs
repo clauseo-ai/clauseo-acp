@@ -34,7 +34,7 @@ use windows::Win32::System::Threading::{GetCurrentThread, OpenThreadToken};
 use windows::core::{HSTRING, PCWSTR, w};
 use zeroize::Zeroizing;
 
-use super::station::{Made, StationSids, StationSteps, made_fresh, make_station};
+use super::station::{Made, StationDesktop, StationSids, StationSteps, made_fresh, make_station};
 use crate::windows::acl::object::{Handle, os_error};
 use crate::windows::sids::Sid;
 use crate::windows::token::os::{LocalDescriptor, LocalSid, user};
@@ -48,8 +48,9 @@ type Failed = (&'static str, io::Error);
 pub(super) struct AgentDesktop {
     _desktop: Desktop,
     _station: Station,
-    /// `<station>\Default`, for the agent's `lpDesktop`.
-    pub(super) path: String,
+    /// `<station>\Default`, the `lpDesktop` of every process the runners start: the inner
+    /// runner and the agent.
+    pub(super) path: StationDesktop,
 }
 
 impl AgentDesktop {
@@ -71,10 +72,16 @@ impl AgentDesktop {
             desktop,
             name,
         } = make_station(&mut steps, sids)?;
+        let path = StationDesktop::of(&name).ok_or_else(|| {
+            (
+                "GetUserObjectInformationW",
+                io::Error::other("the station's name isn't an unnamed station's"),
+            )
+        })?;
         Ok(AgentDesktop {
             _desktop: desktop,
             _station: station,
-            path: format!(r"{name}\Default"),
+            path,
         })
     }
 }
@@ -213,8 +220,11 @@ impl StationSteps for OsStation<'_> {
             .unwrap_or(buffer.len());
         let name = String::from_utf16(buffer.get(..end).unwrap_or_default())
             .map_err(|e| (call, io::Error::other(e)))?;
-        if name.is_empty() || name.contains('\\') {
-            return Err((call, io::Error::other("the station has no usable name")));
+        if StationDesktop::of(&name).is_none() {
+            return Err((
+                call,
+                io::Error::other("the station's name isn't an unnamed station's"),
+            ));
         }
         Ok(name)
     }

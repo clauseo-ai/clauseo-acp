@@ -10,7 +10,8 @@ use std::time::Duration;
 
 use windows::Win32::Foundation::HANDLE;
 
-use super::spawn::{assign, kill_on_close_job};
+use super::spawn::{assign, kill_on_close_job, logon_startup};
+use super::station::StationDesktop;
 use super::sweep::os::own_job_pids;
 
 /// Set in the child's environment: it makes [`job_child`] the child's part.
@@ -102,4 +103,18 @@ fn a_kill_on_close_jobs_child_that_read_its_own_job_dies_with_the_creators_handl
         .expect("the child outlived the job's last handle")
         .unwrap();
     assert!(code.is_some(), "{code:?}");
+}
+
+/// `CreateProcessWithLogonW`'s startup info (the inner runner's) always names the agent's
+/// station's desktop: never `NULL`, which would have the Secondary Logon service grant the pool
+/// user's logon the lawyer's `WinSta0\Default`.
+#[test]
+fn every_logon_starts_on_the_agents_station_desktop() {
+    let desktop = StationDesktop::of("Service-0x0-3e7$").unwrap();
+    let mut wide = desktop.wide();
+    let startup = logon_startup(&mut wide);
+    assert!(!startup.lpDesktop.is_null());
+    assert_eq!(startup.lpDesktop.0, wide.as_mut_ptr());
+    let text = String::from_utf16(wide.split_last().unwrap().1).unwrap();
+    assert_eq!(text, r"Service-0x0-3e7$\Default");
 }

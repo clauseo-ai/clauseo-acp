@@ -6,6 +6,7 @@ use zeroize::Zeroizing;
 use super::super::RunExit;
 use super::super::spawn::{Process, assign, log_on, resume};
 use super::super::start::Steps;
+use super::super::station::StationDesktop;
 use super::{Failure, logon_failure, os};
 use crate::windows::acl::object::Handle;
 use crate::windows::sids::Sid;
@@ -23,6 +24,8 @@ pub(super) struct Start<'a> {
     pub(super) exe: &'a str,
     pub(super) base: &'a str,
     pub(super) cwd: &'a str,
+    /// The agent's station's desktop, the inner runner's too.
+    pub(super) station_desktop: &'a StationDesktop,
     pub(super) job: &'a Handle,
 }
 
@@ -37,7 +40,15 @@ impl Steps for Start<'_> {
             .ok_or_else(|| Failure::new(RunExit::Logon, "the password was spent"))?;
         // `log_on` takes the password and wipes it as it returns.
         let args = format!("--inner {}", self.base);
-        log_on(self.pool_name, password, self.exe, &args, self.cwd).map_err(logon_failure)
+        log_on(
+            self.pool_name,
+            password,
+            self.exe,
+            &args,
+            self.cwd,
+            self.station_desktop,
+        )
+        .map_err(logon_failure)
     }
 
     /// Its token's user, read now: from its first instruction the inner shuts its token to all
