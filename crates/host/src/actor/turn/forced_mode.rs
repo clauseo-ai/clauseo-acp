@@ -345,7 +345,9 @@ fn pick_answered(
     }
 }
 
-/// `session/set_mode` to `target` for `thread`'s session, which moved itself to `mode`.
+/// `session/set_mode` to `target` for `thread`'s session, which moved itself to `mode`; an
+/// unjailed Codex's `unjailed::MOVES_BEFORE_STOP`th move stops it instead
+/// (`unjailed::kept_moving`).
 fn set_back(actor: &mut Actor, thread: ThreadId, mode: &str, target: &'static str) {
     let Some(agent) = agent(actor, thread) else {
         return;
@@ -359,6 +361,12 @@ fn set_back(actor: &mut Actor, thread: ThreadId, mode: &str, target: &'static st
         .as_ref()
         .is_some_and(|codex| codex.jail.is_none());
     if unjailed {
+        if unjailed::kept_moving(actor, thread) {
+            let error =
+                Error::Internal("it kept moving itself to working without asking".to_owned());
+            unjailed::stop_unasked(actor, thread, &error);
+            return;
+        }
         unjailed::resetting(actor, thread);
     }
     if unjailed::first(actor, thread, Kind::SetBack) {

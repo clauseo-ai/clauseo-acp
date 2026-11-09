@@ -12,7 +12,11 @@
 //!   without asking gets one more switch back, and after that the agent is stopped.
 //! - A switch back that fails or goes unanswered stops the agent ([`stop_unasked`]): its turn is
 //!   cancelled, its tree killed at once (no graces), its session ends the normal way through the
-//!   launch gate, and one notice (`NoticeKind::ModeSetBackFailed`) says so.
+//!   launch gate, and one notice (`NoticeKind::ModeSetBackFailed`) says so. Its queued turns wait
+//!   for the lawyer, so nothing starts it again by itself; with none, the next message does.
+//! - Each of the agent's moves that the host switches back counts for its session (a relaunch
+//!   starts the count again; the lawyer's picks never count): the [`MOVES_BEFORE_STOP`]th stops
+//!   the agent as a failed switch back does, however slowly it moves ([`kept_moving`]).
 //! - Its mode log lines come once per kind per turn ([`first`]), with a count at the turn's
 //!   end ([`flush`]), the mode id capped at [`MODE_LOG_CHARS`] characters ([`capped`]).
 
@@ -24,13 +28,17 @@ use clauseo_protocol::{CommandId, CompactString, Notice, NoticeKind, NoticeLevel
 use super::super::super::Actor;
 use super::super::agents::{self, Stage};
 use super::super::updates::{agent, commit};
-use super::super::{cancel, current};
+use super::super::{cancel, current, queue};
 use crate::agent::codex;
 use crate::error::Error;
 use crate::log_file::Cause;
 
 /// How long the host waits for the agent's answer to a switch back before it counts as failed.
 pub(in super::super) const SET_BACK_WAIT: Duration = Duration::from_secs(10);
+
+/// The agent's moves to a mode that approves without asking that one session of an unjailed
+/// Codex gets before it is stopped: the first two are switched back, the third stops it.
+pub(in super::super) const MOVES_BEFORE_STOP: u32 = 3;
 
 /// The most characters of a mode id a log line carries; a longer one ends in an ellipsis.
 const MODE_LOG_CHARS: usize = 64;
@@ -52,6 +60,8 @@ pub(in super::super) struct CodexModes {
     during: Option<CompactString>,
     /// The switch back in flight is the second for one move: a third stops the agent.
     again: bool,
+    /// This session's moves the host switched back, the last one included ([`kept_moving`]).
+    moves: u32,
     /// This turn's mode log lines, by [`Kind`].
     seen: Seen,
 }
@@ -250,6 +260,26 @@ pub(in super::super) fn resetting(actor: &mut Actor, thread: ThreadId) {
     }
 }
 
+/// `thread`'s unjailed Codex moved itself to a mode that approves without asking and is about to
+/// be switched back: counts the move for its session, and whether it is the
+/// [`MOVES_BEFORE_STOP`]th or a later one, so the agent is stopped instead ([`stop_unasked`]).
+/// The third is logged once, with the count.
+pub(in super::super) fn kept_moving(actor: &mut Actor, thread: ThreadId) -> bool {
+    let Some(modes) = modes(actor, thread) else {
+        return false;
+    };
+    modes.moves = modes.moves.saturating_add(1);
+    let count = modes.moves;
+    if count == MOVES_BEFORE_STOP {
+        tracing::warn!(
+            kind = "agent_kept_moving",
+            count,
+            "an unjailed Codex kept moving itself to a mode that approves without asking"
+        );
+    }
+    count >= MOVES_BEFORE_STOP
+}
+
 /// What follows an unjailed Codex's switch back once answered.
 #[derive(Debug)]
 pub(in super::super) enum After {
@@ -295,9 +325,11 @@ pub(in super::super) fn reset_answered(
     Some(After::Again(mode))
 }
 
-/// The switch back of `thread`'s unjailed Codex failed, went unanswered, or did not hold: one
-/// notice, its turn cancelled, and the agent stopped at once, its tree killed with no graces
-/// (`AgentLink::stop_now`); its session ends through the launch gate as any stop's.
+/// The switch back of `thread`'s unjailed Codex failed, went unanswered, or did not hold, or the
+/// agent moved a [`MOVES_BEFORE_STOP`]th time: one notice, its queued turns held for the lawyer
+/// (`queue::hold_for_stop`), its turn cancelled, and the agent stopped at once, its tree killed
+/// with no graces (`AgentLink::stop_now`); its session ends through the launch gate as any
+/// stop's.
 pub(in super::super) fn stop_unasked(actor: &mut Actor, thread: ThreadId, error: &Error) {
     if agent(actor, thread).is_none_or(|agent| agent.stage == Stage::Stopping) {
         return;
@@ -316,6 +348,7 @@ pub(in super::super) fn stop_unasked(actor: &mut Actor, thread: ThreadId, error:
     if let Err(error) = commit(actor, thread, [notice.into()], Vec::new()) {
         tracing::warn!(%thread, error = %Cause(&error), "the stop's notice was not logged");
     }
+    queue::hold_for_stop(actor, thread);
     if current(actor, thread).is_some_and(|current| !current.cancelled) {
         cancel::cancel_current(actor, thread);
     }
