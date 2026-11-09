@@ -1,13 +1,20 @@
 //! The Python runtime's state on the wire (`entry::python_progress`): a waiting or
 //! download-blocked install carries Python's hosts and the agent install's code, as an agent's
-//! does; a refused start carries what refused it, and no hosts.
+//! does; a refused start carries what refused it, and no hosts. And the launch hook's Python
+//! folders follow each state: `Ready` fills them, any other empties them.
+
+use std::path::PathBuf;
 
 use clauseo_agents::testing::python_failed;
-use clauseo_agents::{FailureKind, InstallLog, PythonBlocker, PythonFailureKind, PythonState};
+use clauseo_agents::{
+    AgentsEvent, FailureKind, InstallLog, PythonBlocker, PythonFailureKind, PythonState,
+};
 use clauseo_protocol::{ErrorCode, PythonBlockedBy, PythonFailureCause, PythonProgress};
 
 use super::claude;
+use super::fakes::{RIG_PYTHON_DIR, rig};
 use crate::setup::backend::entry::python_progress;
+use crate::test_support::block_on;
 
 fn hosts() -> Vec<String> {
     vec![
@@ -115,5 +122,44 @@ fn a_refused_python_names_what_refused_it_and_carries_no_code_or_hosts() {
         assert_eq!(code, None);
         assert_eq!(got, Vec::<String>::new());
         assert_eq!(by, Some(want));
+    }
+}
+
+#[test]
+fn the_python_folders_fill_on_ready_and_empty_on_any_other_state() {
+    let rig = rig(true);
+    let folders = || rig.python.read().unwrap().clone();
+    let pump = |state: PythonState| {
+        block_on(
+            rig.backend
+                .pump(futures::stream::iter([AgentsEvent::Python { state }])),
+        );
+    };
+    let ready = || PythonState::Ready {
+        version: "3.13.18".to_owned(),
+    };
+    assert_eq!(folders(), Vec::<PathBuf>::new(), "nothing before a state");
+    let others = [
+        PythonState::Missing {
+            download_bytes: 1000,
+        },
+        python_failed(&claude(), PythonFailureKind::Failed, None),
+        PythonState::Waiting {
+            reason: FailureKind::Offline,
+            log: InstallLog::new(&claude()),
+        },
+        PythonState::Downloading {
+            received: 1,
+            total: 2,
+        },
+        PythonState::Installing,
+        PythonState::Unavailable,
+    ];
+    for other in others {
+        pump(ready());
+        assert_eq!(folders(), [PathBuf::from(RIG_PYTHON_DIR)]);
+        let label = format!("{other:?}");
+        pump(other);
+        assert_eq!(folders(), Vec::<PathBuf>::new(), "{label}");
     }
 }

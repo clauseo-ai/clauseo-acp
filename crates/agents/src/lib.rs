@@ -20,7 +20,8 @@
 //!   unpacked read-only on Unix under `runtime/<archive stem>/` with a manifest and a receipt,
 //!   run once before its receipt, as the second step of an agent's install job. Its own
 //!   [`PythonState`]; a failure never blocks the agent's `Ready`. [`python_command_dir`] is the
-//!   folder for the agent's `PATH`.
+//!   folder for the agent's `PATH`; [`python_path_dirs`] the folders an agent session's `PATH`
+//!   takes (all three on Windows: pandoc's, the interpreter's and pip's).
 //! - Node: the user's when it is a regular file, reports v22 or later and has `npm-cli.js`
 //!   beside it; otherwise the pinned download, checked by SHA-256.
 //! - Downloads (Rust's): each tarball the derived lock lists for this platform, with `Range`
@@ -62,7 +63,8 @@
 //!   [`ca_cert_var`], the CA variable of each agent's CLI.
 //! - [`InstallState`], [`Failure`], [`FailureKind`] (with its error code), [`InstallLog`] and
 //!   [`Installed`]; [`PythonState`] ([`AgentsEvent::Python`], [`Agents::python_state`]),
-//!   [`PythonFailure`], [`PythonFailureKind`], [`PythonBlocker`] and [`python_command_dir`].
+//!   [`PythonFailure`], [`PythonFailureKind`], [`PythonBlocker`], [`python_command_dir`] and
+//!   [`python_path_dirs`].
 //! - [`SigninState`], [`Found`], [`LoginFrom`], [`Source`], [`SigninCode`] (with its error
 //!   code), [`Method`], [`SigninError`], [`PasteCode`] and [`SigninConfig`];
 //!   [`SigninNote`]; [`AgentsEvent::Signin`], [`AgentsEvent::OpenUrl`] and
@@ -159,7 +161,7 @@ pub use fileid::same_file;
 pub use log::InstallLog;
 pub use pins::{AgentPins, PinsError};
 pub use platform::{Arch, Libc, Os, Platform};
-pub use python::{python_command_dir, python_contents_match};
+pub use python::{python_command_dir, python_contents_match, python_path_dirs};
 pub use receipt::{install_folder, install_root, script_path};
 pub use signin::reuse::{CodexLink, codex_link_holds, codex_login_shared, unlink_reused_login};
 pub use signin::{

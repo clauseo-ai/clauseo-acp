@@ -31,6 +31,7 @@ use crate::setup::host_calls::SetupHost;
 use crate::setup::keys::{KeyCache, KeysLoaded};
 use crate::setup::leave::LeaveTimer;
 use crate::setup::login_check::ReusedLogins;
+use crate::setup::python_path::{PythonPath, PythonSlot};
 use crate::setup::readers::LeaveReaders;
 use crate::setup::refresh::SettingsRead;
 use crate::setup::wiring::Wiring;
@@ -411,7 +412,12 @@ pub(super) struct Rig {
     pub(super) counts: Arc<FakeCounts>,
     /// The network route each settings read resolves into (`network::inline`).
     pub(super) network: crate::setup::NetworkSlot,
+    /// The launch hook's Python folders, whose lookup finds [`RIG_PYTHON_DIR`].
+    pub(super) python: PythonSlot,
 }
+
+/// The one folder the rig's Python lookup finds (it reads no disk).
+pub(super) const RIG_PYTHON_DIR: &str = "/data/agents/runtime/clauseo-python/bin";
 
 pub(super) fn home(agent: &AgentId) -> PathBuf {
     PathBuf::from(format!("/data/agents/{agent}/home"))
@@ -488,6 +494,11 @@ pub(super) fn rig_with(
         })
         .collect();
     let (network, follow) = super::network::inline(Arc::clone(&agents) as Arc<dyn SetupAgents>);
+    let python = PythonSlot::default();
+    let lookup = PythonPath::new(
+        Arc::clone(&python),
+        Arc::new(|| vec![PathBuf::from(RIG_PYTHON_DIR)]),
+    );
     let backend = Arc::new(AgentsBackend {
         agents: Arc::clone(&agents) as Arc<dyn SetupAgents>,
         keys: Arc::new(keys),
@@ -508,7 +519,8 @@ pub(super) fn rig_with(
             Vec::new(),
         )
         .with_timer(Arc::clone(&timer) as Arc<dyn LeaveTimer>)
-        .with_network(follow),
+        .with_network(follow)
+        .with_python_path(lookup),
         counts: Arc::clone(&counts) as Arc<dyn SetupCounts>,
         keys_loaded: loaded,
     });
@@ -531,6 +543,7 @@ pub(super) fn rig_with(
         timer,
         counts,
         network,
+        python,
     }
 }
 

@@ -60,6 +60,7 @@ use super::network::FIRST_ROUTE_WAIT;
 use super::network::{
     Follower, NetworkRoute, NetworkSlot, OS_FALLBACK, ProxyEnv, follow, os_lookup, resolve,
 };
+use super::python_path::{PythonPath, PythonSlot};
 use super::readers::LeaveReaders;
 use super::refresh::SettingsRead;
 use super::refusal::{follow_keys, lift_at_start, settle_after_load};
@@ -315,6 +316,9 @@ pub(crate) struct HostSide {
     /// The launch hook's and the readers' network route, from [`SetupStart::network_at_start`]
     /// until the setup's network thread replaces it.
     pub(crate) network: NetworkSlot,
+    /// The launch hook's Python folders for Claude's and Codex's sessions: filled on this
+    /// thread at start and on each Python state (`setup/python_path.rs`).
+    pub(crate) python: PythonSlot,
     /// Reads the effective settings again, on each `SettingsChanged`.
     pub(crate) reread: Box<dyn Fn() -> Effective + Send>,
     /// The keys' notes; the host was given its retry hook.
@@ -375,6 +379,19 @@ fn run(read: SetupStart, parts: SetupParts, side: HostSide) {
     // Each install try asks for a fresh route first (one past 60 s is resolved again).
     config.install.refresh = Some(Arc::new(network.refresher()));
     config.clock = Arc::clone(&clock);
+    // The runtime's folders for the sessions' `PATH`, looked up here (it reads the disk) and on
+    // each Python state, never from the launch hook.
+    let python = {
+        let mut config = config.clone();
+        // Only the data folder, the snapshot and the platform are read; the route's refresher
+        // is not held.
+        config.install.refresh = None;
+        PythonPath::new(
+            side.python,
+            Arc::new(move || clauseo_agents::python_path_dirs(&config)),
+        )
+    };
+    python.fill();
     // The quit may close the cell first: then `Agents` never starts (`BackendStart::start_with`).
     let started = parts.start.start_with(|| {
         let (install, signin) = launchers(parts.home, |options| {
@@ -407,7 +424,8 @@ fn run(read: SetupStart, parts: SetupParts, side: HostSide) {
             refused_at_start,
         )
         .with_network(network)
-        .with_python_hosts(read.python_hosts);
+        .with_python_hosts(read.python_hosts)
+        .with_python_path(python);
         let backend = Arc::new(AgentsBackend {
             agents,
             keys: Arc::clone(&keys),

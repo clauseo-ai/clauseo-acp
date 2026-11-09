@@ -55,8 +55,11 @@ pub(crate) fn launch(
 }
 
 /// Python's state out to the windows: `SetupInfo` again, with the keychain's answer as at the
-/// start and `python` set. A state the wire does not know is not sent.
+/// start and `python` set. A state the wire does not know is not sent. First the launch hook's
+/// Python folders follow it (`setup/python_path.rs`): `Ready` fills them, any other empties
+/// them.
 pub(crate) fn python_event(backend: &super::AgentsBackend, state: &PythonState) {
+    backend.wiring.python.follow(state);
     let Some(python) = python_progress(state, &backend.wiring.python_hosts) else {
         return;
     };
