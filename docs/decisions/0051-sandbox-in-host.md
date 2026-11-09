@@ -314,6 +314,13 @@ The orchestrator's conditions, which the later pull requests must meet:
 
   Follow-up, a must-do: PR-D must move Codex's home (or at least `tmp/arg0`) out of
   `agent-state`, with a migration for existing installs, so `agent-state` is denied whole.
+- Known gap of the read-only switch (R17 PR-D2c): the relaunch under the new policy waits until
+  the old session's processes are gone (`clauseo_sandbox::session_processes_gone`), but that
+  check sees only the agent's process group (Job Object on Windows). A process that called
+  `setsid` (macOS, Linux), or was reparented to launchd or init, escapes it: it keeps its old
+  read-write policy and could write after `ModeChanged` says Read-only. Stage C owns the macOS
+  fix (find and end every process of a macOS session, setsid escapees and orphans included),
+  which fills in that one check and blocks the launch.
 
 ## Status
 

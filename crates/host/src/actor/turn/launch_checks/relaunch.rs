@@ -41,7 +41,7 @@ pub(in super::super) fn after_tree(
     tree: TreeWatch,
     waiting: Vec<Waiting>,
 ) {
-    if tree.gone() {
+    if clauseo_sandbox::session_processes_gone(&tree) {
         agents::start(actor, thread, waiting);
         return;
     }
@@ -103,9 +103,14 @@ pub(in super::super) fn on_gone(actor: &mut Actor, answer: TreeWait) {
         cap_ms,
         "the stopped agent's processes outlived the wait; it does not start again"
     );
-    let error = Error::refused(
-        ErrorCode::AgentLaunchFailed,
-        "the agent's earlier processes did not exit in time",
-    );
+    // A wait the host's stop cut short: the work ends as everything does at stop.
+    let error = if super::super::host_stopping(actor) {
+        Error::Closed
+    } else {
+        Error::refused(
+            ErrorCode::AgentLaunchFailed,
+            "the agent's earlier processes did not exit in time",
+        )
+    };
     agents::fail_all(actor, thread, preparing.waiting, &error);
 }

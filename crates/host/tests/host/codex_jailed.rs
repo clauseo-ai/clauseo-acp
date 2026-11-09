@@ -424,3 +424,35 @@ fn a_tree_that_outlives_the_wait_fails_the_switch_with_no_mode() {
     assert!(!modes(&events).iter().any(|mode| mode == "read-only"));
     host.shutdown();
 }
+
+/// Two mode commands queued while the relaunch waits for the old tree: the last picks the
+/// launch's policy, the first is answered as replaced at the attach, and nothing relaunches
+/// again (replaying the first would relaunch for it, with the same queue, for ever).
+#[cfg(target_os = "linux")]
+#[test]
+fn two_queued_switches_launch_once_in_the_last_mode() {
+    use crate::egress_wait::group;
+    let dir = codex_dir("codex_jailed_two_queued", "codex-handshake");
+    let plays = ["codex-jailed-linger", "codex-jailed-switched"];
+    let (host, fake, thread, mut events, helper) = lingering(&dir, plays, Duration::from_secs(20));
+    let first = send(&host, set_mode(thread, "read-only"));
+    group::until_zombie(helper);
+    host.settle();
+    let second = send(&host, set_mode(thread, "agent-full-access"));
+    host.settle();
+    assert!(!first.is_finished() && !second.is_finished());
+    group::reap(helper);
+    assert_eq!(first.join().unwrap(), Ok(CommandOutcome::Done));
+    assert_eq!(second.join().unwrap(), Ok(CommandOutcome::Done));
+    host.settle();
+    events.drain_ready();
+    let calls = fake.calls();
+    assert_eq!(calls.len(), 2, "{}", events.dump());
+    assert!(!calls[1].policy.matter_read_only());
+    assert!(!modes(&events).iter().any(|mode| mode == "read-only"));
+    let detaches = (events.events())
+        .filter(|e| matches!(e, DomainEvent::AgentSessionDetached(_)))
+        .count();
+    assert_eq!(detaches, 1, "{}", events.dump());
+    host.shutdown();
+}

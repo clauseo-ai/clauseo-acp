@@ -423,7 +423,7 @@ pub(super) fn attach(actor: &mut Actor, thread: ThreadId, start: SessionStart, l
     if let Some(agent) = state(actor, thread).and_then(|state| state.agent.as_deref_mut()) {
         agent.replay = None;
     }
-    for item in waiting {
+    for item in super::forced_mode::latest_mode(actor, thread, waiting) {
         run_waiting(actor, thread, item);
     }
 }

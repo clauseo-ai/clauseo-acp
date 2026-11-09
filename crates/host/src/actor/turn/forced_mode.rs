@@ -329,6 +329,36 @@ pub(super) fn switch(actor: &mut Actor, thread: ThreadId, waiting: Waiting) -> O
     None
 }
 
+/// The work `thread`'s jailed Codex runs once attached, its mode commands but the last one
+/// answered as replaced (as [`switch`] answers one it replaces): the last chose the launch's
+/// policy ([`launch_mode`]), so replaying an older one would relaunch it, and the relaunch
+/// would get the same queue again.
+pub(super) fn latest_mode(
+    actor: &mut Actor,
+    thread: ThreadId,
+    waiting: Vec<Waiting>,
+) -> Vec<Waiting> {
+    if held(actor, thread).and_then(jail_of).is_none() {
+        return waiting;
+    }
+    let modes: Vec<bool> = waiting
+        .iter()
+        .map(|item| asked_mode(actor, thread, item).is_some_and(jailed::allowed))
+        .collect();
+    let Some(last) = modes.iter().rposition(|mode| *mode) else {
+        return waiting;
+    };
+    let mut kept = Vec::with_capacity(waiting.len());
+    for ((at, item), mode) in waiting.into_iter().enumerate().zip(modes) {
+        if mode && at != last {
+            answer(actor, thread, &item);
+        } else {
+            kept.push(item);
+        }
+    }
+    kept
+}
+
 /// Answers a jailed Codex's mode command `waiting` with no `ModeChanged`: the attach of the
 /// agent that runs its mode logged it. A `SetConfigOption` gets the thread's options, the mode
 /// option at the mode run in.

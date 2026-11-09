@@ -2,10 +2,11 @@
 //! proxy, its case-law relay (R24), its browser claims and the folder itself. Off the actor, on
 //! the removal's thread, it waits until both hold:
 //!
-//! - (a) the agent's tree is gone ([`TreeWatch::gone`]): on Unix the agent reaped and its
-//!   process group empty (`killpg(group, 0)` answers `ESRCH`), on Windows its Job Object holding
-//!   no running process. The tree's kill (`Handle::exited`, the shutdown ladder) is only sent,
-//!   and after `StopStep::Unresponsive` the agent may still run.
+//! - (a) the agent's tree is gone (`clauseo_sandbox::session_processes_gone`, which is
+//!   [`TreeWatch::gone`] today): on Unix the agent reaped and its process group empty
+//!   (`killpg(group, 0)` answers `ESRCH`), on Windows its Job Object holding no running process.
+//!   The tree's kill (`Handle::exited`, the shutdown ladder) is only sent, and after
+//!   `StopStep::Unresponsive` the agent may still run.
 //! - (b) when the session claimed browser ports, Chrome is gone: its debugging port refuses a
 //!   connect ([`chrome_alive`]). After #534 Chrome leads a process group of its own, so the
 //!   agent's tree kill can miss it, and it would go on using the proxy's port.
@@ -170,7 +171,7 @@ struct Check {
 /// What is still there now, (a) first. On Windows, after a gone tree that held the session's
 /// Chrome, (b) is the short look (module doc).
 fn still_there(tree: Option<&TreeWatch>, browser: Option<&BrowserSession>) -> Option<Check> {
-    if tree.is_some_and(|tree| !tree.gone()) {
+    if tree.is_some_and(|tree| !clauseo_sandbox::session_processes_gone(tree)) {
         return Some(Check {
             straggler: Straggler::AgentTree,
             slow: false,
