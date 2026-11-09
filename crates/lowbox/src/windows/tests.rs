@@ -74,7 +74,6 @@ fn a_value_that_is_no_handle_fails_closed() {
         0x00ff_fff8,
         0x00ff_fffc,
         0x00ff_ffe0,
-        0x00ff_ffe4,
     ];
     let error = NamespaceHandles::from_inherited(&b01(), &me(), &values).unwrap_err();
     assert!(
@@ -91,7 +90,7 @@ fn a_value_that_is_no_handle_fails_closed() {
 
 #[test]
 fn a_file_in_the_directory_slot_fails_closed() {
-    let files: Vec<std::fs::File> = (0..6)
+    let files: Vec<std::fs::File> = (0..5)
         .map(|_| std::fs::File::open(std::env::current_exe().unwrap()).unwrap())
         .collect();
     let values: Vec<usize> = files
@@ -247,7 +246,7 @@ fn a_standard_handle_is_never_taken_over() {
         // No standard output to take: nothing to check.
         return;
     }
-    let events: Vec<OwnedHandle> = (0..5).map(|_| event(false)).collect();
+    let events: Vec<OwnedHandle> = (0..4).map(|_| event(false)).collect();
     let mut values = vec![out.0.expose_provenance()];
     values.extend(events.iter().map(|e| e.as_raw_handle().expose_provenance()));
     let error = NamespaceHandles::from_inherited(&b01(), &me(), &values).unwrap_err();
@@ -260,8 +259,9 @@ fn a_standard_handle_is_never_taken_over() {
     );
 }
 
-/// The owner side's inheritable guard turns the flag on for every handle and off again when
-/// dropped (six events stand in for the namespace's objects).
+/// The owner side's inheritable guard turns the flag on for every handed-over handle (all but
+/// the pipe folder's) and off again when dropped (six events stand in for the namespace's
+/// objects).
 #[test]
 fn the_inheritable_guard_resets_every_flag() {
     let events: Vec<OwnedHandle> = (0..6).map(|_| event(false)).collect();
@@ -301,7 +301,7 @@ fn the_inheritable_guard_resets_every_flag() {
             })
             .collect()
     };
-    assert_eq!(flags(&handles), [true; 6]);
+    assert_eq!(flags(&handles), [true, true, true, true, true, false]);
     drop(guard);
     assert_eq!(flags(&handles), [false; 6]);
     drop(lock);

@@ -16,12 +16,12 @@ use ::windows::Win32::Security::Authorization::{
     ConvertSidToStringSidW, GetSecurityInfo, SE_KERNEL_OBJECT,
 };
 use ::windows::Win32::Security::{
-    AdjustTokenPrivileges, GetTokenInformation, LUID_AND_ATTRIBUTES, OWNER_SECURITY_INFORMATION,
-    PSECURITY_DESCRIPTOR, PSID, SE_PRIVILEGE_REMOVED, SID_AND_ATTRIBUTES,
-    TOKEN_APPCONTAINER_INFORMATION, TOKEN_ELEVATION, TOKEN_GROUPS, TOKEN_INFORMATION_CLASS,
-    TOKEN_MANDATORY_LABEL, TOKEN_PRIVILEGES, TOKEN_QUERY, TOKEN_USER, TokenAppContainerSid,
-    TokenCapabilities, TokenElevation, TokenGroups, TokenIntegrityLevel, TokenIsAppContainer,
-    TokenPrivileges, TokenUser,
+    AdjustTokenPrivileges, DACL_SECURITY_INFORMATION, GetTokenInformation, LUID_AND_ATTRIBUTES,
+    OWNER_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, PSID, SE_PRIVILEGE_REMOVED,
+    SID_AND_ATTRIBUTES, TOKEN_APPCONTAINER_INFORMATION, TOKEN_ELEVATION, TOKEN_GROUPS,
+    TOKEN_INFORMATION_CLASS, TOKEN_MANDATORY_LABEL, TOKEN_PRIVILEGES, TOKEN_QUERY, TOKEN_USER,
+    TokenAppContainerSid, TokenCapabilities, TokenElevation, TokenGroups, TokenIntegrityLevel,
+    TokenIsAppContainer, TokenPrivileges, TokenUser,
 };
 use ::windows::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
 use ::windows::core::PWSTR;
@@ -83,6 +83,35 @@ pub(super) fn owner_of(handle: HANDLE) -> Result<String, u32> {
     let text = unsafe { sid_text(owner) }.map_err(|_unconvertible| u32::MAX);
     // SAFETY: `descriptor` came from GetSecurityInfo (LocalAlloc) and is freed once, here; a
     // failure to free leaks a few bytes, nothing to undo.
+    let _leak_on_failure: HLOCAL =
+        unsafe { LocalFree(Some(HLOCAL(descriptor.0.cast::<c_void>()))) };
+    text
+}
+
+/// The DACL of the object `handle` (opened with `READ_CONTROL`) as SDDL (`D:…`), else the
+/// Win32 error.
+pub(super) fn dacl_of(handle: HANDLE) -> Result<String, u32> {
+    let mut descriptor = PSECURITY_DESCRIPTOR::default();
+    // SAFETY: `handle` is a handle of this process (an invalid one fails the call);
+    // `descriptor` gets a LocalAlloc'd block freed once below.
+    let code = unsafe {
+        GetSecurityInfo(
+            handle,
+            SE_KERNEL_OBJECT,
+            DACL_SECURITY_INFORMATION,
+            None,
+            None,
+            None,
+            None,
+            Some(&raw mut descriptor),
+        )
+    };
+    if code != ERROR_SUCCESS {
+        return Err(code.0);
+    }
+    // SAFETY: the call succeeded, so `descriptor` is a valid descriptor holding the DACL.
+    let text = unsafe { super::nt::dacl_sddl(descriptor) };
+    // SAFETY: `descriptor` came from GetSecurityInfo (LocalAlloc) and is freed once, here.
     let _leak_on_failure: HLOCAL =
         unsafe { LocalFree(Some(HLOCAL(descriptor.0.cast::<c_void>()))) };
     text

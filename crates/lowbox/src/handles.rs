@@ -1,6 +1,11 @@
-//! The namespace's six handles: their slots, the `--lowbox-handles` text that carries their
-//! values to the guard, and the checks a value passes before the guard uses it. The checks run
-//! through [`Probe`], so they are tested off Windows; `windows::probe` is the real one.
+//! The namespace's six handles: their slots, the `--lowbox-handles` text that carries five of
+//! their values to the guard, the checks a value passes before the guard uses it, and the checks
+//! the guard makes of the pipe folder it opens itself. The checks run through [`Probe`] and plain
+//! strings, so they are tested off Windows; `windows::probe` is the real probe.
+//!
+//! The pipe folder is never handed over: `NtQueryObject` names a handle to an NPFS prefix just
+//! `\Device\NamedPipe` (seen on Server 2025, r842), so a handed-over value could not be told
+//! from any other NPFS handle. The guard opens it by its name instead (`crate::windows`).
 
 use crate::error::{Error, HandleProblem};
 use crate::layout;
@@ -8,6 +13,9 @@ use crate::package::Sid;
 
 /// How many handles the namespace has: one per [`Slot`].
 pub const HANDLE_COUNT: usize = 6;
+
+/// How many of them the owner hands to the guard: every slot in [`Slot::HANDED`].
+pub const HANDED_COUNT: usize = 5;
 
 /// The most hex digits a handle value takes (64 bits).
 const MAX_DIGITS: usize = 16;
@@ -51,6 +59,16 @@ impl Slot {
         Slot::Local,
         Slot::Session,
         Slot::Pipes,
+    ];
+
+    /// The slots whose handles the owner hands over, in handle order: all but [`Slot::Pipes`],
+    /// which the guard opens by name.
+    pub const HANDED: [Slot; HANDED_COUNT] = [
+        Slot::Directory,
+        Slot::RpcControl,
+        Slot::Global,
+        Slot::Local,
+        Slot::Session,
     ];
 
     /// A short name for errors.
@@ -99,8 +117,8 @@ impl ObjectKind {
     }
 }
 
-/// The handle values from `--lowbox-handles`: exactly [`HANDLE_COUNT`] distinct, non-zero
-/// `0x`-prefixed hex values joined by commas, in [`Slot::ALL`]'s order (`0x1a4,0x1a8,…`).
+/// The handle values from `--lowbox-handles`: exactly [`HANDED_COUNT`] distinct, non-zero
+/// `0x`-prefixed hex values joined by commas, in [`Slot::HANDED`]'s order (`0x1a4,0x1a8,…`).
 pub fn parse_handle_arg(text: &str) -> Result<Vec<usize>, Error> {
     let values = text
         .split(',')
@@ -136,9 +154,9 @@ pub(crate) fn format_handle_arg(values: &[usize]) -> String {
 
 /// The count, non-zero and distinct checks, which need no OS.
 fn check_values(values: &[usize]) -> Result<(), Error> {
-    if values.len() != HANDLE_COUNT {
+    if values.len() != HANDED_COUNT {
         return Err(Error::HandleList {
-            reason: "not exactly six values",
+            reason: "not exactly five values",
         });
     }
     if values.contains(&0) {
@@ -200,10 +218,10 @@ pub(crate) struct Expected<'a> {
     pub(crate) owner: &'a Sid,
 }
 
-/// Each of `values` checked for its slot: not one of this process's standard handles, an open
-/// handle, of the slot's type, named exactly as the slot's object in `expected`'s namespace
-/// (`crate::layout::object_name`, letters in either case) and owned by `expected.owner`. Fails
-/// closed at the first value that does not pass.
+/// Each of `values` checked for its slot in [`Slot::HANDED`]: not one of this process's
+/// standard handles, an open handle, of the slot's type, named exactly as the slot's object in
+/// `expected`'s namespace (`crate::layout::object_name`, letters in either case) and owned by
+/// `expected.owner`. Fails closed at the first value that does not pass.
 pub(crate) fn check(
     probe: &impl Probe,
     values: &[usize],
@@ -211,7 +229,7 @@ pub(crate) fn check(
 ) -> Result<(), Error> {
     check_values(values)?;
     let standard = probe.std_handles();
-    for (slot, &value) in Slot::ALL.iter().copied().zip(values) {
+    for (slot, &value) in Slot::HANDED.iter().copied().zip(values) {
         let fail = |problem| Error::Handle { slot, problem };
         if standard.contains(&value) {
             return Err(fail(HandleProblem::StandardHandle));
@@ -243,6 +261,53 @@ pub(crate) fn check(
         }
     }
     Ok(())
+}
+
+/// The pipe folder the guard opened by name, checked through that handle: owned by
+/// `expected.owner` (`found_owner`, the owner's `S-1-…` text or the Win32 error) and with
+/// exactly the ACEs of `expected_dacl` (`found_dacl`, the DACL as SDDL or the Win32 error). Both
+/// texts come from the same conversion (`ConvertSecurityDescriptorToStringSecurityDescriptorW`),
+/// so SID aliases and the access masks are written alike; the DACL's control flags (`P`, `AI`,
+/// `AR`) are not compared, since they grant nothing.
+pub(crate) fn check_pipe_folder(
+    found_owner: Result<String, u32>,
+    found_dacl: Result<String, u32>,
+    expected: &Expected<'_>,
+    expected_dacl: &str,
+) -> Result<(), Error> {
+    let fail = |problem| Error::Handle {
+        slot: Slot::Pipes,
+        problem,
+    };
+    let owner = found_owner.map_err(|code| fail(HandleProblem::OwnerUnreadable { code }))?;
+    if owner != expected.owner.as_str() {
+        return Err(fail(HandleProblem::WrongOwner));
+    }
+    let dacl = found_dacl.map_err(|code| fail(HandleProblem::DaclUnreadable { code }))?;
+    if same_aces(&dacl, expected_dacl) {
+        Ok(())
+    } else {
+        Err(fail(HandleProblem::WrongDacl))
+    }
+}
+
+/// Whether the SDDL DACLs `found` and `wanted` hold exactly the same ACEs, in the same order
+/// (their control flags aside); `false` when either is no DACL with ACEs (see [`aces`]).
+pub(crate) fn same_aces(found: &str, wanted: &str) -> bool {
+    matches!((aces(found), aces(wanted)), (Some(f), Some(w)) if f == w)
+}
+
+/// The ACEs of the SDDL DACL `dacl` (`D:`, optional control flags, then the `(…)` ACEs), or
+/// `None` when it is no DACL with at least one ACE (no `D:`, `D:NO_ACCESS_CONTROL`, an empty
+/// DACL, or text after the DACL such as an `S:` part).
+fn aces(dacl: &str) -> Option<&str> {
+    let rest = dacl.strip_prefix("D:")?;
+    let start = rest.find('(')?;
+    let flags = &rest[..start];
+    let list = &rest[start..];
+    let flags_ok =
+        flags.is_empty() || ["P", "AI", "AR", "PAI", "PAR", "ARAI", "PARAI"].contains(&flags);
+    (flags_ok && list.ends_with(')') && !list.contains(")S:")).then_some(list)
 }
 
 /// The start of an app package SID's text.

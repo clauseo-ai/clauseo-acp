@@ -4,12 +4,14 @@
 //! browser account `B_s`, with a package SID, no capabilities and a namespace the owner builds.
 //! The work splits in two, as the processes do:
 //! - **The owner** (the lawyer's outer process, in the desktop session) builds the package's
-//!   object namespace with [`Namespace::build`] and hands its handles to the guard, which runs as
-//!   `B_s`, through `PROC_THREAD_ATTRIBUTE_HANDLE_LIST` or `DuplicateHandle`, with
-//!   [`NamespaceHandles::to_arg`] on the guard's command line. It applies the grants that
-//!   [`grants`] names.
+//!   object namespace with [`Namespace::build`] and hands five of its six handles (all but the
+//!   pipe folder's) to the guard, which runs as `B_s`, through `PROC_THREAD_ATTRIBUTE_HANDLE_LIST`
+//!   or `DuplicateHandle`, with [`NamespaceHandles::to_arg`] on the guard's command line. It
+//!   keeps all six open until the browser has exited, and applies the grants that [`grants`]
+//!   names.
 //! - **The guard** (`B_s`) takes them back with [`NamespaceHandles::from_inherited`], which checks
-//!   each value before use, and starts the program with [`LowBoxCommand::spawn_suspended`]:
+//!   each value before use and opens the package's pipe folder by name itself, checking its owner
+//!   and ACEs through that handle, and starts the program with [`LowBoxCommand::spawn_suspended`]:
 //!   `NtCreateLowBoxToken` over its own token, then `CreateProcessAsUserW` on its own station and
 //!   desktop. It puts the child in its Job Object before [`Spawned::resume`].
 //!
@@ -67,6 +69,6 @@ pub use self::windows::{
 };
 pub use error::{Error, HandleProblem};
 pub use grants::{BrowserFolders, Grant, Rights, grants};
-pub use handles::{HANDLE_COUNT, ObjectKind, Slot, parse_handle_arg};
+pub use handles::{HANDED_COUNT, HANDLE_COUNT, ObjectKind, Slot, parse_handle_arg};
 pub use package::{PackageName, Sid, package_sid};
 pub use quote::command_line;

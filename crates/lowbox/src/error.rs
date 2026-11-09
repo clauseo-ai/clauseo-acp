@@ -32,7 +32,7 @@ pub enum Error {
         /// What is wrong with it.
         reason: &'static str,
     },
-    /// The handle list from the command line is not exactly [`crate::HANDLE_COUNT`] distinct hex
+    /// The handle list from the command line is not exactly [`crate::HANDED_COUNT`] distinct hex
     /// values.
     HandleList {
         /// What is wrong with it.
@@ -43,7 +43,8 @@ pub enum Error {
         /// What is wrong with them.
         reason: &'static str,
     },
-    /// A handle value given for a slot of the namespace failed its check.
+    /// A handle value given for a slot of the namespace failed its check, or (for
+    /// [`Slot::Pipes`]) the pipe folder the guard opened by name did.
     Handle {
         /// The slot it was given for.
         slot: Slot,
@@ -121,6 +122,13 @@ pub enum HandleProblem {
     },
     /// The object is not owned by the user who built the namespace.
     WrongOwner,
+    /// The pipe folder's DACL could not be read (`GetSecurityInfo` or its conversion failed).
+    DaclUnreadable {
+        /// The Win32 error.
+        code: u32,
+    },
+    /// The pipe folder's ACEs are not the ones the owner sets (`crate::layout::pipe_folder_sddl`).
+    WrongDacl,
 }
 
 impl fmt::Display for Error {
@@ -177,6 +185,8 @@ impl fmt::Display for HandleProblem {
                 write!(f, "owner unreadable (error {code})")
             }
             HandleProblem::WrongOwner => f.write_str("not owned by the namespace's builder"),
+            HandleProblem::DaclUnreadable { code } => write!(f, "DACL unreadable (error {code})"),
+            HandleProblem::WrongDacl => f.write_str("its DACL is not the one the owner sets"),
         }
     }
 }

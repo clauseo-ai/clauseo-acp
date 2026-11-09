@@ -9,12 +9,15 @@ use std::ffi::c_void;
 
 use ::windows::Wdk::Foundation::OBJECT_ATTRIBUTES;
 use ::windows::Win32::Foundation::{
-    HANDLE, HLOCAL, LocalFree, NTSTATUS, OBJ_CASE_INSENSITIVE, UNICODE_STRING,
+    HANDLE, HLOCAL, LocalFree, NTSTATUS, OBJ_CASE_INSENSITIVE, OBJ_DONT_REPARSE, UNICODE_STRING,
 };
 use ::windows::Win32::Security::Authorization::{
+    ConvertSecurityDescriptorToStringSecurityDescriptorW,
     ConvertStringSecurityDescriptorToSecurityDescriptorW, SDDL_REVISION_1,
 };
-use ::windows::Win32::Security::{PSECURITY_DESCRIPTOR, PSID, SID_AND_ATTRIBUTES};
+use ::windows::Win32::Security::{
+    DACL_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, PSID, SID_AND_ATTRIBUTES,
+};
 use ::windows::core::{PCWSTR, PWSTR};
 
 use super::{wide_nul, win32};
@@ -95,6 +98,17 @@ impl ObjectName {
             SecurityQualityOfService: std::ptr::null(),
         }
     }
+
+    /// As [`ObjectName::attributes`], with `OBJ_DONT_REPARSE`: the open fails rather than follow
+    /// an object-manager symbolic link anywhere on the path.
+    pub(super) fn attributes_no_reparse(
+        &self,
+        descriptor: Option<&Descriptor>,
+    ) -> OBJECT_ATTRIBUTES {
+        let mut attributes = self.attributes(descriptor);
+        attributes.Attributes = OBJ_CASE_INSENSITIVE | OBJ_DONT_REPARSE;
+        attributes
+    }
 }
 
 /// A self-relative security descriptor from SDDL, freed with `LocalFree`.
@@ -118,6 +132,43 @@ impl Descriptor {
         .map_err(|e| win32("ConvertStringSecurityDescriptorToSecurityDescriptorW", &e))?;
         Ok(Descriptor(descriptor))
     }
+
+    /// This descriptor's DACL as SDDL (`D:…`), through [`dacl_sddl`], so it reads exactly as
+    /// a DACL read back from an object does.
+    pub(super) fn dacl_sddl(&self) -> Result<String, Error> {
+        // SAFETY: `self.0` is a valid self-relative descriptor until Drop.
+        unsafe { dacl_sddl(self.0) }.map_err(|code| Error::Win32 {
+            call: "ConvertSecurityDescriptorToStringSecurityDescriptorW",
+            code,
+        })
+    }
+}
+
+/// The DACL of `descriptor` as SDDL (`D:…`), else the Win32 error.
+///
+/// # Safety
+/// `descriptor` must point at a valid security descriptor for the call.
+pub(super) unsafe fn dacl_sddl(descriptor: PSECURITY_DESCRIPTOR) -> Result<String, u32> {
+    let mut text = PWSTR::null();
+    // SAFETY: `descriptor` is valid (the caller's contract); `text` gets a LocalAlloc'd string,
+    // freed below.
+    unsafe {
+        ConvertSecurityDescriptorToStringSecurityDescriptorW(
+            descriptor,
+            SDDL_REVISION_1,
+            DACL_SECURITY_INFORMATION,
+            &raw mut text,
+            None,
+        )
+    }
+    .map_err(|e| e.code().0.cast_unsigned() & 0xFFFF)?;
+    // SAFETY: the call succeeded, so `text` is a NUL-terminated string.
+    let string = unsafe { text.to_string() };
+    // SAFETY: `text` came from the conversion (LocalAlloc) and is freed once, here; a failure
+    // to free leaks a few bytes, nothing to undo.
+    let _leak_on_failure: HLOCAL = unsafe { LocalFree(Some(HLOCAL(text.0.cast::<c_void>()))) };
+    // ERROR_INVALID_DATA (13): text that is not UTF-16.
+    string.map_err(|_not_utf16| 13)
 }
 
 impl Drop for Descriptor {
