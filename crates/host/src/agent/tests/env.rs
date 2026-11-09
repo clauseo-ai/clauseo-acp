@@ -60,6 +60,51 @@ fn launch_spec_drops_remote_markers_and_keeps_what_agents_need() {
     assert_eq!(env, kept);
 }
 
+/// Inherited and settings `AGENT_BROWSER_*` variables never reach an agent; the hook's (the
+/// host's own five, for a session with the browser) do, over them.
+#[test]
+fn only_the_hosts_agent_browser_variables_reach_the_agent() {
+    let agent = AgentLaunch {
+        command: absolute_program(),
+        args: Vec::new(),
+        env: BTreeMap::from([("AGENT_BROWSER_PROXY".to_owned(), "http://x:1".to_owned())]),
+    };
+    let inherited = [
+        ("AGENT_BROWSER_CDP", "9222"),
+        ("agent_browser_headed", "1"),
+        ("AGENT_BROWSER_SESSION", "theirs"),
+        ("HOME", "/home/ada"),
+    ]
+    .map(|(name, value)| (OsString::from(name), OsString::from(value)));
+    let hook = BTreeMap::from([(
+        OsString::from("AGENT_BROWSER_SESSION"),
+        OsString::from("t-1"),
+    )]);
+    let spec = launch_spec(
+        &agent,
+        hook,
+        BTreeMap::new(),
+        &[],
+        inherited.into_iter(),
+        std::env::temp_dir(),
+        &[],
+    )
+    .unwrap();
+    let browser: Vec<_> = spec
+        .env()
+        .iter()
+        .filter(|(name, _)| {
+            name.to_str()
+                .unwrap()
+                .to_ascii_uppercase()
+                .starts_with("AGENT_BROWSER_")
+        })
+        .map(|(k, v)| (k.to_str().unwrap(), v.to_str().unwrap()))
+        .collect();
+    assert_eq!(browser, [("AGENT_BROWSER_SESSION", "t-1")]);
+    assert!(spec.env().contains_key(&OsString::from("HOME")));
+}
+
 /// The drop lists, as `crates/limits/src/readers/env.rs` copies them for the plan readers: a change
 /// to one goes in both.
 #[test]

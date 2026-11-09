@@ -65,10 +65,12 @@ pub(crate) fn launch_spec(
         .iter()
         .map(|(name, value)| (OsString::from(name), OsString::from(value)))
         .filter(|(name, _)| !names(&hook_env, name) && !names(&forced, name) && !drops(name))
+        .filter(|(name, _)| !is_agent_browser(name))
         .collect();
     let mut env: BTreeMap<OsString, OsString> = inherited
         .filter(|(name, _)| {
             !is_dropped_inherited(name)
+                && !is_agent_browser(name)
                 && !drops(name)
                 && !names(&hook_env, name)
                 && !names(&forced, name)
@@ -178,6 +180,20 @@ fn is_dropped_inherited(name: &OsStr) -> bool {
     }) || DROPPED_INHERITED
         .iter()
         .any(|drop| same(OsStr::new(drop), name))
+}
+
+/// The prefix of agent-browser's variables. An agent gets only the ones the host sets for a
+/// session with the browser (`agent::loads::browser::shell_env`, through the hook's map): none
+/// inherited from the app's own environment or set in an agent's settings, so an
+/// `AGENT_BROWSER_CDP` or `AGENT_BROWSER_HEADED` there never reaches agent-browser.
+pub(crate) const AGENT_BROWSER_PREFIX: &str = "AGENT_BROWSER_";
+
+/// Whether `name` is one of agent-browser's variables ([`AGENT_BROWSER_PREFIX`]), ignoring ASCII
+/// case (Windows does).
+fn is_agent_browser(name: &OsStr) -> bool {
+    name.as_encoded_bytes()
+        .get(..AGENT_BROWSER_PREFIX.len())
+        .is_some_and(|start| start.eq_ignore_ascii_case(AGENT_BROWSER_PREFIX.as_bytes()))
 }
 
 /// Whether `map` holds `name`, ignoring ASCII case.
