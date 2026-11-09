@@ -18,8 +18,9 @@ pre-commit:
 pre-push:
   commands:
     # CI mode, as fast-lane runs it, so a clippy warning fails the push as it fails CI (#210). No tests
-    # run here (`--no-tests`, #378): CI and the merge queue run them. CI mode also runs the ui steps
-    # even where pnpm is missing. `CI=0 git push` runs the check in local mode.
+    # run here (`--no-tests`, #378): CI and the merge queue run them. Clippy lints the changed
+    # crates only, not their dependents (`--no-dependents`); CI lints the workspace. CI mode also
+    # runs the ui steps even where pnpm is missing. `CI=0 git push` runs the check in local mode.
     # A push of deletes only (`git push origin --delete <branch>`) sends no commits and passes
     # without it: the script reads git's ref lines, which `use_stdin` passes on. pre-push-test.sh
     # tests both, through lefthook.
