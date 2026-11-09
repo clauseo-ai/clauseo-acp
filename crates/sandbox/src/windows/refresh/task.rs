@@ -16,6 +16,9 @@
 //!   starts it and ends a running one, nothing more; the folder `\Clauseo` gets the same owner
 //!   and DACL, made with them, or set again when an administrator made it; one anyone else made
 //!   is deleted with what is in it and made again (`task_folder.rs`).
+//! - [`read_task`]: a registered task as `task_identity.rs` compares it, its principal, actions,
+//!   triggers and descriptor, for a per-user set-up's repair and the readiness check
+//!   (`task_read.rs`), which also deletes one that differs ([`delete_task`]).
 //! - [`unregister_task`], which `--remove --uninstall` calls (it deletes staging itself,
 //!   taking it back if need be: `setup::admin_remove`).
 //! - [`request_admin_refresh`], which the app calls as the lawyer, unelevated, after an update,
@@ -26,20 +29,22 @@
 #![expect(unsafe_code, reason = "FFI to COM and the Task Scheduler's interfaces")]
 
 use windows::Win32::Foundation::{ERROR_FILE_NOT_FOUND, RPC_E_CHANGED_MODE, VARIANT_BOOL};
-use windows::Win32::Security::OWNER_SECURITY_INFORMATION;
+use windows::Win32::Security::{DACL_SECURITY_INFORMATION, OWNER_SECURITY_INFORMATION};
 use windows::Win32::System::Com::{
     CLSCTX_INPROC_SERVER, COINIT_MULTITHREADED, CoCreateInstance, CoInitializeEx, CoUninitialize,
 };
 use windows::Win32::System::TaskScheduler::{
     IExecAction, ILogonTrigger, IRegisteredTask, ITaskFolder, ITaskService, TASK_ACTION_EXEC,
-    TASK_CREATE_OR_UPDATE, TASK_ENUM_HIDDEN, TASK_INSTANCES_IGNORE_NEW, TASK_INSTANCES_QUEUE,
-    TASK_LOGON_SERVICE_ACCOUNT, TASK_RUNLEVEL_HIGHEST, TASK_TRIGGER_LOGON, TaskScheduler,
+    TASK_ACTION_TYPE, TASK_CREATE_OR_UPDATE, TASK_ENUM_HIDDEN, TASK_INSTANCES_IGNORE_NEW,
+    TASK_INSTANCES_QUEUE, TASK_LOGON_SERVICE_ACCOUNT, TASK_RUNLEVEL_HIGHEST, TASK_TRIGGER_LOGON,
+    TASK_TRIGGER_TYPE2, TaskScheduler,
 };
 use windows::Win32::System::Variant::VARIANT;
 use windows::core::{BSTR, HRESULT, Interface};
 
 use super::last_run::{LastRun, last_run};
 use super::task_folder::{Folders, prepare};
+use super::task_identity::{TaskAction, TaskIdentity, TaskTrigger};
 use super::windows_refresher::{EXE_NAME, sandbox_dir};
 use super::{SystemTask, action_path, task_sddl};
 use crate::windows::sids::Sid;
@@ -339,25 +344,33 @@ pub fn register_task(spec: SystemTask, owner_sid: &Sid) -> Result<(), TaskError>
 pub fn unregister_task(task: SystemTask) -> Result<(), TaskError> {
     let _apartment = Apartment::enter()?;
     let service = service()?;
-    // SAFETY: a live service and a BSTR that outlives the call.
-    let folder = match unsafe { service.GetFolder(&BSTR::from(TASK_FOLDER)) } {
-        Ok(folder) => folder,
-        Err(error) if missing(&error) => return Ok(()),
-        Err(error) => return Err(com("ITaskService::GetFolder")(error)),
-    };
-    // SAFETY: a live folder and a BSTR; flags 0.
-    match unsafe { folder.DeleteTask(&BSTR::from(task.name()), 0) } {
-        Ok(()) => {}
-        Err(error) if missing(&error) => {}
-        Err(error) => return Err(com("ITaskFolder::DeleteTask")(error)),
+    if !delete_task(&service, task)? {
+        return Ok(());
     }
-    // SAFETY: as above, on the root folder.
+    // SAFETY: a live service and a BSTR that outlives the call.
     let root =
         unsafe { service.GetFolder(&BSTR::from("\\")) }.map_err(com("ITaskService::GetFolder"))?;
     // A folder still holding someone else's task stays; deleting it fails and is ignored.
     // SAFETY: a live root folder and a BSTR; flags 0.
     let _kept_if_not_empty = unsafe { root.DeleteFolder(&BSTR::from(FOLDER_NAME), 0) };
     Ok(())
+}
+
+/// Deletes `task` from `\Clauseo` through `service`, leaving the folder: whether the folder is
+/// there. A task or folder that isn't there is `Ok`.
+pub(super) fn delete_task(service: &ITaskService, task: SystemTask) -> Result<bool, TaskError> {
+    // SAFETY: a live service and a BSTR that outlives the call.
+    let folder = match unsafe { service.GetFolder(&BSTR::from(TASK_FOLDER)) } {
+        Ok(folder) => folder,
+        Err(error) if missing(&error) => return Ok(false),
+        Err(error) => return Err(com("ITaskService::GetFolder")(error)),
+    };
+    // SAFETY: a live folder and a BSTR; flags 0.
+    match unsafe { folder.DeleteTask(&BSTR::from(task.name()), 0) } {
+        Ok(()) => Ok(true),
+        Err(error) if missing(&error) => Ok(true),
+        Err(error) => Err(com("ITaskFolder::DeleteTask")(error)),
+    }
 }
 
 /// Asks the Task Scheduler to run `\Clauseo\SandboxRefresh` now, as whoever calls it: the app
@@ -449,4 +462,82 @@ fn with_task<T>(
         Err(error) => return Err(com("ITaskFolder::GetTask")(error)),
     };
     then(&task)
+}
+
+/// `task` as registered in `\Clauseo`, `None` when it isn't, read as whoever calls it.
+pub fn read_task(task: SystemTask) -> Result<Option<TaskIdentity>, TaskError> {
+    match with_task(task, identity) {
+        Ok(found) => Ok(Some(found)),
+        Err(TaskError::NotRegistered) => Ok(None),
+        Err(error) => Err(error),
+    }
+}
+
+/// The value `read` writes through its out-pointer; `call` names it when it fails.
+fn out<T: Default>(
+    call: &'static str,
+    read: impl FnOnce(*mut T) -> windows::core::Result<()>,
+) -> Result<T, TaskError> {
+    let mut value = T::default();
+    read(&raw mut value).map_err(com(call))?;
+    Ok(value)
+}
+
+/// What makes `task` the set-up's, read from its definition and descriptor.
+fn identity(task: &IRegisteredTask) -> Result<TaskIdentity, TaskError> {
+    // SAFETY: each call is on a live interface the one before returned, each out-pointer live
+    // for its call (`out`); the collections are read by 1-based index within their counts.
+    unsafe {
+        let definition = task
+            .Definition()
+            .map_err(com("IRegisteredTask::Definition"))?;
+        let principal = definition.Principal().map_err(com("Principal"))?;
+        let principal: BSTR = out("IPrincipal::UserId", |at| principal.UserId(at))?;
+        let collection = definition.Actions().map_err(com("Actions"))?;
+        let count = out("IActionCollection::Count", |at| collection.Count(at))?;
+        let mut actions = Vec::new();
+        for at in 1..=count {
+            let action = collection
+                .get_Item(at)
+                .map_err(com("IActionCollection::Item"))?;
+            let kind: TASK_ACTION_TYPE = out("IAction::Type", |at| action.Type(at))?;
+            if kind != TASK_ACTION_EXEC {
+                actions.push(TaskAction::Other);
+                continue;
+            }
+            let exec: IExecAction = action.cast().map_err(com("IExecAction"))?;
+            let path: BSTR = out("IExecAction::Path", |at| exec.Path(at))?;
+            let arguments: BSTR = out("IExecAction::Arguments", |at| exec.Arguments(at))?;
+            actions.push(TaskAction::Exec {
+                path: path.to_string(),
+                arguments: arguments.to_string(),
+            });
+        }
+        let collection = definition.Triggers().map_err(com("Triggers"))?;
+        let count = out("ITriggerCollection::Count", |at| collection.Count(at))?;
+        let mut triggers = Vec::new();
+        for at in 1..=count {
+            let trigger = collection
+                .get_Item(at)
+                .map_err(com("ITriggerCollection::Item"))?;
+            let kind: TASK_TRIGGER_TYPE2 = out("ITrigger::Type", |at| trigger.Type(at))?;
+            if kind != TASK_TRIGGER_LOGON {
+                triggers.push(TaskTrigger::Other(kind.0));
+                continue;
+            }
+            let logon: ILogonTrigger = trigger.cast().map_err(com("ILogonTrigger"))?;
+            let user: BSTR = out("ILogonTrigger::UserId", |at| logon.UserId(at))?;
+            triggers.push(TaskTrigger::Logon(user.to_string()));
+        }
+        let info = (OWNER_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION).0;
+        let sddl = task
+            .GetSecurityDescriptor(info.cast_signed())
+            .map_err(com("IRegisteredTask::GetSecurityDescriptor"))?;
+        Ok(TaskIdentity {
+            principal: principal.to_string(),
+            actions,
+            triggers,
+            sddl: sddl.to_string(),
+        })
+    }
 }

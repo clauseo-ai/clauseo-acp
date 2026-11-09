@@ -90,6 +90,11 @@ mod staging;
 pub mod task;
 #[cfg(any(windows, test))]
 mod task_folder;
+pub mod task_identity;
+#[cfg(test)]
+mod task_identity_tests;
+#[cfg(windows)]
+pub mod task_read;
 #[cfg(test)]
 mod task_tests;
 #[cfg(test)]
@@ -113,8 +118,13 @@ pub use rules::{
 pub use sources::{SourceError, SourceFile, Sources};
 #[cfg(windows)]
 pub use task::{
-    TASK_FOLDER, TaskError, last_refresh_run, register_task, request_admin_refresh,
+    TASK_FOLDER, TaskError, last_refresh_run, read_task, register_task, request_admin_refresh,
     request_pool_stop, request_pool_sweep, unregister_task,
+};
+pub use task_identity::{TASK_MISSING, TaskCheck, TaskIdentity};
+#[cfg(windows)]
+pub use task_read::{
+    ready_with_pool_tasks, replace_task, sweep_task_needs_repair, task_sddl_read_back,
 };
 pub use version::version_not_older;
 #[cfg(windows)]

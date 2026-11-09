@@ -22,6 +22,8 @@
 //!   launch requests a sweep and waits for it, up to [`SWEEP_WAIT`], and refuses if it still
 //!   isn't done. `Open` markers are left alone there: they may be live sessions'. So is one
 //!   awaiting a stop, first or final, or whose sweep completed and owes its final stop: F4's.
+//!   This refusal and F4's for a sweep say the sweep task is missing (`refresh::TASK_MISSING`)
+//!   when it is, or isn't the set-up's, rather than that the sweep didn't finish.
 //! - **The desktop's start** ([`start_up`], once, before any launch): every outer of the last run
 //!   is gone, so each `Open` or unreadable marker becomes `AwaitingStop`, and the stop and sweep
 //!   tasks are requested for what is still awaited. It never waits.
@@ -53,6 +55,7 @@ use std::time::Duration;
 
 use super::RunExit;
 use super::marker::{MarkerState, Sequences, UncleanSession};
+use crate::windows::refresh::TASK_MISSING;
 use crate::windows::setup::record_values::{STOP_NEXT, SWEEP_NEXT};
 use crate::windows::sids::Sid;
 
@@ -132,6 +135,19 @@ pub trait Markers {
     fn pause(&mut self, pause: Duration);
     /// Says `line` on the outer's stderr: what went wrong but refuses nothing.
     fn note(&mut self, line: &str);
+    /// Whether `\Clauseo\SandboxSweep` is missing or isn't the one the set-up registers, on
+    /// a per-user install (`refresh::sweep_task_needs_repair`); `false` when it can't be told.
+    fn sweep_task_missing(&mut self) -> bool;
+}
+
+/// Why a sweep a marker awaits didn't complete: `waited`, unless the sweep task is missing or
+/// isn't the set-up's, which no wait mends and the app's repair puts back: [`TASK_MISSING`].
+fn unswept(fs: &mut impl Markers, waited: String) -> String {
+    if fs.sweep_task_missing() {
+        TASK_MISSING.to_owned()
+    } else {
+        waited
+    }
 }
 
 /// The markers, the stale ones removed: those of a pool user the record no longer lists, and
@@ -398,11 +414,12 @@ fn wait_for_sweeps(
             return Ok((remove_clean(fs, left, done), done));
         }
     }
-    Err(Refused::sweep(format!(
+    let waited = format!(
         "an earlier session of this sandbox user awaits the sandbox's sweep, which didn't \
          finish within {} s",
         SWEEP_WAIT.as_secs()
-    )))
+    );
+    Err(Refused::sweep(unswept(fs, waited)))
 }
 
 /// A dead outer's marker: `StopNext` read now; `None` when it can't be.
@@ -447,10 +464,11 @@ pub fn await_sweeps(fs: &mut impl Markers) -> Result<(), String> {
             return Ok(());
         }
     }
-    Err(format!(
+    let waited = format!(
         "an earlier session's sandbox sweep didn't finish within {} s",
         SWEEP_WAIT.as_secs()
-    ))
+    );
+    Err(unswept(fs, waited))
 }
 
 /// What the desktop's start found and asked for.
