@@ -17,15 +17,15 @@ use windows::Win32::System::Diagnostics::Debug::{
     SEM_FAILCRITICALERRORS, SEM_NOGPFAULTERRORBOX, SEM_NOOPENFILEERRORBOX, SetErrorMode,
 };
 use windows::Win32::System::JobObjects::{
-    AssignProcessToJobObject, CreateJobObjectW, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
-    JOB_OBJECT_UILIMIT, JOB_OBJECT_UILIMIT_DESKTOP, JOB_OBJECT_UILIMIT_DISPLAYSETTINGS,
-    JOB_OBJECT_UILIMIT_EXITWINDOWS, JOB_OBJECT_UILIMIT_GLOBALATOMS, JOB_OBJECT_UILIMIT_HANDLES,
-    JOB_OBJECT_UILIMIT_READCLIPBOARD, JOB_OBJECT_UILIMIT_SYSTEMPARAMETERS,
-    JOB_OBJECT_UILIMIT_WRITECLIPBOARD, JOBOBJECT_BASIC_ACCOUNTING_INFORMATION,
-    JOBOBJECT_BASIC_UI_RESTRICTIONS, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
-    JobObjectBasicAccountingInformation, JobObjectBasicUIRestrictions,
-    JobObjectExtendedLimitInformation, QueryInformationJobObject, SetInformationJobObject,
-    TerminateJobObject,
+    AssignProcessToJobObject, CreateJobObjectW, JOB_OBJECT_LIMIT, JOB_OBJECT_LIMIT_ACTIVE_PROCESS,
+    JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE, JOB_OBJECT_UILIMIT, JOB_OBJECT_UILIMIT_DESKTOP,
+    JOB_OBJECT_UILIMIT_DISPLAYSETTINGS, JOB_OBJECT_UILIMIT_EXITWINDOWS,
+    JOB_OBJECT_UILIMIT_GLOBALATOMS, JOB_OBJECT_UILIMIT_HANDLES, JOB_OBJECT_UILIMIT_READCLIPBOARD,
+    JOB_OBJECT_UILIMIT_SYSTEMPARAMETERS, JOB_OBJECT_UILIMIT_WRITECLIPBOARD,
+    JOBOBJECT_BASIC_ACCOUNTING_INFORMATION, JOBOBJECT_BASIC_UI_RESTRICTIONS,
+    JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JobObjectBasicAccountingInformation,
+    JobObjectBasicUIRestrictions, JobObjectExtendedLimitInformation, QueryInformationJobObject,
+    SetInformationJobObject, TerminateJobObject,
 };
 use windows::Win32::System::LibraryLoader::{
     LOAD_LIBRARY_SEARCH_SYSTEM32, SetDefaultDllDirectories, SetDllDirectoryW,
@@ -180,13 +180,31 @@ pub(super) const UI_LIMITS: JOB_OBJECT_UILIMIT = JOB_OBJECT_UILIMIT(
         | JOB_OBJECT_UILIMIT_DESKTOP.0,
 );
 
-/// A job whose last handle closing ends every process in it, with no breakaway allowed and
-/// [`UI_LIMITS`]: the inner runner, the agent and all it starts.
+/// The most processes the job holds at once; the next one fails to start, and the job's port says
+/// so (`job_port.rs`). A fork bomb of cmd+conhost pairs at 1,024 still costs several GB and can
+/// starve an 8 GB laptop, while legitimate agent work (npm, pip, Python multiprocessing,
+/// `make -j`, jest workers) peaks well under 100, so 256 leaves headroom.
+pub(super) const ACTIVE_PROCESS_CAP: u32 = 256;
+
+/// The job's limit flags: its last handle closing ends every process in it, and it holds at most
+/// [`ACTIVE_PROCESS_CAP`] processes.
+pub(super) const JOB_LIMITS: JOB_OBJECT_LIMIT =
+    JOB_OBJECT_LIMIT(JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE.0 | JOB_OBJECT_LIMIT_ACTIVE_PROCESS.0);
+
+/// The job's extended limits: [`JOB_LIMITS`], with [`ACTIVE_PROCESS_CAP`] for the count.
+pub(super) fn job_limits() -> JOBOBJECT_EXTENDED_LIMIT_INFORMATION {
+    let mut limits = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
+    limits.BasicLimitInformation.LimitFlags = JOB_LIMITS;
+    limits.BasicLimitInformation.ActiveProcessLimit = ACTIVE_PROCESS_CAP;
+    limits
+}
+
+/// A job whose last handle closing ends every process in it, with no breakaway allowed,
+/// [`JOB_LIMITS`] and [`UI_LIMITS`]: the inner runner, the agent and all it starts.
 pub(super) fn kill_on_close_job() -> io::Result<Handle> {
     // SAFETY: no attributes (an unnamed job no other process can open) and no name.
     let job = Handle(unsafe { CreateJobObjectW(None, PCWSTR::null()) }.map_err(|e| os_error(&e))?);
-    let mut limits = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
-    limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+    let limits = job_limits();
     // SAFETY: the job is live; `limits` is the structure the class names, for its size.
     unsafe {
         SetInformationJobObject(

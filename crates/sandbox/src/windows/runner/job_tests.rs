@@ -1,6 +1,6 @@
 //! The launch's kill-on-close job on Windows: a process in it that reads its own job's pid list
 //! with no job handle, as the inner runner's sweeps do, holds no handle to the job, so it dies
-//! when the job's creator closes the job's one handle.
+//! when the job's creator closes the job's one handle. The job's limits hold its process cap.
 
 use std::io::{BufRead as _, BufReader, Write as _};
 use std::os::windows::io::AsRawHandle as _;
@@ -9,8 +9,11 @@ use std::sync::mpsc;
 use std::time::Duration;
 
 use windows::Win32::Foundation::HANDLE;
+use windows::Win32::System::JobObjects::{
+    JOB_OBJECT_LIMIT_ACTIVE_PROCESS, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+};
 
-use super::spawn::{assign, kill_on_close_job};
+use super::spawn::{assign, job_limits, kill_on_close_job};
 use super::sweep::os::own_job_pids;
 
 /// Set in the child's environment: it makes [`job_child`] the child's part.
@@ -102,4 +105,17 @@ fn a_kill_on_close_jobs_child_that_read_its_own_job_dies_with_the_creators_handl
         .expect("the child outlived the job's last handle")
         .unwrap();
     assert!(code.is_some(), "{code:?}");
+}
+
+/// The job holds at most 256 processes, and still ends them all when its handle closes.
+#[test]
+fn the_job_caps_its_processes_at_256() {
+    let limits = job_limits().BasicLimitInformation;
+    assert!(limits.LimitFlags.contains(JOB_OBJECT_LIMIT_ACTIVE_PROCESS));
+    assert!(
+        limits
+            .LimitFlags
+            .contains(JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE)
+    );
+    assert_eq!(limits.ActiveProcessLimit, 256);
 }

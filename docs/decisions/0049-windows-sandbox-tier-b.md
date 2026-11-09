@@ -1421,6 +1421,16 @@ leaves that profile, both naming the part.
   through its pseudo-handle anyway. The harness's `child-token-default-dacl` row records, as
   information, whether that open works. The design that closes this is AppContainer, after launch (see
   "Rejected: AppContainer (spike A)" for what blocks it today).
+- **The process cap.** The job holds at most 256 processes (`JOB_OBJECT_LIMIT_ACTIVE_PROCESS`,
+  `spawn::ACTIVE_PROCESS_CAP`). A fork bomb of cmd and conhost pairs at 1,024 still costs several
+  GB and can starve an 8 GB laptop, while an agent's real work (npm, pip, Python multiprocessing,
+  `make -j`, jest workers) peaks well under 100. At the cap the next process fails to start and
+  the session goes on. The outer reads the job's completion port (`job_port.rs`), and the first
+  `JOB_OBJECT_MSG_ACTIVE_PROCESS_LIMIT` gives one notice per session: "A task tried to start too
+  many programs at once, so Clauseo stopped it. Ask the assistant to try a smaller step." It goes
+  to the outer's stderr until #789's session-notice path lands. The cap counts only processes in
+  the job. Processes outside it (M2, above) remain the per-slot SYSTEM stop item (C5), which
+  blocks launch.
 - **The pipes** (D11's mitigation). The outer makes four named pipes per launch (`ctl`, the
   agent's stdin, stdout and stderr), one instance each, made first or refused, local clients
   only, with an explicit protected DACL giving the lawyer and the pool user read and write (no
