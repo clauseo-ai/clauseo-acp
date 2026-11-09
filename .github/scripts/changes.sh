@@ -15,6 +15,11 @@
 # - product: product code changed (crates/, ui/, Cargo.toml, Cargo.lock), the paths of
 #            comment.ts's isProductPath, or what builds or budgets it (rust-toolchain.toml,
 #            .cargo/, budgets.toml): the scoreboards run. Everything on when all() is.
+# - lowbox:  the LowBox proof row and its chrome-headless-shell fetch (ci.yml's build job and
+#            windows-pr-tests.yml's run): the LowBox, sandbox and process crates, the browser
+#            guard (crates/mcp/src/browser_guard) and the host's browser launch (crates/host/src/browser),
+#            and what builds them (Cargo.toml, Cargo.lock, clippy.toml, the toolchain, .cargo/,
+#            .config/nextest.toml). The nightly run and any run on demand run it (all()).
 #
 # Fail safe: a path no rule knows turns every output on, and so does an empty diff (a diff that
 # lists nothing is more likely a broken fetch than a no-op pull request). Each rule is a `case`
@@ -29,12 +34,12 @@ set -euo pipefail
 APP_CRATES="desktop host search protocol settings process fake_agent reducer store matters acp limits codex_appserver connectors profile agents counts sandbox blocklist"
 
 nl=$'\n'
-rust=false app=false ui=false product=false product_also=false unknown=""
+rust=false app=false ui=false product=false product_also=false lowbox=false unknown=""
 count=0
 paths=()
 
 # Fail safe means everything: the scoreboards and the comment too.
-all() { rust=true app=true ui=true product_also=true; }
+all() { rust=true app=true ui=true product_also=true lowbox=true; }
 
 is_app_crate() {
   local c
@@ -50,6 +55,11 @@ crate_path() {
   local crate=${1#crates/}
   crate=${crate%%/*}
   if is_app_crate "$crate"; then app=true; fi
+  # The LowBox proof row's code: its crates and the browser launch code it runs under.
+  case "$1" in
+    crates/lowbox/* | crates/sandbox/* | crates/process/*) lowbox=true ;;
+    crates/mcp/src/browser_guard/* | crates/host/src/browser/*) lowbox=true ;;
+  esac
 }
 
 classify() {
@@ -91,10 +101,11 @@ classify() {
     # Nightly fuzzing only (fuzz.yml); no pull request job builds fuzz/.
     fuzz/*) ;;
     # What every Rust build reads.
-    Cargo.toml | Cargo.lock | clippy.toml) rust=true app=true ;;
+    Cargo.toml | Cargo.lock | clippy.toml) rust=true app=true lowbox=true ;;
     # The toolchain and cargo config change the binaries, so the scoreboards run too.
-    rust-toolchain.toml | .cargo/*) rust=true app=true product_also=true ;;
-    .config/nextest.toml) rust=true ;;
+    rust-toolchain.toml | .cargo/*) rust=true app=true product_also=true lowbox=true ;;
+    # The row's timeout and retry override live here.
+    .config/nextest.toml) rust=true lowbox=true ;;
     # reducer-bench's limits and the scoreboard budgets.
     budgets.toml) rust=true product_also=true ;;
     xtask/*) rust=true ;;
@@ -132,3 +143,4 @@ echo "rust=$rust"
 echo "app=$app"
 echo "ui=$ui"
 echo "product=$product"
+echo "lowbox=$lowbox"

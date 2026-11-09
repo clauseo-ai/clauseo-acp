@@ -97,6 +97,7 @@ jobs:
     outputs:
       mode: ${{ steps.mode.outputs.mode }}
       prior: ${{ steps.mode.outputs.prior }}
+      lowbox: ${{ steps.mode.outputs.lowbox }}
     steps:
       # changes.sh as the base branch has it, not as the pull request changes it.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -168,6 +169,9 @@ jobs:
             if out=$(tr '\n' '\0' < "$RUNNER_TEMP/changed" | bash .github/scripts/changes.sh); then
               echo "$out"
               rust=$(sed -n 's/^rust=//p' <<< "$out")
+              # The LowBox proof row's gate (changes.sh's lowbox). Unset when the files API or changes.sh
+              # fails, and the build job then runs the row.
+              echo "lowbox=$(sed -n 's/^lowbox=//p' <<< "$out")" >> "$GITHUB_OUTPUT"
             else
               echo "::warning::changes.sh failed; counting this as a Rust change"
             fi
@@ -251,13 +255,19 @@ jobs:
     # Never skipped as a whole, a failed `decide` included (its mode is then run).
     if: ${{ !cancelled() }}
     runs-on: ${{ (needs.decide.result != 'success' || needs.decide.outputs.mode == 'run') && 'windows-2025' || 'ubuntu-24.04' }}
-    timeout-minutes: 45
+    # 60, as ci.yml's build job: the LowBox proof row among the elevated tests may take up to
+    # 10 minutes (its nextest override) on top of the rest.
+    timeout-minutes: 60
     # None of these names starts with CARGO or RUST, so none enters rust-cache's key.
     env:
       MODE: ${{ needs.decide.result == 'success' && needs.decide.outputs.mode || 'run' }}
       TARGET: x86_64-pc-windows-msvc
       PR: ${{ github.event.pull_request.number }}
       NEXTEST_LOG: ${{ github.workspace }}/nextest.log
+      # The LowBox proof row and its fetch run unless changes.sh's lowbox output (decide) is false:
+      # the LowBox, sandbox and process crates, the browser code, and what builds them. A failed or
+      # unset decide output runs them.
+      LOWBOX: ${{ needs.decide.result != 'success' || needs.decide.outputs.lowbox != 'false' }}
     defaults:
       run:
         shell: bash
@@ -342,16 +352,38 @@ jobs:
           set -o pipefail
           cargo nextest run --workspace --profile ci --no-tests=pass 2>&1 | tee "$NEXTEST_LOG"
 
+      # As ci.yml's step of the same name: the LowBox proof row's shell and artifacts folder.
+      - name: Fetch the pinned chrome-headless-shell for the LowBox proof row
+        if: env.MODE == 'run' && env.LOWBOX == 'true'
+        uses: ./.github/actions/fetch-headless-shell
+
       # The `elevated_` tests (D-B16): ignored everywhere else, and each skips unless the token is
       # elevated and CLAUSEO_ELEVATED_TESTS=1. The hosted runner's token is elevated (probe #509).
-      # One at a time: they make and delete local accounts, a group and an HKLM key.
+      # One at a time: they make and delete local accounts, a group and an HKLM key. The LowBox
+      # proof row (clauseo-lowbox's elevated_lowbox_headless_shell_row) is one of them, left out when
+      # no lowbox path changed (LOWBOX).
       - name: Elevated tests, one at a time
         if: env.MODE == 'run'
         env:
           CLAUSEO_ELEVATED_TESTS: "1"
         run: |
           set -o pipefail
-          cargo nextest run --workspace --profile ci --run-ignored only -E 'test(/(^|::)elevated_/)' --test-threads 1 --no-tests=fail 2>&1 | tee -a "$NEXTEST_LOG"
+          filter='test(/(^|::)elevated_/)'
+          if [ "$LOWBOX" != true ]; then
+            filter="$filter & !test(elevated_lowbox_headless_shell_row)"
+            echo "lowbox row skipped: no lowbox/sandbox/process/browser change"
+          fi
+          cargo nextest run --workspace --profile ci --run-ignored only -E "$filter" --test-threads 1 --no-tests=fail 2>&1 | tee -a "$NEXTEST_LOG"
+
+      # The proof row's screenshot, chrome's standard error and its report, pass or fail.
+      - name: Upload the LowBox proof row's artifacts
+        if: ${{ always() && env.MODE == 'run' && env.LOWBOX == 'true' }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: lowbox-proof-x86_64-pc-windows-msvc
+          path: ${{ env.CLAUSEO_TEST_ARTIFACTS }}
+          retention-days: 14
+          if-no-files-found: warn
 
       - name: Name the failed tests
         if: ${{ failure() && env.MODE == 'run' }}

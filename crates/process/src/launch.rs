@@ -164,7 +164,13 @@ pub fn spawn_in_tree(spec: &LaunchSpec, opts: &SpawnOptions) -> Result<Launched,
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .kill_on_drop(true);
-    let mut child = command.spawn().map_err(|source| Error::Spawn {
+    // Held across the spawn only: a start elsewhere in this process that marks its own handles
+    // inheritable does so under the same lock (`spawn_lock`), so this child never gets them.
+    let spawned = {
+        let _lock = crate::spawn_lock();
+        command.spawn()
+    };
+    let mut child = spawned.map_err(|source| Error::Spawn {
         program: spec.program().to_owned(),
         source,
     })?;

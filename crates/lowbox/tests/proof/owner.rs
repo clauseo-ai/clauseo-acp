@@ -1,0 +1,537 @@
+//! The owner's side of the row: the set-up (recipe steps 1, 3 and 4 and the test account), the
+//! helper's start, the run, the artifacts and the evidence. The cleanup, which always runs, is in
+//! `teardown.rs`.
+//!
+//! The row's own bounded waits: the page 180 s (inside it the helper's probe in package B, 30 s
+//! and its output 10 s, then its first four CDP steps, 20 s each: 120 s), the facts 60 s, the
+//! helper's exit 190 s (the process probe in package B 30 s and its output 10 s, navigate, load
+//! and screenshot 20 s each, `Browser.close` 10 s, chrome's exit 30 s, the exit codes 15 s,
+//! chrome's stderr 10 s: 165 s), its last output 10 s, then in the cleanup the helper's kill
+//! 10 s, the account's processes 30 s, the profile's delete 57 s and the root's delete 10 s:
+//! 547 s in all, under the 600 s nextest gives this row
+//! (`.config/nextest.toml`).
+
+use std::path::{Path, PathBuf};
+use std::sync::mpsc::RecvTimeoutError;
+use std::time::Duration;
+
+use clauseo_lowbox::{
+    BrowserFolders, Namespace, NamespaceHandles, PackageName, Rights, Sid, grants, package_sid,
+};
+
+use super::acl::{self, DriveRoot, NullDevice};
+use super::evidence::{self, Context, PNG_SIGNATURE, redact};
+use super::helper::{Config, STDERR_LOG};
+use super::launch::{self, Helper};
+use super::probe::{MARKER, MARKER_TEXT, PROBE_EXE};
+use super::proxy::Proxy;
+use super::station::Station;
+use super::win::{self, Res};
+use super::{account, loopback, teardown, write};
+
+/// How long the owner waits for chrome's page request.
+const PAGE_WAIT: Duration = Duration::from_secs(180);
+/// How long it waits for the helper's facts after `inspect`.
+const FACTS_WAIT: Duration = Duration::from_secs(60);
+/// How long it waits for the helper to exit after the release.
+const HELPER_EXIT_MS: u32 = 190_000;
+/// How long it waits for the helper's last output after its exit.
+const DRAIN_WAIT: Duration = Duration::from_secs(10);
+/// ALL APPLICATION PACKAGES: may read the probe's folder, so both packages can.
+const ALL_APPLICATION_PACKAGES: &str = "S-1-15-2-1";
+/// Where CI documents the row's inputs.
+const CI: &str = "the Elevated tests step of ci.yml and windows-pr-tests.yml";
+
+/// The row's inputs from CI.
+struct Inputs {
+    /// chrome-headless-shell.exe (x64).
+    shell: PathBuf,
+    /// The folder CI uploads afterwards.
+    artifacts: PathBuf,
+    /// `%SystemDrive%`, such as `C:`.
+    system_drive: String,
+}
+
+impl Inputs {
+    /// Reads them; a missing one fails the row (it never skips).
+    fn from_env() -> Inputs {
+        let var = |name: &str| {
+            std::env::var(name).unwrap_or_else(|_| {
+                panic!("{name} is not set: the proof row needs it ({CI} sets it)")
+            })
+        };
+        assert_eq!(
+            var("CLAUSEO_ELEVATED_TESTS"),
+            "1",
+            "CLAUSEO_ELEVATED_TESTS must be 1: the row runs elevated"
+        );
+        let shell = PathBuf::from(var("CLAUSEO_TEST_CHROME_SHELL"));
+        assert!(
+            shell.is_file(),
+            "CLAUSEO_TEST_CHROME_SHELL is not a file: {}",
+            shell.display()
+        );
+        let artifacts = PathBuf::from(var("CLAUSEO_TEST_ARTIFACTS"));
+        let system_drive = std::env::var("SystemDrive").unwrap_or_else(|_| "C:".to_owned());
+        Inputs {
+            shell,
+            artifacts,
+            system_drive,
+        }
+    }
+}
+
+/// The test account.
+pub(crate) struct User {
+    /// Its name.
+    pub(crate) name: String,
+    /// Its SID text, once looked up.
+    pub(crate) sid: Option<String>,
+    /// `%SystemDrive%\Users\<name>`: its profile folder when `ProfileImagePath` is gone.
+    pub(crate) profile_fallback: PathBuf,
+}
+
+/// What `lay_out` made: the paths the helper needs.
+struct Layout {
+    /// chrome-headless-shell.exe in the shell folder.
+    shell: PathBuf,
+    /// The helper (the test binary) in its own folder.
+    helper_exe: PathBuf,
+    /// The probe (the test binary) in a folder ALL APPLICATION PACKAGES may read.
+    probe_exe: PathBuf,
+    /// Package A's folders.
+    folders: BrowserFolders,
+}
+
+/// The namespace's handles and what opens it again by name.
+pub(crate) struct Built {
+    /// The handles `Namespace::build` returned.
+    pub(crate) handles: NamespaceHandles,
+    /// Its package.
+    pub(crate) package: PackageName,
+    /// Its session.
+    pub(crate) session: u32,
+}
+
+/// Everything the row made, each field set as soon as the thing exists, so the cleanup undoes
+/// exactly what was done.
+#[derive(Default)]
+pub(crate) struct Run {
+    /// The helper process.
+    pub(crate) helper: Option<Helper>,
+    /// The proxy.
+    pub(crate) proxy: Option<Proxy>,
+    /// Package A's namespace (chrome's).
+    pub(crate) namespace: Option<Built>,
+    /// Package B's namespace (the probe's).
+    pub(crate) namespace_b: Option<Built>,
+    /// The drive root's saved DACL.
+    pub(crate) drive_root: Option<DriveRoot>,
+    /// `\Device\Null`'s saved DACL.
+    pub(crate) null_device: Option<NullDevice>,
+    /// The loopback list as it was.
+    pub(crate) loopback: Option<Vec<Vec<u8>>>,
+    /// The SID that holds the granted logon right.
+    pub(crate) logon_right: Option<String>,
+    /// The station and desktop.
+    pub(crate) station: Option<Station>,
+    /// The test account.
+    pub(crate) user: Option<User>,
+    /// The test root.
+    pub(crate) root: Option<PathBuf>,
+    /// Whether the cleanup ran.
+    pub(crate) cleaned: bool,
+}
+
+/// The whole row: set up, prove, clean up, then fail with every problem found.
+pub(crate) fn row() {
+    let inputs = Inputs::from_env();
+    let mut run = Run::default();
+    let outcome = run.prove(&inputs);
+    let cleanup = teardown::cleanup(&mut run);
+    let mut problems = match outcome {
+        Ok(problems) => problems,
+        Err(e) => vec![format!("the row stopped: {e}")],
+    };
+    problems.extend(cleanup.into_iter().map(|f| format!("cleanup: {f}")));
+    assert!(
+        problems.is_empty(),
+        "elevated_lowbox_headless_shell_row failed:\n- {}",
+        problems.join("\n- ")
+    );
+    println!(
+        "elevated_lowbox_headless_shell_row: every assertion held and the cleanup is complete"
+    );
+}
+
+/// `e` as a sentence about `what`.
+fn because(what: &str) -> impl Fn(clauseo_lowbox::Error) -> String + '_ {
+    move |e| format!("{what}: {e}")
+}
+
+/// A path as text.
+fn text(path: &Path) -> String {
+    path.display().to_string()
+}
+
+impl Run {
+    /// The set-up and the run; `Ok` holds the assertions that failed.
+    fn prove(&mut self, inputs: &Inputs) -> Res<Vec<String>> {
+        let tag = win::random_hex(6);
+        let user = format!("ClauseoLowbox{tag}");
+        let package = PackageName::new(&format!("Clauseo.Browser.Proof{tag}"))
+            .map_err(because("the package name"))?;
+        let package_text = package_sid(&package).as_str().to_owned();
+        // Package B: the negative check's (`probe.rs`). No file grant, no loopback exemption.
+        let package_b = PackageName::new(&format!("Clauseo.Browser.ProofB{tag}"))
+            .map_err(because("package B's name"))?;
+        let package_b_text = package_sid(&package_b).as_str().to_owned();
+        println!("setup: test account {user} and two fresh packages (names not printed)");
+
+        let password = win::random_password();
+        account::add(&user, &password)?;
+        self.user = Some(User {
+            name: user.clone(),
+            sid: None,
+            profile_fallback: PathBuf::from(format!(r"{}\Users\{user}", inputs.system_drive)),
+        });
+        let user_sid = account::lookup_sid(&user)?;
+        if let Some(made) = self.user.as_mut() {
+            made.sid = Some(user_sid.clone());
+        }
+        account::grant_logon(&user_sid)?;
+        self.logon_right = Some(user_sid.clone());
+        println!("setup: made the account and granted SeInteractiveLogonRight for the run");
+
+        let root = PathBuf::from(format!(
+            r"{}\clauseo-lowbox-proof-{tag}",
+            inputs.system_drive
+        ));
+        acl::create_root(&root, &user_sid)?;
+        self.root = Some(root.clone());
+        let Layout {
+            shell,
+            helper_exe,
+            probe_exe,
+            folders,
+        } = Self::lay_out(&root, inputs, &package)?;
+        println!("setup: test root {} laid out and granted", root.display());
+
+        let drive_root = format!(r"{}\", inputs.system_drive);
+        let added = self
+            .drive_root
+            .insert(DriveRoot::add(&drive_root, &package_text)?);
+        added.check(&package_text)?;
+        let added = self.null_device.insert(NullDevice::add(&package_text)?);
+        added.check(&package_text)?;
+        println!(r"setup: package ACEs added on {drive_root} and \Device\Null (re-read)");
+
+        // Per package, for A only: never the machine-wide switch. It stands in until PR 4's WFP
+        // filters (see loopback.rs).
+        let original = loopback::current()?;
+        self.loopback = Some(original.clone());
+        let exempted = loopback::exempt(
+            &original,
+            &package_sid(&package).to_bytes(),
+            &package_sid(&package_b).to_bytes(),
+        )?;
+        println!("setup: loopback exemption for {exempted}");
+
+        let owner = win::token_user_sid()?;
+        let owner_sid = Sid::parse(&owner).map_err(because("the owner's SID"))?;
+        let station = self.station.insert(Station::create(
+            &format!("ClauseoLowbox-{tag}"),
+            &owner,
+            &user_sid,
+            &[&package_text, &package_b_text],
+        )?);
+        let (station_name, desktop) = (station.name().to_owned(), station.desktop_path());
+        println!("setup: private station {station_name} and its desktop Default");
+
+        let port = self
+            .proxy
+            .insert(Proxy::start().map_err(|e| format!("the proxy: {e}"))?)
+            .port();
+        let session = self.build_namespaces(&package, &package_b, &user_sid)?;
+        println!("setup: both namespaces built in session {session}; proxy on 127.0.0.1:{port}");
+
+        let helper = self
+            .helper
+            .insert(launch::start(&user, &password, &helper_exe, &desktop)?);
+        drop(password);
+        let copy = |built: Option<&Built>, what: &str| -> Res<String> {
+            let built = built.ok_or_else(|| format!("no namespace for {what}"))?;
+            let values = built
+                .handles
+                .duplicate_into(helper.process())
+                .map_err(because(what))?;
+            Ok(values
+                .iter()
+                .map(|v| format!("{v:#x}"))
+                .collect::<Vec<String>>()
+                .join(","))
+        };
+        let config = Config {
+            owner: owner_sid.as_str().to_owned(),
+            handles: copy(self.namespace.as_ref(), "duplicate_into(package A)")?,
+            package: package.as_str().to_owned(),
+            handles_b: copy(self.namespace_b.as_ref(), "duplicate_into(package B)")?,
+            package_b: package_b.as_str().to_owned(),
+            probe: text(&probe_exe),
+            shell: text(&shell),
+            profile: text(&folders.profile),
+            staging: text(&folders.staging),
+            tmp: text(&folders.tmp),
+            port,
+        };
+        helper.send(&config.line())?;
+        println!(
+            "run: helper pid {} started as {user}; both packages' handles copied",
+            helper.pid()
+        );
+
+        match self.watch() {
+            Ok(output) => self.finish(inputs, &folders, &station_name, &output),
+            Err(e) => {
+                if let Err(log) = self.save_logs(inputs, &folders, &[]) {
+                    println!("run: {log}");
+                }
+                Err(e)
+            }
+        }
+    }
+
+    /// Builds package A's namespace and package B's in this session, for the test account
+    /// `user_sid`; the session.
+    fn build_namespaces(
+        &mut self,
+        package: &PackageName,
+        package_b: &PackageName,
+        user_sid: &str,
+    ) -> Res<u32> {
+        let browser = Sid::parse(user_sid).map_err(because("the account's SID"))?;
+        let session = Namespace::current_session().map_err(because("the session"))?;
+        assert_ne!(
+            session, 0,
+            "the row runs in session 0, which has no \\Sessions\\0\\BaseNamedObjects for the \
+             namespace: run it from a logged-on session"
+        );
+        let handles =
+            Namespace::build(package, session, &browser).map_err(because("Namespace::build"))?;
+        self.namespace = Some(Built {
+            handles,
+            package: package.clone(),
+            session,
+        });
+        let handles_b = Namespace::build(package_b, session, &browser)
+            .map_err(because("Namespace::build(package B)"))?;
+        self.namespace_b = Some(Built {
+            handles: handles_b,
+            package: package_b.clone(),
+            session,
+        });
+        Ok(session)
+    }
+
+    /// Makes the test root's folders (`grants` opens each, so they exist first), applies the
+    /// package's grants, writes the probe's marker in each of A's folders, then copies the shell
+    /// and the helper in (so their files inherit). The probe's folder gets one grant, read and
+    /// run for ALL APPLICATION PACKAGES (not for B alone), and the test binary as the probe.
+    fn lay_out(root: &Path, inputs: &Inputs, package: &PackageName) -> Res<Layout> {
+        let folders = BrowserFolders {
+            profile: root.join("profile"),
+            staging: root.join("staging"),
+            tmp: root.join("tmp"),
+            shell: root.join("shell"),
+        };
+        let pins = root.join("pins");
+        let helper_dir = root.join("helper");
+        let probe_dir = root.join("probe");
+        for dir in [
+            &folders.shell,
+            &folders.profile,
+            &folders.staging,
+            &folders.tmp,
+            &pins,
+            &helper_dir,
+            &probe_dir,
+        ] {
+            acl::mkdir(dir)?;
+        }
+        for grant in grants(package, &folders, &pins).map_err(because("grants"))? {
+            acl::grant(&grant.path, grant.rights.mask(), grant.sid.as_str())?;
+        }
+        acl::grant(
+            &probe_dir,
+            Rights::ReadExecute.mask(),
+            ALL_APPLICATION_PACKAGES,
+        )?;
+        for dir in [
+            &folders.profile,
+            &folders.staging,
+            &folders.tmp,
+            &folders.shell,
+            &probe_dir,
+        ] {
+            write::write(&dir.join(MARKER), MARKER_TEXT)
+                .map_err(|e| format!("writing the probe's marker in {}: {e}", dir.display()))?;
+        }
+        let source = inputs.shell.parent().ok_or("the shell has no folder")?;
+        let files = write::copy_tree(source, &folders.shell)
+            .map_err(|e| format!("copying the shell's folder: {e}"))?;
+        let name = inputs
+            .shell
+            .file_name()
+            .ok_or("the shell has no file name")?;
+        let helper_exe = helper_dir.join("clauseo-lowbox-proof-helper.exe");
+        let probe_exe = probe_dir.join(PROBE_EXE);
+        let me = std::env::current_exe().map_err(|e| format!("current_exe: {e}"))?;
+        write::copy(&me, &helper_exe).map_err(|e| format!("copying the test binary: {e}"))?;
+        write::copy(&me, &probe_exe).map_err(|e| format!("copying the test binary: {e}"))?;
+        println!("setup: copied {files} shell files and the test binary as the helper and probe");
+        Ok(Layout {
+            shell: folders.shell.join(name),
+            helper_exe,
+            probe_exe,
+            folders,
+        })
+    }
+
+    /// The run itself: waits for the page request, asks for the inspection, collects the facts,
+    /// releases the page and waits for the helper. Returns the helper's output lines; without a
+    /// page request it fails without asking for the inspection.
+    fn watch(&mut self) -> Res<Vec<String>> {
+        let (Some(helper), Some(proxy)) = (self.helper.as_mut(), self.proxy.as_ref()) else {
+            return Err("the run had no helper or proxy".to_owned());
+        };
+        // One second at a time, so a helper that stopped (a failed CDP step) ends the wait.
+        let mut seen = false;
+        for _ in 0..PAGE_WAIT.as_secs() {
+            seen = proxy.wait_seen(Duration::from_secs(1));
+            if seen || helper.exit_code().is_some() {
+                break;
+            }
+        }
+        if !seen {
+            return Err(format!(
+                "the proxy never saw the page request (waited up to {} s; helper exit {:?}); no \
+                 inspection asked (the helper's log is above)",
+                PAGE_WAIT.as_secs(),
+                helper.exit_code()
+            ));
+        }
+        println!("run: the proxy saw the page request");
+        if let Err(e) = helper.send("inspect") {
+            println!("run: {e}");
+        }
+        let mut output = Vec::new();
+        loop {
+            match helper.next_line(FACTS_WAIT) {
+                Ok(line) => {
+                    let last = line.contains("|inspected ");
+                    output.push(line);
+                    if last {
+                        break;
+                    }
+                }
+                Err(RecvTimeoutError::Timeout) => {
+                    println!(
+                        "run: no inspection report within {} s",
+                        FACTS_WAIT.as_secs()
+                    );
+                    break;
+                }
+                Err(RecvTimeoutError::Disconnected) => break,
+            }
+        }
+        proxy.release();
+        println!("run: page released");
+        if !helper.wait(HELPER_EXIT_MS) {
+            println!(
+                "run: the helper did not exit within {} s",
+                HELPER_EXIT_MS / 1000
+            );
+        }
+        while let Ok(line) = helper.next_line(DRAIN_WAIT) {
+            output.push(line);
+        }
+        Ok(output)
+    }
+
+    /// Copies the artifacts, prints the evidence and checks it.
+    fn finish(
+        &mut self,
+        inputs: &Inputs,
+        folders: &BrowserFolders,
+        station_name: &str,
+        output: &[String],
+    ) -> Res<Vec<String>> {
+        let shot = folders.staging.join("shot.png");
+        let shot_data = std::fs::read(&shot).unwrap_or_default();
+        let shot_bytes = u64::try_from(shot_data.len()).unwrap_or(u64::MAX);
+        write::create_dir_all(&inputs.artifacts)
+            .map_err(|e| format!("making the artifacts folder: {e}"))?;
+        if shot_bytes > 0 {
+            write::copy(&shot, &inputs.artifacts.join("lowbox-shot.png"))
+                .map_err(|e| format!("copying shot.png: {e}"))?;
+        }
+        let lines = evidence::parse(output);
+        let context = Context {
+            station: station_name.to_owned(),
+            shot_bytes,
+            shot_png: shot_data.starts_with(&PNG_SIGNATURE),
+            proxy_delivered: self.proxy.as_ref().map_or(0, Proxy::delivered),
+            helper_exit: self.helper.as_ref().and_then(Helper::exit_code),
+        };
+        let mut summary = evidence::summary(&lines, &context);
+        if let Some(proxy) = self.proxy.as_ref() {
+            let (refused, errors) = proxy.refused_and_errors();
+            summary.push(format!(
+                "evidence: proxy page requests {}, refused {refused:?}, errors {errors:?}",
+                proxy.seen()
+            ));
+        }
+        let problems = evidence::check(&lines, &context);
+        self.save_logs(inputs, folders, &summary)?;
+        Ok(problems)
+    }
+
+    /// Prints the helper's log and `summary`, writes both to the artifacts and copies chrome's
+    /// standard error there, each with the package SIDs cut out (`redact`).
+    fn save_logs(&self, inputs: &Inputs, folders: &BrowserFolders, summary: &[String]) -> Res<()> {
+        let log: Vec<String> = self
+            .helper
+            .as_ref()
+            .map(Helper::log)
+            .unwrap_or_default()
+            .iter()
+            .map(|line| redact(line))
+            .collect();
+        let summary: Vec<String> = summary.iter().map(|line| redact(line)).collect();
+        println!("--- the helper's log ---");
+        for line in &log {
+            println!("{line}");
+        }
+        println!("--- the evidence ---");
+        for line in &summary {
+            println!("{line}");
+        }
+        write::create_dir_all(&inputs.artifacts)
+            .map_err(|e| format!("making the artifacts folder: {e}"))?;
+        let mut file = log.join("\n");
+        file.push_str("\n\n");
+        file.push_str(&summary.join("\n"));
+        write::write(&inputs.artifacts.join("lowbox-helper-log.txt"), file)
+            .map_err(|e| format!("writing the helper's log: {e}"))?;
+        match std::fs::read(folders.staging.join(STDERR_LOG)) {
+            Ok(bytes) => {
+                let text = redact(&String::from_utf8_lossy(&bytes));
+                write::write(&inputs.artifacts.join("lowbox-chrome-stderr.log"), &text)
+                    .map_err(|e| format!("writing chrome's standard error: {e}"))?;
+                println!("artifacts: chrome's standard error, {} bytes", bytes.len());
+            }
+            Err(e) => println!("artifacts: no chrome standard error log ({e})"),
+        }
+        Ok(())
+    }
+}

@@ -1,0 +1,93 @@
+# Fetches the pinned win64 chrome-headless-shell for the LowBox proof row
+# (crates/lowbox/tests/proof.rs, `elevated_lowbox_headless_shell_row`) on Windows x64. Its callers
+# (ci.yml's build job and windows-pr-tests.yml) run it only when the change touches the LowBox,
+# sandbox, process or browser code (changes.sh's lowbox output), and never on windows-11-arm: the row
+# is out of the ARM64 required path until #828's arm64-browser-proof dispatch is green.
+#
+# The pin is clauseo-ai/browser-pins' `current` release as published 2026-11-08T22:29:53Z
+# (browser-pins-v1.json: stable.version and downloads.chrome-headless-shell.win64), copied here so
+# a run is reproducible and never follows a newer release by itself. The zip is checked against
+# its size and SHA-256 before anything unpacks it, after a download and after a cache restore; a
+# mismatch fails the job.
+#
+# - The zip is cached, keyed on the version and the SHA-256 (the `shell-key` step, which
+#   .github/scripts/cache-keys-test.rb reads), so a new pin is a new key. Every run restores with
+#   actions/cache/restore; a miss saves through ./.github/actions/cache-save-main after the check
+#   passed, which writes only on main's scheduled and on-demand runs. The family is
+#   chrome-headless-shell in .github/scripts/cache-families.txt.
+# - Downloads retry three times, ten seconds apart (Invoke-WebRequest's retry, pwsh 7.4 or later).
+#
+# Sets CLAUSEO_TEST_CHROME_SHELL (the shell's full path) and CLAUSEO_TEST_ARTIFACTS (an empty
+# folder the row writes its screenshot and logs to, which the workflow uploads). The row fails,
+# never skips, without either.
+
+name: Fetch the pinned chrome-headless-shell
+description: Downloads, or restores from the cache, and checks the pinned win64 chrome-headless-shell for the LowBox proof row.
+
+runs:
+  using: composite
+  steps:
+    - name: The pin's cache key
+      id: shell-key
+      shell: bash
+      env:
+        SHELL_VERSION: "157.0.8103.38"
+        SHELL_SHA256: "1ff4540855478ba0848e03f1ef8d455f77d058b38285df91bc34273788a73446"
+      run: |
+        echo "key=chrome-headless-shell-win64-${SHELL_VERSION}-${SHELL_SHA256}" >> "$GITHUB_OUTPUT"
+
+    - name: Restore the cached zip
+      id: restore
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ runner.temp }}/chrome-headless-shell-win64.zip
+        key: ${{ steps.shell-key.outputs.key }}
+
+    - name: Fetch the pinned zip when the cache missed, and check it
+      shell: pwsh
+      env:
+        SHELL_VERSION: "157.0.8103.38"
+        SHELL_SIZE: "126513060"
+        SHELL_SHA256: "1ff4540855478ba0848e03f1ef8d455f77d058b38285df91bc34273788a73446"
+        HIT: ${{ steps.restore.outputs.cache-hit }}
+      run: |
+        $ErrorActionPreference = 'Stop'
+        $zip = Join-Path $env:RUNNER_TEMP 'chrome-headless-shell-win64.zip'
+        if ($env:HIT -eq 'true' -and (Test-Path $zip)) {
+          "restored the zip from the cache"
+        } else {
+          if (Test-Path $zip) { Remove-Item $zip }
+          $url = "https://storage.googleapis.com/chrome-for-testing-public/$env:SHELL_VERSION/win64/chrome-headless-shell-win64.zip"
+          Invoke-WebRequest -Uri $url -OutFile $zip -UseBasicParsing -MaximumRetryCount 3 -RetryIntervalSec 10
+          "downloaded the zip"
+        }
+        # Checked after a restore as well as after a download: a cached zip that does not match the pin fails here.
+        $size = (Get-Item $zip).Length
+        $sha = (Get-FileHash -Algorithm SHA256 $zip).Hash.ToLowerInvariant()
+        if ($size -ne [int64]$env:SHELL_SIZE) { throw "size $size, but the pin says $env:SHELL_SIZE" }
+        if ($sha -ne $env:SHELL_SHA256) { throw "sha256 $sha, but the pin says $env:SHELL_SHA256" }
+        "zip matches the pin: chrome-headless-shell $env:SHELL_VERSION, $size bytes, sha256 $sha"
+
+    - name: Save the checked zip
+      # The zip is checked by now; cache-save-main writes only on main's schedule and dispatch runs.
+      if: steps.restore.outputs.cache-hit != 'true'
+      uses: ./.github/actions/cache-save-main
+      with:
+        path: ${{ runner.temp }}/chrome-headless-shell-win64.zip
+        key: ${{ steps.shell-key.outputs.key }}
+
+    - name: Unpack the pinned shell
+      shell: pwsh
+      run: |
+        $ErrorActionPreference = 'Stop'
+        $zip = Join-Path $env:RUNNER_TEMP 'chrome-headless-shell-win64.zip'
+        $dir = Join-Path $env:RUNNER_TEMP 'headless-shell'
+        Expand-Archive -Path $zip -DestinationPath $dir -Force
+        Remove-Item $zip
+        $exe = (Get-ChildItem -Path $dir -Recurse -Filter 'chrome-headless-shell.exe' | Select-Object -First 1).FullName
+        if (-not $exe) { throw "no chrome-headless-shell.exe in the zip" }
+        $artifacts = Join-Path $env:RUNNER_TEMP 'lowbox-proof-artifacts'
+        New-Item -ItemType Directory -Force $artifacts | Out-Null
+        "shell: $exe"
+        "CLAUSEO_TEST_CHROME_SHELL=$exe" >> $env:GITHUB_ENV
+        "CLAUSEO_TEST_ARTIFACTS=$artifacts" >> $env:GITHUB_ENV

@@ -1,0 +1,80 @@
+[package]
+name = "clauseo-lowbox"
+version = "0.0.0"
+description = "Launches a program in an AppContainer (LowBox) token on Windows."
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+# The package SID, the argument quoting, the handle list's parse and checks and the grants are
+# plain Rust on every OS, so their unit tests run anywhere; the rest is Windows only.
+#
+# The namespace (src/windows/namespace.rs): NtCreateFile, NtOpenDirectoryObject and
+# NtOpenSymbolicLinkObject (Wdk_Storage_FileSystem) with OBJECT_ATTRIBUTES (Wdk_Foundation) and
+# IO_STATUS_BLOCK (System_IO); the SDDL conversion and ConvertSidToStringSidW
+# (Security_Authorization), the token's user (Security, System_Threading's OpenProcessToken) and
+# the session (ProcessIdToSessionId: System_RemoteDesktop). The handle checks
+# (src/windows/probe.rs): GetHandleInformation and NtQueryObject with
+# PUBLIC_OBJECT_TYPE_INFORMATION (System_WindowsProgramming). The launch (src/windows/spawn.rs):
+# CreateProcessAsUserW and the attribute list (System_Threading), CreatePipe (System_Pipes),
+# CreateFileW for NUL (Storage_FileSystem) and GetStdHandle (System_Console). The tokens
+# (src/windows/token.rs): GetTokenInformation and AdjustTokenPrivileges (Security), the owner
+# (GetSecurityInfo: Security_Authorization).
+#
+# clauseo-process for its process-wide spawn lock (`spawn_lock`): the launch holds it while
+# handles are inheritable, as every start through clauseo-process does, so no other start in
+# the process inherits them. Windows only, where the lock is needed.
+[target.'cfg(windows)'.dependencies]
+clauseo-process = { path = "../process" }
+windows = { workspace = true, features = [
+  "Wdk_Foundation",
+  "Wdk_Storage_FileSystem",
+  "Win32_Foundation",
+  "Win32_Security",
+  "Win32_Security_Authorization",
+  "Win32_Storage_FileSystem",
+  "Win32_System_Console",
+  "Win32_System_IO",
+  "Win32_System_Pipes",
+  "Win32_System_RemoteDesktop",
+  "Win32_System_Threading",
+  "Win32_System_WindowsProgramming",
+] }
+
+# The unit tests' cross-check of the package SID: DeriveAppContainerSidFromAppContainerName
+# (Security_Isolation).
+#
+# The proof row (tests/proof.rs), as the owner: the test account (NetUserAdd, NetUserDel,
+# NetUserGetInfo: NetworkManagement_NetManagement), its logon right (LsaAddAccountRights and
+# the rest: Security_Authentication_Identity), the loopback exemption
+# (NetworkIsolationSetAppContainerConfig: NetworkManagement_WindowsFirewall), the private window
+# station (System_StationsAndDesktops; CreateDesktopW is declared in the test, since the crate's
+# needs Graphics_Gdi) and the profile check (RegOpenKeyExW: System_Registry). As the helper: the
+# Job Object (System_JobObjects), the process snapshot (System_Diagnostics_ToolHelp), the command
+# lines (NtQueryInformationProcess: Wdk_System_Threading) and the machine types
+# (IsWow64Process2, PROCESS_MACHINE_INFORMATION: System_SystemInformation). The cleanup's wait
+# for the account's processes (WTSEnumerateProcessesW, which gives each process's user without
+# opening it: System_RemoteDesktop). The no-listener check: GetExtendedTcpTable
+# (NetworkManagement_IpHelper) over the job's pids (QueryInformationJobObject: System_JobObjects).
+# The helper's CDP client: serde_json for the messages, base64 for the screenshot's data.
+[target.'cfg(windows)'.dev-dependencies]
+windows = { workspace = true, features = [
+  "Wdk_System_Threading",
+  "Win32_NetworkManagement_IpHelper",
+  "Win32_NetworkManagement_NetManagement",
+  "Win32_NetworkManagement_WindowsFirewall",
+  "Win32_Security_Authentication_Identity",
+  "Win32_Security_Isolation",
+  "Win32_System_Diagnostics_ToolHelp",
+  "Win32_System_JobObjects",
+  "Win32_System_Registry",
+  "Win32_System_RemoteDesktop",
+  "Win32_System_StationsAndDesktops",
+  "Win32_System_SystemInformation",
+] }
+serde_json = { workspace = true }
+base64 = { workspace = true }

@@ -1151,6 +1151,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "clauseo-lowbox"
+version = "0.0.0"
+dependencies = [
+ "base64 0.22.1",
+ "clauseo-process",
+ "serde_json",
+ "windows",
+]
+
+[[package]]
 name = "clauseo-matters"
 version = "0.1.0"
 dependencies = [
