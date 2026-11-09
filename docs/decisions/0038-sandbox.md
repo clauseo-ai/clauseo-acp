@@ -332,6 +332,88 @@ Residual risks:
   name in those letters the Rust side can label a denial wrongly or accept an overlap the kernel
   still refuses, since Seatbelt applies the rule. Revisit when `caseless` moves to Unicode 17.
 
+Amended 2026-11-09: the browser profile (J3, ruling a1). macOS refuses a nested `sandbox_init`
+in a process that already runs under a Seatbelt profile with any deny, so Chrome's own sandbox
+cannot start inside the agent's jail, and `--no-sandbox` inside the jail would let a renderer
+exploit reach the matter unseen. So the browser stack (the guard, agent-browser and Chrome) runs
+outside the jail, started by the host, under its own profile (`macos::browser::profile`, applied
+by `BrowserLauncher` through `sandbox-exec`), which stands in for Chrome's sandbox.
+`--no-sandbox` is allowed there and nowhere else. The browser is chrome-headless-shell only: an
+app-bundle Chrome needs LaunchServices (`launchservicesd`, `lsd.mapdb`), `configd`,
+`coreservicesd` and the window server (each measured: a crash or a hang without it), and the
+profile refuses a Chrome path with a `.app` name (`BrowserProfileError::AppBundle`).
+
+`BrowserPaths` names the run folder (`<data>/browser-runs/<run>/` with `profile/`, `staging/`,
+`sock/`, `ab/` and `tmp/`), the headless shell's folder, the stack's binaries, the proxy,
+DevTools and stream ports, and the deny roots (the matters, the home's sensitive folders). It
+refuses relative paths, a run folder not directly in `browser-runs`, a run folder that equals,
+holds or sits in a deny root, a binary in a deny root or in the run folder, a path holding a
+quote, backslash or control character (paths are written into the text as strings), and port 0.
+`BrowserLauncher` refuses to start when this process is already sandboxed (`sandbox_check` with
+no operation is not 0: `AlreadySandboxed`), clears the environment, and sets `HOME` and `TMPDIR`
+to `tmp/` and `MAC_CHROMIUM_TMPDIR` to `ab/` (Chrome reads its temp folder from that variable,
+not `TMPDIR`, and binds its singleton socket there; without it Chrome uses `/var/folders` and
+exits). The flags: `--headless --no-sandbox --disable-gpu --user-data-dir=<run>/profile
+--proxy-server=http://127.0.0.1:<proxy>`, and `--remote-debugging-port=<cdp>` for agent-browser.
+
+The profile is `(deny default)`, an explicit `(deny file-map-executable)`, then allows only:
+- run, read and map of the headless shell's folder and the stack's binaries; read and map of
+  `/System` and `/usr/lib` (frameworks, dylibs, fonts: a trap or abort without either), read of
+  `/` (dyld aborts without it), metadata of `/etc`, `/tmp`, `/var` (not needed; about 2,600
+  denials a run without it) and of the folders above the allowed paths (a trap without them);
+- `process-fork` (a trap without it); signals and process info within the sandbox (not needed
+  for a run; kept for teardown and the guard's `sandbox_check` of Chrome's pids);
+- read and write of the run folder, the only writable path; `/dev/null` (a trap without it);
+- the sysctls `hw.machine`, `hw.memsize`, `hw.ncpu`, `hw.pagesize_compat`, `kern.hostname`,
+  `kern.osproductversion`, `kern.osrelease`, `kern.ostype`, `kern.version` (a trap or abort
+  without any one); `RootDomainUserClient` (a SIGSEGV without it);
+- `mach-register` and `mach-lookup` of `org.chromium.Chromium.MachPortRendezvousServer.<pid>`
+  only, Chrome's port broker (`bootstrap_check_in ... Permission denied` without the register;
+  the helpers hang without the lookup). No other Mach service;
+- Unix sockets: bind and connect at `sock/guard.sock` and under `ab/` (agent-browser's daemon,
+  Chrome's singleton); TCP over IPv4 loopback (`tcp4 "localhost:<port>"`: Seatbelt takes only `*`
+  or `localhost` as a host) out to the three ports, and bind and inbound on the DevTools and
+  stream ports. No UDP, no IPv6, no wildcard.
+The last rules are denies, with no allow after them: no run or map of anything in the run
+folder (the agent writes `staging/`), no keychain (folders and services, as in the jail), no GPU
+or IOSurface user client (Chrome draws with SwiftShader), no window server or `CARenderServer`,
+no `nvram`, no `iokit-get-properties`. The jail tests run under it: matters, the home, `.ssh`
+and other state refused for read and write; the keychain and the window server refused; only the
+three ports reachable; a binary or library dropped in the run folder neither runs nor maps; no
+socket bound in `sock/` but `guard.sock`; the outermost refusal; and the headless shell's
+screenshot of a local page (skipped when none is on the machine).
+
+The guard's marker (D3): `sandbox_check(pid, "file-write-data", SANDBOX_FILTER_PATH |
+SANDBOX_CHECK_NO_REPORT, path)` answers 0 for a write under `<data>/browser-runs/` only under this
+profile (the jail hides the data dir: 1), and `file-read-data` of the home answers 1 in it (0
+unsandboxed). The kernel answers 1 for a path that does not exist even with no sandbox, so the
+guard checks paths that exist. `macos::browser::{sandboxed, path_allowed}` wrap the call.
+
+The agent's side (`PolicyBuilder::browser`, `BrowserBridge { socket, staging, bundles }`): a
+connect to exactly `<run>/sock/guard.sock` (a `path-literal` rule; no bind, create or unlink in
+`sock/`), read of the run's `staging/`, and as last rules: no run, read or map of each bundle
+(`Contents/Helpers`, `<data>/browsers`; a new helper there is refused by its folder's rule), no
+write, run or map anywhere in `<data>/browser-runs/` and no read there but the run's staging, its
+ancestors and the socket (`require-not`, so the exceptions survive with no allow after the
+denies). The builder refuses `Loopback::Any`, a browser socket folder, and a runtime path in a
+bundle while a bridge is set. With a bridge or without, no run or map of an installed browser
+(`INSTALLED_BROWSERS`: Chrome and its channels, Chromium, Edge and its channels, Brave, Vivaldi,
+Opera, Arc) in `/Applications` or the home's `Applications`, matched by a case-folded regex on
+`<name>.app/`, since Seatbelt cannot match bundle ids; read stays. The agent profile never allows
+`mach-register`, nor any Chromium Mach name.
+
+Residual risks:
+- A Chromium the agent copies into the matter (from an installed browser, whose read stays): the
+  matter allows running it. A headless shell copied there dies at start in the jail, because
+  `bootstrap_check_in` of its port broker is refused (T9, measured with `native_code_deny` off
+  and on). A Chromium modified to run without its rendezvous server would get further; closing
+  that is `native_code_deny`'s, once on.
+- The browser profile allows `mach-register` of rendezvous names for any pid. A compromised
+  renderer could register the names of pids not yet in use and so stop a Chromium outside the
+  sandbox from starting: denial of service only, accepted.
+- Seatbelt's regex: `#"^[A-Za-z0-9.-]+\.MachPortRendezvousServer\.[0-9]+$"` as a `global-name-regex`
+  matched every Mach service on this Mac (logd, SecurityServer). The rule uses the exact name.
+
 ## Status
 
 proposed

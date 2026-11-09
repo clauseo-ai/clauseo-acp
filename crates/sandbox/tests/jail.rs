@@ -65,3 +65,18 @@ mod env;
 #[cfg(target_os = "macos")]
 #[path = "jail/unicode.rs"]
 mod unicode;
+
+#[cfg(test)]
+#[cfg(target_os = "macos")]
+#[path = "jail/probe.rs"]
+mod probe;
+
+#[cfg(test)]
+#[cfg(target_os = "macos")]
+#[path = "jail/browser.rs"]
+mod browser;
+
+#[cfg(test)]
+#[cfg(target_os = "macos")]
+#[path = "jail/bridge.rs"]
+mod bridge;

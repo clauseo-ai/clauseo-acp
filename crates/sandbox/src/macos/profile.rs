@@ -10,6 +10,7 @@
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
+pub use bridge::INSTALLED_BROWSERS;
 use names::{GIT_NAME_REGEX, HEAD_REGEX, INSTRUCTIONS_REGEX};
 use params::Params;
 
@@ -189,6 +190,8 @@ impl Writer {
         self.read_only_state(&p);
         self.browser_sockets(policy);
         self.network(policy);
+        bridge::browser_allows(self, policy);
+        bridge::browser_denies(self, policy);
     }
 
     /// The policy's allows, before any of its denies.
@@ -560,6 +563,7 @@ fn directory_ancestors(param: &str) -> String {
     format!("(require-all (vnode-type DIRECTORY) (path-ancestors {param}))")
 }
 
+mod bridge;
 mod names;
 mod params;
 #[cfg(test)]

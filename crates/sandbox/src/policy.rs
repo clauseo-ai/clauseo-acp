@@ -6,11 +6,13 @@ use std::path::{Path, PathBuf};
 use crate::links::{LinkFinding, MatterScan};
 use crate::{Access, Error, PathClass};
 
+mod bridge;
 mod build;
 mod links;
 mod names;
 mod store;
 
+pub use bridge::BrowserBridge;
 pub use links::LINK_RULES_MAX;
 pub(crate) use names::opens_as;
 pub use names::{hfs_ignorable, strip_hfs_ignorables};
@@ -139,6 +141,7 @@ pub struct Policy {
     proxy_ports: Vec<u16>,
     loopback: Loopback,
     browser_socket_dir: Option<PathBuf>,
+    browser: Option<BrowserBridge>,
     keychain: bool,
     over_cap: Vec<PathBuf>,
     links: Vec<LinkFinding>,
@@ -165,6 +168,7 @@ pub struct PolicyBuilder {
     proxy_ports: Vec<u16>,
     loopback: Loopback,
     browser_socket_dir: Option<PathBuf>,
+    browser: Option<BrowserBridge>,
     keychain: bool,
     over_cap: Vec<PathBuf>,
     links: Vec<LinkFinding>,
@@ -272,6 +276,11 @@ impl Policy {
     /// and remove files. `None`: no Unix socket anywhere.
     pub fn browser_socket_dir(&self) -> Option<&Path> {
         self.browser_socket_dir.as_deref()
+    }
+
+    /// The agent's bridge to the browser stack, canonical ([`PolicyBuilder::browser`]).
+    pub fn browser(&self) -> Option<&BrowserBridge> {
+        self.browser.as_ref()
     }
 
     /// Whether Claude's Keychain rules apply (macOS).
@@ -491,6 +500,14 @@ impl PolicyBuilder {
     #[cfg(test)]
     pub(crate) fn browser_socket_path(mut self, path: PathBuf) -> PolicyBuilder {
         self.browser_socket_dir = Some(path);
+        self
+    }
+
+    /// The agent's bridge to the browser stack, which runs outside the jail: a connect to its
+    /// socket, a read of its staging folder, no run, read or map of its bundles. Refused with
+    /// [`Loopback::Any`], a browser socket folder or a runtime path in a bundle.
+    pub fn browser(mut self, bridge: BrowserBridge) -> PolicyBuilder {
+        self.browser = Some(bridge);
         self
     }
 

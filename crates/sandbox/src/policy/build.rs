@@ -6,6 +6,7 @@ use std::fs;
 use std::io;
 use std::path::{Component, Path, PathBuf};
 
+use super::bridge;
 use super::links::{canonical_findings, covered_targets, fit_budget, split_linked};
 use super::names::{Keys, path_key};
 use super::{
@@ -59,6 +60,7 @@ pub(super) fn build(b: PolicyBuilder) -> Result<Policy, Error> {
 
     let runtime = all_existing(&b.runtime, "runtime path")?;
     let read = all_existing(&b.read, "read path")?;
+    let browser = bridge::checked(&b, &runtime)?;
     for (paths, what) in [(&runtime, "a runtime path"), (&read, "a read path")] {
         for p in paths {
             check_reallowed(p, what, &matter, home_ref, &hidden)?;
@@ -134,6 +136,7 @@ pub(super) fn build(b: PolicyBuilder) -> Result<Policy, Error> {
             other @ (Loopback::None | Loopback::Any) => other,
         },
         browser_socket_dir: b.browser_socket_dir,
+        browser,
         keychain: b.keychain,
         over_cap,
         links,

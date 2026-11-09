@@ -254,6 +254,13 @@ expression: w.render(&policy)
   (literal (param "STATE"))
   (with message "clauseo-4242-7"))
 
+; The browser's last rules: denies only.
+; Installed browsers: not run or mapped as code (read stays; 0038, T9).
+(deny process-exec file-map-executable
+  (regex #"^/Applications/([gG][oO][oO][gG][lL][eE] [cC][hH][rR][oO][mM][eE]|[gG][oO][oO][gG][lL][eE] [cC][hH][rR][oO][mM][eE] [bB][eE][tT][aA]|[gG][oO][oO][gG][lL][eE] [cC][hH][rR][oO][mM][eE] [dD][eE][vV]|[gG][oO][oO][gG][lL][eE] [cC][hH][rR][oO][mM][eE] [cC][aA][nN][aA][rR][yY]|[cC][hH][rR][oO][mM][iI][uU][mM]|[mM][iI][cC][rR][oO][sS][oO][fF][tT] [eE][dD][gG][eE]|[mM][iI][cC][rR][oO][sS][oO][fF][tT] [eE][dD][gG][eE] [bB][eE][tT][aA]|[mM][iI][cC][rR][oO][sS][oO][fF][tT] [eE][dD][gG][eE] [dD][eE][vV]|[mM][iI][cC][rR][oO][sS][oO][fF][tT] [eE][dD][gG][eE] [cC][aA][nN][aA][rR][yY]|[bB][rR][aA][vV][eE] [bB][rR][oO][wW][sS][eE][rR]|[bB][rR][aA][vV][eE] [bB][rR][oO][wW][sS][eE][rR] [bB][eE][tT][aA]|[bB][rR][aA][vV][eE] [bB][rR][oO][wW][sS][eE][rR] [nN][iI][gG][hH][tT][lL][yY]|[vV][iI][vV][aA][lL][dD][iI]|[oO][pP][eE][rR][aA]|[aA][rR][cC])\.[aA][pP][pP](/|$)")
+  (require-all (subpath (param "HOME_APPLICATIONS")) (regex #"/([gG][oO][oO][gG][lL][eE] [cC][hH][rR][oO][mM][eE]|[gG][oO][oO][gG][lL][eE] [cC][hH][rR][oO][mM][eE] [bB][eE][tT][aA]|[gG][oO][oO][gG][lL][eE] [cC][hH][rR][oO][mM][eE] [dD][eE][vV]|[gG][oO][oO][gG][lL][eE] [cC][hH][rR][oO][mM][eE] [cC][aA][nN][aA][rR][yY]|[cC][hH][rR][oO][mM][iI][uU][mM]|[mM][iI][cC][rR][oO][sS][oO][fF][tT] [eE][dD][gG][eE]|[mM][iI][cC][rR][oO][sS][oO][fF][tT] [eE][dD][gG][eE] [bB][eE][tT][aA]|[mM][iI][cC][rR][oO][sS][oO][fF][tT] [eE][dD][gG][eE] [dD][eE][vV]|[mM][iI][cC][rR][oO][sS][oO][fF][tT] [eE][dD][gG][eE] [cC][aA][nN][aA][rR][yY]|[bB][rR][aA][vV][eE] [bB][rR][oO][wW][sS][eE][rR]|[bB][rR][aA][vV][eE] [bB][rR][oO][wW][sS][eE][rR] [bB][eE][tT][aA]|[bB][rR][aA][vV][eE] [bB][rR][oO][wW][sS][eE][rR] [nN][iI][gG][hH][tT][lL][yY]|[vV][iI][vV][aA][lL][dD][iI]|[oO][pP][eE][rR][aA]|[aA][rR][cC])\.[aA][pP][pP](/|$)"))
+  (with message "clauseo-4242-7"))
+
 ;; parameters
 MATTER = <root>/matter
 STATE = <root>/data/agent-state/m1/codex
@@ -269,3 +276,4 @@ READ_ONLY_6 = <root>/matter/CLAUDE.local.md
 READ_ONLY_7 = <root>/matter/CLAUDE.md
 HIDDEN_0 = <root>/data
 HIDDEN_1 = <root>/elsewhere
+HOME_APPLICATIONS = <root>/home/Applications

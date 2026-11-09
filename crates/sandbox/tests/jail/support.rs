@@ -99,6 +99,14 @@ impl World {
         path
     }
 
+    /// A shell script at `rel` with `body` after its `#!/bin/sh` line, executable.
+    pub(crate) fn script(&self, rel: &str, body: &str) -> PathBuf {
+        use std::os::unix::fs::PermissionsExt;
+        let path = self.file(rel, &format!("#!/bin/sh\n{body}\n"));
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        path
+    }
+
     pub(crate) fn hard_link(&self, original: &str, link: &str) -> PathBuf {
         let path = self.at(link);
         std::fs::hard_link(self.at(original), &path).unwrap();
