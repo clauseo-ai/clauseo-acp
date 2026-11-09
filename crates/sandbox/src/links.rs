@@ -1,6 +1,7 @@
 //! The one walk of the matter per launch: links that lead outside it, and every `.git`, other
 //! [`PROTECTED_AT_ANY_DEPTH`] name and repository-shaped folder in it.
 
+use std::cell::OnceCell;
 use std::collections::BTreeMap;
 use std::fs::{self, FileType};
 use std::io;
@@ -10,6 +11,10 @@ use serde::Serialize;
 
 use crate::policy::{opens_as, same, under};
 use crate::{Error, PROTECTED_AT_ANY_DEPTH};
+
+mod network;
+
+use network::{Mounts, is_network_path, lexical};
 
 /// A `.git` file larger than this is not read for its `gitdir:` line; git writes one line.
 const GIT_FILE_MAX: u64 = 64 * 1024;
@@ -50,6 +55,12 @@ pub struct MatterScan {
     links: Vec<LinkFinding>,
     git: Vec<PathBuf>,
     git_dirs: Vec<PathBuf>,
+    /// The folders those name outside the matter, canonical, sorted: the policy refuses one the
+    /// agent can write, where it could plant the repository's `config`.
+    git_dirs_outside: Vec<PathBuf>,
+    /// The `commondir` names beside a `HEAD` that are links, sorted: git follows one, the walk
+    /// does not, so the policy refuses the launch.
+    commondir_links: Vec<PathBuf>,
     bare: Vec<PathBuf>,
     nested: Vec<PathBuf>,
     /// Files with more than one name, every name of which is in the matter: each group's
@@ -63,6 +74,8 @@ pub(crate) struct ScanParts {
     pub(crate) links: Vec<LinkFinding>,
     pub(crate) git: Vec<PathBuf>,
     pub(crate) git_dirs: Vec<PathBuf>,
+    pub(crate) git_dirs_outside: Vec<PathBuf>,
+    pub(crate) commondir_links: Vec<PathBuf>,
     pub(crate) bare: Vec<PathBuf>,
     pub(crate) nested: Vec<PathBuf>,
     pub(crate) linked: Vec<Vec<PathBuf>>,
@@ -81,9 +94,11 @@ impl MatterScan {
         &self.git
     }
 
-    /// The folders that `.git` files' `gitdir:` lines and `commondir` files beside a `HEAD` name
-    /// inside the matter, and that `.git` links lead to inside it, canonical, sorted. One outside
-    /// the matter is left out: the jail denies it anyway.
+    /// The folders that `.git` files' `gitdir:` lines and `commondir` files beside a `HEAD`
+    /// (inside a `.git` or not) name inside the matter, and that `.git` links lead to inside it,
+    /// canonical, sorted. One outside the matter is left out here (the policy refuses one the
+    /// agent can write; the jail denies the rest anyway), and one on a network path is skipped
+    /// unread ([`network`]).
     pub fn git_dirs(&self) -> &[PathBuf] {
         &self.git_dirs
     }
@@ -116,6 +131,8 @@ impl MatterScan {
             links: self.links,
             git: self.git,
             git_dirs: self.git_dirs,
+            git_dirs_outside: self.git_dirs_outside,
+            commondir_links: self.commondir_links,
             bare: self.bare,
             nested: self.nested,
             linked: self.linked,
@@ -154,6 +171,8 @@ struct Walk {
     folders: Vec<(PathBuf, bool)>,
     /// Files with a link count above 1, by (device, inode).
     hard: BTreeMap<(u64, u64), Names>,
+    /// The mount table, read the first time a `gitdir:` or `commondir` line is.
+    mounts: OnceCell<Mounts>,
 }
 
 /// The one walk of `matter`: [`scan_links`]'s findings and every `.git`, with the folders the
@@ -217,6 +236,9 @@ pub fn scan_matter(matter: &Path) -> Result<MatterScan, Error> {
     scan.git.sort();
     scan.git_dirs.sort();
     scan.git_dirs.dedup();
+    scan.git_dirs_outside.sort();
+    scan.git_dirs_outside.dedup();
+    scan.commondir_links.sort();
     scan.bare.sort();
     scan.bare.dedup();
     scan.nested.sort();
@@ -261,79 +283,82 @@ impl Walk {
         } else if kind.is_file() {
             if is_git {
                 self.scan.git.push(path.clone());
-                if let Some(dir) = git_dir_named(matter, &path) {
-                    self.scan.git_dirs.push(dir);
-                }
+                let named = git_dir_named(matter, &path, self.mounts());
+                self.note(named);
             }
             self.hard_link(path, entry);
         }
     }
 
     /// Lists the folder holding the `HEAD` file or link at `head`: with one, the agent could
-    /// complete it into a git dir (`objects/` and `refs/`, or `commondir`). Also lists the
-    /// folder each `commondir` file in it names inside the matter (where git reads `config`),
-    /// by the `gitdir:` rule. Names compare by [`opens_as`]: one listing of the folder per
-    /// `HEAD`.
+    /// complete it into a git dir (`objects/` and `refs/`, or `commondir`). Also reads the
+    /// `commondir` beside it ([`Walk::commondir`]).
     fn bare_repo(&mut self, matter: &Path, head: &Path) {
         let Some(folder) = head.parent() else {
             return;
         };
         self.scan.bare.push(folder.to_owned());
+        self.commondir(matter, folder);
+    }
+
+    /// Notes the folder the `commondir` file in `folder`, which holds a `HEAD`, names, by the
+    /// `gitdir:` rule: git reads `commondir` in any git dir (`.git`, `.git/worktrees/<name>`,
+    /// `.git/modules/<name>` and its worktrees, a bare repository) and takes the repository's
+    /// `config` from the folder it names. A `commondir` that is a link is noted for the policy
+    /// to refuse, unread. Names compare by [`opens_as`]: one listing of the folder per `HEAD`.
+    fn commondir(&mut self, matter: &Path, folder: &Path) {
         let Ok(entries) = fs::read_dir(folder) else {
             return;
         };
         for entry in entries.flatten() {
-            if opens_as(&entry.file_name(), "commondir")
-                && let Some(dir) = read_small(&entry.path())
-                    .ok()
-                    .and_then(|text| dir_named(matter, folder, text.lines().next()?))
-            {
-                self.scan.git_dirs.push(dir);
+            if !opens_as(&entry.file_name(), "commondir") {
+                continue;
+            }
+            match entry.file_type() {
+                Ok(kind) if kind.is_symlink() => self.scan.commondir_links.push(entry.path()),
+                Ok(kind) if kind.is_file() => {
+                    let Some(line) = read_small(&entry.path())
+                        .ok()
+                        .and_then(|text| text.lines().next().map(str::to_owned))
+                    else {
+                        continue;
+                    };
+                    let named = dir_named(matter, folder, &line, self.mounts());
+                    self.note(named);
+                }
+                _ => {}
             }
         }
     }
 
     /// One entry inside a `.git` folder: folders are walked and files counted for hard links;
-    /// symbolic links are neither followed nor found (git makes none that lead out). A
-    /// `commondir` file in a worktree's folder under `.git/worktrees` is read as well.
+    /// symbolic links are neither followed nor found (git makes none that lead out). A `HEAD`
+    /// file or link makes its folder a git dir, whose `commondir` is read.
     fn visit_in_git(&mut self, matter: &Path, path: PathBuf, kind: FileType, entry: &fs::DirEntry) {
+        if (kind.is_file() || kind.is_symlink())
+            && opens_as(&entry.file_name(), "head")
+            && let Some(folder) = path.parent()
+        {
+            self.commondir(matter, folder);
+        }
         if kind.is_dir() {
             self.folders.push((path, true));
         } else if kind.is_file() {
-            if opens_as(&entry.file_name(), "commondir") {
-                self.worktree_commondir(matter, &path);
-            }
             self.hard_link(path, entry);
         }
     }
 
-    /// Lists the folder the `commondir` file at `file` names inside the matter, if `file` is
-    /// in a worktree's folder under a `.git` folder's `worktrees` (`.git/worktrees/<name>/`).
-    /// Git reads the repository's `config` through it, under the `gitdir:` rule.
-    fn worktree_commondir(&mut self, matter: &Path, file: &Path) {
-        let Some(folder) = file.parent() else {
-            return;
-        };
-        let Some(worktrees) = folder.parent() else {
-            return;
-        };
-        let Some(git) = worktrees.parent() else {
-            return;
-        };
-        let is_worktrees = worktrees
-            .file_name()
-            .is_some_and(|name| opens_as(name, "worktrees"));
-        let is_git = git
-            .file_name()
-            .is_some_and(|name| name.eq_ignore_ascii_case(".git"));
-        if !is_worktrees || !is_git {
-            return;
-        }
-        if let Some(dir) = read_small(file)
-            .ok()
-            .and_then(|text| dir_named(matter, folder, text.lines().next()?))
-        {
-            self.scan.git_dirs.push(dir);
+    /// The mount table, read once per walk.
+    fn mounts(&self) -> &Mounts {
+        self.mounts.get_or_init(Mounts::current)
+    }
+
+    /// Adds where a `gitdir:` or `commondir` line leads to the scan.
+    fn note(&mut self, named: Option<Named>) {
+        match named {
+            Some(Named::Inside(dir)) => self.scan.git_dirs.push(dir),
+            Some(Named::Outside(dir)) => self.scan.git_dirs_outside.push(dir),
+            None => {}
         }
     }
 
@@ -401,25 +426,60 @@ fn file_id(_entry: &fs::DirEntry) -> Option<((u64, u64), u64)> {
     None
 }
 
-/// The folder a `.git` file's `gitdir:` line names, canonical, if it exists inside `matter`.
-fn git_dir_named(matter: &Path, git_file: &Path) -> Option<PathBuf> {
-    let text = read_small(git_file).ok()?;
-    let line = text.lines().find_map(|line| line.strip_prefix("gitdir:"))?;
-    dir_named(matter, git_file.parent()?, line)
+/// Where a `gitdir:` line or a `commondir` file's line leads, canonical.
+#[derive(Debug, PartialEq, Eq)]
+enum Named {
+    /// A folder inside the matter, not the matter itself.
+    Inside(PathBuf),
+    /// A folder outside the matter.
+    Outside(PathBuf),
 }
 
-/// The folder `line` names (absolute, or relative to `base`), canonical, if it exists inside
-/// `matter`: a `gitdir:` line or a `commondir` file's.
-fn dir_named(matter: &Path, base: &Path, line: &str) -> Option<PathBuf> {
+/// Where a `.git` file's `gitdir:` line leads, by [`dir_named`].
+fn git_dir_named(matter: &Path, git_file: &Path, mounts: &Mounts) -> Option<Named> {
+    let text = read_small(git_file).ok()?;
+    let line = text.lines().find_map(|line| line.strip_prefix("gitdir:"))?;
+    dir_named(matter, git_file.parent()?, line, mounts)
+}
+
+/// Where the folder `line` names (absolute, or relative to `base`) leads, canonical, if it
+/// exists: a `gitdir:` line or a `commondir` file's. By [`named_with`] and canonicalize.
+fn dir_named(matter: &Path, base: &Path, line: &str, mounts: &Mounts) -> Option<Named> {
+    named_with(matter, base, line, mounts, |path| dunce::canonicalize(path))
+}
+
+/// [`dir_named`] with `resolve` in place of canonicalize, its one file call. A network path
+/// ([`is_network_path`]) is skipped before `resolve` runs, with a warning that leaves the path
+/// out: as written, or where it leads by text once joined to `base`, unless that is in the
+/// matter (whose own volume the walk reads anyway). The matter itself is left out too: naming
+/// it would make the whole matter read-only.
+fn named_with(
+    matter: &Path,
+    base: &Path,
+    line: &str,
+    mounts: &Mounts,
+    resolve: impl FnOnce(&Path) -> io::Result<PathBuf>,
+) -> Option<Named> {
     let named = Path::new(line.trim());
     let joined = if named.is_absolute() {
         named.to_owned()
     } else {
         base.join(named)
     };
-    let dir = dunce::canonicalize(joined).ok()?;
-    // The matter itself is left out: naming it would make the whole matter read-only.
-    (under(&dir, matter) && !same(&dir, matter)).then_some(dir)
+    let plain = lexical(&joined);
+    if is_network_path(named, mounts) || (!under(&plain, matter) && is_network_path(&plain, mounts))
+    {
+        tracing::warn!("the matter walk skipped a git folder named on a network path");
+        return None;
+    }
+    let dir = resolve(&joined).ok()?;
+    if same(&dir, matter) {
+        None
+    } else if under(&dir, matter) {
+        Some(Named::Inside(dir))
+    } else {
+        Some(Named::Outside(dir))
+    }
 }
 
 /// The text of `path` if it is at most [`GIT_FILE_MAX`] bytes.

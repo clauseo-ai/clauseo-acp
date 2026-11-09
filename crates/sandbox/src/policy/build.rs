@@ -6,7 +6,7 @@ use std::fs;
 use std::io;
 use std::path::{Component, Path, PathBuf};
 
-use super::links::{canonical_findings, covered_targets, fit_budget, split_linked};
+use super::links::{canonical_findings, check_git_dirs, covered_targets, fit_budget, split_linked};
 use super::names::{Keys, path_key};
 use super::{
     ClaudeStore, Loopback, PROTECTED_AT_ANY_DEPTH, PROTECTED_NAMES, PathRule, Policy,
@@ -83,6 +83,14 @@ pub(super) fn build(b: PolicyBuilder) -> Result<Policy, Error> {
     };
     scan.add_links(b.links);
     let parts = scan.into_parts();
+    // The places the agent can write first, for the git dirs' check; then the read-only ones.
+    let mut allowed: Vec<&Path> = vec![state.as_path()];
+    allowed.extend(tmpdir.as_deref());
+    allowed.extend(allowed_folders.iter().map(PathBuf::as_path));
+    allowed.extend(notes.as_deref());
+    check_git_dirs(&parts, &allowed, b.browser_socket_dir.as_deref())?;
+    allowed.extend(runtime.iter().map(PathBuf::as_path));
+    allowed.extend(read.iter().map(PathBuf::as_path));
     let working_trees = working_trees(&parts.git);
     let mut read_only_in_matter: Vec<PathRule> = PROTECTED_NAMES
         .iter()
@@ -102,12 +110,6 @@ pub(super) fn build(b: PolicyBuilder) -> Result<Policy, Error> {
     let (mut links, found) = canonical_findings(parts.links, &matter)?;
     let linked = split_linked(parts.linked, &matter, &read_only_in_matter);
     add_new(&mut links, &found, linked);
-    let mut allowed: Vec<&Path> = vec![state.as_path()];
-    allowed.extend(tmpdir.as_deref());
-    allowed.extend(runtime.iter().map(PathBuf::as_path));
-    allowed.extend(read.iter().map(PathBuf::as_path));
-    allowed.extend(allowed_folders.iter().map(PathBuf::as_path));
-    allowed.extend(notes.as_deref());
     let allowed_exactly = |p: &Path| {
         credential_link.as_deref().is_some_and(|link| same(p, link))
             || claude_store.as_ref().is_some_and(|store| store.covers(p))

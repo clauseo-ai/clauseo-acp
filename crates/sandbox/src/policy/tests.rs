@@ -2,6 +2,7 @@ use super::*;
 use crate::test_support::TempDir;
 
 mod allowed;
+mod git_dirs;
 mod links;
 mod nested;
 mod reallowed;
@@ -274,27 +275,6 @@ fn a_gitdir_file_makes_its_folder_read_only_when_inside_the_matter() {
         !rules.iter().any(|r| r.path().starts_with(canon(&far))),
         "outside the matter it is denied anyway: {rules:?}"
     );
-}
-
-/// A worktree's `commondir` under the `.git` names the folder it points at (inside the matter)
-/// as read-only; the repository's own `.git`, which `../..` names, is denied once.
-#[test]
-fn a_worktree_commondir_makes_its_folder_read_only_when_inside_the_matter() {
-    let w = World::new("wt-commondir");
-    w.dir.file("matter/.git/worktrees/wt1/commondir", "../..\n");
-    w.dir
-        .file("matter/.git/worktrees/wt2/commondir", "../../../shared\n");
-    w.dir.dir("matter/shared");
-    let policy = w.builder().build().unwrap();
-    let matter = canon(&w.at("matter"));
-    let rules = policy.read_only_in_matter();
-    assert!(rules.contains(&PathRule::Subpath(matter.join("shared"))));
-    assert!(rules.contains(&PathRule::Subpath(matter.join(".git"))));
-    let git = rules
-        .iter()
-        .filter(|r| r.path() == matter.join(".git"))
-        .count();
-    assert_eq!(git, 1, "{rules:?}");
 }
 
 #[test]

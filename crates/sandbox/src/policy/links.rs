@@ -21,7 +21,43 @@ use std::path::{Path, PathBuf};
 use super::build::{beneath_existing, refuse};
 use super::names::{Keys, path_key};
 use super::{PathRule, instruction_file, same, under};
+use crate::links::ScanParts;
 use crate::{Error, LinkFinding, LinkKind};
+
+/// Refuses a scan with a `commondir` beside a `HEAD` that is a link (git follows it, the walk
+/// doesn't, so the folder it names would get no deny), or a `gitdir:` or `commondir` naming a
+/// folder outside the matter inside one the agent can write (`writable`, and the browser socket
+/// folder `socket`), where it could write the repository's `config` and the plan has no
+/// read-only rule to stop it. A folder outside the matter that the agent can't write needs
+/// nothing: the jail denies it.
+pub(super) fn check_git_dirs(
+    parts: &ScanParts,
+    writable: &[&Path],
+    socket: Option<&Path>,
+) -> Result<(), Error> {
+    if let Some(link) = parts.commondir_links.first() {
+        return refuse(format!(
+            "a git folder's commondir may not be a link: {}",
+            link.display()
+        ));
+    }
+    for dir in &parts.git_dirs_outside {
+        if let Some(place) = writable
+            .iter()
+            .copied()
+            .chain(socket)
+            .find(|p| under(dir, p))
+        {
+            return refuse(format!(
+                "a git folder's commondir or gitdir: may not name a folder the agent can write: \
+                 {} in {}",
+                dir.display(),
+                place.display()
+            ));
+        }
+    }
+    Ok(())
+}
 
 /// The most link rules (finding paths, folders and targets) one profile holds.
 pub const LINK_RULES_MAX: usize = 256;

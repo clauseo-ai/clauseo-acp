@@ -324,6 +324,8 @@ fn a_bare_repository_in_the_matter_gets_the_git_folders_deny() {
 fn a_worktree_commondir_gets_the_deny_of_its_folder() {
     let w = World::new("plan-wt-commondir");
     w.dir
+        .file("matter/.git/worktrees/wt/HEAD", "ref: refs/heads/main\n");
+    w.dir
         .file("matter/.git/worktrees/wt/commondir", "../../../shared\n");
     w.dir.dir("matter/shared");
     let policy = w.full_policy();

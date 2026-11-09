@@ -69,8 +69,10 @@ semver = { workspace = true }
 # The watcher (src/macos/watch.rs): `log stream` started as a child, its ndjson lines read on a
 # thread of its own with a once-a-second tick, each line parsed as JSON.
 # The upstream lookup's proxy settings and PAC runs (src/proxy/upstream/macos.rs).
+# The launch walk's mount list (src/links/network.rs): getfsstat, to skip network paths unread.
 [target.'cfg(target_os = "macos")'.dependencies]
 async-process = { workspace = true }
+libc = { workspace = true }
 objc2-cf-network = { workspace = true, features = ["std", "CFProxySupport"] }
 objc2-core-foundation = { workspace = true, features = [
   "CFArray",
