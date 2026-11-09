@@ -1,6 +1,6 @@
 use clauseo_settings::{Effective, FilePolicy, Language, Locations, PolicySource, SystemFiles};
 
-use super::{Follower, Reader, Writer, display_language, language, seed, tag};
+use super::{Follower, Reader, Writer, display_language, init_script, language, seed, tag};
 use crate::test_support::Scratch;
 
 /// Every language, through its exhaustive match: a new one fails to compile here too.
@@ -333,4 +333,35 @@ fn the_follower_knows_the_language_it_last_saw() {
     assert_eq!(follower.current(), Some(Language::Hi));
     follower.follow(Language::En);
     assert_eq!(follower.current(), Some(Language::En));
+}
+
+#[test]
+fn the_init_script_gives_the_page_hindi_before_its_scripts() {
+    let script = init_script(Some(clauseo_protocol::Language::Hi)).expect("a script for hi");
+    assert!(
+        script.contains(r#"window.__CLAUSEO_UI_LANGUAGE__ = "hi";"#),
+        "{script}"
+    );
+    assert!(
+        script.contains(r#"document.documentElement.lang = "hi";"#),
+        "{script}"
+    );
+}
+
+#[test]
+fn the_init_script_names_each_language_by_its_tag_as_a_json_string() {
+    for language in every_language() {
+        let script = init_script(Some(super::shown(language))).expect("a script");
+        let quoted = format!("\"{}\"", tag(language));
+        assert_eq!(script.matches(&quoted).count(), 2, "{script}");
+        assert_eq!(script.lines().count(), 2, "{script}");
+    }
+}
+
+#[test]
+fn no_language_gives_no_init_script() {
+    assert_eq!(init_script(None), None);
+    // An unknown recorded value reads as no language (`saved` goes through `language`).
+    assert_eq!(init_script(language("fr").map(super::shown)), None);
+    assert_eq!(init_script(language("").map(super::shown)), None);
 }

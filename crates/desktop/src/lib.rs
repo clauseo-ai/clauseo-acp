@@ -565,6 +565,11 @@ fn open_main_window(app: &App) -> tauri::Result<()> {
     // Tauri sends the CSP with the page only; the scripts, the colouring worker's among them,
     // get the same policy here (csp.rs). It goes nowhere but the app's pages (navigation.rs).
     let builder = navigation::guard(csp::on_scripts(builder, app), app);
+    // The app's language, before any page script: the first paint is in it (ui_language.rs).
+    let builder = match ui_language::first_paint_script() {
+        Some(script) => builder.initialization_script(script),
+        None => builder,
+    };
     // The page's perf globals, before any page script.
     #[cfg(feature = "e2e")]
     let builder = builder.initialization_script(e2e::init_script());

@@ -10,6 +10,7 @@ import {
   DEFAULT_DISPLAY,
   TEXT_SIZES,
   type Display,
+  type Lang,
   type Platform,
   type ReleaseMode,
 } from "@clauseo/components/lib/display.ts";
@@ -101,6 +102,10 @@ export type DisplayEnv = {
   show: (display: Display) => void;
   /** Settings for this page only, never written: a dev or probe page's query. */
   override?: Partial<UiSettings>;
+  /** The language the desktop read before the window existed (connect.ts's injectedLanguage): the first frame's, over
+   * localStorage's cache and the default, until the host's settings arrive and take over. Anything but a known
+   * language is ignored. */
+  firstLanguage?: Lang | null;
   /** The OS to lay out for until the host says (setPlatform): the webview's own guess (platform.ts's guessPlatform),
    * so a Windows window doesn't start in the Mac's places and move. The Mac where left out. */
   platform?: Platform;
@@ -168,6 +173,8 @@ function readStored(storage: DisplayEnv["storage"]): UiSettings {
 /** Starts the display from the settings, at once (display.ts's startDisplay), and keeps it in step with them. */
 export function createDisplayStore(env: DisplayEnv): DisplayStore {
   let stored = readStored(env.storage);
+  const first = one(["en", "hi"] as const, env.firstLanguage);
+  if (first !== undefined) stored = { ...stored, language: first };
   let over: Partial<UiSettings> = uiPatchOf(env.override);
   let platform: Platform = env.platform ?? DEFAULT_DISPLAY.platform;
   let releaseDate: string | null = null;
