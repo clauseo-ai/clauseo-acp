@@ -1,6 +1,7 @@
 //! F4 when a marker's file won't change: a clean one that can't be removed refuses nothing,
 //! and one whose sweep before its final stop completed but can't be re-marked refuses with no
-//! stop requested.
+//! stop requested. And a sweep that can't finish because its task is missing: the refusal says
+//! so, in the readiness check's words.
 
 use super::*;
 
@@ -59,4 +60,32 @@ fn a_swept_marker_whose_re_mark_cant_be_written_refuses_the_logon_without_a_stop
     let refused = logon_check(&mut fake, &sid(POOL_A)).unwrap_err();
     assert_eq!(refused.exit, RunExit::AwaitingStop);
     assert_eq!(fake.state("a1"), Some(FINAL));
+}
+
+#[test]
+fn a_sweep_refused_while_its_task_is_missing_says_to_repair_clauseo() {
+    let awaiting = Some(MarkerState::AwaitingSweep { sweep: 6 });
+    // F4's logon refusal, after its 15 s wait.
+    let mut fake = Fake::new();
+    fake.marker("a1", Some(POOL_A), awaiting);
+    fake.task_missing = true;
+    let refused = logon_check(&mut fake, &sid(POOL_A)).unwrap_err();
+    assert_eq!(refused, Refused::sweep(TASK_MISSING.to_owned()));
+    assert_eq!(
+        TASK_MISSING,
+        "Clauseo's clean-up task is missing. Repair Clauseo to put it back."
+    );
+    assert_eq!(fake.asked("stop"), 0);
+    // A launch's refusal says the same.
+    assert_eq!(await_sweeps(&mut fake), Err(TASK_MISSING.to_owned()));
+    // With the task there, both still say the sweep didn't finish.
+    fake.task_missing = false;
+    let refused = logon_check(&mut fake, &sid(POOL_A)).unwrap_err();
+    assert_eq!(refused.exit, RunExit::AwaitingSweep);
+    assert!(
+        refused.why.contains("didn't finish within 15 s"),
+        "{refused:?}"
+    );
+    let refused = await_sweeps(&mut fake).unwrap_err();
+    assert!(refused.contains("didn't finish within 15 s"), "{refused}");
 }

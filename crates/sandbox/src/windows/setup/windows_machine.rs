@@ -30,6 +30,7 @@ use super::registered::registered;
 use super::{ffi, journal, logon, password, preflight, profile};
 use crate::SetupError;
 use crate::windows::acl;
+use crate::windows::admin_copy::os::WindowsAdminCopy;
 use crate::windows::apply::Surroundings;
 use crate::windows::fence::RegisteredMatter;
 use crate::windows::ledger::{Ledger, ledger_path};
@@ -37,7 +38,8 @@ use crate::windows::marker::{self, Marker, MarkerState};
 use crate::windows::matters::MatterSids;
 use crate::windows::pool::{MachineRecord, POOL_GROUP, POOL_PREFIX, pool_number};
 use crate::windows::record::current_user_sid;
-use crate::windows::refresh;
+use crate::windows::refresh::task_identity::action_exe;
+use crate::windows::refresh::{self, SystemTask, TaskIdentity};
 use crate::windows::secrets;
 use crate::windows::sids::{Reserved, Sid};
 use crate::windows::wfp::{self, Namespace, NetworkReport, NetworkSetup};
@@ -429,6 +431,34 @@ impl Machine for WindowsMachine {
                 .map_err(|error| MachineError::Other(format!("{}: {error}", task.name())))?;
         }
         Ok(())
+    }
+
+    fn task_exe(&mut self) -> Result<PathBuf, MachineError> {
+        action_exe(&WindowsAdminCopy).map_err(|blocked| MachineError::Other(blocked.to_string()))
+    }
+
+    fn task_found(&mut self, task: SystemTask) -> Result<Option<TaskIdentity>, MachineError> {
+        refresh::read_task(task).map_err(|error| MachineError::Other(error.to_string()))
+    }
+
+    fn task_expected(
+        &mut self,
+        task: SystemTask,
+        owner: &Sid,
+        exe: &Path,
+    ) -> Result<TaskIdentity, MachineError> {
+        let sddl = refresh::task_sddl_read_back(owner).map_err(MachineError::Other)?;
+        Ok(TaskIdentity::expected(task, owner, exe, sddl))
+    }
+
+    fn replace_task(
+        &mut self,
+        task: SystemTask,
+        owner: &Sid,
+        existed: bool,
+    ) -> Result<(), MachineError> {
+        refresh::replace_task(task, owner, existed)
+            .map_err(|error| MachineError::Other(format!("{}: {error}", task.name())))
     }
 
     fn held_users(

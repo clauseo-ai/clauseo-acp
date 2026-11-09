@@ -12,7 +12,7 @@ use super::super::marker::{
 };
 use super::{Markers, Refused, StartUp, await_sweeps, logon_check, start_up};
 use crate::windows::record::sandbox_pool_sids;
-use crate::windows::refresh::{request_pool_stop, request_pool_sweep};
+use crate::windows::refresh::{request_pool_stop, request_pool_sweep, sweep_task_needs_repair};
 use crate::windows::setup::record_values::{STOP_SEQUENCE, SWEEP_SEQUENCE};
 use crate::windows::setup::{read_record_install_id, read_record_value};
 use crate::windows::sids::Sid;
@@ -94,6 +94,10 @@ impl Markers for OsMarkers {
     fn note(&mut self, line: &str) {
         let mut stderr = io::stderr().lock();
         drop(writeln!(stderr, "{line}").and_then(|()| stderr.flush()));
+    }
+
+    fn sweep_task_missing(&mut self) -> bool {
+        sweep_task_needs_repair()
     }
 }
 

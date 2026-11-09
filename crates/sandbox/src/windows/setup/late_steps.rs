@@ -14,6 +14,8 @@ use super::machine::{Machine, owned};
 use super::outcome::{JournalOutcome, SetupFailure, Step, cause_of};
 use super::record_values::CopyOwner;
 use super::rollback::Run;
+#[cfg(any(windows, test))]
+use super::user_tasks;
 use crate::Error;
 use crate::windows::apply::{Applied, fence_each};
 use crate::windows::fence::RegisteredMatter;
@@ -31,9 +33,11 @@ const ADMINISTRATORS: &str = "S-1-5-32-544";
 /// record's `AdminCopyOwner` is `machine`), the SYSTEM tasks `\Clauseo\SandboxStop` and
 /// `\Clauseo\SandboxSweep` are registered for `owner`, or replaced when they are there, by the
 /// same registration `--adopt` makes per user (`refresh::register_task`). Their descriptor then
-/// names `owner` alone, so a previous owner's start right goes with the replaced ones. A
-/// per-user install's tasks are `--adopt`'s, and an install with no admin copy has none, so
-/// neither is touched here. A record that can't be read or a registration that fails is
+/// names `owner` alone, so a previous owner's start right goes with the replaced ones. On a
+/// per-user install whose copy `owner` placed, `--adopt` registered them, and the set-up puts
+/// back one that is missing or isn't the same task (`user_tasks::ensure`), so the app's repair
+/// heals a deleted or tampered task. An install with no admin copy has none, and one another
+/// user placed is left alone. A record that can't be read or a registration that fails is
 /// [`Step::StopTask`], rolled back.
 pub(super) fn stop_task(machine: &mut impl Machine, owner: &Sid) -> Result<(), Failed> {
     let failed = |why: String| {
@@ -46,6 +50,8 @@ pub(super) fn stop_task(machine: &mut impl Machine, owner: &Sid) -> Result<(), F
         Ok(Some(CopyOwner::Machine)) => machine
             .register_stop_task(owner)
             .map_err(|error| failed(cause_of(&error))),
+        #[cfg(any(windows, test))]
+        Ok(Some(CopyOwner::User(placed))) if placed == *owner => user_tasks::ensure(machine, owner),
         Ok(Some(CopyOwner::User(_)) | None) => Ok(()),
         Err(error) => Err(failed(format!(
             "the record's AdminCopyOwner can't be read ({})",

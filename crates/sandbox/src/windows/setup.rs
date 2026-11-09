@@ -147,6 +147,9 @@ pub mod sweep;
 #[cfg(any(windows, test))]
 pub mod taken_file;
 mod top_up;
+// The SYSTEM tasks' comparison is `refresh`'s, which builds on Windows and for the tests.
+#[cfg(any(windows, test))]
+mod user_tasks;
 #[cfg(windows)]
 mod windows_machine;
 

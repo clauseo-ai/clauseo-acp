@@ -12,6 +12,8 @@ use crate::windows::fence::RegisteredMatter;
 use crate::windows::ledger::Ledger;
 use crate::windows::marker::{Marker, MarkerState};
 use crate::windows::pool::MachineRecord;
+#[cfg(any(windows, test))]
+use crate::windows::refresh::{SystemTask, TaskIdentity};
 use crate::windows::setup::record_values::CopyOwner;
 use crate::windows::sids::Sid;
 use crate::windows::wfp::{NetworkReport, NetworkSetup};
@@ -214,6 +216,32 @@ pub trait Machine {
     /// `\Clauseo\SandboxSweep` (`refresh::POOL_TASKS`) for the pool owner `owner`
     /// (`refresh::register_task`, as `--adopt` does per user), as this process.
     fn register_stop_task(&mut self, owner: &Sid) -> Result<(), MachineError>;
+    #[cfg(any(windows, test))]
+    /// The program a per-user install's SYSTEM tasks run, the admin copy, once it and every
+    /// folder above it up to the volume root pass `admin_copy::check_chain`
+    /// (`task_identity::action_exe`); else why not, and no task may be registered.
+    fn task_exe(&mut self) -> Result<PathBuf, MachineError>;
+    #[cfg(any(windows, test))]
+    /// `task` as registered in `\Clauseo` (`refresh::read_task`), `None` when it isn't.
+    fn task_found(&mut self, task: SystemTask) -> Result<Option<TaskIdentity>, MachineError>;
+    #[cfg(any(windows, test))]
+    /// What `refresh::register_task` registers as `task` for `owner`, running `exe`
+    /// (`TaskIdentity::expected`, its descriptor as Windows writes it back).
+    fn task_expected(
+        &mut self,
+        task: SystemTask,
+        owner: &Sid,
+        exe: &Path,
+    ) -> Result<TaskIdentity, MachineError>;
+    #[cfg(any(windows, test))]
+    /// Deletes `task` when `existed`, then registers it for the pool owner `owner` as
+    /// `--adopt` does (`refresh::replace_task`), as this process.
+    fn replace_task(
+        &mut self,
+        task: SystemTask,
+        owner: &Sid,
+        existed: bool,
+    ) -> Result<(), MachineError>;
     /// The users of `pool` the reuse rule would hold back once this run has reset `resets`, for
     /// the top-up's count (`top_up.rs`, `MatterSids::held_after_resets`), the owner's ledger
     /// opened trusting `trusted`; an input that can't be read holds every user. The engine calls

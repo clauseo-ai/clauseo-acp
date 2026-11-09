@@ -44,6 +44,8 @@ struct Fake {
     sweep_next_fails: bool,
     /// Which of the marker writes and removals fail.
     fails: Fails,
+    /// `\Clauseo\SandboxSweep` is missing.
+    task_missing: bool,
     log: Vec<String>,
 }
 
@@ -60,6 +62,7 @@ impl Fake {
             unreadable: false,
             sweep_next_fails: false,
             fails: Fails::default(),
+            task_missing: false,
             log: Vec::new(),
         }
     }
@@ -165,6 +168,9 @@ impl Markers for Fake {
     }
     fn note(&mut self, line: &str) {
         self.log.push(format!("note {line}"));
+    }
+    fn sweep_task_missing(&mut self) -> bool {
+        self.task_missing
     }
 }
 

@@ -28,7 +28,8 @@ use crate::windows::wfp::{NetworkReport, NetworkSetup};
 pub(super) use super::fake_acl::FakeAcl;
 pub(super) use super::fake_more::folder_name;
 pub(super) use super::fake_more::{Account, State};
-use super::fake_more::{Around, ProfileFaults};
+use super::fake_more::{Around, ProfileFaults, TASK_EXE, registered_task};
+use crate::windows::refresh::{SystemTask, TaskIdentity, task_sddl};
 
 /// The owner's SID, and its account's name.
 pub(super) const OWNER: &str = "S-1-5-21-7-8-9-1001";
@@ -471,6 +472,41 @@ impl Machine for FakeMachine {
         assert!(!self.acting.get(), "the task is registered as admin");
         self.call(format!("register_stop_task {}", rid(owner)))?;
         self.state.stop_task = Some(owner.clone());
+        Ok(())
+    }
+
+    fn task_exe(&mut self) -> Result<PathBuf, MachineError> {
+        self.call("task_exe".to_owned())?;
+        Ok(PathBuf::from(TASK_EXE))
+    }
+
+    fn task_found(&mut self, task: SystemTask) -> Result<Option<TaskIdentity>, MachineError> {
+        Ok(self.state.tasks.get(task.name()).cloned())
+    }
+
+    fn task_expected(
+        &mut self,
+        task: SystemTask,
+        owner: &Sid,
+        exe: &Path,
+    ) -> Result<TaskIdentity, MachineError> {
+        Ok(TaskIdentity::expected(task, owner, exe, task_sddl(owner)))
+    }
+
+    fn replace_task(
+        &mut self,
+        task: SystemTask,
+        owner: &Sid,
+        existed: bool,
+    ) -> Result<(), MachineError> {
+        assert!(!self.acting.get(), "the task is registered as admin");
+        self.call(format!(
+            "replace_task {} {} {existed}",
+            task.name(),
+            rid(owner)
+        ))?;
+        let found = registered_task(task, owner);
+        self.state.tasks.insert(task.name().to_owned(), found);
         Ok(())
     }
 

@@ -34,7 +34,8 @@
 //!    it, to stop the pool's processes or to sweep its tasks (a refresh before the values exist
 //!    exits 33, changing nothing). A per-machine install doesn't update itself and has no owner
 //!    yet, so it gets none here; its set-up registers the stop and sweep tasks for the owner it
-//!    records (`late_steps::stop_task`);
+//!    records (`late_steps::stop_task`). Per user, the set-up (the app's repair) puts back a stop
+//!    or sweep task that is missing or isn't this registration's (`setup::user_tasks`);
 //! 7. the copy's SHA-256, read from its file in the admin folder (a reparse point refused), the
 //!    install folder, this build's version and the owner (the SID, or `machine`) are written as
 //!    the record's `AdminCopySha256`, `UserInstallDir`, `AdminCopyVersion` and
