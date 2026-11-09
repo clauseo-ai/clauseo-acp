@@ -192,3 +192,84 @@ fn a_fence_only_plan_owns_nothing() {
     let plan = AdmittedPlan::from_grants(matter_one(), grants);
     assert_eq!(plan.owned_roots(), []);
 }
+
+/// Each kind of path on an owned chain, and the owned kind of the folder it is or is in.
+const ON_CHAIN: [(PathKind, OwnedKind); 4] = [
+    (PathKind::State, OwnedKind::State),
+    (PathKind::Notes, OwnedKind::Notes),
+    (PathKind::CredentialLink, OwnedKind::State),
+    (PathKind::TempFolder, OwnedKind::TempFolder),
+];
+
+/// The owned kind a folder `depth` levels below the data folder must have, on the chain down to
+/// a path of `kind`: the layout `targets.rs` accepts (`<data>\<AGENT_STATE_DIR>\<matter>\<x>`,
+/// `<data>\<RUN_DIR>\<session>\tmp`). `None` below the owned folder (the credential link).
+fn chain_kind(kind: PathKind, depth: usize) -> Option<OwnedKind> {
+    let (_, own) = ON_CHAIN.into_iter().find(|(k, _)| *k == kind)?;
+    let middle = if own == OwnedKind::TempFolder {
+        OwnedKind::RunFolder
+    } else {
+        OwnedKind::MatterFolder
+    };
+    [OwnedKind::DataRoot, OwnedKind::DataFolder, middle, own]
+        .get(depth)
+        .copied()
+}
+
+/// Cross-check against the layout (host #823 moves it): for each state, notes, credential link
+/// and temp path `check_target` accepted in the test worlds, `owned_roots` covers its chain in
+/// the data folder with the right kinds, the shared folder named as `targets.rs` names it. A
+/// layout change in either place without the other fails here.
+#[test]
+fn owned_roots_cover_every_accepted_state_notes_and_temp_paths_chain() {
+    let w = World::new("plan-owned-chain");
+    w.dir.dir("data/run/s1/tmp");
+    let session = w
+        .builder()
+        .notes(w.at(NOTES))
+        .tmpdir(w.at("data/run/s1/tmp"))
+        .build()
+        .unwrap();
+    let data = w.canonical("data");
+    let kinds = ON_CHAIN.map(|(kind, _)| kind);
+    let mut checked: Vec<PathKind> = Vec::new();
+    for policy in [w.full_policy(), session] {
+        let admitted = admitted(&w, &policy, &[], &FakeFolders::default());
+        let plan = plan(&admitted, &sids(), matter_one()).unwrap();
+        for grant in plan.grants().iter().filter(|g| kinds.contains(&g.kind)) {
+            let below: Vec<&Path> = grant
+                .path
+                .ancestors()
+                .take_while(|a| in_folder(a, &data))
+                .collect();
+            for (depth, folder) in below.iter().rev().enumerate() {
+                let found = plan
+                    .owned_roots()
+                    .iter()
+                    .find(|r| r.path() == *folder)
+                    .map(OwnedRoot::kind);
+                let want = chain_kind(grant.kind, depth);
+                assert_eq!(found, want, "{:?} at {}", grant.kind, w.relative(folder));
+            }
+            let shared = below.iter().rev().nth(1).and_then(|f| f.file_name());
+            let named = if grant.kind == PathKind::TempFolder {
+                targets::RUN_DIR
+            } else {
+                targets::AGENT_STATE_DIR
+            };
+            assert_eq!(
+                shared,
+                Some(std::ffi::OsStr::new(named)),
+                "{:?}",
+                grant.kind
+            );
+            checked.push(grant.kind);
+        }
+    }
+    for kind in kinds {
+        assert!(
+            checked.contains(&kind),
+            "no accepted {kind:?} path was checked"
+        );
+    }
+}
