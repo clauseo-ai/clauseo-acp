@@ -163,6 +163,13 @@ pub(crate) enum Agent {
 
 /// Relays until the agent leaves (over stdio), agent-browser exits, Chrome dies twice, the
 /// browser cannot start or the guard's parent goes; then stops whatever runs.
+#[cfg_attr(
+    windows,
+    expect(
+        clippy::needless_pass_by_value,
+        reason = "Windows has only `Agent::Stdio`, which holds nothing; Unix moves the listener"
+    )
+)]
 pub(crate) fn run(shared: &Arc<Shared>, parent: &Parent, agent: Agent) -> Outcome {
     let (events, inbox) = mpsc::channel();
     {
