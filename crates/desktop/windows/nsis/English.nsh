@@ -109,6 +109,9 @@ LangString uninstallTempFailed ${LANG_ENGLISH} "Clauseo wasn't uninstalled, beca
 ; added after _?= (windows/uninstall_in_place.nsh); a box, skipped by /S, then exit code 26.
 ; Provisional (2026-11-07).
 LangString uninstallNotInPlace ${LANG_ENGLISH} "Clauseo wasn't uninstalled, because the uninstaller wasn't started from Clauseo's own folder. Nothing was removed. Uninstall Clauseo from Settings > Apps."
+; nativeArm64Notice: the x64 per-machine installer's details line on an ARM64 computer
+; (windows/hooks.nsh, CLAUSEO_NATIVE_ARM64_NOTICE); details list only. Provisional (2026-11-09).
+LangString nativeArm64Notice ${LANG_ENGLISH} "This computer has an ARM64 processor: Clauseo_${VERSION}_arm64-machine-setup.exe is its native per-machine installer."
 
 ; Tauri's stock English, as @tauri-apps/cli 2.12.2 ships it (crates/tauri-bundler/src/bundle/
 ; windows/nsis/languages/English.nsh at tauri-cli-v2.12.2), deleteAppData aside, with one fix:

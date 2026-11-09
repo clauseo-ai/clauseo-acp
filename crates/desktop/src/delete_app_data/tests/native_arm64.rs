@@ -4,9 +4,11 @@
 //! as a success; the per-user installer says nothing, since the app's updater moves it.
 
 use super::admin_copy::{block, macro_body};
-use super::sources::{hook_code, line_with};
+use super::sources::{hook_code, line_with, read};
 
 const NOTICE: &str = "CLAUSEO_NATIVE_ARM64_NOTICE";
+const TEXT: &str = "nativeArm64Notice";
+const EXE: &str = "Clauseo_${VERSION}_arm64-machine-setup.exe";
 
 #[test]
 fn the_per_machine_installer_inserts_the_arm64_notice_and_the_per_user_one_does_not() {
@@ -53,16 +55,24 @@ fn the_arm64_notice_is_one_details_line_from_the_x64_installer_on_a_native_arm64
         .collect();
     assert_eq!(says.len(), 1, "{body:?}");
     let line = line_with(body, &["DetailPrint"]);
-    assert!(
-        says[0].contains("Clauseo_${VERSION}_arm64-machine-setup.exe"),
-        "{}",
-        says[0]
-    );
     assert!(x64 < call && call < success && success < arm64 && arm64 < line);
     assert_eq!(body[line + 1], "${EndIf}");
-    // No language string (English only, as the other plain details lines), and nothing that
-    // blocks, prompts, ends or changes the exit code.
-    assert!(!says[0].contains("$("), "{}", says[0]);
+    // The text is the installer's language string: the line names it, and English.nsh and
+    // Hindi.nsh each hold it.
+    assert_eq!(says[0], &format!("DetailPrint \"$({TEXT})\""));
+    let english = read("windows/nsis/English.nsh");
+    let english_line = english
+        .lines()
+        .find(|line| line.starts_with(&format!("LangString {TEXT} ${{LANG_ENGLISH}} ")))
+        .unwrap_or_else(|| panic!("English.nsh has no {TEXT}"));
+    assert!(english_line.contains(EXE), "{english_line}");
+    let hindi = read("windows/nsis/Hindi.nsh");
+    let hindi_line = hindi
+        .lines()
+        .find(|line| line.starts_with(&format!("LangString {TEXT} ${{LANG_HINDI}} ")))
+        .unwrap_or_else(|| panic!("Hindi.nsh has no {TEXT}"));
+    assert!(hindi_line.contains(EXE), "{hindi_line}");
+    // Nothing that blocks, prompts, ends or changes the exit code.
     for refused in [
         "SetErrorLevel",
         "MessageBox",

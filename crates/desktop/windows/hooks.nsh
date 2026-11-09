@@ -841,7 +841,8 @@ Var ClauseoRepair
 ; per-user install to the arm64 build at its next update. The native machine is
 ; IsWow64Process2's (kernel32, Windows 10 1709 and later), as crates/sandbox/src/windows/detect.rs
 ; reads it; where the call is missing or fails the line is left out. IMAGE_FILE_MACHINE_ARM64 is
-; 0xAA64. The line is English only, like the other plain details lines here.
+; 0xAA64. The line is in the installer's language, like the other strings: nativeArm64Notice in
+; English.nsh and Hindi.nsh.
 !macro CLAUSEO_NATIVE_ARM64_NOTICE
   !ifndef ARCH
     !error "hooks.nsh needs the template's ARCH define"
@@ -857,7 +858,7 @@ Var ClauseoRepair
     System::Call 'kernel32::IsWow64Process2(p R2, *i 0 .R2, *i 0 .R3) i .R1'
     ${If} $R1 <> 0
     ${AndIf} $R3 = 0xAA64
-      DetailPrint "This computer has an ARM64 processor: Clauseo_${VERSION}_arm64-machine-setup.exe is its native per-machine installer."
+      DetailPrint "$(nativeArm64Notice)"
     ${EndIf}
     Pop $R3
     Pop $R2
