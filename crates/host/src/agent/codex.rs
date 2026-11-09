@@ -31,6 +31,15 @@ pub(crate) const ASK_MODE: &str = "workspace-write";
 /// turn (`:35598-35615`), so a jailed Codex never asks. Its modes ([`jailed::MODES`]) are
 /// the jail's policies.
 pub(crate) const JAILED_MODE: &str = "agent-full-access";
+/// codex-acp 2.2.2's "Auto review" preset (`dist/index.js:34243-34354`): a reviewer, not the
+/// lawyer, answers its approval requests.
+pub(crate) const AUTO_REVIEW_MODE: &str = "agent";
+
+/// `mode` approves changes without asking the lawyer: [`JAILED_MODE`] or [`AUTO_REVIEW_MODE`].
+/// An unjailed Codex that moves itself there is switched back to [`ASK_MODE`] (R17 PR-D2c).
+pub(crate) fn approves_unasked(mode: &str) -> bool {
+    matches!(mode, JAILED_MODE | AUTO_REVIEW_MODE)
+}
 /// The variable the Codex app-server takes its home from.
 pub(crate) const HOME_VAR: &str = "CODEX_HOME";
 /// Clauseo's config file in a Codex home ([`write_home_config`]): read-only in the jail.

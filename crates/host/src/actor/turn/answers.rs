@@ -369,6 +369,7 @@ pub(super) fn on_mode(
         send_answer(actor, ctx, thread, out, Then::Nothing)
     });
     if let Err(error) = done {
+        super::forced_mode::pick_failed(actor, thread);
         actor.finish_command(ctx.id, Err(error));
     }
 }

@@ -1,0 +1,10 @@
+{"scenario":"codex-resumes-full-access","description":"An unjailed Codex (tier C) reopening a thread whose session resumes in agent-full-access (R17 PR-D2c round 5): session/resume of sess-1 (loadSession false, src/CodexAcpServer.ts, dist/index.js:43091-43111, written from codex-acp 2.2.2 source until G8a's recordings replace it) reports full access, so the host sends set_mode workspace-write before the prompt; answered 'Asking again.'","on_stdin_close":"exit"}
+{"expect":{"method":"initialize","as":"init","params":{"protocolVersion":1}}}
+{"respond":{"to":"init","result":{"protocolVersion":1,"agentCapabilities":{"loadSession":false,"promptCapabilities":{"image":true,"embeddedContext":true},"mcpCapabilities":{"http":true,"sse":false},"sessionCapabilities":{"list":{},"delete":{},"additionalDirectories":{},"resume":{},"close":{}}},"authMethods":[],"agentInfo":{"name":"@agentclientprotocol/codex-acp","title":"Codex","version":"2.2.2"}}}}
+{"expect":{"method":"session/resume","as":"resume","params":{"sessionId":"sess-1","cwd":"{{any}}"}}}
+{"respond":{"to":"resume","result":{"modes":{"currentModeId":"agent-full-access","availableModes":[{"id":"read-only","name":"Read-only"},{"id":"workspace-write","name":"Workspace access"},{"id":"agent","name":"Auto review"},{"id":"agent-full-access","name":"Full access"}]}}}}
+{"expect":{"method":"session/set_mode","as":"set-mode","params":{"sessionId":"sess-1","modeId":"workspace-write"}}}
+{"respond":{"to":"set-mode","result":{}}}
+{"expect":{"method":"session/prompt","as":"p1","params":{"sessionId":"sess-1"}}}
+{"update":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-answer-1","content":{"type":"text","text":"Asking again."}},"session":"sess-1"}}
+{"respond":{"to":"p1","result":{"stopReason":"end_turn"}}}

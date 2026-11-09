@@ -135,6 +135,9 @@ pub(super) struct CodexAgent {
     /// In the jail, the mode its launch's policy is (one of `codex::jailed::MODES`,
     /// `forced_mode.rs`); `None` at tier C.
     pub(super) jail: Option<&'static str>,
+    /// At tier C, the mode the lawyer last sent it (`forced_mode::switch`): its own move there
+    /// stands, any other move to full access is switched back.
+    pub(super) picked: Option<CompactString>,
 }
 
 /// Runs `waiting` once `thread`'s agent has a session, launching the agent first.

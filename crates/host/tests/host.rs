@@ -72,6 +72,9 @@ mod codex_fence;
 #[path = "host/codex_folder.rs"]
 mod codex_folder;
 #[cfg(test)]
+#[path = "host/codex_full_access.rs"]
+mod codex_full_access;
+#[cfg(test)]
 #[path = "host/codex_jailed.rs"]
 mod codex_jailed;
 #[cfg(test)]

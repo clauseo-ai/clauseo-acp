@@ -15,6 +15,10 @@
 //!   (`agents::restart_for_switch`), and its attach logs the new mode. The agent's own mode
 //!   changes (`current_mode_update`, a mode option's value in `config_option_update`) are
 //!   logged by kind and ignored ([`agent_moved`], [`kept`]): no `ModeChanged`, no relaunch.
+//! - An unjailed Codex (tier C) runs `codex::ASK_MODE`: a start in another mode is switched
+//!   there ([`codex_start`]); its own move to a mode that approves without asking is logged as
+//!   it came and switched back, as forced ask's is, unless the lawyer sent it that mode
+//!   ([`unasked_move`]). The lawyer's own pick stands (D2e will gate it).
 
 use clauseo_acp::SessionStart;
 use clauseo_protocol::{
@@ -143,6 +147,14 @@ pub(super) fn codex_start(
         jailed::keep_options(&mut start.config_options, Some(policy));
         JAILED_MODE
     } else {
+        let current = start.modes.as_ref().map(|modes| modes.current.as_str());
+        if current.is_some_and(codex::approves_unasked) {
+            tracing::info!(
+                kind = "agent_started_in_full_access",
+                "an unjailed Codex session started in a mode that approves without asking; \
+                 switching it to the ask mode"
+            );
+        }
         codex::ASK_MODE
     };
     let offered = start
@@ -216,8 +228,9 @@ pub(super) fn kept(
 }
 
 /// `mode` came from the agent (`current_mode_update`). A jailed Codex's is ignored, and its
-/// session put back in the preset if it left it, unlogged; any other is logged, and forced
-/// ask's switched back when its set does not hold it.
+/// session put back in the preset if it left it, unlogged; any other is logged, and switched
+/// back when forced ask's set does not hold it, or when an unjailed Codex moved itself to a mode
+/// that approves without asking which the lawyer did not send it ([`unasked_move`]).
 pub(super) fn agent_moved(
     actor: &mut Actor,
     thread: ThreadId,
@@ -236,6 +249,8 @@ pub(super) fn agent_moved(
     let forced = held(actor, thread).is_some_and(|agent| agent.forced_ask);
     if forced && !forced_ask::mode_allowed(&mode) {
         set_back(actor, thread, &mode, loads::CLAUDE_MODE);
+    } else if unasked_move(actor, thread, &mode) {
+        set_back(actor, thread, &mode, codex::ASK_MODE);
     }
     commit(
         actor,
@@ -243,6 +258,53 @@ pub(super) fn agent_moved(
         [ModeChanged { mode_id: mode }.into()],
         Vec::new(),
     )
+}
+
+/// An unjailed Codex moved itself to `mode`: whether that is to a mode that approves without
+/// asking which is not the lawyer's pick (`CodexAgent::picked`, set by [`switch`]). The pick
+/// stands until the session reports another mode.
+fn unasked_move(actor: &mut Actor, thread: ThreadId, mode: &str) -> bool {
+    let Some(codex) = agent(actor, thread).and_then(|agent| agent.codex.as_mut()) else {
+        return false;
+    };
+    if codex.picked.as_deref() == Some(mode) {
+        return false;
+    }
+    codex.picked = None;
+    let unasked = codex::approves_unasked(mode);
+    if unasked {
+        tracing::info!(
+            kind = "agent_moved_to_full_access",
+            mode,
+            "an unjailed Codex moved itself to a mode that approves without asking"
+        );
+    }
+    unasked
+}
+
+/// A lawyer's mode command for an unjailed Codex is about to reach it: `SetMode`'s mode, or a
+/// select value of its mode option, becomes its pick (`CodexAgent::picked`).
+fn note_pick(actor: &mut Actor, thread: ThreadId, waiting: &Waiting) {
+    let picked = match waiting {
+        Waiting::Turn(_) | Waiting::Config(_, _, ConfigValue::Boolean(_)) => return,
+        Waiting::Mode(_, mode) => CompactString::from(mode.as_str()),
+        Waiting::Config(_, option, ConfigValue::Select(value)) => {
+            if !jailed::is_mode_option(option.as_str(), &known_options(actor, thread)) {
+                return;
+            }
+            CompactString::from(value.as_str())
+        }
+    };
+    if let Some(codex) = agent(actor, thread).and_then(|agent| agent.codex.as_mut()) {
+        codex.picked = Some(picked);
+    }
+}
+
+/// The lawyer's mode command for `thread` failed: an unjailed Codex keeps no pick.
+pub(super) fn pick_failed(actor: &mut Actor, thread: ThreadId) {
+    if let Some(codex) = agent(actor, thread).and_then(|agent| agent.codex.as_mut()) {
+        codex.picked = None;
+    }
 }
 
 /// `session/set_mode` to `target` for `thread`'s session, which moved itself to `mode`.
@@ -297,12 +359,14 @@ pub(super) fn on_mode_reset(
 }
 
 /// A lawyer's `waiting` for `thread` on its attached agent: given back unless it asks a jailed
-/// Codex for a mode (after [`refusal`], so one of `jailed::MODES`). The mode it runs in is
+/// Codex for a mode (after [`refusal`], so one of `jailed::MODES`); an unjailed Codex's mode
+/// becomes its pick on the way ([`note_pick`]). The mode it runs in is
 /// answered now. Another becomes the pending switch (a later one replaces it, answered with no
 /// event, its receipt `Replaced`): the agent relaunches under its policy now when no turn runs,
 /// else at the boundary.
 pub(super) fn switch(actor: &mut Actor, thread: ThreadId, waiting: Waiting) -> Option<Waiting> {
     let Some(policy) = held(actor, thread).and_then(jail_of) else {
+        note_pick(actor, thread, &waiting);
         return Some(waiting);
     };
     let Some(asked) = asked_mode(actor, thread, &waiting) else {

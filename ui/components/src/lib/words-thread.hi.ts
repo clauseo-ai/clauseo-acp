@@ -127,8 +127,8 @@ export const HI = {
     "Clauseo ने स्किल पैक '{pack}' लोड नहीं किया। इसकी फ़ाइलें मान्य स्किल पैक नहीं हैं।",
   "Clauseo didn't load the skill pack '{pack}'. Clauseo loads at most 16 skill packs at a time.":
     "Clauseo ने स्किल पैक '{pack}' लोड नहीं किया। Clauseo एक बार में अधिकतम 16 स्किल पैक लोड करता है।",
-  "ChatGPT now changes files in this matter without asking. Read-only isn't available for ChatGPT in the Safe workspace on this computer yet.":
-    "ChatGPT अब बिना पूछे इस मामले की फ़ाइलें बदलता है। इस कंप्यूटर पर सुरक्षित कार्यक्षेत्र में ChatGPT के लिए केवल-पढ़ने वाला मोड अभी उपलब्ध नहीं है।",
+  "Read-only isn't available for ChatGPT in the Safe workspace on this computer, so ChatGPT can change files in this matter without asking first.":
+    "इस कंप्यूटर पर सुरक्षित कार्यक्षेत्र में ChatGPT के लिए केवल-पढ़ने वाला मोड उपलब्ध नहीं है, इसलिए ChatGPT पहले पूछे बिना इस मामले की फ़ाइलें बदल सकता है।",
   // the composer
   // in the composer's place while the open conversation is archived (U16a's Find opens one): it takes no question
   "Archived. Read only.": "संग्रहीत। केवल पढ़ने के लिए।",

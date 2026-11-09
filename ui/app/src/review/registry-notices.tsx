@@ -16,7 +16,7 @@ const ONE_BACK = "1 paper came back after the undo: {papers}. Clauseo didn't rem
 const MANY_BACK =
   "{n} papers came back after the undo: {papers}. Clauseo didn't remove them again.";
 const READ_ONLY_UNAVAILABLE =
-  "ChatGPT now changes files in this matter without asking. Read-only isn't available for ChatGPT in the Safe workspace on this computer yet.";
+  "Read-only isn't available for ChatGPT in the Safe workspace on this computer, so ChatGPT can change files in this matter without asking first.";
 /** A skill pack the launch left out, one line per reason (TN-04 to TN-09); the pack is "nda-kit" in each. */
 const PACK_LINE: Record<Exclude<PackSkipReason, "unknown">, ThreadKey> = {
   not_turned_on:

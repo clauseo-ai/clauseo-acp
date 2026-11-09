@@ -541,3 +541,18 @@ fn stale_temp_files_are_swept_before_a_write() {
     assert_eq!(names, ["auth.json", "config.toml", "other.clauseo-1-0.new"]);
     write::remove_dir_all(&root).unwrap();
 }
+
+/// Only full access and Auto review approve without asking the lawyer; the ask mode and
+/// Read-only do not (R17 PR-D2c round 5).
+#[test]
+fn only_full_access_and_auto_review_approve_unasked() {
+    for (mode, unasked) in [
+        ("agent-full-access", true),
+        ("agent", true),
+        ("workspace-write", false),
+        ("read-only", false),
+        ("unknown", false),
+    ] {
+        assert_eq!(super::approves_unasked(mode), unasked, "{mode}");
+    }
+}

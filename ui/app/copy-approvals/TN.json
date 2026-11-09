@@ -90,13 +90,13 @@
     "by": "app track (provisional; Rohan batch review)"
   },
   "TN-10": {
-    "en": "ChatGPT now changes files in this matter without asking. Read-only isn't available for ChatGPT in the Safe workspace on this computer yet.",
-    "hi": "ChatGPT अब बिना पूछे इस मामले की फ़ाइलें बदलता है। इस कंप्यूटर पर सुरक्षित कार्यक्षेत्र में ChatGPT के लिए केवल-पढ़ने वाला मोड अभी उपलब्ध नहीं है।",
+    "en": "Read-only isn't available for ChatGPT in the Safe workspace on this computer, so ChatGPT can change files in this matter without asking first.",
+    "hi": "इस कंप्यूटर पर सुरक्षित कार्यक्षेत्र में ChatGPT के लिए केवल-पढ़ने वाला मोड उपलब्ध नहीं है, इसलिए ChatGPT पहले पूछे बिना इस मामले की फ़ाइलें बदल सकता है।",
     "hi_status": "provisional",
     "hi_at": "2026-11-09",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
     "status": "provisional",
     "at": "2026-11-09",
-    "by": "app track (ReadOnlyUnavailable)"
+    "by": "app track (ReadOnlyUnavailable; orchestrator's en)"
   }
 }
