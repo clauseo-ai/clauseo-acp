@@ -150,6 +150,10 @@ impl Refresher for WindowsRefresher {
         self.lock = None;
     }
 
+    fn record_logon_policy(&mut self) {
+        crate::windows::setup::rights_source::record_for_launches();
+    }
+
     fn record(&mut self) -> Result<RefreshRecord, Failed> {
         let key = HSTRING::from(RECORD_KEY);
         let read = |value: &str| {

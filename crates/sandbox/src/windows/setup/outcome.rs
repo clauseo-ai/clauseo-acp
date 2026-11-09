@@ -28,7 +28,14 @@ pub const ERROR_LOGON_TYPE_NOT_GRANTED: u32 = 1385;
 
 /// The cause when a pool user's logon gets error 1385 (D-B4).
 pub const LOGON_NOT_GRANTED: &str = "Windows' \"Allow log on locally\" setting doesn't include \
-     the sandbox users (error 1385): IT can add the Users group to it";
+     the sandbox users (error 1385): run set-up again, which grants it where no policy sets it, \
+     or add the group ClauseoSandboxUsers to the setting";
+/// The cause when a GPO or Intune sets \"Allow log on locally\" without the pool accounts
+/// (`rights_policy.rs`): set-up grants nothing then, and the block is [`Blocked::LogonPolicy`].
+/// It starts with the lawyer's words.
+pub const LOGON_POLICY_EXCLUDES: &str = "This computer's settings don't let Clauseo's sandbox \
+     accounts sign in yet: a policy sets Windows' \"Allow log on locally\" without the group \
+     ClauseoSandboxUsers, which whoever manages that policy can add";
 /// The cause when `ShellExecuteExW` itself gets error 1385: Windows refused the sign-in of the
 /// account that approved the prompt, before the set-up program ran.
 pub const APPROVER_LOGON_REFUSED: &str = "Windows refused the sign-in of the account that \
@@ -271,8 +278,13 @@ pub struct SetupFailure {
 
 impl SetupFailure {
     /// The setting that blocked this failure, when one did (D-B4): a logon refused with 1385
-    /// ([`LOGON_NOT_GRANTED`], the cause [`cause_of`] gives it). `None` for any other.
+    /// ([`LOGON_NOT_GRANTED`], the cause [`cause_of`] gives it), [`Blocked::LogonRight`]; a
+    /// policy that sets the right without the pool ([`LOGON_POLICY_EXCLUDES`]),
+    /// [`Blocked::LogonPolicy`]. `None` for any other.
     pub fn blocked(&self) -> Option<Blocked> {
+        if self.cause.starts_with(LOGON_POLICY_EXCLUDES) {
+            return Some(Blocked::LogonPolicy);
+        }
         self.cause
             .starts_with(LOGON_NOT_GRANTED)
             .then_some(Blocked::LogonRight)

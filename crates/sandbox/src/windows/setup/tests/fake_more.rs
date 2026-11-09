@@ -10,6 +10,7 @@ use std::path::{Path, PathBuf};
 use crate::windows::acl_plan::Sid;
 use crate::windows::marker::Marker;
 use crate::windows::pool::MachineRecord;
+use crate::windows::setup::logon_grant::fake::FakeRights;
 use crate::windows::setup::record_values::CopyOwner;
 
 use std::cell::Cell;
@@ -224,6 +225,7 @@ pub(super) fn new_machine(test: &str) -> FakeMachine {
         next_rid: 1000,
         passwords: 0,
         around: Around::default(),
+        rights: FakeRights::default(),
     }
 }
 

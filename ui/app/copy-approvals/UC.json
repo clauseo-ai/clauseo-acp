@@ -720,5 +720,15 @@
     "status": "provisional",
     "at": "2026-11-07",
     "by": "app track (provisional; Rohan batch review)"
+  },
+  "UC-97": {
+    "en": "This computer's settings don't let the Safe workspace's accounts sign in yet. Your firm manages these settings on this computer.",
+    "hi": "इस कंप्यूटर की सेटिंग्स अभी सुरक्षित कार्यक्षेत्र के खातों को साइन इन नहीं करने देतीं। इस कंप्यूटर पर ये सेटिंग्स आपकी फ़र्म प्रबंधित करती है।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-09",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-09",
+    "by": "app track (provisional; Rohan batch review)"
   }
 }

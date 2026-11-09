@@ -47,6 +47,8 @@ pub(super) struct Fake {
     pub(super) crash: Option<&'static str>,
     pub(super) crashed: bool,
     pub(super) calls: Vec<&'static str>,
+    /// How many calls came before each `record_logon_policy`, kept apart from `calls`.
+    pub(super) policy_updates: Vec<usize>,
     pub(super) logs: Vec<(bool, String)>,
     /// The staging folder's state.
     pub(super) staging: Staging,
@@ -89,6 +91,7 @@ impl Fake {
             crash: None,
             crashed: false,
             calls: Vec::new(),
+            policy_updates: Vec::new(),
             logs: Vec::new(),
             staging: Staging::Absent,
         }
@@ -154,6 +157,9 @@ impl Refresher for Fake {
     fn record(&mut self) -> Result<RefreshRecord, Failed> {
         self.calls.push("record");
         Ok(self.record.clone())
+    }
+    fn record_logon_policy(&mut self) {
+        self.policy_updates.push(self.calls.len());
     }
     fn clear_leftovers(&mut self) -> Result<(), Failed> {
         self.step("clear_leftovers")?;

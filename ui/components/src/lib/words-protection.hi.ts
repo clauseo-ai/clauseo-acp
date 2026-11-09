@@ -58,6 +58,9 @@ export const HI = {
   // Windows error 1385, once R17 PR-E names it (UC-33)
   "Windows isn't letting the Safe workspace's accounts sign in. Setting up the Safe workspace again usually fixes this.":
     "Windows सुरक्षित कार्यक्षेत्र के खातों को साइन इन नहीं करने दे रहा है। सुरक्षित कार्यक्षेत्र को फिर से तैयार करने से आमतौर पर यह ठीक हो जाता है।",
+  // a Group Policy or Intune setting leaves the accounts out (UC-97)
+  "This computer's settings don't let the Safe workspace's accounts sign in yet. Your firm manages these settings on this computer.":
+    "इस कंप्यूटर की सेटिंग्स अभी सुरक्षित कार्यक्षेत्र के खातों को साइन इन नहीं करने देतीं। इस कंप्यूटर पर ये सेटिंग्स आपकी फ़र्म प्रबंधित करती है।",
   // the firm (UC-50, UC-51)
   "Your firm requires the Safe workspace on this computer. Set it up once, then ask here.":
     "आपकी फ़र्म इस कंप्यूटर पर सुरक्षित कार्यक्षेत्र ज़रूरी मानती है। इसे एक बार तैयार करें, फिर यहाँ पूछें।",

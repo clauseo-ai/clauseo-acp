@@ -61,6 +61,10 @@ test.each([
     "Windows isn't letting the Safe workspace's accounts sign in. Setting up the Safe workspace again usually fixes this.",
   ],
   [
+    "logon_policy",
+    "This computer's settings don't let the Safe workspace's accounts sign in yet. Your firm manages these settings on this computer.",
+  ],
+  [
     "policy",
     "A Windows policy on this computer blocks the program that sets up the Safe workspace. Your firm manages this policy on this computer.",
   ],
@@ -116,6 +120,7 @@ test("setting up again is offered for logon_right only; every other block keeps 
   expect(setUpFixes(cause({ blocked: { reason: "logon_right" } }))).toBe(true);
   expect(canRetry(cause({ blocked: { reason: "logon_right" } }))).toBe(true);
   for (const reason of [
+    "logon_policy",
     "policy",
     "tool_missing",
     "admin_copy_missing",

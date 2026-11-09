@@ -86,6 +86,8 @@ mod inner;
 mod inner_flow;
 #[cfg(any(windows, test))]
 mod leftovers;
+#[cfg(any(windows, test, feature = "test-support"))]
+mod logon_refusal;
 #[cfg(any(windows, test))]
 pub mod marker;
 #[cfg(windows)]
@@ -104,6 +106,8 @@ pub mod unclean;
 pub use env::agent_env;
 #[cfg(windows)]
 pub use inner::run_inner;
+#[cfg(any(windows, test, feature = "test-support"))]
+pub use logon_refusal::{logon_refusal, recorded_state};
 #[cfg(any(windows, test))]
 pub use marker::{UncleanSession, unclean_sessions};
 #[cfg(windows)]
@@ -395,7 +399,8 @@ pub enum RunExit {
     NoSecret,
     /// The Secondary Logon service is disabled (1058).
     SecondaryLogon,
-    /// "Allow log on locally" doesn't include the pool user (1385).
+    /// "Allow log on locally" doesn't include the pool user (1385), and no policy is known to
+    /// leave the pool out ([`logon_refusal`]): setting up again usually fixes it.
     LogonRight,
     /// The pool user's password was refused (1326): set-up must run again.
     Password,
@@ -451,10 +456,14 @@ pub enum RunExit {
     /// none was requested; the outer refuses the launch before its own marker or any logon, and
     /// a later launch checks again.
     AwaitingSweep,
+    /// A 1385 where a Group Policy or Intune setting defines "Allow log on locally" without the
+    /// pool, as the record's `LogonPolicy` (or the cached policy read) says ([`logon_refusal`]):
+    /// setting up again doesn't fix it.
+    LogonPolicy,
 }
 
 impl RunExit {
-    const ALL: [RunExit; 20] = [
+    const ALL: [RunExit; 21] = [
         RunExit::Usage,
         RunExit::BadLaunch,
         RunExit::NoSecret,
@@ -475,6 +484,7 @@ impl RunExit {
         RunExit::MarkerUnwritable,
         RunExit::AwaitingStop,
         RunExit::AwaitingSweep,
+        RunExit::LogonPolicy,
     ];
 
     /// The exit code.
@@ -500,6 +510,7 @@ impl RunExit {
         match self {
             RunExit::SecondaryLogon => Some(NoSandbox::SetUpFailed(SECLOGON_DISABLED.to_owned())),
             RunExit::LogonRight => Some(NoSandbox::SetUpBlocked(crate::Blocked::LogonRight)),
+            RunExit::LogonPolicy => Some(NoSandbox::SetUpBlocked(crate::Blocked::LogonPolicy)),
             RunExit::NoSecret | RunExit::Password => {
                 Some(NoSandbox::SetUpFailed(PASSWORD_LOST.to_owned()))
             }

@@ -104,13 +104,17 @@ pub enum Blocked {
     /// started it: `ShellExecuteExW` gave `ERROR_VIRUS_INFECTED` (225) or `ERROR_VIRUS_DELETED`
     /// (226). A copy that isn't there before the start is [`Blocked::AdminCopyMissing`].
     ToolMissing,
+    /// A Group Policy or Intune setting defines "Allow log on locally" without the sandbox
+    /// accounts (`windows::setup::rights_policy`): set-up grants nothing over a policy, and
+    /// setting up again doesn't fix it. [`Blocked::LogonRight`] stays the local 1385.
+    LogonPolicy,
 }
 
 impl Blocked {
     /// Every variant, in order. Appended with each new one: [`Blocked::name`]'s match is
     /// exhaustive, the test of the names lists this, and a
     /// compile-time match below fails the build until a new variant has its place here.
-    pub const ALL: [Blocked; 7] = [
+    pub const ALL: [Blocked; 8] = [
         Blocked::LogonRight,
         Blocked::Policy,
         Blocked::AdminCopyMissing,
@@ -118,6 +122,7 @@ impl Blocked {
         Blocked::AdminCopyUnsafe,
         Blocked::OtherAccount,
         Blocked::ToolMissing,
+        Blocked::LogonPolicy,
     ];
 
     /// Its serde name (`snake_case`, as `setup-result.json` writes it): path-free and stable,
@@ -131,6 +136,7 @@ impl Blocked {
             Blocked::AdminCopyUnsafe => "admin_copy_unsafe",
             Blocked::OtherAccount => "other_account",
             Blocked::ToolMissing => "tool_missing",
+            Blocked::LogonPolicy => "logon_policy",
         }
     }
 }
@@ -148,9 +154,10 @@ const _: () = {
             Blocked::AdminCopyUnsafe => 4,
             Blocked::OtherAccount => 5,
             Blocked::ToolMissing => 6,
+            Blocked::LogonPolicy => 7,
         }
     }
-    let [first, second, third, fourth, fifth, sixth, seventh] = Blocked::ALL;
+    let [first, second, third, fourth, fifth, sixth, seventh, eighth] = Blocked::ALL;
     assert!(
         place(first) == 0
             && place(second) == 1
@@ -158,7 +165,8 @@ const _: () = {
             && place(fourth) == 3
             && place(fifth) == 4
             && place(sixth) == 5
-            && place(seventh) == 6,
+            && place(seventh) == 6
+            && place(eighth) == 7,
         "Blocked::ALL is out of order"
     );
 };
@@ -195,6 +203,11 @@ impl std::fmt::Display for Blocked {
                 "Windows security blocked or removed clauseo-sandbox-setup.exe, Clauseo's set-up \
                  program, when Clauseo started it; whoever looks after this computer can allow it \
                  and re-run the Clauseo installer"
+            }
+            Blocked::LogonPolicy => {
+                "This computer's settings don't let Clauseo's sandbox accounts sign in yet. A \
+                 Group Policy or Intune setting defines Windows' \"Allow log on locally\" right \
+                 without the group ClauseoSandboxUsers; whoever manages that policy can add it"
             }
         })
     }

@@ -561,19 +561,6 @@ fn refuse_codex_reuse(message: &LaunchMessage, profile: &WinPath) -> Result<(), 
     }
 }
 
-/// Maps a `CreateProcessWithLogonW` code to its failure.
-fn logon_failure(code: u32) -> Failure {
-    match code {
-        1058 => Failure::new(RunExit::SecondaryLogon, super::SECLOGON_DISABLED),
-        1385 => Failure::new(RunExit::LogonRight, crate::Blocked::LogonRight.to_string()),
-        1326 => Failure::new(RunExit::Password, super::PASSWORD_LOST),
-        other => Failure::new(
-            RunExit::Logon,
-            format!("CreateProcessWithLogonW failed ({other})"),
-        ),
-    }
-}
-
 /// This user's profile folder, from its token (never from `USERPROFILE`).
 fn own_profile() -> io::Result<WinPath> {
     let text = profile_folder(&own_token()?)?;

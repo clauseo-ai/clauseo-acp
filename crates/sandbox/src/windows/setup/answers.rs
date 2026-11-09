@@ -26,6 +26,33 @@ pub const PROFILE_TEMP_ASSIGNED: u32 = 0x0800;
 /// `SeInteractiveLogonRight` ("Allow log on locally"): that one is tested by the logon itself,
 /// whose refusal is error 1385.
 pub const DENY_INTERACTIVE_RIGHT: &str = "SeDenyInteractiveLogonRight";
+/// "Deny log on as a batch job", which refuses a batch logon (`LOGON32_LOGON_BATCH`).
+pub const DENY_BATCH_RIGHT: &str = "SeDenyBatchLogonRight";
+/// "Deny log on as a service", which refuses a service logon (`LOGON32_LOGON_SERVICE`).
+pub const DENY_SERVICE_RIGHT: &str = "SeDenyServiceLogonRight";
+
+/// The logon a pool user is started with: today's interactive one, or the batch and service
+/// logons a SYSTEM-side launch can fall back to (0049, "Logon rights").
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LogonKind {
+    /// `LOGON32_LOGON_INTERACTIVE`: "Allow log on locally" and "Deny log on locally".
+    Interactive,
+    /// `LOGON32_LOGON_BATCH`: "Log on as a batch job" and its deny.
+    Batch,
+    /// `LOGON32_LOGON_SERVICE`: "Log on as a service" and its deny.
+    Service,
+}
+
+impl LogonKind {
+    /// The deny right that refuses this logon.
+    pub fn deny_right(self) -> &'static str {
+        match self {
+            LogonKind::Interactive => DENY_INTERACTIVE_RIGHT,
+            LogonKind::Batch => DENY_BATCH_RIGHT,
+            LogonKind::Service => DENY_SERVICE_RIGHT,
+        }
+    }
+}
 
 /// The right "Deny log on through Remote Desktop Services" stands for, which set-up grants the
 /// pool group so no pool user can sign in over Remote Desktop, and `--remove` takes off.
@@ -44,6 +71,24 @@ pub const DENIED_FOR_POOL: [&str; 6] = [
     "S-1-5-32-545",
 ];
 
+/// The well-known SIDs a pool user's token holds in a `kind` logon: [`DENIED_FOR_POOL`] for an
+/// interactive one; a batch or service logon holds `BATCH` (S-1-5-3) or `SERVICE` (S-1-5-6)
+/// in place of `INTERACTIVE` (S-1-5-4).
+pub fn pool_sids_for(kind: LogonKind) -> [&'static str; 6] {
+    let mut sids = DENIED_FOR_POOL;
+    let logon = match kind {
+        LogonKind::Interactive => return sids,
+        LogonKind::Batch => "S-1-5-3",
+        LogonKind::Service => "S-1-5-6",
+    };
+    for sid in &mut sids {
+        if *sid == "S-1-5-4" {
+            *sid = logon;
+        }
+    }
+    sids
+}
+
 /// How a service with start type `start_type` (`QUERY_SERVICE_CONFIGW::dwStartType`) starts;
 /// `None` for a value Windows doesn't define.
 pub fn service_start(start_type: u32) -> Option<ServiceStart> {
@@ -61,9 +106,23 @@ pub fn service_start(start_type: u32) -> Option<ServiceStart> {
 /// when it names any SID of [`DENIED_FOR_POOL`], or `group`, the pool group's SID when the
 /// group exists. SIDs are compared exactly.
 pub fn logon_right_of(denied: &[Sid], group: Option<&Sid>) -> LogonRight {
+    logon_right_for(LogonKind::Interactive, denied, group, &[])
+}
+
+/// Whether the deny right of a `kind` logon ([`LogonKind::deny_right`]), whose holders are
+/// `denied`, refuses the pool users: it does when it names a SID their token holds in that
+/// logon ([`pool_sids_for`]), `group` (the pool group's SID, when it exists), or one of
+/// `pool`, the pool users' own SIDs. SIDs are compared exactly.
+pub fn logon_right_for(
+    kind: LogonKind,
+    denied: &[Sid],
+    group: Option<&Sid>,
+    pool: &[Sid],
+) -> LogonRight {
+    let held = pool_sids_for(kind);
     let refused = denied
         .iter()
-        .any(|sid| DENIED_FOR_POOL.contains(&sid.as_str()) || Some(sid) == group);
+        .any(|sid| held.contains(&sid.as_str()) || Some(sid) == group || pool.contains(sid));
     if refused {
         LogonRight::Refused
     } else {
@@ -157,6 +216,70 @@ mod tests {
             logon_right_of(&[others[1].clone()], Some(&group)),
             LogonRight::Allowed
         );
+    }
+
+    #[test]
+    fn each_logon_kind_is_refused_by_its_own_deny_right() {
+        assert_eq!(LogonKind::Interactive.deny_right(), DENY_INTERACTIVE_RIGHT);
+        assert_eq!(LogonKind::Batch.deny_right(), "SeDenyBatchLogonRight");
+        assert_eq!(LogonKind::Service.deny_right(), "SeDenyServiceLogonRight");
+        let interactive = sid("S-1-5-4");
+        // INTERACTIVE refuses only an interactive logon; BATCH and SERVICE only their own.
+        let right = |kind, held: &Sid| logon_right_for(kind, std::slice::from_ref(held), None, &[]);
+        assert_eq!(
+            right(LogonKind::Interactive, &interactive),
+            LogonRight::Refused
+        );
+        assert_eq!(right(LogonKind::Batch, &interactive), LogonRight::Allowed);
+        assert_eq!(right(LogonKind::Service, &interactive), LogonRight::Allowed);
+        assert_eq!(
+            right(LogonKind::Batch, &sid("S-1-5-3")),
+            LogonRight::Refused
+        );
+        assert_eq!(
+            right(LogonKind::Interactive, &sid("S-1-5-3")),
+            LogonRight::Allowed
+        );
+        assert_eq!(
+            right(LogonKind::Service, &sid("S-1-5-6")),
+            LogonRight::Refused
+        );
+        assert_eq!(
+            right(LogonKind::Batch, &sid("S-1-5-6")),
+            LogonRight::Allowed
+        );
+        // Users, Everyone and Guests (CIS's deny for all three) read the same in each kind.
+        for kind in [LogonKind::Interactive, LogonKind::Batch, LogonKind::Service] {
+            assert_eq!(
+                right(kind, &sid("S-1-5-32-545")),
+                LogonRight::Refused,
+                "{kind:?}"
+            );
+            assert_eq!(
+                right(kind, &sid("S-1-1-0")),
+                LogonRight::Refused,
+                "{kind:?}"
+            );
+            assert_eq!(
+                right(kind, &sid("S-1-5-32-546")),
+                LogonRight::Allowed,
+                "{kind:?}"
+            );
+        }
+        // The group, and a pool user's own SID, refuse every kind.
+        let group = sid("S-1-5-21-111-222-333-1010");
+        let user = sid("S-1-5-21-111-222-333-1011");
+        let both = [group.clone(), user.clone()];
+        for kind in [LogonKind::Batch, LogonKind::Service] {
+            let only_group = logon_right_for(kind, std::slice::from_ref(&group), Some(&group), &[]);
+            assert_eq!(only_group, LogonRight::Refused);
+            let only_user = logon_right_for(kind, std::slice::from_ref(&user), None, &both);
+            assert_eq!(only_user, LogonRight::Refused);
+            assert_eq!(
+                logon_right_for(kind, &[], Some(&group), &both),
+                LogonRight::Allowed
+            );
+        }
     }
 
     #[test]

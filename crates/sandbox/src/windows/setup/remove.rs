@@ -45,9 +45,11 @@
 //! 5. `DeviceSync`'s deny;
 //! 6. the ledger's entries (`ledger_work.rs`), read from the record's `DataDir`, which the owner
 //!    can influence, so it is checked as `--data-dir` is and used only as `ledger_work.rs` says;
-//! 7. the group, when it is the record's and has no members left, its "Deny log on through
-//!    Remote Desktop Services" right taken off first (a right is keyed by SID and would be left
-//!    on a SID nothing has);
+//! 7. "Allow log on locally" off the record's group when `LogonRightAdded` names it (set-up
+//!    granted it; `logon_grant::remove_grant`; a right IT granted stays), then the group, when
+//!    it is the record's and has no members left, its "Deny log on through Remote Desktop
+//!    Services" right taken off first (a right is keyed by SID and would be left on a SID
+//!    nothing has);
 //! 8. as the owner only, the unclean-session markers in the checked data folder
 //!    (`<data_dir>\sandbox\run\*.session`), so none outlives its set-up; an administrator's
 //!    removal leaves them (it deletes nothing in the owner's folders, K1), and the next set-up's
@@ -69,6 +71,7 @@
 
 use std::path::PathBuf;
 
+use super::logon_grant;
 use super::machine::{MachineError, ProfileDir};
 use super::outcome::{SetupExit, cause_of};
 use super::record_values::CopyOwner;
@@ -156,6 +159,8 @@ pub enum RemoveStep {
     RemoteLogon,
     /// Removing the owner's unclean-session markers, as the owner, before the record.
     Markers,
+    /// Taking off the "Allow log on locally" right set-up added.
+    LogonRight,
 }
 
 impl std::fmt::Display for RemoveStep {
@@ -177,6 +182,7 @@ impl std::fmt::Display for RemoveStep {
             RemoveStep::StopTask => "deleting the sandbox's stop and sweep tasks",
             RemoveStep::RemoteLogon => "taking the sandbox group's Remote Desktop deny off",
             RemoveStep::Markers => "removing the sandbox's unclean-session markers",
+            RemoveStep::LogonRight => "taking off the logon right set-up added",
         })
     }
 }
@@ -411,6 +417,8 @@ fn steps(
         )
     })?;
     report.ledger = ledger_work::run(machine, acl, record, acting)?;
+    logon_grant::remove_grant(machine.logon_rights(), &record.group)
+        .map_err(|e| (RemoveStep::LogonRight, cause_of(&e)))?;
     report.group = remove_group(machine, record)?;
     if acting == Acting::Owner {
         clear_markers(machine)?;

@@ -10,6 +10,8 @@
 //! (`LsaAddAccountRights`) or taken off it (`LsaRemoveAccountRights`), with which set-up denies
 //! the pool group "log on through Remote Desktop Services" and `--remove` lifts it. Each needs
 //! an administrator.
+//! The logon-right grant (`logon_grant.rs`) adds and takes off "Allow log on locally" through
+//! [`add_interactive`] and [`remove_interactive`], whose right is fixed here.
 #![expect(unsafe_code, reason = "FFI to the service manager and the LSA policy")]
 
 use std::ffi::c_void;
@@ -36,9 +38,10 @@ use windows::Win32::System::Services::{
 use windows::core::{PCWSTR, PWSTR, w};
 
 use super::accounts::LocalSid as ParsedSid;
-use super::answers::{DENY_INTERACTIVE_RIGHT, logon_right_of, service_start};
+use super::answers::{LogonKind, logon_right_for, service_start};
 use super::ffi::{os, wide};
 use super::machine::{LogonRight, MachineError, ServiceStart};
+use super::rights_policy::INTERACTIVE_RIGHT;
 use crate::windows::pool::POOL_GROUP;
 use crate::windows::sids::Sid;
 
@@ -89,12 +92,22 @@ pub fn seclogon() -> Result<ServiceStart, MachineError> {
     })
 }
 
-/// Whether "Deny log on locally" refuses the pool users ([`logon_right_of`]), counting the
+/// Whether "Deny log on locally" refuses the pool users
+/// ([`logon_right_of`](super::answers::logon_right_of)), counting the
 /// pool group's SID when the group exists. Needs an administrator: the right's holders are
 /// not readable by a standard user.
 pub fn logon_right() -> Result<LogonRight, MachineError> {
-    let denied = holders(DENY_INTERACTIVE_RIGHT)?;
-    Ok(logon_right_of(&denied, group_sid()?.as_ref()))
+    deny_check(LogonKind::Interactive, &[])
+}
+
+/// Whether the deny right of a `kind` logon refuses the pool users ([`logon_right_for`]):
+/// "Deny log on locally", "as a batch job" or "as a service", as local policy holds it now,
+/// against the SIDs a pool user's token holds in that logon, the pool group's SID when the
+/// group exists, and `pool`, the pool users' own SIDs. For a launch to call per logon type
+/// (the batch fallback); needs an administrator or SYSTEM.
+pub fn deny_check(kind: LogonKind, pool: &[Sid]) -> Result<LogonRight, MachineError> {
+    let denied = holders(kind.deny_right())?;
+    Ok(logon_right_for(kind, &denied, group_sid()?.as_ref(), pool))
 }
 
 /// The accounts holding `right` (a name such as `SeDenyInteractiveLogonRight`), each SID in
@@ -172,6 +185,18 @@ pub(super) fn remove_right(account: &Sid, right: &str) -> Result<(), MachineErro
     lsa_check("LsaRemoveAccountRights", status)
 }
 
+/// Adds "Allow log on locally" to `sid` ([`add_right`] with that right, fixed here). Held
+/// already is `Ok`.
+pub(super) fn add_interactive(sid: &Sid) -> Result<(), MachineError> {
+    add_right(sid, INTERACTIVE_RIGHT)
+}
+
+/// Takes "Allow log on locally" off `sid`, its other rights kept ([`remove_right`]). Not held,
+/// or no rights at all, is `Ok`.
+pub(super) fn remove_interactive(sid: &Sid) -> Result<(), MachineError> {
+    remove_right(sid, INTERACTIVE_RIGHT)
+}
+
 /// `text` (UTF-16, no NUL) as the LSA's counted string, pointing into it: `text` must outlive
 /// every use of the result.
 fn lsa_string(text: &mut [u16]) -> LSA_UNICODE_STRING {
@@ -208,7 +233,14 @@ pub(super) fn machine_domain() -> Result<[u32; 3], MachineError> {
 
 /// The SID of the local group `ClauseoSandboxUsers`, if it exists (`LookupAccountNameW`).
 fn group_sid() -> Result<Option<Sid>, MachineError> {
-    let name = wide(POOL_GROUP);
+    // A local group is an alias; an account of another kind by that name isn't the group.
+    Ok(sid_of_name(POOL_GROUP)?.and_then(|(sid, kind)| (kind == SidTypeAlias).then_some(sid)))
+}
+
+/// The SID `name` resolves to (`LookupAccountNameW`, as Windows resolves it: a local name, a
+/// domain one, `DOMAIN\name`), with its kind; `None` when nothing has that name.
+pub(super) fn sid_of_name(name: &str) -> Result<Option<(Sid, SID_NAME_USE)>, MachineError> {
+    let name = wide(name);
     let (mut sid_size, mut domain_size) = (0u32, 0u32);
     let mut kind = SID_NAME_USE::default();
     // SAFETY: the name is NUL-terminated and outlives the call; no buffers ask only for the
@@ -247,12 +279,9 @@ fn group_sid() -> Result<Option<Sid>, MachineError> {
         )
     }
     .map_err(|error| os("LookupAccountNameW", &error))?;
-    // A local group is an alias; an account of another kind by that name isn't the group.
-    if kind != SidTypeAlias {
-        return Ok(None);
-    }
     // SAFETY: the call wrote a valid SID into `sid`, which is live.
-    unsafe { sid_text(PSID(sid.as_mut_ptr().cast())) }
+    let sid = unsafe { sid_text(PSID(sid.as_mut_ptr().cast())) }?;
+    Ok(sid.map(|sid| (sid, kind)))
 }
 
 /// The name of the account whose SID is `sid` (`LookupAccountSidW`); `None` when no account
