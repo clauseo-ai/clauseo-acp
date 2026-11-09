@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use super::{
-    Cause, Changes, GONE_LIMIT, Guard, Live, Next, OVERFLOWS, Pulse, Session, Source, watch,
+    Cause, Changes, GONE_LIMIT, Guard, Layout, Live, Next, OVERFLOWS, Pulse, Session, Source, watch,
 };
 use crate::windows::SetAsideFailure;
 use crate::windows::denial_pipe::Record;
@@ -48,6 +48,9 @@ struct Script(VecDeque<Next>);
 impl Source for Script {
     fn next(&mut self) -> Next {
         self.0.pop_front().unwrap_or(Next::Stopped)
+    }
+    fn layout(&self) -> Layout {
+        Layout::Extended
     }
 }
 
