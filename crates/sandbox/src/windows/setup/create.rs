@@ -289,7 +289,7 @@ fn change(
     // no step for it. It still stops only what the record names: after a first set-up's rollback
     // there is no record (`--stop` then does nothing) or only the users the rollback couldn't
     // remove; after a re-run's, the pool as before.
-    stop_task(machine, &req.owner)?;
+    let tasks = stop_task(machine, &req.owner)?;
     let local_lows: Vec<(PathBuf, PathBuf)> = users
         .profiles
         .iter()
@@ -334,6 +334,7 @@ fn change(
         journals,
         top_up: plan.top_up.clone(),
         network,
+        tasks,
     })
 }
 

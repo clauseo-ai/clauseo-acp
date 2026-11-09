@@ -118,13 +118,16 @@ pub use rules::{
 pub use sources::{SourceError, SourceFile, Sources};
 #[cfg(windows)]
 pub use task::{
-    TASK_FOLDER, TaskError, last_refresh_run, read_task, register_task, request_admin_refresh,
-    request_pool_stop, request_pool_sweep, unregister_task,
+    TASK_FOLDER, TaskError, last_refresh_run, read_task, read_tasks, register_task,
+    register_task_at, request_admin_refresh, request_pool_stop, request_pool_sweep,
+    unregister_task,
 };
-pub use task_identity::{TASK_MISSING, TaskCheck, TaskIdentity};
+pub use task_identity::{
+    ReadError, TASK_CHANGED, TASK_MISSING, TASK_UNCHECKED, TaskCheck, TaskIdentity,
+};
 #[cfg(windows)]
 pub use task_read::{
-    ready_with_pool_tasks, replace_task, sweep_task_needs_repair, task_sddl_read_back,
+    read_error, ready_with_pool_tasks, replace_task, sweep_task_repair, task_descriptor,
 };
 pub use version::version_not_older;
 #[cfg(windows)]

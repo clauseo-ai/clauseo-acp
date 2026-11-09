@@ -345,7 +345,7 @@ pub(crate) fn hidden(name: &str) -> Result<bool, MachineError> {
 }
 
 /// The account `sid` names, as (name, domain, use); `None` when it names none.
-pub(super) fn lookup_sid(
+pub(crate) fn lookup_sid(
     sid: &Sid,
 ) -> Result<Option<(String, String, SID_NAME_USE)>, MachineError> {
     let parsed = LocalSid::parse(sid)?;

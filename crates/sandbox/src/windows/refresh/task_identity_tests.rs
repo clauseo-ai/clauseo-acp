@@ -1,13 +1,15 @@
-//! `task_identity.rs` on every OS: a task is the set-up's only when its principal, program,
-//! argument, triggers and descriptor all are; the program a SYSTEM task may run passes the
-//! admin copy's chain up to the volume root or nothing is registered; and the readiness check
-//! says not ready, in [`TASK_MISSING`]'s words, only on a per-user install this user placed.
+//! `task_identity.rs` on every OS: a task is the set-up's only when its principal's SID, run
+//! level, program, argument, triggers, settings and descriptor all mean what `register_task`
+//! registers, however Windows writes them back; the program a SYSTEM task may run passes the
+//! whole admin copy check or nothing is registered; and the readiness check says not ready, in
+//! words for missing, changed or unreadable, only on a per-user install this user placed.
 
 use std::path::{Path, PathBuf};
 
 use super::task_identity::*;
-use super::{POOL_TASKS, SystemTask, TASKS, same_path, task_sddl};
-use crate::windows::admin_copy::fake::{Fake, descriptor};
+use super::{POOL_TASKS, SystemTask, TASKS};
+use crate::windows::acl_bytes;
+use crate::windows::admin_copy::fake::{Fake, descriptor, locked_dacl};
 use crate::windows::admin_copy::{FULL_ACCESS, Found, READ_EXECUTE};
 use crate::windows::setup::record_values::CopyOwner;
 use crate::windows::sids::Sid;
@@ -18,6 +20,8 @@ const OTHER: &str = "S-1-5-21-1-2-3-1002";
 const EXE: &str = r"C:\Program Files\Clauseo\Sandbox\clauseo-sandbox-setup.exe";
 const SYSTEM: &str = "S-1-5-18";
 const ADMINISTRATORS: &str = "S-1-5-32-544";
+/// LOCAL SYSTEM's name as a German Windows writes it back.
+const GERMAN_SYSTEM: &str = "NT-AUTORITÄT\\SYSTEM";
 
 fn lawyer() -> Sid {
     Sid::parse(LAWYER).unwrap()
@@ -25,33 +29,13 @@ fn lawyer() -> Sid {
 
 /// What `register_task` registers as `task` for the lawyer.
 fn registered(task: SystemTask) -> TaskIdentity {
-    TaskIdentity::expected(task, &lawyer(), Path::new(EXE), task_sddl(&lawyer()))
+    TaskIdentity::expected(task, &lawyer(), Path::new(EXE), test_descriptor(&lawyer()))
 }
 
-#[test]
-fn the_expected_task_is_system_running_the_admin_copy_with_its_one_argument() {
-    let stop = registered(SystemTask::Stop);
-    assert_eq!(stop.principal, SYSTEM);
-    let program = TaskAction::Exec {
-        path: format!("\"{EXE}\""),
-        arguments: "--stop".to_owned(),
-    };
-    assert_eq!(stop.actions, [program]);
-    assert_eq!(stop.triggers, Vec::<TaskTrigger>::new());
-    assert_eq!(stop.sddl, task_sddl(&lawyer()));
-    let refresh = registered(SystemTask::Refresh);
-    assert_eq!(refresh.triggers, [TaskTrigger::Logon(LAWYER.to_owned())]);
-    for task in TASKS {
-        assert_eq!(
-            check(Some(&registered(task)), &registered(task)),
-            TaskCheck::Same
-        );
-        assert_eq!(check(None, &registered(task)), TaskCheck::Missing);
-    }
+/// `found` against `expected`, read without error.
+fn compare(found: &TaskIdentity, expected: &TaskIdentity) -> TaskCheck {
+    check(Ok(Some(found)), expected).unwrap()
 }
-
-/// A change to a task as read back.
-type Change = Box<dyn Fn(&mut TaskIdentity)>;
 
 /// A program action.
 fn exec(path: &str, arguments: &str) -> TaskAction {
@@ -61,10 +45,57 @@ fn exec(path: &str, arguments: &str) -> TaskAction {
     }
 }
 
+/// The task descriptor with `entries` in place of its DACL, owned by `owner`.
+fn with_entries(owner: &str, entries: &[(u8, u8, u32, &str)]) -> Vec<u8> {
+    descriptor(owner, Some(entries), true)
+}
+
+/// `bytes` with `group` as its group.
+fn with_group(mut bytes: Vec<u8>, group: &str) -> Vec<u8> {
+    let at = u32::try_from(bytes.len()).unwrap();
+    bytes.extend(acl_bytes::sid_bytes(&Sid::parse(group).unwrap()));
+    bytes[8..12].copy_from_slice(&at.to_le_bytes());
+    bytes
+}
+
+#[test]
+fn the_expected_task_runs_the_admin_copy_as_system_whenever_asked() {
+    let sweep = registered(SystemTask::Sweep);
+    assert_eq!(sweep.principal, SYSTEM);
+    assert_eq!(sweep.run_level, RUN_LEVEL_HIGHEST);
+    assert_eq!(
+        sweep.actions,
+        [exec(&format!("\"{EXE}\""), "--sweep-tasks")]
+    );
+    assert_eq!(sweep.triggers, Vec::<TaskTrigger>::new());
+    let settings = TaskSettings {
+        enabled: true,
+        demand_start: true,
+        on_battery: OnBattery::Runs,
+        instances: INSTANCES_QUEUE,
+    };
+    assert_eq!(sweep.settings, settings);
+    let stop = registered(SystemTask::Stop);
+    assert_eq!(stop.settings.instances, INSTANCES_IGNORE_NEW);
+    let refresh = registered(SystemTask::Refresh);
+    assert_eq!(refresh.triggers, [TaskTrigger::Logon(LAWYER.to_owned())]);
+    for task in TASKS {
+        assert_eq!(
+            compare(&registered(task), &registered(task)),
+            TaskCheck::Same
+        );
+        assert_eq!(check(Ok(None), &registered(task)), Ok(TaskCheck::Missing));
+    }
+}
+
+/// A change to a task as read back.
+type Change = Box<dyn Fn(&mut TaskIdentity)>;
+
 #[test]
 fn each_part_that_differs_is_named() {
     let quoted = format!("\"{EXE}\"");
     let writable = r#""C:\Users\lawyer\AppData\Local\Clauseo\clauseo-sandbox-setup.exe""#;
+    let lawyer_full = (0, 0, FULL_ACCESS, LAWYER);
     let changes: Vec<(Differs, Change)> = vec![
         (
             Differs::Principal,
@@ -72,7 +103,7 @@ fn each_part_that_differs_is_named() {
         ),
         (
             Differs::Principal,
-            Box::new(|t| t.principal = "S-1-5-19".to_owned()),
+            Box::new(|t| t.principal = GERMAN_SYSTEM.to_owned()),
         ),
         (
             Differs::Action,
@@ -92,12 +123,6 @@ fn each_part_that_differs_is_named() {
             Box::new(move |t| t.actions = vec![exec(&quoted, "--stop")]),
         ),
         (
-            Differs::Arguments,
-            Box::new(|t| {
-                t.actions = vec![exec(&format!("\"{EXE}\""), "--sweep-tasks --refresh")];
-            }),
-        ),
-        (
             Differs::Triggers,
             Box::new(|t| t.triggers.push(TaskTrigger::Other(1))),
         ),
@@ -105,21 +130,57 @@ fn each_part_that_differs_is_named() {
             Differs::Triggers,
             Box::new(|t| t.triggers.push(TaskTrigger::Logon(String::new()))),
         ),
+        (Differs::Disabled, Box::new(|t| t.settings.enabled = false)),
+        (
+            Differs::DemandStart,
+            Box::new(|t| t.settings.demand_start = false),
+        ),
+        (
+            Differs::Batteries,
+            Box::new(|t| t.settings.on_battery = OnBattery::NoStart),
+        ),
+        (
+            Differs::Batteries,
+            Box::new(|t| t.settings.on_battery = OnBattery::Stopped),
+        ),
+        (
+            Differs::Instances,
+            Box::new(|t| t.settings.instances = INSTANCES_IGNORE_NEW),
+        ),
+        (Differs::RunLevel, Box::new(|t| t.run_level = 0)),
         (
             Differs::Descriptor,
-            Box::new(|t| t.sddl = task_sddl(&Sid::parse(OTHER).unwrap())),
+            Box::new(|t| t.descriptor = test_descriptor(&Sid::parse(OTHER).unwrap())),
         ),
         (
             Differs::Descriptor,
-            Box::new(|t| t.sddl.push_str("(A;;FA;;;S-1-5-21-1-2-3-1001)")),
+            Box::new(move |t| {
+                t.descriptor =
+                    with_entries(ADMINISTRATORS, &[(0, 0, FULL_ACCESS, SYSTEM), lawyer_full]);
+            }),
         ),
+        (
+            Differs::Descriptor,
+            Box::new(|t| {
+                let entries = [
+                    (0, 0, FULL_ACCESS, SYSTEM),
+                    (0, 0, FULL_ACCESS, ADMINISTRATORS),
+                ];
+                t.descriptor = with_entries(LAWYER, &entries);
+            }),
+        ),
+        (
+            Differs::Descriptor,
+            Box::new(|t| t.descriptor = descriptor(ADMINISTRATORS, None, true)),
+        ),
+        (Differs::Descriptor, Box::new(|t| t.descriptor = Vec::new())),
     ];
     let expected = registered(SystemTask::Sweep);
     for (part, change) in changes {
         let mut found = expected.clone();
         change(&mut found);
         assert_eq!(
-            check(Some(&found), &expected),
+            compare(&found, &expected),
             TaskCheck::Differs(part),
             "{found:?}"
         );
@@ -129,34 +190,114 @@ fn each_part_that_differs_is_named() {
     found.triggers = vec![TaskTrigger::Logon(OTHER.to_owned())];
     let refresh = registered(SystemTask::Refresh);
     assert_eq!(
-        check(Some(&found), &refresh),
+        compare(&found, &refresh),
         TaskCheck::Differs(Differs::Triggers)
     );
 }
 
 #[test]
-fn system_by_any_name_a_path_as_windows_compares_it_and_read_back_flags_are_the_same() {
+fn a_disabled_sweep_task_is_changed() {
+    let mut found = registered(SystemTask::Sweep);
+    found.settings.enabled = false;
+    let expected = registered(SystemTask::Sweep);
+    assert_eq!(
+        compare(&found, &expected),
+        TaskCheck::Differs(Differs::Disabled)
+    );
+    let mut reader = Reader::adopted();
+    reader.tasks[1].1 = Ok(found);
+    assert_eq!(
+        repair_reason(&mut reader, SystemTask::Sweep),
+        Some(TASK_CHANGED)
+    );
+}
+
+#[test]
+fn a_german_read_back_and_other_texts_with_the_same_meaning_are_the_same() {
     let expected = registered(SystemTask::Stop);
-    for name in ["SYSTEM", "nt authority\\system", "LocalSystem", "s-1-5-18"] {
-        let mut found = expected.clone();
-        found.principal = name.to_owned();
-        assert_eq!(check(Some(&found), &expected), TaskCheck::Same, "{name}");
-    }
-    for path in [
+    // The principal by SID, whatever the language of its name.
+    let lookup = |name: &str| (name == GERMAN_SYSTEM).then(|| Sid::parse(SYSTEM).unwrap());
+    let mut found = expected.clone();
+    found.principal = principal_sid(GERMAN_SYSTEM, lookup);
+    assert_eq!(found.principal, SYSTEM);
+    assert_eq!(compare(&found, &expected), TaskCheck::Same);
+    assert_eq!(principal_sid(" S-1-5-18 ", |_| None), SYSTEM);
+    assert_eq!(
+        principal_sid("AUTORITE NT\\Inconnu", |_| None),
+        "AUTORITE NT\\Inconnu"
+    );
+    // The program by its canonical path.
+    let paths = [
         EXE.to_owned(),
         EXE.to_uppercase(),
-        format!("\"{}\"", EXE.replace('\\', "/")),
-    ] {
+        format!(" \"{}\" ", EXE.replace('\\', "/")),
+        format!(r"\\?\{EXE}"),
+        r"C:\Program Files\\Clauseo\.\Sandbox\..\Sandbox\clauseo-sandbox-setup.exe".to_owned(),
+    ];
+    for path in paths {
         let mut found = expected.clone();
-        found.actions = vec![TaskAction::Exec {
-            path: path.clone(),
-            arguments: "--stop".to_owned(),
-        }];
-        assert_eq!(check(Some(&found), &expected), TaskCheck::Same, "{path}");
+        found.actions = vec![exec(&path, "--stop")];
+        assert_eq!(compare(&found, &expected), TaskCheck::Same, "{path}");
     }
+    // The descriptor by owner, group and entry set: reordered, inherited, a generic right for
+    // the file rights it maps to, and a group the set-up didn't name.
+    let owner_run = (0, 0x10, 0x8000_0000 | 0x2000_0000, LAWYER);
+    let entries = [
+        owner_run,
+        (0, 0, 0x1000_0000, ADMINISTRATORS),
+        (0, 0, FULL_ACCESS, SYSTEM),
+    ];
     let mut found = expected.clone();
-    found.sddl = found.sddl.replace("D:P", "D:PAI");
-    assert_eq!(check(Some(&found), &expected), TaskCheck::Same);
+    found.descriptor = with_group(with_entries(ADMINISTRATORS, &entries), SYSTEM);
+    assert_eq!(compare(&found, &expected), TaskCheck::Same);
+    // A group is compared once the expected descriptor names one.
+    let mut grouped = expected.clone();
+    grouped.descriptor = with_group(grouped.descriptor, ADMINISTRATORS);
+    assert_eq!(
+        compare(&found, &grouped),
+        TaskCheck::Differs(Differs::Descriptor)
+    );
+    found.descriptor = with_group(expected.descriptor, ADMINISTRATORS);
+    assert_eq!(compare(&found, &grouped), TaskCheck::Same);
+    assert_eq!(READ_EXECUTE, 0x0012_0089 | 0x0012_00A0);
+}
+
+/// This machine's own name for LOCAL SYSTEM, in its language, as the Task Scheduler may write
+/// it back, resolves to its SID through the lookup `task.rs` uses.
+#[cfg(windows)]
+#[test]
+fn this_machines_name_for_system_resolves_to_its_sid() {
+    use crate::windows::setup::accounts::lookup_sid;
+    use crate::windows::setup::sweep::windows_sweeper::lookup_account;
+    let system = Sid::parse(SYSTEM).unwrap();
+    let (name, domain, _) = lookup_sid(&system).unwrap().unwrap();
+    for name in [format!("{domain}\\{name}"), name] {
+        assert_eq!(
+            principal_sid(&name, |n| lookup_account(n).ok()),
+            SYSTEM,
+            "{name}"
+        );
+    }
+}
+
+#[test]
+fn a_refused_read_is_changed_and_any_other_error_cant_be_told() {
+    let expected = registered(SystemTask::Sweep);
+    let refused = ReadError::of(0x8007_0005, "E_ACCESSDENIED".to_owned());
+    assert_eq!(refused, ReadError::Refused);
+    assert_eq!(
+        check(Err(&refused), &expected),
+        Ok(TaskCheck::Differs(Differs::Descriptor))
+    );
+    let down = ReadError::of(0x8004_1315, "the Task Scheduler isn't running".to_owned());
+    assert_eq!(
+        check(Err(&down), &expected),
+        Err("the Task Scheduler isn't running".to_owned())
+    );
+    // No task, or no `\Clauseo` folder at all, is a missing task.
+    assert!(not_found(0x8007_0002));
+    assert!(not_found(0x8007_0003));
+    assert!(!not_found(0x8007_0005));
 }
 
 /// A descriptor owned by Administrators that lets `who` change it.
@@ -171,9 +312,13 @@ fn writable_by(who: &str, folder: bool) -> Vec<u8> {
 }
 
 #[test]
-fn the_action_program_and_every_folder_up_to_the_root_must_be_admin_only() {
+fn the_action_program_must_pass_the_whole_admin_copy_check() {
     let found = action_exe(&Fake::ready()).unwrap();
-    assert!(same_path(&found, Path::new(EXE)), "{}", found.display());
+    assert!(
+        super::same_path(&found, Path::new(EXE)),
+        "{}",
+        found.display()
+    );
     // Written out, as a path with `\` has no parts off Windows.
     let levels = [
         (EXE, Found::File),
@@ -210,31 +355,37 @@ fn the_action_program_and_every_folder_up_to_the_root_must_be_admin_only() {
             path.display()
         );
     }
-    // A link in place of the copy is refused.
     let mut fake = Fake::ready();
     fake.set(
         Path::new(EXE),
         Found::Link,
         writable_by(ADMINISTRATORS, false),
     );
+    // A link in place of the copy isn't the copy at all.
+    assert_eq!(action_exe(&fake), Err(Blocked::AdminCopyMissing));
+    // A DLL planted beside the copy, and a copy whose hash isn't the recorded one.
+    let mut fake = Fake::ready();
+    let planted = r"C:\Program Files\Clauseo\Sandbox\version.dll";
+    fake.set(Path::new(planted), Found::File, locked_dacl(false));
     assert_eq!(action_exe(&fake), Err(Blocked::AdminCopyUnsafe));
+    let mut fake = Fake::ready();
+    fake.hash = "f".repeat(64);
+    assert_eq!(action_exe(&fake), Err(Blocked::AdminCopyChanged));
 }
 
 /// The readiness check's reads, as the lawyer.
 struct Reader {
     copy: Result<Option<CopyOwner>, String>,
-    tasks: Vec<(SystemTask, TaskIdentity)>,
-    unreadable: bool,
+    tasks: Vec<(SystemTask, Result<TaskIdentity, ReadError>)>,
 }
 
 impl Reader {
     /// A per-user install the lawyer placed, with both tasks registered.
     fn adopted() -> Reader {
-        let tasks = POOL_TASKS.map(|task| (task, registered(task)));
+        let tasks = POOL_TASKS.map(|task| (task, Ok(registered(task))));
         Reader {
             copy: Ok(Some(CopyOwner::User(lawyer()))),
             tasks: tasks.to_vec(),
-            unreadable: false,
         }
     }
 
@@ -254,40 +405,45 @@ impl TaskReader for Reader {
     fn exe(&mut self) -> Result<PathBuf, String> {
         Ok(PathBuf::from(EXE))
     }
-    fn found(&mut self, task: SystemTask) -> Result<Option<TaskIdentity>, String> {
-        if self.unreadable {
-            return Err("ITaskService::Connect failed (0x80070005)".to_owned());
-        }
+    fn found(&mut self, task: SystemTask) -> Result<Option<TaskIdentity>, ReadError> {
         let found = self.tasks.iter().find(|(held, _)| *held == task);
-        Ok(found.map(|(_, identity)| identity.clone()))
+        found.map(|(_, read)| read.clone()).transpose()
+    }
+    fn descriptor(&mut self, owner: &Sid) -> Result<Vec<u8>, String> {
+        Ok(test_descriptor(owner))
     }
 }
 
 #[test]
-fn readiness_is_not_ready_while_a_per_user_task_is_missing_or_differs() {
-    let missing = SetupState::Failed(TASK_MISSING.to_owned());
+fn readiness_says_missing_changed_or_unchecked_on_a_per_user_install() {
+    let failed = |words: &str| SetupState::Failed(words.to_owned());
     assert_eq!(
         TASK_MISSING,
         "Clauseo's clean-up task is missing. Repair Clauseo to put it back."
     );
     let ready = |mut reader: Reader| ready_with_tasks(SetupState::Ready, &mut reader);
     assert_eq!(ready(Reader::adopted()), SetupState::Ready);
-    assert_eq!(ready(Reader::adopted().without(SystemTask::Sweep)), missing);
-    assert_eq!(ready(Reader::adopted().without(SystemTask::Stop)), missing);
-    // The refresh task isn't one of the two.
     assert_eq!(
-        ready(Reader::adopted().without(SystemTask::Refresh)),
-        SetupState::Ready
+        ready(Reader::adopted().without(SystemTask::Sweep)),
+        failed(TASK_MISSING)
+    );
+    assert_eq!(
+        ready(Reader::adopted().without(SystemTask::Stop)),
+        failed(TASK_MISSING)
     );
     let mut tampered = Reader::adopted();
-    tampered.tasks[1].1.actions = vec![TaskAction::Exec {
-        path: r"C:\Users\lawyer\evil.exe".to_owned(),
-        arguments: "--sweep-tasks".to_owned(),
-    }];
-    assert_eq!(ready(tampered), missing);
-    let mut swept = Reader::adopted().without(SystemTask::Sweep);
-    assert_eq!(needs_repair(&mut swept, SystemTask::Sweep), Ok(true));
-    assert_eq!(needs_repair(&mut swept, SystemTask::Stop), Ok(false));
+    if let Ok(task) = &mut tampered.tasks[1].1 {
+        task.actions = vec![exec(r"C:\Users\lawyer\evil.exe", "--sweep-tasks")];
+    }
+    assert_eq!(ready(tampered), failed(TASK_CHANGED));
+    // A read the Task Scheduler refuses is a changed descriptor; one it can't answer is
+    // unchecked, never Ready.
+    let mut refused = Reader::adopted();
+    refused.tasks[1].1 = Err(ReadError::Refused);
+    assert_eq!(ready(refused), failed(TASK_CHANGED));
+    let mut down = Reader::adopted();
+    down.tasks[0].1 = Err(ReadError::Failed("CoCreateInstance failed".to_owned()));
+    assert_eq!(ready(down), failed(TASK_UNCHECKED));
     // A state that isn't ready stays as it is.
     let mut gone = Reader::adopted().without(SystemTask::Sweep);
     assert_eq!(
@@ -297,27 +453,21 @@ fn readiness_is_not_ready_while_a_per_user_task_is_missing_or_differs() {
 }
 
 #[test]
-fn machine_installs_other_owners_and_unreadable_tasks_keep_the_state() {
+fn machine_installs_other_owners_and_an_unread_record_keep_the_state() {
     let ready = |mut reader: Reader| ready_with_tasks(SetupState::Ready, &mut reader);
     for copy in [
         Ok(Some(CopyOwner::Machine)),
         Ok(None),
         Ok(Some(CopyOwner::User(Sid::parse(OTHER).unwrap()))),
+        Err("RegGetValueW failed (5)".to_owned()),
     ] {
         let mut reader = Reader::adopted().without(SystemTask::Sweep);
         reader.copy = copy.clone();
         assert_eq!(
-            needs_repair(&mut reader, SystemTask::Sweep),
-            Ok(false),
+            repair_reason(&mut reader, SystemTask::Sweep),
+            None,
             "{copy:?}"
         );
         assert_eq!(ready(reader), SetupState::Ready, "{copy:?}");
     }
-    let mut unreadable = Reader::adopted();
-    unreadable.unreadable = true;
-    assert!(needs_repair(&mut unreadable, SystemTask::Sweep).is_err());
-    assert_eq!(ready(unreadable), SetupState::Ready);
-    let mut record = Reader::adopted();
-    record.copy = Err("RegGetValueW failed (5)".to_owned());
-    assert_eq!(ready(record), SetupState::Ready);
 }

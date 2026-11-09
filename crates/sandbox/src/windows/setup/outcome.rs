@@ -362,6 +362,10 @@ pub struct SetupReport {
     /// effect: under Group Policy they may not, which leaves WFP's filters enforcing alone
     /// ([`FirewallOutcome::Ineffective`](crate::windows::wfp::FirewallOutcome::Ineffective)).
     pub network: NetworkReport,
+    /// On a per-user install, the SYSTEM stop and sweep tasks: `Err` when one that was missing
+    /// or changed couldn't be put back, and why (`user_tasks.rs`). The set-up still succeeds;
+    /// the readiness check says not ready until a repair puts it back.
+    pub tasks: Result<(), String>,
 }
 
 /// What a run did to leave at least [`MIN_FREE_AFTER_RUN`](super::MIN_FREE_AFTER_RUN) free pool

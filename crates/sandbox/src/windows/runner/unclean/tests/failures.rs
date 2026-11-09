@@ -4,6 +4,7 @@
 //! so, in the readiness check's words.
 
 use super::*;
+use crate::windows::refresh::{TASK_CHANGED, TASK_MISSING, TASK_UNCHECKED};
 
 const SWEPT: MarkerState = MarkerState::AwaitingSweep { sweep: 7 };
 
@@ -63,23 +64,30 @@ fn a_swept_marker_whose_re_mark_cant_be_written_refuses_the_logon_without_a_stop
 }
 
 #[test]
-fn a_sweep_refused_while_its_task_is_missing_says_to_repair_clauseo() {
+fn a_sweep_refused_while_its_task_is_missing_or_changed_says_to_repair_clauseo() {
     let awaiting = Some(MarkerState::AwaitingSweep { sweep: 6 });
-    // F4's logon refusal, after its 15 s wait.
-    let mut fake = Fake::new();
-    fake.marker("a1", Some(POOL_A), awaiting);
-    fake.task_missing = true;
-    let refused = logon_check(&mut fake, &sid(POOL_A)).unwrap_err();
-    assert_eq!(refused, Refused::sweep(TASK_MISSING.to_owned()));
+    for words in [TASK_MISSING, TASK_CHANGED, TASK_UNCHECKED] {
+        // F4's logon refusal, after its 15 s wait.
+        let mut fake = Fake::new();
+        fake.marker("a1", Some(POOL_A), awaiting);
+        fake.task_repair = Some(words);
+        let refused = logon_check(&mut fake, &sid(POOL_A)).unwrap_err();
+        assert_eq!(refused, Refused::sweep(words.to_owned()));
+        assert_eq!(fake.asked("stop"), 0);
+        // A launch's refusal says the same.
+        assert_eq!(await_sweeps(&mut fake), Err(words.to_owned()));
+    }
     assert_eq!(
         TASK_MISSING,
         "Clauseo's clean-up task is missing. Repair Clauseo to put it back."
     );
-    assert_eq!(fake.asked("stop"), 0);
-    // A launch's refusal says the same.
-    assert_eq!(await_sweeps(&mut fake), Err(TASK_MISSING.to_owned()));
-    // With the task there, both still say the sweep didn't finish.
-    fake.task_missing = false;
+    assert_eq!(
+        TASK_CHANGED,
+        "Clauseo's clean-up task has been changed. Repair Clauseo to put it back."
+    );
+    // With the task as the set-up has it, both still say the sweep didn't finish.
+    let mut fake = Fake::new();
+    fake.marker("a1", Some(POOL_A), awaiting);
     let refused = logon_check(&mut fake, &sid(POOL_A)).unwrap_err();
     assert_eq!(refused.exit, RunExit::AwaitingSweep);
     assert!(

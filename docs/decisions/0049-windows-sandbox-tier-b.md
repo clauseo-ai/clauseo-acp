@@ -1824,6 +1824,24 @@ the delete, and so the registration, with that error: a user who could make the 
 the install, but not take it over. A folder an administrator made, owned by that administrator's
 own SID rather than Administrators, is deleted and made again, which loses nothing.
 
+**Per user, after install.** Nothing but `--adopt` registered the per-user tasks, so a stop or
+sweep task deleted or changed later stayed that way: every second launch was refused for
+`AwaitingSweep` while Settings said ready. Now the per-user set-up (the app's repair, run
+through the admin copy) reads both back and compares them by meaning with what `register_task`
+makes (`refresh::task_identity`). The fields compared: the principal's SID and run level, the
+program (canonical path) and argument, the triggers, enabled, start on demand, battery
+behaviour, the instance policy, and the descriptor's owner, group and set of entries. A missing
+task, one that differs, or one the set-up may not read is registered again, or updated in
+place, by `register_task`. It runs the path the set-up checked, and only once the copy passes
+the whole of `admin_copy::check`. A failure here never fails the set-up: it is named in the
+report (`SetupReport::tasks`). The readiness check (`UserSetup::state`) reads the same two
+tasks as the lawyer. A `Ready` with either task missing, changed or unreadable becomes
+`Failed`, in these words: "Clauseo's clean-up task is missing. Repair Clauseo to put it back.",
+"Clauseo's clean-up task has been changed. Repair Clauseo to put it back.", or "Clauseo couldn't
+check its clean-up task because Windows Task Scheduler didn't respond. Restart the computer; if
+this message stays, repair Clauseo." A launch refused for `AwaitingSweep` gives the same words
+instead of "didn't finish". The host doesn't carry the words to Settings yet (R17 PR-E).
+
 **Per machine.** A per-machine `--adopt` has no owner to name in the descriptor, so it registers
 none of the three. The refresh task stays per-user only: IT updates a per-machine install. The
 stop and sweep tasks (`refresh::POOL_TASKS`) are registered by the elevated set-up instead, once

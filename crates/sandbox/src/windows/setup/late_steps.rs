@@ -33,13 +33,17 @@ const ADMINISTRATORS: &str = "S-1-5-32-544";
 /// record's `AdminCopyOwner` is `machine`), the SYSTEM tasks `\Clauseo\SandboxStop` and
 /// `\Clauseo\SandboxSweep` are registered for `owner`, or replaced when they are there, by the
 /// same registration `--adopt` makes per user (`refresh::register_task`). Their descriptor then
-/// names `owner` alone, so a previous owner's start right goes with the replaced ones. On a
-/// per-user install whose copy `owner` placed, `--adopt` registered them, and the set-up puts
-/// back one that is missing or isn't the same task (`user_tasks::ensure`), so the app's repair
-/// heals a deleted or tampered task. An install with no admin copy has none, and one another
-/// user placed is left alone. A record that can't be read or a registration that fails is
-/// [`Step::StopTask`], rolled back.
-pub(super) fn stop_task(machine: &mut impl Machine, owner: &Sid) -> Result<(), Failed> {
+/// names `owner` alone, so a previous owner's start right goes with the replaced ones. A record
+/// that can't be read or a registration that fails is [`Step::StopTask`], rolled back.
+///
+/// On a per-user install whose copy `owner` placed, `--adopt` registered them, and the set-up
+/// puts back one that is missing or changed (`user_tasks::ensure`), so the app's repair heals a
+/// deleted or tampered task. That never fails the set-up: `Ok(Err)` says what wasn't put back.
+/// An install with no admin copy has none, and one another user placed is left alone.
+pub(super) fn stop_task(
+    machine: &mut impl Machine,
+    owner: &Sid,
+) -> Result<Result<(), String>, Failed> {
     let failed = |why: String| {
         (
             Step::StopTask,
@@ -49,10 +53,13 @@ pub(super) fn stop_task(machine: &mut impl Machine, owner: &Sid) -> Result<(), F
     match machine.copy_owner() {
         Ok(Some(CopyOwner::Machine)) => machine
             .register_stop_task(owner)
+            .map(Ok)
             .map_err(|error| failed(cause_of(&error))),
         #[cfg(any(windows, test))]
-        Ok(Some(CopyOwner::User(placed))) if placed == *owner => user_tasks::ensure(machine, owner),
-        Ok(Some(CopyOwner::User(_)) | None) => Ok(()),
+        Ok(Some(CopyOwner::User(placed))) if placed == *owner => {
+            Ok(user_tasks::ensure(machine, owner))
+        }
+        Ok(Some(CopyOwner::User(_)) | None) => Ok(Ok(())),
         Err(error) => Err(failed(format!(
             "the record's AdminCopyOwner can't be read ({})",
             cause_of(&error)

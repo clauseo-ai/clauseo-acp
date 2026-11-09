@@ -1,7 +1,8 @@
 //! A per-user install's stop and sweep tasks (`user_tasks::ensure`): the set-up the app runs as
-//! its repair registers a missing task, replaces one that differs in any part `--adopt`
-//! registers, leaves the same task alone, and registers nothing while the program they would run
-//! as SYSTEM isn't limited to administrators; the readiness check then says not ready.
+//! its repair registers a missing task and re-registers one that differs in any part `--adopt`
+//! registers, with the path it checked, and leaves the same task alone. A program that fails its
+//! check, a task that can't be read or one that can't be registered never fails the set-up: it
+//! is named in the report, and the readiness check then says not ready.
 
 use std::path::PathBuf;
 
@@ -10,7 +11,8 @@ use super::fake_more::{TASK_EXE, registered_task};
 use super::*;
 use crate::SetupState;
 use crate::windows::refresh::task_identity::{
-    TASK_MISSING, TaskAction, TaskIdentity, TaskReader, TaskTrigger, ready_with_tasks,
+    INSTANCES_IGNORE_NEW, OnBattery, ReadError, TASK_CHANGED, TASK_MISSING, TASK_UNCHECKED,
+    TaskAction, TaskIdentity, TaskReader, TaskTrigger, ready_with_tasks, test_descriptor,
 };
 use crate::windows::refresh::{POOL_TASKS, SystemTask};
 use crate::windows::setup::record_values::CopyOwner;
@@ -20,7 +22,7 @@ fn adopted(test: &str) -> FakeMachine {
     let mut machine = FakeMachine::new(test);
     machine.state.copy_owner = Some(CopyOwner::User(owner()));
     for task in POOL_TASKS {
-        let found = registered_task(task, &owner());
+        let found = Ok(registered_task(task, &owner()));
         machine.state.tasks.insert(task.name().to_owned(), found);
     }
     machine
@@ -31,6 +33,11 @@ fn replaced(machine: &FakeMachine, from: usize) -> Vec<String> {
     let calls = machine.calls_since(from);
     let calls = calls.into_iter().filter(|c| c.starts_with("replace_task"));
     calls.map(str::to_owned).collect()
+}
+
+/// Whether `machine` holds `task` as the owner's set-up registers it.
+fn holds(machine: &FakeMachine, task: SystemTask) -> bool {
+    machine.state.tasks.get(task.name()) == Some(&Ok(registered_task(task, &owner())))
 }
 
 /// The readiness check over `machine`'s tasks, as the owner.
@@ -46,32 +53,41 @@ impl TaskReader for Reader<'_> {
     fn exe(&mut self) -> Result<PathBuf, String> {
         Ok(PathBuf::from(TASK_EXE))
     }
-    fn found(&mut self, task: SystemTask) -> Result<Option<TaskIdentity>, String> {
-        Ok(self.0.state.tasks.get(task.name()).cloned())
+    fn found(&mut self, task: SystemTask) -> Result<Option<TaskIdentity>, ReadError> {
+        self.0.state.tasks.get(task.name()).cloned().transpose()
     }
+    fn descriptor(&mut self, owner: &Sid) -> Result<Vec<u8>, String> {
+        Ok(test_descriptor(owner))
+    }
+}
+
+/// The readiness check's state for `machine` once set up.
+fn readiness(machine: &FakeMachine) -> SetupState {
+    ready_with_tasks(SetupState::Ready, &mut Reader(machine))
 }
 
 #[test]
 fn a_missing_task_is_registered_again_by_the_set_up() {
+    // A deleted task, or the whole `\Clauseo` folder gone (`task_identity::not_found`).
     let mut machine = adopted("user-tasks-missing");
-    machine.state.tasks.remove("SandboxSweep");
+    machine.state.tasks.clear();
     assert_eq!(
-        ready_with_tasks(SetupState::Ready, &mut Reader(&machine)),
+        readiness(&machine),
         SetupState::Failed(TASK_MISSING.to_owned())
     );
     let mut acl = FakeAcl::default();
-    set_up_fresh(&mut machine, &mut acl);
+    let report = set_up_fresh(&mut machine, &mut acl);
+    assert_eq!(report.tasks, Ok(()));
     let owner_rid = rid(&owner());
     assert_eq!(
         replaced(&machine, 0),
-        [format!("replace_task SandboxSweep {owner_rid} false")]
+        [
+            format!("replace_task SandboxStop {owner_rid}"),
+            format!("replace_task SandboxSweep {owner_rid}")
+        ]
     );
-    let sweep = machine.state.tasks.get("SandboxSweep");
-    assert_eq!(sweep, Some(&registered_task(SystemTask::Sweep, &owner())));
-    assert_eq!(
-        ready_with_tasks(SetupState::Ready, &mut Reader(&machine)),
-        SetupState::Ready
-    );
+    assert!(holds(&machine, SystemTask::Sweep));
+    assert_eq!(readiness(&machine), SetupState::Ready);
     // Idempotent: a re-run finds both tasks the same and touches neither.
     let from = machine.calls.len();
     let req = request(&mut machine, 0, Vec::new());
@@ -84,9 +100,8 @@ fn a_missing_task_is_registered_again_by_the_set_up() {
 type Change = (&'static str, fn(&mut TaskIdentity));
 
 #[test]
-fn a_task_differing_in_any_part_is_replaced() {
-    let other = Sid::parse(OTHER_OWNER).unwrap();
-    let changes: [Change; 8] = [
+fn a_task_differing_in_any_part_is_registered_again() {
+    let changes: [Change; 11] = [
         ("principal", |t| t.principal = OTHER_OWNER.to_owned()),
         ("action", |t| {
             t.actions = vec![TaskAction::Exec {
@@ -95,95 +110,102 @@ fn a_task_differing_in_any_part_is_replaced() {
             }];
         }),
         ("another action", |t| t.actions.push(TaskAction::Other)),
-        ("no action", |t| t.actions.clear()),
         ("arguments", |t| {
             if let Some(TaskAction::Exec { arguments, .. }) = t.actions.first_mut() {
                 arguments.push_str(" --refresh");
             }
         }),
         ("trigger", |t| t.triggers.push(TaskTrigger::Other(1))),
-        ("logon trigger", |t| {
-            t.triggers.push(TaskTrigger::Logon(String::new()));
+        ("disabled", |t| t.settings.enabled = false),
+        ("demand start", |t| t.settings.demand_start = false),
+        ("batteries", |t| t.settings.on_battery = OnBattery::NoStart),
+        ("instances", |t| {
+            t.settings.instances = INSTANCES_IGNORE_NEW + 1;
         }),
+        ("run level", |t| t.run_level = 0),
         ("descriptor", |t| {
-            t.sddl = crate::windows::refresh::task_sddl(&Sid::parse(OTHER_OWNER).unwrap());
+            t.descriptor = test_descriptor(&Sid::parse(OTHER_OWNER).unwrap());
         }),
     ];
     for (part, change) in changes {
         let mut machine = adopted(&format!("user-tasks-differs-{}", part.replace(' ', "-")));
-        let stop = machine.state.tasks.get_mut("SandboxStop").unwrap();
-        change(stop);
-        assert_ne!(stop, &registered_task(SystemTask::Stop, &owner()), "{part}");
-        assert_eq!(
-            ready_with_tasks(SetupState::Ready, &mut Reader(&machine)),
-            SetupState::Failed(TASK_MISSING.to_owned()),
-            "{part}"
-        );
-        let mut acl = FakeAcl::default();
-        set_up_fresh(&mut machine, &mut acl);
-        assert_eq!(
-            replaced(&machine, 0),
-            [format!("replace_task SandboxStop {} true", rid(&owner()))],
-            "{part}"
-        );
-        let stop = machine.state.tasks.get("SandboxStop");
-        assert_eq!(
-            stop,
-            Some(&registered_task(SystemTask::Stop, &owner())),
-            "{part}"
-        );
-        assert_eq!(
-            ready_with_tasks(SetupState::Ready, &mut Reader(&machine)),
-            SetupState::Ready,
-            "{part}"
-        );
+        if let Some(Ok(stop)) = machine.state.tasks.get_mut("SandboxStop") {
+            change(stop);
+        }
+        let changed = SetupState::Failed(TASK_CHANGED.to_owned());
+        assert_eq!(readiness(&machine), changed, "{part}");
+        set_up_fresh(&mut machine, &mut FakeAcl::default());
+        let call = format!("replace_task SandboxStop {}", rid(&owner()));
+        assert_eq!(replaced(&machine, 0), [call], "{part}");
+        assert!(holds(&machine, SystemTask::Stop), "{part}");
+        assert_eq!(readiness(&machine), SetupState::Ready, "{part}");
     }
-    // A task registered for another owner is another descriptor: replaced too.
-    let mut machine = adopted("user-tasks-differs-owner");
-    let theirs = registered_task(SystemTask::Sweep, &other);
+    // A task the set-up may not read is a changed descriptor: registered again.
+    let mut machine = adopted("user-tasks-refused");
     machine
         .state
         .tasks
-        .insert("SandboxSweep".to_owned(), theirs);
+        .insert("SandboxSweep".to_owned(), Err(ReadError::Refused));
     set_up_fresh(&mut machine, &mut FakeAcl::default());
     assert_eq!(replaced(&machine, 0).len(), 1, "{:?}", machine.calls);
+    assert_eq!(readiness(&machine), SetupState::Ready);
 }
 
 #[test]
-fn a_user_writable_action_program_registers_nothing_and_stays_not_ready() {
-    // `task_exe` fails as `admin_copy::check_chain` does for a writable copy or folder above it
-    // (`task_identity_tests` holds the chain itself to that).
+fn a_program_that_fails_its_check_registers_nothing_and_stays_not_ready() {
+    // `task_exe` fails as `admin_copy::check` does for a writable copy or folder above it, a
+    // planted file or a changed hash (`task_identity_tests` holds the check to each).
     let mut machine = adopted("user-tasks-writable");
     machine.state.tasks.clear();
     machine.fail("task_exe");
-    let mut acl = FakeAcl::default();
-    let req = request(&mut machine, 0, Vec::new());
-    let failure = set_up(&mut machine, &mut acl, &req).unwrap_err();
-    assert_eq!(failure.step, Step::StopTask);
-    assert_eq!(failure.exit, SetupExit::Failed);
-    assert!(
-        failure.cause.contains("isn't limited to"),
-        "{}",
-        failure.cause
-    );
-    assert!(failure.cause.contains("injected"), "{}", failure.cause);
+    let report = set_up_fresh(&mut machine, &mut FakeAcl::default());
+    let why = report.tasks.unwrap_err();
+    assert!(why.contains("failed its check"), "{why}");
+    assert!(why.contains("injected"), "{why}");
     assert!(replaced(&machine, 0).is_empty(), "{:?}", machine.calls);
     assert!(machine.state.tasks.is_empty());
+    // The pool is set up all the same; only the tasks wait for the next repair.
+    assert!(machine.state.record.is_some());
     assert_eq!(
-        ready_with_tasks(SetupState::Ready, &mut Reader(&machine)),
+        readiness(&machine),
         SetupState::Failed(TASK_MISSING.to_owned())
     );
 }
 
 #[test]
-fn a_failed_replacement_fails_the_set_up_closed() {
+fn one_task_that_cant_be_read_or_registered_spares_the_pool_and_the_other_task() {
+    let mut machine = adopted("user-tasks-unread");
+    let down = ReadError::Failed("ITaskService::Connect failed".to_owned());
+    machine
+        .state
+        .tasks
+        .insert("SandboxStop".to_owned(), Err(down));
+    machine.state.tasks.remove("SandboxSweep");
+    assert_eq!(
+        readiness(&machine),
+        SetupState::Failed(TASK_UNCHECKED.to_owned())
+    );
+    let report = set_up_fresh(&mut machine, &mut FakeAcl::default());
+    let why = report.tasks.unwrap_err();
+    assert!(why.contains("SandboxStop can't be read"), "{why}");
+    let owner_rid = rid(&owner());
+    assert_eq!(
+        replaced(&machine, 0),
+        [format!("replace_task SandboxSweep {owner_rid}")]
+    );
+    // A registration that fails is named; the set-up still succeeds.
     let mut machine = adopted("user-tasks-replace-fails");
-    machine.state.tasks.remove("SandboxStop");
-    machine.fail(&format!("replace_task SandboxStop {} false", rid(&owner())));
-    let req = request(&mut machine, 0, Vec::new());
-    let failure = set_up(&mut machine, &mut FakeAcl::default(), &req).unwrap_err();
-    assert_eq!(failure.step, Step::StopTask);
-    assert!(failure.cause.contains("SandboxStop"), "{}", failure.cause);
+    machine.state.tasks.clear();
+    machine.fail(&format!("replace_task SandboxStop {owner_rid}"));
+    let report = set_up_fresh(&mut machine, &mut FakeAcl::default());
+    let why = report.tasks.unwrap_err();
+    assert!(why.contains("SandboxStop"), "{why}");
+    assert!(!why.contains("SandboxSweep"), "{why}");
+    assert!(holds(&machine, SystemTask::Sweep));
+    assert_eq!(
+        readiness(&machine),
+        SetupState::Failed(TASK_MISSING.to_owned())
+    );
 }
 
 #[test]

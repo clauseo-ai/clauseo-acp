@@ -22,8 +22,9 @@
 //!   launch requests a sweep and waits for it, up to [`SWEEP_WAIT`], and refuses if it still
 //!   isn't done. `Open` markers are left alone there: they may be live sessions'. So is one
 //!   awaiting a stop, first or final, or whose sweep completed and owes its final stop: F4's.
-//!   This refusal and F4's for a sweep say the sweep task is missing (`refresh::TASK_MISSING`)
-//!   when it is, or isn't the set-up's, rather than that the sweep didn't finish.
+//!   This refusal and F4's for a sweep say the sweep task is missing, changed or unreadable, in
+//!   the readiness check's words (`refresh::task_identity`), rather than that the sweep didn't
+//!   finish, when it is.
 //! - **The desktop's start** ([`start_up`], once, before any launch): every outer of the last run
 //!   is gone, so each `Open` or unreadable marker becomes `AwaitingStop`, and the stop and sweep
 //!   tasks are requested for what is still awaited. It never waits.
@@ -55,7 +56,6 @@ use std::time::Duration;
 
 use super::RunExit;
 use super::marker::{MarkerState, Sequences, UncleanSession};
-use crate::windows::refresh::TASK_MISSING;
 use crate::windows::setup::record_values::{STOP_NEXT, SWEEP_NEXT};
 use crate::windows::sids::Sid;
 
@@ -135,19 +135,16 @@ pub trait Markers {
     fn pause(&mut self, pause: Duration);
     /// Says `line` on the outer's stderr: what went wrong but refuses nothing.
     fn note(&mut self, line: &str);
-    /// Whether `\Clauseo\SandboxSweep` is missing or isn't the one the set-up registers, on
-    /// a per-user install (`refresh::sweep_task_needs_repair`); `false` when it can't be told.
-    fn sweep_task_missing(&mut self) -> bool;
+    /// What the app's repair would mend in `\Clauseo\SandboxSweep` on a per-user install, in
+    /// the readiness check's words (`refresh::sweep_task_repair`: missing, changed, or
+    /// unreadable); `None` while it is the set-up's.
+    fn sweep_task_repair(&mut self) -> Option<&'static str>;
 }
 
-/// Why a sweep a marker awaits didn't complete: `waited`, unless the sweep task is missing or
-/// isn't the set-up's, which no wait mends and the app's repair puts back: [`TASK_MISSING`].
+/// Why a sweep a marker awaits didn't complete: `waited`, unless the sweep task is missing,
+/// changed or can't be read, which no wait mends: then the readiness check's words for it.
 fn unswept(fs: &mut impl Markers, waited: String) -> String {
-    if fs.sweep_task_missing() {
-        TASK_MISSING.to_owned()
-    } else {
-        waited
-    }
+    fs.sweep_task_repair().map_or(waited, str::to_owned)
 }
 
 /// The markers, the stale ones removed: those of a pool user the record no longer lists, and

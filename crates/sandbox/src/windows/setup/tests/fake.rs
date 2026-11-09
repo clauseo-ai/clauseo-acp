@@ -29,7 +29,9 @@ pub(super) use super::fake_acl::FakeAcl;
 pub(super) use super::fake_more::folder_name;
 pub(super) use super::fake_more::{Account, State};
 use super::fake_more::{Around, ProfileFaults, TASK_EXE, registered_task};
-use crate::windows::refresh::{SystemTask, TaskIdentity, task_sddl};
+use crate::windows::refresh::task_identity::test_descriptor;
+use crate::windows::refresh::{ReadError, SystemTask, TaskIdentity as Task, TaskIdentity};
+use crate::windows::setup::MachineError as Error;
 
 /// The owner's SID, and its account's name.
 pub(super) const OWNER: &str = "S-1-5-21-7-8-9-1001";
@@ -480,32 +482,28 @@ impl Machine for FakeMachine {
         Ok(PathBuf::from(TASK_EXE))
     }
 
-    fn task_found(&mut self, task: SystemTask) -> Result<Option<TaskIdentity>, MachineError> {
-        Ok(self.state.tasks.get(task.name()).cloned())
+    fn task_found(&mut self, task: SystemTask) -> Result<Option<TaskIdentity>, ReadError> {
+        self.state.tasks.get(task.name()).cloned().transpose()
     }
 
-    fn task_expected(
-        &mut self,
-        task: SystemTask,
-        owner: &Sid,
-        exe: &Path,
-    ) -> Result<TaskIdentity, MachineError> {
-        Ok(TaskIdentity::expected(task, owner, exe, task_sddl(owner)))
+    fn task_expected(&mut self, task: SystemTask, owner: &Sid, exe: &Path) -> Result<Task, Error> {
+        Ok(TaskIdentity::expected(
+            task,
+            owner,
+            exe,
+            test_descriptor(owner),
+        ))
     }
 
-    fn replace_task(
-        &mut self,
-        task: SystemTask,
-        owner: &Sid,
-        existed: bool,
-    ) -> Result<(), MachineError> {
+    fn replace_task(&mut self, task: SystemTask, owner: &Sid, exe: &Path) -> Result<(), Error> {
         assert!(!self.acting.get(), "the task is registered as admin");
-        self.call(format!(
-            "replace_task {} {} {existed}",
-            task.name(),
-            rid(owner)
-        ))?;
-        let found = registered_task(task, owner);
+        assert_eq!(
+            exe,
+            Path::new(TASK_EXE),
+            "the path checked is the path registered"
+        );
+        self.call(format!("replace_task {} {}", task.name(), rid(owner)))?;
+        let found = Ok(registered_task(task, owner));
         self.state.tasks.insert(task.name().to_owned(), found);
         Ok(())
     }

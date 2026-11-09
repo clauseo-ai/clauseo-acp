@@ -10,7 +10,8 @@ use std::path::{Path, PathBuf};
 use crate::windows::acl_plan::Sid;
 use crate::windows::marker::Marker;
 use crate::windows::pool::MachineRecord;
-use crate::windows::refresh::{SystemTask, TaskIdentity, task_sddl};
+use crate::windows::refresh::task_identity::test_descriptor;
+use crate::windows::refresh::{ReadError, SystemTask, TaskIdentity};
 use crate::windows::setup::record_values::CopyOwner;
 
 use std::cell::Cell;
@@ -167,8 +168,9 @@ pub(super) struct State {
     pub(super) copy_owner: Option<CopyOwner>,
     /// The owner the task `\Clauseo\SandboxStop`'s descriptor names, while it is registered.
     pub(super) stop_task: Option<Sid>,
-    /// A per-user install's tasks in `\Clauseo`, by name, as read back (`Machine::task_found`).
-    pub(super) tasks: BTreeMap<String, TaskIdentity>,
+    /// A per-user install's tasks in `\Clauseo`, by name, as read back (`Machine::task_found`),
+    /// or the error reading one gives.
+    pub(super) tasks: BTreeMap<String, Result<TaskIdentity, ReadError>>,
     /// The SIDs local policy denies "log on through Remote Desktop Services".
     pub(super) remote_denied: BTreeSet<Sid>,
 }
@@ -178,7 +180,7 @@ pub(super) const TASK_EXE: &str = r"C:\Program Files\Clauseo\Sandbox\clauseo-san
 
 /// What `refresh::register_task` registers as `task` for `owner`, as the fake reads it back.
 pub(super) fn registered_task(task: SystemTask, owner: &Sid) -> TaskIdentity {
-    TaskIdentity::expected(task, owner, Path::new(TASK_EXE), task_sddl(owner))
+    TaskIdentity::expected(task, owner, Path::new(TASK_EXE), test_descriptor(owner))
 }
 
 /// [`FakeMachine::new`]: a machine with only the owner's account, `DeviceSync`, an empty data

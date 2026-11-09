@@ -20,9 +20,9 @@ use windows::Win32::Security::Authorization::{
     SE_FILE_OBJECT, SetSecurityInfo,
 };
 use windows::Win32::Security::{
-    ACL, DACL_SECURITY_INFORMATION, GetSecurityDescriptorDacl, GetSecurityDescriptorOwner,
-    OBJECT_SECURITY_INFORMATION, OWNER_SECURITY_INFORMATION, PROTECTED_DACL_SECURITY_INFORMATION,
-    PSECURITY_DESCRIPTOR, PSID, SECURITY_ATTRIBUTES,
+    ACL, DACL_SECURITY_INFORMATION, GetSecurityDescriptorDacl, GetSecurityDescriptorLength,
+    GetSecurityDescriptorOwner, OBJECT_SECURITY_INFORMATION, OWNER_SECURITY_INFORMATION,
+    PROTECTED_DACL_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, PSID, SECURITY_ATTRIBUTES,
 };
 use windows::Win32::Storage::FileSystem::{
     CREATE_NEW, CreateDirectoryW, CreateFileW, DeleteFileW, FILE_ADD_FILE,
@@ -171,6 +171,19 @@ pub(super) fn secure_dir(path: &Path, sddl: &str) -> Result<(), Failed> {
 /// read-back with [`super::sddl_matches`] goes through this, which stays a string compare.
 pub(super) fn as_read_back(sddl: &str) -> Result<String, Failed> {
     Descriptor::from_sddl(sddl)?.to_sddl()
+}
+
+/// `sddl` made into a self-relative descriptor's bytes, for comparing descriptors by meaning
+/// (`task_identity`): the SIDs and rights as Windows parses them, whatever the text's aliases.
+pub(super) fn sddl_bytes(sddl: &str) -> Result<Vec<u8>, Failed> {
+    let descriptor = Descriptor::from_sddl(sddl)?;
+    // SAFETY: the descriptor is valid and self-relative until `descriptor` drops, and the slice
+    // is the length the call gives, so it stays inside it.
+    unsafe {
+        let length = usize::try_from(GetSecurityDescriptorLength(descriptor.0))
+            .map_err(|_too_long| "a descriptor too long to read".to_owned())?;
+        Ok(std::slice::from_raw_parts(descriptor.0.0.cast::<u8>(), length).to_vec())
+    }
 }
 
 /// The admin folder `path`, opened for adding a file (`FILE_WRITE_DATA | FILE_ADD_FILE`),

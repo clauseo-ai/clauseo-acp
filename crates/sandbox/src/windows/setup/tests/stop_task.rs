@@ -95,8 +95,8 @@ fn per_user_and_copyless_set_ups_register_no_per_machine_task() {
     let mut expected = fresh_calls();
     let ensured = [
         "task_exe".to_owned(),
-        format!("replace_task SandboxStop {owner} false"),
-        format!("replace_task SandboxSweep {owner} false"),
+        format!("replace_task SandboxStop {owner}"),
+        format!("replace_task SandboxSweep {owner}"),
     ];
     expected.splice(at..at, ensured);
     assert_eq!(calls, expected);

@@ -39,7 +39,7 @@ use crate::windows::matters::MatterSids;
 use crate::windows::pool::{MachineRecord, POOL_GROUP, POOL_PREFIX, pool_number};
 use crate::windows::record::current_user_sid;
 use crate::windows::refresh::task_identity::action_exe;
-use crate::windows::refresh::{self, SystemTask, TaskIdentity};
+use crate::windows::refresh::{self, ReadError, SystemTask, TaskIdentity};
 use crate::windows::secrets;
 use crate::windows::sids::{Reserved, Sid};
 use crate::windows::wfp::{self, Namespace, NetworkReport, NetworkSetup};
@@ -437,8 +437,8 @@ impl Machine for WindowsMachine {
         action_exe(&WindowsAdminCopy).map_err(|blocked| MachineError::Other(blocked.to_string()))
     }
 
-    fn task_found(&mut self, task: SystemTask) -> Result<Option<TaskIdentity>, MachineError> {
-        refresh::read_task(task).map_err(|error| MachineError::Other(error.to_string()))
+    fn task_found(&mut self, task: SystemTask) -> Result<Option<TaskIdentity>, ReadError> {
+        refresh::read_task(task).map_err(refresh::read_error)
     }
 
     fn task_expected(
@@ -447,17 +447,17 @@ impl Machine for WindowsMachine {
         owner: &Sid,
         exe: &Path,
     ) -> Result<TaskIdentity, MachineError> {
-        let sddl = refresh::task_sddl_read_back(owner).map_err(MachineError::Other)?;
-        Ok(TaskIdentity::expected(task, owner, exe, sddl))
+        let descriptor = refresh::task_descriptor(owner).map_err(MachineError::Other)?;
+        Ok(TaskIdentity::expected(task, owner, exe, descriptor))
     }
 
     fn replace_task(
         &mut self,
         task: SystemTask,
         owner: &Sid,
-        existed: bool,
+        exe: &Path,
     ) -> Result<(), MachineError> {
-        refresh::replace_task(task, owner, existed)
+        refresh::replace_task(task, owner, exe)
             .map_err(|error| MachineError::Other(format!("{}: {error}", task.name())))
     }
 
