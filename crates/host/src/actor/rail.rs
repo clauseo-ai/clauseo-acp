@@ -288,8 +288,12 @@ fn matter_row(
         // (`agent/folder_support.rs`): read from memory, never checked here.
         folder_support: actor.folder_supports.get(&row.id).copied(),
         // The computer's, from the cache (decision record 0051): per-matter causes come later
-        // (R18's switch, PR-E's pool).
-        protection: Some(actor.protection.computer().clone()),
+        // (R18's switch, PR-E's pool). Safe workspace parked for launch: none until desktop
+        // wires `with_sandbox`.
+        protection: actor
+            .protection
+            .sandbox_wired()
+            .then(|| actor.protection.computer().clone()),
     }
 }
 

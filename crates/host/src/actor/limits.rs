@@ -397,12 +397,14 @@ fn carry_out(actor: &mut Actor, actions: Vec<Action>, now: Timestamp) {
 }
 
 /// Starts one read on the pool, numbered; its outcome comes back as [`LimitsInput::Read`].
-/// Under `sandbox.required` no reader starts (it would run outside the jail, 0051): the read
-/// fails at once, so the plan-limits line shows it could not read.
+/// Under `sandbox.required`, with a sandbox wired, no reader starts (it would run outside the
+/// jail, 0051): the read fails at once, so the plan-limits line shows it could not read.
 fn start_read(actor: &mut Actor, agent: AgentKind) {
     let number = actor.limits.next_read;
     actor.limits.next_read = number.saturating_add(1);
-    if actor.effective.settings().sandbox.required {
+    // Safe workspace parked for launch: `sandbox.required` blocks no read until desktop wires
+    // `with_sandbox`.
+    if actor.protection.sandbox_wired() && actor.effective.settings().sandbox.required {
         if !actor.limits.refused_reads.contains(&agent) {
             actor.limits.refused_reads.push(agent);
             tracing::info!(?agent, "limits not read: the firm requires the sandbox");

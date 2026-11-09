@@ -298,6 +298,9 @@ mod protection;
 #[path = "host/protection_edges.rs"]
 mod protection_edges;
 #[cfg(test)]
+#[path = "host/protection_parked.rs"]
+mod protection_parked;
+#[cfg(test)]
 #[path = "host/protection_rig.rs"]
 mod protection_rig;
 #[cfg(test)]
