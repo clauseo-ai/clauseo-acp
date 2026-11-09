@@ -1,11 +1,33 @@
 //! The start-up move of Claude's state folders and the notes out of `agent-state` (R17 PR-D1).
 
+use std::cell::Cell;
+use std::io;
 use std::path::{Path, PathBuf};
+
+use clauseo_protocol::{AgentKind, ErrorCode};
 
 use super::{Adopted, Migrated, adopt, migrate, notes_at};
 use crate::agent::state_folder::state_dir;
 use crate::agent::state_folder::tests::{data, matter};
 use crate::write;
+
+thread_local! {
+    /// The seam [`super::rename`] reads: the kind every rename on this thread fails with.
+    pub(crate) static FAIL_RENAMES: Cell<Option<io::ErrorKind>> = const { Cell::new(None) };
+}
+
+/// Makes every move's rename on this thread fail with `kind` until the guard drops: a move
+/// across volumes (`CrossesDevices`, `EXDEV` or `ERROR_NOT_SAME_DEVICE`).
+pub(crate) fn fail_renames_with(kind: io::ErrorKind) -> impl Drop {
+    struct Reset;
+    impl Drop for Reset {
+        fn drop(&mut self) {
+            FAIL_RENAMES.with(|fail| fail.set(None));
+        }
+    }
+    FAIL_RENAMES.with(|fail| fail.set(Some(kind)));
+    Reset
+}
 
 /// `<data>/agent-state/<matter n>/<name>`: the old place.
 fn old(data: &Path, n: u32, name: &str) -> PathBuf {
@@ -69,8 +91,7 @@ fn the_old_layout_moves_once_and_codex_stays() {
         migrate(&data),
         Migrated {
             moved: 4,
-            left: 0,
-            failed: 0
+            ..Migrated::default()
         }
     );
     assert!(moved(&data, 1) && moved(&data, 2));
@@ -113,20 +134,113 @@ fn nothing_to_move_is_fine() {
     assert!(!notes.exists(), "nothing is made when nothing moved");
 }
 
-/// Where a new folder exists already (an older app made the old one again), the new one is used
-/// and the old one stays as it is: never merged, never removed.
+/// Where a new Claude state folder exists already (an older app made the old one again), the new
+/// one is used and the old one stays as it is: never merged, never removed.
 #[test]
-fn an_old_folder_beside_a_new_one_stays() {
+fn an_old_claude_folder_beside_a_new_one_stays() {
     let (data, _home) = data("layout_both");
     plant_old(&data, 1);
+    let claude = state_dir(&data, matter(1), "claude-acp");
+    write::create_dir_all(&claude).unwrap();
+    write::write_file(&claude.join(".claude.json"), b"{}").unwrap();
+    let counts = migrate(&data);
+    assert_eq!((counts.moved, counts.left), (1, 1), "{counts:?}");
+    assert!(!claude.join("projects").exists(), "never merged");
+    let transcript = old(&data, 1, "claude-acp/projects/-m/s1.jsonl");
+    assert_eq!(std::fs::read(transcript).unwrap(), b"transcript");
+    assert!(moved_notes(&data, 1));
+}
+
+/// Whether matter `n`'s old notes are gone and their note is in the new folder.
+fn moved_notes(data: &Path, n: u32) -> bool {
+    let notes = notes_at(data, &matter(n).to_string());
+    std::fs::read(notes.join("n.md")).is_ok_and(|bytes| bytes == b"note")
+        && !old(data, n, "notes").exists()
+}
+
+/// Old notes beside new ones (a downgrade, then an upgrade): at the start each old entry whose
+/// name the new folder lacks moves in, a file and a folder whole; a clash stays in the old
+/// folder, which therefore stays, and the new file is never overwritten; a link stays too. Only
+/// the start merges: a launch's move leaves both.
+#[test]
+fn old_notes_beside_new_ones_are_merged_but_a_clash() {
+    let (data, _home) = data("layout_merge");
+    plant_old(&data, 1);
+    let old_notes = old(&data, 1, "notes");
+    write::create_dir_all(&old_notes.join("drafts")).unwrap();
+    write::write_file(&old_notes.join("drafts/d.md"), b"draft").unwrap();
+    write::write_file(&old_notes.join("clash.md"), b"old").unwrap();
     let notes = notes_at(&data, &matter(1).to_string());
     write::create_dir_all(&notes).unwrap();
-    write::write_file(&notes.join("new.md"), b"new").unwrap();
+    write::write_file(&notes.join("clash.md"), b"new").unwrap();
+    assert_eq!(
+        adopt(&data, &notes).unwrap(),
+        Adopted::Left,
+        "a launch never merges"
+    );
+
     let counts = migrate(&data);
-    assert_eq!((counts.moved, counts.left), (1, 1));
-    assert_eq!(std::fs::read(notes.join("new.md")).unwrap(), b"new");
-    assert!(!notes.join("n.md").exists());
-    assert_eq!(std::fs::read(old(&data, 1, "notes/n.md")).unwrap(), b"note");
+    assert_eq!((counts.merged, counts.clashes), (2, 1), "{counts:?}");
+    assert_eq!(std::fs::read(notes.join("n.md")).unwrap(), b"note");
+    assert_eq!(std::fs::read(notes.join("drafts/d.md")).unwrap(), b"draft");
+    assert_eq!(std::fs::read(notes.join("clash.md")).unwrap(), b"new");
+    assert_eq!(std::fs::read(old_notes.join("clash.md")).unwrap(), b"old");
+    assert_eq!(
+        migrate(&data).merged,
+        0,
+        "a second start merges nothing more"
+    );
+
+    // Without the clash the old folder empties and goes; a second start finds nothing.
+    write::remove_file(&old_notes.join("clash.md")).unwrap();
+    let counts = migrate(&data);
+    assert_eq!((counts.merged, counts.clashes), (0, 0), "{counts:?}");
+    assert!(!old_notes.exists(), "the emptied old notes are removed");
+    assert_eq!(migrate(&data), Migrated::default());
+}
+
+/// A link among the old notes is never moved or followed by the merge.
+#[cfg(unix)]
+#[test]
+fn a_link_in_old_notes_stays_in_the_merge() {
+    let (data, _home) = data("layout_merge_link");
+    plant_old(&data, 1);
+    let old_notes = old(&data, 1, "notes");
+    write::symlink(&data.join("agents"), &old_notes.join("linked")).unwrap();
+    let notes = notes_at(&data, &matter(1).to_string());
+    write::create_dir_all(&notes).unwrap();
+    let counts = migrate(&data);
+    assert_eq!((counts.merged, counts.clashes), (1, 1), "{counts:?}");
+    assert!(old_notes.join("linked").is_symlink());
+    assert!(std::fs::symlink_metadata(notes.join("linked")).is_err());
+}
+
+/// A move across volumes refuses the launch with words that say the agent's files are on
+/// another drive, naming no path; at the start it is counted as failed, and the folder stays.
+#[test]
+fn a_move_across_volumes_refuses_the_launch_saying_so() {
+    let (data, _home) = data("layout_other_volume");
+    plant_old(&data, 1);
+    let claude = state_dir(&data, matter(1), "claude-acp");
+    let notes = notes_at(&data, &matter(1).to_string());
+    let _seam = fail_renames_with(io::ErrorKind::CrossesDevices);
+    assert_eq!(migrate(&data).failed, 2);
+    let error = crate::agent::state_folder::prepare(&data, &claude, AgentKind::Claude).unwrap_err();
+    assert_eq!(error.code(), ErrorCode::AgentLaunchFailed);
+    let text = error.to_string();
+    assert!(text.contains("different drive"), "{text}");
+    assert!(
+        !text.contains(&data.display().to_string()),
+        "no path: {text}"
+    );
+    let error = super::refusal(&adopt(&data, &notes).unwrap_err(), "the matter's notes");
+    assert!(error.to_string().contains("the matter's notes"), "{error}");
+    assert!(error.to_string().contains("different drive"), "{error}");
+    // Any other failure keeps the plain words.
+    let other = super::refusal(&io::Error::from(io::ErrorKind::PermissionDenied), "x");
+    assert!(!other.to_string().contains("drive"), "{other}");
+    assert!(old(&data, 1, "claude-acp/projects/-m/s1.jsonl").exists());
+    assert!(!claude.exists() && !notes.exists());
 }
 
 /// A link in the old place, at a matter's folder or at `agent-state`, is never moved or

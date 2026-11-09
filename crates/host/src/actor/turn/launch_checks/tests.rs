@@ -232,6 +232,40 @@ fn the_notes_folder_is_private_and_never_made_through_a_linked_matter() {
     }
 }
 
+/// R17 PR-D1: notes a failed start-up move left at their old place
+/// (`agent-state/<matter>/notes`) are moved by the launch before it makes the folder; a move
+/// across volumes (the seam) refuses the launch with words that say the agent's files are on
+/// another drive, naming no path, and takes the run folder back.
+#[test]
+fn a_launch_moves_old_notes_first_or_says_they_are_on_another_drive() {
+    use crate::agent::state_folder::layout::tests::fail_renames_with;
+
+    let data = scratch("notes-old-place");
+    let launch = folders(&data, 1);
+    let old = data
+        .join("agent-state")
+        .join(id::<MatterId>(7).to_string())
+        .join("notes");
+    write::create_dir_all(&old).unwrap();
+    write::write_file(&old.join("n.md"), b"note").unwrap();
+    {
+        let _seam = fail_renames_with(std::io::ErrorKind::CrossesDevices);
+        let error = launch.make(&data, &RunSweep::default()).unwrap_err();
+        assert_eq!(error.code(), ErrorCode::AgentLaunchFailed);
+        assert!(error.to_string().contains("different drive"), "{error}");
+        assert!(
+            !error.to_string().contains(&data.display().to_string()),
+            "{error}"
+        );
+        assert!(!launch.root.exists(), "the run folder is taken back");
+        assert!(old.join("n.md").exists() && !launch.notes.exists());
+    }
+    launch.make(&data, &RunSweep::default()).unwrap();
+    assert_eq!(std::fs::read(launch.notes.join("n.md")).unwrap(), b"note");
+    assert!(!old.exists());
+    write::remove_dir_all(&data).unwrap();
+}
+
 /// `remove_run`'s removal takes the run folder the host made, with a link inside it, and never
 /// follows the link: the file outside it survives.
 #[cfg(unix)]

@@ -219,10 +219,7 @@ impl RunFolders {
         for folder in [&self.work, &self.browser, &self.notes, &tmp] {
             if let Err(error) = make_under(data, folder) {
                 self.remove();
-                return Err(Error::refused(
-                    clauseo_protocol::ErrorCode::AgentLaunchFailed,
-                    format!("cannot make the folder {}: {error}", folder.display()),
-                ));
+                return Err(error);
             }
         }
         // The notes folder may be an earlier session's: it is set to 0700 whatever it was.

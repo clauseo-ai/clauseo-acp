@@ -144,6 +144,12 @@ pub(crate) fn remove_tree(path: &Path) -> io::Result<()> {
     }
 }
 
+/// Removes the folder `path` when it is empty (`std::fs::remove_dir` fails on one that holds
+/// anything): old notes the start-up merge emptied (`agent/state_folder/layout.rs`).
+pub(crate) fn remove_empty_dir(path: &Path) -> io::Result<()> {
+    std::fs::remove_dir(path)
+}
+
 /// Removes the link or file `path` itself, never what a link points to: a leftover download's
 /// working entry that is not a real folder (`browser/install/archive.rs`). On Windows a link to
 /// a folder (or a junction) is removed as a folder, which removes the link only.

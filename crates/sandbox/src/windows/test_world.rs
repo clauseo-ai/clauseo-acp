@@ -27,8 +27,9 @@ pub(super) const GROUP_SID: &str = "S-1-5-21-1111111111-2222222222-3333333333-10
 /// This matter's SID in the tests.
 pub(super) const MATTER_SID: &str = "S-1-5-21-2626480971-3383066999-180375651-600177987";
 
-/// This matter's state folder, under its id as the plan expects, relative to the temp folder.
-pub(super) const STATE: &str = "data/agent-state/01890a5d-ac96-774b-bcce-b302099a8057/claude";
+/// This matter's Claude state folder, under its id as the plan expects (the host's layout since
+/// R17 PR-D1), relative to the temp folder.
+pub(super) const STATE: &str = "data/claude-state/01890a5d-ac96-774b-bcce-b302099a8057/claude-acp";
 /// This matter's notes folder, `<data>\notes\<matter>` (the host's layout since R17 PR-D1).
 pub(super) const NOTES: &str = "data/notes/01890a5d-ac96-774b-bcce-b302099a8057";
 /// The session's temp folder every [`World::builder`] sets (required since R17 PR-D1).

@@ -141,3 +141,25 @@ fn the_vendored_rg_comes_first_and_is_allowed() {
     plant_rg(&w.at("usr/bin"));
     w.check(&[w.at("usr/bin")]).unwrap();
 }
+
+/// The adapter's own nested `node_modules` (`<adapter>/node_modules/@openai/codex-*`) is searched
+/// before the install's, as Node finds the adapter's `@openai/codex`; its vendored `rg` is found
+/// with no `rg` on the `PATH` and none in the install's `@openai/codex`.
+#[test]
+fn the_adapters_own_nested_codex_is_searched_first() {
+    let w = World::new("rg-guard-nested");
+    let nested = w
+        .at("install/node_modules/@zed-industries/codex-acp/node_modules/@openai/codex-linux-x64")
+        .join("vendor")
+        .join(triple())
+        .join("codex-path");
+    plant_rg(&nested);
+    let script = w.at("install/node_modules/@zed-industries/codex-acp/dist/index.js");
+    assert_eq!(vendor_folders(&script), std::slice::from_ref(&nested));
+    let empty = w.at("bin-empty");
+    write::create_dir_all(&empty).unwrap();
+    w.check(&[empty]).unwrap();
+    // With the install's too, the nested one still comes first.
+    plant_rg(&w.vendored());
+    assert_eq!(vendor_folders(&script), [nested, w.vendored()]);
+}

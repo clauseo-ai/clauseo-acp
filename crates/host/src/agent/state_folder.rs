@@ -356,11 +356,7 @@ fn prepare_with(data: &Path, state: &Path, kind: AgentKind, cleaned: bool) -> Re
     if kind == AgentKind::Claude
         && let Err(error) = layout::adopt(data, state)
     {
-        tracing::warn!(error = %Cause(&error), "a Claude state folder did not move; refused");
-        return Err(Error::refused(
-            ErrorCode::AgentLaunchFailed,
-            format!("Clauseo couldn't prepare {who}'s folder."),
-        ));
+        return Err(layout::refusal(&error, "Claude Code's folder"));
     }
     make(data, state, who)?;
     let first = clean(state, kind, !cleaned);

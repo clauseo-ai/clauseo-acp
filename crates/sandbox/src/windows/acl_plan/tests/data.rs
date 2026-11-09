@@ -23,11 +23,16 @@ fn a_notes_folder_on_the_profile_is_refused() {
 
 #[test]
 fn a_read_path_over_other_matters_state_is_refused() {
-    // The review's repro: `data/agent-state` holds every matter's state and notes.
+    // The review's repro: `data/agent-state` holds every matter's Codex state, and since R17
+    // PR-D1 `data/claude-state` and `data/notes` every matter's Claude state and notes.
     let w = World::new("plan-read-agent-state");
-    let policy = w.builder().read(w.at("data/agent-state")).build().unwrap();
-    let want = (PathKind::Read, FolderRefusal::OverlapsDataFolder);
-    assert_eq!(refusal(&w, &policy), Some(want));
+    w.dir
+        .dir("data/agent-state/01890a5d-ac96-774b-bcce-b302099a8057/codex-acp");
+    for root in ["data/agent-state", "data/claude-state", "data/notes"] {
+        let policy = w.builder().read(w.at(root)).build().unwrap();
+        let want = (PathKind::Read, FolderRefusal::OverlapsDataFolder);
+        assert_eq!(refusal(&w, &policy), Some(want), "{root}");
+    }
 }
 
 #[test]
@@ -178,24 +183,51 @@ fn writable_targets_in_the_data_folder_outside_the_allow_list_are_refused() {
             PathKind::Notes,
         );
     }
-    // A Claude state folder under another matter's id in `claude-state`.
-    let other = "data/claude-state/01890a5d-ac96-774b-8cce-b302099a8058/claude-acp";
-    w.dir.dir(other);
-    let other = Policy::builder(w.at("matter"), w.at(other))
+    // The `notes` root, and a folder inside this matter's notes, as the notes folder.
+    for notes in [
+        "data/notes",
+        "data/notes/01890a5d-ac96-774b-bcce-b302099a8057/x",
+    ] {
+        w.dir.dir(notes);
+        refused(
+            w.builder().notes(w.at(notes)).build().unwrap(),
+            PathKind::Notes,
+        );
+    }
+    // As the state folder: another matter's Claude state folder; the `claude-state` root; this
+    // matter's folder in `claude-state` itself; another agent's name under either root; and
+    // Claude's state at its place before R17 PR-D1, which the host never builds now.
+    for state in [
+        "data/claude-state/01890a5d-ac96-774b-8cce-b302099a8058/claude-acp",
+        "data/claude-state",
+        "data/claude-state/01890a5d-ac96-774b-bcce-b302099a8057",
+        "data/claude-state/01890a5d-ac96-774b-bcce-b302099a8057/codex-acp",
+        "data/agent-state/01890a5d-ac96-774b-bcce-b302099a8057/other",
+        "data/agent-state/01890a5d-ac96-774b-bcce-b302099a8057/claude-acp",
+    ] {
+        w.dir.dir(state);
+        refused(state_policy(&w, state), PathKind::State);
+    }
+}
+
+/// A policy whose state folder is `state` (relative), with the world's matter, home and temp
+/// folder and the data folder hidden.
+fn state_policy(w: &World, state: &str) -> Policy {
+    Policy::builder(w.at("matter"), w.at(state))
         .home(w.at("home"))
         .tmpdir(w.at(crate::windows::test_world::TMP))
         .hidden(w.at("data"))
         .build()
-        .unwrap();
-    refused(other, PathKind::State);
+        .unwrap()
 }
 
-/// The host's layout since R17 PR-D1: Claude's state folder in `<data>\claude-state\<matter>`
-/// (Codex's stays in `agent-state`) and the notes in `<data>\notes\<matter>`.
+/// The host's layout since R17 PR-D1: Codex's state folder `<data>\agent-state\<matter>\codex-acp`
+/// with its credential link, and the notes in `<data>\notes\<matter>` (Claude's,
+/// `claude-state\<matter>\claude-acp`, is the world's own [`STATE`]).
 #[test]
-fn a_claude_state_folder_in_claude_state_is_planned() {
-    let w = World::new("plan-claude-state");
-    let state = "data/claude-state/01890a5d-ac96-774b-bcce-b302099a8057/claude-acp";
+fn a_codex_state_folder_in_agent_state_is_planned() {
+    let w = World::new("plan-codex-state");
+    let state = "data/agent-state/01890a5d-ac96-774b-bcce-b302099a8057/codex-acp";
     w.dir.dir(state);
     let policy = Policy::builder(w.at("matter"), w.at(state))
         .home(w.at("home"))
@@ -221,7 +253,7 @@ fn the_real_state_notes_store_and_an_agent_runtime_are_planned() {
         .unwrap();
     assert_eq!(refusal(&w, &policy), None);
     assert_eq!(refusal(&w, &w.full_policy()), None);
-    assert!(w.canonical(STATE).ends_with("claude"));
+    assert!(w.canonical(STATE).ends_with("claude-acp"));
 }
 
 #[test]

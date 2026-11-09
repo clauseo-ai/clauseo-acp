@@ -8,9 +8,10 @@
 //! So before a Codex launch [`check`] resolves the first executable `rg` in Codex's order: its
 //! `arg0` folder first (made fresh by Codex at its start in its state folder's `tmp`, holding only
 //! Codex's own aliases, never an `rg`, so not searched), then the vendored
-//! `vendor/<triple>/codex-path` of the `@openai/codex` package next to the adapter (Codex puts it
-//! first on its `PATH`, `arg0/src/lib.rs:160-171`), then the launch's `PATH` (the settings',
-//! with `path_prepend` first, as `agent::launch_spec` merges it). The launch is refused with
+//! `vendor/<triple>/codex-path` of the `@openai/codex` package the adapter loads, its own nested
+//! `node_modules` first ([`vendor_folders`]; Codex puts it first on its `PATH`,
+//! `arg0/src/lib.rs:160-171`), then the launch's `PATH` (the settings', with `path_prepend`
+//! first, as `agent::launch_spec` merges it). The launch is refused with
 //! `agent.launch_failed` when there is none, or when its canonical path is inside a folder the
 //! session writes or Codex keeps (the matter, the run folder, the notes, the state folder). The
 //! refusal and the log name no path.
@@ -72,18 +73,20 @@ fn triple() -> String {
     format!("{}-unknown-linux-musl", std::env::consts::ARCH)
 }
 
-/// The vendored `codex-path` folders next to the adapter's `script`, nearest first: for each
-/// `node_modules` above it (the adapter's own, then the install's), each `@openai/codex*`
-/// package's `vendor/<triple>/codex-path` that is a folder.
+/// The vendored `codex-path` folders next to the adapter's `script`, nearest first, in Node's
+/// lookup order for the adapter's `@openai/codex`: for each folder above the script (one that is
+/// not itself a `node_modules`), its `node_modules`; so the adapter's own nested
+/// `<adapter>/node_modules` comes before the install's `<install>/node_modules`. In each, every
+/// `@openai/codex*` package's `vendor/<triple>/codex-path` that is a folder, by name.
 pub(crate) fn vendor_folders(script: &Path) -> Vec<PathBuf> {
     let triple = triple();
     let mut found = Vec::new();
-    for modules in script.ancestors().filter(|folder| {
-        folder
-            .file_name()
-            .is_some_and(|name| name == "node_modules")
-    }) {
-        let Ok(entries) = std::fs::read_dir(modules.join("@openai")) else {
+    let folders = script
+        .ancestors()
+        .skip(1)
+        .filter(|folder| folder.file_name().is_none_or(|name| name != "node_modules"));
+    for folder in folders {
+        let Ok(entries) = std::fs::read_dir(folder.join("node_modules").join("@openai")) else {
             continue;
         };
         let mut packages: Vec<PathBuf> = entries

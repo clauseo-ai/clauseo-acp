@@ -67,10 +67,18 @@ pub(super) fn notes_dir(data: &Path, matter: MatterId) -> PathBuf {
 
 /// Makes `folder` under `data` through no link (`write::create_private_dirs_under`); the notes
 /// folder is first moved from its place before R17 PR-D1 if a failed start-up move left it there
-/// (`state_folder::layout::adopt`), so no session starts on new, empty notes. Off the actor.
-pub(super) fn make_under(data: &Path, folder: &Path) -> std::io::Result<()> {
-    crate::agent::state_folder::layout::adopt(data, folder)?;
-    crate::write::create_private_dirs_under(data, folder)
+/// (`state_folder::layout::adopt`), so no session starts on new, empty notes. The launch's
+/// refusal: `layout::refusal` for a move that failed (no path), else `agent.launch_failed`
+/// naming the folder. Off the actor.
+pub(super) fn make_under(data: &Path, folder: &Path) -> Result<(), crate::error::Error> {
+    use crate::agent::state_folder::layout;
+    layout::adopt(data, folder).map_err(|error| layout::refusal(&error, "the matter's notes"))?;
+    crate::write::create_private_dirs_under(data, folder).map_err(|error| {
+        crate::error::Error::refused(
+            clauseo_protocol::ErrorCode::AgentLaunchFailed,
+            format!("cannot make the folder {}: {error}", folder.display()),
+        )
+    })
 }
 
 /// Removes `folder` and all it holds, through no link; a failure is a warning.
