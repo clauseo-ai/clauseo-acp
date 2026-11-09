@@ -93,6 +93,9 @@ fn the_installer_scripts_use_only_known_nsis_variables() {
         // uninstall hook reads.
         "DeleteAppDataCheckboxState",
     ];
+    // hooks.nsh's own `Var`s: 1 when a previous folder was refused, and 1 when the per-machine
+    // installer ignored a vendor key that differed from InstallLocation.
+    const HOOK_VARS: &[&str] = &["ClauseoPreviousIgnored", "ClauseoPreviousKeyMismatch"];
     // Registers $0-$9 and $R0-$R9 need no declaration.
     let digit = |s: &str| s.len() == 1 && s.bytes().all(|b| b.is_ascii_digit());
     let register = |name: &str| digit(name) || name.strip_prefix('R').is_some_and(digit);
@@ -107,7 +110,8 @@ fn the_installer_scripts_use_only_known_nsis_variables() {
                 checked += 1;
                 let known = register(name)
                     || NSIS_CONSTANTS.contains(&name)
-                    || TEMPLATE_VARS.contains(&name);
+                    || TEMPLATE_VARS.contains(&name)
+                    || HOOK_VARS.contains(&name);
                 assert!(
                     known,
                     "{file}:{}: ${name} is not an NSIS variable: {line}",

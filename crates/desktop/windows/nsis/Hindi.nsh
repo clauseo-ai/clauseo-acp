@@ -71,6 +71,9 @@ LangString adminCopySkippedSilent ${LANG_HINDI} "सुरक्षित का
 LangString installTempFailed ${LANG_HINDI} "Clauseo इंस्टॉल नहीं हुआ, क्योंकि इंस्टॉलर Program Files में अपनी अस्थायी फ़ाइलों के लिए ऐसा फ़ोल्डर नहीं बना सका जिसे केवल व्यवस्थापक बदल सकें। इंस्टॉलर फिर से चलाएँ। अगर यह फिर विफल हो, तो इस कंप्यूटर की देखरेख करने वाले व्यक्ति से पूछें।"
 LangString uninstallTempFailed ${LANG_HINDI} "Clauseo अनइंस्टॉल नहीं हुआ, क्योंकि अनइंस्टॉलर Program Files में अपनी अस्थायी फ़ाइलों के लिए ऐसा फ़ोल्डर नहीं बना सका जिसे केवल व्यवस्थापक बदल सकें। कुछ भी नहीं हटाया गया। अनइंस्टॉलर फिर से चलाएँ। अगर यह फिर विफल हो, तो इस कंप्यूटर की देखरेख करने वाले व्यक्ति से पूछें।"
 LangString uninstallNotInPlace ${LANG_HINDI} "Clauseo अनइंस्टॉल नहीं हुआ, क्योंकि अनइंस्टॉलर Clauseo के अपने फ़ोल्डर से शुरू नहीं किया गया। कुछ भी नहीं हटाया गया। सेटिंग्स > ऐप्स से Clauseo अनइंस्टॉल करें, या इस कंप्यूटर की देखरेख करने वाले व्यक्ति से पूछें।"
+; previousInstallIgnored and previousInstallKeyMismatch: provisional Hindi (2026-11-09), pending copy review.
+LangString previousInstallIgnored ${LANG_HINDI} "Clauseo को पहले का एक इंस्टॉल ऐसे फ़ोल्डर में मिला जिसकी वह पुष्टि नहीं कर सका, इसलिए उसने अपने सामान्य फ़ोल्डर में नए सिरे से इंस्टॉल किया।"
+LangString previousInstallKeyMismatch ${LANG_HINDI} "Clauseo को इस बात के दो अलग-अलग रिकॉर्ड मिले कि वह पहले कहाँ इंस्टॉल था, इसलिए उसने वह रिकॉर्ड इस्तेमाल किया जिसे केवल व्यवस्थापक बदल सकते हैं।"
 
 ; Tauri's stock English, as @tauri-apps/cli 2.12.2 ships it (crates/tauri-bundler/src/bundle/
 ; windows/nsis/languages/English.nsh at tauri-cli-v2.12.2), deleteAppData aside, with one fix:

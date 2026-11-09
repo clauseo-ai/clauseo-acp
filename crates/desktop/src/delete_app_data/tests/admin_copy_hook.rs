@@ -53,7 +53,7 @@ fn the_hook_checks_the_chain_then_compares_the_hash_reading_the_record_again_on_
     // $R4 starts refused; the chain, then the record's hash, then the copy's, then the compare.
     let seeded = line_with(verified, &["StrCpy $R4 0"]);
     let copy = line_with(verified, &["StrCpy $0 \"${CLAUSEO_ADMIN_EXE}\""]);
-    let chain_check = line_with(verified, &["!insertmacro CLAUSEO_LEVEL_SAFE"]);
+    let chain_check = line_with(verified, &["!insertmacro CLAUSEO_CHAIN_SAFE"]);
     let record = compare_at(verified);
     assert!(
         seeded < copy && copy < chain_check && chain_check < record,
@@ -447,9 +447,20 @@ fn the_hooks_chain_rule_runs_from_the_drives_root_down() {
     for sid in ["S-1-5-18", "S-1-5-32-544", "${CLAUSEO_TRUSTED_INSTALLER}"] {
         line_with(trusted, &[&format!("$R8 == \"{sid}\"")]);
     }
+    // One chain rule, for the admin copy and the previous install folder alike.
+    for user in ["CLAUSEO_ADMIN_COPY_VERIFIED", "CLAUSEO_PREVIOUS_DIR_OK"] {
+        line_with(
+            macro_lines(&code, user),
+            &["!insertmacro CLAUSEO_CHAIN_SAFE"],
+        );
+    }
+    let levels = code
+        .iter()
+        .filter(|line| *line == "!insertmacro CLAUSEO_LEVEL_SAFE");
+    assert_eq!(levels.count(), 1, "{code:?}");
     // The first level is the root (the path's first three characters) against the root's
-    // rights; the last, the copy, a file; every other a folder against the full rights.
-    let verified = macro_lines(&code, "CLAUSEO_ADMIN_COPY_VERIFIED");
+    // rights; the last, the file, a file; every other a folder against the full rights.
+    let verified = macro_lines(&code, "CLAUSEO_CHAIN_SAFE");
     let level = line_with(verified, &["StrCpy $4 $0 $3"]);
     let expected = [
         "StrCpy $4 $0 $3",
