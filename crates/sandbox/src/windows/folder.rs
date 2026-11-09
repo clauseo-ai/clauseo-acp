@@ -41,8 +41,9 @@ use crate::links::network::{Mounts, is_network_path};
 /// first that answers wins):
 ///
 /// 1. `Network` when the path is a UNC path (`\\?\UNC\...`, any case), or its drive letter is
-///    not a local disk by its DOS device (a redirector, a `subst` onto a share, an unknown
-///    device). Asked before the folder is opened, so an unreachable server can't fail it.
+///    a network drive by its DOS device and `GetDriveTypeW` (a redirector, `DRIVE_REMOTE`, a
+///    `subst` onto a share), or the path is one the launch can't check by its text (a volume or
+///    device name). Asked before the folder is opened, so an unreachable server can't fail it.
 /// 2. Open the folder. A missing path is `NotFound`; a file is `InvalidInput`.
 /// 3. `Network` when the folder's final path, from `FILE_NAME_OPENED | VOLUME_NAME_DOS`, is a UNC
 ///    path (any case): a link to a share. If that call fails, the answer is an error, never a
@@ -73,6 +74,17 @@ pub fn label_support(path: &Path) -> io::Result<FolderSupport> {
 
 /// [`folder_support`]'s steps, with [`label_support`]'s last one when `label`.
 fn support(path: &Path, label: bool, mounts: &Mounts) -> io::Result<FolderSupport> {
+    support_with(path, label, mounts, open)
+}
+
+/// [`support`] with `open` in place of opening the folder: the first handle on it, made only
+/// once step 1 has ruled a network path out.
+fn support_with(
+    path: &Path,
+    label: bool,
+    mounts: &Mounts,
+    open: impl Fn(&[u16], u32) -> windows::core::Result<Handle>,
+) -> io::Result<FolderSupport> {
     let wide = verbatim_wide(path)?;
     if is_share_path(&wide) || is_network_path(path, mounts) {
         return Ok(FolderSupport::Network);
@@ -384,21 +396,79 @@ fn os_error(error: &windows::core::Error) -> io::Error {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use std::cell::Cell;
 
-    /// A path on a mapped network drive, a `subst` onto a share, or an unknown device is
-    /// `Network` before the folder is opened: none of these drives exists, so an open would fail.
+    use windows::Win32::Foundation::ERROR_ACCESS_DENIED;
+
+    use super::*;
+    use crate::links::network::Drive;
+    use crate::links::network::drives::{REDIRECTORS, drive_table, kind};
+
+    /// A drive table from fake `QueryDosDeviceW` and `GetDriveTypeW` answers: `E:` onwards one
+    /// letter per redirector prefix, `R:` a disk volume that `GetDriveTypeW` calls remote, `D:`
+    /// a fixed disk volume.
+    fn fake_drives() -> Mounts {
+        let redirector = |letter: u8| {
+            let at = usize::from(letter.checked_sub(b'E')?);
+            REDIRECTORS
+                .get(at)
+                .map(|prefix| format!(r"{prefix}\;X:0\host\share"))
+        };
+        let table = drive_table(
+            |letter| {
+                Ok(match letter {
+                    b'D' | b'R' => Some(r"\Device\HarddiskVolume3".to_owned()),
+                    _ => redirector(letter),
+                })
+            },
+            |letter| if letter == b'R' { kind::REMOTE } else { 3 },
+        );
+        let mut mounts = Mounts::default();
+        for (letter, drive) in table {
+            mounts = mounts.with_drive(letter, drive);
+        }
+        mounts
+    }
+
+    /// A UNC path, a redirector's drive, a `DRIVE_REMOTE` drive, a `subst` onto a share, or a
+    /// path the launch can't check by its text is `Network` with no handle opened on it.
     #[test]
-    fn a_network_or_unknown_drive_answers_before_any_open() {
-        use crate::links::network::Drive;
-        let mounts = Mounts::new(Vec::new(), b"Z")
-            .with_drive(b'Y', Drive::Subst(r"\\host\share".to_owned()))
-            .with_drive(b'V', Drive::Unknown);
-        for path in [r"Z:\m", r"Y:\m", r"V:\m", r"\\host\share\m"] {
+    fn a_network_path_answers_with_no_handle_opened() {
+        let mounts = fake_drives().with_drive(b'Y', Drive::Subst(r"\\host\share".to_owned()));
+        let mut paths = vec![
+            r"\\host\share\m".to_owned(),
+            r"\\?\UNC\host\share\m".to_owned(),
+            r"\\.\UNC\host\share\m".to_owned(),
+            r"\\?\Volume{0}\m".to_owned(),
+            r"R:\m".to_owned(),
+            r"\\.\R:\m".to_owned(),
+            r"Y:\m".to_owned(),
+        ];
+        let letters = (b'E'..).take(REDIRECTORS.len());
+        paths.extend(letters.map(|letter| format!(r"{}:\m", char::from(letter))));
+        let opened = |_: &[u16], _: u32| -> windows::core::Result<Handle> {
+            panic!("a handle was opened on a network path")
+        };
+        for path in &paths {
             for label in [false, true] {
-                let got = support(Path::new(path), label, &mounts).unwrap();
+                let got = support_with(Path::new(path), label, &mounts, opened).unwrap();
                 assert_eq!(got, FolderSupport::Network, "{path}");
             }
+        }
+    }
+
+    /// A fixed disk volume, written plainly or as a `\\.\` device path, goes on to the open.
+    #[test]
+    fn a_local_drive_goes_on_to_the_open() {
+        let mounts = fake_drives();
+        for path in [r"D:\m", r"\\.\D:\m", r"\\?\D:\m"] {
+            let asked = Cell::new(false);
+            let open = |_: &[u16], _: u32| -> windows::core::Result<Handle> {
+                asked.set(true);
+                Err(ERROR_ACCESS_DENIED.to_hresult().into())
+            };
+            let got = support_with(Path::new(path), false, &mounts, open);
+            assert!(asked.get(), "{path}: {got:?}");
         }
     }
 }

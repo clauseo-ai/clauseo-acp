@@ -37,7 +37,8 @@ pub(super) struct Writable<'a> {
 
 /// Refuses a scan with a `commondir` beside a `HEAD` that is a link (git follows it, the walk
 /// doesn't, so the folder it names would get no deny); with a `gitdir:` or `commondir` path on
-/// a device the launch doesn't know (it may be one the agent can write); or with one naming a
+/// a network drive or one the launch can't check (it may be one the agent can write); or with
+/// one naming a
 /// folder outside the matter that is inside a place the agent can write (`writable` and
 /// `others`) or holds one (git reads `config`, `hooks/` and `info/` beneath it), where the
 /// agent could write what git reads and the plan has no read-only rule to stop it. A folder

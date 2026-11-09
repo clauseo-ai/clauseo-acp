@@ -16,8 +16,7 @@ fn found(link: &str, target: &str) -> LinkFinding {
 #[test]
 fn a_link_to_a_network_path_leads_outside_unresolved() {
     let matter = Path::new("/m");
-    let mounts = Mounts::new(vec![(PathBuf::from("/Volumes/share"), true)], b"Z")
-        .with_drive(b'V', network::Drive::Unknown);
+    let mounts = Mounts::new(vec![(PathBuf::from("/Volumes/share"), true)], b"Z");
     let read = fake(&[
         ("/m/unc", r"\\host\share"),
         ("/m/slashes", "//host/share"),
@@ -29,7 +28,7 @@ fn a_link_to_a_network_path_leads_outside_unresolved() {
         ("/m/up", "../m/sub/x"),
         ("/m/sub", "/Volumes/share"),
         ("/m/nt", r"\??\UNC\host\share"),
-        ("/m/vera", r"V:\x"),
+        ("/m/vol", r"\\?\Volume{0}\x"),
         ("/m/junction", r"\??\C:\m\N\..\x"),
     ]);
     for (link, target) in [
@@ -42,7 +41,7 @@ fn a_link_to_a_network_path_leads_outside_unresolved() {
         ("/m/hop", "//host/share"),
         ("/m/up", "/Volumes/share"),
         ("/m/nt", r"\??\UNC\host\share"),
-        ("/m/vera", r"V:\x"),
+        ("/m/vol", r"\\?\Volume{0}\x"),
         ("/m/junction", r"\??\C:\m\N\..\x"),
     ] {
         let got = symlink_finding_with(

@@ -512,7 +512,8 @@ enum Named {
     Inside(PathBuf),
     /// A folder outside the matter.
     Outside(PathBuf),
-    /// A path on a network or unknown device, as far as it was read: never touched.
+    /// A path on a network drive, or one the launch can't check by its text, as far as it was
+    /// read: never touched.
     Unknown(PathBuf),
 }
 

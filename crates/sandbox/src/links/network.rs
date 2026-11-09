@@ -15,7 +15,7 @@ use std::path::{Component, Path, PathBuf};
 use crate::Error;
 use crate::policy::{same, under};
 
-mod drives;
+pub(crate) mod drives;
 
 pub(crate) use drives::Drive;
 
@@ -120,9 +120,9 @@ impl Mounts {
 /// `subst` onto one, `\\server\share`, `\\?\UNC\…`, a non-local macOS mount), or holding a
 /// network mount, by [`classify`] and `mounts` alone, so before any file call on it. The agent
 /// writes anywhere in the matter, and a server holds what the jail can't guard; sharing
-/// matters over a network comes later. A matter on an unknown device is left to the walk,
-/// which refuses any git folder there. On Windows a link in the matter to a share is a link
-/// finding, never followed.
+/// matters over a network comes later. A matter on a path the launch can't check by its text
+/// (a volume or device name, a `..` in a `\\?\` path) refuses too. On Windows a link in the
+/// matter to a share is a link finding, never followed.
 pub(crate) fn check_matter_local(matter: &Path, mounts: &Mounts) -> Result<(), Error> {
     if is_network_path(matter, mounts) || !mounts.network_inside(matter).is_empty() {
         tracing::info!("the sandbox refused a matter on a network drive; nothing was planned");
@@ -142,7 +142,9 @@ pub(crate) fn off_local(path: &Path, mounts: &Mounts) -> Option<(PathBuf, Off)> 
 pub(crate) enum Off {
     /// It reaches a server.
     Network,
-    /// It is on a device the launch doesn't know: a git dir there refuses the launch.
+    /// It can't be checked by its text: a volume or device name (`\\?\Volume{…}`, `\\.\pipe`), a
+    /// `..` in a `\\?\` or `\??\` path, a link that can't be read, or a chain past the cap. A git
+    /// dir there refuses the launch.
     Unknown,
 }
 
@@ -158,9 +160,11 @@ pub(crate) enum Place {
 /// Where `path` is by its text and `mounts`, with no file call. `\\?\` and `\??\` are read
 /// alike, and a `..` in either is unknown (the kernel takes it as written, after any link before
 /// it, so it can't be taken off by text): `UNC\…` after either is network, a drive letter goes
-/// on to the drive check, anything else (a volume or device name) is unknown. Other paths
-/// starting with two separators (`\\host\share`, `//host/share`) are network, `\\.\…`
-/// unknown. A drive letter is what its device is, a `subst` drive one mapping at a time (up to
+/// on to the drive check, anything else (a volume or device name) is unknown. A `\\.\` device
+/// path is `UNC\…` (network), a drive letter (`\\.\D:\x` is `D:\x`: Win32 takes `..` off a
+/// device path by text, as it does a plain one), or another device (unknown). Other paths
+/// starting with two separators (`\\host\share`, `//host/share`) are network. A drive letter
+/// is what its device is ([`Drive`]), a `subst` drive one mapping at a time (up to
 /// [`SUBST_MAX`], past which it is unknown). Any other path is network if its longest
 /// mount-point prefix is.
 pub(crate) fn classify(path: &Path, mounts: &Mounts) -> Place {
@@ -188,7 +192,23 @@ pub(crate) fn classify(path: &Path, mounts: &Mounts) -> Place {
             rest = tail;
         } else if bytes.get(..2).is_some_and(|two| two.iter().all(sep)) {
             let device = bytes.get(2) == Some(&b'.') && bytes.get(3).is_some_and(sep);
-            return Place::Off(if device { Off::Unknown } else { Off::Network });
+            let Some(tail) = bytes.get(4..).filter(|_| device) else {
+                return Place::Off(Off::Network);
+            };
+            if let [u, n, c, after, ..] = tail
+                && [*u, *n, *c].eq_ignore_ascii_case(b"UNC")
+                && sep(after)
+            {
+                return Place::Off(Off::Network);
+            }
+            if drive_letter(tail).is_none() {
+                return Place::Off(Off::Unknown);
+            }
+            let Some(drive_path) = current.to_str().and_then(|text| text.get(4..)) else {
+                return Place::Off(Off::Unknown);
+            };
+            current = PathBuf::from(drive_path);
+            continue;
         }
         let Some(letter) = drive_letter(rest) else {
             return by_mount(current, mounts);
@@ -196,7 +216,6 @@ pub(crate) fn classify(path: &Path, mounts: &Mounts) -> Place {
         let target = match mounts.drive(letter) {
             Drive::Local => return Place::Local(current),
             Drive::Network => return Place::Off(Off::Network),
-            Drive::Unknown => return Place::Off(Off::Unknown),
             Drive::Subst(target) => target,
         };
         let skip = bytes.len() - rest.len() + 2;

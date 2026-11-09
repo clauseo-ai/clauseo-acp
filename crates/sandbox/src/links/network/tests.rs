@@ -19,6 +19,8 @@ fn server_and_device_paths_are_not_touched_by_their_text() {
         r"\??\UNC\host\share",
         r"\??\unc\host\share",
         r"/\host\share",
+        r"\\.\UNC\host\share",
+        "//./unc/host/share",
     ] {
         assert_eq!(place(path, &none), Place::Off(Off::Network), "{path}");
     }
@@ -26,7 +28,7 @@ fn server_and_device_paths_are_not_touched_by_their_text() {
         r"\\.\pipe\x",
         r"\\?\Volume{0}\x",
         r"\??\Volume{0}\x",
-        r"\\.\C:\x",
+        r"\\.\PhysicalDrive0",
     ] {
         assert_eq!(place(path, &none), Place::Off(Off::Unknown), "{path}");
     }
@@ -44,7 +46,7 @@ fn server_and_device_paths_are_not_touched_by_their_text() {
 
 #[test]
 fn a_drive_letter_is_what_its_device_is_in_any_case_and_form() {
-    let mounts = Mounts::new(Vec::new(), b"z").with_drive(b'V', Drive::Unknown);
+    let mounts = Mounts::new(Vec::new(), b"z");
     for path in [
         r"Z:\repo",
         r"z:\repo",
@@ -55,9 +57,6 @@ fn a_drive_letter_is_what_its_device_is_in_any_case_and_form() {
     ] {
         assert_eq!(place(path, &mounts), Place::Off(Off::Network), "{path}");
     }
-    for path in [r"V:\x", r"\??\v:\x"] {
-        assert_eq!(place(path, &mounts), Place::Off(Off::Unknown), "{path}");
-    }
     for path in [r"C:\repo", r"\\?\C:\repo"] {
         assert_eq!(
             place(path, &mounts),
@@ -67,9 +66,25 @@ fn a_drive_letter_is_what_its_device_is_in_any_case_and_form() {
     }
 }
 
+/// A `\\.\` device path on a drive letter is that drive's path, as Win32 reads it: local on a
+/// local drive, network on a network one.
+#[test]
+fn a_device_path_on_a_drive_letter_is_its_drive() {
+    let mounts = Mounts::new(Vec::new(), b"Z");
+    assert_eq!(
+        place(r"\\.\C:\repo\..\x", &mounts),
+        Place::Local(PathBuf::from(r"C:\repo\..\x"))
+    );
+    assert_eq!(
+        place("//./c:/x", &mounts),
+        Place::Local(PathBuf::from("c:/x"))
+    );
+    assert_eq!(place(r"\\.\Z:\x", &mounts), Place::Off(Off::Network));
+}
+
 /// A local `subst` drive is its mapping, one level at a time: onto a local disk it is
-/// local (the mapped path), onto a network or unknown drive it is that, and a chain past the
-/// cap (or a loop) is unknown.
+/// local (the mapped path), onto a network drive it is network, and a chain past the cap (or a
+/// loop) is unknown.
 #[test]
 fn a_subst_drive_is_what_it_maps_to() {
     let subst = |to: &str| Drive::Subst(to.to_owned());
@@ -78,8 +93,6 @@ fn a_subst_drive_is_what_it_maps_to() {
         .with_drive(b'Y', subst(r"X:\deeper"))
         .with_drive(b'N', subst(r"Z:\x"))
         .with_drive(b'Z', Drive::Network)
-        .with_drive(b'U', subst(r"V:\x"))
-        .with_drive(b'V', Drive::Unknown)
         .with_drive(b'L', subst(r"L:\loop"))
         .with_drive(b'S', subst(r"C:\"));
     let local = |path: &str| Place::Local(PathBuf::from(path));
@@ -95,7 +108,6 @@ fn a_subst_drive_is_what_it_maps_to() {
     );
     assert_eq!(place(r"S:\repo", &mounts), local(r"C:\repo"));
     assert_eq!(place(r"N:\repo", &mounts), Place::Off(Off::Network));
-    assert_eq!(place(r"U:\repo", &mounts), Place::Off(Off::Unknown));
     assert_eq!(place(r"L:\repo", &mounts), Place::Off(Off::Unknown));
 }
 
@@ -133,9 +145,9 @@ fn refused(matter: &str, mounts: &Mounts) -> bool {
 fn a_matter_on_a_windows_network_drive_refuses() {
     let mounts = Mounts::new(Vec::new(), b"Z")
         .with_drive(b'C', Drive::Local)
-        .with_drive(b'Y', drives::drive(r"\??\UNC\host\share"))
-        .with_drive(b'X', drives::drive(r"\??\Y:\work"))
-        .with_drive(b'W', drives::drive(r"\??\C:\work"));
+        .with_drive(b'Y', Drive::Network)
+        .with_drive(b'X', Drive::Subst(r"Y:\work".to_owned()))
+        .with_drive(b'W', Drive::Subst(r"C:\work".to_owned()));
     for matter in [
         r"Z:\matters\m",
         r"z:\m",

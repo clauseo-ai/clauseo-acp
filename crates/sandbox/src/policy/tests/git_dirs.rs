@@ -124,9 +124,9 @@ fn parts(outside: &[&str], unknown: &[&str]) -> crate::links::ScanParts {
 
 /// A `subst` drive onto the session's temp folder is caught as agent-writable: the walk
 /// gives its mapped path (`links::tests::named::a_subst_drive_leads_where_it_maps`), and a
-/// path on an unknown device refuses the launch.
+/// path the launch can't check (a volume name) refuses the launch.
 #[test]
-fn a_subst_onto_the_temp_folder_and_an_unknown_device_are_refused() {
+fn a_subst_onto_the_temp_folder_and_an_unchecked_path_are_refused() {
     let others = crate::policy::links::Writable {
         socket: None,
         hidden: &[],
@@ -146,6 +146,11 @@ fn a_subst_onto_the_temp_folder_and_an_unknown_device_are_refused() {
     let found =
         crate::policy::links::check_git_dirs(&parts(&["C:/other/repo"], &[]), &tmp, &others);
     assert!(found.is_ok(), "{found:?}");
-    let found = crate::policy::links::check_git_dirs(&parts(&[], &[r"V:\repo"]), &tmp, &others);
-    refused(found, "drive the launch can't check", Path::new(r"V:\repo"));
+    let found =
+        crate::policy::links::check_git_dirs(&parts(&[], &[r"\\?\Volume{0}\repo"]), &tmp, &others);
+    refused(
+        found,
+        "drive the launch can't check",
+        Path::new(r"\\?\Volume{0}\repo"),
+    );
 }

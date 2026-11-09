@@ -8,7 +8,6 @@ const ECHO: fn(&Path) -> io::Result<PathBuf> = |path| Ok(network::lexical(path))
 
 fn mounts() -> Mounts {
     Mounts::new(vec![(PathBuf::from("/Volumes/share"), true)], b"Z")
-        .with_drive(b'V', network::Drive::Unknown)
         .with_drive(b'X', network::Drive::Subst("C:/data/run/s1/tmp".to_owned()))
 }
 
@@ -54,18 +53,18 @@ fn a_path_through_a_link_to_the_network_is_unknown() {
     }
 }
 
-/// A path on a device the launch doesn't know, as written or through a link, is unknown, and
-/// never resolved: the policy refuses the launch.
+/// A path the launch can't check by its text (a volume or device name), as written or through
+/// a link, is unknown, and never resolved: the policy refuses the launch.
 #[test]
-fn a_path_on_an_unknown_device_is_unknown() {
+fn a_path_named_by_volume_or_device_is_unknown() {
     let matter = Path::new("/m");
     let base = Path::new("/m/.git");
-    let read = fake(&[("/m/vera", r"V:\repo")]);
+    let read = fake(&[("/m/vol", r"\\?\Volume{0}\repo")]);
     for (line, want) in [
-        (r"V:\repo", r"V:\repo"),
-        (r"\??\V:\repo", r"\??\V:\repo"),
+        (r"\\?\Volume{0}\repo", r"\\?\Volume{0}\repo"),
+        (r"\??\Volume{0}\repo", r"\??\Volume{0}\repo"),
         (r"\\.\pipe\x", r"\\.\pipe\x"),
-        ("../vera/x", r"V:\repo"),
+        ("../vol/x", r"\\?\Volume{0}\repo"),
     ] {
         let got = named_with(matter, base, line, &mounts(), &read, never);
         assert_eq!(got, Some(Named::Unknown(PathBuf::from(want))), "{line}");

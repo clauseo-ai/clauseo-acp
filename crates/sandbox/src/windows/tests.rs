@@ -12,8 +12,6 @@ use super::test_dacl;
 use super::{FolderSupport, folder_support};
 use crate::test_support::TempDir;
 
-mod drive_report;
-
 /// `OWNER RIGHTS` with Modify only, and no inherited entries: the owner loses the implicit
 /// `WRITE_DAC` that an owner otherwise has. `0x1301bf` is Modify (`DELETE` included).
 const OWNER_RIGHTS_MODIFY: &str = "D:P(A;OICI;0x1301bf;;;OW)";
@@ -135,16 +133,19 @@ fn a_device_unc_path_is_network() {
     assert_eq!(folder_support(share).unwrap(), FolderSupport::Network);
 }
 
-/// A `\\?\` path on a local drive goes on to the drive check and is answered. The same folder
-/// as a `\\.\` device path is `Network` before any open: the classifier counts every `\\.\`
-/// form as a device it doesn't know (`links::network::classify`), and fails closed.
+/// A local drive's folder answers as a `\\?\` path, and as a `\\.\` device path, which the
+/// classifier reads through its drive letter.
 #[test]
-fn a_local_verbatim_path_answers_and_a_device_path_is_not_touched() {
+fn a_local_device_path_answers() {
     let temp = TempDir::new("folder-device-path");
-    let verbatim = PathBuf::from(format!(r"\\?\{}", temp.path().display()));
-    assert_eq!(folder_support(&verbatim).unwrap(), FolderSupport::Ok);
-    let device = PathBuf::from(format!(r"\\.\{}", temp.path().display()));
-    assert_eq!(folder_support(&device).unwrap(), FolderSupport::Network);
+    for prefix in [r"\\?\", r"\\.\"] {
+        let path = PathBuf::from(format!("{prefix}{}", temp.path().display()));
+        assert_eq!(
+            folder_support(&path).unwrap(),
+            FolderSupport::Ok,
+            "{prefix}"
+        );
+    }
 }
 
 #[test]
