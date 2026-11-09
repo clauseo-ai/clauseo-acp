@@ -127,6 +127,12 @@ int main(int argc, char **argv) {
         size_t size = sizeof args;
         return sys("procargs", sysctl(mib, 3, args, &size, NULL, 0) == 0 && size > 0);
     }
+    if (!strcmp(op, "kinfo")) {
+        struct kinfo_proc info;
+        size_t size = sizeof info;
+        int mib[4] = {CTL_KERN, KERN_PROC, KERN_PROC_PID, atoi(a)};
+        return sys("kinfo", sysctl(mib, 4, &info, &size, NULL, 0) == 0 && size > 0);
+    }
     if (!strcmp(op, "listall")) {
         static pid_t pids[65536];
         return sys("listall", proc_listallpids(pids, sizeof pids) > 0);

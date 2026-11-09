@@ -18,7 +18,9 @@
 (allow signal (target same-sandbox))
 (allow process-info* (target same-sandbox))
 
-; sysctl reads, Codex's list: CPU, memory and OS facts runtimes ask for at start.
+; sysctl reads, Codex's list: CPU, memory and OS facts runtimes ask for at start. Not its
+; `kern.proc.pid.` and `kern.proc.pgrp.`, which name any process, inside the jail or out, with
+; its owner, parent and start time; the jail still reads its own processes without them.
 (allow sysctl-read
   (sysctl-name "hw.activecpu")
   (sysctl-name "hw.busfrequency_compat")
@@ -66,8 +68,6 @@
   (sysctl-name "sysctl.proc_cputype")
   (sysctl-name "vm.loadavg")
   (sysctl-name-prefix "hw.perflevel")
-  (sysctl-name-prefix "kern.proc.pgrp.")
-  (sysctl-name-prefix "kern.proc.pid.")
   (sysctl-name-prefix "net.routetable."))
 
 ; Power management, Codex's base: libraries take sleep assertions through it.

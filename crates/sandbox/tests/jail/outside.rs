@@ -49,13 +49,18 @@ fn another_process_cannot_be_inspected() {
     let refused = "Operation not permitted";
     assert_refused_with(&j.probe(&["procargs", &pid]), refused);
     assert_refused_with(&j.probe(&["pidpath", &pid]), refused);
+    // Its name, owner, parent and start time (`KERN_PROC_PID`): the base allows no
+    // `kern.proc.pid.` sysctl.
+    j.probe_outside(&["kinfo", &pid]).assert_ok();
+    assert_refused_with(&j.probe(&["kinfo", &pid]), refused);
     let ps = run(&j.launcher, "/bin/ps", &["eww", &pid], &j.m1(), &[]);
     assert_ne!(ps.code, Some(0), "{ps:#?}");
     assert!(!ps.stdout.contains("sleep"), "{ps:#?}");
     let own = r#"/bin/sleep 5 & child=$!
-        "$1" listall && "$1" children $child && "$1" procargs $child && "$1" pidpath $child"#;
+        "$1" listall && "$1" children $child && "$1" procargs $child && "$1" pidpath $child &&
+        "$1" kinfo $child"#;
     let out = j.sh(own, &[j.w.at("tools/probe").to_str().unwrap()]);
-    for step in ["listall", "children", "procargs", "pidpath"] {
+    for step in ["listall", "children", "procargs", "pidpath", "kinfo"] {
         assert!(out.stdout.contains(&format!("ALLOWED {step}")), "{out:#?}");
     }
     run_outside("/bin/kill", &["-TERM", &pid], &j.m1()).assert_ok();

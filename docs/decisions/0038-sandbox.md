@@ -138,6 +138,19 @@ the jail); `/dev/ttys*` requires the kernel's pty extension, which only a pty op
 (another terminal of the same user) is refused for read and write. G8b may check it again with a
 real terminal. Nothing under `/Users`, `/private/var/folders`, `/private/tmp` or `/Volumes`.
 
+**What `(deny default)` leaves open** (the default-deny audit, macOS 27.2, 2026-11-09). On this
+macOS `(deny default)` does not refuse every operation, so the profile names those it does not,
+right after the base: `nvram*` (a jailed `nvram -p` printed every variable),
+`iokit-get-properties` (`ioreg` printed the Mac's serial number) and `process-info*` for targets
+outside the jail (a `KERN_PROCARGS2` sysctl read another process's arguments), with
+`process-info-listpids` allowed back right after it so the jail can list its own children. The
+base no longer allows Codex's `kern.proc.pid.` and `kern.proc.pgrp.` sysctls, which named any
+process with its owner, parent and start time. The jail tests (`tests/jail/deny.rs`,
+`outside.rs`, `planted.rs`) try each class as an ordinary action and see it refused. **Known
+limit:** `proc_listpids` with its filters (by uid, parent, process group or tty) still answers
+pid numbers for processes outside the jail, so the agent can map the outside process tree and
+who owns each process, but not their names, paths or arguments.
+
 **`SeatbeltLauncher::new(policy, opts, denials)`** implements `process::Launcher`. A launch runs
 `/usr/bin/sandbox-exec -p <profile> -D ... <program> <args>` through `spawn_in_tree`, with the
 agent's variables plus `TMPDIR` and nothing else, in the same folder. The launcher adds
