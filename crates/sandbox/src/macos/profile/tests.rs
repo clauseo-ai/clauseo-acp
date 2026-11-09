@@ -314,6 +314,63 @@ fn the_listpids_allow_precedes_the_policy_denies() {
             );
         }
     }
+    // These two are the only process-info rules after the base.
+    let base_end = text.find(BASE).expect("the base") + BASE.len();
+    let after = text.get(base_end..).unwrap();
+    let rules: Vec<&str> = after
+        .lines()
+        .filter(|line| line.starts_with('(') && line.contains("process-info"))
+        .collect();
+    assert_eq!(
+        rules,
+        ["(deny process-info*", "(allow process-info-listpids)"],
+        "{after}"
+    );
+}
+
+/// Chrome runs outside the agent's jail (the macOS browser ruling, a1): no agent profile, under
+/// any combination of the builder's options, registers a Mach name or names Chrome's port
+/// rendezvous.
+#[test]
+fn no_profile_registers_a_mach_name_or_reaches_chromes_rendezvous() {
+    type Option_ = fn(PolicyBuilder, &World) -> PolicyBuilder;
+    let options: [Option_; 12] = [
+        |b, w| b.tmpdir(w.at("data/run/s1/tmp")),
+        |b, w| b.runtime(w.at("data/agents/codex-acp")),
+        |b, w| b.read(w.at("elsewhere")),
+        |b, w| b.allowed_folder(w.at("elsewhere/Precedents")),
+        |b, w| b.read_only_in_state(w.at("data/agent-state/m1/codex/config.toml")),
+        |b, w| b.notes(w.at("data/agent-state/m1/notes")),
+        |b, w| b.credential_link(w.at("data/agent-state/m1/codex/auth.json")),
+        |b, w| b.claude_store(w.at("home/.claude")),
+        |b, _| b.proxy_port(41_234),
+        |b, _| b.loopback(Loopback::Any),
+        |b, w| b.browser_socket_path(w.at("sockets")),
+        |b, _| b.keychain(true),
+    ];
+    let w = World::new("profile-no-mach-register");
+    w.dir.dir("home/.claude");
+    w.dir.dir("elsewhere/Precedents");
+    w.dir.dir("sockets");
+    w.dir.dir("data/run/s1/tmp");
+    for set in 0_u32..(1 << options.len()) {
+        let mut builder = w.builder();
+        for (i, option) in options.iter().enumerate() {
+            if set & (1 << i) != 0 {
+                builder = option(builder, &w);
+            }
+        }
+        let policy = builder.build().unwrap();
+        let text = SeatbeltProfile::new(&policy, TAG)
+            .unwrap()
+            .text()
+            .to_owned();
+        assert!(!text.contains("mach-register"), "options {set:#014b}");
+        assert!(
+            !text.contains("MachPortRendezvousServer"),
+            "options {set:#014b}"
+        );
+    }
 }
 
 #[test]
