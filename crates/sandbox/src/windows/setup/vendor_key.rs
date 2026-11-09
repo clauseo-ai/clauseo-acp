@@ -5,32 +5,35 @@
 //! 1. takes the root over with [`VENDOR_SDDL`], then checks it for a link: a key whose
 //!    `SymbolicLinkValue` leads elsewhere is refused; one whose value leads back to itself only
 //!    holds a fake value, which is deleted;
-//! 2. walks every subkey, each taken over (owner SYSTEM, a protected SYSTEM and Administrators
-//!    DACL, [`LOCKED_SDDL`]) before its own subkeys are read, and then:
+//! 2. walks every subkey (`walk.rs`), each taken over (owner SYSTEM, a protected SYSTEM and
+//!    Administrators DACL, [`LOCKED_SDDL`]) before its own subkeys are read, its owner and DACL
+//!    as they were read on the take-over's own handle, and then:
 //!    - a key holding a link value (a link, or a fake one) is deleted with what is under it;
-//!    - a key owned by anyone but SYSTEM, Administrators or a member of Administrators was
-//!      planted, and is deleted with what is under it, which also voids the planter's open
-//!      handles. A well-known owner outside the account domains (Users, Everyone) is a planter.
-//!      Only a local account (its SID in this machine's account domain) is judged by
-//!      membership: a domain account's nested groups need the domain controller, so it counts
-//!      as unresolved. A key whose owner is unresolved is kept, unless it is one the SYSTEM side
-//!      trusts ([`pinned`]);
+//!    - a key whose owner ordinary users can hold (Users, Everyone, Authenticated Users, a local
+//!      account not in Administrators) was planted, since an owner may always rewrite the DACL,
+//!      and is deleted with what is under it, which also voids the planter's open handles.
+//!      SYSTEM, Administrators, a local account in Administrators, `TrustedInstaller`, the
+//!      service accounts and service SIDs are trusted. An alias is spelled out first. Any other
+//!      owner (a domain account, whose nested groups need the domain controller, or another
+//!      built-in group) is unresolved: its key is kept and logged, unless it is one the SYSTEM
+//!      side trusts ([`pinned`]);
 //!    - a pinned key whose DACL let anyone but SYSTEM and Administrators write is deleted too,
 //!      even when an administrator owns it, so no handle opened through that DACL outlives it;
-//!    - every other key is kept: a pinned one gets its own SD, the rest [`INHERITED_SDDL`]. Its
-//!      values are kept, since only an administrator owned it, except that the installer's
-//!      `Clauseo\Clauseo` whose DACL let others write gets its install folder (the uninstaller
-//!      deletes there) written again from the trusted `InstallLocation` of the uninstall key, or
-//!      deleted when there is none;
-//!    - a pinned key that ends deleted, for any reason, is made again empty with its own SD.
+//!    - the installer's `Clauseo\Clauseo`, whose install folder the uninstaller deletes, is
+//!      deleted unless SYSTEM, Administrators or a local account in Administrators owned it and
+//!      no one else could write it; it is made again with the folder from the trusted
+//!      `InstallLocation` of the uninstall key, or none when there is none;
+//!    - every other key is kept with its values: a pinned one gets its own SD, the rest
+//!      [`INHERITED_SDDL`];
+//!    - a pinned key that ends deleted, for any reason, is made again empty with its own SD;
+//! 3. checks every key it kept once more, as a handle held from before a take-over could have
+//!    changed it back: such a key is taken over again once, and refused when it changes again.
 //!
 //! A take-over writes the owner and DACL on a handle opened with restore intent, which no DACL
 //! or OWNER RIGHTS ACE can refuse. Every write is `RegSetKeySecurity` on the key's own handle,
 //! which passes nothing down to the subkeys, so no write can reach through a link. A key deleted
 //! under the walk is done. The walk is pure here, against [`Tree`]; `os.rs` is the registry, and
 //! [`secure`] is set-up's entry. Tested on every OS against a fake tree.
-
-use std::collections::VecDeque;
 
 #[cfg(windows)]
 use super::MachineError;
@@ -46,6 +49,7 @@ mod os;
 mod security;
 #[cfg(test)]
 mod tests;
+mod walk;
 #[cfg(all(windows, test))]
 mod windows_tests;
 
@@ -126,9 +130,15 @@ pub(super) struct Report {
     pub(super) writable_pinned: Vec<String>,
     /// The other keys kept whose DACL let anyone but SYSTEM and Administrators write.
     pub(super) others_could_write: Vec<String>,
-    /// The installer's key whose install folder was written again from the uninstall key's
-    /// `InstallLocation` (`Some`), or deleted for want of one (`None`).
+    /// The installer's key, made again after it was deleted, with its install folder from the
+    /// uninstall key's `InstallLocation` (`Some`), or none for want of one (`None`).
     pub(super) install_dir_reset: Option<(String, Option<String>)>,
+    /// The installer's key deleted because someone other than an administrator owned it or
+    /// could write it.
+    pub(super) untrusted_installer: Vec<String>,
+    /// The kept keys whose owner or DACL had changed again after their take-over, taken over
+    /// again.
+    pub(super) retaken: Vec<String>,
 }
 
 /// The registry under `HKLM\SOFTWARE\Clauseo`, through handles. A key is opened by name from its
@@ -145,17 +155,23 @@ pub(super) trait Tree {
     /// Whether the root, opened following links, is a different key from `key` (the root opened
     /// as itself): a real link. A link that leads nowhere is one.
     fn root_leads_elsewhere(&mut self, key: &Self::Key) -> Result<bool, Miss>;
-    /// Subkey `name` of `parent`, read, not following a link.
-    fn open_child(&mut self, parent: &Self::Key, name: &str) -> Result<Self::Key, Miss>;
-    /// Takes subkey `name` of `parent` over with `sddl`, and returns it open for writing.
+    /// Takes subkey `name` of `parent` over with `sddl`, and returns it open for writing with
+    /// its owner and DACL as SDDL as they were, read on the take-over's handle before its write.
     fn take_over_child(
         &mut self,
         parent: &Self::Key,
         name: &str,
         sddl: &str,
+    ) -> Result<(Self::Key, String), Miss>;
+    /// Makes subkey `name` of `parent` with `sddl`, and returns it open for writing.
+    fn create_child(
+        &mut self,
+        parent: &Self::Key,
+        name: &str,
+        sddl: &str,
     ) -> Result<Self::Key, Miss>;
-    /// Makes subkey `name` of `parent` with `sddl`.
-    fn create_child(&mut self, parent: &Self::Key, name: &str, sddl: &str) -> Result<(), Miss>;
+    /// Takes `key` over again with `sddl` through its open handle, as a take-over writes it.
+    fn retake(&mut self, key: &Self::Key, sddl: &str) -> Result<(), Miss>;
     /// Whether the key holds a `SymbolicLinkValue` of type `REG_LINK`.
     fn has_link_value(&mut self, key: &Self::Key) -> Result<bool, Miss>;
     /// Deletes the key's `SymbolicLinkValue`.
@@ -177,6 +193,8 @@ pub(super) trait Tree {
     /// Whether the local account `sid` is in Administrators, directly or through a group; the
     /// error says why it couldn't be told.
     fn in_administrators(&mut self, sid: &str) -> Result<bool, String>;
+    /// The SID an SDDL alias (`LA`, `LG`) stands for, in the `S-1-...` form.
+    fn spell_out(&mut self, alias: &str) -> Result<String, String>;
 }
 
 /// The pinned SD of a key the SYSTEM side reads and trusts, by its path under the root.
@@ -229,9 +247,15 @@ fn ensure_once<T: Tree>(tree: &mut T, path: &str) -> Result<Option<Report>, Vend
         Err(Miss::Gone) => return Ok(None),
         Err(Miss::Failed(error)) => return Err(VendorFault::Open(error)),
     }
-    let root = clean(tree, root, path, &mut report)?;
+    let kept = walk::clean(tree, root, path, VENDOR_SDDL, &mut report)?;
+    walk::verify(tree, &kept, &mut report)?;
     // The root still there is the walk finished; one deleted under it is walked again.
-    match tree.sddl(&root) {
+    let Some(root) = kept.first() else {
+        return Err(VendorFault::CleanUp(
+            "the walk ended without its root".to_owned(),
+        ));
+    };
+    match tree.sddl(root.key()) {
         Ok(_) => Ok(Some(report)),
         Err(Miss::Gone) => Ok(None),
         Err(Miss::Failed(error)) => Err(VendorFault::Open(error)),
@@ -267,240 +291,6 @@ fn unless_gone<V>(
         Err(Miss::Gone) => Ok(None),
         Err(Miss::Failed(error)) => Err(fault(error)),
     }
-}
-
-/// One key on the walk: its handle (taken over), its path under `HKLM`, its path under the root,
-/// and its subkeys not yet visited.
-struct Frame<K> {
-    key: K,
-    path: String,
-    relative: String,
-    names: VecDeque<String>,
-}
-
-/// What a key is judged against: its pinned SD when the SYSTEM side trusts it, and this
-/// machine's account domain.
-struct Judged<'a> {
-    pinned: Option<&'a str>,
-    local: &'a Result<[u32; 3], String>,
-}
-
-/// A key's paths: under `HKLM`, and under the root.
-struct At {
-    path: String,
-    relative: String,
-}
-
-/// Walks every subkey under `root` with an explicit stack, depth first, as the module says, and
-/// gives `root` back.
-fn clean<T: Tree>(
-    tree: &mut T,
-    root: T::Key,
-    path: &str,
-    report: &mut Report,
-) -> Result<T::Key, VendorFault> {
-    let local = tree.local_domain();
-    let names = unless_gone(tree.subkeys(&root), VendorFault::CleanUp)?.unwrap_or_default();
-    let mut stack = vec![Frame {
-        key: root,
-        path: path.to_owned(),
-        relative: String::new(),
-        names: names.into(),
-    }];
-    loop {
-        let Some(frame) = stack.last_mut() else {
-            return Err(VendorFault::CleanUp(
-                "the walk ended without its root".to_owned(),
-            ));
-        };
-        let Some(name) = frame.names.pop_front() else {
-            if let Some(done) = stack.pop()
-                && stack.is_empty()
-            {
-                return Ok(done.key);
-            }
-            continue;
-        };
-        let child = At {
-            path: format!("{}\\{name}", frame.path),
-            relative: if frame.relative.is_empty() {
-                name.clone()
-            } else {
-                format!("{}\\{name}", frame.relative)
-            },
-        };
-        let pinned = pinned(&child.relative);
-        let judged = Judged {
-            pinned: pinned.as_deref(),
-            local: &local,
-        };
-        let kept = visit(tree, &frame.key, &name, &child, &judged, report)?;
-        match kept {
-            Some(frame) => stack.push(frame),
-            None => {
-                if let Some(pinned) = pinned.as_deref()
-                    && let Some(parent) = stack.last()
-                    && unless_gone(
-                        tree.create_child(&parent.key, &name, pinned),
-                        VendorFault::Secure,
-                    )?
-                    .is_some()
-                {
-                    report.recreated.push(child.path);
-                }
-            }
-        }
-    }
-}
-
-/// Visits subkey `name` of `parent` (`at` gives its paths): its frame when it is kept, `None`
-/// when it is gone, deleted under the walk or by it.
-fn visit<T: Tree>(
-    tree: &mut T,
-    parent: &T::Key,
-    name: &str,
-    at: &At,
-    judged: &Judged<'_>,
-    report: &mut Report,
-) -> Result<Option<Frame<T::Key>>, VendorFault> {
-    let pinned = judged.pinned;
-    // What the child was before the take-over.
-    let Some(read) = unless_gone(tree.open_child(parent, name), VendorFault::CleanUp)? else {
-        return Ok(None);
-    };
-    let Some(before) = unless_gone(tree.sddl(&read), VendorFault::CleanUp)? else {
-        return Ok(None);
-    };
-    drop(read);
-    let before = Security::parse(&before);
-    let owner = owner_of(tree, &before.owner, judged.local);
-    let Some(key) = unless_gone(
-        tree.take_over_child(parent, name, LOCKED_SDDL),
-        VendorFault::Secure,
-    )?
-    else {
-        return Ok(None);
-    };
-    let Some(link) = unless_gone(tree.has_link_value(&key), VendorFault::CleanUp)? else {
-        return Ok(None);
-    };
-    // The SYSTEM side's keys get no benefit of the doubt.
-    let planted = match &owner {
-        Owner::Planter => true,
-        Owner::Unresolved(_) => pinned.is_some(),
-        Owner::Admin | Owner::OtherAdmin => false,
-    };
-    let others_wrote = before.others_may_write();
-    if link || planted || (pinned.is_some() && others_wrote) {
-        drain(tree, key)?;
-        let list = if link {
-            &mut report.removed
-        } else if planted {
-            &mut report.planted
-        } else {
-            &mut report.writable_pinned
-        };
-        list.push(at.path.clone());
-        return Ok(None);
-    }
-    let target = pinned.unwrap_or(INHERITED_SDDL);
-    if unless_gone(tree.set_sddl(&key, target), VendorFault::Secure)?.is_none() {
-        return Ok(None);
-    }
-    if others_wrote {
-        report.others_could_write.push(at.path.clone());
-        if at.relative.eq_ignore_ascii_case(INSTALLER_NAME) {
-            let Some(reset) = unless_gone(tree.reset_install_dir(&key), VendorFault::CleanUp)?
-            else {
-                return Ok(None);
-            };
-            report.install_dir_reset = Some((at.path.clone(), reset));
-        }
-    }
-    match owner {
-        Owner::OtherAdmin => report.admin_owned.push(at.path.clone()),
-        Owner::Unresolved(why) => report.unresolved.push((at.path.clone(), why)),
-        Owner::Admin | Owner::Planter => {}
-    }
-    if pinned.is_some() {
-        if before != Security::parse(target) {
-            report.resecured.push(at.path.clone());
-        }
-    } else {
-        report.taken_over.push(at.path.clone());
-    }
-    let names = unless_gone(tree.subkeys(&key), VendorFault::CleanUp)?.unwrap_or_default();
-    Ok(Some(Frame {
-        key,
-        path: at.path.clone(),
-        relative: at.relative.clone(),
-        names: names.into(),
-    }))
-}
-
-/// Who `sid`, a key's owner before the take-over, is. A well-known SID outside the account
-/// domains (Users, Everyone, a service) is no account in Administrators, so a planter. Only a
-/// local account is judged by membership; a domain account is unresolved, as is an alias this
-/// module can't spell out (`LA`), and everyone when the local domain can't be read.
-fn owner_of<T: Tree>(tree: &mut T, sid: &str, local: &Result<[u32; 3], String>) -> Owner {
-    if security::TRUSTED_OWNERS.contains(&sid) {
-        return Owner::Admin;
-    }
-    if !sid.starts_with("S-") {
-        return Owner::Unresolved("an alias set-up can't spell out".to_owned());
-    }
-    if !sid.starts_with("S-1-5-21-") {
-        return Owner::Planter;
-    }
-    let local = match local {
-        Ok(local) => local,
-        Err(why) => return Owner::Unresolved(format!("this machine's domain: {why}")),
-    };
-    if security::account_domain(sid).as_ref() != Some(local) {
-        return Owner::Unresolved("not a local account".to_owned());
-    }
-    match tree.in_administrators(sid) {
-        Ok(true) => Owner::OtherAdmin,
-        Ok(false) => Owner::Planter,
-        Err(why) => Owner::Unresolved(why),
-    }
-}
-
-/// Who owned a key before the take-over.
-enum Owner {
-    /// SYSTEM or Administrators.
-    Admin,
-    /// An account in Administrators.
-    OtherAdmin,
-    /// Anyone else.
-    Planter,
-    /// An account whose membership couldn't be told, with why.
-    Unresolved(String),
-}
-
-/// Deletes `key` and everything under it, bottom up through handles. Each child is taken over
-/// (for `DELETE`) before its own subkeys are read; one that is gone is done.
-fn drain<T: Tree>(tree: &mut T, key: T::Key) -> Result<(), VendorFault> {
-    let names = unless_gone(tree.subkeys(&key), VendorFault::CleanUp)?.unwrap_or_default();
-    let mut stack = vec![(key, VecDeque::from(names))];
-    while let Some((parent, names)) = stack.last_mut() {
-        let Some(name) = names.pop_front() else {
-            if let Some((done, _)) = stack.pop() {
-                unless_gone(tree.delete(done), VendorFault::CleanUp)?;
-            }
-            continue;
-        };
-        let Some(child) = unless_gone(
-            tree.take_over_child(parent, &name, LOCKED_SDDL),
-            VendorFault::Secure,
-        )?
-        else {
-            continue;
-        };
-        let names = unless_gone(tree.subkeys(&child), VendorFault::CleanUp)?.unwrap_or_default();
-        stack.push((child, names.into()));
-    }
-    Ok(())
 }
 
 /// Secures `HKLM\SOFTWARE\Clauseo` (set-up's entry): [`ensure`] on the registry, with
@@ -551,6 +341,14 @@ fn log(report: &Report) {
             &report.others_could_write,
             "kept keys under the vendor key that others could write",
         ),
+        (
+            &report.untrusted_installer,
+            "deleted the installer's key: a non-administrator owned it or could write it",
+        ),
+        (
+            &report.retaken,
+            "took over keys under the vendor key again: their security had changed back",
+        ),
     ];
     for (keys, what) in lists {
         if !keys.is_empty() {
@@ -562,11 +360,11 @@ fn log(report: &Report) {
             tracing::warn!(
                 %key,
                 %folder,
-                "wrote the installer key's folder again from the uninstall key"
+                "made the installer's key again with the uninstall key's folder"
             );
         }
         Some((key, None)) => {
-            tracing::warn!(%key, "deleted the installer key's folder: the uninstall key has none");
+            tracing::warn!(%key, "made the installer's key again: the uninstall key has no folder");
         }
         None => {}
     }

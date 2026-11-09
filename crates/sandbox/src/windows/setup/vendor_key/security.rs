@@ -72,7 +72,7 @@ pub(super) fn take_over_steps(sddl: &str) -> [Step; 2] {
 
 /// The SDDL aliases Clauseo's keys and their owners use, and the SIDs they stand for, with the
 /// aliases Windows writes for the other well-known accounts and groups a key's owner can be.
-const ALIASES: [(&str, &str); 18] = [
+const ALIASES: [(&str, &str); 19] = [
     ("SY", "S-1-5-18"),
     ("BA", "S-1-5-32-544"),
     ("BU", "S-1-5-32-545"),
@@ -90,11 +90,44 @@ const ALIASES: [(&str, &str); 18] = [
     ("BG", "S-1-5-32-546"),
     ("PU", "S-1-5-32-547"),
     ("BO", "S-1-5-32-551"),
+    ("RD", "S-1-5-32-555"),
     ("AC", "S-1-15-2-1"),
 ];
 
 /// The SIDs whose ownership set-up accepts: SYSTEM and Administrators.
 pub(super) const TRUSTED_OWNERS: [&str; 2] = ["S-1-5-18", "S-1-5-32-544"];
+
+/// The owners besides [`TRUSTED_OWNERS`] whose keys the walk keeps as an administrator's: no
+/// ordinary user holds them. `TrustedInstaller`, `LocalService` and `NetworkService`; any other
+/// service SID (`S-1-5-80-`) is matched by its prefix.
+pub(super) const OS_OWNERS: [&str; 3] = [
+    "S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464",
+    "S-1-5-19",
+    "S-1-5-20",
+];
+
+/// The well-known SIDs ordinary users hold, in their token or by membership. An owner gets
+/// `WRITE_DAC` on its key whatever the DACL says, so any holder could rewrite a key one owns.
+pub(super) const USER_HELD_OWNERS: [&str; 18] = [
+    "S-1-1-0",
+    "S-1-5-11",
+    "S-1-5-32-545",
+    "S-1-5-4",
+    "S-1-5-2",
+    "S-1-5-7",
+    "S-1-5-32-546",
+    "S-1-5-32-547",
+    "S-1-5-32-555",
+    "S-1-2-0",
+    "S-1-2-1",
+    "S-1-5-14",
+    "S-1-5-113",
+    "S-1-5-114",
+    "S-1-15-2-1",
+    "S-1-15-2-2",
+    "S-1-5-12",
+    "S-1-5-33",
+];
 
 impl Security {
     /// The security `sddl` describes.

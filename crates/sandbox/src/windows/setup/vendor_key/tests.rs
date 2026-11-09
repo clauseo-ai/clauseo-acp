@@ -11,7 +11,9 @@ use crate::windows::setup::record_key::VENDOR_KEY;
 use crate::windows::setup::record_values::RECORD_SDDL;
 
 mod access;
+mod installer;
 mod owners;
+mod verify;
 
 /// A key of a user's, which Users may write subkeys and values into: the weak root.
 const WEAK: &str = "O:S-1-5-21-1-2-3-1001D:P(A;CI;KA;;;BU)(A;CI;KA;;;S-1-5-21-1-2-3-1001)";
@@ -48,6 +50,8 @@ enum Event {
     Vanish(String),
     /// A `SymbolicLinkValue` is written to the key at the path.
     LinkValue(String),
+    /// The key at the path gets the SDDL, as a handle held from before its take-over writes it.
+    Undo(String, String),
 }
 
 /// Keys by path under `HKLM`, with what was done to them, and the faults to inject.
@@ -68,6 +72,8 @@ struct FakeTree {
     install_location: Option<String>,
     /// The keys whose install folder was written again or deleted.
     install_resets: Vec<String>,
+    /// A key that gets the SDDL again right after it is taken over again, and the SDDL.
+    retake_undone: Option<(String, String)>,
 }
 
 impl FakeTree {
@@ -117,14 +123,15 @@ impl FakeTree {
         self.keys.get_mut(path).unwrap().values = values.iter().map(|v| (*v).to_owned()).collect();
     }
 
-    /// The take-over of `path` with `sddl`, then the events it sets off.
-    fn take(&mut self, path: &str, sddl: &str) -> Result<String, Miss> {
+    /// The take-over of `path` with `sddl`, then the events it sets off; the path and its SDDL
+    /// from before.
+    fn take(&mut self, path: &str, sddl: &str) -> Result<(String, String), Miss> {
         if self.fail_take.as_deref() == Some(path) {
             return Err(Miss::Failed(
                 "RegSetKeySecurity failed (error 5)".to_owned(),
             ));
         }
-        self.node(path)?.sddl = sddl.to_owned();
+        let before = std::mem::replace(&mut self.node(path)?.sddl, sddl.to_owned());
         self.set.push((path.to_owned(), sddl.to_owned()));
         let (due, later): (Vec<_>, Vec<_>) = self
             .events
@@ -140,9 +147,10 @@ impl FakeTree {
                         .retain(|key, _| key != &at && !key.starts_with(&below));
                 }
                 Event::LinkValue(at) => self.node(&at)?.link_value = true,
+                Event::Undo(at, sddl) => self.node(&at)?.sddl = sddl,
             }
         }
-        Ok(path.to_owned())
+        Ok((path.to_owned(), before))
     }
 }
 
@@ -160,29 +168,38 @@ impl super::Tree for FakeTree {
     }
 
     fn take_over_root(&mut self, sddl: &str) -> Result<String, Miss> {
-        self.take(VENDOR_KEY, sddl)
+        self.take(VENDOR_KEY, sddl).map(|(key, _)| key)
     }
 
     fn root_leads_elsewhere(&mut self, key: &String) -> Result<bool, Miss> {
         Ok(self.node(key)?.link)
     }
 
-    fn open_child(&mut self, parent: &String, name: &str) -> Result<String, Miss> {
-        let path = format!("{parent}\\{name}");
-        self.node(&path)?;
-        Ok(path)
-    }
-
-    fn take_over_child(&mut self, parent: &String, name: &str, sddl: &str) -> Result<String, Miss> {
+    fn take_over_child(
+        &mut self,
+        parent: &String,
+        name: &str,
+        sddl: &str,
+    ) -> Result<(String, String), Miss> {
         self.node(parent)?;
         self.take(&format!("{parent}\\{name}"), sddl)
     }
 
-    fn create_child(&mut self, parent: &String, name: &str, sddl: &str) -> Result<(), Miss> {
+    fn create_child(&mut self, parent: &String, name: &str, sddl: &str) -> Result<String, Miss> {
         self.node(parent)?;
         let path = format!("{parent}\\{name}");
         self.insert(path.clone(), sddl, false);
-        self.created.push(path);
+        self.created.push(path.clone());
+        Ok(path)
+    }
+
+    fn retake(&mut self, key: &String, sddl: &str) -> Result<(), Miss> {
+        self.set_sddl(key, sddl)?;
+        if let Some((path, undone)) = self.retake_undone.clone()
+            && &path == key
+        {
+            self.node(key)?.sddl = undone;
+        }
         Ok(())
     }
 
@@ -248,6 +265,14 @@ impl super::Tree for FakeTree {
 
     fn in_administrators(&mut self, sid: &str) -> Result<bool, String> {
         self.admins.get(sid).cloned().unwrap_or(Ok(false))
+    }
+
+    fn spell_out(&mut self, alias: &str) -> Result<String, String> {
+        match alias {
+            "LA" => Ok("S-1-5-21-1-2-3-500".to_owned()),
+            "LG" => Ok("S-1-5-21-1-2-3-501".to_owned()),
+            _ => Err("no such alias".to_owned()),
+        }
     }
 }
 
@@ -371,43 +396,19 @@ fn a_failed_link_delete_refuses() {
 }
 
 #[test]
-fn an_installer_key_an_admin_account_owns_is_kept_with_its_values() {
-    let mut tree = FakeTree::with(Some(VENDOR_SDDL), &[("Clauseo", ADMIN_USER_KEY, false)]);
-    tree.values(&under("Clauseo"), &["InstallDir"]);
-    let report = ensure(&mut tree, VENDOR_KEY).unwrap();
-    assert_eq!(tree.deleted, Vec::<String>::new());
-    assert_eq!(tree.sddl_of(&under("Clauseo")), INHERITED_SDDL);
-    assert_eq!(tree.keys[&under("Clauseo")].values, ["InstallDir"]);
-    assert_eq!(report.admin_owned, [under("Clauseo")]);
-    assert_eq!(report.taken_over, [under("Clauseo")]);
-}
-
-#[test]
-fn a_users_owned_installer_key_is_deleted() {
-    let mut tree = FakeTree::with(Some(VENDOR_SDDL), &[("Clauseo", USER_KEY, false)]);
-    let report = ensure(&mut tree, VENDOR_KEY).unwrap();
-    assert_eq!(report.planted, [under("Clauseo")]);
-    assert!(!tree.has(&under("Clauseo")));
-    assert!(
-        report.recreated.is_empty(),
-        "only the SYSTEM side's keys are made again"
-    );
-}
-
-#[test]
-fn an_unresolved_owner_keeps_the_installer_key_but_not_sandbox() {
+fn an_unresolved_owner_keeps_its_key_but_not_sandbox() {
     let mut tree = FakeTree::with(
         Some(VENDOR_SDDL),
-        &[("Clauseo", GHOST_KEY, false), ("Sandbox", GHOST_KEY, false)],
+        &[("Kept", GHOST_KEY, false), ("Sandbox", GHOST_KEY, false)],
     );
-    tree.values(&under("Clauseo"), &["InstallDir"]);
+    tree.values(&under("Kept"), &["Value"]);
     tree.values(&under("Sandbox"), &["PoolSids"]);
     let report = ensure(&mut tree, VENDOR_KEY).unwrap();
-    assert_eq!(tree.sddl_of(&under("Clauseo")), INHERITED_SDDL);
-    assert_eq!(tree.keys[&under("Clauseo")].values, ["InstallDir"]);
+    assert_eq!(tree.sddl_of(&under("Kept")), INHERITED_SDDL);
+    assert_eq!(tree.keys[&under("Kept")].values, ["Value"]);
     assert_eq!(
         report.unresolved,
-        [(under("Clauseo"), "the account has no name".to_owned())]
+        [(under("Kept"), "the account has no name".to_owned())]
     );
     assert_eq!(report.planted, [under("Sandbox")]);
     assert_eq!(report.recreated, [under("Sandbox")]);

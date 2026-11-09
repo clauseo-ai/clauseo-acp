@@ -2,8 +2,8 @@
 //! name from its parent's handle with `NtOpenKeyEx`, with `OBJ_OPENLINK` and
 //! `REG_OPTION_OPEN_LINK`, so a link is opened and never followed; only the root's link check
 //! opens it once following, to read its name. A read asks for backup intent under the privileges
-//! [`secure`](super::secure) holds. A take-over follows [`take_over_steps`]: owner, then DACL,
-//! then the rest, each on a handle opened for that alone, so no DENY ACE stops it. Every write
+//! [`secure`](super::secure) holds. A take-over follows [`take_over_steps`]: the owner and DACL
+//! as they were read and then written on a restore-intent handle, then full access. Every write
 //! is `RegSetKeySecurity` on the key's own handle, which neither computes nor propagates
 //! inheritance. Keys are deleted only through the handle they were taken over on. A key not
 //! found or deleted (`STATUS_KEY_DELETED`, `ERROR_KEY_DELETED`) is [`Miss::Gone`].
@@ -95,6 +95,12 @@ impl Registry {
         }
     }
 
+    /// Subkey `name` of `parent`, read, not following a link: the elevated tests' check.
+    #[cfg(test)]
+    pub(super) fn open_child(parent: &Key, name: &str) -> Result<Key, Miss> {
+        open(Some(parent), name, READ, READ_OPTIONS, false)
+    }
+
     /// The root's NT path, which `NtOpenKeyEx` takes without a root handle.
     fn nt_path(&self) -> String {
         format!("\\Registry\\Machine\\{}", self.path)
@@ -120,7 +126,7 @@ impl Tree for Registry {
     }
 
     fn take_over_root(&mut self, sddl: &str) -> Result<Key, Miss> {
-        take_over(None, &self.nt_path(), sddl)
+        take_over(None, &self.nt_path(), sddl).map(|(key, _before)| key)
     }
 
     fn root_leads_elsewhere(&mut self, key: &Key) -> Result<bool, Miss> {
@@ -140,16 +146,24 @@ impl Tree for Registry {
         Ok(!key_name(&followed)?.eq_ignore_ascii_case(&own))
     }
 
-    fn open_child(&mut self, parent: &Key, name: &str) -> Result<Key, Miss> {
-        open(Some(parent), name, READ, READ_OPTIONS, false)
-    }
-
-    fn take_over_child(&mut self, parent: &Key, name: &str, sddl: &str) -> Result<Key, Miss> {
+    fn take_over_child(
+        &mut self,
+        parent: &Key,
+        name: &str,
+        sddl: &str,
+    ) -> Result<(Key, String), Miss> {
         take_over(Some(parent), name, sddl)
     }
 
-    fn create_child(&mut self, parent: &Key, name: &str, sddl: &str) -> Result<(), Miss> {
-        create(Some(parent), name, sddl).map(|_key| ())
+    fn create_child(&mut self, parent: &Key, name: &str, sddl: &str) -> Result<Key, Miss> {
+        create(Some(parent), name, sddl)
+    }
+
+    fn retake(&mut self, key: &Key, sddl: &str) -> Result<(), Miss> {
+        let name = key_name(key)?;
+        let _restore = Privileges::enable(&[RESTORE])
+            .map_err(|error| Miss::Failed(format!("{RESTORE}: {error}")))?;
+        write_until_owned(key, &name, sddl)
     }
 
     fn has_link_value(&mut self, key: &Key) -> Result<bool, Miss> {
@@ -250,6 +264,10 @@ impl Tree for Registry {
     fn in_administrators(&mut self, sid: &str) -> Result<bool, String> {
         let sid = Sid::parse(&sid_text(sid)?).map_err(|error| error.to_string())?;
         in_administrators(&sid).map_err(|error| error.to_string())
+    }
+
+    fn spell_out(&mut self, alias: &str) -> Result<String, String> {
+        sid_text(alias)
     }
 }
 
@@ -431,11 +449,13 @@ thread_local! {
         std::cell::RefCell::new(None);
 }
 
-/// `name` taken over with `sddl` ([`take_over_steps`]), opened for writing. The restore-intent
-/// step runs with `SeRestorePrivilege` enabled around it alone, and writes until the owner read
-/// back is `sddl`'s, at most [`OWNER_TRIES`] times.
-fn take_over(parent: Option<&Key>, name: &str, sddl: &str) -> Result<Key, Miss> {
+/// `name` taken over with `sddl` ([`take_over_steps`]), opened for writing, with its owner and
+/// DACL as they were. The restore-intent step runs with `SeRestorePrivilege` enabled around it
+/// alone, reads the SD on its handle, and writes until the owner read back is `sddl`'s, at most
+/// [`OWNER_TRIES`] times.
+fn take_over(parent: Option<&Key>, name: &str, sddl: &str) -> Result<(Key, String), Miss> {
     let mut opened = None;
+    let mut before = None;
     for step in take_over_steps(sddl) {
         drop(opened.take());
         let key = if step.restore {
@@ -443,6 +463,7 @@ fn take_over(parent: Option<&Key>, name: &str, sddl: &str) -> Result<Key, Miss> 
                 .map_err(|error| Miss::Failed(format!("{RESTORE}: {error}")))?;
             let options = NO_FOLLOW | REG_OPTION_BACKUP_RESTORE.0;
             let key = open(parent, name, step.access, options, false)?;
+            before = Some(read_sddl(&key)?);
             if let Some(sddl) = &step.sddl {
                 write_until_owned(&key, name, sddl)?;
             }
@@ -452,7 +473,10 @@ fn take_over(parent: Option<&Key>, name: &str, sddl: &str) -> Result<Key, Miss> 
         };
         opened = Some(key);
     }
-    opened.ok_or_else(|| Miss::Failed("a take-over has no steps".to_owned()))
+    match (opened, before) {
+        (Some(key), Some(before)) => Ok((key, before)),
+        _ => Err(Miss::Failed("a take-over has no restore step".to_owned())),
+    }
 }
 
 /// Writes `sddl`'s owner and DACL to `key` in one call, and reads the owner back; again while

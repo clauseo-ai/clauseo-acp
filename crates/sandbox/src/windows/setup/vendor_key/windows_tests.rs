@@ -209,8 +209,8 @@ fn set_owner_users(key: HKEY) -> Result<(), String> {
 }
 
 /// Whether the key `name` under `root` is there, following no link.
-fn present(tree: &mut Registry, root: &Key, name: &str) -> bool {
-    tree.open_child(root, name).is_ok()
+fn present(root: &Key, name: &str) -> bool {
+    Registry::open_child(root, name).is_ok()
 }
 
 #[test]
@@ -297,7 +297,7 @@ fn elevated_a_fresh_key_is_pinned_a_weak_one_is_taken_over_and_a_link_child_goes
     let mut tree = Registry::at(&path);
     let root = tree.open_root().unwrap().unwrap();
     for gone in ["LinkChild", "Owned", "Planted", "Racer", "Shut"] {
-        assert!(!present(&mut tree, &root, gone), "{gone} is gone");
+        assert!(!present(&root, gone), "{gone} is gone");
     }
     assert_eq!(
         key_sddl(&target).unwrap(),
@@ -321,6 +321,35 @@ fn elevated_a_fresh_key_is_pinned_a_weak_one_is_taken_over_and_a_link_child_goes
         read_texts(&format!("{path}\\Sandbox"), &["PoolSids"]).unwrap(),
         [None]
     );
+
+    // The next walk: the pinned record keeps its SD and its values; the installer's key, which
+    // Users may now write, is made again (made owned by Administrators, then taken over).
+    let record = format!("{path}\\Sandbox");
+    set_string(&record, "PoolSids", "kept").unwrap();
+    let installer = format!("{path}\\Clauseo");
+    set_dacl(&installer, "D:P(A;;KA;;;BA)(A;;KA;;;BU)").unwrap();
+    let backup = Privileges::enable(&WALK).unwrap();
+    let again = ensure(&mut Registry::at(&path), &path).unwrap();
+    drop(backup);
+    assert!(again.recreated.is_empty(), "{again:?}");
+    assert!(again.resecured.is_empty(), "{again:?}");
+    assert!(again.retaken.is_empty(), "{again:?}");
+    assert_eq!(
+        Security::parse(&key_sddl(&record).unwrap()),
+        Security::parse(&format!("O:BA{RECORD_SDDL}"))
+    );
+    assert_eq!(
+        read_texts(&record, &["PoolSids"]).unwrap(),
+        [Some("kept".to_owned())]
+    );
+    assert_eq!(again.untrusted_installer, std::slice::from_ref(&installer));
+    assert!(again.install_dir_reset.is_some(), "{again:?}");
+    let remade = Security::parse(&key_sddl(&installer).unwrap());
+    assert_eq!(
+        remade.owner, "S-1-5-18",
+        "the installer's key: owned by SYSTEM"
+    );
+    assert!(remade.is_vendor_set(), "{remade:?}");
 }
 
 #[test]
