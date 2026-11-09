@@ -874,8 +874,10 @@ Forgetting a matter, and `--remove`, take them off with the rest. The `OWNER RIG
 shared store is shared between matters, as the store's label is. An identical `OWNER RIGHTS`
 entry already there when a launch first lists ours, with none of ours naming it, is IT's
 ("subfolders and files only: Modify" is a common hardening entry): the ledger records it as
-found (`Entry::found`), and forget and `--remove` drop the listing without removing it. If IT
-takes its own off and a later launch writes ours, it is ours again.
+found (`Entry::found`), and forget and `--remove` (an administrator's too) drop the listing
+without removing it. Ownership is the permission entry's, not one matter's: if IT takes its own
+off and a later launch writes ours, every matter's entry naming it is marked ours, and the last
+matter forgotten removes it.
 
 **The walk's repair in a guarded tree.** Python's `tempfile.mkdtemp` and `TemporaryDirectory`
 (3.12.4 and later, CPython `posixmodule.c`) make each folder with the protected DACL
@@ -932,7 +934,9 @@ the tools Clauseo provides, not programs downloaded into a matter"):
    refused, in a matter under the profile and in one under `C:\` that inherits the `CREATOR
    OWNER` full-control allow.
 5. The `WRITE_DAC` deny breaks nothing ordinary: `git checkout`, `npm ci`, Office saving into the
-   matter, LibreOfficeKit writing its output.
+   matter, LibreOfficeKit writing its output, `ReplaceFile` and .NET `File.Replace` (without the
+   ignore-ACL-errors flag), and reopening a file the pool made asking for full control. Report
+   what breaks.
 6. With the switch off, nothing changes: `icacls` on the matter, state, notes, temp and store
    folders shows today's entries.
 7. The Claude store's strict walk finds nothing to refuse on a signed-in machine.

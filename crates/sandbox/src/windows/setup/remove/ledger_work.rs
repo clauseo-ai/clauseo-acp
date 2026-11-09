@@ -303,7 +303,8 @@ fn same_path(a: &Path, b: &Path) -> bool {
 
 /// The entries of `entries` an administrator may remove for an absent owner, before the path
 /// check: each names one of `trusted` (or is `OWNER RIGHTS`' entry), is an allow or a deny,
-/// records no file, and lies in (or is) one of the matter folders [`matter_roots`] finds.
+/// records no file, isn't IT's own (`Entry::found`), and lies in (or is) one of the matter
+/// folders [`matter_roots`] finds.
 pub(super) fn admin_targets<'l>(entries: &[&'l Entry], trusted: &[Sid]) -> Vec<&'l Entry> {
     let roots = matter_roots(entries, trusted);
     entries
@@ -311,6 +312,7 @@ pub(super) fn admin_targets<'l>(entries: &[&'l Entry], trusted: &[Sid]) -> Vec<&
         .filter(|e| {
             (trusted.contains(&e.sid) || e.rights.fixed_subject() == Some(e.sid.as_str()))
                 && !e.rights.is_label()
+                && !e.found
                 && e.file.is_none()
                 && roots.iter().any(|root| in_folder(&e.path, root))
         })
