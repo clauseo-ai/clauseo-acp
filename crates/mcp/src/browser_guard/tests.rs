@@ -50,7 +50,9 @@ fn the_cdp_port_is_required_and_parsed() {
 }
 
 /// `--listen <socket>` may come first on Unix, as an absolute path that need not exist; it is
-/// refused when relative, anywhere else in the line, and on Windows.
+/// refused when relative, anywhere else in the line, and on Windows. Unix hosts only: on
+/// Windows `/tmp/...` is no absolute path (it has no drive).
+#[cfg(unix)]
 #[test]
 fn listen_comes_first_on_unix_only() {
     let (program, cwd) = program_and_cwd();
