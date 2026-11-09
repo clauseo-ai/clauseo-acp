@@ -30,10 +30,11 @@ use windows::Win32::Security::{
     UNPROTECTED_DACL_SECURITY_INFORMATION,
 };
 use windows::Win32::System::Registry::{
-    HKEY, HKEY_LOCAL_MACHINE, KEY_ALL_ACCESS, KEY_READ, KEY_WOW64_64KEY, REG_LINK,
-    REG_OPTION_BACKUP_RESTORE, REG_OPTION_NON_VOLATILE, REG_OPTION_OPEN_LINK, REG_SZ,
-    REG_VALUE_TYPE, RegCloseKey, RegCreateKeyExW, RegDeleteValueW, RegEnumKeyExW,
-    RegGetKeySecurity, RegQueryValueExW, RegSetKeySecurity, RegSetValueExW,
+    HKEY, HKEY_LOCAL_MACHINE, KEY_ALL_ACCESS, KEY_READ, KEY_WOW64_64KEY,
+    REG_CREATE_KEY_DISPOSITION, REG_CREATED_NEW_KEY, REG_LINK, REG_OPTION_BACKUP_RESTORE,
+    REG_OPTION_NON_VOLATILE, REG_OPTION_OPEN_LINK, REG_SZ, REG_VALUE_TYPE, RegCloseKey,
+    RegCreateKeyExW, RegDeleteValueW, RegEnumKeyExW, RegGetKeySecurity, RegQueryValueExW,
+    RegSetKeySecurity, RegSetValueExW,
 };
 use windows::core::{HSTRING, PCWSTR, PWSTR, w};
 
@@ -124,7 +125,7 @@ impl Tree for Registry {
         // Administrators, which the caller's token holds, own it until the take-over makes
         // SYSTEM the owner under SeRestorePrivilege.
         let sddl = VENDOR_SDDL.replacen("O:SY", "O:BA", 1);
-        create(None, &self.path, &sddl).map(|_key| ())
+        create(None, &self.path, &sddl, false).map(|_key| ())
     }
 
     fn take_over_root(&mut self, sddl: &str) -> Result<Key, Miss> {
@@ -158,7 +159,7 @@ impl Tree for Registry {
     }
 
     fn create_child(&mut self, parent: &Key, name: &str, sddl: &str) -> Result<Key, Miss> {
-        create(Some(parent), name, sddl)
+        create(Some(parent), name, sddl, true)
     }
 
     fn read_values(&mut self, key: &Key) -> Result<Vec<Value>, Miss> {
@@ -167,6 +168,14 @@ impl Tree for Registry {
 
     fn write_values(&mut self, key: &Key, values: &[Value]) -> Result<(), Miss> {
         values::write(key, values)
+    }
+
+    fn flush(&mut self, key: &Key) -> Result<(), Miss> {
+        values::flush(key)
+    }
+
+    fn rename(&mut self, key: &Key, name: &str) -> Result<(), Miss> {
+        values::rename(key, name)
     }
 
     fn retake(&mut self, key: &Key, sddl: &str) -> Result<(), Miss> {
@@ -384,8 +393,9 @@ fn sid_text(text: &str) -> Result<String, String> {
     found
 }
 
-/// `name` made under `parent` (or at the root's path when `parent` is `None`) with `sddl`.
-fn create(parent: Option<&Key>, name: &str, sddl: &str) -> Result<Key, Miss> {
+/// `name` made under `parent` (or at the root's path when `parent` is `None`) with `sddl`;
+/// when `fresh`, a key that was there already is closed unused and fails.
+fn create(parent: Option<&Key>, name: &str, sddl: &str, fresh: bool) -> Result<Key, Miss> {
     let descriptor =
         Descriptor::from_sddl(sddl).map_err(|error| Miss::Failed(error.to_string()))?;
     let attributes = SECURITY_ATTRIBUTES {
@@ -396,9 +406,10 @@ fn create(parent: Option<&Key>, name: &str, sddl: &str) -> Result<Key, Miss> {
     let root = parent.map_or(HKEY_LOCAL_MACHINE, |key| key.0);
     let subkey = HSTRING::from(name);
     let mut opened = HKEY::default();
+    let mut disposition = REG_CREATE_KEY_DISPOSITION::default();
     // SAFETY: the subkey is NUL-terminated and lives for the call; `attributes` and the
-    // descriptor it points to live for the call too; `opened` is a live out-pointer, owned by
-    // `Key` once written.
+    // descriptor it points to live for the call too; `opened` and `disposition` are live
+    // out-pointers, the key owned by `Key` once written.
     let made = unsafe {
         RegCreateKeyExW(
             root,
@@ -409,11 +420,15 @@ fn create(parent: Option<&Key>, name: &str, sddl: &str) -> Result<Key, Miss> {
             KEY_ALL_ACCESS | KEY_WOW64_64KEY,
             Some(&raw const attributes),
             &raw mut opened,
-            None,
+            Some(&raw mut disposition),
         )
     };
     check("RegCreateKeyExW", made)?;
-    Ok(Key(opened))
+    let key = Key(opened);
+    if fresh && disposition != REG_CREATED_NEW_KEY {
+        return Err(Miss::Failed(format!("{name} was there already")));
+    }
+    Ok(key)
 }
 
 /// The key's owner and DACL as SDDL.
@@ -457,6 +472,10 @@ thread_local! {
     /// owner is read back: the elevated tests' planter, setting the owner back.
     pub(super) static AFTER_OWNER_WRITE: std::cell::RefCell<Option<Hook>> =
         std::cell::RefCell::new(None);
+    /// Set, a rename fails: the elevated tests' crash after the old record is deleted.
+    pub(super) static FAIL_RENAME: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    /// Set, a flush fails: the elevated tests' crash before the old record is deleted.
+    pub(super) static FAIL_FLUSH: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
 /// `name` taken over with `sddl` ([`take_over_steps`]), opened for writing, with its owner and

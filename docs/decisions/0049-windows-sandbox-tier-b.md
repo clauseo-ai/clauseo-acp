@@ -307,7 +307,17 @@ build 26100):
     delete) are deleted on every walk anyway, since a handle opened while a DACL was weak
     outlives any DACL written later; a NULL DACL counts as letting everyone write. `Sandbox` is
     made again with its own SD, its values copied through only when an administrator owned it
-    and no one else could write it; `Clauseo\Clauseo` is made again with the folder from the
+    and no one else could write it. The new `Sandbox` is written whole as `Sandbox.new` and
+    flushed, the old one deleted, and the new one renamed through its own handle, so a crash
+    leaves the old record, the new one or both. The next walk deletes a `Sandbox.new` beside
+    `Sandbox`, and renames one found alone into place only when its SD is the pinned one, owned
+    by SYSTEM or Administrators, with no link value, no subkey and values that parse; any other
+    is deleted. Both keys are taken over with Users' read kept
+    (`O:SYD:P(A;;KA;;;SY)(A;;KA;;;BA)(A;;KR;;;BU)`), so a walk that stops before the delete never
+    leaves a normal user denied, which the desktop's check would read as a jail. Readers that
+    hold no set-up lock read again, for up to half a second, when the
+    record is denied, unparsable or missing while `Sandbox.new` is there (`record_settle.rs`).
+    `Clauseo\Clauseo` is made again with the folder from the
     uninstall key's `InstallLocation`, or none. The rest
     is kept with `O:SYD:AI(A;OICIID;KA;;;SY)(A;OICIID;KA;;;BA)(A;OICIID;KR;;;BU)`, written out on
     its own handle: no write uses `SetSecurityInfo`, whose propagation could reach through a
