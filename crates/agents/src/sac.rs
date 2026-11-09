@@ -42,6 +42,9 @@ const PATH_DIR: &str = "codex-path";
 const MOVED_DIR: &str = "codex-path.sac-off";
 /// The ripgrep in it.
 const RG: &str = "rg.exe";
+/// The target of the step's one summary line: host.log keeps info only from `clauseo_*`
+/// crates' `::lifecycle` targets, so the SAC decision reaches a support log.
+const LIFECYCLE: &str = "clauseo_agents::lifecycle";
 
 /// Codex's Windows layouts in an install folder, each with its `rg.exe`'s SHA-256. Both are the
 /// official ripgrep 15.2.0, as `@openai/codex` 0.162.1 ships it (the tarballs
@@ -134,7 +137,7 @@ pub(crate) fn settle(config: &AgentsConfig, folder: &Path, agent: &AgentId) {
             .iter()
             .map(|(dir, pin)| (rel(folder, dir), pin.as_str()))
             .collect();
-        log(agent, &apply(&layouts, || fake.state));
+        step(agent, &layouts, || fake.state);
         return;
     }
     #[cfg(not(feature = "test-support"))]
@@ -145,10 +148,53 @@ pub(crate) fn settle(config: &AgentsConfig, folder: &Path, agent: &AgentId) {
             .iter()
             .map(|&(dir, pin)| (rel(folder, dir), pin))
             .collect();
-        log(agent, &apply(&layouts, windows::read_state));
+        step(agent, &layouts, windows::read_state);
     }
     #[cfg(not(windows))]
     let _: (&Path, &AgentId) = (folder, agent);
+}
+
+/// One run of the SAC step on `layouts`: the moves, their own lines, and the one lifecycle line
+/// when a Codex layout was there (so SAC's state was read).
+fn step(agent: &AgentId, layouts: &[(PathBuf, &str)], read: impl FnOnce() -> SacState) {
+    let mut seen = None;
+    let outcomes = apply(layouts, || {
+        let state = read();
+        seen = Some(state);
+        state
+    });
+    log(agent, &outcomes);
+    if let Some(state) = seen {
+        let (kind, action) = summary(state, &outcomes);
+        tracing::info!(
+            target: LIFECYCLE,
+            %agent,
+            sac = %kind,
+            action = %action,
+            "agent install: Smart App Control step for Codex's rg.exe"
+        );
+    }
+}
+
+/// The lifecycle line's SAC kind (`on`, `off`, `evaluation`, `unknown`) and action: `moved`,
+/// `restored`, `left` (another rg, not moved), `kept` (Off or Evaluation with `codex-path`
+/// in place) or `none` (already aside under On, an unknown state, or a failed rename, which
+/// warns on its own line). Never a path or a hash.
+pub(crate) fn summary(state: SacState, outcomes: &[Outcome]) -> (&'static str, &'static str) {
+    let kind = match state {
+        SacState::On => "on",
+        SacState::Off => "off",
+        SacState::Evaluation => "evaluation",
+        SacState::Unknown(_) => "unknown",
+    };
+    let action = match outcomes.first() {
+        Some(Outcome::Moved) => "moved",
+        Some(Outcome::Restored) => "restored",
+        Some(Outcome::Mismatch(_)) => "left",
+        None if matches!(state, SacState::Off | SacState::Evaluation) => "kept",
+        Some(Outcome::Unknown(_) | Outcome::Failed(_)) | None => "none",
+    };
+    (kind, action)
 }
 
 /// `dir` (`/`-separated) below `folder`.
