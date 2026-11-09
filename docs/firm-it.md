@@ -47,14 +47,19 @@ Windows Server 2025 (build 26100) on 2026-11-03, with the 0.0.0 dry-run installe
   `C:\ProgramData\Microsoft\Windows\Start Menu\Programs\Clauseo.lnk` and
   `C:\Users\Public\Desktop\Clauseo.lnk`, also with `/S`. It writes nothing under `HKCU`. The app it starts at the end runs un-elevated (medium integrity).
 - The per-user installer installs in `%LOCALAPPDATA%\Clauseo` and writes
-  `HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall\Clauseo`. At the end of an
-  interactive install it says a UAC prompt is next, then raises one, to set up Safe workspace (S15
-  tier B): elevated, it writes the sandbox's set-up program from the installer itself into
+  `HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall\Clauseo`. It raises no UAC prompt.
+- **In the launch build, neither installer sets up the Safe workspace or prepares anything for
+  it:** no UAC prompt for it, nothing in `C:\Program Files\Clauseo\Sandbox`, no
+  `ClauseoSandboxUsers` group, no SYSTEM tasks, no `HKLM\SOFTWARE\Clauseo\Sandbox` key and no
+  set-up program; the uninstaller has none of it to remove. The rest of this bullet describes the
+  later version that adds the Safe workspace. At the end of an interactive install the per-user
+  installer says a UAC prompt is next, then raises one, to set up Safe workspace (S15 tier B):
+  elevated, it writes the sandbox's set-up program from the installer itself into
   `C:\Program Files\Clauseo\Sandbox` and runs it from there. A standard user needs an
   administrator to type their password into the prompt; Safe workspace is set up for the user who
-  ran the installer. Declined or failed, Clauseo is installed and works without it, and
-  running the installer again sets it up. A silent (`/S`) or passive (`/P`) per-user install
-  raises no prompt and skips it; Clauseo's updates never prompt. The per-machine installer, already
+  ran the installer. Declined or failed, Clauseo is installed without it, and running the
+  installer again sets it up. A silent (`/S`) or passive (`/P`) per-user install raises no
+  prompt and skips it; Clauseo's updates never prompt. The per-machine installer, already
   elevated, writes and records the set-up program in the same folder on every install and update,
   but sets nobody up: no sandbox users, tasks or network rules. Each lawyer's Safe workspace is set
   up later, from Clauseo's first-run step, which raises a UAC prompt; a standard user needs an
@@ -62,6 +67,9 @@ Windows Server 2025 (build 26100) on 2026-11-03, with the 0.0.0 dry-run installe
 
 **Exit codes** of the installers, besides NSIS's 0 (done), 1 (cancelled) and 2 (stopped by an
 error). Only the last code set is reported, so an install that set several reports one of them.
+
+The launch build never sets 20, 21, 22, 23, 24 or 27: they are the Safe workspace's codes, and
+they and the notes on them below come with it in a later version.
 
 What a silent (`/S`) install can return:
 
@@ -74,11 +82,12 @@ What a silent (`/S`) install can return:
 | 25 | Per-machine install: nothing installed, because the installer couldn't make its protected temporary folder in `C:\Program Files\Clauseo` |
 | 28 | Install: nothing usable installed, because Windows Security (or another antivirus) removed or blocked `Clauseo.exe` while it was being written; allow Clauseo in Windows Security's Protection history, then install again |
 
-A silent per-user install exits 22 by design: it can't show the Windows prompt, so the Safe
-workspace isn't set up. Deployment tools such as Intune and SCCM treat any non-zero code as a
-failure. Either add 22 as a success code (in Intune, the app's **Return codes**: 22, Success), or
-deploy the per-machine installer, which is elevated already and places the set-up program without
-a prompt; each lawyer's Safe workspace is then set up from Clauseo's first-run step, as above.
+With the Safe workspace, a silent per-user install exits 22 by design: it can't show the Windows
+prompt, so the Safe workspace isn't set up. Deployment tools such as Intune and SCCM treat any
+non-zero code as a failure. Either add 22 as a success code (in Intune, the app's **Return codes**:
+22, Success), or deploy the per-machine installer, which is elevated already and places the set-up
+program without a prompt; each lawyer's Safe workspace is then set up from Clauseo's first-run step,
+as above.
 
 A 23 after a 10-minute wait means the placing may still be running; it finishes on its own. A
 `/S` run as SYSTEM (Intune) runs in session 0, which sees no user's Clauseo window, so it doesn't return 24 for a user's running Clauseo.
@@ -138,7 +147,8 @@ registered by an earlier version keep their old `UninstallString` until reinstal
   unless removing the sandbox's set-up succeeded, and the files the sandbox set aside from a
   matter (`sandbox\set-aside`) are always kept. A message names the kept folder, or the folder to
   delete by hand when something could not be deleted and nothing was kept.
-- Where Clauseo's Windows protection was set up (task S15), uninstalling first removes it, elevated
+- Not in the launch build, which sets up no Safe workspace and so removes none: where Clauseo's
+  Windows protection was set up (task S15), uninstalling first removes it, elevated
   (`clauseo-sandbox-setup.exe --remove`): the local sandbox users `ClauseoSb01` to `ClauseoSb32`,
   their profiles, the group `ClauseoSandboxUsers`, the key `HKLM\SOFTWARE\Clauseo\Sandbox` and the
   access rules Clauseo put on the lawyer's folders. A per-user uninstall asks for one UAC prompt
@@ -159,7 +169,8 @@ registered by an earlier version keep their old `UninstallString` until reinstal
   removed `clauseo-sandbox-setup.exe`, see [section 10](#10-if-windows-security-removed-clauseos-set-up-program).
   If it was deleted with the install folder, see
   [Clearing a leftover Windows sandbox by hand](#clearing-a-leftover-windows-sandbox-by-hand).
-- After an uninstall, `C:\Program Files\Clauseo\Sandbox` or the scheduled tasks
+- With the Safe workspace (not in the launch build): after an uninstall,
+  `C:\Program Files\Clauseo\Sandbox` or the scheduled tasks
   `\Clauseo\SandboxRefresh` and `\Clauseo\SandboxStop` may occasionally stay behind; the
   Windows Application event log names the step that couldn't finish. An administrator can delete
   them by hand (see
@@ -185,14 +196,16 @@ version: use `"C:\Program Files\Clauseo\uninstall.exe" /S`, which hands over to 
 `%TEMP%` and returns before the files are gone. On our test machine the stub returned after 0.46 s
 and the folder was gone 0.26 s later. Windows PowerShell's `Start-Process -Wait` waits for that
 copy too. Either way it leaves each
-user's `%LOCALAPPDATA%\ai.clauseo.desktop` in place. As SYSTEM it removes the protection's
-sandbox users, group and key as well (above), allowing up to 2 minutes more, and the access rules
-Clauseo put on each matter folder it recorded.
+user's `%LOCALAPPDATA%\ai.clauseo.desktop` in place. With the Safe workspace (not in the launch
+build), as SYSTEM it removes the protection's sandbox users, group and key as well (above),
+allowing up to 2 minutes more, and the access rules Clauseo put on each matter folder it recorded.
 
-It doesn't go through the files inside a lawyer's matters, so the copies Windows made of those
-rules below each matter folder stay: entries naming the deleted sandbox users, and the low
-integrity label the matter had while Clauseo protected it. They give nothing to any account that
-still exists. To clear them, an administrator runs two commands on the matter folder:
+The rest of this subsection applies only once the Safe workspace has been set up, which the launch
+build never does. The uninstall doesn't go through the files inside a lawyer's matters, so the
+copies Windows made of those rules below each matter folder stay: entries naming the deleted sandbox
+users, and the low integrity label the matter had while Clauseo protected it. They give nothing to
+any account that still exists. To clear them, an administrator runs two commands on the matter
+folder:
 
 1. `icacls "D:\Matters\Example" /reset /T /C` removes the stale entries. It resets the folder and
    everything below it to the permissions it inherits, so don't use it on a matter where your firm
@@ -214,6 +227,9 @@ Never run Clauseo elevated: WebView2 can fail to start when its data folder belo
 user ([tauri#13926](https://github.com/tauri-apps/tauri/issues/13926)).
 
 ### Clearing a leftover Windows sandbox by hand
+
+**Not in the launch build.** The Safe workspace isn't in Clauseo's launch build; it comes in a
+later version. Until then none of this happens on a firm's machines.
 
 The normal way to remove Clauseo's Windows protection is
 `clauseo-sandbox-setup.exe --remove --per-machine` from the install folder, at an elevated prompt
@@ -456,6 +472,9 @@ do when `clauseo-sandbox-setup.exe` is gone, and how to get it back and check it
 <a id="sandbox-setup"></a>
 ### If the Safe workspace can't be set up
 
+**Not in the launch build.** The Safe workspace isn't in Clauseo's launch build; it comes in a
+later version. Until then none of this and the subsections below happen on a firm's machines.
+
 On Windows, when something on the computer stops the Safe workspace's set-up, the app names the
 reason, and "Copy details for IT" links to the part of this page that fixes it:
 
@@ -533,7 +552,8 @@ Then set it up again from Clauseo, signed in as the other account.
 - Allow `%PROGRAMFILES%\Clauseo\*` by **path**. Only administrators can write there, which is why
   firms with these rules need the per-machine installer: they usually block programs in
   user-writable folders such as `%LOCALAPPDATA%`.
-- That rule covers Clauseo's set-up program, the admin copy Clauseo starts elevated:
+- With the Safe workspace (not in the launch build), that rule also covers Clauseo's set-up
+  program, the admin copy Clauseo starts elevated:
   `%PROGRAMFILES%\Clauseo\Sandbox\clauseo-sandbox-setup.exe`. If AppLocker or Software
   Restriction Policies block it (`ERROR_ACCESS_DISABLED_BY_POLICY`, 1260), the Safe workspace
   can't be set up: allow that file by path.
@@ -551,9 +571,9 @@ Then set it up again from Clauseo, signed in as the other account.
   - only as a last resort, a path rule for the user's `agents` folder. Anything the user can
     write there could then run. Scope it to `agents\runtime\` and `agents\<agent>\install\`
     in the data folder, never the whole data folder.
-- Coming (stage C): on Windows, Clauseo's sandbox runs each agent as a separate local user
-  (task S15). A policy that forbids local accounts leaves agents running without it, shown in the
-  app as "Not protected".
+- Coming later, with the Safe workspace (not in the launch build): on Windows it runs each AI
+  tool as a separate local user (task S15). A policy that forbids local accounts stops it, and the
+  app shows "Not protected".
 
 ### Windows in S mode
 
@@ -1015,6 +1035,9 @@ that session's Claude deny rules; Clauseo's own permission check refuses them wh
 
 ## 9. Windows protection: a matter folder Clauseo can't take back
 
+**Not in the launch build.** The Safe workspace isn't in Clauseo's launch build; it comes in a
+later version. Until then none of this happens on a firm's machines.
+
 With Clauseo's Windows protection (tier B), each matter's agent runs as its own local account
 (`ClauseoSb01`, `ClauseoSb02`, and so on). If a matter's folder ends up owned by one of those
 accounts, Clauseo refuses to open the matter and first tries to give the folder back to the
@@ -1038,6 +1061,9 @@ To clear the sandbox users and the rest of the protection from a computer whose
 
 <a id="sandbox-tool-missing"></a>
 ## 10. If Windows security removed Clauseo's set-up program
+
+**Not in the launch build.** The Safe workspace isn't in Clauseo's launch build; it comes in a
+later version. Until then none of this happens on a firm's machines.
 
 Microsoft Defender can quarantine `clauseo-sandbox-setup.exe`, which sets up and removes Clauseo's
 Windows protection (section 1); on our test machine, as `Trojan:Win32/Bearfoos.A!ml`, a false
@@ -1128,6 +1154,9 @@ Removing the protection also removes its network filters and firewall rules: see
 [section 11](#11-windows-protection-the-admin-copy-its-tasks-and-its-network-rules).
 
 ## 11. Windows protection: the admin copy, its tasks and its network rules
+
+**Not in the launch build.** The Safe workspace isn't in Clauseo's launch build; it comes in a
+later version. Until then none of this happens on a firm's machines.
 
 What Clauseo's Windows protection (tier B) puts on a computer besides the sandbox users: the admin
 copy of its set-up program, the registry values that describe it, two SYSTEM tasks and the network
