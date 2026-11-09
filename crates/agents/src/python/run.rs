@@ -141,6 +141,13 @@ pub(crate) async fn smoke<T: Timer>(
             SMOKE_LIMIT.as_secs()
         )));
     };
+    exit_result(seen, code)
+}
+
+/// What a run that ended means: `seen` bytes printed, exit `code`. A process refused at load
+/// exits with one of [`POLICY_STATUSES`], which names its blocker as a refused start's error
+/// does.
+pub(super) fn exit_result(seen: usize, code: Option<i32>) -> Result<(), RunFailure> {
     match code {
         Some(0) if seen > 0 => Ok(()),
         Some(code) if POLICY_STATUSES.iter().any(|&s| code == s.cast_signed()) => {

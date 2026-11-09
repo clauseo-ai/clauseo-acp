@@ -78,6 +78,8 @@ pub enum InstallProgress {
 /// Its retry: [`crate::SetupCommand::RetryAgentInstall`] for **any** ready agent retries
 /// Python (one for the computer); the window may send any ready plan's id. That agent's own
 /// install is left as it is: it stays `Ready`, and nothing of it is fetched or installed again.
+/// While another agent's install runs, the retry starts nothing and pauses nothing: that install
+/// fetches Python as its own second step.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 #[cfg_attr(feature = "specta", derive(specta::Type))]

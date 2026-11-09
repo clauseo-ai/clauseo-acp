@@ -245,6 +245,24 @@ fn a_refused_start_is_blocked_and_another_launch_error_is_failed() {
     );
 }
 
+#[test]
+fn a_process_refused_at_load_names_its_blocker_from_its_exit_status() {
+    use super::run::exit_result;
+    let refused = |status: u32| match exit_result(0, Some(status.cast_signed())) {
+        Err(RunFailure::Blocked(_, by)) => by,
+        other => panic!("{other:?}"),
+    };
+    assert_eq!(refused(0xC0E9_0002), PythonBlocker::AppControl);
+    assert_eq!(refused(0xC000_0428), PythonBlocker::Unknown);
+    assert_eq!(exit_result(12, Some(0)), Ok(()));
+    for (seen, code) in [(0, Some(0)), (12, Some(3)), (12, None)] {
+        assert!(
+            matches!(exit_result(seen, code), Err(RunFailure::Failed(_))),
+            "{seen} {code:?}"
+        );
+    }
+}
+
 #[cfg(unix)]
 #[test]
 fn stale_python_folders_go_read_only_or_not_and_node_and_the_current_one_stay() {

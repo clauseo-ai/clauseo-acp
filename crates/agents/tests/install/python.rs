@@ -219,51 +219,46 @@ fn a_tampered_archive_fails_python_after_three_tries_and_the_agent_stays_ready()
     assert!(matches!(last, PythonState::Ready { .. }), "{last:?}");
 }
 
-#[test]
-fn a_retry_of_any_ready_agent_retries_python_and_leaves_that_agent_s_install_alone() {
-    let bytes = fake_python("echo 3.13.18");
-    let fx = with_python("py-retry-any", &bytes);
-    let path = format!("/py/{}", archive_name(1));
-    for _ in 0..6 {
-        fx.registry.then(&path, Behaviour::Tamper);
-    }
+/// A fixture where B was installed by a build with no Python, so B is found `Ready` on the
+/// machine at the next start and never fetched Python; that start has Python's archive `bytes`.
+fn b_found_before_python(label: &str, bytes: &[u8]) -> Fixture {
+    let mut fx = Fixture::new(label);
     let (agents, events) = fx.start();
     events.first_states();
-    // A's job fails Python, then B's job installs B and fails Python again.
-    agents.install(&agent_a());
-    events.until_end(&agent_a());
-    fx.timer.fire_next(secs(2));
-    fx.timer.fire_next(secs(8));
-    assert_eq!(
-        failure_kind(&events.until_python_end().1),
-        PythonFailureKind::Failed
-    );
     agents.install(&agent_b());
     let (_, last) = events.until_end(&agent_b());
     assert!(matches!(last, InstallState::Ready { .. }), "{last:?}");
-    fx.timer.fire_next(secs(2));
-    fx.timer.fire_next(secs(8));
-    assert_eq!(
-        failure_kind(&events.until_python_end().1),
-        PythonFailureKind::Failed
-    );
+    drop(agents);
+    fx.config.snapshot = fx
+        .config
+        .snapshot
+        .clone()
+        .with_python(python_entry(bytes, 1, 4000));
+    fx.registry
+        .route(&format!("/py/{}", archive_name(1)), bytes.to_vec());
+    fx
+}
+
+#[test]
+fn a_retry_of_any_ready_agent_retries_python_and_leaves_that_agent_s_install_alone() {
+    let bytes = fake_python("echo 3.13.18");
+    let fx = b_found_before_python("py-retry-any", &bytes);
+    let (agents, events) = fx.start();
+    let (a, b) = events.first_states();
+    assert!(matches!(a, InstallState::Missing { .. }), "{a:?}");
+    assert!(matches!(b, InstallState::Ready { .. }), "{b:?}");
     let b_installed = agents.installed(&agent_b());
     assert!(b_installed.is_some());
-    let other_requests = |fx: &Fixture| {
-        fx.registry
-            .requests()
-            .into_iter()
-            .filter(|request| request.path != path)
-            .count()
-    };
-    let before = other_requests(&fx);
+    let before = fx.registry.requests().len();
     // A retry sent with B's id (the window may send any ready plan's) retries Python.
     agents.retry(&agent_b(), false);
     let (_, last) = events.until_python_end();
     assert!(matches!(last, PythonState::Ready { .. }), "{last:?}");
-    // B's own install is not redone: nothing but Python fetched, B never left Ready, A
+    // B's own install is not redone: only Python's archive fetched, B never left Ready, A
     // untouched, and B's install is the same.
-    assert_eq!(other_requests(&fx), before);
+    let after = fx.registry.requests();
+    assert_eq!(after.len(), before + 1, "{after:?}");
+    assert_eq!(python_requests(&fx).len(), 1);
     let seen = events.drain();
     assert!(
         states_of(&seen, &agent_b())
@@ -273,6 +268,36 @@ fn a_retry_of_any_ready_agent_retries_python_and_leaves_that_agent_s_install_alo
     );
     assert_eq!(states_of(&seen, &agent_a()), []);
     assert_eq!(agents.installed(&agent_b()), b_installed);
+}
+
+#[test]
+fn a_python_retry_while_another_agent_installs_starts_nothing_and_pauses_nothing() {
+    let bytes = fake_python("echo 3.13.18");
+    let fx = b_found_before_python("py-retry-busy", &bytes);
+    fx.registry
+        .then(&crate::support::tarball_path("adapter-a"), Behaviour::Stall);
+    let (agents, events) = fx.start();
+    events.first_states();
+    agents.install(&agent_a());
+    fx.registry.wait_for_stalls(1);
+    agents.retry(&agent_b(), false);
+    // B's `Ready` again tells the test the worker has handled the retry before it.
+    agents.install(&agent_b());
+    let mut seen = events.until(&agent_b(), |s| matches!(s, InstallState::Ready { .. }));
+    let fetched = python_requests(&fx);
+    assert_eq!(fetched, [], "no second job fetched Python");
+    fx.registry.release();
+    let (rest, last) = events.until_end(&agent_a());
+    assert!(matches!(last, InstallState::Ready { .. }), "{last:?}");
+    seen.extend(rest);
+    assert!(
+        !states_of(&seen, &agent_a()).contains(&InstallState::Paused),
+        "{seen:?}"
+    );
+    // A's job fetches Python as its second step, once.
+    let (_, last) = events.until_python_end();
+    assert!(matches!(last, PythonState::Ready { .. }), "{last:?}");
+    assert_eq!(python_requests(&fx).len(), 1);
 }
 
 #[test]

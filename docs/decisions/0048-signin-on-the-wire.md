@@ -117,9 +117,10 @@ the runtime and its check failing, have no `ErrorCode`, and adding codes would c
 schema for a state that never stops an agent. A download-side failure also carries the agent
 install's code (`agent.install_blocked`, `agent.install_disk_full`, `agent.install_failed`),
 and a blocked download the Python hosts, so the window reuses the agent's lines. `run_blocked`
-carries an optional `blocked_by` (`PythonBlockedBy`: `app_control` for Windows error 4551,
-App Control for Business or Smart App Control; `applocker` for 1260, `AppLocker` or Software
-Restriction Policies; `unknown` otherwise), read only from the failed start's error code.
+carries an optional `blocked_by` (`PythonBlockedBy`: `app_control` for Windows error 4551 or
+its NT status `0xC0E90002`, App Control for Business or Smart App Control; `applocker` for
+1260, `AppLocker` or Software Restriction Policies; `unknown` otherwise), read only from the
+failed start's error code or the exit status of a process refused at load.
 
 **New error codes.** Eleven, before `unknown`, each with its row in 0003 and in
 `docs/ui-states.md` section 9. An unknown code still decodes to `unknown`.
