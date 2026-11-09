@@ -48,9 +48,16 @@ mod share;
 pub(crate) mod tests;
 #[cfg(windows)]
 mod windows;
+#[cfg(all(windows, test))]
+pub(crate) use windows::TestDrive;
 #[cfg(windows)]
 pub(crate) use windows::short_path;
+#[cfg(all(windows, test))]
+pub(crate) use windows_names::drive_is_local;
 mod windows_names;
+#[cfg(test)]
+#[cfg(windows)]
+mod windows_real_tests;
 
 /// What [`is_network_path`] compares a path against.
 pub(crate) struct NetEnv {
