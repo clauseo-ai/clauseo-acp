@@ -9,14 +9,15 @@ mod spawn;
 mod stdio;
 #[cfg(test)]
 mod tests;
+mod token;
 
 use std::ffi::OsStr;
 use std::os::windows::ffi::OsStrExt;
 
 use ::windows::Win32::Foundation::NTSTATUS;
 
-pub use namespace::{Namespace, NamespaceHandles};
-pub use spawn::{LowBoxCommand, Spawned};
+pub use namespace::{Inheritable, Namespace, NamespaceHandles};
+pub use spawn::{LowBoxCommand, Spawned, UNRESUMED_EXIT};
 pub use stdio::Stdio;
 
 use crate::error::Error;

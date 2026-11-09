@@ -47,11 +47,16 @@ mod handles;
 mod layout;
 mod package;
 mod quote;
+// The token rules: plain Rust, tested on every OS, used by the windows module.
+#[cfg(any(windows, test))]
+mod token_check;
 #[cfg(windows)]
 mod windows;
 
 #[cfg(windows)]
-pub use self::windows::{LowBoxCommand, Namespace, NamespaceHandles, Spawned, Stdio};
+pub use self::windows::{
+    Inheritable, LowBoxCommand, Namespace, NamespaceHandles, Spawned, Stdio, UNRESUMED_EXIT,
+};
 pub use error::{Error, HandleProblem};
 pub use grants::{BrowserFolders, Grant, Rights, grants};
 pub use handles::{HANDLE_COUNT, ObjectKind, Slot, parse_handle_arg};
