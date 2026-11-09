@@ -7,8 +7,12 @@ Low token. Windows only.
 ## Build
 
 ```text
-cargo build -p clauseo-sandbox --bins --example s15_launch_vm --target <native target>
+cargo build -p clauseo-sandbox --features vm-harness-detail --bins --example s15_launch_vm --target <native target>
 ```
+
+`vm-harness-detail` builds the runner with its `DETAIL` lines (each refusal's and notice's
+detail on stderr, after its `kind=` line), which the rows read; the example builds only with it.
+A debug build only: the feature refuses to compile in release, and product builds leave it off.
 
 The harness looks for `clauseo-sandbox-run.exe` and `clauseo-sandbox-setup.exe` beside itself
 and one folder up (cargo puts examples in `examples\`). `--runner` and `--setup` override that.

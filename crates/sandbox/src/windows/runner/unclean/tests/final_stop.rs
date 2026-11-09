@@ -86,8 +86,8 @@ impl Markers for World {
     fn pause(&mut self, pause: Duration) {
         self.fake.pause(pause);
     }
-    fn note(&mut self, line: &str) {
-        self.fake.note(line);
+    fn note(&mut self, kind: RunnerKind, detail: Detail) {
+        self.fake.note(kind, detail);
     }
 }
 
@@ -100,7 +100,7 @@ fn a_trigger_that_respawns_a_pool_process_keeps_the_marker_until_the_final_stop(
     // stop, whose number is read only now, and the logon is refused.
     let refused = logon_check(&mut world, &sid(POOL_A)).unwrap_err();
     assert_eq!(refused.exit, RunExit::AwaitingStop);
-    assert!(refused.why.contains("final stop"), "{refused:?}");
+    assert!(refused.why.text().contains("final stop"), "{refused:?}");
     assert!(world.fake.has("a1"));
     assert!(!world.alive, "the final stop F4 requested killed it");
     // The final stop completed: the next logon goes, and the marker is gone.
@@ -152,7 +152,10 @@ fn a_swept_marker_whose_final_stop_cant_be_read_refuses_the_logon_without_a_stop
         RunExit::AwaitingSweep,
         "no stop number to wait for"
     );
-    assert!(refused.why.contains("completed sweep"), "{refused:?}");
+    assert!(
+        refused.why.text().contains("completed sweep"),
+        "{refused:?}"
+    );
     let swept = MarkerState::AwaitingSweepBeforeStop { sweep: 9 };
     assert_eq!(world.fake.state("a1"), Some(swept));
     assert_eq!(world.fake.asked("stop"), 0);

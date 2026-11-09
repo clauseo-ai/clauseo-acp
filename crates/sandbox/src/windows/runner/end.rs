@@ -49,6 +49,7 @@ use std::thread;
 use std::time::Duration;
 
 use super::marker::MarkerState;
+use super::stderr::{Detail, RunnerKind};
 use super::sweep::SWEPT;
 use super::{RunExit, agent_code};
 use crate::windows::setup::record_values::{STOP_NEXT, SWEEP_NEXT};
@@ -81,21 +82,21 @@ pub(crate) trait EndSteps {
     /// Ends this launch's kill-on-close job (its processes end with [`SWEPT`]) and waits, up to
     /// [`EMPTY_WAIT`], until no process is left in it ([`wait_empty`]); nothing to do before the
     /// job is made. An error says what is left.
-    fn empty_job(&self) -> Result<(), String>;
+    fn empty_job(&self) -> Result<(), Detail>;
     /// The record's `REG_QWORD` value `name` (`SweepNext`, `StopNext`) as the lawyer reads it,
     /// 1 when absent: the number the task's next run takes. Read without the set-up lock, which
     /// only an administrator can take, once the session can launch nothing more
     /// (`pool_steps::sequence` says why that is sound).
-    fn next_number(&self, name: &'static str) -> Result<u64, String>;
+    fn next_number(&self, name: &'static str) -> Result<u64, Detail>;
     /// Asks the Task Scheduler to run `\Clauseo\SandboxSweep` now, and returns once the run is
     /// queued. An error names the failed call and its code, never a path or a SID.
-    fn request_sweep(&self) -> Result<(), String>;
+    fn request_sweep(&self) -> Result<(), Detail>;
     /// Asks the Task Scheduler to run `\Clauseo\SandboxStop` now: whether the run was queued.
     fn request_stop(&self) -> bool;
     /// Writes the session's marker as `state`, in place of the open one.
-    fn settle(&self, state: &MarkerState) -> Result<(), String>;
-    /// A line on the outer's stderr.
-    fn log(&self, line: &str);
+    fn settle(&self, state: &MarkerState) -> Result<(), Detail>;
+    /// A notice on the outer's stderr (`stderr::notice`).
+    fn log(&self, kind: RunnerKind, detail: Detail);
     /// The time on a monotonic clock, from any fixed origin: how long ago the host's stdin ended.
     fn now(&self) -> Duration;
 }
@@ -107,10 +108,13 @@ pub(crate) fn end_session<S: EndSteps>(steps: &S) -> (bool, Option<u64>) {
     let emptied = match steps.empty_job() {
         Ok(()) => true,
         Err(what) => {
-            steps.log(&format!(
-                "clauseo-sandbox-run: warning: the job didn't empty ({what}); the sandbox sweep \
-                 task is requested all the same"
-            ));
+            let detail = what.wrap(|what| {
+                format!(
+                    "clauseo-sandbox-run: warning: the job didn't empty ({what}); the sandbox \
+                     sweep task is requested all the same"
+                )
+            });
+            steps.log(RunnerKind::JobNotEmptied, detail);
             false
         }
     };
@@ -118,10 +122,10 @@ pub(crate) fn end_session<S: EndSteps>(steps: &S) -> (bool, Option<u64>) {
     // takes this number or a later one.
     let sweep = next_number(steps, SWEEP_NEXT);
     if let Err(what) = steps.request_sweep() {
-        steps.log(&format!(
-            "clauseo-sandbox-run: warning: the sandbox sweep task couldn't be requested \
-             ({what})"
-        ));
+        let detail = what.wrap(|what| {
+            format!("clauseo-sandbox-run: warning: the sandbox sweep task couldn't be requested ({what})")
+        });
+        steps.log(RunnerKind::SweepTaskUnrequested, detail);
     }
     (emptied, sweep)
 }
@@ -130,11 +134,14 @@ pub(crate) fn end_session<S: EndSteps>(steps: &S) -> (bool, Option<u64>) {
 fn next_number<S: EndSteps>(steps: &S, name: &'static str) -> Option<u64> {
     steps
         .next_number(name)
-        .inspect_err(|what| {
-            steps.log(&format!(
-                "clauseo-sandbox-run: warning: {name} can't be read ({what}); the session marker \
-                 stays open"
-            ));
+        .map_err(|what| {
+            let detail = what.wrap(|what| {
+                format!(
+                    "clauseo-sandbox-run: warning: {name} can't be read ({what}); the session \
+                     marker stays open"
+                )
+            });
+            steps.log(RunnerKind::SequenceUnreadable, detail);
         })
         .ok()
 }
@@ -199,7 +206,8 @@ pub(crate) struct SessionEnd<S: EndSteps> {
     begun_changed: Condvar,
 }
 
-/// What the outer says when the end on the git watch's `session-end` thread panicked.
+/// The detail of what the outer says when the end on the git watch's `session-end` thread
+/// panicked ([`RunnerKind::EndPanicked`]).
 pub(crate) const END_PANICKED: &str =
     "clauseo-sandbox-run: the session's end panicked on its own thread; the exit ends it again";
 
@@ -239,9 +247,10 @@ impl<S: EndSteps> SessionEnd<S> {
         self.begin(why);
         let emptied = self.steps.empty_job();
         if let Err(what) = &emptied {
-            self.steps.log(&format!(
-                "clauseo-sandbox-run: the session's job didn't empty: {what}"
-            ));
+            let detail = what.clone().wrap(|what| {
+                format!("clauseo-sandbox-run: the session's job didn't empty: {what}")
+            });
+            self.steps.log(RunnerKind::JobNotEmptied, detail);
         }
         let end = Arc::clone(self);
         let later = thread::Builder::new()
@@ -251,7 +260,7 @@ impl<S: EndSteps> SessionEnd<S> {
                 // said, by its kind alone (its text could name anything). A release build
                 // aborts on panic instead, so the outer is gone and its marker stays open.
                 if catch_unwind(AssertUnwindSafe(|| end.start_once())).is_err() {
-                    end.steps.log(END_PANICKED);
+                    end.steps.log(RunnerKind::EndPanicked, END_PANICKED.into());
                 }
             });
         if later.is_err() {
@@ -348,10 +357,13 @@ impl<S: EndSteps> SessionEnd<S> {
                 return;
             };
             if let Err(what) = self.steps.settle(&state) {
-                self.steps.log(&format!(
-                    "clauseo-sandbox-run: warning: the session marker couldn't be written \
-                     ({what}); it stays open"
-                ));
+                let detail = what.wrap(|what| {
+                    format!(
+                        "clauseo-sandbox-run: warning: the session marker couldn't be written \
+                         ({what}); it stays open"
+                    )
+                });
+                self.steps.log(RunnerKind::MarkerUnsettled, detail);
             }
         });
     }
@@ -362,8 +374,10 @@ impl<S: EndSteps> SessionEnd<S> {
     fn awaiting_stop(&self) -> Option<MarkerState> {
         let stop = next_number(&self.steps, STOP_NEXT);
         if !self.steps.request_stop() {
-            self.steps
-                .log("clauseo-sandbox-run: warning: the sandbox stop task couldn't be requested");
+            self.steps.log(
+                RunnerKind::StopTaskUnrequested,
+                "clauseo-sandbox-run: warning: the sandbox stop task couldn't be requested".into(),
+            );
         }
         Some(MarkerState::AwaitingStop { stop: stop? })
     }
@@ -470,8 +484,10 @@ pub(crate) fn relay_stdin<S: EndSteps, W: Write + Send>(
         });
         if writer.is_err() {
             // The agent's stdin, dropped with the closure, is closed at once.
-            end.steps()
-                .log("clauseo-sandbox-run: the agent's stdin writer didn't start");
+            end.steps().log(
+                RunnerKind::StdinWriterFailed,
+                "clauseo-sandbox-run: the agent's stdin writer didn't start".into(),
+            );
         }
         let mut pieces = Some(pieces);
         let mut buffer = vec![0u8; PIECE];

@@ -12,6 +12,7 @@ use super::super::watchdog::TICK;
 use super::super::{Changes, Dog, Guard, Live, Pulse, Session, watch, watchdog};
 use super::{added, script};
 use crate::windows::denial_pipe::Record;
+use crate::windows::runner::stderr::{Detail, RunnerKind};
 use crate::windows::set_aside::{Failed, Hooks, SCAN_BUDGET};
 
 /// A monotonic clock both threads read, in milliseconds.
@@ -62,7 +63,7 @@ impl Session for Watching {
         true
     }
 
-    fn say(&self, _line: &str) {}
+    fn say(&self, _kind: RunnerKind, _detail: Detail) {}
 
     fn record(&self, _record: &Record) {}
 

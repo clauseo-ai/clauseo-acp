@@ -57,7 +57,7 @@ impl Fake {
 }
 
 impl EndSteps for Fake {
-    fn empty_job(&self) -> Result<(), String> {
+    fn empty_job(&self) -> Result<(), Detail> {
         self.push("end job");
         if let Some((began, go)) = self.end_gate.lock().unwrap().take() {
             began.send(()).unwrap();
@@ -73,12 +73,13 @@ impl EndSteps for Fake {
             EMPTY_WAIT,
             EMPTY_POLL,
         )
+        .map_err(|what| Detail::new(|| what))
     }
-    fn next_number(&self, name: &'static str) -> Result<u64, String> {
+    fn next_number(&self, name: &'static str) -> Result<u64, Detail> {
         self.push(format!("read {name}"));
         Ok(SWEEP_AT)
     }
-    fn request_sweep(&self) -> Result<(), String> {
+    fn request_sweep(&self) -> Result<(), Detail> {
         let panics = {
             let mut left = self.request_panics.lock().unwrap();
             let panics = *left > 0;
@@ -92,7 +93,7 @@ impl EndSteps for Fake {
         }
         self.push("request sweep");
         if self.request_fails {
-            return Err("request sweep failed (5)".to_owned());
+            return Err("request sweep failed (5)".into());
         }
         Ok(())
     }
@@ -100,11 +101,12 @@ impl EndSteps for Fake {
         self.push("request stop");
         true
     }
-    fn settle(&self, state: &MarkerState) -> Result<(), String> {
+    fn settle(&self, state: &MarkerState) -> Result<(), Detail> {
         self.push(format!("settle {state:?}"));
         Ok(())
     }
-    fn log(&self, line: &str) {
+    fn log(&self, _kind: RunnerKind, detail: Detail) {
+        let line = detail.text();
         self.push(format!("log {line}"));
         if let Some(logged) = &*self.logged.lock().unwrap() {
             drop(logged.send(line.to_owned()));

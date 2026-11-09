@@ -15,9 +15,9 @@ use super::super::end::{EMPTY_POLL, EMPTY_WAIT, EndSteps, wait_empty};
 use super::super::marker::{MarkerState, write_marker_at};
 use super::super::spawn::{Job, active_processes, end_job};
 use super::super::sweep::SWEPT;
-use super::say;
 use crate::windows::acl::object::Handle;
 use crate::windows::refresh::{request_pool_stop, request_pool_sweep};
+use crate::windows::runner::stderr::{self, Detail, RunnerKind};
 use crate::windows::setup::{read_record_install_id, read_record_value};
 use crate::windows::sids::Sid;
 
@@ -90,41 +90,45 @@ fn clock() -> Instant {
 static ORIGIN: OnceLock<Instant> = OnceLock::new();
 
 impl EndSteps for OsEnd {
-    fn empty_job(&self) -> Result<(), String> {
+    fn empty_job(&self) -> Result<(), Detail> {
         let Some(Job(job)) = self.job.get() else {
             return Ok(());
         };
         end_job(job, SWEPT);
         wait_empty(|| active_processes(job), pause, EMPTY_WAIT, EMPTY_POLL)
+            .map_err(|what| Detail::new(|| what))
     }
 
-    fn next_number(&self, name: &'static str) -> Result<u64, String> {
-        let read = read_record_value(name).map_err(|error| error.to_string())?;
+    fn next_number(&self, name: &'static str) -> Result<u64, Detail> {
+        let read = read_record_value(name).map_err(|error| Detail::new(|| error.to_string()))?;
         Ok(read.unwrap_or(1))
     }
 
-    fn request_sweep(&self) -> Result<(), String> {
-        request_pool_sweep().map_err(|error| error.to_string())
+    fn request_sweep(&self) -> Result<(), Detail> {
+        request_pool_sweep().map_err(|error| Detail::new(|| error.to_string()))
     }
 
     fn request_stop(&self) -> bool {
         request_pool_stop()
     }
 
-    fn settle(&self, state: &MarkerState) -> Result<(), String> {
+    fn settle(&self, state: &MarkerState) -> Result<(), Detail> {
         // The install's id, read again: no removal or reinstall runs while a session is open. One
         // that can't be read leaves the marker open, which never passes for clean.
-        let install = read_record_install_id().map_err(|error| error.to_string())?;
+        let install =
+            read_record_install_id().map_err(|error| Detail::new(|| error.to_string()))?;
         let at = install.as_deref();
         write_marker_at(&self.marker, Some(&self.pool_user), at, *state).map_err(|error| {
-            error
-                .raw_os_error()
-                .map_or_else(|| error.kind().to_string(), |code| code.to_string())
+            Detail::new(|| {
+                error
+                    .raw_os_error()
+                    .map_or_else(|| error.kind().to_string(), |code| code.to_string())
+            })
         })
     }
 
-    fn log(&self, line: &str) {
-        say(line);
+    fn log(&self, kind: RunnerKind, detail: Detail) {
+        stderr::notice(kind, detail);
     }
 
     fn now(&self) -> Duration {

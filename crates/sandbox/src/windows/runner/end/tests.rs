@@ -32,10 +32,10 @@ const SWEEP_AT: u64 = 12;
 const STOP_AT: u64 = 4;
 
 impl Record {
-    fn step(&self, name: &str) -> Result<(), String> {
+    fn step(&self, name: &str) -> Result<(), Detail> {
         self.done.lock().unwrap().push(name.to_owned());
         if self.fail == Some(name) {
-            return Err(format!("{name} failed (5)"));
+            return Err(Detail::new(|| format!("{name} failed (5)")));
         }
         Ok(())
     }
@@ -50,10 +50,10 @@ impl Record {
 }
 
 impl EndSteps for Record {
-    fn empty_job(&self) -> Result<(), String> {
+    fn empty_job(&self) -> Result<(), Detail> {
         self.step("empty job")
     }
-    fn next_number(&self, name: &'static str) -> Result<u64, String> {
+    fn next_number(&self, name: &'static str) -> Result<u64, Detail> {
         self.step(&format!("read {name}"))?;
         Ok(if name == SWEEP_NEXT {
             SWEEP_AT
@@ -61,7 +61,7 @@ impl EndSteps for Record {
             STOP_AT
         })
     }
-    fn request_sweep(&self) -> Result<(), String> {
+    fn request_sweep(&self) -> Result<(), Detail> {
         if let Some(begun) = self.slow.lock().unwrap().take() {
             begun.send(()).unwrap();
             // A request that takes 100 ms: nothing is ever sent on `idle`.
@@ -73,13 +73,16 @@ impl EndSteps for Record {
     fn request_stop(&self) -> bool {
         self.step("request stop").is_ok()
     }
-    fn settle(&self, state: &MarkerState) -> Result<(), String> {
+    fn settle(&self, state: &MarkerState) -> Result<(), Detail> {
         self.step("settle")?;
         self.settled.lock().unwrap().push(*state);
         Ok(())
     }
-    fn log(&self, line: &str) {
-        self.done.lock().unwrap().push(format!("log {line}"));
+    fn log(&self, _kind: RunnerKind, detail: Detail) {
+        self.done
+            .lock()
+            .unwrap()
+            .push(format!("log {}", detail.text()));
     }
     fn now(&self) -> Duration {
         self.readings
@@ -147,7 +150,8 @@ fn a_job_that_doesnt_empty_still_requests_the_sweep_on_every_path() {
     // The host's stdin end: the agent's stdin closes, its grace runs out, the request all the same.
     let end = SessionEnd::new(not_empty());
     relay_stdin(&b"request\n"[..], io::sink(), &end, SHORT, |_| {
-        end.steps().log("agent stdin closed");
+        end.steps()
+            .log(RunnerKind::StdinWriterFailed, "agent stdin closed".into());
     });
     let mut want = lines(&["log agent stdin closed"]);
     want.extend(lines(&NOT_EMPTY));
@@ -280,7 +284,8 @@ fn stdin_ending_with_the_agent_finishing_in_its_grace_keeps_its_code_and_output(
                 &end,
                 Duration::from_secs(30),
                 |_| {
-                    end.steps().log("agent stdin closed");
+                    end.steps()
+                        .log(RunnerKind::StdinWriterFailed, "agent stdin closed".into());
                     closed.send(()).unwrap();
                 },
             );
@@ -288,7 +293,8 @@ fn stdin_ending_with_the_agent_finishing_in_its_grace_keeps_its_code_and_output(
         agent_reads_eof.recv().unwrap();
         // The agent wrote its answer and exited 3; the inner reported it and exited.
         let code = inner_exited(&end, Some(3), Some(3), || {
-            end.steps().log("drain");
+            end.steps()
+                .log(RunnerKind::StdinWriterFailed, "drain".into());
             output.push("answer");
         });
         // The stdin path no longer waits out its grace once the end began.
@@ -310,7 +316,8 @@ fn stdin_ending_with_the_agent_finishing_in_its_grace_keeps_its_code_and_output(
 fn stdin_ending_with_the_agent_not_finishing_ends_the_job_then_requests_the_sweep() {
     let end = SessionEnd::new(Record::default());
     relay_stdin(&b"request\n"[..], io::sink(), &end, SHORT, |_| {
-        end.steps().log("agent stdin closed");
+        end.steps()
+            .log(RunnerKind::StdinWriterFailed, "agent stdin closed".into());
     });
     // The grace ran out: the job ended and emptied, then the request, all on this path.
     let mut want = lines(&["log agent stdin closed"]);
@@ -319,7 +326,10 @@ fn stdin_ending_with_the_agent_not_finishing_ends_the_job_then_requests_the_swee
     assert_eq!(end.began(), Some(EndSignal::Stdin));
     // The job's end ended the inner: the host's job-end code, no second request. A cancel past
     // the grace awaits a sweep too: the next inner's first act kills what is left.
-    let code = inner_exited(&end, Some(SWEPT), None, || end.steps().log("drain"));
+    let code = inner_exited(&end, Some(SWEPT), None, || {
+        end.steps()
+            .log(RunnerKind::StdinWriterFailed, "drain".into());
+    });
     assert_eq!(code, HOST_ENDED);
     want.extend(lines(&["log drain", "log drain"]));
     assert_eq!(end.steps().done(), want);
@@ -364,7 +374,10 @@ fn the_grace_counts_from_the_first_stdin_end() {
 #[test]
 fn the_inners_exit_drains_then_ends_the_job_with_no_grace() {
     let end = SessionEnd::new(Record::default());
-    let code = inner_exited(&end, Some(7), Some(7), || end.steps().log("drain"));
+    let code = inner_exited(&end, Some(7), Some(7), || {
+        end.steps()
+            .log(RunnerKind::StdinWriterFailed, "drain".into());
+    });
     assert_eq!(code, 7);
     let mut want = lines(&["log drain"]);
     want.extend(lines(&ENDED));
@@ -401,7 +414,8 @@ fn the_agent_closing_its_stdin_ends_nothing_but_the_hosts_stdin_end_still_counts
     std::thread::scope(|scope| {
         scope.spawn(|| {
             let close = |_| {
-                end.steps().log("agent stdin closed");
+                end.steps()
+                    .log(RunnerKind::StdinWriterFailed, "agent stdin closed".into());
                 closed.send(()).unwrap();
             };
             relay_stdin(Fed(fed), Closed, &end, SHORT, close);

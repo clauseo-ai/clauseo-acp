@@ -10,6 +10,7 @@ use zeroize::Zeroizing;
 use super::super::end::ended_before_start;
 use super::super::spawn::{Process, assign, log_on, resume};
 use super::super::start::Steps;
+use super::super::stderr::{Detail, RunnerKind};
 use super::super::{LaunchMessage, RunExit};
 use super::{End, Failure, logon_failure, os, watch};
 use crate::windows::acl::object::Handle;
@@ -49,7 +50,7 @@ impl Steps for Start<'_> {
         let sink = open_feed(self.message.denial_pipe.as_deref(), |name| {
             open_writer(name)
         })
-        .map_err(|why| Failure::new(RunExit::Pipe, why))?;
+        .map_err(|why| Failure::new(RunExit::Pipe, Detail::new(|| why)))?;
         self.records = Some(Arc::new(sink));
         Ok(())
     }
@@ -77,9 +78,10 @@ impl Steps for Start<'_> {
     /// Its token's user, read now: from its first instruction the inner shuts its token to all
     /// but SYSTEM until the launch arrives over `ctl`.
     fn check_user(&mut self, inner: &Process) -> Result<(), Failure> {
-        let user = inner
-            .user()
-            .map_err(|e| Failure::new(RunExit::Logon, os("the inner runner's token", &e)))?;
+        let user = inner.user().map_err(|e| {
+            let why = Detail::new(|| os("the inner runner's token", &e));
+            Failure::new(RunExit::Logon, why)
+        })?;
         if user != *self.pool_user {
             return Err(Failure::new(
                 RunExit::Logon,
@@ -90,8 +92,10 @@ impl Steps for Start<'_> {
     }
 
     fn assign(&mut self, inner: &Process) -> Result<(), Failure> {
-        assign(self.job, inner.handle.0)
-            .map_err(|e| Failure::new(RunExit::Job, os("AssignProcessToJobObject", &e)))
+        assign(self.job, inner.handle.0).map_err(|e| {
+            let why = Detail::new(|| os("AssignProcessToJobObject", &e));
+            Failure::new(RunExit::Job, why)
+        })
     }
 
     /// Shuts the inner runner's process and first thread to its agent (the same pool user)
@@ -103,15 +107,19 @@ impl Steps for Start<'_> {
             &runner_process_sddl(self.desktop, self.logon),
         )
         .and_then(|()| shut_object(inner.thread.0, &runner_thread_sddl(self.desktop)))
-        .map_err(|e| Failure::new(RunExit::Token, os("the inner runner's DACL", &e)))
+        .map_err(|e| {
+            let why = Detail::new(|| os("the inner runner's DACL", &e));
+            Failure::new(RunExit::Token, why)
+        })
     }
 
     fn resume(&mut self, inner: &Process) -> Result<(), Failure> {
-        resume(inner).map_err(|e| Failure::new(RunExit::Job, os("ResumeThread", &e)))
+        resume(inner)
+            .map_err(|e| Failure::new(RunExit::Job, Detail::new(|| os("ResumeThread", &e))))
     }
 
     fn kill(&mut self, inner: &Process, error: &Failure) {
-        inner.kill(error.0.code());
+        inner.kill(error.exit().code());
     }
 
     /// A session the git watch ended before its agent ran exits as the job's end would have
@@ -120,10 +128,12 @@ impl Steps for Start<'_> {
         let Some(began) = self.end.began() else {
             return Ok(());
         };
-        let exit = RunExit::from_code(ended_before_start(began)).unwrap_or(RunExit::AgentReserved);
-        Err(Failure::new(
-            exit,
-            "the session ended before its agent started; the agent never ran",
+        // The job's end gives the host's own code or the sweeps' kill code, which passes on as
+        // `AgentReserved`: either way the run fails as `EndedBeforeStart`, whose exit that is.
+        let code = ended_before_start(began);
+        Err(Failure::of(
+            RunnerKind::EndedBeforeStart,
+            Detail::new(|| format!("the session ended before its agent started (0x{code:08X})")),
         ))
     }
 }

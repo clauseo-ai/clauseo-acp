@@ -198,8 +198,8 @@ fn agent() -> Proc {
 
 fn run(fake: &mut Fake, keep: &[u32], point: Point) -> (Result<Vec<u32>, SweepError>, Vec<String>) {
     let mut lines = Vec::new();
-    let got = sweep(fake, &sid(POOL), keep, point, &mut |l| {
-        lines.push(l.to_owned());
+    let got = sweep(fake, &sid(POOL), keep, point, &mut |_kind, detail| {
+        lines.push(detail.text().to_owned());
     });
     (got, lines)
 }

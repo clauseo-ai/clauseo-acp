@@ -20,6 +20,7 @@ use super::super::{
 use super::Log;
 use super::pairs::{NOW, checked, left_temp, matter};
 use crate::windows::denial_pipe::Record;
+use crate::windows::runner::stderr::{Detail, RunnerKind};
 use crate::windows::set_aside::{Failed, Hooks, Live};
 
 const MS: Duration = Duration::from_millis(1);
@@ -128,7 +129,7 @@ impl Session for Pairing<'_> {
         self.log.push("end");
         true
     }
-    fn say(&self, _line: &str) {}
+    fn say(&self, _kind: RunnerKind, _detail: Detail) {}
     fn record(&self, record: &Record) {
         if let Record::Notice { text } = record {
             self.log.push(text.clone());
@@ -279,8 +280,8 @@ impl Tell for Told {
         }
     }
 
-    fn say(&self, line: &str) {
-        self.1.borrow_mut().push(line.to_owned());
+    fn say(&self, _kind: RunnerKind, detail: Detail) {
+        self.1.borrow_mut().push(detail.text().to_owned());
     }
 }
 

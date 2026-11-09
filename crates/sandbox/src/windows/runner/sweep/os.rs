@@ -51,6 +51,7 @@ use windows::Win32::System::Threading::{
 
 use super::{Owner, Point, Processes, SWEPT, Seen, SweepError, sweep};
 use crate::windows::acl::object::{Handle, os_error};
+use crate::windows::runner::stderr::{Detail, RunnerKind};
 use crate::windows::sids::Sid;
 use crate::windows::token::os::{shut_object, sid_text};
 
@@ -90,7 +91,7 @@ impl Drop for WtsList {
 pub(in crate::windows::runner) fn sweep_own(
     me: &Sid,
     point: Point,
-    log: &mut dyn FnMut(&str),
+    log: &mut dyn FnMut(RunnerKind, Detail),
 ) -> Result<(), SweepError> {
     // SAFETY: no arguments.
     let own = unsafe { GetCurrentProcessId() };

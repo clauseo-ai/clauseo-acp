@@ -74,9 +74,14 @@ fn a_planted_task_scheduler_server_is_removed() {
     let mut calls = OsLeftovers::new(&token);
     calls.classes.clone_from(&classes);
     let mut lines = Vec::new();
-    let clean = remove_all(&mut calls, &[Kind::Classes], "test", &mut |line| {
-        lines.push(line.to_owned());
-    });
+    let clean = remove_all(
+        &mut calls,
+        &[Kind::Classes],
+        "test",
+        &mut |_kind, detail| {
+            lines.push(detail.text().to_owned());
+        },
+    );
     let left: Vec<&String> = planted.iter().filter(|path| exists(path)).collect();
     drop(calls);
     // The scratch root goes whatever the result.

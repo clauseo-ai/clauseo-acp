@@ -15,6 +15,7 @@ use super::{
 };
 use crate::windows::SetAsideFailure;
 use crate::windows::denial_pipe::Record;
+use crate::windows::runner::stderr::{Detail, RunnerKind};
 use crate::windows::set_aside::{Ending, Entry, Failed, Hooks, Moved, Reason};
 use crate::windows::test_world::matter_one;
 use crate::{Denial, SetAsideWhat};
@@ -173,7 +174,8 @@ impl Session for FakeSession<'_> {
         self.empty
     }
 
-    fn say(&self, line: &str) {
+    fn say(&self, _kind: RunnerKind, detail: Detail) {
+        let line = detail.text();
         assert!(!for_the_host(line), "{line}");
         self.log.push("said");
     }
@@ -445,8 +447,8 @@ fn each_item_moved_is_recorded_for_the_host_and_never_said_on_stderr() {
         fn end(&self) -> bool {
             true
         }
-        fn say(&self, line: &str) {
-            self.said.borrow_mut().push(line.to_owned());
+        fn say(&self, _kind: RunnerKind, detail: Detail) {
+            self.said.borrow_mut().push(detail.text().to_owned());
         }
         fn record(&self, record: &Record) {
             self.records.borrow_mut().push(record.clone());

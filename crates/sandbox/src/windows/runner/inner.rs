@@ -12,6 +12,7 @@ use super::inner_flow::{Failure, Inner, run};
 use super::leftovers::os::OsLeftovers;
 use super::leftovers::{Kind, remove_all};
 use super::spawn::{Agent, Process, quiet_errors, restrict_dll_search, start_agent};
+use super::stderr::{Detail, RunnerKind};
 use super::sweep::os::sweep_own;
 use super::sweep::{Point, SweepError};
 use crate::windows::acl::object::Handle;
@@ -73,11 +74,11 @@ impl Inner for Calls {
 
     fn sweep(&mut self, point: Point) -> Result<(), SweepError> {
         let mut lines = Vec::new();
-        let swept = sweep_own(&self.me, point, &mut |line| {
-            lines.push(line.to_owned());
+        let swept = sweep_own(&self.me, point, &mut |kind, detail| {
+            lines.push((kind, detail));
         });
-        for line in lines {
-            self.log(&line);
+        for (kind, detail) in lines {
+            self.log(kind, detail);
         }
         swept
     }
@@ -85,18 +86,24 @@ impl Inner for Calls {
     fn clean(&mut self) {
         let mut lines = Vec::new();
         let mut calls = OsLeftovers::new(&self.token);
-        remove_all(&mut calls, &Kind::LOCAL, "before launch", &mut |line| {
-            lines.push(line.to_owned());
-        });
+        remove_all(
+            &mut calls,
+            &Kind::LOCAL,
+            "before launch",
+            &mut |kind, detail| {
+                lines.push((kind, detail));
+            },
+        );
         drop(calls);
-        for line in lines {
-            self.log(&line);
+        for (kind, detail) in lines {
+            self.log(kind, detail);
         }
     }
 
-    fn log(&mut self, line: &str) {
+    fn log(&mut self, kind: RunnerKind, detail: Detail) {
         self.tell(InnerReport::Log {
-            line: line.to_owned(),
+            kind,
+            detail: detail.to_send(),
         });
     }
 
@@ -123,7 +130,7 @@ impl Inner for Calls {
         let ctl = self
             .ctl
             .as_ref()
-            .ok_or_else(|| (RunExit::Pipe, "ctl isn't open".to_owned()))?;
+            .ok_or_else(|| (RunExit::Pipe, "ctl isn't open".into()))?;
         let launch: InnerLaunch =
             read_frame(ctl).map_err(|e| fail(RunExit::Pipe, "ctl read", &e))?;
         // Then, before anything else: shut this runner's token (now with the desktop user's
@@ -140,7 +147,7 @@ impl Inner for Calls {
         let launch = self
             .launch
             .as_ref()
-            .ok_or_else(|| (RunExit::Pipe, "no launch".to_owned()))?;
+            .ok_or_else(|| (RunExit::Pipe, "no launch".into()))?;
         start(&self.set, launch, &self.token)
     }
 
@@ -174,7 +181,7 @@ fn start(set: &PipeSet, launch: &InnerLaunch, token: &Handle) -> Result<Process,
     if me != launch.pool_user {
         return Err((
             RunExit::Token,
-            "the inner runner isn't the pool user".to_owned(),
+            "the inner runner isn't the pool user".into(),
         ));
     }
     let logon = logon_sid(token).map_err(|e| fail(RunExit::Token, "logon SID", &e))?;
@@ -184,7 +191,7 @@ fn start(set: &PipeSet, launch: &InnerLaunch, token: &Handle) -> Result<Process,
         &launch.desktop_user,
         launch.matter_sid.as_ref(),
     )
-    .map_err(|e| (RunExit::Token, e.to_string()))?;
+    .map_err(|e| (RunExit::Token, Detail::new(|| e.to_string())))?;
     for folder in &launch.folders {
         write::make_agent_folder(Path::new(&launch.folder_base), Path::new(folder))
             .map_err(|e| fail(RunExit::Token, "profile folder", &e))?;
@@ -195,7 +202,7 @@ fn start(set: &PipeSet, launch: &InnerLaunch, token: &Handle) -> Result<Process,
         .collect::<std::io::Result<Vec<Handle>>>()
         .map_err(|e| fail(RunExit::Pipe, "open pipe", &e))?;
     let [stdin, stdout, stderr] = stdio.as_slice() else {
-        return Err((RunExit::Pipe, "three pipes expected".to_owned()));
+        return Err((RunExit::Pipe, "three pipes expected".into()));
     };
     let agent_token =
         make(token, &spec).map_err(|e| fail(RunExit::Token, "restricted token", &e))?;
@@ -217,8 +224,11 @@ fn start(set: &PipeSet, launch: &InnerLaunch, token: &Handle) -> Result<Process,
 }
 
 fn fail(exit: RunExit, call: &str, error: &std::io::Error) -> Failure {
-    let code = error
-        .raw_os_error()
-        .map_or_else(|| error.kind().to_string(), |c| c.to_string());
-    (exit, format!("{call} failed ({code})"))
+    let what = Detail::new(|| {
+        let code = error
+            .raw_os_error()
+            .map_or_else(|| error.kind().to_string(), |c| c.to_string());
+        format!("{call} failed ({code})")
+    });
+    (exit, what)
 }

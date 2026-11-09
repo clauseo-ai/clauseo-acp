@@ -10,6 +10,7 @@ use super::{Log, added, guard, script};
 use crate::SetAsideWhat;
 use crate::windows::SetAsideFailure;
 use crate::windows::denial_pipe::Record;
+use crate::windows::runner::stderr::{Detail, RunnerKind};
 use crate::windows::set_aside::{Failed, Hooks};
 
 /// A session that keeps every line said and every notice recorded, whole.
@@ -21,8 +22,8 @@ impl Session for Heard {
         true
     }
 
-    fn say(&self, line: &str) {
-        self.0.borrow_mut().push(line.to_owned());
+    fn say(&self, _kind: RunnerKind, detail: Detail) {
+        self.0.borrow_mut().push(detail.text().to_owned());
     }
 
     fn record(&self, record: &Record) {

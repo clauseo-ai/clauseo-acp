@@ -4,6 +4,7 @@
 //! (the inner runner), which starts the agent under the (B) token; at the session's end the outer
 //! asks the Task Scheduler to run the `SYSTEM` task `\Clauseo\SandboxSweep`. It shows no window;
 //! its stdio is the agent's, and its exit code the agent's, or one of `RunExit`'s on a failure.
+//! What it says itself on stderr goes through `runner::stderr`: one `kind=` line a refusal.
 //!
 //! The work is in `clauseo_sandbox::windows::runner`. On macOS and Linux it exits 2.
 #![windows_subsystem = "windows"]
@@ -41,8 +42,8 @@ fn exit_with(code: u32) -> ExitCode {
 }
 
 #[cfg(not(windows))]
-#[expect(clippy::print_stderr, reason = "the one line a run off Windows gets")]
 fn main() -> ExitCode {
-    eprintln!("clauseo-sandbox-run runs agents in Clauseo's sandbox on Windows only");
+    use clauseo_sandbox::windows::runner::stderr::{Detail, RunnerKind, refuse};
+    refuse(RunnerKind::NotWindows, Detail::none());
     ExitCode::from(2)
 }

@@ -2,7 +2,7 @@
 //! record's sequences and `PoolSids` (the record grants Users read), and requests for the stop
 //! and sweep tasks through the owner's `FRFX` entry. [`start_up_requests`] is the desktop's call.
 
-use std::io::{self, Write as _};
+use std::io;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -12,9 +12,10 @@ use super::super::marker::{
 };
 use super::{Markers, Refused, StartUp, await_sweeps, logon_check, start_up};
 use crate::windows::record::sandbox_pool_sids;
-use crate::windows::refresh::{request_pool_stop, request_pool_sweep};
+use crate::windows::refresh::{TaskError, request_pool_stop, request_pool_sweep};
+use crate::windows::runner::stderr::{self, Detail, RunnerKind};
 use crate::windows::setup::record_values::{STOP_SEQUENCE, SWEEP_SEQUENCE};
-use crate::windows::setup::{read_record_install_id, read_record_value};
+use crate::windows::setup::{MachineError, read_record_install_id, read_record_value};
 use crate::windows::sids::Sid;
 
 /// The markers of the data folder `data_dir`.
@@ -32,8 +33,32 @@ impl OsMarkers {
 
 /// A record value as the lawyer reads it, `absent` when it is missing.
 fn value(name: &str, absent: u64) -> Result<u64, String> {
-    let read = read_record_value(name).map_err(|error| error.to_string())?;
+    let read = read_record_value(name).map_err(|failed| record_text(&failed))?;
     Ok(read.unwrap_or(absent))
+}
+
+/// A record read's failure in the code's own words: the call and its code, never the error's
+/// own text, which can hold a path (its `Other` and `ProfileChanged`). These words reach the
+/// logon's refusal (`Refused::why`) and the host's launch check (`await_sweeps`).
+fn record_text(failed: &MachineError) -> String {
+    match failed {
+        MachineError::Os { call, code } => format!("{call} failed (error {code})"),
+        MachineError::LockHeld => "another set-up is running on this computer".to_owned(),
+        MachineError::Unsupported(call) => format!("{call} isn't built yet"),
+        MachineError::Other(_) | MachineError::ProfileChanged(_) => {
+            "the sandbox's record can't be read".to_owned()
+        }
+    }
+}
+
+/// A task request's failure in the code's own words, as [`record_text`].
+fn task_text(failed: &TaskError) -> String {
+    match failed {
+        TaskError::NotRegistered => "the task isn't registered".to_owned(),
+        TaskError::Com { call, hresult } => format!("{call} failed ({hresult:#010x})"),
+        TaskError::Path(_) => "the admin copy's path can't be found".to_owned(),
+        TaskError::Folder(_) => "the task folder isn't ready".to_owned(),
+    }
 }
 
 impl Markers for OsMarkers {
@@ -57,7 +82,7 @@ impl Markers for OsMarkers {
     }
 
     fn install_id(&mut self) -> Result<Option<String>, String> {
-        read_record_install_id().map_err(|error| error.to_string())
+        read_record_install_id().map_err(|failed| record_text(&failed))
     }
 
     fn settle(
@@ -79,7 +104,7 @@ impl Markers for OsMarkers {
     }
 
     fn request_sweep(&mut self) -> Result<(), String> {
-        request_pool_sweep().map_err(|error| error.to_string())
+        request_pool_sweep().map_err(|failed| task_text(&failed))
     }
 
     #[expect(
@@ -91,9 +116,8 @@ impl Markers for OsMarkers {
         std::thread::sleep(pause);
     }
 
-    fn note(&mut self, line: &str) {
-        let mut stderr = io::stderr().lock();
-        drop(writeln!(stderr, "{line}").and_then(|()| stderr.flush()));
+    fn note(&mut self, kind: RunnerKind, detail: Detail) {
+        stderr::notice(kind, detail);
     }
 }
 
