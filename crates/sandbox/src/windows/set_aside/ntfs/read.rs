@@ -23,7 +23,9 @@ use windows::Wdk::Storage::FileSystem::{
 };
 use windows::Win32::Foundation::{NTSTATUS, STATUS_OPLOCK_BREAK_IN_PROGRESS};
 use windows::Win32::Security::OWNER_SECURITY_INFORMATION;
-use windows::Win32::Storage::FileSystem::{FILE_READ_DATA, READ_CONTROL, ReadFile, SYNCHRONIZE};
+use windows::Win32::Storage::FileSystem::{
+    FILE_READ_ATTRIBUTES, FILE_READ_DATA, READ_CONTROL, ReadFile, SYNCHRONIZE,
+};
 
 use super::{Handle, open_at_status, os_error, tag};
 
@@ -73,7 +75,9 @@ pub(super) fn read_small(folder: &Handle, name: &OsStr, max: u64) -> io::Result<
     let wide: Vec<u16> = name.encode_wide().collect();
     let options =
         FILE_NON_DIRECTORY_FILE | FILE_SYNCHRONOUS_IO_NONALERT | FILE_COMPLETE_IF_OPLOCKED;
-    let access = FILE_READ_DATA.0 | SYNCHRONIZE.0;
+    // `FILE_READ_ATTRIBUTES` for the reparse check below (`FileAttributeTagInfo` needs it);
+    // `SYNCHRONIZE` for `FILE_SYNCHRONOUS_IO_NONALERT`.
+    let access = FILE_READ_DATA.0 | FILE_READ_ATTRIBUTES.0 | SYNCHRONIZE.0;
     let (file, status, information) = open_at_status(folder, &wide, access, FILE_OPEN, options)?;
     unblocked(status, information)?;
     if tag(&file)?.is_some() {
