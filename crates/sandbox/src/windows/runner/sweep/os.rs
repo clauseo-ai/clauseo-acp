@@ -21,8 +21,9 @@
 //!
 //! [`Processes::job_pids`] is `QueryInformationJobObject` with no job handle, which "uses the
 //! job associated with the calling process" (the immediate one, the launch's, when jobs nest),
-//! for `JobObjectBasicProcessIdList`, the buffer grown until the list fits. The inner holds no
-//! handle to its job, so the outer's is the job's last and kill-on-close fires with the outer.
+//! for `JobObjectBasicProcessIdList`, asked again with a bigger buffer while the list doesn't fit
+//! (`own_job_pids`). The inner holds no handle to its job, so the outer's is the job's last and
+//! kill-on-close fires with the outer.
 #![expect(
     unsafe_code,
     reason = "FFI to the process lists, process, token and job calls"
@@ -66,6 +67,12 @@ const DENIED: i32 = 5;
 const MORE_DATA: i32 = 234;
 /// The most pids the job's list is read for: past it, the read fails.
 const JOB_PIDS_CAP: usize = 1 << 16;
+/// The room, in pids, of the first read of the job's list.
+const JOB_PIDS_FIRST: usize = 64;
+/// The room added to the latest count when the job's list is read again.
+const JOB_PIDS_HEADROOM: usize = 64;
+/// The most calls one read of the job's list makes: the first and three more.
+const JOB_PIDS_TRIES: usize = 4;
 
 /// The calls.
 pub(in crate::windows::runner) struct OsProcesses<'a> {
@@ -220,55 +227,95 @@ fn sleep(pause: Duration) {
     std::thread::sleep(pause);
 }
 
-/// The pids of this process's own job (`JobObjectBasicProcessIdList`, no job handle), the
-/// buffer grown fourfold while the list doesn't fit (`ERROR_MORE_DATA`, or fewer pids than
-/// processes), up to [`JOB_PIDS_CAP`] pids; past that, an error.
+/// The pids of this process's own job (`JobObjectBasicProcessIdList`, no job handle), read by
+/// [`job_pids_from`].
 pub(in crate::windows::runner) fn own_job_pids() -> io::Result<Vec<u32>> {
-    let head = size_of::<JOBOBJECT_BASIC_PROCESS_ID_LIST>().div_ceil(size_of::<usize>());
-    let mut room = 64usize;
-    loop {
-        // usize-aligned, as the list's pid array is.
-        let mut buffer = vec![0usize; head + room];
-        let len = u32::try_from(size_of_val(buffer.as_slice())).map_err(io::Error::other)?;
-        // SAFETY: no job handle: the caller's own job. `buffer` is live, writable for `len`
-        // bytes and aligned for the list.
-        let asked = unsafe {
-            QueryInformationJobObject(
-                None,
-                JobObjectBasicProcessIdList,
-                buffer.as_mut_ptr().cast(),
-                len,
-                None,
-            )
-        }
-        .map_err(|e| os_error(&e));
-        match asked {
-            Ok(()) => {}
-            Err(error) if error.raw_os_error() == Some(MORE_DATA) && room < JOB_PIDS_CAP => {
-                room *= 4;
-                continue;
+    job_pids_from(query_own_job)
+}
+
+/// One query of the job's pid list.
+pub(super) struct Asked {
+    /// The call's result: `ERROR_MORE_DATA` when the list stopped at the buffer's end.
+    pub(super) result: io::Result<()>,
+    /// `NumberOfAssignedProcesses`: the job's `ActiveProcesses` as the call began. Windows
+    /// writes it before the pids, so it is there with `ERROR_MORE_DATA` too.
+    pub(super) assigned: usize,
+    /// The pids written (`NumberOfProcessIdsInList` of them, at most `room`).
+    pub(super) listed: Vec<usize>,
+}
+
+/// The job's pids, from `query` (given the room, in pids, its buffer has). A list that doesn't
+/// fit (`ERROR_MORE_DATA`, or fewer pids than processes) or any failed call is asked again, up
+/// to [`JOB_PIDS_TRIES`] calls, the room grown from the latest count plus
+/// [`JOB_PIDS_HEADROOM`] (at least doubled), up to [`JOB_PIDS_CAP`]. A job filling up between
+/// two calls (a fork bomb at the cap) so gets a bigger buffer each time. A list that still fails
+/// is an error with the last Win32 code (`ERROR_MORE_DATA` for a short list), never an empty
+/// list: the sweep then fails closed.
+pub(super) fn job_pids_from(mut query: impl FnMut(usize) -> Asked) -> io::Result<Vec<u32>> {
+    let mut room = JOB_PIDS_FIRST;
+    let mut last = io::Error::from_raw_os_error(MORE_DATA);
+    for _ in 0..JOB_PIDS_TRIES {
+        let asked = query(room);
+        match asked.result {
+            Ok(()) if asked.assigned <= asked.listed.len() => {
+                return asked
+                    .listed
+                    .iter()
+                    .map(|pid| u32::try_from(*pid).map_err(io::Error::other))
+                    .collect();
             }
-            Err(error) => return Err(error),
+            Ok(()) => last = io::Error::from_raw_os_error(MORE_DATA),
+            Err(error) => last = error,
         }
-        // SAFETY: the call wrote the list at the start of the aligned buffer.
-        let list = unsafe { &*buffer.as_ptr().cast::<JOBOBJECT_BASIC_PROCESS_ID_LIST>() };
-        let count = usize::try_from(list.NumberOfProcessIdsInList).map_err(io::Error::other)?;
-        let assigned = usize::try_from(list.NumberOfAssignedProcesses).map_err(io::Error::other)?;
-        if assigned > count && room < JOB_PIDS_CAP {
-            room *= 4;
-            continue;
+        let wanted = asked
+            .assigned
+            .max(asked.listed.len())
+            .saturating_add(JOB_PIDS_HEADROOM);
+        if room >= JOB_PIDS_CAP {
+            break;
         }
-        if count > room || assigned > count {
-            return Err(io::Error::other(
-                "the job's pid list doesn't fit its buffer",
-            ));
-        }
-        // SAFETY: `count` pids follow in `ProcessIdList`, inside `buffer` (`count <= room`).
-        let pids = unsafe { std::slice::from_raw_parts(list.ProcessIdList.as_ptr(), count) };
-        return pids
-            .iter()
-            .map(|pid| u32::try_from(*pid).map_err(io::Error::other))
-            .collect();
+        room = wanted.max(room.saturating_mul(2)).min(JOB_PIDS_CAP);
+    }
+    Err(last)
+}
+
+/// The real query for [`job_pids_from`]: the caller's own job, into a buffer of `room` pids.
+fn query_own_job(room: usize) -> Asked {
+    let head = size_of::<JOBOBJECT_BASIC_PROCESS_ID_LIST>().div_ceil(size_of::<usize>());
+    // usize-aligned, as the list's pid array is.
+    let mut buffer = vec![0usize; head + room];
+    let Ok(len) = u32::try_from(size_of_val(buffer.as_slice())) else {
+        return Asked {
+            result: Err(io::Error::from_raw_os_error(MORE_DATA)),
+            assigned: 0,
+            listed: Vec::new(),
+        };
+    };
+    // SAFETY: no job handle: the caller's own job. `buffer` is live, writable for `len`
+    // bytes and aligned for the list.
+    let result = unsafe {
+        QueryInformationJobObject(
+            None,
+            JobObjectBasicProcessIdList,
+            buffer.as_mut_ptr().cast(),
+            len,
+            None,
+        )
+    }
+    .map_err(|e| os_error(&e));
+    // SAFETY: the list's head is at the start of the aligned, zeroed buffer: written by the call,
+    // or zeros when it wrote nothing.
+    let list = unsafe { &*buffer.as_ptr().cast::<JOBOBJECT_BASIC_PROCESS_ID_LIST>() };
+    let assigned = usize::try_from(list.NumberOfAssignedProcesses).unwrap_or(usize::MAX);
+    let count = usize::try_from(list.NumberOfProcessIdsInList)
+        .unwrap_or(usize::MAX)
+        .min(room);
+    // SAFETY: `count` pids follow in `ProcessIdList`, inside `buffer` (`count <= room`).
+    let pids = unsafe { std::slice::from_raw_parts(list.ProcessIdList.as_ptr(), count) };
+    Asked {
+        result,
+        assigned,
+        listed: pids.to_vec(),
     }
 }
 
@@ -354,3 +401,6 @@ fn exited(process: HANDLE, wait: Duration) -> bool {
     // SAFETY: the handle is live with SYNCHRONIZE.
     unsafe { WaitForSingleObject(process, millis) == WAIT_OBJECT_0 }
 }
+
+#[cfg(test)]
+mod tests;
