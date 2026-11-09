@@ -1174,6 +1174,7 @@ name = "clauseo-mcp"
 version = "0.0.0"
 dependencies = [
  "clauseo-mcp",
+ "dunce",
  "libc",
  "nix",
  "serde",

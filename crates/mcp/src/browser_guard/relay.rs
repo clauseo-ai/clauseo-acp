@@ -1,5 +1,9 @@
 //! The relay between the agent and agent-browser, and the browser's lifecycle around it.
 //!
+//! The agent is the guard's stdio, or in listen mode (Unix) one client of the guard's socket at a
+//! time (`clients.rs`), whose disconnect stops the browser as the idle stop does and never ends
+//! the guard. What follows is said of stdio; listen mode differs only there.
+//!
 //! One thread reads the agent's lines, runs each through `filter.rs` and routes what passes
 //! (`pumps.rs`): to the running agent-browser; a tool call while the browser is stopped starts
 //! Chrome and agent-browser first (`session.rs`); any other request then goes to a one-shot
@@ -37,9 +41,13 @@
 //! (`setsid`), and `reaper.rs`'s `kill_daemon` ends it afterwards; the reaper also learns
 //! agent-browser's pid, for a guard that is killed.
 
+#[cfg(unix)]
+mod clients;
 pub(crate) mod lines;
 mod oneshot;
 pub(crate) mod pumps;
+#[cfg(unix)]
+mod stop_signals;
 
 use std::io;
 use std::sync::Arc;
@@ -51,7 +59,7 @@ use super::parent::Parent;
 use super::session::{self, Shared, StartError, Stopped};
 use super::{Child, note};
 pub(crate) use lines::{Line, Overflow, read_line};
-use lines::{answer_all, lock};
+use lines::{answer_all, answer_all_from, lock};
 
 /// The request sent when the agent closes stdin.
 pub(crate) const CLOSE_REQUEST: &str = r#"{"jsonrpc":"2.0","id":"clauseo-guard-close","method":"tools/call","params":{"name":"agent_browser_close","arguments":{}}}"#;
@@ -88,6 +96,9 @@ pub(crate) enum Event {
     CloseAnswered,
     /// The guard's parent has gone.
     ParentGone,
+    /// Listen mode: SIGTERM or SIGINT asked the guard to stop (`stop_signals.rs`).
+    #[cfg(unix)]
+    Stop,
     /// The browser could not start for a tool call; the reason.
     StartFailed(StartError),
     /// A one-shot agent-browser could not start; the error.
@@ -145,21 +156,50 @@ enum Phase {
     Draining,
 }
 
-/// Relays until the agent leaves, agent-browser exits, Chrome dies twice, the browser cannot
-/// start or the guard's parent goes; then stops whatever runs.
-pub(crate) fn run(shared: &Arc<Shared>, parent: &Parent) -> Outcome {
+/// Where the agent's lines come from.
+pub(crate) enum Agent {
+    /// The guard's stdin; its lines go to stdout. Its end ends the guard.
+    Stdio,
+    /// The clients of the listen socket, one at a time (`clients.rs`). A client's disconnect
+    /// stops the browser and the guard waits for the next.
+    #[cfg(unix)]
+    Listen(std::os::unix::net::UnixListener),
+}
+
+/// Relays until the agent leaves (over stdio), agent-browser exits, Chrome dies twice, the
+/// browser cannot start or the guard's parent goes; then stops whatever runs.
+#[cfg_attr(
+    windows,
+    expect(
+        clippy::needless_pass_by_value,
+        reason = "Windows has only `Agent::Stdio`, which holds nothing; Unix moves the listener"
+    )
+)]
+pub(crate) fn run(shared: &Arc<Shared>, parent: &Parent, agent: Agent) -> Outcome {
     let (events, inbox) = mpsc::channel();
     {
         let events = events.clone();
         parent.watch(move || send(&events, Event::ParentGone));
     }
-    {
-        let (shared, parent) = (Arc::clone(shared), parent.clone());
-        // Never joined: when the child ends first, the guard exits with this thread still
-        // blocked on the agent's stdin.
-        drop(thread::spawn(move || {
-            pumps::pump_agent(&mut io::stdin().lock(), &shared, &parent, &events);
-        }));
+    match agent {
+        Agent::Stdio => {
+            let (shared, parent) = (Arc::clone(shared), parent.clone());
+            // Never joined: when the child ends first, the guard exits with this thread still
+            // blocked on the agent's stdin.
+            drop(thread::spawn(move || {
+                pumps::pump_agent(&mut io::stdin().lock(), &shared, &parent, &events);
+            }));
+        }
+        #[cfg(unix)]
+        Agent::Listen(listener) => {
+            let stop = events.clone();
+            if let Err(error) = stop_signals::watch(move || send(&stop, Event::Stop)) {
+                note(&format!(
+                    "cannot catch SIGTERM or SIGINT; either now ends the guard at once: {error}"
+                ));
+            }
+            clients::serve(listener, shared, parent, events);
+        }
     }
     let end = wait_for_end(shared, &inbox);
     let (stopped, in_flight) = {
@@ -249,6 +289,12 @@ fn wait_for_end(shared: &Shared, inbox: &mpsc::Receiver<Event>) -> End {
             | Event::PortRefused(..)
             | Event::ChromeExited(_) => {}
             Event::ParentGone => return End::ParentGone,
+            // Ends as the agent's leaving does with no browser left to close: stop, exit 0.
+            #[cfg(unix)]
+            Event::Stop => {
+                note("asked to stop (SIGTERM or SIGINT); ending");
+                return End::AgentGone;
+            }
             Event::StartFailed(reason) => return End::StartFailed(reason),
             Event::AgentFailed(error) => return End::AgentFailed(error),
             Event::OneShotEnded(code) => return End::OneShotEnded(code),
@@ -299,20 +345,22 @@ fn stop_if_idle(shared: &Shared) {
 /// with an error and returns `true`, so the next tool call starts both again. `false` the
 /// second time, or once the agent has gone.
 fn restart_later(shared: &Shared) -> bool {
-    let in_flight = {
+    let (generation, in_flight) = {
         let mut state = lock(&shared.state);
         if state.restarted || state.closing {
             return false;
         }
         state.restarted = true;
+        // The start whose requests these are: in listen mode, never answered to a later client.
+        let generation = state.generation;
         drop(session::stop(&shared.launcher, &mut state));
-        state.take_in_flight()
+        (generation, state.take_in_flight())
     };
     note(
         "Chrome exited; the guard ended agent-browser and starts both again at the next browser \
          call (once per session)",
     );
-    answer_all(&shared.out, &in_flight, CRASHED);
+    answer_all_from(&shared.out, Some(generation), &in_flight, CRASHED);
     true
 }
 

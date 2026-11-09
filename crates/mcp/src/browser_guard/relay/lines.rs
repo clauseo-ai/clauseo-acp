@@ -1,5 +1,5 @@
 //! Whole lines in and out: [`read_line`], which never holds more than its limit, and the writes
-//! to the guard's stdout and to agent-browser's stdin, each one whole line under its lock.
+//! to the agent ([`Out`]) and to agent-browser's stdin, each one whole line under its lock.
 
 use std::io::{self, BufRead, Write};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
@@ -8,8 +8,59 @@ use serde_json::{Value, json};
 
 use super::super::ChildStdin;
 
-/// The guard's stdout, shared by every thread that writes to the agent.
-pub(crate) type Out = Mutex<io::Stdout>;
+/// Where every thread that writes to the agent writes: the guard's stdout, or in listen mode
+/// (`clients.rs`) the connected client, swapped for a sink while none is connected.
+///
+/// Each client comes with a floor: the browser's generation (`session.rs`) when it connected.
+/// A line from agent-browser goes through [`emit_from`] with the generation of the start that
+/// wrote it, and one from a start before the floor, which an earlier client's disconnect
+/// stopped, is dropped rather than reaching the next client.
+pub(crate) struct Out {
+    slot: Mutex<Slot>,
+}
+
+/// The writer and its floor.
+struct Slot {
+    writer: Box<dyn Write + Send>,
+    floor: u64,
+}
+
+impl Out {
+    /// The guard's stdout, for every generation.
+    pub(crate) fn stdout() -> Out {
+        Out {
+            slot: Mutex::new(Slot {
+                writer: Box::new(io::stdout()),
+                floor: 0,
+            }),
+        }
+    }
+
+    /// From now on, lines go to `writer`, and only agent-browser's from generation `floor` on.
+    #[cfg(unix)]
+    pub(crate) fn attach(&self, writer: Box<dyn Write + Send>, floor: u64) {
+        *lock(&self.slot) = Slot { writer, floor };
+    }
+
+    /// From now on, lines go nowhere: no client is connected.
+    #[cfg(unix)]
+    pub(crate) fn detach(&self) {
+        *lock(&self.slot) = Slot {
+            writer: Box::new(io::sink()),
+            floor: u64::MAX,
+        };
+    }
+
+    /// Writes `bytes` under the lock, when `generation` is none or not before the floor.
+    fn write(&self, generation: Option<u64>, bytes: &[u8]) -> io::Result<()> {
+        let mut slot = lock(&self.slot);
+        if generation.is_some_and(|generation| generation < slot.floor) {
+            return Ok(());
+        }
+        slot.writer.write_all(bytes)?;
+        slot.writer.flush()
+    }
+}
 /// agent-browser's stdin; `None` once closed.
 pub(crate) type ToChild = Arc<Mutex<Option<ChildStdin>>>;
 
@@ -93,11 +144,15 @@ pub(crate) fn write_child(to_child: &ToChild, text: &str) -> io::Result<()> {
     stdin.flush()
 }
 
-/// Writes whole lines to the guard's stdout under the shared lock.
+/// Writes whole lines to the agent under the shared lock.
 pub(crate) fn emit(out: &Out, bytes: &[u8]) -> io::Result<()> {
-    let mut stdout = lock(out);
-    stdout.write_all(bytes)?;
-    stdout.flush()
+    out.write(None, bytes)
+}
+
+/// Writes whole lines from agent-browser's start numbered `generation` to the agent, unless that
+/// start is older than the connected client (listen mode); then they are dropped.
+pub(crate) fn emit_from(out: &Out, generation: u64, bytes: &[u8]) -> io::Result<()> {
+    out.write(Some(generation), bytes)
 }
 
 /// The guard's own error reply to request `id`, which agent-browser will never answer now:
@@ -109,8 +164,15 @@ pub(crate) fn error_reply(id: &Value, message: &str) -> String {
 /// Answers each of `ids` with [`error_reply`]. The agent may have gone; nothing is left to tell
 /// then.
 pub(crate) fn answer_all(out: &Out, ids: &[Value], message: &str) {
+    answer_all_from(out, None, ids, message);
+}
+
+/// [`answer_all`] for requests sent to agent-browser's start numbered `generation`, when given:
+/// dropped as [`emit_from`] drops that start's lines.
+pub(crate) fn answer_all_from(out: &Out, generation: Option<u64>, ids: &[Value], message: &str) {
     for id in ids {
-        if emit(out, format!("{}\n", error_reply(id, message)).as_bytes()).is_err() {
+        let line = format!("{}\n", error_reply(id, message));
+        if out.write(generation, line.as_bytes()).is_err() {
             return;
         }
     }

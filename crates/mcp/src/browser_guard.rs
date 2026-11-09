@@ -1,6 +1,15 @@
 //! The `browser-guard` mode: `clauseo-mcp browser-guard --agent-browser <file> --cwd <folder>
 //! --cdp-port <port> -- <agent-browser args...>`, with `--daemon-port <port>` after
-//! `--cdp-port` on Windows.
+//! `--cdp-port` on Windows, and on Unix optionally `--listen <socket>` first.
+//!
+//! With `--listen` (Unix only) the guard serves the same lines on a Unix socket it creates
+//! fresh with mode 0600 (`transport/unix.rs`), to one client at a time (`relay/clients.rs`),
+//! instead of on stdio: the host runs it outside the agent's jail and the agent reaches it through
+//! `clauseo-mcp browser-bridge` (`browser_bridge.rs`). A client's disconnect stops the browser
+//! as the idle stop does and the guard waits for the next client; everything below holds as
+//! over stdio but for the agent's stdin, and the guard removes the socket when it exits. Once
+//! the socket is made it prints `clauseo-mcp browser-guard: listening as <pid>/<version>` on
+//! stderr, its own process identity, which the host passes to the bridge.
 //!
 //! In order: note the guard's parent (`parent.rs`; exit 1 if it is gone already), read the
 //! command line (exit 2 on anything else), build the child's environment from the host's
@@ -60,6 +69,8 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
+#[cfg(unix)]
+use crate::transport;
 use crate::{Failure, write};
 pub use record::{ChromeProcess, ChromeState};
 
@@ -70,7 +81,7 @@ pub const USAGE: &str = if cfg!(windows) {
     USAGE_UNIX
 };
 /// The command line on macOS and Linux.
-const USAGE_UNIX: &str = "usage: clauseo-mcp browser-guard --agent-browser <file> --cwd <folder> --cdp-port <port> -- <agent-browser args...>";
+const USAGE_UNIX: &str = "usage: clauseo-mcp browser-guard [--listen <socket>] --agent-browser <file> --cwd <folder> --cdp-port <port> -- <agent-browser args...>";
 /// The command line on Windows: the daemon's port too, which agent-browser derives from the
 /// session name and the host claimed (`port_file.rs`).
 const USAGE_WINDOWS: &str = "usage: clauseo-mcp browser-guard --agent-browser <file> --cwd <folder> --cdp-port <port> --daemon-port <port> -- <agent-browser args...>";
@@ -89,6 +100,8 @@ struct Command {
     cdp_port: u16,
     /// Windows only: the port agent-browser's daemon must listen on.
     daemon_port: Option<u16>,
+    /// Unix only: the socket to serve instead of stdio (`--listen`).
+    listen: Option<PathBuf>,
     child_args: Vec<OsString>,
 }
 
@@ -150,6 +163,32 @@ pub fn run(args: &[OsString]) -> Result<i32, Failure> {
             },
         )?;
     }
+    // Before anything is claimed or made, and while the guard has one thread (`Socket::make`).
+    #[cfg(unix)]
+    let mut socket = command
+        .listen
+        .as_deref()
+        .map(transport::unix::Socket::make)
+        .transpose()
+        .map_err(|reason| failed(&reason))?;
+    // The host reads this line, checks the pid is the child it started, and passes the identity
+    // to the bridge (`browser_bridge.rs`, `--guard-pid` and `--guard-pidversion`).
+    #[cfg(unix)]
+    if socket.is_some() {
+        let own = transport::unix::own_identity()
+            .ok_or_else(|| failed("cannot read the guard's own process identity"))?;
+        note(&format!("{LISTENING} {own}"));
+    }
+    #[cfg(unix)]
+    let agent = match socket
+        .as_mut()
+        .and_then(transport::unix::Socket::take_listener)
+    {
+        Some(listener) => relay::Agent::Listen(listener),
+        None => relay::Agent::Stdio,
+    };
+    #[cfg(windows)]
+    let agent = relay::Agent::Stdio;
     let run = runs::Run::claim(&command.cwd)
         .map_err(|error| failed(&format!("cannot claim a run under --cwd: {error}")))?;
     record::write_state(&command.cwd, run.id(), &record::ChromeState::None);
@@ -188,7 +227,11 @@ pub fn run(args: &[OsString]) -> Result<i32, Failure> {
             ))
         })?;
     }
-    serve(&command, env, &session, &parent, &run)
+    let outcome = serve(&command, env, &session, &parent, &run, agent);
+    // Removes the listen socket, if it is still the guard's.
+    #[cfg(unix)]
+    drop(socket);
+    outcome
 }
 
 /// Relays, starting Chrome and agent-browser at the first tool call (`session.rs`); ends both,
@@ -199,6 +242,7 @@ fn serve(
     session: &str,
     parent: &parent::Parent,
     run: &runs::Run,
+    agent: relay::Agent,
 ) -> Result<i32, Failure> {
     #[cfg(unix)]
     let socket_dir = env
@@ -233,7 +277,7 @@ fn serve(
     };
     let shared = Arc::new(session::Shared::new(launcher));
     // Stops whatever runs (Chrome's tree, agent-browser's, the daemon) before it returns.
-    let outcome = relay::run(&shared, parent);
+    let outcome = relay::run(&shared, parent, agent);
     chrome::remove_profile(run.profile());
     // Chrome is reaped: the record goes, before the run's lock (`runs::Run`'s drop).
     record::clear(&command.cwd, run.id());
@@ -280,6 +324,20 @@ pub fn runs_settled(cwd: &Path) -> bool {
 pub fn chrome_groups(cwd: &Path) -> Vec<ChromeState> {
     record::chrome_groups(cwd)
 }
+
+/// What the agent-side bridge (`browser_bridge.rs`) shares with the guard: the line reader, both
+/// line caps (the agent's lines, the lines to the agent) and the error reply.
+#[cfg(unix)]
+pub(crate) mod lines {
+    pub(crate) use super::filter::MAX_LINE_BYTES as AGENT_MAX_LINE_BYTES;
+    pub(crate) use super::relay::lines::error_reply;
+    pub(crate) use super::relay::{CHILD_MAX_LINE_BYTES, Line, Overflow, read_line};
+}
+
+/// The start of the line that tells the host the guard listens, then `<pid>/<version>`
+/// (`transport.rs`'s `Identity`).
+#[cfg(unix)]
+pub(crate) const LISTENING: &str = "listening as";
 
 /// The failure when the guard's parent has gone (`parent.rs`).
 pub(crate) const PARENT_GONE: &str =
@@ -343,6 +401,10 @@ fn port_checks(
     checks
 }
 
+/// The refusals of `--listen`.
+const LISTEN_UNIX_ONLY: &str = "--listen is for macOS and Linux only";
+const LISTEN_ABSOLUTE: &str = "--listen must be an absolute path";
+
 /// What the command line must look like, for its refusals.
 const EXPECTED_UNIX: &str =
     "expected --agent-browser <file> --cwd <folder> --cdp-port <port> -- <args...>";
@@ -351,8 +413,20 @@ const EXPECTED_WINDOWS: &str = "expected --agent-browser <file> --cwd <folder> -
 /// Exactly `--agent-browser <file> --cwd <folder> --cdp-port <port> -- <args...>`, in that
 /// order, with `--daemon-port <port>` after `--cdp-port` on Windows and never on Unix; each
 /// path absolute and existing, each port from 1024 to 65535 in plain decimal. The child's
-/// arguments are kept as given.
+/// arguments are kept as given. On Unix `--listen <socket>` may come first, an absolute path
+/// that need not exist (`transport/unix.rs` refuses one that does).
 fn parse(args: &[OsString], os: env::Os) -> Result<Command, &'static str> {
+    let (listen, args) = match (os, args) {
+        (env::Os::Unix, [flag, socket, rest @ ..]) if flag == "--listen" => {
+            let socket = Path::new(socket);
+            if !socket.is_absolute() {
+                return Err(LISTEN_ABSOLUTE);
+            }
+            (Some(socket.to_owned()), rest)
+        }
+        (env::Os::Windows, [flag, ..]) if flag == "--listen" => return Err(LISTEN_UNIX_ONLY),
+        _ => (None, args),
+    };
     let expected = match os {
         env::Os::Unix => EXPECTED_UNIX,
         env::Os::Windows => EXPECTED_WINDOWS,
@@ -409,6 +483,7 @@ fn parse(args: &[OsString], os: env::Os) -> Result<Command, &'static str> {
         cwd: cwd.to_owned(),
         cdp_port,
         daemon_port,
+        listen,
         child_args: child_args.to_vec(),
     })
 }

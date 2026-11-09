@@ -1,5 +1,6 @@
 //! Unix: a file replaced inside a folder opened once, so a link swapped in for the folder after
-//! it was checked is never written through (`browser_guard/chrome/profile.rs`).
+//! it was checked is never written through (`browser_guard/chrome/profile.rs`); and the guard's
+//! `--listen` socket bound and removed inside its folder opened once (`transport/unix.rs`).
 
 use std::ffi::{CString, OsStr};
 use std::io::{self, Write};
@@ -9,7 +10,7 @@ use std::path::Path;
 use nix::dir::Dir;
 use nix::fcntl::{OFlag, open, openat, renameat};
 use nix::sys::stat::Mode;
-use nix::unistd::{UnlinkatFlags, unlinkat};
+use nix::unistd::{UnlinkatFlags, fchdir, unlinkat};
 
 /// Writes `contents` to `name` in `folder`: opens `folder` itself with `O_DIRECTORY|O_NOFOLLOW`
 /// (a link there fails the open), removes the temporary files an earlier write left
@@ -78,4 +79,35 @@ fn remove_left(dir: &OwnedFd, name: &OsStr) {
         // Gone already, or not a file: left, harmless.
         if unlinkat(dir, found.as_c_str(), UnlinkatFlags::NoRemoveDir).is_err() {}
     }
+}
+
+/// Binds a Unix socket named `name` in the folder `dir` holds. There is no `bindat` on Linux, so
+/// the process's working folder moves there for the bind and back after it (`fchdir` both
+/// ways): the name is resolved inside the folder that was checked, never by its path. Call it
+/// only while the process has one thread, which no other code shares the working folder with.
+pub(crate) fn bind_unix_socket_in(
+    dir: &OwnedFd,
+    name: &OsStr,
+) -> io::Result<std::os::unix::net::UnixListener> {
+    let back = open(
+        ".",
+        OFlag::O_DIRECTORY | OFlag::O_RDONLY | OFlag::O_CLOEXEC,
+        Mode::empty(),
+    )
+    .map_err(io::Error::from)?;
+    fchdir(dir).map_err(io::Error::from)?;
+    let bound = std::os::unix::net::UnixListener::bind(Path::new(name));
+    if let Err(errno) = fchdir(&back) {
+        // The guard cannot carry on in another folder: no socket is left behind it.
+        if bound.is_ok() && remove_in(dir, name).is_err() {
+            // Nothing more can be done from the wrong folder; the host cleans the name.
+        }
+        return Err(io::Error::from(errno));
+    }
+    bound
+}
+
+/// Unlinks the entry `name` in the folder `dir` holds (never a folder).
+pub(crate) fn remove_in(dir: &OwnedFd, name: &OsStr) -> io::Result<()> {
+    unlinkat(dir, name, UnlinkatFlags::NoRemoveDir).map_err(io::Error::from)
 }
