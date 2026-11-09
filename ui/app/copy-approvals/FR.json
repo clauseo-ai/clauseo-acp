@@ -74,14 +74,14 @@
     "note": "Rohan, on the folder-rights copy page"
   },
   "FR-08": {
-    "en": "Claude asks before every change. Codex can't work here. / Clauseo can't keep Claude and Codex inside a folder on a network drive.",
-    "hi": "Claude हर बदलाव से पहले पूछता है। Codex यहाँ काम नहीं कर सकता। / Clauseo, Claude और Codex को नेटवर्क ड्राइव के फ़ोल्डर के भीतर नहीं रख सकता।",
+    "en": "Claude asks before every change. ChatGPT can't work here. / Clauseo can't keep Claude and Codex inside a folder on a network drive.",
+    "hi": "Claude हर बदलाव से पहले पूछता है। ChatGPT यहाँ काम नहीं कर सकता। / Clauseo, Claude और Codex को नेटवर्क ड्राइव के फ़ोल्डर के भीतर नहीं रख सकता।",
     "hi_status": "provisional",
-    "hi_at": "2026-11-06",
+    "hi_at": "2026-11-09",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "approved",
-    "at": "2026-11-05",
-    "by": "Rohan",
+    "status": "provisional",
+    "at": "2026-11-09",
+    "by": "app track (asking-truth: Codex → ChatGPT; Rohan batch review)",
     "note": "Rohan's approved line with 'an agent' replaced by 'Claude and Codex' (word list: no 'agent'); Rohan, running-page batch 2026-11-05 (written by app track)"
   },
   "FR-09": {
@@ -115,14 +115,14 @@
     "note": "Rohan, on the folder-rights copy page"
   },
   "FR-12": {
-    "en": "On a network drive. / Claude asks before every change. Codex can't work here. / This matter's folder is on a network drive / Clauseo can't keep Claude and Codex inside this folder. To work in the Safe workspace, move the matter to a folder on this computer.",
-    "hi": "नेटवर्क ड्राइव पर। / Claude हर बदलाव से पहले पूछता है। Codex यहाँ काम नहीं कर सकता। / इस मामले का फ़ोल्डर नेटवर्क ड्राइव पर है / Clauseo, Claude और Codex को इस फ़ोल्डर के भीतर नहीं रख सकता। सुरक्षित कार्यक्षेत्र में काम करने के लिए मामले को इस कंप्यूटर के किसी फ़ोल्डर में ले जाएँ।",
+    "en": "On a network drive. / Claude asks before every change. ChatGPT can't work here. / This matter's folder is on a network drive / Clauseo can't keep Claude and Codex inside this folder. To work in the Safe workspace, move the matter to a folder on this computer.",
+    "hi": "नेटवर्क ड्राइव पर। / Claude हर बदलाव से पहले पूछता है। ChatGPT यहाँ काम नहीं कर सकता। / इस मामले का फ़ोल्डर नेटवर्क ड्राइव पर है / Clauseo, Claude और Codex को इस फ़ोल्डर के भीतर नहीं रख सकता। सुरक्षित कार्यक्षेत्र में काम करने के लिए मामले को इस कंप्यूटर के किसी फ़ोल्डर में ले जाएँ।",
     "hi_status": "provisional",
-    "hi_at": "2026-11-07",
+    "hi_at": "2026-11-09",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
     "status": "provisional",
-    "at": "2026-11-07",
-    "by": "app track (provisional; Rohan batch review; design B, safe-workspace-installer-setup)"
+    "at": "2026-11-09",
+    "by": "app track (asking-truth: Codex → ChatGPT; Rohan batch review)"
   },
   "FR-13": {
     "en": "No file permissions / This drive doesn't keep file permissions",
@@ -136,25 +136,25 @@
     "note": "Rohan, on the folder-rights copy page"
   },
   "FR-14": {
-    "en": "Claude asks before every change. Codex can't work here. / Clauseo can't keep Claude and Codex inside a folder on this drive. USB drives often don't keep permissions.",
-    "hi": "Claude हर बदलाव से पहले पूछता है। Codex यहाँ काम नहीं कर सकता। / Clauseo, Claude और Codex को इस ड्राइव के फ़ोल्डर के भीतर नहीं रख सकता। USB ड्राइव अक्सर अनुमतियाँ नहीं रखतीं।",
+    "en": "Claude asks before every change. ChatGPT can't work here. / Clauseo can't keep Claude and Codex inside a folder on this drive. USB drives often don't keep permissions.",
+    "hi": "Claude हर बदलाव से पहले पूछता है। ChatGPT यहाँ काम नहीं कर सकता। / Clauseo, Claude और Codex को इस ड्राइव के फ़ोल्डर के भीतर नहीं रख सकता। USB ड्राइव अक्सर अनुमतियाँ नहीं रखतीं।",
     "hi_status": "provisional",
-    "hi_at": "2026-11-06",
+    "hi_at": "2026-11-09",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "approved",
-    "at": "2026-11-05",
-    "by": "Rohan",
+    "status": "provisional",
+    "at": "2026-11-09",
+    "by": "app track (asking-truth: Codex → ChatGPT; Rohan batch review)",
     "note": "Rohan's approved line with 'an agent' replaced by 'Claude and Codex' (word list: no 'agent'); Rohan, running-page batch 2026-11-05 (written by app track)"
   },
   "FR-15": {
-    "en": "No file permissions. / Claude asks before every change. Codex can't work here. / This matter's folder is on a drive that doesn't keep file permissions / Clauseo can't keep Claude and Codex inside this folder. USB drives often don't keep permissions. To work in the Safe workspace, move the matter to a folder on this computer.",
-    "hi": "फ़ाइल अनुमतियाँ नहीं। / Claude हर बदलाव से पहले पूछता है। Codex यहाँ काम नहीं कर सकता। / इस मामले का फ़ोल्डर ऐसी ड्राइव पर है जो फ़ाइल अनुमतियाँ नहीं रखती / Clauseo, Claude और Codex को इस फ़ोल्डर के भीतर नहीं रख सकता। USB ड्राइव अक्सर अनुमतियाँ नहीं रखतीं। सुरक्षित कार्यक्षेत्र में काम करने के लिए मामले को इस कंप्यूटर के किसी फ़ोल्डर में ले जाएँ।",
+    "en": "No file permissions. / Claude asks before every change. ChatGPT can't work here. / This matter's folder is on a drive that doesn't keep file permissions / Clauseo can't keep Claude and Codex inside this folder. USB drives often don't keep permissions. To work in the Safe workspace, move the matter to a folder on this computer.",
+    "hi": "फ़ाइल अनुमतियाँ नहीं। / Claude हर बदलाव से पहले पूछता है। ChatGPT यहाँ काम नहीं कर सकता। / इस मामले का फ़ोल्डर ऐसी ड्राइव पर है जो फ़ाइल अनुमतियाँ नहीं रखती / Clauseo, Claude और Codex को इस फ़ोल्डर के भीतर नहीं रख सकता। USB ड्राइव अक्सर अनुमतियाँ नहीं रखतीं। सुरक्षित कार्यक्षेत्र में काम करने के लिए मामले को इस कंप्यूटर के किसी फ़ोल्डर में ले जाएँ।",
     "hi_status": "provisional",
-    "hi_at": "2026-11-07",
+    "hi_at": "2026-11-09",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
     "status": "provisional",
-    "at": "2026-11-07",
-    "by": "app track (provisional; Rohan batch review; design B, safe-workspace-installer-setup)"
+    "at": "2026-11-09",
+    "by": "app track (asking-truth: Codex → ChatGPT; Rohan batch review)"
   },
   "FR-20": {
     "en": "Clauseo couldn't check this folder, so Claude asks before every change.",

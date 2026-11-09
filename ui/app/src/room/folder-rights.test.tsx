@@ -91,13 +91,13 @@ test("Close shuts the notice for that matter only, and it stays shut when the ma
   expect(notice()).toBeNull();
 });
 
-test("a network drive: Not protected, and its notice says Claude asks and Codex can't work here", async () => {
+test("a network drive: Not protected, and its notice says Claude asks and ChatGPT can't work here", async () => {
   h = await mountRoom({ matters: [matter("network")] });
   expect(notice()?.getAttribute("aria-label")).toBe(
     fr("en", "This matter's folder is on a network drive"),
   );
   expect(text()).toContain(fr("en", "On a network drive."));
-  expect(text()).toContain(fr("en", "Claude asks before every change. Codex can't work here."));
+  expect(text()).toContain(fr("en", "Claude asks before every change. ChatGPT can't work here."));
   expect(info()).toBe(
     fr(
       "en",
@@ -114,7 +114,7 @@ test("a drive without file permissions: Not protected, and its notice", async ()
     fr("en", "This matter's folder is on a drive that doesn't keep file permissions"),
   );
   expect(text()).toContain(fr("en", "No file permissions."));
-  expect(text()).toContain(fr("en", "Claude asks before every change. Codex can't work here."));
+  expect(text()).toContain(fr("en", "Claude asks before every change. ChatGPT can't work here."));
   expect(info()).toContain("USB drives often don't keep permissions.");
   expect(unprotected()?.textContent).toBe(tbt("en", "Not protected"));
 });

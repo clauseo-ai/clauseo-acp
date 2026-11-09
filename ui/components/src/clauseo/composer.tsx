@@ -13,11 +13,10 @@ import {
   type RefObject,
 } from "react";
 import { Button } from "../ui/button.tsx";
-import { IconAddPapers, IconArrowUp, IconSafeWorkspace, IconStop } from "../icons/icons.tsx";
+import { IconAddPapers, IconArrowUp, IconStop } from "../icons/icons.tsx";
 import { motionAllowed, useDisplay } from "../lib/display.ts";
 import { late } from "../lib/late.ts";
 import { useThreadWords } from "../lib/words-thread.ts";
-import { rt } from "../lib/words-room.ts";
 import type { Paper } from "./matter.ts";
 import { dur, ease } from "./motion.ts";
 import { insertedOnly, mayTakeFocus, pressOwn, replaceAll } from "./composer-edit.ts";
@@ -25,6 +24,7 @@ import { sendsOnEnter } from "./composer-keys.ts";
 import type { MenuShown } from "./composer-menu.tsx";
 import { useRoom } from "./room-scope.ts";
 import { PaperChips } from "./paper-chips.tsx";
+import { SafeWorkspaceLine } from "./safe-workspace-line.tsx";
 import { Say } from "./say.tsx";
 import { StatusLine, type PlanChoice, type ReadyHint, type ToolsSegment } from "./status-line.tsx";
 import { WorkingLine, WorkingSaid, WorkingTime, type WorkingState } from "./working-line.tsx";
@@ -139,6 +139,8 @@ export type ComposerProps<V extends string = string> = {
   gate?: ReactNode;
   /** Words in the room's line's place, such as the fine print before signing in; false for no line at all. */
   line?: ReactNode | false;
+  /** The Safe workspace line says Clauseo changes the matter's files without asking: set by the host's D2d signal. */
+  worksOnItsOwn?: boolean;
   /** No matter open: the field, Add papers and Ask take nothing. */
   disabled?: boolean;
   /** data-testid on the field, Ask, Stop, the working line's row, and the `/` or `@` menu and each of its rows. */
@@ -201,6 +203,7 @@ export function Composer<V extends string = string>({
   id = "ask",
   gate,
   line,
+  worksOnItsOwn = false,
   disabled = false,
   testIds,
   commands,
@@ -579,21 +582,7 @@ export function Composer<V extends string = string>({
       </div>
       {notice}
       {line !== false && (
-        <p className="room-line">
-          {line ?? (
-            <>
-              <IconSafeWorkspace size={14} />
-              <span>
-                <Say>
-                  {rt(
-                    w.lang,
-                    "Safe workspace. Clauseo works inside this matter's folder and asks before going beyond it.",
-                  )}
-                </Say>
-              </span>
-            </>
-          )}
-        </p>
+        <p className="room-line">{line ?? <SafeWorkspaceLine worksOnItsOwn={worksOnItsOwn} />}</p>
       )}
     </form>
   );

@@ -140,7 +140,7 @@ test("a network drive: the warning's title, name, body and why, with Choose anot
   expect(warning()?.getAttribute("aria-label")).toBe(fr("en", "This folder is on a network drive"));
   expect(warning()?.textContent).toBe(
     fr("en", "On a network drive") +
-      fr("en", "Claude asks before every change. Codex can't work here."),
+      fr("en", "Claude asks before every change. ChatGPT can't work here."),
   );
   expect(warning()?.querySelector(".room-info")?.getAttribute("aria-label")).toBe(
     fr("en", "Clauseo can't keep Claude and Codex inside a folder on a network drive."),

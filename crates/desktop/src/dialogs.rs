@@ -31,7 +31,7 @@ pub(crate) trait Confirm: Send + Sync {
 
 /// The confirm's words. Fixed text: nothing the agent wrote reaches the dialog.
 const CONFIRM_TITLE: &str = "Always allow?";
-const CONFIRM_MESSAGE: &str = "The agent will do actions like this one without asking you again.";
+const CONFIRM_MESSAGE: &str = "Clauseo won't ask again before actions like this one.";
 const CONFIRM_OK: &str = "Always allow";
 const CONFIRM_CANCEL: &str = "Cancel";
 

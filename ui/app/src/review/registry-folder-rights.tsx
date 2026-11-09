@@ -146,7 +146,7 @@ export const FOLDER_RIGHTS: Entry[] = [
   entry(
     "FR-08",
     joined([
-      w("Claude asks before every change. Codex can't work here."),
+      w("Claude asks before every change. ChatGPT can't work here."),
       w("Clauseo can't keep Claude and Codex inside a folder on a network drive."),
     ]),
     warned("network"),
@@ -161,7 +161,7 @@ export const FOLDER_RIGHTS: Entry[] = [
     "FR-12",
     joined([
       w("On a network drive."),
-      w("Claude asks before every change. Codex can't work here."),
+      w("Claude asks before every change. ChatGPT can't work here."),
       w("This matter's folder is on a network drive"),
       w(
         "Clauseo can't keep Claude and Codex inside this folder. To work in the Safe workspace, move the matter to a folder on this computer.",
@@ -174,7 +174,7 @@ export const FOLDER_RIGHTS: Entry[] = [
     "FR-15",
     joined([
       w("No file permissions."),
-      w("Claude asks before every change. Codex can't work here."),
+      w("Claude asks before every change. ChatGPT can't work here."),
       w("This matter's folder is on a drive that doesn't keep file permissions"),
       w(
         "Clauseo can't keep Claude and Codex inside this folder. USB drives often don't keep permissions. To work in the Safe workspace, move the matter to a folder on this computer.",
@@ -191,7 +191,7 @@ export const FOLDER_RIGHTS: Entry[] = [
   entry(
     "FR-14",
     joined([
-      w("Claude asks before every change. Codex can't work here."),
+      w("Claude asks before every change. ChatGPT can't work here."),
       w(
         "Clauseo can't keep Claude and Codex inside a folder on this drive. USB drives often don't keep permissions.",
       ),

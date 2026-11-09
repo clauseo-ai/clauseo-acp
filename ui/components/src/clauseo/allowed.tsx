@@ -1,5 +1,6 @@
 // What this matter allows, and Not protected. The room's line under the question box says what the workspace does,
-// "Safe workspace. Clauseo works inside this matter's folder and asks before going beyond it.", and a press on it
+// "Safe workspace. Clauseo works only in this matter's folder. It can't open your other files unless you allow it.",
+// and a press on it
 // opens what the matter allows: what it always may reach, the places the lawyer allowed or refused for it, each with
 // Remove, and whether protection is on. Where protection is off, or couldn't be set up, the same line says "Not
 // protected" for as long as that lasts, with the open lock: a lasting mark in concrete, never in red, because it's a
@@ -53,20 +54,16 @@ export function WorkspaceLine({
             <span>
               <Say>
                 {w.v(
-                  "Safe workspace. Clauseo works inside this matter's folder and asks before going beyond it.",
+                  "Safe workspace. Clauseo works only in this matter's folder. It can't open your other files unless you allow it.",
                 )}
               </Say>
             </span>
           </>
         ) : (
           <NotProtectedMark
-            {...(unprotected.why === "setup"
-              ? {
-                  meaning: w.v(
-                    "Clauseo can read any file you can open on this computer, and asks before changing anything outside the matter's folder.",
-                  ),
-                }
-              : {})}
+            meaning={w.v(
+              "Clauseo can read any file you can open on this computer, and asks before changing anything outside the matter's folder.",
+            )}
           />
         )}
       </BasePopover.Trigger>
@@ -170,7 +167,9 @@ export function AllowedList({
       {unprotected === null && (
         <p className="allows-sub">
           <Say>
-            {w.v("Clauseo works inside this matter's folder and asks before going beyond it.")}
+            {w.v(
+              "Clauseo works only in this matter's folder. It can't open your other files unless you allow it.",
+            )}
           </Say>
         </p>
       )}
@@ -226,11 +225,11 @@ export function AllowedList({
             <Say>
               {unprotected === null
                 ? w.v(
-                    "On. Clauseo works inside this matter's folder and asks before going beyond it.",
+                    "On. Clauseo works only in this matter's folder. It can't open your other files unless you allow it.",
                   )
                 : unprotected.why === "off"
                   ? w.v(
-                      "Off since {time} today. Clauseo can reach any file on this computer without asking.",
+                      "Off since {time} today. Clauseo can read any file you can open on this computer, and asks before changing anything outside the matter's folder.",
                       { time: w.clock(unprotected.since) },
                     )
                   : w.v(

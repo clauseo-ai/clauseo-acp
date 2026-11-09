@@ -1,10 +1,13 @@
 {
   "UC-01": {
-    "en": "Safe workspace. Clauseo works inside this matter's folder and asks before going beyond it.",
-    "hi": "सुरक्षित कार्यक्षेत्र। Clauseo इस मामले के फ़ोल्डर के भीतर काम करता है और उससे बाहर जाने से पहले पूछता है।",
-    "status": "approved",
-    "at": "2026-11-06",
-    "by": "design"
+    "en": "Safe workspace. Clauseo works only in this matter's folder. It can't open your other files unless you allow it.",
+    "hi": "सुरक्षित कार्यक्षेत्र। Clauseo सिर्फ़ इस मामले के फ़ोल्डर में काम करता है। आपकी अनुमति के बिना वह आपकी दूसरी फ़ाइलें नहीं खोल सकता।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-09",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-09",
+    "by": "app track (asking-truth; Rohan batch review)"
   },
   "UC-02": {
     "en": "Not protected.",
@@ -21,21 +24,14 @@
     "by": "design"
   },
   "UC-04": {
-    "en": "Clauseo can change files in this matter without asking. It asks before going beyond it.",
-    "hi": "Clauseo इस मामले में बिना पूछे फ़ाइलें बदल सकता है। इससे बाहर जाने से पहले यह पूछता है।",
+    "en": "Clauseo can read any file you can open, and changes files in this matter without asking. It asks before changing files outside it.",
+    "hi": "Clauseo हर वह फ़ाइल पढ़ सकता है जिसे आप खोल सकते हैं, और इस मामले की फ़ाइलें बिना पूछे बदलता है। इसके बाहर की फ़ाइलें बदलने से पहले यह पूछता है।",
     "hi_status": "provisional",
-    "hi_at": "2026-11-06",
+    "hi_at": "2026-11-09",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
     "status": "provisional",
-    "at": "2026-11-06",
-    "by": "app track (provisional; Rohan batch review)"
-  },
-  "UC-05": {
-    "en": "Clauseo can reach beyond this matter's folder without asking.",
-    "hi": "Clauseo बिना पूछे इस मामले के फ़ोल्डर से बाहर पहुँच सकता है।",
-    "status": "approved",
-    "at": "2026-11-06",
-    "by": "design"
+    "at": "2026-11-09",
+    "by": "app track (asking-truth; Rohan batch review)"
   },
   "UC-06": {
     "en": "Not protected",
@@ -110,14 +106,14 @@
     "by": "design"
   },
   "UC-21": {
-    "en": "The Safe workspace is off for {matter}. Clauseo can read and change files anywhere on this computer while it works here, without asking first.",
-    "hi": "{matter} के लिए सुरक्षित कार्यक्षेत्र बंद है। यहाँ काम करते समय Clauseo बिना पहले पूछे इस कंप्यूटर पर कहीं भी फ़ाइलें पढ़ और बदल सकता है।",
+    "en": "The Safe workspace is off for {matter}. Claude asks before each change. ChatGPT can read any file you can open, and asks before changing files outside this matter's folder.",
+    "hi": "{matter} के लिए सुरक्षित कार्यक्षेत्र बंद है। Claude हर बदलाव से पहले पूछता है। ChatGPT हर वह फ़ाइल पढ़ सकता है जिसे आप खोल सकते हैं, और इस मामले के फ़ोल्डर के बाहर की फ़ाइलें बदलने से पहले पूछता है।",
     "hi_status": "provisional",
-    "hi_at": "2026-11-07",
+    "hi_at": "2026-11-09",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
     "status": "provisional",
-    "at": "2026-11-07",
-    "by": "app track (provisional; Rohan batch review; design B, safe-workspace-installer-setup)"
+    "at": "2026-11-09",
+    "by": "app track (asking-truth; Rohan batch review)"
   },
   "UC-22": {
     "en": "The Safe workspace isn't set up on this computer yet. Until it is, Clauseo can read any file you can open on this computer, and asks before changing anything outside this matter's folder.",
@@ -720,5 +716,15 @@
     "status": "provisional",
     "at": "2026-11-07",
     "by": "app track (provisional; Rohan batch review)"
+  },
+  "UC-106": {
+    "en": "Safe workspace. Clauseo changes files in this matter without asking. It can't open your other files unless you allow it.",
+    "hi": "सुरक्षित कार्यक्षेत्र। Clauseo बिना पूछे इस मामले की फ़ाइलें बदलता है। आपकी अनुमति के बिना वह आपकी दूसरी फ़ाइलें नहीं खोल सकता।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-09",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-09",
+    "by": "app track (asking-truth; Rohan batch review)"
   }
 }
