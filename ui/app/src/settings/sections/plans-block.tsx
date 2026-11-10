@@ -99,6 +99,15 @@ const addsOf = (store: SetupStore) => {
   return set;
 };
 
+/** Plans this window has seen signed in, by store, though the section was closed and opened meanwhile: after one
+ * of them signs out, its card says "Sign in again". The host's SignedOut carries no word of an earlier sign-in. */
+const seen = new WeakMap<SetupStore, Set<AgentId>>();
+const seenOf = (store: SetupStore) => {
+  let set = seen.get(store);
+  if (set === undefined) seen.set(store, (set = new Set()));
+  return set;
+};
+
 const copyText = (text: string) => void navigator.clipboard?.writeText(text).catch(() => {});
 
 export function PlanBlock({
@@ -139,6 +148,16 @@ export function PlanBlock({
   const adding = addsOf(store).has(agent);
   const stand = standOf(setup, adding);
   const ready = isReady(setup?.install);
+  const signedNow = stand.kind === "signed";
+  useEffect(() => {
+    if (signedNow) seenOf(store).add(agent);
+  }, [signedNow, store, agent]);
+  // a real sign-in before this one: seen signed in here, or the agent's own refusal for a sign-in that lapsed
+  // (agent.auth_required); otherwise the first sign-in's words, never "again"
+  const before =
+    signedOutHere ||
+    seenOf(store).has(agent) ||
+    (typeof setup?.signIn === "object" && setup.signIn.failed?.code === "agent.auth_required");
   // the install "Add {plan}" started is ready: its sign-in starts, once
   useEffect(() => {
     if (!ready || !addsOf(store).delete(agent)) return;
@@ -365,7 +384,11 @@ export function PlanBlock({
                     : undefined
             }
           >
-            <MainAct label={s("Sign in again")} onClick={signIn} testId="plans-sign-in" />
+            <MainAct
+              label={before ? s("Sign in again") : fl(lang, "Sign in")}
+              onClick={signIn}
+              testId="plans-sign-in"
+            />
             <OtherAct
               label={s("Look for my {app} sign-in", { app })}
               onClick={() => command({ find_login: { agent } })}

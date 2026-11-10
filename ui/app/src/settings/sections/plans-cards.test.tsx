@@ -15,8 +15,10 @@ import {
   button,
   install,
   mountPlans,
+  play,
   press,
   signIn,
+  signed,
   unmount,
 } from "./plans-rig.tsx";
 
@@ -137,4 +139,29 @@ test("each key panel's help names its own plan", async () => {
     "A key from ChatGPT, or one from your firm's IT team. Billed to the key's own account.",
   );
   expect(block("chatgpt")!.textContent).not.toContain("Claude or ChatGPT");
+});
+
+test("D-066: never signed in, each card's Sign in, never again; after a real sign-in, Sign in again", async () => {
+  // a search that found nothing, on a computer neither plan was signed in on
+  const t = await mountPlans({
+    first: both({ signed_out: { found: "none_found" } }, { signed_out: { found: "none_found" } }),
+  });
+  for (const plan of ["claude", "chatgpt"] as const) {
+    expect(button("Sign in", block(plan)!)).not.toBeNull();
+    expect(block(plan)!.textContent).not.toContain("again");
+  }
+  // signed in, then signed out (here or elsewhere): again
+  await play(t, signIn(CLAUDE, signed()), signIn(CODEX, signed({ plan: "ChatGPT Plus" })));
+  await play(t, signIn(CLAUDE, { signed_out: {} }), signIn(CODEX, { signed_out: {} }));
+  for (const plan of ["claude", "chatgpt"] as const) {
+    expect(button("Sign in again", block(plan)!)).not.toBeNull();
+    expect(button("Sign in", block(plan)!)).toBeNull();
+  }
+});
+
+test("D-066: the agent's refusal for a sign-in that lapsed (agent.auth_required) says Sign in again", async () => {
+  const lapsed: SignIn = { failed: { code: "agent.auth_required", at: AT } };
+  await mountPlans({ first: both(lapsed, lapsed) });
+  expect(button("Sign in again", block("claude")!)).not.toBeNull();
+  expect(button("Sign in again", block("chatgpt")!)).not.toBeNull();
 });
