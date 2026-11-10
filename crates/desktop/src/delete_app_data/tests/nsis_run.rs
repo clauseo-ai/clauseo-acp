@@ -451,13 +451,15 @@ impl Machine {
         }
         let parts = words(line);
         let parts: Vec<&str> = parts.iter().map(String::as_str).collect();
-        if self.file_line(&parts) {
+        if files::file_line(self, &parts) {
             return;
         }
         match parts.as_slice() {
             ["StrCpy", var, value] => self.set(var, self.expand(value)),
-            ["StrCpy", var, value, len] => self.set(var, self.str_cpy(value, len, "")),
-            ["StrCpy", var, value, len, offset] => self.set(var, self.str_cpy(value, len, offset)),
+            ["StrCpy", var, value, len] => self.set(var, str_cpy::str_cpy(self, value, len, "")),
+            ["StrCpy", var, value, len, offset] => {
+                self.set(var, str_cpy::str_cpy(self, value, len, offset))
+            }
             ["ClearErrors"] => self.error = false,
             ["StrLen", var, text] => {
                 let len = self.expand(text).chars().count();
