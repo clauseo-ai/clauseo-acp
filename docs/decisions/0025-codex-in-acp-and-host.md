@@ -40,6 +40,19 @@ agent message text to one that does not (`:29655-29658`, `:44519-44523`). It nev
   before writing outside it or escalating; Undo per turn is the lawyer's way back. No screen may
   promise per-edit approval for Codex. The Word-open guard still applies to Codex's writes,
   through the hooks object in `CODEX_CONFIG` (clauseo-acp #152).
+- **Claude edits the same way (Rohan, 2026-11-10).** Outside forced ask, Claude now starts in
+  Claude Code's `acceptEdits` and is switched to it before the first prompt
+  (`agent/loads.rs` `CLAUDE_MODE`, `claude_mode`; `actor/turn/session.rs` `claude_start`), so
+  it is as frictionless as Codex in `workspace-write`. Claude Code 2.1.293 then approves
+  unasked `Edit`, `Write` and `NotebookEdit`, and the Bash commands `mkdir`, `touch`, `rm`,
+  `rmdir`, `mv`, `cp` and `sed` (PowerShell's `Set-Content`, `Add-Content`, `Clear-Content`,
+  `Remove-Item`), only on paths in the matter folder or its `additionalDirectories` (the work
+  folder and the matter's notes, the same two as Codex's writable roots); a path outside them,
+  a protected path (`.git`, `.claude`, …) and every other command still ask. Deny rules still
+  win, the Word-open guard's hook still runs before each write, bypass stays off, and Undo per
+  turn is the lawyer's way back, as for Codex. Forced ask is unchanged: Claude asks before
+  every change there. Decision record 0030 ("Claude's permission mode") has the scope, its
+  sources and what still guards.
 - **The host owns the mode.** A Codex agent is launched with `INITIAL_AGENT_MODE=workspace-write`
   over any settings value. After `session/new`, `session/load` or `session/resume` the host reads
   the session's modes: none, or none named `workspace-write`, fails the turn with

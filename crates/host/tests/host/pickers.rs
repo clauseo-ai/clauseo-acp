@@ -315,7 +315,7 @@ fn a_failed_pick_is_kept_and_a_mode_pick_is_never_sent() {
     let events = turn(&host, thread, "Summarise clause 4.");
     let options = logged(&events);
     assert_eq!(current(&options, "model").as_deref(), Some("default"));
-    assert_eq!(current(&options, "mode").as_deref(), Some("default"));
+    assert_eq!(current(&options, "mode").as_deref(), Some("acceptEdits"));
     assert_eq!(
         summary(&host, matter).agent_prefs,
         Some(claude_prefs(&[("model", "opus")]))

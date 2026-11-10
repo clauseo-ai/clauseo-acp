@@ -55,13 +55,25 @@ pub(crate) const CLAUDE_SETTING_SOURCES: &[&str] = &["user"];
 /// live). claude.ai connectors stay off too, since [`CLAUDE_AI_MCP_VAR`] is still `false`.
 pub(crate) const CLAUDE_MANAGED_SETTING_SOURCES: &[&str] = &["user"];
 
-/// The permission mode Clauseo runs every Claude session in: Claude Code's `default` ("Manual":
-/// ask before each change). The window cannot pick another mode yet (the desktop bridge refuses
-/// `SetMode`), so this is Clauseo's choice at every session start. Its cost: a mode the
-/// lawyer reached inside a session (accept edits, from a plan-exit option) goes back to
-/// `default` when the session is next loaded, the safer side. Re-applying the thread's last
-/// logged mode instead cannot tell such a choice from a mode the user's settings started a
-/// session in: both are logged as `ModeChanged`.
+/// The permission mode Clauseo starts every Claude session in outside forced ask: Claude Code's
+/// `acceptEdits` (Rohan, 2026-11-10: Claude as frictionless as Codex's `workspace-write`;
+/// decision records 0025 and 0030). Claude Code 2.1.293 then approves, unasked, `Edit`,
+/// `Write` and `NotebookEdit` and the Bash commands `mkdir`, `touch`, `rm`, `rmdir`, `mv`, `cp`
+/// and `sed` (PowerShell's `Set-Content`, `Add-Content`, `Clear-Content`, `Remove-Item`) whose
+/// paths are inside the working directory (the matter folder) or `additionalDirectories` (the
+/// work folder and the matter's notes, `loads/profile.rs`). Everything else asks as in
+/// `default`: a path outside them, a protected path (`.git`, `.claude`, …), any other command.
+/// Deny rules come first in every mode, so the data fence's (`data_fence.rs`) still refuse, and
+/// the guard's `PreToolUse` hook still runs before each write. Undo per turn is the lawyer's way
+/// back. A forced-ask session starts in [`forced_ask::ASK_MODE`](super::forced_ask::ASK_MODE)
+/// instead ([`claude_mode`]).
+///
+/// The window cannot pick another mode yet (the desktop bridge refuses `SetMode`), so this is
+/// Clauseo's choice at every session start. Its cost: a mode the lawyer reached inside a session
+/// (`default` from a plan exit's "manually approve edits") goes back to this one when the
+/// session is next loaded. Re-applying the thread's last logged mode instead cannot tell such a
+/// choice from a mode the user's settings started a session in: both are logged as
+/// `ModeChanged`.
 ///
 /// claude-agent-acp 0.89.1 starts a session in the mode it reads itself: an explicit one (only
 /// its own re-creations pass one), else a resumed transcript's, else `permissions.defaultMode`
@@ -72,7 +84,19 @@ pub(crate) const CLAUDE_MANAGED_SETTING_SOURCES: &[&str] = &["user"];
 /// as the adapter's own). So neither `_meta` route can set it: the host sends
 /// `session/set_mode` with this mode before the first prompt when the session started in
 /// another (`actor/turn/session.rs`), and [`session_meta`] takes bypass off the table.
-pub(crate) const CLAUDE_MODE: &str = "default";
+pub(crate) const CLAUDE_MODE: &str = "acceptEdits";
+
+/// The mode a Claude session starts in and is switched to before its first prompt:
+/// [`CLAUDE_MODE`], or `default` in forced ask
+/// ([`forced_ask::ASK_MODE`](super::forced_ask::ASK_MODE)), where Claude asks before every
+/// change. Never `bypassPermissions`.
+pub(crate) fn claude_mode(forced_ask: bool) -> &'static str {
+    if forced_ask {
+        super::forced_ask::ASK_MODE
+    } else {
+        CLAUDE_MODE
+    }
+}
 
 /// The variable that, set to `false`, keeps claude.ai's connectors out of a Claude Code session.
 pub(crate) const CLAUDE_AI_MCP_VAR: &str = "ENABLE_CLAUDEAI_MCP_SERVERS";
@@ -126,8 +150,8 @@ pub(crate) fn mcp_control(managed: &Path) -> McpControl {
 ///   resumed transcript's `bypassPermissions` is rejected, falling back to the settings'
 ///   `defaultMode`, which may be `acceptEdits` (`acp-agent.js:7212-7219`,
 ///   `session-mode.js:22-35`, `permissions/modes.js` `resolvePermissionMode`). Whatever mode it
-///   then starts in (`acceptEdits`, `auto`, `plan`) is switched to [`CLAUDE_MODE`] after the
-///   start, since `_meta` cannot set it.
+///   then starts in (`default`, `auto`, `plan`, or `acceptEdits` in forced ask) is switched to
+///   [`claude_mode`] after the start, since `_meta` cannot set it.
 /// - `claudeCode.options.extraArgs`: `setting-sources` and [`MODE_FLAGS`] taken out, in both
 ///   forms the SDK turns into a flag (`{"setting-sources": "…"}` and
 ///   `{"setting-sources=…": null}`), since an extra flag goes after the SDK's own and would win.

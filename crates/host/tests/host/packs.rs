@@ -145,7 +145,7 @@ fn claude_with(dir: &Dir, name: &str, with_packs: bool) -> Scenario {
 /// A Claude scenario that starts a session (new, or a load of `sess-1`) and exits on the
 /// prompt, so each prompt launches the agent again.
 pub(crate) fn exits_on_prompt(dir: &Dir, name: &str) -> Scenario {
-    let modes = json!({"currentModeId": "default", "availableModes": [
+    let modes = json!({"currentModeId": "acceptEdits", "availableModes": [
         {"id": "default", "name": "Manual"}, {"id": "acceptEdits", "name": "Accept edits"},
         {"id": "plan", "name": "Plan"}, {"id": "auto", "name": "Auto"}]});
     let lines = [
