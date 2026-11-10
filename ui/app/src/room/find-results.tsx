@@ -92,7 +92,12 @@ function PaperRow({ paper, onOpen }: { paper: FoundPaper; onOpen: () => void }) 
   const { lang } = useDisplay();
   return (
     <li>
-      <button type="button" className="room-matter-row" data-testid="find-paper" onClick={onOpen}>
+      <button
+        type="button"
+        className="room-matter-row room-find-row"
+        data-testid="find-paper"
+        onClick={onOpen}
+      >
         <span className="room-matter-name">
           <Own text={paper.name} />
         </span>
@@ -117,7 +122,7 @@ function ConversationRow({ found, onOpen }: { found: FoundConversation; onOpen: 
   const row = (
     <button
       type="button"
-      className="room-matter-row"
+      className="room-matter-row room-find-row"
       data-testid="find-conversation"
       data-order={found.order}
       onClick={onOpen}

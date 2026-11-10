@@ -134,6 +134,9 @@ function FindField({
         id={room.id("find")}
         type="search"
         autoComplete="off"
+        autoCorrect="off"
+        autoCapitalize="off"
+        spellCheck={false}
         className={searchInput}
         placeholder={placeholder}
         aria-keyshortcuts={keys?.aria}

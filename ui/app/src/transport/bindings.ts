@@ -4062,6 +4062,11 @@ export type PaperSummary = {
 	size: Count,
 	/**  When it was last modified. */
 	modified: Timestamp,
+	/**
+	 *  A `.docx` that holds tracked changes or comments, as the host found them in its XML:
+	 *  what its tile's Tracked changes press waits for. False is left out of the JSON.
+	 */
+	tracked?: boolean,
 };
 
 /**  How a paragraph changed between the two versions. */

@@ -536,6 +536,7 @@ fn list_papers_and_its_answer_on_the_wire() {
             path: MatterPath::new("pleadings/claim.docx").unwrap(),
             size: Count::from(1200_u32),
             modified: Timestamp::new(1_577_836_800_250).unwrap(),
+            tracked: false,
         }],
         skipped: vec![SkippedFile {
             path: MatterPath::new("video.mp4").unwrap(),

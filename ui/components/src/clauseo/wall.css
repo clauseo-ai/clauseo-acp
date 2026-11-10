@@ -191,6 +191,27 @@
   .tile:not([data-state="uncited"]) .tile-title {
     color: currentColor;
   }
+  /* a file's name on one line: too long for the tile, it loses letters from its middle, never its extension (the
+     tooltip shows it whole) */
+  .tile-name {
+    display: flex;
+    min-width: 0;
+    /* pre: a space where the name's two parts meet stays; at a flex item's edge it would drop */
+    white-space: pre;
+  }
+  .tile-name-head {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .tile-name-tail {
+    flex: none;
+  }
+  /* what a press of the face does, under the name */
+  .tile-cue {
+    @apply text-small text-quiet;
+    margin-top: var(--s0-5);
+  }
   /* a Devanagari name in the English interface takes Hindi's taller tile line on its own element: the facade's
      --title-h resolves on the facade, in the page's language */
   .tile-title:where([lang="hi"]) {

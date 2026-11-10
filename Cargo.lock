@@ -1133,6 +1133,7 @@ dependencies = [
  "uuid",
  "windows",
  "zeroize",
+ "zip",
 ]
 
 [[package]]
@@ -1310,6 +1311,7 @@ name = "clauseo-search"
 version = "0.1.0"
 dependencies = [
  "clauseo-protocol",
+ "pulldown-cmark",
  "rusqlite",
  "unicode-normalization",
 ]

@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
-// A .docx's tracked changes over FakeTransport: the Tracked changes press on a .docx tile only (never a .doc, which
-// Clauseo's Word tool can't read, nor a PDF), opening the file's changes in the wall's place, with Back to the tiles.
+// A .docx's tracked changes over FakeTransport: the Tracked changes press on a .docx tile only, and only when the host
+// found tracked changes or comments in it (never a .doc, which Clauseo's Word tool can't read, nor a PDF), opening
+// the file's changes in the wall's place, with Back to the tiles.
 // The list from list_revisions, each change by its author as recorded; Accept and Reject, one or all, send
 // decide_revisions with the list's version and the changes' ids, read the list again and show the latest decision with
 // Undo, which restores the file from the checkpoint before it. Word holding the file opens the lock's dialog, whose Try
@@ -44,13 +45,20 @@ afterEach(async () => {
 });
 
 const REPLY = "drafts/Reply.docx";
-const paper = (n: number, path: string): PaperSummary => ({
+const paper = (n: number, path: string, tracked = false): PaperSummary => ({
   file: uuid(n, 8),
   path,
   size: 1000,
   modified: 1_730_000_000_000,
+  ...(tracked ? { tracked } : {}),
 });
-const PAPERS = [paper(1, REPLY), paper(2, "Old notice.DOC"), paper(3, "Exhibit.pdf")];
+// the host found tracked changes or comments in Reply.docx alone
+const PAPERS = [
+  paper(1, REPLY, true),
+  paper(2, "Old notice.DOC", true),
+  paper(3, "Exhibit.pdf"),
+  paper(4, "Clean.docx"),
+];
 
 const NOW = Date.now();
 const rev = (ids: number[], kind: Revision["kind"], author: string, text?: string): Revision => ({
@@ -142,7 +150,7 @@ const openChanges = () => press(h!.one("tracked-changes"));
 const acceptOf = (n: number) => rows()[n]?.querySelector(".rd-accept");
 const dialog = () => document.querySelector<HTMLElement>("[role=dialog]");
 
-test("the Tracked changes press shows on a .docx tile only, opens its changes in the wall's place, and Back brings the tiles back", async () => {
+test("the Tracked changes press shows on a .docx tile the host found changes in only, opens its changes in the wall's place, and Back brings the tiles back", async () => {
   h = await mount({ list: () => listOf(FIRST) });
   const presses = h.all("tracked-changes");
   expect(presses).toHaveLength(1);
@@ -151,7 +159,11 @@ test("the Tracked changes press shows on a .docx tile only, opens its changes in
   );
   expect(presses[0]?.textContent).toBe("Tracked changes");
   // Open in Word stays each Word tile's main press, the .doc's too
-  expect(h.all("open-in-word").map((b) => b.textContent)).toEqual(["Reply.docx", "Old notice.DOC"]);
+  expect(h.all("open-in-word").map((b) => b.querySelector(".tile-title")?.textContent)).toEqual([
+    "Reply.docx",
+    "Old notice.DOC",
+    "Clean.docx",
+  ]);
   await openChanges();
   expect(panel()?.closest("aside.room-pane")).not.toBeNull();
   expect(tiles()).toHaveLength(0);
@@ -161,7 +173,7 @@ test("the Tracked changes press shows on a .docx tile only, opens its changes in
   expect(panel()?.querySelector(".wc-file")?.textContent).toBe("Reply.docx");
   await press(h.one("word-changes-back"));
   expect(panel()).toBeNull();
-  expect(tiles()).toHaveLength(3);
+  expect(tiles()).toHaveLength(4);
   expect(document.activeElement).toBe(h.one("tracked-changes"));
 });
 
