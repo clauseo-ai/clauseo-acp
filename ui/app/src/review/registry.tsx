@@ -292,11 +292,6 @@ const U3: Entry[] = [
     "You didn't allow a request, so the answer stopped. The answer so far is kept.",
     "not_allowed",
   ),
-  stoppedAt(
-    "U3-52",
-    "Clauseo stopped the answer: it tried to open files outside this matter. The answer so far is kept.",
-    "outside_matter",
-  ),
 ];
 
 /* ---------- U2: the rail and matters ---------- */

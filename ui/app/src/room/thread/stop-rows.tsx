@@ -210,8 +210,8 @@ export function StepRow({
   sentNow?: boolean | undefined;
 }) {
   const w = useWords();
-  const line = sentNow ? null : stopLine(entry);
   const plan = useAgentPlan();
+  const line = sentNow ? null : stopLine(entry, plan);
   return (
     <div
       data-testid="turn-stopped"
@@ -225,7 +225,9 @@ export function StepRow({
       {line !== null && !takesMark(entry) && (
         <p className={QUIET} data-code={line.code}>
           <Say>
-            {line.kind === "error" ? errorWords(w.lang, line.code, plan) : th(w.lang, line.key)}
+            {line.kind === "error"
+              ? errorWords(w.lang, line.code, plan)
+              : th(w.lang, line.key, line.slots)}
           </Say>
         </p>
       )}

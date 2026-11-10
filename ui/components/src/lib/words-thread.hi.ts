@@ -30,9 +30,12 @@ export const HI = {
     "आपने उत्तर रोक दिया। अब तक का उत्तर रखा गया है।",
   "You didn't allow a request, so the answer stopped. The answer so far is kept.":
     "आपने एक अनुरोध की अनुमति नहीं दी, इसलिए उत्तर रुक गया। अब तक का उत्तर सुरक्षित है।",
-  // Clauseo refused, unasked, a request into its own data folder (another matter's files), and the agent stopped
-  "Clauseo stopped the answer: it tried to open files outside this matter. The answer so far is kept.":
-    "Clauseo ने उत्तर रोक दिया: उसने इस मामले के बाहर की फ़ाइलें खोलने का प्रयास किया। अब तक का उत्तर रखा गया है।",
+  // Clauseo refused, unasked, a request into its own data folder (another matter's files), and the agent stopped;
+  // {name} is the agent as the error words name it (Claude, ChatGPT, or its own name), the AI where none is known
+  "Clauseo stopped the answer: {name} tried to open files outside this matter. The answer so far is kept.":
+    "Clauseo ने उत्तर रोक दिया: {name} ने इस मामले के बाहर की फ़ाइलें खोलने की कोशिश की। अब तक का उत्तर रखा गया है।",
+  "Clauseo stopped the answer: the AI tried to open files outside this matter. The answer so far is kept.":
+    "Clauseo ने उत्तर रोक दिया: AI ने इस मामले के बाहर की फ़ाइलें खोलने की कोशिश की। अब तक का उत्तर रखा गया है।",
   "The answer stopped at its limit, before it finished.": "उत्तर पूरा होने से पहले अपनी सीमा पर रुक गया।",
   "This question was declined, so there is no answer.":
     "इस प्रश्न को अस्वीकार किया गया, इसलिए कोई उत्तर नहीं है।",

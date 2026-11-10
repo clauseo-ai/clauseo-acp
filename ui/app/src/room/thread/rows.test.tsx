@@ -111,7 +111,8 @@ test("each stop: always a turn-stopped row with its reason, and its line where i
       undefined,
       th(
         "en",
-        "Clauseo stopped the answer: it tried to open files outside this matter. The answer so far is kept.",
+        "Clauseo stopped the answer: {name} tried to open files outside this matter. The answer so far is kept.",
+        { name: "Claude" },
       ),
     ],
     ["max_tokens", undefined, th("en", "The answer stopped at its limit, before it finished.")],
