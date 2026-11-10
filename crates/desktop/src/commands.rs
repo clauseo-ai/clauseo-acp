@@ -383,7 +383,8 @@ pub(crate) async fn reveal<R: Runtime>(
 
 /// Opens the settings window, or brings it forward when it is open (`settings_window.rs`), at
 /// `section` when one is named (`"connectors"`: the room's case-law hint and banner;
-/// `"protection"`: UC's first-run button, R17; `"usage"`: the toolbar's plan card, U12). An
+/// `"protection"`: UC's first-run button, R17; `"usage"`: the toolbar's plan card, U12;
+/// `"privacy"`: the first screen's "What's sent", UD1). An
 /// unknown section is refused as the arguments decode. Granted to `main` only.
 #[tauri::command]
 #[cfg_attr(test, specta::specta)]

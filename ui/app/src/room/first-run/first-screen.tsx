@@ -128,7 +128,8 @@ export function FirstScreen({
       onWhatsSent={
         openSettings === undefined
           ? undefined
-          : () => void openSettings.call(transport).catch(() => {})
+          : // what the anonymous counts include: Settings opens at Privacy (D-003)
+            () => void openSettings.call(transport, "privacy").catch(() => {})
       }
       testIds={{ counts: IDS.counts, open: "open-folder", newMatter: "start-new-matter" }}
       openRef={(button) => markButton(button, transport.pageMarks?.bind(transport))}

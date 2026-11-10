@@ -147,3 +147,9 @@ test("count_ui: welcome_shown, folder_chosen, agent_ready and signed_in, once ea
   ]);
   expect(sent(t, "first_act")).toHaveLength(1);
 });
+
+test("D-003: What's sent opens Settings at Privacy, where the counts are said, not at Plans", async () => {
+  const t = await mountFirstRun({ matters: [], openSettings: true });
+  await press("What's sent");
+  expect(t.only("open_settings")).toEqual([{ call: "open_settings", section: "privacy" }]);
+});
