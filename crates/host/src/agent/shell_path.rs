@@ -13,8 +13,14 @@
 //!   ([`super::codex::without_login_shell`]), so a command runs `-c` in Codex's own
 //!   environment, whose `PATH` is the session's with Codex's bundled tools' folder put first by
 //!   Codex itself. On macOS the session's `PATH` also gets the folders `path_helper` would add
-//!   ([`path_helper_entries`]) right after Clauseo's ([`mac_shell_path`]), so nothing a
-//!   lawyer's GUI or login `PATH` had is dropped. `CODEX_CONFIG` is the session's own
+//!   ([`path_helper_entries`]) right after Clauseo's ([`mac_shell_path`]), so the GUI `PATH` and
+//!   `/etc/paths` keep reaching Codex. The trade-off, on macOS and Linux alike: with no login
+//!   shell and no snapshot, Codex's commands lose what the lawyer's own shell startup adds (a
+//!   `~/.zprofile` or `~/.bash_profile` with `brew shellenv`, pyenv or nvm, a `~/.zshrc`'s
+//!   aliases and exports). We accept it so Clauseo's tools (Python, stetdoc) and Codex's
+//!   bundled `rg` come first. What reaches Codex is the `PATH` Clauseo builds: its folders,
+//!   `path_helper`'s, then the rest of the `PATH` Clauseo was started with. Claude keeps the
+//!   lawyer's startup files (its file only prepends). `CODEX_CONFIG` is the session's own
 //!   (codex-acp sends it as each thread's `config`, which app-server turns into overrides on
 //!   `config.toml`, `app-server/src/config_manager.rs:446-457`), so two sessions with different
 //!   folders never share it, as they would the home's `config.toml`.
