@@ -135,7 +135,13 @@ export function Welcome({
               in place; the bytes on the line are seen, not read at every tick (the composer's
               region, room-entry, does the same) */}
           {plans.map((plan) => (
-            <span key={plan.key} className="sr-only" role="status" data-testid="install-said">
+            <span
+              key={plan.key}
+              className="sr-only"
+              role="status"
+              data-testid="install-said"
+              data-agent={plan.key}
+            >
               {plan.install !== null && <WorkingSaid state={plan.install} />}
             </span>
           ))}
