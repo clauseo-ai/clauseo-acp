@@ -4,13 +4,11 @@
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
-use std::rc::Rc;
-use std::sync::Arc;
 
 use clauseo_acp::{AcpEvent, AgentInfo, MessageRole, PendingKey};
 use clauseo_protocol::{
-    AgentChoiceId, AgentKind, AgentSessionId, CompactString, ConfigValue, ElicitationId, ErrorCode,
-    MessageId, PermissionRequestId, ThreadId, TurnId,
+    AgentChoiceId, AgentSessionId, CompactString, ConfigValue, ElicitationId, ErrorCode, MessageId,
+    PermissionRequestId, ThreadId, TurnId,
 };
 
 use clauseo_process::TreeWatch;
@@ -30,11 +28,13 @@ use crate::rate::{RateCap, RatedUpdate};
 use crate::sent::SentView;
 
 mod ended;
+mod launch;
 mod path;
 mod start_failure;
 
 use ended::{StopCause, stop_closed};
 pub(super) use ended::{hold_stop, idle_stop, log_detach, on_ended, stop};
+use launch::launch;
 pub(super) use start_failure::launch_failed;
 
 /// Work that waits for the agent's session.
@@ -268,127 +268,6 @@ pub(super) fn launch_now(
 pub(super) fn next_agent_id() -> u64 {
     static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
     NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
-}
-
-/// What a launch gives: the link, the folder it runs in, what a Codex launch recorded, a
-/// Claude launch's plans folder, and the matter folder's spellings for its stderr summary.
-type Launched = (
-    AgentLink,
-    PathBuf,
-    Option<CodexAgent>,
-    Option<PathBuf>,
-    Vec<String>,
-);
-
-/// The launch itself: the spec from the settings (inherited environment, the agent's
-/// variables, then the profile hook's with the host's switches over them, then what the host
-/// forces for the agent's kind, with stetdoc's and the hook's folders first on `PATH`), in the
-/// matter folder that was checked (`prepared`). A Codex agent's `.codex` refusal (#184), its
-/// home and its `config.toml` are done by then.
-fn launch(
-    actor: &Actor,
-    thread: ThreadId,
-    prepared: Prepared,
-    tree: &mut Option<TreeWatch>,
-) -> Result<Launched, Error> {
-    let row = &actor.check_thread(thread)?.row;
-    let settings = actor.effective.agent(row.agent.as_str()).ok_or_else(|| {
-        Error::refused(
-            ErrorCode::AgentLaunchFailed,
-            format!("no agent {} in the settings", row.agent),
-        )
-    })?;
-    // The relay token reaches the agent in a file; its stderr tail hides it all the same.
-    let redacted = super::launch_checks::relay::redacted(&prepared.run);
-    let folder = prepared.stored;
-    let (mut forced, codex) = if let Some(prepared) = prepared.codex {
-        let hooks = codex_hooks(actor);
-        let guard = hooks.is_some();
-        let forced = agent::codex::launch_env(&prepared.home, &settings.env, prepared.keys, hooks);
-        let codex = CodexAgent {
-            folder: prepared.folder,
-            guard,
-            key_retry: KeyRetry::default(),
-        };
-        (forced, Some((codex, prepared.login)))
-    } else {
-        // A Claude agent's home goes in before `plans_folder` reads the merged map below.
-        let forced = prepared
-            .claude_home
-            .as_deref()
-            .map(agent::home::claude_launch_env);
-        (forced.unwrap_or_default(), None)
-    };
-    // Every agent's temp folder is its session's own, gone with the run folder.
-    forced.extend(agent::temp::temp_env(
-        &agent::temp::temp_dir(&prepared.run.root),
-        cfg!(windows),
-    ));
-    let hook = agent::loads::launch_env(actor.profile.launch_env(&row.agent));
-    let session_folder = agent::session_folder(&folder);
-    let matter_spellings = start_failure::spellings_at_launch(actor, &folder, &session_folder);
-    // The key retry is armed by the hook's key and the launch's sign-in check.
-    let codex = codex.map(|(mut codex, login)| {
-        codex.key_retry = KeyRetry::at_launch(&hook, login);
-        codex
-    });
-    let parts = path::launch_parts(actor, codex.is_some(), &prepared.run.path);
-    // Tier C (no jail) leaves the agent's environment alone: no session proxy variables here
-    // (`ProxyHandle::env`); only the browser entry reaches the proxy, advisory without a jail.
-    let mut env = agent::launch_env(
-        settings,
-        super::profile_loads::with_shell_env(actor, &prepared.run, hook),
-        forced,
-        &parts.dropped,
-        parts.inherited.into_iter(),
-        &parts.path,
-    );
-    // The agent's shells get the same `PATH` the session does (`agent/shell_path.rs`).
-    agent::shell_path::apply(&mut env, &prepared.run.path);
-    let spec = agent::spec_of(settings, env, session_folder)
-        .map_err(super::launch_checks::folder::gone_at_spawn)?
-        .with_redacted(redacted);
-    let claude = AgentKind::of(&row.agent) == Some(AgentKind::Claude);
-    let plan_notes = claude
-        .then(|| agent::plan_note::plans_folder(spec.env(), cfg!(windows)))
-        .flatten();
-    let post = actor.post.clone();
-    let post: Rc<dyn Fn(agent::AgentInput)> = Rc::new(move |input| {
-        // The actor may be gone by then.
-        let _gone = post.try_send(Input::Agent { thread, input });
-    });
-    let link = agent::start(
-        &actor.spawner,
-        actor.launcher.as_ref(),
-        &spec,
-        Arc::clone(&actor.clock),
-        post,
-        tree,
-    )?;
-    Ok((link, folder, codex, plan_notes, matter_spellings))
-}
-
-/// THE CODEX HOOKS SEAM: the `hooks` object a Codex agent's `CODEX_CONFIG` carries, with its
-/// `state` trust entry and `trusted_hash`: the one a test set (`HostConfig::with_codex_hooks`),
-/// else [`codex_hook_config`](agent::loads::codex_hook_config) for the guard program the
-/// Claude Code entry runs (`HostConfig::with_pre_write_guard`), so its `PreToolUse` holds one
-/// group, the guard's. `None` with no guard program, or (with a warning) one that
-/// `codex_hook_config` cannot quote. It is read once per launch, which records on the agent
-/// whether one went in (`Agent::guard`); with none the session start skips the guard's trust
-/// check.
-fn codex_hooks(actor: &Actor) -> Option<serde_json::Map<String, serde_json::Value>> {
-    if let Some(hooks) = &actor.codex_hooks {
-        return Some(hooks.clone());
-    }
-    let program = actor.pre_write_guard.as_deref()?;
-    let Some(serde_json::Value::Object(hooks)) = agent::loads::codex_hook_config(program) else {
-        tracing::warn!(
-            "the pre-write guard's path cannot go in Codex's hook command, so Codex runs without \
-             the guard"
-        );
-        return None;
-    };
-    Some(hooks)
 }
 
 /// Step 4 for a turn whose agent was started in another folder than its matter's row now names
