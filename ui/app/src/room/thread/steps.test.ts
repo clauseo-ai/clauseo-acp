@@ -160,13 +160,19 @@ describe("the folded line", () => {
         call("read", "failed", lease),
         ...Array.from({ length: 4 }, () => call("edit", "cancelled")),
       ]).trouble,
-    ).toBe(
-      "Tried to read Lease deed.pdf. Tried to change a paper. Tried to change a paper. And 2 more.",
-    );
+    ).toBe("Tried to read Lease deed.pdf. Tried to change a paper. And 3 more.");
     for (const lang of ["en", "hi"] as const) {
       const one = restOf(lang, [call("fetch", "failed")]);
       expect(one.trouble).not.toContain(troubleOf(lang, [call("fetch", "failed")]));
     }
+  });
+
+  test("the same tried words are said once, the repeat counted in the more (D-077)", () => {
+    const task = () => call("execute", "failed");
+    expect(restOf("en", [task(), task()]).trouble).toBe("Tried to run a task. And 1 more.");
+    expect(
+      restOf("hi", [task(), task()]).trouble.split("एक काम चलाने की कोशिश की गई।"),
+    ).toHaveLength(2);
   });
 
   test("a failure stays on the line, one of many; a stop too", () => {

@@ -215,6 +215,21 @@ test("a failure stays visible on the folded line", async () => {
   expect(lineOf(g)?.textContent).toBe("1 paper read. 1 failed.");
 });
 
+test("two failed tasks with nothing to tell them apart say Tried to run a task. once (D-077)", async () => {
+  h = await mountRoom();
+  h.deliver([
+    reset([
+      ASKED,
+      call(7, 201, "execute", "failed"),
+      call(8, 202, "execute", "failed"),
+      agentText(9, 3, "Done."),
+    ]),
+  ]);
+  const said = h.one("step-group-trouble")?.textContent ?? "";
+  expect(said).toBe("Tried to run a task. And 1 more.");
+  expect(said.split("Tried to run a task.")).toHaveLength(2);
+});
+
 test("a step in a state this version can't read shows neither failed nor done: the folded line and its row agree", async () => {
   h = await mountRoom();
   h.deliver([reset([ASKED, read(7, 201, "a/Lease.pdf", "unknown"), agentText(9, 3, "Done.")])]);
