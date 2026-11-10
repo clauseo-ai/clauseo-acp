@@ -131,8 +131,13 @@ export function PermissionPrompt({
       let fieldEmpty = false;
       const roomField = room.nodes.get("field");
       if (target instanceof Node && rootRef.current?.contains(target)) {
-        // a focused answer keeps its own plain Enter: its click answers
-        if (a === "once" && target instanceof HTMLButtonElement) return;
+        if (target instanceof HTMLButtonElement) {
+          // a focused answer keeps its own plain Enter: its click answers
+          if (a === "once") return;
+          // and a focused button never grants more than it says (D-065): Cmd or Ctrl with Enter allows for the matter
+          // only from Always for this matter itself; on another, the key is that button's own, as a plain Enter
+          if (a === "always" && target.dataset["permAnswer"] !== "always") return;
+        }
         where = "prompt";
       } else if (fromComposer(room, target)) {
         if (target instanceof HTMLTextAreaElement) {
@@ -255,6 +260,7 @@ export function PermissionPrompt({
               size="small"
               aria-keyshortcuts={withKey && keysOn ? shortcut(a) : undefined}
               data-testid={testIds?.answer(a)}
+              data-perm-answer={a}
               aria-disabled={busy || confirming ? true : undefined}
               onClick={() => answer(a)}
             >
