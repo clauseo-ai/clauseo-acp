@@ -863,6 +863,65 @@ on, treats any failed target as a set-up failure, and keeps what was written. Un
 the `LocalLow` denies before it deletes each profile, then the account, then `DeviceSync`'s deny
 (`shared_writes.rs`).
 
+### Owned roots
+
+**The finding** (VM, an observer's `AccessCheck` with the real agent token): matter A's agent
+could make files and folders in matter B's state folder, its `AppData` folders and its temp
+folder (granted `0x1200af`). The data folder sat directly under `C:\`, and `C:\`'s
+`(A;CI;LC;;;BU)` and `(A;CI;DC;;;BU)` reached them by inheritance: the Low label we write keeps
+inheritance. A file planted in another session's state (its agent's settings) could run there.
+
+**The fix:** every folder Clauseo makes for a launch in `<data_dir>` gets a protected DACL
+(`SE_DACL_PROTECTED`) with explicit entries only (`acl_plan/owned.rs`, `apply/owned.rs`):
+
+- the data folder, its `agent-state` and `run` folders: full access (`OICI`) for `SYSTEM`,
+  `Administrators` and the desktop user, as the sandbox folder has it;
+- `agent-state\<matter>` and `run\<session>`: `SYSTEM` and the desktop user;
+- the state, notes and temp folders: the same two, an inherit-only `OWNER RIGHTS` allow of
+  `Modify` (`(A;OICIIO;0x1301bf;;;OW)`: the agent owns what it makes but gets no `WRITE_DAC` on
+  it, so it can't open its files to another matter's agent), then the plan's own entries as
+  before (the pool user's `Modify`, the other pool users' fence, the Low label).
+
+Every explicit allow the ledger records on the folder for a launch stays, with its recorded mask,
+so another live session of the matter keeps its access; any other explicit entry goes. No
+`Users`, `Authenticated Users`, `Everyone` or `CREATOR OWNER`; what the agent makes inherits
+these alone. Each is written after the roots' hand-back (a pool user's goes to the lawyer first)
+and before anything is recorded; it is never rolled back.
+
+A folder whose DACL changed, or that the hand-back took from a pool user (its DACL may have
+matched already), then gets an owner pass and a walk, but `agent-state` and `run` (each session's
+launch does its own): what a pool user made in it before (a file or a junction in a run folder
+another matter's agent made first) goes to the lawyer, a junction as itself, never followed, and
+what is in it loses what it inherited from above. In the state, notes and matter folders the
+matter's own agent keeps its items.
+
+`<data_dir>\agents` (each agent's install and home, Clauseo's Claude sign-in) is owned too, with
+the data folder's entries, even when the data folder itself is skipped (a volume's root, or one
+holding the profile, keeps the DACL Windows or the lawyer gave it). The data folder's contents are
+walked once: when its or `agents`' DACL changes, and at each launch until one walk has passed
+(`sandbox\owned-walked`). `agents` is walked strictly, watching no SID, so it strips only broad
+allows and another live session's recorded allows in the Claude store stay. It runs right after
+the protection, before anything is recorded, and if it fails the launch is refused ("Clauseo
+couldn't secure its sign-in folder. Restart the computer and try again."), so no sign-in stays
+readable to other accounts across sessions. A failed walk of the
+host's other folders is logged and retried.
+
+**Follow-ups** (not in this change):
+
+- A pool user's junction or symbolic link in a fresh run or temp folder is handed back, so it still
+  points where its planter aimed it; set it aside or delete it instead. That needs a pool process
+  at Medium, since a fresh folder has no Low label.
+- A file created with its own protected security descriptor has no inherited `OWNER RIGHTS`
+  entry, so its owner's implied `WRITE_DAC` comes back until the next strict walk repairs it: the
+  same class as #808's window. Tools that rewrite ACLs on `chmod` (MSYS) under `OWNER RIGHTS` go
+  in the compatibility rows.
+- Keep only allows for SIDs assigned to the folder's matter now, rather than every allow the
+  ledger records.
+- A writable flag on the launch message's `granted` entries.
+
+The lawyer's matter folders are a separate decision, pending the VM walk: they keep what they
+inherit.
+
 ### Fast later launches (PR3d)
 
 A later launch spent its time on the strict walk of the matter, state and notes trees and on the

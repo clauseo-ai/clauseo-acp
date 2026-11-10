@@ -182,7 +182,22 @@ pub(super) fn walk(
                 Err(e) => return Err(io(e)),
             };
             if object.name_surrogate() {
-                seen.skipped += 1;
+                // The owner pass hands a pool user's junction or symbolic link back as itself,
+                // never followed: its owner would keep `WRITE_DAC` on it (the review of owned
+                // roots, L1). Every other walk leaves a link bare.
+                let current = match mode {
+                    Mode::HandBack { .. } => Some(object.security(READ_ALL).map_err(io)?),
+                    Mode::Plain | Mode::Strict { .. } | Mode::Reclaim { .. } => None,
+                };
+                match current.filter(|c| mode.owned(c)) {
+                    Some(current) => {
+                        settle_in(token, &object, &folder.descriptor, &current, mode)
+                            .map_err(refuse)?;
+                        seen.visited += 1;
+                        seen.repaired += 1;
+                    }
+                    None => seen.skipped += 1,
+                }
                 continue;
             }
             // A file with another name elsewhere (`links`, FILE_STANDARD_INFO's NumberOfLinks):

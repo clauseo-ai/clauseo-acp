@@ -76,9 +76,8 @@ pub(super) fn clearing(
             Err(ApplyFailure::ChildShut) => {
                 let shut = acl.refused_at();
                 let refuse = |at| Refused {
-                    kind,
-                    failure: ApplyFailure::ChildShut,
                     at,
+                    ..Refused::new(kind, ApplyFailure::ChildShut)
                 };
                 let Some(shut) = shut else {
                     return Err(refuse(None));
@@ -106,9 +105,8 @@ pub(super) fn clearing(
             }
             Err(failure) => {
                 return Err(Refused {
-                    kind,
-                    failure,
                     at: acl.refused_at(),
+                    ..Refused::new(kind, failure)
                 });
             }
         }

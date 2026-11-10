@@ -129,6 +129,29 @@ fn a_launch_with_nothing_changed_walks_no_own_tree() {
     assert_eq!(l.own_walks().len(), 3);
 }
 
+/// S15 owned roots: a launch whose check skips still walks the state and notes trees, strictly,
+/// when their DACL was protected only now (the first launch since the change), so what is in
+/// them loses what it inherited from above.
+#[test]
+fn a_skipped_launch_walks_the_own_trees_it_protected_just_now() {
+    let mut l = Launched::new("checked-skip-protected");
+    let check = l.check();
+    assert_eq!(check.path(), LaunchPath::Skipped);
+    l.acl.protect_gives = Some(Added::Written);
+    l.apply(&check).unwrap();
+    let walks = l.own_walks();
+    for root in &l.roots[1..] {
+        assert!(
+            walks.contains(&(root.clone(), Reach::Tree, true)),
+            "{walks:?}"
+        );
+    }
+    assert!(
+        walks.iter().all(|(root, _, _)| *root != l.roots[0]),
+        "not the matter"
+    );
+}
+
 #[test]
 fn a_targeted_launch_walks_only_the_changed_folders_strictly() {
     let mut l = Launched::new("checked-targeted");

@@ -7,7 +7,7 @@ use std::fmt;
 use std::io;
 use std::path::{Path, PathBuf};
 
-use super::acl_plan::{Grant, Sid, verbatim};
+use super::acl_plan::{Grant, OwnedRoot, Sid, verbatim};
 use super::ledger::RecordedFile;
 
 /// How far a walk goes below its root.
@@ -308,8 +308,9 @@ pub trait AclWriter {
     /// child's owner read through its folder's handle, never following a link; one that one of
     /// `pool` owns (with `pool` empty, none) is handed to the desktop user and cleaned as
     /// [`AclWriter::reclaim`] does; nothing else is written, a colleague's file linked in
-    /// included. A child the lawyer can't open is refused as [`ApplyFailure::ChildShut`], to be
-    /// set aside.
+    /// included. A junction or symbolic link one of `pool` owns is handed back as itself, never
+    /// followed (its owner would keep `WRITE_DAC` on it); any other is left bare. A child the
+    /// lawyer can't open is refused as [`ApplyFailure::ChildShut`], to be set aside.
     fn hand_back_tree(&mut self, root: &Path, pool: &[Sid]) -> Result<Walked, ApplyFailure>;
     /// The explicit mandatory label on `path` now, if any (ours included); `None` when the
     /// path is missing. Read before a label grant is written over it.
@@ -317,6 +318,23 @@ pub trait AclWriter {
     /// Puts `label` back as the explicit label on `grant`'s path (a Low label grant), in place
     /// of ours or of none; another explicit label set since is left as it is.
     fn restore_label(&mut self, grant: &Grant, label: Label) -> Result<(), ApplyFailure>;
+    /// Gives `root`, a folder Clauseo owns, its protected DACL (`acl_bytes::owned_dacl`): the
+    /// explicit denies it has for one of `pool`, `root`'s fixed entries for the desktop user
+    /// (this process's user; `OwnedRoot::fixed`), then each explicit allow it has that is exactly
+    /// one of `keep`'s (the plan's and the ledger's allows there); nothing inherited, nothing
+    /// else. Its owner, label and what is inside are left as they
+    /// are. Through one handle opened without following a link: a link there, or a final path
+    /// other than planned, is [`ApplyFailure::Changed`]; a volume's root is
+    /// [`ApplyFailure::VolumeRoot`]. `AlreadyThere` when it had that DACL, protected. The
+    /// default, for writers no launch drives, is `Unsupported`, so none passes unprotected.
+    fn protect(
+        &mut self,
+        _root: &OwnedRoot,
+        _pool: &[Sid],
+        _keep: &[Grant],
+    ) -> Result<Added, ApplyFailure> {
+        Err(ApplyFailure::Io(io::ErrorKind::Unsupported))
+    }
     /// The hand-back after `--reclaim` (S15 `PR4i`), and nothing else calls it: `root` (and, when
     /// `whole`, everything below it, through each folder's handle, never following a link) that the
     /// desktop user owns loses its explicit plain allows for `others` (the pool users but the
