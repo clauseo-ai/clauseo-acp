@@ -14,6 +14,7 @@ import type {
   SettingsView,
   SetupCommand,
   SetupEvent,
+  PrivacySettings,
   ToolsSettingsView,
 } from "../transport/protocol.ts";
 
@@ -35,6 +36,7 @@ export function SettingsOver({
   limits,
   releaseDate = null,
   tools,
+  privacy,
   connectors,
   setup,
   plans,
@@ -50,6 +52,8 @@ export function SettingsOver({
   releaseDate?: string | null;
   /** The tools' switches the host sends (SettingsView.tools, Privacy's switches); none when left out. */
   tools?: ToolsSettingsView;
+  /** The privacy switches the host sends (SettingsView.privacy, Privacy's counts switch); none when left out. */
+  privacy?: PrivacySettings;
   /** The connectors' state the app feed's catch-up carries (U15); none when left out. */
   connectors?: ConnectorsState;
   /** The setup wire (UD2's Plans); none when left out, and Plans doesn't show. */
@@ -76,6 +80,7 @@ export function SettingsOver({
                 ui: { ...DEFAULT_UI, language: lang },
                 locked,
                 ...(tools === undefined ? {} : { tools }),
+                ...(privacy === undefined ? {} : { privacy }),
                 ...(plans === undefined ? {} : { plans }),
               },
             };

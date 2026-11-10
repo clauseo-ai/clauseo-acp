@@ -86,6 +86,10 @@ export type SectionContext = {
   /** The lawyer's choice of a tool's switch: one patch, unless the key is locked or already holds the value. The
    * connectors' switch (`connectors`, U15) reads both from the connectors' state, since ToolsSettingsView has none. */
   chooseTool: (key: keyof ToolsPatch, value: boolean) => void;
+  /** Whether a firm's policy locks the anonymous counts' switch (`privacy.counts`). */
+  countsLocked: () => boolean;
+  /** The lawyer's choice of the anonymous counts' switch: one patch, unless locked or already holding the value. */
+  chooseCounts: (value: boolean) => void;
 };
 
 export type SectionEntry = {
@@ -197,6 +201,7 @@ export function contextOf(
 ): SectionContext {
   const locked = (key: keyof UiSettings) => settings.locked.includes(lockKey(key));
   const toolLocked = (key: keyof ToolsSettingsView) => settings.locked.includes(`tools.${key}`);
+  const countsLocked = () => settings.locked.includes("privacy.counts");
   return {
     store,
     transport,
@@ -219,6 +224,12 @@ export function contextOf(
       }
       if (toolLocked(key) || settings.tools === undefined || settings.tools[key] === value) return;
       store.setTools({ [key]: value });
+    },
+    countsLocked,
+    chooseCounts: (value) => {
+      if (countsLocked() || settings.privacy === undefined || settings.privacy.counts === value)
+        return;
+      store.setPrivacy({ counts: value });
     },
   };
 }

@@ -7,8 +7,11 @@
 // its glyph locked, and the room's lock reason, "Managed by firm", in its helper's place. Whether a conversation gets the
 // browser once it's on (a Chrome, or Edge on Windows, on the computer; the firm's browser policy) is the tool line's to
 // say, per conversation.
-// Left out until something stands behind them: a case-law source's row, the row for Clauseo's anonymous counts, and the
-// anonymous counts and crash report switches.
+// Then the anonymous counts' switch (D-052), in the first run's words (UD1's "Send anonymous counts" and what they
+// hold), the same `privacy.counts` the first run writes: SettingsView.privacy, a flip one SetPrivacySettings patch,
+// settings_changed to both windows. A firm's lock shows it off and disabled, with "Managed by firm" under its line.
+// Left out until something stands behind them: a case-law source's row, the row for Clauseo's anonymous counts, and
+// the crash report switch.
 //
 // Last, the sites allowed past the unsafe-site list, each with Remove (allowed-sites.tsx, 0053).
 //
@@ -17,6 +20,7 @@
 // names a locked key, then settings_changed. Only the settings window sends it (the main window's host refuses it),
 // and this pane is the only place that does. A change applies from the next conversation's start; one already open
 // keeps its tools. `locked` may list `tools.web_search` and `tools.browser`.
+import { fl } from "@clauseo/components/lib/words-first-launch.ts";
 import { useSettingsWords } from "@clauseo/components/lib/words-settings.ts";
 import { ToolGlyph } from "@clauseo/components/icons/tool-glyph.tsx";
 import { tw } from "@clauseo/components/lib/words-tools.ts";
@@ -106,6 +110,32 @@ function ToolRow({
   );
 }
 
+/** The anonymous counts' switch, as the first run's: on unless the lawyer or the firm turned it off. */
+function CountsRow({ ctx }: { ctx: SectionContext }) {
+  const w = useSettingsWords();
+  const locked = ctx.countsLocked();
+  const on = !locked && ctx.settings.privacy?.counts === true;
+  return (
+    <Group>
+      <PlateRow disabled={locked}>
+        <SettingRow
+          className="py-0"
+          control="switch"
+          label={fl(w.lang, "Send anonymous counts")}
+          note={fl(
+            w.lang,
+            "How many questions, which features, how long answers take. Never your papers, your questions or the answers.",
+          )}
+          managed={locked ? w.s("Managed by firm") : undefined}
+          checked={on}
+          disabled={locked}
+          onCheckedChange={(next) => ctx.chooseCounts(next)}
+        />
+      </PlateRow>
+    </Group>
+  );
+}
+
 export function Privacy({ ctx }: { ctx: SectionContext }) {
   const w = useSettingsWords();
   const { tools } = ctx.settings;
@@ -140,6 +170,7 @@ export function Privacy({ ctx }: { ctx: SectionContext }) {
           />
         </Group>
       )}
+      {ctx.settings.privacy !== undefined && <CountsRow ctx={ctx} />}
       <AllowedSites transport={ctx.transport} />
     </>
   );

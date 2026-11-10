@@ -67,6 +67,7 @@ export function roomSettingsOf(view: SettingsView): Settings {
       motion: MOTION_BACK[ui.motion],
     },
     tools: view.tools,
+    privacy: view.privacy,
     locked: view.locked,
     ...(view.plans === undefined ? {} : { plans: view.plans }),
   };
@@ -121,6 +122,12 @@ export function wireSettingsHost(source: WireSettingsSource): SettingsHost {
       await source.dispatch({
         command_id: crypto.randomUUID(),
         command: { set_tool_settings: { patch } },
+      });
+    },
+    async setPrivacySettings(patch) {
+      await source.dispatch({
+        command_id: crypto.randomUUID(),
+        command: { set_privacy_settings: { patch } },
       });
     },
     onSettingsChanged(listener) {

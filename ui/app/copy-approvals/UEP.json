@@ -165,5 +165,27 @@
     "at": "2026-11-03",
     "by": "design",
     "note": "the design's approved words and Hindi (design/03-system words-settings.ts, privacy)"
+  },
+  "UEP-25": {
+    "en": "Send anonymous counts",
+    "hi": "गुमनाम गिनती भेजें",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-10",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-10",
+    "by": "app track (provisional; words pending orchestrator 2026-11-10)",
+    "note": "D-052: the anonymous counts' switch in Settings, Privacy; UD1-06's approved words and Hindi, reused"
+  },
+  "UEP-26": {
+    "en": "How many questions, which features, how long answers take. Never your papers, your questions or the answers.",
+    "hi": "कितने प्रश्न, कौन-सी सुविधाएँ, और उत्तर कितना समय लेते हैं। आपके दस्तावेज़, आपके प्रश्न या उत्तर कभी नहीं।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-10",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-10",
+    "by": "app track (provisional; words pending orchestrator 2026-11-10)",
+    "note": "D-052: the counts switch's line in Settings, Privacy; UD1-08's approved words and Hindi, reused"
   }
 }

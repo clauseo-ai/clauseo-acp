@@ -34,6 +34,8 @@ import type {
   TurnId,
   ToolsPatch,
   ToolsSettingsView,
+  PrivacyPatch,
+  PrivacySettings,
   UpdateView,
 } from "../transport/protocol.ts";
 import {
@@ -85,6 +87,9 @@ export type Settings = {
   tools?: ToolsSettingsView;
   /** Each agent's firm plan (`plans.<id>`, SettingsView.plans): Plans shows the firm's address from it (UD2). */
   plans?: SettingsView["plans"];
+  /** The privacy switches in force (`privacy.counts`), as SettingsView carries them: Privacy's counts switch shows
+   * only with them. Absent without a host, or from a fake that leaves them out. */
+  privacy?: PrivacySettings;
 };
 
 /* ---------- H3, H5, H20: a matter's details ---------- */
@@ -191,6 +196,7 @@ export type RetryCommand = { retry_from: { thread: ThreadId; message: MessageId 
 export type NextCommand =
   | { set_ui_settings: { patch: Partial<UiSettings> } }
   | { set_tool_settings: { patch: ToolsPatch } }
+  | { set_privacy_settings: { patch: PrivacyPatch } }
   | MattersCommand
   | RetryCommand;
 /** What a command did: `"done"`, create_matter's `{"matter_created": {"matter": ...}}`, or retry_from's
@@ -251,6 +257,8 @@ export const WIRE = {
   setUiSettings: "set_ui_settings",
   /** HostCommand::SetToolSettings; only the settings window sends it, the main window's host refuses it. */
   setToolSettings: "set_tool_settings",
+  /** HostCommand::SetPrivacySettings; only the settings window sends it from Settings, the main window's host refuses it. */
+  setPrivacySettings: "set_privacy_settings",
   settingsChanged: "settings_changed",
   listMatters: "list_matters",
   listThreads: "list_threads",
@@ -279,6 +287,8 @@ export interface SettingsHost {
   setUiSettings(patch: Partial<UiSettings>): Promise<void>;
   /** The tools' switches: only the keys that change, refused whole with `settings.locked` when one is locked. */
   setToolSettings(patch: ToolsPatch): Promise<void>;
+  /** The privacy switches: only the keys that change, refused whole with `settings.locked` when one is locked. */
+  setPrivacySettings(patch: PrivacyPatch): Promise<void>;
   /** Hears each `settings_changed`. Returns the unsubscribe. */
   onSettingsChanged(listener: (settings: Settings) => void): () => void;
 }
