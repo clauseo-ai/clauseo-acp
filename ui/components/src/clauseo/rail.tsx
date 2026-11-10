@@ -5,7 +5,7 @@ import { useLayoutEffect, useRef, useState, type ReactNode, type Ref } from "rea
 import { Button } from "../ui/button.tsx";
 import { Kbd } from "../ui/kbd.tsx";
 import { searchBoxOpen, searchInput } from "../ui/recipes.ts";
-import { IconNewMatter, IconScratchMatter, IconSearch } from "../icons/icons.tsx";
+import { IconNewMatter, IconScratchMatter, IconSearch, IconSettings } from "../icons/icons.tsx";
 import { cn } from "../lib/cn.ts";
 import { useDisplay } from "../lib/display.ts";
 import { useWords } from "../lib/words.ts";
@@ -513,6 +513,7 @@ export function Rail({
               aria-keyshortcuts={platform === "mac" ? "Meta+Comma" : "Control+Comma"}
               data-testid={testIds?.settings}
             >
+              <IconSettings size={16} />
               <span className="deva-nudge">{ui(w.lang, "Settings")}</span>
             </button>
           ) : (
@@ -524,6 +525,7 @@ export function Rail({
                 aria-keyshortcuts={platform === "mac" ? "Meta+Comma" : "Control+Comma"}
                 data-testid={testIds?.settings}
               >
+                <IconSettings size={16} />
                 <span className="deva-nudge">{ui(w.lang, "Settings")}</span>
               </a>
             )

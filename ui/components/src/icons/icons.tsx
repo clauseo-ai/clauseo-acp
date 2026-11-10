@@ -13,6 +13,8 @@
 // here; IconInfo, at the end of this file, reuses the shape IconAbout draws.
 // IconFailed was cut from Lucide 1.66.0 (triangle-alert, the same commit) on 4 Nov 2026 for U16a, the same way: its
 // rounded corners drawn square, its triangle drawn in from the edge so the miter joins stay inside the 20 px box.
+// IconSettings, the rail's Settings, was cut from Lucide 1.66.0's settings (lucide-static@1.66.0) on 10 Nov 2026: its
+// points scaled about the centre by 0.725 onto the 20 px grid, as IconAppearance's and IconAbout's circles were.
 // IconSnooze was cut from Lucide 1.66.0's alarm-clock (the same commit) on 5 Nov 2026 for U16b: its points scaled about
 // the centre by 0.725, as IconChecking's clock was, so the two clocks read as one family.
 import { Icon, type IconProps } from "./icon.tsx";
@@ -577,4 +579,17 @@ export function IconSnooze(props: IconProps) {
  * reuses it) */
 export function IconInfo(props: IconProps) {
   return <IconAbout {...props} />;
+}
+
+/** Settings, at the rail's foot (source: settings, Lucide settings at 1.66.0) */
+export function IconSettings(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path
+        d="M8.311 4.299a1.697 1.697 0 0 1 3.378 0 1.697 1.697 0 0 0 2.406 1.388 1.697 1.697 0 0 1 1.689 2.924 1.697 1.697 0 0 0 0 2.777 1.697 1.697 0 0 1-1.689 2.924 1.697 1.697 0 0 0-2.406 1.388 1.697 1.697 0 0 1-3.378 0 1.697 1.697 0 0 0-2.407-1.388 1.697 1.697 0 0 1-1.689-2.924 1.697 1.697 0 0 0 0-2.777A1.697 1.697 0 0 1 5.904 5.687a1.697 1.697 0 0 0 2.406-1.388"
+        vectorEffect="non-scaling-stroke"
+      />
+      <circle cx="10" cy="10" r="2.175" vectorEffect="non-scaling-stroke" />
+    </Icon>
+  );
 }
