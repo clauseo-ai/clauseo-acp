@@ -12,9 +12,11 @@
 //!
 //! Each quiet change the watch posts (`on_changed`) sends `PapersChanged` to the app, which
 //! lists the papers again; a folder that went also reads `missing` in the matter's next row, so
-//! the room shows the moved folder's line with Locate folder, and the watch stops. The `tracked`
-//! marks follow, as each listing scans them; the Find index keeps the names of the last
-//! checkpoint, as before.
+//! the room shows the moved folder's line with Locate folder, and the watch stops. The watch knows
+//! only that something changed, not which papers, so it calls no `scan::rescan`: the listing the
+//! app makes next hands each new or changed `.docx` to the background tracked-changes scan
+//! (`scan::listed`), which sends `PapersChanged` again if it finds marks. The Find index keeps
+//! the names of the last checkpoint, as before.
 
 use std::path::PathBuf;
 
