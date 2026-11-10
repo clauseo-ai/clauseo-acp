@@ -428,6 +428,60 @@ change from the settings window as `ui` does. R24 (PR5) adds a third to the patc
   running keeps its tools: its header keeps what it held (`actor/header_tools.rs`), and nothing
   re-reads the switches mid-session.
 
+### Claude's permission mode
+
+- **2026-11-10 (Rohan).** Claude should be as frictionless as Codex. Outside forced ask a
+  Claude session starts in Claude Code's `acceptEdits`, not `default`
+  (`agent/loads.rs` `CLAUDE_MODE`). claude-agent-acp 0.89.1 picks its own starting mode (the
+  user's `permissions.defaultMode`, a resumed transcript's) and `_meta` cannot set it, so
+  `actor/turn/session.rs` `claude_start` sends `session/set_mode acceptEdits` before the
+  first prompt whenever the session reports another, on `session/new` and `session/load`.
+  An answer with no modes or no `acceptEdits` fails the launch, as before.
+- **What `acceptEdits` approves (Claude Code 2.1.293).** Read from its docs
+  (code.claude.com/docs/en/permission-modes, "Auto-approve file edits with acceptEdits mode")
+  and from the 2.1.293 binary:
+  - `Edit`, `Write` and `NotebookEdit` on a path inside the working directory (the matter
+    folder) or an `additionalDirectories` folder. The edit check takes a matching deny rule
+    first, then protected paths and the safety checks, then ask rules, and only then
+    `mode === "acceptEdits"` with the path in the working folders.
+  - The Bash commands `mkdir`, `touch`, `rm`, `rmdir`, `mv`, `cp` and `sed` (the binary's list,
+    checked by the base command), with the same path scope: the path check runs first, so a
+    path outside asks. The docs add that safe environment prefixes (`LANG=C`) and wrappers
+    (`timeout`, `nice`, `nohup`) are accepted for all but `touch`. With the PowerShell tool on,
+    `Set-Content`, `Add-Content`, `Clear-Content` and `Remove-Item` on in-scope paths.
+  - Still asking: any path outside those folders, a write to a protected path (`.git`,
+    `.claude`, …), a recognised critical-path `rm`, every other Bash command but the
+    read-only set, `WebFetch`, `WebSearch` outside the host's allow rules, MCP tools.
+- **The auto-edit scope.** The matter folder, plus `additionalDirectories`: the session's work
+  folder (`<data>/run/<session>/work`) and the matter's notes (`<data>/agent-state/<matter>/notes`),
+  after any entries the profile hook gives (Clauseo's own profile gives none). These are
+  exactly Codex's writable roots. Edits in the two `<data>` folders aren't in the turn's
+  checkpoints, so Undo doesn't restore them; they are the agent's scratch and memory, and
+  neither is a deny target.
+- **What still guards.** Deny rules win in every mode, so the data folder's (`Read(//…)`,
+  `Edit(//…)` in the flag settings, "The data folder fence") still refuse, and the host's
+  auto-deny still answers every request Claude does make. The requests it no longer sees are
+  only in-scope edits, all inside the matter folder or the two own folders. The pre-write
+  guard's `PreToolUse` hook runs before each file tool and shell command in every mode; in
+  `acceptEdits` it is the only stop for a write to a document Word holds open (ADR 0021).
+  Bypass stays impossible (`allowDangerouslySkipPermissions: false`, the mode flags taken out
+  of `extraArgs`).
+- **The way back is Undo per turn**, as for Codex (decision record 0025): the matter folder's
+  checkpoints before and after each turn cover every write in it, whichever tool made it.
+- **A mode change inside a session.** Outside forced ask the host doesn't reset a mode the
+  session moves to. A plan exit offers "Yes, and auto-accept edits"
+  (`exit-plan-accept-edits`, back to `acceptEdits`) and "Yes, manually approve edits"
+  (`exit-plan-default`, to `default`). The second is the lawyer's own choice: it is logged as
+  `ModeChanged default` and holds until the session's next start, which sets `acceptEdits`
+  again. No route reaches `bypassPermissions`. `auto` is reachable only through a plan exit's
+  auto option, when the account has auto mode; that's unchanged by this decision.
+- **Forced ask is unchanged.** Decision 3 of 2026-11-04 stands: a forced-ask session starts in
+  `default` (`forced_ask::ASK_MODE`, `loads::claude_mode`) and is switched back to it
+  (`actor/turn/forced_mode.rs`). `acceptEdits` applies only outside forced ask.
+- **Words that become untrue.** The app's copy that says Claude asks before each change in an
+  unprotected matter that isn't forced ask is now wrong. It changes in a separate copy PR; the
+  forced-ask copy stays true.
+
 ### Forced ask in an unprotected matter
 
 - **2026-11-04 (Rohan; private `folder-rights.md`, decision 3).** A Claude session in a matter
@@ -440,7 +494,9 @@ change from the settings window as `ui` does. R24 (PR5) adds a third to the patc
   (`agent/forced_ask.rs`):
   - **Modes:** `SetMode` takes only `default` and `plan` (any other id is `command.invalid`),
     and so does `SetConfigOption` for claude-agent-acp's `mode` option, which sets the mode
-    too; a mode the agent moves to itself is switched back to `default`.
+    too; the session starts in `default`, never in the `acceptEdits` of every other Claude
+    session ("Claude's permission mode"), and a mode the agent moves to itself is switched
+    back to `default`.
   - **Options:** a permission request loses its `allow_always` options and the plan exit's
     options that switch to a skipping mode (`exit-plan-auto`, `exit-plan-accept-edits` and the
     rest, claude-agent-acp 0.89.1 `permissions/options/shared.js`); an answer naming one is

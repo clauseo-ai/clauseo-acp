@@ -1,8 +1,10 @@
 //! Forced ask's mode layer for a mode the agent moves to itself (`agent/forced_ask.rs`): a
 //! `current_mode_update` naming a mode outside `ASK_MODES` (a plan exit the adapter took into
 //! `acceptEdits`) is logged as it came, then `session/set_mode` puts the session back in
-//! `default`, and that is logged once it answers. Meanwhile the guard hook still asks before
-//! every tool, so the race costs no unasked change.
+//! `default` (`forced_ask::ASK_MODE`, never `acceptEdits` here), and that is logged once it
+//! answers. Meanwhile the guard hook still asks before every tool, so the race costs no unasked
+//! change. Only forced ask: elsewhere a Claude session starts in `acceptEdits` and a mode it
+//! moves to (the lawyer's plan-exit choice) is logged and kept until the next start.
 
 use clauseo_protocol::{AgentChoiceId, CompactString, ModeChanged, ThreadId};
 
@@ -21,7 +23,7 @@ pub(super) fn reset_if_forced(actor: &mut Actor, thread: ThreadId, mode: &str) {
     }
     let (Some(session), Ok(default)) = (
         agent.session.clone(),
-        AgentChoiceId::new(crate::agent::loads::CLAUDE_MODE),
+        AgentChoiceId::new(crate::agent::forced_ask::ASK_MODE),
     ) else {
         return;
     };
@@ -48,7 +50,7 @@ pub(super) fn on_mode_reset(
         return;
     }
     let logged = result.map_err(crate::error::Error::Acp).and_then(|()| {
-        let mode_id = CompactString::from(crate::agent::loads::CLAUDE_MODE);
+        let mode_id = CompactString::from(crate::agent::forced_ask::ASK_MODE);
         commit(actor, thread, [ModeChanged { mode_id }.into()], Vec::new())
     });
     if let Err(error) = logged {

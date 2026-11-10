@@ -1,9 +1,10 @@
-//! A Claude agent (`claude-acp`) runs in Clauseo's mode, `default`, whatever mode it started in:
-//! a user's `permissions.defaultMode` (`acceptEdits` here) on `session/new`, a resumed
-//! transcript's `bypassPermissions` on `session/load`. The host sends `session/set_mode default`
-//! before the first prompt, with `allowDangerouslySkipPermissions: false` in `_meta` (the
-//! scenarios check both), and `SetMode` still works after the start. A failed switch, an
-//! answer with no modes and one offering no `default` each fail the launch before any prompt.
+//! A Claude agent (`claude-acp`) outside forced ask runs in Clauseo's mode, `acceptEdits`,
+//! whatever mode it started in: claude-agent-acp's own `default` on `session/new`, a resumed
+//! transcript's `bypassPermissions` on `session/load`. The host sends `session/set_mode
+//! acceptEdits` before the first prompt, with `allowDangerouslySkipPermissions: false` in
+//! `_meta` (the scenarios check both), and `SetMode` still works after the start. A failed
+//! switch, an answer with no modes and one offering no `acceptEdits` each fail the launch
+//! before any prompt. Forced ask starts in `default` instead (`forced_ask.rs`).
 
 use clauseo_protocol::{
     AgentChoiceId, CommandOutcome, DomainEvent, ErrorCode, HostCommand, StopReason, StreamId,
@@ -39,7 +40,7 @@ fn turn(host: &Running, thread: ThreadId, text: &str) -> Events {
 }
 
 #[test]
-fn a_claude_session_switches_to_default_before_its_first_prompt_and_on_load() {
+fn a_claude_session_switches_to_accept_edits_before_its_first_prompt_and_on_load() {
     let dir = Dir::new(
         "claude_mode",
         &[(CLAUDE, Scenario::Local("claude-mode-new"))],
@@ -47,7 +48,7 @@ fn a_claude_session_switches_to_default_before_its_first_prompt_and_on_load() {
     let host = dir.start(0);
     let (_, thread, _) = matter_with_thread(&dir, &host, "m", &[("brief.txt", "x\n")], CLAUDE);
     let mut events = turn(&host, thread, "Summarise clause 4.");
-    assert_eq!(modes(&events), ["default"], "{}", events.dump());
+    assert_eq!(modes(&events), ["acceptEdits"], "{}", events.dump());
 
     // The mode switch the app's command uses still reaches the agent and is logged.
     assert_eq!(
@@ -58,7 +59,7 @@ fn a_claude_session_switches_to_default_before_its_first_prompt_and_on_load() {
         CommandOutcome::Done
     );
     events.until("ModeChanged plan", |e| modes(e).len() == 2);
-    assert_eq!(modes(&events), ["default", "plan"]);
+    assert_eq!(modes(&events), ["acceptEdits", "plan"]);
     host.shutdown();
 
     dir.set_agents(&[(CLAUDE, Scenario::Local("claude-mode-load"))]);
@@ -66,7 +67,7 @@ fn a_claude_session_switches_to_default_before_its_first_prompt_and_on_load() {
     let events = turn(&host, thread, "And clause 5?");
     assert_eq!(
         modes(&events),
-        ["default", "plan", "default"],
+        ["acceptEdits", "plan", "acceptEdits"],
         "{}",
         events.dump()
     );
@@ -98,7 +99,7 @@ fn fails_before_prompt(test: &str, scenario: &'static str, code: ErrorCode) {
 }
 
 #[test]
-fn a_failed_switch_to_default_sends_no_prompt() {
+fn a_failed_switch_to_accept_edits_sends_no_prompt() {
     fails_before_prompt(
         "claude_mode_refused",
         "claude-mode-refused",
@@ -116,10 +117,10 @@ fn a_session_with_no_modes_fails_before_any_prompt() {
 }
 
 #[test]
-fn a_session_offering_no_default_mode_fails_before_any_prompt() {
+fn a_session_offering_no_accept_edits_mode_fails_before_any_prompt() {
     fails_before_prompt(
-        "claude_mode_no_default",
-        "claude-mode-no-default",
+        "claude_mode_no_accept_edits",
+        "claude-mode-no-accept-edits",
         ErrorCode::AgentProtocolError,
     );
 }

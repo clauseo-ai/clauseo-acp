@@ -2,8 +2,10 @@
 //! `HostConfig::with_folder_support` (test-support only), so it runs on every OS. A Claude agent
 //! in a matter on a network drive: `SetMode` takes only `default` and `plan`; a plan exit loses
 //! its auto-accept option and an answer naming it is refused; a mode the agent moves to itself is
-//! switched back; `SetConfigOption` for the mode is refused; the row says why. With
-//! no guard program the launch is refused. A matter with no such answer runs as before. Codex in
+//! switched back to `default`, and a session that starts in `acceptEdits` is switched to it
+//! before its first prompt; `SetConfigOption` for the mode is refused; the row says why. With
+//! no guard program the launch is refused. A matter with no such answer runs in `acceptEdits`
+//! and keeps a plan exit's mode. Codex in
 //! such a matter is refused. The `_meta` layers (no `allowedTools`, the `permissions.ask` rules,
 //! the hook before every tool with `--ask-all`) are pinned in `agent/loads/layering_tests.rs`
 //! and `claude-ask-unknown.jsonl`, the hook's answers in `pre_write_guard/tests/ask.rs`.
@@ -150,6 +152,29 @@ fn claude_on_a_network_drive_runs_in_forced_ask() {
     host.shutdown();
 }
 
+/// A forced-ask session that starts in `acceptEdits` (Clauseo's mode elsewhere, or the user's
+/// `permissions.defaultMode`) is switched to `default` before its first prompt: forced ask never
+/// runs in Clauseo's usual `acceptEdits` (decision 3 of 2026-11-04 stands).
+#[test]
+fn a_forced_ask_session_starts_in_default_not_accept_edits() {
+    for (test, kind) in [
+        ("forced_ask_start_network", Some(FolderSupportKind::Network)),
+        (
+            "forced_ask_start_no_permissions",
+            Some(FolderSupportKind::NoPermissions),
+        ),
+    ] {
+        let (_dir, host, _, thread) = claude_in(test, "claude-forced-ask-start", kind);
+        let mut events = host.events(StreamId::Thread(thread));
+        let (turn, _) = host.prompt(thread, "Summarise clause 4.");
+        let ended = events.until_turn_ended(turn);
+        events.assert_no_mismatch();
+        assert_eq!(ended.stop, StopReason::EndTurn, "{}", events.dump());
+        assert_eq!(modes(&events), ["default"], "{test}: {}", events.dump());
+        host.shutdown();
+    }
+}
+
 /// With no folder answer (and with `cant_change_permissions`, which forces nothing) the same plan
 /// exit offers all three options, the auto-accept one is taken, the agent stays in acceptEdits,
 /// and `SetMode acceptEdits` reaches it: as before forced ask.
@@ -187,7 +212,7 @@ fn claude_elsewhere_runs_as_before() {
         events.assert_no_mismatch();
         assert_eq!(
             modes(&events),
-            ["default", "acceptEdits", "acceptEdits"],
+            ["acceptEdits", "acceptEdits", "acceptEdits"],
             "{test}"
         );
         host.shutdown();
