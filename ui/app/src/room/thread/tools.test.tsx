@@ -218,7 +218,7 @@ test.each(ROWS)(
     // the firm's policy, or a policy Clauseo couldn't check, the reason in full (that one, Try again)
     const offer =
       reason === "Install Chrome"
-        ? "Install Google Chrome, then close and reopen Clauseo."
+        ? "Install Google Chrome, then start a new conversation."
         : reason === "Blocked by your firm"
           ? "Your firm doesn't allow apps to control a browser on this computer, so Clauseo can't use " +
             "one for you."
@@ -282,19 +282,19 @@ test.each([
   [
     undefined,
     "Install Chrome",
-    "Install Google Chrome, then close and reopen Clauseo.",
+    "Install Google Chrome, then start a new conversation.",
     "install Chrome",
   ],
   [
     "mac",
     "Install Chrome",
-    "Install Google Chrome, then close and reopen Clauseo.",
+    "Install Google Chrome, then start a new conversation.",
     "install Chrome",
   ],
   [
     "windows",
     "Install Chrome or Edge",
-    "Install Google Chrome or Microsoft Edge, then close and reopen Clauseo.",
+    "Install Google Chrome or Microsoft Edge, then start a new conversation.",
     "install Chrome or Edge",
   ],
 ] as const)(

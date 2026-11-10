@@ -242,25 +242,25 @@
     "note": "No browser on Windows (browser_not_installed): the host takes Edge when it finds no Chrome"
   },
   "UET-49": {
-    "en": "Install Google Chrome, then close and reopen Clauseo.",
-    "hi": "Google Chrome इंस्टॉल करें, फिर Clauseo बंद करके दोबारा खोलें।",
+    "en": "Install Google Chrome, then start a new conversation.",
+    "hi": "Google Chrome इंस्टॉल करें, फिर एक नई बातचीत शुरू करें।",
     "hi_status": "provisional",
-    "hi_at": "2026-11-09",
+    "hi_at": "2026-11-10",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
     "status": "provisional",
-    "at": "2026-11-09",
-    "by": "app track (provisional; Rohan approved the words 2026-11-09, copy review pending)",
-    "note": "Under Install Chrome on a Mac: the browser's skill loads as Clauseo starts, so it needs reopening"
+    "at": "2026-11-10",
+    "by": "app track (provisional; Rohan approved the words 2026-11-09, start a new conversation after #899 2026-11-10, copy review pending)",
+    "note": "Under Install Chrome on a Mac: the browser's skill loads as each conversation starts (#899), so a new conversation finds it"
   },
   "UET-50": {
-    "en": "Install Google Chrome or Microsoft Edge, then close and reopen Clauseo.",
-    "hi": "Google Chrome या Microsoft Edge इंस्टॉल करें, फिर Clauseo बंद करके दोबारा खोलें।",
+    "en": "Install Google Chrome or Microsoft Edge, then start a new conversation.",
+    "hi": "Google Chrome या Microsoft Edge इंस्टॉल करें, फिर एक नई बातचीत शुरू करें।",
     "hi_status": "provisional",
-    "hi_at": "2026-11-09",
+    "hi_at": "2026-11-10",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
     "status": "provisional",
-    "at": "2026-11-09",
-    "by": "app track (provisional; Rohan approved the words 2026-11-09, copy review pending)",
-    "note": "Under Install Chrome or Edge on Windows: the browser's skill loads as Clauseo starts, so it needs reopening"
+    "at": "2026-11-10",
+    "by": "app track (provisional; Rohan approved the words 2026-11-09, start a new conversation after #899 2026-11-10, copy review pending)",
+    "note": "Under Install Chrome or Edge on Windows: the browser's skill loads as each conversation starts (#899), so a new conversation finds it"
   }
 }

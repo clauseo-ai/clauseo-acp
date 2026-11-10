@@ -133,8 +133,8 @@ const POLICY =
 const UNREADABLE =
   "Clauseo couldn't check this computer's browser settings, so it won't use a browser for now. " +
   "It checks again the next time it needs one.";
-const INSTALL_MAC = "Install Google Chrome, then close and reopen Clauseo.";
-const INSTALL_WINDOWS = "Install Google Chrome or Microsoft Edge, then close and reopen Clauseo.";
+const INSTALL_MAC = "Install Google Chrome, then start a new conversation.";
+const INSTALL_WINDOWS = "Install Google Chrome or Microsoft Edge, then start a new conversation.";
 
 const ROOM: ToolRowRoom = { settings: true, platform: "mac" };
 const words = (tool: KnownTool, room: Partial<ToolRowRoom> = {}) =>
@@ -188,7 +188,7 @@ test("Open Settings is offered only for Off in Settings, with the settings windo
   expect(words({ tool: "browser", state: "browser_not_installed" }).settings).toBe(false);
 });
 
-test("no browser on the computer: what to install, by the OS, and that Clauseo then needs reopening", () => {
+test("no browser on the computer: what to install, by the OS, and that a new conversation then finds it", () => {
   const missing: KnownTool = { tool: "browser", state: "browser_not_installed" };
   expect(words(missing)).toMatchObject({
     glyph: "off",
@@ -253,7 +253,7 @@ test("in Hindi, the tools' words say their Hindi, and a reason keeps its brand n
     "ब्राउज़र: बंद, Chrome या Edge इंस्टॉल करें।",
   );
   expect(toolRow("hi", { tool: "browser", state: "browser_not_installed" }, ROOM).note).toBe(
-    "Google Chrome इंस्टॉल करें, फिर Clauseo बंद करके दोबारा खोलें।",
+    "Google Chrome इंस्टॉल करें, फिर एक नई बातचीत शुरू करें।",
   );
   // provisional Hindi, until the app thread writes it
   expect(toolsLabel("hi", "mac", [{ tool: "browser", state: "browser_blocked_by_policy" }])).toBe(
