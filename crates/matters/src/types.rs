@@ -284,7 +284,8 @@ pub struct Restore<'a> {
     pub at: Timestamp,
     /// The `restore` checkpoint this restore takes back, if it does: the files that restore
     /// added go too, each only while it holds what that restore wrote. `from` is then the
-    /// checkpoint just before it. `UnknownCheckpoint` for one that is not a restore.
+    /// checkpoint just before it, or one with the same files. `UnknownCheckpoint` for one that
+    /// is not a restore, or for a `from` with other files.
     pub undoes: Option<CheckpointId>,
 }
 

@@ -310,8 +310,14 @@ fn plan(
 
 /// The files the restore `undoes` added (in its tree, not in the checkpoint just before it),
 /// with the blobs it wrote, sorted by path bytes; empty for `None`. `UnknownCheckpoint` unless
-/// `undoes` is a `restore` checkpoint with one before it.
-fn added_by(core: &Core, undoes: Option<CheckpointId>) -> Result<Vec<VersionEntry>, Error> {
+/// `undoes` is a `restore` checkpoint with one before it, and unless `from` holds the same
+/// tree as that one (it is that checkpoint, or one with the same files, such as a
+/// `before-turn` checkpoint that caught no edit): `UnknownCheckpoint` names `from` then.
+fn added_by(
+    core: &Core,
+    from: CheckpointId,
+    undoes: Option<CheckpointId>,
+) -> Result<Vec<VersionEntry>, Error> {
     let Some(id) = undoes else {
         return Ok(Vec::new());
     };
@@ -319,9 +325,13 @@ fn added_by(core: &Core, undoes: Option<CheckpointId>) -> Result<Vec<VersionEntr
         .timeline
         .before(id, CheckpointKind::Restore)
         .ok_or(Error::UnknownCheckpoint { id })?;
+    let before_tree = core.timeline.tree(before)?;
+    if core.timeline.tree(from)? != before_tree {
+        return Err(Error::UnknownCheckpoint { id: from });
+    }
     let (old, new) = core
         .history
-        .changed_files(core.timeline.tree(before)?, core.timeline.tree(id)?)?;
+        .changed_files(before_tree, core.timeline.tree(id)?)?;
     let old: BTreeSet<&str> = old.iter().map(|file| file.path.as_str()).collect();
     new.into_iter()
         .filter(|file| !old.contains(file.path.as_str()))
@@ -346,7 +356,7 @@ pub(crate) fn preview(
 ) -> Result<RestorePlan, Error> {
     let chosen = chosen(files)?;
     let then = core.tree_files(from)?;
-    let undone = added_by(core, undoes)?;
+    let undone = added_by(core, from, undoes)?;
     let now = core.snapshot(folder, settings, OnHeld::Report)?;
     let plan = plan(
         core,
@@ -394,7 +404,7 @@ pub(crate) fn restore(
         });
     }
     let then = core.tree_files(request.from)?;
-    let undone = added_by(core, request.undoes)?;
+    let undone = added_by(core, request.from, request.undoes)?;
     // 2. One walk, whose stored objects the outside-edits checkpoint reuses. A file another
     // program holds is listed, not read, and refuses the restore in step 3.
     let walked = core
