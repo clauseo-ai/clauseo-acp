@@ -9,9 +9,9 @@
 // - a matter answering (working or queued) and needing nothing stands in Working, under Needs you;
 // - a limit pause (until U14 gives its open choice), a stop, and nothing at all stand in the rest, under Working, with
 //   the matter's own status, muted; the rail orders Working and the rest by their latest activity (activityOrder);
-// - Pinned keeps a pinned matter, its line and all; Needs you sits under Pinned, above Working, ordered by kind (the
-//   hand's waits, then answers ready, then failures), each kind in the order its rows came: a row that comes later
-//   joins at the kind's foot.
+// - Needs you stands first, then Working, then Pinned, then the rest; a pinned matter that needs you or is answering
+//   stands in Needs you or Working, and goes back to Pinned after. Needs you is ordered by kind (the hand's waits, then
+//   answers ready, then failures), each kind in the order its rows came: a row that comes later joins at the kind's foot.
 // Where a matter's thread list hasn't come (no app feed), the matter's status alone places it: a question, a permission
 // or an answer ready need you, with no thread named. `held` keeps rows where they stand: the open matter until another
 // opens, and every row while the pointer is over the rail (rail-triage.ts keeps both); a row's words still change.
@@ -190,16 +190,18 @@ export function triage({ matters, status, lists, held, arrived, now }: TriageInp
     const list = lists.get(m.matter);
     const row = rowOf(m, status.get(m.matter), list, now);
     rows.set(m.matter, row);
-    const g: Group = m.pinned
-      ? "pinned"
-      : (held?.get(m.matter) ??
-        (m.kind !== "scratch" && wholly(list, now) !== null
-          ? "snoozed"
-          : row.need === "hand" || row.need === "ready"
-            ? "needs"
-            : row.status?.state === "working"
-              ? "working"
-              : "rest"));
+    // a pinned matter stands in Needs you or Working while it needs you or answers, and in Pinned otherwise
+    const g: Group =
+      held?.get(m.matter) ??
+      (row.need === "hand" || row.need === "ready"
+        ? "needs"
+        : row.status?.state === "working"
+          ? "working"
+          : m.pinned
+            ? "pinned"
+            : m.kind !== "scratch" && wholly(list, now) !== null
+              ? "snoozed"
+              : "rest");
     group.set(m.matter, g);
     if (g === "needs") needing.push({ m, row });
   }

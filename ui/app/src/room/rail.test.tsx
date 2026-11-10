@@ -153,7 +153,7 @@ test("each status says its words; a moved folder says so over its status", async
     [5, "stopped", `Stopped at ${time}`],
     [6, "limit", `Limit reached until ${time}`],
     [7, "limit", `Limit reached until ${other.day} ${other.time}`],
-    [8, "limit", "Limit reached. Reset not given."],
+    [8, "limit", "Limit reached"],
     [9, "moved", "Folder moved"],
   ];
   for (const [n, state, line] of words) {
@@ -167,7 +167,7 @@ test("each status says its words; a moved folder says so over its status", async
   expect(said("Matter 10")).toBe("Matter 10");
 });
 
-test("the order: Needs you (a permission, then an answer ready), Working, then the rest by latest activity", async () => {
+test("the order: Needs you (a permission, then an answer ready), Working, Pinned, then the rest by latest activity", async () => {
   const m = (n: number, over: Partial<MatterInfo>) =>
     detailed({ matter: uuid(n, 2), name: `Matter ${n}`, kind: "folder" }, over);
   await mount(
@@ -181,14 +181,19 @@ test("the order: Needs you (a permission, then an answer ready), Working, then t
       m(6, { status: "working", last_activity: NOW - 60_000 }),
       // a next date kept in the store orders nothing and shows nowhere
       m(7, { next_date: "2026-11-04" }),
+      // pinned: answering, it stands in Working; at rest, in Pinned
+      m(8, { pinned: true, status: "working", last_activity: NOW - 30 * 60_000 }),
+      m(9, { pinned: true, last_activity: NOW }),
     ]),
   );
-  expect(headings()).toEqual(["Needs you", "Working", "Other matters"]);
+  expect(headings()).toEqual(["Needs you", "Working", "Pinned", "Other matters"]);
   expect(names()).toEqual([
     "Matter 5",
     "Matter 2",
     "Matter 6",
     "Matter 3",
+    "Matter 8",
+    "Matter 9",
     "Matter 4",
     "Matter 1",
     "Matter 7",

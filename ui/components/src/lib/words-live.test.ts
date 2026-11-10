@@ -57,7 +57,7 @@ const NEW_THREAD: readonly ThreadKey[] = [
 const LIMITS: readonly LimitKey[] = [
   "Resets {time}",
   "Resets {day} {time}",
-  "Limit reached. Reset not given.",
+  "Limit reached",
   "Reset not given.",
   "Usage limit reached",
   "Try again",

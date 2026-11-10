@@ -1,5 +1,5 @@
 // triage.ts, pure: each ThreadStatus and last stop in its group as the approved page's table has it, a pinned matter
-// staying in Pinned, held rows keeping their group, the thread behind each row, and Needs you's order (the hand's waits,
+// in Needs you or Working while it needs you or answers, and in Pinned after, held rows keeping their group, the thread behind each row, and Needs you's order (the hand's waits,
 // then answers ready, then failures, each in the order it came).
 import { expect, test } from "vitest";
 import type { ThreadStatus, ThreadSummary } from "../transport/protocol.ts";
@@ -113,13 +113,21 @@ test("a matter's row names the thread behind it: the oldest waiting, over an ans
   expect(t.rows.get(m.matter)?.need).toBe("hand");
 });
 
-test("a pinned matter that needs the lawyer stays in Pinned, with its line and thread", () => {
+test("a pinned matter stands in Needs you while it needs the lawyer, in Working while it answers, then in Pinned", () => {
   const m = matter(1, { pinned: true, status: "needs_permission" });
   const t = run([m], [[m, [thread(1, m, { status: "needs_you", title: "Rejoinder" })]]]);
-  expect(t.group.get(m.matter)).toBe("pinned");
-  expect(t.needs).toEqual([]);
+  expect(t.group.get(m.matter)).toBe("needs");
+  expect(t.needs).toEqual([m.matter]);
   expect(t.rows.get(m.matter)?.status?.state).toBe("permission");
   expect(t.rows.get(m.matter)?.thread?.title).toBe("Rejoinder");
+  const busy = matter(1, { pinned: true, status: "working" });
+  expect(
+    run([busy], [[busy, [thread(1, busy, { status: "running" })]]]).group.get(busy.matter),
+  ).toBe("working");
+  const after = matter(1, { pinned: true, status: "idle" });
+  const done = run([after], [[after, [thread(1, after)]]]);
+  expect(done.group.get(after.matter)).toBe("pinned");
+  expect(done.needs).toEqual([]);
 });
 
 test("a held row keeps its group: the open matter, and every row under the pointer", () => {

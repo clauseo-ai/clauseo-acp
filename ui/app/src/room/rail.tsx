@@ -1,7 +1,7 @@
 // The room's rail: the parts' Rail with a MatterRow for every matter the host lists (matters.ts), the scratch matter
-// only at its foot. The matters stand in Pinned, then Needs you (triage.ts: a permission or a question waiting, then an
-// answer ready and unseen, then a failure unseen), then Working (answering now), then the rest, Working and the rest each
-// by their latest activity; the rest is headed "Other matters" under any group above it, "Matters" alone. With the
+// only at its foot. The matters stand in Needs you (triage.ts: a permission or a question waiting, then an answer
+// ready and unseen, then a failure unseen), then Working (answering now), then Pinned, then the rest, Working and the
+// rest each by their latest activity; the rest is headed "Other matters" under any group above it, "Matters" alone. With the
 // NextHost's matters part, Pinned, Recent (the five opened last), finding by name and client, and each row's menu (Pin,
 // Locate folder, Show in Finder, Remove from the list); without it, finding by name only, and a menu of Show in Finder
 // alone. What each row says it's doing comes from matters.ts's status,

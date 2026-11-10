@@ -30,7 +30,7 @@ export const HI = {
   Today: "आज",
   Yesterday: "बीता कल",
   // the rail's group of matters answering now, under Needs you
-  Working: "जवाब बन रहा है",
+  Working: "काम चल रहा है",
   // the rail's group of every other matter, by latest activity, under Needs you or Working
   "Other matters": "बाकी मामले",
   "No matters yet": "अभी कोई मामला नहीं",

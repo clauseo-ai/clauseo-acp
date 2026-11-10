@@ -1,4 +1,4 @@
-// U16a's rail over FakeTransport, at the room's interface: Needs you under Pinned with the conversation behind each
+// U16a's rail over FakeTransport, at the room's interface: Needs you first with the conversation behind each
 // row, a press opening that conversation, rows holding their group under the pointer, the order rows come in, the open
 // matter staying put, Recent's list, and nothing ticking or committing at rest with Recent open.
 // @vitest-environment happy-dom
@@ -36,12 +36,12 @@ afterEach(async () => {
   vi.useRealTimers();
 });
 
-test("Needs you stands under Pinned, above Working and the rest, each row naming the conversation behind it", async () => {
+test("Needs you stands first, above Working, Pinned and the rest, each row naming the conversation behind it", async () => {
   await mount();
-  expect(headings()).toEqual(["Pinned", "Needs you", "Other matters"]);
+  expect(headings()).toEqual(["Needs you", "Other matters"]);
   expect(needs()?.querySelector(".room-when")?.textContent).toBe("Needs you");
-  // the hand's waits first, then the answer ready
-  expect(namesIn(needs())).toEqual([B.name, C.name]);
+  // the hand's waits first (the pinned D's question, then B's permission), then the answer ready
+  expect(namesIn(needs())).toEqual([D.name, B.name, C.name]);
   expect(rowOf(B.name)?.querySelector(".room-matter-where")?.textContent).toBe(
     "Reply to the notice",
   );
@@ -49,9 +49,7 @@ test("Needs you stands under Pinned, above Working and the rest, each row naming
   expect(rowOf(C.name)?.querySelector(".room-matter-where")?.textContent).toBe(
     "Counterclaim, limitation",
   );
-  // a pinned matter that needs the lawyer stays in Pinned, its line and conversation with it
-  const pinned = rail()?.querySelector(".room-groups > section");
-  expect(namesIn(pinned)).toEqual([D.name]);
+  // a pinned matter that needs the lawyer stands in Needs you, its line and conversation with it
   expect(rowOf(D.name)?.textContent).toContain("A question for you");
   expect(rowOf(D.name)?.querySelector(".room-matter-where")?.textContent).toBe("Show cause reply");
 });
@@ -106,12 +104,12 @@ test("no row changes group under the pointer; at pointer leave it does", async (
       },
     });
   });
-  expect(namesIn(needs())).toEqual([B.name, C.name]);
+  expect(namesIn(needs())).toEqual([D.name, B.name, C.name]);
   act(() => {
     nav.dispatchEvent(new PointerEvent("pointerout", { bubbles: true }));
   });
-  expect(namesIn(needs())).toEqual([B.name]);
-  expect(headings()).toEqual(["Pinned", "Needs you", "Other matters"]);
+  expect(namesIn(needs())).toEqual([D.name, B.name]);
+  expect(headings()).toEqual(["Needs you", "Other matters"]);
 });
 
 test("a row that comes to Needs you later joins its kind's foot", async () => {
@@ -123,7 +121,7 @@ test("a row that comes to Needs you later joins its kind's foot", async () => {
     });
   });
   // C now waits on the hand too, and came after B
-  expect(namesIn(needs())).toEqual([B.name, C.name]);
+  expect(namesIn(needs())).toEqual([D.name, B.name, C.name]);
   expect(rowOf(C.name)?.querySelector(".room-matter-where")?.textContent).toBe("Second question");
   const a = thread(7, A, { title: "A late wait", status: "needs_you" });
   await act(async () => {
@@ -132,7 +130,7 @@ test("a row that comes to Needs you later joins its kind's foot", async () => {
     });
   });
   // A is the open matter: it stays where it stood
-  expect(namesIn(needs())).toEqual([B.name, C.name]);
+  expect(namesIn(needs())).toEqual([D.name, B.name, C.name]);
 });
 
 test("Recent lists every conversation, scratch included, under its day; a press opens it", async () => {

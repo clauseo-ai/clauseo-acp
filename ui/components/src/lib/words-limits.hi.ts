@@ -18,7 +18,7 @@ export const HI = {
   // first; with no reset given, the toolbar's no-reset form (the thread says it too)
   "Limit reached until {time}": "{time} बजे तक सीमा पूरी",
   "Limit reached until {day} {time}": "{day} {time} बजे तक सीमा पूरी",
-  "Limit reached. Reset not given.": "सीमा पूरी। रीसेट का समय नहीं बताया गया।",
+  "Limit reached": "सीमा पूरी",
   // the composer's status line while the conversation is paused at the limit and the stop's time is known
   "Stopped at {time}, at the plan's limit": "{time} बजे, प्लान की सीमा पर रुका",
   "Stopped on {day} at {time}, at the plan's limit": "{day} को {time} बजे, प्लान की सीमा पर रुका",

@@ -14,8 +14,8 @@ export const HI = {
   // {folder}: where Clauseo keeps new matters, "~/Documents/Clauseo"
   "Use a new folder in {folder}": "{folder} में नया फ़ोल्डर इस्तेमाल करें",
   // under the folder row, once the new folder is chosen
-  "Clauseo makes this folder. Add papers to it any time.":
-    "Clauseo यह फ़ोल्डर बनाता है। इसमें कभी भी दस्तावेज़ जोड़ें।",
+  "Clauseo creates this folder. Add papers to it any time.":
+    "Clauseo यह फ़ोल्डर बना देगा। इसमें कभी भी दस्तावेज़ जोड़ें।",
   // under the name, when Create is tried without one
   "Name the matter.": "मामले का नाम लिखें।",
   // under the folder row, when Create is tried without a folder

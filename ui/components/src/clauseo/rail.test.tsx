@@ -66,21 +66,21 @@ const trust: MatterRowProps = {
 };
 
 describe("the rail's matters", () => {
-  test("pinned matters stand above the date groups, and empty groups don't show", async () => {
+  test("pinned matters stand under the other groups, above the last (the rest), and empty groups don't show", async () => {
     const groups: RailGroup[] = [
-      { when: "Tomorrow", matters: [bharat] },
-      { when: "Next week", matters: [] },
-      { when: "No date", matters: [trust] },
+      { when: "Needs you", matters: [bharat] },
+      { when: "Working", matters: [] },
+      { when: "Other matters", matters: [trust] },
     ];
     await mount(<Rail open groups={groups} pinned={[{ ...acme, pinned: true }]} scratch={{}} />);
     expect([...document.querySelectorAll(".room-when")].map((h) => h.textContent)).toEqual([
+      "Needs you",
       "Pinned",
-      "Tomorrow",
-      "No date",
+      "Other matters",
     ]);
     expect(rows().map((r) => r.querySelector(".room-matter-name")?.textContent)).toEqual([
-      acme.name,
       bharat.name,
+      acme.name,
       trust.name,
       "Scratch matter",
     ]);
@@ -258,13 +258,13 @@ describe("the rail's matters", () => {
     expect(limits.map((r) => txt(r.querySelector(".min-w-0")))).toEqual([
       "Limit reached until 6:10 pm",
       "Limit reached until Tuesday 9:00 am",
-      "Limit reached. Reset not given.",
+      "Limit reached",
     ]);
     for (const r of limits) {
       expect(r.querySelector(".room-mark:not([data-waits])")).not.toBeNull();
       expect(r.querySelector(".text-muted")).not.toBeNull();
     }
-    expect(matterStatus("hi", "limit", "")).toBe("सीमा पूरी। रीसेट का समय नहीं बताया गया।");
+    expect(matterStatus("hi", "limit", "")).toBe("सीमा पूरी");
   });
 
   test("a working matter with no end time says Answering.", () => {
