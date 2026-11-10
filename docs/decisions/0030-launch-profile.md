@@ -483,26 +483,30 @@ change from the settings window as `ui` does. R24 (PR5) adds a third to the patc
   `tests/scenarios/claude-plan-exit.jsonl` plays (its modes are `default`, `acceptEdits`,
   `plan`), not what 0.89.1 sends.
 
-  **What Clauseo offers (2026-11-10, Rohan): never `auto`.** Claude Code's `auto` lets a
+  **Where each choice lands (2026-11-10, Rohan): never in `auto`.** Claude Code's `auto` lets a
   classifier approve commands, network calls and writes outside the matter, which would break
-  "writes outside the matter still ask". So outside forced ask a Claude request loses the plan
-  exit's auto and bypass options (`exit-plan-auto`, `exit-plan-clear-auto`, `exit-plan-bypass`,
-  `exit-plan-clear-bypass`; `agent/forced_ask.rs` `keep_option_outside_forced_ask`, applied
-  in `actor/turn/asks.rs` as forced ask's option layer is). An answer naming one is refused.
-  The lawyer is offered, and lands in:
-  - "Yes, manually approve edits" (`exit-plan-default`): `default`, the lawyer's own choice,
-    logged as `ModeChanged` and kept until the session's next start, which sets `acceptEdits`
-    again;
-  - "No, keep planning" (`reject`): stays in `plan`;
-  - "Yes, auto-accept edits" (`exit-plan-accept-edits`, and its clear-context form), only in
-    the no-`auto` branch: `acceptEdits`.
+  "writes outside the matter still ask". The host keeps every plan-exit option outside forced
+  ask, and switches a session that lands in `auto` to `acceptEdits` at once
+  (`actor/turn/forced_mode.rs` `REFUSED_MODES`). So:
+  - "Yes, and use auto mode" (`exit-plan-auto`) and its clear-context form land in
+    `acceptEdits`: the adapter moves to `auto` (or to `acceptEdits` itself when the model has
+    no auto mode), and the host sets `acceptEdits`. Both are logged.
+  - "Yes, manually approve edits" (`exit-plan-default`) lands in `default`. That is the
+    lawyer's own choice, kept until the session's next start, which sets `acceptEdits` again.
+  - "No, keep planning" (`reject`) stays in `plan`.
+  - "Yes, auto-accept edits" (`exit-plan-accept-edits`), offered only in the no-`auto`
+    branch, lands in `acceptEdits`.
 
-  With 0.89.1 a plan exit therefore can't return to `acceptEdits` inside the session; it
-  comes back at the next start.
+  Between the adapter's move to `auto` and the host's `set_mode` there is a short window in
+  `auto`, one round trip. The window app doesn't offer the auto options yet: `offersOf` in
+  `ui/app/src/room/permission-model.ts` (`PLAN_EXIT_OPTIONS`) leaves them out, and the desktop
+  bridge refuses an answer naming one (`crates/desktop/src/bridge.rs` `MODE_OPTIONS`,
+  `bridge/permission.rs`). Until both let `exit-plan-auto` through, a lawyer leaving plan mode
+  through the app can pick only "manually approve edits" or "keep planning".
 - **A mode reported anyway.** A session that moves to `auto`, `bypassPermissions` or
-  `dontAsk` (`actor/turn/forced_mode.rs` `REFUSED_MODES`) is logged as it came and switched
-  back to `acceptEdits` at once. In forced ask, every option but "manually approve edits" and
-  "keep planning" is dropped, and any mode but `default` and `plan` goes back to `default`.
+  `dontAsk` is logged as it came and switched back to `acceptEdits`. In forced ask, every
+  option but "manually approve edits" and "keep planning" is dropped, and any mode but
+  `default` and `plan` goes back to `default`.
 - **Forced ask is unchanged.** Decision 3 of 2026-11-04 stands: a forced-ask session starts in
   `default` (`forced_ask::ASK_MODE`, `loads::claude_mode`) and is switched back to it
   (`actor/turn/forced_mode.rs`). `acceptEdits` applies only outside forced ask.

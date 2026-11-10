@@ -261,11 +261,12 @@ fn claude_elsewhere_runs_as_before() {
 }
 
 /// Outside forced ask, a plan exit as claude-agent-acp 0.89.1 sends it (`auto` always listed)
-/// loses both its `auto` options, and an answer naming one is refused; the manual option lands
-/// the session in `default`, which the host keeps.
+/// keeps all four options; "use auto mode" moves the agent to `auto`, and the host switches it to
+/// `acceptEdits`. Forced ask drops both auto options (`agent/forced_ask/tests.rs`, and
+/// [`claude_on_a_network_drive_runs_in_forced_ask`] for the accept-edits one).
 #[test]
-fn a_normal_plan_exit_never_offers_auto() {
-    let (_dir, host, _, thread) = claude_in("plan_exit_no_auto", "claude-plan-exit-auto", None);
+fn a_normal_plan_exits_auto_option_lands_in_accept_edits() {
+    let (_dir, host, _, thread) = claude_in("plan_exit_auto", "claude-plan-exit-auto", None);
     let mut events = host.events(StreamId::Thread(thread));
     let (turn, _) = host.prompt(thread, "Plan the change to clause 4.");
     events.until("permission request 1", |e| {
@@ -273,26 +274,26 @@ fn a_normal_plan_exit_never_offers_auto() {
     });
     assert_eq!(
         offered(&events),
-        ["exit-plan-default", "reject"],
+        [
+            "exit-plan-clear-auto",
+            "exit-plan-auto",
+            "exit-plan-default",
+            "reject"
+        ],
         "{}",
         events.dump()
     );
-    for option in ["exit-plan-auto", "exit-plan-clear-auto"] {
-        host.refused(
-            answer(thread, &events, option),
-            ErrorCode::PermissionUnknownOption,
-        );
-    }
     assert_eq!(
-        host.ok(answer(thread, &events, "exit-plan-default")),
+        host.ok(answer(thread, &events, "exit-plan-auto")),
         CommandOutcome::Done
     );
     let ended = events.until_turn_ended(turn);
-    events.assert_no_mismatch();
     assert_eq!(ended.stop, StopReason::EndTurn, "{}", events.dump());
+    events.until("ModeChanged acceptEdits back", |e| modes(e).len() == 3);
+    events.assert_no_mismatch();
     assert_eq!(
         modes(&events),
-        ["acceptEdits", "default"],
+        ["acceptEdits", "auto", "acceptEdits"],
         "{}",
         events.dump()
     );
