@@ -17,6 +17,11 @@ export const HI = {
   "Read {name} online.": "{name} ऑनलाइन पढ़ा गया।",
   "Looked online.": "ऑनलाइन देखा गया।",
   "Ran a task.": "एक काम चलाया गया।",
+  // a task named by the program it ran and the paper it ran on, where the agent gave no words of its own (D-017)
+  "Ran {program} on {name}.": "{name} पर {program} चलाया गया।",
+  "Ran {program}.": "{program} चलाया गया।",
+  // a web search limited to one site, the site said apart from the words searched for (D-028)
+  "Searched {site} for '{query}'.": "{site} पर '{query}' खोजा गया।",
   "Thought it through.": "विचार किया गया।",
   "Did one other thing.": "एक अन्य काम किया गया।",
   // a step that failed or was stopped: what it set out to do, in the past, never as if it were still going; the row's
@@ -35,6 +40,9 @@ export const HI = {
   "Tried to read {name} online.": "{name} ऑनलाइन पढ़ने की कोशिश की गई।",
   "Tried to look online.": "ऑनलाइन देखने की कोशिश की गई।",
   "Tried to run a task.": "एक काम चलाने की कोशिश की गई।",
+  "Tried to run {program} on {name}.": "{name} पर {program} चलाने की कोशिश की गई।",
+  "Tried to run {program}.": "{program} चलाने की कोशिश की गई।",
+  "Tried to search {site} for '{query}'.": "{site} पर '{query}' खोजने की कोशिश की गई।",
   "Tried to think it through.": "विचार करने की कोशिश की गई।",
   "Tried one other thing.": "एक अन्य काम करने की कोशिश की गई।",
   // a step named only by the agent's own words (its title or a task's description), tried and not done: those words

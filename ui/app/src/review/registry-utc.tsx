@@ -5,6 +5,7 @@ import type { ToolCallEntry, ToolCallStatus, ToolKind, ViewEntry } from "../tran
 import { agentText, step, toolCall, userMessage } from "../testing/stream-script.ts";
 import type { Entry } from "./entry.ts";
 import { threadHost } from "./hosts.ts";
+import { UTC_TASKS } from "./registry-utc-tasks.tsx";
 import { RoomClicking, RoomOver } from "./states.tsx";
 import { stepLiveWords, stepWords, type WordsRef } from "./words.ts";
 import type { StepKey } from "@clauseo/components/lib/words-steps.ts";
@@ -278,4 +279,5 @@ export const UTC: Entry[] = [
     call("read", "completed", { ...COMPLAINT, background: true }),
     call("read", "completed", { ...FORM, background: true }),
   ]),
+  ...UTC_TASKS,
 ];

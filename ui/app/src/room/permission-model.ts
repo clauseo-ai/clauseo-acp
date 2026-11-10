@@ -16,6 +16,7 @@ import type {
   ToolCallEntry,
 } from "../transport/protocol.ts";
 import { isolated } from "./thread/content.ts";
+import { inMatter, taskOf, type Task } from "./thread/task-words.ts";
 
 /** The options that change the session's mode on leaving plan mode. The window can't send one (the bridge refuses
  * it, crates/desktop/src/bridge.rs MODE_OPTIONS; a test holds the two lists equal), so the prompt never offers it. */
@@ -65,6 +66,9 @@ export type PermissionModel = {
   /** The words key the prompt shows beneath the ask instead of the title; null when the title is shown. */
   label: ThreadKey | null;
   title: string | null;
+  /** A task's parts for plain words, and its command for the fold (D-016); null for any other call, and for one
+   * whose label stands. */
+  task: Task | null;
   kept: boolean;
   done: boolean;
   state: PromptState;
@@ -148,10 +152,12 @@ function stateOf(
   return { state: "gone", dataState: "expired", dataAnswer: undefined };
 }
 
-/** The prompt's props from the entry and its tool call (undefined when there is none, or on an older page). */
+/** The prompt's props from the entry and its tool call (undefined when there is none, or on an older page). `folder`:
+ * the matter's folder as the host shows it, so a path inside the matter reads from the matter (D-046). */
 export function permissionModel(
   entry: PermissionEntry,
   call: ToolCallEntry | undefined,
+  folder: string | null = null,
 ): PermissionModel {
   const paper = paperOf(call);
   // a plan note is Claude's own file, outside the matter: the line stands where the raw path would show
@@ -161,7 +167,12 @@ export function permissionModel(
     paper,
     asks: paper === null,
     label,
-    title: paper === null && call !== undefined && label === null ? isolated(call.title) : null,
+    title:
+      paper === null && call !== undefined && label === null
+        ? isolated(inMatter(call.title, folder))
+        : null,
+    task:
+      paper === null && call?.kind === "execute" && label === null ? taskOf(call, folder) : null,
     kept: keptOf(call),
     done: call?.status === "completed",
     ...stateOf(entry),

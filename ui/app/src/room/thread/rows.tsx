@@ -33,6 +33,7 @@ import { questionText, useQuestionText, useStreaming } from "./live.ts";
 import { askedAs, backgroundOf, outcomeOf, runningIn } from "./steer.ts";
 import { LiveSteerMark, RequeuedLine, SteerMarkRow } from "./steer-rows.tsx";
 import { LimitStopRow, StepRow } from "./stop-rows.tsx";
+import { plainOf, thoughtText } from "./step-names.ts";
 
 const QUIET = "text-small text-quiet";
 /** The space above a row under another in its section, on the spacing tokens; first in its section, the thread's own
@@ -158,6 +159,8 @@ function LiveUserMessage({
 }
 
 function Answer({ id, text, streaming }: { id: EntryId; text: string; streaming: boolean }) {
+  // no words yet, or only blank lines: no empty block standing in the answer's space (D-030)
+  if (text.trim() === "") return null;
   return (
     // busy while it streams, so a screen reader reads the answer once it ends, not each flush's words
     <div
@@ -171,15 +174,22 @@ function Answer({ id, text, streaming }: { id: EntryId; text: string; streaming:
   );
 }
 
+/** The space above a thought under another row: the reply's own (REPLY), so a thought that opens an answer stands
+ * under the meta line as the answer's first words would (D-030). */
+const THOUGHT = "not-first:mt-(--s4)";
+
 function Thought({ id, text }: { id: EntryId; text: string }) {
+  const shown = thoughtText(text);
+  // a thought with no words yet (or only blank lines) draws nothing, never an empty row
+  if (shown === "") return null;
   return (
     <p
       data-testid="thought"
       data-entry-id={id}
-      className={`${ROW} ${QUIET} whitespace-pre-wrap`}
+      className={`${THOUGHT} ${QUIET} whitespace-pre-wrap`}
       dir="auto"
     >
-      {text}
+      {shown}
     </p>
   );
 }
@@ -224,7 +234,7 @@ function ToolCall({ id, entry }: { id: EntryId; entry: ToolCallEntry }) {
       data-background={backgroundOf(entry) === undefined ? undefined : true}
       className={`${ROW} ${QUIET}`}
     >
-      <bdi>{entry.title}</bdi>
+      <bdi>{plainOf(entry.title)}</bdi>
       {mark !== null && (
         <>
           {" · "}

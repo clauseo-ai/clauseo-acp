@@ -38,6 +38,7 @@ export function PermissionPrompt({
   offered = OFFERED,
   question,
   title,
+  details,
   reason,
   kept = true,
   done,
@@ -60,6 +61,8 @@ export function PermissionPrompt({
   question?: string;
   /** The agent's own words for what it wants to do, beneath the question. */
   title?: string | null;
+  /** What the title folds away, after it on its line: a task's command behind its press (D-016); none, nothing. */
+  details?: ReactNode;
   /** Why it asks, in a few words, under the title: a matter folder Clauseo can't fence (the app's folder rights). */
   reason?: ReactNode;
   /** Whether "Every change is kept." shows. */
@@ -227,6 +230,7 @@ export function PermissionPrompt({
       {title ? (
         <p className={`perm-title text-small text-quiet mt-(--s0-5)${indent}`} id={`${id}-title`}>
           <bdi>{title}</bdi>
+          {details}
         </p>
       ) : null}
       {reason ? (

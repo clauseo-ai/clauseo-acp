@@ -103,6 +103,9 @@ export type ThreadActions = {
   /** H13's Retry from here on one of the lawyer's questions, at its time; absent where the host can't. Rejects with
    * the HostError when the host refuses. */
   retry?: ((message: MessageId, at: Timestamp) => Promise<void>) | undefined;
+  /** Sends a question again as a new turn of this thread: Try again after a Stop or a failed answer (D-027). True once
+   * send_prompt is accepted; never rejects. Absent where the rows have no session to send through. */
+  resend?: ((text: string) => Promise<boolean>) | undefined;
 };
 
 export const ThreadActionsContext = createContext<ThreadActions | null>(null);
@@ -328,8 +331,18 @@ export function useThreadSession(
 
   const stream = thread === null ? null : streamOf(thread);
   const actions = useMemo(
-    () => ({ stream, sentTurn, undo, previewUndo, answer, answerElicitation, stop, retry }),
-    [stream, sentTurn, undo, previewUndo, answer, answerElicitation, stop, retry],
+    () => ({
+      stream,
+      sentTurn,
+      undo,
+      previewUndo,
+      answer,
+      answerElicitation,
+      stop,
+      retry,
+      resend: ask,
+    }),
+    [stream, sentTurn, undo, previewUndo, answer, answerElicitation, stop, retry, ask],
   );
   return { thread, sentTurn, refused: refused ?? link.refused, ask, stop, actions };
 }

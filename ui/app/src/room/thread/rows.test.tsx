@@ -448,7 +448,7 @@ const sent = (order: number, n: number, text: string, ts: number): ViewEntry => 
   user_message: { ...userMessage(order, n, text).user_message!, ts },
 });
 
-test("a question's Who line is You and the time it was sent; each answer's meta line is Clauseo, with its turn's time once the step is in", async () => {
+test("a question's Who line is You and the time it was sent; each answer's meta line is Clauseo, with when it started, kept once the step is in", async () => {
   fixNow();
   h = await mountRoom();
   h.deliver([
@@ -469,14 +469,14 @@ test("a question's Who line is You and the time it was sent; each answer's meta 
   ]);
   expect(who()[0]).toBe("You, 4:31 pm");
   expect(metas().map((m) => m?.className)).toEqual(["meta meta-live", "meta meta-live"]);
-  // the latest turn runs: its meta line shows when it started, its question's time (sent as the turn before ended),
-  // until its step comes in
+  // each meta line shows when its answer started, its question's time (the latest sent as the turn before ended),
+  // and keeps it once its step comes in (D-020)
   expect(metas().map((m) => m?.textContent)).toEqual([
-    `${t("en", "Clauseo")}, ${clockTime("en", ENDED)}`,
+    `${t("en", "Clauseo")}, ${clockTime("en", ASKED)}`,
     `${t("en", "Clauseo")}, ${clockTime("en", ENDED)}`,
   ]);
   h.deliver([upsert(step(10, { turn: uuid(2, 4), ts: ENDED + 60_000 }))]);
-  expect(metas()[1]?.textContent).toBe("Clauseo, 4:34 pm");
+  expect(metas()[1]?.textContent).toBe("Clauseo, 4:33 pm");
 });
 
 test("a question written in Devanagari takes lang=hi on its own line in the English room, an English one none (Hindi audit 1f)", async () => {

@@ -1,8 +1,8 @@
-// An answer's meta line: "Clauseo", and its turn's time once the step is in, with the answer's first step group on it
-// as the design's chip when the work came before the answer's first words (step-groups.tsx). While the answer is live
-// it shows when the answer started, where the view says so honestly (startOf), so the chip after it stands where it
-// will once the turn ends. It reads only times and whether the turn waits in a queue, so a flush of the answer's text
-// renders it not at all.
+// An answer's meta line: "Clauseo" and when the answer started, where the view says so honestly (startOf), live and
+// once it ends alike, so the time never moves as the turn finishes (D-020); with no honest start (it waited behind
+// another conversation), the turn's end once its step is in. The answer's first step group stands on it as the
+// design's chip when the work came before the answer's first words (step-groups.tsx). It reads only times and
+// whether the turn waits in a queue, so a flush of the answer's text renders it not at all.
 import { useState, type ReactNode } from "react";
 import { Who } from "@clauseo/components/clauseo/answer.tsx";
 import { useRoom } from "@clauseo/components/clauseo/room-scope.ts";
@@ -47,12 +47,10 @@ export function AnswerMeta({
   const started = start === null ? null : stamp(w.lang, start, now);
   return (
     <div className="meta meta-live" ref={latest ? nodes.slot("meta") : undefined}>
-      {/* live, the time it started; at the end, the time it ended, in a place kept at least as wide as the start's
-          (its digits all one width), so a shorter end time can't pull the chip left */}
+      {/* the time it started, kept as the turn ends; with none, the time it ended */}
       <Who
         name={w.t("Clauseo")}
-        time={ended !== null ? stamp(w.lang, ended, now) : (started ?? undefined)}
-        held={started === null ? undefined : [started]}
+        time={started ?? (ended !== null ? stamp(w.lang, ended, now) : undefined)}
       />
       {children}
     </div>

@@ -23,6 +23,12 @@ export const MarkdownHostContext = createContext<MarkdownHost>(NO_HOST);
  */
 export const InertLinksContext = createContext(false);
 
+/**
+ * The words of a code block's Copy (D-026), as the host gives them: Copy, or Copied for a moment after a press. With
+ * none (the default, and every surface but the thread's answers), a code block is its `pre` alone.
+ */
+export const CodeCopyContext = createContext<((copied: boolean) => string) | null>(null);
+
 /** The answer's own part of every generated id, so many answers on one page never share an id. */
 export const AnswerScopeContext = createContext("");
 

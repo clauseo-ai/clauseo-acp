@@ -35,6 +35,10 @@ export const HI = {
     "इस प्रश्न को अस्वीकार किया गया, इसलिए कोई उत्तर नहीं है।",
   "The answer stopped. Your question and the answer so far are kept.":
     "उत्तर रुक गया। आपका प्रश्न और अब तक का उत्तर रखे गए हैं।",
+  // under a finished answer and on each of its code blocks: Copy, and what it says for a moment once it copied
+  // (D-026)
+  Copy: "कॉपी करें",
+  Copied: "कॉपी हो गया",
   // who said each row, for assistive technology ("You" is words.ts's)
   "Your question": "आपका प्रश्न",
   "Clauseo's answer": "Clauseo का उत्तर",
@@ -55,6 +59,10 @@ export const HI = {
   // nothing was saved or the question is gone; each first sentence matches the folded lines below
   "Don't allow for this matter": "इस मामले के लिए अनुमति न दें",
   "Clauseo asks before going on.": "आगे बढ़ने से पहले Clauseo आपसे पूछता है।",
+  // what a task asks to do, under the ask, where the agent gave no words of its own: the program it would run and
+  // the paper it would run it on (D-016); the command itself folds under "Show the command"
+  "Run {program} on {name}.": "{name} पर {program} चलाना।",
+  "Run {program}.": "{program} चलाना।",
   "No longer waiting for an answer.": "अब उत्तर की प्रतीक्षा नहीं है।",
   "Allowed once.": "एक बार अनुमति दी गई।",
   "Allowed for this matter.": "इस मामले के लिए अनुमति दी गई।",
