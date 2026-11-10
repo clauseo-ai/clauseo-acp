@@ -249,11 +249,12 @@ export function versionsHost(m: Matter): FakeTransport {
           ],
         };
       if (query.compare_versions !== undefined) return { file_changes: m.compare ?? [] };
+      // a restore's added files: asked to undo it, they go; asked to restore the version before it alone, they stay
       if (query.preview_restore !== undefined)
         return {
           restore_preview:
             query.preview_restore.undoes === undefined
-              ? preview
+              ? { ...preview, added_since: [...preview.added_since, ...(m.removes ?? [])] }
               : { ...preview, removes: m.removes ?? [] },
         };
       if (query.word_blackline !== undefined) return marking(m.mark);
