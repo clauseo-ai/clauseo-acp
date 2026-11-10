@@ -36,6 +36,7 @@ import { UC_ALL } from "./registry-uc-word.tsx";
 import { SAC } from "./registry-sac.tsx";
 import { NM } from "./registry-nm.tsx";
 import { ownEntries, ownEntry } from "./registry-offline.tsx";
+import { PK } from "./registry-pk.tsx";
 import {
   MATTER,
   NEW_MATTER,
@@ -570,4 +571,5 @@ export const REGISTRY: readonly Entry[] = [
   ...R23,
   ...IT_ENTRIES,
   ...NM,
+  ...PK,
 ];
