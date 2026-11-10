@@ -7,6 +7,7 @@ import { defineConfig, type Plugin, type ViteBuilder } from "vite";
 import { configDefaults } from "vitest/config";
 import { BaseSequencer, type TestSpecification } from "vitest/node";
 import tauriConf from "../../crates/desktop/tauri.conf.json" with { type: "json" };
+import { appVersion } from "./src/settings/app-version.ts";
 
 /** The directives the dev policy loosens, and what each gets, for a dev server on `port`. */
 function devAdditions(port: number): Record<string, string> {
@@ -131,9 +132,13 @@ export function cspMeta(): Plugin {
   };
 }
 
-/** The compile-time constants every build of the app carries: the version About shows (src/settings/version.ts), from
- * tauri.conf.json, its one home. vite.review.config.ts takes them too. */
-export const APP_DEFINE = { __CLAUSEO_VERSION__: JSON.stringify(tauriConf.version) };
+/** The compile-time constants every build of the app carries: the version About shows (src/settings/version.ts).
+ * vite.review.config.ts takes them too. */
+export const APP_DEFINE = {
+  __CLAUSEO_VERSION__: JSON.stringify(
+    appVersion(tauriConf.version, process.env.CLAUSEO_VERSION_SUFFIX),
+  ),
+};
 
 /** The pages the release build makes, each its own entry with its own first load: the room, and the settings window.
  * The dev-only pages (gallery.html, parts.html, review.html) are not among them, so none of them ships. */
