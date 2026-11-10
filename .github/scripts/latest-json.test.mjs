@@ -366,17 +366,16 @@ test("release.yml keeps the workflow rules", () => {
   }
 });
 
-test("release.yml's arm64 install smoke runs after sign-windows on windows-11-arm, and blocks nothing yet", () => {
+test("release.yml's arm64 install smoke runs after sign-windows on windows-11-arm, and blocks the release", () => {
   const text = readFileSync(RELEASE_YML, "utf8");
   const smoke = jobCommands(text, "arm64-install-smoke");
   assert.ok(smoke.includes("needs: [check, sign-windows]"), smoke.join("\n"));
   assert.ok(smoke.includes("runs-on: windows-11-arm"));
-  // Non-blocking until three passing runs (the orchestrator's call): it may fail, and no job,
-  // assemble included, needs it.
-  assert.ok(smoke.includes("continue-on-error: true"));
-  assert.ok(jobCommands(text, "assemble").includes("needs: [check, build, sign-windows]"));
+  // Blocking: it may not fail (no continue-on-error), and assemble, so the release, needs it.
+  assert.ok(!smoke.some((line) => line.startsWith("continue-on-error:")), smoke.join("\n"));
+  assert.ok(jobCommands(text, "assemble").includes("needs: [check, build, sign-windows, arm64-install-smoke]"));
   const needers = text.split("\n").filter((line) => /^\s+needs:.*\barm64-install-smoke\b/.test(stripComment(line)));
-  assert.deepEqual(needers, []);
+  assert.deepEqual(needers, ["    needs: [check, build, sign-windows, arm64-install-smoke]"]);
   // x64 first, then arm64 over it, then the registered silent uninstall; ARM64 is checked.
   const script = smoke.join("\n");
   const order = ["_x64-machine-setup.exe", "_arm64-machine-setup.exe", "0xAA64", "QuietUninstallString"];
