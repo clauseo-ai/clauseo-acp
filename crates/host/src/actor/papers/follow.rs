@@ -54,7 +54,14 @@ pub(crate) fn relocated(actor: &mut Actor, matter: MatterId) {
 
 /// `matter` left the list: stop watching it.
 pub(crate) fn forgotten(actor: &mut Actor, matter: MatterId) {
+    actor.files.listed.remove(&matter);
     live::forgotten(actor, matter);
+}
+
+/// The app was answered a listing of `matter`'s papers: it shows them, so [`on_turn_ended`]
+/// may have it list them again.
+pub(crate) fn answered(actor: &mut Actor, matter: MatterId) {
+    actor.files.listed.insert(matter);
 }
 
 /// A listing of `matter`'s `folder` answered: what it found goes in the matter's row, and a
@@ -70,13 +77,14 @@ pub(crate) fn listed(actor: &mut Actor, matter: MatterId, folder: &Path, found: 
     }
 }
 
-/// A turn in `matter` ended, however it ended. Unless its folder's watch is live (it tells of
-/// each change), the app lists the papers again, since the answer may have added or changed
-/// some: on Windows, a watch that failed or is still starting, and a matter not followed (one in
-/// a second window).
+/// A turn in `matter` ended, however it ended. If the app has listed its papers and its
+/// folder's watch is not live (a live one tells of each change), the app lists the papers again,
+/// since the answer may have added or changed some: on Windows, a watch that failed or is still
+/// starting, and a listed matter not followed (one in a second window). A matter whose papers
+/// the app never listed shows none, so nothing goes.
 pub(crate) fn on_turn_ended(actor: &mut Actor, matter: MatterId) {
     let watched = actor.papers_live && live::watching(actor, matter);
-    if !watched && actor.matters.contains_key(&matter) {
+    if !watched && actor.files.listed.contains(&matter) && actor.matters.contains_key(&matter) {
         crate::actor::app::publish(actor, &HostEvent::PapersChanged { matter });
     }
 }
