@@ -132,6 +132,8 @@ nix = { workspace = true, features = ["process"] }
 clauseo-sandbox = { path = "../sandbox", features = ["test-support"] }
 # The case-law relay's exclusive-bind test binds its port again with SO_REUSEADDR.
 socket2 = { workspace = true }
+# The papers scan's test that its reparse tags are Windows' own (`revisions/marks/reparse.rs`).
+windows = { workspace = true, features = ["Win32_System_SystemServices"] }
 
 [[bench]]
 name = "reopen"

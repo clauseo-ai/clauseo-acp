@@ -89,19 +89,27 @@ pub(crate) fn check(path: &Path) -> Option<bool> {
 }
 
 /// `file`, opened at `path` as a reparse point itself, as the file to read: the same handle, or
-/// for a reparse point that is not a link (deduplicated…) the file opened again normally. `None`
-/// for a link or a mount point (never followed) and a file in the cloud or offline (never read).
+/// for a reparse point that is not a link (deduplicated, a cloud file kept on this computer…)
+/// the file opened again normally. `None` for a link or a mount point (never followed), a file
+/// in the cloud or offline (never read), and a reopened file that is not the same file.
 #[cfg(windows)]
 fn windows_file(path: &Path, file: std::fs::File) -> Option<std::fs::File> {
-    let (attributes, tag) = crate::network_paths::attribute_tag(&file).ok()?;
+    use crate::network_paths::{attribute_tag, file_identity};
+    let (attributes, tag) = attribute_tag(&file).ok()?;
     match reparse::reparse(attributes, tag) {
         reparse::Reparse::Read => Some(file),
         reparse::Reparse::Skip | reparse::Reparse::Unknown => None,
         reparse::Reparse::Reopen => {
-            drop(file);
+            // `file` stays open while the path is opened again, so the same volume and file ID
+            // on both proves the second open followed nothing swapped in between
             let again = std::fs::File::open(path).ok()?;
-            // swapped for a placeholder or an offline file since: never read
-            let (attributes, tag) = crate::network_paths::attribute_tag(&again).ok()?;
+            let first = file_identity(&file).ok()?;
+            if file_identity(&again).ok()? != first {
+                return None;
+            }
+            drop(file);
+            // turned into a placeholder or an offline file since: never read
+            let (attributes, tag) = attribute_tag(&again).ok()?;
             match reparse::reparse(attributes, tag) {
                 reparse::Reparse::Read | reparse::Reparse::Reopen => Some(again),
                 reparse::Reparse::Skip | reparse::Reparse::Unknown => None,
