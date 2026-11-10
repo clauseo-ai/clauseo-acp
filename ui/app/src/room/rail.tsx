@@ -3,7 +3,8 @@
 // ready and unseen, then a failure unseen), then Working (answering now), then Pinned, then the rest, Working and the
 // rest each by their latest activity; the rest is headed "Other matters" under any group above it, "Matters" alone. With the
 // NextHost's matters part, Pinned, Recent (the five opened last), finding by name and client, and each row's menu (Pin,
-// Locate folder, Show in Finder, Remove from the list); without it, finding by name only, and a menu of Show in Finder
+// Locate folder, Show in Finder, Remove from the list, which asks first), and Locate folder beside a refused Show in
+// Finder's words on the row; without it, finding by name only, and a menu of Show in Finder
 // alone. What each row says it's doing comes from matters.ts's status,
 // its moments put in the lawyer's clock as the rail renders, so nothing ticks at rest; the open matter's row says
 // nothing, since the lawyer is looking at it. Until the list arrives, and if it can't be read, the rail draws no list
@@ -43,6 +44,7 @@ import type { AllThreads } from "./all-threads.ts";
 import type { MatterInfo, MatterStatus } from "./host-next.ts";
 import { openConversation } from "./open-conversation.ts";
 import { locatable } from "./act-refusals.ts";
+import { LocateButton } from "./locate-button.tsx";
 import { railView, recentDays } from "./rail-lists.ts";
 import { RailTriage } from "./rail-triage.ts";
 import { activityOrder, type TriageStatus } from "./triage.ts";
@@ -234,6 +236,21 @@ export function RoomRail({
     const said = refused.get(m.matter);
     const revealed = said?.act === "reveal" ? said.code : null;
     const findFolder = m.folder_state === "missing" || locatable(revealed);
+    const snoozing = matterSnooze(sc, m, every.lists.get(m.matter), placed.group.get(m.matter));
+    // the refusal's words have Locate folder beside them, as the menu has it, where the matters part can relocate
+    const locate =
+      detailed && locatable(revealed) ? (
+        <LocateButton onLocate={() => void matters.locate(m.matter)} />
+      ) : null;
+    const below =
+      locate === null ? (
+        snoozing.below
+      ) : (
+        <>
+          {locate}
+          {snoozing.below}
+        </>
+      );
     return {
       id: m.matter,
       name: m.name,
@@ -251,7 +268,8 @@ export function RoomRail({
       // UC: Not protected, as the row has it now (matters.ts takes protection_changed onto it)
       unprotected: notProtected(m.protection),
       // the open matter's conversations, once its list is in
-      ...matterSnooze(sc, m, every.lists.get(m.matter), placed.group.get(m.matter)),
+      ...snoozing,
+      ...(below === undefined ? {} : { below }),
       ...(split !== null
         ? {
             conversations: split.rows,

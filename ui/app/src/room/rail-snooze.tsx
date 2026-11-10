@@ -1,10 +1,11 @@
-// Snooze and Done on the rail (U16b), the room's half: the commands (H-triage), the line left in a row's place after
-// either until the pointer or the focus leaves the rail, the picker, and the props each part takes: a conversation's
+// Snooze and Done on the rail (U16b), the room's half: the commands (H-triage), the line left in a conversation's
+// place after either until the pointer or the focus leaves the rail, a matter's line beneath its row, which stays as it
+// is, for BRIEF_MS, the picker, and the props each part takes: a conversation's
 // buttons and its snoozed mark, the open matter's done conversations for its fold, a matter's menu, and the Snoozed
 // shelf. A line shows only once the host has answered Done for every thread; one refused (a time past, or more than
 // 366 days ahead) puts back those it took and leaves the rows as they were. What opens later (the menu's times, the
 // picker, the open shelf and fold) is snooze-late.tsx's, loaded by snooze-load.ts.
-import { Suspense, useEffect, useState, type ReactNode } from "react";
+import { Suspense, useEffect, useRef, useState, type ReactNode } from "react";
 import type { ConversationRowProps } from "@clauseo/components/clauseo/rail-conversations.tsx";
 import type { DoneRow } from "@clauseo/components/clauseo/rail-done-rows.tsx";
 import type { MatterRowProps } from "@clauseo/components/clauseo/rail.tsx";
@@ -33,6 +34,9 @@ import { clockOf, dayOf } from "./when.ts";
 
 const NO_LINES: ReadonlyMap<string, Line> = new Map();
 
+/** How long a matter's line, with its Undo, stands beneath its row. */
+export const BRIEF_MS = 8_000;
+
 /** A time to come back, as the rail says it: "6:00 pm", "tomorrow 9:00 am", "Monday 9:00 am", "18 November 9:00 am". */
 export function whenWords(at: Timestamp, now: Timestamp, zone: string, lang: Lang): string {
   const { time, day } = clockOf(at, now, zone, lang);
@@ -48,11 +52,42 @@ export function whenWords(at: Timestamp, now: Timestamp, zone: string, lang: Lan
  * open, and the acts. */
 export function useSnooze(transport: HostTransport, onRail: () => boolean) {
   const [lines, setLines] = useState(NO_LINES);
-  const [picking, setPicking] = useState<{ key: string; threads: readonly Held[] } | null>(null);
-  // a line comes only while the pointer or the focus is on the rail: one that arrives after both have left would never
-  // be cleared, and would hold the rows where they stand
+  const [picking, setPicking] = useState<{
+    key: string;
+    threads: readonly Held[];
+    brief: boolean;
+  } | null>(null);
+  // the keys whose line is brief (a matter's), and the timers that take those lines away
+  const briefs = useRef(new Set<string>());
+  const timers = useRef(new Map<string, ReturnType<typeof setTimeout>>());
+  useEffect(() => {
+    const running = timers.current;
+    return () => running.forEach(clearTimeout);
+  }, []);
+  // a conversation's line comes only while the pointer or the focus is on the rail: one that arrives after both have
+  // left would never be cleared, and would hold the rows where they stand. A matter's is brief, and its timer clears it
   const show = (key: string, line: Line) => {
-    if (onRail()) setLines((was) => new Map(was).set(key, line));
+    const brief = briefs.current.has(key);
+    if (!brief && !onRail()) return;
+    setLines((was) => new Map(was).set(key, line));
+    if (!brief) return;
+    clearTimeout(timers.current.get(key));
+    timers.current.set(
+      key,
+      setTimeout(() => {
+        timers.current.delete(key);
+        setLines((was) => {
+          if (was.get(key) !== line) return was;
+          const left = new Map(was);
+          left.delete(key);
+          return left;
+        });
+      }, BRIEF_MS),
+    );
+  };
+  const mark = (key: string, brief: boolean) => {
+    if (brief) briefs.current.add(key);
+    else briefs.current.delete(key);
   };
   // the window coming back clears the lines, as the pointer or the focus leaving the rail does
   useEffect(() => {
@@ -75,11 +110,16 @@ export function useSnooze(transport: HostTransport, onRail: () => boolean) {
   return {
     lines,
     picking,
-    snooze: (key: string, threads: readonly Held[], until: Timestamp) => {
+    /** `brief`: a matter's, its line beneath the row for BRIEF_MS at most. */
+    snooze: (key: string, threads: readonly Held[], until: Timestamp, brief = false) => {
       setPicking(null);
+      mark(key, brief);
       acts((a) => a.snooze(key, threads, until));
     },
-    done: (key: string, threads: readonly Held[]) => acts((a) => a.done(key, threads)),
+    done: (key: string, threads: readonly Held[], brief = false) => {
+      mark(key, brief);
+      acts((a) => a.done(key, threads));
+    },
     undo: (key: string) => {
       const line = lines.get(key);
       if (line === undefined) return;
@@ -90,11 +130,15 @@ export function useSnooze(transport: HostTransport, onRail: () => boolean) {
     },
     wake: (threads: readonly ThreadId[]) => acts((a) => a.wake(threads)),
     notDone: (thread: ThreadId) => acts((a) => a.notDone(thread)),
-    choose: (key: string, threads: readonly Held[]) => setPicking({ key, threads }),
+    choose: (key: string, threads: readonly Held[], brief = false) =>
+      setPicking({ key, threads, brief }),
     cancel: () => setPicking(null),
-    /** The pointer or the focus left the rail: the lines go, their rows taking their new places. */
+    /** The pointer or the focus left the rail: the conversations' lines go, their rows taking their new places. A
+     * matter's brief line stays until its time is up: its Undo is the only way back, and the menu that sent it often
+     * stood past the rail's edge, so the pointer leaves as it closes. */
     leave: () => {
-      if (lines.size > 0) setLines(NO_LINES);
+      const kept = new Map([...lines].filter(([key]) => briefs.current.has(key)));
+      if (kept.size !== lines.size) setLines(kept.size === 0 ? NO_LINES : kept);
     },
   };
 }
@@ -103,19 +147,26 @@ export type Snooze = ReturnType<typeof useSnooze>;
 /** What the props are made with: the acts, and the clock the rail renders with. */
 export type SnoozeCtx = { snooze: Snooze; now: Timestamp; zone: string; lang: Lang };
 
-/** Snooze and Done for these threads: the snooze menu's times, the menus' two items, and Mark (all) done. */
-function triageOf(c: SnoozeCtx, key: string, threads: readonly Held[], done = false): Triage {
+/** Snooze and Done for these threads: the snooze menu's times, the menus' two items, and Mark as done (Mark all
+ * conversations done); `matter`: a matter's, whose line is brief and stands beneath its row. */
+function triageOf(
+  c: SnoozeCtx,
+  key: string,
+  threads: readonly Held[],
+  done = false,
+  matter = false,
+): Triage {
   const first = threads[0];
   const onDone =
     done && first !== undefined
       ? () => c.snooze.notDone(first.thread)
-      : () => c.snooze.done(key, threads);
+      : () => c.snooze.done(key, threads, matter);
   const menu = () => (
     <Suspense fallback={null}>
       <LazySnoozeMenu
         zone={c.zone}
-        onPick={(until) => c.snooze.snooze(key, threads, until)}
-        onChoose={() => c.snooze.choose(key, threads)}
+        onPick={(until) => c.snooze.snooze(key, threads, until, matter)}
+        onChoose={() => c.snooze.choose(key, threads, matter)}
       />
     </Suspense>
   );
@@ -143,32 +194,45 @@ function triageOf(c: SnoozeCtx, key: string, threads: readonly Held[], done = fa
   return triage;
 }
 
-/** What stands in a row's place, if anything: its picker, or its line with Undo. */
-function replaceOf(c: SnoozeCtx, key: string): ReactNode | undefined {
+/** The picker standing in a row's place, if it's open there. */
+function pickerOf(c: SnoozeCtx, key: string): ReactNode | undefined {
   const s = c.snooze;
-  if (s.picking?.key === key) {
-    const threads = s.picking.threads;
-    return (
-      <Suspense fallback={null}>
-        <LazyPicker
-          zone={c.zone}
-          onPick={(until) => s.snooze(key, threads, until)}
-          onCancel={s.cancel}
-        />
-      </Suspense>
-    );
-  }
+  if (s.picking?.key !== key) return undefined;
+  const { threads, brief } = s.picking;
+  return (
+    <Suspense fallback={null}>
+      <LazyPicker
+        zone={c.zone}
+        onPick={(until) => s.snooze(key, threads, until, brief)}
+        onCancel={s.cancel}
+      />
+    </Suspense>
+  );
+}
+
+/** What stands in a conversation's place, if anything: its picker, or its line with Undo. */
+function replaceOf(c: SnoozeCtx, key: string): ReactNode | undefined {
+  return pickerOf(c, key) ?? lineOf(c, key, "Marked as done");
+}
+
+/** A row's line with Undo after a snooze or Done, if one stands: `done` its words after Done. */
+function lineOf(
+  c: SnoozeCtx,
+  key: string,
+  done: "Marked as done" | "All conversations marked as done",
+): ReactNode | undefined {
+  const s = c.snooze;
   const line = s.lines.get(key);
   if (line === undefined) return undefined;
   const text =
     line.kind === "done"
-      ? tw(c.lang, "Marked as done")
+      ? tw(c.lang, done)
       : tw(c.lang, "Snoozed until {when}", {
           when: whenWords(line.until, c.now, c.zone, c.lang),
         });
   return (
     <Suspense fallback={null}>
-      <LazyLine text={text} onUndo={() => s.undo(key)} />
+      <LazyLine text={text} onUndo={() => s.undo(key)} take={done === "Marked as done"} />
     </Suspense>
   );
 }
@@ -230,17 +294,21 @@ export function splitConversations(
   return { rows: shown, done: { count: done.length, rows: fold } };
 }
 
-/** A matter's Snooze until… and Mark all done, for its conversations not done (none: no items), and its line. */
+/** A matter's Snooze until… and Mark all conversations done, for its conversations not done (none: no items); its
+ * picker, in its row's place; and its line, brief, beneath the row, which keeps its name, its menu and its press. */
 export function matterSnooze(
   c: SnoozeCtx,
   m: MatterInfo,
   list: readonly ThreadSummary[] | undefined,
   group: Group | undefined,
-): Pick<MatterRowProps, "triage" | "replace" | "snoozed"> {
+): Pick<MatterRowProps, "triage" | "replace" | "snoozed"> & { below?: ReactNode } {
   const awake = (list ?? []).filter((th) => th.status !== "archived" && th.done !== true);
-  const replace = replaceOf(c, m.matter);
-  // snoozed whole, yet in view (Pinned, or held where it stood): its row says so
-  const whole = group === "snoozed" || m.kind === "scratch" ? null : wholly(list, c.now);
+  const replace = pickerOf(c, m.matter);
+  const below = lineOf(c, m.matter, "All conversations marked as done");
+  // snoozed whole, yet in view (Pinned, or held where it stood): its row says so, once its line, which says it too,
+  // has gone
+  const whole =
+    group === "snoozed" || m.kind === "scratch" || below !== undefined ? null : wholly(list, c.now);
   return {
     ...(whole === null
       ? {}
@@ -252,9 +320,10 @@ export function matterSnooze(
     ...(awake.length === 0 || m.kind === "scratch"
       ? {}
       : {
-          triage: triageOf(c, m.matter, awake),
+          triage: triageOf(c, m.matter, awake, false, true),
         }),
     ...(replace === undefined ? {} : { replace }),
+    ...(below === undefined ? {} : { below }),
   };
 }
 

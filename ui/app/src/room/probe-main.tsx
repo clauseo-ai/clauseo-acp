@@ -28,7 +28,9 @@
 // both plans are listed with Claude's sign-in cancelled and ChatGPT signed in, for the default plan's screenshots
 // (D-014). With ?thread=first-read, the matter's first read is under way, its latest read codex's quoted shell read of
 // a file outside the matter (first-read/probe-state.ts), for the line under the composer; ?file=long names a long file.
-// Not shipped.
+// With ?reveal=refused, Show in Finder is refused with the folder missing, for the rail's Locate folder beside the
+// refusal; with ?rail=triage, every matter's threads arrive at the start, so the open matter's menu (with
+// ?thread=commands) has Snooze until and Mark done. Not shipped.
 import { whenWordsReady } from "@clauseo/components/lib/display.ts";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
@@ -277,6 +279,11 @@ const SETUP_CHATGPT_ONLY: SetupEvent[] = [
   },
 ];
 
+/** ?reveal=refused: every Show in Finder answers the folder missing. */
+const refuseReveal = (): never => {
+  throw { code: "matter.folder_missing", message: "missing", retryable: false };
+};
+
 const transport = new FakeTransport({
   // ?platform=windows or linux draws that computer's frame; the Mac's without
   platform:
@@ -291,6 +298,8 @@ const transport = new FakeTransport({
     : chatgptOnly
       ? { setup: { first: () => SETUP_CHATGPT_ONLY } }
       : {}),
+  // ?reveal=refused: Show in Finder is refused as the folder can't be found, so the row offers Locate folder
+  ...(page.get("reveal") === "refused" ? { reveal: refuseReveal } : {}),
   // on the pages whose undo meets a lock, every undo_step is refused with matter.file_locked
   dispatch: (envelope): CommandOutcome => {
     if (staged?.refusesUndo === true && envelope.command.undo_step !== undefined) throw LOCKED;
@@ -331,6 +340,8 @@ const transport = new FakeTransport({
     matters: () => matters,
     papers,
     location: "Documents/Clauseo",
+    // ?rail=triage: every matter's threads arrive at the start, so the matter's menu has Snooze until and Mark done
+    frames: page.get("rail") === "triage",
     ...(planning !== null
       ? { agents: planning.agents }
       : chatgptOnly

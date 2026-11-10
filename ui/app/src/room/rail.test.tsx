@@ -323,7 +323,7 @@ test("with H5 the open matter's row carries its actions' chevron, reached by key
   );
 });
 
-test("Remove from the list sends forget_matter and the row leaves", async () => {
+test("D-054: Remove from the list asks first; Cancel sends nothing, and Remove sends forget_matter and the row leaves", async () => {
   let list = [detailed(A), detailed(B)];
   const sent: NextCommand[] = [];
   await mount(
@@ -346,7 +346,35 @@ test("Remove from the list sends forget_matter and the row leaves", async () => 
   expect(remove).toBeDefined();
   await act(async () => remove?.click());
   await settle();
-  expect(sent).toContainEqual({ forget_matter: { matter: A.matter } });
+  // nothing brings a removed matter back from the list, so it asks, and says what happens
+  const ask = () => document.querySelector<HTMLElement>('[data-testid="remove-confirm"]');
+  expect(ask()?.textContent).toContain(`Remove ${A.name} from the list?`);
+  expect(ask()?.textContent).toContain(
+    "The matter and its conversations leave the list and Recent. Its folder and papers stay where they are.",
+  );
+  expect(sent.some((c) => "forget_matter" in c)).toBe(false);
+  const button = (id: string) => document.querySelector<HTMLElement>(`[data-testid="${id}"]`);
+  await act(async () => button("remove-confirm-cancel")?.click());
+  await settle();
+  expect(sent.some((c) => "forget_matter" in c)).toBe(false);
+  expect(names()).toEqual(expect.arrayContaining([A.name, B.name]));
+  expect(names()).toHaveLength(2);
+  await act(async () =>
+    rowOf(A.name)?.dispatchEvent(
+      new MouseEvent("contextmenu", { bubbles: true, cancelable: true }),
+    ),
+  );
+  await settle();
+  const again = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find((i) =>
+    i.textContent?.includes("Remove from the list"),
+  );
+  await act(async () => again?.click());
+  await settle();
+  await act(async () => button("remove-confirm-ok")?.click());
+  await settle();
+  expect(sent.filter((c) => "forget_matter" in c)).toEqual([
+    { forget_matter: { matter: A.matter } },
+  ]);
   expect(names()).toEqual([B.name]);
 });
 
@@ -385,6 +413,48 @@ test("a refused Show in Finder says why on its row's note line and in the consol
   expect(rowOf(A.name)?.querySelector(".room-matter-note")?.textContent).toBe(
     errorWords("en", "matter.folder_missing"),
   );
+  warn.mockRestore();
+});
+
+test("D-057: a refused Show in Finder's words have Locate folder beside them, which relocates the matter", async () => {
+  const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+  const sent: NextCommand[] = [];
+  const transport = await mount({
+    ...withNext(
+      () => [detailed(A), detailed(B)],
+      (c) => void sent.push(c),
+    ),
+    platform: "mac",
+    reveal: () => {
+      throw { code: "matter.folder_missing", message: "gone", retryable: true };
+    },
+    pickFolder: () => ({ folder: "ref-found", display: "Desktop/Acme" }),
+  });
+  const locate = () =>
+    rowOf(A.name)?.closest("li")?.querySelector<HTMLElement>('[data-testid="locate-folder"]');
+  expect(locate()).toBeNull();
+  await act(async () =>
+    rowOf(A.name)?.dispatchEvent(
+      new MouseEvent("contextmenu", { bubbles: true, cancelable: true }),
+    ),
+  );
+  await settle();
+  const reveal = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find((i) =>
+    i.textContent?.includes("Show in Finder"),
+  );
+  await act(async () => reveal?.click());
+  await settle();
+  expect(transport.only("reveal")).toHaveLength(1);
+  expect(rowOf(A.name)?.querySelector(".room-matter-note")?.textContent).toBe(
+    errorWords("en", "matter.folder_missing"),
+  );
+  // beside the words, not inside the row's own button: the existing Locate folder, and only on that row
+  expect(locate()?.textContent).toBe("Locate folder");
+  expect(rowOf(A.name)?.contains(locate() ?? null)).toBe(false);
+  expect(rowOf(B.name)?.closest("li")?.querySelector('[data-testid="locate-folder"]')).toBeNull();
+  await act(async () => locate()?.click());
+  await settle();
+  expect(sent).toContainEqual({ relocate_matter: { matter: A.matter, folder: "ref-found" } });
   warn.mockRestore();
 });
 
