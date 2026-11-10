@@ -9,6 +9,14 @@
   --gutter: max(var(--thread-pad), calc((var(--work-w) - var(--measure)) / 2));
 }
 
+/* a dialog's scrim (z-30) covers the window but not its caption buttons, which answer the first press while a dialog is
+   open: in the room (responsive.css lets the toolbar go relative for it) and in the settings window. Outside the
+   layers, as responsive.css's frame rules are. */
+:root:has([data-dialog-plane]) .room-caption {
+  position: relative;
+  z-index: 31;
+}
+
 @layer components {
   .room-window {
     width: 100%;
