@@ -127,8 +127,8 @@ async-process = "2"
 # clauseo-process (it also uses the async-process, futures, memchr, nix and windows lines above):
 # the timer of its shutdown ladder.
 async-io = "2"
-# The open matter's folder watch (crates/host, decision record 0055): FSEvents, ReadDirectoryChangesW
-# and inotify, no polling.
+# The open matter's folder watch (crates/host, decision record 0055): FSEvents and inotify, no
+# polling; macOS and Linux only.
 notify = { version = "8.2.2", default-features = false, features = [
   "macos_fsevent",
 ] }

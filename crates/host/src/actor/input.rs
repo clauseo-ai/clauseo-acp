@@ -290,6 +290,7 @@ pub(crate) enum Input {
     /// deadline (`allowed/saving.rs`).
     Allowed(Box<super::allowed::AllowedInput>),
     /// The open matter's folder changed and went quiet, from its watch (`papers/watch.rs`).
+    #[cfg(not(windows))]
     PapersChanged(super::papers::FolderChanged),
 }
 
@@ -332,6 +333,7 @@ impl std::fmt::Debug for Input {
             #[cfg(feature = "test-support")]
             Self::StateForTest(_) => "StateForTest",
             Self::Allowed(_) => "Allowed",
+            #[cfg(not(windows))]
             Self::PapersChanged(_) => "PapersChanged",
         };
         f.write_str(name)

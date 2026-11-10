@@ -3,8 +3,8 @@
 //! `RegisterFile` shares, so a path keeps one id for the host's run. Whether a `.docx` holds
 //! tracked changes comes from what the matter's background scan has read ([`scan`]): the
 //! listing answers at once, and the scan sends `PapersChanged` when it knows more. The open
-//! matter's folder is watched (`follow.rs`, `watch.rs`), and a listing says what it found of the
-//! folder there.
+//! matter's folder is watched, except on Windows (`follow.rs`, `watch.rs`), and a listing says
+//! what it found of the folder there.
 
 pub(crate) mod scan;
 
@@ -24,8 +24,14 @@ use crate::log_file::Cause;
 use crate::matter_worker::{MatterJob, MatterReply};
 
 pub(crate) mod follow;
+#[cfg(windows)]
+mod no_watch;
+#[cfg(not(windows))]
 mod watch;
 pub(crate) use follow::Follow;
+#[cfg(windows)]
+use no_watch as watch;
+#[cfg(not(windows))]
 pub(crate) use watch::FolderChanged;
 
 /// The files the host has handed out ids for, both ways, kept in host memory for its run.

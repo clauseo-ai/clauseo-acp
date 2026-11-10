@@ -133,6 +133,7 @@ pub(super) async fn open(
         files: super::papers::FileRefs::default(),
         paper_scans: super::papers::scan::PaperScans::default(),
         papers_follow: None,
+        papers_live: super::papers::follow::live_watch(),
         next_sub: 0,
         work: Work::default(),
         phase: HostPhase::Starting(ready),

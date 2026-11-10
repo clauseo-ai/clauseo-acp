@@ -48,8 +48,6 @@ url = { workspace = true }
 getrandom = { workspace = true }
 async-channel = { workspace = true, features = ["std"] }
 async-io = { workspace = true }
-# The open matter's folder watch (src/actor/papers/watch.rs, decision record 0055).
-notify = { workspace = true }
 # `executor` for `LocalPool` (QR11.2); the root line's default features include it already.
 futures = { workspace = true, features = ["executor"] }
 # `update.json`'s marker (src/update.rs).
@@ -77,6 +75,11 @@ rustix = { workspace = true, features = ["fs"] }
 # The data folder fence's `~user` paths (agent/data_fence/resolve.rs): the user's home from the
 # user database.
 nix = { workspace = true, features = ["user"] }
+
+# The open matter's folder watch (src/actor/papers/watch.rs, decision record 0055); none on
+# Windows, where its handle would stop the lawyer renaming or moving the folder around the matter.
+[target.'cfg(not(windows))'.dependencies]
+notify = { workspace = true }
 
 # The network path checks' remote mount list (network_paths/mac.rs): getfsstat.
 [target.'cfg(target_os = "macos")'.dependencies]

@@ -10,10 +10,10 @@ day, beside Clauseo.
 
 ## Decision
 
-- The host watches the folder of the matter the lawyer last opened (`OpenMatter`), one matter
-  at a time, through the `notify` crate: FSEvents on macOS, `ReadDirectoryChangesW` on Windows,
-  inotify on Linux. The whole tree is watched, as the listing walks it, symlinks not followed.
-  No polling.
+- On macOS and Linux the host watches the folder of the matter the lawyer last opened
+  (`OpenMatter`), one matter at a time, through the `notify` crate: FSEvents on macOS, inotify
+  on Linux. The whole tree is watched, as the listing walks it, symlinks not followed. No
+  polling. Windows has no watch (below).
 - A change to a file the listing never shows (`clauseo_matters::is_excluded_path`: `~$` owner
   files, `*.tmp`, `.clauseo`, `.git`) and a read are passed over. The rest wait until the folder
   has been quiet for 300 ms (a Word save is temporary files and a rename), or 256 changes have
@@ -27,18 +27,30 @@ day, beside Clauseo.
   OS will not watch is logged by kind and left unwatched. The app also lists the papers again when
   its window comes back to the front, which covers that case and any change a feed missed; a
   listing that finds the folder there again starts the watch.
+- **Windows: no watch.** `ReadDirectoryChangesW` needs a handle on the matter's folder, and while
+  that handle is open Windows refuses to rename or move the folder that holds it. A lawyer who
+  cannot rename or move their own matter folder while Clauseo is open reads that as Clauseo
+  breaking their files, which is worse than tiles that lag a moment. So the watch is compiled out
+  on Windows (`notify` is a `cfg(not(windows))` dependency; `papers/no_watch.rs` stands in
+  behind the same follow code, and `follow::live_watch` is the switch). Instead, the app lists
+  the papers again when its window comes back to the front (as on every OS), and the host sends
+  `PapersChanged` for the matter when each turn there ends, done, cancelled or failed
+  (`follow::on_turn_ended`), since an answer is the one change Clauseo itself makes while the
+  lawyer looks at the wall. A change made in Explorer while Clauseo stays in front shows at the
+  next return to the window or the next answer's end. macOS and Linux send nothing at a turn's
+  end: the watch tells of each change.
 - A file's `FileRefId` is per path, so a rename is the old tile gone and a new one come. The
   `tracked` marks follow, since each listing scans them. The Find index keeps the names of the
   last checkpoint, as before.
 
 ## Consequences
 
-- `host` depends on `notify` (and, through it, inotify on Linux, objc2-core-services on macOS,
-  windows-sys on Windows). `matters` exports `is_excluded_path`.
-- No file is opened. On Windows the watch holds one handle, on the folder itself, opened with
-  every share mode: Word saves, renames and deletes inside it as before, and the folder itself
-  can be deleted or moved. While the watch lives, Windows refuses to rename or move the folder
-  that holds the matter's folder; it lives only while the matter is open.
+- `host` depends on `notify` on macOS and Linux only (and, through it, inotify on Linux and
+  objc2-core-services on macOS); Windows does not build it. `matters` exports
+  `is_excluded_path`.
+- No file is opened, and on Windows no handle is held: the lawyer renames, moves and deletes the
+  matter's folder and the folders around it as before. The cost is that Windows tiles follow
+  Explorer only at the window's return to the front and at each answer's end, one listing each.
 - inotify uses one watch per subfolder; past the user's limit the watch fails and the focus
   listing is all that is left.
 
