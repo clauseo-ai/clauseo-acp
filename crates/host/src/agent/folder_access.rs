@@ -14,7 +14,9 @@
 //!   opens nothing and never refuses), no entry read. A refusal of it (`PermissionDenied`:
 //!   EPERM, which TCC gives, or EACCES) refuses the launch, so no agent is started. With the
 //!   usage strings in the app's `Info.plist` (`crates/desktop/Info.plist`), that open is also
-//!   what makes macOS ask the lawyer, the first time, instead of refusing in silence.
+//!   what makes macOS ask the lawyer, the first time, instead of refusing in silence. The open
+//!   blocks while that prompt is up, so the launch waits for it for [`PREFLIGHT_WAIT`]; an open
+//!   still unanswered then is this refusal too, never `matter.folder_missing`.
 //! - [`session_refusal`], for a launch that failed on an agent's error answer
 //!   (`actor/turn/agents/start_failure.rs`, after its log line): only the shape of Claude's
 //!   `validateCwd` (an answer to `session/new` with JSON-RPC -32602, `data` holding `cwd`, and
@@ -27,10 +29,17 @@
 
 use std::io;
 use std::path::Path;
+use std::time::Duration;
 
 use clauseo_protocol::{ErrorCode, HostError};
 
 use crate::error::Error;
+
+/// How long a launch waits for [`preflight`]'s open (`actor/turn/launch_checks/folder.rs`):
+/// as long as a lawyer may take to answer macOS's prompt, which the open waits on. Only a bound
+/// against an open that never answers (a network volume that hangs); its expiry is
+/// [`refusal`], never `matter.folder_missing` and never a launch let through.
+pub(crate) const PREFLIGHT_WAIT: Duration = Duration::from_secs(120);
 
 /// The refusal's detail, for logs; the app's words come from the code.
 const DETAIL: &str = "the computer's privacy settings keep Clauseo from opening the matter folder";
@@ -56,7 +65,7 @@ pub(crate) fn refusal() -> Error {
 
 /// Refuses a launch in `folder` when `open` (in the host, [`open_folder`]) is refused
 /// permission: `matter.folder_permission`. Any other failure is let through, for the other
-/// checks to report (a folder that is gone is `matter.folder_missing` already) or the spawn.
+/// checks to report (a folder that is gone is `matter.folder_missing` by the next) or the spawn.
 /// Logs the error's number, never the folder. Its file system call: off the actor.
 pub(crate) fn preflight(
     folder: &Path,
