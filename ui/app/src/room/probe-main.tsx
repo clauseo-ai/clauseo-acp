@@ -23,8 +23,10 @@
 // ?thread=hindi, the thread is a question asked in Hindi and a recorded Hindi answer (testing/hindi-answer.ts), finished,
 // for screenshots of Devanagari tables, ₹ and bold in the room. With ?thread=shaping, the thread is a question and a
 // fixed answer (testing/shaping-answer.ts), finished: the cells in every block type, for the Devanagari shaping audit's
-// 1a and 1d. With ?plan=codex, claude, one, many, close, stale or none, the agent is signed in with its plan and the plan's limits are on
-// the channel (limits/probe-plan.ts), for the toolbar's plan and its card. Not shipped.
+// 1a and 1d. With ?plan=codex, claude, one, many, close, stale or none, the agent is signed in with its plan and the
+// plan's limits are on the channel (limits/probe-plan.ts), for the toolbar's plan and its card. With ?plans=chatgpt,
+// both plans are listed with Claude's sign-in cancelled and ChatGPT signed in, for the default plan's screenshots
+// (D-014). Not shipped.
 import { whenWordsReady } from "@clauseo/components/lib/display.ts";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
@@ -34,6 +36,7 @@ import type {
   CommandOutcome,
   HostEvent,
   MatterSummary,
+  SetupEvent,
   ViewPatchBody,
 } from "../transport/protocol.ts";
 import { type FakeCall, FakeTransport } from "../transport/fake-transport.ts";
@@ -235,6 +238,32 @@ const NATIVE_LIGHTS = {
 
 /** ?plan=codex, claude, one, many, close, stale or none: the agent signed in with its plan, its limits on the channel (probe-plan.ts). */
 const planning = planProbe(page.get("plan"));
+/** ?plans=chatgpt: both plans installed and listed, Claude's sign-in cancelled and ChatGPT signed in (D-014's default). */
+const chatgptOnly = page.get("plans") === "chatgpt";
+const SETUP_CHATGPT_ONLY: SetupEvent[] = [
+  { agent_install_progress: { agent: "claude-acp", state: { ready: { version: "0.1.0" } } } },
+  { agent_install_progress: { agent: "codex-acp", state: { ready: { version: "0.1.0" } } } },
+  {
+    sign_in_changed: {
+      agent: "claude-acp",
+      state: { failed: { code: "signin.cancelled", at: 1 } },
+    },
+  },
+  {
+    sign_in_changed: {
+      agent: "codex-acp",
+      state: {
+        signed_in: {
+          email: "lawyer@example.com",
+          plan: "ChatGPT Plus",
+          method: "plan",
+          source: "own",
+          at: 1,
+        },
+      },
+    },
+  },
+];
 
 const transport = new FakeTransport({
   // ?platform=windows or linux draws that computer's frame; the Mac's without
@@ -244,7 +273,12 @@ const transport = new FakeTransport({
       : page.get("platform") === "linux"
         ? "linux"
         : "mac",
-  ...(planning === null ? {} : { setup: planning.setup, openSettings: () => {} }),
+  // ?plan= and ?plans= are separate pages; one setup, from whichever the page asks for
+  ...(planning !== null
+    ? { setup: planning.setup, openSettings: () => {} }
+    : chatgptOnly
+      ? { setup: { first: () => SETUP_CHATGPT_ONLY } }
+      : {}),
   // on the pages whose undo meets a lock, every undo_step is refused with matter.file_locked
   dispatch: (envelope): CommandOutcome => {
     if (staged?.refusesUndo === true && envelope.command.undo_step !== undefined) throw LOCKED;
@@ -281,7 +315,16 @@ const transport = new FakeTransport({
     matters: () => matters,
     papers,
     location: "Documents/Clauseo",
-    ...(planning === null ? {} : { agents: planning.agents }),
+    ...(planning !== null
+      ? { agents: planning.agents }
+      : chatgptOnly
+        ? {
+            agents: [
+              { id: "claude-acp", kind: "claude" as const },
+              { id: "codex-acp", kind: "codex" as const },
+            ],
+          }
+        : {}),
     // ?thread=ask lists its thread as ?thread=permission does: waiting on the lawyer, so the room opens it
     threads: () =>
       probeThreads(

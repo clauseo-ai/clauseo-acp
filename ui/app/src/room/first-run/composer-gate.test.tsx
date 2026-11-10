@@ -137,7 +137,7 @@ test("the gate checks the plan the send uses: ChatGPT picked in the switch while
   expect(sent(t, "create_thread").map((c) => c.agent)).toEqual([CLAUDE]);
 });
 
-test("Sign in to ChatGPT, already signed in, takes the new conversation to ChatGPT once and sends nothing; the lawyer's later pick of Claude stands", async () => {
+test("with only ChatGPT signed in the new conversation starts on it, with no gate; the lawyer's later pick of Claude stands", async () => {
   const t = await mountFirstRun({
     first: [
       install(CLAUDE, READY),
@@ -146,10 +146,10 @@ test("Sign in to ChatGPT, already signed in, takes the new conversation to ChatG
       signIn(CODEX, SIGNED_IN),
     ],
   });
-  await press("Sign in to ChatGPT");
-  expect(t.setups()).toEqual([]);
+  // D-014: never a default plan that isn't signed in while another is, so no "Use ChatGPT instead" to press
   expect(planButton("ChatGPT")?.getAttribute("aria-pressed")).toBe("true");
   expect(byId("signin")).toBeNull();
+  expect(button("Use ChatGPT instead")).toBeNull();
   await press(planButton("Claude"));
   await settle();
   expect(planButton("Claude")?.getAttribute("aria-pressed")).toBe("true");

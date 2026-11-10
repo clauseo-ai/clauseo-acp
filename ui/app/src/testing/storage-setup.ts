@@ -4,7 +4,7 @@
 // has no global localStorage) gives it happy-dom's. Here a DOM test whose global storage is unusable gets a fresh
 // happy-dom Window's storage, and the global back as it was when the file ends. Node 24 and the node-environment tests
 // are unchanged: they never reach the branch.
-import { afterAll } from "vitest";
+import { afterAll, afterEach } from "vitest";
 
 const KEYS = ["localStorage", "sessionStorage"] as const;
 
@@ -40,3 +40,14 @@ if (typeof document !== "undefined") {
     });
   }
 }
+
+// The plan last asked with (room/plan-default.ts's clauseo.last-plan) is the computer's, not the test's: each test
+// starts with none, so a question sent in one doesn't choose the next one's default plan.
+if (typeof document !== "undefined")
+  afterEach(() => {
+    try {
+      globalThis.localStorage?.removeItem("clauseo.last-plan");
+    } catch {
+      // no storage: nothing kept
+    }
+  });
