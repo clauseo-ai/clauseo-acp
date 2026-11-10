@@ -6,12 +6,12 @@
 //!   took into `acceptEdits` or `auto`) goes back to `default` (`forced_ask::ASK_MODE`, never
 //!   `acceptEdits` here). Meanwhile the guard hook still asks before every tool, so the race
 //!   costs no unasked change.
-//! - Elsewhere: `auto`, `bypassPermissions` and `dontAsk` ([`REFUSED_MODES`]) go back to
-//!   `acceptEdits` (`agent::loads::CLAUDE_MODE`). So the plan exit's "use auto mode" lands the
-//!   session in `acceptEdits`, never `auto`; claude-agent-acp 0.89.1 lists neither bypass nor
-//!   `dontAsk`, so for those this answers an adapter that moved there anyway. Every other mode
-//!   is kept until the next start: `default` (a plan exit's "manually approve edits"), `plan`,
-//!   `acceptEdits` (decision record 0030, "Claude's permission mode").
+//! - Elsewhere: any mode but `acceptEdits` and `plan` ([`NORMAL_MODES`]) goes back to
+//!   `acceptEdits` (`agent::loads::CLAUDE_MODE`). A plan exit approved with "manually approve
+//!   edits" (`default`, the option behind the app's "Allow once") means "go ahead" in the mode
+//!   the matter runs in; "use auto mode" lands in `acceptEdits`, never `auto`; and
+//!   `bypassPermissions`, `dontAsk` or an unknown mode, which claude-agent-acp 0.89.1 never
+//!   offers, go back too (decision record 0030, "Claude's permission mode").
 
 use clauseo_protocol::{AgentChoiceId, AgentKind, CompactString, ModeChanged, ThreadId};
 
@@ -20,10 +20,12 @@ use super::agents::call;
 use super::inputs::AgentReply;
 use super::updates::{agent, commit};
 
-/// The modes a Claude session outside forced ask is switched back from: `auto` lets a
-/// classifier approve commands, network calls and writes outside the matter, bypass skips every
-/// ask, and `dontAsk` turns each ask into a refusal the lawyer never sees.
-pub(crate) const REFUSED_MODES: [&str; 3] = ["auto", "bypassPermissions", "dontAsk"];
+/// The modes a Claude session outside forced ask is kept in when it moves there itself:
+/// `acceptEdits`, Clauseo's mode, and `plan`, which makes no change. Any other goes back to
+/// `acceptEdits`: `default` would ask before every edit after a plan the lawyer approved,
+/// `auto` lets a classifier approve commands, network calls and writes outside the matter,
+/// bypass skips every ask, and `dontAsk` turns each ask into a refusal the lawyer never sees.
+pub(crate) const NORMAL_MODES: [&str; 2] = [crate::agent::loads::CLAUDE_MODE, "plan"];
 
 /// The mode a Claude session that moved to `mode` is switched back to, or `None` to keep it.
 pub(crate) fn reset_to(forced_ask: bool, mode: &str) -> Option<&'static str> {
@@ -31,9 +33,7 @@ pub(crate) fn reset_to(forced_ask: bool, mode: &str) -> Option<&'static str> {
         (!crate::agent::forced_ask::mode_allowed(mode))
             .then_some(crate::agent::forced_ask::ASK_MODE)
     } else {
-        REFUSED_MODES
-            .contains(&mode)
-            .then_some(crate::agent::loads::CLAUDE_MODE)
+        (!NORMAL_MODES.contains(&mode)).then_some(crate::agent::loads::CLAUDE_MODE)
     }
 }
 

@@ -300,6 +300,77 @@ fn a_normal_plan_exits_auto_option_lands_in_accept_edits() {
     host.shutdown();
 }
 
+/// Runs one plan-exit turn of `thread`: waits for request `n` (1-based), answers `option`, and
+/// waits for the turn's end and for `modes` mode changes in all.
+fn plan_exit(
+    host: &Running,
+    events: &mut Events,
+    thread: ThreadId,
+    n: usize,
+    option: &str,
+    modes_len: usize,
+) {
+    let (turn, _) = host.prompt(thread, "Plan the change to clause 4.");
+    events.until("permission request", |e| e.permission_requests().len() == n);
+    let request = events.permission_requests()[n - 1];
+    assert_eq!(
+        host.ok(HostCommand::AnswerPermission {
+            thread,
+            request,
+            option_id: AgentChoiceId::new(option).unwrap(),
+        }),
+        CommandOutcome::Done
+    );
+    let ended = events.until_turn_ended(turn);
+    assert_eq!(ended.stop, StopReason::EndTurn, "{}", events.dump());
+    events.until("mode changes", |e| modes(e).len() == modes_len);
+    events.assert_no_mismatch();
+}
+
+/// Outside forced ask, a plan exit answered "keep planning" stays in `plan`, and one approved
+/// with the manual option (the app's "Allow once") moves the agent to `default`, which the
+/// host switches to `acceptEdits`: approving a plan means going ahead in the matter's mode.
+#[test]
+fn a_normal_plan_exit_stays_in_plan_or_goes_ahead_in_accept_edits() {
+    let (_dir, host, _, thread) = claude_in("plan_exit_normal", "claude-plan-exit-normal", None);
+    let mut events = host.events(StreamId::Thread(thread));
+    plan_exit(&host, &mut events, thread, 1, "reject", 2);
+    assert_eq!(modes(&events), ["acceptEdits", "plan"], "{}", events.dump());
+    plan_exit(&host, &mut events, thread, 2, "exit-plan-default", 4);
+    assert_eq!(
+        modes(&events),
+        ["acceptEdits", "plan", "default", "acceptEdits"],
+        "{}",
+        events.dump()
+    );
+    host.shutdown();
+}
+
+/// In forced ask the same approval ends in `default`, with no switch.
+#[test]
+fn a_forced_ask_plan_exit_approved_ends_in_default() {
+    let (_dir, host, _, thread) = claude_in(
+        "plan_exit_forced",
+        "claude-forced-ask-plan-default",
+        Some(FolderSupportKind::Network),
+    );
+    let mut events = host.events(StreamId::Thread(thread));
+    plan_exit(&host, &mut events, thread, 1, "exit-plan-default", 3);
+    assert_eq!(
+        offered(&events),
+        ["exit-plan-default", "reject"],
+        "{}",
+        events.dump()
+    );
+    assert_eq!(
+        modes(&events),
+        ["default", "plan", "default"],
+        "{}",
+        events.dump()
+    );
+    host.shutdown();
+}
+
 /// Forced ask with no guard hook to give (no guard program, as when `current_exe` failed): the
 /// launch is refused with `agent.guard_missing` rather than left to the ask rules alone, and no
 /// session call reaches the agent. The review's `rev_forced_ask_without_a_guard_still_fences`.
