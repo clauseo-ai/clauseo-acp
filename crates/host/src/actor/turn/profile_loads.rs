@@ -166,6 +166,7 @@ pub(super) fn session_loads(
         case_law: case_law_entry.is_some(),
         browser: browser_on,
         sandbox: sandbox.as_ref(),
+        matter: Some(matter),
     });
     let guard = actor
         .pre_write_guard
@@ -258,16 +259,26 @@ fn claude_sandbox(
         .filter(|folder| folder.is_absolute())
         .collect();
     let claude_home = actor.effective.locations().agent_home(agent_id.as_str());
+    // Every other matter's folder the host knows now; one registered later is the residual.
+    let other_matters: Vec<PathBuf> = actor
+        .matters
+        .iter()
+        .filter(|(id, _)| **id != run.key.matter)
+        .map(|(_, entry)| PathBuf::from(&entry.row.folder_path))
+        .collect();
     let paths = SandboxPaths {
         matter,
         work: &run.work,
         tmp: &tmp,
+        claude_tmp: run.claude_tmp.as_deref(),
         downloads: &run.downloads,
         skill_packs: &run.skill_packs,
         notes: &run.notes,
         skills: &skills,
         path: &path,
         claude_home: &claude_home,
+        data: &run.data_deny.spellings,
+        other_matters: &other_matters,
         browser,
     };
     ClaudeSandbox::for_os(cfg!(windows), &paths)

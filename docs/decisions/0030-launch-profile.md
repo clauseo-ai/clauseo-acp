@@ -641,7 +641,9 @@ Clauseo's internals: other conversations (every matter's prompts and answers in 
 index, `search.sqlite`), other sessions' run folders and copies, other matters' notes, the
 store and the agents' credentials. It is not a wall between matters. Its residual: a run
 folder, a matter's notes or another matter's Claude project made after a Claude session
-launched is in none of that session's deny rules (its transcripts are). The host's auto-deny
+launched is in none of that session's deny rules (its transcripts are), and a matter registered
+after a Claude session launched is in none of its sandbox's read denies ("Claude's sandbox
+(macOS)"). The host's auto-deny
 refuses a request for one when Claude asks. Per Claude Code's docs, rules apply in the order
 deny, ask, allow, and an allow can't carve out a deny; Read, Glob and Grep outside the working
 folders ask in the default, `acceptEdits` and `plan` modes, so there the auto-deny refuses
@@ -983,8 +985,22 @@ this record and firm-it §8.
   Code's own sandbox, and a sandboxed command runs without asking. Linux gets the same object,
   for development. The host puts a `sandbox` object in the flag settings, after the data
   folder's rules and before forced ask (`agent/loads/sandbox.rs`, `profile::claude_options`). It
-  replaces any `sandbox` the hook sent. It also forces `CLAUDE_CODE_TMPDIR=<run>/tmp`, so the
-  sandbox's temp folder goes with the run folder.
+  replaces any `sandbox` the hook sent.
+  - **Claude's short temp folder** (2026-11-10, security review). Claude Code 2.1.293 uses
+    `<CLAUDE_CODE_TMPDIR>/claude-<uid>` for sandboxed commands only when that path is at most 44
+    bytes. Otherwise it falls back to `/tmp/claude-<uid>`, which every session shares and
+    every sandboxed command may write; `<run>/tmp` is always longer. So each Claude session gets
+    `/tmp/clsb-<8 random>` (`agent/claude_tmp.rs`) as `CLAUDE_CODE_TMPDIR`. It fits 44 bytes
+    for any 10-digit uid, also as `/private/tmp`. The folder is 0700, made on the launch-prep
+    thread, named in `<run>/claude-tmp`, and removed with the run folder, or at the next start
+    with the earlier run's folders after a crash or a stop. It is in `allowWrite` and
+    `allowRead`. Sandboxed commands' `TMPDIR` is made under it. The agent's own `TMPDIR`
+    stays `<run>/tmp` (#930), which Claude Code and unsandboxed commands (agent-browser) use.
+    A folder that can't be made gives the session no sandbox, and its commands ask.
+  - **No sandbox, so commands ask,** when a path in its lists holds `*`, `?`, `[` or `]`
+    (one info line, no path). Claude Code reads sandbox paths as patterns and does not escape
+    them: `Smith [2024]` would open `Smith 2` and not itself. The same applies when a path to
+    deny is not UTF-8.
   - **On:** `enabled` and `autoAllowBashIfSandboxed`. Forced ask still sends
     `autoAllowBashIfSandboxed: false` after it, so a forced-ask session asks for every command,
     sandboxed or not.
@@ -995,16 +1011,27 @@ this record and firm-it §8.
     and its commands ask. Claude Code auto-allows a command only while `isSandboxingEnabled()`
     holds. A sandbox that fails to start refuses that command and stays off for the rest of the
     session (`sandboxDisabledThisSession`). `true` would end Claude at start-up instead.
-  - **Files:** `denyRead: ["~/"]`, which covers other clients' files, `~/.ssh` and `<data>`.
-    The data fence's `Read(…)` deny rules become read denies too. `allowWrite` holds the matter
-    folder, `<run>/work`, `<run>/tmp` and the matter's notes. `allowRead`, which Claude Code
-    ranks over `denyRead`, re-opens those, plus `<run>/downloads`, `<run>/skill-packs`, the
+  - **Files:** `denyRead` holds:
+    - the home (`~/`): other clients' files and `~/.ssh`;
+    - each spelling of `<data>`, which `CLAUSEO_DATA_DIR` may put outside the home;
+    - every other matter folder the host knows at the launch;
+    - `/Volumes` and `/Users/Shared`, where matters may be kept.
+
+    The data fence's `Read(…)` deny rules become read denies too. **Residual:** a matter
+    registered after this launch is in none of its lists, the same as the data fence's residual
+    for run folders and notes. `allowWrite` holds the matter folder, `<run>/work`,
+    `<run>/tmp`, the matter's notes and the short temp folder. `denyWrite` holds the matter's
+    `.clauseo`: its `matter.json` finds a moved matter folder again, and Claude's `Edit` is
+    denied it too, on every OS. `allowRead`, which Claude Code ranks over `denyRead` (a
+    narrower deny inside it still applies), re-opens those, plus
+    `<run>/agent-browser/downloads`, `<run>/skill-packs`, the
     built-in skills, stetdoc's folder and Clauseo's Python runtime folder (`<rt>`, where pandoc
     also lives). The runtime is found from its `PATH` folder `<rt>/bin`. The whole run folder is
     not opened: it holds the relay's token and the browser's profile (the visited sites'
     cookies).
   - **Network:** `allowedDomains: []`. A sandboxed command that reaches a new host asks. The
-    seeded `WebFetch(domain:…)` allow rules widen the list to those sites.
+    seeded `WebFetch(domain:…)` sites probably ask too, which fails safe: Claude Code builds the
+    list from trusted settings only, and they come in through `allowedTools`.
   - **agent-browser:** `excludedCommands: ["agent-browser:*"]`, in a session with the browser
     only. It needs its daemon, Chrome and the session's sockets. The exclusion holds up when
     commands are chained. Claude Code 2.1.293's `containsExcludedCommand` splits the command
@@ -1027,7 +1054,9 @@ this record and firm-it §8.
 - **Windows keeps asking.** No `sandbox` key goes there. Claude Code 2.1.293 never auto-allows on
   Windows: `autoAllowBashIfSandboxed` reads `false` there (`isAutoAllowSupported`). Its Windows
   sandbox needs a one-time admin install and Git Bash, and sits behind a feature gate. Sending
-  nothing also keeps the session's behaviour the same if that gate opens.
+  nothing also keeps the session's behaviour the same if that gate opens. A `sandbox` object the
+  profile hook sends passes through on Windows untouched. That is accepted: auto-allow is
+  forced off there, whatever it says.
 - The citations are offsets in the 2.1.293 binary's strings. Stage C's live checks on a Mac are
   listed in the PR. Clauseo's own macOS jail (parked) would nest Claude's sandbox inside it,
   where it can't start, and commands would go back to asking.

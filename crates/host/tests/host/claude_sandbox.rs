@@ -8,8 +8,8 @@ use crate::profile_rig::{CLAUDE, Wired, agent_lines, agents, settings, template,
 use crate::support::Dir;
 
 /// Claude Code's own sandbox (`agent::loads::sandbox`): a Claude session on macOS and Linux
-/// gets it, with its work folder writable, the home denied and its temp folder as
-/// `CLAUDE_CODE_TMPDIR`; on Windows none, so its commands keep asking.
+/// gets it, with its work folder writable, the home denied and a short temp folder of its own
+/// as `CLAUDE_CODE_TMPDIR`; on Windows none, so its commands keep asking.
 #[test]
 fn claude_runs_its_commands_in_its_sandbox_except_on_windows() {
     let dir = Dir::new("profile_claude_sandbox", &[]);
@@ -22,8 +22,9 @@ fn claude_runs_its_commands_in_its_sandbox_except_on_windows() {
                 "autoAllowBashIfSandboxed": true,
                 "allowUnsandboxedCommands": false,
                 "filesystem": {
-                    "denyRead": ["~/"],
-                    "allowWrite": ["{{any}}", "@WORK@", "{{any}}", "{{any}}"],
+                    "denyRead": ["~/", "/Volumes", "/Users/Shared", "{{any}}", "{{any}}"],
+                    "denyWrite": ["{{any}}"],
+                    "allowWrite": ["{{any}}", "@WORK@", "{{any}}", "{{any}}", "{{any}}"],
                 },
             }}),
             &[],
@@ -53,7 +54,10 @@ fn claude_runs_its_commands_in_its_sandbox_except_on_windows() {
     if cfg!(windows) {
         assert_eq!(tmp, None);
     } else {
-        let run = launch.run.as_ref().expect("a run folder");
-        assert_eq!(tmp, Some(&run.join("tmp").into_os_string()));
+        // Claude's short temp folder, gone with the run folder once the session ended.
+        let short = std::path::PathBuf::from(tmp.expect("CLAUDE_CODE_TMPDIR"));
+        assert!(short.starts_with("/tmp"), "{}", short.display());
+        assert!(short.join("claude-4294967295").as_os_str().len() <= 44);
+        assert!(!short.exists(), "removed with the run folder");
     }
 }

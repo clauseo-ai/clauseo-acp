@@ -203,6 +203,7 @@ fn claude_gets_agent_browser_rules_only_with_the_browser() {
             case_law: false,
             browser,
             sandbox: None,
+            matter: None,
         };
         claude_options(&mut options, &keys);
         let allowed = names(&options, "allowedTools");
