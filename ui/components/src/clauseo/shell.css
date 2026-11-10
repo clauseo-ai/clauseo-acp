@@ -293,13 +293,14 @@
   }
 
   /* ---------- Settings, at the rail's foot ---------- */
+  /* the gear before the words, as the scratch matter's icon stands before its name; it takes the words' colour */
   .room-settings {
     @apply text-ui text-muted;
     flex: none;
     display: flex;
     align-items: center;
-    justify-content: space-between;
-    gap: var(--s2);
+    justify-content: flex-start;
+    gap: var(--s3);
     min-height: var(--size-control);
     padding: 0 var(--s3);
     border-radius: var(--r-tile);

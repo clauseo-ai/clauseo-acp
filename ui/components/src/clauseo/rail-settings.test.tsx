@@ -4,6 +4,8 @@
 import { act, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, test } from "vitest";
+import { iconIn } from "../icons/icon-in.tsx";
+import { IconSettings } from "../icons/icons.tsx";
 import { DEFAULT_DISPLAY, showDisplay } from "../lib/display.ts";
 import { Rail } from "./rail.tsx";
 
@@ -48,6 +50,22 @@ describe("Settings at the rail's foot", () => {
     expect(document.querySelector("a.room-settings")).toBeNull();
     await act(async () => button?.click());
     expect(pressed).toBe(1);
+  });
+
+  test("a 16 px gear stands before the words, hidden, as the Settings window's sections draw theirs; the words name it", async () => {
+    await mount(<Rail open groups={[]} onSettings={() => {}} />);
+    const button = document.querySelector<HTMLButtonElement>("button.room-settings");
+    const gear = iconIn(button, IconSettings, 16);
+    expect(gear).not.toBeNull();
+    expect(gear?.getAttribute("aria-hidden")).toBe("true");
+    expect(button?.firstElementChild).toBe(gear);
+    expect(txt(button)).toBe("Settings");
+    await act(async () => root?.unmount());
+    host?.remove();
+    await mount(<Rail open groups={[]} settings="#settings" />);
+    const link = document.querySelector("a.room-settings");
+    expect(link?.firstElementChild).toBe(iconIn(link, IconSettings, 16));
+    expect(link?.firstElementChild?.getAttribute("aria-hidden")).toBe("true");
   });
 
   test("off the Mac the shortcut is Ctrl+,", async () => {
