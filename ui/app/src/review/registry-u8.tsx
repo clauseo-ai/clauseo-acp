@@ -28,7 +28,7 @@ import type { Entry } from "./entry.ts";
 import { detailed, fakeNext } from "../room/fake-next.ts";
 import { NO_STAND_INS, type StandIns } from "../room/versions/stand-ins.ts";
 import { RoomClicking } from "./states.tsx";
-import { versionWords, type WordsRef } from "./words.ts";
+import { threadWords, versionWords, type WordsRef } from "./words.ts";
 
 const THE_MATTER: MatterSummary = {
   matter: MATTER,
@@ -76,12 +76,24 @@ const version = (
 });
 
 /** The host's marker for a restore: `checkpoint` restored the matter to `from`. */
-const restoreMarker = (order: number, from: string, checkpoint: string): ViewEntry => ({
+const restoreMarker = (
+  order: number,
+  from: string,
+  checkpoint: string,
+  undoes?: string,
+): ViewEntry => ({
   marker: {
     order,
     event: uuid(order, 9),
     ts: Date.now(),
-    kind: { version_restored: { from, checkpoint, scope: "matter" } },
+    kind: {
+      version_restored: {
+        from,
+        checkpoint,
+        scope: "matter",
+        ...(undoes === undefined ? {} : { undoes }),
+      },
+    },
   },
 });
 
@@ -129,6 +141,8 @@ export type Matter = {
   restored?: boolean;
   /** preview_restore's removes, when it is asked to undo a restore. */
   removes?: string[];
+  /** The conversation's stream records a restore made from Versions while it was open, or the undo of one. */
+  recorded?: "restore" | "undo";
 };
 
 /** The host's Word tool's marking up of the notice: a word out and a word in, and a paragraph added. */
@@ -185,6 +199,9 @@ export function versionsHost(m: Matter): FakeTransport {
           }),
         ]
       : []),
+    ...(m.recorded === undefined
+      ? []
+      : [restoreMarker(29, "cp2", "cp7", m.recorded === "undo" ? "cp5" : undefined)]),
   ];
   const matterReset: ViewPatchBody = {
     reset: {
@@ -446,4 +463,12 @@ export const U8: Entry[] = [
     { restored: true, removes: ["Rejoinder.docx", "Synopsis.docx"] },
     UNDOING,
   ),
+  // the conversation open as the restore was made records it, as a quiet line under its last answer
+  state(
+    "U8-28",
+    threadWords("You restored an earlier version of the matter."),
+    { recorded: "restore" },
+    [],
+  ),
+  state("U8-29", threadWords("You undid the restore."), { recorded: "undo" }, []),
 ];

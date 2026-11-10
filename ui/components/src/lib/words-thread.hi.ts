@@ -45,6 +45,9 @@ export const HI = {
   // (D-026)
   Copy: "कॉपी करें",
   Copied: "कॉपी हो गया",
+  // a restore of the matter made from Versions while this conversation was open, as a quiet line in it
+  "You restored an earlier version of the matter.": "आपने मामले का एक पहले का संस्करण पुनर्स्थापित किया।",
+  "You undid the restore.": "आपने पुनर्स्थापन पूर्ववत किया।",
   // who said each row, for assistive technology ("You" is words.ts's)
   "Your question": "आपका प्रश्न",
   "Clauseo's answer": "Clauseo का उत्तर",

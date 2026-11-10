@@ -219,5 +219,27 @@
     "at": "2026-11-10",
     "by": "app track (provisional; Rohan batch review)",
     "note": "D-033: the same for several files"
+  },
+  "U8-28": {
+    "en": "You restored an earlier version of the matter.",
+    "hi": "आपने मामले का एक पहले का संस्करण पुनर्स्थापित किया।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-10",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-10",
+    "by": "app track (provisional; Rohan batch review)",
+    "note": "D-036: the conversation records a restore made from Versions while it was open"
+  },
+  "U8-29": {
+    "en": "You undid the restore.",
+    "hi": "आपने पुनर्स्थापन पूर्ववत किया।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-10",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-10",
+    "by": "app track (provisional; Rohan batch review)",
+    "note": "D-036: the same for the undo of a restore"
   }
 }

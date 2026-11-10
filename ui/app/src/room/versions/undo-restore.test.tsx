@@ -110,7 +110,7 @@ test("Undo this change on a restore version asks through the restore dialog, wit
   );
   await h.click(h.one("dialog-confirm"));
   expect(h.sent("restore_version")).toEqual([
-    { matter: MATTER, checkpoint: "cp3", scope: "matter", undoes: "cp4" },
+    { matter: MATTER, checkpoint: "cp3", scope: "matter", undoes: "cp4", thread: THREAD },
   ]);
   expect(dialog()).toBeNull();
   expect(document.body.textContent).toMatch(/Undid the restore\. The matter stands as it did at/);
@@ -221,7 +221,7 @@ test("undoing a restore asks the host to take back what it added: the dialog nam
   expect(dialog()?.textContent).not.toMatch(/Nothing will change|added since/);
   await h.click(h.one("dialog-confirm"));
   expect(h.sent("restore_version")).toEqual([
-    { matter: MATTER, checkpoint: "cp3", scope: "matter", undoes: "cp4" },
+    { matter: MATTER, checkpoint: "cp3", scope: "matter", undoes: "cp4", thread: THREAD },
   ]);
 });
 
