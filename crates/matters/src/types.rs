@@ -282,6 +282,10 @@ pub struct Restore<'a> {
     pub checkpoint: CheckpointId,
     /// The commit time of both.
     pub at: Timestamp,
+    /// The `restore` checkpoint this restore takes back, if it does: the files that restore
+    /// added go too, each only while it holds what that restore wrote. `from` is then the
+    /// checkpoint just before it. `UnknownCheckpoint` for one that is not a restore.
+    pub undoes: Option<CheckpointId>,
 }
 
 /// What a restore of a version would do, file by file: what [`Matter::preview_restore`]
@@ -292,6 +296,9 @@ pub struct RestorePlan {
     /// (`Modified`, or `Added` for a file brought back), sorted by path. Empty when the folder
     /// already stands as the version.
     pub writes: Vec<FileChange>,
+    /// The files the undone restore added that still hold what it wrote, sorted: deleted.
+    /// Empty unless the restore undoes another ([`Restore::undoes`]).
+    pub removes: Vec<MatterPath>,
     /// Files in the folder now that the version does not have, sorted: they stay. For
     /// [`RestoreFiles::Only`], only the chosen ones.
     pub added_since: Vec<MatterPath>,
@@ -321,6 +328,8 @@ pub struct Restored {
     pub checkpoint: Checkpoint,
     /// The files written, sorted.
     pub written: Vec<MatterPath>,
+    /// The files deleted, as [`RestorePlan::removes`].
+    pub removed: Vec<MatterPath>,
     /// As [`RestorePlan::added_since`]: left in place.
     pub added_since: Vec<MatterPath>,
     /// As [`RestorePlan::kept`].

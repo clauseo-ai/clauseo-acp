@@ -2464,6 +2464,10 @@ export type HostCommand =
 	 *  version does not know is refused when the command decodes.
 	 */
 	scope: RestoreRequest,
+	/**  The `restore` checkpoint this restore takes back: the files it added go too. */
+	undoes?: CheckpointId,
+	/**  The conversation it was asked from, of this matter: its stream records the restore. */
+	thread?: ThreadId,
 } }) & { allow_blocked_site?: never; answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; cancel_browser_install?: never; cancel_scan?: never; cancel_scheduled_update?: never; check_for_update?: never; connector?: never; create_matter?: never; create_thread?: never; decide_revisions?: never; edit_queued_prompt?: never; first_act?: never; forget_matter?: never; install_browser?: never; install_update?: never; mark_seen?: never; mark_thread_done?: never; open_matter?: never; recheck_browser_policy?: never; refresh_limits?: never; relocate_matter?: never; remove_queued_prompt?: never; remove_sandbox_setup?: never; rename_thread?: never; restart_agent?: never; resume_queue?: never; retry_protection?: never; revoke_allowed_site?: never; scan_folder?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_network?: never; set_privacy_settings?: never; set_skill_pack?: never; set_tool_settings?: never; set_ui_settings?: never; set_update_mode?: never; snooze_thread?: never; sweep_done?: never; undo_step?: never; update_matter?: never } | 
 /**
  *  Change the display settings; answers `Done`, and every app subscriber gets
@@ -2906,6 +2910,8 @@ export type HostQuery =
 	checkpoint: CheckpointId,
 	/**  The whole matter or chosen files, as `RestoreVersion` takes it. */
 	scope: RestoreRequest,
+	/**  The `restore` checkpoint it would take back, as `RestoreVersion` takes it. */
+	undoes?: CheckpointId,
 } }) & { compare_versions?: never; folder_support?: never; list_papers?: never; list_revisions?: never; list_threads?: never; page_entries?: never; preview_undo?: never; read_blob?: never; search?: never; word_blackline?: never } | 
 /**
  *  What undoing a turn's step would meet now: the step's files whose content in the folder
@@ -3448,7 +3454,10 @@ export type MarkerKind =
 	/**  Files kept as they were. */
 	kept: MatterPath[],
 } }) & { compaction?: never; matter_relocated?: never; version_restored?: never } | 
-/**  A version was restored (matter stream). */
+/**
+ *  A version was restored (matter stream, and the stream of the conversation it was asked
+ *  from).
+ */
 ({ version_restored: {
 	/**  The checkpoint restored from. */
 	from: CheckpointId,
@@ -3456,6 +3465,8 @@ export type MarkerKind =
 	checkpoint: CheckpointId,
 	/**  What was put back. */
 	scope: RestoreScope,
+	/**  The `restore` checkpoint it took back, if it did. */
+	undoes?: CheckpointId,
 } }) & { compaction?: never; matter_relocated?: never; step_undone?: never } | 
 /**  The matter's folder was located after it moved (matter stream): "Found at {folder}". */
 ({ matter_relocated: {
@@ -4901,6 +4912,11 @@ export type RestorePreview = {
 	 *  stands as the version.
 	 */
 	changes: FileChange[],
+	/**
+	 *  Files the undone restore added that still hold what it wrote: the restore deletes them.
+	 *  Empty unless it undoes a restore; missing from an older host's answer.
+	 */
+	removes?: MatterPath[],
 	/**  Files in the folder now that the version does not have: the restore leaves them. */
 	added_since: MatterPath[],
 	/**
@@ -6803,6 +6819,8 @@ export type VersionRestored = {
 	checkpoint: CheckpointId,
 	/**  What was put back. */
 	scope: RestoreScope,
+	/**  The `restore` checkpoint this one took back, if it did. Missing from older logs. */
+	undoes?: CheckpointId,
 };
 
 /**

@@ -42,7 +42,9 @@ fn undo_refuses_seven_character_word_name() {
 #[test]
 fn restore_refuses_seven_character_word_name() {
     let (fx, mut matter) = open_in_word("owner-restore");
-    let preview = matter.preview_restore(cid(1), RestoreFiles::All).unwrap();
+    let preview = matter
+        .preview_restore(cid(1), RestoreFiles::All, None)
+        .unwrap();
     assert_eq!(preview.locked, [path("Invoice.docx")]);
     let err = matter
         .restore(&restore_request(1, RestoreFiles::All, 4, 5))

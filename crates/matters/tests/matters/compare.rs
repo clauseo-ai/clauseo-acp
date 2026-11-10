@@ -165,7 +165,7 @@ fn files_at_and_read_file_return_version_content() {
     assert_eq!(err.code(), ErrorCode::MatterFolderMissing, "{err:?}");
     let chosen: Vec<MatterPath> = vec![path("a.txt")];
     let err = matter
-        .preview_restore(cid(1), clauseo_matters::RestoreFiles::Only(&chosen))
+        .preview_restore(cid(1), clauseo_matters::RestoreFiles::Only(&chosen), None)
         .unwrap_err();
     assert_eq!(err.code(), ErrorCode::MatterFolderMissing, "{err:?}");
 }

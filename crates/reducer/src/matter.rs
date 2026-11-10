@@ -63,6 +63,7 @@ pub(crate) fn fold(state: &mut MatterState, envelope: &Envelope, out: &mut Appli
                 from: event.from,
                 checkpoint: event.checkpoint,
                 scope: event.scope.clone(),
+                undoes: event.undoes,
             };
             marker(state, envelope, kind, out);
         }

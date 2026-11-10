@@ -124,6 +124,7 @@ pub(super) fn query(
             matter,
             checkpoint,
             ref scope,
+            undoes,
         } => {
             if let Err(invalid) = scope.check("PreviewRestore") {
                 let _gone = reply.send(Err(Error::Invalid(invalid)));
@@ -132,8 +133,10 @@ pub(super) fn query(
             let job = MatterJob::Preview {
                 from: checkpoint,
                 scope: scope.clone(),
+                undoes,
             };
-            matter_query(actor, matter, vec![checkpoint], job, reply);
+            let versions = std::iter::once(checkpoint).chain(undoes).collect();
+            matter_query(actor, matter, versions, job, reply);
         }
         HostQuery::PreviewUndo { thread, turn } => {
             super::turn::undo_preview::preview_undo(actor, thread, turn, reply);
@@ -260,6 +263,7 @@ pub(super) fn matter_answer(reply: MatterReply) -> Result<QueryResult, Error> {
             let plan = *plan;
             QueryResult::RestorePreview(RestorePreview {
                 changes: plan.writes,
+                removes: plan.removes,
                 added_since: plan.added_since,
                 kept: plan.kept,
                 locked: plan.locked,

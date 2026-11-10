@@ -129,6 +129,9 @@ pub enum HostQuery {
         checkpoint: CheckpointId,
         /// The whole matter or chosen files, as `RestoreVersion` takes it.
         scope: RestoreRequest,
+        /// The `restore` checkpoint it would take back, as `RestoreVersion` takes it.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        undoes: Option<CheckpointId>,
     },
     /// What undoing a turn's step would meet now: the step's files whose content in the folder
     /// differs from the step's after-turn checkpoint (edited since). Writes nothing and logs
@@ -357,6 +360,10 @@ pub struct RestorePreview {
     /// (`modified`, or `added` for a file brought back). Empty when the folder already
     /// stands as the version.
     pub changes: Vec<FileChange>,
+    /// Files the undone restore added that still hold what it wrote: the restore deletes them.
+    /// Empty unless it undoes a restore; missing from an older host's answer.
+    #[serde(default)]
+    pub removes: Vec<MatterPath>,
     /// Files in the folder now that the version does not have: the restore leaves them.
     pub added_since: Vec<MatterPath>,
     /// Files that differ from the version but the restore cannot write (cloud-only, over the

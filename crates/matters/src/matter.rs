@@ -398,7 +398,7 @@ impl Matter {
     /// checkpoint if the folder changed since the last checkpoint; writes each file through a
     /// synced temp file, checks that no target changed since that checkpoint, renames them into
     /// place, and takes a `restore` checkpoint (no thread, no turn). Files added since stay, and
-    /// nothing is deleted. Cloud-only, over-cap and excluded files are never read or written. See
+    /// nothing is deleted, but the files a restore it undoes added ([`Restore::undoes`]). Cloud-only, over-cap and excluded files are never read or written. See
     /// [`Restore`] for the ids and retrying, [`RestorePlan`] for what is kept.
     pub fn restore(&mut self, request: &Restore<'_>) -> Result<Restored, Error> {
         json::check(&self.folder, self.id)?;
@@ -425,16 +425,24 @@ impl Matter {
         replace::read_local(&self.folder, &self.settings, path)
     }
 
-    /// What [`Matter::restore`] of `from` would do now, from the same plan, with the files a
+    /// What [`Matter::restore`] of `from` (taking back the restore `undoes`) would do now, from the same plan, with the files a
     /// program holds in `locked` instead of failing. Writes nothing: no object, no stat cache,
     /// no checkpoint.
     pub fn preview_restore(
         &self,
         from: CheckpointId,
         files: RestoreFiles<'_>,
+        undoes: Option<CheckpointId>,
     ) -> Result<RestorePlan, Error> {
         json::check(&self.folder, self.id)?;
-        restore::preview(&self.core, &self.folder, &self.settings, from, files)
+        restore::preview(
+            &self.core,
+            &self.folder,
+            &self.settings,
+            from,
+            files,
+            undoes,
+        )
     }
 
     /// The files that differ from `from` to `to`, sorted by path, unflagged.

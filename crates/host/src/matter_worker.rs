@@ -16,8 +16,8 @@ use clauseo_matters::{
     Settings, TimelineEntry, TurnMeta, UndoRequest, Undone, matter_path_of_resolved,
 };
 use clauseo_protocol::{
-    CheckpointId, FileChange, FileDecision, FolderSupportKind, ImportSummary, MatterId, MatterPath,
-    RestoreRequest, ThreadId, Timestamp, TurnId,
+    CheckpointId, FileChange, FolderSupportKind, ImportSummary, MatterId, MatterPath,
+    RestoreRequest,
 };
 
 use crate::agent::data_fence::{FenceCheck, PathsChecked, check_paths};
@@ -27,6 +27,8 @@ use crate::log_file::Cause;
 use crate::network_paths::resolve::Disk;
 use crate::network_paths::{self, NetEnv};
 use crate::sent::TurnPaths;
+
+pub(crate) use jobs::{RestoreJob, UndoJob};
 
 /// The matter paths a turn's tool calls named, in `folder`: those `acp` placed inside the
 /// session folder by text, and each `outside` path that the network-safe walk resolves into
@@ -67,29 +69,6 @@ pub(crate) fn matter_settings(data_dir: &Path) -> Settings {
         retention: Retention::KeepAll,
         probe: Arc::new(OsProbe),
     }
-}
-
-/// An undo request that owns its decisions, so it can cross to the matter thread.
-#[derive(Debug, Clone)]
-pub(crate) struct UndoJob {
-    pub(crate) before: CheckpointId,
-    pub(crate) after: CheckpointId,
-    pub(crate) decisions: Vec<FileDecision>,
-    pub(crate) thread: Option<ThreadId>,
-    pub(crate) turn: Option<TurnId>,
-    pub(crate) outside_edits: CheckpointId,
-    pub(crate) checkpoint: CheckpointId,
-    pub(crate) at: Timestamp,
-}
-
-/// A restore request that owns its scope, so it can cross to the matter thread.
-#[derive(Debug, Clone)]
-pub(crate) struct RestoreJob {
-    pub(crate) from: CheckpointId,
-    pub(crate) scope: RestoreRequest,
-    pub(crate) outside_edits: CheckpointId,
-    pub(crate) checkpoint: CheckpointId,
-    pub(crate) at: Timestamp,
 }
 
 /// One job for a matter thread.
@@ -158,6 +137,7 @@ pub(crate) enum MatterJob {
     Preview {
         from: CheckpointId,
         scope: RestoreRequest,
+        undoes: Option<CheckpointId>,
     },
     /// The first of `paths` (as the agent named them: absolute, or relative to `folder`) that
     /// lies in `folder` and that Word or another program holds open, by
@@ -497,6 +477,7 @@ fn handle(settings: &Settings, slot: &mut Slot, job: MatterJob) -> MatterReply {
         })),
         MatterJob::Restore(job) => MatterReply::Restored(open(settings, slot).and_then(|matter| {
             let request = Restore {
+                undoes: job.undoes,
                 from: job.from,
                 files: (&job.scope).into(),
                 outside_edits: job.outside_edits,
@@ -514,10 +495,17 @@ fn handle(settings: &Settings, slot: &mut Slot, job: MatterJob) -> MatterReply {
             open(settings, slot)
                 .and_then(|matter| Ok(matter.compare(CompareSide::Checkpoint(from), to)?)),
         ),
-        MatterJob::Preview { from, scope } => MatterReply::Previewed(
-            open(settings, slot)
-                .and_then(|matter| Ok(Box::new(matter.preview_restore(from, (&scope).into())?))),
-        ),
+        MatterJob::Preview {
+            from,
+            scope,
+            undoes,
+        } => MatterReply::Previewed(open(settings, slot).and_then(|matter| {
+            Ok(Box::new(matter.preview_restore(
+                from,
+                (&scope).into(),
+                undoes,
+            )?))
+        })),
         MatterJob::HeldOpen {
             folder,
             paths,
@@ -579,6 +567,7 @@ fn open<'s>(settings: &Settings, slot: &'s mut Slot) -> Result<&'s mut Matter, E
 mod checkpoints;
 mod claims;
 mod import;
+mod jobs;
 mod relocate;
 mod sides;
 mod too_deep;

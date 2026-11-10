@@ -200,6 +200,7 @@ mod windows {
             outside_edits: cid(n),
             checkpoint: cid(n + 1),
             at: at(n),
+            undoes: None,
         }
     }
 

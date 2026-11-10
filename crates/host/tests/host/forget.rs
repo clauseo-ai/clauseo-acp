@@ -195,6 +195,7 @@ fn preview(
     });
     let checkpoint = events.checkpoint(CheckpointKind::Import).unwrap();
     host.query(HostQuery::PreviewRestore {
+        undoes: None,
         matter,
         checkpoint,
         scope: RestoreRequest::Matter,
