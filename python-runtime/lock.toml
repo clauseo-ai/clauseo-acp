@@ -6,7 +6,7 @@ schema = 1
 
 [runtime]
 python = "3.13.18"
-build = 2
+build = 3
 pbs_release = "20261026"
 
 # What bump resolves: pip resolves `requirements` for cp313 on each target (binary wheels only),
@@ -18,7 +18,7 @@ requirements = [
   "pandas>=3.1,<4",
   "lxml>=6.1,<7",
   "pillow>=13,<14",
-  "pypdfium2>=5.15,<6",
+  "pypdfium2>=5.15.2,<6",
   "pypdf>=7,<8",
   "python-docx>=1.2,<2",
   "openpyxl>=3.1,<4",
@@ -339,33 +339,33 @@ size = 413949
 
 [[package]]
 name = "pypdfium2"
-version = "5.15.1"
+version = "5.15.2"
 licence = "Apache-2.0 OR BSD-3-Clause"
 requires = []
 
 [package.wheels.aarch64-apple-darwin]
-file = "pypdfium2-5.15.1-py3-none-macosx_13_0_arm64.whl"
-url = "https://files.pythonhosted.org/packages/33/c6/9d118ffda2612d65471ccc598c1a0fc4c17222c751fba47f0351d5ba580c/pypdfium2-5.15.1-py3-none-macosx_13_0_arm64.whl"
-sha256 = "8cb84f21ed36428ecf483e136ccbe71fc258ee730eae87d69baa3e178e56c8d6"
-size = 3710594
+file = "pypdfium2-5.15.2-py3-none-macosx_13_0_arm64.whl"
+url = "https://files.pythonhosted.org/packages/e7/bb/bf88a781a53c905022b25b2d1fb742c908f86b8076403471f626cc41a508/pypdfium2-5.15.2-py3-none-macosx_13_0_arm64.whl"
+sha256 = "e71fe832e94421ac3c28d6a6ed4a9e61f22417089652d339f391c4ffc2a44c35"
+size = 3710813
 
 [package.wheels.aarch64-pc-windows-msvc]
-file = "pypdfium2-5.15.1-py3-none-win_arm64.whl"
-url = "https://files.pythonhosted.org/packages/98/63/82fbff983c077ef0f97932e3cfbdbcf1bf71ec0933358959ef69fcf9f797/pypdfium2-5.15.1-py3-none-win_arm64.whl"
-sha256 = "f711092ba714959c6bc04eb747cbf9d188875b842e1fe8ecd3aa61b201572737"
-size = 3907474
+file = "pypdfium2-5.15.2-py3-none-win_arm64.whl"
+url = "https://files.pythonhosted.org/packages/e7/20/edc21f0b086aba3162a33e5725a4f224dcabb46f67a051e1a1be81e3cbbc/pypdfium2-5.15.2-py3-none-win_arm64.whl"
+sha256 = "a20398367f188eb817be156bfd00077dcb5f8ad06c093849f3fa70b8087b4a87"
+size = 3907705
 
 [package.wheels.x86_64-apple-darwin]
-file = "pypdfium2-5.15.1-py3-none-macosx_13_0_x86_64.whl"
-url = "https://files.pythonhosted.org/packages/3e/88/7d2f8c158f8ff9ad975e01908942283e465fbde80a7756944fd29360d64b/pypdfium2-5.15.1-py3-none-macosx_13_0_x86_64.whl"
-sha256 = "d3086b72825c3b976d38fa6ca015703e26e615c1de7d6f48e26448268fe1d7aa"
-size = 3939881
+file = "pypdfium2-5.15.2-py3-none-macosx_13_0_x86_64.whl"
+url = "https://files.pythonhosted.org/packages/09/de/9e7eda3ee1c00228d72f7fc53a370d76eed51fe5fea25debc428ac684e35/pypdfium2-5.15.2-py3-none-macosx_13_0_x86_64.whl"
+sha256 = "7f296a298074d76fb7c3d1ecb80d7097a96778bf0ad9c5c48a0170e56e2c6821"
+size = 3940099
 
 [package.wheels.x86_64-pc-windows-msvc]
-file = "pypdfium2-5.15.1-py3-none-win_amd64.whl"
-url = "https://files.pythonhosted.org/packages/a8/82/42aa61264fcc9fec241b34e93caffd95bcdabe9b1960bfce6258374b55fa/pypdfium2-5.15.1-py3-none-win_amd64.whl"
-sha256 = "9cf0fda610da25ef9c1e1234a85020a3275645ab95f7f74f67840bb5f8de10f7"
-size = 4187358
+file = "pypdfium2-5.15.2-py3-none-win_amd64.whl"
+url = "https://files.pythonhosted.org/packages/fe/7f/8aa446529fa14523e5c18f89e823afc95526689f76a75efe68a82a10d850/pypdfium2-5.15.2-py3-none-win_amd64.whl"
+sha256 = "74d1bace34fb01c660d0b64344d5a4b7d276942b7c6623c88ab59ea21c5acfbd"
+size = 4187589
 
 [[package]]
 name = "python-dateutil"

@@ -2,7 +2,7 @@ Third-party notices for Clauseo's Python runtime
 ================================================================================
 
 Written by `cargo xtask python-runtime bump` from python-runtime/lock.toml; do not edit.
-lock-sha256: bf37a5d4831762c855e531126afafe7f2b8331c5b42b5fa2d30737ca6c2bb746
+lock-sha256: bfe7d1d1d3a2f302e3312e0a71757778dd035e15ed2f2cb0b7df7f48f2100b7d
 
 The runtime is CPython 3.13.18 as built by python-build-standalone (release 20261026), with the
 Python packages below. Tcl/Tk, tkinter, IDLE and turtle are removed from the runtime, so
@@ -35,7 +35,7 @@ Contents
 - paragraphs 1.1.0 (MIT)
 - pillow 13.0.0 (MIT-CMU)
 - pypdf 7.0.0 (BSD-3-Clause)
-- pypdfium2 5.15.1 (Apache-2.0 OR BSD-3-Clause)
+- pypdfium2 5.15.2 (Apache-2.0 OR BSD-3-Clause)
 - python-dateutil 4.0.0 (BSD-3-Clause)
 - python-docx 1.2.0 (MIT)
 - python-pptx 1.0.2 (MIT)
@@ -12846,11 +12846,11 @@ ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 POSSIBILITY OF SUCH DAMAGE.
 
 ================================================================================
-pypdfium2 5.15.1 (Apache-2.0 OR BSD-3-Clause)
+pypdfium2 5.15.2 (Apache-2.0 OR BSD-3-Clause)
 ================================================================================
 
 --------------------------------------------------------------------------------
-pypdfium2-5.15.1.dist-info/licenses/BUILD_LICENSES/SHARED/Apache-2.0.txt (all targets)
+pypdfium2-5.15.2.dist-info/licenses/BUILD_LICENSES/SHARED/Apache-2.0.txt (all targets)
 --------------------------------------------------------------------------------
 
                                  Apache License
@@ -13056,12 +13056,12 @@ pypdfium2-5.15.1.dist-info/licenses/BUILD_LICENSES/SHARED/Apache-2.0.txt (all ta
    limitations under the License.
 
 --------------------------------------------------------------------------------
-pypdfium2-5.15.1.dist-info/licenses/BUILD_LICENSES/abseil.txt (all targets)
+pypdfium2-5.15.2.dist-info/licenses/BUILD_LICENSES/abseil.txt (all targets)
 --------------------------------------------------------------------------------
 #include ./SHARED/Apache-2.0.txt
 
 --------------------------------------------------------------------------------
-pypdfium2-5.15.1.dist-info/licenses/BUILD_LICENSES/agg23.txt (all targets)
+pypdfium2-5.15.2.dist-info/licenses/BUILD_LICENSES/agg23.txt (all targets)
 --------------------------------------------------------------------------------
 //----------------------------------------------------------------------------
 // Anti-Grain Geometry - Version 2.3
@@ -13079,7 +13079,7 @@ pypdfium2-5.15.1.dist-info/licenses/BUILD_LICENSES/agg23.txt (all targets)
 //----------------------------------------------------------------------------
 
 --------------------------------------------------------------------------------
-pypdfium2-5.15.1.dist-info/licenses/BUILD_LICENSES/all_except_musl/llvm-libc.txt (all targets)
+pypdfium2-5.15.2.dist-info/licenses/BUILD_LICENSES/all_except_musl/llvm-libc.txt (all targets)
 --------------------------------------------------------------------------------
 ==============================================================================
 The LLVM Project is under the Apache License v2.0 with LLVM Exceptions:
@@ -13160,7 +13160,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS WITH THE
 SOFTWARE.
 
 --------------------------------------------------------------------------------
-pypdfium2-5.15.1.dist-info/licenses/BUILD_LICENSES/android/catapult.txt (all targets)
+pypdfium2-5.15.2.dist-info/licenses/BUILD_LICENSES/android/catapult.txt (all targets)
 --------------------------------------------------------------------------------
 Copyright 2015 The Chromium Authors. All rights reserved.
 
@@ -13190,7 +13190,7 @@ OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 --------------------------------------------------------------------------------
-pypdfium2-5.15.1.dist-info/licenses/BUILD_LICENSES/android/cpu_features.txt (all targets)
+pypdfium2-5.15.2.dist-info/licenses/BUILD_LICENSES/android/cpu_features.txt (all targets)
 --------------------------------------------------------------------------------
 #include ../SHARED/Apache-2.0.txt
 
@@ -13223,7 +13223,7 @@ OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
 SUCH DAMAGE.
 
 --------------------------------------------------------------------------------
-pypdfium2-5.15.1.dist-info/licenses/BUILD_LICENSES/android/libunwind.txt (all targets)
+pypdfium2-5.15.2.dist-info/licenses/BUILD_LICENSES/android/libunwind.txt (all targets)
 --------------------------------------------------------------------------------
 ==============================================================================
 The LLVM Project is under the Apache License v2.0 with LLVM Exceptions:
@@ -13337,7 +13337,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 
 --------------------------------------------------------------------------------
-pypdfium2-5.15.1.dist-info/licenses/BUILD_LICENSES/cibw_musl/libgcc_and_libstdc++.txt (all targets)
+pypdfium2-5.15.2.dist-info/licenses/BUILD_LICENSES/cibw_musl/libgcc_and_libstdc++.txt (all targets)
 --------------------------------------------------------------------------------
 GCC RUNTIME LIBRARY EXCEPTION
 
@@ -14037,7 +14037,7 @@ copy of the Program in return for a fee.
                      END OF TERMS AND CONDITIONS
 
 --------------------------------------------------------------------------------
-pypdfium2-5.15.1.dist-info/licenses/BUILD_LICENSES/dragonbox-Apache2-LLVM.txt (all targets)
+pypdfium2-5.15.2.dist-info/licenses/BUILD_LICENSES/dragonbox-Apache2-LLVM.txt (all targets)
 --------------------------------------------------------------------------------
 #include ./SHARED/Apache-2.0.txt
 
@@ -14058,7 +14058,7 @@ the License, but only in their entirety and only with respect to the Combined
 Software.
 
 --------------------------------------------------------------------------------
-pypdfium2-5.15.1.dist-info/licenses/BUILD_LICENSES/dragonbox-Boost.txt (all targets)
+pypdfium2-5.15.2.dist-info/licenses/BUILD_LICENSES/dragonbox-Boost.txt (all targets)
 --------------------------------------------------------------------------------
 Boost Software License - Version 1.0 - August 17th, 2003
 
@@ -14085,7 +14085,7 @@ ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 --------------------------------------------------------------------------------
-pypdfium2-5.15.1.dist-info/licenses/BUILD_LICENSES/fast_float.txt (all targets)
+pypdfium2-5.15.2.dist-info/licenses/BUILD_LICENSES/fast_float.txt (all targets)
 --------------------------------------------------------------------------------
 MIT License
 
@@ -14116,7 +14116,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 --------------------------------------------------------------------------------
-pypdfium2-5.15.1.dist-info/licenses/BUILD_LICENSES/freetype.txt (all targets)
+pypdfium2-5.15.2.dist-info/licenses/BUILD_LICENSES/freetype.txt (all targets)
 --------------------------------------------------------------------------------
                     The FreeType Project LICENSE
                     ----------------------------
@@ -14289,7 +14289,7 @@ Legal Terms
 --- end of FTL.TXT ---
 
 --------------------------------------------------------------------------------
-pypdfium2-5.15.1.dist-info/licenses/BUILD_LICENSES/harfbuzz.txt (all targets)
+pypdfium2-5.15.2.dist-info/licenses/BUILD_LICENSES/harfbuzz.txt (all targets)
 --------------------------------------------------------------------------------
 HarfBuzz is licensed under the so-called "Old MIT" license.  Details follow.
 For parts of HarfBuzz that are licensed under different licenses see individual
@@ -14335,12 +14335,12 @@ ON AN "AS IS" BASIS, AND THE COPYRIGHT HOLDER HAS NO OBLIGATION TO
 PROVIDE MAINTENANCE, SUPPORT, UPDATES, ENHANCEMENTS, OR MODIFICATIONS.
 
 --------------------------------------------------------------------------------
-pypdfium2-5.15.1.dist-info/licenses/BUILD_LICENSES/highway.txt (all targets)
+pypdfium2-5.15.2.dist-info/licenses/BUILD_LICENSES/highway.txt (all targets)
 --------------------------------------------------------------------------------
 #include ./SHARED/Apache-2.0.txt
 
 --------------------------------------------------------------------------------
-pypdfium2-5.15.1.dist-info/licenses/BUILD_LICENSES/icu.txt (all targets)
+pypdfium2-5.15.2.dist-info/licenses/BUILD_LICENSES/icu.txt (all targets)
 --------------------------------------------------------------------------------
 UNICODE LICENSE V3
 
@@ -14856,7 +14856,7 @@ suitability of this software for any purpose.  It is provided "as is"
 without express or implied warranty.
 
 --------------------------------------------------------------------------------
-pypdfium2-5.15.1.dist-info/licenses/BUILD_LICENSES/lcms.txt (all targets)
+pypdfium2-5.15.2.dist-info/licenses/BUILD_LICENSES/lcms.txt (all targets)
 --------------------------------------------------------------------------------
 //---------------------------------------------------------------------------------
 //
@@ -14887,7 +14887,7 @@ pypdfium2-5.15.1.dist-info/licenses/BUILD_LICENSES/lcms.txt (all targets)
 //
 
 --------------------------------------------------------------------------------
-pypdfium2-5.15.1.dist-info/licenses/BUILD_LICENSES/libjpeg_turbo.ijg (all targets)
+pypdfium2-5.15.2.dist-info/licenses/BUILD_LICENSES/libjpeg_turbo.ijg (all targets)
 --------------------------------------------------------------------------------
 libjpeg-turbo note:  This file has been modified by The libjpeg-turbo Project
 to include only information relevant to libjpeg-turbo, to wordsmith certain
@@ -15151,7 +15151,7 @@ TO DO
 Please send bug reports, offers of help, etc. to jpeg-info@jpegclub.org.
 
 --------------------------------------------------------------------------------
-pypdfium2-5.15.1.dist-info/licenses/BUILD_LICENSES/libjpeg_turbo.md (all targets)
+pypdfium2-5.15.2.dist-info/licenses/BUILD_LICENSES/libjpeg_turbo.md (all targets)
 --------------------------------------------------------------------------------
 libjpeg-turbo Licenses
 ======================
@@ -15290,7 +15290,7 @@ desirable to choose a license that granted us the same protections for new code
 that were granted to the IJG for code derived from their software.
 
 --------------------------------------------------------------------------------
-pypdfium2-5.15.1.dist-info/licenses/BUILD_LICENSES/libopenjpeg.txt (all targets)
+pypdfium2-5.15.2.dist-info/licenses/BUILD_LICENSES/libopenjpeg.txt (all targets)
 --------------------------------------------------------------------------------
 /*
  * The copyright in this software is being made available under the 2-clauses
@@ -15326,7 +15326,7 @@ pypdfium2-5.15.1.dist-info/licenses/BUILD_LICENSES/libopenjpeg.txt (all targets)
  */
 
 --------------------------------------------------------------------------------
-pypdfium2-5.15.1.dist-info/licenses/BUILD_LICENSES/libpng.txt (all targets)
+pypdfium2-5.15.2.dist-info/licenses/BUILD_LICENSES/libpng.txt (all targets)
 --------------------------------------------------------------------------------
 COPYRIGHT NOTICE, DISCLAIMER, and LICENSE
 =========================================
@@ -15464,7 +15464,7 @@ this source code in a product, acknowledgment is not required but would
 be appreciated.
 
 --------------------------------------------------------------------------------
-pypdfium2-5.15.1.dist-info/licenses/BUILD_LICENSES/libtiff.txt (all targets)
+pypdfium2-5.15.2.dist-info/licenses/BUILD_LICENSES/libtiff.txt (all targets)
 --------------------------------------------------------------------------------
 Copyright (c) 1988-1997 Sam Leffler
 Copyright (c) 1991-1997 Silicon Graphics, Inc.
@@ -15489,7 +15489,7 @@ LIABILITY, ARISING OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE
 OF THIS SOFTWARE.
 
 --------------------------------------------------------------------------------
-pypdfium2-5.15.1.dist-info/licenses/BUILD_LICENSES/pbin_and_sbuild/brotli.txt (all targets)
+pypdfium2-5.15.2.dist-info/licenses/BUILD_LICENSES/pbin_and_sbuild/brotli.txt (all targets)
 --------------------------------------------------------------------------------
 Copyright (c) 2009, 2010, 2013-2016 by the Brotli Authors.
 
@@ -15512,7 +15512,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 
 --------------------------------------------------------------------------------
-pypdfium2-5.15.1.dist-info/licenses/BUILD_LICENSES/pbin_and_sbuild/libyuv.txt (all targets)
+pypdfium2-5.15.2.dist-info/licenses/BUILD_LICENSES/pbin_and_sbuild/libyuv.txt (all targets)
 --------------------------------------------------------------------------------
 Copyright 2011 The LibYuv Project Authors. All rights reserved.
 
@@ -15545,7 +15545,7 @@ THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 --------------------------------------------------------------------------------
-pypdfium2-5.15.1.dist-info/licenses/BUILD_LICENSES/pbin_musl/musl.txt (all targets)
+pypdfium2-5.15.2.dist-info/licenses/BUILD_LICENSES/pbin_musl/musl.txt (all targets)
 --------------------------------------------------------------------------------
 musl as a whole is licensed under the following standard MIT license:
 
@@ -15742,7 +15742,7 @@ permissive licensing, and of not having licensing issues being an
 obstacle to adoption, that text has been removed.
 
 --------------------------------------------------------------------------------
-pypdfium2-5.15.1.dist-info/licenses/BUILD_LICENSES/pdfium-binaries.txt (all targets)
+pypdfium2-5.15.2.dist-info/licenses/BUILD_LICENSES/pdfium-binaries.txt (all targets)
 --------------------------------------------------------------------------------
 Copyright 2014-2026 Benoit Blanchon
 
@@ -15755,7 +15755,7 @@ THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR I
 This package also includes third-party software. See the licenses/ directory for their respective licenses.
 
 --------------------------------------------------------------------------------
-pypdfium2-5.15.1.dist-info/licenses/BUILD_LICENSES/pdfium.txt (all targets)
+pypdfium2-5.15.2.dist-info/licenses/BUILD_LICENSES/pdfium.txt (all targets)
 --------------------------------------------------------------------------------
 // Copyright 2014 The PDFium Authors
 //
@@ -15788,7 +15788,7 @@ pypdfium2-5.15.1.dist-info/licenses/BUILD_LICENSES/pdfium.txt (all targets)
 #include ./SHARED/Apache-2.0.txt
 
 --------------------------------------------------------------------------------
-pypdfium2-5.15.1.dist-info/licenses/BUILD_LICENSES/simdutf.txt (all targets)
+pypdfium2-5.15.2.dist-info/licenses/BUILD_LICENSES/simdutf.txt (all targets)
 --------------------------------------------------------------------------------
 Copyright 2021 The simdutf authors
 
@@ -15810,7 +15810,7 @@ IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 --------------------------------------------------------------------------------
-pypdfium2-5.15.1.dist-info/licenses/BUILD_LICENSES/v8_xfa/bigint.txt (all targets)
+pypdfium2-5.15.2.dist-info/licenses/BUILD_LICENSES/v8_xfa/bigint.txt (all targets)
 --------------------------------------------------------------------------------
 
                             C++ Big Integer Library
@@ -15885,7 +15885,7 @@ absolutely no warranty.
 ~~~~
 
 --------------------------------------------------------------------------------
-pypdfium2-5.15.1.dist-info/licenses/BUILD_LICENSES/v8_xfa/fdlibm.txt (all targets)
+pypdfium2-5.15.2.dist-info/licenses/BUILD_LICENSES/v8_xfa/fdlibm.txt (all targets)
 --------------------------------------------------------------------------------
 Copyright (C) 1993-2004 by Sun Microsystems, Inc. All rights reserved.
 
@@ -15895,7 +15895,7 @@ software is freely granted, provided that this notice
 is preserved.
 
 --------------------------------------------------------------------------------
-pypdfium2-5.15.1.dist-info/licenses/BUILD_LICENSES/v8_xfa/fp16.txt (all targets)
+pypdfium2-5.15.2.dist-info/licenses/BUILD_LICENSES/v8_xfa/fp16.txt (all targets)
 --------------------------------------------------------------------------------
 The MIT License (MIT)
 
@@ -15910,7 +15910,7 @@ The above copyright notice and this permission notice shall be included in all c
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 --------------------------------------------------------------------------------
-pypdfium2-5.15.1.dist-info/licenses/BUILD_LICENSES/v8_xfa/inspector_protocol.txt (all targets)
+pypdfium2-5.15.2.dist-info/licenses/BUILD_LICENSES/v8_xfa/inspector_protocol.txt (all targets)
 --------------------------------------------------------------------------------
 // Copyright 2016 The Chromium Authors
 //
@@ -15941,7 +15941,7 @@ pypdfium2-5.15.1.dist-info/licenses/BUILD_LICENSES/v8_xfa/inspector_protocol.txt
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 --------------------------------------------------------------------------------
-pypdfium2-5.15.1.dist-info/licenses/BUILD_LICENSES/v8_xfa/strongtalk.txt (all targets)
+pypdfium2-5.15.2.dist-info/licenses/BUILD_LICENSES/v8_xfa/strongtalk.txt (all targets)
 --------------------------------------------------------------------------------
 Copyright (c) 1994-2006 Sun Microsystems Inc.
 All Rights Reserved.
@@ -15974,7 +15974,7 @@ NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 --------------------------------------------------------------------------------
-pypdfium2-5.15.1.dist-info/licenses/BUILD_LICENSES/v8_xfa/v8.txt (all targets)
+pypdfium2-5.15.2.dist-info/licenses/BUILD_LICENSES/v8_xfa/v8.txt (all targets)
 --------------------------------------------------------------------------------
 Copyright 2006-2011, the V8 project authors. All rights reserved.
 Redistribution and use in source and binary forms, with or without
@@ -16004,7 +16004,7 @@ THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 --------------------------------------------------------------------------------
-pypdfium2-5.15.1.dist-info/licenses/BUILD_LICENSES/zlib.txt (all targets)
+pypdfium2-5.15.2.dist-info/licenses/BUILD_LICENSES/zlib.txt (all targets)
 --------------------------------------------------------------------------------
 /* zlib.h -- interface of the 'zlib' general purpose compression library
   version 1.3.1, January 22nd, 2024
@@ -16037,7 +16037,7 @@ pypdfium2-5.15.1.dist-info/licenses/BUILD_LICENSES/zlib.txt (all targets)
 */
 
 --------------------------------------------------------------------------------
-pypdfium2-5.15.1.dist-info/licenses/LICENSES/Apache-2.0.txt (all targets)
+pypdfium2-5.15.2.dist-info/licenses/LICENSES/Apache-2.0.txt (all targets)
 --------------------------------------------------------------------------------
 
                                  Apache License
@@ -16243,7 +16243,7 @@ pypdfium2-5.15.1.dist-info/licenses/LICENSES/Apache-2.0.txt (all targets)
    limitations under the License.
 
 --------------------------------------------------------------------------------
-pypdfium2-5.15.1.dist-info/licenses/LICENSES/BSD-3-Clause.txt (all targets)
+pypdfium2-5.15.2.dist-info/licenses/LICENSES/BSD-3-Clause.txt (all targets)
 --------------------------------------------------------------------------------
 Copyright (c) <year> <owner>.
 
@@ -16273,7 +16273,7 @@ ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 --------------------------------------------------------------------------------
-pypdfium2-5.15.1.dist-info/licenses/LICENSES/CC-BY-4.0.txt (all targets)
+pypdfium2-5.15.2.dist-info/licenses/LICENSES/CC-BY-4.0.txt (all targets)
 --------------------------------------------------------------------------------
 Creative Commons Attribution 4.0 International Public License
 
