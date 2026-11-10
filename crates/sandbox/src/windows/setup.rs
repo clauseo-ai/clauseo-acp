@@ -6,7 +6,9 @@
 //! [`set_up`] takes the machine-wide lock, then:
 //!
 //! 1. reads `HKLM\SOFTWARE\Clauseo\Sandbox` and refuses when another user owns it (D5), with that
-//!    user's SID in the cause;
+//!    user's SID in the cause. Pool users the record doesn't list but that are proven Clauseo's
+//!    (in the group and marked, `stranded.rs`) are adopted back; with no record, or one that
+//!    can't be trusted, they are removed first, never adopted;
 //! 2. preflight: the Secondary Logon service is not disabled, and local policy doesn't refuse
 //!    `Users` the interactive logon right; either fails with a named cause before any account
 //!    exists;
@@ -141,12 +143,16 @@ mod rollback;
 mod shared;
 #[cfg(any(windows, test))]
 pub mod stop;
+pub mod stranded;
+#[cfg(windows)]
+mod stranded_os;
+mod stranded_setup;
 pub mod strays;
 #[cfg(any(windows, test))]
 pub mod sweep;
 #[cfg(any(windows, test))]
 pub mod taken_file;
-mod top_up;
+pub mod top_up;
 #[cfg(windows)]
 mod windows_machine;
 

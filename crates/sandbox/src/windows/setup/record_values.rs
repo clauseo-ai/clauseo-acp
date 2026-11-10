@@ -147,10 +147,13 @@ pub const SWEEP_SEQUENCE: &str = "SweepSequence";
 /// (without the lock, `pool_steps::sequence` says why) as the marker's `M`; the marker is
 /// clean once [`SWEEP_SEQUENCE`] `>= M`.
 pub const SWEEP_NEXT: &str = "SweepNext";
+/// `MarkerVersion` (`REG_QWORD`): `stranded::MARKER_VERSION` once every pool user carries the
+/// comment, so an account with the older mark alone is never proven (`stranded.rs`).
+pub const MARKER_VERSION: &str = "MarkerVersion";
 /// The values the set-up owns, which a rollback or `--remove` deletes; the ones `--adopt`
 /// writes stay until `--remove` takes the admin copy away. Each `…Sequence` comes before its
 /// `…Next`, so a marker read during a removal can only wait longer (`pool_steps::sequence`).
-pub const SETUP_VALUES: [&str; 14] = [
+pub const SETUP_VALUES: [&str; 15] = [
     OWNER_SID,
     GROUP_SID,
     POOL_SIDS,
@@ -165,6 +168,7 @@ pub const SETUP_VALUES: [&str; 14] = [
     SWEEP_COMPLETED,
     SWEEP_SEQUENCE,
     SWEEP_NEXT,
+    MARKER_VERSION,
 ];
 
 /// `listed` (`ResetSids` as read) with each of `add` it lacks appended, in order.
@@ -297,6 +301,23 @@ pub fn decode(raw: RawRecord) -> Result<Option<MachineRecord>, RecordValueError>
         data_dir: PathBuf::from(data_dir),
         removing: raw.removing.is_some_and(|value| value != 0),
     }))
+}
+
+/// [`decode`], as set-up and `--remove` read the record (`stranded.rs`): a malformed `PoolSids`
+/// is an empty pool, never a shorter list, and no SID in it is trusted. A key holding nothing
+/// else is no record.
+pub fn decode_untrusting_pool(
+    mut raw: RawRecord,
+) -> Result<Option<MachineRecord>, RecordValueError> {
+    if raw
+        .pool
+        .as_deref()
+        .is_some_and(|units| pool_sids_from_multi_sz(units).is_err())
+    {
+        tracing::warn!("the record's PoolSids is malformed; no SID in it is trusted");
+        raw.pool = None;
+    }
+    decode(raw)
 }
 
 /// The SID `text` spells, for the value `name`.

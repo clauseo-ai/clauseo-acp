@@ -540,6 +540,9 @@ crates/sandbox/examples/s15_wfp_vm/ports_rows.rs timed clippy::disallowed_method
 crates/sandbox/src/windows/setup/processes.rs - unsafe_code
 crates/sandbox/src/windows/setup/profile.rs - unsafe_code
 crates/sandbox/src/windows/setup/profile.rs wait clippy::disallowed_methods
+# Stranded pool accounts: the group's members and each account's flags (NetLocalGroupGetMembers,
+# NetUserGetInfo).
+crates/sandbox/src/windows/setup/stranded_os.rs - unsafe_code
 # The stop task's process snapshot, the WTS process list, OpenProcess, NtSuspendProcess and
 # TerminateProcess; the BITS jobs it cancels; its Windows test's token DACL and the benign process
 # it starts.

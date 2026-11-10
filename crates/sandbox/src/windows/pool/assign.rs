@@ -260,13 +260,13 @@ pub(crate) fn decide(
     }
 }
 
-/// The users of `pool` [`decide`] would hold back from a new matter, in pool order, by the same
-/// rule (`held_back_why`): the set-up's top-up counts the rest as free (`setup/top_up.rs`).
-pub(crate) fn held_back(pool: &[Sid], rows: &Rows, held: &Holds<'_>) -> Vec<Sid> {
-    let held_back = pool
+/// The users of `pool` the reuse rule holds back, each with why: the rule `assign` applies,
+/// for the top-up's count and its log (`setup/top_up.rs`).
+pub(crate) fn held_back_each(pool: &[Sid], rows: &Rows, held: &Holds<'_>) -> Vec<(Sid, Why)> {
+    let each = pool
         .iter()
-        .filter(|user| held_back_why(user, rows, held).is_some());
-    held_back.cloned().collect()
+        .filter_map(|user| held_back_why(user, rows, held).map(|why| (user.clone(), why)));
+    each.collect()
 }
 
 /// Why `user` can't go to another matter, or `None` when it may.

@@ -27,7 +27,9 @@ use super::owner::Owner;
 use super::record_values::CopyOwner;
 use super::record_write::{self, RECORD_KEY};
 use super::registered::registered;
-use super::{ffi, journal, logon, password, preflight, profile};
+use super::stranded::PoolAccounts;
+use super::top_up::HeldUser;
+use super::{ffi, journal, logon, password, preflight, profile, stranded_os};
 use crate::SetupError;
 use crate::windows::acl;
 use crate::windows::admin_copy;
@@ -207,7 +209,32 @@ impl Machine for WindowsMachine {
     }
 
     fn read_record(&mut self) -> Result<Option<MachineRecord>, MachineError> {
-        record_write::read(&self.names.record_key)
+        stranded_os::read_untrusting_pool(&self.names.record_key)
+    }
+
+    fn pool_accounts(&mut self) -> Result<PoolAccounts, MachineError> {
+        stranded_os::pool_accounts(&self.names)
+    }
+
+    fn mark(&mut self, name: &str) -> Result<(), MachineError> {
+        stranded_os::set_comment(&self.names.real(name))
+    }
+
+    fn write_marker_version(&mut self) -> Result<(), MachineError> {
+        stranded_os::write_marker_version(&self.names.record_key)
+    }
+
+    fn disable(&mut self, name: &str) -> Result<(), MachineError> {
+        stranded_os::disable_account(&self.names.real(name))
+    }
+
+    fn revoke_rights(&mut self, sid: &Sid) -> Result<(), MachineError> {
+        preflight::remove_all_rights(sid)
+    }
+
+    fn sweep_tasks(&mut self, pool: &[Sid]) -> Result<(), MachineError> {
+        crate::windows::setup::sweep::windows_sweeper::delete_pool_tasks(pool);
+        Ok(())
     }
 
     fn write_record(&mut self, record: &MachineRecord) -> Result<(), MachineError> {
@@ -447,14 +474,14 @@ impl Machine for WindowsMachine {
         pool: &[Sid],
         trusted: &[Sid],
         resets: &[Sid],
-    ) -> Result<Vec<Sid>, MachineError> {
+    ) -> Result<Vec<HeldUser>, MachineError> {
         owned(self, |m| {
             let matters = MatterSids::load(&m.data_dir).map_err(from_setup)?;
             let ledger = m.ledger(trusted);
             if let Err(error) = &ledger {
                 tracing::warn!(%error, "the ledger can't be read; every sandbox user is in use");
             }
-            Ok(matters.held_after_resets(pool, ledger, resets))
+            Ok(matters.held_after_resets_each(pool, ledger, resets))
         })
     }
 

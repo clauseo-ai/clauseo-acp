@@ -13,6 +13,8 @@ use crate::windows::ledger::Ledger;
 use crate::windows::marker::{Marker, MarkerState};
 use crate::windows::pool::MachineRecord;
 use crate::windows::setup::record_values::CopyOwner;
+use crate::windows::setup::stranded::PoolAccounts;
+use crate::windows::setup::top_up::HeldUser;
 use crate::windows::sids::Sid;
 use crate::windows::wfp::{NetworkReport, NetworkSetup};
 
@@ -47,6 +49,12 @@ pub enum MachineError {
          there: remove the sandbox users, then run set-up again"
     )]
     ProfileChanged(String),
+    /// The machine's record can't be trusted: `OwnerSid`, `GroupSid` or `DataDir` is missing,
+    /// of the wrong type or malformed, while other values are there (what is wrong, never a
+    /// value). Nothing in it is used: set-up and `--remove` take out the accounts they can
+    /// prove are Clauseo's (`stranded.rs`), and adopt none.
+    #[error("the machine's record can't be trusted: {0}")]
+    RecordCorrupt(String),
 }
 
 /// How the Secondary Logon service (`seclogon`) starts.
@@ -96,8 +104,28 @@ pub trait Machine {
     fn lock(&mut self) -> Result<(), MachineError>;
     /// Gives the lock back. Called once for every `lock` that succeeded.
     fn unlock(&mut self);
-    /// `HKLM\SOFTWARE\Clauseo\Sandbox`, whole; `None` when the key is missing.
+    /// `HKLM\SOFTWARE\Clauseo\Sandbox`, whole; `None` when the key is missing. A malformed
+    /// `PoolSids` reads as an empty pool, never trusted for a SID; a record whose `OwnerSid`,
+    /// `GroupSid` or `DataDir` can't be read is [`MachineError::RecordCorrupt`].
     fn read_record(&mut self) -> Result<Option<MachineRecord>, MachineError>;
+    /// The local accounts in `ClauseoSandboxUsers` or with a pool user's name, each with
+    /// whether it is in the group and carries set-up's mark (`stranded.rs`).
+    fn pool_accounts(&mut self) -> Result<PoolAccounts, MachineError>;
+    /// Sets the account `name`'s comment to `stranded::POOL_COMMENT` (`NetUserSetInfo` level
+    /// 1007): every kept pool user gets set-up's mark, as every new one has it from creation.
+    fn mark(&mut self, name: &str) -> Result<(), MachineError>;
+    /// Writes the record's `MarkerVersion` (`stranded::MARKER_VERSION`), once every pool user
+    /// carries the comment.
+    fn write_marker_version(&mut self) -> Result<(), MachineError>;
+    /// Disables the account `name` (`UF_ACCOUNTDISABLE`, its other flags kept), so a delete
+    /// that then fails leaves an account that can't log on.
+    fn disable(&mut self, name: &str) -> Result<(), MachineError>;
+    /// Takes every user right off `sid` (`LsaRemoveAccountRights`, all rights): a deleted
+    /// account's SID keeps none. Holding none is `Ok`.
+    fn revoke_rights(&mut self, sid: &Sid) -> Result<(), MachineError>;
+    /// Deletes every scheduled task whose principal or owner is one of `pool`
+    /// (`sweep::sweep_tasks`); one that may be left is logged, not an error.
+    fn sweep_tasks(&mut self, pool: &[Sid]) -> Result<(), MachineError>;
     /// Writes `record` as the whole key, replacing every value.
     fn write_record(&mut self, record: &MachineRecord) -> Result<(), MachineError>;
     /// Deletes the key: only when a fresh set-up rolls back to nothing.
@@ -128,8 +156,8 @@ pub trait Machine {
     /// A new random password for a pool user (`PR4e`'s generator).
     fn new_password(&mut self) -> Password;
     /// Makes the local account `name` with `password`, `UF_DONT_EXPIRE_PASSWD |
-    /// UF_PASSWD_CANT_CHANGE`; its SID. An account by that name already there is an error,
-    /// never adopted (D-B5).
+    /// UF_PASSWD_CANT_CHANGE` and the comment `stranded::POOL_COMMENT`; its SID. An account by that
+    /// name already there is an error, never adopted (D-B5).
     fn create_user(&mut self, name: &str, password: &Password) -> Result<Sid, MachineError>;
     /// Sets `name`'s password to `password` (a re-run, D-B6).
     fn set_password(&mut self, name: &str, password: &Password) -> Result<(), MachineError>;
@@ -217,7 +245,8 @@ pub trait Machine {
     /// Locks the admin copy's folder and everything in it again, as `--adopt` does
     /// (`admin_copy::os::lock_down_tree`), denying the pool's group `group`, as this process.
     fn lock_admin_copy(&mut self, group: &Sid) -> Result<(), MachineError>;
-    /// The users of `pool` the reuse rule would hold back once this run has reset `resets`, for
+    /// The users of `pool` the reuse rule would hold back once this run has reset `resets`, each
+    /// with why (`None`: an input couldn't be read), for
     /// the top-up's count (`top_up.rs`, `MatterSids::held_after_resets`), the owner's ledger
     /// opened trusting `trusted`; an input that can't be read holds every user. The engine calls
     /// it as the owner, once the lock is held, over a recorded pool. A missing `matters.json`
@@ -227,7 +256,7 @@ pub trait Machine {
         pool: &[Sid],
         trusted: &[Sid],
         resets: &[Sid],
-    ) -> Result<Vec<Sid>, MachineError>;
+    ) -> Result<Vec<HeldUser>, MachineError>;
     /// The owner's ledger, `<data_dir>\sandbox\acl-ledger.json`, opened trusting `trusted` (the
     /// pool users and the group) against this machine's reserved accounts.
     fn ledger(&mut self, trusted: &[Sid]) -> io::Result<Ledger>;

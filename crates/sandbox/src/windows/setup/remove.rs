@@ -28,14 +28,20 @@
 //! (past that [`SetupExit::LockHeld`], nothing touched; the hook's own bound is 120 s, K3). A
 //! first read before the lock that finds no record still tries the lock, without waiting: a
 //! set-up holding it may be writing the first record, so that is `LockHeld` too, never 0.
+//! With no record, or one that can't be trusted, the accounts proven Clauseo's go as
+//! `remove/stranded.rs` says, with a corrupt record's network, tasks, denies, ledger, markers
+//! and values; what is one condition short is named in [`RemoveReport::left`] and left.
 //!
-//! 1. the record read again under the lock, and who acts decided again from it;
+//! 1. the record read again under the lock, and who acts decided again from it; then each
+//!    proven account its pool doesn't list (a blanked or malformed `PoolSids`) written back
+//!    into it with `Removing` set, so it goes as a recorded user does (`stranded::widen`);
 //! 2. `Removing = 1` written to the record (once; a re-run finds it set);
 //! 3. every process running as a pool SID stopped (D-B13);
 //! 4. per pool user, in record order: its `LocalLow` denies (planned again from the record's
-//!    group, D-B11), its profile, its account with its sign-in screen value. A reparse point on
-//!    the way to `LocalLow` (`Removal::in_profile`) is logged, and the deny goes with the
-//!    profile, whose delete takes each link in it out itself first;
+//!    group, D-B11), its profile (`DeleteProfileW`, with its `ProfileList` entry), its account
+//!    with its sign-in screen value, every right its SID holds; then the pool's tasks. A reparse
+//!    point on the way to `LocalLow` (`Removal::in_profile`) is logged, and the deny goes with
+//!    the profile, whose delete takes each link in it out itself first;
 //!    Then, only once every pool account is gone and a second sweep has stopped every process
 //!    still running as a pool SID (one that won't stop ends the run at `Strays`, network on),
 //!    the network filters, the owner's read grant
@@ -47,7 +53,8 @@
 //!    can influence, so it is checked as `--data-dir` is and used only as `ledger_work.rs` says;
 //! 7. the group, when it is the record's and has no members left, its "Deny log on through
 //!    Remote Desktop Services" right taken off first (a right is keyed by SID and would be left
-//!    on a SID nothing has);
+//!    on a SID nothing has); one still holding accounts nobody can prove are Clauseo's stays,
+//!    named in [`RemoveReport::left`], and the run goes on;
 //! 8. as the owner only, the unclean-session markers in the checked data folder
 //!    (`<data_dir>\sandbox\run\*.session`), so none outlives its set-up; an administrator's
 //!    removal leaves them (it deletes nothing in the owner's folders, K1), and the next set-up's
@@ -82,6 +89,7 @@ use crate::windows::writer::AclWriter;
 mod ledger_work;
 pub mod owners;
 mod seam;
+mod stranded;
 #[cfg(windows)]
 mod windows_removal;
 
@@ -119,6 +127,9 @@ pub struct RemoveReport {
     /// Why the firewall rules couldn't be removed, when they couldn't: not fatal, as at set-up,
     /// since the WFP filters (the enforcing layer) went (S15 PR7).
     pub firewall: Option<String>,
+    /// What was left, by name, and why (`stranded.rs`): an account in the group or marked,
+    /// but not both; a stranded account that wouldn't go; the group while it has members.
+    pub left: Vec<String>,
 }
 
 /// The step a removal stopped at. Variants are appended from here on.
@@ -234,33 +245,48 @@ pub fn remove_then(
 ) -> Result<Removed, RemoveFailure> {
     // Read once before the lock, so a machine with nothing set up, or a per-user uninstall by
     // someone else, ends at once and never waits for a set-up's lock.
-    let before = read(machine)?;
-    if before.is_none() {
-        // No record, unless a set-up holding the lock is about to write it.
-        lock(machine, 0)?;
-        let _locked = Locked(machine);
-        while_locked(&Removed::NothingSetUp);
-        return Ok(Removed::NothingSetUp);
-    }
-    if let Decision::Stop(removed) = decide(machine, before.as_ref(), per_machine)? {
-        return Ok(removed);
+    let before = stranded::read(machine)?;
+    if let Some(record) = &before.record {
+        if let Decision::Stop(removed) = decide(machine, Some(&record.owner), per_machine)? {
+            return Ok(removed);
+        }
+    } else {
+        // No record, unless a set-up holding the lock is about to write it. A corrupt one is
+        // decided by its `OwnerSid` when that reads (D-B9), then read again below once the
+        // lock is held, as a record is: a set-up may rebuild the pool while this waits.
+        match stranded::decide_corrupt(machine, before.corrupt, per_machine)? {
+            Err(removed) => return Ok(removed),
+            Ok(Some(_)) => {}
+            Ok(None) => {
+                lock(machine, 0)?;
+                let locked = Locked(machine);
+                let removed = stranded::sweep(&mut *locked.0, acl, None)?;
+                while_locked(&removed);
+                return Ok(removed);
+            }
+        }
     }
     lock(machine, REMOVE_LOCK_WAIT_MS)?;
     let locked = Locked(machine);
     let machine = &mut *locked.0;
-    let record = read(machine)?;
-    let acting = match decide(machine, record.as_ref(), per_machine)? {
+    let found = stranded::read(machine)?;
+    let Some(record) = found.record else {
+        let removed = match stranded::decide_corrupt(machine, found.corrupt, per_machine)? {
+            Ok(corrupt) => stranded::sweep(machine, acl, corrupt)?,
+            Err(removed) => removed,
+        };
+        while_locked(&removed);
+        return Ok(removed);
+    };
+    let acting = match decide(machine, Some(&record.owner), per_machine)? {
         Decision::Stop(removed) => {
             while_locked(&removed);
             return Ok(removed);
         }
         Decision::Act(acting) => acting,
     };
-    let Some(record) = record else {
-        while_locked(&Removed::NothingSetUp);
-        return Ok(Removed::NothingSetUp);
-    };
-    let removed = steps(machine, acl, &record, acting)
+    let (record, left, domain) = stranded::widen(machine, record)?;
+    let removed = steps(machine, acl, &record, acting, (left, domain))
         .map(Removed::All)
         .map_err(|(step, cause)| RemoveFailure {
             step,
@@ -313,35 +339,24 @@ pub fn acting_token<T, E: std::fmt::Display>(
     }
 }
 
-/// The record, or a failure with nothing touched.
-fn read(machine: &mut impl Removal) -> Result<Option<MachineRecord>, RemoveFailure> {
-    machine.read_record().map_err(|error| RemoveFailure {
-        step: RemoveStep::ReadRecord,
-        cause: cause_of(&error),
-        exit: SetupExit::Failed,
-    })
-}
-
 /// Whether to stop, and who acts otherwise, as the module says.
 fn decide(
     machine: &impl Removal,
-    record: Option<&MachineRecord>,
+    owner: Option<&Sid>,
     per_machine: bool,
 ) -> Result<Decision, RemoveFailure> {
-    let Some(record) = record else {
+    let Some(owner) = owner else {
         return Ok(Decision::Stop(Removed::NothingSetUp));
     };
     match machine.invoker() {
-        Some(invoker) if *invoker == record.owner && machine.can_act_as_owner() => {
+        Some(invoker) if *invoker == *owner && machine.can_act_as_owner() => {
             Ok(Decision::Act(Acting::Owner))
         }
         // The owner asked, but no token weaker than an administrator's can act as them. A
         // per-machine run takes the administrator's bounded path; a per-user one stops, since
         // that path would delete the record with ledger entries left.
-        Some(invoker) if *invoker == record.owner && per_machine => {
-            Ok(Decision::Act(Acting::Admin))
-        }
-        Some(invoker) if *invoker == record.owner => Err(RemoveFailure {
+        Some(invoker) if *invoker == *owner && per_machine => Ok(Decision::Act(Acting::Admin)),
+        Some(invoker) if *invoker == *owner => Err(RemoveFailure {
             step: RemoveStep::Owner,
             cause: "the owner's token couldn't be lowered to a standard user's, so nothing was \
                     removed"
@@ -364,8 +379,12 @@ fn steps(
     acl: &mut impl AclWriter,
     record: &MachineRecord,
     acting: Acting,
+    (left, domain): (Vec<String>, [u32; 3]),
 ) -> Result<RemoveReport, Failed> {
-    let mut report = RemoveReport::default();
+    let mut report = RemoveReport {
+        left,
+        ..RemoveReport::default()
+    };
     if !record.removing {
         let flagged = MachineRecord {
             removing: true,
@@ -380,8 +399,11 @@ fn steps(
         .stop_strays(&record.pool, &record.owner)
         .map_err(|e| (RemoveStep::Strays, cause_of(&e)))?;
     for (at, sid) in record.pool.iter().enumerate() {
-        remove_user(machine, acl, record, at, sid, &mut report)?;
+        remove_user(machine, acl, record, (at, domain), sid, &mut report)?;
     }
+    machine
+        .sweep_tasks(&record.pool)
+        .map_err(|e| (RemoveStep::Account, cause_of(&e)))?;
     // Anything still running as a pool SID (one that started since the first sweep, or one the
     // first couldn't stop) is stopped again, elevated, before the network goes. One that won't
     // stop keeps the network on: the run ends here, RemovedPartly, and a re-run retries.
@@ -398,7 +420,7 @@ fn steps(
         ));
     }
     report.firewall = machine
-        .remove_network(&record.owner)
+        .remove_network(Some(&record.owner))
         .map_err(|e| (RemoveStep::Network, cause_of(&e)))?;
     let program_data = machine
         .program_data()
@@ -411,7 +433,7 @@ fn steps(
         )
     })?;
     report.ledger = ledger_work::run(machine, acl, record, acting)?;
-    report.group = remove_group(machine, record)?;
+    report.group = remove_group(machine, record, &mut report.left)?;
     if acting == Acting::Owner {
         clear_markers(machine)?;
     }
@@ -429,7 +451,7 @@ fn remove_user(
     machine: &mut impl Removal,
     acl: &mut impl AclWriter,
     record: &MachineRecord,
-    at: usize,
+    (at, domain): (usize, [u32; 3]),
     sid: &Sid,
     report: &mut RemoveReport,
 ) -> Result<(), Failed> {
@@ -484,6 +506,11 @@ fn remove_user(
             .map_err(|e| (RemoveStep::Account, format!("{label}: {}", cause_of(&e))))?;
         report.accounts += 1;
     }
+    // Only a SID of this machine's account domain: never a built-in one a record names.
+    if sid.domain() == Some(domain) {
+        let rights = |e: MachineError| (RemoveStep::Account, format!("{label}: {}", cause_of(&e)));
+        machine.revoke_rights(sid).map_err(rights)?;
+    }
     Ok(())
 }
 
@@ -495,11 +522,16 @@ fn remove_denies(acl: &mut impl AclWriter, group: &Sid, targets: &[PathBuf]) -> 
 }
 
 /// The group, when it is the record's and empty; whether it was deleted. Gone already is
-/// `false`; another group under the name, or one with members, stops the run. Its Remote
+/// `false`; another group under the name stops the run. One with members (accounts the record
+/// doesn't list and `stranded.rs` couldn't prove Clauseo's) stays, named in `left`. Its Remote
 /// Desktop deny comes off just before the delete ([`RemoveStep::RemoteLogon`] when it won't):
 /// a user right is keyed by SID, and would outlive the group. With the group gone already,
 /// the deny still comes off by the record's `GroupSid`, as an earlier run may have left it.
-fn remove_group(machine: &mut impl Removal, record: &MachineRecord) -> Result<bool, Failed> {
+fn remove_group(
+    machine: &mut impl Removal,
+    record: &MachineRecord,
+    left: &mut Vec<String>,
+) -> Result<bool, Failed> {
     let failed = |e: MachineError| (RemoveStep::Group, cause_of(&e));
     let Some(group) = machine.group().map_err(failed)? else {
         machine
@@ -521,10 +553,16 @@ fn remove_group(machine: &mut impl Removal, record: &MachineRecord) -> Result<bo
                 .map_err(|e| (RemoveStep::RemoteLogon, cause_of(&e)))?;
             machine.delete_group(&group).map_err(failed).map(|()| true)
         }
-        members => Err((
-            RemoveStep::Group,
-            format!("the group ClauseoSandboxUsers still has {members} members"),
-        )),
+        members => {
+            tracing::warn!(
+                members,
+                "ClauseoSandboxUsers still has members, so it was left"
+            );
+            left.push(format!(
+                "the group ClauseoSandboxUsers, which still has {members} member(s)"
+            ));
+            Ok(false)
+        }
     }
 }
 

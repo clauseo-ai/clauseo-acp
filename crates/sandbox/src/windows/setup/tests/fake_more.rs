@@ -9,13 +9,16 @@ use std::path::{Path, PathBuf};
 
 use crate::windows::acl_plan::Sid;
 use crate::windows::marker::Marker;
-use crate::windows::pool::MachineRecord;
+use crate::windows::pool::assign::Why;
+use crate::windows::pool::{MachineRecord, pool_number};
 use crate::windows::setup::record_values::CopyOwner;
+use crate::windows::setup::stranded::{MARKER_VERSION, PartialRecord, PoolAccounts, Seen};
+use crate::windows::setup::top_up::HeldUser;
 
 use std::cell::Cell;
 use std::rc::Rc;
 
-use super::fake::{FakeMachine, OWNER, OWNER_NAME, VOLUME, sid};
+use super::fake::{FakeMachine, OWNER, OWNER_NAME, VOLUME, rid, rids, sid};
 use crate::test_support::TempDir;
 use crate::windows::setup::{LogonRight, MachineError, ServiceStart};
 
@@ -144,6 +147,29 @@ impl ProfileFaults {
     }
 }
 
+/// What `stranded.rs` reads and clears beyond the accounts.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(super) struct Stranded {
+    /// Accounts made without set-up's flags: never carrying the older mark, hidden or not.
+    pub(super) unflagged: BTreeSet<String>,
+    /// Accounts carrying `POOL_COMMENT`: those `create_user` made and `mark` marked.
+    pub(super) commented: BTreeSet<String>,
+    /// The record's `MarkerVersion`.
+    pub(super) marker_version: Option<u32>,
+    /// What `read_record` finds wrong with the record, until one is written or deleted.
+    pub(super) corrupt: Option<&'static str>,
+    /// The SIDs that hold a user right of their own.
+    pub(super) rights: BTreeSet<Sid>,
+    /// The principals of the scheduled tasks there are.
+    pub(super) tasks: BTreeSet<Sid>,
+    /// The accounts disabled.
+    pub(super) disabled: BTreeSet<String>,
+    /// The group's members that aren't this computer's accounts, by name.
+    pub(super) foreign: Vec<String>,
+    /// `read_partial`'s answer for a corrupt record.
+    pub(super) partial: PartialRecord,
+}
+
 /// One local account.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct Account {
@@ -224,6 +250,7 @@ pub(super) fn new_machine(test: &str) -> FakeMachine {
         next_rid: 1000,
         passwords: 0,
         around: Around::default(),
+        stranded: Stranded::default(),
     }
 }
 
@@ -277,6 +304,73 @@ impl FakeMachine {
             Some(at) => Err(self.fails.remove(at).1),
             None => Ok(()),
         }
+    }
+
+    /// What `pool_accounts` finds, with no call line: the accounts in the group or with a pool
+    /// name, each marked when hidden and not `unflagged`.
+    pub(super) fn survey(&self) -> PoolAccounts {
+        let group = self.state.group.clone();
+        let mut seen = Vec::new();
+        for (name, account) in &self.state.accounts {
+            let in_group = group.as_ref().is_some_and(|g| account.groups.contains(g));
+            if in_group || pool_number(name).is_some() {
+                seen.push(Seen {
+                    name: name.clone(),
+                    sid: account.sid.clone(),
+                    in_group,
+                    commented: self.stranded.commented.contains(name),
+                    marked: account.hidden && !self.stranded.unflagged.contains(name),
+                });
+            }
+        }
+        PoolAccounts {
+            group,
+            machine: [5, 5, 5],
+            seen,
+            foreign: self.stranded.foreign.clone(),
+            marker_version: self.stranded.marker_version,
+        }
+    }
+
+    /// `Machine::held_users`' answer: each user in `held`, held by a ledger grant.
+    pub(super) fn fake_held(&self) -> Vec<HeldUser> {
+        let held = self.held.iter();
+        held.map(|user| (user.clone(), Some(Why::Entries)))
+            .collect()
+    }
+
+    /// `Machine::mark`, with no call line.
+    pub(super) fn fake_mark(&mut self, name: &str) -> Result<(), MachineError> {
+        self.account(name)?;
+        self.stranded.commented.insert(name.to_owned());
+        Ok(())
+    }
+
+    /// `Machine::write_marker_version`, with no call line.
+    pub(super) fn fake_marker_version(&mut self) {
+        self.stranded.marker_version = Some(MARKER_VERSION);
+    }
+
+    /// `Machine::disable`.
+    pub(super) fn fake_disable(&mut self, name: &str) -> Result<(), MachineError> {
+        self.call(format!("disable {name}"))?;
+        self.account(name)?;
+        self.stranded.disabled.insert(name.to_owned());
+        Ok(())
+    }
+
+    /// `Machine::revoke_rights`.
+    pub(super) fn fake_revoke(&mut self, sid: &Sid) -> Result<(), MachineError> {
+        self.call(format!("revoke_rights {}", rid(sid)))?;
+        self.stranded.rights.remove(sid);
+        Ok(())
+    }
+
+    /// `Machine::sweep_tasks`.
+    pub(super) fn fake_sweep_tasks(&mut self, pool: &[Sid]) -> Result<(), MachineError> {
+        self.call(format!("sweep_tasks {}", rids(pool)))?;
+        self.stranded.tasks.retain(|task| !pool.contains(task));
+        Ok(())
     }
 
     /// Records `line` as a call on the owner's files, and as made outside the owner when it was.

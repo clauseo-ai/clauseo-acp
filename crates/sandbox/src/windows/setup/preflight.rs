@@ -172,6 +172,21 @@ pub(super) fn remove_right(account: &Sid, right: &str) -> Result<(), MachineErro
     lsa_check("LsaRemoveAccountRights", status)
 }
 
+/// Takes every user right off `account` (`LsaRemoveAccountRights`, `AllRights`): what a
+/// deleted pool user's SID may still hold, set-up's grants or anyone's. Holding none
+/// (`STATUS_OBJECT_NAME_NOT_FOUND`) is `Ok`.
+pub(super) fn remove_all_rights(account: &Sid) -> Result<(), MachineError> {
+    let policy = open_policy(POLICY_LOOKUP_NAMES)?;
+    let sid = ParsedSid::parse(account)?;
+    // SAFETY: `policy` is open and `sid` a valid SID, live for the call; `AllRights` takes no
+    // list.
+    let status = unsafe { LsaRemoveAccountRights(policy.0, sid.0, true, None) };
+    if status == STATUS_OBJECT_NAME_NOT_FOUND {
+        return Ok(());
+    }
+    lsa_check("LsaRemoveAccountRights", status)
+}
+
 /// `text` (UTF-16, no NUL) as the LSA's counted string, pointing into it: `text` must outlive
 /// every use of the result.
 fn lsa_string(text: &mut [u16]) -> LSA_UNICODE_STRING {

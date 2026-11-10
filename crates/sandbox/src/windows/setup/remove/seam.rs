@@ -12,6 +12,7 @@ use crate::windows::apply::Surroundings;
 use crate::windows::ledger::Ledger;
 use crate::windows::pool::MachineRecord;
 use crate::windows::setup::record_values::CopyOwner;
+use crate::windows::setup::stranded::{PartialRecord, PoolAccounts};
 use crate::windows::setup::{MachineError, ProfileDir};
 use crate::windows::sids::Sid;
 
@@ -23,8 +24,13 @@ pub trait Removal {
     fn lock_within(&mut self, wait_ms: u32) -> Result<(), MachineError>;
     /// Gives the lock back. Called once for every `lock_within` that succeeded.
     fn unlock(&mut self);
-    /// `HKLM\SOFTWARE\Clauseo\Sandbox`, whole; `None` when the key is missing.
+    /// `HKLM\SOFTWARE\Clauseo\Sandbox`, whole; `None` when the key is missing. As
+    /// `Machine::read_record`: a malformed `PoolSids` is an empty pool, and a record whose
+    /// `OwnerSid`, `GroupSid` or `DataDir` can't be read is `MachineError::RecordCorrupt`.
     fn read_record(&mut self) -> Result<Option<MachineRecord>, MachineError>;
+    /// As `Machine::pool_accounts`: the local accounts in `ClauseoSandboxUsers` or with a pool
+    /// user's name, each with whether it is in the group and marked (`stranded.rs`).
+    fn pool_accounts(&mut self) -> Result<PoolAccounts, MachineError>;
     /// Writes `record` as the whole key.
     fn write_record(&mut self, record: &MachineRecord) -> Result<(), MachineError>;
     /// Deletes the key; one already gone is `Ok`.
@@ -49,7 +55,8 @@ pub trait Removal {
     /// Removes the network filters, the owner's read grant on them and the firewall rules
     /// (S15 PR7, `wfp::remove`); what is already gone counts as removed. A WFP failure is the
     /// `Err`; `Some` names a firewall failure, which isn't fatal.
-    fn remove_network(&mut self, owner: &Sid) -> Result<Option<String>, MachineError>;
+    /// `owner` is the record's; with none (a corrupt record), no read grant is taken back.
+    fn remove_network(&mut self, owner: Option<&Sid>) -> Result<Option<String>, MachineError>;
     /// The name of the account whose SID is `sid`, if one exists.
     fn account_name(&mut self, sid: &Sid) -> Result<Option<String>, MachineError>;
     /// The profile Windows lists for `sid` (`ProfileList`), if any.
@@ -64,6 +71,16 @@ pub trait Removal {
     fn delete_profile(&mut self, sid: &Sid, owner: &Sid) -> Result<(), MachineError>;
     /// Deletes the account `name` and its sign-in screen value; either gone already is `Ok`.
     fn delete_user(&mut self, name: &str) -> Result<(), MachineError>;
+    /// As `Machine::disable`: the account `name` can't log on, before its delete is tried.
+    fn disable(&mut self, name: &str) -> Result<(), MachineError>;
+    /// What a record `read_record` found corrupt still says: each of `OwnerSid`, `GroupSid`
+    /// and `DataDir` that reads alone, for the clean-up around its pool (`remove/stranded.rs`).
+    fn read_partial(&mut self) -> PartialRecord;
+    /// As `Machine::revoke_rights`: every user right off `sid`; none held is `Ok`.
+    fn revoke_rights(&mut self, sid: &Sid) -> Result<(), MachineError>;
+    /// As `Machine::sweep_tasks`: every scheduled task of `pool`'s deleted; one that may be
+    /// left is logged, not an error.
+    fn sweep_tasks(&mut self, pool: &[Sid]) -> Result<(), MachineError>;
     /// `%ProgramData%`, which holds `Microsoft\DeviceSync`.
     fn program_data(&mut self) -> Result<PathBuf, MachineError>;
     /// The SID of the local group `ClauseoSandboxUsers`, if it exists.

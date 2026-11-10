@@ -44,6 +44,20 @@ pub(crate) fn run() -> SweepExit {
     sweep(&mut WindowsSweeper::new())
 }
 
+/// Step 4 alone for `pool` (`sweep_tasks`), as `--remove` and set-up take out pool users no
+/// record lists: their tasks deleted. One that may be left is logged, by counts only.
+pub(crate) fn delete_pool_tasks(pool: &[Sid]) {
+    let swept = super::sweep_tasks(&mut WindowsSweeper::new(), pool);
+    if swept.left() {
+        tracing::warn!(
+            deleted = swept.deleted,
+            not_deleted = swept.not_deleted,
+            unreadable = swept.unreadable,
+            "a scheduled task of a removed sandbox user may be left"
+        );
+    }
+}
+
 /// The machine the sweep acts on.
 pub(crate) struct WindowsSweeper {
     /// The set-up lock, while held.

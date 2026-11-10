@@ -817,6 +817,46 @@ takes the user who asked from its recorded parent (D-B2), never from an argument
 - **VM rows.** With UAC off, and as the built-in Administrator: set-up, a forced re-set-up
   (`NeedsReSetUp`), a launch, then the uninstall exits 0 and leaves no record, no
   `ClauseoSandboxUsers` group, no pool account and no `sandbox\` when the box is ticked.
+- **Stranded pool accounts** (`setup/stranded.rs`). A VM row blanked a live pool's `PoolSids`:
+  the next set-up made Sb09 to Sb16 and left Sb01 to Sb08 enabled, holding the logon right
+  through the group, and `--remove` then exited 4 at the group ("still has 8 members").
+  - **Proof.** An account the record doesn't list is Clauseo's only when it has a pool name and
+    is in `ClauseoSandboxUsers`: this computer's own alias, whose SID lies in the machine's
+    account domain, never a domain group of that name. It must also carry set-up's mark: the
+    comment `Clauseo sandbox account; managed by Clauseo set-up`, which set-up gives every pool
+    account it makes or keeps. Or it carries the older mark (a standard user with
+    `UF_DONT_EXPIRE_PASSWD | UF_PASSWD_CANT_CHANGE`, hidden by its `SpecialAccounts\UserList`
+    value 0), and then only while no member of the group carries the comment and the record's
+    `MarkerVersion` (2 once set-up marks its users) is absent or older; one that can't be read
+    counts as newer. A name alone never
+    counts (D-B5). A malformed `PoolSids` reads as an empty pool, never trusted for a SID, and
+    a malformed `Removing` counts as set.
+  - **A trusted record** (`OwnerSid`, `GroupSid` and `DataDir` read): set-up adopts each proven
+    account back with the same SID, so ledger and ACL references stay good. It gets a new
+    password and a new profile, since its history is unknown. Set-up then makes only what is
+    missing. `--remove` writes them into the record with `Removing`, then removes them like
+    recorded users.
+  - **No record, or an untrusted one:** nothing is adopted (D5). Set-up and `--remove` disable
+    each proven member of the group first (`UF_ACCOUNTDISABLE`), then remove it as a recorded
+    user goes: profile and `ProfileList` entry, sign-in screen value (before the account),
+    account, every user right its SID holds, scheduled tasks. Then the group and its Remote
+    Desktop deny go once it is empty. A proven account that won't go fails set-up, or makes
+    `--remove` exit 4, disabled; its sign-in value is put back, so the next run proves it again.
+    A right is revoked only from a SID of this machine's account domain. For a corrupt record,
+    `--remove` decides from `OwnerSid` when it reads (D-B9: a per-user removal by anyone else
+    touches nothing), then reads the record again once it holds the lock, as for any record. It takes off the network filters, `DeviceSync`'s deny, the ledger's
+    entries (with `OwnerSid` and `DataDir`), the owner's markers and the stop and sweep tasks,
+    then the record's values.
+  - **Left alone:** an account short of the proof is named in the log (warn, so the Event Log)
+    and in `RemoveReport::left`, as is a group that still has members. Set-up's refusal names
+    exactly the group's unprovable members, foreign ones included.
+  - **The top-up** to 8 free users counts held users too, so one held by a matter or set-aside
+    records makes a ninth. The pool's ceiling is `POOL_CAP` (32, D-B5), free and held alike;
+    at it the top-up reports the shortfall and the run goes on. Every run logs one line: free,
+    held by matters, by set-aside records, for a reset or unread, added, short, the ceiling.
+  - ACEs that name a deleted SID stay as unresolvable entries until the ledger's or the strict
+    walks drop them; harmless, since Windows never reuses a SID. VM row: blank the record on a
+    live pool; set-up adopts; `--remove` exits 0 and leaves no accounts.
 
 **Accepted residual.** A per-machine removal someone other than the owner runs deletes the record
 even when the ledger lists entries it may not touch, as ruled. Those entries name dead SIDs, which

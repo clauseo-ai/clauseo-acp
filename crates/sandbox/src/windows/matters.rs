@@ -136,7 +136,7 @@ impl MatterSids {
     /// The users of `pool` that [`MatterSids::assign`] would hold back once the elevated set-up
     /// has reset `resets`, the users its run acts on (read once, before, through
     /// [`MatterSids::resets_due`]): the set-up's top-up counts the rest free
-    /// (`setup/top_up.rs`). The same rule as `assign` (`assign::held_back`): the rows as
+    /// (`setup/top_up.rs`). The same rule as `assign` (`assign::held_back_each`): the rows as
     /// loaded, `ledger` (grants and hand-backs owed), the set-aside owners, the open sessions
     /// and every mark but those of `resets`, so a release marked since that read stays held. A
     /// ledger, or open sessions whose lock can't be taken, hold every user, as an unreadable
@@ -147,8 +147,22 @@ impl MatterSids {
         ledger: io::Result<Ledger>,
         resets: &[Sid],
     ) -> Vec<Sid> {
+        let each = self
+            .held_after_resets_each(pool, ledger, resets)
+            .into_iter();
+        each.map(|(user, _why)| user).collect()
+    }
+
+    /// [`MatterSids::held_after_resets`], each user with why (`None`: an input couldn't be read,
+    /// which holds every user), for the top-up's log.
+    pub fn held_after_resets_each(
+        &self,
+        pool: &[Sid],
+        ledger: io::Result<Ledger>,
+        resets: &[Sid],
+    ) -> Vec<(Sid, Option<assign::Why>)> {
         let (Ok(ledger), Ok(open)) = (ledger, self.open_sessions()) else {
-            return pool.to_vec();
+            return pool.iter().map(|user| (user.clone(), None)).collect();
         };
         let marks = self
             .needs_reset
@@ -162,7 +176,8 @@ impl MatterSids {
             open: &open,
             needs_reset: &needs_reset,
         };
-        assign::held_back(pool, &self.rows, &held)
+        let each = assign::held_back_each(pool, &self.rows, &held).into_iter();
+        each.map(|(user, why)| (user, Some(why))).collect()
     }
 
     /// Clears the reset mark of each of `users`, once the elevated set-up has deleted and remade

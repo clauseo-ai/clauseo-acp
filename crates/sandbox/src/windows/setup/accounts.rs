@@ -43,6 +43,7 @@ use super::lock::os;
 use super::password::is_strong;
 use super::record_values::RegValue;
 use super::record_write::{Key, check, set_value};
+use super::stranded::{POOL_COMMENT, delete_keeping_hide};
 use crate::windows::sids::Sid;
 
 /// The key whose `DWORD` value 0 under an account's name hides it from the sign-in screen.
@@ -135,7 +136,8 @@ pub(super) fn name_of(sid: &Sid, kind: Kind) -> Result<Option<String>, MachineEr
 }
 
 /// Makes the local account `name` with `password`: `NetUserAdd` level 1, a standard user,
-/// `UF_SCRIPT | UF_DONT_EXPIRE_PASSWD | UF_PASSWD_CANT_CHANGE`. An account by that name is
+/// `UF_SCRIPT | UF_DONT_EXPIRE_PASSWD | UF_PASSWD_CANT_CHANGE`, commented [`POOL_COMMENT`]
+/// (set-up's mark, `stranded.rs`). An account by that name is
 /// `NERR_UserExists` (2224), never adopted (D-B5). Its SID; when the SID can't be read the
 /// account is deleted again, so a failure leaves none behind.
 pub(crate) fn create_user(name: &str, password: &str) -> Result<Sid, MachineError> {
@@ -143,13 +145,14 @@ pub(crate) fn create_user(name: &str, password: &str) -> Result<Sid, MachineErro
     checked_password(password)?;
     let mut name_units = wide(name);
     let mut secret = secret_units(password);
+    let mut comment = wide(POOL_COMMENT);
     let info = USER_INFO_1 {
         usri1_name: PWSTR(name_units.as_mut_ptr()),
         usri1_password: PWSTR(secret.as_mut_ptr()),
         usri1_password_age: 0,
         usri1_priv: USER_PRIV_USER,
         usri1_home_dir: PWSTR::null(),
-        usri1_comment: PWSTR::null(),
+        usri1_comment: PWSTR(comment.as_mut_ptr()),
         usri1_flags: UF_SCRIPT | UF_DONT_EXPIRE_PASSWD | UF_PASSWD_CANT_CHANGE,
         usri1_script_path: PWSTR::null(),
     };
@@ -193,17 +196,21 @@ pub(super) fn set_password(name: &str, password: &str) -> Result<(), MachineErro
     net("NetUserSetInfo", status)
 }
 
-/// Deletes the local account `name` (`NetUserDel`) and its sign-in screen value. An account
-/// or value already gone is `Ok`.
+/// Deletes the local account `name` (`NetUserDel`) as `stranded::delete_keeping_hide` orders
+/// it: its sign-in screen value off first, put back when the delete fails. An account or value
+/// already gone is `Ok`.
 pub(crate) fn delete_user(name: &str) -> Result<(), MachineError> {
     checked_name(name)?;
-    let account = HSTRING::from(name);
-    // SAFETY: the name is a NUL-terminated HSTRING that lives for the call.
-    let status = unsafe { NetUserDel(PCWSTR::null(), &account) };
-    if status != NERR_UserNotFound {
-        net("NetUserDel", status)?;
-    }
-    unhide(name)
+    let delete = || {
+        let account = HSTRING::from(name);
+        // SAFETY: the name is a NUL-terminated HSTRING that lives for the call.
+        let status = unsafe { NetUserDel(PCWSTR::null(), &account) };
+        if status == NERR_UserNotFound {
+            return Ok(());
+        }
+        net("NetUserDel", status)
+    };
+    delete_keeping_hide(|| unhide(name), delete, || hide(name))
 }
 
 /// Makes the local group `name` (`NetLocalGroupAdd` level 1); its SID. A group by that name is
@@ -334,8 +341,8 @@ pub(super) fn unhide(name: &str) -> Result<(), MachineError> {
     check("RegDeleteValueW", deleted)
 }
 
-/// Whether `name`'s sign-in screen value is there, for the tests.
-#[cfg(test)]
+/// Whether `name`'s sign-in screen value is there, as `hide` writes it (part of set-up's
+/// mark, `stranded_os::marked`).
 pub(crate) fn hidden(name: &str) -> Result<bool, MachineError> {
     let key = HSTRING::from(HIDDEN_USERS);
     let value = HSTRING::from(name);
@@ -429,7 +436,7 @@ fn same_name(left: &str, right: &str) -> bool {
 
 /// `name`, if Windows can take it as a local account name that only names itself: 1 to 20
 /// characters, none of which qualifies it with a domain or computer.
-fn checked_name(name: &str) -> Result<(), MachineError> {
+pub(super) fn checked_name(name: &str) -> Result<(), MachineError> {
     let fits = (1..=NAME_MAX).contains(&name.chars().count());
     if fits && !name.contains(['\\', '/', '@', '\0']) {
         Ok(())
@@ -453,7 +460,7 @@ fn checked_password(password: &str) -> Result<(), MachineError> {
 }
 
 /// `text`'s UTF-16 units and a NUL.
-fn wide(text: &str) -> Vec<u16> {
+pub(super) fn wide(text: &str) -> Vec<u16> {
     text.encode_utf16().chain([0]).collect()
 }
 
@@ -485,7 +492,7 @@ pub(super) fn net(call: &'static str, status: u32) -> Result<(), MachineError> {
 }
 
 /// `sid`'s text, from a valid SID.
-fn sid_text(sid: PSID) -> Result<Sid, MachineError> {
+pub(super) fn sid_text(sid: PSID) -> Result<Sid, MachineError> {
     let mut text = PWSTR::null();
     // SAFETY: the caller's SID is valid; `text` is a live out-pointer, freed below.
     unsafe { ConvertSidToStringSidW(sid, &raw mut text) }
