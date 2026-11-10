@@ -12,6 +12,10 @@ import type { ListedPapers } from "./open.ts";
 /** The refusal of a listing whose folder is gone. */
 const FOLDER_MISSING = "matter.folder_missing";
 
+/** How long a listing may run before another may start: a reply that never comes (lost across a host restart)
+ * must not freeze the wall. */
+export const READ_WAIT_MS = 30_000;
+
 /** The code of a failed read, when it has one. */
 const codeOf = (error: unknown): string | null =>
   typeof error === "object" && error !== null && "code" in error && typeof error.code === "string"
@@ -34,6 +38,9 @@ export function usePapers(
     // listed once more after it, so a burst of changes is two listings, never a queue of them
     let running = false;
     let dirty = false;
+    // each listing's number: only the latest one's answer is shown
+    let asked = 0;
+    let timer: ReturnType<typeof setTimeout> | undefined;
     const list = () => {
       if (running) {
         dirty = true;
@@ -41,19 +48,26 @@ export function usePapers(
       }
       running = true;
       dirty = false;
+      const mine = (asked += 1);
+      let over = false;
       const done = () => {
+        if (over) return;
+        over = true;
+        clearTimeout(timer);
         running = false;
         if (live && dirty) list();
       };
+      timer = setTimeout(done, READ_WAIT_MS);
       next.listPapers(matter).then(
         (papers) => {
-          if (live) setListed({ matter, papers });
+          if (live && mine === asked) setListed({ matter, papers });
           done();
         },
         (error: unknown) => {
           console.warn(`list_papers failed: ${JSON.stringify(error)}`);
           // only a folder that is gone empties the wall: the moved folder's line says why
-          if (live && codeOf(error) === FOLDER_MISSING) setListed({ matter, papers: null });
+          if (live && mine === asked && codeOf(error) === FOLDER_MISSING)
+            setListed({ matter, papers: null });
           done();
         },
       );
@@ -65,6 +79,7 @@ export function usePapers(
     window.addEventListener("focus", list);
     return () => {
       live = false;
+      clearTimeout(timer);
       stop?.();
       window.removeEventListener("focus", list);
     };

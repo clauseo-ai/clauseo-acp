@@ -16,10 +16,11 @@
 //! quiet, then looks at the folder and posts [`FolderChanged`]. Dropping the [`Watch`] stops the
 //! OS's feed, which drops the sender, and the thread ends.
 
+use std::collections::BTreeSet;
 use std::os::unix::fs::MetadataExt as _;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
+use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
 use clauseo_protocol::{FolderState, MatterId};
@@ -58,6 +59,14 @@ const START_THREAD: &str = "clauseo-watch-start";
 
 /// A file name under a path, to ask whether the listing passes the path over as a folder.
 const PROBE: &str = "paper.docx";
+
+/// The folders whose start is still running (a share that does not answer can hold one for
+/// long): a second start of one fails at once, so a hung folder strands at most one thread.
+static STARTING: Mutex<BTreeSet<PathBuf>> = Mutex::new(BTreeSet::new());
+
+fn starting() -> std::sync::MutexGuard<'static, BTreeSet<PathBuf>> {
+    STARTING.lock().unwrap_or_else(PoisonError::into_inner)
+}
 
 /// What the burst thread posts: the watch of `generation` saw `matter`'s folder change.
 #[derive(Debug, Clone, Copy)]
@@ -119,10 +128,20 @@ pub(crate) fn start(
     clock: Arc<dyn Clock>,
 ) {
     let back = post.clone();
+    let failed = WatchStarted {
+        generation,
+        started: Started::Failed,
+    };
+    if !starting().insert(folder.clone()) {
+        let _gone = back.try_send(Input::WatchStarted(Box::new(failed)));
+        return;
+    }
+    let held = folder.clone();
     let spawned = std::thread::Builder::new()
         .name(START_THREAD.to_owned())
         .spawn(move || {
             let started = begin(matter, &folder, generation, &post, clock);
+            starting().remove(&folder);
             let started = WatchStarted {
                 generation,
                 started,
@@ -132,11 +151,8 @@ pub(crate) fn start(
         });
     if let Err(error) = spawned {
         tracing::warn!(%matter, kind = ?error.kind(), "no thread to start the folder's watch");
-        let started = WatchStarted {
-            generation,
-            started: Started::Failed,
-        };
-        let _gone = back.try_send(Input::WatchStarted(Box::new(started)));
+        starting().remove(&held);
+        let _gone = back.try_send(Input::WatchStarted(Box::new(failed)));
     }
 }
 
@@ -293,7 +309,7 @@ fn bursts(
                 Err(RecvTimeoutError::Disconnected) => return,
             }
         }
-        let Some(look) = look(&burst.folder, burst.root, timing.recheck, changes) else {
+        let Some(look) = look(burst, timing.recheck, changes) else {
             return;
         };
         let changed = FolderChanged {
@@ -310,17 +326,22 @@ fn bursts(
 /// What became of `folder`, whose device and inode were `root`. Only a folder that is not there
 /// (`folder_state::stat`: not found, or not a folder), twice `recheck` apart, is missing; a stat
 /// that fails otherwise (an offline share, permissions) leaves it found. The wait between the two
-/// is on `changes` (whatever comes in it is looked at by the second stat); none once the watch
-/// has dropped.
-fn look(
-    folder: &Path,
-    root: Option<(u64, u64)>,
-    recheck: Duration,
-    changes: &Receiver<()>,
-) -> Option<Look> {
+/// is on `changes`, whose changes it folds in until `recheck` has passed on the host's clock (or
+/// a whole `recheck` of real time went quiet); none once the watch has dropped.
+fn look(burst: &Burst, recheck: Duration, changes: &Receiver<()>) -> Option<Look> {
+    let (folder, root) = (burst.folder.as_path(), burst.root);
     if stat(folder) == FolderState::Missing {
-        if let Err(RecvTimeoutError::Disconnected) = changes.recv_timeout(recheck) {
-            return None;
+        let until = burst.clock.now().mono.saturating_add(recheck);
+        loop {
+            let left = until.saturating_sub(burst.clock.now().mono);
+            if left.is_zero() {
+                break;
+            }
+            match changes.recv_timeout(left) {
+                Ok(()) => {}
+                Err(RecvTimeoutError::Timeout) => break,
+                Err(RecvTimeoutError::Disconnected) => return None,
+            }
         }
         if stat(folder) == FolderState::Missing {
             return Some(Look::Missing);
