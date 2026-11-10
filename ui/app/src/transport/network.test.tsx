@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 // The network signal (network.ts): the first mount sends what navigator.onLine reads, online too; after that
 // set_network goes to the host on a change only, ahead of a send_prompt when navigator.onLine changed with no event;
-// a remount on the same transport sends nothing; unmount stops listening.
+// a remount on the same transport sends nothing, unless the last send failed; unmount stops listening.
 import { act, StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
@@ -113,5 +113,38 @@ test("a failed send is ignored", async () => {
   const unmount = mount(t);
   fire("offline");
   await vi.waitFor(() => expect(debug).toHaveBeenCalledTimes(2));
+  unmount();
+});
+
+test("a failed send is forgotten, so the next mount sends again", async () => {
+  const t = new FakeTransport();
+  vi.spyOn(t, "dispatch").mockRejectedValueOnce({
+    code: "internal",
+    message: "x",
+    retryable: false,
+  });
+  const debug = vi.spyOn(console, "debug").mockImplementation(() => {});
+  mount(t)();
+  await vi.waitFor(() => expect(debug).toHaveBeenCalledTimes(1));
+  expect(kinds(t)).toEqual([]);
+  const unmount = mount(t);
+  expect(kinds(t)).toEqual([ON]);
+  unmount();
+});
+
+test("a failed send is forgotten, so the next change sends again", async () => {
+  const t = new FakeTransport();
+  const unmount = mount(t);
+  vi.spyOn(t, "dispatch").mockRejectedValueOnce({
+    code: "internal",
+    message: "x",
+    retryable: false,
+  });
+  const debug = vi.spyOn(console, "debug").mockImplementation(() => {});
+  fire("offline");
+  await vi.waitFor(() => expect(debug).toHaveBeenCalledTimes(1));
+  // no event fired for the repeat; the next turn start reads offline again and re-sends it
+  await prompt(t, "p");
+  expect(kinds(t)).toEqual([ON, OFF, "send_prompt"]);
   unmount();
 });
