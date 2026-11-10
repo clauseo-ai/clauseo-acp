@@ -15,7 +15,7 @@ import type { Platform } from "@clauseo/components/lib/display.ts";
 import { late } from "@clauseo/components/lib/late.ts";
 import type { ViewStore } from "../../store/store.ts";
 import type { HostTransport } from "../../transport/host-transport.ts";
-import type { MatterId } from "../../transport/protocol.ts";
+import type { MatterId, ThreadId } from "../../transport/protocol.ts";
 import type { Papers } from "../host-next.ts";
 import type { Blacklines } from "./blackline.ts";
 import type { VersionsController } from "./controller.ts";
@@ -71,6 +71,7 @@ export function useVersions({
   transport,
   store,
   matter,
+  thread = null,
   papers,
   platform,
   standIns = NO_STAND_INS,
@@ -78,6 +79,8 @@ export function useVersions({
   transport: HostTransport;
   store: ViewStore;
   matter: MatterId | null;
+  /** Optional: the matter's open conversation, which records a restore made from Versions; null for a draft. */
+  thread?: ThreadId | null;
   papers: Papers | null;
   platform: Platform;
   /** Optional, for tests and the review page: the host changes still to land. None by default. */
@@ -94,6 +97,7 @@ export function useVersions({
   if (session !== null && session.matter !== matter) setSession(null);
   const live = session !== null && session.matter === matter ? session : null;
   useEffect(() => live?.controller.start(), [live]);
+  useEffect(() => live?.controller.setThread(thread), [live, thread]);
   const watch = useCallback(
     (fn: () => void) => live?.controller.subscribe(fn) ?? (() => undefined),
     [live],

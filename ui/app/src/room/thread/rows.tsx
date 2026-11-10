@@ -1,7 +1,7 @@
 // The thread's rows, one per entry. A live row reads only its own entry and its own text from the view store, and is
 // memoized on its id, so a flush renders only the rows whose part changed. A paged row (older entries, page_entries)
-// shows the entry it was given. Permissions and elicitations are permission-row.tsx's; markers, versions and compaction
-// show nothing yet. A queued or removed message shows nothing (the queue's strip holds it), and a steer taken into the
+// shows the entry it was given. Permissions and elicitations are permission-row.tsx's; a restore made from Versions
+// while the conversation was open shows as a quiet line; other markers, versions and compaction show nothing yet. A queued or removed message shows nothing (the queue's strip holds it), and a steer taken into the
 // answer shows as its mark (steer.ts, steer-rows.tsx).
 import { memo, useState, useSyncExternalStore, type ReactNode } from "react";
 import { QuestionLine, Who } from "@clauseo/components/clauseo/answer.tsx";
@@ -18,6 +18,7 @@ import type {
   AgentContentEntry,
   ContentBlock,
   EntryId,
+  MarkerEntry,
   NoticeEntry,
   StreamId,
   ToolCallEntry,
@@ -269,6 +270,23 @@ function Notice({ id, entry }: { id: EntryId; entry: NoticeEntry }) {
   );
 }
 
+/** A restore of the matter made from Versions while this conversation was open (the host's version_restored marker on
+ * its stream), as a quiet line; any other marker shows nothing. */
+function Marker({ id, entry }: { id: EntryId; entry: MarkerEntry }) {
+  const w = useThreadWords();
+  const restored = entry.kind.version_restored;
+  if (restored === undefined) return null;
+  return (
+    <p data-testid="marker-restored" data-entry-id={id} className={`${ROW} ${QUIET}`}>
+      <Say>
+        {restored.undoes === undefined
+          ? w.th("You restored an earlier version of the matter.")
+          : w.th("You undid the restore.")}
+      </Say>
+    </p>
+  );
+}
+
 /** The kinds that read nothing but their entry. */
 function EntryRow({
   id,
@@ -286,6 +304,7 @@ function EntryRow({
   if (entry.limit_stop !== undefined) return <LimitStopRow id={id} entry={entry.limit_stop} />;
   if (entry.notice !== undefined) return <Notice id={id} entry={entry.notice} />;
   if (entry.elicitation !== undefined) return <Elicitation id={id} entry={entry.elicitation} />;
+  if (entry.marker !== undefined) return <Marker id={id} entry={entry.marker} />;
   return null;
 }
 

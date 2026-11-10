@@ -14,6 +14,7 @@ import type {
   HostError,
   MatterId,
   RestorePreview,
+  ThreadId,
   ViewEntry,
 } from "../../transport/protocol.ts";
 import { matterStreamOf, readMatter } from "../matter-stream.ts";
@@ -87,6 +88,9 @@ export class VersionsController {
   readonly #done = new DoneWatch();
   /** As the last refusal said an answer runs: the next list_threads' number, and how many conversations had rested. */
   #refusedAt = { list: 0, rests: 0 };
+  /** The room's open conversation, which records a restore; null for a draft (the room keeps it current). */
+  #thread: ThreadId | null = null;
+  setThread = (thread: ThreadId | null): void => void (this.#thread = thread);
 
   constructor(transport: HostTransport, store: ViewStore, matter: MatterId) {
     this.#transport = transport;
@@ -480,12 +484,15 @@ export class VersionsController {
 
   async #restore(ask: RestoreAsk): Promise<void> {
     const { id, preview, undoes } = ask;
+    // the conversation the lawyer is in records the restore too; a draft has none yet
+    const thread = this.#thread;
     const outcome = await this.#act({
       restore_version: {
         matter: this.matter,
         checkpoint: id,
         scope: "matter",
         ...(undoes === null ? {} : { undoes }),
+        ...(thread === null ? {} : { thread }),
       },
     });
     if (outcome.kind === "refused") {

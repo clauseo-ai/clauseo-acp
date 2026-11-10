@@ -130,7 +130,7 @@ test("the restore dialog lists exactly the preview's files, restores, and its Un
 
   await h.click(h.one("dialog-confirm"));
   expect(h.sent("restore_version")).toEqual([
-    { matter: MATTER, checkpoint: "cp2", scope: "matter" },
+    { matter: MATTER, checkpoint: "cp2", scope: "matter", thread: THREAD },
   ]);
   // the host's restore version, and its marker, on the matter's stream
   await h.deliver(MATTER_STREAM, [
@@ -173,8 +173,8 @@ test("the restore dialog lists exactly the preview's files, restores, and its Un
   expect(h.sent("restore_version")).toHaveLength(1);
   await h.click(h.one("dialog-confirm"));
   expect(h.sent("restore_version")).toEqual([
-    { matter: MATTER, checkpoint: "cp2", scope: "matter" },
-    { matter: MATTER, checkpoint: "cp3", scope: "matter", undoes: "cp4" },
+    { matter: MATTER, checkpoint: "cp2", scope: "matter", thread: THREAD },
+    { matter: MATTER, checkpoint: "cp3", scope: "matter", undoes: "cp4", thread: THREAD },
   ]);
   expect(document.body.textContent).toContain(
     `Undid the restore. The matter stands as it did at ${at3}.`,
@@ -216,8 +216,8 @@ test("Word holding a file: the dialog names it with Try again, the page says why
   await h.click(h.one("dialog-try-again"));
   expect(queried(h, "preview_restore")).toHaveLength(2);
   expect(h.sent("restore_version")).toEqual([
-    { matter: MATTER, checkpoint: "cp2", scope: "matter" },
-    { matter: MATTER, checkpoint: "cp2", scope: "matter" },
+    { matter: MATTER, checkpoint: "cp2", scope: "matter", thread: THREAD },
+    { matter: MATTER, checkpoint: "cp2", scope: "matter", thread: THREAD },
   ]);
   expect(dialog()).toBeNull();
   expect(document.body.textContent).not.toContain(errorWords("en", "matter.file_locked"));

@@ -2,8 +2,7 @@
 // with Base UI's CSP mode inside, then the window: the toolbar, the rail, the work and the wall, laid out by shell.css
 // and responsive.css. Three columns from 1200 px, the rail folded behind Matters as a floating panel from 1000 px, one
 // column below. The rail is U2's (rail.tsx over matters.ts); the work is the live thread (thread/work.tsx). The window
-// draws its own frame
-// (H19): the toolbar is the title bar, with the caption buttons wired to the window off the Mac and macOS's own traffic
+// draws its own frame (H19): the toolbar is the title bar, with the caption buttons wired to the window off the Mac and macOS's own traffic
 // lights over the corner lights' place on it, inside the desktop app; elsewhere (tests, the probe, a browser) the
 // buttons log their presses and the lights are painted. The plan is the open conversation's agent's (limits/live-plan.tsx, U12); until a host query no search, and
 // until H5 nothing under a matter's title (the scratch matter's line stands). The wall
@@ -279,6 +278,7 @@ function RoomFrame({
     transport,
     store,
     matter: open?.matter ?? null,
+    thread: open !== null && talks.matter === open.matter ? talks.thread : null,
     papers,
     platform,
     standIns: standIns ?? ownStandIns,
