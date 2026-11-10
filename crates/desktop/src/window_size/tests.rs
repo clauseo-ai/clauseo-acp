@@ -1,6 +1,6 @@
 use super::{
-    DAY_GROUND, NIGHT_GROUND, SETTINGS_SIZE, WEBVIEW2_BACKGROUND_ENV, WINDOW_SIZE, fit, fitted,
-    ground, state_denylist, state_flags, webview2_background,
+    DAY_GROUND, MIN_WINDOW_SIZE, NIGHT_GROUND, SETTINGS_SIZE, WEBVIEW2_BACKGROUND_ENV, WINDOW_SIZE,
+    fit, fitted, ground, state_denylist, state_flags, webview2_background,
 };
 use std::path::Path;
 use tauri_plugin_window_state::StateFlags;
@@ -14,6 +14,18 @@ fn close(actual: (f64, f64), expected: (f64, f64)) -> bool {
 fn no_monitor_opens_at_the_room_size() {
     assert_eq!(fitted(None), (1280.0, 800.0));
     assert_eq!(WINDOW_SIZE, (1280.0, 800.0));
+}
+
+#[test]
+fn the_main_window_keeps_at_least_760_by_520() {
+    assert_eq!(MIN_WINDOW_SIZE, (760.0, 520.0));
+    // the size it opens at is above the least, so the minimum never shrinks a first window
+    assert!(WINDOW_SIZE.0 >= MIN_WINDOW_SIZE.0 && WINDOW_SIZE.1 >= MIN_WINDOW_SIZE.1);
+    // the main window's builder sets it (lib.rs, open_main_window)
+    let lib = include_str!("../lib.rs");
+    assert!(lib.contains("window_size::with_size(builder, (width, height))"));
+    let own = include_str!("../window_size.rs");
+    assert!(own.contains(".min_inner_size(MIN_WINDOW_SIZE.0, MIN_WINDOW_SIZE.1)"));
 }
 
 #[test]
