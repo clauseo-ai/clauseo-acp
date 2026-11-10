@@ -39,7 +39,7 @@ test("its chunks are 16 to 64 bytes, as an agent streams, and some split a conju
   expect(splits.length).toBeGreaterThanOrEqual(5);
 });
 
-test("it answers session/new with modes, in default, as the host asks of a Claude agent", () => {
+test("it answers session/new with modes, in acceptEdits, as the host asks of a Claude agent", () => {
   const modes = lines.find((l) => l.respond?.to === "new")?.respond?.result?.modes;
-  expect(modes?.currentModeId).toBe("default");
+  expect(modes?.currentModeId).toBe("acceptEdits");
 });
