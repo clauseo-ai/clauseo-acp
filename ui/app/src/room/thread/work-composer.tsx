@@ -15,6 +15,7 @@
 // the focus goes back to the field, so the emptied words can be undone. An edit the strip couldn't make because its
 // message had already gone comes back into the field (after the words there, a blank line between); when it was the
 // last queued, the working line says so until the next send or the drained turn starts (else the strip does).
+// Escape, and ⌘. on the Mac or Ctrl+. elsewhere, stop a running answer as Stop does (stop-key.ts).
 import {
   use,
   useCallback,
@@ -39,6 +40,7 @@ import { errorWords } from "@clauseo/components/lib/words-errors.ts";
 import { frame } from "@clauseo/components/lib/words-frame.ts";
 import { mt } from "@clauseo/components/lib/words-matters.ts";
 import { useWords } from "@clauseo/components/lib/words.ts";
+import { useDisplay } from "@clauseo/components/lib/display.ts";
 import { StoreContext } from "../../store/hooks.ts";
 import type { StreamView } from "../../store/view.ts";
 import type { HostTransport } from "../../transport/host-transport.ts";
@@ -57,6 +59,7 @@ import { pickFull, queueFullLine } from "./composer-queue.ts";
 import { ComposerSteer } from "./composer-steer.tsx";
 import { asksWords } from "./step-names.ts";
 import { useHold } from "../first-run/hold.ts";
+import { useStopKey } from "./stop-key.ts";
 import type { AskHow, Drafts } from "./session.ts";
 import { ProtectionContext } from "../protection/context.ts";
 
@@ -150,6 +153,9 @@ export function WorkComposer({
   // the view store, read as Enter queues (the cap); none where the composer is mounted alone
   const store = use(StoreContext);
   const w = useWords();
+  // Escape and ⌘. (Ctrl+. off the Mac) stop the running answer, as Stop does (stop-key.ts)
+  const { platform } = useDisplay();
+  useStopKey(busy, onStop, platform === "mac");
   // the paused line's time against this render's clock (U12)
   const now = useNow();
   const agentPlan = useAgentPlan();
