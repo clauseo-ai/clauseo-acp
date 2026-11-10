@@ -175,9 +175,10 @@ matter: 24–37 ms, or 1.4–1.6 s with secure-delete.
   `items.body` compressed and building snippets in Rust is the lever if that matters.
 - Any change to the format or the tokenizer bumps `FORMAT` and triggers a rebuild. Format 2
   (normalised text, see Normalisation): an index of format 1 reopens as needing a rebuild, and
-  the host rebuilds it from the log. Format 3 stores a prompt or an answer as its plain words on
-  one line (Markdown marks and link addresses dropped, a space wherever a line broke), so a
-  snippet reads as text and fits the rail; an index of format 2 is rebuilt the same way.
+  the host rebuilds it from the log. Format 3 stores text on one line as the thread shows it: a
+  prompt as typed, an answer as its plain words (Markdown marks and link addresses dropped, raw
+  HTML kept as written, a space wherever a line broke), so a snippet reads as text and fits the
+  rail; an index of format 2 is rebuilt the same way.
 - The normalisation is one step on every write and every query. It costs what NFC costs on a
   few kilobytes of text per entry; the perf test records the typing numbers.
 - A new event that adds, changes or removes searchable text must reach the index; any new delete

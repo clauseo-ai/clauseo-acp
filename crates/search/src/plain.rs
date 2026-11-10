@@ -1,8 +1,10 @@
-//! An entry's text as Find shows it: plain words on one line. A prompt or an answer is Markdown,
-//! so its marks (`**`, `#`, `>`, list bullets, table pipes, code fences) and its links' and
-//! images' addresses go, keeping what a reader sees: a link's words, an image's description,
-//! code's text. Every line break and every block's end becomes a space, so two lines never glue
-//! into one word ("Arbitration" and "and" stay apart), and runs of white space close to one.
+//! An answer's text as Find shows it: plain words on one line. An answer is Markdown, so its
+//! marks (`**`, `#`, `>`, list bullets, table pipes, code fences) and its links' and images'
+//! addresses go, keeping what a reader sees: a link's words, an image's description, code's
+//! text, and raw HTML as written (the answer shows it as text, so `<Seller>` stays findable).
+//! Every line break and every block's end becomes a space, so two lines never glue into one
+//! word ("Arbitration" and "and" stay apart), and runs of white space close to one. A prompt
+//! shows as typed, so it is only [`one_line`].
 
 use pulldown_cmark::{Event, LinkType, Options, Parser, Tag, TagEnd};
 
@@ -17,7 +19,8 @@ pub(crate) fn plain(markdown: &str) -> String {
     let mut autolink = false;
     for event in Parser::new_ext(markdown, options) {
         match event {
-            Event::Text(text) | Event::Code(text) => {
+            // Raw HTML too: the answer shows it as text, never as markup.
+            Event::Text(text) | Event::Code(text) | Event::Html(text) | Event::InlineHtml(text) => {
                 if !autolink {
                     out.push_str(&text);
                 }
@@ -50,14 +53,10 @@ pub(crate) fn plain(markdown: &str) -> String {
             | Event::TaskListMarker(_)
             | Event::InlineMath(_)
             | Event::DisplayMath(_) => {}
-            // A line's or a block's end, a rule, an inline tag such as `<br>`: a space.
-            Event::SoftBreak
-            | Event::HardBreak
-            | Event::Rule
-            | Event::Html(_)
-            | Event::InlineHtml(_)
-            | Event::End(_)
-            | Event::Start(_) => out.push(' '),
+            // A line's or a block's end, a rule: a space.
+            Event::SoftBreak | Event::HardBreak | Event::Rule | Event::End(_) | Event::Start(_) => {
+                out.push(' ');
+            }
         }
     }
     one_line(&out)
@@ -104,6 +103,28 @@ mod tests {
             plain("| Party | Role |\n|---|---|\n| A | Buyer |"),
             "Party Role A Buyer"
         );
+    }
+
+    #[test]
+    fn raw_html_stays_as_the_answer_shows_it() {
+        assert_eq!(
+            plain("The <Seller> shall pay the <Buyer>."),
+            "The <Seller> shall pay the <Buyer>."
+        );
+        assert_eq!(plain("<Seller>\n\nsigns here"), "<Seller> signs here");
+        assert_eq!(plain("one<br>two"), "one<br>two");
+    }
+
+    #[test]
+    fn a_prompt_kept_as_typed_keeps_every_word() {
+        for typed in [
+            "Ask the <client> today",
+            "2*3*4",
+            "See [Annex A](draft) now",
+        ] {
+            assert_eq!(one_line(typed), typed);
+        }
+        assert_eq!(one_line("Ask the\n<client>"), "Ask the <client>");
     }
 
     #[test]

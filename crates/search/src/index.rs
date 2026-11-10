@@ -232,10 +232,11 @@ impl Batch<'_> {
             at,
             archived,
         };
-        // a prompt or an answer is Markdown: Find keeps and shows its plain words, on one line
+        // Find keeps and shows what the thread shows, on one line: an answer is Markdown, so its
+        // plain words; a prompt shows as typed, so all of it (`<client>`, `2*3*4` stay whole)
         let text = match kind {
-            EntryKind::Prompt | EntryKind::Answer => plain(text),
-            EntryKind::ToolTitle => one_line(text),
+            EntryKind::Answer => plain(text),
+            EntryKind::Prompt | EntryKind::ToolTitle => one_line(text),
         };
         self.insert(&row, &stored(&text))
     }
