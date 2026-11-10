@@ -332,6 +332,7 @@ crates/matters/src/place/windows.rs - unsafe_code
 crates/host/examples/stetdoc_compare_fake.rs - clippy::disallowed_methods
 crates/host/src/config/wiring/stetdoc.rs HostConfig clippy::multiple_inherent_impl
 crates/host/src/actor/query.rs query clippy::too_many_lines
+# One match arm per matter job, as actor/query.rs's query has one arm per query; splitting handle into helpers is on the after-launch list.
 crates/host/src/matter_worker.rs handle clippy::too_many_lines
 crates/host/tests/host/blackline.rs stetdoc_on_path clippy::disallowed_methods
 crates/host/src/clock.rs SystemClock::now clippy::disallowed_methods
