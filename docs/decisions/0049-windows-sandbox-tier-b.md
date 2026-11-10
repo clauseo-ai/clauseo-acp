@@ -676,11 +676,18 @@ started elevated, by the app or by the uninstall hook.
   (template block `admin-section`, before `SetContext`'s `${RunningX64}`, the language picker and
   `SemverCompare`), and the per-user elevated step once it has its switch, though it loads no
   plug-in. It makes a folder named by `GetTempFileName` directly in `%ProgramFiles%\Clauseo`
-  (`$PROGRAMFILES64`, from HKLM; no parent of its own, so nothing outlives the run), sets owner
+  (`$PROGRAMFILES64`, from HKLM; no parent of its own), sets owner
   Administrators and a protected DACL (Administrators and SYSTEM full) with `icacls`, checking
   both exit codes, then sets `$PLUGINSDIR` and `$TEMP` to it. NSIS skips its own plug-in folder
-  when `$PLUGINSDIR` is set (makensis `build.cpp:3806-3807`) and deletes `$PLUGINSDIR`, and only
-  it, at exit (`Main.c:470-489`). Earlier builds used a parent `installer-temp`, which stayed
+  when `$PLUGINSDIR` is set (makensis `build.cpp:3806-3807`) and tries to delete `$PLUGINSDIR`,
+  and only it, at exit (`Main.c:470-489`). That leaves the folder with its `System.dll` (the ARM64
+  install smoke finds one per per-machine run, not queued for a restart; why isn't proven), so
+  each per-machine run first removes earlier runs' folders: only folders directly in
+  `%ProgramFiles%\Clauseo` named as NSIS names them (`ns`, a letter, 1-4 hex digits, `.tmp`), never
+  its own or `$INSTDIR`, and only one whose `System.dll` it could delete, which a run still going
+  holds loaded; then `RMDir /r`. The per-machine uninstaller removes its own once it has exited
+  (below). A recursive delete there is safe for the same reason the folder is ours: only
+  administrators can create anything there. Earlier builds used a parent `installer-temp`, which stayed
   empty after every run; each run now removes it first, only when empty. The per-machine installer also points the environment's `TEMP`
   and `TMP` there, so what it starts elevated (the WebView2 bootstrapper, `--adopt`, the old
   uninstaller its reinstall page runs in place) uses it too. The folder can't be checked as ours
@@ -713,13 +720,16 @@ started elevated, by the app or by the uninstall hook.
   the end of the section (`uninstall_in_place.nsh`, block `uninstall-self-delete`) it starts,
   once (from `un.onGUIEnd` when it has a window, from the section under `/S`; in `$SYSDIR`), a
   hidden `"$SYSDIR\cmd.exe" /d /v:off /c` that waits about 3 s on `$SYSDIR\PING.EXE`, deletes
-  `uninstall.exe` only if the main exe isn't there, and removes the install folder only if empty. An install writes the main exe before `WriteUninstaller`, so the guard
+  `uninstall.exe` only if the main exe isn't there, removes its own plug-in folder (`rmdir /s /q` on
+  that exact `$PLUGINSDIR`, once more about 5 s later if it is still there; only a folder directly
+  in `%ProgramFiles%\Clauseo` with an NSIS temp name, and no line at all if NSIS cut it at its
+  string limit), and removes the install folder only if empty. An install writes the main exe before `WriteUninstaller`, so the guard
   keeps a new install's `uninstall.exe` unless both land in the instant between `if` and `del`.
   `/d` keeps out HKCU's `AutoRun`, which an elevated cmd would otherwise run from the user's
   hive. It builds no line, and leaves the file, when the paths hold one of `% ^ & | < > " !`.
   The reinstall page runs the old uninstaller this way too, never with `/UPDATE`; its own
   `_?=` comes last on the line, which NSIS takes, and the self-delete can only remove the old
-  `uninstall.exe` and empty folders, so it isn't skipped there. **Residual:** an install
+  `uninstall.exe`, its own plug-in folder and empty folders, so it isn't skipped there. **Residual:** an install
   registered by an older version keeps its old `UninstallString` (no `_?=`), and so the `%TEMP%`
   copy, until it's reinstalled. `uninstall.exe` started by hand without `_?=` still copies itself
   before any script runs; the copy then refuses with 26, but by then it is already running
