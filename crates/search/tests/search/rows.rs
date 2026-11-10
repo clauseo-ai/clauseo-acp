@@ -125,3 +125,35 @@ fn snippet_markers_in_stored_text_are_stripped() {
     assert_eq!(snippet(hit), "a forged mark");
     assert_eq!(crate::common::marked(hit), vec!["mark"]);
 }
+
+#[test]
+fn a_prompt_is_found_as_typed_and_an_answer_keeps_its_raw_html() {
+    let dir = TestDir::new("as-shown");
+    let mut index = index(&dir);
+    for (n, typed) in [
+        (1, "Ask the <client> about it"),
+        (2, "Multiply 2*3*4 please"),
+        (3, "See [Annex A](draft) now"),
+    ] {
+        index
+            .put_entry(
+                matter(1),
+                thread(1),
+                seq(n),
+                EntryKind::Prompt,
+                at(1),
+                typed,
+            )
+            .unwrap();
+    }
+    answer(&mut index, 1, 1, 4, "The <Seller> signs **here**");
+    let shown = |query| {
+        let page = find(&index, query, Mode::Ranked);
+        assert_eq!(page.hits.len(), 1, "{query}");
+        snippet(&page.hits[0])
+    };
+    assert_eq!(shown("client "), "Ask the <client> about it");
+    assert_eq!(shown("draft "), "See [Annex A](draft) now");
+    assert_eq!(shown("multiply "), "Multiply 2*3*4 please");
+    assert_eq!(shown("seller "), "The <Seller> signs here");
+}

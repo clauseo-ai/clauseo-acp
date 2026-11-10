@@ -41,8 +41,9 @@
 //!   its thread or matter, file names by matter. A put replaces the row with the same key.
 //! - Deletes remove the text from the index too: FTS5 `secure-delete` and SQLite's
 //!   `secure_delete` are on, and a delete outside a batch ends with a WAL checkpoint.
-//! - A prompt or an answer is stored as its plain words on one line (`plain.rs`): no Markdown
-//!   marks, no link addresses, a space wherever a line broke, so a snippet reads as text.
+//! - Text is stored on one line, as the thread shows it (`plain.rs`): a prompt as typed; an
+//!   answer as its plain words, no Markdown marks or link addresses but raw HTML as written; a
+//!   space wherever a line broke, so a snippet reads as text.
 //! - The control characters U+0002 and U+0003 mark matches inside snippets, so they are
 //!   stripped from text before it is stored.
 //! - No clock: [`Query::now`] is the time recency is measured from.
