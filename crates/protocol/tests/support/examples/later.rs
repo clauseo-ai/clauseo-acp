@@ -116,6 +116,10 @@ pub(super) fn failures() -> Vec<DomainEvent> {
             ErrorCode::MatterFolderPermission,
             "the privacy settings keep Clauseo from opening the matter folder",
         ),
+        failed(
+            ErrorCode::AgentOffline,
+            "the window said the computer is offline",
+        ),
     ]
 }
 
