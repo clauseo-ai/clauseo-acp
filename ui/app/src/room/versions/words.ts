@@ -129,6 +129,7 @@ export function askOf(lang: Lang, cal: Calendar, s: Snapshot, ask: Ask | null): 
       edited: [],
       editedHead: null,
       failed,
+      ...(undone === undefined ? {} : { confirm: vt(lang, "Undo the restore") }),
     };
   }
   const meta = s.timeline.meta.get(ask.id);
