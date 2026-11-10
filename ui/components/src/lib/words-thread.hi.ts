@@ -153,4 +153,7 @@ export const HI = {
     "नीचे पहला प्रश्न पूछें। हर उत्तर उसी दस्तावेज़ और पृष्ठ का हवाला देता है जिस पर वह आधारित है।",
   "Nothing in this matter matches '{q}'.": "इस मामले में '{q}' से मेल खाता कुछ नहीं है।",
   "Search covers the papers, the answers and Versions.": "खोज में दस्तावेज़, उत्तर और संस्करण शामिल हैं।",
+  // Latest, over the composer once the view has left the thread's end: its words, and its name for a screen reader
+  Latest: "नवीनतम",
+  "Go to the latest message": "नवीनतम संदेश पर जाएँ",
 } as const;

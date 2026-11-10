@@ -251,7 +251,12 @@ export function Work({
             <Suspense fallback={null}>
               <KeyedRequestContext value={keyed}>
                 <FolderSupportContext value={matter?.folder_support}>
-                  <LazyThreadList transport={transport} stream={stream} busy={busy} />
+                  <LazyThreadList
+                    transport={transport}
+                    stream={stream}
+                    busy={busy}
+                    sent={session.sentTurn}
+                  />
                 </FolderSupportContext>
               </KeyedRequestContext>
             </Suspense>
