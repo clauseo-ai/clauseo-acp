@@ -7,11 +7,16 @@
 import { st, type SettingsKey } from "@clauseo/components/lib/words-settings.ts";
 import { tw, type ToolsKey } from "@clauseo/components/lib/words-tools.ts";
 import { toolsLine, type ToolsLineKey } from "@clauseo/components/lib/words-tools-line.ts";
-import type { AgentLimitsView, LimitsView, ToolsSettingsView } from "../transport/protocol.ts";
+import type {
+  AgentLimitsView,
+  LimitsView,
+  PrivacySettings,
+  ToolsSettingsView,
+} from "../transport/protocol.ts";
 import type { Entry } from "./entry.ts";
 import { OpenTip } from "./open-tip.tsx";
 import { SettingsOver } from "./states-settings.tsx";
-import { settingsWords, type WordsRef } from "./words.ts";
+import { firstLaunchWords, settingsWords, type WordsRef } from "./words.ts";
 
 /** The settings window, 960 by 700 (DESIGN.md). */
 const WINDOW = { width: 960, height: 700 } as const;
@@ -19,6 +24,7 @@ const WINDOW = { width: 960, height: 700 } as const;
 /** The state each entry shows Privacy in; `tip` names an info tip's button to press open once it shows. */
 type State = {
   tools?: ToolsSettingsView;
+  privacy?: PrivacySettings;
   locked?: string[];
   limits?: LimitsView;
   tip?: SettingsKey;
@@ -26,6 +32,8 @@ type State = {
 
 const ON: ToolsSettingsView = { web_search: true, browser: true };
 const OFF: ToolsSettingsView = { web_search: false, browser: false };
+/** The anonymous counts on, after the first act, as the host sends them. */
+const COUNTS: PrivacySettings = { counts: true, crash_reports: false, counts_started: true };
 
 /** A line of the room's tool line words (words-tools-line.ts) that Settings says too. */
 const lineWords = (key: ToolsLineKey): WordsRef => ({
@@ -66,6 +74,7 @@ const entry = (id: string, words: WordsRef, state: State = {}): Entry => ({
         {...(state.locked === undefined ? {} : { locked: state.locked })}
         {...(state.limits === undefined ? {} : { limits: state.limits })}
         {...(state.tools === undefined ? {} : { tools: state.tools })}
+        {...(state.privacy === undefined ? {} : { privacy: state.privacy })}
       />
     );
     return state.tip === undefined ? over : <OpenTip label={st(lang, state.tip)}>{over}</OpenTip>;
@@ -118,4 +127,13 @@ export const WEB_SETTINGS: Entry[] = [
   entry("UEP-22", settingsWords("About websites"), {
     tip: "About websites",
   }),
+  // D-052: the anonymous counts' switch, in the first run's words (UD1-06, UD1-08), on
+  entry("UEP-25", firstLaunchWords("Send anonymous counts"), { tools: ON, privacy: COUNTS }),
+  entry(
+    "UEP-26",
+    firstLaunchWords(
+      "How many questions, which features, how long answers take. Never your papers, your questions or the answers.",
+    ),
+    { tools: ON, privacy: COUNTS },
+  ),
 ];

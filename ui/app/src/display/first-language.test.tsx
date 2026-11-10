@@ -36,6 +36,7 @@ function laterHost() {
     getSettings: () => new Promise<Settings>((resolve) => (answer = resolve)),
     setUiSettings: () => Promise.resolve(),
     setToolSettings: () => Promise.resolve(),
+    setPrivacySettings: () => Promise.resolve(),
     onSettingsChanged: () => () => {},
   };
   const answerWith = (language: "en" | "hi") =>

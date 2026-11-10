@@ -6,7 +6,8 @@
 // one helper line at most, each switch showing its value and a flip sent as set_tool_settings with its key; a locked
 // key's switch disabled, showing the host's value, its glyph locked, U11-07's line in its helper's place; the Browser
 // switch's helper the same on or off (no "Not available yet" since #870); the nav's icon not the web's globe; no
-// Indian Kanoon.
+// Indian Kanoon. The anonymous counts' switch (D-052) only when the host sends SettingsView.privacy, in the first
+// run's words, a flip sent as set_privacy_settings, a firm's lock shown off and disabled, a host change shown live.
 import axe from "axe-core";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
@@ -17,7 +18,12 @@ import type { DisplayStore } from "../../room/display-store.ts";
 import type { Settings } from "../../room/host-next.ts";
 import { stubFonts } from "../../room/thread/testing.ts";
 import { FakeTransport } from "../../transport/fake-transport.ts";
-import type { AgentLimitsView, LimitsView, ToolsSettingsView } from "../../transport/protocol.ts";
+import type {
+  AgentLimitsView,
+  LimitsView,
+  PrivacySettings,
+  ToolsSettingsView,
+} from "../../transport/protocol.ts";
 import { IconSafeWorkspace, IconWebsite } from "@clauseo/components/icons/icons.tsx";
 import { SECTIONS } from "../sections.tsx";
 import { SettingsApp } from "../settings-app.tsx";
@@ -71,11 +77,23 @@ const PLAN: AgentLimitsView = {
 
 async function mount({
   tools,
+  privacy,
   locked = [],
   limits,
   refuse = false,
-}: { tools?: ToolsSettingsView; locked?: string[]; limits?: LimitsView; refuse?: boolean } = {}) {
-  const settings: Settings = { ui: UI, locked, ...(tools === undefined ? {} : { tools }) };
+}: {
+  tools?: ToolsSettingsView;
+  privacy?: PrivacySettings;
+  locked?: string[];
+  limits?: LimitsView;
+  refuse?: boolean;
+} = {}) {
+  const settings: Settings = {
+    ui: UI,
+    locked,
+    ...(tools === undefined ? {} : { tools }),
+    ...(privacy === undefined ? {} : { privacy }),
+  };
   const transport = new FakeTransport({
     next: {
       query: (query) => {
@@ -356,4 +374,60 @@ test("a write the host refuses (settings.locked) leaves the switch where it was,
   expect(transport.only("next_command")).toHaveLength(1);
   expect(switchNamed(el, "Web search")?.getAttribute("aria-checked")).toBe("true");
   expect(pane(el).textContent).toBe(before);
+});
+
+const COUNTS = "Send anonymous counts";
+const COUNTS_NOTE =
+  "How many questions, which features, how long answers take. Never your papers, your questions or the answers.";
+const PRIVACY_ON: PrivacySettings = { counts: true, crash_reports: false, counts_started: true };
+
+test("without the privacy switches from the host, no anonymous counts' switch", async () => {
+  const { el } = await mount({ tools: ON });
+  expect(switchNamed(el, COUNTS)).toBeNull();
+});
+
+test("the anonymous counts' switch says the first run's words, shows the host's value, and a flip sends set_privacy_settings", async () => {
+  const { el, transport } = await mount({ privacy: PRIVACY_ON });
+  const counts = switchNamed(el, COUNTS);
+  expect(counts?.closest(".set-row")?.textContent).toBe(`${COUNTS}${COUNTS_NOTE}`);
+  expect(counts?.getAttribute("aria-checked")).toBe("true");
+  await act(async () => counts?.click());
+  await act(async () => settled());
+  expect(transport.only("next_command").map((c) => c.command)).toEqual([
+    { set_privacy_settings: { patch: { counts: false } } },
+  ]);
+  expect(switchNamed(el, COUNTS)?.getAttribute("aria-checked")).toBe("false");
+  await act(async () => switchNamed(el, COUNTS)?.click());
+  await act(async () => settled());
+  expect(
+    transport
+      .only("next_command")
+      .map((c) => c.command)
+      .at(-1),
+  ).toEqual({
+    set_privacy_settings: { patch: { counts: true } },
+  });
+});
+
+test("a firm's lock on privacy.counts shows the switch off and disabled, says so, and a press sends nothing", async () => {
+  const { el, transport } = await mount({
+    privacy: { ...PRIVACY_ON, counts: false },
+    locked: ["privacy.counts"],
+  });
+  const counts = switchNamed(el, COUNTS);
+  expect(counts?.getAttribute("aria-checked")).toBe("false");
+  expect(counts?.hasAttribute("data-disabled")).toBe(true);
+  expect(counts?.closest(".set-row")?.textContent).toBe(`${COUNTS}${COUNTS_NOTE}${LOCKED}`);
+  await act(async () => counts?.click());
+  await act(async () => settled());
+  expect(transport.only("next_command")).toEqual([]);
+});
+
+test("the other window's change to the counts reaches the switch live", async () => {
+  const { el, transport } = await mount({ privacy: PRIVACY_ON });
+  expect(switchNamed(el, COUNTS)?.getAttribute("aria-checked")).toBe("true");
+  await act(async () =>
+    transport.settingsChanged({ ui: UI, locked: [], privacy: { ...PRIVACY_ON, counts: false } }),
+  );
+  expect(switchNamed(el, COUNTS)?.getAttribute("aria-checked")).toBe("false");
 });

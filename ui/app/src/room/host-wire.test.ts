@@ -92,7 +92,7 @@ const MOTIONS: [UiMotion, string][] = [
   ["reduced", "reduce"],
 ];
 
-test("get_settings maps every wire lite and motion to the room's, and keeps the tool switches and the locked keys as they came", async () => {
+test("get_settings maps every wire lite and motion to the room's, and keeps the tool and privacy switches and the locked keys as they came", async () => {
   for (const [lite, wireLite] of LITES) {
     for (const [motion, wireMotion] of MOTIONS) {
       const view = {
@@ -103,6 +103,7 @@ test("get_settings maps every wire lite and motion to the room's, and keeps the 
       await expect(host.getSettings()).resolves.toEqual({
         ui: { theme: "dark", font_size: 18, language: "hi", lite, motion },
         tools: { web_search: true, browser: false },
+        privacy: VIEW.privacy,
         locked: ["ui.theme", "matters.default_location"],
       });
     }
