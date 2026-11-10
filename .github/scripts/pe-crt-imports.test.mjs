@@ -169,6 +169,27 @@ test("the command line: directories give their .exe, .dll and .node files, neste
   assert.equal(run().status, 2);
 });
 
+test("a directory search finds .pyd", async () => {
+  const dir = join(scratch, "pyd");
+  await mkdir(join(dir, "DLLs"), { recursive: true });
+  await mkdir(join(dir, "pkg"), { recursive: true });
+  await writeFile(join(dir, "DLLs", "_socket.pyd"), makePe({ imports: CLEAN }));
+  await writeFile(join(dir, "pkg", "__init__.py"), "not checked");
+  await writeFile(join(dir, "pkg", "mod.pyc"), "not checked");
+  assert.deepEqual(await expandPaths([dir]), [join(dir, "DLLs", "_socket.pyd")]);
+
+  const run = (...args) => spawnSync(process.execPath, [SCRIPT, ...args], { encoding: "utf8" });
+  const clean = run(dir);
+  assert.equal(clean.status, 0, clean.stdout + clean.stderr);
+  assert.match(clean.stdout, /^1 files \(1 DLLs or addons\): none imports the VC\+\+ runtime$/m);
+
+  await writeFile(join(dir, "pkg", "_bad.CP313-win_amd64.PYD"), makePe({ imports: ["VCRUNTIME140.dll"] }));
+  assert.deepEqual(await expandPaths([dir]), [join(dir, "DLLs", "_socket.pyd"), join(dir, "pkg", "_bad.CP313-win_amd64.PYD")]);
+  const bad = run(dir);
+  assert.equal(bad.status, 1);
+  assert.match(bad.stdout, /::error::.*_bad\.CP313-win_amd64\.PYD imports VCRUNTIME140\.dll/);
+});
+
 /** A folder under scratch, made fresh enough: mkdir -p. */
 async function folder(name) {
   const dir = join(scratch, name);
