@@ -78,8 +78,8 @@
 //!
 //! # Invariants
 //!
-//! - Only `nodejs.org` and `registry.npmjs.org` are contacted (and, once its archives are
-//!   published, Python's release asset on `github.com` and its redirect), over https alone, or
+//! - Only `nodejs.org`, `registry.npmjs.org` and, for Python's release asset, `github.com` and
+//!   its redirect (`release-assets.githubusercontent.com`) are contacted, over https alone, or
 //!   the firm's https mirror for tarballs; an IT runtime and an offline bundle contact nothing.
 //!   Sign-in's own network use is one name lookup before a login run (the agent's first sign-in
 //!   host, or the proxy's); the vendors' CLIs make the sign-in's connections themselves.

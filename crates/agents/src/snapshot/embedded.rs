@@ -1,5 +1,5 @@
 //! The embedded snapshot's data: G16's pins, the sizes measured for them, Node 24.22.0's
-//! archives, the Python runtime's (none published yet) and the agents' hosts.
+//! archives, the Python runtime's (3.13.18, build c2) and the agents' hosts.
 
 use clauseo_protocol::AgentId;
 
@@ -142,13 +142,52 @@ const PYTHON_VERSION: &str = "3.13.18";
 /// Whether Clauseo's CI has published the Python archives this build pins. Until it has,
 /// [`PYTHON_ARCHIVES`] stays empty and no platform has Python: an install skips it and reports
 /// it unavailable, and the agents install as before. A test holds the two together.
-pub(super) const PYTHON_ARCHIVES_PUBLISHED: bool = false;
-/// Each Python archive Clauseo's CI publishes as a release asset on `clauseo-ai/clauseo-acp`:
-/// platform, file name (`clauseo-python-3.13.18-c<build>-<os>-<arch>.tar.gz`), URL, size,
-/// unpacked size, SHA-256. macOS arm64 and x64, Windows x64 and ARM64; Linux has no Python. A
-/// security fix ships as an app update with new rows here; the old runtime folder is removed at
-/// the next start. Empty until [`PYTHON_ARCHIVES_PUBLISHED`].
-pub(super) const PYTHON_ARCHIVES: [(Os, Arch, &str, &str, u64, u64, &str); 0] = [];
+pub(super) const PYTHON_ARCHIVES_PUBLISHED: bool = true;
+/// Each Python archive Clauseo's CI publishes as a release asset on `clauseo-ai/clauseo-acp`
+/// (release `python-runtime-3.13.18-c2`): platform, file name
+/// (`clauseo-python-3.13.18-c<build>-<os>-<arch>.tar.gz`), URL, size, unpacked size, SHA-256.
+/// macOS arm64 and x64, Windows x64 and ARM64; Linux has no Python. The unpacked size is the sum
+/// of the archive's regular file sizes, as `xtask`'s `tree::file_count_and_size` measures a
+/// runtime. A security fix ships as an app update with new rows here; the old runtime folder is
+/// removed at the next start. Empty until [`PYTHON_ARCHIVES_PUBLISHED`].
+pub(super) const PYTHON_ARCHIVES: [(Os, Arch, &str, &str, u64, u64, &str); 4] = [
+    (
+        Os::Darwin,
+        Arch::Arm64,
+        "clauseo-python-3.13.18-c2-macos-arm64.tar.gz",
+        "https://github.com/clauseo-ai/clauseo-acp/releases/download/python-runtime-3.13.18-c2/clauseo-python-3.13.18-c2-macos-arm64.tar.gz",
+        120_403_590,
+        410_667_627,
+        "8921fb856c147add57f95c6afe93031d04b300c31d1ac5dccf19ac1357b1036f",
+    ),
+    (
+        Os::Darwin,
+        Arch::X64,
+        "clauseo-python-3.13.18-c2-macos-x64.tar.gz",
+        "https://github.com/clauseo-ai/clauseo-acp/releases/download/python-runtime-3.13.18-c2/clauseo-python-3.13.18-c2-macos-x64.tar.gz",
+        106_159_100,
+        351_436_025,
+        "7b7f43de6dd11f92f8f8f5e7088af52e5e390f6bc0d276a437f34c7c0485a449",
+    ),
+    (
+        Os::Win32,
+        Arch::X64,
+        "clauseo-python-3.13.18-c2-windows-x64.tar.gz",
+        "https://github.com/clauseo-ai/clauseo-acp/releases/download/python-runtime-3.13.18-c2/clauseo-python-3.13.18-c2-windows-x64.tar.gz",
+        102_298_941,
+        412_988_046,
+        "c22ccbc85709b3be3a78b938a766ee0276dfdc6ef4743f3a2e4bf49bbda1b6d2",
+    ),
+    (
+        Os::Win32,
+        Arch::Arm64,
+        "clauseo-python-3.13.18-c2-windows-arm64.tar.gz",
+        "https://github.com/clauseo-ai/clauseo-acp/releases/download/python-runtime-3.13.18-c2/clauseo-python-3.13.18-c2-windows-arm64.tar.gz",
+        93_896_712,
+        394_754_979,
+        "712a1e24fbf3399578d75b883516cc482ece5b7f0bd64b19fd62d7ad2adc6918",
+    ),
+];
 
 /// Hosts every install contacts.
 const INSTALL_HOSTS: [&str; 2] = ["nodejs.org", "registry.npmjs.org"];
