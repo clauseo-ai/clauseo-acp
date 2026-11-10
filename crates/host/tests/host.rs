@@ -68,6 +68,9 @@ mod cancel_leftovers;
 #[path = "host/claude_mode.rs"]
 mod claude_mode;
 #[cfg(test)]
+#[path = "host/claude_sandbox.rs"]
+mod claude_sandbox;
+#[cfg(test)]
 #[path = "host/clear_env.rs"]
 mod clear_env;
 #[cfg(test)]

@@ -382,6 +382,7 @@ fn keys(web_search: Switch, login: Login) -> ClaudeKeys<'static> {
         data: &NO_DENY,
         case_law: false,
         browser: false,
+        sandbox: None,
     }
 }
 
@@ -480,8 +481,7 @@ fn skill_shell_is_off_and_the_folders_come_after_the_hooks() {
     );
 }
 
-/// The guard's entry and `disableAllHooks: false` survive beside the profile's settings, and
-/// the forced MCP keys stay.
+/// The guard's entry, `disableAllHooks: false` and the forced MCP keys survive the profile's keys.
 #[test]
 fn the_guard_and_the_forced_keys_survive_the_profile_keys() {
     let hook = json!({"claudeCode": {"options": {

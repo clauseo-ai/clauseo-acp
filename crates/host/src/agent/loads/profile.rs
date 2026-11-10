@@ -12,7 +12,9 @@
 //!   `skipWebFetchPreflight: true` on a Bedrock,
 //!   Vertex or Foundry login, and always `permissions.deny` gains the data folder's rules
 //!   (`agent/data_fence.rs`), after any the hook put there; in forced ask it also gains the
-//!   `permissions.ask` rules and `sandbox.autoAllowBashIfSandboxed: false`. These are flag
+//!   `permissions.ask` rules and `sandbox.autoAllowBashIfSandboxed: false`, over Claude Code's
+//!   own sandbox, which the settings gain before it on macOS and Linux (`agent/loads/sandbox.rs`;
+//!   none on Windows). These are flag
 //!   settings: they outrank the user's settings, and Claude Code merges every source's
 //!   `permissions.deny`, so no user rule takes one out.
 //! - Codex ([`codex_keys`]): of the hook's keys only `developer_instructions`
@@ -180,6 +182,9 @@ pub(crate) struct ClaudeKeys<'a> {
     /// `agent_browser_denied`, `agent_browser_ask`). Without it,
     /// any hook rule naming agent-browser is dropped, so a session without the browser has none.
     pub(crate) browser: bool,
+    /// Claude Code's own sandbox (`agent::loads::sandbox`), on macOS and Linux; none on
+    /// Windows, where commands keep asking.
+    pub(crate) sandbox: Option<&'a super::sandbox::ClaudeSandbox>,
 }
 
 /// Adds [`ClaudeKeys`] to `claudeCode.options` (see the module doc).
@@ -232,6 +237,10 @@ pub(crate) fn claude_options(options: &mut Map<String, Value>, keys: &ClaudeKeys
     deny_data_folder(&mut settings, keys.data);
     if keys.browser {
         browser_ask_settings(&mut settings);
+    }
+    // Before forced ask, whose `autoAllowBashIfSandboxed: false` must win.
+    if let Some(sandbox) = keys.sandbox {
+        super::sandbox::sandbox_settings(&mut settings, sandbox);
     }
     if keys.forced_ask {
         forced_ask_settings(&mut settings);

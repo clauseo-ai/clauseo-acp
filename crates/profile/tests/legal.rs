@@ -2,6 +2,8 @@
 //! skills' source files, their budgets, the words they must never hold, the version lock, and
 //! the skills index Codex gets. Nothing is written; the lock test reads `assets/skills/`.
 
+#[path = "legal/claude_shell.rs"]
+mod claude_shell;
 #[path = "legal/index.rs"]
 mod index;
 
@@ -168,9 +170,8 @@ fn legal_names_matter_brief() {
     assert!(!LEGAL.contains("{work_folder}/matter-brief.md"));
 }
 
-/// D-045: Codex runs even an approved command under Seatbelt, which blocks the macOS services
-/// `mdls`, `mdfind`, `open` and `qlmanage` need and `osascript`'s Apple events. Codex on macOS
-/// is told, in one sentence; Codex elsewhere and Claude, unsandboxed, never are.
+/// D-045: Codex's Seatbelt blocks what `mdls`, `mdfind`, `open`, `qlmanage` and `osascript` need,
+/// even approved. Codex on macOS is told in one sentence; elsewhere never, and Claude has its own.
 #[test]
 fn only_codex_on_macos_is_told_which_commands_never_run() {
     use clauseo_profile::instructions::codex_shell;
@@ -208,7 +209,7 @@ fn only_codex_on_macos_is_told_which_commands_never_run() {
     );
     assert!(!profile.instructions().contains("osascript"));
     let claude = serde_json::to_string(&profile.session_meta(Some(AgentKind::Claude))).unwrap();
-    assert!(!claude.contains("osascript"), "{claude}");
+    assert!(!claude.contains(line), "{claude}");
     assert!(
         profile
             .codex_keys_without_index(Some(AgentKind::Claude))

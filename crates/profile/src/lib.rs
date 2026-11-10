@@ -199,9 +199,27 @@ impl ClauseoProfile {
             .collect()
     }
 
-    /// Claude's options.
+    /// Claude's options, with [`Self::claude_instructions`].
     pub fn claude_options(&self) -> ClaudeOptions {
-        ClaudeOptions::new(self.instructions(), Some(self.paths.claude_plugin.clone()))
+        ClaudeOptions::new(
+            self.claude_instructions(),
+            Some(self.paths.claude_plugin.clone()),
+        )
+    }
+
+    /// Claude's instructions on this OS: [`Self::claude_instructions_for`] macOS or not.
+    pub fn claude_instructions(&self) -> String {
+        self.claude_instructions_for(cfg!(target_os = "macos"))
+    }
+
+    /// Claude's instructions: [`Self::instructions`], then on macOS (`macos`) a blank line and
+    /// [`instructions::claude_shell`]'s line, which Codex never gets.
+    pub fn claude_instructions_for(&self, macos: bool) -> String {
+        let text = self.instructions();
+        match instructions::claude_shell(macos) {
+            Some(line) => format!("{text}\n\n{line}"),
+            None => text,
+        }
     }
 
     /// Codex's keys with no skills index: `developer_instructions` is [`Self::instructions`].
@@ -216,7 +234,7 @@ impl ClauseoProfile {
     }
 
     /// Codex's instructions: [`Self::instructions`], then on macOS (`macos`) a blank line and
-    /// [`instructions::codex_shell`]'s line, which Claude never gets.
+    /// [`instructions::codex_shell`]'s line, which Claude never gets (it has its own).
     pub fn codex_instructions_for(&self, macos: bool) -> String {
         let text = self.instructions();
         match instructions::codex_shell(macos) {
