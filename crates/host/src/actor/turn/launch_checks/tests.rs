@@ -90,13 +90,16 @@ fn a_stale_prep_never_removes_the_newer_launch_folder() {
         .recv_timeout(Duration::from_secs(5))
         .expect("the stale prep undoes its own folders");
     assert!(!stale.root.exists(), "the stale launch's folder is gone");
+    assert!(!stale.browser.exists(), "and its browser folder");
     assert!(newer.work.join("draft.md").exists());
-    assert!(newer.browser.is_dir());
+    assert!(!newer.browser.exists(), "made only for the entry");
     assert!(newer.notes.is_dir(), "the shared notes folder stays");
     // The actor's own removal of a superseded answer takes only that launch's folder too.
     stale.make(&data, &sweep).unwrap();
+    write::create_dir_all(&stale.browser).unwrap();
     stale.remove();
     assert!(!stale.root.exists());
+    assert!(!stale.browser.exists());
     assert!(newer.work.join("draft.md").exists());
     write::remove_dir_all(&data).unwrap();
 }
@@ -106,11 +109,24 @@ fn a_stale_prep_never_removes_the_newer_launch_folder() {
 /// background; a link of that name is not followed.
 #[test]
 fn the_start_up_sweep_sets_run_aside_and_deletes_it_in_the_background() {
+    // The browser folders lie in <data>/browser/run, outside the run folder.
+    let key = folders(Path::new("/data"), 1);
+    assert_eq!(
+        key.browser,
+        Path::new("/data")
+            .join("browser")
+            .join("run")
+            .join(key.key.id())
+    );
     let data = scratch("sweep");
     let leftover = data.join("run").join("old-thread-3").join("work");
     write::create_dir_all(&leftover).unwrap();
     write::write_file(&leftover.join("f.md"), b"left").unwrap();
     write::create_dir_all(&data.join("run.old-0").join("x")).unwrap();
+    // A crashed run's browser folder (the guard's --cwd) too.
+    let browser = data.join("browser");
+    write::create_dir_all(&browser.join("run").join("old-thread-3").join("downloads")).unwrap();
+    write::write_file(&browser.join("agent-browser.json"), b"{}").unwrap();
     let sweep = RunSweep::default();
     let live = folders(&data, 4);
     live.make(&data, &sweep).unwrap();
@@ -119,13 +135,18 @@ fn the_start_up_sweep_sets_run_aside_and_deletes_it_in_the_background() {
         [live.key.id()],
         "the leftover is out of run at once"
     );
+    assert_eq!(names(&browser.join("run")), Vec::<String>::new());
     sweep.join_delete();
-    assert!(
-        names(&data)
-            .iter()
-            .all(|name| !name.starts_with("run.old-")),
-        "the set-aside folders are deleted"
-    );
+    for parent in [&data, &browser] {
+        assert!(
+            names(parent)
+                .iter()
+                .all(|name| !name.starts_with("run.old-")),
+            "the set-aside folders are deleted"
+        );
+    }
+    assert!(browser.join("agent-browser.json").exists());
+    assert!(!live.browser.exists());
     assert!(live.work.is_dir(), "the live launch's folders stay");
     // Once per host start: a second launch sweeps nothing.
     let second = folders(&data, 5);
@@ -236,14 +257,17 @@ fn removing_a_run_folder_never_follows_a_link_inside_it() {
     let launch = folders(&data, 1);
     launch.make(&data, &RunSweep::default()).unwrap();
     write::symlink(&outside, &launch.work.join("linked")).unwrap();
+    write::create_dir_all(&launch.browser).unwrap();
     write::symlink(&outside.join("brief.md"), &launch.browser.join("file-link")).unwrap();
     launch.remove();
     assert!(!launch.root.exists(), "the run folder is gone");
+    assert!(!launch.browser.exists(), "and the browser folder");
     assert_eq!(std::fs::read(outside.join("brief.md")).unwrap(), b"keep");
     assert!(launch.notes.is_dir(), "the notes folder stays");
     // A path that is not a run folder the host built is never removed.
     let mut stray = folders(&data, 2);
     stray.root = outside.clone();
+    stray.browser = outside.clone();
     stray.remove();
     assert!(outside.join("brief.md").exists());
     for folder in [&data, &outside] {
@@ -432,6 +456,7 @@ fn the_shell_browser_env_is_reachable_under_its_own_codex_fence_only() {
         notes: &run.notes,
         codex_home: &codex_home,
         listed: &listed,
+        socket_dir: None,
     };
     let fence = keys(&locations, session, false);
     let own = [run.root.clone(), run.notes.clone()];

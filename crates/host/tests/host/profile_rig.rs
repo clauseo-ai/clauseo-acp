@@ -98,10 +98,13 @@ impl Launcher for Wired {
             let template = PathBuf::from(format!("{scenario}.tmpl"));
             if let Ok(text) = std::fs::read_to_string(&template) {
                 let session = run.file_name().unwrap().to_str().unwrap();
+                // The guard's `--cwd`: `<data>/browser/run/<session>`, outside the run folder.
+                let data = run.parent().and_then(Path::parent).unwrap();
+                let browser = data.join("browser").join("run").join(session);
                 let text = text
                     .replace("@RUN@", &escaped(&path_text(run)))
                     .replace("@WORK@", &escaped(&path_text(&run.join("work"))))
-                    .replace("@BROWSER@", &escaped(&path_text(&run.join("browser"))))
+                    .replace("@BROWSER@", &escaped(&path_text(&browser)))
                     .replace("@SESSION@", &escaped(session))
                     .replace("@PACKS@", &escaped(&path_text(&run.join("skill-packs"))));
                 write::write(Path::new(scenario.as_ref()), text.as_bytes());

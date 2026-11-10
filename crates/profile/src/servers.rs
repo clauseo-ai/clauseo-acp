@@ -26,8 +26,32 @@ pub const BROWSER: &str = "browser";
 /// so the guard, which refuses every tool off agent-browser's `core` profile and every argument
 /// naming a file, is what holds the browser to its own folder there. Claude keeps the shell
 /// command, its rules and its skill (`ProfileHook::browser_tool`).
+///
+/// Not on Windows ([`no_browser`]).
 pub fn browser_mcp(kind: Option<AgentKind>) -> bool {
-    kind == Some(AgentKind::Codex)
+    browser_mcp_on(kind, cfg!(windows))
+}
+
+/// [`browser_mcp`] as it is on Windows when `windows` is true, and elsewhere when it is false.
+pub fn browser_mcp_on(kind: Option<AgentKind>, windows: bool) -> bool {
+    kind == Some(AgentKind::Codex) && !windows
+}
+
+/// Whether an agent of `kind` gets no browser at all, neither the entry nor the shell command:
+/// Codex on Windows. Clauseo gives Codex's shell the unelevated restricted-token sandbox there
+/// (`windows.sandbox = "unelevated"`), whose only network block is proxy variables that leave
+/// loopback out (codex 0.162.1 `windows-sandbox-rs/src/env.rs:126-170`, applied at
+/// `spawn_prep.rs:141-143`; the firewall rules exist only in the elevated setup). agent-browser's
+/// daemon port and Chrome's debugging port are unauthenticated, so with the entry a shell command
+/// Codex runs without a prompt could drive the unfenced guard's browser past its filter
+/// (decision record 0030). The way back is the elevated sandbox or an authenticated daemon.
+pub fn no_browser(kind: Option<AgentKind>) -> bool {
+    no_browser_on(kind, cfg!(windows))
+}
+
+/// [`no_browser`] as it is on Windows when `windows` is true, and elsewhere when it is false.
+pub fn no_browser_on(kind: Option<AgentKind>, windows: bool) -> bool {
+    kind == Some(AgentKind::Codex) && windows
 }
 
 /// The case-law connector's reserved server name (R24): a `mcp.servers.case-law` entry in the

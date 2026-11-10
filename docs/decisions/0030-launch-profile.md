@@ -190,7 +190,8 @@ The host thread set the conditions the profile must keep: Claude keeps `settingS
     use `TestProxy`. Production passes none, so production has no browser until stage C.
 - **Per-session folders** (`actor/turn/launch_checks.rs`). The launch-prep thread makes them
   after the data-folder and `.codex` refusals, and before any `session/*` call:
-  - `run/<session id>/{work,browser}`. The session id is `<thread>-<launch>`, two opaque ids
+  - `run/<session id>/work` and `browser/run/<session id>` (the guard's `--cwd`, outside the
+    run folder Codex's shell may write; see below). The session id is `<thread>-<launch>`, two opaque ids
     and never user text. `launch` is the launch prep's id, from the agent ids' counter (a
     deviation: R17 names `Agent::id`).
   - `agent-state/<matter id>/notes`.
@@ -887,6 +888,56 @@ unelevated sandbox, which refuses to run any sandboxed command when a profile de
 (`codex-rs/sandboxing/src/windows.rs:111-131`), until the elevated sandbox (S15). For what the
 fence is and isn't (tier C has no wall between matters), see the data-folder fence section of
 this record and firm-it §8.
+
+### Codex's browser entry in the plain client: the boundary and what is accepted
+
+- **The boundary.** In the plain client Claude's shell and Claude's Chrome are unfenced, so the
+  boundary that matters is between Codex's sandboxed shell (Seatbelt on macOS, bubblewrap and
+  seccomp on Linux) and the guard and Chrome, which Codex starts unfenced. No path lets the shell
+  steer them without the lawyer:
+  - **The guard's folder** (B1). Its `--cwd`, and with it the downloads, screenshots, `HOME`,
+    temporary folder and Chrome's profile, is `<data>/browser/run/<session id>`
+    (`RunFolders::browser`), outside the run folder the shell may write. Codex's fence denies
+    `<data>/browser` whole, read and write (`agent/codex_fence.rs` `DATA_DENIED`), so the shell
+    cannot plant a link the guard would write through. The folder goes with the run folder at the
+    session's end (`RunFolders::remove`) and `<data>/browser/run` is set aside and deleted at
+    the first launch after a start, as `<data>/run` is (`sweep.rs`). The downloads mover also
+    refuses a downloads folder that is no longer a real folder right before each move.
+  - **The daemon socket and the debugging port** (B2). The host makes the socket folder
+    (`/tmp/clauseo-ab-<16 random>`, 0700) at the claim and adds it to the session's Codex fence
+    as a `deny` by exact path. The shell's own sandbox already refuses the connection:
+    Seatbelt's `(deny default)` (`codex-rs/sandboxing/src/seatbelt_base_policy.sbpl:8`) with no
+    network rule when network is off and no Unix socket is allowed (`seatbelt.rs:318-322,
+    381-382`); on Linux seccomp denies `connect` in the restricted mode
+    (`codex-rs/linux-sandbox/src/landlock.rs:201-203`) and bubblewrap unshares the network
+    (`bwrap.rs:304-306`), so loopback TCP is closed too.
+  - **`read`** (H1). agent-browser marks `agent_browser_read` read-only, so Codex runs it with
+    no prompt; the guard refuses its `url`, `llms` and `requireMd` keys, so it reads only the
+    page already open, through Chrome (agent-browser v0.41.1 `native/actions.rs:5964-5994`).
+- **No browser for Codex on Windows.** Clauseo gives Codex's shell the unelevated
+  restricted-token sandbox there (`windows.sandbox = "unelevated"`), whose only network block is
+  proxy variables that leave loopback out (codex 0.162.1 `windows-sandbox-rs/src/env.rs:126-170`,
+  applied at `spawn_prep.rs:141-143`); the firewall rules exist only in the elevated setup. Its
+  reads are not restricted, so the guard's port file and Chrome's command line are readable.
+  agent-browser's daemon and Chrome's debugging port take no password, so with the entry a shell
+  command Codex runs without a prompt could drive the unfenced browser past the filter and write
+  outside Codex's writable roots. So on Windows Codex gets neither the entry nor the shell tool
+  (`servers::no_browser`), no browser in its header (the app offers no browser action), and a
+  line telling the lawyer a Claude conversation can open web pages. The way back is the elevated
+  sandbox (its firewall) or an authenticated daemon. Claude on Windows keeps its shell tool.
+- **Accepted at Claude parity** (H2, M1, and no prompts). With no proxy, nothing stops Chrome
+  reaching loopback or private addresses after a redirect or a page's own navigation; the guard
+  checks only the address it is given. A page on `127.0.0.1:<debugging port>` could ask Chrome's
+  `/json/new?file:///…` for a `file://` tab and read it. Codex's "allow for this session" is per
+  tool, not per argument, and the host now answers the browser server's approvals itself
+  (`actor/turn/asks.rs`), as Claude's allow rules do for its shell browser, so prompt injection
+  could make either agent open a URL carrying text from the conversation. All of this is what
+  Claude's unfenced shell browser can do in the plain client, and it is accepted for launch.
+  `eval` keeps asking in both agents (Codex: the host never answers `agent_browser_eval`; Claude:
+  no allow rule, and `wait --fn` asks), which narrows H2 to redirects: the script route needs the
+  lawyer's approval. The after-launch fix, for both agents' browsers, is a guard-local proxy with
+  an open allowlist that refuses private and loopback addresses after the DNS lookup, with
+  Chrome's `--proxy-bypass-list=<-loopback>` so loopback goes through it too.
 
 ## Consequences
 

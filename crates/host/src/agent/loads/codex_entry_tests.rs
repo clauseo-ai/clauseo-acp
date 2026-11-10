@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use clauseo_acp::McpServer;
 use clauseo_protocol::ToolsUnavailableReason;
 
-use super::browser::{BrowserInputs, Claims, asks_for_proxy, hook_servers};
+use super::browser::{BrowserInputs, Claims, asks_for_proxy, hook_servers, no_browser, offered};
 use super::profile_tests::{browser_server, claims, inputs, reason};
 
 /// Codex's `browser` entry exactly as `clauseo_profile::servers::browser` builds it on Windows
@@ -111,4 +111,34 @@ fn codex_s_entry_goes_without_a_proxy_on_each_os() {
     };
     let (_, state) = hook_servers(vec![browser_server()], &no_proxy);
     assert_eq!(reason(state), Some(ToolsUnavailableReason::NoProxy));
+}
+
+/// Codex on Windows has no browser (`no_browser`): its entry is dropped before the fill, so the
+/// session sends none and its header holds no browser state at all, which the app shows as
+/// nothing to act on (no install advice, no switch); Claude on Windows and Codex elsewhere are
+/// untouched. Runs on every OS: the OS is a parameter.
+#[test]
+fn codex_on_windows_gets_no_entry_and_no_browser_state() {
+    use clauseo_protocol::AgentKind;
+    let dir = PathBuf::from("/data/browser/run/t-1");
+    let chrome = PathBuf::from("/chrome");
+    let ready = inputs(&dir, Some(&chrome));
+    for windows in [false, true] {
+        assert!(!no_browser(Some(AgentKind::Claude), windows));
+        let none_here = no_browser(Some(AgentKind::Codex), windows);
+        assert_eq!(none_here, windows);
+        let servers = offered(vec![codex_server(false)], none_here);
+        let (sent, state) = hook_servers(servers, &ready);
+        if windows {
+            assert_eq!(sent, Vec::<McpServer>::new());
+            assert_eq!(state, None);
+        } else {
+            assert_eq!(sent.len(), 1);
+            let state = state.expect("a browser state");
+            assert_eq!(
+                state.availability,
+                clauseo_protocol::ToolAvailability::Available
+            );
+        }
+    }
 }

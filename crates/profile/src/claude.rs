@@ -14,9 +14,13 @@ pub const STETDOC_READ_ONLY: [&str; 5] = ["view", "inspect", "check", "lookup", 
 /// `press` :603, `hover` :524, `focus` :531, `select` :552, `check` :538, `uncheck` :545,
 /// `scroll` :660, `scrollintoview` :704, `wait` :713, `get` :1459, `is` :1462, `find` :1465,
 /// `screenshot` :872, `pdf` :965, `tab` :1650, `back` :441, `forward` :442, `reload` :443,
-/// `close` :1063, `frame` :1717, `dialog` :1730, `download` :590). Every other one (`upload`,
-/// `eval`, `state`, `cookies`, `storage`, `network`, `set`, `install`, ...) asks.
-pub const AGENT_BROWSER_ALLOWED: [&str; 28] = [
+/// `close` :1063, `frame` :1717, `dialog` :1730, `download` :590, `read` :444). Every other
+/// one (`upload`, `eval`, `state`, `cookies`, `storage`, `network`, `set`, `install`, ...)
+/// asks, and so does an allowed one that matches [`AGENT_BROWSER_ASK`]. They are Codex's 29 core
+/// MCP tools (`clauseo_mcp`'s `browser_guard/filter.rs` `ALLOWED_TOOLS`) less `eval`, which runs
+/// page JavaScript and asks each time; `pdf` and `download` write a named file, which Codex's
+/// guard refuses.
+pub const AGENT_BROWSER_ALLOWED: [&str; 29] = [
     "open",
     "snapshot",
     "click",
@@ -45,6 +49,23 @@ pub const AGENT_BROWSER_ALLOWED: [&str; 28] = [
     "frame",
     "dialog",
     "download",
+    "read",
+];
+
+/// agent-browser commands that ask even though their subcommand is allowed: Claude Code checks
+/// deny rules, then ask rules, then allow rules (code.claude.com/docs/en/permissions), and `*`
+/// matches anywhere, spaces included.
+/// - `wait --fn <js>` (also `-f`) runs page JavaScript (`cli/src/commands.rs` :811 at v0.41.1):
+///   `Bash(agent-browser wait*-f*)` catches `--fn`, `--fn=` and `-f`, and so also a wait whose
+///   text holds `-f` (`wait --text "self-filing"`), which then asks too.
+/// - `get cdp-url` prints Chrome's debugging address (:3009), the route `eval` is kept from.
+///
+/// Checked at the tag and found to take no JavaScript: `get` :2970, `is`
+/// :3043, `find` :3079, `frame` :1717, `dialog` :1730, `tab` :1650, `scroll` :660, `select`
+/// :552, `open` :399, `read` :2365.
+pub const AGENT_BROWSER_ASK: [&str; 2] = [
+    "Bash(agent-browser wait*-f*)",
+    "Bash(agent-browser get*cdp-url*)",
 ];
 
 /// agent-browser's options and subcommands Claude may never run, whatever the lawyer answers:
@@ -80,6 +101,12 @@ pub fn agent_browser_allowed() -> impl Iterator<Item = String> {
     AGENT_BROWSER_ALLOWED
         .iter()
         .map(|sub| format!("Bash(agent-browser {sub}:*)"))
+}
+
+/// [`AGENT_BROWSER_ASK`]: the `permissions.ask` rules the host adds to a Claude session that has
+/// the browser, and to no other.
+pub fn agent_browser_ask() -> impl Iterator<Item = String> {
+    AGENT_BROWSER_ASK.iter().map(|rule| (*rule).to_owned())
 }
 
 /// `Bash(agent-browser *<flag>*)` for each of [`AGENT_BROWSER_DENIED`], then

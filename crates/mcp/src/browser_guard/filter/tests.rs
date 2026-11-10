@@ -1,8 +1,8 @@
 use serde_json::{Value, json};
 
 use super::{
-    BATCH_MESSAGE, EXTRA_ARGS_ALLOWED, MUST_BE_FALSE, REFUSED_KEYS, SCREENSHOT_PATH, TIMEOUT,
-    Verdict, check, refusal_text,
+    BATCH_MESSAGE, EXTRA_ARGS_ALLOWED, MUST_BE_FALSE, READ_FETCH, READ_FETCH_KEYS, REFUSED_KEYS,
+    SCREENSHOT_PATH, TIMEOUT, Verdict, check, refusal_text,
 };
 
 mod tools;
@@ -275,6 +275,36 @@ fn new_tab_and_webgpu_pass_only_as_false() {
         .as_deref(),
         Some("newTab")
     );
+}
+
+/// `agent_browser_read` runs with no prompt (agent-browser marks it read-only), so it reads only
+/// the open page: a `url`, or the `llms` and `requireMd` re-fetches, is refused whatever its
+/// value; the open page's own options pass. Another tool's `url` is still judged as a URL.
+#[test]
+fn read_reads_only_the_open_page() {
+    assert_eq!(READ_FETCH_KEYS, ["url", "llms", "requireMd"]);
+    let read = |arguments: &Value| refused_on("agent_browser_read", arguments);
+    for arguments in [
+        json!({"url": "https://example.com/"}),
+        json!({"url": "example.com"}),
+        json!({"url": "http://127.0.0.1:9222/json/list"}),
+        json!({"url": null}),
+        json!({"llms": "index"}),
+        json!({"requireMd": true}),
+        json!({"requireMd": false}),
+        json!({"raw": true, "url": "https://example.com/"}),
+    ] {
+        assert_eq!(read(&arguments).as_deref(), Some(READ_FETCH), "{arguments}");
+    }
+    for arguments in [
+        json!({}),
+        json!({"raw": true}),
+        json!({"outline": true, "filter": "Pricing"}),
+        json!({"readTimeoutMs": 5000}),
+    ] {
+        assert_eq!(read(&arguments), None, "{arguments}");
+    }
+    assert_eq!(refused(&json!({"url": "https://example.com/"})), None);
 }
 
 #[test]

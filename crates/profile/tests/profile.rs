@@ -244,19 +244,27 @@ fn kind_specific_parts_go_only_to_their_kind() {
     );
     assert!(profile.codex_keys_without_index(None).is_empty());
     assert!(profile.skill_files(None).is_none());
-    // `browser` goes to Codex alone (`servers::browser_mcp`): Claude keeps the shell command.
+    // `browser` goes to Codex alone (`servers::browser_mcp`), and not on Windows: Claude keeps
+    // the shell command.
+    let codex = if cfg!(windows) {
+        vec!["case-law"]
+    } else {
+        vec!["browser", "case-law"]
+    };
     for (kind, want) in [
         (None, vec!["case-law"]),
         (Some(AgentKind::Claude), vec!["case-law"]),
-        (Some(AgentKind::Codex), vec!["browser", "case-law"]),
+        (Some(AgentKind::Codex), codex),
     ] {
         let names: Vec<String> = profile.servers(kind).into_iter().map(|s| s.name).collect();
         assert_eq!(names, want, "{kind:?}");
     }
-    assert_eq!(
-        profile.servers(Some(AgentKind::Codex))[0],
-        clauseo_profile::servers::browser(profile.paths())
-    );
+    if !cfg!(windows) {
+        assert_eq!(
+            profile.servers(Some(AgentKind::Codex))[0],
+            clauseo_profile::servers::browser(profile.paths())
+        );
+    }
 }
 
 #[test]
@@ -474,9 +482,19 @@ fn agent_browser_rules_are_the_hosts_per_session() {
     for rule in [
         "Bash(agent-browser open:*)",
         "Bash(agent-browser snapshot:*)",
+        "Bash(agent-browser read:*)",
     ] {
         assert!(allowed.iter().any(|a| a == rule), "{rule}");
     }
+    // eval runs page JavaScript: it asks each time.
+    assert!(!allowed.iter().any(|a| a == "Bash(agent-browser eval:*)"));
+    assert_eq!(
+        clauseo_profile::claude::agent_browser_ask().collect::<Vec<_>>(),
+        [
+            "Bash(agent-browser wait*-f*)",
+            "Bash(agent-browser get*cdp-url*)"
+        ]
+    );
     for asks in [
         "upload", "eval", "state", "cookies", "storage", "network", "set", "install",
     ] {
@@ -543,7 +561,11 @@ fn only_the_browser_part_names_agent_browser() {
     ] {
         assert!(on.contains(rule), "{rule}");
     }
-    for part in [BrowserPart::Off, BrowserPart::NotInstalled] {
+    for part in [
+        BrowserPart::Off,
+        BrowserPart::NotInstalled,
+        BrowserPart::ClaudeOnly,
+    ] {
         let off = fill(part);
         assert!(!off.contains("agent-browser") && !off.contains("AGENT_BROWSER"));
         assert!(off.contains("You have no browser in this session"));
@@ -573,7 +595,11 @@ fn only_the_browser_part_names_agent_browser() {
         browser_part_for(BrowserPart::On, false),
         browser_part(BrowserPart::On)
     );
-    for part in [BrowserPart::Off, BrowserPart::NotInstalled] {
+    for part in [
+        BrowserPart::Off,
+        BrowserPart::NotInstalled,
+        BrowserPart::ClaudeOnly,
+    ] {
         assert_eq!(browser_part_for(part, true), browser_part(part));
         assert!(!browser_part_for(part, true).contains("agent-browser"));
     }

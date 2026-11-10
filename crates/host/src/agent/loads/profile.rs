@@ -173,8 +173,9 @@ pub(crate) struct ClaudeKeys<'a> {
     /// (decision D7). Without it, any hook rule for a `case-law` server is dropped.
     pub(crate) case_law: bool,
     /// The session has the browser as a shell tool: `allowedTools` gains agent-browser's page
-    /// subcommands and `disallowedTools` its denied flags and subcommands
-    /// (`clauseo_profile::claude::agent_browser_allowed`, `agent_browser_denied`). Without it,
+    /// subcommands, `disallowedTools` its denied flags and subcommands, and `permissions.ask`
+    /// the allowed commands that still ask (`clauseo_profile::claude::agent_browser_allowed`,
+    /// `agent_browser_denied`, `agent_browser_ask`). Without it,
     /// any hook rule naming agent-browser is dropped, so a session without the browser has none.
     pub(crate) browser: bool,
 }
@@ -226,6 +227,9 @@ pub(crate) fn claude_options(options: &mut Map<String, Value>, keys: &ClaudeKeys
         settings.insert("skipWebFetchPreflight".to_owned(), Value::Bool(true));
     }
     deny_data_folder(&mut settings, keys.data);
+    if keys.browser {
+        browser_ask_settings(&mut settings);
+    }
     if keys.forced_ask {
         forced_ask_settings(&mut settings);
     }
@@ -254,6 +258,19 @@ fn deny_data_folder(
         push_new(&mut allow, &rule);
     }
     permissions.insert("allow".to_owned(), Value::Array(allow));
+    settings.insert("permissions".to_owned(), Value::Object(permissions));
+}
+
+/// `permissions.ask` gains agent-browser's allowed commands that still ask
+/// (`clauseo_profile::claude::agent_browser_ask`: a `wait --fn` running page JavaScript), after
+/// any the hook put there. A hook value at `permissions` or `ask` of another type is replaced.
+fn browser_ask_settings(settings: &mut Map<String, Value>) {
+    let mut permissions = take_object(settings, "permissions");
+    let mut ask = take_array(&mut permissions, "ask");
+    for rule in clauseo_profile::claude::agent_browser_ask() {
+        push_new(&mut ask, &rule);
+    }
+    permissions.insert("ask".to_owned(), Value::Array(ask));
     settings.insert("permissions".to_owned(), Value::Object(permissions));
 }
 

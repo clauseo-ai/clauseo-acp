@@ -7,7 +7,10 @@ use clauseo_protocol::{
 };
 use serde_json::json;
 
-use super::{CLAUDE_OPEN, CODEX_OPEN, Opens};
+use super::{
+    CLAUDE_OPEN, CODEX_OPEN, CodexTools, Opens, auto_allowed_browser_tool, codex_browser_tool,
+    codex_standalone_browser_tool,
+};
 use crate::pipeline::tests::support::id;
 
 fn turn() -> TurnId {
@@ -355,4 +358,117 @@ fn a_browser_open_with_an_unsafe_character_writes_nothing() {
             "{url:?}"
         );
     }
+}
+
+/// A Codex call's tool comes only from a title exactly `mcp.browser.<tool>`.
+#[test]
+fn a_codex_browser_tool_is_read_from_the_exact_title_only() {
+    assert_eq!(
+        codex_browser_tool("mcp.browser.agent_browser_click"),
+        Some("agent_browser_click")
+    );
+    for title in [
+        "mcp.browser.",
+        "mcp.browsers.agent_browser_click",
+        "mcp.case-law.search",
+        "mcp__browser__agent_browser_click",
+        " mcp.browser.agent_browser_click",
+        "Run mcp.browser.agent_browser_click",
+        "MCP tool call approval",
+    ] {
+        assert_eq!(codex_browser_tool(title), None, "{title}");
+    }
+}
+
+/// A standalone approval names a tool only with the `browser` server, an `elicitation:` id and
+/// Codex's exact fallback message.
+#[test]
+fn a_standalone_approval_names_a_tool_only_in_codexs_exact_form() {
+    let id = "elicitation:sess-1:browser:1";
+    let input = |server: &str, message: &str| json!({"serverName": server, "description": message});
+    let ok = input(
+        "browser",
+        r#"Allow the browser MCP server to run tool "agent_browser_snapshot"?"#,
+    );
+    assert_eq!(
+        codex_standalone_browser_tool(id, Some(&ok)),
+        Some("agent_browser_snapshot")
+    );
+    assert_eq!(codex_standalone_browser_tool("tc-1", Some(&ok)), None);
+    assert_eq!(codex_standalone_browser_tool(id, None), None);
+    for (server, message) in [
+        (
+            "case-law",
+            r#"Allow the browser MCP server to run tool "agent_browser_snapshot"?"#,
+        ),
+        (
+            "browser",
+            r#"Allow the case-law MCP server to run tool "search"?"#,
+        ),
+        (
+            "browser",
+            r#"Allow the browser MCP server to run tool "agent_browser_snapshot"? Sure."#,
+        ),
+        ("browser", r#"Allow the browser MCP server to run tool ""?"#),
+        (
+            "browser",
+            r#"Allow the browser MCP server to run tool "a" or "b"?"#,
+        ),
+        ("browser", "Run agent_browser_snapshot on the page?"),
+    ] {
+        assert_eq!(
+            codex_standalone_browser_tool(id, Some(&input(server, message))),
+            None,
+            "{server}: {message}"
+        );
+    }
+}
+
+/// Every `agent_browser_*` tool is answered by the host but eval, which asks.
+#[test]
+fn every_agent_browser_tool_but_eval_is_auto_allowed() {
+    for tool in [
+        "agent_browser_click",
+        "agent_browser_open",
+        "agent_browser_get_text",
+    ] {
+        assert!(auto_allowed_browser_tool(tool), "{tool}");
+    }
+    for tool in [
+        "agent_browser_eval",
+        "agent_browser_",
+        "agent_browser_Click",
+        "agent_browser_click.x",
+        "search",
+        "browser_click",
+    ] {
+        assert!(!auto_allowed_browser_tool(tool), "{tool}");
+    }
+}
+
+/// A Codex `browser` call is kept while unfinished and dropped on a final status; one that
+/// starts finished, or another server's, is never kept.
+#[test]
+fn codex_browser_calls_are_kept_until_they_end() {
+    let mut tools = CodexTools::default();
+    let click = call("mcp.browser.agent_browser_click", None, &json!({}));
+    tools.started(&click);
+    assert_eq!(tools.tool("tc-1"), Some("agent_browser_click"));
+    tools.updated("tc-1", &ToolCallPatch::default());
+    assert_eq!(tools.tool("tc-1"), Some("agent_browser_click"));
+    tools.updated("tc-1", &completed(None));
+    assert_eq!(tools.tool("tc-1"), None);
+    let mut done = click.clone();
+    done.status = ToolCallStatus::Completed;
+    tools.started(&done);
+    assert_eq!(tools.tool("tc-1"), None);
+    tools.started(&call("mcp.case-law.search", None, &json!({})));
+    assert_eq!(tools.tool("tc-1"), None);
+    for n in 0..65 {
+        let mut many = click.clone();
+        many.acp_id = format!("tc-{n}").into();
+        tools.started(&many);
+    }
+    assert!(tools.0.len() <= 64);
+    assert_eq!(tools.tool("tc-64"), Some("agent_browser_click"));
 }

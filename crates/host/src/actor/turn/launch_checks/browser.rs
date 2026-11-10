@@ -284,6 +284,11 @@ pub(super) fn browser_prep(
         shell: false,
         proxy: false,
     };
+    // Codex on Windows has no browser at all (`agent::loads::browser::no_browser`).
+    let kind = clauseo_protocol::AgentKind::of(agent);
+    if crate::agent::loads::browser::no_browser(kind, cfg!(windows)) {
+        return skip;
+    }
     let entry = actor.profile.mcp_servers(agent).into_iter().find(|server| {
         let clauseo_acp::McpServer::Stdio { name, .. } = server;
         name == clauseo_profile::servers::BROWSER
@@ -338,6 +343,19 @@ fn chrome_search(actor: &Actor) -> ChromeSearch {
     match &actor.wiring.browser_executable {
         Some(chrome) => ChromeSearch::Forced(chrome.clone()),
         None => ChromeSearch::Roots(actor.wiring.chrome_roots.clone()),
+    }
+}
+
+/// Makes the guard's `--cwd` for a session the `browser` entry goes to (Codex):
+/// `<data>/browser/run/<session id>` (`RunFolders::browser`), through no link below `data`.
+/// One that cannot be made leaves the session without the browser, with a warning.
+pub(super) fn entry_folder(run: &mut super::RunFolders, data: &Path) {
+    if let Err(error) = crate::write::create_private_dirs_under(data, &run.browser) {
+        tracing::warn!(
+            error = %crate::log_file::Cause(&error),
+            "the browser's folder was not made; the session has no browser"
+        );
+        run.chrome = None;
     }
 }
 
