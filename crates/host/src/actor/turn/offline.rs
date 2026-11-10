@@ -18,7 +18,7 @@
 //! ([`classify::transport_note`]), or for every running turn while the window says offline.
 //! Codex's note is surely its own and is dropped; Claude's line is only suspected (a model could
 //! write the same words), so it is held in the watch and put back in order if the agent goes on
-//! or the prompt ends well, and dropped only when the turn ends offline. Any agent event of the
+//! or the turn ends any other way, and dropped only when the turn ends offline. Any agent event of the
 //! turn but usage, commands, config options, mode and title clears the watch: the agent got
 //! through. Unless it is cleared within [`OFFLINE_WAIT`], and no permission or elicitation waits
 //! on the lawyer, the turn is cancelled through the Cancel path with `agent.offline` as its
@@ -123,11 +123,17 @@ pub(super) fn agent_active(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
     }
 }
 
-/// The live turn's prompt ended, not offline: the held lines go back into the answer.
-pub(super) fn prompt_ended(actor: &mut Actor, thread: ThreadId) {
+/// `thread`'s turn ends with `failure` (else the one it holds), or its agent ended
+/// (`agents::on_ended`, while the agent is still there to log them): unless that is
+/// `agent.offline`, the held lines go back into the answer.
+pub(super) fn turn_ending(actor: &mut Actor, thread: ThreadId, failure: Option<ErrorCode>) {
     let Some(current) = current(actor, thread) else {
         return;
     };
+    let failure = failure.or_else(|| current.failure.as_ref().map(|(code, _)| *code));
+    if failure == Some(ErrorCode::AgentOffline) {
+        return;
+    }
     let turn = current.turn;
     if let Some(watch) = current.offline.take() {
         put_back(actor, thread, turn, watch.held);

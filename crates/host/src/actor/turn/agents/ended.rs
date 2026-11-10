@@ -89,6 +89,8 @@ pub(in super::super) fn hold_stop(actor: &mut Actor, thread: ThreadId) {
 pub(in super::super) fn on_ended(actor: &mut Actor, thread: ThreadId, ended: Ended) {
     // Updates the rate cap holds came before the exit, while the turn is still live.
     updates::flush_rate(actor, thread);
+    // Claude's held line goes back while the agent is still there to log it.
+    super::super::offline::turn_ending(actor, thread, None);
     let Some(agent) = state(actor, thread).and_then(|state| state.agent.take()) else {
         return;
     };
