@@ -1,6 +1,8 @@
-// Install and sign in, then New conversation, without a restart: a room opened with only Claude set up shows no plan
-// choice; once ChatGPT's install is ready and signed in, and the host's settings_changed brings its agents entry, New
-// conversation offers Claude and ChatGPT, and ChatGPT's question starts a thread on codex-acp. The room is never
+// Set up the other plan from the composer, then ask with it, without a restart: a room opened with only Claude set up
+// still offers both plans on a new conversation (PK); choosing ChatGPT puts its one act, "Set up ChatGPT", where the
+// question will go, with "Use Claude instead" beside it. Pressed, it starts ChatGPT's sign-in through the setup
+// store's queue; once ChatGPT's install is ready and signed in, and the host's settings_changed brings its agents
+// entry, the gate gives way to the field and ChatGPT's question starts a thread on codex-acp. The room is never
 // remounted.
 // @vitest-environment happy-dom
 import { act } from "react";
@@ -11,6 +13,7 @@ import {
   CODEX,
   READY,
   SIGNED_IN,
+  button,
   byId,
   install,
   mountFirstRun,
@@ -19,6 +22,7 @@ import {
   sent,
   settle,
   signIn,
+  text,
   typeInto,
 } from "./rig.tsx";
 
@@ -29,7 +33,7 @@ const planButton = (name: string) =>
     (b) => b.textContent?.trim() === name,
   ) ?? null;
 
-test("ChatGPT set up while the room is open: New conversation offers it, and its question goes to codex-acp", async () => {
+test("ChatGPT set up from the composer while the room is open: its question goes to codex-acp", async () => {
   const listed = [CLAUDE];
   const t = await mountFirstRun({
     agents: listed,
@@ -39,8 +43,19 @@ test("ChatGPT set up while the room is open: New conversation offers it, and its
   // the room's top element, which a remount would replace
   const room = document.body.lastElementChild?.firstElementChild ?? null;
   expect(room).not.toBeNull();
-  expect(planButton("Claude")).toBeNull();
-  expect(planButton("ChatGPT")).toBeNull();
+  // both plans, on Claude, the one signed in
+  expect(planButton("Claude")?.getAttribute("aria-pressed")).toBe("true");
+  expect(planButton("ChatGPT")).not.toBeNull();
+  expect(byId("signin")).toBeNull();
+
+  // ChatGPT chosen: its one act where the question goes, and Claude as the way round it
+  await press(planButton("ChatGPT"));
+  expect(planButton("ChatGPT")?.getAttribute("aria-pressed")).toBe("true");
+  expect(text()).toContain("ChatGPT isn't set up on this computer.");
+  expect(byId("signin-set-up")?.textContent).toBe("Set up ChatGPT");
+  expect(button("Use Claude instead")).not.toBeNull();
+  await press(byId("signin-set-up"));
+  expect(t.setups()).toContainEqual({ start_sign_in: { agent: CODEX } });
 
   // ChatGPT's install reaches Ready and it signs in; setup writes agents.codex-acp, and the host says settings_changed
   await play(
@@ -53,10 +68,8 @@ test("ChatGPT set up while the room is open: New conversation offers it, and its
   await act(async () => t.settingsChanged({ ui: DEFAULT_UI, locked: [] }));
   await settle();
 
-  await press(byId("new-conversation"));
-  expect(planButton("Claude")).not.toBeNull();
-  expect(planButton("ChatGPT")).not.toBeNull();
-  await press(planButton("ChatGPT"));
+  // the gate gave way to the field, ChatGPT still chosen
+  expect(byId("signin-set-up")).toBeNull();
   expect(planButton("ChatGPT")?.getAttribute("aria-pressed")).toBe("true");
   await typeInto(field(), QUESTION);
   await press(byId("send"));

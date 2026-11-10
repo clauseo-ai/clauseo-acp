@@ -209,13 +209,17 @@ function choiceOf(
 }
 
 /** The composer's plan choice for a new conversation: one option per kind the host lists (R15), labelled by the kind's
- * plan, Claude first. Each option's value is chosen by `choiceOf`. None when there is only one plan to choose. */
+ * plan, Claude first. Each option's value is chosen by `choiceOf`. None when there is only one plan to choose. With
+ * `always` (a host that can set a plan up from the room), both plans, each kind the host doesn't list yet standing as
+ * its canonical id: choosing it offers its set-up in the composer (first-run.tsx), and once set up the host lists that
+ * same id, so the option keeps its value. */
 export function planOptions(
   agents: readonly AgentSummary[],
   threads: readonly Used[] = [],
+  always = false,
 ): { value: AgentId; label: string }[] {
   const options = KINDS.flatMap((kind) => {
-    const value = choiceOf(kind, agents, threads);
+    const value = choiceOf(kind, agents, threads) ?? (always ? CANONICAL[kind] : undefined);
     return value === undefined ? [] : [{ value, label: PLAN[kind] }];
   });
   return options.length > 1 ? options : [];

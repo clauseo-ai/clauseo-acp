@@ -17,7 +17,8 @@
 //   the work isn't remounted under a question on its way.
 // - The agents (R15's list_agents, for the plan choice) are read at start and again on each settings_changed, since
 //   setting up a plan writes its agents entry: a plan signed in while the room is open joins the choice. The default
-//   plan weighs the plans signed in and the last asked with (plan-default.ts).
+//   plan weighs the plans signed in and the last asked with (plan-default.ts). A draft's model and effort picks go with
+//   its create_thread (conversations-agents.ts).
 // - H6: a thread is marked seen when it opens with the window focused, when its turn ends while open and focused, and
 //   when the window comes back to it unseen (its answer ended while the lawyer was elsewhere: D-037).
 import { late } from "@clauseo/components/lib/late.ts";
@@ -26,11 +27,12 @@ import type { ViewStore } from "../store/store.ts";
 import { streamOf } from "../store/view.ts";
 import { internalError, toHostError, type HostTransport } from "../transport/host-transport.ts";
 import type { AgentId, MatterId, MessageId, ThreadId, Timestamp } from "../transport/protocol.ts";
+import { AgentList } from "./conversations-agents.ts";
 import { agentOf, makeView, threadOf } from "./conversations-make.ts";
-import { lastPlan, rememberPlan, SignedPlans } from "./plan-default.ts";
-import { freshState, keepKept, type MatterState } from "./conversations-state.ts";
+import { rememberPlan } from "./plan-default.ts";
+import { applyChange, freshState, keepKept, type MatterState } from "./conversations-state.ts";
 import { resting, type ConversationsView, type Known } from "./conversations-view.ts";
-import type { AgentSummary, AppEvent, NextHost, ThreadsChanged } from "./host-next.ts";
+import type { AppEvent, NextHost } from "./host-next.ts";
 import type { Matters } from "./matters.ts";
 import { onWindowBack } from "./window-back.ts";
 
@@ -46,9 +48,7 @@ export class Conversations {
   readonly #focused: () => boolean;
   readonly #by = new Map<MatterId, MatterState>();
   readonly #listeners = new Set<() => void>();
-  #agents: AgentSummary[] = [];
-  readonly #plans = new SignedPlans(); // the plans signed in (plan-default.ts), for the default plan
-  #agentReads = 0; // the list_agents reads sent: a reply a later read overtook is dropped
+  readonly #agents: AgentList;
   #current: MatterState | null = null;
   #n = 0;
   #focus: { key: string; n: number } | null = null;
@@ -74,6 +74,12 @@ export class Conversations {
     this.#next = matters.next;
     this.#drafts = drafts;
     this.#focused = focused;
+    this.#agents = new AgentList(
+      transport,
+      matters.next,
+      () => this.#emit(),
+      () => this.#live,
+    );
     this.#view = this.#make();
   }
 
@@ -92,12 +98,7 @@ export class Conversations {
     this.#stop.push(onWindowBack(() => this.#back()));
     const app = this.#next.app;
     if (app !== null) this.#stop.push(app.subscribeApp((event) => this.#hear(event)));
-    // a plan set up while the room is open writes its agents entry, and the host says settings_changed
-    const settings = this.#next.settings;
-    if (settings !== null && this.#next.agents !== null)
-      this.#stop.push(settings.onSettingsChanged(() => this.#listAgents()));
-    this.#listAgents();
-    this.#stop.push(this.#plans.watch(this.#transport, () => this.#emit()));
+    this.#stop.push(...this.#agents.start());
     this.#follow();
     return () => {
       this.#live = false;
@@ -170,6 +171,19 @@ export class Conversations {
     this.#emit();
   }
 
+  /** The lawyer's model or effort pick in the draft (pickers.ts), for the plan it runs now: create_thread sends it. */
+  pick(option: string, value: string): void {
+    const m = this.#current;
+    if (m === null || m.open === null || threadOf(m, m.open) !== null) return;
+    const kind = this.#agents.kindOf(agentOf(m, this.#agents));
+    if (kind === undefined) return;
+    m.draft ??= { key: m.open, shown: false, chosen: null };
+    if (m.draft.key !== m.open) return;
+    const picks = m.draft.picks ?? {};
+    m.draft.picks = { ...picks, [kind]: { ...picks[kind], [option]: value } };
+    this.#emit();
+  }
+
   /** The thread the first send of the conversation `key` (the session's own) goes to: its thread once the list is in,
    * else a new one, made with the agent its draft runs (`create_thread`), which takes the key. The key is the
    * session's, not whatever is open when the answers come back, so a move made meanwhile can't take the question.
@@ -183,10 +197,14 @@ export class Conversations {
     if (m.phase !== "ready") throw toHostError(m.refusal);
     const open = threadOf(m, key);
     if (open !== null) return open;
-    const agent = agentOf(m, this.#choice(), key);
+    const agent = agentOf(m, this.#agents, key);
+    const picks = m.draft?.key === key ? m.draft.picks : undefined;
+    const config = this.#agents.configFor(agent, picks, this.#matters.view().open);
     const made = await this.#transport.dispatch({
       command_id: crypto.randomUUID(),
-      command: { create_thread: { matter: m.matter, agent } },
+      command: {
+        create_thread: { matter: m.matter, agent, ...(config === undefined ? {} : { config }) },
+      },
     });
     if (typeof made === "string" || made.thread_created === undefined)
       throw internalError("create_thread answered without a thread");
@@ -250,7 +268,7 @@ export class Conversations {
     m.threads.set(made, {
       thread: made,
       matter: m.matter,
-      agent: from?.agent ?? agentOf(m, this.#choice()),
+      agent: from?.agent ?? agentOf(m, this.#agents),
       status: "starting",
       queue_held: false,
     });
@@ -477,48 +495,12 @@ export class Conversations {
     if (changed) this.#emit();
   }
 
-  /** R15's list_agents, read at start and again on each settings_changed; the latest read's answer wins. */
-  #listAgents(): void {
-    const agents = this.#next.agents;
-    if (agents === null) return;
-    const at = (this.#agentReads += 1);
-    agents.listAgents().then(
-      (list) => {
-        if (!this.#live || at !== this.#agentReads) return;
-        this.#agents = list;
-        this.#emit();
-      },
-      (error: unknown) => console.warn(`list_agents failed: ${JSON.stringify(error)}`),
-    );
-  }
-
   /** H4's threads_changed: a matter's whole list, or what changed in it. Matters not visited are read when opened. */
   #hear(event: AppEvent): void {
     if (!this.#live || !("threads_changed" in event)) return;
-    const change: ThreadsChanged = event.threads_changed;
-    const m = this.#by.get(change.matter);
+    const m = this.#by.get(event.threads_changed.matter);
     if (m === undefined) return;
-    const threads = change.all ? new Map<ThreadId, Known>() : new Map(m.threads);
-    for (const t of change.threads) threads.set(t.thread, this.#withHeader(t));
-    // a whole list that predates a thread this room made keeps it, as a read does
-    if (change.all)
-      for (const made of m.made) {
-        const known = m.threads.get(made);
-        if (!threads.has(made) && known !== undefined) threads.set(made, known);
-      }
-    keepKept(m, threads);
-    for (const gone of change.removed) {
-      threads.delete(gone);
-      m.made.delete(gone);
-      m.unsent.delete(gone);
-    }
-    m.threads = threads;
-    if (change.all) {
-      // a whole list is as good as a read: one in flight is older
-      m.ticket += 1;
-      m.phase = "ready";
-      m.refused = null;
-    }
+    applyChange(m, event.threads_changed, (t) => this.#withHeader(t));
     if (m.phase === "ready") this.#settle(m);
     if (m === this.#current) this.#emit();
   }
@@ -535,14 +517,9 @@ export class Conversations {
     return undefined;
   }
 
-  /** The plans a new thread can run: the agents read, the plans signed in, the last asked with (plan-default.ts). */
-  #choice() {
-    return { agents: this.#agents, signed: this.#plans.signed, last: lastPlan() };
-  }
-
   #make(): ConversationsView {
     return makeView(this.#current, {
-      ...this.#choice(),
+      choice: this.#agents,
       retry: this.#next.retry !== null,
       focus: this.#focus,
     });

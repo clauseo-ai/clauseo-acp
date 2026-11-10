@@ -14,6 +14,7 @@ import type { AgentId } from "../../transport/protocol.ts";
 import {
   CLAUDE,
   CODEX,
+  isReady,
   isSignedIn,
   planInPlay,
   setupStoreOf,
@@ -105,11 +106,12 @@ function actsFor(
         store.command({ use_different_account: { agent } });
         return;
       case "instead": {
-        // the other plan's install starts (Claude's download pauses where it is, R20), and the new conversation takes
-        // it at once (FirstRun's pending choice)
+        // the other plan's install starts unless it is ready (Claude's download pauses where it is, R20), and the new
+        // conversation takes it at once (FirstRun's pending choice)
         const other = agent === CODEX ? CLAUDE : CODEX;
         store.set({ chosen: other, pending: other, keyOpen: false, pasting: false });
-        store.command({ install_agent: { agent: other } });
+        if (!isReady(store.state().agents[other]?.install))
+          store.command({ install_agent: { agent: other } });
         return;
       }
       case "key-panel":
@@ -135,6 +137,8 @@ type RoomSide = {
   agent: AgentId;
   /** The open conversation is a thread already: its plan is fixed. */
   fixed: boolean;
+  /** The open conversation is a draft, whose plan can still change. */
+  drafting: boolean;
   zone: string;
   lang: Lang;
   platform: string;
@@ -153,6 +157,23 @@ function stepActs(transport: HostTransport, store: ProtectionStore, parts: StepP
         ? undefined
         : () => void transport.openSettings?.("protection").catch(() => {}),
   };
+}
+
+/** The gate's view for the plan the send uses. The plan signed out where the other is signed in, or in a conversation
+ * fixed to it, is the set-up view: its own one act ("Set up {name}", or "Sign in again" after an expired sign-in), and
+ * on a draft the other plan as a quiet way round; with neither plan signed in on a draft, both stand side by side. */
+function viewFor(state: SetupState, room: RoomSide, clock: (at: number) => string) {
+  const { agent, drafting } = room;
+  const setup = state.agents[agent];
+  if (state.queued === agent && !isSignedIn(setup?.signIn))
+    return { kind: "queued", offline: false } as const;
+  const view = gateView(setup, state, clock);
+  if (view?.kind !== "signed-out" || view.found !== undefined) return view;
+  const other = isSignedIn(state.agents[agent === CODEX ? CLAUDE : CODEX]?.signIn);
+  if (drafting && !other) return view;
+  const signIn = setup?.signIn;
+  const expired = typeof signIn === "object" && signIn.failed?.code === "agent.auth_required";
+  return { kind: "set-up", expired, instead: drafting } as const;
 }
 
 /** The composer's hold for this setup state: the gate until the plan the send uses is signed in, the install's working
@@ -177,10 +198,7 @@ function holdOf(
     IDS.install,
   );
   // a plan waiting for the other's download or sign-in to end says the queued sign-in's words, with its Cancel
-  const view =
-    state.queued === agent && !isSignedIn(setup?.signIn)
-      ? ({ kind: "queued", offline: false } as const)
-      : gateView(setup, state, clock);
+  const view = viewFor(state, room, clock);
   const signedIn = setup?.signIn;
   if (view !== null) {
     const device =
@@ -327,6 +345,7 @@ export function FirstRun({
   const openAgent = talks.rows.find((r) => r.key === talks.open)?.agent ?? null;
   const agent = openAgent ?? talks.agent;
   const fixed = openAgent !== null;
+  const drafting = talks.drafting;
   // "Use … instead": the new conversation takes the other plan at once, listed or not (the chosen agent wins,
   // agent.ts's agentFor: codex-acp is listed only once its install is ready), and only once, so the lawyer's own pick
   // in the plan switch stands
@@ -359,7 +378,7 @@ export function FirstRun({
   // and again when the room's side changes
   useEffect(() => {
     const holder = holderOf(transport);
-    const room: RoomSide = { agent, fixed, zone, lang, platform, releaseMode };
+    const room: RoomSide = { agent, fixed, drafting, zone, lang, platform, releaseMode };
     let cache: [SetupState, ProtectionState | null, Hold | null] | null = null;
     const withParts = (shield: ProtectionState | null) =>
       shields === null || shield === null || parts === null
@@ -384,7 +403,7 @@ export function FirstRun({
       holder.read = () => null;
       notify();
     };
-  }, [transport, store, shields, parts, agent, fixed, zone, lang, platform, releaseMode]);
+  }, [transport, store, shields, parts, agent, fixed, drafting, zone, lang, platform, releaseMode]);
   // UC: the Safe workspace step is entered once, after the first sign-in here; where the set-up
   // asks no administrator it is sent at once, with no confirm, and the step is its wait; where the
   // repair is the installer, nothing is sent

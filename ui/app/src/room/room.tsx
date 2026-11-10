@@ -67,6 +67,7 @@ import { usePapers } from "./use-papers.ts";
 import { LocateFolderContext, type ActRefusals } from "./act-refusals.ts";
 import { LocateGate, MovedFolder } from "./moved.tsx";
 import { usePickWait } from "./picker-wait.ts";
+import { useDraftMenus } from "./config-menus.ts";
 import { FolderChooserHost } from "./folder-chooser-host.tsx";
 import { PickerLine } from "@clauseo/components/clauseo/picker-line.tsx";
 import { unprotectedFolder } from "./folder-support.ts";
@@ -237,7 +238,7 @@ function RoomFrame({
     [talks.thread, talks.refused, talks.canRetry, conversations],
   );
   const retried = talks.retried;
-  // a new conversation's plan, offered where the host lists more than one, until its first question fixes it
+  // a new conversation's plan (both where the room sets one up), until its first question fixes it
   const choice = useMemo(
     () =>
       talks.drafting && talks.options.length > 1
@@ -251,6 +252,7 @@ function RoomFrame({
     [talks.drafting, talks.options, talks.agent, conversations],
   );
   const open = view.open;
+  const draftMenus = useDraftMenus(talks, conversations, open, w.lang);
   const setup = hasSetup(transport);
   const welcome =
     setup &&
@@ -545,6 +547,7 @@ function RoomFrame({
                           draftKey={talks.open}
                           conversation={link}
                           choice={choice}
+                          menus={draftMenus}
                           plan={plan}
                           focus={talks.focus?.n ?? null}
                           archived={talks.archived}
