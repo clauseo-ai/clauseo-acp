@@ -348,9 +348,101 @@ pub(crate) fn write_atomic_with(
     written
 }
 
+/// Adds `bytes` to the end of the log file `path`, made if missing. When that would take it past
+/// `cap` bytes, the file is first renamed over `rotated` (one older file kept), so each file
+/// stays at or below `cap` unless `bytes` alone is bigger. When that rename fails (`rotated` a
+/// folder, or held open by a viewer that doesn't share delete), the file is emptied instead and
+/// the next rotation tries the rename again: its older lines go, logging goes on. Opened for each
+/// write and closed after, so runners writing the same file at once each append whole lines and
+/// none keeps it open (std opens with every share mode, so another's rename goes through).
+///
+/// `path` is checked first as the run folder's other files are ([`check_owned_file`]: another
+/// owner's file taken back). What it refuses (a link or a second hard link left from before the
+/// folder was secured; a folder stays) is removed, the name alone, never what it leads to;
+/// then the file is opened as itself ([`open_log`]), never through a link.
+#[cfg(any(windows, test))]
+pub(crate) fn append_capped(path: &Path, rotated: &Path, bytes: &[u8], cap: u64) -> io::Result<()> {
+    let open = || {
+        if check_owned_file(path).is_err() && !std::fs::symlink_metadata(path)?.is_dir() {
+            std::fs::remove_file(path)?;
+        }
+        open_log(path, true)
+    };
+    let mut file = open()?;
+    let len = file.metadata()?.len();
+    let adding = u64::try_from(bytes.len()).unwrap_or(u64::MAX);
+    if len > 0 && len.saturating_add(adding) > cap {
+        drop(file);
+        if std::fs::rename(path, rotated).is_ok() {
+            file = open()?;
+        } else {
+            file = open()?;
+            // An append handle can't truncate on Windows (it lacks `FILE_WRITE_DATA`, so
+            // `SetEndOfFile` is refused), so a second handle, opened the same way, empties it.
+            open_log(path, false)?.set_len(0)?;
+        }
+    }
+    file.write_all(bytes)
+}
+
+/// The log file `path` opened to append (or, with `append` false, to write, for emptying it),
+/// made if missing, as itself
+/// (`FILE_FLAG_OPEN_REPARSE_POINT` on Windows, `O_NOFOLLOW` elsewhere, where only tests run),
+/// and refused unless it is a file and no reparse point.
+#[cfg(any(windows, test))]
+fn open_log(path: &Path, append: bool) -> io::Result<File> {
+    let mut options = OpenOptions::new();
+    options.create(true).append(append).write(!append);
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt as _;
+        options.custom_flags(windows::Win32::Storage::FileSystem::FILE_FLAG_OPEN_REPARSE_POINT.0);
+    }
+    #[cfg(not(windows))]
+    {
+        use std::os::unix::fs::OpenOptionsExt as _;
+        let nofollow = rustix::fs::OFlags::NOFOLLOW.bits();
+        options.custom_flags(i32::try_from(nofollow).unwrap_or(i32::MAX));
+    }
+    let file = options.open(path)?;
+    let meta = file.metadata()?;
+    #[cfg(windows)]
+    let reparse = {
+        use std::os::windows::fs::MetadataExt as _;
+        let flag = windows::Win32::Storage::FileSystem::FILE_ATTRIBUTE_REPARSE_POINT.0;
+        meta.file_attributes() & flag != 0
+    };
+    #[cfg(not(windows))]
+    let reparse = false;
+    if reparse || !meta.is_file() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "the log file is a link or not a file",
+        ));
+    }
+    Ok(file)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_capped_log_rotates_before_it_passes_its_cap() {
+        use crate::test_support::TempDir;
+
+        let temp = TempDir::new("append-capped");
+        let (log, old) = (temp.path().join("r.log"), temp.path().join("r.1.log"));
+        for line in [&b"0123456789\n"[..], b"abcdefghij\n", b"ABCDEFGHIJ\n"] {
+            append_capped(&log, &old, line, 25).unwrap();
+        }
+        assert_eq!(std::fs::read(&log).unwrap(), b"ABCDEFGHIJ\n");
+        assert_eq!(std::fs::read(&old).unwrap(), b"0123456789\nabcdefghij\n");
+        append_capped(&log, &old, b"klmnopqrst\n", 25).unwrap();
+        append_capped(&log, &old, b"KLMNOPQRST\n", 25).unwrap();
+        assert_eq!(std::fs::read(&log).unwrap(), b"KLMNOPQRST\n");
+        assert_eq!(std::fs::read(&old).unwrap(), b"ABCDEFGHIJ\nklmnopqrst\n");
+    }
 
     const PLAIN: Found = Found {
         reparse: false,

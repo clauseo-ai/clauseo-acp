@@ -13,14 +13,26 @@ use crate::windows::test_world::{STATE, World, matter_one};
 use crate::windows::write::rename_new;
 
 mod bookkeeping;
+#[cfg(unix)]
+mod budget;
 mod crash;
 mod fast;
+mod heal;
 mod links;
+mod live;
+mod live_ends;
+#[cfg(unix)]
+mod live_hits;
+#[cfg(unix)]
+mod live_reads;
 mod nested;
+mod notes;
 #[cfg(unix)]
 mod pool;
 #[cfg(unix)]
 mod posix;
+mod repo_shapes;
+mod restore_refusals;
 #[cfg(unix)]
 mod round4;
 #[cfg(unix)]
@@ -28,6 +40,8 @@ mod scans;
 mod sessions;
 #[cfg(unix)]
 mod timing;
+#[cfg(unix)]
+mod volumes;
 
 #[cfg(windows)]
 fn volume() -> super::ntfs::Ntfs {

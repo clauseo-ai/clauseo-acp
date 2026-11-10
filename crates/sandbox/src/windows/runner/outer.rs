@@ -3,7 +3,7 @@
 
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, OnceLock, mpsc};
+use std::sync::{Arc, Mutex, OnceLock, mpsc};
 use std::thread;
 use std::time::Duration;
 
@@ -15,8 +15,7 @@ use super::paths::{CodexReuse, WinPath};
 use super::spawn::{Process, kill_on_close_job, restrict_dll_search, system_folder};
 use super::start::start;
 use super::unclean::os::check_logon;
-use super::{LAUNCH_CAP, LaunchMessage, RUN_DIR, RunExit, agent_env, codex_reuse, is_launch_name};
-use crate::windows::matters::SANDBOX_DIR;
+use super::{LaunchMessage, RunExit, agent_env, codex_reuse};
 use crate::windows::pipe::os::ServerPipe;
 use crate::windows::pipe::{PipeSet, Role, pipe_sddl};
 use crate::windows::record::current_user_sid;
@@ -24,12 +23,14 @@ use crate::windows::secrets::{SecretError, secret_for};
 use crate::windows::setup::read_record_install_id;
 use crate::windows::token::os::{logon_sid, own_token, profile_folder};
 use crate::windows::token::{desktop_sddl, station_sddl};
-use crate::windows::{private_dir, write};
 use end::OsEnd;
+use launch_file::{data_dir_of, read_launch};
 use steps::Start;
 
 mod end;
+mod launch_file;
 mod steps;
+mod watch;
 
 /// The session end's guard, shared with the stdin relay's thread.
 type End = Arc<SessionEnd<OsEnd>>;
@@ -65,6 +66,10 @@ pub fn run_outer(launch_file: &Path, exe: &Path) -> u32 {
         ));
         return RunExit::DllSearch.code();
     }
+    // The runner's log file (`log_file.rs`), before anything logs.
+    if let Ok(data_dir) = data_dir_of(launch_file) {
+        super::log_file::install(&data_dir);
+    }
     match outer(launch_file, exe) {
         Ok(code) => code,
         Err(Failure(exit, what)) => {
@@ -75,6 +80,11 @@ pub fn run_outer(launch_file: &Path, exe: &Path) -> u32 {
 }
 
 fn outer(launch_file: &Path, exe: &Path) -> Result<u32, Failure> {
+    // The order the launcher relies on: the launch file is read through a handle that closes
+    // before `read_launch` returns (`private_dir::read_unchanged` drops it), and the outer then
+    // tries to remove the file. Only later (`start.rs`) is the denial pipe connected, then the
+    // inner started. The launcher deletes the launch file once the outer connects, so no handle
+    // to it may stay open past here; the marker below takes only its name.
     let message = read_launch(launch_file)?;
     let data_dir = data_dir_of(launch_file)?;
     // F4, before this session's marker: a marker of this pool user's that awaits a stop refuses
@@ -130,10 +140,12 @@ fn marked_outer(
         job: OnceLock::new(),
         marker,
         pool_user: message.pool_user.clone(),
+        watch: Mutex::new(None),
     }));
     let result = session(message, &end);
     if result.is_err() {
         end.trigger(EndSignal::Failed);
+        end.steps().stop_watch();
         end.finish();
     }
     match result {
@@ -204,9 +216,10 @@ fn session(message: &LaunchMessage, end: &End) -> Result<u32, Failure> {
             os(&format!("the agent's window station: {call}"), &e),
         )
     })?;
-    // The logon, the user's check, the job, the shut, then the resume (`start.rs`); the inner's
-    // first act is the sweep of every other process of the pool user's. The job's one handle stays
-    // this process's, so the job's processes end with it.
+    // The denial pipe, the git watch (`outer/watch.rs`), the logon, the user's check, the job, the
+    // shut, then the resume (`start.rs`); the inner's first act is the sweep of every other process
+    // of the pool user's. The job's one handle stays this process's, so the job's processes end
+    // with it.
     let mut steps = Start {
         pool_name: &message.pool_name,
         pool_user: &message.pool_user,
@@ -217,6 +230,9 @@ fn session(message: &LaunchMessage, end: &End) -> Result<u32, Failure> {
         base: set.base(),
         cwd: &steps.cwd,
         job,
+        end,
+        message,
+        records: None,
     };
     let inner = start(&mut steps)?;
     let launch = InnerLaunch {
@@ -433,6 +449,7 @@ fn relay(
             left -= 1;
         }
     });
+    end.steps().stop_watch();
     tell_status(last.as_ref(), code);
     end.finish();
     if end.escaped() {
@@ -483,54 +500,6 @@ fn tell_status(report: Option<&InnerReport>, code: u32) {
 fn exit_now(code: u32) -> ! {
     // Windows takes the exit code as the u32 it is; `from_ne_bytes` keeps its bits.
     std::process::exit(i32::from_ne_bytes(code.to_ne_bytes()))
-}
-
-/// Reads the launch file, if the desktop user owns it and only the desktop user, `SYSTEM` and
-/// `Administrators` may open it, then removes it.
-fn read_launch(path: &Path) -> Result<LaunchMessage, Failure> {
-    let name = path
-        .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or_default();
-    if !is_launch_name(name) {
-        return Err(Failure::new(
-            RunExit::Usage,
-            "the launch file's name is not a launch file's",
-        ));
-    }
-    let bytes = private_dir::read_unchanged(path, LAUNCH_CAP)
-        .map_err(|e| Failure::new(RunExit::BadLaunch, os("launch file", &e)))?
-        .ok_or_else(|| {
-            Failure::new(
-                RunExit::BadLaunch,
-                "the launch file is missing or not the desktop user's alone",
-            )
-        })?;
-    if let Err(error) = write::remove_owned_file(path) {
-        say(&format!(
-            "clauseo-sandbox-run: the launch file stays: {}",
-            error.kind()
-        ));
-    }
-    LaunchMessage::parse(&bytes).map_err(|e| Failure::new(RunExit::BadLaunch, e.to_string()))
-}
-
-/// `<data_dir>` from `<data_dir>\sandbox\run\<id>.json`.
-fn data_dir_of(launch_file: &Path) -> Result<PathBuf, Failure> {
-    let run = launch_file.parent();
-    let sandbox = run
-        .filter(|run| run.file_name().is_some_and(|name| name == RUN_DIR))
-        .and_then(Path::parent);
-    sandbox
-        .filter(|sandbox| sandbox.file_name().is_some_and(|name| name == SANDBOX_DIR))
-        .and_then(Path::parent)
-        .map(Path::to_path_buf)
-        .ok_or_else(|| {
-            Failure::new(
-                RunExit::Usage,
-                "the launch file isn't in <data_dir>\\sandbox\\run",
-            )
-        })
 }
 
 /// M3: the pure check, then the credential link against the lawyer's own `~\.codex\auth.json`

@@ -8,11 +8,13 @@
 //!   point): each next part is made or opened relative to its parent's handle (`NtCreateFile`
 //!   with `RootDirectory`, `FILE_OPEN_IF` or `FILE_OPEN`, `FILE_DIRECTORY_FILE`,
 //!   `FILE_OPEN_REPARSE_POINT` and `OBJ_DONT_REPARSE`), and refused if a reparse point.
-//! - An item is opened as itself with `DELETE | FILE_READ_ATTRIBUTES` alone, relative to its
-//!   folder's handle (that folder opened by its path as itself, refused if a reparse point or
-//!   if its final path isn't the planned one), its own final path checked against the planned
-//!   one, and renamed on that handle (`NtSetInformationFile(FileRenameInformation)`) into the
-//!   pass folder's handle (`RootDirectory`), `ReplaceIfExists` false. Not
+//! - An item is opened as itself with `DELETE | FILE_READ_ATTRIBUTES` (and `READ_CONTROL`, to
+//!   read its owner from that handle, when its DACL gives it; else without, owner unread),
+//!   relative to its folder's handle (that folder opened by its path as itself, refused if a
+//!   reparse point or if its final path isn't the planned one), its own final path checked
+//!   against the planned one, and renamed on that handle
+//!   (`NtSetInformationFile(FileRenameInformation)`) into the pass folder's handle
+//!   (`RootDirectory`), `ReplaceIfExists` false. Not
 //!   `SetFileInformationByHandle(FileRenameInfo)`: kernelbase refuses a non-NULL
 //!   `RootDirectory` with `ERROR_INVALID_PARAMETER`, which the VM showed. A restore opens the
 //!   item relative to its pass's folder and renames it into its old folder, opened and checked
@@ -20,12 +22,15 @@
 //! - The folders below a pass's folder that mirror the item's folders in the matter
 //!   (`<pass>\sub\.git`) are made the same way as the pass's folder, one handle at a time.
 //! - The scan's folders are opened and listed, and its names probed, through handles too
-//!   (`scan.rs`).
+//!   (`scan.rs`), as is all the live watch reads: each item, its owner, and a link's target,
+//!   read with `FSCTL_GET_REPARSE_POINT` on the link's own handle (`link.rs`).
 //! - Final paths are compared with the planned ones part by part as NTFS compares names
 //!   (`CompareStringOrdinal`, case ignored), so an item a probe opened under another case, or
 //!   under any name NTFS matches, is still the planned one.
 //!
 //! A rename across volumes fails with `ERROR_NOT_SAME_DEVICE`: [`SetAsideFailure::OtherVolume`].
+//! So an item on another volume than the data folder goes to the lawyer's own set-aside folder on
+//! that volume (`Volume::items_root`, made by `private_dir::make_drive_folder`).
 #![expect(
     unsafe_code,
     reason = "FFI to open the set-aside's folders and items by handle and rename them"
@@ -33,7 +38,7 @@
 
 use std::ffi::{OsStr, OsString};
 use std::io;
-use std::os::windows::ffi::{OsStrExt as _, OsStringExt as _};
+use std::os::windows::ffi::OsStrExt as _;
 use std::path::{Path, PathBuf};
 
 use windows::Wdk::Foundation::OBJECT_ATTRIBUTES;
@@ -50,27 +55,30 @@ use windows::Win32::Foundation::{
 use windows::Win32::Storage::FileSystem::{
     CreateFileW, DELETE, FILE_ACCESS_RIGHTS, FILE_ADD_FILE, FILE_ADD_SUBDIRECTORY,
     FILE_ATTRIBUTE_REPARSE_POINT, FILE_ATTRIBUTE_TAG_INFO, FILE_FLAG_BACKUP_SEMANTICS,
-    FILE_FLAG_OPEN_REPARSE_POINT, FILE_FLAGS_AND_ATTRIBUTES, FILE_ID_INFO, FILE_NAME_NORMALIZED,
-    FILE_READ_ATTRIBUTES, FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE, FILE_TRAVERSE,
-    FileAttributeTagInfo, FileIdInfo, GETFINALPATHNAMEBYHANDLE_FLAGS, GetFileInformationByHandleEx,
-    GetFinalPathNameByHandleW, OPEN_EXISTING, SYNCHRONIZE, VOLUME_NAME_DOS,
+    FILE_FLAG_OPEN_REPARSE_POINT, FILE_FLAGS_AND_ATTRIBUTES, FILE_ID_INFO, FILE_READ_ATTRIBUTES,
+    FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE, FILE_TRAVERSE, FileAttributeTagInfo,
+    FileIdInfo, GetFileInformationByHandleEx, OPEN_EXISTING, READ_CONTROL, SYNCHRONIZE,
 };
 use windows::Win32::System::IO::IO_STATUS_BLOCK;
 use windows::core::{PCWSTR, PWSTR};
 
 use super::SetAsideFailure;
 use super::files::{FileId, io_failure};
-use super::run::Volume;
-use super::scan::Listed;
-use crate::windows::acl_plan::verbatim;
+use super::run::{Need, Volume};
+use super::scan::{Kind, Listed};
 use crate::windows::folder::verbatim_wide;
+use crate::windows::private_dir::make_drive_folder;
+use crate::windows::setup::journal::volume_root;
 
 mod forget;
+mod link;
+mod read;
 mod scan;
 mod temps;
 
 pub(super) use forget::{forget_from_sandbox, forget_from_set_aside};
 pub(super) use scan::same_name;
+use scan::same_path;
 pub(super) use temps::remove_temps;
 
 /// `ERROR_REPARSE_POINT_ENCOUNTERED`: an open told not to follow a reparse point met one.
@@ -118,6 +126,30 @@ impl Volume for Ntfs {
         scan::probe(folder, name)
     }
 
+    fn read_small(&self, folder: &Handle, name: &OsStr, max: u64) -> io::Result<Vec<u8>> {
+        read::read_small(folder, name, max)
+    }
+
+    fn open_top(&self, top: &Path) -> io::Result<Handle> {
+        scan::open_top(top)
+    }
+
+    fn look(&self, folder: &Handle, name: &OsStr) -> io::Result<Option<(FileId, Kind)>> {
+        scan::look(folder, name)
+    }
+
+    fn link_target(&self, folder: &Handle, name: &OsStr) -> io::Result<PathBuf> {
+        link::link_target(folder, name)
+    }
+
+    fn owner_at(&self, folder: &Handle, name: &OsStr) -> io::Result<String> {
+        read::owner_at(folder, name)
+    }
+
+    fn folder_name(&self, folder: &Handle) -> io::Result<OsString> {
+        scan::folder_name(folder)
+    }
+
     fn file_id(&self, path: &Path) -> io::Result<Option<FileId>> {
         match open_path(path, FILE_READ_ATTRIBUTES.0 | SYNCHRONIZE.0) {
             Ok(handle) => id_of(&handle).map(Some),
@@ -144,13 +176,37 @@ impl Volume for Ntfs {
         crate::windows::acl::own(path, &pool)
     }
 
+    fn items_root(&self, sandbox: &Path, folder: &Path) -> io::Result<PathBuf> {
+        let root = |path: &Path| {
+            volume_root(path).ok_or_else(|| io::Error::other("the volume's root can't be read"))
+        };
+        let there = root(folder)?;
+        if same_root(&root(sandbox)?, &there) {
+            Ok(sandbox.to_owned())
+        } else {
+            let user = crate::windows::record::current_user_sid()?;
+            Ok(there.join(super::drive_folder_name(user.as_str())))
+        }
+    }
+
+    fn secure_items_root(&self, root: &Path, parts: &[OsString]) -> io::Result<()> {
+        make_drive_folder(root, true)?;
+        let mut folder = root.to_owned();
+        for part in parts {
+            folder.push(part);
+            make_drive_folder(&folder, false)?;
+        }
+        Ok(())
+    }
+
     fn move_into(
         &self,
         from: &Path,
         sandbox: &Path,
         parts: &[OsString],
         name: &OsStr,
-    ) -> Result<(), SetAsideFailure> {
+        need: Need<'_>,
+    ) -> Result<Option<String>, SetAsideFailure> {
         let folder = folder_chain(sandbox, parts, FILE_OPEN_IF)?;
         let parent_path = from
             .parent()
@@ -160,18 +216,29 @@ impl Volume for Ntfs {
             .ok_or(SetAsideFailure::Io(io::ErrorKind::InvalidInput))?;
         let parent = open_folder(parent_path, PARENT)?;
         let leaf: Vec<u16> = leaf.encode_wide().collect();
-        let item = open_at(
-            &parent,
-            &leaf,
-            MOVE,
-            FILE_OPEN,
-            NTCREATEFILE_CREATE_OPTIONS(0),
-        )
-        .map_err(|e| gone_or(&e))?;
+        let options = NTCREATEFILE_CREATE_OPTIONS(0);
+        // The owner comes from this very handle, the one renamed: never a read by path before.
+        let (item, owner) = match open_at(&parent, &leaf, MOVE | READ_CONTROL.0, FILE_OPEN, options)
+        {
+            Ok(item) => {
+                let owner = read::owner_of(&item).ok();
+                (item, owner)
+            }
+            Err(error) if error.kind() == io::ErrorKind::PermissionDenied => {
+                let item =
+                    open_at(&parent, &leaf, MOVE, FILE_OPEN, options).map_err(|e| gone_or(&e))?;
+                (item, None)
+            }
+            Err(error) => return Err(gone_or(&error)),
+        };
         if !same_path(&item, from).map_err(|e| io_failure(&e))? {
             return Err(SetAsideFailure::Changed);
         }
-        rename(&item, &folder, &wide_os(name)).map_err(|e| failure(&e))
+        if !need.allows(owner.as_deref()) {
+            return Err(SetAsideFailure::NotTheAgents);
+        }
+        rename(&item, &folder, &wide_os(name)).map_err(|e| failure(&e))?;
+        Ok(owner)
     }
 
     fn move_back(
@@ -206,6 +273,24 @@ impl Volume for Ntfs {
     ) -> Result<(), SetAsideFailure> {
         forget::remove_emptied(sandbox, parts, kept)
     }
+}
+
+/// Whether the volume roots `a` and `b` (`GetVolumePathNameW`'s) name one volume: equal once a
+/// verbatim `\\?\` is dropped (not `\\?\UNC\`), ignoring ASCII case as drive letters and NTFS
+/// names compare. A `subst` drive may read as its own root: its items then go to a set-aside
+/// folder of its own, on the same volume, which a rename still reaches.
+fn same_root(a: &Path, b: &Path) -> bool {
+    let plain = |path: &Path| {
+        let text = path.as_os_str().as_encoded_bytes();
+        let unc = text
+            .get(..8)
+            .is_some_and(|head| head.eq_ignore_ascii_case(br"\\?\UNC\"));
+        match text.strip_prefix(br"\\?\") {
+            Some(rest) if !unc => rest.to_vec(),
+            Some(_) | None => text.to_vec(),
+        }
+    };
+    plain(a).eq_ignore_ascii_case(&plain(b))
 }
 
 /// The file ID of the handle's file, folder or link.
@@ -360,6 +445,19 @@ fn open_at(
     disposition: NTCREATEFILE_CREATE_DISPOSITION,
     options: NTCREATEFILE_CREATE_OPTIONS,
 ) -> io::Result<Handle> {
+    open_at_status(folder, name, access, disposition, options).map(|(handle, _, _)| handle)
+}
+
+/// [`open_at`], with the open's own status and its `IO_STATUS_BLOCK.Information`: an open with
+/// `FILE_COMPLETE_IF_OPLOCKED` succeeds with `STATUS_OPLOCK_BREAK_IN_PROGRESS` while an oplock's
+/// break is under way, which the caller reads as it needs (`scan::read_small`).
+fn open_at_status(
+    folder: &Handle,
+    name: &[u16],
+    access: u32,
+    disposition: NTCREATEFILE_CREATE_DISPOSITION,
+    options: NTCREATEFILE_CREATE_OPTIONS,
+) -> io::Result<(Handle, NTSTATUS, usize)> {
     let bytes = u16::try_from(name.len() * 2)
         .map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e))?;
     let unicode = UNICODE_STRING {
@@ -399,7 +497,7 @@ fn open_at(
     if done.is_err() {
         return Err(nt_error(done));
     }
-    Ok(Handle(handle))
+    Ok((Handle(handle), done, status.Information))
 }
 
 /// Whether the handle's file or folder is a reparse point.
@@ -421,42 +519,6 @@ fn tag(handle: &Handle) -> io::Result<Option<u32>> {
     }
     .map_err(|e| os_error(&e))?;
     Ok((tag.FileAttributes & FILE_ATTRIBUTE_REPARSE_POINT.0 != 0).then_some(tag.ReparseTag))
-}
-
-/// Whether the handle's final path (normalized, with its drive letter) is `planned`, compared
-/// part by part as NTFS compares names ([`same_name`]), both sides in the verbatim form
-/// ([`verbatim`]): `dunce`'s plain form kept a final path past `MAX_PATH`, or with a name that
-/// isn't Unicode, verbatim while the planned path was plain (round 7, VM run 3).
-fn same_path(handle: &Handle, planned: &Path) -> io::Result<bool> {
-    let found = verbatim(&PathBuf::from(OsString::from_wide(&final_path(handle)?)));
-    let planned = verbatim(&std::path::absolute(planned)?);
-    let (mut a, mut b) = (found.components(), planned.components());
-    loop {
-        match (a.next(), b.next()) {
-            (None, None) => return Ok(true),
-            (Some(x), Some(y))
-                if scan::same_wide(&wide_os(x.as_os_str()), &wide_os(y.as_os_str())) => {}
-            _ => return Ok(false),
-        }
-    }
-}
-
-/// The handle's final path, normalized, with its drive letter (`\\?\C:\...`).
-fn final_path(handle: &Handle) -> io::Result<Vec<u16>> {
-    let flags = GETFINALPATHNAMEBYHANDLE_FLAGS(FILE_NAME_NORMALIZED.0 | VOLUME_NAME_DOS.0);
-    let mut buffer = vec![0u16; 512];
-    loop {
-        // SAFETY: the handle is open and `buffer` is a writable slice of its length.
-        let length = unsafe { GetFinalPathNameByHandleW(handle.0, &mut buffer, flags) };
-        match usize::try_from(length).map_err(io::Error::other)? {
-            0 => return Err(io::Error::last_os_error()),
-            n if n < buffer.len() => {
-                buffer.truncate(n);
-                return Ok(buffer);
-            }
-            n => buffer.resize(n + 1, 0),
-        }
-    }
 }
 
 /// `text` as UTF-16, without a NUL.

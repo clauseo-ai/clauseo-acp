@@ -50,13 +50,24 @@ pub(super) const SET_ASIDE_NAME: &str = "clauseo-sandbox-setup.exe.old";
 const EVENT_SOURCE: PCWSTR = w!("Clauseo Sandbox");
 
 /// `--refresh`: [`refresh`] over a [`WindowsRefresher`] with the key and version built in.
+/// Then, unless the run wasn't allowed (not `SYSTEM`, or not the admin copy), the heal of the
+/// lawyers' drive folders another account made first (`private_dir::heal_drive_folders`,
+/// `set_aside/heal.rs`), whatever the refresh decided: its outcome is its own log lines.
 pub fn run() -> RefreshExit {
     let mut fs = WindowsRefresher::new();
     let trust = Trust {
         key: UPDATER_KEY,
         machine: OWN_MACHINE,
     };
-    refresh(&mut fs, &trust)
+    let exit = refresh(&mut fs, &trust);
+    drop(fs);
+    if exit != RefreshExit::NotAllowed {
+        // The wall clock's second, as the result file reads it: it names a squatted folder.
+        let now = std::time::UNIX_EPOCH
+            + std::time::Duration::from_secs(crate::windows::setup::result_file::now_secs());
+        crate::windows::private_dir::heal_drive_folders(now);
+    }
+    exit
 }
 
 /// The real machine. Its paths are found once, from `FOLDERID_ProgramFiles`.

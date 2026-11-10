@@ -9,7 +9,7 @@ use std::path::Path;
 use std::time::SystemTime;
 
 use super::files::{Manifest, Place, io_failure};
-use super::run::{Refused, Volume, one_part};
+use super::run::{Need, Refused, Volume, items_root, one_part};
 use super::time::{rfc3339, timestamp};
 use super::{Entry, Reason, SetAsideFailure};
 
@@ -18,8 +18,11 @@ const NAMES_TRIED: u32 = 9;
 
 /// Moves `from` into the folder `within` in the pass's folder for `now`, made as needed, under
 /// its own name or the first free `~n` one, and adds its manifest entry: an intent first, then,
-/// once the move is done, the finished entry. Names are kept as they are, text or not. A
-/// failure's `at` is `from`.
+/// once the move is done, the finished entry. Names are kept as they are, text or not. The
+/// chain starts at the item's folder's set-aside folder ([`items_root`]: the sandbox folder, or
+/// the one on the item's volume, made or checked first). A failure's `at` is `from`. The entry's
+/// owner is the one read from the handle the move renamed ([`Volume::move_into`], which refuses
+/// an item `need` doesn't allow); the intent's, read by path before, is for a crash alone.
 pub(super) fn set_aside(
     volume: &impl Volume,
     place: &Place,
@@ -27,6 +30,22 @@ pub(super) fn set_aside(
     within: &[OsString],
     reason: Reason,
     now: SystemTime,
+    need: Need<'_>,
+) -> Result<Entry, Refused> {
+    let owner = volume.owner(from).ok();
+    set_aside_owned(volume, place, (from, within, owner), reason, now, need)
+}
+
+/// [`set_aside`], with the intent's owner read by the caller: the live watch reads it through
+/// handles from the watched folder (`Volume::owner_at`), never by the item's full path, which
+/// would follow a link partway (`live.rs`).
+pub(super) fn set_aside_owned(
+    volume: &impl Volume,
+    place: &Place,
+    (from, within, owner): (&Path, &[OsString], Option<String>),
+    reason: Reason,
+    now: SystemTime,
+    need: Need<'_>,
 ) -> Result<Entry, Refused> {
     let refuse = |failure| Refused::at(failure, from);
     let own = from
@@ -36,7 +55,10 @@ pub(super) fn set_aside(
     if !within.iter().all(|part| one_part(part)) {
         return Err(refuse(SetAsideFailure::Io(io::ErrorKind::InvalidInput)));
     }
-    let owner = volume.owner(from).ok();
+    let source = from
+        .parent()
+        .ok_or_else(|| refuse(SetAsideFailure::Io(io::ErrorKind::InvalidInput)))?;
+    let root = items_root(volume, place, source).map_err(|refused| refuse(refused.failure))?;
     let folder = timestamp(now);
     let parts = place.parts(&folder, within);
     let mut manifest = load(volume, place).map_err(|refused| refuse(refused.failure))?;
@@ -47,13 +69,13 @@ pub(super) fn set_aside(
         if n > 1 {
             name.push(format!("~{n}"));
         }
-        let to = place.to(&folder, within, &name);
+        let to = place.to(&root, &folder, within, &name);
         match volume.file_id(&to) {
             Ok(None) => {}
             Ok(Some(_)) => continue,
             Err(error) => return Err(refuse(io_failure(&error))),
         }
-        let entry = Entry {
+        let mut entry = Entry {
             id,
             matter: place.matter(),
             from: from.to_owned(),
@@ -67,14 +89,15 @@ pub(super) fn set_aside(
         };
         manifest.intents.push(entry.clone());
         place.write_manifest(&manifest).map_err(refuse)?;
-        let result = volume.move_into(from, &place.sandbox, &parts, &entry.name);
+        let result = volume.move_into(from, &root, &parts, &entry.name, need);
         manifest.intents.retain(|intent| intent.id != id);
-        if result.is_ok() {
+        if let Ok(owned) = &result {
+            entry.owner.clone_from(owned);
             manifest.entries.push(entry.clone());
         }
         place.write_manifest(&manifest).map_err(refuse)?;
         match result {
-            Ok(()) => {
+            Ok(_) => {
                 tracing::info!(?reason, "a protected name was set aside");
                 hand_over(volume, &entry.to, "a set-aside item");
                 return Ok(entry);

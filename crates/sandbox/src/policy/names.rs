@@ -61,7 +61,7 @@ fn caseless_key(text: &str) -> String {
 /// volume documents. So `क़` as U+0958 and as U+0915 U+093C, `É` and `é`, `ß` and `ss` share a
 /// key. A name that is not UTF-8 folds ASCII case only. Elsewhere the name itself: NTFS and Linux
 /// file systems keep NFC and NFD names as two files.
-pub(super) fn name_key(name: &OsStr) -> Cow<'_, OsStr> {
+pub(crate) fn name_key(name: &OsStr) -> Cow<'_, OsStr> {
     if !cfg!(target_os = "macos") {
         return Cow::Borrowed(name);
     }

@@ -205,3 +205,90 @@ fn denials_print_as_tagged_json() {
         r#"{"kind":"dropped","count":2}"#
     );
 }
+
+/// Each control, bidi and zero-width character an agent can put in a name is shown escaped;
+/// plain names, Windows paths and other scripts are left as they are.
+#[test]
+fn a_shown_name_escapes_controls_and_bidi_characters() {
+    use std::path::Path;
+    let hidden = [
+        '\u{0}',
+        '\n',
+        '\r',
+        '\u{1B}',
+        '\u{7F}',
+        '\u{80}',
+        '\u{9F}',
+        '\u{061C}',
+        '\u{200E}',
+        '\u{200F}',
+        '\u{2028}',
+        '\u{2029}',
+        '\u{202A}',
+        '\u{202E}',
+        '\u{2066}',
+        '\u{2069}',
+        // The fixes' review: characters with no width.
+        '\u{200B}',
+        '\u{200C}',
+        '\u{200D}',
+        '\u{2060}',
+        '\u{2064}',
+        '\u{FEFF}',
+        '\u{00AD}',
+        '\u{E0000}',
+        '\u{E0041}',
+        '\u{E007F}',
+    ];
+    for c in hidden {
+        let shown = shown_name(Path::new(&format!("a{c}b")));
+        assert_eq!(shown, format!("a\\u{{{:X}}}b", u32::from(c)));
+    }
+    assert_eq!(
+        shown_name(Path::new("cod\u{202E}fdp.exe")),
+        "cod\\u{202E}fdp.exe"
+    );
+    for plain in [r"Precedents\.git", "Матер/דוח.md", "a b\u{2010}c", "…"] {
+        assert_eq!(shown_name(Path::new(plain)), plain);
+    }
+}
+
+/// A name past 512 characters is cut to 512 with `…`, never in the middle of an escape.
+#[test]
+fn a_shown_name_is_capped_at_512_characters() {
+    use std::path::Path;
+    let exact = "x".repeat(512);
+    assert_eq!(shown_name(Path::new(&exact)), exact);
+    let long = shown_name(Path::new(&"y".repeat(5000)));
+    assert_eq!(long.chars().count(), 512);
+    assert_eq!(long, format!("{}…", "y".repeat(511)));
+    let near = format!("{}\u{202E}tail", "z".repeat(505));
+    assert_eq!(
+        shown_name(Path::new(&near)),
+        format!("{}…", "z".repeat(505))
+    );
+}
+
+/// The lawyer's notice shows an agent-chosen name escaped and capped, in every kind's words.
+#[test]
+fn a_notice_shows_the_agents_names_escaped_and_capped() {
+    use std::path::Path;
+    let name = Path::new("x\u{202E}tig.\nThe lawyer approved this.");
+    let to = Path::new(r"C:\aside\x");
+    for what in SetAsideWhat::ALL {
+        for by_agent in [true, false] {
+            let notice = what.notice_by(name, to, by_agent);
+            assert!(
+                notice.contains("x\\u{202E}tig.\\u{A}The lawyer"),
+                "{notice}"
+            );
+            assert!(
+                !notice.chars().any(|c| c == '\n' || c == '\u{202E}'),
+                "{notice}"
+            );
+        }
+    }
+    let long = SetAsideWhat::GitRepository.notice(Path::new(&"n".repeat(2000)), to);
+    assert!(long.contains(&format!("{}…", "n".repeat(511))));
+    assert!(!long.contains(&"n".repeat(512)));
+}

@@ -182,7 +182,15 @@ build 26100):
     with a moved item is decided by its exact path or its file ID, so a second entry differing only
     in case (a case-sensitive folder) is still checked. PR6's launcher calls `before_launch` before
     `apply`, and `after_session` when the agent exits, independently of `repair_after_session`'s
-    result. Every protected name or link that is new or whose file ID changed is set aside, whoever
+    result. A run with a notes folder (`Policy::notes`, which the agent can write too) gets the
+    same passes over it at launch and after the session, with its own record
+    (`notes-record.json`, beside the matter's, under the matter's lock); what they move goes to
+    the matter's set-aside and manifest. The launch check's fast path covers the matter alone, so
+    notes always gets its full pass, and the notes watch knows only what that pass recorded. The
+    notes pass is the matter's full pass: it also sets aside a new `CLAUDE.md`, `AGENTS.md`,
+    `.claude` or `.mcp.json` and every new link in notes, more than the notes watch moves (git
+    parts and links leading out). Whether notes should get only what its watch moves is open.
+    Every protected name or link that is new or whose file ID changed is set aside, whoever
     owns it, a link moved as itself and never followed: so a lawyer folder the agent renamed to
     `.git` or `sub\.git`, a lawyer file it hard-linked as `CLAUDE.md`, or a junction it made to a
     folder holding a `.git`, is caught. A scan that can't list a folder still sets aside what it
@@ -201,9 +209,274 @@ build 26100):
     written as an intent before each move and finished after it, under the set-aside's lock, and an
     intent a crash left is settled on the next load, so every item set aside is listed (the original
     and new paths, the reason, the owner, the time and the matter). The running page shows them
-    (`list_set_aside`), and `restore_set_aside` moves one back only if its name is free. An item on
-    another volume than the data folder can't be moved there by a rename: the pass is refused naming
-    the item (`OtherVolume`), the item stays, and no copy is made.
+    (`list_set_aside`), and `restore_set_aside` moves one back only if its name is free.
+  - **A matter on another drive.** A rename can't cross volumes, so what is set aside out of a
+    matter on another drive than Clauseo's data folder goes to the lawyer's private folder at
+    that drive's root, `<volume>\.clauseo-set-aside-<lawyer's SID>` (`set-aside\<matter>\<pass>\...`
+    inside it), so each Windows user of the machine has their own and never meets another's.
+    Each launch makes that folder, and each move checks it again, the way the sandbox folder is
+    made and checked: a link is refused. Its protected permissions give full access to the lawyer
+    and SYSTEM only, and deny the pool group `ClauseoSandboxUsers`. If the drive can't hold such
+    a folder (read-only, FAT or exFAT with no permissions, a link at its name), the launch is
+    refused (`SetAsideFailure::DriveFolder`: "Clauseo can't make a private folder on the matter's
+    drive for what it moves out of the matter"). Nothing else refuses a matter on another drive,
+    and no repository is left in place. The manifest, record and lock stay in the data folder; a
+    restore trusts an entry's folder only when it is the sandbox folder or this lawyer's folder
+    on the item's own drive, by its SID-named path.
+  - **A squatted drive folder.** Anyone who can make a folder at a drive's root (another user,
+    or a pool user before the launch) can make the lawyer's first. The launch never takes one
+    another account owns back (its owner could hold handles into it, or have filled it): it is
+    refused (`SetAsideFailure::DriveFolderNotYours`). The refresh task, as SYSTEM, heals it for
+    each lawyer the record names (`OwnerSid`, a per-user `AdminCopyOwner`) on each local fixed
+    or removable drive, with nothing the lawyer or a squatter writes choosing what it touches
+    (`set_aside/heal.rs`, `private_dir/drive/heal.rs`). It opens the folder itself
+    (`FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_BACKUP_SEMANTICS`), refuses a reparse point or a
+    file read from that handle (`FileAttributeTagInfo`), makes SYSTEM its owner with a protected,
+    non-inheritable DACL of SYSTEM and Administrators written on the handle alone
+    (`SetKernelObjectSecurity`; `SetSecurityInfo` would push entries down into the contents),
+    renames it by the same handle in place to `<name>.squatted-<UTC second>-<8 hex>`
+    (`NtSetInformationFile`, no root, a bare name, never over an existing name), and makes the
+    lawyer's folder afresh, owned by the lawyer with the drive DACL. The 8 hex digits are random,
+    so a squatter can't make the name first; a name that is taken anyway is tried again with new
+    digits, 4 names in all. A rename an open handle or a lease holds up is tried 3 times, 250 ms
+    apart, and each open and rename runs on its own thread with a 500 ms bound, so one folder
+    takes at most 2 s; past that the heal gives up, logs it, and leaves the folder locked down
+    as SYSTEM's. A folder made again at the name between the rename and the fresh one is
+    logged and counted, and healed again, 3 rounds at most. Nothing inside is opened, listed or
+    moved; one Event Log line names the drive, the SIDs and the new name. Follow-ups: the launch's
+    Preparing state
+    asking for the run (`request_admin_refresh`) and retrying on `DriveFolderNotYours`, and a
+    volume mounted on a folder, with no letter, which the heal doesn't visit.
+    `OtherVolume` stays for a rename that still crosses volumes (a volume mounted on a folder
+    inside the matter).
+  - **Repository shapes at exit.** A git folder needs no `.git` name: a folder holding `HEAD`
+    (a file or a link) with `objects` and `refs` folders, or with a `commondir` file, is one,
+    and git trusts it in a lawyer's folder (`safe.bareRepository` defaults to `all`). The scan
+    takes each `HEAD` outside every `.git` from the listings it reads anyway (no extra open
+    unless one is there) and records it by file ID; a new or changed one is set aside, the
+    `HEAD` alone, which ends git's discovery and leaves the lawyer's folder where it is (the
+    record can't tell a new folder from the lawyer's). A `HEAD` in a launch `.git` the lawyer
+    renamed is that `.git`'s and stays. A record an older version wrote holds no `HEAD` (its
+    `:heads` key is missing), so that pass records them and moves none. Names are compared with
+    the HFS+ ignorables stripped first (`strip_hfs_ignorables`, shared with the macOS jail),
+    then folded, since a matter may sync to a Mac: the scan also takes from the listings a name
+    that only stripping makes `.git` (`.g<U+200C>it`), which its NTFS probe doesn't open.
+  - **The live watch (the `.git` rename hole).** Between launch and the after-session pass, the
+    agent could rename a lawyer's folder or file to `.git`; it stays the lawyer's, so the
+    lawyer's VS Code git polling, or the lawyer's own git, would run its `core.fsmonitor` or
+    hooks as the lawyer. The outer runner runs as the lawyer for the whole session, so it
+    watches the folders itself (`runner/git_watch.rs`, `runner/outer/watch.rs`): not
+    SandboxWatch or ETW, which IT can switch off, but `ReadDirectoryChangesExW` on the run's one
+    writable matter folder and its notes folder when the run has one (never a read-only grant),
+    recursive, for names made and renamed, attributes and writes, armed before the inner runner
+    starts. It asks for the extended records, which carry each item's attributes, so a folder
+    that becomes a reparse point (an empty folder the agent made, then turned into a junction
+    with `FSCTL_SET_REPARSE_POINT`, `mklink /J`'s two steps, no privilege needed) is told from
+    the many plain writes, and is checked as a link made. The buffer is 1 MiB on a local volume;
+    a volume that refuses it, or the extended records, gets 64 KiB and the plain records, where
+    every change is checked. Each name reported
+    goes to the set-aside's live check (`set_aside/live.rs`), which moves at once, through the
+    after-session pass's own move, manifest and lock: a `.git` (folder, file or link) the record
+    doesn't hold at that key with that file ID; a `HEAD` made or renamed in outside every `.git`;
+    below a folder made, cloned or moved in (the watch names only the folder, so a folder moved in
+    from the agent's temp folder with a `.git` inside it is scanned), each `.git`, each git
+    folder whole and each `HEAD`; and a junction or symbolic link that leads outside the matter
+    (judged as below, never followed), or whose target can't be read. A link within the matter is
+    left to the after-session pass, which moves every new link. What git reads from the folder a
+    launch `commondir` names (`config`, `hooks`, `objects`, `refs`, `packed-refs`, `info`),
+    when that folder is the matter's own, another folder in the matter outside every `.git`, or
+    missing as its last part only (then the folder itself, once made; one whose parent is
+    missing isn't watched), is moved when made, and the after-session pass
+    checks it too (`Kept::Common`, its folders kept in the record as `:common` keys). One
+    outside the matter isn't watched. `objects` and `refs` that are links count as folders for a
+    git folder's shape.
+
+    **Kill first.** Any reported `.git` or `HEAD` record ends the agent's job at once, by the
+    outer's own end path, whether or not the item is still there when checked, and before
+    anything moves, so nothing alive races the moves or puts another back. Two `HEAD`s don't
+    end it: one in a launch `.git` (its parent known by file ID), and a folder named `HEAD`,
+    which git never reads as one and which is scanned like any new folder. In each batch the
+    name hits go first: the session ends, each hit is moved, then the other `.git` parts, links
+    and common names, and only then does it scan the folders reported. A scan that meets a git
+    folder the record doesn't know ends the session before it reads anything in that folder,
+    rescans included. Only then is its `commondir` read, as itself, relative to the folder's
+    handle (`Volume::read_small`: `FILE_OPEN_REPARSE_POINT`, `OBJ_DONT_REPARSE`,
+    `FILE_NON_DIRECTORY_FILE`, `FILE_COMPLETE_IF_OPLOCKED`, at most 4 KiB, a reparse point
+    refused). An oplock the agent holds on it makes the open return at once instead of waiting
+    for a break the agent never acknowledges; the `commondir` then counts as unreadable, names
+    nothing, and its folder is still the git folder it is. The live watch makes no read by
+    path (`scan/reach.rs`): each read opens the watched root as itself, each folder on the way
+    relative to the one before it, as itself, and the item last. A link on the way stops the
+    read, and the item is listed gone and never moved. A link's target comes from the link's own
+    handle (`FSCTL_GET_REPARSE_POINT`, `FILE_COMPLETE_IF_OPLOCKED`; a tag other than a junction
+    or a symbolic link counts as leading out), and the intent's owner from its folder's handle.
+    Links and `commondir` targets are judged by identity, not spelling (`scan/locate.rs`). A
+    network or device path (two leading separators, `\\?\`, `\\.\` or `\??\` not followed
+    by a drive), a target with no drive, or another drive than the root's is outside, and nothing
+    is opened, so a symbolic link to a share makes no SMB connection. Otherwise the target is
+    walked from the root's handle, or from its drive's top down to the folder whose file ID
+    (volume serial and ID) is the root's, each part opened as a folder; a link, a file, or a
+    missing or unreadable part on the way counts as outside. Keys hold each folder's long name,
+    so a target spelled with a short name or in another case keys as the real folder. This
+    errs toward setting aside: a link to a link, a link to anything missing, and a target
+    reached only through a link above the matter (or a folder above it the lawyer can't list)
+    lead out. In a matter on a UNC path every link leads out and no `commondir` is watched.
+    Left by path: the move itself opens the item's folder by its full path and checks its final
+    path after, so a folder swapped for a network link between the walk and the move could still
+    cause one SMB open; the after-session pass reads the intent's owner by path. Each reported
+    name now costs the root's open plus one per part, not measured on Windows. Each scan moves
+    what it finds as it finds it, never after the whole tree.
+
+    The watch's end empties the job and returns (`SessionEnd::kill_now`: `TerminateJobObject`,
+    then a wait of at most 400 ms until the job has no process). The sweep task's request follows
+    on its own thread, so it adds nothing before the moves. If the job doesn't empty, nothing moves:
+    the watch lists what it left, says once that the check after the session sets it aside, and
+    scans no more; its last rescan at the stop moves nothing either and leaves what it finds the
+    same way. Once the end has begun the outer never starts or resumes the inner: it checks
+    before the logon, after the job assignment and before the resume, and kills a suspended inner
+    it made. Such a session exits `AgentReserved`, the code of an agent the watch ended, with
+    "the session ended before its agent started; the agent never ran".
+
+    An agent can't stretch the window: a scan past 2 s, 3 overflows in a row, or 3 items found
+    gone, counted across all paths (short-lived `.git`s renamed in and out, and folders renamed
+    in or moved in that are gone before their scan), ends the session too. A folder renamed in
+    within its folder is `FILE_ACTION_RENAMED_NEW_NAME` with `FILE_ATTRIBUTE_DIRECTORY` in the
+    extended record. A folder moved in from another folder (the agent's temp, or elsewhere in the
+    matter) comes as `FILE_ACTION_ADDED`, as `mkdir` does, so the two are told apart by the
+    record's `CreationTime`: one created more than 5 s (`records.rs` `MOVED_IN_AGE`) before the
+    watch received the buffer (the wall clock, read once per buffer as it arrives) was moved in
+    and counts; a folder just made doesn't, since what goes in it is reported on its own, so a
+    script's `mkdir tmp` then `rm -r tmp` ends nothing. A creation time in the future (clock
+    skew, or forged) or unreadable counts as moved in: the count fails toward ending the
+    session. The time is the buffer's receipt, not the event's: a record read late makes a
+    folder just made look older, which errs only toward ending the session. A folder that looks
+    just made still counts when its file ID (the extended record's 64-bit `FileId`: on NTFS the
+    file reference number, whose top 16 bits are the sequence number NTFS bumps when it reuses
+    the MFT record, so an ID isn't reused within the window; on ReFS it isn't promised unique,
+    and a false match only counts more) left another watched place: a `FILE_ACTION_REMOVED` or
+    `FILE_ACTION_RENAMED_OLD_NAME` of a folder with the same file ID in the matter, its notes
+    folder, or the agent's state or temp folder, within 10 s either way (`git_watch/pairs.rs`:
+    `PAIR_WINDOW`). A folder's ID that left first is kept 10 s; a folder gone and unpaired is
+    held 10 s for a leaving record another watch reads later, counted by its own watch on its
+    next record or its 1 s idle tick, and dropped by the creation-time rule when nothing pairs.
+    The folder's own leaving from where it was made doesn't pair. Files' records aren't kept, so
+    a flood of files leaving pushes nothing out. The pairing fails closed when it loses track: a
+    folder's ID under 10 s old pushed out of the bounded list (`PAIR_MAX` = 4096 kept across the
+    watches, and as many held), or any watch's overflow, loses it for 10 s, and a state or temp
+    watch that can't be armed, gets only the plain records (a network share, such as AppData
+    redirected to a server: no file IDs, so it notes nothing), can't start its thread, panics or
+    breaks loses it for the session, and the first loss of a session tells the lawyer once, on the
+    denial pipe and on the outer's stderr (`git_watch::PAIRING_LOST`); while lost, every folder
+    that looks just made and is gone before its scan counts, those held when it was lost too. The
+    state and temp folders get watches
+    of their own (recursive, extended records, names only: `FILE_NOTIFY_CHANGE_FILE_NAME` and
+    `FILE_NOTIFY_CHANGE_DIR_NAME`, so the agent's writes there don't overflow them) that only note
+    file IDs: they move nothing and end nothing, and one that fails doesn't refuse the launch.
+    Residual: a folder moved in from a place no watch covers that the agent can write, with its
+    creation time set to now, isn't counted. The VM's AccessCheck found that, outside the matter,
+    the agent's state folder and its temp folder, the only folders the agent can create in are other
+    matters' folders: a cross-matter case, which the cross-matter fix addresses. Folders a policy
+    grants the agent beyond those (`allowed_folders`, writable runtime paths) aren't watched for the
+    pairing either: the launch message doesn't name them apart from read-only grants, and they may
+    be many, large or on a network share, where only the plain records come and, by the rule above,
+    every session would lose the pairing. A watch not read for over 10 s (starved) sees its overflow
+    only after a folder held meanwhile was dropped uncounted; accepted. A VM (Windows Server 2025,
+    NTFS) confirmed the records: a cross-folder move gives `FILE_ACTION_ADDED` with the folder's
+    original creation time, `mkdir` one within about 4 ms, and a rename within a folder
+    `FILE_ACTION_RENAMED_NEW_NAME`. Known limit: the plain records (a network share) carry no
+    attributes or times, so a folder renamed or moved in and back out there isn't counted; counting
+    every name renamed in would end sessions over an editor's backup renames. The 2 s budget doesn't
+    depend on the check returning: a watchdog thread
+    (`runner/git_watch/watchdog.rs`) wakes every 250 ms and ends the session (`Cause::Stalled`)
+    once one check has been busy past 2 s, while that check is still blocked. A scan of a folder
+    made or moved in stops at the 2 s mark instead of walking on (a million empty folders with a
+    repository last would keep it there for tens of seconds). The folder is then set aside whole
+    only if a pool user owns it, read from the handle the move opens (`MOVE | READ_CONTROL`,
+    `GetKernelObjectSecurity`) against the pool's exact SIDs, so a folder swapped in after the
+    check can't pass. Anyone else's (a lawyer dragging a big client folder in), or one whose
+    owner can't be read (a FAT or exFAT volume, a third party's folder that denies the lawyer
+    `READ_CONTROL`), is refused before the rename (`SetAsideFailure::NotTheAgents`) and stays for
+    the after-session pass; the session still ends with the budget notice. Full rescans walk
+    on, with the job already ended. Each cause gives the lawyer its own plain line, e.g.
+    "Clauseo stopped this session because the
+    matter changed faster than Clauseo could check it (very many files at once). Nothing was
+    lost." or "Clauseo stopped this session because checking the matter got stuck. Nothing was
+    lost." An overflow
+    (`ERROR_NOTIFY_ENUM_DIR`, an empty or unreadable buffer) rescans the whole folder and reads
+    on. A watch that can't be armed refuses the launch ("Clauseo can't watch the matter's folder
+    for changes, so it didn't start the session"), and one that breaks while the agent runs ends
+    the session (`Cause::Broken`); nothing falls back to rescans. A watch thread that panics or
+    ends before it is stopped ends the run. Once the job is empty, the watch stops and rescans
+    each folder one last time. Fail closed: an item that can't be moved (the agent holding a
+    handle) is tried again once the session ended; one still stuck is said, and the
+    after-session pass, the backstop for the matter and for notes, tries again.
+
+    Each item moved gets the lawyer's notice, chosen by its owner as read on the moved handle. A
+    pool user's: "The AI tool tried to put a code repository in the matter. Clauseo stopped it
+    and moved `<name>` to `<set-aside path>`." An owner that can't be read counts as a pool
+    user's, so an agent can't deny the lawyer `READ_CONTROL` on its own `.git` to get the line
+    that says to move it back. Anyone else's: "Clauseo moved `<name>` to `<set-aside path>`
+    because a git repository appeared in the matter while an agent was working. If you made it
+    yourself, move it back after the session ends." The agent chose the names, so a notice and a
+    set-aside record show each with its control, bidi and zero-width characters escaped as
+    `\u{XXXX}` (C0, DEL, C1, U+00AD, U+061C, U+200B to U+200F, U+2028, U+2029, U+202A to
+    U+202E, U+2060 to U+2064, U+2066 to U+2069, U+FEFF, U+E0000 to U+E007F), cut to 512
+    characters with `…` (`denial/shown.rs`); so do `Error::ProtectedLink`'s message and
+    `Error::shown_at` (the item `Error::SetAside`, `AclApply` or `ProtectedLink` names). Each
+    item moved goes to the host as two records on its denial pipe, the lawyer's notice and the
+    set-aside; the session's end notice goes there too. Nothing on the outer's stderr, which
+    carries the agent's stderr too, is read back: a valid record line the agent writes there is
+    relayed as plain bytes. The pipe
+    (`crates/sandbox/src/windows/denial_pipe.rs`) is one of the launcher's run pipes,
+    `\\.\pipe\clauseo-run-<32 hex>-denials` (C4's `Role::Denials`), named in the launch message
+    (`denial_pipe`, refused unless it has that shape). The host makes it before it spawns the
+    runner, with C4's lawyer-only `pipe::denial_sddl`, and reads it. The outer connects first,
+    before the watch is armed and before the inner's logon: a write-only client end
+    (`SECURITY_IDENTIFICATION`, checked to be a pipe by `GetFileType`), not inheritable. A named
+    pipe that is taken, gone or can't be reached refuses the launch (`RunExit::Pipe`) in plain
+    words, without the pipe's name. With no name, records are only logged (the kind, no path).
+    Today `from_policy` passes none (`runner/policy.rs`), so the lawyer gets no notices yet.
+    Follow-up, **C5/D3b-win: the launcher must create the denial pipe and pass its name (C4 #804
+    does the create).**
+    The inner gets no handle list, since `CreateProcessWithLogonW` takes no `STARTUPINFOEX`, but
+    `log_on` names no std handles for it and it never holds the pipe; the agent, which the inner
+    starts with a handle list of its three pipes, has no way to it. Each record is one flat
+    JSON line tagged by `kind`, at most 256 KiB: `{"kind":"set_aside","path":...,"to":...,
+    "what":...}` or `{"kind":"notice","text":...}`. The line carries no version: kinds are only
+    added, and a change of shape bumps `LAUNCH_VERSION`, since runner and host ship together. An
+    unknown field, kind or `what`, or trailing data, makes a line no record: the host's
+    `RecordReader` skips it and reads on (logged once a session, never its words), so one bad
+    line never drops the denials after it. `windows/denial_pipe.rs` is the format's one source;
+    C4's launcher reads with it (`decode` per line, or `RecordReader`). A writer thread
+    sends the records, so a slow host never holds up a kill; the stop drains it for up to 2 s. A
+    write that fails is only logged.
+    The set-aside becomes a `Denial::SetAside` (its path, where it went, and the agent's plain
+    words: "an agent can't create a git repository inside a matter. Clone or init in your
+    scratch folder instead.") for the session's denial sink, the agent's refusal. The cost is
+    plain: **agents can't clone or init a repository into a matter**, since it is set aside at
+    once; they work in their own scratch or state folder. A lawyer's own `.git` whose folder
+    the agent renamed is moved too, as the after-session pass moves it. So is a `HEAD` the
+    lawyer's git rewrites (`HEAD.lock` renamed to `HEAD`) in a bare repository of their own in
+    the matter whose folder isn't named `.git`, and that now ends the session too.
+  - **Restore never puts back a git folder.** `restore_set_aside` hands an item back as the
+    lawyer's, which would make a set-aside `.git` trusted. It refuses any entry whose own name, a
+    folder it was in below the matter, or any part of the path it goes back to opens as `.git`,
+    and any entry that is or holds at any depth a `HEAD` (a file or a link) or a `commondir` (a
+    bare repository's or a worktree's git folder set aside whole), its folders opened as the scan
+    opens them, never through a link, one that can't be listed counting as holding one
+    (`SetAsideFailure::GitFolder`: "Clauseo won't put back a git folder or repository an agent
+    made: your own git tools would run code from it as you"). The lawyer puts back one they made
+    by hand, after the session. The folder it goes back into is opened by that path and must have
+    it as its final path, so no short name or link lands it inside one; a short name there fails
+    that check, closed. It also refuses what git reads from a folder a launch `commondir` named:
+    an item (not a link) named `config` or `hooks`, wherever it was, and an item that is one of
+    the `:common` folders the matter's or the notes record holds, or one of git's names inside
+    one (`SetAsideFailure::GitFolder`). A link, or a folder holding one at any depth, is put back
+    only if each link's target, read from the link and worked out against the folder it goes back
+    to, stays inside the matter or notes folder, told by identity as the live watch tells it
+    (`scan/locate.rs`). A target that can't be read, one inside the item itself (not back yet),
+    or a folder in the item that can't be listed counts as leading out
+    (`SetAsideFailure::LinkOut`).
   - **Write-denies at any depth (S15 PR4a2).** The policy's walk of the matter (`scan_matter`,
     run by `PolicyBuilder::build` at every launch) lists every `.git`, `.claude`, `.mcp.json`,
     `CLAUDE.md` and `AGENTS.md` at any depth (`PROTECTED_AT_ANY_DEPTH`, the set-aside's nested
@@ -216,8 +489,8 @@ build 26100):
     records each deny, and forget hands it back like any other. A link with one of these names
     that leads into the matter is listed too, as a `.git` link is, so the permission write
     refuses the launch there, as at the root, with `Error::ProtectedLink` naming the item
-    relative to the matter (`matter.protected_link`). macOS reads the same list: its profile
-    gains one subpath parameter per item.
+    (escaped) relative to the matter (`matter.protected_link`). macOS reads the same list: its
+    profile gains one subpath parameter per item.
   - An owner gets `WRITE_DAC` before any deny is read, so a protected item a pool user owns (one
     the lawyer restored from the set-aside or renamed, or one made before PR4a) is handed to the
     desktop user before its deny is written, as forget hands it back (`AclWriter::hand_back`,
@@ -404,6 +677,17 @@ may drop `Everyone` behind a proxy that runs as the desktop user.
 - **A deny on an item the lawyer renamed away from a protected name** stays after forget: the
   explicit entry goes with the file, and forget removes entries by path. This predates S15
   PR4a2, for the root names and nested `.git` (accepted).
+- **The live watch** counts a junction within the matter that leads to another link as leading
+  out, so it sets that one aside even when both stay in the matter. A folder the agent made
+  that shuts the lawyer out can't be scanned when it is moved in; the after-session pass names it
+  as unscanned and keeps the session open. The watch keeps a last-write `MODIFIED` record only
+  when the item carries the reparse-point attribute: edits inside a git folder there at launch
+  need none, since #784 (merged) makes every folder holding a `HEAD`, and each folder a
+  `commondir` names, whole-tree read-only in the Windows plan (M1). A test pins that every git
+  folder the set-aside's launch scan knows is one of those (`repo_shapes.rs`
+  `every_git_folder_the_watch_knows_at_launch_is_one_the_plan_denies`). A `commondir` naming a
+  folder outside the matter isn't watched. The uninstaller and forget know only the data
+  folder's set-aside, not the drive folders (a follow-up).
 - **A nested `CLAUDE.local.md` or `AGENTS.override.md`** the agent makes below the matter's
   root is not set aside: the two extra opens per folder cost 6.0% of the scan on average (4.8% to
   6.8% over three runs) on 50,000 files ten to a folder (macOS stand-in), past the 5% allowed for
@@ -1482,6 +1766,26 @@ leaves that profile, both naming the part.
   same matter can't open one by name either. Before it sends a byte it checks each client is
   the inner runner's process, and that process's token user the pool user. The launch goes over
   `ctl`, never the command line, which `CreateProcessWithLogonW` caps at 1024 characters.
+- **The runner's log.** The outer runner, as the lawyer, writes its `tracing` warnings and errors
+  from Clauseo's own crates to `<data_dir>\sandbox\run\runner.log`
+  (`windows/runner/log_file.rs`), one line each with the time, level, target and the runner's
+  process ID. The run folder's protected DACL (the lawyer, `SYSTEM` and `Administrators` only,
+  nothing inherited) keeps the agent out: the pool user can neither read nor write it. The inner
+  runner keeps no file; its lines reach the outer over `ctl`. The file is checked as the run
+  folder's other files are (`write::check_owned_file`: another owner's file taken back; a link
+  or second hard link left there is removed, the name alone) and opened as itself
+  (`FILE_FLAG_OPEN_REPARSE_POINT`). It rotates into `runner.1.log` before it would pass 1 MB,
+  so the two hold 2 MB at most, and a line is cut at 8 KB; a rotation that fails (a viewer
+  holding `runner.1.log`) empties `runner.log` and tries again at the next rotation. It never
+  holds matter content, a path in the matter, a name the agent chose or a secret: a message is
+  kept only as a literal, and the `log-literals` xtask check fails any `warn!`, `error!` or
+  `event!` at those levels under `crates/sandbox/src/windows/` (of `windows/setup/`, only the
+  record files the outer reads; tests aside) whose message is formatted or a `message` field,
+  and any `use` renaming those macros or `macro_rules!` calling them, since the formatter can't
+  tell a literal from a formatted message; one holding `\`
+  or `/` is withheld too. Numbers and `bool`s are kept; a string field only when its name is
+  `cause`, `code`, `kind` or `what` (the code's own words) and it holds no path separator;
+  any other field, an error's text among them, is written `name=<dropped>`.
 - **The environment.** `USERPROFILE`, `HOME`, `HOMEDRIVE`/`HOMEPATH`, `APPDATA`, `LOCALAPPDATA`
   and `TEMP`/`TMP` point under the state folder (the session's temp folder when the policy has
   one). A variable that points into the lawyer's profile outside the paths the launch grants is
