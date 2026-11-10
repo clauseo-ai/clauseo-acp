@@ -85,6 +85,8 @@ mod inner;
 #[cfg(any(windows, test))]
 mod inner_flow;
 #[cfg(any(windows, test))]
+mod job_port;
+#[cfg(any(windows, test))]
 mod leftovers;
 #[cfg(any(windows, test))]
 pub mod marker;
@@ -571,6 +573,9 @@ fn is_batch(program: &str) -> bool {
     extension.is_some_and(|ext| ext.eq_ignore_ascii_case("cmd") || ext.eq_ignore_ascii_case("bat"))
 }
 
+#[cfg(test)]
+#[cfg(windows)]
+mod job_cap_tests;
 #[cfg(test)]
 #[cfg(windows)]
 mod job_tests;

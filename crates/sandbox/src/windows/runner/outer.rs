@@ -170,6 +170,10 @@ fn session(message: &LaunchMessage, end: &End) -> Result<u32, Failure> {
     // before the sweep task is requested (`end.rs`).
     let job =
         steps.hold_job(kill_on_close_job().map_err(|e| Failure::new(RunExit::Job, os("job", &e)))?);
+    // The cap's notice (`job_port.rs`); without the port the cap holds and says nothing.
+    if let Err(e) = super::job_port::os::watch_job(job, say) {
+        say(&os("the job's completion port", &e));
+    }
     // Only a missing or unusable secret is the set-up's to fix; a read that failed is this
     // launch's alone, and a SID the pool doesn't hold is a bad launch.
     let password = secret_for(data_dir, &message.pool_user).map_err(|error| match error {

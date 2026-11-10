@@ -158,6 +158,12 @@ default-filter = 'not (package(xtask) & binary(xtask) & test(=process::tests::tr
 platform = 'cfg(windows)'
 default-filter = 'not (package(xtask) & binary(xtask) & test(=process::tests::tree::a_leftover_gets_sigterm_when_the_command_exits_and_the_run_ends_when_it_does) | package(clauseo-mcp) & binary(guard) & test(=lazy::the_idle_stop_ends_chrome_and_the_daemon_and_the_next_call_restarts) | package(clauseo-sandbox) & test(=ports::tests::a_browser_claim_never_lands_in_the_tier_b_range) | package(clauseo-process) & binary(spawn_options) & test(=default_options_inherit_the_environment_and_give_a_console_of_its_own))'
 
+# The test process's own job (#843): whether CI's tests sit in an outer job, and its limits,
+# printed on a passing run too, as it bears on what the runner meets inside another product's job.
+[[profile.ci.overrides]]
+filter = 'package(clauseo-sandbox) & test(=windows::runner::job_cap_tests::the_test_process_job_is_recorded)'
+success-output = "immediate"
+
 # The quarantined tests alone (see profile ci), run nightly by ci.yml's `quarantine` job, with the
 # ci profile's timeouts and retry, so a fixed one shows as passing.
 [profile.quarantine]
