@@ -11,7 +11,8 @@
 // Opening the section asks the host for a read (`shown`), which reads only figures older
 // than 5 minutes. No timers: times are said against the clock at each render, and the host sends a new view at each
 // shown reset. Not here until the host gives them: Manage plan and Manage billing (H11), the month's figure, the retry
-// lines and what the plan does at its limit (H16), and preparing ahead (later).
+// lines and what the plan does at its limit (H16), and preparing ahead (later). A plan the setup wire says isn't
+// signed in shows nothing, though the host reads it as billed by use (no subscription and no limits; D-060).
 import { IconTryAgain } from "@clauseo/components/icons/icons.tsx";
 import { lim } from "@clauseo/components/lib/words-limits.ts";
 import { pc } from "@clauseo/components/lib/words-plan-card.ts";
@@ -24,6 +25,7 @@ import { windowOf, type WindowFigures } from "../../room/limits/plan-windows.ts"
 import { stamp } from "../../room/thread/clock.ts";
 import { useLimitsStore, useLimitsView, useNow } from "../../store/limits.ts";
 import type { AgentKind, AgentLimitsView } from "../../transport/protocol.ts";
+import type { SectionContext } from "../sections.tsx";
 import { Group, PlateRow } from "./parts.tsx";
 import { KINDS } from "./usage-note.ts";
 
@@ -161,7 +163,7 @@ function AgentUsage({ kind, entry }: { kind: AgentKind; entry: AgentLimitsView }
   );
 }
 
-export function Usage() {
+export function Usage({ ctx }: { ctx: SectionContext }) {
   const w = useSettingsWords();
   const store = useLimitsStore();
   const view = useLimitsView();
@@ -172,7 +174,11 @@ export function Usage() {
     asked.current = true;
     store.refresh(undefined, "shown");
   }, [store]);
-  const kinds = KINDS.filter((kind) => view[kind] !== undefined);
+  // a plan with no sign-in and no key reads as billed by use: it isn't set up, so it shows nothing (D-060)
+  const kinds = KINDS.filter((kind) => {
+    const entry = view[kind];
+    return entry !== undefined && !(lookOf(entry) === "payg" && ctx.notSetUp(kind));
+  });
   return (
     <div className="set-usage" data-testid="usage-section">
       {kinds.length === 0 ? (
