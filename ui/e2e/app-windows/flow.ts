@@ -7,15 +7,30 @@ import type { StopReason, Window } from "./selectors.ts";
 
 /**
  * Unfolds the rail if it is folded behind Matters (below 1200 px; opening a matter folds it
- * again), so New matter, the find field and the rows can be pressed.
+ * again), so New matter, the find field and the rows can be pressed. From 1200 px the rail is a
+ * column of its own and Matters isn't drawn at all.
  */
 export async function showRail(w: Window): Promise<void> {
-  // New matter is in the page from the first render, folded or not.
-  await expect(w.newMatter).toBeAttached();
+  // The room is hidden while it starts (shell.css), so first wait until New matter or Matters
+  // shows: a check before then read every width as folded and pressed a Matters that a wide
+  // window never draws. Only a shown one counts: Matters comes first in the page, and from
+  // 1200 px it is there but not drawn.
+  await expect(w.newMatter.or(w.railToggle).filter({ visible: true }).first()).toBeVisible();
   if (!(await w.newMatter.isVisible())) {
     await w.railToggle.click();
   }
   await expect(w.newMatter).toBeVisible();
+}
+
+/**
+ * Moves the pointer off the rail, to the window's right edge. While the pointer is over the rail,
+ * each row keeps the group it stands in (rail-triage.ts), and from 1200 px the rail stays open
+ * after a press, so a spec that reads the groups steps off it first.
+ */
+export async function offRail(w: Window): Promise<void> {
+  const page = w.newMatter.page();
+  const view = await page.evaluate(() => ({ width: innerWidth, height: innerHeight }));
+  await page.mouse.move(view.width - 8, Math.round(view.height / 2));
 }
 
 /**
