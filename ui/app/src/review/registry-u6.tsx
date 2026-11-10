@@ -5,6 +5,7 @@
 import { QuestionLine } from "@clauseo/components/clauseo/answer.tsx";
 import { RoomScopeProvider } from "@clauseo/components/clauseo/room-scope-provider.tsx";
 import { PartsRoot } from "@clauseo/components/ui/root.tsx";
+import { titleOf } from "../room/conversation-title.ts";
 import { RetriedLine } from "../room/retried-line.tsx";
 import { RetryFromHere } from "../room/retry-from-here.tsx";
 import { ThreadActionsContext, type ThreadActions } from "../room/thread/session.ts";
@@ -61,7 +62,9 @@ const PAPERS: PaperSummary[] = ["Plaint.pdf", "Written statement.pdf", "Lease de
 /** The room on a matter with no conversation yet: a new one, before its first question. */
 const fresh = () => <RoomOver host={() => roomHost([MATTER], PAPERS)} />;
 /** A conversation on the ChatGPT plan whose last answer runs to the composer: where the answer ends and the plan's
- * line starts (D-073; open it with &lite=1 for lite). */
+ * line starts (D-073; open it with &lite=1 for lite), titled as its first question titles it (D-070), on the rail. */
+const ASKED_LONG =
+  "Without using web search, write a short note on the notice period in clause 9 of the lease deed";
 const LONG = [
   "Clause nine needs thirty days' written notice to the bank, sent by registered post to its branch.",
   "The notice must name the loan account, the date of default and the sum outstanding on that date.",
@@ -74,11 +77,8 @@ const ended = () => (
     host={() =>
       threadHost({
         agent: "codex-acp",
-        entries: [
-          userMessage(5, 1, "What does the lease say about notice to the bank?"),
-          agentText(6, 1, LONG),
-          step(7),
-        ],
+        title: titleOf(ASKED_LONG) ?? ASKED_LONG,
+        entries: [userMessage(5, 1, ASKED_LONG), agentText(6, 1, LONG), step(7)],
       })
     }
   />
@@ -139,5 +139,6 @@ export const U6: Entry[] = [
     words: threadWords("Uses your {name} plan"),
     screen: "matters/thread-end",
     render: ended,
+    width: 1400,
   },
 ];

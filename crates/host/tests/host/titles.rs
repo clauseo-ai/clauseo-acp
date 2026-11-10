@@ -7,7 +7,8 @@
 //! The agent's side comes from scenarios: `title-after-rename` (a title on the second turn),
 //! `title-seed` and `title-load` (a title replayed by `session/load`),
 //! `title-load-replay-in-prompt` (a title replayed by the first prompt after a reload, as
-//! claude-agent-acp does), `title-codex-double` (codex-acp's prompt title, then its AI title)
+//! claude-agent-acp does), `title-codex-double` (codex-acp's prompt title, then its AI title),
+//! `title-codex-prompts` (codex-acp's title from each prompt, whole, and no AI title)
 //! and `title-turns` (three turns with titles for the agent-title sequence).
 
 use std::path::Path;
@@ -252,9 +253,9 @@ fn hand_typed_title_survives_a_replay_in_the_first_prompt() {
     host.shutdown();
 }
 
-/// Codex's two titles: the placeholder, then the whole prompt (the agent's title, which replaces
-/// the placeholder), then its AI title, which replaces the prompt. The thread ends on the AI
-/// title, with the agent as its source, and the log has two renames by the agent.
+/// Codex's two titles: the placeholder, then the whole prompt, which only repeats the lawyer's
+/// question and is not taken (D-070), then its AI title, which replaces the placeholder. The
+/// thread ends on the AI title, with the agent as its source, and the log has one rename by it.
 #[test]
 fn codex_prompt_title_then_ai_title_ends_on_the_ai_title() {
     let (dir, host, matter, thread) = two_turns(
@@ -267,10 +268,6 @@ fn codex_prompt_title_then_ai_title_ends_on_the_ai_title() {
         renames(&host, thread),
         [
             (FIRST_WORDS.to_owned(), RenameSource::Placeholder),
-            (
-                "Review the indemnity cap in clause 9 and tell me if it is market".to_owned(),
-                RenameSource::Agent,
-            ),
             (AGENT_TITLE.to_owned(), RenameSource::Agent),
         ]
     );
@@ -279,6 +276,30 @@ fn codex_prompt_title_then_ai_title_ends_on_the_ai_title() {
     assert_eq!(header.as_deref(), Some(AGENT_TITLE), "header");
     host.shutdown();
     assert_eq!(stored_sources(&dir, matter), [Some(RenameSource::Agent)]);
+}
+
+/// D-070: Codex titling the session with each prompt, whole, never names the thread: neither
+/// the first question nor the second replaces the room's title from the first question.
+#[test]
+fn codex_prompt_titles_leave_the_rooms_title_from_the_first_question() {
+    let (dir, host, matter, thread) = two_turns(
+        "title_codex_prompts",
+        "title-codex-prompts",
+        FIRST_WORDS,
+        true,
+    );
+    assert_eq!(
+        renames(&host, thread),
+        [(FIRST_WORDS.to_owned(), RenameSource::Placeholder)]
+    );
+    let (row, header) = titles(&host, matter, thread);
+    assert_eq!(row.as_deref(), Some(FIRST_WORDS), "sidebar row");
+    assert_eq!(header.as_deref(), Some(FIRST_WORDS), "header");
+    host.shutdown();
+    assert_eq!(
+        stored_sources(&dir, matter),
+        [Some(RenameSource::Placeholder)]
+    );
 }
 
 /// The first-words placeholder sent after the agent has named the thread is ignored: the
