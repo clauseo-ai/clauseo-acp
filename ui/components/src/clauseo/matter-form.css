@@ -1,6 +1,6 @@
-/* The new matter form. Its fields on the work's surface, the lawyer's words in them at the
-   composer's 17 px and 600, and the folder Clauseo will make as one muted line in the computer's own words, with a
-   quiet Change. Every value is a token. */
+/* The new matter form. Its fields on the work's surface, the lawyer's words in them at the composer's 17 px and 600;
+   the Folder row a set-in field like theirs, holding the chosen path in the computer's own words and Choose folder… at
+   its end. Every value is a token. */
 @layer components {
   .matter-form {
     display: grid;
@@ -15,45 +15,108 @@
   .matter-form-input::placeholder {
     @apply font-ui;
   }
-  /* client and next date side by side, folding under each other where the column is narrow */
-  .matter-form-pair {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(min(100%, var(--form-pair-min)), 1fr));
-    gap: var(--s5) var(--s4);
-  }
+
+  /* ---------- Folder: the label, then the field, then the note or the offer under it ---------- */
   .matter-form-folder {
-    @apply text-small-row text-muted;
+    display: grid;
+    gap: var(--s1-5);
+    min-width: 0;
+  }
+  /* set in on the well tone as the text fields are, the path and its button on one line */
+  .matter-form-folder-field {
+    @apply bg-well set-in-control rounded-control;
     display: flex;
-    align-items: flex-start;
+    align-items: center;
     gap: var(--s2);
+    min-width: 0;
+    min-height: var(--size-control);
+    padding-block: var(--s1);
+    padding-inline: var(--s3) var(--s1);
   }
   .matter-form-folder-icon {
     flex: none;
-    margin-top: var(--s0-5);
+    color: var(--muted);
   }
-  .matter-form-folder-words {
+  .matter-form-folder[data-chosen] .matter-form-folder-icon {
+    color: var(--primary);
+  }
+  .matter-form-folder-path {
+    @apply text-ui;
     flex: 1;
     min-width: 0;
-    padding-top: var(--s0-5);
+    display: flex;
   }
-  .matter-form-path {
+  .matter-form-folder-none {
+    color: var(--muted);
+  }
+  .matter-form-choose {
+    flex: none;
+  }
+  .matter-form-folder-note {
+    @apply text-small text-muted;
+  }
+  /* the offer: its plus under the field's folder icon, its words in the primary tone so it reads as a choice */
+  .matter-form-offer {
+    justify-self: start;
+    max-width: 100%;
+    padding-inline: var(--s3);
+    color: var(--primary);
+  }
+  .matter-form-offer > span {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  /* a path on one line: the parent gives way first, cut with an ellipsis, so the folder's own name stays in view; the
+     whole path is in the text, for a screen reader, and in the row's title under the pointer */
+  .folder-path {
+    display: flex;
+    min-width: 0;
+    max-width: 100%;
     font-family: var(--font-en);
     color: var(--primary);
-    overflow-wrap: anywhere;
+    white-space: nowrap;
   }
+  .folder-path-head {
+    flex: 0 1 auto;
+    min-width: var(--s6);
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  /* the folder's own name never gives way while the parent can: it gives way last, keeping room for "~/…" */
+  .folder-path-tail {
+    flex: 0 0 auto;
+    min-width: 0;
+    max-width: calc(100% - var(--s6));
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .folder-path-head:only-child,
+  .folder-path-tail:only-child {
+    min-width: 0;
+    max-width: 100%;
+  }
+
   /* a line from the caller or the form's own check, said plainly in the primary tone, as the room says a refusal */
   .matter-form-error {
     @apply text-small-row text-primary;
   }
-  /* the line, and Open it under it when the line names a matter on the list */
+  /* the line, and its one way on under it */
   .matter-form-refusal {
     display: grid;
     justify-items: start;
     gap: var(--s2);
   }
-  .matter-form-change {
-    flex: none;
-    margin-top: calc(-1 * var(--s1));
-    color: var(--primary);
+  .matter-form-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--s2);
+    margin-top: var(--s2);
+  }
+  /* in a dialog: the act at the end, Cancel before it on the line, while Tab still reaches the act first */
+  .matter-form-actions-end {
+    flex-direction: row-reverse;
+    justify-content: flex-start;
   }
 }

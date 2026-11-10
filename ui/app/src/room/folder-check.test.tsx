@@ -269,20 +269,3 @@ test("Create waits at most 5 s for a check that doesn't answer, then makes the m
   await settle();
   expect(created(transport)).toEqual([existing("ref-a")]);
 });
-
-test("a parent Create's picker gives on a network drive: the warning, then Create anyway makes it there without asking again", async () => {
-  const transport = await mount(checking([{ support: "network" }]));
-  await openForm();
-  await press("create-matter");
-  expect(checked(transport)).toEqual([
-    { folder_support: { source: { new_folder: { folder: "ref-a" } } } },
-  ]);
-  expect(warning()?.dataset["kind"]).toBe("network");
-  expect(created(transport)).toEqual([]);
-  expect(dialog()?.textContent).toContain(`D:\\Matters\\ref-a\\${NAME}`);
-  await press("folder-anyway");
-  expect(transport.only("pick_folder")).toHaveLength(1);
-  expect(created(transport)).toEqual([
-    { create_matter: { name: NAME, source: { new_folder: { folder: "ref-a" } } } },
-  ]);
-});

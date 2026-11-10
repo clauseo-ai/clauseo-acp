@@ -93,7 +93,7 @@ test.describe("permission-cancelled", () => {
     app,
   }) => {
     const w = window(app.page);
-    // two sibling matters, both new folders under E2E_MATTER_DIR (room-matters.spec.ts says why)
+    // two sibling matters, both new folders in the host's default location (room-matters.spec.ts says why)
     await createRoomMatter(w, ASKING, { existing: false });
     await sendPrompt(w, "Edit the brief");
     await waiting(w, 0);
