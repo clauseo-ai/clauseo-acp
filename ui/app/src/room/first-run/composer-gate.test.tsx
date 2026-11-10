@@ -9,6 +9,7 @@ import {
   CODEX,
   READY,
   SIGNED_IN,
+  button,
   byId,
   enter,
   install,
