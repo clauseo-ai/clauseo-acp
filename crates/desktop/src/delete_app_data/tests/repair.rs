@@ -193,7 +193,9 @@ fn the_repair_relaunch_starts_clauseo_once_as_the_user_after_the_admin_step() {
         body,
         [
             "${If} $ClauseoRepair = 1",
+            "!ifdef CLAUSEO_SAFE_WORKSPACE",
             "${AndIf} $ClauseoAdminTimedOut <> 1",
+            "!endif",
             RUN_AS_USER,
             "StrCpy $PassiveMode 1",
             "SetAutoClose true",
@@ -301,11 +303,23 @@ fn repair_mode_skips_the_finish_page_and_closes_the_installer() {
     // The relaunch's effect on the passive path, run as written: $PassiveMode 1 in repair mode
     // only, and not after a wait for the elevated instance that timed out.
     let code = hook_code();
-    let lines = &macro_body(&code, RELAUNCH)[1..];
+    let body = &macro_body(&code, RELAUNCH)[1..];
+    // With the Safe workspace on (the define set), a timed-out wait keeps the relaunch away.
+    let on = HashMap::from([("CLAUSEO_SAFE_WORKSPACE".to_owned(), String::new())]);
+    let lines = preprocess(body, &on);
     for (repair, timed_out, skipped) in [("1", "", true), ("0", "", false), ("1", "1", false)] {
-        let passive = run_relaunch(lines, repair, timed_out);
+        let passive = run_relaunch(&lines, repair, timed_out);
         assert_eq!(passive, skipped, "repair {repair}, timed out {timed_out:?}");
     }
+    // Off, nothing names the admin step's variable, and repair mode alone decides.
+    let off = preprocess(body, &HashMap::new());
+    assert!(
+        off.iter()
+            .all(|line| !line.contains("ClauseoAdminTimedOut")),
+        "{off:?}"
+    );
+    assert!(run_relaunch(&off, "1", ""));
+    assert!(!run_relaunch(&off, "0", ""));
 }
 
 /// RELAUNCH's chain with `$ClauseoRepair` and `$ClauseoAdminTimedOut` as given (renamed to
