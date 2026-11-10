@@ -177,6 +177,19 @@ try {
     const session = `copy-running-${process.pid}`;
     // asynchronous, so this process's server answers the browser while agent-browser waits
     const ab = (...a) => promisify(execFile)("agent-browser", ["--session", session, ...a]);
+    // a signal skips `finally`: close the session (and its Chrome) before the process goes
+    const closeOnSignal = (signal) => {
+      try {
+        execFileSync("agent-browser", ["--session", session, "close"], {
+          stdio: "ignore",
+          timeout: 15_000,
+        });
+      } catch {
+        // already gone
+      }
+      process.kill(process.pid, signal);
+    };
+    for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"]) process.once(signal, closeOnSignal);
     try {
       await ab("open", "about:blank");
       for (const line of shootable) {
@@ -199,6 +212,7 @@ try {
         }
       }
     } finally {
+      for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"]) process.off(signal, closeOnSignal);
       try {
         await ab("close");
       } catch {
