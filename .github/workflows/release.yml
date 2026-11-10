@@ -1118,6 +1118,76 @@ jobs:
           $legs = "$env:RUNNER_TEMP/legs"
           $dir = "$env:ProgramFiles\Clauseo"
           $uninstKey = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\Clauseo'
+          # Which processes Restart Manager says use a file: what Tauri's CheckIfAppIsRunning asks
+          # of the main exe before the uninstall removes it, and aborts on (exit 2) under /S when
+          # RmShutdown can't stop one (uninstall_in_place.nsh, un.onUninstFailed). Compiled now, so
+          # the query just before the uninstall takes no time. A failure to compile or to query is
+          # a notice, never the smoke's failure.
+          $rm = $true
+          try {
+            Add-Type -TypeDefinition @'
+          using System;
+          using System.Collections.Generic;
+          using System.Runtime.InteropServices;
+          using System.Text;
+          public static class RmUsers {
+            [StructLayout(LayoutKind.Sequential)]
+            public struct UniqueProcess { public int Pid; public System.Runtime.InteropServices.ComTypes.FILETIME Start; }
+            [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+            public struct ProcessInfo {
+              public UniqueProcess Process;
+              [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 256)] public string AppName;
+              [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 64)] public string ServiceShortName;
+              public int AppType;
+              public uint AppStatus;
+              public uint SessionId;
+              [MarshalAs(UnmanagedType.Bool)] public bool Restartable;
+            }
+            [DllImport("rstrtmgr.dll", CharSet = CharSet.Unicode)]
+            static extern int RmStartSession(out uint session, int flags, StringBuilder key);
+            [DllImport("rstrtmgr.dll", CharSet = CharSet.Unicode)]
+            static extern int RmRegisterResources(uint session, uint files, string[] names, uint apps, IntPtr unique, uint services, string[] serviceNames);
+            [DllImport("rstrtmgr.dll")]
+            static extern int RmGetList(uint session, out uint needed, ref uint count, [In, Out] ProcessInfo[] info, ref uint reasons);
+            [DllImport("rstrtmgr.dll")]
+            static extern int RmEndSession(uint session);
+            public static string[] Of(string path) {
+              uint session;
+              int r = RmStartSession(out session, 0, new StringBuilder(64));
+              if (r != 0) return new[] { "RmStartSession failed: " + r };
+              try {
+                r = RmRegisterResources(session, 1, new[] { path }, 0, IntPtr.Zero, 0, null);
+                if (r != 0) return new[] { "RmRegisterResources failed: " + r };
+                uint needed, count = 0, reasons = 0;
+                r = RmGetList(session, out needed, ref count, null, ref reasons);
+                if (r == 0) return new string[0];
+                if (r != 234) return new[] { "RmGetList failed: " + r };
+                var info = new ProcessInfo[needed];
+                count = needed;
+                r = RmGetList(session, out needed, ref count, info, ref reasons);
+                if (r != 0) return new[] { "RmGetList failed: " + r };
+                var users = new List<string>();
+                for (int i = 0; i < count; i++) {
+                  var p = info[i];
+                  users.Add(string.Format("pid {0} {1} (type {2}, service '{3}', status {4}, session {5})", p.Process.Pid, p.AppName, p.AppType, p.ServiceShortName, p.AppStatus, p.SessionId));
+                }
+                return users.ToArray();
+              } finally {
+                RmEndSession(session);
+              }
+            }
+          }
+          '@
+          } catch {
+            $rm = $false
+            Write-Host "::notice::the Restart Manager query didn't compile: $($_.Exception.Message)"
+          }
+          function RmNotices($when, $path) {
+            if (-not $rm) { return }
+            try { $users = @([RmUsers]::Of($path)) } catch { $users = @("the query failed: $($_.Exception.Message)") }
+            if ($users.Count -eq 0) { Write-Host "::notice::$when, Restart Manager: nothing uses $path" }
+            foreach ($user in $users) { Write-Host "::notice::$when, Restart Manager on ${path}: $user" }
+          }
           function Run($exe, $arguments) {
             Write-Host "> $exe $arguments"
             $code = (Start-Process -FilePath $exe -ArgumentList $arguments -Wait -PassThru).ExitCode
@@ -1150,7 +1220,43 @@ jobs:
           # exits (the plug-in folder once more about 5 s later if it is still there).
           $quiet = (Get-ItemProperty $uninstKey).QuietUninstallString
           if ($quiet -notmatch '^"([^"]+)"\s+(/S _\?=.+)$') { throw "unexpected QuietUninstallString: $quiet" }
-          Run $Matches[1] $Matches[2]
+          # Its standard output to a file (un.onUninstFailed's line), which needs CreateProcess;
+          # when the runner's token can't start an elevated image that way (740), the plain start
+          # the installs use.
+          $exe = $Matches[1]
+          $arguments = $Matches[2]
+          $out = "$log/uninstall-stdout.txt"
+          RmNotices 'before the uninstall' "$dir\Clauseo.exe"
+          Write-Host "> $exe $arguments"
+          try {
+            $code = (Start-Process -FilePath $exe -ArgumentList $arguments -Wait -PassThru -NoNewWindow -RedirectStandardOutput $out).ExitCode
+          } catch {
+            Write-Host "::notice::the uninstall can't start with its output redirected ($($_.Exception.Message)); starting it plainly"
+            $code = (Start-Process -FilePath $exe -ArgumentList $arguments -Wait -PassThru).ExitCode
+          }
+          if ((Test-Path $out) -and (Get-Item $out).Length -gt 0) {
+            Get-Content $out | ForEach-Object { Write-Host "::notice::the uninstaller said: $_" }
+          }
+          if ($code -ne 0) {
+            # Where it stopped: un.onUninstFailed's line above means in the section
+            # (CheckIfAppIsRunning); none, with a plug-in folder newer than the arm64 install's,
+            # means in un.onInit; none and no newer folder, before any script (a header NSIS
+            # couldn't read).
+            RmNotices 'after the failed uninstall' "$dir\Clauseo.exe"
+            foreach ($entry in @(Get-ChildItem -Force $dir -ErrorAction SilentlyContinue)) {
+              Write-Host "::notice::after the failed uninstall, in the folder: $($entry.Name) ($($entry.LastWriteTime.ToString('HH:mm:ss.fff')))"
+            }
+            PluginFolders 'the failed uninstall'
+            foreach ($process in @(Get-Process | Where-Object { $_.Path -and $_.Path.StartsWith("$dir\", [StringComparison]::OrdinalIgnoreCase) })) {
+              Write-Host "::notice::after the failed uninstall, running from the folder: pid $($process.Id) $($process.Path)"
+            }
+            try {
+              foreach ($threat in @(Get-MpThreatDetection -ErrorAction Stop)) {
+                Write-Host "::notice::Defender detection: $($threat.InitialDetectionTime) $($threat.Resources -join ', ')"
+              }
+            } catch { Write-Host "::notice::Defender detections unreadable: $($_.Exception.Message)" }
+            throw "exit code $code from $exe"
+          }
           for ($i = 0; $i -lt 30 -and (Test-Path $dir); $i++) { Start-Sleep 2 }
           $left = @()
           # What a restart deletes: PendingFileRenameOperations holds source, target pairs, and an

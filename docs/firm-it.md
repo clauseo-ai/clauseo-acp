@@ -67,6 +67,9 @@ Windows Server 2025 (build 26100) on 2026-11-03, with the 0.0.0 dry-run installe
 
 **Exit codes** of the installers, besides NSIS's 0 (done), 1 (cancelled) and 2 (stopped by an
 error). Only the last code set is reported, so an install that set several reports one of them.
+A silent uninstall that stops with 2 during the removal itself, usually because Clauseo was still
+running and Windows couldn't close it, also writes this line to its standard output when the
+caller captures it: `clauseo uninstall: aborted in Section Uninstall`.
 
 The launch build never sets 20, 21, 22, 23, 24 or 27: they are the Safe workspace's codes, and
 they and the notes on them below come with it in a later version.
