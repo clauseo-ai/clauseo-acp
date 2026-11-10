@@ -848,7 +848,11 @@ Var ClauseoRepair
 ; any Push and Pop, as RunAsUser may leave a result on the stack.
 !macro CLAUSEO_REPAIR_RELAUNCH
   ${If} $ClauseoRepair = 1
+  ; With the Safe workspace off there is no admin step to time out (admin_copy.nsh, which
+  ; declares the variable, isn't included).
+  !ifdef CLAUSEO_SAFE_WORKSPACE
   ${AndIf} $ClauseoAdminTimedOut <> 1
+  !endif
     nsis_tauri_utils::RunAsUser "$INSTDIR\${MAINBINARYNAME}.exe" ""
     StrCpy $PassiveMode 1
     SetAutoClose true
