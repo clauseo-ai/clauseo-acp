@@ -36,6 +36,11 @@ pub enum Error {
         /// Its `data`'s shape, fit for the log file: `none`, a scalar's kind, or an object's
         /// key names (never a value).
         data: String,
+        /// Its `data` as text: the string at `data.message` when there is one (codex-acp puts
+        /// Codex's own error there, under a bare "Internal error"), else the JSON, at most
+        /// 4 KiB ([`data_text`]). For classifying only ([`Error::rpc_data`]): never in the
+        /// error's text nor the log, as it may quote the lawyer's words.
+        data_text: Option<String>,
     },
     /// The agent broke the protocol: a line over 8 MiB, or an answer the driver cannot use.
     #[error("the agent broke the protocol: {0}")]
@@ -66,7 +71,40 @@ pub enum Error {
     SteerUnsupported,
 }
 
+/// The most of an RPC error's `data` kept.
+pub(crate) const MAX_DATA_BYTES: usize = 4096;
+
+/// The text of an RPC error's `data`: its `message` string when it has one, else its JSON, cut
+/// at a char boundary within [`MAX_DATA_BYTES`]. `None` for no data or a JSON `null`.
+pub(crate) fn data_text(data: Option<&serde_json::Value>) -> Option<String> {
+    let data = data.filter(|data| !data.is_null())?;
+    let mut text = match data.get("message").and_then(serde_json::Value::as_str) {
+        Some(message) => message.to_owned(),
+        None => match data.as_str() {
+            Some(text) => text.to_owned(),
+            None => data.to_string(),
+        },
+    };
+    if text.len() > MAX_DATA_BYTES {
+        let mut end = MAX_DATA_BYTES;
+        while !text.is_char_boundary(end) {
+            end -= 1;
+        }
+        text.truncate(end);
+    }
+    Some(text)
+}
+
 impl Error {
+    /// An RPC error's `data` as text, for classifying the failure (offline, sign in again);
+    /// `None` for any other error.
+    pub fn rpc_data(&self) -> Option<&str> {
+        let Self::Rpc { data_text, .. } = self else {
+            return None;
+        };
+        data_text.as_deref()
+    }
+
     /// The code a client sees.
     pub const fn code(&self) -> ErrorCode {
         match self {

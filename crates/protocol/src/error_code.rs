@@ -292,6 +292,10 @@ error_codes! {
         computer's privacy settings keep Clauseo, or the agent it starts, from opening the \
         matter's folder (on macOS, Files and Folders in Privacy & Security), so no agent works \
         in it: allow Clauseo there, then ask again.";
+    AgentOffline = "agent.offline", retryable: true, meaning: "The agent lost its connection \
+        while answering: it could not reach its service (connection refused, no network, no \
+        name resolution, connect timed out). The answer so far is kept; asking again can work \
+        once the computer is back online.";
     Unknown = "unknown", retryable: false, meaning: "A code from a newer Clauseo that this \
         version does not know. Never produced here.";
 }

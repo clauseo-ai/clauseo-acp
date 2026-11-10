@@ -108,6 +108,7 @@ fn a_refused_session_new_names_its_method_and_data_keys() {
             code,
             message,
             data,
+            ..
         } = &refused
         else {
             panic!("{refused:?}");

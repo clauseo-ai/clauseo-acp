@@ -14,13 +14,15 @@ use clauseo_store::BlobIn;
 use super::super::{Actor, title_source};
 use super::agents::{Agent, Stage};
 use super::out::Out;
-use super::{Then, TimerKind, TurnTimer, asks, current, lost, state, text};
+use super::{Then, TimerKind, TurnTimer, asks, current, lost, offline, state, text};
 use crate::build;
 use crate::coalesce::TextIn;
 use crate::error::Error;
 use crate::log_file::Cause;
 use crate::rate::{Admitted, RatedUpdate};
 use crate::sources::Sources;
+
+mod warning;
 
 /// Where an update belongs.
 #[derive(Debug, Clone, Copy)]
@@ -144,21 +146,9 @@ fn handle(actor: &mut Actor, thread: ThreadId, event: AcpEvent) {
             signal,
         } => asks::on_limit(actor, thread, &session, origin, &signal),
         AcpEvent::Warning { session, warning } => {
-            let warning = warning_kind(&warning);
+            let warning = warning::kind(&warning);
             tracing::warn!(%thread, ?session, warning, "the agent sent something unreadable");
         }
-    }
-}
-
-/// A warning's kind, for the log: its fields hold what the agent sent.
-const fn warning_kind(warning: &clauseo_acp::ProtocolWarning) -> &'static str {
-    use clauseo_acp::ProtocolWarning as W;
-    match warning {
-        W::MalformedLine { .. } => "malformed_line",
-        W::UnknownUpdate { .. } => "unknown_update",
-        W::InvalidUpdate { .. } => "invalid_update",
-        W::UnknownLimitStatus { .. } => "unknown_limit_status",
-        W::SessionFailure { .. } => "session_failure",
     }
 }
 
@@ -184,6 +174,11 @@ fn on_update(
     let Some(context) = context(actor, thread, origin) else {
         return;
     };
+    if let Context::Live(turn) = context
+        && offline::held_back(actor, thread, turn, &update)
+    {
+        return;
+    }
     let done = match update {
         AgentUpdate::MessageChunk {
             role,

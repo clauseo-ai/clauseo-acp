@@ -103,6 +103,7 @@ fn rpc(method: &str, code: i32, message: &str, data: &str) -> Error {
         code,
         message: message.to_owned(),
         data: data.to_owned(),
+        data_text: None,
     })
 }
 

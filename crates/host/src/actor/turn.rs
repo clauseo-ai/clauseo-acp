@@ -25,6 +25,7 @@ mod key_retry;
 mod known;
 mod launch_checks;
 mod logout;
+mod offline;
 mod out;
 mod picks;
 mod profile_loads;
@@ -80,7 +81,7 @@ pub(crate) use restore::{
 };
 pub(crate) use route::{TurnCommand, command};
 pub(crate) use sign_in::on_request as sign_in_request;
-pub(crate) use state::busy;
+pub(crate) use state::{busy, keeps_loaded, keeps_matter_loaded, running_turn, turn_running};
 pub(crate) use writer::{
     hold_for_relocate, matter_busy, release_relocate, stop_agents, writer_busy,
 };
@@ -203,6 +204,8 @@ struct Current {
     end: Option<End>,
     /// The turn failed on the host's side; it ends `Failed` with this `TurnFailed`.
     failure: Option<(ErrorCode, Option<String>)>,
+    /// The agent said its connection failed and has sent nothing since (`offline.rs`).
+    offline: Option<offline::Watch>,
     /// The failure asks to stop the prompt once the commit being built is sent.
     abort: bool,
     /// An agent-driven commit of the turn failed with this code.
@@ -318,6 +321,8 @@ enum TimerKind {
     Rate,
     Cancel(TurnId),
     LimitRead(TurnId),
+    /// The wait after a connection failure ran out (`offline.rs`).
+    Offline(TurnId),
     /// A steer's answer did not come in time (`queue/steer.rs`).
     Steer(clauseo_protocol::MessageId),
     /// A `stop_agents` wait ran out (`sign_in/stops.rs`), for any thread of its agent.
@@ -398,6 +403,7 @@ pub(crate) fn timer(actor: &mut Actor, timer: TurnTimer) {
         TimerKind::Rate => updates::on_rate_timer(actor, thread),
         TimerKind::Cancel(turn) => cancel::on_cancel_timer(actor, thread, turn),
         TimerKind::LimitRead(turn) => end::on_limit_read_timer(actor, thread, turn),
+        TimerKind::Offline(turn) => offline::on_timer(actor, thread, turn),
         TimerKind::Steer(message) => queue::on_steer_timer(actor, thread, message),
         TimerKind::StopWait(id) => sign_in::stop_timer(actor, id),
     }
@@ -520,46 +526,6 @@ pub(crate) fn shutdown(actor: &mut Actor) {
     came_back::shutdown(actor);
     cancel::shutdown(actor);
     super::limits::decide_stops_now(actor);
-}
-
-/// Whether `thread` has a current turn, a last turn whose end is not durable yet, or queued
-/// turns (`thread.turn_running` for `ArchiveThread`).
-pub(crate) fn turn_running(actor: &Actor, thread: ThreadId) -> bool {
-    actor.threads.get(&thread).is_some_and(|entry| {
-        let state = &entry.turn;
-        state.current.is_some() || state.closing.is_some() || !state.queue.is_empty()
-    })
-}
-
-/// The turn running on `thread` now, if any (`blocked.rs` attributes a blocked site to it).
-pub(crate) fn running_turn(actor: &Actor, thread: ThreadId) -> Option<TurnId> {
-    let current = actor.threads.get(&thread)?.turn.current.as_deref()?;
-    Some(current.turn)
-}
-
-/// Whether `thread`'s stream stays loaded: an agent, open turn, repair, retriable end, limit stop.
-pub(crate) fn keeps_loaded(actor: &Actor, thread: ThreadId) -> bool {
-    actor.threads.get(&thread).is_some_and(|entry| {
-        let state = &entry.turn;
-        state.agent.is_some()
-            || state.preparing.is_some()
-            || state.current.is_some()
-            || state.reconciling
-            || state
-                .closing
-                .as_ref()
-                .is_some_and(|closing| !closing.retried)
-    }) || super::limits::holds_stop(actor, thread)
-}
-
-/// Whether `matter`'s stream, once loaded to check a reused checkpoint, stays loaded: while a
-/// turn, an undo or a restore holds its writer, so the turn's next checkpoint reads it without
-/// a reload.
-pub(crate) fn keeps_matter_loaded(actor: &Actor, matter: MatterId) -> bool {
-    actor
-        .matters
-        .get(&matter)
-        .is_some_and(|entry| entry.turns.holder.is_some())
 }
 
 /// Whether the host is shutting down.
