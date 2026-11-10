@@ -181,10 +181,9 @@ struct Current {
     cancelled: bool,
     /// The same Stop, for the prompt's API-key retry off the actor (`key_retry.rs`).
     stopped: key_retry::Stopped,
-    /// The stop the agent's own `Cancelled` turns into, after the turn's last permission answer
-    /// was a refusal and no Stop came after it (Codex's only reject option ends the turn):
-    /// `NotAllowed` for the lawyer's reject kind, `OutsideMatter` for the host's data-folder
-    /// refusal. Another answer or a Stop clears it.
+    /// The stop the agent's own `Cancelled` becomes after the turn's last permission answer
+    /// was a refusal with no Stop since (Codex's only reject ends the turn): `NotAllowed` for
+    /// the lawyer's, `OutsideMatter` for the host's data folder. An answer or a Stop clears it.
     refused: Option<StopReason>,
     /// The first limit signal of the turn.
     limit: Option<LimitMark>,
