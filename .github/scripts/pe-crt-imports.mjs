@@ -3,14 +3,14 @@
 //
 //   node .github/scripts/pe-crt-imports.mjs [--app-local-ok[=<dir>]]... <file-or-directory>...
 //
-// A directory is searched, with its subdirectories, for *.exe, *.dll and *.node (a Node addon
-// is a DLL); a file is checked whatever its name. A clean Windows has no VC++ Redistributable,
-// so an exe importing VCRUNTIME140.dll fails to start there (0xC0000135); our runners, which all
-// have the C++ build tools, never see it. Every Rust binary we build is linked with
-// -C target-feature=+crt-static (release.yml's matrix and setup-exe-repro.yml). release.yml's
-// `build` job runs this over every PE it uploads in windows-exe-<target>, fetched ones included,
-// and every DLL placed for bundling; `sign-windows` runs it over each NSIS installer and
-// everything 7-Zip extracts from it.
+// A directory is searched, with its subdirectories, for *.exe, *.dll, *.node and *.pyd (a Node
+// addon and a Python extension module are DLLs); a file is checked whatever its name. A clean
+// Windows has no VC++ Redistributable, so an exe importing VCRUNTIME140.dll fails to start there
+// (0xC0000135); our runners, which all have the C++ build tools, never see it. Every Rust binary
+// we build is linked with -C target-feature=+crt-static (release.yml's matrix and
+// setup-exe-repro.yml). release.yml's `build` job runs this over every PE it uploads in
+// windows-exe-<target>, fetched ones included, and every DLL placed for bundling; `sign-windows`
+// runs it over each NSIS installer and everything 7-Zip extracts from it.
 //
 // For each file it reads the import table and the delay-import table (PE32 and PE32+, any
 // machine) and fails, naming the file and the DLL, on a DLL CRT_RULES forbids. A file that is
@@ -284,11 +284,11 @@ async function findAppLocal(dll, dirs) {
 }
 
 /** The file names a directory's search picks up, any case. */
-export const PE_NAME = /\.(exe|dll|node)$/i;
+export const PE_NAME = /\.(exe|dll|node|pyd)$/i;
 
 /**
- * The files to check: each file argument as given, and each directory's *.exe, *.dll and
- * *.node (any case, subdirectories included), sorted. Throws when an argument doesn't exist.
+ * The files to check: each file argument as given, and each directory's *.exe, *.dll, *.node and
+ * *.pyd (any case, subdirectories included), sorted. Throws when an argument doesn't exist.
  * @param {string[]} args files and directories
  * @returns {Promise<string[]>}
  */
@@ -355,10 +355,10 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
     resolved += result.notes.length;
     if (!result.ok) failed++;
   }
-  const dlls = files.filter((file) => /\.(dll|node)$/i.test(file)).length;
+  const dlls = files.filter((file) => /\.(dll|node|pyd)$/i.test(file)).length;
   const summary = `${files.length} files (${dlls} DLLs or addons)`;
   if (files.length === 0) {
-    console.log(`::error::no .exe, .dll or .node in ${args.join(" ")}`);
+    console.log(`::error::no .exe, .dll, .node or .pyd in ${args.join(" ")}`);
     process.exit(1);
   }
   if (failed > 0) {
