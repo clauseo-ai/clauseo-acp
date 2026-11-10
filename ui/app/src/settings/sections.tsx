@@ -31,6 +31,7 @@ import type {
   ToolsSettingsView,
 } from "../transport/protocol.ts";
 import { APP_VERSION } from "./version.ts";
+import type { NotSetUp } from "./plan-setup.ts";
 import { lockKey, type LiveSettings } from "./use-settings.ts";
 import { hashId } from "./use-hash-section.ts";
 import { About } from "./sections/about.tsx";
@@ -73,6 +74,8 @@ export type SectionContext = {
   display: Display;
   /** Every agent's limits, from the window's limits store: Plan and usage's note reads them. */
   limits: LimitsView;
+  /** Whether the setup wire says a plan isn't signed in (plan-setup.ts): Plan and usage shows no billing for it. */
+  notSetUp: NotSetUp;
   /** The release date the host reports (`YYYY-MM-DD`), or null: About's line reads it. */
   releaseDate: string | null;
   /** Whether a firm's policy locks this setting. */
@@ -125,7 +128,7 @@ export const SECTIONS: readonly SectionEntry[] = [
     name: "Plan and usage",
     icon: IconPlanLimit,
     lead: "What each plan has left, and when it resets.",
-    note: (ctx, lang) => usageNote(ctx.limits, lang),
+    note: (ctx, lang) => usageNote(ctx.limits, lang, ctx.notSetUp),
     Body: Usage,
   },
   {
@@ -203,6 +206,7 @@ export function contextOf(
   limits: LimitsView = {},
   releaseDate: string | null = null,
   connectors: ConnectorsState = NO_CONNECTORS,
+  notSetUp: NotSetUp = () => false,
 ): SectionContext {
   const locked = (key: keyof UiSettings) => settings.locked.includes(lockKey(key));
   const toolLocked = (key: keyof ToolsSettingsView) => settings.locked.includes(`tools.${key}`);
@@ -213,6 +217,7 @@ export function contextOf(
     settings,
     display,
     limits,
+    notSetUp,
     releaseDate,
     connectors,
     locked,

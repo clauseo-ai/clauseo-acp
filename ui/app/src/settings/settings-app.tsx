@@ -17,6 +17,7 @@ import { tauriWindowControls, type WindowControls } from "../transport/window-co
 import { setWindowTitle } from "../transport/window-title.ts";
 import { useWindowFrame } from "../window/use-window-frame.ts";
 import { sendConnector } from "./connector-commands.ts";
+import { useNotSetUp } from "./plan-setup.ts";
 import { contextOf, shownSections, type SectionEntry, type SectionId } from "./sections.tsx";
 import { useHashSection } from "./use-hash-section.ts";
 import { useSettings } from "./use-settings.ts";
@@ -59,6 +60,8 @@ export function SettingsApp({
     checked.current = true;
     sendConnector(transport, { check: {} }).catch(() => {});
   }, [transport]);
+  // each plan's sign-in off the setup wire: a plan that isn't set up shows no billing in Plan and usage (D-060)
+  const notSetUp = useNotSetUp(transport);
   const ctx = contextOf(
     store,
     transport,
@@ -67,6 +70,7 @@ export function SettingsApp({
     limitsView,
     releaseDate,
     connectorsState,
+    notSetUp,
   );
   const shown = shownSections(ctx);
   // a section that stops showing gives way to the first; a hash's section that isn't shown yet waits for the first
