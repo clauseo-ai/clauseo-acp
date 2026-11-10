@@ -713,7 +713,7 @@ test("release.yml's Safe workspace switch is off for launch and every sandbox to
   const build = jobCommands(text, "build");
   commandAt(build, 'node .github/scripts/sidecars.mjs --safe-workspace="$SAFE_WORKSPACE" "$TARGET"');
   assert.deepEqual(
-    build.filter((line) => line.startsWith("node .github/scripts/sidecars.mjs") && line !== "node .github/scripts/sidecars.mjs --check"),
+    build.filter((line) => line.startsWith("node .github/scripts/sidecars.mjs") && line !== 'node .github/scripts/sidecars.mjs --check "$TARGET"'),
     ['node .github/scripts/sidecars.mjs --safe-workspace="$SAFE_WORKSPACE" "$TARGET"'],
   );
   const sign = jobCommands(text, "sign-windows");
