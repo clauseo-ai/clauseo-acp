@@ -6,11 +6,13 @@ use std::fs;
 use std::io;
 use std::path::{Component, Path, PathBuf};
 
+use super::grants::{
+    Places, check_not_holding, check_outside_matter, check_socket_folder, claude_store_folder,
+};
 use super::links::{canonical_findings, covered_targets, fit_budget, split_linked};
 use super::names::{Keys, path_key};
 use super::{
-    ClaudeStore, Loopback, PROTECTED_AT_ANY_DEPTH, PROTECTED_NAMES, PathRule, Policy,
-    PolicyBuilder, same, under,
+    Loopback, PROTECTED_AT_ANY_DEPTH, PROTECTED_NAMES, PathRule, Policy, PolicyBuilder, same, under,
 };
 use crate::Error;
 use crate::links::{LinkFinding, scan_matter};
@@ -28,6 +30,7 @@ pub(super) fn build(b: PolicyBuilder) -> Result<Policy, Error> {
     let home_ref = home.as_deref();
     check_matter(&matter, &state, home_ref, &hidden)?;
     let tmpdir = tmp_folder(b.tmpdir.as_deref(), &matter, &state, home_ref, &hidden)?;
+    let places = Places::new(&matter, &state, home_ref, &hidden);
 
     let notes = b
         .notes
@@ -51,11 +54,8 @@ pub(super) fn build(b: PolicyBuilder) -> Result<Policy, Error> {
             link.display()
         ));
     }
-    let claude_store = b
-        .claude_store
-        .as_deref()
-        .map(|dir| existing(dir, "Claude store folder").map(|dir| ClaudeStore { dir }))
-        .transpose()?;
+    let claude_store = claude_store_folder(b.claude_store.as_deref(), &places)?;
+    check_socket_folder(b.browser_socket_dir.as_deref(), &places)?;
 
     let runtime = all_existing(&b.runtime, "runtime path")?;
     let read = all_existing(&b.read, "read path")?;
@@ -232,12 +232,7 @@ fn check_matter(
 /// so it may not be in the matter, hold it, or equal or hold a hidden path.
 fn check_notes(notes: &Path, matter: &Path, hidden: &[PathBuf]) -> Result<(), Error> {
     let shown = notes.display();
-    if overlap(notes, matter) {
-        return refuse(format!(
-            "the notes folder may not be inside the matter or hold it: {shown} and {}",
-            matter.display()
-        ));
-    }
+    check_outside_matter(notes, "notes folder", matter)?;
     if let Some(h) = hidden.iter().find(|h| under(h, notes)) {
         return refuse(format!(
             "the notes folder may not equal or hold a hidden path: {shown} and {}",
@@ -250,7 +245,8 @@ fn check_notes(notes: &Path, matter: &Path, hidden: &[PathBuf]) -> Result<(), Er
 /// The session's temp folder if set, by [`folder_and_name`] after refusing a `p` whose own name
 /// is a symbolic link (the launcher makes the folder if it is missing). It is allowed again
 /// after the hidden paths and holds the agent's writes, so it may not be `/`, equal or hold the
-/// home folder, the state folder or a hidden path, nor be inside the matter or hold it.
+/// home folder, the state folder or a hidden path, nor be inside the matter or hold it
+/// ([`check_outside_matter`]).
 fn tmp_folder(
     p: Option<&Path>,
     matter: &Path,
@@ -280,29 +276,8 @@ fn tmp_folder(
     if is_root(&tmpdir) {
         return refuse(format!("the {what} may not be the root folder: {shown}"));
     }
-    if home.is_some_and(|home| under(home, &tmpdir)) {
-        return refuse(format!(
-            "the {what} may not equal or hold the home folder: {shown}"
-        ));
-    }
-    if under(state, &tmpdir) {
-        return refuse(format!(
-            "the {what} may not equal or hold the state folder: {shown} and {}",
-            state.display()
-        ));
-    }
-    if overlap(&tmpdir, matter) {
-        return refuse(format!(
-            "the {what} may not be inside the matter or hold it: {shown} and {}",
-            matter.display()
-        ));
-    }
-    if let Some(h) = hidden.iter().find(|h| under(h, &tmpdir)) {
-        return refuse(format!(
-            "the {what} may not equal or hold a hidden path: {shown} and {}",
-            h.display()
-        ));
-    }
+    check_not_holding(&tmpdir, what, home, state, hidden)?;
+    check_outside_matter(&tmpdir, what, matter)?;
     if !run_shaped(&tmpdir) {
         return refuse(format!(
             "the {what} must be `<data_dir>/{RUN_DIR}/<session>/{TEMP_DIR}`: {shown}"
@@ -517,7 +492,7 @@ fn absolute(p: &Path, what: &str) -> Result<(), Error> {
 }
 
 /// Whether `a` and `b` are the same or one holds the other, by [`under`].
-fn overlap(a: &Path, b: &Path) -> bool {
+pub(super) fn overlap(a: &Path, b: &Path) -> bool {
     under(a, b) || under(b, a)
 }
 

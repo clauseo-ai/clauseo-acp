@@ -7,10 +7,13 @@ use crate::links::{LinkFinding, MatterScan};
 use crate::{Access, Error, PathClass};
 
 mod build;
+mod compare;
+mod grants;
 mod links;
 mod names;
 mod store;
 
+pub(crate) use compare::{same, under};
 pub use links::LINK_RULES_MAX;
 pub(crate) use names::opens_as;
 pub use names::{hfs_ignorable, strip_hfs_ignorables};
@@ -46,31 +49,6 @@ pub const PROTECTED_AT_ANY_DEPTH: [&str; 5] =
 /// loads a nested `CLAUDE.md` when it works in that folder. Stricter than the brief's "at the
 /// matter root" (decision 0038, for Rohan to confirm).
 pub const INSTRUCTIONS_AT_ANY_DEPTH: &str = "CLAUDE.md";
-
-/// Whether `path` is `prefix` or under it. On macOS names compare one by one by their
-/// [`names::name_key`], Unicode canonical caseless matching, the folding APFS documents for its
-/// case-insensitive volumes (`DATA/x` is under `data`, an NFD name matches its NFC form; the
-/// pairs checked against this Mac's volume are in the tests). Elsewhere the comparison is exact:
-/// NTFS and Linux file systems keep NFC and NFD names as two files.
-pub(crate) fn under(path: &Path, prefix: &Path) -> bool {
-    if path.starts_with(prefix) {
-        true
-    } else if cfg!(target_os = "macos") {
-        let mut names = path.components();
-        prefix.components().all(|want| {
-            names
-                .next()
-                .is_some_and(|got| names::same_name(got.as_os_str(), want.as_os_str()))
-        })
-    } else {
-        false
-    }
-}
-
-/// Whether `a` and `b` are the same path, by [`under`]'s comparison.
-pub(crate) fn same(a: &Path, b: &Path) -> bool {
-    a.components().count() == b.components().count() && under(a, b)
-}
 
 /// Whether `path` is a [`INSTRUCTIONS_AT_ANY_DEPTH`] file in `matter`, in any letter case.
 pub(crate) fn instruction_file(matter: &Path, path: &Path) -> bool {
@@ -452,6 +430,8 @@ impl PolicyBuilder {
 
     /// The folder holding Claude's login store (the lawyer's `~/.claude`, or Clauseo's login
     /// home). Only [`CLAUDE_STORE_FILES`] and [`CLAUDE_STORE_LOCK_FOLDERS`] in it are allowed.
+    /// It may not be inside the matter or hold it, nor equal or hold the home folder, the state
+    /// folder or a hidden path ([`PolicyBuilder::build`]).
     pub fn claude_store(mut self, dir: impl Into<PathBuf>) -> PolicyBuilder {
         self.claude_store = Some(dir.into());
         self
@@ -479,7 +459,9 @@ impl PolicyBuilder {
     /// The browser socket folder the host made for this launch. The policy keeps its canonical
     /// path; the jail then allows Unix-socket bind and connect, and file create, write, read
     /// and unlink, under that one folder, but not making or removing the folder itself.
-    /// Without it the jail allows no Unix socket anywhere.
+    /// Without it the jail allows no Unix socket anywhere. It may not be inside the matter or
+    /// hold it, nor equal or hold the home folder, the state folder or a hidden path
+    /// ([`PolicyBuilder::build`]).
     #[cfg(unix)]
     pub fn browser_socket_dir(mut self, dir: &crate::BrowserSocketDir) -> PolicyBuilder {
         self.browser_socket_dir = Some(dir.canonical().to_owned());
@@ -542,10 +524,12 @@ impl PolicyBuilder {
     /// - The matter may not be `/` or equal or hold the home folder, nor equal, hold or sit
     ///   inside a hidden path. The state folder and the matter may not be one inside the other
     ///   (or the same); the state folder may not equal or hold a hidden path. The notes folder
-    ///   may not be inside the matter, hold it, or equal or hold a hidden path. The credential
-    ///   link must be inside the state folder. Runtime and read paths may not be `/` or equal
-    ///   or hold the home folder, the matter or a hidden path (inside one is fine: that is why
-    ///   they are allowed again). Read-only paths in the state folder must be inside it;
+    ///   may not be inside the matter, hold it, or equal or hold a hidden path. The Claude store
+    ///   folder and the browser socket folder may not be inside the matter or hold it, nor equal
+    ///   or hold the home folder, the state folder or a hidden path. The credential link must be
+    ///   inside the state folder. Runtime and read paths may not be `/` or equal or hold the home
+    ///   folder, the matter or a hidden path (inside one is fine: that is why they are allowed
+    ///   again). Read-only paths in the state folder must be inside it;
     ///   over-cap files inside the matter. The temp folder may not end in `.` or `..` as
     ///   written, be `/`, equal or hold the home folder, the state folder or a hidden path, nor
     ///   be inside the matter or hold it; and it must be `.../run/<session>/tmp`.
