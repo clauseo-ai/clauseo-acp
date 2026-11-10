@@ -125,7 +125,7 @@ fn each_verdict_picks_its_set() {
     assert!(words(Verdict::Start, Language::Hi).is_none());
     // Through the check: a missing runtime and an old one each get their own set.
     let missing = words(verdict(None, minimum()), Language::En);
-    let too_old = words(verdict(Some("154.0.3485.54"), minimum()), Language::En);
+    let too_old = words(verdict(Some("110.0.1587.69"), minimum()), Language::En);
     assert_eq!(
         missing.map(|set| set.instruction),
         Some(MISSING_EN.instruction)
