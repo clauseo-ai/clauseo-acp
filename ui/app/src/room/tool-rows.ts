@@ -1,8 +1,8 @@
 // Each row of the tool line's popover, in the fewest words (DESIGN.md §Icons): the tool's glyph and name, an On or
 // Off chip, the reason in a few words only when off; under the browser with no Chrome (or Edge, on Windows), what to
-// install and that Clauseo then needs reopening; under the browser the firm's policy blocks, or whose policy Clauseo
-// couldn't check, the reason in full, and for the policy not checked, Try again (browser-policy.ts). Pure, so the
-// tests can read every state; loaded with the popover only.
+// install and that a new conversation then finds it; under the browser the firm's policy blocks, or whose policy
+// Clauseo couldn't check, the reason in full, and for the policy not checked, Try again (browser-policy.ts). Pure, so
+// the tests can read every state; loaded with the popover only.
 import type { Lang, Platform } from "@clauseo/components/lib/display.ts";
 import { tw, type ToolsKey } from "@clauseo/components/lib/words-tools.ts";
 import { toolsLine } from "@clauseo/components/lib/words-tools-line.ts";
@@ -27,7 +27,7 @@ export type ToolRowWords = {
   /** The reason's tooltip and description: once a policy read found nothing blocking, when the browser comes; else
    * null. */
   reasonTip: string | null;
-  /** A muted line under the reason saying it in full: what to install and that Clauseo then needs reopening, the
+  /** A muted line under the reason saying it in full: what to install and that a new conversation then finds it, the
    * firm's policy blocks the browser, or Clauseo couldn't check it; else null. */
   note: string | null;
   /** Off in Settings, with the settings window to turn it on: the popover's foot offers Open Settings. */
@@ -50,11 +50,11 @@ const POLICY: ToolsKey =
 const UNREADABLE: ToolsKey =
   "Clauseo couldn't check this computer's browser settings, so it won't use a browser for now. It checks again the next time it needs one.";
 
-/** What to install, in full: the browser's skill loads as Clauseo starts, so a browser installed later needs Clauseo
- * reopened. Windows takes Edge too. */
-const INSTALL_MAC: ToolsKey = "Install Google Chrome, then close and reopen Clauseo.";
+/** What to install, in full: the browser's skill loads as each conversation starts, so a browser installed later
+ * is there in the next new conversation. Windows takes Edge too. */
+const INSTALL_MAC: ToolsKey = "Install Google Chrome, then start a new conversation.";
 const INSTALL_WINDOWS: ToolsKey =
-  "Install Google Chrome or Microsoft Edge, then close and reopen Clauseo.";
+  "Install Google Chrome or Microsoft Edge, then start a new conversation.";
 
 /** The browser's reason in full: what to install with none on the computer, or its policy keeping it off; else null. */
 function browserNote(lang: Lang, platform: Platform, state: BrowserState): string | null {

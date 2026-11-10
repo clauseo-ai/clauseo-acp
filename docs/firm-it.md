@@ -878,8 +878,8 @@ pull request that makes Clauseo act on it. Same formats as above ([decision
 Clauseo's browser is agent-browser, a command the agents run, which drives the computer's installed
 Google Chrome (on Windows, Microsoft Edge when no Chrome is installed) through Chrome's remote
 debugging, in a fresh profile for each session. With neither installed, the agents get no browser
-and the app tells the lawyer what to install; a browser installed later reaches the agents once
-Clauseo is reopened. The browser doesn't go through Clauseo's egress proxy, so
+and the app tells the lawyer what to install; a browser installed later reaches the agents in the
+next new conversation, with no need to reopen Clauseo. The browser doesn't go through Clauseo's egress proxy, so
 `network.allowed_domains` and the unsafe-site list don't apply to it; Chrome or Edge uses its own
 network settings.
 
