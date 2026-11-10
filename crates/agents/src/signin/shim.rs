@@ -137,5 +137,22 @@ pub(crate) fn sign_in_address(url: &str, hosts: &[String]) -> bool {
     !host.is_empty() && hosts.iter().any(|known| known.eq_ignore_ascii_case(host))
 }
 
+/// The shim's script for a Claude sign-in on macOS and Linux, written now.
+#[cfg(unix)]
+pub(crate) fn script(config: &crate::config::AgentsConfig) -> std::io::Result<Option<PathBuf>> {
+    install(&config.data_dir).map(Some)
+}
+
+/// None on Windows, where Claude opens its own tab.
+#[cfg(not(unix))]
+#[expect(
+    clippy::unnecessary_wraps,
+    reason = "the Unix version's signature, which can fail; one call site serves both"
+)]
+pub(crate) fn script(config: &crate::config::AgentsConfig) -> std::io::Result<Option<PathBuf>> {
+    let _ = config;
+    Ok(None)
+}
+
 #[cfg(test)]
 mod tests;

@@ -10,10 +10,10 @@ use std::time::Duration;
 use clauseo_process::Timer;
 use clauseo_protocol::AgentId;
 
-use super::Ticket;
 use super::stop::{JobEnd, Stopped};
 use super::switch::{self, OwnLogin, Switch};
 use super::thread::Worker;
+use super::{Ticket, Ticks};
 use crate::cancel::{Cancel, Stop};
 use crate::config::AgentsConfig;
 use crate::signin::env::Vendor;
@@ -22,6 +22,9 @@ use crate::signin::{
     Found, Method, PasteCode, SigninCode, SigninError, SigninNote, SigninState, Source, vendor_of,
 };
 use crate::state::{AgentsEvent, Installed};
+use trace::End;
+
+mod trace;
 
 /// Every agent's sign-in: what the handle, the worker and the sign-in jobs share.
 #[derive(Debug)]
@@ -55,6 +58,8 @@ struct Inner {
     /// Each agent's running job.
     jobs: BTreeMap<AgentId, Slot>,
     next_job: u64,
+    /// The clock of the jobs' log lines.
+    ticks: Ticks,
 }
 
 /// An agent's running job: its ticket, its task, where pasted codes go, and, for a task that
@@ -67,6 +72,8 @@ struct Slot {
     task: Task,
     paste: Option<async_channel::Sender<PasteCode>>,
     kick: Option<async_channel::Sender<()>>,
+    /// When the job's slot was taken ([`Ticks::now`]), for its log's `took_ms`.
+    began: Duration,
 }
 
 /// How long the lawyer's Cancel lets a sign-in's runs end gracefully before they are killed.
@@ -103,7 +110,10 @@ impl SigninHub {
             .collect();
         SigninHub {
             agents,
-            inner: Mutex::new(Inner::default()),
+            inner: Mutex::new(Inner {
+                ticks: Ticks::new(&config.clock),
+                ..Inner::default()
+            }),
             events,
             codex_files: futures::lock::Mutex::new(()),
             data_dir: config.data_dir.clone(),
@@ -334,6 +344,7 @@ impl SigninHub {
                 return Ok(None);
             }
             running.ticket.cancel.cancel();
+            trace::ended(&inner.ticks, agent, running, End::Superseded);
         }
         inner.next_job += 1;
         let ticket = Ticket {
@@ -354,6 +365,7 @@ impl SigninHub {
             (None, None)
         };
         let ended = Arc::new(JobEnd::default());
+        let began = inner.ticks.now();
         inner.jobs.insert(
             agent.clone(),
             Slot {
@@ -362,8 +374,10 @@ impl SigninHub {
                 task,
                 paste: sender,
                 kick,
+                began,
             },
         );
+        trace::started(agent, task);
         Ok(Some(SigninStart {
             ticket,
             ended,
@@ -414,8 +428,8 @@ impl SigninHub {
         if !is_current(&inner, ticket) {
             return false;
         }
-        if ends {
-            inner.jobs.remove(&ticket.agent);
+        if ends && let Some(slot) = inner.jobs.remove(&ticket.agent) {
+            trace::ended(&inner.ticks, &ticket.agent, &slot, End::State(&state));
         }
         inner.states.insert(ticket.agent.clone(), state.clone());
         // Fails only when every receiver is gone; nobody is listening then.
@@ -430,8 +444,10 @@ impl SigninHub {
     /// (`AgentsEvent::SigninUnchanged`); nothing once the job is superseded.
     pub(crate) fn end_job(&self, ticket: &Ticket) {
         let mut inner = self.lock();
-        if is_current(&inner, ticket) {
-            inner.jobs.remove(&ticket.agent);
+        if is_current(&inner, ticket)
+            && let Some(slot) = inner.jobs.remove(&ticket.agent)
+        {
+            trace::ended(&inner.ticks, &ticket.agent, &slot, End::Unchanged);
             // Fails only when every receiver is gone; nobody is listening then.
             drop(self.events.try_send(AgentsEvent::SigninUnchanged {
                 agent: ticket.agent.clone(),
@@ -472,9 +488,10 @@ impl SigninHub {
 
     /// Stops every job at once: the handle is gone.
     pub(super) fn stop_all(&self) {
-        let jobs = std::mem::take(&mut self.lock().jobs);
-        for slot in jobs.into_values() {
+        let mut inner = self.lock();
+        for (agent, slot) in std::mem::take(&mut inner.jobs) {
             slot.ticket.cancel.cancel();
+            trace::ended(&inner.ticks, &agent, &slot, End::Stopped);
         }
     }
 
@@ -482,10 +499,13 @@ impl SigninHub {
     /// allows, and nothing a job sends from now on reaches anyone. Gives each job's stop, for
     /// the quit to wait on and to kill at its bound ([`Stopped::wait_or_kill`]).
     pub(super) fn stop_all_gracefully(&self) -> Vec<Stopped> {
-        let jobs = std::mem::take(&mut self.lock().jobs);
-        jobs.into_values()
-            .map(|slot| {
+        let mut inner = self.lock();
+        let ticks = inner.ticks.clone();
+        std::mem::take(&mut inner.jobs)
+            .into_iter()
+            .map(|(agent, slot)| {
                 slot.ticket.cancel.stop(Stop::Quit);
+                trace::ended(&ticks, &agent, &slot, End::Stopped);
                 Stopped::new(slot.ticket.cancel, slot.ended)
             })
             .collect()
@@ -533,7 +553,7 @@ pub(super) fn start_job<T: Timer + Send + Sync + 'static>(worker: &Worker<T>, st
     let needs_shim =
         matches!(task, Task::SignIn(_) | Task::UseDifferent) && vendor == Vendor::Claude;
     let browser = if needs_shim {
-        let Ok(browser) = shim_script(&worker.config) else {
+        let Ok(browser) = crate::signin::shim::script(&worker.config) else {
             fail(&ticket);
             return;
         };
@@ -567,21 +587,4 @@ pub(super) fn start_job<T: Timer + Send + Sync + 'static>(worker: &Worker<T>, st
     if spawned.is_err() {
         fail(&ticket);
     }
-}
-
-/// The shim on macOS and Linux.
-#[cfg(unix)]
-fn shim_script(config: &AgentsConfig) -> std::io::Result<Option<PathBuf>> {
-    crate::signin::shim::install(&config.data_dir).map(Some)
-}
-
-/// None on Windows, where Claude opens its own tab.
-#[cfg(not(unix))]
-#[expect(
-    clippy::unnecessary_wraps,
-    reason = "the Unix version's signature, which can fail; one call site serves both"
-)]
-fn shim_script(config: &AgentsConfig) -> std::io::Result<Option<PathBuf>> {
-    let _ = config;
-    Ok(None)
 }

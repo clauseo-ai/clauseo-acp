@@ -67,6 +67,10 @@ mod detect_nowrite;
 #[path = "signin/shim.rs"]
 mod shim;
 
+#[cfg(test)]
+#[path = "signin/lifecycle_log.rs"]
+mod lifecycle_log;
+
 use std::collections::BTreeMap;
 use std::ffi::OsString;
 use std::path::Path;

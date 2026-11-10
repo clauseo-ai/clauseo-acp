@@ -34,6 +34,7 @@ use crate::signin::{Found, Method, PasteCode, SigninError, SigninState};
 use crate::state::{AgentsEvent, InstallState, Installed, PythonState};
 
 mod first;
+mod python_log;
 mod shared;
 mod signin;
 mod stop;
@@ -89,6 +90,10 @@ struct Inner {
     python: PythonState,
     /// The size of Python's archive: a paused Python download's `Missing`.
     python_bytes: u64,
+    /// When Python's install job began to work, for its log's `took_ms`.
+    python_began: Option<std::time::Duration>,
+    /// The clock `python_began` reads.
+    ticks: Ticks,
     installed: BTreeMap<AgentId, Installed>,
     /// The job that may emit now, if any.
     current: Option<Ticket>,
@@ -97,6 +102,38 @@ struct Inner {
     tries: BTreeMap<AgentId, u32>,
     /// Set by `shutdown` or the drop: no job starts after it.
     closed: bool,
+}
+
+/// The config's monotonic clock, for the lifecycle lines' `took_ms`.
+#[derive(Clone)]
+pub(crate) struct Ticks(Arc<dyn crate::config::Clock>);
+
+impl Ticks {
+    pub(crate) fn new(clock: &Arc<dyn crate::config::Clock>) -> Ticks {
+        Ticks(Arc::clone(clock))
+    }
+
+    /// The monotonic reading now.
+    pub(crate) fn now(&self) -> std::time::Duration {
+        self.0.monotonic()
+    }
+
+    /// Milliseconds from `began`, a reading of [`Ticks::now`], to now.
+    pub(crate) fn since_ms(&self, began: std::time::Duration) -> u64 {
+        u64::try_from(self.now().saturating_sub(began).as_millis()).unwrap_or(u64::MAX)
+    }
+}
+
+impl Default for Ticks {
+    fn default() -> Ticks {
+        Ticks(Arc::new(crate::config::SystemClock))
+    }
+}
+
+impl std::fmt::Debug for Ticks {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Ticks")
+    }
 }
 
 /// One job's identity and pause signal.
@@ -134,7 +171,10 @@ impl Agents {
     ) -> (Agents, async_channel::Receiver<AgentsEvent>) {
         let (events, receiver) = async_channel::unbounded();
         let shared = Arc::new(Shared {
-            inner: Mutex::new(Inner::default()),
+            inner: Mutex::new(Inner {
+                ticks: Ticks::new(&config.clock),
+                ..Inner::default()
+            }),
             jobs: Mutex::new(0),
             job_ended: Condvar::new(),
             signin: SigninHub::new(&config, events.clone()),
