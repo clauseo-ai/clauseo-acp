@@ -23,6 +23,9 @@ mod layering_tests;
 pub(crate) mod profile;
 #[cfg(test)]
 mod profile_tests;
+pub(crate) mod sandbox;
+#[cfg(test)]
+mod sandbox_tests;
 #[cfg(test)]
 mod tests;
 

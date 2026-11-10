@@ -369,6 +369,7 @@ fn claude_pre_allows_case_law_only_with_our_entry() {
             data: &crate::agent::data_fence::LaunchDeny::default(),
             case_law,
             browser: false,
+            sandbox: None,
         };
         claude_options(&mut options, &keys);
         options.get("allowedTools").cloned()

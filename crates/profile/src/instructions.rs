@@ -55,13 +55,26 @@ pub const BROWSER_CODEX: &str = include_str!("../assets/instructions/browser-cod
 /// services and Apple events (codex 0.162.1 `seatbelt_base_policy.sbpl`). Measured on a Mac:
 /// `mdls` is denied (`com.apple.metadata.mds`), `mdfind` finds nothing, `open -R` opens no
 /// window, `qlmanage` fails to start, and `osascript` runs but cannot drive another app, while
-/// `textutil` and `sips` work. Claude runs unsandboxed and never gets it ([`codex_shell`]).
+/// `textutil` and `sips` work. Claude gets its own line ([`CLAUDE_SHELL_MACOS`]).
 pub const CODEX_SHELL_MACOS: &str = include_str!("../assets/instructions/codex-shell-macos.txt");
 
 /// The line a Codex session gets after the instructions on macOS (`macos`), and none elsewhere:
 /// the commands it names are macOS's own.
 pub fn codex_shell(macos: bool) -> Option<&'static str> {
     macos.then(|| CODEX_SHELL_MACOS.trim())
+}
+
+/// The line a Claude session on macOS gets after the instructions: Claude Code's own sandbox
+/// (the host's `agent::loads::sandbox`) runs every command under Seatbelt with Apple events off
+/// and no way out (`allowUnsandboxedCommands: false`), and its Mach list has no Spotlight or
+/// Quick Look service, so `mdls`, `mdfind`, `open`, `qlmanage` and `osascript` driving
+/// another app fail as they do for Codex ([`CODEX_SHELL_MACOS`]).
+pub const CLAUDE_SHELL_MACOS: &str = include_str!("../assets/instructions/claude-shell-macos.txt");
+
+/// The line a Claude session gets after the instructions on macOS (`macos`), and none
+/// elsewhere: Windows has no sandbox for Claude, and the commands it names are macOS's own.
+pub fn claude_shell(macos: bool) -> Option<&'static str> {
+    macos.then(|| CLAUDE_SHELL_MACOS.trim())
 }
 
 /// What a Codex session on Windows is told, which has no browser for this agent there

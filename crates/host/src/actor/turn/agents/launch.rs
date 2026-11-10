@@ -67,10 +67,8 @@ pub(super) fn launch(
         (forced.unwrap_or_default(), None)
     };
     // Every agent's temp folder is its session's own, gone with the run folder.
-    forced.extend(agent::temp::temp_env(
-        &agent::temp::temp_dir(&prepared.run.root),
-        cfg!(windows),
-    ));
+    let temp = agent::temp::session_env(&prepared.run.root, &row.agent, cfg!(windows));
+    forced.extend(temp);
     let hook = agent::loads::launch_env(actor.profile.launch_env(&row.agent));
     let session_folder = agent::session_folder(&folder);
     let matter_spellings = start_failure::spellings_at_launch(actor, &folder, &session_folder);

@@ -18,6 +18,7 @@ use crate::agent::loads;
 use crate::agent::loads::browser::{self, BrowserInputs, Claims, Switch};
 use crate::agent::loads::case_law::{self, CaseLawInputs, Relay};
 use crate::agent::loads::profile::{self, ClaudeKeys, Folders, Login};
+use crate::agent::loads::sandbox::{ClaudeSandbox, SandboxPaths};
 use crate::browser::seed_sites::SEED_SITES;
 use crate::error::Error;
 use crate::log_file::LIFECYCLE;
@@ -149,6 +150,12 @@ pub(super) fn session_loads(
     let forced_ask = super::state(actor, thread)
         .and_then(|state| state.agent.as_deref())
         .is_some_and(|agent| agent.forced_ask);
+    let browser_on = shell
+        .as_ref()
+        .is_some_and(|(_, part)| *part == BrowserPart::On);
+    let sandbox = (kind == Some(AgentKind::Claude))
+        .then(|| claude_sandbox(actor, &agent_id, &run, matter, browser_on))
+        .flatten();
     let claude = (kind == Some(AgentKind::Claude)).then_some(ClaudeKeys {
         web_search,
         login,
@@ -157,9 +164,8 @@ pub(super) fn session_loads(
         forced_ask,
         data: &run.data_deny,
         case_law: case_law_entry.is_some(),
-        browser: shell
-            .as_ref()
-            .is_some_and(|(_, part)| *part == BrowserPart::On),
+        browser: browser_on,
+        sandbox: sandbox.as_ref(),
     });
     let guard = actor
         .pre_write_guard
@@ -221,6 +227,50 @@ pub(super) fn session_loads(
         Vec::new()
     };
     Ok((meta, servers, directories))
+}
+
+/// Claude Code's own sandbox for a Claude session of `agent_id` in `run`, whose matter folder
+/// is `matter` (`agent::loads::sandbox`): none on Windows. Path joins only.
+fn claude_sandbox(
+    actor: &Actor,
+    agent_id: &clauseo_protocol::AgentId,
+    run: &RunFolders,
+    matter: &Path,
+    browser: bool,
+) -> Option<ClaudeSandbox> {
+    let tmp = crate::agent::temp::temp_dir(&run.root);
+    let skills: Vec<PathBuf> = run
+        .data_deny
+        .spellings
+        .iter()
+        .map(|data| {
+            crate::agent::data_fence::BUILT_IN_SKILLS
+                .iter()
+                .fold(data.clone(), |path, name| path.join(name))
+        })
+        .collect();
+    let path: Vec<PathBuf> = actor
+        .wiring
+        .path_prepend
+        .iter()
+        .cloned()
+        .chain(actor.profile.agent_path(agent_id))
+        .filter(|folder| folder.is_absolute())
+        .collect();
+    let claude_home = actor.effective.locations().agent_home(agent_id.as_str());
+    let paths = SandboxPaths {
+        matter,
+        work: &run.work,
+        tmp: &tmp,
+        downloads: &run.downloads,
+        skill_packs: &run.skill_packs,
+        notes: &run.notes,
+        skills: &skills,
+        path: &path,
+        claude_home: &claude_home,
+        browser,
+    };
+    ClaudeSandbox::for_os(cfg!(windows), &paths)
 }
 
 /// The hook's servers without `case-law`, the `case-law` entry `run`'s session gets (after
