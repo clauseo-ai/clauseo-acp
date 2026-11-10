@@ -88,6 +88,7 @@ mod inner_flow;
 mod leftovers;
 #[cfg(any(windows, test))]
 pub mod marker;
+pub mod outcome;
 #[cfg(windows)]
 mod outer;
 pub mod paths;
@@ -106,6 +107,7 @@ pub use env::agent_env;
 pub use inner::run_inner;
 #[cfg(any(windows, test))]
 pub use marker::{UncleanSession, unclean_sessions};
+pub use outcome::{HOST_ENDED, RunOutcome};
 #[cfg(windows)]
 pub use outer::run_outer;
 pub use paths::{WinPath, codex_reuse};

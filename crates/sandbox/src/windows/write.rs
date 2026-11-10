@@ -242,6 +242,37 @@ pub(crate) fn lock_exclusive_for(path: &Path, wait: Duration) -> io::Result<File
     lock_open_for(file, path, wait)
 }
 
+/// [`lock_exclusive_for`], opening the lock file without following a link (`O_NOFOLLOW` on
+/// Unix, where a link is an error; `FILE_FLAG_OPEN_REPARSE_POINT` on Windows, where the link
+/// itself opens) and refusing anything but a plain file before the lock is taken.
+pub(crate) fn lock_no_follow_for(path: &Path, wait: Duration) -> io::Result<File> {
+    let mut options = OpenOptions::new();
+    options.read(true).write(true).create(true).truncate(false);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt as _;
+        let no_follow =
+            i32::try_from(rustix::fs::OFlags::NOFOLLOW.bits()).map_err(io::Error::other)?;
+        options.custom_flags(no_follow);
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt as _;
+        options.custom_flags(::windows::Win32::Storage::FileSystem::FILE_FLAG_OPEN_REPARSE_POINT.0);
+    }
+    let file = options.open(path)?;
+    if !file.metadata()?.is_file() {
+        let name = path
+            .file_name()
+            .map_or_else(String::new, |name| name.to_string_lossy().into_owned());
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("the lock {name} is not a plain file"),
+        ));
+    }
+    lock_open_for(file, path, wait)
+}
+
 /// [`lock_exclusive_for`] for a lock file the caller already opened (`file`, without following a
 /// link), named by `path` in its error. Dropping the file releases the lock.
 pub(crate) fn lock_open_for(file: File, path: &Path, wait: Duration) -> io::Result<File> {

@@ -68,6 +68,7 @@ mod detect;
 pub mod fence;
 #[cfg(windows)]
 mod folder;
+pub mod launch;
 pub mod ledger;
 pub mod marker;
 pub mod matters;
@@ -132,6 +133,7 @@ pub(crate) use detect::os_facts;
 pub use fence::{MatterFolders, Neighbours, RegisteredMatter, plan_fence};
 #[cfg(windows)]
 pub use folder::{folder_support, label_support};
+pub use launch::{LaunchSteps, Launchers, Preparing, Progress, TierBLauncher};
 #[cfg(windows)]
 pub use marker::setup_state;
 #[cfg(windows)]

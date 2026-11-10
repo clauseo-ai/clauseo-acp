@@ -13,6 +13,9 @@ use std::path::PathBuf;
 use super::sids::Sid;
 
 pub mod assign;
+mod full;
+
+pub use full::PoolFullCause;
 
 /// The most pool users a machine has (D-B5: 4 at first, 4 more at a time, at most 32).
 pub const POOL_CAP: u8 = 32;
