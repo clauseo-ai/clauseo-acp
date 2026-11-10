@@ -1,5 +1,5 @@
-// The status line on the composer's top edge: how long the answer took, the plan the questions go to, and the
-// prepared draft's hint while its Ready card is out of view.
+// The status line on the composer's top edge: how long the answer took, the plan the questions go to, the agent's own
+// model and effort, and the prepared draft's hint while its Ready card is out of view.
 import {
   lazy,
   Suspense,
@@ -10,6 +10,7 @@ import {
   type ReactNode,
 } from "react";
 import { late } from "../lib/late.ts";
+import { IconMore } from "../icons/icons.tsx";
 import { Kbd } from "../ui/kbd.tsx";
 import { SegmentedSwitch } from "../ui/segmented.tsx";
 import { motionAllowed, useDisplay } from "../lib/display.ts";
@@ -20,6 +21,21 @@ import { nextStatusFit, type StatusFit } from "./logic.ts";
 import { dur, ease } from "./motion.ts";
 import { useRoom } from "./room-scope.ts";
 import { Say } from "./say.tsx";
+
+const NO_MENUS: readonly ConfigMenu[] = [];
+
+/** A menu's trigger as it stands at rest, before its chunk is in: the value's name and the chevron. */
+function MenuAtRest({ menu }: { menu: ConfigMenu }) {
+  const name = menu.options.find((o) => o.value === menu.value)?.name ?? menu.value;
+  return (
+    <span className="room-plan room-pick">
+      <bdi lang="en" className="as-en">
+        {name}
+      </bdi>
+      <IconMore size={14} className="room-pick-chevron" />
+    </span>
+  );
+}
 
 export type ReadyHint = {
   /** "Draft petition ready", or "Draft petition, opened" once turned to. */
@@ -39,6 +55,18 @@ export type PlanChoice<V extends string = string> = {
   segmented?: readonly { value: V; label: string }[];
 };
 
+/** One of the agent's own settings, its model or its effort, on the status line after the plan: a quiet trigger in the
+ * agent's own name for the value ("Opus"), which opens the agent's values as a menu. `label` is the room's name for it
+ * ("Model"), the menu's title and part of the trigger's name. The values' names and descriptions are the agent's, as
+ * it gives them, never translated. */
+export type ConfigMenu = {
+  id: string;
+  label: string;
+  value: string;
+  options: readonly { value: string; name: string; description?: string | undefined }[];
+  onValueChange: (value: string) => void;
+};
+
 /** The tool line, after the plan: what Clauseo's tools can do in the open conversation, one phrase, and the control
  * that opens where each tool stands. `summary` is the phrase it says, for the fit: the line measures again when it
  * changes. */
@@ -50,6 +78,12 @@ const PlanTrigger = lazy(() =>
   late(import("./plan-trigger.tsx").then((m) => ({ default: m.PlanTrigger }))),
 ) as unknown as typeof import("./plan-trigger.tsx").PlanTrigger;
 
+/** A model or effort menu, loaded with the first status line that offers one. Until it is in, the value stands as the
+ * trigger's own words at rest, so nothing moves when it arrives. */
+const ConfigMenuTrigger = lazy(() =>
+  late(import("./config-menu.tsx").then((m) => ({ default: m.ConfigMenuTrigger }))),
+);
+
 /** The status line on the composer's top edge: "Took 38 seconds", a dot, "Uses your Claude plan", and the ready hint
  * at its right while the Ready card is out of view. Before the first answer it holds the plan alone. It never
  * truncates: the hint gives up its words first and keeps its key cap; if that still isn't enough the line wraps to
@@ -60,6 +94,7 @@ export function StatusLine<V extends string>({
   hint,
   choice,
   tools = null,
+  menus = NO_MENUS,
   hidden = false,
 }: {
   took: string | null;
@@ -68,6 +103,8 @@ export function StatusLine<V extends string>({
   choice?: PlanChoice<V> | undefined;
   /** The tool line, parted from the plan by the dot; null for none. */
   tools?: ToolsSegment | null;
+  /** The agent's model and effort, after the plan, each parted by a dot; none by default. */
+  menus?: readonly ConfigMenu[] | undefined;
   /** While the working line stands in its place. It stays mounted, so the plan's select keeps its state. */
   hidden?: boolean;
 }) {
@@ -78,12 +115,14 @@ export function StatusLine<V extends string>({
   const line = useRef<HTMLDivElement>(null);
   const tookRef = useRef<HTMLSpanElement>(null);
   const goRef = useRef<HTMLSpanElement>(null);
-  const toolsRef = useRef<HTMLSpanElement>(null);
   const hadTook = useRef(took !== null);
   const seg = useId();
   const { id, hand } = useRoom();
   const hintState = hint?.state ?? "none";
   const toolsSaid = tools?.summary ?? null;
+  const menusSaid = menus
+    .map((m) => m.options.find((o) => o.value === m.value)?.name ?? m.value)
+    .join();
 
   // the time it took arrives as the working line closes: it comes up 4 px into place over 200 ms
   useLayoutEffect(() => {
@@ -117,11 +156,11 @@ export function StatusLine<V extends string>({
         f = nextStatusFit(f, cap !== null && getComputedStyle(cap).display !== "none");
         b.dataset["fit"] = f;
       }
-      // a line that wraps never starts a row with the tool line's dot: the dot parts two phrases on one row
-      const t = toolsRef.current;
-      if (t !== null) {
+      // a line that wraps never starts a row with a dot (the tool line's, a menu's): a dot parts two phrases on one row
+      const box = l.getBoundingClientRect();
+      for (const t of l.children) {
+        if (!(t instanceof HTMLElement) || t.dataset["dotted"] === undefined) continue;
         delete t.dataset["lead"];
-        const box = l.getBoundingClientRect();
         const lead = box.width > 0 && t.getBoundingClientRect().left - box.left < 1;
         if (lead && t.previousElementSibling !== null) t.dataset["lead"] = "";
       }
@@ -136,7 +175,7 @@ export function StatusLine<V extends string>({
     });
     ro.observe(host);
     return () => ro.disconnect();
-  }, [lang, textSize, wide, hintState, took, hidden, toolsSaid]);
+  }, [lang, textSize, wide, hintState, took, hidden, toolsSaid, menusSaid]);
 
   const hold = (on: boolean) => (e?: PointerEvent) => {
     if (e?.pointerType !== "touch") hand.holdDraft("hint", on);
@@ -184,9 +223,19 @@ export function StatusLine<V extends string>({
             <PlanTrigger plan={plan} choice={choice} />
           </Suspense>
         )}
+        {menus.map((m, i) => (
+          <span className="room-status-menu" data-dotted="" key={m.id}>
+            {(i > 0 || choice !== undefined || plan !== "" || took !== null) && (
+              <i className="room-dot" aria-hidden="true" />
+            )}
+            <Suspense fallback={<MenuAtRest menu={m} />}>
+              <ConfigMenuTrigger menu={m} />
+            </Suspense>
+          </span>
+        ))}
         {tools !== null && (
-          <span className="room-status-tools" ref={toolsRef}>
-            {(choice !== undefined || plan !== "" || took !== null) && (
+          <span className="room-status-tools" data-dotted="">
+            {(choice !== undefined || plan !== "" || took !== null || menus.length > 0) && (
               <i className="room-dot" aria-hidden="true" />
             )}
             {tools.node}

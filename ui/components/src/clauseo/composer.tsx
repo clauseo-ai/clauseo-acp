@@ -26,10 +26,11 @@ import { useRoom } from "./room-scope.ts";
 import { PaperChips } from "./paper-chips.tsx";
 import { SafeWorkspaceLine } from "./safe-workspace-line.tsx";
 import { Say } from "./say.tsx";
-import { StatusLine, type PlanChoice, type ReadyHint, type ToolsSegment } from "./status-line.tsx";
+import { StatusLine, type ConfigMenu, type PlanChoice } from "./status-line.tsx";
+import type { ReadyHint, ToolsSegment } from "./status-line.tsx";
 import { WorkingLine, WorkingSaid, WorkingTime, type WorkingState } from "./working-line.tsx";
 
-export type { PlanChoice, ReadyHint, ToolsSegment } from "./status-line.tsx";
+export type { ConfigMenu, PlanChoice, ReadyHint, ToolsSegment } from "./status-line.tsx";
 
 /** One of the agent's commands, as ACP's `available_commands_update` lists it and the session's header carries it
  * (`HeaderEntry.commands`, passed as it is): its name without the slash, what it does, and a hint for its input. */
@@ -129,6 +130,8 @@ export type ComposerProps<V extends string = string> = {
   choice?: PlanChoice<V>;
   /** The tool line on the status line, after the plan; none by default. */
   tools?: ToolsSegment | null;
+  /** The agent's model and effort on the status line, after the plan; none by default. */
+  menus?: readonly ConfigMenu[] | undefined;
   /** Keys the field passes on first, before its own Enter. True when one was taken, and its default is prevented.
    * While an input method composes it hears nothing: every key is the input method's then. */
   onKeyCommand?: (e: KeyboardEvent<HTMLTextAreaElement>) => boolean;
@@ -199,6 +202,7 @@ export function Composer<V extends string = string>({
   onRemovePaper,
   choice,
   tools = null,
+  menus,
   onKeyCommand,
   id = "ask",
   gate,
@@ -408,7 +412,7 @@ export function Composer<V extends string = string>({
   }, [room]);
   // the status line: what the last answer took, the plan, the hint, the plan choice or the tool line
   const said = took !== null || plan !== "" || hint !== null;
-  const status = said || choice !== undefined || tools !== null;
+  const status = said || choice !== undefined || tools !== null || (menus?.length ?? 0) > 0;
   return (
     <form
       ref={room.nodes.slot("composer")}
@@ -433,7 +437,9 @@ export function Composer<V extends string = string>({
       )}
       {acts}
       {/* a status line with nothing to say isn't drawn: no time yet, no plan, no choice and no hint */}
-      {status && <StatusLine {...{ took, plan, hint, choice, tools }} hidden={working !== null} />}
+      {status && (
+        <StatusLine {...{ took, plan, hint, choice, tools, menus }} hidden={working !== null} />
+      )}
       {/* while Clauseo works the working line is the well's top row, and the field its foot: one set-in region */}
       <div className="room-entry" ref={entry} data-working={working !== null ? "" : undefined}>
         {/* what assistive technology hears of the working line: one status region, mounted as long as the composer

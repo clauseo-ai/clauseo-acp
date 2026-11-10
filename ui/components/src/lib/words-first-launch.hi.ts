@@ -175,6 +175,9 @@ export const HI = {
   "Your papers stay on this computer. Claude or ChatGPT sees the parts it reads to answer you.":
     "आपके दस्तावेज़ इसी कंप्यूटर पर रहते हैं। Claude या ChatGPT उतना ही देखता है, जितना वह आपको जवाब देने के लिए पढ़ता है।",
   "Sign in to {name}": "{name} में साइन इन करें",
+  // the plan chosen for a conversation, not set up on this computer (PK): its one act, in the composer
+  "{name} isn't set up on this computer.": "{name} इस कंप्यूटर पर सेट अप नहीं है।",
+  "Set up {name}": "{name} सेट अप करें",
   // a plan's row on the first screen, after its name and " · "
   "needs a download of about {mb} MB": "लगभग {mb} MB का डाउनलोड ज़रूरी है",
   // UD1-97: under Claude's "Finish signing in with your browser.": claude.ai's own sign-in page opens every time

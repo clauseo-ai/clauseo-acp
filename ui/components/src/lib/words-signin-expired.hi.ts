@@ -9,6 +9,8 @@ export const HI = {
   "Sign in again opens {name}'s own sign-in in your browser. Only the sign-in repeats: this matter, its papers and your settings stay as they are.":
     "दोबारा साइन इन करने पर आपके ब्राउज़र में {name} का अपना साइन इन खुलता है। केवल साइन इन दोहराया जाता है। यह मामला, इसके दस्तावेज़ और आपकी सेटिंग्स जैसे हैं वैसे रहते हैं।",
   "Sign in again": "दोबारा साइन इन करें",
+  // PK: the plan chosen for a new conversation, its sign-in expired, before any question is held
+  "Your {name} sign-in has expired.": "आपका {name} साइन इन समाप्त हो गया है।",
   // UD2-24: waiting in the browser
   "Finish signing in with your browser. Your question is asked once you're back.":
     "अपने ब्राउज़र में साइन इन पूरा करें। आपके लौटते ही आपका प्रश्न पूछा जाएगा।",

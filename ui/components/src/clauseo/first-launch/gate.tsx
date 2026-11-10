@@ -9,6 +9,7 @@ import { IconTick } from "../../icons/icons.tsx";
 import { cn } from "../../lib/cn.ts";
 import { useDisplay } from "../../lib/display.ts";
 import { errorWords } from "../../lib/words-errors.ts";
+import { sx } from "../../lib/words-signin-expired.ts";
 import { fl, type FirstLaunchKey } from "../../lib/words-first-launch.ts";
 import { ui } from "../../lib/words-ui.ts";
 import { Button } from "../../ui/button.tsx";
@@ -38,6 +39,9 @@ const PLANS: readonly Plan[] = ["claude", "chatgpt"];
  * gate's own, the panel and the paste field the lawyer opened. Times are already clock words in the language. */
 export type GateView =
   | { kind: "signed-out"; found?: Found | undefined }
+  /** The plan a conversation runs isn't ready here while the other is, or the conversation is fixed to it: its one
+   * act, "Set up {name}", or "Sign in again" when its sign-in expired; `instead` offers the other plan, on a draft. */
+  | { kind: "set-up"; expired: boolean; instead: boolean }
   | { kind: "checking" }
   | { kind: "queued"; offline: boolean }
   | { kind: "waiting"; nudge: boolean; pasting: boolean }
@@ -82,6 +86,8 @@ export type GateTestIds = {
   loginOther?: string;
   /** Each plan's "Sign in to {name}", suffixed with its plan: `${signInTo}-claude`. */
   signInTo?: string;
+  /** The set-up view's one act: "Set up {name}" or "Sign in again". */
+  setUp?: string;
 };
 
 /** The gate, in the field's row, for every state before the field takes a question. */
@@ -223,6 +229,36 @@ export function Gate({
             )}
           </>
         );
+      break;
+    case "set-up":
+      // one act, where the question will go; the other plan, signed in, a quiet way round it on a draft
+      body = (
+        <>
+          <Act
+            act={
+              <Button
+                kind="tone"
+                className={cn(WRAP, "room-field-ask")}
+                onClick={act({ act: "sign-in-to", plan })}
+                data-testid={testIds.setUp}
+              >
+                {view.expired ? sx(lang, "Sign in again") : w("Set up {name}", { name })}
+              </Button>
+            }
+          >
+            <Say>
+              {view.expired
+                ? sx(lang, "Your {name} sign-in has expired.", { name })
+                : w("{name} isn't set up on this computer.", { name })}
+            </Say>
+          </Act>
+          {view.instead && (
+            <Ways>
+              {way(w("Use {name} instead", { name: NAME[other(plan)] }), { act: "instead" })}
+            </Ways>
+          )}
+        </>
+      );
       break;
     case "checking":
       // the sign-in status check is still running (its retries are silent): nothing to press yet, Sign in busy
