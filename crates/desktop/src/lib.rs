@@ -556,9 +556,8 @@ fn open_main_window(app: &App) -> tauri::Result<()> {
     let builder = WebviewWindowBuilder::new(app, MAIN_WINDOW, WebviewUrl::App("index.html".into()))
         .title(title)
         .window_classname(MAIN_WINDOW_CLASS)
-        .use_https_scheme(true)
-        .inner_size(width, height)
-        .center();
+        .use_https_scheme(true);
+    let builder = window_size::with_size(builder, (width, height)).center();
     // The ground from the first frame on Windows, before WebView2 starts (window_size.rs).
     let builder = window_size::with_ground(window_frame::with_frame(builder));
     // Tauri sends the CSP with the page only; the scripts, the colouring worker's among them,

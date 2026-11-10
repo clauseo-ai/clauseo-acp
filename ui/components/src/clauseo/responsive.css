@@ -1,5 +1,5 @@
 /* The room at other widths. A mid window folds the rail behind Matters; under 1000 px the room is one column, the
-   composer docked to the bottom. These rules stand outside
+   composer docked to the bottom, and Matters opens the list over it. These rules stand outside
    the cascade layers on purpose: at these widths they override the primitives' own classes, such as the search
    field's width and the Ask button's sides. */
 /* ---------- the frame contract: where the window draws its own frame (data-frame="own" on <html>, set by the room's
@@ -186,16 +186,36 @@
     align-items: center;
     column-gap: var(--s3);
   }
+  /* Matters opens the list as a panel over the work, as the folded rail does from 1000 px: nothing under it moves and
+     the page grows by nothing (D-061; at 960 px the list once ran inline and pushed the work below the fold). It stands
+     fixed under the toolbar, which keeps the window's top where the window draws its own frame, and its list scrolls
+     inside it. Escape in it folds it, as in the folded rail */
   .room-rail {
     display: none;
-    padding: 0 var(--s2) var(--s4);
-    overflow: visible;
+    position: fixed;
+    z-index: 10;
+    top: var(--top-h, var(--toolbar));
+    left: calc(var(--s3) + env(safe-area-inset-left));
+    bottom: calc(var(--s3) + env(safe-area-inset-bottom));
+    width: min(var(--rail-panel-w), calc(var(--view-w) - 2 * var(--s3)));
+    padding: 0 var(--s3);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    border-radius: var(--r-card);
+    background: var(--ground);
+    box-shadow: var(--e3);
   }
   .room-rail[data-open] {
     display: flex;
   }
-  .room-groups {
-    margin-top: var(--s4);
+  /* an empty rail keeps its place and its id for Matters' aria-controls, but draws no panel */
+  .room-rail:empty {
+    background: transparent;
+    box-shadow: none;
+    pointer-events: none;
+  }
+  .room-rail-head {
+    padding-top: var(--s3);
   }
   .room-centre {
     display: contents;
@@ -240,12 +260,6 @@
   }
   .room-centre[data-more] .room-composer {
     box-shadow: var(--shadow-dock);
-  }
-  /* while Matters is open the list has the window: the composer leaves the bottom edge and follows the work, at the
-     page's end, where scrolling or Tab reaches it. Docked, the sign-in card (half a 640 by 480 window, more in Hindi
-     at a large text size) covered the list */
-  .room-window:has(> .room-rail[data-open]) .room-composer {
-    position: static;
   }
   .room-status {
     height: auto;
