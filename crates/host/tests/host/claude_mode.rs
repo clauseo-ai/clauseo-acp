@@ -124,3 +124,38 @@ fn a_session_offering_no_accept_edits_mode_fails_before_any_prompt() {
         ErrorCode::AgentProtocolError,
     );
 }
+
+/// Outside forced ask, a session the agent moves to `bypassPermissions` or `dontAsk` is switched
+/// back to `acceptEdits`, each logged as it came and then as switched back.
+#[test]
+fn a_session_that_moves_to_bypass_or_dont_ask_goes_back_to_accept_edits() {
+    let dir = Dir::new(
+        "claude_mode_reset",
+        &[(CLAUDE, Scenario::Local("claude-mode-reset"))],
+    );
+    let host = dir.start(0);
+    let (_, thread, _) = matter_with_thread(&dir, &host, "m", &[("brief.txt", "x\n")], CLAUDE);
+    let mut events = turn(&host, thread, "Summarise clause 4.");
+    events.until("ModeChanged acceptEdits back", |e| modes(e).len() == 3);
+    assert_eq!(
+        modes(&events),
+        ["acceptEdits", "bypassPermissions", "acceptEdits"],
+        "{}",
+        events.dump()
+    );
+    let mut events = turn(&host, thread, "And clause 5?");
+    events.until("ModeChanged acceptEdits back", |e| modes(e).len() == 5);
+    assert_eq!(
+        modes(&events),
+        [
+            "acceptEdits",
+            "bypassPermissions",
+            "acceptEdits",
+            "dontAsk",
+            "acceptEdits"
+        ],
+        "{}",
+        events.dump()
+    );
+    host.shutdown();
+}

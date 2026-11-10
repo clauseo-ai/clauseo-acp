@@ -483,7 +483,7 @@ fn plain(actor: &mut Actor, thread: ThreadId, update: AgentUpdate) -> Result<(),
         }
         .into(),
         AgentUpdate::CurrentMode { mode_id } => {
-            super::forced_mode::reset_if_forced(actor, thread, &mode_id);
+            super::forced_mode::reset_if_refused(actor, thread, &mode_id);
             ModeChanged { mode_id }.into()
         }
         AgentUpdate::ConfigOptions(options) => ConfigOptionsReplaced { options }.into(),

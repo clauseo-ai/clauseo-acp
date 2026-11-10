@@ -1,63 +1,98 @@
-//! Forced ask's mode layer for a mode the agent moves to itself (`agent/forced_ask.rs`): a
-//! `current_mode_update` naming a mode outside `ASK_MODES` (a plan exit the adapter took into
-//! `acceptEdits`) is logged as it came, then `session/set_mode` puts the session back in
-//! `default` (`forced_ask::ASK_MODE`, never `acceptEdits` here), and that is logged once it
-//! answers. Meanwhile the guard hook still asks before every tool, so the race costs no unasked
-//! change. Only forced ask: elsewhere a Claude session starts in `acceptEdits` and a mode it
-//! moves to (the lawyer's plan-exit choice) is logged and kept until the next start.
+//! The mode layer for a mode a Claude agent moves to itself (a `current_mode_update`): the
+//! update is logged as it came, then, when Clauseo doesn't run Claude in that mode,
+//! `session/set_mode` puts the session back, and that is logged once it answers.
+//!
+//! - Forced ask (`agent/forced_ask.rs`): any mode outside `ASK_MODES` (a plan exit the adapter
+//!   took into `acceptEdits` or `auto`) goes back to `default` (`forced_ask::ASK_MODE`, never
+//!   `acceptEdits` here). Meanwhile the guard hook still asks before every tool, so the race
+//!   costs no unasked change.
+//! - Elsewhere: `bypassPermissions` and `dontAsk` ([`REFUSED_MODES`]) go back to
+//!   `acceptEdits` (`agent::loads::CLAUDE_MODE`). claude-agent-acp 0.89.1 offers neither
+//!   (`allowDangerouslySkipPermissions: false`; `dontAsk` is never listed), so this only
+//!   answers an adapter that moved there anyway. Every other mode is kept until the next
+//!   start: `default`, `plan`, `acceptEdits`, and `auto` from a plan exit the lawyer chose
+//!   (decision record 0030, "Claude's permission mode").
 
-use clauseo_protocol::{AgentChoiceId, CompactString, ModeChanged, ThreadId};
+use clauseo_protocol::{AgentChoiceId, AgentKind, CompactString, ModeChanged, ThreadId};
 
 use super::super::Actor;
 use super::agents::call;
 use super::inputs::AgentReply;
 use super::updates::{agent, commit};
 
-/// `mode` came from a forced-ask agent: switch it back when it is not allowed.
-pub(super) fn reset_if_forced(actor: &mut Actor, thread: ThreadId, mode: &str) {
+/// The modes a Claude session outside forced ask is switched back from: bypass skips every
+/// ask, and `dontAsk` turns each ask into a refusal the lawyer never sees.
+pub(crate) const REFUSED_MODES: [&str; 2] = ["bypassPermissions", "dontAsk"];
+
+/// The mode a Claude session that moved to `mode` is switched back to, or `None` to keep it.
+pub(crate) fn reset_to(forced_ask: bool, mode: &str) -> Option<&'static str> {
+    if forced_ask {
+        (!crate::agent::forced_ask::mode_allowed(mode))
+            .then_some(crate::agent::forced_ask::ASK_MODE)
+    } else {
+        REFUSED_MODES
+            .contains(&mode)
+            .then_some(crate::agent::loads::CLAUDE_MODE)
+    }
+}
+
+/// `mode` came from `thread`'s agent: a Claude agent is switched back when [`reset_to`] says.
+pub(super) fn reset_if_refused(actor: &mut Actor, thread: ThreadId, mode: &str) {
+    let claude = actor
+        .threads
+        .get(&thread)
+        .is_some_and(|entry| AgentKind::of(&entry.row.agent) == Some(AgentKind::Claude));
     let Some(agent) = agent(actor, thread) else {
         return;
     };
-    if !agent.forced_ask || crate::agent::forced_ask::mode_allowed(mode) {
+    // A forced-ask agent is always Claude's (`agents.rs`).
+    if !claude && !agent.forced_ask {
         return;
     }
-    let (Some(session), Ok(default)) = (
-        agent.session.clone(),
-        AgentChoiceId::new(crate::agent::forced_ask::ASK_MODE),
-    ) else {
+    let Some(target) = reset_to(agent.forced_ask, mode) else {
         return;
     };
-    let (id, client) = (agent.id, agent.link.client.clone());
+    let (Some(session), Ok(back)) = (agent.session.clone(), AgentChoiceId::new(target)) else {
+        return;
+    };
+    let (id, client, forced_ask) = (agent.id, agent.link.client.clone(), agent.forced_ask);
     let matter = actor.threads.get(&thread).map(|entry| entry.row.matter);
     tracing::info!(
         matter = ?matter,
         mode,
-        "a forced-ask Claude session moved to a mode that skips asks; switching it back"
+        to = target,
+        forced_ask,
+        "a Claude session moved to a mode Clauseo doesn't run it in; switching it back"
     );
     call(actor, thread, id, async move {
-        AgentReply::ModeReset(client.set_mode(&session, default).await)
+        AgentReply::ModeReset(target, client.set_mode(&session, back).await)
     });
 }
 
-/// The switch back answered: `default` is logged; a failure is a warning (the hook still asks).
+/// The switch back answered: `mode` is logged; a failure is a warning.
 pub(super) fn on_mode_reset(
     actor: &mut Actor,
     thread: ThreadId,
     same: bool,
+    mode: &'static str,
     result: Result<(), clauseo_acp::Error>,
 ) {
     if !same {
         return;
     }
     let logged = result.map_err(crate::error::Error::Acp).and_then(|()| {
-        let mode_id = CompactString::from(crate::agent::forced_ask::ASK_MODE);
+        let mode_id = CompactString::from(mode);
         commit(actor, thread, [ModeChanged { mode_id }.into()], Vec::new())
     });
     if let Err(error) = logged {
         tracing::warn!(
             %thread,
+            mode,
             error = %crate::log_file::Cause(&error),
-            "a forced-ask session was not switched back to default"
+            "a Claude session was not switched back"
         );
     }
 }
+
+#[cfg(test)]
+mod tests;
