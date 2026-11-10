@@ -1,15 +1,16 @@
 // The open matter's papers for the wall (H8's ListPapers), listed again whenever the host says they changed
-// (`papers_changed` on the app feed): a paper came, went or was renamed in the matter's folder (decision record 0055),
-// or the background tracked-changes scan found Tracked changes in a .docx the last listing showed without them. The
-// host's listing answers at once from what the scan has read, so a re-list is cheap. They are listed again too when
-// the window comes back to the front, which covers a folder the host doesn't watch (Windows, or one the OS refused) and
-// anything a watch missed. A listing that finds the folder gone, or not the matter's, empties the wall: the moved
-// folder's line says why (moved.tsx), and its Locate folder brings the papers back.
+// (`papers_changed` on the app feed): a paper came, went or was renamed in the matter's folder (decision record
+// 0055), or the background tracked-changes scan found Tracked changes in a .docx the last listing showed without
+// them. They are listed again too when the window comes back to the front, which covers a folder the host doesn't
+// watch (Windows, or one the OS refused) and anything a watch missed. A listing that finds the folder gone empties
+// the wall: the moved folder's line says why (moved.tsx), and its Locate folder brings the papers back.
 import { useEffect, useState } from "react";
 import type { MatterId } from "../transport/protocol.ts";
-import { locatable } from "./act-refusals.ts";
 import type { AppHost, Papers, PapersHost } from "./host-next.ts";
 import type { ListedPapers } from "./open.ts";
+
+/** The refusal of a listing whose folder is gone. */
+const FOLDER_MISSING = "matter.folder_missing";
 
 /** The code of a failed read, when it has one. */
 const codeOf = (error: unknown): string | null =>
@@ -18,8 +19,8 @@ const codeOf = (error: unknown): string | null =>
     : null;
 
 /** The matter's papers from H8, or null: before they arrive, without H8, when the read fails, or once the folder is
- * gone. `app`, when there is one, re-lists them on each `papers_changed` for the matter; a later answer replaces an
- * earlier one, never the reverse; without it the list follows the window's focus only. */
+ * gone. `app`, when there is one, re-lists them on each `papers_changed` for the matter, one listing at a time;
+ * without it the list follows the window's focus only. */
 export function usePapers(
   next: PapersHost | null,
   app: AppHost | null,
@@ -29,23 +30,31 @@ export function usePapers(
   useEffect(() => {
     if (next === null || matter === null) return;
     let live = true;
-    // each listing's number: an answer older than the last one shown is dropped
-    let asked = 0;
-    let shown = 0;
+    // one listing at a time: a change while one runs marks the papers dirty, and they are
+    // listed once more after it, so a burst of changes is two listings, never a queue of them
+    let running = false;
+    let dirty = false;
     const list = () => {
-      asked += 1;
-      const mine = asked;
+      if (running) {
+        dirty = true;
+        return;
+      }
+      running = true;
+      dirty = false;
+      const done = () => {
+        running = false;
+        if (live && dirty) list();
+      };
       next.listPapers(matter).then(
         (papers) => {
-          if (!live || mine < shown) return;
-          shown = mine;
-          setListed({ matter, papers });
+          if (live) setListed({ matter, papers });
+          done();
         },
         (error: unknown) => {
           console.warn(`list_papers failed: ${JSON.stringify(error)}`);
-          if (!live || mine < shown || !locatable(codeOf(error))) return;
-          shown = mine;
-          setListed({ matter, papers: null });
+          // only a folder that is gone empties the wall: the moved folder's line says why
+          if (live && codeOf(error) === FOLDER_MISSING) setListed({ matter, papers: null });
+          done();
         },
       );
     };
