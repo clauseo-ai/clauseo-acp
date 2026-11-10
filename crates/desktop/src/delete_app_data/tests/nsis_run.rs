@@ -547,12 +547,9 @@ impl Machine {
             }
             match node {
                 Node::Line(line) if line == "${ExitDo}" => return true,
-                Node::Line(line) => {
-                    self.line(line);
-                    if self.aborted {
-                        return true;
-                    }
-                }
+                // An Abort stops the run at the next node (the check above), and tells no caller
+                // it left a ${Do}.
+                Node::Line(line) => self.line(line),
                 Node::If(arms, otherwise) => {
                     let chosen = arms
                         .iter()
