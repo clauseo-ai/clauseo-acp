@@ -39,11 +39,15 @@ pub(crate) use no_watch::Follow;
 #[cfg(not(windows))]
 pub(crate) use watch::{FolderChanged, WatchStarted};
 
-/// The files the host has handed out ids for, both ways, kept in host memory for its run.
+/// The files the host has handed out ids for, both ways, and the matters whose papers it has
+/// listed, kept in host memory for its run.
 #[derive(Debug, Default)]
 pub(crate) struct FileRefs {
     paths: BTreeMap<FileRefId, PathBuf>,
     ids: BTreeMap<PathBuf, FileRefId>,
+    /// The matters a `ListPapers` was answered for (`follow.rs`): only these are listed again
+    /// at an answer's end. A forget takes its matter out.
+    listed: std::collections::BTreeSet<MatterId>,
 }
 
 impl FileRefs {
@@ -109,6 +113,7 @@ pub(super) fn answer(
 ) {
     let answer = match listed {
         MatterReply::Papers(listed) => {
+            follow::answered(actor, matter);
             match &listed {
                 Ok(_) => follow::listed(actor, matter, folder, true),
                 Err(error) if error.code() == ErrorCode::MatterFolderMissing => {
