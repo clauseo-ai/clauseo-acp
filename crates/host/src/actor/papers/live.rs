@@ -40,12 +40,29 @@ enum State {
     Failed,
 }
 
+#[cfg(test)]
 impl Follow {
     /// In tests: whether the watch is live.
-    #[cfg(test)]
     pub(crate) fn is_live(&self) -> bool {
         self.state == State::Live
     }
+
+    /// In tests: whether the folder reads gone (a listing that finds it starts the watch again).
+    pub(crate) fn is_gone(&self) -> bool {
+        self.state == State::Gone
+    }
+
+    pub(crate) fn generation(&self) -> u64 {
+        self.generation
+    }
+}
+
+/// Whether `matter`'s folder is watched now: followed, and its watch live.
+pub(super) fn watching(actor: &Actor, matter: MatterId) -> bool {
+    actor
+        .papers_follow
+        .as_ref()
+        .is_some_and(|follow| follow.matter == matter && follow.state == State::Live)
 }
 
 /// Follows `matter`'s `folder`, in place of any other; one already followed stays as it is.
@@ -99,7 +116,8 @@ pub(crate) fn on_started(actor: &mut Actor, started: WatchStarted) {
     }
     (follow.state, follow.watch) = match started {
         Started::Live(watch) => (State::Live, Some(watch)),
-        Started::Missing => (State::Gone, None),
+        // Busy: tried again by the next listing that finds the folder, as for one gone.
+        Started::Missing | Started::Busy => (State::Gone, None),
         Started::Failed => (State::Failed, None),
     };
 }
