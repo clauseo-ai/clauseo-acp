@@ -17,11 +17,20 @@ test("a step the lawyer didn't allow says so, and that the answer so far is kept
   });
 });
 
-test("a step Clauseo stopped, for files outside the matter, says Clauseo stopped it, not the lawyer", () => {
-  expect(stopLine(stopped("outside_matter"))).toEqual({
+test("a step Clauseo stopped, for files outside the matter, names the agent, or the AI where none is known", () => {
+  expect(stopLine(stopped("outside_matter"), { kind: "codex", name: "codex-acp" })).toEqual({
     kind: "thread",
-    key: "Clauseo stopped the answer: it tried to open files outside this matter. The answer so far is kept.",
+    key: "Clauseo stopped the answer: {name} tried to open files outside this matter. The answer so far is kept.",
+    slots: { name: "ChatGPT" },
   });
+  expect(stopLine(stopped("outside_matter"), { kind: undefined, name: " Gemini " })).toMatchObject({
+    slots: { name: "Gemini" },
+  });
+  for (const agent of [undefined, { kind: undefined, name: null }] as const)
+    expect(stopLine(stopped("outside_matter"), agent)).toEqual({
+      kind: "thread",
+      key: "Clauseo stopped the answer: the AI tried to open files outside this matter. The answer so far is kept.",
+    });
 });
 
 test("the lawyer's own stop keeps its line, and a finished answer says nothing", () => {

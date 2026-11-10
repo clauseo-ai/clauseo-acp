@@ -2,15 +2,18 @@
 // name Claude, said for the open conversation's agent (words-errors.ts's plannedKey). Each is the real refusal on a
 // send, as U3-err-agent.* shows Claude's, in a thread whose agent is Codex (the ChatGPT plan) or an agent of no kind,
 // named by its settings id. The nameless lines (U6F-09 to U6F-12) show only where no name is known at all, which the
-// room never has today (a thread always names its agent's id), so they render by themselves.
+// room never has today (a thread always names its agent's id), so they render by themselves. U3-52 and U3-53, the
+// thread's line for a turn Clauseo stopped on the agent's request for files outside the matter, name the agent the same
+// way: Codex's turn as ChatGPT, and the AI alone.
 import type { Lang } from "@clauseo/components/lib/display.ts";
+import { th } from "@clauseo/components/lib/words-thread.ts";
 import { type AgentName, errorWords as sentence } from "@clauseo/components/lib/words-errors.ts";
 import type { AgentId, ErrorCode } from "../transport/protocol.ts";
 import { agentText, step, userMessage } from "../testing/stream-script.ts";
 import type { Entry } from "./entry.ts";
 import { threadHost } from "./hosts.ts";
-import { RoomAsking } from "./states.tsx";
-import { errorWords } from "./words.ts";
+import { RoomAsking, RoomOver } from "./states.tsx";
+import { errorWords, threadWords } from "./words.ts";
 
 const QUESTION = userMessage(5, 1, "Summarise the notice to the bank.");
 const ANSWER = agentText(6, 1, "Clause nine requires **notice in writing**, served at the branch.");
@@ -148,5 +151,39 @@ export const U6F: Entry[] = [
     words: errorWords("The AI was downloaded, but setting it up didn't finish. Try again."),
     screen: "room/first-run",
     render: setupFailed({ kind: undefined, name: null }),
+  },
+  {
+    id: "U3-52",
+    words: threadWords(
+      "Clauseo stopped the answer: {name} tried to open files outside this matter. The answer so far is kept.",
+    ),
+    screen: "room/thread",
+    render: () => (
+      <RoomOver
+        host={() =>
+          threadHost({
+            entries: [QUESTION, ANSWER, step(7, { stop: "outside_matter" })],
+            agent: "codex-acp",
+          })
+        }
+      />
+    ),
+  },
+  {
+    id: "U3-53",
+    words: threadWords(
+      "Clauseo stopped the answer: the AI tried to open files outside this matter. The answer so far is kept.",
+    ),
+    screen: "room/thread",
+    render: (lang: Lang) => (
+      <main lang={lang} className="review-alone">
+        <p>
+          {th(
+            lang,
+            "Clauseo stopped the answer: the AI tried to open files outside this matter. The answer so far is kept.",
+          )}
+        </p>
+      </main>
+    ),
   },
 ];
