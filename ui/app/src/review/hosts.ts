@@ -93,6 +93,8 @@ export type ThreadState = {
   limits?: LimitsView;
   /** What the host found about the matter's folder (folder_support): folder rights' notice and card reason. */
   folder?: FolderSupportKind;
+  /** The thread's title, as its list row gives it; none by default. */
+  title?: string;
   /** The connectors' state on the app feed (U15): the out-of-credit note, the hint's "from" price. With it the room
    * has the settings window, which the hint and the note open. */
   connectors?: ConnectorsState;
@@ -168,7 +170,15 @@ export function threadHost(state: ThreadState): FakeTransport {
         };
       if (typeof query === "object" && query.list_threads !== undefined)
         return {
-          threads: [{ thread: THREAD, matter: MATTER.matter, agent, status: "idle" }],
+          threads: [
+            {
+              thread: THREAD,
+              matter: MATTER.matter,
+              agent,
+              status: "idle",
+              ...(state.title === undefined ? {} : { title: state.title }),
+            },
+          ],
         };
       const blob = typeof query === "object" ? query.read_blob : undefined;
       const got = blob === undefined ? undefined : state.blobs?.[blob.hash];

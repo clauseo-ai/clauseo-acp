@@ -7,8 +7,7 @@ use clauseo_acp::{AcpEvent, AgentUpdate, MessageRole, Origin};
 use clauseo_protocol::{
     AgentId, AgentSessionId, CommandsAvailable, CompactString, CompactionStatus,
     ConfigOptionsReplaced, ContentBlock, DomainEvent, MessageId, ModeChanged, Notice, PlanReplaced,
-    RenameSource, StreamId, TextKind, ThreadId, ThreadRenamed, Title, ToolCallPatch, TurnId,
-    UsageUpdated,
+    RenameSource, StreamId, TextKind, ThreadId, ThreadRenamed, ToolCallPatch, TurnId, UsageUpdated,
 };
 use clauseo_store::BlobIn;
 
@@ -538,12 +537,9 @@ fn title_changed(actor: &mut Actor, thread: ThreadId, title: Option<String>) -> 
         tracing::debug!(%thread, "the agent cleared its session title");
         return Ok(());
     };
-    let title = match Title::new(&title) {
-        Ok(title) => title,
-        Err(error) => {
-            tracing::debug!(%thread, %error, "the agent's session title is not a valid title");
-            return Ok(());
-        }
+    let prompt = current(actor, thread).map(|current| current.prompt.as_slice());
+    let Some(title) = title_source::agent_title(thread, &title, prompt) else {
+        return Ok(());
     };
     let entry = actor.threads.get(&thread).ok_or_else(|| lost("a thread"))?;
     let (source, has_title) = (entry.row.title_source, entry.row.title.is_some());
