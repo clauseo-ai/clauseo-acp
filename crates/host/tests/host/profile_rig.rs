@@ -192,6 +192,8 @@ pub(crate) struct Hook {
     pub(crate) tokens: Arc<Mutex<Vec<Option<SkillsWritten>>>>,
     /// The shell browser's folder (`ProfileHook::browser_tool`).
     pub(crate) browser_tool: Option<PathBuf>,
+    /// Every agent's session `PATH` folders (`ProfileHook::agent_path`).
+    pub(crate) agent_path: Vec<PathBuf>,
 }
 
 impl ProfileHook for Hook {
@@ -219,6 +221,10 @@ impl ProfileHook for Hook {
 
     fn browser_tool(&self) -> Option<PathBuf> {
         self.browser_tool.clone()
+    }
+
+    fn agent_path(&self, _agent: &AgentId) -> Vec<PathBuf> {
+        self.agent_path.clone()
     }
 
     fn codex_config(
