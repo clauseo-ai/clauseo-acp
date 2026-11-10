@@ -20,6 +20,7 @@ use crate::agent::loads::case_law::{self, CaseLawInputs, Relay};
 use crate::agent::loads::profile::{self, ClaudeKeys, Folders, Login};
 use crate::browser::seed_sites::SEED_SITES;
 use crate::error::Error;
+use crate::log_file::LIFECYCLE;
 
 /// `tools.web_search` and `tools.browser`, with whether each is locked.
 fn switches(actor: &Actor) -> (Switch, Switch) {
@@ -109,6 +110,11 @@ pub(super) fn session_loads(
         case_law_servers(actor, &run, actor.profile.mcp_servers(&agent_id), control);
     let part = connectors_part(case_law_entry.is_some());
     let shell = shell_browser(actor, &run);
+    if let Some((_, browser_part)) = &shell {
+        // For support: whether this session has the browser, and which Chrome by file name.
+        let (browser, chrome) = browser::part_log(*browser_part, run.chrome.as_deref());
+        tracing::info!(target: LIFECYCLE, %thread, browser, chrome, "browser part filled");
+    }
     let folders = Folders::of(&run.work, &run.notes)?
         .with_connectors(part)
         .with_browser(browser_part(shell.as_ref(), kind == Some(AgentKind::Codex)));

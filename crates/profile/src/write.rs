@@ -126,8 +126,8 @@ pub(crate) fn replace_if_differs(target: &Path, bytes: &[u8]) -> Result<bool, Pr
 /// [`replace_if_differs`] does: a temp file beside it, written, synced, then renamed over it.
 /// The caller has decided it differs. On Windows a program that is running cannot be renamed
 /// over, but it can be renamed: the old one goes aside as `.<name>.<pid>-<n>.old` first, which a
-/// later call's [`sweep_old`] removes once nothing runs it.
-pub(crate) fn replace_program(target: &Path, bytes: &[u8]) -> Result<(), ProfileError> {
+/// later call's [`sweep_old`] removes once nothing runs it. Returns whether it did so.
+pub(crate) fn replace_program(target: &Path, bytes: &[u8]) -> Result<bool, ProfileError> {
     let dir = target
         .parent()
         .ok_or_else(|| ProfileError::io("replace", target, io::ErrorKind::InvalidInput.into()))?;
@@ -147,16 +147,21 @@ pub(crate) fn replace_program(target: &Path, bytes: &[u8]) -> Result<(), Profile
                 let old = dir.join(format!(".{name}.{}-{n}{OLD_SUFFIX}", std::process::id()));
                 std::fs::rename(target, &old)
                     .and_then(|()| std::fs::rename(&temp, target))
+                    .map(|()| true)
                     .map_err(|_aside| err)
             }
-            other => other,
+            other => other.map(|()| false),
         });
-    if let Err(err) = written {
-        let _gone = std::fs::remove_file(&temp);
-        return Err(ProfileError::io("write", target, err));
+    match written {
+        Ok(set_aside) => {
+            sync_dir(dir);
+            Ok(set_aside)
+        }
+        Err(err) => {
+            let _gone = std::fs::remove_file(&temp);
+            Err(ProfileError::io("write", target, err))
+        }
     }
-    sync_dir(dir);
-    Ok(())
 }
 
 /// The suffix of a program [`replace_program`] set aside on Windows.
