@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 
 use clauseo_acp::McpServer;
 use clauseo_profile::instructions::BrowserPart;
-use clauseo_protocol::{AgentKind, ErrorCode, ThreadId, ToolAvailability};
+use clauseo_protocol::{AgentId, AgentKind, ErrorCode, ThreadId, ToolAvailability};
 use serde_json::{Map, Value};
 
 use super::super::Actor;
@@ -57,10 +57,17 @@ pub(super) fn launch_keys(
         // (`ManagedByFirm`, the relay ended) while this paragraph stays: wrong words, but no
         // case law reaches the agent.
         let part = connectors_part(prepared.run.case_law.relay().is_some());
-        let shell = shell_browser(actor, &prepared.run);
+        // The part `session_loads` would fill, from the same inputs: the browser entry's state
+        // as it stands now (a slot taken in between leaves wrong words, but no browser).
+        let control = loads::mcp_control(&actor.managed_mcp);
+        let (_, browser_switch) = switches(actor);
+        let inputs = browser_inputs(actor, &prepared.run, control, browser_switch);
+        let (_, entry) = browser::hook_servers(actor.profile.mcp_servers(&agent_id), &inputs);
+        let shell = shell_browser(actor, &prepared.run, &agent_id);
+        let browser = session_part(shell.as_ref(), entry.as_ref(), &prepared.run);
         let folders = Folders::of(&prepared.run.work, &prepared.run.notes)?
             .with_connectors(part)
-            .with_browser(browser_part(shell.as_ref(), true));
+            .with_browser(browser_part(browser, shell.is_none()));
         let (web_search, _) = switches(actor);
         let packs = prepared.run.packs_written.as_deref();
         let keys = actor
@@ -110,16 +117,21 @@ pub(super) fn session_loads(
     let (hook, case_law_entry, case_law_state) =
         case_law_servers(actor, &run, actor.profile.mcp_servers(&agent_id), control);
     let part = connectors_part(case_law_entry.is_some());
-    let shell = shell_browser(actor, &run);
-    if let Some((_, browser_part)) = &shell {
+    let (web_search, browser_switch) = switches(actor);
+    let inputs = browser_inputs(actor, &run, control, browser_switch);
+    // Codex's `browser` entry (`clauseo_profile::servers::browser_mcp`), filled or left out.
+    let (hook_servers, browser_state) = browser::hook_servers(hook, &inputs);
+    // Claude's shell tool; none for an agent offered the entry.
+    let shell = shell_browser(actor, &run, &agent_id);
+    let session_browser = session_part(shell.as_ref(), browser_state.as_ref(), &run);
+    if shell.is_some() || browser_state.is_some() {
         // For support: whether this session has the browser, and which Chrome by file name.
-        let (browser, chrome) = browser::part_log(*browser_part, run.chrome.as_deref());
+        let (browser, chrome) = browser::part_log(session_browser, run.chrome.as_deref());
         tracing::info!(target: LIFECYCLE, %thread, browser, chrome, "browser part filled");
     }
     let folders = Folders::of(&run.work, &run.notes)?
         .with_connectors(part)
-        .with_browser(browser_part(shell.as_ref(), kind == Some(AgentKind::Codex)));
-    let (web_search, browser_switch) = switches(actor);
+        .with_browser(browser_part(session_browser, shell.is_none()));
     let settings_env = actor
         .effective
         .agent(agent_id.as_str())
@@ -178,24 +190,11 @@ pub(super) fn session_loads(
         claude.as_ref(),
     );
     profile::fill_meta(&mut meta, folders)?;
-    let inputs = BrowserInputs {
-        switch: browser_switch,
-        control,
-        slot_free: actor.wiring.browser_slots.free_for(run.key),
-        proxy_set: actor.wiring.proxy.is_some(),
-        // Only a proxy that opened for this session gives a port (`launch_checks::egress`).
-        port: run.egress.as_ref().and_then(|egress| egress.port()),
-        blocked_by_policy: run.browser_blocked,
-        executable: run.chrome.as_deref(),
-        browser_dir: &run.browser,
-        claims: run.browser_session.as_deref().map(Claims::of),
-    };
     if run.browser_policy_read {
         // What the app heard from a "Try again" follows this newer read.
         super::super::browser_policy::on_launch_read(actor, run.browser_blocked);
     }
     let mut servers = loads::mcp_servers(&actor.effective, control);
-    let (hook_servers, browser_state) = browser::hook_servers(hook, &inputs);
     servers.extend(hook_servers);
     servers.extend(case_law_entry);
     if browser_state
@@ -205,7 +204,7 @@ pub(super) fn session_loads(
         // The session holds its slot until it ends (`launch_checks::discard`).
         actor.wiring.browser_slots.take(run.key);
     }
-    // The shell tool's state stands in for the parked entry's (`servers::BROWSER_MCP`).
+    // Claude's shell tool has no entry: its own state shows instead.
     let browser_state = browser_state.or(shell.map(|(state, _)| state));
     let tools = profile::web_search_state(kind, web_search, login)
         .into_iter()
@@ -268,13 +267,48 @@ fn case_law_servers(
     (rest, entry, state)
 }
 
+/// What the `browser` entry of `run`'s session needs (`agent::loads::browser`).
+fn browser_inputs<'a>(
+    actor: &Actor,
+    run: &'a RunFolders,
+    control: loads::McpControl,
+    switch: Switch,
+) -> BrowserInputs<'a> {
+    BrowserInputs {
+        switch,
+        control,
+        slot_free: actor.wiring.browser_slots.free_for(run.key),
+        proxy_set: actor.wiring.proxy.is_some(),
+        // Only a proxy that opened for this session gives a port (`launch_checks::egress`).
+        port: run.egress.as_ref().and_then(|egress| egress.port()),
+        blocked_by_policy: run.browser_blocked,
+        executable: run.chrome.as_deref(),
+        browser_dir: &run.browser,
+        claims: run.browser_session.as_deref().map(Claims::of),
+    }
+}
+
+/// Whether the profile hook offers `agent` the `browser` MCP entry (Codex:
+/// `clauseo_profile::servers::browser_mcp`), which takes the shell tool's place.
+fn offers_entry(actor: &Actor, agent: &AgentId) -> bool {
+    actor.profile.mcp_servers(agent).iter().any(|server| {
+        let McpServer::Stdio { name, .. } = server;
+        name == clauseo_profile::servers::BROWSER
+    })
+}
+
 /// The shell tool's header state and browser part for `run`'s session, or none when the app
-/// wired no shell tool (`ProfileHook::browser_tool`).
+/// wired no shell tool (`ProfileHook::browser_tool`) or `agent` is offered the `browser` entry
+/// instead ([`offers_entry`]).
 fn shell_browser(
     actor: &Actor,
     run: &RunFolders,
+    agent: &AgentId,
 ) -> Option<(clauseo_protocol::ToolState, BrowserPart)> {
     actor.profile.browser_tool()?;
+    if offers_entry(actor, agent) {
+        return None;
+    }
     let (_, switch) = switches(actor);
     let found = run.browser_shell && run.chrome.is_some();
     Some(browser::shell_state(switch, run.browser_blocked, found))
@@ -310,14 +344,25 @@ fn shell_chrome<'a>(actor: &Actor, run: &'a RunFolders) -> Option<&'a Path> {
     run.chrome.as_deref().filter(|_| run.browser_shell)
 }
 
-/// What `{browser}` becomes: the shell tool's part (with Codex's line for `codex`), or the
-/// no-browser sentence without it.
-fn browser_part(
+/// Which browser part `run`'s session gets: the shell tool's (Claude), else the one the `browser`
+/// entry's state gives (Codex, `browser::entry_part`), else none.
+fn session_part(
     shell: Option<&(clauseo_protocol::ToolState, BrowserPart)>,
-    codex: bool,
-) -> &'static str {
-    let part = shell.map_or(BrowserPart::Off, |(_, part)| *part);
-    clauseo_profile::instructions::browser_part_for(part, codex)
+    entry: Option<&clauseo_protocol::ToolState>,
+    run: &RunFolders,
+) -> BrowserPart {
+    match (shell, entry) {
+        (Some((_, part)), _) => *part,
+        (None, Some(state)) => browser::entry_part(state, run.chrome.is_some()),
+        (None, None) => BrowserPart::Off,
+    }
+}
+
+/// What `{browser}` becomes for `part`: with the browser, the line naming the `browser` entry's
+/// tools for a session without the shell tool (`mcp`: Codex's), the shell tool's rules for one
+/// with it (Claude's); without, the no-browser sentence.
+fn browser_part(part: BrowserPart, mcp: bool) -> &'static str {
+    clauseo_profile::instructions::browser_part_for(part, mcp)
 }
 
 /// What `{connectors}` becomes: the paragraph when the session gets the `case-law` entry.

@@ -73,6 +73,10 @@ pub(super) struct BrowserPrep {
     /// The browser as a shell tool (`ProfileHook::browser_tool`): no MCP entry, no proxy,
     /// no slot and no claims; the Chrome found is the session's `AGENT_BROWSER_EXECUTABLE_PATH`.
     shell: bool,
+    /// Whether the entry asks for the session's egress proxy (it holds `{proxy_port}`): the
+    /// parked Safe workspace's. The plain client's Codex entry does not, so its session opens no
+    /// proxy and waits for no block list (`egress::egress_prep`).
+    proxy: bool,
 }
 
 impl BrowserPrep {
@@ -86,6 +90,11 @@ impl BrowserPrep {
     /// Whether this is the shell tool's prep (`ProfileHook::browser_tool`).
     pub(super) fn shell(&self) -> bool {
         self.shell
+    }
+
+    /// Whether the entry asks for the session's egress proxy (`{proxy_port}`).
+    pub(super) fn proxy(&self) -> bool {
+        self.proxy
     }
 
     /// The prep with no browser: a launch whose slot wait ended with every slot held
@@ -252,11 +261,13 @@ pub(super) fn warn_if_still_full(actor: &Actor, run: &super::RunFolders) {
     }
 }
 
-/// What the launch prep does for `agent`'s session `key`, from the actor's state. With the shell
-/// tool wired (`ProfileHook::browser_tool`): its `agent-browser` command and a Chrome search
-/// when `tools.browser` is on, else nothing. Otherwise, for the guarded entry: nothing when no
-/// browser can go to it (`tools.browser` off, no proxy, no `browser` entry from the profile
-/// hook, or no slot and none coming free).
+/// What the launch prep does for `agent`'s session `key`, from the actor's state. When the
+/// profile hook offers this agent a `browser` entry (Codex:
+/// `clauseo_profile::servers::browser_mcp`), the guarded entry: nothing when no browser can go
+/// to it (`tools.browser` off, a proxy asked for and none set, or no slot and none coming
+/// free), else its sidecars, a Chrome search and the claims. Otherwise,
+/// with the shell tool wired (`ProfileHook::browser_tool`, Claude): its `agent-browser` command
+/// and a Chrome search when `tools.browser` is on, else nothing.
 pub(super) fn browser_prep(
     actor: &Actor,
     agent: &clauseo_protocol::AgentId,
@@ -271,8 +282,13 @@ pub(super) fn browser_prep(
         #[cfg(unix)]
         socket_root: None,
         shell: false,
+        proxy: false,
     };
-    if let Some(tools) = actor.profile.browser_tool() {
+    let entry = actor.profile.mcp_servers(agent).into_iter().find(|server| {
+        let clauseo_acp::McpServer::Stdio { name, .. } = server;
+        name == clauseo_profile::servers::BROWSER
+    });
+    if let (None, Some(tools)) = (&entry, actor.profile.browser_tool()) {
         if !settings.tools.browser {
             return skip;
         }
@@ -288,19 +304,17 @@ pub(super) fn browser_prep(
             ..skip
         };
     }
+    let Some(entry) = entry else {
+        return skip;
+    };
+    let proxy = crate::agent::loads::browser::asks_for_proxy(&entry);
+    let clauseo_acp::McpServer::Stdio { command, args, .. } = entry;
     if !settings.tools.browser
-        || actor.wiring.proxy.is_none()
+        || (proxy && actor.wiring.proxy.is_none())
         || !(actor.wiring.browser_slots.free_for(key) || actor.wiring.browser_slots.releasing(key))
     {
         return skip;
     }
-    let entry = actor.profile.mcp_servers(agent).into_iter().find(|server| {
-        let clauseo_acp::McpServer::Stdio { name, .. } = server;
-        name == clauseo_profile::servers::BROWSER
-    });
-    let Some(clauseo_acp::McpServer::Stdio { command, args, .. }) = entry else {
-        return skip;
-    };
     let mut sidecars = vec![command];
     sidecars.extend(
         args.iter()
@@ -313,6 +327,7 @@ pub(super) fn browser_prep(
         chrome: chrome_search(actor),
         #[cfg(unix)]
         socket_root: actor.wiring.browser_socket_root.clone(),
+        proxy,
         ..skip
     }
 }

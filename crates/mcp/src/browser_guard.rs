@@ -198,7 +198,7 @@ fn serve(
         run: run.id().to_owned(),
         profile: run.profile().to_owned(),
         cdp_port: command.cdp_port,
-        proxy: env.get(env::PROXY).cloned().unwrap_or_default(),
+        proxy: env.get(env::PROXY).cloned(),
         chrome_env: env::chrome_env(&env),
         program: command.agent_browser.clone(),
         args: command.child_args.clone(),

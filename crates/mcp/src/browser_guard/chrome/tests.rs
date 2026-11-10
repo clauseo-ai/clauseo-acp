@@ -36,7 +36,7 @@ fn chrome_gets_the_proxy_the_profile_and_the_claimed_port_never_port_zero() {
         cwd: Path::new("/state/browser"),
         profile: Path::new("/state/browser/chrome-profile-1-0000abcd"),
         cdp_port: 61_101,
-        proxy: OsStr::new("http://127.0.0.1:8080"),
+        proxy: Some(OsStr::new("http://127.0.0.1:8080")),
         env: &env,
     };
     let args = chrome_args(&spec, Path::new("/state/browser/chrome-profile-1-0000abcd"));
@@ -59,6 +59,36 @@ fn chrome_gets_the_proxy_the_profile_and_the_claimed_port_never_port_zero() {
     assert_eq!(debugging, 1, "{args:?}");
 }
 
+/// With no proxy given (the plain client's Codex entry), Chrome gets no proxy switch at all and
+/// goes direct; everything else is as with one.
+#[test]
+fn chrome_without_a_proxy_gets_no_proxy_switch() {
+    let env = BTreeMap::new();
+    let spec = Spec {
+        executable: Path::new("/chrome"),
+        cwd: Path::new("/state/browser"),
+        profile: Path::new("/state/browser/chrome-profile-1-0000abcd"),
+        cdp_port: 61_101,
+        proxy: None,
+        env: &env,
+    };
+    let args: Vec<String> = chrome_args(&spec, spec.profile)
+        .iter()
+        .map(|arg| arg.to_string_lossy().into_owned())
+        .collect();
+    assert!(
+        !args.iter().any(|arg| arg.starts_with("--proxy")),
+        "{args:?}"
+    );
+    for arg in [
+        "--headless=new",
+        "--force-webrtc-ip-handling-policy=disable_non_proxied_udp",
+        "--remote-debugging-port=61101",
+    ] {
+        assert!(args.iter().any(|a| a == arg), "{arg} in {args:?}");
+    }
+}
+
 #[test]
 fn chrome_gets_one_feature_list_of_each_kind_and_no_weakened_security() {
     let env = BTreeMap::new();
@@ -67,7 +97,7 @@ fn chrome_gets_one_feature_list_of_each_kind_and_no_weakened_security() {
         cwd: Path::new("/state/browser"),
         profile: Path::new("/state/browser/chrome-profile-1-0000abcd"),
         cdp_port: 61_101,
-        proxy: OsStr::new("http://127.0.0.1:8080"),
+        proxy: Some(OsStr::new("http://127.0.0.1:8080")),
         env: &env,
     };
     let args: Vec<String> = chrome_args(&spec, spec.profile)

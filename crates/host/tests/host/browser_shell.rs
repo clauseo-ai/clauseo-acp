@@ -174,10 +174,11 @@ fn a_session_with_a_chrome_gets_the_shell_browser() {
     // The hook's folders (Clauseo's Python runtime) come after the tools folder, so no
     // `agent-browser` there shadows Clauseo's.
     assert_eq!(parts.get(2), Some(&data.join("python")));
+    // The shell tool's rules (this hook offers the agent no `browser` entry, so it gets the shell
+    // tool whatever its kind: `browser_codex.rs` has Codex's entry), never an escalation line.
     assert!(instructions.contains("use the `agent-browser` command in your shell"));
-    // Codex's line: ask to run unsandboxed, with one prefix rule to approve.
-    assert!(instructions.contains(r#"`sandbox_permissions: "require_escalated"`"#));
-    assert!(instructions.contains(r#"`prefix_rule: ["agent-browser"]`"#));
+    assert!(!instructions.contains("require_escalated"));
+    assert!(!instructions.contains("`browser` MCP server"));
     assert!(!instructions.contains("{browser}"));
     assert_eq!(
         header_browser(&header),

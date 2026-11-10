@@ -87,8 +87,8 @@ pub(crate) struct Launcher {
     pub(crate) run: String,
     pub(crate) profile: PathBuf,
     pub(crate) cdp_port: u16,
-    /// `AGENT_BROWSER_PROXY`.
-    pub(crate) proxy: OsString,
+    /// `AGENT_BROWSER_PROXY`, if the host gave one.
+    pub(crate) proxy: Option<OsString>,
     /// [`env::chrome_env`].
     pub(crate) chrome_env: BTreeMap<String, OsString>,
     /// agent-browser's file and arguments.
@@ -121,7 +121,7 @@ impl Launcher {
             run: "1-0000abcd".to_owned(),
             profile: dir.join("chrome-profile-1-0000abcd"),
             cdp_port: 61_101,
-            proxy: OsString::from("http://127.0.0.1:9"),
+            proxy: Some(OsString::from("http://127.0.0.1:9")),
             chrome_env: BTreeMap::new(),
             program: dir.join("agent-browser"),
             args: Vec::new(),
@@ -270,7 +270,7 @@ fn start_both(
         cwd: &launcher.cwd,
         profile: &launcher.profile,
         cdp_port: launcher.cdp_port,
-        proxy: &launcher.proxy,
+        proxy: launcher.proxy.as_deref(),
         env: &launcher.chrome_env,
     };
     record::write_state(&launcher.cwd, &launcher.run, &ChromeState::Starting);

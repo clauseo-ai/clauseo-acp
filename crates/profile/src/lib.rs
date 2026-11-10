@@ -175,11 +175,11 @@ impl ClauseoProfile {
             .compose_for(&self.author, self.stetdoc_cli)
     }
 
-    /// The servers for an agent of `kind`, whatever the kind: `browser` while
-    /// [`servers::BROWSER_MCP`] is on (it is parked), then `case-law` (R24), which the host sends
-    /// only in a session whose relay it opened.
-    pub fn servers(&self, _kind: Option<AgentKind>) -> Vec<ProfileServer> {
-        servers::BROWSER_MCP
+    /// The servers for an agent of `kind`: `browser` for Codex ([`servers::browser_mcp`]; Claude
+    /// keeps the shell command), then `case-law` (R24), which the host sends only in a session
+    /// whose relay it opened.
+    pub fn servers(&self, kind: Option<AgentKind>) -> Vec<ProfileServer> {
+        servers::browser_mcp(kind)
             .then(|| servers::browser(&self.paths))
             .into_iter()
             .chain([servers::case_law(&self.paths)])

@@ -6,6 +6,8 @@ use super::{
     port_of, set_cdp,
 };
 
+mod proxy;
+
 /// The socket folder the tests' host made.
 const SOCKET: &str = "/tmp/clauseo-ab-0123456789abcdef";
 
@@ -132,7 +134,11 @@ fn ports_are_1024_to_65535_in_plain_decimal() {
 #[test]
 fn each_required_variable_missing_is_named() {
     for os in [Os::Unix, Os::Windows] {
-        for (name, _) in required(os) {
+        // The proxy is optional (`a_missing_proxy_sets_no_proxy_variable`).
+        for (name, _) in required(os)
+            .into_iter()
+            .filter(|(name, _)| *name != "AGENT_BROWSER_PROXY")
+        {
             let error = build(
                 &source_for(os, &[], name),
                 os,

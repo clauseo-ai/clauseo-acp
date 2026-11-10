@@ -109,12 +109,13 @@ pub(super) struct EgressPrep {
 /// The egress part of `agent`'s launch prep: a proxy to open only when `browser` will look for
 /// the session's browser.
 pub(super) fn egress_prep(actor: &Actor, agent: &AgentId, browser: &BrowserPrep) -> EgressPrep {
-    // The shell tool has no proxy: only the guarded entry's browser reaches one.
+    // The shell tool has no proxy, nor the plain client's Codex entry: only an entry that asks
+    // for one (`{proxy_port}`, the parked Safe workspace's) reaches the session's proxy.
     let proxy = actor
         .wiring
         .proxy
         .clone()
-        .filter(|_| browser.wanted() && !browser.shell());
+        .filter(|_| browser.wanted() && !browser.shell() && browser.proxy());
     let seams = actor.wiring.blocklist.as_ref();
     EgressPrep {
         first_load: seams

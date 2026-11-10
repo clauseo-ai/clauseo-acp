@@ -23,8 +23,13 @@ impl Os {
 
 /// The config file Clauseo owns; an explicit file replaces agent-browser's config discovery.
 pub(crate) const CONFIG: &str = "AGENT_BROWSER_CONFIG";
-/// The session's egress proxy, `http://127.0.0.1:<port>`.
+/// The session's egress proxy, `http://127.0.0.1:<port>`. Optional: the plain client's Codex
+/// entry has none, and Chrome then goes direct, as Claude's shell browser does; when it is set
+/// it must be valid, and everything the proxy brings (Chrome's `--proxy-server`, the bypass,
+/// the `*_PROXY` variables) follows it.
 pub(crate) const PROXY: &str = "AGENT_BROWSER_PROXY";
+/// agent-browser's proxy bypass, one of [`FIXED`]: set only with [`PROXY`].
+const PROXY_BYPASS: &str = "AGENT_BROWSER_PROXY_BYPASS";
 /// The Chrome the host chose.
 pub(crate) const EXECUTABLE_PATH: &str = "AGENT_BROWSER_EXECUTABLE_PATH";
 /// The Clauseo session id. `AGENT_BROWSER_NAMESPACE` is never set: it would put the socket at
@@ -209,8 +214,9 @@ impl fmt::Display for EnvError {
 }
 
 /// The child's whole environment but [`CDP`], which [`set_cdp`] adds once Chrome is up. Fails
-/// on the first required variable that is missing or invalid, in the order config, proxy,
-/// executable path, session, socket folder (Unix only), stream port; never falls back. The Unix
+/// on the first required variable that is missing or invalid, in the order config, proxy (only
+/// when set: with none, no proxy variable reaches the child), executable path, session, socket
+/// folder (Unix only), stream port; never falls back. The Unix
 /// socket folder is checked here only for being absolute; `socket.rs` checks the folder itself.
 /// On Windows, `dirs` supplies the defaults [`windows_defaults`] gives the variables the guard's
 /// environment lacks.
@@ -221,13 +227,16 @@ pub(crate) fn build(
     dirs: &WindowsDirs,
 ) -> Result<BTreeMap<String, OsString>, EnvError> {
     let config = required(source, os, CONFIG, is_local_file, Problem::NotFile)?;
-    let proxy = required(
-        source,
-        os,
-        PROXY,
-        |v, _| is_loopback_proxy(v),
-        Problem::NotProxy,
-    )?;
+    let proxy = match source.get(os, PROXY) {
+        Some(_) => Some(required(
+            source,
+            os,
+            PROXY,
+            |v, _| is_loopback_proxy(v),
+            Problem::NotProxy,
+        )?),
+        None => None,
+    };
     let executable = required(source, os, EXECUTABLE_PATH, is_local_file, Problem::NotFile)?;
     let session = required(
         source,
@@ -260,21 +269,27 @@ pub(crate) fn build(
         env.insert(name.to_owned(), value.to_owned());
     };
     set(CONFIG, config);
-    set(PROXY, proxy);
+    if let Some(proxy) = proxy {
+        set(PROXY, proxy);
+    }
     set(EXECUTABLE_PATH, executable);
     set(SESSION, session);
     set(SOCKET_DIR, &socket_dir);
     set(STREAM_PORT, stream_port);
     set(ARGS, OsStr::new(WEBRTC_ARG));
     for (name, value) in FIXED {
-        set(name, OsStr::new(value));
+        if *name != PROXY_BYPASS || proxy.is_some() {
+            set(name, OsStr::new(value));
+        }
     }
-    for name in PROXY_VARS_UPPER {
-        set(name, proxy);
-    }
-    if os == Os::Unix {
-        for name in PROXY_VARS_LOWER {
+    if let Some(proxy) = proxy {
+        for name in PROXY_VARS_UPPER {
             set(name, proxy);
+        }
+        if os == Os::Unix {
+            for name in PROXY_VARS_LOWER {
+                set(name, proxy);
+            }
         }
     }
     for (folder, names) in folder_table(os) {
