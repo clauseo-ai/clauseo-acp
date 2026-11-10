@@ -100,14 +100,28 @@ pub(super) fn identity(path: &Path) -> std::io::Result<(u64, u128)> {
         )
     }
     .map_err(|error| std::io::Error::from_raw_os_error(error.code().0 & 0xFFFF))?;
-    let mut info = FILE_ID_INFO::default();
-    let size = u32::try_from(size_of::<FILE_ID_INFO>()).unwrap_or(0);
-    // SAFETY: `handle` is open; `info` is a FILE_ID_INFO of `size` bytes written in place.
-    let read =
-        unsafe { GetFileInformationByHandleEx(handle, FileIdInfo, (&raw mut info).cast(), size) };
+    let read = handle_identity(handle);
     // SAFETY: `handle` was opened above and is closed once.
     let _closed = unsafe { CloseHandle(handle) };
-    read.map_err(|error| std::io::Error::from_raw_os_error(error.code().0 & 0xFFFF))?;
+    read
+}
+
+/// The identity of the open `file`: its volume's serial number and its 128-bit file ID
+/// (`FileIdInfo`), as [`identity`] reads it for a path.
+pub(crate) fn file_identity(file: &std::fs::File) -> std::io::Result<(u64, u128)> {
+    use std::os::windows::io::AsRawHandle as _;
+    // `file` keeps the handle open for the call, and closes it itself
+    handle_identity(HANDLE(file.as_raw_handle()))
+}
+
+/// The volume serial number and 128-bit file ID of the open `handle` (`FileIdInfo`).
+fn handle_identity(handle: HANDLE) -> std::io::Result<(u64, u128)> {
+    let mut info = FILE_ID_INFO::default();
+    let size = u32::try_from(size_of::<FILE_ID_INFO>()).unwrap_or(0);
+    // SAFETY: the caller keeps `handle` open; `info` is a FILE_ID_INFO of `size` bytes written
+    // in place.
+    unsafe { GetFileInformationByHandleEx(handle, FileIdInfo, (&raw mut info).cast(), size) }
+        .map_err(|error| std::io::Error::from_raw_os_error(error.code().0 & 0xFFFF))?;
     Ok((
         info.VolumeSerialNumber,
         u128::from_le_bytes(info.FileId.Identifier),

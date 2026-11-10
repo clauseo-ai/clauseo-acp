@@ -51,7 +51,7 @@ mod windows;
 #[cfg(all(windows, test))]
 pub(crate) use windows::TestDrive;
 #[cfg(windows)]
-pub(crate) use windows::{attribute_tag, short_path};
+pub(crate) use windows::{attribute_tag, file_identity, short_path};
 #[cfg(all(windows, test))]
 pub(crate) use windows_names::drive_is_local;
 mod windows_names;
