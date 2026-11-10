@@ -296,6 +296,18 @@
   .room-centre[data-turn="page"] .room-thread {
     visibility: hidden;
   }
+  /* lite casts no shadow, so the edges the thread passes under are a hairline each (D-073): the composer's,
+     while the thread runs on below it (its border always there, so showing it moves nothing), and the
+     pinned question's */
+  :root[data-render="lite"] .room-thread {
+    border-bottom: var(--hairline) solid transparent;
+  }
+  :root[data-render="lite"] .room-centre[data-more] .room-thread {
+    border-bottom-color: var(--divide-mid);
+  }
+  :root[data-render="lite"] .room-pin {
+    border-bottom: var(--hairline) solid var(--divide-mid);
+  }
   .room-centre:is([data-turn="page"], [data-turn="opening"]) .room-pin {
     visibility: hidden;
   }
