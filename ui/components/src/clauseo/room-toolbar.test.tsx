@@ -117,6 +117,11 @@ test("a stale plan with a card mutes its fill, inside the press where the meter 
   const { look: _, ...fresh } = stale;
   await mount(fresh);
   expect(fill()?.hasAttribute("data-muted")).toBe(false);
+  // plenty left: the muted fill, as Settings' tiles and the plan's card draw it; primary from the close band on
+  expect(fill()?.classList.contains("bg-muted")).toBe(true);
+  await act(async () => root?.unmount());
+  host?.remove();
+  await mount({ ...fresh, left: 0.1, status: "Close to the limit" });
   expect(fill()?.classList.contains("bg-primary")).toBe(true);
 });
 

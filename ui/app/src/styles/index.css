@@ -1,9 +1,13 @@
 /* The app's stylesheet: the design system's, with the app's own classes. Tests and the dev-only gallery are not
    sources, so their classes never reach the shipped CSS. A screen imports the sheets of the parts it shows, in
    clauseo/parts.css's order, so the app ships only what its screens use. The room imports it (src/room/entry.ts).
-   The room's frame: the shell, the composer, the wall, the thread and Latest over its foot (latest.css), the empty wall's words and the change note
-   (live.css) and the other widths; the rail and its rows (matters.css), and the new matter form (matter-form.css); a web source's site tile (site-tile.css);
-   the first run's lockup (lockup.css), screen, install line and sign-in gate (first-launch.css). */
+   The room's frame: the shell, the composer, the wall, the thread and Latest over its foot (latest.css), the empty
+   wall's words and the change note (live.css) and the other widths; the rail and its rows (matters.css), and the new
+   matter form (matter-form.css); the protection line and the Not protected note (edge.css), the limit's notes and marks
+   (limits.css), the toolbar's plan and its card (plan-card.css), the rail's update notice (rail-notice.css); a web
+   source's site tile (site-tile.css); the first run's lockup (lockup.css), screen, install line and sign-in gate
+   (first-launch.css). room/room-css-shipped.test.ts builds the app and fails when a class the room names has no rule
+   here. */
 @import "./system.css";
 @import "@clauseo/components/clauseo/shell.css";
 @import "@clauseo/components/clauseo/composer.css";
@@ -16,6 +20,10 @@
 @import "@clauseo/components/clauseo/matter-form.css";
 @import "@clauseo/components/clauseo/matters.css";
 @import "@clauseo/components/clauseo/triage.css";
+@import "@clauseo/components/clauseo/edge.css";
+@import "@clauseo/components/clauseo/limits.css";
+@import "@clauseo/components/clauseo/plan-card.css";
+@import "@clauseo/components/clauseo/rail-notice.css";
 @import "@clauseo/components/clauseo/site-tile.css";
 @import "@clauseo/components/clauseo/lockup.css";
 @import "@clauseo/components/clauseo/rail-brand.css";

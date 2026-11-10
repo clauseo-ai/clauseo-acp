@@ -3,11 +3,13 @@
 // and no share, only when it reset, muted. With no figures the card says so and offers Try again (`refresh_limits`,
 // `try_again`); billed by use, it has its title and who bills, no bar and no figure. Its own chunk: only a lawyer who
 // opens the card needs it. Not here until the host gives them (H16, H11): the stale line's retry time, the month's
-// figure, what happens at the limit, Manage plan.
+// figure, what happens at the limit, Manage plan. Its foot opens Settings at Plan and usage (`open_settings`, "usage"),
+// in Settings' own words for the section.
 import { IconTryAgain } from "@clauseo/components/icons/icons.tsx";
 import { PlanCard } from "@clauseo/components/clauseo/plan-card.tsx";
 import { lim } from "@clauseo/components/lib/words-limits.ts";
 import { pc } from "@clauseo/components/lib/words-plan-card.ts";
+import { st } from "@clauseo/components/lib/words-settings.ts";
 import { useWords } from "@clauseo/components/lib/words.ts";
 import { Button } from "@clauseo/components/ui/button.tsx";
 import { useAgentLimits, useLimitsStore, useNow } from "../../store/limits.ts";
@@ -16,7 +18,14 @@ import { stamp } from "../thread/clock.ts";
 import { PLAN_NAME, lookOf, planTitle } from "./plan-model.ts";
 import { windowOf } from "./plan-windows.ts";
 
-export function LivePlanCard({ kind }: { kind: AgentKind }) {
+export function LivePlanCard({
+  kind,
+  onSettings = null,
+}: {
+  kind: AgentKind;
+  /** Opens Settings at Plan and usage; null where the host can't open Settings. */
+  onSettings?: (() => void) | null;
+}) {
   const w = useWords();
   const entry = useAgentLimits(kind);
   const store = useLimitsStore();
@@ -67,6 +76,9 @@ export function LivePlanCard({ kind }: { kind: AgentKind }) {
       windows={figures ? entry.windows.map((row) => windowOf(lang, row, now)) : []}
       message={message}
       foot={null}
+      settings={
+        onSettings === null ? null : { label: st(lang, "Plan and usage"), onOpen: onSettings }
+      }
     />
   );
 }

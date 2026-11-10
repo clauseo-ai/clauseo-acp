@@ -45,7 +45,8 @@ const TITLE: &str = "Settings";
 const MENU_ID: &str = "settings";
 
 /// A part of the settings window `open_settings` can open it at (R24: the room's case-law hint
-/// and banner open Connectors; R17: UC's first-run button opens Protection). Closed, as the app
+/// and banner open Connectors; R17: UC's first-run button opens Protection; U12: the toolbar's
+/// plan card opens Plan and usage). Closed, as the app
 /// asked: a value the build does not know is refused when the command's arguments decode, never
 /// ignored, and a new section is added here together with the page that shows it (ADR 0002's
 /// rule for commands, which a webview sends).
@@ -58,14 +59,18 @@ pub(crate) enum SettingsSection {
     /// The Protection section: the sandbox's state, its set-up and removal (decision record
     /// 0051). The page is the app's.
     Protection,
+    /// Plan and usage: each agent's plan and its limits.
+    Usage,
 }
 
 impl SettingsSection {
-    /// The page's fragment for it: `settings.html#connectors`, `settings.html#protection`.
+    /// The page's fragment for it: `settings.html#connectors`, `settings.html#protection`,
+    /// `settings.html#usage`.
     fn fragment(self) -> &'static str {
         match self {
             Self::Connectors => "connectors",
             Self::Protection => "protection",
+            Self::Usage => "usage",
         }
     }
 }
