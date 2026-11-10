@@ -62,7 +62,7 @@ import { handWaits } from "./triage.ts";
 import { LivePlan } from "./limits/live-plan.tsx";
 import { Matters, type MattersView } from "./matters.ts";
 import { AnswerHost, quietly, type ListedPapers } from "./open.ts";
-import { usePapers } from "./use-papers.ts";
+import { useMatterMoves, usePapers } from "./use-papers.ts";
 import { LocateFolderContext, type ActRefusals } from "./act-refusals.ts";
 import { LocateGate, MovedFolder } from "./moved.tsx";
 import { usePickWait } from "./picker-wait.ts";
@@ -260,7 +260,8 @@ function RoomFrame({
     view.matters.every((m) => m.kind === "scratch");
   // until the list says welcome or room, the room is unseen and the page's mark stands (deciding.ts)
   const deciding = useDeciding(setup, view.phase);
-  const listed = usePapers(matters.next.papers, matters.next.app, open?.matter ?? null);
+  const moved = useMatterMoves(store, matters.next.papers, open?.matter ?? null);
+  const listed = usePapers(matters.next.papers, matters.next.app, open?.matter ?? null, moved);
   const papers = listed?.papers ?? null;
   const answers = useAnswerHost(transport, open?.matter ?? null, listed, matters.refusals);
   // the open matter's refused open (an answer's paper, Find's), on the composer's line; Locate
