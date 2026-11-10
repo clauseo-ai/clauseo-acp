@@ -5,6 +5,7 @@
 import { lazy, Suspense, useEffect, useLayoutEffect, useState } from "react";
 import { late } from "@clauseo/components/lib/late.ts";
 import { Welcome, type FootPlan } from "@clauseo/components/clauseo/first-launch/welcome.tsx";
+import { ToolsLine } from "@clauseo/components/clauseo/first-launch/tools.tsx";
 import { useDisplay } from "@clauseo/components/lib/display.ts";
 import { toHostError, type HostTransport } from "../../transport/host-transport.ts";
 import type { AgentId } from "../../transport/protocol.ts";
@@ -20,6 +21,7 @@ import type { Matters } from "../matters.ts";
 import { usePickWait } from "../picker-wait.ts";
 import { markButton, markWelcome } from "../../start-marks.ts";
 import { IDS, NAME, installActs, planOf } from "./acts.ts";
+import { readyPlan, toolsView } from "./views.ts";
 import { browserNote, welcomeFoot, type FootActs } from "./welcome-foot.tsx";
 
 /** A plan's line's presses: its install's, its "Sign in to {name}" (through the store's queue), and Cancel, which
@@ -90,6 +92,9 @@ export function FirstScreen({
   });
   // the papers line names the one plan in play, else both
   const inPlay = planInPlay(state);
+  // the document tools, under the two rows: their size before, their download after a plan is ready
+  const tools = toolsView(state);
+  const retryThrough = readyPlan(state);
   const [form, setForm] = useState(false);
   const [refused, setRefused] = useState<{ code: string; path: string } | null>(null);
   const wait = usePickWait();
@@ -114,6 +119,18 @@ export function FirstScreen({
     <Welcome
       plans={plans}
       papersPlan={inPlay === null ? null : NAME[planOf(inPlay)]}
+      tools={
+        tools === null ? null : (
+          <ToolsLine
+            view={tools}
+            onRetry={
+              retryThrough === null
+                ? undefined
+                : () => store.command({ retry_agent_install: { agent: retryThrough } })
+            }
+          />
+        )
+      }
       counts={{ ...state.counts, onChange: store.setCounts }}
       onOpenFolder={() => void openFolder()}
       opening={wait.opening}

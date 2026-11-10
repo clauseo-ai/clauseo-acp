@@ -11,6 +11,7 @@ import type {
   AgentId,
   ErrorCode,
   InstallProgress,
+  PythonProgress,
   SettingsView,
   SetupCommand,
   SetupEvent,
@@ -62,6 +63,11 @@ export type CountsState = {
 export type SetupState = {
   /** Whether this computer can keep an API key; null before SetupInfo. */
   keys: boolean | null;
+  /** The document tools' runtime, one for the computer (SetupInfo's `python`); null before SetupInfo and from an older
+   * host that leaves it out. Its failure never changes a plan's state. */
+  python: PythonProgress | null;
+  /** The document tools' download in MB, as the host last said it (missing's download_bytes, downloading's total). */
+  pythonMb?: number;
   agents: Readonly<Record<AgentId, AgentSetup>>;
   /** The plan the lawyer means: the last one whose Sign in they pressed. Before any press (`picked` false) it follows
    * the one plan that says it is signed in, so a lawyer with ChatGPT alone is not taken for Claude after a restart;
@@ -94,6 +100,7 @@ export const planLocked = (locked: readonly string[], agent: AgentId): boolean =
 
 const START: SetupState = {
   keys: null,
+  python: null,
   agents: {},
   chosen: CLAUDE,
   picked: false,
@@ -261,7 +268,19 @@ export function createSetupStore(transport: HostTransport & SetupSource): SetupS
   };
   const heard = (event: SetupEvent) => {
     if ("setup_info" in event && event.setup_info !== undefined) {
-      emit({ ...state, keys: event.setup_info.keys_available });
+      const python = event.setup_info.python ?? null;
+      const mb =
+        typeof python === "object" && python?.missing !== undefined
+          ? mbOf(python.missing.download_bytes)
+          : typeof python === "object" && python?.downloading !== undefined
+            ? mbOf(python.downloading.total)
+            : state.pythonMb;
+      emit({
+        ...state,
+        keys: event.setup_info.keys_available,
+        python,
+        ...(mb === undefined ? {} : { pythonMb: mb }),
+      });
     } else if ("agent_install_progress" in event && event.agent_install_progress !== undefined) {
       const { agent: id, state: install } = event.agent_install_progress;
       const was = state.agents[id];

@@ -7,6 +7,10 @@
     display: grid;
     gap: var(--s4);
   }
+  /* the document tools' line under the cards, its words on the cards' own inset */
+  .set-plans-tools .fl-tools {
+    padding: 0 0 0 var(--s5);
+  }
   .set-plan {
     display: grid;
     gap: var(--s1);
