@@ -30,7 +30,8 @@ use super::close::{Expiries, TurnClose};
 use super::out::Out;
 use super::{
     End, Holder, JobKind, LimitMark, Then, TimerKind, TurnJob, TurnPhase, TurnTimer, asks, cancel,
-    current, failure, host_stopping, known, matter_of, queue, sign_in, state, steps, updates,
+    current, failure, host_stopping, known, matter_of, offline, queue, sign_in, state, steps,
+    updates,
 };
 use crate::error::Error;
 use crate::log_file::Cause;
@@ -72,7 +73,13 @@ pub(super) fn on_prompt_done(
     updates::flush_rate(actor, thread);
     // A turn whose commit already failed ends `Failed` whatever the read says.
     let store_failed = current(actor, thread).is_some_and(|current| current.store_failed.is_some());
+    // A prompt that failed offline skips the limits read: it needs the network too.
+    let went_offline = match &result {
+        Err(error) => offline::prompt_failed_offline(actor, thread, error),
+        Ok(_) => None,
+    };
     let fallback = matches!(result, Err(clauseo_acp::Error::Rpc { .. }))
+        && went_offline.is_none()
         && !host_stopping(actor)
         && !store_failed
         && limits::reads_for(actor, thread) == Some(AgentKind::Codex);
@@ -104,11 +111,8 @@ pub(super) fn on_prompt_done(
                 current.limit_read = Some(LimitRead::default());
             }
             let text = error.to_string();
-            End::failed(
-                sign_in::code_of(actor, error.code(), &text),
-                Some(text),
-                None,
-            )
+            let code = went_offline.unwrap_or_else(|| sign_in::code_of(actor, error.code(), &text));
+            End::failed(code, Some(text), None)
         }
     };
     end_turn(actor, thread, end);

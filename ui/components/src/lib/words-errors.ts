@@ -97,6 +97,7 @@ export type ErrorCode =
   | "word.revisions_stale"
   | "word.not_docx"
   | "word.edit_failed"
+  | "agent.offline"
   | "unknown";
 
 /** The thread's own sentence for an answer cut short: its Hindi lives in words-thread.ts, once. */
@@ -257,6 +258,9 @@ export const ERROR_WORDS: Record<ErrorCode, ErrorKey> = {
   "word.not_docx":
     "Clauseo can't read the tracked changes in this file. It may be damaged, or it may not be a Word document.",
   "word.edit_failed": "Clauseo couldn't save your decision. The file is as it was.",
+  // the connection dropped mid-answer (D-050); provisional, with Try again under the answer
+  "agent.offline":
+    "You're offline, so the answer stopped. The answer so far is kept. Try again when you're back online.",
   // a code from a newer Clauseo: as internal reads, since this version can say nothing truer
   unknown: "Something went wrong inside Clauseo.",
 };

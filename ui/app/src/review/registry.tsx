@@ -135,19 +135,31 @@ const ERRORS: Entry[] = (Object.entries(ERROR_WORDS) as [ErrorCode, ErrorKey][])
   ([code, key]) =>
     key === "The answer stopped. Your question and the answer so far are kept." || versionsOwn(key)
       ? []
-      : [
-          {
-            id: `U3-err-${code}`,
-            words: errorWords(key),
-            screen: "room/composer",
-            render: () => (
-              <RoomAsking
-                host={() => threadHost({ entries: [QUESTION, ANSWER, ended()], refuse: code })}
-                question="And clause ten?"
-              />
-            ),
-          },
-        ],
+      : code === "agent.offline"
+        ? [
+            // a turn's failure, never a send's refusal (D-050): the stop line under the answer so far, with Try again
+            {
+              id: `U3-err-${code}`,
+              words: errorWords(key),
+              screen: "room/thread",
+              render: thread({
+                entries: [QUESTION, PARTIAL, ended({ stop: "failed", failure: "agent.offline" })],
+              }),
+            },
+          ]
+        : [
+            {
+              id: `U3-err-${code}`,
+              words: errorWords(key),
+              screen: "room/composer",
+              render: () => (
+                <RoomAsking
+                  host={() => threadHost({ entries: [QUESTION, ANSWER, ended()], refuse: code })}
+                  question="And clause ten?"
+                />
+              ),
+            },
+          ],
 );
 
 /** U3's entries, each id written as it is: an id never moves when an entry is added or taken out. */

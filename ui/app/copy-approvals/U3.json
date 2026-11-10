@@ -936,5 +936,16 @@
     "at": "2026-11-09",
     "by": "orchestrator (settled en)",
     "note": "The send-refusal entry every error code gets (registry.tsx's ERRORS); the panel's own state is UC-124 to UC-127"
+  },
+  "U3-err-agent.offline": {
+    "en": "You're offline, so the answer stopped. The answer so far is kept. Try again when you're back online.",
+    "hi": "आप ऑफ़लाइन हैं, इसलिए उत्तर रुक गया। अब तक का उत्तर रखा गया है। ऑनलाइन होने पर फिर से प्रयास करें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-10",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-10",
+    "by": "app track (provisional; Rohan batch review)",
+    "note": "D-050: an answer the lost connection stopped (agent.offline), on the stop line under the answer, with Try again beside Copy; reuses U3-err-agent.install_offline's \"You're offline\" and U3-04's \"The answer so far is kept.\""
   }
 }

@@ -111,6 +111,7 @@ pub(crate) fn session_refusal(error: &Error) -> Option<Error> {
         code,
         message,
         data,
+        ..
     }) = error
     else {
         return None;

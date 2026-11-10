@@ -1847,6 +1847,8 @@ export type ErrorCode =
 "word.edit_failed" | 
 /** The computer's privacy settings keep Clauseo, or the agent it starts, from opening the matter's folder (on macOS, Files and Folders in Privacy & Security), so no agent works in it: allow Clauseo there, then ask again. */
 "matter.folder_permission" | 
+/** The agent lost its connection while answering: it could not reach its service (connection refused, no network, no name resolution, connect timed out). The answer so far is kept; asking again can work once the computer is back online. */
+"agent.offline" | 
 /** A code from a newer Clauseo that this version does not know. Never produced here. */
 "unknown";
 

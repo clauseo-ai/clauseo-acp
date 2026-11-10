@@ -170,6 +170,9 @@ export const HI = {
     "Clauseo इस फ़ाइल के ट्रैक किए गए बदलाव नहीं पढ़ सकता। हो सकता है कि यह क्षतिग्रस्त हो, या यह Word दस्तावेज़ न हो।",
   "Clauseo couldn't save your decision. The file is as it was.":
     "Clauseo आपका निर्णय सहेज नहीं सका। फ़ाइल पहले जैसी ही है।",
+  // the connection dropped mid-answer (provisional Hindi)
+  "You're offline, so the answer stopped. The answer so far is kept. Try again when you're back online.":
+    "आप ऑफ़लाइन हैं, इसलिए उत्तर रुक गया। अब तक का उत्तर रखा गया है। ऑनलाइन होने पर फिर से प्रयास करें।",
 } as const;
 
 /** The sentences' Hindi, for the copy review to tell hi: later from Hindi. */

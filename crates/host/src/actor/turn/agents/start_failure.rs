@@ -47,6 +47,7 @@ pub(in super::super) fn launch_failed(actor: &mut Actor, thread: ThreadId, error
         code,
         message,
         data,
+        ..
     }) = error
     {
         tracing::warn!(

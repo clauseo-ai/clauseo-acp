@@ -505,6 +505,7 @@ fn rpc_error(shared: &Shared, method: &str, error: agent_client_protocol::Error)
         method: method.to_owned(),
         code: error.code.into(),
         data: crate::diagnose::data_shape(error.data.as_ref()),
+        data_text: crate::error::data_text(error.data.as_ref()),
         message: error.message,
     }
 }
