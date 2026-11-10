@@ -195,6 +195,8 @@
 }
 .review-confirm p {
   margin: 0;
+  white-space: pre-line;
+  overflow-wrap: anywhere;
 }
 .review-confirm-buttons {
   display: flex;

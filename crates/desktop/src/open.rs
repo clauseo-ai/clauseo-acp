@@ -212,10 +212,7 @@ pub(crate) async fn open_external(
     link: &Link,
 ) -> Result<(), HostError> {
     let pass = gate.enter(now())?;
-    if !confirm
-        .confirm_link(LinkWords::new(&link.destination, language))
-        .await
-    {
+    if !confirm.confirm_link(LinkWords::new(link, language)).await {
         pass.quiet_for(now(), AFTER_DECLINE);
         return Err(HostError::new(
             ErrorCode::TransportUnauthorized,

@@ -54,5 +54,16 @@
     "at": "2026-11-02",
     "by": "Rohan",
     "note": "Rohan, on the review page, 15:35"
+  },
+  "H11-08": {
+    "en": "Full address: {address}",
+    "hi": "पूरा पता: {address}",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-10",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-10",
+    "by": "app track (provisional; Rohan batch review)",
+    "note": "D-029: the link confirm's whole link below the host line; provisional for Rohan's batch review"
   }
 }
