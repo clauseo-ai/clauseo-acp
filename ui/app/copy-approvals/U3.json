@@ -317,6 +317,17 @@
     "by": "app track (provisional; Rohan batch review)",
     "note": "Split from matter.folder_missing: the folder is there but its .clauseo/matter.json is missing, unreadable or another matter's"
   },
+  "U3-err-matter.folder_permission": {
+    "en": "Clauseo needs permission to open this folder.",
+    "hi": "Clauseo को यह फ़ोल्डर खोलने की अनुमति चाहिए।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-10",
+    "hi_by": "host track (draft; pending a Hindi-speaking lawyer's review)",
+    "status": "provisional",
+    "at": "2026-11-10",
+    "by": "orchestrator (settled for the macOS folder permission launch fix; Rohan batch review)",
+    "note": "macOS privacy settings (Files and Folders) keep Clauseo out of the matter's folder; the app adds the Open Privacy settings button and its line"
+  },
   "U3-err-matter.folder_refused": {
     "en": "A whole drive, your home folder or a system folder can't be a matter.",
     "hi": "पूरी ड्राइव, आपका होम फ़ोल्डर या कोई सिस्टम फ़ोल्डर मामला नहीं बन सकता।",

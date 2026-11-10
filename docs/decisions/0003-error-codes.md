@@ -127,6 +127,7 @@ as `yes` or `no`. The meaning is also each variant's doc comment in `error_code.
 | `word.revisions_stale` | The Word file changed since its tracked changes were listed, or a change named is no longer in it, so nothing was written: list them again. | no | host and matters (`DecideRevisions`: the file's bytes differ from the list's `version`, or stetdoc answers `not_found` or a `stale_*` code) |
 | `word.not_docx` | The file is not a Word document (.docx) that stetdoc can read. | no | host (`ListRevisions`, `DecideRevisions`: the path does not end in `.docx`, or stetdoc cannot read the file) |
 | `word.edit_failed` | stetdoc failed or did not finish in time while reading or editing the Word file, or the file is not on this computer or is too large to version, so nothing was written. | yes | host (`ListRevisions`, `DecideRevisions`: stetdoc timed out, exited with another error, or printed output that does not read; the file is cloud-only or over the checkpoint size cap); retryable because a passing failure (a slow disk, a busy machine) can clear |
+| `matter.folder_permission` | The computer's privacy settings keep Clauseo, or the agent it starts, from opening the matter's folder (on macOS, Files and Folders in Privacy & Security), so no agent works in it: allow Clauseo there, then ask again. | no | host (a launch's folder check on macOS: the host's own open of the matter folder is refused, EPERM or EACCES; and on every OS an agent's `session/new` answered with JSON-RPC -32602 saying its `cwd` does not exist, after the host found the folder there) |
 | `unknown` | A code from a newer Clauseo that this version does not know. Never produced here. | no | decoding only |
 
 Judgement calls on retryable: `agent.launch_failed` and `agent.exited` are retryable because a new
@@ -155,6 +156,15 @@ the agent "couldn't be downloaded". A failure after every file is fetched and ch
 code, so the words can say the download worked. It is retryable, as `agent.install_failed` is: the
 antivirus that holds the fresh files lets go, and the next try's set-up may work. `agent.install_failed`
 keeps its meaning, now only for failures before the files are all fetched.
+
+`matter.folder_permission` was added on 2026-11-10, at the orchestrator's request (a launch
+blocker on a Mac: a matter under `~/Documents`, where every Claude conversation failed as
+`agent.protocol_error`). macOS privacy protection (TCC) keeps an app without the lawyer's consent
+out of Documents, Desktop, Downloads, removable and network volumes and iCloud Drive, and the
+agents Clauseo starts inherit Clauseo's consent. Claude's adapter answers `session/new` in such a
+folder with -32602 "`cwd` does not exist", which said nothing the lawyer could act on. The host
+now opens the folder itself before a launch on macOS and refuses with this code, and maps that one
+agent answer to it too. Not retryable: the lawyer changes a privacy setting first, then asks again.
 
 ## Consequences
 

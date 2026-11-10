@@ -5,8 +5,10 @@
 //! #617), waited on for [`PROBE_WAIT`]: a folder that does not answer is `matter.folder_missing`
 //! too. The check is `check_matter_folder`'s, the matters crate's reason check; a folder that
 //! is there without its marker is let through, since the matter's first open may relink it
-//! (decision record 0020) and otherwise answers `matter.folder_not_a_matter` itself. No path
-//! goes in the refusal or the log.
+//! (decision record 0020) and otherwise answers `matter.folder_not_a_matter` itself. Then, on
+//! macOS, the host opens the folder itself (`agent/folder_access.rs`): a folder the privacy
+//! settings keep Clauseo out of is `matter.folder_permission`, and no agent starts. No path goes
+//! in the refusal or the log.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -15,12 +17,14 @@ use clauseo_protocol::{ErrorCode, MatterId};
 
 use crate::actor::matters::probe::{NO_ANSWER, PROBE_WAIT};
 use crate::agent::codex::prepare::{Job, off_actor};
+use crate::agent::folder_access;
 use crate::clock::Clock;
 use crate::error::Error;
 use crate::log_file::Cause;
 
 /// Whether matter `matter`'s folder `stored` is there: `matter.folder_missing` when it is not,
-/// or when the check does not answer within [`PROBE_WAIT`].
+/// or when the check does not answer within [`PROBE_WAIT`]; `matter.folder_permission` when it
+/// is there and the host may not open it ([`folder_access::preflight`]).
 pub(super) async fn check(
     clock: Arc<dyn Clock>,
     matter: MatterId,
@@ -32,14 +36,25 @@ pub(super) async fn check(
         wait: PROBE_WAIT,
     };
     let found = off_actor(clock, job, move || {
-        Ok(crate::check_matter_folder(&stored, matter))
+        match crate::check_matter_folder(&stored, matter) {
+            Err(refusal) if refusal.code() == ErrorCode::MatterFolderMissing => {
+                Err(Error::Refused(refusal))
+            }
+            _ => folder_access::preflight(&stored, folder_access::open_folder),
+        }
     })
     .await;
     match found {
-        Ok(Err(refusal)) if refusal.code() == ErrorCode::MatterFolderMissing => {
-            Err(Error::Refused(refusal))
+        Ok(()) => Ok(()),
+        // The check's own refusals; the others are the wait's (no answer, no thread).
+        Err(error)
+            if matches!(
+                error.code(),
+                ErrorCode::MatterFolderMissing | ErrorCode::MatterFolderPermission
+            ) =>
+        {
+            Err(error)
         }
-        Ok(_) => Ok(()),
         Err(error) => {
             tracing::warn!(error = %Cause(&error), matter = %matter, "a launch's matter folder did not answer");
             Err(Error::refused(ErrorCode::MatterFolderMissing, NO_ANSWER))
