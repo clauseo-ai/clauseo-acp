@@ -3,7 +3,7 @@
 // (hold.ts): the install's working line, the sign-in gate in the field's row until the conversation's plan is signed
 // in, and the room's line under the field (the fine print until then, the signed-in line after). Each gate press is one
 // setup command; nothing else here talks to the host but the matter's creation, the counts and the first act.
-import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { lazy, Suspense, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { late } from "@clauseo/components/lib/late.ts";
 import { Gate, SignedLine, type GateAct } from "@clauseo/components/clauseo/first-launch/gate.tsx";
 import { installLine } from "@clauseo/components/clauseo/first-launch/install.tsx";
@@ -24,7 +24,12 @@ import {
 import type { Conversations, ConversationsView } from "../conversations.ts";
 import type { Matters } from "../matters.ts";
 import { clockOf } from "../when.ts";
-import { firstReadMarks, markAdded } from "../first-read/marks.ts";
+import { firstReadMarks, markAdded, subscribeMarks } from "../first-read/marks.ts";
+
+/** The first read's offer, in its own chunk with the first read's words (first-read-offer.tsx). */
+const FirstReadOffer = lazy(() =>
+  late(import("../first-read/first-read-offer.tsx")).then((m) => ({ default: m.FirstReadOffer })),
+);
 
 /** The first read's title, as start.ts names the thread (words-first-read.ts's UD2-12, in English as the host keeps it). */
 const FIRST_READ_TITLE_EN = "First read";
@@ -412,35 +417,43 @@ export function FirstRun({
     }
     wasWelcome.current = welcome;
   }, [welcome, matters, store]);
-  // UD2's first read: once the chosen plan is signed in (and, after UC, the workspace step has its outcome), for each
-  // matter added during the first run and not yet read; its chunk loads only then
-  const chosen = state.chosen;
+  // UD2's first read, offered, never sent by itself (D-015): no turn goes without the lawyer's press. Its button stands
+  // in the new conversation of a matter added during the first run, with papers and no conversation yet, once the
+  // conversation's plan is signed in (and, after UC, the workspace step has its outcome); its chunk loads only then.
+  // A sign-in, "Use … instead" and a plan switch only change what the button would use.
+  const agentSetup = state.agents[agent];
   const signedIn =
-    isSignedIn(state.agents[chosen]?.signIn) &&
-    (chosenSetup?.signedHere !== true || stepAllowsRead(workspaceStep(shieldState, parts)));
-  useEffect(() => {
-    if (!signedIn || welcome) return;
-    const due = Object.entries(firstReadMarks()).filter(
-      ([, m]) => m.added === true && m.thread === undefined,
+    isSignedIn(agentSetup?.signIn) &&
+    (agentSetup?.signedHere !== true || stepAllowsRead(workspaceStep(shieldState, parts)));
+  const marks = useSyncExternalStore(subscribeMarks, firstReadMarks, firstReadMarks);
+  const mark = talks.matter === null ? undefined : marks[talks.matter];
+  const offer =
+    !welcome &&
+    signedIn &&
+    talks.matter !== null &&
+    talks.phase === "ready" &&
+    talks.drafting &&
+    talks.rows.every((r) => r.thread === null) &&
+    mark?.added === true &&
+    mark.thread === undefined;
+  if (!welcome)
+    return (
+      <>
+        <CaseLawSlot />
+        {offer && talks.matter !== null && (
+          <Suspense fallback={null}>
+            <FirstReadOffer
+              transport={transport}
+              matters={matters}
+              conversations={conversations}
+              matter={talks.matter}
+              agent={agent}
+              title={FIRST_READ_TITLE_EN}
+            />
+          </Suspense>
+        )}
+      </>
     );
-    if (due.length === 0) return;
-    void late(import("../first-read/first-read-start.ts")).then(({ startFirstRead }) => {
-      for (const [matter] of due)
-        void startFirstRead(transport, matters, matter, chosen).then((thread) => {
-          // open at once, with its summary: the host's threads_changed lists its row as it comes
-          if (thread !== null)
-            conversations.openThread(matter, thread, {
-              thread,
-              matter,
-              agent: chosen,
-              status: "starting",
-              title: FIRST_READ_TITLE_EN,
-              queue_held: false,
-            });
-        });
-    });
-  }, [signedIn, welcome, chosen, transport, matters, conversations]);
-  if (!welcome) return <CaseLawSlot />;
   // no gate on the first screen: each plan's line offers its own sign-in until it is signed in
   return <FirstScreen store={store} matters={matters} transport={transport} state={state} />;
 }

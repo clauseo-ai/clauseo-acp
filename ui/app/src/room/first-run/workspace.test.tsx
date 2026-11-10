@@ -1,7 +1,8 @@
 // @vitest-environment happy-dom
 // UC's Safe workspace step in the first run, over a FakeTransport with the setup and protection
 // wires. Design B: the installer sets the Safe workspace up, so a computer protected when the app
-// first opens, or a refused protection query, has no step, and the first read starts at once. Where
+// first opens, or a refused protection query, has no step, and the first read is offered at once (D-015: offered,
+// never sent by itself). Where
 // the installer's admin copy is missing (admin_copy_missing), the step is the repair, with "Get the
 // installer" on a per-user install. needs_set_up (the copy there, after an in-app Remove) keeps the
 // app's set-up: the Windows screen, which is itself the confirm, where it asks an administrator;
@@ -132,6 +133,8 @@ async function mount(protection: FakeProtectionHost | undefined) {
 
 const reads = (t: FakeTransport) =>
   t.only("dispatch").filter((d) => d.command.command.create_thread !== undefined).length;
+/** The first read offered (D-015: never sent by itself): 1 while Read the papers stands, unpressed, and nothing sent. */
+const offered = (t: FakeTransport) => (byId("first-read-offer") !== null && reads(t) === 0 ? 1 : 0);
 const step = () => byId("workspace-setup");
 
 /** A protection host whose computer is `computer` until the test changes it, with each command held. */
@@ -165,6 +168,10 @@ test.each([
   const t = await mount(protection as FakeProtectionHost | undefined);
   await signInNow(t);
   expect(step()).toBeNull();
+  expect(offered(t)).toBe(1);
+  // pressed, it starts once
+  await press(byId("first-read-offer"));
+  for (let i = 0; i < 3; i += 1) await settle();
   expect(reads(t)).toBe(1);
 });
 
@@ -175,7 +182,7 @@ test("set up at install (design B): protected when the app first opens, so no st
   expect(step()).toBeNull();
   expect(byId("protection-setup")).toBeNull();
   expect(t.protectionCommands()).toEqual([]);
-  expect(reads(t)).toBe(1);
+  expect(offered(t)).toBe(1);
 });
 
 test("admin_copy_missing: the repair's words and Get the installer, no command; the first read waits for Not now", async () => {
@@ -204,7 +211,7 @@ test("admin_copy_missing: the repair's words and Get the installer, no command; 
   expect(step()?.dataset["state"]).toBe("off");
   expect(byId("workspace-retry")).toBeNull();
   expect(t.protectionCommands()).toEqual([]);
-  expect(reads(t)).toBe(1);
+  expect(offered(t)).toBe(1);
 });
 
 test("admin_copy_missing on a firm install: the firm manages the install, with no button", async () => {
@@ -247,14 +254,14 @@ test("needs_set_up with retry_asks_admin true (the admin copy there, after an in
   await act(async () => s.answers[0]!.resolve());
   for (let i = 0; i < 3; i += 1) await settle();
   expect(step()).toBeNull();
-  expect(reads(t)).toBe(1);
+  expect(offered(t)).toBe(1);
 });
 
 test("any other block: no step; the room's line and note say it", async () => {
   const t = await mount({ view: () => view(PROT.policy) });
   await signInNow(t);
   expect(step()).toBeNull();
-  expect(reads(t)).toBe(1);
+  expect(offered(t)).toBe(1);
 });
 
 test("Settings on the Not protected line opens the window at #protection", async () => {
@@ -279,12 +286,12 @@ test("Not now is an outcome: the line says Not protected in Claude's words, and 
     tbt("en", "Clauseo asks before each change in this matter."),
   );
   expect(byId("protection-failed")).toBeNull();
-  expect(reads(t)).toBe(1);
+  expect(offered(t)).toBe(1);
   // Try again goes back to the Windows screen; the first read isn't started again
   await press(byId("workspace-retry"));
   await settle();
   expect(step()?.dataset["state"]).toBe("ask");
-  expect(reads(t)).toBe(1);
+  expect(reads(t)).toBe(0);
 });
 
 test.each(["sandbox.setup_refused", "sandbox.setup_failed"])(
@@ -299,15 +306,15 @@ test.each(["sandbox.setup_refused", "sandbox.setup_failed"])(
     for (let i = 0; i < 3; i += 1) await settle();
     expect(step()?.dataset["state"]).toBe("off");
     expect(byId("protection-failed")?.textContent).toBe(errorWords("en", code));
-    expect(reads(t)).toBe(1);
+    expect(offered(t)).toBe(1);
     await signInNow(t);
-    expect(reads(t)).toBe(1);
+    expect(offered(t)).toBe(1);
     // Try again goes back to the set-up's screen, sending nothing until it is pressed
     await press(byId("workspace-retry"));
     await settle();
     expect(step()?.dataset["state"]).toBe("ask");
     expect(t.protectionCommands()).toEqual(["retry_protection"]);
-    expect(reads(t)).toBe(1);
+    expect(reads(t)).toBe(0);
   },
 );
 
@@ -323,13 +330,13 @@ test("where R17 says the set-up asks no administrator, it is sent once on enteri
   for (let i = 0; i < 3; i += 1) await settle();
   expect(step()).toBeNull();
   expect(t.protectionCommands()).toEqual(["retry_protection"]);
-  expect(reads(t)).toBe(1);
+  expect(offered(t)).toBe(1);
 });
 
 test("can't or a full pool: no step", async () => {
   const t = await mount({ view: () => view(PROT.unsupported) });
   await signInNow(t);
   expect(step()).toBeNull();
-  expect(reads(t)).toBe(1);
+  expect(offered(t)).toBe(1);
   expect(localStorage.getItem(MARKS_KEY)).not.toBeNull();
 });

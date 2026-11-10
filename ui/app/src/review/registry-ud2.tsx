@@ -7,6 +7,7 @@ import type { Lang } from "@clauseo/components/lib/display.ts";
 import { frd, type FirstReadKey } from "@clauseo/components/lib/words-first-read.ts";
 import { sc, type ScanKey } from "@clauseo/components/lib/words-scan.ts";
 import { sx, type SigninExpiredKey } from "@clauseo/components/lib/words-signin-expired.ts";
+import { fakeNext } from "../room/fake-next.ts";
 import { seedMarks } from "../room/first-read/marks.ts";
 import {
   agentText,
@@ -158,6 +159,44 @@ const room = (s: Scene) => () => <RoomOver host={sceneHost(s)} />;
 const firstRead = (s: Omit<Scene, "title">, papers: number) => (): ReactNode => {
   seedMarks({ [MATTER.matter]: { added: true, thread: THREAD, turns: [TURN], papers } });
   return <RoomOver host={sceneHost({ ...s, title: "First read" })} />;
+};
+/** D-015: the matter the first run added, signed in, with papers and no conversation yet: the read offered, unsent. */
+const offered = (): ReactNode => {
+  seedMarks({ [MATTER.matter]: { added: true } });
+  const host = (): FakeTransport =>
+    new FakeTransport({
+      query: (query) => {
+        if (query === "list_matters") return { matters: [MATTER] };
+        if (query === "get_settings") throw new Error("not scripted");
+        if (typeof query === "object" && query.list_threads !== undefined) return { threads: [] };
+        throw new Error(`not scripted: ${JSON.stringify(query)}`);
+      },
+      setup: {
+        first: () => [
+          { setup_info: { keys_available: true } },
+          {
+            agent_install_progress: { agent: "claude-acp", state: { ready: { version: "0.1.0" } } },
+          },
+          {
+            sign_in_changed: {
+              agent: "claude-acp",
+              state: { signed_in: { method: "plan", source: "own", at: 1 } },
+            },
+          },
+        ],
+        command: () => {},
+      },
+      next: fakeNext({
+        matters: () => [],
+        papers: [
+          { path: "Plaint.pdf", file: "file-1", size: 1000 },
+          { path: "Written statement.pdf", file: "file-2", size: 1000 },
+        ] as never,
+        agents: [{ id: "claude-acp", kind: "claude" }],
+        parts: ["agents", "papers"],
+      }),
+    });
+  return <RoomOver host={host} />;
 };
 const PROMPT = userMessage(2, 1, "Read every paper in this matter's folder.");
 const reading = (title: string | null): ViewEntry => ({
@@ -387,4 +426,6 @@ export const UD2: Entry[] = [
     UPDATING,
   ),
   entry("UD2-58", matterWords("Getting {plan} ready."), "room/resume-cue", RESUMING),
+  // UD2-65: the first read offered in the new conversation; nothing is sent until it is pressed (D-015)
+  entry("UD2-65", readWords("Read the papers"), "room/first-read-offer", offered),
 ];
