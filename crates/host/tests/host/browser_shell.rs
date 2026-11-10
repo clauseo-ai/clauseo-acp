@@ -139,22 +139,22 @@ fn a_session_with_a_chrome_gets_the_shell_browser() {
         var(&seen, "AGENT_BROWSER_SESSION"),
         Some(PathBuf::from(&session))
     );
+    // The session's own config, profile and downloads, all in its run folder's
+    // `agent-browser` folder, the one place the data fences open to it: never `<data>/browser`
+    // (denied to the agents) nor the lawyer's own Chrome profile.
+    let own = run.join("agent-browser");
+    // (The run folder is gone with the session: `launch_checks`' tests check what is made.)
     assert_eq!(
         var(&seen, "AGENT_BROWSER_CONFIG"),
-        Some(data.join("browser").join("agent-browser.json"))
+        Some(own.join("config.json"))
     );
-    assert_eq!(
-        std::fs::read(data.join("browser").join("agent-browser.json")).unwrap(),
-        b"{}\n"
-    );
-    // The session's own profile and downloads, under the data folder's run folder for this
-    // session: never the lawyer's own Chrome profile.
+    assert!(!data.join("browser").exists());
     let profile = var(&seen, "AGENT_BROWSER_PROFILE").unwrap();
-    assert_eq!(profile, run.join("browser-profile"));
-    assert!(profile.starts_with(data) && profile.parent() == Some(run.as_path()));
+    assert_eq!(profile, own.join("profile"));
+    assert!(profile.starts_with(data));
     assert_eq!(
         var(&seen, "AGENT_BROWSER_DOWNLOAD_PATH"),
-        Some(run.join("downloads"))
+        Some(own.join("downloads"))
     );
     assert_eq!(var(&seen, "AGENT_BROWSER_EXECUTABLE_PATH"), Some(chrome));
     assert_eq!(
@@ -201,7 +201,7 @@ fn a_session_with_no_chrome_gets_no_browser_and_is_told_why() {
         "{header:?} {instructions}"
     );
     let run = seen.run.as_ref().unwrap();
-    assert!(!run.join("browser-profile").exists());
+    assert!(!run.join("agent-browser").exists());
     assert_eq!(
         header_browser(&header),
         Some(tool(

@@ -3,7 +3,7 @@ use std::path::{Component, Path, PathBuf};
 use clauseo_settings::Locations;
 use serde_json::{Map, Value, json};
 
-use super::{EXTENDS, PROFILE, SET_ASIDE_GLOB, Session, keys};
+use super::{EXTENDS, Listed, PROFILE, SET_ASIDE_GLOB, Session, keys};
 
 /// What of `<data>` is left readable to a Codex shell on purpose, with why. The guard test checks
 /// that each `Locations` path is denied or here.
@@ -26,19 +26,19 @@ fn locations() -> Locations {
     Locations::under_root(Path::new(ROOT))
 }
 
-fn data() -> PathBuf {
+pub(crate) fn data() -> PathBuf {
     locations().data_dir().to_path_buf()
 }
 
-fn run_root() -> PathBuf {
+pub(crate) fn run_root() -> PathBuf {
     data().join("run").join("s1")
 }
 
-fn notes() -> PathBuf {
+pub(crate) fn notes() -> PathBuf {
     data().join("agent-state").join("m1").join("notes")
 }
 
-fn codex_home() -> PathBuf {
+pub(crate) fn codex_home() -> PathBuf {
     locations().agent_home("codex-acp")
 }
 
@@ -46,14 +46,60 @@ fn matter() -> PathBuf {
     PathBuf::from("/home/lawyer/Matters/Smith v Jones")
 }
 
-fn fence() -> Map<String, Value> {
+/// The fence before the launch lists anything: `run`, `agent-state` and `agents/runtime` whole.
+pub(crate) fn fence() -> Map<String, Value> {
+    fence_with(&Listed::default())
+}
+
+/// The fence with `listed` as the launch found the data folder.
+pub(crate) fn fence_with(listed: &Listed) -> Map<String, Value> {
     let (run_root, notes, codex_home) = (run_root(), notes(), codex_home());
     let session = Session {
         run_root: &run_root,
         notes: &notes,
         codex_home: &codex_home,
+        listed,
     };
     keys(&locations(), session, false)
+}
+
+/// `<data>/agents/runtime`.
+pub(crate) fn runtime() -> PathBuf {
+    data().join("agents").join("runtime")
+}
+
+pub(crate) const PYTHON: &str = "clauseo-python-3.13.18-c2-macos-arm64";
+pub(crate) const NODE: &str = "node-v24.22.0-darwin-arm64";
+
+/// What a launch of session `s1` for matter `m1` lists: sessions `s2` and `s3`, matter `m2`
+/// and `m1`'s scratch folder beside its notes, a set-aside run, Claude's folder, the sign-in
+/// shim, another agent's folder and the npm settings under `agents`, and Node, a half-unpacked
+/// folder and a file beside Python's build in the runtime folder.
+pub(crate) fn listed() -> Listed {
+    let data = data();
+    let agents = data.join("agents");
+    Listed {
+        run: Some(vec![
+            data.join("run").join("s2"),
+            data.join("run").join("s3"),
+        ]),
+        agent_state: Some(vec![
+            data.join("agent-state").join("m1").join("scratch"),
+            data.join("agent-state").join("m2"),
+        ]),
+        set_aside: vec![data.join("run.old-0")],
+        agents: Some(vec![
+            agents.join("claude-acp"),
+            agents.join("other-agent"),
+            agents.join("npmrc"),
+            agents.join("signin"),
+        ]),
+        runtime: Some(vec![
+            runtime().join(NODE),
+            runtime().join(format!(".tmp-{NODE}")),
+            runtime().join("notes.txt"),
+        ]),
+    }
 }
 
 /// The profile's rules as codex-rs compiles them: each scoped subpath joined to its base, each
@@ -111,9 +157,14 @@ fn rank(mode: &str) -> u8 {
     }
 }
 
-/// How a turn's policy is made (codex-rs `core/src/session/session.rs:491-507`).
+/// How a turn's policy is made (codex-rs `core/src/session/session.rs:491-507`), and an
+/// approved escalated command's.
 #[derive(Clone, Copy)]
-enum Turn {
+pub(crate) enum Turn {
+    /// An approved escalated command (`for_approved_command`, codex-rs
+    /// `protocol/src/permissions/target.rs:48-110`): `:root` writable and the profile's deny
+    /// entries only.
+    Escalated,
     /// The profile as loaded: all its entries, no extra roots.
     Profile,
     /// Rebuilt from codex-acp's `workspaceWrite` policy: its writable roots (the matter folder
@@ -126,7 +177,12 @@ enum Turn {
 /// (`protocol/src/permissions.rs:1043-1048`): `/` readable and the matter folder writable
 /// (`:workspace`), with the rules `turn` keeps; the deepest matching rule wins, and `deny` wins
 /// a tie. A deny glob that matches denies.
-fn access_in(keys: &Map<String, Value>, turn: Turn, path: &Path) -> String {
+pub(crate) fn access_in(keys: &Map<String, Value>, turn: Turn, path: &Path) -> String {
+    access_with(keys, turn, path, &[run_root(), notes()])
+}
+
+/// [`access_in`] for a session whose `additionalDirectories` are `own`.
+fn access_with(keys: &Map<String, Value>, turn: Turn, path: &Path, own: &[PathBuf]) -> String {
     let (exact, globs) = compiled(keys);
     if globs.iter().any(|glob| glob_matches(glob, path)) {
         return "deny".to_owned();
@@ -136,10 +192,14 @@ fn access_in(keys: &Map<String, Value>, turn: Turn, path: &Path) -> String {
         (matter(), "write".to_owned()),
     ];
     match turn {
+        Turn::Escalated => {
+            rules = vec![(PathBuf::from("/"), "write".to_owned())];
+            rules.extend(exact.into_iter().filter(|(_, mode)| mode == "deny"));
+        }
         Turn::Profile => rules.extend(exact),
         Turn::Rebuilt => {
             rules.extend(exact.into_iter().filter(|(_, mode)| mode == "deny"));
-            rules.extend([run_root(), notes()].map(|root| (root, "write".to_owned())));
+            rules.extend(own.iter().map(|root| (root.clone(), "write".to_owned())));
         }
     }
     rules
@@ -150,7 +210,7 @@ fn access_in(keys: &Map<String, Value>, turn: Turn, path: &Path) -> String {
 }
 
 /// The access in both kinds of turn, which must agree.
-fn access(keys: &Map<String, Value>, path: &Path) -> String {
+pub(crate) fn access(keys: &Map<String, Value>, path: &Path) -> String {
     let profile = access_in(keys, Turn::Profile, path);
     assert_eq!(
         profile,
@@ -161,7 +221,22 @@ fn access(keys: &Map<String, Value>, path: &Path) -> String {
     profile
 }
 
-fn readable(keys: &Map<String, Value>, path: &Path) -> bool {
+/// The access a Codex shell gets to `path` in a session whose run folder and notes are `own`,
+/// in both kinds of turn, which must agree. For other modules' tests (`launch_checks`).
+pub(crate) fn session_access(keys: &Map<String, Value>, own: &[PathBuf], path: &Path) -> String {
+    let profile = access_with(keys, Turn::Profile, path, own);
+    let rebuilt = access_with(keys, Turn::Rebuilt, path, own);
+    assert_eq!(profile, rebuilt, "{}", path.display());
+    profile
+}
+
+/// An approved escalated command's access to `path` (`for_approved_command`: `:root` writable
+/// and the deny entries only). For other modules' tests (`launch_checks`).
+pub(crate) fn escalated_access(keys: &Map<String, Value>, path: &Path) -> String {
+    access_with(keys, Turn::Escalated, path, &[])
+}
+
+pub(crate) fn readable(keys: &Map<String, Value>, path: &Path) -> bool {
     access(keys, path) != "deny"
 }
 
@@ -359,6 +434,7 @@ fn windows_gets_no_fence() {
         run_root: &run_root,
         notes: &notes,
         codex_home: &codex_home,
+        listed: &listed(),
     };
     assert!(keys(&locations(), session, true).is_empty());
 }
@@ -376,6 +452,7 @@ fn a_data_folder_with_a_glob_character_is_named_literally_without_the_set_aside_
         run_root: &run_root,
         notes: &notes,
         codex_home: &codex_home,
+        listed: &Listed::default(),
     };
     let keys = keys(&locations, session, false);
     let scoped = keys["permissions"][PROFILE]["filesystem"][data.to_str().unwrap()]

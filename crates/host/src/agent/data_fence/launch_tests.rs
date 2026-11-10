@@ -7,7 +7,10 @@ use serde_json::json;
 
 use super::launch::claude_project_key;
 use super::tests::{check, layout, text};
-use super::{DENIED, LaunchDeny, SHARED, claude_deny_rules, claude_projects, launch_deny};
+use super::{
+    DENIED, LaunchDeny, READ_ONLY, SHARED, claude_allow_rules, claude_deny_rules, claude_projects,
+    launch_deny,
+};
 use crate::write;
 
 /// What a data folder may hold beside the layout's own: other sessions' run folders (one set
@@ -289,4 +292,155 @@ fn covers(target: &str, file: &str) -> bool {
             .iter()
             .zip(&names)
             .all(|(part, name)| fits(part, name))
+}
+
+const PYTHON: &str = "clauseo-python-3.13.18-c2-macos-arm64";
+const NODE: &str = "node-v24.22.0-darwin-arm64";
+
+/// Clauseo's Python runtime and `<data>/tools` are in no `Read` deny and are allowed `Read`,
+/// and are `Edit`-denied, all under them; Node, a half-unpacked folder, a link named like a
+/// Python build, the sign-in shim and the rest of `agents` stay denied for both.
+#[test]
+fn python_and_tools_are_readable_never_editable_and_their_siblings_stay_denied() {
+    let dir = layout("read-only");
+    let root = dir.path();
+    let data = root.join("data");
+    let runtime = data.join("agents").join("runtime");
+    for file in [
+        runtime.join(PYTHON).join("bin").join("python3"),
+        runtime.join(PYTHON).join("lib").join("os.py"),
+        runtime.join(NODE).join("bin").join("node"),
+        runtime
+            .join(format!(".tmp-{NODE}"))
+            .join("bin")
+            .join("node"),
+        data.join("agents").join("signin").join("shim"),
+        data.join("agents").join("npm-cache").join("x"),
+        data.join("tools").join("agent-browser"),
+    ] {
+        write::create_dir_all(file.parent().unwrap()).unwrap();
+        write::write_file(&file, b"x").unwrap();
+    }
+    #[cfg(unix)]
+    write::symlink(
+        &data.join("agents").join("claude-acp").join("home"),
+        &runtime.join("clauseo-python-link"),
+    )
+    .unwrap();
+    let deny = launch(root);
+    let mut denied = vec![
+        format!("agents/runtime/{NODE}/**"),
+        format!("agents/runtime/.tmp-{NODE}/**"),
+        "agents/signin/**".to_owned(),
+        "agents/npm-cache/**".to_owned(),
+    ];
+    if cfg!(unix) {
+        denied.push("agents/runtime/clauseo-python-link".to_owned());
+        denied.push("agents/runtime/clauseo-python-link/**".to_owned());
+    }
+    for target in &denied {
+        assert!(deny.targets.contains(target), "{target}: {deny:?}");
+    }
+    for open in [PYTHON, "tools"] {
+        assert!(
+            !deny.targets.iter().any(|t| t.contains(open)),
+            "{open}: {deny:?}"
+        );
+    }
+    for whole in ["agents/runtime/**", "agents/**"] {
+        assert!(
+            !deny.targets.iter().any(|t| t == whole),
+            "{whole}: {deny:?}"
+        );
+    }
+    let base = super::rule_path(&text(&data), cfg!(windows));
+    let rules = claude_deny_rules(&deny);
+    let allow = claude_allow_rules(&deny);
+    for place in ["agents/runtime/clauseo-python-*", "tools"] {
+        assert!(READ_ONLY.contains(&place));
+        let edit = format!("Edit({base}/{place}/**)");
+        assert!(rules.contains(&edit), "{edit}");
+        let read = format!("Read({base}/{place}/**)");
+        assert!(allow.contains(&read), "{read}");
+        assert!(!rules.contains(&read), "{read}");
+    }
+    assert!(
+        !rules
+            .iter()
+            .any(|r| r.starts_with("Read(") && r.contains(PYTHON))
+    );
+    assert!(
+        !rules
+            .iter()
+            .any(|r| r.starts_with("Read(") && r.contains("/tools"))
+    );
+    // Nothing else is allowed: the built-in skills and these two.
+    assert_eq!(allow.len(), 1 + READ_ONLY.len());
+    for target in &denied {
+        assert!(
+            rules.contains(&format!("Read({base}/{target})")),
+            "{target}"
+        );
+        assert!(
+            rules.contains(&format!("Edit({base}/{target})")),
+            "{target}"
+        );
+    }
+}
+
+/// The fixed rules (before the launch lists anything): Node and half-unpacked folders under
+/// `agents/runtime`, not the folder whole; `<data>/browser` still; and in every run folder,
+/// the own one too, the shell browser's config file, which agent-browser reads itself.
+#[test]
+fn the_fixed_rules_deny_node_browser_and_every_shell_browser_config() {
+    for target in [
+        "agents/runtime/node-v*/**",
+        "agents/runtime/.tmp-*/**",
+        "browser/**",
+        "run/*/agent-browser/config.json",
+        "agents/signin/**",
+    ] {
+        assert!(DENIED.contains(&target), "{target}");
+    }
+    assert!(!DENIED.contains(&"agents/runtime/**"));
+    let rules = claude_deny_rules(&LaunchDeny::fixed(vec![std::path::PathBuf::from("/d")]));
+    for rule in [
+        "Read(//d/run/*/agent-browser/config.json)",
+        "Edit(//d/run/*/agent-browser/config.json)",
+        "Read(//d/browser/**)",
+        "Edit(//d/agents/runtime/clauseo-python-*/**)",
+        "Edit(//d/tools/**)",
+    ] {
+        assert!(rules.iter().any(|r| r == rule), "{rule}");
+    }
+}
+
+/// The own run folder's `agent-browser` folder (its profile and downloads) is in no launch
+/// rule; another session's is, with its whole run folder.
+#[test]
+fn the_own_agent_browser_folder_is_open_and_another_sessions_is_denied() {
+    let dir = layout("agent-browser");
+    let root = dir.path();
+    let data = root.join("data");
+    for session in ["s1", "s2"] {
+        let own = data.join("run").join(session).join("agent-browser");
+        for file in [own.join("config.json"), own.join("downloads").join("a.pdf")] {
+            write::create_dir_all(file.parent().unwrap()).unwrap();
+            write::write_file(&file, b"x").unwrap();
+        }
+        write::create_dir_all(&own.join("profile")).unwrap();
+    }
+    let deny = launch(root);
+    assert!(deny.targets.iter().any(|t| t == "run/s2/**"), "{deny:?}");
+    assert!(
+        !deny.targets.iter().any(|t| t.contains("run/s1")),
+        "{deny:?}"
+    );
+    let own = data.join("run").join("s1").join("agent-browser");
+    for path in [own.join("downloads").join("a.pdf"), own.join("profile")] {
+        let path = text(&path);
+        assert!(!check(root, &[&path], None).touches_data(), "{path}");
+    }
+    let theirs = text(&data.join("run/s2/agent-browser/downloads/a.pdf"));
+    assert!(check(root, &[&theirs], None).touches_data(), "{theirs}");
 }

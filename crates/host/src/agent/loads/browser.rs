@@ -237,10 +237,12 @@ fn browser_entry(
 
 /// agent-browser's variables for a session with the browser as a shell tool, which the host
 /// forces into the agent's environment (the hook is session-blind): the session's name
-/// (`AGENT_BROWSER_SESSION`, the session's id), Clauseo's config file (`AGENT_BROWSER_CONFIG`,
+/// (`AGENT_BROWSER_SESSION`, the session's id), the session's config file (`AGENT_BROWSER_CONFIG`,
 /// `{}`, so the lawyer's `~/.agent-browser/config.json` is never read), the session's own
 /// downloads folder and Chrome profile (`AGENT_BROWSER_DOWNLOAD_PATH`, `AGENT_BROWSER_PROFILE`,
-/// both under its run folder, so never the lawyer's own profile) and the Chrome the launch prep
+/// so never the lawyer's own profile), all three in its run folder's `agent-browser` folder,
+/// the one place the data fences open to this session's agent-browser and to no other session's
+/// (`agent::codex_fence`, `agent::data_fence`), and the Chrome the launch prep
 /// found (`AGENT_BROWSER_EXECUTABLE_PATH`), and [`IDLE_TIMEOUT_MS`]. No proxy, stream port or
 /// socket folder: the shell tool has none of the guard's claims.
 pub(crate) fn shell_env(inputs: &ShellInputs<'_>) -> BTreeMap<OsString, OsString> {
@@ -274,11 +276,11 @@ pub(crate) const IDLE_TIMEOUT_MS: &str = "600000";
 pub(crate) struct ShellInputs<'a> {
     /// The session's id (`SessionKey::id`).
     pub(crate) session: &'a str,
-    /// `<data>/browser/agent-browser.json` (`browser::write_config`).
+    /// `<data>/run/<session id>/agent-browser/config.json` (`browser::write_session_config`).
     pub(crate) config: &'a Path,
-    /// `<data>/run/<session id>/downloads`.
+    /// `<data>/run/<session id>/agent-browser/downloads`.
     pub(crate) downloads: &'a Path,
-    /// `<data>/run/<session id>/browser-profile`.
+    /// `<data>/run/<session id>/agent-browser/profile`.
     pub(crate) profile: &'a Path,
     /// The Chrome the launch prep found.
     pub(crate) executable: &'a Path,
@@ -378,16 +380,21 @@ mod shell_tests {
     }
 
     /// The six variables, each exactly once, with the values given (the idle timeout 10 minutes,
-    /// in milliseconds): nothing about a proxy, a stream port or a socket folder.
+    /// in milliseconds): nothing about a proxy, a stream port or a socket folder. The config, the
+    /// downloads and the profile all sit in the session's own `agent-browser` folder, never in
+    /// `<data>/browser` (`launch_checks`' tests check the folders the launch builds).
     #[test]
     fn shell_env_is_the_session_config_folders_and_chrome() {
-        // Joined as the host joins them, so the separator is the OS's own (`\` on Windows).
-        let run = PathBuf::from("/data/run/t-1");
-        let downloads = run.join("downloads");
-        let profile = run.join("browser-profile");
+        // Joined as the host joins them, so the separator is the OS's own (`\\` on Windows).
+        let data = PathBuf::from("/data");
+        let session = "t-1".to_owned();
+        let own = data.join("run").join(&session).join("agent-browser");
+        let config = own.join("config.json");
+        let downloads = own.join("downloads");
+        let profile = own.join("profile");
         let inputs = ShellInputs {
-            session: "t-1",
-            config: Path::new("/data/browser/agent-browser.json"),
+            session: &session,
+            config: &config,
             downloads: &downloads,
             profile: &profile,
             executable: Path::new("/opt/chrome"),
@@ -400,14 +407,23 @@ mod shell_tests {
         assert_eq!(
             text,
             [
-                ("AGENT_BROWSER_CONFIG", "/data/browser/agent-browser.json"),
+                ("AGENT_BROWSER_CONFIG", config.to_str().unwrap()),
                 ("AGENT_BROWSER_DOWNLOAD_PATH", downloads.to_str().unwrap()),
                 ("AGENT_BROWSER_EXECUTABLE_PATH", "/opt/chrome"),
                 ("AGENT_BROWSER_IDLE_TIMEOUT_MS", "600000"),
                 ("AGENT_BROWSER_PROFILE", profile.to_str().unwrap()),
-                ("AGENT_BROWSER_SESSION", "t-1"),
+                ("AGENT_BROWSER_SESSION", session.as_str()),
             ]
         );
+        for name in [
+            "AGENT_BROWSER_CONFIG",
+            "AGENT_BROWSER_DOWNLOAD_PATH",
+            "AGENT_BROWSER_PROFILE",
+        ] {
+            let path = Path::new(&env[&OsString::from(name)]);
+            assert!(path.starts_with(&own), "{name}");
+            assert!(!path.starts_with(data.join("browser")), "{name}");
+        }
     }
 
     #[test]

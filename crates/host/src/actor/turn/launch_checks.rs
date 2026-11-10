@@ -50,6 +50,7 @@ use super::super::input::Input;
 use super::agents::{self, Waiting};
 use super::{TurnInput, host_stopping, state};
 
+use crate::agent::codex_fence::Listed;
 use crate::agent::data_fence::LaunchDeny;
 use crate::agent::folder_support::{Answer, FolderCheck};
 use crate::agent::login_link::{self, Checked, LoginCheck};
@@ -125,8 +126,12 @@ pub(crate) struct RunFolders {
     /// The browser as a shell tool (`ProfileHook::browser_tool`, `tools.browser` on): the
     /// session has it once [`Self::chrome`] is found and its two folders below are made.
     pub(crate) browser_shell: bool,
-    /// `<root>/downloads`, `AGENT_BROWSER_DOWNLOAD_PATH`, and `<root>/browser-profile`,
-    /// `AGENT_BROWSER_PROFILE`: made only for the shell tool, gone with the run folder.
+    /// `<root>/agent-browser` (`browser::SESSION_DIR`): the shell tool's own folder, holding
+    /// `config.json` (`AGENT_BROWSER_CONFIG`), `downloads` (`AGENT_BROWSER_DOWNLOAD_PATH`) and
+    /// `profile` (`AGENT_BROWSER_PROFILE`): made only for the shell tool, gone with the run
+    /// folder. Inside the run folder, so the data fences reopen it for this session only.
+    pub(crate) agent_browser: PathBuf,
+    pub(crate) browser_config: PathBuf,
     pub(crate) downloads: PathBuf,
     pub(crate) browser_profile: PathBuf,
     /// `<root>/skill-packs`: the launch's own plugin of skill packs (decision record 0040),
@@ -141,6 +146,10 @@ pub(crate) struct RunFolders {
     /// entry that is not this session's own enumerated by the launch prep. Run folders and
     /// matters' notes made after the launch are in no rule (the accepted residual).
     pub(crate) data_deny: LaunchDeny,
+    /// What the launch prep listed for Codex's data fence (`agent::codex_fence::list`): the
+    /// siblings of this session's run folder and notes, `run.old-*`, and what of `<data>/agents`
+    /// and its runtime folder the shell needs not. Each folder is denied whole until then.
+    pub(crate) codex_listed: Listed,
     /// `<root>/relay-token`: the case-law relay's token file (R24), written by the launch prep
     /// only when the session's relay opened, and gone with the run folder. R17 passes this to
     /// `PolicyBuilder::read_only_in_state`.
@@ -170,12 +179,15 @@ impl RunFolders {
     /// The folders of `key`'s session under `data`. Paths only: nothing is made here.
     pub(crate) fn new(data: &Path, key: SessionKey) -> Self {
         let root = run_dir(data).join(key.id());
+        let agent_browser = root.join(crate::browser::SESSION_DIR);
         Self {
             key,
             work: root.join("work"),
             browser: root.join("browser"),
-            downloads: root.join("downloads"),
-            browser_profile: root.join("browser-profile"),
+            browser_config: agent_browser.join(crate::browser::SESSION_CONFIG),
+            downloads: agent_browser.join("downloads"),
+            browser_profile: agent_browser.join("profile"),
+            agent_browser,
             skill_packs: root.join("skill-packs"),
             relay_token: relay::token_file(&root),
             notes: notes_dir(data, key.matter),
@@ -187,6 +199,7 @@ impl RunFolders {
             browser_shell: false,
             packs_written: None,
             data_deny: LaunchDeny::fixed(vec![data.to_owned()]),
+            codex_listed: Listed::default(),
             case_law: relay::CaseLaw::Absent,
             egress: None,
             lease: Arc::default(),
@@ -351,6 +364,7 @@ pub(super) fn prepare(
                 }
                 run.make(&data, &sweep)?;
                 run.data_deny = launch_deny(&run, &stored, &data, claude_home.as_deref());
+                run.codex_listed = crate::agent::codex_fence::list(&data, &run.root, &run.notes);
                 claim(&mut run, &data, claims, slot);
                 let skills_written = write_skills(&skills);
                 let packs_skipped;
@@ -403,7 +417,7 @@ fn claim(run: &mut RunFolders, data: &Path, claims: Claims, slot: bool) {
     (run.chrome, run.browser_session) = (prepared.chrome, prepared.session);
     (run.browser_blocked, run.browser_policy_read) = (prepared.policy_block, prepared.policy_read);
     if run.browser_shell && run.chrome.is_some() {
-        shell_folders(run, data);
+        browser::shell_folders(run, data);
     }
     // The launch offers the browser only once its Chrome was found and claimed.
     let offered = run.chrome.is_some() && run.browser_session.is_some();
@@ -415,22 +429,6 @@ fn claim(run: &mut RunFolders, data: &Path, claims: Claims, slot: bool) {
         egress: run.egress.clone(),
     };
     run.lease.keep(held, parts);
-}
-
-/// Makes the shell tool's downloads and profile folders, in the launch's own run folder, so the
-/// profile starts empty: no earlier launch's cookies. One that cannot be made leaves the session
-/// without the browser (`BrowserNotInstalled`), with a warning; the launch goes on.
-fn shell_folders(run: &mut RunFolders, data: &Path) {
-    for folder in [&run.downloads, &run.browser_profile] {
-        if let Err(error) = crate::write::create_private_dirs_under(data, folder) {
-            tracing::warn!(
-                error = %crate::log_file::Cause(&error),
-                "a browser folder was not made; the session has no browser"
-            );
-            run.chrome = None;
-            return;
-        }
-    }
 }
 
 /// A prep nobody waits for any more takes back what it made: the relay's token first, then the

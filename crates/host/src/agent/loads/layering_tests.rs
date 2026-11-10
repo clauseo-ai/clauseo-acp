@@ -377,7 +377,9 @@ fn every_claude_session_denies_the_data_folders_clauseo_only_subtrees() {
         );
         assert!(
             !rules.iter().any(|rule| {
-                (rule.contains("/run/") && !rule.ends_with("/run/*/relay-token)"))
+                (rule.contains("/run/")
+                    && !rule.ends_with("/run/*/relay-token)")
+                    && !rule.ends_with("/run/*/agent-browser/config.json)"))
                     || rule.contains("/agent-state")
             }),
             "{rules:?}"
@@ -435,7 +437,8 @@ fn covers(rule: &str, tool: &str, path: &str) -> bool {
 
 /// A Claude session's flag settings allow a Read of Clauseo's built-in skill assets, for each
 /// spelling of the data folder, after the hook's own allow rules, so a built-in skill never asks
-/// the lawyer; no deny rule covers them, and no allow covers anything else in the data folder.
+/// the lawyer; no deny rule covers them, and no allow covers anything else in the data folder
+/// but a Read of the agents' commands and Clauseo's Python runtime (`data_fence::READ_ONLY`).
 #[test]
 fn claude_may_read_the_built_in_skills_without_a_prompt_and_nothing_else_in_data() {
     let spellings = ["/data", "/link/data"];
@@ -470,11 +473,13 @@ fn claude_may_read_the_built_in_skills_without_a_prompt_and_nothing_else_in_data
     };
     let (allow, deny) = (strings("allow"), strings("deny"));
     let want: Vec<String> = std::iter::once("Bash(ls:*)".to_owned())
-        .chain(
-            spellings
-                .iter()
-                .map(|data| format!("Read(/{data}/profile/claude-plugin/skills/**)")),
-        )
+        .chain(spellings.iter().flat_map(|data| {
+            [
+                format!("Read(/{data}/profile/claude-plugin/skills/**)"),
+                format!("Read(/{data}/tools/**)"),
+                format!("Read(/{data}/agents/runtime/clauseo-python-*/**)"),
+            ]
+        }))
         .collect();
     assert_eq!(allow, want);
     for data in spellings {

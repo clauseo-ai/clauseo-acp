@@ -72,6 +72,7 @@ pub(super) fn launch_keys(
             run_root: &prepared.run.root,
             notes: &prepared.run.notes,
             codex_home: &codex.home,
+            listed: &prepared.run.codex_listed,
         };
         let fence =
             crate::agent::codex_fence::keys(actor.effective.locations(), session, cfg!(windows));
@@ -291,14 +292,10 @@ pub(super) fn with_shell_env(
     let Some(executable) = shell_chrome(actor, run) else {
         return env;
     };
-    let config = actor.effective.locations().data_dir();
-    let config = config
-        .join(crate::browser::CONFIG_DIR)
-        .join(crate::browser::CONFIG_FILE);
     let session = run.key.id();
     let inputs = browser::ShellInputs {
         session: &session,
-        config: &config,
+        config: &run.browser_config,
         downloads: &run.downloads,
         profile: &run.browser_profile,
         executable,
