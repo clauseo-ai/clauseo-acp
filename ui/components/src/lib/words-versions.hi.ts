@@ -73,6 +73,13 @@ const OWN = {
   "No changes since then.": "तब से कोई बदलाव नहीं।",
   "Changed since {time} on {date}": "{date} को {time} बजे के बाद बदला गया",
   "Changed since {time} today": "आज {time} बजे के बाद बदला गया",
+  // a file added or removed since the version, and the side of the sheet it has no paper on
+  "Added since {time} on {date}": "{date} को {time} बजे के बाद जोड़ा गया",
+  "Added since {time} today": "आज {time} बजे के बाद जोड़ा गया",
+  "Removed since {time} on {date}": "{date} को {time} बजे के बाद हटाया गया",
+  "Removed since {time} today": "आज {time} बजे के बाद हटाया गया",
+  "This paper wasn't in the matter then.": "यह दस्तावेज़ तब मामले में नहीं था।",
+  "This paper isn't in the matter now.": "यह दस्तावेज़ अब मामले में नहीं है।",
   "As it was at {time} on {date}": "जैसा {date} को {time} बजे था",
   "As it was at {time} today": "जैसा आज {time} बजे था",
   // a Word document's changes, marked up by the host's Word tool (UC-113 to UC-116); provisional, English and Hindi

@@ -16,7 +16,7 @@ import { late } from "@clauseo/components/lib/late.ts";
 import type { ViewStore } from "../../store/store.ts";
 import type { HostTransport } from "../../transport/host-transport.ts";
 import type { MatterId, ThreadId } from "../../transport/protocol.ts";
-import type { Papers } from "../host-next.ts";
+import type { Papers, PapersHost } from "../host-next.ts";
 import type { Blacklines } from "./blackline.ts";
 import type { VersionsController } from "./controller.ts";
 import { NO_STAND_INS, type StandIns } from "./stand-ins.ts";
@@ -73,6 +73,7 @@ export function useVersions({
   matter,
   thread = null,
   papers,
+  lister = null,
   platform,
   standIns = NO_STAND_INS,
 }: {
@@ -82,6 +83,8 @@ export function useVersions({
   /** Optional: the matter's open conversation, which records a restore made from Versions; null for a draft. */
   thread?: ThreadId | null;
   papers: Papers | null;
+  /** Optional: H8's list_papers, for a file Versions opens that the room's list doesn't hold yet. */
+  lister?: PapersHost | null;
   platform: Platform;
   /** Optional, for tests and the review page: the host changes still to land. None by default. */
   standIns?: StandIns;
@@ -172,6 +175,10 @@ export function useVersions({
   };
   const undoWaits = useSyncExternalStore(watch, nothing, nothing);
   const fileRef = (path: string) => papers?.papers.find((p) => p.path === path)?.file ?? null;
+  const freshRef = async (path: string) =>
+    matter === null || lister === null
+      ? null
+      : ((await lister.listPapers(matter)).papers.find((p) => p.path === path)?.file ?? null);
   if (live === null)
     return {
       open: false,
@@ -211,6 +218,7 @@ export function useVersions({
       blacklines,
       standIns,
       fileRef,
+      freshRef,
       onLeave: close,
       onPanel: panel ? null : onPanel,
       onAway: panel ? putAway : null,

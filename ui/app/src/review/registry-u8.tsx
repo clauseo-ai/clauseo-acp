@@ -328,6 +328,10 @@ const state = (id: string, words: WordsRef, m: Matter, clicks: readonly string[]
 const UNDO_RESTORE: Matter = { restored: true, removes: ["Reply notes.md"] };
 const UNDOING = [OPEN, '[data-testid="version"][data-checkpoint="cp7"]', UNDO] as const;
 
+/** A file added since the version, and one removed since. */
+const ADDED: FileChange[] = [{ ...file("Reply notes.md"), change: "added" }];
+const REMOVED: FileChange[] = [{ ...file("Old memo.txt"), change: "deleted" }];
+
 /** A document whose words can't be compared yet: a Word document is marked up instead (registry-uc-blackline.tsx). */
 const SHEET = [file("Notes for counsel.txt")];
 /** A PDF, whose sheet shows both sides and says a PDF shows only whether it changed. */
@@ -471,4 +475,36 @@ export const U8: Entry[] = [
     [],
   ),
   state("U8-29", threadWords("You undid the restore."), { recorded: "undo" }, []),
+  // compared with now, a file added since the version, and one removed since: the sheet says which, and the side with
+  // no paper says so
+  state("U8-30", versionWords("Added since {time} on {date}"), { compare: ADDED }, [
+    OPEN,
+    EARLIER,
+    COMPARE,
+  ]),
+  state("U8-31", versionWords("Added since {time} today"), { compare: ADDED }, [
+    OPEN,
+    TODAY,
+    COMPARE,
+  ]),
+  state("U8-32", versionWords("Removed since {time} on {date}"), { compare: REMOVED }, [
+    OPEN,
+    EARLIER,
+    COMPARE,
+  ]),
+  state("U8-33", versionWords("Removed since {time} today"), { compare: REMOVED }, [
+    OPEN,
+    TODAY,
+    COMPARE,
+  ]),
+  state("U8-34", versionWords("This paper wasn't in the matter then."), { compare: ADDED }, [
+    OPEN,
+    TODAY,
+    COMPARE,
+  ]),
+  state("U8-35", versionWords("This paper isn't in the matter now."), { compare: REMOVED }, [
+    OPEN,
+    TODAY,
+    COMPARE,
+  ]),
 ];

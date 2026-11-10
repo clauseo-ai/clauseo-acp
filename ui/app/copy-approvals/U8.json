@@ -241,5 +241,71 @@
     "at": "2026-11-10",
     "by": "app track (provisional; Rohan batch review)",
     "note": "D-036: the same for the undo of a restore"
+  },
+  "U8-30": {
+    "en": "Added since {time} on {date}",
+    "hi": "{date} को {time} बजे के बाद जोड़ा गया",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-10",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-10",
+    "by": "app track (provisional; Rohan batch review)",
+    "note": "D-032: Compare with now for a file added or removed since the version, shaped like U8-07/08"
+  },
+  "U8-31": {
+    "en": "Added since {time} today",
+    "hi": "आज {time} बजे के बाद जोड़ा गया",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-10",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-10",
+    "by": "app track (provisional; Rohan batch review)",
+    "note": "D-032: Compare with now for a file added or removed since the version, shaped like U8-07/08"
+  },
+  "U8-32": {
+    "en": "Removed since {time} on {date}",
+    "hi": "{date} को {time} बजे के बाद हटाया गया",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-10",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-10",
+    "by": "app track (provisional; Rohan batch review)",
+    "note": "D-032: Compare with now for a file added or removed since the version, shaped like U8-07/08"
+  },
+  "U8-33": {
+    "en": "Removed since {time} today",
+    "hi": "आज {time} बजे के बाद हटाया गया",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-10",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-10",
+    "by": "app track (provisional; Rohan batch review)",
+    "note": "D-032: Compare with now for a file added or removed since the version, shaped like U8-07/08"
+  },
+  "U8-34": {
+    "en": "This paper wasn't in the matter then.",
+    "hi": "यह दस्तावेज़ तब मामले में नहीं था।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-10",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-10",
+    "by": "app track (provisional; Rohan batch review)",
+    "note": "D-032: the then side of a file added since the version"
+  },
+  "U8-35": {
+    "en": "This paper isn't in the matter now.",
+    "hi": "यह दस्तावेज़ अब मामले में नहीं है।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-10",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-10",
+    "by": "app track (provisional; Rohan batch review)",
+    "note": "D-032: the now side of a file removed since the version"
   }
 }
