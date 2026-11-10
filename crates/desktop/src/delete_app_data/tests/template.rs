@@ -500,6 +500,15 @@ fn the_main_window_class_is_clauseos_own_and_the_installer_looks_for_it() {
             crate::MAIN_WINDOW_CLASS
         )],
     );
+    // With the Safe workspace off, hooks.nsh defines it instead, for repair mode's wait.
+    let off = read("windows/hooks.nsh");
+    assert!(
+        off.contains(&format!(
+            "!define CLAUSEO_MAIN_WINDOW_CLASS \"{}\"",
+            crate::MAIN_WINDOW_CLASS
+        )),
+        "hooks.nsh"
+    );
     // Set where the main window is built.
     let lib = read("src/lib.rs");
     assert!(
