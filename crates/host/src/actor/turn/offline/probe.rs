@@ -17,6 +17,7 @@ use url::Url;
 use super::super::super::Actor;
 use super::super::super::input::Input;
 use super::super::TurnInput;
+use crate::log_file::Cause;
 
 /// The most the connection may take, its lookup included.
 const PROBE_CAP: Duration = Duration::from_secs(3);
@@ -103,7 +104,7 @@ pub(super) fn start(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
             let _gone = post.try_send(Input::Turn(input));
         });
     if let Err(error) = spawned {
-        tracing::warn!(%thread, %error, "the offline probe did not start");
+        tracing::warn!(%thread, error = %Cause(&error), "the offline probe did not start");
         super::on_probed(actor, thread, turn, false);
     }
 }

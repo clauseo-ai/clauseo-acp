@@ -370,3 +370,69 @@ fn claude_s_line_goes_back_when_a_cancel_the_agent_never_answers_ends_the_turn()
     assert_eq!(answer(&log, turn), format!("Clause five says{CLAUDE}"));
     rig.finish();
 }
+
+/// Codex's note while a tool call is open: the model call failed, so the open tool call is stale
+/// and the turn still ends offline after the wait.
+#[test]
+fn a_note_ends_the_turn_offline_even_with_a_tool_call_open() {
+    let script = format!(
+        r#"{{"expect":{{"method":"session/prompt","as":"p1","params":{{"sessionId":"sess-1"}}}}}}
+{{"update":{{"update":{{"sessionUpdate":"tool_call","toolCallId":"t-1","title":"Run the check","kind":"execute","status":"in_progress"}}}}}}
+{{"update":{{"update":{{"sessionUpdate":"agent_message_chunk","content":{{"type":"text","text":"{NOTE}"}}}}}}}}
+{{"expect":{{"method":"session/cancel","params":{{"sessionId":"sess-1"}}}}}}
+{{"respond":{{"to":"p1","result":{{"stopReason":"cancelled"}}}}}}
+"#
+    );
+    let mut rig = Rig::start("offline-note-tool", &script);
+    let (thread, turn) = prompting(&mut rig);
+    rig.run_until("the note's watch over the open tool call", |actor| {
+        let open = actor
+            .loaded(clauseo_protocol::StreamId::Thread(thread))
+            .is_some_and(|loaded| loaded.sent.unfinished_tools(turn).next().is_some());
+        let watched = actor.threads[&thread]
+            .turn
+            .current
+            .as_ref()
+            .is_some_and(|current| current.offline.is_some());
+        open && watched
+    });
+    rig.clock.advance(OFFLINE_WAIT);
+    until_ended(&mut rig, thread);
+    assert_eq!(
+        ended(&rig.log(thread), turn),
+        (Some(StopReason::Failed), Some(ErrorCode::AgentOffline))
+    );
+    rig.finish();
+}
+
+/// Claude's line, the prompt fails offline, and the agent exits while the turn ends (its
+/// after-turn checkpoint held back): the line stays out of the answer.
+#[test]
+fn claude_s_line_stays_dropped_when_the_agent_exits_during_an_offline_end() {
+    let rest = format!(
+        r#"{{"respond":{{"to":"p1","error":{{"code":-32603,"message":"Internal error: {CLAUDE}"}}}}}}
+{{"exit":{{"code":1}}}}"#
+    );
+    let mut rig = Rig::start("offline-claude-exit", &claude(&rest));
+    let (thread, turn) = prompting(&mut rig);
+    rig.run_holding(
+        "the agent's exit while the turn ends",
+        |_, input| matches!(input, crate::actor::input::Input::Matter { .. }),
+        |actor| actor.threads[&thread].turn.agent.is_none(),
+    );
+    let phase = rig.actor.threads[&thread]
+        .turn
+        .current
+        .as_ref()
+        .map(|current| current.phase);
+    assert_eq!(phase, Some(TurnPhase::Ending));
+    rig.release_held();
+    until_ended(&mut rig, thread);
+    let log = rig.log(thread);
+    assert_eq!(
+        ended(&log, turn),
+        (Some(StopReason::Failed), Some(ErrorCode::AgentOffline))
+    );
+    assert_eq!(answer(&log, turn), "Clause five says");
+    rig.finish();
+}
