@@ -917,6 +917,19 @@ test("sign-windows runs without the macOS and Linux legs; assemble and publish n
   }
 });
 
+test("a dry run's About shows its version with dev.<short sha>; a tag's shows the version alone", () => {
+  const text = readFileSync(RELEASE_YML, "utf8");
+  const check = jobCommands(text, "check");
+  assert.ok(check.includes("version_suffix: ${{ steps.mode.outputs.version_suffix }}"), "the check job's output");
+  assert.ok(
+    check.includes('if [ "$mode" = dry ]; then echo "version_suffix=dev.${GITHUB_SHA:0:9}"; else echo "version_suffix="; fi'),
+    "dry only",
+  );
+  // The ui job's vite build reads it (ui/app/vite.config.ts, appVersion).
+  const ui = jobCommands(text, "ui");
+  assert.ok(ui.includes("CLAUSEO_VERSION_SUFFIX: ${{ needs.check.outputs.version_suffix }}"), "the ui build's env");
+});
+
 test("the workflow lint fails each broken rule", () => {
   const good = [
     "on:",

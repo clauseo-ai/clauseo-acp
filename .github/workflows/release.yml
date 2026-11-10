@@ -104,6 +104,7 @@ jobs:
       environment: ${{ steps.mode.outputs.environment }}
       features: ${{ steps.mode.outputs.features }}
       release_date: ${{ steps.mode.outputs.release_date }}
+      version_suffix: ${{ steps.mode.outputs.version_suffix }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -202,6 +203,9 @@ jobs:
             echo "environment=$environment"
             echo "features=$features"
             echo "release_date=$release_date"
+            # About's version in a dry run, after the plain one: dev.<the commit's first 9 hex digits>
+            # (ui/app/vite.config.ts, appVersion). Tags show their own version alone.
+            if [ "$mode" = dry ]; then echo "version_suffix=dev.${GITHUB_SHA:0:9}"; else echo "version_suffix="; fi
           } | tee -a "$GITHUB_OUTPUT"
 
       # The overlays may hold only what they are for. Every sidecar, S15's included, goes through
@@ -353,6 +357,7 @@ jobs:
       - name: Build the ui with hidden source maps, then move the maps out
         env:
           MAPS: ${{ runner.temp }}/ui-sourcemaps
+          CLAUSEO_VERSION_SUFFIX: ${{ needs.check.outputs.version_suffix }}
         run: |
           set -euo pipefail
           pnpm -C ui --filter @clauseo/app exec vite build --sourcemap hidden
