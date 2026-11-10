@@ -10,7 +10,8 @@
 // lists H8's papers (host-next.ts's papers part, which the desktop gives through host-wire.ts). Folded, the rail closes
 // on Escape and on opening a matter or making one, and focus goes back to Matters; opening a conversation or starting
 // one closes it too, and the field takes the focus. Matters carries the court-yellow dot while another matter waits on
-// the lawyer. Cmd+N on the Mac, Ctrl+N elsewhere, starts a new conversation in the open matter; until its first
+// the lawyer. Cmd+N on the Mac, Ctrl+N elsewhere, starts a new conversation in the open matter, and Shift with it opens
+// New matter, as the Mac's native menu does too (room-commands.ts); until its first
 // question, the reading column's top says what it reads, once the matter's papers are counted. A link or paper in an
 // answer opens through the host (open.ts, H11), and so does a matter row's Show in Finder; a Word document's tile, and a
 // change note naming one, open it in Word (word/open-in-word.ts; the tiles are paper-wall.tsx). A
@@ -71,7 +72,8 @@ import { PickerLine } from "@clauseo/components/clauseo/picker-line.tsx";
 import { unprotectedFolder } from "./folder-support.ts";
 import { RoomRail } from "./rail.tsx";
 import { useSettingsKey } from "./settings-key.ts";
-import { useFindKey } from "./find-key.ts";
+import { focusFind, useFindKey } from "./find-key.ts";
+import { useRoomCommands } from "./room-commands.ts";
 import { ScratchLine } from "./scratch-line.tsx";
 import type { StandIns } from "./versions/stand-ins.ts";
 import { useVersions } from "./versions/use-versions.ts";
@@ -290,8 +292,7 @@ function RoomFrame({
     madeFolded.current = railOpen;
     setRailOpen(false);
   };
-  // New conversation's key, while a matter's conversations are in and no dialog holds the keys; an input method's
-  // composing key is its own
+  // New conversation's key, while a matter's conversations are in and no dialog holds the keys
   const mac = platform === "mac";
   const endVersions = versions.close;
   const canStart =
@@ -303,24 +304,18 @@ function RoomFrame({
     // Versions' dialog, or a restore or undo still running, keeps the key: the dialog holds the focus, yet the key
     // still reaches the document, and ending Versions would drop the dialog or the act's result line
     versions.canLeave;
-  useEffect(() => {
-    if (!canStart) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.isComposing || e.keyCode === 229 || e.altKey || e.shiftKey) return;
-      // the letter the layout gives (Dvorak's N is N, its Ctrl+B is not); the key's place only where the layout gives no
-      // Latin letter (Devanagari, Cyrillic)
-      const key = e.key.toLowerCase();
-      if (/^[a-z]$/.test(key) ? key !== "n" : e.code !== "KeyN") return;
-      if (mac ? !e.metaKey || e.ctrlKey : !e.ctrlKey || e.metaKey) return;
-      e.preventDefault();
-      // a new conversation is now's: Versions ends first, through its controller, and the rail comes back
-      if (!endVersions()) return;
-      conversations.startNew();
-      setRailOpen(false);
-    };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [canStart, mac, conversations, endVersions]);
+  // a new conversation is now's: Versions ends first, through its controller, and the rail comes back
+  const startNew = () => {
+    if (!endVersions()) return;
+    conversations.startNew();
+    setRailOpen(false);
+  };
+  // New matter, from its key or the native menu, as the rail's button does, wherever the rail stands
+  const openNewMatter = () => {
+    madeFolded.current = false;
+    setNewMounted(true);
+    setNewOpen(true);
+  };
   // Settings, in a window of its own, from the rail's foot and on its key: only where the host has that window. A
   // refusal goes to the console, as an open or show does (open.ts)
   const [openSettings] = useState(() => {
@@ -339,6 +334,13 @@ function RoomFrame({
   const [findField] = useState(() => () => document.getElementById(room.id("find")));
   const [openRail] = useState(() => () => setRailOpen(true));
   useFindKey(findField, openRail, mac);
+  // ⌘N, ⇧⌘N and the native menu's New conversation, New matter and Find (room-commands.ts)
+  const newMatterNow = versions.rail == null && !newOpen ? openNewMatter : null;
+  const find = () => void focusFind(findField, openRail);
+  useRoomCommands(
+    { newConversation: canStart ? startNew : null, newMatter: newMatterNow, find },
+    mac,
+  );
   // the plan the open conversation uses, on the status line: its thread's, or the one a draft would run
   // nothing while the matter's list loads (its agent isn't known yet), or for an agent of no kind
   const openRow = talks.rows.find((r) => r.key === talks.open);
@@ -443,11 +445,7 @@ function RoomFrame({
           talks={talks}
           threads={threads}
           open={railOpen}
-          onNewMatter={() => {
-            madeFolded.current = false;
-            setNewMounted(true);
-            setNewOpen(true);
-          }}
+          onNewMatter={openNewMatter}
           onNewMatterPreload={preloadNewMatter}
           onMoved={fold}
           onConversation={() => setRailOpen(false)}
