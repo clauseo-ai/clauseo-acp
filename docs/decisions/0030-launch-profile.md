@@ -1025,9 +1025,11 @@ this record and firm-it §8.
     denied it too, on every OS. `allowRead`, which Claude Code ranks over `denyRead` (a
     narrower deny inside it still applies), re-opens those, plus
     `<run>/agent-browser/downloads`, `<run>/skill-packs`, the
-    built-in skills, stetdoc's folder and Clauseo's Python runtime folder (`<rt>`, where pandoc
-    also lives). The runtime is found from its `PATH` folder `<rt>/bin`. The whole run folder is
-    not opened: it holds the relay's token and the browser's profile (the visited sites'
+    built-in skills, stetdoc's folder, the shell browser's tools folder (`<data>/tools`, in a
+    session that has it) and Clauseo's Python runtime folder (`<rt>`, where pandoc also lives):
+    the folders the launch puts first on its shells' `PATH` (decision record 0048). The runtime
+    is found from its `PATH` folder `<rt>/bin`. The file `<run>/clauseo-env.sh` that puts them
+    first in each Bash command is opened alone. The whole run folder is not opened: it holds the relay's token and the browser's profile (the visited sites'
     cookies).
   - **Network:** `allowedDomains: []`. A sandboxed command that reaches a new host asks. The
     seeded `WebFetch(domain:…)` sites probably ask too, which fails safe: Claude Code builds the
