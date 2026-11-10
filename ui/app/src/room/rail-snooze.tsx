@@ -104,13 +104,7 @@ export type Snooze = ReturnType<typeof useSnooze>;
 export type SnoozeCtx = { snooze: Snooze; now: Timestamp; zone: string; lang: Lang };
 
 /** Snooze and Done for these threads: the snooze menu's times, the menus' two items, and Mark (all) done. */
-function triageOf(
-  c: SnoozeCtx,
-  key: string,
-  threads: readonly Held[],
-  nextDate: string | undefined,
-  done = false,
-): Triage {
+function triageOf(c: SnoozeCtx, key: string, threads: readonly Held[], done = false): Triage {
   const first = threads[0];
   const onDone =
     done && first !== undefined
@@ -120,7 +114,6 @@ function triageOf(
     <Suspense fallback={null}>
       <LazySnoozeMenu
         zone={c.zone}
-        nextDate={nextDate}
         onPick={(until) => c.snooze.snooze(key, threads, until)}
         onChoose={() => c.snooze.choose(key, threads)}
       />
@@ -187,7 +180,6 @@ export function splitConversations(
   c: SnoozeCtx,
   rows: readonly ConversationRow[],
   props: readonly ConversationRowProps[],
-  nextDate: string | undefined,
 ): { rows: ConversationRowProps[]; done?: { count: number; rows: () => ReactNode } } {
   const shown: ConversationRowProps[] = [];
   const done: DoneRow[] = [];
@@ -224,7 +216,7 @@ export function splitConversations(
               when: whenWords(until, c.now, c.zone, c.lang),
             }),
           }),
-      triage: triageOf(c, thread, [held], nextDate, isDone),
+      triage: triageOf(c, thread, [held], isDone),
       ...(isDone ? { done: true } : {}),
       ...(replace === undefined ? {} : { replace }),
     });
@@ -260,7 +252,7 @@ export function matterSnooze(
     ...(awake.length === 0 || m.kind === "scratch"
       ? {}
       : {
-          triage: triageOf(c, m.matter, awake, m.next_date),
+          triage: triageOf(c, m.matter, awake),
         }),
     ...(replace === undefined ? {} : { replace }),
   };

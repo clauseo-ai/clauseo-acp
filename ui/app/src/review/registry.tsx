@@ -34,6 +34,7 @@ import { UD2 } from "./registry-ud2.tsx";
 import { UD2_PLANS } from "./registry-ud2-plans.tsx";
 import { UC_ALL } from "./registry-uc-word.tsx";
 import { SAC } from "./registry-sac.tsx";
+import { NM } from "./registry-nm.tsx";
 import {
   MATTER,
   NEW_MATTER,
@@ -50,7 +51,6 @@ import {
   errorWords,
   frameWords,
   limitWords,
-  matterFormWords,
   matterWords,
   shared,
   threadWords,
@@ -316,15 +316,15 @@ const railState = (id: string, words: WordsRef): Entry => ({
   render: () => <RoomOver host={railHost} />,
 });
 
-/** Change, then Create the matter: the picked folder refused with `code`. */
+/** Choose folder…, then Create matter: the picked folder refused with `code`. */
 const CHANGE_CREATE: readonly Step[] = [
   ...NEW_MATTER,
   { press: "matter-existing" },
   { press: "create-matter" },
 ];
 
-/** A line of the new matter form's refusal (matter-form-check.ts's createErrorLine), after Change and Create, or with
- * `next` after Create into the default location, where the line names no folder. */
+/** A line of the new matter form's refusal (matter-form-check.ts's createErrorLine), after Choose folder… and Create,
+ * or with `next` after Use a new folder and Create, in the default location, where the line names no folder. */
 const refusal = (
   id: string,
   words: WordsRef,
@@ -338,7 +338,9 @@ const refusal = (
   render: () => (
     <RoomAfter
       host={() => refusingHost(code, display, next)}
-      steps={next ? [...NEW_MATTER, { press: "create-matter" }] : CHANGE_CREATE}
+      steps={
+        next ? [...NEW_MATTER, { press: "matter-made" }, { press: "create-matter" }] : CHANGE_CREATE
+      }
     />
   ),
 });
@@ -405,11 +407,8 @@ export const REGISTRY: readonly Entry[] = [
     ...RAIL,
     render: () => <RoomOver host={() => roomHost([])} />,
   },
-  railState("U2-02", frameWords("Tomorrow")),
-  railState("U2-03", frameWords("This week")),
-  railState("U2-04", frameWords("Next week")),
-  railState("U2-05", frameWords("Later")),
-  railState("U2-06", frameWords("No date yet")),
+  // U2-02 to U2-06, retired: the rail's date groups (Tomorrow, This week, Next week, Later, No date yet) gave way to
+  // Needs you, Working and the rest by latest activity (NM-11, NM-12)
   railState("U2-07", limitWords("Limit reached until {time}")),
   railState("U2-08", limitWords("Limit reached until {day} {time}")),
   railState("U2-09", limitWords("Limit reached. Reset not given.")),
@@ -475,21 +474,7 @@ export const REGISTRY: readonly Entry[] = [
     "internal",
     "Documents/Mehta",
   ),
-  {
-    id: "U2-20",
-    words: matterWords("Write the date as 30 October 2026."),
-    screen: "matters/new-matter",
-    render: () => (
-      <RoomAfter
-        host={() => refusingHost("internal", "", true)}
-        steps={[
-          ...NEW_MATTER,
-          { type: { field: 2, text: "next Tuesday" } },
-          { press: "create-matter" },
-        ]}
-      />
-    ),
-  },
+  // U2-20, retired: the next date's line went with the field (a matter is a name, a client and a folder)
   {
     id: "U2-21",
     words: matterWords("A matter for quick questions, with no papers of its own."),
@@ -583,13 +568,7 @@ export const REGISTRY: readonly Entry[] = [
     render: () => <RoomOver host={scratchHost} />,
   },
   railState("U2-33", frameWords("Stopped on {day} at {time}")),
-  // what Change changes, for a screen reader, where no folder line says it (without H20)
-  {
-    id: "U2-34",
-    words: matterFormWords("The matter's folder"),
-    screen: "matters/new-matter",
-    render: () => <RoomAfter host={() => refusingHost("internal")} steps={NEW_MATTER} />,
-  },
+  // U2-34, retired: the Folder row's label names it for a screen reader too
   ...U16B,
   ...FOLDER_RIGHTS,
   ...FOLDER_CHOOSER,
@@ -597,4 +576,5 @@ export const REGISTRY: readonly Entry[] = [
   ...UBL,
   ...R23,
   ...IT_ENTRIES,
+  ...NM,
 ];

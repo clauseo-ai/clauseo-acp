@@ -300,18 +300,18 @@ describe("friendly names", () => {
     expect(doneOf("en", call("read", "failed", lease))).toBe("Tried to read Lease.pdf.");
     expect(doneOf("hi", call("read", "failed", lease))).toBe("Lease.pdf पढ़ने की कोशिश की गई।");
     expect(restOf("en", [call("read", "failed", lease)]).trouble).toBe("Tried to read Lease.pdf.");
-    expect(doneOf("en", call("other", "cancelled", { title: "Check the cause list" }))).toBe(
-      "Tried: Check the cause list.",
+    expect(doneOf("en", call("other", "cancelled", { title: "Check the share register" }))).toBe(
+      "Tried: Check the share register.",
     );
-    expect(doneOf("hi", call("other", "cancelled", { title: "Check the cause list." }))).toBe(
-      "कोशिश की गई: Check the cause list।",
+    expect(doneOf("hi", call("other", "cancelled", { title: "Check the share register." }))).toBe(
+      "कोशिश की गई: Check the share register।",
     );
     const count = raw({ command: "x", description: "Count the pages" });
     expect(doneOf("en", call("execute", "failed", count))).toBe("Tried: Count the pages.");
     // done, the agent's own words as they are
     expect(doneOf("en", call("execute", "completed", count))).toBe("Count the pages.");
-    expect(doneOf("en", call("other", "completed", { title: "Check the cause list" }))).toBe(
-      "Check the cause list.",
+    expect(doneOf("en", call("other", "completed", { title: "Check the share register" }))).toBe(
+      "Check the share register.",
     );
   });
 
@@ -322,14 +322,14 @@ describe("friendly names", () => {
     const unknown = call("read", "unknown", lease);
     const words = [
       doneOf("en", unknown),
-      doneOf("en", call("other", "unknown", { title: "Check the cause list" })),
+      doneOf("en", call("other", "unknown", { title: "Check the share register" })),
       doneOf("en", call("search", "unknown", raw({ pattern: "notice period" }))),
       doneOf("en", call("execute", "unknown")),
       restOf("en", [unknown]).line,
     ];
     expect(words).toEqual([
       "Lease.pdf.",
-      "Check the cause list.",
+      "Check the share register.",
       "'notice period'.",
       "State not known.",
       "State not known.",

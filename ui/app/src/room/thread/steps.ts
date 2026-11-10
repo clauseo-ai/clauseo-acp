@@ -94,7 +94,7 @@ export function segmentsPick(
 const unknownState = (c: ToolCallEntry) => c.status === "unknown";
 
 /** A step in a state this version can't read, in no tense: by its place ("Lease.pdf."), its words searched for, or
- * the agent's own words cut down ("Check the cause list."); with none, that its state isn't known. */
+ * the agent's own words cut down ("Check the share register."); with none, that its state isn't known. */
 function namedOf(lang: Lang, entry: ToolCallEntry): string {
   const p = placeOf(entry);
   const own = p.name ?? (p.query === null ? null : `'${p.query}'`) ?? p.what;

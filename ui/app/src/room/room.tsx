@@ -439,9 +439,6 @@ function RoomFrame({
         titleLang={open !== null && !scratch ? (langOfText(title) ?? "en") : w.lang}
         titleHint=""
         subtitle={scratch ? mt(w.lang, "Quick questions, kept like any matter") : ""}
-        nextDate=""
-        caseNo=""
-        court=""
         history={[]}
         canUndo={false}
         railOpen={railOpen}

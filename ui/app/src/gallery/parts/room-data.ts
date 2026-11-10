@@ -14,10 +14,8 @@ export const nothing = (): void => undefined;
 /** The matter's head: its name as filed, and the line under it. */
 export const MATTER_HEAD = {
   title: "Acme Traders v. State",
-  titleHint: "District Court, Example. CS 12 of 2024. For Acme Traders",
-  nextDate: "9 November 2026",
-  caseNo: "CS 12 of 2024",
-  court: "District Court, Example",
+  titleHint: "Acme Traders",
+  subtitle: "For Acme Traders",
 };
 
 /** The plan's meter in the toolbar: plenty of it left, and close to the limit. */
@@ -185,7 +183,19 @@ export const PINNED: readonly MatterRowProps[] = [
 
 export const RAIL_GROUPS: readonly RailGroup[] = [
   {
-    when: "Today",
+    when: "Needs you",
+    matters: [
+      {
+        name: "Coral Finance v. Kumar",
+        note: "Loan recovery, for the lender",
+        hint: "Coral Finance",
+        state: "ready",
+        onOpen: nothing,
+      },
+    ],
+  },
+  {
+    when: "Working",
     matters: [
       {
         name: "Acme Traders v. State",
@@ -197,6 +207,11 @@ export const RAIL_GROUPS: readonly RailGroup[] = [
         conversations: CONVERSATIONS,
         onNewConversation: nothing,
       },
+    ],
+  },
+  {
+    when: "Other matters",
+    matters: [
       {
         name: "Harbour Trust",
         note: "Trust deed",
@@ -205,11 +220,6 @@ export const RAIL_GROUPS: readonly RailGroup[] = [
         at: "6:10 pm",
         onOpen: nothing,
       },
-    ],
-  },
-  {
-    when: "Tomorrow",
-    matters: [
       {
         name: "Bluebell Mills v. Union of India",
         note: "Customs writ",
@@ -220,28 +230,15 @@ export const RAIL_GROUPS: readonly RailGroup[] = [
       },
     ],
   },
-  {
-    when: "No date",
-    matters: [
-      {
-        name: "Coral Finance v. Kumar",
-        note: "Loan recovery, for the lender",
-        hint: "Coral Finance",
-        state: "ready",
-        onOpen: nothing,
-      },
-    ],
-  },
 ];
 
-/** Every matter, with its client and case number, for finding one by name, client or number. */
+/** Every matter, with its client, for finding one by name or client. */
 export const FIND_ALL: readonly FindableRow[] = [
   {
     name: "Acme Traders v. State",
     note: "Recovery suit, for the plaintiff",
     hint: "Acme Traders v. State",
     client: "Acme Traders",
-    caseNo: "CS 12 of 2024",
     onOpen: nothing,
   },
   {
@@ -249,7 +246,6 @@ export const FIND_ALL: readonly FindableRow[] = [
     note: "Trust deed",
     hint: "Harbour Trust",
     client: "A. Rao",
-    caseNo: "OS 40 of 2023",
     onOpen: nothing,
   },
   {
@@ -257,7 +253,6 @@ export const FIND_ALL: readonly FindableRow[] = [
     note: "Loan recovery, for the lender",
     hint: "Coral Finance",
     client: "Coral Finance Co.",
-    caseNo: "CS 3 of 2025",
     onOpen: nothing,
   },
 ];

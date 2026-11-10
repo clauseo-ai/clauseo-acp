@@ -6,41 +6,6 @@
     "at": "2026-11-02",
     "note": "Rohan, on the review page"
   },
-  "U2-02": {
-    "en": "Tomorrow",
-    "hi": "कल",
-    "status": "approved",
-    "at": "2026-11-02",
-    "note": "Rohan, on the review page"
-  },
-  "U2-03": {
-    "en": "This week",
-    "hi": "इस सप्ताह",
-    "status": "approved",
-    "at": "2026-11-02",
-    "note": "Rohan, on the review page"
-  },
-  "U2-04": {
-    "en": "Next week",
-    "hi": "अगले सप्ताह",
-    "status": "approved",
-    "at": "2026-11-02",
-    "note": "Rohan, on the review page"
-  },
-  "U2-05": {
-    "en": "Later",
-    "hi": "बाद में",
-    "status": "approved",
-    "at": "2026-11-02",
-    "note": "Rohan, on the review page"
-  },
-  "U2-06": {
-    "en": "No date yet",
-    "hi": "अभी कोई तारीख नहीं",
-    "status": "approved",
-    "at": "2026-11-02",
-    "note": "Rohan, on the review page"
-  },
   "U2-07": {
     "en": "Limit reached until {time}",
     "hi": "{time} बजे तक सीमा पूरी",
@@ -132,13 +97,6 @@
     "at": "2026-11-02",
     "note": "Rohan, on the review page"
   },
-  "U2-20": {
-    "en": "Write the date as 30 October 2026.",
-    "hi": "तारीख इस तरह लिखें: 30 अक्टूबर 2026।",
-    "status": "approved",
-    "at": "2026-11-02",
-    "note": "Rohan, on the review page"
-  },
   "U2-21": {
     "en": "A matter for quick questions, with no papers of its own.",
     "hi": "त्वरित प्रश्नों के लिए एक मामला, जिसके अपने कोई दस्तावेज़ नहीं हैं।",
@@ -226,13 +184,6 @@
   "U2-33": {
     "en": "Stopped on {day} at {time}",
     "hi": "{day} को {time} बजे रोका गया",
-    "status": "approved",
-    "at": "2026-11-02",
-    "note": "Rohan, on the review page"
-  },
-  "U2-34": {
-    "en": "The matter's folder",
-    "hi": "मामले का फ़ोल्डर",
     "status": "approved",
     "at": "2026-11-02",
     "note": "Rohan, on the review page"

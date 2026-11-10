@@ -1,6 +1,6 @@
-// The rail: the matters on the bare ground, grouped by their next date, with the current matter's conversations
-// opened under its row, finding a matter, and the scratch matter at its foot. Matters, their states and their next
-// dates come in as props.
+// The rail: the matters on the bare ground, in the groups the room gives (Needs you, Working, the rest), with the
+// current matter's conversations opened under its row, finding a matter, and the scratch matter at its foot. Matters,
+// their states and their groups come in as props.
 import { useLayoutEffect, useRef, useState, type ReactNode, type Ref } from "react";
 import { Button } from "../ui/button.tsx";
 import { Kbd } from "../ui/kbd.tsx";
@@ -29,8 +29,8 @@ const MENU = '*[role="menu"]';
 /** A group of rows under its heading; testId goes on its section. */
 export type RailGroup = { when: string; matters: readonly MatterRowProps[]; testId?: string };
 
-/** A matter the rail can find: its row, with its client and case number. */
-export type FindableRow = MatterRowProps & { client: string; caseNo: string };
+/** A matter the rail can find: its row, with its client. */
+export type FindableRow = MatterRowProps & { client: string };
 
 /** The list on first launch: what goes here. New matter, above, is the way forward. What Clauseo does with the
  * folder waits until it does it (the first read), so the line says only what to add. */
@@ -49,24 +49,23 @@ function NoMatters() {
 /** What a search found, said where the name alone doesn't show why. */
 function matchLine(lang: "en" | "hi", m: FindableRow, by: FoundBy): string | undefined {
   if (by === "client") return mt(lang, "Client, {client}", { client: m.client });
-  if (by === "caseNo") return m.caseNo;
   return undefined;
 }
 
 /** Finding a matter: a field set into the ground under New matter. Focused and empty, the list turns to the matters
- * opened most recently; typed into, it turns to every matter whose name, client or case number holds the words. The
- * date groups come back when the field is left empty, or Escape clears it. */
+ * opened most recently; typed into, it turns to every matter whose name or client holds the words. The
+ * groups come back when the field is left empty, or Escape clears it. */
 export type RailFind = {
   all: readonly FindableRow[];
   /** The matters opened most recently, newest first. Their rows show no match line: the order is all that says when
    * each was opened. Empty, as where the host doesn't say when a matter was last opened, the field focused and empty
-   * shows no Recent at all: the date groups stay, as they stand with the field left. */
+   * shows no Recent at all: the groups stay, as they stand with the field left. */
   recent: readonly MatterRowProps[];
   /** Where the field starts: words in it, or focused and empty. */
   query?: string;
   open?: boolean;
   /** What the search covers, so its label and its no-match line promise only that: names alone, names and clients,
-   * or, left out, names, clients and case numbers. */
+   * or, left out, names and clients. */
   covers?: "name" | "nameClient";
   /** Optional: Find searching inside (U16a). Given it, the field reads "Find", shows its key (⌘K, Ctrl+K), and while
    * words are in it the list is what this draws: the room's results, which take the matching matters found here. */
@@ -91,15 +90,10 @@ function findWords(lang: "en" | "hi", covers: RailFind["covers"]) {
         label: mt(lang, "Find a matter by its name"),
         none: mt(lang, "Search covers names."),
       };
-    case "nameClient":
+    default:
       return {
         label: mt(lang, "Find a matter by its name or client"),
         none: mt(lang, "Search covers names and clients."),
-      };
-    default:
-      return {
-        label: mt(lang, "Find a matter by its name, client or case number"),
-        none: mt(lang, "Search covers names, clients and case numbers."),
       };
   }
 }
@@ -127,7 +121,7 @@ function FindField({
   onQuery: (q: string) => void;
   onOpen: () => void;
   onClose: () => void;
-  /** Escape on an empty field: the date groups come back, focus stays. */
+  /** Escape on an empty field: the groups come back, focus stays. */
   onDone: () => void;
   onFirst: () => void;
 }) {
@@ -152,7 +146,7 @@ function FindField({
         }}
         onBlur={onClose}
         onKeyDown={(e) => {
-          // Escape clears the words and keeps focus here; on an empty field the date groups come back and the key goes
+          // Escape clears the words and keeps focus here; on an empty field the groups come back and the key goes
           // on to the rail, where a folded rail closes
           if (e.key === "Escape" && query !== "") {
             e.preventDefault();
@@ -171,8 +165,8 @@ function FindField({
   );
 }
 
-/** The rail: matters on the bare ground, grouped by their next date, under a full-width New matter, with Scratch
- * matter, "Quick questions", below a hairline. Pinned matters stand above every date, under "Pinned". With no
+/** The rail: matters on the bare ground, in the room's groups, under a full-width New matter, with Scratch matter,
+ * "Quick questions", below a hairline. Pinned matters stand above every group, under "Pinned". With no
  * matters at all, the rail says so. Given find, a field under New matter finds any matter; given settings, the
  * rail's foot links to them, and given onSettings, its Settings is a button that opens them (their own window). */
 export function Rail({

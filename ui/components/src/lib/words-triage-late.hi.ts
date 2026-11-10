@@ -8,8 +8,6 @@ export const HI = {
   "Tomorrow {time}": "कल {time}",
   "Monday {time}": "सोमवार {time}",
   "Choose a day and time": "दिन और समय चुनें",
-  // RO-09: with "{weekday} {d} {month}, {time}" beneath, 9:00 am the day before the matter's next date
-  "Before the next date": "अगली तारीख से पहले",
   // RO-05: a snoozed row's line in the shelf; {when} as in "Next back {when}"
   "Until {when}": "{when} तक",
   // RO-06: a matter snoozed whole, in the shelf
