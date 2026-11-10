@@ -11,6 +11,7 @@ use crate::windows::setup::pool_steps::Pool;
 
 mod exits;
 mod file_owner;
+mod orphans;
 mod principals;
 mod record;
 mod running;
@@ -70,6 +71,10 @@ struct Fake {
     /// The owners the cache's `SD` values give, by task path, `Err` where one is missing or
     /// can't be read; one not here is the Administrators'.
     cache_owners: BTreeMap<String, Result<Sid, Failed>>,
+    /// Keys only the cache holds (no task file, not listed), by path; and whether the cache
+    /// holds a task past each key, by path, `Err` where that can't be read; one not here does.
+    cache_only: Vec<String>,
+    cache_entries: BTreeMap<String, Result<bool, Failed>>,
     /// Each task's security descriptor by its name, `Err` where it can't be read; one not
     /// here is the Administrators'.
     owners: BTreeMap<String, Result<String, Failed>>,
@@ -120,6 +125,8 @@ impl Fake {
             hidden: Vec::new(),
             listings_fail: [false; 2],
             cache_owners: BTreeMap::new(),
+            cache_only: Vec::new(),
+            cache_entries: BTreeMap::new(),
             owners: BTreeMap::new(),
             files: BTreeMap::new(),
             securities: BTreeMap::new(),
@@ -364,12 +371,18 @@ impl Sweeper for Fake {
         if self.listings_fail[1] {
             return Err("a key of the Task Scheduler's cache couldn't be listed (5)".to_owned());
         }
-        Ok(self.on_disk())
+        let mut paths = self.on_disk();
+        paths.extend(self.cache_only.iter().cloned());
+        Ok(paths)
     }
 
     fn task_cache_owner(&mut self, path: &str) -> Result<Sid, Failed> {
         let admins = || Ok(Sid::parse("S-1-5-32-544").unwrap());
         self.cache_owners.get(path).cloned().unwrap_or_else(admins)
+    }
+
+    fn task_cache_entries(&mut self, path: &str) -> Result<bool, Failed> {
+        self.cache_entries.get(path).cloned().unwrap_or(Ok(true))
     }
 
     fn delete_task(&mut self, folder: &String, name: &str) -> Result<(), Failed> {
@@ -434,7 +447,7 @@ fn only_tasks_whose_principal_is_exactly_a_pool_sid_are_deleted() {
          tasks deleted, 0 unreadable (0 more skipped, not the pool's by their task file), 0 with \
          no user or group, 0 unresolved (no SID, not another domain's), 0 skipped (another \
          domain's, no SID), 0 not deleted, 0 not listed (in a task file or the cache only), 0 \
-         running instances stopped, 0 not, 0 BITS jobs cancelled, 0 not"
+         orphan cache keys (no task, not the pool's), 0 running instances stopped, 0 not, 0 BITS jobs cancelled, 0 not"
     );
 }
 

@@ -2151,7 +2151,20 @@ the pool-user check. No record, or an empty pool, is nothing to sweep. Then it:
    missing or can't be read, keeps it 56. A hidden task is never deleted: with no task object,
    nothing is deleted through a file or the registry, and the run fails closed. A listing that
    can't be read is 56 too. The log line counts hidden tasks ("not listed (in a task file or
-   the cache only)");
+   the cache only)").
+   **Orphan cache keys.** Feature updates and uninstalls leave `Tree` keys behind that are no
+   task: each holds its `SD`, `Id` and `Index` (0) and nothing more, owned by Administrators or
+   SYSTEM, with no entry under `TaskCache\{Tasks,Plain,Logon,Boot}` and no task file. A test VM
+   held 26, and with each counted hidden every run ended 56 and every launch after the first
+   was refused. A path only the cache holds is an orphan, counted apart ("orphan cache keys (no
+   task, not the pool's)") and not 56, when all three hold: its `SD` parses and its owner isn't
+   a pool SID; none of `Tasks\{Id}`, `Plain\{Id}`, `Logon\{Id}` or `Boot\{Id}` exists, `{Id}`
+   the key's `Id` (`REG_SZ`, refused unless a GUID in braces, so it can't name another key),
+   each key opened read-only from `HKLM` by its whole path as the `Tree` keys are; and the file
+   listing, read whole, has no file at its path. Anything that can't be read, a key that can't
+   be opened for any reason but being missing, or a file listing that failed, leaves the path
+   to the rule above, so a Tarrask-style hidden task (its `SD` deleted or a pool user's while
+   `Tasks\{Id}` still holds it) stays 56. Orphans are Windows' and are never deleted;
 4. cancels every BITS job a pool user owns with the stop's BITS step
    (`pool_steps::cancel_pool_jobs`), whatever the walk found. Only then, with no pool task
    left to trigger and no job left to notify, it stops the running instances of the pool's
@@ -2257,6 +2270,22 @@ A run deletes only the pool users' tasks and BITS jobs. An ended run never write
   `elevated_this_machines_tasks_all_have_a_principal_that_resolves` now also checks that every
   task on file and in the cache of CI's machine is listed or skipped by its file, so the
   cross-check doesn't end a clean machine's runs at 56.
+- **Assumption: a standard user can't register a task owned by someone else.** Both owner
+  checks, on a task's own descriptor and on its cache key's `SD`, take an owner that isn't a
+  pool SID to mean the task isn't the pool's (and the orphan rule takes it to mean a cache key
+  isn't), so they rest on a pool user being unable to
+  register a task whose descriptor names another owner (`O:SY`, `O:BA`). Elevated test (not
+  run yet): `elevated_a_standard_user_cant_register_a_task_owned_by_system_or_administrators`:
+  a standard test user registers, from XML, one task with an `O:SY` descriptor, one with
+  `O:BA` and one with no owner; each must be refused, or registered with the test user as
+  the owner both its cache key's `SD` and the Task Scheduler give, never SYSTEM or
+  Administrators (an ownerless descriptor is expected to take the caller's default owner).
+  Then, on a task of its own, the test user calls `IRegisteredTask::SetSecurityDescriptor`
+  naming `O:SY`, then `O:BA` (through Windows PowerShell's `Schedule.Service`); each
+  is expected refused, since an owner can be set only to the caller or a group its token may
+  own by, and either way the owner the cache records must stay the test user's. The test is
+  written to pass on that expected behaviour. Should it fail, both checks must also hold a
+  task's principal and file before trusting its owner.
 - The harness rows for this end (`cancel`, `stdin-unread-cancel`, `end-cleanup`) haven't
   run on a VM yet, nor have the elevated tests in `setup/sweep/windows_tests.rs`; the Windows
   code is only built and checked by clippy.

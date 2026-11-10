@@ -4,7 +4,8 @@
 //! own tasks all have a principal that reads and resolves, and every task on file and in the
 //! Task Scheduler's cache is listed (the cross-check), so a real run doesn't end 56 on a clean
 //! machine. And a test user's task whose descriptor shuts SYSTEM and Administrators out is
-//! deleted or 56, never left behind a sweep that would end 0.
+//! deleted or 56, never left behind a sweep that would end 0. And a standard user can't register
+//! a task owned by SYSTEM or Administrators, which the owner checks rest on.
 //!
 //! The gate is skipped (it needs LOCAL SYSTEM and a `ClauseoSbNN` pool), as the stop's BITS test
 //! skips it: the step is called with the pool the test chose. Elevated, as CI's elevated step
@@ -14,7 +15,7 @@ use std::process::Command;
 
 use super::windows_sweeper::WindowsSweeper;
 use super::windows_sweeper::same_task_path;
-use super::{Names, Resolved, Sweeper as _, Task, resolve, sweep_tasks};
+use super::{Names, Resolved, Sweeper as _, Task, resolve, sddl_owner, sweep_tasks};
 use crate::test_support::TempDir;
 use crate::windows::refresh::windows_tests::{system32, try_in_cmd};
 use crate::windows::setup::logon::tests::{TestUser, clear_leftovers, random_hex};
@@ -164,13 +165,14 @@ fn elevated_this_machines_tasks_all_have_a_principal_that_resolves() {
     let swept = sweep_tasks(&mut sweeper, &[]);
     eprintln!(
         "{} folders, {} tasks, {} with no user or group, {} unreadable, {} skipped, {} folders \
-         unlisted",
+         unlisted, {} orphan cache keys",
         swept.folders,
         swept.tasks,
         swept.no_principal,
         swept.unreadable,
         swept.skipped,
-        swept.unlisted
+        swept.unlisted,
+        swept.orphans
     );
     for (why, count) in &swept.why {
         eprintln!("{count} x {why}");
@@ -309,4 +311,126 @@ fn elevated_a_task_whose_descriptor_shuts_system_out_is_deleted_or_56_never_left
         listed || swept.hidden > 0,
         "the listing hid the task and the cross-check didn't find it: {swept:?}"
     );
+}
+
+#[test]
+#[ignore = "elevated: run by CI's elevated step with CLAUSEO_ELEVATED_TESTS=1"]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "writes the test user's task XML into the test's own folder"
+)]
+fn elevated_a_standard_user_cant_register_a_task_owned_by_system_or_administrators() {
+    if !gate("elevated_a_standard_user_cant_register_a_task_owned_by_system_or_administrators") {
+        return;
+    }
+    // Both owner checks (the task's own descriptor, its cache key's `SD`) rest on this: a
+    // standard user's task whose descriptor names SYSTEM or Administrators as its owner is
+    // refused, or registered owned by that user, never by the owner it named.
+    clear_leftovers(TASK_TEST_PREFIX);
+    let user = TestUser::named(TASK_TEST_PREFIX, &random_hex(3));
+    let sid = user.sid.clone();
+    eprintln!("1. the test user: {} {}", user.name, sid.as_str());
+    let dir = TempDir::new("sweep-owner");
+    let grant = format!(
+        "D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;FA;;;{})",
+        sid.as_str()
+    );
+    protect_with(dir.path(), &grant).unwrap();
+    let suffix = format!("{}{}", std::process::id(), random_hex(2));
+    // The owner each descriptor names (none: ownerless), and a task whose own descriptor names
+    // the test user, whose descriptor the test user then tries to rewrite.
+    let names = [
+        ("O:SY", format!("ClauseoSweepOwnerSy{suffix}")),
+        ("O:BA", format!("ClauseoSweepOwnerBa{suffix}")),
+        ("", format!("ClauseoSweepOwnerNone{suffix}")),
+        ("O:self", format!("ClauseoSweepOwnerSet{suffix}")),
+    ];
+    // Dropped before the user, so the account outlives its tasks' clean-up.
+    let _made = Made(names.iter().map(|(_, name)| name.clone()).collect());
+    let schtasks = format!(r"{}\schtasks.exe", system32());
+    let mut sweeper = WindowsSweeper::new();
+    for (alias, name) in &names {
+        // 2. As that user: a task whose descriptor names `alias` its owner, readable by all
+        // three, so this process can read what owner it got.
+        let owner = alias.replace("self", sid.as_str());
+        let sddl = format!(
+            "{owner}D:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;FA;;;{})",
+            sid.as_str()
+        );
+        let xml = dir.path().join(format!("{name}.xml"));
+        std::fs::write(&xml, task_xml(sid.as_str(), &sddl)).unwrap();
+        let create = format!(
+            r#""{schtasks}" /create /tn {name} /xml "{}" /f"#,
+            xml.display()
+        );
+        let (code, printed) = try_in_cmd(&user, dir.path(), &create);
+        eprintln!("2. {alias:?} as the test user: exit {code:?}\n{printed}");
+        if code != Some(0) {
+            assert_ne!(*alias, "O:self", "the test user's own task:\n{printed}");
+            eprintln!("   refused: the gap can't arise for {alias:?}");
+            continue;
+        }
+        // 3. Registered: its owner, from the cache key's `SD` and from the Task Scheduler,
+        // must be the test user.
+        let cached = sweeper.task_cache_owner(&format!(r"\{name}"));
+        eprintln!("3. its cache key's owner: {cached:?}");
+        assert_eq!(cached.as_ref(), Ok(&sid), "{alias:?}: the cache key's SD");
+        let root = sweeper.root().unwrap();
+        let read = sweeper.task_sddl(&root, name).unwrap();
+        let owner = sddl_owner(&read);
+        eprintln!("   its descriptor's owner: {owner:?}");
+        assert_eq!(
+            owner,
+            Ok(Some(sid.clone())),
+            "{alias:?}: the task's descriptor"
+        );
+    }
+    // 4. As that user, on its own task: IRegisteredTask::SetSecurityDescriptor naming SYSTEM,
+    // then Administrators, its owner. Expected refused (an owner can be set only to the
+    // caller or a group its token may own by); either way the owner the cache records stays
+    // the test user's.
+    let (_, name) = &names[3];
+    for alias in ["SY", "BA"] {
+        let sddl = format!(
+            "O:{alias}D:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;FA;;;{})",
+            sid.as_str()
+        );
+        // Anything before the call that fails (PowerShell, the COM connect, the task's lookup)
+        // ends it 1 and fails the test; the call itself ends it 0 when it worked, 3 when refused,
+        // each saying so (what it printed holds stderr too).
+        let script = format!(
+            "$ErrorActionPreference='Stop'; $s=New-Object -ComObject Schedule.Service; \
+             $s.Connect(); $t=$s.GetFolder('\\').GetTask('{name}'); \
+             try {{ $t.SetSecurityDescriptor('{sddl}', 0); 'SET-OK'; exit 0 }} \
+             catch {{ 'SET-REFUSED: ' + $_.Exception.Message; exit 3 }}"
+        );
+        let (code, printed) = try_in_cmd(&user, dir.path(), &powershell(&script));
+        eprintln!("4. SetSecurityDescriptor O:{alias} as the test user: exit {code:?}\n{printed}");
+        let ran = match code {
+            Some(0) => printed.contains("SET-OK"),
+            Some(3) => printed.contains("SET-REFUSED"),
+            _ => false,
+        };
+        assert!(
+            ran,
+            "O:{alias}: PowerShell didn't reach the call: exit {code:?}\n{printed}"
+        );
+        let cached = sweeper.task_cache_owner(&format!(r"\{name}"));
+        eprintln!("   its cache key's owner: {cached:?}");
+        assert_eq!(
+            cached.as_ref(),
+            Ok(&sid),
+            "O:{alias} set later: the cache key's SD"
+        );
+    }
+}
+
+/// A cmd line that runs `script` in Windows PowerShell, passed encoded (UTF-16LE, base64) so
+/// cmd reads none of its characters.
+fn powershell(script: &str) -> String {
+    use base64::Engine as _;
+    let bytes: Vec<u8> = script.encode_utf16().flat_map(u16::to_le_bytes).collect();
+    let encoded = base64::engine::general_purpose::STANDARD.encode(bytes);
+    let exe = format!(r"{}\WindowsPowerShell\v1.0\powershell.exe", system32());
+    format!(r#""{exe}" -NoProfile -NonInteractive -EncodedCommand {encoded}"#)
 }
