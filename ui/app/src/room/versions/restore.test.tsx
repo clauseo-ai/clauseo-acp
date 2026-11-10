@@ -163,9 +163,9 @@ test("the restore dialog lists exactly the preview's files, restores, and its Un
   ).toBe(`Restored to ${at2} today`);
 
   await h.click(done?.querySelector(".ver-restored-undo"));
-  // the Undo asks first, with what restoring the version before writes now
+  // the Undo asks first, with what restoring the version before writes now, as an undo of the restore cp4
   expect(queried(h, "preview_restore").at(-1)).toEqual({
-    preview_restore: { matter: MATTER, checkpoint: "cp3", scope: "matter" },
+    preview_restore: { matter: MATTER, checkpoint: "cp3", scope: "matter", undoes: "cp4" },
   });
   expect(describedBy()).toBe(
     "2 documents will change: \u2068brief.txt\u2069 and \u2068notes.docx\u2069. You can undo this.",
@@ -174,7 +174,7 @@ test("the restore dialog lists exactly the preview's files, restores, and its Un
   await h.click(h.one("dialog-confirm"));
   expect(h.sent("restore_version")).toEqual([
     { matter: MATTER, checkpoint: "cp2", scope: "matter" },
-    { matter: MATTER, checkpoint: "cp3", scope: "matter" },
+    { matter: MATTER, checkpoint: "cp3", scope: "matter", undoes: "cp4" },
   ]);
   expect(document.body.textContent).toContain(
     `Undid the restore. The matter stands as it did at ${at3}.`,

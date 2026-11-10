@@ -99,6 +99,11 @@ const OWN = {
     "कुछ नहीं बदलेगा। मामला पहले से वैसा ही है जैसा तब था।",
   "'{papers}', added since, stays.": "बाद में जोड़ा गया '{papers}' बना रहेगा।",
   "{papers}, added since, stay.": "बाद में जोड़े गए {papers} बने रहेंगे।",
+  // undoing a restore: its title, by when the restore was made, and the files it added, which go
+  "Undo the restore at {time}?": "{time} बजे का पुनर्स्थापन पूर्ववत करें?",
+  "'{papers}', added by the restore, will be removed.":
+    "पुनर्स्थापन से जोड़ा गया '{papers}' हटा दिया जाएगा।",
+  "{papers}, added by the restore, will be removed.": "पुनर्स्थापन से जोड़े गए {papers} हटा दिए जाएँगे।",
   "'{papers}' can't be restored and stays as it is.":
     "'{papers}' पुनर्स्थापित नहीं हो सकता और जैसा है वैसा ही रहेगा।",
   "{papers} can't be restored and stay as they are.":

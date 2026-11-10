@@ -103,14 +103,14 @@ test("Undo this change on a restore version asks through the restore dialog, wit
   // nothing is restored yet: the dialog lists the preview of cp3, the version before the restore
   expect(h.sent("restore_version")).toEqual([]);
   expect(h.queried("preview_restore")).toEqual([
-    { preview_restore: { matter: MATTER, checkpoint: "cp3", scope: "matter" } },
+    { preview_restore: { matter: MATTER, checkpoint: "cp3", scope: "matter", undoes: "cp4" } },
   ]);
   expect(describedBy()).toBe(
     "2 documents will change: \u2068brief.txt\u2069 and \u2068memo.docx\u2069. You can undo this.",
   );
   await h.click(h.one("dialog-confirm"));
   expect(h.sent("restore_version")).toEqual([
-    { matter: MATTER, checkpoint: "cp3", scope: "matter" },
+    { matter: MATTER, checkpoint: "cp3", scope: "matter", undoes: "cp4" },
   ]);
   expect(dialog()).toBeNull();
   expect(document.body.textContent).toMatch(/Undid the restore\. The matter stands as it did at/);
@@ -170,9 +170,11 @@ test("a newest restore keeps its Undo after a look elsewhere: the toolbar's Undo
   const undo = h.host.querySelector(".room-pair .room-undo");
   expect(undo?.getAttribute("aria-disabled")).toBeNull();
   await h.click(undo);
-  const cp3 = { preview_restore: { matter: MATTER, checkpoint: "cp3", scope: "matter" } };
+  const cp3 = {
+    preview_restore: { matter: MATTER, checkpoint: "cp3", scope: "matter", undoes: "cp4" },
+  };
   expect(h.queried("preview_restore").at(-1)).toEqual(cp3);
-  expect(dialog()?.textContent).toMatch(/^Restore the matter to how it was at/);
+  expect(dialog()?.textContent).toMatch(/^Undo the restore at/);
   await h.click(h.button("Cancel", dialog()));
   // picking the restore's row keeps the room at now, with its Undo in the band
   await h.lookAt("cp4");
@@ -182,4 +184,63 @@ test("a newest restore keeps its Undo after a look elsewhere: the toolbar's Undo
   await h.click(h.one("version-undo"));
   expect(h.queried("preview_restore")).toHaveLength(asked + 1);
   expect(h.queried("preview_restore").at(-1)).toEqual(cp3);
+});
+
+test("undoing a restore asks the host to take back what it added: the dialog names the restore and the file that goes", async () => {
+  const ADDED = "Reply notes.md";
+  h = await mountVersions(
+    [...VERSIONS, version(4, "restore"), restoredMarker(40, "cp2", "cp4")],
+    STEPS,
+    {
+      // the host's preview: nothing to write back, and the file the restore added removed, only when asked to undo it
+      query: answering({
+        preview_restore: (q: { preview_restore: { undoes?: string } }) => ({
+          restore_preview: {
+            changes: [],
+            added_since: q.preview_restore.undoes === undefined ? [ADDED] : [],
+            kept: [],
+            locked: [],
+            ...(q.preview_restore.undoes === undefined ? {} : { removes: [ADDED] }),
+          },
+        }),
+      }),
+      dispatch: () => ({ version_restored: { checkpoint: "cp5" } }),
+    },
+  );
+  await h.openVersions();
+  await h.click(h.host.querySelector(".room-pair .room-undo"));
+  expect(h.queried("preview_restore").at(-1)).toEqual({
+    preview_restore: { matter: MATTER, checkpoint: "cp3", scope: "matter", undoes: "cp4" },
+  });
+  // the restore cp4 was made at 12:04 pm (zone-free: the version's clock words are the room's)
+  expect(dialog()?.textContent).toMatch(/^Undo the restore at .+ today\?/);
+  // not "Nothing will change", nor that the file stays: it goes
+  expect(describedBy()).toBe(
+    "'\u2068Reply notes.md\u2069', added by the restore, will be removed.",
+  );
+  expect(dialog()?.textContent).not.toMatch(/Nothing will change|added since/);
+  await h.click(h.one("dialog-confirm"));
+  expect(h.sent("restore_version")).toEqual([
+    { matter: MATTER, checkpoint: "cp3", scope: "matter", undoes: "cp4" },
+  ]);
+});
+
+test("undoing a restore that also writes files back lists the change, then the files that go", async () => {
+  h = await mountVersions(
+    [...VERSIONS, version(4, "restore"), restoredMarker(40, "cp2", "cp4")],
+    STEPS,
+    {
+      query: answering({
+        preview_restore: {
+          restore_preview: { ...PREVIEW, removes: ["a.md", "b.md"] },
+        },
+      }),
+    },
+  );
+  await h.openVersions();
+  await h.click(h.host.querySelector(".room-pair .room-undo"));
+  expect(describedBy()).toBe("1 document will change: \u2068brief.txt\u2069. You can undo this.");
+  expect(dialog()?.textContent).toContain(
+    "'\u2068a.md\u2069' and '\u2068b.md\u2069', added by the restore, will be removed.",
+  );
 });

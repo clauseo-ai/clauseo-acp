@@ -61,7 +61,9 @@ export function askOf(lang: Lang, cal: Calendar, s: Snapshot, ask: Ask | null): 
   const failed = ask.failed === null ? null : errorWords(lang, ask.failed);
   if (ask.act === "restore") {
     const { changes, added_since, kept } = ask.preview;
-    const name = namesOf([...changes.map((c) => c.path), ...added_since, ...kept]);
+    // undoing a restore: the files it added go (an older host's answer names none)
+    const removes = ask.undoes === null ? [] : (ask.preview.removes ?? []);
+    const name = namesOf([...changes.map((c) => c.path), ...added_since, ...kept, ...removes]);
     const changed = changes.map((c) => name(c.path));
     const papers = listOf(lang, changed);
     // one name stands in the line's own quotes; several are each quoted, and "and" joins them outside the quotes
@@ -70,7 +72,18 @@ export function askOf(lang: Lang, cal: Calendar, s: Snapshot, ask: Ask | null): 
         lang,
         paths.map((p) => `'${name(p)}'`),
       );
+    const removed =
+      removes.length === 0
+        ? null
+        : removes.length === 1
+          ? vt(lang, "'{papers}', added by the restore, will be removed.", {
+              papers: name(removes[0] ?? ""),
+            })
+          : vt(lang, "{papers}, added by the restore, will be removed.", {
+              papers: quoted(removes),
+            });
     const stays = [
+      changed.length === 0 ? null : removed,
       added_since.length === 0
         ? null
         : added_since.length === 1
@@ -86,19 +99,25 @@ export function askOf(lang: Lang, cal: Calendar, s: Snapshot, ask: Ask | null): 
               papers: quoted(kept),
             }),
     ].filter((x) => x !== null);
+    // undoing a restore names the restore it takes back, by when it was made
+    const undone = ask.undoes === null ? undefined : versionOf(s, ask.undoes);
     return {
       kind: "confirm",
       act: "restore",
       title:
-        v.day === cal.today
-          ? vt(lang, "Restore the matter to how it was at {time} today?", { time: timeOf(lang, v) })
-          : vt(lang, "Restore the matter to how it was at {time} on {date}?", {
-              time: timeOf(lang, v),
-              date: cal.words(lang, v.day, "date"),
-            }),
+        undone !== undefined
+          ? vt(lang, "Undo the restore at {time}?", { time: whenOf(lang, cal, undone) })
+          : v.day === cal.today
+            ? vt(lang, "Restore the matter to how it was at {time} today?", {
+                time: timeOf(lang, v),
+              })
+            : vt(lang, "Restore the matter to how it was at {time} on {date}?", {
+                time: timeOf(lang, v),
+                date: cal.words(lang, v.day, "date"),
+              }),
       body:
         changed.length === 0
-          ? vt(lang, "Nothing will change. The matter already stands as it did then.")
+          ? (removed ?? vt(lang, "Nothing will change. The matter already stands as it did then."))
           : changed.length === 1
             ? vt(lang, "1 document will change: {papers}. You can undo this.", { papers })
             : vt(lang, "{n} documents will change: {papers}. You can undo this.", {

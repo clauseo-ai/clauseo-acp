@@ -75,6 +75,16 @@ const version = (
   },
 });
 
+/** The host's marker for a restore: `checkpoint` restored the matter to `from`. */
+const restoreMarker = (order: number, from: string, checkpoint: string): ViewEntry => ({
+  marker: {
+    order,
+    event: uuid(order, 9),
+    ts: Date.now(),
+    kind: { version_restored: { from, checkpoint, scope: "matter" } },
+  },
+});
+
 const stepEntry = (order: number, over: Partial<StepEntry>): ViewEntry => ({
   step: {
     order,
@@ -115,6 +125,10 @@ export type Matter = {
   mark?: "hold" | { truncated: boolean } | { refused: string; retryable: boolean };
   /** The lawyer accepted or rejected tracked changes in these files after the next turn: version cp6 (UC). */
   revisions?: FileChange[];
+  /** The newest version is a restore to the turn's version three days ago, cp7, marked by the host. */
+  restored?: boolean;
+  /** preview_restore's removes, when it is asked to undo a restore. */
+  removes?: string[];
 };
 
 /** The host's Word tool's marking up of the notice: a word out and a word in, and a paragraph added. */
@@ -156,6 +170,9 @@ export function versionsHost(m: Matter): FakeTransport {
     version(3, "outside_edits", today(0), m.outside ?? [file(LEASE)]),
     version(4, "after_turn", today(10), [], uuid(3, 4)),
     ...(m.revisions === undefined ? [] : [version(6, "revisions", today(15), m.revisions)]),
+    ...(m.restored === true
+      ? [version(7, "restore", today(20)), restoreMarker(70, "cp2", "cp7")]
+      : []),
   ];
   const steps = [
     stepEntry(9, { files, checkpoint_after: "cp2" }),
@@ -215,7 +232,13 @@ export function versionsHost(m: Matter): FakeTransport {
           ],
         };
       if (query.compare_versions !== undefined) return { file_changes: m.compare ?? [] };
-      if (query.preview_restore !== undefined) return { restore_preview: preview };
+      if (query.preview_restore !== undefined)
+        return {
+          restore_preview:
+            query.preview_restore.undoes === undefined
+              ? preview
+              : { ...preview, removes: m.removes ?? [] },
+        };
       if (query.word_blackline !== undefined) return marking(m.mark);
       throw new Error(`not scripted: ${JSON.stringify(query)}`);
     },
@@ -230,17 +253,7 @@ export function versionsHost(m: Matter): FakeTransport {
           event(
             batch(
               2,
-              [
-                upsert(version(5, "restore", Date.now())),
-                upsert({
-                  marker: {
-                    order: 50,
-                    event: uuid(50, 9),
-                    ts: Date.now(),
-                    kind: { version_restored: { from: to, checkpoint: "cp5", scope: "matter" } },
-                  },
-                }),
-              ],
+              [upsert(version(5, "restore", Date.now())), upsert(restoreMarker(50, to, "cp5"))],
               undefined,
               MATTER_STREAM,
             ),
@@ -293,6 +306,10 @@ const state = (id: string, words: WordsRef, m: Matter, clicks: readonly string[]
     />
   ),
 });
+
+/** The newest version a restore that brought back one file, and the presses that ask to undo it. */
+const UNDO_RESTORE: Matter = { restored: true, removes: ["Reply notes.md"] };
+const UNDOING = [OPEN, '[data-testid="version"][data-checkpoint="cp7"]', UNDO] as const;
 
 /** A document whose words can't be compared yet: a Word document is marked up instead (registry-uc-blackline.tsx). */
 const SHEET = [file("Notes for counsel.txt")];
@@ -415,4 +432,18 @@ export const U8: Entry[] = [
     CONFIRM,
   ]),
   state("U8-24", versionWords("Restored to {time} today"), {}, [OPEN, TODAY, RESTORE, CONFIRM]),
+  // undoing the newest version, a restore: the dialog names the restore, and the files it added, which go
+  state("U8-25", versionWords("Undo the restore at {time}?"), UNDO_RESTORE, UNDOING),
+  state(
+    "U8-26",
+    versionWords("'{papers}', added by the restore, will be removed."),
+    UNDO_RESTORE,
+    UNDOING,
+  ),
+  state(
+    "U8-27",
+    versionWords("{papers}, added by the restore, will be removed."),
+    { restored: true, removes: ["Rejoinder.docx", "Synopsis.docx"] },
+    UNDOING,
+  ),
 ];
