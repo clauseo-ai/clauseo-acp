@@ -1,8 +1,8 @@
 //! A Claude agent that refuses `session/new` (claude-agent-acp 0.89.1's `cwd` check, captured on
-//! a real run): the launch fails with `agent.protocol_error`, and the log file names the request's
-//! method, the error's code, its message's length and its data's keys, then the start-phase lines
-//! of the agent's stderr and its last line, and holds neither the message, the data's value nor
-//! any other stderr line (decision record 0047).
+//! a real run): the launch fails with `matter.folder_permission`, and the log file names the
+//! request's method, the error's code, its message's length and its data's keys, then the
+//! start-phase lines of the agent's stderr and its last line, and holds neither the message, the
+//! data's value nor any other stderr line (decision record 0047).
 //!
 //! The log is the process's global subscriber, so this module holds one test: nextest runs it
 //! in a process of its own.
@@ -47,7 +47,7 @@ fn a_refused_start_logs_its_method_error_shape_and_start_phases() {
     });
     assert_eq!(
         failed,
-        Some(ErrorCode::AgentProtocolError),
+        Some(ErrorCode::MatterFolderPermission),
         "{}",
         events.dump()
     );

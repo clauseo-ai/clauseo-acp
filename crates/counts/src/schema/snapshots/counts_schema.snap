@@ -1525,7 +1525,8 @@ expression: counts_schema()
         "word.stetdoc_missing",
         "word.revisions_stale",
         "word.not_docx",
-        "word.edit_failed"
+        "word.edit_failed",
+        "matter.folder_permission"
       ],
       "type": "string"
     },

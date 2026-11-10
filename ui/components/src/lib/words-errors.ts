@@ -38,6 +38,7 @@ export type ErrorCode =
   | "matter.checkpoint_failed"
   | "matter.folder_missing"
   | "matter.folder_not_a_matter"
+  | "matter.folder_permission"
   | "matter.folder_refused"
   | "matter.codex_folder"
   | "matter.file_locked"
@@ -144,6 +145,8 @@ export const ERROR_WORDS: Record<ErrorCode, ErrorKey> = {
     "This matter's folder can't be reached. It may have moved, or its drive or network isn't connected.",
   "matter.folder_not_a_matter":
     "This folder doesn't hold this matter's Clauseo file. Locate the matter's folder to carry on.",
+  // settled (orchestrator, 2026-11-10); the app's Open Privacy settings button and its line are the room's
+  "matter.folder_permission": "Clauseo needs permission to open this folder.",
   "matter.folder_refused": "A whole drive, your home folder or a system folder can't be a matter.",
   "matter.codex_folder":
     "This matter's folder holds a .codex folder. Rename or remove it to use ChatGPT here.",

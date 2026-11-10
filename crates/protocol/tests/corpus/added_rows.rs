@@ -555,4 +555,11 @@ pub(crate) const ADDED_AFTER_V1: &[Corpus] = &[
         (310, 0xddd9_fb28_c6c8_1129),
         (215, 0xc0df_ab05_c496_c67c),
     ),
+    (
+        "added/turn_failed-MatterFolderPermission",
+        include_bytes!("added/turn_failed-MatterFolderPermission.jsonl"),
+        include_bytes!("added/turn_failed-MatterFolderPermission.msgpack"),
+        (387, 0xcc8f_4ffd_b7e6_4560),
+        (289, 0x03ca_ae5d_2ba0_44cf),
+    ),
 ];

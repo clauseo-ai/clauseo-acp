@@ -65,6 +65,8 @@ export const HI = {
     "इस मामले के फ़ोल्डर तक पहुँचा नहीं जा सकता। हो सकता है वह कहीं और ले जाया गया हो, या उसकी ड्राइव या नेटवर्क जुड़ा न हो।",
   "This folder doesn't hold this matter's Clauseo file. Locate the matter's folder to carry on.":
     "इस फ़ोल्डर में इस मामले की Clauseo फ़ाइल नहीं है। आगे बढ़ने के लिए मामले का फ़ोल्डर ढूँढें।",
+  // provisional: a specialist's draft, pending the Hindi-speaking lawyer's review (U3-err-matter.folder_permission)
+  "Clauseo needs permission to open this folder.": "Clauseo को यह फ़ोल्डर खोलने की अनुमति चाहिए।",
   "A whole drive, your home folder or a system folder can't be a matter.":
     "पूरी ड्राइव, आपका होम फ़ोल्डर या कोई सिस्टम फ़ोल्डर मामला नहीं बन सकता।",
   "This matter's folder holds a .codex folder. Rename or remove it to use ChatGPT here.":

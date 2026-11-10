@@ -1814,6 +1814,8 @@ export type ErrorCode =
 "word.not_docx" | 
 /** stetdoc failed or did not finish in time while reading or editing the Word file, or the file is not on this computer or is too large to version, so nothing was written. */
 "word.edit_failed" | 
+/** The computer's privacy settings keep Clauseo, or the agent it starts, from opening the matter's folder (on macOS, Files and Folders in Privacy & Security), so no agent works in it: allow Clauseo there, then ask again. */
+"matter.folder_permission" | 
 /** A code from a newer Clauseo that this version does not know. Never produced here. */
 "unknown";
 

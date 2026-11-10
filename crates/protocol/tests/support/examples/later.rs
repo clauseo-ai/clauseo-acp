@@ -112,6 +112,10 @@ pub(super) fn failures() -> Vec<DomainEvent> {
         ),
         failed(ErrorCode::WordNotDocx, "not a Word document"),
         failed(ErrorCode::WordEditFailed, "stetdoc timed out"),
+        failed(
+            ErrorCode::MatterFolderPermission,
+            "the privacy settings keep Clauseo from opening the matter folder",
+        ),
     ]
 }
 

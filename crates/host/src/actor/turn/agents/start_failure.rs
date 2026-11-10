@@ -50,6 +50,9 @@ pub(in super::super) fn launch_failed(actor: &mut Actor, thread: ThreadId, error
     } else {
         tracing::warn!(%thread, error = %Cause(error), "the agent did not start");
     }
+    // Claude's "`cwd` does not exist" answer to `session/new` is `matter.folder_permission`.
+    let refusal = crate::agent::folder_access::session_refusal(error);
+    let error = refusal.as_ref().unwrap_or(error);
     agent.link.stop();
     agent.stage = Stage::Stopping;
     agent.start_failure = Some(error.code());
