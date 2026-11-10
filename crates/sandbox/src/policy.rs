@@ -6,11 +6,13 @@ use std::path::{Path, PathBuf};
 use crate::links::{LinkFinding, MatterScan};
 use crate::{Access, Error, PathClass};
 
+mod bridge;
 mod build;
 mod links;
 mod names;
 mod store;
 
+pub use bridge::BrowserBridge;
 pub use links::LINK_RULES_MAX;
 pub(crate) use names::opens_as;
 pub use names::{hfs_ignorable, strip_hfs_ignorables};
@@ -80,15 +82,21 @@ pub(crate) fn instruction_file(matter: &Path, path: &Path) -> bool {
             .is_some_and(|name| name.eq_ignore_ascii_case(INSTRUCTIONS_AT_ANY_DEPTH))
 }
 
-/// The browser's loopback reach (agent-browser's and Chrome's CDP ports).
+/// The agent's TCP reach to local listeners beyond the proxy ports: connect only, over IPv4
+/// and IPv6. No variant lets the agent bind or listen on an inet socket: Seatbelt checks a bind
+/// and a listen by the local port alone (its `localhost` matches any address of the Mac), so
+/// no rule could hold a jailed listener to loopback (0038). The browser no longer uses it: its
+/// stack runs outside the jail, reached through the guard's socket.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum Loopback {
-    /// No loopback beyond the proxy ports.
+    /// No local listener beyond the proxy ports.
     #[default]
     None,
-    /// These loopback ports, with bind and inbound on localhost. Sorted and de-duplicated.
+    /// These ports, connect only. Seatbelt's `localhost` also matches the Mac's other
+    /// addresses, so a listener on one of them on a listed port is reached too. Sorted and
+    /// de-duplicated.
     Ports(Vec<u16>),
-    /// Any loopback port. Also reaches other loopback services and other launches' proxies,
+    /// Any port, connect only. Also reaches other local services and other launches' proxies,
     /// which refuse a request without their token (S16).
     Any,
 }
@@ -139,6 +147,7 @@ pub struct Policy {
     proxy_ports: Vec<u16>,
     loopback: Loopback,
     browser_socket_dir: Option<PathBuf>,
+    browser: Option<BrowserBridge>,
     keychain: bool,
     over_cap: Vec<PathBuf>,
     links: Vec<LinkFinding>,
@@ -165,6 +174,7 @@ pub struct PolicyBuilder {
     proxy_ports: Vec<u16>,
     loopback: Loopback,
     browser_socket_dir: Option<PathBuf>,
+    browser: Option<BrowserBridge>,
     keychain: bool,
     over_cap: Vec<PathBuf>,
     links: Vec<LinkFinding>,
@@ -272,6 +282,11 @@ impl Policy {
     /// and remove files. `None`: no Unix socket anywhere.
     pub fn browser_socket_dir(&self) -> Option<&Path> {
         self.browser_socket_dir.as_deref()
+    }
+
+    /// The agent's bridge to the browser stack, canonical ([`PolicyBuilder::browser`]).
+    pub fn browser(&self) -> Option<&BrowserBridge> {
+        self.browser.as_ref()
     }
 
     /// Whether Claude's Keychain rules apply (macOS).
@@ -470,7 +485,7 @@ impl PolicyBuilder {
         self
     }
 
-    /// The browser's loopback reach; [`Loopback::None`] unless set.
+    /// The agent's connect-only reach to local listeners; [`Loopback::None`] unless set.
     pub fn loopback(mut self, loopback: Loopback) -> PolicyBuilder {
         self.loopback = loopback;
         self
@@ -491,6 +506,14 @@ impl PolicyBuilder {
     #[cfg(test)]
     pub(crate) fn browser_socket_path(mut self, path: PathBuf) -> PolicyBuilder {
         self.browser_socket_dir = Some(path);
+        self
+    }
+
+    /// The agent's bridge to the browser stack, which runs outside the jail: a connect to its
+    /// socket, a read of its staging folder, no run, read or map of its bundles. Refused with
+    /// [`Loopback::Any`], a browser socket folder or a runtime path in a bundle.
+    pub fn browser(mut self, bridge: BrowserBridge) -> PolicyBuilder {
+        self.browser = Some(bridge);
         self
     }
 

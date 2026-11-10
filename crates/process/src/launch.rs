@@ -2,9 +2,11 @@
 //! one place an agent process starts.
 
 use std::ffi::OsStr;
+#[cfg(unix)]
+use std::os::fd::{OwnedFd, RawFd};
 use std::path::PathBuf;
 use std::process::Stdio;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
 use async_process::ChildStdout;
@@ -55,17 +57,42 @@ impl Launcher for PassthroughLauncher {
     }
 }
 
+/// The on-or-off choices of a [`SpawnOptions`], one bit each; all off by default.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) struct Flags(u8);
+
+impl Flags {
+    /// [`SpawnOptions::clear_env`].
+    pub(crate) const CLEAR_ENV: Flags = Flags(1);
+    /// [`SpawnOptions::end_with_parent`], which only Linux sets.
+    pub(crate) const END_WITH_PARENT: Flags = Flags(1 << 1);
+    /// [`SpawnOptions::close_other_fds`].
+    #[cfg(unix)]
+    pub(crate) const CLOSE_OTHER_FDS: Flags = Flags(1 << 2);
+
+    /// Whether `flag` is on.
+    pub(crate) fn has(self, flag: Flags) -> bool {
+        self.0 & flag.0 == flag.0
+    }
+
+    /// These flags with `flag` on too.
+    #[must_use]
+    fn with(self, flag: Flags) -> Flags {
+        Flags(self.0 | flag.0)
+    }
+}
+
 /// How [`spawn_in_tree`] starts an agent, beyond its spec.
 #[derive(Debug, Clone, Default)]
 #[non_exhaustive]
 pub struct SpawnOptions {
     pub(crate) home: Option<PathBuf>,
-    pub(crate) clear_env: bool,
+    pub(crate) flags: Flags,
     #[cfg(windows)]
     pub(crate) creation_flags: u32,
-    #[cfg(target_os = "linux")]
-    pub(crate) end_with_parent: bool,
     pub(crate) stdin_grace: Option<Duration>,
+    #[cfg(unix)]
+    pub(crate) fds: Vec<(RawFd, Arc<OwnedFd>)>,
 }
 
 impl SpawnOptions {
@@ -83,7 +110,7 @@ impl SpawnOptions {
 
     /// The child gets only the spec's variables: none of this process's environment.
     pub fn clear_env(mut self) -> SpawnOptions {
-        self.clear_env = true;
+        self.flags = self.flags.with(Flags::CLEAR_ENV);
         self
     }
 
@@ -98,11 +125,53 @@ impl SpawnOptions {
         #[cfg(target_os = "linux")]
         {
             let mut opts = self;
-            opts.end_with_parent = true;
+            opts.flags = opts.flags.with(Flags::END_WITH_PARENT);
             opts
         }
         #[cfg(not(target_os = "linux"))]
         self
+    }
+
+    /// The child gets `fd` as its descriptor `target` (3 or above), open across its exec, as
+    /// Chrome's `--remote-debugging-pipe` wants its fds 3 and 4. Every other descriptor of this
+    /// process stays closed to the child. This process's copy of `fd` closes when the last
+    /// clone of these options drops: pass it on a clone made for one launch and drop the clone
+    /// after the launch, so the child holds the only copy. A `target` below 3 is ignored.
+    #[cfg(unix)]
+    pub fn pass_fd(mut self, target: RawFd, fd: OwnedFd) -> SpawnOptions {
+        if target > 2 {
+            self.fds.retain(|(t, _)| *t != target);
+            self.fds.push((target, Arc::new(fd)));
+        }
+        self
+    }
+
+    /// The child closes, before it runs, every descriptor of 3 or above that is open across exec
+    /// and was not passed with [`SpawnOptions::pass_fd`]: one this process (or a library in it)
+    /// opened without close-on-exec, or one another thread's start leaked while it was being
+    /// made. The sandbox launchers set it, so a jailed agent or the browser stack never gets a
+    /// descriptor of the host's. The child lists its descriptors (`proc_pidinfo` on macOS) or
+    /// tries each up to `getdtablesize`.
+    #[cfg(unix)]
+    pub fn close_other_fds(mut self) -> SpawnOptions {
+        self.flags = self.flags.with(Flags::CLOSE_OTHER_FDS);
+        self
+    }
+
+    /// The home folder [`SpawnOptions::home`] set, if any.
+    pub fn home_dir(&self) -> Option<&std::path::Path> {
+        self.home.as_deref()
+    }
+
+    /// Whether [`SpawnOptions::clear_env`] is set.
+    pub fn clears_env(&self) -> bool {
+        self.flags.has(Flags::CLEAR_ENV)
+    }
+
+    /// Whether [`SpawnOptions::end_with_parent`] is set; always `false` off Linux, where the
+    /// option does nothing.
+    pub fn ends_with_parent(&self) -> bool {
+        self.flags.has(Flags::END_WITH_PARENT)
     }
 
     /// Process creation flags added to the crate's own (`CREATE_SUSPENDED`, `CREATE_NO_WINDOW`).
@@ -136,6 +205,30 @@ pub struct Launched {
     pub handle: Handle,
 }
 
+/// Held while this crate starts a child and while [`cloexec_pipe`] makes a pipe: on macOS a
+/// pipe is made, then marked close-on-exec in a second call, and a child forked in between
+/// would keep both ends.
+static SPAWNING: Mutex<()> = Mutex::new(());
+
+/// A pipe whose two ends are close-on-exec before any child of this crate can start, for a
+/// descriptor meant for one child alone (Chrome's `DevTools` pipe, given with
+/// [`SpawnOptions::pass_fd`]). It is made under the lock every [`spawn_in_tree`] holds while it
+/// starts its child; a start outside this crate does not take that lock, which is what
+/// [`SpawnOptions::close_other_fds`] is for.
+pub fn cloexec_pipe() -> std::io::Result<(std::io::PipeReader, std::io::PipeWriter)> {
+    let _held = SPAWNING.lock().unwrap_or_else(PoisonError::into_inner);
+    std::io::pipe()
+}
+
+/// Runs `start` under the lock [`spawn_in_tree`] holds while it starts a child and
+/// [`cloexec_pipe`] holds while it makes a pipe: for a start outside this crate (an
+/// `async_process::Command`'s `spawn`, say), so its child cannot catch a pipe whose ends are not
+/// close-on-exec yet. `start` should only start the child: other starts wait for it.
+pub fn spawn_locked<T>(start: impl FnOnce() -> T) -> T {
+    let _held = SPAWNING.lock().unwrap_or_else(PoisonError::into_inner);
+    start()
+}
+
 /// Starts `spec` with stdio pipes in a tree of its own: a new process group on Unix, a Job Object
 /// on Windows that it joins before it runs. The child inherits this process's environment, then
 /// `spec`'s variables override it; with [`SpawnOptions::clear_env`] it gets only `spec`'s
@@ -146,7 +239,7 @@ pub fn spawn_in_tree(spec: &LaunchSpec, opts: &SpawnOptions) -> Result<Launched,
     let live = Live::enter()?;
     let mut command = std::process::Command::new(spec.program());
     command.args(spec.args());
-    if opts.clear_env {
+    if opts.flags.has(Flags::CLEAR_ENV) {
         command.env_clear();
     }
     for name in NODE_ENV {
@@ -164,7 +257,8 @@ pub fn spawn_in_tree(spec: &LaunchSpec, opts: &SpawnOptions) -> Result<Launched,
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .kill_on_drop(true);
-    let mut child = command.spawn().map_err(|source| Error::Spawn {
+    let spawned = spawn_locked(|| command.spawn());
+    let mut child = spawned.map_err(|source| Error::Spawn {
         program: spec.program().to_owned(),
         source,
     })?;

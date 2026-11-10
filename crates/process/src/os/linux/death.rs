@@ -1,5 +1,5 @@
 //! [`crate::SpawnOptions::end_with_parent`] on Linux: the child sets SIGKILL as its
-//! parent-death signal (`PR_SET_PDEATHSIG`) between fork and exec, the one `pre_exec` of the
+//! parent-death signal (`PR_SET_PDEATHSIG`) between fork and exec, a `pre_exec` of the
 //! crate. The kernel sends it when the thread that forked the child ends, which a crash, a
 //! kill or an exit that skips every drop all do. The child then checks that its parent is still
 //! the process that started it: had that process died before the signal was set, the child was

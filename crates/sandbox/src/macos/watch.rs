@@ -181,13 +181,14 @@ fn current(generation: u64) -> bool {
 
 /// Starts `log stream` and keeps the child in the state, so the last unregistration kills it.
 fn start(generation: u64) -> std::io::Result<ChildStdout> {
-    let mut child = Command::new(LOG)
-        .args(["stream", "--style", "ndjson", "--predicate", PREDICATE])
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .kill_on_drop(true)
-        .spawn()?;
+    let mut child = spawn(
+        Command::new(LOG)
+            .args(["stream", "--style", "ndjson", "--predicate", PREDICATE])
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .kill_on_drop(true),
+    )?;
     let stdout = child
         .stdout
         .take()
@@ -277,15 +278,23 @@ fn probe_tag() -> String {
 fn probe(tag: &str) {
     // The tag holds only ASCII letters, digits and `-`, so it is safe inside the string.
     let profile = format!(r#"(version 1)(deny default (with message "{tag}"))"#);
-    let spawned = Command::new(SANDBOX_EXEC)
-        .args(["-p", &profile, PROBE_PROGRAM])
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn();
+    let spawned = spawn(
+        Command::new(SANDBOX_EXEC)
+            .args(["-p", &profile, PROBE_PROGRAM])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null()),
+    );
     if let Err(error) = spawned {
         tracing::warn!(%error, "the Seatbelt denial watcher's probe did not start");
     }
+}
+
+/// Starts `command` under `clauseo-process`'s spawn lock, as every start of that crate is, so
+/// its child cannot catch a pipe made meanwhile (Chrome's `DevTools` pipe) before its ends are
+/// close-on-exec: macOS marks a new pipe close-on-exec only in a second call.
+fn spawn(command: &mut Command) -> std::io::Result<Child> {
+    clauseo_process::spawn_locked(|| command.spawn())
 }
 
 /// Ticks every registered sink, outside the lock.
@@ -449,3 +458,6 @@ fn valid_tag(tag: &str) -> bool {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod spawn_tests;

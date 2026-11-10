@@ -1,0 +1,61 @@
+; The browser profile's base: what headless Chrome needs beyond the run's own paths, which
+; browser.rs writes. It follows `(version 1)`, `(deny default ...)` and an explicit
+; `(deny file-map-executable ...)`, and holds only allow rules. Each allow was measured on
+; macOS 27.2 (arm64) with chrome-headless-shell 155, `--headless --no-sandbox --disable-gpu
+; --screenshot` through `--proxy-server`: without it, the run failed (the failure is named;
+; decision 0038 keeps the log). Nothing here names a user path.
+
+; Processes. Chrome forks its helpers (without it: SIGTRAP at start). Signals and process info
+; were not needed for a run; they stay in this sandbox's tree for teardown and for the guard,
+; which asks `sandbox_check` about Chrome's pids.
+(allow process-fork)
+(allow signal (target same-sandbox))
+(allow process-info* (target self))
+(allow process-info* (target children))
+(allow process-info* (target same-sandbox))
+
+; The root folder: without it dyld aborts at start (SIGABRT, exit 134).
+(allow file-read* (literal "/"))
+
+; Frameworks, dylibs, the dyld cache and the system fonts (/System/Library/Fonts): without
+; /System Chrome traps at start (exit 133), without /usr/lib dyld aborts (exit 134).
+(allow file-read*
+  (subpath "/System")
+  (subpath "/usr/lib"))
+(allow file-map-executable
+  (subpath "/System")
+  (subpath "/usr/lib"))
+
+;
+; The links at the root: metadata only. A run passes without it, but logs about 2,600 denials.
+(allow file-read-metadata
+  (literal "/etc")
+  (literal "/tmp")
+  (literal "/var"))
+
+; The null device: without it Chrome traps at start (exit 133).
+(allow file-read* file-write-data file-ioctl (literal "/dev/null"))
+
+; Facts Chrome's base library reads at start; without any one of them it traps (exit 133) or
+; aborts (exit 134).
+(allow sysctl-read
+  (sysctl-name "hw.machine")
+  (sysctl-name "hw.memsize")
+  (sysctl-name "hw.ncpu")
+  (sysctl-name "hw.pagesize_compat")
+  (sysctl-name "kern.hostname")
+  (sysctl-name "kern.osproductversion")
+  (sysctl-name "kern.osrelease")
+  (sysctl-name "kern.ostype")
+  (sysctl-name "kern.version"))
+
+; Power management: the headless shell opens it at start and crashes without it (SIGSEGV,
+; exit 139). The agent jail's base allows the same class.
+(allow iokit-open-user-client (iokit-user-client-class "RootDomainUserClient"))
+
+; Chrome's own port broker, `org.chromium.Chromium.MachPortRendezvousServer.<pid>`: the browser
+; process registers it and its helpers look it up. Without the register it traps
+; (`bootstrap_check_in ... Permission denied (1100)`); without the lookup the helpers never
+; start and the run hangs. The headless shell needs no other Mach service.
+(allow mach-register mach-lookup
+  (global-name-regex #"^org\.chromium\.Chromium\.MachPortRendezvousServer\.[0-9]+$"))

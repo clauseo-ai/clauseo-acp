@@ -163,7 +163,7 @@ mod denial;
 mod detect;
 mod error;
 mod links;
-mod macos;
+pub mod macos;
 mod policy;
 pub mod ports;
 pub mod proxy;
@@ -185,9 +185,9 @@ pub use links::{LinkFinding, LinkKind, MatterScan, scan_links, scan_matter};
 pub use macos::SeatbeltLauncher;
 pub use macos::SeatbeltProfile;
 pub use policy::{
-    CLAUDE_STORE_BESIDE_LOCK_SUFFIX, CLAUDE_STORE_FILES, CLAUDE_STORE_LOCK_FOLDERS, ClaudeStore,
-    INSTRUCTIONS_AT_ANY_DEPTH, LINK_RULES_MAX, Loopback, PROTECTED_AT_ANY_DEPTH, PROTECTED_NAMES,
-    PathRule, Policy, PolicyBuilder, hfs_ignorable, strip_hfs_ignorables,
+    BrowserBridge, CLAUDE_STORE_BESIDE_LOCK_SUFFIX, CLAUDE_STORE_FILES, CLAUDE_STORE_LOCK_FOLDERS,
+    ClaudeStore, INSTRUCTIONS_AT_ANY_DEPTH, LINK_RULES_MAX, Loopback, PROTECTED_AT_ANY_DEPTH,
+    PROTECTED_NAMES, PathRule, Policy, PolicyBuilder, hfs_ignorable, strip_hfs_ignorables,
 };
 pub use proxy::{
     Allowlist, Exchange, FailKind, Listener, LoginKind, ProxyConfig, ProxyHandle, Record, Route,

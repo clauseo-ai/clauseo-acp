@@ -293,6 +293,8 @@ crates/reducer_bench/benches/apply.rs linux::fail clippy::panic
 # folder), the tests' Windows exit watch, and the pipe test that launches with SIGTERM ignored.
 crates/process/src/os/windows.rs - unsafe_code
 crates/process/src/os/linux/death.rs - unsafe_code
+# J3: the descriptors a child gets at fixed numbers (Chrome's DevTools pipe), set before exec.
+crates/process/src/os/unix/inherit.rs - unsafe_code
 # Its macOS descendant listing: libproc's proc_listchildpids, proc_pidinfo and proc_pidpath.
 crates/process/src/os/macos.rs - unsafe_code
 crates/process/tests/pipes/shutdown.rs launch_ignoring_sigterm unsafe_code
@@ -402,6 +404,13 @@ crates/sandbox/src/links/tests.rs walk_of_fifty_thousand_files clippy::disallowe
 # Added by S14 (macOS): the agent's TMPDIR in its state folder, the jail tests' file setup.
 crates/sandbox/src/macos/launcher.rs make_tmpdir clippy::disallowed_methods
 crates/sandbox/tests/jail/support.rs - clippy::disallowed_methods
+# J3 (macOS): the browser profile's sandbox_check, and the jail probe's copies, dlopen,
+# bootstrap_look_up, KERN_PROCARGS2 and proc_listallpids.
+crates/sandbox/src/macos/browser/check.rs - unsafe_code
+crates/sandbox/tests/jail/probe.rs - clippy::disallowed_methods
+crates/sandbox/tests/jail/probe.rs map unsafe_code
+crates/sandbox/tests/jail/probe.rs lookup unsafe_code
+crates/sandbox/tests/jail/probe.rs inspect unsafe_code
 # clauseo-mcp (S27): main's one stderr print of a mode's failure, the write module (the guard's
 # folders), the guard's one child start (agent-browser), the echo stub's log file, and the tests'
 # write module and guard starts.

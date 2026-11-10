@@ -23,11 +23,12 @@ thiserror = { workspace = true }
 # and sysconf(_SC_CLK_TCK) for a sweep's cutoff (`time`, `feature`).
 [target.'cfg(unix)'.dependencies]
 nix = { workspace = true, features = ["signal", "time", "feature"] }
-
-# libproc's proc_listchildpids, proc_pidinfo and proc_pidpath: the descendant listing
-# (src/os/macos.rs).
-[target.'cfg(target_os = "macos")'.dependencies]
+# fcntl(F_DUPFD_CLOEXEC) and dup2 for a passed descriptor (`SpawnOptions::pass_fd`,
+# src/os/unix/inherit.rs); libproc's calls on macOS (below).
 libc = { workspace = true }
+
+# libproc's proc_listchildpids, proc_pidinfo and proc_pidpath, the descendant listing
+# (src/os/macos.rs), come through libc above.
 
 # The Job Object, the suspended start and the thread resume, and the job's process list with each
 # process's creation time, image name, parent (Toolhelp) and end; the system time for a sweep's
@@ -48,7 +49,7 @@ serde_json = { workspace = true }
 
 # The exit watch: a subreaper and waitpid on Linux, kqueue on macOS; and SIGTERM ignored for one test.
 [target.'cfg(unix)'.dev-dependencies]
-nix = { workspace = true, features = ["signal", "process", "event"] }
+nix = { workspace = true, features = ["signal", "process", "event", "fs"] }
 
 # The exit watch on Windows: OpenProcess, WaitForSingleObject and GetExitCodeProcess; and the
 # console a test agent shares (tests/spawn_options.rs).

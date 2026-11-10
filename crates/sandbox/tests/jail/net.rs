@@ -343,8 +343,11 @@ fn a_browser_socket_folder_listener_is_reached_from_the_jail() {
 /// Binds 127.0.0.1:`port` in the jail with Perl and prints `BOUND`, or dies naming the error.
 const BIND: &str = r#"use Socket; socket(S, PF_INET, SOCK_STREAM, 0) or die "socket: $!\n"; setsockopt(S, SOL_SOCKET, SO_REUSEADDR, 1); bind(S, pack_sockaddr_in($ARGV[0], inet_aton("127.0.0.1"))) or die "bind: $!\n"; listen(S, 1) or die "listen: $!\n"; print "BOUND\n""#;
 
+/// `Loopback::Ports` is connect only: a listener on a listed port is reached, one on another
+/// port is not, and no port binds, listed or not (0038: Seatbelt checks a bind by its port
+/// alone, so the jail allows no inet listener).
 #[test]
-fn loopback_ports_bind_only_the_listed_ports() {
+fn loopback_ports_connect_to_the_listed_ports_and_bind_none() {
     let w = World::new();
     // Two free ports, released for the jailed process to take.
     let free = || {
@@ -366,13 +369,14 @@ fn loopback_ports_bind_only_the_listed_ports() {
         let port = port.to_string();
         run(&launcher, "/usr/bin/perl", &["-e", BIND, &port], &m1, &[])
     };
-    assert_eq!(bind(listed).assert_ok().stdout, "BOUND\n");
-    let out = bind(other);
-    out.assert_refused();
-    assert!(
-        out.stderr.contains("bind: Operation not permitted"),
-        "{out:#?}"
-    );
+    for port in [listed, other, 0] {
+        let out = bind(port);
+        out.assert_refused();
+        assert!(
+            out.stderr.contains("bind: Operation not permitted"),
+            "{port}: {out:#?}"
+        );
+    }
     // A listener on the listed port can be reached from the jail; one on the other cannot.
     let open = TcpListener::bind(("127.0.0.1", listed)).unwrap();
     let nc = |port: u16| {
@@ -389,4 +393,49 @@ fn loopback_ports_bind_only_the_listed_ports() {
     drop(open);
     let _closed = TcpListener::bind(("127.0.0.1", other)).unwrap();
     nc(other).assert_refused();
+}
+
+/// No inet bind in the agent's jail either, with the widest network options (proxy ports, any
+/// loopback port, a browser socket folder): TCP and UDP, on `127.0.0.1`, `0.0.0.0`, `[::]` and
+/// `[::1]`, on port 0 and a fixed one, each fails with EPERM (0038: Seatbelt checks a bind by
+/// its port alone, so the profile allows none and ends with a deny of them all).
+#[test]
+fn every_inet_bind_is_refused_in_the_agent_jail() {
+    let w = World::new();
+    let free = || {
+        TcpListener::bind("127.0.0.1:0")
+            .unwrap()
+            .local_addr()
+            .unwrap()
+            .port()
+    };
+    let (proxy, fixed) = (free(), free());
+    let sockets = BrowserSocketDir::create().unwrap();
+    let policy = w
+        .builder()
+        .proxy_port(proxy)
+        .loopback(clauseo_sandbox::Loopback::Any)
+        .browser_socket_dir(&sockets)
+        .build()
+        .unwrap();
+    let (launcher, _) = launcher(policy);
+    let probe = crate::probe::copy_to(&w.at("m1/probe"));
+    let m1 = w.at("m1");
+    for kind in ["tcp-bind", "udp-bind"] {
+        let refused = format!("{kind}=Operation not permitted (os error 1)");
+        for host in ["127.0.0.1", "0.0.0.0", "[::]", "[::1]"] {
+            for port in [0, fixed, proxy] {
+                let addr = format!("{host}:{port}");
+                let env = crate::probe::env(kind, &[&addr]);
+                let out = run(
+                    &launcher,
+                    probe.to_str().unwrap(),
+                    &crate::probe::ARGS,
+                    &m1,
+                    &env,
+                );
+                assert_eq!(crate::probe::answer(&out.stdout), refused, "{addr}");
+            }
+        }
+    }
 }
