@@ -57,7 +57,7 @@ test("a fresh computer: the lead, then Claude's row and ChatGPT's, equal, each w
     "Needs a download of about 110 MB",
     "Needs a download of about 140 MB",
   ]);
-  // no plan picked yet: the fine print names both
+  // the fine print names both plans, before and after a press
   expect(text()).toContain(
     "Your papers stay on this computer. Claude or ChatGPT sees the parts it reads to answer you.",
   );
@@ -70,7 +70,7 @@ test("ChatGPT alone: its Sign in installs and signs in ChatGPT, and the chosen p
   expect(setups(t)).toEqual([{ start_sign_in: { agent: CODEX } }]);
   expect(storeOf(t).state().chosen).toBe(CODEX);
   expect(text()).toContain(
-    "Your papers stay on this computer. ChatGPT sees what each question sends it.",
+    "Your papers stay on this computer. Claude or ChatGPT sees the parts it reads to answer you.",
   );
   await play(
     t,
@@ -165,6 +165,6 @@ test("a returning lawyer with ChatGPT alone signed in: the chosen plan is ChatGP
   // ChatGPT has nothing to offer; Claude's row still offers its own
   expect(rows().map((r) => r.dataset["agent"])).toEqual([CLAUDE]);
   expect(text()).toContain(
-    "Your papers stay on this computer. ChatGPT sees what each question sends it.",
+    "Your papers stay on this computer. Claude or ChatGPT sees the parts it reads to answer you.",
   );
 });
