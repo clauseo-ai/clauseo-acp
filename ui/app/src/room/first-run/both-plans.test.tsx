@@ -57,6 +57,11 @@ test("a fresh computer: the lead, then Claude's row and ChatGPT's, equal, each w
     "Claude · needs a download of about 110 MB",
     "ChatGPT · needs a download of about 140 MB",
   ]);
+  // each region names its plan, as its row does (the Windows e2e finds Claude's by it)
+  expect(allById("install-said").map((s) => (s as HTMLElement).dataset["agent"])).toEqual([
+    CLAUDE,
+    CODEX,
+  ]);
   // each row starts with its plan, in the row's own tone; only offered, so no clock
   expect(rows().map((r) => r.querySelector(".working-plan")?.textContent)).toEqual([
     "Claude",
