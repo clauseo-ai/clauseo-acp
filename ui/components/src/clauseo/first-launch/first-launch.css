@@ -107,6 +107,11 @@
     @apply text-small-row text-primary;
     padding: 0 0 var(--s1) var(--s4);
   }
+  /* a muted line under a plan's row, at the row's own padding (Claude's browser sign-in note) */
+  .fl-plan-note {
+    @apply text-small text-muted;
+    padding: 0 var(--s4) var(--s2);
+  }
   .fl-plan + .fl-plan {
     margin-top: var(--s1);
   }

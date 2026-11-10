@@ -20,7 +20,7 @@ import { sx } from "@clauseo/components/lib/words-signin-expired.ts";
 import { ui } from "@clauseo/components/lib/words-ui.ts";
 import { Button } from "@clauseo/components/ui/button.tsx";
 import type { AgentId } from "../../transport/protocol.ts";
-import { planLocked, type AgentSetup, type SetupState } from "../../store/setup.ts";
+import { CLAUDE, planLocked, type AgentSetup, type SetupState } from "../../store/setup.ts";
 import { gateView, installView } from "./views.ts";
 
 /** The line's presses: the install's, the room gate's Sign in, and its Cancel. */
@@ -59,6 +59,24 @@ function named(
       lead: "none",
     };
   return line.words.includes(name) ? led : { ...led, plan: name };
+}
+
+/** Claude's note under "Finish signing in with your browser.": its sign-in always opens claude.ai's own sign-in page,
+ * even when the lawyer is signed in there. Only for Claude, only while its row says that; null otherwise. */
+export function browserNote(
+  lang: Lang,
+  agent: AgentId,
+  line: WorkingState | null,
+  setup: AgentSetup | undefined,
+): string | null {
+  if (agent !== CLAUDE || line === null) return null;
+  const signIn = setup?.signIn;
+  const waiting = typeof signIn === "object" && signIn.waiting !== undefined;
+  return waiting &&
+    line.kind === "wait" &&
+    line.words === fl(lang, "Finish signing in with your browser.")
+    ? fl(lang, "Claude may ask you to sign in again in your browser. Use your Claude account.")
+    : null;
 }
 
 /** The first screen's working line for `agent`, or null when there is nothing to say. */

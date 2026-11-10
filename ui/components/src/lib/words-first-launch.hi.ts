@@ -177,6 +177,9 @@ export const HI = {
   "Sign in to {name}": "{name} में साइन इन करें",
   // a plan's row on the first screen, after its name and " · "
   "needs a download of about {mb} MB": "लगभग {mb} MB का डाउनलोड ज़रूरी है",
+  // UD1-97: under Claude's "Finish signing in with your browser.": claude.ai's own sign-in page opens every time
+  "Claude may ask you to sign in again in your browser. Use your Claude account.":
+    "Claude आपके ब्राउज़र में आपसे दोबारा साइन इन करने को कह सकता है। अपने Claude खाते का उपयोग करें।",
 } satisfies Hindi<string>;
 
 /** Every string, English and Hindi (null: hi: later), for the tests that hold the voice and the copy review. */

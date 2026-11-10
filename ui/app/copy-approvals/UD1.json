@@ -854,5 +854,15 @@
     "status": "provisional",
     "at": "2026-11-10",
     "by": "app track (provisional; orchestrator approved the words 2026-11-10, copy review pending)"
+  },
+  "UD1-97": {
+    "en": "Claude may ask you to sign in again in your browser. Use your Claude account.",
+    "hi": "Claude आपके ब्राउज़र में आपसे दोबारा साइन इन करने को कह सकता है। अपने Claude खाते का उपयोग करें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-10",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-10",
+    "by": "app track (provisional; orchestrator approved the words 2026-11-10, copy review pending)"
   }
 }
