@@ -179,3 +179,21 @@ Var ClauseoSelfDelete
 !macro CLAUSEO_UNINSTALL_GUI_END
   !insertmacro CLAUSEO_START_SELF_DELETE
 !macroend
+
+; An uninstall whose section aborts says so on its standard output, when it has one, and writes
+; nothing to disk. NSIS calls this only on that way out (Ui.c:456, when install_thread fails), never
+; after an Abort or Quit in un.onInit and never after a header it couldn't read; all three exit 2
+; ("aborted by script") unless SetErrorLevel set a code first, and every refusal of ours does. In
+; the section the one Abort without a code of its own is Tauri's CheckIfAppIsRunning (in
+; NSIS_HOOK_PREUNINSTALL's step 0 and again in the template), under /S when Restart Manager lists
+; a process using the main exe and can't shut it down. The ARM64 install smoke (release.yml)
+; redirects the uninstaller's output to tell these apart. Only a caller that gave the process a
+; standard output gets the line: the reinstall page's ExecWait and a start from Explorer give
+; none. In every build, per user too: INSTALLMODE isn't defined yet where this file is included.
+Function un.onUninstFailed
+  System::Call 'kernel32::GetStdHandle(i -11) p .r0'
+  ${If} $0 P<> 0
+  ${AndIf} $0 P<> -1
+    FileWrite $0 "clauseo uninstall: aborted in Section Uninstall$\r$\n"
+  ${EndIf}
+FunctionEnd

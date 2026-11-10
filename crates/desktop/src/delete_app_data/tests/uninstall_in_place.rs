@@ -2,10 +2,11 @@
 //! `_?=` in both registry commands; in `un.onInit` its plug-in folder first, then a refusal
 //! unless it runs in its own folder; then a delayed hidden cmd line, guarded by the main exe's
 //! absence, that deletes the image, removes its own plug-in folder by its exact path and then the
-//! install folder only when empty, started once per run.
+//! install folder only when empty, started once per run; and a line on its standard output when
+//! its section aborts.
 //! Per-user keeps Tauri's lines. The Windows VM runs it for real.
 
-use super::admin_copy::{assert_run, code_of, firm_it_codes, macro_body};
+use super::admin_copy::{assert_run, block, code_of, firm_it_codes, macro_body};
 use super::safe_temp::loads_a_plug_in;
 use super::sources::{hook_code, line_with, read};
 use super::template::{TEMPLATE, block_code, split_blocks};
@@ -429,4 +430,32 @@ fn the_per_machine_uninstall_deletes_the_install_folder_key_but_not_under_update
     // The template's defines it names.
     assert!(text.contains(r#"!define MANUKEY "Software\${MANUFACTURER}""#));
     assert!(text.contains(r#"!define MANUPRODUCTKEY "${MANUKEY}\${PRODUCTNAME}""#));
+}
+
+#[test]
+fn an_uninstall_whose_section_aborts_says_so_on_its_standard_output_and_writes_no_file() {
+    let code = code();
+    // NSIS calls it only when the section fails (exit 2 unless a code was set): one line to the
+    // standard output the caller gave, none without one (0 or INVALID_HANDLE_VALUE).
+    assert_eq!(
+        block(&code, "Function un.onUninstFailed", "FunctionEnd"),
+        [
+            "Function un.onUninstFailed",
+            "System::Call 'kernel32::GetStdHandle(i -11) p .r0'",
+            "${If} $0 P<> 0",
+            "${AndIf} $0 P<> -1",
+            r#"FileWrite $0 "clauseo uninstall: aborted in Section Uninstall$\r$\n""#,
+            "${EndIf}",
+            "FunctionEnd",
+        ]
+    );
+    // It opens no file, and it is the only one: the template defines none.
+    assert!(!code.iter().any(|line| line.starts_with("FileOpen ")));
+    assert_eq!(
+        code.iter()
+            .filter(|line| *line == "Function un.onUninstFailed")
+            .count(),
+        1
+    );
+    assert!(!read(TEMPLATE).contains("un.onUninstFailed"));
 }
