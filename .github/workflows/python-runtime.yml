@@ -124,6 +124,22 @@ jobs:
           TARGET: ${{ matrix.target }}
         run: cargo xtask python-runtime build --target "$TARGET" --out "$RUNNER_TEMP/python-runtime"
 
+      # A clean Windows has no VC++ Redistributable, so every VC++ DLL the runtime's files import
+      # must be one it ships (CPython's vcruntime140 beside python.exe, the wheels' msvcp140 in
+      # <pkg>.libs/). The header of .github/scripts/pe-crt-imports.mjs says how that is decided.
+      # stage/python is the tree pack.py packs, so it is the archive's contents.
+      - name: Check the runtime's VC++ imports resolve to DLLs it ships
+        if: runner.os == 'Windows'
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          runtime="$RUNNER_TEMP/python-runtime/stage/python"
+          app_local=("--app-local-ok=$runtime")
+          for libs in "$runtime"/Lib/site-packages/*.libs; do
+            app_local+=("--app-local-ok=$libs")
+          done
+          node .github/scripts/pe-crt-imports.mjs "${app_local[@]}" "$runtime"
+
       - name: Show the archive
         run: cat "$RUNNER_TEMP/python-runtime/build.json" >> "$GITHUB_STEP_SUMMARY"
 
