@@ -10,8 +10,9 @@
 //! - `Modify` on the matter, the state and notes folders, the session's temp folder
 //!   (`<data_dir>\run\<session>\tmp`, never the run folder above it; nothing sets or makes it
 //!   on Windows yet: PR5's runner sets `TEMP`/`TMP` to it and makes it) and the credential link;
-//!   `ReadAndExecute` on runtime and read paths and allowed folders; on Clauseo's Claude login
-//!   home, `CreateFiles` on the folder and `Modify` on its allowed names.
+//!   `ReadAndExecute` on runtime and read paths and allowed folders, and on each allow a read of
+//!   another matter needs ([`Admitted::other_reads`]: no refused name reached, R18); on Clauseo's
+//!   Claude login home, `CreateFiles` on the folder and `Modify` on its allowed names.
 //! - A Low mandatory label, `S:(ML;OICI;NW;;;LW)` (no-write-up), inherited on the matter, state,
 //!   notes and temp folders and the Claude store folder, and on the credential link file itself
 //!   ([`Rights::LowLabel`]): the Low token writes nothing labelled higher. Side effect, accepted:
@@ -350,8 +351,9 @@ impl AdmittedPlan {
 }
 
 /// The plan for `admitted`'s policy with `subjects`, in a fixed order: the writable folders,
-/// the credential link, the Claude store, the read paths, the Low labels, the read-only denies,
-/// the other pool users' denies, then the siblings' denies. Each entry appears once.
+/// the credential link, the Claude store, the read paths (the reads of other matters last), the
+/// Low labels, the read-only denies, the other pool users' denies, then the siblings' denies.
+/// Each entry appears once.
 ///
 /// Refuses ([`Error::Policy`], naming the kind of path but not the path) when the subjects
 /// collide (the pool user is the group, another pool user or the matter SID), or when any entry
@@ -411,6 +413,10 @@ pub fn plan(
             plan.allow(path, Rights::ReadAndExecute, Inherit::Tree, kind);
         }
     }
+    for read in admitted.other_reads() {
+        let (path, kind) = (read.path(), PathKind::OtherMatterRead);
+        plan.allow(path, Rights::ReadAndExecute, read.inherit(), kind);
+    }
     plan.labels(policy, &own)?;
     plan.read_only(policy);
     let mut pool = vec![pool.clone()];
@@ -428,14 +434,9 @@ pub fn plan(
         plan.push(sibling, group, Rights::DenyRead, Inherit::Tree, kind);
     }
     if let Some(parent) = admitted.parent_files() {
-        let (group, kind) = (subjects.pool_group.clone(), PathKind::ParentFiles);
-        plan.push(
-            parent,
-            group,
-            Rights::DenyRead,
-            Inherit::FilesInFolder,
-            kind,
-        );
+        let group = subjects.pool_group.clone();
+        let (rights, kind) = (Rights::DenyRead, PathKind::ParentFiles);
+        plan.push(parent, group, rights, Inherit::FilesInFolder, kind);
     }
     // Every registered matter whose fence the ledger doesn't list as applied, as the gate
     // checked it: its entries are its own (the ledger records them under its id).
@@ -501,14 +502,8 @@ impl Plan<'_> {
             self.push(folder, low.clone(), Rights::LowLabel, Inherit::Tree, kind);
         }
         if let Some(store) = policy.claude_store() {
-            let kind = PathKind::ClaudeStore;
-            self.push(
-                store.dir(),
-                low.clone(),
-                Rights::LowLabel,
-                Inherit::Tree,
-                kind,
-            );
+            let (dir, kind) = (store.dir(), PathKind::ClaudeStore);
+            self.push(dir, low.clone(), Rights::LowLabel, Inherit::Tree, kind);
         }
         if let Some(link) = policy.credential_link() {
             let kind = PathKind::CredentialLink;

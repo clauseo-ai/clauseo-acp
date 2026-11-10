@@ -204,6 +204,33 @@ fn with_an_allowed_folder() {
 }
 
 #[test]
+fn with_reads_of_another_matter() {
+    let w = World::new("profile-other-matter");
+    w.dir.dir("m2/docs");
+    w.dir.dir("m2/.clauseo");
+    w.dir.file("m2/notes.txt", "notes");
+    let policy = w
+        .builder()
+        .hidden_matter(&w.at("m2"), "m2-id")
+        .other_matter_read(&w.at("m2/docs"), false)
+        .other_matter_read(&w.at("m2/notes.txt"), true)
+        .build()
+        .unwrap();
+    insta::assert_snapshot!(w.render(&policy));
+}
+
+#[test]
+fn the_refused_names_pattern_matches_whole_names_in_any_case() {
+    let regex = other_matter::refused_regex();
+    // `i` takes the Turkic İ and ı, `s` the long s (R18 MEDIUM-1), each an alternative whole.
+    assert_eq!(
+        regex,
+        "/\\.([gG]([iI]|\u{130}|\u{131})[tT]|[cC][lL][aA][uU]([sS]|\u{17F})[eE][oO]|\
+         [cC][lL][aA][uU][dD][eE]|[cC][oO][dD][eE][xX]|[aA][gG][eE][nN][tT]([sS]|\u{17F}))(/|$)"
+    );
+}
+
+#[test]
 fn with_read_only_paths_in_the_matter() {
     let w = World::new("profile-read-only");
     w.dir.file("matter/.git/config", "[core]\n");

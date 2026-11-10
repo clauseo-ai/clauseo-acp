@@ -42,6 +42,9 @@ pub(super) fn siblings(
     kept.extend(policy.runtime().iter().cloned());
     kept.extend(policy.read().iter().cloned());
     kept.extend(policy.allowed_folders().iter().cloned());
+    // A read of another matter (R18): its matter is registered, so descended into anyway.
+    let reads = policy.other_matter_reads().iter();
+    kept.extend(reads.map(|read| read.path().to_owned()));
     // Paths a deny may not touch, nor be above, but whose holders are descended into: the other
     // matters and everything their policies reach.
     let mut protected: Vec<PathBuf> = neighbours

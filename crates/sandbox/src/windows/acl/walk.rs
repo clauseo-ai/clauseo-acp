@@ -37,14 +37,16 @@ use super::object::{Handle, Object, os_error, reparse_refused, words};
 use super::{READ_ALL, dacl_info, same_path};
 use crate::windows::acl_bytes::{
     Acl, DACL_AUTO_INHERITED, DACL_PROTECTED, Descriptor, SACL_AUTO_INHERITED, SACL_PROTECTED,
-    bare_child, broad_allow, build_descriptor, empty_acl, explicit_label, inherited_label, lacking,
-    owner_bytes, rebuild, without_broad, without_inherited, writes,
+    bare_child, broad_allow_but, build_descriptor, empty_acl, explicit_label, inherited_label,
+    lacking, owner_bytes, rebuild, without_broad, without_broad_but, without_inherited, writes,
 };
 use crate::windows::writer::{ApplyFailure, Owned, Reach, Walked};
 
 mod handed;
+mod item;
 
 use handed::{Writes, make};
+pub(super) use item::{check_item, listed_reads};
 
 /// Files' generic rights, for working out inherited entries.
 const MAPPING: GENERIC_MAPPING = GENERIC_MAPPING {
@@ -72,6 +74,7 @@ pub(super) enum Mode<'a> {
     Strict {
         watched: &'a [Vec<u8>],
         pool: &'a [Vec<u8>],
+        reads: &'a [(std::path::PathBuf, Vec<u8>, u8)],
         foreign: Option<Foreign<'a>>,
     },
     /// `forget_matter`'s: what one of `pool` owns goes back to `me`, cleaned. `own` (a strict
@@ -359,8 +362,12 @@ fn settle(
     let mut new_owner = None;
     match mode {
         Mode::Plain | Mode::HandBack { .. } => {}
-        Mode::Strict { watched, .. } => {
-            let broad = dacl.as_ref().is_some_and(|d| broad_allow(d, watched));
+        Mode::Strict { watched, reads, .. } => {
+            // R18: a read of another matter the ledger lists on this child isn't one.
+            let here = super::reads_on(child, reads).map_err(io)?;
+            let broad = dacl
+                .as_ref()
+                .is_some_and(|d| broad_allow_but(d, watched, &here));
             if now.dacl_protected() || broad {
                 if !owned {
                     return Err(if now.dacl_protected() {
@@ -369,7 +376,7 @@ fn settle(
                         ApplyFailure::BroadAllowChild
                     });
                 }
-                let cleaned = dacl.as_ref().map(|d| without_broad(d, watched));
+                let cleaned = dacl.as_ref().map(|d| without_broad_but(d, watched, &here));
                 base = rebuild(&checked, None, cleaned.as_deref(), DACL_PROTECTED).map_err(io)?;
                 repaired = true;
             }

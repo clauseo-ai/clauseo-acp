@@ -48,6 +48,7 @@ fn put_with(acl: &mut NtfsAcl, root: &Path, grants: &[Grant]) -> Result<Walked, 
         watched: vec![other.clone()],
         pool: vec![Sid::parse(USER_SID).unwrap(), other],
         assigned: Vec::new(),
+        excused: Vec::new(),
     };
     acl.propagate(root, Reach::Tree, Some(&strict))
 }
@@ -416,6 +417,7 @@ fn as_agent(acl: &mut NtfsAcl, root: &Path) -> Result<Walked, ApplyFailure> {
         watched: vec![Sid::parse(OTHER_POOL_SIDS[0]).unwrap()],
         pool: vec![current_user_sid().unwrap()],
         assigned: Vec::new(),
+        excused: Vec::new(),
     };
     acl.propagate(root, Reach::Tree, Some(&strict))
 }
@@ -451,6 +453,7 @@ fn a_child_the_lawyer_cant_open_refuses_naming_it() {
         watched: vec![other.clone()],
         pool: vec![other],
         assigned: Vec::new(),
+        excused: Vec::new(),
     };
     let walked = acl.propagate(&place.at("matter"), Reach::Tree, Some(&strict));
     assert_eq!(walked, Err(ApplyFailure::ChildShut));

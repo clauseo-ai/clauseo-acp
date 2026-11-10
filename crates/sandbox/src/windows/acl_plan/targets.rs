@@ -85,7 +85,8 @@ pub(super) fn check_target(
                     | PathKind::OtherMatter
                     | PathKind::Sibling
                     | PathKind::ParentFiles
-                    | PathKind::SharedWrite => false,
+                    | PathKind::SharedWrite
+                    | PathKind::OtherMatterRead => false,
                 }
             }
             Rights::DenyWrite | Rights::DenyReadWrite | Rights::DenyRead => true,

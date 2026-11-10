@@ -184,6 +184,7 @@ impl Writer {
         self.keychain(policy, &p);
         self.denies(policy, &p);
         self.allow_again(&p);
+        other_matter::other_matter_reads(self, policy);
         self.fixed_folders(&p);
         self.credential_link_metadata(&p);
         self.read_only_state(&p);
@@ -561,6 +562,7 @@ fn directory_ancestors(param: &str) -> String {
 }
 
 mod names;
+mod other_matter;
 mod params;
 #[cfg(test)]
 mod tests;

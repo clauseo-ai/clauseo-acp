@@ -158,6 +158,62 @@ impl World {
             .collect();
         format!("<root>/{}", parts.join("/"))
     }
+
+    /// Matter two's folder, `other/m2`, canonical: a repository, a nested one in `sub`, a
+    /// worktree's `.git` file in `wt`, agent config spelled `.Claude`, and plain files and
+    /// folders around them (R18).
+    pub(super) fn other_tree(&self) -> PathBuf {
+        for (rel, text) in [
+            ("other/m2/a.txt", "a"),
+            ("other/m2/.git/config", "[core]"),
+            ("other/m2/.Claude/settings.json", "{}"),
+            ("other/m2/docs/b.txt", "b"),
+            ("other/m2/docs/deep/c.txt", "c"),
+            ("other/m2/sub/.git/HEAD", "ref: refs/heads/main"),
+            ("other/m2/sub/src/d.rs", "d"),
+            ("other/m2/sub/e.txt", "e"),
+            ("other/m2/wt/.git", "gitdir: ../.git/worktrees/wt"),
+            ("other/m2/wt/f.txt", "f"),
+        ] {
+            self.dir.file(rel, text);
+        }
+        self.canonical("other/m2")
+    }
+
+    /// Matter one's policy with notes, matter two's folder hidden as `m2`, and a read of each of
+    /// `reads` (relative to the temp folder; a file when it says so).
+    pub(super) fn reading(&self, reads: &[(&str, bool)]) -> Policy {
+        let other = self.at("other/m2");
+        let mut builder = self
+            .builder()
+            .notes(self.at(NOTES))
+            .hidden_matter(&other, "m2");
+        for &(rel, is_file) in reads {
+            builder = builder.other_matter_read(&self.at(rel), is_file);
+        }
+        builder.build().unwrap()
+    }
+
+    /// Matter two registered at `other/m2`, assigned the first other pool user, its fence not
+    /// applied yet (so the launch plans it).
+    pub(super) fn neighbour_m2(&self) -> Neighbours {
+        let root = self.canonical("other/m2");
+        Neighbours {
+            registered: vec![RegisteredMatter {
+                id: matter_two(),
+                folders: MatterFolders {
+                    root,
+                    state: self
+                        .canonical("data")
+                        .join("agent-state/01890a5d-ac96-774b-8cce-b302099a8058/c"),
+                    notes: None,
+                },
+                pool_user: Sid::parse(OTHER_POOL_SIDS[0]).unwrap(),
+                fenced: false,
+            }],
+            reach: Vec::new(),
+        }
+    }
 }
 
 /// Neighbours with a registered matter at each of `roots` (state and notes folders beside it,

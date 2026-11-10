@@ -56,6 +56,77 @@ home folder, the matter or a hidden path (inside one is fine, which is why they 
 again). An allowed folder inside `Documents/Clauseo` that is not a matter is accepted by design:
 only "holds the matter" stands for the brief's `Documents/Clauseo`.
 
+**Reads of another matter (R18, amended 2026-11-08).** The lawyer may let an agent read a folder or
+a file in another matter, once or remembered for the matter. The host names each other registered
+matter with `hidden_matter(path, id)` (a hidden path, so every hidden-path rule refuses it) and each
+grant with `other_matter_read(path, is_file)`. `allowed_folder` is unchanged and still refuses a
+folder in another matter: a grant there is read-only by its type, and no call makes one writable.
+`build()` refuses a grant that is not inside a `hidden_matter` root; one with `.git`,
+`.clauseo`, `.claude`, `.codex` or `.agents` (`REFUSED_IN_OTHER_MATTER`, in any letter case, below)
+anywhere in its canonical path, so a link that resolves into one is refused too; one that holds or
+sits in a hidden path other than the matter's own folder (a grant of `m2/secret/deep` when the host
+hides `m2/secret`); one that holds the home folder or this matter; one in a matter that sits
+inside another hidden path (the data dir); and a file granted as a tree or the other way round.
+`check_allowed_folder` runs the same rules for a path in another matter (its cross-matter
+branch) and the old ones elsewhere.
+`classify` answers `PathClass::OtherMatter { matter, refused }` for a refused path in another
+matter's folder that nothing allows again: outside the grant, a write, or a refused name;
+`refused` is set when the path is or sits in one of the five names below that folder, which no
+grant reads, so the host need not offer a card for it.
+
+The five names stay refused because each carries more than the documents the lawyer chose: `.git`
+the whole history, deleted text included; `.clauseo` that matter's Clauseo data (`matter.json`
+and what the host keeps beside it); `.claude`, `.codex` and `.agents` its agents' settings,
+instructions and session files. In the profile each grant comes after the rules allowed again
+after the hidden paths: `file-read*` on the grant (subpath for a tree, literal for a file) and
+metadata on its ancestors, so it wins over the matter's hidden deny; then one read-and-write deny
+per granted tree requiring `(subpath <grant>)` and a path-free regex of the five names as whole
+names, `/\.(git|clauseo|claude|codex|agents)(/|$)` in any letter case, so it wins over the
+grant at any depth (a submodule's or nested repository's `.git`, folder or file, included). No
+write rule is added, so the hidden deny still refuses every write. Seatbelt checks the path a link
+resolves to, so a link in the grant that leads into its `.git` is refused by the same rule. The
+jail tests `other_matter::a_read_grant_of_another_matter_reads_it_but_not_its_git_or_data_folder`
+and `a_read_grant_of_one_file_reads_that_file_only` run `sandbox-exec`: the grant's files and a
+look-alike `.github` read, `.git/config`, `.clauseo/x`, a nested `.GIT/HEAD`, the agents'
+folders and the link refuse, the folder lists, and nothing in it is written, made or removed.
+Without the deny rule the same test reads all ten, so the order is what refuses them.
+`a_read_grant_of_a_subfolder_refuses_links_out_of_it` grants `m2/sub`: its file reads, and links
+in it to `m2/doc.txt` (outside the grant), to `m2/.clauseo/x` and out of the matter refuse, as do
+the matter's own files outside the grant and its listing.
+Letter case (review of #735, MEDIUM-1): APFS matches names by Unicode case folding, so
+`.clauſeo/x` (U+017F, long s) opens the real `.clauseo/x` and `.agentſ` opens `.agents`
+(measured on this Mac). Under `sandbox-exec` the old ASCII-only regex already refused both:
+Seatbelt matched the path it resolved, with the name as stored. The jail test
+`refused_names_spelled_in_any_case_or_with_a_long_s_stay_refused` passes with the old regex and
+reads all five spellings with the deny rule removed. The profile still doesn't rely on that.
+Each letter of the regex is every code point that folds to it: both ASCII cases as a class, and
+any code point outside ASCII as a whole alternative, since it is more than one byte
+(`[gG]([iI]|İ|ı)[tT]`, `[cC][lL][aA][uU]([sS]|ſ)[eE][oO]`). The table (`policy/ascii_fold.rs`)
+holds U+017F for `s`, U+212A KELVIN SIGN for `k`, and the Turkic İ and ı for `i`, which refuse
+more than APFS opens. A test checks it against the lines of Unicode 16's CaseFolding.txt that
+fold to an ASCII letter (vendored as `policy/case_folding_ascii.txt`) and against every code
+point's full fold by `caseless`. The policy's `refused_name` uses the same table, so a grant
+with `.clauſeo` in its path is refused and `classify` sets `refused` for it. Normalisation adds
+nothing: the names are ASCII, the one code point that decomposes to an ASCII letter (U+212A) is
+in the table, and full folding's multi-letter folds (`ß` to `ss`, `ﬆ` to `st`) spell no pair in
+the five names. The jail test refuses `.clauſeo/x`, `.CLAUSEO/x`, `.ClAuSeO/x`, `.agentſ/x` and
+`.GIT/HEAD` through a grant on `m2`, each of which opens the real file outside the jail.
+Limits: the refused names still show in the grant's listing (`stat` on one is refused); a
+granted folder that sits in a folder of one of
+those names is refused by `build()` rather than written as a rule that would deny it whole.
+Residual, hard links: a file in the grant with another name under `.git` (or another refused
+name) reads through its granted name, since Seatbelt checks the path opened and SBPL has no
+filter on a file's link count (Windows leaves a multi-link file out of the grant). Low: the
+link has to exist in the other matter already, and the reading agent can't make one there, as
+it writes nothing in that matter; git itself doesn't hard-link a working file into `.git`.
+Follow-up (review of #735, LOW-6): scan the granted tree for files with more than one link and
+leave them out, or refuse the grant, as Windows does.
+Made during the run: a `.git` or `.clauseo` file (or a `.git` folder) made in a granted folder
+is refused by name, as is the `gitdir:` target outside the grant
+(`a_git_or_clauseo_made_during_the_run_in_a_granted_folder_stays_refused`). On Windows both
+files read: each holds only a pointer, the target stays hidden unless it is inside the grant,
+and the grant is read-only (0049).
+
 **Read-only names and links.** `.codex/`, `.claude/`, `.agents/`, `.clauseo/`, `.mcp.json`,
 `CLAUDE.md`, `CLAUDE.local.md` and `AGENTS.md` at the matter root, existing or not; each existing
 `.git` at any depth and the folder a `gitdir:` file names inside the matter; over-cap files.
@@ -154,7 +225,9 @@ metadata on the ancestors of every allowed path, and a literal read of `$HOME/.C
 Keychain rules when on; write-deny on the read-only paths in the matter, and unlink-deny on their
 folders; write-deny on `CLAUDE.md` at any depth; read and write deny on link findings and link
 folders; read and write deny on hidden paths; again the state folder, notes, credential link,
-Claude store, runtime and read paths, with their ancestors' metadata; unlink- and create-deny on
+Claude store, runtime and read paths, with their ancestors' metadata; read on the reads of other
+matters and their ancestors' metadata, then read and write deny on the refused names in each granted
+tree (R18, above); unlink- and create-deny on
 the matter, state and notes folders themselves (literal: a subpath rule matches the folder too, so
 an agent could otherwise remove its folder and leave a link for the next launch); write-deny on
 read-only paths in the state folder; the network. Every deny carries the tag. Network: outbound to

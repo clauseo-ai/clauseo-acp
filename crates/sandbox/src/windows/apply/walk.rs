@@ -161,6 +161,20 @@ pub(crate) fn strict_of(entries: &[Entry]) -> Strict {
     }
 }
 
+/// Every read of another matter `ledger` lists, whichever matter's (R18): a strict walk excuses
+/// that allow, on that path, for that SID, reaching as far as the entry says
+/// (`acl_bytes/excused.rs`), as it is no attack on the fence it passes.
+pub(crate) fn excused_reads(
+    ledger: &crate::windows::ledger::Ledger,
+) -> Vec<(PathBuf, Sid, Inherit)> {
+    let reads = ledger
+        .entries()
+        .filter(|e| e.kind == PathKind::OtherMatterRead);
+    reads
+        .map(|e| (e.path.clone(), e.sid.clone(), e.inherit))
+        .collect()
+}
+
 /// `strict` for a walk of `root`: in a matter's tree (inside one of `own`, the closest), with
 /// the subjects `assigned` gives that matter, so a child another pool user owns is handed back
 /// (S15 `PR4h`); outside every matter's tree, as it is.
@@ -195,6 +209,7 @@ fn strict_from(items: &[(Rights, &Sid)]) -> Strict {
         watched: sids(&|r| matches!(r, Rights::DenyReadWrite | Rights::DenyRead)),
         pool: sids(&|r| !r.is_label()),
         assigned: Vec::new(),
+        excused: Vec::new(),
     }
 }
 

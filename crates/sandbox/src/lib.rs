@@ -46,7 +46,8 @@
 //!
 //! - [`Policy::builder`]`(matter, state)`, then [`PolicyBuilder`]'s `tmpdir`, `runtime`, `read`,
 //!   `allowed_folder`, `read_only_in_state`, `notes`, `credential_link`, `claude_store`,
-//!   `hidden`, `proxy_port` (once per loopback listener), `loopback` ([`Loopback`]),
+//!   `hidden`, `hidden_matter`, `other_matter_read` ([`OtherMatterRead`], R18), `proxy_port`
+//!   (once per loopback listener), `loopback` ([`Loopback`]),
 //!   `browser_socket_dir` (Unix; without it no Unix socket anywhere), `keychain`,
 //!   `over_cap`, `links`, `scan` (a [`MatterScan`] the caller already has),
 //!   `home`, and `build`. Accessors carry the builder's names, plus [`Policy::tmpdir`] (the
@@ -58,10 +59,13 @@
 //!   [`ClaudeStore`] with its allowed names ([`CLAUDE_STORE_FILES`],
 //!   [`CLAUDE_STORE_LOCK_FOLDERS`], [`CLAUDE_STORE_BESIDE_LOCK_SUFFIX`]).
 //! - [`Policy::check_allowed_folder`]: R18 runs it before a card; `build` runs it on each
-//!   allowed folder. [`Policy::classify`]: the [`PathClass`] of a refused path, for a watcher.
+//!   allowed folder; its cross-matter branch refuses [`REFUSED_IN_OTHER_MATTER`] anywhere in
+//!   the path. [`Policy::classify`]: the [`PathClass`] of a refused path, for a watcher.
 //! - [`scan_links`]`(matter) -> Vec<`[`LinkFinding`]`>` ([`LinkKind`]), and [`scan_matter`],
 //!   which also lists every `.git`, the folders `.git` files name, and the other
 //!   [`PROTECTED_AT_ANY_DEPTH`] names.
+//! - [`name_folds_to`] and [`refused_in_other_matter`]: the refused names and their case
+//!   folding, for the host's offer rules (the same table the sandbox uses).
 //! - [`detect`]`(setup)` and [`probe`]`(setup)` return a [`Detection`]: tier A on macOS when
 //!   Seatbelt applies a profile (`setup` unused); on Windows, C with [`NoSandbox::UnsupportedOs`]
 //!   on ARM64 or before Windows 10 22H2, else B when `setup`'s state is [`SetupState::Ready`] and
@@ -186,8 +190,9 @@ pub use macos::SeatbeltLauncher;
 pub use macos::SeatbeltProfile;
 pub use policy::{
     CLAUDE_STORE_BESIDE_LOCK_SUFFIX, CLAUDE_STORE_FILES, CLAUDE_STORE_LOCK_FOLDERS, ClaudeStore,
-    INSTRUCTIONS_AT_ANY_DEPTH, LINK_RULES_MAX, Loopback, PROTECTED_AT_ANY_DEPTH, PROTECTED_NAMES,
-    PathRule, Policy, PolicyBuilder, hfs_ignorable, strip_hfs_ignorables,
+    HiddenOverlapAllowance, INSTRUCTIONS_AT_ANY_DEPTH, LINK_RULES_MAX, Loopback, OtherMatterRead,
+    PROTECTED_AT_ANY_DEPTH, PROTECTED_NAMES, PathRule, Policy, PolicyBuilder,
+    REFUSED_IN_OTHER_MATTER, hfs_ignorable, strip_hfs_ignorables,
 };
 pub use proxy::{
     Allowlist, Exchange, FailKind, Listener, LoginKind, ProxyConfig, ProxyHandle, Record, Route,
@@ -197,3 +202,16 @@ pub use proxy::{
 pub use setup::{Blocked, SandboxSetup, SetAside, SetupError, SetupState};
 #[cfg(windows)]
 pub use windows::UserSetup;
+
+/// Whether `name` equals the ASCII name `ascii` under Unicode simple and common case folding,
+/// as APFS and NTFS compare names; the same table the sandbox's refused names use.
+pub fn name_folds_to(name: &std::ffi::OsStr, ascii: &str) -> bool {
+    policy::ascii_fold::folds_to(name, ascii)
+}
+
+/// Whether `name` is one of the names never readable in another matter's folder (`.git`,
+/// `.clauseo`, `.claude`, `.codex`, `.agents`) in any case-folded spelling; the host's offer
+/// rules use this so they match the sandbox exactly.
+pub fn refused_in_other_matter(name: &std::ffi::OsStr) -> bool {
+    policy::other_matter::refused_name(name)
+}

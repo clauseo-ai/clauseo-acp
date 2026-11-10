@@ -27,6 +27,7 @@ mod remove;
 mod remove_fake;
 mod remove_ledger;
 mod remove_markers;
+mod remove_reads;
 mod remove_set_aside;
 mod resets;
 mod rollback;

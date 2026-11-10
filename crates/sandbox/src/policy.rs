@@ -6,14 +6,22 @@ use std::path::{Path, PathBuf};
 use crate::links::{LinkFinding, MatterScan};
 use crate::{Access, Error, PathClass};
 
+pub(crate) mod ascii_fold;
 mod build;
 mod links;
 mod names;
+pub(crate) mod other_matter;
+mod overlap;
+mod rule;
 mod store;
 
 pub use links::LINK_RULES_MAX;
 pub(crate) use names::opens_as;
 pub use names::{hfs_ignorable, strip_hfs_ignorables};
+use other_matter::HiddenMatter;
+pub use other_matter::{OtherMatterRead, REFUSED_IN_OTHER_MATTER};
+pub use overlap::HiddenOverlapAllowance;
+pub use rule::{Loopback, PathRule};
 pub use store::{
     CLAUDE_STORE_BESIDE_LOCK_SUFFIX, CLAUDE_STORE_FILES, CLAUDE_STORE_LOCK_FOLDERS, ClaudeStore,
 };
@@ -80,46 +88,6 @@ pub(crate) fn instruction_file(matter: &Path, path: &Path) -> bool {
             .is_some_and(|name| name.eq_ignore_ascii_case(INSTRUCTIONS_AT_ANY_DEPTH))
 }
 
-/// The browser's loopback reach (agent-browser's and Chrome's CDP ports).
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub enum Loopback {
-    /// No loopback beyond the proxy ports.
-    #[default]
-    None,
-    /// These loopback ports, with bind and inbound on localhost. Sorted and de-duplicated.
-    Ports(Vec<u16>),
-    /// Any loopback port. Also reaches other loopback services and other launches' proxies,
-    /// which refuse a request without their token (S16).
-    Any,
-}
-
-/// A path rule: the path alone, or the path and everything under it.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub enum PathRule {
-    /// Exactly this path.
-    Literal(PathBuf),
-    /// This path and everything under it.
-    Subpath(PathBuf),
-}
-
-impl PathRule {
-    /// The rule's path.
-    pub fn path(&self) -> &Path {
-        match self {
-            PathRule::Literal(path) | PathRule::Subpath(path) => path,
-        }
-    }
-
-    /// Whether the rule covers `path`, by [`under`]: on macOS without case and in any Unicode
-    /// normalisation form, as the kernel resolves names on a case-insensitive volume.
-    pub fn covers(&self, path: &Path) -> bool {
-        match self {
-            PathRule::Literal(rule) => same(path, rule),
-            PathRule::Subpath(rule) => under(path, rule),
-        }
-    }
-}
-
 /// What one launch's jail allows. Built by [`Policy::builder`]; every path is canonical
 /// (`/var` is `/private/var` on macOS), and every rule of [`PolicyBuilder::build`] holds.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -145,6 +113,8 @@ pub struct Policy {
     link_targets: Vec<PathBuf>,
     link_folders: Vec<PathBuf>,
     read_only_in_matter: Vec<PathRule>,
+    hidden_matters: Vec<HiddenMatter>,
+    other_matter_reads: Vec<OtherMatterRead>,
 }
 
 /// The policy's inputs, as given. [`PolicyBuilder::build`] checks and canonicalises them.
@@ -169,6 +139,8 @@ pub struct PolicyBuilder {
     over_cap: Vec<PathBuf>,
     links: Vec<LinkFinding>,
     scan: Option<MatterScan>,
+    hidden_matters: Vec<(PathBuf, String)>,
+    other_matter_reads: Vec<(PathBuf, bool)>,
 }
 
 impl Policy {
@@ -331,8 +303,9 @@ impl Policy {
 
     /// Why `path` (canonical, as the policy's paths are) was refused `access`, for the denial
     /// watcher: [`PathClass::LinkTarget`] on or under a link finding's path or target, or under
-    /// a link folder;
-    /// [`PathClass::Hidden`] under a hidden path that nothing allows again;
+    /// a link folder; [`PathClass::OtherMatter`] under another matter's folder
+    /// ([`PolicyBuilder::hidden_matter`]: outside a read grant, a write, or a refused name) that
+    /// nothing allows again; [`PathClass::Hidden`] under a hidden path that nothing allows again;
     /// [`PathClass::ReadOnly`] for a write to a read-only path (protected names, `.git`,
     /// over-cap files, nested `CLAUDE.md`, read-only paths in the state folder, allowed
     /// folders, runtime, read); otherwise [`PathClass::Outside`]. On macOS names compare
@@ -349,8 +322,16 @@ impl Policy {
         if on_link {
             return PathClass::LinkTarget;
         }
-        if !self.allowed_again(path) && self.hidden.iter().any(|h| under(path, h)) {
-            return PathClass::Hidden;
+        if !self.allowed_again(path) {
+            if let Some(other) = other_matter::matter_of(path, &self.hidden_matters) {
+                return PathClass::OtherMatter {
+                    matter: other.matter.clone(),
+                    refused: other_matter::in_refused_name(path, &other.path),
+                };
+            }
+            if self.hidden.iter().any(|h| under(path, h)) {
+                return PathClass::Hidden;
+            }
         }
         if access == Access::Write && self.read_only(path) {
             return PathClass::ReadOnly;
@@ -364,9 +345,32 @@ impl Policy {
     /// component. "Holds the matter" is the rule that refuses `Documents/Clauseo`, the parent of
     /// new matters, which cannot be a hidden path because the matter sits inside it. R18 runs
     /// this before it shows a card; [`PolicyBuilder::build`] runs it on each allowed folder.
+    ///
+    /// The cross-matter branch: a path in another matter's folder
+    /// ([`PolicyBuilder::hidden_matter`]) is refused with one of [`REFUSED_IN_OTHER_MATTER`]
+    /// anywhere in it, holding or inside a hidden path other than the matter's own folder,
+    /// holding the home folder or this matter, or in a matter that sits in another hidden
+    /// path; else it passes, and may be granted read-only through
+    /// [`PolicyBuilder::other_matter_read`] only ([`PolicyBuilder::allowed_folder`] refuses it).
     pub fn check_allowed_folder(&self, folder: &Path) -> Result<(), Error> {
         let folder = build::existing(folder, "allowed folder")?;
-        build::check_allowed(&folder, &self.matter, self.home.as_deref(), &self.hidden)
+        let (home, hidden) = (self.home.as_deref(), &self.hidden);
+        if other_matter::matter_of(&folder, &self.hidden_matters).is_some() {
+            let matters = &self.hidden_matters;
+            return other_matter::check_read(&folder, &self.matter, home, hidden, matters)
+                .map(drop);
+        }
+        build::check_allowed(&folder, &self.matter, home, hidden)
+    }
+
+    /// The read-only grants of other matters' folders ([`PolicyBuilder::other_matter_read`]).
+    pub fn other_matter_reads(&self) -> &[OtherMatterRead] {
+        &self.other_matter_reads
+    }
+
+    /// The other matter whose folder ([`PolicyBuilder::hidden_matter`]) holds `path`, if any.
+    pub fn hidden_matter_of(&self, path: &Path) -> Option<&str> {
+        other_matter::matter_of(path, &self.hidden_matters).map(|m| m.matter.as_str())
     }
 
     /// Whether a rule after the hidden paths allows `path` again.
@@ -454,6 +458,24 @@ impl PolicyBuilder {
     /// home). Only [`CLAUDE_STORE_FILES`] and [`CLAUDE_STORE_LOCK_FOLDERS`] in it are allowed.
     pub fn claude_store(mut self, dir: impl Into<PathBuf>) -> PolicyBuilder {
         self.claude_store = Some(dir.into());
+        self
+    }
+
+    /// Another registered matter's folder, `matter` its id as the host names it: a hidden path
+    /// ([`Policy::hidden`] lists it) that [`PolicyBuilder::other_matter_read`] may read in, and
+    /// whose refused paths classify as [`PathClass::OtherMatter`]. It need not exist.
+    pub fn hidden_matter(mut self, path: &Path, matter: &str) -> PolicyBuilder {
+        self.hidden_matters
+            .push((path.to_owned(), matter.to_owned()));
+        self
+    }
+
+    /// A read-only grant of a folder in another matter and everything under it, or of one file
+    /// in it (`is_file`) (R18), applied after the hidden paths: it reads again what they hide
+    /// and writes nothing. `build` refuses it unless it passes [`Policy::check_allowed_folder`]'s
+    /// cross-matter branch and is a file exactly when `is_file`.
+    pub fn other_matter_read(mut self, path: &Path, is_file: bool) -> PolicyBuilder {
+        self.other_matter_reads.push((path.to_owned(), is_file));
         self
     }
 
@@ -549,7 +571,8 @@ impl PolicyBuilder {
     ///   over-cap files inside the matter. The temp folder may not end in `.` or `..` as
     ///   written, be `/`, equal or hold the home folder, the state folder or a hidden path, nor
     ///   be inside the matter or hold it; and it must be `.../run/<session>/tmp`.
-    /// - Each allowed folder passes [`Policy::check_allowed_folder`].
+    /// - Each allowed folder passes [`Policy::check_allowed_folder`] outside its cross-matter
+    ///   branch; each read of another matter passes that branch.
     /// - Without [`PolicyBuilder::scan`], the matter is walked here
     ///   ([`scan_matter`](crate::scan_matter)). Every finding (the walk's and
     ///   [`PolicyBuilder::links`]') is canonicalised, and one outside the matter is refused. A

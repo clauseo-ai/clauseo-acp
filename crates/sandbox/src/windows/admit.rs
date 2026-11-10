@@ -65,6 +65,9 @@ pub enum PathKind {
     /// The session's temp folder, the agent's `TMPDIR` ([`Policy::session_tmpdir`]):
     /// `<data_dir>\run\<session>\tmp`.
     TempFolder,
+    /// A read-only grant in another matter's folder ([`Policy::other_matter_reads`], R18): an
+    /// allow added at launch and taken back at the run's end (`apply/reads.rs`).
+    OtherMatterRead,
 }
 
 impl fmt::Display for PathKind {
@@ -86,6 +89,7 @@ impl fmt::Display for PathKind {
             PathKind::ParentFiles => "the files beside the matter",
             PathKind::SharedWrite => "a place every sandbox user can write",
             PathKind::TempFolder => "the session's temp folder",
+            PathKind::OtherMatterRead => "a read of another matter's folder",
         })
     }
 }
@@ -189,6 +193,7 @@ pub struct Admitted<'a> {
     data_dir: PathBuf,
     siblings: Vec<PathBuf>,
     parent_files: Option<PathBuf>,
+    other_reads: Vec<ReadGrant>,
 }
 
 impl<'a> Admitted<'a> {
@@ -223,6 +228,11 @@ impl<'a> Admitted<'a> {
     /// Clauseo's data folder, canonical.
     pub fn data_dir(&self) -> &Path {
         &self.data_dir
+    }
+
+    /// The allows the policy's reads of other matters need, as the gate listed them (step 4).
+    pub fn other_reads(&self) -> &[ReadGrant] {
+        &self.other_reads
     }
 }
 
@@ -327,6 +337,10 @@ struct Checks<E, L> {
 ///    its own folders are taken the same way, down to the matters. Each one kept must answer
 ///    `Ok`, as a grant folder does; `Network` is left alone; any other answer refuses with
 ///    [`PathKind::Sibling`]. A listing that fails refuses too.
+/// 4. The reads of other matters (`other_reads.rs`, R18): each granted folder (a granted file's
+///    folder) must answer `Ok`, and is listed, down to every refused name in it, for the allows
+///    that leave each of those out; a refusal or a failed listing names
+///    [`PathKind::OtherMatterRead`].
 ///
 /// Nothing is written. A refusal returns before anything is planned.
 #[cfg(any(windows, test, feature = "test-support"))]
@@ -379,6 +393,7 @@ fn gate<'a>(
     }
     let fences = neighbours::fences(&resolved, given, &mut check)?;
     let walked = siblings::siblings(policy, &data, &resolved, &mut check, folders)?;
+    let other_reads = other_reads::reads(policy, &mut check)?;
     Ok(Admitted {
         policy,
         neighbours: resolved,
@@ -386,6 +401,7 @@ fn gate<'a>(
         data_dir: data,
         siblings: walked.siblings,
         parent_files: walked.parent_files,
+        other_reads,
     })
 }
 
@@ -524,6 +540,8 @@ pub(crate) fn fences_for(
 
 #[cfg(any(windows, test, feature = "test-support"))]
 mod neighbours;
+mod other_reads;
+pub use other_reads::ReadGrant;
 #[cfg(any(windows, test, feature = "test-support"))]
 mod siblings;
 #[cfg(any(windows, test, feature = "test-support"))]

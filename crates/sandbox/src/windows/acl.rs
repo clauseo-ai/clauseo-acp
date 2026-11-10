@@ -33,7 +33,7 @@ use windows::Win32::Storage::FileSystem::{WRITE_DAC, WRITE_OWNER};
 use windows::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
 
 use super::acl_bytes::{
-    AceSpec, Acl, DACL_AUTO_INHERITED, DACL_PROTECTED, Descriptor, SACL_AUTO_INHERITED,
+    AceSpec, Acl, DACL_AUTO_INHERITED, DACL_PROTECTED, Descriptor, Listed, SACL_AUTO_INHERITED,
     SACL_PROTECTED, build_descriptor, empty_acl, explicit_label, label_spec, owner_sid, sid_bytes,
 };
 use super::acl_plan::{Grant, Inherit, Sid, in_folder};
@@ -43,7 +43,7 @@ use super::ledger::RecordedFile;
 use super::record::{current_token_groups, current_user_sid};
 use super::writer::{AclWriter, Added, ApplyFailure, DenyStrip, Label, Reach, Strict, Walked};
 use object::{Handle, Object, os_error};
-use walk::{Foreign, Mode};
+use walk::{Foreign, Mode, listed_reads};
 
 pub(in crate::windows) mod object;
 pub(in crate::windows) mod privilege;
@@ -97,7 +97,7 @@ impl NtfsAcl {
 
 impl AclWriter for NtfsAcl {
     fn add(&mut self, grant: &Grant) -> Result<Added, ApplyFailure> {
-        write(grant, None)
+        write(grant, Expect::Nothing)
     }
 
     fn remove(&mut self, grant: &Grant) -> Result<(), ApplyFailure> {
@@ -166,9 +166,12 @@ impl AclWriter for NtfsAcl {
         } else {
             sid_bytes(&current_user_sid().map_err(|e| ApplyFailure::Io(e.kind()))?)
         };
+        // R18: each read of another matter the ledger lists (`walk::listed_reads`).
+        let reads = listed_reads(strict).map_err(|e| ApplyFailure::Io(e.kind()))?;
         let mode = Mode::Strict {
             watched: &watched,
             pool: &pool,
+            reads: &reads,
             foreign: (!assigned.is_empty()).then_some(Foreign {
                 assigned: &assigned,
                 me: &me,
@@ -199,7 +202,24 @@ impl AclWriter for NtfsAcl {
     }
 
     fn add_expecting(&mut self, grant: &Grant, expected: &Path) -> Result<Added, ApplyFailure> {
-        write(grant, Some(expected))
+        write(grant, Expect::Named(expected))
+    }
+
+    fn add_recorded(&mut self, grant: &Grant, file: &RecordedFile) -> Result<Added, ApplyFailure> {
+        write(grant, Expect::Id(file.id))
+    }
+
+    fn check_item(&mut self, path: &Path, strict: &Strict) -> Result<(), ApplyFailure> {
+        walk::check_item(&self.token, path, strict)
+    }
+
+    fn located(&mut self, file: &RecordedFile) -> io::Result<Option<PathBuf>> {
+        let Some(object) = Object::open_by_id(&file.path, file.id, 0)? else {
+            return Ok(None);
+        };
+        Ok(Some(PathBuf::from(OsString::from_wide(
+            &object.normalized()?,
+        ))))
     }
 
     fn refused_at(&mut self) -> Option<PathBuf> {
@@ -372,21 +392,39 @@ pub(crate) fn descriptor(path: &Path) -> io::Result<Vec<u8>> {
     Object::open(path)?.security(READ_ALL)
 }
 
-/// [`AclWriter::add`], and with `expected` [`AclWriter::add_expecting`]: the target opened
-/// once and checked; with `expected`, compared by the file ID on that same handle with the file
-/// `expected` names (opened without following; a link there is `Changed`); then written
-/// through that handle (N8).
-fn write(grant: &Grant, expected: Option<&Path>) -> Result<Added, ApplyFailure> {
+/// What a write must find on the handle it writes through, besides the planned target.
+#[derive(Clone, Copy)]
+enum Expect<'a> {
+    Nothing,
+    /// The file this path names (the credential link's, N8).
+    Named(&'a Path),
+    /// The file with this ID (a read of another matter's, R18).
+    Id(super::writer::FileId),
+}
+
+/// [`AclWriter::add`], [`AclWriter::add_expecting`] and [`AclWriter::add_recorded`]: the
+/// target opened once and checked; then compared by the file ID on that same handle with what
+/// `expected` names (a named file opened without following; a link there is `Changed`); then
+/// written through that handle (N8).
+fn write(grant: &Grant, expected: Expect<'_>) -> Result<Added, ApplyFailure> {
     let io = |e: io::Error| ApplyFailure::Io(e.kind());
     let target = Object::open(grant.path()).map_err(io)?;
     check_target(&target, grant)?;
-    if let Some(expected) = expected {
-        let expected = Object::open(expected).map_err(io)?;
-        if expected.name_surrogate()
-            || target.file_id().map_err(io)? != expected.file_id().map_err(io)?
-        {
-            return Err(ApplyFailure::Changed);
+    let want = match expected {
+        Expect::Nothing => None,
+        Expect::Named(expected) => {
+            let expected = Object::open(expected).map_err(io)?;
+            if expected.name_surrogate() {
+                return Err(ApplyFailure::Changed);
+            }
+            Some(expected.file_id().map_err(io)?)
         }
+        Expect::Id(id) => Some((id.volume, id.id)),
+    };
+    if let Some(want) = want
+        && target.file_id().map_err(io)? != want
+    {
+        return Err(ApplyFailure::Changed);
     }
     let spec = AceSpec::for_grant(grant, target.folder).map_err(io)?;
     let current = target.security(READ_ALL).map_err(io)?;
@@ -508,6 +546,31 @@ fn same_path(target: &Object, planned: &Path) -> io::Result<bool> {
     wide.pop();
     let planned = PathBuf::from(OsString::from_wide(&wide));
     Ok(in_folder(&final_path, &planned) && in_folder(&planned, &final_path))
+}
+
+/// `planned` in the `\\?\` form a final path is read in, as [`same_path`] puts it.
+fn final_form(planned: &Path) -> io::Result<PathBuf> {
+    let mut wide = verbatim_wide(planned)?;
+    wide.pop();
+    Ok(PathBuf::from(OsString::from_wide(&wide)))
+}
+
+/// The SIDs `reads` (final-form paths, SIDs as bytes, flags) lists a read of another matter for
+/// on `target`, each with its flags: the strict walk excuses exactly those allows there (R18).
+fn reads_on<'r>(
+    target: &Object,
+    reads: &'r [(PathBuf, Vec<u8>, u8)],
+) -> io::Result<Vec<Listed<'r>>> {
+    if reads.is_empty() {
+        return Ok(Vec::new());
+    }
+    let at = PathBuf::from(OsString::from_wide(&target.normalized()?));
+    let here = reads
+        .iter()
+        .filter(|(p, ..)| in_folder(&at, p) && in_folder(p, &at));
+    Ok(here
+        .map(|(_, sid, flags)| (sid.as_slice(), *flags))
+        .collect())
 }
 
 /// The DACL control bits a write on a target keeps: its protection, and the auto-inherited mark

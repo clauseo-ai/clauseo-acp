@@ -81,7 +81,7 @@ pub enum Access {
 }
 
 /// Why a refused path is out of the agent's reach.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PathClass {
     /// Outside everything the policy allows: the lawyer may widen it with a card.
@@ -93,6 +93,18 @@ pub enum PathClass {
     ReadOnly,
     /// A link in the matter that leads outside it, or what it leads to: no card (S14).
     LinkTarget,
+    /// Under another matter's folder ([`PolicyBuilder::hidden_matter`](crate::PolicyBuilder)):
+    /// outside a read grant, a write, or one of
+    /// [`REFUSED_IN_OTHER_MATTER`](crate::REFUSED_IN_OTHER_MATTER). A card may grant a read
+    /// (R18), never a write.
+    OtherMatter {
+        /// The other matter, as the host named it.
+        matter: String,
+        /// Whether the path is in or is one of
+        /// [`REFUSED_IN_OTHER_MATTER`](crate::REFUSED_IN_OTHER_MATTER) below the other matter's
+        /// folder, which no grant reads.
+        refused: bool,
+    },
 }
 
 /// Why the egress proxy refused a connection.

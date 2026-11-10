@@ -2,8 +2,11 @@ use super::*;
 use crate::test_support::TempDir;
 
 mod allowed;
+mod ascii_fold;
 mod links;
 mod nested;
+mod other_matter;
+mod overlap;
 mod reallowed;
 mod tmpdir;
 mod unicode;

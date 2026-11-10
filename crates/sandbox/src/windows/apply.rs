@@ -35,9 +35,11 @@
 //!    owns is handed to the desktop user, and refuses as [`ApplyFailure::PoolOwned`] (`Child`)
 //!    only if that hand-back fails ([`Strict`]'s `assigned`, S15 `PR4h`).
 //! 6. Only then are the entries marked `applied`.
-//! 7. Only after all that succeeds does a folder that is now a registered matter lose the
-//!    sibling deny on it, for every matter whose entry names it; a deny on a folder holding it is
-//!    replaced by the walk-down set first (`lift.rs`). A refused launch leaves every deny.
+//! 7. Only after all that succeeds, a fence's whole-tree deny on a matter folder that this
+//!    plan split in two is taken back (`split.rs`, R18), and a folder that is now a registered
+//!    matter loses the sibling deny on it, for every matter whose entry names it; a deny on a
+//!    folder holding it is replaced by the walk-down set first (`lift.rs`). A refused launch
+//!    leaves every deny.
 //!
 //! Any failure rolls back this launch's new entries only (`back.rs`): under the ledger's lock
 //! they are marked `removing`, each permission entry this launch wrote for them is removed unless
@@ -59,21 +61,25 @@ use super::acl_plan::{AdmittedPlan, Grant, Rights, in_folder};
 use super::admit::{FolderList, PathKind};
 use super::clean_close::{FullReason, LaunchCheck, LaunchPath, WalkInputs};
 use super::ledger::{EntryId, EntryState, Ledger, RecordedFile, is_our_label};
-use super::writer::{AclWriter, Added, ApplyFailure, Label, Reach, Walked};
+use super::writer::{AclWriter, Added, ApplyFailure, Label, Reach, Strict, Walked};
 use crate::Error;
 
 mod back;
 #[cfg(any(windows, test, feature = "test-support"))]
 mod fence;
 mod lift;
+mod lifts;
+mod reads;
 mod roots;
+mod split;
 mod stuck;
 mod walk;
 
 pub use back::{forget_matter, reconcile};
 #[cfg(any(windows, test, feature = "test-support"))]
 pub use fence::{FencedEach, fence_each, fence_registered};
-pub(crate) use walk::{OWN_KINDS, strict_for, strict_of};
+pub use reads::{Narrowed, end_reads, narrow_reads};
+pub(crate) use walk::{OWN_KINDS, excused_reads, strict_for, strict_of};
 use walk::{Refused, Walk, clearing, inside_any, own_roots, owner_passes, strict_at, walks};
 
 /// What [`apply`] did.
@@ -141,6 +147,9 @@ pub fn apply(
 /// listed then, each deny is found in place (an explicit entry on the item itself), and nothing
 /// is written. They aren't walk inputs (`WalkInputs`): no own-tree walk depends on them, so a
 /// changed set of them can't make a skip leave anything out.
+///
+/// First, before anything is recorded, each of the matter's reads of other matters that `plan`
+/// doesn't list is taken back (`reads.rs`, R18): an earlier run that crashed left it.
 pub fn apply_checked(
     ledger: &mut Ledger,
     plan: &mut AdmittedPlan,
@@ -148,6 +157,8 @@ pub fn apply_checked(
     around: &mut dyn Surroundings,
     check: &LaunchCheck,
 ) -> Result<Applied, Error> {
+    // R18: the matter's reads of other matters a crashed run left, and the plan doesn't list.
+    reads::drop_stale(ledger, plan, acl, around)?;
     apply_with_pool(ledger, plan, acl, around, check, &[])
 }
 
@@ -175,6 +186,10 @@ fn apply_with_pool(
     let run = run_plan(ledger, plan, acl, around, &own, pool)
         .inspect_err(|error| stuck::owe(ledger, plan, error))?;
     stuck::settled(ledger, plan);
+    // R18: a whole-tree fence entry on a matter folder goes once its split pair is applied.
+    split::retire_whole(ledger, plan, acl, around);
+    // R18: a read of another matter's whole folder lifts the fence's deny on the folder alone.
+    lifts::lift(ledger, plan, acl);
     let lifted = lift::lift(ledger, plan, &roots, acl, around);
     Ok(Applied {
         written: run.written.len(),
@@ -337,14 +352,22 @@ fn write_all(
             }
         }
     }
+    // R18: each new read records its item by file ID before its allow is written.
+    reads::record_files(ledger, plan, acl)?;
     // M2: an entry still pending (this launch's, or one an earlier launch left) gets its walk.
     let pending: BTreeSet<EntryId> = ledger
         .entries()
         .filter(|e| e.state == EntryState::Pending && plan.entries().contains(&e.id))
         .map(|e| e.id)
         .collect();
-    let strict = strict_for(plan);
+    let strict = Strict {
+        excused: excused_reads(ledger),
+        ..strict_for(plan)
+    };
     let own = own_roots(plan);
+    // R18: no read is written into a tree the other matter's fence doesn't hold.
+    run.walked
+        .add(reads::check_trees(ledger, plan, acl, around, &strict)?);
     let mut by_path: BTreeMap<(usize, &Path), Vec<usize>> = BTreeMap::new();
     for (i, grant) in grants.iter().enumerate() {
         let depth = grant.path().components().count();
@@ -370,6 +393,9 @@ fn write_all(
             let added = match (grant.kind(), around.credentials()) {
                 (PathKind::CredentialLink, Some(expected)) => acl.add_expecting(grant, &expected),
                 (PathKind::CredentialLink, None) => Err(ApplyFailure::Changed),
+                (PathKind::OtherMatterRead, _) => {
+                    reads::add(ledger, plan.entries().get(i).copied(), grant, acl)
+                }
                 _ => acl.add(grant),
             };
             // A link at a protected name is named, for `protected_link`; so is an item the
@@ -480,7 +506,10 @@ pub fn repair_after_session(
     around: &mut dyn Surroundings,
 ) -> Result<Walked, Error> {
     let entries = ledger.matter_entries(matter);
-    let strict = strict_of(&entries);
+    let strict = Strict {
+        excused: excused_reads(ledger),
+        ..strict_of(&entries)
+    };
     let roots: BTreeSet<(PathBuf, PathKind)> = entries
         .iter()
         .filter(|e| OWN_KINDS.contains(&e.kind) && e.rights == Rights::Modify)

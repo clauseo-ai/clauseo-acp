@@ -75,6 +75,10 @@ pub struct Strict {
     /// pool user, and its matter SID when set; the pool owners its children may have. Empty
     /// outside a matter's tree (a sibling, the parent's files, the shared folders).
     pub assigned: Vec<Sid>,
+    /// The reads of other matters the ledger lists (R18), each path with the SID its allow
+    /// names and how far it reaches: that exact allow, on that path, isn't one that beats an
+    /// inherited deny (`acl_bytes/excused.rs`).
+    pub excused: Vec<(std::path::PathBuf, Sid, crate::windows::acl_plan::Inherit)>,
 }
 
 impl Walked {
@@ -282,6 +286,32 @@ pub trait AclWriter {
     /// to write is the file `expected` names (one file ID, compared on that same handle): the
     /// credential link's write (L5, N8).
     fn add_expecting(&mut self, grant: &Grant, expected: &Path) -> Result<Added, ApplyFailure>;
+    /// [`AclWriter::add`], refused as [`ApplyFailure::Changed`] unless the object it opened to
+    /// write has `file`'s ID (compared on that same handle): a read of another matter's write,
+    /// on the item its entry recorded before (R18). The default, for writers that never write
+    /// one, is `Unsupported`.
+    fn add_recorded(
+        &mut self,
+        _grant: &Grant,
+        _file: &RecordedFile,
+    ) -> Result<Added, ApplyFailure> {
+        Err(ApplyFailure::Io(io::ErrorKind::Unsupported))
+    }
+    /// `path` itself (never what a link at it names) held to `strict` as a strict walk holds a
+    /// child: a protected DACL is [`ApplyFailure::ProtectedChild`], an explicit allow that beats
+    /// an inherited deny, but a listed read, [`ApplyFailure::BroadAllowChild`]. Nothing is
+    /// written. The top of a read of another matter, which no walk visits as a child (R18). The
+    /// default, for writers that never check one, is `Unsupported`.
+    fn check_item(&mut self, _path: &Path, _strict: &Strict) -> Result<(), ApplyFailure> {
+        Err(ApplyFailure::Io(io::ErrorKind::Unsupported))
+    }
+    /// Where the file `file` recorded is now: its final path, opened by its ID as
+    /// [`AclWriter::remove_recorded`] opens it; `None` when no file has that ID any more. A
+    /// read's tree is walked there after its take-back, wherever it was moved (R18). The
+    /// default, for writers that never take one back, is `Unsupported`.
+    fn located(&mut self, _file: &RecordedFile) -> io::Result<Option<PathBuf>> {
+        Err(io::Error::from(io::ErrorKind::Unsupported))
+    }
     /// The child the last failed walk refused, when it was one (for the lawyer to see; never
     /// logged). Taking it clears it.
     fn refused_at(&mut self) -> Option<PathBuf>;

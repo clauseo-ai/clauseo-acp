@@ -28,10 +28,12 @@ ReadOnlyInMatter DenyWrite pool 0x000d0156 Tree <root>/matter/AGENTS.md
 ReadOnlyInMatter DenyWrite pool 0x000d0156 Tree <root>/matter/CLAUDE.local.md
 ReadOnlyInMatter DenyWrite pool 0x000d0156 Tree <root>/matter/CLAUDE.md
 ReadOnlyInState DenyWrite pool 0x000d0156 Tree <root>/data/agent-state/01890a5d-ac96-774b-bcce-b302099a8057/claude/settings.json
-Matter DenyReadWrite other-pool-1 0x000f01ff Tree <root>/matter
+Matter DenyReadWrite other-pool-1 0x000f01ff ThisOnly <root>/matter
+Matter DenyReadWrite other-pool-1 0x000f01ff Below <root>/matter
 State DenyReadWrite other-pool-1 0x000f01ff Tree <root>/data/agent-state/01890a5d-ac96-774b-bcce-b302099a8057/claude
 Notes DenyReadWrite other-pool-1 0x000f01ff Tree <root>/data/agent-state/01890a5d-ac96-774b-bcce-b302099a8057/notes
-Matter DenyReadWrite other-pool-2 0x000f01ff Tree <root>/matter
+Matter DenyReadWrite other-pool-2 0x000f01ff ThisOnly <root>/matter
+Matter DenyReadWrite other-pool-2 0x000f01ff Below <root>/matter
 State DenyReadWrite other-pool-2 0x000f01ff Tree <root>/data/agent-state/01890a5d-ac96-774b-bcce-b302099a8057/claude
 Notes DenyReadWrite other-pool-2 0x000f01ff Tree <root>/data/agent-state/01890a5d-ac96-774b-bcce-b302099a8057/notes
 Sibling DenyRead group 0x000200a9 Tree <root>/Drafts

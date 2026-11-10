@@ -18,8 +18,12 @@ use crate::windows::writer::Label;
 mod checked;
 mod child_owners;
 mod fake;
+mod lifts;
 mod owners;
 mod protected_link;
+mod read_files;
+mod read_only;
+mod reads;
 mod review;
 mod root_owners;
 mod round2;
@@ -29,6 +33,7 @@ mod round4_crash;
 mod round4_ledger;
 mod round5;
 mod round6;
+mod split;
 mod stuck;
 
 use fake::{Around, FakeAcl, Key, key};
@@ -403,14 +408,15 @@ fn growing_the_pool_adds_the_new_users_denies_to_every_registered_matter() {
     let small = [sid(USER_SID), sid(OTHER_POOL_SIDS[0])];
     let first =
         fence_registered(&mut ledger, &registered, &small, &mut acl, &mut around(&w)).unwrap();
-    assert_eq!(first.written, 3 + 2, "each matter fenced from the other");
+    // Each matter folder's deny is two entries (R18).
+    assert_eq!(first.written, 4 + 3, "each matter fenced from the other");
 
     let grown = [small[0].clone(), small[1].clone(), sid(OTHER_POOL_SIDS[1])];
     let next =
         fence_registered(&mut ledger, &registered, &grown, &mut acl, &mut around(&w)).unwrap();
     assert_eq!(
         next.written,
-        3 + 2,
+        4 + 3,
         "only the new user's denies, on every folder"
     );
     let newcomer = OTHER_POOL_SIDS[1];
