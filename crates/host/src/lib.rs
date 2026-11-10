@@ -274,6 +274,8 @@ pub use agent::login_link::{
 };
 pub use agent::login_splits::LoginSplits;
 pub use agent::session_folder;
+#[cfg(feature = "test-support")]
+pub use agent::shell_path::path_helper_folders;
 pub use blocklist::{AllowedSites, BlockListSeams, BlockListUpdate, block_list_is_stale};
 pub use clauseo_acp::McpServer;
 #[cfg(feature = "test-support")]

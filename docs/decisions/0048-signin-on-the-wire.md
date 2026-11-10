@@ -613,6 +613,27 @@ it was. When the runtime's folders go on, the session drops an inherited `PYTHON
 `PATH` also puts `python313.dll` and `vcruntime140.dll` on child processes' DLL search path;
 that is accepted for launch, and PR 2's launcher, after launch, removes the need.
 
+The folders also come first inside the agents' shells, on macOS and Linux, because macOS
+login shells re-sort `PATH` (`/etc/zprofile` runs `path_helper`, which puts `/usr/bin` first,
+so a Codex turn ran `/usr/bin/python3` and `import docx` failed). Codex (`@openai/codex`
+0.162.1) runs each command with `-lc` unless `allow_login_shell = false`
+(`config/src/config_toml.rs:221`, default true at `core/src/config/mod.rs:3852`,
+`core/src/shell.rs:25`), after sourcing a login-shell snapshot that re-exports
+`shell_environment_policy.set` (`core/src/tools/runtimes/mod.rs`); the session's
+`CODEX_CONFIG` gets `allow_login_shell = false` and `shell_environment_policy.set.PATH`, the
+session's `PATH`, and on macOS the folders `path_helper` adds (`/etc/paths`, then
+`/etc/paths.d/*` by name, read on the launch-prep thread) go right after Clauseo's, so nothing a
+lawyer's GUI or login `PATH` had is dropped. Claude Code (2.1.293) pastes the file
+`CLAUDE_ENV_FILE` names into each Bash command after its login-shell snapshot; the launch writes
+`export PATH='<folders>':"$PATH"` there, which keeps everything the snapshot built. Both are per
+session, since the shell browser's folder is on one session's `PATH` and not another's: the keys
+ride in `CODEX_CONFIG`, which codex-acp sends as each thread's `config` and app-server turns
+into overrides on `config.toml` (`app-server/src/config_manager.rs:446-457`), not in the home's
+shared `config.toml`; the file is `<data>/run/<session id>/clauseo-env.sh`, gone with the run
+folder, not in the shared Claude home. With no folders nothing is set, and an inherited
+`CLAUDE_ENV_FILE` is left alone (it is replaced only when Clauseo sets its own). Windows is
+unchanged (`agent/shell_path.rs`).
+
 ## Consequences
 
 - Desktop owns the mapping from `agents` to the wire. A state or code added to `agents` needs a

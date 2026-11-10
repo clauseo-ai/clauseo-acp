@@ -104,7 +104,11 @@ pub(crate) const WINDOWS_SANDBOX: &str = "unelevated";
 /// bundled skills off, and no skills instructions) as nested keys over them all, so R15's pins
 /// win; then `hooks`, the object the [hooks seam](crate::actor::turn) gives, when there is one,
 /// over everything. On Windows, `windows.sandbox` is [`WINDOWS_SANDBOX`], set with R15's pins.
-/// Nothing here reaches `<agent_home>/config.toml` ([`home_config`]).
+/// Nothing here reaches `<agent_home>/config.toml` ([`home_config`]). With folders on the
+/// session's `PATH`, off Windows, the launch then adds `allow_login_shell = false` and
+/// `shell_environment_policy.set.PATH` ([`with_shell_path`]) from the merged environment the
+/// agent gets (`agent/shell_path.rs`): this object is the session's own, where the home's
+/// `config.toml` is shared by every session of the agent.
 pub(crate) fn config(
     settings_env: &BTreeMap<String, String>,
     profile: Map<String, Value>,
@@ -154,6 +158,21 @@ pub(crate) fn config_on(
         config.insert("hooks".to_owned(), Value::Object(hooks));
     }
     config
+}
+
+/// Sets the two keys that give Codex's shell commands the session's `PATH` on macOS and Linux
+/// (`agent/shell_path.rs`, decision record 0048): `allow_login_shell = false`, so a command
+/// runs with `-c`, not `-lc` (`core/src/shell.rs:25` at `rust-v0.162.1`), and
+/// `shell_environment_policy.set.PATH = path`, which Codex exports again after sourcing its
+/// shell snapshot (`core/src/tools/runtimes/mod.rs`). The policy's other keys
+/// (`ignore_default_excludes`) stay. Only with folders on the session's `PATH`.
+pub(crate) fn with_shell_path(config: &mut Map<String, Value>, path: &str) {
+    config.insert("allow_login_shell".to_owned(), Value::Bool(false));
+    insert_dotted(
+        config,
+        "shell_environment_policy.set.PATH",
+        Value::from(path),
+    );
 }
 
 /// Merges `keys` into `config` without replacing anything: objects on both sides merge key by
@@ -256,7 +275,10 @@ pub(crate) fn home_config() -> String {
 /// cache into `CODEX_HOME/plugins` (G8a counted 176 folders and 57 skills;
 /// `core-plugins/src/manager.rs:2814-2824` at `rust-v0.162.1`), fetched from
 /// `github.com/openai/plugins` (#203), whose skills reach the session's command list. Nothing
-/// else in the home is read or touched: `auth.json` and the rest are Codex's.
+/// else in the home is read or touched: `auth.json` and the rest are Codex's. Nor does the
+/// session's `PATH` go here (`allow_login_shell` and `shell_environment_policy.set.PATH`,
+/// [`with_shell_path`]): it differs between sessions of the agent, so it rides in each
+/// session's own `CODEX_CONFIG`.
 ///
 /// The hooks table never goes in this file, only through `CODEX_CONFIG`: the guard's trust entry
 /// is keyed by the session-flags source (`/<session-flags>/config.toml:pre_tool_use:0:0`), so a
