@@ -6,8 +6,10 @@ use clauseo_protocol::ErrorCode;
 use super::{open_folder, preflight, session_refusal};
 use crate::error::Error;
 
-/// `EPERM` and `EACCES`, as macOS and Linux number them.
+/// `EPERM` and `EACCES`, as macOS and Linux number them (Windows numbers its codes otherwise).
+#[cfg(unix)]
 const EPERM: i32 = 1;
+#[cfg(unix)]
 const EACCES: i32 = 13;
 
 /// The matter folder the tests name; nothing opens it.
@@ -22,6 +24,7 @@ fn refused(result: Result<(), Error>) -> Option<(ErrorCode, String)> {
         .map(|error| (error.code(), error.to_wire().message().to_owned()))
 }
 
+#[cfg(unix)]
 #[test]
 fn an_open_refused_with_eperm_refuses_the_launch_with_folder_permission_and_no_path() {
     let (code, message) = refused(preflight(folder(), |_| {
@@ -32,10 +35,22 @@ fn an_open_refused_with_eperm_refuses_the_launch_with_folder_permission_and_no_p
     assert!(!message.contains("Documents"), "{message}");
 }
 
+#[cfg(unix)]
 #[test]
 fn an_open_refused_with_eacces_refuses_the_launch_too() {
     let found = refused(preflight(folder(), |_| {
         Err(io::Error::from_raw_os_error(EACCES))
+    }));
+    assert_eq!(
+        found.map(|(code, _)| code),
+        Some(ErrorCode::MatterFolderPermission)
+    );
+}
+
+#[test]
+fn an_open_refused_permission_on_any_os_refuses_the_launch() {
+    let found = refused(preflight(folder(), |_| {
+        Err(io::Error::from(io::ErrorKind::PermissionDenied))
     }));
     assert_eq!(
         found.map(|(code, _)| code),
