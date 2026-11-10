@@ -15,6 +15,10 @@ use super::{
 use crate::{EXIT_OK, write};
 
 /// The variable naming the port Codex's browser login listens on, for the tests of its `/cancel`.
+/// The variable naming a file Codex's `login status` waits for before it answers (polled, as
+/// `FAKE_CODEX_BIND_GATE`): a test holds the sign-in's quick check open while it cancels.
+pub(super) const STATUS_GATE_VAR: &str = "FAKE_STATUS_GATE";
+
 const CODEX_PORT_VAR: &str = "FAKE_CODEX_PORT";
 /// The line Codex's browser login prints when `GET /cancel` ends it.
 const CODEX_CANCELLED: &str = "Login cancelled";
