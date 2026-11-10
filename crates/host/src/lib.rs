@@ -142,7 +142,7 @@
 //! - The updater's seam (decision record 0037): [`Updater`] (`install_kind`, `check` and
 //!   `download`; never `install`, which desktop runs after the host has stopped), the values
 //!   that cross it ([`Offer`], [`Downloaded`], [`Opaque`], [`ProgressSink`], [`UpdaterError`]),
-//!   `update.json`'s [`UpdateMarker`], and [`NoUpdater`], managed by a package so nothing is
+//!   `update.json`'s [`UpdateMarker`], and [`NoUpdater`], updates unavailable so nothing is
 //!   ever checked. [`read_update_marker`] reads `update.json` as the last run left it.
 //! - The updater in the actor (`actor/update.rs`): `HostConfig::with_updater`, its jitter seed
 //!   and the app's version start the pure machine (`update/machine.rs`) once the host serves.

@@ -278,6 +278,17 @@ fn linux_is_always_a_package() {
     assert_eq!(super::install_kind::detect(), InstallKind::Package);
 }
 
+/// Linux's updater (`with_updater` there) says a package manager updates it and offers nothing;
+/// a build elsewhere with no updater keeps the host's `NoUpdater`, which says it has none.
+#[test]
+fn linux_is_package_managed_and_a_build_with_no_updater_is_unavailable() {
+    use clauseo_host::{NoUpdater, Updater as _};
+    let linux = super::package::PackageManaged;
+    assert_eq!(linux.install_kind(), InstallKind::Package);
+    assert_eq!(futures::executor::block_on(linux.check()), Ok(None));
+    assert_eq!(NoUpdater.install_kind(), InstallKind::Unavailable);
+}
+
 /// The install's steps, recorded.
 pub(super) struct Recorded {
     installable: bool,

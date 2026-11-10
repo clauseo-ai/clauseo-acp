@@ -96,6 +96,7 @@ const SETTINGS = {
   per_machine: { view: view({ managed: { by: "per_machine" } }) },
   read_only_location: { view: view({ managed: { by: "read_only_location" } }) },
   package: { view: view({ managed: { by: "package" } }) },
+  unavailable: { view: view({ managed: { by: "unavailable" } }) },
   locked: { view: view("idle", { mode: "notify" }), locked: ["update.mode"] },
 } satisfies Record<string, { view: UpdateView; locked?: string[] }>;
 
@@ -169,4 +170,11 @@ export const R23: Entry[] = [
     "package",
   ),
   settings("R23-29", settingsWords("Managed by firm"), "locked"),
+  settings(
+    "R23-30",
+    words(
+      "This version of Clauseo doesn't update itself. To update, install the new version over this one. Your matters and settings stay.",
+    ),
+    "unavailable",
+  ),
 ];

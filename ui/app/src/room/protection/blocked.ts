@@ -84,7 +84,13 @@ export const setUpFixes = (cause: Cause | null): boolean => blockOf(cause) === "
 /** The updater's word on who manages this install (`UpdateView.state`'s `managed.by`, from
  * desktop's install_kind.rs): "per_machine" for a per-machine install, "policy" where the firm's
  * policy sets `update.mode` to none (which hides the install kind); null for a per-user install. */
-export type ManagedBy = "policy" | "per_machine" | "read_only_location" | "package" | null;
+export type ManagedBy =
+  | "policy"
+  | "per_machine"
+  | "read_only_location"
+  | "package"
+  | "unavailable"
+  | null;
 
 /** A firm install: a per-machine install (exe under Program Files, or the HKLM uninstall key), or,
  * as an extra hint, the firm's policy (`update.mode` none, `sandbox.required`, or

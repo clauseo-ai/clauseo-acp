@@ -13,6 +13,8 @@ export const MANAGED_WORDS: Record<ManagedBy, UpdateKey> = {
   read_only_location:
     "Clauseo can't update itself from where it's installed. Ask whoever looks after this computer.",
   package: "Updates come through the package manager that installed Clauseo.",
+  unavailable:
+    "This version of Clauseo doesn't update itself. To update, install the new version over this one. Your matters and settings stay.",
 };
 
 /** The policy key that locks the mode. */

@@ -72,7 +72,7 @@ pub(super) struct E2eEnv {
 /// The updater a build gives the host.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum Choice {
-    /// None: the host keeps `NoUpdater`, `managed` by `package`, and never checks.
+    /// None: the host keeps `NoUpdater`, `managed` by `unavailable`, and never checks.
     None,
     /// The plugin, over `tauri.conf.json`'s endpoints and pubkey.
     Config,

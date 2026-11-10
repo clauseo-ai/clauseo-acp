@@ -34,7 +34,7 @@ pub(crate) const CURRENT: &str = "0.4.0";
 /// The version the fake offers.
 pub(crate) const NEXT: &str = "0.4.1";
 /// The timers a host keeps armed with nothing to do: the updater's one, which under the default
-/// `NoUpdater` (managed by a package) counts `managed` again a day later (decision record 0037).
+/// `NoUpdater` (updates unavailable) counts `managed` again a day later (decision record 0037).
 pub(crate) const STANDING_TIMERS: usize = 1;
 
 /// Every test's jitter seed.
@@ -292,6 +292,7 @@ fn a_managed_run_never_checks() {
             ManagedBy::ReadOnlyLocation,
         ),
         (InstallKind::Package, None, ManagedBy::Package),
+        (InstallKind::Unavailable, None, ManagedBy::Unavailable),
         (
             InstallKind::CurrentUser,
             Some(r#"{"update": {"mode": "none"}}"#),

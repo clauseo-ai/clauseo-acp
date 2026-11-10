@@ -187,6 +187,7 @@ impl Machine {
             InstallKind::PerMachine => Some(ManagedBy::PerMachine),
             InstallKind::ReadOnlyLocation => Some(ManagedBy::ReadOnlyLocation),
             InstallKind::Package => Some(ManagedBy::Package),
+            InstallKind::Unavailable => Some(ManagedBy::Unavailable),
         }
     }
 
