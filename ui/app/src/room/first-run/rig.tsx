@@ -101,6 +101,8 @@ export type RigOptions = {
   settingsPart?: boolean;
   /** Answers each setup command; throwing refuses it. */
   command?: (command: SetupCommand) => void | Promise<void>;
+  /** The host has the settings window (open_settings). */
+  openSettings?: boolean;
   /** The folder the picker gives; null: cancelled. */
   picked?: { folder: string; display: string } | null;
 };
@@ -110,6 +112,7 @@ export async function mountFirstRun(o: RigOptions = {}) {
   let matters = o.matters ?? [A];
   const fake: FakeHost = {
     platform: o.platform ?? "mac",
+    ...(o.openSettings === true ? { openSettings: () => {} } : {}),
     query: async (query) => {
       if (query === "list_matters") return { matters };
       if (query === "get_settings") return { settings: o.settings ?? settingsView() };
