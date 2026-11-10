@@ -68,6 +68,12 @@ fn starting() -> std::sync::MutexGuard<'static, BTreeSet<PathBuf>> {
     STARTING.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
+/// In tests: whether a start of `folder` is still running.
+#[cfg(test)]
+pub(crate) fn is_starting(folder: &Path) -> bool {
+    starting().contains(folder)
+}
+
 /// What the burst thread posts: the watch of `generation` saw `matter`'s folder change.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct FolderChanged {
@@ -100,6 +106,9 @@ pub(crate) enum Started {
     Missing,
     /// The OS refused (inotify's watch limit, an error from the share): logged by kind.
     Failed,
+    /// An earlier start of the folder is still running (a quick A, B, A): none now, and the next
+    /// listing that finds the folder tries again.
+    Busy,
 }
 
 /// One folder's watch; dropping it ends it.
@@ -133,7 +142,11 @@ pub(crate) fn start(
         started: Started::Failed,
     };
     if !starting().insert(folder.clone()) {
-        let _gone = back.try_send(Input::WatchStarted(Box::new(failed)));
+        let busy = WatchStarted {
+            generation,
+            started: Started::Busy,
+        };
+        let _gone = back.try_send(Input::WatchStarted(Box::new(busy)));
         return;
     }
     let held = folder.clone();
@@ -187,15 +200,16 @@ fn watch(
     post: &async_channel::Sender<Input>,
     clock: Arc<dyn Clock>,
 ) -> Result<RecommendedWatcher, notify::Error> {
-    let (send, changes) = mpsc::channel::<()>();
+    // One change waiting is all a burst needs to know: the rest are dropped while it waits.
+    let (send, changes) = mpsc::sync_channel::<()>(1);
     // `FSEvents` names paths as resolved (`/private/var` for `/var`): both spellings count.
     let roots: Vec<PathBuf> = std::iter::once(folder.to_path_buf())
         .chain(dunce::canonicalize(folder).ok())
         .collect();
     let handler = move |event: notify::Result<notify::Event>| {
         if shows(&roots, &event) {
-            // The thread is gone only once the watch is being dropped.
-            let _gone = send.send(());
+            // Full: a change already waits, which says the same. Gone: the watch is dropping.
+            let _full_or_gone = send.try_send(());
         }
     };
     let config = Config::default().with_follow_symlinks(false);

@@ -21,4 +21,8 @@ pub(super) fn forgotten(actor: &mut Actor, _matter: MatterId) {
     }
 }
 
+pub(super) fn watching(_actor: &Actor, _matter: MatterId) -> bool {
+    false
+}
+
 pub(super) fn found(_actor: &mut Actor, _matter: MatterId, _folder: &Path) {}

@@ -29,7 +29,7 @@ mod live;
 #[cfg(windows)]
 mod no_watch;
 #[cfg(not(windows))]
-mod watch;
+pub(crate) mod watch;
 #[cfg(not(windows))]
 pub(crate) use live::{Follow, on_changed, on_started};
 #[cfg(windows)]

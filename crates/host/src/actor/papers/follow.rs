@@ -70,10 +70,13 @@ pub(crate) fn listed(actor: &mut Actor, matter: MatterId, folder: &Path, found: 
     }
 }
 
-/// A turn in `matter` ended, however it ended. With no watch (Windows) the app lists the papers
-/// again, since the answer may have added or changed some; with one, the watch tells it.
+/// A turn in `matter` ended, however it ended. Unless its folder's watch is live (it tells of
+/// each change), the app lists the papers again, since the answer may have added or changed
+/// some: on Windows, a watch that failed or is still starting, and a matter not followed (one in
+/// a second window).
 pub(crate) fn on_turn_ended(actor: &mut Actor, matter: MatterId) {
-    if !actor.papers_live && actor.matters.contains_key(&matter) {
+    let watched = actor.papers_live && live::watching(actor, matter);
+    if !watched && actor.matters.contains_key(&matter) {
         crate::actor::app::publish(actor, &HostEvent::PapersChanged { matter });
     }
 }
