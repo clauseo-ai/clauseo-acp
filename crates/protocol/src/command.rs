@@ -14,16 +14,15 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::MatterPath;
 use crate::{
-    AgentChoiceId, AgentId, AgentKind, AllowScope, BlockedSiteId, CheckpointId, ClientName,
-    CommandId, Date, DecideRevisions, Delivery, ElicitationId, ElicitationResponse, FieldChange,
-    FileDecision, FolderRefId, MatterId, PackId, PackList, PermissionRequestId, PrivacyPatch,
-    PromptBlock, RestoreScope, ThreadId, Timestamp, Title, ToolsPatch, TurnId, UiPatch,
+    AgentChoiceId, AgentId, AgentKind, AgentPrefs, AllowScope, BlockedSiteId, CheckpointId,
+    ClientName, CommandId, ConfigPicks, Date, DecideRevisions, Delivery, ElicitationId,
+    ElicitationResponse, FieldChange, FileDecision, FolderRefId, InstallWhen, MatterId, MatterPath,
+    PackId, PackList, PermissionRequestId, PrivacyPatch, PromptBlock, RestoreScope, ThreadId,
+    Timestamp, Title, ToolsPatch, TurnId, UiPatch, UpdateMode,
 };
 #[cfg(doc)]
 use crate::{FileChoice, RawPayload};
-use crate::{InstallWhen, UpdateMode};
 
 mod connectors;
 mod outcome;
@@ -195,10 +194,9 @@ pub enum HostCommand {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         next_date: Option<Date>,
     },
-    /// Change a matter's details. Each field: missing leaves it, `null` clears it (`client`,
-    /// `next_date`, `skill_packs`: back to the global `skills.enabled`), a value sets it (`[]`
-    /// for `skill_packs` means no pack for the matter). A command that changes nothing answers
-    /// `Done` too.
+    /// Change a matter's details. Each field: missing leaves it, `null` clears it (`skill_packs`:
+    /// back to the global `skills.enabled`), a value sets it (`[]` for `skill_packs`: no pack
+    /// for the matter). A command that changes nothing answers `Done` too.
     UpdateMatter {
         /// The matter.
         matter: MatterId,
@@ -217,6 +215,10 @@ pub enum HostCommand {
         /// Whether it is pinned to the top of the rail.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         pinned: Option<bool>,
+        /// The picks a new conversation starts with, per agent kind (`CreateThread::config`).
+        #[serde(default, skip_serializing_if = "FieldChange::is_keep")]
+        #[cfg_attr(feature = "specta", specta(type = Option<Option<AgentPrefs>>))]
+        agent_prefs: FieldChange<AgentPrefs>,
     },
     /// The lawyer opened a matter: its `last_opened` becomes now, which orders "Recent".
     OpenMatter {
@@ -291,6 +293,11 @@ pub enum HostCommand {
         matter: MatterId,
         /// The agent's registry id.
         agent: AgentId,
+        /// Model and effort to start with, set after the session starts and before the first
+        /// prompt (`model`, `thought_level` options; one the agent refuses is dropped). Missing:
+        /// the matter's `agent_prefs` for the agent's kind, else its defaults; `{}` sets none.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        config: Option<ConfigPicks>,
     },
     /// Send a prompt. Never refused because a turn is running: it is queued, sent now or steered.
     SendPrompt {
@@ -366,7 +373,8 @@ pub enum HostCommand {
         /// keys) of at most [`MAX_ELICITATION_VALUES_BYTES`].
         response: ElicitationResponse,
     },
-    /// Set one of the agent's config options.
+    /// Set one of the agent's config options: only a select option of category `model` or
+    /// `thought_level` (else `command.invalid`); a success keeps the pick in `agent_prefs`.
     SetConfigOption {
         /// The thread.
         thread: ThreadId,

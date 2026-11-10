@@ -4,7 +4,7 @@
 
 use clauseo_acp::PendingKey;
 use clauseo_protocol::{
-    AgentChoiceId, CommandOutcome, CompactString, ConfigOption, ConfigOptionsReplaced,
+    AgentChoiceId, CommandOutcome, CompactString, ConfigOption, ConfigOptionsReplaced, ConfigValue,
     ElicitationId, ElicitationOutcome, ElicitationRequest, ElicitationResolved,
     ElicitationResponse, ErrorCode, ModeChanged, PermissionChoice, PermissionKind,
     PermissionRequestId, PermissionResolved, Principal, RawPayload, StreamId, ThreadId,
@@ -324,17 +324,21 @@ fn field<'a>(object: &'a RawPayload, name: &str) -> Option<&'a RawPayload> {
         .map(|(_, value)| value)
 }
 
-/// `SetConfigOption` returned: log every option as the agent now has them.
+/// `SetConfigOption` of `pick` returned: log every option as the agent now has them, and keep
+/// the pick in the matter's prefs (`picks.rs`), in the same commit.
 pub(super) fn on_config(
     actor: &mut Actor,
     thread: ThreadId,
-    ctx: CommandCtx,
+    (ctx, pick): (CommandCtx, (AgentChoiceId, ConfigValue)),
     same: bool,
     result: Result<Vec<ConfigOption>, clauseo_acp::Error>,
 ) {
     let done = answered(same, result).and_then(|options| {
         let mut out = Out::new(actor, thread, Some(ctx.id))?;
         out.push(actor, ConfigOptionsReplaced { options })?;
+        if let Some(row) = super::picks::remember(actor, thread, &pick) {
+            out.draft.matter_row(row);
+        }
         send_answer(actor, ctx, thread, out, Then::Nothing)
     });
     if let Err(error) = done {

@@ -8,11 +8,12 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
 
 use crate::open_enum::open_unit_enum;
 use crate::{
-    AgentId, AgentKind, AllowedSite, BlobHash, CheckpointId, ClientName, CompactString, Count,
-    Date, Error, FileChange, FileRefId, LastStop, MatterId, MatterKind, MatterPath, MatterSource,
-    MatterStatus, PackList, PackStatus, Protection, ProtectionView, QueueHoldReason,
-    RestoreRequest, RevisionList, SearchAnswer, SearchRequest, Seq, SettingsView, SkippedFile,
-    StreamId, ThreadId, ThreadStatus, Timestamp, TurnId, UpdateView, ViewEntry, WordBlackline,
+    AgentId, AgentKind, AgentPrefs, AllowedSite, BlobHash, CheckpointId, ClientName, CompactString,
+    ConfigOption, Count, Date, Error, FileChange, FileRefId, LastStop, MatterId, MatterKind,
+    MatterPath, MatterSource, MatterStatus, PackList, PackStatus, Protection, ProtectionView,
+    QueueHoldReason, RestoreRequest, RevisionList, SearchAnswer, SearchRequest, Seq, SettingsView,
+    SkippedFile, StreamId, ThreadId, ThreadStatus, Timestamp, TurnId, UpdateView, ViewEntry,
+    WordBlackline,
 };
 
 /// Most entries one `PageEntries` returns: the size of a `Reset`'s view window (about 200 recent
@@ -324,6 +325,11 @@ pub struct AgentSummary {
     /// `fake-agent`. Left out of the JSON when `None`.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub kind: Option<AgentKind>,
+    /// Its config options as its latest session reported them (the host keeps them across
+    /// restarts), so a new conversation can offer the model and effort before any session;
+    /// empty, and left out of the JSON, until its first conversation started.
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pub config_options: Vec<ConfigOption>,
 }
 
 /// Where new matters go, for `GetDefaultLocation`.
@@ -394,6 +400,10 @@ pub struct MatterSummary {
     /// `skills.enabled` list, and `[]` means no pack for this matter.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub skill_packs: Option<PackList>,
+    /// The model and effort a new conversation in it starts with, per agent kind, once set
+    /// (`UpdateMatter::agent_prefs`, or a successful `SetConfigOption` in one of its threads).
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub agent_prefs: Option<AgentPrefs>,
     /// Whether it is pinned to the top of the rail; missing reads as `false`.
     #[serde(default)]
     pub pinned: bool,

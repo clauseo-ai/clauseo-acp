@@ -94,6 +94,7 @@ fn create_thread(host: &HostHandle, n: u128, matter: MatterId) -> ThreadId {
     let command = HostCommand::CreateThread {
         matter,
         agent: AgentId::new("fake-agent").unwrap(),
+        config: None,
     };
     match block_on(host.dispatch(envelope(n, command))).unwrap() {
         CommandOutcome::ThreadCreated { thread } => thread,
@@ -242,6 +243,7 @@ fn start_command_subscribe_shutdown_restart() {
     let unknown = HostCommand::CreateThread {
         matter: MatterId::new(Uuid::now_v7()).unwrap(),
         agent: AgentId::new("fake-agent").unwrap(),
+        config: None,
     };
     let refused = block_on(host.dispatch(envelope(4, unknown))).unwrap_err();
     assert_eq!(refused.code(), ErrorCode::CommandUnknownMatter);
@@ -275,6 +277,7 @@ fn concurrent_duplicates_share_the_first_answer() {
     let command = || HostCommand::CreateThread {
         matter,
         agent: AgentId::new("fake-agent").unwrap(),
+        config: None,
     };
     let (a, b) = block_on(futures::future::join(
         host.dispatch(envelope(7, command())),

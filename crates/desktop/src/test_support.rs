@@ -382,6 +382,7 @@ impl Running {
         let outcome = self.run(HostCommand::CreateThread {
             matter: self.scratch(),
             agent: AgentId::new(AGENT).unwrap(),
+            config: None,
         });
         let CommandOutcome::ThreadCreated { thread } = outcome else {
             panic!("not created: {outcome:?}");

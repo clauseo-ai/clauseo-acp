@@ -98,6 +98,7 @@ fn commit_is_atomic() {
             last_opened: None,
             forgotten: None,
             skill_packs: None,
+            agent_prefs: None,
         }),
         snapshot: Some(SnapshotIn::compress(thread(2), seq(1), 1, b"state")),
         ..Commit::default()

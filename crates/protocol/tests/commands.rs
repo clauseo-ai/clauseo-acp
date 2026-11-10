@@ -71,6 +71,10 @@ mod blackline;
 #[path = "commands/revisions.rs"]
 mod revisions;
 
+#[cfg(test)]
+#[path = "commands/picks.rs"]
+mod picks;
+
 use std::str::FromStr;
 
 use clauseo_protocol::{

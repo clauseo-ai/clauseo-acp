@@ -322,6 +322,7 @@ impl Rig {
         let command = HostCommand::CreateThread {
             matter: self.matter(),
             agent: AgentId::new("fake-agent").unwrap(),
+            config: None,
         };
         let created = self.dispatch(n, command).unwrap();
         let CommandOutcome::ThreadCreated { thread } = created else {

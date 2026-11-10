@@ -440,6 +440,7 @@ fn session_in_a_planted_environment() {
         HostCommand::CreateThread {
             matter,
             agent: AgentId::new(CLAUDE).unwrap(),
+            config: None,
         },
     );
     let CommandOutcome::ThreadCreated { thread } = created else {

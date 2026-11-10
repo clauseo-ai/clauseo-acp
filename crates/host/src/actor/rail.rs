@@ -273,6 +273,7 @@ fn matter_row(
         client: row.client.clone(),
         next_date: row.next_date,
         skill_packs: row.skill_packs.clone(),
+        agent_prefs: row.agent_prefs.clone(),
         pinned: row.pinned,
         last_opened: row.last_opened,
         status: matter_status(facts),
@@ -355,6 +356,9 @@ pub(crate) fn note_commit(actor: &mut Actor, envelopes: &[Envelope]) {
         };
         actor.lists.touch_thread(thread);
         actor.triage.committed(&envelope.event);
+        if let DomainEvent::ConfigOptionsReplaced(replaced) = &envelope.event {
+            super::agent_options::note(actor, thread, &replaced.options);
+        }
         if let DomainEvent::TurnEnded(ended) = &envelope.event
             && let Some(entry) = actor.threads.get_mut(&thread)
         {

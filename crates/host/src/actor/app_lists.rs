@@ -283,6 +283,7 @@ fn same_matter(a: &MatterSummary, b: &MatterSummary) -> bool {
         client,
         next_date,
         skill_packs,
+        agent_prefs,
         pinned,
         last_opened,
         status,
@@ -297,6 +298,7 @@ fn same_matter(a: &MatterSummary, b: &MatterSummary) -> bool {
         && *client == b.client
         && *next_date == b.next_date
         && *skill_packs == b.skill_packs
+        && *agent_prefs == b.agent_prefs
         && *pinned == b.pinned
         && *last_opened == b.last_opened
         && *status == b.status

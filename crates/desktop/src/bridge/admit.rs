@@ -22,7 +22,9 @@
 //! only `RevokeAllowedSite` (its list of allowed sites): no other window, and so nothing an
 //! agent shows or runs, may lift a block.
 
-use clauseo_protocol::{ConnectorCommand, FolderRefId, HostCommand, HostError, MatterSource};
+use clauseo_protocol::{
+    ConfigValue, ConnectorCommand, FolderRefId, HostCommand, HostError, MatterSource,
+};
 
 use super::{Bridge, SETTINGS_WINDOW, invalid, lock};
 
@@ -69,10 +71,10 @@ pub(super) fn admit(bridge: &Bridge, label: &str, command: &HostCommand) -> Resu
 /// Whether `main` may send `command`: an allow-list, one arm per host command and no
 /// catch-all, so a command the host adds does not compile here until the bridge rules on it
 /// (`docs/decisions/0019-app-stream-to-the-window.md`). Refuses what goes another way
-/// (`AnswerPermission`), what may not come from the window at all (`SetMode`,
-/// `SetConfigOption`), and a `CreateMatter`, `RelocateMatter` or `ScanFolder` whose folder
-/// ref this run's `pick_folder` did not issue. `CancelScan` always passes: it starts nothing,
-/// and cancelling a scan that is not running does nothing.
+/// (`AnswerPermission`), what may not come from the window at all (`SetMode`, a
+/// `SetConfigOption` that is not a choice), and a `CreateMatter`, `RelocateMatter` or
+/// `ScanFolder` whose folder ref this run's `pick_folder` did not issue. `CancelScan` always
+/// passes: it starts nothing, and cancelling a scan that is not running does nothing.
 fn admit_main(bridge: &Bridge, command: &HostCommand) -> Result<(), HostError> {
     match command {
         HostCommand::CreateMatter { source, .. } => picked_source(bridge, source),
@@ -131,15 +133,26 @@ fn admit_main(bridge: &Bridge, command: &HostCommand) -> Result<(), HostError> {
         | HostCommand::RevokeAllowedSite { .. }
         // The room's tracked changes in a Word file: a matter, a path inside it that the host
         // resolves and refuses unless it is a `.docx`, and change ids. Writes as a restore does.
-        | HostCommand::DecideRevisions(_) => Ok(()),
+        | HostCommand::DecideRevisions(_)
+        // The pickers: a choice of a config option, which the host takes only for a model or
+        // effort option of the thread's (`turn/picks.rs`), refusing every other.
+        | HostCommand::SetConfigOption {
+            value: ConfigValue::Select(_),
+            ..
+        } => Ok(()),
         HostCommand::AnswerPermission { .. } => Err(invalid(
             "a permission is answered with answer_permission, not dispatch",
         )),
-        // A mode or option can widen what the agent may do without asking (Claude's
-        // bypassPermissions), an escalation 0001 puts behind a native dialog drawn by Rust.
-        // That path does not exist yet, and the window never sends either.
-        HostCommand::SetMode { .. } | HostCommand::SetConfigOption { .. } => Err(invalid(
-            "modes and config options are not settable from the window yet",
+        // A mode, or an option like it, can widen what the agent may do without asking
+        // (Claude's bypassPermissions), an escalation 0001 puts behind a native dialog drawn by
+        // Rust. That path does not exist yet, and the window never sends either. A model or
+        // effort option is always a choice, never on or off.
+        HostCommand::SetMode { .. } => Err(invalid("modes are not settable from the window yet")),
+        HostCommand::SetConfigOption {
+            value: ConfigValue::Boolean(_),
+            ..
+        } => Err(invalid(
+            "only the model and effort options are settable from the window, and they are choices",
         )),
         // The tool switches live in the settings window only; the main window shows the
         // tools and offers to open Settings, so it has no caller (least privilege).

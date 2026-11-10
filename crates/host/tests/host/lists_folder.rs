@@ -47,6 +47,7 @@ fn pin(matter: MatterId, pinned: bool) -> HostCommand {
         next_date: FieldChange::Keep,
         skill_packs: FieldChange::Keep,
         pinned: Some(pinned),
+        agent_prefs: FieldChange::Keep,
     }
 }
 

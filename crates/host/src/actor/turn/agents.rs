@@ -448,8 +448,8 @@ pub(super) fn on_reply(actor: &mut Actor, thread: ThreadId, id: u64, reply: Agen
     }
     match reply {
         AgentReply::Prompt { turn, result } => end::on_prompt_done(actor, thread, turn, result),
-        AgentReply::Config { ctx, result } => {
-            super::answers::on_config(actor, thread, ctx, same, result);
+        AgentReply::Config { ctx, pick, result } => {
+            super::answers::on_config(actor, thread, (ctx, pick), same, result);
         }
         AgentReply::Mode { ctx, mode, result } => {
             super::answers::on_mode(actor, thread, ctx, same, &mode, result);
@@ -479,7 +479,8 @@ pub(super) fn on_reply(actor: &mut Actor, thread: ThreadId, id: u64, reply: Agen
         AgentReply::Prepared {
             result: Ok(start),
             loaded,
-        } => session::attach(actor, thread, start, loaded),
+            picked,
+        } => session::on_prepared(actor, thread, start, loaded, &picked),
         // `Refused`: a session call's `.codex` re-check refused it, so no call was sent.
         AgentReply::Prepared {
             result: Err(error), ..
@@ -531,8 +532,9 @@ pub(super) fn run_waiting(actor: &mut Actor, thread: ThreadId, waiting: Waiting)
         Waiting::Config(ctx, option, value) => {
             super::idle::call_started(actor, thread);
             call(actor, thread, id, async move {
-                let result = client.set_config_option(&session, option, value).await;
-                AgentReply::Config { ctx, result }
+                let result = client.set_config_option(&session, option.clone(), value.clone());
+                let (pick, result) = ((option, value), result.await);
+                AgentReply::Config { ctx, pick, result }
             });
         }
         Waiting::Mode(ctx, mode) if forced && !agent::forced_ask::mode_allowed(mode.as_str()) => {

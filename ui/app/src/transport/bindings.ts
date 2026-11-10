@@ -11,8 +11,8 @@ export const commands = {
 	 *  `CreateMatter` whose folder ref this run's `pick_folder` did not issue; from the settings
 	 *  window, everything but `SetUiSettings`, `SetToolSettings`, `SetPrivacySettings`,
 	 *  `SetSkillPack`, `RefreshLimits`, `SetUpdateMode`, `CheckForUpdate` and the connector
-	 *  commands but `DismissCaseLawHint`; from `main`, `SetMode`, `SetConfigOption`,
-	 *  `SetToolSettings`, `SetPrivacySettings`, `SetUpdateMode`, `SetSkillPack` and every
+	 *  commands but `DismissCaseLawHint`; from `main`, `SetMode`, a `SetConfigOption` that is not
+	 *  a choice, `SetToolSettings`, `SetPrivacySettings`, `SetUpdateMode`, `SetSkillPack` and every
 	 *  connector command but `DismissCaseLawHint` and `RefreshBalance` (`OpenPayLink` among them;
 	 *  `src/bridge/admit.rs`).
 	 */
@@ -312,6 +312,13 @@ export type AgentNamed = {
 	agent_name: string,
 };
 
+/**
+ *  A matter's remembered picks, per agent kind: a new conversation in the matter that names no
+ *  `CreateThread::config` starts with its agent kind's picks. Serialised as a JSON object keyed
+ *  by kind, `{"claude": {"model": "opus"}}`.
+ */
+export type AgentPrefs = Partial<{ [key in AgentKind]: ConfigPicks }>;
+
 /**  An agent session started or was loaded for the thread. */
 export type AgentSessionAttached = {
 	/**  ACP's session id, a foreign attribute. */
@@ -344,6 +351,12 @@ export type AgentSummary = {
 	 *  `fake-agent`. Left out of the JSON when `None`.
 	 */
 	kind?: AgentKind,
+	/**
+	 *  Its config options as its latest session reported them (the host keeps them across
+	 *  restarts), so a new conversation can offer the model and effort before any session;
+	 *  empty, and left out of the JSON, until its first conversation started.
+	 */
+	config_options?: ConfigOption[],
 };
 
 /**  An answer or a thought, as one text. Entry id `agent_text:<message>`. */
@@ -890,6 +903,14 @@ export type ConfigOptionsReplaced = {
 	/**  The options. */
 	options: ConfigOption[],
 };
+
+/**
+ *  Values for an agent's config options: under each option's id (`ConfigOption::id`), the id
+ *  of the value to set (`ConfigChoice::value`). Select options only. At most
+ *  [`MAX_CONFIG_PICKS`] entries; [`ConfigPicks::new`] and `Deserialize` check it. Serialised as
+ *  a JSON object, `{"model": "opus", "effort": "high"}`.
+ */
+export type ConfigPicks = { [key in AgentChoiceId]: AgentChoiceId };
 
 /**  A config option's new value, matching the option's kind. */
 export type ConfigValue = 
@@ -2176,10 +2197,9 @@ export type HostCommand =
 	next_date?: Date,
 } }) & { allow_blocked_site?: never; answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; cancel_browser_install?: never; cancel_scan?: never; cancel_scheduled_update?: never; check_for_update?: never; connector?: never; create_thread?: never; decide_revisions?: never; edit_queued_prompt?: never; first_act?: never; forget_matter?: never; install_browser?: never; install_update?: never; mark_seen?: never; mark_thread_done?: never; open_matter?: never; recheck_browser_policy?: never; refresh_limits?: never; relocate_matter?: never; remove_queued_prompt?: never; remove_sandbox_setup?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; retry_protection?: never; revoke_allowed_site?: never; scan_folder?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_privacy_settings?: never; set_skill_pack?: never; set_tool_settings?: never; set_ui_settings?: never; set_update_mode?: never; snooze_thread?: never; sweep_done?: never; undo_step?: never; update_matter?: never } | 
 /**
- *  Change a matter's details. Each field: missing leaves it, `null` clears it (`client`,
- *  `next_date`, `skill_packs`: back to the global `skills.enabled`), a value sets it (`[]`
- *  for `skill_packs` means no pack for the matter). A command that changes nothing answers
- *  `Done` too.
+ *  Change a matter's details. Each field: missing leaves it, `null` clears it (`skill_packs`:
+ *  back to the global `skills.enabled`), a value sets it (`[]` for `skill_packs`: no pack
+ *  for the matter). A command that changes nothing answers `Done` too.
  */
 ({ update_matter: {
 	/**  The matter. */
@@ -2192,6 +2212,8 @@ export type HostCommand =
 	skill_packs?: PackList | null,
 	/**  Whether it is pinned to the top of the rail. */
 	pinned?: boolean,
+	/**  The picks a new conversation starts with, per agent kind (`CreateThread::config`). */
+	agent_prefs?: AgentPrefs | null,
 } }) & { allow_blocked_site?: never; answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; cancel_browser_install?: never; cancel_scan?: never; cancel_scheduled_update?: never; check_for_update?: never; connector?: never; create_matter?: never; create_thread?: never; decide_revisions?: never; edit_queued_prompt?: never; first_act?: never; forget_matter?: never; install_browser?: never; install_update?: never; mark_seen?: never; mark_thread_done?: never; open_matter?: never; recheck_browser_policy?: never; refresh_limits?: never; relocate_matter?: never; remove_queued_prompt?: never; remove_sandbox_setup?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; retry_protection?: never; revoke_allowed_site?: never; scan_folder?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_privacy_settings?: never; set_skill_pack?: never; set_tool_settings?: never; set_ui_settings?: never; set_update_mode?: never; snooze_thread?: never; sweep_done?: never; undo_step?: never } | 
 /**  The lawyer opened a matter: its `last_opened` becomes now, which orders "Recent". */
 ({ open_matter: {
@@ -2277,6 +2299,12 @@ export type HostCommand =
 	matter: MatterId,
 	/**  The agent's registry id. */
 	agent: AgentId,
+	/**
+	 *  Model and effort to start with, set after the session starts and before the first
+	 *  prompt (`model`, `thought_level` options; one the agent refuses is dropped). Missing:
+	 *  the matter's `agent_prefs` for the agent's kind, else its defaults; `{}` sets none.
+	 */
+	config?: ConfigPicks,
 } }) & { allow_blocked_site?: never; answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; cancel_browser_install?: never; cancel_scan?: never; cancel_scheduled_update?: never; check_for_update?: never; connector?: never; create_matter?: never; decide_revisions?: never; edit_queued_prompt?: never; first_act?: never; forget_matter?: never; install_browser?: never; install_update?: never; mark_seen?: never; mark_thread_done?: never; open_matter?: never; recheck_browser_policy?: never; refresh_limits?: never; relocate_matter?: never; remove_queued_prompt?: never; remove_sandbox_setup?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; retry_protection?: never; revoke_allowed_site?: never; scan_folder?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_privacy_settings?: never; set_skill_pack?: never; set_tool_settings?: never; set_ui_settings?: never; set_update_mode?: never; snooze_thread?: never; sweep_done?: never; undo_step?: never; update_matter?: never } | 
 /**  Send a prompt. Never refused because a turn is running: it is queued, sent now or steered. */
 ({ send_prompt: {
@@ -2359,7 +2387,10 @@ export type HostCommand =
 	 */
 	response: ElicitationResponse,
 } }) & { allow_blocked_site?: never; answer_permission?: never; archive_thread?: never; cancel?: never; cancel_browser_install?: never; cancel_scan?: never; cancel_scheduled_update?: never; check_for_update?: never; connector?: never; create_matter?: never; create_thread?: never; decide_revisions?: never; edit_queued_prompt?: never; first_act?: never; forget_matter?: never; install_browser?: never; install_update?: never; mark_seen?: never; mark_thread_done?: never; open_matter?: never; recheck_browser_policy?: never; refresh_limits?: never; relocate_matter?: never; remove_queued_prompt?: never; remove_sandbox_setup?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; retry_protection?: never; revoke_allowed_site?: never; scan_folder?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_privacy_settings?: never; set_skill_pack?: never; set_tool_settings?: never; set_ui_settings?: never; set_update_mode?: never; snooze_thread?: never; sweep_done?: never; undo_step?: never; update_matter?: never } | 
-/**  Set one of the agent's config options. */
+/**
+ *  Set one of the agent's config options: only a select option of category `model` or
+ *  `thought_level` (else `command.invalid`); a success keeps the pick in `agent_prefs`.
+ */
 ({ set_config_option: {
 	/**  The thread. */
 	thread: ThreadId,
@@ -3565,6 +3596,11 @@ export type MatterSummary = {
 	 *  `skills.enabled` list, and `[]` means no pack for this matter.
 	 */
 	skill_packs?: PackList,
+	/**
+	 *  The model and effort a new conversation in it starts with, per agent kind, once set
+	 *  (`UpdateMatter::agent_prefs`, or a successful `SetConfigOption` in one of its threads).
+	 */
+	agent_prefs?: AgentPrefs,
 	/**  Whether it is pinned to the top of the rail; missing reads as `false`. */
 	pinned?: boolean,
 	/**  When the lawyer last opened it (`OpenMatter`), once they have. */

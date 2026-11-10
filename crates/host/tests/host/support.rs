@@ -210,6 +210,7 @@ impl Running {
         let outcome = self.ok(HostCommand::CreateThread {
             matter,
             agent: AgentId::new(agent).unwrap(),
+            config: None,
         });
         match outcome {
             CommandOutcome::ThreadCreated { thread } => thread,

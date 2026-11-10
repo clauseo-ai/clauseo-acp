@@ -286,6 +286,9 @@ mod papers;
 #[path = "host/permissions.rs"]
 mod permissions;
 #[cfg(test)]
+#[path = "host/pickers.rs"]
+mod pickers;
+#[cfg(test)]
 #[path = "host/plan_note.rs"]
 mod plan_note;
 #[cfg(test)]

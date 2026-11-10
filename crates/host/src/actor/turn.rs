@@ -26,6 +26,7 @@ mod known;
 mod launch_checks;
 mod logout;
 mod out;
+mod picks;
 mod profile_loads;
 mod prompt;
 mod queue;

@@ -65,6 +65,7 @@ fn unknown_ids_get_unknown_codes() {
         HostCommand::CreateThread {
             matter: MatterId::new(foreign_uuid(2)).unwrap(),
             agent: AgentId::new(FAKE).unwrap(),
+            config: None,
         },
         ErrorCode::CommandUnknownMatter,
     );

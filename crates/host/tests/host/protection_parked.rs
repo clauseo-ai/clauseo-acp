@@ -28,6 +28,7 @@ fn with_no_sandbox_wired_sandbox_required_refuses_no_create_thread_and_rows_carr
     let _created = host.ok(HostCommand::CreateThread {
         matter,
         agent: AgentId::new(FAKE).unwrap(),
+        config: None,
     });
     host.shutdown();
 }

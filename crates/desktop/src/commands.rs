@@ -154,8 +154,8 @@ pub(crate) fn release_mode(env: Option<&str>, e2e: bool) -> ReleaseMode {
 /// `CreateMatter` whose folder ref this run's `pick_folder` did not issue; from the settings
 /// window, everything but `SetUiSettings`, `SetToolSettings`, `SetPrivacySettings`,
 /// `SetSkillPack`, `RefreshLimits`, `SetUpdateMode`, `CheckForUpdate` and the connector
-/// commands but `DismissCaseLawHint`; from `main`, `SetMode`, `SetConfigOption`,
-/// `SetToolSettings`, `SetPrivacySettings`, `SetUpdateMode`, `SetSkillPack` and every
+/// commands but `DismissCaseLawHint`; from `main`, `SetMode`, a `SetConfigOption` that is not
+/// a choice, `SetToolSettings`, `SetPrivacySettings`, `SetUpdateMode`, `SetSkillPack` and every
 /// connector command but `DismissCaseLawHint` and `RefreshBalance` (`OpenPayLink` among them;
 /// `src/bridge/admit.rs`).
 #[tauri::command]

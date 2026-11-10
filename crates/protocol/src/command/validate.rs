@@ -154,9 +154,11 @@ impl HostCommand {
                 checkpoint: _,
                 scope,
             } => scope.check("RestoreVersion"),
+            // The picks are checked by their types as they decode.
             Self::CreateThread {
                 matter: _,
                 agent: _,
+                config: _,
             }
             | Self::RelocateMatter {
                 matter: _,
@@ -203,6 +205,7 @@ impl HostCommand {
                 next_date: _,
                 skill_packs: _,
                 pinned: _,
+                agent_prefs: _,
             }
             | Self::OpenMatter { matter: _ }
             | Self::ForgetMatter { matter: _ }

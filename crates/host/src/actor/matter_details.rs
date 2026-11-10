@@ -1,6 +1,6 @@
-//! The matter commands of the rail: `UpdateMatter` (client, next date, skill packs, pinned),
-//! `OpenMatter` (`last_opened`) and `ForgetMatter`, and bringing a forgotten matter back when its
-//! folder is imported again.
+//! The matter commands of the rail: `UpdateMatter` (client, next date, skill packs, pinned,
+//! agent prefs), `OpenMatter` (`last_opened`) and `ForgetMatter`, and bringing a forgotten
+//! matter back when its folder is imported again.
 //!
 //! Each writes the matter's row and the command's receipt in one commit and no event: the
 //! details live on the row (store schema 2), `ListMatters` reads rows, and the reducer's matter
@@ -17,8 +17,8 @@
 use std::path::Path;
 
 use clauseo_protocol::{
-    ClientName, CommandOutcome, Date, ErrorCode, FieldChange, MatterId, MatterKind, PackList,
-    StreamId,
+    ClientName, CommandOutcome, Date, ErrorCode, FieldChange, HostCommand, MatterId, MatterKind,
+    PackList, StreamId,
 };
 use clauseo_store::MatterRow;
 
@@ -28,24 +28,28 @@ use super::{Actor, Tag, turn};
 use crate::error::Error;
 use crate::pipeline::Draft;
 
-/// What `UpdateMatter` asks.
-pub(super) struct Update {
-    pub(super) client: FieldChange<ClientName>,
-    pub(super) next_date: FieldChange<Date>,
-    pub(super) skill_packs: FieldChange<PackList>,
-    pub(super) pinned: Option<bool>,
-}
-
 /// `UpdateMatter`: the changed row and the receipt.
-pub(super) fn update_matter(actor: &mut Actor, ctx: &CommandCtx, matter: MatterId, update: Update) {
-    let done = check_skill_packs(&update.skill_packs)
+pub(super) fn update_matter(actor: &mut Actor, ctx: &CommandCtx, command: HostCommand) {
+    let HostCommand::UpdateMatter {
+        matter,
+        client,
+        next_date,
+        skill_packs,
+        pinned,
+        agent_prefs,
+    } = command
+    else {
+        return;
+    };
+    let done = check_skill_packs(&skill_packs)
         .and_then(|()| actor.check_matter(matter).map(|entry| entry.row.clone()))
         .and_then(|before| {
             let mut row = before.clone();
-            apply(&mut row.client, update.client);
-            apply(&mut row.next_date, update.next_date);
-            apply(&mut row.skill_packs, update.skill_packs);
-            if let Some(pinned) = update.pinned {
+            apply(&mut row.client, client);
+            apply(&mut row.next_date, next_date);
+            apply(&mut row.skill_packs, skill_packs);
+            apply(&mut row.agent_prefs, agent_prefs);
+            if let Some(pinned) = pinned {
                 row.pinned = pinned;
             }
             commit_row(actor, ctx, before, row)

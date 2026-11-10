@@ -32,6 +32,7 @@ use crate::matter_worker::MatterWorker;
 use crate::pipeline::{Draft, FeederTx, Pipeline, Ticket};
 use crate::snapshot::SnapshotWorker;
 
+mod agent_options;
 mod allowed;
 mod app;
 mod app_lists;
@@ -181,6 +182,8 @@ pub(crate) struct Actor {
     /// proxies' views (`allowed.rs`). Boxed, as is `blocked`, so the host thread's close future
     /// stays under clippy's `large_futures` limit on Windows.
     pub(crate) allowed: Box<allowed::AllowState>,
+    /// Each agent's config options as its latest session reported them (`agent_options.rs`).
+    pub(crate) agent_options: agent_options::AgentOptions,
     /// The settings the block list's updater reads each round, kept current (`blocklist.rs`).
     pub(crate) blocklist: Option<crate::blocklist::Live>,
     /// The limits model, its reader, timer and subscribers (`limits.rs`).
