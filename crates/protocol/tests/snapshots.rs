@@ -463,6 +463,7 @@ mod host_event {
             matter: matter_id(1),
             protection: Protection::Protected { tier: ProtectionTier::B },
         };
+        PapersChanged => papers_changed: HostEvent::PapersChanged { matter: matter_id(1) };
         ProtectionViewChanged => protection_view_changed: HostEvent::ProtectionViewChanged {
             view: ProtectionView {
                 in_progress: Some(ProtectionWork::SetUp),

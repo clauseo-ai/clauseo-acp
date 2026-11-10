@@ -199,6 +199,14 @@ pub enum HostEvent {
         /// Its protection now.
         protection: Protection,
     },
+    /// What a matter's papers hold changed since `HostQuery::ListPapers` last answered: the
+    /// background scan found tracked changes in a `.docx` the listing showed without them, or
+    /// the files changed. The app lists the papers again. App-wide, never logged and in no
+    /// stream: it reaches app subscribers only, carries no list, and a catch-up carries none.
+    PapersChanged {
+        /// The matter.
+        matter: MatterId,
+    },
     /// This computer's protection view changed (decision record 0051): the sandbox's detection,
     /// the set-up work in progress, `retry_asks_admin`, or either protection setting. The whole
     /// view after the change, as `HostQuery::Protection` answers it. App-wide, never logged,

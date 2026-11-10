@@ -129,6 +129,7 @@ pub(super) async fn open(
         scan_walk: parts.scan_walk,
         stats_running: std::sync::Arc::default(),
         files: super::papers::FileRefs::default(),
+        paper_scans: super::papers::scan::PaperScans::default(),
         next_sub: 0,
         work: Work::default(),
         phase: HostPhase::Starting(ready),

@@ -51,7 +51,6 @@ import { LimitsContext, limitsStoreOf } from "../store/limits.ts";
 import { createViewStore } from "../store/store.ts";
 import type { HostTransport } from "../transport/host-transport.ts";
 import type { MatterId } from "../transport/protocol.ts";
-import type { Papers, PapersHost } from "./host-next.ts";
 import type { AgentName } from "@clauseo/components/lib/words-errors.ts";
 import { kindOf, knownPlan } from "./agent.ts";
 import { AgentPlanContext, useThreadAgentName } from "./thread/agent-plan.ts";
@@ -63,6 +62,7 @@ import { handWaits } from "./triage.ts";
 import { LivePlan } from "./limits/live-plan.tsx";
 import { Matters, type MattersView } from "./matters.ts";
 import { AnswerHost, quietly, type ListedPapers } from "./open.ts";
+import { usePapers } from "./use-papers.ts";
 import { LocateFolderContext, type ActRefusals } from "./act-refusals.ts";
 import { LocateGate, MovedFolder } from "./moved.tsx";
 import { usePickWait } from "./picker-wait.ts";
@@ -106,25 +106,6 @@ const SacNote = lazy(() =>
 const loadNewMatter = () => late(import("./new-matter.tsx"));
 const NewMatter = lazy(() => loadNewMatter().then((m) => ({ default: m.NewMatter })));
 const preloadNewMatter = () => void loadNewMatter();
-
-/** The matter's papers from H8, or null: before they arrive, without H8, or when the read fails. */
-function usePapers(next: PapersHost | null, matter: MatterId | null): ListedPapers {
-  const [listed, setListed] = useState<{ matter: MatterId; papers: Papers } | null>(null);
-  useEffect(() => {
-    if (next === null || matter === null) return;
-    let live = true;
-    next.listPapers(matter).then(
-      (papers) => {
-        if (live) setListed({ matter, papers });
-      },
-      (error: unknown) => console.warn(`list_papers failed: ${JSON.stringify(error)}`),
-    );
-    return () => {
-      live = false;
-    };
-  }, [next, matter]);
-  return listed !== null && listed.matter === matter ? listed : null;
-}
 
 /** The answers' MarkdownHost (open.ts): one object per transport and matter, so a new papers list or a streaming row
  * never makes a new one; the wall's papers reach it as they arrive. */
@@ -276,7 +257,7 @@ function RoomFrame({
     view.matters.every((m) => m.kind === "scratch");
   // until the list says welcome or room, the room is unseen and the page's mark stands (deciding.ts)
   const deciding = useDeciding(setup, view.phase);
-  const listed = usePapers(matters.next.papers, open?.matter ?? null);
+  const listed = usePapers(matters.next.papers, matters.next.app, open?.matter ?? null);
   const papers = listed?.papers ?? null;
   const answers = useAnswerHost(transport, open?.matter ?? null, listed, matters.refusals);
   // the open matter's refused open (an answer's paper, Find's), on the composer's line; Locate

@@ -516,6 +516,7 @@ fn whole(event: &HostEvent) -> bool {
         | HostEvent::CaseLawHint { .. }
         | HostEvent::ProtectionChanged { .. }
         | HostEvent::ProtectionViewChanged { .. }
+        | HostEvent::PapersChanged { .. }
         | HostEvent::SiteBlocked { .. } => false,
     }
 }

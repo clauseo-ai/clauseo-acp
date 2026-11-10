@@ -1,0 +1,123 @@
+// @vitest-environment happy-dom
+// usePapers (use-papers.ts): the wall's papers are listed once when a matter opens, again on each `papers_changed` for
+// that matter (the host's tracked-changes scan found more), never for another matter's, and an answer that comes back
+// after a newer one is dropped.
+import { act, useEffect } from "react";
+import { createRoot, type Root } from "react-dom/client";
+import { afterEach, expect, test } from "vitest";
+import type { MatterId } from "../transport/protocol.ts";
+import type { AppEvent, AppHost, Papers, PapersHost } from "./host-next.ts";
+import type { ListedPapers } from "./open.ts";
+import { usePapers } from "./use-papers.ts";
+
+(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+
+const A = "01900000-0000-7000-8000-00000000000a" as MatterId;
+const B = "01900000-0000-7000-8000-00000000000b" as MatterId;
+
+/** A listing with one paper whose `tracked` says whether its tile offers Tracked changes. */
+const papers = (tracked: boolean): Papers =>
+  ({
+    papers: [
+      {
+        file: "01900000-0000-7000-8000-0000000000f1",
+        path: "lease.docx",
+        size: 10,
+        modified: 0,
+        tracked,
+      },
+    ],
+    skipped: [],
+    unread: [],
+    truncated: false,
+  }) as unknown as Papers;
+
+/** A papers host whose answers the test settles, one per call, in any order. */
+function fakePapers() {
+  const calls: { matter: MatterId; answer: (papers: Papers) => void }[] = [];
+  const host: PapersHost = {
+    listPapers: (matter) =>
+      new Promise<Papers>((resolve) => {
+        calls.push({ matter, answer: resolve });
+      }),
+  };
+  return { host, calls };
+}
+
+/** An app host the test plays events on. */
+function fakeApp() {
+  const listeners = new Set<(event: AppEvent) => void>();
+  const app: AppHost = {
+    subscribeApp: (listener) => {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+  };
+  const play = (event: AppEvent) => {
+    for (const listener of listeners) listener(event);
+  };
+  return { app, play, listeners };
+}
+
+let root: Root | null = null;
+afterEach(() => {
+  act(() => root?.unmount());
+  root = null;
+  document.body.replaceChildren();
+});
+
+/** Mounts usePapers over the fakes; `seen()` is its latest answer. */
+function mount(host: PapersHost, app: AppHost, matter: MatterId) {
+  const seen: { latest: ListedPapers } = { latest: null };
+  function Probe() {
+    const listed = usePapers(host, app, matter);
+    useEffect(() => {
+      seen.latest = listed;
+    }, [listed]);
+    return null;
+  }
+  const container = document.createElement("div");
+  document.body.append(container);
+  root = createRoot(container);
+  act(() => root?.render(<Probe />));
+  return { seen: () => seen.latest };
+}
+
+const tracked = (listed: ListedPapers) => listed?.papers.papers[0]?.tracked;
+
+test("papers_changed for the open matter lists the papers again", async () => {
+  const { host, calls } = fakePapers();
+  const { app, play } = fakeApp();
+  const probe = mount(host, app, A);
+  expect(calls.map((call) => call.matter)).toEqual([A]);
+  await act(async () => calls[0]?.answer(papers(false)));
+  expect(tracked(probe.seen())).toBe(false);
+
+  act(() => play({ papers_changed: { matter: B } }));
+  expect(calls).toHaveLength(1);
+  act(() => play({ papers_changed: { matter: A } }));
+  expect(calls.map((call) => call.matter)).toEqual([A, A]);
+  await act(async () => calls[1]?.answer(papers(true)));
+  expect(tracked(probe.seen())).toBe(true);
+});
+
+test("an answer older than the one shown is dropped", async () => {
+  const { host, calls } = fakePapers();
+  const { app, play } = fakeApp();
+  const probe = mount(host, app, A);
+  act(() => play({ papers_changed: { matter: A } }));
+  expect(calls).toHaveLength(2);
+  await act(async () => calls[1]?.answer(papers(true)));
+  await act(async () => calls[0]?.answer(papers(false)));
+  expect(tracked(probe.seen())).toBe(true);
+});
+
+test("unmounting stops listening", () => {
+  const { host } = fakePapers();
+  const { app, listeners } = fakeApp();
+  mount(host, app, A);
+  expect(listeners.size).toBe(1);
+  act(() => root?.unmount());
+  root = null;
+  expect(listeners.size).toBe(0);
+});

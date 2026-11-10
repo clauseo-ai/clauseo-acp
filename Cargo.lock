@@ -1115,6 +1115,7 @@ dependencies = [
  "futures",
  "getrandom 0.3.4",
  "libc",
+ "memchr",
  "nix",
  "proptest",
  "quick-xml",

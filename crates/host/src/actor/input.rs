@@ -251,6 +251,8 @@ pub(crate) enum Input {
     FolderStates(Vec<(MatterId, String, clauseo_protocol::FolderState)>),
     /// A folder scan's thread or throttle timer.
     Scan(super::scan::ScanInput),
+    /// A matter's papers scan read a batch (`papers/scan.rs`).
+    PaperMarks(super::papers::scan::Batch),
     /// The Scratch matter's folder scan answered, or start-up's wait for it ended.
     Scratch(super::scratch::ScratchInput),
     /// The Documents lookup answered, or its bound passed (`documents.rs`).
@@ -308,6 +310,7 @@ impl std::fmt::Debug for Input {
             Self::Limits(_) => "Limits",
             Self::FolderStates(_) => "FolderStates",
             Self::Scan(_) => "Scan",
+            Self::PaperMarks(_) => "PaperMarks",
             Self::Scratch(_) => "Scratch",
             Self::Documents(_) => "Documents",
             Self::NewFolder(_) => "NewFolder",
