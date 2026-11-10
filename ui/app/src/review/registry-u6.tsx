@@ -13,6 +13,7 @@ import type { Entry } from "./entry.ts";
 import type { PaperSummary } from "../room/host-next.ts";
 import { MATTER, roomHost, threadHost } from "./hosts.ts";
 import { RoomOver } from "./states.tsx";
+import { PAPERS_LIVE } from "./registry-papers-live.tsx";
 import { matterWords, threadWords } from "./words.ts";
 import { agentText, step, THREAD, userMessage, uuid } from "../testing/stream-script.ts";
 import { jumpTo } from "../room/thread/jump-entry.ts";
@@ -171,4 +172,6 @@ export const U6: Entry[] = [
     screen: "matters/find-jump",
     render: jumped,
   },
+  // The wall following the open matter's folder (0055): PL-01 to PL-03.
+  ...PAPERS_LIVE,
 ];
