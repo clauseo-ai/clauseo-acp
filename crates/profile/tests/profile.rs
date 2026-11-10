@@ -486,8 +486,10 @@ fn agent_browser_rules_are_the_hosts_per_session() {
     ] {
         assert!(allowed.iter().any(|a| a == rule), "{rule}");
     }
-    // eval runs page JavaScript: it asks each time.
-    assert!(!allowed.iter().any(|a| a == "Bash(agent-browser eval:*)"));
+    // eval runs page JavaScript, and pdf and download write to a path the agent names: each asks.
+    let rules = ["eval", "pdf", "download"].map(|sub| format!("Bash(agent-browser {sub}:*)"));
+    let none = rules.iter().all(|rule| !allowed.contains(rule));
+    assert!(none, "{rules:?}");
     assert_eq!(
         clauseo_profile::claude::agent_browser_ask().collect::<Vec<_>>(),
         [
