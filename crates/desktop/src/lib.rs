@@ -171,7 +171,7 @@ use quit::{Exit, SetupStop};
 use rust_only::PluginRustOnly;
 use tauri::webview::PageLoadEvent;
 use tauri::{App, AppHandle, Manager, RunEvent, Runtime, WebviewUrl, WebviewWindowBuilder};
-pub(crate) use window_events::{follows_limits, on_window_event, raise_main_window};
+pub(crate) use window_events::{follows_limits, on_any_window_event, raise_main_window};
 #[cfg(windows)]
 pub use window_size::ground_in_env;
 
@@ -288,6 +288,7 @@ pub fn run() -> tauri::Result<()> {
             commands::count_ui,
             commands::setup,
             commands::quit_app,
+            commands::open_privacy_settings,
             commands::page_marks,
             #[cfg(feature = "e2e")]
             e2e::perf_channel_bytes,
@@ -296,11 +297,7 @@ pub fn run() -> tauri::Result<()> {
             #[cfg(feature = "marks")]
             marks::marks_finish,
         ]))
-        // The task is short and bounded (one host command), like the bridge's others.
-        .on_window_event(|window, event| {
-            counts::on_window_event(window, event);
-            drop(on_window_event(window, event));
-        })
+        .on_window_event(on_any_window_event)
         .setup(|app| {
             // A quit signal from here on stops the agents as the normal quit does.
             #[cfg(unix)]

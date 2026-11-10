@@ -176,5 +176,27 @@
     "status": "provisional",
     "at": "2026-11-07",
     "by": "app track (provisional; Rohan batch review)"
+  },
+  "FR-22": {
+    "en": "Open Privacy settings",
+    "hi": "गोपनीयता सेटिंग्स खोलें",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-10",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-10",
+    "by": "app track (provisional; orchestrator settled the words 2026-11-10, copy review pending)",
+    "note": "macOS only: the button under matter.folder_permission's stop; it opens System Settings at Privacy & Security, Files and Folders (the desktop's open_privacy_settings)"
+  },
+  "FR-23": {
+    "en": "Turn on access for Clauseo, then ask again.",
+    "hi": "Clauseo के लिए एक्सेस चालू करें, फिर दोबारा पूछें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-10",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-10",
+    "by": "app track (provisional; orchestrator settled the words 2026-11-10, copy review pending)",
+    "note": "macOS only: the line under Open Privacy settings"
   }
 }

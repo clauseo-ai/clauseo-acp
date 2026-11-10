@@ -1,18 +1,27 @@
 // Folder rights' copy review entries (FR-01 to FR-15, FR-20, FR-21): the room's notice for a matter folder Clauseo can't
 // fence or couldn't check, the text it opens for IT, the toolbar's Not protected, the reason on an Editing files card,
 // in the real room over FakeTransport, the host's folder_support set on the one matter; and New matter's warning for
-// a folder picked, the host's FolderSupport answering. Apart from registry.tsx to keep that file under the size
+// a folder picked, the host's FolderSupport answering; and on the Mac, Open Privacy settings and its line under a turn
+// macOS kept out of the matter's folder (FR-22, FR-23). Apart from registry.tsx to keep that file under the size
 // limit. The mode picker's off options (FR16, FR17) wait on a mode picker.
 import type { ReactNode } from "react";
 import type { Lang } from "@clauseo/components/lib/display.ts";
 import { tbt } from "@clauseo/components/lib/words-toolbar.ts";
-import { TURN, uuid } from "../testing/stream-script.ts";
+import { PRIVACY_KEYS } from "@clauseo/components/lib/words-errors.ts";
+import { step, TURN, userMessage, uuid } from "../testing/stream-script.ts";
 import { FakeTransport } from "../transport/fake-transport.ts";
 import type { FolderSupportKind, ViewEntry } from "../transport/protocol.ts";
 import type { Entry } from "./entry.ts";
 import { MATTER, NEW_MATTER, roomHost, threadHost, type Step } from "./hosts.ts";
 import { RoomAfter, RoomFocusing, RoomOver, RoomPressing } from "./states.tsx";
-import { folderCardWords, folderWords as w, matterWords, uiWords, type WordsRef } from "./words.ts";
+import {
+  errorWords,
+  folderCardWords,
+  folderWords as w,
+  matterWords,
+  uiWords,
+  type WordsRef,
+} from "./words.ts";
 
 /** Several lines of one id, joined with " / " as the approved page writes them. */
 const joined = (parts: readonly WordsRef[]): WordsRef => ({
@@ -61,6 +70,15 @@ const entry = (id: string, words: WordsRef, render: () => ReactNode): Entry => (
   screen: "room/folder-rights",
   render,
 });
+
+/** A turn macOS kept out of the matter's folder: the question, and its stop with matter.folder_permission. */
+const kept = () =>
+  threadHost({
+    entries: [
+      userMessage(5, 1, "What does clause nine of the lease say about notice?"),
+      step(9, { stop: "failed", failure: "matter.folder_permission" }),
+    ],
+  });
 
 /** A pending Editing files card in a folder whose permissions can't change. */
 const EDITING: ViewEntry[] = [
@@ -208,4 +226,7 @@ export const FOLDER_RIGHTS: Entry[] = [
   entry("FR-21", matterWords("Opening the folder picker…"), () => (
     <RoomAfter host={holding} steps={PICKED} />
   )),
+  // matter.folder_permission's stop on the Mac (room/thread/privacy-settings.tsx): the button, then the line under it
+  entry("FR-22", errorWords(PRIVACY_KEYS.button), () => <RoomOver host={kept} />),
+  entry("FR-23", errorWords(PRIVACY_KEYS.line), () => <RoomOver host={kept} />),
 ];

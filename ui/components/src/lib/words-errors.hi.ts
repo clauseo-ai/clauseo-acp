@@ -67,6 +67,9 @@ export const HI = {
     "इस फ़ोल्डर में इस मामले की Clauseo फ़ाइल नहीं है। आगे बढ़ने के लिए मामले का फ़ोल्डर ढूँढें।",
   // provisional: a specialist's draft, pending the Hindi-speaking lawyer's review (U3-err-matter.folder_permission)
   "Clauseo needs permission to open this folder.": "Clauseo को यह फ़ोल्डर खोलने की अनुमति चाहिए।",
+  // provisional, as above: the Open Privacy settings button under it on the Mac, and its line (PRIVACY_KEYS)
+  "Open Privacy settings": "गोपनीयता सेटिंग्स खोलें",
+  "Turn on access for Clauseo, then ask again.": "Clauseo के लिए एक्सेस चालू करें, फिर दोबारा पूछें।",
   "A whole drive, your home folder or a system folder can't be a matter.":
     "पूरी ड्राइव, आपका होम फ़ोल्डर या कोई सिस्टम फ़ोल्डर मामला नहीं बन सकता।",
   "This matter's folder holds a .codex folder. Rename or remove it to use ChatGPT here.":

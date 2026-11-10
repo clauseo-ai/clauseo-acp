@@ -200,6 +200,20 @@ pub(crate) fn open_url_unconfirmed(opener: &dyn Opener, url: &str) -> Result<(),
     opener.open_url(&link.url)
 }
 
+/// macOS's Files and Folders pane in System Settings' Privacy & Security.
+pub(crate) const PRIVACY_FILES_AND_FOLDERS: &str =
+    "x-apple.systempreferences:com.apple.preference.security?Privacy_FilesAndFolders";
+
+/// `open_privacy_settings`: opens [`PRIVACY_FILES_AND_FOLDERS`] when `mac`, and nothing else, so
+/// the page can open no other URL with it. Off macOS it opens nothing and is `command.invalid`;
+/// the page shows its button on macOS only.
+pub(crate) fn open_privacy_settings(opener: &dyn Opener, mac: bool) -> Result<(), HostError> {
+    if !mac {
+        return Err(invalid("the Privacy settings pane is macOS's"));
+    }
+    opener.open_url(PRIVACY_FILES_AND_FOLDERS)
+}
+
 /// `open_external` for a checked `link`: asks the lawyer in `language`, through `gate` (one
 /// confirm at a time, none for [`AFTER_DECLINE`] after a decline: `command.conflict`), and
 /// opens it. Declined, nothing opens and the call fails with `transport.unauthorized`.

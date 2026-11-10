@@ -79,6 +79,7 @@ export type FakeCall =
   | FakeChooserCall
   | { call: "open_external"; url: string }
   | { call: "quit_app" }
+  | { call: "open_privacy_settings" }
   | { call: "open_file"; file: FileRefId }
   | { call: "reveal"; target: RevealTarget }
   | { call: "open_settings"; section: SettingsSection | null }
@@ -126,6 +127,8 @@ export type FakeHost = FakeDisplayHost & {
   openExternal?: (url: string) => void | Promise<void>;
   /** Answer `quitApp`; throwing refuses. Without one the quit is accepted and nothing ends. */
   quitApp?: () => void | Promise<void>;
+  /** Answer `openPrivacySettings`; throwing refuses. Without one the pane opens. */
+  openPrivacySettings?: () => void | Promise<void>;
   openFile?: (file: FileRefId) => OpenedFile | void | Promise<OpenedFile | void>;
   reveal?: (target: RevealTarget) => void | Promise<void>;
   /** With it, the fake has the settings window (`openSettings`), and this answers each open; throwing refuses. Without
@@ -541,6 +544,11 @@ export class FakeTransport implements HostTransport, NextHostSource, LimitsSourc
   async quitApp(): Promise<void> {
     this.calls.push({ call: "quit_app" });
     await this.#answer(() => this.host.quitApp?.());
+  }
+
+  async openPrivacySettings(): Promise<void> {
+    this.calls.push({ call: "open_privacy_settings" });
+    await this.#answer(() => this.host.openPrivacySettings?.());
   }
 
   async openFile(file: FileRefId): Promise<OpenedFile> {

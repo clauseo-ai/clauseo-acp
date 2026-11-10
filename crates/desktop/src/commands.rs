@@ -30,7 +30,7 @@ use crate::smart_app_control::SmartAppControl;
 /// The command names, in the order `build.rs` and `capabilities/main.json` list them. A test
 /// checks they, `lib.rs`'s handler and the bindings agree.
 #[cfg(test)]
-pub(crate) const COMMANDS: [&str; 24] = [
+pub(crate) const COMMANDS: [&str; 25] = [
     "dispatch",
     "query",
     "open_stream",
@@ -54,6 +54,7 @@ pub(crate) const COMMANDS: [&str; 24] = [
     "count_ui",
     "setup",
     "quit_app",
+    "open_privacy_settings",
     "page_marks",
 ];
 
@@ -411,6 +412,20 @@ pub(crate) async fn quit_app<R: Runtime>(app: AppHandle<R>) -> Result<(), HostEr
     crate::ipc::timed("quit_app", async {
         app.exit(0);
         Ok(())
+    })
+    .await
+}
+
+/// Opens macOS's Files and Folders privacy pane (`open::PRIVACY_FILES_AND_FOLDERS`), for the
+/// Open Privacy settings button under `matter.folder_permission`. No arguments: the URL is fixed
+/// here, so the page opens nothing else with it. `command.invalid` off macOS. Granted to
+/// `main` only.
+#[tauri::command]
+#[cfg_attr(test, specta::specta)]
+pub(crate) async fn open_privacy_settings<R: Runtime>(app: AppHandle<R>) -> Result<(), HostError> {
+    crate::ipc::timed("open_privacy_settings", async {
+        let mac = cfg!(target_os = "macos");
+        crate::open::open_privacy_settings(&NativeOpener::new(app), mac)
     })
     .await
 }

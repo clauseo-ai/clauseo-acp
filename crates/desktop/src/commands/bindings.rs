@@ -47,6 +47,7 @@ fn with_commands(builder: tauri_specta::Builder<tauri::Wry>) -> tauri_specta::Bu
             count_ui,
             setup::<tauri::Wry>,
             quit_app::<tauri::Wry>,
+            open_privacy_settings::<tauri::Wry>,
             page_marks,
         ])
         .constant(
