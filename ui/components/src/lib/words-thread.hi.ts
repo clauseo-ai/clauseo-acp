@@ -161,6 +161,9 @@ export const HI = {
   "Not every file in this folder is listed.": "इस फ़ोल्डर की सभी फ़ाइलें सूची में नहीं हैं।",
   // the plan in the status line, for a plan other than Claude
   "Uses your {name} plan": "आपके {name} प्लान का उपयोग करता है",
+  // the agent's own model and effort on the status line (PK): each menu's title, and its trigger's name before the value
+  Model: "मॉडल",
+  Effort: "प्रयास",
   // empty states
   "Clauseo has read this matter's {n} papers.": "Clauseo ने इस मामले के {n} दस्तावेज़ पढ़ लिए हैं।",
   "Ask the first question below. Each answer cites the paper and page it relies on.":
