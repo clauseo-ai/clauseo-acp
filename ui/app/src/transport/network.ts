@@ -30,7 +30,11 @@ export function watchNetwork(
     lastSent.set(transport, online);
     transport
       .dispatch({ command_id: crypto.randomUUID(), command: { set_network: { online } } })
-      .catch((error: unknown) => console.debug(`set_network failed: ${JSON.stringify(error)}`));
+      .catch((error: unknown) => {
+        // Forget it, so the next change or mount sends again (unless a later value went out meanwhile).
+        if (lastSent.get(transport) === online) lastSent.delete(transport);
+        console.debug(`set_network failed: ${JSON.stringify(error)}`);
+      });
   };
   const offline = () => report(false);
   const online = () => report(true);
