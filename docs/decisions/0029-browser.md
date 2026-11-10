@@ -1129,6 +1129,9 @@ listeners alone, so the browser claims outside it: `ports::claim_browser_port` f
 stream ports, `ports::claim_browser_port_at` for the daemon's, which takes any port of 49152 to
 65534 that isn't held. Nearly every draw now claims; the 200,000-draw bound stays.
 
+Amended 2026-11-08 (ports 300): tier B's range is now 46100 to 46399; the browser's claims stay
+outside it, as above.
+
 **Missing sidecars.** The same prep checks that the browser entry's `clauseo-mcp` (its command)
 and agent-browser (its `--agent-browser` argument) are files. A development build has no
 agent-browser: a missing one leaves the browser out with `BrowserNotInstalled` and a log line

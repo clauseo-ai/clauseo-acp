@@ -179,7 +179,7 @@ fn two_sessions_get_distinct_ports_and_folders_and_drop_frees_them() {
 
 /// No browser claim lands in tier B's range (S15 PR7), where every pool user's static permit
 /// reaches: Chrome's debugging port and the stream port of many sessions held at once. Linux
-/// hands out ports in 46100-46199 from its ephemeral range, so a claim there must be asked again.
+/// hands out ports in 46100-46399 from its ephemeral range, so a claim there must be asked again.
 #[cfg(unix)]
 #[test]
 fn browser_sessions_never_claim_a_port_in_tier_b_s_range() {

@@ -97,7 +97,11 @@ pub fn rules(ns: &Namespace, pool: &[Sid]) -> Vec<RuleSpec> {
         ),
         rule(
             "block_loopback_tcp",
-            "Block Loopback TCP Outside 46100-46199",
+            &format!(
+                "Block Loopback TCP Outside {}-{}",
+                TIER_B_PORTS.start(),
+                TIER_B_PORTS.end()
+            ),
             Direction::Out,
             RuleProtocol::Tcp,
             LOOPBACK_ADDRESSES,

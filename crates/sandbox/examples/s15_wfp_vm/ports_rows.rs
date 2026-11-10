@@ -5,7 +5,7 @@
 //! IPv6 range apart first and put it back after:
 //!
 //! ```text
-//! netsh int ipv6 set dynamicport tcp start=40000 num=10000   (elevated; overlaps 46100-46199)
+//! netsh int ipv6 set dynamicport tcp start=40000 num=10000   (elevated; overlaps 46100-46399)
 //! s15_wfp_vm.exe ports                                        (does WMI report 40000-49999?)
 //! netsh int ipv6 set dynamicport tcp start=49152 num=16384   (elevated; the default again)
 //! ```

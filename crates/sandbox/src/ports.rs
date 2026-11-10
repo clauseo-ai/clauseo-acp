@@ -24,7 +24,7 @@
 //! again for the life of the process. The host's tree kill is `killpg`, which misses a jailed
 //! child that called `setsid`; that child keeps its Seatbelt rules, and they still allow the
 //! port. A port handed to the next session would then reach that child. Windows frees the port
-//! on drop: its range is 100 ports, and its tree kill is a Job Object, so nothing survives it.
+//! on drop: its range is 300 ports, and its tree kill is a Job Object, so nothing survives it.
 
 use std::collections::BTreeSet;
 use std::io;
@@ -34,14 +34,15 @@ use std::net::{Ipv4Addr, SocketAddr};
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
 /// The loopback ports tier B's listeners take on Windows, and the only ones set-up's static
-/// permits open to a pool user (S15 PR7). Below 49152, where Windows' dynamic range starts by
-/// default, so the OS never hands them to another program's port-0 bind; clear of the
-/// listeners known to sit below it (`WinRM` 47001, the `ASP.NET` state service 42424,
-/// `EtherNet/IP` 44818, `BACnet` 47808, SQL Server's browser 1434) and of any port IANA
-/// registers. Set-up and
-/// every tier-B launch refuse a machine whose dynamic range, or whose excluded port ranges
-/// (Hyper-V, WSL, Docker), overlap it (`wfp::check_ports`).
-pub const TIER_B_PORTS: std::ops::RangeInclusive<u16> = 46100..=46199;
+/// permits open to a pool user, every port of it to every pool user (S15 PR7). Below 49152,
+/// where Windows' dynamic range starts by default, so the OS never hands them to another
+/// program's port-0 bind; clear of the listeners known to sit below it (`WinRM` 47001, the
+/// `ASP.NET` state service 42424, `EtherNet/IP` 44818, `BACnet` 47808, SQL Server's browser
+/// 1434). 300 ports, sized for about 60 tier-B sessions at once, each binding about two (the
+/// proxy's agent listener and the R24 relay). Set-up and every tier-B launch refuse a machine whose
+/// dynamic range, or whose excluded port ranges (Hyper-V, WSL, Docker), overlap it
+/// (`wfp::check_ports`).
+pub const TIER_B_PORTS: std::ops::RangeInclusive<u16> = 46100..=46399;
 
 /// The ports claimed now, by live [`PortClaim`]s.
 static CLAIMED: Mutex<BTreeSet<u16>> = Mutex::new(BTreeSet::new());

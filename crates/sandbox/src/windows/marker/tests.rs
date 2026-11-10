@@ -74,7 +74,24 @@ fn a_version_1_marker_is_outdated() {
         state_of(found, &lawyer, &records),
         SetupState::Outdated {
             found: 1,
-            current: 2
+            current: SETUP_VERSION
+        }
+    );
+}
+
+#[test]
+fn a_version_2_marker_is_outdated_so_set_up_runs_again() {
+    // Version 2's permits open 46100-46199 and have no slot for the wider range: stale.
+    let temp = TempDir::new("marker-v2");
+    write(temp.path(), &marker(2, LAWYER)).unwrap();
+    let lawyer = sid(LAWYER);
+    let found = read(temp.path(), &lawyer);
+    assert_eq!(found, MarkerState::Older { found: 2 });
+    assert_eq!(
+        state_of(found, &lawyer, &Fake::ready()),
+        SetupState::Outdated {
+            found: 2,
+            current: 3
         }
     );
 }
@@ -105,12 +122,12 @@ fn a_newer_or_broken_marker_is_not_current() {
     let fields = format!(r#""user_sid":"{LAWYER}","group_sid":"{GROUP}","set_up_at":1"#);
     for broken in [
         "not json".to_owned(),
-        r#"{"version":2,"user_sid":"BA"}"#.to_owned(),
-        format!(r#"{{"version":2,"user_sid":"{LAWYER}"}}"#),
+        r#"{"version":3,"user_sid":"BA"}"#.to_owned(),
+        format!(r#"{{"version":3,"user_sid":"{LAWYER}"}}"#),
         // Version 1's single account under version 2.
-        format!(r#"{{"version":2,{fields},"sandbox_sid":"{SB01}"}}"#),
-        format!(r#"{{"version":2,{fields},"pool":["BA"]}}"#),
-        format!(r#"{{"version":2,{fields},"pool":["{SB01}"],"extra":true}}"#),
+        format!(r#"{{"version":3,{fields},"sandbox_sid":"{SB01}"}}"#),
+        format!(r#"{{"version":3,{fields},"pool":["BA"]}}"#),
+        format!(r#"{{"version":3,{fields},"pool":["{SB01}"],"extra":true}}"#),
     ] {
         temp.file(&file, &broken);
         let found = read(temp.path(), &sid(LAWYER));
@@ -122,7 +139,7 @@ fn a_newer_or_broken_marker_is_not_current() {
     // The same fields with a pool parse.
     temp.file(
         &file,
-        &format!(r#"{{"version":2,{fields},"pool":["{SB01}"]}}"#),
+        &format!(r#"{{"version":3,{fields},"pool":["{SB01}"]}}"#),
     );
     assert!(matches!(
         read(temp.path(), &sid(LAWYER)),

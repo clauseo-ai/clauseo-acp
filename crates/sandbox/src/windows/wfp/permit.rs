@@ -1,6 +1,6 @@
 //! A tier-B launch's network check (S15 PR7): set-up's filters are read as the desktop user
 //! (set-up's read-only grants) and checked ([`check_setup`]) before the agent starts. Nothing is
-//! added: the static permits set-up wrote open 46100-46199 to each pool user, and the
+//! added: the static permits set-up wrote open 46100-46399 to each pool user, and the
 //! listeners' per-launch secrets keep matters apart there.
 
 use super::check::{NetworkGap, check_setup};
@@ -15,7 +15,7 @@ use crate::{Error, Policy};
 ///
 /// Fails closed with [`Error::NetworkUnfiltered`]: set-up's objects missing, changed,
 /// unreadable, joined by a filter set-up didn't write, or not covering `user`
-/// (`sandbox.setup_required`); `Loopback::Any`, a port outside 46100-46199, or WFP not
+/// (`sandbox.setup_required`); `Loopback::Any`, a port outside 46100-46399, or WFP not
 /// answering (`agent.launch_failed`). The launch must not start the agent then.
 pub fn check_launch(user: &Sid, policy: &Policy) -> Result<(), Error> {
     let ports = permit_ports(policy).map_err(unfiltered)?;
