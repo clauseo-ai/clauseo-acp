@@ -5,9 +5,9 @@
 //! Contract:
 //! - Two windows, both built in code (`tauri.conf.json` has none): `main` at setup, and
 //!   `settings` on `open_settings` or, on the Mac, the app menu's "Settings…" on Cmd+,
-//!   (`settings_window.rs`, `docs/decisions/0028-settings-window.md`). `settings` is made on
-//!   open and destroyed on close; a window's destruction drops its stream, and `main`'s
-//!   destroys `settings`, so closing `main` still ends the app.
+//!   (`menu.rs`, `settings_window.rs`, `docs/decisions/0028-settings-window.md`).
+//!   `settings` is made on open and destroyed on close; a window's destruction drops its stream,
+//!   and `main`'s destroys `settings`, so closing `main` still ends the app.
 //! - Setup opens the window first, then starts the host on a thread of its own
 //!   (`host_start.rs`), so the webview never waits for the store; a command sent before the host
 //!   is ready waits for it, and after a failed start gets that start's error. That thread starts
@@ -124,6 +124,8 @@ mod jailed;
 mod machine_memory;
 #[cfg(feature = "marks")]
 mod marks;
+#[cfg(any(test, target_os = "macos"))]
+mod menu;
 mod native_mark;
 mod navigation;
 mod open;
@@ -226,12 +228,10 @@ pub fn run() -> tauri::Result<()> {
     // Where the quit stands (quit.rs), read by the run loop and the second start's callback.
     let exit = Arc::new(Exit::default());
     let launch_exit = Arc::clone(&exit);
-    // The Mac's app menu, with "Settings…" (settings_window.rs). Windows and Linux get none: a
-    // menu would be a bar on the undecorated window.
+    // The Mac's menu bar (menu.rs). Windows and Linux get none: a menu would be a bar on the
+    // undecorated window.
     #[cfg(target_os = "macos")]
-    let builder = builder
-        .menu(settings_window::app_menu)
-        .on_menu_event(|app, event| settings_window::on_menu_event(app, event.id().as_ref()));
+    let builder = menu::on_builder(builder);
     let builder = builder
         // First, so a second launch ends before any other plugin starts.
         .plugin_rust_only(tauri_plugin_single_instance::init(

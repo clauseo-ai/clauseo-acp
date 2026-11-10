@@ -13,8 +13,20 @@ export function isFindKey(e: KeyboardEvent, mac: boolean): boolean {
   return /^[a-z]$/.test(key) ? key === "k" : e.code === "KeyK";
 }
 
-/** On Find's key, focuses the field `field` names; where it can't take focus (the rail folded away), `openRail` opens
- * the rail first. Nothing where the room shows no Find (no matters, or Versions in the rail's place). */
+/** Focuses the field `field` names; where it can't take focus (the rail folded away), `openRail` opens the rail
+ * first. False where the room shows no Find (no matters, or Versions in the rail's place). The native menu's Find
+ * (room-commands.ts) comes here too. */
+export function focusFind(field: () => HTMLElement | null, openRail: () => void): boolean {
+  const input = field();
+  if (input === null) return false;
+  input.focus();
+  if (document.activeElement === input) return true;
+  flushSync(openRail);
+  field()?.focus();
+  return true;
+}
+
+/** On Find's key, focuses Find (focusFind). Nothing where the room shows no Find. */
 export function useFindKey(
   field: () => HTMLElement | null,
   openRail: () => void,
@@ -22,14 +34,9 @@ export function useFindKey(
 ): void {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (!isFindKey(e, mac)) return;
-      const input = field();
-      if (input === null) return;
+      if (!isFindKey(e, mac) || field() === null) return;
       e.preventDefault();
-      input.focus();
-      if (document.activeElement === input) return;
-      flushSync(openRail);
-      field()?.focus();
+      focusFind(field, openRail);
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
