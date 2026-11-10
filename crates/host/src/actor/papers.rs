@@ -13,7 +13,7 @@ use std::path::PathBuf;
 
 use clauseo_matters::PaperList;
 use clauseo_protocol::{
-    Count, FileRefId, MAX_PAPERS, MatterId, MatterPath, PaperSummary, QueryResult,
+    Count, ErrorCode, FileRefId, MAX_PAPERS, MatterId, MatterPath, PaperSummary, QueryResult,
 };
 
 use super::Actor;
@@ -83,7 +83,16 @@ pub(super) fn answer(
     reply: Reply<QueryResult>,
 ) {
     let answer = match listed {
-        MatterReply::Papers(listed) => listed.and_then(|papers| summarise(actor, matter, papers)),
+        MatterReply::Papers(listed) => {
+            match &listed {
+                Ok(_) => follow::listed(actor, matter, true),
+                Err(error) if error.code() == ErrorCode::MatterFolderMissing => {
+                    follow::listed(actor, matter, false);
+                }
+                Err(_) => {}
+            }
+            listed.and_then(|papers| summarise(actor, matter, papers))
+        }
         MatterReply::Created(_)
         | MatterReply::Imported(_)
         | MatterReply::Opened(_)

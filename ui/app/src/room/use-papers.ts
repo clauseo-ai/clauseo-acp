@@ -1,20 +1,30 @@
 // The open matter's papers for the wall (H8's ListPapers), listed again whenever the host says they changed
-// (`papers_changed` on the app feed): the background tracked-changes scan found Tracked changes in a .docx the last
-// listing showed without them. The host's listing answers at once from what the scan has read, so a re-list is cheap.
+// (`papers_changed` on the app feed): a paper came, went or was renamed in the matter's folder (decision record 0055),
+// or the background tracked-changes scan found Tracked changes in a .docx the last listing showed without them. The
+// host's listing answers at once from what the scan has read, so a re-list is cheap. A listing that finds the folder
+// gone, or not the matter's, empties the wall: the moved folder's line says why (moved.tsx), and its Locate folder
+// brings the papers back.
 import { useEffect, useState } from "react";
 import type { MatterId } from "../transport/protocol.ts";
+import { locatable } from "./act-refusals.ts";
 import type { AppHost, Papers, PapersHost } from "./host-next.ts";
 import type { ListedPapers } from "./open.ts";
 
-/** The matter's papers from H8, or null: before they arrive, without H8, or when the read fails. `app`, when there is
- * one, re-lists them on each `papers_changed` for the matter; a later answer replaces an earlier one, never the
- * reverse. */
+/** The code of a failed read, when it has one. */
+const codeOf = (error: unknown): string | null =>
+  typeof error === "object" && error !== null && "code" in error && typeof error.code === "string"
+    ? error.code
+    : null;
+
+/** The matter's papers from H8, or null: before they arrive, without H8, when the read fails, or once the folder is
+ * gone. `app`, when there is one, re-lists them on each `papers_changed` for the matter; a later answer replaces an
+ * earlier one, never the reverse. */
 export function usePapers(
   next: PapersHost | null,
   app: AppHost | null,
   matter: MatterId | null,
 ): ListedPapers {
-  const [listed, setListed] = useState<{ matter: MatterId; papers: Papers } | null>(null);
+  const [listed, setListed] = useState<{ matter: MatterId; papers: Papers | null } | null>(null);
   useEffect(() => {
     if (next === null || matter === null) return;
     let live = true;
@@ -30,7 +40,12 @@ export function usePapers(
           shown = mine;
           setListed({ matter, papers });
         },
-        (error: unknown) => console.warn(`list_papers failed: ${JSON.stringify(error)}`),
+        (error: unknown) => {
+          console.warn(`list_papers failed: ${JSON.stringify(error)}`);
+          if (!live || mine < shown || !locatable(codeOf(error))) return;
+          shown = mine;
+          setListed({ matter, papers: null });
+        },
       );
     };
     list();
@@ -42,5 +57,7 @@ export function usePapers(
       stop?.();
     };
   }, [next, app, matter]);
-  return listed !== null && listed.matter === matter ? listed : null;
+  return listed !== null && listed.matter === matter && listed.papers !== null
+    ? { matter, papers: listed.papers }
+    : null;
 }
