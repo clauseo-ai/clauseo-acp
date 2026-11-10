@@ -1,13 +1,15 @@
 //! `TurnFailed` examples for codes added after the 0048 install and sign-in set, which
 //! `later_variants` in the parent module chains on before them, R24's case-law records, and the
-//! host notices with a kind, which it chains on last, the skill pack notices among them.
+//! host notices with a kind, which it chains on next, the skill pack notices among them, and the
+//! later stop reasons (`NotAllowed`'s moved here from it), which it chains on last.
 
 use clauseo_protocol::{
     AgentId, DomainEvent, ErrorCode, MatterPath, Notice, NoticeKind, NoticeLevel, PackId,
-    PackSkipReason, PageVia, PageVisited, SearchSource, TurnFailed, WebResult, WebSearchRecorded,
+    PackSkipReason, PageVia, PageVisited, SearchSource, StopReason, TurnEnded, TurnFailed,
+    WebResult, WebSearchRecorded,
 };
 
-use crate::fixtures::{tool_call_id, turn_id};
+use crate::fixtures::{checkpoint_id, tool_call_id, turn_id};
 
 /// One `TurnFailed` of turn 3 for each later code, in the order the corpus first saw them.
 pub(super) fn failures() -> Vec<DomainEvent> {
@@ -226,6 +228,26 @@ fn case_law() -> Vec<DomainEvent> {
             )
             .with_source(SearchSource::CaseLaw, Some("search_law")),
         )
+        .into(),
+    ]
+}
+
+/// One `TurnEnded` of turn 3 for each stop reason added after v1: `NotAllowed`, `OutsideMatter`.
+pub(super) fn stops() -> Vec<DomainEvent> {
+    vec![
+        TurnEnded {
+            turn: turn_id(3),
+            stop: StopReason::NotAllowed,
+            usage: None,
+            checkpoint_after: Some(checkpoint_id(14)),
+        }
+        .into(),
+        TurnEnded {
+            turn: turn_id(3),
+            stop: StopReason::OutsideMatter,
+            usage: None,
+            checkpoint_after: Some(checkpoint_id(14)),
+        }
         .into(),
     ]
 }

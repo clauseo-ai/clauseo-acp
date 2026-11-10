@@ -103,13 +103,6 @@ pub fn file_changes() -> Vec<FileChange> {
 /// no example opens a page with, and the stop reasons no example turn ends with.
 pub fn later_variants() -> Vec<DomainEvent> {
     vec![
-        TurnEnded {
-            turn: turn_id(3),
-            stop: StopReason::NotAllowed,
-            usage: None,
-            checkpoint_after: Some(checkpoint_id(14)),
-        }
-        .into(),
         ThreadRenamed {
             title: short("Read the lease"),
             by: RenameSource::Placeholder,
@@ -222,6 +215,7 @@ pub fn later_variants() -> Vec<DomainEvent> {
     .chain(later::failures_then_case_law())
     .chain(setup::turns())
     .chain(later::notices())
+    .chain(later::stops())
     .collect()
 }
 

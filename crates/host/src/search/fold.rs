@@ -161,7 +161,7 @@ impl ThreadMemo {
         } else if let Some(turn) = turn_end(event) {
             self.turn_ended(turn, out);
             let never_sent = matches!(event, DomainEvent::TurnEnded(ended)
-                if matches!(ended.stop, StopReason::Cancelled | StopReason::NotAllowed));
+                if matches!(ended.stop, StopReason::Cancelled | StopReason::NotAllowed | StopReason::OutsideMatter));
             if never_sent && !self.started.contains(&turn) {
                 self.withdrawn(turn, out);
             }

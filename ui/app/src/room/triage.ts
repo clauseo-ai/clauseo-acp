@@ -125,7 +125,8 @@ export function needOf(t: {
     t.status === "idle" &&
     reason !== "at_limit" &&
     reason !== "cancelled" &&
-    reason !== "not_allowed"
+    reason !== "not_allowed" &&
+    reason !== "outside_matter"
   )
     return "ready";
   return null;

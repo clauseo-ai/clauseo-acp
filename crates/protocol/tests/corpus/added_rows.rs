@@ -569,4 +569,11 @@ pub(crate) const ADDED_AFTER_V1: &[Corpus] = &[
         (351, 0xf408_1789_7d88_50f1),
         (253, 0xeaf2_fea8_ad96_77b2),
     ),
+    (
+        "added/turn_ended-OutsideMatter",
+        include_bytes!("added/turn_ended-OutsideMatter.jsonl"),
+        include_bytes!("added/turn_ended-OutsideMatter.msgpack"),
+        (358, 0x8e3b_faa7_4797_d6f7),
+        (240, 0xfd08_788b_99e1_7347),
+    ),
 ];

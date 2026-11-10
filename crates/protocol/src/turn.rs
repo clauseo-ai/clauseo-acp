@@ -74,8 +74,8 @@ open_data_enum! {
 }
 
 open_unit_enum! {
-    /// Why a turn stopped: ACP v1's stop reasons plus Clauseo's `NotAllowed`, `AtLimit` and
-    /// `Failed`.
+    /// Why a turn stopped: ACP v1's stop reasons plus Clauseo's `NotAllowed`, `OutsideMatter`,
+    /// `AtLimit` and `Failed`.
     pub enum StopReason {
         /// The agent finished. Only this ending moves the thread's queue on.
         EndTurn,
@@ -92,6 +92,11 @@ open_unit_enum! {
         /// as `Cancelled` (the queue holds); only the words differ. Never on a turn that had not
         /// started.
         NotAllowed,
+        /// The agent cancelled it right after the host refused, unasked, a permission request
+        /// into Clauseo's data folder (another matter's or Clauseo's own files); no Stop came
+        /// after that refusal. Every rule treats it as `Cancelled` (the queue holds); only the
+        /// words differ. Never on a turn that had not started.
+        OutsideMatter,
         /// The account's usage limit stopped it; a `TurnStoppedAtLimit` explains it.
         AtLimit,
         /// It failed; a `TurnFailed` before it says why.

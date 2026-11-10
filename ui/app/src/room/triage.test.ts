@@ -96,7 +96,7 @@ test("a failure's row says when it failed; needOf reads only the table's waits",
 });
 
 test("a turn ended on the lawyer's refusal is no answer ready, as a Stop is not", () => {
-  for (const reason of ["cancelled", "not_allowed"] as const)
+  for (const reason of ["cancelled", "not_allowed", "outside_matter"] as const)
     expect(needOf({ status: "idle", seen: false, last_stop: { reason, at: 1 } })).toBe(null);
   expect(needOf({ status: "idle", seen: false, last_stop: { reason: "end_turn", at: 1 } })).toBe(
     "ready",

@@ -58,6 +58,7 @@ import {
   type WordsRef,
 } from "./words.ts";
 import type { NextErrorCode } from "../room/host-next.ts";
+import type { ThreadKey } from "@clauseo/components/lib/words-thread.ts";
 import { ERROR_WORDS, type ErrorKey } from "@clauseo/components/lib/words-errors.ts";
 import { agentText, step, toolCall, TURN, userMessage, uuid } from "../testing/stream-script.ts";
 import type { ErrorCode, StepEntry, ViewEntry } from "../transport/protocol.ts";
@@ -124,6 +125,13 @@ const limit = (reason: string, resets_at?: number): ViewEntry => ({
 });
 
 const thread = (state: ThreadState) => () => <RoomOver host={() => threadHost(state)} />;
+/** A turn's end under the answer so far: its stop, and the line that stop says. */
+const stoppedAt = (id: string, key: ThreadKey, stop: StepEntry["stop"]): Entry => ({
+  id,
+  words: threadWords(key),
+  screen: "room/thread",
+  render: thread({ entries: [QUESTION, PARTIAL, ended({ stop })] }),
+});
 
 /** One entry per error code, "U3-err-<code>", refused on a send: an id that names its code never moves when a code
  * is added. Codes whose sentence is U3-07's (words-thread.ts's), or that registry-offline.tsx's ownEntry names, need
@@ -170,18 +178,8 @@ const U3: Entry[] = [
       entries: [QUESTION, PARTIAL, toolCall(7, 1, "cancelled"), ended({ stop: "cancelled" })],
     }),
   },
-  {
-    id: "U3-04",
-    words: threadWords("You stopped the answer. The answer so far is kept."),
-    screen: "room/thread",
-    render: thread({ entries: [QUESTION, PARTIAL, ended({ stop: "cancelled" })] }),
-  },
-  {
-    id: "U3-05",
-    words: threadWords("The answer stopped at its limit, before it finished."),
-    screen: "room/thread",
-    render: thread({ entries: [QUESTION, PARTIAL, ended({ stop: "max_tokens" })] }),
-  },
+  stoppedAt("U3-04", "You stopped the answer. The answer so far is kept.", "cancelled"),
+  stoppedAt("U3-05", "The answer stopped at its limit, before it finished.", "max_tokens"),
   {
     id: "U3-06",
     words: threadWords("This question was declined, so there is no answer."),
@@ -289,14 +287,16 @@ const U3: Entry[] = [
     screen: "room/thread",
     render: thread({ entries: [QUESTION, PARTIAL, limit("plan_window", atLocal(-2, 9, 0))] }),
   },
-  {
-    id: "U3-51",
-    words: threadWords(
-      "You didn't allow a request, so the answer stopped. The answer so far is kept.",
-    ),
-    screen: "room/thread",
-    render: thread({ entries: [QUESTION, PARTIAL, ended({ stop: "not_allowed" })] }),
-  },
+  stoppedAt(
+    "U3-51",
+    "You didn't allow a request, so the answer stopped. The answer so far is kept.",
+    "not_allowed",
+  ),
+  stoppedAt(
+    "U3-52",
+    "Clauseo stopped the answer: it tried to open files outside this matter. The answer so far is kept.",
+    "outside_matter",
+  ),
 ];
 
 /* ---------- U2: the rail and matters ---------- */

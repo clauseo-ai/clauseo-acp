@@ -13,7 +13,7 @@ use clauseo_protocol::{
     AgentChoiceId, AgentSessionId, CompactString, Deliverable, ElicitationId, ElicitationRequest,
     ElicitationRequested, ElicitationResponse, LimitStopReason, MatterPath, PermissionAbout,
     PermissionChoice, PermissionKind, PermissionOption, PermissionRequestId, PermissionRequested,
-    PermissionResolved, Principal, StreamId, ThreadId, TurnId,
+    PermissionResolved, Principal, StopReason, StreamId, ThreadId, TurnId,
 };
 
 use super::super::input::MatterTag;
@@ -377,10 +377,14 @@ fn refuse_held_open(
 /// Rejects a request that touches Clauseo's data folder, with nothing logged and the lawyer never
 /// asked: the agent gets the reject-once option, else `cancelled`, and the agent's count for its
 /// `agent ended` line goes up. No path is logged. ACP's answer carries no reason, so the agent
-/// hears its adapter's own words for a refusal.
+/// hears its adapter's own words for a refusal. An agent that cancels its turn on it (Codex)
+/// ends the turn `OutsideMatter`, not the lawyer's `Cancelled`.
 fn refuse_data_folder(actor: &mut Actor, thread: ThreadId, ask: &PermissionAsk) {
     let reject =
         reject_option(&ask.options).and_then(|option| AgentChoiceId::new(&option.option_id).ok());
+    if let Some(current) = current(actor, thread) {
+        current.refused = Some(StopReason::OutsideMatter);
+    }
     let Some(agent) = agent(actor, thread) else {
         return;
     };

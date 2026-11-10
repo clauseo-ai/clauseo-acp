@@ -273,6 +273,9 @@ mod mcp;
 #[cfg(test)]
 #[path = "host/not_allowed.rs"]
 mod not_allowed;
+#[cfg(all(test, unix))]
+#[path = "host/outside_matter.rs"]
+mod outside_matter;
 #[cfg(test)]
 #[path = "host/own_logout.rs"]
 mod own_logout;
