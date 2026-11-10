@@ -4,11 +4,11 @@
 // changes while one runs are listed once, after it.
 import { act, useEffect } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { afterEach, expect, test } from "vitest";
+import { afterEach, expect, test, vi } from "vitest";
 import type { MatterId } from "../transport/protocol.ts";
 import type { AppEvent, AppHost, Papers, PapersHost } from "./host-next.ts";
 import type { ListedPapers } from "./open.ts";
-import { usePapers } from "./use-papers.ts";
+import { READ_WAIT_MS, usePapers } from "./use-papers.ts";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -127,4 +127,25 @@ test("unmounting stops listening", () => {
   act(() => root?.unmount());
   root = null;
   expect(listeners.size).toBe(0);
+});
+
+test("a listing that never answers lets the next one go after the wait", async () => {
+  vi.useFakeTimers();
+  try {
+    const { host, calls } = fakePapers();
+    const { app, play } = fakeApp();
+    const probe = mount(host, app, A);
+    act(() => play({ papers_changed: { matter: A } }));
+    expect(calls, "the first never answers").toHaveLength(1);
+    act(() => {
+      vi.advanceTimersByTime(READ_WAIT_MS);
+    });
+    expect(calls, "the change waiting behind it goes out").toHaveLength(2);
+    await act(async () => calls[1]?.answer(papers(true)));
+    expect(tracked(probe.seen())).toBe(true);
+    await act(async () => calls[0]?.answer(papers(false)));
+    expect(tracked(probe.seen()), "the late first answer is not shown").toBe(true);
+  } finally {
+    vi.useRealTimers();
+  }
 });

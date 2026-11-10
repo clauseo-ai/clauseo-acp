@@ -93,6 +93,10 @@ pub(crate) fn on_started(actor: &mut Actor, started: WatchStarted) {
     let Some(follow) = current(actor, generation) else {
         return;
     };
+    // A folder already seen gone (its burst came first) stays gone; the late watch drops.
+    if follow.state != State::Starting {
+        return;
+    }
     (follow.state, follow.watch) = match started {
         Started::Live(watch) => (State::Live, Some(watch)),
         Started::Missing => (State::Gone, None),

@@ -278,6 +278,7 @@ export const WIRE = {
 
 /** H8: a matter's papers. */
 export interface PapersHost {
+  /** Listing a matter also makes it the one whose folder the host watches (decision record 0055). */
   listPapers(matter: MatterId): Promise<Papers>;
 }
 

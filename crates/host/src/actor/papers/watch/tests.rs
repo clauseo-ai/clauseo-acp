@@ -168,7 +168,14 @@ fn a_folder_gone_reads_missing_and_one_swapped_in_reads_replaced() {
     crate::write::create_dir_all(&other).unwrap();
     let root = root_id(&folder);
     let (_send, changes) = mpsc::channel();
-    let seen = |what| look(&folder, root, Duration::ZERO, &changes) == Some(what);
+    let burst = Burst {
+        matter: "01900000-0000-7000-8000-000000000001".parse().unwrap(),
+        generation: 7,
+        folder: folder.clone(),
+        root,
+        clock: std::sync::Arc::new(crate::clock::SystemClock),
+    };
+    let seen = |what| look(&burst, Duration::ZERO, &changes) == Some(what);
     assert!(seen(Look::Found));
     crate::write::rename(&folder, &dir.path().join("m-old")).unwrap();
     assert!(seen(Look::Missing));
