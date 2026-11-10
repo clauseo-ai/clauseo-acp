@@ -48,6 +48,9 @@ const SYSTEM: &str = "S-1-5-18";
 const COMMAND_MS: u32 = 120_000;
 /// How many [`pause`]s a wait takes at most: 15 s.
 const WAIT_STEPS: u32 = 60;
+/// The longest command line `CreateProcessWithLogonW` takes is 1024 characters: this many
+/// with its NUL.
+const LOGON_LINE_MAX: usize = 1025;
 
 /// Whether the test may run here: an elevated token and `CLAUSEO_ELEVATED_TESTS=1`.
 fn gate(test: &str) -> bool {
@@ -77,14 +80,26 @@ pub(crate) fn system32() -> String {
 /// Runs `script` in `cmd` as `user`, with its profile loaded, and waits for it: its exit code
 /// (`None` if it didn't end in time) and what it printed, read from a file in `folder`, which
 /// `user` must be able to write. `script` runs inside a `(...)` group: no bare parentheses.
+///
+/// `CreateProcessWithLogonW` refuses a command line of more than 1024 characters with "The
+/// parameter is incorrect" (an encoded PowerShell script is longer), so a line that long runs
+/// from `script.cmd` in `folder` instead, which then must hold no `%`.
 pub(crate) fn try_in_cmd(user: &TestUser, folder: &Path, script: &str) -> (Option<u32>, String) {
     let output = folder.join("output.txt");
     let cmd = format!(r"{}\cmd.exe", system32());
+    let grouped = format!(r#"({script}) > "{}" 2>&1"#, output.display());
     // `/s`: cmd takes what is between the outer quotes as it is.
-    let line = format!(
-        r#""{cmd}" /d /s /c "({script}) > "{}" 2>&1""#,
-        output.display()
-    );
+    let mut line = format!(r#""{cmd}" /d /s /c "{grouped}""#);
+    if line.encode_utf16().count() >= LOGON_LINE_MAX {
+        assert!(
+            !script.contains('%'),
+            "a .cmd file would expand its %: {script}"
+        );
+        let batch = folder.join("script.cmd");
+        write_batch(&batch, &grouped);
+        line = format!(r#""{cmd}" /d /s /c ""{}"""#, batch.display());
+        assert!(line.encode_utf16().count() < LOGON_LINE_MAX, "{line}");
+    }
     let mut line: Vec<u16> = line.encode_utf16().chain(once(0)).collect();
     let password: Zeroizing<Vec<u16>> =
         Zeroizing::new(user.password.encode_utf16().chain(once(0)).collect());
@@ -133,6 +148,16 @@ pub(crate) fn try_in_cmd(user: &TestUser, folder: &Path, script: &str) -> (Optio
         Err(error) => format!("(its output can't be read: {error})"),
     };
     (code, printed)
+}
+
+/// Writes `grouped` to the `.cmd` file at `batch`, one line with its echo off, for
+/// [`try_in_cmd`].
+#[expect(
+    clippy::disallowed_methods,
+    reason = "writes the test user's command into the test's own folder"
+)]
+fn write_batch(batch: &Path, grouped: &str) {
+    std::fs::write(batch, format!("@{grouped}\r\n")).unwrap();
 }
 
 /// The test folder and its tasks: each task ended and deleted, then the folder, on drop.

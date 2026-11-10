@@ -12,9 +12,12 @@
 
 use std::process::Command;
 
+mod admin_log;
+
+use super::windows_listing::{is_guid, parse_id, task_cache, task_cache_id_units};
 use super::windows_sweeper::WindowsSweeper;
 use super::windows_sweeper::same_task_path;
-use super::{Names, Resolved, Sweeper as _, Task, resolve, sweep_tasks};
+use super::{Names, Resolved, Sweeper as _, Task, resolve, sddl_owner, sweep_tasks};
 use crate::test_support::TempDir;
 use crate::windows::refresh::windows_tests::{system32, try_in_cmd};
 use crate::windows::setup::logon::tests::{TestUser, clear_leftovers, random_hex};
@@ -187,9 +190,35 @@ fn elevated_this_machines_tasks_all_have_a_principal_that_resolves() {
     let other = swept.why.keys().any(|why| !stale.contains(&why.as_str()));
     assert!(
         !other,
-        "tasks or folders that can't be read: {:?}",
-        swept.why
+        "tasks or folders that can't be read: {:?}\nIds that aren't a GUID: {}",
+        swept.why,
+        odd_ids()
     );
+}
+
+/// Up to 5 `Id` values in the Task Scheduler's cache that [`parse_id`] refuses, each by its
+/// length and its last 2 UTF-16 units, never by its task's path.
+fn odd_ids() -> String {
+    let listing = match task_cache() {
+        Ok(listing) => listing,
+        Err(error) => return format!("(the cache can't be listed: {error})"),
+    };
+    let mut odd = Vec::new();
+    let mut count = 0_usize;
+    for path in &listing.paths {
+        let Ok(Some(units)) = task_cache_id_units(path) else {
+            continue;
+        };
+        if parse_id(&units).is_ok() {
+            continue;
+        }
+        count += 1;
+        if odd.len() < 5 {
+            let last = units.get(units.len().saturating_sub(2)..).unwrap_or(&units);
+            odd.push(format!("{} units ending {last:04x?}", units.len()));
+        }
+    }
+    format!("{count}: {}", odd.join("; "))
 }
 
 #[test]
@@ -208,13 +237,19 @@ fn task_paths_compare_as_windows_compares_them_not_by_unicode_lowercase() {
 /// A task as the test user registers it from XML: its own, on a trigger far ahead, with `sddl`
 /// as its descriptor; UTF-16LE after its byte order mark, as `schtasks /xml` reads it.
 fn task_xml(user: &str, sddl: &str) -> Vec<u8> {
+    let principal = format!("<UserId>{user}</UserId><LogonType>InteractiveToken</LogonType>");
+    task_xml_for(&principal, sddl)
+}
+
+/// [`task_xml`] with `principal` as what its `Principal` element holds.
+fn task_xml_for(principal: &str, sddl: &str) -> Vec<u8> {
     let xml = format!(
         "<?xml version=\"1.0\" encoding=\"UTF-16\"?>\r\n<Task version=\"1.2\" \
          xmlns=\"http://schemas.microsoft.com/windows/2004/02/mit/task\">\r\n  \
          <RegistrationInfo><SecurityDescriptor>{sddl}</SecurityDescriptor></RegistrationInfo>\
          \r\n  <Triggers><TimeTrigger><StartBoundary>2099-01-01T00:00:00</StartBoundary>\
-         </TimeTrigger></Triggers>\r\n  <Principals><Principal id=\"Author\"><UserId>{user}\
-         </UserId><LogonType>InteractiveToken</LogonType></Principal></Principals>\r\n  \
+         </TimeTrigger></Triggers>\r\n  <Principals><Principal id=\"Author\">{principal}\
+         </Principal></Principals>\r\n  \
          <Actions Context=\"Author\"><Exec><Command>{}\\cmd.exe</Command><Arguments>/c exit 0\
          </Arguments></Exec></Actions>\r\n</Task>\r\n",
         system32()
@@ -304,9 +339,260 @@ fn elevated_a_task_whose_descriptor_shuts_system_out_is_deleted_or_56_never_left
         !left || swept.left(),
         "the task was left and the sweep would have ended 0: {swept:?}"
     );
-    // Missing from the listing, only the cross-check could have caught it.
+    // Missing from the listing, only the cross-check could have caught it: this task, by its
+    // path, among the hidden ones, not just any hidden task.
+    let path = format!(r"\{name}");
+    let caught = swept
+        .hidden_paths
+        .iter()
+        .any(|hidden| same_task_path(hidden, &path) == Ok(true));
     assert!(
-        listed || swept.hidden > 0,
+        listed || caught,
         "the listing hid the task and the cross-check didn't find it: {swept:?}"
     );
+}
+
+#[test]
+#[ignore = "elevated: run by CI's elevated step with CLAUSEO_ELEVATED_TESTS=1"]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "writes the test user's task XML into the test's own folder"
+)]
+fn elevated_a_standard_user_cant_register_a_task_owned_by_system_or_administrators() {
+    if !gate("elevated_a_standard_user_cant_register_a_task_owned_by_system_or_administrators") {
+        return;
+    }
+    // Both owner checks (the task's own descriptor, its cache key's `SD`) rest on this: a
+    // standard user's task whose descriptor names SYSTEM or Administrators as its owner is
+    // refused, or registered owned by that user, never by the owner it named.
+    clear_leftovers(TASK_TEST_PREFIX);
+    let user = TestUser::named(TASK_TEST_PREFIX, &random_hex(3));
+    let sid = user.sid.clone();
+    eprintln!("1. the test user: {} {}", user.name, sid.as_str());
+    let dir = TempDir::new("sweep-owner");
+    let grant = format!(
+        "D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;FA;;;{})",
+        sid.as_str()
+    );
+    protect_with(dir.path(), &grant).unwrap();
+    let suffix = format!("{}{}", std::process::id(), random_hex(2));
+    // The owner each descriptor names (none: ownerless), and a task whose own descriptor names
+    // the test user, whose descriptor the test user then tries to rewrite.
+    let names = [
+        ("O:SY", format!("ClauseoSweepOwnerSy{suffix}")),
+        ("O:BA", format!("ClauseoSweepOwnerBa{suffix}")),
+        ("", format!("ClauseoSweepOwnerNone{suffix}")),
+        ("O:self", format!("ClauseoSweepOwnerSet{suffix}")),
+    ];
+    // Dropped before the user, so the account outlives its tasks' clean-up.
+    let _made = Made(names.iter().map(|(_, name)| name.clone()).collect());
+    let schtasks = format!(r"{}\schtasks.exe", system32());
+    let mut sweeper = WindowsSweeper::new();
+    for (alias, name) in &names {
+        // 2. As that user: a task whose descriptor names `alias` its owner, readable by all
+        // three, so this process can read what owner it got.
+        let owner = alias.replace("self", sid.as_str());
+        let sddl = format!(
+            "{owner}D:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;FA;;;{})",
+            sid.as_str()
+        );
+        let xml = dir.path().join(format!("{name}.xml"));
+        std::fs::write(&xml, task_xml(sid.as_str(), &sddl)).unwrap();
+        let create = format!(
+            r#""{schtasks}" /create /tn {name} /xml "{}" /f"#,
+            xml.display()
+        );
+        let (code, printed) = try_in_cmd(&user, dir.path(), &create);
+        eprintln!("2. {alias:?} as the test user: exit {code:?}\n{printed}");
+        if code != Some(0) {
+            assert_ne!(*alias, "O:self", "the test user's own task:\n{printed}");
+            eprintln!("   refused: the gap can't arise for {alias:?}");
+            continue;
+        }
+        // 3. Registered: its owner, from the cache key's `SD` and from the Task Scheduler,
+        // must be the test user.
+        let cached = sweeper.task_cache_owner(&format!(r"\{name}"));
+        eprintln!("3. its cache key's owner: {cached:?}");
+        assert_eq!(cached.as_ref(), Ok(&sid), "{alias:?}: the cache key's SD");
+        let root = sweeper.root().unwrap();
+        let read = sweeper.task_sddl(&root, name).unwrap();
+        let owner = sddl_owner(&read);
+        eprintln!("   its descriptor's owner: {owner:?}");
+        assert_eq!(
+            owner,
+            Ok(Some(sid.clone())),
+            "{alias:?}: the task's descriptor"
+        );
+    }
+    // 4. As that user, on its own task: IRegisteredTask::SetSecurityDescriptor naming SYSTEM,
+    // then Administrators, its owner. Expected refused (an owner can be set only to the
+    // caller or a group its token may own by); either way the owner the cache records stays
+    // the test user's.
+    let (_, name) = &names[3];
+    for alias in ["SY", "BA"] {
+        let sddl = format!(
+            "O:{alias}D:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;FA;;;{})",
+            sid.as_str()
+        );
+        // Anything before the call that fails (PowerShell, the COM connect, the task's lookup)
+        // ends it 1 and fails the test; the call itself ends it 0 when it worked, 3 when refused,
+        // each saying so (what it printed holds stderr too).
+        let script = format!(
+            "$ErrorActionPreference='Stop'; $s=New-Object -ComObject Schedule.Service; \
+             $s.Connect(); $t=$s.GetFolder('\\').GetTask('{name}'); \
+             try {{ $t.SetSecurityDescriptor('{sddl}', 0); 'SET-OK'; exit 0 }} \
+             catch {{ 'SET-REFUSED: ' + $_.Exception.Message; exit 3 }}"
+        );
+        let (code, printed) = try_in_cmd(&user, dir.path(), &powershell(&script));
+        eprintln!("4. SetSecurityDescriptor O:{alias} as the test user: exit {code:?}\n{printed}");
+        let ran = match code {
+            Some(0) => printed.contains("SET-OK"),
+            Some(3) => printed.contains("SET-REFUSED"),
+            _ => false,
+        };
+        assert!(
+            ran,
+            "O:{alias}: PowerShell didn't reach the call: exit {code:?}\n{printed}"
+        );
+        let cached = sweeper.task_cache_owner(&format!(r"\{name}"));
+        eprintln!("   its cache key's owner: {cached:?}");
+        assert_eq!(
+            cached.as_ref(),
+            Ok(&sid),
+            "O:{alias} set later: the cache key's SD"
+        );
+    }
+}
+
+/// A cmd line that runs `script` in Windows PowerShell, passed encoded (UTF-16LE, base64) so
+/// cmd reads none of its characters.
+fn powershell(script: &str) -> String {
+    use base64::Engine as _;
+    let bytes: Vec<u8> = script.encode_utf16().flat_map(u16::to_le_bytes).collect();
+    let encoded = base64::engine::general_purpose::STANDARD.encode(bytes);
+    let exe = format!(r"{}\WindowsPowerShell\v1.0\powershell.exe", system32());
+    format!(r#""{exe}" -NoProfile -NonInteractive -EncodedCommand {encoded}"#)
+}
+
+#[test]
+fn an_id_value_is_read_with_its_nuls_at_the_end_dropped_and_its_braces_kept() {
+    let guid = "{0A1B2C3D-4E5F-6789-ABCD-EF0123456789}";
+    let units = |text: &str, nuls: usize| -> Vec<u16> {
+        text.encode_utf16()
+            .chain(std::iter::repeat_n(0, nuls))
+            .collect()
+    };
+    for nuls in [0, 1, 2] {
+        assert_eq!(
+            parse_id(&units(guid, nuls)).as_deref(),
+            Ok(guid),
+            "{nuls} NULs"
+        );
+    }
+    let lower = "{0a1b2c3d-4e5f-6789-abcd-ef0123456789}";
+    assert_eq!(parse_id(&units(lower, 1)).as_deref(), Ok(lower));
+    let not_guid = Err("a task's Id in the Task Scheduler's cache isn't a GUID".to_owned());
+    // No braces, a NUL inside, a `\` after it, nothing at all.
+    for (text, nuls) in [
+        ("0A1B2C3D-4E5F-6789-ABCD-EF0123456789", 1),
+        ("{0A1B2C3D-4E5F-6789-ABCD-EF0123456789}\u{0}x", 1),
+        ("{0A1B2C3D-4E5F-6789-ABCD-EF0123456789}\\x", 1),
+        ("", 2),
+    ] {
+        assert_eq!(parse_id(&units(text, nuls)), not_guid, "{text:?}");
+    }
+    let unpaired = vec![0xd800, 0];
+    assert_eq!(
+        parse_id(&unpaired),
+        Err("a task's Id in the Task Scheduler's cache isn't UTF-16 text".to_owned())
+    );
+}
+
+#[test]
+fn a_task_cache_id_is_a_guid_in_braces_and_nothing_else() {
+    assert!(is_guid("{0A1B2C3D-4E5F-6789-ABCD-EF0123456789}"));
+    for not in [
+        "0A1B2C3D-4E5F-6789-ABCD-EF0123456789",
+        "{0A1B2C3D-4E5F-6789-ABCD-EF012345678}",
+        "{0A1B2C3D-4E5F-6789-ABCD-EF0123456789}\\x",
+        "{..\\..\\Tree-4E5F-6789-ABCD-EF0123456789}",
+        "{0A1B2C3D-4E5F-6789-ABCD-EF012345678G}",
+        "",
+    ] {
+        assert!(!is_guid(not), "{not}");
+    }
+}
+
+#[test]
+#[ignore = "elevated: run by CI's elevated step with CLAUSEO_ELEVATED_TESTS=1"]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "writes the test user's task XML into the test's own folder"
+)]
+fn elevated_a_standard_user_cant_register_a_task_for_another_principal() {
+    if !gate("elevated_a_standard_user_cant_register_a_task_for_another_principal") {
+        return;
+    }
+    // The file-and-cache rule trusts a task file naming someone else because a standard user
+    // can't register a task for another principal without that principal's credentials: one
+    // for another local user (no password, an interactive token) or for Users must fail.
+    clear_leftovers(TASK_TEST_PREFIX);
+    let user = TestUser::named(TASK_TEST_PREFIX, &random_hex(3));
+    let other = TestUser::named(TASK_TEST_PREFIX, &random_hex(3));
+    let sid = user.sid.clone();
+    eprintln!(
+        "1. the test user {}, the other user {}",
+        user.name, other.name
+    );
+    let dir = TempDir::new("sweep-principal");
+    let grant = format!(
+        "D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;FA;;;{})",
+        sid.as_str()
+    );
+    protect_with(dir.path(), &grant).unwrap();
+    let suffix = format!("{}{}", std::process::id(), random_hex(2));
+    let sddl = format!(
+        "O:{0}D:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;FA;;;{0})",
+        sid.as_str()
+    );
+    let token = "<LogonType>InteractiveToken</LogonType>";
+    // Each case: its name, what its Principal holds, its logon type
+    // (TASK_LOGON_INTERACTIVE_TOKEN 3, TASK_LOGON_GROUP 4), and whether it must register. The
+    // first, the test user's own, shows a refusal below isn't the script's or the XML's.
+    let own = format!("<UserId>{}</UserId>{token}", sid.as_str());
+    let others = format!("<UserId>{}</UserId>{token}", other.sid.as_str());
+    let users = "<GroupId>S-1-5-32-545</GroupId>".to_owned();
+    let cases = [
+        ("Own", own, 3, true),
+        ("Other", others, 3, false),
+        ("Users", users, 4, false),
+    ];
+    let names: Vec<String> = cases
+        .iter()
+        .map(|(case, ..)| format!("ClauseoSweepPrincipal{case}{suffix}"))
+        .collect();
+    // Dropped before the users, so the accounts outlive their tasks' clean-up.
+    let _made = Made(names.clone());
+    for ((case, principal, logon, registers), name) in cases.iter().zip(&names) {
+        let xml = dir.path().join(format!("{case}.xml"));
+        std::fs::write(&xml, task_xml_for(principal, &sddl)).unwrap();
+        let script = format!(
+            "$ErrorActionPreference='Stop'; $x=Get-Content -Raw -LiteralPath '{}'; \
+             $s=New-Object -ComObject Schedule.Service; $s.Connect(); $f=$s.GetFolder('\\'); \
+             try {{ $null=$f.RegisterTask('{name}', $x, 6, $null, $null, {logon}); 'REG-OK'; \
+             exit 0 }} catch {{ 'REG-REFUSED: ' + $_.Exception.Message; exit 3 }}",
+            xml.display()
+        );
+        let (code, printed) = try_in_cmd(&user, dir.path(), &powershell(&script));
+        eprintln!("2. {case} as the test user: exit {code:?}\n{printed}");
+        let (exit, said) = if *registers {
+            (Some(0), "REG-OK")
+        } else {
+            (Some(3), "REG-REFUSED")
+        };
+        assert!(
+            code == exit && printed.contains(said),
+            "{case}: expected exit {exit:?} with {said}:\n{printed}"
+        );
+    }
 }

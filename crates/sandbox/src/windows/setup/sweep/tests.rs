@@ -11,6 +11,7 @@ use crate::windows::setup::pool_steps::Pool;
 
 mod exits;
 mod file_owner;
+mod log_path;
 mod principals;
 mod record;
 mod running;
@@ -67,6 +68,25 @@ struct Fake {
     /// each of those listings (the task files', the cache's) fails.
     hidden: Vec<String>,
     listings_fail: [bool; 2],
+    /// Task files no cache key holds, and cache keys no task file holds, by path; the task
+    /// files' own owners by their parts joined by `\`, `Err` where one can't be read and one
+    /// not here the Administrators'.
+    stray: Vec<String>,
+    stale: Vec<String>,
+    file_owners: BTreeMap<String, Result<Sid, Failed>>,
+    /// Mid-run: tasks (folder, name, principal's `UserId`) made once the walk is done, as the task
+    /// files are first listed; paths whose file only the first listing holds; and how many of
+    /// the cache's listings, from the first, have a key vanish. The task files' listings read.
+    late: Vec<(String, String, String)>,
+    once: Vec<String>,
+    vanish: usize,
+    listings: usize,
+    /// How many of the task files' listings, from the first, have a folder vanish; whether a
+    /// folder or key gone is there again when checked; and whether each cache key's task can
+    /// run, by path (one not here can).
+    vanish_folder: usize,
+    present_again: Result<bool, Failed>,
+    runnable: BTreeMap<String, Result<bool, Failed>>,
     /// The owners the cache's `SD` values give, by task path, `Err` where one is missing or
     /// can't be read; one not here is the Administrators'.
     cache_owners: BTreeMap<String, Result<Sid, Failed>>,
@@ -94,6 +114,9 @@ struct Fake {
     gone_from: Option<usize>,
     done: Vec<String>,
     logged: Vec<(bool, String)>,
+    /// What the admin-only log was given, and why it fails when `Some`.
+    admin_logged: Vec<String>,
+    admin_fails: Option<Failed>,
 }
 
 impl Fake {
@@ -119,6 +142,16 @@ impl Fake {
             stop_refuse: Vec::new(),
             hidden: Vec::new(),
             listings_fail: [false; 2],
+            stray: Vec::new(),
+            stale: Vec::new(),
+            file_owners: BTreeMap::new(),
+            late: Vec::new(),
+            once: Vec::new(),
+            vanish: 0,
+            listings: 0,
+            vanish_folder: 0,
+            present_again: Ok(false),
+            runnable: BTreeMap::new(),
             cache_owners: BTreeMap::new(),
             owners: BTreeMap::new(),
             files: BTreeMap::new(),
@@ -133,6 +166,8 @@ impl Fake {
             gone_from: None,
             done: Vec::new(),
             logged: Vec::new(),
+            admin_logged: Vec::new(),
+            admin_fails: None,
         }
     }
 
@@ -353,18 +388,59 @@ impl Sweeper for Fake {
         Ok(upper(a) == upper(b))
     }
 
-    fn task_file_paths(&mut self) -> Result<Vec<String>, Failed> {
+    fn task_file_paths(&mut self) -> Result<Listing, Failed> {
+        for (folder, name, principal) in std::mem::take(&mut self.late) {
+            self.task(&folder, &name, user(&principal));
+        }
+        self.listings += 1;
         if self.listings_fail[0] {
             return Err("a folder below Tasks couldn't be listed (5)".to_owned());
         }
-        Ok(self.on_disk())
+        let mut paths = self.on_disk();
+        paths.extend(self.stray.iter().cloned());
+        if self.listings == 1 {
+            paths.extend(self.once.iter().cloned());
+        }
+        let gone = self.listings <= self.vanish_folder;
+        let vanished = if gone {
+            vec![r"\Gone".to_owned()]
+        } else {
+            Vec::new()
+        };
+        Ok(Listing { paths, vanished })
     }
 
-    fn task_cache_paths(&mut self) -> Result<Vec<String>, Failed> {
+    fn task_cache_paths(&mut self) -> Result<Listing, Failed> {
         if self.listings_fail[1] {
             return Err("a key of the Task Scheduler's cache couldn't be listed (5)".to_owned());
         }
-        Ok(self.on_disk())
+        let mut paths = self.on_disk();
+        paths.extend(self.stale.iter().cloned());
+        let gone = self.listings <= self.vanish;
+        let vanished = if gone {
+            vec![r"\A\gone".to_owned()]
+        } else {
+            Vec::new()
+        };
+        Ok(Listing { paths, vanished })
+    }
+
+    fn task_file_owner(&mut self, parts: &[String]) -> Result<Sid, Failed> {
+        let admins = || Ok(Sid::parse("S-1-5-32-544").unwrap());
+        let owner = self.file_owners.get(&parts.join("\\")).cloned();
+        owner.unwrap_or_else(admins)
+    }
+
+    fn task_cache_runnable(&mut self, path: &str) -> Result<bool, Failed> {
+        self.runnable.get(path).cloned().unwrap_or(Ok(true))
+    }
+
+    fn task_folder_present(&mut self, _path: &str) -> Result<bool, Failed> {
+        self.present_again.clone()
+    }
+
+    fn task_cache_key_present(&mut self, _path: &str) -> Result<bool, Failed> {
+        self.present_again.clone()
     }
 
     fn task_cache_owner(&mut self, path: &str) -> Result<Sid, Failed> {
@@ -389,6 +465,11 @@ impl Sweeper for Fake {
 
     fn log(&mut self, error: bool, line: &str) {
         self.logged.push((error, line.to_owned()));
+    }
+
+    fn admin_log(&mut self, line: &str) -> Result<(), Failed> {
+        self.admin_logged.push(line.to_owned());
+        self.admin_fails.clone().map_or(Ok(()), Err)
     }
 }
 

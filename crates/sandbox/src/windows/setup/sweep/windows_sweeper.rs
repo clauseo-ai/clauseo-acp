@@ -3,7 +3,7 @@
 //! process, LOCAL SYSTEM under the task; a task's owner from `GetSecurityDescriptor`), a task's
 //! file (`windows_task_file.rs`), the task files' and the Task Scheduler cache's listings
 //! (`windows_listing.rs`), `LookupAccountNameW`, the record's lock and values
-//! (`pool_steps::windows_record`), and the Event Log.
+//! (`pool_steps::windows_record`), the Event Log, and the admin-only log (`admin_log`).
 #![expect(
     unsafe_code,
     reason = "COM calls to the Task Scheduler, LookupAccountNameW, SHGetKnownFolderPath and \
@@ -28,8 +28,8 @@ use windows::Win32::UI::Shell::{FOLDERID_System, KF_FLAG_DEFAULT, SHGetKnownFold
 use windows::core::{BSTR, HSTRING, PCWSTR, PWSTR};
 
 use super::{
-    Failed, Principal, SweepExit, Sweeper, TASK_FILE_CAP, Task, TaskFile, sweep, windows_listing,
-    windows_task_file,
+    Failed, Listing, Principal, SweepExit, Sweeper, TASK_FILE_CAP, Task, TaskFile, sweep,
+    windows_listing, windows_task_file,
 };
 use crate::windows::refresh::event_log;
 use crate::windows::setup::accounts::{self, Kind};
@@ -38,6 +38,8 @@ use crate::windows::setup::pool_steps::windows_record::{self, RecordLock};
 use crate::windows::setup::pool_steps::{Bits, Gate, Pool, Record, windows_gate};
 use crate::windows::setup::preflight::sid_text;
 use crate::windows::sids::Sid;
+
+pub(crate) mod admin_log;
 
 /// `--sweep-tasks`: [`sweep`] over a [`WindowsSweeper`].
 pub(crate) fn run() -> SweepExit {
@@ -274,12 +276,28 @@ impl Sweeper for WindowsSweeper {
         same_task_path(a, b)
     }
 
-    fn task_file_paths(&mut self) -> Result<Vec<String>, Failed> {
+    fn task_file_paths(&mut self) -> Result<Listing, Failed> {
         windows_listing::task_files(&system_folder()?)
     }
 
-    fn task_cache_paths(&mut self) -> Result<Vec<String>, Failed> {
+    fn task_cache_paths(&mut self) -> Result<Listing, Failed> {
         windows_listing::task_cache()
+    }
+
+    fn task_file_owner(&mut self, parts: &[String]) -> Result<Sid, Failed> {
+        windows_task_file::owner(&system_folder()?, parts)
+    }
+
+    fn task_cache_runnable(&mut self, path: &str) -> Result<bool, Failed> {
+        windows_listing::task_cache_runnable(path)
+    }
+
+    fn task_folder_present(&mut self, path: &str) -> Result<bool, Failed> {
+        windows_task_file::folder_present(&system_folder()?, path)
+    }
+
+    fn task_cache_key_present(&mut self, path: &str) -> Result<bool, Failed> {
+        windows_listing::task_cache_key_present(path)
     }
 
     fn task_cache_owner(&mut self, path: &str) -> Result<Sid, Failed> {
@@ -294,6 +312,10 @@ impl Sweeper for WindowsSweeper {
 
     fn log(&mut self, error: bool, line: &str) {
         event_log(error, line);
+    }
+
+    fn admin_log(&mut self, line: &str) -> Result<(), Failed> {
+        admin_log::append(line)
     }
 }
 

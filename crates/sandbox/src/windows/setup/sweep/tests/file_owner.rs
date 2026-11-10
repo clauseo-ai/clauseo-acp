@@ -143,11 +143,11 @@ fn a_clean_task_file_naming_someone_else_is_still_skipped() {
 }
 
 /// A DACL entry: its type, SID and mask.
-type Entry<'e> = (u8, &'e str, u32);
+pub(super) type Entry<'e> = (u8, &'e str, u32);
 
 /// A descriptor's DACL, for [`descriptor`].
 #[derive(Debug, Clone, Copy)]
-enum Dacl<'d> {
+pub(super) enum Dacl<'d> {
     /// None: the DACL-present bit unset.
     Absent,
     /// A NULL DACL: present, at offset 0.
@@ -157,7 +157,7 @@ enum Dacl<'d> {
 }
 
 /// A self-relative descriptor owned by `owner` with `dacl`.
-fn descriptor(owner: Option<&str>, dacl: Dacl<'_>) -> Vec<u8> {
+pub(super) fn descriptor(owner: Option<&str>, dacl: Dacl<'_>) -> Vec<u8> {
     let owner = owner.map(|owner| sid_bytes(&Sid::parse(owner).unwrap()));
     let entries = match dacl {
         Dacl::Of(entries) => Some(entries),
@@ -244,6 +244,25 @@ fn the_task_files_security_is_read_from_its_descriptor() {
     let mut absolute = descriptor(Some("S-1-5-18"), Dacl::Of(clean));
     absolute[3] = 0;
     assert!(file_security(&absolute).is_err());
+}
+
+#[test]
+fn an_owner_is_read_only_from_a_revision_1_self_relative_descriptor() {
+    use crate::windows::acl_bytes::owner_sid;
+
+    // The owner a cache key's `SD` gives a hidden task, and a task file's.
+    let good = descriptor(Some("S-1-5-18"), Dacl::Absent);
+    assert_eq!(owner_sid(&good), Some(Sid::parse("S-1-5-18").unwrap()));
+    let mut revision = good.clone();
+    revision[0] = 2;
+    let mut absolute = good;
+    absolute[3] &= !0x80; // SE_SELF_RELATIVE cleared, the owner's offset left.
+    for (bad, case) in [(revision, "revision 2"), (absolute, "not self-relative")] {
+        assert_eq!(owner_sid(&bad), None, "{case}");
+        assert!(file_security(&bad).is_err(), "{case}");
+    }
+    // An empty value names none either.
+    assert_eq!(owner_sid(&[]), None);
 }
 
 #[test]
