@@ -20,6 +20,7 @@
 //!    b. a key of [`MUST_BE_FALSE`] whose value is anything but `false`;
 //!    c. a `timeoutMs` that is not a whole number up to [`MAX_TIMEOUT_MS`];
 //!    d. on `agent_browser_screenshot`, a `selector` agent-browser would take for a file path;
+//!    on `agent_browser_read`, any key of [`READ_FETCH_KEYS`];
 //!    e. a `url` that is not a string, names a scheme other than http, https or
 //!    `about:blank`, or names a local or private host (`host.rs`);
 //!    f. an `extraArgs` that is not an array of strings each in [`EXTRA_ARGS_ALLOWED`];
@@ -79,6 +80,18 @@ pub(crate) const RESERVED_ID: &str = "clauseo-guard-close";
 const TOOL_SCREENSHOT: &str = "agent_browser_screenshot";
 /// The tool whose `script` goes to agent-browser on stdin, never into argv.
 const TOOL_EVAL: &str = "agent_browser_eval";
+const TOOL_READ: &str = "agent_browser_read";
+
+/// The keys on `agent_browser_read` that make agent-browser's daemon fetch over HTTP itself
+/// rather than read the open tab's page through Chrome (v0.41.1 `native/actions.rs:5964-5978`:
+/// `url` fetches that URL; `llms` and `requireMd` re-fetch the active tab's URL and its
+/// `llms.txt` files, following redirects, `read.rs:198-215`). agent-browser marks `read`
+/// read-only (`mcp.rs:2180-2186`), so Codex runs it with no prompt: refused, `read` reads only
+/// the page already open, through `handle_content` (`actions.rs:5980-5994`).
+pub(crate) const READ_FETCH_KEYS: &[&str] = &["url", "llms", "requireMd"];
+/// The refusal of a [`READ_FETCH_KEYS`] key.
+pub(crate) const READ_FETCH: &str =
+    "agent_browser_read fetching a page itself (open the page, then read it)";
 /// The refusal's name for a screenshot selector that reads as a path.
 pub(crate) const SCREENSHOT_PATH: &str = "a file path as the screenshot selector";
 /// The refusal's name for a `timeoutMs` out of range.
@@ -133,7 +146,8 @@ pub(crate) const ALLOWED_TOOLS: &[&str] = &[
 /// reads as a feature Clauseo leaves out: each serves the browser on a loopback port, the stream
 /// server (`stream_enable`, `actions.rs:9772-9785` at v0.41.1, with its `disable` and
 /// `status`), the dashboard that shows its streams, and the developer tools page of `inspect`
-/// (`native/inspect_server.rs`). The macOS browser profile denies every inet bind anyway.
+/// (`native/inspect_server.rs`). In the plain client the guard runs outside any sandbox, so this
+/// refusal is what keeps them off.
 pub(crate) const LIVE_VIEW_TOOLS: &[&str] = &[
     "agent_browser_stream_enable",
     "agent_browser_stream_disable",
@@ -253,6 +267,13 @@ fn check_arguments(tool: &str, arguments: &Map<String, Value>) -> Result<(), Str
         && reads_as_path(selector)
     {
         return Err(SCREENSHOT_PATH.to_owned());
+    }
+    if tool == TOOL_READ
+        && READ_FETCH_KEYS
+            .iter()
+            .any(|key| arguments.contains_key(*key))
+    {
+        return Err(READ_FETCH.to_owned());
     }
     if let Some(url) = arguments.get("url") {
         check_url(url)?;

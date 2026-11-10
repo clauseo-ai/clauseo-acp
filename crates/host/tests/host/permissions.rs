@@ -152,3 +152,89 @@ fn permission_first_answer_wins() {
     );
     host.shutdown();
 }
+
+/// The tools of the permission requests the lawyer saw, by the agent's tool call id (`None` for
+/// a request whose tool call the host never logged).
+fn requested_tools(events: &Events) -> Vec<Option<String>> {
+    let started: std::collections::BTreeMap<_, String> = events
+        .events()
+        .filter_map(|event| match event {
+            DomainEvent::ToolCallStarted(started) => {
+                Some((started.tool_call, started.acp_id.to_string()))
+            }
+            _ => None,
+        })
+        .collect();
+    events
+        .events()
+        .filter_map(|event| match event {
+            DomainEvent::PermissionRequested(requested) => Some(
+                requested
+                    .tool_call
+                    .and_then(|tool| started.get(&tool).cloned()),
+            ),
+            _ => None,
+        })
+        .collect()
+}
+
+/// Codex's approvals of the guarded browser server: a click (correlated with its tool call) and
+/// a snapshot (standalone) are answered `allow_session` by the host with nothing logged; eval in
+/// both forms, a case-law search and a shell command reach the lawyer. The scenario checks each
+/// answer the agent gets.
+#[test]
+fn codex_browser_tools_are_allowed_unseen_but_eval() {
+    const CODEX: &str = "codex-acp";
+    let dir = Dir::new(
+        "codex_browser_approvals",
+        &[(CODEX, Scenario::Local("codex-browser-approvals"))],
+    );
+    let host = dir.start(0);
+    let (_, thread, _) = matter_with_thread(&dir, &host, "m", &[], CODEX);
+    let mut events = host.events(StreamId::Thread(thread));
+    let (turn, _) = host.prompt(thread, "Find the judgment.");
+    answer_from(
+        &host,
+        &mut events,
+        thread,
+        0,
+        &["allow_once", "allow_once", "allow_once", "approved"],
+    );
+    let ended = events.until_turn_ended(turn);
+    events.assert_no_mismatch();
+    assert_eq!(ended.stop, StopReason::EndTurn, "{}", events.dump());
+    let seen = requested_tools(&events);
+    assert_eq!(seen.len(), 4, "{}", events.dump());
+    assert_eq!(seen[0].as_deref(), Some("tc-eval"));
+    assert_eq!(seen[2].as_deref(), Some("tc-law"));
+    assert_eq!(seen[3].as_deref(), Some("tc-shell"));
+    assert!(
+        !seen
+            .iter()
+            .any(|tool| matches!(tool.as_deref(), Some("tc-click"))),
+        "{}",
+        events.dump()
+    );
+    host.shutdown();
+}
+
+/// A Claude session's requests are never answered by the host, even in Codex's browser shapes
+/// with `allow_session` offered.
+#[test]
+fn a_claude_sessions_browser_approval_reaches_the_lawyer() {
+    const CLAUDE: &str = "claude-acp";
+    let dir = Dir::new(
+        "claude_browser_approval",
+        &[(CLAUDE, Scenario::Local("claude-browser-approval"))],
+    );
+    let host = dir.start(0);
+    let (_, thread, _) = matter_with_thread(&dir, &host, "m", &[], CLAUDE);
+    let mut events = host.events(StreamId::Thread(thread));
+    let (turn, _) = host.prompt(thread, "Find the judgment.");
+    answer_from(&host, &mut events, thread, 0, &["allow_once", "allow_once"]);
+    let ended = events.until_turn_ended(turn);
+    events.assert_no_mismatch();
+    assert_eq!(ended.stop, StopReason::EndTurn, "{}", events.dump());
+    assert_eq!(requested_tools(&events).len(), 2, "{}", events.dump());
+    host.shutdown();
+}

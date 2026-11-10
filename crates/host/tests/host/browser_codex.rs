@@ -93,10 +93,16 @@ fn codex_gets_the_entry_with_no_proxy_and_claude_the_shell_tool() {
         {"name": "AGENT_BROWSER_EXECUTABLE_PATH", "value": "/chrome"},
         {"name": "AGENT_BROWSER_STREAM_PORT", "value": "{{any}}"},
     ]});
+    // Codex on Windows has no browser at all, whatever the hook offers: no entry goes.
+    let servers = if cfg!(windows) {
+        json!([])
+    } else {
+        json!([entry])
+    };
     let codex = template(
         &dir,
         "bc-codex",
-        &codex_lines("bc-codex", &json!({"mcpServers": [entry]})),
+        &codex_lines("bc-codex", &json!({"mcpServers": servers})),
     );
     let claude = template(
         &dir,
@@ -132,9 +138,14 @@ fn codex_gets_the_entry_with_no_proxy_and_claude_the_shell_tool() {
     let header = first_frame_tools(&host, codex_thread);
     let browser = header
         .iter()
-        .find(|state| state.tool == ClauseoTool::Browser)
-        .expect("the header shows the browser");
-    assert_eq!(browser.availability, ToolAvailability::Available);
+        .find(|state| state.tool == ClauseoTool::Browser);
+    if cfg!(windows) {
+        // No browser state at all: the app offers no browser action (no install, no switch).
+        assert_eq!(browser, None);
+    } else {
+        let browser = browser.expect("the header shows the browser");
+        assert_eq!(browser.availability, ToolAvailability::Available);
+    }
     // No egress proxy for Codex's entry: none opened while its agent ran.
     assert_eq!(calls(&log), Vec::<String>::new());
 
@@ -159,10 +170,12 @@ fn codex_gets_the_entry_with_no_proxy_and_claude_the_shell_tool() {
     assert!(!path_parts(&codex_seen.env).contains(&tools));
     let config = codex_seen.codex_config().expect("a CODEX_CONFIG");
     let instructions = config["developer_instructions"].as_str().unwrap();
-    assert!(
-        instructions.contains("use your browser tools, the ones from the `browser` MCP server"),
-        "{instructions}"
-    );
+    let line = if cfg!(windows) {
+        "a Claude conversation can"
+    } else {
+        "use your browser tools, the ones from the `browser` MCP server"
+    };
+    assert!(instructions.contains(line), "{instructions}");
     assert!(!instructions.contains("agent-browser"), "{instructions}");
     assert!(
         !instructions.contains("require_escalated"),

@@ -6,8 +6,11 @@
 //!
 //! Nothing else weakens a security control; Safe Browsing's warnings are given up (ADR 0029).
 //! No certificate, sandbox, web-security or site isolation change. Safe Browsing is off, so its
-//! list updates and lookups never leave; the session's egress proxy and deny list are the
-//! control on where the browser goes.
+//! list updates and lookups never leave. Where the browser goes is bounded by the guard's URL
+//! filter (`filter.rs`) and, when the host gives one, the session's egress proxy and deny list;
+//! the plain client's Codex entry has no proxy, so like Claude's shell browser a redirect or a
+//! page's own navigation reaches any address, loopback and private ones included, past the
+//! filter's check of the address it is given (decision record 0029, the accepted residual).
 
 /// Chrome's one `--disable-features` and one `--enable-features` (Chrome reads only the last of
 /// each): agent-browser's own entries plus the features below, by Chromium's exact names.

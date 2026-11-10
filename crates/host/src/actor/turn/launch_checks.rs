@@ -103,7 +103,12 @@ pub(crate) struct RunFolders {
     pub(crate) root: PathBuf,
     /// `{work_folder}`, `<root>/work`.
     pub(crate) work: PathBuf,
-    /// `{browser_dir}`, `<root>/browser`.
+    /// `{browser_dir}`, the guard's `--cwd`: `<data>/browser/run/<session id>`, outside the
+    /// run folder, since Codex's shell may write the run folder and the guard, unfenced, writes
+    /// through this one (its downloads, screenshots, home, temporary files and Chrome's profile).
+    /// Made by the launch prep only for a session the entry goes to (`browser::entry_folder`),
+    /// removed with the run folder ([`Self::remove`]); an earlier run's are swept at start
+    /// ([`RunSweep`]).
     pub(crate) browser: PathBuf,
     /// `{matter_notes}`, `<data>/agent-state/<matter id>/notes`: the matter's, shared by its
     /// agents, kept when a session ends.
@@ -188,7 +193,7 @@ impl RunFolders {
         Self {
             key,
             work: root.join("work"),
-            browser: root.join("browser"),
+            browser: browser_run_dir(data).join(key.id()),
             browser_config: agent_browser.join(crate::browser::SESSION_CONFIG),
             downloads: agent_browser.join("downloads"),
             browser_profile: agent_browser.join("profile"),
@@ -219,7 +224,7 @@ impl RunFolders {
     pub(crate) fn make(&self, data: &Path, sweep: &RunSweep) -> Result<(), Error> {
         sweep.once(data);
         let tmp = crate::agent::temp::temp_dir(&self.root);
-        for folder in [&self.work, &tmp, &self.browser, &self.notes] {
+        for folder in [&self.work, &tmp, &self.notes] {
             if let Err(error) = crate::write::create_private_dirs_under(data, folder) {
                 self.remove();
                 return Err(Error::refused(
@@ -243,21 +248,10 @@ impl RunFolders {
         Ok(())
     }
 
-    /// Removes this launch's run folder and all it holds, when it is a real folder; the notes
-    /// folder stays. Only the folder the host made: the path as built (`<data>/run/<session id>`),
-    /// never canonicalized, removed with `remove_dir_all`, which removes a link inside and never
-    /// follows it. Called once the agent's process has exited, or when it never started. File
-    /// system calls: off the actor.
+    /// Removes this launch's run folder and its browser folder, through no link
+    /// ([`folders::remove_folders`]); the notes folder stays. File system calls: off the actor.
     pub(crate) fn remove(&self) {
-        let ours = self.root.file_name() == Some(std::ffi::OsStr::new(&self.key.id()))
-            && self.root.parent().and_then(Path::file_name) == Some(std::ffi::OsStr::new("run"));
-        if !ours {
-            tracing::warn!("not a run folder the host made; it stays");
-            return;
-        }
-        if crate::write::is_real_dir(&self.root) {
-            remove_tree(&self.root);
-        }
+        folders::remove_folders(self);
     }
 }
 
@@ -565,7 +559,7 @@ pub use packs::PackRequest;
 use packs::PackSkip;
 pub(super) use packs::{PackNotices, pack_notices};
 mod folders;
-use folders::{launch_deny, notes_dir, remove_tree, run_dir};
+use folders::{browser_run_dir, launch_deny, notes_dir, remove_tree, run_dir};
 mod paths;
 use paths::{LaunchPaths, launch_paths};
 

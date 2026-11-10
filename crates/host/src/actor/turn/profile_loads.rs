@@ -64,7 +64,8 @@ pub(super) fn launch_keys(
         let inputs = browser_inputs(actor, &prepared.run, control, browser_switch);
         let (_, entry) = browser::hook_servers(actor.profile.mcp_servers(&agent_id), &inputs);
         let shell = shell_browser(actor, &prepared.run, &agent_id);
-        let browser = session_part(shell.as_ref(), entry.as_ref(), &prepared.run);
+        let none_here = browser::no_browser(AgentKind::of(&agent_id), cfg!(windows));
+        let browser = session_part(shell.as_ref(), entry.as_ref(), &prepared.run, none_here);
         let folders = Folders::of(&prepared.run.work, &prepared.run.notes)?
             .with_connectors(part)
             .with_browser(browser_part(browser, shell.is_none()));
@@ -80,6 +81,7 @@ pub(super) fn launch_keys(
             notes: &prepared.run.notes,
             codex_home: &codex.home,
             listed: &prepared.run.codex_listed,
+            socket_dir: socket_dir(&prepared.run),
         };
         let fence =
             crate::agent::codex_fence::keys(actor.effective.locations(), session, cfg!(windows));
@@ -114,8 +116,9 @@ pub(super) fn session_loads(
             Error::refused(ErrorCode::AgentLaunchFailed, "the session has no folders")
         })?;
     let control = loads::mcp_control(&actor.managed_mcp);
-    let (hook, case_law_entry, case_law_state) =
-        case_law_servers(actor, &run, actor.profile.mcp_servers(&agent_id), control);
+    let none_here = browser::no_browser(kind, cfg!(windows));
+    let offered = browser::offered(actor.profile.mcp_servers(&agent_id), none_here);
+    let (hook, case_law_entry, case_law_state) = case_law_servers(actor, &run, offered, control);
     let part = connectors_part(case_law_entry.is_some());
     let (web_search, browser_switch) = switches(actor);
     let inputs = browser_inputs(actor, &run, control, browser_switch);
@@ -123,8 +126,8 @@ pub(super) fn session_loads(
     let (hook_servers, browser_state) = browser::hook_servers(hook, &inputs);
     // Claude's shell tool; none for an agent offered the entry.
     let shell = shell_browser(actor, &run, &agent_id);
-    let session_browser = session_part(shell.as_ref(), browser_state.as_ref(), &run);
-    if shell.is_some() || browser_state.is_some() {
+    let session_browser = session_part(shell.as_ref(), browser_state.as_ref(), &run, none_here);
+    if shell.is_some() || browser_state.is_some() || none_here {
         // For support: whether this session has the browser, and which Chrome by file name.
         let (browser, chrome) = browser::part_log(session_browser, run.chrome.as_deref());
         tracing::info!(target: LIFECYCLE, %thread, browser, chrome, "browser part filled");
@@ -290,6 +293,21 @@ fn browser_inputs<'a>(
 
 /// Whether the profile hook offers `agent` the `browser` MCP entry (Codex:
 /// `clauseo_profile::servers::browser_mcp`), which takes the shell tool's place.
+/// The session's browser socket folder, for Codex's fence (`agent::codex_fence::Session`): the
+/// folder as made, when the session holds a browser claim (macOS and Linux).
+fn socket_dir(run: &RunFolders) -> Option<&Path> {
+    let session = run.browser_session.as_deref()?;
+    #[cfg(unix)]
+    {
+        Some(session.socket_dir.path())
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = session;
+        None
+    }
+}
+
 fn offers_entry(actor: &Actor, agent: &AgentId) -> bool {
     actor.profile.mcp_servers(agent).iter().any(|server| {
         let McpServer::Stdio { name, .. } = server;
@@ -306,7 +324,7 @@ fn shell_browser(
     agent: &AgentId,
 ) -> Option<(clauseo_protocol::ToolState, BrowserPart)> {
     actor.profile.browser_tool()?;
-    if offers_entry(actor, agent) {
+    if offers_entry(actor, agent) || browser::no_browser(AgentKind::of(agent), cfg!(windows)) {
         return None;
     }
     let (_, switch) = switches(actor);
@@ -344,13 +362,19 @@ fn shell_chrome<'a>(actor: &Actor, run: &'a RunFolders) -> Option<&'a Path> {
     run.chrome.as_deref().filter(|_| run.browser_shell)
 }
 
-/// Which browser part `run`'s session gets: the shell tool's (Claude), else the one the `browser`
-/// entry's state gives (Codex, `browser::entry_part`), else none.
+/// Which browser part `run`'s session gets: the Claude-only line for an agent with no browser on
+/// this OS (`none_here`, Codex on Windows: `browser::no_browser`); else the shell tool's
+/// (Claude), else the one the `browser` entry's state gives (Codex, `browser::entry_part`),
+/// else none.
 fn session_part(
     shell: Option<&(clauseo_protocol::ToolState, BrowserPart)>,
     entry: Option<&clauseo_protocol::ToolState>,
     run: &RunFolders,
+    none_here: bool,
 ) -> BrowserPart {
+    if none_here {
+        return BrowserPart::ClaudeOnly;
+    }
     match (shell, entry) {
         (Some((_, part)), _) => *part,
         (None, Some(state)) => browser::entry_part(state, run.chrome.is_some()),

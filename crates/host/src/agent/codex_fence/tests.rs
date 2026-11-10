@@ -46,6 +46,10 @@ fn matter() -> PathBuf {
     PathBuf::from("/home/lawyer/Matters/Smith v Jones")
 }
 
+fn socket_dir() -> PathBuf {
+    PathBuf::from("/tmp/clauseo-ab-0123456789abcdef")
+}
+
 /// The fence before the launch lists anything: `run`, `agent-state` and `agents/runtime` whole.
 pub(crate) fn fence() -> Map<String, Value> {
     fence_with(&Listed::default())
@@ -53,12 +57,14 @@ pub(crate) fn fence() -> Map<String, Value> {
 
 /// The fence with `listed` as the launch found the data folder.
 pub(crate) fn fence_with(listed: &Listed) -> Map<String, Value> {
-    let (run_root, notes, codex_home) = (run_root(), notes(), codex_home());
+    let (run_root, notes, codex_home, socket_dir) =
+        (run_root(), notes(), codex_home(), socket_dir());
     let session = Session {
         run_root: &run_root,
         notes: &notes,
         codex_home: &codex_home,
         listed,
+        socket_dir: Some(&socket_dir),
     };
     keys(&locations(), session, false)
 }
@@ -444,6 +450,29 @@ fn every_locations_path_is_denied_or_allowed_with_a_reason() {
     }
 }
 
+/// B1 and B2 of the browser review: the unfenced guard's `--cwd` (`<data>/browser/run/<id>`,
+/// `RunFolders::browser`) and the session's socket folder are denied, read and write, in both
+/// kinds of turn, so the sandboxed shell can neither plant a link where the guard writes nor
+/// reach agent-browser's daemon socket.
+#[test]
+fn the_guard_folder_and_the_browser_socket_folder_are_denied() {
+    let keys = fence();
+    // `RunFolders::browser`, as `launch_checks/tests.rs` pins it.
+    let browser = data().join("browser").join("run").join("s1");
+    for path in [
+        browser.clone(),
+        browser.join("downloads"),
+        browser.join("profile").join("Default"),
+        data().join("browser").join("run.old-0").join("s9"),
+        socket_dir(),
+        socket_dir().join("s1.sock"),
+    ] {
+        assert_eq!(access(&keys, &path), "deny", "{}", path.display());
+    }
+    let filesystem = &keys["permissions"][PROFILE]["filesystem"];
+    assert_eq!(filesystem[socket_dir().to_str().unwrap()], json!("deny"));
+}
+
 #[test]
 fn windows_gets_no_fence() {
     let (run_root, notes, codex_home) = (run_root(), notes(), codex_home());
@@ -452,6 +481,7 @@ fn windows_gets_no_fence() {
         notes: &notes,
         codex_home: &codex_home,
         listed: &listed(),
+        socket_dir: None,
     };
     assert!(keys(&locations(), session, true).is_empty());
 }
@@ -470,6 +500,7 @@ fn a_data_folder_with_a_glob_character_is_named_literally_without_the_set_aside_
         notes: &notes,
         codex_home: &codex_home,
         listed: &Listed::default(),
+        socket_dir: None,
     };
     let keys = keys(&locations, session, false);
     let scoped = keys["permissions"][PROFILE]["filesystem"][data.to_str().unwrap()]

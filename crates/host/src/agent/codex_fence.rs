@@ -31,7 +31,7 @@
 //!   1043-1047`). Seatbelt (macOS) and bubblewrap (Linux) apply a deny to every sandboxed
 //!   process, the shell included, for reads and writes (`codex-rs/sandboxing/src/seatbelt.rs:
 //!   899-1000`, `codex-rs/linux-sandbox/src/bwrap.rs:1331-1362`).
-//! - An approved escalated command (`require_escalated`: agent-browser's, by its prefix rule)
+//! - An approved escalated command (`require_escalated`, which the lawyer approves)
 //!   runs under `for_approved_command` (`codex-rs/core/src/tools/orchestrator.rs:234-258`):
 //!   `:root` writable and the profile's `deny` entries only, its `write` and `read` entries
 //!   dropped (`codex-rs/protocol/src/permissions/target.rs:48-110`, `codex-rs/protocol/src/
@@ -109,8 +109,10 @@ const CODEX_HOME_DENIED: [&str; 4] = [
 
 /// The folders under `<data>` no Codex shell needs that no `Locations` accessor names: the
 /// skill packs' sources, the matters' store, the counts, the Windows sandbox's ledger, the
-/// limits reader's state, the browser's config, and the block list's store and the lawyer's
-/// allowed sites.
+/// limits reader's state, the browser's config and every session's browser folder (the guard's
+/// `--cwd`, `<data>/browser/run/<session>`: the guard runs unfenced and writes through it, so
+/// the shell must not plant a link there), and the block list's store and the lawyer's allowed
+/// sites.
 const DATA_DENIED: [&str; 7] = [
     "skill-packs",
     "matters",
@@ -272,16 +274,26 @@ pub(crate) struct Session<'a> {
     pub(crate) codex_home: &'a Path,
     /// What the launch listed ([`list`]).
     pub(crate) listed: &'a Listed,
+    /// The session's browser socket folder (`/tmp/clauseo-ab-<16 random>`, made by the host
+    /// at the claim, `browser::session`), denied by its exact path: agent-browser's daemon
+    /// listens there unauthenticated, for the guard, which Codex runs unfenced. None without a
+    /// browser claim. The shell's own sandbox already refuses the connect (Seatbelt's `(deny
+    /// default)` with no network rule when network is off, `codex-rs/sandboxing/src/
+    /// seatbelt.rs:318-322, 381-382`; Linux's seccomp denies `connect` in the restricted mode,
+    /// `codex-rs/linux-sandbox/src/landlock.rs:201-203`); this deny is a second wall.
+    pub(crate) socket_dir: Option<&'a Path>,
 }
 
 /// The fence's denied paths: the `Locations` paths, the store's and the search index's database
-/// files, [`DATA_DENIED`], Claude's whole folder, [`AGENTS_DENIED`], Codex's sign-in markers and
-/// [`CODEX_HOME_DENIED`] and [`CODEX_DATABASES`] in its home, then what the launch listed
-/// ([`Listed`], each path only under the folder it was listed from). A path that is or holds the
-/// session's run folder, its notes or Codex's home is left out, with a warning. Last, each of
-/// [`SESSION_PARENTS`] and the runtime folder that the launch could not list, whole: then the
-/// session's two folders are reopened by [`keys`]' `write` entries and the session's
-/// `additionalDirectories` for an ordinary command only, never an escalated one.
+/// files, [`DATA_DENIED`] (`browser` among them: every session's browser folder, the unfenced
+/// guard's `--cwd`, is in it), Claude's whole folder, [`AGENTS_DENIED`], Codex's sign-in
+/// markers and [`CODEX_HOME_DENIED`] and [`CODEX_DATABASES`] in its home, then what the launch
+/// listed ([`Listed`], each path only under the folder it was listed from). A path that is or
+/// holds the session's run folder, its notes or Codex's home is left out, with a warning. Last,
+/// each of [`SESSION_PARENTS`] and the runtime folder that the launch could not list, whole, and
+/// the session's browser socket folder ([`Session::socket_dir`]): then the session's two folders
+/// are reopened by [`keys`]' `write` entries and the session's `additionalDirectories` for an
+/// ordinary command only, never an escalated one.
 pub(crate) fn rules(locations: &Locations, session: Session<'_>) -> Vec<PathBuf> {
     let data = locations.data_dir();
     let agents = data.join("agents");
@@ -358,6 +370,7 @@ pub(crate) fn rules(locations: &Locations, session: Session<'_>) -> Vec<PathBuf>
         keep
     });
     denied.extend(whole);
+    denied.extend(session.socket_dir.map(Path::to_path_buf));
     let mut seen = std::collections::HashSet::new();
     denied.retain(|path| seen.insert(path.clone()));
     denied

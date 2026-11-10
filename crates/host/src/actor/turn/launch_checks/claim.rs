@@ -26,6 +26,8 @@ pub(super) fn claim(run: &mut RunFolders, data: &Path, claims: Claims, slot: boo
     (run.browser_blocked, run.browser_policy_read) = (prepared.policy_block, prepared.policy_read);
     if run.browser_shell && run.chrome.is_some() {
         super::browser::shell_folders(run, data);
+    } else if run.chrome.is_some() && run.browser_session.is_some() {
+        super::browser::entry_folder(run, data);
     }
     // The launch offers the browser only once its Chrome was found and claimed.
     let offered = run.chrome.is_some() && run.browser_session.is_some();

@@ -4,16 +4,18 @@
 //! permission request that names a file of the matter a program holds open (Word, say) is
 //! answered for the lawyer, rejected, in the commit that logs it. One that touches Clauseo's own
 //! data folder (`agent/data_fence.rs`) is rejected with nothing logged: the lawyer never sees it.
+//! A Codex approval of one of the guarded `browser` server's tools other than eval is allowed for
+//! the session with nothing logged ([`browser_tool_to_allow`]).
 
 use std::path::PathBuf;
 
 use clauseo_acp::{AcpEvent, LimitSignal, LimitStatus, Origin, PendingKey};
 use clauseo_matters::HeldOpen;
 use clauseo_protocol::{
-    AgentChoiceId, AgentSessionId, CompactString, Deliverable, ElicitationId, ElicitationRequest,
-    ElicitationRequested, ElicitationResponse, LimitStopReason, MatterPath, PermissionAbout,
-    PermissionChoice, PermissionKind, PermissionOption, PermissionRequestId, PermissionRequested,
-    PermissionResolved, Principal, StopReason, StreamId, ThreadId, TurnId,
+    AgentChoiceId, AgentKind, AgentSessionId, CompactString, Deliverable, ElicitationId,
+    ElicitationRequest, ElicitationRequested, ElicitationResponse, LimitStopReason, MatterPath,
+    PermissionAbout, PermissionChoice, PermissionKind, PermissionOption, PermissionRequestId,
+    PermissionRequested, PermissionResolved, Principal, StopReason, StreamId, ThreadId, TurnId,
 };
 
 use super::super::input::MatterTag;
@@ -52,7 +54,8 @@ pub(super) struct HeldOpenCheck {
 /// otherwise, or when the check cannot be sent, it is logged `Live` for the lawyer at once. In
 /// forced ask it first loses the options `agent::forced_ask::keep_option` drops. A Claude request
 /// naming only its own plan note is marked `about: agent_plan` (`agent/plan_note.rs`), a label that
-/// changes nothing else.
+/// changes nothing else. In the live turn, a Codex approval of a `browser` tool other than eval is
+/// answered `allow_session` at once, unseen ([`browser_tool_to_allow`]).
 pub(super) fn on_permission(actor: &mut Actor, thread: ThreadId, event: AcpEvent) {
     let AcpEvent::PermissionRequested {
         session,
@@ -86,6 +89,10 @@ pub(super) fn on_permission(actor: &mut Actor, thread: ThreadId, event: AcpEvent
         cancel_outside_turn(actor, thread, &ask.session);
         return;
     };
+    if let Some((tool, option)) = browser_tool_to_allow(actor, thread, &ask, raw_input.as_ref()) {
+        allow_browser_tool(actor, thread, ask.key, &tool, option);
+        return;
+    }
     let fence = fence_check(actor, thread, &paths, raw_input.as_ref());
     if paths.is_empty() {
         paths = tool_call_paths(actor, thread, &ask);
@@ -122,6 +129,77 @@ pub(super) fn on_permission(actor: &mut Actor, thread: ThreadId, event: AcpEvent
         );
         log_for_lawyer(actor, thread, ask);
     }
+}
+
+/// The option codex-acp 2.2.2 offers to allow an MCP tool for the session, kind `allow_always`
+/// (`dist/index.js:32663-32708`); answered, Codex gets `ApprovedForSession` and, in its default
+/// `Auto` approval mode, asks no more for that server and tool in the session (codex rust-v0.162.1
+/// `core/src/mcp_tool_call.rs:1730-1751`, `:2126-2163`; codex-acp `dist/index.js:32733-32750`).
+const ALLOW_SESSION: &str = "allow_session";
+
+/// The `browser` tool and the `allow_session` option, when the host answers this request itself:
+/// the thread's agent is Codex, not in forced ask; the request offers `allow_session`; and it
+/// names one of the guarded `browser` server's tools other than eval
+/// (`sources::browser::auto_allowed_browser_tool`). The tool comes only from fields Codex and
+/// codex-acp build, never from model-written text: the title `mcp.browser.<tool>` of the
+/// earlier tool call the request's toolCallId names, which the thread's sources keep
+/// (`sources::browser::CodexTools`), or a standalone request's `serverName` and exact message
+/// (`sources::browser::codex_standalone_browser_tool`). Everything else (shell commands, file
+/// writes, other servers such as `case-law`, eval) goes to the lawyer as before.
+///
+/// Codex's own per-server `default_tools_approval_mode` would do this without a prompt, but it
+/// cannot reach Codex: codex-acp replaces the whole `mcp_servers` table with the servers ACP
+/// gives it (`dist/index.js:35482`), so a `CODEX_CONFIG` value for that server is dropped.
+fn browser_tool_to_allow(
+    actor: &mut Actor,
+    thread: ThreadId,
+    ask: &PermissionAsk,
+    raw_input: Option<&serde_json::Value>,
+) -> Option<(String, AgentChoiceId)> {
+    let kind = actor
+        .check_thread(thread)
+        .ok()
+        .and_then(|entry| AgentKind::of(&entry.row.agent));
+    if kind != Some(AgentKind::Codex) || agent(actor, thread).is_none_or(|agent| agent.forced_ask) {
+        return None;
+    }
+    let option = ask
+        .options
+        .iter()
+        .find(|option| option.option_id == ALLOW_SESSION)?;
+    let option = AgentChoiceId::new(&option.option_id).ok()?;
+    let standalone =
+        crate::sources::browser::codex_standalone_browser_tool(&ask.acp_tool_call_id, raw_input);
+    let tool = match standalone {
+        Some(tool) => tool.to_owned(),
+        None => super::state(actor, thread)?
+            .sources
+            .codex_browser_tool(&ask.acp_tool_call_id)?
+            .to_owned(),
+    };
+    crate::sources::browser::auto_allowed_browser_tool(&tool).then_some((tool, option))
+}
+
+/// Answers a Codex `browser` tool's approval with `option` (`allow_session`), with nothing
+/// logged on the thread: the lawyer never sees it. `tracing` gets the tool's name, never its
+/// arguments.
+fn allow_browser_tool(
+    actor: &mut Actor,
+    thread: ThreadId,
+    key: PendingKey,
+    tool: &str,
+    option: AgentChoiceId,
+) {
+    let Some(agent) = agent(actor, thread) else {
+        return;
+    };
+    let client = agent.link.client.clone();
+    tracing::info!(%thread, tool, "allowed a browser tool for the session");
+    spawn(actor, async move {
+        if let Err(error) = client.answer_permission(key, option).await {
+            tracing::warn!(error = %Cause(&error), "a browser tool's approval did not reach the agent");
+        }
+    });
 }
 
 /// The data-folder check of a request's paths and `rawInput` (`agent/data_fence.rs`), for

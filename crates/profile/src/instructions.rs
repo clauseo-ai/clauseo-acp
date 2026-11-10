@@ -64,6 +64,11 @@ pub fn codex_shell(macos: bool) -> Option<&'static str> {
     macos.then(|| CODEX_SHELL_MACOS.trim())
 }
 
+/// What a Codex session on Windows is told, which has no browser for this agent there
+/// (`servers::no_browser`): one plain line pointing the lawyer to a Claude conversation.
+pub const BROWSER_CLAUDE_ONLY: &str =
+    include_str!("../assets/instructions/browser-claude-only.txt");
+
 /// Which browser part a session gets in place of `{browser}`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BrowserPart {
@@ -74,6 +79,9 @@ pub enum BrowserPart {
     Off,
     /// No supported browser on this computer: [`BROWSER_NONE`].
     NotInstalled,
+    /// No browser for this agent on this computer (Codex on Windows, `servers::no_browser`):
+    /// [`BROWSER_CLAUDE_ONLY`].
+    ClaudeOnly,
 }
 
 /// What the host fills `{browser}` with: a space and the part `part` names. Only this part names
@@ -85,10 +93,13 @@ pub fn browser_part(part: BrowserPart) -> &'static str {
         std::sync::LazyLock::new(|| format!(" {}", BROWSER_OFF.trim()));
     static NONE: std::sync::LazyLock<String> =
         std::sync::LazyLock::new(|| format!(" {}", BROWSER_NONE.trim()));
+    static CLAUDE_ONLY: std::sync::LazyLock<String> =
+        std::sync::LazyLock::new(|| format!(" {}", BROWSER_CLAUDE_ONLY.trim()));
     match part {
         BrowserPart::On => &ON,
         BrowserPart::Off => &OFF,
         BrowserPart::NotInstalled => &NONE,
+        BrowserPart::ClaudeOnly => &CLAUDE_ONLY,
     }
 }
 

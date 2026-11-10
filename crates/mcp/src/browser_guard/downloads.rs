@@ -269,7 +269,10 @@ impl Sweeper {
 /// Moves the file `from` into `downloads` as `name`, or the first free `<stem> (<n>)<ext>`,
 /// never replacing a file: when a name is taken by the time of the move, the next free one is
 /// tried, [`MOVE_TRIES`] names at most. `before_move` runs between the look and each move (the
-/// tests put a file there). Returns where the file went.
+/// tests put a file there). Right before each move, `downloads` must still be a real folder, not
+/// a link or a Windows reparse point (`symlink_metadata`, whose `is_symlink` covers junctions):
+/// one swapped in after the guard's start-up check would carry the file elsewhere. Returns where
+/// the file went.
 pub(crate) fn place(
     from: &Path,
     downloads: &Path,
@@ -282,6 +285,7 @@ pub(crate) fn place(
             break;
         };
         before_move(&target);
+        refuse_a_link(downloads)?;
         match write::move_new(from, &target) {
             Ok(()) => return Ok(target),
             Err(error) if error.kind() == io::ErrorKind::AlreadyExists => first = n + 1,
@@ -292,6 +296,17 @@ pub(crate) fn place(
         io::ErrorKind::AlreadyExists,
         "no free name in the downloads folder",
     ))
+}
+
+/// `Err` unless `folder` is a real folder, read without following a link.
+fn refuse_a_link(folder: &Path) -> io::Result<()> {
+    let kind = std::fs::symlink_metadata(folder)?.file_type();
+    if kind.is_symlink() || !kind.is_dir() {
+        return Err(io::Error::other(
+            "the downloads folder is no longer a real folder",
+        ));
+    }
+    Ok(())
 }
 
 /// Chrome's names for a download still being written, on every OS: `*.crdownload` once Chrome

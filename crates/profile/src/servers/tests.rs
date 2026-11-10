@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 
 use clauseo_settings::Locations;
 
-use super::{CASE_LAW, browser_for, case_law};
+use super::{CASE_LAW, browser_for, browser_mcp_on, case_law, no_browser_on};
 use crate::{BrowserSidecars, ProfilePaths};
 
 fn paths() -> ProfilePaths {
@@ -97,4 +97,32 @@ fn the_case_law_entry_names_the_relay_and_the_token_file_only() {
             ("CLAUSEO_RELAY_TOKEN_FILE", "{relay_token_file}"),
         ]
     );
+}
+
+/// Codex gets the entry on macOS and Linux and no browser at all on Windows, where its part points
+/// the lawyer to a Claude conversation with no install advice and no tool named; Claude never gets
+/// the entry and always may have its shell command.
+#[test]
+fn codex_has_the_entry_off_windows_and_no_browser_on_windows() {
+    use crate::instructions::{BrowserPart, browser_part};
+    use clauseo_protocol::AgentKind;
+    for windows in [false, true] {
+        assert!(!browser_mcp_on(Some(AgentKind::Claude), windows));
+        assert!(!no_browser_on(Some(AgentKind::Claude), windows));
+        assert!(!browser_mcp_on(None, windows));
+    }
+    assert!(browser_mcp_on(Some(AgentKind::Codex), false));
+    assert!(!no_browser_on(Some(AgentKind::Codex), false));
+    assert!(!browser_mcp_on(Some(AgentKind::Codex), true));
+    assert!(no_browser_on(Some(AgentKind::Codex), true));
+    let claude_only = browser_part(BrowserPart::ClaudeOnly);
+    assert!(claude_only.contains("You have no browser in this session"));
+    assert!(
+        claude_only.contains("a Claude conversation can"),
+        "{claude_only}"
+    );
+    for word in ["Chrome", "install", "MCP", "tool", "skill", "agent-browser"] {
+        assert!(!claude_only.contains(word), "{word}: {claude_only}");
+    }
+    assert!(claude_only.split_whitespace().count() <= 40);
 }
