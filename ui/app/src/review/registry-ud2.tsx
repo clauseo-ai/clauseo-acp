@@ -287,6 +287,25 @@ export const UD2: Entry[] = [
     "matters/new-scan",
     scan(scanned({ files: 1, bytes: 2_400_000, now_reading: "Plaint.pdf" })),
   ),
+  // D-072: the counts in KB under 1 MB, and an empty folder's own line, in the same scene (UC's ids, this file's scenes)
+  entry(
+    "UC-135",
+    scanWords("{n} files, {kb} KB"),
+    "matters/new-scan",
+    scan(scanned({ files: 200, bytes: 6_000, done: true })),
+  ),
+  entry(
+    "UC-136",
+    scanWords("1 file, {kb} KB"),
+    "matters/new-scan",
+    scan(scanned({ files: 1, bytes: 48_000, done: true })),
+  ),
+  entry(
+    "UC-137",
+    scanWords("The folder is empty."),
+    "matters/new-scan",
+    scan(scanned({ files: 0, bytes: 0, done: true })),
+  ),
   entry(
     "UD2-03",
     scanWords("Reading the folder. Now {title}."),

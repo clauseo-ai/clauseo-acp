@@ -912,5 +912,38 @@
     "at": "2026-11-10",
     "by": "app track (provisional; orchestrator to approve)",
     "note": "the confirm's body; Cancel and Remove from the list are the existing words (rail triage, D-054)"
+  },
+  "UC-135": {
+    "en": "{n} files, {kb} KB",
+    "hi": "{n} फ़ाइलें, {kb} KB",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-10",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-10",
+    "by": "orchestrator (decision: KB under 1 MB; an empty folder says so)",
+    "note": "New matter's folder line, a folder under 1 MB (D-072; was a rounded-up {mb} MB)"
+  },
+  "UC-136": {
+    "en": "1 file, {kb} KB",
+    "hi": "1 फ़ाइल, {kb} KB",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-10",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-10",
+    "by": "orchestrator (decision: KB under 1 MB; an empty folder says so)",
+    "note": "New matter's folder line, one file under 1 MB (D-072)"
+  },
+  "UC-137": {
+    "en": "The folder is empty.",
+    "hi": "फ़ोल्डर खाली है।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-10",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-10",
+    "by": "orchestrator (decision: KB under 1 MB; an empty folder says so)",
+    "note": "New matter's folder line, the scan done with no file (D-072; was 0 files, 0 MB)"
   }
 }

@@ -66,6 +66,7 @@ import {
 import { installDevHooks, queryPatch } from "./dev-hooks.ts";
 import { askEntry, ONE_QUESTION, TWO_QUESTIONS } from "./elicitation-fixtures.ts";
 import { detailed, fakeNext, railStates } from "./fake-next.ts";
+import { scanProbe } from "./scan/probe-scan.ts";
 import type { MatterInfo, PaperSummary } from "./host-next.ts";
 import { planProbe } from "./limits/probe-plan.ts";
 import { probeThreads } from "./probe-threads.ts";
@@ -300,6 +301,8 @@ const transport = new FakeTransport({
       : {}),
   // ?reveal=refused: Show in Finder is refused as the folder can't be found, so the row offers Locate folder
   ...(page.get("reveal") === "refused" ? { reveal: refuseReveal } : {}),
+  // ?scan=small, empty or large: New matter's picker and its folder's counts (scan/probe-scan.ts)
+  ...scanProbe(page.get("scan")),
   // on the pages whose undo meets a lock, every undo_step is refused with matter.file_locked
   dispatch: (envelope): CommandOutcome => {
     if (staged?.refusesUndo === true && envelope.command.undo_step !== undefined) throw LOCKED;
