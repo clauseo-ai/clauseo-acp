@@ -1,7 +1,8 @@
 // @vitest-environment happy-dom
 // Settings, Plan and usage over FakeTransport (U12): each agent's plan, windows and "Updated at", in every state the
-// room shows (stale, loading, none with Try again, pay as you go, a window whose reset passed, missing_scope and
-// live_only with no entry); shown sent once on opening, try_again from the button, and nothing left on a timer.
+// room shows (stale, loading with its checking line, none with Try again, pay as you go, a window whose reset passed,
+// and missing_scope, live_only and a newer state as none); never blank, with one line when no plan has an entry; shown
+// sent once on opening, try_again from the button, and nothing left on a timer.
 import { IconTryAgain } from "@clauseo/components/icons/icons.tsx";
 import { iconIn } from "@clauseo/components/icons/icon-in.tsx";
 import axe from "axe-core";
@@ -186,11 +187,12 @@ test("stale: the figures kept, muted, and Updated at speaks up", async () => {
   expect(card("claude")?.querySelector(".set-numeral")?.textContent).toBe("70%");
 });
 
-test("loading: the plan's name alone, no figures, never blank", async () => {
+test("loading: the plan's name and the checking line, no figures", async () => {
   await mount();
   await view({ claude: figureless({ freshness: "loading" }) });
   expect(heads()).toEqual(["Claude Max"]);
-  expect(group("claude")?.textContent).toBe("Claude Max");
+  expect(group("claude")?.textContent).toBe("Claude MaxChecking what's left…");
+  expect(card("claude")?.getAttribute("role")).toBe("status");
   expect(group("claude")?.querySelector('[role="meter"]')).toBeNull();
 });
 
@@ -293,13 +295,72 @@ test("a window whose reset passed: no percentage, no meter, its reset muted", as
   );
 });
 
-test("missing_scope and live_only: no entry", async () => {
+test("missing_scope and live_only: the couldn't-check card with Try again, beside the other plan", async () => {
   await mount();
   await view({ claude: figureless({ freshness: "missing_scope" }), codex: entry(10) });
-  expect(card("claude")).toBeNull();
+  expect(card("claude")?.textContent).toContain("Usage isn't available right now.");
   await view({ claude: entry(30, { freshness: "live_only" }), codex: entry(10) });
-  expect(card("claude")).toBeNull();
-  expect(card("codex")).not.toBeNull();
+  expect(card("claude")?.textContent).toContain("Usage isn't available right now.");
+  expect(group("claude")?.querySelector('[data-testid="plan-try-again"]')).not.toBeNull();
+  expect(card("codex")?.querySelector(".set-numeral")?.textContent).toBe("90%");
+});
+
+/** What a plan's entry must show in each state: its figures, the checking line, or the couldn't-check card. */
+const SHOWS = {
+  figures: "38%",
+  loading: "Checking what's left…",
+  none: "Usage isn't available right now.",
+};
+const NEVER_BLANK: [string, LimitsView, Partial<Record<"claude" | "codex", string>>][] = [
+  ["{}", {}, {}],
+  ["fresh", { claude: entry(62) }, { claude: SHOWS.figures }],
+  ["loading", { claude: figureless({ freshness: "loading" }) }, { claude: SHOWS.loading }],
+  ["unavailable", { codex: figureless({ freshness: "unavailable" }) }, { codex: SHOWS.none }],
+  ["missing_scope", { claude: figureless({ freshness: "missing_scope" }) }, { claude: SHOWS.none }],
+  ["live_only", { claude: entry(30, { freshness: "live_only" }) }, { claude: SHOWS.none }],
+  [
+    "a state from a newer Clauseo",
+    { claude: figureless({ freshness: "paused_by_vendor" as AgentLimitsView["freshness"] }) },
+    { claude: SHOWS.none },
+  ],
+  [
+    "both plans, one loading",
+    { claude: figureless({ freshness: "loading" }), codex: entry(62, { plan: "ChatGPT Plus" }) },
+    { claude: SHOWS.loading, codex: SHOWS.figures },
+  ],
+];
+
+test.each(NEVER_BLANK)("never blank: %s", async (_, limits, shows) => {
+  await mount();
+  await view(limits);
+  expect(section()?.textContent?.trim()).not.toBe("");
+  const kinds = Object.keys(shows) as ("claude" | "codex")[];
+  if (kinds.length === 0) {
+    expect(section()?.textContent).toBe("Set up Claude or ChatGPT to see what each plan has left.");
+    expect(heads()).toEqual([]);
+  }
+  for (const kind of ["claude", "codex"] as const) {
+    const want = shows[kind];
+    if (want === undefined) {
+      expect(card(kind)).toBeNull();
+      continue;
+    }
+    const plan = limits[kind]?.plan ?? "";
+    expect(group(kind)?.querySelector("h3")?.textContent).toBe(plan);
+    expect(card(kind)?.textContent).toContain(want);
+  }
+  if (kinds.length > 0) expect(section()?.textContent).not.toContain("Set up Claude or ChatGPT");
+});
+
+test("Hindi: the checking line and the line with no plan", async () => {
+  localStorage.setItem("clauseo.display", JSON.stringify({ language: "hi" }));
+  await mount();
+  await view({});
+  expect(section()?.textContent).toBe(
+    "हर प्लान में कितना बाकी है, यह देखने के लिए Claude या ChatGPT सेट अप करें।",
+  );
+  await view({ claude: figureless({ freshness: "loading" }) });
+  expect(card("claude")?.textContent).toBe("कितना बाकी है, इसकी जाँच हो रही है…");
 });
 
 test("the note beside its name: Claude's 5-hour share left, else the first with figures, Pay as you go, or nothing", async () => {

@@ -27,6 +27,9 @@ export const HI = {
   "Updated at {time}": "{time} बजे अपडेट किया गया",
   "No limits to show. Each question is billed to the key's account.":
     "दिखाने को कोई सीमा नहीं। हर प्रश्न का शुल्क उसी key के खाते पर लगता है।",
+  "Checking what's left…": "कितना बाकी है, इसकी जाँच हो रही है…",
+  "Set up Claude or ChatGPT to see what each plan has left.":
+    "हर प्लान में कितना बाकी है, यह देखने के लिए Claude या ChatGPT सेट अप करें।",
   // language and appearance
   "Changes at once, and everything stays where it was.": "तुरंत बदलती है, और सब कुछ वहीं रहता है जहाँ था।",
   Day: "दिन",
