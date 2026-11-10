@@ -1,7 +1,7 @@
 //! Set-up's steps around the denies and the matters: the owners of the folders the shared-write
 //! denies protect (`PR4h`), reading the owner's registered matters after the lock (`PR4h`), step
-//! 8's fence of them against the grown pool, step 9's change journals, and the per-machine
-//! stop and sweep tasks once the owner is recorded.
+//! 8's fence of them against the grown pool, step 9's change journals, the per-machine stop and
+//! sweep tasks once the owner is recorded, and the watch task on any install with an admin copy.
 
 use std::io;
 use std::path::{Path, PathBuf};
@@ -72,6 +72,25 @@ pub(super) fn admin_lock(machine: &mut impl Machine, group: &Sid) -> Result<(), 
             "the record's AdminCopyOwner can't be read ({})",
             cause_of(&error)
         ))),
+    }
+}
+
+/// Right after [`stop_task`]: wherever an admin copy is installed (per machine or per user),
+/// the SYSTEM task `\Clauseo\SandboxWatch` (`--watch`, the denial reporter's SYSTEM side) is
+/// registered for `owner`, or replaced, so its descriptor names `owner` alone. Only set-up
+/// registers it, never the installer (`--adopt` registers `refresh::TASKS`). With no admin
+/// copy there is nothing for it to run. A failure doesn't fail the set-up: the reporter is a
+/// diagnostic with a fallback (the runner's host-side source), and the next set-up tries again.
+/// It is logged, without the owner's SID.
+pub(super) fn watch_task(machine: &mut impl Machine, owner: &Sid) {
+    let registered = match machine.copy_owner() {
+        Ok(Some(CopyOwner::Machine | CopyOwner::User(_))) => machine.register_watch_task(owner),
+        Ok(None) => return,
+        Err(error) => Err(error),
+    };
+    if let Err(error) = registered {
+        let cause = cause_of(&error);
+        tracing::warn!(%cause, "the sandbox's watch task wasn't registered");
     }
 }
 

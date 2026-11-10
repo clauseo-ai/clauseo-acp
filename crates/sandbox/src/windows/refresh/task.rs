@@ -17,7 +17,9 @@
 //!   and DACL, made with them, or set again when an administrator made it; one anyone else made
 //!   is deleted with what is in it and made again (`task_folder.rs`).
 //! - [`unregister_task`], which `--remove --uninstall` calls (it deletes staging itself,
-//!   taking it back if need be: `setup::admin_remove`).
+//!   taking it back if need be: `setup::admin_remove`). The watch task, which only set-up
+//!   registers, is disabled, a running instance ended and its trace session stopped before it
+//!   is deleted, so no session outlives it.
 //! - [`request_admin_refresh`], which the app calls as the lawyer, unelevated, after an update,
 //!   [`request_pool_stop`], and [`request_pool_sweep`], which the outer runner calls as the
 //!   lawyer at every session's end: each asks the Task Scheduler to run its task
@@ -42,6 +44,10 @@ use super::last_run::{LastRun, last_run};
 use super::task_folder::{Folders, prepare};
 use super::windows_refresher::{EXE_NAME, sandbox_dir};
 use super::{SystemTask, action_path, task_sddl};
+use crate::windows::setup::watch::teardown::{
+    KeyDelete, KeyLeft, WatchKey, WatchParts, remove_watch,
+};
+use crate::windows::setup::watch::{windows_key, windows_trace};
 use crate::windows::sids::Sid;
 
 /// The task's folder.
@@ -73,6 +79,12 @@ pub enum TaskError {
     /// The folder couldn't be made ready (`task_folder::prepare`).
     #[error("the folder {TASK_FOLDER}: {0}")]
     Folder(String),
+    /// The watcher's trace session couldn't be stopped.
+    #[error("the watcher's trace session: {0}")]
+    Session(String),
+    /// The watcher's published pipe name couldn't be deleted.
+    #[error("the watcher's key: {0}")]
+    WatchKey(String),
 }
 
 /// `call` failed with `error`, as a line for the log.
@@ -282,6 +294,9 @@ pub fn register_task(spec: SystemTask, owner_sid: &Sid) -> Result<(), TaskError>
             TASK_INSTANCES_IGNORE_NEW
         };
         settings
+            .SetPriority(spec.priority())
+            .map_err(com("SetPriority"))?;
+        settings
             .SetMultipleInstances(instances)
             .map_err(com("SetMultipleInstances"))?;
         settings
@@ -335,16 +350,39 @@ pub fn register_task(spec: SystemTask, owner_sid: &Sid) -> Result<(), TaskError>
 
 /// Deletes `task`, then the folder `\Clauseo` if nothing else is in it. A task or folder that
 /// isn't there is `Ok`. Elevated: `--remove --uninstall` calls it for each task, and a
-/// per-machine install's `--remove` for the stop and sweep tasks.
+/// per-machine install's `--remove` for the stop and sweep tasks. A task that
+/// [`SystemTask::ends_before_delete`] (the watch task) goes as `watch::teardown` says, its
+/// session and key too, with or without the folder.
 pub fn unregister_task(task: SystemTask) -> Result<(), TaskError> {
     let _apartment = Apartment::enter()?;
     let service = service()?;
     // SAFETY: a live service and a BSTR that outlives the call.
     let folder = match unsafe { service.GetFolder(&BSTR::from(TASK_FOLDER)) } {
-        Ok(folder) => folder,
-        Err(error) if missing(&error) => return Ok(()),
+        Ok(folder) => Some(folder),
+        Err(error) if missing(&error) => None,
         Err(error) => return Err(com("ITaskService::GetFolder")(error)),
     };
+    if task.ends_before_delete() {
+        let mut parts = WindowsWatch {
+            service: &service,
+            folder: folder.as_ref(),
+            task,
+        };
+        return remove_watch(&mut parts);
+    }
+    match folder {
+        Some(folder) => delete_task(&service, &folder, task),
+        None => Ok(()),
+    }
+}
+
+/// Deletes `task` from `folder`, then `\Clauseo` if it is empty. A task that isn't there is
+/// `Ok`.
+fn delete_task(
+    service: &ITaskService,
+    folder: &ITaskFolder,
+    task: SystemTask,
+) -> Result<(), TaskError> {
     // SAFETY: a live folder and a BSTR; flags 0.
     match unsafe { folder.DeleteTask(&BSTR::from(task.name()), 0) } {
         Ok(()) => {}
@@ -358,6 +396,80 @@ pub fn unregister_task(task: SystemTask) -> Result<(), TaskError> {
     // SAFETY: a live root folder and a BSTR; flags 0.
     let _kept_if_not_empty = unsafe { root.DeleteFolder(&BSTR::from(FOLDER_NAME), 0) };
     Ok(())
+}
+
+/// The watch task's removal on this machine (`watch::teardown`): the task in `folder`, when
+/// there is one; the trace session and the published name
+/// (`HKLM\SOFTWARE\Clauseo\SandboxWatch`) either way, which an ended watcher leaves (it is
+/// built with `panic = "abort"` and has no drop to run).
+struct WindowsWatch<'a> {
+    service: &'a ITaskService,
+    folder: Option<&'a ITaskFolder>,
+    task: SystemTask,
+}
+
+impl WatchParts for WindowsWatch<'_> {
+    type Error = TaskError;
+
+    fn end_task(&mut self) -> Result<(), TaskError> {
+        let Some(folder) = self.folder else {
+            return Ok(());
+        };
+        // SAFETY: a live folder and a BSTR.
+        let registered = match unsafe { folder.GetTask(&BSTR::from(self.task.name())) } {
+            Ok(registered) => registered,
+            Err(error) if missing(&error) => return Ok(()),
+            Err(error) => return Err(com("ITaskFolder::GetTask")(error)),
+        };
+        // SAFETY: a live task; the VARIANT_BOOL is a plain value.
+        unsafe { registered.SetEnabled(VARIANT_BOOL::from(false)) }
+            .map_err(com("IRegisteredTask::SetEnabled"))?;
+        // SAFETY: a live task; flags 0.
+        unsafe { registered.Stop(0) }.map_err(com("IRegisteredTask::Stop"))
+    }
+
+    fn stop_session(&mut self) -> Result<(), TaskError> {
+        windows_trace::stop_session()
+            .map(|_ran| ())
+            .map_err(TaskError::Session)
+    }
+
+    fn inspect_key(&mut self) -> Result<WatchKey, TaskError> {
+        windows_key::inspect()
+            .map_err(|error| TaskError::WatchKey(format!("reading its owner: {error}")))
+    }
+
+    fn delete_key(&mut self) -> Result<KeyDelete, TaskError> {
+        windows_key::delete().map_err(|error| TaskError::WatchKey(error.to_string()))
+    }
+
+    fn take_key(&mut self) -> Result<(), TaskError> {
+        windows_key::take_for_admins()
+            .map_err(|error| TaskError::WatchKey(format!("taking it: {error}")))
+    }
+
+    fn left(&self, why: KeyLeft) -> TaskError {
+        tracing::warn!(reason = why.line(), "the watcher's key was left");
+        TaskError::WatchKey(why.line().to_owned())
+    }
+
+    fn delete_task(&mut self) -> Result<(), TaskError> {
+        match self.folder {
+            Some(folder) => delete_task(self.service, folder, self.task),
+            None => Ok(()),
+        }
+    }
+}
+
+/// Asks the Task Scheduler to run `\Clauseo\SandboxWatch` now, as whoever calls it (the
+/// runner, as the lawyer, unelevated), through the owner's `FRFX`. It returns once the run is
+/// queued; the watcher then publishes its pipe's name (`setup::watch::protocol`) and exits
+/// unless a client connects within 30 seconds. One already running isn't started twice
+/// (`TASK_INSTANCES_IGNORE_NEW`). [`TaskError::NotRegistered`] means set-up hasn't
+/// registered it (no admin copy, or an older set-up): the runner falls back to its host-side
+/// source. Blocks on COM calls: call it off the UI thread.
+pub fn request_watch() -> Result<(), TaskError> {
+    run_task(SystemTask::Watch)
 }
 
 /// Asks the Task Scheduler to run `\Clauseo\SandboxRefresh` now, as whoever calls it: the app

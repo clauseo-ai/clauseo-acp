@@ -39,8 +39,9 @@
 //!
 //! `--refresh` (`crate::windows::refresh`) is the SYSTEM task's: it exits with its own codes
 //! (`RefreshExit`, from 32), which is why [`main`] returns the process's exit code. So do
-//! `--stop` (`stop.rs`, `StopExit`, from 45) and `--sweep-tasks` (`sweep.rs`, `SweepExit`,
-//! from 53, after the WSL deny task's 51 and 52), the other SYSTEM tasks'.
+//! `--stop` (`stop.rs`, `StopExit`, from 45), `--sweep-tasks` (`sweep.rs`, `SweepExit`, from
+//! 53, after the WSL deny task's 51 and 52) and `--watch` (`watch.rs`, `WatchExit`: 68, then
+//! from 70), the other SYSTEM tasks'.
 
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
@@ -61,6 +62,7 @@ use super::remove::{Removed, WindowsRemoval, per_machine_allowed, remove_then};
 use super::result_file::{self, SetupResult};
 use super::stop;
 use super::sweep;
+use super::watch;
 use super::windows_machine::{Names, WindowsMachine};
 use super::{SetupRequest, owner_failure, set_up};
 use crate::windows::NtfsAcl;
@@ -71,7 +73,8 @@ use crate::windows::sids::{Sid, data_dir_owner_allowed};
 
 /// Runs the exe on `args` (those after its name) and returns its process exit code: a
 /// [`SetupExit`]'s, for `--refresh` a [`refresh::RefreshExit`]'s, for `--stop` a
-/// [`stop::StopExit`]'s, for `--sweep-tasks` a [`sweep::SweepExit`]'s.
+/// [`stop::StopExit`]'s, for `--sweep-tasks` a [`sweep::SweepExit`]'s, for `--watch` a
+/// [`watch::WatchExit`]'s.
 pub fn main(args: impl IntoIterator<Item = OsString>) -> u8 {
     // First: no DLL from beside the exe (a folder a standard user may write) loads from here on.
     if let Err(error) = restrict_dll_search() {
@@ -99,11 +102,14 @@ pub fn main(args: impl IntoIterator<Item = OsString>) -> u8 {
     if mode == Mode::SweepTasks {
         return sweep::windows_sweeper::run().as_code();
     }
+    if mode == Mode::Watch {
+        return watch::windows_watcher::run().as_code();
+    }
     super::event_trace::install();
     run_mode(mode).as_code()
 }
 
-/// Every mode but `--refresh`, `--stop` and `--sweep-tasks`, which [`main`] runs.
+/// Every mode but `--refresh`, `--stop`, `--sweep-tasks` and `--watch`, which [`main`] runs.
 fn run_mode(mode: Mode) -> SetupExit {
     match mode {
         Mode::SetUp {
@@ -150,7 +156,7 @@ fn run_mode(mode: Mode) -> SetupExit {
                 .ok();
             run_remove(Names::production(), invoker, per_machine, uninstall)
         }
-        Mode::Refresh | Mode::Stop | Mode::SweepTasks => SetupExit::Usage,
+        Mode::Refresh | Mode::Stop | Mode::SweepTasks | Mode::Watch => SetupExit::Usage,
     }
 }
 

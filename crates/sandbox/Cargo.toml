@@ -111,6 +111,7 @@ rustix = { workspace = true, features = ["fs", "process"] }
 # (System_ProcessStatus).
 # secrets.bin (src/windows/secrets/dpapi.rs, setup/owner): CryptProtectData (Security_Cryptography);
 # the set-up's recorded parent from NtQueryInformationProcess (Wdk_System_Threading).
+# --remove deletes the watch key by a handle opened as itself (NtDeleteKey, Wdk_System_Registry).
 # The setup exe and UserSetup (S15 PR4h): SHGetKnownFolderPath and ShellExecuteExW (UI_Shell), the
 # known folder's string freed with CoTaskMemFree (System_Com), and the exe's DLL search kept to
 # System32 (SetDefaultDllDirectories, System_LibraryLoader).
@@ -136,6 +137,8 @@ rustix = { workspace = true, features = ["fs", "process"] }
 # user could leave to start at a logon: its scheduled tasks (System_TaskScheduler, whose
 # collections take a VARIANT index: System_Variant, System_Ole) and BITS jobs
 # (Networking_BackgroundIntelligentTransferService).
+# The denial reporter's SYSTEM side (src/windows/setup/watch): the real-time session and its
+# consumer (System_Diagnostics_Etw, whose EVENT_TRACE_LOGFILEW needs System_Time).
 [target.'cfg(windows)'.dependencies]
 # The SHA-256 of the set-up program's admin copy (`windows::admin_copy`).
 sha2 = { workspace = true }
@@ -143,6 +146,7 @@ socket2 = { workspace = true }
 windows = { workspace = true, features = [
   "Wdk_Foundation",
   "Wdk_Storage_FileSystem",
+  "Wdk_System_Registry",
   "Wdk_System_Threading",
   "Win32_Foundation",
   "Win32_Networking_BackgroundIntelligentTransferService",
@@ -164,6 +168,7 @@ windows = { workspace = true, features = [
   "Win32_System_JobObjects",
   "Win32_System_Ioctl",
   "Win32_System_Com",
+  "Win32_System_Diagnostics_Etw",
   "Win32_System_Diagnostics_ToolHelp",
   "Win32_System_EventLog",
   "Win32_System_Diagnostics_Debug",
@@ -180,6 +185,7 @@ windows = { workspace = true, features = [
   "Win32_System_SystemServices",
   "Win32_System_TaskScheduler",
   "Win32_System_Threading",
+  "Win32_System_Time",
   "Win32_System_Variant",
   "Win32_System_WindowsProgramming",
   "Win32_System_Wmi",

@@ -559,6 +559,12 @@ crates/sandbox/src/windows/setup/sweep/windows_sweeper.rs - unsafe_code
 crates/sandbox/src/windows/setup/sweep/windows_tests.rs Made::drop clippy::disallowed_methods
 crates/sandbox/src/windows/setup/sweep/windows_tests.rs elevated_the_sweep_deletes_a_pool_users_task_and_leaves_the_lawyers clippy::disallowed_methods
 crates/sandbox/src/windows/setup/sweep/windows_tests.rs elevated_a_task_whose_descriptor_shuts_system_out_is_deleted_or_56_never_left_at_0 clippy::disallowed_methods
+# The denial reporter's SYSTEM side: its pipe and published key, its ETW session and consumer,
+# and its monotonic clock.
+crates/sandbox/src/windows/setup/watch/windows_key.rs - unsafe_code
+crates/sandbox/src/windows/setup/watch/windows_pipe.rs - unsafe_code
+crates/sandbox/src/windows/setup/watch/windows_trace.rs - unsafe_code
+crates/sandbox/src/windows/setup/watch/windows_watcher.rs - unsafe_code
 # S15 PR4h: UserSetup's ShellExecuteExW and process handle, the setup exe's one line off Windows,
 # and the wall clock of a set-aside's folder and of a forget's release.
 crates/sandbox/src/windows/user_setup.rs - unsafe_code

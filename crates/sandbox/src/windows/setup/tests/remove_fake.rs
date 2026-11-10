@@ -11,6 +11,7 @@ use std::rc::Rc;
 use clauseo_protocol::MatterId;
 
 use super::fake::{FakeAcl, FakeMachine, OWNER, rid, rids};
+use super::fake_more::KeyOwner;
 use crate::windows::acl_plan::{Grant, Sid};
 use crate::windows::apply::Surroundings;
 use crate::windows::ledger::{Ledger, RecordedFile, ledger_path};
@@ -20,6 +21,9 @@ use crate::windows::set_aside::forget_bookkeeping;
 use crate::windows::setup::record_values::CopyOwner;
 use crate::windows::setup::remove::Removal;
 use crate::windows::setup::remove::{FolderOwner, owners};
+use crate::windows::setup::watch::teardown::{
+    KeyDelete, KeyLeft, WatchKey, WatchParts, remove_watch,
+};
 use crate::windows::setup::{Machine, MachineError, ProfileDir};
 use crate::windows::shared_writes::OWNER_RIGHTS_SID;
 use crate::windows::sids::Reserved;
@@ -218,6 +222,11 @@ impl Removal for Remover {
         self.call("unregister_stop_task")?;
         self.m.state.stop_task = None;
         Ok(())
+    }
+
+    fn unregister_watch_task(&mut self) -> Result<(), MachineError> {
+        self.call("unregister_watch_task")?;
+        remove_watch(&mut FakeWatch(self))
     }
 
     fn invoker(&self) -> Option<&Sid> {
@@ -508,5 +517,73 @@ impl AclWriter for RemoveAcl {
     fn restore_label(&mut self, grant: &Grant, label: Label) -> Result<(), ApplyFailure> {
         self.call("restore_label", grant.path(), None)?;
         self.acl.restore_label(grant, label)
+    }
+}
+
+/// The watch task's removal over the fake's state, each effect a line in the log. Ending the
+/// task ends its process only, as `IRegisteredTask::Stop` does: the session and the key stay.
+struct FakeWatch<'a>(&'a mut Remover);
+
+impl WatchParts for FakeWatch<'_> {
+    type Error = MachineError;
+
+    fn end_task(&mut self) -> Result<(), MachineError> {
+        self.0.call("end_watch_task")?;
+        let state = &mut self.0.m.state;
+        if state.watch_task.is_some() {
+            state.watcher.running = false;
+        }
+        Ok(())
+    }
+
+    fn stop_session(&mut self) -> Result<(), MachineError> {
+        self.0.call("stop_watch_session")?;
+        self.0.m.state.watcher.session = false;
+        Ok(())
+    }
+
+    fn inspect_key(&mut self) -> Result<WatchKey, MachineError> {
+        self.0.call("inspect_watch_key")?;
+        match self.0.m.state.watcher.key {
+            None => Ok(WatchKey::Absent),
+            Some(KeyOwner::Link) => Ok(WatchKey::Link),
+            Some(KeyOwner::System) => Ok(WatchKey::System),
+            Some(KeyOwner::Administrators) => Ok(WatchKey::Other),
+            Some(KeyOwner::Unreadable) => Err(MachineError::Other(
+                "the watch key's owner can't be read".to_owned(),
+            )),
+        }
+    }
+
+    /// Deletes the key at its name; a link is deleted as itself, as the real one does.
+    fn delete_key(&mut self) -> Result<KeyDelete, MachineError> {
+        self.0.call("delete_watch_key")?;
+        let key = &mut self.0.m.state.watcher.key;
+        Ok(match key {
+            Some(KeyOwner::System | KeyOwner::Unreadable) => KeyDelete::Denied,
+            Some(KeyOwner::Administrators | KeyOwner::Link) | None => {
+                *key = None;
+                KeyDelete::Gone
+            }
+        })
+    }
+
+    fn take_key(&mut self) -> Result<(), MachineError> {
+        self.0.call("take_watch_key")?;
+        let key = &mut self.0.m.state.watcher.key;
+        if key.is_some() {
+            *key = Some(KeyOwner::Administrators);
+        }
+        Ok(())
+    }
+
+    fn left(&self, why: KeyLeft) -> MachineError {
+        MachineError::Other(format!("the watch key: {}", why.line()))
+    }
+
+    fn delete_task(&mut self) -> Result<(), MachineError> {
+        self.0.call("delete_watch_task")?;
+        self.0.m.state.watch_task = None;
+        Ok(())
     }
 }

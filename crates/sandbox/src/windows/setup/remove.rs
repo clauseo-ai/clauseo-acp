@@ -53,9 +53,12 @@
 //!    removal leaves them (it deletes nothing in the owner's folders, K1), and the next set-up's
 //!    readers drop each as stale, since it names a pool SID the record no longer lists
 //!    (`runner::unclean`);
-//! 9. on a per-machine install, the stop and sweep tasks set-up registered for the owner, then
-//!    the record key, which takes the set-up's values with it (`SETUP_VALUES`: the stop's and
-//!    the sweep's `…Next`, `…Sequence` and `…Completed` among them);
+//! 9. wherever an admin copy is installed, the watch task set-up registered (disabled, a
+//!    running watcher ended, its session stopped and its key deleted, taken first when it is
+//!    SYSTEM's, then deleted: `watch/teardown.rs`); on a per-machine install,
+//!    the stop and sweep tasks set-up registered for the owner; then the record key, which takes
+//!    the set-up's values with it (`SETUP_VALUES`: the stop's and the sweep's `…Next`,
+//!    `…Sequence` and `…Completed` among them);
 //! 10. for the uninstaller only, the admin copy's teardown (`admin_remove.rs`, run through
 //!     [`remove_then`]), with the lock still held, so a refresh skips instead of racing it.
 //!
@@ -156,6 +159,8 @@ pub enum RemoveStep {
     RemoteLogon,
     /// Removing the owner's unclean-session markers, as the owner, before the record.
     Markers,
+    /// The watch task set-up registered, deleted before the stop task.
+    WatchTask,
 }
 
 impl std::fmt::Display for RemoveStep {
@@ -177,6 +182,7 @@ impl std::fmt::Display for RemoveStep {
             RemoveStep::StopTask => "deleting the sandbox's stop and sweep tasks",
             RemoveStep::RemoteLogon => "taking the sandbox group's Remote Desktop deny off",
             RemoveStep::Markers => "removing the sandbox's unclean-session markers",
+            RemoveStep::WatchTask => "deleting the sandbox's watch task",
         })
     }
 }
@@ -415,6 +421,7 @@ fn steps(
     if acting == Acting::Owner {
         clear_markers(machine)?;
     }
+    remove_watch_task(machine)?;
     remove_stop_task(machine)?;
     machine
         .delete_record()
@@ -546,6 +553,21 @@ fn remove_stop_task(machine: &mut impl Removal) -> Result<(), Failed> {
     match machine.copy_owner().map_err(failed)? {
         Some(CopyOwner::Machine) => machine.unregister_stop_task().map_err(failed),
         Some(CopyOwner::User(_)) | None => Ok(()),
+    }
+}
+
+/// Step 8, first: wherever an admin copy is installed, the task `\Clauseo\SandboxWatch` set-up
+/// registered for the record's owner is disabled, a running watcher ended and its session
+/// stopped, then the task deleted (`refresh::unregister_task`), so the owner keeps no start
+/// right once their pool is gone and no session outlives it. With no admin copy set-up
+/// registered none.
+fn remove_watch_task(machine: &mut impl Removal) -> Result<(), Failed> {
+    let failed = |e: MachineError| (RemoveStep::WatchTask, cause_of(&e));
+    match machine.copy_owner().map_err(failed)? {
+        Some(CopyOwner::Machine | CopyOwner::User(_)) => {
+            machine.unregister_watch_task().map_err(failed)
+        }
+        None => Ok(()),
     }
 }
 

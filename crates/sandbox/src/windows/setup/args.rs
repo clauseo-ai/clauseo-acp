@@ -21,6 +21,8 @@
 //!   `\Clauseo\SandboxStop` runs. No other argument either: the pool comes from the record.
 //! - `--sweep-tasks`: deletes the pool users' scheduled tasks and cancels their BITS jobs
 //!   (`sweep.rs`), which the SYSTEM task `\Clauseo\SandboxSweep` runs. No other argument either.
+//! - `--watch`: reports the pool's refused opens to the owner's runner (`watch.rs`), which the
+//!   SYSTEM task `\Clauseo\SandboxWatch` runs. No other argument: the pool comes from the record.
 //!
 //! `--per-machine` (taken by `--remove` and `--adopt`) and `--uninstall` (`--remove` only)
 //! are the flags without a value. Every other flag takes its value as the next argument (never
@@ -79,6 +81,8 @@ pub enum Mode {
     Stop,
     /// `--sweep-tasks`.
     SweepTasks,
+    /// `--watch`.
+    Watch,
 }
 
 /// The lawyer a per-user `--adopt` sets up, as the unelevated installer named them.
@@ -96,21 +100,23 @@ pub struct AdoptUser {
     "usage: clauseo-sandbox-setup --set-up --parent <pid> --data-dir <path> [--add <n>] | \
          --reclaim --parent <pid> | --adopt --user-install-dir <path> (--owner-sid <sid> \
          --data-dir <path> | --per-machine) | --remove [--uninstall] [--per-machine] | --refresh | \
-         --stop | --sweep-tasks ({0})"
+         --stop | --sweep-tasks | --watch ({0})"
 )]
 pub struct Usage(pub String);
+
+/// The SYSTEM tasks' modes, which take nothing else: what they act on comes from the record.
+const ALONE_MODES: [(&str, Mode); 4] = [
+    ("--refresh", Mode::Refresh),
+    ("--stop", Mode::Stop),
+    ("--sweep-tasks", Mode::SweepTasks),
+    ("--watch", Mode::Watch),
+];
 
 /// Parses the arguments after the program's name.
 pub fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Mode, Usage> {
     let mut args = args.into_iter();
     let mode = args.next().ok_or_else(|| Usage("no mode".to_owned()))?;
-    // The SYSTEM tasks' modes take nothing else: what they act on comes from the record.
-    let alone_modes = [
-        ("--refresh", Mode::Refresh),
-        ("--stop", Mode::Stop),
-        ("--sweep-tasks", Mode::SweepTasks),
-    ];
-    for (alone, parsed) in alone_modes {
+    for (alone, parsed) in ALONE_MODES {
         if mode == alone {
             return match args.next() {
                 None => Ok(parsed),

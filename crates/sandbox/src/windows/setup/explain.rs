@@ -175,6 +175,7 @@ impl AdoptStep {
             AdoptStep::Task(SystemTask::Refresh) => "refresh_task",
             AdoptStep::Task(SystemTask::Stop) => "stop_task",
             AdoptStep::Task(SystemTask::Sweep) => "sweep_task",
+            AdoptStep::Task(SystemTask::Watch) => "watch_task",
             AdoptStep::Values => "admin_values",
             AdoptStep::SetUpUser => "set_up_user",
         }

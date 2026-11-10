@@ -479,6 +479,13 @@ impl Machine for FakeMachine {
         self.call(format!("lock_admin_copy {}", rid(group)))
     }
 
+    fn register_watch_task(&mut self, owner: &Sid) -> Result<(), MachineError> {
+        assert!(!self.acting.get(), "the task is registered as admin");
+        self.call(format!("register_watch_task {}", rid(owner)))?;
+        self.state.watch_task = Some(owner.clone());
+        Ok(())
+    }
+
     fn held_users(
         &mut self,
         _pool: &[Sid],
