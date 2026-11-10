@@ -181,8 +181,9 @@ test("a returning lawyer with ChatGPT alone signed in: the chosen plan is ChatGP
     ],
   });
   expect(storeOf(t).state().chosen).toBe(CODEX);
-  // ChatGPT has nothing to offer; Claude's row still offers its own
-  expect(rows().map((r) => r.dataset["agent"])).toEqual([CLAUDE]);
+  // ChatGPT is ready and signed in (D-012: shown wherever that happened); Claude's row still offers its own
+  expect(rows().map((r) => r.dataset["agent"])).toEqual([CLAUDE, CODEX]);
+  expect(row(CODEX)?.textContent).toContain("ChatGPT is ready");
   expect(text()).toContain(
     "Your papers stay on this computer. Claude or ChatGPT sees the parts it reads to answer you.",
   );

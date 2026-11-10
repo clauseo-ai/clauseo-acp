@@ -8,7 +8,7 @@ import { Welcome, type FootPlan } from "@clauseo/components/clauseo/first-launch
 import { useDisplay } from "@clauseo/components/lib/display.ts";
 import { toHostError, type HostTransport } from "../../transport/host-transport.ts";
 import type { AgentId } from "../../transport/protocol.ts";
-import { PLANS, type SetupState, type SetupStore } from "../../store/setup.ts";
+import { PLANS, isReady, isSignedIn, type SetupState, type SetupStore } from "../../store/setup.ts";
 import type { Matters } from "../matters.ts";
 import { usePickWait } from "../picker-wait.ts";
 import { markButton, markWelcome } from "../../start-marks.ts";
@@ -72,7 +72,11 @@ export function FirstScreen({
         footActs(store, agent, state),
         IDS.install,
       ),
-      ready: setup?.readyHere === true,
+      // ready here, or installed and signed in wherever that happened (D-012: Settings' sign-in left this window
+      // with no row for the plan, since its install was never seen turning ready here)
+      ready:
+        setup?.readyHere === true ||
+        ((isReady(setup?.install) || setup?.install === "managed") && isSignedIn(setup?.signIn)),
     };
   });
   const [form, setForm] = useState(false);

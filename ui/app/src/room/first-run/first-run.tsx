@@ -325,6 +325,24 @@ export function FirstRun({
     store.set({ pending: null });
     conversations.choose(pending);
   }, [take, pending, store, conversations]);
+  // a plan signed in in another window (Settings' Plans) while this one's draft would run a plan that isn't: before
+  // the lawyer picks here, the draft follows the one plan signed in, as `chosen` does (D-012). Only for a sign-in this
+  // window heard happen (not the first word at start, which the room's default plan decides), and once per plan, so
+  // the lawyer's own pick in the plan switch stands. Choosing sends nothing.
+  const target = state.chosen;
+  const follows =
+    talks.drafting &&
+    !state.picked &&
+    target !== agent &&
+    isSignedIn(state.agents[target]?.signIn) &&
+    state.agents[target]?.signedHere === true &&
+    !isSignedIn(state.agents[agent]?.signIn);
+  const followed = useRef<AgentId | null>(null);
+  useEffect(() => {
+    if (!follows || followed.current === target) return;
+    followed.current = target;
+    conversations.choose(target);
+  }, [follows, target, conversations]);
   // the composer reads its hold from the setup store's state as it changes (one commit per event, with this one),
   // and again when the room's side changes
   useEffect(() => {
