@@ -1,11 +1,11 @@
 //! The open matter's folder, watched (decision record 0055): a paper added, renamed, moved out or
 //! deleted while the matter is open sends `PapersChanged`, and the listing that follows shows the
-//! folder as it is; opening another matter moves the watch. Real file-system events with the
-//! host's 300 ms debounce: each step waits for the listing it expects, over as many
-//! `PapersChanged` as come.
+//! folder as it is; a folder moved away reads `missing` in the matter's row, and a relocate
+//! watches the new folder and reads `found`. Real file-system events with the host's 300 ms
+//! debounce: each step waits for the listing it expects, over as many `PapersChanged` as come.
 
 use clauseo_host::AppSubscription;
-use clauseo_protocol::{HostCommand, HostEvent, HostQuery, MatterId, QueryResult};
+use clauseo_protocol::{FolderState, HostCommand, HostEvent, HostQuery, MatterId, QueryResult};
 use futures::StreamExt as _;
 
 use crate::settings::{decode, subscribe_app};
@@ -57,6 +57,22 @@ fn until_listed(host: &Running, sub: &mut AppSubscription, matter: MatterId, wan
     );
 }
 
+/// Waits through app events until `matter`'s row reads `state`.
+fn until_row(sub: &mut AppSubscription, matter: MatterId, state: FolderState) {
+    for _ in 0..ROUNDS * 4 {
+        let item = wait("a matter row", sub.next()).expect("the app stream ended");
+        if let HostEvent::MattersChanged(changed) = decode(&item)
+            && changed
+                .matters
+                .iter()
+                .any(|row| row.matter == matter && row.folder_state == state)
+        {
+            return;
+        }
+    }
+    panic!("{matter}'s row never read {state:?}");
+}
+
 #[test]
 fn papers_added_renamed_moved_out_and_deleted_follow_the_folder_live() {
     let dir = Dir::new("papers_live_follow", &[]);
@@ -95,6 +111,34 @@ fn papers_added_renamed_moved_out_and_deleted_follow_the_folder_live() {
     until_listed(&host, &mut sub, matter, &["brief.txt", "drafts/keep.txt"]);
     write::remove_file(&folder.join("drafts/keep.txt"));
     until_listed(&host, &mut sub, matter, &["brief.txt"]);
+    host.shutdown();
+}
+
+#[test]
+fn a_folder_moved_away_reads_missing_and_a_relocate_watches_it_again() {
+    let dir = Dir::new("papers_live_moved", &[]);
+    let host = start(&dir);
+    let folder = dir.folder("m", &[("brief.txt", "x\n")]);
+    let matter = host.create_matter("m", &folder);
+    let (mut sub, _first) = subscribe_app(&host);
+    host.ok(HostCommand::OpenMatter { matter });
+
+    let moved = dir.work_path("m-moved");
+    write::rename(&folder, &moved);
+    until_row(&mut sub, matter, FolderState::Missing);
+
+    // Located where it went: found, and the app is told to list it there.
+    let picked = host.folder_ref(&moved);
+    host.ok(HostCommand::RelocateMatter {
+        matter,
+        folder: picked,
+    });
+    next_change(&mut sub, matter);
+    assert_eq!(paths(&host, matter), ["brief.txt"]);
+
+    // The new folder is the one watched.
+    write::write(&moved.join("added.txt"), b"a");
+    until_listed(&host, &mut sub, matter, &["added.txt", "brief.txt"]);
     host.shutdown();
 }
 

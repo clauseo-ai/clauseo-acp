@@ -36,7 +36,8 @@ export function fakeNext({
   frames = false,
 }: {
   matters: () => readonly MatterInfo[];
-  papers?: readonly PaperSummary[];
+  /** The papers, or a read of them on each list_papers (a folder changed while the matter is open, 0055). */
+  papers?: readonly PaperSummary[] | (() => readonly PaperSummary[]);
   threads?: (matter: MatterId) => readonly ThreadInfo[];
   /** The agents, or a read of them on each list_agents (a plan set up while the room is open). */
   agents?: readonly AgentSummary[] | (() => readonly AgentSummary[]);
@@ -57,7 +58,14 @@ export function fakeNext({
       if (query === WIRE.listAgents)
         return { agents: [...(typeof agents === "function" ? agents() : agents)] };
       if (WIRE.listPapers in query)
-        return { papers: { papers: [...papers], skipped: [], unread: [], truncated: false } };
+        return {
+          papers: {
+            papers: [...(typeof papers === "function" ? papers() : papers)],
+            skipped: [],
+            unread: [],
+            truncated: false,
+          },
+        };
       return { threads: [...threads(query.list_threads.matter)] };
     },
     ...(command === undefined ? {} : { command }),

@@ -1,16 +1,19 @@
 //! Which matter's folder the host watches (decision record 0055): the one the lawyer last
 //! opened (`OpenMatter`), one at a time. Opening another matter, forgetting the matter, and the
 //! host's end drop the watch; a relocate moves it to the new folder. A folder that cannot be
-//! watched (gone, or the OS refused the watch) is logged and left unwatched.
+//! watched (gone, or the OS refused the watch) is logged and left unwatched: the app lists the
+//! papers again when its window comes back to the front, and a listing that finds the folder
+//! there again starts the watch.
 //!
 //! Each quiet change the watch posts ([`on_changed`]) sends `PapersChanged` to the app, which
-//! lists the papers again; a folder that went stops the watch (on Windows its handle would hold
-//! the folder's delete open). The `tracked` marks follow, as each listing scans them; the Find
-//! index keeps the names of the last checkpoint, as before.
+//! lists the papers again; a folder that went also reads `missing` in the matter's next row, so
+//! the room shows the moved folder's line with Locate folder, and the watch stops (on Windows its
+//! handle would hold the folder's delete open). The `tracked` marks follow, as each listing
+//! scans them; the Find index keeps the names of the last checkpoint, as before.
 
 use std::path::PathBuf;
 
-use clauseo_protocol::{HostEvent, MatterId};
+use clauseo_protocol::{FolderState, HostEvent, MatterId};
 
 use super::watch::{FolderChanged, Watch};
 use crate::actor::Actor;
@@ -57,6 +60,19 @@ pub(crate) fn forgotten(actor: &mut Actor, matter: MatterId) {
     }
 }
 
+/// A listing of `matter` answered: what it found of the folder goes in the matter's row, and a
+/// followed folder found again is watched again.
+pub(crate) fn listed(actor: &mut Actor, matter: MatterId, found: bool) {
+    mark(actor, matter, found);
+    let unwatched = actor
+        .papers_follow
+        .as_ref()
+        .is_some_and(|follow| follow.matter == matter && follow.watch.is_none());
+    if found && unwatched {
+        restart(actor, matter);
+    }
+}
+
 /// The watch saw a quiet change. One from a watch since replaced is dropped.
 pub(crate) fn on_changed(actor: &mut Actor, changed: FolderChanged) {
     let FolderChanged {
@@ -77,6 +93,7 @@ pub(crate) fn on_changed(actor: &mut Actor, changed: FolderChanged) {
     if !found && let Some(follow) = actor.papers_follow.as_mut() {
         follow.watch = None;
     }
+    mark(actor, matter, found);
     crate::actor::app::publish(actor, &HostEvent::PapersChanged { matter });
 }
 
@@ -98,6 +115,33 @@ fn restart(actor: &mut Actor, matter: MatterId) {
     if let Some(follow) = actor.papers_follow.as_mut() {
         follow.watch = watch;
     }
+}
+
+/// `matter`'s folder state as found: `missing`, or `found` again; the rows go out at the next
+/// flush when it changed.
+fn mark(actor: &mut Actor, matter: MatterId, found: bool) {
+    if !actor.matters.contains_key(&matter) {
+        return;
+    }
+    let before = actor
+        .folder_states
+        .get(&matter)
+        .copied()
+        .unwrap_or(FolderState::Found);
+    let now = if found {
+        FolderState::Found
+    } else {
+        FolderState::Missing
+    };
+    if before == now {
+        return;
+    }
+    if found {
+        actor.folder_states.remove(&matter);
+    } else {
+        actor.folder_states.insert(matter, now);
+    }
+    actor.lists.touch_all();
 }
 
 fn folder_of(actor: &Actor, matter: MatterId) -> Option<PathBuf> {
