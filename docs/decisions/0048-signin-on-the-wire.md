@@ -626,8 +626,13 @@ tools' folder first (`core/src/tools/runtimes/unified_exec.rs:505-520`); no
 `shell_environment_policy.set.PATH`, which would stop Codex replaying that folder
 (`core/src/tools/runtimes/mod.rs:105-111`). On macOS the session's `PATH` also gets the
 folders `path_helper` adds (`/etc/paths`, then `/etc/paths.d/*` by name, read on the
-launch-prep thread) right after Clauseo's, so nothing a lawyer's GUI or login `PATH` had is
-dropped. Claude Code (2.1.293) pastes the file
+launch-prep thread) right after Clauseo's, so the GUI `PATH` and `/etc/paths` keep reaching
+Codex. The trade-off, on macOS and Linux alike: with no login shell and no snapshot, Codex's
+commands lose what the lawyer's own shell startup adds (a `~/.zprofile` with `brew shellenv`,
+pyenv or nvm, a `~/.zshrc`'s aliases and exports). It is accepted so Clauseo's tools and Codex's
+bundled `rg` come first; what reaches Codex is the `PATH` Clauseo builds (its folders,
+`path_helper`'s, then the rest of the `PATH` Clauseo was started with). Claude keeps the lawyer's
+startup files. Claude Code (2.1.293) pastes the file
 `CLAUDE_ENV_FILE` names into each Bash command after its login-shell snapshot; the launch writes
 `export PATH='<folders>':"$PATH"` there, which keeps everything the snapshot built. Both are per
 session, since the shell browser's folder is on one session's `PATH` and not another's: the keys

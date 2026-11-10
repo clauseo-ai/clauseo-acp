@@ -313,3 +313,81 @@ fn unusable_folders_are_left_out_of_the_line() {
     );
     assert_eq!(env_file_text(&dirs[..2]), None);
 }
+
+/// The file is the user's own: 0600.
+#[cfg(unix)]
+#[test]
+fn the_env_file_is_private() {
+    use std::os::unix::fs::PermissionsExt;
+    let run = scratch("claude-mode");
+    let path = prepare_on(
+        dirs(),
+        true,
+        Some(AgentKind::Claude),
+        &run,
+        Os::Linux,
+        Path::new("/nowhere"),
+    );
+    let mode = std::fs::metadata(path.env_file.unwrap())
+        .unwrap()
+        .permissions()
+        .mode();
+    assert_eq!(mode & 0o777, 0o600);
+    write::remove_dir_all(&run).unwrap();
+}
+
+/// A folder named with a command substitution, a backtick and `$HOME` stays inert when `sh`
+/// sources the file: nothing runs, and the literal folder comes back first on `PATH`. The
+/// shell runs through the host's own launcher (`clauseo_process::spawn_in_tree`).
+#[cfg(unix)]
+#[test]
+fn sourcing_the_env_file_runs_nothing() {
+    use clauseo_process::{LaunchSpec, Launched, SpawnOptions, spawn_in_tree};
+    use futures::AsyncReadExt as _;
+
+    let run = scratch("claude-inert");
+    let odd = run.join("a $(touch PWNED) `touch TICKED` $HOME 'q'");
+    let path = prepare_on(
+        vec![odd.clone()],
+        true,
+        Some(AgentKind::Claude),
+        &run,
+        Os::Linux,
+        Path::new("/nowhere"),
+    );
+    let file = path.env_file.unwrap();
+    let env = BTreeMap::from([
+        (OsString::from("PATH"), OsString::from("/usr/bin:/bin")),
+        (OsString::from("HOME"), OsString::from("/home/nobody")),
+    ]);
+    let args = vec![
+        OsString::from("-c"),
+        OsString::from(". \"$1\" && printf %s \"$PATH\""),
+        OsString::from("sh"),
+        file.into_os_string(),
+    ];
+    let spec = LaunchSpec::new(PathBuf::from("/bin/sh"), args, env, run.clone()).unwrap();
+    let Launched {
+        mut handle,
+        mut stdout,
+        stderr,
+        ..
+    } = spawn_in_tree(&spec, &SpawnOptions::new().clear_env()).unwrap();
+    let (said, report) = futures::executor::block_on(async {
+        let mut said = Vec::new();
+        let (read, _drained) = futures::join!(stdout.read_to_end(&mut said), stderr.drain());
+        read.unwrap();
+        (said, handle.exited().await)
+    });
+    assert_eq!(
+        report.code(),
+        Some(0),
+        "sh failed: {}",
+        report.stderr_tail()
+    );
+    let expected = format!("{}:/usr/bin:/bin", odd.to_str().unwrap());
+    assert_eq!(String::from_utf8(said).unwrap(), expected);
+    assert!(!run.join("PWNED").exists(), "the substitution ran");
+    assert!(!run.join("TICKED").exists(), "the backtick ran");
+    write::remove_dir_all(&run).unwrap();
+}
