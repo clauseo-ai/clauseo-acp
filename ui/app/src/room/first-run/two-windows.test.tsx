@@ -73,6 +73,9 @@ test("first screen: ChatGPT signed in from Settings shows in the main window, fr
   expect(row(CODEX)?.textContent).toContain("ChatGPT is ready");
   expect(row(CLAUDE)?.textContent).toContain("Sign-in was cancelled.");
   expect(text()).not.toContain("Claude is ready");
+  expect(text()).toContain(
+    "Your papers stay on this computer. ChatGPT sees the parts it reads to answer you.",
+  );
   expect(sent(main, "send_prompt")).toEqual([]);
 });
 

@@ -71,7 +71,7 @@ test("a fresh computer: the lead, then Claude's row and ChatGPT's, equal, each w
     "none",
     "none",
   ]);
-  // the fine print names both plans, before and after a press
+  // nothing chosen, neither signed in: the fine print names both plans (UD1-93)
   expect(text()).toContain(
     "Your papers stay on this computer. Claude or ChatGPT sees the parts it reads to answer you.",
   );
@@ -83,9 +83,11 @@ test("ChatGPT alone: its Sign in installs and signs in ChatGPT, and the chosen p
   await press("Sign in to ChatGPT");
   expect(setups(t)).toEqual([{ start_sign_in: { agent: CODEX } }]);
   expect(storeOf(t).state().chosen).toBe(CODEX);
+  // one plan in play, picked: the fine print names it alone (UD1-23)
   expect(text()).toContain(
-    "Your papers stay on this computer. Claude or ChatGPT sees the parts it reads to answer you.",
+    "Your papers stay on this computer. ChatGPT sees the parts it reads to answer you.",
   );
+  expect(text()).not.toContain("Claude or ChatGPT sees");
   await play(
     t,
     signIn(CODEX, "queued"),
@@ -181,11 +183,12 @@ test("a returning lawyer with ChatGPT alone signed in: the chosen plan is ChatGP
     ],
   });
   expect(storeOf(t).state().chosen).toBe(CODEX);
-  // ChatGPT is ready and signed in (D-012: shown wherever that happened); Claude's row still offers its own
+  // ChatGPT has nothing to offer; Claude's row still offers its own
   expect(rows().map((r) => r.dataset["agent"])).toEqual([CLAUDE, CODEX]);
   expect(row(CODEX)?.textContent).toContain("ChatGPT is ready");
+  // the only plan signed in is the one in play: the fine print names it alone (UD1-23)
   expect(text()).toContain(
-    "Your papers stay on this computer. Claude or ChatGPT sees the parts it reads to answer you.",
+    "Your papers stay on this computer. ChatGPT sees the parts it reads to answer you.",
   );
 });
 
