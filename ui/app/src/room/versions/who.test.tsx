@@ -8,7 +8,7 @@ import { vt } from "@clauseo/components/lib/words-versions.ts";
 import { act } from "react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { loadVersions } from "./use-versions.ts";
-import { THREAD, TURN, uuid } from "../../testing/stream-script.ts";
+import { header, reset, STREAM, THREAD, TURN, uuid } from "../../testing/stream-script.ts";
 import type { CheckpointKind, ViewEntry } from "../../transport/protocol.ts";
 import { clockOf, localZone } from "../when.ts";
 import {
@@ -132,6 +132,25 @@ test("a revisions version says the lawyer accepted or rejected tracked changes i
     await h.unmount();
     h = null;
   }
+});
+
+test("a conversation is named as the rail names it: its header's title over list_threads' older one", async () => {
+  h = await mountVersions(
+    [version(1, "import"), version(2, "after_turn", { thread: THREAD, turn: turn(10) })],
+    [],
+    // list_threads still has the title the first read gave; the conversation's header has its newer one
+    { threads: [thread(THREAD, "First read")] },
+  );
+  const titled = (title: string): ViewEntry => ({ header: { ...header().header!, title } });
+  await h.deliver(STREAM, [reset([], titled("Reply to the bank"))]);
+  await h.openVersions();
+  expect(whoText(rowOf(h, "cp2"))).toBe("Clauseo, in Reply to the bank");
+  // renamed while Versions is open: the row follows the header, with no list_threads asked
+  const listed = h.queried("list_threads").length;
+  await h.deliver(STREAM, [reset([], titled("Notice to the bank"))]);
+  expect(whoText(rowOf(h, "cp2"))).toBe("Clauseo, in Notice to the bank");
+  expect(h.queried("list_threads")).toHaveLength(listed);
+  expect(document.body.textContent).not.toContain("First read");
 });
 
 test("a version made in a conversation without a title names a new conversation, in either language", async () => {

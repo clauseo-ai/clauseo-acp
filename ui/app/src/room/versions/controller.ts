@@ -158,7 +158,7 @@ export class VersionsController {
     if (view !== undefined && epoch !== null && view.hasOlder && this.#older === null)
       void this.#pageMatter(view, epoch);
     const read = readMatter(view, this.#older?.entries ?? []);
-    const titles = new Map(talks.threads.map((t) => [t.thread, t.title ?? ""]));
+    const titles = new Map(talks.threads.map((t) => [t.thread, talks.titleOf(t)]));
     const now = Date.now();
     const timeline = timelineOf({
       versions: read.versions,
