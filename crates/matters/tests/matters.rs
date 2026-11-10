@@ -40,6 +40,10 @@ mod undo_case;
 mod restore;
 
 #[cfg(test)]
+#[path = "matters/replace.rs"]
+mod replace;
+
+#[cfg(test)]
 #[path = "matters/compare.rs"]
 mod compare;
 

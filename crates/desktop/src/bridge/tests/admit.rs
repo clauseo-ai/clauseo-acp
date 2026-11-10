@@ -60,6 +60,10 @@ fn every_command_and_read_the_windows_send_today_is_admitted() {
         json!({"snooze_thread": {"thread": thread}}),
         json!({"mark_thread_done": {"thread": thread, "done": true}}),
         json!({"sweep_done": {"day_start": 1_790_000_000_000_u64}}),
+        // The room's tracked changes in a Word file.
+        json!({"decide_revisions": {"matter": matter, "path": "Lease.docx",
+            "version": "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff",
+            "ids": [1, 2], "decision": "accept"}}),
     ];
     for body in commands {
         let admitted = bridge.admit(MAIN, &command(body.clone()));
@@ -224,6 +228,31 @@ fn preview_undo_is_read_from_main_and_refused_from_settings() {
         refusal.to_string().contains("reads only the settings"),
         "{refusal}"
     );
+}
+
+/// `ListRevisions` reaches the host from the main window, which refuses a file that is not a
+/// Word document with its own code, and the settings window is refused it by the bridge;
+/// `DecideRevisions` is main's alone.
+#[test]
+fn list_revisions_is_read_from_main_and_decide_revisions_is_mains() {
+    let scratch = Scratch::new("admit-revisions", &[]);
+    let host = scratch.start(Vec::new());
+    let bridge = host.bridge();
+    let body = json!({"list_revisions": {"matter": host.scratch(), "path": "notes.txt"}});
+    let refusal = block_on(bridge.query(MAIN, read(body.clone()))).unwrap_err();
+    assert_eq!(refusal.code(), ErrorCode::WordNotDocx, "{refusal:?}");
+    let refusal = block_on(bridge.query(SETTINGS, read(body))).unwrap_err();
+    assert_eq!(refusal.code(), ErrorCode::CommandInvalid, "{refusal:?}");
+    assert!(
+        refusal.to_string().contains("reads only the settings"),
+        "{refusal}"
+    );
+    let decide = command(json!({"decide_revisions": {"matter": host.scratch(),
+        "path": "Lease.docx",
+        "version": "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff",
+        "ids": [1], "decision": "reject"}}));
+    let refusal = bridge.admit(SETTINGS, &decide).unwrap_err();
+    assert_eq!(refusal.code(), ErrorCode::CommandInvalid);
 }
 
 /// `ScanFolder` passes `admit` only with a folder this run's picker issued; `CancelScan`

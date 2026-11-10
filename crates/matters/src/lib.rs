@@ -10,7 +10,8 @@
 //! - Creating and importing a matter (the scan, refused folders, warnings, cancel), opening one
 //!   again, locating a moved folder and repairing a deleted `matter.json`, `before-turn` and
 //!   `after-turn` checkpoints with their diff, undoing a step, restoring a version (the whole
-//!   matter or chosen files), and comparing and reading versions.
+//!   matter or chosen files), replacing one file with content made outside the folder, and
+//!   comparing and reading versions.
 //! - The document rules: excluded names, the per-file size cap, cloud-only placeholders (never
 //!   read), racily clean files.
 //!
@@ -31,10 +32,12 @@
 //!   and [`Matter::still_gone`] says which files it deleted are back;
 //!   [`Matter::timeline`] lists the checkpoints, rebuilt from the trailers on open;
 //!   [`Matter::restore`] restores a version ([`Restore`], [`RestoreFiles`], [`Restored`]) and
-//!   [`Matter::preview_restore`] says what it would do ([`RestorePlan`]); [`Matter::compare`]
-//!   ([`CompareSide`]), [`Matter::files_at`] ([`VersionFile`]) and [`Matter::read_file`] read
-//!   versions and take `&self`; [`Matter::papers`] lists the folder as it is now ([`PaperList`],
-//!   [`Paper`]) by the checkpoint walk's rules.
+//!   [`Matter::preview_restore`] says what it would do ([`RestorePlan`]);
+//!   [`Matter::replace_file`] writes one file's new content made outside the folder, between an
+//!   `outside-edits` and a `revisions` checkpoint ([`ReplaceFile`], [`Replaced`]);
+//!   [`Matter::compare`] ([`CompareSide`]), [`Matter::files_at`] ([`VersionFile`]) and
+//!   [`Matter::read_file`] read versions and take `&self`; [`Matter::papers`] lists the folder
+//!   as it is now ([`PaperList`], [`Paper`]) by the checkpoint walk's rules.
 //! - [`held_open`]: whether Word (or, on Windows, any program) has a file of the folder open
 //!   ([`HeldOpen`]), by the rule undo and restore refuse with; [`held_open_at`] takes a path
 //!   as an agent names it, resolved into the folder by [`matter_path_in`], and
@@ -137,6 +140,7 @@ mod papers;
 mod place;
 mod probe;
 mod refuse;
+mod replace;
 mod restore;
 mod rules;
 mod scan;
@@ -167,6 +171,7 @@ pub use scan::scan;
 pub use types::{
     Checkpoint, CheckpointOutcome, CommitId, CompareSide, DEFAULT_MARKER, FILE_CAP_BYTES,
     IMPORT_WARN_BYTES, ImportWarning, Imported, LARGEST_FILES, LargeFile, Limits, Marker,
-    NewMatter, Progress, Restore, RestoreFiles, RestorePlan, Restored, Retention, ScanReport,
-    Scanned, Settings, TimelineEntry, TurnMeta, UndoRequest, Undone, VersionFile,
+    NewMatter, Progress, ReplaceFile, Replaced, Restore, RestoreFiles, RestorePlan, Restored,
+    Retention, ScanReport, Scanned, Settings, TimelineEntry, TurnMeta, UndoRequest, Undone,
+    VersionFile,
 };

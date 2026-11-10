@@ -106,7 +106,7 @@ fn held_open_by(folder: &Path, path: &MatterPath, given: Option<&[String]>) -> O
 pub(crate) fn held_at_read(err: &std::io::Error) -> bool {
     #[cfg(windows)]
     {
-        matches!(err.raw_os_error(), Some(SHARING_VIOLATION | LOCK_VIOLATION))
+        held_by_read_code(err.raw_os_error())
     }
     #[cfg(not(windows))]
     {
@@ -130,6 +130,13 @@ pub(crate) fn held_at_write(err: &std::io::Error, held: impl FnOnce() -> bool) -
         let _ = (err, held);
         false
     }
+}
+
+/// [`held_at_read`] by the Windows error code: a sharing or a lock violation. Plain arithmetic,
+/// so tested on every OS.
+#[cfg(any(windows, test))]
+pub(crate) const fn held_by_read_code(code: Option<i32>) -> bool {
+    matches!(code, Some(SHARING_VIOLATION | LOCK_VIOLATION))
 }
 
 /// [`held_at_write`] by the Windows error code: `ERROR_ACCESS_DENIED` (5),

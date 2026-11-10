@@ -3,6 +3,8 @@
 use serde::{Deserialize, Serialize};
 
 use crate::{CheckpointId, MatterId, MessageId, ThreadId, TurnId};
+#[cfg(doc)]
+use crate::{HostCommand, RestoreRequest};
 
 /// What a command did. The host's receipt stores it, so a repeated `command_id` returns the same
 /// outcome. The queue commands, `RestartAgent`, `SetUiSettings`, `SetToolSettings`,
@@ -43,5 +45,17 @@ pub enum CommandOutcome {
     VersionRestored {
         /// The checkpoint the restore wrote.
         checkpoint: CheckpointId,
+    },
+    /// The tracked changes were accepted or rejected and the file written.
+    RevisionsDecided {
+        /// A checkpoint holding the file as it was just before: the `outside-edits` one taken
+        /// first, or the last one when the folder had not changed. `RestoreVersion` of it, with
+        /// [`RestoreRequest::Files`] naming the file, undoes the decision
+        /// ([`HostCommand::RestoreVersion`]).
+        before: CheckpointId,
+        /// The `revisions` checkpoint taken after writing; missing when the checkpoint after the
+        /// write could not be taken. The next checkpoint records the change.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        checkpoint: Option<CheckpointId>,
     },
 }

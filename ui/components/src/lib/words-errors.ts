@@ -92,6 +92,10 @@ export type ErrorCode =
   | "blackline.no_word_tool"
   | "blackline.not_word"
   | "blackline.failed"
+  | "word.stetdoc_missing"
+  | "word.revisions_stale"
+  | "word.not_docx"
+  | "word.edit_failed"
   | "unknown";
 
 /** The thread's own sentence for an answer cut short: its Hindi lives in words-thread.ts, once. */
@@ -233,6 +237,15 @@ export const ERROR_WORDS: Record<ErrorCode, ErrorKey> = {
     "Clauseo's Word tool is missing. Reinstall Clauseo to see the marked-up changes.",
   "blackline.not_word": "The changes in this document couldn't be marked up.",
   "blackline.failed": "The changes in this document couldn't be marked up.",
+  // provisional (English settled by the orchestrator): a Word file's tracked changes, accepted or rejected from its
+  // tile on the wall (room/word/changes-pane.tsx); edit_failed's line stands beside Try again
+  "word.stetdoc_missing":
+    "Clauseo's Word tool is missing. Reinstall Clauseo to accept or reject changes.",
+  "word.revisions_stale":
+    "This file changed after the list was made, so nothing was accepted or rejected. The list now shows its current changes.",
+  "word.not_docx":
+    "Clauseo can't read the tracked changes in this file. It may be damaged, or it may not be a Word document.",
+  "word.edit_failed": "Clauseo couldn't save your decision. The file is as it was.",
   // a code from a newer Clauseo: as internal reads, since this version can say nothing truer
   unknown: "Something went wrong inside Clauseo.",
 };

@@ -157,6 +157,15 @@ export const HI = {
     "{name} डाउनलोड हो गया, लेकिन उसका सेटअप पूरा नहीं हुआ। फिर से प्रयास करें।",
   "The AI was downloaded, but setting it up didn't finish. Try again.":
     "AI डाउनलोड हो गया, लेकिन उसका सेटअप पूरा नहीं हुआ। फिर से प्रयास करें।",
+  // a Word file's tracked changes (provisional Hindi)
+  "Clauseo's Word tool is missing. Reinstall Clauseo to accept or reject changes.":
+    "Clauseo का Word टूल मौजूद नहीं है। बदलाव स्वीकार या अस्वीकार करने के लिए Clauseo फिर से इंस्टॉल करें।",
+  "This file changed after the list was made, so nothing was accepted or rejected. The list now shows its current changes.":
+    "सूची बनने के बाद यह फ़ाइल बदल गई, इसलिए कुछ भी स्वीकार या अस्वीकार नहीं किया गया। सूची अब इसके मौजूदा बदलाव दिखाती है।",
+  "Clauseo can't read the tracked changes in this file. It may be damaged, or it may not be a Word document.":
+    "Clauseo इस फ़ाइल के ट्रैक किए गए बदलाव नहीं पढ़ सकता। हो सकता है कि यह क्षतिग्रस्त हो, या यह Word दस्तावेज़ न हो।",
+  "Clauseo couldn't save your decision. The file is as it was.":
+    "Clauseo आपका निर्णय सहेज नहीं सका। फ़ाइल पहले जैसी ही है।",
 } as const;
 
 /** The sentences' Hindi, for the copy review to tell hi: later from Hindi. */

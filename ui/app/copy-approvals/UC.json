@@ -766,5 +766,104 @@
     "status": "provisional",
     "at": "2026-11-09",
     "by": "app track (provisional; Rohan batch review; word blackline)"
+  },
+  "UC-120": {
+    "en": "Tracked changes",
+    "hi": "ट्रैक किए गए बदलाव",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-09",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-09",
+    "by": "orchestrator (settled en)",
+    "note": "Accept and reject of a Word file's tracked changes (word-accept-reject)"
+  },
+  "UC-121": {
+    "en": "No tracked changes in this file.",
+    "hi": "इस फ़ाइल में कोई ट्रैक किया गया बदलाव नहीं है।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-09",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-09",
+    "by": "orchestrator (settled en)",
+    "note": "Accept and reject of a Word file's tracked changes (word-accept-reject)"
+  },
+  "UC-122": {
+    "en": "Formatting changed",
+    "hi": "फ़ॉर्मैटिंग बदली गई",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-09",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-09",
+    "by": "orchestrator (settled en)",
+    "note": "Accept and reject of a Word file's tracked changes (word-accept-reject)"
+  },
+  "UC-123": {
+    "en": "Moved",
+    "hi": "जगह बदली गई",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-09",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-09",
+    "by": "orchestrator (settled en)",
+    "note": "Accept and reject of a Word file's tracked changes (word-accept-reject)"
+  },
+  "UC-124": {
+    "en": "This file changed after the list was made, so nothing was accepted or rejected. The list now shows its current changes.",
+    "hi": "सूची बनने के बाद यह फ़ाइल बदल गई, इसलिए कुछ भी स्वीकार या अस्वीकार नहीं किया गया। सूची अब इसके मौजूदा बदलाव दिखाती है।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-09",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-09",
+    "by": "orchestrator (settled en)",
+    "note": "Accept and reject of a Word file's tracked changes (word-accept-reject)"
+  },
+  "UC-125": {
+    "en": "Clauseo can't read the tracked changes in this file. It may be damaged, or it may not be a Word document.",
+    "hi": "Clauseo इस फ़ाइल के ट्रैक किए गए बदलाव नहीं पढ़ सकता। हो सकता है कि यह क्षतिग्रस्त हो, या यह Word दस्तावेज़ न हो।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-09",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-09",
+    "by": "orchestrator (settled en)",
+    "note": "Accept and reject of a Word file's tracked changes (word-accept-reject)"
+  },
+  "UC-126": {
+    "en": "Clauseo's Word tool is missing. Reinstall Clauseo to accept or reject changes.",
+    "hi": "Clauseo का Word टूल मौजूद नहीं है। बदलाव स्वीकार या अस्वीकार करने के लिए Clauseo फिर से इंस्टॉल करें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-09",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-09",
+    "by": "orchestrator (settled en)",
+    "note": "Accept and reject of a Word file's tracked changes (word-accept-reject)"
+  },
+  "UC-127": {
+    "en": "Clauseo couldn't save your decision. The file is as it was.",
+    "hi": "Clauseo आपका निर्णय सहेज नहीं सका। फ़ाइल पहले जैसी ही है।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-09",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-09",
+    "by": "orchestrator (settled en)",
+    "note": "Accept and reject of a Word file's tracked changes (word-accept-reject)"
+  },
+  "UC-128": {
+    "en": "You accepted or rejected tracked changes in {file}",
+    "hi": "आपने {file} में ट्रैक किए गए बदलाव स्वीकार या अस्वीकार किए",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-09",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-09",
+    "by": "orchestrator (settled en)",
+    "note": "Accept and reject of a Word file's tracked changes (word-accept-reject)"
   }
 }

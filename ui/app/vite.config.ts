@@ -224,6 +224,8 @@ export const PRELOADED_CHUNKS = [
   "note-chunk",
   // 0053: the unsafe-site allow's confirm, behind a notice's press (room/thread/site-blocked.tsx)
   "site-allow-confirm",
+  // a .docx's tracked changes, behind its tile's press (room/paper-wall.tsx), whose lock dialog takes the primitives
+  "changes-chunk",
 ];
 
 const HELPER = "__vitePreload(() => ";

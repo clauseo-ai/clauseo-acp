@@ -73,7 +73,8 @@ pub use launch_checks::PackRequest;
 pub(crate) use out::flush_text;
 pub(crate) use queue::{any_active, any_running, cancel_all, queue_hold, release, sync_all_held};
 pub(crate) use restore::{
-    RestoreAsk, committed as restore_committed, on_restored, restore_version,
+    RestoreAsk, RevisionsAsk, committed as restore_committed, decide_revisions, on_decided,
+    on_restored, restore_version,
 };
 pub(crate) use route::{TurnCommand, command};
 pub(crate) use sign_in::on_request as sign_in_request;

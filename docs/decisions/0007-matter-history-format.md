@@ -92,7 +92,8 @@ documents with 3 changed).
 
   `Clauseo-Checkpoint` is the `CheckpointId` the host minted; the commit id never leaves `matters`
   and `store`. `Clauseo-Kind` is one of `import`, `before-turn`, `after-turn`, `outside-edits`,
-  `undo`, `restore`. `Clauseo-Thread` and `Clauseo-Turn` are present when the checkpoint has them
+  `undo`, `restore`, `revisions` (tracked changes of a Word file accepted or rejected, no thread or
+  turn). `Clauseo-Thread` and `Clauseo-Turn` are present when the checkpoint has them
   (turn checkpoints, and an undo's when the host passes them). Writers emit them in that order.
   Readers take the message's last paragraph, accept the trailers in any order, ignore keys they do
   not know, read a kind they do not know as `Unknown`, and need only `Clauseo-Checkpoint`; a commit

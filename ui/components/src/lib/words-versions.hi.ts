@@ -46,6 +46,9 @@ const OWN = {
   "Undo of the restore at {time}": "{time} बजे का पुनर्स्थापन पूर्ववत किया गया",
   "Undo of the restore at {time} on {date}": "{date} को {time} बजे का पुनर्स्थापन पूर्ववत किया गया",
   "Restore of a version": "संस्करण पुनर्स्थापित किया गया",
+  // tracked changes the lawyer accepted or rejected in a Word file, from its tile (provisional Hindi)
+  "You accepted or rejected tracked changes in {file}":
+    "आपने {file} में ट्रैक किए गए बदलाव स्वीकार या अस्वीकार किए",
   // what a version did to the papers
   "Changed {papers}.": "बदले गए: {papers}।",
   "Added {papers}.": "जोड़े गए: {papers}।",

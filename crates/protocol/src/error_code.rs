@@ -278,6 +278,16 @@ error_codes! {
         failed: the compare or its view failed, took too long, or printed what Clauseo could not \
         read; nothing is shown and nothing was written in the matter. Trying again can \
         succeed.";
+    WordStetdocMissing = "word.stetdoc_missing", retryable: false, meaning: "Clauseo has no \
+        stetdoc program to read or edit Word files with, or could not start it.";
+    WordRevisionsStale = "word.revisions_stale", retryable: false, meaning: "The Word file \
+        changed since its tracked changes were listed, or a change named is no longer in it, so \
+        nothing was written: list them again.";
+    WordNotDocx = "word.not_docx", retryable: false, meaning: "The file is not a Word document \
+        (.docx) that stetdoc can read.";
+    WordEditFailed = "word.edit_failed", retryable: true, meaning: "stetdoc failed or did not \
+        finish in time while reading or editing the Word file, or the file is not on this computer \
+        or is too large to version, so nothing was written.";
     Unknown = "unknown", retryable: false, meaning: "A code from a newer Clauseo that this \
         version does not know. Never produced here.";
 }

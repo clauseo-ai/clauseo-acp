@@ -24,6 +24,11 @@
 //!   channel with `try_send` and never waits for; a full channel makes it catch up from its
 //!   per-stream watermarks. A forgotten matter's rows are deleted; its import indexes it again.
 //! - The Scratch matter: a first start creates it.
+//! - Tracked changes in a matter's Word file (`revisions.rs`, `actor/revisions.rs`):
+//!   `ListRevisions` and `DecideRevisions` run stetdoc (`HostConfig::with_stetdoc`) on
+//!   the matter's thread against private copies in `<data folder>/revisions/<matter id>/`, never
+//!   in the folder; a decision holds the writer and writes the file as a restore does, between
+//!   an `outside-edits` and a `revisions` checkpoint.
 //! - The block list's updates (`blocklist.rs`, decision record 0053), with
 //!   [`BlockListSeams::apply`] only: a `clauseo-blocklist` thread, started once the host
 //!   serves and stopped when it ends, loads the newer verified one of the stored pair
@@ -252,6 +257,7 @@ mod pipeline;
 pub mod pre_write_guard;
 mod principal;
 mod rate;
+mod revisions;
 mod search;
 mod sent;
 mod snapshot;

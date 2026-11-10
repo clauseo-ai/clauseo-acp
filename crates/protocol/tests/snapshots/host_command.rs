@@ -145,6 +145,15 @@ golden! { HostCommand::name_of {
         scope: AllowScope::Matter,
         matter: Some(matter_id(1)),
     };
+    DecideRevisions => decide_revisions: HostCommand::DecideRevisions(DecideRevisions {
+        matter: matter_id(1),
+        path: path("Lease.docx"),
+        version: "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff"
+            .parse()
+            .unwrap(),
+        ids: vec![2, 3],
+        decision: RevisionDecision::Reject,
+    });
     // Each `ConnectorCommand` has its own golden in `snapshots/connectors.rs`.
     Connector => connector: HostCommand::Connector(super::connectors::add_credits());
 } }

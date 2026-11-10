@@ -18,6 +18,8 @@ fn variant(err: &Error) -> &'static str {
         Error::FolderMissing { .. } => "FolderMissing",
         Error::FolderRefused { .. } => "FolderRefused",
         Error::FileLocked { .. } => "FileLocked",
+        Error::ChangedSince { .. } => "ChangedSince",
+        Error::NotVersioned { .. } => "NotVersioned",
         Error::UnknownCheckpoint { .. } => "UnknownCheckpoint",
         Error::DuplicateCheckpoint { .. } => "DuplicateCheckpoint",
         Error::MissingDecision { .. } => "MissingDecision",
@@ -39,7 +41,7 @@ fn assert_code(err: &Error, code: ErrorCode, name: &str) {
 }
 
 /// One of each variant, with the code it maps to.
-fn hand_built() -> [(Error, ErrorCode); 15] {
+fn hand_built() -> [(Error, ErrorCode); 17] {
     let folder = PathBuf::from("/m");
     [
         (
@@ -61,6 +63,18 @@ fn hand_built() -> [(Error, ErrorCode); 15] {
                 paths: vec![path("a.docx")],
             },
             ErrorCode::MatterFileLocked,
+        ),
+        (
+            Error::ChangedSince {
+                path: path("a.docx"),
+            },
+            ErrorCode::WordRevisionsStale,
+        ),
+        (
+            Error::NotVersioned {
+                path: path("a.docx"),
+            },
+            ErrorCode::WordEditFailed,
         ),
         (
             Error::UnknownCheckpoint { id: cid(9) },

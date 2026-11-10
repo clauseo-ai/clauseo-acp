@@ -59,7 +59,7 @@ function WhoMark({ who }: { who: Version["who"]["kind"] }) {
   const Glyph =
     who === "clauseo"
       ? IconConversation
-      : who === "outside"
+      : who === "outside" || who === "revisions"
         ? IconYourChange
         : who === "import"
           ? IconImported

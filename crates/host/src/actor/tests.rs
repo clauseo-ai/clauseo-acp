@@ -77,7 +77,8 @@ fn matters(host: &HostHandle) -> Vec<(MatterId, MatterKind)> {
         | QueryResult::Update(_)
         | QueryResult::Protection(_)
         | QueryResult::AllowedSites(_)
-        | QueryResult::WordBlackline(_)) => panic!("not matters: {other:?}"),
+        | QueryResult::WordBlackline(_)
+        | QueryResult::Revisions(_)) => panic!("not matters: {other:?}"),
     }
 }
 
@@ -100,7 +101,8 @@ fn create_thread(host: &HostHandle, n: u128, matter: MatterId) -> ThreadId {
         | CommandOutcome::MatterCreated { .. }
         | CommandOutcome::PromptAccepted { .. }
         | CommandOutcome::StepUndone { .. }
-        | CommandOutcome::VersionRestored { .. }) => panic!("not a thread: {other:?}"),
+        | CommandOutcome::VersionRestored { .. }
+        | CommandOutcome::RevisionsDecided { .. }) => panic!("not a thread: {other:?}"),
     }
 }
 

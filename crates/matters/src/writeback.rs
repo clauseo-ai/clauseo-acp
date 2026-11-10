@@ -251,6 +251,32 @@ pub(crate) fn writable(
 /// caller's next walk should find missing. A sync client may put one back at once (undo's
 /// `resurrected`).
 pub(crate) fn apply(core: &Core, folder: &Path, ops: &[&Op]) -> Result<Vec<MatterPath>, Error> {
+    apply_or_partial(core, folder, ops).map_err(|failed| failed.error)
+}
+
+/// Why [`apply_or_partial`] failed, and whether the folder had changed by then.
+#[derive(Debug)]
+pub(crate) struct Failed {
+    pub(crate) error: Error,
+    /// A delete or a rename was made before the failure: the folder is not as it was.
+    pub(crate) changed: bool,
+}
+
+/// [`apply`], telling a failure that left the folder as it was from one after a delete or a
+/// rename (a failed rename after another, or a folder sync after the renames).
+pub(crate) fn apply_or_partial(
+    core: &Core,
+    folder: &Path,
+    ops: &[&Op],
+) -> Result<Vec<MatterPath>, Failed> {
+    let unchanged = |error| Failed {
+        error,
+        changed: false,
+    };
+    let changed = |error| Failed {
+        error,
+        changed: true,
+    };
     let mut made = Vec::new();
     let staged = match stage_all(core, folder, ops, &mut made) {
         Ok(staged) => staged,
@@ -261,23 +287,35 @@ pub(crate) fn apply(core: &Core, folder: &Path, ops: &[&Op]) -> Result<Vec<Matte
                     tracing::warn!(error = %err, "folder left behind");
                 }
             }
-            return Err(err);
+            return Err(unchanged(err));
         }
     };
     let mut deleted = Vec::new();
+    // A delete or a rename made: a failure from here on leaves the folder changed.
+    let mut any_change = false;
     for op in ops {
         if let Op::Delete(path) = op {
             let abs = folder.join(path.as_str());
             match write::remove_file(&abs) {
-                Ok(()) => deleted.push(path.clone()),
+                Ok(()) => {
+                    any_change = true;
+                    deleted.push(path.clone());
+                }
                 Err(err) if err.kind() == io::ErrorKind::NotFound => {
                     deleted.push(path.clone());
                     continue;
                 }
-                Err(err) => return Err(held_or(folder, path, Error::io("delete", abs, err))),
+                Err(err) => {
+                    let error = held_or(folder, path, Error::io("delete", abs, err));
+                    return Err(if any_change {
+                        changed(error)
+                    } else {
+                        unchanged(error)
+                    });
+                }
             }
             let dir = abs.parent().unwrap_or(folder);
-            fsync::sync_dir(dir).map_err(|err| Error::io("sync", dir, err))?;
+            fsync::sync_dir(dir).map_err(|err| changed(Error::io("sync", dir, err)))?;
         }
     }
     // Every rename, then each folder synced once: the renames are durable before the
@@ -286,6 +324,7 @@ pub(crate) fn apply(core: &Core, folder: &Path, ops: &[&Op]) -> Result<Vec<Matte
     for (path, file) in staged {
         match file.rename() {
             Ok(dir) => {
+                any_change = true;
                 dirs.insert(dir);
             }
             Err(err) => {
@@ -296,17 +335,22 @@ pub(crate) fn apply(core: &Core, folder: &Path, ops: &[&Op]) -> Result<Vec<Matte
                         tracing::warn!(error = %err, "a renamed file's folder not synced");
                     }
                 }
-                return Err(held_or(folder, path, err));
+                let error = held_or(folder, path, err);
+                return Err(if any_change {
+                    changed(error)
+                } else {
+                    unchanged(error)
+                });
             }
         }
     }
     for dir in dirs {
-        fsync::sync_dir(&dir).map_err(|err| Error::io("sync", &dir, err))?;
+        fsync::sync_dir(&dir).map_err(|err| changed(Error::io("sync", &dir, err)))?;
     }
     // macOS: the syncs above reach the drive but not past its cache, and the checkpoint's
     // `F_FULLFSYNC` is on the matters root, which may be another drive. A share or an exFAT
     // drive without `F_FULLFSYNC` keeps the folder syncs.
-    fsync::full_flush_dir(folder).map_err(|err| Error::io("sync", folder, err))?;
+    fsync::full_flush_dir(folder).map_err(|err| changed(Error::io("sync", folder, err)))?;
     Ok(deleted)
 }
 

@@ -207,6 +207,9 @@ pub fn later_variants() -> Vec<DomainEvent> {
             detail: Some("the guard hook has no program".to_owned()),
         }
         .into(),
+        CheckpointRecorded::new(checkpoint_id(18), CheckpointKind::Revisions, None, None)
+            .unwrap()
+            .into(),
         // Never a turn's failure in practice (the updater's code); here for the corpus.
         TurnFailed {
             turn: turn_id(3),

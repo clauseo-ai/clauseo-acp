@@ -268,7 +268,10 @@ impl Bridge {
             // The sandbox's view (0051): the host's cache, read only. Both windows show it.
             | HostQuery::Protection
             // The sites allowed despite the block list (0053, PR 2): stored state, no paths.
-            | HostQuery::AllowedSites => {}
+            | HostQuery::AllowedSites
+            // The room's tracked changes in a Word file: the host reads a private copy with
+            // stetdoc and writes nothing.
+            | HostQuery::ListRevisions { .. } => {}
             HostQuery::Search(request) => return search::page(self, label, request.clone()).await,
             // The New matter dialog's folder warning: only a ref this run's picker issued, as
             // for `CreateMatter`.

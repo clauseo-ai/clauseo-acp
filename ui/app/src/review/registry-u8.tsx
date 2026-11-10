@@ -113,6 +113,8 @@ export type Matter = {
   /** word_blackline's answer for a Word document compared with now: marked up (by default, whole), left unanswered,
    * or refused with a code. */
   mark?: "hold" | { truncated: boolean } | { refused: string; retryable: boolean };
+  /** The lawyer accepted or rejected tracked changes in these files after the next turn: version cp6 (UC). */
+  revisions?: FileChange[];
 };
 
 /** The host's Word tool's marking up of the notice: a word out and a word in, and a paragraph added. */
@@ -153,6 +155,7 @@ export function versionsHost(m: Matter): FakeTransport {
     version(2, "after_turn", atLocal(-3, 10, 30), files, TURN),
     version(3, "outside_edits", today(0), m.outside ?? [file(LEASE)]),
     version(4, "after_turn", today(10), [], uuid(3, 4)),
+    ...(m.revisions === undefined ? [] : [version(6, "revisions", today(15), m.revisions)]),
   ];
   const steps = [
     stepEntry(9, { files, checkpoint_after: "cp2" }),

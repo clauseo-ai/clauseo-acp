@@ -104,6 +104,14 @@ pub(super) fn failures() -> Vec<DomainEvent> {
         failed(ErrorCode::BlacklineNoWordTool, "stetdoc is not configured"),
         failed(ErrorCode::BlacklineNotWord, "the path is not a .docx"),
         failed(ErrorCode::BlacklineFailed, "stetdoc compare exited 1"),
+        // Never a turn's failure in practice (tracked-change codes); here for the corpus.
+        failed(ErrorCode::WordStetdocMissing, "no stetdoc program"),
+        failed(
+            ErrorCode::WordRevisionsStale,
+            "the file changed since the list",
+        ),
+        failed(ErrorCode::WordNotDocx, "not a Word document"),
+        failed(ErrorCode::WordEditFailed, "stetdoc timed out"),
     ]
 }
 

@@ -56,6 +56,7 @@ mod query;
 mod rail;
 mod relocate;
 mod requests;
+mod revisions;
 pub(crate) mod scan;
 pub(crate) mod scratch;
 pub(crate) use matters::probe::FolderProbes;
