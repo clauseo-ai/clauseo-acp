@@ -1,17 +1,19 @@
-//! A set-up run, steps 1 to 11 after the lock: the owner check, the preflight, the plan for the
-//! pool (D-B5, D-B6), then the changes, each failure handed to the rollback (`rollback.rs`).
+//! A set-up run, steps 1 to 11 after the lock: the owner check, what an interrupted run left
+//! (`intent.rs`), the preflight, the plan for the pool (D-B5, D-B6), then the changes, each
+//! failure handed to the rollback (`rollback.rs`). Before each change the run checks its
+//! deadline (`early_steps::checkpoint`), and before the group and each account it writes its
+//! intent, cleared once the record names what was made.
 
 use std::collections::BTreeSet;
 use std::io;
 use std::path::PathBuf;
 
+use super::early_steps::{check_owner, checkpoint, intend, preflight, recorded_intent, recover};
 use super::late_steps::{
-    admin_lock, fence, journals, network, own_protected, refuse_pool_owner, registered, stop_task,
+    admin_lock, fence, journals, network, own_protected, registered, shared_writes, stop_task,
 };
-use super::machine::{LogonRight, Machine, Password, ServiceStart, owned};
-use super::outcome::{
-    LOGON_REFUSED, SECLOGON_DISABLED, SetupExit, SetupFailure, SetupReport, Step, TopUp, cause_of,
-};
+use super::machine::{Machine, Password, owned};
+use super::outcome::{SetupExit, SetupFailure, SetupReport, Step, TopUp, cause_of};
 use super::resets::{self, resets_due};
 use super::rollback::{Made, Run, roll_back};
 use super::top_up;
@@ -19,11 +21,8 @@ use super::{POOL_START, SetupRequest};
 use crate::windows::fence::RegisteredMatter;
 use crate::windows::marker::{Marker, MarkerState, SETUP_VERSION};
 use crate::windows::pool::{MachineRecord, POOL_CAP, PoolUser, pool_name, pool_number};
-use crate::windows::shared_writes::{
-    SharedWrites, apply_shared_write_denies, plan_shared_write_denies, shared_write_targets,
-};
 use crate::windows::sids::Sid;
-use crate::windows::writer::{AclWriter, ApplyFailure};
+use crate::windows::writer::AclWriter;
 
 /// A step's failure inside the run: where, and why.
 pub(super) type Failed = (Step, String);
@@ -77,6 +76,7 @@ pub(super) fn run(
         .read_record()
         .map_err(|error| SetupFailure::early(Step::ReadRecord, cause_of(&error)))?;
     check_owner(before.as_ref(), &req.owner)?;
+    let before = recover(machine, before, &req.owner)?;
     let matters = registered(machine, before.as_ref())?;
     let resets = resets_due(machine, before.as_ref())?;
     let held = top_up::held(machine, before.as_ref(), &resets)?;
@@ -94,60 +94,18 @@ pub(super) fn run(
             } else {
                 format!("{cause}; left behind: {}", left.join("; "))
             };
+            let exit = if run.deadline {
+                SetupExit::DeadlineReached
+            } else {
+                SetupExit::Failed
+            };
             Err(SetupFailure {
                 step,
                 cause,
                 rolled_back,
-                exit: SetupExit::Failed,
+                exit,
             })
         }
-    }
-}
-
-/// Step 1's check: a record owned by another user refuses with that user's SID (D5); one that
-/// names the owner as a pool user or the group refuses too, so no step ever touches the owner's
-/// own account (S15 `PR4b` review).
-fn check_owner(record: Option<&MachineRecord>, owner: &Sid) -> Result<(), SetupFailure> {
-    let Some(record) = record else {
-        return Ok(());
-    };
-    if record.owner != *owner {
-        return Err(SetupFailure::early(
-            Step::Owner,
-            format!(
-                "this computer's protection was set up by another Windows user, {}",
-                record.owner
-            ),
-        ));
-    }
-    if record.pool.contains(owner) || record.group == *owner {
-        // This user owns the set-up, so not `OtherOwner`: a failure with its cause.
-        return Err(SetupFailure {
-            step: Step::Owner,
-            cause: format!(
-                "the machine's record names the owner, {owner}, as a sandbox user or group"
-            ),
-            rolled_back: true,
-            exit: SetupExit::Failed,
-        });
-    }
-    Ok(())
-}
-
-/// Step 2: Secondary Logon must not be disabled, and local policy must not refuse `Users` the
-/// interactive logon right. Both are checked before any account exists.
-fn preflight(machine: &mut impl Machine) -> Result<(), SetupFailure> {
-    match machine.seclogon() {
-        Ok(ServiceStart::Automatic | ServiceStart::Manual) => {}
-        Ok(ServiceStart::Disabled) => {
-            return Err(SetupFailure::early(Step::SecondaryLogon, SECLOGON_DISABLED));
-        }
-        Err(error) => return Err(SetupFailure::early(Step::SecondaryLogon, cause_of(&error))),
-    }
-    match machine.logon_right() {
-        Ok(LogonRight::Allowed) => Ok(()),
-        Ok(LogonRight::Refused) => Err(SetupFailure::early(Step::LogonRight, LOGON_REFUSED)),
-        Err(error) => Err(SetupFailure::early(Step::LogonRight, cause_of(&error))),
     }
 }
 
@@ -282,33 +240,45 @@ fn change(
     make_users(machine, req, plan, run, &group, &mut users)?;
     let record = record_of(req, &group, plan, run);
     if run.recorded() != Some(&record) {
+        checkpoint(machine, run, Step::WriteRecord)?;
         write_record(machine, &record).map_err(|cause| (Step::WriteRecord, cause))?;
         run.recorded = Some(record);
     }
+    recorded_intent(machine, run)?;
+    checkpoint(machine, run, Step::AdminLock)?;
     admin_lock(machine, &group)?;
     // A failure after this leaves the task registered, naming this run's owner: the rollback has
     // no step for it. It still stops only what the record names: after a first set-up's rollback
     // there is no record (`--stop` then does nothing) or only the users the rollback couldn't
     // remove; after a re-run's, the pool as before.
+    checkpoint(machine, run, Step::StopTask)?;
     stop_task(machine, &req.owner)?;
     let local_lows: Vec<(PathBuf, PathBuf)> = users
         .profiles
         .iter()
         .map(|(_, profile)| (profile.clone(), profile.join("AppData").join("LocalLow")))
         .collect();
+    checkpoint(machine, run, Step::Owners)?;
     own_protected(machine, &local_lows)?;
+    checkpoint(machine, run, Step::SharedWrites)?;
     let shared = shared_writes(machine, acl, &group, &users.profiles, run)?;
     let live: Vec<Sid> = users.profiles.iter().map(|(u, _)| u.sid.clone()).collect();
+    checkpoint(machine, run, Step::Fence)?;
     let (fenced, fence_skipped) = match fence(machine, acl, &plan.matters, run, &group, &live)? {
         Some((applied, skipped)) => (Some(applied), skipped),
         None => (None, Vec::new()),
     };
+    checkpoint(machine, run, Step::Network)?;
     let network = network(machine, &req.owner, &group, &live)?;
+    // Journals have no step of their own: their failures never fail the set-up.
+    checkpoint(machine, run, Step::Secrets)?;
     let journals = journals(machine, &plan.matters);
+    checkpoint(machine, run, Step::Secrets)?;
     owned(machine, |machine| {
         machine.protect_for_owner(&users.secrets, &live)
     })
     .map_err(|error| (Step::Secrets, cause_of(&error)))?;
+    checkpoint(machine, run, Step::Marker)?;
     let profiles_reset = resets::clear(machine, users.profiles_reset);
     let marker = Marker {
         version: SETUP_VERSION,
@@ -317,6 +287,7 @@ fn change(
         pool: live,
         set_up_at: machine.now(),
     };
+    checkpoint(machine, run, Step::Marker)?;
     owned(machine, |machine| machine.write_marker(&marker))
         .map_err(|error| (Step::Marker, cause_of(&error)))?;
     Ok(SetupReport {
@@ -353,6 +324,9 @@ fn group(machine: &mut impl Machine, run: &mut Run) -> Result<Sid, Failed> {
             )));
         }
         None => {
+            checkpoint(machine, run, Step::Group)?;
+            intend(machine, run, true, &[]).map_err(failed)?;
+            checkpoint(machine, run, Step::Group)?;
             let sid = machine
                 .create_group()
                 .map_err(|error| failed(cause_of(&error)))?;
@@ -361,6 +335,7 @@ fn group(machine: &mut impl Machine, run: &mut Run) -> Result<Sid, Failed> {
         }
     };
     run.group = Some(sid.clone());
+    checkpoint(machine, run, Step::RemoteLogon)?;
     machine
         .deny_remote_logon(&sid)
         .map_err(|error| (Step::RemoteLogon, cause_of(&error)))?;
@@ -383,6 +358,7 @@ fn keep_user(
     let wipe = plan.resets.contains(&user.sid);
     if !plan.reset && !wipe {
         if run.group_made {
+            checkpoint(machine, run, Step::AddToGroup)?;
             machine
                 .add_to_group(name, group)
                 .map_err(|error| (Step::AddToGroup, cause_of(&error)))?;
@@ -400,22 +376,27 @@ fn keep_user(
         return Ok(());
     }
     let expected = if wipe {
+        checkpoint(machine, run, Step::ResetProfile)?;
         Some(resets::delete(machine, user)?)
     } else {
         None
     };
     let password = machine.new_password();
+    checkpoint(machine, run, Step::ResetPassword)?;
     machine
         .set_password(name, &password)
         .map_err(|error| (Step::ResetPassword, cause_of(&error)))?;
     run.reset.push((user.sid.clone(), password.clone()));
     users.reset.push(user.clone());
+    checkpoint(machine, run, Step::AddToGroup)?;
     machine
         .add_to_group(name, group)
         .map_err(|error| (Step::AddToGroup, cause_of(&error)))?;
+    checkpoint(machine, run, Step::Hide)?;
     machine
         .hide(name)
         .map_err(|error| (Step::Hide, cause_of(&error)))?;
+    checkpoint(machine, run, Step::LogOn)?;
     let path = log_on(machine, name, &password)?;
     if let Some(expected) = &expected {
         resets::check_remade(user, expected, &path)?;
@@ -441,6 +422,10 @@ fn make_users(
     let mut next = 1;
     for _ in 0..plan.make {
         let name = free_name(machine, &taken, &mut next, &mut users.skipped)?;
+        checkpoint(machine, run, Step::CreateUser)?;
+        let pending = std::slice::from_ref(&name);
+        intend(machine, run, false, pending).map_err(|cause| (Step::CreateUser, cause))?;
+        checkpoint(machine, run, Step::CreateUser)?;
         let password = machine.new_password();
         let sid = machine
             .create_user(&name, &password)
@@ -452,15 +437,20 @@ fn make_users(
             profile: None,
         });
         let name = user.name.as_str();
+        checkpoint(machine, run, Step::AddToGroup)?;
         machine
             .add_to_group(name, group)
             .map_err(|error| (Step::AddToGroup, cause_of(&error)))?;
+        checkpoint(machine, run, Step::Hide)?;
         machine
             .hide(name)
             .map_err(|error| (Step::Hide, cause_of(&error)))?;
         let record = record_of(req, group, plan, run);
+        checkpoint(machine, run, Step::WriteRecord)?;
         write_record(machine, &record).map_err(|cause| (Step::WriteRecord, cause))?;
         run.recorded = Some(record);
+        recorded_intent(machine, run)?;
+        checkpoint(machine, run, Step::LogOn)?;
         if let Some(made) = run.made.last_mut() {
             made.logged_on = true;
         }
@@ -545,51 +535,4 @@ pub(super) fn write_record(
     machine
         .write_record(record)
         .map_err(|error| cause_of(&error))
-}
-
-/// Step 7: `DeviceSync` and every live user's `LocalLow` denied to the group. Any failed target
-/// fails the set-up; what was written stays (D12), except what the rollback takes off with the
-/// users this run made.
-fn shared_writes(
-    machine: &mut impl Machine,
-    acl: &mut impl AclWriter,
-    group: &Sid,
-    profiles: &[(PoolUser, PathBuf)],
-    run: &mut Run,
-) -> Result<SharedWrites, Failed> {
-    let failed = |cause: String| (Step::SharedWrites, cause);
-    let program_data = machine
-        .program_data()
-        .map_err(|error| failed(cause_of(&error)))?;
-    let folders: Vec<PathBuf> = profiles.iter().map(|(_, path)| path.clone()).collect();
-    let live: Vec<Sid> = profiles.iter().map(|(user, _)| user.sid.clone()).collect();
-    let device_sync = program_data.join("Microsoft").join("DeviceSync");
-    let there = machine.exists(&device_sync).map_err(|error| {
-        let cause = cause_of(&error);
-        (Step::Owners, format!("{}: {cause}", device_sync.display()))
-    })?;
-    if there {
-        let mut pool = live.clone();
-        pool.push(group.clone());
-        refuse_pool_owner(machine, &device_sync, &pool)?;
-    }
-    let targets = shared_write_targets(&program_data, &folders);
-    let grants =
-        plan_shared_write_denies(group, &targets).map_err(|error| failed(error.to_string()))?;
-    let done = apply_shared_write_denies(acl, &grants, &live);
-    run.added.clone_from(&done.added);
-    if done.failed.is_empty() {
-        Ok(done)
-    } else {
-        Err(failed(failed_targets(&done.failed)))
-    }
-}
-
-/// Each failed target and why, for the cause.
-fn failed_targets(failed: &[(PathBuf, ApplyFailure)]) -> String {
-    let each: Vec<String> = failed
-        .iter()
-        .map(|(path, failure)| format!("{}: {failure}", path.display()))
-        .collect();
-    format!("a shared folder couldn't be closed ({})", each.join("; "))
 }

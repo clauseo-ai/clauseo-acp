@@ -1,7 +1,7 @@
 //! Set-up's steps around the denies and the matters: the owners of the folders the shared-write
 //! denies protect (`PR4h`), reading the owner's registered matters after the lock (`PR4h`), step
-//! 8's fence of them against the grown pool, step 9's change journals, and the per-machine
-//! stop and sweep tasks once the owner is recorded.
+//! 8's fence of them against the grown pool, step 9's change journals, the per-machine stop and
+//! sweep tasks once the owner is recorded, and step 7's shared-write denies.
 
 use std::io;
 use std::path::{Path, PathBuf};
@@ -17,10 +17,13 @@ use super::rollback::Run;
 use crate::Error;
 use crate::windows::apply::{Applied, fence_each};
 use crate::windows::fence::RegisteredMatter;
-use crate::windows::pool::MachineRecord;
+use crate::windows::pool::{MachineRecord, PoolUser};
+use crate::windows::shared_writes::{
+    SharedWrites, apply_shared_write_denies, plan_shared_write_denies, shared_write_targets,
+};
 use crate::windows::sids::Sid;
 use crate::windows::wfp::{NetworkReport, NetworkSetup};
-use crate::windows::writer::AclWriter;
+use crate::windows::writer::{AclWriter, ApplyFailure};
 
 /// `SYSTEM`.
 const SYSTEM: &str = "S-1-5-18";
@@ -272,4 +275,51 @@ pub(super) fn journals(
         done.push((volume, outcome));
     }
     Ok(done)
+}
+
+/// Step 7: `DeviceSync` and every live user's `LocalLow` denied to the group. Any failed target
+/// fails the set-up; what was written stays (D12), except what the rollback takes off with the
+/// users this run made.
+pub(super) fn shared_writes(
+    machine: &mut impl Machine,
+    acl: &mut impl AclWriter,
+    group: &Sid,
+    profiles: &[(PoolUser, PathBuf)],
+    run: &mut Run,
+) -> Result<SharedWrites, Failed> {
+    let failed = |cause: String| (Step::SharedWrites, cause);
+    let program_data = machine
+        .program_data()
+        .map_err(|error| failed(cause_of(&error)))?;
+    let folders: Vec<PathBuf> = profiles.iter().map(|(_, path)| path.clone()).collect();
+    let live: Vec<Sid> = profiles.iter().map(|(user, _)| user.sid.clone()).collect();
+    let device_sync = program_data.join("Microsoft").join("DeviceSync");
+    let there = machine.exists(&device_sync).map_err(|error| {
+        let cause = cause_of(&error);
+        (Step::Owners, format!("{}: {cause}", device_sync.display()))
+    })?;
+    if there {
+        let mut pool = live.clone();
+        pool.push(group.clone());
+        refuse_pool_owner(machine, &device_sync, &pool)?;
+    }
+    let targets = shared_write_targets(&program_data, &folders);
+    let grants =
+        plan_shared_write_denies(group, &targets).map_err(|error| failed(error.to_string()))?;
+    let done = apply_shared_write_denies(acl, &grants, &live);
+    run.added.clone_from(&done.added);
+    if done.failed.is_empty() {
+        Ok(done)
+    } else {
+        Err(failed(failed_targets(&done.failed)))
+    }
+}
+
+/// Each failed target and why, for the cause.
+fn failed_targets(failed: &[(PathBuf, ApplyFailure)]) -> String {
+    let each: Vec<String> = failed
+        .iter()
+        .map(|(path, failure)| format!("{}: {failure}", path.display()))
+        .collect();
+    format!("a shared folder couldn't be closed ({})", each.join("; "))
 }

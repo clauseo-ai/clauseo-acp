@@ -17,6 +17,7 @@ use crate::windows::ledger::{Ledger, RecordedFile, ledger_path};
 use crate::windows::pool::MachineRecord;
 use crate::windows::runner::marker::{marker_path, remove_marker, unclean_sessions};
 use crate::windows::set_aside::forget_bookkeeping;
+use crate::windows::setup::intent::Intent;
 use crate::windows::setup::record_values::CopyOwner;
 use crate::windows::setup::remove::Removal;
 use crate::windows::setup::remove::{FolderOwner, owners};
@@ -212,6 +213,27 @@ impl Removal for Remover {
 
     fn copy_owner(&mut self) -> Result<Option<CopyOwner>, MachineError> {
         Machine::copy_owner(&mut self.m)
+    }
+
+    fn read_intent(&mut self) -> Result<Intent, MachineError> {
+        Machine::read_intent(&mut self.m)
+    }
+
+    fn clear_intent(&mut self) -> Result<(), MachineError> {
+        let owner = self.m.owner.clone();
+        Machine::write_intent(&mut self.m, &owner, false, &[])
+    }
+
+    fn marked_user(&mut self, name: &str) -> Result<Option<Sid>, MachineError> {
+        Machine::marked_user(&mut self.m, name)
+    }
+
+    fn marked_group(&mut self) -> Result<Option<Sid>, MachineError> {
+        Machine::marked_group(&mut self.m)
+    }
+
+    fn cancelled(&self) -> bool {
+        Machine::cancelled(&self.m)
     }
 
     fn unregister_stop_task(&mut self) -> Result<(), MachineError> {

@@ -206,6 +206,9 @@ pub fn outcome(
         Some(SetupExit::Usage) => {
             format!("Clauseo's set-up program was started wrongly (exit {code})")
         }
+        Some(SetupExit::DeadlineReached) => format!(
+            "Clauseo's set-up program ran out of time and stopped; run it again (exit {code})"
+        ),
         Some(SetupExit::RemovedPartly) => {
             format!("Clauseo's set-up program removed only part of the protection (exit {code})")
         }

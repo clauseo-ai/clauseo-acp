@@ -236,6 +236,7 @@ fn a_recorded_sid_that_is_no_pool_account_refuses() {
             password: "admin".to_owned(),
             groups: std::collections::BTreeSet::default(),
             hidden: false,
+            marked: false,
         },
     );
     machine.state.record = Some(MachineRecord {
@@ -264,6 +265,7 @@ fn an_account_with_a_free_pool_name_is_skipped_never_adopted() {
             password: "someone's".to_owned(),
             groups: std::collections::BTreeSet::default(),
             hidden: false,
+            marked: false,
         },
     );
     let report = set_up_fresh(&mut machine, &mut FakeAcl::default());
@@ -303,14 +305,14 @@ fn exit_codes_round_trip() {
     let codes: Vec<u8> = SetupExit::ALL.iter().map(|exit| exit.as_code()).collect();
     assert_eq!(
         codes,
-        [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+        [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
         "appended from here on, never renumbered"
     );
     for exit in SetupExit::ALL {
         assert_eq!(SetupExit::from_code(u32::from(exit.as_code())), Some(exit));
     }
     for other in [
-        11,
+        12,
         77,
         255,
         ERROR_CANCELLED,

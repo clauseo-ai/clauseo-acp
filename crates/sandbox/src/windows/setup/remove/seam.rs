@@ -11,6 +11,7 @@ use super::FolderOwner;
 use crate::windows::apply::Surroundings;
 use crate::windows::ledger::Ledger;
 use crate::windows::pool::MachineRecord;
+use crate::windows::setup::intent::Intent;
 use crate::windows::setup::record_values::CopyOwner;
 use crate::windows::setup::{MachineError, ProfileDir};
 use crate::windows::sids::Sid;
@@ -27,8 +28,19 @@ pub trait Removal {
     fn read_record(&mut self) -> Result<Option<MachineRecord>, MachineError>;
     /// Writes `record` as the whole key.
     fn write_record(&mut self, record: &MachineRecord) -> Result<(), MachineError>;
-    /// Deletes the key; one already gone is `Ok`.
+    /// Deletes the key's set-up values (the intent's among them); one already gone is `Ok`.
     fn delete_record(&mut self) -> Result<(), MachineError>;
+    /// The record key's intent (`intent.rs`), as `Machine::read_intent` reads it.
+    fn read_intent(&mut self) -> Result<Intent, MachineError>;
+    /// Deletes the intent's pending values (`PendingGroup`, `PendingUsers`), nothing else.
+    fn clear_intent(&mut self) -> Result<(), MachineError>;
+    /// As `Machine::marked_user`.
+    fn marked_user(&mut self, name: &str) -> Result<Option<Sid>, MachineError>;
+    /// As `Machine::marked_group`.
+    fn marked_group(&mut self) -> Result<Option<Sid>, MachineError>;
+    /// Whether the run's deadline is near (`deadline.rs`): the removal stops before its next
+    /// step, `Removing` set, for the next run to finish.
+    fn cancelled(&self) -> bool;
     /// The record's `AdminCopyOwner`: who placed the admin copy, `None` when there is none.
     fn copy_owner(&mut self) -> Result<Option<CopyOwner>, MachineError>;
     /// Deletes the SYSTEM tasks `\Clauseo\SandboxStop` and `\Clauseo\SandboxSweep`

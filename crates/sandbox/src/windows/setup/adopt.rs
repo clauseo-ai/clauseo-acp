@@ -46,6 +46,10 @@
 //!    `--per-machine` sets nobody up (each user's set-up runs later through the app) and exits
 //!    `Done`.
 //!
+//! With `--deadline`, steps 5 to 7 each first check the run's cancel flag (`deadline.rs`); once it
+//! is set, `--adopt` changes nothing more and exits [`SetupExit::DeadlineReached`] (running it
+//! again repairs what it left), and step 8's set-up checks the same flag before each change.
+//!
 //! Every step goes through [`Adopter`], so the order and the refusals are tested on every OS;
 //! `windows_adopter.rs` is the machine.
 
@@ -117,6 +121,8 @@ pub trait Adopter {
     /// Records a step that failed (`explain.rs`): the Event Log's line, and, once the lawyer is
     /// confirmed, `setup-result.json` written as them.
     fn report(&mut self, failure: &AdoptFailure);
+    /// Whether the run's deadline is near (`deadline::cancelled`): no further change.
+    fn cancelled(&mut self) -> bool;
 }
 
 /// What [`Adopter::records`] reads.
@@ -218,6 +224,7 @@ fn place(
         return Err(SetupExit::Usage);
     }
     let dir = admin_copy::admin_dir(program_files);
+    go_on(machine)?;
     if let Err(error) = machine.lock_down(&dir, exe, records.group.as_ref()) {
         return Err(failed(
             machine,
@@ -241,6 +248,7 @@ fn place(
     };
     if let Target::User { owner_sid, .. } = target {
         for task in TASKS {
+            go_on(machine)?;
             if let Err(error) = machine.register_task(task, owner_sid) {
                 return Err(failed(machine, AdoptStep::Task(task), task.name(), error));
             }
@@ -252,6 +260,7 @@ fn place(
         version: admin_copy::APP_VERSION.to_owned(),
         owner,
     };
+    go_on(machine)?;
     if let Err(error) = machine.write_values(&values) {
         return Err(failed(
             machine,
@@ -259,6 +268,15 @@ fn place(
             "the admin values",
             error,
         ));
+    }
+    Ok(())
+}
+
+/// Before each change: once the run's deadline is near, `--adopt` stops here.
+fn go_on(machine: &mut dyn Adopter) -> Result<(), SetupExit> {
+    if machine.cancelled() {
+        tracing::warn!("--adopt stopped for its deadline; running it again repairs what it left");
+        return Err(SetupExit::DeadlineReached);
     }
     Ok(())
 }

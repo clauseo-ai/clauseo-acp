@@ -26,9 +26,11 @@ use crate::windows::sids::Reserved;
 use crate::windows::wfp::{NetworkReport, NetworkSetup};
 
 pub(super) use super::fake_acl::FakeAcl;
+use super::fake_intent::{self, Life};
 pub(super) use super::fake_more::folder_name;
 pub(super) use super::fake_more::{Account, State};
 use super::fake_more::{Around, ProfileFaults};
+use crate::windows::setup::intent::Intent;
 
 /// The owner's SID, and its account's name.
 pub(super) const OWNER: &str = "S-1-5-21-7-8-9-1001";
@@ -113,6 +115,8 @@ pub(super) struct FakeMachine {
     pub(super) next_rid: u32,
     pub(super) passwords: u32,
     pub(super) around: Around,
+    /// Its deadline's flag, its changes, a kill (`fake_intent.rs`).
+    pub(super) life: Life,
 }
 
 impl Machine for FakeMachine {
@@ -134,7 +138,9 @@ impl Machine for FakeMachine {
     }
 
     fn write_record(&mut self, record: &MachineRecord) -> Result<(), MachineError> {
+        fake_intent::tear(self, record);
         self.call(format!("write_record {}", rids(&record.pool)))?;
+        self.state.partial = None;
         self.state.record = Some(record.clone());
         self.written.push(record.clone());
         Ok(())
@@ -143,7 +149,33 @@ impl Machine for FakeMachine {
     fn delete_record(&mut self) -> Result<(), MachineError> {
         self.call("delete_record")?;
         self.state.record = None;
+        fake_intent::forget_intent(self);
         Ok(())
+    }
+
+    fn read_intent(&mut self) -> Result<Intent, MachineError> {
+        Ok(fake_intent::read_intent(self))
+    }
+
+    fn write_intent(
+        &mut self,
+        owner: &Sid,
+        group: bool,
+        users: &[String],
+    ) -> Result<(), MachineError> {
+        fake_intent::write_intent(self, owner, group, users)
+    }
+
+    fn marked_user(&mut self, name: &str) -> Result<Option<Sid>, MachineError> {
+        Ok(fake_intent::marked_user(self, name))
+    }
+
+    fn marked_group(&mut self) -> Result<Option<Sid>, MachineError> {
+        Ok(fake_intent::marked_group(self))
+    }
+
+    fn cancelled(&self) -> bool {
+        self.life.cancelled()
     }
 
     fn seclogon(&mut self) -> Result<ServiceStart, MachineError> {
@@ -184,6 +216,7 @@ impl Machine for FakeMachine {
         self.call("create_group")?;
         let group = self.new_sid();
         self.state.group = Some(group.clone());
+        self.state.group_marked = true;
         Ok(group)
     }
 
@@ -201,6 +234,7 @@ impl Machine for FakeMachine {
         self.call(format!("delete_group {}", rid(group)))?;
         if self.state.group.as_ref() == Some(group) {
             self.state.group = None;
+            self.state.group_marked = false;
         }
         for account in self.state.accounts.values_mut() {
             account.groups.remove(group);
@@ -243,6 +277,7 @@ impl Machine for FakeMachine {
             password: password.to_string(),
             groups: BTreeSet::new(),
             hidden: false,
+            marked: true,
         };
         self.state.accounts.insert(name.to_owned(), account);
         Ok(sid)
@@ -280,45 +315,7 @@ impl Machine for FakeMachine {
     }
 
     fn log_on_once(&mut self, name: &str, password: &Password) -> Result<ProfileDir, MachineError> {
-        self.call(format!("log_on_once {name}"))?;
-        let account = self.account(name)?;
-        if account.password != password.as_str() {
-            return Err(MachineError::Os {
-                call: "LogonUserW",
-                code: 1326,
-            });
-        }
-        let sid = account.sid.clone();
-        if self.temporary.contains(name) {
-            let path = self.dir.dir("Users/TEMP/AppData/LocalLow");
-            let path = path.parent().unwrap().parent().unwrap().to_owned();
-            return Ok(ProfileDir {
-                path,
-                temporary: true,
-            });
-        }
-        let listed = self.state.profiles.get(&sid).cloned();
-        let path = self
-            .faults
-            .logon_path(&self.dir.path().join("Users"), name, listed);
-        let folder = path.file_name().unwrap().to_string_lossy().into_owned();
-        if self.no_local_low.contains(name) {
-            self.dir.dir(&format!("Users/{folder}/AppData"));
-            self.state.profiles.insert(sid, path.clone());
-            return Ok(ProfileDir {
-                path,
-                temporary: false,
-            });
-        }
-        let local_low = self.dir.dir(&format!("Users/{folder}/AppData/LocalLow"));
-        if self.self_owned_local_low.contains(name) {
-            self.owners.insert(local_low, sid.clone());
-        }
-        self.state.profiles.insert(sid, path.clone());
-        Ok(ProfileDir {
-            path,
-            temporary: false,
-        })
+        self.fake_log_on_once(name, password)
     }
 
     fn profile_of(&mut self, sid: &Sid) -> Result<Option<ProfileDir>, MachineError> {

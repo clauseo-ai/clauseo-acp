@@ -18,7 +18,9 @@ use std::rc::Rc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use super::accounts::{self, Kind};
+use super::accounts_marked::{self, GROUP_COMMENT};
 use super::answers::DENY_REMOTE_INTERACTIVE_RIGHT;
+use super::intent::Intent;
 use super::lock::{Acquired, Held, SETUP_MUTEX, SetupMutex};
 use super::machine::{
     LogonRight, Machine, MachineError, Password, ProfileDir, ServiceStart, owned,
@@ -27,6 +29,7 @@ use super::owner::Owner;
 use super::record_values::CopyOwner;
 use super::record_write::{self, RECORD_KEY};
 use super::registered::registered;
+use super::{deadline, record_intent};
 use super::{ffi, journal, logon, password, preflight, profile};
 use crate::SetupError;
 use crate::windows::acl;
@@ -45,9 +48,6 @@ use crate::windows::wfp::{self, Namespace, NetworkReport, NetworkSetup};
 
 /// `BUILTIN\Administrators`, the owner a protected folder is handed to.
 const ADMINISTRATORS: &str = "S-1-5-32-544";
-
-/// The comment the pool group carries in Computer Management.
-const GROUP_COMMENT: &str = "Clauseo's protection runs each matter's agent as one of these users.";
 
 /// The machine-wide names a [`WindowsMachine`] works on, and what it may touch: the real ones
 /// ([`Names::production`]), or a test's, so a test never touches a real pool.
@@ -216,6 +216,32 @@ impl Machine for WindowsMachine {
 
     fn delete_record(&mut self) -> Result<(), MachineError> {
         record_write::delete(&self.names.record_key)
+    }
+
+    fn read_intent(&mut self) -> Result<Intent, MachineError> {
+        record_intent::read_intent(&self.names.record_key)
+    }
+
+    fn write_intent(
+        &mut self,
+        owner: &Sid,
+        group: bool,
+        users: &[String],
+    ) -> Result<(), MachineError> {
+        // The engine's names (`ClauseoSbNN`), as the intent is read back and undone by them.
+        record_intent::write_intent(&self.names.record_key, owner, group, users)
+    }
+
+    fn marked_user(&mut self, name: &str) -> Result<Option<Sid>, MachineError> {
+        accounts_marked::marked_user(&self.names, name)
+    }
+
+    fn marked_group(&mut self) -> Result<Option<Sid>, MachineError> {
+        accounts_marked::marked_group(&self.names)
+    }
+
+    fn cancelled(&self) -> bool {
+        deadline::cancelled()
     }
 
     fn seclogon(&mut self) -> Result<ServiceStart, MachineError> {

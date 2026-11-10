@@ -6,6 +6,10 @@
 //! this run made that is still there, so no account or group is left that the record doesn't
 //! name. Every other deny stays (D12). Nothing that existed before the run is removed.
 //!
+//! The run's intent (`intent.rs`) goes last: with the record when the record goes, else cleared
+//! once the record is written to what remains, which then names whatever the rollback couldn't
+//! remove. A rollback that couldn't write the record leaves the intent for the next run.
+//!
 //! A re-run's new passwords for the recorded users can't be undone, so the rollback writes them
 //! to `secrets.bin` (keeping the blobs of the users not reset), and the pool still works. The
 //! denies stay on purpose: a deny naming a group or user that is gone does no harm.
@@ -54,6 +58,12 @@ pub(super) struct Run {
     pub(super) kept: Vec<Sid>,
     /// The new passwords this run gave kept users (a re-run), as each was set.
     pub(super) reset: Vec<(Sid, Password)>,
+    /// `Some` while an intent this run wrote (`intent.rs`) is outstanding, no record write
+    /// having cleared it; `Some(true)` when it names the group this run made (or was about to),
+    /// which no record names yet.
+    pub(super) intent: Option<bool>,
+    /// The run stopped for its deadline (`deadline.rs`), so it exits `DeadlineReached`.
+    pub(super) deadline: bool,
 }
 
 impl Run {
@@ -69,6 +79,8 @@ impl Run {
             ledger: None,
             kept: Vec::new(),
             reset: Vec::new(),
+            intent: None,
+            deadline: false,
         }
     }
 
@@ -212,9 +224,11 @@ fn rewrite_record(
     let made_group_left = run.group_made && !group_gone;
     let before = run.before.as_ref();
     let result = if before.is_none() && survivors.is_empty() && !made_group_left {
-        match run.recorded {
-            Some(_) => machine.delete_record().map_err(|error| cause_of(&error)),
-            None => Ok(()),
+        // The intent's `OwnerSid` and pending values go with the record's.
+        if run.recorded.is_some() || run.intent.is_some() {
+            machine.delete_record().map_err(|error| cause_of(&error))
+        } else {
+            Ok(())
         }
     } else {
         let group = if made_group_left {
@@ -225,7 +239,11 @@ fn rewrite_record(
                 .or_else(|| run.group.clone())
         };
         let Some(group) = group else {
-            // No group means nothing was made: the record is as it was.
+            // No group means nothing was made: the record is as it was, and so is any intent
+            // but this run's, which named only the group it didn't make.
+            if run.intent.is_some() {
+                clear_intent(machine, req, left);
+            }
             return;
         };
         let mut pool = before.map(|b| b.pool.clone()).unwrap_or_default();
@@ -242,11 +260,15 @@ fn rewrite_record(
             data_dir: before.map_or_else(|| req.data_dir.clone(), |b| b.data_dir.clone()),
             removing: before.is_some_and(|b| b.removing),
         };
-        if run.recorded() == Some(&record) {
+        let written = if run.recorded() == Some(&record) {
             Ok(())
         } else {
             write_record(machine, &record)
+        };
+        if written.is_ok() && run.intent.is_some() {
+            clear_intent(machine, req, left);
         }
+        written
     };
     if let Err(cause) = result {
         let survivors: Vec<String> = survivors.iter().map(ToString::to_string).collect();
@@ -254,6 +276,16 @@ fn rewrite_record(
             "the machine's record, which may not name what this run left ({cause}; survivors: \
              [{}])",
             survivors.join(", ")
+        ));
+    }
+}
+
+/// The intent cleared, once the record names what remains; a failure is left behind, named.
+fn clear_intent(machine: &mut impl Machine, req: &SetupRequest, left: &mut Vec<String>) {
+    if let Err(error) = machine.write_intent(&req.owner, false, &[]) {
+        left.push(format!(
+            "the set-up's intent, which the next set-up or removal finishes ({})",
+            cause_of(&error)
         ));
     }
 }

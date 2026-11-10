@@ -44,6 +44,11 @@ pub const SECLOGON_DISABLED: &str = "the Secondary Logon service (seclogon) is d
 pub const LOGON_REFUSED: &str = "Windows' \"Deny log on locally\" setting includes the Users \
      group, so the sandbox users can't sign in: IT can take Users out of it";
 
+/// The cause of a run stopped by its deadline ([`SetupExit::DeadlineReached`]), at the step it
+/// was about to take.
+pub(super) const DEADLINE_REACHED: &str = "the set-up ran out of the time it was given, so it \
+     stopped before this step and undid what it had made: run it again";
+
 /// The setup exe's exit codes (D-B4). Codes are appended from here on, never renumbered: the
 /// uninstall hook and the app read them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -78,6 +83,12 @@ pub enum SetupExit {
     /// (its values, a task, its folder), stays; the step and code are in the Event Log. The
     /// uninstall hook counts it as removed, as only administrators can change what is left.
     AdminCopyLeft,
+    /// 11: the run reached the deadline its `--deadline` set (`deadline.rs`). A set-up stopped
+    /// before its next change and rolled back what it had made, or was ended at the deadline
+    /// itself, leaving what its intent and record name for the next run (D-B7); `--remove`
+    /// stopped between two steps with `Removing` set, for the next run to finish; `--adopt`
+    /// stopped between two of its steps, which running it again repairs.
+    DeadlineReached,
 }
 
 impl SetupExit {
@@ -92,7 +103,7 @@ impl SetupExit {
     pub const Removed: SetupExit = SetupExit::Done;
 
     /// Every exit, in code order.
-    pub const ALL: [SetupExit; 11] = [
+    pub const ALL: [SetupExit; 12] = [
         SetupExit::Done,
         SetupExit::Usage,
         SetupExit::OtherOwner,
@@ -104,6 +115,7 @@ impl SetupExit {
         SetupExit::NotAdminCopy,
         SetupExit::Downgrade,
         SetupExit::AdminCopyLeft,
+        SetupExit::DeadlineReached,
     ];
 
     /// The process exit code.
@@ -120,6 +132,7 @@ impl SetupExit {
             SetupExit::NotAdminCopy => 8,
             SetupExit::Downgrade => 9,
             SetupExit::AdminCopyLeft => 10,
+            SetupExit::DeadlineReached => 11,
         }
     }
 
@@ -223,6 +236,9 @@ pub enum Step {
     /// 5a: once the record names the group, locking the admin copy's folder and file again with
     /// the group denied (`late_steps::admin_lock`), after step 5.
     AdminLock,
+    /// 1: finishing what an interrupted run left: the accounts and the group its intent names
+    /// that no record does, and a record it left partial (`intent.rs`).
+    Pending,
 }
 
 impl fmt::Display for Step {
@@ -254,6 +270,7 @@ impl fmt::Display for Step {
             Step::StopTask => "registering the sandbox's stop and sweep tasks",
             Step::RemoteLogon => "denying the sandbox users Remote Desktop logon",
             Step::AdminLock => "locking the set-up program's admin copy",
+            Step::Pending => "finishing an interrupted set-up",
         })
     }
 }

@@ -57,6 +57,8 @@
 !define CLAUSEO_ADOPT_NOT_ELEVATED 7
 !define CLAUSEO_ADOPT_NOT_ADMIN_COPY 8
 !define CLAUSEO_ADOPT_DOWNGRADE 9
+; 11, DeadlineReached: only with --deadline, which the installer doesn't pass yet (a failure).
+!define CLAUSEO_ADOPT_DEADLINE 11
 ; The elevated instance exits with 100 + --adopt's code, so NSIS's own 1 (cancelled) and 2
 ; (aborted, as by .onInit's downgrade check) never read as --adopt's; with 99 when the program
 ; was not written or started, or the arguments it was given were refused.

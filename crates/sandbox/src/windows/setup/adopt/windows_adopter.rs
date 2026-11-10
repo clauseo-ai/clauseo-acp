@@ -172,6 +172,10 @@ impl Adopter for WindowsAdopter {
             tracing::error!(%error, "--adopt: setup-result.json couldn't be written");
         }
     }
+
+    fn cancelled(&mut self) -> bool {
+        crate::windows::setup::deadline::cancelled()
+    }
 }
 
 /// A task call's error: a COM one gives its HRESULT.

@@ -9,6 +9,7 @@ use crate::windows::setup::explain::Code;
 use crate::windows::setup::record_values::{AdminValues, CopyOwner};
 
 mod cpu_type;
+mod deadline;
 mod deny;
 mod reports;
 
@@ -48,6 +49,8 @@ struct Fake {
     fail: Option<AdoptStep>,
     /// Every failure reported, in order.
     reports: Vec<AdoptFailure>,
+    /// The deadline's flag is set once this many changes were made.
+    cancel_after: Option<usize>,
 }
 
 impl Fake {
@@ -80,6 +83,7 @@ impl Fake {
             set_up_exit: SetupExit::Done,
             fail: None,
             reports: Vec::new(),
+            cancel_after: None,
         }
     }
 
@@ -220,6 +224,11 @@ impl Adopter for Fake {
 
     fn report(&mut self, failure: &AdoptFailure) {
         self.reports.push(failure.clone());
+    }
+
+    fn cancelled(&mut self) -> bool {
+        self.cancel_after
+            .is_some_and(|after| self.changes.len() >= after)
     }
 }
 
