@@ -86,7 +86,7 @@ test("reinstall: a plan never installed keeps the first run's line and its Sign 
     first: [install(CLAUDE, { missing: { download_bytes: 160_000_000 } })],
   });
   expect(foot()?.dataset["state"]).toBe("missing");
-  expect(text()).toContain("Needs a download of about 160 MB");
+  expect(text()).toContain("Claude · needs a download of about 160 MB");
   expect(text()).not.toContain("isn't installed");
   expect(again()).toBeNull();
   await press(byId("install-sign-in"));

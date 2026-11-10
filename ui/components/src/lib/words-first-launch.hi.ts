@@ -50,8 +50,8 @@ export const HI = {
   "Setting up {name}…": "{name} सेट अप हो रहा है…",
 
   // the fine print, up front (design)
-  "Your papers stay on this computer. {name} sees what each question sends it.":
-    "आपके दस्तावेज़ इसी कंप्यूटर पर रहते हैं। हर प्रश्न के साथ जो भेजा जाता है, वही {name} देखता है।",
+  "Your papers stay on this computer. {name} sees the parts it reads to answer you.":
+    "आपके दस्तावेज़ इसी कंप्यूटर पर रहते हैं। {name} उतना ही देखता है, जितना वह आपको जवाब देने के लिए पढ़ता है।",
 
   // the plan, in the composer (design)
   "Sign in to Claude or ChatGPT to ask about this matter":
@@ -175,6 +175,8 @@ export const HI = {
   "Your papers stay on this computer. Claude or ChatGPT sees the parts it reads to answer you.":
     "आपके दस्तावेज़ इसी कंप्यूटर पर रहते हैं। Claude या ChatGPT उतना ही देखता है, जितना वह आपको जवाब देने के लिए पढ़ता है।",
   "Sign in to {name}": "{name} में साइन इन करें",
+  // a plan's row on the first screen, after its name and " · "
+  "needs a download of about {mb} MB": "लगभग {mb} MB का डाउनलोड ज़रूरी है",
 } satisfies Hindi<string>;
 
 /** Every string, English and Hindi (null: hi: later), for the tests that hold the voice and the copy review. */

@@ -259,7 +259,11 @@ const SCENES: ([FirstLaunchKey, Scene, string] | null)[] = [
   ],
   ["Try again", { first: true, events: [failedInstall] }, "dl-error"],
   ["Details", { first: true, events: [failedInstall] }, "dl-error"],
-  ["Your papers stay on this computer. {name} sees what each question sends it.", GATE, "plan"],
+  [
+    "Your papers stay on this computer. {name} sees the parts it reads to answer you.",
+    GATE,
+    "plan",
+  ],
   // the plan, in the composer
   // UD1-24, retired: the matter's sign-in box names both plans now (UD1-95)
   null,
@@ -552,6 +556,8 @@ const SCENES: ([FirstLaunchKey, Scene, string] | null)[] = [
   ],
   ["Sign in to {name}", BOTH, "welcome-both"],
   ["Sign in to Claude or ChatGPT to ask about this matter", GATE, "plan"],
+  // UD1-96: a plan's row on the first screen, after its name and " · "
+  ["needs a download of about {mb} MB", BOTH, "welcome-both"],
 ];
 
 /** The gate's refusal line for any other code: its code's own sentence, here a sign-in refused while a key is in use.
