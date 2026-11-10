@@ -36,9 +36,9 @@ afterEach(async () => {
   vi.useRealTimers();
 });
 
-test("Needs you stands under Pinned, above the date groups, each row naming the conversation behind it", async () => {
+test("Needs you stands under Pinned, above Working and the rest, each row naming the conversation behind it", async () => {
   await mount();
-  expect(headings()).toEqual(["Pinned", "Needs you", "No date yet"]);
+  expect(headings()).toEqual(["Pinned", "Needs you", "Other matters"]);
   expect(needs()?.querySelector(".room-when")?.textContent).toBe("Needs you");
   // the hand's waits first, then the answer ready
   expect(namesIn(needs())).toEqual([B.name, C.name]);
@@ -111,7 +111,7 @@ test("no row changes group under the pointer; at pointer leave it does", async (
     nav.dispatchEvent(new PointerEvent("pointerout", { bubbles: true }));
   });
   expect(namesIn(needs())).toEqual([B.name]);
-  expect(headings()).toEqual(["Pinned", "Needs you", "No date yet"]);
+  expect(headings()).toEqual(["Pinned", "Needs you", "Other matters"]);
 });
 
 test("a row that comes to Needs you later joins its kind's foot", async () => {

@@ -1,15 +1,17 @@
 // The rail's triage, pure (no React): from the matters, every matter's threads (all-threads.ts) and the open matter to
 // the groups and what each matter's row says, with the thread behind it. As the approved page's table has it:
-// - a matter needs you while any thread waits on the lawyer's hand (needs_you), has an answer ready and unread (idle,
-//   not seen, its last turn not failed, stopped at the limit or cancelled), or failed and isn't seen yet;
-// - its row shows the most pressing: a wait on the hand, then an answer ready, then a failure. ThreadStatus doesn't say
+// - a matter needs you ONLY while a thread waits on the lawyer's hand (needs_you: a permission or a question) or has an
+//   answer ready and unread (idle, not seen, its last turn not failed, stopped at the limit or cancelled) (D-037);
+// - its row shows the most pressing: a wait on the hand, then an answer ready, then a failure not yet seen, which says
+//   so on its row but stands with the rest: a failure is no answer waiting. ThreadStatus doesn't say
 //   permission or question yet, so the words come from the matter's status (H5) and the row names the oldest waiting
 //   thread; ready and failed name the oldest such thread;
-// - working, queued, a limit pause (until U14 gives its open choice), a stop, and nothing at all stay in the date groups
-//   with the matter's own status, muted;
-// - Pinned keeps a pinned matter, its line and all; Needs you sits under Pinned, above the date groups, ordered by
-//   kind (the hand's waits, then answers ready, then failures), each kind in the order its rows came: a row that comes
-//   later joins at the kind's foot.
+// - a matter answering (working or queued) and needing nothing stands in Working, under Needs you;
+// - a limit pause (until U14 gives its open choice), a stop, and nothing at all stand in the rest, under Working, with
+//   the matter's own status, muted; the rail orders Working and the rest by their latest activity (activityOrder);
+// - Pinned keeps a pinned matter, its line and all; Needs you sits under Pinned, above Working, ordered by kind (the
+//   hand's waits, then answers ready, then failures), each kind in the order its rows came: a row that comes later
+//   joins at the kind's foot.
 // Where a matter's thread list hasn't come (no app feed), the matter's status alone places it: a question, a permission
 // or an answer ready need you, with no thread named. `held` keeps rows where they stand: the open matter until another
 // opens, and every row while the pointer is over the rail (rail-triage.ts keeps both); a row's words still change.
@@ -22,8 +24,9 @@ import type { RowState, RowStatus } from "./matters.ts";
 
 /** Why a matter needs the lawyer, in Needs you's order. */
 export type Need = "hand" | "ready" | "failed";
-/** Where a matter's row stands. "date": its date group, by its next date. */
-export type Group = "pinned" | "needs" | "date" | "snoozed";
+/** Where a matter's row stands. "working": answering, needing nothing; "rest": everything else, by its latest
+ * activity. */
+export type Group = "pinned" | "needs" | "working" | "rest" | "snoozed";
 
 /** A row's state: the matters' row states and Failed. */
 export type TriageState = RowState | "failed";
@@ -109,7 +112,11 @@ const RANK: Record<Need, number> = { hand: 0, ready: 1, failed: 2 };
 const resting = (s: ThreadStatus) => s === "idle" || s === "agent_exited" || s === "idle_stopped";
 
 /** Why a thread needs the lawyer, or null: the page's table. */
-export function needOf(t: Pick<ThreadSummary, "status" | "seen" | "last_stop">): Need | null {
+export function needOf(t: {
+  status: ThreadStatus;
+  seen?: boolean | undefined;
+  last_stop?: ThreadSummary["last_stop"] | undefined;
+}): Need | null {
   if (t.status === "needs_you") return "hand";
   if (!resting(t.status) || t.seen !== false || t.last_stop === undefined) return null;
   const reason = t.last_stop.reason;
@@ -188,9 +195,11 @@ export function triage({ matters, status, lists, held, arrived, now }: TriageInp
       : (held?.get(m.matter) ??
         (m.kind !== "scratch" && wholly(list, now) !== null
           ? "snoozed"
-          : row.need === null
-            ? "date"
-            : "needs"));
+          : row.need === "hand" || row.need === "ready"
+            ? "needs"
+            : row.status?.state === "working"
+              ? "working"
+              : "rest"));
     group.set(m.matter, g);
     if (g === "needs") needing.push({ m, row });
   }
@@ -213,4 +222,15 @@ export function triage({ matters, status, lists, held, arrived, now }: TriageInp
       (a.m.matter < b.m.matter ? -1 : a.m.matter > b.m.matter ? 1 : 0),
   );
   return { rows, group, needs: needing.map((n) => n.m.matter), arrived: came };
+}
+
+/** Working's order and the rest's: the latest activity first, then the newest (v7 ids sort by creation). */
+export function activityOrder(
+  a: Pick<MatterInfo, "matter" | "last_activity">,
+  b: Pick<MatterInfo, "matter" | "last_activity">,
+): number {
+  const la = a.last_activity ?? -Infinity;
+  const lb = b.last_activity ?? -Infinity;
+  if (la !== lb) return lb - la;
+  return a.matter < b.matter ? 1 : a.matter > b.matter ? -1 : 0;
 }

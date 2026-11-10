@@ -18,25 +18,20 @@
 //   the work isn't remounted under a question on its way.
 // - The agents (R15's list_agents, for the plan choice) are read at start and again on each settings_changed, since
 //   setting up a plan writes its agents entry: a plan signed in while the room is open joins the choice.
-// - H6: a thread is marked seen when it opens with the window focused, and when its turn ends while open and focused.
+// - H6: a thread is marked seen when it opens with the window focused, when its turn ends while open and focused, and
+//   when the window comes back to it unseen (its answer ended while the lawyer was elsewhere: D-037).
 import { late } from "@clauseo/components/lib/late.ts";
 import { pickReopenThread } from "../store/reopen.ts";
 import type { ViewStore } from "../store/store.ts";
 import { streamOf } from "../store/view.ts";
 import { internalError, toHostError, type HostTransport } from "../transport/host-transport.ts";
 import type { AgentId, MatterId, MessageId, ThreadId, Timestamp } from "../transport/protocol.ts";
-import { agentFor, matterPlan, planOptions } from "./agent.ts";
+import { agentOf, makeView, threadOf } from "./conversations-make.ts";
 import { freshState, keepKept, type MatterState } from "./conversations-state.ts";
-import {
-  newestFirst,
-  noMatter,
-  resting,
-  type ConversationRow,
-  type ConversationsView,
-  type Known,
-} from "./conversations-view.ts";
+import { resting, type ConversationsView, type Known } from "./conversations-view.ts";
 import type { AgentSummary, AppEvent, NextHost, ThreadsChanged } from "./host-next.ts";
 import type { Matters } from "./matters.ts";
+import { onWindowBack } from "./window-back.ts";
 
 export type { ConversationRow, ConversationsView } from "./conversations-view.ts";
 
@@ -93,6 +88,7 @@ export class Conversations {
     this.#live = true;
     this.#stop.push(this.#matters.subscribe(() => this.#follow()));
     this.#stop.push(this.#store.subscribe(() => this.#headers()));
+    this.#stop.push(onWindowBack(() => this.#back()));
     const app = this.#next.app;
     if (app !== null) this.#stop.push(app.subscribeApp((event) => this.#hear(event)));
     // a plan set up while the room is open writes its agents entry, and the host says settings_changed
@@ -166,7 +162,7 @@ export class Conversations {
     const m = this.#current;
     if (m === null || m.open === null) return;
     if (m.draft === null || m.draft.key !== m.open) {
-      if (this.#threadOf(m, m.open) !== null) return;
+      if (threadOf(m, m.open) !== null) return;
       m.draft = { key: m.open, shown: false, chosen: agent };
     } else m.draft.chosen = agent;
     this.#emit();
@@ -183,9 +179,9 @@ export class Conversations {
     if (m.phase === "failed") await this.#list(m);
     else if (m.phase === "loading") await m.listing;
     if (m.phase !== "ready") throw toHostError(m.refusal);
-    const open = this.#threadOf(m, key);
+    const open = threadOf(m, key);
     if (open !== null) return open;
-    const agent = this.#agentOf(m, key);
+    const agent = agentOf(m, this.#agents, key);
     const made = await this.#transport.dispatch({
       command_id: crypto.randomUUID(),
       command: { create_thread: { matter: m.matter, agent } },
@@ -252,7 +248,7 @@ export class Conversations {
     m.threads.set(made, {
       thread: made,
       matter: m.matter,
-      agent: from?.agent ?? this.#agentOf(m),
+      agent: from?.agent ?? agentOf(m, this.#agents),
       status: "starting",
       queue_held: false,
     });
@@ -352,7 +348,7 @@ export class Conversations {
   #settle(m: MatterState): void {
     const key = m.open;
     if (key === null || m.draft?.key === key) return;
-    const thread = this.#threadOf(m, key);
+    const thread = threadOf(m, key);
     const pending = m.pending === key;
     const live =
       thread !== null &&
@@ -380,11 +376,6 @@ export class Conversations {
   }
 
   /** The listed thread a key names, or null (a draft, a key waiting for the list, a thread gone). */
-  #threadOf(m: MatterState, key: string): ThreadId | null {
-    for (const [thread, k] of m.keys) if (k === key && m.threads.has(thread)) return thread;
-    return m.threads.has(key) ? key : null;
-  }
-
   /** The conversation open is left: a draft with nothing typed goes, and so does a thread this room made whose first
    * question the host refused (archived: nothing is deleted, and no empty thread stays listed or reopens). */
   #leave(m: MatterState): void {
@@ -399,7 +390,7 @@ export class Conversations {
       m.draft = null;
       return;
     }
-    const thread = this.#threadOf(m, key);
+    const thread = threadOf(m, key);
     if (thread === null || !m.unsent.has(thread)) return;
     m.unsent.delete(thread);
     const known = m.threads.get(thread);
@@ -413,7 +404,7 @@ export class Conversations {
 
   /** A conversation opened: H6 marks its thread seen, if the window has focus. */
   #opened(m: MatterState): void {
-    const thread = m.open === null ? null : this.#threadOf(m, m.open);
+    const thread = m.open === null ? null : threadOf(m, m.open);
     if (thread !== null) this.#markSeen(m, thread);
   }
 
@@ -426,6 +417,18 @@ export class Conversations {
     rows.command({ mark_seen: { thread } }).catch((error: unknown) => {
       console.warn(`mark_seen failed: ${JSON.stringify(error)}`);
     });
+  }
+
+  /** The window came back: the open thread, if its answer waits unseen, is marked seen, once. */
+  #back(): void {
+    const m = this.#current;
+    const thread = m === null || m.open === null ? null : threadOf(m, m.open);
+    const known = thread === null ? undefined : m?.threads.get(thread);
+    if (m === null || thread === null || known?.seen !== false || known.last_stop === undefined)
+      return;
+    if (!this.#live || !this.#focused()) return;
+    this.#markSeen(m, thread);
+    this.#emit();
   }
 
   /* ---------- live updates ---------- */
@@ -449,7 +452,7 @@ export class Conversations {
     if (!this.#live || m === null) return;
     let changed = false;
     let lost = false;
-    const openThread = m.open === null ? null : this.#threadOf(m, m.open);
+    const openThread = m.open === null ? null : threadOf(m, m.open);
     for (const [thread, known] of m.threads) {
       const header = this.#store.view(streamOf(thread))?.header ?? undefined;
       const was = this.#seenHeaders.get(thread);
@@ -531,65 +534,12 @@ export class Conversations {
     return undefined;
   }
 
-  /** The agent a new thread for `key` runs: its draft's choice, else agent.ts's order. */
-  #agentOf(m: MatterState, key: string | null = m.open): AgentId {
-    const chosen = m.draft !== null && m.draft.key === key ? m.draft.chosen : null;
-    const threads = [...m.threads.values()].filter((t) => t.status !== "archived");
-    return agentFor({ chosen, setting: null, threads, agents: this.#agents });
-  }
-
   #make(): ConversationsView {
-    const m = this.#current;
-    const agents = this.#agents;
-    if (m === null) return noMatter(agents, this.#next.retry !== null);
-    // an archived thread kept open (Find's) takes no row, whatever its header says
-    const listed = [...m.threads.values()]
-      .filter((t) => t.status !== "archived" && t.thread !== m.kept?.thread)
-      .sort(newestFirst);
-    const options = planOptions(agents, listed);
-    const rows: ConversationRow[] = listed.map((t) => ({
-      key: m.keys.get(t.thread) ?? t.thread,
-      thread: t.thread,
-      ...(t.title === undefined ? {} : { title: t.title }),
-      agent: t.agent,
-      status: t.status,
-      ...(t.seen === undefined ? {} : { seen: t.seen }),
-      ...(t.last_stop === undefined ? {} : { last_stop: t.last_stop }),
-      ...(t.snoozed_until === undefined ? {} : { snoozed_until: t.snoozed_until }),
-      ...(t.done === true ? { done: true } : {}),
-    }));
-    const d = m.draft;
-    if (d !== null && d.shown)
-      rows.unshift({ key: d.key, thread: null, agent: null, status: "idle" });
-    const thread = m.open === null ? null : this.#threadOf(m, m.open);
-    const origin = thread === null ? undefined : m.retried.get(thread);
-    const source = origin === undefined ? undefined : m.threads.get(origin.from);
-    // the host refuses Retry from here in an archived conversation, as it refuses a question
-    const archived = thread !== null && m.threads.get(thread)?.status === "archived";
-    return {
-      matter: m.matter,
-      phase: m.phase,
-      refused: m.refused,
-      rows,
-      open: m.open,
-      thread,
-      drafting: m.phase !== "loading" && thread === null,
-      archived,
-      plan: matterPlan(listed, agents),
-      agents,
-      options,
-      agent: this.#agentOf(m),
-      focus: this.#focus !== null && this.#focus.key === m.open ? this.#focus : null,
-      canRetry: this.#next.retry !== null && !archived,
-      retried:
-        origin === undefined
-          ? null
-          : {
-              from: m.keys.get(origin.from) ?? origin.from,
-              ...(source?.title === undefined ? {} : { title: source.title }),
-              at: origin.at,
-            },
-    };
+    return makeView(this.#current, {
+      agents: this.#agents,
+      retry: this.#next.retry !== null,
+      focus: this.#focus,
+    });
   }
 
   #emit(): void {
