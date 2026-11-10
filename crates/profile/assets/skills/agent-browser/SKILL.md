@@ -1,9 +1,9 @@
 ---
 name: agent-browser
-description: Use for web pages that need a real browser, such as JavaScript-heavy pages, pages behind clicks or forms, and screenshots or PDFs of a page, driven with the `agent-browser` shell command. Covers the snapshot-and-ref loop, reading and extracting page text, clicking and filling, waiting, tabs, iframes, dialogs and downloads, and the rules for using a browser on legal work.
+description: When this session has a browser, use it for web pages that need a real browser, such as JavaScript-heavy pages, pages behind clicks or forms, and screenshots or PDFs of a page, driven with the `agent-browser` shell command. Covers the snapshot-and-ref loop, reading and extracting page text, clicking and filling, waiting, tabs, iframes, dialogs and downloads, and the rules for using a browser on legal work.
 metadata:
   clauseo:
-    version: 0.41.1
+    version: 0.41.1+clauseo.2
     author: Clauseo
     tools: [browser]
     tier: builtin
