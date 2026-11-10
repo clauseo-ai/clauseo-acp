@@ -29,6 +29,13 @@ pub(crate) struct Redactor {
     secrets: Vec<String>,
 }
 
+/// `text` with the rules that need no agent: words starting `sk-`, the word after `Bearer `
+/// (in any case) and each URL's user name and password, as the stderr tail hides them. For text
+/// the host keeps from an agent outside its tail, such as a failed turn's detail.
+pub fn redact_tokens(text: &str) -> String {
+    Redactor::new(None, &BTreeMap::new(), &[]).redact(text)
+}
+
 impl std::fmt::Debug for Redactor {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Redactor")

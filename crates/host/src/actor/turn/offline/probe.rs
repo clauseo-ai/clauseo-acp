@@ -1,9 +1,9 @@
-//! The host's own word on a watch only the window armed (R2-1): the webview's `offline` can be
-//! wrong or stuck, so before such a watch ends a turn, a thread of its own resolves the agent's
-//! service host and opens one TCP connection to it, within [`PROBE_CAP`], and posts back whether
-//! it got through. Behind a proxy (the firm's settings, the host's variables or the OS's, as the
-//! egress proxy routes, decision 0039) it tries the proxy instead. Nothing is sent, and the log
-//! gets fixed fields only.
+//! The host's own word before an offline watch ends a turn: the webview's `offline` can be
+//! wrong or stuck, and an agent's note can come before a retry that gets through. So first a
+//! thread of its own resolves the agent's service host and opens one TCP connection to it,
+//! within [`PROBE_CAP`], and posts back whether it got through. Behind a proxy (the firm's
+//! settings, the host's variables or the OS's, as the egress proxy routes, decision 0039) it
+//! tries the proxy instead. Nothing is sent, and the log gets fixed fields only.
 
 use std::fmt;
 use std::sync::Arc;
@@ -42,8 +42,13 @@ impl ReachProbe {
 }
 
 impl Default for ReachProbe {
+    /// The real probe; in unit tests one that never gets through, so none touches the network.
     fn default() -> Self {
-        Self(Arc::new(connects))
+        if cfg!(test) {
+            Self(Arc::new(|_| false))
+        } else {
+            Self(Arc::new(connects))
+        }
     }
 }
 
@@ -101,6 +106,7 @@ pub(super) fn start(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
                 turn,
                 reached,
             };
+            // The internal channel is unbounded: a send fails only once the actor is gone.
             let _gone = post.try_send(Input::Turn(input));
         });
     if let Err(error) = spawned {

@@ -13,7 +13,10 @@ use clauseo_protocol::{
 use super::agents::send_prompt;
 use super::failures::until_ended;
 use super::rig::{Rig, kind};
+use crate::actor::input::Input;
+use crate::actor::turn::TurnInput;
 use crate::actor::turn::offline::OFFLINE_WAIT;
+use crate::actor::turn::offline::probe::ReachProbe;
 use crate::actor::turn::{CANCEL_WAIT, TurnPhase};
 
 /// Codex's warning, as codex-acp forwards it, from stage C's sweep (macOS).
@@ -372,7 +375,7 @@ fn claude_s_line_goes_back_when_a_cancel_the_agent_never_answers_ends_the_turn()
 }
 
 /// Codex's note while a tool call is open: the model call failed, so the open tool call is stale
-/// and the turn still ends offline after the wait.
+/// and the turn ends offline after the wait once the probe cannot get through either.
 #[test]
 fn a_note_ends_the_turn_offline_even_with_a_tool_call_open() {
     let script = format!(
@@ -384,6 +387,7 @@ fn a_note_ends_the_turn_offline_even_with_a_tool_call_open() {
 "#
     );
     let mut rig = Rig::start("offline-note-tool", &script);
+    rig.actor.turn_path.probe = ReachProbe::fixed(false);
     let (thread, turn) = prompting(&mut rig);
     rig.run_until("the note's watch over the open tool call", |actor| {
         let open = actor
@@ -434,5 +438,52 @@ fn claude_s_line_stays_dropped_when_the_agent_exits_during_an_offline_end() {
         (Some(StopReason::Failed), Some(ErrorCode::AgentOffline))
     );
     assert_eq!(answer(&log, turn), "Clause five says");
+    rig.finish();
+}
+
+/// Codex's fallback note, then 45 s of silence (a reasoning model retrying over HTTPS): the probe
+/// gets through, so the watch waits again, and the answer goes on to a normal end.
+#[test]
+fn a_note_whose_probe_gets_through_waits_and_the_answer_goes_on() {
+    let mut rig = Rig::start("offline-note-probe-ok", &recovered());
+    rig.actor.turn_path.probe = ReachProbe::fixed(true);
+    let (thread, turn) = prompting(&mut rig);
+    let watch_since = |actor: &crate::actor::Actor| {
+        let current = actor.threads[&thread].turn.current.as_ref()?;
+        let watch = current.offline.as_ref().filter(|watch| !watch.probing())?;
+        Some(watch.since())
+    };
+    // Whatever the agent sends after its note waits until the 45 s have passed.
+    let hold = move |actor: &crate::actor::Actor, input: &Input| {
+        let watched = actor.threads[&thread]
+            .turn
+            .current
+            .as_ref()
+            .is_some_and(|current| current.offline.is_some());
+        watched
+            && matches!(
+                input,
+                Input::Agent { .. } | Input::Turn(TurnInput::Agent { .. })
+            )
+    };
+    rig.run_holding("the note's watch", hold, |actor| {
+        watch_since(actor).is_some()
+    });
+    let since = watch_since(&rig.actor).unwrap();
+    rig.clock.advance(OFFLINE_WAIT);
+    rig.run_holding("the probe's answer", hold, |actor| {
+        watch_since(actor).is_some_and(|armed| armed > since)
+    });
+    rig.clock.advance(OFFLINE_WAIT / 2);
+    let current = rig.actor.threads[&thread].turn.current.as_ref().unwrap();
+    assert!(current.live() && current.failure.is_none());
+    rig.release_held();
+    until_ended(&mut rig, thread);
+    let log = rig.log(thread);
+    assert_eq!(ended(&log, turn), (Some(StopReason::EndTurn), None));
+    assert_eq!(
+        answer(&log, turn),
+        "Clause five says the notice period is thirty days."
+    );
     rig.finish();
 }

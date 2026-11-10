@@ -24,11 +24,13 @@
 //! Cancel path with `agent.offline` as its failure, so the answer so far is kept. A turn waiting
 //! on the lawyer (a permission, an elicitation) waits again instead; so does one running a tool
 //! call under a watch only the window armed, for up to [`WORKING_LIMIT`] (after an agent's note
-//! an open tool call is stale). A watch only the window armed ends only once the host's own
-//! probe (`probe.rs`) cannot reach the agent's service either; a probe that gets through
-//! makes it wait again. A prompt that fails with a connection-class error, or
-//! while the watch stands, ends `agent.offline` too, unless its error says a server answered or
-//! asks for a sign-in. The log gets fixed fields only, never the agent's text (decision 0047).
+//! an open tool call is stale). Either watch ends only once the host's own probe (`probe.rs`)
+//! cannot reach the agent's service either: Codex's fallback note means it retries over HTTPS,
+//! which a blip or a proxy that blocks only WebSocket connections lets through, and a reasoning
+//! model may stay silent past the wait. A probe that gets through makes it wait again. A prompt
+//! that fails with a connection-class error, or while an agent's note armed the watch, ends
+//! `agent.offline` too, unless its error says a server answered or asks for a sign-in. The log
+//! gets fixed fields only, never the agent's text (decision 0047).
 
 use std::time::Duration;
 
@@ -251,9 +253,8 @@ fn network_watch(actor: &mut Actor, thread: ThreadId) {
 /// The watch's wait ran out, and the agent sent nothing since (nor did a later note arm it
 /// again). A turn waiting on the lawyer (a permission, an elicitation), or running a tool call
 /// under a watch only the window armed and younger than [`WORKING_LIMIT`], is quiet, not cut
-/// off: it waits again. A watch only the window armed asks the host's probe first
-/// ([`on_probed`]). Else the turn is cancelled through the Cancel path and ends
-/// `Failed { agent.offline }`.
+/// off: it waits again. Else the host's probe decides ([`on_probed`]): the turn is cancelled
+/// through the Cancel path and ends `Failed { agent.offline }` only if it cannot get through.
 pub(super) fn on_timer(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
     let now = actor.now().mono;
     let asking = updates::agent(actor, thread).is_some_and(|agent| {
@@ -269,16 +270,14 @@ pub(super) fn on_timer(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
     else {
         return;
     };
-    // A note means the model call failed, so a tool call still open then is stale; a window-only
-    // watch lets one keep the turn going up to [`WORKING_LIMIT`], then asks the probe.
+    // A note means the model call failed, so a tool call still open then is stale; under a
+    // window-only watch one keeps the turn going up to [`WORKING_LIMIT`], then the probe decides.
     let noted = watch.note.is_some();
     let working = working && !noted && now.saturating_sub(watch.first) < WORKING_LIMIT;
     if asking || working {
         tracing::info!(%thread, asking, working, "the agent is quiet but at work; waiting again");
         watch.since = now;
         arm_timer(actor, thread, turn);
-    } else if noted {
-        end_offline(actor, thread);
     } else if !watch.probing {
         watch.probing = true;
         probe::start(actor, thread, turn);
@@ -286,18 +285,17 @@ pub(super) fn on_timer(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
 }
 
 /// The host's probe for `thread`'s `turn` answered: `reached` the agent's service (or its
-/// proxy), so the window is wrong and the watch waits again; else the turn ends offline. A
-/// watch that went, or that an agent's note armed since, ignores it.
+/// proxy), so the window is wrong, or the agent's retry (Codex's HTTPS after its WebSocket
+/// failed) can get through, and the watch waits again; else the turn ends offline. A watch
+/// that went ignores it.
 pub(super) fn on_probed(actor: &mut Actor, thread: ThreadId, turn: TurnId, reached: bool) {
     let now = actor.now().mono;
     let Some(watch) = live_watch(actor, thread, turn).filter(|watch| watch.probing) else {
         return;
     };
     watch.probing = false;
-    if watch.note.is_some() {
-        return;
-    }
-    tracing::info!(%thread, reached, "the host's probe of the agent's service");
+    let noted = watch.note.is_some();
+    tracing::info!(%thread, reached, noted, "the host's probe of the agent's service");
     if reached {
         watch.since = now;
         arm_timer(actor, thread, turn);
@@ -332,7 +330,8 @@ fn end_offline(actor: &mut Actor, thread: ThreadId) {
 
 /// The code a failed prompt of `thread` ends with when it is offline. A sign-in the error asks
 /// for comes first, and an error that says a server answered (a status, a limit) is never
-/// offline, watch or not; else the error names a connection failure, or the watch stands.
+/// offline, watch or not; else the error names a connection failure, or an agent's note armed
+/// the watch.
 /// The RPC error's `data` (codex-acp's `data.message`) is read beside its text.
 pub(super) fn prompt_failed_offline(
     actor: &mut Actor,
@@ -351,8 +350,11 @@ pub(super) fn prompt_failed_offline(
     let texts = || both.iter().flatten();
     let server = texts().any(|text| classify::says_server(text));
     let connection = texts().any(|text| classify::says_connection(text));
-    let watched = current(actor, thread).is_some_and(|current| current.offline.is_some());
-    (!server && (watched || connection)).then_some(ErrorCode::AgentOffline)
+    // Only an agent's note counts: the window's word alone does not make any failure offline.
+    let noted = current(actor, thread)
+        .and_then(|current| current.offline.as_ref())
+        .is_some_and(|watch| watch.note.is_some());
+    (!server && (noted || connection)).then_some(ErrorCode::AgentOffline)
 }
 
 #[cfg(test)]
