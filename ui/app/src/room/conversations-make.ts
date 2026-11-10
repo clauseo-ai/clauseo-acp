@@ -11,6 +11,7 @@ import {
   type ConversationsView,
 } from "./conversations-view.ts";
 import type { AgentSummary } from "./host-next.ts";
+import type { Signed } from "./plan-default.ts";
 
 /** The thread behind conversation `key` in `m`: the thread holding that key, or the thread of that id. */
 export function threadOf(m: MatterState, key: string): ThreadId | null {
@@ -18,20 +19,22 @@ export function threadOf(m: MatterState, key: string): ThreadId | null {
   return m.threads.has(key) ? key : null;
 }
 
+/** The plans a new thread can run: the agents read, the plans signed in, and the last asked with (plan-default.ts). */
+export type Choice = { agents: AgentSummary[]; signed: Signed; last: AgentId | null };
+
 /** The agent a new thread for `key` runs: its draft's choice, else agent.ts's order. */
 export function agentOf(
   m: MatterState,
-  agents: readonly AgentSummary[],
+  { agents, signed, last }: Choice,
   key: string | null = m.open,
 ): AgentId {
   const chosen = m.draft !== null && m.draft.key === key ? m.draft.chosen : null;
   const threads = [...m.threads.values()].filter((t) => t.status !== "archived");
-  return agentFor({ chosen, setting: null, threads, agents });
+  return agentFor({ chosen, threads, agents, signed, last });
 }
 
-/** What the view needs beyond the matter: the agents read, whether the host offers Retry, and the focus asked for. */
-export type MakeInput = {
-  agents: AgentSummary[];
+/** What the view needs beyond the matter: the plans (Choice), whether the host offers Retry, and the focus asked for. */
+export type MakeInput = Choice & {
   retry: boolean;
   focus: { key: string; n: number } | null;
 };
@@ -39,8 +42,9 @@ export type MakeInput = {
 /** The view of `m`, the open matter's state, or of no matter open. */
 export function makeView(
   m: MatterState | null,
-  { agents, retry, focus }: MakeInput,
+  { retry, focus, ...choice }: MakeInput,
 ): ConversationsView {
+  const agents = choice.agents;
   if (m === null) return noMatter(agents, retry);
   // an archived thread kept open (Find's) takes no row, whatever its header says; the first read's does (D-021)
   const hidden = m.kept?.status === "archived" ? m.kept.thread : null;
@@ -79,7 +83,7 @@ export function makeView(
     plan: matterPlan(listed, agents),
     agents,
     options,
-    agent: agentOf(m, agents),
+    agent: agentOf(m, choice),
     focus: focus !== null && focus.key === m.open ? focus : null,
     canRetry: retry && !archived,
     retried:

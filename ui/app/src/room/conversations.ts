@@ -9,15 +9,15 @@
 //   its title and status win, and are kept once its view goes. A held view that goes while its thread was working
 //   reads the list again, so the row doesn't stay "Answering." after the turn's end slipped past.
 // - New conversation is a draft row, the room's alone (U6, "Decided here"): nothing reaches the host until its first
-//   send, which runs `create_thread`, then `send_prompt` (the session's), then `rename_thread` with the title its
-//   first message gives (conversation-title.ts), a placeholder the agent's own title replaces (#339). Leaving a
-//   draft with nothing typed drops it.
+//   send, which runs `create_thread`, `send_prompt` (the session's), then `rename_thread` with the title its first
+//   message gives (conversation-title.ts), a placeholder the agent's own title replaces (#339). Left empty, it drops.
 // - Each conversation has a key: the work column's key and its composer draft's, so moving between conversations
 //   remounts the work and each keeps its own words. A thread's key is its id, unless the room opened it before knowing
 //   it (a matter just opened, before its list is in; a draft that became the thread): then it keeps that first key, so
 //   the work isn't remounted under a question on its way.
 // - The agents (R15's list_agents, for the plan choice) are read at start and again on each settings_changed, since
-//   setting up a plan writes its agents entry: a plan signed in while the room is open joins the choice.
+//   setting up a plan writes its agents entry: a plan signed in while the room is open joins the choice. The default
+//   plan weighs the plans signed in and the last asked with (plan-default.ts).
 // - H6: a thread is marked seen when it opens with the window focused, when its turn ends while open and focused, and
 //   when the window comes back to it unseen (its answer ended while the lawyer was elsewhere: D-037).
 import { late } from "@clauseo/components/lib/late.ts";
@@ -27,6 +27,7 @@ import { streamOf } from "../store/view.ts";
 import { internalError, toHostError, type HostTransport } from "../transport/host-transport.ts";
 import type { AgentId, MatterId, MessageId, ThreadId, Timestamp } from "../transport/protocol.ts";
 import { agentOf, makeView, threadOf } from "./conversations-make.ts";
+import { lastPlan, rememberPlan, SignedPlans } from "./plan-default.ts";
 import { freshState, keepKept, type MatterState } from "./conversations-state.ts";
 import { resting, type ConversationsView, type Known } from "./conversations-view.ts";
 import type { AgentSummary, AppEvent, NextHost, ThreadsChanged } from "./host-next.ts";
@@ -46,8 +47,8 @@ export class Conversations {
   readonly #by = new Map<MatterId, MatterState>();
   readonly #listeners = new Set<() => void>();
   #agents: AgentSummary[] = [];
-  /** The list_agents reads sent: a reply that a later read overtook is older than it, and dropped. */
-  #agentReads = 0;
+  readonly #plans = new SignedPlans(); // the plans signed in (plan-default.ts), for the default plan
+  #agentReads = 0; // the list_agents reads sent: a reply a later read overtook is dropped
   #current: MatterState | null = null;
   #n = 0;
   #focus: { key: string; n: number } | null = null;
@@ -96,6 +97,7 @@ export class Conversations {
     if (settings !== null && this.#next.agents !== null)
       this.#stop.push(settings.onSettingsChanged(() => this.#listAgents()));
     this.#listAgents();
+    this.#stop.push(this.#plans.watch(this.#transport, () => this.#emit()));
     this.#follow();
     return () => {
       this.#live = false;
@@ -181,7 +183,7 @@ export class Conversations {
     if (m.phase !== "ready") throw toHostError(m.refusal);
     const open = threadOf(m, key);
     if (open !== null) return open;
-    const agent = agentOf(m, this.#agents, key);
+    const agent = agentOf(m, this.#choice(), key);
     const made = await this.#transport.dispatch({
       command_id: crypto.randomUUID(),
       command: { create_thread: { matter: m.matter, agent } },
@@ -199,12 +201,12 @@ export class Conversations {
     return thread;
   };
 
-  /** A prompt was accepted in `thread`: a thread with no title yet, renamed by nobody here, takes its title from it.
-   * A message that gives no title the host would take sends nothing. */
+  /** A prompt was accepted in `thread`: its plan is the last asked with; untitled and unrenamed, it takes a title. */
   sent = (thread: ThreadId, text: string): void => {
     const m = this.#stateOf(thread);
     const known = m?.threads.get(thread);
     if (m === undefined || known === undefined) return;
+    rememberPlan(known.agent);
     m.unsent.delete(thread);
     const header = this.#store.view(streamOf(thread))?.header?.header;
     if ((header?.title ?? known.title) !== undefined || m.renamed.has(thread)) return;
@@ -248,7 +250,7 @@ export class Conversations {
     m.threads.set(made, {
       thread: made,
       matter: m.matter,
-      agent: from?.agent ?? agentOf(m, this.#agents),
+      agent: from?.agent ?? agentOf(m, this.#choice()),
       status: "starting",
       queue_held: false,
     });
@@ -479,8 +481,7 @@ export class Conversations {
   #listAgents(): void {
     const agents = this.#next.agents;
     if (agents === null) return;
-    this.#agentReads += 1;
-    const at = this.#agentReads;
+    const at = (this.#agentReads += 1);
     agents.listAgents().then(
       (list) => {
         if (!this.#live || at !== this.#agentReads) return;
@@ -534,9 +535,14 @@ export class Conversations {
     return undefined;
   }
 
+  /** The plans a new thread can run: the agents read, the plans signed in, the last asked with (plan-default.ts). */
+  #choice() {
+    return { agents: this.#agents, signed: this.#plans.signed, last: lastPlan() };
+  }
+
   #make(): ConversationsView {
     return makeView(this.#current, {
-      agents: this.#agents,
+      ...this.#choice(),
       retry: this.#next.retry !== null,
       focus: this.#focus,
     });

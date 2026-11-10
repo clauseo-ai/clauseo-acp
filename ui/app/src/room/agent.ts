@@ -19,12 +19,17 @@ export const DEFAULT_AGENT: AgentId = "claude-acp";
 export type AgentInputs = {
   /** The lawyer's choice in the composer for this conversation, if they made one. */
   chosen: AgentId | null;
-  /** The "Start new conversations with" setting (H7), if the host gives it. */
-  setting: AgentId | null;
+  /** The "Start new conversations with" setting (H7), if the host gives it; left out, none. */
+  setting?: AgentId | null;
   /** The matter's conversations, archived ones left out. */
   threads: readonly Used[];
   /** The agents the host lists (R15's ListAgents), for their kinds; empty before the list arrives. */
   agents: readonly AgentSummary[];
+  /** The plans signed in, by kind (the setup store's sign-in states, plan-default.ts); null or left out where the
+   * window has heard no sign-in state, and the order is the one above, signed in or not. */
+  signed?: ReadonlySet<AgentKind> | null;
+  /** The plan the lawyer last asked a question with, in any matter (plan-default.ts); null or left out: none yet. */
+  last?: AgentId | null;
 };
 
 /** A conversation as the rule weighs it: its agent, and when it was used: H6's last activity, else its creation (v7
@@ -127,10 +132,39 @@ function fallbackOf(agents: readonly AgentSummary[]): AgentId {
   );
 }
 
-/** The agent `create_thread` names. */
-export function agentFor({ chosen, setting, threads, agents }: AgentInputs): AgentId {
+/** The agent of `kind` a new conversation would run: choiceOf's, or the canonical id before the host lists agents. */
+const ofKind = (kind: AgentKind, agents: readonly AgentSummary[], threads: readonly Used[]) =>
+  choiceOf(kind, agents, threads) ?? (agents.length === 0 ? CANONICAL[kind] : undefined);
+
+/** The agent `create_thread` names. With the sign-in states heard (D-014, D-043), a new conversation never defaults to
+ * a plan that isn't signed in while another is: the lawyer's choice; else the matter's plan, if signed in; else the
+ * plan last asked with anywhere, if signed in and listed; else the setting, if signed in; else the only plan signed
+ * in; else, with both or neither signed in, the order without sign-in (the matter's, the setting, Claude), so the gate
+ * offers the sign-in. */
+export function agentFor({
+  chosen,
+  setting = null,
+  threads,
+  agents,
+  signed = null,
+  last = null,
+}: AgentInputs): AgentId {
   if (chosen !== null) return chosen;
-  return mostUsed(threads, agents) ?? setting ?? fallbackOf(agents);
+  const matter = mostUsed(threads, agents);
+  const plain = () => matter ?? setting ?? fallbackOf(agents);
+  if (signed === null) return plain();
+  const ok = (agent: AgentId | null): agent is AgentId => {
+    if (agent === null) return false;
+    const kind = kindOf(agent, agents);
+    return (
+      kind !== undefined && signed.has(kind) && (agents.length === 0 || isListed(agent, agents))
+    );
+  };
+  if (ok(matter)) return matter;
+  if (ok(last)) return last;
+  if (ok(setting)) return setting;
+  const ready = KINDS.filter((k) => signed.has(k)).flatMap((k) => ofKind(k, agents, threads) ?? []);
+  return ready.length === 1 && ready[0] !== undefined ? ready[0] : plain();
 }
 
 /** The plan of an agent's kind, "Claude" or "ChatGPT"; null for an agent of no kind, which has no plan to name. */
