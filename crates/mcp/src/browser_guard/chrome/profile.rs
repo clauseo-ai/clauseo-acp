@@ -23,7 +23,8 @@ use crate::write;
 /// Keeps `profile` when an earlier start of this run made it (a real folder, not a link), with
 /// its staging folder, and merges [`quiet::preferences`] and [`logon::preferences`] into the
 /// `Default/Preferences` Chrome rewrote, and [`logon::ready_local_state`] into its `Local
-/// State`, so every start of the run gets them; else makes it from nothing, with
+/// State`, so every start of the run gets them, with `chrome://flags`' choices taken out of it
+/// ([`without_flags`]); else makes it from nothing, with
 /// `Default/Preferences` sending downloads to `staging` and those services off, and
 /// [`logon::local_state`] as `Local State`, so Chrome makes no failed Windows logon. `staging`
 /// is a folder directly in `profile`. A link at either file's name is never followed: its target
@@ -55,7 +56,7 @@ pub(in super::super) fn ready_profile(
                 .unwrap_or_else(|| first_preferences(staging, downloads));
             merge(&mut preferences, quiet::preferences());
             merge(&mut preferences, logon::preferences());
-            let kept = read_json(&local_state);
+            let kept = read_json(&local_state).map(without_flags);
             write_new(
                 profile,
                 &local_state,
@@ -77,6 +78,22 @@ pub(in super::super) fn ready_profile(
         &file,
         first_preferences(staging, downloads).to_string(),
     )
+}
+
+/// `local_state` without what `chrome://flags` turned on (`browser.enabled_labs_experiments` and
+/// its `browser.enabled_labs_experiments_origin_lists`,
+/// `components/webui/flags/flags_ui_pref_names.cc`): Chrome applies those as switches and
+/// features at its next start, past the guard's check of its arguments (`sandbox.rs`). Nothing is
+/// added: a `Local State` without them stays as it is.
+fn without_flags(mut local_state: serde_json::Value) -> serde_json::Value {
+    if let Some(browser) = local_state
+        .get_mut("browser")
+        .and_then(serde_json::Value::as_object_mut)
+    {
+        browser.remove("enabled_labs_experiments");
+        browser.remove("enabled_labs_experiments_origin_lists");
+    }
+    local_state
 }
 
 /// A new profile's `Default/Preferences`: downloads to `staging`, the mixed-content rule above,
