@@ -235,6 +235,7 @@ fn run_command(actor: &mut Actor, ctx: &CommandCtx, command: HostCommand) {
         }
         HostCommand::OpenMatter { matter } => {
             super::matter_details::open_matter(actor, ctx, matter);
+            super::papers::follow::opened(actor, matter);
         }
         HostCommand::ForgetMatter { matter } => {
             super::matter_details::forget_matter(actor, ctx, matter);

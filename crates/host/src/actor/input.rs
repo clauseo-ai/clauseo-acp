@@ -289,6 +289,8 @@ pub(crate) enum Input {
     /// The allowed sites' start-up read or a save's outcome, from their thread, or the read's
     /// deadline (`allowed/saving.rs`).
     Allowed(Box<super::allowed::AllowedInput>),
+    /// The open matter's folder changed and went quiet, from its watch (`papers/watch.rs`).
+    PapersChanged(super::papers::FolderChanged),
 }
 
 impl std::fmt::Debug for Input {
@@ -330,6 +332,7 @@ impl std::fmt::Debug for Input {
             #[cfg(feature = "test-support")]
             Self::StateForTest(_) => "StateForTest",
             Self::Allowed(_) => "Allowed",
+            Self::PapersChanged(_) => "PapersChanged",
         };
         f.write_str(name)
     }

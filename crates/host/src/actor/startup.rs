@@ -132,6 +132,7 @@ pub(super) async fn open(
         stats_running: std::sync::Arc::default(),
         files: super::papers::FileRefs::default(),
         paper_scans: super::papers::scan::PaperScans::default(),
+        papers_follow: None,
         next_sub: 0,
         work: Work::default(),
         phase: HostPhase::Starting(ready),

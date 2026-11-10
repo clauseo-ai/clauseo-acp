@@ -48,6 +48,8 @@ url = { workspace = true }
 getrandom = { workspace = true }
 async-channel = { workspace = true, features = ["std"] }
 async-io = { workspace = true }
+# The open matter's folder watch (src/actor/papers/watch.rs, decision record 0055).
+notify = { workspace = true }
 # `executor` for `LocalPool` (QR11.2); the root line's default features include it already.
 futures = { workspace = true, features = ["executor"] }
 # `update.json`'s marker (src/update.rs).

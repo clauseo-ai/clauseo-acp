@@ -157,6 +157,7 @@ pub(super) fn forget_committed(actor: &mut Actor, matter: MatterId, durable: boo
         actor.search.forget(matter);
         actor.folder_states.remove(&matter);
         actor.folder_supports.remove(&matter);
+        super::papers::follow::forgotten(actor, matter);
         turn::stop_agents(actor, matter);
         return;
     }
