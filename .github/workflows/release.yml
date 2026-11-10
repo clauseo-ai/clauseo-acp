@@ -1081,15 +1081,13 @@ jobs:
 
   # Windows on ARM, per machine: the x64 installer silently, the arm64 one over it, then the
   # registered silent uninstall, which must leave nothing behind (decision 0035's tier 1, design
-  # VM row A4). Every mode, dry included. Not blocking yet: continue-on-error, and assemble doesn't
-  # need it. The orchestrator approves making it blocking (drop continue-on-error, add it to
-  # assemble's needs) after three passing runs.
+  # VM row A4). Every mode, dry included. Blocking: assemble needs it, so a leftover stops the
+  # release.
   arm64-install-smoke:
     name: arm64-install-smoke
     needs: [check, sign-windows]
     runs-on: windows-11-arm
     timeout-minutes: 20
-    continue-on-error: true
     permissions:
       contents: read
     env:
@@ -1210,7 +1208,7 @@ jobs:
   # a public pre-release (test). A dry run stops at the artifact dist-assets.
   assemble:
     name: assemble
-    needs: [check, build, sign-windows]
+    needs: [check, build, sign-windows, arm64-install-smoke]
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     permissions:
