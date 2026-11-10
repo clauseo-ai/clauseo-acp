@@ -1,8 +1,8 @@
 // @vitest-environment happy-dom
-// The wall follows the open matter's folder (decision record 0055): the host's papers_changed reads the papers again,
-// so a paper added, renamed or taken out shows as it is (D-055, D-056). A folder that goes while the matter is open
-// turns the work column into the moved folder's line, with Locate folder on the line itself, and empties the wall;
-// Locate folder brings the papers back (D-057).
+// The wall follows the open matter's folder (decision record 0055): the host's papers_changed, and the window coming back
+// to the front, read the papers again, so a paper added, renamed or taken out shows as it is (D-055, D-056). A folder
+// that goes while the matter is open turns the work column into the moved folder's line, with Locate folder on the
+// line itself, and empties the wall; Locate folder brings the papers back (D-057).
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { mt } from "@clauseo/components/lib/words-matters.ts";
@@ -132,12 +132,19 @@ test("a paper added, renamed or taken out while the matter is open shows on the 
   );
 });
 
-test("another matter's change reads nothing", async () => {
-  const { transport } = scripted();
+test("another matter's change reads nothing; the window coming back to the front reads the papers again", async () => {
+  const { transport, folder } = scripted();
   await mount(transport);
   const before = lists(transport);
   await hear(transport, { papers_changed: { matter: OTHER } });
   expect(lists(transport)).toBe(before);
+
+  // a change the host couldn't watch shows once the lawyer comes back to the window
+  folder.papers = [paper(4, "Vakalatnama.pdf")];
+  await act(async () => window.dispatchEvent(new Event("focus")));
+  await settle();
+  expect(lists(transport)).toBe(before + 1);
+  expect(tiles()).toEqual(["Vakalatnama.pdf"]);
 });
 
 test("a folder that goes while the matter is open shows Locate folder on its line, and Locate brings the papers back", async () => {
