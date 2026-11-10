@@ -12,7 +12,9 @@ import {
 } from "@clauseo/components/lib/display.ts";
 import { settled as lateSettled } from "@clauseo/components/lib/late.ts";
 import { forgetHindiForTests } from "@clauseo/components/lib/words-core.ts";
-import { Welcome } from "@clauseo/components/clauseo/first-launch/welcome.tsx";
+import { fl } from "@clauseo/components/lib/words-first-launch.ts";
+import { Welcome, type FootPlan } from "@clauseo/components/clauseo/first-launch/welcome.tsx";
+import type { WorkingState } from "@clauseo/components/clauseo/working-line.tsx";
 import { act, useLayoutEffect } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, test } from "vitest";
@@ -121,15 +123,30 @@ let container: HTMLElement;
 let root: Root | null = null;
 let frames: { lang: string; text: string }[] = [];
 
+/** A plan still to download, in the state the first screen gives a missing plan: its size, in the words. */
+function missing(name: string, mb: number): WorkingState {
+  return {
+    kind: "wait",
+    words: fl("hi", "needs a download of about {mb} MB", { mb }),
+    pill: null,
+    lead: "none",
+    plan: name,
+  };
+}
+
+/** Both plans, Claude then ChatGPT, as the first screen builds them. */
+const plans: FootPlan[] = [
+  { key: "claude", name: "Claude", install: missing("Claude", 110), ready: false },
+  { key: "chatgpt", name: "ChatGPT", install: missing("ChatGPT", 95), ready: false },
+];
+
 function Recorded() {
   useLayoutEffect(() => {
     frames.push({ lang: document.documentElement.lang, text: container.textContent ?? "" });
   });
   return (
     <Welcome
-      name="Claude"
-      install={null}
-      ready={false}
+      plans={plans}
       counts={{ on: true, locked: false, onChange: () => {} }}
       onOpenFolder={() => {}}
       onNewMatter={() => {}}
