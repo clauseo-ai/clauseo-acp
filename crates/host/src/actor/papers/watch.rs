@@ -1,8 +1,7 @@
-//! The open matter's folder, watched (decision record 0055): the OS's own change feed through
-//! the `notify` crate (`FSEvents` on macOS, `ReadDirectoryChangesW` on Windows, inotify on Linux),
-//! the whole tree as the listing walks it, never a polling loop. No file is opened: inotify and
-//! `FSEvents` hold no handle at all, and on Windows the one handle is the folder's own, opened
-//! with every share mode, so Word saves, renames and deletes in it as before.
+//! The open matter's folder, watched (decision record 0055), on macOS and Linux only (Windows
+//! builds `no_watch.rs` instead): the OS's own change feed through the `notify` crate (`FSEvents`
+//! on macOS, inotify on Linux), the whole tree as the listing walks it, never a polling loop. No
+//! file is opened, and neither feed holds a handle, so Word saves, renames and deletes as before.
 //!
 //! A change to a file the listing never shows (`~$` owner files, `*.tmp`, `.clauseo`, `.git`:
 //! `clauseo_matters::is_excluded_path`) and a read (an access event: the tracked-changes scan
@@ -48,8 +47,28 @@ pub(crate) struct Watch {
 }
 
 impl Watch {
-    /// Watches `folder` of `matter`, posting each quiet change to `post`.
+    /// Watches `folder` of `matter`, posting each quiet change to `post`; none when the folder
+    /// cannot be watched (gone, or the OS refused), which is logged.
     pub(crate) fn start(
+        matter: MatterId,
+        folder: PathBuf,
+        post: async_channel::Sender<Input>,
+    ) -> Option<Self> {
+        match Self::try_start(matter, folder, post) {
+            Ok(watch) => Some(watch),
+            Err(error) => {
+                tracing::info!(
+                    %matter,
+                    // The kind alone: the error's paths would put the folder in the log.
+                    kind = ?error.kind,
+                    "the matter's folder is not watched; its papers are listed again on focus"
+                );
+                None
+            }
+        }
+    }
+
+    fn try_start(
         matter: MatterId,
         folder: PathBuf,
         post: async_channel::Sender<Input>,

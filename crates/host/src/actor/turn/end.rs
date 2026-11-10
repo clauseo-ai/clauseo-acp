@@ -462,6 +462,7 @@ pub(super) fn finish(actor: &mut Actor, thread: ThreadId) {
     }
     if let Ok(matter) = matter_of(actor, thread) {
         release_writer(actor, matter, thread);
+        super::super::papers::follow::on_turn_ended(actor, matter);
     }
     if host_stopping(actor) {
         agents::stop(actor, thread);

@@ -214,6 +214,8 @@ pub(crate) struct Actor {
     pub(crate) paper_scans: papers::scan::PaperScans,
     /// The matter whose folder is watched, the last one opened (`papers/follow.rs`).
     pub(crate) papers_follow: Option<Box<papers::Follow>>,
+    /// Whether that folder is watched: `papers::follow::live_watch`, set by tests.
+    pub(crate) papers_live: bool,
     pub(crate) next_sub: u64,
     pub(crate) work: Work,
     pub(crate) phase: HostPhase,
@@ -522,6 +524,7 @@ impl Actor {
             Input::Protection(done) => protection::work::on_done(self, *done),
             Input::Allowed(input) => allowed::on_input(self, *input),
             Input::SiteBlocked { session, site } => blocked::site_blocked(self, session, site),
+            #[cfg(not(windows))]
             Input::PapersChanged(changed) => papers::follow::on_changed(self, changed),
             // The loop handles an abort before it gets here.
             #[cfg(feature = "test-support")]

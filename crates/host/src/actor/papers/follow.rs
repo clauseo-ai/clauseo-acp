@@ -5,17 +5,24 @@
 //! papers again when its window comes back to the front, and a listing that finds the folder
 //! there again starts the watch.
 //!
-//! Each quiet change the watch posts ([`on_changed`]) sends `PapersChanged` to the app, which
+//! Not on Windows ([`live_watch`]): there the watch's handle would stop the lawyer renaming or
+//! moving the folder that holds the matter's folder, so nothing is watched, and the app lists
+//! the papers again when its window comes back to the front and when each answer ends
+//! ([`on_turn_ended`]).
+//!
+//! Each quiet change the watch posts (`on_changed`) sends `PapersChanged` to the app, which
 //! lists the papers again; a folder that went also reads `missing` in the matter's next row, so
-//! the room shows the moved folder's line with Locate folder, and the watch stops (on Windows its
-//! handle would hold the folder's delete open). The `tracked` marks follow, as each listing
-//! scans them; the Find index keeps the names of the last checkpoint, as before.
+//! the room shows the moved folder's line with Locate folder, and the watch stops. The `tracked`
+//! marks follow, as each listing scans them; the Find index keeps the names of the last
+//! checkpoint, as before.
 
 use std::path::PathBuf;
 
 use clauseo_protocol::{FolderState, HostEvent, MatterId};
 
-use super::watch::{FolderChanged, Watch};
+#[cfg(not(windows))]
+use super::watch::FolderChanged;
+use super::watch::Watch;
 use crate::actor::Actor;
 
 /// The watched matter, and its watch while there is one.
@@ -26,6 +33,9 @@ pub(crate) struct Follow {
 
 /// `OpenMatter` of `matter`: watch its folder, in place of any other.
 pub(crate) fn opened(actor: &mut Actor, matter: MatterId) {
+    if !actor.papers_live {
+        return;
+    }
     let Some(folder) = folder_of(actor, matter) else {
         return;
     };
@@ -74,6 +84,7 @@ pub(crate) fn listed(actor: &mut Actor, matter: MatterId, found: bool) {
 }
 
 /// The watch saw a quiet change. One from a watch since replaced is dropped.
+#[cfg(not(windows))]
 pub(crate) fn on_changed(actor: &mut Actor, changed: FolderChanged) {
     let FolderChanged {
         matter,
@@ -95,6 +106,21 @@ pub(crate) fn on_changed(actor: &mut Actor, changed: FolderChanged) {
     }
     mark(actor, matter, found);
     crate::actor::app::publish(actor, &HostEvent::PapersChanged { matter });
+}
+
+/// Whether the open matter's folder is watched on this OS: not on Windows, where the watch's
+/// handle on the folder would stop the lawyer renaming or moving the folder that holds it. The
+/// actor keeps it as `papers_live`, which tests set.
+pub(crate) const fn live_watch() -> bool {
+    cfg!(not(windows))
+}
+
+/// A turn in `matter` ended, however it ended. With no watch (Windows) the app lists the papers
+/// again, since the answer may have added or changed some; with one, the watch tells it.
+pub(crate) fn on_turn_ended(actor: &mut Actor, matter: MatterId) {
+    if !actor.papers_live && actor.matters.contains_key(&matter) {
+        crate::actor::app::publish(actor, &HostEvent::PapersChanged { matter });
+    }
 }
 
 fn follows(actor: &Actor, matter: MatterId) -> bool {
@@ -152,16 +178,5 @@ fn folder_of(actor: &Actor, matter: MatterId) -> Option<PathBuf> {
 }
 
 fn start(actor: &Actor, matter: MatterId, folder: PathBuf) -> Option<Watch> {
-    match Watch::start(matter, folder, actor.post.clone()) {
-        Ok(watch) => Some(watch),
-        Err(error) => {
-            tracing::info!(
-                %matter,
-                // The kind alone: the error's paths would put the folder in the log.
-                kind = ?error.kind,
-                "the matter's folder is not watched; its papers are listed again on focus"
-            );
-            None
-        }
-    }
+    Watch::start(matter, folder, actor.post.clone())
 }
