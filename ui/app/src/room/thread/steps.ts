@@ -178,8 +178,14 @@ export function restOf(
   const unread = calls.filter(unknownState);
   if (tried.length === 0 && unread.length > 0)
     return { kinds: iconsOf(unread), line: steps(lang, "State not known."), trouble: "" };
-  const out = tried.slice(0, NAMED).map((c) => doneOf(lang, c));
-  const rest = tried.length - NAMED;
+  // each sentence once (D-077): two tasks with nothing to tell them apart read "Tried to run a task." once, the
+  // other counted in the more
+  const out: string[] = [];
+  for (const c of tried) {
+    const said = doneOf(lang, c);
+    if (out.length < NAMED && !out.includes(said)) out.push(said);
+  }
+  const rest = tried.length - out.length;
   if (rest > 0) out.push(counted(lang, ["And 1 more.", "And {n} more."], rest));
   // the break leads what was tried, alone: a kind icon before it would mark the one step twice
   return { kinds: [], line: "", trouble: out.join(" ") };
