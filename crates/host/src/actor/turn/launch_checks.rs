@@ -32,7 +32,9 @@
 //! agent's process tree and its Chrome are gone ([`straggler`]), or the agent never started.
 //! The session's case-law relay and its token file (R24, [`relay`]) are made on the same thread
 //! and ride the same way, and so does its egress proxy ([`egress`]), opened there once Chrome
-//! is found and closed as the run drops.
+//! is found and closed as the run drops. Last, the same thread fixes the session's `PATH`
+//! folders and what its shells get ([`claim`], `agent/shell_path.rs`): Claude's
+//! `clauseo-env.sh` in the run folder, and on macOS the folders `path_helper` adds, for Codex.
 //!
 //! At the first launch, before any folder is made, `<data>/run` from an earlier run is set
 //! aside in one rename and deleted on a thread of its own ([`RunSweep`]). Nothing is made or
@@ -173,6 +175,9 @@ pub(crate) struct RunFolders {
     pub(crate) lease: Arc<straggler::Lease>,
     /// Whether the launch prep waited for a browser slot (`browser::slot_wait`).
     pub(crate) slot_waited: bool,
+    /// Its `PATH` folders and what its shells get, found by the launch prep after the claims
+    /// (`claim.rs`, `agent/shell_path.rs`); `<root>/clauseo-env.sh` goes with the folder.
+    pub(crate) path: crate::agent::shell_path::SessionPath,
 }
 
 impl RunFolders {
@@ -204,6 +209,7 @@ impl RunFolders {
             egress: None,
             lease: Arc::default(),
             slot_waited: false,
+            path: crate::agent::shell_path::SessionPath::default(),
         }
     }
 
@@ -398,39 +404,6 @@ pub(super) fn prepare(
     });
 }
 
-/// The session's egress proxy, browser claims and case-law relay (`claims`), made on the
-/// launch-prep thread. `slot`: whether a browser slot is there after the prep's slot wait.
-fn claim(run: &mut RunFolders, data: &Path, claims: Claims, slot: bool) {
-    let Claims {
-        browser,
-        case_law,
-        egress,
-        held,
-    } = claims;
-    let browser = if slot || browser.shell() {
-        browser
-    } else {
-        browser.skipped()
-    };
-    run.browser_shell = browser.shell();
-    let prepared = browser.prepare(data, &run.key.id());
-    (run.chrome, run.browser_session) = (prepared.chrome, prepared.session);
-    (run.browser_blocked, run.browser_policy_read) = (prepared.policy_block, prepared.policy_read);
-    if run.browser_shell && run.chrome.is_some() {
-        browser::shell_folders(run, data);
-    }
-    // The launch offers the browser only once its Chrome was found and claimed.
-    let offered = run.chrome.is_some() && run.browser_session.is_some();
-    run.egress = egress.open(run.key, offered);
-    run.case_law = case_law.open(run);
-    let parts = straggler::Parts {
-        browser: run.browser_session.clone(),
-        case_law: run.case_law.clone(),
-        egress: run.egress.clone(),
-    };
-    run.lease.keep(held, parts);
-}
-
 /// A prep nobody waits for any more takes back what it made: the relay's token first, then the
 /// run folder with the token file. No agent was started, so nothing waits.
 fn undo_late(late: Prepared) {
@@ -571,6 +544,8 @@ pub(super) fn remove_run(actor: &mut Actor, thread: ThreadId, tree: TreeWatch) {
 }
 
 mod browser;
+mod claim;
+use claim::claim;
 mod egress;
 use paths::Claims;
 pub(super) mod folder;

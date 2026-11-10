@@ -30,6 +30,7 @@ pub(crate) mod loads;
 pub(crate) mod login_link;
 pub(crate) mod login_splits;
 pub(crate) mod plan_note;
+pub(crate) mod shell_path;
 mod spec;
 pub(crate) mod title;
 
@@ -55,7 +56,9 @@ use futures::task::LocalSpawnExt;
 use crate::clock::{Clock, ProcessTimer};
 use crate::error::Error;
 
-pub(crate) use spec::{PYTHON_VARS, launch_spec, session_path};
+#[cfg(test)]
+pub(crate) use spec::launch_spec;
+pub(crate) use spec::{PYTHON_VARS, launch_env, session_path, spec_of};
 
 /// How long the owner waits, after the agent is gone, for its stderr pipe and its stdout to end,
 /// so the exit report's tail holds the last lines and [`Ended`] follows every event. A helper the

@@ -9,11 +9,24 @@ use clauseo_settings::AgentLaunch;
 
 use crate::error::Error;
 
-/// The spec for `agent`, run in `cwd` (the matter folder).
-///
-/// The env map holds the `inherited` environment (the host's own, read at launch) minus every
-/// `GIT_*` and `SSH_*` variable, the names in [`DROPPED_INHERITED`], and every name an agent,
-/// hook or forced variable also names, then the
+/// [`launch_env`] made into a spec run in `cwd` (the matter folder), for tests.
+#[cfg(test)]
+pub(crate) fn launch_spec(
+    agent: &AgentLaunch,
+    hook_env: BTreeMap<OsString, OsString>,
+    forced: BTreeMap<OsString, OsString>,
+    dropped: &[&str],
+    inherited: impl Iterator<Item = (OsString, OsString)>,
+    cwd: PathBuf,
+    path_prepend: &[PathBuf],
+) -> Result<LaunchSpec, Error> {
+    let env = launch_env(agent, hook_env, forced, dropped, inherited, path_prepend);
+    spec_of(agent, env, cwd)
+}
+
+/// The whole environment of `agent`'s launch. It holds the `inherited` environment (the host's
+/// own, read at launch) minus every `GIT_*` and `SSH_*` variable, the names in
+/// [`DROPPED_INHERITED`], and every name an agent, hook or forced variable also names, then the
 /// agent's variables minus those the hook or `forced` names, then the hook's minus those
 /// `forced` names, then `forced`: what the host sets for the agent's kind (a Codex agent's
 /// mode, home and config, `agent/codex.rs`; a Claude agent's home, `agent/home.rs`), which
@@ -46,15 +59,17 @@ use crate::error::Error;
 /// `path_prepend` goes first on the merged `PATH`, in its order ([`prepend_path`]): stetdoc's
 /// folder (`HostConfig::with_agent_path_prepend`), the shell browser's folder for a session
 /// that has it, then the profile hook's ([`session_path`]).
-pub(crate) fn launch_spec(
+///
+/// The launch then edits it for the agent's shells (`agent/shell_path.rs`) and makes the spec
+/// with [`spec_of`].
+pub(crate) fn launch_env(
     agent: &AgentLaunch,
     mut hook_env: BTreeMap<OsString, OsString>,
     forced: BTreeMap<OsString, OsString>,
     dropped: &[&str],
     inherited: impl Iterator<Item = (OsString, OsString)>,
-    cwd: PathBuf,
     path_prepend: &[PathBuf],
-) -> Result<LaunchSpec, Error> {
+) -> BTreeMap<OsString, OsString> {
     let drops = |name: &OsStr| {
         clauseo_process::is_node_env(name)
             || dropped.iter().any(|drop| same(OsStr::new(drop), name))
@@ -83,6 +98,15 @@ pub(crate) fn launch_spec(
     if !path_prepend.is_empty() {
         prepend_path(&mut env, path_prepend);
     }
+    env
+}
+
+/// The spec of `agent`'s command and arguments, with `env` as its whole environment, in `cwd`.
+pub(crate) fn spec_of(
+    agent: &AgentLaunch,
+    env: BTreeMap<OsString, OsString>,
+    cwd: PathBuf,
+) -> Result<LaunchSpec, Error> {
     let args = agent.args.iter().map(OsString::from).collect();
     Ok(LaunchSpec::new(
         PathBuf::from(&agent.command),

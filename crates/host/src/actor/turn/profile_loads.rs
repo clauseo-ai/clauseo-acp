@@ -304,12 +304,6 @@ pub(super) fn with_shell_env(
     env
 }
 
-/// The shell browser's tools folder for the agent's `PATH` (after stetdoc's, before the profile
-/// hook's: `agents::path::launch_parts`), for a session that has it.
-pub(super) fn browser_tools(actor: &Actor, run: &RunFolders) -> Option<PathBuf> {
-    shell_chrome(actor, run).and_then(|_| actor.profile.browser_tool())
-}
-
 /// The Chrome of `run`'s session when it has the browser as a shell tool.
 fn shell_chrome<'a>(actor: &Actor, run: &'a RunFolders) -> Option<&'a Path> {
     actor.profile.browser_tool()?;

@@ -1,7 +1,9 @@
 //! The profile hook's session `PATH` folders (`ProfileHook::agent_path`, as desktop gives
 //! Clauseo's Python runtime) on both agents' launches: after stetdoc's folder and before the
 //! user's `PATH`, a relative one left off, and the inherited `PYTHONHOME` and `PYTHONPATH`
-//! dropped only when folders go on.
+//! dropped only when folders go on. On macOS a Codex launch's `PATH` also has the folders
+//! `path_helper` adds (`/etc/paths`, then `/etc/paths.d`) right after Clauseo's, each folder
+//! once (`agent/shell_path.rs`); Claude's, Linux's and Windows's are Clauseo's, then the user's.
 
 use std::collections::BTreeMap;
 use std::ffi::{OsStr, OsString};
@@ -108,6 +110,34 @@ fn launched_with_hook_path(label: &str, dirs: Vec<PathBuf>) -> (PathBuf, Vec<Hoo
     (folder, seen)
 }
 
+/// The `PATH` a launch gets with `ours` first and the user's `/usr/bin` after: on macOS a Codex
+/// launch has the host's own `path_helper` folders between them, each folder kept where it
+/// first comes, as `agent::shell_path::mac_shell_path` builds it.
+fn expected_path(ours: &[PathBuf], codex: bool) -> Vec<PathBuf> {
+    let helper = if codex && cfg!(target_os = "macos") {
+        clauseo_host::path_helper_folders()
+    } else {
+        Vec::new()
+    };
+    let mut kept: Vec<PathBuf> = Vec::new();
+    for part in ours
+        .iter()
+        .chain(&helper)
+        .cloned()
+        .chain([PathBuf::from("/usr/bin")])
+    {
+        if !part.as_os_str().is_empty() && !kept.contains(&part) {
+            kept.push(part);
+        }
+    }
+    kept
+}
+
+/// Whether launch `at` is Codex's: the rig runs Claude's turn, then Codex's.
+fn is_codex(at: usize) -> bool {
+    at == 1
+}
+
 /// The hook's folders go after stetdoc's and before the user's `PATH` on both agents, a
 /// relative one left off, and the inherited `PYTHONHOME` and `PYTHONPATH` go.
 #[test]
@@ -120,23 +150,15 @@ fn the_hook_path_follows_stetdoc_and_drops_the_python_variables() {
     );
     assert_eq!(seen.len(), 2);
     for (at, (parts, home, path)) in seen.iter().enumerate() {
-        assert_eq!(
-            parts,
-            &[
-                folder.clone(),
-                bin.clone(),
-                root.clone(),
-                PathBuf::from("/usr/bin")
-            ],
-            "launch {at}"
-        );
+        let ours = [folder.clone(), bin.clone(), root.clone()];
+        assert_eq!(parts, &expected_path(&ours, is_codex(at)), "launch {at}");
         assert_eq!(home, &None, "launch {at}");
         assert_eq!(path, &None, "launch {at}");
     }
 }
 
-/// A hook with no folders, or only relative ones, leaves `PATH` as before (stetdoc's, then the
-/// user's) and both Python variables inherited.
+/// A hook with no folders, or only relative ones, leaves `PATH` as before (stetdoc's, on macOS
+/// Codex's `path_helper` folders, then the user's) and both Python variables inherited.
 #[test]
 fn an_empty_hook_path_keeps_the_path_and_the_python_variables() {
     for (label, dirs) in [
@@ -149,9 +171,10 @@ fn an_empty_hook_path_keeps_the_path_and_the_python_variables() {
         let (folder, seen) = launched_with_hook_path(label, dirs);
         assert_eq!(seen.len(), 2, "{label}");
         for (at, (parts, home, path)) in seen.iter().enumerate() {
+            let ours = [folder.clone()];
             assert_eq!(
                 parts,
-                &[folder.clone(), PathBuf::from("/usr/bin")],
+                &expected_path(&ours, is_codex(at)),
                 "{label} launch {at}"
             );
             assert_eq!(

@@ -311,21 +311,22 @@ fn launch(
         codex.key_retry = KeyRetry::at_launch(&hook, login);
         codex
     });
-    let tools = super::profile_loads::browser_tools(actor, &prepared.run);
-    let parts = path::launch_parts(actor, &row.agent, codex.is_some(), tools);
+    let parts = path::launch_parts(actor, codex.is_some(), &prepared.run.path);
     // Tier C (no jail) leaves the agent's environment alone: no session proxy variables here
     // (`ProxyHandle::env`); only the browser entry reaches the proxy, advisory without a jail.
-    let spec = agent::launch_spec(
+    let mut env = agent::launch_env(
         settings,
         super::profile_loads::with_shell_env(actor, &prepared.run, hook),
         forced,
         &parts.dropped,
         parts.inherited.into_iter(),
-        agent::session_folder(&folder),
         &parts.path,
-    )
-    .map_err(super::launch_checks::folder::gone_at_spawn)?
-    .with_redacted(redacted);
+    );
+    // The agent's shells get the same `PATH` the session does (`agent/shell_path.rs`).
+    agent::shell_path::apply(&mut env, &prepared.run.path);
+    let spec = agent::spec_of(settings, env, agent::session_folder(&folder))
+        .map_err(super::launch_checks::folder::gone_at_spawn)?
+        .with_redacted(redacted);
     let claude = AgentKind::of(&row.agent) == Some(AgentKind::Claude);
     let plan_notes = claude
         .then(|| agent::plan_note::plans_folder(spec.env(), cfg!(windows)))
