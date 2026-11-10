@@ -103,6 +103,7 @@ pub(in super::super) fn on_ended(actor: &mut Actor, thread: ThreadId, ended: End
         stop_cause,
         denied_data_folder,
         start_failure,
+        matter_spellings,
         ..
     } = *agent;
     let unresponsive = matches!(
@@ -116,12 +117,22 @@ pub(in super::super) fn on_ended(actor: &mut Actor, thread: ThreadId, ended: End
     if session.is_none() {
         match &ended {
             Ended::Exited(report) => {
-                super::start_failure::log_start_tail(thread, start_failure, report);
+                super::start_failure::log_start_tail(
+                    thread,
+                    start_failure,
+                    report,
+                    &matter_spellings,
+                );
             }
             Ended::Stopped { report, .. }
                 if start_failure.is_some() || stop_cause == StopCause::Closed =>
             {
-                super::start_failure::log_start_tail(thread, start_failure, report);
+                super::start_failure::log_start_tail(
+                    thread,
+                    start_failure,
+                    report,
+                    &matter_spellings,
+                );
             }
             Ended::Stopped { .. } => {}
         }

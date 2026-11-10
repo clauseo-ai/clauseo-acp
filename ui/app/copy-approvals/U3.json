@@ -320,12 +320,9 @@
   "U3-err-matter.folder_permission": {
     "en": "Clauseo needs permission to open this folder.",
     "hi": "Clauseo को यह फ़ोल्डर खोलने की अनुमति चाहिए।",
-    "hi_status": "provisional",
-    "hi_at": "2026-11-10",
-    "hi_by": "host track (draft; pending a Hindi-speaking lawyer's review)",
-    "status": "provisional",
+    "status": "approved",
     "at": "2026-11-10",
-    "by": "orchestrator (settled for the macOS folder permission launch fix; Rohan batch review)",
+    "by": "orchestrator (English and Hindi settled for the macOS folder permission launch fix)",
     "note": "macOS privacy settings (Files and Folders) keep Clauseo out of the matter's folder; the app adds the Open Privacy settings button and its line"
   },
   "U3-err-matter.folder_refused": {

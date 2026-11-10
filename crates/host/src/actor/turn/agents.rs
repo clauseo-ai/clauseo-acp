@@ -116,9 +116,10 @@ pub(super) struct Agent {
     /// Its permission requests the host rejected for touching Clauseo's data folder
     /// (`agent/data_fence.rs`), logged as a count on its `agent ended` line.
     pub(super) denied_data_folder: u32,
-    /// The code its launch failed with (`launch_failed`); its end then logs its start's stderr
-    /// summary.
+    /// Its launch's failure code (`launch_failed`); its end then logs its start's stderr summary.
     pub(super) start_failure: Option<ErrorCode>,
+    /// Its matter folder's spellings, read at the launch (`start_failure::matter_spellings`).
+    pub(super) matter_spellings: Vec<String>,
     /// Its idle clock and config calls in flight (`idle.rs`).
     pub(super) idle: super::idle::Mark,
 }
@@ -130,8 +131,7 @@ pub(super) struct CodexAgent {
     /// it. Each prompt and session call checks the stored folder for `.codex` first, resolved
     /// again.
     pub(super) folder: PathBuf,
-    /// A hooks object went into its `CODEX_CONFIG`, so its session start checks that Codex
-    /// trusts the guard.
+    /// Its `CODEX_CONFIG` got a hooks object: its session start checks Codex trusts the guard.
     pub(super) guard: bool,
     /// Its one `authenticate` with its key (`key_retry.rs`).
     pub(super) key_retry: KeyRetry,
@@ -203,13 +203,14 @@ pub(super) fn launch_now(
         tracing::info!(%matter, forced_ask, "Claude runs in forced ask: the matter folder is unprotected");
     }
     let mut tree = None;
-    let (link, folder, codex, plan_notes) = match launch(actor, thread, prepared, &mut tree) {
-        Ok(launched) => launched,
-        Err(error) => {
-            fail_all(actor, thread, waiting, &error);
-            return tree;
-        }
-    };
+    let (link, folder, codex, plan_notes, matter_spellings) =
+        match launch(actor, thread, prepared, &mut tree) {
+            Ok(launched) => launched,
+            Err(error) => {
+                fail_all(actor, thread, waiting, &error);
+                return tree;
+            }
+        };
     let id = next_agent_id();
     let client = link.client.clone();
     call(actor, thread, id, async move {
@@ -253,6 +254,7 @@ pub(super) fn launch_now(
         plan_notes,
         denied_data_folder: 0,
         start_failure: None,
+        matter_spellings,
         idle: super::idle::Mark::default(),
     };
     if let Some(state) = state(actor, thread) {
@@ -268,9 +270,15 @@ pub(super) fn next_agent_id() -> u64 {
     NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
 }
 
-/// What a launch gives: the link, the folder it runs in, what a Codex launch recorded, and a
-/// Claude launch's plans folder.
-type Launched = (AgentLink, PathBuf, Option<CodexAgent>, Option<PathBuf>);
+/// What a launch gives: the link, the folder it runs in, what a Codex launch recorded, a
+/// Claude launch's plans folder, and the matter folder's spellings for its stderr summary.
+type Launched = (
+    AgentLink,
+    PathBuf,
+    Option<CodexAgent>,
+    Option<PathBuf>,
+    Vec<String>,
+);
 
 /// The launch itself: the spec from the settings (inherited environment, the agent's
 /// variables, then the profile hook's with the host's switches over them, then what the host
@@ -317,6 +325,8 @@ fn launch(
         cfg!(windows),
     ));
     let hook = agent::loads::launch_env(actor.profile.launch_env(&row.agent));
+    let session_folder = agent::session_folder(&folder);
+    let matter_spellings = start_failure::spellings_at_launch(actor, &folder, &session_folder);
     // The key retry is armed by the hook's key and the launch's sign-in check.
     let codex = codex.map(|(mut codex, login)| {
         codex.key_retry = KeyRetry::at_launch(&hook, login);
@@ -335,7 +345,7 @@ fn launch(
     );
     // The agent's shells get the same `PATH` the session does (`agent/shell_path.rs`).
     agent::shell_path::apply(&mut env, &prepared.run.path);
-    let spec = agent::spec_of(settings, env, agent::session_folder(&folder))
+    let spec = agent::spec_of(settings, env, session_folder)
         .map_err(super::launch_checks::folder::gone_at_spawn)?
         .with_redacted(redacted);
     let claude = AgentKind::of(&row.agent) == Some(AgentKind::Claude);
@@ -355,7 +365,7 @@ fn launch(
         post,
         tree,
     )?;
-    Ok((link, folder, codex, plan_notes))
+    Ok((link, folder, codex, plan_notes, matter_spellings))
 }
 
 /// THE CODEX HOOKS SEAM: the `hooks` object a Codex agent's `CODEX_CONFIG` carries, with its
