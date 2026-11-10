@@ -1286,6 +1286,7 @@ dependencies = [
  "getrandom 0.3.4",
  "httparse",
  "insta",
+ "libc",
  "minisign-verify",
  "nix",
  "objc2-cf-network",

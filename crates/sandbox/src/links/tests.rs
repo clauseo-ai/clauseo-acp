@@ -1,8 +1,39 @@
 use super::*;
 use crate::test_support::TempDir;
 
+mod commondir;
+mod named;
+mod network_links;
+
 fn canon(p: &Path) -> PathBuf {
     dunce::canonicalize(p).unwrap()
+}
+
+/// A fake file system of `links` (link, target as written); any other path is not a link. It
+/// fails the test when asked about a network path: a server or device path, the share mount,
+/// or a path on the mapped network drive `Z:`.
+fn fake(links: &[(&str, &str)]) -> impl Fn(&Path) -> io::Result<Option<PathBuf>> + use<> {
+    let links: Vec<(PathBuf, PathBuf)> = links
+        .iter()
+        .map(|(link, target)| (PathBuf::from(link), PathBuf::from(target)))
+        .collect();
+    move |path: &Path| {
+        let text = path.to_string_lossy();
+        let network = ["\\\\", "\\??\\", "//", "/Volumes/share", "Z:", "z:"];
+        assert!(
+            !network.iter().any(|start| text.starts_with(start)),
+            "a network path was looked at: {text}"
+        );
+        Ok(links
+            .iter()
+            .find(|(link, _)| link == path)
+            .map(|(_, target)| target.clone()))
+    }
+}
+
+/// A resolver that fails the test: the walk must not resolve the path.
+fn never(path: &Path) -> io::Result<PathBuf> {
+    panic!("a network path was resolved: {}", path.display())
 }
 
 #[test]

@@ -87,35 +87,44 @@ fn a_notes_folder_whose_permissions_cant_change_is_refused() {
     assert_refused(&w, &policy, PathKind::Notes, want);
 }
 
+/// A matter on a share is refused when the policy is built, before the gate or any file call
+/// on it. The gate's folder check answers `Network` for it too, as the second line.
 #[test]
 fn a_matter_on_a_share_is_refused() {
     let w = World::new("admit-win-network-matter");
     if !has_admin_share(&w) {
         return;
     }
-    let policy = Policy::builder(admin_share_path(&w.at("matter")), w.at(STATE))
+    let matter = admin_share_path(&w.at("matter"));
+    let built = Policy::builder(matter.clone(), w.at(STATE))
         .home(w.at("home"))
-        .build()
-        .unwrap();
-    let want = FolderRefusal::Support(FolderSupport::Network);
-    assert_refused(&w, &policy, PathKind::Matter, want);
+        .build();
+    assert!(matches!(built, Err(Error::MatterOnNetwork)), "{built:?}");
+    assert_eq!(folder_support(&matter).unwrap(), FolderSupport::Network);
 }
 
 #[test]
 fn a_state_folder_on_a_share_refuses_the_whole_launch() {
     // The matter is local and fine; the state folder alone, through `\\localhost\C$`, is
-    // enough to refuse.
+    // enough to refuse, when the policy is built. The gate's label check answers `Network`
+    // for it too.
     let w = World::new("admit-win-network-state");
     if !has_admin_share(&w) {
         return;
     }
-    let policy = Policy::builder(w.at("matter"), admin_share_path(&w.at(STATE)))
+    let state = admin_share_path(&w.at(STATE));
+    let built = Policy::builder(w.at("matter"), state.clone())
         .home(w.at("home"))
-        .build()
-        .unwrap();
-    assert_eq!(folder_support(policy.matter()).unwrap(), FolderSupport::Ok);
-    let want = FolderRefusal::Support(FolderSupport::Network);
-    assert_refused(&w, &policy, PathKind::State, want);
+        .build();
+    let Err(Error::Policy(message)) = &built else {
+        panic!("not refused: {built:?}");
+    };
+    assert!(
+        message.contains("the state folder is on a network drive"),
+        "{message}"
+    );
+    assert_eq!(folder_support(&w.at("matter")).unwrap(), FolderSupport::Ok);
+    assert_eq!(label_support(&state).unwrap(), FolderSupport::Network);
 }
 
 #[test]

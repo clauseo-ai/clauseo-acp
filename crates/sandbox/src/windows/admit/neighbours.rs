@@ -3,16 +3,49 @@
 //! matter's own folders.
 
 use std::io;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use super::{FolderRefusal, FolderSupport, refusal};
 use crate::Error;
+use crate::links::network::{Mounts, lexical, link_to_network, read_if_link};
+
+/// A link read: `read_if_link`, or a test's fake.
+type ReadLink = Box<dyn Fn(&Path) -> io::Result<Option<PathBuf>>>;
+
+/// Which paths are off the local disks, by [`link_to_network`] on `mounts` with `read` as its one
+/// file call: this machine's in the gate, fakes in tests. An unread table counts every path off.
+pub(super) struct Net {
+    pub(super) mounts: Mounts,
+    pub(super) read: ReadLink,
+}
+
+impl Net {
+    /// This machine's mount table and link reads.
+    pub(super) fn machine() -> Net {
+        Net {
+            mounts: Mounts::current(),
+            read: Box::new(read_if_link),
+        }
+    }
+
+    /// Whether `path` leaves the local disks, name by name and link by link.
+    pub(super) fn off(&self, path: &Path) -> bool {
+        self.mounts.unread || link_to_network(path, &self.mounts, &self.read).is_some()
+    }
+}
 use crate::windows::acl_plan::targets::odd_spelling;
 use crate::windows::fence::{Fence, Neighbours};
 
-/// `neighbours` with every path canonical; a path that doesn't resolve keeps its spelling.
-pub(super) fn resolve(neighbours: &Neighbours) -> Neighbours {
-    let canonical = |p: &Path| dunce::canonicalize(p).unwrap_or_else(|_missing| p.to_owned());
+/// `neighbours` with every path canonical; a path that doesn't resolve keeps its spelling. One
+/// off the local disks by [`Net::off`] (another matter on a share) is never touched: it keeps
+/// its spelling with `..` taken off by text.
+pub(super) fn resolve(neighbours: &Neighbours, net: &Net) -> Neighbours {
+    let canonical = |p: &Path| {
+        if net.off(p) {
+            return lexical(p);
+        }
+        dunce::canonicalize(p).unwrap_or_else(|_missing| p.to_owned())
+    };
     let mut resolved = neighbours.clone();
     for other in &mut resolved.registered {
         other.folders.root = canonical(&other.folders.root);
@@ -29,7 +62,8 @@ pub(super) fn resolve(neighbours: &Neighbours) -> Neighbours {
 /// (a name-surrogate reparse point; `policy/build.rs`'s `root_folder`), and resolves every link
 /// above it; its own plan refuses an odd spelling of the resolved path. So here: a folder that
 /// doesn't exist is left out (nothing to protect yet; the host's matter creation fences it); one
-/// on a network share is left out too, as a sibling is; a folder reached through a linked parent
+/// on a network share, or off the local disks by [`Net::off`] (checked before any file call),
+/// is left out too, as a sibling is; a folder reached through a linked parent
 /// is fenced at its resolved target; a cloud placeholder or other reparse point that isn't a
 /// name surrogate is accepted, as D7 does. A folder that is itself a link, has an odd resolved
 /// spelling, or can't take the fence refuses the launch with [`Error::NeighbourUnfenceable`]
@@ -38,6 +72,7 @@ pub(super) fn fences(
     resolved: &Neighbours,
     given: &Neighbours,
     check: &mut impl FnMut(&Path) -> io::Result<FolderSupport>,
+    net: &Net,
 ) -> Result<Vec<Fence>, Error> {
     let mut fences = Vec::new();
     for (other, spelled) in resolved.registered.iter().zip(&given.registered) {
@@ -53,6 +88,10 @@ pub(super) fn fences(
                 path_kind: kind,
                 support,
             };
+            // Off the local disks: left out untouched, as a share is below.
+            if net.off(asked) || net.off(folder) {
+                continue;
+            }
             match own_name_is_link(asked) {
                 Ok(true) => return Err(refuse(FolderRefusal::ReparsePoint)),
                 Ok(false) => {}

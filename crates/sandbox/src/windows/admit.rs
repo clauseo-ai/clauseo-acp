@@ -23,6 +23,8 @@ use super::acl_plan::targets::AGENTS_DIR;
 #[cfg(any(windows, test, feature = "test-support"))]
 use crate::Error;
 use crate::Policy;
+#[cfg(any(windows, test, feature = "test-support"))]
+use neighbours::Net;
 
 /// Which kind of path a grant or a refusal is about. Errors and logs name this, never the path,
 /// so no matter's or client's name reaches them. Stored in the ledger by its snake-case name;
@@ -256,6 +258,7 @@ pub fn admit<'a>(
     let checks = Checks {
         entries: super::folder_support,
         label: super::label_support,
+        net: Net::machine(),
     };
     gate(policy, data_dir, neighbours, checks, folders)
 }
@@ -274,6 +277,7 @@ pub fn admit_with<'a>(
     let checks = Checks {
         entries: |path: &Path| (check.borrow_mut())(path),
         label: |path: &Path| (check.borrow_mut())(path),
+        net: Net::machine(),
     };
     gate(policy, data_dir, neighbours, checks, folders)
 }
@@ -292,16 +296,19 @@ pub fn admit_labelling_with<'a>(
     let checks = Checks {
         entries: check,
         label,
+        net: Net::machine(),
     };
     gate(policy, data_dir, neighbours, checks, folders)
 }
 
 /// The gate's two folder checks: `label` for the folders it grants on, which the plan gives
-/// the Low label (so they need `WRITE_OWNER` too), `entries` for the folders it only denies.
+/// the Low label (so they need `WRITE_OWNER` too), `entries` for the folders it only denies;
+/// and `net`, which says which paths are off the local disks before anything touches them.
 #[cfg(any(windows, test, feature = "test-support"))]
 struct Checks<E, L> {
     entries: E,
     label: L,
+    net: Net,
 }
 
 /// The gate, with the folder check `check` and the folder lister `folders` as parameters.
@@ -309,7 +316,8 @@ struct Checks<E, L> {
 /// 0. The matter folder must not be `data_dir` (Clauseo's data folder), hold it, or sit inside
 ///    it, compared canonically: `data_dir` is canonicalised (the policy's paths already are),
 ///    then compared part by part by the policy's comparison and also without ASCII case, as
-///    NTFS compares names. A `data_dir` that doesn't resolve refuses, failing closed. Either
+///    NTFS compares names. A `data_dir` that doesn't resolve, or is off the local disks by
+///    `Checks::net` (checked before any file call), refuses, failing closed. Either
 ///    refuses with [`FolderRefusal::OverlapsDataFolder`] for [`PathKind::Matter`].
 /// 1. Each of [`grant_folders`] must answer [`FolderSupport::Ok`] to the label check (each gets
 ///    the Low label, so a folder the lawyer can't label is [`FolderSupport::CantLabel`]); any
@@ -343,7 +351,14 @@ fn gate<'a>(
     let Checks {
         entries: mut check,
         mut label,
+        net,
     } = checks;
+    // Every path is classified before it is touched: a link to a share would send the user's
+    // NTLM hash. A data folder off the local disks refuses, as one that doesn't resolve does.
+    if net.off(data_dir) {
+        tracing::warn!("the data folder is off the local disks; tier B refuses");
+        return Err(refused(PathKind::Matter, FolderRefusal::OverlapsDataFolder));
+    }
     let data = match dunce::canonicalize(data_dir) {
         Ok(data) => data,
         Err(error) => {
@@ -363,7 +378,7 @@ fn gate<'a>(
         return Err(refused(kind, refusal));
     }
     let given = neighbours;
-    let resolved = neighbours::resolve(given);
+    let resolved = neighbours::resolve(given, &net);
     let nested = resolved
         .registered
         .iter()
@@ -377,7 +392,7 @@ fn gate<'a>(
             return Err(refused(kind, refusal));
         }
     }
-    let fences = neighbours::fences(&resolved, given, &mut check)?;
+    let fences = neighbours::fences(&resolved, given, &mut check, &net)?;
     let walked = siblings::siblings(policy, &data, &resolved, &mut check, folders)?;
     Ok(Admitted {
         policy,
@@ -518,8 +533,9 @@ pub(crate) fn fences_for(
             .collect(),
         reach: Vec::new(),
     };
-    let resolved = neighbours::resolve(&given);
-    neighbours::fences(&resolved, &given, &mut check)
+    let net = Net::machine();
+    let resolved = neighbours::resolve(&given, &net);
+    neighbours::fences(&resolved, &given, &mut check, &net)
 }
 
 #[cfg(any(windows, test, feature = "test-support"))]

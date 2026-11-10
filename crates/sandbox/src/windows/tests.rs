@@ -133,11 +133,19 @@ fn a_device_unc_path_is_network() {
     assert_eq!(folder_support(share).unwrap(), FolderSupport::Network);
 }
 
+/// A local drive's folder answers as a `\\?\` path, and as a `\\.\` device path, which the
+/// classifier reads through its drive letter.
 #[test]
 fn a_local_device_path_answers() {
     let temp = TempDir::new("folder-device-path");
-    let device = PathBuf::from(format!(r"\\.\{}", temp.path().display()));
-    assert_eq!(folder_support(&device).unwrap(), FolderSupport::Ok);
+    for prefix in [r"\\?\", r"\\.\"] {
+        let path = PathBuf::from(format!("{prefix}{}", temp.path().display()));
+        assert_eq!(
+            folder_support(&path).unwrap(),
+            FolderSupport::Ok,
+            "{prefix}"
+        );
+    }
 }
 
 #[test]

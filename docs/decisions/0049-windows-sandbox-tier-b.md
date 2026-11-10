@@ -347,6 +347,50 @@ matter's agent gets error 5. The residual risk: a pipe the agent makes with no s
 NPFS's default descriptor (`Everyone` read), so another matter's agent can read it. A later tier
 may drop `Everyone` behind a proxy that runs as the desktop user.
 
+### Which drives count as network
+
+The launch refuses a matter, settings path or git folder on a network drive. Any other drive is
+local, including a device it doesn't know (`links/network/drives.rs`). The check reads only the
+path's text, `QueryDosDeviceW` and `GetDriveTypeW`. It opens no handle on the drive until those
+have ruled network out.
+
+- **Network:**
+  - a UNC path: `\\host\share`, `//host/share`, `\\?\UNC\`, `\??\UNC\` or `\\.\UNC\`;
+  - a drive letter whose DOS device starts with a redirector prefix (below), or a `subst` onto
+    one;
+  - a drive letter whose `GetDriveTypeW` is `DRIVE_REMOTE`.
+- **Missing:** a letter with no DOS device, or one whose `GetDriveTypeW` is `DRIVE_NO_ROOT_DIR`.
+  The walk skips it. `GetDriveTypeW` isn't asked about a letter with no device, so a
+  disconnected mapping isn't reconnected.
+- **Local:** any other letter, whatever its device: `DRIVE_FIXED`, `DRIVE_REMOVABLE`,
+  `DRIVE_CDROM`, `DRIVE_RAMDISK` or `DRIVE_UNKNOWN`. When `QueryDosDeviceW` fails,
+  `GetDriveTypeW` decides alone. A device path `\\.\D:\x` is read as `D:\x`.
+- **Can't check, refused:** a path whose text names no drive (`\\?\Volume{…}`, `\\.\pipe\…`), or
+  a `..` in a `\\?\` or `\??\` path. A link that can't be read is refused too.
+
+The redirector prefixes, compared without case, with the source for each device name:
+
+| Prefix | What | Source |
+|---|---|---|
+| `\Device\Mup` | every UNC provider (MUP) | Microsoft, "Support for UNC Naming and MUP" (IFS docs) |
+| `\Device\LanmanRedirector` | SMB | Microsoft's SMB redirector; mapping targets `\Device\LanmanRedirector\;Z:…` |
+| `\Device\WebDavRedirector` | WebDAV | `DD_DAV_DEVICE_NAME_U` in Windows XP's `davname.h` |
+| `\Device\CSCDevice` | Offline Files | kept from the first list |
+| `\Device\RdpDr` | Remote Desktop drives (`\\tsclient`) | `RDPDR_DEVICE_NAME_U` in Windows's `rdpdr.h`; `drprov.c` checks connection names against it |
+| `\Device\P9Rdr` | WSL's Plan 9 redirector | `P9RDR_DEVICE_NAME` in WSL's `p9rdr.h` |
+| `\Device\VBoxMiniRdr` | VirtualBox shared folders | VirtualBox `vbsfshared.h` (`DD_MRX_VBOX_FS_DEVICE_NAME_U`); `vboxmrxnp.cpp` maps `\Device\VBoxMiniRdr\;X:\vboxsvr\share` |
+| `\Device\hgfs` | VMware shared folders (also `\Device\hgfsInternal`) | ReactOS `hackssign/client.c` (`\Device\hgfs\;`); `\DEVICE\HGFS\VMWARE-HOST\SHARED FOLDERS\` in prefetch research |
+| `\Device\PrlMiniRdr` | Parallels shared folders | Microsoft's Electron UNC-host patch tests; `\;prlminirdr\;` paths in malware path datasets |
+| `\??\UNC\` | a `subst` onto a UNC path | the object manager's `\??\` namespace |
+
+`vmhgfs.sys` and `prl_fs.sys` are driver files, not device names. A redirector missing from the
+list still reports `DRIVE_REMOTE`, since MUP providers set `FILE_REMOTE_DEVICE`.
+
+`GetDriveTypeW` is never asked about a letter whose device is a redirector's or that has no
+device. For a `WinFsp` drive in disk mode (rclone, some cloud drives), it opens that drive's
+root. Such a drive counts as local. Its folders usually lack `FILE_PERSISTENT_ACLS`, so the gate
+refuses it with `NoPermissions`.
+
 ### Threat model: what stays open, by design
 
 - **FAT and exFAT drives** keep no ACLs, so every pool agent reads them. A matter on one is
@@ -354,6 +398,26 @@ may drop `Everyone` behind a proxy that runs as the desktop user.
 - **Another matter's allowed, read or runtime paths** beside a matter get no sibling deny, so
   every pool user reads them wherever `Users` can. Owner: S15 close-out, Rohan's read-gap
   decision.
+- **A drive letter with no DOS device counts as local** (measured). The walk reads drive letters
+  with `QueryDosDeviceW` and refuses a matter on a network drive.
+  - An Unavailable persistent mapping to a host that doesn't exist has no DOS device
+    (`QueryDosDeviceW` error 2). The walk counts it as local and missing and skips it, and the
+    launch goes on.
+  - A Disconnected mapping that has a device refuses with the `gitdir:` refusal.
+  - Neither case makes a network attempt. pktmon (twice) and ETW (SMB client, TCP/IP, DNS) showed
+    no 445, 139, 137 or 5355 traffic, no name lookup and no NTLM. The policy built in 53 ms.
+  - The pool user's logon session can't see the lawyer's mapping.
+  - A letter that appears mid-session is outside the launch check's scope.
+- **A VHD mounted from a share** is a known limit. It shows as a local `HarddiskVolume` with
+  `DRIVE_FIXED`, so a matter on it is walked and admitted. ACLs apply inside it, and the agent
+  can't point it at a server of its choosing. But every read and write of the VHD file reaches
+  the share, and that server's admin holds the file. A later check could read the bus type
+  (`BusTypeFileBackedVirtual` from `IOCTL_STORAGE_QUERY_PROPERTY`), then the backing file
+  (`GetStorageDependencyInformation`), and refuse a VHD whose file is on a UNC path. Owner: S15
+  close-out.
+- **Links inside `.git` and `include.path` in a repository's `config`** are not checked by the
+  launch walk: a `hooks` link to a writable folder, or an include of a file the agent can write.
+  Owner: the #788/#789 follow-ups.
 - **A neighbour on a network share** gets no fence: the restricted token fails network logon
   (measured over `\\localhost`). Accepted risk: a share name that aliases a local folder. Owner:
   PR7's VM rows (`s15_wfp_vm`: the (B) token against `\\localhost\C$` and a guest share).

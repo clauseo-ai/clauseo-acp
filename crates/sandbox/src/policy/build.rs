@@ -6,17 +6,23 @@ use std::fs;
 use std::io;
 use std::path::{Component, Path, PathBuf};
 
-use super::links::{canonical_findings, covered_targets, fit_budget, split_linked};
+use super::links::{
+    Writable, canonical_findings, check_git_dirs, covered_targets, fit_budget, split_linked,
+};
 use super::names::{Keys, path_key};
 use super::{
     ClaudeStore, Loopback, PROTECTED_AT_ANY_DEPTH, PROTECTED_NAMES, PathRule, Policy,
     PolicyBuilder, same, under,
 };
 use crate::Error;
+use crate::links::network::check_matter_local;
 use crate::links::{LinkFinding, scan_matter};
 
 /// The checks and the canonical policy.
 pub(super) fn build(b: PolicyBuilder) -> Result<Policy, Error> {
+    // Every path classified before any is resolved; the matter's network mounts once resolved.
+    let mounts = super::local::mounts(&b)?;
+    let split = super::local::check(&b, &mounts)?;
     let matter = root_folder(&b.matter, "matter")?;
     let state = root_folder(&b.state, "state folder")?;
     let home = b
@@ -24,9 +30,11 @@ pub(super) fn build(b: PolicyBuilder) -> Result<Policy, Error> {
         .as_deref()
         .map(|home| beneath_existing(home, "home folder"))
         .transpose()?;
-    let hidden = all_beneath(&b.hidden, "hidden path")?;
+    let mut hidden = all_beneath(&split.local, "hidden path")?;
+    hidden.extend(split.off);
     let home_ref = home.as_deref();
     check_matter(&matter, &state, home_ref, &hidden)?;
+    check_matter_local(&matter, &mounts)?;
     let tmpdir = tmp_folder(b.tmpdir.as_deref(), &matter, &state, home_ref, &hidden)?;
 
     let notes = b
@@ -37,20 +45,7 @@ pub(super) fn build(b: PolicyBuilder) -> Result<Policy, Error> {
     if let Some(notes) = &notes {
         check_notes(notes, &matter, &hidden)?;
     }
-    let credential_link = b
-        .credential_link
-        .as_deref()
-        .map(|p| folder_and_name(p, "credential link"))
-        .transpose()?;
-    if let Some(link) = &credential_link
-        && (!under(link, &state) || same(link, &state))
-    {
-        return refuse(format!(
-            "the credential link must be inside the state folder {}: {}",
-            state.display(),
-            link.display()
-        ));
-    }
+    let credential_link = credential_link(b.credential_link.as_deref(), &state)?;
     let claude_store = b
         .claude_store
         .as_deref()
@@ -83,6 +78,20 @@ pub(super) fn build(b: PolicyBuilder) -> Result<Policy, Error> {
     };
     scan.add_links(b.links);
     let parts = scan.into_parts();
+    // The places the agent can write first, for the git dirs' check; then the read-only ones
+    // (allowed folders are read-only in both jails).
+    let mut allowed: Vec<&Path> = vec![state.as_path()];
+    allowed.extend(tmpdir.as_deref());
+    allowed.extend(notes.as_deref());
+    let others = Writable {
+        socket: b.browser_socket_dir.as_deref(),
+        hidden: &hidden,
+        claude_store: claude_store.as_ref(),
+    };
+    check_git_dirs(&parts, &allowed, &others)?;
+    allowed.extend(allowed_folders.iter().map(PathBuf::as_path));
+    allowed.extend(runtime.iter().map(PathBuf::as_path));
+    allowed.extend(read.iter().map(PathBuf::as_path));
     let working_trees = working_trees(&parts.git);
     let mut read_only_in_matter: Vec<PathRule> = PROTECTED_NAMES
         .iter()
@@ -99,15 +108,9 @@ pub(super) fn build(b: PolicyBuilder) -> Result<Policy, Error> {
     let mut seen = HashSet::new();
     read_only_in_matter
         .retain(|rule| seen.insert((matches!(rule, PathRule::Literal(_)), path_key(rule.path()))));
-    let (mut links, found) = canonical_findings(parts.links, &matter)?;
+    let (mut links, found) = canonical_findings(parts.links, &matter, &mounts)?;
     let linked = split_linked(parts.linked, &matter, &read_only_in_matter);
     add_new(&mut links, &found, linked);
-    let mut allowed: Vec<&Path> = vec![state.as_path()];
-    allowed.extend(tmpdir.as_deref());
-    allowed.extend(runtime.iter().map(PathBuf::as_path));
-    allowed.extend(read.iter().map(PathBuf::as_path));
-    allowed.extend(allowed_folders.iter().map(PathBuf::as_path));
-    allowed.extend(notes.as_deref());
     let allowed_exactly = |p: &Path| {
         credential_link.as_deref().is_some_and(|link| same(p, link))
             || claude_store.as_ref().is_some_and(|store| store.covers(p))
@@ -141,6 +144,23 @@ pub(super) fn build(b: PolicyBuilder) -> Result<Policy, Error> {
         link_folders,
         read_only_in_matter,
     })
+}
+
+/// The credential link, by [`folder_and_name`], which must be inside the state folder.
+fn credential_link(p: Option<&Path>, state: &Path) -> Result<Option<PathBuf>, Error> {
+    let link = p
+        .map(|p| folder_and_name(p, "credential link"))
+        .transpose()?;
+    if let Some(link) = &link
+        && (!under(link, state) || same(link, state))
+    {
+        return refuse(format!(
+            "the credential link must be inside the state folder {}: {}",
+            state.display(),
+            link.display()
+        ));
+    }
+    Ok(link)
 }
 
 /// `extra` added to `links`, each unless a finding already there names its path: `found` holds

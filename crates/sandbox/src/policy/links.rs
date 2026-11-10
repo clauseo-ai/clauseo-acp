@@ -20,8 +20,70 @@ use std::path::{Path, PathBuf};
 
 use super::build::{beneath_existing, refuse};
 use super::names::{Keys, path_key};
-use super::{PathRule, instruction_file, same, under};
+use super::{ClaudeStore, PathRule, instruction_file, same, under};
+use crate::links::ScanParts;
+use crate::links::network::{Mounts, off_local};
 use crate::{Error, LinkFinding, LinkKind};
+
+/// The places the agent can write besides the state, temp and notes folders, for
+/// [`check_git_dirs`]: the browser socket folder, the hidden paths (they hold the other matters'
+/// folders, which the agent can create in on Windows; the rest are counted too, which can only
+/// refuse more), and the Claude store's lock folders, which the agent can create.
+pub(super) struct Writable<'a> {
+    pub(super) socket: Option<&'a Path>,
+    pub(super) hidden: &'a [PathBuf],
+    pub(super) claude_store: Option<&'a ClaudeStore>,
+}
+
+/// Refuses a scan with a `commondir` beside a `HEAD` that is a link (git follows it, the walk
+/// doesn't, so the folder it names would get no deny); with a `gitdir:` or `commondir` path on
+/// a network drive or one the launch can't check (it may be one the agent can write); or with
+/// one naming a
+/// folder outside the matter that is inside a place the agent can write (`writable` and
+/// `others`) or holds one (git reads `config`, `hooks/` and `info/` beneath it), where the
+/// agent could write what git reads and the plan has no read-only rule to stop it. A folder
+/// outside the matter that the agent can't write needs nothing: the jail denies it.
+pub(super) fn check_git_dirs(
+    parts: &ScanParts,
+    writable: &[&Path],
+    others: &Writable<'_>,
+) -> Result<(), Error> {
+    if let Some(link) = parts.commondir_links.first() {
+        return refuse(format!(
+            "a git folder's commondir may not be a link: {}",
+            link.display()
+        ));
+    }
+    if let Some(path) = parts.git_dirs_unknown.first() {
+        return refuse(format!(
+            "a git folder's commondir or gitdir: names a network drive or a drive the launch \
+             can't check: {}",
+            path.display()
+        ));
+    }
+    let locks = others
+        .claude_store
+        .map(ClaudeStore::lock_folders)
+        .unwrap_or_default();
+    let places: Vec<&Path> = writable
+        .iter()
+        .copied()
+        .chain(others.socket)
+        .chain(others.hidden.iter().map(PathBuf::as_path))
+        .chain(locks.iter().map(PathBuf::as_path))
+        .collect();
+    for dir in &parts.git_dirs_outside {
+        if let Some(place) = places.iter().find(|p| under(dir, p) || under(p, dir)) {
+            return refuse(format!(
+                "a git folder's commondir or gitdir: may not name a folder the agent can write \
+                 in or under: {} and {}",
+                dir.display(),
+                place.display()
+            ));
+        }
+    }
+    Ok(())
+}
 
 /// The most link rules (finding paths, folders and targets) one profile holds.
 pub const LINK_RULES_MAX: usize = 256;
@@ -32,9 +94,13 @@ pub const LINK_RULES_MAX: usize = 256;
 /// reached while that part is missing. Findings are kept once by [`path_key`] of path and
 /// target, and a path written in two forms keeps its first form (the walk's, which comes first),
 /// so the later sets compare plain bytes. Returns the findings and the keys of their paths.
+/// Each folder and target is classified by `mounts` before it is touched ([`off_local`]): a
+/// folder off the local disks refuses (it can't be in the matter), a target there stays as
+/// written.
 pub(super) fn canonical_findings(
     findings: Vec<LinkFinding>,
     matter: &Path,
+    mounts: &Mounts,
 ) -> Result<(Vec<LinkFinding>, HashSet<PathBuf>), Error> {
     // The walk's findings share folders; each folder is resolved once.
     let mut folders: BTreeMap<PathBuf, PathBuf> = BTreeMap::new();
@@ -59,6 +125,13 @@ pub(super) fn canonical_findings(
         let folder = if let Some(canonical) = folders.get(folder) {
             canonical.clone()
         } else {
+            if off_local(folder, mounts).is_some() {
+                return refuse(format!(
+                    "a link finding must be inside the matter {}: {}",
+                    matter.display(),
+                    path.display()
+                ));
+            }
             let canonical = dunce::canonicalize(folder).map_err(|error| {
                 Error::Policy(format!(
                     "a link finding's folder must exist: {}: {error}",
@@ -76,7 +149,14 @@ pub(super) fn canonical_findings(
                 canonical.display()
             ));
         }
-        let target = target.map(|t| beneath_existing(&t, "link target").unwrap_or(t));
+        // A target off the local disks stays as written: resolving it would connect to the server.
+        let target = target.map(|t| {
+            if off_local(&t, mounts).is_some() {
+                t
+            } else {
+                beneath_existing(&t, "link target").unwrap_or(t)
+            }
+        });
         let key = keys.of(&canonical);
         if seen.insert((key.clone(), target.as_deref().map(|t| keys.of(t)))) {
             let path = first_form.entry(key).or_insert(canonical).clone();

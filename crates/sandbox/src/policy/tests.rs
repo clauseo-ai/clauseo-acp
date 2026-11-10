@@ -2,8 +2,10 @@ use super::*;
 use crate::test_support::TempDir;
 
 mod allowed;
+mod git_dirs;
 mod links;
 mod nested;
+mod network;
 mod reallowed;
 mod tmpdir;
 mod unicode;
@@ -49,7 +51,7 @@ fn canon(p: &Path) -> PathBuf {
 
 /// The refusal's message, which must name `rule` and `path`.
 #[track_caller]
-fn refused(result: Result<Policy, Error>, rule: &str, path: &Path) {
+fn refused<T: std::fmt::Debug>(result: Result<T, Error>, rule: &str, path: &Path) {
     match result {
         Err(Error::Policy(message)) => {
             assert!(message.contains(rule), "{message:?} should name {rule:?}");

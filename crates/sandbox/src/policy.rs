@@ -8,6 +8,7 @@ use crate::{Access, Error, PathClass};
 
 mod build;
 mod links;
+mod local;
 mod names;
 mod store;
 
@@ -169,6 +170,9 @@ pub struct PolicyBuilder {
     over_cap: Vec<PathBuf>,
     links: Vec<LinkFinding>,
     scan: Option<MatterScan>,
+    /// The mount table `build` classifies paths by, in place of this machine's.
+    #[cfg(test)]
+    mounts: Option<crate::links::network::Mounts>,
 }
 
 impl Policy {
@@ -509,6 +513,13 @@ impl PolicyBuilder {
     /// Link findings to deny, added to the scan's.
     pub fn links(mut self, findings: impl IntoIterator<Item = LinkFinding>) -> PolicyBuilder {
         self.links.extend(findings);
+        self
+    }
+
+    /// Classify paths by `mounts` in place of this machine's mount table.
+    #[cfg(test)]
+    pub(crate) fn mounts(mut self, mounts: crate::links::network::Mounts) -> PolicyBuilder {
+        self.mounts = Some(mounts);
         self
     }
 
