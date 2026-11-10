@@ -118,6 +118,17 @@
   }
 }
 
+/* a wide window, from 1600 px, full screen among them (D-074): the wall takes more of the width, with as many columns of
+   tiles as it holds, and the reading column keeps its measure, centred in the work that's left (shell.css's --gutter) */
+@variant room-wide {
+  :root {
+    --pane-w: var(--pane-w-wide);
+  }
+  .facade {
+    grid-template-columns: repeat(auto-fill, minmax(var(--tile-min-w), 1fr));
+  }
+}
+
 @variant max-mid {
   .room-window {
     width: 100%;

@@ -240,6 +240,12 @@
   --rail-w: clamp(240px, 18vw, 264px); /* the rail */
   --pane-w: clamp(352px, 28vw, 416px); /* the wall */
   --pane-w-mid: 400px; /* the wall at 1000 to 1199 px */
+  --pane-w-wide: clamp(
+    416px,
+    34vw,
+    760px
+  ); /* the wall from 1600 px: four columns of tiles at 1600, five at 1920 */
+  --tile-min-w: 104px; /* the least tile on a wide wall, about a 3-column tile's width at 1280 */
   --thread-pad-mid: 36px; /* the work's sides at 1000 to 1199 px */
   --window-min-h: 600px; /* the least height the room lays out for; it scrolls below it */
   --lead-h: 52px; /* the toolbar's lead: the corner lights sit in its top 52 px */
