@@ -47,5 +47,13 @@
     "status": "approved",
     "at": "2026-11-02",
     "note": "Rohan, on the review page, 15:35"
+  },
+  "U6-08": {
+    "en": "Uses your {name} plan",
+    "hi": "आपके {name} प्लान का उपयोग करता है",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "design",
+    "note": "U6-06's words, approved; shown at a conversation's end (D-073)"
   }
 }

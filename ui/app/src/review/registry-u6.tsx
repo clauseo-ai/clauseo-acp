@@ -10,10 +10,10 @@ import { RetryFromHere } from "../room/retry-from-here.tsx";
 import { ThreadActionsContext, type ThreadActions } from "../room/thread/session.ts";
 import type { Entry } from "./entry.ts";
 import type { PaperSummary } from "../room/host-next.ts";
-import { MATTER, roomHost } from "./hosts.ts";
+import { MATTER, roomHost, threadHost } from "./hosts.ts";
 import { RoomOver } from "./states.tsx";
 import { matterWords, threadWords } from "./words.ts";
-import { uuid } from "../testing/stream-script.ts";
+import { agentText, step, userMessage, uuid } from "../testing/stream-script.ts";
 
 /** A retry that does nothing: the review shows the parts, the host isn't asked. */
 const ACTIONS: ThreadActions = {
@@ -60,6 +60,29 @@ const PAPERS: PaperSummary[] = ["Plaint.pdf", "Written statement.pdf", "Lease de
 
 /** The room on a matter with no conversation yet: a new one, before its first question. */
 const fresh = () => <RoomOver host={() => roomHost([MATTER], PAPERS)} />;
+/** A conversation on the ChatGPT plan whose last answer runs to the composer: where the answer ends and the plan's
+ * line starts (D-073; open it with &lite=1 for lite). */
+const LONG = [
+  "Clause nine needs thirty days' written notice to the bank, sent by registered post to its branch.",
+  "The notice must name the loan account, the date of default and the sum outstanding on that date.",
+  "Clause ten lets the bank cure within fifteen days of the notice; the lease runs on if it does.",
+  "Clause eleven keeps the deposit with the lessor until the bank's charge is released in writing.",
+  "Nothing in the lease lets the lessor end it without that notice, whatever the default.",
+].join("\n\n");
+const ended = () => (
+  <RoomOver
+    host={() =>
+      threadHost({
+        agent: "codex-acp",
+        entries: [
+          userMessage(5, 1, "What does the lease say about notice to the bank?"),
+          agentText(6, 1, LONG),
+          step(7),
+        ],
+      })
+    }
+  />
+);
 /** The same with one paper in the matter. */
 const freshOne = () => <RoomOver host={() => roomHost([MATTER], PAPERS.slice(0, 1))} />;
 
@@ -110,5 +133,11 @@ export const U6: Entry[] = [
     words: matterWords("A new conversation. It reads this matter's one paper."),
     screen: "matters/new-conversation",
     render: freshOne,
+  },
+  {
+    id: "U6-08",
+    words: threadWords("Uses your {name} plan"),
+    screen: "matters/thread-end",
+    render: ended,
   },
 ];
