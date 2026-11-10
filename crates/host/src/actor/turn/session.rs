@@ -27,7 +27,7 @@ use super::picks::{Pick, Picked};
 use super::{AgentReply, LogFor, Then, TurnInput, lost, state, updates};
 use crate::agent::{self, codex};
 use crate::error::Error;
-use crate::log_file::Cause;
+use crate::log_file::{Cause, LIFECYCLE};
 use crate::sent::SentView;
 
 mod named;
@@ -38,6 +38,7 @@ const CONTEXT_NOT_RESTORED: &str = "Clauseo doesn't remember the earlier questio
      in this conversation. Include what it needs from them in your next question.";
 
 pub(super) fn on_initialized(actor: &mut Actor, thread: ThreadId, info: AgentInfo) {
+    tracing::info!(target: LIFECYCLE, %thread, "agent initialized");
     let stored = actor
         .threads
         .get(&thread)
@@ -477,6 +478,7 @@ pub(super) fn attach(actor: &mut Actor, thread: ThreadId, start: SessionStart, l
     let Some(agent) = state(actor, thread).and_then(|state| state.agent.as_deref_mut()) else {
         return;
     };
+    tracing::info!(target: LIFECYCLE, %thread, loaded, "session attached");
     agent.session = Some(start.session);
     agent.stage = Stage::Attached;
     agent.preparing = false;

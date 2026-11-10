@@ -47,7 +47,11 @@ pub(crate) use cause::Cause;
 pub(crate) use writer::{FileSink, Sink, Writer};
 
 /// The target of the host's lifecycle lines, the only info lines the file keeps: the host's
-/// start and stop, an agent's launch and end (with its exit code), a matter's open and close.
+/// start and stop, an agent's launch and end (with its exit code), a matter's open and close,
+/// and a first turn's way to its first words, each stamped with its time: `launch prep started`,
+/// `launch prep done`, `agent launched` (spawned, `initialize` sent), `agent initialized`,
+/// `session attached` (`session/new` or `session/load` answered), `prompt sent`, `first update`
+/// and `first answer text`.
 pub const LIFECYCLE: &str = "clauseo_host::lifecycle";
 
 /// The current file's name in the log folder.

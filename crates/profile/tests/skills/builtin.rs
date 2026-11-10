@@ -233,7 +233,12 @@ fn a_codex_launch_writes_exactly_the_files_its_index_names() {
     let keys = profile.codex_keys(Some(AgentKind::Codex), &done[0]);
     assert_eq!(
         keys["developer_instructions"],
-        format!("{}\n\n{}", profile.instructions(), profile.skills_index()).as_str()
+        format!(
+            "{}\n\n{}",
+            profile.codex_instructions(),
+            profile.skills_index()
+        )
+        .as_str()
     );
     assert!(
         profile
@@ -248,7 +253,7 @@ fn a_codex_launch_writes_exactly_the_files_its_index_names() {
     let keys = profile.codex_keys(Some(AgentKind::Codex), &theirs);
     assert_eq!(
         keys["developer_instructions"],
-        profile.instructions().as_str()
+        profile.codex_instructions().as_str()
     );
     let mut written: Vec<std::path::PathBuf> = writes
         .iter()

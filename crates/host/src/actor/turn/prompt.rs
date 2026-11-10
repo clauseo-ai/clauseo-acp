@@ -9,6 +9,7 @@ use super::agents::Stage;
 use super::key_retry;
 use super::{AgentReply, BeforePrompt, End, TurnInput, TurnPhase, current, end, spawn, state};
 use crate::agent::{codex, leftovers};
+use crate::log_file::LIFECYCLE;
 use crate::undo_note::{self, NoteInput};
 
 /// Step 5: the prompt, with the undo note first.
@@ -80,6 +81,7 @@ pub(super) fn prompt(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
             if let Err(error) = checked {
                 return AgentReply::PromptRefused { turn, error };
             }
+            tracing::info!(target: LIFECYCLE, %thread, %turn, "prompt sent");
             let result = retry
                 .run(&client, || client.prompt(&session, turn, content.clone()))
                 .await;

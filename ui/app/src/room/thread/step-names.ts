@@ -179,6 +179,22 @@ export function placeOf(entry: ToolCallEntry): StepPlace {
   return place;
 }
 
+/** A segment of Clauseo's data folder that holds only the agents' own state: each matter's notes and its brief. */
+const AGENT_STATE = /(?:^|[/\\])agent-state[/\\]/;
+
+/** Whether a step touched only the agent's own notes (`<data>/agent-state/<matter>/notes`, the matter brief among them)
+ * by every place it names: its locations, its input's path, or its title's paths. Such a step is the agent's upkeep, never
+ * a paper, so the folded line neither counts it nor tells it as failed. A step that names no place is not internal. */
+export function internalOf(entry: ToolCallEntry): boolean {
+  const places: string[] = [];
+  for (const l of entry.locations)
+    if (typeof l === "object") places.push(l.inside?.path ?? l.outside?.display ?? "");
+  const raw = first(rawOf(entry), PATH_KEYS);
+  if (raw !== null) places.push(raw);
+  places.push(...(entry.title.match(ABSOLUTE) ?? []));
+  return places.length > 0 && places.every((p) => AGENT_STATE.test(p));
+}
+
 /** The agent's title as a sentence, its paths cut, where nothing else names the step; `plain` with no title. */
 export function titled(entry: ToolCallEntry, plain: string): string {
   const title = titleOf(entry.title);

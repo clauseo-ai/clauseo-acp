@@ -26,9 +26,9 @@ expression: tree_text(paths.claude_plugin())
     },
     "matter-brief": {
       "files": {
-        "SKILL.md": "1c6fba780db132baabe7595e253146cae62534ea9e404e26abf8127f214ba2f4"
+        "SKILL.md": "d0cc052dc3f33a200f7590e6e4fedd1af4b8fbec2d11c4cab3b3ac4c97e943a6"
       },
-      "version": "1"
+      "version": "2"
     }
   }
 }
@@ -280,7 +280,7 @@ Title style: "{codename or client}, {engagement}" ("Project Kestrel, acquisition
 ## The maintenance contract
 
 - The file is `matter-brief.md` in your matter notes folder. Every agent working on this matter shares it, in this conversation and in others. Use your own file tools to read and edit it.
-- Read it at the start of work. If it does not exist, create it from the skeleton once you know enough to fill the title and summary.
+- At the start of work, list your matter notes folder, and read the brief only if it is there: never try to read a brief that does not exist yet. If it does not exist, create it from the skeleton once you know enough to fill the title and summary.
 - At the end of any turn that produced a document, reached a conclusion or learned a material fact, bring it current, before the turn's last message.
 - Keep it under 12,000 characters. Record conclusions and state, never the conversation's story.
 - Date each entry under Positions taken and cite the document it came from ("More likely than not X, advice note on the non-compete, 8 June").

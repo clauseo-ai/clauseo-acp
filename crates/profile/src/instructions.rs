@@ -52,6 +52,20 @@ pub const BROWSER_NONE: &str = include_str!("../assets/instructions/browser-none
 /// one prefix rule so the lawyer approves it once.
 pub const BROWSER_CODEX: &str = include_str!("../assets/instructions/browser-codex.txt");
 
+/// The line a Codex session on macOS gets after the instructions (D-045): Codex runs an approved
+/// ("escalated") command under Seatbelt too, whose base policy blocks the mach-lookup of system
+/// services and Apple events (codex 0.162.1 `seatbelt_base_policy.sbpl`). Measured on a Mac:
+/// `mdls` is denied (`com.apple.metadata.mds`), `mdfind` finds nothing, `open -R` opens no
+/// window, `qlmanage` fails to start, and `osascript` runs but cannot drive another app, while
+/// `textutil` and `sips` work. Claude runs unsandboxed and never gets it ([`codex_shell`]).
+pub const CODEX_SHELL_MACOS: &str = include_str!("../assets/instructions/codex-shell-macos.txt");
+
+/// The line a Codex session gets after the instructions on macOS (`macos`), and none elsewhere:
+/// the commands it names are macOS's own.
+pub fn codex_shell(macos: bool) -> Option<&'static str> {
+    macos.then(|| CODEX_SHELL_MACOS.trim())
+}
+
 /// Which browser part a session gets in place of `{browser}`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BrowserPart {

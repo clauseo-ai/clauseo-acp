@@ -7,7 +7,7 @@ import { describe, expect, test } from "vitest";
 import { agentText, header, toolCall } from "../../testing/stream-script.ts";
 import type { EntryId, ToolCallEntry, ToolCallStatus, ToolKind } from "../../transport/protocol.ts";
 import type { StreamView } from "../../store/view.ts";
-import { doingOf, doingPick, placeOf, splitPath, titleOf } from "./step-names.ts";
+import { doingOf, doingPick, internalOf, placeOf, splitPath, titleOf } from "./step-names.ts";
 import {
   doneOf,
   doneSoFar,
@@ -426,5 +426,53 @@ describe("doingPick: the working line's words", () => {
       pick(view("running", [{ id: "tool_call:a", e: { tool_call: call("read") } }])),
     ).toBeNull();
     expect(pick(view("idle", [{ id: "tool_call:a", e: { tool_call: reading } }]))).toBeNull();
+  });
+});
+
+describe("the agent's own notes (D-044)", () => {
+  const brief = "/Users/x/Library/Application Support/Clauseo/agent-state/m1/notes/matter-brief.md";
+  const notes = "C:\\Users\\x\\AppData\\Roaming\\Clauseo\\agent-state\\m1\\notes\\matter-brief.md";
+  const outside = (display: string) =>
+    ({ locations: [{ outside: { display } }] }) as Partial<ToolCallEntry>;
+
+  test("a step that touches only the notes, by location, input or title, is internal; a paper's step is not", () => {
+    expect(internalOf(call("edit", "completed", outside(brief)))).toBe(true);
+    expect(internalOf(call("read", "failed", raw({ file_path: brief })))).toBe(true);
+    expect(internalOf(call("execute", "completed", { title: `Get-Content ${notes}` }))).toBe(true);
+    expect(
+      internalOf(call("read", "completed", raw({ file_path: "/Users/x/Matters/Lease.pdf" }))),
+    ).toBe(false);
+    expect(
+      internalOf(call("read", "completed", { title: `diff ${brief} /Users/x/Matters/Lease.pdf` })),
+    ).toBe(false);
+    expect(internalOf(call("search"))).toBe(false);
+  });
+
+  test("the folded line neither counts the brief as a paper changed nor its failed read as failed", () => {
+    const rows = [
+      call("read", "failed", raw({ file_path: brief })),
+      call("edit", "completed", outside(brief)),
+      call("read", "completed", raw({ file_path: "/Users/x/Matters/Lease.pdf" })),
+    ].map((c) => ({ tool_call: c }));
+    const line = lineOf("en", rows, false);
+    expect(line.line).toBe("1 paper read.");
+    expect(line.trouble).toBe("");
+    const running = { tool_call: call("search", "in_progress") };
+    const live = lineOf("en", [...rows, running], true);
+    expect(live.more).toBe(steps("en", "1 done so far."));
+    expect(live.trouble).toBe("");
+  });
+
+  test("a group of nothing but the notes says the work was planned, with no count and no break", () => {
+    const rows = [
+      call("read", "failed", raw({ file_path: brief })),
+      call("edit", "completed", outside(brief)),
+    ].map((c) => ({ tool_call: c }));
+    expect(lineOf("en", rows, false)).toEqual({
+      kinds: ["think"],
+      line: steps("en", "Planned the work."),
+      trouble: "",
+      more: "",
+    });
   });
 });
