@@ -12,6 +12,7 @@ use serde_json::{Value, json};
 
 use super::*;
 
+mod claude_089;
 mod codex;
 mod interface;
 mod mcp_wire;
@@ -314,8 +315,10 @@ fn error_codes_map() {
         ),
         (
             Error::Rpc {
+                method: String::new(),
                 code: -32603,
                 message: String::new(),
+                data: String::new(),
             },
             ErrorCode::AgentProtocolError,
         ),

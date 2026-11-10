@@ -23,13 +23,19 @@ pub enum Error {
         /// The ways it signs in, from `initialize`.
         methods: Vec<AuthMethod>,
     },
-    /// The agent answered with a JSON-RPC error.
-    #[error("the agent answered with error {code}: {message}")]
+    /// The agent answered with a JSON-RPC error, or its answer did not decode (the SDK's
+    /// `-32700`). The driver has logged it (`diagnose.rs`).
+    #[error("the agent answered {method} with error {code}: {message}")]
     Rpc {
+        /// The request's JSON-RPC method, such as `session/new`.
+        method: String,
         /// The JSON-RPC code.
         code: i32,
-        /// Its message.
+        /// Its message: the agent's text, never for the log file.
         message: String,
+        /// Its `data`'s shape, fit for the log file: `none`, a scalar's kind, or an object's
+        /// key names (never a value).
+        data: String,
     },
     /// The agent broke the protocol: a line over 8 MiB, or an answer the driver cannot use.
     #[error("the agent broke the protocol: {0}")]

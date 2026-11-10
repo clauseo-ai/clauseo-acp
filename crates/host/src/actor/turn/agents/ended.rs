@@ -102,6 +102,7 @@ pub(in super::super) fn on_ended(actor: &mut Actor, thread: ThreadId, ended: End
         after_stop,
         stop_cause,
         denied_data_folder,
+        start_failure,
         ..
     } = *agent;
     let unresponsive = matches!(
@@ -111,6 +112,20 @@ pub(in super::super) fn on_ended(actor: &mut Actor, thread: ThreadId, ended: End
             ..
         }
     );
+    // Before its session was ready, after a failed launch or on its own: its start's stderr.
+    if session.is_none() {
+        match &ended {
+            Ended::Exited(report) => {
+                super::start_failure::log_start_tail(thread, start_failure, report);
+            }
+            Ended::Stopped { report, .. }
+                if start_failure.is_some() || stop_cause == StopCause::Closed =>
+            {
+                super::start_failure::log_start_tail(thread, start_failure, report);
+            }
+            Ended::Stopped { .. } => {}
+        }
+    }
     let reason = match ended {
         Ended::Exited(reason) => reason,
         Ended::Stopped { step, report } => {

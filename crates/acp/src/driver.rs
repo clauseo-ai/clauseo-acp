@@ -469,13 +469,19 @@ fn send_with<Req, T, F>(
     F: Future<Output = Result<T, Error>> + Send + 'static,
 {
     let shared = Arc::clone(shared);
+    let method = request.method().to_owned();
     // An error means the connection is closed: the callback and `reply` are dropped, and the
     // caller sees `Error::Closed`.
     let sent = cx
         .prepare_request(request)
         .on_receiving_result(move |result| async move {
-            let result = result.map_err(|error| rpc_error(&shared, error));
-            answer(reply, on_answer(result).await);
+            let result = result.map_err(|error| rpc_error(&shared, &method, error));
+            let answered = result.is_ok();
+            let mapped = on_answer(result).await;
+            if answered && matches!(mapped, Err(Error::Protocol(_))) {
+                crate::diagnose::unmapped(&method);
+            }
+            answer(reply, mapped);
             Ok(())
         });
     match sent {
@@ -483,17 +489,22 @@ fn send_with<Req, T, F>(
     }
 }
 
-/// An error the agent answered with, or the SDK's for a connection that closed first.
-fn rpc_error(shared: &Shared, error: agent_client_protocol::Error) -> Error {
+/// An error the agent answered with to `method`, or the SDK's for a connection that closed
+/// first, or for an answer that did not decode. Each but the closed connection is logged
+/// (`diagnose::rpc_error`).
+fn rpc_error(shared: &Shared, method: &str, error: agent_client_protocol::Error) -> Error {
     if agent_client_protocol::is_incoming_transport_closed(&error) {
         return Error::Closed;
     }
+    crate::diagnose::rpc_error(method, &error);
     if error.code == acp::ErrorCode::AuthRequired {
         let methods = shared.state().auth_methods.clone();
         return Error::AuthRequired { methods };
     }
     Error::Rpc {
+        method: method.to_owned(),
         code: error.code.into(),
+        data: crate::diagnose::data_shape(error.data.as_ref()),
         message: error.message,
     }
 }

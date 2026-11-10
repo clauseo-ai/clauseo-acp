@@ -31,9 +31,11 @@ use crate::sent::SentView;
 
 mod ended;
 mod path;
+mod start_failure;
 
 use ended::{StopCause, stop_closed};
 pub(super) use ended::{hold_stop, idle_stop, log_detach, on_ended, stop};
+pub(super) use start_failure::launch_failed;
 
 /// Work that waits for the agent's session.
 #[derive(Debug)]
@@ -114,6 +116,9 @@ pub(super) struct Agent {
     /// Its permission requests the host rejected for touching Clauseo's data folder
     /// (`agent/data_fence.rs`), logged as a count on its `agent ended` line.
     pub(super) denied_data_folder: u32,
+    /// The code its launch failed with (`launch_failed`); its end then logs its start's stderr
+    /// summary.
+    pub(super) start_failure: Option<ErrorCode>,
     /// Its idle clock and config calls in flight (`idle.rs`).
     pub(super) idle: super::idle::Mark,
 }
@@ -247,6 +252,7 @@ pub(super) fn launch_now(
         forced_ask,
         plan_notes,
         denied_data_folder: 0,
+        start_failure: None,
         idle: super::idle::Mark::default(),
     };
     if let Some(state) = state(actor, thread) {
@@ -577,19 +583,5 @@ fn fail_waiting(actor: &mut Actor, thread: ThreadId, waiting: &Waiting, error: &
             let error = Error::refused(error.code(), error.to_string());
             actor.finish_command(ctx.id, Err(error));
         }
-    }
-}
-
-/// The launch failed after the agent started: stop it and fail what waits for it.
-pub(super) fn launch_failed(actor: &mut Actor, thread: ThreadId, error: &Error) {
-    let Some(agent) = state(actor, thread).and_then(|state| state.agent.as_deref_mut()) else {
-        return;
-    };
-    tracing::warn!(%thread, error = %Cause(error), "the agent did not start");
-    agent.link.stop();
-    agent.stage = Stage::Stopping;
-    let waiting = std::mem::take(&mut agent.waiting);
-    for item in waiting {
-        fail_waiting(actor, thread, &item, error);
     }
 }

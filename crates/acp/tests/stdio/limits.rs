@@ -136,8 +136,10 @@ fn codex_limit_error_without_session_failure() {
         assert_eq!(
             end,
             Err(Error::Rpc {
+                method: "session/prompt".to_owned(),
                 code: -32603,
                 message: "You've hit your usage limit · resets 3pm".to_owned(),
+                data: "none".to_owned(),
             })
         );
         // The chunk before the error, and no limit event: the error is not a session failure.

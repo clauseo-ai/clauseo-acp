@@ -55,7 +55,8 @@
 //!
 //! `protocol`, `agent-client-protocol` with the features its `Cargo.toml` line names (never
 //! `unstable_subagents`), `futures`, `async-channel`, `serde`, `serde_json`, `memchr`,
-//! `thiserror`. Never `tauri`, `tokio` or `process`: the host hands over the pipes.
+//! `thiserror`, `tracing` (WARN lines naming a method and an error's shape, `diagnose.rs`).
+//! Never `tauri`, `tokio` or `process`: the host hands over the pipes.
 //!
 //! # Start reading
 //!
@@ -74,6 +75,7 @@
 )]
 
 mod client;
+mod diagnose;
 mod driver;
 mod error;
 mod event;
