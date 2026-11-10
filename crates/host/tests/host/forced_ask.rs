@@ -260,6 +260,45 @@ fn claude_elsewhere_runs_as_before() {
     }
 }
 
+/// Outside forced ask, a plan exit as claude-agent-acp 0.89.1 sends it (`auto` always listed)
+/// loses both its `auto` options, and an answer naming one is refused; the manual option lands
+/// the session in `default`, which the host keeps.
+#[test]
+fn a_normal_plan_exit_never_offers_auto() {
+    let (_dir, host, _, thread) = claude_in("plan_exit_no_auto", "claude-plan-exit-auto", None);
+    let mut events = host.events(StreamId::Thread(thread));
+    let (turn, _) = host.prompt(thread, "Plan the change to clause 4.");
+    events.until("permission request 1", |e| {
+        !e.permission_requests().is_empty()
+    });
+    assert_eq!(
+        offered(&events),
+        ["exit-plan-default", "reject"],
+        "{}",
+        events.dump()
+    );
+    for option in ["exit-plan-auto", "exit-plan-clear-auto"] {
+        host.refused(
+            answer(thread, &events, option),
+            ErrorCode::PermissionUnknownOption,
+        );
+    }
+    assert_eq!(
+        host.ok(answer(thread, &events, "exit-plan-default")),
+        CommandOutcome::Done
+    );
+    let ended = events.until_turn_ended(turn);
+    events.assert_no_mismatch();
+    assert_eq!(ended.stop, StopReason::EndTurn, "{}", events.dump());
+    assert_eq!(
+        modes(&events),
+        ["acceptEdits", "default"],
+        "{}",
+        events.dump()
+    );
+    host.shutdown();
+}
+
 /// Forced ask with no guard hook to give (no guard program, as when `current_exe` failed): the
 /// launch is refused with `agent.guard_missing` rather than left to the ask rules alone, and no
 /// session call reaches the agent. The review's `rev_forced_ask_without_a_guard_still_fences`.

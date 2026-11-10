@@ -67,6 +67,29 @@ const SKIPPING_OPTIONS: [&str; 6] = [
     "exit-plan-clear-accept-edits",
 ];
 
+/// The plan exit's options that switch to `auto` or bypass: dropped from a Claude request
+/// outside forced ask too ([`keep_option_outside_forced_ask`]). `auto` lets Claude Code's
+/// classifier approve commands, network calls and writes outside the matter that
+/// `acceptEdits` would ask for. claude-agent-acp 0.89.1 always lists `auto`, so its plan exit
+/// offers "Yes, and use auto mode" in place of "Yes, auto-accept edits"; bypass is never listed
+/// (`allowDangerouslySkipPermissions: false`), kept here as a second check.
+const ELEVATED_OPTIONS: [&str; 4] = [
+    "exit-plan-auto",
+    "exit-plan-clear-auto",
+    "exit-plan-bypass",
+    "exit-plan-clear-bypass",
+];
+
+/// Whether a Claude session's permission request outside forced ask keeps `option`: any but
+/// [`ELEVATED_OPTIONS`], so the lawyer is never offered `auto` or bypass. The `allow_always`
+/// options stay: outside forced ask a lasting rule is the lawyer's to give.
+pub(crate) fn keep_option_outside_forced_ask(option: &PermissionOption) -> bool {
+    let id = option.option_id.as_str();
+    !ELEVATED_OPTIONS
+        .iter()
+        .any(|elevated| elevated.eq_ignore_ascii_case(id))
+}
+
 /// Whether a forced-ask session may be set to mode `id`: only [`ASK_MODES`], by exact id.
 pub(crate) fn mode_allowed(id: &str) -> bool {
     ASK_MODES.contains(&id)

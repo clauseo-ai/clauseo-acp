@@ -10,10 +10,10 @@ use std::path::PathBuf;
 use clauseo_acp::{AcpEvent, LimitSignal, LimitStatus, Origin, PendingKey};
 use clauseo_matters::HeldOpen;
 use clauseo_protocol::{
-    AgentChoiceId, AgentSessionId, CompactString, Deliverable, ElicitationId, ElicitationRequest,
-    ElicitationRequested, ElicitationResponse, LimitStopReason, MatterPath, PermissionAbout,
-    PermissionChoice, PermissionKind, PermissionOption, PermissionRequestId, PermissionRequested,
-    PermissionResolved, Principal, StreamId, ThreadId, TurnId,
+    AgentChoiceId, AgentKind, AgentSessionId, CompactString, Deliverable, ElicitationId,
+    ElicitationRequest, ElicitationRequested, ElicitationResponse, LimitStopReason, MatterPath,
+    PermissionAbout, PermissionChoice, PermissionKind, PermissionOption, PermissionRequestId,
+    PermissionRequested, PermissionResolved, Principal, StreamId, ThreadId, TurnId,
 };
 
 use super::super::input::MatterTag;
@@ -50,7 +50,9 @@ pub(super) struct HeldOpenCheck {
 /// checks the paths against Clauseo's data folder (`agent/data_fence.rs`), then resolves them
 /// into the matter folder and checks whether a program holds one open ([`on_held_open`]);
 /// otherwise, or when the check cannot be sent, it is logged `Live` for the lawyer at once. In
-/// forced ask it first loses the options `agent::forced_ask::keep_option` drops. A Claude request
+/// forced ask it first loses the options `agent::forced_ask::keep_option` drops; any other
+/// Claude request loses the plan exit's `auto` and bypass options
+/// (`agent::forced_ask::keep_option_outside_forced_ask`). A Claude request
 /// naming only its own plan note is marked `about: agent_plan` (`agent/plan_note.rs`), a label that
 /// changes nothing else.
 pub(super) fn on_permission(actor: &mut Actor, thread: ThreadId, event: AcpEvent) {
@@ -67,8 +69,16 @@ pub(super) fn on_permission(actor: &mut Actor, thread: ThreadId, event: AcpEvent
     };
     // Forced ask (`agent/forced_ask.rs`): no option that would stop later asks is offered, so
     // an answer naming one is refused as one the agent did not offer.
+    // Any other Claude session (`actor/turn/forced_mode.rs`): no plan-exit option into `auto`
+    // or bypass, which approve what `acceptEdits` would ask for.
+    let claude = actor
+        .threads
+        .get(&thread)
+        .is_some_and(|entry| AgentKind::of(&entry.row.agent) == Some(AgentKind::Claude));
     if agent(actor, thread).is_some_and(|agent| agent.forced_ask) {
         options.retain(crate::agent::forced_ask::keep_option);
+    } else if claude {
+        options.retain(crate::agent::forced_ask::keep_option_outside_forced_ask);
     }
     // Read from the paths the request itself names, before any fallback to the tool call's.
     let plans = agent(actor, thread).and_then(|agent| agent.plan_notes.clone());
