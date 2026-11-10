@@ -15,6 +15,7 @@ mod limit_stop;
 mod limit_timer;
 mod made;
 mod offline;
+mod offline_network;
 mod order;
 mod queue;
 mod relocate;

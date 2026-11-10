@@ -68,6 +68,8 @@ fn every_command_and_read_the_windows_send_today_is_admitted() {
         json!({"set_config_option": {"thread": thread, "option_id": "model",
             "value": {"select": "opus"}}}),
         json!({"update_matter": {"matter": matter, "agent_prefs": {"claude": {"effort": "high"}}}}),
+        // The window's network signal (D-050).
+        json!({"set_network": {"online": false}}),
     ];
     for body in commands {
         let admitted = bridge.admit(MAIN, &command(body.clone()));

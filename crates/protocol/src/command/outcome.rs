@@ -11,8 +11,8 @@ use crate::{HostCommand, RestoreRequest};
 /// `SetPrivacySettings`, `FirstAct`, `UpdateMatter`, `OpenMatter`, `ForgetMatter`, `RefreshLimits`,
 /// `MarkSeen`, `ScanFolder`, `CancelScan`, `SnoozeThread`, `MarkThreadDone`, `SweepDone`,
 /// `InstallBrowser`, `CancelBrowserInstall`, `RecheckBrowserPolicy`, the four update commands, the
-/// connector commands and the two allowed-site commands answer `Done`; the last two kinds store no
-/// receipt, as the three browser commands do not.
+/// connector commands, the two allowed-site commands and `SetNetwork` answer `Done`; the last three
+/// kinds store no receipt, as the three browser commands do not.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 #[cfg_attr(feature = "specta", derive(specta::Type))]

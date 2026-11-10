@@ -156,6 +156,7 @@ golden! { HostCommand::name_of {
         ids: vec![2, 3],
         decision: RevisionDecision::Reject,
     });
+    SetNetwork => set_network: HostCommand::SetNetwork { online: false };
     // Each `ConnectorCommand` has its own golden in `snapshots/connectors.rs`.
     Connector => connector: HostCommand::Connector(super::connectors::add_credits());
 } }
