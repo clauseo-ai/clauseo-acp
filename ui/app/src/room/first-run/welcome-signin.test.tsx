@@ -73,16 +73,36 @@ test("installed by the firm and signed out: the same Sign in", async () => {
   expect(byId("signin-foot-sign-in")).not.toBeNull();
 });
 
-test("a sign-in that stopped: Sign in again on the foot", async () => {
+test("a sign-in that stopped (not a cancel): Claude is ready with Sign in on the foot", async () => {
   await mountFirstRun({
     matters: [],
     first: [
       install(CLAUDE, READY),
-      signIn(CLAUDE, { failed: { code: "signin.cancelled", at: 0 } }),
+      signIn(CLAUDE, { failed: { code: "signin.link_expired", at: 0 } }),
     ],
   });
   expect(line()?.dataset["state"]).toBe("failed");
   expect(byId("signin-foot-sign-in")?.textContent).toBe("Sign in to Claude");
+});
+
+test("D-007: a cancelled sign-in says so with Sign in again, never Claude is ready", async () => {
+  const t = await mountFirstRun({
+    matters: [],
+    first: [install(CLAUDE, READY), signIn(CLAUDE, { signed_out: {} })],
+  });
+  await press(byId("signin-foot-sign-in"));
+  await play(t, signIn(CLAUDE, { waiting: { since: 0, nudge: false } }));
+  await press(byId("signin-foot-cancel"));
+  // the browser's Cancel, as desktop says it
+  await play(t, signIn(CLAUDE, { failed: { code: "signin.cancelled", at: 0 } }));
+  expect(line()?.dataset["state"]).toBe("cancelled");
+  const row = byId("install-foot")?.closest("[data-testid=plan-row]")?.textContent ?? text();
+  expect(row).toContain("Sign-in was cancelled.");
+  expect(row).not.toContain("is ready");
+  expect(byId("install-said")?.textContent).toContain("Sign-in was cancelled.");
+  expect(byId("signin-foot-sign-in")?.textContent).toBe("Sign in again");
+  await press(byId("signin-foot-sign-in"));
+  expect(setups(t).at(-1)).toEqual({ start_sign_in: { agent: CLAUDE } });
 });
 
 test("signed in, with a plan, a key or the firm's account: no Sign in on the foot", async () => {
