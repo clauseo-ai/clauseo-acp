@@ -39,6 +39,7 @@ export {
   IconToolSwitchMode,
   IconToolThink,
 } from "./tool-kinds.tsx";
+export { IconArrowDown, IconArrowUp } from "./arrows.tsx";
 export { IconBrowser, IconDownload } from "./web-tools.tsx";
 
 /** A fold (source: chevron) */
@@ -144,26 +145,6 @@ export function IconBackToAnswer(props: IconProps) {
  * Turn to it already draws, so it reuses it) */
 export function IconArrowRight(props: IconProps) {
   return <IconTurnToIt {...props} />;
-}
-
-/** Wake now, on the Snoozed shelf: back up into the list (cut for Send, not used for it yet) (source: arrowUp) */
-export function IconArrowUp(props: IconProps) {
-  return (
-    <Icon {...props}>
-      <path d="M10 16V6" vectorEffect="non-scaling-stroke" />
-      <path d="M5.5 9.5L10 5l4.5 4.5" vectorEffect="non-scaling-stroke" />
-    </Icon>
-  );
-}
-
-/** Latest, over the composer: down to the thread's end (source: arrowUp, turned) */
-export function IconArrowDown(props: IconProps) {
-  return (
-    <Icon {...props}>
-      <path d="M10 4v10" vectorEffect="non-scaling-stroke" />
-      <path d="M5.5 10.5L10 15l4.5-4.5" vectorEffect="non-scaling-stroke" />
-    </Icon>
-  );
 }
 
 /** Send, the paper plane, not used in the room yet (source: send) */
