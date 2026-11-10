@@ -97,13 +97,14 @@ test("a .doc and a .docx tile open in Word, a .pdf and a .txt tile with the defa
   expect(opened()).toEqual([uuid(1, 8), uuid(2, 8), uuid(3, 8), uuid(4, 8)]);
 });
 
-test("a long name loses letters from its middle on one line, keeping its extension, and stays whole in its text", async () => {
+test("a file's name stands whole in its two clamped lines where nothing needs cutting, read once", async () => {
   h = await withPapers();
   const title = faceOf("Exhibit.pdf")?.querySelector(".tile-title");
   expect(title?.classList.contains("tile-name")).toBe(true);
-  expect(title?.querySelector(".tile-name-head")?.textContent).toBe("Exh");
-  expect(title?.querySelector(".tile-name-tail")?.textContent).toBe("ibit.pdf");
-  expect(faceOf("bundle.zip")?.querySelector(".tile-name-tail")?.textContent).toBe("ndle.zip");
+  expect(title?.querySelector(".tile-name-text")?.textContent).toBe("Exhibit.pdf");
+  expect(title?.querySelector(".tile-name-text")?.getAttribute("aria-hidden")).toBeNull();
+  // the whole name for assistive technology only while the eye's words are cut
+  expect(title?.querySelector(".sr-only")?.textContent).toBe("");
 });
 
 test("every tile carries its file type's glyph by extension, at 24 px, and the Word tiles still open in Word", async () => {
