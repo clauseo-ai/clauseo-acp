@@ -35,7 +35,6 @@ import { UD2_PLANS } from "./registry-ud2-plans.tsx";
 import { UC_ALL } from "./registry-uc-word.tsx";
 import { SAC } from "./registry-sac.tsx";
 import { NM } from "./registry-nm.tsx";
-import { PAPERS_LIVE } from "./registry-papers-live.tsx";
 import {
   MATTER,
   NEW_MATTER,
@@ -80,6 +79,7 @@ const atLocal = (days: number, h: number, m: number) => {
  * "Clauseo, 4:32 pm" once its step is in. */
 const ASKED = atLocal(0, 16, 31);
 const ENDED = atLocal(0, 16, 32);
+
 const asked = userMessage(5, 1, "What does clause nine of the lease say about notice?");
 const QUESTION: ViewEntry = { user_message: { ...asked.user_message!, ts: ASKED } };
 const ANSWER = agentText(
@@ -400,7 +400,6 @@ export const REGISTRY: readonly Entry[] = [
   ...UD2_PLANS,
   ...UC_ALL,
   ...SAC,
-  ...PAPERS_LIVE,
   {
     id: "U2-01",
     words: frameWords("Add a matter's folder."),
