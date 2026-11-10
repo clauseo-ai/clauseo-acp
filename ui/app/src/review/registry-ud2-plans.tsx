@@ -164,7 +164,8 @@ export const UD2_PLANS: Entry[] = [
   entry("UD2-47", "Remove key", KEY),
   entry("UD2-48", "Remove the API key?", KEY_REMOVE),
   entry("UD2-49", "Questions wait until you sign in or add a key again.", KEY_REMOVE),
-  entry("UD2-50", "Sign in again", SIGNED_OUT),
+  // "again" only after a real sign-in (D-066): Claude signed out from here
+  entry("UD2-50", "Sign in again", SIGNED_OUT_HERE),
   entry("UD2-51", "Your firm's address", ENDPOINT),
   entry(
     "UD2-52",

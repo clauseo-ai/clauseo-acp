@@ -112,9 +112,9 @@ test("reused login: the through line, no Sign out, and Stop using it here, which
   expect(t.setups().some((c) => "sign_out" in c)).toBe(false);
 });
 
-test("signed out: Sign in again sends start_sign_in, and Look for my Claude Code sign-in sends find_login, each for its own plan", async () => {
+test("signed out, never signed in here: Sign in sends start_sign_in, and Look for my Claude Code sign-in sends find_login, each for its own plan", async () => {
   const t = await at({ signed_out: {} });
-  await press(button("Sign in again", block("claude")!));
+  await press(button("Sign in", block("claude")!));
   await press(block("chatgpt")!.querySelector('[data-testid="plans-find-login"]'));
   expect(words("chatgpt")).toContain("Look for my Codex sign-in");
   await press(block("claude")!.querySelector('[data-testid="plans-find-login"]'));
@@ -372,7 +372,7 @@ test.each([
       },
     },
   );
-  await press(button("Sign in again", block("claude")!));
+  await press(button("Sign in", block("claude")!));
   expect(block("claude")!.querySelector('[data-testid="plans-refused"]')?.textContent).toBe(
     errorWords("en", code),
   );
