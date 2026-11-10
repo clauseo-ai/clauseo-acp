@@ -86,7 +86,8 @@
 //!   other change is the hidden attribute of `.clauseo` on Windows. Undo and
 //!   restore check every target and lock before writing any, and never write or delete a file
 //!   whose name the folder holds only spelled otherwise (another case or normalisation). A
-//!   restore never deletes. One exception to names matching byte for byte: a folder on the way
+//!   restore never deletes, but for the files an earlier restore it undoes added
+//!   (`Restore::undoes`). One exception to names matching byte for byte: a folder on the way
 //!   that the folder spells otherwise (`sub/` for the history's `Sub/c.txt`) is written into
 //!   as the file system finds it, so the next checkpoint records `sub/c.txt`; no file is
 //!   replaced.

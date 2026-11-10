@@ -151,6 +151,11 @@ until `StepUndone` is durable; a failed undo commit is retried once, as a turn's
   nothing to write logs only the outside edits (and the reused id, if the log lacks it) and
   answers `VersionRestored` with the reused id, as `UndoStep` does: the missing
   `VersionRestored` event, not the outcome, tells the client nothing was written.
+- `RestoreVersion { undoes }` takes back an earlier restore: the files that restore added (in
+  its tree, not the checkpoint before it) are deleted too, each only while it holds what the
+  restore wrote; `PreviewRestore { undoes }` lists them in `removes`. `RestoreVersion { thread }`
+  names the conversation it was asked from (one of the matter's, else `command.invalid`): the
+  same commit logs `VersionRestored` in that thread's stream, where it folds to the same marker.
 - The files a restore wrote join the note of every thread of the matter once its commit is
   durable. `VersionRestored` does not list them, so this part of the note is held in memory and
   lost if the host restarts before that thread's next prompt (clauseo-acp-private#183 makes it
