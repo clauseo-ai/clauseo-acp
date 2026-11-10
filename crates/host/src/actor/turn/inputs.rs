@@ -40,6 +40,12 @@ pub(crate) enum TurnInput {
     },
     /// A check for papers an undo removed that came back is due (`came_back.rs`).
     CameBack(super::came_back::Check),
+    /// The host's probe of the agent's service for `thread`'s `turn` answered (`offline.rs`).
+    OfflineProbe {
+        thread: ThreadId,
+        turn: TurnId,
+        reached: bool,
+    },
 }
 
 /// An agent call's result.

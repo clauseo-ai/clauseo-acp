@@ -381,6 +381,11 @@ pub(crate) fn turn_input(actor: &mut Actor, input: TurnInput) {
         }
         TurnInput::RunRemoved { key, freed } => launch_checks::on_run_removed(actor, key, freed),
         TurnInput::CameBack(check) => came_back::on_due(actor, check),
+        TurnInput::OfflineProbe {
+            thread,
+            turn,
+            reached,
+        } => offline::on_probed(actor, thread, turn, reached),
         TurnInput::Log {
             thread,
             why,

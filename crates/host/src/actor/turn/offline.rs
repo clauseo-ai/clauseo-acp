@@ -18,32 +18,38 @@
 //! ([`classify::transport_note`]), or for every running turn while the window says offline.
 //! Codex's note is surely its own and is dropped; Claude's line is only suspected (a model could
 //! write the same words), so it is held in the watch and put back in order if the agent goes on
-//! or the turn ends any other way, and dropped only when the turn ends offline. Any agent event of the
-//! turn but usage, commands, config options, mode and title clears the watch: the agent got
-//! through. Unless it is cleared within [`OFFLINE_WAIT`], and no permission or elicitation waits
-//! on the lawyer, the turn is cancelled through the Cancel path with `agent.offline` as its
-//! failure, so the answer so far is kept. A prompt that fails with a connection-class error, or
+//! or the turn ends any other way, and dropped only when the turn ends offline. Any agent event
+//! of the turn but usage, commands, config options, mode and title clears the watch: the agent
+//! got through. Unless it is cleared within [`OFFLINE_WAIT`], the turn is cancelled through the
+//! Cancel path with `agent.offline` as its failure, so the answer so far is kept. A turn that is
+//! quiet but at work (a tool call not finished, a permission or elicitation waiting on the
+//! lawyer) waits again instead, and a watch only the window armed ends only once the host's
+//! own probe (`probe.rs`) cannot reach the agent's service either; a probe that gets through
+//! makes it wait again. A prompt that fails with a connection-class error, or
 //! while the watch stands, ends `agent.offline` too, unless its error says a server answered or
 //! asks for a sign-in. The log gets fixed fields only, never the agent's text (decision 0047).
 
 use std::time::Duration;
 
 use clauseo_acp::{AgentUpdate, MessageRole};
-use clauseo_protocol::{AgentSessionId, CommandOutcome, ContentBlock, ErrorCode, ThreadId, TurnId};
+use clauseo_protocol::{
+    AgentSessionId, CommandOutcome, ContentBlock, ErrorCode, StreamId, ThreadId, TurnId,
+};
 
 use super::super::Actor;
 use super::super::commands::CommandCtx;
 use super::{TimerKind, TurnTimer, cancel, current, sign_in, updates};
 
 pub(super) mod classify;
+pub(crate) mod probe;
 
 /// How long a turn waits after the agent said its connection failed, or the window said the
 /// computer went offline, for any sign the agent got through, before it ends offline.
 pub(super) const OFFLINE_WAIT: Duration = Duration::from_secs(30);
 
 /// The failure's detail when the window's report armed the watch.
-const NETWORK_DETAIL: &str = "the window said the computer is offline and the agent sent \
-                              nothing for 30 s";
+const NETWORK_DETAIL: &str = "the window said the computer is offline, the agent sent \
+                              nothing for 30 s and the host's probe did not get through";
 
 /// The watch on the live turn.
 #[derive(Debug)]
@@ -55,6 +61,21 @@ pub(super) struct Watch {
     note: Option<String>,
     /// Claude's suspected lines, held back in order, with their sessions.
     held: Vec<(AgentSessionId, AgentUpdate)>,
+    /// The host's probe runs for it (a watch the window armed, whose wait ran out).
+    probing: bool,
+}
+
+#[cfg(test)]
+impl Watch {
+    /// When it was armed, or armed again.
+    pub(super) const fn since(&self) -> Duration {
+        self.since
+    }
+
+    /// Whether the host's probe runs for it.
+    pub(super) const fn probing(&self) -> bool {
+        self.probing
+    }
 }
 
 /// A live update of `turn`: `None` when it is held back or dropped as the agent's note about
@@ -100,6 +121,7 @@ pub(super) fn on_live(
             since: now,
             note: None,
             held: Vec::new(),
+            probing: false,
         });
         watch.since = now;
         watch.note = Some(text);
@@ -206,14 +228,17 @@ fn network_watch(actor: &mut Actor, thread: ThreadId) {
         since: now,
         note: None,
         held: Vec::new(),
+        probing: false,
     });
     let turn = current.turn;
     arm_timer(actor, thread, turn);
 }
 
-/// The watch's wait ran out: unless the agent sent anything since (or a later note armed it
-/// again), or a permission or elicitation waits on the lawyer, the turn is cancelled through
-/// the Cancel path and ends `Failed { agent.offline }`.
+/// The watch's wait ran out, and the agent sent nothing since (nor did a later note arm it
+/// again). A turn waiting on the lawyer (a permission, an elicitation) or running a tool call is
+/// quiet, not cut off: it waits again. A watch only the window armed asks the host's probe
+/// first ([`on_probed`]). Else the turn is cancelled through the Cancel path and ends
+/// `Failed { agent.offline }`.
 pub(super) fn on_timer(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
     let now = actor.now().mono;
     let asking = updates::agent(actor, thread).is_some_and(|agent| {
@@ -221,18 +246,59 @@ pub(super) fn on_timer(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
             && agent.elicitations.is_empty()
             && agent.url_elicitations.is_empty())
     });
-    let Some(current) = current(actor, thread)
-        .filter(|current| current.turn == turn && current.live() && current.failure.is_none())
+    let working = actor
+        .loaded(StreamId::Thread(thread))
+        .is_some_and(|loaded| loaded.sent.unfinished_tools(turn).next().is_some());
+    let Some(watch) = live_watch(actor, thread, turn)
+        .filter(|watch| now.saturating_sub(watch.since) >= OFFLINE_WAIT)
     else {
         return;
     };
-    let due = current
-        .offline
-        .as_ref()
-        .is_some_and(|watch| now.saturating_sub(watch.since) >= OFFLINE_WAIT);
-    if !due || asking {
+    if asking || working {
+        tracing::info!(%thread, asking, working, "the agent is quiet but at work; waiting again");
+        watch.since = now;
+        arm_timer(actor, thread, turn);
+    } else if watch.note.is_some() {
+        end_offline(actor, thread);
+    } else if !watch.probing {
+        watch.probing = true;
+        probe::start(actor, thread, turn);
+    }
+}
+
+/// The host's probe for `thread`'s `turn` answered: `reached` the agent's service (or its
+/// proxy), so the window is wrong and the watch waits again; else the turn ends offline. A
+/// watch that went, or that an agent's note armed since, ignores it.
+pub(super) fn on_probed(actor: &mut Actor, thread: ThreadId, turn: TurnId, reached: bool) {
+    let now = actor.now().mono;
+    let Some(watch) = live_watch(actor, thread, turn).filter(|watch| watch.probing) else {
+        return;
+    };
+    watch.probing = false;
+    if watch.note.is_some() {
         return;
     }
+    tracing::info!(%thread, reached, "the host's probe of the agent's service");
+    if reached {
+        watch.since = now;
+        arm_timer(actor, thread, turn);
+    } else {
+        end_offline(actor, thread);
+    }
+}
+
+/// The watch of `thread`'s `turn`, while it is live and has no failure.
+fn live_watch(actor: &mut Actor, thread: ThreadId, turn: TurnId) -> Option<&mut Watch> {
+    current(actor, thread)
+        .filter(|current| current.turn == turn && current.live() && current.failure.is_none())
+        .and_then(|current| current.offline.as_mut())
+}
+
+/// Cancels `thread`'s live turn with `agent.offline` as its failure; its watch goes.
+fn end_offline(actor: &mut Actor, thread: ThreadId) {
+    let Some(current) = current(actor, thread) else {
+        return;
+    };
     let note = current.offline.take().and_then(|watch| watch.note);
     let by = if note.is_some() {
         "agent_note"
