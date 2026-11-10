@@ -1,8 +1,10 @@
 // The agent's model or effort, chosen from the status line: a menu that opens upward from the value's own words. Its
 // own chunk, since only a status line that offers the agent's settings needs it. A real menu: Enter, Space or the
-// arrows open it, the arrows move through the values, a typed letter jumps, Enter picks and closes, Escape closes with
-// focus back on the trigger. The values' names and descriptions are the agent's own.
+// arrows open it on the value ticked now (the first with none ticked), the arrows move through the values, a typed
+// letter jumps, Enter picks and closes, Escape closes with focus back on the trigger. The values' names and
+// descriptions are the agent's own.
 import { Menu as BaseMenu } from "@base-ui/react/menu";
+import { useRef } from "react";
 import { IconMore, IconTick } from "../icons/icons.tsx";
 import { cn } from "../lib/cn.ts";
 import { useLayer } from "../ui/layer-context.ts";
@@ -15,8 +17,23 @@ import type { ConfigMenu } from "./status-line.tsx";
 export function ConfigMenuTrigger({ menu }: { menu: ConfigMenu }) {
   const layer = useLayer();
   const name = menu.options.find((o) => o.value === menu.value)?.name ?? menu.value;
+  // opened by keys, the menu highlights its first value; the ticked one takes the focus in its place, so Enter keeps
+  // the value as it is and the arrows move from it. A pointer's open highlights nothing, and nothing moves.
+  const byKeys = useRef(false);
   return (
-    <BaseMenu.Root>
+    <BaseMenu.Root
+      onOpenChange={(open, details) => {
+        byKeys.current = open && fromKeys(details.event);
+      }}
+      onItemHighlighted={(item) => {
+        if (!byKeys.current || item === undefined) return;
+        byKeys.current = false;
+        const ticked = [...(item.parentElement?.children ?? [])].find(
+          (row) => row.getAttribute("aria-checked") === "true",
+        );
+        if (ticked instanceof HTMLElement && ticked !== item) ticked.focus({ preventScroll: true });
+      }}
+    >
       <BaseMenu.Trigger
         className="room-plan room-pick"
         aria-label={`${menu.label}: ${name}`}
@@ -81,4 +98,11 @@ export function ConfigMenuTrigger({ menu }: { menu: ConfigMenu }) {
       </BaseMenu.Portal>
     </BaseMenu.Root>
   );
+}
+
+/** Whether a menu opened by keys: a key, or a button's click with no press behind it (Enter or Space on it). */
+function fromKeys(event: Event | undefined): boolean {
+  if (event === undefined) return false;
+  if (event.type.startsWith("key")) return true;
+  return event.type === "click" && (event as MouseEvent).detail === 0;
 }
