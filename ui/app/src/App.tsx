@@ -4,6 +4,7 @@ import type { Batch } from "./store/batch.ts";
 import { StoreContext } from "./store/hooks.ts";
 import { createViewStore, type ViewStore } from "./store/store.ts";
 import type { HostTransport } from "./transport/host-transport.ts";
+import { useNetworkSignal } from "./transport/network.ts";
 import type { WindowControls } from "./transport/window-controls.ts";
 
 /** The whole app: the room (src/room/) over the transport, with one view store for the page. `batch` says when the
@@ -28,6 +29,8 @@ export function App({
     onStore?.(made);
     return made;
   });
+  // the webview's network signal to the host (set_network), once for the page
+  useNetworkSignal(transport);
   // `cargo xtask buildtime web` times hot reload by adding an attribute to this element's opening
   // tag, ROOT_TAG in scripts/buildtime-lib.mjs. When this element changes, change ROOT_TAG with it.
   return (

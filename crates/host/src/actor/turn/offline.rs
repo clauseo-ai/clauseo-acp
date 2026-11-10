@@ -12,9 +12,10 @@
 //! - Claude: Claude Code retries on its own too, then sends its API error line as answer text
 //!   ("API Error: Unable to connect to API (ECONNREFUSED)") and the prompt fails with
 //!   "Internal error: <that line>".
+//! - The window: `SetNetwork { online: false }` when the webview's `offline` event fires.
 //!
-//! So a watch arms on the live turn on an agent note that names a connection failure
-//! ([`classify::transport_note`]).
+//! So a watch arms on the live turn: on an agent note that names a connection failure
+//! ([`classify::transport_note`]), or for every running turn while the window says offline.
 //! Codex's note is surely its own and is dropped; Claude's line is only suspected (a model could
 //! write the same words), so it is held in the watch and put back in order if the agent goes on
 //! or the prompt ends well, and dropped only when the turn ends offline. Any agent event of the
@@ -28,23 +29,29 @@
 use std::time::Duration;
 
 use clauseo_acp::{AgentUpdate, MessageRole};
-use clauseo_protocol::{AgentSessionId, ContentBlock, ErrorCode, ThreadId, TurnId};
+use clauseo_protocol::{AgentSessionId, CommandOutcome, ContentBlock, ErrorCode, ThreadId, TurnId};
 
 use super::super::Actor;
+use super::super::commands::CommandCtx;
 use super::{TimerKind, TurnTimer, cancel, current, sign_in, updates};
 
 pub(super) mod classify;
 
-/// How long a turn waits after the agent said its connection failed, for any sign the agent got
-/// through, before it ends offline.
+/// How long a turn waits after the agent said its connection failed, or the window said the
+/// computer went offline, for any sign the agent got through, before it ends offline.
 pub(super) const OFFLINE_WAIT: Duration = Duration::from_secs(30);
+
+/// The failure's detail when the window's report armed the watch.
+const NETWORK_DETAIL: &str = "the window said the computer is offline and the agent sent \
+                              nothing for 30 s";
 
 /// The watch on the live turn.
 #[derive(Debug)]
 pub(super) struct Watch {
     /// When it was armed, on the host's monotonic clock.
     since: Duration,
-    /// The agent's note that armed it, for the failure's detail (the event log, never shown).
+    /// The agent's note that armed it, for the failure's detail (the event log, never shown);
+    /// `None` when the window's report armed it.
     note: Option<String>,
     /// Claude's suspected lines, held back in order, with their sessions.
     held: Vec<(AgentSessionId, AgentUpdate)>,
@@ -146,6 +153,58 @@ fn arm_timer(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
     let _handle = actor.arm_timer(OFFLINE_WAIT, timer);
 }
 
+/// `SetNetwork`: the window says whether the computer is online. Offline arms the watch on
+/// every running turn (a turn that starts later gets it from [`turn_started`]); online takes
+/// back each watch it armed, never one an agent's note armed. Answers `Done`, no receipt.
+pub(crate) fn set_network(actor: &mut Actor, ctx: &CommandCtx, online: bool) {
+    if actor.turn_path.offline == online {
+        tracing::info!(online, "the window's network signal");
+    }
+    actor.turn_path.offline = !online;
+    let threads: Vec<ThreadId> = actor.threads.keys().copied().collect();
+    for thread in threads {
+        if online {
+            let Some(current) = current(actor, thread) else {
+                continue;
+            };
+            if current
+                .offline
+                .as_ref()
+                .is_some_and(|watch| watch.note.is_none())
+            {
+                current.offline = None;
+            }
+        } else {
+            network_watch(actor, thread);
+        }
+    }
+    actor.finish_command(ctx.id, Ok(CommandOutcome::Done));
+}
+
+/// `thread`'s turn went live (its prompt is out): while the window says offline, it is watched.
+pub(super) fn turn_started(actor: &mut Actor, thread: ThreadId) {
+    if actor.turn_path.offline {
+        network_watch(actor, thread);
+    }
+}
+
+/// Arms the window's watch on `thread`'s live turn, unless one stands already.
+fn network_watch(actor: &mut Actor, thread: ThreadId) {
+    let now = actor.now().mono;
+    let Some(current) = current(actor, thread)
+        .filter(|current| current.live() && current.failure.is_none() && current.offline.is_none())
+    else {
+        return;
+    };
+    current.offline = Some(Watch {
+        since: now,
+        note: None,
+        held: Vec::new(),
+    });
+    let turn = current.turn;
+    arm_timer(actor, thread, turn);
+}
+
 /// The watch's wait ran out: unless the agent sent anything since (or a later note armed it
 /// again), or a permission or elicitation waits on the lawyer, the turn is cancelled through
 /// the Cancel path and ends `Failed { agent.offline }`.
@@ -169,8 +228,14 @@ pub(super) fn on_timer(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
         return;
     }
     let note = current.offline.take().and_then(|watch| watch.note);
-    tracing::warn!(%thread, "the agent went quiet while offline; ending the turn");
-    current.failure = Some((ErrorCode::AgentOffline, note));
+    let by = if note.is_some() {
+        "agent_note"
+    } else {
+        "window"
+    };
+    tracing::warn!(%thread, by, "the agent went quiet while offline; ending the turn");
+    let detail = note.unwrap_or_else(|| NETWORK_DETAIL.to_owned());
+    current.failure = Some((ErrorCode::AgentOffline, Some(detail)));
     cancel::cancel_running(actor, thread, None);
 }
 

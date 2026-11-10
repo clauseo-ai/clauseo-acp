@@ -73,6 +73,7 @@ pub(crate) use idle::{on_due as idle_due, relay_call as idle_relay_call, tick as
 pub(crate) use inputs::{AgentReply, LogFor, TurnInput};
 pub(crate) use launch_checks::HeldRuns;
 pub use launch_checks::PackRequest;
+pub(crate) use offline::set_network;
 pub(crate) use out::flush_text;
 pub(crate) use queue::{any_active, any_running, cancel_all, queue_hold, release, sync_all_held};
 pub(crate) use restore::{
@@ -204,7 +205,8 @@ struct Current {
     end: Option<End>,
     /// The turn failed on the host's side; it ends `Failed` with this `TurnFailed`.
     failure: Option<(ErrorCode, Option<String>)>,
-    /// The agent said its connection failed and has sent nothing since (`offline.rs`).
+    /// The agent said its connection failed, or the window said offline, and the agent has sent
+    /// nothing since (`offline.rs`).
     offline: Option<offline::Watch>,
     /// The failure asks to stop the prompt once the commit being built is sent.
     abort: bool,

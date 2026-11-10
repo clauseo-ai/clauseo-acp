@@ -21,6 +21,8 @@
 //! `AllowBlockedSite` from a block's notice and `RevokeAllowedSite`, and the settings window
 //! only `RevokeAllowedSite` (its list of allowed sites): no other window, and so nothing an
 //! agent shows or runs, may lift a block.
+//! The network signal `SetNetwork` (D-050) is `main`'s alone: its webview hears `online` and
+//! `offline`.
 
 use clauseo_protocol::{
     ConfigValue, ConnectorCommand, FolderRefId, HostCommand, HostError, MatterSource,
@@ -139,7 +141,10 @@ fn admit_main(bridge: &Bridge, command: &HostCommand) -> Result<(), HostError> {
         | HostCommand::SetConfigOption {
             value: ConfigValue::Select(_),
             ..
-        } => Ok(()),
+        }
+        // D-050: the window's `online`/`offline` events, a flag; it only arms or takes back
+        // the host's offline watch on running turns.
+        | HostCommand::SetNetwork { .. } => Ok(()),
         HostCommand::AnswerPermission { .. } => Err(invalid(
             "a permission is answered with answer_permission, not dispatch",
         )),
