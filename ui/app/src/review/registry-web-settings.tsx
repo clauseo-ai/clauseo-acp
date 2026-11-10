@@ -127,6 +127,13 @@ export const WEB_SETTINGS: Entry[] = [
   entry("UEP-22", settingsWords("About websites"), {
     tip: "About websites",
   }),
+  // D-064: under the group's rows, what Clauseo fetches by itself when it starts
+  entry(
+    "UEP-27",
+    settingsWords(
+      "When it starts, Clauseo asks Claude or ChatGPT how much of your plan is left. No papers or questions go with it.",
+    ),
+  ),
   // D-052: the anonymous counts' switch, in the first run's words (UD1-06, UD1-08), on
   entry("UEP-25", firstLaunchWords("Send anonymous counts"), { tools: ON, privacy: COUNTS }),
   entry(

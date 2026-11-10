@@ -187,5 +187,16 @@
     "at": "2026-11-10",
     "by": "app track (provisional; words pending orchestrator 2026-11-10)",
     "note": "D-052: the counts switch's line in Settings, Privacy; UD1-08's approved words and Hindi, reused"
+  },
+  "UEP-27": {
+    "en": "When it starts, Clauseo asks Claude or ChatGPT how much of your plan is left. No papers or questions go with it.",
+    "hi": "शुरू होने पर Clauseo, Claude या ChatGPT से पूछता है कि आपके प्लान में कितना बाकी है। इसके साथ कोई दस्तावेज़ या प्रश्न नहीं जाते।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-10",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-10",
+    "by": "app track (provisional; words pending orchestrator 2026-11-10)",
+    "note": "D-064: under What leaves this computer, what Clauseo fetches by itself at start; the orchestrator's English"
   }
 }

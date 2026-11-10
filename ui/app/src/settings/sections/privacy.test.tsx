@@ -138,6 +138,8 @@ test("Privacy shows on the side, its pane headed, with no lead that repeats its 
 
 const WHAT = "Questions, the papers' parts they need, web searches.";
 const BRAVE = "Anthropic lists Brave Search as its web search subprocessor.";
+const STARTS =
+  "When it starts, Clauseo asks Claude or ChatGPT how much of your plan is left. No papers or questions go with it.";
 const VISIT = "Websites see Clauseo's visits, as they see any browser's.";
 const tipButton = (el: HTMLElement, label: string) =>
   el.querySelector<HTMLElement>(`button[aria-label="${label}"]`);
@@ -430,4 +432,24 @@ test("the other window's change to the counts reaches the switch live", async ()
     transport.settingsChanged({ ui: UI, locked: [], privacy: { ...PRIVACY_ON, counts: false } }),
   );
   expect(switchNamed(el, COUNTS)?.getAttribute("aria-checked")).toBe("false");
+});
+
+test("under What leaves this computer's rows, one line says what Clauseo fetches by itself when it starts", async () => {
+  for (const state of [{}, { tools: { web_search: false, browser: false } }]) {
+    const { el } = await mount(state);
+    const foot = el.querySelector('[data-testid="group-foot"]');
+    expect(foot?.textContent).toBe(STARTS);
+    expect(foot?.closest("section")?.querySelector("h3")?.textContent).toBe(
+      "What leaves this computer",
+    );
+    // after the plate of rows, not among them
+    expect(foot?.previousElementSibling?.classList.contains("set-plate")).toBe(true);
+    expect((pane(el).textContent ?? "").split(STARTS).length - 1).toBe(1);
+    await act(async () => root?.unmount());
+    host?.remove();
+    store?.dispose();
+    root = null;
+    host = null;
+    store = null;
+  }
 });
