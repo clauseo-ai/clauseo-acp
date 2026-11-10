@@ -96,15 +96,13 @@ impl DesktopProfile {
             .and_then(|program| load_stetdoc_skill(program, &paths.claude_skills()));
         let prepend = skill.is_some() && found.as_deref().is_some_and(alone_in_its_folder);
         let browser_tool = install_browser(&paths, path);
-        // The browser's skill only when a Chrome is there at start: without one, no session
-        // gets the browser (the host says so per session) and the skill would name a command
-        // no agent has on its `PATH`.
-        let chrome = browser_tool.is_some()
-            && clauseo_host::browser::chrome::find(
-                &clauseo_host::browser::chrome::ChromeRoots::system(locations.data_dir()),
-            )
-            .is_some();
-        let (profile, refused) = ClauseoProfile::new(paths, None).with_tool_skills(skill, chrome);
+        // The browser's skill comes with the copy alone. Whether a session has a browser (its
+        // Chrome found, `tools.browser` on, the firm's policy allowing it) is decided at each
+        // launch and told in `{browser}`, so a Chrome installed later counts from the next
+        // conversation, with no restart.
+        let with_browser = browser_tool.is_some();
+        let (profile, refused) =
+            ClauseoProfile::new(paths, None).with_tool_skills(skill, with_browser);
         for err in refused {
             tracing::warn!(%err, "a skill is left out of the profile");
         }

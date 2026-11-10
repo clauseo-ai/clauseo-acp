@@ -312,8 +312,9 @@ fn every_index_path_is_where_the_write_puts_the_file() {
     }
 }
 
-/// The browser's skill goes into Claude's plugin and Codex's index only with the browser, as
-/// `name` and `description` alone; a later start without the browser removes it.
+/// The browser's skill goes into Claude's plugin and Codex's index only with the
+/// `agent-browser` copy, as `name` and `description` alone, its description saying it is for a
+/// session that has a browser; a later start without the copy removes it.
 #[test]
 fn the_browser_skill_comes_and_goes_with_the_browser() {
     use clauseo_profile::skills::builtin::AGENT_BROWSER;
@@ -328,6 +329,10 @@ fn the_browser_skill_comes_and_goes_with_the_browser() {
     let front = text.split("\n---\n").next().unwrap();
     assert!(front.starts_with("---\nname: agent-browser\ndescription: "));
     assert_eq!(front.lines().count(), 3, "{front}");
+    assert!(
+        front.contains("When this session has a browser, use it for web pages"),
+        "{front}"
+    );
     assert!(text.contains("Apache License 2.0. Modified by Clauseo"));
     assert!(with.skills_index().contains("agent-browser"));
     assert!(

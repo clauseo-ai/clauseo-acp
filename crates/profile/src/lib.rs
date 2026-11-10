@@ -78,8 +78,9 @@ pub struct ClauseoProfile {
     author: String,
     instructions: Instructions,
     skills: Arc<Rendered>,
-    /// Whether the app put the `agent-browser` command on the agents' `PATH` and found a Chrome
-    /// ([`Self::with_tool_skills`]): the browser's skill. Claude's rules for it are the host's.
+    /// Whether the app copied the `agent-browser` command for the agents
+    /// ([`Self::with_tool_skills`]): the browser's skill. Whether a session has the browser, and
+    /// Claude's rules for it, are the host's, per session.
     browser: bool,
 }
 

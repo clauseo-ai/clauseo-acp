@@ -506,12 +506,12 @@ fn the_host_config_gets_the_browser_folder_only_with_its_copy() {
 }
 
 /// A debug build with no bundled sidecar copies the first `agent-browser` on `PATH` into
-/// `<data>/tools` and wires that folder; the browser's skill comes only with a Chrome on this
-/// machine. With no program anywhere there is no browser and no skill.
+/// `<data>/tools` and wires that folder, and the browser's skill comes with that copy whether
+/// or not this machine has a Chrome (each session's `{browser}` says whether it has one). With no
+/// program anywhere there is no browser and no skill.
 #[cfg(all(unix, not(target_os = "macos"), debug_assertions))]
 #[test]
 fn build_copies_agent_browser_from_path_in_a_debug_build() {
-    use clauseo_host::browser::chrome::{ChromeRoots, find};
     let scratch = Scratch::new("profile-build-browser", &["data", "bin"]);
     scratch.file(
         "bin/agent-browser",
@@ -527,16 +527,19 @@ fn build_copies_agent_browser_from_path_in_a_debug_build() {
         std::fs::read(tools.join("agent-browser")).unwrap(),
         std::fs::read(folder.join("agent-browser")).unwrap()
     );
-    let chrome = find(&ChromeRoots::system(locations.data_dir())).is_some();
     let token = write_skills(&hook.launch_writes(&agent(CLAUDE))[0]).unwrap();
-    assert_eq!(
+    assert!(
         token
             .root()
             .join("agent-browser")
             .join("SKILL.md")
-            .is_file(),
-        chrome
+            .is_file()
     );
+    // Codex's index names it too.
+    let token = write_skills(&hook.launch_writes(&agent(CODEX))[0]).unwrap();
+    let keys = hook.codex_config(&agent(CODEX), Some(&token), None);
+    let skill = token.root().join("agent-browser").join("SKILL.md");
+    assert!(developer_instructions(&keys).contains(skill.to_str().unwrap()));
 
     let empty = scratch.dir("data");
     let none = DesktopProfile::build_with(&locations, None, Some(empty.as_os_str())).unwrap();
