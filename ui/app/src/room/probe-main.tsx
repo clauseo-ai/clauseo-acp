@@ -23,7 +23,8 @@
 // ?thread=hindi, the thread is a question asked in Hindi and a recorded Hindi answer (testing/hindi-answer.ts), finished,
 // for screenshots of Devanagari tables, ₹ and bold in the room. With ?thread=shaping, the thread is a question and a
 // fixed answer (testing/shaping-answer.ts), finished: the cells in every block type, for the Devanagari shaping audit's
-// 1a and 1d. Not shipped.
+// 1a and 1d. With ?plan=codex, claude, one, many, close, stale or none, the agent is signed in with its plan and the plan's limits are on
+// the channel (limits/probe-plan.ts), for the toolbar's plan and its card. Not shipped.
 import { whenWordsReady } from "@clauseo/components/lib/display.ts";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
@@ -58,6 +59,7 @@ import { installDevHooks, queryPatch } from "./dev-hooks.ts";
 import { askEntry, ONE_QUESTION, TWO_QUESTIONS } from "./elicitation-fixtures.ts";
 import { detailed, fakeNext, railStates } from "./fake-next.ts";
 import type { MatterInfo, PaperSummary } from "./host-next.ts";
+import { planProbe } from "./limits/probe-plan.ts";
 import { probeThreads } from "./probe-threads.ts";
 import { connectRoom } from "./start.ts";
 import { versionsHost, versionsPageOf } from "./versions/probe-states.tsx";
@@ -231,6 +233,9 @@ const NATIVE_LIGHTS = {
   isMaximised: async () => false,
 };
 
+/** ?plan=codex, claude, one, many, close, stale or none: the agent signed in with its plan, its limits on the channel (probe-plan.ts). */
+const planning = planProbe(page.get("plan"));
+
 const transport = new FakeTransport({
   // ?platform=windows or linux draws that computer's frame; the Mac's without
   platform:
@@ -239,6 +244,7 @@ const transport = new FakeTransport({
       : page.get("platform") === "linux"
         ? "linux"
         : "mac",
+  ...(planning === null ? {} : { setup: planning.setup, openSettings: () => {} }),
   // on the pages whose undo meets a lock, every undo_step is refused with matter.file_locked
   dispatch: (envelope): CommandOutcome => {
     if (staged?.refusesUndo === true && envelope.command.undo_step !== undefined) throw LOCKED;
@@ -275,6 +281,7 @@ const transport = new FakeTransport({
     matters: () => matters,
     papers,
     location: "Documents/Clauseo",
+    ...(planning === null ? {} : { agents: planning.agents }),
     // ?thread=ask lists its thread as ?thread=permission does: waiting on the lawyer, so the room opens it
     threads: () =>
       probeThreads(
@@ -284,6 +291,7 @@ const transport = new FakeTransport({
   }),
 });
 
+if (planning !== null) transport.limitsChanged(planning.limits);
 if (holding) transport.answerPermission = () => new Promise<void>(() => {});
 
 declare global {
