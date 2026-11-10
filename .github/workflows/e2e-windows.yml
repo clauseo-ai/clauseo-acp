@@ -168,8 +168,12 @@ jobs:
           git diff --no-renames -z --name-only refs/ci/base...refs/ci/head > "$RUNNER_TEMP/changed"
           bash "$scripts/changes.sh" < "$RUNNER_TEMP/changed" | tee -a "$GITHUB_OUTPUT"
 
-      # The same test as windows-pr-tests.yml's `decide` job. A failed read of the reviews counts
-      # as ready, so an approved pull request still gets its smoke test.
+      # The same test as windows-pr-tests.yml's `decide` job, plus main's own review verdict: since
+      # 2026-11-09 approvals survive pushes, so an approved pull request is ready whatever commit
+      # the approval is on (reviewDecision). Before, a rebase after the approval left a wait-mode
+      # failure that GitHub counts against the required check, even beside a passing run (#874).
+      # A failed read of the reviews counts as ready, so an approved pull request still gets its
+      # smoke test.
       - name: Decide whether the pull request is ready for the smoke test
         id: ready
         env:
@@ -186,13 +190,15 @@ jobs:
           if [ "$EVENT" != pull_request ] && [ "$EVENT" != pull_request_review ]; then ready true; fi
           if [ "$LABELLED" = true ]; then ready true; fi
           if [ "$EVENT" = pull_request_review ] && [ "$REVIEW_STATE" = approved ]; then ready true; fi
+          if decision=$(gh pr view "$PR" --repo "$REPO" --json reviewDecision -q .reviewDecision) \
+              && [ "$decision" = APPROVED ]; then ready true; fi
           if ! approved=$(gh api "repos/$REPO/pulls/$PR/reviews" --paginate \
               -q '.[] | select(.state == "APPROVED") | .commit_id'); then
             echo "::warning::The reviews API failed; counting the pull request as ready"
             ready true
           fi
           if grep -qxF "$HEAD_SHA" <<< "$approved"; then ready true; fi
-          echo "No label ready and no approval of the head commit $HEAD_SHA: smoke waits for one."
+          echo "No label ready and no approval of the pull request: smoke waits for one."
           ready false
 
       # The note on modes. A failed read of this commit's earlier result decides without it.
