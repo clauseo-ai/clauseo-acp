@@ -2,8 +2,9 @@
 // window can do about it. Signed in: UD1's signed-in line, with "Sign out" (an own plan login) or "Stop using it here"
 // (a reused one), each asking first; with a key or the firm's account, the line alone, since the host bars a sign-in
 // then. Signed out: "Sign in again" and "Look for my … sign-in", or UD1's line for a login found but not reusable.
-// Signing in: UD1's gate, inline. A plan not added yet, either one: "Add Claude" or "Add ChatGPT", the same card for
-// each, which installs it and then starts its sign-in. Once its install runs: the install line.
+// Signing in: UD1's gate, inline. A plan not added yet, either one: "Add Claude" or "Add ChatGPT", which installs it
+// and then starts its sign-in. Once its install runs: the install line. Every plan not in use yet (not added, waiting
+// for its download, signed out, a sign-in that stopped) is the one card, plans-card.tsx, the same for both plans.
 // Under it, the other ways in (a key; for Claude the firm's address). A plan the firm's policy locks shows its line
 // and "Managed by firm", and no control.
 import { useEffect, useState, type ReactNode } from "react";
@@ -22,13 +23,13 @@ import { errorWords } from "@clauseo/components/lib/words-errors.ts";
 import { fl } from "@clauseo/components/lib/words-first-launch.ts";
 import { st, type SettingsKey } from "@clauseo/components/lib/words-settings.ts";
 import { say } from "@clauseo/components/lib/words-ui.ts";
-import { Button } from "@clauseo/components/ui/button.tsx";
 import { clockOf, localZone } from "../../room/when.ts";
 import { aboutMb, gateView, installView, refusalView } from "../../room/first-run/views.ts";
 import { CODEX, isReady, type AgentSetup, type SetupStore } from "../../store/setup.ts";
 import type { HostTransport } from "../../transport/host-transport.ts";
 import type { AgentId, FoundLogin, SignIn } from "../../transport/protocol.ts";
 import { Managed } from "./parts.tsx";
+import { MainAct, OtherAct, PlanCard, Stopped } from "./plans-card.tsx";
 import { PlansEndpoint } from "./plans-endpoint.tsx";
 import { PlansKey } from "./plans-key.tsx";
 import { Confirm, Refused } from "./plans-parts.tsx";
@@ -43,12 +44,17 @@ const PRICES: Record<Plan, string> = {
   chatgpt: "https://chatgpt.com/pricing",
 };
 
+/** The sign-in codes Plans says in its own card (plans-card.tsx's Stopped) rather than UD1's gate. */
+const STOPPED = new Set(["signin.cancelled", "signin.link_expired", "signin.no_plan"]);
+const isStopped = (code: string) => STOPPED.has(code);
+
 type SignedIn = NonNullable<Extract<SignIn, { signed_in: unknown }>["signed_in"]>;
 
 /** Where the block stands. */
 type Stand =
   | { kind: "none" }
-  | { kind: "add"; mb: number }
+  /** Not here yet; `paused` when it waits for the other plan's download. */
+  | { kind: "add"; mb: number; paused?: true }
   | { kind: "install" }
   | { kind: "signed"; signed: SignedIn }
   | { kind: "signed-out"; found: PlansFound | undefined }
@@ -62,6 +68,11 @@ function standOf(setup: AgentSetup | undefined, adding: boolean): Stand {
   if (install !== undefined && install !== "managed" && !isReady(install)) {
     if (!adding && typeof install === "object" && install.missing !== undefined)
       return { kind: "add", mb: aboutMb(setup?.mb ?? 0) };
+    // waiting for the other plan's download: the same card, whose press queues the sign-in; once queued, the gate
+    if (!adding && install === "paused")
+      return setup?.signIn === "queued"
+        ? { kind: "gate" }
+        : { kind: "add", mb: aboutMb(setup?.mb ?? 0), paused: true };
     if (installView(setup) !== null) return { kind: "install" };
   }
   const signIn = setup?.signIn;
@@ -99,6 +110,7 @@ export function PlanBlock({
   transport,
   locked,
   endpoint,
+  otherReady,
   onOther,
   blockRef,
 }: {
@@ -110,6 +122,8 @@ export function PlanBlock({
   transport: HostTransport;
   locked: boolean;
   endpoint: string | undefined;
+  /** The other plan can be used here (installed or signed in, not held by the firm): only then "Use … instead". */
+  otherReady: boolean;
   onOther: () => void;
   blockRef: (el: HTMLElement | null) => void;
 }) {
@@ -232,39 +246,34 @@ export function PlanBlock({
         break;
       case "add":
         body = (
-          <>
-            {line(s(plan === "claude" ? "Uses your Claude plan." : "Uses your ChatGPT plan."))}
-            {/* the card's quiet line under Add: the download's size, about, then what to expect; with no
-                size known, what to expect alone */}
-            <p className="set-plan-fine">
-              {say(
-                stand.mb > 0
-                  ? s("Needs a download of about {mb} MB. Signing in happens in your browser.", {
-                      mb: stand.mb,
-                    })
-                  : s("Signing in happens in your browser."),
-              )}
-            </p>
-            <div className="set-plan-acts">
-              <Button
-                kind="tone"
-                size="small"
-                data-testid="plans-add"
-                onClick={() => {
-                  // the install starts with no confirm (the block named the size); a refused send leaves the block as it was
-                  addsOf(store).add(agent);
-                  setAdding(true);
-                  void store.send({ install_agent: { agent } }).then((ok) => {
-                    if (ok) return;
-                    addsOf(store).delete(agent);
-                    setAdding(false);
-                  });
-                }}
-              >
-                {say(s(plan === "claude" ? "Add Claude" : "Add ChatGPT"))}
-              </Button>
-            </div>
-          </>
+          <PlanCard
+            plan={plan}
+            // the download's size, about, then what to expect; with no size known, what to expect alone
+            note={
+              stand.mb > 0
+                ? s("Needs a download of about {mb} MB. Signing in happens in your browser.", {
+                    mb: stand.mb,
+                  })
+                : s("Signing in happens in your browser.")
+            }
+          >
+            <MainAct
+              label={s(plan === "claude" ? "Add Claude" : "Add ChatGPT")}
+              testId="plans-add"
+              onClick={() => {
+                // waiting for the other download: the sign-in queues, and desktop downloads this plan next
+                if (stand.paused === true) return signIn();
+                // the install starts with no confirm (the card named the size); a refused send leaves it as it was
+                addsOf(store).add(agent);
+                setAdding(true);
+                void store.send({ install_agent: { agent } }).then((ok) => {
+                  if (ok) return;
+                  addsOf(store).delete(agent);
+                  setAdding(false);
+                });
+              }}
+            />
+          </PlanCard>
         );
         break;
       case "install": {
@@ -334,55 +343,43 @@ export function PlanBlock({
         const { found } = stand;
         const known = found !== undefined && found !== "none_found" && found !== "reuse_off";
         body = known ? (
-          <>
-            {line(fl(lang, FOUND[found as Found], { app }))}
-            <div className="set-plan-acts">
-              <Button kind="tone" size="small" onClick={signIn}>
-                {say(fl(lang, "Sign in"))}
-              </Button>
-              {found === "reused_failed" && (
-                <Button
-                  kind="quiet"
-                  size="small"
-                  onClick={() => command({ use_different_account: { agent } })}
-                >
-                  {say(fl(lang, "Sign in with a different account"))}
-                </Button>
-              )}
-            </div>
-          </>
+          <PlanCard plan={plan} note={fl(lang, FOUND[found as Found], { app })}>
+            <MainAct label={fl(lang, "Sign in")} onClick={signIn} testId="plans-sign-in" />
+            {found === "reused_failed" && (
+              <OtherAct
+                label={fl(lang, "Sign in with a different account")}
+                onClick={() => command({ use_different_account: { agent } })}
+              />
+            )}
+          </PlanCard>
         ) : (
-          <>
-            {signedOutHere && found === undefined && line(s("Signed out of {name}.", { name }))}
-            {found === "none_found" && line(s("No {app} sign-in on this computer.", { app }))}
-            {found === "reuse_off" && line(s("Clauseo isn't using {app}'s sign-in here.", { app }))}
-            <div className="set-plan-acts">
-              <Button kind="tone" size="small" onClick={signIn}>
-                {say(s("Sign in again"))}
-              </Button>
-              <Button
-                kind="quiet"
-                size="small"
-                data-testid="plans-find-login"
-                onClick={() => command({ find_login: { agent } })}
-              >
-                {say(s("Look for my {app} sign-in", { app }))}
-              </Button>
-            </div>
-          </>
+          <PlanCard
+            plan={plan}
+            note={
+              found === "none_found"
+                ? s("No {app} sign-in on this computer.", { app })
+                : found === "reuse_off"
+                  ? s("Clauseo isn't using {app}'s sign-in here.", { app })
+                  : signedOutHere
+                    ? s("Signed out of {name}.", { name })
+                    : undefined
+            }
+          >
+            <MainAct label={s("Sign in again")} onClick={signIn} testId="plans-sign-in" />
+            <OtherAct
+              label={s("Look for my {app} sign-in", { app })}
+              onClick={() => command({ find_login: { agent } })}
+              testId="plans-find-login"
+            />
+          </PlanCard>
         );
         break;
       }
       case "failed":
         body = (
-          <>
-            {line(errorWords(lang, stand.code))}
-            <div className="set-plan-acts">
-              <Button kind="tone" size="small" onClick={signIn}>
-                {say(s("Sign in again"))}
-              </Button>
-            </div>
-          </>
+          <PlanCard plan={plan} note={errorWords(lang, stand.code)}>
+            <MainAct label={s("Sign in again")} onClick={signIn} testId="plans-sign-in" />
+          </PlanCard>
         );
         break;
       case "gate": {
@@ -393,6 +390,22 @@ export function PlanBlock({
           { ...store.state(), keyOpen: false, pasting },
           (at) => clockOf(at, at, zone, lang).time,
         );
+        // a sign-in that stopped in a way the card says: the card, with no key link (the key stands under it)
+        if (view !== null && view.kind === "failed" && isStopped(view.code)) {
+          body = (
+            <Stopped
+              plan={plan}
+              lang={lang}
+              code={view.code}
+              at={view.at}
+              otherReady={otherReady}
+              onSignIn={signIn}
+              onOther={onOther}
+              onPlans={() => onAct({ act: "plans" })}
+            />
+          );
+          break;
+        }
         body = view !== null && (
           <div className="set-plan-gate">
             <Gate plan={plan} view={view} keys={keys} onAct={onAct} />
@@ -425,6 +438,7 @@ export function PlanBlock({
             {say(s("Other ways in"))}
           </Heading>
           <PlansKey
+            plan={plan}
             keys={keys}
             keysKnown={keysKnown}
             inUse={method === "api_key"}

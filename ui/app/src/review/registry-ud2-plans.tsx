@@ -92,6 +92,11 @@ const ADD: Scene = {
     ],
   },
 };
+/** Both plans here: Claude signed out, ChatGPT's sign-in cancelled. The same card for each, its own key help under
+ * it, no key link above the key, and "Use Claude instead" since Claude is here. */
+const CANCELLED: Scene = {
+  setup: { first: both({ signed_out: {} }, { failed: { code: "signin.cancelled", at: AT } }) },
+};
 const KEY: Scene = {
   setup: { first: both({ signed_in: { method: "api_key", source: "own", at: AT } }) },
 };
@@ -176,4 +181,10 @@ export const UD2_PLANS: Entry[] = [
   entry("UD2-60", "Uses your Claude plan.", ADD),
   entry("UD2-61", "Add Claude", ADD),
   entry("UD2-62", "Needs a download of about {mb} MB. Signing in happens in your browser.", ADD),
+  // UD2-63: each plan's key help names its own plan; shown on both cards, one signed out and one cancelled
+  entry(
+    "UD2-63",
+    "A key from {name}, or one from your firm's IT team. Billed to the key's own account.",
+    CANCELLED,
+  ),
 ];

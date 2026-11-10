@@ -82,6 +82,9 @@ export const HI = {
     "लगभग {mb} MB का डाउनलोड ज़रूरी है। साइन इन आपके ब्राउज़र में होता है।",
   "Signing in happens in your browser.": "साइन इन आपके ब्राउज़र में होता है।",
   "Other ways in": "जुड़ने के दूसरे तरीके",
+  // the key's help under each plan's card names that plan only
+  "A key from {name}, or one from your firm's IT team. Billed to the key's own account.":
+    "{name} की key, या आपकी फ़र्म की IT टीम से मिली key। शुल्क उसी key के खाते पर लगता है।",
   "Change key": "key बदलें",
   "Remove key": "key हटाएँ",
   "Remove the API key?": "API key हटाएँ?",

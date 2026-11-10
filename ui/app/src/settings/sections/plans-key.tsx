@@ -3,6 +3,8 @@
 // one) and "Remove key", which asks first. The key goes from the field into one `set_agent_key` and is dropped: the
 // field keeps it only until desktop takes it (PasteRow), and no store, log or state holds it.
 import { useRef, useState } from "react";
+import type { Plan } from "@clauseo/components/clauseo/first-launch/gate.tsx";
+import { NAME } from "@clauseo/components/clauseo/first-launch/plan-names.ts";
 import { Note, PasteRow, Ways } from "@clauseo/components/clauseo/first-launch/parts.tsx";
 import { useDisplay } from "@clauseo/components/lib/display.ts";
 import { fl } from "@clauseo/components/lib/words-first-launch.ts";
@@ -12,12 +14,15 @@ import { Button } from "@clauseo/components/ui/button.tsx";
 import { Confirm } from "./plans-parts.tsx";
 
 export function PlansKey({
+  plan,
   keys,
   keysKnown,
   inUse,
   onKey,
   onRemove,
 }: {
+  /** Whose key: the help names this plan's maker only. */
+  plan: Plan;
   /** Where this computer keeps a key, or null where it has no keyring. */
   keys: "mac" | "windows" | "linux" | null;
   /** Whether the host has said (setup_info): before it, nothing shows. */
@@ -68,7 +73,7 @@ export function PlansKey({
         />
         <Ways>
           <Note>
-            {`${fl(lang, "A key from Claude or ChatGPT, or one from your firm's IT team. Billed to the key's own account.")} ${fl(
+            {`${st(lang, "A key from {name}, or one from your firm's IT team. Billed to the key's own account.", { name: NAME[plan] })} ${fl(
               lang,
               keys === "mac"
                 ? "Kept in this Mac's Keychain."
