@@ -5,18 +5,19 @@
 //! macOS's (`/etc/zprofile` → `path_helper`) puts `/usr/bin` first again, so `python3` was
 //! `/usr/bin/python3` and `import docx` failed.
 //!
-//! - Codex (`@openai/codex` 0.162.1) runs a command with `-lc` unless `allow_login_shell` is
-//!   false (`config/src/config_toml.rs:221`, default true at `core/src/config/mod.rs:3852`,
-//!   `core/src/shell.rs:25`), and with `shell_snapshot` (on by default) sources a login-shell
-//!   snapshot first, then re-exports `shell_environment_policy.set`'s variables
-//!   (`core/src/tools/runtimes/mod.rs`, `maybe_wrap_shell_lc_with_snapshot`). The session's
-//!   `CODEX_CONFIG` gets both keys ([`super::codex::with_shell_path`]), `set.PATH` being the
-//!   session's `PATH`; on macOS the folders `path_helper` would add ([`path_helper_entries`])
-//!   go right after Clauseo's ([`mac_shell_path`]), so nothing a lawyer's GUI or login `PATH`
-//!   had is dropped. `CODEX_CONFIG` is the session's own (codex-acp sends it as each thread's
-//!   `config`, which app-server turns into overrides on `config.toml`,
-//!   `app-server/src/config_manager.rs:446-457`), so two sessions with different folders never
-//!   share it, as they would the home's `config.toml`.
+//! - Codex (`@openai/codex` 0.162.1, `rust-v0.162.1`) runs a command with `-lc` unless
+//!   `allow_login_shell` is false (`config/src/config_toml.rs:221`, default true at
+//!   `core/src/config/mod.rs:3852`, `core/src/tools/handlers/unified_exec.rs:104-113`), and
+//!   with `shell_snapshot` (on by default) sources a login-shell snapshot first. The session's
+//!   `CODEX_CONFIG` gets `allow_login_shell = false` and `features.shell_snapshot = false`
+//!   ([`super::codex::without_login_shell`]), so a command runs `-c` in Codex's own
+//!   environment, whose `PATH` is the session's with Codex's bundled tools' folder put first by
+//!   Codex itself. On macOS the session's `PATH` also gets the folders `path_helper` would add
+//!   ([`path_helper_entries`]) right after Clauseo's ([`mac_shell_path`]), so nothing a
+//!   lawyer's GUI or login `PATH` had is dropped. `CODEX_CONFIG` is the session's own
+//!   (codex-acp sends it as each thread's `config`, which app-server turns into overrides on
+//!   `config.toml`, `app-server/src/config_manager.rs:446-457`), so two sessions with different
+//!   folders never share it, as they would the home's `config.toml`.
 //! - Claude Code (2.1.293) sources a login-shell snapshot before each Bash command, then the
 //!   file `CLAUDE_ENV_FILE` names. The launch writes [`ENV_FILE`] in the session's own run
 //!   folder, one line putting the folders first on the `PATH` the snapshot built (so it keeps
@@ -228,8 +229,8 @@ pub(crate) fn apply(env: &mut BTreeMap<OsString, OsString>, path: &SessionPath) 
 }
 
 /// [`apply`] on `os`. With folders, off Windows: a Codex session's `CODEX_CONFIG` gets
-/// `allow_login_shell = false` and `shell_environment_policy.set.PATH` (`env`'s `PATH`, on
-/// macOS through [`mac_shell_path`]); a Claude session with its file gets [`ENV_FILE_VAR`],
+/// `allow_login_shell = false` and `features.shell_snapshot = false`, and on macOS its `PATH`
+/// goes through [`mac_shell_path`]; a Claude session with its file gets [`ENV_FILE_VAR`],
 /// over any inherited one. Otherwise `env` is left as it is, an inherited `CLAUDE_ENV_FILE`
 /// included.
 pub(crate) fn apply_on(env: &mut BTreeMap<OsString, OsString>, path: &SessionPath, os: Os) {
@@ -245,35 +246,38 @@ pub(crate) fn apply_on(env: &mut BTreeMap<OsString, OsString>, path: &SessionPat
     }
 }
 
-/// The Codex part of [`apply_on`]. A `PATH` or `CODEX_CONFIG` that is not UTF-8 or JSON leaves
-/// the config as it is, with a warning.
+/// The Codex part of [`apply_on`]. A `PATH` that is not UTF-8 is left as it is, and a
+/// `CODEX_CONFIG` that is not a JSON object too, each with a warning.
 fn codex_keys(env: &mut BTreeMap<OsString, OsString>, path: &SessionPath, os: Os) {
-    let value = |name: &str| {
-        env.iter()
-            .find(|(key, _)| key.eq_ignore_ascii_case(name))
-            .and_then(|(_, value)| value.to_str())
-            .map(str::to_owned)
+    let find = |env: &BTreeMap<OsString, OsString>, name: &str| {
+        env.keys()
+            .find(|key| key.eq_ignore_ascii_case(name))
+            .cloned()
     };
-    let (Some(session), Some(config)) = (value("PATH"), value(super::codex::CONFIG_VAR)) else {
-        tracing::warn!("Codex's shell keeps the login PATH: no UTF-8 PATH or CODEX_CONFIG");
+    if os == Os::Mac
+        && let Some(name) = find(env, "PATH")
+    {
+        if let Some(session) = env.get(&name).and_then(|value| value.to_str()) {
+            let shell = mac_shell_path(&path.dirs, &path.etc_paths, session);
+            env.insert(name, OsString::from(shell));
+        } else {
+            tracing::warn!("path_helper's folders left off Codex's PATH: not UTF-8");
+        }
+    }
+    let name = OsString::from(super::codex::CONFIG_VAR);
+    let config = env.get(&name).and_then(|value| value.to_str());
+    let Some(Ok(mut config)) = config.map(serde_json::from_str::<serde_json::Map<_, _>>) else {
+        tracing::warn!("Codex's shell keeps its login shell: CODEX_CONFIG is not a JSON object");
         return;
     };
-    let shell = match os {
-        Os::Mac => mac_shell_path(&path.dirs, &path.etc_paths, &session),
-        Os::Linux | Os::Windows => session,
-    };
-    let Ok(mut config) = serde_json::from_str::<serde_json::Map<_, _>>(&config) else {
-        tracing::warn!("Codex's shell keeps the login PATH: CODEX_CONFIG is not an object");
-        return;
-    };
-    super::codex::with_shell_path(&mut config, &shell);
+    super::codex::without_login_shell(&mut config);
     tracing::debug!(
         folders = path.dirs.len(),
         helper = path.etc_paths.len(),
-        "Codex's shell runs without a login shell, with the session's PATH"
+        "Codex's shell runs without a login shell or snapshot, with the session's PATH"
     );
     env.insert(
-        OsString::from(super::codex::CONFIG_VAR),
+        name,
         OsString::from(serde_json::Value::Object(config).to_string()),
     );
 }

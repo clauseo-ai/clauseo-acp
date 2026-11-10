@@ -618,12 +618,16 @@ login shells re-sort `PATH` (`/etc/zprofile` runs `path_helper`, which puts `/us
 so a Codex turn ran `/usr/bin/python3` and `import docx` failed). Codex (`@openai/codex`
 0.162.1) runs each command with `-lc` unless `allow_login_shell = false`
 (`config/src/config_toml.rs:221`, default true at `core/src/config/mod.rs:3852`,
-`core/src/shell.rs:25`), after sourcing a login-shell snapshot that re-exports
-`shell_environment_policy.set` (`core/src/tools/runtimes/mod.rs`); the session's
-`CODEX_CONFIG` gets `allow_login_shell = false` and `shell_environment_policy.set.PATH`, the
-session's `PATH`, and on macOS the folders `path_helper` adds (`/etc/paths`, then
-`/etc/paths.d/*` by name, read on the launch-prep thread) go right after Clauseo's, so nothing a
-lawyer's GUI or login `PATH` had is dropped. Claude Code (2.1.293) pastes the file
+`core/src/tools/handlers/unified_exec.rs:104-113`), after sourcing a login-shell snapshot
+(`shell_snapshot`, on by default). The session's `CODEX_CONFIG` gets `allow_login_shell =
+false` and `features.shell_snapshot = false`, so a command runs `-c` with Codex's process
+environment (`protocol/src/shell_environment.rs:91-158`) and Codex still puts its own bundled
+tools' folder first (`core/src/tools/runtimes/unified_exec.rs:505-520`); no
+`shell_environment_policy.set.PATH`, which would stop Codex replaying that folder
+(`core/src/tools/runtimes/mod.rs:105-111`). On macOS the session's `PATH` also gets the
+folders `path_helper` adds (`/etc/paths`, then `/etc/paths.d/*` by name, read on the
+launch-prep thread) right after Clauseo's, so nothing a lawyer's GUI or login `PATH` had is
+dropped. Claude Code (2.1.293) pastes the file
 `CLAUDE_ENV_FILE` names into each Bash command after its login-shell snapshot; the launch writes
 `export PATH='<folders>':"$PATH"` there, which keeps everything the snapshot built. Both are per
 session, since the shell browser's folder is on one session's `PATH` and not another's: the keys
