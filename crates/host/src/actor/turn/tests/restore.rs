@@ -1,14 +1,18 @@
 //! `RestoreVersion` whose log commit fails: the writer waits for the retry, the files stay
-//! restored, and the note reaches the matter's threads whether the retry lands or not.
+//! restored, and the note reaches the matter's threads whether the retry lands or not. A
+//! conversation whose stream is blocked does not keep the matter's stream from recording it.
 
 use clauseo_protocol::{
-    CheckpointKind, CommandOutcome, DomainEvent, ExpiryReason, HostCommand, MatterPath,
-    RestoreRequest, StopReason, ThreadId,
+    CheckpointKind, CommandEnvelope, CommandOutcome, DomainEvent, ExpiryReason, HostCommand,
+    MatterPath, RestoreRequest, StopReason, StreamId, ThreadId,
 };
+use futures::channel::oneshot;
 
 use super::failures::until_ended;
-use super::rig::Rig;
+use super::rig::{Rig, command_id};
+use crate::actor::input::{Input, Request};
 use crate::actor::turn::{End, end};
+use crate::pipeline::tests::support::notice;
 
 /// A Scratch thread whose one turn rewrote `brief.txt`; returns the thread and the restore
 /// command that puts the after-turn version back.
@@ -149,5 +153,86 @@ fn a_restore_commit_failing_twice_still_notes_the_files() {
         0,
         "a restore that wrote nothing logs no VersionRestored"
     );
+    rig.finish();
+}
+
+#[test]
+fn a_restore_asked_from_a_blocked_conversation_is_still_recorded_by_the_matter() {
+    let mut rig = Rig::start("turn-restore-blocked-thread", "");
+    let (thread, restore) = rewritten(&mut rig);
+    let HostCommand::RestoreVersion {
+        matter,
+        checkpoint,
+        scope,
+        undoes,
+        ..
+    } = restore
+    else {
+        panic!("rewritten gives a restore");
+    };
+    let restore = HostCommand::RestoreVersion {
+        thread: Some(thread),
+        undoes,
+        matter,
+        checkpoint,
+        scope,
+    };
+    // The conversation's first commit fails while the second is in flight: its stream stays
+    // blocked through the restore.
+    let stream = StreamId::Thread(thread);
+    rig.fail(1, |event| *event == notice(1));
+    rig.commit(thread, vec![notice(1)]);
+    rig.commit(thread, vec![notice(2)]);
+    let behind = |actor: &crate::actor::Actor, input: &Input| {
+        matches!(input, Input::Committed { ticket, .. }
+            if actor.pipeline.events(*ticket).iter().any(|e| e.event == notice(2)))
+    };
+    // The second's answer is held, so its stream drains only when the test lets it go.
+    rig.hold_next("the second commit's answer", behind);
+    rig.run_until("the block", |actor| {
+        actor.pipeline.blocked(stream).is_some()
+    });
+
+    // The restore's commit is built while the conversation's stream is blocked; it is
+    // released, in send order, once the held commit returns.
+    let (reply, mut answer) = oneshot::channel();
+    let command = CommandEnvelope {
+        command_id: command_id(20),
+        command: restore,
+    };
+    rig.actor.on_request(Request::Dispatch { command, reply });
+    rig.run_until("the restore's log sent", |actor| {
+        actor.matters[&matter].turns.restore.is_some()
+    });
+    assert!(
+        rig.actor.pipeline.blocked(stream).is_some(),
+        "still blocked"
+    );
+    let brief = std::fs::read_to_string(rig.scratch_file("brief.txt")).unwrap();
+    assert_eq!(brief, "The lease ends in June.", "R8 restored the file");
+
+    rig.release_held();
+    rig.settle_commits();
+    let outcome = answer
+        .try_recv()
+        .unwrap()
+        .expect("the restore was answered");
+    assert!(
+        matches!(outcome, Ok(CommandOutcome::VersionRestored { .. })),
+        "{outcome:?}"
+    );
+    assert_eq!(
+        restores(&mut rig),
+        1,
+        "the matter's stream records the restore"
+    );
+    assert_eq!(rig.actor.matters[&matter].turns.holder, None);
+    assert!(rig.actor.matters[&matter].turns.restore.is_none());
+    assert_eq!(noted(&rig, thread), ["brief.txt"]);
+    let line = rig
+        .log(thread)
+        .into_iter()
+        .any(|event| matches!(event, DomainEvent::VersionRestored(_)));
+    assert!(!line, "the blocked conversation's line was skipped");
     rig.finish();
 }
