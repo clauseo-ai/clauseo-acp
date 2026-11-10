@@ -280,6 +280,7 @@ pub(super) fn matter_commit(
         last_opened: None,
         forgotten: None,
         skill_packs: None,
+        agent_prefs: None,
     };
     draft.matter_row(row.clone());
     if let Some((id, outcome)) = command {

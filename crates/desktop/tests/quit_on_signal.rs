@@ -185,6 +185,7 @@ mod quit {
         let CommandOutcome::ThreadCreated { thread } = dispatch(HostCommand::CreateThread {
             matter,
             agent: AgentId::new(AGENT).unwrap(),
+            config: None,
         }) else {
             panic!("no thread");
         };

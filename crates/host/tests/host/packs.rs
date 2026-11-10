@@ -184,6 +184,7 @@ fn bind(host: &Running, matter: MatterId, ids: &[&str]) {
         next_date: FieldChange::Keep,
         skill_packs: FieldChange::Set(packs(ids)),
         pinned: None,
+        agent_prefs: FieldChange::Keep,
     });
 }
 

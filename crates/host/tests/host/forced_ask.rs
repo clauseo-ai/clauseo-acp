@@ -2,7 +2,7 @@
 //! `HostConfig::with_folder_support` (test-support only), so it runs on every OS. A Claude agent
 //! in a matter on a network drive: `SetMode` takes only `default` and `plan`; a plan exit loses
 //! its auto-accept option and an answer naming it is refused; a mode the agent moves to itself is
-//! switched back; `SetConfigOption` for the mode takes only the same two; the row says why. With
+//! switched back; `SetConfigOption` for the mode is refused; the row says why. With
 //! no guard program the launch is refused. A matter with no such answer runs as before. Codex in
 //! such a matter is refused. The `_meta` layers (no `allowedTools`, the `permissions.ask` rules,
 //! the hook before every tool with `--ask-all`) are pinned in `agent/loads/layering_tests.rs`
@@ -136,15 +136,12 @@ fn claude_on_a_network_drive_runs_in_forced_ask() {
     }
     assert_eq!(host.ok(set_mode(thread, "plan")), CommandOutcome::Done);
     events.until("ModeChanged plan", |e| modes(e).len() == 4);
-    // The mode's config option is gated the same way (the review's
-    // `rev_config_option_mode_is_refused_in_forced_ask`): only plan reaches the agent.
-    for mode in ["acceptEdits", "bypassPermissions", "auto"] {
+    // The mode's config option never reaches the agent (the review's
+    // `rev_config_option_mode_is_refused_in_forced_ask`): only model and effort options are
+    // settable (`turn/picks.rs`), so even `plan` is refused there.
+    for mode in ["acceptEdits", "bypassPermissions", "auto", "plan"] {
         host.refused(set_config_mode(thread, mode), ErrorCode::CommandInvalid);
     }
-    assert_eq!(
-        host.ok(set_config_mode(thread, "plan")),
-        CommandOutcome::Done
-    );
     events.assert_no_mismatch();
     assert_eq!(
         summary(&host, matter).folder_support,

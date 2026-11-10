@@ -30,12 +30,14 @@ mod privacy;
 
 use clauseo_protocol::{
     AgentKind,
+    AgentPrefs,
     AllowScope,
     AppendTarget,
     BrowserInstallFailure,
     BrowserInstallState,
     BrowserPolicyState,
     ClientName,
+    ConfigPicks,
     ConfigValue,
     ContentBlock,
     Count,
@@ -116,6 +118,23 @@ use limits::{account_limits, limits_view};
 #[cfg(test)]
 fn pack_list(ids: &[&str]) -> PackList {
     PackList::new(ids.iter().map(|id| PackId::new(id).unwrap()).collect()).unwrap()
+}
+
+/// Picks of each `(option, value)` pair.
+#[cfg(test)]
+fn picks(pairs: &[(&str, &str)]) -> ConfigPicks {
+    let pick = |(option, value): &(&str, &str)| (choice(option), choice(value));
+    ConfigPicks::new(pairs.iter().map(pick).collect()).unwrap()
+}
+
+/// A matter's prefs: Claude's model and effort.
+#[cfg(test)]
+fn agent_prefs() -> AgentPrefs {
+    let claude = picks(&[("model", "opus"), ("effort", "high")]);
+    AgentPrefs(std::collections::BTreeMap::from([(
+        AgentKind::Claude,
+        claude,
+    )]))
 }
 
 /// The example of the known kind `kind`, from `examples::every_event`.
@@ -397,6 +416,7 @@ mod host_event {
                 client: Some(ClientName::new("Rathi Steels").unwrap()),
                 next_date: None,
                 skill_packs: Some(pack_list(&["nda-kit"])),
+                agent_prefs: Some(agent_prefs()),
                 pinned: true,
                 last_opened: None,
                 status: MatterStatus::Stopped { at: Timestamp::new(1_760_000_008_000).unwrap() },

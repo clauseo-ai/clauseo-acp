@@ -20,6 +20,7 @@ golden! { HostCommand::name_of {
         next_date: FieldChange::Clear,
         skill_packs: FieldChange::Set(pack_list(&["nda-kit", "a1"])),
         pinned: Some(true),
+        agent_prefs: FieldChange::Set(agent_prefs()),
     };
     OpenMatter => open_matter: HostCommand::OpenMatter { matter: matter_id(1) };
     ForgetMatter => forget_matter: HostCommand::ForgetMatter { matter: matter_id(1) };
@@ -38,6 +39,7 @@ golden! { HostCommand::name_of {
     CreateThread => create_thread: HostCommand::CreateThread {
         matter: matter_id(1),
         agent: agent("claude-acp"),
+        config: Some(picks(&[("model", "opus"), ("effort", "high")])),
     };
     SendPrompt => send_prompt: HostCommand::SendPrompt {
         thread: thread_id(2),

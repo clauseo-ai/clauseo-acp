@@ -130,6 +130,23 @@ copy too); decision record 0040 gives the reasons:
 ALTER TABLE matters ADD COLUMN skill_packs TEXT /* JSON array of pack ids, at most 32, none twice; NULL = the global skills.enabled list */;
 ```
 
+### Schema version 6
+
+`crates/store/src/migrations/0006_matter_agent_prefs.sql`, verbatim (the same test checks this
+copy too). A matter remembers the model and effort its conversations start with, per agent kind
+(`UpdateMatter::agent_prefs`, and the host's write after a successful `SetConfigOption`): JSON
+text such as `{"claude":{"model":"opus","effort":"high"}}`, the shape of protocol's
+`AgentPrefs`. NULL, as on every matter before it, leaves each agent at its own defaults. A row,
+not an event: like the other matter details, the reducer's view does not show it.
+
+```sql
+-- Schema version 6: a matter's model and effort picks per agent kind (UpdateMatter's agent_prefs).
+-- docs/decisions/0006-store-format.md gives the reason for the column and what NULL means.
+-- Frozen: a later change is a new numbered file in this folder, never an edit here.
+
+ALTER TABLE matters ADD COLUMN agent_prefs TEXT /* JSON object: agent kind -> {option id: value id}; NULL = none, each agent's own defaults */;
+```
+
 In the table columns, ids are stored as lowercase hyphenated UUID text and times as milliseconds
 since the Unix epoch. Inside `events.envelope`, the envelope's own encoding applies: ids are
 16-byte MessagePack bin, as `docs/decisions/0002-event-schema.md` says, and `stream` is its text.

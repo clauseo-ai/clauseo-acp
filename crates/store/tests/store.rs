@@ -11,6 +11,9 @@ mod common;
 mod write;
 
 #[cfg(test)]
+#[path = "store/agent_prefs.rs"]
+mod agent_prefs;
+#[cfg(test)]
 #[path = "store/close.rs"]
 mod close;
 #[cfg(test)]

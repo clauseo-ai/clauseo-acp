@@ -230,20 +230,8 @@ fn run_command(actor: &mut Actor, ctx: &CommandCtx, command: HostCommand) {
         } => {
             super::matters::create_matter(actor, ctx, &name, source, (client, next_date));
         }
-        HostCommand::UpdateMatter {
-            matter,
-            client,
-            next_date,
-            skill_packs,
-            pinned,
-        } => {
-            let update = super::matter_details::Update {
-                client,
-                next_date,
-                skill_packs,
-                pinned,
-            };
-            super::matter_details::update_matter(actor, ctx, matter, update);
+        command @ HostCommand::UpdateMatter { .. } => {
+            super::matter_details::update_matter(actor, ctx, command);
         }
         HostCommand::OpenMatter { matter } => {
             super::matter_details::open_matter(actor, ctx, matter);
@@ -258,8 +246,12 @@ fn run_command(actor: &mut Actor, ctx: &CommandCtx, command: HostCommand) {
         HostCommand::SnoozeThread { thread, until } => triage::snooze(actor, ctx, thread, until),
         HostCommand::MarkThreadDone { thread, done } => triage::mark_done(actor, ctx, thread, done),
         HostCommand::SweepDone { day_start } => triage::sweep_done(actor, ctx, day_start),
-        HostCommand::CreateThread { matter, agent } => {
-            if let Err(error) = create_thread(actor, ctx, matter, agent) {
+        HostCommand::CreateThread {
+            matter,
+            agent,
+            config,
+        } => {
+            if let Err(error) = create_thread(actor, ctx, (matter, agent), config) {
                 actor.finish_command(ctx.id, Err(error));
             }
         }
@@ -419,12 +411,12 @@ pub(crate) fn check_matter(actor: &Actor, matter: MatterId) -> Result<&MatterEnt
 }
 
 /// `CreateThread`: the agent must be in the settings; `ThreadCreated` and the row. No
-/// launch.
+/// launch: the config waits on the entry for the session's start.
 fn create_thread(
     actor: &mut Actor,
     ctx: &CommandCtx,
-    matter: MatterId,
-    agent: clauseo_protocol::AgentId,
+    (matter, agent): (MatterId, clauseo_protocol::AgentId),
+    config: Option<clauseo_protocol::ConfigPicks>,
 ) -> Result<(), Error> {
     actor.check_matter(matter)?;
     if actor.effective.agent(agent.as_str()).is_none() {
@@ -475,6 +467,7 @@ fn create_thread(
         last_stop: None,
         turn: turn::TurnState::default(),
         came_back: turn::CameBackWatches::default(),
+        picks: config,
     };
     let tag = Tag::Command {
         id: ctx.id,

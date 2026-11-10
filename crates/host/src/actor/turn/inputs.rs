@@ -2,7 +2,9 @@
 //! reads.
 
 use clauseo_acp::{AgentInfo, PromptEnd, SessionStart};
-use clauseo_protocol::{AgentChoiceId, ConfigOption, Envelope, QueryResult, ThreadId, TurnId};
+use clauseo_protocol::{
+    AgentChoiceId, ConfigOption, ConfigValue, Envelope, QueryResult, ThreadId, TurnId,
+};
 
 use super::super::commands::CommandCtx;
 use super::super::input::Reply;
@@ -50,10 +52,12 @@ pub(crate) enum AgentReply {
         loaded: bool,
         result: Result<SessionStart, clauseo_acp::Error>,
     },
-    /// A Codex session's checks before its attach (the ask mode, the guard's trust) ended.
+    /// A session's work before its attach (Codex's ask mode and guard's trust, Claude's mode,
+    /// the picks) ended; `picked` says what the picks did.
     Prepared {
         loaded: bool,
         result: Result<SessionStart, crate::error::Error>,
+        picked: super::picks::Picked,
     },
     Prompt {
         turn: TurnId,
@@ -66,8 +70,10 @@ pub(crate) enum AgentReply {
     },
     /// A Codex session call's `.codex` re-check refused it before it was sent.
     Refused(crate::error::Error),
+    /// A `SetConfigOption` of `pick` answered.
     Config {
         ctx: CommandCtx,
+        pick: (AgentChoiceId, ConfigValue),
         result: Result<Vec<ConfigOption>, clauseo_acp::Error>,
     },
     Mode {

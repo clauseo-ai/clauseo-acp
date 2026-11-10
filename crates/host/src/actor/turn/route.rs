@@ -86,12 +86,13 @@ pub(crate) fn command(actor: &mut Actor, ctx: &CommandCtx, thread: ThreadId, com
             response,
         } => answers::answer_elicitation(actor, ctx, thread, elicitation, response),
         TurnCommand::SetConfigOption { option_id, value } => {
-            agents::ensure(
-                actor,
-                thread,
-                agents::Waiting::Config(ctx, option_id, value),
-            );
-            Ok(())
+            super::picks::settable(actor, thread, &option_id, &value).map(|()| {
+                agents::ensure(
+                    actor,
+                    thread,
+                    agents::Waiting::Config(ctx, option_id, value),
+                );
+            })
         }
         TurnCommand::SetMode { mode_id } => {
             agents::ensure(actor, thread, agents::Waiting::Mode(ctx, mode_id));

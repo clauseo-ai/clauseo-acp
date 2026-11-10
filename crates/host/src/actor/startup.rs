@@ -50,6 +50,7 @@ pub(super) async fn open(
     super::query::blackline::sweep_leftovers(parts.effective.data_dir(), parts.clock.now().wall);
     let heads = store.heads().await?;
     let allowed = Box::new(super::allowed::AllowState::new(parts.effective.data_dir()));
+    let agent_options = super::agent_options::AgentOptions::new(parts.effective.data_dir());
     let tails = store.tail_times().await?.into_iter().collect();
     let Registry {
         matters,
@@ -116,6 +117,7 @@ pub(super) async fn open(
         app_subs: Vec::new(),
         blocked: Box::default(),
         allowed,
+        agent_options,
         blocklist: None,
         limits: super::limits::LimitsHost::new(limits_reader),
         triage: super::triage::Triage::new(),
@@ -256,6 +258,7 @@ async fn registry(store: &Store) -> Result<Registry, Error> {
                     last_stop: None,
                     turn: turn::TurnState::default(),
                     came_back: turn::CameBackWatches::default(),
+                    picks: None,
                 },
             );
         }

@@ -158,6 +158,7 @@ mod matter;
 mod number;
 mod open_enum;
 mod patch;
+mod picks;
 mod protection;
 mod query;
 mod raw;
@@ -248,6 +249,7 @@ wire_types! {
         MatterKind, RestoreScope, SyncService,
     },
     number::{Count, Cursor, Finite, Seq, Timestamp},
+    picks::{AgentPrefs, ConfigPicks},
     patch::{
         Ack, AppendTarget, HostEvent, PatchBatch, StreamHeader, Subscribe, SubscribeEvents,
         ViewPatch, ViewPatchBody, ViewPosition, ViewWindow,
@@ -339,6 +341,8 @@ pub use envelope::EnvelopeRead;
 pub use error::Error;
 pub use ids::{MAX_ID_TEXT_BYTES, is_windows_reserved_name};
 pub use number::MAX_SAFE;
+// The most picks a `ConfigPicks` holds: a constant, so outside `wire_types!`.
+pub use picks::MAX_CONFIG_PICKS;
 // The kind a catch-all holds; the catch-all variants holding it export as `string`.
 pub use open_enum::UnknownKind;
 pub use query::{MAX_BLOB_READ_BYTES, MAX_PAGE_ENTRIES, MAX_PAPERS};

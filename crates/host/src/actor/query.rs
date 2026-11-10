@@ -173,7 +173,8 @@ pub(super) fn query(
             super::papers::list(actor, matter, reply);
         }
         HostQuery::ListAgents => {
-            let agents = list_agents(&actor.effective.settings().agents);
+            let ids: Vec<String> = actor.effective.settings().agents.keys().cloned().collect();
+            let agents = list_agents(ids, &mut actor.agent_options);
             let _gone = reply.send(Ok(QueryResult::Agents(agents)));
         }
         HostQuery::ReadBlob { hash, offset, len } => {
@@ -194,14 +195,18 @@ pub(super) fn query(
     }
 }
 
-/// One summary per settings agent whose id is a valid `AgentId`, sorted by id (the map's
-/// order), with its kind. An id `AgentId` refuses could never name a thread, so it is left out.
-fn list_agents<T>(agents: &std::collections::BTreeMap<String, T>) -> Vec<AgentSummary> {
-    agents
-        .keys()
+/// One summary per settings agent (`ids`, sorted) whose id is a valid `AgentId`, with its kind
+/// and its kept config options. An id `AgentId` refuses could never name a thread, so it is left
+/// out.
+fn list_agents(
+    ids: Vec<String>,
+    options: &mut super::agent_options::AgentOptions,
+) -> Vec<AgentSummary> {
+    ids.into_iter()
         .filter_map(|id| AgentId::new(id.as_str()).ok())
         .map(|id| AgentSummary {
             kind: AgentKind::of(&id),
+            config_options: options.of(id.as_str()).to_vec(),
             id,
         })
         .collect()

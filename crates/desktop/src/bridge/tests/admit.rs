@@ -64,6 +64,10 @@ fn every_command_and_read_the_windows_send_today_is_admitted() {
         json!({"decide_revisions": {"matter": matter, "path": "Lease.docx",
             "version": "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff",
             "ids": [1, 2], "decision": "accept"}}),
+        // The pickers: a choice of an option (the host takes only the model's or the effort's).
+        json!({"set_config_option": {"thread": thread, "option_id": "model",
+            "value": {"select": "opus"}}}),
+        json!({"update_matter": {"matter": matter, "agent_prefs": {"claude": {"effort": "high"}}}}),
     ];
     for body in commands {
         let admitted = bridge.admit(MAIN, &command(body.clone()));
@@ -105,8 +109,8 @@ fn every_refused_command_is_refused_before_open_stream() {
             "request": Uuid::now_v7(), "option_id": "allow"}})),
         command(json!({"set_mode": {"thread": thread, "mode_id": "bypassPermissions"}})),
         command(
-            json!({"set_config_option": {"thread": thread, "option_id": "mode",
-            "value": {"select": "bypassPermissions"}}}),
+            json!({"set_config_option": {"thread": thread, "option_id": "fast",
+            "value": {"boolean": true}}}),
         ),
     ];
     for refused in refused {

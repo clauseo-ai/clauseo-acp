@@ -424,6 +424,7 @@ fn sandbox_required_refuses_create_thread_by_cause() {
             let command = HostCommand::CreateThread {
                 matter,
                 agent: clauseo_protocol::AgentId::new(FAKE).unwrap(),
+                config: None,
             };
             match expected {
                 Some(code) => drop(host.refused(command, code)),

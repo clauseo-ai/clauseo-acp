@@ -56,6 +56,7 @@ fn forget_takes_the_matter_off_the_list_and_an_import_brings_it_back() {
         next_date: FieldChange::Keep,
         skill_packs: FieldChange::Keep,
         pinned: Some(true),
+        agent_prefs: FieldChange::Keep,
     });
     let mut events = host.events(StreamId::Thread(thread));
     let (turn, _) = host.prompt(thread, "Tighten clause 4");
@@ -92,6 +93,7 @@ fn forget_takes_the_matter_off_the_list_and_an_import_brings_it_back() {
         HostCommand::CreateThread {
             matter,
             agent: clauseo_protocol::AgentId::new(FAKE).unwrap(),
+            config: None,
         },
         ErrorCode::CommandUnknownMatter,
     );
@@ -248,6 +250,7 @@ fn forget_keeps_skill_packs_and_unforget_restores_them() {
         next_date: FieldChange::Keep,
         skill_packs: FieldChange::Set(list.clone()),
         pinned: None,
+        agent_prefs: FieldChange::Keep,
     });
     let before = summary(&host, matter).skill_packs;
     assert_eq!(before, Some(list));

@@ -3,7 +3,7 @@
 use std::path::PathBuf;
 
 use clauseo_protocol::{
-    AgentId, AgentSessionId, BlobHash, BlobRef, CheckpointId, ClientName, CommandId,
+    AgentId, AgentPrefs, AgentSessionId, BlobHash, BlobRef, CheckpointId, ClientName, CommandId,
     CommandOutcome, Count, Date, Envelope, MatterId, MatterKind, PackList, RenameSource, Seq,
     StreamId, ThreadId, Timestamp,
 };
@@ -178,6 +178,9 @@ pub struct MatterRow {
     /// The skill packs it narrows to, once set; `None` takes the global `skills.enabled` list
     /// (schema 5; `NULL` before). Stored as a JSON array of pack ids.
     pub skill_packs: Option<PackList>,
+    /// The model and effort a new conversation starts with, per agent kind, once set; `None`
+    /// leaves each agent at its own defaults (schema 6; `NULL` before). Stored as JSON.
+    pub agent_prefs: Option<AgentPrefs>,
 }
 
 /// A thread's summary row.

@@ -96,6 +96,7 @@ fn a_create_keeps_its_details_and_list_matters_shows_every_field() {
             folder_support: None,
             // No sandbox wired: the Safe workspace is parked for launch, so no protection (0051).
             protection: None,
+            agent_prefs: None,
         }
     );
     // The Scratch matter is listed first (oldest), with no details, and outside this home it
@@ -209,6 +210,7 @@ fn update_matter_keeps_clears_and_sets_each_detail() {
         next_date,
         skill_packs: FieldChange::Keep,
         pinned,
+        agent_prefs: FieldChange::Keep,
     };
     // Nothing named: nothing changes, and the answer is still Done.
     assert_eq!(
@@ -258,6 +260,7 @@ fn update_matter_keeps_clears_and_sets_each_detail() {
             next_date: FieldChange::Keep,
             skill_packs: FieldChange::Keep,
             pinned: Some(true),
+            agent_prefs: FieldChange::Keep,
         },
         ErrorCode::CommandUnknownMatter,
     );
@@ -283,6 +286,7 @@ fn update_matter_keeps_clears_and_sets_skill_packs() {
         next_date: FieldChange::Keep,
         skill_packs,
         pinned: None,
+        agent_prefs: FieldChange::Keep,
     };
     // A new matter has no list: it takes the global one.
     assert_eq!(summary(&host, matter).skill_packs, None);
@@ -337,6 +341,7 @@ fn update_matter_refuses_a_reserved_pack_id() {
         next_date: FieldChange::Keep,
         skill_packs: FieldChange::Set(kept.clone()),
         pinned: None,
+        agent_prefs: FieldChange::Keep,
     });
     // Each reserved name is refused as a bad value is: command.invalid, and nothing changes.
     for reserved in [
@@ -358,6 +363,7 @@ fn update_matter_refuses_a_reserved_pack_id() {
                 next_date: FieldChange::Keep,
                 skill_packs: FieldChange::Set(list),
                 pinned: Some(true),
+                agent_prefs: FieldChange::Keep,
             },
             ErrorCode::CommandInvalid,
         );
