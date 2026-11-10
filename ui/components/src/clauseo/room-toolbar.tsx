@@ -16,6 +16,8 @@ import { sentences } from "../lib/sentences.ts";
 import { HistoryPanel } from "./history.tsx";
 import type { HistoryRow } from "./matter.ts";
 import { CaptionButtons, CornerLights, type CaptionWiring } from "./caption.tsx";
+import { useFullScreen } from "../lib/full-screen.ts";
+import { RailBrand } from "./rail-brand.tsx";
 import { useRoom } from "./room-scope.ts";
 import { mt } from "../lib/words-matters.ts";
 import { Dot, Say } from "./say.tsx";
@@ -95,6 +97,8 @@ export type RoomToolbarProps = {
   /** Optional: macOS draws its own traffic lights over the corner lights' place (with chrome "own", on the Mac), so the
    * lights keep their box and paint nothing. */
   nativeLights?: boolean;
+  /** Optional: Clauseo's lockup in the lead, on a wide Mac window (rail-brand.tsx); the rail draws it elsewhere. */
+  brand?: boolean;
   /** Optional, true by default: false leaves the search field out. */
   search?: boolean;
   /** Optional, true by default: false leaves the Versions and Undo pair out. (Not `history`, which holds Versions'
@@ -131,6 +135,7 @@ export function RoomToolbar(p: RoomToolbarProps) {
   const display = useDisplay();
   const platform = p.platform ?? display.platform;
   const own = p.chrome !== "os";
+  const fullScreen = useFullScreen(own && platform === "mac" && p.nativeLights === true);
   // Windows and Linux: the caption buttons at the top right, and no corner lights
   const captions = own && platform !== "mac";
   const search = p.search !== false;
@@ -184,7 +189,11 @@ export function RoomToolbar(p: RoomToolbarProps) {
       data-tauri-drag-region
     >
       <div className="room-lead" data-tauri-drag-region>
-        {own && platform === "mac" && <CornerLights native={p.nativeLights === true} />}
+        {/* in macOS's full screen the native lights are gone until the pointer reaches the top: the lead keeps no room */}
+        {own && platform === "mac" && !fullScreen && (
+          <CornerLights native={p.nativeLights === true} />
+        )}
+        {p.brand === true && <RailBrand at="lead" platform={platform} />}
         <Button
           kind="tone"
           size="small"

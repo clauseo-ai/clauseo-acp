@@ -222,8 +222,23 @@ const versioning = versionsPage === null ? null : versionsHost(versionsPage);
 /** The page's host for Versions or Word, where it has one. */
 const staged = versioning ?? wording;
 
+/** ?lights=native: the window's controls as the desktop app has them, so the Mac's lights keep their place and paint
+ * nothing, as macOS draws its own there. Nothing presses them. */
+const NATIVE_LIGHTS = {
+  minimise: async () => {},
+  toggleMaximise: async () => {},
+  close: async () => {},
+  isMaximised: async () => false,
+};
+
 const transport = new FakeTransport({
-  platform: "mac",
+  // ?platform=windows or linux draws that computer's frame; the Mac's without
+  platform:
+    page.get("platform") === "windows"
+      ? "windows"
+      : page.get("platform") === "linux"
+        ? "linux"
+        : "mac",
   // on the pages whose undo meets a lock, every undo_step is refused with matter.file_locked
   dispatch: (envelope): CommandOutcome => {
     if (staged?.refusesUndo === true && envelope.command.undo_step !== undefined) throw LOCKED;
@@ -290,7 +305,10 @@ if (container === null) throw new Error("index.html has no #root element");
 whenWordsReady(() =>
   createRoot(container).render(
     <StrictMode>
-      <App transport={transport} />
+      <App
+        transport={transport}
+        {...(page.get("lights") === "native" ? { windowControls: NATIVE_LIGHTS } : {})}
+      />
     </StrictMode>,
   ),
 );

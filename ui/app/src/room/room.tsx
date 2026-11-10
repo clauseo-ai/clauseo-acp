@@ -393,8 +393,7 @@ function RoomFrame({
         ? tauriWindowControls()
         : null,
   );
-  // the caption buttons' commands, off the Mac: its own lights need none, and capabilities/frame.json grants none
-  // there, so asking whether the window is maximised would only be refused, on every resize
+  // the caption buttons' commands, off the Mac: frame.json grants the Mac none, so asking would be refused each resize
   const wired = useMemo(() => (platform === "mac" ? null : controls), [platform, controls]);
   const caption = useWindowFrame(wired);
   // R23's update notice: at the rail's foot where the rail stands beside the work, else at the head of the wall
@@ -422,6 +421,7 @@ function RoomFrame({
         chrome="own"
         caption={caption}
         nativeLights={controls !== null}
+        brand
         search={false}
         unprotected={unprotectedFolder(open?.folder_support) || shield.explain !== undefined}
         onUnprotected={shield.explain}

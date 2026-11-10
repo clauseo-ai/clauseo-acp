@@ -4,18 +4,22 @@ import type { Batch } from "./store/batch.ts";
 import { StoreContext } from "./store/hooks.ts";
 import { createViewStore, type ViewStore } from "./store/store.ts";
 import type { HostTransport } from "./transport/host-transport.ts";
+import type { WindowControls } from "./transport/window-controls.ts";
 
 /** The whole app: the room (src/room/) over the transport, with one view store for the page. `batch` says when the
  * store applies what arrived (once a frame, every 100 ms in the room's lite, unless a test says otherwise).
- * `onStore` hears the store once it is made: only the perf build (src/perf/) passes it. */
+ * `onStore` hears the store once it is made: only the perf build (src/perf/) passes it. `windowControls` stands in for
+ * Tauri's window: only the probe passes it, to draw the Mac's native lights' frame. */
 export function App({
   transport,
   batch,
   onStore,
+  windowControls,
 }: {
   transport: HostTransport;
   batch?: Batch;
   onStore?: ((store: ViewStore) => void) | undefined;
+  windowControls?: WindowControls;
 }) {
   const [store] = useState(() => {
     // the room's display settings start before its first render; in lite its batch is every 100 ms
@@ -29,7 +33,7 @@ export function App({
   return (
     <div id="app-root">
       <StoreContext value={store}>
-        <Room transport={transport} />
+        <Room transport={transport} {...(windowControls === undefined ? {} : { windowControls })} />
       </StoreContext>
     </div>
   );

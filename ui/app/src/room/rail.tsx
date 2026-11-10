@@ -341,6 +341,7 @@ export function RoomRail({
       onNewMatter={onNewMatter}
       {...(onNewMatterPreload === undefined ? {} : { onNewMatterPreload })}
       newMatterRef={newMatterRef}
+      brand
       // nothing to find on an empty rail
       {...(folders.length === 0
         ? {}
