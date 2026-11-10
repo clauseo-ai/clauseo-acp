@@ -186,5 +186,38 @@
     "at": "2026-11-02",
     "by": "Rohan",
     "note": "Rohan, 2026-11-02, approved as written"
+  },
+  "U8-25": {
+    "en": "Undo the restore at {time}?",
+    "hi": "{time} बजे का पुनर्स्थापन पूर्ववत करें?",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-10",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-10",
+    "by": "app track (provisional; Rohan batch review)",
+    "note": "D-033: Undo on a restore asks to undo that restore, in the shape of U8's undo titles"
+  },
+  "U8-26": {
+    "en": "'{papers}', added by the restore, will be removed.",
+    "hi": "पुनर्स्थापन से जोड़ा गया '{papers}' हटा दिया जाएगा।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-10",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-10",
+    "by": "app track (provisional; Rohan batch review)",
+    "note": "D-033: undoing a restore removes the file it added; shaped like U8-22's added-since line"
+  },
+  "U8-27": {
+    "en": "{papers}, added by the restore, will be removed.",
+    "hi": "पुनर्स्थापन से जोड़े गए {papers} हटा दिए जाएँगे।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-10",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-10",
+    "by": "app track (provisional; Rohan batch review)",
+    "note": "D-033: the same for several files"
   }
 }

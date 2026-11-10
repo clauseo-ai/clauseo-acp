@@ -7,6 +7,7 @@ import type { ViewStore } from "../../store/store.ts";
 import { streamOf } from "../../store/view.ts";
 import type { HostTransport } from "../../transport/host-transport.ts";
 import type { MatterId, ThreadId, ThreadStatus, ThreadSummary } from "../../transport/protocol.ts";
+import { stepsSig } from "./reading.ts";
 import { isBusy } from "./state.ts";
 
 export class Conversations {
@@ -60,6 +61,14 @@ export class Conversations {
     if (h !== undefined && h !== null && "header" in h && h.header !== undefined)
       return h.header.status;
     return this.#rested.get(t.thread) ?? t.status;
+  }
+
+  /** What Versions reads of the conversations, as one string: their statuses, how many, the newest list_threads, and
+   * each held conversation's steps (one undone there changes what Undo offers; text doesn't count). */
+  sig(): string {
+    const statuses = this.#threads.map((t) => JSON.stringify(this.statusOf(t))).join(",");
+    const steps = this.#threads.map((t) => stepsSig(this.#store.view(streamOf(t.thread))));
+    return [statuses, this.#threads.length, this.#listed, steps.join(",")].join("|");
   }
 
   /** The first conversation an answer runs in, or null. */

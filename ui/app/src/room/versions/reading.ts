@@ -198,13 +198,22 @@ export async function lockedRestore(
     : { act: "restore", id, preview, undoes, stage: "word", files };
 }
 
-/** What restoring a version would write now, by the host's preview_restore: null when the answer isn't one. */
+/** What restoring a version would write now, by the host's preview_restore; undoes: the restore it takes back, whose
+ * added files go too (the preview's removes). Null when the answer isn't one. */
 export async function previewRestore(
   transport: HostTransport,
   matter: MatterId,
   id: string,
+  undoes: string | null = null,
 ): Promise<RestorePreview | null> {
-  const r = await transport.query({ preview_restore: { matter, checkpoint: id, scope: "matter" } });
+  const r = await transport.query({
+    preview_restore: {
+      matter,
+      checkpoint: id,
+      scope: "matter",
+      ...(undoes === null ? {} : { undoes }),
+    },
+  });
   return "restore_preview" in r ? r.restore_preview : null;
 }
 
