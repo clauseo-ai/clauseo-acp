@@ -70,7 +70,8 @@ pub(crate) struct DesktopProfile {
 }
 
 impl DesktopProfile {
-    /// The profile under `locations`: the bundled programs beside the app's executable,
+    /// The profile under `locations`: the bundled programs beside the app's executable (on macOS
+    /// agent-browser in `Contents/Helpers`, [`agent_browser_path`]),
     /// stetdoc as [`stetdoc_program`] finds it, in its own folder under `resource_dir` (Tauri's
     /// resource folder) or on macOS under `Contents/Helpers` (its skill loaded when it is
     /// there), R22's built-in skills, and no author (tracked changes carry "Clauseo", 0030).
@@ -139,11 +140,13 @@ impl DesktopProfile {
     }
 }
 
-/// The `agent-browser` command for the agents: the bundled sidecar (`<exe dir>/clauseo-agent-
-/// browser`), or in a debug build with no sidecar the first `agent-browser` on `path`, copied
-/// into `<data>/tools` (`clauseo_profile::tools`, only when its SHA-256 changed). Returns the
-/// folder, or none, with a log line, when there is no program to copy or the copy failed: then
-/// no session gets the browser, its skill or its instructions, and the app runs on.
+/// The `agent-browser` command for the agents: the bundled sidecar where [`paths_for`] resolved
+/// it (`ProfilePaths::browser`'s `agent_browser`: `Contents/Helpers` on macOS, beside the exe
+/// elsewhere, [`agent_browser_path`]), or in a debug build with no sidecar the first
+/// `agent-browser` on `path`, copied into `<data>/tools` (`clauseo_profile::tools`, only when its
+/// SHA-256 changed). Returns the folder, or none, with a log line, when there is no program to
+/// copy or the copy failed: then no session gets the browser, its skill or its instructions, and
+/// the app runs on.
 ///
 /// Each outcome is one line on [`LIFECYCLE`], for support: `copied`, `up_to_date`,
 /// `copied_running_copy_set_aside` (Windows), `no_sidecar`, or a warning with the error's

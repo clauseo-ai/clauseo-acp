@@ -20,7 +20,9 @@ pub const AGENT_BROWSER_COMMAND: &str = "agent-browser";
 pub struct BrowserSidecars {
     /// The `clauseo-mcp` binary: the entry's command.
     pub clauseo_mcp: PathBuf,
-    /// The agent-browser binary, passed as `--agent-browser`.
+    /// The agent-browser binary, passed as `--agent-browser` and copied to
+    /// [`ProfilePaths::tools`]: where desktop's `profile.rs` resolved it (`Contents/Helpers` on
+    /// macOS, beside the exe elsewhere).
     pub agent_browser: PathBuf,
 }
 
