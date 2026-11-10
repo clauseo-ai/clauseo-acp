@@ -86,13 +86,16 @@ export const FILES_SCENARIO = fileURLToPath(
 export const FIRST_READ_ANSWER = "A plain summary of the papers.";
 
 /**
- * A matter made on the first screen that starts with papers gets its first read once the plan is
- * signed in (UD2, ui/app/src/room/first-run/first-run.tsx): the window makes a "First read"
- * conversation, sends the first-read prompt in it and opens it. Waits until that read is answered
- * (the scenarios in scenarios/ answer it with {@link FIRST_READ_ANSWER} and change no file), then
- * opens a new conversation, so the spec's own prompt starts a thread of its own.
+ * A matter made on the first screen that starts with papers is offered its first read once the
+ * plan is signed in (UD2, D-015; ui/app/src/room/first-run/first-run.tsx): "Read the papers" stands
+ * under the new conversation's line. Nothing sends the read by itself, so this presses that button,
+ * which makes a "First read" conversation and sends the first-read prompt in it. Waits until that
+ * read is answered (the scenarios in scenarios/ answer it with {@link FIRST_READ_ANSWER} and change
+ * no file), then opens a new conversation, so the spec's own prompt starts a thread of its own.
  */
 export async function finishFirstRead(w: Window): Promise<void> {
+  await expect(w.firstReadOffer).toBeVisible();
+  await w.firstReadOffer.click();
   await expect(w.firstRead).toHaveAttribute("data-state", "read");
   await expect(w.agentMessages.last()).toHaveText(FIRST_READ_ANSWER);
   await expectTurnEnded(w, "end_turn");
