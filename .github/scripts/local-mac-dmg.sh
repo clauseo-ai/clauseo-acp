@@ -75,7 +75,10 @@ CARGO_PROFILE_RELEASE_SPLIT_DEBUGINFO=$(wf_env CARGO_PROFILE_RELEASE_SPLIT_DEBUG
 export SAFE_WORKSPACE TARGET MODE=dry CLAUSEO_RELEASE_MODE=dry VERSION FEATURES="" RUSTFLAGS
 SAFE_WORKSPACE=$(wf_env SAFE_WORKSPACE)
 RUSTFLAGS=$(wf_matrix rustflags)
-RELEASE_DIR=target/$TARGET/release
+# cargo and tauri put the build under CARGO_TARGET_DIR when it is set (a Mac's own setting).
+TARGET_DIR=${CARGO_TARGET_DIR:-target}
+case $TARGET_DIR in /*) ;; *) TARGET_DIR=$ROOT/$TARGET_DIR ;; esac
+RELEASE_DIR=$TARGET_DIR/$TARGET/release
 SUFFIX=dev.$SHA9
 
 N=0
@@ -332,7 +335,7 @@ bundle() {
   tarball=Clauseo_${VERSION}_${ARCH}.app.tar.gz
   mv "$macos/Clauseo.app.tar.gz" "$macos/$tarball"
   rm "$macos/Clauseo.app.tar.gz.sig"
-  pnpm -C ui tauri signer sign --app-version "$VERSION" "$PWD/$macos/$tarball"
+  pnpm -C ui tauri signer sign --app-version "$VERSION" "$macos/$tarball"
 }
 step "bundle the .app and DMG ad hoc (APPLE_SIGNING_IDENTITY=-), sign the updater archive"
 note "codesign --force -s - --options runtime on Contents/Helpers' two files first"
