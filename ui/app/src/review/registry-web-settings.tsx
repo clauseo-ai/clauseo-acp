@@ -7,12 +7,7 @@
 import { st, type SettingsKey } from "@clauseo/components/lib/words-settings.ts";
 import { tw, type ToolsKey } from "@clauseo/components/lib/words-tools.ts";
 import { toolsLine, type ToolsLineKey } from "@clauseo/components/lib/words-tools-line.ts";
-import type {
-  AgentLimitsView,
-  LimitsView,
-  PrivacySettings,
-  ToolsSettingsView,
-} from "../transport/protocol.ts";
+import type { LimitsView, PrivacySettings, ToolsSettingsView } from "../transport/protocol.ts";
 import type { Entry } from "./entry.ts";
 import { OpenTip } from "./open-tip.tsx";
 import { SettingsOver } from "./states-settings.tsx";
@@ -51,16 +46,6 @@ const toolWords = (key: ToolsKey): WordsRef => ({
   later: tw.hi[key] === null,
 });
 
-/** Claude's plan alone, so the rows name Claude only. */
-const CLAUDE: AgentLimitsView = {
-  plan: "Claude Max",
-  billing: "plan",
-  windows: [],
-  at_limit_text: "",
-  freshness: "unavailable",
-};
-const CLAUDE_ONLY: LimitsView = { claude: CLAUDE };
-
 const entry = (id: string, words: WordsRef, state: State = {}): Entry => ({
   id,
   words,
@@ -84,20 +69,27 @@ const entry = (id: string, words: WordsRef, state: State = {}): Entry => ({
 /** Privacy's entries, each id written as it is: an id never moves when an entry is added or taken out. Retired in
  * round 3 (icons first): UEP-05, UEP-09, UEP-11, UEP-12; UEP-17 (each plan's own what-line, now UEP-23's one note);
  * UEP-02 (the pane's lead, which repeated its first heading); UEP-16 (Not available yet under the Browser switch,
- * wrong once #870's browser runs without a website check). */
+ * wrong once #870's browser runs without a website check); UEP-06 (Brave Search as Anthropic's "subprocessor", on
+ * Claude's row; UEP-28 on Web search's row says it plainly, D-068). */
 export const WEB_SETTINGS: Entry[] = [
   entry("UEP-01", settingsWords("Privacy")),
   entry("UEP-03", settingsWords("What leaves this computer")),
   entry("UEP-04", settingsWords("To {name}, on your plan")),
   // what goes to a plan, once, as the group's note over both plans' rows
   entry("UEP-23", settingsWords("Questions, the papers' parts they need, web searches.")),
-  // behind Claude's info icon, the tip open
-  entry("UEP-06", settingsWords("Anthropic lists Brave Search as its web search subprocessor."), {
-    limits: CLAUDE_ONLY,
-    tip: "More about Brave Search",
-  }),
+  // behind Web search's info icon, the tip open below it (D-068: it sat on Claude's row and said "subprocessor")
+  entry(
+    "UEP-28",
+    settingsWords(
+      "Claude's web searches go through Brave Search, a service Anthropic uses to run web searches.",
+    ),
+    {
+      tools: ON,
+      tip: "More about Brave Search",
+    },
+  ),
   entry("UEP-21", settingsWords("More about Brave Search"), {
-    limits: CLAUDE_ONLY,
+    tools: ON,
     tip: "More about Brave Search",
   }),
   // the group as a firm locks it: both switches off, each glyph locked, each with the room's lock reason in its
