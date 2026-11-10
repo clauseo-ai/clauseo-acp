@@ -188,6 +188,12 @@ pub struct LaunchMessage {
     /// profile stays only inside these.
     #[serde(default)]
     pub granted: Vec<String>,
+    /// The folders git in the agent trusts (`safe.directory`, [`env::agent_env`]): the matter,
+    /// then each allowed folder (another matter's, granted read-only), in that order. Each is
+    /// also in `granted`; the pool user doesn't own them, so git would refuse them otherwise.
+    /// Each becomes `<root>` and `<root>/*` in the environment.
+    #[serde(default)]
+    pub git_roots: Vec<String>,
     /// The CA bundle (`ca_bundle::ensure`), for `CODEX_CA_CERTIFICATE` and `SSL_CERT_FILE`.
     #[serde(default)]
     pub ca_bundle: Option<String>,
@@ -295,6 +301,9 @@ impl LaunchMessage {
         }
         for path in &self.granted {
             local("granted", path)?;
+        }
+        for path in &self.git_roots {
+            local("git_roots", path)?;
         }
         for path in &self.firm_ca {
             local("firm_ca", path)?;
@@ -571,6 +580,8 @@ fn is_batch(program: &str) -> bool {
     extension.is_some_and(|ext| ext.eq_ignore_ascii_case("cmd") || ext.eq_ignore_ascii_case("bat"))
 }
 
+#[cfg(test)]
+mod git_tests;
 #[cfg(test)]
 #[cfg(windows)]
 mod job_tests;

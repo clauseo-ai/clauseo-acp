@@ -5,13 +5,13 @@ use super::frame::{InnerReport, command_line, read_frame, write_frame};
 use super::paths::{CodexReuse, WinPath};
 use super::*;
 
-const POOL: &str = "S-1-5-21-1111111111-2222222222-3333333333-1005";
-const PROFILE: &str = r"C:\Users\Lawyer";
-const DATA: &str = r"C:\Users\Lawyer\AppData\Local\Clauseo";
-const STATE: &str = r"C:\Users\Lawyer\AppData\Local\Clauseo\agent-state\m1\codex-acp";
-const RUNTIME: &str = r"C:\Users\Lawyer\AppData\Local\Clauseo\runtime\node";
+pub(super) const POOL: &str = "S-1-5-21-1111111111-2222222222-3333333333-1005";
+pub(super) const PROFILE: &str = r"C:\Users\Lawyer";
+pub(super) const DATA: &str = r"C:\Users\Lawyer\AppData\Local\Clauseo";
+pub(super) const STATE: &str = r"C:\Users\Lawyer\AppData\Local\Clauseo\agent-state\m1\codex-acp";
+pub(super) const RUNTIME: &str = r"C:\Users\Lawyer\AppData\Local\Clauseo\runtime\node";
 
-fn message() -> LaunchMessage {
+pub(super) fn message() -> LaunchMessage {
     LaunchMessage {
         version: LAUNCH_VERSION,
         pool_user: Sid::parse(POOL).unwrap(),
@@ -32,17 +32,18 @@ fn message() -> LaunchMessage {
             RUNTIME.to_owned(),
             r"D:\Matters\Smith".to_owned(),
         ],
+        git_roots: vec![r"D:\Matters\Smith".to_owned()],
         ca_bundle: Some(format!(r"{DATA}\sandbox-ca\roots.pem")),
         credential_link: Some(format!(r"{STATE}\auth.json")),
         firm_ca: Vec::new(),
     }
 }
 
-fn profile() -> WinPath {
+pub(super) fn profile() -> WinPath {
     WinPath::parse(PROFILE).unwrap()
 }
 
-fn get<'a>(env: &'a [(String, String)], name: &str) -> Option<&'a str> {
+pub(super) fn get<'a>(env: &'a [(String, String)], name: &str) -> Option<&'a str> {
     env.iter()
         .find(|(n, _)| n.eq_ignore_ascii_case(name))
         .map(|(_, v)| v.as_str())
@@ -237,8 +238,10 @@ fn git_uses_openssl_and_codex_the_bundle() {
     for (name, value) in GIT_OPENSSL {
         assert_eq!(get(&env, name), Some(value));
     }
-    assert!(get(&env, "GIT_CONFIG_KEY_1").is_none());
-    assert!(get(&env, "GIT_CONFIG_VALUE_1").is_none());
+    // Index 1 is the matter's `safe.directory` now; the spec's `core.sshCommand` is gone.
+    assert_eq!(get(&env, "GIT_CONFIG_KEY_1"), Some("safe.directory"));
+    assert_eq!(get(&env, "GIT_CONFIG_VALUE_1"), Some(r"D:/Matters/Smith"));
+    assert!(env.iter().all(|(_, value)| value != "evil"));
     for name in CA_VARS {
         assert_eq!(
             get(&env, name),
