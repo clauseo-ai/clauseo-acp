@@ -17,6 +17,7 @@ const calls: string[] = [];
 const HOST: MarkdownHost = {
   openExternal: (url) => calls.push(`external ${url}`),
   openReference: (kind, id) => calls.push(`${kind} ${id}`),
+  openPath: (path) => calls.push(`path ${path}`),
 };
 
 let host: HTMLDivElement;
@@ -98,6 +99,30 @@ test("a link click is cancelled and goes to the host; a relative link is inert",
     "external https://indiacode.nic.in/act",
     "external https://indiacode.nic.in/act",
   ]);
+});
+
+test("a relative link names a paper: a click or Enter sends its decoded path to the host's openPath, never a navigation", () => {
+  show(
+    "See [Reply notes.md](Reply%20notes.md), [the draft](./drafts/Reply%20to%20bank.docx#p2) and [mail](mailto:a@b.in).",
+  );
+  const [notes, draft, mail] = [...host.querySelectorAll("a")];
+  // no href to follow: a link the keyboard reaches, which the host opens
+  expect(notes?.hasAttribute("href")).toBe(false);
+  expect(notes?.getAttribute("role")).toBe("link");
+  expect(notes?.tabIndex).toBe(0);
+  expect(click(notes).defaultPrevented).toBe(true);
+  click(draft);
+  act(() => {
+    draft?.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+  });
+  click(mail);
+  expect(calls).toEqual([
+    "path Reply notes.md",
+    "path drafts/Reply to bank.docx",
+    "path drafts/Reply to bank.docx",
+    "external mailto:a@b.in",
+  ]);
+  expect(mail?.getAttribute("role")).toBeNull();
 });
 
 test("a footnote reference reaches its note's id (one prefix, not two) and scrolls there, not out", () => {

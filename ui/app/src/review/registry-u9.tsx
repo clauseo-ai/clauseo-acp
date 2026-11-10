@@ -34,6 +34,8 @@ const QUESTION: ViewEntry = {
   },
 };
 const ANSWER = agentText(6, 1, "The notice's date is now **30 October 2026**.");
+/** An answer whose link names a paper the matter's folder no longer holds. */
+const GONE_LINK = agentText(6, 1, "The notes are in [Reply notes.md](Reply%20notes.md).");
 /** The turn's change note: one Word document changed, kept as checkpoint 9, and not yet undone. */
 const changed = (paths: readonly string[] = [NOTICE]): ViewEntry =>
   step(9, {
@@ -270,6 +272,19 @@ export const U9: Entry[] = [
         host={() => versionsHost(LOCKED_TWO_RESTORE)}
         clicks={[OPEN, EARLIER, RESTORE, CONFIRM]}
         standIns={NO_STAND_INS}
+      />
+    ),
+  },
+  // an answer's relative link to a paper the matter's folder no longer holds (D-034), pressed
+  {
+    id: "U9-15",
+    words: errorWords("This paper is no longer in the matter's folder."),
+    screen: "room/thread",
+    ...WINDOW,
+    render: () => (
+      <RoomClicking
+        host={() => threadHost({ entries: [QUESTION, GONE_LINK], papers: PAPERS })}
+        clicks={["a[data-clauseo='link'][role='link']"]}
       />
     ),
   },

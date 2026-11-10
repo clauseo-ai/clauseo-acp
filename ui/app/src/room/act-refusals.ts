@@ -44,6 +44,11 @@ export class ActRefusals {
     if (code !== null) this.#put(matter, { act, code });
   }
 
+  /** An action the room refused itself, with the app's own code (open.ts's PAPER_GONE): it stands as a host's does. */
+  refuse(act: ActRefusal["act"], matter: MatterId, code: string): void {
+    this.#put(matter, { act, code });
+  }
+
   /** Takes back what the matter's last action said. */
   clear(matter: MatterId): void {
     if (this.#by.has(matter)) this.#put(matter, null);

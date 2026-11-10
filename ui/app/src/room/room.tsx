@@ -60,6 +60,7 @@ import { UpdateNotice } from "./update-notice.tsx";
 import { handWaits } from "./triage.ts";
 import { LivePlan } from "./limits/live-plan.tsx";
 import { Matters, type MattersView } from "./matters.ts";
+import type { PapersHost } from "./host-next.ts";
 import { AnswerHost, quietly, type ListedPapers } from "./open.ts";
 import { useMatterMoves, usePapers } from "./use-papers.ts";
 import { LocateFolderContext, type ActRefusals } from "./act-refusals.ts";
@@ -113,10 +114,11 @@ function useAnswerHost(
   matter: MatterId | null,
   listed: ListedPapers,
   refusals: ActRefusals,
+  papers: PapersHost | null,
 ): MarkdownHost {
   const host = useMemo(
-    () => new AnswerHost(transport, matter, refusals),
-    [transport, matter, refusals],
+    () => new AnswerHost(transport, matter, refusals, papers),
+    [transport, matter, refusals, papers],
   );
   useEffect(() => host.show(listed), [host, listed]);
   return host;
@@ -259,7 +261,13 @@ function RoomFrame({
   const moved = useMatterMoves(store, matters.next.papers, open?.matter ?? null);
   const listed = usePapers(matters.next.papers, matters.next.app, open?.matter ?? null, moved);
   const papers = listed?.papers ?? null;
-  const answers = useAnswerHost(transport, open?.matter ?? null, listed, matters.refusals);
+  const answers = useAnswerHost(
+    transport,
+    open?.matter ?? null,
+    listed,
+    matters.refusals,
+    matters.next.papers,
+  );
   // the open matter's refused open (an answer's paper, Find's), on the composer's line; Locate
   // folder for its folder
   const { refusals } = matters;

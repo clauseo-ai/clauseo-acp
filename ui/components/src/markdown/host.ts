@@ -8,11 +8,15 @@ export type MarkdownHost = {
   openExternal(url: string): void;
   /** Open a citation or a paper of the matter, by its validated id. */
   openReference(kind: "citation" | "paper", id: string): void;
+  /** Open the paper a relative link names (`[Reply notes.md](Reply%20notes.md)`), by its matter-relative path,
+   * percent-decoded; the host says so when the matter's folder no longer holds it. */
+  openPath(path: string): void;
 };
 
 const NO_HOST: MarkdownHost = {
   openExternal() {},
   openReference() {},
+  openPath() {},
 };
 
 export const MarkdownHostContext = createContext<MarkdownHost>(NO_HOST);
