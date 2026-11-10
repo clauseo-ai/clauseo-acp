@@ -43,6 +43,14 @@
     min-width: 0;
     overflow-wrap: anywhere;
   }
+  /* a snippet in three lines at most: one long answer can't fill the rail */
+  .room-find-said {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 3;
+    line-clamp: 3;
+    overflow: hidden;
+  }
   /* a found word inside a snippet or a file name */
   .room-find-hit {
     @apply text-primary font-chip;

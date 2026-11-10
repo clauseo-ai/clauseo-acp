@@ -1,5 +1,5 @@
 import type { FocusEvent, KeyboardEvent, MouseEvent, PointerEvent, ReactElement } from "react";
-import type { ComponentType } from "react";
+import { useRef, type ComponentType } from "react";
 import type { IconProps } from "../icons/icon.tsx";
 import { Button } from "../ui/button.tsx";
 import { Chip } from "../ui/chip.tsx";
@@ -8,6 +8,7 @@ import { useWords } from "../lib/words.ts";
 import { langOfText } from "../lib/script.ts";
 import { useCarded, useDraftHolders, useInHand, type Target } from "./hand.ts";
 import { useWide } from "./layout.ts";
+import { useMiddleCut } from "./middle-cut.ts";
 import {
   citationsOf,
   citedPapers,
@@ -57,7 +58,7 @@ export type PaperTileProps = {
   /** Optional: the paper's file type's glyph (fileTypeIcon), at 24 px on the tile's top line, above its title. Hidden
    * from assistive technology: the file's name says its type. */
   fileIcon?: ComponentType<IconProps>;
-  /** Optional: the title is a file's name, kept to one line: a name too long for the tile loses letters from its
+  /** Optional: the title is a file's name, in two lines at most: a name too long for them loses letters from its
    * middle, never its end, so its extension shows. Its whole name stays in the face's text; pair it with a `tip` that
    * shows it whole to the eye. */
   fileName?: boolean;
@@ -65,13 +66,26 @@ export type PaperTileProps = {
   cue?: string;
 };
 
-/** A file's name cut for the middle ellipsis: what may lose letters, and its last letters with the extension, which
- * always show. A name with no extension keeps its last four letters. */
-function nameParts(name: string): { head: string; tail: string } {
-  const dot = name.lastIndexOf(".");
-  const ext = dot > 0 && name.length - dot <= 8 ? dot : name.length;
-  const cut = Math.max(0, ext - 4);
-  return { head: name.slice(0, cut), tail: name.slice(cut) };
+/** A file's name on its tile, in two lines at most, cut in its middle past them (middle-cut.ts). A cut name is for
+ * the eye; assistive technology reads the whole name. */
+function FileName({
+  id,
+  name,
+  lang,
+}: {
+  id: string | undefined;
+  name: string;
+  lang: string | undefined;
+}) {
+  const shown = useRef<HTMLSpanElement>(null);
+  const whole = useRef<HTMLSpanElement>(null);
+  useMiddleCut(shown, whole, name);
+  return (
+    <span className="tile-title tile-name" id={id} lang={lang}>
+      <span className="tile-name-text" ref={shown} />
+      <span className="sr-only" ref={whole} />
+    </span>
+  );
 }
 
 /** One paper on the wall. Uncited it lies flat; cited it fills with its role's colour and stays lit. Hover lifts it
@@ -175,14 +189,11 @@ export function PaperTile({
           )}
           {FileIcon !== undefined && <FileIcon size={24} className="tile-glyph" />}
           {fileName ? (
-            <span
-              className="tile-title tile-name"
+            <FileName
               id={action === undefined ? undefined : room.id(`paper-${id}-title`)}
+              name={title}
               lang={latin ? "en" : langOfText(title)}
-            >
-              <span className="tile-name-head">{nameParts(title).head}</span>
-              <span className="tile-name-tail">{nameParts(title).tail}</span>
-            </span>
+            />
           ) : (
             <span
               className="tile-title"

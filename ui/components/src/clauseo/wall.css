@@ -191,21 +191,15 @@
   .tile:not([data-state="uncited"]) .tile-title {
     color: currentColor;
   }
-  /* a file's name on one line: too long for the tile, it loses letters from its middle, never its extension (the
-     tooltip shows it whole) */
-  .tile-name {
-    display: flex;
-    min-width: 0;
-    /* pre: a space where the name's two parts meet stays; at a flex item's edge it would drop */
-    white-space: pre;
-  }
-  .tile-name-head {
-    min-width: 0;
+  /* a file's name in two lines at most: past them it loses letters from its middle, never its extension
+     (middle-cut.ts fits the words; the tooltip shows the name whole) */
+  .tile-name-text {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
     overflow: hidden;
-    text-overflow: ellipsis;
-  }
-  .tile-name-tail {
-    flex: none;
+    overflow-wrap: anywhere;
   }
   /* what a press of the face does, under the name */
   .tile-cue {
