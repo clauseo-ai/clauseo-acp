@@ -78,8 +78,9 @@ pub(crate) struct LaunchWiring {
     /// The sessions whose removal ran past [`Self::tree_wait`]: their proxy, relay and claims,
     /// held until the host stops (`launch_checks::straggler`).
     pub(crate) held: HeldRuns,
-    /// The block list's seams (ADR 0053, `BlockListSeams::apply`); `None`: no fetch. Boxed, so
-    /// the actor (which keeps this wiring) stays within the host thread's close-future budget.
+    /// The block list's seams (ADR 0053, `BlockListSeams::apply`); `None`, or nothing
+    /// enforcing the list (`blocklist::needed`): no fetch. Boxed, so the actor (which keeps
+    /// this wiring) stays within the host thread's close-future budget.
     pub(crate) blocklist: Option<Box<crate::blocklist::BlockListSeams>>,
     /// The stetdoc the Word blackline and tracked changes run (`HostConfig::with_stetdoc`);
     /// `None`: refused.

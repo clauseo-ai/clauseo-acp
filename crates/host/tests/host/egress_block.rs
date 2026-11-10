@@ -235,8 +235,10 @@ pub(crate) fn start_host(
             }))
             .with_egress_proxy(wired)
             .with_browser_executable(Some(PathBuf::from("/chrome")));
+        // The profile hook offers the guarded browser while `BROWSER_MCP` is off, so the seams
+        // say the list is enforced and the host runs its updater (`blocklist::needed`).
         match seams {
-            Some(seams) => seams.apply(config),
+            Some(seams) => seams.enforced().apply(config),
             None => config,
         }
     });

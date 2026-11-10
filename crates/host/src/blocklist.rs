@@ -3,6 +3,8 @@
 //! published pair every interval over the host's own network, verifies it, applies the rollback
 //! rule, stores it and swaps it into the shared [`Current`] the egress proxy reads.
 //!
+//! - Only when something enforces the list ([`needed`]): the guarded browser entry or the Safe
+//!   workspace. The plain build has neither, so it starts no thread and makes no request.
 //! - The thread is its own `std::thread`, never the actor's pool. It starts once the host
 //!   serves (`actor.rs`'s `run`) and stops when the host thread ends: the [`Running`] guard's
 //!   drop disconnects its stop channel, and every wait is a `recv_timeout` on that channel, so
@@ -89,6 +91,8 @@ pub struct BlockListSeams {
     pub(crate) first_load: FirstLoad,
     /// Run on the updater's thread before its start-up load, for tests that hold it.
     pub(crate) before_load: Option<Arc<dyn Fn() + Send + Sync>>,
+    /// Starts the updater as if something enforced the list ([`needed`]), for tests.
+    pub(crate) enforced: bool,
 }
 
 impl BlockListSeams {
@@ -103,6 +107,7 @@ impl BlockListSeams {
             secrets: None,
             first_load: FirstLoad::new(),
             before_load: None,
+            enforced: false,
         }
     }
 
@@ -112,6 +117,16 @@ impl BlockListSeams {
     #[must_use]
     pub fn before_first_load(mut self, hook: impl Fn() + Send + Sync + 'static) -> Self {
         self.before_load = Some(Arc::new(hook));
+        self
+    }
+
+    /// These seams with the updater started as if something enforced the list ([`needed`]):
+    /// for tests of the guarded browser's proxy, which their profile hook offers while
+    /// `BROWSER_MCP` is off.
+    #[cfg(feature = "test-support")]
+    #[must_use]
+    pub fn enforced(mut self) -> Self {
+        self.enforced = true;
         self
     }
 
@@ -234,13 +249,34 @@ pub(crate) fn allowed_sites(
     }
 }
 
-/// The block list's seams in `config`, with what the thread needs beside them. The seams stay
-/// in the config's wiring too: each launch's proxy reads the same shared [`Current`] from there
-/// (`launch_checks/egress.rs`).
+/// Whether the host fetches the list: only when something enforces it. Only a session's egress
+/// proxy reads it, and a proxy opens only for the guarded browser entry
+/// (`clauseo_profile::servers::BROWSER_MCP`, parked) or, once it returns, the Safe workspace
+/// (`HostConfig::with_sandbox`). The plain build has neither: no fetch at start and none
+/// every interval (stage E, 2026-11-10). The fetch code stays for when either returns.
+pub(crate) fn needed(config: &crate::HostConfig) -> bool {
+    clauseo_profile::servers::BROWSER_MCP
+        || config.sandbox().is_some()
+        || config
+            .wiring
+            .blocklist
+            .as_ref()
+            .is_some_and(|seams| seams.enforced)
+}
+
+/// The block list's seams in `config`, with what the thread needs beside them, when [`needed`].
+/// The seams stay in the config's wiring too: each launch's proxy reads the same shared
+/// [`Current`] from there (`launch_checks/egress.rs`). When not needed, `None`: no thread,
+/// no load and no fetch, and the first load's teller is dropped so a wait for it ends at once.
 pub(crate) fn prepare(config: &crate::HostConfig) -> Option<Start> {
-    let seams = config.wiring.blocklist.as_deref()?.clone();
+    let seams = config.wiring.blocklist.as_deref()?;
+    if !needed(config) {
+        drop(seams.first_load.teller());
+        tracing::info!("block list: nothing enforces it in this build; not fetched");
+        return None;
+    }
     Some(Start {
-        seams,
+        seams: seams.clone(),
         data_dir: config.effective.data_dir().to_path_buf(),
         live: Live::new(Fetching::of(config.effective.settings())),
         clock: Arc::clone(&config.clock),
