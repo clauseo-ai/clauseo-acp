@@ -2,7 +2,8 @@
 // Privacy), holding only what is true now, icons first and in the fewest words (DESIGN.md §Icons). The group's note
 // says once what goes to a plan; then one row per plan the window knows, naming where; for Claude, the provider
 // Anthropic lists for its web search behind an info icon. Then a row for the websites Clauseo visits, its explanation behind an info
-// icon, unless the host's switches have both tools off. Then the tools' switches, web search and the browser, each led
+// icon, unless the host's switches have both tools off. Under the rows, one line on what Clauseo fetches by itself
+// when it starts (D-064): each plan's limits. Then the tools' switches, web search and the browser, each led
 // by its glyph with the state on it, one helper line each, each flip one patch. A locked switch shows the host's value,
 // its glyph locked, and the room's lock reason, "Managed by firm", in its helper's place. Whether a conversation gets the
 // browser once it's on (a Chrome, or Edge on Windows, on the computer; the firm's browser policy) is the tool line's to
@@ -146,6 +147,9 @@ export function Privacy({ ctx }: { ctx: SectionContext }) {
       <Group
         title={w.s("What leaves this computer")}
         note={w.s("Questions, the papers' parts they need, web searches.")}
+        foot={w.s(
+          "When it starts, Clauseo asks Claude or ChatGPT how much of your plan is left. No papers or questions go with it.",
+        )}
       >
         {plansOf(ctx).map((kind) => (
           <Dest key={kind} kind={kind} />

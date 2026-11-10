@@ -48,6 +48,9 @@ export const HI = {
   "More about Brave Search": "Brave Search के बारे में और",
   "Anthropic lists Brave Search as its web search subprocessor.":
     "Anthropic, Brave Search को अपने वेब खोज सब-प्रोसेसर के रूप में सूचीबद्ध करता है।",
+  // under the rows: what Clauseo fetches by itself when it starts (D-064)
+  "When it starts, Clauseo asks Claude or ChatGPT how much of your plan is left. No papers or questions go with it.":
+    "शुरू होने पर Clauseo, Claude या ChatGPT से पूछता है कि आपके प्लान में कितना बाकी है। इसके साथ कोई दस्तावेज़ या प्रश्न नहीं जाते।",
   "To the websites Clauseo visits": "Clauseo जिन वेबसाइटों पर जाता है, उन्हें",
   "About websites": "वेबसाइटों के बारे में",
   "Websites see Clauseo's visits, as they see any browser's.":
