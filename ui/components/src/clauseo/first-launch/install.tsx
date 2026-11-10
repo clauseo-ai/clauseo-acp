@@ -48,6 +48,8 @@ export type InstallActs = {
    * the plan isn't here yet. Desktop starts the download on the press and keeps it, so the sign-in goes on once the
    * plan is ready (0033, "When an install starts"). Left out in a matter, whose gate has the press. */
   signIn?: (() => void) | undefined;
+  /** The Sign in names its plan, "Sign in to {name}": where both plans stand side by side (the first screen). */
+  named?: boolean | undefined;
   /** The plan's install, the normal one (`install_agent`, its size, progress and failures on this line): offered as
    * "Install {plan}" for a plan whose install went missing after Clauseo installed it (#859). Left out, that plan's
    * line is the plain missing one. */
@@ -65,7 +67,12 @@ export type InstallTestIds = {
 
 /** The first screen's line while the sign-in status check runs and the install has no line of its own: the check's
  * words, and Sign in busy (disabled, `aria-busy`) until the check answers. The room gate shows the same in the composer. */
-export function checkingLine(lang: Lang, name: string, ids: InstallTestIds = {}): WorkingState {
+export function checkingLine(
+  lang: Lang,
+  name: string,
+  ids: InstallTestIds = {},
+  named = false,
+): WorkingState {
   const w = (key: Parameters<typeof fl>[1], slots?: Record<string, string | number>) =>
     fl(lang, key, slots);
   return {
@@ -82,7 +89,7 @@ export function checkingLine(lang: Lang, name: string, ids: InstallTestIds = {})
           aria-busy="true"
           data-testid={ids.signIn}
         >
-          {w("Sign in")}
+          {named ? w("Sign in to {name}", { name }) : w("Sign in")}
         </Button>
       </span>
     ),
@@ -167,7 +174,7 @@ export function installLine(
               onClick={acts.signIn}
               data-testid={ids.signIn}
             >
-              {w("Sign in")}
+              {acts.named === true ? w("Sign in to {name}", { name }) : w("Sign in")}
             </Button>
           ),
         ),

@@ -82,7 +82,7 @@ const ADD0: Scene = {
     ],
   },
 };
-/** A fresh computer: Claude not here yet, with its size and the room gate's Sign in; ChatGPT's card with Add. */
+/** A fresh computer: neither plan here yet, each with its card and Add, Claude's then ChatGPT's. */
 const ADD: Scene = {
   setup: {
     first: [
@@ -172,4 +172,8 @@ export const UD2_PLANS: Entry[] = [
   entry("UD2-56", "Clauseo isn't using {app}'s sign-in here.", found("reuse_off")),
   // UD2-59: the card's line with no size known (a download of no bytes)
   entry("UD2-59", "Signing in happens in your browser.", ADD0),
+  // UD2-60 to UD2-62: Claude's card, the same as ChatGPT's, when Claude isn't added yet (the plans side by side)
+  entry("UD2-60", "Uses your Claude plan.", ADD),
+  entry("UD2-61", "Add Claude", ADD),
+  entry("UD2-62", "Needs a download of about {mb} MB. Signing in happens in your browser.", ADD),
 ];

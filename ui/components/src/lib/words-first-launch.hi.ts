@@ -54,7 +54,8 @@ export const HI = {
     "आपके दस्तावेज़ इसी कंप्यूटर पर रहते हैं। हर प्रश्न के साथ जो भेजा जाता है, वही {name} देखता है।",
 
   // the plan, in the composer (design)
-  "Sign in to {name} to ask about this matter": "इस मामले के बारे में पूछने के लिए {name} में साइन इन करें",
+  "Sign in to Claude or ChatGPT to ask about this matter":
+    "इस मामले के बारे में पूछने के लिए Claude या ChatGPT में साइन इन करें",
   "Sign in": "साइन इन करें",
   "Use {name} instead": "इसके बजाय {name} इस्तेमाल करें",
   "Use an API key or my firm's account": "API key या अपनी फ़र्म का खाता इस्तेमाल करें",
@@ -167,6 +168,13 @@ export const HI = {
     "सुरक्षित कार्यक्षेत्र तैयार करने के लिए Windows एक बार अनुमति माँगता है।",
   "Not now": "अभी नहीं",
   Settings: "सेटिंग्स",
+
+  // both plans side by side on the first screen and in the matter's sign-in box (new; provisional)
+  "Sign in with the plan you pay for: Claude, ChatGPT or both.":
+    "जिस प्लान का भुगतान आप करते हैं, उससे साइन इन करें: Claude, ChatGPT या दोनों।",
+  "Your papers stay on this computer. Claude or ChatGPT sees the parts it reads to answer you.":
+    "आपके दस्तावेज़ इसी कंप्यूटर पर रहते हैं। Claude या ChatGPT उतना ही देखता है, जितना वह आपको जवाब देने के लिए पढ़ता है।",
+  "Sign in to {name}": "{name} में साइन इन करें",
 } satisfies Hindi<string>;
 
 /** Every string, English and Hindi (null: hi: later), for the tests that hold the voice and the copy review. */

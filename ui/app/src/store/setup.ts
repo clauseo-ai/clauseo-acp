@@ -63,8 +63,16 @@ export type SetupState = {
   /** Whether this computer can keep an API key; null before SetupInfo. */
   keys: boolean | null;
   agents: Readonly<Record<AgentId, AgentSetup>>;
-  /** The plan the first screen shows getting ready: Claude's, until the lawyer chooses ChatGPT. */
+  /** The plan the lawyer means: the last one whose Sign in they pressed. Before any press (`picked` false) it follows
+   * the one plan that says it is signed in, so a lawyer with ChatGPT alone is not taken for Claude after a restart;
+   * Claude's otherwise, as the fallback. The first read and the Safe workspace step follow it. */
   chosen: AgentId;
+  /** The lawyer pressed a plan's Sign in (or "Use … instead") in this window: `chosen` no longer follows the sign-ins. */
+  picked: boolean;
+  /** A plan whose Sign in was pressed while the other plan was downloading or signing in: one download at a time, and
+   * a new install pauses another's and drops its sign-in (0033), so its start_sign_in waits here until the other is
+   * ready and signed in, or its install or sign-in ends. Null with none waiting. */
+  queued: AgentId | null;
   /** "Use … instead" pressed: the agent the new conversation takes once the room lists it; null after. */
   pending: AgentId | null;
   /** The gate's own: the key panel open, the paste field open, what was copied for the failure on screen. */
@@ -88,6 +96,8 @@ const START: SetupState = {
   keys: null,
   agents: {},
   chosen: CLAUDE,
+  picked: false,
+  queued: null,
   pending: null,
   keyOpen: false,
   pasting: false,
@@ -119,6 +129,51 @@ export const isSignedIn = (state: SignIn | undefined): boolean =>
   "signed_in" in state &&
   state.signed_in !== undefined;
 
+/** The plans, in the order every screen offers them: Claude, then ChatGPT. */
+export const PLANS: readonly AgentId[] = [CLAUDE, CODEX];
+
+/** Whether a plan is in the middle of something a second install would break: downloading or setting up (an offline
+ * download waits and resumes by itself), or a sign-in queued, being checked or under way in the browser. A failed
+ * install, a paused one, a sign-in that stopped or was cancelled, a login found (it waits for the lawyer's press) and
+ * signed in are not. */
+export function busy(setup: AgentSetup | undefined): boolean {
+  const install = setup?.install;
+  if (typeof install === "object" && install.failed !== undefined) return false;
+  if (install === "installing") return true;
+  if (
+    typeof install === "object" &&
+    (install.downloading !== undefined || install.waiting !== undefined)
+  )
+    return true;
+  return signInBusy(setup?.signIn);
+}
+
+/** A sign-in queued, being checked, or under way in the browser or with a code. */
+function signInBusy(signIn: SignIn | undefined): boolean {
+  if (signIn === "queued" || signIn === "checking") return true;
+  return (
+    typeof signIn === "object" &&
+    (signIn.waiting !== undefined ||
+      signIn.device_code !== undefined ||
+      signIn.switching !== undefined)
+  );
+}
+
+/** Whether a plan's sign-in is already under way or waits on the lawyer's press (a login found): a new start_sign_in
+ * would only start it over. */
+const signingIn = (setup: AgentSetup | undefined): boolean => {
+  const signIn = setup?.signIn;
+  return signInBusy(signIn) || (typeof signIn === "object" && signIn.login_found !== undefined);
+};
+
+/** The plan `chosen` follows before the lawyer picks: the one plan signed in, when exactly one is; else as it was. */
+function follow(state: SetupState): SetupState {
+  if (state.picked) return state;
+  const signed = PLANS.filter((id) => isSignedIn(state.agents[id]?.signIn));
+  const only = signed.length === 1 ? signed[0] : undefined;
+  return only === undefined || only === state.chosen ? state : { ...state, chosen: only };
+}
+
 export type SetupStore = {
   subscribe: (listener: () => void) => () => void;
   state: () => SetupState;
@@ -133,6 +188,12 @@ export type SetupStore = {
   set: (
     patch: Partial<Pick<SetupState, "keyOpen" | "pasting" | "copied" | "chosen" | "pending">>,
   ) => void;
+  /** A plan's "Sign in to {name}", pressed: it becomes the chosen plan (and the new conversation's), and its
+   * start_sign_in goes now, or waits in `queued` while the other plan is busy. A plan already signed in, or whose
+   * sign-in is under way, sends nothing. */
+  signInTo: (agent: AgentId) => void;
+  /** The waiting plan's Cancel: it waits no more, and nothing is sent. */
+  unqueue: () => void;
   /** The counts switch, pressed: before the first act it is local state only; after it, `set_privacy_settings`. */
   setCounts: (on: boolean) => void;
   /** The lawyer's first act: its count, then `first_act` with the switch's value, once. */
@@ -148,7 +209,7 @@ export function createSetupStore(transport: HostTransport & SetupSource): SetupS
   const counted = new Set<string>();
   let firstActSent = false;
   const emit = (next: SetupState) => {
-    state = next;
+    state = follow(next);
     for (const listener of listeners) listener();
   };
   const warn = (what: string) => (error: unknown) =>
@@ -161,7 +222,36 @@ export function createSetupStore(transport: HostTransport & SetupSource): SetupS
   };
   const agent = (id: AgentId, patch: AgentSetup) =>
     emit({ ...state, agents: { ...state.agents, [id]: { ...state.agents[id], ...patch } } });
+  // the plans whose start_sign_in went and whose host hasn't said anything of them since: busy already, so a second
+  // press in that moment waits too
+  const starting = new Set<AgentId>();
+  /** Whether a plan other than `agent` is busy: `agent`'s own start_sign_in waits for it. */
+  const otherBusy = (agent: AgentId): boolean =>
+    [...starting].some((id) => id !== agent) ||
+    Object.entries(state.agents).some(([id, setup]) => id !== agent && busy(setup));
+  const startSignIn = (agent: AgentId) => {
+    starting.add(agent);
+    void send({ start_sign_in: { agent } }).then((ok) => {
+      if (ok) return;
+      // refused: nothing started, so a plan waiting on it goes now
+      starting.delete(agent);
+      release();
+    });
+  };
+  /** The waiting plan's start_sign_in, once no other plan is busy. */
+  const release = () => {
+    const waiting = state.queued;
+    if (waiting === null || otherBusy(waiting)) return;
+    emit({ ...state, queued: null });
+    if (!isSignedIn(state.agents[waiting]?.signIn)) startSignIn(waiting);
+  };
   const hear = (event: SetupEvent) => {
+    const id = event.agent_install_progress?.agent ?? event.sign_in_changed?.agent ?? null;
+    if (id !== null) starting.delete(id);
+    heard(event);
+    release();
+  };
+  const heard = (event: SetupEvent) => {
     if ("setup_info" in event && event.setup_info !== undefined) {
       emit({ ...state, keys: event.setup_info.keys_available });
     } else if ("agent_install_progress" in event && event.agent_install_progress !== undefined) {
@@ -263,7 +353,29 @@ export function createSetupStore(transport: HostTransport & SetupSource): SetupS
     },
     command: (command) => void send(command),
     send,
-    set: (patch) => emit({ ...state, ...patch }),
+    // a plan chosen by hand ("Use … instead") is the lawyer's pick
+    set: (patch) =>
+      emit({ ...state, ...patch, picked: state.picked || patch.chosen !== undefined }),
+    signInTo: (agent) => {
+      emit({
+        ...state,
+        chosen: agent,
+        picked: true,
+        pending: agent,
+        keyOpen: false,
+        pasting: false,
+        queued: state.queued === agent ? null : state.queued,
+      });
+      // signed in, or its sign-in under way already: it only becomes the chosen plan
+      const setup = state.agents[agent];
+      if (isSignedIn(setup?.signIn) || signingIn(setup)) return;
+      if (otherBusy(agent)) {
+        emit({ ...state, queued: agent });
+        return;
+      }
+      startSignIn(agent);
+    },
+    unqueue: () => emit({ ...state, queued: null }),
     setCounts: (on) => {
       if (state.counts.locked) return;
       emit({ ...state, counts: { ...state.counts, on } });

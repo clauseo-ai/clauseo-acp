@@ -106,7 +106,7 @@ test("another refusal says its code's sentence, and a press clears it", async ()
       if (c.start_sign_in !== undefined) throw refusal("signin.key_in_use");
     },
   });
-  await press("Sign in");
+  await press("Sign in to Claude");
   await settle();
   expect(byId("signin-refused")?.textContent).toBe(
     "Clauseo is using your API key. To sign in with your plan instead, open Settings, then Plans, and remove the key.",

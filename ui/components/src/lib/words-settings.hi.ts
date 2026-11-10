@@ -72,6 +72,9 @@ export const HI = {
   "Look for my {app} sign-in": "मेरा {app} साइन इन खोजें",
   "Uses your ChatGPT plan.": "आपके ChatGPT प्लान का उपयोग करता है।",
   "Add ChatGPT": "ChatGPT जोड़ें",
+  // the same card for Claude, when Claude isn't added yet (the plans side by side)
+  "Uses your Claude plan.": "आपके Claude प्लान का उपयोग करता है।",
+  "Add Claude": "Claude जोड़ें",
   "Needs a download of about {mb} MB. Signing in happens in your browser.":
     "लगभग {mb} MB का डाउनलोड ज़रूरी है। साइन इन आपके ब्राउज़र में होता है।",
   "Signing in happens in your browser.": "साइन इन आपके ब्राउज़र में होता है।",

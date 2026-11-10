@@ -1,6 +1,7 @@
 // Signing in, in the composer's well where the question will go (design/03-system/src/pages/first-launch/gate.tsx):
 // the one act left before the first question. Two rows on the well: the act, with its words and its button where Ask
-// will stand, and beneath it the quiet ways round it. It covers the plan, a login already on this computer (said before
+// will stand, and beneath it the quiet ways round it. It covers the plan (signed out, both plans offered side by side,
+// each with its own "Sign in to {name}"), a login already on this computer (said before
 // it is used), signing in in the browser with each way that can end, ChatGPT's device code (never the first offer:
 // only after the browser didn't work), and an API key. No model is named and no lab's logo shows.
 import { useEffect, useRef, type ReactNode } from "react";
@@ -30,6 +31,9 @@ export type Found =
 /** Which plan: Claude's (Claude Code underneath) or ChatGPT's (Codex). */
 export type Plan = "claude" | "chatgpt";
 
+/** The plans, in the order the gate offers them. */
+const PLANS: readonly Plan[] = ["claude", "chatgpt"];
+
 /** Where the sign-in is, as the gate shows it. The app reads it from the host's `SignIn`; `key` and `pasting` are the
  * gate's own, the panel and the paste field the lawyer opened. Times are already clock words in the language. */
 export type GateView =
@@ -50,6 +54,8 @@ export type GateRefusal = { code: string; switching: boolean };
 /** What a press asks for; the app turns each into the host's command, or the gate's own state. */
 export type GateAct =
   | { act: "sign-in"; console?: boolean }
+  /** A plan's own "Sign in to {name}", where both are offered: this gate's plan or the other. */
+  | { act: "sign-in-to"; plan: Plan }
   | { act: "cancel" }
   | { act: "paste" }
   | { act: "code"; code: string }
@@ -74,6 +80,8 @@ export type GateTestIds = {
   loginFound?: string;
   loginUse?: string;
   loginOther?: string;
+  /** Each plan's "Sign in to {name}", suffixed with its plan: `${signInTo}-claude`. */
+  signInTo?: string;
 };
 
 /** The gate, in the field's row, for every state before the field takes a question. */
@@ -162,33 +170,59 @@ export function Gate({
         )}
     </Ways>
   );
+  // both plans side by side and equal, Claude then ChatGPT, each its own sign-in
+  const both = (
+    <span className="fl-gate-plans">
+      {PLANS.map((p) => (
+        <Button
+          key={p}
+          kind="tone"
+          className={cn(WRAP, "room-field-ask fl-gate-plan")}
+          onClick={act({ act: "sign-in-to", plan: p })}
+          data-plan={p}
+          data-testid={testIds.signInTo === undefined ? undefined : `${testIds.signInTo}-${p}`}
+        >
+          {w("Sign in to {name}", { name: NAME[p] })}
+        </Button>
+      ))}
+    </span>
+  );
   let body: ReactNode;
   switch (view.kind) {
     case "signed-out":
-      body = (
-        <>
-          <Act act={signIn(w("Sign in"))}>
-            <Say>
-              {view.found === undefined
-                ? w("Sign in to {name} to ask about this matter", { name })
-                : w(FOUND[view.found], { app })}
-            </Say>
-          </Act>
-          {/* a login that can't be shared offers Clauseo's own sign-in, and for Claude a key or the firm's account */}
-          {view.found === undefined
-            ? instead(true)
-            : plan === "claude" && (
-                <Ways>
-                  {way(
-                    w("Use an API key or my firm's account"),
-                    { act: "key-panel", open: true },
-                    undefined,
-                    true,
-                  )}
-                </Ways>
+      body =
+        view.found === undefined ? (
+          <>
+            <Act act={both}>
+              <Say>{w("Sign in to Claude or ChatGPT to ask about this matter")}</Say>
+            </Act>
+            <Ways>
+              {way(
+                w("Use an API key or my firm's account"),
+                { act: "key-panel", open: true },
+                undefined,
+                true,
               )}
-        </>
-      );
+            </Ways>
+          </>
+        ) : (
+          <>
+            <Act act={signIn(w("Sign in"))}>
+              <Say>{w(FOUND[view.found], { app })}</Say>
+            </Act>
+            {/* a login that can't be shared offers Clauseo's own sign-in, and for Claude a key or the firm's account */}
+            {plan === "claude" && (
+              <Ways>
+                {way(
+                  w("Use an API key or my firm's account"),
+                  { act: "key-panel", open: true },
+                  undefined,
+                  true,
+                )}
+              </Ways>
+            )}
+          </>
+        );
       break;
     case "checking":
       // the sign-in status check is still running (its retries are silent): nothing to press yet, Sign in busy

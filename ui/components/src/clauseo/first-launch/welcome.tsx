@@ -1,7 +1,8 @@
 // The first screen (design/03-system/src/pages/first-launch/welcome.tsx, way B, papers first). It is already the room,
 // with no matter in it yet: the work across the window asks for one thing, the folder for a matter, or a new matter
-// (U2's form, in place). The plan's install shows on the working line at the foot where the composer will stand (its
-// size and Sign in until the lawyer presses it, since nothing downloads before then), with the fine print under it;
+// (U2's form, in place). Both plans stand at the foot where the composer will stand, Claude then ChatGPT, equal: a lead
+// line, then each plan's own working line (its size and "Sign in to {name}" until the lawyer presses it, since nothing
+// downloads before then, then its progress, failures and "{name} is ready"), with the fine print under them;
 // and the anonymous counts Clauseo sends by default, said plainly, with the switch. The sample matter waits (UD1's
 // brief), and so does the Safe workspace's line: no screen names it before UC.
 import { useId, type ReactNode, type Ref } from "react";
@@ -22,10 +23,21 @@ import { cn } from "../../lib/cn.ts";
 /** The counts switch: on by default; `locked` when the firm's policy keeps counts off: shown off, with no control. */
 export type CountsSwitch = { on: boolean; locked: boolean; onChange: (on: boolean) => void };
 
+/** One plan's row at the foot. */
+export type FootPlan = {
+  /** Its agent id, for the row's data-agent. */
+  key: string;
+  /** "Claude" or "ChatGPT". */
+  name: string;
+  /** Its working line; null when there is none to show. */
+  install: WorkingState | null;
+  /** Its install finished in this window: "{name} is ready" in the line's place. */
+  ready: boolean;
+};
+
 export function Welcome({
-  name,
-  install,
-  ready,
+  plans,
+  documents,
   counts,
   onOpenFolder,
   onNewMatter,
@@ -36,12 +48,10 @@ export function Welcome({
   testIds = {},
   openRef,
 }: {
-  /** The plan's name, "Claude" or "ChatGPT". */
-  name: string;
-  /** The install's working line; null when there is none to show. */
-  install: WorkingState | null;
-  /** The install finished in this window: "{name} is ready" in the line's place. */
-  ready: boolean;
+  /** Both plans, in the order shown: Claude, then ChatGPT. */
+  plans: readonly FootPlan[];
+  /** The plan the fine print names, once the lawyer has one; null names both. */
+  documents: string | null;
   counts: CountsSwitch;
   onOpenFolder: () => void;
   onNewMatter: () => void;
@@ -124,25 +134,48 @@ export function Welcome({
       </div>
       <div className="fl-foot">
         <div className="fl-foot-col">
-          {/* the install's live region, mounted as the foot is, so each state change is said once,
+          {/* each plan's live region, mounted as the foot is, so each state change is said once,
               in place; the bytes on the line are seen, not read at every tick (the composer's
               region, room-entry, does the same) */}
-          <span className="sr-only" role="status" data-testid="install-said">
-            {install !== null && <WorkingSaid state={install} />}
-          </span>
-          {install !== null ? (
-            <div className="room-entry fl-foot-well" data-working="">
-              <WorkingLine state={install} />
-            </div>
-          ) : (
-            ready && (
-              <Done className="fl-ready">
-                <Say>{w("{name} is ready", { name })}</Say>
-              </Done>
-            )
+          {plans.map((plan) => (
+            <span key={plan.key} className="sr-only" role="status" data-testid="install-said">
+              {plan.install !== null && <WorkingSaid state={plan.install} />}
+            </span>
+          ))}
+          {/* the lead while a plan still offers its sign-in: either, or both */}
+          {plans.some((plan) => plan.install !== null) && (
+            <p className="fl-plans-lead">
+              <Say>{w("Sign in with the plan you pay for: Claude, ChatGPT or both.")}</Say>
+            </p>
+          )}
+          {plans.map((plan) =>
+            plan.install !== null ? (
+              <div
+                key={plan.key}
+                className="room-entry fl-foot-well fl-plan"
+                data-working=""
+                data-testid="plan-row"
+                data-agent={plan.key}
+              >
+                <WorkingLine state={plan.install} />
+              </div>
+            ) : (
+              plan.ready && (
+                <div
+                  key={plan.key}
+                  className="fl-plan"
+                  data-testid="plan-row"
+                  data-agent={plan.key}
+                >
+                  <Done className="fl-ready">
+                    <Say>{w("{name} is ready", { name: plan.name })}</Say>
+                  </Done>
+                </div>
+              )
+            ),
           )}
           <p className="room-line fl-foot-line">
-            <DocumentsLine name={name} />
+            <DocumentsLine name={documents} />
           </p>
           <Counts {...counts} onWhatsSent={onWhatsSent} testId={testIds.counts} />
         </div>
