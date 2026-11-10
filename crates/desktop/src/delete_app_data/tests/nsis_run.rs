@@ -62,9 +62,6 @@ pub(super) fn preprocess(lines: &[String], defines: &HashMap<String, String>) ->
         let outer = open.iter().all(|&on| on);
         let parts = words(line);
         let parts: Vec<&str> = parts.iter().map(String::as_str).collect();
-        if self.file_line(&parts) {
-            return;
-        }
         match parts.as_slice() {
             ["!if", a, op, b] => {
                 let (a, b) = (expand(a), expand(b));
@@ -454,6 +451,9 @@ impl Machine {
         }
         let parts = words(line);
         let parts: Vec<&str> = parts.iter().map(String::as_str).collect();
+        if self.file_line(&parts) {
+            return;
+        }
         match parts.as_slice() {
             ["StrCpy", var, value] => self.set(var, self.expand(value)),
             ["StrCpy", var, value, len] => self.set(var, self.str_cpy(value, len, "")),
