@@ -131,7 +131,7 @@ An unknown kind has no row and no answer (`None`): its envelope's `stream` decid
 | `matter_created` | name, kind, import? | host | yes | M |
 | `checkpoint_recorded` | checkpoint, kind, thread?, turn? | matters, through the host | yes | M |
 | `outside_edits` | checkpoint, files | matters, through the host | yes | M |
-| `version_restored` | from, checkpoint, scope, undoes? | host, matters | yes | M, and T of the conversation it was asked from |
+| `version_restored` | from, checkpoint, scope, undoes? | host, matters | yes | M |
 | `matter_relocated` | folder | host, matters | yes | M |
 | `patches` (`HostEvent`) | `PatchBatch`: stream, epoch, patches | host | no | the subscribed stream |
 | `events` (`HostEvent`) | envelopes, replayed then live | host | no | the subscribed stream |
@@ -476,6 +476,8 @@ reads back as `Unknown`.
   command, which refuses them. `HostCommand::RestoreVersion` names its scope with
   `RestoreRequest`, a closed twin of the logged `RestoreScope` with the same wire form and
   `deny_unknown_fields`; the host converts it with `From` before logging `version_restored`.
+  That event, a matter event, is also logged in the stream of the conversation the restore was
+  asked from (`RestoreVersion { thread }`), where the thread's fold makes the same marker.
   `HostCommand::SendPrompt` names its delivery the same way, with `DeliveryRequest`, the closed
   twin of `Delivery`, so a newer mode fails to decode as `command.invalid`. Queue has one wire
   form in the command, `UserMessage` and `UserMessageEntry`: a missing `delivery`, which is how
