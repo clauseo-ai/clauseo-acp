@@ -58,66 +58,68 @@ fn codex_path(dirs: Vec<PathBuf>, etc_paths: Vec<PathBuf>) -> SessionPath {
     }
 }
 
-/// On Linux, Codex's config gets `allow_login_shell = false` and the session's whole `PATH` as
-/// `shell_environment_policy.set.PATH`, beside the policy's `ignore_default_excludes`.
+/// On Linux, Codex's config gets `allow_login_shell = false` and `features.shell_snapshot =
+/// false` beside R15's other features, and no `shell_environment_policy.set` (Codex then puts
+/// its own folders first itself); the session's `PATH` is left as it was.
 #[test]
-fn codex_gets_both_keys_with_the_session_path() {
+fn codex_gets_no_login_shell_and_no_snapshot() {
     let mut env = codex_env("/stet:/rt/bin:/usr/bin:/bin");
     let before = codex_config(&env);
     apply_on(&mut env, &codex_path(dirs(), Vec::new()), Os::Linux);
     let after = codex_config(&env);
     assert_eq!(after["allow_login_shell"], json!(false));
+    assert_eq!(after["features"]["shell_snapshot"], json!(false));
     assert_eq!(
         after["shell_environment_policy"],
-        json!({"ignore_default_excludes": false, "set": {"PATH": "/stet:/rt/bin:/usr/bin:/bin"}})
+        json!({"ignore_default_excludes": false}),
+        "no set.PATH"
     );
     // Nothing else changed.
-    let (mut after, mut before) = (after, before);
+    let mut after = after;
     after.as_object_mut().unwrap().remove("allow_login_shell");
-    after["shell_environment_policy"]
+    after["features"]
         .as_object_mut()
         .unwrap()
-        .remove("set");
-    before.as_object_mut().unwrap().remove("allow_login_shell");
+        .remove("shell_snapshot");
     assert_eq!(after, before);
     assert_eq!(&env[&OsString::from("PATH")], "/stet:/rt/bin:/usr/bin:/bin");
+    assert_eq!(env.len(), 2);
 }
 
-/// A `PATH` holding quotes, backslashes and spaces reaches Codex as it is: the JSON escapes it,
-/// and codex-acp's `JSON.parse` and app-server's JSON-to-TOML give back the same string.
+/// A `PATH` holding quotes, backslashes and spaces never goes in `CODEX_CONFIG`; on macOS it
+/// stays in the child's environment as it is, with `path_helper`'s folders added.
 #[test]
-fn the_path_value_is_escaped() {
+fn the_path_stays_in_the_environment() {
     let path = r#"/stet:/My "Tools"\bin:/a b:/usr/bin"#;
     let mut env = codex_env(path);
-    apply_on(&mut env, &codex_path(dirs(), Vec::new()), Os::Linux);
+    let helper = vec![PathBuf::from("/usr/local/bin")];
+    apply_on(&mut env, &codex_path(dirs(), helper), Os::Mac);
     let text = env[&OsString::from("CODEX_CONFIG")]
         .to_str()
         .unwrap()
         .to_owned();
-    assert!(
-        text.contains(r#""PATH":"/stet:/My \"Tools\"\\bin:/a b:/usr/bin""#),
-        "{text}"
-    );
+    assert!(!text.contains("PATH"), "{text}");
     assert_eq!(
-        codex_config(&env)["shell_environment_policy"]["set"]["PATH"],
-        json!(path)
+        &env[&OsString::from("PATH")],
+        r#"/stet:/rt/bin:/usr/local/bin:/My "Tools"\bin:/a b:/usr/bin"#
     );
 }
 
-/// With no folders first on `PATH`, and on Windows whatever the folders, the config is
-/// byte for byte what it was: neither key.
+/// With no folders first on `PATH`, and on Windows whatever the folders, the environment is
+/// byte for byte what it was: neither key, the same `PATH`.
 #[test]
-fn no_folders_or_windows_leave_codex_config_alone() {
+fn no_folders_or_windows_leave_codex_alone() {
     let original = codex_env("/usr/bin:/bin");
     let mut env = original.clone();
+    let helper = vec![PathBuf::from("/usr/local/bin")];
     apply_on(&mut env, &codex_path(Vec::new(), Vec::new()), Os::Linux);
-    apply_on(&mut env, &codex_path(Vec::new(), Vec::new()), Os::Mac);
+    apply_on(&mut env, &codex_path(Vec::new(), helper.clone()), Os::Mac);
     assert_eq!(env, original);
-    apply_on(&mut env, &codex_path(dirs(), Vec::new()), Os::Windows);
+    apply_on(&mut env, &codex_path(dirs(), helper), Os::Windows);
     assert_eq!(env, original);
     let config = codex_config(&env);
     assert!(config.get("allow_login_shell").is_none());
-    assert!(config["shell_environment_policy"].get("set").is_none());
+    assert!(config["features"].get("shell_snapshot").is_none());
 }
 
 /// A fake `/etc`: `paths`, with a blank line and a comment, and two `paths.d` files given in
@@ -176,10 +178,7 @@ fn mac_codex_path_puts_path_helper_after_clauseo_and_drops_repeats() {
     apply_on(&mut env, &path, Os::Mac);
     let expected = "/stet:/rt/bin:/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin:/opt/X11/bin:\
                     /usr/sbin:/sbin:/Users/ada/bin";
-    assert_eq!(
-        codex_config(&env)["shell_environment_policy"]["set"]["PATH"],
-        json!(expected)
-    );
+    assert_eq!(&env[&OsString::from("PATH")], expected);
     assert_eq!(codex_config(&env)["allow_login_shell"], json!(false));
     assert!(!run.join(ENV_FILE).exists(), "Codex gets no file");
     // Linux reads no `path_helper`; nor does a Codex session without folders.
