@@ -28,6 +28,13 @@ pub(crate) const STDIN_GRACE: Duration = Duration::from_secs(2);
 const TERM_GRACE: Duration = Duration::from_secs(3);
 /// How long shutdown waits for the exit after the kill, before it reports the agent unresponsive.
 const KILL_GRACE: Duration = Duration::from_secs(2);
+/// How often [`Handle::exited_draining`] asks whether the tree is gone once the agent exited.
+#[cfg(windows)]
+const GONE_POLL: Duration = Duration::from_millis(20);
+/// How long [`Handle::exited_draining`] still reads, once only spared browsers are left, for
+/// what the tree wrote before it ended: every read returns at once then.
+#[cfg(windows)]
+const DRAIN: Duration = Duration::from_millis(200);
 
 /// An agent's process and its tree. Dropping it kills the tree at once, without waiting.
 #[derive(Debug)]
@@ -96,6 +103,36 @@ impl Handle {
     pub async fn exited(&mut self) -> ExitReport {
         let status = self.child.status().await;
         self.finish(&status)
+    }
+
+    /// [`Handle::exited`], with `pipes` (the reads of the agent's stdout and stderr to their
+    /// end) driven beside it until both are done. Returns the report and whether the pipes
+    /// reached their end.
+    ///
+    /// On Windows a browser the tree's kill spared (`LaunchSpec::spare_browsers`) can hold those
+    /// pipes open for as long as it runs: it inherits every inheritable handle of the process
+    /// that starts it (Codex's `webbrowser` starts it by `CreateProcessW` with inheritance on),
+    /// the agent's stdout and stderr among them. So once the agent has exited and the rest of
+    /// its tree is gone, the spared browsers and their children aside ([`TreeWatch::gone`]),
+    /// the reads get 200 ms more for what is already in the pipes, then are dropped.
+    /// Elsewhere, and while any other process of the tree runs, it waits for the pipes' end.
+    pub async fn exited_draining<T: Timer>(
+        &mut self,
+        timer: &T,
+        pipes: impl Future<Output = ()>,
+    ) -> (ExitReport, bool) {
+        let mut pipes = pin!(pipes);
+        let report = {
+            let exited = pin!(self.exited());
+            match select(pipes.as_mut(), exited).await {
+                Either::Left(((), exited)) => return (exited.await, true),
+                Either::Right((report, _)) => report,
+            }
+        };
+        let watch = self.tree_watch();
+        let settled = pin!(settled(&watch, timer));
+        let ended = matches!(select(pipes, settled).await, Either::Left(_));
+        (report, ended)
     }
 
     /// Stops the agent by the ladder: close its stdin and wait the stdin grace (2 s unless
@@ -252,6 +289,22 @@ async fn ladder<S, T: Timer>(
         Some(status) => Ended::Killed(status),
         None => Ended::Unresponsive,
     }
+}
+
+/// Ends once the tree is gone, spared browsers and their children aside, and [`DRAIN`] more
+/// has passed: asked every [`GONE_POLL`].
+#[cfg(windows)]
+async fn settled<T: Timer>(watch: &TreeWatch, timer: &T) {
+    while !watch.gone() {
+        timer.after(GONE_POLL).await;
+    }
+    timer.after(DRAIN).await;
+}
+
+/// Never ends: no Unix stop spares a process, so the pipes' end is awaited as it always was.
+#[cfg(unix)]
+async fn settled<T: Timer>(_watch: &TreeWatch, _timer: &T) {
+    futures::future::pending::<()>().await;
 }
 
 /// `exit`'s output if it ends before `deadline`.
