@@ -50,7 +50,7 @@ use std::collections::VecDeque;
 
 use clauseo_protocol::{
     AgentChoiceId, ContentBlock, DetachReason, ElicitationResponse, ErrorCode, LimitStopReason,
-    MatterId, MatterPath, StreamId, ThreadId, Timestamp, TurnId,
+    MatterId, MatterPath, StopReason, StreamId, ThreadId, Timestamp, TurnId,
 };
 use futures::future::AbortHandle;
 
@@ -181,10 +181,11 @@ struct Current {
     cancelled: bool,
     /// The same Stop, for the prompt's API-key retry off the actor (`key_retry.rs`).
     stopped: key_retry::Stopped,
-    /// The lawyer's last permission answer in the turn was a reject kind and no Stop came
-    /// after it: the agent's own `Cancelled` then ends the turn `NotAllowed` (Codex's only
-    /// reject option ends the turn). Another answer or a Stop clears it.
-    refused: bool,
+    /// The stop the agent's own `Cancelled` turns into, after the turn's last permission answer
+    /// was a refusal and no Stop came after it (Codex's only reject option ends the turn):
+    /// `NotAllowed` for the lawyer's reject kind, `OutsideMatter` for the host's data-folder
+    /// refusal. Another answer or a Stop clears it.
+    refused: Option<StopReason>,
     /// The first limit signal of the turn.
     limit: Option<LimitMark>,
     /// The places the turn's tool calls named, for the after-turn checkpoint.

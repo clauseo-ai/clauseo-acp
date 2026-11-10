@@ -7,7 +7,7 @@ use clauseo_protocol::{
     AgentChoiceId, CommandOutcome, CompactString, ConfigOption, ConfigOptionsReplaced, ConfigValue,
     ElicitationId, ElicitationOutcome, ElicitationRequest, ElicitationResolved,
     ElicitationResponse, ErrorCode, ModeChanged, PermissionChoice, PermissionKind,
-    PermissionRequestId, PermissionResolved, Principal, RawPayload, StreamId, ThreadId,
+    PermissionRequestId, PermissionResolved, Principal, RawPayload, StopReason, StreamId, ThreadId,
 };
 
 use super::super::commands::{AfterCommand, CommandCtx};
@@ -55,7 +55,8 @@ pub(super) fn answer_permission(
     let refused = matches!(
         option.kind,
         PermissionKind::RejectOnce | PermissionKind::RejectAlways
-    );
+    )
+    .then_some(StopReason::NotAllowed);
     let then = Then::Permission {
         agent: agent.id,
         key,

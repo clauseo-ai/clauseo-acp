@@ -106,6 +106,14 @@ test("each stop: always a turn-stopped row with its reason, and its line where i
       undefined,
       th("en", "You didn't allow a request, so the answer stopped. The answer so far is kept."),
     ],
+    [
+      "outside_matter",
+      undefined,
+      th(
+        "en",
+        "Clauseo stopped the answer: it tried to open files outside this matter. The answer so far is kept.",
+      ),
+    ],
     ["max_tokens", undefined, th("en", "The answer stopped at its limit, before it finished.")],
     [
       "max_turn_requests",

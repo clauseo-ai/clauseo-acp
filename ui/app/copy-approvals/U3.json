@@ -676,6 +676,17 @@
     "by": "Rohan",
     "note": "Rohan, running-page batch 2026-11-05 (written by app track)"
   },
+  "U3-52": {
+    "en": "Clauseo stopped the answer: it tried to open files outside this matter. The answer so far is kept.",
+    "hi": "Clauseo ने उत्तर रोक दिया: उसने इस मामले के बाहर की फ़ाइलें खोलने का प्रयास किया। अब तक का उत्तर रखा गया है।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-10",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-10",
+    "by": "orchestrator (settled en)",
+    "note": "A turn ended StopReason::OutsideMatter: Clauseo refused, unasked, a request into its data folder and the agent stopped (stops.ts); the partial answer is kept as after a Stop"
+  },
   "U3-err-settings.refused": {
     "en": "Clauseo couldn't save that setting. Your settings are as they were.",
     "hi": "Clauseo वह सेटिंग सहेज नहीं सका। आपकी सेटिंग्स पहले जैसी हैं।",

@@ -156,14 +156,17 @@ fn running_turn_ended(stop: StopReason) -> (serde_json::Value, String) {
     (as_cancelled(serde_json::to_value(&state).unwrap()), changes)
 }
 
-/// `NotAllowed` (a refusal that ended the turn, private #361) folds as `Cancelled` does: the
-/// same status, prompt and step, and the same changes, but for the step's stop.
+/// `NotAllowed` (a refusal that ended the turn, private #361) and `OutsideMatter` (the host's
+/// data-folder refusal that ended it) fold as `Cancelled` does: the same status, prompt and
+/// step, and the same changes, but for the step's stop.
 #[test]
 fn not_allowed_folds_like_cancelled() {
     let (cancelled, cancelled_changes) = running_turn_ended(StopReason::Cancelled);
-    let (not_allowed, not_allowed_changes) = running_turn_ended(StopReason::NotAllowed);
-    assert_eq!(not_allowed, cancelled);
-    assert_eq!(not_allowed_changes, cancelled_changes);
+    for stop in [StopReason::NotAllowed, StopReason::OutsideMatter] {
+        let (refused, refused_changes) = running_turn_ended(stop);
+        assert_eq!(refused, cancelled, "{stop:?}");
+        assert_eq!(refused_changes, cancelled_changes, "{stop:?}");
+    }
     assert!(
         cancelled.to_string().contains("cancelled"),
         "the step's stop is in the state: {cancelled}"

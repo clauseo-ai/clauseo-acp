@@ -122,6 +122,7 @@ test("U3's ids are written as they are: one per error code but U3-07's and Versi
     "U3-49",
     "U3-50",
     "U3-51",
+    "U3-52",
   ]);
   expect(REGISTRY.find((e) => e.id === "U3-48")?.words.key).toBe("Reset not given.");
 });

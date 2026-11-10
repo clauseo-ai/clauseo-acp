@@ -16,6 +16,11 @@ export function stopLine(step: StepEntry): StopLine | null {
         kind: "thread",
         key: "You didn't allow a request, so the answer stopped. The answer so far is kept.",
       };
+    case "outside_matter":
+      return {
+        kind: "thread",
+        key: "Clauseo stopped the answer: it tried to open files outside this matter. The answer so far is kept.",
+      };
     case "max_tokens":
     case "max_turn_requests":
       return { kind: "thread", key: "The answer stopped at its limit, before it finished." };

@@ -73,7 +73,7 @@ impl Current {
             phase: TurnPhase::Accepting,
             cancelled: false,
             stopped: key_retry::Stopped::default(),
-            refused: false,
+            refused: None,
             limit: None,
             tool_paths: crate::sent::TurnPaths::default(),
             checkpoint_before: None,

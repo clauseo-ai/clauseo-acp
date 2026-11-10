@@ -5656,8 +5656,8 @@ export type StepUndone = {
 };
 
 /**
- *  Why a turn stopped: ACP v1's stop reasons plus Clauseo's `NotAllowed`, `AtLimit` and
- *  `Failed`.
+ *  Why a turn stopped: ACP v1's stop reasons plus Clauseo's `NotAllowed`, `OutsideMatter`,
+ *  `AtLimit` and `Failed`.
  */
 export type StopReason = 
 /**  The agent finished. Only this ending moves the thread's queue on. */
@@ -5677,6 +5677,13 @@ export type StopReason =
  *  started.
  */
 "not_allowed" | 
+/**
+ *  The agent cancelled it right after the host refused, unasked, a permission request
+ *  into Clauseo's data folder (another matter's or Clauseo's own files); no Stop came
+ *  after that refusal. Every rule treats it as `Cancelled` (the queue holds); only the
+ *  words differ. Never on a turn that had not started.
+ */
+"outside_matter" | 
 /**  The account's usage limit stopped it; a `TurnStoppedAtLimit` explains it. */
 "at_limit" | 
 /**  It failed; a `TurnFailed` before it says why. */
