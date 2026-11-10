@@ -212,6 +212,8 @@ pub(crate) struct Actor {
     pub(crate) files: papers::FileRefs,
     /// Each matter's background scan for tracked changes (`papers/scan.rs`).
     pub(crate) paper_scans: papers::scan::PaperScans,
+    /// The matter whose folder is watched, the last one opened (`papers/follow.rs`).
+    pub(crate) papers_follow: Option<Box<papers::Follow>>,
     pub(crate) next_sub: u64,
     pub(crate) work: Work,
     pub(crate) phase: HostPhase,
@@ -520,6 +522,7 @@ impl Actor {
             Input::Protection(done) => protection::work::on_done(self, *done),
             Input::Allowed(input) => allowed::on_input(self, *input),
             Input::SiteBlocked { session, site } => blocked::site_blocked(self, session, site),
+            Input::PapersChanged(changed) => papers::follow::on_changed(self, changed),
             // The loop handles an abort before it gets here.
             #[cfg(feature = "test-support")]
             Input::Abort(reply) => {

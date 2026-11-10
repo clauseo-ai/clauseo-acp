@@ -289,6 +289,9 @@ mod packs_timing;
 #[path = "host/papers.rs"]
 mod papers;
 #[cfg(test)]
+#[path = "host/papers_live.rs"]
+mod papers_live;
+#[cfg(test)]
 #[path = "host/permissions.rs"]
 mod permissions;
 #[cfg(test)]

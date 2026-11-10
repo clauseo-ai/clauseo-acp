@@ -127,6 +127,11 @@ async-process = "2"
 # clauseo-process (it also uses the async-process, futures, memchr, nix and windows lines above):
 # the timer of its shutdown ladder.
 async-io = "2"
+# The open matter's folder watch (crates/host, decision record 0055): FSEvents, ReadDirectoryChangesW
+# and inotify, no polling.
+notify = { version = "8.2.2", default-features = false, features = [
+  "macos_fsevent",
+] }
 # clauseo-host: SHA-256 for the trust hash of the pre-write guard's Codex hook, as Codex 0.162.1
 # computes it with sha2 0.10 (crates/host/src/agent/loads/codex.rs). clauseo-connectors: the PKCE
 # S256 challenge. clauseo-sandbox: the admin copy's hash, which the refresh records, and its Windows

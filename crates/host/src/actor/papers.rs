@@ -2,7 +2,9 @@
 //! actor), each paper with a [`FileRefId`] from the host's file registry, [`FileRefs`], which
 //! `RegisterFile` shares, so a path keeps one id for the host's run. Whether a `.docx` holds
 //! tracked changes comes from what the matter's background scan has read ([`scan`]): the
-//! listing answers at once, and the scan sends `PapersChanged` when it knows more.
+//! listing answers at once, and the scan sends `PapersChanged` when it knows more. The open
+//! matter's folder is watched (`follow.rs`, `watch.rs`), and a listing says what it found of the
+//! folder there.
 
 pub(crate) mod scan;
 
@@ -20,6 +22,11 @@ use super::matters::matter_worker;
 use crate::error::Error;
 use crate::log_file::Cause;
 use crate::matter_worker::{MatterJob, MatterReply};
+
+pub(crate) mod follow;
+mod watch;
+pub(crate) use follow::Follow;
+pub(crate) use watch::FolderChanged;
 
 /// The files the host has handed out ids for, both ways, kept in host memory for its run.
 #[derive(Debug, Default)]

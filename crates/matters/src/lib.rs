@@ -37,7 +37,8 @@
 //!   `outside-edits` and a `revisions` checkpoint ([`ReplaceFile`], [`Replaced`]);
 //!   [`Matter::compare`] ([`CompareSide`]), [`Matter::files_at`] ([`VersionFile`]) and
 //!   [`Matter::read_file`] read versions and take `&self`; [`Matter::papers`] lists the folder
-//!   as it is now ([`PaperList`], [`Paper`]) by the checkpoint walk's rules.
+//!   as it is now ([`PaperList`], [`Paper`]) by the checkpoint walk's rules;
+//!   [`is_excluded_path`] says whether that walk passes a path over.
 //! - [`held_open`]: whether Word (or, on Windows, any program) has a file of the folder open
 //!   ([`HeldOpen`]), by the rule undo and restore refuse with; [`held_open_at`] takes a path
 //!   as an agent names it, resolved into the folder by [`matter_path_in`], and
@@ -167,6 +168,7 @@ pub use papers::{Paper, PaperList};
 pub use place::{Place, SyncService, place};
 pub use probe::{OsProbe, PlaceholderProbe};
 pub use refuse::{WINDOWS_FOLDER_LIMIT, check_place, check_protected, is_too_deep, same_or_nested};
+pub use rules::is_excluded_path;
 pub use scan::scan;
 pub use types::{
     Checkpoint, CheckpointOutcome, CommitId, CompareSide, DEFAULT_MARKER, FILE_CAP_BYTES,
