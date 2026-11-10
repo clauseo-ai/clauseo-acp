@@ -37,6 +37,7 @@ export type FootPlan = {
 
 export function Welcome({
   plans,
+  papersPlan,
   counts,
   onOpenFolder,
   onNewMatter,
@@ -49,6 +50,9 @@ export function Welcome({
 }: {
   /** Both plans, in the order shown: Claude, then ChatGPT. */
   plans: readonly FootPlan[];
+  /** The one plan in play, which the papers line names (picked, or the only one signed in); null or left out while
+   * both are offered, and the line names both. */
+  papersPlan?: string | null | undefined;
   counts: CountsSwitch;
   onOpenFolder: () => void;
   onNewMatter: () => void;
@@ -178,8 +182,8 @@ export function Welcome({
             ),
           )}
           <p className="room-line fl-foot-line">
-            {/* both plans named, whatever is picked: the first screen offers both */}
-            <DocumentsLine name={null} />
+            {/* both plans named while both are offered; one plan in play is named alone */}
+            <DocumentsLine name={papersPlan ?? null} />
           </p>
           <Counts {...counts} onWhatsSent={onWhatsSent} testId={testIds.counts} />
         </div>

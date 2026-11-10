@@ -60,10 +60,10 @@
     width: var(--s4);
     height: var(--s4);
   }
-  /* a plan only offered: no icon, its 16 px slot kept so the words start where every row's do */
+  /* a plan only offered: no icon, and no slot for one, so its words start at the row's own padding, in the column
+     where the lead line's words and the other rows' icons (the tick, the clock) start */
   .working-lead[data-lead="none"] {
-    width: var(--s4);
-    height: var(--s4);
+    display: none;
   }
   /* a row for one of two plans: the plan's name in the row's own tone, the words muted after it */
   .working-plan {

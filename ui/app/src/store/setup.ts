@@ -174,6 +174,14 @@ function follow(state: SetupState): SetupState {
   return only === undefined || only === state.chosen ? state : { ...state, chosen: only };
 }
 
+/** The one plan in play for the papers line (UD1-23 names it; UD1-93 names both): the plan the lawyer picked, else the
+ * only one signed in; null while both are offered, nothing picked and neither signed in (or both are). */
+export function planInPlay(state: SetupState): AgentId | null {
+  if (state.picked) return state.chosen;
+  const signed = PLANS.filter((id) => isSignedIn(state.agents[id]?.signIn));
+  return signed.length === 1 ? (signed[0] ?? null) : null;
+}
+
 export type SetupStore = {
   subscribe: (listener: () => void) => () => void;
   state: () => SetupState;

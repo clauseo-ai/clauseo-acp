@@ -46,9 +46,11 @@ test("plan: the composer offers Claude and ChatGPT, and Sign in to Claude sends 
   expect(byId("signin")?.dataset["agent"]).toBe("claude");
   expect(gateState()).toBe("signed-out");
   expect(text()).toContain("Sign in to Claude or ChatGPT to ask about this matter");
+  // both offered, nothing chosen, neither signed in: the gate's foot names both plans (UD1-93)
   expect(text()).toContain(
-    "Your papers stay on this computer. Claude sees the parts it reads to answer you.",
+    "Your papers stay on this computer. Claude or ChatGPT sees the parts it reads to answer you.",
   );
+  expect(text()).not.toContain("Claude sees the parts");
   expect(text()).not.toMatch(/Opus|Sonnet|Haiku|GPT-\d|o\d-/);
   // the gate names the plan; the status line above it says nothing of one
   expect(text()).not.toContain("Uses your");
@@ -540,4 +542,25 @@ test("signin-nudge: Paste it puts the focus in the code field, and Cancel gives 
   await press(byId("signin-cancel"));
   expect(byId("signin-code")).toBeNull();
   expect(document.activeElement).toBe(byId("signin-paste"));
+});
+
+test("papers line: the gate's foot names one plan only once it is in play (picked here), and both before", async () => {
+  await mountFirstRun({
+    first: [
+      info(),
+      install(CLAUDE, READY),
+      signIn(CLAUDE, { signed_out: {} }),
+      install(CODEX, READY),
+      signIn(CODEX, { signed_out: {} }),
+    ],
+  });
+  expect(text()).toContain(
+    "Your papers stay on this computer. Claude or ChatGPT sees the parts it reads to answer you.",
+  );
+  await press("Sign in to ChatGPT");
+  expect(byId("signin")?.dataset["agent"]).toBe("chatgpt");
+  expect(text()).toContain(
+    "Your papers stay on this computer. ChatGPT sees the parts it reads to answer you.",
+  );
+  expect(text()).not.toContain("Claude or ChatGPT sees");
 });

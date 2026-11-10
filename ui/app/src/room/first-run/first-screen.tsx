@@ -8,7 +8,14 @@ import { Welcome, type FootPlan } from "@clauseo/components/clauseo/first-launch
 import { useDisplay } from "@clauseo/components/lib/display.ts";
 import { toHostError, type HostTransport } from "../../transport/host-transport.ts";
 import type { AgentId } from "../../transport/protocol.ts";
-import { PLANS, isReady, isSignedIn, type SetupState, type SetupStore } from "../../store/setup.ts";
+import {
+  PLANS,
+  isReady,
+  isSignedIn,
+  planInPlay,
+  type SetupState,
+  type SetupStore,
+} from "../../store/setup.ts";
 import type { Matters } from "../matters.ts";
 import { usePickWait } from "../picker-wait.ts";
 import { markButton, markWelcome } from "../../start-marks.ts";
@@ -79,6 +86,8 @@ export function FirstScreen({
         ((isReady(setup?.install) || setup?.install === "managed") && isSignedIn(setup?.signIn)),
     };
   });
+  // the papers line names the one plan in play, else both
+  const inPlay = planInPlay(state);
   const [form, setForm] = useState(false);
   const [refused, setRefused] = useState<{ code: string; path: string } | null>(null);
   const wait = usePickWait();
@@ -102,6 +111,7 @@ export function FirstScreen({
   return (
     <Welcome
       plans={plans}
+      papersPlan={inPlay === null ? null : NAME[planOf(inPlay)]}
       counts={{ ...state.counts, onChange: store.setCounts }}
       onOpenFolder={() => void openFolder()}
       opening={wait.opening}

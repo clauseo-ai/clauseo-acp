@@ -15,6 +15,7 @@ import {
   CLAUDE,
   CODEX,
   isSignedIn,
+  planInPlay,
   setupStoreOf,
   type SetupSource,
   type SetupState,
@@ -127,6 +128,8 @@ const noSubscribe = () => () => {};
 /** The room's side of the hold: the plan the send uses, and how times and words are said. */
 type RoomSide = {
   agent: AgentId;
+  /** The open conversation is a thread already: its plan is fixed. */
+  fixed: boolean;
   zone: string;
   lang: Lang;
   platform: string;
@@ -179,6 +182,8 @@ function holdOf(
       typeof signedIn === "object" && "device_code" in signedIn
         ? (signedIn.device_code?.code ?? null)
         : null;
+    // one plan in play (the thread's, the picked one, or the only one signed in) is named; else both are
+    const one = room.fixed ? agent : planInPlay(state);
     const keys =
       state.keys === false
         ? null
@@ -197,7 +202,7 @@ function holdOf(
         />
       ),
       working,
-      line: <DocumentsLine name={NAME[plan]} />,
+      line: <DocumentsLine name={one === null ? null : NAME[planOf(one)]} />,
     };
   }
   // the Safe workspace step stands after the first sign-in (UC, workspace.ts): in the gate's place while it asks or
@@ -314,7 +319,9 @@ export function FirstRun({
   const display = useDisplay();
   const { lang, platform, releaseMode } = display;
   // the plan the send uses: the open conversation's thread's, or the one a draft would run (room.tsx's openAgent)
-  const agent = talks.rows.find((r) => r.key === talks.open)?.agent ?? talks.agent;
+  const openAgent = talks.rows.find((r) => r.key === talks.open)?.agent ?? null;
+  const agent = openAgent ?? talks.agent;
+  const fixed = openAgent !== null;
   // "Use … instead": the new conversation takes the other plan at once, listed or not (the chosen agent wins,
   // agent.ts's agentFor: codex-acp is listed only once its install is ready), and only once, so the lawyer's own pick
   // in the plan switch stands
@@ -347,7 +354,7 @@ export function FirstRun({
   // and again when the room's side changes
   useEffect(() => {
     const holder = holderOf(transport);
-    const room: RoomSide = { agent, zone, lang, platform, releaseMode };
+    const room: RoomSide = { agent, fixed, zone, lang, platform, releaseMode };
     let cache: [SetupState, ProtectionState | null, Hold | null] | null = null;
     const withParts = (shield: ProtectionState | null) =>
       shields === null || shield === null || parts === null
@@ -372,7 +379,7 @@ export function FirstRun({
       holder.read = () => null;
       notify();
     };
-  }, [transport, store, shields, parts, agent, zone, lang, platform, releaseMode]);
+  }, [transport, store, shields, parts, agent, fixed, zone, lang, platform, releaseMode]);
   // UC: the Safe workspace step is entered once, after the first sign-in here; where the set-up
   // asks no administrator it is sent at once, with no confirm, and the step is its wait; where the
   // repair is the installer, nothing is sent
