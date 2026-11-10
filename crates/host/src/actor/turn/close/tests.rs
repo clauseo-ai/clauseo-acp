@@ -47,3 +47,21 @@ fn a_root_home_and_no_home_leave_the_text_alone() {
     assert_eq!(scrub_home(text.clone(), &[PathBuf::from("/")]), text);
     assert_eq!(scrub_home(text.clone(), &[]), text);
 }
+
+#[test]
+fn tokens_and_url_credentials_are_hidden_with_the_home_folder() {
+    let homes = [PathBuf::from("/Users/asha")];
+    let detail = "at /Users/asha/x: sk-proj-abcdef1234567890 rejected; Authorization: Bearer \
+                  eyJabc.def-ghi; via http://asha:hunter22@proxy.firm:3128"
+        .to_owned();
+    let scrubbed = clauseo_process::redact_tokens(&scrub_home(detail, &homes));
+    for secret in [
+        "asha",
+        "sk-proj-abcdef1234567890",
+        "eyJabc.def-ghi",
+        "hunter22",
+    ] {
+        assert!(!scrubbed.contains(secret), "{secret} in {scrubbed}");
+    }
+    assert!(scrubbed.contains("~/x") && scrubbed.contains("proxy.firm:3128"));
+}

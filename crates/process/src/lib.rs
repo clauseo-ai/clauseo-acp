@@ -118,7 +118,7 @@ pub use launch::{
 };
 pub use live::{close_spawns, live_handles};
 pub use spec::LaunchSpec;
-pub use stderr::StderrPump;
+pub use stderr::{StderrPump, redact_tokens};
 pub use stdin::AgentStdin;
 #[cfg(feature = "test-support")]
 pub use timer::ManualTimer;

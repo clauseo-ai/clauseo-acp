@@ -236,11 +236,12 @@ pub(crate) fn closing(actor: &Actor, thread: ThreadId, turn: TurnId) -> bool {
 /// The most of a `TurnFailed.detail` written, in bytes, as the protocol documents it.
 pub(super) const MAX_DETAIL_BYTES: usize = 4096;
 
-/// `detail` as a `TurnFailed` writes it: the home folder written `~` ([`scrub_home`]), control
-/// characters as spaces, cut at a char boundary within [`MAX_DETAIL_BYTES`]. An agent's error
-/// message is uncapped and may carry a stack trace with the lawyer's paths.
+/// `detail` as a `TurnFailed` writes it: the home folder written `~` ([`scrub_home`]), tokens
+/// and URL credentials hidden as the stderr tail hides them (`clauseo_process::redact_tokens`),
+/// control characters as spaces, cut at a char boundary within [`MAX_DETAIL_BYTES`]. An agent's
+/// error message is uncapped and may carry a stack trace with the lawyer's paths.
 pub(super) fn detail_of(actor: &Actor, detail: String) -> String {
-    let mut detail = scrub_home(detail, &actor.home_spellings);
+    let mut detail = clauseo_process::redact_tokens(&scrub_home(detail, &actor.home_spellings));
     if detail.contains(char::is_control) {
         detail = detail.replace(char::is_control, " ");
     }
