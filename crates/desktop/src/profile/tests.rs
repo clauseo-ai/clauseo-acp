@@ -61,9 +61,10 @@ fn claude_meta_carries_the_instructions_and_the_plugin_dir() {
     let profile = profile(&scratch);
     let hook = DesktopProfile::new(profile.clone(), true);
     let meta = Value::Object(hook.session_meta(&agent(CLAUDE), None).unwrap());
+    // Claude's own instructions: on macOS they end with the commands-that-never-run line.
     assert_eq!(
         meta.pointer("/systemPrompt/append").and_then(Value::as_str),
-        Some(profile.instructions().as_str())
+        Some(profile.claude_instructions().as_str())
     );
     let plugin = scratch.path().join("profile").join("claude-plugin");
     assert_eq!(
