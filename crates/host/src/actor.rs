@@ -525,7 +525,9 @@ impl Actor {
             Input::Allowed(input) => allowed::on_input(self, *input),
             Input::SiteBlocked { session, site } => blocked::site_blocked(self, session, site),
             #[cfg(not(windows))]
-            Input::PapersChanged(changed) => papers::follow::on_changed(self, changed),
+            Input::PapersChanged(changed) => papers::on_changed(self, changed),
+            #[cfg(not(windows))]
+            Input::WatchStarted(started) => papers::on_started(self, *started),
             // The loop handles an abort before it gets here.
             #[cfg(feature = "test-support")]
             Input::Abort(reply) => {

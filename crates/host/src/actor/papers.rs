@@ -24,15 +24,20 @@ use crate::log_file::Cause;
 use crate::matter_worker::{MatterJob, MatterReply};
 
 pub(crate) mod follow;
+#[cfg(not(windows))]
+mod live;
 #[cfg(windows)]
 mod no_watch;
 #[cfg(not(windows))]
 mod watch;
-pub(crate) use follow::Follow;
-#[cfg(windows)]
-use no_watch as watch;
 #[cfg(not(windows))]
-pub(crate) use watch::FolderChanged;
+pub(crate) use live::{Follow, on_changed, on_started};
+#[cfg(windows)]
+use no_watch as live;
+#[cfg(windows)]
+pub(crate) use no_watch::Follow;
+#[cfg(not(windows))]
+pub(crate) use watch::{FolderChanged, WatchStarted};
 
 /// The files the host has handed out ids for, both ways, kept in host memory for its run.
 #[derive(Debug, Default)]
@@ -64,6 +69,16 @@ pub(super) fn file_ref(actor: &mut Actor, path: PathBuf) -> Result<FileRefId, Er
 /// [`answer`] replies once it is back.
 pub(super) fn list(actor: &mut Actor, matter: MatterId, reply: Reply<QueryResult>) {
     let limit = usize::try_from(MAX_PAPERS).unwrap_or(usize::MAX);
+    let folder = match actor.check_matter(matter) {
+        Ok(entry) => PathBuf::from(&entry.row.folder_path),
+        Err(error) => {
+            let _gone = reply.send(Err(error));
+            return;
+        }
+    };
+    // The room lists the papers of the matter it shows, which the app may reopen at launch
+    // without an `OpenMatter`: that matter is the one followed.
+    follow::opened(actor, matter);
     let worker = match matter_worker(actor, matter) {
         Ok(worker) => worker,
         Err(error) => {
@@ -71,7 +86,10 @@ pub(super) fn list(actor: &mut Actor, matter: MatterId, reply: Reply<QueryResult
             return;
         }
     };
-    match worker.send(MatterJob::ListPapers { limit }, MatterTag::Papers(reply)) {
+    match worker.send(
+        MatterJob::ListPapers { limit },
+        MatterTag::Papers { reply, folder },
+    ) {
         Ok(()) => actor.work.matter_jobs += 1,
         // The reply went with the job, and dropping it answers the caller that the host is
         // gone.
@@ -81,19 +99,20 @@ pub(super) fn list(actor: &mut Actor, matter: MatterId, reply: Reply<QueryResult
     }
 }
 
-/// The worker's listing of `matter`, answered as `QueryResult::Papers`.
+/// The worker's listing of `matter`'s `folder`, answered as `QueryResult::Papers`.
 pub(super) fn answer(
     actor: &mut Actor,
     matter: MatterId,
     listed: MatterReply,
     reply: Reply<QueryResult>,
+    folder: &std::path::Path,
 ) {
     let answer = match listed {
         MatterReply::Papers(listed) => {
             match &listed {
-                Ok(_) => follow::listed(actor, matter, true),
+                Ok(_) => follow::listed(actor, matter, folder, true),
                 Err(error) if error.code() == ErrorCode::MatterFolderMissing => {
-                    follow::listed(actor, matter, false);
+                    follow::listed(actor, matter, folder, false);
                 }
                 Err(_) => {}
             }

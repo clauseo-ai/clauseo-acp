@@ -180,8 +180,12 @@ pub(crate) enum MatterTag {
     Revisions(Box<super::turn::RevisionsAsk>),
     /// A query R8 answers: `CompareVersions`, `PreviewRestore`.
     Query(Reply<QueryResult>),
-    /// A `ListPapers` query, answered with the listing.
-    Papers(Reply<QueryResult>),
+    /// A `ListPapers` query of the matter's `folder` as its row named it, answered with the
+    /// listing.
+    Papers {
+        reply: Reply<QueryResult>,
+        folder: std::path::PathBuf,
+    },
     /// The discard of a matter made on disk whose commit failed (`matters/made.rs`).
     Discard,
     /// A check for papers an undo removed that came back (`turn/came_back.rs`).
@@ -292,6 +296,9 @@ pub(crate) enum Input {
     /// The open matter's folder changed and went quiet, from its watch (`papers/watch.rs`).
     #[cfg(not(windows))]
     PapersChanged(super::papers::FolderChanged),
+    /// The open matter's folder watch started, or why not (`papers/watch.rs`).
+    #[cfg(not(windows))]
+    WatchStarted(Box<super::papers::WatchStarted>),
 }
 
 impl std::fmt::Debug for Input {
@@ -335,6 +342,8 @@ impl std::fmt::Debug for Input {
             Self::Allowed(_) => "Allowed",
             #[cfg(not(windows))]
             Self::PapersChanged(_) => "PapersChanged",
+            #[cfg(not(windows))]
+            Self::WatchStarted(_) => "WatchStarted",
         };
         f.write_str(name)
     }
