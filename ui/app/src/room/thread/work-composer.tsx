@@ -29,6 +29,7 @@ import {
 import {
   Composer,
   type ComposerHandle,
+  type ConfigMenu,
   type Mentions,
   type PlanChoice,
   type SlashCommand,
@@ -65,6 +66,7 @@ export function WorkComposer({
   drafts,
   draftKey,
   choice,
+  menus,
   plan = "",
   tools = null,
   commands,
@@ -97,6 +99,8 @@ export function WorkComposer({
   draftKey: string | null;
   /** A new conversation's plan choice, before its first question; absent once fixed, or with one plan. */
   choice?: PlanChoice | undefined;
+  /** The agent's model and effort menus, the draft's or the thread's (config-menus.ts); none without options. */
+  menus?: readonly ConfigMenu[] | undefined;
   /** The status line's plan words, "Uses your Claude plan"; "" for none. Not drawn while the choice stands. */
   plan?: string;
   /** The tool line after the plan, from the open thread's header's tools (tool-line.tsx); null for none. */
@@ -385,6 +389,8 @@ export function WorkComposer({
       // under the gate the plan is the gate's to name: the status line says nothing of it
       plan={gated ? "" : plan}
       tools={tools}
+      // under the gate the plan isn't ready: its model and effort wait with it
+      menus={gated ? undefined : menus}
       {...(choice === undefined ? {} : { choice })}
       hint={null}
       commands={commands}

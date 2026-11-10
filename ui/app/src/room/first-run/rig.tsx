@@ -11,6 +11,7 @@ import { FakeTransport, type FakeHost } from "../../transport/fake-transport.ts"
 import type {
   AgentId,
   CommandOutcome,
+  ConfigOption,
   HostCommand,
   InstallProgress,
   MatterSummary,
@@ -18,6 +19,7 @@ import type {
   SetupCommand,
   SetupEvent,
   SignIn,
+  ThreadSummary,
   UiCount,
 } from "../../transport/protocol.ts";
 import { fakeNext } from "../fake-next.ts";
@@ -105,6 +107,10 @@ export type RigOptions = {
   openSettings?: boolean;
   /** The folder the picker gives; null: cancelled. */
   picked?: { folder: string; display: string } | null;
+  /** The open matter's threads (list_threads); none by default. */
+  threads?: ThreadSummary[];
+  /** The options each listed agent last reported (AgentSummary.config_options); none by default. */
+  options?: ConfigOption[];
 };
 
 /** The room over a fake host with the setup wire. */
@@ -116,7 +122,7 @@ export async function mountFirstRun(o: RigOptions = {}) {
     query: async (query) => {
       if (query === "list_matters") return { matters };
       if (query === "get_settings") return { settings: o.settings ?? settingsView() };
-      if (typeof query === "object" && "list_threads" in query) return { threads: [] };
+      if (typeof query === "object" && "list_threads" in query) return { threads: o.threads ?? [] };
       throw new Error(`not scripted: ${JSON.stringify(query)}`);
     },
     dispatch: (envelope): CommandOutcome => {
@@ -141,6 +147,7 @@ export async function mountFirstRun(o: RigOptions = {}) {
       agents: () =>
         (o.agents ?? [CLAUDE, CODEX]).map((id) => ({
           id,
+          ...(o.options === undefined ? {} : { config_options: o.options }),
           ...(id === CLAUDE
             ? { kind: "claude" as const }
             : id === CODEX

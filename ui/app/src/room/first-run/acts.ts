@@ -17,6 +17,7 @@ export const IDS = {
   gate: {
     root: "signin",
     state: "signin-state",
+    setUp: "signin-set-up",
     cancel: "signin-cancel",
     paste: "signin-paste",
     code: "signin-code",
