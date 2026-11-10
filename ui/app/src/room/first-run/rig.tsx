@@ -95,8 +95,10 @@ export type RigOptions = {
   settings?: SettingsView;
   platform?: "mac" | "windows" | "linux";
   language?: Lang;
-  /** The agents the host lists (R15's list_agents): both plans unless a test says otherwise. */
+  /** The agents the host lists (R15's list_agents), read on each list_agents: both plans unless a test says otherwise. */
   agents?: AgentId[];
+  /** The NextHost's settings part too, whose settings_changed the room hears (FakeTransport.settingsChanged). */
+  settingsPart?: boolean;
   /** Answers each setup command; throwing refuses it. */
   command?: (command: SetupCommand) => void | Promise<void>;
   /** The folder the picker gives; null: cancelled. */
@@ -133,15 +135,16 @@ export async function mountFirstRun(o: RigOptions = {}) {
     },
     next: fakeNext({
       matters: () => [],
-      agents: (o.agents ?? [CLAUDE, CODEX]).map((id) => ({
-        id,
-        ...(id === CLAUDE
-          ? { kind: "claude" as const }
-          : id === CODEX
-            ? { kind: "codex" as const }
-            : {}),
-      })),
-      parts: ["agents"],
+      agents: () =>
+        (o.agents ?? [CLAUDE, CODEX]).map((id) => ({
+          id,
+          ...(id === CLAUDE
+            ? { kind: "claude" as const }
+            : id === CODEX
+              ? { kind: "codex" as const }
+              : {}),
+        })),
+      parts: o.settingsPart === true ? ["agents", "settings"] : ["agents"],
     }),
   };
   const transport = new FakeTransport(fake);
