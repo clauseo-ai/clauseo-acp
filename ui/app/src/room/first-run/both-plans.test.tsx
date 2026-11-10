@@ -161,6 +161,18 @@ test.each([
   ]);
 });
 
+test("a cancelled sign-in's row has no icon: no tick, since it isn't ready, and no clock, since nothing waits", async () => {
+  const t = await mountFirstRun({ matters: [], first: FRESH });
+  await press("Sign in to Claude");
+  await play(
+    t,
+    install(CLAUDE, READY),
+    signIn(CLAUDE, { failed: { code: "signin.cancelled", at: AT } }),
+  );
+  expect(row(CLAUDE)?.textContent).toContain("Sign in again");
+  expect(row(CLAUDE)?.querySelector(".working-lead")?.getAttribute("data-lead")).toBe("none");
+});
+
 test("the waiting plan's Cancel stops its wait: nothing is sent for it, and its Sign in is back", async () => {
   const t = await mountFirstRun({ matters: [], first: FRESH });
   await press("Sign in to Claude");

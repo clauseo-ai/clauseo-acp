@@ -41,7 +41,7 @@ const installed = (setup: AgentSetup | undefined): boolean => {
  * "Claude · needs a download of about 110 MB", with no icon (only offered); words that name the plan already (getting
  * it ready, "{name} is ready", the queued line, most failures) keep their own words and no name in front; any other
  * words get the name in front as they are ("Claude · Finish signing in with your browser."). A ready plan's row leads
- * with the tick; the clock stays on rows that wait or download. */
+ * with the tick; the clock stays on rows that wait or download, and a cancelled sign-in has no icon. */
 function named(
   line: WorkingState | null,
   lang: Lang,
@@ -135,7 +135,8 @@ export function welcomeFoot(
   const cancel = { words: ui(lang, "Cancel"), press: acts.cancel, testId: IDS.cancel, quiet: true };
   switch (view.kind) {
     // a cancelled sign-in says so, as Settings' card does, and offers it again (D-007: it read "{name} is ready" while
-    // signed out); no tick, since the plan isn't ready to use
+    // signed out); no tick, since the plan isn't ready to use, and no clock, since nothing waits: no icon, as an
+    // offered row has none
     case "failed":
       if (view.code === "signin.cancelled")
         return named(
@@ -146,6 +147,7 @@ export function welcomeFoot(
           lang,
           name,
           null,
+          "none",
         );
       return named(
         line(fl(lang, "{name} is ready", { name }), view.kind, signIn),
