@@ -276,7 +276,10 @@ test("Not now is an outcome: the line says Not protected in Claude's words, and 
   expect(t.protectionCommands()).toEqual([]);
   expect(step()?.dataset["state"]).toBe("off");
   expect(step()?.textContent).toContain(
-    tbt("en", "Clauseo asks before each change in this matter."),
+    tbt(
+      "en",
+      "Clauseo changes files in this matter without asking, and asks before changing files outside it.",
+    ),
   );
   expect(byId("protection-failed")).toBeNull();
   expect(reads(t)).toBe(1);

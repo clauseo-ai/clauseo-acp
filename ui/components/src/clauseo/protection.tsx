@@ -106,7 +106,7 @@ export function NotProtectedNote({
     why === "off"
       ? [
           w.v(
-            "The Safe workspace is off for {matter}. Claude asks before each change. ChatGPT can read any file you can open, and asks before changing files outside this matter's folder.",
+            "The Safe workspace is off for {matter}. Claude changes files in this matter without asking, and asks before changing files outside it. ChatGPT can read any file you can open, and asks before changing files outside this matter's folder.",
             { matter },
           ),
         ]

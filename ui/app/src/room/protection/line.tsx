@@ -1,7 +1,8 @@
 // UC: the room's line under the composer, in the room's first load. A protected matter says what the Safe workspace
 // does, with the lock, and isn't pressable; a matter without protection carries the Not protected mark, in words true
-// for the plan the lawyer talks to: Claude asks before each change, ChatGPT reads any file the lawyer can open and
-// changes files in the folder without asking (QC.6). Protection switched off says the same as any other cause: the
+// for the plan the lawyer talks to: Claude changes files in the matter without asking and asks before changing files
+// outside it; ChatGPT reads any file the lawyer can open and changes files in the folder without asking (QC.6).
+// Protection switched off says the same as any other cause: the
 // host runs each plan there as it runs it without protection. A press opens the note that explains the cause. A matter whose protection isn't known shows no line (QU.1).
 import { NotProtectedMark } from "@clauseo/components/clauseo/not-protected.tsx";
 import type { Lang } from "@clauseo/components/lib/display.ts";
@@ -16,7 +17,10 @@ export type PlanKind = "claude" | "codex" | undefined;
 /** What Not protected means for this plan. A plan not known takes ChatGPT's line, which promises the least asking. */
 function meaningOf(lang: Lang, plan: PlanKind): string {
   return plan === "claude"
-    ? tbt(lang, "Clauseo asks before each change in this matter.")
+    ? tbt(
+        lang,
+        "Clauseo changes files in this matter without asking, and asks before changing files outside it.",
+      )
     : tbt(
         lang,
         "Clauseo can read any file you can open, and changes files in this matter without asking. It asks before changing files outside it.",
