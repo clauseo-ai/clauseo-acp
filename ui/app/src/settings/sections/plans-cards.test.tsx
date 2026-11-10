@@ -132,11 +132,11 @@ test("a cancelled sign-in with the other plan here: Use Claude instead moves to 
 test("each key panel's help names its own plan", async () => {
   await mountPlans({ first: both({ signed_out: {} }, CANCELLED) });
   expect(block("claude")!.textContent).toContain(
-    "A key from Claude, or one from your firm's IT team. Billed to the key's own account.",
+    "A key from Claude, yours or your firm's. Billed to that key's account.",
   );
   expect(block("claude")!.textContent).not.toContain("ChatGPT");
   expect(block("chatgpt")!.textContent).toContain(
-    "A key from ChatGPT, or one from your firm's IT team. Billed to the key's own account.",
+    "A key from ChatGPT, yours or your firm's. Billed to that key's account.",
   );
   expect(block("chatgpt")!.textContent).not.toContain("Claude or ChatGPT");
 });

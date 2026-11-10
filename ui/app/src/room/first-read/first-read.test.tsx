@@ -183,6 +183,10 @@ test("D-015: a sign-in sends no turn; the read is offered, and Read the papers s
   // signed in: nothing sent by itself, the button offered
   expect(order(t)).toEqual([]);
   expect(offer()?.textContent).toBe("Read the papers");
+  // the action after the new-conversation line's sentence: under it
+  const line = byId("new-conversation-line");
+  expect(line).not.toBeNull();
+  expect(line!.compareDocumentPosition(offer()!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   // a second signed_in sends nothing either
   await play(t, SIGNED_OUT, signIn(CLAUDE, SIGNED_IN));
   await settle();

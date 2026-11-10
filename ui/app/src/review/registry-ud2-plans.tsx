@@ -185,7 +185,7 @@ export const UD2_PLANS: Entry[] = [
   // UD2-63: each plan's key help names its own plan; shown on both cards, one signed out and one cancelled
   entry(
     "UD2-63",
-    "A key from {name}, or one from your firm's IT team. Billed to the key's own account.",
+    "A key from {name}, yours or your firm's. Billed to that key's account.",
     CANCELLED,
   ),
 ];

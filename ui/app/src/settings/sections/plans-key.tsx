@@ -73,7 +73,7 @@ export function PlansKey({
         />
         <Ways>
           <Note>
-            {`${st(lang, "A key from {name}, or one from your firm's IT team. Billed to the key's own account.", { name: NAME[plan] })} ${fl(
+            {`${st(lang, "A key from {name}, yours or your firm's. Billed to that key's account.", { name: NAME[plan] })} ${fl(
               lang,
               keys === "mac"
                 ? "Kept in this Mac's Keychain."

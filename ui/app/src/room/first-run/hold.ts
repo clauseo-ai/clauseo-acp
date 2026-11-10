@@ -73,3 +73,34 @@ const hearCard = (heard: () => void) => {
 /** The card, once the first run's chunk is in. */
 export const useExpiredCard = (): ExpiredCardOf | null =>
   useSyncExternalStore(hearCard, readCard, readCard);
+
+/** D-015: the first read's offer, which the first run gives and the room places under its new-conversation line, as
+ * the action after that sentence; null with none. One per transport. */
+type OfferSlot = { node: ReactNode; heard: Set<() => void> };
+const offers = new WeakMap<object, OfferSlot>();
+const offerOf = (transport: object): OfferSlot => {
+  let slot = offers.get(transport);
+  if (slot === undefined) offers.set(transport, (slot = { node: null, heard: new Set() }));
+  return slot;
+};
+
+export function provideOffer(transport: object, node: ReactNode): void {
+  const slot = offerOf(transport);
+  slot.node = node;
+  for (const heard of slot.heard) heard();
+}
+
+/** The offer, under the room's new-conversation line. */
+export function OfferSlot({ transport }: { transport: object }): ReactNode {
+  "use no memo";
+  const slot = offerOf(transport);
+  const read = () => slot.node;
+  return useSyncExternalStore(
+    (heard) => {
+      slot.heard.add(heard);
+      return () => slot.heard.delete(heard);
+    },
+    read,
+    read,
+  );
+}
