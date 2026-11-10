@@ -193,7 +193,8 @@ test("a row not open says what it's doing: Answering., a question, waiting for a
   });
   expect(rowOf("Open one")?.getAttribute("aria-current")).toBe("true");
   expect(rowOf("Open one")?.querySelector(".sr-only")).toBeNull();
-  expect(rowOf("Lease notice")?.querySelector(".sr-only")?.textContent).toContain("Answering.");
+  // answering, said plainly under its title
+  expect(rowOf("Lease notice")?.querySelector(".room-conv-said")?.textContent).toBe("Answering.");
   expect(rowOf("Bank letters")?.textContent).toContain("A question for you");
   expect(rowOf("Indemnity")?.querySelector(".sr-only")?.textContent).toContain(
     "Waiting for 'Lease notice'",

@@ -258,6 +258,10 @@
   .room-conv-ask {
     @apply text-small font-chip text-primary;
   }
+  /* an answer ready, a failure or Answering.: said under the title, muted, below the hand's weight */
+  .room-conv-said {
+    @apply text-small text-muted;
+  }
   .room-conv-more {
     position: absolute;
     top: 0;

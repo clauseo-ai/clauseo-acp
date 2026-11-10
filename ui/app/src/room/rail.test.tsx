@@ -1,5 +1,5 @@
 // The room's rail over FakeTransport, at the room's interface: the scratch matter only at the foot, each row's
-// status words (none on the open matter's), date groups across a Sunday, finding by name only without a NextHost and
+// status words (none on the open matter's), Needs you, Working and the rest by latest activity, finding by name only without a NextHost and
 // by client with one, each saying so, Pinned and Recent (five), no Find on an empty rail, Remove from the list, Show in
 // Finder and the open matter's chevron, isolated folder paths, matters_changed updating a row, and a left matter's thread waiting on a
 // permission, and U12's paused rail.
@@ -167,34 +167,45 @@ test("each status says its words; a moved folder says so over its status", async
   expect(said("Matter 10")).toBe("Matter 10");
 });
 
-test("date groups across a Sunday, in the rail's order, with no empty group", async () => {
-  vi.useFakeTimers({ toFake: ["Date"] });
-  vi.setSystemTime(new Date(2026, 10, 1, 12, 0)); // Sunday 1 November 2026
-  const m = (n: number, next_date?: string) =>
-    detailed(
-      { matter: uuid(n, 2), name: `Matter ${n}`, kind: "folder" },
-      next_date === undefined ? {} : { next_date },
-    );
+test("the order: Needs you (a permission, then an answer ready), Working, then the rest by latest activity", async () => {
+  const m = (n: number, over: Partial<MatterInfo>) =>
+    detailed({ matter: uuid(n, 2), name: `Matter ${n}`, kind: "folder" }, over);
   await mount(
     withNext(() => [
-      m(1, "2026-11-03"),
-      m(2, "2026-11-02"),
-      m(3, "2026-11-01"),
-      m(4),
-      m(5, "2026-11-30"),
+      // the one the lawyer opened last opens, and says nothing of its work, which is in view
+      m(1, { last_activity: NOW - 5 * 60_000, last_opened: NOW }),
+      m(2, { status: "ready", last_activity: NOW - 60_000 }),
+      m(3, { status: "working", last_activity: NOW - 9 * 60_000 }),
+      m(4, { last_activity: NOW - 60_000 }),
+      m(5, { status: "needs_permission", last_activity: NOW - 3_600_000 }),
+      m(6, { status: "working", last_activity: NOW - 60_000 }),
+      // a next date kept in the store orders nothing and shows nowhere
+      m(7, { next_date: "2026-11-04" }),
     ]),
   );
-  expect(headings()).toEqual(["Tomorrow", "This week", "Next week", "Later", "No date yet"]);
-  expect(names()).toEqual(["Matter 2", "Matter 3", "Matter 1", "Matter 5", "Matter 4"]);
+  expect(headings()).toEqual(["Needs you", "Working", "Other matters"]);
+  expect(names()).toEqual([
+    "Matter 5",
+    "Matter 2",
+    "Matter 6",
+    "Matter 3",
+    "Matter 4",
+    "Matter 1",
+    "Matter 7",
+  ]);
+  expect(said("Matter 5")).toContain("Needs your permission");
+  expect(said("Matter 2")).toContain("Answer ready");
+  expect(said("Matter 6")).toContain("Answering.");
+  expect(rail()?.textContent).not.toMatch(/Tomorrow|This week|No date yet|Next date/);
 });
 
-test("without a NextHost: one group, No date yet, newest first; no Pinned, and find matches names only", async () => {
+test("without a NextHost: one group, Matters, newest first; no Pinned, and find matches names only", async () => {
   await mount(today([A, B, C]));
-  expect(headings()).toEqual(["No date yet"]);
+  expect(headings()).toEqual(["Matters"]);
   expect(names()).toEqual([C.name, B.name, A.name]);
   // focused and empty: no Recent, the groups stay
   await act(async () => find()?.focus());
-  expect(headings()).toEqual(["No date yet"]);
+  expect(headings()).toEqual(["Matters"]);
   await act(async () => type(find() as HTMLInputElement, "sharma"));
   await settle();
   expect(names()).toEqual([B.name]);
@@ -206,7 +217,7 @@ test("without a NextHost: one group, No date yet, newest first; no Pinned, and f
   expect(rail()?.textContent).not.toContain("client");
 });
 
-test("with a NextHost: find by client, Pinned above the dates, and Recent by last opened", async () => {
+test("with a NextHost: find by client, Pinned above the rest, and Recent by last opened", async () => {
   await mount(
     withNext(() => [
       detailed(A, { client: "Asha Rao", last_opened: 30 }),
@@ -214,8 +225,8 @@ test("with a NextHost: find by client, Pinned above the dates, and Recent by las
       detailed(C, { last_opened: 20 }),
     ]),
   );
-  expect(headings()).toEqual(["Pinned", "No date yet"]);
-  // pinned above every date; the rest newest first
+  expect(headings()).toEqual(["Pinned", "Other matters"]);
+  // pinned above the rest; the rest newest first
   expect(names()).toEqual([B.name, C.name, A.name]);
   await act(async () => find()?.focus());
   expect(headings()).toEqual(["Recent"]);

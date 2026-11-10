@@ -53,7 +53,7 @@ export class RailTriage {
           ? null
           : {
               matter: inputs.open,
-              group: stood ?? this.#place(inputs, null).group.get(inputs.open) ?? "date",
+              group: stood ?? this.#place(inputs, null).group.get(inputs.open) ?? "rest",
             };
     }
     const held = new Map(this.#frozen ?? []);
