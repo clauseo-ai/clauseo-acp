@@ -471,8 +471,9 @@ mod windows {
         case.write("~$brief.txt", "owner file: open in Word");
         let held = hold(&case.file("brief.txt"));
 
-        let (matter, preview) =
-            within_deadline(matter, |m| m.preview_restore(cid(1), RestoreFiles::All));
+        let (matter, preview) = within_deadline(matter, |m| {
+            m.preview_restore(cid(1), RestoreFiles::All, None)
+        });
         let plan = preview.expect("the preview answers while the file is held");
         assert_eq!(plan.locked, [path("brief.txt")], "{plan:?}");
         assert_eq!(written(&plan), ["brief.txt"], "{plan:?}");
@@ -492,8 +493,9 @@ mod windows {
         );
 
         // Word closed the document; its owner file left behind is stale (no Word runs).
-        let (mut matter, preview) =
-            within_deadline(matter, |m| m.preview_restore(cid(1), RestoreFiles::All));
+        let (mut matter, preview) = within_deadline(matter, |m| {
+            m.preview_restore(cid(1), RestoreFiles::All, None)
+        });
         let plan = preview.unwrap();
         assert!(plan.locked.is_empty(), "{plan:?}");
         assert_eq!(written(&plan), ["brief.txt"], "{plan:?}");
@@ -516,8 +518,9 @@ mod windows {
         case.write("added.txt", "added since the import\n");
         let held = hold(&case.file("added.txt"));
 
-        let (mut matter, preview) =
-            within_deadline(matter, |m| m.preview_restore(cid(1), RestoreFiles::All));
+        let (mut matter, preview) = within_deadline(matter, |m| {
+            m.preview_restore(cid(1), RestoreFiles::All, None)
+        });
         let plan = preview.expect("the preview answers while the file is held");
         assert_eq!(plan.locked, [path("added.txt")], "{plan:?}");
         assert!(plan.writes.is_empty(), "{plan:?}");

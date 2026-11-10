@@ -5,7 +5,9 @@
 use clauseo_matters::{Error, Matter, Restore, RestoreFiles};
 use clauseo_protocol::MatterPath;
 
-use crate::fixture::{Fixture, assert_no_temp_files, at, cid, created, meta, path, tools};
+use crate::fixture::{
+    Fixture, assert_no_temp_files, assert_none, at, cid, created, meta, path, tools,
+};
 use crate::support;
 
 /// Checkpoint 1 holds `a.txt` "one"; a turn (2, 3) makes it "two" and adds `notes.md`; the
@@ -53,20 +55,20 @@ fn undoing_a_restore_removes_the_file_it_brought_back() {
     let plain = matter
         .preview_restore(cid(4), RestoreFiles::All, None)
         .unwrap();
-    assert!(plain.writes.is_empty());
-    assert!(plain.removes.is_empty());
+    assert_none(&plain.writes);
+    assert_none(&plain.removes);
     assert_eq!(plain.added_since, paths(&["notes.md"]));
     // taking the restore back removes it, and the preview says so first
     let preview = matter
         .preview_restore(cid(4), RestoreFiles::All, Some(cid(5)))
         .unwrap();
-    assert!(preview.writes.is_empty());
+    assert_none(&preview.writes);
     assert_eq!(preview.removes, paths(&["notes.md"]));
-    assert!(preview.added_since.is_empty());
+    assert_none(&preview.added_since);
 
     let done = matter.restore(&request(4, Some(5), 6, 7)).unwrap();
     assert_eq!(done.removed, paths(&["notes.md"]));
-    assert!(done.written.is_empty());
+    assert_none(&done.written);
     assert!(!fx.file("notes.md").exists());
     assert_eq!(fx.read("a.txt"), b"two");
     assert_eq!(done.checkpoint.outcome.id(), cid(7));
@@ -80,7 +82,7 @@ fn undoing_a_restore_keeps_a_file_edited_since_and_one_added_since() {
     fx.write("notes.md", "the lawyer's notes");
     fx.write("mine.txt", "mine");
     let done = matter.restore(&request(4, Some(5), 6, 7)).unwrap();
-    assert!(done.removed.is_empty());
+    assert_none(&done.removed);
     assert_eq!(done.added_since, paths(&["mine.txt", "notes.md"]));
     assert_eq!(fx.read("notes.md"), b"the lawyer's notes");
     assert_eq!(fx.read("mine.txt"), b"mine");

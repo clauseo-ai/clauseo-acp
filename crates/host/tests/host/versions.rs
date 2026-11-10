@@ -419,7 +419,7 @@ fn undoing_a_restore_removes_what_it_brought_back_and_the_conversation_records_b
     let with_notes = matter_events(&host, matter)
         .checkpoint(CheckpointKind::OutsideEdits)
         .unwrap();
-    std::fs::remove_file(&notes).unwrap();
+    write::remove_file(&notes);
     let CommandOutcome::VersionRestored {
         checkpoint: brought,
     } = host.ok(restore(with_notes, None))
@@ -447,7 +447,7 @@ fn undoing_a_restore_removes_what_it_brought_back_and_the_conversation_records_b
     let QueryResult::RestorePreview(preview) = previewed else {
         panic!("PreviewRestore answered {previewed:?}");
     };
-    assert_eq!(preview.removes, [name.clone()], "{preview:?}");
+    assert_eq!(preview.removes, std::slice::from_ref(&name), "{preview:?}");
     assert!(
         preview.changes.is_empty() && preview.added_since.is_empty(),
         "{preview:?}"
