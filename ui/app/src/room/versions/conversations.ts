@@ -1,5 +1,6 @@
 // The matter's conversations as Versions reads them: their titles, and whether an answer runs in one, for Restore and
-// Undo to wait on. list_threads gives both; it runs when Versions opens, when the matter's stream moves and when the
+// Undo to wait on. list_threads gives both, and a conversation whose stream the store holds has its header's newer
+// title and status, as the rail reads them; it runs when Versions opens, when the matter's stream moves and when the
 // host refuses an act because an answer runs. A conversation list_threads calls busy has its own stream held while it
 // is, so its header says the moment it rests, even when its turn changed no file and so left the matter's stream
 // still; the hold ends once it rests. Nothing here runs a timer: every read follows a host answer or a store flush.
@@ -63,12 +64,21 @@ export class Conversations {
     return this.#rested.get(t.thread) ?? t.status;
   }
 
-  /** What Versions reads of the conversations, as one string: their statuses, how many, the newest list_threads, and
-   * each held conversation's steps (one undone there changes what Undo offers; text doesn't count). */
+  /** What Versions reads of the conversations, as one string: their statuses, how many, the newest list_threads,
+   * each held conversation's steps (one undone there changes what Undo offers; text doesn't count), and their names. */
   sig(): string {
     const statuses = this.#threads.map((t) => JSON.stringify(this.statusOf(t))).join(",");
     const steps = this.#threads.map((t) => stepsSig(this.#store.view(streamOf(t.thread))));
-    return [statuses, this.#threads.length, this.#listed, steps.join(",")].join("|");
+    const titles = this.#threads.map((t) => this.titleOf(t)).join("\n");
+    return [statuses, this.#threads.length, this.#listed, steps.join(","), titles].join("|");
+  }
+
+  /** A conversation's name as the rail gives it (room/conversations.ts's withHeader): its header's title where the
+   * store holds its stream (the newer word: a rename, the agent's title), else list_threads'; "" for none. */
+  titleOf(t: ThreadSummary): string {
+    const h = this.#store.view(streamOf(t.thread))?.header;
+    const live = h !== undefined && h !== null && "header" in h ? h.header?.title : undefined;
+    return live ?? t.title ?? "";
   }
 
   /** The first conversation an answer runs in, or null. */

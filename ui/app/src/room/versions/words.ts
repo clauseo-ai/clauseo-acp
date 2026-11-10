@@ -19,7 +19,8 @@ import { clockOf } from "../when.ts";
 import { changedSince, type Ask, type Done, type Snapshot, type Unsaved } from "./state.ts";
 import { fileName, namesOf } from "@clauseo/components/lib/words-core.ts";
 
-/** A conversation's name as list_threads gives it; one without a title is a new conversation. */
+/** A conversation's name as the rail gives it (conversations.ts's titleOf); one without a title is a new
+ * conversation. */
 export const conversationOf = (lang: Lang, s: Snapshot, thread: ThreadId): string =>
   s.titles.get(thread) || mt(lang, "New conversation");
 
