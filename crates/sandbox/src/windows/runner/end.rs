@@ -459,6 +459,23 @@ pub(crate) fn inner_exited<S: EndSteps>(
     })
 }
 
+/// What the outer says of an `Escapee` report: `count` processes that can't be ended, or, with
+/// a count of 0, a tree of them that outran the sweep (`sweep::SweepError::escapees`).
+pub(crate) fn escapee_line(point: &str, count: u32, images: &[String]) -> String {
+    if count == 0 {
+        return format!(
+            "clauseo-sandbox-run: sweep ({point}): the sandbox user's processes kept starting new \
+             ones faster than the sweep could end them; the sandbox stop task ends them before \
+             this sandbox user runs again"
+        );
+    }
+    format!(
+        "clauseo-sandbox-run: sweep ({point}): {count} of the sandbox user's processes can't be \
+         ended ({})",
+        images.join(", ")
+    )
+}
+
 #[cfg(test)]
 mod stdin_tests;
 #[cfg(test)]

@@ -1,6 +1,6 @@
 //! The inner runner's order through a recording fake: the first-act sweep and cleanup before the
 //! launch, the fail-closed sweep, the sweeps given no job handle, a job list that can't be read,
-//! the tick, and the escapee reports at each point.
+//! the tick, and the escapee reports at each point, a tree that outran the sweep among them.
 
 use super::*;
 
@@ -14,6 +14,8 @@ struct Record {
     job_list_fails: Vec<Point>,
     /// Sweeps at these points find a process they can't end.
     escape_sweep: Vec<Point>,
+    /// Sweeps at these points meet a tree that keeps starting processes until the rounds run out.
+    outrun: Vec<Point>,
     /// Reports told, and whether `ctl` was open when they were.
     told: Vec<(InnerReport, bool)>,
     /// This step fails: "connect", "read", "start", "started".
@@ -25,7 +27,7 @@ struct Record {
     open: bool,
 }
 
-const ERROR: SweepError = SweepError::StillRunning;
+const ERROR: SweepError = SweepError::List(String::new());
 
 /// A sweep's failure naming a process it couldn't end: the first act's first failure, or a later
 /// sweep's left processes, one of them unkillable.
@@ -64,6 +66,9 @@ impl Inner for Record {
         }
         if self.escape_sweep.contains(&point) {
             return Err(escapee(point));
+        }
+        if self.outrun.contains(&point) {
+            return Err(SweepError::StillRunning);
         }
         Ok(())
     }
@@ -162,7 +167,7 @@ fn a_failed_first_act_sweep_exits_sweep_and_starts_no_agent() {
         ..Record::default()
     };
     assert_eq!(run(&mut record), RunExit::Sweep.code());
-    let what = "sweep (before launch): the sandbox user still started processes after 8 rounds";
+    let what = "sweep (before launch): the process list failed ()";
     assert_eq!(
         record.done,
         [
@@ -344,4 +349,32 @@ fn a_job_list_that_cant_be_read_fails_the_first_act_closed_and_a_tick_tries_agai
         .collect();
     assert_eq!(failed.len(), 2, "{failed:?}");
     assert_eq!(record.done.last().unwrap(), "report Exited { code: 3 }");
+}
+
+#[test]
+fn a_tree_that_outran_the_sweep_is_an_escapee_at_every_point() {
+    let tree = |point: &str| InnerReport::Escapee {
+        point: point.to_owned(),
+        count: 0,
+        images: Vec::new(),
+    };
+    // At the first act: exits Escapee, told before ctl opens, so the marker awaits the stop.
+    let mut record = Record {
+        outrun: vec![Point::Start],
+        ..Record::default()
+    };
+    assert_eq!(run(&mut record), RunExit::Escapee.code());
+    assert_eq!(record.told, [(tree("before launch"), false)]);
+    assert!(!record.done.iter().any(|step| step == "start agent"));
+    // At a tick and the end: told on ctl, and the run goes on with the agent's own code.
+    let mut record = Record {
+        waits_left: 1,
+        outrun: vec![Point::Tick, Point::End],
+        ..Record::default()
+    };
+    assert_eq!(run(&mut record), 3);
+    assert_eq!(
+        record.told,
+        [(tree("mid-session"), true), (tree("session end"), true)]
+    );
 }

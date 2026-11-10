@@ -16,8 +16,10 @@
 //! `SYNCHRONIZE`. One whose DACL refuses that (error 5) is opened with `WRITE_DAC`, which its
 //! owner (this user) holds unless an `OWNER RIGHTS` entry takes it away, given a DACL granting
 //! this user those rights, and opened again; when that fails too, the first error stands. Its
-//! creation time is read with `GetProcessTimes`, and it is ended with `TerminateProcess`. Whether
-//! one whose kill was refused has exited is `WaitForSingleObject` with no wait.
+//! creation time is read with `GetProcessTimes`, and it is ended with `TerminateProcess`, whose
+//! success is never taken for its end: whether it has exited is `WaitForSingleObject` on the
+//! same handle (`SYNCHRONIZE`), `WAIT_OBJECT_0` and nothing else, for as long as the sweep says
+//! (`KILL_WAIT` after a kill, no wait for one whose kill was refused).
 //!
 //! [`Processes::job_pids`] is `QueryInformationJobObject` with no job handle, which "uses the
 //! job associated with the calling process" (the immediate one, the launch's, when jobs nest),
@@ -29,7 +31,8 @@
 )]
 
 use std::io;
-use std::time::Duration;
+use std::sync::OnceLock;
+use std::time::{Duration, Instant};
 
 use windows::Win32::Foundation::{FILETIME, HANDLE, WAIT_OBJECT_0};
 use windows::Win32::Security::TOKEN_QUERY;
@@ -49,13 +52,11 @@ use windows::Win32::System::Threading::{
     PROCESS_TERMINATE, TerminateProcess, WaitForSingleObject,
 };
 
-use super::{Owner, Point, Processes, SWEPT, Seen, SweepError, sweep};
+use super::{Owner, Point, Processes, SWEPT, Seen, SweepError, sweep, wait_millis};
 use crate::windows::acl::object::{Handle, os_error};
 use crate::windows::sids::Sid;
 use crate::windows::token::os::{shut_object, sid_text};
 
-/// How long an ended process has to be gone.
-const KILL_WAIT: Duration = Duration::from_secs(5);
 /// `ERROR_INVALID_PARAMETER`: `OpenProcess` of a pid no process has.
 const NO_SUCH_PID: i32 = 87;
 /// `ERROR_NO_MORE_FILES`: the snapshot's end.
@@ -185,29 +186,33 @@ impl Processes for OsProcesses<'_> {
 
     fn kill(&mut self, process: &Handle) -> io::Result<()> {
         // SAFETY: the handle is live with PROCESS_TERMINATE.
-        let ended = unsafe { TerminateProcess(process.0, SWEPT) }.map_err(|e| os_error(&e));
-        if let Err(error) = ended {
-            // One already exiting refuses the call; it is gone all the same.
-            return if exited(process.0, Duration::ZERO) {
-                Ok(())
-            } else {
-                Err(error)
-            };
-        }
-        if exited(process.0, KILL_WAIT) {
-            Ok(())
-        } else {
-            Err(io::Error::from(io::ErrorKind::TimedOut))
-        }
+        unsafe { TerminateProcess(process.0, SWEPT) }.map_err(|e| os_error(&e))
     }
 
-    fn exited(&mut self, process: &Handle) -> bool {
-        exited(process.0, Duration::ZERO)
+    fn exited(&mut self, process: &Handle, wait: Duration) -> bool {
+        exited(process.0, wait)
     }
 
     fn pause(&mut self, pause: Duration) {
         sleep(pause);
     }
+
+    fn now(&mut self) -> Duration {
+        let origin = *ORIGIN.get_or_init(clock);
+        clock().saturating_duration_since(origin)
+    }
+}
+
+/// [`Processes::now`]'s origin: its first reading.
+static ORIGIN: OnceLock<Instant> = OnceLock::new();
+
+/// The monotonic clock's reading, for [`Processes::now`].
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the sweep's deadline on its waits; the tests inject the clock (`Processes::now`)"
+)]
+fn clock() -> Instant {
+    Instant::now()
 }
 
 /// The pause between two looks at a process whose kill was refused.
@@ -263,8 +268,15 @@ pub(in crate::windows::runner) fn own_job_pids() -> io::Result<Vec<u32>> {
                 "the job's pid list doesn't fit its buffer",
             ));
         }
-        // SAFETY: `count` pids follow in `ProcessIdList`, inside `buffer` (`count <= room`).
-        let pids = unsafe { std::slice::from_raw_parts(list.ProcessIdList.as_ptr(), count) };
+        // The pids' pointer comes from `buffer` itself, not from the struct's one-element
+        // `ProcessIdList`, whose provenance covers that one pid only.
+        let offset = std::mem::offset_of!(JOBOBJECT_BASIC_PROCESS_ID_LIST, ProcessIdList);
+        // SAFETY: `ProcessIdList` starts `offset` bytes into the aligned buffer (a multiple of
+        // `usize`'s size, as the array is `usize`-aligned), and `count` pids follow inside it
+        // (`count <= room`, and `buffer` holds `head + room` words from its start).
+        let pids = unsafe {
+            std::slice::from_raw_parts(buffer.as_ptr().byte_add(offset).cast::<usize>(), count)
+        };
         return pids
             .iter()
             .map(|pid| u32::try_from(*pid).map_err(io::Error::other))
@@ -348,9 +360,10 @@ fn owner(pid: u32) -> Owner {
     crate::windows::token::os::user(&Handle(token)).map_or(Owner::None, Owner::User)
 }
 
-/// Whether `process` has ended within `wait`.
+/// Whether `process` has ended within `wait`: what is left of the sweep's deadline, at most
+/// `KILL_WAIT`, and never `INFINITE` ([`wait_millis`]).
 fn exited(process: HANDLE, wait: Duration) -> bool {
-    let millis = u32::try_from(wait.as_millis()).unwrap_or(u32::MAX);
+    let millis = wait_millis(wait);
     // SAFETY: the handle is live with SYNCHRONIZE.
     unsafe { WaitForSingleObject(process, millis) == WAIT_OBJECT_0 }
 }

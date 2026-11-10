@@ -19,6 +19,8 @@ pub(super) const EXIT_POLL: Duration = Duration::from_millis(100);
 pub(super) struct Refused<'a, T> {
     pub(super) found: &'a Seen,
     pub(super) process: T,
+    /// Its creation time, when the sweep could read it: with its pid, which process it is.
+    pub(super) started: Option<u64>,
     /// Why the kill failed.
     pub(super) error: io::Error,
 }
@@ -40,21 +42,23 @@ impl<T> Refused<'_, T> {
 pub(super) type Outcome<'a, T> = (Vec<Refused<'a, T>>, Vec<Refused<'a, T>>);
 
 /// Looks at each refused process, then again every [`EXIT_POLL`] until none is left or
-/// [`EXIT_WAIT`] has passed.
+/// [`EXIT_WAIT`] has passed, or `budget` (what is left of the sweep's deadline) if less.
 pub(super) fn wait_out<'a, P: Processes>(
     calls: &mut P,
     refused: Vec<Refused<'a, P::Process>>,
+    budget: Duration,
 ) -> Outcome<'a, P::Process> {
+    let limit = EXIT_WAIT.min(budget);
     let mut ended = Vec::new();
     let mut left = refused;
     let mut waited = Duration::ZERO;
     loop {
         let (gone, still): (Vec<_>, Vec<_>) = left
             .into_iter()
-            .partition(|refused| calls.exited(&refused.process));
+            .partition(|refused| calls.exited(&refused.process, Duration::ZERO));
         ended.extend(gone);
         left = still;
-        if left.is_empty() || waited >= EXIT_WAIT {
+        if left.is_empty() || waited >= limit {
             return (ended, left);
         }
         calls.pause(EXIT_POLL);

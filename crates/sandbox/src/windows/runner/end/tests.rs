@@ -566,3 +566,20 @@ fn a_number_that_cant_be_read_or_no_end_leaves_the_marker_open() {
         "{last}"
     );
 }
+
+#[test]
+fn an_escapee_report_says_its_processes_or_a_tree_that_outran_the_sweep() {
+    let images = ["hidden.exe".to_owned(), "shut.exe".to_owned()];
+    assert_eq!(
+        escapee_line("session end", 2, &images),
+        "clauseo-sandbox-run: sweep (session end): 2 of the sandbox user's processes can't be \
+         ended (hidden.exe, shut.exe)"
+    );
+    // A tree that outran the sweep has no count or name.
+    assert_eq!(
+        escapee_line("mid-session", 0, &[]),
+        "clauseo-sandbox-run: sweep (mid-session): the sandbox user's processes kept starting new \
+         ones faster than the sweep could end them; the sandbox stop task ends them before \
+         this sandbox user runs again"
+    );
+}

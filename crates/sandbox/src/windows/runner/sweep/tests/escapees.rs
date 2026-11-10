@@ -7,33 +7,36 @@ use super::*;
 fn a_sweep_that_cant_read_its_own_start_kills_nothing() {
     struct NoClock(Fake);
     impl Processes for NoClock {
-        type Process = u32;
+        type Process = Handle;
         fn list(&mut self) -> io::Result<Vec<Seen>> {
             self.0.list()
         }
         fn named(&mut self) -> io::Result<Vec<Seen>> {
             self.0.named()
         }
-        fn open(&mut self, pid: u32) -> io::Result<Option<u32>> {
+        fn open(&mut self, pid: u32) -> io::Result<Option<Handle>> {
             self.0.open(pid)
         }
         fn job_pids(&mut self) -> io::Result<Vec<u32>> {
             self.0.job_pids()
         }
-        fn started(&mut self, process: &u32) -> io::Result<u64> {
+        fn started(&mut self, process: &Handle) -> io::Result<u64> {
             self.0.started(process)
         }
         fn own_start(&mut self) -> io::Result<u64> {
             Err(io::Error::from_raw_os_error(6))
         }
-        fn kill(&mut self, process: &u32) -> io::Result<()> {
+        fn kill(&mut self, process: &Handle) -> io::Result<()> {
             self.0.kill(process)
         }
-        fn exited(&mut self, process: &u32) -> bool {
-            self.0.exited(process)
+        fn exited(&mut self, process: &Handle, wait: Duration) -> bool {
+            self.0.exited(process, wait)
         }
         fn pause(&mut self, pause: Duration) {
             self.0.pause(pause);
+        }
+        fn now(&mut self) -> Duration {
+            self.0.now()
         }
     }
     let mut fake = machine();
@@ -79,7 +82,6 @@ fn a_process_that_cant_be_opened_or_ended_is_an_escapee_and_one_that_cant_be_che
         job,
         started,
         SweepError::List("5".to_owned()),
-        SweepError::StillRunning,
         SweepError::Left {
             count: 2,
             unkillable: 0,
@@ -122,5 +124,25 @@ fn a_later_sweep_counts_its_escapees_and_names_each_image_once_up_to_the_cap() {
         assert_eq!(escapees.count, 11, "{point}");
         assert_eq!(escapees.images.len(), IMAGES_CAP, "{point}");
         assert_eq!(escapees.images[..2], ["same.exe", "a.exe"], "{point}");
+    }
+}
+
+#[test]
+fn a_tree_that_outruns_the_sweep_is_an_escapee_with_no_count_or_name() {
+    let tree = Some(Escapees {
+        count: 0,
+        images: Vec::new(),
+    });
+    for error in [SweepError::StillRunning, SweepError::Deadline] {
+        assert_eq!(error.escapees(), tree, "{error:?}");
+    }
+    // A process that starts another each time it is killed outruns every point's rounds.
+    for point in [Point::Start, Point::Tick, Point::End] {
+        let mut fake = machine();
+        fake.procs.insert(12, pool_proc("hydra.exe"));
+        fake.forever = Some(12);
+        let got = run(&mut fake, &[10], point).0;
+        assert_eq!(got, Err(SweepError::StillRunning), "{point}");
+        assert_eq!(got.unwrap_err().escapees(), tree, "{point}");
     }
 }

@@ -8,7 +8,7 @@ use std::thread;
 use std::time::Duration;
 
 use super::desktop::AgentDesktop;
-use super::end::{EndSignal, GRACE, SessionEnd, copy, inner_exited, relay_stdin};
+use super::end::{EndSignal, GRACE, SessionEnd, copy, escapee_line, inner_exited, relay_stdin};
 use super::frame::{InnerLaunch, InnerReport, command_line, read_frame, write_frame};
 use super::marker::marked;
 use super::paths::{CodexReuse, WinPath};
@@ -294,11 +294,7 @@ fn next_report(ctl: &ServerPipe, end: &End) -> io::Result<InnerReport> {
                 images,
             } => {
                 end.mark_escapee();
-                say(&format!(
-                    "clauseo-sandbox-run: sweep ({point}): {count} of the sandbox user's processes \
-                     can't be ended ({})",
-                    images.join(", ")
-                ));
+                say(&escapee_line(&point, count, &images));
             }
             report @ (InnerReport::Started { .. }
             | InnerReport::Failed { .. }
