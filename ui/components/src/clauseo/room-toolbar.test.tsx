@@ -296,7 +296,10 @@ test("the caption wiring reaches the buttons: each press calls its handler, and 
 });
 
 test("nativeLights marks the corner lights for macOS's own, and only then", async () => {
+  // a window smaller than its screen: happy-dom's window fills its screen, which reads as macOS's full screen
+  const height = vi.spyOn(window.screen, "height", "get").mockReturnValue(window.innerHeight + 100);
   await mount(null, { platform: "mac", nativeLights: true });
+  height.mockRestore();
   expect(parts().lights?.hasAttribute("data-native")).toBe(true);
   await remount({ platform: "mac" });
   expect(parts().lights?.hasAttribute("data-native")).toBe(false);

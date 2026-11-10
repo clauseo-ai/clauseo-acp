@@ -248,6 +248,7 @@
      Measured, since the system draws them (crates/desktop/src/window_frame/geometry.rs) */
   --lights-native-w: 59px;
   --lead-w-mid: 196px; /* the toolbar's lead with the rail folded behind Matters */
+  --size-lockup-rail: 96px; /* Clauseo's lockup at the rail's head: the lockup's least width (design/logo) */
   --rail-panel-top: 60px; /* the folded rail opens just under Matters */
   --rail-panel-w: 260px; /* the folded rail, open */
   --pill-clear: 52px; /* the wall's foot keeps clear of the presentation pill */

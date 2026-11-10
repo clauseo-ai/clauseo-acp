@@ -18,6 +18,7 @@ import { Heading } from "./heading.tsx";
 import { findMatters, type FoundBy } from "./rail-find.ts";
 import { MatterRow, type MatterRowProps } from "./rail-matter.tsx";
 import { TestBuildTag } from "./test-build.tsx";
+import { RailBrand } from "./rail-brand.tsx";
 
 export type { MatterRowProps, MatterState } from "./rail-matter.tsx";
 export { MatterRow };
@@ -184,6 +185,7 @@ export function Rail({
   scratch,
   settings,
   onSettings,
+  brand = false,
   notice,
   label,
   testIds,
@@ -216,6 +218,8 @@ export function Rail({
   /** Optional: Settings at the rail's foot, pressed: opens them in a window of their own. Given it, Settings is a
    * button, in the link's place and look. */
   onSettings?: () => void;
+  /** Optional: Clauseo's lockup above New matter, where the toolbar's lead doesn't hold it (rail-brand.tsx). */
+  brand?: boolean;
   /** Optional: what sets this rail apart where several stand on one page, added to its name, "Matters, …". */
   label?: string;
   /** Optional: what the room says about Clauseo itself (an update, the first crash, a lab's terms),
@@ -411,6 +415,7 @@ export function Rail({
       </Heading>
       {/* New matter and Find stand on a sticky head, as the scratch matter and Settings stand on the foot */}
       <div className="room-rail-head">
+        {brand && <RailBrand at="rail" platform={platform} />}
         <Button
           kind="tone"
           className="w-full flex-none justify-start px-s3 text-muted is-hover:text-primary"
