@@ -1127,14 +1127,24 @@ jobs:
             if ([BitConverter]::ToUInt32($b, $pe) -ne 0x4550) { throw "$exe has no PE header" }
             [BitConverter]::ToUInt16($b, $pe + 4)
           }
+          # The elevated runs' plug-in folders (safe_temp.nsh) in the folder after each install:
+          # each run leaves its own, and removes earlier runs' ones.
+          function PluginFolders($after) {
+            foreach ($folder in @(Get-ChildItem -Force -Directory $dir -Filter 'ns*.tmp')) {
+              Write-Host "::notice::after $after, a plug-in folder: $($folder.Name) ($((Get-ChildItem -Force -Name $folder.FullName) -join ', '))"
+            }
+          }
           Run "$legs/release-x86_64-pc-windows-msvc/Clauseo_${env:VERSION}_x64-machine-setup.exe" '/S'
           if ((Machine "$dir\Clauseo.exe") -ne 0x8664) { throw 'the x64 install is not x64' }
+          PluginFolders 'the x64 install'
           Run "$legs/release-aarch64-pc-windows-msvc/Clauseo_${env:VERSION}_arm64-machine-setup.exe" '/S'
+          PluginFolders 'the arm64 install'
           $m = Machine "$dir\Clauseo.exe"
           if ($m -ne 0xAA64) { throw ('Clauseo.exe over the x64 install has machine 0x{0:X4}, not ARM64' -f $m) }
           # The uninstall the install registered: "<dir>\uninstall.exe" /S _?=<dir>, which runs in
           # place (uninstall_in_place.nsh), so the wait is for the uninstall itself; its
-          # self-delete removes uninstall.exe and the folder about 3 s after it exits.
+          # self-delete removes uninstall.exe, its plug-in folder and the folder about 3 s after it
+          # exits (the plug-in folder once more about 5 s later if it is still there).
           $quiet = (Get-ItemProperty $uninstKey).QuietUninstallString
           if ($quiet -notmatch '^"([^"]+)"\s+(/S _\?=.+)$') { throw "unexpected QuietUninstallString: $quiet" }
           Run $Matches[1] $Matches[2]
@@ -1142,10 +1152,14 @@ jobs:
           $left = @()
           # What a restart deletes: PendingFileRenameOperations holds source, target pairs, and an
           # empty target means delete at the next restart. A source reads \??\C:\... (stripped here).
+          # MoveFileEx appends to PendingFileRenameOperations2 instead while that value exists.
           $pending = @()
-          $pairs = @((Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager' -Name PendingFileRenameOperations -ErrorAction SilentlyContinue).PendingFileRenameOperations)
-          for ($p = 0; $p + 1 -lt $pairs.Count; $p += 2) {
-            if ($pairs[$p + 1] -eq '') { $pending += $pairs[$p] -replace '^\\\?\?\\', '' }
+          $session = Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager'
+          foreach ($value in 'PendingFileRenameOperations', 'PendingFileRenameOperations2') {
+            $pairs = @($session.$value)
+            for ($p = 0; $p + 1 -lt $pairs.Count; $p += 2) {
+              if ($pairs[$p + 1] -eq '') { $pending += $pairs[$p] -replace '^\\\?\?\\', '' }
+            }
           }
           $pendingHere = @($pending | Where-Object { $_.StartsWith("$dir\", [StringComparison]::OrdinalIgnoreCase) } | Sort-Object -Unique)
           foreach ($path in $pendingHere) { Write-Host "::notice::pending delete at the next restart: $path" }
@@ -1174,7 +1188,15 @@ jobs:
             if (Test-Path $lnk) { $left += $lnk }
           }
           # C:\ProgramData\Clauseo, the firm-policy folder, stays by design (hooks.nsh).
-          if ($left) { $left | ForEach-Object { Write-Host "::error::left after the uninstall: $_" }; exit 1 }
+          if ($left) {
+            $left | ForEach-Object { Write-Host "::error::left after the uninstall: $_" }
+            # Whether anything still holds a file that stayed: a delete now, and why it fails.
+            foreach ($file in @($left | Where-Object { Test-Path -PathType Leaf $_ })) {
+              try { [IO.File]::Delete($file); Write-Host "::notice::a delete now works: $file" }
+              catch { Write-Host "::notice::a delete now fails: ${file}: $($_.Exception.Message)" }
+            }
+            exit 1
+          }
           Write-Host 'arm64 over x64 per machine: installed, Clauseo.exe is ARM64, uninstalled clean'
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

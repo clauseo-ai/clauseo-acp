@@ -225,9 +225,10 @@ pub(super) fn lines(nodes: &[Node]) -> Vec<&str> {
 /// The machine: the defines, variables, error flag and stack, the record under
 /// `HKLM\SOFTWARE\Clauseo\Sandbox` and the lawyer's key under `HKCU\Software\Clauseo`, whether
 /// the run is silent, the user's SID for `CLAUSEO_OWN_SID`, the files `${FileExists}` finds, the
-/// macros it runs inline (and the record each leaves), what it said (`DetailPrint`, `MessageBox`,
-/// `SetErrorLevel`, `ExecWait`, `Quit`, `Abort`), whether it aborted, and which stubbed macros it
-/// reached.
+/// names `FindFirst` and `FindNext` return and the files `Delete` can't delete, the macros it
+/// runs inline (and the record each leaves), what it said (`DetailPrint`, `MessageBox`,
+/// `SetErrorLevel`, `ExecWait`, `Quit`, `Abort`, `Delete`, `RMDir`), whether it aborted, and
+/// which stubbed macros it reached.
 pub(super) struct Machine {
     pub(super) defines: HashMap<String, String>,
     pub(super) vars: HashMap<String, String>,
@@ -244,6 +245,10 @@ pub(super) struct Machine {
     pub(super) own_sid: &'static str,
     /// The paths that exist, as `${FileExists}` is given them once expanded.
     pub(super) files: Vec<String>,
+    /// The names one `FindFirst`, then each `FindNext`, returns, in order; then "".
+    pub(super) found: Vec<String>,
+    /// The paths, once expanded, whose `Delete` fails (a file in use).
+    pub(super) locked: Vec<String>,
     /// An `Abort` ran: nothing after it does, as the section it ends.
     pub(super) aborted: bool,
     pub(super) inline: HashMap<String, Vec<Node>>,
@@ -274,6 +279,8 @@ impl Machine {
             silent: false,
             own_sid: "",
             files: Vec::new(),
+            found: Vec::new(),
+            locked: Vec::new(),
             aborted: false,
             inline: HashMap::new(),
             after: HashMap::new(),
@@ -368,6 +375,7 @@ impl Machine {
             "=" => number(&a) == number(&b),
             "<>" => number(&a) != number(&b),
             ">=" => number(&a) >= number(&b),
+            "<=" => number(&a) <= number(&b),
             _ => panic!("an operator this interpreter doesn't know: {cond}"),
         }
     }
@@ -391,6 +399,53 @@ impl Machine {
 
     fn set(&mut self, var: &str, value: String) {
         self.vars.insert(var.to_owned(), value);
+    }
+
+    /// `StrCpy` with a length and an offset, as NSIS's `EW_ASSIGNVAR` (exec.c) takes them: a
+    /// negative offset counts from the end (nothing when still negative), the offset is capped at
+    /// the end, then an empty length takes the rest, a negative one cuts that many characters off
+    /// the end, and 0 takes nothing.
+    fn str_cpy(&self, value: &str, len: &str, offset: &str) -> String {
+        let text: Vec<char> = self.expand(value).chars().collect();
+        let total = i64::try_from(text.len()).unwrap();
+        let offset = self.expand(offset);
+        let mut start = if offset.is_empty() {
+            0
+        } else {
+            offset.parse::<i64>().unwrap()
+        };
+        if start < 0 {
+            start += total;
+        }
+        if start < 0 {
+            return String::new();
+        }
+        let rest = &text[usize::try_from(start.min(total)).unwrap()..];
+        let left = i64::try_from(rest.len()).unwrap();
+        let len = self.expand(len);
+        let take = if len.is_empty() {
+            left
+        } else {
+            let len = len.parse::<i64>().unwrap();
+            if len < 0 {
+                (left + len).max(0)
+            } else {
+                len.min(left)
+            }
+        };
+        rest[..usize::try_from(take).unwrap()].iter().collect()
+    }
+
+    /// The next name `FindFirst` or `FindNext` returns into `var`; "" and the error flag at the
+    /// end, as NSIS leaves them.
+    fn find(&mut self, var: &str) {
+        if self.found.is_empty() {
+            self.error = true;
+            self.set(var, String::new());
+        } else {
+            let name = self.found.remove(0);
+            self.set(var, name);
+        }
     }
 
     /// `WordFunc`'s `${VersionCompare}`: 0 for equal versions, 1 when the first is newer, 2
@@ -442,6 +497,8 @@ impl Machine {
         let parts: Vec<&str> = parts.iter().map(String::as_str).collect();
         match parts.as_slice() {
             ["StrCpy", var, value] => self.set(var, self.expand(value)),
+            ["StrCpy", var, value, len] => self.set(var, self.str_cpy(value, len, "")),
+            ["StrCpy", var, value, len, offset] => self.set(var, self.str_cpy(value, len, offset)),
             ["ClearErrors"] => self.error = false,
             ["StrLen", var, text] => {
                 let len = self.expand(text).chars().count();
@@ -483,6 +540,30 @@ impl Machine {
                 let a: i64 = self.expand(a).parse().unwrap();
                 let b: i64 = self.expand(b).parse().unwrap();
                 self.set(var, (a + b).to_string());
+            }
+            ["IntOp", var, a, "-", b] => {
+                let a: i64 = self.expand(a).parse().unwrap();
+                let b: i64 = self.expand(b).parse().unwrap();
+                self.set(var, (a - b).to_string());
+            }
+            // The pattern is said; the names come from `found`.
+            ["FindFirst", handle, var, pattern] => {
+                let pattern = self.expand(pattern);
+                self.said.push(format!("FindFirst {pattern}"));
+                self.set(handle, "1".to_owned());
+                self.find(var);
+            }
+            ["FindNext", _, var] => self.find(var),
+            ["FindClose", _] => {}
+            // A file in `locked` sets the error flag, as a file in use does.
+            ["Delete", path] => {
+                let path = self.expand(path);
+                self.error |= self.locked.contains(&path);
+                self.said.push(format!("Delete {path}"));
+            }
+            ["RMDir", "/r", path] => {
+                let path = self.expand(path);
+                self.said.push(format!("RMDir /r {path}"));
             }
             ["DetailPrint", text] => {
                 let text = self.expand(text);

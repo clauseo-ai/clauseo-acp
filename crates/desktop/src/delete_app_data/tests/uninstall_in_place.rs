@@ -1,7 +1,8 @@
 //! The per-machine uninstaller runs in place and deletes itself (`windows/uninstall_in_place.nsh`):
 //! `_?=` in both registry commands; in `un.onInit` its plug-in folder first, then a refusal
 //! unless it runs in its own folder; then a delayed hidden cmd line, guarded by the main exe's
-//! absence, that deletes the image and removes only empty folders, started once per run.
+//! absence, that deletes the image, removes its own plug-in folder by its exact path and then the
+//! install folder only when empty, started once per run.
 //! Per-user keeps Tauri's lines. The Windows VM runs it for real.
 
 use super::admin_copy::{assert_run, code_of, firm_it_codes, macro_body};
@@ -215,10 +216,11 @@ fn a_path_with_a_cmd_metacharacter_builds_no_command_line() {
 }
 
 /// The whole cmd line, as NSIS builds it: cmd without `AutoRun` or delayed expansion, PING by
-/// full path, uninstall.exe deleted only while no main exe is back, then the folder removed only
-/// when empty. No `installer-temp`: the plug-in folder has no parent of its own
-/// (`safe_temp.nsh`).
-const COMMAND: &str = r#"StrCpy $ClauseoSelfDelete '/d /v:off /c ""$SYSDIR\PING.EXE" -n 4 127.0.0.1 >nul & (if not exist "$INSTDIR\${MAINBINARYNAME}.exe" del /f /q "$INSTDIR\uninstall.exe") & rmdir "$INSTDIR""'"#;
+/// full path, uninstall.exe deleted only while no main exe is back, then the uninstaller's own
+/// plug-in folder (which NSIS's exit leaves, its System.dll in it: `safe_temp.nsh`), once more
+/// about 5 s later if it is still there, then the install folder only when empty. No
+/// `installer-temp`: the plug-in folder has no parent of its own.
+const COMMAND: &str = r#"StrCpy $ClauseoSelfDelete '/d /v:off /c ""$SYSDIR\PING.EXE" -n 4 127.0.0.1 >nul & (if not exist "$INSTDIR\${MAINBINARYNAME}.exe" del /f /q "$INSTDIR\uninstall.exe") & rmdir /s /q "$PLUGINSDIR" & (if exist "$PLUGINSDIR" ("$SYSDIR\PING.EXE" -n 6 127.0.0.1 >nul & rmdir /s /q "$PLUGINSDIR")) & rmdir "$INSTDIR""'"#;
 
 #[test]
 fn the_line_is_checked_then_built_to_delete_the_image_only_while_no_main_exe_is_back() {
@@ -228,12 +230,28 @@ fn the_line_is_checked_then_built_to_delete_the_image_only_while_no_main_exe_is_
         [
             r#"!if "${INSTALLMODE}" == "perMachine""#,
             "Push $0",
+            "Push $1",
             r#"StrCpy $ClauseoSelfDelete """#,
             r#"!insertmacro CLAUSEO_CMD_SAFE "$INSTDIR\${MAINBINARYNAME}.exe" $0"#,
+            // The plug-in folder the line removes: cmd-safe too, and the one this run made,
+            // directly in %ProgramFiles%\Clauseo (safe_temp.rs runs that test).
+            "${If} $0 = 1",
+            r#"!insertmacro CLAUSEO_CMD_SAFE "$PLUGINSDIR" $0"#,
+            "${EndIf}",
+            "${If} $0 = 1",
+            "!insertmacro CLAUSEO_OWN_PLUGINSDIR $0",
+            "${EndIf}",
             "${If} $0 = 1",
             r#"${AndIf} ${FileExists} "$INSTDIR\uninstall.exe""#,
             COMMAND,
+            // No line NSIS cut at its string limit: a cut path could name a parent folder.
+            "StrLen $1 $ClauseoSelfDelete",
+            "IntOp $1 $1 + 1",
+            "${If} $1 >= ${NSIS_MAX_STRLEN}",
+            r#"StrCpy $ClauseoSelfDelete """#,
             "${EndIf}",
+            "${EndIf}",
+            "Pop $1",
             "Pop $0",
             "${If} ${Silent}",
             "!insertmacro CLAUSEO_START_SELF_DELETE",
@@ -245,10 +263,16 @@ fn the_line_is_checked_then_built_to_delete_the_image_only_while_no_main_exe_is_
     for line in &code {
         assert!(!line.starts_with("Rename "), "{line}");
         assert!(!line.starts_with("GetTempFileName "), "{line}");
-        // No recursive removal anywhere in the file.
-        assert!(!line.contains("/s"), "{line}");
+        // No recursive removal anywhere in the file but the line's, of the plug-in folder.
+        assert!(line == COMMAND || !line.contains("/s"), "{line}");
         assert!(!line.contains("RMDir /r"), "{line}");
     }
+    // The line's: rmdir /s twice, each on "$PLUGINSDIR" whole, and $INSTDIR never with /s.
+    assert_eq!(COMMAND.matches("/s").count(), 2);
+    assert_eq!(COMMAND.matches(r#"rmdir /s /q "$PLUGINSDIR" "#).count(), 1);
+    assert_eq!(COMMAND.matches(r#"rmdir /s /q "$PLUGINSDIR")"#).count(), 1);
+    assert_eq!(COMMAND.matches(r#"rmdir "$INSTDIR""#).count(), 1);
+    assert!(COMMAND.ends_with(r#" & rmdir "$INSTDIR""'"#));
     // The comments say why /d is there, and what happens when the guard loses.
     let text = read("windows/uninstall_in_place.nsh");
     assert!(text.contains("; /d: an elevated cmd would otherwise run HKCU's Command Processor"));

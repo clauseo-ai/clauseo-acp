@@ -124,8 +124,11 @@ silent per-user uninstall never returns 27: it skips the protection's removal.
 
 The per-machine installer, and the per-user installer's elevated step, keep their temporary files,
 plug-ins included, in a new `ns….tmp` folder in `C:\Program Files\Clauseo`, which only
-Administrators and SYSTEM can open, and delete it when they finish. The per-machine uninstaller
-keeps its own plug-ins there too. Earlier versions put these folders in
+Administrators and SYSTEM can open. The per-user step's folder goes when it finishes. The
+per-machine uninstaller keeps its own plug-ins there too, and removes its folder a few seconds
+after it finishes. A folder left by an earlier per-machine run (named `ns`, a letter, up to four
+hex digits, `.tmp`) is removed by the next per-machine install or uninstall, so after an install
+one such folder may stay until then. Earlier versions put these folders in
 `C:\Program Files\Clauseo\installer-temp`, which stayed behind empty; the installer and the
 uninstaller remove an empty leftover `installer-temp`.
 

@@ -25,16 +25,23 @@
 ;   first test, "StrCmp $PLUGINSDIR "" done", build.cpp:3806-3807): every plug-in loads from here;
 ; - $TEMP covers the run's other $TEMP uses, such as the template's WebView2 bootstrapper, which it
 ;   writes to $TEMP and runs elevated;
-; - at exit NSIS deletes $PLUGINSDIR, recursively, and nothing else (CleanUp, Main.c:470-489),
-;   on every way out, Quit and Abort in .onInit included (Ui.c:396 returns, then Main.c:427-429);
-;   a file still in use goes at the next restart (DEL_REBOOT). So no RMDir of our own is needed,
-;   and nothing of the run stays: there is no parent of its own to outlive it.
+; - at exit NSIS tries to delete $PLUGINSDIR, recursively, and nothing else (CleanUp,
+;   Main.c:470-489), on every way out, Quit and Abort in .onInit included (Ui.c:396 returns, then
+;   Main.c:427-429); a file it can't delete it queues for the next restart (DEL_REBOOT, util.c:249).
+;   That is not enough on its own. The ARM64 install smoke (release.yml, arm64-install-smoke) finds
+;   every per-machine run's folder still there afterwards, System.dll in it, and none of it in
+;   PendingFileRenameOperations (it didn't read ...2, where MoveFileEx appends while that value
+;   exists): one folder for each installer and for the uninstaller (smoke log 42805041761).
+;   System is the one plug-in loaded until CleanUp (System's Plugin.h:31 registers a callback, so
+;   exec.c:1070 never frees it after a call); CleanUp frees it just before the delete
+;   (plugin.c:51), and still its file isn't deleted. Why isn't proven; so the per-machine runs
+;   remove what is left themselves ("Leftovers", below).
 ;   %ProgramFiles%\Clauseo is where the admin copy lives (Sandbox, admin_copy.nsh) and the
 ;   per-machine $INSTDIR by default, so the folder can sit inside $INSTDIR. Nothing there removes
 ;   what it didn't put: the uninstaller deletes its own files by name, and $INSTDIR only when
 ;   empty, never recursively (the template's section; then its delayed rmdir,
-;   uninstall_in_place.nsh, which runs once its own exit cleanup is done), and so does the old
-;   uninstaller that an install over a running one starts.
+;   uninstall_in_place.nsh, which first removes the uninstaller's own folder), and so does the
+;   old uninstaller that an install over a running one starts.
 ;
 ; Earlier builds made the folders in a parent of their own, %ProgramFiles%\Clauseo\installer-temp,
 ; which stayed, empty, after every run. Each run removes it first, without /r (RMDir fails on a
@@ -46,9 +53,25 @@
 ; already write anywhere. That matters because CreateDirectory doesn't fail on a folder that is
 ; already there (exec.c:389-398); icacls then sets the owner and DACL anyway.
 ;
-; No sweep of old folders in CLAUSEO_TEMP_PARENT: two installs may run at once, and one would
-; delete the other's plug-ins. A folder stays only when an installer is killed. (RMDir /r follows
-; junctions; none can be under Program Files but an administrator's.)
+; Leftovers. Two removals, per machine only (CLAUSEO_MACHINE_START and the uninstaller):
+; - each per-machine run, installer or uninstaller, removes earlier runs' folders, after its own
+;   is made and loaded (CLAUSEO_REMOVE_OLD_PLUGINSDIRS). Only folders directly in
+;   CLAUSEO_TEMP_PARENT, named as NSIS names them ("ns", a letter, 1-4 hex digits, ".tmp";
+;   CLAUSEO_NSIS_TEMP_NAME), never this run's $PLUGINSDIR or $INSTDIR, and only one whose
+;   System.dll it could delete first. Another run still going has System loaded from its folder
+;   (it stays loaded until that run's exit), and Windows refuses to delete a loaded DLL, so that
+;   run keeps its folder; a run that hasn't loaded System yet has no System.dll there, so it keeps
+;   its folder too (the per-user elevated branch loads no plug-in and never has one). The one gap
+;   is the instant between NSIS extracting System.dll and loading it, in a second per-machine
+;   run started at the same moment; that run's plug-in calls then fail;
+; - the per-machine uninstaller's delayed cmd line, which runs after it has exited, removes its
+;   own $PLUGINSDIR, that exact path, then $INSTDIR only when empty (uninstall_in_place.nsh).
+; Why a recursive delete is safe there: only administrators, SYSTEM and TrustedInstaller can
+; create anything in %ProgramFiles%\Clauseo or in these folders (Program Files' rules, then the
+; protected DACL), so no one else can have put a folder, a file or a junction at such a name (RMDir
+; /r follows junctions), and an administrator can already delete anything. A folder whose name
+; doesn't fit stays. A folder can still stay when its run is killed, or after an install until the
+; next per-machine run.
 ;
 ; Every per-machine run, SYSTEM's (Intune, /S) included: NSIS can't read its own token without a
 ; plug-in, and what it could read natively, the environment (USERNAME, TEMP), is the user's to set,
@@ -164,6 +187,119 @@
   Pop $2
 !macroend
 
+; Sets OUT to 1 when the one character CHAR is in SET, any case (StrCmp), else 0. Plain NSIS and
+; LogicLib. CHAR and OUT must not be $R4 or $R5.
+!macro CLAUSEO_CHAR_IN CHAR SET OUT
+  Push $R4
+  Push $R5
+  StrCpy ${OUT} 0
+  StrCpy $R4 0
+  ${Do}
+    StrCpy $R5 "${SET}" 1 $R4
+    ${If} $R5 == ""
+      ${ExitDo}
+    ${EndIf}
+    ${If} $R5 == "${CHAR}"
+      StrCpy ${OUT} 1
+      ${ExitDo}
+    ${EndIf}
+    IntOp $R4 $R4 + 1
+  ${Loop}
+  Pop $R5
+  Pop $R4
+!macroend
+
+; Sets OUT to 1 when NAME is shaped like the folder names NSIS's GetTempFileName gives ("ns", a
+; letter a-z, then Win32's 1-4 hex digits and ".tmp": my_GetTempFileName, util.c:473-485), any
+; case, else 0. Plain NSIS and LogicLib. NAME is read once, first; OUT must not be $R0-$R5.
+!macro CLAUSEO_NSIS_TEMP_NAME NAME OUT
+  Push $R0
+  Push $R1
+  Push $R2
+  Push $R3
+  StrCpy $R0 "${NAME}"
+  StrCpy ${OUT} 0
+  StrLen $R1 $R0
+  StrCpy $R2 $R0 2
+  StrCpy $R3 $R0 4 -4
+  ${If} $R1 >= 8
+  ${AndIf} $R1 <= 11
+  ${AndIf} $R2 == "ns"
+  ${AndIf} $R3 == ".tmp"
+    StrCpy $R3 $R0 1 2
+    !insertmacro CLAUSEO_CHAR_IN $R3 "abcdefghijklmnopqrstuvwxyz" ${OUT}
+    ; The digits: from the fourth character to the one before ".tmp".
+    IntOp $R1 $R1 - 4
+    StrCpy $R2 3
+    ${Do}
+      ${If} ${OUT} <> 1
+      ${OrIf} $R2 >= $R1
+        ${ExitDo}
+      ${EndIf}
+      StrCpy $R3 $R0 1 $R2
+      !insertmacro CLAUSEO_CHAR_IN $R3 "0123456789abcdef" ${OUT}
+      IntOp $R2 $R2 + 1
+    ${Loop}
+  ${EndIf}
+  Pop $R3
+  Pop $R2
+  Pop $R1
+  Pop $R0
+!macroend
+
+; Earlier runs' plug-in folders, removed (header, "Leftovers"): each folder directly in
+; CLAUSEO_TEMP_PARENT with an NSIS temp name, other than this run's $PLUGINSDIR and $INSTDIR, whose
+; System.dll is there and can be deleted (so no run still has it loaded); then RMDir /r. Plain
+; NSIS and LogicLib. Keeps $0-$3, and leaves the error flag clear.
+!macro CLAUSEO_REMOVE_OLD_PLUGINSDIRS
+  Push $0
+  Push $1
+  Push $2
+  Push $3
+  ClearErrors
+  FindFirst $0 $1 "${CLAUSEO_TEMP_PARENT}\ns*.tmp"
+  ${Do}
+    ${If} $1 == ""
+      ${ExitDo}
+    ${EndIf}
+    StrCpy $3 "${CLAUSEO_TEMP_PARENT}\$1"
+    !insertmacro CLAUSEO_NSIS_TEMP_NAME $1 $2
+    ${If} $2 = 1
+    ${AndIf} $3 != $PLUGINSDIR
+    ${AndIf} $3 != $INSTDIR
+    ${AndIf} ${FileExists} "$3\System.dll"
+      ClearErrors
+      Delete "$3\System.dll"
+      ${IfNot} ${Errors}
+        RMDir /r "$3"
+      ${EndIf}
+    ${EndIf}
+    FindNext $0 $1
+  ${Loop}
+  FindClose $0
+  ClearErrors
+  Pop $3
+  Pop $2
+  Pop $1
+  Pop $0
+!macroend
+
+; Sets OUT to 1 when $PLUGINSDIR is a folder directly in CLAUSEO_TEMP_PARENT with an NSIS temp
+; name, as CLAUSEO_SAFE_PLUGINSDIR makes it, else 0: the uninstaller's delayed cmd line removes it
+; recursively (uninstall_in_place.nsh). Plain NSIS and LogicLib. OUT must not be $R0-$R5.
+!macro CLAUSEO_OWN_PLUGINSDIR OUT
+  Push $R0
+  Push $R1
+  StrCpy ${OUT} 0
+  StrLen $R0 "${CLAUSEO_TEMP_PARENT}\"
+  StrCpy $R1 $PLUGINSDIR $R0
+  ${If} $R1 == "${CLAUSEO_TEMP_PARENT}\"
+    StrCpy $R1 $PLUGINSDIR "" $R0
+    !insertmacro CLAUSEO_NSIS_TEMP_NAME $R1 ${OUT}
+  ${EndIf}
+  Pop $R1
+  Pop $R0
+!macroend
 ; The per-machine installer's start, first in .onInit (template block "admin-section"): the
 ; folder, then the environment's TEMP and TMP set to it (GetTempPath reads TMP first), so the
 ; programs it starts elevated use it too: the WebView2 bootstrapper, --adopt, and the uninstaller
@@ -172,11 +308,13 @@
 ; uninstaller runs the same start first in un.onInit (template block "un-admin-section"): it runs
 ; elevated in place (_?=, uninstall_in_place.nsh), and SetContext (${RunningX64}, System) and
 ; CheckIfAppIsRunning (nsis_tauri_utils) would otherwise load from the user's %TEMP%; its children
-; (--remove, --delete-app-data) get the folder as TEMP too.
+; (--remove, --delete-app-data) get the folder as TEMP too. Last, once System is loaded from this
+; run's own folder, earlier runs' folders go (header, "Leftovers").
 !macro CLAUSEO_MACHINE_START
   !if "${INSTALLMODE}" == "perMachine"
     !insertmacro CLAUSEO_SAFE_PLUGINSDIR
     System::Call 'kernel32::SetEnvironmentVariableW(w "TEMP", w "$TEMP")'
     System::Call 'kernel32::SetEnvironmentVariableW(w "TMP", w "$TEMP")'
+    !insertmacro CLAUSEO_REMOVE_OLD_PLUGINSDIRS
   !endif
 !macroend
