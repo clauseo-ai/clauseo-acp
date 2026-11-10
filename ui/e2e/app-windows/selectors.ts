@@ -85,6 +85,11 @@ export const ids = {
    */
   firstRead: "first-read",
   /**
+   * "Read the papers" (UD2, D-015): the button under the new conversation's line in a matter added during the first
+   * run with papers. Pressing it sends the first read; nothing sends it by itself.
+   */
+  firstReadOffer: "first-read-offer",
+  /**
    * The first run's sign-in card, which stands in the composer's place while the conversation's
    * plan is signed out, with `data-agent`.
    */
@@ -326,6 +331,7 @@ export function window(page: Page) {
       card.getByTestId(permissionButton(kind)),
     turnStopped: id(ids.turnStopped),
     firstRead: id(ids.firstRead),
+    firstReadOffer: id(ids.firstReadOffer),
     signIn: id(ids.signIn),
     agentStopped: id(ids.agentStopped),
     restart: id(ids.restart),
