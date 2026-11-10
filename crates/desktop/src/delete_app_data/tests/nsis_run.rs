@@ -458,7 +458,7 @@ impl Machine {
             ["StrCpy", var, value] => self.set(var, self.expand(value)),
             ["StrCpy", var, value, len] => self.set(var, str_cpy::str_cpy(self, value, len, "")),
             ["StrCpy", var, value, len, offset] => {
-                self.set(var, str_cpy::str_cpy(self, value, len, offset))
+                self.set(var, str_cpy::str_cpy(self, value, len, offset));
             }
             ["ClearErrors"] => self.error = false,
             ["StrLen", var, text] => {
