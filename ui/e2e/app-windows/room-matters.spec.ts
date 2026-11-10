@@ -3,8 +3,8 @@
 //
 // The e2e build's pick_folder always returns E2E_MATTER_DIR. A folder can be one matter only and a
 // matter may not sit inside another (crates/matters/src/refuse.rs), so a test with two matters
-// makes both with the new-folder source: Create the matter without Change picks the parent
-// (E2E_MATTER_DIR) and the host makes `<parent>/<name>`, two sibling folders.
+// makes both as new folders in the host's default location: Use a new folder, then Create matter,
+// and the host makes `<Documents>\Clauseo\<name>`, two sibling folders.
 
 import { expect } from "@playwright/test";
 import { test } from "./fixture.ts";

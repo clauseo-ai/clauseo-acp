@@ -8,7 +8,7 @@ import { NewMatterDialog } from "@clauseo/components/clauseo/new-matter-dialog.t
 import { PlanCard } from "@clauseo/components/clauseo/plan-card.tsx";
 import { Group, Sample } from "./frame.tsx";
 import { LimitSamples } from "./matters-limits.tsx";
-import { folderFor, WINDOWS } from "./matters-data.ts";
+import { WINDOWS } from "./matters-data.ts";
 import { QueueSamples } from "./matters-queue.tsx";
 import { RailSamples } from "./matters-rail.tsx";
 
@@ -21,7 +21,13 @@ function NewMatterTrigger() {
       <Button kind="tone" size="small" onClick={() => setOpen(true)}>
         {w.t("New matter")}
       </Button>
-      <NewMatterDialog open={open} onOpenChange={setOpen} onCreate={() => {}} />
+      <NewMatterDialog
+        open={open}
+        onOpenChange={setOpen}
+        location="Documents/Clauseo"
+        pickFolder={() => "Documents/Clients/Acme Holdings"}
+        onCreate={() => {}}
+      />
     </>
   );
 }
@@ -34,14 +40,19 @@ export function MattersParts() {
       <RailSamples />
       <QueueSamples />
       <Sample name="New matter form, first launch">
-        <NewMatterForm folderFor={folderFor} onCreate={() => {}} />
+        <NewMatterForm
+          location="Documents/Clauseo"
+          pickFolder={() => "Documents/Clients/Acme Holdings"}
+          onCreate={() => {}}
+        />
       </Sample>
       <Sample name="New matter form, filled in">
         <NewMatterForm
-          folderFor={folderFor}
-          name="Acme Ltd v. State"
-          client="Acme Ltd"
-          next="30 October 2026"
+          name="Acme share purchase"
+          client="Acme Holdings"
+          folder="Documents/Clients/Acme Holdings/Share purchase"
+          location="Documents/Clauseo"
+          pickFolder={() => "Documents/Clients/Acme Holdings"}
           titled={false}
           onCreate={() => {}}
           onCancel={() => {}}

@@ -1,19 +1,14 @@
-// New matter, from the rail. The rail's New matter opens the new matter form, the same part first
-// launch opens on its first screen, in the system's dialog: a name as it stands on the cause list, a client if any,
-// and the folder Clauseo makes for it under Documents. Focus starts on the name. Escape, Cancel or a press on the
-// scrim closes it, and focus goes back to New matter.
+// New matter, from the rail. The rail's New matter opens the new matter form, the same part first launch opens on its
+// first screen, in the system's dialog: the matter's name, its client if any, and its folder, chosen in the computer's
+// own picker or made new where Clauseo keeps matters. Focus starts on the name. Escape, Cancel or a press on the scrim
+// closes it, and focus goes back to New matter.
 import { Dialog as Base } from "@base-ui/react/dialog";
 import { useState, type RefObject } from "react";
 import { focusPlane } from "../ui/dialog-start.ts";
 import { dialogPlace, dialogPlane, dialogTitle, scrim } from "../ui/recipes-overlays.ts";
 import { cn } from "../lib/cn.ts";
-import { useDisplay, type Platform } from "../lib/display.ts";
 import { useMatterFormWords } from "../lib/words-matter-form.ts";
 import { NewMatterForm, type NewMatterFormProps } from "./matter-form.tsx";
-
-/** The folder Clauseo makes for a new matter, as the computer writes it: always in English. */
-const newMatterFolder = (platform: Platform, name: string) =>
-  ["Documents", "Clauseo", name].join(platform === "windows" ? "\\" : "/");
 
 export function NewMatterDialog({
   open,
@@ -21,50 +16,19 @@ export function NewMatterDialog({
   onCreate,
   name,
   client,
-  details,
-  folder,
-  folderFor,
-  pickFolder,
-  error,
-  nextError,
-  openMatter,
-  warning,
-  blocked,
-  scan,
-  unpick,
-  opening,
-  testIds,
   finalFocus,
-}: {
+  ...form
+}: Omit<NewMatterFormProps, "onCreate" | "onCancel" | "titled" | "inDialog"> & {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  /** Create the matter, pressed with a name, as the form gives it. Returning nothing closes the dialog at once. Given a
-   * promise, Create stands pressed until it settles, and the dialog closes only if it resolves to anything but false;
-   * a rejected promise, or false, keeps it open, for the caller's error line or a picker the lawyer cancelled. */
-  onCreate: (name: string, client: string, next: string, nextDate: string | null) => unknown;
-  /** Optional: what the fields hold as it opens. */
-  name?: string;
-  client?: string;
-  /** Passed to the form: see NewMatterFormProps. Without folder or folderFor, the folder line shows the folder Clauseo
-   * makes under Documents, as before. */
-  details?: NewMatterFormProps["details"];
-  folder?: NewMatterFormProps["folder"];
-  folderFor?: NewMatterFormProps["folderFor"];
-  pickFolder?: NewMatterFormProps["pickFolder"];
-  error?: NewMatterFormProps["error"];
-  nextError?: NewMatterFormProps["nextError"];
-  openMatter?: NewMatterFormProps["openMatter"];
-  warning?: NewMatterFormProps["warning"];
-  blocked?: NewMatterFormProps["blocked"];
-  scan?: NewMatterFormProps["scan"];
-  unpick?: NewMatterFormProps["unpick"];
-  opening?: NewMatterFormProps["opening"];
-  testIds?: NewMatterFormProps["testIds"];
+  /** Create the matter, pressed with a name and a folder, as the form gives it. Returning nothing closes the dialog at
+   * once. Given a promise, Create stands pressed until it settles, and the dialog closes only if it resolves to
+   * anything but false; a rejected promise, or false, keeps it open, for the caller's error line. */
+  onCreate: NewMatterFormProps["onCreate"];
   /** Optional: where focus goes when it closes, New matter's button. Left out, the element focused before it opened. */
   finalFocus?: RefObject<HTMLElement | null>;
 }) {
   const w = useMatterFormWords();
-  const { platform } = useDisplay();
   const [{ mount, field }] = useState(focusPlane);
   return (
     <Base.Root open={open} onOpenChange={onOpenChange}>
@@ -80,31 +44,19 @@ export function NewMatterDialog({
         >
           <Base.Title className={cn(dialogTitle, "mb-s4")}>{w("A new matter")}</Base.Title>
           <NewMatterForm
-            folderFor={folderFor ?? ((n) => newMatterFolder(platform, n))}
-            folder={folder}
-            details={details}
-            pickFolder={pickFolder}
-            error={error}
-            nextError={nextError}
-            openMatter={openMatter}
-            warning={warning}
-            blocked={blocked}
-            scan={scan}
-            unpick={unpick}
-            opening={opening}
-            testIds={testIds}
+            {...form}
             {...(name === undefined ? {} : { name })}
             {...(client === undefined ? {} : { client })}
             titled={false}
             inDialog
-            onCreate={(n, c, next, date) => {
-              const made = onCreate(n, c, next, date);
-              if (!(made instanceof Promise)) {
+            onCreate={(n, c, made) => {
+              const done = onCreate(n, c, made);
+              if (!(done instanceof Promise)) {
                 onOpenChange(false);
                 return;
               }
               // closes only on success; the form keeps Create pressed meanwhile and swallows a rejection
-              return made.then((ok) => {
+              return done.then((ok) => {
                 if (ok !== false) onOpenChange(false);
               });
             }}

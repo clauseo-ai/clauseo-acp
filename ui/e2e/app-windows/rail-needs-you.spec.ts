@@ -4,7 +4,7 @@
 // parts (the `rail-wire` change), without which the rail has no Needs you.
 //
 // The e2e build's pick_folder always returns E2E_MATTER_DIR, so both matters are made as new folders beside each other
-// (room-matters.spec.ts says why).
+// in the host's default location (room-matters.spec.ts says why).
 
 import { expect } from "@playwright/test";
 import { test } from "./fixture.ts";

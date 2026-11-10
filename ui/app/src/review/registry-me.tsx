@@ -6,15 +6,20 @@ import { RoomAfter } from "./states.tsx";
 import { MATTER, NEW_MATTER, refusingHost, type Step } from "./hosts.ts";
 import { matterWords } from "./words.ts";
 
-/** Change, then Create the matter: the picked folder refused. */
+/** Choose folder…, then Create matter: the picked folder refused. */
 const CHANGE_CREATE: readonly Step[] = [
   ...NEW_MATTER,
   { press: "matter-existing" },
   { press: "create-matter" },
 ];
 
-/** Create the matter in the default location: the folder is in the form's own words, so the line names none. */
-const CREATE: readonly Step[] = [...NEW_MATTER, { press: "create-matter" }];
+/** Use a new folder, then Create matter, in the default location: the folder is in the form's own words, so the line
+ * names none. */
+const CREATE: readonly Step[] = [
+  ...NEW_MATTER,
+  { press: "matter-made" },
+  { press: "create-matter" },
+];
 
 /** A matter the matters list doesn't have: the folder's matter, from another install or forgotten. */
 const UNKNOWN = "00000000-0000-4000-8000-000000000042";

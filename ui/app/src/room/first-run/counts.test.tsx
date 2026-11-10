@@ -68,14 +68,17 @@ test("counts: the first act (a folder chosen) sends one first_act with the switc
 test("counts: a new matter is the first act too, with the switch left on", async () => {
   const t = await mountFirstRun({
     matters: [],
-    picked: { folder: "parent-ref", display: "Documents" },
+    picked: { folder: "folder-ref", display: "Documents/Mehta" },
   });
   await press("Start a new matter");
-  await typeInto(byId<HTMLInputElement>("matter-name") as HTMLInputElement, "Mehta v. Mehta");
+  await typeInto(byId<HTMLInputElement>("matter-name") as HTMLInputElement, "Mehta family trust");
+  await press(byId("matter-existing"));
+  // choosing the folder is no act yet: Create matter is
+  expect(sent(t, "first_act")).toEqual([]);
   await press(byId("create-matter"));
   expect(sent(t, "first_act")).toEqual([{ counts: true }]);
   expect(sent(t, "create_matter")).toEqual([
-    { name: "Mehta v. Mehta", source: { new_folder: { folder: "parent-ref" } } },
+    { name: "Mehta family trust", source: { existing_folder: { folder: "folder-ref" } } },
   ]);
   expect(counts(t).filter((c) => c.onboarding_step !== undefined)).toEqual([
     { onboarding_step: { step: "welcome_shown" } },

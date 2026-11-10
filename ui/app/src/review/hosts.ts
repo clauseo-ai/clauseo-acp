@@ -30,7 +30,7 @@ import { detailed, fakeNext, railStates, railThreads } from "../room/fake-next.t
 /** A matter as filed, for states that show one. */
 export const MATTER: MatterSummary = {
   matter: "00000000-0000-4000-8000-000000000001",
-  name: "Acme Traders v. State",
+  name: "Acme Traders supply agreement",
   kind: "folder",
 };
 
@@ -299,12 +299,16 @@ export function refusingHost(
 }
 
 /** One thing a state does once rendered: press the control with this test id, type into a field of the dialog (by its
- * place among the dialog's fields: 0 the name, 1 the client, 2 the next date) and move on from it, or type into the
+ * place among the dialog's fields: 0 the name, 1 the client) and move on from it, press Enter in one, or type into the
  * rail's Find. */
-export type Step = { press: string } | { type: { field: number; text: string } } | { find: string };
+export type Step =
+  | { press: string }
+  | { type: { field: number; text: string } }
+  | { enter: number }
+  | { find: string };
 
 /** New matter pressed and the name typed. */
 export const NEW_MATTER: readonly Step[] = [
   { press: "new-matter" },
-  { type: { field: 0, text: "Mehta v. Mehta" } },
+  { type: { field: 0, text: "Mehta family trust" } },
 ];
