@@ -41,7 +41,10 @@ test("a file the agent made shows as a tile once the matter's stream has its ver
   h = await mountVersions([], [], {
     next: fakeNext({ matters: () => [detailed(THE_MATTER)], papers, parts: ["papers"] }),
   });
-  const listed = () => h?.transport.only("next_query").filter((q) => "list_papers" in q.query);
+  const listed = () =>
+    h?.transport
+      .only("next_query")
+      .filter((q) => typeof q.query === "object" && "list_papers" in q.query);
   expect(tiles()).toEqual(["Notice.docx"]);
   // the matter's stream, held for the papers, arrives: nothing changed, so nothing is listed again
   await h.deliver(MATTER_STREAM, [matterReset([version(1, "import")])]);
