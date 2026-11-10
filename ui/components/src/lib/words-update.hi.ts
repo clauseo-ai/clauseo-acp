@@ -39,4 +39,6 @@ export const HI = {
     "Clauseo जहाँ इंस्टॉल है, वहाँ से वह ख़ुद को अपडेट नहीं कर सकता। इस कंप्यूटर की देखरेख करने वाले व्यक्ति से पूछें।",
   "Updates come through the package manager that installed Clauseo.":
     "अपडेट उसी पैकेज मैनेजर से आते हैं जिससे Clauseo इंस्टॉल हुआ था।",
+  "This version of Clauseo doesn't update itself. To update, install the new version over this one. Your matters and settings stay.":
+    "Clauseo का यह संस्करण अपने आप अपडेट नहीं होता। अपडेट करने के लिए, नया संस्करण इसी के ऊपर इंस्टॉल करें। आपके मामले और सेटिंग्स बने रहते हैं।",
 } satisfies Hindi<string>;

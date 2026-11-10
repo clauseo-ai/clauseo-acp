@@ -317,5 +317,16 @@
     "at": "2026-11-08",
     "by": "app copy (R23)",
     "note": "Settings, Updates (R23, ADR 0037)"
+  },
+  "R23-30": {
+    "en": "This version of Clauseo doesn't update itself. To update, install the new version over this one. Your matters and settings stay.",
+    "hi": "Clauseo का यह संस्करण अपने आप अपडेट नहीं होता। अपडेट करने के लिए, नया संस्करण इसी के ऊपर इंस्टॉल करें। आपके मामले और सेटिंग्स बने रहते हैं।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-10",
+    "hi_by": "app copy (R23; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-10",
+    "by": "app copy (R23)",
+    "note": "Settings, Updates (R23, ADR 0037)"
   }
 }

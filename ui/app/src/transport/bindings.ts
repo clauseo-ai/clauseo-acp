@@ -3407,8 +3407,10 @@ export type ManagedBy =
  *  administrator.
  */
 "read_only_location" | 
-/**  A package manager updates it (Linux), or this build has no updater. */
-"package";
+/**  A package manager updates it (Linux). */
+"package" | 
+/**  This build has no updater: a new version is installed over it. */
+"unavailable";
 
 /**  An undo, a restore, a located folder or a compaction. Entry id `marker:<event>`. */
 export type MarkerEntry = {

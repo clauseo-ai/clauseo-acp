@@ -1,6 +1,6 @@
 //! The updater's boundary (decision record 0037): the [`Updater`] trait desktop implements over
 //! `tauri-plugin-updater`, the values that cross it, and [`NoUpdater`], the default, which says
-//! updates are managed by a package so no check ever runs.
+//! updates are unavailable so no check ever runs.
 //!
 //! The host checks and downloads through the trait; it never installs. On install it shuts down
 //! and hands the [`Downloaded`] value to desktop, which calls the plugin's `install` after the
@@ -53,17 +53,20 @@ pub enum InstallKind {
     /// Its folder is not writable by the user (a macOS `.app`), so an update would ask for an
     /// administrator: someone else updates it.
     ReadOnlyLocation,
-    /// A package manager updates it (Linux), or this build has no updater.
+    /// A package manager updates it (Linux).
     Package,
+    /// This build has no updater ([`NoUpdater`]): nothing updates it in place.
+    Unavailable,
 }
 
 impl InstallKind {
     /// Every value, in declaration order.
-    pub const ALL: [Self; 4] = [
+    pub const ALL: [Self; 5] = [
         Self::CurrentUser,
         Self::PerMachine,
         Self::ReadOnlyLocation,
         Self::Package,
+        Self::Unavailable,
     ];
 }
 
@@ -200,14 +203,14 @@ pub enum MarkerState {
     Installing,
 }
 
-/// The updater of a build with none, of tests and of `cli`: managed by a package, so the host
+/// The updater of a build with none, of tests and of `cli`: updates are unavailable, so the host
 /// never checks and never touches the network.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct NoUpdater;
 
 impl Updater for NoUpdater {
     fn install_kind(&self) -> InstallKind {
-        InstallKind::Package
+        InstallKind::Unavailable
     }
 
     fn check(&self) -> BoxFuture<'static, Result<Option<Offer>, UpdaterError>> {

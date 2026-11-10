@@ -131,7 +131,7 @@ impl HostConfig {
         self
     }
 
-    /// The updater (default: [`NoUpdater`], managed by a package, so nothing is checked).
+    /// The updater (default: [`NoUpdater`], updates unavailable, so nothing is checked).
     /// The host checks and downloads through it on its own pool (decision record 0037).
     pub fn with_updater(mut self, updater: Arc<dyn Updater>) -> Self {
         self.update.updater = updater;

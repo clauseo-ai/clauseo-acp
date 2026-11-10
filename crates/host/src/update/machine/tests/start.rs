@@ -1,4 +1,4 @@
-//! Start-up: the five managed cases, the marker, the cached download in `auto` and `notify`,
+//! Start-up: the six managed cases, the marker, the cached download in `auto` and `notify`,
 //! the check delays, and the daily `Managed` count.
 
 use super::*;
@@ -10,7 +10,7 @@ fn cached(version: &str) -> CachedDownload {
     }
 }
 
-/// The five ways a run is managed, each with a cached download that `auto` would install.
+/// The six ways a run is managed, each with a cached download that `auto` would install.
 fn managed_starts() -> Vec<(ManagedBy, Start)> {
     let auto = mode(UpdateMode::Auto);
     let with_cache = |s: Start| Start {
@@ -19,6 +19,10 @@ fn managed_starts() -> Vec<(ManagedBy, Start)> {
     };
     vec![
         (ManagedBy::Package, begin(InstallKind::Package, auto)),
+        (
+            ManagedBy::Unavailable,
+            begin(InstallKind::Unavailable, auto),
+        ),
         (ManagedBy::PerMachine, begin(InstallKind::PerMachine, auto)),
         (
             ManagedBy::ReadOnlyLocation,
