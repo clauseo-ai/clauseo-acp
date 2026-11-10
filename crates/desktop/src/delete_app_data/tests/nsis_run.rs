@@ -393,6 +393,40 @@ impl Machine {
         self.vars.insert(var.to_owned(), value);
     }
 
+    /// `WordFunc`'s `${VersionCompare}`: 0 for equal versions, 1 when the first is newer, 2
+    /// when the second is.
+    fn version_compare(&mut self, a: &str, b: &str, var: &str) {
+        let parse = |text: String| -> Vec<u64> {
+            text.split('.').map(|part| part.parse().unwrap()).collect()
+        };
+        let (a, b) = (parse(self.expand(a)), parse(self.expand(b)));
+        let order = match a.cmp(&b) {
+            std::cmp::Ordering::Equal => "0",
+            std::cmp::Ordering::Greater => "1",
+            std::cmp::Ordering::Less => "2",
+        };
+        self.set(var, order.to_owned());
+    }
+
+    /// The plug-in's dialog, which reads its arguments from the stack as the example in NSIS's
+    /// docs pushes them: "A" on top, then each language's name and id, down to the "" pushed
+    /// first. It answers by pushing `answer` for the script's Pop.
+    fn lang_dialog(&mut self, title: &str) {
+        let flag = self.stack.pop().expect("a LangDialog with no stack");
+        assert_eq!(flag, "A", "a LangDialog flag this interpreter doesn't know");
+        self.asked.clear();
+        loop {
+            let name = self.stack.pop().expect("a LangDialog past its \"\"");
+            if name.is_empty() {
+                break;
+            }
+            let id = self.stack.pop().expect("a LangDialog name with no id");
+            self.asked.push((name, id));
+        }
+        self.said.push(format!("LangDialog {title}"));
+        self.stack.push(self.answer.clone());
+    }
+
     fn line(&mut self, line: &str) {
         // A command in backquotes, then the variable for its exit code.
         if let Some(rest) = line.strip_prefix("ExecWait `") {
@@ -458,19 +492,7 @@ impl Machine {
                 let text = self.expand(text);
                 self.said.push(format!("MessageBox {text}"));
             }
-            // WordFunc's: 0 for equal versions, 1 when the first is newer, 2 when the second is.
-            ["${VersionCompare}", a, b, var] => {
-                let parse = |text: String| -> Vec<u64> {
-                    text.split('.').map(|part| part.parse().unwrap()).collect()
-                };
-                let (a, b) = (parse(self.expand(a)), parse(self.expand(b)));
-                let order = match a.cmp(&b) {
-                    std::cmp::Ordering::Equal => "0",
-                    std::cmp::Ordering::Greater => "1",
-                    std::cmp::Ordering::Less => "2",
-                };
-                self.set(var, order.to_owned());
-            }
+            ["${VersionCompare}", a, b, var] => self.version_compare(a, b, var),
             ["Quit"] => self.said.push("Quit".to_owned()),
             // With /SD a silent run shows no box and takes the default answer.
             ["MessageBox", _, text, "/SD", _] => {
@@ -493,24 +515,7 @@ impl Machine {
                 );
                 self.written.push(line);
             }
-            // The plug-in's dialog, which reads its arguments from the stack as the example in
-            // NSIS's docs pushes them: "A" on top, then each language's name and id, down to the
-            // "" pushed first. It answers by pushing `answer` for the script's Pop.
-            ["LangDLL::LangDialog", title, _text] => {
-                let flag = self.stack.pop().expect("a LangDialog with no stack");
-                assert_eq!(flag, "A", "a LangDialog flag this interpreter doesn't know");
-                self.asked.clear();
-                loop {
-                    let name = self.stack.pop().expect("a LangDialog past its \"\"");
-                    if name.is_empty() {
-                        break;
-                    }
-                    let id = self.stack.pop().expect("a LangDialog name with no id");
-                    self.asked.push((name, id));
-                }
-                self.said.push(format!("LangDialog {title}"));
-                self.stack.push(self.answer.clone());
-            }
+            ["LangDLL::LangDialog", title, _text] => self.lang_dialog(title),
             ["SetErrorLevel", code] => {
                 let code = self.expand(code);
                 self.said.push(format!("SetErrorLevel {code}"));
