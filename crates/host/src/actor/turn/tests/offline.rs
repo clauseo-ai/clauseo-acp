@@ -3,7 +3,8 @@
 //! note that names a connection failure, then silence, ends the turn through the Cancel path as
 //! `Failed { agent.offline }` with the answer so far kept; work or a permission request after
 //! the note clears it; a prompt that fails with a connection-class error ends `agent.offline`
-//! too, and a server error or a sign-in keeps its own code, watch or not.
+//! too, and a server error or a sign-in keeps its own code, watch or not. A turn that ends any
+//! other way (a cancel the agent never answers) puts Claude's held line back.
 
 use clauseo_protocol::{
     AgentChoiceId, DomainEvent, ErrorCode, HostCommand, StopReason, ThreadId, TurnId,
@@ -12,8 +13,8 @@ use clauseo_protocol::{
 use super::agents::send_prompt;
 use super::failures::until_ended;
 use super::rig::{Rig, kind};
-use crate::actor::turn::TurnPhase;
 use crate::actor::turn::offline::OFFLINE_WAIT;
+use crate::actor::turn::{CANCEL_WAIT, TurnPhase};
 
 /// Codex's warning, as codex-acp forwards it, from stage C's sweep (macOS).
 const NOTE: &str = "Falling back from WebSockets to HTTPS transport. stream disconnected before \
@@ -339,5 +340,33 @@ fn claude_s_line_is_dropped_when_the_turn_ends_offline() {
         (Some(StopReason::Failed), Some(ErrorCode::AgentOffline))
     );
     assert_eq!(answer(&log, turn), "Clause five says");
+    rig.finish();
+}
+
+/// The lawyer cancels while Claude's line is held, and the agent never answers the cancel: the
+/// fallback stops the agent and the turn ends `Cancelled` with the line put back.
+#[test]
+fn claude_s_line_goes_back_when_a_cancel_the_agent_never_answers_ends_the_turn() {
+    let rest = r#"{"expect":{"method":"session/cancel","params":{"sessionId":"sess-1"}}}"#;
+    let mut rig = Rig::start("offline-claude-cancel", &claude(rest));
+    let (thread, turn) = prompting(&mut rig);
+    rig.run_until("the held line", |actor| {
+        actor.threads[&thread]
+            .turn
+            .current
+            .as_ref()
+            .is_some_and(|current| current.offline.is_some())
+    });
+    rig.dispatch(11, HostCommand::Cancel { thread }).unwrap();
+    rig.clock.advance(CANCEL_WAIT);
+    until_ended(&mut rig, thread);
+    let log = rig.log(thread);
+    assert_eq!(
+        ended(&log, turn),
+        (Some(StopReason::Cancelled), None),
+        "{:?}",
+        log.iter().map(kind).collect::<Vec<_>>()
+    );
+    assert_eq!(answer(&log, turn), format!("Clause five says{CLAUDE}"));
     rig.finish();
 }

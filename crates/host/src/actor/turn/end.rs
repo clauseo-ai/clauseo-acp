@@ -78,11 +78,6 @@ pub(super) fn on_prompt_done(
         Err(error) => offline::prompt_failed_offline(actor, thread, error),
         Ok(_) => None,
     };
-    // Claude's suspected connection line goes back into the answer unless the turn ends offline.
-    let cancelled = current(actor, thread).is_some_and(|current| current.cancelled);
-    if went_offline.is_none() || cancelled {
-        offline::prompt_ended(actor, thread);
-    }
     let fallback = matches!(result, Err(clauseo_acp::Error::Rpc { .. }))
         && went_offline.is_none()
         && !host_stopping(actor)
@@ -154,6 +149,9 @@ pub(super) fn on_prompt_refused(actor: &mut Actor, thread: ThreadId, turn: TurnI
 /// Steps 6 and 7: the held text and the expiries in one commit, then the after-turn
 /// checkpoint, whose answer logs the end.
 pub(super) fn end_turn(actor: &mut Actor, thread: ThreadId, mut end: End) {
+    // Claude's suspected connection line goes back into the answer unless the turn ends
+    // offline: a cancel (one the agent never answered too) or any other end.
+    offline::turn_ending(actor, thread, end.failure.as_ref().map(|(code, _)| *code));
     cancel::sweep_leftovers(actor, thread, end.stop);
     let Some(current) = current(actor, thread) else {
         return;
