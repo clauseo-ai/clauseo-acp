@@ -49,7 +49,8 @@ fn profile(root: &Path) -> ClauseoProfile {
 }
 
 /// One Codex turn on a host wired with the shell tool (`<data>/tools`, holding an
-/// `agent-browser` file), `chrome` as the session's Chrome (none: a search of empty roots) and
+/// `agent-browser` file) and a hook's `<data>/python` session folder (as desktop gives Clauseo's
+/// Python runtime), `chrome` as the session's Chrome (none: a search of empty roots) and
 /// `extra` settings; the launch seen, its developer instructions and its header's tools.
 fn launch(
     name: &str,
@@ -66,6 +67,7 @@ fn launch(
     let hook = Hook {
         profile: Some(Arc::new(profile(dir.data()))),
         browser_tool: Some(tools),
+        agent_path: vec![dir.data().join("python")],
         ..Hook::default()
     };
     let empty = ChromeRoots {
@@ -169,6 +171,9 @@ fn a_session_with_a_chrome_gets_the_shell_browser() {
     let parts = path_parts(&seen);
     assert_eq!(parts.first(), Some(&data.join("stetdoc")));
     assert_eq!(parts.get(1), Some(&data.join("tools")));
+    // The hook's folders (Clauseo's Python runtime) come after the tools folder, so no
+    // `agent-browser` there shadows Clauseo's.
+    assert_eq!(parts.get(2), Some(&data.join("python")));
     assert!(instructions.contains("use the `agent-browser` command in your shell"));
     // Codex's line: ask to run unsandboxed, with one prefix rule to approve.
     assert!(instructions.contains(r#"`sandbox_permissions: "require_escalated"`"#));
@@ -186,7 +191,10 @@ fn a_session_with_no_chrome_gets_no_browser_and_is_told_why() {
     for name in NAMES {
         assert_eq!(var(&seen, name), None, "{name}");
     }
-    assert!(!path_parts(&seen).contains(&dir.data().join("tools")));
+    let parts = path_parts(&seen);
+    assert!(!parts.contains(&dir.data().join("tools")));
+    // The hook's folders still follow stetdoc's.
+    assert_eq!(parts.get(1), Some(&dir.data().join("python")));
     assert!(!instructions.contains("agent-browser"), "{instructions}");
     assert!(
         instructions.contains("found no Google Chrome"),
