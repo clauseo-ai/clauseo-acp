@@ -187,13 +187,16 @@ fn access_with(keys: &Map<String, Value>, turn: Turn, path: &Path, own: &[PathBu
     if globs.iter().any(|glob| glob_matches(glob, path)) {
         return "deny".to_owned();
     }
+    // `:root` is the file system root of the path (codex's `absolute_root_path_for_cwd`): `/`,
+    // or on Windows the drive's root (`C:\`), which a bare `/` is no prefix of.
+    let root = path.ancestors().last().unwrap_or(path).to_path_buf();
     let mut rules = vec![
-        (PathBuf::from("/"), "read".to_owned()),
+        (root.clone(), "read".to_owned()),
         (matter(), "write".to_owned()),
     ];
     match turn {
         Turn::Escalated => {
-            rules = vec![(PathBuf::from("/"), "write".to_owned())];
+            rules = vec![(root, "write".to_owned())];
             rules.extend(exact.into_iter().filter(|(_, mode)| mode == "deny"));
         }
         Turn::Profile => rules.extend(exact),
@@ -491,4 +494,18 @@ fn the_fence_reaches_codex_config_whole_and_the_hook_cannot_set_it() {
     assert_eq!(config["default_permissions"], fence["default_permissions"]);
     assert_eq!(config["permissions"], fence["permissions"]);
     assert_eq!(config.get("sandbox_mode"), None);
+}
+
+/// The escalated model's `:root` is each path's own file system root, so a path whose root is
+/// not a bare `/` (a Windows drive) is still under it: the own run folder stays writable and a
+/// denied path stays denied, not denied for want of any matching rule.
+#[test]
+fn the_escalated_model_roots_each_path_at_its_own_file_system_root() {
+    let keys = fence_with(&listed());
+    let own = run_root().join("agent-browser").join("config.json");
+    let root = own.ancestors().last().unwrap().to_path_buf();
+    assert!(own.starts_with(&root));
+    assert_eq!(escalated_access(&keys, &own), "write");
+    assert_eq!(escalated_access(&keys, &data().join("browser")), "deny");
+    assert_eq!(escalated_access(&keys, &data().join("tools")), "write");
 }
