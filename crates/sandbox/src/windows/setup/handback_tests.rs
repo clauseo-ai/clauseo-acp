@@ -89,6 +89,7 @@ fn walk(
         watched: vec![other.clone()],
         pool: vec![own.clone(), other.clone()],
         assigned: vec![own],
+        guarded: Vec::new(),
     };
     let matter = dunce::canonicalize(dir.path().join("matter")).unwrap();
     acl.propagate(&matter, Reach::Tree, Some(&strict))

@@ -74,7 +74,8 @@ pub use back::{forget_matter, reconcile};
 #[cfg(any(windows, test, feature = "test-support"))]
 pub use fence::{FencedEach, fence_each, fence_registered};
 pub(crate) use walk::{OWN_KINDS, strict_for, strict_of};
-use walk::{Refused, Walk, clearing, inside_any, own_roots, owner_passes, strict_at, walks};
+use walk::{Refused, Walk, clearing, guard_roots, inside_any, own_roots, owner_passes};
+use walk::{strict_at, walks};
 
 /// What [`apply`] did.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -324,6 +325,19 @@ fn write_all(
                 .set_file(plan, id, &file)
                 .map_err(|e| ledger_failed(grant.kind(), e))?;
         }
+        // M2 of #808: an `OWNER RIGHTS` entry already there when first listed, and none of
+        // ours, is IT's (`Entry::found`); one found that is gone is written by us, so it is
+        // marked ours first, before the write.
+        if grant.rights() == Rights::OwnerModify {
+            let there = acl.present(grant);
+            let there =
+                there.map_err(|e| Refused::new(grant.kind(), ApplyFailure::Io(e.kind())))?;
+            let found = ledger.entries().any(|e| e.id == id && e.found);
+            if there != found && (found || plan.created().contains(&id)) {
+                let failed = |e| ledger_failed(grant.kind(), e);
+                ledger.set_found(plan, id, there).map_err(failed)?;
+            }
+        }
         if grant.rights().is_label() && plan.created().contains(&id) {
             let found = acl.label(grant.path());
             let found =
@@ -345,6 +359,7 @@ fn write_all(
         .collect();
     let strict = strict_for(plan);
     let own = own_roots(plan);
+    let guards = guard_roots(plan);
     let mut by_path: BTreeMap<(usize, &Path), Vec<usize>> = BTreeMap::new();
     for (i, grant) in grants.iter().enumerate() {
         let depth = grant.path().components().count();
@@ -407,7 +422,8 @@ fn write_all(
             strict: is_strict,
             kind,
         } = &walk;
-        let strict = is_strict.then(|| strict_at(&strict, &own, root, |m| plan.assigned_to(m)));
+        let assigned = |m| plan.assigned_to(m);
+        let strict = is_strict.then(|| strict_at(&strict, &own, &guards, root, assigned));
         let seen = clearing(acl, around, &own, *kind, |acl| {
             acl.propagate(root, *reach, strict.as_ref())
         })?;

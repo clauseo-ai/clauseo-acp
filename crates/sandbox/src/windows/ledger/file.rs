@@ -9,7 +9,6 @@ use serde_json::{Map, Value};
 
 use super::reclaims::{ReclaimSlot, read_reclaim, render_reclaims};
 use super::{Entry, HandbackOwed, LEDGER_VERSION};
-use crate::windows::acl_plan::LOW_LABEL_SID;
 use crate::windows::sids::{Reserved, Sid};
 
 /// Which SIDs a ledger entry may name to be acted on.
@@ -21,14 +20,16 @@ pub(super) struct Trust {
 
 impl Trust {
     /// Whether `entry` may be acted on: its path (and its recorded file's) is absolute, and it is
-    /// the Low label naming the Low level, or an access entry naming one of the trusted SIDs (the
-    /// pool users and their group) or a matter-form SID the reserved accounts and domains admit.
+    /// the Low label naming the Low level, `OWNER RIGHTS`' entry naming `OWNER RIGHTS`, or an
+    /// access entry naming one of the trusted SIDs (the pool users and their group) or a
+    /// matter-form SID the reserved accounts and domains admit.
     pub(super) fn admits(&self, entry: &Entry) -> bool {
-        let sid_ok = if entry.rights.is_label() {
-            entry.sid.as_str() == LOW_LABEL_SID
-        } else {
-            self.trusted.contains(&entry.sid)
-                || (entry.sid.is_matter_form() && self.reserved.admits(&entry.sid))
+        let sid_ok = match entry.rights.fixed_subject() {
+            Some(fixed) => entry.sid.as_str() == fixed,
+            None => {
+                self.trusted.contains(&entry.sid)
+                    || (entry.sid.is_matter_form() && self.reserved.admits(&entry.sid))
+            }
         };
         let file_ok = entry.file.as_ref().is_none_or(|f| f.path.is_absolute());
         sid_ok && entry.path.is_absolute() && file_ok

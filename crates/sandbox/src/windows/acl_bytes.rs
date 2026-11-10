@@ -19,6 +19,8 @@ use std::io;
 use super::acl_plan::{Grant, Inherit};
 use super::sids::Sid;
 use super::writer::Label;
+#[cfg(any(windows, test))]
+pub(crate) use guarded::{guard_offends, without_guarded};
 pub(crate) use repair::{bare_child, owner_descriptor, rebuild, without_inherited};
 #[cfg(test)]
 pub(crate) use steps::bare;
@@ -159,8 +161,8 @@ pub(crate) struct AceSpec {
 
 impl AceSpec {
     /// The entry `grant` writes on a folder (`folder`) or a file. On a file a [`Inherit::Tree`]
-    /// entry inherits nothing (files have no children); [`Inherit::FilesInFolder`] and
-    /// [`Inherit::Below`] are for a folder only.
+    /// entry inherits nothing (files have no children); [`Inherit::FilesInFolder`],
+    /// [`Inherit::Below`] and [`Inherit::FilesBelow`] are for a folder only.
     pub(crate) fn for_grant(grant: &Grant, folder: bool) -> io::Result<AceSpec> {
         let rights = grant.rights();
         let kind = if rights.is_label() {
@@ -175,7 +177,8 @@ impl AceSpec {
             (Inherit::Tree, true) => OBJECT_INHERIT | CONTAINER_INHERIT,
             (Inherit::FilesInFolder, true) => OBJECT_INHERIT | INHERIT_ONLY | NO_PROPAGATE,
             (Inherit::Below, true) => OBJECT_INHERIT | CONTAINER_INHERIT | INHERIT_ONLY,
-            (Inherit::FilesInFolder | Inherit::Below, false) => {
+            (Inherit::FilesBelow, true) => OBJECT_INHERIT | INHERIT_ONLY,
+            (Inherit::FilesInFolder | Inherit::Below | Inherit::FilesBelow, false) => {
                 return Err(invalid("an entry for what is below a folder is on a file"));
             }
         };
@@ -571,6 +574,8 @@ fn invalid(error: impl Into<Box<dyn std::error::Error + Send + Sync>>) -> io::Er
 
 #[cfg(any(windows, test))]
 mod copies;
+#[cfg(any(windows, test))]
+mod guarded;
 mod repair;
 mod steps;
 #[cfg(test)]

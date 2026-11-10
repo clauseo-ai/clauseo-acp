@@ -358,6 +358,7 @@ fn a_shut_item_of_pool_entries_alone_inherits_and_a_colleagues_keeps_its_protect
         watched: vec![other()],
         pool: vec![Sid::parse(USER_SID).unwrap(), other()],
         assigned: vec![Sid::parse(USER_SID).unwrap()],
+        guarded: Vec::new(),
     };
     let walked = acl.propagate(&place.at("matter"), Reach::Tree, Some(&strict));
     assert!(walked.is_ok(), "launchable: {walked:?}");

@@ -22,6 +22,8 @@ use crate::windows::sids::Reserved;
 use crate::windows::write;
 use crate::windows::writer::FileId;
 
+mod guard;
+
 /// What every launch leaves in a matter's set-aside folder: the record and the lock.
 pub(super) const LEFT_BY_LAUNCH: [&str; 2] = ["record.json", "set-aside.lock"];
 

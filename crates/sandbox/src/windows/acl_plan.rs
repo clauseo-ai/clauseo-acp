@@ -17,6 +17,12 @@
 //!   ([`Rights::LowLabel`]): the Low token writes nothing labelled higher. Side effect, accepted:
 //!   the lawyer's own Low-integrity processes can write those too. Whether the Claude store
 //!   takes writes at Low is PR6's VM row (the store and credential rows of done-when 2).
+//! - With [`Policy::native_code_deny`] (off by default), nothing the pool writes runs
+//!   (`guard.rs`): on each place it may write, an inherited deny of execute on files for each
+//!   allow's subject, an inherited deny of permission changes, and an inherited `OWNER RIGHTS`
+//!   entry that takes away an owner's implied `WRITE_DAC`. Defence against a program
+//!   downloaded and run, not a boundary: a creator that passes its own DACL at creation gets
+//!   past it (0049).
 //! - A deny of writes for the pool user on each of the policy's read-only paths in the matter and
 //!   the state folder: one deny refuses both of the token's checks.
 //! - Isolation between matters: the fence ([`plan_fence`]) of this matter, an inherited deny of
@@ -51,6 +57,7 @@ use super::admit::{Admitted, PathKind};
 use super::fence::Fence;
 use super::fence::{MatterFolders, fence_grants, plan_fence};
 use super::ledger::EntryId;
+use super::shared_writes::OWNER_RIGHTS_SID;
 pub use super::sids::Sid;
 use crate::policy::under;
 use crate::{Error, PathRule, Policy};
@@ -72,78 +79,6 @@ pub struct Subjects {
 /// The Low mandatory level, `S-1-16-4096` (`LW`): the subject of a [`Rights::LowLabel`] item.
 pub const LOW_LABEL_SID: &str = "S-1-16-4096";
 
-/// The rights an entry gives or denies. Stored in the ledger by its snake-case name; new rights
-/// are appended.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum Rights {
-    /// Allow `Modify` (`0x1301bf`): read, write, run and delete, without `FILE_DELETE_CHILD`,
-    /// `WRITE_DAC` or `WRITE_OWNER`, so the agent can't strip a deny or delete a child through
-    /// its parent.
-    Modify,
-    /// Allow `ReadAndExecute` (`0x1200a9`).
-    ReadAndExecute,
-    /// Allow `CreateFiles` (`FILE_ADD_FILE`, `0x2`) on a folder: make a file in it, nothing more.
-    CreateFiles,
-    /// Deny writing (`0xd0156`): data, append, attributes, extended attributes, `DELETE`,
-    /// `FILE_DELETE_CHILD`, `WRITE_DAC` and `WRITE_OWNER`.
-    DenyWrite,
-    /// Deny reading and writing (`0xf01ff`): [`Rights::DenyWrite`] plus read data, read
-    /// attributes, read extended attributes, execute and `READ_CONTROL`.
-    DenyReadWrite,
-    /// Deny reading (`0x200a9`): read data, read attributes, read extended attributes, execute
-    /// and `READ_CONTROL`.
-    DenyRead,
-    /// Not an access entry: the Low mandatory label `S:(ML;OICI;NW;;;LW)` (mask `0x1`,
-    /// no-write-up), set with `LABEL_SECURITY_INFORMATION`; its subject is [`LOW_LABEL_SID`].
-    LowLabel,
-    /// Read and write the file's data, no `DELETE` and no permission change
-    /// (`FILE_GENERIC_READ | FILE_WRITE_DATA | FILE_APPEND_DATA`, `0x12008f`): the credential
-    /// link's allow, which lands on the lawyer's real credentials file (L5).
-    ReadWriteData,
-}
-
-impl Rights {
-    /// The access mask.
-    pub fn mask(self) -> u32 {
-        match self {
-            Rights::Modify => 0x0013_01bf,
-            Rights::ReadAndExecute => 0x0012_00a9,
-            Rights::CreateFiles => 0x0000_0002,
-            Rights::DenyWrite => DENY_WRITE,
-            Rights::DenyReadWrite => DENY_WRITE | DENY_READ,
-            Rights::DenyRead => DENY_READ,
-            Rights::LowLabel => 0x1,
-            Rights::ReadWriteData => 0x0012_008f,
-        }
-    }
-
-    /// Whether the entry is a deny entry.
-    pub fn is_deny(self) -> bool {
-        matches!(
-            self,
-            Rights::DenyWrite | Rights::DenyReadWrite | Rights::DenyRead
-        )
-    }
-
-    /// Whether the item is the mandatory label rather than an access entry.
-    pub fn is_label(self) -> bool {
-        self == Rights::LowLabel
-    }
-
-    /// Whether the entry allows access.
-    pub fn is_allow(self) -> bool {
-        !self.is_deny() && !self.is_label()
-    }
-}
-
-/// `FILE_WRITE_DATA | FILE_APPEND_DATA | FILE_WRITE_EA | FILE_DELETE_CHILD |
-/// FILE_WRITE_ATTRIBUTES | DELETE | WRITE_DAC | WRITE_OWNER`.
-const DENY_WRITE: u32 = 0x2 | 0x4 | 0x10 | 0x40 | 0x100 | 0x0001_0000 | 0x0004_0000 | 0x0008_0000;
-
-/// `FILE_READ_DATA | FILE_READ_EA | FILE_EXECUTE | FILE_READ_ATTRIBUTES | READ_CONTROL`.
-const DENY_READ: u32 = 0x1 | 0x8 | 0x20 | 0x80 | 0x0002_0000;
-
 /// Where an entry reaches: the path alone, or the path and everything under it (object and
 /// container inherit).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -158,6 +93,9 @@ pub enum Inherit {
     FilesInFolder,
     /// Everything below the folder, not the folder: object and container inherit, inherit only.
     Below,
+    /// Every file below the folder, at any depth, and no folder: object inherit, inherit only.
+    /// Each folder below carries it on, inherit-only, to its own files.
+    FilesBelow,
 }
 
 /// One permission entry to write. Made only inside this crate: by [`plan`], or read back from
@@ -350,8 +288,10 @@ impl AdmittedPlan {
 }
 
 /// The plan for `admitted`'s policy with `subjects`, in a fixed order: the writable folders,
-/// the credential link, the Claude store, the read paths, the Low labels, the read-only denies,
-/// the other pool users' denies, then the siblings' denies. Each entry appears once.
+/// the credential link, the Claude store, the guard on what those let the pool write (with
+/// [`Policy::native_code_deny`]), the read
+/// paths, the Low labels, the read-only denies, the other pool users' denies, then the siblings'
+/// denies. Each entry appears once.
 ///
 /// Refuses ([`Error::Policy`], naming the kind of path but not the path) when the subjects
 /// collide (the pool user is the group, another pool user or the matter SID), or when any entry
@@ -400,6 +340,9 @@ pub fn plan(
             let kind = PathKind::ClaudeStoreFile;
             plan.allow(&file, Rights::Modify, Inherit::ThisOnly, kind);
         }
+    }
+    if policy.native_code_deny() {
+        guard::guard_writes(&mut plan)?;
     }
     let read_paths = [
         (policy.runtime(), PathKind::Runtime),
@@ -586,6 +529,9 @@ pub(super) fn in_folder(path: &Path, folder: &Path) -> bool {
     })
 }
 
+mod guard;
+mod rights;
+pub use rights::Rights;
 mod verbatim;
 pub(in crate::windows) use verbatim::verbatim;
 

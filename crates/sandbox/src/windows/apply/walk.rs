@@ -17,9 +17,10 @@ use clauseo_protocol::MatterId;
 
 use super::Surroundings;
 use crate::Error;
-use crate::windows::acl_plan::{AdmittedPlan, Inherit, Rights, Sid, in_folder, verbatim};
+use crate::windows::acl_plan::{AdmittedPlan, Grant, Inherit, Rights, Sid, in_folder, verbatim};
 use crate::windows::admit::PathKind;
 use crate::windows::ledger::Entry;
+use crate::windows::shared_writes::OWNER_RIGHTS_SID;
 use crate::windows::writer::{AclWriter, ApplyFailure, Reach, Strict, Walked};
 
 /// The most children one walk sets aside before it refuses.
@@ -164,9 +165,11 @@ pub(crate) fn strict_of(entries: &[Entry]) -> Strict {
 /// `strict` for a walk of `root`: in a matter's tree (inside one of `own`, the closest), with
 /// the subjects `assigned` gives that matter, so a child another pool user owns is handed back
 /// (S15 `PR4h`); outside every matter's tree, as it is.
+/// And [`Strict::guarded`] only in a tree one of `guards` holds ([`guard_roots`]).
 pub(super) fn strict_at(
     strict: &Strict,
     own: &[OwnRoot],
+    guards: &[PathBuf],
     root: &Path,
     assigned: impl FnOnce(MatterId) -> Vec<Sid>,
 ) -> Strict {
@@ -175,10 +178,29 @@ pub(super) fn strict_at(
         .filter(|(tree, _)| in_folder(root, tree))
         .max_by_key(|(tree, _)| tree.components().count())
         .map(|(_, matter)| *matter);
+    let guarded = if inside_any(root, guards) {
+        strict.guarded.clone()
+    } else {
+        Vec::new()
+    };
     Strict {
         assigned: matter.map(assigned).unwrap_or_default(),
+        guarded,
         ..strict.clone()
     }
+}
+
+/// The folders `plan`'s guard on what the pool writes covers (`Policy::native_code_deny`):
+/// each with its files-only execute deny. None with the switch off.
+pub(super) fn guard_roots(plan: &AdmittedPlan) -> Vec<PathBuf> {
+    let guard =
+        |g: &&Grant| g.rights() == Rights::DenyExecute && g.inherit() == Inherit::FilesBelow;
+    let roots = plan
+        .grants()
+        .iter()
+        .filter(guard)
+        .map(|g| g.path().to_owned());
+    roots.collect::<BTreeSet<_>>().into_iter().collect()
 }
 
 fn strict_from(items: &[(Rights, &Sid)]) -> Strict {
@@ -193,9 +215,24 @@ fn strict_from(items: &[(Rights, &Sid)]) -> Strict {
     };
     Strict {
         watched: sids(&|r| matches!(r, Rights::DenyReadWrite | Rights::DenyRead)),
-        pool: sids(&|r| !r.is_label()),
+        pool: sids(&|r| r.fixed_subject().is_none()),
         assigned: Vec::new(),
+        guarded: guarded_from(items),
     }
+}
+
+/// [`Strict::guarded`] of `items`: `OWNER RIGHTS` and the subjects of the guard's execute
+/// denies, when there are any; none with the switch off.
+fn guarded_from(items: &[(Rights, &Sid)]) -> Vec<Sid> {
+    let mut guarded: BTreeSet<Sid> = items
+        .iter()
+        .filter(|(r, _)| *r == Rights::DenyExecute)
+        .map(|(_, s)| (*s).clone())
+        .collect();
+    if !guarded.is_empty() {
+        guarded.extend(Sid::parse(OWNER_RIGHTS_SID).ok());
+    }
+    guarded.into_iter().collect()
 }
 
 /// One walk to run.
@@ -346,7 +383,7 @@ fn wider(a: Reach, b: Reach) -> Reach {
 pub(super) fn reach_of(inherit: Inherit) -> Reach {
     match inherit {
         Inherit::FilesInFolder => Reach::FilesOnly,
-        Inherit::Tree | Inherit::Below | Inherit::ThisOnly => Reach::Tree,
+        Inherit::Tree | Inherit::Below | Inherit::FilesBelow | Inherit::ThisOnly => Reach::Tree,
     }
 }
 
