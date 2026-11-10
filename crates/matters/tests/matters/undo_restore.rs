@@ -1,6 +1,6 @@
 //! Undoing a restore: a restore that takes back an earlier one removes the files that restore
 //! added, each only while it holds what the restore wrote, and refuses a checkpoint that is not
-//! a restore.
+//! a restore, or a version with other files than the one just before it.
 
 use clauseo_matters::{Error, Matter, Restore, RestoreFiles};
 use clauseo_protocol::MatterPath;
@@ -96,4 +96,18 @@ fn undoing_a_checkpoint_that_is_not_a_restore_is_refused() {
     let done = matter.restore(&request(1, Some(3), 6, 7));
     assert!(matches!(done, Err(Error::UnknownCheckpoint { id }) if id == cid(3)));
     assert_eq!(fx.read("notes.md"), b"notes");
+}
+
+#[test]
+fn undoing_a_restore_from_a_version_other_than_the_one_before_it_is_refused() {
+    let (fx, mut matter) = restored("undo-restore-wrong-from");
+    // 3 still has notes.md; the version just before the restore (4) does not
+    let preview = matter.preview_restore(cid(3), RestoreFiles::All, Some(cid(5)));
+    assert!(matches!(preview, Err(Error::UnknownCheckpoint { id }) if id == cid(3)));
+    let done = matter.restore(&request(1, Some(5), 6, 7));
+    assert!(matches!(done, Err(Error::UnknownCheckpoint { id }) if id == cid(1)));
+    assert_eq!(fx.read("notes.md"), b"notes");
+    assert_eq!(fx.read("a.txt"), b"two");
+    assert_eq!(matter.timeline().last().map(|entry| entry.id), Some(cid(5)));
+    assert_no_temp_files(&fx.folder);
 }
