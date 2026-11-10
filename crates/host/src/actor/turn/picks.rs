@@ -12,9 +12,13 @@
 //!   both from Codex's resume answer); else `CreateThread`'s config; else the matter's prefs for
 //!   the agent's kind; else nothing, the agent's defaults. [`apply`] sets each value that differs
 //!   from the session's, the model first since the efforts offered follow it.
-//! - A pick the agent does not offer, or refuses, is dropped ([`after`]): logged at info with
-//!   its option and value ids, taken out of the matter's prefs, and the session goes on with
-//!   the agent's value. A pick never fails or holds the launch, nor the prompt behind it.
+//! - A pick the agent does not offer, or refuses as invalid (-32602), is dropped ([`after`]):
+//!   logged at info with its option and value ids, taken out of the matter's prefs, and the
+//!   session goes on with the agent's value. So is a pick of an option that is no model or
+//!   effort one, or that `config_allowed` refuses. A pick of an option the session does not
+//!   report (a load answer without options), or one the agent fails otherwise (a rate limit),
+//!   is kept for a later session. A pick never fails or holds the launch, nor the prompt behind
+//!   it.
 //! - A `SetConfigOption` that succeeds keeps its pick in the matter's prefs for the thread's
 //!   agent kind ([`remember`]).
 
@@ -29,8 +33,12 @@ use super::super::Actor;
 use super::agents::{Stage, Waiting};
 use super::out::Out;
 use super::{Then, state};
+use crate::agent::forced_ask::config_allowed;
 use crate::error::Error;
 use crate::log_file::Cause;
+
+/// The JSON-RPC code of an agent refusing a value as invalid.
+const INVALID_PARAMS: i32 = -32602;
 
 /// An option's id and the id of the value to set.
 pub(super) type Pick = (AgentChoiceId, AgentChoiceId);
@@ -187,21 +195,29 @@ enum Offer {
     Held,
     /// The option offers the value.
     Offered,
-    /// No model or effort option of that id offers it.
+    /// The option does not offer the value, or may not be set from Clauseo: the pick goes.
     Not,
+    /// The session reports no option of that id: the pick waits for a session that does.
+    Absent,
 }
 
 fn offer(options: &[ConfigOption], (id, value): &Pick) -> Offer {
-    let option = options
-        .iter()
-        .find(|option| option.id == id.as_str() && picked_category(option.category));
-    let Some(ConfigOptionKind::Select {
+    if !config_allowed(id.as_str(), Some(value.as_str())) {
+        return Offer::Not;
+    }
+    let Some(option) = options.iter().find(|option| option.id == id.as_str()) else {
+        return Offer::Absent;
+    };
+    let ConfigOptionKind::Select {
         current_value,
         options,
-    }) = option.map(|option| &option.kind)
+    } = &option.kind
     else {
         return Offer::Not;
     };
+    if !picked_category(option.category) {
+        return Offer::Not;
+    }
     if current_value == value.as_str() {
         Offer::Held
     } else if options.iter().any(|choice| choice.value == value.as_str()) {
@@ -213,8 +229,9 @@ fn offer(options: &[ConfigOption], (id, value): &Pick) -> Offer {
 
 /// Sets `picks` on `start`'s session, one at a time and the model first: each against the
 /// options as the last answer gave them, which become `start`'s. A pick not offered, or one the
-/// agent answers with an error, is stale; a call that fails otherwise (the connection closed) is
-/// logged and the rest are left.
+/// agent refuses as invalid params (-32602), is stale; one of an option the session lacks, or
+/// that the agent answers with another error, is kept; a call that fails otherwise (the
+/// connection closed) is logged and the rest are left.
 pub(super) async fn apply(
     client: &AcpClient,
     start: &mut SessionStart,
@@ -229,7 +246,7 @@ pub(super) async fn apply(
     let mut picked = Picked::default();
     for pick in picks {
         match offer(&start.config_options, &pick) {
-            Offer::Held => continue,
+            Offer::Held | Offer::Absent => continue,
             Offer::Not => {
                 picked.stale.push(pick);
                 continue;
@@ -243,7 +260,13 @@ pub(super) async fn apply(
             .await
         {
             Ok(options) => start.config_options = options,
-            Err(clauseo_acp::Error::Rpc { .. }) => picked.stale.push(pick),
+            Err(clauseo_acp::Error::Rpc {
+                code: INVALID_PARAMS,
+                ..
+            }) => picked.stale.push(pick),
+            Err(clauseo_acp::Error::Rpc { code, .. }) => {
+                tracing::warn!(option = %pick.0, value = %pick.1, code, "a config pick failed; kept");
+            }
             Err(error) => {
                 tracing::warn!(option = %pick.0, error = %Cause(&error), "a config pick was not set");
                 break;

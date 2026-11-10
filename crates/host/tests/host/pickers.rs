@@ -4,7 +4,9 @@
 //! and a matter's prefs are set before the first prompt; a `SetConfigOption` of the model, then
 //! the effort, reaches the agent and is kept in the matter's prefs; only model and effort
 //! options are settable, before the first session too; a pick the agent does not take is
-//! dropped and the prompt still runs; a reloaded session gets the thread's own values back.
+//! dropped and the prompt still runs, while one the agent fails otherwise, or one of an option
+//! the session does not report, is kept; a pick of a mode is never sent and is dropped; a
+//! reloaded session gets the thread's own values back.
 
 use std::collections::BTreeMap;
 
@@ -292,5 +294,59 @@ fn a_loaded_session_gets_the_threads_values_back() {
     let options = logged(&events);
     assert_eq!(current(&options, "model").as_deref(), Some("opus"));
     assert_eq!(current(&options, "effort").as_deref(), Some("high"));
+    host.shutdown();
+}
+
+/// (h) A pick the agent fails with an error other than -32602 (a rate limit) is kept, and a
+/// stored pick of a mode, which the pickers never set, is never sent and is dropped
+/// (`pickers-busy` offers `bypassPermissions`; a mode pick sent is a mismatch).
+#[test]
+fn a_failed_pick_is_kept_and_a_mode_pick_is_never_sent() {
+    let dir = Dir::new(
+        "pickers_busy",
+        &[(CLAUDE, Scenario::Bundled("pickers-busy"))],
+    );
+    let host = dir.start(0);
+    let folder = dir.folder("m", &[("brief.txt", "x\n")]);
+    let matter = host.create_matter("m", &folder);
+    let stored = claude_prefs(&[("model", "opus"), ("mode", "bypassPermissions")]);
+    set_prefs(&host, matter, FieldChange::Set(stored));
+    let thread = create_thread(&host, matter, None);
+    let events = turn(&host, thread, "Summarise clause 4.");
+    let options = logged(&events);
+    assert_eq!(current(&options, "model").as_deref(), Some("default"));
+    assert_eq!(current(&options, "mode").as_deref(), Some("default"));
+    assert_eq!(
+        summary(&host, matter).agent_prefs,
+        Some(claude_prefs(&[("model", "opus")]))
+    );
+    host.shutdown();
+}
+
+/// (i) A session that reports no options leaves the picks in the matter's prefs, and the next
+/// session that reports them gets them set before its prompt.
+#[test]
+fn a_pick_waits_for_a_session_with_its_option() {
+    let dir = Dir::new(
+        "pickers_bare",
+        &[(CLAUDE, Scenario::Bundled("pickers-bare"))],
+    );
+    let host = dir.start(0);
+    let folder = dir.folder("m", &[("brief.txt", "x\n")]);
+    let matter = host.create_matter("m", &folder);
+    let prefs = claude_prefs(&[("model", "opus"), ("effort", "high")]);
+    set_prefs(&host, matter, FieldChange::Set(prefs.clone()));
+    let first = create_thread(&host, matter, None);
+    drop(turn(&host, first, "Summarise clause 4."));
+    assert_eq!(summary(&host, matter).agent_prefs, Some(prefs.clone()));
+    host.shutdown();
+
+    dir.set_agents(&[(CLAUDE, Scenario::Bundled("pickers-picked"))]);
+    let host = dir.start(1);
+    let second = create_thread(&host, matter, None);
+    let options = logged(&turn(&host, second, "And clause 5?"));
+    assert_eq!(current(&options, "model").as_deref(), Some("opus"));
+    assert_eq!(current(&options, "effort").as_deref(), Some("high"));
+    assert_eq!(summary(&host, matter).agent_prefs, Some(prefs));
     host.shutdown();
 }

@@ -94,6 +94,8 @@ bundled! {
         "permission-last-answer",
         "permission-share-mode",
         "permission-word-open",
+        "pickers-bare",
+        "pickers-busy",
         "pickers-first",
         "pickers-load",
         "pickers-picked",
