@@ -46,6 +46,7 @@ fn every_kind_round_trips_through_its_message() {
         CheckpointKind::OutsideEdits,
         CheckpointKind::Undo,
         CheckpointKind::Restore,
+        CheckpointKind::Revisions,
     ] {
         for with_turn in [false, true] {
             let written = entry(kind, with_turn);

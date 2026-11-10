@@ -1,0 +1,17 @@
+---
+source: crates/protocol/tests/snapshots/host_command.rs
+assertion_line: 6
+expression: "HostCommand::DecideRevisions(DecideRevisions\n{\n    matter: matter_id(1), path: path(\"Lease.docx\"), version:\n    \"00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff\".parse().unwrap(),\n    ids: vec![2, 3], decision: RevisionDecision::Reject,\n})"
+---
+{
+  "decide_revisions": {
+    "matter": "01900000-0000-7000-8000-000000000001",
+    "path": "Lease.docx",
+    "version": "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff",
+    "ids": [
+      2,
+      3
+    ],
+    "decision": "reject"
+  }
+}

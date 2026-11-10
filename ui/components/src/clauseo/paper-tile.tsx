@@ -51,6 +51,9 @@ export type PaperTileProps = {
   era?: "gone" | "touched" | undefined;
   /** Optional: test ids for the e2e specs: on the face, the button a press lands on. */
   testIds?: { face?: string };
+  /** Optional: a second, quiet press under the face, where the room gives one: a Word document's Tracked changes. The
+   * face's press stays the tile's main act. */
+  action?: { label: string; onPress: () => void; testId?: string };
   /** Optional: the paper's file type's glyph (fileTypeIcon), at 24 px on the tile's top line, above its title. Hidden
    * from assistive technology: the file's name says its type. */
   fileIcon?: ComponentType<IconProps>;
@@ -72,6 +75,7 @@ export function PaperTile({
   onTurn,
   era,
   testIds,
+  action,
 }: PaperTileProps) {
   const w = useWords();
   const wide = useWide();
@@ -115,6 +119,7 @@ export function PaperTile({
       data-hand={lifted ? "" : undefined}
       data-carded={carded ? "" : undefined}
       data-era={era}
+      data-act={action === undefined ? undefined : ""}
       inert={era === "gone" ? true : undefined}
       aria-hidden={era === "gone" ? true : undefined}
     >
@@ -152,7 +157,11 @@ export function PaperTile({
             </span>
           )}
           {FileIcon !== undefined && <FileIcon size={24} className="tile-glyph" />}
-          <span className="tile-title" lang={latin ? "en" : langOfText(title)}>
+          <span
+            className="tile-title"
+            id={action === undefined ? undefined : room.id(`paper-${id}-title`)}
+            lang={latin ? "en" : langOfText(title)}
+          >
             {latin ? title : <Say>{title}</Say>}
           </span>
           {state !== "uncited" && (
@@ -164,6 +173,19 @@ export function PaperTile({
             </span>
           )}
         </button>,
+      )}
+      {action !== undefined && (
+        <Button
+          kind="quiet"
+          size="small"
+          className="tile-act"
+          // which paper's: its title, as the face shows it
+          aria-describedby={room.id(`paper-${id}-title`)}
+          data-testid={action.testId}
+          onClick={action.onPress}
+        >
+          {action.label}
+        </Button>
       )}
       {label !== undefined && (
         <span className="sr-only" id={room.id(`paper-${id}-more`)}>

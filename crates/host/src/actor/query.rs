@@ -30,6 +30,7 @@ use crate::error::Error;
 use crate::log_file::Cause;
 use crate::matter_worker::{MatterJob, MatterReply};
 use crate::principal::{Access, authorize};
+use crate::revisions::RevisionsDone;
 
 pub(super) mod blackline;
 mod folder_support;
@@ -161,6 +162,9 @@ pub(super) fn query(
         }
         HostQuery::AllowedSites => super::allowed::list(actor, reply),
         HostQuery::WordBlackline { .. } => blackline::word_blackline(actor, query, reply),
+        HostQuery::ListRevisions { matter, ref path } => {
+            super::revisions::list(actor, matter, path.clone(), reply);
+        }
         HostQuery::ListPapers { matter } => {
             if let Err(error) = actor.check_matter(matter) {
                 let _gone = reply.send(Err(error));
@@ -259,6 +263,12 @@ pub(super) fn matter_answer(reply: MatterReply) -> Result<QueryResult, Error> {
         MatterReply::EditedSince(result) => {
             result.map(|edited_since| QueryResult::UndoPreview(UndoPreview { edited_since }))
         }
+        MatterReply::Revisions(done) => match *done {
+            RevisionsDone::Listed(result) => result.map(QueryResult::Revisions),
+            RevisionsDone::Decided(_) => Err(Error::Internal(
+                "a tracked-changes list got a decision's reply".to_owned(),
+            )),
+        },
         other @ (MatterReply::Created(_)
         | MatterReply::Imported(_)
         | MatterReply::Opened(_)

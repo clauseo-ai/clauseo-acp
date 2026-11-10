@@ -168,8 +168,10 @@ fn start_writers(
 }
 
 /// Starts what `open` leaves running: the agents' hold bound, the limits model with its
-/// `cached` limits, the browser install and the lock causes; then logs the start.
+/// `cached` limits, the browser install and the lock causes; sweeps the tracked-changes copies
+/// a crash left; then logs the start.
 fn start_services(actor: &mut Actor, cached: Vec<AccountLimits>) {
+    super::revisions::sweep_leftovers(actor);
     // `agent.keys_loading`'s bound starts with the host (`agent/launch_refusals.rs`).
     let now = actor.clock.now().mono;
     actor.wiring.sign_in.refused.start_load_bound(now);

@@ -22,6 +22,10 @@ use crate::log_file::Cause;
 use crate::matter_worker::{MatterJob, RestoreDone, RestoreJob};
 use crate::pipeline::{Draft, MatterEvent};
 
+mod revisions;
+
+pub(crate) use revisions::{RevisionsAsk, decide_revisions, on_decided};
+
 /// A restore between its checks and R8's answer.
 #[derive(Debug)]
 pub(crate) struct RestoreAsk {
@@ -119,6 +123,8 @@ pub(crate) struct RestoreLog {
     /// The files R8 wrote, for the next prompt's note.
     written: Vec<MatterPath>,
     outcome: CommandOutcome,
+    /// The feature the usage counts note once it is logged; `None` for a revisions decision.
+    feature: Option<Feature>,
     /// That commit failed; the unblock sends it again.
     failed: bool,
     /// The one retry was sent.
@@ -179,6 +185,7 @@ fn restore_log(actor: &Actor, ask: &RestoreAsk, done: RestoreDone) -> Result<Res
         events,
         written,
         outcome: CommandOutcome::VersionRestored { checkpoint: id },
+        feature: Some(Feature::Restore),
         failed: false,
         retried: false,
     })
@@ -248,7 +255,9 @@ pub(crate) fn committed(actor: &mut Actor, matter: MatterId, durable: bool) {
     else {
         return;
     };
-    counting::feature_used(actor, Feature::Restore);
+    if let Some(feature) = log.feature {
+        counting::feature_used(actor, feature);
+    }
     note_restored(actor, matter, &log.written);
     end::pass_writer(actor, matter);
 }

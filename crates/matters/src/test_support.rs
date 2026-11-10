@@ -58,3 +58,35 @@ pub(crate) fn after_delete(path: &std::path::Path, bytes: &[u8]) {
         tracing::warn!(error = %err, "a test's file was not brought back");
     }
 }
+
+/// The files [`fail_after_replace_write`] armed, by absolute path.
+static FAIL_AFTER_WRITE: std::sync::Mutex<Vec<std::path::PathBuf>> =
+    std::sync::Mutex::new(Vec::new());
+
+/// From now on, for the whole process, the next `Matter::replace_file` that writes the file
+/// `path` (absolute) fails right after its rename, before its `revisions` checkpoint, with a
+/// sharing violation: as that checkpoint's walk fails on Windows when it meets a file another
+/// program holds. Once per call. Process-wide, as the host replaces on a matter thread; it suits
+/// nextest's one process per test.
+pub fn fail_after_replace_write(path: impl Into<std::path::PathBuf>) {
+    let mut armed = FAIL_AFTER_WRITE
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    armed.push(path.into());
+}
+
+/// After a replace renamed its file over `path`: the armed failure, once.
+pub(crate) fn after_replace_write(path: &std::path::Path) -> Result<(), crate::Error> {
+    let mut armed = FAIL_AFTER_WRITE
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let Some(at) = armed.iter().position(|one| one == path) else {
+        return Ok(());
+    };
+    armed.remove(at);
+    Err(crate::Error::io(
+        "read",
+        path,
+        std::io::Error::from_raw_os_error(32),
+    ))
+}

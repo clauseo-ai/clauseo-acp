@@ -161,6 +161,7 @@ mod patch;
 mod protection;
 mod query;
 mod raw;
+mod revisions;
 mod search;
 mod serde_util;
 mod session;
@@ -299,6 +300,9 @@ wire_types! {
     },
     view::{ClauseoTool, ToolAvailability, ToolState, ToolsUnavailableReason},
     view::{QueueHoldReason},
+    revisions::{
+        DecideRevisions, DocVersion, Revision, RevisionDecision, RevisionKind, RevisionList,
+    },
 }
 
 // Re-exports that are not wire types: constants, functions, and types that never cross the
@@ -339,6 +343,7 @@ pub use number::MAX_SAFE;
 pub use open_enum::UnknownKind;
 pub use query::{MAX_BLOB_READ_BYTES, MAX_PAGE_ENTRIES, MAX_PAPERS};
 pub use raw::{MAX_MSGPACK_DEPTH, MAX_RAW_DEPTH, MAX_RAW_ENCODE_DEPTH};
+pub use revisions::{MAX_REVISION_TEXT_CHARS, MAX_REVISIONS};
 pub use search::{DEFAULT_SEARCH_LIMIT, MAX_SEARCH_LIMIT};
 // A setup command's variant without its fields, for desktop's allow-lists; never on the wire.
 pub use setup::{MAX_INSTALL_LOG_LINE_BYTES, MAX_INSTALL_LOG_LINES, MAX_SECRET_BYTES, SetupAction};

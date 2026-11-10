@@ -29,8 +29,32 @@ const SKILL_FILE: &str = SKILL_MD;
 /// How long one stetdoc run may take (it starts in about 5 ms).
 pub const RUN_LIMIT: Duration = Duration::from_secs(10);
 
-/// The most bytes of stdout one run keeps.
-const STDOUT_MAX: u64 = 1024 * 1024;
+/// The most bytes of stdout one skill-loading run keeps.
+pub const STDOUT_MAX: u64 = 1024 * 1024;
+
+/// What one [`run_for`] gets: its deadline, the most stdout it keeps, and the variables added
+/// to the environment the launcher gives it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RunOptions {
+    /// Past it the run's tree is killed.
+    pub limit: Duration,
+    /// The most bytes of stdout kept; past it the run's tree is killed.
+    pub stdout_max: u64,
+    /// Added to the launcher's environment.
+    pub env: BTreeMap<OsString, OsString>,
+}
+
+impl RunOptions {
+    /// `limit`, [`STDOUT_MAX`] and nothing added to the environment.
+    #[must_use]
+    pub const fn new(limit: Duration) -> Self {
+        Self {
+            limit,
+            stdout_max: STDOUT_MAX,
+            env: BTreeMap::new(),
+        }
+    }
+}
 
 /// stetdoc's skill for the bundled binary: runs `stetdoc --version`; when `cached` (a skills
 /// folder a previous run wrote) already holds that version's skill, unchanged, takes its text
@@ -95,14 +119,86 @@ pub async fn run<T: Timer>(
     stetdoc: &Path,
     args: &[&str],
 ) -> Result<String, ProfileError> {
-    let cwd = stetdoc.parent().unwrap_or(stetdoc).to_owned();
-    let spec = LaunchSpec::new(
-        stetdoc.to_owned(),
-        args.iter().map(OsString::from).collect(),
-        BTreeMap::new(),
-        cwd,
+    let os_args: Vec<OsString> = args.iter().map(OsString::from).collect();
+    let ran = run_for(
+        launcher,
+        timer,
+        stetdoc,
+        &os_args,
+        &RunOptions::new(RUN_LIMIT),
     )
-    .map_err(|err| stetdoc_error(args, err.to_string()))?;
+    .await
+    .map_err(|failure| stetdoc_error(args, failure.to_string()))?;
+    if ran.code != Some(0) {
+        return Err(stetdoc_error(
+            args,
+            format!("it exited with {:?}: {}", ran.code, ran.stderr_tail),
+        ));
+    }
+    String::from_utf8(ran.stdout)
+        .map_err(|err| stetdoc_error(args, format!("its stdout is not UTF-8: {err}")))
+}
+
+/// How one stetdoc run of [`run_for`] exited, whatever the code: stetdoc with `--json` prints
+/// its refusals on stdout and exits with the refusal's code (`stetdoc capabilities`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Ran {
+    /// The exit code; `None` when a signal ended it.
+    pub code: Option<i32>,
+    /// Everything it printed on stdout, at most [`RunOptions::stdout_max`].
+    pub stdout: Vec<u8>,
+    /// The end of its stderr, for the log.
+    pub stderr_tail: String,
+}
+
+/// Why a [`run_for`] has no exit to read.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RunFailure {
+    /// The program could not be started (missing, not a program, refused).
+    Launch(String),
+    /// It ran past its limit and was killed with its tree.
+    TimedOut,
+    /// Its stdout ran past `max` bytes and it was killed with its tree.
+    TooMuchOutput {
+        /// [`RunOptions::stdout_max`].
+        max: u64,
+    },
+    /// Reading its stdout failed.
+    Read(String),
+}
+
+impl std::fmt::Display for RunFailure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Launch(reason) => write!(f, "it could not start: {reason}"),
+            Self::TimedOut => f.write_str("it timed out"),
+            Self::TooMuchOutput { max } => {
+                write!(
+                    f,
+                    "its stdout ran past {} MiB; it was killed",
+                    max / (1024 * 1024)
+                )
+            }
+            Self::Read(reason) => write!(f, "its stdout failed: {reason}"),
+        }
+    }
+}
+
+/// Runs stetdoc with `args` in its own folder, with `options.env` added to the environment the
+/// launcher gives it, and returns how it exited, whatever the code, within `options.limit`.
+/// Past the limit or `options.stdout_max` bytes of stdout its process tree is killed. Waits on
+/// `timer` and stetdoc's pipes: run it off any thread that must stay responsive.
+pub async fn run_for<T: Timer>(
+    launcher: &dyn Launcher,
+    timer: &T,
+    stetdoc: &Path,
+    args: &[OsString],
+    options: &RunOptions,
+) -> Result<Ran, RunFailure> {
+    let (limit, max) = (options.limit, options.stdout_max);
+    let cwd = stetdoc.parent().unwrap_or(stetdoc).to_owned();
+    let spec = LaunchSpec::new(stetdoc.to_owned(), args.to_vec(), options.env.clone(), cwd)
+        .map_err(|err| RunFailure::Launch(err.to_string()))?;
     let Launched {
         stdin,
         stdout,
@@ -111,12 +207,12 @@ pub async fn run<T: Timer>(
         ..
     } = launcher
         .launch(&spec)
-        .map_err(|err| stetdoc_error(args, err.to_string()))?;
+        .map_err(|err| RunFailure::Launch(err.to_string()))?;
     drop(stdin);
     let mut out = Vec::new();
     let ran = {
         let work = async {
-            let mut limited = stdout.take(STDOUT_MAX + 1);
+            let mut limited = stdout.take(max.saturating_add(1));
             let mut drain = pin!(stderr.drain());
             let (read, drained) = {
                 let reading = pin!(limited.read_to_end(&mut out));
@@ -125,7 +221,7 @@ pub async fn run<T: Timer>(
                     Either::Right((_, reading)) => (reading.await, true),
                 }
             };
-            if read.is_ok() && u64::try_from(out.len()).unwrap_or(u64::MAX) > STDOUT_MAX {
+            if read.is_ok() && u64::try_from(out.len()).unwrap_or(u64::MAX) > max {
                 return None;
             }
             let exit = if drained {
@@ -135,7 +231,7 @@ pub async fn run<T: Timer>(
             };
             Some((read, exit))
         };
-        match select(pin!(work), pin!(timer.after(RUN_LIMIT))).await {
+        match select(pin!(work), pin!(timer.after(limit))).await {
             Either::Left((ran, _)) => Some(ran),
             Either::Right(((), _)) => None,
         }
@@ -144,17 +240,14 @@ pub async fn run<T: Timer>(
     // deadline is still writing.
     drop(handle);
     let (read, exit) = ran
-        .ok_or_else(|| stetdoc_error(args, "it timed out"))?
-        .ok_or_else(|| stetdoc_error(args, "its stdout ran past 1 MiB; it was killed"))?;
-    read.map_err(|err| stetdoc_error(args, format!("its stdout failed: {err}")))?;
-    if exit.code() != Some(0) {
-        return Err(stetdoc_error(
-            args,
-            format!("it exited with {:?}: {}", exit.code(), exit.stderr_tail()),
-        ));
-    }
-    String::from_utf8(out)
-        .map_err(|err| stetdoc_error(args, format!("its stdout is not UTF-8: {err}")))
+        .ok_or(RunFailure::TimedOut)?
+        .ok_or(RunFailure::TooMuchOutput { max })?;
+    read.map_err(|err| RunFailure::Read(err.to_string()))?;
+    Ok(Ran {
+        code: exit.code(),
+        stdout: out,
+        stderr_tail: exit.stderr_tail(),
+    })
 }
 
 fn stetdoc_error(args: &[&str], reason: impl Into<String>) -> ProfileError {

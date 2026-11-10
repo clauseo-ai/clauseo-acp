@@ -128,7 +128,10 @@ fn admit_main(bridge: &Bridge, command: &HostCommand) -> Result<(), HostError> {
         // 0053, PR 2: a block's notice offers "Allow this site", and its undo takes it back.
         // The host allows only the host of a notice it sent, and refuses while policy forbids.
         | HostCommand::AllowBlockedSite { .. }
-        | HostCommand::RevokeAllowedSite { .. } => Ok(()),
+        | HostCommand::RevokeAllowedSite { .. }
+        // The room's tracked changes in a Word file: a matter, a path inside it that the host
+        // resolves and refuses unless it is a `.docx`, and change ids. Writes as a restore does.
+        | HostCommand::DecideRevisions(_) => Ok(()),
         HostCommand::AnswerPermission { .. } => Err(invalid(
             "a permission is answered with answer_permission, not dispatch",
         )),

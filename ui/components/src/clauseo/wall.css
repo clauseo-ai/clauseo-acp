@@ -83,6 +83,21 @@
   .tile[data-hand] {
     z-index: 3;
   }
+  /* a tile with a second press (a Word document's Tracked changes): the face over it, the press quiet under it, the
+     tile's row taller by its height */
+  .tile[data-act] {
+    display: flex;
+    flex-direction: column;
+    gap: var(--s0-5);
+  }
+  .tile[data-act] > .tile-face {
+    flex: 1 1 auto;
+    height: auto;
+  }
+  .tile-act {
+    width: 100%;
+    justify-content: center;
+  }
   /* uncited: flat on the wall, no shadow, no highlight */
   .tile-face {
     --c: var(--flat);

@@ -493,6 +493,7 @@ pub(super) fn on_matter_reply(
         MatterTag::Query(answer) => {
             let _gone = answer.send(super::query::matter_answer(reply));
         }
+        MatterTag::Revisions(ask) => turn::on_decided(actor, &ask, reply),
         MatterTag::Papers(answer) => super::papers::answer(actor, matter, reply, answer),
         MatterTag::Discard => made::discarded(actor, matter, &reply),
         MatterTag::CameBack(check) => turn::came_back_reply(actor, check, reply),

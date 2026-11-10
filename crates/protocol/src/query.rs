@@ -11,8 +11,8 @@ use crate::{
     AgentId, AgentKind, AllowedSite, BlobHash, CheckpointId, ClientName, CompactString, Count,
     Date, Error, FileChange, FileRefId, LastStop, MatterId, MatterKind, MatterPath, MatterSource,
     MatterStatus, PackList, PackStatus, Protection, ProtectionView, QueueHoldReason,
-    RestoreRequest, SearchAnswer, SearchRequest, Seq, SettingsView, SkippedFile, StreamId,
-    ThreadId, ThreadStatus, Timestamp, TurnId, UpdateView, ViewEntry, WordBlackline,
+    RestoreRequest, RevisionList, SearchAnswer, SearchRequest, Seq, SettingsView, SkippedFile,
+    StreamId, ThreadId, ThreadStatus, Timestamp, TurnId, UpdateView, ViewEntry, WordBlackline,
 };
 
 /// Most entries one `PageEntries` returns: the size of a `Reset`'s view window (about 200 recent
@@ -215,6 +215,15 @@ pub enum HostQuery {
         #[serde(skip_serializing_if = "Option::is_none", default)]
         to: Option<CheckpointId>,
     },
+    /// The tracked changes of one Word file of a matter, read with stetdoc from a private copy
+    /// (`revisions.rs`). Answered `QueryResult::Revisions`. Writes nothing. A file that is not
+    /// a `.docx` or does not read as one is `word.not_docx`; no stetdoc, `word.stetdoc_missing`.
+    ListRevisions {
+        /// The matter.
+        matter: MatterId,
+        /// The Word file.
+        path: MatterPath,
+    },
 }
 
 /// A query's answer.
@@ -275,6 +284,8 @@ pub enum QueryResult {
     AllowedSites(Vec<AllowedSite>),
     /// For `WordBlackline`.
     WordBlackline(WordBlackline),
+    /// For `ListRevisions`.
+    Revisions(RevisionList),
 }
 
 /// A picked folder's check, for `FolderSupport`. A struct, so later fields are additive; it

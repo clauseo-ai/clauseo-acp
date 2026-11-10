@@ -337,6 +337,12 @@ mod relocate;
 #[path = "host/restart.rs"]
 mod restart;
 #[cfg(test)]
+#[path = "host/revisions.rs"]
+mod revisions;
+#[cfg(test)]
+#[path = "host/revisions_real.rs"]
+mod revisions_real;
+#[cfg(test)]
 #[path = "host/search.rs"]
 mod search;
 #[cfg(test)]

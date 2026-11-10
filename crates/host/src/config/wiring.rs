@@ -81,7 +81,8 @@ pub(crate) struct LaunchWiring {
     /// The block list's seams (ADR 0053, `BlockListSeams::apply`); `None`: no fetch. Boxed, so
     /// the actor (which keeps this wiring) stays within the host thread's close-future budget.
     pub(crate) blocklist: Option<Box<crate::blocklist::BlockListSeams>>,
-    /// The stetdoc the Word blackline runs (`HostConfig::with_stetdoc`); `None`: refused.
+    /// The stetdoc the Word blackline and tracked changes run (`HostConfig::with_stetdoc`);
+    /// `None`: refused.
     pub(crate) stetdoc: Option<Stetdoc>,
 }
 

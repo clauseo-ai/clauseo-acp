@@ -202,7 +202,7 @@ fn deliverable() {
 
 #[test]
 fn checkpoint_kind() {
-    use CheckpointKind::{AfterTurn, BeforeTurn, Import, OutsideEdits, Restore, Undo};
+    use CheckpointKind::{AfterTurn, BeforeTurn, Import, OutsideEdits, Restore, Revisions, Undo};
     let cases = [
         (Import, "import"),
         (BeforeTurn, "before_turn"),
@@ -210,6 +210,7 @@ fn checkpoint_kind() {
         (OutsideEdits, "outside_edits"),
         (Undo, "undo"),
         (Restore, "restore"),
+        (Revisions, "revisions"),
     ];
     unit_enum(&CheckpointKind::ALL, &cases, CheckpointKind::Unknown);
 }

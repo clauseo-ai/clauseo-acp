@@ -1521,7 +1521,11 @@ expression: counts_schema()
         "agent.install_setup_failed",
         "blackline.no_word_tool",
         "blackline.not_word",
-        "blackline.failed"
+        "blackline.failed",
+        "word.stetdoc_missing",
+        "word.revisions_stale",
+        "word.not_docx",
+        "word.edit_failed"
       ],
       "type": "string"
     },

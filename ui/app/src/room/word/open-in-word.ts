@@ -7,14 +7,15 @@
 // quiet line. A path too long for Word comes with a way to show the matter's folder (reveal), where
 // the folders to move or rename are; a show's refusal is given to the caller as an open's is. The
 // label comes from the reader's words, loaded only once a listed paper is a Word document, so the
-// room's first load carries none of them.
+// room's first load carries none of them. A .docx's opener also carries the way to its tracked changes, which its tile
+// offers as a second press (paper-wall.tsx).
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import type { Lang } from "@clauseo/components/lib/display.ts";
 import { late } from "@clauseo/components/lib/late.ts";
 import type { HostTransport } from "../../transport/host-transport.ts";
-import type { FileRefId } from "../../transport/protocol.ts";
+import type { FileRefId, MatterId } from "../../transport/protocol.ts";
 import { refusalOf, type ListedPapers } from "../open.ts";
-import { isWordFile } from "./lock.ts";
+import { isDocx, isWordFile } from "./lock.ts";
 
 /** How a press went: the refusal's code, or null when it opened, the lawyer declined, or an open of the same file was
  * already on its way; and whether Word opened the file in Protected View. */
@@ -29,7 +30,14 @@ export type WordOpener = {
   protectedLine: string;
   onOpen: () => Promise<WordOpened>;
   onReveal: () => Promise<string | null>;
+  /** A .docx's tracked changes: the tile's press for them, and what their panel reads and decides them through. None
+   * for a .doc, which Clauseo's Word tool can't read. */
+  changes?: TrackedChanges;
 };
+
+/** The way to a .docx's tracked changes from its tile (room/word/changes-pane.tsx): the press's label, the transport
+ * and the matter. */
+export type TrackedChanges = { label: string; transport: HostTransport; matter: MatterId };
 
 const NOT_SENT: WordOpened = { refused: null, protectedView: false };
 
@@ -78,6 +86,7 @@ export function useWordOpeners(
       "This file's path is long, so Word opens it in Protected View. Choose Enable Editing to make changes.",
     );
     const { matter } = listed;
+    const changes: TrackedChanges = { label: rdt(lang, "Tracked changes"), transport, matter };
     const onReveal = () => refusalOf("reveal", transport.reveal({ matter }));
     const openers = new Map<string, WordOpener>();
     for (const p of listed.papers.papers) {
@@ -87,6 +96,7 @@ export function useWordOpeners(
         label,
         protectedLine,
         onReveal,
+        ...(isDocx(p.path) ? { changes } : {}),
         onOpen: async () => {
           if (opening.has(file)) return NOT_SENT;
           opening.add(file);

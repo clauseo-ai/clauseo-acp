@@ -17,9 +17,9 @@ use serde::{Deserialize, Serialize};
 use crate::MatterPath;
 use crate::{
     AgentChoiceId, AgentId, AgentKind, AllowScope, BlockedSiteId, CheckpointId, ClientName,
-    CommandId, Date, Delivery, ElicitationId, ElicitationResponse, FieldChange, FileDecision,
-    FolderRefId, MatterId, PackId, PackList, PermissionRequestId, PrivacyPatch, PromptBlock,
-    RestoreScope, ThreadId, Timestamp, Title, ToolsPatch, TurnId, UiPatch,
+    CommandId, Date, DecideRevisions, Delivery, ElicitationId, ElicitationResponse, FieldChange,
+    FileDecision, FolderRefId, MatterId, PackId, PackList, PermissionRequestId, PrivacyPatch,
+    PromptBlock, RestoreScope, ThreadId, Timestamp, Title, ToolsPatch, TurnId, UiPatch,
 };
 #[cfg(doc)]
 use crate::{FileChoice, RawPayload};
@@ -584,4 +584,8 @@ pub enum HostCommand {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         matter: Option<MatterId>,
     },
+    /// Accept or reject tracked changes of a matter's Word file (`revisions.rs`); refused
+    /// while a turn runs in the matter. Answers `RevisionsDecided`; undo it with
+    /// `RestoreVersion` of its `before` for its one file. JSON: `{"decide_revisions": {..}}`.
+    DecideRevisions(DecideRevisions),
 }

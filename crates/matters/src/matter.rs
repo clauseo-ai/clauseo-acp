@@ -22,11 +22,11 @@ use crate::checkpoint::{Core, Spec};
 use crate::history::{GixStore, HistoryStore, recorded_worktree};
 use crate::stat::EntryState;
 use crate::types::{
-    Checkpoint, CommitId, CompareSide, Imported, Marker, NewMatter, Progress, Restore,
-    RestoreFiles, RestorePlan, Restored, Settings, TimelineEntry, TurnMeta, UndoRequest, Undone,
-    VersionFile,
+    Checkpoint, CommitId, CompareSide, Imported, Marker, NewMatter, Progress, ReplaceFile,
+    Replaced, Restore, RestoreFiles, RestorePlan, Restored, Settings, TimelineEntry, TurnMeta,
+    UndoRequest, Undone, VersionFile,
 };
-use crate::{Error, MissingReason, compare, papers, refuse, restore, scan, undo, write};
+use crate::{Error, MissingReason, compare, papers, refuse, replace, restore, scan, undo, write};
 
 /// The git dir's name inside `<matters root>/<matter id>/`.
 const GIT_DIR: &str = "history.git";
@@ -403,6 +403,26 @@ impl Matter {
     pub fn restore(&mut self, request: &Restore<'_>) -> Result<Restored, Error> {
         json::check(&self.folder, self.id)?;
         restore::restore(&mut self.core, &self.folder, &self.settings, request)
+    }
+
+    /// Replaces the file `request.path` with `request.new`, made outside the folder from the
+    /// bytes in `request.expected` (a Word file whose tracked changes were accepted or rejected
+    /// on a private copy). Refuses before writing anything when the file is open in another
+    /// program (`matter.file_locked`) or its content is not those bytes (`ChangedSince`); takes
+    /// an `outside-edits` checkpoint if the folder changed since the last checkpoint; writes the
+    /// file through a synced temp file, checking that it did not change since that checkpoint;
+    /// and takes a `revisions` checkpoint (no thread, no turn). See [`ReplaceFile`].
+    pub fn replace_file(&mut self, request: &ReplaceFile<'_>) -> Result<Replaced, Error> {
+        json::check(&self.folder, self.id)?;
+        replace::replace(&mut self.core, &self.folder, &self.settings, request)
+    }
+
+    /// The bytes of the file `path` in the folder, read with downloads off: a file a checkpoint
+    /// would not read (cloud-only by the settings' probe, or over the size cap) is
+    /// [`Error::NotVersioned`] and is never opened. A missing file is an [`Error::Io`] of kind
+    /// `NotFound`. Links are followed: the caller checks where `path` leads.
+    pub fn read_local(&self, path: &MatterPath) -> Result<Vec<u8>, Error> {
+        replace::read_local(&self.folder, &self.settings, path)
     }
 
     /// What [`Matter::restore`] of `from` would do now, from the same plan, with the files a

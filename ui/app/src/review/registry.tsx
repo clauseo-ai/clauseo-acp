@@ -32,7 +32,7 @@ import { UET } from "./registry-uet.tsx";
 import { UD1 } from "./registry-ud1.tsx";
 import { UD2 } from "./registry-ud2.tsx";
 import { UD2_PLANS } from "./registry-ud2-plans.tsx";
-import { UC_ALL } from "./registry-uc-blackline.tsx";
+import { UC_ALL } from "./registry-uc-word.tsx";
 import { SAC } from "./registry-sac.tsx";
 import {
   MATTER,

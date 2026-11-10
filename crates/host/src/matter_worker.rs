@@ -184,6 +184,8 @@ pub(crate) enum MatterJob {
     Discard,
     /// A Word blackline's two sides of `path`, copied into the new folder `dir` (`sides.rs`).
     WriteSides(Sides),
+    /// Tracked changes in a Word file: list them, or decide some (`revisions.rs`).
+    Revisions(Box<crate::revisions::RevisionsJob>),
 }
 
 /// How an import ended.
@@ -237,6 +239,7 @@ pub(crate) fn made(reply: MatterReply) -> Result<Made, Error> {
         | MatterReply::Papers(_)
         | MatterReply::StillGone(_)
         | MatterReply::SidesWritten(_)
+        | MatterReply::Revisions(_)
         | MatterReply::Discarded(_) => Err(Error::Internal(
             "a matter's create got another job's reply".to_owned(),
         )),
@@ -269,6 +272,7 @@ pub(crate) enum MatterReply {
     Discarded(Result<(), Error>),
     /// The blackline's folder with both sides in it.
     SidesWritten(Result<BlacklineDir, Error>),
+    Revisions(Box<crate::revisions::RevisionsDone>),
 }
 
 impl MatterReply {
@@ -291,6 +295,7 @@ impl MatterReply {
             Self::StillGone(_) => "StillGone",
             Self::Discarded(_) => "Discarded",
             Self::SidesWritten(_) => "SidesWritten",
+            Self::Revisions(_) => "Revisions",
         }
     }
 }
@@ -408,6 +413,10 @@ fn run<T>(
 }
 
 /// Runs one job against the slot.
+#[expect(
+    clippy::too_many_lines,
+    reason = "one arm per job, each calling out; a split would only scatter the match"
+)]
 fn handle(settings: &Settings, slot: &mut Slot, job: MatterJob) -> MatterReply {
     match job {
         MatterJob::Create { new, check } => {
@@ -523,19 +532,13 @@ fn handle(settings: &Settings, slot: &mut Slot, job: MatterJob) -> MatterReply {
         MatterJob::StillGone { paths } => {
             MatterReply::StillGone(open(settings, slot).map(|matter| matter.still_gone(&paths)))
         }
+        MatterJob::Revisions(job) => crate::revisions::reply(open(settings, slot), &job),
         MatterJob::Discard => MatterReply::Discarded(match std::mem::replace(slot, Slot::Empty) {
             Slot::Open(matter) => matter.discard().map_err(Error::from),
             Slot::Empty | Slot::Unopened { .. } => Ok(()),
         }),
         MatterJob::WriteSides(sides) => sides.reply(settings, slot),
     }
-}
-
-/// The commit of a new matter's root checkpoint `root`.
-fn root_commit(matter: &Matter, root: CheckpointId) -> Result<CommitId, Error> {
-    matter
-        .commit_of(root)
-        .ok_or_else(|| Error::Internal(format!("the new matter has no checkpoint {root}")))
 }
 
 /// The open matter, opening it first when the last open failed.
@@ -580,7 +583,7 @@ mod relocate;
 mod sides;
 mod too_deep;
 
-use checkpoints::{repair, timeline_entry, turn_checkpoint};
+use checkpoints::{repair, root_commit, timeline_entry, turn_checkpoint};
 pub(crate) use claims::{Claim, Claimed, check_registry};
 use import::import;
 pub(crate) use relocate::{Registry, Relink};

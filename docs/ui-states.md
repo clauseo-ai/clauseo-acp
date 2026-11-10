@@ -220,6 +220,7 @@ its step card, and compare (below) lists the files between any two versions.
 | Edits made outside Clauseo | `CheckpointKind::OutsideEdits` | time, `files` (the lawyer, outside Clauseo) |
 | Undo of a step | `CheckpointKind::Undo` | time, thread and turn when recorded; restored and kept paths are on the undo marker (`MarkerKind::StepUndone`) |
 | Restore of a version | `CheckpointKind::Restore` | time; the version restored from and the scope are on the restore marker (`MarkerKind::VersionRestored`) |
+| Tracked changes of a Word file accepted or rejected | `CheckpointKind::Revisions` | time; the file is the one `HostCommand::DecideRevisions` named |
 | Checkpoint of a kind from a newer Clauseo | `CheckpointKind::Unknown` | time only |
 | Compare two versions | `HostQuery::CompareVersions` with `to` a checkpoint returns `QueryResult::FileChanges` | per file: change kind, sizes, may include the lawyer's edits |
 | Compare a version with the folder now | `HostQuery::CompareVersions` with `to` missing or `null` returns `QueryResult::FileChanges` | the same per file fields; nothing is stored |
@@ -353,6 +354,8 @@ retried as they are; the others need the lawyer or a fix first. Meanings are in 
 | Safe workspace still cleaning up after an earlier session, its stop or sweep not done after 15 s (S15) | `ErrorCode::SandboxCleaningUp` | yes |
 | Word blackline: no Word tool, or not a Word document | `ErrorCode::BlacklineNoWordTool`, `ErrorCode::BlacklineNotWord` | no |
 | Word blackline failed (the compare or its view) | `ErrorCode::BlacklineFailed` | yes |
+| Tracked changes: no stetdoc, a file that is not a Word document, or a list that went stale | `ErrorCode::WordStetdocMissing`, `ErrorCode::WordNotDocx`, `ErrorCode::WordRevisionsStale` | no |
+| Tracked changes: stetdoc failed or timed out | `ErrorCode::WordEditFailed` | yes |
 | A code from a newer Clauseo | `ErrorCode::Unknown` | no |
 
 A failed turn shows its code from `turn_failed` on the step card (section 3).

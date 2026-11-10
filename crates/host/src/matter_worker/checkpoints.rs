@@ -1,10 +1,10 @@
 //! The checkpoints a turn's end or a start-up repair takes for the matter, and the reused-id
 //! answers the host records late: `turn_checkpoint` answers an end, `repair` an interrupted
-//! turn at start-up.
+//! turn at start-up, and `root_commit` gives a new matter's root checkpoint's commit.
 
 use std::collections::BTreeSet;
 
-use clauseo_matters::{Checkpoint, CheckpointOutcome, Matter, TimelineEntry, TurnMeta};
+use clauseo_matters::{Checkpoint, CheckpointOutcome, CommitId, Matter, TimelineEntry, TurnMeta};
 use clauseo_protocol::{CheckpointId, CheckpointKind, FileChange, MatterPath};
 
 use super::{Reused, TurnCheckpoint};
@@ -127,4 +127,11 @@ fn reused(
             own,
         }),
     })
+}
+
+/// The commit of a new matter's root checkpoint `root`.
+pub(super) fn root_commit(matter: &Matter, root: CheckpointId) -> Result<CommitId, Error> {
+    matter
+        .commit_of(root)
+        .ok_or_else(|| Error::Internal(format!("the new matter has no checkpoint {root}")))
 }

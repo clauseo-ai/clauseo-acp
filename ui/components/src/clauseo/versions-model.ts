@@ -5,6 +5,7 @@
 // versions, and the parts only hand the lawyer's intent over.
 import type { Lang } from "../lib/display.ts";
 import { clock } from "../lib/words.ts";
+import { fileName } from "../lib/words-core.ts";
 import { listOf, vt } from "../lib/words-versions.ts";
 
 /* ---------- days ---------- */
@@ -46,6 +47,8 @@ export type Who =
   | { kind: "restore"; to: string }
   /** An undo of the restore with id `of`. Its time and day are read from that restore when shown. */
   | { kind: "undoRestore"; of: string }
+  /** The lawyer accepted or rejected tracked changes in these Word files, by path (one, as the host writes it). */
+  | { kind: "revisions"; files: readonly string[] }
   /** A version made in a way this version of Clauseo doesn't know: it shows its time alone. */
   | { kind: "unknown" };
 
@@ -151,6 +154,11 @@ export function whoOf(lang: Lang, cal: Calendar, v: Version, all: readonly Versi
         ? vt(lang, "Undo of the restore at {time}", { time: timeOf(lang, of) })
         : vt(lang, "Undo of the restore at {time} on {date}", when(lang, cal, of));
     }
+    case "revisions":
+      // several files, should a version ever hold them, are named as one list, as a version's papers are
+      return vt(lang, "You accepted or rejected tracked changes in {file}", {
+        file: listOf(lang, w.files.map(fileName)),
+      });
     case "unknown":
       return "";
   }

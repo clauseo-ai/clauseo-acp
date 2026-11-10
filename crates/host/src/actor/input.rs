@@ -176,6 +176,8 @@ pub(crate) enum MatterTag {
     Turn(TurnJob),
     /// A `RestoreVersion`'s restore.
     Restore(Box<RestoreAsk>),
+    /// A `DecideRevisions`' edit and write (`turn/restore/revisions.rs`).
+    Revisions(Box<super::turn::RevisionsAsk>),
     /// A query R8 answers: `CompareVersions`, `PreviewRestore`.
     Query(Reply<QueryResult>),
     /// A `ListPapers` query, answered with the listing.

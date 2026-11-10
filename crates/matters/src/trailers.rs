@@ -26,13 +26,14 @@ const THREAD: &str = "Clauseo-Thread";
 const TURN: &str = "Clauseo-Turn";
 
 /// The trailer spelling of each kind. `Unknown` has none: it is never written.
-const KINDS: [(CheckpointKind, &str); 6] = [
+const KINDS: [(CheckpointKind, &str); 7] = [
     (CheckpointKind::Import, "import"),
     (CheckpointKind::BeforeTurn, "before-turn"),
     (CheckpointKind::AfterTurn, "after-turn"),
     (CheckpointKind::OutsideEdits, "outside-edits"),
     (CheckpointKind::Undo, "undo"),
     (CheckpointKind::Restore, "restore"),
+    (CheckpointKind::Revisions, "revisions"),
 ];
 
 /// The trailer value for `kind`; `None` for `Unknown`.
@@ -60,6 +61,7 @@ fn kind_words(kind: CheckpointKind) -> &'static str {
         CheckpointKind::OutsideEdits => "Edits outside Clauseo",
         CheckpointKind::Undo => "Undo",
         CheckpointKind::Restore => "Restore",
+        CheckpointKind::Revisions => "Tracked changes",
         CheckpointKind::Unknown => "Checkpoint",
     }
 }
