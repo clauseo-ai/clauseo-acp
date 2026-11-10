@@ -2,8 +2,8 @@
 //! part). Claude gets the text through `_meta.systemPrompt.append`, Codex through
 //! `developer_instructions`.
 
-/// R21's tools part. It holds `{author}`, which [`Instructions::compose`] fills, and
-/// `{work_folder}` and `{browser}`, which the host fills per session.
+/// R21's tools part. It holds `{author}` and `{stetdoc}`, which [`Instructions::compose_for`]
+/// fills, and `{work_folder}` and `{browser}`, which the host fills per session.
 pub const TOOLS: &str = include_str!("../assets/instructions/tools.txt");
 
 /// R22's legal part, appended after the tools part. It holds `{work_folder}` and
@@ -91,6 +91,23 @@ pub fn browser_part_for(part: BrowserPart, codex: bool) -> &'static str {
     }
 }
 
+/// The stetdoc line: what the agents are told when the app found a stetdoc whose `--version`
+/// works, whether or not its skill loaded. The profile puts it in place of `{stetdoc}` through
+/// [`stetdoc_part`].
+pub const STETDOC_CLI: &str = include_str!("../assets/instructions/stetdoc.txt");
+
+/// The token the profile fills with [`stetdoc_part`]. It is not the host's: the profile knows
+/// whether stetdoc works when it is built.
+pub const STETDOC: &str = "{stetdoc}";
+
+/// What the profile fills `{stetdoc}` with: a space and [`STETDOC_CLI`] when the app found a
+/// working stetdoc (`found`), else nothing.
+pub fn stetdoc_part(found: bool) -> &'static str {
+    static ON: std::sync::LazyLock<String> =
+        std::sync::LazyLock::new(|| format!(" {}", STETDOC_CLI.trim()));
+    if found { &ON } else { "" }
+}
+
 /// The token the profile fills with the author's name.
 pub const AUTHOR: &str = "{author}";
 
@@ -133,10 +150,16 @@ impl Instructions {
         self
     }
 
-    /// The parts, each trimmed, joined by one blank line (`{connectors}` by none), with
-    /// `{author}` filled by [`author_name`]`(author)`. `{work_folder}`, `{matter_notes}` and
-    /// `{connectors}` stay for the host.
+    /// [`Self::compose_for`] with no working stetdoc found: `{stetdoc}` filled with nothing.
     pub fn compose(&self, author: &str) -> String {
+        self.compose_for(author, false)
+    }
+
+    /// The parts, each trimmed, joined by one blank line (`{connectors}` by none), with
+    /// `{author}` filled by [`author_name`]`(author)` and `{stetdoc}` by
+    /// [`stetdoc_part`]`(stetdoc)`. `{work_folder}`, `{matter_notes}` and `{connectors}` stay
+    /// for the host.
+    pub fn compose_for(&self, author: &str, stetdoc: bool) -> String {
         let mut text = String::new();
         for part in &self.parts {
             let part = part.trim();
@@ -146,7 +169,8 @@ impl Instructions {
             text.push_str(part);
         }
         let author = author_name(author);
-        crate::placeholders::fill(&text, &[AUTHOR], &[(AUTHOR, &author)]).unwrap_or(text)
+        let values = [(AUTHOR, author.as_str()), (STETDOC, stetdoc_part(stetdoc))];
+        crate::placeholders::fill(&text, &[AUTHOR, STETDOC], &values).unwrap_or(text)
     }
 }
 

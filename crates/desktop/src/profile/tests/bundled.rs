@@ -75,7 +75,7 @@ fn a_release_build_without_the_bundled_stetdoc_runs_none() {
     }
 }
 
-/// Not on macOS, where `Scratch::executable` is not built.
+/// Not on macOS: it never ran there.
 #[cfg(all(unix, not(target_os = "macos"), debug_assertions))]
 #[test]
 fn a_debug_build_without_the_bundled_stetdoc_takes_the_one_on_path() {

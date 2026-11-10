@@ -82,6 +82,9 @@ pub struct ClauseoProfile {
     /// ([`Self::with_tool_skills`]): the browser's skill. Whether a session has the browser, and
     /// Claude's rules for it, are the host's, per session.
     browser: bool,
+    /// Whether the app found a stetdoc whose `--version` works ([`Self::with_stetdoc_cli`]):
+    /// the instructions' stetdoc line.
+    stetdoc_cli: bool,
 }
 
 impl ClauseoProfile {
@@ -96,7 +99,17 @@ impl ClauseoProfile {
             instructions: Instructions::launch(),
             skills: Arc::default(),
             browser: false,
+            stetdoc_cli: false,
         }
+    }
+
+    /// The same profile with the stetdoc line in its instructions when `found`: the app found a
+    /// stetdoc whose `--version` works, whether or not its skill loaded
+    /// ([`instructions::stetdoc_part`]).
+    #[must_use]
+    pub fn with_stetdoc_cli(mut self, found: bool) -> Self {
+        self.stetdoc_cli = found;
+        self
     }
 
     /// The same profile with `skills` rendered once, here, for every later
@@ -155,10 +168,11 @@ impl ClauseoProfile {
         &self.author
     }
 
-    /// The composed instructions, `{author}` filled, `{work_folder}`, `{matter_notes}` and
-    /// `{connectors}` left.
+    /// The composed instructions, `{author}` and `{stetdoc}` filled, `{work_folder}`,
+    /// `{matter_notes}` and `{connectors}` left.
     pub fn instructions(&self) -> String {
-        self.instructions.compose(&self.author)
+        self.instructions
+            .compose_for(&self.author, self.stetdoc_cli)
     }
 
     /// The servers for an agent of `kind`, whatever the kind: `browser` while

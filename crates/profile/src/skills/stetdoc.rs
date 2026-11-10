@@ -1,7 +1,11 @@
 //! stetdoc's skill: the text the bundled `stetdoc skills get core` prints, rendered as
 //! `stetdoc/SKILL.md` with `stetdoc --version`'s first line as its version. Its frontmatter is
 //! rewritten to `name: stetdoc` and stetdoc's `description` alone ([`skill_source`]), so no
-//! `allowed-tools`, `hooks` or other key of stetdoc's reaches an agent.
+//! `allowed-tools`, `hooks` or other key of stetdoc's reaches an agent. stetdoc 0.9.3 prints the
+//! skill's body alone, with no frontmatter, so its text is refused here: the agents then learn
+//! stetdoc from its own `--help` (`instructions::STETDOC_CLI`), and only the skill is left out.
+//! [`version`] and [`load_skill_at`] are the two halves of [`load_skill`], so a caller can tell
+//! a stetdoc that does not run from a skill text that is refused.
 //!
 //! [`load_skill`] runs once, when the app builds the profile, off the host thread; the
 //! actor-side calls only hand out what it loaded. stetdoc starts through `clauseo-process`, like
@@ -68,20 +72,43 @@ pub async fn load_skill<T: Timer>(
     stetdoc: &Path,
     cached: &Path,
 ) -> Result<SkillSource, ProfileError> {
+    let version = version(launcher, timer, stetdoc).await?;
+    load_skill_at(launcher, timer, stetdoc, &version, cached).await
+}
+
+/// The first line `stetdoc --version` prints, trimmed. A run that fails, or prints no version,
+/// is an error: this stetdoc does not work.
+pub async fn version<T: Timer>(
+    launcher: &dyn Launcher,
+    timer: &T,
+    stetdoc: &Path,
+) -> Result<String, ProfileError> {
     let printed = run(launcher, timer, stetdoc, &["--version"]).await?;
     let version = printed.lines().next().unwrap_or_default().trim().to_owned();
     if version.is_empty() {
         return Err(stetdoc_error(&["--version"], "it printed no version"));
     }
+    Ok(version)
+}
+
+/// [`load_skill`] once [`version`] gave `version`: the skill from `cached` when it holds this
+/// version's, unchanged, else from `stetdoc skills get core`.
+pub async fn load_skill_at<T: Timer>(
+    launcher: &dyn Launcher,
+    timer: &T,
+    stetdoc: &Path,
+    version: &str,
+    cached: &Path,
+) -> Result<SkillSource, ProfileError> {
     let held = cached.join(STETDOC).join(SKILL_FILE);
-    let text = if is_current(cached, STETDOC, &version)? {
+    let text = if is_current(cached, STETDOC, version)? {
         std::fs::read(&held).map_err(|err| ProfileError::io("read", &held, err))?
     } else {
         run(launcher, timer, stetdoc, &["skills", "get", "core"])
             .await?
             .into_bytes()
     };
-    skill_source(&version, &text)
+    skill_source(version, &text)
 }
 
 /// stetdoc's skill from the text `skills get core` printed (or a cached copy, already in this

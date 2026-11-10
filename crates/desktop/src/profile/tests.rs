@@ -12,13 +12,16 @@ use clauseo_settings::{Locations, SkillsExtra, SkillsSettings};
 use serde_json::Value;
 
 use super::{DesktopProfile, paths_for};
-// Only the tests not built on macOS use it (`Scratch::executable` is not built there).
+// Only the tests not built on macOS use it.
 #[cfg(not(target_os = "macos"))]
 use super::first_on_path;
 use crate::test_support::Scratch;
 
 mod bundled;
 mod helper;
+// Its stetdoc stand-ins are shell scripts.
+#[cfg(unix)]
+mod release;
 // Its program stand-in is a shell script and its PATH fallback is a debug build's.
 #[cfg(all(unix, not(target_os = "macos"), debug_assertions))]
 mod install_log;
@@ -422,7 +425,7 @@ printf -- '---\\nname: stetdoc\\ndescription: Edits Word files.\\n---\\nUse it.\
     );
 }
 
-/// A stub stetdoc that answers both runs at once.
+/// A stub stetdoc that answers both runs at once, its skill with a frontmatter that parses.
 #[cfg(all(unix, not(target_os = "macos"), debug_assertions))]
 const STUB: &[u8] = b"#!/bin/sh\nif [ \"$1\" = --version ]; then echo 'stetdoc 9.9.9'; else\nprintf -- '---\\nname: stetdoc\\ndescription: Edits Word files.\\n---\\nUse it.\\n'; fi\n";
 
@@ -461,10 +464,11 @@ fn a_non_executable_stetdoc_does_not_shadow_the_real_one() {
 }
 
 /// D3: a stetdoc that hangs on `skills get core` is stopped within `STETDOC_START_LIMIT`: the
-/// build returns well before stetdoc's own 10 s limit, with no stetdoc skill and no prepend.
+/// build returns well before stetdoc's own 10 s limit, with no stetdoc skill. Its `--version`
+/// worked, so it stays on: its folder first on PATH and the stetdoc line in the instructions.
 #[cfg(all(unix, not(target_os = "macos"), debug_assertions))]
 #[test]
-fn a_slow_stetdoc_is_stopped_and_treated_as_absent() {
+fn a_stetdoc_slow_to_print_its_skill_stays_on_without_it() {
     let scratch = Scratch::new("profile-slow-stetdoc", &["data", "slow"]);
     scratch.file(
         "slow/stetdoc",
@@ -481,9 +485,11 @@ fn a_slow_stetdoc_is_stopped_and_treated_as_absent() {
         .recv_timeout(std::time::Duration::from_secs(7))
         .expect("the build returns within 7 s")
         .unwrap();
-    assert_eq!(hook.path_prepend(), None);
+    assert_eq!(hook.path_prepend(), Some(scratch.dir("slow")));
     let token = write_skills(&hook.launch_writes(&agent(CODEX))[0]).unwrap();
     assert!(!token.root().join("stetdoc").exists());
+    let line = clauseo_profile::instructions::STETDOC_CLI.trim();
+    assert!(hook.profile.instructions().contains(line));
 }
 
 #[test]
@@ -494,7 +500,7 @@ fn a_relative_program_path_fails_the_profile() {
     assert!(paths_for(&locations, exe, Some(PathBuf::from("bin/stetdoc"))).is_err());
 }
 
-/// Not on macOS, where `Scratch::executable` is not built.
+/// Not on macOS: it never ran there.
 #[cfg(not(target_os = "macos"))]
 #[test]
 fn stetdoc_is_found_on_path_only_in_an_absolute_folder() {

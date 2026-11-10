@@ -12,6 +12,9 @@ mod builtin;
 #[path = "skills/tools.rs"]
 mod tools;
 
+#[path = "skills/stetdoc.rs"]
+mod stetdoc_cli;
+
 use std::path::{Path, PathBuf};
 
 use clauseo_process::{AsyncIoTimer, PassthroughLauncher, SpawnOptions};
