@@ -38,10 +38,7 @@ afterEach(async () => {
 
 const toolbar: RoomToolbarProps = {
   title: "Acme Ltd v. State",
-  titleHint: "Delhi High Court. CS 12/2026. Acme",
-  nextDate: "3 March 2027",
-  caseNo: "CS 12/2026",
-  court: "Delhi High Court",
+  titleHint: "Acme",
   history: [],
   canUndo: false,
   onUndo: () => {},
