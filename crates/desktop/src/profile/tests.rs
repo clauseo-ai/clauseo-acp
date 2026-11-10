@@ -97,7 +97,8 @@ fn without_a_token_codex_gets_no_index() {
     let profile = profile(&scratch);
     let hook = DesktopProfile::new(profile.clone(), true);
     let keys = hook.codex_config(&agent(CODEX), None, None);
-    assert_eq!(developer_instructions(&keys), profile.instructions());
+    // Codex's own instructions: on macOS they end with the commands-that-never-run line.
+    assert_eq!(developer_instructions(&keys), profile.codex_instructions());
     assert!(!developer_instructions(&keys).contains(&profile.skills_index()));
 }
 
