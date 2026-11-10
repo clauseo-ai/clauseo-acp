@@ -5,6 +5,9 @@
 
 use std::collections::HashMap;
 
+mod files;
+mod str_cpy;
+
 /// The named variables `Machine::expand` reads (the others it knows are `$R0`..`$R9`, `$0`..`$9`).
 const NAMED: [&str; 1] = ["$INSTDIR"];
 
@@ -59,6 +62,9 @@ pub(super) fn preprocess(lines: &[String], defines: &HashMap<String, String>) ->
         let outer = open.iter().all(|&on| on);
         let parts = words(line);
         let parts: Vec<&str> = parts.iter().map(String::as_str).collect();
+        if self.file_line(&parts) {
+            return;
+        }
         match parts.as_slice() {
             ["!if", a, op, b] => {
                 let (a, b) = (expand(a), expand(b));
@@ -401,53 +407,6 @@ impl Machine {
         self.vars.insert(var.to_owned(), value);
     }
 
-    /// `StrCpy` with a length and an offset, as NSIS's `EW_ASSIGNVAR` (exec.c) takes them: a
-    /// negative offset counts from the end (nothing when still negative), the offset is capped at
-    /// the end, then an empty length takes the rest, a negative one cuts that many characters off
-    /// the end, and 0 takes nothing.
-    fn str_cpy(&self, value: &str, len: &str, offset: &str) -> String {
-        let text: Vec<char> = self.expand(value).chars().collect();
-        let total = i64::try_from(text.len()).unwrap();
-        let offset = self.expand(offset);
-        let mut start = if offset.is_empty() {
-            0
-        } else {
-            offset.parse::<i64>().unwrap()
-        };
-        if start < 0 {
-            start += total;
-        }
-        if start < 0 {
-            return String::new();
-        }
-        let rest = &text[usize::try_from(start.min(total)).unwrap()..];
-        let left = i64::try_from(rest.len()).unwrap();
-        let len = self.expand(len);
-        let take = if len.is_empty() {
-            left
-        } else {
-            let len = len.parse::<i64>().unwrap();
-            if len < 0 {
-                (left + len).max(0)
-            } else {
-                len.min(left)
-            }
-        };
-        rest[..usize::try_from(take).unwrap()].iter().collect()
-    }
-
-    /// The next name `FindFirst` or `FindNext` returns into `var`; "" and the error flag at the
-    /// end, as NSIS leaves them.
-    fn find(&mut self, var: &str) {
-        if self.found.is_empty() {
-            self.error = true;
-            self.set(var, String::new());
-        } else {
-            let name = self.found.remove(0);
-            self.set(var, name);
-        }
-    }
-
     /// `WordFunc`'s `${VersionCompare}`: 0 for equal versions, 1 when the first is newer, 2
     /// when the second is.
     fn version_compare(&mut self, a: &str, b: &str, var: &str) {
@@ -504,7 +463,7 @@ impl Machine {
                 let len = self.expand(text).chars().count();
                 self.set(var, len.to_string());
             }
-            ["SetRegView", "64" | "lastused"] => {}
+            ["SetRegView", "64" | "lastused"] | ["FindClose", _] => {}
             ["Push", value] => self.stack.push(self.expand(value)),
             ["Pop", var] => {
                 let value = self.stack.pop().expect("a Pop on an empty stack");
@@ -545,25 +504,6 @@ impl Machine {
                 let a: i64 = self.expand(a).parse().unwrap();
                 let b: i64 = self.expand(b).parse().unwrap();
                 self.set(var, (a - b).to_string());
-            }
-            // The pattern is said; the names come from `found`.
-            ["FindFirst", handle, var, pattern] => {
-                let pattern = self.expand(pattern);
-                self.said.push(format!("FindFirst {pattern}"));
-                self.set(handle, "1".to_owned());
-                self.find(var);
-            }
-            ["FindNext", _, var] => self.find(var),
-            ["FindClose", _] => {}
-            // A file in `locked` sets the error flag, as a file in use does.
-            ["Delete", path] => {
-                let path = self.expand(path);
-                self.error |= self.locked.contains(&path);
-                self.said.push(format!("Delete {path}"));
-            }
-            ["RMDir", "/r", path] => {
-                let path = self.expand(path);
-                self.said.push(format!("RMDir /r {path}"));
             }
             ["DetailPrint", text] => {
                 let text = self.expand(text);

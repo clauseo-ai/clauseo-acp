@@ -378,7 +378,7 @@ fn earlier_runs_folders_go_only_when_named_by_nsis_and_their_system_dll_could_go
     );
     // The error flag clear, as the start leaves it, and the registers back.
     assert!(!machine.error);
-    assert!(machine.stack.is_empty());
+    assert!(machine.stack.is_empty(), "{:?}", machine.stack);
     // The only recursive delete in the elevated code is that one, on a path in
     // CLAUSEO_TEMP_PARENT.
     let recursive: Vec<&String> = code
