@@ -72,17 +72,42 @@ impl Kept {
 }
 
 /// Whether the Word file at `path` holds a tracked change or a comment; `None` when it could not
-/// be read (so the answer is not kept). Never follows a link at `path`.
+/// be read (so the answer is not kept). Never follows a link at `path`, and on Windows never
+/// reads a cloud placeholder or an offline file, which would download it ([`reparse`]).
 pub(crate) fn check(path: &Path) -> Option<bool> {
     #[cfg(test)]
     if let Some(hook) = hooks::find(path) {
         return hook(path);
     }
     let file = crate::write::open_read_nofollow(path).ok()?;
+    #[cfg(windows)]
+    let file = windows_file(path, file)?;
     if !file.metadata().ok()?.is_file() {
         return Some(false);
     }
     zip_has_marks(BufReader::new(file))
+}
+
+/// `file`, opened at `path` as a reparse point itself, as the file to read: the same handle, or
+/// for a reparse point that is not a link (deduplicated…) the file opened again normally. `None`
+/// for a link or a mount point (never followed) and a file in the cloud or offline (never read).
+#[cfg(windows)]
+fn windows_file(path: &Path, file: std::fs::File) -> Option<std::fs::File> {
+    let (attributes, tag) = crate::network_paths::attribute_tag(&file).ok()?;
+    match reparse::reparse(attributes, tag) {
+        reparse::Reparse::Read => Some(file),
+        reparse::Reparse::Skip | reparse::Reparse::Unknown => None,
+        reparse::Reparse::Reopen => {
+            drop(file);
+            let again = std::fs::File::open(path).ok()?;
+            // swapped for a placeholder or an offline file since: never read
+            let (attributes, tag) = crate::network_paths::attribute_tag(&again).ok()?;
+            match reparse::reparse(attributes, tag) {
+                reparse::Reparse::Read | reparse::Reparse::Reopen => Some(again),
+                reparse::Reparse::Skip | reparse::Reparse::Unknown => None,
+            }
+        }
+    }
 }
 
 /// Whether the zip `file` reads as a Word file that holds a tracked change or a comment; `None`
@@ -159,5 +184,7 @@ pub(crate) mod hooks {
     }
 }
 
+#[cfg(any(windows, test))]
+mod reparse;
 #[cfg(test)]
 mod tests;

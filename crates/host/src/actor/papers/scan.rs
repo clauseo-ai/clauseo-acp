@@ -98,8 +98,13 @@ pub(crate) fn listed(
 pub(crate) fn rescan(actor: &mut Actor, matter: MatterId, folder: &Path, papers: &[Paper]) {
     let scan = state(actor, matter, folder);
     let unread: Vec<Paper> = scan.kept.unread(papers).cloned().collect();
+    let mut waiting: HashSet<MatterPath> = scan
+        .wanted
+        .iter()
+        .map(|wanted| wanted.path.clone())
+        .collect();
     for paper in unread {
-        if !scan.wanted.iter().any(|wanted| wanted.path == paper.path) {
+        if waiting.insert(paper.path.clone()) {
             scan.wanted.push(paper);
         }
     }
@@ -190,9 +195,15 @@ pub(crate) fn on_batch(actor: &mut Actor, batch: Batch) {
         start(actor, matter);
         return;
     }
+    // by path, each at most once: a listing lists a path once and [`rescan`] adds it once
+    let wanted: HashMap<&MatterPath, &Paper> = scan
+        .wanted
+        .iter()
+        .map(|wanted| (&wanted.path, wanted))
+        .collect();
     let mut shown = false;
     for (paper, has) in &read {
-        let waited = scan.wanted.iter().any(|wanted| wanted == paper);
+        let waited = wanted.get(&paper.path) == Some(&paper);
         if let Some(has) = *has {
             scan.kept.put(paper, has);
             // a paper the listing showed untracked that holds marks: its tile changes
@@ -201,8 +212,10 @@ pub(crate) fn on_batch(actor: &mut Actor, batch: Batch) {
     }
     // Tried, read or not: a failed read waits for the next listing, never loops here. A paper
     // listed again at another size or time since stays, to be read as it is now.
+    let tried: HashMap<&MatterPath, &Paper> =
+        read.iter().map(|(paper, _)| (&paper.path, paper)).collect();
     scan.wanted
-        .retain(|wanted| !read.iter().any(|(paper, _)| paper == wanted));
+        .retain(|wanted| tried.get(&wanted.path) != Some(&wanted));
     if shown {
         super::super::app::publish(actor, &HostEvent::PapersChanged { matter });
     }

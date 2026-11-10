@@ -2,9 +2,11 @@
 //! `GetDriveTypeW`, which can open a disconnected mapped drive and wait on it); a reparse point's
 //! tag, from its folder's listing (`FindFirstFileW`), never by opening it; and a local file's
 //! identity, opened without following a link and only once the walk has vouched for its path.
+//! Also an open file's attributes and reparse tag, for the papers scan (`revisions/marks.rs`).
 #![expect(
     unsafe_code,
-    reason = "FFI to QueryDosDeviceW, FindFirstFileW, GetShortPathNameW and file identity"
+    reason = "FFI to QueryDosDeviceW, FindFirstFileW, GetShortPathNameW, file identity and an \
+              open file's attributes and reparse tag"
 )]
 
 use std::os::windows::ffi::OsStrExt as _;
@@ -12,10 +14,10 @@ use std::path::Path;
 
 use windows::Win32::Foundation::{CloseHandle, HANDLE};
 use windows::Win32::Storage::FileSystem::{
-    CreateFileW, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT, FILE_ID_INFO,
-    FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE, FileIdInfo, FindClose, FindFirstFileW,
-    GetFileInformationByHandleEx, GetShortPathNameW, OPEN_EXISTING, QueryDosDeviceW,
-    WIN32_FIND_DATAW,
+    CreateFileW, FILE_ATTRIBUTE_TAG_INFO, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT,
+    FILE_ID_INFO, FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE, FileAttributeTagInfo,
+    FileIdInfo, FindClose, FindFirstFileW, GetFileInformationByHandleEx, GetShortPathNameW,
+    OPEN_EXISTING, QueryDosDeviceW, WIN32_FIND_DATAW,
 };
 use windows::core::{HSTRING, PCWSTR};
 
@@ -61,6 +63,23 @@ pub(super) fn reparse_tag(path: &Path) -> Option<u32> {
     // SAFETY: `found` is the search handle just opened, closed once.
     let _closed = unsafe { FindClose(found) };
     Some(data.dwReserved0)
+}
+
+/// The attributes and reparse tag of the open `file` (`FileAttributeTagInfo`). On a handle opened
+/// with `FILE_FLAG_OPEN_REPARSE_POINT` they are the reparse point's own; asking never recalls a
+/// cloud file or reads its data.
+pub(crate) fn attribute_tag(file: &std::fs::File) -> std::io::Result<(u32, u32)> {
+    use std::os::windows::io::AsRawHandle as _;
+    let handle = HANDLE(file.as_raw_handle());
+    let mut info = FILE_ATTRIBUTE_TAG_INFO::default();
+    let size = u32::try_from(size_of::<FILE_ATTRIBUTE_TAG_INFO>()).unwrap_or(0);
+    // SAFETY: `file` keeps `handle` open for the call, and closes it itself; `info` is a
+    // FILE_ATTRIBUTE_TAG_INFO of `size` bytes written in place.
+    unsafe {
+        GetFileInformationByHandleEx(handle, FileAttributeTagInfo, (&raw mut info).cast(), size)
+    }
+    .map_err(|error| std::io::Error::from_raw_os_error(error.code().0 & 0xFFFF))?;
+    Ok((info.FileAttributes, info.ReparseTag))
 }
 
 /// The identity of the local file or folder at `path`: its volume's serial number and its
