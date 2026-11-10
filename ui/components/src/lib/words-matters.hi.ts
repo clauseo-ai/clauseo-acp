@@ -7,11 +7,9 @@ export const HI = {
   "Find a matter": "मामला खोजें",
   // RO-20: Find's placeholder and name once it searches inside (U16a)
   Find: "खोजें",
-  "Find a matter by its name, client or case number": "नाम, मुवक्किल या केस नंबर से मामला खोजें",
   Recent: "हाल के",
   "Matching matters": "मेल खाते मामले",
   "No matter matches '{q}'.": "कोई मामला '{q}' से मेल नहीं खाता।",
-  "Search covers names, clients and case numbers.": "खोज में नाम, मुवक्किल और केस नंबर शामिल हैं।",
   // where the host gives no client (today's), find searches names only; with clients, names and clients
   "Find a matter by its name": "नाम से मामला खोजें",
   "Find a matter by its name or client": "नाम या मुवक्किल से मामला खोजें",
@@ -22,7 +20,7 @@ export const HI = {
   "Client, {client}": "मुवक्किल, {client}",
   "Folder moved": "फ़ोल्डर कहीं और ले जाया गया",
   "A matter waits for you": "एक मामला आपकी प्रतीक्षा में है",
-  /* ---------- a new matter: a folder the host refused, a create that failed, a next date that doesn't read ---------- */
+  /* ---------- a new matter: a folder the host refused, a create that failed ---------- */
   // matter.folder_refused, which doesn't say why: true of a folder already a matter, an unreadable matter file, the
   // matters' own folder, a drive, the home folder and a system folder alike
   "Clauseo can't make a matter of this folder. Choose another folder.":
@@ -42,7 +40,6 @@ export const HI = {
     "हो सकता है वह लॉक हो, या ऐसी ड्राइव पर हो जो अब जुड़ी नहीं है।",
   "Clauseo couldn't create the matter. Try again, or choose another folder.":
     "Clauseo मामला नहीं बना सका। फिर से प्रयास करें, या दूसरा फ़ोल्डर चुनें।",
-  "Write the date as 30 October 2026.": "तारीख इस तरह लिखें: 30 अक्टूबर 2026।",
   // matter.folder_is_matter: the folder is already a matter, by any spelling or nested with one; the matter's name when
   // the list has it, and Open it beside the line
   "This folder is already a matter: {name}.": "यह फ़ोल्डर पहले से एक मामला है: {name}।",

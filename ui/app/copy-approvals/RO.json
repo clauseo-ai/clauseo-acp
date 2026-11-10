@@ -249,17 +249,6 @@
     "by": "Rohan",
     "note": "Rohan, running-page batch 2026-11-05 (written by app track)"
   },
-  "RO-09": {
-    "en": "Before the next date",
-    "hi": "अगली तारीख से पहले",
-    "hi_status": "provisional",
-    "hi_at": "2026-11-06",
-    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "approved",
-    "at": "2026-11-05",
-    "by": "Rohan",
-    "note": "Rohan, running-page batch 2026-11-05 (written by app track)"
-  },
   "RO-10": {
     "en": "Snoozed until {when} / Undo",
     "hi": "{when} तक टाला गया / पूर्ववत करें",

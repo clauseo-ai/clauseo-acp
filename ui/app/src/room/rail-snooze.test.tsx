@@ -4,7 +4,7 @@
 // @vitest-environment happy-dom
 import { act } from "react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import type { MatterInfo, ThreadInfo } from "./host-next.ts";
+import type { ThreadInfo } from "./host-next.ts";
 import { LISTS, MATTERS } from "./rail-needs-rig.ts";
 import { railView } from "./rail-lists.ts";
 import {
@@ -47,15 +47,10 @@ afterEach(async () => {
 const MIDNIGHT = Date.UTC(2026, 10, 3);
 const HOUR = 3_600_000;
 const T_LIST = thread(10, A, { title: "List of dates" });
-const withA = (more: ThreadInfo[], next?: string) => {
+const withA = (more: ThreadInfo[]) => {
   const lists = new Map(LISTS);
   lists.set(A.matter, [...(lists.get(A.matter) ?? []), ...more]);
-  const matters =
-    next === undefined
-      ? MATTERS
-      : () =>
-          MATTERS().map((m): MatterInfo => (m.matter === A.matter ? { ...m, next_date: next } : m));
-  return { lists, matters };
+  return { lists, matters: MATTERS };
 };
 
 /** The snooze menu of Bail conditions (List of dates is the open one), open: its items' words. */
@@ -142,15 +137,6 @@ test("the menu at 4:59 pm offers 6:00 pm, and at 5:00 pm 9:00 pm in its place", 
     "Monday 9:00 am",
     "Choose a day and time",
   ]);
-});
-
-test("Before the next date shows only with the matter's next date more than a day away", async () => {
-  await mount(withA([T_LIST], "2026-11-11"));
-  // 9:00 am the day before, its day and time beneath
-  expect(await menuOf()).toContain("Before the next dateTuesday 10 November, 9:00 am");
-  await unmount();
-  await mount(withA([T_LIST], "2026-11-04"));
-  expect((await menuOf()).some((i) => i?.startsWith("Before the next date"))).toBe(false);
 });
 
 test("a snooze: one snooze_thread with its time, the line in the row's place until the pointer leaves, then the row with its alarm clock", async () => {

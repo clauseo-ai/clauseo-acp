@@ -3,7 +3,7 @@
 // open, with a conversation waiting, one with an answer ready, one snoozed and three done; Joshi v. Joshi snoozed whole;
 // and a conversation of Kapoor's snoozed. Each state is taken as the lawyer would: the pointer to a row (its buttons
 // shown with the focus, as the keyboard has them), a fold or a menu opened, a time chosen. The snooze menu's states
-// (before and after 5:00 pm, with and without Before the next date) stand alone, its times worked out for 4:00 pm and
+// (before and after 5:00 pm) stand alone, its times worked out for 4:00 pm and
 // 6:00 pm today, so the page shows each whatever the hour it's opened at.
 import type { ReactNode } from "react";
 import type { Lang } from "@clauseo/components/lib/display.ts";
@@ -72,14 +72,14 @@ export const U16B: Entry[] = [
   )),
   entry("RO-05", wl("Until {when}"), () => <RoomTriage acts={SHELF} />),
   entry("RO-06", wl("Whole matter"), () => <RoomTriage acts={SHELF} />),
-  // the snooze menu: before 5:00 pm with Before the next date, after 5:00 pm without
-  entry("RO-07", wl("Snooze until"), () => <MenuAt hour={16} nextIn={8} />),
+  // the snooze menu: before 5:00 pm, and after
+  entry("RO-07", wl("Snooze until"), () => <MenuAt hour={16} />),
   entry(
     "RO-08",
     joined([wl("Tomorrow {time}"), wl("Monday {time}"), wl("Choose a day and time")]),
     () => <MenuAt hour={18} />,
   ),
-  entry("RO-09", wl("Before the next date"), () => <MenuAt hour={16} nextIn={8} />),
+  // RO-09, retired: Before the next date went with the next date (a matter is a name, a client and a folder)
   // in the row's place after a snooze, with Undo; a snoozed conversation in its matter, its words under the pointer
   entry("RO-10", joined([w("Snoozed until {when}"), undo]), () => <RoomTriage acts={SNOOZED} />),
   entry("RO-11", w("Snoozed until {when}"), () => (

@@ -428,8 +428,4 @@
   --set-task-w: 520px; /* Windows' task dialog */
   --set-icon-task: 32px; /* the task dialog's own icon */
   --set-icon-title: 16px; /* a dialog's icon in its title bar */
-  /* First launch and settings */
-  --form-pair-min: calc(
-    200px * var(--k)
-  ); /* the new matter's client and next date stand side by side above this */
 }
