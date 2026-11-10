@@ -44,6 +44,28 @@ function fragmentId(fragment: string): string {
   }
 }
 
+/**
+ * The matter-relative path a relative link names (`Reply%20notes.md`, `./drafts/Reply.docx`), percent-decoded, with
+ * its query and fragment dropped; undefined for a fragment, a scheme (`https:`, `file:`, `C:`), a rooted or
+ * protocol-relative path, or nothing at all. The host matches it against the matter's papers, so a path that climbs
+ * out of the folder matches none.
+ */
+function relativePath(href: string | undefined): string | undefined {
+  if (href === undefined || /^[#/\\]/.test(href) || /^[a-z][a-z0-9+.-]*:/i.test(href))
+    return undefined;
+  const bare = href.split(/[?#]/)[0] ?? "";
+  let path: string;
+  try {
+    path = decodeURIComponent(bare);
+  } catch {
+    path = bare;
+  }
+  // a Windows path's separators read as the matter's own
+  path = path.replaceAll("\\", "/");
+  while (path.startsWith("./")) path = path.slice(2);
+  return path === "" ? undefined : path;
+}
+
 /** `url` with its percent-encoding undone, or as written when that is malformed. */
 function decoded(url: string): string {
   try {
@@ -95,7 +117,8 @@ function spoofedHost(text: string, href: string | undefined): string | undefined
 /**
  * Every link in an answer. It renders a real <a href> for display and copy, but a click or middle click
  * never navigates: it is cancelled, and the URL goes to the host's open_external. A fragment scrolls to its
- * target. Relative and other links render without an href, inert, and so does every link in the streaming
+ * target. A relative link renders without an href, as a link the keyboard reaches, and goes to the host's
+ * openPath (relativePath); other links render without an href, inert, and so does every link in the streaming
  * last block. Of the sanitised attributes it keeps the id and the reference's aria-describedby; a
  * footnote back-reference gets its label in the page's language.
  */
@@ -106,8 +129,14 @@ export function Link({ href, id, children, text, ...rest }: LinkProps) {
   const scope = useContext(AnswerScopeContext);
   const inert = useContext(InertLinksContext);
   const url = inert ? undefined : allowed(href, scope);
+  // a relative link names a paper of the matter: the host opens it, or says it is no longer in the folder
+  const path = inert || url !== undefined ? undefined : relativePath(href);
   const open = (event: MouseEvent<HTMLAnchorElement>) => {
     event.preventDefault();
+    if (path !== undefined) {
+      host.openPath(path);
+      return;
+    }
     if (!url) return;
     if (url.startsWith("#")) {
       document.getElementById(fragmentId(url.slice(1)))?.scrollIntoView();
@@ -129,6 +158,17 @@ export function Link({ href, id, children, text, ...rest }: LinkProps) {
       rel="noreferrer noopener"
       onClick={open}
       onAuxClick={open}
+      {...(path === undefined
+        ? {}
+        : {
+            role: "link",
+            tabIndex: 0,
+            onKeyDown: (event: KeyboardEvent<HTMLAnchorElement>) => {
+              if (event.key !== "Enter") return;
+              event.preventDefault();
+              host.openPath(path);
+            },
+          })}
     >
       {children}
       {realHost ? <span data-clauseo="link-host"> ({realHost})</span> : null}

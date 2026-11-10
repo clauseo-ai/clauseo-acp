@@ -161,6 +161,8 @@ export const HI = {
     "{name} डाउनलोड हो गया, लेकिन उसका सेटअप पूरा नहीं हुआ। फिर से प्रयास करें।",
   "The AI was downloaded, but setting it up didn't finish. Try again.":
     "AI डाउनलोड हो गया, लेकिन उसका सेटअप पूरा नहीं हुआ। फिर से प्रयास करें।",
+  // the app's own: an answer's link to a paper the matter's folder no longer holds (provisional Hindi)
+  "This paper is no longer in the matter's folder.": "यह दस्तावेज़ अब मामले के फ़ोल्डर में नहीं है।",
   // a Word file's tracked changes (provisional Hindi)
   "Clauseo's Word tool is missing. Reinstall Clauseo to accept or reject changes.":
     "Clauseo का Word टूल मौजूद नहीं है। बदलाव स्वीकार या अस्वीकार करने के लिए Clauseo फिर से इंस्टॉल करें।",

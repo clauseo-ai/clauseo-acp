@@ -265,6 +265,12 @@ export const ERROR_WORDS: Record<ErrorCode, ErrorKey> = {
   unknown: "Something went wrong inside Clauseo.",
 };
 
+/** Codes the app gives itself, never the host, so outside ErrorCode: an answer's link, or Versions' Open now, to a
+ * paper the matter's folder no longer holds (room/open.ts). */
+export const APP_ERROR_WORDS = {
+  "paper.not_in_folder": "This paper is no longer in the matter's folder.",
+} as const satisfies Record<string, ErrorKey>;
+
 const own = wordsOf("errors");
 /** Versions' words, read from the shared list rather than words-versions.ts, which stays out of the room's first
  * load (first-load.test.ts). */
@@ -339,6 +345,8 @@ export function plannedKey(code: ErrorCode, agent?: AgentName): { key: ErrorKey;
  * `agent` is the thread's agent (AgentName), for the codes whose sentence names it (plannedKey); a caller that
  * doesn't know the thread leaves it out. */
 export function errorWords(lang: Lang, code: string, agent?: AgentName): string {
+  if (Object.hasOwn(APP_ERROR_WORDS, code))
+    return own(lang, APP_ERROR_WORDS[code as keyof typeof APP_ERROR_WORDS]);
   const known = Object.hasOwn(ERROR_WORDS, code) ? (code as ErrorCode) : "unknown";
   const { key, name } = plannedKey(known, agent);
   return name === undefined || key === STOPPED || isMark(key)

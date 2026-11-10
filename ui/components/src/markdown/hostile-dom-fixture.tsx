@@ -110,6 +110,7 @@ const references: string[] = [];
 const HOST: MarkdownHost = {
   openExternal: (url) => opened.push(url),
   openReference: (kind, id) => references.push(`${kind}:${id}`),
+  openPath: (path) => references.push(`path:${path}`),
 };
 export const pwned: string[] = [];
 export const g4 = globalThis as { __g4pwn?: (id: string) => void; __g4clobber?: unknown };
