@@ -236,15 +236,11 @@ pub(crate) fn closing(actor: &Actor, thread: ThreadId, turn: TurnId) -> bool {
 /// The most of a `TurnFailed.detail` written, in bytes, as the protocol documents it.
 pub(super) const MAX_DETAIL_BYTES: usize = 4096;
 
-/// `detail` as a `TurnFailed` writes it: the home folder written `~`, control characters as
-/// spaces, cut at a char boundary within [`MAX_DETAIL_BYTES`]. An agent's error message is
-/// uncapped and may carry a stack trace with the lawyer's paths.
+/// `detail` as a `TurnFailed` writes it: the home folder written `~` ([`scrub_home`]), control
+/// characters as spaces, cut at a char boundary within [`MAX_DETAIL_BYTES`]. An agent's error
+/// message is uncapped and may carry a stack trace with the lawyer's paths.
 pub(super) fn detail_of(actor: &Actor, detail: String) -> String {
-    let home = actor.home.as_deref().and_then(std::path::Path::to_str);
-    let mut detail = match home {
-        Some(home) if home.len() > 1 => detail.replace(home, "~"),
-        _ => detail,
-    };
+    let mut detail = scrub_home(detail, &actor.home_spellings);
     if detail.contains(char::is_control) {
         detail = detail.replace(char::is_control, " ");
     }
@@ -257,3 +253,48 @@ pub(super) fn detail_of(actor: &Actor, detail: String) -> String {
     }
     detail
 }
+
+/// `text` with every spelling of the home folder in `homes` (`rail::home_spellings`: as
+/// configured and canonical) written `~`, each as it is, with forward slashes, as a
+/// `file://` URL and JSON-escaped (`C:\\Users\\…`), ignoring ASCII case (Windows and macOS
+/// paths). The longest form goes first, so a URL loses its scheme too. A spelling of one
+/// character (`/`) is left alone.
+pub(super) fn scrub_home(text: String, homes: &[std::path::PathBuf]) -> String {
+    let mut forms: Vec<String> = Vec::new();
+    for home in homes.iter().filter_map(|home| home.to_str()) {
+        let home = home.trim_end_matches(['/', '\\']);
+        if home.chars().count() <= 1 {
+            continue;
+        }
+        let forward = home.replace('\\', "/");
+        let url = if forward.starts_with('/') {
+            format!("file://{forward}")
+        } else {
+            format!("file:///{forward}")
+        };
+        forms.extend([url, home.replace('\\', "\\\\"), forward, home.to_owned()]);
+    }
+    forms.sort_by(|a, b| b.len().cmp(&a.len()).then_with(|| a.cmp(b)));
+    forms.dedup();
+    forms
+        .iter()
+        .fold(text, |text, form| replace_ignoring_case(&text, form, "~"))
+}
+
+/// `text` with each match of `from`, ignoring ASCII case, replaced by `to`.
+fn replace_ignoring_case(text: &str, from: &str, to: &str) -> String {
+    // ASCII lowercasing keeps every byte where it was, so a match in `lower` is one in `text`.
+    let (lower, needle) = (text.to_ascii_lowercase(), from.to_ascii_lowercase());
+    let mut out = String::with_capacity(text.len());
+    let mut at = 0;
+    for (found, _) in lower.match_indices(&needle) {
+        out.push_str(text.get(at..found).unwrap_or_default());
+        out.push_str(to);
+        at = found + needle.len();
+    }
+    out.push_str(text.get(at..).unwrap_or_default());
+    out
+}
+
+#[cfg(test)]
+mod tests;
