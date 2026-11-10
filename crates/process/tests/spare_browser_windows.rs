@@ -125,3 +125,97 @@ fn the_kill_spares_a_browser_and_ends_the_rest() {
 fn file_name(path: &Path) -> &str {
     path.file_name().and_then(|name| name.to_str()).unwrap()
 }
+
+/// A sign-in's Cancel after its login opened the browser: the run's own processes exit by
+/// themselves, and the browser they started, spared, holds the pipes it inherited. The wait
+/// for the run and its output (`Handle::exited_draining`) returns well inside the lawyer's 2 s
+/// grace, with what the run wrote before it exited, and the browser keeps running.
+#[test]
+fn the_exit_wait_ends_once_only_a_spared_browser_holds_the_pipes() {
+    use futures::io::AsyncReadExt as _;
+
+    let bin = clauseo_fake_agent::bin_path().expect(
+        "fake_agent binary; `-p clauseo-process` does not build it: run `cargo build -p clauseo-fake_agent` first",
+    );
+    assert!(!bin.to_string_lossy().contains(' '), "{}", bin.display());
+    let dir = folder("drain-browser");
+    let edge = dir.join("msedge.exe");
+    cmd(&format!(
+        "mkdir {} & copy /y {} {} >nul",
+        dir.display(),
+        bin.display(),
+        edge.display()
+    ));
+    // `start /b` hands the browser cmd's stdout and stderr, the run's pipes; cmd then waits for
+    // a line on its stdin, writes one of its own and exits by itself.
+    let shell: PathBuf = std::env::var_os("ComSpec").expect("ComSpec").into();
+    let line = format!(
+        "start /b {} --hold & set /p go= & echo before-exit",
+        edge.display()
+    );
+    let spec = LaunchSpec::new(
+        shell,
+        vec!["/d".into(), "/c".into(), line.into()],
+        BTreeMap::new(),
+        env!("CARGO_MANIFEST_DIR").into(),
+    )
+    .unwrap()
+    .spare_browsers();
+    let launched = spawn_in_tree(&spec, &SpawnOptions::new()).unwrap();
+    let mut handle = launched.handle;
+    let mut stdin = launched.stdin;
+    let mut stdout = launched.stdout;
+    let stderr = launched.stderr;
+    let descendants = handle.descendants();
+    let mut browser = None;
+    let started = within_bound(|| {
+        browser = find(
+            &descendants.snapshot().pids().unwrap_or_default(),
+            "msedge.exe",
+        );
+        browser.is_some()
+    });
+    let Some(browser) = browser else {
+        panic!("the browser never started: {started}");
+    };
+    let mut out = Vec::new();
+    let finished = block_on(async {
+        use futures::io::AsyncWriteExt as _;
+        drop(stdin.write_all(b"go\r\n").await);
+        drop(stdin.close().await);
+        let read = async {
+            let mut chunk = [0_u8; 4096];
+            while let Ok(n @ 1..) = stdout.read(&mut chunk).await {
+                out.extend_from_slice(chunk.get(..n).unwrap_or_default());
+            }
+        };
+        let errs = async {
+            drop(stderr.drain().await);
+        };
+        let pipes = async {
+            futures::future::join(read, errs).await;
+        };
+        let wait = Box::pin(handle.exited_draining(&clauseo_process::AsyncIoTimer, pipes));
+        // The lawyer's grace is 2 s, and the bound was what this wait took before.
+        let bound = Box::pin(Timer::after(Duration::from_millis(1_500)));
+        match futures::future::select(wait, bound).await {
+            futures::future::Either::Left(((_report, ended), _)) => Some(ended),
+            futures::future::Either::Right(_) => None,
+        }
+    });
+    let browser_runs = running(browser);
+    drop(handle);
+    kill(browser);
+    within_bound(|| !running(browser));
+    cmd(&format!("rd /s /q {}", dir.display()));
+    let Some(ended) = finished else {
+        panic!("the wait ran past 1.5 s");
+    };
+    assert!(
+        !ended,
+        "the browser held the pipes, so they never reached their end"
+    );
+    let text = String::from_utf8_lossy(&out);
+    assert!(text.contains("before-exit"), "{text}");
+    assert!(browser_runs, "the browser was ended with the tree");
+}

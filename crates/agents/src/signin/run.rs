@@ -11,7 +11,9 @@
 //! when the stop at once follows (the quit's bound) or the lawyer's grace passes. A run whose
 //! job is already stopped is not started at all: the last look at the stop and the spawn are one
 //! step against the stop ([`Cancel::unless_stopped`]). A browser the run opens is spared by every
-//! stop and kill of its tree (`LaunchSpec::spare_browsers`).
+//! stop and kill of its tree (`LaunchSpec::spare_browsers`), and once the run's own processes
+//! have exited it no longer holds the run open through the pipes it inherited
+//! (`Handle::exited_draining`).
 //!
 //! stdout and stderr go into a 64 KB ring in memory ([`Ring`]) that is never shown or logged,
 //! and each line is offered to a callback as it arrives (the flows look for a device code, a
@@ -28,7 +30,7 @@ use std::time::Duration;
 use clauseo_process::{LaunchSpec, Launched, Launcher, Timer};
 use clauseo_protocol::AgentId;
 use futures::FutureExt as _;
-use futures::future::{Either, join3, select};
+use futures::future::{Either, join, select};
 use futures::io::{AsyncReadExt as _, AsyncWriteExt as _};
 
 use crate::cancel::Cancel;
@@ -257,8 +259,10 @@ pub(crate) async fn run<T: Timer>(
                 }
                 offer(line);
             });
-            let ((), drained, report) = join3(read, errs, handle.exited()).await;
-            drop(drained);
+            // A browser the login opened and the stop spared can hold both pipes open on
+            // Windows: once only it is left, the reads end after a short drain.
+            let pipes = join(read, errs).map(drop);
+            let (report, _ended) = Box::pin(handle.exited_draining(timer, pipes)).await;
             report.code()
         });
         let feed = pin!(async {
