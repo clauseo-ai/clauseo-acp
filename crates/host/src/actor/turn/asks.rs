@@ -65,6 +65,8 @@ pub(super) fn on_permission(actor: &mut Actor, thread: ThreadId, event: AcpEvent
     else {
         return;
     };
+    // The agent got through: a request of the live turn clears its offline watch (`offline.rs`).
+    active(actor, thread);
     // Forced ask (`agent/forced_ask.rs`): no option that would stop later asks is offered, so
     // an answer naming one is refused as one the agent did not offer.
     if agent(actor, thread).is_some_and(|agent| agent.forced_ask) {
@@ -415,6 +417,7 @@ pub(super) fn on_elicitation(
     request: ElicitationRequest,
 ) {
     let live = current(actor, thread).is_some_and(|current| current.live());
+    active(actor, thread);
     if !live {
         if let Some(agent) = agent(actor, thread) {
             let client = agent.link.client.clone();
@@ -470,6 +473,9 @@ pub(super) fn on_limit(
         Origin::Turn(turn) => Some(turn),
         Origin::Late(_) | Origin::Replay | Origin::Idle => None,
     };
+    if let Some(turn) = turn {
+        super::offline::agent_active(actor, thread, turn);
+    }
     let current = current(actor, thread).filter(|current| Some(current.turn) == turn);
     if let (Some(current), Some(mark)) = (current, mark) {
         if current.limit.is_none() {
@@ -501,5 +507,13 @@ pub(super) fn limit_mark(signal: &LimitSignal) -> Option<LimitMark> {
             resets_at: None,
             reason: *reason,
         }),
+    }
+}
+
+/// The agent of `thread`'s live turn asked something: it got through, so the turn's offline
+/// watch goes (`offline.rs`).
+fn active(actor: &mut Actor, thread: ThreadId) {
+    if let Some(turn) = current(actor, thread).map(|current| current.turn) {
+        super::offline::agent_active(actor, thread, turn);
     }
 }

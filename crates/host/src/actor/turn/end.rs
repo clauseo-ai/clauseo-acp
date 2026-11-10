@@ -78,6 +78,11 @@ pub(super) fn on_prompt_done(
         Err(error) => offline::prompt_failed_offline(actor, thread, error),
         Ok(_) => None,
     };
+    // Claude's suspected connection line goes back into the answer unless the turn ends offline.
+    let cancelled = current(actor, thread).is_some_and(|current| current.cancelled);
+    if went_offline.is_none() || cancelled {
+        offline::prompt_ended(actor, thread);
+    }
     let fallback = matches!(result, Err(clauseo_acp::Error::Rpc { .. }))
         && went_offline.is_none()
         && !host_stopping(actor)
@@ -111,7 +116,8 @@ pub(super) fn on_prompt_done(
                 current.limit_read = Some(LimitRead::default());
             }
             let text = error.to_string();
-            let code = went_offline.unwrap_or_else(|| sign_in::code_of(actor, error.code(), &text));
+            let code = went_offline
+                .unwrap_or_else(|| sign_in::code_of(actor, error.code(), &text, error.rpc_data()));
             End::failed(code, Some(text), None)
         }
     };

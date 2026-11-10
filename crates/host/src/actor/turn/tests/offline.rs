@@ -1,10 +1,13 @@
-//! Going offline mid-answer (`offline.rs`, D-050): the agent's note about its connection never
-//! reaches the log; a note that names a connection failure, then silence, ends the turn through
-//! the Cancel path as `Failed { agent.offline }` with the answer so far kept; work after the
-//! note clears it; a prompt that fails with a connection-class error ends `agent.offline` too,
-//! and a server error keeps its own code.
+//! Going offline mid-answer (`offline.rs`, D-050): Codex's note about its connection never
+//! reaches the log, and Claude's line is held back until the turn's end shows what it was; a
+//! note that names a connection failure, then silence, ends the turn through the Cancel path as
+//! `Failed { agent.offline }` with the answer so far kept; work or a permission request after
+//! the note clears it; a prompt that fails with a connection-class error ends `agent.offline`
+//! too, and a server error or a sign-in keeps its own code, watch or not.
 
-use clauseo_protocol::{DomainEvent, ErrorCode, StopReason, ThreadId, TurnId};
+use clauseo_protocol::{
+    AgentChoiceId, DomainEvent, ErrorCode, HostCommand, StopReason, ThreadId, TurnId,
+};
 
 use super::agents::send_prompt;
 use super::failures::until_ended;
@@ -15,6 +18,9 @@ use crate::actor::turn::offline::OFFLINE_WAIT;
 /// Codex's warning, as codex-acp forwards it, from stage C's sweep (macOS).
 const NOTE: &str = "Falling back from WebSockets to HTTPS transport. stream disconnected before \
                     completion: Connection refused (os error 61)";
+
+/// Claude Code's line for a refused connection, as claude-agent-sdk 0.3.293 writes it.
+const CLAUDE: &str = "API Error: Unable to connect to API (ECONNREFUSED)";
 
 /// A partial answer, Codex's note, then nothing until the host cancels.
 fn quiet() -> String {
@@ -51,8 +57,43 @@ fn failing(message: &str) -> String {
     )
 }
 
+/// A partial answer, Codex's note, then the prompt fails with `message` in `data.message`.
+fn failing_after_note(message: &str) -> String {
+    format!(
+        r#"{{"expect":{{"method":"session/prompt","as":"p1","params":{{"sessionId":"sess-1"}}}}}}
+{{"update":{{"update":{{"sessionUpdate":"agent_message_chunk","messageId":"m-1","content":{{"type":"text","text":"Clause five says"}}}}}}}}
+{{"update":{{"update":{{"sessionUpdate":"agent_message_chunk","content":{{"type":"text","text":"{NOTE}"}}}}}}}}
+{{"respond":{{"to":"p1","error":{{"code":-32603,"message":"Internal error","data":{{"message":"{message}","codex_error_info":"other"}}}}}}}}
+"#
+    )
+}
+
+/// A partial answer, Claude's line, then `rest` (more steps, ending the prompt).
+fn claude(rest: &str) -> String {
+    format!(
+        r#"{{"expect":{{"method":"session/prompt","as":"p1","params":{{"sessionId":"sess-1"}}}}}}
+{{"update":{{"update":{{"sessionUpdate":"agent_message_chunk","messageId":"m-1","content":{{"type":"text","text":"Clause five says"}}}}}}}}
+{{"update":{{"update":{{"sessionUpdate":"agent_message_chunk","content":{{"type":"text","text":"{CLAUDE}"}}}}}}}}
+{rest}
+"#
+    )
+}
+
+/// The note, then a permission request the lawyer answers after the wait.
+fn asking() -> String {
+    format!(
+        r#"{{"expect":{{"method":"session/prompt","as":"p1","params":{{"sessionId":"sess-1"}}}}}}
+{{"update":{{"update":{{"sessionUpdate":"agent_message_chunk","messageId":"m-1","content":{{"type":"text","text":"Clause five says"}}}}}}}}
+{{"update":{{"update":{{"sessionUpdate":"agent_message_chunk","content":{{"type":"text","text":"{NOTE}"}}}}}}}}
+{{"request":{{"id":"perm-1","method":"session/request_permission","params":{{"sessionId":"sess-1","toolCall":{{"toolCallId":"t-1","title":"Run ls","kind":"execute","status":"pending"}},"options":[{{"optionId":"allow-once","name":"Allow once","kind":"allow_once"}},{{"optionId":"reject-once","name":"Reject","kind":"reject_once"}}]}}}}}}
+{{"expect_response":{{"id":"perm-1","result":{{"outcome":{{"outcome":"selected","optionId":"allow-once"}}}}}}}}
+{{"respond":{{"to":"p1","result":{{"stopReason":"end_turn"}}}}}}
+"#
+    )
+}
+
 /// Runs the prompt until the turn is live.
-fn prompting(rig: &mut Rig) -> (ThreadId, TurnId) {
+pub(super) fn prompting(rig: &mut Rig) -> (ThreadId, TurnId) {
     let thread = rig.thread();
     let turn = send_prompt(rig, 10, thread);
     rig.run_until("the prompt", |actor| {
@@ -66,7 +107,7 @@ fn prompting(rig: &mut Rig) -> (ThreadId, TurnId) {
 }
 
 /// The answer text the log holds for `turn`, all of it.
-fn answer(log: &[DomainEvent], turn: TurnId) -> String {
+pub(super) fn answer(log: &[DomainEvent], turn: TurnId) -> String {
     log.iter()
         .filter_map(|event| {
             if let DomainEvent::TextAppended(appended) = event
@@ -81,7 +122,7 @@ fn answer(log: &[DomainEvent], turn: TurnId) -> String {
 }
 
 /// How `turn` ended: its stop, and its failure's code when it failed.
-fn ended(log: &[DomainEvent], turn: TurnId) -> (Option<StopReason>, Option<ErrorCode>) {
+pub(super) fn ended(log: &[DomainEvent], turn: TurnId) -> (Option<StopReason>, Option<ErrorCode>) {
     let stop = log.iter().find_map(|event| {
         if let DomainEvent::TurnEnded(ended) = event
             && ended.turn == turn
@@ -174,5 +215,129 @@ fn a_prompt_failing_on_a_server_error_keeps_its_own_code() {
             Some(ErrorCode::AgentProtocolError)
         )
     );
+    rig.finish();
+}
+
+#[test]
+fn a_permission_request_after_the_note_is_never_cancelled_as_offline() {
+    let mut rig = Rig::start("offline-asking", &asking());
+    let (thread, turn) = prompting(&mut rig);
+    rig.run_until("the permission request", |actor| {
+        actor.threads[&thread]
+            .turn
+            .agent
+            .as_deref()
+            .is_some_and(|agent| !agent.permissions.is_empty())
+    });
+    // The lawyer reads the card for longer than the wait.
+    rig.clock.advance(OFFLINE_WAIT * 2);
+    rig.run_tasks_until_stalled();
+    let current = rig.actor.threads[&thread].turn.current.as_ref().unwrap();
+    assert!(current.live() && current.failure.is_none() && current.offline.is_none());
+    let agent = rig.actor.threads[&thread].turn.agent.as_deref().unwrap();
+    let request = *agent.permissions.keys().next().unwrap();
+    let answer = HostCommand::AnswerPermission {
+        thread,
+        request,
+        option_id: AgentChoiceId::new("allow-once").unwrap(),
+    };
+    rig.dispatch(11, answer).unwrap();
+    until_ended(&mut rig, thread);
+    assert_eq!(
+        ended(&rig.log(thread), turn),
+        (Some(StopReason::EndTurn), None)
+    );
+    rig.finish();
+}
+
+/// Scenario A of the review: the note armed the watch, then the server answered 429.
+#[test]
+fn a_usage_limit_within_the_wait_is_never_offline() {
+    let message = "You've hit your usage limit. Upgrade to Pro or try again at 3pm.";
+    let mut rig = Rig::start("offline-limit", &failing_after_note(message));
+    let (thread, turn) = prompting(&mut rig);
+    until_ended(&mut rig, thread);
+    let (stop, code) = ended(&rig.log(thread), turn);
+    assert_eq!(stop, Some(StopReason::Failed));
+    assert_ne!(code, Some(ErrorCode::AgentOffline));
+    rig.finish();
+}
+
+/// Scenario B: the note armed the watch, then the token refresh asks for a sign-in.
+#[test]
+fn a_sign_in_within_the_wait_is_never_offline() {
+    let message = "Your access token could not be refreshed: refresh_token_reused";
+    let mut rig = Rig::start("offline-signin", &failing_after_note(message));
+    rig.actor.wiring.sign_in.again = Some(|text| text.contains("refresh_token_reused"));
+    let (thread, turn) = prompting(&mut rig);
+    rig.run_until("the sign-in failure", |actor| {
+        actor.threads[&thread]
+            .turn
+            .current
+            .as_ref()
+            .is_none_or(|current| current.turn != turn || current.phase != TurnPhase::Prompting)
+    });
+    rig.settle_commits();
+    let log = rig.log(thread);
+    let code = log.iter().find_map(|event| {
+        if let DomainEvent::TurnFailed(failed) = event
+            && failed.turn == turn
+        {
+            Some(failed.code)
+        } else {
+            None
+        }
+    });
+    assert_eq!(
+        code,
+        Some(ErrorCode::AgentAuthRequired),
+        "{:?}",
+        log.iter().map(kind).collect::<Vec<_>>()
+    );
+    rig.finish();
+}
+
+#[test]
+fn claude_s_line_goes_back_in_order_when_the_answer_goes_on() {
+    let rest = r#"{"update":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-1","content":{"type":"text","text":" thirty days."}}}}
+{"respond":{"to":"p1","result":{"stopReason":"end_turn"}}}"#;
+    let mut rig = Rig::start("offline-claude-on", &claude(rest));
+    let (thread, turn) = prompting(&mut rig);
+    until_ended(&mut rig, thread);
+    let log = rig.log(thread);
+    assert_eq!(ended(&log, turn), (Some(StopReason::EndTurn), None));
+    assert_eq!(
+        answer(&log, turn),
+        format!("Clause five says{CLAUDE} thirty days.")
+    );
+    rig.finish();
+}
+
+#[test]
+fn claude_s_line_goes_back_when_the_prompt_ends_well() {
+    let rest = r#"{"respond":{"to":"p1","result":{"stopReason":"end_turn"}}}"#;
+    let mut rig = Rig::start("offline-claude-ok", &claude(rest));
+    let (thread, turn) = prompting(&mut rig);
+    until_ended(&mut rig, thread);
+    let log = rig.log(thread);
+    assert_eq!(ended(&log, turn), (Some(StopReason::EndTurn), None));
+    assert_eq!(answer(&log, turn), format!("Clause five says{CLAUDE}"));
+    rig.finish();
+}
+
+#[test]
+fn claude_s_line_is_dropped_when_the_turn_ends_offline() {
+    let rest = format!(
+        r#"{{"respond":{{"to":"p1","error":{{"code":-32603,"message":"Internal error: {CLAUDE}"}}}}}}"#
+    );
+    let mut rig = Rig::start("offline-claude-failed", &claude(&rest));
+    let (thread, turn) = prompting(&mut rig);
+    until_ended(&mut rig, thread);
+    let log = rig.log(thread);
+    assert_eq!(
+        ended(&log, turn),
+        (Some(StopReason::Failed), Some(ErrorCode::AgentOffline))
+    );
+    assert_eq!(answer(&log, turn), "Clause five says");
     rig.finish();
 }

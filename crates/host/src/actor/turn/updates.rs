@@ -7,11 +7,11 @@ use clauseo_acp::{AcpEvent, AgentUpdate, MessageRole, Origin};
 use clauseo_protocol::{
     AgentId, AgentSessionId, CommandsAvailable, CompactString, CompactionStatus,
     ConfigOptionsReplaced, ContentBlock, DomainEvent, MessageId, ModeChanged, Notice, PlanReplaced,
-    RenameSource, StreamId, TextKind, ThreadId, ThreadRenamed, ToolCallPatch, TurnId, UsageUpdated,
+    StreamId, TextKind, ThreadId, ToolCallPatch, TurnId, UsageUpdated,
 };
 use clauseo_store::BlobIn;
 
-use super::super::{Actor, title_source};
+use super::super::Actor;
 use super::agents::{Agent, Stage};
 use super::out::Out;
 use super::{Then, TimerKind, TurnTimer, asks, current, lost, offline, state, text};
@@ -22,6 +22,7 @@ use crate::log_file::Cause;
 use crate::rate::{Admitted, RatedUpdate};
 use crate::sources::Sources;
 
+mod title;
 mod warning;
 
 /// Where an update belongs.
@@ -174,11 +175,34 @@ fn on_update(
     let Some(context) = context(actor, thread, origin) else {
         return;
     };
-    if let Context::Live(turn) = context
-        && offline::held_back(actor, thread, turn, &update)
-    {
-        return;
-    }
+    let update = match context {
+        Context::Live(turn) => match offline::on_live(actor, thread, turn, session, update) {
+            Some(update) => update,
+            None => return,
+        },
+        Context::Outside { .. } => update,
+    };
+    log_update(actor, thread, session, context, update);
+}
+
+/// A live update of `turn` the offline watch held back, logged now (`offline.rs`).
+pub(super) fn log_live(
+    actor: &mut Actor,
+    thread: ThreadId,
+    turn: TurnId,
+    session: &AgentSessionId,
+    update: AgentUpdate,
+) {
+    log_update(actor, thread, session, Context::Live(turn), update);
+}
+
+fn log_update(
+    actor: &mut Actor,
+    thread: ThreadId,
+    session: &AgentSessionId,
+    context: Context,
+    update: AgentUpdate,
+) {
     let done = match update {
         AgentUpdate::MessageChunk {
             role,
@@ -494,7 +518,7 @@ fn plain(actor: &mut Actor, thread: ThreadId, update: AgentUpdate) -> Result<(),
             kind: None,
         }
         .into(),
-        AgentUpdate::SessionTitle { title } => return title_changed(actor, thread, title),
+        AgentUpdate::SessionTitle { title } => return title::changed(actor, thread, title),
         AgentUpdate::CompactionStarted { acp_id } => {
             if let Some(agent) = agent(actor, thread) {
                 agent.compaction.remove(&acp_id);
@@ -522,52 +546,6 @@ fn plain(actor: &mut Actor, thread: ThreadId, update: AgentUpdate) -> Result<(),
         | AgentUpdate::ToolCallUpdate { .. } => return Err(lost("a turn update")),
     };
     commit(actor, thread, [event], Vec::new())
-}
-
-/// A session title: `ThreadRenamed { by: Agent }` and the row, when it is a valid title the
-/// thread takes (see `title_source`). A title the thread already has from the agent makes no
-/// event, so the replay Codex sends on load adds nothing.
-fn title_changed(actor: &mut Actor, thread: ThreadId, title: Option<String>) -> Result<(), Error> {
-    let Some(title) = title else {
-        tracing::debug!(%thread, "the agent cleared its session title");
-        return Ok(());
-    };
-    let prompt = current(actor, thread).map(|current| current.prompt.as_slice());
-    let Some(title) = title_source::agent_title(thread, &title, prompt) else {
-        return Ok(());
-    };
-    let entry = actor.threads.get(&thread).ok_or_else(|| lost("a thread"))?;
-    let (source, has_title) = (entry.row.title_source, entry.row.title.is_some());
-    if !title_source::title_may_change(source, has_title, RenameSource::Agent) {
-        // No event came between the chunks, so the message run goes on.
-        tracing::debug!(%thread, "the agent's title does not replace the thread's title");
-        return Ok(());
-    }
-    if source == Some(RenameSource::Agent) && entry.row.title.as_deref() == Some(title.as_str()) {
-        return Ok(());
-    }
-    let mut out = Out::new(actor, thread, None)?;
-    out.push(
-        actor,
-        ThreadRenamed {
-            title: CompactString::from(title.as_str()),
-            by: RenameSource::Agent,
-        },
-    )?;
-    let now = actor.now().wall;
-    let entry = actor
-        .threads
-        .get_mut(&thread)
-        .ok_or_else(|| lost("a thread"))?;
-    entry.row.title = Some(title.as_str().to_owned());
-    entry.row.title_source = Some(RenameSource::Agent);
-    entry.row.updated = now;
-    out.draft.thread_row(entry.row.clone());
-    out.send(actor, Then::Nothing)?;
-    if let Some(agent) = agent(actor, thread) {
-        agent.run = None;
-    }
-    Ok(())
 }
 
 /// Commits non-text events (after the held text); a chunk without an id after them starts a
