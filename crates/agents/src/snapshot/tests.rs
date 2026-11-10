@@ -40,7 +40,15 @@ fn the_embedded_snapshot_builds() {
     let entry = built.agent(&claude()).unwrap();
     assert_eq!(entry.display_name, "Claude");
     assert_eq!(entry.bin, "dist/index.js");
-    assert_eq!(entry.install_hosts, ["nodejs.org", "registry.npmjs.org"]);
+    assert_eq!(
+        entry.install_hosts,
+        [
+            "nodejs.org",
+            "registry.npmjs.org",
+            "github.com",
+            "release-assets.githubusercontent.com",
+        ]
+    );
     assert_eq!(
         built.agent(&codex()).unwrap().signin_hosts,
         ["auth.openai.com", "chatgpt.com"]
