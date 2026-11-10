@@ -17,11 +17,14 @@
     "by": "design"
   },
   "UC-03": {
-    "en": "Clauseo asks before each change in this matter.",
-    "hi": "Clauseo इस मामले में हर बदलाव से पहले पूछता है।",
-    "status": "approved",
+    "en": "Clauseo changes files in this matter without asking, and asks before changing files outside it.",
+    "hi": "Clauseo इस मामले की फ़ाइलें बिना पूछे बदलता है, और इसके बाहर की फ़ाइलें बदलने से पहले पूछता है।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-10",
+    "hi_by": "app track (provisional; orchestrator approved the words 2026-11-10 for Claude acceptEdits, copy review pending)",
+    "status": "provisional",
     "at": "2026-11-06",
-    "by": "design"
+    "by": "app track (provisional; orchestrator approved the words 2026-11-10 for Claude acceptEdits, copy review pending)"
   },
   "UC-04": {
     "en": "Clauseo can read any file you can open, and changes files in this matter without asking. It asks before changing files outside it.",
@@ -106,14 +109,14 @@
     "by": "design"
   },
   "UC-21": {
-    "en": "The Safe workspace is off for {matter}. Claude asks before each change. ChatGPT can read any file you can open, and asks before changing files outside this matter's folder.",
-    "hi": "{matter} के लिए सुरक्षित कार्यक्षेत्र बंद है। Claude हर बदलाव से पहले पूछता है। ChatGPT हर वह फ़ाइल पढ़ सकता है जिसे आप खोल सकते हैं, और इस मामले के फ़ोल्डर के बाहर की फ़ाइलें बदलने से पहले पूछता है।",
+    "en": "The Safe workspace is off for {matter}. Claude changes files in this matter without asking, and asks before changing files outside it. ChatGPT can read any file you can open, and asks before changing files outside this matter's folder.",
+    "hi": "{matter} के लिए सुरक्षित कार्यक्षेत्र बंद है। Claude इस मामले की फ़ाइलें बिना पूछे बदलता है, और इसके बाहर की फ़ाइलें बदलने से पहले पूछता है। ChatGPT हर वह फ़ाइल पढ़ सकता है जिसे आप खोल सकते हैं, और इस मामले के फ़ोल्डर के बाहर की फ़ाइलें बदलने से पहले पूछता है।",
     "hi_status": "provisional",
     "hi_at": "2026-11-09",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
     "status": "provisional",
     "at": "2026-11-09",
-    "by": "app track (asking-truth; Rohan batch review)"
+    "by": "app track (provisional; orchestrator approved the words 2026-11-10 for Claude acceptEdits, copy review pending)"
   },
   "UC-22": {
     "en": "The Safe workspace isn't set up on this computer yet. Until it is, Clauseo can read any file you can open on this computer, and asks before changing anything outside this matter's folder.",

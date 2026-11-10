@@ -179,7 +179,10 @@ export function WorkspaceOff({
                 lang,
                 "Clauseo can read any file you can open, and changes files in this matter without asking. It asks before changing files outside it.",
               )
-            : tbt(lang, "Clauseo asks before each change in this matter.")
+            : tbt(
+                lang,
+                "Clauseo changes files in this matter without asking, and asks before changing files outside it.",
+              )
         }
       />
       {failed !== null && (

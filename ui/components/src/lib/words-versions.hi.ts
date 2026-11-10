@@ -260,8 +260,8 @@ const EDGE = {
     "सुरक्षित कार्यक्षेत्र। Clauseo सिर्फ़ इस मामले के फ़ोल्डर में काम करता है। आपकी अनुमति के बिना वह आपकी दूसरी फ़ाइलें नहीं खोल सकता।",
   // not protected
   "This matter is not protected": "यह मामला संरक्षित नहीं है",
-  "The Safe workspace is off for {matter}. Claude asks before each change. ChatGPT can read any file you can open, and asks before changing files outside this matter's folder.":
-    "{matter} के लिए सुरक्षित कार्यक्षेत्र बंद है। Claude हर बदलाव से पहले पूछता है। ChatGPT हर वह फ़ाइल पढ़ सकता है जिसे आप खोल सकते हैं, और इस मामले के फ़ोल्डर के बाहर की फ़ाइलें बदलने से पहले पूछता है।",
+  "The Safe workspace is off for {matter}. Claude changes files in this matter without asking, and asks before changing files outside it. ChatGPT can read any file you can open, and asks before changing files outside this matter's folder.":
+    "{matter} के लिए सुरक्षित कार्यक्षेत्र बंद है। Claude इस मामले की फ़ाइलें बिना पूछे बदलता है, और इसके बाहर की फ़ाइलें बदलने से पहले पूछता है। ChatGPT हर वह फ़ाइल पढ़ सकता है जिसे आप खोल सकते हैं, और इस मामले के फ़ोल्डर के बाहर की फ़ाइलें बदलने से पहले पूछता है।",
   "Windows didn't allow the Safe workspace on this computer.":
     "Windows ने इस कंप्यूटर पर सुरक्षित कार्यक्षेत्र की अनुमति नहीं दी।",
   "macOS didn't allow the Safe workspace on this computer.":

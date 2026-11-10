@@ -58,7 +58,10 @@ const railMark = (name = THE_MATTER.name) =>
     .find((r) => r.textContent?.includes(name))
     ?.querySelector(".room-matter-np") ?? null;
 
-const CLAUDE_LINE = tbt("en", "Clauseo asks before each change in this matter.");
+const CLAUDE_LINE = tbt(
+  "en",
+  "Clauseo changes files in this matter without asking, and asks before changing files outside it.",
+);
 const CODEX_LINE = tbt(
   "en",
   "Clauseo can read any file you can open, and changes files in this matter without asking. It asks before changing files outside it.",
