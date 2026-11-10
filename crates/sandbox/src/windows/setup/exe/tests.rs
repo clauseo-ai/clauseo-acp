@@ -21,8 +21,12 @@ use crate::windows::secrets;
 use crate::windows::test_acl::{elevated_tests_enabled, has};
 use crate::windows::wfp::{self, Namespace};
 
-/// This family's record key.
-const TEST_KEY: &str = "SOFTWARE\\Clauseo\\SandboxTestSetup";
+/// This family's scratch vendor key, outside `SOFTWARE\Clauseo`: the record's walk runs on it,
+/// never on the real one.
+const TEST_ROOT: &str = "SOFTWARE\\ClauseoTestSetup";
+
+/// This family's record key: the pinned `Sandbox` under [`TEST_ROOT`].
+const TEST_KEY: &str = "SOFTWARE\\ClauseoTestSetup\\Sandbox";
 
 #[test]
 fn a_wrong_command_line_exits_usage_and_touches_nothing() {
@@ -54,7 +58,7 @@ fn remove_exits_0_when_nothing_was_set_up_and_no_set_up_holds_the_lock() {
     };
     let run = suffix();
     let names = Names {
-        record_key: format!("SOFTWARE\\Clauseo\\NoSuchKey{run}"),
+        record_key: format!("{TEST_ROOT}{run}\\NoSuchKey"),
         group: format!("{SETUP_TEST_PREFIX}G{run}"),
         mutex,
         users: SETUP_TEST_PREFIX.to_owned(),
@@ -72,6 +76,9 @@ fn remove_exits_0_when_nothing_was_set_up_and_no_set_up_holds_the_lock() {
             SetupExit::Removed
         );
     }
+    drop(record_write::delete_scratch_root(&format!(
+        "{TEST_ROOT}{run}"
+    )));
 }
 
 #[test]
@@ -103,6 +110,7 @@ fn sweep() {
         drop(accounts::delete_group(&name));
     }
     drop(record_write::delete(TEST_KEY));
+    drop(record_write::delete_scratch_root(TEST_ROOT));
     // The set-up's network step (S15 PR7) wrote in its own test namespace.
     drop(wfp::remove(&Namespace::numbered_test(1), Some(&me)));
 }

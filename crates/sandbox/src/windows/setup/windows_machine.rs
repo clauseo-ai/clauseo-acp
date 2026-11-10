@@ -24,9 +24,11 @@ use super::machine::{
     LogonRight, Machine, MachineError, Password, ProfileDir, ServiceStart, owned,
 };
 use super::owner::Owner;
+use super::record_key;
 use super::record_values::CopyOwner;
 use super::record_write::{self, RECORD_KEY};
 use super::registered::registered;
+use super::vendor_key;
 use super::{ffi, journal, logon, password, preflight, profile};
 use crate::SetupError;
 use crate::windows::acl;
@@ -207,6 +209,7 @@ impl Machine for WindowsMachine {
     }
 
     fn read_record(&mut self) -> Result<Option<MachineRecord>, MachineError> {
+        vendor_key::secure(record_key::vendor_of(&self.names.record_key))?;
         record_write::read(&self.names.record_key)
     }
 

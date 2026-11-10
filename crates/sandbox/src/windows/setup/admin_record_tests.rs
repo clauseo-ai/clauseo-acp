@@ -11,8 +11,12 @@ use crate::windows::pool::MachineRecord;
 use crate::windows::record::current_user_sid;
 use crate::windows::test_acl::elevated_tests_enabled;
 
-/// A key of this test's own, never the real record.
-const KEY: &str = "SOFTWARE\\Clauseo\\SandboxTestAdminCopy";
+/// A scratch vendor key of this test's own, outside `SOFTWARE\Clauseo`: the record's walk runs
+/// on it, never on the real one.
+const ROOT: &str = "SOFTWARE\\ClauseoTestAdminCopy";
+
+/// A key of this test's own, never the real record: the pinned `Sandbox` under [`ROOT`].
+const KEY: &str = "SOFTWARE\\ClauseoTestAdminCopy\\Sandbox";
 
 const HASH: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 
@@ -24,6 +28,7 @@ fn elevated_a_rollback_keeps_the_admin_copy_values_and_remove_takes_them() {
     }
     drop(record_write::delete(KEY));
     drop(delete_admin_values(KEY));
+    drop(record_write::delete_scratch_root(ROOT));
     let me = current_user_sid().unwrap();
     let values = AdminValues {
         sha256: HASH.to_owned(),
@@ -64,4 +69,5 @@ fn elevated_a_rollback_keeps_the_admin_copy_values_and_remove_takes_them() {
         [None, None, None, None]
     );
     assert!(record_write::key_sddl(KEY).is_err(), "the key is gone");
+    record_write::delete_scratch_root(ROOT).unwrap();
 }

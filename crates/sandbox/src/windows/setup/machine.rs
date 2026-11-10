@@ -47,6 +47,13 @@ pub enum MachineError {
          there: remove the sandbox users, then run set-up again"
     )]
     ProfileChanged(String),
+    /// `HKLM\SOFTWARE\Clauseo`, the parent of the machine's keys, couldn't be secured
+    /// (`vendor_key.rs`): set-up stops there, and nothing after it runs.
+    #[error(
+        "HKLM\\SOFTWARE\\Clauseo: {0}; set-up stopped there, so remove the cause, then run \
+         set-up again"
+    )]
+    VendorKey(String),
 }
 
 /// How the Secondary Logon service (`seclogon`) starts.

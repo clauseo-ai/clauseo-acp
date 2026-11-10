@@ -509,6 +509,10 @@ crates/sandbox/src/windows/setup/account_list.rs - unsafe_code
 crates/sandbox/src/windows/setup/lock.rs - unsafe_code
 crates/sandbox/src/windows/setup/lock.rs back_off clippy::disallowed_methods
 crates/sandbox/src/windows/setup/record_write.rs - unsafe_code
+crates/sandbox/src/windows/setup/vendor_key/os.rs - unsafe_code
+crates/sandbox/src/windows/setup/vendor_key/os/values.rs - unsafe_code
+crates/sandbox/src/windows/setup/vendor_key/windows_tests.rs - unsafe_code
+crates/sandbox/src/windows/setup/vendor_key/windows_tests.rs elevated_a_fresh_key_is_pinned_a_weak_one_is_taken_over_and_a_link_child_goes clippy::too_many_lines
 crates/sandbox/src/windows/setup/windows_machine.rs WindowsMachine::now clippy::disallowed_methods
 # The set-up's logon, profile, preflight, process and journal calls (S15 PR4f); the profile
 # delete's bounded wait; the elevated tests' token read, their marker files and the hive load's

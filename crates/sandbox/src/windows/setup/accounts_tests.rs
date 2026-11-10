@@ -28,8 +28,12 @@ use crate::windows::record::current_user_sid;
 use crate::windows::sids::Sid;
 use crate::windows::test_acl::elevated_tests_enabled;
 
-/// This test family's record key.
-const TEST_KEY: &str = "SOFTWARE\\Clauseo\\SandboxTestAcct";
+/// This test family's scratch vendor key, outside `SOFTWARE\Clauseo`: the record's walk runs on it,
+/// never on the real one.
+const TEST_ROOT: &str = "SOFTWARE\\ClauseoTestAcct";
+
+/// This test family's record key: the pinned `Sandbox` under [`TEST_ROOT`].
+const TEST_KEY: &str = "SOFTWARE\\ClauseoTestAcct\\Sandbox";
 
 /// The start of every account and group name this test family makes, and only this family:
 /// `ClauseoAcct`, then `U` (user) or `G` (group), then six hex digits: 18 characters.
@@ -75,6 +79,7 @@ fn sweep() {
         }
     }
     drop(record_write::delete(TEST_KEY));
+    drop(record_write::delete_scratch_root(TEST_ROOT));
 }
 
 /// Sweeps when dropped, so a failed assertion still cleans up.
@@ -88,12 +93,11 @@ impl Drop for Sweep {
 
 #[test]
 fn the_record_reader_answers_on_a_machine_with_no_key() {
-    let missing = format!("SOFTWARE\\Clauseo\\NoSuchKey{}", suffix());
+    let missing = format!("{TEST_ROOT}{}\\NoSuchKey", suffix());
     assert_eq!(record_write::read(&missing), Ok(None));
     assert_eq!(record_write::delete(&missing), Ok(()));
-    // The real key: absent on a runner. Read only.
-    let mut real = read_only_machine();
-    assert!(real.read_record().is_ok());
+    // The real key: absent on a runner. Read only, without the walk set-up's read runs.
+    assert!(record_write::read(record_write::RECORD_KEY).is_ok());
     assert_eq!(crate::windows::sandbox_pool_sids().ok(), Some(vec![]));
 }
 
@@ -252,10 +256,18 @@ fn elevated_accounts_group_hidden_user_and_record() {
         removing: false,
     };
     machine.write_record(&record).unwrap();
-    assert_eq!(machine.read_record(), Ok(Some(record.clone())));
     let taken = key_sddl(TEST_KEY).unwrap();
     assert!(taken.starts_with("O:BAD:P"), "{taken}");
     assert!(!taken.contains(";;;WD)"), "{taken}");
+    // The read runs the vendor-key walk on the scratch root, which makes the pinned record again
+    // with its values and its SD.
+    assert_eq!(machine.read_record(), Ok(Some(record.clone())));
+    let after = key_sddl(TEST_KEY).unwrap();
+    assert!(
+        after.starts_with("O:BAD:P"),
+        "the walk keeps the record's SD: {after}"
+    );
+    assert!(!after.contains(";;;WD)"), "{after}");
 
     // The user: made once, never adopted.
     let password = machine.new_password();
@@ -295,13 +307,13 @@ fn elevated_accounts_group_hidden_user_and_record() {
     // The record, whole, with its protected DACL; the owner is never a pool user.
     record.removing = true;
     machine.write_record(&record).unwrap();
-    assert_eq!(machine.read_record(), Ok(Some(record.clone())));
     let sddl = key_sddl(TEST_KEY).unwrap();
     assert!(sddl.starts_with("O:BAD:P"), "{sddl}");
     for entry in ["(A;CI;KA;;;SY)", "(A;CI;KA;;;BA)", "(A;CI;KR;;;BU)"] {
         assert!(sddl.contains(entry), "{sddl} lacks {entry} ({RECORD_SDDL})");
     }
     assert_eq!(sddl.matches("(A;").count(), 3, "{sddl}");
+    assert_eq!(machine.read_record(), Ok(Some(record.clone())));
     let mut bad = record.clone();
     bad.pool.push(owner);
     assert!(machine.write_record(&bad).is_err());
