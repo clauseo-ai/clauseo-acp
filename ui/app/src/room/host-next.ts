@@ -38,6 +38,7 @@ import type {
 } from "../transport/protocol.ts";
 import {
   wireAgentsHost,
+  wireLocationHost,
   wireAppHost,
   wireMattersHost,
   wirePapersHost,
@@ -360,8 +361,8 @@ const hasAppFeed = (transport: object): transport is AppFeedSource =>
 
 /** The calls the room needs beyond today's host, each part null where the transport's host lacks it. A NextHostSource
  * (FakeTransport) gives its scripted parts; a transport with the app feed (TauriTransport) gives settings, papers,
- * agents, matters (H3, H5, H6) and the app events (H4) over the wire. Not the rest: the desktop host refuses
- * restart_agent and has no retry_from, and the default location stays off so Create picks the parent folder, as today.
+ * agents, matters (H3, H5, H6), the default location (H20, New matter's "Use a new folder in") and the app events (H4)
+ * over the wire. Not the rest: the desktop host refuses restart_agent and has no retry_from.
  * The one place the room asks for them. */
 export function nextHostOf(transport: HostTransport): NextHost {
   if (isSource(transport)) return transport.nextHost();
@@ -372,6 +373,7 @@ export function nextHostOf(transport: HostTransport): NextHost {
       papers: wirePapersHost(transport),
       agents: wireAgentsHost(transport),
       matters: wireMattersHost(transport),
+      location: wireLocationHost(transport),
       app: wireAppHost(transport),
     };
   return NO_NEXT;

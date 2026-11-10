@@ -4,7 +4,8 @@
 // The e2e build's pick_folder always returns E2E_MATTER_DIR. A folder can be one matter only and a
 // matter may not sit inside another (crates/matters/src/refuse.rs), so a test with two matters
 // makes both as new folders in the host's default location: Use a new folder, then Create matter,
-// and the host makes `<Documents>\Clauseo\<name>`, two sibling folders.
+// and the host makes `<matters.default_location>\<name>` (the scratch matters folder), two sibling
+// folders.
 
 import { expect } from "@playwright/test";
 import { test } from "./fixture.ts";

@@ -19,6 +19,7 @@ import {
   roomMatterOf,
   wireAgentsHost,
   wireAppHost,
+  wireLocationHost,
   wireMattersHost,
   wirePapersHost,
   wireSettingsHost,
@@ -271,15 +272,31 @@ test("agents: another answer rejects as internal, and the host's refusal as itse
   ).rejects.toEqual(refused);
 });
 
-test("a transport with the app feed (the desktop's) gives settings, papers, agents, matters and app, and no other part", () => {
+test("location: get_default_location is asked, and its display comes back; another answer rejects as internal", async () => {
+  const asked: HostQuery[] = [];
+  const host = wireLocationHost({
+    query: async (query) => {
+      asked.push(query);
+      return { default_location: { display: "Documents/Clauseo" } };
+    },
+  });
+  await expect(host.getDefaultLocation()).resolves.toBe("Documents/Clauseo");
+  expect(asked).toEqual(["get_default_location"]);
+  await expect(
+    wireLocationHost({ query: async () => ({ matters: [] }) }).getDefaultLocation(),
+  ).rejects.toMatchObject({ code: "internal" });
+});
+
+test("a transport with the app feed (the desktop's) gives settings, papers, agents, matters, the default location and app, and no other part", () => {
   const { source } = fakeSource();
   const next = nextHostOf(source as unknown as HostTransport);
   expect(next.settings).not.toBeNull();
   expect(next.papers).not.toBeNull();
   expect(next.agents).not.toBeNull();
   expect(next.matters).not.toBeNull();
+  expect(next.location).not.toBeNull();
   expect(next.app).not.toBeNull();
-  expect([next.location, next.restart, next.retry]).toEqual([null, null, null]);
+  expect([next.restart, next.retry]).toEqual([null, null]);
 });
 
 /* ---------- matters and the app events ---------- */
