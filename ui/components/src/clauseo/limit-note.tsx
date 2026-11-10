@@ -297,26 +297,35 @@ export function WayTile({
  * primary, the rest in the muted tone. `wait` leads it with the clock, where the note says what waits and until
  * when; advice carries no icon, and its words start on the room's line's words. `action` follows the last sentence
  * inline, wrapping as its words do. `end` sits at the note's end, such
- * as a quiet icon button that hides it (U15's out-of-credit note). */
+ * as a quiet icon button that hides it (U15's out-of-credit note). `lead` is words, or the caller's own parts (the first
+ * read's line, its file's name fitted). `oneLine`: the note never wraps, and the caller's lead fits itself to the line
+ * (limits.css, [data-line="one"]). */
 export function FieldNotice({
   lead,
   rest,
   action,
   end,
   wait = false,
+  oneLine = false,
 }: {
-  lead: string;
+  lead: string | ReactNode;
   rest?: string | null;
   action?: ReactNode;
   end?: ReactNode;
   wait?: boolean;
+  oneLine?: boolean;
 }) {
   return (
-    <p className="lim-field-note" role="status" data-wait={wait ? "" : undefined}>
+    <p
+      className="lim-field-note"
+      role="status"
+      data-wait={wait ? "" : undefined}
+      data-line={oneLine ? "one" : undefined}
+    >
       {wait && <IconChecking size={14} className="lim-field-icon" />}
       <span className="min-w-0">
         <span className="lim-field-lead">
-          <Say>{lead}</Say>
+          {typeof lead === "string" ? <Say>{lead}</Say> : lead}
         </span>
         {rest != null && rest !== "" ? (
           <span className="lim-field-rest">

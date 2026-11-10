@@ -220,9 +220,12 @@ test("its question shows as Clauseo's first read, never the prompt, and the line
   expect(question?.textContent).toContain("Clauseo's first read");
   expect(document.body.textContent).not.toContain(FIRST_READ_PROMPT);
   expect(byId("first-read")?.dataset["state"]).toBe("reading");
-  expect(byId("first-read")?.textContent).toContain(
-    "Reading 1 file. Now \u2068Board minutes.docx\u2069.",
-  );
+  // one line beside its clock: the file's name in its own isolated part, its stem able to give way, its extension kept
+  expect(byId("first-read")?.textContent).toContain("Reading 1 file. Now Board minutes.docx.");
+  expect(byId("first-read")?.querySelector("[data-line='one']")).not.toBeNull();
+  const name = byId("first-read")?.querySelector("bdi.lim-field-name");
+  expect(name?.getAttribute("title")).toBe("Board minutes.docx");
+  expect(name?.querySelector(".lim-field-ext")?.textContent).toBe(".docx");
   await act(async () =>
     t.deliver(
       event(
