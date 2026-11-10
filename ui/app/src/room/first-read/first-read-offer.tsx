@@ -73,7 +73,7 @@ export function FirstReadOffer({
       );
   };
   return (
-    <div className="mx-auto box-content flex max-w-measure justify-center px-thread-pad pt-s7">
+    <div className="mx-auto box-content flex max-w-measure justify-center px-thread-pad pb-s4">
       <Button kind="tone" disabled={pressed} onClick={read} data-testid="first-read-offer">
         {frd(lang, "Read the papers")}
       </Button>

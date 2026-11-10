@@ -84,7 +84,7 @@ import { Work } from "./thread/work.tsx";
 import { tauriWindowControls, type WindowControls } from "../transport/window-controls.ts";
 import { useWindowFrame } from "../window/use-window-frame.ts";
 import { ToolLineContext } from "./tool-line-context.ts";
-import { hasSetup } from "./first-run/hold.ts";
+import { hasSetup, OfferSlot } from "./first-run/hold.ts";
 import { FirstRun } from "./first-run/first-run.tsx";
 import { useDeciding } from "./deciding.ts";
 import { FirstMark } from "./first-mark.tsx";
@@ -514,24 +514,24 @@ function RoomFrame({
                   />
                 </Suspense>
               )}
-              {/* a new conversation, before its first question: what it reads, once the papers are counted. A
-                matter with no conversation yet shows the same line: the design's FirstQuestion (empty.tsx:
-                "Clauseo has read this matter's {n} papers.", and that each answer cites its page) goes here once
-                stage D reads the papers ahead and answers carry citations; until then those are promises the room
-                can't keep */}
+              {/* a new conversation, before its first question: what it reads, once the papers are counted (a matter
+                with no conversation yet too), then the first read's offer (D-015). Not yet the design's FirstQuestion */}
               {talks.drafting && !scratch && papers !== null && papers.papers.length > 0 && (
-                <p
-                  className="mx-auto box-content max-w-measure px-thread-pad pt-s7 pb-s4 text-center text-reply text-primary"
-                  data-testid="new-conversation-line"
-                >
-                  <Say>
-                    {papers.papers.length === 1
-                      ? mt(w.lang, "A new conversation. It reads this matter's one paper.")
-                      : mt(w.lang, "A new conversation. It reads this matter's {n} papers.", {
-                          n: papers.papers.length,
-                        })}
-                  </Say>
-                </p>
+                <>
+                  <p
+                    className="mx-auto box-content max-w-measure px-thread-pad pt-s7 pb-s4 text-center text-reply text-primary"
+                    data-testid="new-conversation-line"
+                  >
+                    <Say>
+                      {papers.papers.length === 1
+                        ? mt(w.lang, "A new conversation. It reads this matter's one paper.")
+                        : mt(w.lang, "A new conversation. It reads this matter's {n} papers.", {
+                            n: papers.papers.length,
+                          })}
+                    </Say>
+                  </p>
+                  <OfferSlot transport={transport} />
+                </>
               )}
               {/* one thread's state per conversation: each starts its own; with no matter open, the composer waits */}
               <MarkdownHostContext value={answers}>

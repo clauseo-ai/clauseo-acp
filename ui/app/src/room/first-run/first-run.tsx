@@ -33,7 +33,7 @@ const FirstReadOffer = lazy(() =>
 
 /** The first read's title, as start.ts names the thread (words-first-read.ts's UD2-12, in English as the host keeps it). */
 const FIRST_READ_TITLE_EN = "First read";
-import { holderOf, provideExpiredCard, type Hold } from "./hold.ts";
+import { holderOf, provideExpiredCard, provideOffer, type Hold } from "./hold.ts";
 import { ExpiredCard } from "../signin-expired/expired-card.tsx";
 import { CaseLawSlot } from "./case-law.tsx";
 import { stepAllowsRead, stepDue, workspaceStep } from "./workspace.ts";
@@ -436,24 +436,27 @@ export function FirstRun({
     talks.rows.every((r) => r.thread === null) &&
     mark?.added === true &&
     mark.thread === undefined;
-  if (!welcome)
-    return (
-      <>
-        <CaseLawSlot />
-        {offer && talks.matter !== null && (
-          <Suspense fallback={null}>
-            <FirstReadOffer
-              transport={transport}
-              matters={matters}
-              conversations={conversations}
-              matter={talks.matter}
-              agent={agent}
-              title={FIRST_READ_TITLE_EN}
-            />
-          </Suspense>
-        )}
-      </>
+  // placed by the room under its new-conversation line, as the action after that sentence
+  const offerOn = offer && talks.matter !== null ? talks.matter : null;
+  useEffect(() => {
+    provideOffer(
+      transport,
+      offerOn === null ? null : (
+        <Suspense fallback={null}>
+          <FirstReadOffer
+            transport={transport}
+            matters={matters}
+            conversations={conversations}
+            matter={offerOn}
+            agent={agent}
+            title={FIRST_READ_TITLE_EN}
+          />
+        </Suspense>
+      ),
     );
+  }, [offerOn, transport, matters, conversations, agent]);
+  useEffect(() => () => provideOffer(transport, null), [transport]);
+  if (!welcome) return <CaseLawSlot />;
   // no gate on the first screen: each plan's line offers its own sign-in until it is signed in
   return <FirstScreen store={store} matters={matters} transport={transport} state={state} />;
 }
