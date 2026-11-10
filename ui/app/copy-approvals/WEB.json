@@ -22,15 +22,12 @@
     "note": "Rohan, on the review page (web and browser, icon-first v2)"
   },
   "WEB-07": {
-    "en": "{name} doesn't list its pages",
-    "hi": "{name} अपने पेज नहीं बताता",
-    "hi_status": "provisional",
-    "hi_at": "2026-11-06",
-    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "approved",
-    "at": "2026-11-04",
-    "by": "Rohan",
-    "note": "Rohan, on the review page (web and browser, icon-first v2)"
+    "en": "{name} didn't say which pages it found",
+    "hi": "{name} ने नहीं बताया कि उसे कौन-से पेज मिले",
+    "status": "provisional",
+    "at": "2026-11-10",
+    "by": "app track (provisional; Rohan batch review)",
+    "note": "was \"{name} doesn't list its pages\", unclear in the sweep (D-028); shows only beside a page, since searches that list no page show no list"
   },
   "WEB-09": {
     "en": "Opened on OpenAI's side",
@@ -79,17 +76,6 @@
   "WEB-13": {
     "en": "1 source",
     "hi": "1 स्रोत",
-    "hi_status": "provisional",
-    "hi_at": "2026-11-06",
-    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "approved",
-    "at": "2026-11-04",
-    "by": "Rohan",
-    "note": "Rohan, on the review page (web and browser, icon-first v2)"
-  },
-  "WEB-16": {
-    "en": "Searches",
-    "hi": "खोज",
     "hi_status": "provisional",
     "hi_at": "2026-11-06",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",

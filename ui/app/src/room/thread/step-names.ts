@@ -11,6 +11,7 @@ import { sentence } from "@clauseo/components/clauseo/matter.ts";
 import type { StreamView } from "../../store/view.ts";
 import type { ToolCallEntry } from "../../transport/protocol.ts";
 import { turnRunning } from "./live.ts";
+import { taskOf } from "./task-words.ts";
 
 /** What a step touched. `name`: the paper's file name, a site, or null; `where`: its folder or full place, for the
  * hover; `query`: the words searched for; `what`: the agent's own short words for a task (a command's description). */
@@ -89,9 +90,41 @@ function paperIn(title: string, named: string): string {
 /** A web address in a title. */
 const WEB = /\bhttps?:\/\/[^\s"'`]+/;
 
-/** The agent's title with each absolute path cut to its file name: the fallback when nothing else names the step. */
+/** Text with Markdown's strong and emphasis marks and a heading's hashes taken off (D-018): an agent's title or
+ * thought ("**Inspecting docx headers**") reads as its words. Code spans keep their text, without the backticks. */
+export const plainOf = (s: string): string =>
+  s
+    .replace(/^#{1,6}\s+/gm, "")
+    .replace(/(\*\*|__)(?=\S)([\s\S]*?\S)\1/g, "$2")
+    .replace(/(^|[\s(])\*(?=\S)([^*\n]*?\S)\*(?=[\s).,;:!?]|$)/g, "$1$2")
+    .replace(/`([^`\n]+)`/g, "$1");
+
+/** A thought's words as its row shows them: its Markdown marks off (D-018), with no blank line before or after it
+ * and none more than one in a row, so a reasoning summary's leading newlines leave no gap (D-030). */
+export const thoughtText = (text: string): string =>
+  plainOf(text)
+    .replace(/^\s+|\s+$/g, "")
+    .replace(/\n\s*\n(\s*\n)+/g, "\n\n");
+
+/** The agent's title with each absolute path cut to its file name and its Markdown marks off: the fallback when
+ * nothing else names the step. */
 export const titleOf = (title: string): string =>
-  title.replace(ABSOLUTE, (p) => splitPath(p).name || p).trim();
+  plainOf(title.replace(ABSOLUTE, (p) => splitPath(p).name || p)).trim();
+
+/** A web search's words as the lawyer reads them (D-028): the sites a `site:` operator names taken out to say on
+ * their own ("indiacode.nic.in"), and the quotes around the rest dropped; `site` null when none is named. */
+export function siteQuery(query: string): { site: string | null; query: string } {
+  const sites: string[] = [];
+  const rest = query
+    .replace(/(?:^|\s)-?site:(\S+)/gi, (m: string, s: string) => {
+      if (!m.trim().startsWith("-")) sites.push(s.replace(/^https?:\/\//, "").replace(/\/$/, ""));
+      return " ";
+    })
+    .replace(/["“”]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  return { site: sites.length === 0 ? null : sites.join(", "), query: rest === "" ? query : rest };
+}
 
 const places = new WeakMap<ToolCallEntry, StepPlace>();
 
@@ -167,14 +200,27 @@ export function doingOf(lang: Lang, entry: ToolCallEntry): string {
       return p.query === null
         ? titled(entry, stepLive(lang, "Searching the papers."))
         : stepLive(lang, "Searching for '{query}'.", { query: p.query });
-    case "fetch":
-      return p.query !== null
-        ? stepLive(lang, "Searching online for '{query}'.", { query: p.query })
+    case "fetch": {
+      const sq = p.query === null ? null : siteQuery(p.query);
+      if (sq?.site != null)
+        return stepLive(lang, "Searching {site} for '{query}'.", {
+          site: sq.site,
+          query: sq.query,
+        });
+      return sq !== null
+        ? stepLive(lang, "Searching online for '{query}'.", { query: sq.query })
         : name !== null
           ? stepLive(lang, "Reading {name} online.", { name })
           : titled(entry, stepLive(lang, "Looking online."));
-    case "execute":
-      return p.what === null ? stepLive(lang, "Running a task.") : sentenceOf(p.what);
+    }
+    case "execute": {
+      const t = taskOf(entry);
+      if (t.own !== null) return sentenceOf(t.own);
+      if (t.program === null) return stepLive(lang, "Running a task.");
+      return t.paper === null
+        ? stepLive(lang, "Running {program}.", { program: t.program })
+        : stepLive(lang, "Running {program} on {name}.", { program: t.program, name: t.paper });
+    }
     case "think":
       return stepLive(lang, "Thinking it through.");
     default:

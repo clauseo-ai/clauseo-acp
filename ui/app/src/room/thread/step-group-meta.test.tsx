@@ -211,7 +211,7 @@ const timeOf = (meta: HTMLElement) => ({
   held: [...meta.querySelectorAll<HTMLElement>(".who-held-as")].map((e) => e.dataset["held"]),
 });
 
-test("live, the meta line shows when the answer started (its question's time, sent to a free agent); at the end the time it ended, in a place kept as wide, the same line and button", async () => {
+test("live, the meta line shows when the answer started (its question's time, sent to a free agent); at the end the same time (D-020), the same line and button", async () => {
   h = await mountRoom({ display: { language: "en" } });
   // the question at 5 s (order 5), the turn before ended at 3 s: the agent was free
   h.deliver([
@@ -224,9 +224,7 @@ test("live, the meta line shows when the answer started (its question's time, se
   const line = meta.querySelector(":scope > button")!;
   expect(line.textContent).toBe("Read file 202. 1 done so far.");
   const asked = stamp("en", ASKED.user_message!.ts, Date.now());
-  expect(timeOf(meta)).toEqual({ who: `Clauseo, ${asked}`, held: [`, ${asked}`] });
-  for (const e of meta.querySelectorAll(".who-held-as"))
-    expect(e.getAttribute("aria-hidden")).toBe("true");
+  expect(timeOf(meta)).toEqual({ who: `Clauseo, ${asked}`, held: [] });
   // the turn ends: the step finishes, the answer's words come, the turn's step and the idle header
   h.deliver([
     upsert(toolCall(8, 202, "completed")),
@@ -241,9 +239,8 @@ test("live, the meta line shows when the answer started (its question's time, se
   expect(meta.querySelector(":scope > button")).toBe(line);
   expect(line.textContent).toBe("2 papers read.");
   expect(meta.children).toHaveLength(2);
-  // the time it ended, the start still keeping the place's width
-  const ended = stamp("en", 10_000, Date.now());
-  expect(timeOf(meta)).toEqual({ who: `Clauseo, ${ended}`, held: [`, ${asked}`] });
+  // still the time it started: the answer's time never moves as the turn ends
+  expect(timeOf(meta)).toEqual({ who: `Clauseo, ${asked}`, held: [] });
 });
 
 test("a question that waited shows no time while live: behind the turn before, or in the matter's queue", async () => {

@@ -10,11 +10,13 @@ import { Thread } from "@clauseo/components/clauseo/thread.tsx";
 import { th } from "@clauseo/components/lib/words-thread.ts";
 import { frd } from "@clauseo/components/lib/words-first-read.ts";
 import { useWords } from "@clauseo/components/lib/words.ts";
+import { CodeCopyContext } from "@clauseo/components/markdown/host.ts";
 import { useStreamPart, useViewStore } from "../../store/hooks.ts";
 import type { StreamView } from "../../store/view.ts";
 import type { HostTransport } from "../../transport/host-transport.ts";
 import type { EntryId, StreamId, Timestamp, TurnId, ViewEntry } from "../../transport/protocol.ts";
 import { firstReadMarks, isFirstReadTurn, subscribeMarks } from "../first-read/marks.ts";
+import { AnswerActions } from "./answer-actions.tsx";
 import { AnswerMeta } from "./answer-meta.tsx";
 import { CaseLawHintSlot } from "./case-law-hint.tsx";
 import { SiteBlockedSlot } from "./site-blocked.tsx";
@@ -235,6 +237,16 @@ const LiveExchange = memo(
             <>
               {answer}
               {notes && <SteerNotesOf ids={rest} stream={stream} paged={paged} />}
+              {step !== undefined && (
+                <AnswerActions
+                  ids={rest}
+                  step={step}
+                  question={question}
+                  stream={stream}
+                  paged={paged}
+                  latest={latest}
+                />
+              )}
               <SiteBlockedSlot stream={stream} turn={turn} />
               <CaseLawHintSlot stream={stream} turn={turn} />
             </>
@@ -308,39 +320,46 @@ export const ThreadList = memo(function ThreadList({
   const question =
     askedTurn !== null && isFirstReadTurn(askedTurn) ? frd(w.lang, "Clauseo's first read") : words;
   const landed = useStreamPart(store, stream, pickLanded);
+  // each code block in an answer offers Copy (D-026)
+  const copyWords = useCallback(
+    (copied: boolean) => th(w.lang, copied ? "Copied" : "Copy"),
+    [w.lang],
+  );
   return (
     // it rests once there is something to rest on: a reopened thread's view arrives after the mount, and the thread
     // settles at its end then, and follows what comes in while the lawyer stays there; a question sent from here goes
     // back to the end, and while Find's jump to an entry lands (reach) nothing follows it away. The log is busy until the first view lands and while an older page goes in,
     // so a screen reader doesn't read a whole reopened history, or a page put in above, as news
     <SourcesTransport value={transport}>
-      <Thread
-        question={question}
-        who={w.t("You")}
-        resting={!busy && exchanges.length > 0}
-        sent={sent}
-        hold={reach !== null}
-        busy={(stream !== null && !landed) || older.loading}
-      >
-        {stream !== null &&
-          exchanges.map((g, i) => {
-            const b = i === 0 ? undefined : exchanges[i - 1];
-            return (
-              <LiveExchange
-                key={g.key}
-                ids={g.ids}
-                asked={g.asked}
-                sentNow={g.sentNow}
-                turn={g.turn}
-                stream={stream}
-                paged={paged}
-                latest={i === exchanges.length - 1}
-                beforeAsked={b?.asked === true ? b.ids[0] : undefined}
-                beforeStep={b?.ids.find((id) => id.startsWith(STEP))}
-              />
-            );
-          })}
-      </Thread>
+      <CodeCopyContext value={copyWords}>
+        <Thread
+          question={question}
+          who={w.t("You")}
+          resting={!busy && exchanges.length > 0}
+          sent={sent}
+          hold={reach !== null}
+          busy={(stream !== null && !landed) || older.loading}
+        >
+          {stream !== null &&
+            exchanges.map((g, i) => {
+              const b = i === 0 ? undefined : exchanges[i - 1];
+              return (
+                <LiveExchange
+                  key={g.key}
+                  ids={g.ids}
+                  asked={g.asked}
+                  sentNow={g.sentNow}
+                  turn={g.turn}
+                  stream={stream}
+                  paged={paged}
+                  latest={i === exchanges.length - 1}
+                  beforeAsked={b?.asked === true ? b.ids[0] : undefined}
+                  beforeStep={b?.ids.find((id) => id.startsWith(STEP))}
+                />
+              );
+            })}
+        </Thread>
+      </CodeCopyContext>
     </SourcesTransport>
   );
 });

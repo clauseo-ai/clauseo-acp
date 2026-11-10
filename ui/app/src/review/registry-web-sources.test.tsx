@@ -86,20 +86,9 @@ test("WEB-13 shows one tile and 1 source, folded", async () => {
   expect(rows(host).length).toBe(0);
 });
 
-test("WEB-07, Codex's search, has no count: the search glyph and the chevron, named Searches", async () => {
+test("WEB-07, Codex's search beside its page, says it didn't name the pages it found", async () => {
   const host = await cell("WEB-07");
-  const toggle = host.querySelector('[data-testid="web-sources-toggle"]');
-  expect(words(toggle)).toBe("");
-  expect(toggle?.textContent).not.toContain("source");
-  expect(toggle?.getAttribute("aria-label")).toBe("Searches");
-});
-
-test("WEB-16 shows Codex's search folded: the search glyph, no count, named Searches", async () => {
-  const host = await cell("WEB-16");
-  const toggle = host.querySelector('[data-testid="web-sources-toggle"]');
-  expect(toggle?.getAttribute("aria-expanded")).toBe("false");
-  expect(words(toggle)).toBe("");
-  expect(toggle?.getAttribute("aria-label")).toBe("Searches");
+  expect(host.textContent).toContain("ChatGPT didn't say which pages it found");
 });
 
 test("WEB-09 shows its info tip open, saying where the page was opened", async () => {

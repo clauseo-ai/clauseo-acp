@@ -161,6 +161,9 @@ export type StepRowProps = {
   resultOpen?: boolean | undefined;
   /** What came back was an error: the break and the mark's primary ink, whatever the status says. */
   failed?: boolean;
+  /** For a step that failed, why, in one line from what it said (its error's last line), under its words; none for
+   * a step that didn't fail or said nothing (D-017). */
+  why?: string | null;
 };
 
 /** One row of an open group. */
@@ -177,6 +180,7 @@ export function StepRow({
   result,
   resultOpen,
   failed = false,
+  why = null,
 }: StepRowProps) {
   return (
     <li
@@ -212,6 +216,11 @@ export function StepRow({
               <Say>{mark}</Say>
             </span>
           </>
+        )}
+        {why !== null && (
+          <bdi className="step-row-why" data-testid="tool-call-why">
+            <span dir="auto">{why}</span>
+          </bdi>
         )}
         {result}
       </span>

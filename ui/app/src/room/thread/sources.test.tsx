@@ -180,24 +180,24 @@ test("a page opened twice in one tool call shows once", async () => {
   expect(rows().map(words)).toEqual(["A example.com"]);
 });
 
-test("a Claude search with no results says so in two muted words", async () => {
-  await answered([searched("rare query")]);
+test("a Claude search with no results says so in two muted words, beside a page read", async () => {
+  await answered([searched("rare query"), visited("https://example.com/x", { title: "X" })]);
   await open();
   expect(h!.one("web-source-query")?.textContent).toBe("'rare query'");
   expect(h!.one("web-source-note")?.textContent).toBe("No results");
   expect(h!.all("web-source-result")).toEqual([]);
 });
 
-test("a Codex search: one muted line behind the info glyph, no links, the search glyph folded", async () => {
-  await answered([searched("notice period")], "codex-acp");
-  expect(marks()).toEqual(["search"]);
-  // no page, so no count: the glyph and the chevron, the button named for what it opens to
-  expect(count()).toBeUndefined();
-  expect(words(toggle())).toBe("");
-  expect(toggle().getAttribute("aria-label")).toBe("Searches");
+test("a Codex search beside its page: one muted line behind the info glyph, no links, the search glyph folded", async () => {
+  await answered(
+    [searched("notice period"), visited("https://example.com/x", { via: "codex_open_page" })],
+    "codex-acp",
+  );
+  expect(marks()[0]).toBe("search");
+  expect(count()).toBe("1 source");
   await open();
   const note = h!.one("web-source-note")!;
-  expect(note.textContent).toBe("ChatGPT doesn't list its pages");
+  expect(note.textContent).toBe("ChatGPT didn't say which pages it found");
   expect(note.querySelector("svg[aria-hidden]")).not.toBeNull();
   expect(rows()[0]!.querySelector("a")).toBeNull();
 });
@@ -256,12 +256,9 @@ test("the count is the distinct pages: a search's results and the pages read, an
   expect(rows().length).toBe(4);
 });
 
-test("searches with no pages have no count: the search glyph, the chevron, named Searches", async () => {
+test("searches that list no page show no sources: the step group's rows say them (D-028)", async () => {
   await answered([searched("rare query"), searched("rarer query")]);
-  expect(marks()).toEqual(["search"]);
-  expect(count()).toBeUndefined();
-  expect(words(toggle())).toBe("");
-  expect(toggle().getAttribute("aria-label")).toBe("Searches");
+  expect(h!.one("web-sources")).toBeNull();
 });
 
 test("a page with no title never links its whole address: its file name, decoded, then its site; or its site alone", async () => {

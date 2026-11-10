@@ -11,7 +11,16 @@ import { stepKindOf, type StepKind } from "@clauseo/components/clauseo/tool-kind
 import type { StreamView } from "../../store/view.ts";
 import type { EntryId, Timestamp, ToolCallEntry, ViewEntry } from "../../transport/protocol.ts";
 import { sameIds } from "./ids.ts";
-import { asksWords, doingOf, placeOf, sentenceOf, titleOf, unsettled } from "./step-names.ts";
+import {
+  asksWords,
+  doingOf,
+  placeOf,
+  sentenceOf,
+  siteQuery,
+  titleOf,
+  unsettled,
+} from "./step-names.ts";
+import { taskOf } from "./task-words.ts";
 
 /** One part of an answer: a row on its own, or a group of rows folded into one line. */
 export type Segment =
@@ -246,16 +255,33 @@ export function doneOf(lang: Lang, entry: ToolCallEntry): string {
       return p.query === null
         ? titled(say("Searched the papers.", "Tried to search the papers."))
         : say("Searched for '{query}'.", "Tried to search for '{query}'.", { query: p.query });
-    case "fetch":
-      return p.query !== null
+    case "fetch": {
+      const sq = p.query === null ? null : siteQuery(p.query);
+      if (sq?.site != null)
+        return say("Searched {site} for '{query}'.", "Tried to search {site} for '{query}'.", {
+          site: sq.site,
+          query: sq.query,
+        });
+      return sq !== null
         ? say("Searched online for '{query}'.", "Tried to search online for '{query}'.", {
-            query: p.query,
+            query: sq.query,
           })
         : name !== null
           ? say("Read {name} online.", "Tried to read {name} online.", { name })
           : titled(say("Looked online.", "Tried to look online."));
-    case "execute":
-      return p.what === null ? say("Ran a task.", "Tried to run a task.") : agentWords(p.what);
+    }
+    case "execute": {
+      // the agent's own words for the task, else the program and the paper it ran on (D-017)
+      const t = taskOf(entry);
+      if (t.own !== null) return agentWords(t.own);
+      if (t.program === null) return say("Ran a task.", "Tried to run a task.");
+      return t.paper === null
+        ? say("Ran {program}.", "Tried to run {program}.", { program: t.program })
+        : say("Ran {program} on {name}.", "Tried to run {program} on {name}.", {
+            program: t.program,
+            name: t.paper,
+          });
+    }
     case "think":
       return say("Thought it through.", "Tried to think it through.");
     default:
@@ -282,11 +308,12 @@ export function markOf(lang: Lang, call: ToolCallEntry): string | null {
   return null;
 }
 
-/** The time a row shows, from the host's two stamps alone: when it finished, else when it started; none while it is
- * pending or running, since its state says enough. */
+/** The time a row shows: when it started (the host's first stamp), so the rows, in the order they started, read in
+ * time order however long each took (D-020); none while it is pending or running,
+ * since its state says enough. */
 export function timeOf(call: ToolCallEntry): Timestamp | null {
   if (call.status === "pending" || call.status === "in_progress") return null;
-  return call.finished_at ?? call.started_at;
+  return call.started_at;
 }
 
 /** The group's line as StepGroup takes it: icons, words, the muted aside, the trouble, and live, what the step in hand

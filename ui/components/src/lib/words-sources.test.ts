@@ -12,8 +12,8 @@ test("the summary counts the distinct pages, the singular apart", () => {
 test("a query is a quoted run, and the rows' other words are a few, with no period", () => {
   expect(partsOf("en", "'{query}'", "query")).toEqual(["'", "'"]);
   expect(src("en", "No results")).toBe("No results");
-  expect(src("en", "{name} doesn't list its pages", { name: "ChatGPT" })).toBe(
-    "ChatGPT doesn't list its pages",
+  expect(src("en", "{name} didn't say which pages it found", { name: "ChatGPT" })).toBe(
+    "ChatGPT didn't say which pages it found",
   );
   expect(src("en", "Opened on OpenAI's side")).toBe("Opened on OpenAI's side");
   expect(src("en", "Opened in the browser")).toBe("Opened in the browser");
@@ -26,10 +26,9 @@ test("the whole set: no sentence of round 2 is left", () => {
       "{n} sources",
       "'{query}'",
       "No results",
-      "{name} doesn't list its pages",
+      "{name} didn't say which pages it found",
       "Opened on OpenAI's side",
       "Opened in the browser",
-      "Searches",
     ].sort(),
   );
 });

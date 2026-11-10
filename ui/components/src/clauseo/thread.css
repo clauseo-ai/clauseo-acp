@@ -485,6 +485,16 @@
     white-space: pre;
     overflow-wrap: normal;
   }
+  /* a code block's Copy (D-026): a quiet small word over the block's top corner (code.tsx's wrapper is relative) */
+  .reply-text [data-clauseo="code-block"] .code-copy {
+    position: absolute;
+    top: var(--s1-5);
+    inset-inline-end: var(--s2);
+    padding: 0 var(--s1);
+    background: var(--well);
+    color: var(--muted);
+    font-size: var(--t13);
+  }
   .reply-text [data-clauseo="markdown"] pre code {
     font: inherit;
     padding: 0;

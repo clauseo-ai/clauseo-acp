@@ -32,7 +32,8 @@ import {
 } from "./permission-model.ts";
 import { ElicitationForm } from "./elicitation-form.tsx";
 import { FolderReason } from "./folder-reason.tsx";
-import { useFolderReason } from "./folder-support.ts";
+import { useFolderReason, useMatterFolder } from "./folder-support.ts";
+import { CommandFold } from "./thread/command-fold.tsx";
 import { KeyedRequestContext } from "./permission-keyed.ts";
 import { useAgentPlan } from "./thread/agent-plan.ts";
 import { useThreadActions } from "./thread/session.ts";
@@ -56,7 +57,8 @@ function Permission({
 }) {
   const w = useThreadWords();
   const { answer } = useThreadActions();
-  const m = useMemo(() => permissionModel(entry, call), [entry, call]);
+  const folder = useMatterFolder();
+  const m = useMemo(() => permissionModel(entry, call, folder), [entry, call, folder]);
   const offered = useMemo(() => m.offers.map((o) => o.answer), [m]);
   const [asked, setAsked] = useState<Asked | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -66,6 +68,18 @@ function Permission({
   const lang = w.lang;
   const plan = useAgentPlan();
   const reason = useFolderReason(call?.kind) && pending;
+  // a task in plain words (D-016): the agent's own, else the program and the paper; its command folded under them
+  const task = m.task;
+  const plain =
+    task === null
+      ? null
+      : (task.own ??
+        (task.program === null
+          ? null
+          : task.paper === null
+            ? w.th("Run {program}.", { program: task.program })
+            : w.th("Run {program} on {name}.", { program: task.program, name: task.paper })));
+  const command = plain !== null ? (task?.command ?? null) : null;
   const onAnswer = useCallback(
     (a: PermissionAnswer) => {
       const offer = m.offers.find((o) => o.answer === a);
@@ -99,7 +113,8 @@ function Permission({
         keys={keys}
         offered={offered}
         {...(m.asks ? { question: w.th("Clauseo asks before going on.") } : {})}
-        title={m.label === null ? m.title : w.th(m.label)}
+        title={m.label === null ? (plain ?? m.title) : w.th(m.label)}
+        {...(command === null ? {} : { details: <CommandFold command={command} lang={lang} /> })}
         {...(reason ? { reason: <FolderReason /> } : {})}
         kept={m.kept}
         done={m.done}

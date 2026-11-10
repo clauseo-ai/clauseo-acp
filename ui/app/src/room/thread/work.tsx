@@ -38,7 +38,7 @@ import { paperMentions } from "./paper-mentions.ts";
 import { WorkComposer } from "./work-composer.tsx";
 import { ArchivedLine } from "../archived.tsx";
 import { useToolsSegment } from "../tool-line-load.ts";
-import { FolderSupportContext, notedFolder } from "../folder-support.ts";
+import { FolderSupportContext, MatterFolderContext, notedFolder } from "../folder-support.ts";
 import { locatable, useLocateFolder } from "../act-refusals.ts";
 import { LocateButton } from "../locate-button.tsx";
 import { hasSetup } from "../first-run/hold.ts";
@@ -251,12 +251,14 @@ export function Work({
             <Suspense fallback={null}>
               <KeyedRequestContext value={keyed}>
                 <FolderSupportContext value={matter?.folder_support}>
-                  <LazyThreadList
-                    transport={transport}
-                    stream={stream}
-                    busy={busy}
-                    sent={session.sentTurn}
-                  />
+                  <MatterFolderContext value={matter?.folder_display || null}>
+                    <LazyThreadList
+                      transport={transport}
+                      stream={stream}
+                      busy={busy}
+                      sent={session.sentTurn}
+                    />
+                  </MatterFolderContext>
                 </FolderSupportContext>
               </KeyedRequestContext>
             </Suspense>

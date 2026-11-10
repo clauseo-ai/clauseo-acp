@@ -5,6 +5,9 @@ export const HI = {
   // U17: the row's press, closed and open
   "Show the result": "परिणाम दिखाएँ",
   "Hide the result": "परिणाम छिपाएँ",
+  // a task's own command, folded under its plain words (D-017) and under a permission prompt's (D-016)
+  "Show the command": "कमांड दिखाएँ",
+  "Hide the command": "कमांड छिपाएँ",
   // the blocks it didn't draw: pictures, then anything else
   "1 picture isn't shown here.": "1 चित्र यहाँ नहीं दिखाया गया है।",
   "{n} pictures aren't shown here.": "{n} चित्र यहाँ नहीं दिखाए गए हैं।",
