@@ -1,10 +1,11 @@
-// The first screen's working line, at its foot where the composer will stand: the install's line while the plan isn't
-// here yet (install.tsx, with the room gate's Sign in while it is missing), and once it is installed but not signed in,
-// the plan's Sign in in the same place (busy while the sign-in status check runs), so a lawyer can get the plan going
+// One plan's working line on the first screen, at its foot where the composer will stand (one for each plan, Claude's
+// then ChatGPT's): the install's line while the plan isn't here yet (install.tsx, with "Sign in to {name}" while it is
+// missing), and once it is installed but not signed in, the plan's "Sign in to {name}" in the same place (busy while the sign-in status check runs), so a lawyer can get the plan going
 // without opening a matter. No gate stands on the first screen: the line says the gate's own words for a sign-in under
 // way and offers its Cancel, never a second Sign in; the states only a matter's gate walks (a device code, a login
-// found, switching accounts) leave the foot as it was. A plan the firm's policy locks shows no control. Settings'
-// Plans has its own Sign in again.
+// found, switching accounts) leave the foot as it was. A plan waiting for the other plan's download or sign-in to end
+// (the setup store's `queued`) says the queued sign-in's words, with a Cancel that stops its wait. A plan the firm's
+// policy locks shows no control. Settings' Plans has its own Sign in again.
 import type { WorkingState } from "@clauseo/components/clauseo/working-line.tsx";
 import {
   checkingLine,
@@ -44,10 +45,16 @@ export function welcomeFoot(
   acts: FootActs,
   ids: InstallTestIds,
 ): WorkingState | null {
-  const install = installLine(lang, installView(setup), name, acts, ids);
-  if (install !== null || !installed(setup) || planLocked(state.locked, agent)) return install;
-  // no clock time is said by the states shown here
-  const view = gateView(setup, state, () => "");
+  const locked = planLocked(state.locked, agent);
+  const waiting = state.queued === agent && !locked;
+  const install = waiting
+    ? null
+    : installLine(lang, installView(setup), name, { ...acts, named: true }, ids);
+  if (install !== null || (!waiting && (!installed(setup) || locked))) return install;
+  // no clock time is said by the states shown here; the plan waiting on the other is the queued sign-in's
+  const view = waiting
+    ? ({ kind: "queued", offline: false } as const)
+    : gateView(setup, state, () => "");
   if (view === null) return null;
   const line = (
     words: string,
@@ -71,7 +78,11 @@ export function welcomeFoot(
       </span>
     ),
   });
-  const signIn = { words: fl(lang, "Sign in"), press: acts.signIn, testId: IDS.signIn };
+  const signIn = {
+    words: fl(lang, "Sign in to {name}", { name }),
+    press: acts.signIn,
+    testId: IDS.signIn,
+  };
   const cancel = { words: ui(lang, "Cancel"), press: acts.cancel, testId: IDS.cancel, quiet: true };
   switch (view.kind) {
     // signed out, or a sign-in that stopped: the plan is ready, and Sign in starts it again
@@ -92,7 +103,7 @@ export function welcomeFoot(
         : line(fl(lang, "Finish signing in with your browser."), view.kind, cancel);
     // the sign-in status check runs: its words, and Sign in busy until it answers
     case "checking":
-      return checkingLine(lang, name, ids);
+      return checkingLine(lang, name, ids, true);
     default:
       return null;
   }

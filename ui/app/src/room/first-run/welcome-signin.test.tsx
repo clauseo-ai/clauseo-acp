@@ -24,7 +24,7 @@ import type { SignIn } from "../../transport/protocol.ts";
 const line = () => byId("signin-foot");
 const signInButtons = () => [...allById("signin-foot-sign-in"), ...allById("install-sign-in")];
 
-test("installed and signed out: the foot says Claude is ready with Sign in, which sends the room gate's start_sign_in", async () => {
+test("installed and signed out: the foot says Claude is ready with Sign in to Claude, which sends the room gate's start_sign_in", async () => {
   const t = await mountFirstRun({
     matters: [],
     first: [install(CLAUDE, READY), signIn(CLAUDE, { signed_out: {} })],
@@ -32,7 +32,7 @@ test("installed and signed out: the foot says Claude is ready with Sign in, whic
   expect(line()?.dataset["state"]).toBe("signed-out");
   expect(byId("install-said")?.textContent).toBe("Claude is ready");
   const sign = byId("signin-foot-sign-in");
-  expect(sign?.textContent).toBe("Sign in");
+  expect(sign?.textContent).toBe("Sign in to Claude");
   expect(byId("signin")).toBeNull();
   expect(setups(t)).toEqual([]);
   await press(sign);
@@ -82,7 +82,7 @@ test("a sign-in that stopped: Sign in again on the foot", async () => {
     ],
   });
   expect(line()?.dataset["state"]).toBe("failed");
-  expect(byId("signin-foot-sign-in")?.textContent).toBe("Sign in");
+  expect(byId("signin-foot-sign-in")?.textContent).toBe("Sign in to Claude");
 });
 
 test("signed in, with a plan, a key or the firm's account: no Sign in on the foot", async () => {

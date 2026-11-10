@@ -2,8 +2,8 @@
 // window can do about it. Signed in: UD1's signed-in line, with "Sign out" (an own plan login) or "Stop using it here"
 // (a reused one), each asking first; with a key or the firm's account, the line alone, since the host bars a sign-in
 // then. Signed out: "Sign in again" and "Look for my … sign-in", or UD1's line for a login found but not reusable.
-// Signing in: UD1's gate, inline. ChatGPT not added: "Add ChatGPT", which installs it and then starts its sign-in.
-// Claude not here yet: the install line with the room gate's Sign in, which downloads it and then signs in.
+// Signing in: UD1's gate, inline. A plan not added yet, either one: "Add Claude" or "Add ChatGPT", the same card for
+// each, which installs it and then starts its sign-in. Once its install runs: the install line.
 // Under it, the other ways in (a key; for Claude the firm's address). A plan the firm's policy locks shows its line
 // and "Managed by firm", and no control.
 import { useEffect, useState, type ReactNode } from "react";
@@ -57,10 +57,10 @@ type Stand =
   | { kind: "failed"; code: string }
   | { kind: "gate" };
 
-function standOf(agent: AgentId, setup: AgentSetup | undefined, adding: boolean): Stand {
+function standOf(setup: AgentSetup | undefined, adding: boolean): Stand {
   const install = setup?.install;
   if (install !== undefined && install !== "managed" && !isReady(install)) {
-    if (agent === CODEX && !adding && typeof install === "object" && install.missing !== undefined)
+    if (!adding && typeof install === "object" && install.missing !== undefined)
       return { kind: "add", mb: aboutMb(setup?.mb ?? 0) };
     if (installView(setup) !== null) return { kind: "install" };
   }
@@ -79,7 +79,7 @@ function standOf(agent: AgentId, setup: AgentSetup | undefined, adding: boolean)
   return { kind: "gate" };
 }
 
-/** Adds waiting for their install, by store: "Add ChatGPT" starts the sign-in once the install is ready, though the
+/** Adds waiting for their install, by store: "Add {plan}" starts the sign-in once the install is ready, though the
  * section was closed and opened meanwhile. */
 const adds = new WeakMap<SetupStore, Set<AgentId>>();
 const addsOf = (store: SetupStore) => {
@@ -120,12 +120,12 @@ export function PlanBlock({
   const app = APP[plan];
   const [pasting, setPasting] = useState(false);
   const [signedOutHere, setSignedOutHere] = useState(false);
-  // "Add ChatGPT" pressed: the add waits in the store's set until the install is ready (the state only re-renders)
+  // "Add {plan}" pressed: the add waits in the store's set until the install is ready (the state only re-renders)
   const [, setAdding] = useState(false);
   const adding = addsOf(store).has(agent);
-  const stand = standOf(agent, setup, adding);
+  const stand = standOf(setup, adding);
   const ready = isReady(setup?.install);
-  // the install "Add ChatGPT" started is ready: its sign-in starts, once
+  // the install "Add {plan}" started is ready: its sign-in starts, once
   useEffect(() => {
     if (!ready || !addsOf(store).delete(agent)) return;
     store.command({ start_sign_in: { agent } });
@@ -174,6 +174,11 @@ export function PlanBlock({
         return;
       case "instead":
         onOther();
+        return;
+      case "sign-in-to":
+        // the gate's own plan signs in here; the other plan's press moves to its block, as "Use … instead" does
+        if (a.plan === plan) signIn();
+        else onOther();
         return;
       case "key-panel":
         // the key's field stands under the block already: the press takes the lawyer there
@@ -228,7 +233,7 @@ export function PlanBlock({
       case "add":
         body = (
           <>
-            {line(s("Uses your ChatGPT plan."))}
+            {line(s(plan === "claude" ? "Uses your Claude plan." : "Uses your ChatGPT plan."))}
             {/* the card's quiet line under Add: the download's size, about, then what to expect; with no
                 size known, what to expect alone */}
             <p className="set-plan-fine">
@@ -256,7 +261,7 @@ export function PlanBlock({
                   });
                 }}
               >
-                {say(s("Add ChatGPT"))}
+                {say(s(plan === "claude" ? "Add Claude" : "Add ChatGPT"))}
               </Button>
             </div>
           </>
@@ -274,7 +279,7 @@ export function PlanBlock({
             copied: null,
             setCopied: () => {},
             // a plan not here yet gets the room gate's Sign in: desktop downloads it and signs in once it is ready
-            // (not while "Add ChatGPT" waits: its own sign-in starts at ready)
+            // (not while "Add {plan}" waits: its own sign-in starts at ready)
             signIn: adding ? undefined : signIn,
           },
           { signIn: "plans-sign-in" },

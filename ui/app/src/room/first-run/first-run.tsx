@@ -3,41 +3,25 @@
 // (hold.ts): the install's working line, the sign-in gate in the field's row until the conversation's plan is signed
 // in, and the room's line under the field (the fine print until then, the signed-in line after). Each gate press is one
 // setup command; nothing else here talks to the host but the matter's creation, the counts and the first act.
-import {
-  lazy,
-  Suspense,
-  useEffect,
-  useLayoutEffect,
-  useRef,
-  useState,
-  useSyncExternalStore,
-} from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { late } from "@clauseo/components/lib/late.ts";
-import {
-  Gate,
-  SignedLine,
-  type GateAct,
-  type Plan,
-} from "@clauseo/components/clauseo/first-launch/gate.tsx";
+import { Gate, SignedLine, type GateAct } from "@clauseo/components/clauseo/first-launch/gate.tsx";
 import { installLine } from "@clauseo/components/clauseo/first-launch/install.tsx";
 import { DocumentsLine } from "@clauseo/components/clauseo/first-launch/parts.tsx";
-import { Welcome } from "@clauseo/components/clauseo/first-launch/welcome.tsx";
 import { useDisplay, type Lang, type ReleaseMode } from "@clauseo/components/lib/display.ts";
-import { toHostError, type HostTransport } from "../../transport/host-transport.ts";
+import type { HostTransport } from "../../transport/host-transport.ts";
 import type { AgentId } from "../../transport/protocol.ts";
 import {
   CLAUDE,
   CODEX,
   isSignedIn,
   setupStoreOf,
-  type AgentSetup,
   type SetupSource,
   type SetupState,
   type SetupStore,
 } from "../../store/setup.ts";
 import type { Conversations, ConversationsView } from "../conversations.ts";
 import type { Matters } from "../matters.ts";
-import { usePickWait } from "../picker-wait.ts";
 import { clockOf } from "../when.ts";
 import { firstReadMarks, markAdded } from "../first-read/marks.ts";
 
@@ -54,50 +38,13 @@ import {
   type ProtectionStore,
 } from "../../store/protection.ts";
 import { loadProtectionNote } from "../protection/note-load.ts";
-import { markButton, markWelcome } from "../../start-marks.ts";
-
+import { copyText, IDS, installActs, NAME, PLANS, planOf } from "./acts.ts";
+import { FirstScreen } from "./first-screen.tsx";
 import { repairOf, stepWords, type StepParts } from "./step-parts.ts";
 import { gateView, installView, refusalView } from "./views.ts";
-import { welcomeFoot, type FootActs } from "./welcome-foot.tsx";
 
 // UD2: the expired sign-in card rides here, with the setup store and the gate; the thread's chunk places it
 provideExpiredCard((props) => <ExpiredCard {...props} />);
-
-/** The test ids the brief decides (UD1, "Decided here"). */
-const IDS = {
-  install: {
-    line: "install-foot",
-    retry: "install-retry",
-    proxy: "install-proxy",
-    askIt: "install-ask-it",
-    signIn: "install-sign-in",
-    install: "install-again",
-  },
-  gate: {
-    root: "signin",
-    state: "signin-state",
-    cancel: "signin-cancel",
-    paste: "signin-paste",
-    code: "signin-code",
-    deviceCode: "signin-device-code",
-    key: "signin-key",
-    loginFound: "login-found",
-    loginUse: "login-use",
-    loginOther: "login-other",
-  },
-  done: "signin-done",
-  counts: "counts-switch",
-} as const;
-
-/** Each plan's prices page, for an account with no plan (H11's open_external asks first). */
-const PLANS: Record<Plan, string> = {
-  claude: "https://claude.com/pricing",
-  chatgpt: "https://chatgpt.com/pricing",
-};
-const NAME: Record<Plan, string> = { claude: "Claude", chatgpt: "ChatGPT" };
-const planOf = (agent: AgentId): Plan => (agent === CODEX ? "chatgpt" : "claude");
-
-const copyText = (text: string) => void navigator.clipboard?.writeText(text).catch(() => {});
 
 /** What a gate press does for `agent`. */
 function actsFor(
@@ -112,8 +59,18 @@ function actsFor(
         store.set({ pasting: false, keyOpen: false });
         store.command({ start_sign_in: a.console === true ? { agent, console: true } : { agent } });
         return;
+      case "sign-in-to":
+        // either plan's own Sign in, through the store's queue: the other plan's choice moves the new conversation to
+        // it as "Use … instead" did
+        store.signInTo(a.plan === "chatgpt" ? CODEX : CLAUDE);
+        return;
       case "cancel":
         store.set({ pasting: false });
+        // the plan waiting its turn stops waiting; nothing was sent for it
+        if (store.state().queued === agent) {
+          store.unqueue();
+          return;
+        }
         store.command({ cancel_sign_in: { agent } });
         return;
       case "paste":
@@ -165,17 +122,6 @@ function actsFor(
   };
 }
 
-/** The install line's buttons for `agent`. */
-const installActs = (store: SetupStore, agent: AgentId, copied: SetupState["copied"]) => ({
-  retry: () => store.command({ retry_agent_install: { agent } }),
-  // a plan whose install went missing after Clauseo installed it (#859): the normal install, as choosing its card
-  install: () => store.command({ install_agent: { agent } }),
-  proxy: () => store.command({ retry_agent_install: { agent, use_system_proxy: true } }),
-  copy: copyText,
-  copied,
-  setCopied: (what: "log") => store.set({ copied: what }),
-});
-
 const noSubscribe = () => () => {};
 
 /** The room's side of the hold: the plan the send uses, and how times and words are said. */
@@ -222,7 +168,11 @@ function holdOf(
     installActs(store, agent, state.copied),
     IDS.install,
   );
-  const view = gateView(setup, state, clock);
+  // a plan waiting for the other's download or sign-in to end says the queued sign-in's words, with its Cancel
+  const view =
+    state.queued === agent && !isSignedIn(setup?.signIn)
+      ? ({ kind: "queued", offline: false } as const)
+      : gateView(setup, state, clock);
   const signedIn = setup?.signIn;
   if (view !== null) {
     const device =
@@ -466,117 +416,6 @@ export function FirstRun({
     });
   }, [signedIn, welcome, chosen, transport, matters, conversations]);
   if (!welcome) return <CaseLawSlot />;
-  return (
-    <FirstScreen
-      store={store}
-      matters={matters}
-      transport={transport}
-      plan={planOf(state.chosen)}
-      setup={state.agents[state.chosen]}
-      state={state}
-      acts={{
-        ...installActs(store, state.chosen, state.copied),
-        // no gate on the first screen: the line offers the gate's own Sign in press until the plan is signed in
-        signIn: () => void actsFor(store, transport, state.chosen, null)({ act: "sign-in" }),
-        cancel: () => void actsFor(store, transport, state.chosen, null)({ act: "cancel" }),
-      }}
-    />
-  );
-}
-
-/** U2's new matter form in place, and a refused folder's words: New matter's chunk (new-matter.tsx), loaded as the
- * first screen needs them. */
-const loadNewMatter = () => late(import("../new-matter.tsx"));
-const FirstMatter = lazy(() => loadNewMatter().then((m) => ({ default: m.FirstMatter })));
-const RefusedLine = lazy(() => loadNewMatter().then((m) => ({ default: m.RefusedLine })));
-
-/** The folder's own name, the last part of how it reads. */
-const folderName = (display: string) =>
-  display
-    .split(/[\\/]/)
-    .filter((p) => p !== "")
-    .pop() ?? display;
-
-/** The first screen: the question, the install at its foot, the counts switch. Its acts make the first matter: a
- * folder chosen opens it at once (the room opens the moment it is made); a new matter takes U2's form, in place. */
-function FirstScreen({
-  store,
-  matters,
-  transport,
-  plan,
-  setup,
-  state,
-  acts,
-}: {
-  store: SetupStore;
-  matters: Matters;
-  transport: HostTransport;
-  plan: Plan;
-  setup: AgentSetup | undefined;
-  state: SetupState;
-  acts: FootActs;
-}) {
-  const { lang } = useDisplay();
-  const install = welcomeFoot(lang, state.chosen, NAME[plan], setup, state, acts, IDS.install);
-  const [form, setForm] = useState(false);
-  const [refused, setRefused] = useState<{ code: string; path: string } | null>(null);
-  const wait = usePickWait();
-  useEffect(() => store.count({ onboarding_step: { step: "welcome_shown" } }), [store]);
-  // the start-up's marks (start-marks.ts): the welcome's first commit, then its button, which sends them all once
-  useLayoutEffect(markWelcome, []);
-  const openFolder = async () => {
-    setRefused(null);
-    const picked = await wait.track(() => matters.pickFolder());
-    if (picked === null) return;
-    store.firstAct("folder_chosen");
-    try {
-      await matters.create(folderName(picked.display), {
-        existing_folder: { folder: picked.folder },
-      });
-    } catch (thrown) {
-      setRefused({ code: toHostError(thrown).code, path: picked.display });
-    }
-  };
-  const openSettings = transport.openSettings;
-  return (
-    <Welcome
-      name={NAME[plan]}
-      install={install}
-      ready={setup?.readyHere === true}
-      counts={{ ...state.counts, onChange: store.setCounts }}
-      onOpenFolder={() => void openFolder()}
-      opening={wait.opening}
-      onNewMatter={() => {
-        setRefused(null);
-        setForm(true);
-      }}
-      {...(form
-        ? {
-            form: (
-              <Suspense fallback={null}>
-                <FirstMatter
-                  matters={matters}
-                  onAct={() => store.firstAct("new_matter")}
-                  onBack={() => setForm(false)}
-                />
-              </Suspense>
-            ),
-          }
-        : {})}
-      error={
-        refused === null ? null : (
-          <Suspense fallback={null}>
-            <RefusedLine code={refused.code} path={refused.path} />
-          </Suspense>
-        )
-      }
-      onWhatsSent={
-        openSettings === undefined
-          ? undefined
-          : () => void openSettings.call(transport).catch(() => {})
-      }
-      testIds={{ counts: IDS.counts, open: "open-folder", newMatter: "start-new-matter" }}
-      openRef={(button) => markButton(button, transport.pageMarks?.bind(transport))}
-    />
-  );
+  // no gate on the first screen: each plan's line offers its own sign-in until it is signed in
+  return <FirstScreen store={store} matters={matters} transport={transport} state={state} />;
 }

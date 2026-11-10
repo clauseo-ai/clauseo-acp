@@ -113,7 +113,7 @@ const chatgpt = (state: SignIn, clicks: string[] = []): Scene => ({
     install(CODEX, { ready: { version: "0.1.0" } }),
     signIn(CODEX, state),
   ],
-  clicks: [".fl-gate-ways .fl-way", ...clicks],
+  clicks: ['.fl-gate-plan[data-plan="chatgpt"]', ...clicks],
 });
 const failed = (code: string): SetupEvent =>
   signIn(CLAUDE, { failed: { code: code as never, at: AT } });
@@ -139,6 +139,14 @@ const CHECKING: Scene = { events: [READY, signIn(CLAUDE, "checking")] };
 const REINSTALL: Scene = {
   first: true,
   events: [install(CLAUDE, { missing: { download_bytes: 182_400_000, installed_before: true } })],
+};
+/** A fresh computer: both plans not here yet, side by side with their sizes. */
+const BOTH: Scene = {
+  first: true,
+  events: [
+    install(CLAUDE, { missing: { download_bytes: 112_000_000 } }),
+    install(CODEX, { missing: { download_bytes: 139_000_000 } }),
+  ],
 };
 const STUCK: Scene = { events: [READY, signIn(CLAUDE, { switching: { since: AT, stuck: true } })] };
 /** The key panel open while signed out, the switch begun, then a key sent and refused with command.conflict. */
@@ -253,9 +261,11 @@ const SCENES: ([FirstLaunchKey, Scene, string] | null)[] = [
   ["Details", { first: true, events: [failedInstall] }, "dl-error"],
   ["Your papers stay on this computer. {name} sees what each question sends it.", GATE, "plan"],
   // the plan, in the composer
-  ["Sign in to {name} to ask about this matter", GATE, "plan"],
-  ["Sign in", GATE, "plan"],
-  ["Use {name} instead", GATE, "plan-chatgpt"],
+  // UD1-24, retired: the matter's sign-in box names both plans now (UD1-95)
+  null,
+  ["Sign in", { events: [READY, failed("signin.cancelled")] }, "signin-cancelled"],
+  // signed out, the box offers both plans' own Sign in; "Use … instead" stays where a sign-in stopped
+  ["Use {name} instead", { events: [READY, failed("signin.cancelled")] }, "plan-chatgpt"],
   ["Use an API key or my firm's account", GATE, "plan-key"],
   [
     "Your browser opens when {name} is ready.",
@@ -533,6 +543,15 @@ const SCENES: ([FirstLaunchKey, Scene, string] | null)[] = [
   // UD1-90 and UD1-91: the chosen plan's install went missing after Clauseo installed it (#859), and its Install
   ["{plan} isn't installed on this computer any more.", REINSTALL, "reinstall"],
   ["Install {plan}", REINSTALL, "reinstall"],
+  // UD1-92 to UD1-95: both plans side by side, on the first screen and in the matter's sign-in box
+  ["Sign in with the plan you pay for: Claude, ChatGPT or both.", BOTH, "welcome-both"],
+  [
+    "Your papers stay on this computer. Claude or ChatGPT sees the parts it reads to answer you.",
+    BOTH,
+    "welcome-both",
+  ],
+  ["Sign in to {name}", BOTH, "welcome-both"],
+  ["Sign in to Claude or ChatGPT to ask about this matter", GATE, "plan"],
 ];
 
 /** The gate's refusal line for any other code: its code's own sentence, here a sign-in refused while a key is in use.

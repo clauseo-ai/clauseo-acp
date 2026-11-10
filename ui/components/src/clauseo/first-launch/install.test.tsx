@@ -6,7 +6,7 @@ import { isValidElement, type ReactElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { expect, test } from "vitest";
 import { loadHindi } from "../../lib/words-core.ts";
-import { installLine, type InstallActs, type InstallView } from "./install.tsx";
+import { checkingLine, installLine, type InstallActs, type InstallView } from "./install.tsx";
 
 const ACTS: InstallActs = {
   retry: () => {},
@@ -130,4 +130,28 @@ test("install lines: a failed set-up offers Try again and Details, not the syste
   const download = actions(false);
   expect(download).toContain("Use the system proxy");
   expect(download.match(/<button/g)?.length).toBe(3);
+});
+
+test("install lines: where both plans stand side by side, Sign in names its plan, in English and Hindi; elsewhere it stays Sign in", async () => {
+  await loadHindi();
+  const markup = (lang: "en" | "hi", named: boolean, name = "ChatGPT") => {
+    const line = installLine(
+      lang,
+      { kind: "missing", mb: 140 },
+      name,
+      { ...ACTS, signIn: () => {}, named },
+      { signIn: "sign" },
+    );
+    if (line === null || line.kind !== "wait" || !isValidElement(line.actions))
+      throw new Error("no actions");
+    return renderToStaticMarkup(line.actions as ReactElement);
+  };
+  expect(markup("en", true)).toContain(">Sign in to ChatGPT<");
+  expect(markup("hi", true)).toContain(">ChatGPT में साइन इन करें<");
+  expect(markup("en", true, "Claude")).toContain(">Sign in to Claude<");
+  expect(markup("en", false)).toContain(">Sign in<");
+  // the status check's busy button names it the same way
+  const checking = checkingLine("en", "ChatGPT", { signIn: "sign" }, true);
+  if (checking.kind !== "wait") throw new Error("no wait line");
+  expect(renderToStaticMarkup(checking.actions as ReactElement)).toContain(">Sign in to ChatGPT<");
 });
