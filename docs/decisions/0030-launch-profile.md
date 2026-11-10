@@ -352,7 +352,9 @@ two dependencies, `profile` and `tracing`.
   app's executable, runs stetdoc for its skill (`load_skill`, cached in the plugin's
   `skills/` folder), and renders R22's built-ins. The hook's methods then only map what it
   holds. The browser's sidecars are named beside the executable, where Tauri's `externalBin`
-  puts them (S27 bundles them). The author is `None`, so tracked changes carry `Clauseo`.
+  puts them (S27 bundles them), except agent-browser on macOS, in `Contents/Helpers` (0029,
+  "Where it lives on macOS"; `profile.rs`'s `agent_browser_path` resolves it). The author is
+  `None`, so tracked changes carry `Clauseo`.
 - **Failure.** A stetdoc skill that fails, or a refused built-in, is left out with a warning,
   and the profile is built without it. If the profile itself cannot be built (no executable
   path, or `ProfilePaths::new` refuses a path), the app logs a warning and starts with no
