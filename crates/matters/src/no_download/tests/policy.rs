@@ -175,6 +175,7 @@ fn every_read_of_every_entry_point_runs_with_downloads_off_and_the_caller_keeps_
                 outside_edits: cid(6),
                 checkpoint: cid(7),
                 at: at(7),
+                undoes: None,
             })
             .unwrap();
         check("restore");

@@ -33,6 +33,8 @@ fn rewritten(rig: &mut Rig) -> (ThreadId, HostCommand) {
         .expect("the after-turn checkpoint recorded brief.txt")
         .checkpoint();
     let restore = HostCommand::RestoreVersion {
+        thread: None,
+        undoes: None,
         matter: rig.matter(),
         checkpoint: before,
         scope: RestoreRequest::Matter,
@@ -49,6 +51,8 @@ fn restore_again(rig: &mut Rig) -> HostCommand {
         .unwrap()
         .checkpoint();
     HostCommand::RestoreVersion {
+        thread: None,
+        undoes: None,
         matter: rig.matter(),
         checkpoint: before,
         scope: RestoreRequest::Matter,

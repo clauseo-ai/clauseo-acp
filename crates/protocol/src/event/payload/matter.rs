@@ -172,4 +172,7 @@ pub struct VersionRestored {
     pub checkpoint: CheckpointId,
     /// What was put back.
     pub scope: RestoreScope,
+    /// The `restore` checkpoint this one took back, if it did. Missing from older logs.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub undoes: Option<CheckpointId>,
 }

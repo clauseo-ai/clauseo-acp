@@ -68,6 +68,8 @@ fn file_list_rules() {
     // An empty undo undoes nothing.
     assert!(invalid(&undo(Vec::new()).validate()));
     let restore = |scope| HostCommand::RestoreVersion {
+        thread: None,
+        undoes: None,
         matter: matter_id(5),
         checkpoint: checkpoint_id(6),
         scope,
@@ -152,6 +154,8 @@ fn file_lists_cap_their_path_bytes() {
             .collect(),
     };
     let restore = |list: &[MatterPath]| HostCommand::RestoreVersion {
+        thread: None,
+        undoes: None,
         matter: matter_id(5),
         checkpoint: checkpoint_id(6),
         scope: RestoreRequest::Files {

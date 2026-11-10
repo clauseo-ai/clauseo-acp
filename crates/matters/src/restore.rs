@@ -1,6 +1,8 @@
 //! Restoring a version: put back the whole matter, or chosen files, as they were at a
 //! checkpoint. Everything moves forward: the result is a new `restore` checkpoint, so a restore
-//! can be undone. Files added since stay: a restore never deletes.
+//! can be undone. Files added since stay: a restore never deletes, except when it undoes an
+//! earlier restore ([`Restore::undoes`]): then the files that restore added go, each only while
+//! it still holds what that restore wrote.
 //!
 //! The order, and what a crash between two steps leaves (nothing is committed or written before
 //! step 4):
@@ -30,8 +32,8 @@ use clauseo_protocol::{ChangeKind, CheckpointId, CheckpointKind, Count, FileChan
 
 use crate::checkpoint::{Core, OnHeld, Spec, VersionEntry};
 use crate::diff::content_id;
-use crate::history::Oid;
-use crate::stat::{CacheEntry, EntryState};
+use crate::history::{HistoryStore, Oid};
+use crate::stat::{CacheEntry, EntryState, find_by_path};
 use crate::types::{
     Checkpoint, CheckpointOutcome, CommitId, Restore, RestoreFiles, RestorePlan, Restored,
     Settings, TimelineEntry,
@@ -53,13 +55,29 @@ struct Write {
 #[derive(Debug, Default, PartialEq, Eq)]
 struct Plan {
     writes: Vec<Write>,
+    /// The files the undone restore added, still as it wrote them: deleted.
+    removes: Vec<MatterPath>,
     added_since: Vec<MatterPath>,
     kept: Vec<MatterPath>,
 }
 
 impl Plan {
+    /// The files written, then the files deleted: what the lock check looks at.
     fn targets(&self) -> Vec<MatterPath> {
-        self.writes.iter().map(|write| write.path.clone()).collect()
+        self.writes
+            .iter()
+            .map(|write| write.path.clone())
+            .chain(self.removes.iter().cloned())
+            .collect()
+    }
+
+    /// The writes, then the deletes.
+    fn ops(&self) -> Vec<Op> {
+        self.writes
+            .iter()
+            .map(|write| Op::Write(write.path.clone(), write.blob))
+            .chain(self.removes.iter().cloned().map(Op::Delete))
+            .collect()
     }
 
     /// The public plan, with `locked`.
@@ -87,6 +105,7 @@ impl Plan {
             .collect::<Result<Vec<_>, Error>>()?;
         Ok(RestorePlan {
             writes,
+            removes: self.removes,
             added_since: self.added_since,
             kept: self.kept,
             locked,
@@ -230,15 +249,36 @@ fn plan(
     then: &[VersionEntry],
     now: &[CacheEntry],
     chosen: Option<&BTreeSet<&str>>,
+    undone: &[VersionEntry],
 ) -> Result<Plan, Error> {
     let draft = draft(then, now, chosen)?;
     let cap = settings.limits.effective_cap();
     let mut names = Names::default();
     let mut plan = Plan {
         writes: Vec::with_capacity(draft.candidates.len()),
-        added_since: draft.added_since,
+        removes: Vec::new(),
+        added_since: Vec::with_capacity(draft.added_since.len()),
         kept: draft.kept,
     };
+    // A file added since goes only when the undone restore added it and it still holds what
+    // that restore wrote, and when it may be deleted by its exact name.
+    for path in draft.added_since {
+        let wrote = find_by_path(undone, path.as_str(), |file| file.path.as_str());
+        let there = find_by_path(now, path.as_str(), |entry| entry.path.as_str());
+        let same = matches!(
+            (wrote, there.map(|entry| entry.state)),
+            (Some(wrote), Some(EntryState::Read(blob))) if blob == wrote.blob
+        );
+        let ok = same
+            && !rules::is_excluded_path(path.as_str())
+            && writable(folder, settings, &path)?
+            && writeback::respelled(&mut names, folder, &[&Op::Delete(path.clone())])?.is_empty();
+        if ok {
+            plan.removes.push(path);
+        } else {
+            plan.added_since.push(path);
+        }
+    }
     for candidate in draft.candidates {
         let size = core.size_of(candidate.path.as_str(), candidate.blob)?;
         // A name the folder holds only spelled otherwise, by the rule undo and `apply` use
@@ -268,6 +308,33 @@ fn plan(
     Ok(plan)
 }
 
+/// The files the restore `undoes` added (in its tree, not in the checkpoint just before it),
+/// with the blobs it wrote, sorted by path bytes; empty for `None`. `UnknownCheckpoint` unless
+/// `undoes` is a `restore` checkpoint with one before it.
+fn added_by(core: &Core, undoes: Option<CheckpointId>) -> Result<Vec<VersionEntry>, Error> {
+    let Some(id) = undoes else {
+        return Ok(Vec::new());
+    };
+    let before = core
+        .timeline
+        .before(id, CheckpointKind::Restore)
+        .ok_or(Error::UnknownCheckpoint { id })?;
+    let (old, new) = core
+        .history
+        .changed_files(core.timeline.tree(before)?, core.timeline.tree(id)?)?;
+    let old: BTreeSet<&str> = old.iter().map(|file| file.path.as_str()).collect();
+    new.into_iter()
+        .filter(|file| !old.contains(file.path.as_str()))
+        .map(|file| {
+            let path = MatterPath::new(&file.path).map_err(|err| Error::history("tree", err))?;
+            Ok(VersionEntry {
+                path,
+                blob: file.blob,
+            })
+        })
+        .collect()
+}
+
 /// See [`crate::Matter::preview_restore`].
 pub(crate) fn preview(
     core: &Core,
@@ -275,9 +342,11 @@ pub(crate) fn preview(
     settings: &Settings,
     from: CheckpointId,
     files: RestoreFiles<'_>,
+    undoes: Option<CheckpointId>,
 ) -> Result<RestorePlan, Error> {
     let chosen = chosen(files)?;
     let then = core.tree_files(from)?;
+    let undone = added_by(core, undoes)?;
     let now = core.snapshot(folder, settings, OnHeld::Report)?;
     let plan = plan(
         core,
@@ -286,6 +355,7 @@ pub(crate) fn preview(
         &then,
         now.entries(),
         chosen.as_ref(),
+        &undone,
     )?;
     let locked = with_held(locks::locked(folder, &plan.targets()), now.held());
     plan.public(locked)
@@ -324,6 +394,7 @@ pub(crate) fn restore(
         });
     }
     let then = core.tree_files(request.from)?;
+    let undone = added_by(core, request.undoes)?;
     // 2. One walk, whose stored objects the outside-edits checkpoint reuses. A file another
     // program holds is listed, not read, and refuses the restore in step 3.
     let walked = core
@@ -337,6 +408,7 @@ pub(crate) fn restore(
         &then,
         walked.entries(),
         chosen.as_ref(),
+        &undone,
     )?;
     let locked = with_held(locks::locked(folder, &plan.targets()), walked.held());
     if !locked.is_empty() {
@@ -351,8 +423,8 @@ pub(crate) fn restore(
         CheckpointOutcome::Created(_) => Some(outside),
         CheckpointOutcome::Reused(_) => None,
     };
-    let restored: Vec<MatterPath> = plan.targets();
-    if restored.is_empty() {
+    let restored: Vec<MatterPath> = plan.writes.iter().map(|write| write.path.clone()).collect();
+    if restored.is_empty() && plan.removes.is_empty() {
         // Nothing to write: no second walk, so nothing edited meanwhile is called a restore.
         let (last, last_commit, _) = core
             .timeline
@@ -367,16 +439,13 @@ pub(crate) fn restore(
                 skipped: Vec::new(),
             },
             written: restored,
+            removed: Vec::new(),
             added_since: plan.added_since,
             kept: plan.kept,
         });
     }
     // 5. Stage, check again, rename.
-    let ops: Vec<Op> = plan
-        .writes
-        .iter()
-        .map(|write| Op::Write(write.path.clone(), write.blob))
-        .collect();
+    let ops = plan.ops();
     let ops: Vec<&Op> = ops.iter().collect();
     writeback::apply(core, folder, &ops)?;
     // 6. The restore checkpoint.
@@ -389,6 +458,7 @@ pub(crate) fn restore(
         outside_edits,
         checkpoint,
         written: restored,
+        removed: plan.removes,
         added_since: plan.added_since,
         kept: plan.kept,
     })

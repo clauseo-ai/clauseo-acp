@@ -481,6 +481,7 @@ fn matter_events() -> Vec<DomainEvent> {
         }
         .into(),
         VersionRestored {
+            undoes: None,
             from: checkpoint_id(8),
             checkpoint: checkpoint_id(17),
             scope: RestoreScope::Files {

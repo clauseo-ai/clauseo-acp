@@ -200,6 +200,8 @@ fn accept_writes_the_file_and_a_restore_of_before_undoes_it() {
     assert!(checkpoint.is_some());
 
     let undo = HostCommand::RestoreVersion {
+        thread: None,
+        undoes: None,
         matter: rig.matter,
         checkpoint: before,
         scope: RestoreRequest::Files {
@@ -244,6 +246,8 @@ fn a_failure_after_the_write_still_answers_decided_and_the_undo_works() {
     );
 
     let undo = HostCommand::RestoreVersion {
+        thread: None,
+        undoes: None,
         matter: rig.matter,
         checkpoint: before,
         scope: RestoreRequest::Files {
@@ -337,6 +341,8 @@ fn a_retry_after_a_failed_write_records_its_before_and_the_undo_restores_it() {
     );
     assert_ne!(rig.lease_bytes(), ORIGINAL);
     let undo = HostCommand::RestoreVersion {
+        thread: None,
+        undoes: None,
         matter: rig.matter,
         checkpoint: before,
         scope: RestoreRequest::Files {

@@ -1,15 +1,17 @@
 //! `RestoreVersion`: the matter's writer must be free and is held for the whole restore; the
 //! version must be one of the matter's; R8 restores it on the matter's thread; one commit of
 //! the matter's stream logs it. A restore belongs to no thread, so the writer's holder is
-//! [`Holder::Restore`] and the commit carries no thread event. The writer and the note wait
+//! [`Holder::Restore`]; the same commit records it in the stream of the conversation it was asked
+//! from, when the command names one of the matter's. One that `undoes` an earlier restore also
+//! removes the files that restore added, while they hold what it wrote. The writer and the note wait
 //! until that commit is durable; a failed one is sent once more when the matter's stream
 //! drains, as an undo's is.
 
 use clauseo_counts::schema::Feature;
 use clauseo_matters::{CheckpointOutcome, Restored};
 use clauseo_protocol::{
-    CheckpointId, CheckpointKind, CheckpointRecorded, CommandOutcome, ErrorCode, MatterId,
-    MatterPath, RestoreRequest, StreamId, VersionRestored,
+    CheckpointId, CheckpointKind, CheckpointRecorded, CommandOutcome, DomainEvent, ErrorCode,
+    HostCommand, MatterId, MatterPath, RestoreRequest, StreamId, ThreadId, VersionRestored,
 };
 
 use super::super::commands::{AfterCommand, CommandCtx};
@@ -33,18 +35,29 @@ pub(crate) struct RestoreAsk {
     matter: MatterId,
     from: CheckpointId,
     scope: RestoreRequest,
+    /// The restore it takes back.
+    undoes: Option<CheckpointId>,
+    /// The conversation whose stream records it.
+    thread: Option<ThreadId>,
 }
 
 /// Takes the matter's writer (`matter.turn_running` while a turn or an undo holds it or turns
-/// wait for it), then checks the version against the matter's log.
-pub(crate) fn restore_version(
-    actor: &mut Actor,
-    ctx: CommandCtx,
-    matter: MatterId,
-    from: CheckpointId,
-    scope: RestoreRequest,
-) {
-    if let Err(error) = take_writer(actor, matter) {
+/// wait for it), then checks the version, and the restore it undoes, against the matter's log.
+/// A conversation that is not the matter's is refused as `command.invalid`.
+pub(crate) fn restore_version(actor: &mut Actor, ctx: CommandCtx, command: HostCommand) {
+    let HostCommand::RestoreVersion {
+        matter,
+        checkpoint: from,
+        scope,
+        undoes,
+        thread,
+    } = command
+    else {
+        actor.finish_command(ctx.id, Err(lost("a restore command")));
+        return;
+    };
+    if let Err(error) = own_thread(actor, matter, thread).and_then(|()| take_writer(actor, matter))
+    {
         actor.finish_command(ctx.id, Err(error));
         return;
     }
@@ -53,13 +66,15 @@ pub(crate) fn restore_version(
         matter,
         from,
         scope,
+        undoes,
+        thread,
     };
     let stream = StreamId::Matter(matter);
     actor.with_loaded(
         stream,
         Box::new(move |actor: &mut Actor, loaded: Result<(), Error>| {
             let sent = loaded
-                .and_then(|()| own_versions(actor, matter, &[from, from]))
+                .and_then(|()| own_versions(actor, matter, &[from, undoes.unwrap_or(from)]))
                 .and_then(|()| send_restore(actor, ask));
             if let Err(error) = sent {
                 give_up(actor, matter, ctx, error);
@@ -67,6 +82,24 @@ pub(crate) fn restore_version(
             actor.release(stream);
         }),
     );
+}
+
+/// `thread`, when given, is a conversation of `matter`.
+fn own_thread(actor: &Actor, matter: MatterId, thread: Option<ThreadId>) -> Result<(), Error> {
+    match thread {
+        Some(thread)
+            if actor
+                .threads
+                .get(&thread)
+                .is_none_or(|entry| entry.row.matter != matter) =>
+        {
+            Err(Error::refused(
+                ErrorCode::CommandInvalid,
+                "the conversation is not one of this matter's",
+            ))
+        }
+        Some(_) | None => Ok(()),
+    }
 }
 
 fn take_writer(actor: &mut Actor, matter: MatterId) -> Result<(), Error> {
@@ -98,6 +131,7 @@ fn send_restore(actor: &mut Actor, ask: RestoreAsk) -> Result<(), Error> {
         outside_edits: actor.ids.mint(now)?,
         checkpoint: actor.ids.mint(now)?,
         at: now,
+        undoes: ask.undoes,
     };
     let matter = ask.matter;
     actor
@@ -122,6 +156,8 @@ pub(crate) struct RestoreLog {
     events: Vec<MatterEvent>,
     /// The files R8 wrote, for the next prompt's note.
     written: Vec<MatterPath>,
+    /// The conversation whose stream records the restore, with its `VersionRestored`.
+    thread: Option<(ThreadId, VersionRestored)>,
     outcome: CommandOutcome,
     /// The feature the usage counts note once it is logged; `None` for a revisions decision.
     feature: Option<Feature>,
@@ -154,6 +190,7 @@ fn restore_log(actor: &Actor, ask: &RestoreAsk, done: RestoreDone) -> Result<Res
         outside_edits,
         checkpoint,
         written,
+        removed,
         ..
     } = restored;
     let mut events = undo::outside_edits_events(outside_edits)?;
@@ -170,20 +207,28 @@ fn restore_log(actor: &Actor, ask: &RestoreAsk, done: RestoreDone) -> Result<Res
             tracing::error!(%id, "R8 reused a checkpoint its timeline does not hold");
         }
     }
+    let mut thread = None;
     if let CheckpointOutcome::Created(id) = checkpoint.outcome {
         let recorded = CheckpointRecorded::new(id, CheckpointKind::Restore, None, None)
             .map_err(|error| Error::Internal(error.to_string()))?;
         events.push(MatterEvent::checkpoint(recorded, checkpoint.commit));
-        events.push(MatterEvent::plain(VersionRestored {
+        let restored = VersionRestored {
             from: ask.from,
             checkpoint: id,
             scope: ask.scope.clone().into(),
-        }));
+            undoes: ask.undoes,
+        };
+        thread = ask.thread.map(|thread| (thread, restored.clone()));
+        events.push(MatterEvent::plain(restored));
     }
+    // The agent hears of the files removed as of the files put back: changed by the restore.
+    let mut written = written;
+    written.extend(removed);
     Ok(RestoreLog {
         ctx: ask.ctx,
         events,
         written,
+        thread,
         outcome: CommandOutcome::VersionRestored { checkpoint: id },
         feature: Some(Feature::Restore),
         failed: false,
@@ -203,6 +248,17 @@ fn log_commit(actor: &mut Actor, matter: MatterId, log: &RestoreLog) -> Result<(
             &mut draft,
             matter,
             event.clone(),
+            Some(ctx.id),
+            now,
+            &mut actor.ids,
+        )?;
+    }
+    if let Some((thread, restored)) = &log.thread {
+        super::out::flush_text(actor, *thread, &mut draft)?;
+        actor.pipeline.push(
+            &mut draft,
+            StreamId::Thread(*thread),
+            DomainEvent::VersionRestored(restored.clone()),
             Some(ctx.id),
             now,
             &mut actor.ids,

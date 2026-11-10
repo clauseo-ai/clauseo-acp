@@ -82,6 +82,16 @@ impl Timeline {
         self.by_id.contains_key(&id)
     }
 
+    /// The checkpoint just before `id`, when `id` is on the timeline as a checkpoint of `kind`
+    /// and is not the first.
+    pub(crate) fn before(&self, id: CheckpointId, kind: CheckpointKind) -> Option<CheckpointId> {
+        let index = *self.by_id.get(&id)?;
+        if self.entries.get(index)?.kind != kind {
+            return None;
+        }
+        Some(self.entries.get(index.checked_sub(1)?)?.id)
+    }
+
     /// The commit of checkpoint `id`, if it is on the timeline.
     pub(crate) fn commit(&self, id: CheckpointId) -> Option<Oid> {
         self.by_id

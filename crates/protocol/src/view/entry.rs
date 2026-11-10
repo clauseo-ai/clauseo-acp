@@ -472,7 +472,8 @@ pub enum MarkerKind {
         /// Files kept as they were.
         kept: Vec<MatterPath>,
     },
-    /// A version was restored (matter stream).
+    /// A version was restored (matter stream, and the stream of the conversation it was asked
+    /// from).
     VersionRestored {
         /// The checkpoint restored from.
         from: CheckpointId,
@@ -480,6 +481,9 @@ pub enum MarkerKind {
         checkpoint: CheckpointId,
         /// What was put back.
         scope: RestoreScope,
+        /// The `restore` checkpoint it took back, if it did.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        undoes: Option<CheckpointId>,
     },
     /// The matter's folder was located after it moved (matter stream): "Found at {folder}".
     MatterRelocated {

@@ -96,6 +96,8 @@ golden! { HostCommand::name_of {
         files: vec![FileDecision { path: path("a.docx"), choice: FileChoice::Undo }],
     };
     RestoreVersion => restore_version: HostCommand::RestoreVersion {
+        thread: None,
+        undoes: None,
         matter: matter_id(1),
         checkpoint: checkpoint_id(17),
         scope: RestoreRequest::Files { paths: vec![path("a.docx")] },

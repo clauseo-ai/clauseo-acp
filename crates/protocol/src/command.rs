@@ -377,6 +377,12 @@ pub enum HostCommand {
         /// What to put back. A `Files` scope names at least one file; a kind or field this
         /// version does not know is refused when the command decodes.
         scope: RestoreRequest,
+        /// The `restore` checkpoint this restore takes back: the files it added go too.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        undoes: Option<CheckpointId>,
+        /// The conversation it was asked from, of this matter: its stream records the restore.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        thread: Option<ThreadId>,
     },
     /// Change the display settings; answers `Done`, and every app subscriber gets
     /// `HostEvent::SettingsChanged`. A patch naming a key the firm's policy sets is refused

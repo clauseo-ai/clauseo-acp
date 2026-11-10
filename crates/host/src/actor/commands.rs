@@ -271,11 +271,7 @@ fn run_command(actor: &mut Actor, ctx: &CommandCtx, command: HostCommand) {
         | HostCommand::RemoveQueuedPrompt { .. }
         | HostCommand::SendQueuedNow { .. }
         | HostCommand::ResumeQueue { .. }) => to_turn::run_turn_command(actor, ctx, command),
-        HostCommand::RestoreVersion {
-            matter,
-            checkpoint,
-            scope,
-        } => turn::restore_version(actor, *ctx, matter, checkpoint, scope),
+        restore @ HostCommand::RestoreVersion { .. } => turn::restore_version(actor, *ctx, restore),
         HostCommand::SetUiSettings { patch } => set_ui_settings(actor, ctx, &patch),
         HostCommand::SetToolSettings { patch } => set_tool_settings(actor, ctx, &patch),
         HostCommand::SetSkillPack { id, on } => set_skill_pack(actor, ctx, &id, on),

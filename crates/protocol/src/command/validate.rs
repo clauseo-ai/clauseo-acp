@@ -153,6 +153,8 @@ impl HostCommand {
                 matter: _,
                 checkpoint: _,
                 scope,
+                undoes: _,
+                thread: _,
             } => scope.check("RestoreVersion"),
             // The picks are checked by their types as they decode.
             Self::CreateThread {
