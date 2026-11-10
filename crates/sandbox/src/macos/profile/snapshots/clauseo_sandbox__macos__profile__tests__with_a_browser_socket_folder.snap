@@ -260,6 +260,11 @@ expression: text
 (allow file-read-metadata
   (path-ancestors (param "BROWSER_SOCKETS")))
 
+; The launch's probe name, which no service registers: the lawyer's side finds
+; the session's processes by it, whatever group or parent they have.
+(allow mach-lookup
+  (global-name (param "SESSION_PROBE")))
+
 ; Network: the proxy's loopback ports and the browser socket folder only; no DNS.
 (allow network-outbound
   (remote ip "localhost:41234")
@@ -282,3 +287,4 @@ READ_ONLY_6 = <root>/matter/CLAUDE.local.md
 READ_ONLY_7 = <root>/matter/CLAUDE.md
 HIDDEN_0 = <root>/data
 BROWSER_SOCKETS = <root>/tmp/clauseo-ab-aaaaaaaaaaaaaaaa
+SESSION_PROBE = <outside the temp folder: chat.clauseo.session.clauseo-4242-7>

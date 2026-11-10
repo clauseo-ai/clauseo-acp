@@ -38,6 +38,11 @@ mod git;
 
 #[cfg(test)]
 #[cfg(target_os = "macos")]
+#[path = "jail/git_watch.rs"]
+mod git_watch;
+
+#[cfg(test)]
+#[cfg(target_os = "macos")]
 #[path = "jail/tree.rs"]
 mod tree;
 

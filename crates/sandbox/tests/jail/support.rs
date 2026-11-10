@@ -130,13 +130,19 @@ impl World {
 
     /// [`World::builder`] with the matter at `matter` (relative) in place of `m1`.
     pub(crate) fn builder_for(&self, matter: &str) -> PolicyBuilder {
-        Policy::builder(self.at(matter), self.at("data/agent-state/m1/codex"))
+        self.builder_at(&self.at(matter))
+    }
+
+    /// [`World::builder`] with the matter at `matter` (absolute) in place of `m1`.
+    pub(crate) fn builder_at(&self, matter: &Path) -> PolicyBuilder {
+        Policy::builder(matter, self.at("data/agent-state/m1/codex"))
             .home(self.at("home"))
             .notes(self.at("data/agent-state/m1/notes"))
             .credential_link(self.at("data/agent-state/m1/codex/auth.json"))
             .claude_store(self.at("claude"))
             .hidden(self.at("data"))
             .hidden(self.at("m2"))
+            .git_set_aside(self.at("data/sandbox/git-set-aside"))
     }
 }
 
@@ -169,9 +175,24 @@ pub(crate) fn listen_unix_at(path: PathBuf) -> PathBuf {
 }
 
 impl Drop for World {
+    /// Removes the folder. A launch's git watch writes its matter state file under `data/` once
+    /// the session is gone, a moment after the test's run returns, so a removal that races it
+    /// is tried again for up to 3 s.
     fn drop(&mut self) {
-        if let Err(error) = std::fs::remove_dir_all(&self.root) {
-            eprintln!("removing {}: {error}", self.root.display());
+        let mut tries = 0;
+        loop {
+            match std::fs::remove_dir_all(&self.root) {
+                Ok(()) => return,
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => return,
+                Err(error) if tries >= 30 => {
+                    eprintln!("removing {}: {error}", self.root.display());
+                    return;
+                }
+                Err(_) => {
+                    tries += 1;
+                    std::thread::sleep(std::time::Duration::from_millis(100));
+                }
+            }
         }
     }
 }

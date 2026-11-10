@@ -6,6 +6,7 @@ use std::fs;
 use std::io;
 use std::path::{Component, Path, PathBuf};
 
+use super::git_aside::{finish, places};
 use super::links::{canonical_findings, covered_targets, fit_budget, split_linked};
 use super::names::{Keys, path_key};
 use super::{
@@ -115,7 +116,7 @@ pub(super) fn build(b: PolicyBuilder) -> Result<Policy, Error> {
     let link_targets = covered_targets(&links, &allowed, &allowed_exactly);
     let link_folders = fit_budget(&links, &link_targets, &matter, &working_trees)?;
 
-    Ok(Policy {
+    finish(Policy {
         matter,
         state,
         tmpdir,
@@ -140,6 +141,7 @@ pub(super) fn build(b: PolicyBuilder) -> Result<Policy, Error> {
         link_targets,
         link_folders,
         read_only_in_matter,
+        git: places(b.git_set_aside.as_deref())?,
     })
 }
 

@@ -1,9 +1,10 @@
-//! The set-aside's times: a pass's folder name and an entry's time, in UTC.
+//! The set-asides' times in UTC: a folder name and a record's time (Windows' set-aside, macOS'
+//! git watch).
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
 /// `now` in UTC as `YYYYMMDDTHHMMSS-mmmZ`: a pass's folder name.
-pub(super) fn timestamp(now: SystemTime) -> String {
+pub(crate) fn timestamp(now: SystemTime) -> String {
     let (year, month, day, secs, millis) = utc(now);
     format!(
         "{year:04}{month:02}{day:02}T{:02}{:02}{:02}-{millis:03}Z",
@@ -14,7 +15,7 @@ pub(super) fn timestamp(now: SystemTime) -> String {
 }
 
 /// `now` in UTC as RFC 3339 to the millisecond: `YYYY-MM-DDTHH:MM:SS.mmmZ`.
-pub(super) fn rfc3339(now: SystemTime) -> String {
+pub(crate) fn rfc3339(now: SystemTime) -> String {
     let (year, month, day, secs, millis) = utc(now);
     format!(
         "{year:04}-{month:02}-{day:02}T{:02}:{:02}:{:02}.{millis:03}Z",

@@ -2,9 +2,12 @@ use super::*;
 use crate::test_support::TempDir;
 
 mod allowed;
+mod commondir;
 mod links;
+mod matter_watch;
 mod nested;
 mod reallowed;
+mod set_aside;
 mod tmpdir;
 mod unicode;
 

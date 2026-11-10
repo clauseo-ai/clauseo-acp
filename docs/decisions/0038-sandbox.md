@@ -93,12 +93,264 @@ macOS and in the Windows ACL plan (a whole-tree DenyWrite). The cost: a folder w
 named `HEAD` (rare in a matter) is read-only to the agent, and a matter whose root holds one is
 read-only entirely.
 
-What the name rules cannot see, covered by the lawyer-side watch (a follow-up): a folder that
-already holds a `.git` or a bare layout, made in `TMPDIR`, the state or notes folder, and moved
-into the matter (checked on this Mac, kept as the jail test
-`a_folder_holding_a_git_moved_in_is_not_stopped_by_the_name_rule`); a directory clonefile
-(`cp -c -R`) of such a folder into the matter; a symbolic link in the matter to a `.git` outside
-it.
+**The git watch** (`src/macos/git_watch`, the lawyer-side backstop). A name rule sees only the
+last name of a create or a rename's destination, so it can't stop what arrives under another
+name: a folder already holding a `.git` or a bare layout, made in the state folder (writable,
+same volume), and moved into the matter (`git init $STATE/foo && mv $STATE/foo <matter>/foo`,
+checked on this Mac); a directory clonefile of one; a symbolic link in the matter to a
+repository outside it. The same name denies as the matter's (`.git` and `HEAD`, any case, HFS+
+ignorables) also cover the session's temp folder and notes, last of the file rules, so no
+repository is made there at all. The state folder is left out: Codex clones its plugin
+marketplace with git into `$CODEX_HOME/.tmp/plugins` there. So each jailed launch starts a watch
+on the matter, outside the jail, before the agent. It looks for:
+
+- a new `.git` (folder, or file naming a `gitdir:`);
+- a `HEAD` file or link in any folder that was not a repository at launch, whatever surrounds
+  it; a new repository-shaped folder (`HEAD` with `objects` and `refs`, folders or links, as
+  git follows links, or with a `commondir` file) is taken whole, otherwise only its `HEAD`;
+- a new symbolic link that leads outside the matter or nowhere, judged without following any
+  link: its target is walked from the link's folder one name at a time with `fstatat` from held
+  descriptors, and a link on the way counts as leading out (`a -> b/../x` with `b -> .` goes
+  to the matter's parent, though `b/../x` reads as `x`); one that ends at another link is
+  judged as that one is, up to 8 in a row;
+- anything new at a launch repository's `commondir` target (below).
+
+Names compare with the HFS+ ignorables stripped, then by the policy's fold. What was there at
+launch stays while it keeps its file ID: the walk's `.git`s and outbound links, and the
+repositories, `HEAD` folders (left alone while they stay unshaped) and folders of the watch's
+own walk (one more walk of the matter per launch, before the agent runs). How it watches:
+`FSEvents` on the matter (file events, no defer, 0.1 s latency, a minimal binding to
+CoreServices). Each batch of events is first checked by name alone, listing no folder: a `.git`
+anywhere in an event's path, a `HEAD` at its end (unless in a launch folder that held one), or
+an `objects`, `refs` or `commondir` arriving beside a `HEAD` ends the session at once, whether
+or not the item is still there, so a repository renamed into the matter and out again before
+the check still ends it. Only a launch repository that keeps its file ID (the profile makes it
+read-only) and the volume set-aside folder are passed by. An item an event reported that is
+gone by check time is counted, per watch and for the whole host, and logged; a folder renamed in
+and out under a plain name leaves only that count. Past the names, every event re-checks its
+parent folder's `HEAD`, so a folder of `HEAD` and `config` that gets `objects` and `refs`
+later is caught; a created, renamed-in or cloned folder is scanned, within 20,000 listed
+entries for the whole batch: past that the scan stops and the session ends, so a huge folder
+can't hold up the watch while the agent runs (the final scan after the kill has no cap). Any
+find while the agent may run ends the session, gone or not, and a scan then stops at its first
+find, walking no further; the scan after the kill is complete. A folder in the matter that
+can't be opened or listed (`chmod 000` hides what is in it; a missing folder, or a network
+volume or automount the watch refuses, is no such folder) counts as a find while the agent may
+run; the final scan keeps it as stuck (below). Every walk calls the runner's progress hook
+(`Watch::on_progress`) once per folder it lists. A dropped or must-scan event, a
+changed root or a path outside the matter rescans it; a stream that can't start refuses the
+launch ("Clauseo won't start the AI tool: it can't watch <folder> for changes (...)"), as there
+is no fallback to timed rescans. The session's **notes folder** (`Policy::notes`) gets the
+same: a watch of its own rooted there, with its own stream, canary, 30 s pass and state file
+(keyed by the notes path), an empty launch (nothing in notes is the lawyer's to keep: the
+profile makes no repository there read-only, so `Launch::keep_repos` is false and even a
+repository found there at launch is a find), its items
+set aside into the data dir's folder, and the same session: a find there ends the session as
+one in the matter does, and the host's start and each launch finish its dead sessions as they
+do the matter's. `start` takes the matter's mode from `Policy::matter_watch()`: `Live`, or
+`AfterOnly` (no stream, canary or 30 s pass: only the launch's check before and the final scan
+after) for a matter no stream can watch (below); the notes watch is always `Live`. The launch
+logs the mode and the session record keeps it. Every file operation goes by descriptor: a
+path's folder is opened with `O_NOFOLLOW_ANY` and its last name read or changed with the `*at`
+calls, a walk holds each folder open while it lists it and opens its subfolders from it, and
+renames are `renameatx_np(RENAME_EXCL)`. Scans never follow a link, never enter a `.git`, and
+never enter, list or look up in a folder on a volume without `MNT_LOCAL`, one the automounter
+mounted, or at or below `/net` or `/Network`, apart from an `AfterOnly` matter's own volume at
+and below the matter (a different mount inside it stays refused). A folder's entry is read with
+`fstatat` from its parent and, on another volume, that volume's flags with `getattrlistat`,
+before anything is opened: autofs fires no trigger for a lookup of attributes on the last name
+(its `trigger_resolve`), except on a "force a mount" node only its own maps make.
+**Volumes under the folder:** the launch walk notes every device it meets under the matter (and
+notes), and every folder on a volume a scan never enters. Any other volume a later scan meets
+(a disk image or share mounted inside the live matter brings a ready-made tree with no event
+for what is in it) is a find, never a silent skip: while the agent may run it ends the session;
+the final scan keeps it as stuck, and the matter's launches are refused ("... until the disk or
+share mounted at <path> is ejected") while it is still mounted there. From inside the jail no
+disk image can be attached: the same 1 MB image attaches outside, while inside `hdiutil attach`
+fails on the Sandbox's refusal of its look-up of `com.apple.system.hdiejectd` (the jail test
+reads that kernel line), and nothing is mounted. A network drive or automount **already** in
+the matter or notes at launch is refused rather than watched ("Disconnect the network drive at
+<path> from this matter's folder, then start the AI tool again. ..."): no scan enters it, and
+the profile, fixed when the launcher is made, can't deny it per launch. Device numbers can be
+reused once a volume is ejected, so a new volume that happens to get a launch volume's number
+passes as that one. A session recorded before volumes were kept judges no volume new in its
+dead-session scan; its matter's next launch records them. Not covered: a volume mounted inside another volume that
+also appeared during the session is recorded only as the outer one (the scan doesn't enter a
+new volume), so after the outer is ejected nothing records the inner; and a stuck record clears
+once its folder's device matches the folder's above it, which a mount nested under a volume
+ejected and remounted can satisfy early. The jail test reads the Sandbox's refusal with `log
+stream`, which needs an administrator account and can drop lines under load: on a standard
+account, or on a very busy machine, that test can fail with nothing wrong in the jail.
+
+Two backstops cover a stream that loses events without saying so (seen on a disk image mounted
+seconds before, under a full parallel test run: nothing for over 10 s). **The canary:** every
+10 s the watch rewrites its canary, `watch-canary-<16 hex>` with a random part of its own (no
+other session's write can answer it; removed when the watch stops, and one unwritten for 2
+minutes, a crashed host's, is removed at each launch and at the host's start), in the set-aside
+folder it uses, which is on the matter's
+volume, denied to the agent and watched by the same stream (one stream, two paths). Its event
+comes about 4 ms after the write on this Mac. When none comes within 5 s, or the canary can't
+be written, the stream is lost and the session ends as for a find: kill first, then the final
+scan, and the lawyer gets `Denial::GitWatchLost` ("Clauseo stopped the AI tool because it
+could no longer watch this matter's folder for changes."). The canary's lateness is judged on
+every input, once the canary's events in the batch being read count, and each batch is stamped
+when the stream queues it: one read 5 s or more after that ends the session the same way, as
+the watch lags behind the agent (an agent that writes nonstop would otherwise hold the canary's
+event back behind its own). There is no fallback to rescans. An
+event flagged must-scan-subdirectories or dropped (user or kernel) only rescans the matter at
+once, and the watch carries on.
+**The 30 s pass:** the watch keeps every folder of the matter with its file ID and its
+modification and status-change times (from its launch walk, then from its own listings); every
+30 s it reads them again and lists only the folders whose ID or times changed, adding their new
+subfolders to be listed in turn. A pass stops after 250 ms of work and the next goes on from
+there. Either backstop's find ends the session as an event's does.
+
+**Kill first, then set aside.** On the first find while the agent may run, the watch ends every
+process of the session and moves nothing until none is left: a loop moving ready repositories in
+would otherwise keep one present most of the time. A process group or tree misses a child that
+calls `setsid` and outlives its parent (re-parented to launchd), which keeps write access to the
+matter. So each launch passes its profile a probe name of its own (`-D
+SESSION_PROBE=chat.clauseo.session.<tag>-<n>-<random>`, the random part made once per host
+process, so a name of an earlier host run, even one with the same pid, never matches a live
+session's), and the profile allows a `mach-lookup` of that
+one name, which no service registers. A process belongs to the session when `sandbox_check`
+says it is sandboxed, may look up the session's name, and may not look up a control name no
+profile allows (`SANDBOX_CHECK_NO_REPORT`, so the checks log no denial). No process can shed
+its sandbox, so this finds every process of the session whatever its group or parent
+(`proc_listallpids`, about 2 ms for 700 processes). Considered and refused: the responsible
+PID (a process can spawn with the "disclaim" attribute and be its own), and a path probe
+(`sandbox_check` answers "denied" for every process on a path that doesn't exist). The session
+counts as over only when its group is empty and no process carries the probe; its kill is
+`TreeKill` plus SIGKILL to each probed process, checked again just before its signal, sent again
+every 0.1 s. The kill goes first: the first find of a batch returns at once, before the batch's
+other events' scans (a batch's names are all checked first, then its arrived folders on one
+budget), a rescan or the 30 s pass, and nothing more is checked while the session ends.
+Nothing moves while a process of the session is left: when one outlives the kill's 10 s, the
+session's record is marked first, then the final scan only lists what it finds, within the
+scan's entry budget (renames by path could be redirected by a live process swapping a folder),
+and the record keeps those paths (below). An agent that did not start is treated the same when
+a process carrying its probe is left.
+The probe fails closed: a `sandbox_check` that errs on a running process keeps the session
+running, so only a plain "not sandboxed", "may not look up the session's name" or "may look up
+the control name" rules a process out. Such a process is never killed, though: only one every
+check plainly puts in the session is, and right before each signal it is checked again and its
+start time (`proc_pidinfo`) compared with the listing's, so a reused pid is skipped. A process
+whose checks keep failing keeps the session alive past the kill's cap, so its record stays.
+A dead session's kill (below) also skips every process that started before the session's
+launch time, which its record holds. A process can't shed the probe from inside: a nested
+`sandbox-exec` can't apply a profile, and `launchctl submit` hands launchd no job (jail tests).
+A watch thread that panics ends the session; an attach to a thread already gone ends it too.
+**The watchdog:** a check reads what the agent made while it runs (a folder moved in is walked
+whole; a disk can stop answering), and
+while one check holds the watch's thread nothing else is checked. So each runner publishes when
+its check began and each folder a walk lists, and one watchdog thread per host looks every
+0.1 s: a check (one batch of events, a rescan, a 30 s pass) with no progress for 5 s ends the
+session by its tree and probe, logged, and the kill goes again on each look while that check
+runs; the runner, once its check returns, tells the lawyer (`Denial::GitWatchLost`) and goes to
+the final scan. A check still held 10 s after the first kill, with a process of the session
+left, has the session's record marked outlived from the watchdog's thread, so the matter's next
+launch is refused even if the check never returns. 5 s is the canary's wait: a check held
+longer leaves the agent as unwatched as a lost stream. The three windows (the canary, a late
+batch, the watchdog) are 5 s each: at 2 s, load averages of 50 and more on the test Mac lagged
+the stream or the watch thread past the window and ended sessions that were fine. The canary's
+wait stays under its 10 s interval, and the other two are defined as it. A rescan of a big
+matter that keeps listing folders is not stuck, but no check runs past 60 s in all
+(`CHECK_DEADLINE`): a listing that never ends still beats on every folder. Up to that, a
+rescan that keeps making progress holds the watch's thread while the agent runs; the events
+meanwhile queue and are read after it (a batch read 5 s late then ends the session). A session
+attached after the watchdog gave up on a check is ended
+at once.
+
+Then the final scan sets each item aside by one `rename(2)` that never replaces into
+`<set-aside>/<UTC time>-<session>-<random>/item`, beside a `record.json` (the original path,
+what it was, the time, the session, the outcome, a link's target), and renames the item's own
+`HEAD` and `config` there, so the set-aside copy is no working repository. The set-aside
+folder is `PolicyBuilder::git_set_aside` (`<data_dir>/sandbox/git-set-aside`): `build()`
+refuses one outside every hidden path or meeting the matter or any path allowed again, and the
+profile denies it with `file-read* file-write*` as its last file rule. For a matter on another
+local volume, a rename can't reach that folder (`EXDEV`), so `build()` names a `.clauseo`
+folder at the root of the matter's volume (`Policy::volume_set_aside`), which the profile denies
+the same way and the watch never enters; the launch makes it (a real folder owned by the lawyer,
+made private where the volume keeps modes) and is refused with a plain reason when it can't (a
+read-only volume, a link, another owner), as when no set-aside folder is named. Matters on
+other volumes are not refused for being there.
+
+An item that still can't move is neutralised in place: a folder's `HEAD` and `config` get a
+random `-set-aside-by-clauseo-<16 hex>` suffix (a `.git` gets one too), a file is renamed the
+same way, and a link (which holds no data) is removed once its target is recorded. If that fails
+as well, the matter's state file (below) keeps the item, and the matter's launches are refused
+("Clauseo won't start an AI tool in this matter until <path> is moved out of it ...") until it
+is gone. A folder the final scan can't read is kept the same way, and launches are refused
+("... until it can read <path>: the folder could not be read when an earlier AI session ended,
+so Clauseo could not check it for Git folders ...") until it can be read. Nothing else is ever
+deleted; macOS has no restore of these items.
+
+**The matter's state file**, `<git set-aside>/matters/<hash of the matter>.json` under a
+`flock`, records each running session: its host process (pid and start), its probe name, its launch
+time, its set-aside folder and its launch baseline, and the matter's path. The session's own watch removes
+it after its final scan; when the kill's 10 s ran out with a process left, it marks it instead,
+with what that scan found. A session whose
+host is gone (or, in this host, whose watch is not running) never ran its final scan, or ran it
+with a process left: its surviving processes are killed by its probe (up to 3 s, only those
+started since its launch) and, once none is left, its scan runs from its baseline, every folder
+counted as old. It moves repository shapes only, never a folder of the lawyer's around them:
+each `.git` not the launch's, the `HEAD` of each folder that was not a launch repository (a
+repository-shaped one keeps its `objects` and `refs`), each link out and each new `commondir`
+path. A repository the lawyer made after the crash loses its `.git` or `HEAD` the same way, and
+the notice says where it went. That happens at the **host's start**, for every matter
+(`git_watch_start_up`, which
+the host calls once on a thread of its own with its git set-aside folder), and at each launch of
+the matter, before the watch takes anything in it for the lawyer's. While a process of it is
+left nothing of it moves, its record stays, and the matter's launches are refused ("Clauseo
+won't start an AI tool in this matter yet: a process of an earlier AI tool session is still
+running after Clauseo tried to stop it. Restart the Mac, then try again.", with how many items
+it left when the record lists some), until a start or launch finds none left; the record also
+stays while the matter can't be found (a disk not plugged in), for the next try. At the **host's quit**, `git_watch_quit(within)` refuses further launches, kills every
+running session by its probe (again every 50 ms) and waits up to `within` for the watches to
+run their final scans; a watch that doesn't finish keeps its record for the next start.
+
+Every folder the watch leaves alone at launch is one the policy made read-only: the launch's
+walk lists every folder holding a `HEAD` (the agent could complete it into a git dir), and the
+watch exempts only folders holding a `HEAD`, repository-shaped or not (its `objects`, `refs`
+and `commondir` links count wherever they lead, dangling ones too).
+
+**`commondir` targets.** A launch repository's (or `.git`'s) `commondir` that names the matter,
+the state folder, a missing path or any folder no read-only rule covers would let the agent
+build `objects`, `refs` and `config` there. `build()` lists them: for a missing path the
+profile denies writes at and below it; for an existing folder, writes at and below `objects`,
+`refs`, `config`, `packed-refs`, `hooks`, `info` and `worktrees` in it (Seatbelt matches
+these literals in any letter case on APFS, checked on this Mac). The watch flags anything new at
+those paths in the matter. A `commondir` that is a symbolic link, dangling or not, refuses the
+build ("a git repository's `commondir` may not be a symbolic link"): git reads `config` and
+`hooks` through it, and where it leads can change once the agent runs. A `commondir` that
+arrives anywhere during a session ends it by its name, before anything is read.
+
+Each set-aside reaches the launch's sink, uncapped, as `Denial::GitSetAside { path, what,
+outcome, session_ended }`. `notice()` is the lawyer's text. The agent runs as the lawyer's
+own user, so no one can tell who made the item, and the notice blames no one: "A Git folder
+appeared in the matter at Clients/Acme/.git while an AI tool was running. Clauseo stopped the
+session and moved it to <path>, because Git folders can run programs when opened. If you put it
+there yourself, you can move it back from there." No other move back is offered. Every path a
+notice or refusal shows, a stuck item's launch refusal included, has its control characters,
+bidirectional controls (U+061C, U+200E, U+200F, U+202A to U+202E, U+2066 to U+2069),
+zero-width and invisible characters (U+200B to U+200D, U+2060 to U+2064, U+FEFF) and line
+separators shown as escapes (`\u{202e}`), each byte that isn't UTF-8 as `\x80` and a
+backslash doubled, so a crafted name can't break the line, reorder the text or pass for
+another. `refusal()` is a line for the agent's
+log. The policy cost, plainly: agents can't clone or init a repository into the matter, their
+temp folder or notes, and a find ends their session. A `.git` or bare repository the lawyer
+makes in the matter while a session runs ends that session too and is moved the same way; so
+does a big folder the lawyer copies in (past the scan budget), though nothing in it moves
+unless it is a repository.
+
+**A matter on a volume the stream can't watch** (no `MNT_LOCAL`, `autofs`, mounted by the
+automounter, or under `/net` or `/Network`; `FSEvents` doesn't report other machines' changes).
+`build()` reads each volume from an open folder (`fstat` and `fstatfs` on one descriptor, the
+nearest existing folder for a path not made yet). It allows such a matter only when no other
+path the agent can write (the state folder, the session's temp folder, notes, the Claude store,
+the browser socket folder) is on the same volume: then nothing can be renamed in from
+elsewhere, and `Policy::matter_watch()` is `MatterWatch::AfterOnly`: the launch runs no live
+stream, only the scans before and after the session. Otherwise it refuses with a plain reason.
 
 `CLAUDE.md` at any depth of the matter cannot be created, written, renamed onto or removed, in any
 letter case: Claude loads a nested `CLAUDE.md` when it works in that folder. This is stricter than
@@ -320,6 +572,10 @@ given.
   opened handle, with no folding.
 
 Residual risks:
+- **A matter on a network volume is watched only before and after a session.** While the agent
+  runs only the profile's name denies stop a new `.git` or `HEAD` there; nothing can be renamed
+  in, as `build()` refuses the matter when another path the agent writes shares its volume.
+  Another machine on the network can still change the matter during the session.
 - On FAT32 volumes two siblings can differ only in normalisation (U+0958 and U+0915 U+093C were
   made as two folders on a FAT32 image; on an exFAT image the second form of each of U+0958, ऩ
   and café reported "already exists", as on APFS). A Seatbelt rule that allows one then also

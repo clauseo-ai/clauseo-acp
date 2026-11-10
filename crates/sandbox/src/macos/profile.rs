@@ -13,6 +13,11 @@ use std::path::{Path, PathBuf};
 use names::{GIT_NAME_REGEX, HEAD_REGEX, INSTRUCTIONS_REGEX};
 use params::Params;
 
+#[cfg(target_os = "macos")]
+pub(crate) use git::PROBE_PREFIX;
+#[cfg(any(target_os = "macos", test))]
+pub(crate) use git::args_with_probe;
+
 use crate::{Error, Loopback, PathRule, Policy};
 
 /// The base allowances (system reads, devices, sysctls, Mach services), from Codex's base.
@@ -105,6 +110,8 @@ struct Writer {
     message: String,
     /// A comment written before the next rule, and dropped if a new comment comes first.
     comment: Option<String>,
+    /// The launch tag.
+    tag: String,
 }
 
 impl Writer {
@@ -114,6 +121,7 @@ impl Writer {
             params: Vec::new(),
             message: format!("(with message \"{tag}\")"),
             comment: None,
+            tag: tag.to_owned(),
         }
     }
 
@@ -188,6 +196,7 @@ impl Writer {
         self.credential_link_metadata(&p);
         self.read_only_state(&p);
         self.browser_sockets(policy);
+        git::rules(self, policy, &p);
         self.network(policy);
     }
 
@@ -560,6 +569,7 @@ fn directory_ancestors(param: &str) -> String {
     format!("(require-all (vnode-type DIRECTORY) (path-ancestors {param}))")
 }
 
+mod git;
 mod names;
 mod params;
 #[cfg(test)]

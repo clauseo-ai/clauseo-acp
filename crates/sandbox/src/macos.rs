@@ -4,11 +4,17 @@
 //! unified log's Sandbox lines into [`Denial`](crate::Denial)s.
 
 #[cfg(target_os = "macos")]
+mod git_watch;
+#[cfg(target_os = "macos")]
+mod jail_procs;
+#[cfg(target_os = "macos")]
 mod launcher;
 mod profile;
 #[cfg(target_os = "macos")]
 mod watch;
 
+#[cfg(target_os = "macos")]
+pub use git_watch::{quit as git_watch_quit, start_up as git_watch_start_up};
 #[cfg(target_os = "macos")]
 pub use launcher::SeatbeltLauncher;
 pub use profile::SeatbeltProfile;

@@ -532,3 +532,16 @@ fn the_head_regex_matches_only_a_last_name_head() {
     ];
     check_regex(HEAD_REGEX, &matter, &refused, &allowed);
 }
+
+#[test]
+fn each_launch_gets_its_own_probe_name() {
+    let w = World::new("profile-probe");
+    let profile = SeatbeltProfile::new(&w.builder().build().unwrap(), TAG).unwrap();
+    let rule = "(allow mach-lookup\n  (global-name (param \"SESSION_PROBE\")))";
+    assert!(profile.text().contains(rule), "{}", profile.text());
+    let default = std::ffi::OsString::from("SESSION_PROBE=chat.clauseo.session.clauseo-4242-7");
+    assert!(profile.args().contains(&default));
+    let args = super::args_with_probe(&profile, "chat.clauseo.session.clauseo-4242-7-3");
+    let ours = std::ffi::OsString::from("SESSION_PROBE=chat.clauseo.session.clauseo-4242-7-3");
+    assert!(args.contains(&ours) && !args.contains(&default), "{args:?}");
+}

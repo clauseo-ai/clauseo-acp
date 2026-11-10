@@ -400,6 +400,14 @@ crates/sandbox/src/windows/tests.rs a_junction_named_sandbox_is_refused clippy::
 crates/sandbox/src/detect.rs seatbelt::run clippy::disallowed_methods
 crates/sandbox/src/links/tests.rs walk_of_fifty_thousand_files clippy::disallowed_methods
 # Added by S14 (macOS): the agent's TMPDIR in its state folder, the jail tests' file setup.
+crates/sandbox/src/macos/git_watch/fsevents.rs - unsafe_code
+crates/sandbox/src/macos/git_watch/os.rs Real::now clippy::disallowed_methods
+crates/sandbox/src/macos/git_watch/os.rs Lock::0 dead_code
+crates/sandbox/src/macos/git_watch/os/attr.rs - unsafe_code
+crates/sandbox/src/macos/git_watch/aside.rs Aside::done clippy::too_many_arguments
+crates/sandbox/src/macos/jail_procs.rs - unsafe_code
+crates/sandbox/src/macos/git_watch/tests_live.rs - clippy::disallowed_methods
+crates/sandbox/src/macos/git_watch/tests_fd.rs - clippy::disallowed_methods
 crates/sandbox/src/macos/launcher.rs make_tmpdir clippy::disallowed_methods
 crates/sandbox/tests/jail/support.rs - clippy::disallowed_methods
 # clauseo-mcp (S27): main's one stderr print of a mode's failure, the write module (the guard's

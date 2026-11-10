@@ -401,7 +401,8 @@ fn claude_md_cannot_be_made_or_changed_at_any_depth() {
         "printf x >> x/CLAUDE.md",
         "mv x/draft.txt x/CLAUDE.md",
         "rm x/CLAUDE.md",
-        "ln -s draft.txt sub-link && mv sub-link x/claude.md",
+        // The link leads inside the matter: one leading nowhere is the git watch's to set aside.
+        "ln -s x/draft.txt sub-link && mv sub-link x/claude.md",
     ] {
         sh(&launcher, &m1, script, &[]).assert_refused();
     }

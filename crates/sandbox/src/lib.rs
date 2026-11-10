@@ -92,6 +92,18 @@
 //!   reports file-data reads and writes as [`Denial::Path`], the log's folds of repeats as
 //!   [`Denial::Dropped`], and only logs network and device denials. A watcher that fails to
 //!   start or dies is logged and started again at most once a minute; launches run either way.
+//!   Each launch also starts the git watch on the matter and the notes folder before the agent
+//!   (`src/macos/git_watch`), which, on the first thing the agent leaves for the lawyer's git
+//!   to trust, ends every process of the session, then sets it aside into
+//!   [`Policy::git_set_aside`] (or the matter volume's [`Policy::volume_set_aside`]) and
+//!   reports it as [`Denial::GitSetAside`]; a policy without that folder, a folder whose
+//!   `FSEvents` stream can't start, and a matter where an earlier session's process outlived
+//!   its kill are refused at launch. The host calls [`git_watch_start_up`] once at
+//!   its start, on a thread of its own, with the same git set-aside folder: it kills what a
+//!   quit or crash left running and, once none of it is left, runs the final scans those
+//!   sessions missed. At its quit
+//!   it calls [`git_watch_quit`] with how long it can wait, which kills every running session
+//!   and lets the watches run their final scans.
 //! - [`start_proxy`] with a [`ProxyConfig`] (lists, the shared block list and the launch's
 //!   allowed sites, [`Upstream`], sink; an unloaded block list blocks nothing and is logged
 //!   once); the handle's ports,
@@ -170,20 +182,23 @@ pub mod proxy;
 mod setup;
 #[cfg(test)]
 mod test_support;
+#[cfg(any(windows, target_os = "macos", test))]
+mod utc;
 pub mod windows;
 
 #[cfg(unix)]
 pub use browser_dir::BrowserSocketDir;
 pub use denial::{
-    Access, CappedSink, Clock, DENIAL_WINDOW, DENIALS_PER_WINDOW, Denial, DenialSink, HostRefusal,
-    PathClass, Reachability, SystemClock,
+    Access, CappedSink, Clock, DENIAL_WINDOW, DENIALS_PER_WINDOW, Denial, DenialSink, GitItem,
+    GitOutcome, HostRefusal, PathClass, Reachability, SystemClock,
 };
 pub use detect::{Detection, NoSandbox, SET_UP_BY_OTHER_USER, Tier, detect, probe};
 pub use error::Error;
 pub use links::{LinkFinding, LinkKind, MatterScan, scan_links, scan_matter};
-#[cfg(target_os = "macos")]
-pub use macos::SeatbeltLauncher;
 pub use macos::SeatbeltProfile;
+#[cfg(target_os = "macos")]
+pub use macos::{SeatbeltLauncher, git_watch_quit, git_watch_start_up};
+pub use policy::git_aside::MatterWatch;
 pub use policy::{
     CLAUDE_STORE_BESIDE_LOCK_SUFFIX, CLAUDE_STORE_FILES, CLAUDE_STORE_LOCK_FOLDERS, ClaudeStore,
     INSTRUCTIONS_AT_ANY_DEPTH, LINK_RULES_MAX, Loopback, PROTECTED_AT_ANY_DEPTH, PROTECTED_NAMES,
