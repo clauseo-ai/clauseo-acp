@@ -608,5 +608,25 @@
     "status": "provisional",
     "at": "2026-11-10",
     "by": "app track (provisional; orchestrator approved the words 2026-11-10, copy review pending)"
+  },
+  "UD2-63": {
+    "en": "A key from {name}, or one from your firm's IT team. Billed to the key's own account.",
+    "hi": "{name} की key, या आपकी फ़र्म की IT टीम से मिली key। शुल्क उसी key के खाते पर लगता है।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-10",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-10",
+    "by": "app track (provisional; words pending orchestrator 2026-11-10)"
+  },
+  "UD2-65": {
+    "en": "Read the papers",
+    "hi": "दस्तावेज़ पढ़ें",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-10",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-10",
+    "by": "app track (provisional; words pending orchestrator 2026-11-10)"
   }
 }

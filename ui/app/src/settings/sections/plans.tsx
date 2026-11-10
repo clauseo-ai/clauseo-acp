@@ -6,7 +6,15 @@
 // key, a pasted code or an address beyond its field, and nothing runs a timer.
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { useDisplay } from "@clauseo/components/lib/display.ts";
-import { setupStoreOf, CLAUDE, CODEX, planLocked, type SetupSource } from "../../store/setup.ts";
+import {
+  setupStoreOf,
+  CLAUDE,
+  CODEX,
+  isReady,
+  isSignedIn,
+  planLocked,
+  type SetupSource,
+} from "../../store/setup.ts";
 import type { HostTransport } from "../../transport/host-transport.ts";
 import type { AgentId } from "../../transport/protocol.ts";
 import type { SectionContext } from "../sections.tsx";
@@ -35,6 +43,15 @@ export function Plans({ ctx }: { ctx: SectionContext }) {
     block?.scrollIntoView?.({ block: "nearest" });
     block?.querySelector<HTMLElement>("button, input")?.focus();
   }, []);
+  // a plan the lawyer can switch to from here: installed (or the firm's own install) or signed in, and not held by
+  // the firm's policy; "Use … instead" names no other plan
+  const usable = (agent: AgentId) => {
+    const setup = state.agents[agent];
+    return (
+      !planLocked(ctx.settings.locked, agent) &&
+      (isReady(setup?.install) || setup?.install === "managed" || isSignedIn(setup?.signIn))
+    );
+  };
   return (
     <div className="set-plans">
       {AGENTS.map((agent) => (
@@ -48,6 +65,7 @@ export function Plans({ ctx }: { ctx: SectionContext }) {
           transport={transport}
           locked={planLocked(ctx.settings.locked, agent)}
           endpoint={ctx.settings.plans?.[agent]?.endpoint}
+          otherReady={usable(agent === CLAUDE ? CODEX : CLAUDE)}
           onOther={() => goTo(agent === CLAUDE ? CODEX : CLAUDE)}
           blockRef={(el) => {
             if (el === null) blocks.current.delete(agent);
