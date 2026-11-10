@@ -121,7 +121,14 @@ impl BrowserPrep {
             tracing::warn!("a browser sidecar is missing; the session has no browser");
             return read;
         }
-        let Some(chrome) = self.chrome.find_with_config(data) else {
+        // The shell tool's config is the session's own (`launch_checks::shell_folders`); the
+        // app-wide one under `<data>/browser` is the parked MCP entry's.
+        let found = if self.shell {
+            self.chrome.find(data)
+        } else {
+            self.chrome.find_with_config(data)
+        };
+        let Some(chrome) = found else {
             return read;
         };
         if self.shell {
@@ -316,5 +323,24 @@ fn chrome_search(actor: &Actor) -> ChromeSearch {
     match &actor.wiring.browser_executable {
         Some(chrome) => ChromeSearch::Forced(chrome.clone()),
         None => ChromeSearch::Roots(actor.wiring.chrome_roots.clone()),
+    }
+}
+
+/// Makes the shell tool's downloads and profile folders and writes its `{}` config file, all in
+/// the launch's own `agent-browser` folder, so the profile starts empty (no earlier launch's
+/// cookies) and the lawyer's `~/.agent-browser/config.json` is never read. One that cannot be
+/// made leaves the session without the browser (`BrowserNotInstalled`), with a warning; the
+/// launch goes on.
+pub(super) fn shell_folders(run: &mut super::RunFolders, data: &Path) {
+    let made = [&run.agent_browser, &run.downloads, &run.browser_profile]
+        .into_iter()
+        .try_for_each(|folder| crate::write::create_private_dirs_under(data, folder))
+        .and_then(|()| crate::browser::write_session_config(&run.browser_config));
+    if let Err(error) = made {
+        tracing::warn!(
+            error = %crate::log_file::Cause(&error),
+            "a browser folder or its config was not made; the session has no browser"
+        );
+        run.chrome = None;
     }
 }

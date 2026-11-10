@@ -18,8 +18,9 @@ pub(crate) mod session;
 pub const CONFIG_DIR: &str = "browser";
 
 /// agent-browser's config file, `<data>/browser/agent-browser.json`: the path the profile's
-/// `browser` entry passes as `AGENT_BROWSER_CONFIG`
-/// (`clauseo_profile::ProfilePaths::browser_config`).
+/// parked `browser` MCP entry passes as `AGENT_BROWSER_CONFIG`
+/// (`clauseo_profile::ProfilePaths::browser_config`). The shell tool's is the session's own
+/// ([`SESSION_CONFIG`]): both data fences deny `<data>/browser`.
 pub const CONFIG_FILE: &str = "agent-browser.json";
 
 /// Makes `<data>/browser/` (through no link below `data`, 0700 on Unix) and writes `{}` to
@@ -36,6 +37,21 @@ pub(crate) fn write_config(data: &std::path::Path) -> std::io::Result<std::path:
     let file = folder.join(CONFIG_FILE);
     crate::write::replace_private_file(&file, b"{}\n")?;
     Ok(file)
+}
+
+/// The shell tool's per-session folder in the session's run folder, `<run>/agent-browser`: its
+/// config file, Chrome profile and downloads, so the data fences reopen exactly one folder for
+/// them (the run folder, `agent::codex_fence`), and no other session's.
+pub const SESSION_DIR: &str = "agent-browser";
+
+/// The shell tool's config file in [`SESSION_DIR`], as `AGENT_BROWSER_CONFIG`.
+pub const SESSION_CONFIG: &str = "config.json";
+
+/// Writes `{}` to `config` (the session's [`SESSION_CONFIG`]), atomically, replacing whatever
+/// is there (a link at that name too, never followed). Its folder is made by the caller, through
+/// no link below the data folder. File system calls: off the actor (the launch prep).
+pub(crate) fn write_session_config(config: &std::path::Path) -> std::io::Result<()> {
+    crate::write::replace_private_file(config, b"{}\n")
 }
 
 /// Where the browser runs, a switch for stage C.

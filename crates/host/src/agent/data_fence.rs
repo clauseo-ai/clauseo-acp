@@ -6,8 +6,11 @@
 //!   Clauseo-only subtree and file of `<data>` ([`DENIED`]) and, enumerated at each launch,
 //!   every entry of `<data>` that is not the session's own (`launch.rs`: other matters' notes,
 //!   other run folders, `run.old-*`, anything else), in the flag settings of every Claude
-//!   session. Claude Code applies them to its file tools and to the file commands it recognises
-//!   in Bash. A deny rule has no exceptions, so the session's own run folder, this matter's notes
+//!   session, and `Edit(//…)` alone, with a `Read` allow, for what every session may read and
+//!   run ([`READ_ONLY`]: the agents' commands, Clauseo's Python runtime). Claude Code applies
+//!   them to its file tools and to the file commands it recognises in Bash, never to the
+//!   processes those start (`agent-browser`, `python3` read what they need). A deny rule has no
+//!   exceptions, so the session's own run folder, this matter's notes
 //!   and Claude's plans folder are left out by naming their siblings instead, and so are the
 //!   tool results Claude saves in its own project folder. Run folders, matters' notes and other
 //!   matters' Claude projects made after the launch are the accepted residual of these rules.
@@ -63,9 +66,14 @@ pub(crate) use launch::{LaunchDeny, claude_projects, launch_deny};
 /// Claude Code writes its plan note to `plans` there with its own Edit tool, and a deny rule
 /// has no exceptions. And in every run folder, the own one too, the case-law relay's token file
 /// (R24): `clauseo-mcp` reads it itself, so Claude's tools never need it, and a token read
-/// through them would land in the transcript.
-pub(crate) const DENIED: [&str; 36] = [
+/// through them would land in the transcript; and the shell browser's config file
+/// (`browser::SESSION_CONFIG`), which agent-browser reads itself: an edit to it could set what
+/// the `agent-browser` deny rules refuse as flags (`--profile`, `--config`).
+/// Under `agents/runtime`, Node and the half-unpacked `.tmp-` folders, but not Clauseo's Python
+/// runtime ([`READ_ONLY`]); the launch denies every other entry there that exists.
+pub(crate) const DENIED: [&str; 38] = [
     "run/*/relay-token",
+    "run/*/agent-browser/config.json",
     "skill-packs/**",
     "matters/**",
     "logs/**",
@@ -96,7 +104,8 @@ pub(crate) const DENIED: [&str; 36] = [
     "agents/claude-acp/home/file-history/**",
     "agents/claude-acp/home/todos/**",
     "agents/claude-acp/home/shell-snapshots/**",
-    "agents/runtime/**",
+    "agents/runtime/node-v*/**",
+    "agents/runtime/.tmp-*/**",
     "agents/downloads/**",
     "agents/npm-cache/**",
     "agents/signin/**",
@@ -112,23 +121,50 @@ pub(crate) const SHARED: [(&str, &str); 1] = [(
      its skills (legal-drafting's section-checklists.md)",
 )];
 
+/// The prefix of the folder name of each build of Clauseo's Python runtime under
+/// `<data>/agents/runtime` (`clauseo_agents`' `python.rs`, `FOLDER_PREFIX`):
+/// `clauseo-python-3.13.18-c2-macos-arm64`, one per pinned build.
+pub(crate) const PYTHON_RUNTIME_PREFIX: &str = "clauseo-python-";
+
+/// What of `<data>` every session may read and run, never write, as rule patterns of folders
+/// under it (a final `*` is any rest of the name): the commands the app copies for the agents
+/// (`<data>/tools`, the shell browser's `agent-browser`), and each build of Clauseo's Python
+/// runtime (its `bin/python3`, `pip` and `pandoc`, which read their own library there), the
+/// same for every matter. Claude gets `Edit` denied ([`claude_deny_rules`]) and `Read` allowed
+/// ([`claude_allow_rules`]) for each and all under it; the launch's enumeration leaves out
+/// each real folder that fits, and denies its siblings (`launch.rs`). Codex's profile reaches
+/// them without a rule (`agent::codex_fence`, `RuntimeDeny`). The host's auto-deny still
+/// refuses a request that names them: neither agent needs to.
+pub(crate) const READ_ONLY: [&str; 2] = ["tools", "agents/runtime/clauseo-python-*"];
+
+/// Whether `name` is a build of Clauseo's Python runtime's folder name ([`PYTHON_RUNTIME_PREFIX`]
+/// and something after it).
+pub(crate) fn is_python_runtime(name: &str) -> bool {
+    name.len() > PYTHON_RUNTIME_PREFIX.len() && name.starts_with(PYTHON_RUNTIME_PREFIX)
+}
+
 /// Claude's `permissions.deny` rules for a launch: for the data folder spelled each way in
 /// `deny.spellings` (its canonical path first, then the path as configured when that differs),
-/// `Read` and `Edit` for each of `deny.targets`. A spelling that is not UTF-8 gets none (no
-/// rule could name it).
+/// `Read` and `Edit` for each of `deny.targets`, then `Edit` alone for each of [`READ_ONLY`]
+/// and all under it. A spelling that is not UTF-8 gets none (no rule could name it).
 pub(crate) fn claude_deny_rules(deny: &LaunchDeny) -> Vec<String> {
     let mut rules = Vec::new();
+    let mut push = |rule: String| {
+        if !rules.contains(&rule) {
+            rules.push(rule);
+        }
+    };
     for spelling in &deny.spellings {
         let Some(base) = spelling.to_str().map(|text| rule_path(text, cfg!(windows))) else {
             continue;
         };
         for target in &deny.targets {
             for tool in ["Read", "Edit"] {
-                let rule = format!("{tool}({base}/{target})");
-                if !rules.contains(&rule) {
-                    rules.push(rule);
-                }
+                push(format!("{tool}({base}/{target})"));
             }
+        }
+        for place in READ_ONLY {
+            push(format!("Edit({base}/{place}/**)"));
         }
     }
     rules
@@ -140,8 +176,10 @@ pub(crate) fn claude_deny_rules(deny: &LaunchDeny) -> Vec<String> {
 pub(crate) const BUILT_IN_SKILLS: [&str; 3] = ["profile", "claude-plugin", "skills"];
 
 /// Claude's `permissions.allow` rules for a launch: `Read` of the built-in skills' folder
-/// ([`BUILT_IN_SKILLS`]) and all under it, for each spelling of `<data>`, so a built-in skill
-/// never asks the lawyer. Read only, and nothing wider. A spelling that is not UTF-8 gets none.
+/// ([`BUILT_IN_SKILLS`]) and all under it, so a built-in skill never asks the lawyer, then of
+/// each of [`READ_ONLY`] and all under it, for each spelling of `<data>`. Read only, and
+/// nothing wider; a deny rule (another session's, a link's) still beats each. A spelling that is
+/// not UTF-8 gets none.
 pub(crate) fn claude_allow_rules(deny: &LaunchDeny) -> Vec<String> {
     let skills: Vec<String> = BUILT_IN_SKILLS.iter().map(|name| escape(name)).collect();
     let skills = skills.join("/");
@@ -150,9 +188,12 @@ pub(crate) fn claude_allow_rules(deny: &LaunchDeny) -> Vec<String> {
         let Some(base) = spelling.to_str().map(|text| rule_path(text, cfg!(windows))) else {
             continue;
         };
-        let rule = format!("Read({base}/{skills}/**)");
-        if !rules.contains(&rule) {
-            rules.push(rule);
+        let places = std::iter::once(skills.as_str()).chain(READ_ONLY);
+        for place in places {
+            let rule = format!("Read({base}/{place}/**)");
+            if !rules.contains(&rule) {
+                rules.push(rule);
+            }
         }
     }
     rules

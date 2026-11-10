@@ -18,10 +18,11 @@
 
 use std::path::{Component, Path, PathBuf};
 
-use super::{DENIED, SHARED, escape};
+use super::{DENIED, READ_ONLY, SHARED, escape};
 
 /// Stands for any one name in an own folder's place ([`claude_projects`]'s session id). A
-/// file name can't hold a NUL, so no real name is this.
+/// file name can't hold a NUL, so no real name is this. Followed by text, it stands for any name
+/// that starts with the text ([`READ_ONLY`]'s `clauseo-python-*`).
 const ANY_NAME: &str = "\0";
 
 /// The longest project key Claude Code uses whole; a longer one is cut and given a hash.
@@ -112,8 +113,9 @@ pub(crate) fn launch_deny(
 }
 
 /// The patterns that deny every entry of `data` that exists now, except the `own` folders, the
-/// [`SHARED`] ones, each `<project>/<any name>/tool-results` of `projects`, and the folders
-/// above them, which are walked into instead: a folder is `<name>/**`, a link both `<name>` and
+/// [`SHARED`] ones, each `<project>/<any name>/tool-results` of `projects`, each real folder
+/// that fits one of [`READ_ONLY`] (a link that fits is denied), and the folders above them,
+/// which are walked into instead: a folder is `<name>/**`, a link both `<name>` and
 /// `<name>/**`, anything else `<name>`, names glob-escaped. A link is never walked into. A
 /// name that is not UTF-8 gets no pattern (no rule could name it); the auto-deny still covers
 /// it.
@@ -129,9 +131,29 @@ pub(crate) fn existing_targets(data: &Path, own: &[PathBuf], projects: &[PathBuf
         project.extend([ANY_NAME.to_owned(), "tool-results".to_owned()]);
         own.push(project);
     }
+    let open: Vec<Vec<String>> = READ_ONLY.iter().map(|place| pattern_place(place)).collect();
     let mut out = Vec::new();
-    walk(data, &mut Vec::new(), &own, &mut out);
+    walk(data, &mut Vec::new(), &Places { own, open }, &mut out);
     out
+}
+
+/// The places [`walk`] leaves out: `own`, whatever kind of entry is there, and `open`, only
+/// where a real folder is (each as names, [`fits`]).
+struct Places {
+    own: Vec<Vec<String>>,
+    open: Vec<Vec<String>>,
+}
+
+/// A [`READ_ONLY`] pattern as names for [`fits`]: a final `*` in a name is [`ANY_NAME`]
+/// followed by the name's start.
+fn pattern_place(pattern: &str) -> Vec<String> {
+    pattern
+        .split('/')
+        .map(|name| match name.strip_suffix('*') {
+            Some(start) => format!("{ANY_NAME}{start}"),
+            None => name.to_owned(),
+        })
+        .collect()
 }
 
 /// `place`'s names, or `None` when it holds anything but names or a name that is not UTF-8.
@@ -149,7 +171,7 @@ fn names(place: &Path) -> Option<Vec<String>> {
 }
 
 /// [`existing_targets`] for the folder `dir`, at `at` (its names under `<data>`).
-fn walk(dir: &Path, at: &mut Vec<String>, own: &[Vec<String>], out: &mut Vec<String>) {
+fn walk(dir: &Path, at: &mut Vec<String>, places: &Places, out: &mut Vec<String>) {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return;
     };
@@ -161,14 +183,13 @@ fn walk(dir: &Path, at: &mut Vec<String>, own: &[Vec<String>], out: &mut Vec<Str
         };
         at.push(name);
         let real_dir = entry.file_type().is_ok_and(|kind| kind.is_dir());
-        if own.iter().any(|folder| fits(folder, at)) {
+        let above = |folder: &Vec<String>| fits(folder.get(..at.len()).unwrap_or_default(), at);
+        if places.own.iter().any(|folder| fits(folder, at)) {
             // The session's own.
-        } else if real_dir
-            && own
-                .iter()
-                .any(|folder| fits(folder.get(..at.len()).unwrap_or_default(), at))
-        {
-            walk(&entry.path(), at, own, out);
+        } else if real_dir && places.open.iter().any(|folder| fits(folder, at)) {
+            // Every session's to read and run (`READ_ONLY`).
+        } else if real_dir && places.own.iter().chain(&places.open).any(above) {
+            walk(&entry.path(), at, places, out);
         } else {
             let pattern = at.iter().map(|name| escape(name)).collect::<Vec<_>>();
             let pattern = pattern.join("/");
@@ -184,12 +205,14 @@ fn walk(dir: &Path, at: &mut Vec<String>, own: &[Vec<String>], out: &mut Vec<Str
     }
 }
 
-/// Whether the own place `folder` names the place `at`: as long, each name equal or
-/// [`ANY_NAME`].
+/// Whether the own place `folder` names the place `at`: as long, each name equal, or
+/// [`ANY_NAME`] followed by a start of the name (nothing: any name).
 fn fits(folder: &[String], at: &[String]) -> bool {
     folder.len() == at.len()
-        && folder
-            .iter()
-            .zip(at)
-            .all(|(own, name)| own == ANY_NAME || own == name)
+        && folder.iter().zip(at).all(|(own, name)| {
+            own == name
+                || own
+                    .strip_prefix(ANY_NAME)
+                    .is_some_and(|start| name.starts_with(start) && name.len() > start.len())
+        })
 }
