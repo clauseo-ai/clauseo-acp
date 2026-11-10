@@ -2,10 +2,11 @@
 //! version must be one of the matter's; R8 restores it on the matter's thread; one commit of
 //! the matter's stream logs it. A restore belongs to no thread, so the writer's holder is
 //! [`Holder::Restore`]; the same commit records it in the stream of the conversation it was asked
-//! from, when the command names one of the matter's. One that `undoes` an earlier restore also
-//! removes the files that restore added, while they hold what it wrote. The writer and the note wait
-//! until that commit is durable; a failed one is sent once more when the matter's stream
-//! drains, as an undo's is.
+//! from, when the command names one of the matter's and that stream is not blocked by an earlier
+//! store failure (the conversation's line is best-effort; the matter's record is not). One that
+//! `undoes` an earlier restore also removes the files that restore added, while they hold what
+//! it wrote. The writer and the note wait until that commit is durable; a failed one is sent
+//! once more when the matter's stream drains, as an undo's is.
 
 use clauseo_counts::schema::Feature;
 use clauseo_matters::{CheckpointOutcome, Restored};
@@ -221,7 +222,7 @@ fn restore_log(actor: &Actor, ask: &RestoreAsk, done: RestoreDone) -> Result<Res
         thread = ask.thread.map(|thread| (thread, restored.clone()));
         events.push(MatterEvent::plain(restored));
     }
-    // The agent hears of the files removed as of the files put back: changed by the restore.
+    // The agent hears of the files removed with the files written; its note says it removed some.
     let mut written = written;
     written.extend(removed);
     Ok(RestoreLog {
@@ -253,16 +254,24 @@ fn log_commit(actor: &mut Actor, matter: MatterId, log: &RestoreLog) -> Result<(
             &mut actor.ids,
         )?;
     }
-    if let Some((thread, restored)) = &log.thread {
-        super::out::flush_text(actor, *thread, &mut draft)?;
-        actor.pipeline.push(
-            &mut draft,
-            StreamId::Thread(*thread),
-            DomainEvent::VersionRestored(restored.clone()),
-            Some(ctx.id),
-            now,
-            &mut actor.ids,
-        )?;
+    // The conversation's line is best-effort: the files are already restored, so a conversation
+    // stream blocked by an earlier store failure never keeps the matter's stream from recording
+    // it. The writer is held, so no turn text of the conversation waits to be flushed first.
+    match &log.thread {
+        Some((thread, _)) if super::failure::blocked(actor, *thread) => {
+            tracing::info!(%matter, %thread, "the conversation does not record the restore");
+        }
+        Some((thread, restored)) => {
+            actor.pipeline.push(
+                &mut draft,
+                StreamId::Thread(*thread),
+                DomainEvent::VersionRestored(restored.clone()),
+                Some(ctx.id),
+                now,
+                &mut actor.ids,
+            )?;
+        }
+        None => {}
     }
     let stream = StreamId::Matter(matter);
     draft.receipt(ctx.receipt(Some(stream), log.outcome, now));
@@ -298,7 +307,7 @@ fn send_log(actor: &mut Actor, matter: MatterId, log: RestoreLog) {
 }
 
 /// The commit logging the restore returned: durable, the threads of the matter note the files
-/// put back and the writer passes on; failed, the unblock sends it once more.
+/// written or removed and the writer passes on; failed, the unblock sends it once more.
 pub(crate) fn committed(actor: &mut Actor, matter: MatterId, durable: bool) {
     if !durable {
         on_failed(actor, matter);
