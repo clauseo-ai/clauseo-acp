@@ -135,6 +135,9 @@
 !else
 !include "${__FILEDIR__}\safe_temp.nsh"
 !include "${__FILEDIR__}\uninstall_in_place.nsh"
+; Repair mode's wait looks for Clauseo's main window by its class, which admin_copy.nsh defines;
+; with the Safe workspace off it is defined here, the same value (lib.rs's MAIN_WINDOW_CLASS).
+!define CLAUSEO_MAIN_WINDOW_CLASS "ClauseoMainWindow"
 !endif
 
 ; Repair mode (the paragraph "Repair" above): the switch, how long the installer waits for
