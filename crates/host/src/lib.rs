@@ -30,8 +30,9 @@
 //!   in the folder; a decision holds the writer and writes the file as a restore does, between
 //!   an `outside-edits` and a `revisions` checkpoint.
 //! - The block list's updates (`blocklist.rs`, decision record 0053), with
-//!   [`BlockListSeams::apply`] only: a `clauseo-blocklist` thread, started once the host
-//!   serves and stopped when it ends, loads the newer verified one of the stored pair
+//!   [`BlockListSeams::apply`] and something enforcing the list only (the guarded browser or
+//!   the Safe workspace; neither in the plain build): a `clauseo-blocklist` thread, started
+//!   once the host serves and stopped when it ends, loads the newer verified one of the stored pair
 //!   (`<data folder>/blocklist/`) and the bundled snapshot into the shared
 //!   `clauseo_blocklist::Current`, then fetches the published pair every interval, verifies it,
 //!   applies the rollback rule, stores it and swaps it in; any failure keeps the list in use.

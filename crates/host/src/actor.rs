@@ -297,7 +297,8 @@ fn run(
         };
         allowed::start(&mut actor, allowed_sites);
         startup::begin_startup(&mut actor);
-        // Stops when this block ends, however it ends (`blocklist.rs`).
+        // Only when something enforces the list (`blocklist::needed`); stops when this block
+        // ends, however it ends (`blocklist.rs`).
         let _blocklist = blocklist.and_then(|start| {
             actor.blocklist = Some(start.live.clone());
             blocklist::start(start)
