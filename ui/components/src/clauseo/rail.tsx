@@ -2,6 +2,7 @@
 // current matter's conversations opened under its row, finding a matter, and the scratch matter at its foot. Matters,
 // their states and their groups come in as props.
 import { useLayoutEffect, useRef, useState, type ReactNode, type Ref } from "react";
+import { flushSync } from "react-dom";
 import { Button } from "../ui/button.tsx";
 import { Kbd } from "../ui/kbd.tsx";
 import { searchBoxOpen, searchInput } from "../ui/recipes.ts";
@@ -157,6 +158,11 @@ function FindField({
             onQuery("");
           } else if (e.key === "Escape") {
             onDone();
+          } else if (e.key === "Tab" && query.trim() === "") {
+            // Tab leaves an empty Find: the rail's own list and Matters / Recent come back before the browser moves
+            // the focus, so it lands on a control that stays. Left to the blur, it landed on a row of Find's list as
+            // that list went, and WebKit then began again at the page's top (D-049)
+            flushSync(onDone);
           } else if (e.key === "Enter") {
             e.preventDefault();
             onFirst();
