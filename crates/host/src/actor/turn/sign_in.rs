@@ -231,10 +231,13 @@ fn set_refused(actor: &mut Actor, agent: AgentId, code: Option<ErrorCode>) -> Re
     Ok(())
 }
 
-/// The code a turn failing with an error of `code` and `text` ends with:
-/// `agent.auth_required` for an error the sign-in-again test accepts, else `code`.
-pub(super) fn code_of(actor: &Actor, code: ErrorCode, text: &str) -> ErrorCode {
-    if code != ErrorCode::AgentAuthRequired && actor.wiring.sign_in.sign_in_again(text) {
+/// The code a turn failing with an error of `code`, `text` and an RPC error's `data` ends with:
+/// `agent.auth_required` for an error the sign-in-again test accepts in either, else `code`.
+/// codex-acp puts Codex's own error (`refresh_token_reused`) in `data`, under a bare
+/// "Internal error", and `data` never joins the text (`clauseo_acp::Error::rpc_data`).
+pub(super) fn code_of(actor: &Actor, code: ErrorCode, text: &str, data: Option<&str>) -> ErrorCode {
+    let again = |text: &str| actor.wiring.sign_in.sign_in_again(text);
+    if code != ErrorCode::AgentAuthRequired && (again(text) || data.is_some_and(again)) {
         return ErrorCode::AgentAuthRequired;
     }
     code

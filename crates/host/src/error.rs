@@ -110,6 +110,14 @@ impl Error {
         }
     }
 
+    /// An agent's RPC error's `data`, for classifying only (`clauseo_acp::Error::rpc_data`).
+    pub(crate) fn rpc_data(&self) -> Option<&str> {
+        let Self::Acp(error) = self else {
+            return None;
+        };
+        error.rpc_data()
+    }
+
     /// A state check's refusal with `code` and a detail for logs.
     pub(crate) fn refused(code: ErrorCode, message: impl Into<String>) -> Self {
         Self::Refused(HostError::new(code, message))

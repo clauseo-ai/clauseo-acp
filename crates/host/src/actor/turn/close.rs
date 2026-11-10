@@ -146,7 +146,7 @@ impl TurnClose {
             out.push(actor, files.clone())?;
         }
         if let Some((code, detail)) = &self.failure {
-            let detail = detail.clone();
+            let detail = detail.clone().map(|detail| detail_of(actor, detail));
             out.push(
                 actor,
                 TurnFailed {
@@ -231,4 +231,29 @@ pub(crate) fn closing(actor: &Actor, thread: ThreadId, turn: TurnId) -> bool {
         let closing = entry.turn.closing.as_ref();
         closing.is_some_and(|closing| closing.close.turn == turn)
     })
+}
+
+/// The most of a `TurnFailed.detail` written, in bytes, as the protocol documents it.
+pub(super) const MAX_DETAIL_BYTES: usize = 4096;
+
+/// `detail` as a `TurnFailed` writes it: the home folder written `~`, control characters as
+/// spaces, cut at a char boundary within [`MAX_DETAIL_BYTES`]. An agent's error message is
+/// uncapped and may carry a stack trace with the lawyer's paths.
+pub(super) fn detail_of(actor: &Actor, detail: String) -> String {
+    let home = actor.home.as_deref().and_then(std::path::Path::to_str);
+    let mut detail = match home {
+        Some(home) if home.len() > 1 => detail.replace(home, "~"),
+        _ => detail,
+    };
+    if detail.contains(char::is_control) {
+        detail = detail.replace(char::is_control, " ");
+    }
+    if detail.len() > MAX_DETAIL_BYTES {
+        let mut end = MAX_DETAIL_BYTES;
+        while !detail.is_char_boundary(end) {
+            end -= 1;
+        }
+        detail.truncate(end);
+    }
+    detail
 }
