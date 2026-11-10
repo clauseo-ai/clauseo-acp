@@ -58,8 +58,8 @@ impl fmt::Display for BuildError {
 pub(crate) const STETDOC_START_LIMIT: Duration = Duration::from_secs(3);
 
 /// The launch profile as the host's hook: the profile, built once, and whether stetdoc's folder
-/// goes on the agents' `PATH` (stetdoc was found, its skill loaded, and its folder holds no
-/// other program).
+/// goes on the agents' `PATH` (stetdoc was found and ran, and its folder holds no other
+/// program; a skill text it refused does not matter here).
 #[derive(Debug, Clone)]
 pub(crate) struct DesktopProfile {
     profile: ClauseoProfile,
@@ -94,22 +94,48 @@ impl DesktopProfile {
         path: Option<&OsStr>,
     ) -> Result<Self, BuildError> {
         let exe = std::env::current_exe().map_err(BuildError::Exe)?;
+        let layout = Layout {
+            exe,
+            macos: cfg!(target_os = "macos"),
+            resource_dir,
+        };
+        Self::build_in(locations, &layout, path)
+    }
+
+    /// [`Self::build_with`] for the app laid out as `layout` says, so a test can stand a
+    /// release bundle up in a scratch folder.
+    pub(crate) fn build_in(
+        locations: &Locations,
+        layout: &Layout<'_>,
+        path: Option<&OsStr>,
+    ) -> Result<Self, BuildError> {
+        let exe = layout.exe.clone();
         let exe_dir = exe.parent().unwrap_or_else(|| Path::new(""));
-        let bundled = bundled_stetdoc(cfg!(target_os = "macos"), exe_dir, resource_dir);
+        let bundled = bundled_stetdoc(layout.macos, exe_dir, layout.resource_dir);
         let found = stetdoc_program(bundled.as_deref(), path, !cfg!(debug_assertions));
         let paths = paths_for(locations, exe, found.clone())?;
-        let skill = found
+        let loaded = found
             .as_deref()
-            .and_then(|program| load_stetdoc_skill(program, &paths.claude_skills()));
-        let prepend = skill.is_some() && found.as_deref().is_some_and(alone_in_its_folder);
+            .map(|program| load_stetdoc_skill(program, &paths.claude_skills()));
+        // stetdoc stays on when its skill fails: only a stetdoc whose `--version` fails (or that
+        // passes the deadline) is treated as absent, with no PATH entry and no stetdoc line.
+        let ran = loaded
+            .as_ref()
+            .is_some_and(|load| !matches!(load, StetdocLoad::Broken));
+        let prepend = ran && found.as_deref().is_some_and(alone_in_its_folder);
+        let skill = match loaded {
+            Some(StetdocLoad::Skill(skill)) => Some(skill),
+            _ => None,
+        };
         let browser_tool = install_browser(&paths, path);
         // The browser's skill comes with the copy alone. Whether a session has a browser (its
         // Chrome found, `tools.browser` on, the firm's policy allowing it) is decided at each
         // launch and told in `{browser}`, so a Chrome installed later counts from the next
         // conversation, with no restart.
         let with_browser = browser_tool.is_some();
-        let (profile, refused) =
-            ClauseoProfile::new(paths, None).with_tool_skills(skill, with_browser);
+        let (profile, refused) = ClauseoProfile::new(paths, None)
+            .with_stetdoc_cli(ran)
+            .with_tool_skills(skill, with_browser);
         for err in refused {
             tracing::warn!(%err, "a skill is left out of the profile");
         }
@@ -209,38 +235,83 @@ fn browser_program(paths: &ProfilePaths, path: Option<&OsStr>) -> Option<PathBuf
     }
 }
 
-/// stetdoc's skill from `program`, within [`STETDOC_START_LIMIT`] for both runs. On the
-/// deadline the run is dropped, and with it its process handle, which kills stetdoc's tree. A
-/// failure or the deadline leaves the skill out with a warning, and stetdoc is then treated as
-/// absent (its folder goes on no `PATH`).
-fn load_stetdoc_skill(program: &Path, cached: &Path) -> Option<SkillSource> {
+/// Where the app's executable is and where it looks for the stetdoc a release bundles
+/// ([`bundled_stetdoc`]).
+#[derive(Debug, Clone)]
+pub(crate) struct Layout<'a> {
+    /// The app's executable.
+    pub(crate) exe: PathBuf,
+    /// Whether it is laid out as a macOS bundle (`Contents/MacOS`, `Contents/Helpers`).
+    pub(crate) macos: bool,
+    /// Tauri's resource folder, when it is known.
+    pub(crate) resource_dir: Option<&'a Path>,
+}
+
+/// What [`load_stetdoc_skill`] found.
+#[derive(Debug)]
+enum StetdocLoad {
+    /// stetdoc's `--version` works and its skill loaded.
+    Skill(SkillSource),
+    /// stetdoc's `--version` works but its skill was not loaded (`skills get core` failed or
+    /// took too long, or its text was refused: stetdoc 0.9.3 prints no frontmatter). The skill
+    /// is left out; stetdoc stays on, for the agents and the app.
+    NoSkill,
+    /// stetdoc's `--version` did not work (it did not start, exited with an error, printed no
+    /// version), or the deadline passed: it is treated as absent.
+    Broken,
+}
+
+/// stetdoc's skill from `program`, both runs within [`STETDOC_START_LIMIT`] together: first
+/// `--version`, then the skill in what is left of the limit. On the deadline the run is
+/// dropped, and with it its process handle, which kills stetdoc's tree. A `--version` that
+/// fails or passes the deadline is [`StetdocLoad::Broken`]: stetdoc is treated as absent. A
+/// skill that fails or passes the deadline after a working `--version` leaves only the skill
+/// out. Both are logged as warnings.
+fn load_stetdoc_skill(program: &Path, cached: &Path) -> StetdocLoad {
     let launcher = PassthroughLauncher::new(SpawnOptions::new());
-    let loaded = async_io::block_on(async {
-        let load = std::pin::pin!(stetdoc::load_skill(
-            &launcher,
-            &AsyncIoTimer,
-            program,
-            cached
-        ));
-        let deadline = std::pin::pin!(AsyncIoTimer.after(STETDOC_START_LIMIT));
-        match futures::future::select(load, deadline).await {
-            Either::Left((loaded, _)) => Some(loaded),
-            Either::Right(((), _)) => None,
+    // Set once `--version` worked, so a deadline tells which run it stopped.
+    let version_worked = std::cell::Cell::new(false);
+    let work = async {
+        let version = stetdoc::version(&launcher, &AsyncIoTimer, program).await?;
+        version_worked.set(true);
+        Ok::<_, ProfileError>(
+            stetdoc::load_skill_at(&launcher, &AsyncIoTimer, program, &version, cached).await,
+        )
+    };
+    match async_io::block_on(within(STETDOC_START_LIMIT, work)) {
+        Some(Ok(Ok(skill))) => StetdocLoad::Skill(skill),
+        Some(Ok(Err(err))) => {
+            tracing::warn!(%err, "stetdoc's skill text is left out; stetdoc itself stays on");
+            StetdocLoad::NoSkill
         }
-    });
-    match loaded {
-        Some(Ok(skill)) => Some(skill),
         Some(Err(err)) => {
-            tracing::warn!(%err, "stetdoc's skill is left out; stetdoc is treated as absent");
-            None
+            tracing::warn!(%err, "stetdoc --version failed; stetdoc is treated as absent");
+            StetdocLoad::Broken
+        }
+        None if version_worked.get() => {
+            tracing::warn!(
+                limit_secs = STETDOC_START_LIMIT.as_secs(),
+                "stetdoc's skill text took too long and is left out; stetdoc itself stays on"
+            );
+            StetdocLoad::NoSkill
         }
         None => {
             tracing::warn!(
                 limit_secs = STETDOC_START_LIMIT.as_secs(),
                 "stetdoc took too long and was stopped; it is treated as absent"
             );
-            None
+            StetdocLoad::Broken
         }
+    }
+}
+
+/// `work`'s output, or `None` once `limit` passed; `work` is then dropped.
+async fn within<F: std::future::Future>(limit: Duration, work: F) -> Option<F::Output> {
+    let work = std::pin::pin!(work);
+    let deadline = std::pin::pin!(AsyncIoTimer.after(limit));
+    match futures::future::select(work, deadline).await {
+        Either::Left((done, _)) => Some(done),
+        Either::Right(((), _)) => None,
     }
 }
 

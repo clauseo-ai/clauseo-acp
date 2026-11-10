@@ -232,7 +232,8 @@ fn the_connectors_paragraph_goes_only_where_the_host_puts_it() {
         .trim()
         .replace("{author}", "Clauseo")
         .replace("{work_folder}", "W")
-        .replace("{browser}", "");
+        .replace("{browser}", "")
+        .replace("{stetdoc}", "");
     for (filled, part) in [(&with, PARAGRAPH), (&without, CONNECTORS_NONE)] {
         let expected = format!("{tools}\n\n{}\n\n## Identity", part.trim());
         assert!(filled.starts_with(&expected), "{filled}");

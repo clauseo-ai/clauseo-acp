@@ -1,0 +1,1 @@
+For Word documents, use the `stetdoc` command; run `stetdoc --help` and `stetdoc <command> --help` to learn it.

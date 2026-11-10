@@ -347,7 +347,11 @@ two dependencies, `profile` and `tracing`.
   `Host::start`. The window never waits on it, but the host starts after it, and every bridge
   command waits for the host. So loading stetdoc's skill is bounded: both of stetdoc's runs
   together get `STETDOC_START_LIMIT`, 3 s. Past it, the load is dropped, which kills
-  stetdoc's process tree, and stetdoc is treated as absent (no skill, no prepend, a warning).
+  stetdoc's process tree. A `--version` that fails or runs past it treats stetdoc as absent
+  (no skill, no prepend, a warning). A skill that fails or runs past it after a working
+  `--version` (stetdoc 0.9.3 prints its skill's body with no frontmatter) leaves only the
+  skill out (2026-11-10): stetdoc stays on the agents' `PATH` and in the app
+  (`HostConfig::with_stetdoc`).
   The rest of the build is file reads and rendering. The build finds the
   app's executable, runs stetdoc for its skill (`load_skill`, cached in the plugin's
   `skills/` folder), and renders R22's built-ins. The hook's methods then only map what it
@@ -369,7 +373,9 @@ two dependencies, `profile` and `tracing`.
   on Unix) is skipped and the walk goes on, and on Windows only `stetdoc.exe` counts, since
   stetdoc starts with no shell. When stetdoc is absent, `ProfilePaths` names a placeholder
   (`<exe folder>/stetdoc/stetdoc`), which is neither run nor put on `PATH`. When stetdoc is
-  found and its skill loaded, `with_agent_path_prepend` takes `ClauseoProfile::path_prepend()`,
+  found and its `--version` works, with its skill or without, the instructions get the stetdoc
+  line (`{stetdoc}`, filled by the profile: `instructions::STETDOC_CLI`, which points the agent
+  at `stetdoc --help`), and `with_agent_path_prepend` takes `ClauseoProfile::path_prepend()`,
   but only when stetdoc is the only program in its folder. A folder found on `PATH` that holds
   others (`~/.cargo/bin`, `/usr/local/bin`) is not put first (a warning says so), since it would
   shadow the system's programs; the agent still finds stetdoc on the `PATH` it inherits.
