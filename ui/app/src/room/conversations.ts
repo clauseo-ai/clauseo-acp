@@ -16,6 +16,8 @@
 //   remounts the work and each keeps its own words. A thread's key is its id, unless the room opened it before knowing
 //   it (a matter just opened, before its list is in; a draft that became the thread): then it keeps that first key, so
 //   the work isn't remounted under a question on its way.
+// - The agents (R15's list_agents, for the plan choice) are read at start and again on each settings_changed, since
+//   setting up a plan writes its agents entry: a plan signed in while the room is open joins the choice.
 // - H6: a thread is marked seen when it opens with the window focused, and when its turn ends while open and focused.
 import { late } from "@clauseo/components/lib/late.ts";
 import { pickReopenThread } from "../store/reopen.ts";
@@ -49,6 +51,8 @@ export class Conversations {
   readonly #by = new Map<MatterId, MatterState>();
   readonly #listeners = new Set<() => void>();
   #agents: AgentSummary[] = [];
+  /** The list_agents reads sent: a reply that a later read overtook is older than it, and dropped. */
+  #agentReads = 0;
   #current: MatterState | null = null;
   #n = 0;
   #focus: { key: string; n: number } | null = null;
@@ -91,16 +95,11 @@ export class Conversations {
     this.#stop.push(this.#store.subscribe(() => this.#headers()));
     const app = this.#next.app;
     if (app !== null) this.#stop.push(app.subscribeApp((event) => this.#hear(event)));
-    const agents = this.#next.agents;
-    if (agents !== null)
-      agents.listAgents().then(
-        (list) => {
-          if (!this.#live) return;
-          this.#agents = list;
-          this.#emit();
-        },
-        (error: unknown) => console.warn(`list_agents failed: ${JSON.stringify(error)}`),
-      );
+    // a plan set up while the room is open writes its agents entry, and the host says settings_changed
+    const settings = this.#next.settings;
+    if (settings !== null && this.#next.agents !== null)
+      this.#stop.push(settings.onSettingsChanged(() => this.#listAgents()));
+    this.#listAgents();
     this.#follow();
     return () => {
       this.#live = false;
@@ -471,6 +470,22 @@ export class Conversations {
     }
     if (lost) void this.#list(m);
     if (changed) this.#emit();
+  }
+
+  /** R15's list_agents, read at start and again on each settings_changed; the latest read's answer wins. */
+  #listAgents(): void {
+    const agents = this.#next.agents;
+    if (agents === null) return;
+    this.#agentReads += 1;
+    const at = this.#agentReads;
+    agents.listAgents().then(
+      (list) => {
+        if (!this.#live || at !== this.#agentReads) return;
+        this.#agents = list;
+        this.#emit();
+      },
+      (error: unknown) => console.warn(`list_agents failed: ${JSON.stringify(error)}`),
+    );
   }
 
   /** H4's threads_changed: a matter's whole list, or what changed in it. Matters not visited are read when opened. */

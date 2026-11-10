@@ -38,7 +38,8 @@ export function fakeNext({
   matters: () => readonly MatterInfo[];
   papers?: readonly PaperSummary[];
   threads?: (matter: MatterId) => readonly ThreadInfo[];
-  agents?: readonly AgentSummary[];
+  /** The agents, or a read of them on each list_agents (a plan set up while the room is open). */
+  agents?: readonly AgentSummary[] | (() => readonly AgentSummary[]);
   location?: string | null;
   command?: FakeNextHost["command"];
   parts?: readonly NextPart[];
@@ -53,7 +54,8 @@ export function fakeNext({
         if (location === null) throw new Error("no default location in this host");
         return { default_location: { display: location } };
       }
-      if (query === WIRE.listAgents) return { agents: [...agents] };
+      if (query === WIRE.listAgents)
+        return { agents: [...(typeof agents === "function" ? agents() : agents)] };
       if (WIRE.listPapers in query)
         return { papers: { papers: [...papers], skipped: [], unread: [], truncated: false } };
       return { threads: [...threads(query.list_threads.matter)] };
