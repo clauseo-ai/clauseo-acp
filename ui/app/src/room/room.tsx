@@ -285,6 +285,7 @@ function RoomFrame({
     matter: open?.matter ?? null,
     thread: open !== null && talks.matter === open.matter ? talks.thread : null,
     papers,
+    lister: matters.next.papers,
     platform,
     standIns: standIns ?? ownStandIns,
   });
