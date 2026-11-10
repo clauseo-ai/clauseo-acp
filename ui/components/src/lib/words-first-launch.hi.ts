@@ -60,7 +60,8 @@ export const HI = {
   "Use {name} instead": "इसके बजाय {name} इस्तेमाल करें",
   "Use an API key or my firm's account": "API key या अपनी फ़र्म का खाता इस्तेमाल करें",
   "Your browser opens when you reconnect.": "दोबारा कनेक्ट होते ही आपका ब्राउज़र खुलेगा।",
-  "API key": "API key",
+  // the field's own word, in Hindi: "API key" stays the term, as everywhere in the Hindi (D-069)
+  "API key": "API key डालें",
   "Use this key": "यह key इस्तेमाल करें",
   "A key from Claude or ChatGPT, or one from your firm's IT team. Billed to the key's own account.":
     "Claude या ChatGPT की key, या आपकी फ़र्म की IT टीम से मिली key। शुल्क उसी key के खाते पर लगता है।",

@@ -332,6 +332,8 @@ pub fn run() -> tauri::Result<()> {
             app.manage(dialogs::LastPick::default());
             app.manage(chooser::Chooser::started());
             open_main_window(app)?;
+            #[cfg(target_os = "macos")]
+            menu::follow_language(app.handle().clone());
             start_host(app.handle().clone(), start, locations, parts, egress::manage(app))?;
             Ok(())
         })
