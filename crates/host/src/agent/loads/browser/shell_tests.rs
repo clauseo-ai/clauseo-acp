@@ -215,7 +215,9 @@ fn claude_gets_agent_browser_rules_only_with_the_browser() {
         if browser {
             let want: Vec<String> = clauseo_profile::claude::agent_browser_allowed().collect();
             assert_eq!(allowed, want);
-            assert!(!allowed.iter().any(|rule| rule.contains(" eval")));
+            for sub in [" eval", " pdf", " download"] {
+                assert!(!allowed.iter().any(|rule| rule.contains(sub)), "{sub}");
+            }
             assert!(allowed.contains(&"Bash(agent-browser read:*)".to_owned()));
             let want: Vec<String> = clauseo_profile::claude::agent_browser_denied().collect();
             assert_eq!(denied, want);

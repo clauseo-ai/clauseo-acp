@@ -13,14 +13,15 @@ pub const STETDOC_READ_ONLY: [&str; 5] = ["view", "inspect", "check", "lookup", 
 /// tag: `open` :399, `snapshot` :974, `click` :448, `dblclick` :467, `fill` :474, `type` :481,
 /// `press` :603, `hover` :524, `focus` :531, `select` :552, `check` :538, `uncheck` :545,
 /// `scroll` :660, `scrollintoview` :704, `wait` :713, `get` :1459, `is` :1462, `find` :1465,
-/// `screenshot` :872, `pdf` :965, `tab` :1650, `back` :441, `forward` :442, `reload` :443,
-/// `close` :1063, `frame` :1717, `dialog` :1730, `download` :590, `read` :444). Every other
-/// one (`upload`, `eval`, `state`, `cookies`, `storage`, `network`, `set`, `install`, ...)
-/// asks, and so does an allowed one that matches [`AGENT_BROWSER_ASK`]. They are Codex's 29 core
-/// MCP tools (`clauseo_mcp`'s `browser_guard/filter.rs` `ALLOWED_TOOLS`) less `eval`, which runs
-/// page JavaScript and asks each time; `pdf` and `download` write a named file, which Codex's
-/// guard refuses.
-pub const AGENT_BROWSER_ALLOWED: [&str; 29] = [
+/// `screenshot` :872, `tab` :1650, `back` :441, `forward` :442, `reload` :443, `close` :1063,
+/// `frame` :1717, `dialog` :1730, `read` :444). Every other one (`upload`, `eval`, `pdf`,
+/// `download`, `state`, `cookies`, `storage`, `network`, `set`, `install`, ...) asks, and so does
+/// an allowed one that matches [`AGENT_BROWSER_ASK`]. They are Codex's 29 core MCP tools
+/// (`clauseo_mcp`'s `browser_guard/filter.rs` `ALLOWED_TOOLS`) less `eval`, which runs page
+/// JavaScript. `pdf <path>` and `download <sel> <path>` ask: Claude's agent-browser runs outside
+/// its sandbox, so they would write page-chosen content to any path the agent names (Codex's guard
+/// refuses them); a clicked download still lands in the session's downloads folder unasked.
+pub const AGENT_BROWSER_ALLOWED: [&str; 27] = [
     "open",
     "snapshot",
     "click",
@@ -40,7 +41,6 @@ pub const AGENT_BROWSER_ALLOWED: [&str; 29] = [
     "is",
     "find",
     "screenshot",
-    "pdf",
     "tab",
     "back",
     "forward",
@@ -48,7 +48,6 @@ pub const AGENT_BROWSER_ALLOWED: [&str; 29] = [
     "close",
     "frame",
     "dialog",
-    "download",
     "read",
 ];
 
