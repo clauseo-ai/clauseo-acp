@@ -79,6 +79,9 @@ function siteOf(url: string): { name: string; where: string } | null {
 /** An absolute path, Unix or Windows, as a run of non-space characters. Never a slash inside a word or after a colon
  * or another slash, so a web address ("https://indiankanoon.org/doc/1/") is no path and stays whole. */
 const ABSOLUTE = /(?<![\w:/\\.])(?:[A-Za-z]:\\|\/)[^\s"'`]*[/\\][^\s"'`]+/g;
+/** An absolute path in quotes, as a shell command quotes it ("cat '/Users/…/Application Support/…/notes.md'"): spaces
+ * and all, up to its closing quote, which is never part of the name. */
+const QUOTED = /(['"`])((?:[A-Za-z]:\\|\/)[^'"`]*[/\\][^'"`]+)\1/g;
 /** The kinds whose title names the paper they touched. */
 const PAPER_KINDS: ReadonlySet<string> = new Set(["read", "edit", "delete", "move"]);
 /** The paper's whole path in a title, from where `named` (its first run without a space) starts up to its file's
@@ -109,7 +112,14 @@ export const thoughtText = (text: string): string =>
 /** The agent's title with each absolute path cut to its file name and its Markdown marks off: the fallback when
  * nothing else names the step. */
 export const titleOf = (title: string): string =>
-  plainOf(title.replace(ABSOLUTE, (p) => splitPath(p).name || p)).trim();
+  plainOf(
+    title
+      .replace(
+        QUOTED,
+        (_whole, quote: string, p: string) => `${quote}${splitPath(p).name || p}${quote}`,
+      )
+      .replace(ABSOLUTE, (p) => splitPath(p).name || p),
+  ).trim();
 
 /** A web search's words as the lawyer reads them (D-028): the sites a `site:` operator names taken out to say on
  * their own ("indiacode.nic.in"), and the quotes around the rest dropped; `site` null when none is named. */
@@ -156,11 +166,12 @@ export function placeOf(entry: ToolCallEntry): StepPlace {
   } else {
     // nothing names it but the agent's title, whose paths the row cuts to their file names: the first one's folder is
     // the hover, so where the paper is stays a pointer away; with no path, a web address in it, whole
-    const named = entry.title.match(ABSOLUTE)?.[0];
+    // a quoted path is whole up to its quote; a bare one, a paper's own step's, runs on past a space to the paper's
+    // extension ("Form DIR-12.pdf"), so its words (and their tried form) are the room's own
+    const quoted = [...entry.title.matchAll(QUOTED)][0]?.[2];
+    const named = quoted ?? entry.title.match(ABSOLUTE)?.[0];
     const folder = named === undefined ? "" : splitPath(named).folder;
-    // a paper's own step names the paper the title names, so its words (and their tried form) are the room's own: the
-    // path runs on past a space to the paper's extension ("Form DIR-12.pdf")
-    const file = named === undefined ? "" : splitPath(paperIn(entry.title, named)).name;
+    const file = named === undefined ? "" : splitPath(quoted ?? paperIn(entry.title, named)).name;
     if (PAPER_KINDS.has(entry.kind) && file !== "") place.name = file;
     place.where = folder === "" ? (entry.title.match(WEB)?.[0] ?? null) : folder;
   }

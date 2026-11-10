@@ -26,7 +26,9 @@
 // 1a and 1d. With ?plan=codex, claude, one, many, close, stale or none, the agent is signed in with its plan and the
 // plan's limits are on the channel (limits/probe-plan.ts), for the toolbar's plan and its card. With ?plans=chatgpt,
 // both plans are listed with Claude's sign-in cancelled and ChatGPT signed in, for the default plan's screenshots
-// (D-014). Not shipped.
+// (D-014). With ?thread=first-read, the matter's first read is under way, its latest read codex's quoted shell read of
+// a file outside the matter (first-read/probe-state.ts), for the line under the composer; ?file=long names a long file.
+// Not shipped.
 import { whenWordsReady } from "@clauseo/components/lib/display.ts";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
@@ -42,6 +44,7 @@ import type {
 import { type FakeCall, FakeTransport } from "../transport/fake-transport.ts";
 import { HINDI_ANSWER, HINDI_QUESTION } from "../testing/hindi-answer.ts";
 import { SHAPING_ANSWER, SHAPING_QUESTION } from "../testing/shaping-answer.ts";
+import { firstReadProbe } from "./first-read/probe-state.ts";
 import {
   batch,
   chosen,
@@ -137,6 +140,8 @@ const hindiThread = page.get("thread") === "hindi";
 /** ?thread=shaping: an idle thread, a question and the fixed answer with the cells in every block type (Devanagari
  * shaping audit 1a, 1d). */
 const shapingThread = page.get("thread") === "shaping";
+/** ?thread=first-read: the matter's first read, reading codex's quoted read of a file outside the matter. */
+const firstReading = page.get("thread") === "first-read";
 /** The pages whose matter lists one idle thread, which the room opens and subscribes to. */
 const idleThread = commanding || hindiThread || shapingThread;
 
@@ -164,43 +169,50 @@ const PERMISSIONS: ViewPatchBody[] = [
 /** The scripted turn after the prompt, in batches of 25 bodies, as the bridge would deliver them. */
 function stream(): HostEvent[] {
   const turn = scriptedTurn().bodies;
-  const bodies: ViewPatchBody[] = hindiThread
-    ? [reset([userMessage(2, 1, HINDI_QUESTION), agentText(3, 100, HINDI_ANSWER)], header("idle"))]
-    : shapingThread
+  const bodies: ViewPatchBody[] = firstReading
+    ? firstReadProbe(page.get("file") === "long", 4)
+    : hindiThread
       ? [
           reset(
-            [userMessage(2, 1, SHAPING_QUESTION), agentText(3, 100, SHAPING_ANSWER)],
+            [userMessage(2, 1, HINDI_QUESTION), agentText(3, 100, HINDI_ANSWER)],
             header("idle"),
           ),
         ]
-      : commanding
+      : shapingThread
         ? [
             reset(
-              [
-                userMessage(2, 1, "When did the bank reply?"),
-                agentText(3, 100, "The bank replied on 12 March 2001."),
-              ],
-              header("idle", COMMANDS),
+              [userMessage(2, 1, SHAPING_QUESTION), agentText(3, 100, SHAPING_ANSWER)],
+              header("idle"),
             ),
           ]
-        : asking
+        : commanding
           ? [
-              reset([userMessage(2, 1, "Tighten the notice to the bank.")], header("needs_you")),
-              ...turn.slice(0, -1),
-              ...PERMISSIONS,
+              reset(
+                [
+                  userMessage(2, 1, "When did the bank reply?"),
+                  agentText(3, 100, "The bank replied on 12 March 2001."),
+                ],
+                header("idle", COMMANDS),
+              ),
             ]
-          : questioning
+          : asking
             ? [
-                reset(
-                  [
-                    userMessage(2, 1, "Draft the petition to quash."),
-                    askEntry(3, uuid(1, 9), TWO_QUESTIONS),
-                    askEntry(4, uuid(2, 9), ONE_QUESTION),
-                  ],
-                  header("needs_you"),
-                ),
+                reset([userMessage(2, 1, "Tighten the notice to the bank.")], header("needs_you")),
+                ...turn.slice(0, -1),
+                ...PERMISSIONS,
               ]
-            : [reset([userMessage(2, 1, "When did the bank reply?")]), ...turn];
+            : questioning
+              ? [
+                  reset(
+                    [
+                      userMessage(2, 1, "Draft the petition to quash."),
+                      askEntry(3, uuid(1, 9), TWO_QUESTIONS),
+                      askEntry(4, uuid(2, 9), ONE_QUESTION),
+                    ],
+                    header("needs_you"),
+                  ),
+                ]
+              : [reset([userMessage(2, 1, "When did the bank reply?")]), ...turn];
   const events: HostEvent[] = [];
   for (let at = 0; at < bodies.length; at += 25) {
     events.push(event(batch(at + 1, bodies.slice(at, at + 25))));
@@ -288,7 +300,11 @@ const transport = new FakeTransport({
     const answer = staged?.query(query);
     if (answer !== undefined) return answer;
     // ?thread=permission: the turn's thread, so the room subscribes to it and shows the prompts
-    if ((asking || questioning) && typeof query === "object" && query.list_threads !== undefined)
+    if (
+      (asking || questioning || firstReading) &&
+      typeof query === "object" &&
+      query.list_threads !== undefined
+    )
       return {
         threads: [{ thread: THREAD, matter: MATTER, agent: "claude-acp", status: "needs_you" }],
       };
@@ -328,7 +344,11 @@ const transport = new FakeTransport({
     // ?thread=ask lists its thread as ?thread=permission does: waiting on the lawyer, so the room opens it
     threads: () =>
       probeThreads(
-        { asking: asking || questioning, commanding: idleThread, shaping: shapingThread },
+        {
+          asking: asking || questioning || firstReading,
+          commanding: idleThread,
+          shaping: shapingThread,
+        },
         wording?.threads ?? [],
       ),
   }),

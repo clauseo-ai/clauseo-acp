@@ -322,6 +322,32 @@
     flex: none;
     margin-left: auto;
   }
+  /* a note that keeps one line beside its clock (the first read's): its words never wrap, and the file's name gives way
+     in its middle, the stem cut with an ellipsis and its extension kept */
+  .lim-field-note[data-line="one"] > .min-w-0 {
+    flex: 1;
+  }
+  .lim-field-note[data-line="one"] .lim-field-lead {
+    display: flex;
+    min-width: 0;
+    white-space: nowrap;
+  }
+  .lim-field-words {
+    flex: none;
+    white-space: pre;
+  }
+  .lim-field-name {
+    display: flex;
+    min-width: 0;
+  }
+  .lim-field-stem {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .lim-field-ext {
+    flex: none;
+  }
   .lim-field-note + .room-line {
     margin-top: var(--s1);
   }
