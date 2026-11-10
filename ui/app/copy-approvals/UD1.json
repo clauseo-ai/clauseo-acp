@@ -864,5 +864,55 @@
     "status": "provisional",
     "at": "2026-11-10",
     "by": "app track (provisional; orchestrator approved the words 2026-11-10, copy review pending)"
+  },
+  "UD1-98": {
+    "en": "Also downloads Clauseo's document tools ({size}).",
+    "hi": "Clauseo के दस्तावेज़ टूल भी डाउनलोड होते हैं ({size})।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-10",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-10",
+    "by": "app track (provisional; orchestrator approved the words 2026-11-10, copy review pending)"
+  },
+  "UD1-99": {
+    "en": "Downloading document tools… {done} of {size}",
+    "hi": "दस्तावेज़ टूल डाउनलोड हो रहे हैं… {size} में से {done}",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-10",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-10",
+    "by": "app track (provisional; orchestrator approved the words 2026-11-10, copy review pending)"
+  },
+  "UD1-100": {
+    "en": "Clauseo couldn't download its document tools.",
+    "hi": "Clauseo अपने दस्तावेज़ टूल डाउनलोड नहीं कर सका।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-10",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-10",
+    "by": "app track (provisional; orchestrator approved the words 2026-11-10, copy review pending)"
+  },
+  "UD1-101": {
+    "en": "Windows blocked Clauseo's document tools on this computer.",
+    "hi": "Windows ने इस कंप्यूटर पर Clauseo के दस्तावेज़ टूल रोक दिए।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-10",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-10",
+    "by": "app track (provisional; orchestrator approved the words 2026-11-10, copy review pending)"
+  },
+  "UD1-102": {
+    "en": "You're offline. Setting up waits for the connection.",
+    "hi": "आप ऑफ़लाइन हैं। कनेक्शन मिलने तक सेटअप रुका रहेगा।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-10",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "approved",
+    "at": "2026-11-05",
+    "by": "Rohan (U3's entry for these words, reused for the document tools 2026-11-10)"
   }
 }

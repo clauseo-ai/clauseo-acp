@@ -180,6 +180,14 @@ export const HI = {
   // UD1-97: under Claude's "Finish signing in with your browser.": claude.ai's own sign-in page opens every time
   "Claude may ask you to sign in again in your browser. Use your Claude account.":
     "Claude आपके ब्राउज़र में आपसे दोबारा साइन इन करने को कह सकता है। अपने Claude खाते का उपयोग करें।",
+
+  // Clauseo's document tools, one line under the plans (new; provisional). Never named by what they're made of
+  "Also downloads Clauseo's document tools ({size}).":
+    "Clauseo के दस्तावेज़ टूल भी डाउनलोड होते हैं ({size})।",
+  "Downloading document tools… {done} of {size}": "दस्तावेज़ टूल डाउनलोड हो रहे हैं… {size} में से {done}",
+  "Clauseo couldn't download its document tools.": "Clauseo अपने दस्तावेज़ टूल डाउनलोड नहीं कर सका।",
+  "Windows blocked Clauseo's document tools on this computer.":
+    "Windows ने इस कंप्यूटर पर Clauseo के दस्तावेज़ टूल रोक दिए।",
 } satisfies Hindi<string>;
 
 /** Every string, English and Hindi (null: hi: later), for the tests that hold the voice and the copy review. */

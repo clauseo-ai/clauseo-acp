@@ -5,18 +5,10 @@
 // the Hindi words in at once, as review/words.ts has them: each ref reads its Hindi when made
 import "@clauseo/components/lib/words-hi.ts";
 import { fl, type FirstLaunchKey } from "@clauseo/components/lib/words-first-launch.ts";
-import { FakeTransport } from "../transport/fake-transport.ts";
-import type {
-  AgentId,
-  InstallProgress,
-  SettingsView,
-  SetupEvent,
-  SignIn,
-} from "../transport/protocol.ts";
+import type { AgentId, InstallProgress, SetupEvent, SignIn } from "../transport/protocol.ts";
 import type { Entry } from "./entry.ts";
-import { MATTER } from "./hosts.ts";
-import { RoomDriven, type DrivenStep } from "./registry-ud1-switching.tsx";
-import { RoomClicking, RoomOver } from "./states.tsx";
+import { render, type Scene } from "./registry-ud1-scene.tsx";
+import * as T from "./registry-ud1-tools.ts";
 import { errorWords, type WordsRef } from "./words.ts";
 
 const CLAUDE: AgentId = "claude-acp";
@@ -47,63 +39,11 @@ const READY = install(CLAUDE, { ready: { version: "0.1.0" } });
 const DOWNLOADING = install(CLAUDE, { downloading: { received: 61_000_000, total: 182_000_000 } });
 const SIGNED_OUT = signIn(CLAUDE, { signed_out: {} });
 
-type Scene = {
-  /** No matter: the first screen. */
-  first?: boolean;
-  events: SetupEvent[];
-  platform?: "mac" | "windows" | "linux";
-  keys?: boolean;
-  locked?: boolean;
-  /** Controls to press, in order (CSS selectors). */
-  clicks?: string[];
-  /** The code desktop refuses each setup command with, and the steps that send one (RoomDriven). */
-  refuse?: string;
-  steps?: DrivenStep[];
+/** The first screen with Claude downloading, beside ChatGPT's row with its size. */
+const WELCOME: Scene = {
+  first: true,
+  events: [DOWNLOADING, SIGNED_OUT, install(CODEX, { missing: { download_bytes: 139_000_000 } })],
 };
-
-/** The room over a fake host with the setup wire, in the scene. */
-function host(s: Scene): () => FakeTransport {
-  return () =>
-    new FakeTransport({
-      platform: s.platform ?? "mac",
-      openSettings: () => {},
-      query: (query) => {
-        if (query === "list_matters") return { matters: s.first === true ? [] : [MATTER] };
-        if (query === "get_settings")
-          return {
-            settings: {
-              ui: {
-                theme: "system",
-                font_size: 16,
-                language: "en",
-                lite: "automatic",
-                motion: "system",
-              },
-              privacy: { counts: true, crash_reports: false, counts_started: false },
-              locked: s.locked === true ? ["privacy.counts"] : [],
-            } as unknown as SettingsView,
-          };
-        if (typeof query === "object" && "list_threads" in query) return { threads: [] };
-        throw new Error(`not scripted: ${JSON.stringify(query)}`);
-      },
-      setup: {
-        first: () => [{ setup_info: { keys_available: s.keys ?? true } }, ...s.events],
-        command: () => {
-          if (s.refuse !== undefined)
-            throw { code: s.refuse, message: "refused", retryable: true } as const;
-        },
-      },
-    });
-}
-
-const render = (s: Scene) =>
-  s.steps !== undefined
-    ? () => <RoomDriven host={host(s)} steps={s.steps ?? []} />
-    : s.clicks === undefined
-      ? () => <RoomOver host={host(s)} />
-      : () => <RoomClicking host={host(s)} clicks={s.clicks ?? []} />;
-
-const WELCOME: Scene = { first: true, events: [DOWNLOADING, SIGNED_OUT] };
 const GATE: Scene = { events: [READY, SIGNED_OUT] };
 const KEY: Scene = { events: [READY, SIGNED_OUT], clicks: [".fl-way-quiet"] };
 const chatgpt = (state: SignIn, clicks: string[] = []): Scene => ({
@@ -139,14 +79,6 @@ const CHECKING: Scene = { events: [READY, signIn(CLAUDE, "checking")] };
 const REINSTALL: Scene = {
   first: true,
   events: [install(CLAUDE, { missing: { download_bytes: 182_400_000, installed_before: true } })],
-};
-/** A fresh computer: both plans not here yet, side by side with their sizes. */
-const BOTH: Scene = {
-  first: true,
-  events: [
-    install(CLAUDE, { missing: { download_bytes: 112_000_000 } }),
-    install(CODEX, { missing: { download_bytes: 139_000_000 } }),
-  ],
 };
 const STUCK: Scene = { events: [READY, signIn(CLAUDE, { switching: { since: AT, stuck: true } })] };
 /** The key panel open while signed out, the switch begun, then a key sent and refused with command.conflict. */
@@ -548,22 +480,29 @@ const SCENES: ([FirstLaunchKey, Scene, string] | null)[] = [
   ["{plan} isn't installed on this computer any more.", REINSTALL, "reinstall"],
   ["Install {plan}", REINSTALL, "reinstall"],
   // UD1-92 to UD1-95: both plans side by side, on the first screen and in the matter's sign-in box
-  ["Sign in with the plan you pay for: Claude, ChatGPT or both.", BOTH, "welcome-both"],
+  ["Sign in with the plan you pay for: Claude, ChatGPT or both.", T.BOTH, "welcome-both"],
   [
     "Your papers stay on this computer. Claude or ChatGPT sees the parts it reads to answer you.",
-    BOTH,
+    T.BOTH,
     "welcome-both",
   ],
-  ["Sign in to {name}", BOTH, "welcome-both"],
+  ["Sign in to {name}", T.BOTH, "welcome-both"],
   ["Sign in to Claude or ChatGPT to ask about this matter", GATE, "plan"],
   // UD1-96: a plan's row on the first screen, after its name and " · "
-  ["needs a download of about {mb} MB", BOTH, "welcome-both"],
+  ["needs a download of about {mb} MB", T.BOTH, "welcome-both"],
   // UD1-97: Claude's browser sign-in note, under its first-screen row (also in the matter's gate and Plans' card)
   [
     "Claude may ask you to sign in again in your browser. Use your Claude account.",
     { first: true, events: [READY, signIn(CLAUDE, { waiting: { since: AT, nudge: false } })] },
     "welcome-browser-note",
   ],
+  // UD1-98 to UD1-101: the document tools
+  ["Also downloads Clauseo's document tools ({size}).", T.TOOLS_MISSING, "tools-missing"],
+  ["Downloading document tools… {done} of {size}", T.TOOLS_DOWNLOADING, "tools-downloading"],
+  ["Clauseo couldn't download its document tools.", T.TOOLS_FAILED, "tools-failed"],
+  ["Windows blocked Clauseo's document tools on this computer.", T.TOOLS_BLOCKED, "tools-blocked"],
+  // UD1-102: the document tools offline, in the plans' own offline words (TOOLS_OFFLINE, below)
+  null,
 ];
 
 /** The gate's refusal line for any other code: its code's own sentence, here a sign-in refused while a key is in use.
@@ -575,6 +514,14 @@ const REFUSAL: Entry = {
   ),
   screen: "first-launch/signin-refused",
   render: render(KEY_IN_USE),
+};
+
+/** The document tools offline: the plans' own offline sentence, in the null SCENES keeps for it. */
+const TOOLS_OFFLINE: Entry = {
+  id: "UD1-102",
+  words: errorWords("You're offline. Setting up waits for the connection."),
+  screen: "first-launch/tools-waiting",
+  render: render(T.TOOLS_WAITING),
 };
 
 export const UD1: readonly Entry[] = [
@@ -591,4 +538,5 @@ export const UD1: readonly Entry[] = [
         ],
   ),
   REFUSAL,
+  TOOLS_OFFLINE,
 ];

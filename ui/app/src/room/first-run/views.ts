@@ -2,7 +2,16 @@
 // as the gate says it. Pure, so each state's screen is tested from the host's words alone.
 import type { GateRefusal, GateView } from "@clauseo/components/clauseo/first-launch/gate.tsx";
 import type { InstallView } from "@clauseo/components/clauseo/first-launch/install.tsx";
-import { isSignedIn, mbOf, type AgentSetup, type SetupState } from "../../store/setup.ts";
+import type { ToolsView } from "@clauseo/components/clauseo/first-launch/tools.tsx";
+import type { AgentId } from "../../transport/protocol.ts";
+import {
+  PLANS,
+  isReady,
+  isSignedIn,
+  mbOf,
+  type AgentSetup,
+  type SetupState,
+} from "../../store/setup.ts";
 
 /** A download's size as the line says it, "about": the nearest 10 MB from 100 MB up,
  * whole MB below. 0 stays 0. */
@@ -98,3 +107,48 @@ export function refusalView(setup: AgentSetup | undefined): GateRefusal | null {
   const switching = typeof signIn === "object" && signIn.switching !== undefined;
   return { code: setup.refused, switching };
 }
+
+/** Whether a plan isn't here yet and says its size: missing, or paused behind the other plan's download. */
+const awaited = (setup: AgentSetup | undefined): boolean => {
+  const install = setup?.install;
+  return install === "paused" || (typeof install === "object" && install.missing !== undefined);
+};
+
+/** The document tools' line, from SetupInfo's `python`; null with nothing to say: unavailable, ready, or an older host
+ * that says nothing. Their size before the download shows only while a plan still says its own, once for all of them
+ * (no plan's size counts it). */
+export function toolsView(state: SetupState): ToolsView | null {
+  const python = state.python;
+  if (python === null || python === "unavailable") return null;
+  if (python === "installing")
+    return state.pythonMb === undefined ? null : { kind: "installing", mb: state.pythonMb };
+  if (python.missing !== undefined) {
+    const mb = mbOf(python.missing.download_bytes);
+    return mb > 0 && PLANS.some((id) => awaited(state.agents[id])) ? { kind: "missing", mb } : null;
+  }
+  if (python.downloading !== undefined) {
+    const { received, total } = python.downloading;
+    const totalMb = mbOf(total);
+    return {
+      kind: "downloading",
+      received,
+      total,
+      doneMb: Math.min(mbOf(received), totalMb),
+      totalMb,
+    };
+  }
+  if (python.waiting !== undefined) return { kind: "waiting" };
+  if (python.failed !== undefined) {
+    const { cause, blocked_by } = python.failed;
+    // Windows' app control refused it: a retry can't help
+    if (cause === "run_blocked" && (blocked_by === "app_control" || blocked_by === "applocker"))
+      return { kind: "blocked" };
+    return { kind: "failed" };
+  }
+  return null;
+}
+
+/** A plan whose install is ready, the one the document tools' retry goes through (any ready plan retries them alone,
+ * and stays ready); null with none. */
+export const readyPlan = (state: SetupState): AgentId | null =>
+  PLANS.find((id) => isReady(state.agents[id]?.install)) ?? null;

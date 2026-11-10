@@ -40,6 +40,7 @@ export type FootPlan = {
 export function Welcome({
   plans,
   papersPlan,
+  tools = null,
   counts,
   onOpenFolder,
   onNewMatter,
@@ -55,6 +56,8 @@ export function Welcome({
   /** The one plan in play, which the papers line names (picked, or the only one signed in); null or left out while
    * both are offered, and the line names both. */
   papersPlan?: string | null | undefined;
+  /** The document tools' line under the plans (tools.tsx); null with none. */
+  tools?: ReactNode;
   counts: CountsSwitch;
   onOpenFolder: () => void;
   onNewMatter: () => void;
@@ -188,6 +191,7 @@ export function Welcome({
               )
             ),
           )}
+          {tools}
           <p className="room-line fl-foot-line">
             {/* both plans named while both are offered; one plan in play is named alone */}
             <DocumentsLine name={papersPlan ?? null} />

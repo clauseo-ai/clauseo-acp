@@ -1,6 +1,7 @@
 // Plans (UD2, settings.html#plans): one block per plan, Claude's then ChatGPT's, each its sign-in as UD1's parts say
-// it, with what can be done from this window: sign out, stop using a reused login, look for one, add ChatGPT, sign in
-// inline (the main window is not brought forward), and the other ways in (an API key, the firm's address). The state
+// it, with what can be done from this window: sign out, stop using a reused login, look for one, add a plan, sign in
+// inline (the main window is not brought forward), and the other ways in (an API key, the firm's address); under the
+// cards, Clauseo's document tools getting ready, on one quiet line. The state
 // is the setup store's (store/setup.ts), over the window's own setup feed; every press is one setup command, which
 // desktop's allow-list lets the settings window send (crates/desktop/src/setup/admit.rs). Nothing here keeps an API
 // key, a pasted code or an address beyond its field, and nothing runs a timer.
@@ -14,10 +15,13 @@ import {
   isSignedIn,
   planLocked,
   type SetupSource,
+  type SetupState,
 } from "../../store/setup.ts";
 import type { HostTransport } from "../../transport/host-transport.ts";
 import type { AgentId } from "../../transport/protocol.ts";
 import type { SectionContext } from "../sections.tsx";
+import { ToolsLine } from "@clauseo/components/clauseo/first-launch/tools.tsx";
+import { readyPlan, toolsView } from "../../room/first-run/views.ts";
 import { PlanBlock } from "./plans-block.tsx";
 
 /** The plans, in the design's order. */
@@ -73,6 +77,26 @@ export function Plans({ ctx }: { ctx: SectionContext }) {
           }}
         />
       ))}
+      {/* the document tools, one quiet line under the plan cards (the first screen's own) */}
+      <PlansTools
+        state={state}
+        retry={(agent) => store.command({ retry_agent_install: { agent } })}
+      />
+    </div>
+  );
+}
+
+function PlansTools({ state, retry }: { state: SetupState; retry: (agent: AgentId) => void }) {
+  const view = toolsView(state);
+  if (view === null) return null;
+  const through = readyPlan(state);
+  return (
+    <div className="set-plans-tools">
+      <ToolsLine
+        view={view}
+        onRetry={through === null ? undefined : () => retry(through)}
+        testId="plans-tools"
+      />
     </div>
   );
 }

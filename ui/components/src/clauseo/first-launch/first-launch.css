@@ -115,6 +115,20 @@
   .fl-plan + .fl-plan {
     margin-top: var(--s1);
   }
+  /* the document tools, one quiet line under the plans: secondary words, the plan rows' meter, a quiet Try again */
+  .fl-tools {
+    @apply text-small-row text-muted;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--s1) var(--s3);
+    min-height: var(--size-control-small);
+    padding: var(--s1) 0 0 var(--s4);
+  }
+  .fl-tools-words {
+    flex: 1 1 var(--working-text-min);
+    min-width: 0;
+  }
   .fl-ready {
     @apply text-small-row text-muted;
     min-height: var(--size-control);
