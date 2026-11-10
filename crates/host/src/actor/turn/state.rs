@@ -1,8 +1,8 @@
 //! The constructors of a turn's in-memory state: a new current turn, and the ways a turn ends;
-//! and whether start-up or shutdown waits for the turn path.
+//! whether start-up or shutdown waits for the turn path; and whether an update is the live turn's.
 
 use clauseo_protocol::{
-    ContentBlock, DetachReason, ErrorCode, ExpiryReason, MessageId, StopReason, TurnId,
+    ContentBlock, DetachReason, ErrorCode, ExpiryReason, MessageId, StopReason, ThreadId, TurnId,
 };
 
 use super::super::{Actor, HostPhase};
@@ -53,6 +53,10 @@ impl End {
     }
 }
 
+/// Where the prompt's task leaves the listing of the agent's descendants; `None` until it is
+/// taken, and when it failed.
+pub(super) type BeforePrompt = std::rc::Rc<std::cell::RefCell<Option<clauseo_process::Snapshot>>>;
+
 impl Current {
     pub(super) fn new(
         turn: TurnId,
@@ -83,6 +87,7 @@ impl Current {
             limit_read: None,
             started,
             first_words: None,
+            first_update: None,
             withheld: super::withheld::Withheld::default(),
         }
     }
@@ -117,4 +122,20 @@ pub(crate) fn busy(actor: &Actor) -> bool {
                     )
                 })
         })
+}
+
+/// Whether an update of `turn` belongs to `thread`'s live turn (its prompt in flight, not
+/// cancelled). The first one has its time kept and a lifecycle line marks it (D-022).
+pub(super) fn live(actor: &mut Actor, thread: ThreadId, turn: TurnId) -> bool {
+    let now = actor.now().mono;
+    let Some(current) =
+        super::current(actor, thread).filter(|current| current.turn == turn && current.live())
+    else {
+        return false;
+    };
+    if current.first_update.is_none() {
+        current.first_update = Some(now);
+        tracing::info!(target: crate::log_file::LIFECYCLE, %thread, %turn, "first update");
+    }
+    true
 }

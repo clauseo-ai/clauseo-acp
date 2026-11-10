@@ -303,6 +303,20 @@ fn the_profile_names_the_own_run_folder_and_notes_write() {
     }
 }
 
+/// The session's temp folder (`TMPDIR`, `agent::temp`) is inside its run folder: writable in
+/// the profile and in every rebuilt turn, while another session's stays denied (D-023).
+#[test]
+fn the_sessions_temp_folder_is_writable_and_another_sessions_is_not() {
+    let keys = fence();
+    let own = run_root()
+        .join("tmp")
+        .join("clang-module-cache")
+        .join("a.pcm");
+    assert_eq!(access(&keys, &own), "write");
+    let other = data().join("run").join("s2").join("tmp").join("a.pcm");
+    assert_eq!(access(&keys, &other), "deny");
+}
+
 /// A session and a matter made after the launch are denied, in the profile and in every turn
 /// rebuilt from codex-acp's policy, while the own run folder and notes stay writable.
 #[test]

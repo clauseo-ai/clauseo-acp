@@ -194,13 +194,28 @@ impl ClauseoProfile {
     /// Codex's keys with no skills index: `developer_instructions` is [`Self::instructions`].
     /// The index goes in only through [`Self::codex_keys`], with a [`SkillsWritten`].
     pub fn codex_config(&self) -> CodexConfig {
-        CodexConfig::with_instructions(self.instructions())
+        CodexConfig::with_instructions(self.codex_instructions())
+    }
+
+    /// Codex's instructions on this OS: [`Self::codex_instructions_for`] macOS or not.
+    pub fn codex_instructions(&self) -> String {
+        self.codex_instructions_for(cfg!(target_os = "macos"))
+    }
+
+    /// Codex's instructions: [`Self::instructions`], then on macOS (`macos`) a blank line and
+    /// [`instructions::codex_shell`]'s line, which Claude never gets.
+    pub fn codex_instructions_for(&self, macos: bool) -> String {
+        let text = self.instructions();
+        match instructions::codex_shell(macos) {
+            Some(line) => format!("{text}\n\n{line}"),
+            None => text,
+        }
     }
 
     /// Codex's instructions with the index: [`Self::instructions`], then a blank line and the
     /// skills index ([`Self::skills_index`]) when a skill is rendered.
     fn codex_instructions_with_index(&self) -> String {
-        let text = self.instructions();
+        let text = self.codex_instructions();
         let index = self.skills_index();
         if index.is_empty() {
             text
@@ -262,7 +277,7 @@ impl ClauseoProfile {
             }
         });
         let index = packs::index::codex_index_with_packs(builtin, packs);
-        let text = self.instructions();
+        let text = self.codex_instructions();
         if index.is_empty() {
             return CodexConfig::with_instructions(text).into_keys();
         }

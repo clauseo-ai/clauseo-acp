@@ -60,7 +60,7 @@ use crate::agent::{codex, data_folder};
 use crate::browser::session::BrowserSession;
 use crate::config::SessionKey;
 use crate::error::Error;
-use crate::log_file::Cause;
+use crate::log_file::{Cause, LIFECYCLE};
 
 /// A launch whose checks are running.
 #[derive(Debug)]
@@ -218,7 +218,8 @@ impl RunFolders {
     /// run folder is taken back. File system calls: off the actor.
     pub(crate) fn make(&self, data: &Path, sweep: &RunSweep) -> Result<(), Error> {
         sweep.once(data);
-        for folder in [&self.work, &self.browser, &self.notes] {
+        let tmp = crate::agent::temp::temp_dir(&self.root);
+        for folder in [&self.work, &tmp, &self.browser, &self.notes] {
             if let Err(error) = crate::write::create_private_dirs_under(data, folder) {
                 self.remove();
                 return Err(Error::refused(
@@ -284,6 +285,7 @@ pub(super) fn prepare(
     waiting: Vec<Waiting>,
     keys_wait: Option<impl std::future::Future<Output = ()> + Send + 'static>,
 ) {
+    tracing::info!(target: LIFECYCLE, %thread, "launch prep started");
     let id = agents::next_agent_id();
     let paths = launch_paths(actor, thread, id);
     let sweep = actor.turn_path.run_sweep.clone();
@@ -486,6 +488,7 @@ pub(super) fn on_prepared(
         return;
     };
     let waiting = preparing.waiting;
+    tracing::info!(target: LIFECYCLE, %thread, ok = result.is_ok(), "launch prep done");
     remember_folder_support(actor, thread, &result);
     let mut prepared = match result {
         Ok(prepared) => prepared,

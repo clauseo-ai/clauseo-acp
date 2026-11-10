@@ -43,7 +43,7 @@ fn no_skill_rendered_means_no_index() {
     let keys = profile.codex_keys_without_index(Some(AgentKind::Codex));
     assert_eq!(
         keys["developer_instructions"],
-        profile.instructions().as_str()
+        profile.codex_instructions().as_str()
     );
 }
 
@@ -155,7 +155,7 @@ fn the_codex_keys_without_index_are_the_instructions_alone() {
     let keys = profile.codex_keys_without_index(Some(AgentKind::Codex));
     assert_eq!(
         keys["developer_instructions"],
-        profile.instructions().as_str()
+        profile.codex_instructions().as_str()
     );
     assert!(
         profile

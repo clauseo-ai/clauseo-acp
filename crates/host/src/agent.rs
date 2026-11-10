@@ -33,6 +33,7 @@ pub(crate) mod login_splits;
 pub(crate) mod plan_note;
 pub(crate) mod shell_path;
 mod spec;
+pub(crate) mod temp;
 pub(crate) mod title;
 
 use std::cell::{Cell, RefCell};

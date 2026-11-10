@@ -166,9 +166,9 @@ const fn warning_kind(warning: &clauseo_acp::ProtocolWarning) -> &'static str {
 /// Where an update of `origin` belongs, or `None` to drop it.
 fn context(actor: &mut Actor, thread: ThreadId, origin: Origin) -> Option<Context> {
     match origin {
-        Origin::Turn(turn) => current(actor, thread)
-            .filter(|current| current.turn == turn && current.live())
-            .map(|_| Context::Live(turn)),
+        Origin::Turn(turn) => {
+            super::state::live(actor, thread, turn).then_some(Context::Live(turn))
+        }
         Origin::Late(_) => None,
         Origin::Replay => Some(Context::Outside { replay: true }),
         Origin::Idle => Some(Context::Outside { replay: false }),

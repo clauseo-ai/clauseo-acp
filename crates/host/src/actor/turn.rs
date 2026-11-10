@@ -58,6 +58,7 @@ use crate::coalesce::ThreadText;
 use crate::error::Error;
 use crate::matter_worker::MatterReply;
 use crate::pipeline::Failure;
+use state::BeforePrompt;
 
 pub(crate) use asks::asks_pending;
 pub(crate) use came_back::{
@@ -214,14 +215,12 @@ struct Current {
     started: std::time::Duration,
     /// When its first answer text came, on the same clock: `answer_ended.first_words`.
     first_words: Option<std::time::Duration>,
+    /// When its first live agent update came, on the same clock (`state::first_update`).
+    first_update: Option<std::time::Duration>,
     /// Elicitation values withheld from the turn's tool output (`withheld.rs`), zeroized when
     /// the turn ends.
     withheld: withheld::Withheld,
 }
-
-/// Where the prompt's task leaves the listing of the agent's descendants; `None` until it is
-/// taken, and when it failed.
-type BeforePrompt = std::rc::Rc<std::cell::RefCell<Option<clauseo_process::Snapshot>>>;
 
 /// Where a current turn is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

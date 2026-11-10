@@ -293,7 +293,7 @@ fn launch(
     // The relay token reaches the agent in a file; its stderr tail hides it all the same.
     let redacted = super::launch_checks::relay::redacted(&prepared.run);
     let folder = prepared.stored;
-    let (forced, codex) = if let Some(prepared) = prepared.codex {
+    let (mut forced, codex) = if let Some(prepared) = prepared.codex {
         let hooks = codex_hooks(actor);
         let guard = hooks.is_some();
         let forced = agent::codex::launch_env(&prepared.home, &settings.env, prepared.keys, hooks);
@@ -311,6 +311,11 @@ fn launch(
             .map(agent::home::claude_launch_env);
         (forced.unwrap_or_default(), None)
     };
+    // Every agent's temp folder is its session's own, gone with the run folder.
+    forced.extend(agent::temp::temp_env(
+        &agent::temp::temp_dir(&prepared.run.root),
+        cfg!(windows),
+    ));
     let hook = agent::loads::launch_env(actor.profile.launch_env(&row.agent));
     // The key retry is armed by the hook's key and the launch's sign-in check.
     let codex = codex.map(|(mut codex, login)| {

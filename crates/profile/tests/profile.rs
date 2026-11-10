@@ -185,7 +185,16 @@ fn every_claude_session_turns_skill_shell_execution_off() {
 
 #[test]
 fn the_codex_fragment_is_the_instructions_alone() {
-    let keys = profile().codex_keys_without_index(Some(AgentKind::Codex));
+    let mut keys = profile().codex_keys_without_index(Some(AgentKind::Codex));
+    // One snapshot for every OS: macOS's Codex line (legal.rs checks it) is taken off first.
+    if let Some(line) = clauseo_profile::instructions::codex_shell(cfg!(target_os = "macos")) {
+        let text = keys["developer_instructions"].as_str().unwrap();
+        let alone = text
+            .strip_suffix(&format!("\n\n{line}"))
+            .unwrap()
+            .to_owned();
+        keys.insert("developer_instructions".to_owned(), Value::String(alone));
+    }
     insta::assert_snapshot!(pretty(&Value::Object(keys)));
 }
 

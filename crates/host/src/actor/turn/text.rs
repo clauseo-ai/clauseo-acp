@@ -15,7 +15,7 @@ use super::out::Out;
 use super::{Then, TimerKind, TurnTimer, end, lost, state};
 use crate::coalesce::{DisplayText, TextIn};
 use crate::error::Error;
-use crate::log_file::Cause;
+use crate::log_file::{Cause, LIFECYCLE};
 
 /// One text delta of the live turn. A message's first delta closes the held batch first, so
 /// its provisional order is the seq its `TextAppended` gets.
@@ -34,6 +34,9 @@ pub(super) fn on_delta(actor: &mut Actor, thread: ThreadId, delta: TextIn) -> Re
             .as_mut()
             .filter(|current| current.turn == delta.turn)
     {
+        if current.first_words.is_none() {
+            tracing::info!(target: LIFECYCLE, %thread, turn = %delta.turn, "first answer text");
+        }
         current.first_words.get_or_insert(now);
     }
     let pushed = state.text.push(now, delta);

@@ -14,6 +14,7 @@ import { sameIds } from "./ids.ts";
 import {
   asksWords,
   doingOf,
+  internalOf,
   placeOf,
   sentenceOf,
   siteQuery,
@@ -335,10 +336,21 @@ export function lineOf(
   live: boolean,
   asks: "permission" | "question" | null = null,
 ): GroupLine {
+  // the agent's upkeep of its own notes (the matter brief) is no paper: it is neither counted nor told as failed
   const calls: ToolCallEntry[] = [];
-  for (const e of entries) if (e?.tool_call !== undefined) calls.push(e.tool_call);
+  let upkeep = false;
+  for (const e of entries)
+    if (e?.tool_call !== undefined) {
+      if (internalOf(e.tool_call)) upkeep = true;
+      else calls.push(e.tool_call);
+    }
   const aside = backgroundLine(lang, calls);
-  if (!live) return { ...restOf(lang, calls), more: aside };
+  // a group at rest of nothing but that upkeep says the work was planned, with no count and no break
+  const rest = (): GroupLine =>
+    calls.length === 0 && upkeep
+      ? { kinds: ["think"], line: steps(lang, "Planned the work."), trouble: "", more: aside }
+      : { ...restOf(lang, calls), more: aside };
+  if (!live) return rest();
   // the newest of what is still to finish, or a thought after the last of them
   let now: ToolCallEntry | "thought" | null = null;
   for (let i = entries.length - 1; i >= 0 && now === null; i -= 1) {
@@ -347,7 +359,7 @@ export function lineOf(
     else if (e?.tool_call !== undefined && unsettled(e.tool_call)) now = e.tool_call;
     else if (e?.tool_call !== undefined) break;
   }
-  if (now === null) return { ...restOf(lang, calls), more: aside };
+  if (now === null) return rest();
   return {
     // waiting on the lawyer, the line leads with the wait's own icon (the shield, the question mark), as the working
     // line does, never the kind of the step that waits
