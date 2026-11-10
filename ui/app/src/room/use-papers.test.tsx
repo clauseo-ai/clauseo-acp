@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 // usePapers (use-papers.ts): the wall's papers are listed once when a matter opens, again on each `papers_changed` for
-// that matter (the host's tracked-changes scan found more), never for another matter's, and an answer that comes back
-// after a newer one is dropped.
+// that matter (the host's tracked-changes scan found more), never for another matter's, and one listing at a time:
+// changes while one runs are listed once, after it.
 import { act, useEffect } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, expect, test } from "vitest";
@@ -101,14 +101,21 @@ test("papers_changed for the open matter lists the papers again", async () => {
   expect(tracked(probe.seen())).toBe(true);
 });
 
-test("an answer older than the one shown is dropped", async () => {
+test("one listing at a time: changes while one runs list once more after it", async () => {
   const { host, calls } = fakePapers();
   const { app, play } = fakeApp();
   const probe = mount(host, app, A);
-  act(() => play({ papers_changed: { matter: A } }));
-  expect(calls).toHaveLength(2);
-  await act(async () => calls[1]?.answer(papers(true)));
+  act(() => {
+    play({ papers_changed: { matter: A } });
+    play({ papers_changed: { matter: A } });
+    window.dispatchEvent(new Event("focus"));
+  });
+  expect(calls, "none while the first runs").toHaveLength(1);
   await act(async () => calls[0]?.answer(papers(false)));
+  expect(calls, "one more for all three").toHaveLength(2);
+  expect(tracked(probe.seen())).toBe(false);
+  await act(async () => calls[1]?.answer(papers(true)));
+  expect(calls, "nothing left to list").toHaveLength(2);
   expect(tracked(probe.seen())).toBe(true);
 });
 
