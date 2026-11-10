@@ -219,6 +219,8 @@ test("undoing a restore asks the host to take back what it added: the dialog nam
     "'\u2068Reply notes.md\u2069', added by the restore, will be removed.",
   );
   expect(dialog()?.textContent).not.toMatch(/Nothing will change|added since/);
+  // its act says what it does: the band's own words for taking a restore back, not Restore
+  expect(h.one("dialog-confirm")?.textContent).toBe("Undo the restore");
   await h.click(h.one("dialog-confirm"));
   expect(h.sent("restore_version")).toEqual([
     { matter: MATTER, checkpoint: "cp3", scope: "matter", undoes: "cp4", thread: THREAD },
