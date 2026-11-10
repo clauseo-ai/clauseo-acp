@@ -272,18 +272,24 @@ export function FindResults({
         </section>
       )}
       {shown.nothing && (
+        // what Find covers, said in words under it: an info icon alone here meant nothing (D-071)
         <div className="room-find-none" role="status">
           <p className="text-ui font-chip text-primary">
             <Say>{fw(lang, 'Nothing found for "{words}".', { words: field.query.trim() })}</Say>
           </p>
+          <p className="text-small text-muted">
+            <Say>{scope}</Say>
+          </p>
         </div>
       )}
       <p ref={foot} className="room-find-foot">
-        <Tooltip content={scope}>
-          <button type="button" className="room-find-scope" aria-label={scope}>
-            <IconAbout size={14} />
-          </button>
-        </Tooltip>
+        {!shown.nothing && (
+          <Tooltip content={scope}>
+            <button type="button" className="room-find-scope" aria-label={scope}>
+              <IconAbout size={14} />
+            </button>
+          </Tooltip>
+        )}
       </p>
     </>
   );

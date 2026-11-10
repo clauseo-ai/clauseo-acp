@@ -8,7 +8,7 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { streamOf } from "../store/view.ts";
 import { agentText, MATTER, reset, THREAD, userMessage, uuid } from "../testing/stream-script.ts";
 import type { HostQuery, QueryResult, SearchHit } from "../transport/protocol.ts";
-import { clearJump, jumpAsked, jumpTo } from "./thread/jump-entry.ts";
+import { clearJump, jumpAsked, jumpTo, landing } from "./thread/jump-entry.ts";
 import { mountRoom, summary, THE_MATTER, type Harness } from "./thread/harness.ts";
 
 const NOW = Date.UTC(2026, 10, 3, 17, 0);
@@ -114,3 +114,17 @@ test("opening another conversation clears a jump to a thread that never opened",
   await h.settle();
   expect(jumpAsked()).toBeNull();
 });
+
+test.each([
+  // [the row's height, its clearance (the pin's band), the thread's visible height, where it lands]
+  [120, 80, 400, "center"],
+  [240, 80, 400, "center"],
+  [241, 80, 400, "start"],
+  [900, 80, 400, "start"],
+  [120, 0, 100, "start"],
+] as const)(
+  "a found row %i px tall with %i px clearance in %i px lands at its %s, never under the pin (D-071)",
+  (height, clearance, visible, block) => {
+    expect(landing(height, clearance, visible)).toBe(block);
+  },
+);

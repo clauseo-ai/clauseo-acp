@@ -14,7 +14,9 @@ import type { PaperSummary } from "../room/host-next.ts";
 import { MATTER, roomHost, threadHost } from "./hosts.ts";
 import { RoomOver } from "./states.tsx";
 import { matterWords, threadWords } from "./words.ts";
-import { agentText, step, userMessage, uuid } from "../testing/stream-script.ts";
+import { agentText, step, THREAD, userMessage, uuid } from "../testing/stream-script.ts";
+import { jumpTo } from "../room/thread/jump-entry.ts";
+import { streamOf } from "../store/view.ts";
 
 /** A retry that does nothing: the review shows the parts, the host isn't asked. */
 const ACTIONS: ThreadActions = {
@@ -83,6 +85,28 @@ const ended = () => (
     }
   />
 );
+/** A Find result's jump to a long answer, earlier in the conversation than the pinned question (D-071): where its
+ * first line lands against the pin. */
+const jumped = () => {
+  jumpTo(streamOf(THREAD), 6);
+  return (
+    <RoomOver
+      host={() =>
+        threadHost({
+          agent: "codex-acp",
+          entries: [
+            userMessage(5, 1, ASKED_LONG),
+            agentText(6, 1, `${LONG}\n\n${LONG}`),
+            step(7),
+            userMessage(8, 2, "And what if the bank doesn't cure in time?"),
+            agentText(9, 2, "Then the lessor may end the lease by a second written notice."),
+            step(10),
+          ],
+        })
+      }
+    />
+  );
+};
 /** The same with one paper in the matter. */
 const freshOne = () => <RoomOver host={() => roomHost([MATTER], PAPERS.slice(0, 1))} />;
 
@@ -140,5 +164,11 @@ export const U6: Entry[] = [
     screen: "matters/thread-end",
     render: ended,
     width: 1400,
+  },
+  {
+    id: "U6-09",
+    words: threadWords("Uses your {name} plan"),
+    screen: "matters/find-jump",
+    render: jumped,
   },
 ];

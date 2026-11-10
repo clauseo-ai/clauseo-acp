@@ -59,6 +59,13 @@ export function useJumpOrder(stream: StreamId | null): number | null {
 
 const pickIds = (v: StreamView | undefined) => v?.ids;
 
+/** Where a found row lands (D-071): centred when it fits with its clearance (its scroll-margin-top, the pinned
+ * question's band) above and below it, else its top just under the pinned question, so a long answer never starts
+ * under the pin with a cut line showing at its edge. */
+export function landing(height: number, clearance: number, visible: number): "center" | "start" {
+  return height + 2 * clearance <= visible ? "center" : "start";
+}
+
 /**
  * Once the entry `order` of `stream` is among the rows (the older pages or the live window), scrolls its row (or the
  * nearest row before it) into view and lets the ask go. Fonts settling can move the thread back to its resting place
@@ -90,7 +97,13 @@ export function useJumpLanding(
       .map((e) => root.querySelector(`[data-entry-id="${CSS.escape(entryIdOf(e))}"]`))
       .find((el) => el !== null);
     if (row === undefined) return;
-    const show = () => row.scrollIntoView({ block: "center" });
+    const show = () => {
+      const box = scroller();
+      const clearance = Number.parseFloat(getComputedStyle(row).scrollMarginTop) || 0;
+      const height = row.getBoundingClientRect().height;
+      const block = box === null ? "center" : landing(height, clearance, box.clientHeight);
+      row.scrollIntoView({ block });
+    };
     show();
     void document.fonts?.ready.then(show);
     if (mine) put(null);
