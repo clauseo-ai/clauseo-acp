@@ -22,7 +22,8 @@ export async function showRail(w: Window): Promise<void> {
  * Makes a matter through the rail's New matter form and waits until it is open. `existing`
  * presses Choose folder… (pick_folder returns E2E_MATTER_DIR, which becomes the matter); without
  * it, Use a new folder chooses a new folder named after the matter in the host's default location
- * (Documents\Clauseo), which the host makes. A folder can be one matter only, and a matter may not
+ * (the scratch matters folder, settings.json's `matters.default_location`; the desktop reads it with
+ * get_default_location), which the host makes. A folder can be one matter only, and a matter may not
  * sit inside another, so a test that makes several matters makes them all without `existing`.
  */
 export async function createRoomMatter(
