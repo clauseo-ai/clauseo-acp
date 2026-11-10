@@ -33,6 +33,8 @@ export type FootPlan = {
   install: WorkingState | null;
   /** Its install finished in this window: "{name} is ready" in the line's place. */
   ready: boolean;
+  /** A muted line under its row (Claude's browser sign-in note); null or left out with none. */
+  note?: string | null | undefined;
 };
 
 export function Welcome({
@@ -165,6 +167,11 @@ export function Welcome({
                 data-agent={plan.key}
               >
                 <WorkingLine state={plan.install} />
+                {plan.note != null && (
+                  <p className="fl-plan-note" data-testid="plan-note">
+                    <Say>{plan.note}</Say>
+                  </p>
+                )}
               </div>
             ) : (
               plan.ready && (

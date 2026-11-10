@@ -20,7 +20,7 @@ import type { Matters } from "../matters.ts";
 import { usePickWait } from "../picker-wait.ts";
 import { markButton, markWelcome } from "../../start-marks.ts";
 import { IDS, NAME, installActs, planOf } from "./acts.ts";
-import { welcomeFoot, type FootActs } from "./welcome-foot.tsx";
+import { browserNote, welcomeFoot, type FootActs } from "./welcome-foot.tsx";
 
 /** A plan's line's presses: its install's, its "Sign in to {name}" (through the store's queue), and Cancel, which
  * stops a wait for the other plan or cancels the sign-in under way. */
@@ -67,18 +67,20 @@ export function FirstScreen({
   const plans: FootPlan[] = PLANS.map((agent) => {
     const name = NAME[planOf(agent)];
     const setup = state.agents[agent];
+    const install = welcomeFoot(
+      lang,
+      agent,
+      name,
+      setup,
+      state,
+      footActs(store, agent, state),
+      IDS.install,
+    );
     return {
       key: agent,
       name,
-      install: welcomeFoot(
-        lang,
-        agent,
-        name,
-        setup,
-        state,
-        footActs(store, agent, state),
-        IDS.install,
-      ),
+      install,
+      note: browserNote(lang, agent, install, setup),
       // ready here, or installed and signed in wherever that happened (D-012: Settings' sign-in left this window
       // with no row for the plan, since its install was never seen turning ready here)
       ready:

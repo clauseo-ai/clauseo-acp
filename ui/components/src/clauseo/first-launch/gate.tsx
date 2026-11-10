@@ -269,6 +269,14 @@ export function Gate({
           <Act dot act={cancel}>
             <Say>{w("Finish signing in with your browser.")}</Say>
           </Act>
+          {/* Claude's sign-in always opens claude.ai's own sign-in page, even when the lawyer is signed in there */}
+          {plan === "claude" && (
+            <Ways>
+              <Note>
+                {w("Claude may ask you to sign in again in your browser. Use your Claude account.")}
+              </Note>
+            </Ways>
+          )}
           {/* only once the host says the page may not have opened (30 s): never on a timer of the window's own */}
           {view.nudge && (
             <Ways>

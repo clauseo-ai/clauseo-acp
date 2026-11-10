@@ -165,3 +165,16 @@ test("D-066: the agent's refusal for a sign-in that lapsed (agent.auth_required)
   expect(button("Sign in again", block("claude")!)).not.toBeNull();
   expect(button("Sign in again", block("chatgpt")!)).not.toBeNull();
 });
+
+test("Claude's card waiting on the browser says Claude's browser note; ChatGPT's never does", async () => {
+  const NOTE = "Claude may ask you to sign in again in your browser. Use your Claude account.";
+  const t = await mountPlans({ first: both({ signed_out: {} }, { signed_out: {} }) });
+  expect(document.body.textContent).not.toContain(NOTE);
+  await play(t, signIn(CLAUDE, { waiting: { since: AT, nudge: false } }));
+  expect(block("claude")?.textContent).toContain(NOTE);
+  await play(t, signIn(CODEX, { waiting: { since: AT, nudge: false } }));
+  expect(block("chatgpt")?.textContent).toContain("Finish signing in with your browser.");
+  expect(block("chatgpt")?.textContent).not.toContain(NOTE);
+  await play(t, signIn(CLAUDE, CANCELLED));
+  expect(block("claude")?.textContent).not.toContain(NOTE);
+});

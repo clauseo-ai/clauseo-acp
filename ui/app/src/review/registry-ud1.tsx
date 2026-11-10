@@ -558,6 +558,12 @@ const SCENES: ([FirstLaunchKey, Scene, string] | null)[] = [
   ["Sign in to Claude or ChatGPT to ask about this matter", GATE, "plan"],
   // UD1-96: a plan's row on the first screen, after its name and " · "
   ["needs a download of about {mb} MB", BOTH, "welcome-both"],
+  // UD1-97: Claude's browser sign-in note, under its first-screen row (also in the matter's gate and Plans' card)
+  [
+    "Claude may ask you to sign in again in your browser. Use your Claude account.",
+    { first: true, events: [READY, signIn(CLAUDE, { waiting: { since: AT, nudge: false } })] },
+    "welcome-browser-note",
+  ],
 ];
 
 /** The gate's refusal line for any other code: its code's own sentence, here a sign-in refused while a key is in use.
