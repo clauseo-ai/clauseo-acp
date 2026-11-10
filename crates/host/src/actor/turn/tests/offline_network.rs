@@ -11,8 +11,8 @@ use super::agents::send_prompt;
 use super::failures::until_ended;
 use super::offline::{answer, ended, prompting};
 use super::rig::Rig;
-use crate::actor::turn::offline::OFFLINE_WAIT;
 use crate::actor::turn::offline::probe::ReachProbe;
+use crate::actor::turn::offline::{OFFLINE_WAIT, WORKING_LIMIT};
 
 /// A prompt the agent never answers until the host cancels it.
 const SILENT: &str = r#"{"expect":{"method":"session/prompt","as":"p1","params":{"sessionId":"sess-1"}}}
@@ -235,5 +235,30 @@ fn a_running_tool_call_is_never_ended_by_the_window_s_offline() {
     assert!(going(&rig, thread));
     assert!(armed(&rig.actor, thread).is_some_and(|armed| armed > since));
     cancel(&mut rig, thread, turn);
+    rig.finish();
+}
+
+#[test]
+fn a_tool_call_keeps_a_window_only_watch_for_ten_minutes_then_a_failed_probe_ends_it() {
+    let mut rig = start("network-tool-limit", TOOL, false);
+    let (thread, turn) = prompting(&mut rig);
+    rig.run_until("the tool call", |actor| {
+        actor
+            .loaded(clauseo_protocol::StreamId::Thread(thread))
+            .is_some_and(|loaded| loaded.sent.unfinished_tools(turn).next().is_some())
+    });
+    network(&mut rig, 20, false);
+    let waits = WORKING_LIMIT.as_secs() / OFFLINE_WAIT.as_secs();
+    for _ in 1..waits {
+        rig.clock.advance(OFFLINE_WAIT);
+        rig.drain();
+    }
+    assert!(going(&rig, thread), "ended before the limit");
+    rig.clock.advance(OFFLINE_WAIT);
+    until_ended(&mut rig, thread);
+    assert_eq!(
+        ended(&rig.log(thread), turn),
+        (Some(StopReason::Failed), Some(ErrorCode::AgentOffline))
+    );
     rig.finish();
 }
