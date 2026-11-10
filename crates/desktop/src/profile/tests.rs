@@ -19,6 +19,9 @@ use crate::test_support::Scratch;
 
 mod bundled;
 mod helper;
+// Its program stand-in is a shell script and its PATH fallback is a debug build's.
+#[cfg(all(unix, not(target_os = "macos"), debug_assertions))]
+mod install_log;
 
 const CLAUDE: &str = "claude-acp";
 const CODEX: &str = "codex-acp";

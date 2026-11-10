@@ -313,11 +313,69 @@ pub(crate) fn shell_state(
     (state, part)
 }
 
+/// The Chrome file names a support line may show (`browser::chrome`'s candidates); any other
+/// reads `other`, since a Chrome set in the settings could be named anything.
+const KNOWN_CHROMES: [&str; 7] = [
+    "chrome.exe",
+    "msedge.exe",
+    "Google Chrome",
+    "Google Chrome for Testing",
+    "google-chrome",
+    "chromium",
+    "chrome",
+];
+
+/// What the support line for a session's `{browser}` shows (`profile_loads::session_loads`):
+/// the part's word (`on`, `off`, `not_installed`) and the Chrome's file name, only when it
+/// is one of [`KNOWN_CHROMES`] (`other` for any other, `none` without one). Never a path:
+/// one holds the user's name.
+pub(crate) fn part_log(
+    part: BrowserPart,
+    executable: Option<&Path>,
+) -> (&'static str, &'static str) {
+    let word = match part {
+        BrowserPart::On => "on",
+        BrowserPart::Off => "off",
+        BrowserPart::NotInstalled => "not_installed",
+    };
+    let name = executable.map_or("none", |path| {
+        let file = path.file_name().and_then(OsStr::to_str).unwrap_or_default();
+        KNOWN_CHROMES
+            .into_iter()
+            .find(|known| *known == file)
+            .unwrap_or("other")
+    });
+    (word, name)
+}
+
 #[cfg(test)]
 mod shell_tests {
     use std::path::PathBuf;
 
     use super::*;
+
+    /// The support line names the part and a known Chrome's file name, never a folder; any other
+    /// file name reads `other`.
+    #[test]
+    fn the_part_log_names_a_known_chrome_file_and_no_folder() {
+        let edge = Path::new(r"C:\Users\someone\AppData\Local\Microsoft\Edge\msedge.exe");
+        let edge = if cfg!(windows) {
+            edge.to_path_buf()
+        } else {
+            PathBuf::from("/home/someone/edge").join("msedge.exe")
+        };
+        assert_eq!(part_log(BrowserPart::On, Some(&edge)), ("on", "msedge.exe"));
+        let own = PathBuf::from("/home/someone/bin").join("someones-browser");
+        assert_eq!(part_log(BrowserPart::On, Some(&own)), ("on", "other"));
+        assert_eq!(
+            part_log(BrowserPart::Off, Some(&edge)),
+            ("off", "msedge.exe")
+        );
+        assert_eq!(
+            part_log(BrowserPart::NotInstalled, None),
+            ("not_installed", "none")
+        );
+    }
 
     /// The six variables, each exactly once, with the values given (the idle timeout 10 minutes,
     /// in milliseconds): nothing about a proxy, a stream port or a socket folder.

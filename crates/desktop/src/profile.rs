@@ -27,6 +27,10 @@ use serde_json::{Map, Value};
 
 use crate::setup::SetupHook;
 
+/// The target of the profile's support lines: host.log keeps info only from `clauseo_*::lifecycle`
+/// targets (`clauseo_host::log_file`).
+const LIFECYCLE: &str = "clauseo_desktop::profile::lifecycle";
+
 /// stetdoc's program name, without the OS's suffix.
 const STETDOC: &str = "stetdoc";
 
@@ -140,18 +144,35 @@ impl DesktopProfile {
 /// into `<data>/tools` (`clauseo_profile::tools`, only when its SHA-256 changed). Returns the
 /// folder, or none, with a log line, when there is no program to copy or the copy failed: then
 /// no session gets the browser, its skill or its instructions, and the app runs on.
+///
+/// Each outcome is one line on [`LIFECYCLE`], for support: `copied`, `up_to_date`,
+/// `copied_running_copy_set_aside` (Windows), `no_sidecar`, or a warning with the error's
+/// [`ProfileError::log_text`]; never a path.
 fn install_browser(paths: &ProfilePaths, path: Option<&OsStr>) -> Option<PathBuf> {
     let Some(source) = browser_program(paths, path) else {
-        tracing::info!("no agent-browser program: the agents get no browser");
+        tracing::info!(
+            target: LIFECYCLE,
+            outcome = "no_sidecar",
+            "agent-browser left out: the agents get no browser"
+        );
         return None;
     };
     match clauseo_profile::tools::install_agent_browser(&source, paths) {
-        Ok((_, wrote)) => {
-            tracing::debug!(wrote, "the agents' agent-browser command is in place");
+        Ok((_, installed)) => {
+            tracing::info!(
+                target: LIFECYCLE,
+                outcome = installed.word(),
+                "the agents' agent-browser command is in place"
+            );
             Some(paths.tools().to_path_buf())
         }
         Err(err) => {
-            tracing::warn!(%err, "agent-browser was not copied for the agents: they get no browser");
+            tracing::warn!(
+                target: LIFECYCLE,
+                outcome = "failed",
+                err = %err.log_text(),
+                "agent-browser was not copied for the agents: they get no browser"
+            );
             None
         }
     }

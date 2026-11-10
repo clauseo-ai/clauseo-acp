@@ -2,7 +2,7 @@
 //! disk: made once, made again only when the SHA-256 differs, a program (0755 on Unix), never a
 //! link, with no temp file left; a missing sidecar writes nothing.
 
-use clauseo_profile::tools::install_agent_browser;
+use clauseo_profile::tools::{Installed, install_agent_browser};
 
 use super::{Scratch, profile_paths, read, write};
 
@@ -12,8 +12,9 @@ fn the_copy_is_made_once_and_again_only_when_the_hash_differs() {
     let paths = profile_paths(&root);
     let source = root.join("app").join("clauseo-agent-browser");
     write::write(&source, b"v1").unwrap();
-    let (target, wrote) = install_agent_browser(&source, &paths).unwrap();
-    assert!(wrote);
+    let (target, installed) = install_agent_browser(&source, &paths).unwrap();
+    assert_eq!(installed, Installed::Copied);
+    assert!(installed.wrote());
     let name = format!("agent-browser{}", std::env::consts::EXE_SUFFIX);
     assert_eq!(target, root.join("tools").join(name));
     assert_eq!(target, paths.agent_browser_command());
@@ -31,13 +32,18 @@ fn the_copy_is_made_once_and_again_only_when_the_hash_differs() {
         assert_eq!(mode & 0o777, 0o755);
     }
     let (_, again) = install_agent_browser(&source, &paths).unwrap();
-    assert!(!again, "an unchanged copy is not written again");
+    assert_eq!(
+        again,
+        Installed::UpToDate,
+        "an unchanged copy is not written again"
+    );
+    assert!(!again.wrote());
     write::write(&source, b"v2").unwrap();
-    assert!(install_agent_browser(&source, &paths).unwrap().1);
+    assert!(install_agent_browser(&source, &paths).unwrap().1.wrote());
     assert_eq!(read(&target), b"v2");
     // A copy changed in place is put back to the bundled bytes.
     write::write(&target, b"tampered").unwrap();
-    assert!(install_agent_browser(&source, &paths).unwrap().1);
+    assert!(install_agent_browser(&source, &paths).unwrap().1.wrote());
     assert_eq!(read(&target), b"v2");
     let names: Vec<_> = std::fs::read_dir(paths.tools())
         .unwrap()
