@@ -34,6 +34,15 @@
   .room-find-key {
     flex: none;
   }
+  /* a found row: its words wrap inside the rail, a long word or address broken where it must be, never pushing the
+     rail wider */
+  .room-find-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .room-find-row > * {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
   /* a found word inside a snippet or a file name */
   .room-find-hit {
     @apply text-primary font-chip;

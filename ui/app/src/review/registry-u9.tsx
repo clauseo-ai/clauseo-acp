@@ -46,8 +46,18 @@ const changed = (paths: readonly string[] = [NOTICE]): ViewEntry =>
     })),
     checkpoint_after: uuid(1, 9),
   });
-/** The wall's papers: the Word document, which the wall lists with its file ref. */
-const PAPERS: PaperSummary[] = [{ file: uuid(1, 8), path: NOTICE, size: 1200, modified: ENDED }];
+/** The wall's papers: the Word document, which the wall lists with its file ref, and a long-named PDF and a CSV, which
+ * open with the computer's default app. */
+const PAPERS: PaperSummary[] = [
+  { file: uuid(1, 8), path: NOTICE, size: 1200, modified: ENDED },
+  {
+    file: uuid(1, 7),
+    path: "Statement of claim with annexures A to F, final.pdf",
+    size: 1200,
+    modified: ENDED,
+  },
+  { file: uuid(1, 6), path: "Invoices listed.csv", size: 1200, modified: ENDED },
+];
 
 /** Versions' restore of a version three days ago, whose preview names the Word document as locked. */
 const LOCKED_RESTORE: Matter = { locked: [NOTICE] };

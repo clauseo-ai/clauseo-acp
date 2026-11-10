@@ -25,6 +25,15 @@ const DOCX: PaperSummary = {
   path: REPLY,
   size: 24_000,
   modified: Date.UTC(2026, 10, 9, 9, 0),
+  // the host found tracked changes in it: its tile offers Tracked changes
+  tracked: true,
+};
+/** A .docx with no tracked changes or comments: its tile offers Open in Word alone. */
+const CLEAN: PaperSummary = {
+  file: "00000000-0000-4000-8000-0000000000d2",
+  path: "Vakalatnama.docx",
+  size: 18_000,
+  modified: Date.UTC(2026, 10, 9, 9, 0),
 };
 
 /** A change made this morning, so it reads "Today, …". */
@@ -58,7 +67,11 @@ const wordHost =
   (list: RevisionList | string, decide = "word.edit_failed") =>
   (): FakeTransport =>
     new FakeTransport({
-      next: fakeNext({ matters: () => [detailed(THE_MATTER)], papers: [DOCX], parts: ["papers"] }),
+      next: fakeNext({
+        matters: () => [detailed(THE_MATTER)],
+        papers: [DOCX, CLEAN],
+        parts: ["papers"],
+      }),
       query: (query) => {
         if (query === "list_matters") return { matters: [THE_MATTER] };
         if (typeof query === "object" && query.list_threads !== undefined)

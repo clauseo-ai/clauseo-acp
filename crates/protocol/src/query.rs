@@ -312,6 +312,10 @@ pub struct PaperSummary {
     pub size: Count,
     /// When it was last modified.
     pub modified: Timestamp,
+    /// A `.docx` that holds tracked changes or comments, as the host found them in its XML:
+    /// what its tile's Tracked changes press waits for. False is left out of the JSON.
+    #[serde(skip_serializing_if = "std::ops::Not::not", default)]
+    pub tracked: bool,
 }
 
 /// One agent in the settings, for `ListAgents`.

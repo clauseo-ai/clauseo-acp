@@ -8,12 +8,16 @@
 // the folders to move or rename are; a show's refusal is given to the caller as an open's is. The
 // label comes from the reader's words, loaded only once a listed paper is a Word document, so the
 // room's first load carries none of them. A .docx's opener also carries the way to its tracked changes, which its tile
-// offers as a second press (paper-wall.tsx).
+// offers as a second press (paper-wall.tsx), only when the host found tracked changes or comments in it. Every other
+// file of a type the desktop opens (crates/desktop/src/open.rs, DOCUMENT_TYPES) opens the same way from its tile, with
+// the computer's default app for its type, under the wall's words for it, Open it: wallOpenerFor gives those, while a
+// change note offers Word's alone (openerFor).
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import type { Lang } from "@clauseo/components/lib/display.ts";
 import { late } from "@clauseo/components/lib/late.ts";
 import type { HostTransport } from "../../transport/host-transport.ts";
 import type { FileRefId, MatterId } from "../../transport/protocol.ts";
+import { mt } from "@clauseo/components/lib/words-matters.ts";
 import { refusalOf, type ListedPapers } from "../open.ts";
 import { isDocx, isWordFile } from "./lock.ts";
 
@@ -44,9 +48,19 @@ const NOT_SENT: WordOpened = { refused: null, protectedView: false };
 export type WordOpen = {
   /** The opener of a matter-relative path: a Word document the wall lists, once the words are in; else null. */
   openerFor: (path: string) => WordOpener | null;
+  /** The opener its tile offers: a Word document's, as openerFor's, or any other file's the desktop opens; else
+   * null. */
+  wallOpenerFor: (path: string) => WordOpener | null;
 };
 
-const NONE: WordOpen = { openerFor: () => null };
+const NONE: WordOpen = { openerFor: () => null, wallOpenerFor: () => null };
+
+/** The types open_file opens, as crates/desktop/src/open.rs's DOCUMENT_TYPES lists them: keep the two in step. */
+const OPENABLE =
+  /\.(doc|docx|dotx|rtf|odt|pdf|txt|md|csv|xls|xlsx|ods|ppt|pptx|odp|png|jpg|jpeg|gif|heic|tif|tiff)$/i;
+
+/** Whether a file's tile opens it with the computer's default app. */
+export const isOpenable = (path: string): boolean => OPENABLE.test(path);
 
 export const WordOpenContext = createContext<WordOpen>(NONE);
 
@@ -79,40 +93,48 @@ export function useWordOpeners(
     };
   }, [anyWord, rdt]);
   return useMemo(() => {
-    if (listed === null || rdt === null) return NONE;
-    const label = rdt(lang, "Open in Word");
-    const protectedLine = rdt(
-      lang,
-      "This file's path is long, so Word opens it in Protected View. Choose Enable Editing to make changes.",
-    );
+    if (listed === null) return NONE;
     const { matter } = listed;
-    const changes: TrackedChanges = { label: rdt(lang, "Tracked changes"), transport, matter };
     const onReveal = () => refusalOf("reveal", transport.reveal({ matter }));
-    const openers = new Map<string, WordOpener>();
+    const openOf = (file: FileRefId) => async (): Promise<WordOpened> => {
+      if (opening.has(file)) return NOT_SENT;
+      opening.add(file);
+      try {
+        let protectedView = false;
+        const opened = transport.openFile(file).then((o) => {
+          protectedView = o.protected_view;
+        });
+        const refused = await refusalOf("open_file", opened);
+        return { refused, protectedView };
+      } finally {
+        opening.delete(file);
+      }
+    };
+    const word = new Map<string, WordOpener>();
+    const others = new Map<string, WordOpener>();
+    const openIt = mt(lang, "Open it");
     for (const p of listed.papers.papers) {
-      if (!isWordFile(p.path)) continue;
-      const file = p.file;
-      openers.set(p.path, {
-        label,
-        protectedLine,
-        onReveal,
-        ...(isDocx(p.path) ? { changes } : {}),
-        onOpen: async () => {
-          if (opening.has(file)) return NOT_SENT;
-          opening.add(file);
-          try {
-            let protectedView = false;
-            const opened = transport.openFile(file).then((o) => {
-              protectedView = o.protected_view;
-            });
-            const refused = await refusalOf("open_file", opened);
-            return { refused, protectedView };
-          } finally {
-            opening.delete(file);
-          }
-        },
-      });
+      if (isWordFile(p.path)) {
+        if (rdt === null) continue;
+        const changes: TrackedChanges = { label: rdt(lang, "Tracked changes"), transport, matter };
+        word.set(p.path, {
+          label: rdt(lang, "Open in Word"),
+          protectedLine: rdt(
+            lang,
+            "This file's path is long, so Word opens it in Protected View. Choose Enable Editing to make changes.",
+          ),
+          onReveal,
+          // the second press only for a .docx the host found tracked changes or comments in
+          ...(isDocx(p.path) && p.tracked === true ? { changes } : {}),
+          onOpen: openOf(p.file),
+        });
+      } else if (isOpenable(p.path)) {
+        others.set(p.path, { label: openIt, protectedLine: "", onReveal, onOpen: openOf(p.file) });
+      }
     }
-    return { openerFor: (path) => openers.get(path) ?? null };
+    return {
+      openerFor: (path) => word.get(path) ?? null,
+      wallOpenerFor: (path) => word.get(path) ?? others.get(path) ?? null,
+    };
   }, [transport, listed, rdt, lang, opening]);
 }

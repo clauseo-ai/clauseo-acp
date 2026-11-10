@@ -15,6 +15,10 @@ publish.workspace = true
 test-support = []
 
 [dependencies]
+# Whether a listed .docx holds tracked changes or comments (revisions/marks.rs): its zip parts.
+zip = { version = "9.2.2", default-features = false, features = [
+  "deflate-flate2",
+] }
 clauseo-protocol = { path = "../protocol" }
 clauseo-reducer = { path = "../reducer" }
 clauseo-store = { path = "../store" }

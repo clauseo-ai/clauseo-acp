@@ -1,10 +1,13 @@
-// The wall's tiles: one per paper the wall lists, a Word document's tile opening it in Word
-// (word/open-in-word.ts). What a tile's open said stands under the tiles until the next press of a
-// tile (word/wall-said.tsx, in the thread's chunk with the change note's lines): the Protected View
-// line, or a refused open's words. A .docx's tile has a second, quiet press under its face, Tracked
-// changes, which puts the file's tracked changes in the wall's place (word/changes-pane.tsx, its own
-// chunk, loaded on that press), with Back to the tiles. The room keys the wall by its matter, so
-// another matter's wall starts with nothing under it.
+// The wall's tiles: one per paper the wall lists, a Word document's tile opening it in Word and any
+// other file of a type the desktop opens with the computer's default app (word/open-in-word.ts), the
+// press's words on the face under the name. A name too long for its tile loses letters from its
+// middle, never its extension, and shows whole in the tile's tooltip. What a tile's open said stands
+// under the tiles until the next press of a tile (word/wall-said.tsx, in the thread's chunk with the
+// change note's lines): the Protected View line, or a refused open's words. A .docx the host found
+// tracked changes or comments in has a second, quiet press under its face, Tracked changes, which
+// puts the file's tracked changes in the wall's place (word/changes-pane.tsx, its own chunk, loaded
+// on that press), with Back to the tiles. The room keys the wall by its matter, so another matter's
+// wall starts with nothing under it.
 import { fileTypeIcon } from "@clauseo/components/icons/file-type.ts";
 import { PaperTile } from "@clauseo/components/clauseo/paper-tile.tsx";
 import { useRoom } from "@clauseo/components/clauseo/room-scope.ts";
@@ -53,7 +56,7 @@ export function PaperWall({ papers, word }: { papers: Papers; word: WordOpen }) 
   } | null>(null);
   // Back gives the focus to the Tracked changes press it came from, once the tiles are back
   const back = useRef<string | null>(null);
-  const saidBy = said && word.openerFor(said.path);
+  const saidBy = said && word.wallOpenerFor(said.path);
   const open = changes === null ? undefined : word.openerFor(changes.path)?.changes;
   if (changes !== null && open !== undefined) {
     const { Pane } = changes;
@@ -85,14 +88,17 @@ export function PaperWall({ papers, word }: { papers: Papers; word: WordOpen }) 
         }}
       >
         {papers.papers.map(({ file, path }) => {
-          const opener = word.openerFor(path);
+          const opener = word.wallOpenerFor(path);
           const tracked = opener?.changes;
+          const name = fileName(path);
           return (
             <PaperTile
               key={file}
               id={file}
               state="uncited"
-              title={fileName(path)}
+              title={name}
+              fileName
+              tip={name}
               fileIcon={fileTypeIcon(path)}
               {...(opener === null
                 ? {}
@@ -101,9 +107,8 @@ export function PaperWall({ papers, word }: { papers: Papers; word: WordOpen }) 
                       setSaid(null);
                       void opener.onOpen().then((opened) => setSaid({ path, opened }));
                     },
-                    tip: opener.label,
-                    label: opener.label,
-                    testIds: { face: "open-in-word" },
+                    cue: opener.label,
+                    testIds: { face: word.openerFor(path) === null ? "open-file" : "open-in-word" },
                   })}
               {...(tracked === undefined
                 ? {}

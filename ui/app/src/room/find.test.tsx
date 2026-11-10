@@ -209,6 +209,15 @@ test("the found words are spans in primary at chip weight; markup inside a snipp
   ]);
   expect(results()?.textContent).toContain("Conversations");
   expect(row?.textContent).toContain("Sharma v. State of Delhi, today");
+  // the row wraps its words inside the rail
+  expect(row?.classList.contains("room-find-row")).toBe(true);
+});
+
+test("the field asks for no autocorrect, spell check or capitals: typed words are search words", async () => {
+  await room(() => page([]));
+  expect(field()?.getAttribute("autocorrect")).toBe("off");
+  expect(field()?.getAttribute("autocapitalize")).toBe("off");
+  expect(field()?.getAttribute("spellcheck")).toBe("false");
 });
 
 test("RO-27 shows while the index builds, and clears on a page without it", async () => {

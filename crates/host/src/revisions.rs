@@ -13,6 +13,7 @@
 //! `SystemRoot`, and `TEMP` and `TMP` pointing into the job's folder), not the agents'
 //! launcher: that one may be the sandbox's, which would keep stetdoc from the data folder.
 
+mod marks;
 mod parse;
 mod stetdoc;
 
@@ -30,6 +31,7 @@ use crate::error::Error;
 use crate::log_file::Cause;
 use crate::write;
 
+pub(crate) use marks::{Listed, listed};
 pub(crate) use parse::is_docx;
 
 /// The folder under the data folder that holds each matter's private copies.

@@ -6,6 +6,7 @@ use clauseo_protocol::{MatterId, Seq, StreamId, ThreadId, Timestamp};
 use rusqlite::{Connection, ToSql, Transaction, params};
 
 use crate::normal::normalise;
+use crate::plain::{one_line, plain};
 use crate::query::{self, Page, Progress, Query};
 use crate::{EntryKind, Error, Kind, OpenState, open};
 
@@ -231,7 +232,12 @@ impl Batch<'_> {
             at,
             archived,
         };
-        self.insert(&row, &stored(text))
+        // a prompt or an answer is Markdown: Find keeps and shows its plain words, on one line
+        let text = match kind {
+            EntryKind::Prompt | EntryKind::Answer => plain(text),
+            EntryKind::ToolTitle => one_line(text),
+        };
+        self.insert(&row, &stored(&text))
     }
 
     /// [`SearchIndex::put_thread_title`], inside the batch.
