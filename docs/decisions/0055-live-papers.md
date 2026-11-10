@@ -40,8 +40,10 @@ day, beside Clauseo.
   next return to the window or the next answer's end. macOS and Linux send nothing at a turn's
   end: the watch tells of each change.
 - A file's `FileRefId` is per path, so a rename is the old tile gone and a new one come. The
-  `tracked` marks follow, since each listing scans them. The Find index keeps the names of the
-  last checkpoint, as before.
+  `tracked` marks follow: the watch knows only that something changed, so it publishes
+  `PapersChanged` and calls no `papers::scan::rescan` (#924); the listing that follows hands
+  each new or changed `.docx` to the background scan, which publishes again if it finds marks.
+  The Find index keeps the names of the last checkpoint, as before.
 
 ## Consequences
 
