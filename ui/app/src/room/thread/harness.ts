@@ -59,6 +59,8 @@ export type Script = {
   next?: FakeHost["next"];
   /** The settings window's open (FakeHost's openSettings): with it the room has Settings. */
   openSettings?: FakeHost["openSettings"];
+  /** Answers the Files and Folders pane's open (FakeHost's openPrivacySettings); it opens when left out. */
+  openPrivacySettings?: FakeHost["openPrivacySettings"];
   /** UC's protection wire (FakeHost's protection): with it the room reads the computer's protection. */
   protection?: FakeHost["protection"];
   /** The setup wire (FakeHost's setup): with it the room loads the first run, and the
@@ -134,6 +136,9 @@ export async function mountRoom(script: Script = {}): Promise<Harness> {
     dispatch: (envelope) => (script.dispatch ?? defaultOutcome)(envelope.command),
     ...(script.next === undefined ? {} : { next: script.next }),
     ...(script.openSettings === undefined ? {} : { openSettings: script.openSettings }),
+    ...(script.openPrivacySettings === undefined
+      ? {}
+      : { openPrivacySettings: script.openPrivacySettings }),
     ...(script.protection === undefined ? {} : { protection: script.protection }),
     ...(script.setup === undefined ? {} : { setup: script.setup }),
     ...(script.smartAppControl === undefined ? {} : { smartAppControl: script.smartAppControl }),

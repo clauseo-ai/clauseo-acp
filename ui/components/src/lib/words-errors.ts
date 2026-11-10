@@ -114,6 +114,13 @@ const isMark = (key: ErrorKey): key is MarkKey => (MARK_KEYS as readonly string[
 /** Every error sentence, in English. */
 export type ErrorKey = keyof typeof HI | typeof STOPPED | MarkKey;
 
+/** matter.folder_permission's button on the Mac, which opens macOS's Files and Folders privacy pane, and the line under
+ * it (room/thread/privacy-settings.tsx). Settled by the orchestrator (2026-11-10); copy review pending. */
+export const PRIVACY_KEYS = {
+  button: "Open Privacy settings",
+  line: "Turn on access for Clauseo, then ask again.",
+} as const satisfies Record<string, ErrorKey>;
+
 /** One sentence per code, in English. */
 export const ERROR_WORDS: Record<ErrorCode, ErrorKey> = {
   internal: "Something went wrong inside Clauseo.",

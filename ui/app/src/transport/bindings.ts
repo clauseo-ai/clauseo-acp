@@ -174,6 +174,13 @@ export const commands = {
 	 */
 	quitApp: () => typedError<null, HostError>(__TAURI_INVOKE("quit_app")),
 	/**
+	 *  Opens macOS's Files and Folders privacy pane (`open::PRIVACY_FILES_AND_FOLDERS`), for the
+	 *  Open Privacy settings button under `matter.folder_permission`. No arguments: the URL is fixed
+	 *  here, so the page opens nothing else with it. `command.invalid` off macOS. Granted to
+	 *  `main` only.
+	 */
+	openPrivacySettings: () => typedError<null, HostError>(__TAURI_INVOKE("open_privacy_settings")),
+	/**
 	 *  The page's start-up marks (`ui/app/src/start-marks.ts`), sent once after the welcome's
 	 *  primary button mounts, logged on the desktop's clock (`startup::log_page`): the first call of
 	 *  a run only. Always answers ok; carries only milliseconds.

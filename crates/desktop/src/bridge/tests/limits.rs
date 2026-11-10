@@ -1,5 +1,5 @@
 //! The limits on `main`'s and the settings window's channels (`open_stream` follows them there
-//! alone), the refresh either window's focus asks for (`on_window_event` in `lib.rs`, then
+//! alone), the refresh either window's focus asks for (`window_events::on_window_event`, then
 //! `Bridge::shown`), and the settings window's refreshes, throttled. A scripted reader stands in
 //! for the limits readers: it records each read and answers only when the test says, so no
 //! reader process starts.
@@ -241,7 +241,10 @@ fn main_and_settings_focus_dispatch_a_shown_refresh_and_no_other_window_s() {
         window("other"),
     );
     let focus = |window: &WebviewWindow<MockRuntime>, focused: bool| {
-        crate::on_window_event(&window.as_ref().window(), &WindowEvent::Focused(focused))
+        crate::window_events::on_window_event(
+            &window.as_ref().window(),
+            &WindowEvent::Focused(focused),
+        )
     };
     clock.advance(SHOWN_AFTER);
 
@@ -283,7 +286,7 @@ fn a_focus_before_the_host_starts_refreshes_once_it_has() {
         .build()
         .unwrap();
     let focused = WindowEvent::Focused(true);
-    let mut task = crate::on_window_event(&main.as_ref().window(), &focused)
+    let mut task = crate::window_events::on_window_event(&main.as_ref().window(), &focused)
         .expect("the main window's focus dispatches");
     assert!(
         (&mut task).now_or_never().is_none(),
