@@ -184,6 +184,7 @@ export class TauriTransport implements HostTransport, AppFeedSource, LimitsSourc
           ("folder_scanned" in event && event.folder_scanned !== undefined) ||
           ("protection_changed" in event && event.protection_changed !== undefined) ||
           ("site_blocked" in event && event.site_blocked !== undefined) ||
+          ("papers_changed" in event && event.papers_changed !== undefined) ||
           ("update_changed" in event && event.update_changed !== undefined) ||
           // UC: R17 PR-B's whole ProtectionView, not in bindings.ts yet (store/protection.ts reads it loosely)
           Object.hasOwn(event, "protection_view_changed")

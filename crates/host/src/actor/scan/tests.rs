@@ -224,6 +224,7 @@ fn next_scan_of(app: &mut AppSubscription) -> FolderScanned {
             | HostEvent::CaseLawHint { .. }
             | HostEvent::ProtectionChanged { .. }
             | HostEvent::ProtectionViewChanged { .. }
+            | HostEvent::PapersChanged { .. }
             | HostEvent::SiteBlocked { .. } => {}
             other @ (HostEvent::Patches(_)
             | HostEvent::Events(_)
@@ -475,6 +476,7 @@ fn import_summary(
             | HostEvent::CaseLawHint { .. }
             | HostEvent::ProtectionChanged { .. }
             | HostEvent::ProtectionViewChanged { .. }
+            | HostEvent::PapersChanged { .. }
             | HostEvent::SiteBlocked { .. }) => {
                 panic!("no matter_created before {other:?}")
             }

@@ -31,7 +31,9 @@ use crate::error::Error;
 use crate::log_file::Cause;
 use crate::write;
 
-pub(crate) use marks::{Listed, listed};
+#[cfg(test)]
+pub(crate) use marks::hooks;
+pub(crate) use marks::{Kept, check};
 pub(crate) use parse::is_docx;
 
 /// The folder under the data folder that holds each matter's private copies.

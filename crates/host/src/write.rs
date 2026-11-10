@@ -278,6 +278,22 @@ pub(crate) fn set_mode(path: &Path, mode: u32) -> io::Result<()> {
     std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode))
 }
 
+/// Opens `path` for reading, never through a link at its last component: `O_NOFOLLOW` on Unix
+/// (the open fails on a link), and on Windows `FILE_FLAG_OPEN_REPARSE_POINT`, which opens the
+/// link itself, not what it points at. A read changes nothing; it lives here for the flags.
+pub(crate) fn open_read_nofollow(path: &Path) -> io::Result<std::fs::File> {
+    let mut options = std::fs::OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    std::os::unix::fs::OpenOptionsExt::custom_flags(&mut options, nix::libc::O_NOFOLLOW);
+    #[cfg(windows)]
+    std::os::windows::fs::OpenOptionsExt::custom_flags(
+        &mut options,
+        windows::Win32::Storage::FileSystem::FILE_FLAG_OPEN_REPARSE_POINT.0,
+    );
+    options.open(path)
+}
+
 /// Opens `path` for reading with a share mode that lets others read but not write or delete
 /// (`FILE_SHARE_READ`), as Word holds a document. For the pre-write guard's Windows test.
 #[cfg(all(test, windows))]

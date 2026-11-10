@@ -1,10 +1,15 @@
 //! `ListPapers`: a matter's folder as it is now, listed on the matter's worker (never on the
 //! actor), each paper with a [`FileRefId`] from the host's file registry, [`FileRefs`], which
-//! `RegisterFile` shares, so a path keeps one id for the host's run.
+//! `RegisterFile` shares, so a path keeps one id for the host's run. Whether a `.docx` holds
+//! tracked changes comes from what the matter's background scan has read ([`scan`]): the
+//! listing answers at once, and the scan sends `PapersChanged` when it knows more.
+
+pub(crate) mod scan;
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
+use clauseo_matters::PaperList;
 use clauseo_protocol::{
     Count, FileRefId, MAX_PAPERS, MatterId, MatterPath, PaperSummary, QueryResult,
 };
@@ -15,7 +20,6 @@ use super::matters::matter_worker;
 use crate::error::Error;
 use crate::log_file::Cause;
 use crate::matter_worker::{MatterJob, MatterReply};
-use crate::revisions::Listed;
 
 /// The files the host has handed out ids for, both ways, kept in host memory for its run.
 #[derive(Debug, Default)]
@@ -95,14 +99,11 @@ pub(super) fn answer(
     let _gone = reply.send(answer);
 }
 
-/// `listed`'s papers with each file's id, minted on first sight of its path in `matter`'s
-/// folder, and whether a `.docx` holds tracked changes or comments.
-fn summarise(actor: &mut Actor, matter: MatterId, listed: Listed) -> Result<QueryResult, Error> {
-    let Listed {
-        list: papers,
-        tracked,
-    } = listed;
+/// `papers` with each file's id, minted on first sight of its path in `matter`'s folder, and
+/// whether a `.docx` holds tracked changes or comments as far as the scan has read.
+fn summarise(actor: &mut Actor, matter: MatterId, papers: PaperList) -> Result<QueryResult, Error> {
     let folder = PathBuf::from(&actor.check_matter(matter)?.row.folder_path);
+    let tracked = scan::listed(actor, matter, &folder, &papers.papers);
     let mut summaries = Vec::with_capacity(papers.papers.len());
     for paper in papers.papers {
         let file = file_ref(actor, absolute(&folder, &paper.path))?;

@@ -210,6 +210,8 @@ pub(crate) struct Actor {
     /// Matter folders whose `ListMatters` stat is still running (`folder_state.rs`).
     pub(crate) stats_running: folder_state::Running,
     pub(crate) files: papers::FileRefs,
+    /// Each matter's background scan for tracked changes (`papers/scan.rs`).
+    pub(crate) paper_scans: papers::scan::PaperScans,
     pub(crate) next_sub: u64,
     pub(crate) work: Work,
     pub(crate) phase: HostPhase,
@@ -504,6 +506,7 @@ impl Actor {
             Input::IdleDeadline { generation } => turn::idle_due(self, generation),
             Input::FolderStates(states) => query::on_folder_states(self, states),
             Input::Scan(input) => scan::on_input(self, input),
+            Input::PaperMarks(batch) => papers::scan::on_batch(self, batch),
             Input::Scratch(input) => scratch::on_input(self, input),
             Input::Documents(input) => documents::on_input(self, input),
             Input::NewFolder(probed) => matters::probe::on_probed(self, *probed),

@@ -19,6 +19,8 @@ test-support = []
 zip = { version = "9.2.2", default-features = false, features = [
   "deflate-flate2",
 ] }
+# The tracked-changes check's one pass over a .docx part (revisions/marks.rs).
+memchr = { workspace = true }
 clauseo-protocol = { path = "../protocol" }
 clauseo-reducer = { path = "../reducer" }
 clauseo-store = { path = "../store" }
