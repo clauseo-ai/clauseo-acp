@@ -17,6 +17,7 @@ import {
 } from "@clauseo/components/icons/icons.tsx";
 import type { Display, Lang } from "@clauseo/components/lib/display.ts";
 import { cw } from "@clauseo/components/lib/words-connectors.ts";
+import { frame } from "@clauseo/components/lib/words-frame.ts";
 import { LANGUAGE_NAMES, st, type SettingsKey } from "@clauseo/components/lib/words-settings.ts";
 import { uw } from "@clauseo/components/lib/words-update.ts";
 import type { DisplayStore } from "../room/display-store.ts";
@@ -158,9 +159,13 @@ export const SECTIONS: readonly SectionEntry[] = [
     name: "Appearance",
     icon: IconAppearance,
     lead: "How Clauseo looks on this computer.",
+    // the Theme control's choice, in its words: Follow the computer, not the light it gives now (D-067)
     note: (ctx, lang) =>
       st(lang, "{theme}, text size {n}", {
-        theme: st(lang, ctx.display.theme === "night" ? "Night" : "Day"),
+        theme:
+          ctx.settings.ui.theme === "system"
+            ? frame(lang, "Follow the computer")
+            : st(lang, ctx.settings.ui.theme === "dark" ? "Night" : "Day"),
         n: ctx.display.textSize,
       }),
     Body: Appearance,

@@ -225,6 +225,23 @@ test("text size offers 14 to 20, shows 16 by default, and a choice sets data-tex
   expect(saved()).toMatchObject({ font_size: 18 });
 });
 
+test("the side's Appearance note names the Theme control's choice: Follow the computer while it follows, not the light it gives", async () => {
+  history.replaceState(null, "", "/settings.html#appearance");
+  const { el } = await mount(withHost());
+  const note = () =>
+    [...el.querySelectorAll(".set-nav-row")]
+      .find((r) => r.querySelector(".set-nav-name")?.textContent === "Appearance")
+      ?.querySelector(".set-nav-note")?.textContent;
+  expect(side(el, "Theme", "Follow the computer")?.getAttribute("aria-pressed")).toBe("true");
+  expect(note()).toBe("Follow the computer, text size 16");
+  await press(side(el, "Theme", "Night"));
+  expect(note()).toBe("Night, text size 16");
+  await press(side(el, "Theme", "Day"));
+  expect(note()).toBe("Day, text size 16");
+  await press(side(el, "Theme", "Follow the computer"));
+  expect(note()).toBe("Follow the computer, text size 16");
+});
+
 test("lite offers On and Off only, and a stored automatic shows as Off", async () => {
   localStorage.setItem(DISPLAY_KEY, JSON.stringify({ lite: "automatic" }));
   history.replaceState(null, "", "/settings.html#appearance");
