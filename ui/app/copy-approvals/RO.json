@@ -305,15 +305,15 @@
     "note": "the line's full stop dropped; Undo is words.ts's own, its Hindi approved; Rohan, running-page batch 2026-11-05 (written by app track)"
   },
   "RO-15": {
-    "en": "Snooze until / Mark all done",
-    "hi": "कब तक टालें / सभी को पूरा चिह्नित करें",
+    "en": "Snooze until",
+    "hi": "कब तक टालें",
     "hi_status": "provisional",
     "hi_at": "2026-11-06",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
     "status": "approved",
     "at": "2026-11-05",
     "by": "Rohan",
-    "note": "RO-07's \"Snooze until\" on the submenu's row, its \"…\" dropped (the row's chevron says it opens); Rohan, running-page batch 2026-11-05 (written by app track)"
+    "note": "RO-07's \"Snooze until\" on the submenu's row, its \"…\" dropped (the row's chevron says it opens); Rohan, running-page batch 2026-11-05 (written by app track); its \"Mark all done\" became UC-129's \"Mark all conversations done\" (rail triage, D-051, 2026-11-10)"
   },
   "RO-16": {
     "en": "Done",

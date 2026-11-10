@@ -20,11 +20,16 @@ export function snoozeTimes(now: Timestamp, zone: string): SnoozeTime[] {
   const times: SnoozeTime[] = [];
   if (minute < 17 * H) times.push({ key: "evening", until: atLocal(day, 18 * H, zone) });
   else if (minute < 21 * H) times.push({ key: "night", until: atLocal(day, 21 * H, zone) });
-  times.push({ key: "tomorrow", until: atLocal(day + 1, 9 * H, zone) });
+  times.push({ key: "tomorrow", until: tomorrowAt9(now, zone) });
   // 1 January 1970 was a Thursday: day 0's weekday is 4, Sunday 0
   const toMonday = (8 - ((day + 4) % 7)) % 7 || 7;
   if (toMonday > 1) times.push({ key: "monday", until: atLocal(day + toMonday, 9 * H, zone) });
   return times;
+}
+
+/** 9:00 am tomorrow on the zone's wall clock: the menu's Tomorrow, and the time the picker opens with. */
+export function tomorrowAt9(now: Timestamp, zone: string): Timestamp {
+  return atLocal(wallOf(now, zone).day + 1, 9 * H, zone);
 }
 
 /** The picker's value ("2026-11-05T17:30", the zone's wall clock) as a moment; null if it isn't one. */

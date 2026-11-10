@@ -19,7 +19,7 @@ import { shelf, type Shelved } from "./shelf.ts";
 import { snoozed, type Group } from "./triage.ts";
 import type { MatterInfo } from "./host-next.ts";
 import { snoozeChoices } from "./snooze-choices.ts";
-import { MOST_AHEAD, pickedAt, pickerValue } from "./snooze-times.ts";
+import { MOST_AHEAD, pickedAt, pickerValue, tomorrowAt9 } from "./snooze-times.ts";
 
 export type SnoozeMenuProps = {
   zone: string;
@@ -48,13 +48,15 @@ export type PickerProps = {
 const takes = (until: Timestamp | null): until is Timestamp =>
   until !== null && until > Date.now() && until - Date.now() <= MOST_AHEAD;
 
-/** The picker, from a minute ahead to the host's furthest; Snooze greyed for a value outside them. */
+/** The picker, from a minute ahead to the host's furthest, opening at 9:00 am tomorrow so Snooze can be pressed at once;
+ * Snooze greyed for a value outside them. */
 export function Picker({ zone, onPick, onCancel }: PickerProps) {
   const [now] = useState(Date.now);
   return (
     <SnoozePicker
       min={pickerValue(now + 60_000, zone)}
       max={pickerValue(now + MOST_AHEAD - 60_000, zone)}
+      initial={pickerValue(tomorrowAt9(now, zone), zone)}
       valid={(value) => takes(pickedAt(value, zone))}
       onPick={(value) => {
         const until = pickedAt(value, zone);

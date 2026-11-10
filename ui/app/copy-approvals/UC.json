@@ -868,5 +868,49 @@
     "at": "2026-11-09",
     "by": "orchestrator (settled en)",
     "note": "Accept and reject of a Word file's tracked changes (word-accept-reject)"
+  },
+  "UC-129": {
+    "en": "Mark all conversations done",
+    "hi": "सभी बातचीत पूरी चिह्नित करें",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-10",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-10",
+    "by": "app track (provisional; orchestrator to approve)",
+    "note": "a matter's menu, under Snooze until; was RO-15's \"Mark all done\", which never said all of what (rail triage, D-051)"
+  },
+  "UC-130": {
+    "en": "All conversations marked as done / Undo",
+    "hi": "सभी बातचीत पूरी चिह्नित की गईं / पूर्ववत करें",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-10",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-10",
+    "by": "app track (provisional; orchestrator to approve)",
+    "note": "beneath a matter's row, which stays, for 8 seconds after Mark all conversations done; Undo is words.ts's own (rail triage, D-051)"
+  },
+  "UC-131": {
+    "en": "Remove {name} from the list?",
+    "hi": "{name} को सूची से हटाएँ?",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-10",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-10",
+    "by": "app track (provisional; orchestrator to approve)",
+    "note": "the confirm before Remove from the list; {name} is the matter's name as filed (rail triage, D-054)"
+  },
+  "UC-132": {
+    "en": "The matter and its conversations leave the list and Recent. Its folder and papers stay where they are.",
+    "hi": "यह मामला और इसकी बातचीत सूची और ‘हाल के’ से हट जाएँगी। इसका फ़ोल्डर और दस्तावेज़ अपनी जगह पर रहेंगे।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-10",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-10",
+    "by": "app track (provisional; orchestrator to approve)",
+    "note": "the confirm's body; Cancel and Remove from the list are the existing words (rail triage, D-054)"
   }
 }

@@ -45,18 +45,21 @@ export function SnoozeItems({
 export function SnoozePicker({
   min,
   max,
+  initial = "",
   valid,
   onPick,
   onCancel,
 }: {
   min: string;
   max: string;
+  /** Optional: the value it opens with, so Snooze can be pressed at once; empty without. */
+  initial?: string;
   valid: (value: string) => boolean;
   onPick: (value: string) => void;
   onCancel: () => void;
 }) {
   const { lang } = useDisplay();
-  const [value, setValue] = useState("");
+  const [value, setValue] = useState(initial);
   const field = useRef<HTMLInputElement>(null);
   useEffect(() => field.current?.focus(), []);
   const label = twl(lang, "Choose a day and time");

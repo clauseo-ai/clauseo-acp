@@ -21,8 +21,9 @@ export const HI = {
   Snooze: "टालें",
   "Mark as done": "पूरा चिह्नित करें",
   "Mark as not done": "अधूरा चिह्नित करें",
-  // RO-15: a matter's menu, with RO-07's "Snooze until" on its submenu's row
-  "Mark all done": "सभी को पूरा चिह्नित करें",
+  // UC-129: a matter's menu, under RO-15's "Snooze until"; it marks the matter's conversations (was "Mark all done";
+  // new; provisional)
+  "Mark all conversations done": "सभी बातचीत पूरी चिह्नित करें",
   // RO-17: behind the open fold's info icon
   "Conversations you've read, with nothing waiting, move here each morning.":
     "जो बातचीत आप पढ़ चुके हैं और जिनमें कुछ बाकी नहीं, वे हर सुबह यहाँ आ जाती हैं।",
