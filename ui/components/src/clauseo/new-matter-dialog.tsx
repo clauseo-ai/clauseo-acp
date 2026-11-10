@@ -1,7 +1,7 @@
 // New matter, from the rail. The rail's New matter opens the new matter form, the same part first launch opens on its
 // first screen, in the system's dialog: the matter's name, its client if any, and its folder, chosen in the computer's
 // own picker or made new where Clauseo keeps matters. Focus starts on the name. Escape, Cancel or a press on the scrim
-// closes it, and focus goes back to New matter.
+// closes it, and focus goes back to New matter, its ring drawn only when a key closed it (D-075).
 import { Dialog as Base } from "@base-ui/react/dialog";
 import { useState, type RefObject } from "react";
 import { focusPlane } from "../ui/dialog-start.ts";
@@ -29,7 +29,7 @@ export function NewMatterDialog({
   finalFocus?: RefObject<HTMLElement | null>;
 }) {
   const w = useMatterFormWords();
-  const [{ mount, field }] = useState(focusPlane);
+  const [{ mount, field, back }] = useState(focusPlane);
   return (
     <Base.Root open={open} onOpenChange={onOpenChange}>
       <Base.Portal>
@@ -40,7 +40,7 @@ export function NewMatterDialog({
           data-dialog-plane=""
           className={cn(dialogPlace, dialogPlane, "new-matter-dialog")}
           initialFocus={field()}
-          finalFocus={finalFocus ?? true}
+          finalFocus={back(finalFocus)}
         >
           <Base.Title className={cn(dialogTitle, "mb-s4")}>{w("A new matter")}</Base.Title>
           <NewMatterForm
