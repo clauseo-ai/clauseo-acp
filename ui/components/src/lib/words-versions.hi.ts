@@ -102,6 +102,7 @@ const OWN = {
     "{n} दस्तावेज़ बदलेंगे: {papers}। आप इसे पूर्ववत कर सकते हैं।",
   "1 document will change: {papers}. You can undo this.":
     "1 दस्तावेज़ बदलेगा: {papers}। आप इसे पूर्ववत कर सकते हैं।",
+  "You can undo this.": "आप इसे पूर्ववत कर सकते हैं।",
   "Nothing will change. The matter already stands as it did then.":
     "कुछ नहीं बदलेगा। मामला पहले से वैसा ही है जैसा तब था।",
   "'{papers}', added since, stays.": "बाद में जोड़ा गया '{papers}' बना रहेगा।",

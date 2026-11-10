@@ -307,5 +307,16 @@
     "at": "2026-11-10",
     "by": "app track (provisional; Rohan batch review)",
     "note": "D-032: the now side of a file removed since the version"
+  },
+  "U8-36": {
+    "en": "You can undo this.",
+    "hi": "आप इसे पूर्ववत कर सकते हैं।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-10",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-10",
+    "by": "app track (provisional; Rohan batch review)",
+    "note": "D-033 review: the undo-a-restore dialog whose body is the removals alone; the closing sentence of U8's restore bodies"
   }
 }

@@ -8,6 +8,6 @@
 {"write_file":{"path":"notes/b.txt","content":"Beta\n"}}
 {"update":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-answer-1","content":{"type":"text","text":"Done."}}}}
 {"respond":{"to":"p1","result":{"stopReason":"end_turn"}}}
-{"expect":{"method":"session/prompt","as":"p2","params":{"sessionId":"sess-1","prompt":[{"type":"text","text":"Note from Clauseo: since your last turn, the lawyer put these files back to an earlier version: notes/b.txt. Read them again before relying on what you remember about them."},{"type":"text","text":"Carry on."}]}},"note":"prompt[0] is the undo note, prompt[1] the lawyer's text"}
+{"expect":{"method":"session/prompt","as":"p2","params":{"sessionId":"sess-1","prompt":[{"type":"text","text":"Note from Clauseo: since your last turn, the lawyer put these files back to an earlier version, and removed those it did not have: notes/b.txt. Read them again before relying on what you remember about them."},{"type":"text","text":"Carry on."}]}},"note":"prompt[0] is the undo note, prompt[1] the lawyer's text"}
 {"update":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-answer-2","content":{"type":"text","text":"Carried on."}}}}
 {"respond":{"to":"p2","result":{"stopReason":"end_turn"}}}

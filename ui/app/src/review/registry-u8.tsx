@@ -462,6 +462,7 @@ export const U8: Entry[] = [
     UNDO_RESTORE,
     UNDOING,
   ),
+  state("U8-36", versionWords("You can undo this."), UNDO_RESTORE, UNDOING),
   state(
     "U8-27",
     versionWords("{papers}, added by the restore, will be removed."),
