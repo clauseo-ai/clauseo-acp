@@ -35,6 +35,30 @@ const installed = (setup: AgentSetup | undefined): boolean => {
   return typeof install === "object" && "ready" in install && install.ready !== undefined;
 };
 
+/** The row as the first screen shows it beside the other plan's: it starts with its plan. A missing plan's size reads
+ * "Claude · needs a download of about 110 MB", with no icon (only offered); words that name the plan already (getting
+ * it ready, "{name} is ready", the queued line, most failures) keep their own words and no name in front; any other
+ * words get the name in front as they are ("Claude · Finish signing in with your browser."). A ready plan's row leads
+ * with the tick; the clock stays on rows that wait or download. */
+function named(
+  line: WorkingState | null,
+  lang: Lang,
+  name: string,
+  missing: number | null,
+  lead?: "none" | "done",
+): WorkingState | null {
+  if (line === null || line.kind !== "wait") return line;
+  const led = lead === undefined ? line : { ...line, lead };
+  if (missing !== null)
+    return {
+      ...led,
+      plan: name,
+      words: fl(lang, "needs a download of about {mb} MB", { mb: missing }),
+      lead: "none",
+    };
+  return line.words.includes(name) ? led : { ...led, plan: name };
+}
+
 /** The first screen's working line for `agent`, or null when there is nothing to say. */
 export function welcomeFoot(
   lang: Lang,
@@ -47,10 +71,15 @@ export function welcomeFoot(
 ): WorkingState | null {
   const locked = planLocked(state.locked, agent);
   const waiting = state.queued === agent && !locked;
-  const install = waiting
-    ? null
-    : installLine(lang, installView(setup), name, { ...acts, named: true }, ids);
-  if (install !== null || (!waiting && (!installed(setup) || locked))) return install;
+  const view0 = installView(setup);
+  const install = waiting ? null : installLine(lang, view0, name, { ...acts, named: true }, ids);
+  if (install !== null || (!waiting && (!installed(setup) || locked)))
+    return named(
+      install,
+      lang,
+      name,
+      view0?.kind === "missing" && view0.reinstall !== true ? view0.mb : null,
+    );
   // no clock time is said by the states shown here; the plan waiting on the other is the queued sign-in's
   const view = waiting
     ? ({ kind: "queued", offline: false } as const)
@@ -88,7 +117,13 @@ export function welcomeFoot(
     // signed out, or a sign-in that stopped: the plan is ready, and Sign in starts it again
     case "signed-out":
     case "failed":
-      return line(fl(lang, "{name} is ready", { name }), view.kind, signIn);
+      return named(
+        line(fl(lang, "{name} is ready", { name }), view.kind, signIn),
+        lang,
+        name,
+        null,
+        "done",
+      );
     case "queued":
       return line(
         view.offline
@@ -100,7 +135,12 @@ export function welcomeFoot(
     case "waiting":
       return view.pasting
         ? null
-        : line(fl(lang, "Finish signing in with your browser."), view.kind, cancel);
+        : named(
+            line(fl(lang, "Finish signing in with your browser."), view.kind, cancel),
+            lang,
+            name,
+            null,
+          );
     // the sign-in status check runs: its words, and Sign in busy until it answers
     case "checking":
       return checkingLine(lang, name, ids, true);

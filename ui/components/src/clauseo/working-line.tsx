@@ -15,6 +15,7 @@ import {
   IconFold,
   IconNeedsPermission,
   IconQuestion,
+  IconTick,
 } from "../icons/icons.tsx";
 import { useThreadWords } from "../lib/words-thread.ts";
 import { sentence } from "./matter.ts";
@@ -67,12 +68,21 @@ export type WorkingState =
        * carry its bytes, which move every 250 ms, so the live region hears the state alone. Left
        * out, it hears the words. */
       said?: string;
+      /** Optional: the plan the row is for, said first in the row's own tone, then " · " and the muted words, where
+       * rows for both plans stand together (the first screen). The live region hears it too. */
+      plan?: string;
+      /** Optional: what leads the row instead of the clock: nothing (a plan only offered, its slot kept so the words
+       * line up) or the tick (a plan that is ready). */
+      lead?: "none" | "done";
     };
 
 /** What leads the row: the permission's shield or the question mark while it waits on the lawyer; the pen while Clauseo writes; the break on an error (a stop, not responding, or a wait that
  * carries an error's code), so a broken line looks broken before it's read; the clock on every other wait. */
-function leadOf(state: WorkingState): "pen" | "break" | "permission" | "question" | "wait" {
+function leadOf(
+  state: WorkingState,
+): "pen" | "break" | "permission" | "question" | "wait" | "none" | "done" {
   if (state.kind === "wait" && state.asks !== undefined) return state.asks;
+  if (state.kind === "wait" && state.lead !== undefined) return state.lead;
   if ("working" in state && state.working === true) return "pen";
   if (state.kind === "stopped" || state.kind === "retrying") return "break";
   return state.kind === "wait" && state.code !== undefined ? "break" : "wait";
@@ -85,7 +95,9 @@ function Lead({ state }: { state: WorkingState }) {
   const lead = leadOf(state);
   return (
     <span className="working-lead" data-lead={lead}>
-      {lead === "pen" ? null : lead === "break" ? (
+      {lead === "pen" || lead === "none" ? null : lead === "done" ? (
+        <IconTick size={16} className="working-icon working-done" />
+      ) : lead === "break" ? (
         <IconBreak size={16} className="working-icon" />
       ) : lead === "permission" ? (
         <IconNeedsPermission size={16} className="working-icon" />
@@ -195,7 +207,9 @@ function TimePill({ children, place }: { children: string; place: "row" | "field
  * a break's words, or nothing between) is said once in place; the row's own words are seen, not read twice. */
 export function WorkingSaid({ state }: { state: WorkingState }) {
   const { words, pill } = useParts(state);
-  const said = state.kind === "wait" && state.said !== undefined ? state.said : words;
+  const spoken = state.kind === "wait" && state.said !== undefined ? state.said : words;
+  const said =
+    state.kind === "wait" && state.plan !== undefined ? `${state.plan} · ${spoken}` : spoken;
   return (
     <>
       <Say>{said}</Say>
@@ -241,6 +255,14 @@ export function WorkingLine({
               the words but the pen never takes a line of its own */}
           {leadOf(state) === "pen" ? (
             <Glued after={<PenMark className="working-icon working-pen" />}>{words}</Glued>
+          ) : state.kind === "wait" && state.plan !== undefined ? (
+            <>
+              <span className="working-plan as-en" lang="en">
+                {state.plan}
+              </span>
+              {" · "}
+              <Say>{words}</Say>
+            </>
           ) : (
             <Say>{words}</Say>
           )}

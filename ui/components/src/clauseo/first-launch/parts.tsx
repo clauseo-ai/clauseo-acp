@@ -42,9 +42,12 @@ export function DocumentsLine({ name }: { name: string | null }) {
             ? w(
                 "Your papers stay on this computer. Claude or ChatGPT sees the parts it reads to answer you.",
               )
-            : w("Your papers stay on this computer. {name} sees what each question sends it.", {
-                name,
-              })}
+            : w(
+                "Your papers stay on this computer. {name} sees the parts it reads to answer you.",
+                {
+                  name,
+                },
+              )}
         </Say>
       </span>
     </>

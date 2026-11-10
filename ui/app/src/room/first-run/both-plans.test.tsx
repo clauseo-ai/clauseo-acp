@@ -43,8 +43,8 @@ test("a fresh computer: the lead, then Claude's row and ChatGPT's, equal, each w
   const t = await mountFirstRun({ matters: [], first: FRESH });
   expect(text()).toContain("Sign in with the plan you pay for: Claude, ChatGPT or both.");
   expect(rows().map((r) => r.dataset["agent"])).toEqual([CLAUDE, CODEX]);
-  expect(row(CLAUDE)?.textContent).toContain("Needs a download of about 110 MB");
-  expect(row(CODEX)?.textContent).toContain("Needs a download of about 140 MB");
+  expect(row(CLAUDE)?.textContent).toContain("Claude · needs a download of about 110 MB");
+  expect(row(CODEX)?.textContent).toContain("ChatGPT · needs a download of about 140 MB");
   const claude = row(CLAUDE)?.querySelector("button");
   const chatgpt = row(CODEX)?.querySelector("button");
   expect(claude?.textContent).toBe("Sign in to Claude");
@@ -54,8 +54,17 @@ test("a fresh computer: the lead, then Claude's row and ChatGPT's, equal, each w
   expect(claude?.className).toBe(chatgpt?.className);
   // each row its own live region
   expect(allById("install-said").map((s) => s.textContent)).toEqual([
-    "Needs a download of about 110 MB",
-    "Needs a download of about 140 MB",
+    "Claude · needs a download of about 110 MB",
+    "ChatGPT · needs a download of about 140 MB",
+  ]);
+  // each row starts with its plan, in the row's own tone; only offered, so no clock
+  expect(rows().map((r) => r.querySelector(".working-plan")?.textContent)).toEqual([
+    "Claude",
+    "ChatGPT",
+  ]);
+  expect(rows().map((r) => r.querySelector(".working")?.getAttribute("data-lead"))).toEqual([
+    "none",
+    "none",
   ]);
   // the fine print names both plans, before and after a press
   expect(text()).toContain(
@@ -78,9 +87,14 @@ test("ChatGPT alone: its Sign in installs and signs in ChatGPT, and the chosen p
     install(CODEX, { downloading: { received: 20_000_000, total: 139_000_000 } }),
   );
   expect(row(CODEX)?.textContent).toContain("Getting ChatGPT ready… 20 MB of 139 MB");
+  // the words name the plan already: no name in front, and the clock while it downloads
+  expect(row(CODEX)?.querySelector(".working-plan")).toBeNull();
+  expect(row(CODEX)?.querySelector(".working")?.getAttribute("data-lead")).toBe("wait");
   // Claude's row stands as it was, its own Sign in still there
-  expect(row(CLAUDE)?.textContent).toContain("Needs a download of about 110 MB");
+  expect(row(CLAUDE)?.textContent).toContain("Claude · needs a download of about 110 MB");
   await play(t, install(CODEX, READY), signIn(CODEX, { waiting: { since: AT, nudge: false } }));
+  // a line without the plan's name gets it in front
+  expect(row(CODEX)?.textContent).toContain("ChatGPT · Finish signing in with your browser.");
   await play(t, signIn(CODEX, SIGNED_IN));
   expect(setups(t)).toEqual([{ start_sign_in: { agent: CODEX } }]);
   expect(installs(setups(t))).toEqual([]);
@@ -167,4 +181,14 @@ test("a returning lawyer with ChatGPT alone signed in: the chosen plan is ChatGP
   expect(text()).toContain(
     "Your papers stay on this computer. Claude or ChatGPT sees the parts it reads to answer you.",
   );
+});
+
+test("a ready plan offered its sign-in leads with the tick, and its words name it once", async () => {
+  await mountFirstRun({
+    matters: [],
+    first: [install(CLAUDE, READY), signIn(CLAUDE, { signed_out: {} })],
+  });
+  expect(row(CLAUDE)?.querySelector(".working")?.getAttribute("data-lead")).toBe("done");
+  expect(row(CLAUDE)?.querySelector(".working-plan")).toBeNull();
+  expect(row(CLAUDE)?.textContent).toContain("Claude is ready");
 });

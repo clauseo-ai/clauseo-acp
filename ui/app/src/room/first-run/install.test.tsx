@@ -31,7 +31,7 @@ test("install: missing on the first screen says the size, about, and sends nothi
     first: [install(CLAUDE, { missing: { download_bytes: 160_000_000 } })],
   });
   expect(foot()?.dataset["state"]).toBe("missing");
-  expect(text()).toContain("Needs a download of about 160 MB");
+  expect(text()).toContain("Claude · needs a download of about 160 MB");
   expect(setups(t)).toEqual([]);
   const sign = byId("install-sign-in");
   expect(sign?.textContent).toBe("Sign in to Claude");
@@ -284,7 +284,7 @@ test("install: the live region says each state once and never a byte update", as
     first: [install(CLAUDE, { missing: { download_bytes: 160_000_000 } })],
   });
   const region = byId("install-said");
-  expect(region?.textContent).toBe("Needs a download of about 160 MB");
+  expect(region?.textContent).toBe("Claude · needs a download of about 160 MB");
   let changes = 0;
   const watch = new MutationObserver((records) => {
     changes += records.length;

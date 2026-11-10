@@ -159,11 +159,14 @@
     "by": "design"
   },
   "UD1-23": {
-    "en": "Your papers stay on this computer. {name} sees what each question sends it.",
-    "hi": "आपके दस्तावेज़ इसी कंप्यूटर पर रहते हैं। हर प्रश्न के साथ जो भेजा जाता है, वही {name} देखता है।",
-    "status": "approved",
-    "at": "2026-11-02",
-    "by": "design"
+    "en": "Your papers stay on this computer. {name} sees the parts it reads to answer you.",
+    "hi": "आपके दस्तावेज़ इसी कंप्यूटर पर रहते हैं। {name} उतना ही देखता है, जितना वह आपको जवाब देने के लिए पढ़ता है।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-10",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-10",
+    "by": "app track (provisional; reworded to match UD1-93, orchestrator approved the words 2026-11-10, copy review pending)"
   },
   "UD1-25": {
     "en": "Sign in",
@@ -835,6 +838,16 @@
   "UD1-95": {
     "en": "Sign in to Claude or ChatGPT to ask about this matter",
     "hi": "इस मामले के बारे में पूछने के लिए Claude या ChatGPT में साइन इन करें",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-10",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-10",
+    "by": "app track (provisional; orchestrator approved the words 2026-11-10, copy review pending)"
+  },
+  "UD1-96": {
+    "en": "needs a download of about {mb} MB",
+    "hi": "लगभग {mb} MB का डाउनलोड ज़रूरी है",
     "hi_status": "provisional",
     "hi_at": "2026-11-10",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",

@@ -47,7 +47,7 @@ test("plan: the composer offers Claude and ChatGPT, and Sign in to Claude sends 
   expect(gateState()).toBe("signed-out");
   expect(text()).toContain("Sign in to Claude or ChatGPT to ask about this matter");
   expect(text()).toContain(
-    "Your papers stay on this computer. Claude sees what each question sends it.",
+    "Your papers stay on this computer. Claude sees the parts it reads to answer you.",
   );
   expect(text()).not.toMatch(/Opus|Sonnet|Haiku|GPT-\d|o\d-/);
   // the gate names the plan; the status line above it says nothing of one
