@@ -521,7 +521,7 @@ ask, could close even those: a later option, not this change.
   `counts`, `limits`, `logs`, `matters`, `sandbox`, `skill-packs`, `updates`, each `/**`),
   files (`settings.json`, `update.json`, `first_act_done`, `state.sqlite*`,
   `search.sqlite*`) and, under
-  `agents`, Codex's home, the installs, runtime, npm and sign-in folders, and in Claude's own
+  `agents`, Codex's home, the installs, Node and half-unpacked runtime folders, npm and sign-in folders, and in Claude's own
   home its login, settings, skills and plugins, every project's transcripts, subagent
   transcripts and memory (`projects/*/*.jsonl`, `projects/*/*/subagents/**`,
   `projects/*/memory/**`), and what it keeps across sessions, so across matters:
@@ -558,6 +558,15 @@ ask, could close even those: a later option, not this change.
   of `<data>`, Read only and nothing wider. A guard test checks that every data folder entry `Locations` names, the
   store's database and the search index is in `DENIED` or on an allow list with its reason
   (`agents`: it holds the plans folder; `profile`: the built-in plugin).
+  Two folders every session may read and run but never edit (`READ_ONLY` in the module):
+  `<data>/tools` (the agents' commands, agent-browser's copy) and each Python build
+  (`agents/runtime/clauseo-python-*`, a real folder only; Node and `.tmp-*` stay denied). Each
+  gets `Edit(//<data>/<x>/**)` denied and `Read(//<data>/<x>/**)` allowed, and the launch's
+  enumeration leaves them out. In every run folder, the own one too, the shell browser's
+  config (`run/*/agent-browser/config.json`) is denied like the relay token: agent-browser reads
+  it itself, and an edit could set what the `agent-browser` deny rules refuse as flags. These
+  rules bind Claude's tools only: a subprocess (`agent-browser`, `python3`) reads what it needs
+  whatever they say.
 - **The host's auto-deny.** Before a permission request is shown, the matter thread reads the
   paths it touches: its locations and diffs, `rawInput`'s `file_path`, `notebook_path`,
   `path`, `paths` and `cwd`, every other string anywhere in `rawInput` shaped like a path
@@ -709,12 +718,35 @@ of the data folder only Clauseo uses (`agent::codex_fence::rules`), scoped under
 as a literal path. That covers the logs, settings, updates, the store's and the search index's
 databases (`search.sqlite*` holds every matter's prompts and answers), skill pack sources, Claude's
 whole folder, and in Codex's home its login, `sessions/`, `history.jsonl` and its databases
-(`state_5.sqlite*` and its siblings). It denies `run`, `agent-state` and `run.old-*` whole, so
-a session or matter made after the launch is denied too. The paths come from `Locations` where it
-names them, and a guard test checks each `Locations` path is denied or allowed for a stated reason.
+(`state_5.sqlite*` and its siblings), the sign-in shim, the agents' downloads and npm cache and
+settings; each of these is named whether or not it exists, so no credential waits for a launch.
+The paths come from `Locations` where it names them, and a guard test checks each `Locations`
+path is denied or allowed for a stated reason.
 
-The session's own run folder and the matter's notes are reopened two ways, both deeper than the
-`run` and `agent-state` denies. The profile names them `write`: once a profile is chosen, Codex
+Beside those, the launch prep lists what it denies entry by entry (`codex_fence::list`): every
+other session's run folder, every other matter's `agent-state` folder and the own matter's
+entries beside its notes, the `run.old-*` folders (the `run.old-*` glob stays too), the entries
+of `agents` but Codex's own folder and the runtime folder, and those of the runtime folder but
+Clauseo's Python builds (`clauseo-python-*`, real folders only). A folder it can't list (a link,
+a failed list, a name that isn't UTF-8) is denied whole, as before. Nothing the agent needs sits
+under a deny, because an approved escalated command keeps only the profile's denies: it runs
+under `for_approved_command` (`codex-rs/core/src/tools/orchestrator.rs:234-258`), which is
+`:root` writable plus the profile's `deny` entries (`codex-rs/protocol/src/permissions/target.rs:
+48-110`, `codex-rs/protocol/src/permissions.rs:735-766`); every `write` and `read` entry drops.
+Stage C saw it: every escalated `agent-browser` command failed while `run` and `browser` were
+denied whole. So:
+
+- The residual Claude's rules accept (data-folder fence section) now applies to Codex too: a
+  session's run folder or a matter's state made after the launch is in no deny until the next
+  launch, readable to the shell and writable to an escalated command.
+- An escalated command may write in Clauseo's Python runtime, which no deny names; ordinary
+  commands only read and run it. That is Codex's escalation, which the lawyer approved.
+- The shell browser's config, Chrome profile and downloads sit in the session's own
+  `<run>/agent-browser`; `<data>/browser` (the parked MCP entry's config) stays denied.
+  `<data>/tools` (the agents' commands) is in no rule.
+
+The session's own run folder and the matter's notes are also opened two ways for ordinary
+commands. The profile names them `write`: once a profile is chosen, Codex
 no longer takes `CODEX_CONFIG`'s `sandbox_workspace_write.writable_roots` (stage B, live, macOS).
 And the host sends them as ACP `additionalDirectories` on `session/new`, `session/load` and
 `session/resume` (`profile_loads::codex_directories`). codex-acp 2.2.2 makes each turn's
@@ -732,7 +764,9 @@ writable whole, so the agent can write this session's pack plugin (`<run>/skill-
 - codex-acp's per-turn policy passed through (`codex-rs/app-server/src/request_processors/turn_processor.rs:846, 893, 918`)
   and rebuilt keeping the profile's deny entries: `codex-rs/core/src/session/session.rs:491-507`,
   `codex-rs/protocol/src/permissions.rs:709-731`;
-- the deepest rule winning, deny winning a tie: `codex-rs/protocol/src/permissions.rs:1043-1048`;
+- the deepest rule winning, deny winning a tie: `codex-rs/protocol/src/permissions.rs:1043-1047`;
+- an escalated command keeping only the denies: `codex-rs/protocol/src/permissions/target.rs:48-110`,
+  `codex-rs/protocol/src/permissions.rs:735-766`, `codex-rs/core/src/tools/orchestrator.rs:234-258`;
 - Seatbelt and bubblewrap enforcing it on every sandboxed command:
   `codex-rs/sandboxing/src/seatbelt.rs:899-900, 1045-1046`, `codex-rs/linux-sandbox/src/bwrap.rs:490-511, 1353-1362`;
   bubblewrap binding a writable root over a masked denied folder (`bwrap.rs:615-659, 1370-1398`);
@@ -749,8 +783,10 @@ itself keeps cross-matter records: one Codex home per agent holds every matter's
 databases. The deny binds only sandboxed processes, not Codex's own process
 (`codex-rs/state/src/sqlite.rs:34-39, 61-63`). A home per matter is a later design question.
 
-Gaps: a data folder whose path holds a glob character loses the `run.old-*` deny, since a scoped
-glob reads its base as glob text. The other rules are literal. A data folder that isn't UTF-8
+Gaps: a data folder whose path holds a glob character loses the `run.old-*` glob, since a scoped
+glob reads its base as glob text; the listed `run.old-*` folders are literal. Seatbelt's regex
+for a glob names only the matching path, not what is under it
+(`codex-rs/sandboxing/src/seatbelt.rs:719-830`), which is why they are listed. The other rules are literal. A data folder that isn't UTF-8
 already fails the launch (`Folders::of`). Windows gets no profile: Clauseo runs Codex there in the
 unelevated sandbox, which refuses to run any sandboxed command when a profile denies reads
 (`codex-rs/sandboxing/src/windows.rs:111-131`), until the elevated sandbox (S15). For what the
