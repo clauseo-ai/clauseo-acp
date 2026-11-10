@@ -156,6 +156,16 @@ export function IconArrowUp(props: IconProps) {
   );
 }
 
+/** Latest, over the composer: down to the thread's end (source: arrowUp, turned) */
+export function IconArrowDown(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="M10 4v10" vectorEffect="non-scaling-stroke" />
+      <path d="M5.5 10.5L10 15l4.5-4.5" vectorEffect="non-scaling-stroke" />
+    </Icon>
+  );
+}
+
 /** Send, the paper plane, not used in the room yet (source: send) */
 export function IconSend(props: IconProps) {
   return (

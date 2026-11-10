@@ -51,6 +51,8 @@ const NEW_THREAD: readonly ThreadKey[] = [
   "Use {min} or more.",
   "Use {max} or less.",
   "Use a whole number.",
+  "Latest",
+  "Go to the latest message",
 ];
 const LIMITS: readonly LimitKey[] = [
   "Resets {time}",

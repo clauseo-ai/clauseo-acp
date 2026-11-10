@@ -29,6 +29,11 @@ export const ICON_NAMES = [
       "Wake now, on the Snoozed shelf: back up into the list (cut for Send, not used for it yet)",
   },
   {
+    component: "IconArrowDown",
+    source: "arrowUp",
+    meaning: "Latest, over the composer: down to the thread's end",
+  },
+  {
     component: "IconSend",
     source: "send",
     meaning: "Send, the paper plane, not used in the room yet",

@@ -9,6 +9,7 @@ export type NodeName =
   | "thread"
   | "threadInner"
   | "pin"
+  | "latest"
   | "pane"
   | "facade"
   | "composer"

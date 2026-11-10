@@ -270,10 +270,17 @@ export type ThreadListProps = {
   transport: HostTransport;
   stream: StreamId | null;
   busy: boolean;
+  /** The turn the lawyer's latest question from here started, while it runs: a new one takes the view to the end. */
+  sent?: string | null;
 };
 
 /** The open thread: Thread's log and scroller, the older pages above, the live exchanges. */
-export const ThreadList = memo(function ThreadList({ transport, stream, busy }: ThreadListProps) {
+export const ThreadList = memo(function ThreadList({
+  transport,
+  stream,
+  busy,
+  sent = null,
+}: ThreadListProps) {
   const w = useWords();
   const store = useViewStore();
   const { nodes } = useRoom();
@@ -303,14 +310,16 @@ export const ThreadList = memo(function ThreadList({ transport, stream, busy }: 
   const landed = useStreamPart(store, stream, pickLanded);
   return (
     // it rests once there is something to rest on: a reopened thread's view arrives after the mount, and the thread
-    // settles on its latest answer then. The log is busy until the first view lands and while an older page goes in,
+    // settles at its end then, and follows what comes in while the lawyer stays there; a question sent from here goes
+    // back to the end, and while Find's jump to an entry lands (reach) nothing follows it away. The log is busy until the first view lands and while an older page goes in,
     // so a screen reader doesn't read a whole reopened history, or a page put in above, as news
     <SourcesTransport value={transport}>
       <Thread
         question={question}
         who={w.t("You")}
-        live={busy}
         resting={!busy && exchanges.length > 0}
+        sent={sent}
+        hold={reach !== null}
         busy={(stream !== null && !landed) || older.loading}
       >
         {stream !== null &&

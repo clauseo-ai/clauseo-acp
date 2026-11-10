@@ -1,9 +1,14 @@
-import { useEffect, useLayoutEffect, useRef, type ReactNode } from "react";
-import { useDisplay } from "../lib/display.ts";
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { IconArrowDown } from "../icons/icons.tsx";
+import { motionAllowed, useDisplay } from "../lib/display.ts";
 import { langOfText } from "../lib/script.ts";
+import { th } from "../lib/words-thread.ts";
 import { useWords } from "../lib/words.ts";
+import { Button } from "../ui/button.tsx";
+import { createFollow, type FollowPlace } from "./follow.ts";
 import { isWide } from "./layout.ts";
 import { dur, ease } from "./motion.ts";
+import type { Flourish } from "./flourish.ts";
 import { useRoom, type RoomNodes } from "./room-scope.ts";
 import { Say } from "./say.tsx";
 
@@ -33,30 +38,78 @@ function anchorables(inner: Element, nodes: RoomNodes): Element[] {
   return out;
 }
 
-/** How far below the window's top the question rests on a narrow window: 12 px, and a phone's status bar. The
- * stylesheet gives it as the question's scroll margin, where env(safe-area-inset-top) is resolved. */
-const clearance = (q: Element) => Number.parseFloat(getComputedStyle(q).scrollMarginTop) || 12;
+/** Where the thread's end is (follow.ts): the thread's own on a wide window; under 1000 px the page scrolls, and the
+ * thread's end is where the docked composer starts. */
+function threadPlace(nodes: RoomNodes): FollowPlace {
+  const place: FollowPlace = {
+    gap: () => {
+      const t = nodes.get("thread");
+      if (t === null) return 0;
+      if (isWide()) return t.scrollHeight - t.scrollTop - t.clientHeight;
+      const top = nodes.get("composer")?.getBoundingClientRect().top ?? Infinity;
+      return t.getBoundingClientRect().bottom - Math.min(window.innerHeight, top);
+    },
+    top: () => (isWide() ? (nodes.get("thread")?.scrollTop ?? 0) : window.scrollY),
+    toEnd: (smooth) => {
+      const t = nodes.get("thread");
+      if (t === null) return;
+      const behavior = smooth && motionAllowed() ? "smooth" : "instant";
+      if (!isWide()) window.scrollTo({ top: Math.max(0, window.scrollY + place.gap()), behavior });
+      else if (behavior === "smooth") t.scrollTo({ top: t.scrollHeight, behavior });
+      else t.scrollTop = t.scrollHeight;
+    },
+  };
+  return place;
+}
 
-/** The thread and, over it, the question pinned once it has scrolled away. At rest the view shows the answer from
- * its first line, just under the pinned question; on a narrow window the page holds the question at the top. A
- * change of language keeps the reader's place. While the answer streams (live), the view follows it without
- * moving: each time the words take a new line, the scroll is set once, before the frame paints, to the end of the
- * stream but never past the answer's first line. A lawyer who scrolls takes the view over. */
+/** Shows or hides Latest's dock; it rises 8 px into place as it shows, where motion is allowed. */
+function showLatest(
+  scope: { nodes: RoomNodes; motion: { move: Flourish["move"] } },
+  show: boolean,
+) {
+  const n = scope.nodes.get("latest");
+  if (n === null || n.hidden === !show) return;
+  n.hidden = !show;
+  const button = n.firstElementChild;
+  if (show && button instanceof HTMLElement)
+    scope.motion.move(
+      button,
+      [
+        { opacity: 0, transform: "translateY(8px)" },
+        { opacity: 1, transform: "none" },
+      ],
+      {
+        duration: dur("state"),
+        easing: ease("arrive"),
+      },
+    );
+}
+
+/** Keys that move a scroller up. */
+const UP = new Set(["ArrowUp", "PageUp", "Home"]);
+
+/** The thread and, over it, the question pinned once it has scrolled away. The view keeps to the thread's end while
+ * the lawyer is there (follow.ts): it opens at the end, and whatever comes in, the answer's words as they stream
+ * included, keeps it there; the scroll is set once a change of size, before the frame paints, never glided. A move up
+ * lets go, and Latest, over the composer, goes back. A change of language keeps the reader's place. */
 export function Thread({
   question,
   who,
   children,
-  live = false,
   resting = true,
   busy = false,
+  sent = null,
+  hold = false,
 }: {
   question: string;
   who: string;
   children: ReactNode;
-  /** The answer is streaming: follow it. */
-  live?: boolean;
-  /** The answer has settled: land where the view rests. */
+  /** The thread has something to rest on: land at its end, unless the lawyer has moved away. */
   resting?: boolean;
+  /** The lawyer's latest question sent from here, by a key of its own: each new one goes to the end and follows. */
+  sent?: string | null;
+  /** A jump to one of the thread's entries is landing (Find): nothing follows it away. */
+  hold?: boolean;
   /** Rows are going in all at once, such as the first view or an older page: the log is marked aria-busy, so they
    * aren't read out as they land. */
   busy?: boolean;
@@ -85,7 +138,10 @@ export function Thread({
       });
   };
   const anchor = useRef<Anchor | null>(null);
-  const userScrolled = useRef(false);
+  // Latest shows and hides on its element too, as the pin does: following runs on every streamed line
+  const [follow] = useState(() =>
+    createFollow(threadPlace(scope.nodes), (show) => showLatest(scope, show)),
+  );
 
   const pinHeight = () => {
     const n = pin.current;
@@ -149,29 +205,16 @@ export function Thread({
     else window.scrollTo(0, Math.round(window.scrollY + by));
   };
 
-  // where the view rests: the answer's first line under the pinned question
-  const rest = () => {
-    const t = thread.current;
-    const i0 = inner.current;
-    if (t === null || i0 === null || userScrolled.current) return;
-    if (isWide()) {
-      const step = reach.current.nodes.get("answerStep");
-      const end = t.scrollHeight - t.clientHeight;
-      if (step !== null) t.scrollTop = Math.max(0, Math.min(end, step.offsetTop - pinHeight() - 4));
-    } else {
-      const q = reach.current.nodes.get("questionStep");
-      if (q !== null)
-        window.scrollTo(
-          0,
-          Math.max(0, Math.round(window.scrollY + q.getBoundingClientRect().top - clearance(q))),
-        );
-    }
-    check();
-    readAnchor();
-  };
-
+  // where the view rests: the thread's end, while following; once there is something to rest on, and again once the
+  // fonts settle
   useLayoutEffect(() => {
     if (!resting) return;
+    const rest = () => {
+      if (thread.current === null || inner.current === null) return;
+      follow.grew();
+      check();
+      readAnchor();
+    };
     rest();
     let on = true;
     void document.fonts.ready.then(() => {
@@ -180,39 +223,28 @@ export function Thread({
     return () => {
       on = false;
     };
-    // once, as the answer settles; the fonts settle it again
-  }, [resting]);
+  }, [resting, follow]);
 
-  // following the stream: the end of the thread, but never past the answer's first line; on a narrow window the
-  // page holds the question at the top. Set directly, never glided, whenever the thread's height changes, which a
-  // ResizeObserver reports after layout and before paint, so no frame shows the words below the fold.
+  // following: back to the end whenever the thread or what it holds changes size, which a ResizeObserver reports
+  // after layout and before paint, so no frame shows the words below the fold. The thread's own size changes as the
+  // composer grows or the window does
   useEffect(() => {
     const t = thread.current;
     const i0 = inner.current;
-    if (!live || t === null || i0 === null) return;
-    const follow = () => {
-      if (userScrolled.current) return;
-      if (isWide()) {
-        const end = t.scrollHeight - t.clientHeight;
-        const step = reach.current.nodes.get("answerStep");
-        const goal = step === null ? end : Math.min(end, step.offsetTop - pinHeight() - 4);
-        const next = Math.max(0, Math.round(goal));
-        if (Math.abs(t.scrollTop - next) >= 1) t.scrollTop = next;
-      } else {
-        const q = reach.current.nodes.get("questionStep");
-        if (q === null) return;
-        const by = Math.round(q.getBoundingClientRect().top - clearance(q));
-        // the page scrolls smoothly for the lawyer's own jumps; the follow never glides
-        if (Math.abs(by) >= 1)
-          window.scrollTo({ top: Math.max(0, window.scrollY + by), behavior: "instant" });
-      }
-    };
-    const ro = new ResizeObserver(follow);
+    if (t === null || i0 === null) return;
+    const ro = new ResizeObserver(() => follow.grew());
     ro.observe(i0);
     ro.observe(t);
-    follow();
     return () => ro.disconnect();
-  }, [live]);
+  }, [follow]);
+
+  // a question sent from here goes to the end, and follows its answer
+  useLayoutEffect(() => {
+    if (sent !== null) follow.end(false);
+  }, [sent, follow]);
+
+  // Find's jump: nothing follows while it lands
+  useLayoutEffect(() => follow.hold(hold), [hold, follow]);
 
   // a change of language or size keeps the reader's place
   const first = useRef(true);
@@ -221,9 +253,11 @@ export function Thread({
       first.current = false;
       return;
     }
-    keepAnchor();
+    // at the end the view stays there; elsewhere it keeps the line being read
+    if (follow.following) follow.grew();
+    else keepAnchor();
     check();
-  }, [lang, textSize]);
+  }, [lang, textSize, follow]);
 
   useEffect(() => {
     const t = thread.current;
@@ -233,35 +267,61 @@ export function Thread({
       if (raf !== 0) return;
       raf = requestAnimationFrame(() => {
         raf = 0;
+        follow.scrolled();
         check();
         readAnchor();
       });
     };
-    const mine = () => {
-      userScrolled.current = true;
+    // the lawyer's own moves up let go at once. On a wide window only those over the thread: the rail and the
+    // papers scroll on their own. Under 1000 px the page is the thread's scroller
+    const over = (e: Event) => !isWide() || (e.target instanceof Node && t.contains(e.target));
+    const onWheel = (e: WheelEvent) => {
+      if (e.deltaY < 0 && over(e)) follow.leave();
+    };
+    const onTouch = (e: TouchEvent) => {
+      if (over(e)) follow.leave();
+    };
+    const onKey = (e: KeyboardEvent) => {
+      const up = UP.has(e.key) || (e.key === " " && e.shiftKey);
+      const mine = e.target instanceof Node && (t.contains(e.target) || e.target === document.body);
+      if (up && mine) follow.leave();
+    };
+    // a press on the thread's scrollbar, past its content's width
+    const onPress = (e: PointerEvent) => {
+      if (e.target === t && e.offsetX >= t.clientWidth) follow.leave();
     };
     t.addEventListener("scroll", onScroll, { passive: true });
     window.addEventListener("scroll", onScroll, { passive: true });
     window.addEventListener("resize", onScroll);
-    t.addEventListener("wheel", mine, { passive: true });
-    t.addEventListener("touchmove", mine, { passive: true });
-    window.addEventListener("wheel", mine, { passive: true });
+    window.addEventListener("wheel", onWheel, { passive: true });
+    window.addEventListener("touchmove", onTouch, { passive: true });
+    window.addEventListener("keydown", onKey);
+    t.addEventListener("pointerdown", onPress);
     return () => {
       cancelAnimationFrame(raf);
       t.removeEventListener("scroll", onScroll);
       window.removeEventListener("scroll", onScroll);
       window.removeEventListener("resize", onScroll);
-      t.removeEventListener("wheel", mine);
-      t.removeEventListener("touchmove", mine);
-      window.removeEventListener("wheel", mine);
+      window.removeEventListener("wheel", onWheel);
+      window.removeEventListener("touchmove", onTouch);
+      window.removeEventListener("keydown", onKey);
+      t.removeEventListener("pointerdown", onPress);
     };
-  }, []);
+  }, [follow]);
+
+  // Latest: to the end, gliding where motion is allowed, and following again. It hides as it goes, so a focus on it
+  // moves on to the composer's field rather than falling to the page
+  const toLatest = () => {
+    const had = reach.current.nodes.get("latest")?.contains(document.activeElement) === true;
+    follow.end(true);
+    if (had) reach.current.nodes.get("field")?.focus({ preventScroll: true });
+  };
 
   const backToQuestion = () => {
     const q = reach.current.nodes.get("questionStep");
     const t = thread.current;
     if (q === null || t === null) return;
-    userScrolled.current = true;
+    follow.leave();
     if (!isWide()) window.scrollBy({ top: q.getBoundingClientRect().top - 72 });
     else t.scrollTop = Math.max(0, q.offsetTop - 16);
     check();
@@ -308,6 +368,19 @@ export function Thread({
         >
           {children}
         </div>
+      </div>
+      {/* outside the log, so its showing is never read out as news; it stands over the thread's foot, just above the
+          composer (thread.css) */}
+      <div className="room-latest" ref={scope.nodes.slot("latest")} hidden>
+        <Button
+          kind="tone"
+          size="small"
+          aria-label={th(w.lang, "Go to the latest message")}
+          onClick={toLatest}
+        >
+          <IconArrowDown />
+          {th(w.lang, "Latest")}
+        </Button>
       </div>
     </>
   );
