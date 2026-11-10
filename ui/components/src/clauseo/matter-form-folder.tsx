@@ -93,7 +93,7 @@ export function FolderRow({
       </div>
       {made && (
         <p id={madeId} className="matter-form-folder-note">
-          <Say>{w("Clauseo makes this folder. Add papers to it any time.")}</Say>
+          <Say>{w("Clauseo creates this folder. Add papers to it any time.")}</Say>
         </p>
       )}
       {offer !== null && (

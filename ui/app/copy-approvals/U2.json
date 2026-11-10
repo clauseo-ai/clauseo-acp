@@ -21,11 +21,12 @@
     "note": "Rohan, on the review page"
   },
   "U2-09": {
-    "en": "Limit reached. Reset not given.",
-    "hi": "सीमा पूरी। रीसेट का समय नहीं बताया गया।",
-    "status": "approved",
-    "at": "2026-11-02",
-    "note": "Rohan, on the review page"
+    "en": "Limit reached",
+    "hi": "सीमा पूरी",
+    "status": "provisional",
+    "at": "2026-11-10",
+    "by": "orchestrator (decided 2026-11-10)",
+    "note": "trimmed from \"Limit reached. Reset not given.\" (approved 2026-11-02, Rohan)"
   },
   "U2-10": {
     "en": "{path} is a whole drive.",

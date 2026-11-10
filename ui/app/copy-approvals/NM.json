@@ -66,14 +66,14 @@
     "note": "the default location offered under the Folder row; {folder} is ~/Documents/Clauseo"
   },
   "NM-07": {
-    "en": "Clauseo makes this folder. Add papers to it any time.",
-    "hi": "Clauseo यह फ़ोल्डर बनाता है। इसमें कभी भी दस्तावेज़ जोड़ें।",
+    "en": "Clauseo creates this folder. Add papers to it any time.",
+    "hi": "Clauseo यह फ़ोल्डर बना देगा। इसमें कभी भी दस्तावेज़ जोड़ें।",
     "hi_status": "provisional",
     "hi_at": "2026-11-10",
-    "hi_by": "app track (provisional; words pending orchestrator 2026-11-10)",
+    "hi_by": "orchestrator (decided 2026-11-10)",
     "status": "provisional",
     "at": "2026-11-10",
-    "by": "app track (provisional; words pending orchestrator 2026-11-10)",
+    "by": "orchestrator (decided 2026-11-10)",
     "note": "under the Folder row once the new folder is chosen (the old folder line's title, now shown)"
   },
   "NM-08": {
@@ -111,10 +111,10 @@
   },
   "NM-11": {
     "en": "Working",
-    "hi": "जवाब बन रहा है",
+    "hi": "काम चल रहा है",
     "hi_status": "provisional",
     "hi_at": "2026-11-10",
-    "hi_by": "app track (provisional; words pending orchestrator 2026-11-10)",
+    "hi_by": "orchestrator (decided 2026-11-10)",
     "status": "provisional",
     "at": "2026-11-10",
     "by": "app track (provisional; words pending orchestrator 2026-11-10)",

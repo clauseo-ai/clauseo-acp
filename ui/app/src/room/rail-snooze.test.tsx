@@ -13,6 +13,7 @@ import {
   B,
   C,
   conversations,
+  D,
   focusWindow,
   hover,
   item,
@@ -87,18 +88,18 @@ test("a snoozed row comes back at the first render after its time, and not befor
   lists.set(B.matter, [{ ...T_ASK, snoozed_until: NOW + HOUR }]);
   await mount({ lists });
   // B's one conversation snoozed: the matter is snoozed whole, on the shelf, out of Needs you
-  expect(names(needs())).toEqual([C.name]);
+  expect(names(needs())).toEqual([D.name, C.name]);
   const shelf = rail()?.querySelector('[data-testid="rail-shelf"]');
   expect(shelf?.querySelector(".room-fold-count")?.textContent).toBe("1");
   expect(shelf?.textContent).toContain("Next back 6:00\u00a0pm");
   vi.setSystemTime(NOW + HOUR - 1);
   await focusWindow();
-  expect(names(needs())).toEqual([C.name]);
+  expect(names(needs())).toEqual([D.name, C.name]);
   // the time comes with nothing drawn: nothing changes until the next render
   vi.setSystemTime(NOW + HOUR);
-  expect(names(needs())).toEqual([C.name]);
+  expect(names(needs())).toEqual([D.name, C.name]);
   await focusWindow();
-  expect(names(needs())).toEqual([B.name, C.name]);
+  expect(names(needs())).toEqual([D.name, B.name, C.name]);
   expect(rail()?.querySelector('[data-testid="rail-shelf"]')).toBeNull();
 });
 
@@ -106,14 +107,15 @@ test("the wake: the reducer clearing a snooze brings the row back to Needs you w
   const lists = new Map(LISTS);
   lists.set(B.matter, [{ ...T_ASK, snoozed_until: NOW + 5 * HOUR }, thread(11, B)]);
   const transport = await mount({ lists });
-  expect(names(needs())).toEqual([C.name]);
+  expect(names(needs())).toEqual([D.name, C.name]);
   await act(async () => {
     transport.appEvent({
       threads_changed: { matter: B.matter, threads: [T_ASK], removed: [], all: false },
     });
   });
-  expect(names(needs())).toEqual([B.name, C.name]);
-  const row = needs()?.querySelector('[data-testid="matter-row"]');
+  expect(names(needs())).toEqual([D.name, B.name, C.name]);
+  // under D, the pinned matter whose question came first
+  const row = needs()?.querySelectorAll('[data-testid="matter-row"]')[1];
   expect(row?.getAttribute("data-state")).toBe("permission");
   expect(row?.querySelector(".room-matter-where")?.textContent).toBe(T_ASK.title);
 });

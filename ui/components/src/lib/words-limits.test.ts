@@ -19,7 +19,7 @@ test("the limit's words say until when, the part of the day first in Hindi, and 
   expect(lim("hi", "Limit reached until {time}", { time: clock("hi", "9:40 pm") })).toBe(
     "रात 9:40 बजे तक सीमा पूरी",
   );
-  expect(lim("hi", "Limit reached. Reset not given.")).toBe("सीमा पूरी। रीसेट का समय नहीं बताया गया।");
+  expect(lim("hi", "Limit reached")).toBe("सीमा पूरी");
 });
 
 test("no limit string says I or a banned word, and Hindi sentences end in the danda", () => {

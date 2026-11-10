@@ -15,6 +15,11 @@
   .matter-form-input::placeholder {
     @apply font-ui;
   }
+  /* the field the dialog opens on holds the caret, so it keeps the full focus ring that every focused field draws
+     (base.css), where a dialog's quiet start hides the ring on a starting button (ui/dialog-start.ts) */
+  .matter-form-input:focus-visible {
+    outline-color: var(--primary);
+  }
 
   /* ---------- Folder: the label, then the field, then the note or the offer under it ---------- */
   .matter-form-folder {

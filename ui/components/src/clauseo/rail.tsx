@@ -166,7 +166,8 @@ function FindField({
 }
 
 /** The rail: matters on the bare ground, in the room's groups, under a full-width New matter, with Scratch matter,
- * "Quick questions", below a hairline. Pinned matters stand above every group, under "Pinned". With no
+ * "Quick questions", below a hairline. Pinned matters stand under "Pinned", above the
+ * last group (the rest) and under the others (Needs you, Working). With no
  * matters at all, the rail says so. Given find, a field under New matter finds any matter; given settings, the
  * rail's foot links to them, and given onSettings, its Settings is a button that opens them (their own window). */
 export function Rail({
@@ -311,10 +312,12 @@ export function Rail({
     setQuery("");
     setFinding(false);
   };
+  // Pinned stands above the last group (the rest), under Needs you and Working
   const all: readonly RailGroup[] = [
+    ...groups.slice(0, -1),
     ...(pinned.length > 0 ? [{ when: frame(w.lang, "Pinned"), matters: pinned }] : []),
-    ...groups.filter((g) => g.matters.length > 0),
-  ];
+    ...groups.slice(-1),
+  ].filter((g) => g.matters.length > 0);
   const opening = (m: MatterRowProps): MatterRowProps => ({
     ...m,
     onOpen: () => {

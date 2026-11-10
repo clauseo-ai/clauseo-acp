@@ -49,7 +49,7 @@ export const NM: Entry[] = [
   form("NM-04", matterFormWords("No folder chosen"), NEW_MATTER),
   form("NM-05", matterFormWords("Choose folder…"), NEW_MATTER),
   form("NM-06", matterFormWords("Use a new folder in {folder}"), NEW_MATTER),
-  form("NM-07", matterFormWords("Clauseo makes this folder. Add papers to it any time."), MADE),
+  form("NM-07", matterFormWords("Clauseo creates this folder. Add papers to it any time."), MADE),
   form("NM-08", matterFormWords("Name the matter."), TRIED),
   form("NM-09", matterFormWords("Choose a folder for the matter."), TRIED),
   // the long path, cut short in its middle, the whole of it under the pointer

@@ -177,7 +177,7 @@ test("Use a new folder: offered under the row, it shows the folder Clauseo makes
   expect(byTestId("matter-made")).toBeUndefined();
   expect(path()?.textContent).toBe("~/Documents/Clauseo/…");
   expect(document.querySelector(".matter-form-folder-note")?.textContent).toBe(
-    "Clauseo makes this folder. Add papers to it any time.",
+    "Clauseo creates this folder. Add papers to it any time.",
   );
   await type(inputs()[0], "Acme lease");
   expect(path()?.textContent).toBe("~/Documents/Clauseo/Acme lease");

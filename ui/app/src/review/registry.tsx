@@ -271,7 +271,7 @@ const U3: Entry[] = [
     screen: "room/thread",
     render: thread({ entries: [QUESTION, PARTIAL, limit("workspace_credits", atLocal(2, 9, 0))] }),
   },
-  // U3-16 was "Limit reached. Reset not given.", the toolbar's sentence, which the limit row no longer says
+  // U3-16 was "Limit reached", the toolbar's sentence, which the limit row no longer says
   {
     id: "U3-48",
     words: limitWords("Reset not given."),
@@ -411,7 +411,7 @@ export const REGISTRY: readonly Entry[] = [
   // Needs you, Working and the rest by latest activity (NM-11, NM-12)
   railState("U2-07", limitWords("Limit reached until {time}")),
   railState("U2-08", limitWords("Limit reached until {day} {time}")),
-  railState("U2-09", limitWords("Limit reached. Reset not given.")),
+  railState("U2-09", limitWords("Limit reached")),
   refusal(
     "U2-10",
     matterWords("{path} is a whole drive."),
