@@ -91,7 +91,8 @@ fn set_aside(run: &Path, parent: &Path) {
     }
 }
 
-/// Deletes every real `run.old-*` folder in `parent`; a link of that name is left alone.
+/// Deletes every real `run.old-*` folder in `parent`, and the short temp folder each of its
+/// sessions names (`agent::claude_tmp`); a link of that name is left alone.
 fn delete_set_aside(parent: &Path) {
     let Ok(entries) = std::fs::read_dir(parent) else {
         return;
@@ -103,6 +104,10 @@ fn delete_set_aside(parent: &Path) {
             .to_str()
             .is_some_and(|name| name.starts_with(SET_ASIDE));
         if named && crate::write::is_real_dir(&path) {
+            // A crashed session's short temp folder for Claude goes with its run folder.
+            for session in std::fs::read_dir(&path).into_iter().flatten().flatten() {
+                crate::agent::claude_tmp::remove_claude_tmp(&session.path());
+            }
             remove_tree(&path);
         }
     }

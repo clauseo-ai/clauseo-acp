@@ -9,8 +9,6 @@ use std::collections::BTreeMap;
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
-use clauseo_protocol::{AgentId, AgentKind};
-
 /// The session's temp folder in its run folder `run_root` (`<data>/run/<session>`).
 pub(crate) fn temp_dir(run_root: &Path) -> PathBuf {
     run_root.join("tmp")
@@ -32,31 +30,17 @@ pub(crate) fn temp_env(tmp: &Path, windows: bool) -> BTreeMap<OsString, OsString
         .collect()
 }
 
-/// The variable Claude Code takes its own temp folder from: its sandbox's temp folder, the one
-/// a sandboxed command's `TMPDIR` names, is made under it.
-const CLAUDE_TMP_VAR: &str = "CLAUDE_CODE_TMPDIR";
-
-/// What the host also forces on a Claude agent's launch where Claude Code's own sandbox runs
-/// (not on Windows, `windows`; `agent::loads::sandbox`): `tmp` as `CLAUDE_CODE_TMPDIR`, so
-/// what sandboxed commands leave in temp goes with the run folder too.
-pub(crate) fn claude_temp_env(tmp: &Path, windows: bool) -> BTreeMap<OsString, OsString> {
-    if windows {
-        return BTreeMap::new();
-    }
-    BTreeMap::from([(OsString::from(CLAUDE_TMP_VAR), tmp.as_os_str().to_owned())])
-}
-
-/// What the host forces on `agent`'s launch for its run folder `run_root`: [`temp_env`], and
-/// for a Claude agent [`claude_temp_env`] too.
+/// What the host forces on an agent's launch for its run folder `run_root`: [`temp_env`], and
+/// for a Claude agent whose sandbox runs, its short temp folder `claude_tmp`
+/// (`agent::claude_tmp::claude_env`).
 pub(crate) fn session_env(
     run_root: &Path,
-    agent: &AgentId,
+    claude_tmp: Option<&Path>,
     windows: bool,
 ) -> BTreeMap<OsString, OsString> {
-    let tmp = temp_dir(run_root);
-    let mut env = temp_env(&tmp, windows);
-    if AgentKind::of(agent) == Some(AgentKind::Claude) {
-        env.extend(claude_temp_env(&tmp, windows));
+    let mut env = temp_env(&temp_dir(run_root), windows);
+    if let Some(dir) = claude_tmp.filter(|_| !windows) {
+        env.extend(super::claude_tmp::claude_env(dir));
     }
     env
 }
@@ -84,23 +68,21 @@ mod tests {
     }
 
     #[test]
-    fn claude_gets_its_own_temp_folder_where_its_sandbox_runs() {
-        let tmp = PathBuf::from("/data/run/s1/tmp");
-        assert_eq!(
-            claude_temp_env(&tmp, false),
-            BTreeMap::from([(
-                OsString::from("CLAUDE_CODE_TMPDIR"),
-                tmp.clone().into_os_string()
-            )])
-        );
-        assert!(claude_temp_env(&tmp, true).is_empty());
+    fn claude_gets_its_short_temp_folder_where_its_sandbox_runs() {
         let run = PathBuf::from("/data/run/s1");
-        let claude = AgentId::new(AgentKind::Claude.id()).unwrap();
-        let codex = AgentId::new(AgentKind::Codex.id()).unwrap();
-        assert_eq!(session_env(&run, &claude, false).len(), 2);
-        assert_eq!(session_env(&run, &codex, false).len(), 1);
+        let short = PathBuf::from("/tmp/clsb-abcd1234");
+        let claude = session_env(&run, Some(&short), false);
         assert_eq!(
-            session_env(&run, &claude, true).len(),
+            claude.get(&OsString::from("CLAUDE_CODE_TMPDIR")),
+            Some(&short.clone().into_os_string())
+        );
+        assert_eq!(
+            claude.get(&OsString::from("TMPDIR")),
+            Some(&run.join("tmp").into_os_string())
+        );
+        assert_eq!(session_env(&run, None, false).len(), 1);
+        assert_eq!(
+            session_env(&run, Some(&short), true).len(),
             2,
             "TEMP and TMP only"
         );

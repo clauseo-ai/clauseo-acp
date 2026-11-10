@@ -81,7 +81,8 @@ pub(super) fn remove_tree(folder: &Path) {
 }
 
 /// Removes this launch's run folder and its browser folder and all they hold, each when it
-/// is a real folder; the notes folder stays. Only the folders the host made: the paths as
+/// is a real folder, with Claude's short temp folder the run folder names
+/// (`agent::claude_tmp`); the notes folder stays. Only the folders the host made: the paths as
 /// built (`<data>/run/<session id>`, `<data>/browser/run/<session id>`), never
 /// canonicalized, removed with `remove_dir_all`, which removes a link inside and never
 /// follows it. Called once the agent's process has exited, or when it never started. File
@@ -104,6 +105,9 @@ pub(super) fn remove_folders(run: &RunFolders) {
         if !named(folder, parents) {
             tracing::warn!("not a session folder the host made; it stays");
             continue;
+        }
+        if folder == &run.root {
+            crate::agent::claude_tmp::remove_claude_tmp(folder);
         }
         if crate::write::is_real_dir(folder) {
             remove_tree(folder);

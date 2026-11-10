@@ -15,6 +15,8 @@ use crate::config::SessionKey;
 use crate::pipeline::tests::support::id;
 use crate::write;
 
+mod claude_sandbox;
+
 /// A fresh data folder under the temp folder for `test`.
 fn scratch(test: &str) -> PathBuf {
     let root = std::env::temp_dir().join(format!("clauseo-run-{test}-{}", std::process::id()));

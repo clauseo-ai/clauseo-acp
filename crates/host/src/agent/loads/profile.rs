@@ -185,6 +185,9 @@ pub(crate) struct ClaudeKeys<'a> {
     /// Claude Code's own sandbox (`agent::loads::sandbox`), on macOS and Linux; none on
     /// Windows, where commands keep asking.
     pub(crate) sandbox: Option<&'a super::sandbox::ClaudeSandbox>,
+    /// The matter folder: Claude's `Edit` is denied its `.clauseo` folder (`matter.json`, the
+    /// marker that finds a moved matter folder again). None in a test that is about other keys.
+    pub(crate) matter: Option<&'a Path>,
 }
 
 /// Adds [`ClaudeKeys`] to `claudeCode.options` (see the module doc).
@@ -237,6 +240,9 @@ pub(crate) fn claude_options(options: &mut Map<String, Value>, keys: &ClaudeKeys
     deny_data_folder(&mut settings, keys.data);
     if keys.browser {
         browser_ask_settings(&mut settings);
+    }
+    if let Some(matter) = keys.matter {
+        deny_matter_marker(&mut settings, matter);
     }
     // Before forced ask, whose `autoAllowBashIfSandboxed: false` must win.
     if let Some(sandbox) = keys.sandbox {
@@ -292,6 +298,26 @@ fn browser_ask_settings(settings: &mut Map<String, Value>) {
         push_new(&mut ask, &rule);
     }
     permissions.insert("ask".to_owned(), Value::Array(ask));
+    settings.insert("permissions".to_owned(), Value::Object(permissions));
+}
+
+/// `permissions.deny` gains `Edit` of the matter's `.clauseo` folder and all in it, after any
+/// rules already there. A matter folder that is not UTF-8 gets none (no rule could name it).
+fn deny_matter_marker(settings: &mut Map<String, Value>, matter: &Path) {
+    let Some(text) = matter.to_str() else {
+        return;
+    };
+    let base = crate::agent::data_fence::rule_path(text, cfg!(windows));
+    let marker = super::sandbox::MATTER_MARKER;
+    let mut permissions = take_object(settings, "permissions");
+    let mut deny = take_array(&mut permissions, "deny");
+    for rule in [
+        format!("Edit({base}/{marker})"),
+        format!("Edit({base}/{marker}/**)"),
+    ] {
+        push_new(&mut deny, &rule);
+    }
+    permissions.insert("deny".to_owned(), Value::Array(deny));
     settings.insert("permissions".to_owned(), Value::Object(permissions));
 }
 

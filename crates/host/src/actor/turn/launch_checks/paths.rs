@@ -93,7 +93,11 @@ pub(super) fn launch_paths(actor: &Actor, thread: ThreadId, id: u64) -> Result<L
         thread,
         launch: id,
     };
-    let run = RunFolders::new(locations.data_dir(), key);
+    let mut run = RunFolders::new(locations.data_dir(), key);
+    // Claude's sandbox's short temp folder (`agent::claude_tmp`), made by the launch prep.
+    if kind == Some(AgentKind::Claude) && !cfg!(windows) {
+        run.claude_tmp = crate::agent::claude_tmp::claude_tmp_dir();
+    }
     let skills = match kind {
         Some(_) => actor.profile.launch_writes(&row.agent),
         None => Vec::new(),

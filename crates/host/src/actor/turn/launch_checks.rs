@@ -56,7 +56,7 @@ use crate::agent::codex_fence::Listed;
 use crate::agent::data_fence::LaunchDeny;
 use crate::agent::folder_support::{Answer, FolderCheck};
 use crate::agent::login_link::{self, Checked, LoginCheck};
-use crate::agent::{codex, data_folder};
+use crate::agent::{claude_tmp, codex, data_folder};
 use crate::browser::session::BrowserSession;
 use crate::config::SessionKey;
 use crate::error::Error;
@@ -183,6 +183,9 @@ pub(crate) struct RunFolders {
     /// Its `PATH` folders and what its shells get, found by the launch prep after the claims
     /// (`claim.rs`, `agent/shell_path.rs`); `<root>/clauseo-env.sh` goes with the folder.
     pub(crate) path: crate::agent::shell_path::SessionPath,
+    /// Claude's short temp folder (`agent::claude_tmp`): set for a Claude session off Windows,
+    /// and none again when the launch prep could not make it (its sandbox is then off).
+    pub(crate) claude_tmp: Option<PathBuf>,
 }
 
 impl RunFolders {
@@ -215,6 +218,7 @@ impl RunFolders {
             lease: Arc::default(),
             slot_waited: false,
             path: crate::agent::shell_path::SessionPath::default(),
+            claude_tmp: None,
         }
     }
 
@@ -248,8 +252,9 @@ impl RunFolders {
         Ok(())
     }
 
-    /// Removes this launch's run folder and its browser folder, through no link
-    /// ([`folders::remove_folders`]); the notes folder stays. File system calls: off the actor.
+    /// Removes this launch's run folder, its browser folder and Claude's short temp folder,
+    /// through no link ([`folders::remove_folders`]); the notes folder stays. File system
+    /// calls: off the actor.
     pub(crate) fn remove(&self) {
         folders::remove_folders(self);
     }
@@ -365,6 +370,8 @@ pub(super) fn prepare(
                     }
                 }
                 run.make(&data, &sweep)?;
+                let short = run.claude_tmp.take();
+                run.claude_tmp = short.filter(|dir| claude_tmp::make_claude_tmp(&run.root, dir));
                 run.data_deny = launch_deny(&run, &stored, &data, claude_home.as_deref());
                 run.codex_listed = crate::agent::codex_fence::list(&data, &run.root, &run.notes);
                 claim(&mut run, &data, claims, slot);
