@@ -308,9 +308,10 @@ fn stale_python_folders_go_read_only_or_not_and_node_and_the_current_one_stay() 
 #[test]
 fn no_python_for_the_platform_means_unavailable_and_no_command_folder() {
     let data = TestDir::new("python-none");
+    // Linux has no Python archive (macOS and Windows do, since 3.13.18-c2 is pinned).
     let config = AgentsConfig::new(
         data.0.clone(),
-        crate::platform::Platform::new(Os::Darwin, Arch::Arm64),
+        crate::platform::Platform::new(Os::Linux, Arch::X64),
     );
     assert_eq!(resting_state(&config), PythonState::Unavailable);
     assert!(!needed(&config));
