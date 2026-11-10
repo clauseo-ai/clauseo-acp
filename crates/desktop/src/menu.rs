@@ -16,7 +16,9 @@
 //!   The page runs the same code as its keys and buttons, and does nothing where it can't (no
 //!   matter open, a dialog holding the keys). No capability is granted for it: the script runs
 //!   from Rust.
-//! - The words are English (`words`).
+//! - The words follow `ui.language` ([`words`]): the bar is built in English, then
+//!   [`follow_language`] builds it again in the settings' language once the host has started,
+//!   and on each `SettingsChanged` whose language differs from the bar's.
 
 pub(crate) mod words;
 
@@ -71,7 +73,8 @@ pub(crate) fn script(command: PageCommand) -> String {
 #[cfg(target_os = "macos")]
 const SETTINGS_ID: &str = "settings";
 
-/// `builder` with the menu bar and its items' handler.
+/// `builder` with the menu bar, in English until [`follow_language`] reads the settings, and its
+/// items' handler.
 #[cfg(target_os = "macos")]
 pub(crate) fn on_builder<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
     builder
@@ -208,4 +211,41 @@ pub(crate) fn send<R: tauri::Runtime, M: tauri::Manager<R>>(
     main.show()?;
     main.set_focus()?;
     main.eval(script(command))
+}
+
+/// Builds the bar again in the settings' language once the host has started, and on each
+/// `SettingsChanged` that changes it, until the host stops. A bar that fails to build keeps the
+/// one shown, and the next change tries again.
+#[cfg(target_os = "macos")]
+pub(crate) fn follow_language<R: tauri::Runtime>(app: tauri::AppHandle<R>) {
+    use futures::StreamExt as _;
+    use tauri::Manager as _;
+
+    use crate::bridge::Bridge;
+    use crate::setup::{CellHost, SetupHost as _};
+    drop(tauri::async_runtime::spawn(async move {
+        let Some(cell) = app.try_state::<Bridge>().map(|bridge| bridge.cell()) else {
+            return;
+        };
+        let Ok(mut changes) = CellHost::new(cell).settings_changes().await else {
+            return;
+        };
+        let mut shown = clauseo_protocol::Language::En;
+        loop {
+            let Some(bridge) = app.try_state::<Bridge>() else {
+                return;
+            };
+            let language = bridge.language().await;
+            if language != shown
+                && bar(&app, language)
+                    .and_then(|bar| app.set_menu(bar))
+                    .is_ok()
+            {
+                shown = language;
+            }
+            if changes.next().await.is_none() {
+                return;
+            }
+        }
+    }));
 }
