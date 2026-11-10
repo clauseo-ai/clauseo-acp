@@ -175,6 +175,8 @@ impl Default for Inner {
             states: std::collections::BTreeMap::new(),
             python: PythonState::Unavailable,
             python_bytes: 0,
+            python_began: None,
+            ticks: super::Ticks::default(),
             installed: std::collections::BTreeMap::new(),
             current: None,
             next_job: 0,
@@ -215,6 +217,8 @@ impl Inner {
         events: &async_channel::Sender<AgentsEvent>,
         state: PythonState,
     ) {
+        let began = &mut inner.python_began;
+        super::python_log::changed(&inner.python, &state, began, &inner.ticks);
         inner.python = state.clone();
         drop(events.try_send(AgentsEvent::Python { state }));
     }

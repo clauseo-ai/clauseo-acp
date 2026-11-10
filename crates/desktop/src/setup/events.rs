@@ -164,7 +164,9 @@ static EVENTS_LOGGED: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU3
 /// only: never an email, a code or a path.
 fn log_event(event: &SetupEvent) {
     if let SetupEvent::SignInChanged { agent, state } = event {
-        super::status_timing::answered(agent, &state_kind(state));
+        let kind = state_kind(state);
+        super::status_timing::changed(agent, &kind);
+        super::status_timing::answered(agent, &kind);
     }
     if EVENTS_LOGGED.fetch_add(1, std::sync::atomic::Ordering::Relaxed) >= EVENT_LINES {
         return;
