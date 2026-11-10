@@ -7,10 +7,10 @@
 //!   `acceptEdits` here). Meanwhile the guard hook still asks before every tool, so the race
 //!   costs no unasked change.
 //! - Elsewhere: `auto`, `bypassPermissions` and `dontAsk` ([`REFUSED_MODES`]) go back to
-//!   `acceptEdits` (`agent::loads::CLAUDE_MODE`). The plan exit's options into `auto` and
-//!   bypass are never offered (`asks.rs`), and claude-agent-acp 0.89.1 lists neither bypass nor
-//!   `dontAsk`, so this answers an adapter that moved there anyway. Every other mode is kept
-//!   until the next start: `default` (a plan exit's "manually approve edits"), `plan`,
+//!   `acceptEdits` (`agent::loads::CLAUDE_MODE`). So the plan exit's "use auto mode" lands the
+//!   session in `acceptEdits`, never `auto`; claude-agent-acp 0.89.1 lists neither bypass nor
+//!   `dontAsk`, so for those this answers an adapter that moved there anyway. Every other mode
+//!   is kept until the next start: `default` (a plan exit's "manually approve edits"), `plan`,
 //!   `acceptEdits` (decision record 0030, "Claude's permission mode").
 
 use clauseo_protocol::{AgentChoiceId, AgentKind, CompactString, ModeChanged, ThreadId};
