@@ -14,7 +14,9 @@ import {
   type InstallTestIds,
 } from "@clauseo/components/clauseo/first-launch/install.tsx";
 import type { Lang } from "@clauseo/components/lib/display.ts";
+import { errorWords } from "@clauseo/components/lib/words-errors.ts";
 import { fl } from "@clauseo/components/lib/words-first-launch.ts";
+import { sx } from "@clauseo/components/lib/words-signin-expired.ts";
 import { ui } from "@clauseo/components/lib/words-ui.ts";
 import { Button } from "@clauseo/components/ui/button.tsx";
 import type { AgentId } from "../../transport/protocol.ts";
@@ -114,9 +116,28 @@ export function welcomeFoot(
   };
   const cancel = { words: ui(lang, "Cancel"), press: acts.cancel, testId: IDS.cancel, quiet: true };
   switch (view.kind) {
-    // signed out, or a sign-in that stopped: the plan is ready, and Sign in starts it again
-    case "signed-out":
+    // a cancelled sign-in says so, as Settings' card does, and offers it again (D-007: it read "{name} is ready" while
+    // signed out); no tick, since the plan isn't ready to use
     case "failed":
+      if (view.code === "signin.cancelled")
+        return named(
+          line(errorWords(lang, "signin.cancelled"), "cancelled", {
+            ...signIn,
+            words: sx(lang, "Sign in again"),
+          }),
+          lang,
+          name,
+          null,
+        );
+      return named(
+        line(fl(lang, "{name} is ready", { name }), view.kind, signIn),
+        lang,
+        name,
+        null,
+        "done",
+      );
+    // signed out, after the install: the plan is ready, and Sign in starts it
+    case "signed-out":
       return named(
         line(fl(lang, "{name} is ready", { name }), view.kind, signIn),
         lang,
