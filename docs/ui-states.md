@@ -358,6 +358,7 @@ retried as they are; the others need the lawyer or a fix first. Meanings are in 
 | Word blackline failed (the compare or its view) | `ErrorCode::BlacklineFailed` | yes |
 | Tracked changes: no stetdoc, a file that is not a Word document, or a list that went stale | `ErrorCode::WordStetdocMissing`, `ErrorCode::WordNotDocx`, `ErrorCode::WordRevisionsStale` | no |
 | Tracked changes: stetdoc failed or timed out | `ErrorCode::WordEditFailed` | yes |
+| Offline mid-answer (D-050): the agent couldn't reach its service, or the window said offline (`HostCommand::SetNetwork`) and the agent then sent nothing for 30 s; the answer so far stays, the stop line says so and offers Try again | `ErrorCode::AgentOffline` | yes |
 | A code from a newer Clauseo | `ErrorCode::Unknown` | no |
 
 A failed turn shows its code from `turn_failed` on the step card (section 3).

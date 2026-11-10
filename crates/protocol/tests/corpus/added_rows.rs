@@ -562,4 +562,11 @@ pub(crate) const ADDED_AFTER_V1: &[Corpus] = &[
         (387, 0xcc8f_4ffd_b7e6_4560),
         (289, 0x03ca_ae5d_2ba0_44cf),
     ),
+    (
+        "added/turn_failed-AgentOffline",
+        include_bytes!("added/turn_failed-AgentOffline.jsonl"),
+        include_bytes!("added/turn_failed-AgentOffline.msgpack"),
+        (351, 0xf408_1789_7d88_50f1),
+        (253, 0xeaf2_fea8_ad96_77b2),
+    ),
 ];
