@@ -175,6 +175,47 @@ fn a_forced_ask_session_starts_in_default_not_accept_edits() {
     }
 }
 
+/// A forced-ask session reopened by `session/load` (answered in `auto`) or by `session/resume`
+/// (answered in `acceptEdits`) is switched to `default` before its prompt, as a new one is.
+#[test]
+fn a_forced_ask_session_reopened_by_load_or_resume_stays_in_default() {
+    for (test, reopen) in [
+        ("forced_ask_load", "claude-forced-ask-load"),
+        ("forced_ask_resume", "claude-forced-ask-resume"),
+    ] {
+        let dir = Dir::new(
+            test,
+            &[(CLAUDE, Scenario::Local("claude-forced-ask-start"))],
+        );
+        let forced = |config: clauseo_host::HostConfig| {
+            config
+                .with_folder_support(Some(FolderSupportKind::Network))
+                .with_pre_write_guard(std::path::PathBuf::from(GUARD))
+        };
+        let host = dir.start_with(0, forced);
+        let (_, thread, _) = matter_with_thread(&dir, &host, "m", &[("brief.txt", "x\n")], CLAUDE);
+        let mut events = host.events(StreamId::Thread(thread));
+        let (turn, _) = host.prompt(thread, "Summarise clause 4.");
+        assert_eq!(events.until_turn_ended(turn).stop, StopReason::EndTurn);
+        host.shutdown();
+
+        dir.set_agents(&[(CLAUDE, Scenario::Local(reopen))]);
+        let host = dir.start_with(1, forced);
+        let mut events = host.events(StreamId::Thread(thread));
+        let (turn, _) = host.prompt(thread, "And clause 5?");
+        let ended = events.until_turn_ended(turn);
+        events.assert_no_mismatch();
+        assert_eq!(ended.stop, StopReason::EndTurn, "{test}: {}", events.dump());
+        assert_eq!(
+            modes(&events),
+            ["default", "default"],
+            "{test}: {}",
+            events.dump()
+        );
+        host.shutdown();
+    }
+}
+
 /// With no folder answer (and with `cant_change_permissions`, which forces nothing) the same plan
 /// exit offers all three options, the auto-accept one is taken, the agent stays in acceptEdits,
 /// and `SetMode acceptEdits` reaches it: as before forced ask.

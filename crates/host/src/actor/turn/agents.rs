@@ -465,8 +465,8 @@ pub(super) fn on_reply(actor: &mut Actor, thread: ThreadId, id: u64, reply: Agen
             end::on_prompt_refused(actor, thread, turn, &error);
         }
         AgentReply::Steer(steered) => super::queue::on_steered(actor, thread, *steered),
-        AgentReply::ModeReset(result) => {
-            super::forced_mode::on_mode_reset(actor, thread, same, result);
+        AgentReply::ModeReset(mode, result) => {
+            super::forced_mode::on_mode_reset(actor, thread, same, mode, result);
         }
         AgentReply::Initialized(_)
         | AgentReply::Session { .. }
