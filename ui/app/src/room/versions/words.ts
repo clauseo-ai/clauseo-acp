@@ -118,7 +118,10 @@ export function askOf(lang: Lang, cal: Calendar, s: Snapshot, ask: Ask | null): 
               }),
       body:
         changed.length === 0
-          ? (removed ?? vt(lang, "Nothing will change. The matter already stands as it did then."))
+          ? removed === null
+            ? vt(lang, "Nothing will change. The matter already stands as it did then.")
+            : // the removals alone: the dialog still says the act can be undone
+              `${removed} ${vt(lang, "You can undo this.")}`
           : changed.length === 1
             ? vt(lang, "1 document will change: {papers}. You can undo this.", { papers })
             : vt(lang, "{n} documents will change: {papers}. You can undo this.", {

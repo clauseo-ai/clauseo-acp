@@ -122,8 +122,9 @@ Amended by H9 (2026-11-02), the brief's "Later" list. The code is `actor/turn/qu
   turn stays queued, held.
 
 The undo note (QR11.1) is not logged. Its words: "Note from Clauseo: since your last turn, the
-lawyer put these files back to an earlier version: notes/a.txt, brief.txt. Read them again before
-relying on what you remember about them." The paths are the undo and restore checkpoints' files
+lawyer put these files back to an earlier version, and removed those it did not have: notes/a.txt,
+brief.txt. Read them again before relying on what you remember about them." The removed files are
+those an undo deleted (its turn made them) and those a restore that undoes another deleted. The paths are the undo and restore checkpoints' files
 since the thread's last `TurnStarted`. An undo keeps the writer and leaves the note unchanged
 until `StepUndone` is durable; a failed undo commit is retried once, as a turn's end is.
 

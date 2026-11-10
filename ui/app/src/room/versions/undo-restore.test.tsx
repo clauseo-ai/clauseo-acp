@@ -214,9 +214,9 @@ test("undoing a restore asks the host to take back what it added: the dialog nam
   });
   // the restore cp4 was made at 12:04 pm (zone-free: the version's clock words are the room's)
   expect(dialog()?.textContent).toMatch(/^Undo the restore at .+ today\?/);
-  // not "Nothing will change", nor that the file stays: it goes
+  // not "Nothing will change", nor that the file stays: it goes, and the act can be undone
   expect(describedBy()).toBe(
-    "'\u2068Reply notes.md\u2069', added by the restore, will be removed.",
+    "'\u2068Reply notes.md\u2069', added by the restore, will be removed. You can undo this.",
   );
   expect(dialog()?.textContent).not.toMatch(/Nothing will change|added since/);
   // its act says what it does: the band's own words for taking a restore back, not Restore
