@@ -32,7 +32,7 @@ import { UET } from "./registry-uet.tsx";
 import { UD1 } from "./registry-ud1.tsx";
 import { UD2 } from "./registry-ud2.tsx";
 import { UD2_PLANS } from "./registry-ud2-plans.tsx";
-import { UC } from "./registry-uc.tsx";
+import { UC_ALL } from "./registry-uc-blackline.tsx";
 import { SAC } from "./registry-sac.tsx";
 import {
   MATTER,
@@ -395,7 +395,7 @@ export const REGISTRY: readonly Entry[] = [
   ...UD1,
   ...UD2,
   ...UD2_PLANS,
-  ...UC,
+  ...UC_ALL,
   ...SAC,
   {
     id: "U2-01",
