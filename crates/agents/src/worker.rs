@@ -328,6 +328,11 @@ impl Agents {
     /// `cancel_sign_in` ends the wait. Refused when the agent is unknown, the method is another
     /// agent's, or the caller gave it no home.
     ///
+    /// A plan sign-in (any method but Claude's `Console`) that finds Clauseo's own login not
+    /// signed in detects the lawyer's own login again, by a stat: found, and with no `no-reuse`,
+    /// no reuse recorded and (Codex) no login file in Clauseo's home, the job ends `LoginFound`
+    /// with no login run, so "Use it" is offered rather than the browser opened.
+    ///
     /// For Codex, refused with `OwnLoginPresent` while the login would replace Clauseo's own
     /// ([`Agents::replaces_own_login`]): `codex login` signs that account out first.
     pub fn sign_in(&self, agent: &AgentId, method: Method) -> Result<(), SigninError> {

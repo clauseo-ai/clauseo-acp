@@ -42,7 +42,8 @@ use crate::signin::queue::{self, Gate, Queue};
 use crate::signin::run::RunSpec;
 use crate::signin::stopping::OnStop;
 use crate::signin::{
-    Found, Method, PasteCode, SigninCode, SigninNote, SigninState, Source, claude, codex, found,
+    Found, Method, PasteCode, SigninCode, SigninNote, SigninState, Source, claude, codex, detect,
+    found,
 };
 use crate::state::Installed;
 use crate::worker::{Shared, Ticket};
@@ -226,6 +227,11 @@ impl<T: Timer + Send + Sync> SigninJob<T> {
             // removal of a login already there).
             if self.ticket.cancel.is_cancelled() {
                 return Some(self.failed(SigninCode::Cancelled));
+            }
+            // Not signed in: the lawyer's own login, found by a stat now, is offered first.
+            if let Some(found) = detect::at_press(self) {
+                tracing::info!(agent = %self.ticket.agent, "sign in: the lawyer's login offered");
+                return Some(found);
             }
         }
         match (self.vendor, self.task) {

@@ -25,15 +25,17 @@
 //! theirs), which gives the plan and what email it reports. Nothing ties a reuse to an account:
 //! the agent runs as the lawyer, and switching accounts is their own doing.
 //!
-//! Detection never starts reuse: it gives `LoginFound`, and only "Use it" reuses.
+//! Detection never starts reuse: it gives `LoginFound`, and only "Use it" reuses. It runs in each
+//! status check and again at each Sign in press ([`at_press`]), so nothing it saw is kept.
 
 use std::collections::BTreeMap;
 use std::ffi::OsString;
 use std::path::Path;
 
 use crate::cancel::Cancel;
-use crate::signin::job::SigninJob;
-use crate::signin::{SigninState, reuse};
+use crate::signin::env::Vendor;
+use crate::signin::job::{SigninJob, Task};
+use crate::signin::{Method, SigninState, marker, reuse};
 use crate::status::{Identity, claude_detection, codex_detection};
 
 /// What detection found: the state, and an account it never knows (kept for the callers'
@@ -83,6 +85,33 @@ fn detected<T>(
                 .lawyer_home()
                 .is_some_and(|lawyer| stat(&lawyer)),
     )
+}
+
+/// Sign in pressed with a plan method (not Claude's Console) and Clauseo's own login not signed
+/// in (the quick check said so, or could not tell): detection again, so the lawyer's own login is
+/// offered ("Use it", `LoginFound`) rather than a browser opened, whatever an earlier status
+/// check saw. That check runs once per app start, after the install's first `Ready`, and none
+/// runs for a press kept until `Ready`; one that got no answer shows Sign in with nothing
+/// detected, and a login file made after it is never seen. `None`, so the sign-in goes on:
+/// nothing found, `no-reuse` there (the lawyer chose Clauseo's own sign-in), the login already
+/// reused, for Codex any login file in Clauseo's home (Clauseo's own, which "Use it" could not
+/// link over, or one shared with the lawyer's: the login's guard decides), or cancelled.
+pub(crate) fn at_press<T>(job: &SigninJob<T>) -> Option<SigninState> {
+    if job.task == Task::SignIn(Method::Console)
+        || marker::no_reuse(&job.config.data_dir, &job.ticket.agent)
+        || super::found::is_reused(job)
+    {
+        return None;
+    }
+    let cancel = &job.ticket.cancel;
+    let found = match job.vendor {
+        Vendor::Claude => claude(job, cancel)?,
+        Vendor::Codex if std::fs::symlink_metadata(reuse::login_file(&job.home)).is_ok() => {
+            return None;
+        }
+        Vendor::Codex => codex(job, cancel)?,
+    };
+    matches!(found.state, SigninState::LoginFound { .. }).then_some(found.state)
 }
 
 fn found(state: SigninState) -> Detected {

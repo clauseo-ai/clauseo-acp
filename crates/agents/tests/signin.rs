@@ -60,6 +60,10 @@ mod reuse_claude;
 mod reuse_codex;
 
 #[cfg(test)]
+#[path = "signin/found_at_press.rs"]
+mod found_at_press;
+
+#[cfg(test)]
 #[path = "signin/detect_nowrite.rs"]
 mod detect_nowrite;
 
