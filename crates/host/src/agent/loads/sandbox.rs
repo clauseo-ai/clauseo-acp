@@ -44,7 +44,9 @@
 //!   launch, `/Volumes` and `/Users/Shared`; the data fence's `Read(…)` deny rules become read
 //!   denies too. A matter registered after the launch is in no list: the accepted residual.
 //! - `filesystem.allowRead` ([`ClaudeSandbox::allow_read`]): re-opens, within those denies,
-//!   what a sandboxed command needs. Not the whole run folder: it holds the case-law relay's
+//!   what a sandboxed command needs, with the `PATH` file Claude Code reads into each command
+//!   (`<run>/clauseo-env.sh`, `agent::shell_path`) and the shell browser's tools folder. Not
+//!   the whole run folder: it holds the case-law relay's
 //!   token and the browser's profile (the visited sites' cookies).
 //! - `ignoreViolations`: Claude Code's shell snapshot folder in its home, which the data fence
 //!   denies. Each command starts with `source <snapshot> 2>/dev/null || true`, so a denied read
@@ -112,9 +114,13 @@ pub(crate) struct SandboxPaths<'a> {
     /// The built-in plugin's skills, `<data>/profile/claude-plugin/skills`, for each spelling
     /// of `<data>`.
     pub(crate) skills: &'a [PathBuf],
-    /// The folders first on the agent's `PATH`: stetdoc's, then the profile hook's (Clauseo's
-    /// Python runtime, `<rt>/bin`, where pandoc is too).
+    /// The folders first on the agent's `PATH` and its shells' (`agent::shell_path`):
+    /// stetdoc's, the shell browser's tools (`<data>/tools`) in a session that has them, then
+    /// the profile hook's (Clauseo's Python runtime, `<rt>/bin`, where pandoc is too).
     pub(crate) path: &'a [PathBuf],
+    /// The file that puts those folders first in each Bash command (`<run>/clauseo-env.sh`,
+    /// `agent::shell_path::ENV_FILE`), if it was written: the file alone, never its folder.
+    pub(crate) env_file: Option<&'a Path>,
     /// Claude Code's config folder (`agent::home`).
     pub(crate) claude_home: &'a Path,
     /// Each spelling of `<data>` (`LaunchDeny::spellings`).
@@ -182,7 +188,8 @@ impl ClaudeSandbox {
     }
 
     /// `filesystem.allowRead`: the writable folders, the browser's downloads, the skill packs,
-    /// the built-in skills, and each folder first on `PATH` (stetdoc's), except that a folder
+    /// the built-in skills, the shells' `PATH` file, and each folder first on `PATH` (stetdoc's,
+    /// the shell browser's tools), except that a folder
     /// in Clauseo's Python runtime (`<rt>/bin`) opens the whole runtime, whose interpreter reads
     /// its standard library and site-packages beside it. Never a `PATH` folder's parent
     /// otherwise: it could be the home itself.
@@ -200,6 +207,7 @@ impl ClaudeSandbox {
         .map(|path| path.to_path_buf())
         .collect();
         folders.extend(paths.skills.iter().cloned());
+        folders.extend(paths.env_file.map(Path::to_path_buf));
         for folder in paths.path {
             let runtime = folder.parent().filter(|parent| {
                 parent

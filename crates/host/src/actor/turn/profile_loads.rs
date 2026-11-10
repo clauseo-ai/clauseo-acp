@@ -250,14 +250,6 @@ fn claude_sandbox(
                 .fold(data.clone(), |path, name| path.join(name))
         })
         .collect();
-    let path: Vec<PathBuf> = actor
-        .wiring
-        .path_prepend
-        .iter()
-        .cloned()
-        .chain(actor.profile.agent_path(agent_id))
-        .filter(|folder| folder.is_absolute())
-        .collect();
     let claude_home = actor.effective.locations().agent_home(agent_id.as_str());
     // Every other matter's folder the host knows now; one registered later is the residual.
     let other_matters: Vec<PathBuf> = actor
@@ -275,7 +267,8 @@ fn claude_sandbox(
         skill_packs: &run.skill_packs,
         notes: &run.notes,
         skills: &skills,
-        path: &path,
+        path: &run.path.dirs,
+        env_file: run.path.env_file.as_deref(),
         claude_home: &claude_home,
         data: &run.data_deny.spellings,
         other_matters: &other_matters,
