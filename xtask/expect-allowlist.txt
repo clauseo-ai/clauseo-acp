@@ -51,6 +51,8 @@ crates/desktop/src/navigation/browser_args.rs keep_no_dns_in_env unsafe_code
 # The WebView2 AdditionalBrowserArguments policy check: RegGetValueW.
 crates/desktop/src/navigation/browser_args.rs policy_set unsafe_code
 crates/desktop/src/open/word_path.rs short_folder unsafe_code
+# Key-marker tests: a released read writes its marker on a thread the injected clock cannot see; a real pause lets it land before the scratch goes.
+crates/desktop/src/setup/backend/tests/key_marker.rs Late::drop clippy::disallowed_methods
 # R20 P5b piece B: test set-up writing fake installs and fake login files (mode 0000).
 crates/desktop/src/setup/backend/tests/leave.rs a_split_found_in_temp_homes_runs_the_leave_order_with_its_reason clippy::disallowed_methods
 crates/desktop/src/setup/login_check/tests.rs unix clippy::disallowed_methods
