@@ -203,6 +203,17 @@ fn ready_writes_the_entry_with_the_install_and_the_home_then_checks_status() {
     };
     assert_eq!(rig.host.calls(), [HostCall::SetAgentLaunch(claude(), want)]);
     assert_eq!(rig.calls(), [("check_status", claude())]);
+    // The host's first read of the new plan waits, held, until the readers have the entry.
+    assert_eq!(
+        rig.journal(),
+        [
+            "readers.hold",
+            "host.set_agent_launch",
+            "readers.set_entry",
+            "readers.release",
+            "agents.check_status",
+        ]
+    );
 }
 
 #[test]

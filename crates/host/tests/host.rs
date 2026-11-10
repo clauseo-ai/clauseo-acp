@@ -229,6 +229,9 @@ mod limits_login;
 #[path = "host/limits_pending.rs"]
 mod limits_pending;
 #[cfg(test)]
+#[path = "host/limits_plan_added.rs"]
+mod limits_plan_added;
+#[cfg(test)]
 #[path = "host/limits_sandbox.rs"]
 mod limits_sandbox;
 #[cfg(test)]
