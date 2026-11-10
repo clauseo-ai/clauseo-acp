@@ -1,23 +1,34 @@
-//! The MCP servers the profile adds: `browser`, agent-browser's MCP server behind S27's guard,
-//! then `case-law`, the paid case-law connector through the host's relay (R24).
+//! The MCP servers the profile adds: `browser`, agent-browser's MCP server behind S27's guard
+//! (Codex only, [`browser_mcp`]), then `case-law`, the paid case-law connector through the
+//! host's relay (R24).
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
+use clauseo_protocol::AgentKind;
+
 use crate::paths::ProfilePaths;
 use crate::placeholders::{
-    BROWSER_DIR, BROWSER_EXECUTABLE, CDP_PORT, DAEMON_PORT, PROXY_PORT, RELAY_PORT,
-    RELAY_TOKEN_FILE, SESSION_ID, SOCKET_DIR, STREAM_PORT,
+    BROWSER_DIR, BROWSER_EXECUTABLE, CDP_PORT, DAEMON_PORT, RELAY_PORT, RELAY_TOKEN_FILE,
+    SESSION_ID, SOCKET_DIR, STREAM_PORT,
 };
 
 /// The reserved server name: a `mcp.servers.browser` entry in the settings is dropped.
 pub const BROWSER: &str = "browser";
 
-/// Whether the profile offers the `browser` MCP entry ([`browser`]). Off: parked with the
-/// browser guard, after launch. The agents drive agent-browser through their shell instead
-/// (the `agent-browser` command the app puts on their `PATH`, its skill and the instructions'
-/// browser part), and the entry's code stays, tested, for when the guard returns.
-pub const BROWSER_MCP: bool = false;
+/// Whether an agent of `kind` gets the `browser` MCP entry ([`browser`]): Codex only.
+///
+/// In a Codex turn the shell `agent-browser` cannot work: an approved command still runs under
+/// Seatbelt, because Clauseo's permission profile has deny entries, with no network, and
+/// Chrome's own sandbox cannot nest in it. Codex starts a local stdio MCP server as a plain
+/// child instead, with no Seatbelt and no permission profile (codex 0.162.1
+/// `codex-mcp/src/rmcp_client.rs:1216-1238`, `rmcp-client/src/stdio_server_launcher.rs:262-288`),
+/// so the guard, which refuses every tool off agent-browser's `core` profile and every argument
+/// naming a file, is what holds the browser to its own folder there. Claude keeps the shell
+/// command, its rules and its skill (`ProfileHook::browser_tool`).
+pub fn browser_mcp(kind: Option<AgentKind>) -> bool {
+    kind == Some(AgentKind::Codex)
+}
 
 /// The case-law connector's reserved server name (R24): a `mcp.servers.case-law` entry in the
 /// settings or a policy source is dropped (`clauseo_settings::RESERVED_MCP_SERVERS`).
@@ -40,10 +51,13 @@ pub struct ProfileServer {
 /// The `browser` entry. The command is `clauseo-mcp`; its `browser-guard` runs agent-browser's
 /// `mcp --tools core` with `--cwd` the session's browser state folder (`{browser_dir}`, one
 /// token the host fills with a native path) and `--cdp-port {cdp_port}`, plus
-/// `--daemon-port {daemon_port}` on Windows. It derives from `--cwd` and the proxy every other
-/// folder and proxy variable agent-browser needs (downloads, screenshots, `HOME`, `TMPDIR` or
-/// `TEMP`, and the Windows socket folder). The entry carries five variables, six on macOS and
-/// Linux with the host's socket folder (`{socket_dir}`). A sidecar path that is no UTF-8 is
+/// `--daemon-port {daemon_port}` on Windows. It derives from `--cwd` every other folder
+/// agent-browser needs (downloads, screenshots, its run profile, `HOME`, `TMPDIR` or `TEMP`,
+/// and the Windows socket folder), and fixes the idle timeout. The entry carries four variables,
+/// five on macOS and Linux with the host's socket folder (`{socket_dir}`): no proxy, so Chrome
+/// goes direct, as Claude's shell browser does; the egress allowlist belongs to the parked Safe
+/// workspace (an entry holding `{proxy_port}` would get the session's proxy, and the host opens
+/// one only then). A sidecar path that is no UTF-8 is
 /// written lossily: the host's launch would then fail, which is no worse than a missing browser.
 pub fn browser(paths: &ProfilePaths) -> ProfileServer {
     browser_for(paths, cfg!(windows))
@@ -69,10 +83,6 @@ fn browser_for(paths: &ProfilePaths, windows: bool) -> ProfileServer {
         (
             "AGENT_BROWSER_CONFIG".to_owned(),
             paths.browser_config.to_string_lossy().into_owned(),
-        ),
-        (
-            "AGENT_BROWSER_PROXY".to_owned(),
-            format!("http://127.0.0.1:{PROXY_PORT}"),
         ),
         ("AGENT_BROWSER_SESSION".to_owned(), SESSION_ID.to_owned()),
         (

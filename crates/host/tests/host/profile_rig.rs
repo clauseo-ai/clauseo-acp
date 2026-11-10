@@ -181,7 +181,8 @@ pub(crate) fn notes(dir: &Dir, matter: MatterId) -> PathBuf {
 
 /// A profile hook: `meta` for a Claude agent, `codex` keys for a Codex agent (or, with
 /// `profile`, that profile's keys for the launch's skills token), `servers` and `skills` for
-/// every agent. `tokens` records the token each Codex launch's keys were built from.
+/// every agent, `codex_servers` for a Codex agent only. `tokens` records the token each Codex
+/// launch's keys were built from.
 #[derive(Clone, Default)]
 pub(crate) struct Hook {
     pub(crate) meta: Value,
@@ -192,6 +193,9 @@ pub(crate) struct Hook {
     pub(crate) tokens: Arc<Mutex<Vec<Option<SkillsWritten>>>>,
     /// The shell browser's folder (`ProfileHook::browser_tool`).
     pub(crate) browser_tool: Option<PathBuf>,
+    /// The servers a Codex agent gets after `servers`, as the launch profile gives Codex alone
+    /// the `browser` entry (`clauseo_profile::servers::browser_mcp`).
+    pub(crate) codex_servers: Vec<McpServer>,
     /// Every agent's session `PATH` folders (`ProfileHook::agent_path`).
     pub(crate) agent_path: Vec<PathBuf>,
 }
@@ -211,8 +215,12 @@ impl ProfileHook for Hook {
         BTreeMap::new()
     }
 
-    fn mcp_servers(&self, _agent: &AgentId) -> Vec<McpServer> {
-        self.servers.clone()
+    fn mcp_servers(&self, agent: &AgentId) -> Vec<McpServer> {
+        let mut servers = self.servers.clone();
+        if agent.as_str() == CODEX {
+            servers.extend(self.codex_servers.iter().cloned());
+        }
+        servers
     }
 
     fn launch_writes(&self, _agent: &AgentId) -> Vec<SkillWrite> {

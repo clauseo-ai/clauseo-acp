@@ -244,16 +244,24 @@ fn kind_specific_parts_go_only_to_their_kind() {
     );
     assert!(profile.codex_keys_without_index(None).is_empty());
     assert!(profile.skill_files(None).is_none());
-    for kind in [None, Some(AgentKind::Claude), Some(AgentKind::Codex)] {
+    // `browser` goes to Codex alone (`servers::browser_mcp`): Claude keeps the shell command.
+    for (kind, want) in [
+        (None, vec!["case-law"]),
+        (Some(AgentKind::Claude), vec!["case-law"]),
+        (Some(AgentKind::Codex), vec!["browser", "case-law"]),
+    ] {
         let names: Vec<String> = profile.servers(kind).into_iter().map(|s| s.name).collect();
-        // `browser` is parked (`servers::BROWSER_MCP`).
-        assert_eq!(names, ["case-law"]);
+        assert_eq!(names, want, "{kind:?}");
     }
+    assert_eq!(
+        profile.servers(Some(AgentKind::Codex))[0],
+        clauseo_profile::servers::browser(profile.paths())
+    );
 }
 
 #[test]
 fn the_browser_entry_runs_the_guard_with_its_ports_and_variables() {
-    // Parked (`servers::BROWSER_MCP`): the entry's own builder, as it would go out.
+    // Codex's entry (`servers::browser_mcp`), as it goes out before the host fills it.
     let browser = clauseo_profile::servers::browser(profile().paths());
     assert_eq!(browser.command, abs("/app/clauseo-mcp"));
     let agent_browser = abs("/app/agent-browser").to_string_lossy().into_owned();
@@ -285,10 +293,6 @@ fn the_browser_entry_runs_the_guard_with_its_ports_and_variables() {
             "AGENT_BROWSER_EXECUTABLE_PATH",
             "{browser_executable}".to_owned(),
         ),
-        (
-            "AGENT_BROWSER_PROXY",
-            "http://127.0.0.1:{proxy_port}".to_owned(),
-        ),
         ("AGENT_BROWSER_SESSION", "{session_id}".to_owned()),
     ];
     if cfg!(unix) {
@@ -303,8 +307,7 @@ fn every_token_the_profile_sends_is_one_the_host_is_told_to_fill() {
     let profile = profile();
     let mut texts = vec![profile.instructions()];
     let tokens: Vec<&str> = IN_INSTRUCTIONS.iter().chain(&IN_SERVERS).copied().collect();
-    let parked = clauseo_profile::servers::browser(profile.paths());
-    for server in profile.servers(None).into_iter().chain([parked]) {
+    for server in profile.servers(Some(AgentKind::Codex)) {
         texts.extend(server.args);
         texts.extend(server.env.into_values());
     }
@@ -546,17 +549,32 @@ fn only_the_browser_part_names_agent_browser() {
         assert!(off.contains("You have no browser in this session"));
     }
     assert!(fill(BrowserPart::NotInstalled).contains("found no Google Chrome"));
-    // Codex's line goes only to a Codex session with the browser.
-    let codex_line = r#"`sandbox_permissions: "require_escalated"`"#;
-    let prefix = r#"`prefix_rule: ["agent-browser"]`"#;
+    // A Codex session with the browser is told to use the `browser` MCP entry's tools, never the
+    // shell command or its variables, and never to escalate; Claude never gets Codex's part.
     let codex_on = browser_part_for(BrowserPart::On, true);
-    assert!(
-        codex_on.contains(codex_line) && codex_on.contains(prefix),
-        "{codex_on}"
+    for rule in [
+        "use your browser tools, the ones from the `browser` MCP server",
+        "never a browser command in your shell",
+        "confidential matter text",
+        "close tool",
+    ] {
+        assert!(codex_on.contains(rule), "{rule}: {codex_on}");
+    }
+    for word in [
+        "agent-browser",
+        "AGENT_BROWSER",
+        "sandbox_permissions",
+        "require_escalated",
+        "prefix_rule",
+    ] {
+        assert!(!codex_on.contains(word), "{word}: {codex_on}");
+    }
+    assert_eq!(
+        browser_part_for(BrowserPart::On, false),
+        browser_part(BrowserPart::On)
     );
-    assert!(codex_on.starts_with(browser_part(BrowserPart::On)));
-    assert!(!browser_part_for(BrowserPart::On, false).contains("sandbox_permissions"));
     for part in [BrowserPart::Off, BrowserPart::NotInstalled] {
+        assert_eq!(browser_part_for(part, true), browser_part(part));
         assert!(!browser_part_for(part, true).contains("agent-browser"));
     }
     assert!(word_count(browser_part(BrowserPart::NotInstalled)) <= 50);

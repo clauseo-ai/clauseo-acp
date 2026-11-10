@@ -50,20 +50,24 @@ The host thread set the conditions the profile must keep: Claude keeps `settingS
     splits each on `.`, and `config_manager.rs:438` reads `bypass_hook_trust` straight from
     the request. The host merges the keys after the overrides and before `hooks`, adding only
     where no key is, and treats a dotted key as a clash with its first part.
-  - `servers(kind)`: `browser` for every kind, an agent with no kind included. `env()`:
+  - `servers(kind)`: `browser` for Codex alone (`servers::browser_mcp`; Claude drives
+    agent-browser as a shell tool, its rules and skill unchanged), then `case-law`. `env()`:
     `STETDOC_AUTHOR`. `path_prepend()`: `Option`, stetdoc's parent folder, or none (with a
     warning) when that folder also holds a browser sidecar or the app's own executable, or is a
     root. Folders compare without regard to case or separator.
   - An agent with no kind (`fake-agent`) gets the servers and nothing kind-specific.
 - **The `browser` entry.** Command `clauseo-mcp`; arguments `browser-guard --agent-browser
   <agent-browser> --cwd {browser_dir} --cdp-port {cdp_port} -- mcp --tools core`, with
-  `--daemon-port {daemon_port}` after `--cdp-port` on Windows; five variables:
-  `AGENT_BROWSER_CONFIG` (static), `AGENT_BROWSER_PROXY=http://127.0.0.1:{proxy_port}`,
-  `AGENT_BROWSER_SESSION={session_id}`, `AGENT_BROWSER_EXECUTABLE_PATH={browser_executable}` and
-  `AGENT_BROWSER_STREAM_PORT={stream_port}`, and on macOS and Linux a sixth,
+  `--daemon-port {daemon_port}` after `--cdp-port` on Windows; four variables:
+  `AGENT_BROWSER_CONFIG` (static), `AGENT_BROWSER_SESSION={session_id}`,
+  `AGENT_BROWSER_EXECUTABLE_PATH={browser_executable}` and
+  `AGENT_BROWSER_STREAM_PORT={stream_port}`, and on macOS and Linux a fifth,
   `AGENT_BROWSER_SOCKET_DIR={socket_dir}` (S27's ports-and-socket PR, 0029). S27's guard derives
-  the download, screenshot, `HOME`, `TMPDIR` or `TEMP`, Windows socket and proxy variables from
-  `--cwd` and the proxy value, so the entry carries none of them. The guard's
+  the download, screenshot, `HOME`, `TMPDIR` or `TEMP` and Windows socket variables from
+  `--cwd`, so the entry carries none of them. No `AGENT_BROWSER_PROXY`: in the plain client
+  Chrome goes direct, as Claude's shell browser does, and the host opens no egress proxy for the
+  entry; it opens one, and fills `{proxy_port}`, only for an entry that holds that token (the
+  parked Safe workspace's). The guard's
   `--cwd` is the session's browser state folder, never the matter folder.
 - **Placeholders, and the host's contract** (`placeholders.rs`, the one home of the token
   strings and of `fill`, both public, documented API). The host depends on `profile` and calls

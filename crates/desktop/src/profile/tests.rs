@@ -160,10 +160,14 @@ fn every_agent_with_a_kind_gets_the_author_and_the_case_law_entry() {
             Some(&OsString::from("Clauseo")),
             "{id}"
         );
-        // The hook offers `case-law` (R24) alone: `browser` is parked
-        // (`clauseo_profile::servers::BROWSER_MCP`). The host fills it per session or leaves it
-        // out (no relay, the connector not signed in, the firm's managed MCP).
-        let servers = hook.mcp_servers(&agent(id));
+        // Codex gets `browser` first (`clauseo_profile::servers::browser_mcp`), Claude none (it
+        // keeps the shell command); both get `case-law` (R24). The host fills each per session
+        // or leaves it out (no relay, the connector not signed in, the firm's managed MCP).
+        let mut servers = hook.mcp_servers(&agent(id));
+        if id == CODEX {
+            let McpServer::Stdio { name, command, .. } = servers.remove(0);
+            assert_eq!((name.as_str(), &command), ("browser", &clauseo_mcp));
+        }
         let [
             McpServer::Stdio {
                 name: case_law,
@@ -173,7 +177,7 @@ fn every_agent_with_a_kind_gets_the_author_and_the_case_law_entry() {
             },
         ] = servers.as_slice()
         else {
-            panic!("one stdio server: {servers:?}");
+            panic!("one stdio server after Codex's browser: {servers:?}");
         };
         assert_eq!(case_law, "case-law");
         assert_eq!(case_law_command, &clauseo_mcp);
@@ -181,7 +185,7 @@ fn every_agent_with_a_kind_gets_the_author_and_the_case_law_entry() {
         let names: Vec<&str> = case_law_env.iter().map(|(name, _)| name.as_str()).collect();
         assert_eq!(names, ["CLAUSEO_RELAY", "CLAUSEO_RELAY_TOKEN_FILE"]);
     }
-    // The parked entry still names both sidecars where the release bundles them, under the
+    // Codex's entry names both sidecars where the release bundles them, under the
     // clauseo- prefix (.github/scripts/sidecars.mjs), since the .deb and .rpm put sidecars in
     // /usr/bin beside other programs.
     let browser = clauseo_profile::servers::browser(profile.paths());
@@ -199,8 +203,10 @@ fn every_agent_with_a_kind_gets_the_author_and_the_case_law_entry() {
         browser.args.get(at + 1).map(String::as_str),
         agent_browser.to_str()
     );
-    // Five variables, and the socket folder's on macOS and Linux (decision record 0030).
-    assert_eq!(browser.env.len(), if cfg!(windows) { 5 } else { 6 });
+    // Four variables (no proxy), and the socket folder's on macOS and Linux (decision record
+    // 0030).
+    assert!(!browser.env.contains_key("AGENT_BROWSER_PROXY"));
+    assert_eq!(browser.env.len(), if cfg!(windows) { 4 } else { 5 });
 }
 
 #[test]
@@ -565,11 +571,12 @@ fn build_copies_agent_browser_from_path_in_a_debug_build() {
             .join("SKILL.md")
             .is_file()
     );
-    // Codex's index names it too.
+    // Codex's index never names it: Codex has the `browser` entry's tools instead.
     let token = write_skills(&hook.launch_writes(&agent(CODEX))[0]).unwrap();
     let keys = hook.codex_config(&agent(CODEX), Some(&token), None);
     let skill = token.root().join("agent-browser").join("SKILL.md");
-    assert!(developer_instructions(&keys).contains(skill.to_str().unwrap()));
+    assert!(!developer_instructions(&keys).contains(skill.to_str().unwrap()));
+    assert!(!developer_instructions(&keys).contains("agent-browser"));
 
     let empty = scratch.dir("data");
     let none = DesktopProfile::build_with(&locations, None, Some(empty.as_os_str())).unwrap();

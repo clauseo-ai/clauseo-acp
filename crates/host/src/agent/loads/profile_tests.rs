@@ -31,8 +31,8 @@ const LOCKED_OFF: Switch = Switch {
     locked: true,
 };
 
-/// The `browser` entry exactly as `clauseo_profile::servers::browser` builds it.
-fn browser_server() -> McpServer {
+/// A `browser` entry asking for the proxy (`{proxy_port}`), as the Safe workspace's would.
+pub(super) fn browser_server() -> McpServer {
     McpServer::Stdio {
         name: "browser".to_owned(),
         command: PathBuf::from("/app/clauseo-mcp"),
@@ -81,7 +81,7 @@ fn browser_server() -> McpServer {
 }
 
 /// A session's claims as the tests fill them: macOS and Linux's, with no daemon port.
-fn claims() -> Claims<'static> {
+pub(super) fn claims() -> Claims<'static> {
     Claims {
         name: "t-1",
         cdp_port: 61_101,
@@ -100,7 +100,7 @@ fn other_server() -> McpServer {
     }
 }
 
-fn inputs<'a>(browser_dir: &'a Path, chrome: Option<&'a Path>) -> BrowserInputs<'a> {
+pub(super) fn inputs<'a>(browser_dir: &'a Path, chrome: Option<&'a Path>) -> BrowserInputs<'a> {
     BrowserInputs {
         switch: ON,
         control: McpControl::Clauseo,
@@ -114,7 +114,7 @@ fn inputs<'a>(browser_dir: &'a Path, chrome: Option<&'a Path>) -> BrowserInputs<
     }
 }
 
-fn reason(state: Option<ToolState>) -> Option<ToolsUnavailableReason> {
+pub(super) fn reason(state: Option<ToolState>) -> Option<ToolsUnavailableReason> {
     match state?.availability {
         ToolAvailability::Unavailable { reason } => Some(reason),
         ToolAvailability::Available | ToolAvailability::Unknown { .. } => None,

@@ -181,10 +181,15 @@ pub(crate) fn index_text(lines: &[String]) -> String {
     format!("{INDEX_HEAD}\n\n{}", lines.join("\n"))
 }
 
-/// [`codex_index`]'s lines, one per skill whose path may be listed.
+/// [`codex_index`]'s lines, one per skill whose path may be listed. The browser's skill is never
+/// listed: it teaches the shell command, and Codex drives the browser through the `browser` MCP
+/// entry's tools instead (`servers::browser_mcp`).
 pub(crate) fn index_lines(skills_root: &Path, rendered: &Rendered) -> Vec<String> {
     let mut lines = Vec::new();
     for skill in rendered.skills() {
+        if skill.name() == AGENT_BROWSER {
+            continue;
+        }
         let path = skills_root.join(skill.name()).join(SKILL_MD);
         let Some(path) = path.to_str().filter(|path| is_listable(path)) else {
             tracing::warn!(

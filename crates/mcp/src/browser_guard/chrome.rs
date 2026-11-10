@@ -87,8 +87,8 @@ pub(crate) struct Spec<'a> {
     pub(crate) profile: &'a Path,
     /// `--cdp-port`.
     pub(crate) cdp_port: u16,
-    /// `AGENT_BROWSER_PROXY`, checked by `env.rs`.
-    pub(crate) proxy: &'a OsStr,
+    /// `AGENT_BROWSER_PROXY`, checked by `env.rs`; none when the host gave none.
+    pub(crate) proxy: Option<&'a OsStr>,
     /// [`env::chrome_env`].
     pub(crate) env: &'a BTreeMap<String, OsString>,
 }
@@ -364,11 +364,14 @@ pub(crate) fn chrome_args(spec: &Spec<'_>, profile: &Path) -> Vec<OsString> {
             .chain(quiet::ARGS)
             .map(OsString::from),
     );
-    let mut proxy = OsString::from("--proxy-server=");
-    proxy.push(spec.proxy);
-    args.push(proxy);
-    // `env::FIXED`'s bypass: none, not even loopback.
-    args.push(OsString::from("--proxy-bypass-list=<-loopback>"));
+    // With no proxy given (the plain client's Codex entry), Chrome goes direct.
+    if let Some(given) = spec.proxy {
+        let mut proxy = OsString::from("--proxy-server=");
+        proxy.push(given);
+        args.push(proxy);
+        // `env::FIXED`'s bypass: none, not even loopback.
+        args.push(OsString::from("--proxy-bypass-list=<-loopback>"));
+    }
     let mut user_data = OsString::from("--user-data-dir=");
     user_data.push(profile);
     args.push(user_data);

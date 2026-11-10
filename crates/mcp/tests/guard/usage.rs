@@ -167,9 +167,10 @@ fn a_missing_or_invalid_host_variable_is_named_and_nothing_starts() {
     let stub = example("echo_stub");
     let log = scratch.log();
     let args = [log.as_os_str()];
+    // `AGENT_BROWSER_PROXY` is optional (the plain client's Codex entry sends none:
+    // `env.rs`'s no-proxy test), but one that is set must be valid (below).
     let mut required = vec![
         "AGENT_BROWSER_CONFIG",
-        "AGENT_BROWSER_PROXY",
         "AGENT_BROWSER_EXECUTABLE_PATH",
         "AGENT_BROWSER_SESSION",
         "AGENT_BROWSER_STREAM_PORT",

@@ -185,6 +185,37 @@ fn the_child_sees_exactly_the_allow_list_and_the_given_folder() {
     }
 }
 
+/// No `AGENT_BROWSER_PROXY` from the host (the plain client's Codex entry): the guard starts,
+/// answers a request with no Chrome, then starts Chrome and agent-browser at the first call, and
+/// the child sees the same map as with a proxy but for every proxy variable, even one the agent's
+/// environment holds.
+#[test]
+fn without_a_proxy_the_guard_starts_and_the_child_gets_no_proxy_variable() {
+    let scratch = Scratch::new("env-no-proxy");
+    let args = ["mcp", "--tools", "core"].map(OsStr::new);
+    let mut command = guard_command(&scratch, &example("env_stub"), &args);
+    command.env_remove("AGENT_BROWSER_PROXY");
+    command.envs(HOSTILE.iter().copied());
+    if cfg!(windows) {
+        command.env("PROCESSOR_ARCHITECTURE", OS_SET_HOSTILE);
+    } else {
+        command.env("LANG", "en_IN.UTF-8").env("lang", "xx");
+    }
+    let mut guard = Guard::start(command);
+    let mut wanted = expected(&scratch);
+    wanted.retain(|name, _| !name.to_ascii_uppercase().contains("PROXY"));
+    guard.send(&serde_json::json!({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}));
+    let oneshot = guard.read();
+    let mut without_cdp = wanted.clone();
+    without_cdp.remove("AGENT_BROWSER_CDP");
+    assert_eq!(child_env(&oneshot, scratch.session()), without_cdp);
+    guard.send_call("open");
+    let report = guard.read();
+    let (status, rest) = guard.finish();
+    assert_eq!(status.code(), Some(0), "{rest}");
+    assert_eq!(child_env(&report, scratch.session()), wanted);
+}
+
 /// The environment in an `env_stub` report, with the run's own session name
 /// (`run-<guard pid>-<8 hex>`, and on Windows `-<n>` after it, `src/browser_guard/runs.rs`)
 /// checked and put back to the host's, and the variables Windows sets itself checked and dropped.

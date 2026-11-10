@@ -1,5 +1,7 @@
 //! The profile hook's MCP servers for one session, and above all its `browser` entry (S27's
-//! agent-browser behind `clauseo-mcp browser-guard`, decision record 0030).
+//! agent-browser behind `clauseo-mcp browser-guard`, decision record 0030), which the profile
+//! offers Codex alone (`clauseo_profile::servers::browser_mcp`); Claude has the browser as a
+//! shell tool ([`shell_env`], [`shell_state`]).
 //!
 //! The hook sees only the agent's id, so the entry comes with tokens
 //! (`clauseo_profile::placeholders::IN_SERVERS`). The host fills them here, once per session,
@@ -9,14 +11,16 @@
 //! 2. The firm's `managed-mcp.json` ([`McpControl::Managed`]): no Clauseo server at all goes,
 //!    so `ManagedByFirm`.
 //! 3. No free browser slot: `TooManyBrowsers`.
-//! 4. No proxy set: `NoProxy`.
+//! 4. An entry that asks for the session's proxy (it holds `{proxy_port}`: the parked Safe
+//!    workspace's, never the plain client's Codex entry) with no proxy set: `NoProxy`.
 //! 5. The firm's Chrome or Edge policy turns remote debugging off and its Clauseo policy does
 //!    not allow Clauseo's browser anyway (`browser::rd_policy`): `BrowserBlockedByPolicy`; or,
 //!    with no false, a place of that policy could not be read: `BrowserPolicyUnreadable`.
 //! 6. No Chrome picked, a sidecar (`clauseo-mcp` or agent-browser) missing, or the session's
 //!    ports or socket folder not claimed (`browser::session`): `BrowserNotInstalled`.
-//! 7. The session's proxy did not open, so it has no port: `NoProxy`. The proxy opens only
-//!    after 6 found everything (`actor/turn/launch_checks/egress.rs`).
+//! 7. For an entry that asks for it, the session's proxy did not open, so it has no port:
+//!    `NoProxy`. The proxy opens only after 6 found everything, and only for such an entry
+//!    (`actor/turn/launch_checks/egress.rs`).
 //!
 //! Each value is filled into one decoded string (one argument, one variable's value) in one
 //! pass, so a folder whose name holds a token stays literal; MCP arguments go as a list with no
@@ -162,7 +166,8 @@ fn browser_entry(
     if !inputs.slot_free {
         return Err(ToolsUnavailableReason::TooManyBrowsers);
     }
-    if !inputs.proxy_set {
+    let wants_proxy = asks_for_proxy(&server);
+    if wants_proxy && !inputs.proxy_set {
         return Err(ToolsUnavailableReason::NoProxy);
     }
     if let Some(reason) = inputs.blocked_by_policy {
@@ -174,10 +179,12 @@ fn browser_entry(
     let claims = inputs
         .claims
         .ok_or(ToolsUnavailableReason::BrowserNotInstalled)?;
-    let port = inputs
-        .port
-        .ok_or(ToolsUnavailableReason::NoProxy)?
-        .to_string();
+    let port = if wants_proxy {
+        let port = inputs.port.ok_or(ToolsUnavailableReason::NoProxy)?;
+        Some(port.to_string())
+    } else {
+        None
+    };
     let (Some(executable), Some(browser_dir)) = (
         executable.to_str(),
         dunce::simplified(inputs.browser_dir).to_str(),
@@ -202,12 +209,12 @@ fn browser_entry(
     // Windows) is unfillable if the entry holds it, which leaves the browser out below.
     let mut values = vec![
         (BROWSER_DIR, browser_dir),
-        (PROXY_PORT, port.as_str()),
         (SESSION_ID, claims.name),
         (BROWSER_EXECUTABLE, executable),
         (CDP_PORT, cdp_port.as_str()),
         (STREAM_PORT, stream_port.as_str()),
     ];
+    values.extend(port.as_deref().map(|port| (PROXY_PORT, port)));
     values.extend(daemon_port.as_deref().map(|port| (DAEMON_PORT, port)));
     values.extend(socket_dir.map(|dir| (SOCKET_DIR, dir)));
     let fill = |text: &str| placeholders::fill(text, &IN_SERVERS, &values);
@@ -233,6 +240,30 @@ fn browser_entry(
         tracing::error!(%unfilled, "the browser entry has a token the host cannot fill");
         ToolsUnavailableReason::BrowserNotInstalled
     })
+}
+
+/// The `{browser}` part of a session the profile offers the `browser` entry (Codex), from the
+/// entry's header state ([`hook_servers`]): on when the entry goes; the not-installed sentence
+/// when it was left out for want of a Chrome (`chrome_found` false); the no-browser sentence for
+/// any other reason (off, the firm's policy or `managed-mcp.json`, no slot, no proxy, no claims).
+pub(crate) fn entry_part(state: &ToolState, chrome_found: bool) -> BrowserPart {
+    match state.availability {
+        ToolAvailability::Available => BrowserPart::On,
+        ToolAvailability::Unavailable {
+            reason: ToolsUnavailableReason::BrowserNotInstalled,
+        } if !chrome_found => BrowserPart::NotInstalled,
+        ToolAvailability::Unavailable { .. } | ToolAvailability::Unknown { .. } => BrowserPart::Off,
+    }
+}
+
+/// Whether `server` asks for the session's egress proxy: an argument or a variable holds
+/// `{proxy_port}`. The plain client's Codex entry does not (Chrome goes direct, as Claude's shell
+/// browser does); the parked Safe workspace's would.
+pub(crate) fn asks_for_proxy(server: &McpServer) -> bool {
+    let McpServer::Stdio { args, env, .. } = server;
+    args.iter()
+        .chain(env.iter().map(|(_, value)| value))
+        .any(|text| text.contains(PROXY_PORT))
 }
 
 /// agent-browser's variables for a session with the browser as a shell tool, which the host
@@ -423,6 +454,39 @@ mod shell_tests {
             let path = Path::new(&env[&OsString::from(name)]);
             assert!(path.starts_with(&own), "{name}");
             assert!(!path.starts_with(data.join("browser")), "{name}");
+        }
+    }
+
+    /// Codex's part follows its entry: on when it goes, not installed only for want of a Chrome,
+    /// off for every other reason.
+    #[test]
+    fn entry_part_follows_the_entry() {
+        let state = |availability| ToolState {
+            tool: ClauseoTool::Browser,
+            availability,
+        };
+        let out = |reason| state(ToolAvailability::Unavailable { reason });
+        assert_eq!(
+            entry_part(&state(ToolAvailability::Available), true),
+            BrowserPart::On
+        );
+        let missing = out(ToolsUnavailableReason::BrowserNotInstalled);
+        assert_eq!(entry_part(&missing, false), BrowserPart::NotInstalled);
+        // A Chrome found but a sidecar or a claim missing: no "install Chrome" advice.
+        assert_eq!(entry_part(&missing, true), BrowserPart::Off);
+        for reason in [
+            ToolsUnavailableReason::Off,
+            ToolsUnavailableReason::LockedOff,
+            ToolsUnavailableReason::ManagedByFirm,
+            ToolsUnavailableReason::TooManyBrowsers,
+            ToolsUnavailableReason::NoProxy,
+            ToolsUnavailableReason::BrowserBlockedByPolicy,
+        ] {
+            assert_eq!(
+                entry_part(&out(reason), false),
+                BrowserPart::Off,
+                "{reason:?}"
+            );
         }
     }
 

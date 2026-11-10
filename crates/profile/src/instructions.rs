@@ -45,11 +45,9 @@ pub const BROWSER_OFF: &str = include_str!("../assets/instructions/browser-off.t
 /// line the agent can pass on to the lawyer.
 pub const BROWSER_NONE: &str = include_str!("../assets/instructions/browser-none.txt");
 
-/// The line a Codex session with the browser gets after [`BROWSER`]: Codex's sandbox blocks the
-/// browser (no network, no socket), so each command asks to run unsandboxed, in the terms of
-/// codex 0.162.1's shell tool (`sandbox_permissions: "require_escalated"`, `justification`,
-/// `prefix_rule`: `core/src/tools/handlers/shell_spec.rs:232-266` at `rust-v0.162.1`), and offers
-/// one prefix rule so the lawyer approves it once.
+/// What a Codex session with the browser gets instead of [`BROWSER`]: Codex has no shell browser
+/// (its sandbox blocks it, approved or not), only the `browser` MCP entry's tools
+/// (`servers::browser_mcp`), so the part names those tools and never `agent-browser`.
 pub const BROWSER_CODEX: &str = include_str!("../assets/instructions/browser-codex.txt");
 
 /// The line a Codex session on macOS gets after the instructions (D-045): Codex runs an approved
@@ -69,7 +67,8 @@ pub fn codex_shell(macos: bool) -> Option<&'static str> {
 /// Which browser part a session gets in place of `{browser}`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BrowserPart {
-    /// The session has the `agent-browser` command: [`BROWSER`].
+    /// The session has the browser: Claude the `agent-browser` command ([`BROWSER`]), Codex the
+    /// `browser` MCP entry's tools ([`BROWSER_CODEX`]).
     On,
     /// Turned off, or left out by policy: [`BROWSER_OFF`].
     Off,
@@ -93,12 +92,13 @@ pub fn browser_part(part: BrowserPart) -> &'static str {
     }
 }
 
-/// [`browser_part`], with [`BROWSER_CODEX`] after the rules for a Codex session (`codex`) that
-/// has the browser. Claude never gets the Codex line.
-pub fn browser_part_for(part: BrowserPart, codex: bool) -> &'static str {
+/// [`browser_part`], with [`BROWSER_CODEX`] in place of the shell rules for a session that has
+/// the browser through the `browser` MCP entry (`mcp`: Codex's, `servers::browser_mcp`). A
+/// session with the shell tool (Claude's) gets the shell rules, never the entry's line.
+pub fn browser_part_for(part: BrowserPart, mcp: bool) -> &'static str {
     static ON_CODEX: std::sync::LazyLock<String> =
-        std::sync::LazyLock::new(|| format!(" {} {}", BROWSER.trim(), BROWSER_CODEX.trim()));
-    if codex && part == BrowserPart::On {
+        std::sync::LazyLock::new(|| format!(" {}", BROWSER_CODEX.trim()));
+    if mcp && part == BrowserPart::On {
         &ON_CODEX
     } else {
         browser_part(part)

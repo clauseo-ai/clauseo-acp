@@ -41,9 +41,9 @@ passed exactly as given. Anything else exits 2 with a reason and the mode's usag
 | Variable | Value |
 |---|---|
 | `AGENT_BROWSER_CONFIG`, `AGENT_BROWSER_EXECUTABLE_PATH` | from the guard's environment, set by the host; each must be an existing file at an absolute path; on Windows a path starting with two slashes or backslashes (a network share or device path) or `\??` is refused before anything reads it |
-| `AGENT_BROWSER_PROXY` | from the guard's environment; exactly `http://127.0.0.1:<port>`, port 1 to 65535, no leading zero |
+| `AGENT_BROWSER_PROXY` | from the guard's environment when the host sets it; exactly `http://127.0.0.1:<port>`, port 1 to 65535, no leading zero. Optional: the plain client's Codex entry sends none, and the child then gets no proxy variable, no bypass and Chrome no `--proxy-server`, so Chrome goes direct, as Claude's shell browser does |
 | `AGENT_BROWSER_SESSION` | from the guard's environment; 1 to 64 of `A-Z a-z 0-9 _ -` |
-| `AGENT_BROWSER_PROXY_BYPASS` | `<-loopback>`, so loopback goes through the proxy too |
+| `AGENT_BROWSER_PROXY_BYPASS` | `<-loopback>`, so loopback goes through the proxy too; only with `AGENT_BROWSER_PROXY` |
 | `AGENT_BROWSER_ARGS` | `--force-webrtc-ip-handling-policy=disable_non_proxied_udp` only. agent-browser no longer launches Chrome (next row); the value holds should it ever. Until the S27 launch fix it also carried `--remote-debugging-port=<--cdp-port>`, which broke every launch ("Chrome on the claimed port", below) |
 | `AGENT_BROWSER_CDP` | `ws://127.0.0.1:<--cdp-port>/devtools/browser/<id>`, the endpoint of the Chrome the guard started, read from Chrome's stderr; agent-browser connects to it instead of launching a Chrome |
 | `AGENT_BROWSER_IDLE_TIMEOUT_MS` | `600000` |
@@ -187,9 +187,21 @@ on Windows.
    `-32600` "Clauseo reserves the id clauseo-guard-close for itself." with that id, nothing
    forwarded.
 4. An object whose `method` is exactly `tools/call` (case-sensitive, as `mcp.rs:700-709`
-   matches) has `params.arguments` checked whatever the tool's name. Arguments that are absent
-   or not an object pass: agent-browser refuses a non-object before running anything
-   (`mcp.rs:3967-3975`). Keys match exactly, as agent-browser's do (`mcp.rs:2264-2308`).
+   matches) names a tool that is not on the allowlist, a missing or non-string name included.
+   Only the 29 tools of agent-browser v0.41.1's `core` profile pass (`ALLOWED_TOOLS`, from
+   `cli/src/mcp.rs:340-370` at the tag), the profile the host starts it with
+   (`crates/profile/src/servers.rs:81`): the guard enforces the core profile itself, so an agent
+   that runs the guard with `--tools all` gains nothing, and a new or renamed tool is refused,
+   never let through. `agent_browser_tools_profiles` only prints the profiles and is on the list.
+   Every live view (the stream, dashboard and `inspect` tools, `agent_browser_stream_enable` to
+   `agent_browser_inspect`) gets "That browser feature isn't available in Clauseo."; any other
+   tool off the list, `agent_browser_batch` included (it is not in `core`, so no command inside a
+   batch needs a check), gets "That browser tool isn't one Clauseo offers.". Neither reaches
+   agent-browser; the macOS browser profile denies every inet bind anyway.
+5. An object whose `method` is exactly `tools/call` and whose tool passed rule 4 has
+   `params.arguments` checked. Arguments that are absent or not an object pass: agent-browser
+   refuses a non-object before running anything (`mcp.rs:3967-3975`). Keys match exactly, as
+   agent-browser's do (`mcp.rs:2264-2308`).
    - **Refused keys:** `session`, `namespace`, `idleTimeout`, `restore`, `restoreSave`, `restoreCheckUrl`, `restoreCheckText`, `restoreCheckFn`, `caCert`, `useSystemCa`, `clearCaCert`, `headed`, `screenshotDir`, `path`.
      Present with any value, even `false` or `null`. `path` on any tool: `screenshot.path` writes
      any file the process can reach (`screenshot.rs:626-649`), past the agent's own write
@@ -241,11 +253,12 @@ on Windows.
      `-Rohan` are refused; `-5`, `-10`, `-`, `--`, `---x`, `- item`, `--Select--` and `-Select-`
      (placeholder options on Indian government forms) pass. The rule is a shape, not a list of
      flag names, so a flag added upstream is refused too.
-5. A refused request is answered with its own id:
-   `{"jsonrpc":"2.0","id":<same>,"result":{"content":[{"type":"text","text":"Clauseo does not allow <name> in the browser."}],"isError":true}}`,
-   and never reaches the child. A refused notification (no `id`) is dropped unanswered.
-6. Everything else passes: other methods (`initialize`, `tools/list`, ...), other tools' calls,
-   and `allowedDomains`, which can only narrow.
+6. A refused request is answered with its own id:
+   `{"jsonrpc":"2.0","id":<same>,"result":{"content":[{"type":"text","text":"Clauseo does not allow <name> in the browser."}],"isError":true}}`
+   for rule 5, with the text of rule 4 in place of that sentence for a tool refusal, and it never
+   reaches the child. A refused notification (no `id`) is dropped unanswered.
+7. Everything else passes: other methods (`initialize`, `tools/list`, ...), calls to the core
+   tools that rule 5 does not refuse, and `allowedDomains`, which can only narrow.
 
 A unit test in `filter.rs` fails when the three lists above differ from the code's.
 

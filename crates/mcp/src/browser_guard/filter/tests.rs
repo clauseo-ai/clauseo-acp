@@ -5,6 +5,8 @@ use super::{
     Verdict, check, refusal_text,
 };
 
+mod tools;
+
 fn call_tool(tool: &str, arguments: &Value) -> Value {
     json!({
         "jsonrpc": "2.0",
@@ -388,7 +390,8 @@ fn arguments_that_are_not_an_object_pass_on() {
     for arguments in [json!(null), json!("--headed"), json!(["--headed"])] {
         assert_eq!(refused(&arguments), None, "{arguments}");
     }
-    let no_arguments = json!({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {}});
+    let no_arguments = json!({"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+        "params": {"name": "agent_browser_open"}});
     assert!(matches!(verdict(&no_arguments), Verdict::Forward(_)));
 }
 
@@ -412,7 +415,7 @@ fn a_refused_notification_is_dropped() {
 fn an_id_of_null_or_a_string_comes_back_as_given() {
     for id in [json!(null), json!("abc"), json!(1.5)] {
         let message = json!({"jsonrpc": "2.0", "id": id, "method": "tools/call",
-            "params": {"name": "x", "arguments": {"headed": true}}});
+            "params": {"name": "agent_browser_open", "arguments": {"headed": true}}});
         let Verdict::Answer(text) = verdict(&message) else {
             panic!()
         };
