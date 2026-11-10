@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 // Settings, Privacy over FakeTransport: the section on the side; one row per plan the window knows (both while it
-// knows none, Claude's alone with Claude's limits only), Brave Search behind an info icon on Claude's row only; the
+// knows none, Claude's alone with Claude's limits only), no button on either; Brave Search behind Web search's info icon,
+// opening below it, in plain words (D-068); the
 // websites' row with its visit sentence behind an info icon, unless both tools are off; the "On the web" group only
 // when the host sends the tools' switches (SettingsView.tools), each row led by its tool's glyph with the state on it and
 // one helper line at most, each switch showing its value and a flip sent as set_tool_settings with its key; a locked
@@ -137,25 +138,53 @@ test("Privacy shows on the side, its pane headed, with no lead that repeats its 
 });
 
 const WHAT = "Questions, the papers' parts they need, web searches.";
-const BRAVE = "Anthropic lists Brave Search as its web search subprocessor.";
+const BRAVE =
+  "Claude's web searches go through Brave Search, a service Anthropic uses to run web searches.";
 const STARTS =
   "When it starts, Clauseo asks Claude or ChatGPT how much of your plan is left. No papers or questions go with it.";
 const VISIT = "Websites see Clauseo's visits, as they see any browser's.";
 const tipButton = (el: HTMLElement, label: string) =>
   el.querySelector<HTMLElement>(`button[aria-label="${label}"]`);
 
-test("knowing no plan, both plans' rows show their to-line alone; Brave Search waits behind Claude's info icon only", async () => {
+test("knowing no plan, both plans' rows show their to-line alone, with no info icon", async () => {
   const { el } = await mount();
   const claude = el.querySelector<HTMLElement>('[data-testid="dest-claude"]');
   const chatgpt = el.querySelector<HTMLElement>('[data-testid="dest-codex"]');
   expect(claude?.textContent).toBe("To Claude, on your plan");
   expect(chatgpt?.textContent).toBe("To ChatGPT, on your plan");
-  expect(document.body.textContent).not.toContain(BRAVE);
-  expect(tipButton(claude!, "More about Brave Search")).not.toBeNull();
+  expect(claude?.querySelector("button")).toBeNull();
   expect(chatgpt?.querySelector("button")).toBeNull();
-  await act(async () => tipButton(claude!, "More about Brave Search")?.click());
+});
+
+test("Brave Search waits behind Web search's info icon, opens below it in plain words, and a press on it never flips the switch", async () => {
+  const { el, transport } = await mount({ tools: ON });
+  const row = switchNamed(el, "Web search")?.closest<HTMLElement>(".set-row");
+  const info = tipButton(row!, "More about Brave Search");
+  expect(info).not.toBeNull();
+  // outside the switch's label
+  expect(info?.closest("label")).toBeNull();
+  expect(document.body.textContent).not.toContain(BRAVE);
+  await act(async () => info?.click());
   await act(async () => settled());
   expect(document.body.textContent).toContain(BRAVE);
+  expect(document.body.textContent).not.toContain("subprocessor");
+  const popup = [...document.querySelectorAll<HTMLElement>("[data-side]")].find((p) =>
+    p.textContent?.includes(BRAVE),
+  );
+  expect(popup?.getAttribute("data-side")).toBe("bottom");
+  // every button on the page has a name
+  const nameOf = (b: Element) =>
+    b.getAttribute("aria-label") ??
+    (b.getAttribute("aria-labelledby") ?? "")
+      .split(" ")
+      .map((id) => document.getElementById(id)?.textContent ?? "")
+      .join("")
+      .trim() ??
+    "";
+  for (const b of document.querySelectorAll("button, [role='button']"))
+    expect(nameOf(b) || b.textContent?.trim(), b.outerHTML).toBeTruthy();
+  expect(transport.only("next_command")).toEqual([]);
+  expect(switchNamed(el, "Web search")?.getAttribute("aria-checked")).toBe("true");
 });
 
 test("with two plans, what goes to a plan shows once, as the group's note under its head", async () => {

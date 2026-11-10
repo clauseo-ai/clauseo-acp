@@ -46,8 +46,8 @@ export const HI = {
     "प्रश्न, उनके लिए ज़रूरी दस्तावेज़ों के अंश, वेब खोजें।",
   // behind an info icon: the button's name, then what it holds
   "More about Brave Search": "Brave Search के बारे में और",
-  "Anthropic lists Brave Search as its web search subprocessor.":
-    "Anthropic, Brave Search को अपने वेब खोज सब-प्रोसेसर के रूप में सूचीबद्ध करता है।",
+  "Claude's web searches go through Brave Search, a service Anthropic uses to run web searches.":
+    "Claude की वेब खोजें Brave Search से होकर जाती हैं, एक सेवा जिसे Anthropic वेब खोज चलाने के लिए इस्तेमाल करता है।",
   // under the rows: what Clauseo fetches by itself when it starts (D-064)
   "When it starts, Clauseo asks Claude or ChatGPT how much of your plan is left. No papers or questions go with it.":
     "शुरू होने पर Clauseo, Claude या ChatGPT से पूछता है कि आपके प्लान में कितना बाकी है। इसके साथ कोई दस्तावेज़ या प्रश्न नहीं जाते।",

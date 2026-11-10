@@ -1,10 +1,10 @@
 // Settings, Privacy: what leaves this computer, and who sees it (design/03-system/src/pages/settings/sections-c.tsx,
 // Privacy), holding only what is true now, icons first and in the fewest words (DESIGN.md §Icons). The group's note
-// says once what goes to a plan; then one row per plan the window knows, naming where; for Claude, the provider
-// Anthropic lists for its web search behind an info icon. Then a row for the websites Clauseo visits, its explanation behind an info
+// says once what goes to a plan; then one row per plan the window knows, naming where. Then a row for the websites Clauseo visits, its explanation behind an info
 // icon, unless the host's switches have both tools off. Under the rows, one line on what Clauseo fetches by itself
 // when it starts (D-064): each plan's limits. Then the tools' switches, web search and the browser, each led
-// by its glyph with the state on it, one helper line each, each flip one patch. A locked switch shows the host's value,
+// by its glyph with the state on it, one helper line each, each flip one patch. Web search's row carries, behind an
+// info icon opening below it, the service Claude's web searches go through (Brave Search; D-068). A locked switch shows the host's value,
 // its glyph locked, and the room's lock reason, "Managed by firm", in its helper's place. Whether a conversation gets the
 // browser once it's on (a Chrome, or Edge on Windows, on the computer; the firm's browser policy) is the tool line's to
 // say, per conversation.
@@ -22,6 +22,7 @@
 // and this pane is the only place that does. A change applies from the next conversation's start; one already open
 // keeps its tools. `locked` may list `tools.web_search` and `tools.browser`.
 import { fl } from "@clauseo/components/lib/words-first-launch.ts";
+import type { ReactNode } from "react";
 import { useSettingsWords } from "@clauseo/components/lib/words-settings.ts";
 import { ToolGlyph } from "@clauseo/components/icons/tool-glyph.tsx";
 import { tw } from "@clauseo/components/lib/words-tools.ts";
@@ -48,11 +49,6 @@ function Dest({ kind }: { kind: AgentKind }) {
     <div className="set-dest set-dest-alone" data-testid={`dest-${kind}`}>
       <p className="set-dest-to">
         <span>{w.say(w.s("To {name}, on your plan", { name }))}</span>
-        {kind === "claude" && (
-          <InfoTip label={w.s("More about Brave Search")}>
-            {w.say(w.s("Anthropic lists Brave Search as its web search subprocessor."))}
-          </InfoTip>
-        )}
       </p>
     </div>
   );
@@ -79,12 +75,14 @@ function ToolRow({
   tool,
   label,
   note,
+  info,
 }: {
   ctx: SectionContext;
   tools: ToolsSettingsView;
   tool: keyof ToolsSettingsView;
   label: string;
   note: string;
+  info?: ReactNode;
 }) {
   const w = useSettingsWords();
   const locked = ctx.toolLocked(tool);
@@ -102,6 +100,7 @@ function ToolRow({
           />
         }
         label={label}
+        info={info}
         note={locked ? toolsLine(w.lang, "Managed by firm") : note}
         checked={on}
         disabled={locked}
@@ -164,6 +163,15 @@ export function Privacy({ ctx }: { ctx: SectionContext }) {
             tool="web_search"
             label={w.s("Web search")}
             note={w.s("Search the web and read pages.")}
+            info={
+              <InfoTip label={w.s("More about Brave Search")} side="bottom">
+                {w.say(
+                  w.s(
+                    "Claude's web searches go through Brave Search, a service Anthropic uses to run web searches.",
+                  ),
+                )}
+              </InfoTip>
+            }
           />
           <ToolRow
             ctx={ctx}

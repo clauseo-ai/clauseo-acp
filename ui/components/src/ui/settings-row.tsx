@@ -20,6 +20,7 @@ export function SettingRow({
   disabled = false,
   managed,
   icon,
+  info,
   className,
 }: {
   control: "switch" | "checkbox";
@@ -33,9 +34,17 @@ export function SettingRow({
   /** Optional: a glyph that leads the row, on the label's line, such as a tool's with its state on it. Hidden from
    * assistive technology; the label and the control name it. */
   icon?: ReactNode;
+  /** Optional: an explanation behind an info icon after the label, outside it, so a press on it never flips the
+   * control. */
+  info?: ReactNode;
   className?: string;
 }) {
   const props = { checked, onCheckedChange, disabled };
+  const name = (
+    <Field.Label className={settingLabel}>
+      <Mixed>{label}</Mixed>
+    </Field.Label>
+  );
   return (
     <Field.Root
       disabled={disabled}
@@ -56,9 +65,14 @@ export function SettingRow({
         </span>
       )}
       <div className="min-w-0 flex-1">
-        <Field.Label className={settingLabel}>
-          <Mixed>{label}</Mixed>
-        </Field.Label>
+        {info === undefined ? (
+          name
+        ) : (
+          <div className="flex items-center gap-s1-5">
+            {name}
+            {info}
+          </div>
+        )}
         <Field.Description className={settingNote}>
           <Mixed>{note}</Mixed>
         </Field.Description>
