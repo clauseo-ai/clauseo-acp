@@ -276,6 +276,10 @@
   [data-quiet-start] :focus-visible {
     outline-color: transparent;
   }
+  /* nor does focus a press gave back on a dialog's close, until a key is pressed (components/ui/dialog-start.ts) */
+  [data-quiet-focus]:focus-visible {
+    outline-color: transparent;
+  }
   a {
     color: inherit;
     text-decoration-thickness: 1px;
