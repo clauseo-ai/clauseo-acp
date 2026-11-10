@@ -11,13 +11,23 @@ day, beside Clauseo.
 ## Decision
 
 - On macOS and Linux the host watches the folder of the matter the lawyer last opened
-  (`OpenMatter`), one matter at a time, through the `notify` crate: FSEvents on macOS, inotify
-  on Linux. The whole tree is watched, as the listing walks it, symlinks not followed. No
-  polling. Windows has no watch (below).
+  (`OpenMatter`) or the app last listed (`ListPapers`: the matter the app reopens at launch is
+  listed, never opened), one matter at a time, through the `notify` crate: FSEvents on macOS,
+  inotify on Linux. The whole tree is watched, as the listing walks it, symlinks not followed.
+  No polling. Windows has no watch (below).
+- The watch starts on a short-lived thread, never on the actor: resolving the folder and
+  inotify's walk of its tree would freeze the host on a share that does not answer. Each start
+  has a generation; what a replaced watch posts is dropped. A start the OS refused (inotify's
+  watch limit, an error from the share) is not tried again until another folder or matter is
+  followed.
 - A change to a file the listing never shows (`clauseo_matters::is_excluded_path`: `~$` owner
-  files, `*.tmp`, `.clauseo`, `.git`) and a read are passed over. The rest wait until the folder
-  has been quiet for 300 ms (a Word save is temporary files and a rename), or 256 changes have
-  come, on a `clauseo-papers` thread, which then stats the folder.
+  files, `*.tmp`, `.clauseo`, `.git`) and a read are passed over; a path the event does not say
+  is a file or a folder counts unless the listing passes it over as both. The rest wait on a
+  `clauseo-papers` thread until the folder has been quiet for 300 ms (a Word save is temporary
+  files and a rename), or 2 s after the burst's first change, whichever comes first. The thread
+  then looks at the folder: only one not found or not a folder, twice 2 s apart, is missing (a
+  share that blinks is not), and another folder swapped in at the same path gets a new watch.
+- The app lists at most one at a time: changes while a listing runs make one more after it.
 - The host then sends the app event `HostEvent::PapersChanged { matter }` (never logged, in no
   stream, no catch-up), and the app lists the papers again. The event carries no list: the
   listing stays the one place the folder's rules live. A folder that went reads `missing` in
@@ -55,6 +65,9 @@ day, beside Clauseo.
   Explorer only at the window's return to the front and at each answer's end, one listing each.
 - inotify uses one watch per subfolder; past the user's limit the watch fails and the focus
   listing is all that is left.
+- A listing that finds the folder gone empties the wall and shows the moved folder's line; one
+  that finds a folder that is not the matter's leaves the wall as it was, and opening the matter
+  says why.
 
 ## Status
 

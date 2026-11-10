@@ -1,26 +1,24 @@
 //! Windows has no folder watch (decision record 0055): the `notify` crate is not built there, and
-//! [`super::follow::opened`] starts none. This stands in for `watch.rs` so the follow code is the
-//! same on every OS; a stand-in watch never reports anything.
+//! [`super::follow::opened`] follows nothing, since `papers_live` is off. This stands in for
+//! `live.rs` so the follow code is the same on every OS; each call does nothing.
 
-use std::path::PathBuf;
+use std::path::Path;
 
 use clauseo_protocol::MatterId;
 
-use crate::actor::input::Input;
+use crate::actor::Actor;
 
-/// A watch that never reports.
-pub(crate) struct Watch {
-    pub(crate) folder: PathBuf,
-}
+/// No matter is followed on Windows.
+pub(crate) enum Follow {}
 
-impl Watch {
-    /// No watch is started on Windows; this one holds the folder and nothing else, and, as in
-    /// `watch.rs`, there is none for a folder that is not there.
-    pub(crate) fn start(
-        _matter: MatterId,
-        folder: PathBuf,
-        _post: async_channel::Sender<Input>,
-    ) -> Option<Self> {
-        folder.is_dir().then_some(Self { folder })
+pub(super) fn follow(_actor: &mut Actor, _matter: MatterId, _folder: &Path) {}
+
+pub(super) fn relocated(_actor: &mut Actor, _matter: MatterId, _folder: &Path) {}
+
+pub(super) fn forgotten(actor: &mut Actor, _matter: MatterId) {
+    if let Some(follow) = actor.papers_follow.take() {
+        match *follow {}
     }
 }
+
+pub(super) fn found(_actor: &mut Actor, _matter: MatterId, _folder: &Path) {}

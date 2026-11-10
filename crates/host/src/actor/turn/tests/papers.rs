@@ -1,9 +1,12 @@
 //! A turn's end and the matter's papers (decision record 0055): with no folder watch (Windows,
 //! `papers_live` off), every end, cancelled or failed alike, sends `PapersChanged` for the turn's
 //! matter, so the app lists its papers again; with the watch (macOS, Linux) an end sends none,
-//! since the watch tells of each change itself.
+//! since the watch tells of each change itself. A listing follows its matter (the one the app
+//! reopens at launch is never opened), and forgetting the matter ends the watch.
 
-use clauseo_protocol::{ErrorCode, HostEvent, MatterId, Principal};
+use clauseo_protocol::{
+    ErrorCode, ExpiryReason, HostEvent, HostQuery, MatterId, Principal, StopReason,
+};
 use futures::channel::oneshot;
 use futures::{FutureExt as _, StreamExt as _};
 
@@ -64,12 +67,67 @@ fn with_no_watch_each_turn_end_lists_the_matters_papers_again() {
     let failed = End::failed(ErrorCode::AgentProtocolError, None, None);
     let (told, matter) = papers_changed_by("papers-end-failed", false, failed);
     assert_eq!(told, [matter]);
+    let done = End {
+        stop: StopReason::EndTurn,
+        failure: None,
+        expiry: ExpiryReason::TurnEnded,
+        detach: None,
+    };
+    let (told, matter) = papers_changed_by("papers-end-done", false, done);
+    assert_eq!(told, [matter]);
 }
 
 #[test]
 fn with_the_watch_a_turn_end_sends_no_papers_changed() {
     let (told, _) = papers_changed_by("papers-end-watched", true, End::cancelled(None));
     assert_eq!(told, []);
+}
+
+/// A `ListPapers` of the rig's matter, answered.
+fn list_papers(rig: &mut Rig) {
+    let (reply, mut answer) = oneshot::channel();
+    let query = HostQuery::ListPapers {
+        matter: rig.matter(),
+    };
+    let principal = Principal::LocalDesktop;
+    rig.actor.on_request(Request::Query {
+        principal,
+        query,
+        reply,
+    });
+    let mut got = false;
+    rig.run_until("the listing", |_| {
+        got = got || matches!(answer.try_recv(), Ok(Some(_)));
+        got
+    });
+}
+
+#[cfg(not(windows))]
+#[test]
+fn a_listing_with_no_open_starts_the_watch_and_forgetting_the_matter_ends_it() {
+    let mut rig = Rig::start("papers-list-follows", "");
+    rig.actor.papers_live = true;
+    assert!(rig.actor.papers_follow.is_none());
+    list_papers(&mut rig);
+    rig.run_until("the watch started", |actor| {
+        actor
+            .papers_follow
+            .as_ref()
+            .is_some_and(|follow| follow.is_live())
+    });
+    let matter = rig.matter();
+    crate::actor::papers::follow::forgotten(&mut rig.actor, matter);
+    assert!(rig.actor.papers_follow.is_none());
+    rig.finish();
+}
+
+#[test]
+fn with_no_watch_a_listing_follows_nothing() {
+    let mut rig = Rig::start("papers-list-unwatched", "");
+    rig.actor.papers_live = false;
+    list_papers(&mut rig);
+    assert!(rig.actor.papers_follow.is_none());
+    rig.finish();
 }
 
 #[test]

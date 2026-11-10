@@ -1,120 +1,73 @@
-//! Which matter's folder the host watches (decision record 0055): the one the lawyer last
-//! opened (`OpenMatter`), one at a time. Opening another matter, forgetting the matter, and the
-//! host's end drop the watch; a relocate moves it to the new folder. A folder that cannot be
-//! watched (gone, or the OS refused the watch) is logged and left unwatched: the app lists the
-//! papers again when its window comes back to the front, and a listing that finds the folder
-//! there again starts the watch.
+//! Which matter's folder the host follows (decision record 0055): the one the lawyer last opened
+//! (`OpenMatter`) or the app last listed (`ListPapers`: the matter the app reopens at launch is
+//! listed, never opened), one at a time. Opening or listing another matter, forgetting the
+//! matter, and the host's end drop the watch; a relocate moves it to the new folder. How the
+//! watch starts, fails and restarts is `live.rs`'s.
 //!
 //! Not on Windows ([`live_watch`]): there the watch's handle would stop the lawyer renaming or
 //! moving the folder that holds the matter's folder, so nothing is watched, and the app lists
 //! the papers again when its window comes back to the front and when each answer ends
 //! ([`on_turn_ended`]).
 //!
-//! Each quiet change the watch posts (`on_changed`) sends `PapersChanged` to the app, which
-//! lists the papers again; a folder that went also reads `missing` in the matter's next row, so
-//! the room shows the moved folder's line with Locate folder, and the watch stops. The watch knows
-//! only that something changed, not which papers, so it calls no `scan::rescan`: the listing the
-//! app makes next hands each new or changed `.docx` to the background tracked-changes scan
-//! (`scan::listed`), which sends `PapersChanged` again if it finds marks. The Find index keeps
-//! the names of the last checkpoint, as before.
+//! Each quiet change the watch posts sends `PapersChanged` to the app, which lists the papers
+//! again; a folder that went also reads `missing` in the matter's next row, so the room shows the
+//! moved folder's line with Locate folder. The watch knows only that something changed, not
+//! which papers, so it calls no `scan::rescan`: the listing the app makes next hands each new or
+//! changed `.docx` to the background tracked-changes scan (`scan::listed`), which sends
+//! `PapersChanged` again if it finds marks. The Find index keeps the names of the last
+//! checkpoint, as before.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use clauseo_protocol::{FolderState, HostEvent, MatterId};
 
-#[cfg(not(windows))]
-use super::watch::FolderChanged;
-use super::watch::Watch;
+use super::live;
 use crate::actor::Actor;
-
-/// The watched matter, and its watch while there is one.
-pub(crate) struct Follow {
-    matter: MatterId,
-    watch: Option<Watch>,
-}
-
-/// `OpenMatter` of `matter`: watch its folder, in place of any other.
-pub(crate) fn opened(actor: &mut Actor, matter: MatterId) {
-    if !actor.papers_live {
-        return;
-    }
-    let Some(folder) = folder_of(actor, matter) else {
-        return;
-    };
-    if let Some(follow) = &actor.papers_follow
-        && follow.matter == matter
-        && follow
-            .watch
-            .as_ref()
-            .is_some_and(|watch| watch.folder == folder)
-    {
-        return;
-    }
-    // The old watch ends before the new one starts.
-    actor.papers_follow = None;
-    let watch = start(actor, matter, folder);
-    actor.papers_follow = Some(Box::new(Follow { matter, watch }));
-}
-
-/// `matter` was relocated: watch its new folder if it is the one followed, and have the app
-/// list its papers there.
-pub(crate) fn relocated(actor: &mut Actor, matter: MatterId) {
-    if follows(actor, matter) {
-        restart(actor, matter);
-    }
-    crate::actor::app::publish(actor, &HostEvent::PapersChanged { matter });
-}
-
-/// `matter` left the list: stop watching it.
-pub(crate) fn forgotten(actor: &mut Actor, matter: MatterId) {
-    if follows(actor, matter) {
-        actor.papers_follow = None;
-    }
-}
-
-/// A listing of `matter` answered: what it found of the folder goes in the matter's row, and a
-/// followed folder found again is watched again.
-pub(crate) fn listed(actor: &mut Actor, matter: MatterId, found: bool) {
-    mark(actor, matter, found);
-    let unwatched = actor
-        .papers_follow
-        .as_ref()
-        .is_some_and(|follow| follow.matter == matter && follow.watch.is_none());
-    if found && unwatched {
-        restart(actor, matter);
-    }
-}
-
-/// The watch saw a quiet change. One from a watch since replaced is dropped.
-#[cfg(not(windows))]
-pub(crate) fn on_changed(actor: &mut Actor, changed: FolderChanged) {
-    let FolderChanged {
-        matter,
-        folder,
-        found,
-    } = changed;
-    let current = actor.papers_follow.as_ref().is_some_and(|follow| {
-        follow.matter == matter
-            && follow
-                .watch
-                .as_ref()
-                .is_some_and(|watch| watch.folder == folder)
-    });
-    if !current || folder_of(actor, matter).as_ref() != Some(&folder) {
-        return;
-    }
-    if !found && let Some(follow) = actor.papers_follow.as_mut() {
-        follow.watch = None;
-    }
-    mark(actor, matter, found);
-    crate::actor::app::publish(actor, &HostEvent::PapersChanged { matter });
-}
 
 /// Whether the open matter's folder is watched on this OS: not on Windows, where the watch's
 /// handle on the folder would stop the lawyer renaming or moving the folder that holds it. The
 /// actor keeps it as `papers_live`, which tests set.
 pub(crate) const fn live_watch() -> bool {
     cfg!(not(windows))
+}
+
+/// `OpenMatter` or `ListPapers` of `matter`: follow its folder, in place of any other.
+pub(crate) fn opened(actor: &mut Actor, matter: MatterId) {
+    if !actor.papers_live {
+        return;
+    }
+    if let Some(folder) = folder_of(actor, matter) {
+        live::follow(actor, matter, &folder);
+    }
+}
+
+/// `matter` was relocated: watch its new folder if it is the one followed, and have the app
+/// list its papers there.
+pub(crate) fn relocated(actor: &mut Actor, matter: MatterId) {
+    if actor.papers_live
+        && let Some(folder) = folder_of(actor, matter)
+    {
+        live::relocated(actor, matter, &folder);
+    }
+    crate::actor::app::publish(actor, &HostEvent::PapersChanged { matter });
+}
+
+/// `matter` left the list: stop watching it.
+pub(crate) fn forgotten(actor: &mut Actor, matter: MatterId) {
+    live::forgotten(actor, matter);
+}
+
+/// A listing of `matter`'s `folder` answered: what it found goes in the matter's row, and a
+/// followed folder found again is watched again. A listing of a folder the row no longer names
+/// (a relocate in between) says nothing.
+pub(crate) fn listed(actor: &mut Actor, matter: MatterId, folder: &Path, found: bool) {
+    if folder_of(actor, matter).as_deref() != Some(folder) {
+        return;
+    }
+    mark(actor, matter, found);
+    if found && actor.papers_live {
+        live::found(actor, matter, folder);
+    }
 }
 
 /// A turn in `matter` ended, however it ended. With no watch (Windows) the app lists the papers
@@ -125,24 +78,12 @@ pub(crate) fn on_turn_ended(actor: &mut Actor, matter: MatterId) {
     }
 }
 
-fn follows(actor: &Actor, matter: MatterId) -> bool {
-    actor
-        .papers_follow
-        .as_ref()
-        .is_some_and(|follow| follow.matter == matter)
-}
-
-fn restart(actor: &mut Actor, matter: MatterId) {
-    if let Some(follow) = actor.papers_follow.as_mut() {
-        follow.watch = None;
-    }
-    let Some(folder) = folder_of(actor, matter) else {
-        return;
-    };
-    let watch = start(actor, matter, folder);
-    if let Some(follow) = actor.papers_follow.as_mut() {
-        follow.watch = watch;
-    }
+/// The watch saw `matter`'s folder change: `found` or not goes in its row, and the app lists the
+/// papers again.
+#[cfg(not(windows))]
+pub(super) fn changed(actor: &mut Actor, matter: MatterId, found: bool) {
+    mark(actor, matter, found);
+    crate::actor::app::publish(actor, &HostEvent::PapersChanged { matter });
 }
 
 /// `matter`'s folder state as found: `missing`, or `found` again; the rows go out at the next
@@ -177,8 +118,4 @@ fn folder_of(actor: &Actor, matter: MatterId) -> Option<PathBuf> {
         .matters
         .get(&matter)
         .map(|entry| PathBuf::from(&entry.row.folder_path))
-}
-
-fn start(actor: &Actor, matter: MatterId, folder: PathBuf) -> Option<Watch> {
-    Watch::start(matter, folder, actor.post.clone())
 }
