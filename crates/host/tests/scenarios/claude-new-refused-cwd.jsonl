@@ -1,0 +1,8 @@
+{"scenario":"claude-new-refused-cwd","description":"claude-agent-acp 0.89.1's refusal of a session/new whose folder it cannot stat (acp-agent.js validateCwd: -32602, data {cwd}), after stderr lines: the host must fail the launch, log the method, the code, the message's length and the data's keys, and of the stderr only the start-phase lines and the last line","on_stdin_close":"exit"}
+{"expect":{"method":"initialize","as":"init","params":{"protocolVersion":1}}}
+{"respond":{"to":"init","result":{"protocolVersion":1,"agentCapabilities":{"loadSession":true},"authMethods":[],"agentInfo":{"name":"@agentclientprotocol/claude-agent-acp","version":"0.89.1"}}}}
+{"expect":{"method":"session/new","as":"new","params":{"cwd":"{{any}}"}}}
+{"stderr":{"line":"[session/create] sessionId=0b6c55e2-2f5d-4c11-9b1e-5d0f3c9e7a10 phase=validate-cwd durationMs=1 totalMs=1"}}
+{"stderr":{"line":"Reading Quarrington Holdings brief for the Zanzibar indemnity"}}
+{"stderr":{"line":"the start ended"}}
+{"respond":{"to":"new","error":{"code":-32602,"message":"Invalid params: `cwd` does not exist on the machine running the agent: /Users/lawyer/Quarrington Holdings","data":{"cwd":"/Users/lawyer/Quarrington Holdings"}}}}

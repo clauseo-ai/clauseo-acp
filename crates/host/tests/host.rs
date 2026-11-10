@@ -65,6 +65,9 @@ mod claude_mode;
 #[path = "host/clear_env.rs"]
 mod clear_env;
 #[cfg(test)]
+#[path = "host/start_refused_log.rs"]
+mod start_refused_log;
+#[cfg(test)]
 #[path = "host/web_sources.rs"]
 mod web_sources;
 

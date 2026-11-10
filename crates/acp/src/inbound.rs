@@ -79,7 +79,9 @@ impl Inbound {
                         elicitation_id: CompactString::from(&*complete.elicitation_id.0),
                     },
                     Err(error) => {
-                        map::invalid(None, Some("elicitation/complete"), error.to_string())
+                        let text = error.to_string();
+                        crate::diagnose::undecoded("elicitation/complete", &text);
+                        map::invalid(None, Some("elicitation/complete"), text)
                     }
                 };
                 self.shared.emit(event).await;
@@ -130,7 +132,9 @@ impl Inbound {
         let notification = match serde_json::from_value::<acp::SessionNotification>(params) {
             Ok(notification) => notification,
             Err(error) => {
-                let event = map::invalid(session, Some(name), error.to_string());
+                let text = error.to_string();
+                crate::diagnose::undecoded("session/update", &text);
+                let event = map::invalid(session, Some(name), text);
                 return self.shared.emit(event).await;
             }
         };
@@ -252,8 +256,11 @@ fn permission(params: Value) -> Result<PermissionRequest, agent_client_protocol:
         .and_then(|call| call.get("rawInput"))
         .filter(|input| !input.is_null())
         .cloned();
-    let request = acp::RequestPermissionRequest::deserialize(params)
-        .map_err(|error| invalid_params(&error.to_string()))?;
+    let request = acp::RequestPermissionRequest::deserialize(params).map_err(|error| {
+        let text = error.to_string();
+        crate::diagnose::undecoded("session/request_permission", &text);
+        invalid_params(&text)
+    })?;
     let session = AgentSessionId::new(&request.session_id.0)
         .map_err(|error| invalid_params(&format!("sessionId: {error}")))?;
     let mut options = Vec::with_capacity(request.options.len());
@@ -326,8 +333,11 @@ struct CheckedElicitation {
 /// Checks an `elicitation/create`. Refuses (-32602) one that does not decode, has a mode other
 /// than form or URL, or is scoped to a request instead of a session.
 fn elicitation(params: Value) -> Result<CheckedElicitation, agent_client_protocol::Error> {
-    let request = acp::CreateElicitationRequest::deserialize(params)
-        .map_err(|error| invalid_params(&error.to_string()))?;
+    let request = acp::CreateElicitationRequest::deserialize(params).map_err(|error| {
+        let text = error.to_string();
+        crate::diagnose::undecoded("elicitation/create", &text);
+        invalid_params(&text)
+    })?;
     let message = request.message;
     let (scope, elicitation_id, request) = match request.mode {
         acp::ElicitationMode::Form(form) => {
