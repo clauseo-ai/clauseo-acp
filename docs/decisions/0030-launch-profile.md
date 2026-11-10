@@ -472,7 +472,7 @@ change from the settings window as `ui` does. R24 (PR5) adds a third to the patc
   (`permissions/options/tools.js` `buildExitPlanModePermissionOptions`) depends on the modes
   the session lists. 0.89.1 always lists `auto` (`session-mode.js` `buildAvailableModes`:
   `default`, `acceptEdits`, `plan`, `auto`, and `bypassPermissions` only with bypass
-  allowed, which Clauseo never does). So a real plan exit offers, in order:
+  allowed, which Clauseo never does). So its plan exit sends, in order:
   - with plan text, "Yes, clear context and use auto mode" (`exit-plan-clear-auto`);
   - "Yes, and use auto mode" (`exit-plan-auto`);
   - "Yes, manually approve edits" (`exit-plan-default`);
@@ -481,21 +481,28 @@ change from the settings window as `ui` does. R24 (PR5) adds a third to the patc
   "Yes, auto-accept edits" (`exit-plan-accept-edits`, and its clear-context form) comes only
   when the session lists neither `auto` nor bypass. That is the branch
   `tests/scenarios/claude-plan-exit.jsonl` plays (its modes are `default`, `acceptEdits`,
-  `plan`), not what 0.89.1 sends. Where each choice lands outside forced ask:
-  - the auto options land in `auto`, a real Claude Code mode (the docs' mode table: a
-    classifier reviews actions instead of prompts). When the model doesn't support auto mode,
-    the adapter puts `acceptEdits` in its place (`AUTO_MODE_FALLBACK`, `session-mode.js:6`,
-    `applyPermissionFallback`).
-  - "Yes, manually approve edits" lands in `default`.
-  - "Yes, auto-accept edits" lands in `acceptEdits`.
-  - "No, keep planning" stays in `plan`.
+  `plan`), not what 0.89.1 sends.
 
-  The host logs each landing as `ModeChanged` and keeps it until the session's next start,
-  which sets `acceptEdits` again. The two exceptions are `bypassPermissions` and `dontAsk`,
-  which the host switches back to `acceptEdits` at once (`actor/turn/forced_mode.rs`
-  `REFUSED_MODES`). 0.89.1 offers neither, so that only answers an adapter that moved there
-  anyway. In forced ask, every option but "manually approve edits" and "keep planning" is
-  dropped, and any other mode goes back to `default`.
+  **What Clauseo offers (2026-11-10, Rohan): never `auto`.** Claude Code's `auto` lets a
+  classifier approve commands, network calls and writes outside the matter, which would break
+  "writes outside the matter still ask". So outside forced ask a Claude request loses the plan
+  exit's auto and bypass options (`exit-plan-auto`, `exit-plan-clear-auto`, `exit-plan-bypass`,
+  `exit-plan-clear-bypass`; `agent/forced_ask.rs` `keep_option_outside_forced_ask`, applied
+  in `actor/turn/asks.rs` as forced ask's option layer is). An answer naming one is refused.
+  The lawyer is offered, and lands in:
+  - "Yes, manually approve edits" (`exit-plan-default`): `default`, the lawyer's own choice,
+    logged as `ModeChanged` and kept until the session's next start, which sets `acceptEdits`
+    again;
+  - "No, keep planning" (`reject`): stays in `plan`;
+  - "Yes, auto-accept edits" (`exit-plan-accept-edits`, and its clear-context form), only in
+    the no-`auto` branch: `acceptEdits`.
+
+  With 0.89.1 a plan exit therefore can't return to `acceptEdits` inside the session; it
+  comes back at the next start.
+- **A mode reported anyway.** A session that moves to `auto`, `bypassPermissions` or
+  `dontAsk` (`actor/turn/forced_mode.rs` `REFUSED_MODES`) is logged as it came and switched
+  back to `acceptEdits` at once. In forced ask, every option but "manually approve edits" and
+  "keep planning" is dropped, and any mode but `default` and `plan` goes back to `default`.
 - **Forced ask is unchanged.** Decision 3 of 2026-11-04 stands: a forced-ask session starts in
   `default` (`forced_ask::ASK_MODE`, `loads::claude_mode`) and is switched back to it
   (`actor/turn/forced_mode.rs`). `acceptEdits` applies only outside forced ask.

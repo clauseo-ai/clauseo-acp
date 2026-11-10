@@ -125,10 +125,10 @@ fn a_session_offering_no_accept_edits_mode_fails_before_any_prompt() {
     );
 }
 
-/// Outside forced ask, a session the agent moves to `bypassPermissions` or `dontAsk` is switched
-/// back to `acceptEdits`, each logged as it came and then as switched back.
+/// Outside forced ask, a session the agent moves to `bypassPermissions`, `dontAsk` or `auto` is
+/// switched back to `acceptEdits`, each logged as it came and then as switched back.
 #[test]
-fn a_session_that_moves_to_bypass_or_dont_ask_goes_back_to_accept_edits() {
+fn a_session_that_moves_to_bypass_dont_ask_or_auto_goes_back_to_accept_edits() {
     let dir = Dir::new(
         "claude_mode_reset",
         &[(CLAUDE, Scenario::Local("claude-mode-reset"))],
@@ -154,6 +154,14 @@ fn a_session_that_moves_to_bypass_or_dont_ask_goes_back_to_accept_edits() {
             "dontAsk",
             "acceptEdits"
         ],
+        "{}",
+        events.dump()
+    );
+    let mut events = turn(&host, thread, "And clause 6?");
+    events.until("ModeChanged acceptEdits back", |e| modes(e).len() == 7);
+    assert_eq!(
+        modes(&events)[5..],
+        ["auto", "acceptEdits"],
         "{}",
         events.dump()
     );
