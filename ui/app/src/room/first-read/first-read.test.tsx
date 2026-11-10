@@ -1,4 +1,5 @@
-// The first read (UD2, room/first-read/), over a FakeTransport with the setup wire: it starts once, only after the plan
+// The first read (UD2, room/first-read/), over a FakeTransport with the setup wire: offered, never sent by itself (D-015):
+// a sign-in, "Use … instead" or a plan switch sends no turn, and Read the papers starts it once, only after the plan
 // is signed in, only for a matter added in this first run with at least one paper, never where a "First read" thread
 // exists, and never twice; its question shows as "Clauseo's first read" by its accepted turn; the line says how far it
 // has got; Stop sends cancel and Restart one more send_prompt with the same text, no restart_agent.
@@ -35,6 +36,7 @@ import {
   A,
   byId,
   CLAUDE,
+  CODEX,
   info,
   install,
   MADE_MATTER,
@@ -46,6 +48,7 @@ import {
   signIn,
   SIGNED_IN,
 } from "../first-run/rig.tsx";
+import { setupStoreOf } from "../../store/setup.ts";
 import { forgetMarksForTests, MARKS_KEY } from "./marks.ts";
 import { FIRST_READ_PROMPT } from "./prompt.ts";
 
@@ -73,6 +76,8 @@ type Options = {
   papers?: PaperSummary[];
   threads?: ThreadSummary[];
   entries?: ViewEntry[];
+  /** ChatGPT listed and installed too. */
+  codex?: boolean;
 };
 
 /** The room over a host with the setup wire, the papers part, and the thread's view as it subscribes. */
@@ -111,11 +116,21 @@ async function mount(o: Options = {}) {
       return "done";
     },
     pickFolder: () => ({ folder: "folder-ref-1", display: "Documents/Matters/Rathi Steels" }),
-    setup: { first: () => [info(), install(CLAUDE, READY), SIGNED_OUT] },
+    setup: {
+      first: () => [
+        info(),
+        install(CLAUDE, READY),
+        SIGNED_OUT,
+        ...(o.codex === true ? [install(CODEX, READY), signIn(CODEX, { signed_out: {} })] : []),
+      ],
+    },
     next: fakeNext({
       matters: () => [],
       papers: o.papers ?? [PAPER],
-      agents: [{ id: CLAUDE, kind: "claude" }],
+      agents: [
+        { id: CLAUDE, kind: "claude" },
+        ...(o.codex === true ? [{ id: CODEX, kind: "codex" as const }] : []),
+      ],
       parts: ["agents", "papers"],
     }),
     subscribe: (stream) =>
@@ -148,10 +163,31 @@ const order = (t: FakeTransport) =>
     .map((d) => Object.keys(d.command.command)[0])
     .filter((k) => ["create_thread", "rename_thread", "send_prompt", "restart_agent"].includes(k!));
 
-test("it starts once the plan is signed in, for the matter the first run added: create_thread, rename_thread, send_prompt, once", async () => {
+const offer = () => byId("first-read-offer");
+
+/** Signs Claude in and presses the offered read. */
+async function readPapers(t: FakeTransport) {
+  await play(t, signIn(CLAUDE, SIGNED_IN));
+  await settle();
+  await press(offer());
+  await settle();
+  return t;
+}
+
+test("D-015: a sign-in sends no turn; the read is offered, and Read the papers sends create_thread, rename_thread, send_prompt, once", async () => {
   const t = await openFolder(await mount());
   expect(order(t)).toEqual([]);
+  expect(offer()).toBeNull();
   await play(t, signIn(CLAUDE, SIGNED_IN));
+  await settle();
+  // signed in: nothing sent by itself, the button offered
+  expect(order(t)).toEqual([]);
+  expect(offer()?.textContent).toBe("Read the papers");
+  // a second signed_in sends nothing either
+  await play(t, SIGNED_OUT, signIn(CLAUDE, SIGNED_IN));
+  await settle();
+  expect(order(t)).toEqual([]);
+  await press(offer());
   await settle();
   expect(order(t)).toEqual(["create_thread", "rename_thread", "send_prompt"]);
   expect(sent(t, "create_thread")).toEqual([{ matter: MADE_MATTER, agent: CLAUDE }]);
@@ -159,11 +195,11 @@ test("it starts once the plan is signed in, for the matter the first run added: 
   expect(sent(t, "send_prompt")).toEqual([
     { thread: THREAD, content: [{ text: { text: FIRST_READ_PROMPT } }] },
   ]);
-  // a second signed_in starts nothing more
+  // started: the offer goes, and the mark survives a reload
+  expect(offer()).toBeNull();
   await play(t, SIGNED_OUT, signIn(CLAUDE, SIGNED_IN));
   await settle();
   expect(order(t)).toEqual(["create_thread", "rename_thread", "send_prompt"]);
-  // and the mark survives a reload
   expect(JSON.parse(localStorage.getItem(MARKS_KEY) ?? "{}")[MADE_MATTER]).toMatchObject({
     thread: THREAD,
     turns: [TURN],
@@ -171,9 +207,34 @@ test("it starts once the plan is signed in, for the matter the first run added: 
   });
 });
 
-test("no paper, a matter not added in this first run, or a First read thread already there: nothing starts", async () => {
+test("D-015: Use ChatGPT instead and a plan switch, with both plans signed in, send no turn", async () => {
+  const t = await openFolder(await mount({ codex: true }));
+  await play(t, signIn(CLAUDE, SIGNED_IN), signIn(CODEX, SIGNED_IN));
+  await settle();
+  expect(order(t)).toEqual([]);
+  // "Use ChatGPT instead" (the setup store's own act, as the gate presses it) and the other way back
+  const store = setupStoreOf(t as unknown as Parameters<typeof setupStoreOf>[0]);
+  await act(async () => store.set({ chosen: CODEX, pending: CODEX }));
+  await settle();
+  expect(order(t)).toEqual([]);
+  await act(async () => store.signInTo(CLAUDE));
+  await settle();
+  await act(async () => store.signInTo(CODEX));
+  await settle();
+  expect(order(t)).toEqual([]);
+  expect(sent(t, "send_prompt")).toEqual([]);
+  // the button still stands, and takes the plan now chosen
+  await press(offer());
+  await settle();
+  expect(sent(t, "create_thread")).toEqual([{ matter: MADE_MATTER, agent: CODEX }]);
+  expect(sent(t, "send_prompt")).toHaveLength(1);
+});
+
+test("no paper, a matter not added in this first run, or a First read thread already there: no offer, nothing sent", async () => {
   let t = await openFolder(await mount({ papers: [] }));
   await play(t, signIn(CLAUDE, SIGNED_IN));
+  await settle();
+  expect(offer()).toBeNull();
   expect(order(t)).toEqual([]);
   await act(async () => root?.unmount());
   host?.remove();
@@ -181,6 +242,8 @@ test("no paper, a matter not added in this first run, or a First read thread alr
   forgetMarksForTests();
   t = await mount({ matters: [A] });
   await play(t, signIn(CLAUDE, SIGNED_IN));
+  await settle();
+  expect(offer()).toBeNull();
   expect(order(t)).toEqual([]);
   await act(async () => root?.unmount());
   host?.remove();
@@ -194,6 +257,8 @@ test("no paper, a matter not added in this first run, or a First read thread alr
     }),
   );
   await play(t, signIn(CLAUDE, SIGNED_IN));
+  await settle();
+  expect(offer()).toBeNull();
   expect(order(t)).toEqual([]);
 });
 
@@ -213,9 +278,7 @@ test("its question shows as Clauseo's first read, never the prompt, and the line
       content: [],
     },
   };
-  const t = await openFolder(await mount({ entries: [PROMPT, reading] }));
-  await play(t, signIn(CLAUDE, SIGNED_IN));
-  await settle();
+  const t = await readPapers(await openFolder(await mount({ entries: [PROMPT, reading] })));
   const question = byId("message-user");
   expect(question?.textContent).toContain("Clauseo's first read");
   expect(document.body.textContent).not.toContain(FIRST_READ_PROMPT);
@@ -243,9 +306,7 @@ test("its question shows as Clauseo's first read, never the prompt, and the line
 });
 
 test("Stop sends cancel; stopped, Restart sends one send_prompt with the same text and no restart_agent", async () => {
-  const t = await openFolder(await mount({ entries: [PROMPT] }));
-  await play(t, signIn(CLAUDE, SIGNED_IN));
-  await settle();
+  const t = await readPapers(await openFolder(await mount({ entries: [PROMPT] })));
   await press(byId("cancel"));
   expect(sent(t, "cancel")).toEqual([{ thread: THREAD }]);
   await act(async () =>

@@ -121,6 +121,9 @@ test("the first read's conversation stands under its matter as soon as it is mad
   await settle();
   await play(t, signIn(CLAUDE, SIGNED_IN));
   await settle();
+  // the first read is offered, never sent by itself (D-015): Read the papers makes it
+  await press(byId("first-read-offer"));
+  await settle();
   const titles = rows().map((r) => r.querySelector(".room-conv-title")?.textContent);
   expect(titles).toEqual(["First read"]);
   expect(rows()[0]?.getAttribute("aria-current")).toBe("true");
