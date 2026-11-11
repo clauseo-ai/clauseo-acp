@@ -201,6 +201,16 @@
     overflow: hidden;
     overflow-wrap: anywhere;
   }
+  /* a file or folder Clauseo doesn't read (only online, or a folder it couldn't open): no fill, a dashed edge, the
+     quiet ink; colours, never opacity, so its words keep their contrast. It lifts on no hover and moves on no press */
+  .tile[data-away] .tile-face,
+  .tile[data-away] .tile-face:hover {
+    background: transparent;
+    border: var(--hairline) dashed var(--scrollbar-hover);
+  }
+  .tile[data-away] .tile-face:active {
+    transform: none;
+  }
   /* what a press of the face does, under the name */
   .tile-cue {
     @apply text-small text-quiet;

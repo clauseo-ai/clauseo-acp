@@ -1,0 +1,145 @@
+{
+  "WA-01": {
+    "en": "Only in {service}",
+    "hi": "केवल {service} में",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-11",
+    "hi_by": "orchestrator draft (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-11",
+    "by": "orchestrator, 2026-11-11, stage D cloud-only tiles",
+    "note": "the wall's dimmed tiles for files only online and folders not opened, and the new conversation's count"
+  },
+  "WA-02": {
+    "en": "Not on this computer, so Clauseo doesn't open it or save new versions of it.",
+    "hi": "यह इस कंप्यूटर पर नहीं है, इसलिए Clauseo इसे नहीं खोलता और इसके नए संस्करण नहीं सहेजता।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-11",
+    "hi_by": "orchestrator draft (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-11",
+    "by": "orchestrator, 2026-11-11, stage D cloud-only tiles",
+    "note": "the wall's dimmed tiles for files only online and folders not opened, and the new conversation's count"
+  },
+  "WA-03": {
+    "en": "To keep it here, right-click it in File Explorer and choose Always keep on this device.",
+    "hi": "इसे यहाँ रखने के लिए File Explorer में इस पर राइट-क्लिक करें और Always keep on this device चुनें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-11",
+    "hi_by": "orchestrator draft (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-11",
+    "by": "orchestrator, 2026-11-11, stage D cloud-only tiles",
+    "note": "the wall's dimmed tiles for files only online and folders not opened, and the new conversation's count"
+  },
+  "WA-04": {
+    "en": "Not opened",
+    "hi": "नहीं खोला गया",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-11",
+    "hi_by": "orchestrator draft (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-11",
+    "by": "orchestrator, 2026-11-11, stage D cloud-only tiles",
+    "note": "the wall's dimmed tiles for files only online and folders not opened, and the new conversation's count"
+  },
+  "WA-05": {
+    "en": "{n} more are only in {service}.",
+    "hi": "{n} और दस्तावेज़ केवल {service} में हैं।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-11",
+    "hi_by": "orchestrator draft (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-11",
+    "by": "orchestrator, 2026-11-11, stage D cloud-only tiles",
+    "note": "the wall's dimmed tiles for files only online and folders not opened, and the new conversation's count"
+  },
+  "WA-06": {
+    "en": "To keep it here, Control-click it in Finder and choose Always Keep on This Device.",
+    "hi": "इसे यहाँ रखने के लिए Finder में इस पर Control-क्लिक करें और Always Keep on This Device चुनें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-11",
+    "hi_by": "orchestrator draft (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-11",
+    "by": "orchestrator, 2026-11-11, stage D cloud-only tiles",
+    "note": "the wall's dimmed tiles for files only online and folders not opened, and the new conversation's count"
+  },
+  "WA-07": {
+    "en": "1 more is only in {service}.",
+    "hi": "1 और दस्तावेज़ केवल {service} में है।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-11",
+    "hi_by": "orchestrator draft (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-11",
+    "by": "orchestrator, 2026-11-11, stage D cloud-only tiles",
+    "note": "the wall's dimmed tiles for files only online and folders not opened, and the new conversation's count"
+  },
+  "WA-08": {
+    "en": "Only online",
+    "hi": "केवल ऑनलाइन",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-11",
+    "hi_by": "orchestrator draft (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-11",
+    "by": "orchestrator, 2026-11-11, stage D cloud-only tiles",
+    "note": "the wall's dimmed tiles for files only online and folders not opened, and the new conversation's count"
+  },
+  "WA-09": {
+    "en": "Download it to this computer to change that.",
+    "hi": "इसे बदलने के लिए इसे इस कंप्यूटर पर डाउनलोड करें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-11",
+    "hi_by": "orchestrator draft (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-11",
+    "by": "orchestrator, 2026-11-11, stage D cloud-only tiles",
+    "note": "the wall's dimmed tiles for files only online and folders not opened, and the new conversation's count"
+  },
+  "WA-10": {
+    "en": "{n} more are only online.",
+    "hi": "{n} और दस्तावेज़ केवल ऑनलाइन हैं।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-11",
+    "hi_by": "orchestrator draft (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-11",
+    "by": "orchestrator, 2026-11-11, stage D cloud-only tiles",
+    "note": "the wall's dimmed tiles for files only online and folders not opened, and the new conversation's count"
+  },
+  "WA-11": {
+    "en": "1 more is only online.",
+    "hi": "1 और दस्तावेज़ केवल ऑनलाइन है।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-11",
+    "hi_by": "orchestrator draft (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-11",
+    "by": "orchestrator, 2026-11-11, stage D cloud-only tiles",
+    "note": "the wall's dimmed tiles for files only online and folders not opened, and the new conversation's count"
+  },
+  "WA-12": {
+    "en": "Only in {service}",
+    "hi": "केवल {service} में",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-11",
+    "hi_by": "orchestrator draft (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-11",
+    "by": "orchestrator, 2026-11-11, stage D cloud-only tiles",
+    "note": "the wall's dimmed tiles for files only online and folders not opened, and the new conversation's count"
+  },
+  "WA-13": {
+    "en": "Clauseo couldn't look inside this folder. It may be only online, or Clauseo may not be allowed to open it.",
+    "hi": "Clauseo इस फ़ोल्डर के अंदर नहीं देख सका। हो सकता है यह केवल ऑनलाइन हो, या Clauseo को इसे खोलने की अनुमति न हो।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-11",
+    "hi_by": "orchestrator draft (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-11",
+    "by": "orchestrator, 2026-11-11, stage D cloud-only tiles",
+    "note": "the wall's dimmed tiles for files only online and folders not opened, and the new conversation's count"
+  }
+}

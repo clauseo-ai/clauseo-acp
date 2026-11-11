@@ -39,7 +39,6 @@ import { useDisplay } from "@clauseo/components/lib/display.ts";
 import { frame } from "@clauseo/components/lib/words-frame.ts";
 import { mt } from "@clauseo/components/lib/words-matters.ts";
 import { th } from "@clauseo/components/lib/words-thread.ts";
-import { Say } from "@clauseo/components/clauseo/say.tsx";
 import { useWords } from "@clauseo/components/lib/words.ts";
 import { MarkdownHostContext, type MarkdownHost } from "@clauseo/components/markdown/host.ts";
 import { PartsRoot } from "@clauseo/components/ui/root.tsx";
@@ -80,6 +79,8 @@ import type { StandIns } from "./versions/stand-ins.ts";
 import { useVersions } from "./versions/use-versions.ts";
 import { useWordOpeners, WordOpenContext } from "./word/open-in-word.ts";
 import { PaperWall } from "./paper-wall.tsx";
+import { NewConversationLine } from "./new-conversation-line.tsx";
+import { wallEmpty } from "./wall-away.ts";
 import { clockOf } from "./when.ts";
 import { useJumpFollows } from "./thread/jump-entry.ts";
 import type { Drafts } from "./thread/session.ts";
@@ -528,18 +529,7 @@ function RoomFrame({
                 with no conversation yet too), then the first read's offer (D-015). Not yet the design's FirstQuestion */}
               {talks.drafting && !scratch && papers !== null && papers.papers.length > 0 && (
                 <>
-                  <p
-                    className="mx-auto box-content max-w-measure px-thread-pad pt-s7 pb-s4 text-center text-reply text-primary"
-                    data-testid="new-conversation-line"
-                  >
-                    <Say>
-                      {papers.papers.length === 1
-                        ? mt(w.lang, "A new conversation. It reads this matter's one paper.")
-                        : mt(w.lang, "A new conversation. It reads this matter's {n} papers.", {
-                            n: papers.papers.length,
-                          })}
-                    </Say>
-                  </p>
+                  <NewConversationLine papers={papers} />
                   <OfferSlot transport={transport} />
                 </>
               )}
@@ -577,7 +567,7 @@ function RoomFrame({
         <aside className="room-pane" ref={nodes.slot("pane")}>
           {!atRail && notice}
           {papers !== null &&
-            (papers.papers.length === 0 ? (
+            (wallEmpty(papers) ? (
               <EmptyPapers body={false} />
             ) : (
               <PaperWall key={listed?.matter} papers={papers} word={word} />

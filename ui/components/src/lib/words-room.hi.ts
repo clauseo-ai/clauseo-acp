@@ -20,6 +20,23 @@ export const HI = {
     "केवल तभी, जब Windows कभी इस कंप्यूटर पर Clauseo को रोके: Windows Security खोलें, App & browser control में जाएँ, फिर Smart App Control settings में इसे बंद करें। अप-टू-डेट Windows 11 पर आप इसे बाद में फिर से चालू कर सकते हैं। तब तक कुछ करने की ज़रूरत नहीं है।",
   // the note's link: the install guide's Smart App Control section, through the link confirm
   "How to do this": "यह कैसे करें",
+  // the wall's dimmed tiles (room/wall-away.ts), Hindi provisional (stage D, 2026-11-11). A file only online: the
+  // line on its tile, by the service that syncs the folder where it has a name, then its tip, the first sentence and
+  // how to keep it here. The OS's own menu names stay in English, as the OS shows them. The Mac's how-to is its own
+  // key, so it can go alone.
+  "Only in {service}": "केवल {service} में",
+  "Only online": "केवल ऑनलाइन",
+  "Not on this computer, so Clauseo doesn't open it or save new versions of it.":
+    "यह इस कंप्यूटर पर नहीं है, इसलिए Clauseo इसे नहीं खोलता और इसके नए संस्करण नहीं सहेजता।",
+  "To keep it here, right-click it in File Explorer and choose Always keep on this device.":
+    "इसे यहाँ रखने के लिए File Explorer में इस पर राइट-क्लिक करें और Always keep on this device चुनें।",
+  "To keep it here, Control-click it in Finder and choose Always Keep on This Device.":
+    "इसे यहाँ रखने के लिए Finder में इस पर Control-क्लिक करें और Always Keep on This Device चुनें।",
+  "Download it to this computer to change that.": "इसे बदलने के लिए इसे इस कंप्यूटर पर डाउनलोड करें।",
+  // a folder Clauseo couldn't list: online only, or not allowed, which the host can't tell apart
+  "Not opened": "नहीं खोला गया",
+  "Clauseo couldn't look inside this folder. It may be only online, or Clauseo may not be allowed to open it.":
+    "Clauseo इस फ़ोल्डर के अंदर नहीं देख सका। हो सकता है यह केवल ऑनलाइन हो, या Clauseo को इसे खोलने की अनुमति न हो।",
 } as const;
 
 /** The room's own strings, for the tests' banned-words screen. */
