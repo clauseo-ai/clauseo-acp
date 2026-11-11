@@ -312,10 +312,11 @@ export function VersionsCentre({
         {...openNow(standIns, inView, fileRef(inView.path), c, freshRef)}
       />
     );
+  // an undo waits while the host checks what changed since, and while it would put nothing back
   const held =
     s.ask?.act === "undo" &&
     s.ask.stage === "confirm" &&
-    ![...s.ask.choices.values()].includes("undo");
+    (s.ask.checking === true || ![...s.ask.choices.values()].includes("undo"));
   return (
     <div className="ver-room-band">
       <VersionBand

@@ -2,6 +2,7 @@
 // Versions' undo asks the host what changed since the turn's version (preview_undo, as the thread's Undo does): a file
 // the turn added that the lawyer edited after it is kept by default, though no newer version shows the edit; a file
 // left as the turn made it goes back with no question.
+import { act } from "react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { THREAD, TURN } from "../../testing/stream-script.ts";
 import type { HostQuery, ViewEntry } from "../../transport/protocol.ts";
@@ -97,4 +98,63 @@ test("the agent's own file left as it made it goes back with no question", async
       ],
     },
   ]);
+});
+
+test("Undo waits for the host's answer, and goes ahead once it comes", async () => {
+  let answer: (edited: string[]) => void = () => undefined;
+  h = await mountVersions(VERSIONS, [STEP], {
+    query: answering({
+      preview_undo: () =>
+        new Promise((resolve) => {
+          answer = (edited) => resolve({ undo_preview: { edited_since: edited } });
+        }),
+    }),
+  });
+  await h.openVersions();
+  await h.click(h.all("version").find((r) => r.dataset["checkpoint"] === "cp2"));
+  await h.click(h.one("version-undo"));
+  expect(h.one("dialog-confirm")?.getAttribute("aria-disabled")).toBe("true");
+  await h.click(h.one("dialog-confirm"));
+  expect(h.sent("undo_step")).toEqual([]);
+  await act(async () => answer([]));
+  await h.settle();
+  expect(h.one("dialog-confirm")?.getAttribute("aria-disabled")).toBeNull();
+  await h.click(h.one("dialog-confirm"));
+  expect(h.sent("undo_step")).toHaveLength(1);
+});
+
+test("with no answer from the host, a file that may hold the lawyer's edits is kept, with the warning", async () => {
+  h = await mountVersions(
+    VERSIONS,
+    [
+      stepEntry(5, {
+        files: [file("notes.txt", { change: "added", may_include_lawyer_edits: true })],
+        checkpoint_after: "cp2",
+      }),
+    ],
+    {
+      query: answering({
+        preview_undo: () => {
+          throw new Error("refused");
+        },
+      }),
+    },
+  );
+  await h.openVersions();
+  await h.click(h.all("version").find((r) => r.dataset["checkpoint"] === "cp2"));
+  await h.click(h.one("version-undo"));
+  await h.settle();
+  const row = choiceRow("notes.txt");
+  expect(row?.querySelector(".ver-edited-at")?.textContent).toBe(
+    "Changed during the answer, though Clauseo didn't say it was changing it.",
+  );
+  expect(
+    [...(row?.querySelectorAll("button") ?? [])]
+      .find((b) => b.textContent?.trim() === "Keep current")
+      ?.getAttribute("aria-pressed"),
+  ).toBe("true");
+  // the check is over: only that every file is kept holds Undo back
+  expect(dialog()?.textContent).toContain(
+    "Nothing goes back. Every document it changed is kept as it is now.",
+  );
 });

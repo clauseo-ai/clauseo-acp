@@ -42,6 +42,7 @@ import {
   outcomeOf,
   sameChanges,
   staleNewest,
+  undoAsk,
   type Ask,
   type Done,
   type Look,
@@ -310,15 +311,14 @@ export class VersionsController {
 
   /* ---------- undoing and restoring ---------- */
 
-  /** Opens the undo dialog for a turn's version. */
+  /** Opens the undo dialog for a turn's version; Undo waits for what changed since (keepEdited). */
   askUndo(id: string): void {
     const m = this.meta(id);
     if (!undoable(m) || m?.step == null) return;
     const since = changedSince(this.#snap.timeline, id);
     const choices = defaultChoices(m.step, new Set(since.keys()));
     this.#chosen = new Set();
-    this.#set({ ask: { act: "undo", id, choices, stage: "confirm", failed: null }, failed: null });
-    // what the lawyer changed since, as the thread's Undo asks it: a file the turn added goes with any edit made after
+    this.#set({ ask: undoAsk(id, choices), failed: null });
     void editedSince(this.#transport, m.thread, m.step.turn).then((edited) => {
       const ask = keepEdited(this.#snap.ask, id, edited, this.#chosen);
       if (ask !== null) this.#set({ ask });
@@ -448,7 +448,7 @@ export class VersionsController {
   /** Goes ahead with what the dialog asks. */
   async confirm(): Promise<void> {
     const ask = this.#snap.ask;
-    if (ask === null || this.#acting) return;
+    if (ask === null || this.#acting || (ask.act === "undo" && ask.checking === true)) return;
     if (ask.act === "undo") await this.#undo(ask);
     else await this.#restore(ask);
   }
