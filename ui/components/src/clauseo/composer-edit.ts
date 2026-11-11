@@ -1,13 +1,26 @@
 // How the composer edits its own field and reads presses on it, apart from the component: every change through the
 // engine's own editing, so undo takes it back, and the focus moved only where the lawyer left nothing else.
 
+import { sharedStart } from "./composer-diff.ts";
+
+/** The longest text replaceAll puts in through the engine's editing. Chromium's insertText puts multi-line text in a
+ * line at a time, each line an edit and two input events of its own, so its time grows with the square of the text: in
+ * a bare textarea 150 KB took 0.7 s, 300 KB 2.7 s and 600 KB 13.6 s, where a paste of 6 MiB takes 0.5 s. Longer text,
+ * such as a long question coming back after its turn stopped, is set in place, and that one step can't be undone. */
+export const UNDOABLE_MAX = 64 * 1024;
+
 /** Replaces all the field holds with `text` through the engine's editing, so undo takes it back; where the engine
- * refuses (a disabled field, or no execCommand, as in happy-dom) the value is set in place. True when the engine did
- * it, in which case its own input event has already told the field. */
+ * refuses (a disabled field, or no execCommand, as in happy-dom), or the text is over UNDOABLE_MAX, the value is set
+ * in place. True when the engine did it, in which case its own input event has already told the field. */
 export function replaceAll(a: HTMLTextAreaElement, text: string, focus: boolean): boolean {
   if (a.value === text) return true;
   const focused = a.ownerDocument.activeElement === a;
-  if (!a.disabled && (focused || focus) && typeof a.ownerDocument.execCommand === "function") {
+  if (
+    !a.disabled &&
+    (focused || focus) &&
+    text.length <= UNDOABLE_MAX &&
+    typeof a.ownerDocument.execCommand === "function"
+  ) {
     if (!focused) a.focus();
     a.select();
     // insertText and delete edit plain text only: nothing here parses HTML, so Trusted Types have nothing to check
@@ -45,7 +58,6 @@ export function pressOwn(target: EventTarget, field: Element): boolean {
  * the same words. */
 export function insertedOnly(was: string, next: string): boolean {
   if (next.length < was.length) return false;
-  let i = 0;
-  while (i < was.length && was.charCodeAt(i) === next.charCodeAt(i)) i++;
+  const i = sharedStart(was, next, was.length);
   return next.endsWith(was.slice(i));
 }
