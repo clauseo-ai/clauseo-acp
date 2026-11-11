@@ -84,7 +84,6 @@ export const HI = {
   "Needs a download of about {mb} MB. Signing in happens in your browser.":
     "लगभग {mb} MB का डाउनलोड ज़रूरी है। साइन इन आपके ब्राउज़र में होता है।",
   "Signing in happens in your browser.": "साइन इन आपके ब्राउज़र में होता है।",
-  "Other ways in": "जुड़ने के दूसरे तरीके",
   // the key's help under each plan's card names that plan only
   "A key from {name}, yours or your firm's. Billed to that key's account.":
     "{name} की key, आपकी या आपकी फ़र्म की। शुल्क उसी key के खाते पर लगता है।",
@@ -94,11 +93,6 @@ export const HI = {
   "Questions wait until you sign in or add a key again.":
     "दोबारा साइन इन करने या key जोड़ने तक प्रश्न प्रतीक्षा करेंगे।",
   "Sign in again": "दोबारा साइन इन करें",
-  "Your firm's address": "आपकी फ़र्म का पता",
-  "Your IT team gives you this. Questions go through your firm's own account, on its terms.":
-    "यह आपकी IT टीम देती है। प्रश्न आपकी फ़र्म के अपने खाते से, उसकी शर्तों पर जाते हैं।",
-  Connect: "कनेक्ट करें",
-  "Remove address": "पता हटाएँ",
   // what a search for the CLI's login found, once the host says (stage D's FoundLogin none_found and reuse_off)
   "No {app} sign-in on this computer.": "इस कंप्यूटर पर {app} का कोई साइन इन नहीं।",
   "Clauseo isn't using {app}'s sign-in here.": "Clauseo यहाँ {app} का साइन इन इस्तेमाल नहीं कर रहा।",

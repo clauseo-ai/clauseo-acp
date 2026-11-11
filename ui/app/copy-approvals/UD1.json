@@ -182,13 +182,6 @@
     "at": "2026-11-02",
     "by": "design"
   },
-  "UD1-27": {
-    "en": "Use an API key or my firm's account",
-    "hi": "API key या अपनी फ़र्म का खाता इस्तेमाल करें",
-    "status": "approved",
-    "at": "2026-11-02",
-    "by": "design"
-  },
   "UD1-28": {
     "en": "Your browser opens when {name} is ready.",
     "hi": "{name} तैयार होते ही आपका ब्राउज़र खुलेगा।",
@@ -203,16 +196,6 @@
   "UD1-29": {
     "en": "Your browser opens when you reconnect.",
     "hi": "दोबारा कनेक्ट होते ही आपका ब्राउज़र खुलेगा।",
-    "status": "approved",
-    "at": "2026-11-02",
-    "by": "design"
-  },
-  "UD1-30": {
-    "en": "API key",
-    "hi": "API key डालें",
-    "hi_status": "provisional",
-    "hi_at": "2026-11-10",
-    "hi_by": "app track (provisional; words pending orchestrator 2026-11-10)",
     "status": "approved",
     "at": "2026-11-02",
     "by": "design"

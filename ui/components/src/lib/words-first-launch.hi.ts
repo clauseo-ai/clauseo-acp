@@ -58,10 +58,12 @@ export const HI = {
     "इस मामले के बारे में पूछने के लिए Claude या ChatGPT में साइन इन करें",
   "Sign in": "साइन इन करें",
   "Use {name} instead": "इसके बजाय {name} इस्तेमाल करें",
-  "Use an API key or my firm's account": "API key या अपनी फ़र्म का खाता इस्तेमाल करें",
+  // UC-141: the quiet way to the key panel, in Connectors' Hindi (U15-09)
+  "Use an API key instead": "इसके बजाय API key इस्तेमाल करें",
   "Your browser opens when you reconnect.": "दोबारा कनेक्ट होते ही आपका ब्राउज़र खुलेगा।",
-  // the field's own word, in Hindi: "API key" stays the term, as everywhere in the Hindi (D-069)
-  "API key": "API key डालें",
+  // UC-139 and UC-140: the field names the key by its maker; "API key" stays in Latin script (D-069)
+  "Anthropic API key": "Anthropic API key",
+  "OpenAI API key": "OpenAI API key",
   "Use this key": "यह key इस्तेमाल करें",
   "A key from Claude or ChatGPT, or one from your firm's IT team. Billed to the key's own account.":
     "Claude या ChatGPT की key, या आपकी फ़र्म की IT टीम से मिली key। शुल्क उसी key के खाते पर लगता है।",

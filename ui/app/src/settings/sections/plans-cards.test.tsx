@@ -51,7 +51,7 @@ const shape = (plan: "claude" | "chatgpt") => {
   return { parts, acts };
 };
 
-const KEY_LINK = "Use an API key or my firm's account";
+const KEY_LINK = "Use an API key instead";
 
 test.each([
   [
@@ -94,12 +94,13 @@ test("Claude waiting for the other download: the card's Add Claude, with its siz
   expect(t.setups()).toEqual([{ start_sign_in: { agent: CLAUDE } }]);
 });
 
-test("a cancelled sign-in: no key link above the key panel, which shows once, under Other ways in", async () => {
+test("a cancelled sign-in: one quiet key button under the card, and its panel shows once", async () => {
   await mountPlans({ first: both({ signed_out: {} }, CANCELLED) });
   const chatgpt = block("chatgpt")!;
   expect(chatgpt.textContent).toContain("Sign-in was cancelled.");
-  expect(chatgpt.textContent).not.toContain(KEY_LINK);
-  expect(chatgpt.querySelector('[aria-label="Other ways in"]')).not.toBeNull();
+  const links = [...chatgpt.querySelectorAll("button")].filter((b) => b.textContent === KEY_LINK);
+  expect(links).toHaveLength(1);
+  await press(links[0]!);
   expect(chatgpt.querySelectorAll('[data-testid="plans-key"]')).toHaveLength(1);
 });
 
@@ -131,6 +132,8 @@ test("a cancelled sign-in with the other plan here: Use Claude instead moves to 
 
 test("each key panel's help names its own plan", async () => {
   await mountPlans({ first: both({ signed_out: {} }, CANCELLED) });
+  for (const plan of ["claude", "chatgpt"] as const)
+    await press(button("Use an API key instead", block(plan)!));
   expect(block("claude")!.textContent).toContain(
     "A key from Claude, yours or your firm's. Billed to that key's account.",
   );
