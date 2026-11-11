@@ -43,9 +43,9 @@ setInterval(() => {}, 1000);
 ";
 
 /// The fake npm whose tree outlives it a moment: a child in its group (its pid as `<n>.child`),
-/// then its pid as `<n>.pid` in the folder its first argument names, then sleeps. On Unix the
-/// child, killed with the group, is reaped by init, so the tree is seldom gone at the instant
-/// npm's handle drops.
+/// then its pid as `<n>.pid` in the folder its first argument names, then sleeps. How soon the
+/// OS reaps the two after the group's kill varies, so on Unix the tests hold a process of their
+/// own in the group as well ([`Holder`]), to make the job's wait poll for certain.
 const HANGING_TREE_NPM: &str = "\
 const fs = require('fs'), path = require('path');
 const [dir, n] = process.argv.slice(1);
@@ -439,18 +439,19 @@ fn tree_pids(fx: &Fixture, n: usize) -> [u32; 2] {
     [npm, child.trim().parse().expect("a pid")]
 }
 
+/// Whether the temp folder npm ran in is still in the install root.
+fn temp_folder_there(fx: &Fixture) -> bool {
+    std::fs::read_dir(fx.install_root(&agent_a()))
+        .unwrap()
+        .flatten()
+        .any(|entry| entry.file_name().to_string_lossy().starts_with(".tmp-"))
+}
+
 /// Waits until the job has removed the temp folder npm ran in, then checks that npm's whole
 /// tree (`pids`) had ended by then: the folder never goes while the tree may hold a file in it.
 fn folder_went_after_the_tree(fx: &Fixture, pids: [u32; 2]) {
     let start = Instant::now();
-    loop {
-        let temp = std::fs::read_dir(fx.install_root(&agent_a()))
-            .unwrap()
-            .flatten()
-            .any(|entry| entry.file_name().to_string_lossy().starts_with(".tmp-"));
-        if !temp {
-            break;
-        }
+    while temp_folder_there(fx) {
         assert!(
             start.elapsed() < DEADLINE,
             "the temp folder was not removed"
@@ -479,6 +480,56 @@ fn tree_polls(fx: &Fixture) -> usize {
         .count()
 }
 
+/// A process of the test's own in npm's process group, which the test reaps only when it lets
+/// go: killed with the group, it stays in it as the test's zombie, and the job's wait (an empty
+/// group) sees the tree as running however fast the OS reaps npm's own processes.
+#[cfg(unix)]
+struct Holder(std::process::Child);
+
+#[cfg(unix)]
+impl Holder {
+    /// Joins the group npm (`npm`, its leader) runs in.
+    fn join(npm: u32) -> Holder {
+        use std::os::unix::process::CommandExt;
+        let group = i32::try_from(npm).expect("a pid");
+        let child = std::process::Command::new("sleep")
+            .arg("600")
+            .process_group(group)
+            .spawn()
+            .expect("a process in npm's group");
+        Holder(child)
+    }
+
+    /// Waits until the job has armed a second poll for npm's tree since `before` (so its first
+    /// poll found the tree running and went on), checks the temp folder is still there while
+    /// the tree is, then reaps the holder.
+    fn let_go_after_polls(mut self, fx: &Fixture, before: usize, what: &str) {
+        let start = Instant::now();
+        while tree_polls(fx) < before + 2 {
+            assert!(
+                start.elapsed() < DEADLINE,
+                "{what} waited for npm's tree: {:?}",
+                fx.timer.armed()
+            );
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert!(
+            temp_folder_there(fx),
+            "the temp folder went while the tree ran"
+        );
+        self.0.wait().expect("the holder reaped");
+    }
+}
+
+#[cfg(unix)]
+impl Drop for Holder {
+    /// Ends and reaps it if a failed assert left it; once reaped, both do nothing.
+    fn drop(&mut self) {
+        drop(self.0.kill());
+        drop(self.0.wait());
+    }
+}
+
 /// A pause while `npm ci` runs waits for npm's whole tree (polled, up to 10 s) before the temp
 /// folder is removed, rather than ending the wait at once as the pause does elsewhere.
 #[test]
@@ -488,20 +539,16 @@ fn a_pause_mid_npm_ci_waits_for_npm_s_tree() {
     let (agents, events) = start(&fx, &[Fake::HangTree], &ci_runs);
     agents.install(&agent_a());
     let pids = tree_pids(&fx, 0);
+    // Unix only: Windows' TerminateJobObject has usually emptied the job by the first check,
+    // and the test cannot hold a process of its own in npm's job.
     #[cfg(unix)]
-    let before = tree_polls(&fx);
+    let (holder, before) = (Holder::join(pids[0]), tree_polls(&fx));
     agents.pause(&agent_a());
+    #[cfg(unix)]
+    holder.let_go_after_polls(&fx, before, "the pause");
     events.until(&agent_a(), |state| *state == InstallState::Paused);
     folder_went_after_the_tree(&fx, pids);
     assert!(agents.shutdown(Duration::from_secs(10)), "the job ended");
-    // Unix only: the child outlives the group's kill until init reaps it, so the wait polls.
-    // Windows' TerminateJobObject has usually emptied the job by the first check.
-    #[cfg(unix)]
-    assert!(
-        tree_polls(&fx) > before,
-        "the pause waited for npm's tree: {:?}",
-        fx.timer.armed()
-    );
 }
 
 /// `npm ci` running out of its 10 minutes waits for npm's tree too, before the job's retry.
@@ -512,21 +559,17 @@ fn an_npm_ci_past_its_limit_waits_for_npm_s_tree() {
     let (agents, _events) = start(&fx, &[Fake::HangTree], &ci_runs);
     agents.install(&agent_a());
     let pids = tree_pids(&fx, 0);
+    // Unix only, as in the pause's test.
     #[cfg(unix)]
-    let before = tree_polls(&fx);
+    let (holder, before) = (Holder::join(pids[0]), tree_polls(&fx));
     fx.timer.fire_next(Duration::from_mins(10));
+    #[cfg(unix)]
+    holder.let_go_after_polls(&fx, before, "the limit");
     folder_went_after_the_tree(&fx, pids);
     let start = Instant::now();
     while !fx.timer.install_waits().contains(&BACKOFF_FIRST) {
         assert!(start.elapsed() < DEADLINE, "no back-off after the limit");
         std::thread::sleep(Duration::from_millis(20));
     }
-    // Unix only, as in the pause's test: on Windows the job is usually empty at once.
-    #[cfg(unix)]
-    assert!(
-        tree_polls(&fx) > before,
-        "the limit waited for npm's tree: {:?}",
-        fx.timer.armed()
-    );
     assert!(agents.shutdown(Duration::from_secs(10)));
 }
