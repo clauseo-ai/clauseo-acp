@@ -53,11 +53,16 @@ jobs:
       - name: Install the Rust toolchain from rust-toolchain.toml
         run: rustup toolchain install
 
+      # Exactly one test must run: a renamed test would otherwise pass by matching nothing.
       - name: The committed JSON Schema matches the crate's types
         env:
           INSTA_UPDATE: "no"
           CI: "true"
-        run: cargo test --locked -p clauseo-counts --lib schema::tests::wire::the_committed_schema_matches
+        run: |
+          set -euo pipefail
+          cargo test --locked -p clauseo-counts --lib schema::tests::wire::the_committed_schema_matches -- --exact 2>&1 | tee "$RUNNER_TEMP/snapshot.log"
+          grep -q "test result: ok. 1 passed;" "$RUNNER_TEMP/snapshot.log" ||
+            { echo "::error::the schema snapshot test did not run exactly once"; exit 1; }
 
   native:
     name: native tests
