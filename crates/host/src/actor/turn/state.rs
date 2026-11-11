@@ -3,8 +3,8 @@
 //! and what a thread's turn state holds.
 
 use clauseo_protocol::{
-    ContentBlock, DetachReason, ErrorCode, ExpiryReason, MatterId, MessageId, StopReason, ThreadId,
-    TurnId,
+    ContentBlock, DetachReason, ErrorCode, ExpiryReason, MatterId, MessageId, StopReason, StreamId,
+    ThreadId, TurnId,
 };
 
 use super::super::{Actor, HostPhase};
@@ -150,6 +150,34 @@ pub(crate) fn turn_running(actor: &Actor, thread: ThreadId) -> bool {
         let state = &entry.turn;
         state.current.is_some() || state.closing.is_some() || !state.queue.is_empty()
     })
+}
+
+/// Whether a turn of `thread` has ended: its end is decided (`Ending`, its prompt has
+/// returned), its `TurnEnded` is not durable yet (`closing`), or one is durable: the loaded
+/// stream's last step, or `last_stop` (kept from each durable `TurnEnded`) while the stream is
+/// not loaded. `idle` says the agent's update came outside the live turn: the driver makes a
+/// session's origin idle once the prompt's answer is in, so such an update during a prompt
+/// follows the answer. Once a turn has ended, the first turn has, and the thread's name is
+/// settled (D-070).
+pub(crate) fn turn_ended(actor: &Actor, thread: ThreadId, idle: bool) -> bool {
+    let Some(entry) = actor.threads.get(&thread) else {
+        return false;
+    };
+    let state = &entry.turn;
+    if state.closing.is_some()
+        || state.current.as_ref().is_some_and(|current| {
+            current.phase == TurnPhase::Ending || (idle && current.phase == TurnPhase::Prompting)
+        })
+    {
+        return true;
+    }
+    match actor
+        .loaded(StreamId::Thread(thread))
+        .and_then(|loaded| loaded.state.as_thread())
+    {
+        Some(stream) => super::super::rail::last_step(stream).is_some(),
+        None => entry.last_stop.is_some(),
+    }
 }
 
 /// The turn running on `thread` now, if any (`blocked.rs` attributes a blocked site to it).

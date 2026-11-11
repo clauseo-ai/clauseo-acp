@@ -4,12 +4,15 @@
 //! so a placeholder never replaces a title. The row keeps who set its title (`title_source`),
 //! which the tests read back from the store after a host stops.
 //!
-//! The agent's side comes from scenarios: `title-after-rename` (a title on the second turn),
-//! `title-seed` and `title-load` (a title replayed by `session/load`),
-//! `title-load-replay-in-prompt` (a title replayed by the first prompt after a reload, as
-//! claude-agent-acp does), `title-codex-double` (codex-acp's prompt title, then its AI title),
-//! `title-codex-prompts` (codex-acp's title from each prompt, whole, and no AI title)
-//! and `title-turns` (three turns with titles for the agent-title sequence).
+//! The agent's titles count only until a turn of the thread has ended (D-070): after the first
+//! answer the name settles. The agent's side comes from scenarios: `title-first-turn` (a title
+//! during the first turn), `title-first-turn-twice` (two titles during the first turn),
+//! `title-after-rename` (a title on the second turn, ignored), `title-between-turns` (a title
+//! after the first answer, ignored), `title-seed` and `title-load` (a title replayed by
+//! `session/load`), `title-load-replay-in-prompt` (a title replayed by the first prompt after a
+//! reload, as claude-agent-acp does), `title-codex-double` (codex-acp's prompt title, then its
+//! AI title), `title-codex-prompts` (codex-acp's title from each prompt, whole, and no AI title)
+//! and `title-turns` (three turns with titles, the first one taken).
 
 use std::path::Path;
 use std::time::Duration;
@@ -144,28 +147,111 @@ fn turn(host: &Running, events: &mut Events, thread: ThreadId, prompt: &str) {
     events.assert_no_mismatch();
 }
 
-/// Rule 2 with the room's placeholder: the first-words title, then the agent's title. The
-/// agent's title replaces it, and the row's source is the agent's.
+/// An agent title during the first turn renames the thread, as it always has (D-070).
 #[test]
-fn agent_title_replaces_first_words_title() {
-    let (dir, host, matter, thread) = two_turns(
-        "title_agent_replaces_first_words",
-        "title-after-rename",
-        FIRST_WORDS,
-        true,
+fn agent_title_in_the_first_turn_renames_the_thread() {
+    let dir = Dir::new(
+        "title_agent_first_turn",
+        &[(FAKE, Scenario::Local("title-first-turn"))],
     );
+    let host = dir.start(0);
+    let (matter, thread, _) = matter_with_thread(&dir, &host, "m", &[("brief.txt", "x\n")], FAKE);
+    let mut events = host.events(StreamId::Thread(thread));
+    turn(&host, &mut events, thread, FIRST_WORDS);
+    turn(&host, &mut events, thread, "And clause 10?");
     assert_eq!(
-        renames(&host, thread),
-        [
-            (FIRST_WORDS.to_owned(), RenameSource::Placeholder),
-            (AGENT_TITLE.to_owned(), RenameSource::Agent),
-        ]
+        renames_in(&events),
+        [(AGENT_TITLE.to_owned(), RenameSource::Agent)],
+        "{}",
+        events.dump()
     );
     let (row, header) = titles(&host, matter, thread);
     assert_eq!(row.as_deref(), Some(AGENT_TITLE), "sidebar row");
     assert_eq!(header.as_deref(), Some(AGENT_TITLE), "header");
     host.shutdown();
     assert_eq!(stored_sources(&dir, matter), [Some(RenameSource::Agent)]);
+}
+
+/// Rule 2 with the room's placeholder: the first-words title, then the agent's title during the
+/// first turn. The agent's title replaces it, and the row's source is the agent's.
+#[test]
+fn agent_title_replaces_first_words_title() {
+    let dir = Dir::new(
+        "title_agent_replaces_first_words",
+        &[(FAKE, Scenario::Local("title-first-turn"))],
+    );
+    let host = dir.start(0);
+    let (matter, thread, _) = matter_with_thread(&dir, &host, "m", &[("brief.txt", "x\n")], FAKE);
+    rename(&host, thread, FIRST_WORDS, true);
+    let mut events = host.events(StreamId::Thread(thread));
+    turn(&host, &mut events, thread, FIRST_WORDS);
+    assert_eq!(
+        renames_in(&events),
+        [
+            (FIRST_WORDS.to_owned(), RenameSource::Placeholder),
+            (AGENT_TITLE.to_owned(), RenameSource::Agent),
+        ],
+        "{}",
+        events.dump()
+    );
+    let (row, header) = titles(&host, matter, thread);
+    assert_eq!(row.as_deref(), Some(AGENT_TITLE), "sidebar row");
+    assert_eq!(header.as_deref(), Some(AGENT_TITLE), "header");
+    host.shutdown();
+    assert_eq!(stored_sources(&dir, matter), [Some(RenameSource::Agent)]);
+}
+
+/// D-070: the agent's title sent with the second turn makes no event; the room's title from the
+/// first question stays, in the sidebar, the header and the store.
+#[test]
+fn agent_title_in_the_second_turn_is_ignored() {
+    let (dir, host, matter, thread) = two_turns(
+        "title_agent_second_turn",
+        "title-after-rename",
+        FIRST_WORDS,
+        true,
+    );
+    assert_eq!(
+        renames(&host, thread),
+        [(FIRST_WORDS.to_owned(), RenameSource::Placeholder)],
+        "no ThreadRenamed by Agent"
+    );
+    let (row, header) = titles(&host, matter, thread);
+    assert_eq!(row.as_deref(), Some(FIRST_WORDS), "sidebar row");
+    assert_eq!(header.as_deref(), Some(FIRST_WORDS), "header");
+    host.shutdown();
+    assert_eq!(
+        stored_sources(&dir, matter),
+        [Some(RenameSource::Placeholder)]
+    );
+}
+
+/// D-070: an agent title sent after the first answer and before the second prompt is ignored.
+#[test]
+fn agent_title_between_turns_is_ignored() {
+    let dir = Dir::new(
+        "title_agent_between_turns",
+        &[(FAKE, Scenario::Local("title-between-turns"))],
+    );
+    let host = dir.start(0);
+    let (matter, thread, _) = matter_with_thread(&dir, &host, "m", &[("brief.txt", "x\n")], FAKE);
+    rename(&host, thread, FIRST_WORDS, true);
+    let mut events = host.events(StreamId::Thread(thread));
+    turn(&host, &mut events, thread, FIRST_WORDS);
+    turn(&host, &mut events, thread, "And clause 10?");
+    assert_eq!(
+        renames_in(&events),
+        [(FIRST_WORDS.to_owned(), RenameSource::Placeholder)],
+        "{}",
+        events.dump()
+    );
+    let (row, _) = titles(&host, matter, thread);
+    assert_eq!(row.as_deref(), Some(FIRST_WORDS), "sidebar row");
+    host.shutdown();
+    assert_eq!(
+        stored_sources(&dir, matter),
+        [Some(RenameSource::Placeholder)]
+    );
 }
 
 /// Rule 1: a hand-typed title, then the agent's title: the typed one stays.
@@ -254,10 +340,10 @@ fn hand_typed_title_survives_a_replay_in_the_first_prompt() {
 }
 
 /// Codex's two titles: the placeholder, then the whole prompt, which only repeats the lawyer's
-/// question and is not taken (D-070), then its AI title, which replaces the placeholder. The
-/// thread ends on the AI title, with the agent as its source, and the log has one rename by it.
+/// question and is not taken (D-070), then its AI title after the first answer, which is
+/// ignored: the thread keeps the first question's title, with the placeholder as its source.
 #[test]
-fn codex_prompt_title_then_ai_title_ends_on_the_ai_title() {
+fn codex_ai_title_after_the_first_answer_is_ignored() {
     let (dir, host, matter, thread) = two_turns(
         "title_codex_double",
         "title-codex-double",
@@ -266,16 +352,16 @@ fn codex_prompt_title_then_ai_title_ends_on_the_ai_title() {
     );
     assert_eq!(
         renames(&host, thread),
-        [
-            (FIRST_WORDS.to_owned(), RenameSource::Placeholder),
-            (AGENT_TITLE.to_owned(), RenameSource::Agent),
-        ]
+        [(FIRST_WORDS.to_owned(), RenameSource::Placeholder)]
     );
     let (row, header) = titles(&host, matter, thread);
-    assert_eq!(row.as_deref(), Some(AGENT_TITLE), "sidebar row");
-    assert_eq!(header.as_deref(), Some(AGENT_TITLE), "header");
+    assert_eq!(row.as_deref(), Some(FIRST_WORDS), "sidebar row");
+    assert_eq!(header.as_deref(), Some(FIRST_WORDS), "header");
     host.shutdown();
-    assert_eq!(stored_sources(&dir, matter), [Some(RenameSource::Agent)]);
+    assert_eq!(
+        stored_sources(&dir, matter),
+        [Some(RenameSource::Placeholder)]
+    );
 }
 
 /// D-070: Codex titling the session with each prompt, whole, never names the thread: neither
@@ -308,7 +394,7 @@ fn codex_prompt_titles_leave_the_rooms_title_from_the_first_question() {
 fn placeholder_is_ignored_once_the_agent_has_named_the_thread() {
     let dir = Dir::new(
         "title_agent_then_placeholder",
-        &[(FAKE, Scenario::Local("title-after-rename"))],
+        &[(FAKE, Scenario::Local("title-first-turn"))],
     );
     let host = dir.start(0);
     let (matter, thread, _) = matter_with_thread(&dir, &host, "m", &[("brief.txt", "x\n")], FAKE);
@@ -330,19 +416,19 @@ fn placeholder_is_ignored_once_the_agent_has_named_the_thread() {
     assert_eq!(stored_sources(&dir, matter), [Some(RenameSource::Agent)]);
 }
 
-/// An agent title replaces an earlier agent title; the same one again makes no event.
+/// During the first turn an agent title replaces an earlier agent title; the same one again
+/// makes no event.
 #[test]
 fn agent_title_replaces_an_earlier_agent_title_once() {
     let dir = Dir::new(
         "title_agent_twice",
-        &[(FAKE, Scenario::Local("title-turns"))],
+        &[(FAKE, Scenario::Local("title-first-turn-twice"))],
     );
     let host = dir.start(0);
     let (_, thread, _) = matter_with_thread(&dir, &host, "m", &[("brief.txt", "x\n")], FAKE);
     let mut events = host.events(StreamId::Thread(thread));
     turn(&host, &mut events, thread, "One.");
     turn(&host, &mut events, thread, "Two.");
-    turn(&host, &mut events, thread, "Three.");
     assert_eq!(
         renames_in(&events),
         [
@@ -355,7 +441,8 @@ fn agent_title_replaces_an_earlier_agent_title_once() {
     host.shutdown();
 }
 
-/// A hand-typed title sent after an agent title stays when the agent names the thread again.
+/// A hand-typed title sent after an agent title stays; the agent's later titles, after the first
+/// answer, are ignored too.
 #[test]
 fn typed_title_wins_over_a_later_agent_title() {
     let dir = Dir::new(
@@ -385,10 +472,10 @@ fn typed_title_wins_over_a_later_agent_title() {
     assert_eq!(stored_sources(&dir, matter), [Some(RenameSource::Lawyer)]);
 }
 
-/// The agent replays its stored title on load (Codex's replay): the same title as the thread
-/// already has from the agent logs nothing new.
+/// After a restart, the agent's title replayed on load for a thread whose first turn has ended
+/// is ignored (D-070): the thread keeps the first question's title, and nothing is logged.
 #[test]
-fn replayed_agent_title_on_load_adds_no_event() {
+fn replayed_agent_title_on_load_is_ignored_after_the_first_answer() {
     let (dir, host, _matter, thread) = two_turns(
         "title_agent_replay",
         "title-after-rename",
@@ -403,12 +490,34 @@ fn replayed_agent_title_on_load_adds_no_event() {
     turn(&host, &mut events, thread, "And clause 11?");
     assert_eq!(
         renames_in(&events),
-        [
-            (FIRST_WORDS.to_owned(), RenameSource::Placeholder),
-            (AGENT_TITLE.to_owned(), RenameSource::Agent),
-        ],
+        [(FIRST_WORDS.to_owned(), RenameSource::Placeholder)],
         "{}",
         events.dump()
     );
     host.shutdown();
+}
+
+/// A hand-typed title, then an agent title during the first turn: the typed one stays.
+#[test]
+fn typed_title_before_the_first_turn_beats_an_agent_title_in_it() {
+    let dir = Dir::new(
+        "title_typed_then_agent_first_turn",
+        &[(FAKE, Scenario::Local("title-first-turn"))],
+    );
+    let host = dir.start(0);
+    let (matter, thread, _) = matter_with_thread(&dir, &host, "m", &[("brief.txt", "x\n")], FAKE);
+    rename(&host, thread, TYPED, false);
+    let mut events = host.events(StreamId::Thread(thread));
+    turn(&host, &mut events, thread, FIRST_WORDS);
+    assert_eq!(
+        renames_in(&events),
+        [(TYPED.to_owned(), RenameSource::Lawyer)],
+        "{}",
+        events.dump()
+    );
+    let (row, header) = titles(&host, matter, thread);
+    assert_eq!(row.as_deref(), Some(TYPED), "sidebar row");
+    assert_eq!(header.as_deref(), Some(TYPED), "header");
+    host.shutdown();
+    assert_eq!(stored_sources(&dir, matter), [Some(RenameSource::Lawyer)]);
 }
