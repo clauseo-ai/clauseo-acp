@@ -17,7 +17,7 @@ use worker::{
 use clauseo_counts::schema::Time;
 
 use crate::body::{Limited, check_headers, inflate};
-use crate::retention::Pruner;
+use crate::retention::deletes;
 use crate::route::{Refusal, Route};
 use crate::rows::{Accepted, BUMP_RATE, Param, accept};
 
@@ -132,27 +132,18 @@ fn statement(db: &D1Database, sql: &str, values: &[Param]) -> Result<D1PreparedS
     Ok(db.prepare(sql).bind(&values)?)
 }
 
-/// The daily deletes ([`Pruner`]). A failed run is not retried or recorded (the Worker keeps
-/// no logs); the next day's run deletes the same rows and more.
+/// The daily deletes ([`deletes`]), one statement at a time, so each finished range stays
+/// deleted if a later one fails. A failed run is not retried or recorded (the Worker keeps no
+/// logs); the next day's run deletes the same rows.
 #[event(scheduled)]
 async fn scheduled(_event: ScheduledEvent, env: Env, _context: ScheduleContext) {
     prune(&env).await.unwrap_or_default();
 }
 
-/// A deleted row's key, the one column each chunked delete returns.
-#[derive(serde::Deserialize)]
-struct Key {
-    #[serde(alias = "install", alias = "tally")]
-    key: String,
-}
-
 async fn prune(env: &Env) -> Result<(), Refusal> {
     let db = env.d1(DB)?;
-    let mut pruner = Pruner::new(now()).ok_or(Refusal::Failed)?;
-    while let Some((sql, values)) = pruner.next() {
-        let keys: Vec<Key> = statement(&db, sql, &values)?.all().await?.results()?;
-        let keys: Vec<String> = keys.into_iter().map(|row| row.key).collect();
-        pruner.record(&keys);
+    for (sql, values) in deletes(now()).ok_or(Refusal::Failed)? {
+        statement(&db, sql, &values)?.run().await?;
     }
     Ok(())
 }

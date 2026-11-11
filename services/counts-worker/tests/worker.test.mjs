@@ -193,7 +193,7 @@ test("any other path is 404, another method on the two paths 405", async () => {
   }
 });
 
-test("the daily cron deletes reports after 90 days, tallies after 396 and past days' counts, in chunks", async () => {
+test("the daily cron deletes reports after 90 days, tallies after 396 and past days' counts, over every id range", async () => {
   const old = uuid();
   const kept = uuid();
   const insert = (install, dayText) =>
@@ -202,7 +202,8 @@ test("the daily cron deletes reports after 90 days, tallies after 396 and past d
     `INSERT INTO tally VALUES ('${id}', '${weekText}', '3.0.4', 'stable', 'linux', NULL, 'x86_64', 'per_user', 0, '{}')`;
   const oldTally = uuid();
   const keptTally = uuid();
-  // A backlog of more than one 1,000-row chunk in each table: 2,500 reports and 1,200 tallies.
+  // A backlog spread over all 16 id ranges, larger than any one range: 2,500 reports and 1,200
+  // tallies, the first hex digit of each id cycling through 0 to f.
   const series = (count) => `WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < ${count})`;
   worker.sql(
     [
@@ -210,8 +211,8 @@ test("the daily cron deletes reports after 90 days, tallies after 396 and past d
       insert(kept, day(90)),
       tally(oldTally, week(58)),
       tally(keptTally, week(55)),
-      `${series(2_500)} INSERT INTO report SELECT printf('%08x-0000-4000-8000-00000000000a', i), '${day(120)}', '3.0.4', 'stable', 'macos', 15, 'aarch64', 'en', '{}' FROM n`,
-      `${series(1_200)} INSERT INTO tally SELECT printf('%08x-0000-4000-8000-00000000000b', i), '${week(70)}', '3.0.4', 'stable', 'linux', NULL, 'x86_64', 'per_user', 0, '{}' FROM n`,
+      `${series(2_500)} INSERT INTO report SELECT printf('%x%07x-0000-4000-8000-00000000000a', i % 16, i), '${day(120)}', '3.0.4', 'stable', 'macos', 15, 'aarch64', 'en', '{}' FROM n`,
+      `${series(1_200)} INSERT INTO tally SELECT printf('%x%07x-0000-4000-8000-00000000000b', i % 16, i), '${week(70)}', '3.0.4', 'stable', 'linux', NULL, 'x86_64', 'per_user', 0, '{}' FROM n`,
       `INSERT INTO rate VALUES ('counts', '${day(1)}', 3), ('tally', '${day(2)}', 4) ON CONFLICT DO NOTHING`,
     ].join("; "),
   );
