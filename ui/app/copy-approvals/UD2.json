@@ -559,16 +559,6 @@
     "at": "2026-11-10",
     "by": "app track (provisional; orchestrator approved the words 2026-11-10, copy review pending)"
   },
-  "UD2-63": {
-    "en": "A key from {name}, yours or your firm's. Billed to that key's account.",
-    "hi": "{name} की key, आपकी या आपकी फ़र्म की। शुल्क उसी key के खाते पर लगता है।",
-    "hi_status": "provisional",
-    "hi_at": "2026-11-10",
-    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-10",
-    "by": "app track (provisional; orchestrator approved the reworded words 2026-11-10, copy review pending)"
-  },
   "UD2-65": {
     "en": "Read the papers",
     "hi": "दस्तावेज़ पढ़ें",

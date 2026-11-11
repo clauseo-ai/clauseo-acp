@@ -17,7 +17,7 @@ import { Say } from "../say.tsx";
 import { WRAP } from "./classes.ts";
 import { Failed } from "./gate-failed.tsx";
 import { Act, Note, PasteRow, Ways } from "./parts.tsx";
-import { APP, FOUND, KEY_LABEL, NAME, other } from "./plan-names.ts";
+import { APP, FOUND, KEY_HELP, KEY_LABEL, NAME, other } from "./plan-names.ts";
 
 /** A login seen but not reusable, or why reuse stopped: the host's `FoundLogin`. */
 export type Found =
@@ -451,7 +451,7 @@ export function Gate({
           <Ways>
             {keys !== null && (
               <Note>
-                {`${w("A key from Claude or ChatGPT, or one from your firm's IT team. Billed to the key's own account.")} ${w(
+                {`${w(KEY_HELP[plan])} ${w(
                   keys === "mac"
                     ? "Kept in this Mac's Keychain."
                     : keys === "windows"

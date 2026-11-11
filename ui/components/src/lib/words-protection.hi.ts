@@ -14,19 +14,19 @@ export const HI = {
   // the first set-up, and the app's elevates the verified admin copy after an in-app Remove, or for
   // a re-run
   "Set up the Safe workspace?": "सुरक्षित कार्यक्षेत्र तैयार करें?",
-  "Windows will ask to let Clauseo set up the Safe workspace. It will say the publisher is unknown. That's expected for Clauseo. Choose Yes. If Windows asks for an administrator's password, whoever looks after this computer can enter it.":
-    "Windows, Clauseo को सुरक्षित कार्यक्षेत्र तैयार करने देने के लिए पूछेगा। वह प्रकाशक को अज्ञात बताएगा। Clauseo के लिए यह सामान्य है। Yes चुनें। अगर Windows किसी व्यवस्थापक का पासवर्ड माँगे, तो इस कंप्यूटर की देखरेख करने वाले व्यक्ति उसे दर्ज कर सकते हैं।",
+  "Windows will ask to let Clauseo set up the Safe workspace. It will say the publisher is unknown. That's expected for Clauseo. Choose Yes. If Windows asks for an administrator's password, enter the password of an administrator account on this computer.":
+    "Windows, Clauseo को सुरक्षित कार्यक्षेत्र तैयार करने देने के लिए पूछेगा। वह प्रकाशक को अज्ञात बताएगा। Clauseo के लिए यह सामान्य है। Yes चुनें। अगर Windows किसी व्यवस्थापक का पासवर्ड माँगे, तो इस कंप्यूटर के किसी व्यवस्थापक खाते का पासवर्ड दर्ज करें।",
   // Add room's confirm (UC-94, UC-95)
   "Add room": "जगह जोड़ें",
   "Add room for 4 more?": "4 और के लिए जगह जोड़ें?",
-  "Windows will ask to let Clauseo add room to the Safe workspace. It will say the publisher is unknown. That's expected for Clauseo. Choose Yes. If Windows asks for an administrator's password, whoever looks after this computer can enter it.":
-    "Windows, Clauseo को सुरक्षित कार्यक्षेत्र में जगह जोड़ने देने के लिए पूछेगा। वह प्रकाशक को अज्ञात बताएगा। Clauseo के लिए यह सामान्य है। Yes चुनें। अगर Windows किसी व्यवस्थापक का पासवर्ड माँगे, तो इस कंप्यूटर की देखरेख करने वाले व्यक्ति उसे दर्ज कर सकते हैं।",
+  "Windows will ask to let Clauseo add room to the Safe workspace. It will say the publisher is unknown. That's expected for Clauseo. Choose Yes. If Windows asks for an administrator's password, enter the password of an administrator account on this computer.":
+    "Windows, Clauseo को सुरक्षित कार्यक्षेत्र में जगह जोड़ने देने के लिए पूछेगा। वह प्रकाशक को अज्ञात बताएगा। Clauseo के लिए यह सामान्य है। Yes चुनें। अगर Windows किसी व्यवस्थापक का पासवर्ड माँगे, तो इस कंप्यूटर के किसी व्यवस्थापक खाते का पासवर्ड दर्ज करें।",
   // the set-up press where no Windows prompt follows (UC-12)
   "Set up the Safe workspace": "सुरक्षित कार्यक्षेत्र तैयार करें",
   // the remove confirm (UC-41 to UC-44)
   "Remove the Safe workspace from this computer?": "इस कंप्यूटर से सुरक्षित कार्यक्षेत्र हटाएँ?",
-  "Windows will ask to let Clauseo remove the Safe workspace. It will say the publisher is unknown. That's expected for Clauseo. Choose Yes. If Windows asks for an administrator's password, whoever looks after this computer can enter it.":
-    "Windows, Clauseo को सुरक्षित कार्यक्षेत्र हटाने देने के लिए पूछेगा। वह प्रकाशक को अज्ञात बताएगा। Clauseo के लिए यह सामान्य है। Yes चुनें। अगर Windows किसी व्यवस्थापक का पासवर्ड माँगे, तो इस कंप्यूटर की देखरेख करने वाले व्यक्ति उसे दर्ज कर सकते हैं।",
+  "Windows will ask to let Clauseo remove the Safe workspace. It will say the publisher is unknown. That's expected for Clauseo. Choose Yes. If Windows asks for an administrator's password, enter the password of an administrator account on this computer.":
+    "Windows, Clauseo को सुरक्षित कार्यक्षेत्र हटाने देने के लिए पूछेगा। वह प्रकाशक को अज्ञात बताएगा। Clauseo के लिए यह सामान्य है। Yes चुनें। अगर Windows किसी व्यवस्थापक का पासवर्ड माँगे, तो इस कंप्यूटर के किसी व्यवस्थापक खाते का पासवर्ड दर्ज करें।",
   "Afterwards, Clauseo works on this computer without the Safe workspace until it's set up again.":
     "इसके बाद, जब तक सुरक्षित कार्यक्षेत्र फिर से तैयार नहीं होता, Clauseo इस कंप्यूटर पर उसके बिना काम करता है।",
   // the same, where the firm requires the Safe workspace (UC-45)

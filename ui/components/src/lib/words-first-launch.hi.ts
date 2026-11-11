@@ -26,6 +26,8 @@ export const HI = {
   "{name} is ready": "{name} तैयार है",
   "Use the system proxy": "सिस्टम की प्रॉक्सी इस्तेमाल करें",
   "Copy details for IT": "IT के लिए विवरण कॉपी करें",
+  // UC-144: a blocked download's copy button, which copies the addresses (UD1-17)
+  "Copy addresses": "पते कॉपी करें",
   "Message copied": "संदेश कॉपी हो गया",
   // the facts in a note for IT (words-first-launch.ts's itNote), each "key: value" (new,
   // provisional)
@@ -37,8 +39,8 @@ export const HI = {
   "Program hash: {hash}": "प्रोग्राम का हैश: {hash}",
   "Clauseo version: {version}": "Clauseo संस्करण: {version}",
   "Clauseo for firm IT: {url}": "फ़र्म IT के लिए Clauseo: {url}",
-  "Clauseo needs to download {name} to work. Please allow these addresses on the firm's network: {list}.":
-    "काम करने के लिए Clauseo को {name} डाउनलोड करना है। कृपया फ़र्म के नेटवर्क पर ये पते अनुमत करें: {list}।",
+  "Clauseo needs to download {name}. These addresses must be reachable from this computer: {list}.":
+    "Clauseo को {name} डाउनलोड करना है। ये पते इस कंप्यूटर से पहुँच में होने चाहिए: {list}।",
   "{name} needs {need} MB free on this computer, and {free} MB is free.":
     "{name} को इस कंप्यूटर पर {need} MB खाली जगह चाहिए, और अभी {free} MB खाली है।",
   "{name} couldn't be downloaded.": "{name} डाउनलोड नहीं हो सका।",
@@ -65,8 +67,12 @@ export const HI = {
   "Anthropic API key": "Anthropic API key",
   "OpenAI API key": "OpenAI API key",
   "Use this key": "यह key इस्तेमाल करें",
-  "A key from Claude or ChatGPT, or one from your firm's IT team. Billed to the key's own account.":
-    "Claude या ChatGPT की key, या आपकी फ़र्म की IT टीम से मिली key। शुल्क उसी key के खाते पर लगता है।",
+  // UC-145 and UC-146: the key panel's help names the key's maker; "Anthropic Console", "OpenAI" and "API key" stay
+  // in Latin script (D-069)
+  "A key from the Anthropic Console. Billed to that account.":
+    "Anthropic Console की key। शुल्क उसी खाते पर लगता है।",
+  "A key from the OpenAI platform. Billed to that account.":
+    "OpenAI platform की key। शुल्क उसी खाते पर लगता है।",
   "Using an API key, billed to its own account": "API key से, उसी के खाते पर शुल्क",
   // Sign in pressed before the install is ready, in place of the design's "Sign in at {time}" (new)
   "Your browser opens when {name} is ready.": "{name} तैयार होते ही आपका ब्राउज़र खुलेगा।",

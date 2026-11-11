@@ -227,7 +227,7 @@ export const UC: Entry[] = [
   first(
     "UC-11",
     pw(
-      "Windows will ask to let Clauseo set up the Safe workspace. It will say the publisher is unknown. That's expected for Clauseo. Choose Yes. If Windows asks for an administrator's password, whoever looks after this computer can enter it.",
+      "Windows will ask to let Clauseo set up the Safe workspace. It will say the publisher is unknown. That's expected for Clauseo. Choose Yes. If Windows asks for an administrator's password, enter the password of an administrator account on this computer.",
     ),
   ),
   room("UC-12", pw("Set up the Safe workspace"), "room/np-note", {
@@ -360,7 +360,7 @@ export const UC: Entry[] = [
   settings(
     "UC-42",
     pw(
-      "Windows will ask to let Clauseo remove the Safe workspace. It will say the publisher is unknown. That's expected for Clauseo. Choose Yes. If Windows asks for an administrator's password, whoever looks after this computer can enter it.",
+      "Windows will ask to let Clauseo remove the Safe workspace. It will say the publisher is unknown. That's expected for Clauseo. Choose Yes. If Windows asks for an administrator's password, enter the password of an administrator account on this computer.",
     ),
     held(P.b),
     ['[data-testid="protection-remove"]'],

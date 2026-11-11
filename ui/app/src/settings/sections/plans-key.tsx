@@ -6,7 +6,7 @@
 // gate's own key link (a stopped sign-in's) opens this panel too.
 import { useEffect, useRef } from "react";
 import type { Plan } from "@clauseo/components/clauseo/first-launch/gate.tsx";
-import { KEY_LABEL, NAME } from "@clauseo/components/clauseo/first-launch/plan-names.ts";
+import { KEY_HELP, KEY_LABEL } from "@clauseo/components/clauseo/first-launch/plan-names.ts";
 import { Note, PasteRow, Ways } from "@clauseo/components/clauseo/first-launch/parts.tsx";
 import { useDisplay } from "@clauseo/components/lib/display.ts";
 import { fl } from "@clauseo/components/lib/words-first-launch.ts";
@@ -89,7 +89,7 @@ export function PlansKey({
           />
           <Ways>
             <Note>
-              {`${st(lang, "A key from {name}, yours or your firm's. Billed to that key's account.", { name: NAME[plan] })} ${fl(
+              {`${fl(lang, KEY_HELP[plan])} ${fl(
                 lang,
                 keys === "mac"
                   ? "Kept in this Mac's Keychain."

@@ -99,16 +99,6 @@
     "at": "2026-11-02",
     "by": "design"
   },
-  "UD1-15": {
-    "en": "Copy details for IT",
-    "hi": "IT के लिए विवरण कॉपी करें",
-    "status": "provisional",
-    "at": "2026-11-08",
-    "by": "app track (no IT endings)",
-    "hi_status": "provisional",
-    "hi_at": "2026-11-08",
-    "hi_by": "app track (no IT endings)"
-  },
   "UD1-16": {
     "en": "Message copied",
     "hi": "संदेश कॉपी हो गया",
@@ -117,11 +107,15 @@
     "by": "design"
   },
   "UD1-17": {
-    "en": "Clauseo needs to download {name} to work. Please allow these addresses on the firm's network: {list}.",
-    "hi": "काम करने के लिए Clauseo को {name} डाउनलोड करना है। कृपया फ़र्म के नेटवर्क पर ये पते अनुमत करें: {list}।",
+    "en": "Clauseo needs to download {name}. These addresses must be reachable from this computer: {list}.",
+    "hi": "Clauseo को {name} डाउनलोड करना है। ये पते इस कंप्यूटर से पहुँच में होने चाहिए: {list}।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-11",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
     "status": "approved",
-    "at": "2026-11-02",
-    "by": "design"
+    "at": "2026-11-11",
+    "by": "orchestrator (IT sweep, 2026-11-11)",
+    "note": "the text Copy addresses copies; was \"…Please allow these addresses on the firm's network\" (IT sweep)"
   },
   "UD1-18": {
     "en": "{name} needs {need} MB free on this computer, and {free} MB is free.",
@@ -203,13 +197,6 @@
   "UD1-31": {
     "en": "Use this key",
     "hi": "यह key इस्तेमाल करें",
-    "status": "approved",
-    "at": "2026-11-02",
-    "by": "design"
-  },
-  "UD1-32": {
-    "en": "A key from Claude or ChatGPT, or one from your firm's IT team. Billed to the key's own account.",
-    "hi": "Claude या ChatGPT की key, या आपकी फ़र्म की IT टीम से मिली key। शुल्क उसी key के खाते पर लगता है।",
     "status": "approved",
     "at": "2026-11-02",
     "by": "design"

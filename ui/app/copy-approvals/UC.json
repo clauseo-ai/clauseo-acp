@@ -54,14 +54,15 @@
     "by": "app track (provisional; Rohan batch review; design B, safe-workspace-installer-setup)"
   },
   "UC-11": {
-    "en": "Windows will ask to let Clauseo set up the Safe workspace. It will say the publisher is unknown. That's expected for Clauseo. Choose Yes. If Windows asks for an administrator's password, whoever looks after this computer can enter it.",
-    "hi": "Windows, Clauseo को सुरक्षित कार्यक्षेत्र तैयार करने देने के लिए पूछेगा। वह प्रकाशक को अज्ञात बताएगा। Clauseo के लिए यह सामान्य है। Yes चुनें। अगर Windows किसी व्यवस्थापक का पासवर्ड माँगे, तो इस कंप्यूटर की देखरेख करने वाले व्यक्ति उसे दर्ज कर सकते हैं।",
+    "en": "Windows will ask to let Clauseo set up the Safe workspace. It will say the publisher is unknown. That's expected for Clauseo. Choose Yes. If Windows asks for an administrator's password, enter the password of an administrator account on this computer.",
+    "hi": "Windows, Clauseo को सुरक्षित कार्यक्षेत्र तैयार करने देने के लिए पूछेगा। वह प्रकाशक को अज्ञात बताएगा। Clauseo के लिए यह सामान्य है। Yes चुनें। अगर Windows किसी व्यवस्थापक का पासवर्ड माँगे, तो इस कंप्यूटर के किसी व्यवस्थापक खाते का पासवर्ड दर्ज करें।",
     "hi_status": "provisional",
-    "hi_at": "2026-11-08",
+    "hi_at": "2026-11-11",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-08",
-    "by": "app track (provisional; Rohan batch review; required-words)"
+    "status": "approved",
+    "at": "2026-11-11",
+    "by": "orchestrator (IT sweep, 2026-11-11)",
+    "note": "the password ending reads \"enter the password of an administrator account on this computer\", was \"whoever looks after this computer can enter it\" (IT sweep)"
   },
   "UC-12": {
     "en": "Set up the Safe workspace",
@@ -306,14 +307,15 @@
     "by": "app track (provisional; Rohan batch review; design B, safe-workspace-installer-setup)"
   },
   "UC-42": {
-    "en": "Windows will ask to let Clauseo remove the Safe workspace. It will say the publisher is unknown. That's expected for Clauseo. Choose Yes. If Windows asks for an administrator's password, whoever looks after this computer can enter it.",
-    "hi": "Windows, Clauseo को सुरक्षित कार्यक्षेत्र हटाने देने के लिए पूछेगा। वह प्रकाशक को अज्ञात बताएगा। Clauseo के लिए यह सामान्य है। Yes चुनें। अगर Windows किसी व्यवस्थापक का पासवर्ड माँगे, तो इस कंप्यूटर की देखरेख करने वाले व्यक्ति उसे दर्ज कर सकते हैं।",
+    "en": "Windows will ask to let Clauseo remove the Safe workspace. It will say the publisher is unknown. That's expected for Clauseo. Choose Yes. If Windows asks for an administrator's password, enter the password of an administrator account on this computer.",
+    "hi": "Windows, Clauseo को सुरक्षित कार्यक्षेत्र हटाने देने के लिए पूछेगा। वह प्रकाशक को अज्ञात बताएगा। Clauseo के लिए यह सामान्य है। Yes चुनें। अगर Windows किसी व्यवस्थापक का पासवर्ड माँगे, तो इस कंप्यूटर के किसी व्यवस्थापक खाते का पासवर्ड दर्ज करें।",
     "hi_status": "provisional",
-    "hi_at": "2026-11-08",
+    "hi_at": "2026-11-11",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-08",
-    "by": "app track (provisional; Rohan batch review; required-words)"
+    "status": "approved",
+    "at": "2026-11-11",
+    "by": "orchestrator (IT sweep, 2026-11-11)",
+    "note": "the password ending reads \"enter the password of an administrator account on this computer\", was \"whoever looks after this computer can enter it\" (IT sweep)"
   },
   "UC-43": {
     "en": "Afterwards, Clauseo works on this computer without the Safe workspace until it's set up again.",
@@ -691,14 +693,15 @@
     "by": "app track (provisional; Rohan batch review; design B, safe-workspace-installer-setup)"
   },
   "UC-95": {
-    "en": "Windows will ask to let Clauseo add room to the Safe workspace. It will say the publisher is unknown. That's expected for Clauseo. Choose Yes. If Windows asks for an administrator's password, whoever looks after this computer can enter it.",
-    "hi": "Windows, Clauseo को सुरक्षित कार्यक्षेत्र में जगह जोड़ने देने के लिए पूछेगा। वह प्रकाशक को अज्ञात बताएगा। Clauseo के लिए यह सामान्य है। Yes चुनें। अगर Windows किसी व्यवस्थापक का पासवर्ड माँगे, तो इस कंप्यूटर की देखरेख करने वाले व्यक्ति उसे दर्ज कर सकते हैं।",
+    "en": "Windows will ask to let Clauseo add room to the Safe workspace. It will say the publisher is unknown. That's expected for Clauseo. Choose Yes. If Windows asks for an administrator's password, enter the password of an administrator account on this computer.",
+    "hi": "Windows, Clauseo को सुरक्षित कार्यक्षेत्र में जगह जोड़ने देने के लिए पूछेगा। वह प्रकाशक को अज्ञात बताएगा। Clauseo के लिए यह सामान्य है। Yes चुनें। अगर Windows किसी व्यवस्थापक का पासवर्ड माँगे, तो इस कंप्यूटर के किसी व्यवस्थापक खाते का पासवर्ड दर्ज करें।",
     "hi_status": "provisional",
-    "hi_at": "2026-11-08",
+    "hi_at": "2026-11-11",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-08",
-    "by": "app track (provisional; Rohan batch review; required-words)"
+    "status": "approved",
+    "at": "2026-11-11",
+    "by": "orchestrator (IT sweep, 2026-11-11)",
+    "note": "the password ending reads \"enter the password of an administrator account on this computer\", was \"whoever looks after this computer can enter it\" (IT sweep)"
   },
   "UC-96": {
     "en": "Clauseo will close so the installer can set up the Safe workspace. Run the installer you download, then open Clauseo again.",
@@ -978,5 +981,38 @@
     "at": "2026-11-11",
     "by": "Rohan (via the orchestrator)",
     "note": "the quiet way to the key panel, on the first screen and under each plan in Settings, Plans; was UD1-27's \"Use an API key or my firm's account\" and UD2-45's \"Other ways in\"; the words and Hindi of Connectors' U15-09 (other ways in)"
+  },
+  "UC-144": {
+    "en": "Copy addresses",
+    "hi": "पते कॉपी करें",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-11",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "approved",
+    "at": "2026-11-11",
+    "by": "orchestrator (IT sweep, 2026-11-11)",
+    "note": "a blocked download's copy button on any computer (agent.install_blocked), copying UD1-17; was UD1-15's \"Copy details for IT\", whose words stay the Safe workspace's and the site block's (IT sweep)"
+  },
+  "UC-145": {
+    "en": "A key from the Anthropic Console. Billed to that account.",
+    "hi": "Anthropic Console की key। शुल्क उसी खाते पर लगता है।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-11",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "approved",
+    "at": "2026-11-11",
+    "by": "orchestrator (IT sweep, 2026-11-11)",
+    "note": "the key panel's help under Claude, on the first screen and in Settings, Plans, before the existing where-it's-kept sentence; was UD1-32 and UD2-63 (IT sweep)"
+  },
+  "UC-146": {
+    "en": "A key from the OpenAI platform. Billed to that account.",
+    "hi": "OpenAI platform की key। शुल्क उसी खाते पर लगता है।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-11",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "approved",
+    "at": "2026-11-11",
+    "by": "orchestrator (IT sweep, 2026-11-11)",
+    "note": "the key panel's help under ChatGPT, on the first screen and in Settings, Plans, before the existing where-it's-kept sentence; was UD1-32 and UD2-63 (IT sweep)"
   }
 }

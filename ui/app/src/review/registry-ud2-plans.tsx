@@ -172,12 +172,13 @@ export const UD2_PLANS: Entry[] = [
   entry("UD2-60", "Uses your Claude plan.", ADD),
   entry("UD2-61", "Add Claude", ADD),
   entry("UD2-62", "Needs a download of about {mb} MB. Signing in happens in your browser.", ADD),
-  // UD2-63: each plan's key help names its own plan; shown on both cards, one signed out and one cancelled
+  // UD2-63, retired: each plan's key help names the key's maker (UC-145, UC-146)
+  // UC-140 and UC-146: ChatGPT's key field and help name its maker, UC-146 on both cards' key panels, each with its
+  // own (UC-139, UC-145, Claude's, and UC-141 are shown in the room, registry-ud1.tsx)
+  entry("UC-140", firstLaunchWords("OpenAI API key"), CHATGPT_KEY),
   entry(
-    "UD2-63",
-    "A key from {name}, yours or your firm's. Billed to that key's account.",
+    "UC-146",
+    firstLaunchWords("A key from the OpenAI platform. Billed to that account."),
     CANCELLED,
   ),
-  // UC-140: ChatGPT's key field names its maker (UC-139, Claude's, and UC-141 are shown in the room, registry-ud1.tsx)
-  entry("UC-140", firstLaunchWords("OpenAI API key"), CHATGPT_KEY),
 ];
