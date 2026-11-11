@@ -1,0 +1,131 @@
+# The counts Worker (services/counts-worker/, docs/counts-worker.md): its checks on every pull
+# request and push to main that touches it, the crate whose schema it takes, or this file.
+#
+# - The schema snapshot runs first and every other job waits for it: the Worker validates only
+#   through clauseo-counts' parse_batch and parse_tally, so its closed lists are the crate's,
+#   and a type that no longer matches crates/counts/src/schema/snapshots/ fails here.
+# - native: cargo test, clippy and fmt in the folder (its own workspace and Cargo.lock).
+# - worker: the wasm build with worker-build, then pnpm test: the deploy guard's and the source
+#   guard's tests, and the Worker under `wrangler dev --local` with a local D1 and the cron.
+# - No secret, no environment, no cache; the token can only read the repo. Rust comes from
+#   rust-toolchain.toml, pnpm and Node from ui/package.json, wrangler from the folder's
+#   pnpm-lock.yaml. Every action is pinned by commit SHA.
+name: counts-worker
+
+on:
+  pull_request:
+    paths:
+      - services/counts-worker/**
+      - crates/counts/**
+      - crates/protocol/**
+      - .github/workflows/counts-worker.yml
+  push:
+    branches: [main]
+    paths:
+      - services/counts-worker/**
+      - crates/counts/**
+      - crates/protocol/**
+      - .github/workflows/counts-worker.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: counts-worker-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  CARGO_TERM_COLOR: always
+  # The worker-build release the Worker is built with; it matches the `worker` crate in
+  # services/counts-worker/Cargo.lock.
+  WORKER_BUILD_VERSION: 0.8.7
+
+jobs:
+  schema:
+    name: schema snapshot
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install the Rust toolchain from rust-toolchain.toml
+        run: rustup toolchain install
+
+      - name: The committed JSON Schema matches the crate's types
+        env:
+          INSTA_UPDATE: "no"
+          CI: "true"
+        run: cargo test --locked -p clauseo-counts --lib schema::tests::wire::the_committed_schema_matches
+
+  native:
+    name: native tests
+    needs: schema
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: services/counts-worker
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install the Rust toolchain from rust-toolchain.toml, and the wasm target
+        run: |
+          rustup toolchain install
+          rustup target add wasm32-unknown-unknown
+
+      - name: Format
+        run: cargo fmt --check
+
+      - name: Test
+        run: cargo test --locked
+
+      - name: Clippy, native and wasm32
+        run: |
+          cargo clippy --locked --all-targets -- -D warnings
+          cargo clippy --locked --target wasm32-unknown-unknown -- -D warnings
+
+  worker:
+    name: wasm build and wrangler tests
+    needs: schema
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: services/counts-worker
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install the Rust toolchain from rust-toolchain.toml, and the wasm target
+        run: |
+          rustup toolchain install
+          rustup target add wasm32-unknown-unknown
+
+      - name: Install worker-build
+        run: cargo install --locked worker-build --version "$WORKER_BUILD_VERSION"
+
+      - name: Build the Worker
+        run: worker-build --release
+
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          package_json_file: ui/package.json
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: ui/package.json
+          package-manager-cache: false
+
+      - name: Install wrangler
+        run: pnpm install --frozen-lockfile
+
+      - name: Check wrangler.toml's privacy settings
+        run: node scripts/check-deploy.mjs
+
+      - name: Test against wrangler dev --local
+        run: pnpm test
