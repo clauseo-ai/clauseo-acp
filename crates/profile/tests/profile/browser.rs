@@ -99,8 +99,9 @@ fn only_the_browser_part_names_agent_browser() {
         .unwrap()
     };
     let on = fill(BrowserPart::On);
-    assert!(on.contains("over 125 characters, use `curl`. For a page that needs a real"));
-    assert!(on.contains("over 125 characters, `agent-browser read` gives the page's text."));
+    assert!(on.contains("with your web fetch tool. For a page that needs a real"));
+    assert!(on.contains("over 125 characters, use `agent-browser read` or `curl`."));
+    assert!(on.contains("`agent-browser eval`, `pdf` and `download` are off"));
     for rule in [
         "`agent-browser`",
         "`AGENT_BROWSER_SESSION`",
@@ -132,6 +133,8 @@ fn only_the_browser_part_names_agent_browser() {
         "use your browser tools, the ones from the `browser` MCP server",
         "never a browser command in your shell",
         "confidential matter text",
+        "The eval tool is off",
+        "Your shell has no internet, so save files with the download tool, never curl or wget.",
         "close tool",
     ] {
         assert!(codex_on.contains(rule), "{rule}: {codex_on}");
