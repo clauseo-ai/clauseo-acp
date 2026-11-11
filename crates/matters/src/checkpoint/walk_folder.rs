@@ -143,6 +143,7 @@ pub(super) fn walk_folder(
         entries,
         skipped,
         read_any,
+        cap,
         held,
     }))
 }

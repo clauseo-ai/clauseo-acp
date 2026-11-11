@@ -102,6 +102,34 @@ documents with 3 changed).
   not know, read a kind they do not know as `Unknown`, and need only `Clauseo-Checkpoint`; a commit
   without one is not a checkpoint. Writers never reuse an id; a reader that finds one id on two
   commits takes the later. The summary line is for people and is never parsed.
+- Files read for the first time (orchestrator, 2026-11-11, stage D; found on a Windows laptop,
+  where an agent's read of a OneDrive placeholder downloaded it and the room called it a new
+  paper, and Undo would have deleted it). A file the stat cache has as skipped (over the cap, or
+  cloud-only and never versioned) that a checkpoint's walk reads was in the folder before: it is
+  never an added file. Writers add, after the trailers above, one line per such file, each list
+  sorted by path bytes:
+
+  ```
+  Clauseo-Baseline: cloud-only notes.txt
+  Clauseo-Was-Skipped: over-size-cap Exhibits/scan 2.pdf
+  ```
+
+  The value is the reason it had been skipped (`cloud-only` or `over-size-cap`; one a reader does
+  not know reads as unknown), one space, then the path exactly as in the tree (a path has no
+  control character, so no line break; its spaces, a last one included, are kept; readers trim
+  only line breaks). The cache does not keep the reason: a skipped size over the walk's cap says
+  over the cap, any other cloud-only, which is right while the cap does not change.
+  - `Clauseo-Baseline`: read with the size and modification time it was skipped with, so
+    unchanged (a sync client keeps both when it downloads a file). It is in the commit's tree but
+    is not a change: the diff leaves it out, so no `FilesChanged` names it and nothing undoes it.
+  - `Clauseo-Was-Skipped`: read with another size or mtime. It is a change (listed as added, and
+    never paired as the new name of a rename).
+  - The diff of a step (`changes_between`, undo, "edited since") reads these trailers from every
+    checkpoint after the step's first up to its last: the last checkpoint's baselines are left
+    out, and no file any of them names is a rename's new name. A baseline of an earlier
+    checkpoint of a longer step may have changed since, so it is listed.
+  - A history written before these trailers has none: a Clauseo that reads it lists such a file
+    as an added one, as before. An older Clauseo reading a newer history ignores them likewise.
 - There is no `Clauseo-Seq` trailer: the commit is written before the host logs
   `CheckpointRecorded`, so the `seq` is not known yet, and the parent chain already orders the
   timeline. Opening a matter walks the first-parent chain from the ref and rebuilds the map from

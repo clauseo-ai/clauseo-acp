@@ -56,10 +56,16 @@ pub(crate) fn compare(
         .collect();
     let old = side(core, from, now, &unversioned)?;
     let new = side(core, to, now, &unversioned)?;
-    diff_by(&old, &new, &BTreeSet::new(), &mut |file| match file.size {
-        Some(size) => Ok(size),
-        None => core.size_of(file.path.as_str(), file.blob),
-    })
+    diff_by(
+        &old,
+        &new,
+        &BTreeSet::new(),
+        &BTreeSet::new(),
+        &mut |file| match file.size {
+            Some(size) => Ok(size),
+            None => core.size_of(file.path.as_str(), file.blob),
+        },
+    )
 }
 
 /// The files of one side, sorted by path.

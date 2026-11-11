@@ -283,12 +283,12 @@ pub use clauseo_acp::McpServer;
 #[cfg(feature = "test-support")]
 pub use clock::ManualClock;
 pub use clock::{Clock, Now, SystemClock};
-#[cfg(feature = "test-support")]
-pub use config::TestProxy;
 pub use config::{
     CAP_MIN_IDLE, DEFAULT_TREE_WAIT, Detect, EgressProxy, HostConfig, IDLE_LIMIT, LIVE_AGENTS,
     NoProfile, PackRequest, ProfileHook, Sandbox, SessionKey,
 };
+#[cfg(feature = "test-support")]
+pub use config::{TestProxy, WithPlaceholderProbe};
 pub use encode::EncodedEvent;
 pub use error::Error;
 pub use handle::{

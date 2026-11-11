@@ -1,6 +1,6 @@
 //! What `HostConfig` taken apart (`ConfigParts::from`) hands the host thread (`ConfigParts`) and
-//! the updater's seams (`UpdateSeams`). Kept apart from `config.rs`, whose `HostConfig` builds
-//! them.
+//! the updater's seams (`UpdateSeams`), and one test seam of `HostConfig` that `config.rs` has
+//! no room for. Kept apart from `config.rs`, whose `HostConfig` builds them.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -50,6 +50,30 @@ pub(crate) struct ConfigParts {
     pub(crate) idle: IdleStop,
     /// The sandbox seam (`with_sandbox`), if any.
     pub(crate) sandbox: Option<Sandbox>,
+}
+
+/// Tests: the cloud-only probe of every matter walk (`clauseo_matters::Settings::probe`;
+/// default the OS's `OsProbe`), so a test can pretend some files are placeholders. A trait
+/// beside `HostConfig`'s own methods, as `config.rs` has no room for one more.
+#[cfg(feature = "test-support")]
+pub trait WithPlaceholderProbe {
+    /// This config, its matter walks asking `probe` whether a file is cloud-only.
+    #[must_use]
+    fn with_placeholder_probe(
+        self,
+        probe: Arc<dyn clauseo_matters::PlaceholderProbe + Send + Sync>,
+    ) -> Self;
+}
+
+#[cfg(feature = "test-support")]
+impl WithPlaceholderProbe for HostConfig {
+    fn with_placeholder_probe(
+        mut self,
+        probe: Arc<dyn clauseo_matters::PlaceholderProbe + Send + Sync>,
+    ) -> Self {
+        self.folder_probes.placeholder = probe;
+        self
+    }
 }
 
 /// Takes the config apart.

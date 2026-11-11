@@ -28,6 +28,10 @@ mod checkpoint;
 mod skipped;
 
 #[cfg(test)]
+#[path = "matters/first_read.rs"]
+mod first_read;
+
+#[cfg(test)]
 #[path = "matters/undo.rs"]
 mod undo;
 
