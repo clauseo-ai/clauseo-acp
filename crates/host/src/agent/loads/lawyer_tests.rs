@@ -216,8 +216,8 @@ fn reads_keep_only_usable_values() {
     );
 }
 
-/// Every value an enabled local server carries is hidden in the agent's stderr tail: the
-/// keychain values read and each plain variable value; a disabled server's are not needed.
+/// Every value an enabled server carries is hidden in the agent's stderr tail: the keychain
+/// values read and each plain variable or header value; a disabled server's are not needed.
 #[test]
 fn every_value_of_an_enabled_server_is_redacted() {
     let effective = effective(
@@ -231,10 +231,21 @@ fn every_value_of_an_enabled_server_is_redacted() {
         }),
     );
     let secrets = McpSecrets::of(&[("github/env/TOKEN", "keychain-value-0042")], &[]);
-    let mut redacted = lawyer::redacted(&effective, &secrets);
-    redacted.sort();
-    // A remote server's values are PR B's to add.
-    assert_eq!(redacted, ["keychain-value-0042", "plain-value-0042"]);
+    let redacted = lawyer::redacted(&effective, &secrets);
+    for value in [
+        "keychain-value-0042",
+        "plain-value-0042",
+        "header-value-0042",
+    ] {
+        assert!(
+            redacted.iter().any(|hidden| hidden == value),
+            "{value}: {redacted:?}"
+        );
+    }
+    assert!(
+        !redacted.iter().any(|hidden| hidden.contains("off-value")),
+        "{redacted:?}"
+    );
 }
 
 /// A server renamed after the launch prep read its values is left out of that session, but not
@@ -382,39 +393,107 @@ fn no_remote_server_goes_in_the_safe_workspace_or_under_managed_mcp() {
     assert_eq!(lawyer::wanted(&effective, true), lawyer::Wanted::default());
 }
 
-/// What the stderr redactor gets: each keychain value, each plain header value, and the URL
-/// whole, its path with its query, its query and each query value.
+/// What the stderr redactor gets, in the forms an error line prints them in: each keychain
+/// value and plain header value as it is, JSON-escaped, percent-encoded and after its scheme
+/// (Basic: decoded, and the password); the URL whole, its host, its path with its query, its
+/// query, each query value (decoded too) and each long path segment. A value under 6 bytes is
+/// left out (and logged by name).
 #[test]
-fn the_redacted_list_holds_values_urls_and_their_tokens() {
+fn the_redacted_list_holds_each_value_and_url_part_in_its_forms() {
     let effective = effective(
         "redacted",
         &json!({
-            "docs": {"url": "https://mcp.example.com/v1/p4th/mcp?key=q7token&empty=", "enabled": true,
-                "headers": {"Authorization": {"keychain": true}, "X-Tenant": "firm-tenant-7"}},
+            "docs": {"url": "https://mcp.example.com:8443/v1/k3yLikeSegment0123/mcp?key=q7%2Btoken&n=1",
+                "enabled": true, "headers": {"Authorization": {"keychain": true},
+                    "X-Tenant": "firm\"tenant/7", "X-Short": "abc"}},
             "local": {"command": "/tools/srv", "enabled": true, "env": {"TOKEN": {"keychain": true}}},
         }),
     );
     let secrets = McpSecrets::of(
         &[
-            ("docs/header/Authorization", "Bearer s3cret-header"),
+            // user1:password1
+            ("docs/header/Authorization", "Basic dXNlcjE6cGFzc3dvcmQx"),
             ("local/env/TOKEN", "env-t0ken-value"),
         ],
         &[],
     );
-    let mut redacted = lawyer::redacted(&effective, &secrets);
-    redacted.sort();
-    assert_eq!(
-        redacted,
-        [
-            "/v1/p4th/mcp?key=q7token&empty=",
-            "Bearer s3cret-header",
-            "env-t0ken-value",
-            "firm-tenant-7",
-            "https://mcp.example.com/v1/p4th/mcp?key=q7token&empty=",
-            "key=q7token&empty=",
-            "q7token",
-        ]
+    let redacted = lawyer::redacted(&effective, &secrets);
+    for form in [
+        "Basic dXNlcjE6cGFzc3dvcmQx",
+        "dXNlcjE6cGFzc3dvcmQx",
+        "user1:password1",
+        "password1",
+        "env-t0ken-value",
+        "firm\"tenant/7",
+        "firm\\\"tenant/7",
+        "firm%22tenant%2F7",
+        "firm%22tenant%2f7",
+        "https://mcp.example.com:8443/v1/k3yLikeSegment0123/mcp?key=q7%2Btoken&n=1",
+        "https://mcp.example.com:8443/v1/k3yLikeSegment0123/mcp?key=q7+token&n=1",
+        "mcp.example.com:8443",
+        "mcp.example.com",
+        "/v1/k3yLikeSegment0123/mcp?key=q7%2Btoken&n=1",
+        "key=q7%2Btoken&n=1",
+        "q7%2Btoken",
+        "q7+token",
+        "k3yLikeSegment0123",
+    ] {
+        assert!(
+            redacted.iter().any(|hidden| hidden == form),
+            "{form} not in {redacted:?}"
+        );
+    }
+    for short in ["abc", "1", "/mcp", "v1"] {
+        assert!(
+            !redacted.iter().any(|hidden| hidden == short),
+            "{short} in {redacted:?}"
+        );
+    }
+    assert!(
+        redacted.iter().all(|hidden| hidden.len() >= 6),
+        "{redacted:?}"
     );
+}
+
+/// A header value holding CR, LF, NUL or DEL, plain (a firm's policy, a hand-edited file) or
+/// from the keychain, never reaches the wire: its server is left out, named with the header.
+#[test]
+fn a_header_value_with_a_control_character_never_goes() {
+    for (n, bad) in ["a\rb", "a\nX-Evil: 1", "a\u{0}b", "a\u{7f}b"]
+        .iter()
+        .enumerate()
+    {
+        let effective = effective(
+            &format!("control-{n}"),
+            &json!({
+                "plain": {"url": "https://plain.example.com/mcp", "enabled": true,
+                    "headers": {"X-Api-Key": bad}},
+                "kept": {"url": "https://kept.example.com/mcp", "enabled": true,
+                    "headers": {"X-Api-Key": {"keychain": true}}},
+                "ok": {"url": "https://ok.example.com/mcp", "enabled": true,
+                    "headers": {"X-Api-Key": "fine\tvalue"}},
+            }),
+        );
+        let secrets = McpSecrets::of(&[("kept/header/X-Api-Key", bad)], &[]);
+        let (servers, left_out) = lawyer::servers(&effective, CLAUSEO, &secrets, NO_HOST);
+        assert_eq!(
+            servers,
+            [McpServer::Http {
+                name: "ok".to_owned(),
+                url: "https://ok.example.com/mcp".to_owned(),
+                headers: vec![("X-Api-Key".to_owned(), "fine\tvalue".to_owned())],
+            }],
+            "{bad:?}"
+        );
+        assert_eq!(
+            left_out,
+            [
+                ("kept".to_owned(), "X-Api-Key".to_owned()),
+                ("plain".to_owned(), "X-Api-Key".to_owned()),
+            ],
+            "{bad:?}"
+        );
+    }
 }
 
 #[test]

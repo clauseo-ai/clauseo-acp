@@ -54,6 +54,7 @@ futures = { workspace = true, features = ["executor"] }
 serde = { workspace = true, features = ["derive"] }
 # `raw_value`: the case-law relay reads a connector reply without building it as a tree.
 serde_json = { workspace = true, features = ["raw_value"] }
+base64 = { workspace = true }
 uuid = { workspace = true, features = ["v7"] }
 tracing = { workspace = true }
 # The log file (log_file.rs, decision record 0047): the formatter, the registry and the filter.

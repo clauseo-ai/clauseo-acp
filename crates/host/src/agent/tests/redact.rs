@@ -1,7 +1,9 @@
 //! Iris's MED-1 on PR B: an agent that ends before its session is ready has its last stderr
 //! line logged (`start_failure`), and that is when `session/new` held a lawyer's remote server.
-//! The URL (a token in its path and its query) and every header value, from the keychain or
-//! plain, reach the stderr redactor through `lawyer::redacted`.
+//! The URL (whole, its host, its path and query tokens, a key-like path segment, a query value
+//! decoded) and every header value, from the keychain or plain (as it is, JSON-escaped,
+//! percent-encoded, a `Basic` credential decoded), reach the stderr redactor through
+//! `lawyer::redacted`.
 
 use std::collections::BTreeMap;
 use std::rc::Rc;
@@ -20,18 +22,23 @@ use crate::agent::{AgentInput, Ended, launch_spec, start};
 use crate::clock::ManualClock;
 
 const PATH_TOKEN: &str = "p4thToken77";
-const QUERY_TOKEN: &str = "q7QueryToken12";
-const KEYCHAIN_HEADER: &str = "x5HeaderToken77";
-const PLAIN_HEADER: &str = "firm-tenant-0042";
+const KEY_SEGMENT: &str = "k3yLikeSegment0123";
+const QUERY_TOKEN: &str = "q7%2BQuery%2FToken";
+const QUERY_DECODED: &str = "q7+Query/Token";
+/// `user1:password1`, as a `Basic` header from the keychain.
+const BASIC: &str = "Basic dXNlcjE6cGFzc3dvcmQx";
+const PLAIN_HEADER: &str = "firm\"tenant/0042";
 
-/// Settings with one remote server: a token in its URL's path and query, one header from the
-/// keychain and one plain.
+/// Settings with one remote server: a token in its URL's path and query and a key-like path
+/// segment, a `Basic` header from the keychain and a plain one holding a quote and a slash.
 fn effective() -> Effective {
     let root = std::env::temp_dir().join(format!("clauseo-redact-mcp-{}", std::process::id()));
     crate::write::create_dir_all(&root).unwrap();
-    let url = format!("https://mcp.example.com/v1/{PATH_TOKEN}/mcp?key={QUERY_TOKEN}&region=uk");
+    let url = format!(
+        "https://mcp.example.com/v1/{PATH_TOKEN}/{KEY_SEGMENT}/mcp?key={QUERY_TOKEN}&region=uk"
+    );
     let servers = json!({"docs": {"url": url, "enabled": true, "headers": {
-        "X-Api-Key": {"keychain": true}, "X-Tenant": PLAIN_HEADER}}});
+        "Authorization": {"keychain": true}, "X-Tenant": PLAIN_HEADER}}});
     let text = json!({"mcp": {"servers": servers}}).to_string();
     crate::write::write_file(&root.join("settings.json"), text.as_bytes()).unwrap();
     let effective = Effective::load(&Locations::under_root(&root), &SystemFiles, &[]);
@@ -42,7 +49,7 @@ fn effective() -> Effective {
 
 #[test]
 fn a_remote_servers_url_and_header_values_are_redacted_from_the_stderr_tail() {
-    let secrets = McpSecrets::of(&[("docs/header/X-Api-Key", KEYCHAIN_HEADER)], &[]);
+    let secrets = McpSecrets::of(&[("docs/header/Authorization", BASIC)], &[]);
     let redacted = lawyer::redacted(&effective(), &secrets);
     let spec = launch_spec(
         &fake_agent(scenario("stderr-mcp-remote")),
@@ -74,10 +81,16 @@ fn a_remote_servers_url_and_header_values_are_redacted_from_the_stderr_tail() {
     assert_eq!(code, Some(1));
     for secret in [
         PATH_TOKEN,
+        KEY_SEGMENT,
         QUERY_TOKEN,
-        KEYCHAIN_HEADER,
-        PLAIN_HEADER,
+        QUERY_DECODED,
         "mcp.example.com",
+        "dXNlcjE6cGFzc3dvcmQx",
+        "user1:password1",
+        "password1",
+        PLAIN_HEADER,
+        "firm\\\"tenant/0042",
+        "firm%22tenant%2F0042",
     ] {
         assert!(!stderr_tail.contains(secret), "{secret} in {stderr_tail}");
     }
