@@ -1,4 +1,9 @@
 //! Step 5: the prompt, with the undo note (the files put back since the last turn) first.
+//!
+//! The note is added here, after `SendPrompt` checked the question alone, so a Codex prompt is
+//! checked against Codex's cap again as it will be sent (`codex_cap::refuse`): over
+//! it, the turn ends failed with `prompt.too_long` before anything reaches the agent, the queue
+//! held, and the note kept for the next prompt.
 
 use clauseo_protocol::{ContentBlock, ErrorCode, StreamId, ThreadId, TurnId, ViewEntry};
 use futures::future::{AbortHandle, Abortable, join};
@@ -14,7 +19,7 @@ use crate::undo_note::{self, NoteInput};
 
 /// Step 5: the prompt, with the undo note first.
 pub(super) fn prompt(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
-    let note = take_note(actor, thread);
+    let note = note_text(actor, thread);
     let agent = state(actor, thread)
         .and_then(|state| state.agent.as_deref())
         .filter(|agent| agent.stage == Stage::Attached)
@@ -31,6 +36,7 @@ pub(super) fn prompt(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
             ))
         });
     let Some(((id, check), (client, descendants), fence, session)) = agent else {
+        clear_note(actor, thread);
         if let Some(current) = current(actor, thread) {
             current.phase = TurnPhase::Prompting;
         }
@@ -42,11 +48,37 @@ pub(super) fn prompt(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
         end::end_turn(actor, thread, end);
         return;
     };
-    let retry = key_retry::for_call(actor, thread);
     let Some(current) = current(actor, thread) else {
         return;
     };
     current.phase = TurnPhase::Prompting;
+    let mut content = Vec::with_capacity(current.prompt.len() + 1);
+    if let Some(text) = note {
+        content.push(ContentBlock::Text { text });
+    }
+    content.extend(current.prompt.iter().cloned());
+    let cancelled = current.cancelled;
+    // The text exactly as it goes out, the note in: over Codex's cap, nothing is sent.
+    if let Err(error) = super::codex_cap::refuse(actor, thread, &content) {
+        tracing::warn!(
+            %thread,
+            %turn,
+            error = %crate::log_file::Cause(&error),
+            "a Codex prompt with its undo note was refused before it was sent"
+        );
+        let end = if cancelled {
+            End::cancelled(None)
+        } else {
+            End::failed(error.code(), Some(error.to_string()), None)
+        };
+        end::end_turn(actor, thread, end);
+        return;
+    }
+    clear_note(actor, thread);
+    let retry = key_retry::for_call(actor, thread);
+    let Some(current) = super::current(actor, thread) else {
+        return;
+    };
     let stopped = std::rc::Rc::clone(&current.stopped);
     super::state::prompt_sent(actor, thread);
     // The prompt goes out: the case-law relay's turn caps start again (R24), and while the
@@ -57,12 +89,6 @@ pub(super) fn prompt(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
         return;
     };
     let retry = retry.unless_stopped(stopped);
-    let blocks = current.prompt.clone();
-    let mut content = Vec::with_capacity(blocks.len() + 1);
-    if let Some(text) = note {
-        content.push(ContentBlock::Text { text });
-    }
-    content.extend(blocks);
     let (abort, registration) = AbortHandle::new_pair();
     current.prompt_call = Some(abort);
     let before = BeforePrompt::default();
@@ -107,12 +133,18 @@ pub(super) fn prompt(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
     });
 }
 
-/// The undo note's text for the next prompt, and the note cleared for the turn starting now.
-fn take_note(actor: &mut Actor, thread: ThreadId) -> Option<String> {
+/// The undo note's text for the next prompt; the note stays until [`clear_note`].
+fn note_text(actor: &mut Actor, thread: ThreadId) -> Option<String> {
     ensure_note(actor, thread);
     let state = state(actor, thread)?;
-    let told = state.note.replace(Vec::new()).unwrap_or_default();
-    undo_note::note_text(&told)
+    undo_note::note_text(state.note.as_deref().unwrap_or_default())
+}
+
+/// The note cleared: the turn starting now carries it, or its agent is gone.
+fn clear_note(actor: &mut Actor, thread: ThreadId) {
+    if let Some(state) = state(actor, thread) {
+        state.note = Some(Vec::new());
+    }
 }
 
 /// Reads the note from the loaded state the first time it is needed: the files undone since
