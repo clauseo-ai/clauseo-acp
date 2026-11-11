@@ -3,7 +3,7 @@
 use super::Effective;
 use crate::error::Error;
 use crate::policy::PolicyRead;
-use crate::schema::McpServerLaunch;
+use crate::schema::{McpServerLaunch, McpValue};
 use crate::testing::{FakeSource, MemFiles, abs, abs_json, locations, policy, user};
 use crate::warning::Origin;
 use crate::warning::WarningKind;
@@ -11,12 +11,12 @@ use std::collections::BTreeMap;
 
 /// A server at `bin/<name>`, on or off.
 fn server(name: &str, enabled: bool) -> McpServerLaunch {
-    McpServerLaunch {
-        command: abs(&format!("bin/{name}")).display().to_string(),
-        args: Vec::new(),
-        env: BTreeMap::new(),
+    McpServerLaunch::local(
+        abs(&format!("bin/{name}")).display().to_string(),
+        Vec::new(),
+        BTreeMap::new(),
         enabled,
-    }
+    )
 }
 
 /// `{"mcp": {"servers": {...}}}` with each `(name, enabled)` at `bin/<name>`.
@@ -72,10 +72,14 @@ fn a_server_is_off_until_turned_on_and_the_enabled_come_in_name_order() {
     );
     assert_eq!(enabled(&effective), ["alpha", "zeta"]);
     let alpha = effective.mcp_servers().get("alpha").unwrap();
-    assert_eq!(alpha.args, ["--stdio"]);
     assert_eq!(
-        alpha.env,
-        BTreeMap::from([("K".to_owned(), "v".to_owned())])
+        alpha,
+        &McpServerLaunch::local(
+            abs("bin/alpha").display().to_string(),
+            vec!["--stdio".to_owned()],
+            BTreeMap::from([("K".to_owned(), McpValue::Plain("v".to_owned()))]),
+            true,
+        )
     );
     assert!(!effective.is_locked("mcp.servers"));
 }
@@ -143,7 +147,7 @@ fn a_bad_entry_in_a_policy_list_is_dropped_and_the_list_still_locks() {
     let text = format!(
         r#"{{"mcp": {{"servers": {{
             "firm": {{"command": "{f}", "enabled": true}},
-            "relative": {{"command": "server", "enabled": true}},
+            "relative": {{"command": "bin/server", "enabled": true}},
             "bad name": {{"command": "{f}", "enabled": true}}
         }}}}}}"#,
         f = abs_json("bin/firm"),

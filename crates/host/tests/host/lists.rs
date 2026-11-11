@@ -467,7 +467,8 @@ fn whole(event: &HostEvent) -> bool {
         HostEvent::SettingsChanged(_)
         | HostEvent::FolderScanned(_)
         | HostEvent::UpdateChanged(_)
-        | HostEvent::ConnectorsChanged(_) => true,
+        | HostEvent::ConnectorsChanged(_)
+        | HostEvent::McpToolsChanged(_) => true,
         HostEvent::MattersChanged(changed) => changed.all,
         HostEvent::ThreadsChanged(changed) => changed.all,
         HostEvent::Patches(_)

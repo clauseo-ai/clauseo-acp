@@ -225,6 +225,7 @@ fn next_scan_of(app: &mut AppSubscription) -> FolderScanned {
             | HostEvent::BrowserPolicy { .. }
             | HostEvent::UpdateChanged(_)
             | HostEvent::ConnectorsChanged(_)
+            | HostEvent::McpToolsChanged(_)
             | HostEvent::CaseLawHint { .. }
             | HostEvent::ProtectionChanged { .. }
             | HostEvent::ProtectionViewChanged { .. }
@@ -477,6 +478,7 @@ fn import_summary(
             | HostEvent::BrowserPolicy { .. }
             | HostEvent::UpdateChanged(_)
             | HostEvent::ConnectorsChanged(_)
+            | HostEvent::McpToolsChanged(_)
             | HostEvent::CaseLawHint { .. }
             | HostEvent::ProtectionChanged { .. }
             | HostEvent::ProtectionViewChanged { .. }

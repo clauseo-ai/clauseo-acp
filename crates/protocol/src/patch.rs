@@ -16,8 +16,9 @@ use serde::{Deserialize, Serialize};
 use crate::{
     AccountLimits, BlockedSiteId, BrowserInstallState, BrowserPolicyState, ConnectorsState, Cursor,
     EntryId, Envelope, FolderScanned, HeaderEntry, LimitsView, MatterHeaderEntry, MatterId,
-    MattersChanged, MessageId, Protection, ProtectionView, Seq, SettingsView, SiteTag, StreamId,
-    ThreadId, ThreadsChanged, Timestamp, TurnId, UpdateView, ViewEntry, ViewEpoch,
+    MattersChanged, McpToolsView, MessageId, Protection, ProtectionView, Seq, SettingsView,
+    SiteTag, StreamId, ThreadId, ThreadsChanged, Timestamp, TurnId, UpdateView, ViewEntry,
+    ViewEpoch,
 };
 
 /// One change to a stream's view, at its cursor.
@@ -177,6 +178,12 @@ pub enum HostEvent {
     /// logged and in no stream: it reaches app subscribers only, and every app catch-up carries
     /// the latest one, as for `SettingsChanged`.
     ConnectorsChanged(ConnectorsState),
+    /// The lawyer's MCP servers, or who decides them, changed: the whole view after the change
+    /// (Settings › Tools). App-wide, never logged and in no stream: it reaches app subscribers
+    /// only, and every app catch-up carries the latest one unless it is `McpToolsView::EMPTY`
+    /// (the lawyer's list with no server), which a window holds until it hears otherwise. It
+    /// names variables and headers, never a value.
+    McpToolsChanged(McpToolsView),
     /// A turn's web searches looked like Indian case law and the case-law connector is live but
     /// not added (R24): the app offers it under the answer. Once per matter, never after the
     /// lawyer dismissed it. App-wide and never logged: an offer, not part of the record, so a

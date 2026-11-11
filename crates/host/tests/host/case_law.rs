@@ -156,7 +156,8 @@ fn lawyer(dir: &Dir, extra: &Value) -> (Value, Value) {
     }
     let settings = json!({"tools": tools, "mcp": {"servers": {
         "alpha": {"command": bin.join("alpha").display().to_string(), "enabled": true}}}});
-    let entry = json!({"name": "alpha", "command": "{{any}}", "args": [], "env": []});
+    let entry = json!({"name": "alpha", "command": "{{any}}", "args": [],
+        "env": crate::support::lawyer_env(Vec::new())});
     (settings, entry)
 }
 

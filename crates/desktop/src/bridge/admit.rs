@@ -22,7 +22,8 @@
 //! only `RevokeAllowedSite` (its list of allowed sites): no other window, and so nothing an
 //! agent shows or runs, may lift a block.
 //! The network signal `SetNetwork` (D-050) is `main`'s alone: its webview hears `online` and
-//! `offline`.
+//! `offline`. The lawyer's MCP server commands (Settings › Tools) are the settings window's
+//! alone: each server is a program that runs with the lawyer's access.
 
 use clauseo_protocol::{
     ConfigValue, ConnectorCommand, FolderRefId, HostCommand, HostError, MatterSource,
@@ -57,13 +58,15 @@ pub(super) fn admit(bridge: &Bridge, label: &str, command: &HostCommand) -> Resu
             | HostCommand::RetryProtection {}
             | HostCommand::RemoveSandboxSetup {}
             // The allowed sites' list (0053, PR 2) takes one back; allowing is main's.
-            | HostCommand::RevokeAllowedSite { .. } => Ok(()),
+            | HostCommand::RevokeAllowedSite { .. }
+            // Tools: the lawyer's own MCP servers, each a program that runs as the lawyer.
+            | HostCommand::Mcp(_) => Ok(()),
             HostCommand::Connector(connector) => connector_settings(connector),
             _ => Err(invalid(
                 "the settings window sends only set_ui_settings, set_tool_settings, \
                  set_privacy_settings, set_skill_pack, refresh_limits, set_update_mode, \
-                 check_for_update, retry_protection, remove_sandbox_setup, revoke_allowed_site \
-                 and the connector commands",
+                 check_for_update, retry_protection, remove_sandbox_setup, revoke_allowed_site, \
+                 the MCP server commands and the connector commands",
             )),
         },
         _ => Err(invalid(format!("window {label} may send no command"))),
@@ -180,6 +183,12 @@ fn admit_main(bridge: &Bridge, command: &HostCommand) -> Result<(), HostError> {
         )),
         // R24: the room's hint and the balance only; the rest is the settings window's.
         HostCommand::Connector(connector) => connector_main(connector),
+        // A lawyer's MCP server is a program that runs with the lawyer's access: added, changed
+        // and turned on in the settings window only, never from the window that shows agent
+        // output.
+        HostCommand::Mcp(_) => Err(invalid(
+            "the MCP servers are changed from the settings window only",
+        )),
     }
 }
 

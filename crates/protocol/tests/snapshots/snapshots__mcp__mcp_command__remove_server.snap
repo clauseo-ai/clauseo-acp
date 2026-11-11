@@ -1,0 +1,9 @@
+---
+source: crates/protocol/tests/snapshots/mcp.rs
+expression: "McpCommand::RemoveServer { name: \"github\".to_owned() }"
+---
+{
+  "remove_server": {
+    "name": "github"
+  }
+}

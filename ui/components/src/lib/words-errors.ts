@@ -102,6 +102,17 @@ export type ErrorCode =
   | "word.edit_failed"
   | "agent.offline"
   | "prompt.too_long"
+  | "mcp.name_empty"
+  | "mcp.name_taken"
+  | "mcp.name_reserved"
+  | "mcp.name_invalid"
+  | "mcp.command_invalid"
+  | "mcp.command_not_found"
+  | "mcp.url_invalid"
+  | "mcp.header_name_invalid"
+  | "mcp.env_name_invalid"
+  | "mcp.secret_store_failed"
+  | "mcp.server_unknown"
   | "unknown";
 
 /** The thread's own sentence for an answer cut short: its Hindi lives in words-thread.ts, once. */
@@ -285,6 +296,19 @@ export const ERROR_WORDS: Record<WordedCode, ErrorKey> = {
   // before it sends; the draft stays in the field. Settled by the orchestrator (2026-11-11)
   "prompt.too_long":
     "This question is too long to send. Save the text as a file in the matter's folder, then ask about it. Your words are kept.",
+  // the lawyer's MCP servers (Settings › Tools): the Tools form says each in its own words; anywhere else,
+  // the settings window's failure line
+  "mcp.name_empty": "Clauseo couldn't save that setting. Your settings are as they were.",
+  "mcp.name_taken": "Clauseo couldn't save that setting. Your settings are as they were.",
+  "mcp.name_reserved": "Clauseo couldn't save that setting. Your settings are as they were.",
+  "mcp.name_invalid": "Clauseo couldn't save that setting. Your settings are as they were.",
+  "mcp.command_invalid": "Clauseo couldn't save that setting. Your settings are as they were.",
+  "mcp.command_not_found": "Clauseo couldn't save that setting. Your settings are as they were.",
+  "mcp.url_invalid": "Clauseo couldn't save that setting. Your settings are as they were.",
+  "mcp.header_name_invalid": "Clauseo couldn't save that setting. Your settings are as they were.",
+  "mcp.env_name_invalid": "Clauseo couldn't save that setting. Your settings are as they were.",
+  "mcp.secret_store_failed": "Clauseo couldn't save that setting. Your settings are as they were.",
+  "mcp.server_unknown": "Clauseo couldn't save that setting. Your settings are as they were.",
   // a code from a newer Clauseo: as internal reads, since this version can say nothing truer
   unknown: "Something went wrong inside Clauseo.",
 };

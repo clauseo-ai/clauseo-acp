@@ -25,11 +25,16 @@ use crate::{
 use crate::{FileChoice, MatterPath, RawPayload};
 
 mod connectors;
+mod mcp;
 mod outcome;
 mod requests;
 mod validate;
 
 pub use connectors::{ConnectorCommand, MAX_CONNECTOR_ID_BYTES};
+pub use mcp::{
+    MAX_MCP_LIST, MAX_MCP_NAME_BYTES, MAX_MCP_TEXT_BYTES, McpCommand, McpSecretEdit,
+    McpSecretValue, McpServerEdit,
+};
 pub use outcome::CommandOutcome;
 pub use requests::{DeliveryRequest, RestoreRequest};
 pub use validate::{
@@ -559,4 +564,9 @@ pub enum HostCommand {
         /// Whether the window's `navigator.onLine` says the computer is online.
         online: bool,
     },
+    /// The lawyer's own MCP servers, Settings › Tools (`command/mcp.rs`): add, replace,
+    /// remove, turn on or off. Each answers `Done` with a receipt, or a refusal; the new list
+    /// reaches app subscribers as `HostEvent::McpToolsChanged`. A secret value it carries
+    /// encodes as `[redacted]`. JSON: `{"mcp": {"remove_server": {"name": "github"}}}`.
+    Mcp(McpCommand),
 }

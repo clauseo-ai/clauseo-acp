@@ -246,6 +246,8 @@ impl HostCommand {
             Self::SetUpdateMode { mode } => check_update_mode(*mode),
             // Ids by shape; whether the connector or pack is known, live or added is state.
             Self::Connector(command) => command.check(),
+            // Bounds and kinds; names, paths, URLs and what the list holds are the host's.
+            Self::Mcp(command) => command.check(),
             // The ids' count and repeats; the `.docx` name and the ids' existence are state.
             Self::DecideRevisions(decide) => decide.check(),
         }

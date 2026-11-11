@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 
 use clauseo_acp::ToolCall;
 use clauseo_protocol::{CompactString, TextOrBlob, ToolCallPatch, ToolCallStatus, ToolKind};
-use clauseo_settings::McpServerLaunch;
+use clauseo_settings::{McpServerLaunch, McpTransport};
 use serde_json::{Value, json};
 
 use super::{
@@ -17,9 +17,11 @@ use crate::agent::loads::McpControl;
 
 fn launch(enabled: bool) -> McpServerLaunch {
     McpServerLaunch {
-        command: "/bin/server".to_owned(),
-        args: Vec::new(),
-        env: BTreeMap::new(),
+        transport: McpTransport::Local {
+            command: "/bin/server".to_owned(),
+            args: Vec::new(),
+            env: BTreeMap::new(),
+        },
         enabled,
     }
 }

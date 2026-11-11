@@ -506,8 +506,10 @@ fn tokens_are_filled_only_in_the_profiles_values() {
     let bin = dir.folder("bin", &[]);
     let alpha = bin.join("alpha").display().to_string();
     let literal = json!([{"name": "alpha", "command": "{{any}}",
-        "args": ["--out", "{work_folder}", "{matter_notes}/x"],
-        "env": [{"name": "WHERE", "value": "{browser_dir}|{work_folder}"}]}]);
+    "args": ["--out", "{work_folder}", "{matter_notes}/x"],
+    "env": crate::support::lawyer_env(vec![
+        json!({"name": "WHERE", "value": "{browser_dir}|{work_folder}"}),
+    ])}]);
     let new = template(
         &dir,
         "sc-new",

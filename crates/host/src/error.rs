@@ -53,6 +53,7 @@ impl Error {
             Self::Acp(error) => error.code(),
             Self::Settings(clauseo_settings::Error::Locked { .. }) => ErrorCode::SettingsLocked,
             Self::Settings(clauseo_settings::Error::Refused { .. }) => ErrorCode::SettingsRefused,
+            Self::Settings(clauseo_settings::Error::Mcp { refusal, .. }) => mcp_code(*refusal),
             Self::Reducer(_) | Self::Settings(_) | Self::Closed | Self::Internal(_) => {
                 ErrorCode::Internal
             }
@@ -148,6 +149,25 @@ impl From<Error> for HostError {
             | Error::Closed
             | Error::Internal(_) => error.to_wire(),
         }
+    }
+}
+
+/// The code of a refusal of the lawyer's MCP servers (`HostCommand::Mcp`).
+fn mcp_code(refusal: clauseo_settings::McpRefusal) -> ErrorCode {
+    use clauseo_settings::McpRefusal;
+    match refusal {
+        McpRefusal::NameEmpty => ErrorCode::McpNameEmpty,
+        McpRefusal::NameTaken => ErrorCode::McpNameTaken,
+        McpRefusal::NameReserved => ErrorCode::McpNameReserved,
+        McpRefusal::NameInvalid => ErrorCode::McpNameInvalid,
+        McpRefusal::CommandInvalid => ErrorCode::McpCommandInvalid,
+        McpRefusal::CommandNotFound => ErrorCode::McpCommandNotFound,
+        McpRefusal::UrlInvalid => ErrorCode::McpUrlInvalid,
+        McpRefusal::HeaderNameInvalid => ErrorCode::McpHeaderNameInvalid,
+        McpRefusal::EnvNameInvalid => ErrorCode::McpEnvNameInvalid,
+        McpRefusal::Unknown => ErrorCode::McpServerUnknown,
+        // `McpRefusal` is non-exhaustive: a rule this host does not know is a bug here.
+        _ => ErrorCode::Internal,
     }
 }
 
