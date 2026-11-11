@@ -12,14 +12,14 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use clauseo_protocol::{
-    AgentSessionId, CompactString, ContentBlock, DomainEvent, ElicitationId, ElicitationRequest,
-    Envelope, MatterPath, MessageId, PermissionOption, PermissionRequestId, StreamId, TextOrBlob,
+    AgentSessionId, CompactString, DomainEvent, ElicitationId, ElicitationRequest, Envelope,
+    MatterPath, MessageId, PermissionOption, PermissionRequestId, StreamId, TextOrBlob,
     ToolCallContent, ToolCallId, ToolCallPatch, ToolCallStarted, ToolCallStatus, ToolKind,
     ToolLocation, TurnId,
 };
 
 use crate::build::ToolFields;
-use crate::command_names;
+use crate::shell_writes;
 
 /// One tool call as last sent.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -67,20 +67,18 @@ pub(crate) struct TurnPaths {
     /// The `Outside` locations and diffs, as `acp` displays them (the path as the agent sent
     /// it).
     pub(crate) outside: BTreeSet<String>,
-    /// The file names the turn's shell commands name ([`crate::command_names`]).
-    pub(crate) commands: BTreeSet<String>,
+    /// The files the turn's shell commands write ([`crate::shell_writes`]): paths relative to
+    /// the matter's folder, or absolute ones the matter thread places in it.
+    pub(crate) writes: BTreeSet<String>,
     /// The shell calls among the turn's tool calls, by a key unique in the turn (ACP's id live,
     /// the logged id when read back), so a later update of one is read too.
     pub(crate) shells: BTreeSet<String>,
 }
 
-/// One tool call or update as [`TurnPaths::note_command`] reads it.
+/// One tool call or update as [`TurnPaths::note_command`] reads it: its kind and input.
 pub(crate) struct CommandText<'a> {
     pub(crate) kind: Option<ToolKind>,
-    pub(crate) title: Option<&'a str>,
     pub(crate) raw_input: Option<&'a TextOrBlob>,
-    pub(crate) raw_output: Option<&'a TextOrBlob>,
-    pub(crate) content: &'a [ToolCallContent],
 }
 
 impl<'a> CommandText<'a> {
@@ -88,10 +86,7 @@ impl<'a> CommandText<'a> {
     pub(crate) fn of_patch(patch: &'a ToolCallPatch) -> Self {
         Self {
             kind: patch.kind,
-            title: patch.title.as_deref(),
             raw_input: patch.raw_input.as_ref(),
-            raw_output: patch.raw_output.as_ref(),
-            content: patch.content.as_deref().unwrap_or_default(),
         }
     }
 
@@ -99,10 +94,7 @@ impl<'a> CommandText<'a> {
     pub(crate) fn of_call(call: &'a clauseo_acp::ToolCall) -> Self {
         Self {
             kind: Some(call.kind),
-            title: Some(&call.title),
             raw_input: call.raw_input.as_ref(),
-            raw_output: call.raw_output.as_ref(),
-            content: &call.content,
         }
     }
 
@@ -110,10 +102,7 @@ impl<'a> CommandText<'a> {
     pub(crate) fn of_started(started: &'a ToolCallStarted) -> Self {
         Self {
             kind: Some(started.kind),
-            title: Some(&started.title),
             raw_input: started.raw_input.as_ref(),
-            raw_output: started.raw_output.as_ref(),
-            content: &started.content,
         }
     }
 }
@@ -131,38 +120,17 @@ impl TurnPaths {
         }
     }
 
-    /// Adds the file names a shell call (`ToolKind::Execute`, its start or a later update of
-    /// the call `key`) names in its title, input, output and text. A blob's text (one too large
-    /// to log inline) is not read.
+    /// Adds the files a shell call (`ToolKind::Execute`, its start or a later update of the call
+    /// `key`) writes, read from its command alone ([`crate::shell_writes`]): never its output,
+    /// which names files it only lists or reads. An input kept as a blob is not read.
     pub(crate) fn note_command(&mut self, key: &str, call: &CommandText<'_>) {
         if call.kind == Some(ToolKind::Execute) && !self.shells.contains(key) {
             self.shells.insert(key.to_owned());
         }
-        if !self.shells.contains(key) {
-            return;
-        }
-        let names = &mut self.commands;
-        if let Some(title) = call.title {
-            command_names::add_words(names, title);
-        }
-        for raw in [call.raw_input, call.raw_output].into_iter().flatten() {
-            if let TextOrBlob::Inline(text) = raw {
-                command_names::add_json(names, text);
-            }
-        }
-        for item in call.content {
-            match item {
-                ToolCallContent::Text {
-                    text: TextOrBlob::Inline(text),
-                }
-                | ToolCallContent::Content {
-                    content: ContentBlock::Text { text },
-                } => command_names::add_words(names, text),
-                ToolCallContent::Text { .. }
-                | ToolCallContent::Content { .. }
-                | ToolCallContent::Diff { .. }
-                | ToolCallContent::Unknown { .. } => {}
-            }
+        if self.shells.contains(key)
+            && let Some(TextOrBlob::Inline(input)) = call.raw_input
+        {
+            shell_writes::add_input(&mut self.writes, input);
         }
     }
 }
