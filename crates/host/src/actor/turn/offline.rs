@@ -325,7 +325,7 @@ fn end_offline(actor: &mut Actor, thread: ThreadId) {
     tracing::warn!(%thread, by, "the agent went quiet while offline; ending the turn");
     let detail = note.unwrap_or_else(|| NETWORK_DETAIL.to_owned());
     current.failure = Some((ErrorCode::AgentOffline, Some(detail)));
-    cancel::cancel_running(actor, thread, None);
+    cancel::cancel_running(actor, thread, None, cancel::why::FAILURE);
 }
 
 /// The code a failed prompt of `thread` ends with when it is offline. A sign-in the error asks

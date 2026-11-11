@@ -406,6 +406,9 @@ mod steer;
 #[path = "host/steer_at_head.rs"]
 mod steer_at_head;
 #[cfg(test)]
+#[path = "host/steer_wait.rs"]
+mod steer_wait;
+#[cfg(test)]
 #[path = "host/stop_for.rs"]
 mod stop_for;
 #[cfg(test)]

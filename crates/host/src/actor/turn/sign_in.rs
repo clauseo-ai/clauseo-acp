@@ -125,7 +125,7 @@ fn stop(actor: &mut Actor, agent: &AgentId, why: StopFor) {
             if let Some(state) = state(actor, thread) {
                 state.stopped_for_sign_in = Some(turn);
             }
-            cancel::cancel_current(actor, thread);
+            cancel::cancel_current(actor, thread, cancel::why::SIGN_IN);
         }
         if let Some(preparing) = state(actor, thread).and_then(|state| state.preparing.take()) {
             // Its answer, when it comes, is stale: the run folder it made is removed then.

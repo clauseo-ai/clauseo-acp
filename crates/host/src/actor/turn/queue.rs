@@ -7,8 +7,9 @@
 //! only after `EndTurn`. Any other stop (`Cancelled`, `NotAllowed`, `Failed`, `AtLimit`,
 //! `Refusal`, `MaxTokens`, `MaxTurnRequests`) holds it until the lawyer moves it: `ResumeQueue`,
 //! `SendQueuedNow` or a new `SendPrompt` (which only queues held while a hold applies: the
-//! sign-in's or an install's, `hold.rs`). While a steer request is out, it waits for the answer,
-//! so a requeued steer takes the head. The held flag lives here only (nothing is logged for it);
+//! sign-in's or an install's, `hold.rs`). While a steer request is out, it waits for the answer
+//! (at most `steer.rs`'s wait), so a requeued steer takes the head; a steer that cannot join the
+//! running turn now waits as the next turn instead (`steer.rs`). The held flag lives here only (nothing is logged for it);
 //! the view shows it, with why the queue waits, through `clauseo_reducer::set_queue_held`
 //! (`held.rs`). At start-up every queued turn comes back held, rebuilt from the log
 //! ([`restore`]).
@@ -19,6 +20,7 @@ pub(in crate::actor::turn) mod dump;
 mod held;
 mod hold;
 mod install;
+mod queued;
 mod restore;
 mod sign_in;
 mod steer;
@@ -27,15 +29,13 @@ use std::collections::VecDeque;
 
 use clauseo_counts::schema::Delivery;
 use clauseo_protocol::{
-    CommandOutcome, ContentBlock, DeliveryRequest, ErrorCode, MAX_QUEUED_TURNS, MessageId,
-    PromptBlock, QueueHoldReason, StopReason, StreamId, ThreadId, TurnId, TurnQueued,
+    ContentBlock, DeliveryRequest, ErrorCode, MAX_QUEUED_TURNS, MessageId, PromptBlock,
+    QueueHoldReason, StopReason, StreamId, ThreadId, TurnId,
 };
 
-use super::super::commands::{AfterCommand, CommandCtx};
-use super::super::{Actor, Tag, counting};
-use super::out::Out;
-use super::{Current, Holder, Then, TurnTag, cancel, host_stopping, lost, matter_of, state, steps};
-use crate::build;
+use super::super::commands::CommandCtx;
+use super::super::{Actor, counting};
+use super::{Current, Holder, cancel, host_stopping, lost, matter_of, state, steps};
 use crate::error::Error;
 use crate::log_file::Cause;
 
@@ -48,6 +48,8 @@ pub(super) use held::set_requeue_for_test;
 pub(crate) use held::{queue_hold, sync_all_held};
 pub(super) use held::{sync_held, waits};
 pub(crate) use install::{any_active, any_running, cancel_all, release};
+pub(super) use queued::command_tag;
+use queued::{Joins, log_queued};
 pub(super) use restore::restore;
 pub(super) use sign_in::{Requeue, keep as keep_for_sign_in, resume as resume_sign_in};
 pub(super) use steer::{Steered, on_steer_timer, on_steered};
@@ -61,6 +63,9 @@ pub(crate) struct ThreadQueue {
     held: bool,
     /// Real steer requests not answered yet; the queue waits for them.
     steers: Vec<steer::Pending>,
+    /// Steers the agent took into the current turn: they go next if it ends `Cancelled` or
+    /// `Failed` (`steer.rs`).
+    injected: Vec<steer::Ask>,
     /// A current turn the lawyer removed before it started: its end neither holds nor moves
     /// the queue differently from the turn before it.
     removed: Option<TurnId>,
@@ -139,6 +144,8 @@ pub(crate) enum After {
     Steer(Box<steer::Ask>),
     /// A requeued steer's turn joined the head.
     Requeued(TurnId),
+    /// A steer that cannot join the running turn now joined the head, as the next turn.
+    Waits(TurnId),
     /// A queued turn's removal (`TurnEnded { Cancelled }`).
     Removed(TurnId),
     /// A prompt queued held while a hold applies (`hold.rs`), counted as delivered so. With
@@ -226,11 +233,14 @@ fn route(
     refuse_stuck(actor, thread)?;
     let holds = hold::holds(actor, thread);
     // Under an install's hold a steer joins no turn: the install stops it.
-    if delivery == DeliveryRequest::Steer
-        && !holds.update_now()
-        && let Some(target) = steer::target(actor, thread)
-    {
-        return steer::steer(actor, ctx, thread, target, blocks);
+    if delivery == DeliveryRequest::Steer && !holds.update_now() {
+        match steer::target(actor, thread) {
+            steer::Target::Join(turn) => return steer::steer(actor, ctx, thread, turn, blocks),
+            steer::Target::Next(running) => {
+                return steer::next(actor, ctx, thread, running, blocks);
+            }
+            steer::Target::SendNow => {}
+        }
     }
     let running = turn_running(actor, thread);
     if running.is_none() && !holds.is_empty() {
@@ -299,7 +309,7 @@ fn append(
         thread,
         Some(ahead),
         blocks,
-        DeliveryRequest::Queue,
+        Joins::As(DeliveryRequest::Queue),
         |turn, message, content, queue| {
             queue.turns.push_back(queued(turn, message, content));
             After::Appended(turn)
@@ -335,7 +345,7 @@ fn jump(
         thread,
         Some(running),
         blocks,
-        delivery,
+        Joins::As(delivery),
         |turn, message, content, queue| {
             queue.turns.push_front(Queued {
                 turn,
@@ -346,65 +356,6 @@ fn jump(
             After::Jumped(turn)
         },
     )
-}
-
-/// One commit of a new turn's `UserMessage`, its `TurnQueued` behind `ahead` of its own
-/// thread (behind the thread itself, its thread alone, with none), `SteerResolved { SentNow }`
-/// for a steer, and the receipt (`PromptAccepted`). `place` puts the turn in the queue before
-/// the commit is sent (taken out again if it is refused).
-fn log_queued(
-    actor: &mut Actor,
-    ctx: CommandCtx,
-    thread: ThreadId,
-    ahead: Option<TurnId>,
-    blocks: Vec<ContentBlock>,
-    delivery: DeliveryRequest,
-    place: impl FnOnce(TurnId, MessageId, Vec<ContentBlock>, &mut ThreadQueue) -> After,
-) -> Result<(), Error> {
-    let now = actor.now().wall;
-    let turn: TurnId = actor.ids.mint(now)?;
-    let message: MessageId = actor.ids.mint(now)?;
-    let built = build::user_message(turn, message, None, blocks.clone(), delivery.into());
-    let waits = TurnQueued::new(thread, turn, thread, ahead)
-        .map_err(|error| Error::Internal(error.to_string()))?;
-    let outcome = CommandOutcome::PromptAccepted { turn, message };
-    let mut out = Out::new(actor, thread, Some(ctx.id))?;
-    out.push(actor, built.value)?;
-    out.draft.blobs(built.blobs);
-    out.push(actor, waits)?;
-    if delivery == DeliveryRequest::Steer {
-        out.push(actor, steer::sent_now(message, turn))?;
-    }
-    out.draft
-        .receipt(ctx.receipt(Some(StreamId::Thread(thread)), outcome, now));
-    let after = place(
-        turn,
-        message,
-        blocks,
-        queue(actor, thread).ok_or_else(|| lost("a thread"))?,
-    );
-    let tag = command_tag(ctx, outcome, thread, after);
-    let sent = out.send_tagged(actor, tag);
-    if sent.is_err() {
-        drop_turn(actor, thread, turn);
-    }
-    sent
-}
-
-pub(super) fn command_tag(
-    ctx: CommandCtx,
-    outcome: CommandOutcome,
-    thread: ThreadId,
-    after: After,
-) -> Tag {
-    Tag::Command {
-        id: ctx.id,
-        outcome,
-        after: AfterCommand::Turn(TurnTag {
-            thread,
-            then: Then::Queue(after),
-        }),
-    }
 }
 
 /// Takes `turn` out of the queue (its commit was refused).
@@ -433,10 +384,14 @@ pub(super) fn committed(actor: &mut Actor, thread: ThreadId, after: After, ok: b
         (After::Jumped(_), true) => {
             // Sent now, over the running answer, which it cancels.
             counting::question_sent(actor, thread, Delivery::Now);
-            cancel::cancel_current(actor, thread);
+            cancel::cancel_current(actor, thread, cancel::why::SEND_NOW);
             move_on(actor, thread);
         }
         (After::Requeued(_) | After::Edited { .. }, true) => move_on(actor, thread),
+        (After::Waits(_), true) => {
+            counting::question_sent(actor, thread, Delivery::Steer);
+            move_on(actor, thread);
+        }
         (After::Steer(ask), true) => {
             counting::question_sent(actor, thread, Delivery::Steer);
             steer::send(actor, thread, *ask);
@@ -464,6 +419,7 @@ pub(super) fn committed(actor: &mut Actor, thread: ThreadId, after: After, ok: b
             After::Appended(turn)
             | After::Jumped(turn)
             | After::Requeued(turn)
+            | After::Waits(turn)
             | After::Held { turn, .. },
             false,
         ) => {
@@ -476,10 +432,15 @@ pub(super) fn committed(actor: &mut Actor, thread: ThreadId, after: After, ok: b
 }
 
 /// The commit ending the current turn `turn` is durable: a head sent now starts; else the
-/// queue moves on after `EndTurn` (or a removed turn) and holds after any other stop.
+/// queue moves on after `EndTurn` (or a removed turn) and holds after any other stop. Then the
+/// steers the agent may have lost with the turn go next (`steer.rs`), behind a head sent now.
 pub(super) fn on_turn_closed(actor: &mut Actor, thread: ThreadId, turn: TurnId, stop: StopReason) {
-    // A steer of this turn still unanswered starts its wait now.
-    steer::turn_closed(actor, thread, turn);
+    let lost = steer::turn_closed(actor, thread, turn, stop);
+    closed(actor, thread, turn, stop);
+    steer::requeue_all(actor, thread, lost, steer::why::TURN_STOPPED);
+}
+
+fn closed(actor: &mut Actor, thread: ThreadId, turn: TurnId, stop: StopReason) {
     let Some(queue) = queue(actor, thread) else {
         return;
     };

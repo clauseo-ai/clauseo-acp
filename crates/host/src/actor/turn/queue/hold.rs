@@ -20,7 +20,7 @@ use clauseo_protocol::{ContentBlock, DeliveryRequest, ThreadId};
 
 use super::super::super::Actor;
 use super::super::super::commands::CommandCtx;
-use super::{After, Queued, log_queued, refuse_full, turn_ahead};
+use super::{After, Joins, Queued, log_queued, refuse_full, turn_ahead};
 use crate::error::Error;
 
 /// The holds that apply to a thread.
@@ -125,7 +125,7 @@ pub(super) fn hold_prompt(
         thread,
         ahead,
         blocks,
-        logged,
+        Joins::As(logged),
         |turn, message, content, queue| {
             let queued = Queued {
                 turn,

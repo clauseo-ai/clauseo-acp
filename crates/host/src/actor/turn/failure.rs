@@ -45,7 +45,7 @@ pub(super) fn on_store_failure(actor: &mut Actor, thread: ThreadId, failure: &Fa
     );
     current.store_failed = Some(failure.error.code());
     if current.live() {
-        cancel::cancel_running(actor, thread, None);
+        cancel::cancel_running(actor, thread, None, cancel::why::FAILURE);
     }
 }
 
@@ -75,7 +75,7 @@ pub(super) fn on_unblocked(actor: &mut Actor, thread: ThreadId) {
             }
         }
         TurnPhase::Prompting | TurnPhase::FallbackStop => {
-            cancel::cancel_running(actor, thread, None);
+            cancel::cancel_running(actor, thread, None, cancel::why::FAILURE);
         }
         TurnPhase::Checkpointing | TurnPhase::Ending => {}
         TurnPhase::Accepting | TurnPhase::Launching | TurnPhase::Queued | TurnPhase::Starting => {
