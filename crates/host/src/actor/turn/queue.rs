@@ -2,17 +2,17 @@
 //! ends, then start one at a time at step 2.
 //!
 //! A queued turn has its `UserMessage` and a `TurnQueued` behind its own thread logged, and no
-//! `TurnStarted` or `TurnEnded`. The queue moves on when the current turn's `TurnEnded` is
-//! durable: always to a head sent now (send now, a queued prompt sent now, a requeued steer), else
-//! only after `EndTurn`. Any other stop (`Cancelled`, `NotAllowed`, `Failed`, `AtLimit`,
-//! `Refusal`, `MaxTokens`, `MaxTurnRequests`) holds it until the lawyer moves it: `ResumeQueue`,
+//! `TurnStarted` or `TurnEnded`. The queue moves on when the current turn's `TurnEnded` is durable:
+//! always to a head sent now (send now, a queued prompt sent now, a requeued steer), else only
+//! after `EndTurn`. Any other stop (`Cancelled`, `NotAllowed`, `Failed`, `AtLimit`, `Refusal`,
+//! `MaxTokens`, `MaxTurnRequests`) holds it until the lawyer moves it: `ResumeQueue`,
 //! `SendQueuedNow` or a new `SendPrompt` (which only queues held while a hold applies: the
-//! sign-in's or an install's, `hold.rs`). While a steer request is out, it waits for the answer
-//! (at most `steer.rs`'s wait), so a requeued steer takes the head; a steer that cannot join the
-//! running turn now waits as the next turn instead (`steer.rs`). The held flag lives here only (nothing is logged for it);
-//! the view shows it, with why the queue waits, through `clauseo_reducer::set_queue_held`
-//! (`held.rs`). At start-up every queued turn comes back held, rebuilt from the log
-//! ([`restore`]).
+//! sign-in's or an install's, `hold.rs`). While a steer request is out, it waits for the answer (at
+//! most `steer.rs`'s wait), so a requeued steer takes the head; a steer that cannot join the
+//! running turn now waits as the next turn instead (`steer.rs`). The held flag lives here only
+//! (nothing is logged for it); the view shows it, with why the queue waits, through
+//! `clauseo_reducer::set_queue_held` (`held.rs`). At start-up every queued turn comes back held,
+//! rebuilt from the log ([`restore`]).
 
 mod commands;
 #[cfg(feature = "test-support")]

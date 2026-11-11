@@ -145,6 +145,7 @@ fn non_mergeable_event_flushes_held_first() {
     // A permission request is not an update: it flushes too.
     let _admitted = cap.admit(ms(6), titled("a", "two"));
     let ask = RatedUpdate(Box::new(AcpEvent::PermissionRequested {
+        origin: clauseo_acp::Origin::Idle,
         session: session(),
         key: PendingKey(1),
         acp_tool_call_id: CompactString::from("a"),

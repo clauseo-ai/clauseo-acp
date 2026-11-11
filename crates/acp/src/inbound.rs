@@ -188,8 +188,15 @@ impl Inbound {
         let event = {
             let mut state = self.shared.state();
             let key = state.next_key();
+            let origin_of = |session: &AgentSessionId| {
+                state
+                    .sessions
+                    .get(session.as_str())
+                    .map_or(crate::event::Origin::Idle, |s| s.origin)
+            };
             match request {
                 Request::Permission(request) => {
+                    let origin = origin_of(&request.session);
                     let pending = PendingPermission {
                         session: CompactString::from(request.session.as_str()),
                         options: request
@@ -202,6 +209,7 @@ impl Inbound {
                     state.permissions.insert(key, pending);
                     AcpEvent::PermissionRequested {
                         session: request.session,
+                        origin,
                         key,
                         acp_tool_call_id: request.acp_tool_call_id,
                         options: request.options,
@@ -210,12 +218,14 @@ impl Inbound {
                     }
                 }
                 Request::Elicitation(request) => {
+                    let origin = origin_of(&request.session);
                     let url = matches!(request.request, ElicitationRequest::Url { .. });
                     state
                         .elicitations
                         .insert(key, PendingElicitation { url, responder });
                     AcpEvent::ElicitationRequested {
                         session: request.session,
+                        origin,
                         key,
                         elicitation_id: request.elicitation_id,
                         acp_tool_call_id: request.acp_tool_call_id,

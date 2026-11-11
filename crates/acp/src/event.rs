@@ -31,6 +31,9 @@ pub enum AcpEvent {
     PermissionRequested {
         /// The agent's session.
         session: AgentSessionId,
+        /// When it came, relative to the session's turns: `Idle` for a turn the agent started
+        /// by itself, with no prompt in flight.
+        origin: Origin,
         /// The key to answer it with.
         key: PendingKey,
         /// The agent's `toolCallId` the request is about.
@@ -50,6 +53,8 @@ pub enum AcpEvent {
     ElicitationRequested {
         /// The agent's session.
         session: AgentSessionId,
+        /// When it came, as for `PermissionRequested`.
+        origin: Origin,
         /// The key to answer it with.
         key: PendingKey,
         /// The agent's `elicitationId`, which URL elicitations carry and

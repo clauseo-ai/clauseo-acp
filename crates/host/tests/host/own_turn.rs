@@ -2,7 +2,8 @@
 //! finishes): its tool call and text are never dropped. The host opens a turn for them with no
 //! message of the lawyer's, shows and keeps it across a restart, gives it an Undo step, ends it
 //! on the agent's cost-bearing usage update or after a quiet spell; a prompt queued meanwhile
-//! waits behind it, and Send now cancels it.
+//! waits behind it, and Send now cancels it; a permission request with no turn opens one too and
+//! is asked, never cancelled.
 
 use std::time::Duration;
 
@@ -11,7 +12,8 @@ use clauseo_protocol::{
 };
 
 use crate::observe::Events;
-use crate::queue::{send, settle, starts, until_queued};
+use crate::permissions::until_first_request;
+use crate::queue::{allow, send, settle, starts, until_queued};
 use crate::support::{Dir, FAKE, Running, Scenario, matter_with_thread, text};
 
 /// How long an agent-started turn with nothing open waits for an update.
@@ -148,5 +150,23 @@ fn send_now_cancels_an_agent_started_turn() {
     assert_eq!(events.until_turn_ended(next).stop, StopReason::EndTurn);
     settle(&host, &mut events);
     assert_eq!(events.turn_text(next), "Clause 9 says.");
+    host.shutdown();
+}
+
+#[test]
+fn a_permission_request_with_no_turn_opens_an_agent_started_turn_and_is_asked() {
+    let (_dir, host, thread, mut events) = host_with(
+        "a_permission_request_with_no_turn_opens_an_agent_started_turn_and_is_asked",
+        "own-turn-permission",
+    );
+    let (first, _) = host.prompt(thread, "Run the build.");
+    assert_eq!(events.until_turn_ended(first).stop, StopReason::EndTurn);
+    let own = until_other_start(&mut events, first);
+    until_first_request(&mut events);
+    allow(&host, &mut events, thread);
+    assert_eq!(events.until_turn_ended(own).stop, StopReason::EndTurn);
+    // `settle` checks the agent got its answer, not a cancel.
+    settle(&host, &mut events);
+    assert_eq!(events.turn_text(own), OWN_TEXT);
     host.shutdown();
 }

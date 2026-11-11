@@ -1,16 +1,16 @@
-//! Start-up: a thread's queue rebuilt from its whole log, held. Its queued turns are the
-//! prompts whose turn neither started nor ended, in the order they joined the queue (a prompt's
-//! `UserMessage`, a requeued steer's `SteerResolved`), with their edits applied. A steer saved
-//! and never answered (the host stopped first) moves to a new queued turn, so it is not lost; it
-//! keeps its message's place in the log, behind any prompt queued before it, and so does a steer
-//! the agent took into a turn that then ended `Cancelled` or `Failed`, or never ended (the
-//! repair ends it `Failed`), had the host stopped before it went next (`steer.rs`). The turns put back
-//! at the head live keep that place across a restart: a requeued steer (`steer.rs`) and a turn
-//! put back for its agent's sign-in (`sign_in.rs`) both have their `TurnQueued` marked
-//! `at_head`, so they come back first, the latest put back first, as the live queue has them.
-//! The queue comes back held, so nothing runs before the lawyer looks. Only a turn put back for
-//! the sign-in marks the queue as waiting for it, so `restart_agents` resumes that one; a steer
-//! does not. An older log has no mark and restores in log order.
+//! Start-up: a thread's queue rebuilt from its whole log, held. Its queued turns are the prompts
+//! whose turn neither started nor ended, in the order they joined the queue (a prompt's
+//! `UserMessage`, a requeued steer's `SteerResolved`), with their edits applied. A steer saved and
+//! never answered (the host stopped first) moves to a new queued turn, so it is not lost; it keeps
+//! its message's place in the log, behind any prompt queued before it, and so does a steer the
+//! agent took into a turn that then ended `Cancelled` or `Failed`, or never ended (the repair ends
+//! it `Failed`), had the host stopped before it went next (`steer.rs`). The turns put back at the
+//! head live keep that place across a restart: a requeued steer (`steer.rs`) and a turn put back
+//! for its agent's sign-in (`sign_in.rs`) both have their `TurnQueued` marked `at_head`, so they
+//! come back first, the latest put back first, as the live queue has them. The queue comes back
+//! held, so nothing runs before the lawyer looks. Only a turn put back for the sign-in marks the
+//! queue as waiting for it, so `restart_agents` resumes that one; a steer does not. An older log
+//! has no mark and restores in log order.
 
 use std::collections::{BTreeMap, BTreeSet};
 
