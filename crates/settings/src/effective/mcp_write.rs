@@ -96,6 +96,36 @@ impl Effective {
         Ok(())
     }
 
+    /// Adds each of `servers` (an import's), in one write: each passes
+    /// [`Self::check_mcp_server`]'s checks against the list and the ones before it (no two in
+    /// any case), then all are added; one refused, or the write failing, adds none.
+    pub fn add_mcp_servers(
+        &mut self,
+        files: &dyn Files,
+        servers: &[(String, McpServerLaunch)],
+    ) -> Result<(), Error> {
+        let mut entries = Vec::with_capacity(servers.len());
+        for (index, (name, server)) in servers.iter().enumerate() {
+            self.check_mcp_server(None, name, server)?;
+            let before = servers.get(..index).unwrap_or_default();
+            if before
+                .iter()
+                .any(|(other, _)| other.eq_ignore_ascii_case(name))
+            {
+                return Err(refused(name, McpRefusal::NameTaken));
+            }
+            entries.push((name.clone(), self.mcp_entry(server)?));
+        }
+        user::write_mcp_servers(&self.locations, files, entries)?;
+        for (name, server) in servers {
+            self.settings
+                .mcp
+                .servers
+                .insert(name.clone(), server.clone());
+        }
+        Ok(())
+    }
+
     /// Removes the server `name`, answering what it was; `Ok(None)`, with nothing written, when
     /// there is none.
     pub fn remove_mcp_server(

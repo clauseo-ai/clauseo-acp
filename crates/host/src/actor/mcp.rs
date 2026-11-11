@@ -39,6 +39,7 @@ use super::input::Input;
 use crate::error::Error;
 
 mod ask;
+pub(crate) mod finder;
 pub(crate) mod import;
 pub(crate) mod keychain;
 pub(crate) mod view;
@@ -67,6 +68,10 @@ pub(crate) struct McpOnActor {
     pub(crate) scanning: bool,
     /// Whether another scan was asked for while one ran.
     pub(crate) rescan: bool,
+    /// Whether a scan's finder worker still runs (`finder.rs`).
+    pub(crate) scan_busy: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    /// Whether an import's finder worker still runs.
+    pub(crate) import_busy: std::sync::Arc<std::sync::atomic::AtomicBool>,
     /// How the last import went, for the view.
     pub(crate) last_import: Option<clauseo_protocol::McpImportResult>,
 }
@@ -94,7 +99,7 @@ pub(crate) enum McpInput {
     /// An import's keychain writes ended.
     Imported {
         ctx: CommandCtx,
-        result: Result<Box<import::Imported>, import::StoreFailed>,
+        result: Result<Box<import::Imported>, import::ImportFailed>,
     },
     /// An import scan ended; `None` when it panicked.
     Scanned(Option<Vec<import::Found>>),

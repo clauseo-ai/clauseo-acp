@@ -264,6 +264,23 @@ pub(crate) fn write_mcp_enabled(
     Ok(true)
 }
 
+/// Adds each of `entries` to `mcp.servers` in the user's `settings.json`, in one write, as
+/// [`write_mcp_server`] adds one: the file holds all of them, or (the write failing) none. It
+/// checks nothing: [`crate::Effective::add_mcp_servers`] does, before it calls this.
+pub(crate) fn write_mcp_servers(
+    locations: &Locations,
+    files: &dyn Files,
+    entries: Vec<(String, Value)>,
+) -> Result<(), Error> {
+    let mut document = read_document(locations, files)?;
+    if let Value::Object(mcp) = section_mut(&mut document, "mcp")
+        && let Value::Object(servers) = section_mut(mcp, "servers")
+    {
+        servers.extend(entries);
+    }
+    save_document(locations, files, &document)
+}
+
 /// The user's `settings.json` as one object: empty when the file is missing; an error, with
 /// the file left alone, when it does not parse.
 fn read_document(locations: &Locations, files: &dyn Files) -> Result<Map<String, Value>, Error> {

@@ -87,21 +87,31 @@ fn at(rel: &str) -> String {
     format!("{}{sep}{}", home(), rel.replace('/', sep))
 }
 
-/// The fake `APPDATA` (Windows' Claude Desktop folder), `CODEX_HOME`, and a `PATH` holding
-/// [`program`]'s folder only.
+/// The fake `APPDATA` (Windows' Claude Desktop folder), `CODEX_HOME`, nvm-windows'
+/// `NVM_HOME`, and a `PATH` holding [`program`]'s folder only.
 fn vars(name: &str) -> Option<String> {
     match name {
-        "PATH" | "Path" => Some(at("bin")),
+        "PATH" | "Path" => Some(nvm_bin()),
+        "NVM_HOME" => Some(at("nvm")),
         "APPDATA" => Some(at("AppData/Roaming")),
         "CODEX_HOME" => Some(at("codex")),
         _ => None,
     }
 }
 
-/// The program most importable servers run: a file on the fake `PATH`, so the settings keep
-/// its bare name.
+/// nvm's folder of the current Node, on this OS.
+fn nvm_bin() -> String {
+    if cfg!(windows) {
+        at("nvm/v22.1.0")
+    } else {
+        at(".nvm/versions/node/v22.1.0/bin")
+    }
+}
+
+/// The program most importable servers run: under nvm and on the fake `PATH`, so the settings
+/// keep its bare name.
 fn program() -> String {
-    at(&format!("bin/{}", npx_name()))
+    format!("{}{}{}", nvm_bin(), std::path::MAIN_SEPARATOR, npx_name())
 }
 
 /// `npx`'s file name on this OS.
@@ -116,11 +126,12 @@ fn off_path() -> String {
 
 /// The three apps' config:
 /// - Claude Desktop: `github` (local, with `ENV_VALUE`) and `notes` (remote http, with
-///   `HEADER_VALUE`) import; `files` runs a program not found; `weather` is `sse`.
+///   `HEADER_VALUE`) import; `files` runs a program not found (written as a path); `weather`
+///   is `sse`.
 /// - Claude Code: the user-wide `search` imports; a project's `.mcp.json` `repo-tool` is not
-///   approved.
+///   approved and its `repo-off` is disabled there.
 /// - Codex: `drafts` (a program off the search path) imports; `billing` names a variable not
-///   set.
+///   set; `paused` is `enabled = false`.
 fn apps() -> FakeFs {
     let npx = program();
     let desktop = json!({"mcpServers": {
@@ -128,20 +139,23 @@ fn apps() -> FakeFs {
             "env": {"GITHUB_TOKEN": ENV_VALUE}},
         "notes": {"type": "http", "url": "https://notes.example.test/mcp",
             "headers": {"Authorization": HEADER_VALUE}},
-        "files": {"command": "uvx-missing", "args": ["files"]},
+        "files": {"command": at("tools/uvx-missing"), "args": ["files"]},
         "weather": {"type": "sse", "url": "https://weather.example.test/sse"},
     }});
     let project = at("Matters/Jones");
     let claude = json!({
         "mcpServers": {"search": {"command": npx}},
         "projects": {project.clone(): {"hasTrustDialogAccepted": true,
-            "enabledMcpjsonServers": []}},
+            "enabledMcpjsonServers": [], "disabledMcpjsonServers": ["repo-off"]}},
     });
-    let mcp_json = json!({"mcpServers": {"repo-tool": {"command": npx}}});
+    let mcp_json = json!({"mcpServers": {
+        "repo-tool": {"command": npx}, "repo-off": {"command": npx},
+    }});
     let drafts = off_path();
     let codex = format!(
         "[mcp_servers.drafts]\ncommand = '{drafts}'\n\n\
-         [mcp_servers.billing]\ncommand = '{npx}'\nenv_vars = [\"NOT_SET_ANYWHERE\"]\n"
+         [mcp_servers.billing]\ncommand = '{npx}'\nenv_vars = [\"NOT_SET_ANYWHERE\"]\n\n\
+         [mcp_servers.paused]\ncommand = '{npx}'\nenabled = false\n"
     );
     let desktop_path = if cfg!(windows) {
         at("AppData/Roaming/Claude/claude_desktop_config.json")
@@ -169,7 +183,9 @@ fn wired(config: HostConfig, store: &Arc<MemoryStore>, fs: FakeFs) -> HostConfig
                 vars: &vars,
                 fs: fs.as_ref(),
             };
-            clauseo_host::find_mcp_imports_in(&env, existing)
+            // The fake paths are their own canonical form.
+            let canonical = |path: &Path| Some(path.to_path_buf());
+            clauseo_host::find_mcp_imports_in(&env, &canonical, existing)
         }))
 }
 
@@ -223,6 +239,9 @@ fn imported(
     (view, last)
 }
 
+#[path = "mcp_import_safety.rs"]
+mod safety;
+
 /// The log files under `dir`, oldest first.
 fn read_logs(dir: &Path) -> String {
     ["host.2.log", "host.1.log", "host.log"]
@@ -265,7 +284,10 @@ fn mcp_import_counts_imports_and_skips_and_keeps_values_in_the_keychain() {
     );
     let names: Vec<&str> = view.servers.iter().map(|s| s.name.as_str()).collect();
     assert_eq!(names, ["github", "notes"]);
-    assert!(view.servers.iter().all(|server| server.enabled));
+    assert!(
+        view.servers.iter().all(|server| !server.enabled),
+        "imported servers arrive turned off"
+    );
     // On the search path: the bare name, which a launch finds again after an upgrade.
     assert_eq!(view.servers[0].command.as_deref(), Some(npx_name()));
     assert_eq!(view.servers[0].args, ["-y", "server-github"]);
@@ -302,11 +324,12 @@ fn mcp_import_counts_imports_and_skips_and_keeps_values_in_the_keychain() {
         servers["notes"]["headers"]["Authorization"],
         json!({"keychain": true})
     );
-    assert_eq!(servers["github"]["enabled"], true);
+    assert_eq!(servers["github"]["enabled"], false);
 
     // Claude Code: the user's server in, the project's unapproved one skipped.
-    let (_, last) = imported(&host, &mut sub, ClaudeCode);
+    let (view, last) = imported(&host, &mut sub, ClaudeCode);
     assert_eq!(last.imported, ["search"]);
+    assert!(view.servers.iter().all(|server| server.name != "repo-off"));
     assert_eq!(
         last.skipped,
         [skip("repo-tool", McpSkipReason::NotApproved, None)]
@@ -327,9 +350,18 @@ fn mcp_import_counts_imports_and_skips_and_keeps_values_in_the_keychain() {
         [skip("billing", McpSkipReason::UnresolvedVariable, None)]
     );
     assert!(view.importable.is_empty(), "{view:?}");
+    // What the apps turned off never comes in, and is not offered as a skip either.
+    for off in ["repo-off", "paused"] {
+        assert!(
+            view.servers.iter().all(|server| server.name != off),
+            "{off}"
+        );
+        assert!(last.skipped.iter().all(|one| one.name != off), "{off}");
+    }
 
     // Claude Desktop again: everything already added or still not importable.
-    let (_, last) = imported(&host, &mut sub, ClaudeDesktop);
+    let (view, last) = imported(&host, &mut sub, ClaudeDesktop);
+    safety::assert_no_values_or_paths(&view);
     assert_eq!(last.imported, Vec::<String>::new());
     assert_eq!(
         last.skipped,
@@ -348,7 +380,12 @@ fn mcp_import_counts_imports_and_skips_and_keeps_values_in_the_keychain() {
     host.shutdown();
     drop(guard);
 
-    let log = read_logs(&locations.log_dir());
+    assert_logged_without_values(&locations.log_dir());
+}
+
+/// The log files under `dir` name an import and hold no value.
+fn assert_logged_without_values(dir: &Path) {
+    let log = read_logs(dir);
     assert!(
         log.contains("MCP servers imported"),
         "the log holds no import:\n{log}"

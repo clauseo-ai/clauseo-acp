@@ -1,4 +1,5 @@
-//! The writes of one MCP server (Settings › Tools): add, replace, rename, remove, on and off;
+//! The writes of one MCP server (Settings › Tools): add, replace, rename, remove, on and off,
+//! and an import's servers in one write;
 //! the firm's lock, each rule's refusal, a failed write, and the file a fresh load agrees with.
 
 use super::Effective;
@@ -340,4 +341,39 @@ fn writes_leave_every_other_key_as_the_file_has_it() {
         entry(&files, "bare"),
         serde_json::json!({"command": abs_str("bin/bare"), "enabled": false})
     );
+}
+
+#[test]
+fn an_import_adds_all_in_one_write_or_none() {
+    let mut files = user(r#"{"ui": {"theme": "dark"}}"#);
+    let mut effective = Effective::load(&locations(), &files, &[]);
+    effective
+        .save_mcp_server(&files, None, "github", &local("github"))
+        .unwrap();
+    let before = file_text(&files);
+    // A name held in another case, or twice in the batch, refuses the whole batch.
+    for batch in [
+        vec![
+            ("a".to_owned(), local("a")),
+            ("GitHub".to_owned(), local("b")),
+        ],
+        vec![("a".to_owned(), local("a")), ("A".to_owned(), local("b"))],
+    ] {
+        let error = effective.add_mcp_servers(&files, &batch).unwrap_err();
+        assert_eq!(refusal(error), McpRefusal::NameTaken);
+        assert_eq!(file_text(&files), before);
+    }
+    files.fail_writes = true;
+    let batch = [("a".to_owned(), local("a")), ("b".to_owned(), local("b"))];
+    assert!(matches!(
+        effective.add_mcp_servers(&files, &batch),
+        Err(Error::Io { .. })
+    ));
+    assert_eq!(effective.mcp_servers().len(), 1, "a failed write adds none");
+    files.fail_writes = false;
+    effective.add_mcp_servers(&files, &batch).unwrap();
+    let fresh = Effective::load(&locations(), &files, &[]);
+    let names: Vec<&str> = fresh.mcp_servers().keys().map(String::as_str).collect();
+    assert_eq!(names, ["a", "b", "github"]);
+    assert_eq!(fresh.mcp_servers(), effective.mcp_servers());
 }
