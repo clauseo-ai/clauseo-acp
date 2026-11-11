@@ -77,6 +77,8 @@ export function noticeLine(kind: NoticeKind | undefined, w: NoticeWords): string
       return w.th(
         "Claude's automatic mode isn't available for this account, so Claude asks before running commands.",
       );
+    if (kind === "outside_matter_blocked")
+      return w.th("Clauseo blocked a request: it reaches outside this matter.");
     return null;
   }
   // read by shape: a value from a newer host, or none (null), that this version doesn't know gives null. The field

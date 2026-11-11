@@ -160,7 +160,7 @@ fn tell_once(actor: &mut Actor, thread: ThreadId) -> bool {
     let Some(current) = current(actor, thread) else {
         return false;
     };
-    if std::mem::replace(&mut current.offline_told, true) {
+    if std::mem::replace(&mut current.told.offline, true) {
         return false;
     }
     agent(actor, thread)

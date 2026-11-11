@@ -16,11 +16,13 @@ import {
   kindsOf,
   lineOf,
   markOf,
+  promptsAtTheirCalls,
   restOf,
   segmentsOf,
   summaryOf,
   troubleOf,
   type Part,
+  type Segment,
 } from "./steps.ts";
 
 let n = 0;
@@ -60,6 +62,32 @@ describe("segmentsOf", () => {
 
   test("a permission prompt or a question parts the runs either side, and never folds", () => {
     expect(of("ttpttqt")).toEqual(["[t0 t1]", "p2", "[t3 t4]", "q5", "[t6]"]);
+  });
+});
+
+describe("promptsAtTheirCalls", () => {
+  const group = (...ids: string[]): Segment => ({ group: ids as EntryId[] });
+  const row = (id: string): Segment => ({ row: id as EntryId });
+  const calls: Record<string, string> = { p1: "t1", p2: "t2", p3: "t3" };
+  const callOf = (id: EntryId) => (calls[id] ?? null) as EntryId | null;
+  const shown = (segments: readonly Segment[]) =>
+    promptsAtTheirCalls(segments, callOf).map((s) =>
+      s.row !== undefined ? s.row : `[${s.group.join(" ")}]`,
+    );
+
+  test("a prompt answered after the next step began stands after its own step, not the next one's", () => {
+    // the dry run: two commands, the first one's prompt, a third command (refused unasked), the second one's prompt
+    expect(shown([group("t1", "t2"), row("p1"), group("t3"), row("p2")])).toEqual([
+      "[t1 t2]",
+      "p1",
+      "p2",
+      "[t3]",
+    ]);
+  });
+
+  test("a prompt right after its own step, or with no tool call, stays where it is", () => {
+    const segments = [group("t1"), row("p1"), row("a5"), group("t3"), row("p3"), row("q9")];
+    expect(shown(segments)).toEqual(["[t1]", "p1", "a5", "[t3]", "p3", "q9"]);
   });
 });
 

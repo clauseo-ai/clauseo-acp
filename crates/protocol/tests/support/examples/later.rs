@@ -185,6 +185,11 @@ pub(super) fn notices() -> Vec<DomainEvent> {
                 .to_owned(),
             kind: Some(NoticeKind::AutoModeUnavailable),
         },
+        Notice {
+            level: NoticeLevel::Warning,
+            text: "Clauseo blocked a request: it reaches outside this matter.".to_owned(),
+            kind: Some(NoticeKind::OutsideMatterBlocked),
+        },
     ];
     notices.extend(
         [

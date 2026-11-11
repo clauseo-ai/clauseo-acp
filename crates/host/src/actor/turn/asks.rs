@@ -4,7 +4,7 @@
 //! or a stop marks the live turn; the first wins; a rate limit also feeds the limits model). A
 //! permission request that names a file of the matter a program holds open (Word, say) is
 //! answered for the lawyer, rejected, in the commit that logs it. One that touches Clauseo's own
-//! data folder (`agent/data_fence.rs`) is rejected with nothing logged: the lawyer never sees it.
+//! data folder (`agent/data_fence.rs`) is rejected unasked, with a notice (`outside.rs`).
 //! A Codex approval of one of the guarded `browser` server's tools is allowed for the session
 //! with nothing logged ([`browser_tool_to_allow`]), and one of a server the lawyer added is
 //! allowed once with nothing logged ([`trusted_tool_to_allow`]); one giving a shell command the
@@ -18,7 +18,7 @@ use clauseo_protocol::{
     AgentChoiceId, AgentSessionId, CompactString, Deliverable, ElicitationId, ElicitationRequest,
     ElicitationRequested, ElicitationResponse, LimitStopReason, MatterPath, PermissionAbout,
     PermissionChoice, PermissionOption, PermissionRequestId, PermissionRequested,
-    PermissionResolved, Principal, StopReason, StreamId, ThreadId, TurnId,
+    PermissionResolved, Principal, StreamId, ThreadId, TurnId,
 };
 
 use super::super::input::MatterTag;
@@ -211,7 +211,7 @@ fn tool_call_paths(actor: &Actor, thread: ThreadId, ask: &PermissionAsk) -> Vec<
 }
 
 /// The matter thread checked a permission request's paths. Still in the same live turn, a path
-/// in Clauseo's data folder gets the request rejected unseen ([`refuse_data_folder`]), a file
+/// in Clauseo's data folder gets the request rejected unasked (`outside.rs`), a file
 /// held open gets it refused for the lawyer ([`refuse_held_open`]); neither, and the request is
 /// logged for the lawyer. Once that turn is over, that one request is answered
 /// `cancelled` (the others of the session, and any later turn, are left alone).
@@ -239,7 +239,7 @@ pub(super) fn on_held_open(
     }
     let held = match checked {
         PathsChecked::DataFolder => {
-            refuse_data_folder(actor, thread, &ask);
+            super::outside::refuse_data_folder(actor, thread, &ask);
             return;
         }
         PathsChecked::Held(held) => held,
@@ -383,34 +383,6 @@ fn refuse_held_open(
         agent.run = None;
     }
     Ok(())
-}
-
-/// Rejects a request that touches Clauseo's data folder, with nothing logged and the lawyer never
-/// asked: the agent gets the reject-once option, else `cancelled`, and the agent's count for its
-/// `agent ended` line goes up. No path is logged. ACP's answer carries no reason, so the agent
-/// hears its adapter's own words for a refusal. An agent that cancels its turn on it (Codex)
-/// ends the turn `OutsideMatter`, not the lawyer's `Cancelled`.
-fn refuse_data_folder(actor: &mut Actor, thread: ThreadId, ask: &PermissionAsk) {
-    let reject =
-        reject_option(&ask.options).and_then(|option| AgentChoiceId::new(&option.option_id).ok());
-    if let Some(current) = current(actor, thread) {
-        current.refused = Some(StopReason::OutsideMatter);
-    }
-    let Some(agent) = agent(actor, thread) else {
-        return;
-    };
-    agent.denied_data_folder = agent.denied_data_folder.saturating_add(1);
-    let client = agent.link.client.clone();
-    let key = ask.key;
-    spawn(actor, async move {
-        let answered = match reject {
-            Some(option) => client.answer_permission(key, option).await,
-            None => client.cancel_permission(key).await,
-        };
-        if let Err(error) = answered {
-            tracing::warn!(error = %Cause(&error), "a data-folder refusal did not reach the agent");
-        }
-    });
 }
 
 /// An elicitation: logged during the live turn, else answered `Cancel`.

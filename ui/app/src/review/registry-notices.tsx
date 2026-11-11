@@ -70,6 +70,13 @@ const notice = (order: number, over: Partial<NoticeEntry>): ViewEntry => ({
 const CONTEXT_NOTICE = notice(6, { text: CONTEXT, kind: "context_not_restored" });
 /** Claude's auto mode isn't available, so the session runs in acceptEdits. */
 const AUTO_NOTICE = notice(6, { text: AUTO_UNAVAILABLE, kind: "auto_mode_unavailable" });
+const BLOCKED = "Clauseo blocked a request: it reaches outside this matter.";
+/** Clauseo's data fence refused, unasked, a request of the agent's (once a turn). */
+const BLOCKED_NOTICE = notice(6, {
+  level: "warning",
+  text: BLOCKED,
+  kind: "outside_matter_blocked",
+});
 /** One paper a sync client put back after the undo. */
 const ONE_PAPER = notice(6, {
   kind: { files_came_back: { files: ["Pleadings/Reply.docx"], more: 0 } },
@@ -130,5 +137,11 @@ export const TN: Entry[] = [
     words: threadWords(AUTO_UNAVAILABLE),
     screen: "room/thread",
     render: thread(AUTO_NOTICE),
+  },
+  {
+    id: "TN-11",
+    words: threadWords(BLOCKED),
+    screen: "room/thread",
+    render: thread(BLOCKED_NOTICE),
   },
 ];

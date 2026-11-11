@@ -167,6 +167,10 @@ fn notice_kind() {
         r#""auto_mode_unavailable""#,
         &NoticeKind::AutoModeUnavailable,
     );
+    decodes_in_both(
+        r#""outside_matter_blocked""#,
+        &NoticeKind::OutsideMatterBlocked,
+    );
     let pack = PackId::new("nda-kit").unwrap();
     let skipped = NoticeKind::SkillPackNotLoaded {
         pack,

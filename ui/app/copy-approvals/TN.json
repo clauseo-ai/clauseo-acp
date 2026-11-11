@@ -98,5 +98,16 @@
     "status": "approved",
     "at": "2026-11-11",
     "by": "orchestrator (settled en)"
+  },
+  "TN-11": {
+    "en": "Clauseo blocked a request: it reaches outside this matter.",
+    "hi": "Clauseo ने एक अनुरोध रोक दिया: वह इस मामले के बाहर तक पहुँचता है।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-11",
+    "hi_by": "fence-after-allow (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-11",
+    "by": "fence-after-allow (provisional; orchestrator to approve)",
+    "note": "Host notice NoticeKind::OutsideMatterBlocked: Clauseo's data fence refused, unasked, a request of the agent's that reached outside the matter (actor/turn/outside.rs), once a turn; the agent is told separately by a steer"
   }
 }
