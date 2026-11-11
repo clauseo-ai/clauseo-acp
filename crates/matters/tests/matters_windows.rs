@@ -324,8 +324,10 @@ mod windows {
         let plain = case.file("plain.txt");
         assert!(!OsProbe.is_cloud_only(&plain, &plain.symlink_metadata().unwrap()));
 
+        // The tree is unchanged, but the skip record gained cloud.docx, so a checkpoint with no
+        // changed file is made (decision 0007): Undo's record of what was there at the start.
         let checkpoint = matter.before_turn(&meta(2)).unwrap();
-        assert_eq!(checkpoint.outcome, CheckpointOutcome::Reused(cid(1)));
+        assert_eq!(checkpoint.outcome, CheckpointOutcome::Created(cid(2)));
         assert!(checkpoint.changes.is_empty(), "{:?}", checkpoint.changes);
         assert_eq!(
             checkpoint.skipped,
