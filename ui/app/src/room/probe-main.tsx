@@ -30,7 +30,8 @@
 // a file outside the matter (first-read/probe-state.ts), for the line under the composer; ?file=long names a long file.
 // With ?reveal=refused, Show in Finder is refused with the folder missing, for the rail's Locate folder beside the
 // refusal; with ?rail=triage, every matter's threads arrive at the start, so the open matter's menu (with
-// ?thread=commands) has Snooze until and Mark done. Not shipped.
+// ?thread=commands) has Snooze until and Mark done. With ?sac=evaluation, Windows says Smart App Control is still
+// deciding, so the room shows its note (room/sac/), shown again on each load. Not shipped.
 import { whenWordsReady } from "@clauseo/components/lib/display.ts";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
@@ -284,7 +285,13 @@ const refuseReveal = (): never => {
   throw { code: "matter.folder_missing", message: "missing", retryable: false };
 };
 
+// ?sac=evaluation: the note shows on each load, whatever an earlier Got it kept
+const sacNote = page.get("sac") === "evaluation";
+if (sacNote) localStorage.removeItem("clauseo.smart-app-control-noted");
+
 const transport = new FakeTransport({
+  // ?sac=evaluation: Windows says Smart App Control is still deciding, so the room shows its note
+  ...(sacNote ? { smartAppControl: "evaluation" as const } : {}),
   // ?platform=windows or linux draws that computer's frame; the Mac's without
   platform:
     page.get("platform") === "windows"

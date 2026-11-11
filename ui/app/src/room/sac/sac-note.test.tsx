@@ -33,7 +33,9 @@ test("in evaluation, not put away before, the room shows the note with its words
   h = await roomWith("evaluation");
   const note = h.one("sac-note");
   expect(note).not.toBeNull();
-  expect(note?.textContent).toContain("Only if Windows ever blocks Clauseo on this computer");
+  expect(note?.textContent).toContain(
+    "If Windows ever blocks Clauseo, turn off Smart App Control.",
+  );
   expect(note?.querySelector("[role=status]")).not.toBeNull();
   expect(h.one("sac-note-how")?.textContent).toBe("How to do this");
   expect(h.one("sac-note-got-it")?.textContent).toBe("Got it");

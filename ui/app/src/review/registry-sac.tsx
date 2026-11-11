@@ -26,9 +26,7 @@ const render = () => <RoomOver host={evaluating} />;
 export const SAC: Entry[] = [
   {
     id: "SAC-01",
-    words: roomWords(
-      "Only if Windows ever blocks Clauseo on this computer: open Windows Security, go to App & browser control, then Smart App Control settings, and turn it off. On an up-to-date Windows 11, you can turn it back on later. Until then, there's nothing to do.",
-    ),
+    words: roomWords("If Windows ever blocks Clauseo, turn off Smart App Control."),
     screen: "room/sac-note",
     render,
   },
