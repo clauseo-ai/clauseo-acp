@@ -48,6 +48,12 @@
     background: var(--well-strong);
     border-radius: var(--r-field) var(--r-field) 0 0;
   }
+  /* a second line under the first (the first run's other plan): compact, square at the top, one hair below the first */
+  .working-also > .working {
+    min-height: var(--size-control-small);
+    border-radius: 0;
+    border-top: var(--hairline) solid var(--well);
+  }
   /* the lead: the icon's own 16 px, or, while the pen writes, an empty slot of the same 16 px, so the words keep
      their place */
   .working-lead {

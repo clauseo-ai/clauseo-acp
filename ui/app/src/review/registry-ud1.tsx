@@ -540,6 +540,23 @@ const UC_KEY: Entry[] = (
   render: render(scene),
 }));
 
+/** UC-153: ChatGPT ready while Claude's sign-in is under way, on the first screen: sign-ins go one at a time, so its
+ * row says its browser opens after Claude's (the parallel installs; UC's id, this file's scene). */
+const AFTER_SIGN_IN: Entry = {
+  id: "UC-153",
+  words: firstLaunchWords("Your browser opens for {name} after {other}'s sign-in."),
+  screen: "first-launch/plan-after",
+  render: render({
+    first: true,
+    events: [
+      READY,
+      signIn(CLAUDE, { waiting: { since: AT, nudge: false } }),
+      install(CODEX, { ready: { version: "0.1.0" } }),
+      signIn(CODEX, "queued"),
+    ],
+  }),
+};
+
 export const UD1: readonly Entry[] = [
   ...SCENES.flatMap((scene, i) =>
     scene === null
@@ -556,4 +573,5 @@ export const UD1: readonly Entry[] = [
   REFUSAL,
   TOOLS_OFFLINE,
   ...UC_KEY,
+  AFTER_SIGN_IN,
 ];

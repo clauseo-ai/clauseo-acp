@@ -14,9 +14,11 @@ import type { AgentId } from "../../transport/protocol.ts";
 import {
   CLAUDE,
   CODEX,
-  isReady,
+  installGoing,
   isSignedIn,
+  otherPlan,
   planInPlay,
+  signInWaits,
   setupStoreOf,
   type SetupSource,
   type SetupState,
@@ -48,7 +50,8 @@ import { loadProtectionNote } from "../protection/note-load.ts";
 import { copyText, IDS, installActs, NAME, PLANS, planOf } from "./acts.ts";
 import { FirstScreen } from "./first-screen.tsx";
 import { repairOf, stepWords, type StepParts } from "./step-parts.ts";
-import { gateView, installView, refusalView } from "./views.ts";
+import { gateView, installView, queuedView, refusalView } from "./views.ts";
+import { footActs, welcomeFoot } from "./welcome-foot.tsx";
 
 // UD2: the expired sign-in card rides here, with the setup store and the gate; the thread's chunk places it
 provideExpiredCard((props) => <ExpiredCard {...props} />);
@@ -63,8 +66,9 @@ function actsFor(
   return (a) => {
     switch (a.act) {
       case "sign-in":
+        // Sign in and Try again, through the store's queue: it waits for the other plan's sign-in, never its download
         store.set({ pasting: false, keyOpen: false });
-        store.command({ start_sign_in: a.console === true ? { agent, console: true } : { agent } });
+        store.signIn(agent, { console: a.console === true, again: true });
         return;
       case "sign-in-to":
         // either plan's own Sign in, through the store's queue: the other plan's choice moves the new conversation to
@@ -105,15 +109,11 @@ function actsFor(
       case "different":
         store.command({ use_different_account: { agent } });
         return;
-      case "instead": {
-        // the other plan's install starts unless it is ready (Claude's download pauses where it is, R20), and the new
-        // conversation takes it at once (FirstRun's pending choice)
-        const other = agent === CODEX ? CLAUDE : CODEX;
-        store.set({ chosen: other, pending: other, keyOpen: false, pasting: false });
-        if (!isReady(store.state().agents[other]?.install))
-          store.command({ install_agent: { agent: other } });
+      case "instead":
+        // the other plan's own Sign in, through the store's queue: its download starts beside this plan's, which goes
+        // on, and the new conversation takes it at once (FirstRun's pending choice)
+        store.signInTo(otherPlan(agent));
         return;
-      }
       case "key-panel":
         store.set({ keyOpen: a.open });
         return;
@@ -165,15 +165,38 @@ function stepActs(transport: HostTransport, store: ProtectionStore, parts: StepP
 function viewFor(state: SetupState, room: RoomSide, clock: (at: number) => string) {
   const { agent, drafting } = room;
   const setup = state.agents[agent];
-  if (state.queued === agent && !isSignedIn(setup?.signIn))
-    return { kind: "queued", offline: false } as const;
-  const view = gateView(setup, state, clock);
+  if (state.queued === agent && !isSignedIn(setup?.signIn)) return queuedView(setup, state, agent);
+  const view = gateView(setup, state, clock, agent);
   if (view?.kind !== "signed-out" || view.found !== undefined) return view;
   const other = isSignedIn(state.agents[agent === CODEX ? CLAUDE : CODEX]?.signIn);
   if (drafting && !other) return view;
   const signIn = setup?.signIn;
   const expired = typeof signIn === "object" && signIn.failed?.code === "agent.auth_required";
   return { kind: "set-up", expired, instead: drafting } as const;
+}
+
+/** The other plan's line in the composer, as the first screen says it (its name in front, its own Cancel), while its
+ * install is under way, failed or offline, or its sign-in waits or is open in the browser; null otherwise (only
+ * offered, ready or signed in). */
+function otherLine(store: SetupStore, state: SetupState, other: AgentId, lang: Lang) {
+  const setup = state.agents[other];
+  const view = installView(setup);
+  const signIn = setup?.signIn;
+  const moving =
+    installGoing(setup) ||
+    (view !== null && view.kind !== "missing") ||
+    signInWaits(state, other) ||
+    (typeof signIn === "object" && signIn.waiting !== undefined);
+  if (!moving) return null;
+  return welcomeFoot(
+    lang,
+    other,
+    NAME[planOf(other)],
+    setup,
+    state,
+    footActs(store, other, state),
+    IDS.install,
+  );
 }
 
 /** The composer's hold for this setup state: the gate until the plan the send uses is signed in, the install's working
@@ -190,13 +213,18 @@ function holdOf(
   const plan = planOf(agent);
   const setup = state.agents[agent];
   const clock = (at: number) => clockOf(at, Date.now(), room.zone, lang).time;
-  const working = installLine(
+  const own = installLine(
     lang,
     installView(setup),
     NAME[plan],
     installActs(store, agent, state.copied),
     IDS.install,
   );
+  // the other plan's line while it downloads or its sign-in waits, compact under this plan's: choosing a plan never
+  // hides the other's download, and each line keeps its own progress and Cancel
+  const other = otherLine(store, state, otherPlan(agent), lang);
+  const working = own ?? other;
+  const also = own === null ? null : other;
   // a plan waiting for the other's download or sign-in to end says the queued sign-in's words, with its Cancel
   const view = viewFor(state, room, clock);
   const signedIn = setup?.signIn;
@@ -225,6 +253,7 @@ function holdOf(
         />
       ),
       working,
+      also,
       line: <DocumentsLine name={one === null ? null : NAME[planOf(one)]} />,
     };
   }
@@ -255,6 +284,7 @@ function holdOf(
         />
       ),
       working,
+      also,
     };
   }
   if (shield !== null && step === "off") {
@@ -262,6 +292,7 @@ function holdOf(
     const { WorkspaceOff } = shield.parts;
     return {
       working,
+      also,
       line: (
         <WorkspaceOff
           plan={plan}
@@ -280,6 +311,7 @@ function holdOf(
   if (typeof signedIn === "object" && signedIn.signed_in !== undefined && signedHere)
     return {
       working,
+      also,
       line: (
         <SignedLine
           plan={plan}
@@ -291,7 +323,7 @@ function holdOf(
         />
       ),
     };
-  return working === null ? null : { working };
+  return working === null ? null : { working, also };
 }
 
 export function FirstRun({

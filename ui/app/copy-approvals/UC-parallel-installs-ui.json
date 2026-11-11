@@ -1,0 +1,13 @@
+{
+  "UC-153": {
+    "en": "Your browser opens for {name} after {other}'s sign-in.",
+    "hi": "{other} का साइन इन पूरा होते ही {name} के लिए आपका ब्राउज़र खुलेगा।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-11",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-11",
+    "by": "app track (orchestrator to approve)",
+    "note": "a plan's line, its download done while the other plan's sign-in is under way: sign-ins go one at a time, and its browser opens by itself after (orchestrator's decision, parallel installs)"
+  }
+}

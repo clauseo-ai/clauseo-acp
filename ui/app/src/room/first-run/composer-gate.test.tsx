@@ -162,7 +162,7 @@ test.each<[string, string[]]>([
   ["no plan listed yet", []],
   ["only Claude listed", [CLAUDE]],
 ])(
-  "on a first run (%s), Sign in to ChatGPT switches the gate and the send to codex-acp at once, its sign-in waiting for Claude's download",
+  "on a first run (%s), Sign in to ChatGPT switches the gate and the send to codex-acp at once, its sign-in going beside Claude's download",
   async (_, agents) => {
     const t = await mountFirstRun({
       agents,
@@ -173,9 +173,10 @@ test.each<[string, string[]]>([
       ],
     });
     await press("Sign in to ChatGPT");
-    // one download at a time: nothing goes while Claude's runs, and ChatGPT's box says its turn comes
-    expect(t.setups()).toEqual([]);
+    // downloads side by side: ChatGPT's sign-in goes at once, and desktop downloads it beside Claude's
+    expect(t.setups()).toEqual([{ start_sign_in: { agent: CODEX } }]);
     expect(byId("signin")?.dataset["agent"]).toBe("chatgpt");
+    await play(t, signIn(CODEX, "queued"));
     expect(byId("signin-state")?.dataset["state"]).toBe("queued");
     await play(t, install(CLAUDE, READY));
     expect(t.setups()).toEqual([{ start_sign_in: { agent: CODEX } }]);

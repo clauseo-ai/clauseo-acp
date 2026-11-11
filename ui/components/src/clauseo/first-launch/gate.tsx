@@ -43,7 +43,9 @@ export type GateView =
    * act, "Set up {name}", or "Sign in again" when its sign-in expired; `instead` offers the other plan, on a draft. */
   | { kind: "set-up"; expired: boolean; instead: boolean }
   | { kind: "checking" }
-  | { kind: "queued"; offline: boolean }
+  /** `after`: the plan installed, its browser opening once the other plan's sign-in, named here, ends (one sign-in at
+   * a time). */
+  | { kind: "queued"; offline: boolean; after?: string }
   | { kind: "waiting"; nudge: boolean; pasting: boolean }
   | { kind: "device"; code: string; until: string }
   | { kind: "login-found"; email?: string | undefined }
@@ -269,7 +271,12 @@ export function Gate({
           <Say>
             {view.offline
               ? w("Your browser opens when you reconnect.")
-              : w("Your browser opens when {name} is ready.", { name })}
+              : view.after !== undefined
+                ? w("Your browser opens for {name} after {other}'s sign-in.", {
+                    name,
+                    other: view.after,
+                  })
+                : w("Your browser opens when {name} is ready.", { name })}
           </Say>
         </Act>
       );
