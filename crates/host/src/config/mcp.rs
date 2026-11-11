@@ -35,6 +35,13 @@ pub struct McpLaunchAsk {
 pub trait McpLaunchConfirm: Send + Sync {
     /// Asks about `ask`; `true` allows the save.
     fn confirm(&self, ask: &McpLaunchAsk) -> bool;
+
+    /// Asks once about an import (Settings › Tools' `Import`) of `asks`, one per server in name
+    /// order: `true` imports them turned on; `false` imports nothing (`mcp.save_declined`). By
+    /// default it declines, so no program is imported unseen.
+    fn confirm_import(&self, _asks: &[McpLaunchAsk]) -> bool {
+        false
+    }
 }
 
 mod bare;

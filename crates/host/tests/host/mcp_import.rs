@@ -171,11 +171,13 @@ fn apps() -> FakeFs {
         .file(&at("codex/config.toml"), &codex)
 }
 
-/// The config with the keychain double and a finder over `fs`.
+/// The config with the keychain double, a finder over `fs`, and a confirm that allows every
+/// import (`confirm::Answers`).
 fn wired(config: HostConfig, store: &Arc<MemoryStore>, fs: FakeFs) -> HostConfig {
     let fs = Arc::new(fs);
     config
         .with_mcp_secrets(Arc::<MemoryStore>::clone(store))
+        .with_mcp_confirm(Arc::new(confirm::Answers::allowing(true)))
         .with_mcp_import(Arc::new(move |existing: &[String]| {
             let env = Env {
                 os: os(),
@@ -239,6 +241,8 @@ fn imported(
     (view, last)
 }
 
+#[path = "mcp_import_confirm.rs"]
+mod confirm;
 #[path = "mcp_import_safety.rs"]
 mod safety;
 
@@ -285,8 +289,8 @@ fn mcp_import_counts_imports_and_skips_and_keeps_values_in_the_keychain() {
     let names: Vec<&str> = view.servers.iter().map(|s| s.name.as_str()).collect();
     assert_eq!(names, ["github", "notes"]);
     assert!(
-        view.servers.iter().all(|server| !server.enabled),
-        "imported servers arrive turned off"
+        view.servers.iter().all(|server| server.enabled),
+        "the confirm allowed them: they arrive turned on"
     );
     // On the search path: the bare name, which a launch finds again after an upgrade.
     assert_eq!(view.servers[0].command.as_deref(), Some(npx_name()));
@@ -324,7 +328,7 @@ fn mcp_import_counts_imports_and_skips_and_keeps_values_in_the_keychain() {
         servers["notes"]["headers"]["Authorization"],
         json!({"keychain": true})
     );
-    assert_eq!(servers["github"]["enabled"], false);
+    assert_eq!(servers["github"]["enabled"], true);
 
     // Claude Code: the user's server in, the project's unapproved one skipped.
     let (view, last) = imported(&host, &mut sub, ClaudeCode);

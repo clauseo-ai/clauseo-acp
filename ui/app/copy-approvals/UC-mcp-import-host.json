@@ -1,0 +1,35 @@
+{
+  "UC-231": {
+    "en": "Let Clauseo run these programs?",
+    "hi": "Clauseo को ये प्रोग्राम चलाने दें?",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-11",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-11",
+    "by": "orchestrator (PR A3: native confirm before an MCP import)",
+    "note": "MCP import confirm: title"
+  },
+  "UC-232": {
+    "en": "These will start when you work in a matter: {list}. Only allow programs you trust.",
+    "hi": "जब आप किसी मामले में काम करेंगे, तब ये शुरू होंगे: {list}। केवल उन्हीं प्रोग्राम को अनुमति दें जिन पर आपको भरोसा है।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-11",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-11",
+    "by": "orchestrator (PR A3: native confirm before an MCP import)",
+    "note": "MCP import confirm: message; {list} is each server with its program or URL"
+  },
+  "UC-233": {
+    "en": "and {count} more",
+    "hi": "और {count} अन्य",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-11",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-11",
+    "by": "orchestrator (PR A3: native confirm before an MCP import)",
+    "note": "MCP import confirm: the end of a list past eight servers; {count} is how many more"
+  }
+}

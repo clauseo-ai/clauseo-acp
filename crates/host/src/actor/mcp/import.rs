@@ -15,11 +15,13 @@
 //!   an entry partly unreadable. A changed name alone does not block it.
 //! - An import, on the keychain thread ([`super::off_actor`], so it waits its turn with the
 //!   other commands): the finder again, then each importable server of the app has its values
-//!   written to the keychain. Then on the actor the servers the settings take go into
-//!   `settings.json` in one write (`Effective::add_mcp_servers`), each turned off until the
-//!   lawyer turns it on. A server whose name the list holds in any case is skipped
-//!   (`already_added`), never renamed or replaced; one the rules refuse is skipped too, and the
-//!   values of a skipped server are put back.
+//!   written to the keychain, after one native confirm listing every server and what it starts
+//!   (`McpLaunchConfirm::confirm_import`, A1's confirm): Allow imports them turned on; Cancel,
+//!   or no confirm wired, imports nothing and answers `mcp.save_declined`. An import with
+//!   nothing to import asks nothing. Then on the actor the servers the settings take go into
+//!   `settings.json` in one write (`Effective::add_mcp_servers`). A server whose name the list
+//!   holds in any case is skipped (`already_added`), never renamed or replaced; one the rules
+//!   refuse is skipped too, and the values of a skipped server are put back.
 //! - All or nothing: a keychain failure, or a settings write that fails after the keychain
 //!   writes, puts back every value the import wrote (deleting new items, restoring replaced
 //!   ones) and saves no server.
@@ -44,6 +46,7 @@ use super::super::commands::CommandCtx;
 use super::super::input::Input;
 use super::keychain::{self, Step, Undo};
 use super::{McpInput, finder, view};
+use crate::config::mcp::McpLaunchAsk;
 use crate::error::Error;
 
 #[cfg(test)]
@@ -192,6 +195,24 @@ struct Ready {
     steps: Vec<Step>,
 }
 
+impl Ready {
+    /// What the confirm shows for it: its name, and the program with its arguments or the URL.
+    fn ask(&self) -> McpLaunchAsk {
+        let (program, url) = match &self.server.transport {
+            McpTransport::Local { command, args, .. } => (
+                std::iter::once(command).chain(args).cloned().collect(),
+                None,
+            ),
+            McpTransport::Remote { url, .. } => (Vec::new(), Some(url.clone())),
+        };
+        McpLaunchAsk {
+            server: self.name.clone(),
+            program,
+            url,
+        }
+    }
+}
+
 /// One server whose values are in the keychain, waiting for its settings write.
 pub(crate) struct Written {
     name: String,
@@ -212,6 +233,8 @@ pub(crate) enum ImportFailed {
     Store(Option<StoreError>),
     /// The finder did not answer in time (`finder.rs`).
     Finder,
+    /// The lawyer did not allow the programs, or no confirm is wired.
+    Declined,
 }
 
 /// `McpCommand::Import`: refused while the firm's policy sets the list (the caller refused
@@ -238,13 +261,24 @@ pub(super) fn import(
     let existing: Vec<String> = actor.effective.mcp_servers().keys().cloned().collect();
     let store = actor.wiring.mcp_secrets.clone();
     let busy = std::sync::Arc::clone(&actor.mcp.import_busy);
+    let confirm = actor.wiring.mcp_confirm.clone();
     super::off_actor(actor, Some(ctx), move || {
         let existing_names = existing.clone();
         let Some(found) = finder::bounded(&find, existing, &busy, finder::TIMEOUT) else {
             let result = Err(ImportFailed::Finder);
             return McpInput::Imported { ctx, result };
         };
-        let (ready, skipped) = pick(found, source, &existing_names);
+        let (mut ready, skipped) = pick(found, source, &existing_names);
+        if !ready.is_empty() {
+            let asks: Vec<McpLaunchAsk> = ready.iter().map(Ready::ask).collect();
+            if !confirm.is_some_and(|confirm| confirm.confirm_import(&asks)) {
+                let result = Err(ImportFailed::Declined);
+                return McpInput::Imported { ctx, result };
+            }
+            for one in &mut ready {
+                one.server.enabled = true;
+            }
+        }
         let result = write(store.as_deref(), ready)
             .map(|written| {
                 Box::new(Imported {
@@ -295,8 +329,9 @@ fn pick(
     (ready, skipped)
 }
 
-/// A candidate as the entry `SaveServer` would add, turned off, each value bound for the
-/// keychain; skipped when its command is not text or the settings' rules refuse it.
+/// A candidate as the entry `SaveServer` would add, turned off until the confirm allows it,
+/// each value bound for the keychain; skipped when its command is not text or the settings'
+/// rules refuse it.
 fn prepare(candidate: ImportCandidate) -> Result<Ready, McpSkipped> {
     let ImportCandidate { name, kind, .. } = candidate;
     let (transport, steps) = match kind {
@@ -314,7 +349,7 @@ fn prepare(candidate: ImportCandidate) -> Result<Ready, McpSkipped> {
             (McpTransport::Remote { url, headers }, steps)
         }
     };
-    // Off until the lawyer turns it on: no confirm has shown these programs yet.
+    // Off until the confirm's Allow turns it on (`import`).
     let server = McpServerLaunch {
         transport,
         enabled: false,
@@ -506,6 +541,10 @@ fn import_failed(failed: ImportFailed) -> Error {
                 "the keychain did not save the imported values",
             )
         }
+        ImportFailed::Declined => Error::refused(
+            ErrorCode::McpSaveDeclined,
+            "the lawyer did not allow the imported programs",
+        ),
         ImportFailed::Finder => {
             Error::Internal("the other apps' MCP settings did not read in time".to_owned())
         }

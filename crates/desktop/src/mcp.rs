@@ -11,6 +11,7 @@
 //! Kept out of `connectors.rs`, which reads no settings. Nothing here logs the program, its
 //! arguments or the URL.
 
+mod import_words;
 mod words;
 
 use std::sync::{Arc, Mutex};
@@ -124,6 +125,18 @@ impl<D: LaunchDrawer> McpLaunchConfirm for LaunchConfirm<D> {
         flood.open = false;
         flood.declined = (!allowed).then(|| (ask.clone(), (self.now)()));
         allowed
+    }
+
+    /// One confirm for the whole import, listing each server ([`import_words`]); blocks the
+    /// keychain thread as [`Self::confirm`] does.
+    fn confirm_import(&self, asks: &[McpLaunchAsk]) -> bool {
+        let drawer = &self.0;
+        tauri::async_runtime::block_on(async {
+            let language = drawer.language().await;
+            drawer
+                .draw(import_words::import_words(asks, language))
+                .await
+        })
     }
 }
 

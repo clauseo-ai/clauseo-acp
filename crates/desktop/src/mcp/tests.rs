@@ -283,6 +283,26 @@ fn mcp_only_allow_allows() {
     }
 }
 
+/// An import's one confirm: only Allow allows, and it draws the import's words.
+#[test]
+fn mcp_import_confirm_only_allow_allows() {
+    let asks = [
+        local(&["npx", "files-mcp"]),
+        remote("https://tools.example/mcp"),
+    ];
+    for (answer, allowed) in [
+        (Answer::Allow, true),
+        (Answer::Cancel, false),
+        (Answer::Never, false),
+    ] {
+        let confirm = LaunchConfirm(FakeDrawer::new(Language::En, answer));
+        assert_eq!(confirm.confirm_import(&asks), allowed);
+        let drawn = confirm.0.drawn.lock().unwrap();
+        let words = super::import_words::import_words(&asks, Language::En);
+        assert_eq!(drawn.as_slice(), [words]);
+    }
+}
+
 #[test]
 fn mcp_confirm_speaks_the_apps_language() {
     let confirm = LaunchConfirm::new(FakeDrawer::new(Language::Hi, Answer::Cancel));
@@ -295,7 +315,7 @@ fn mcp_confirm_speaks_the_apps_language() {
 #[test]
 fn mcp_confirm_logs_nothing() {
     let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
-    for file in ["src/mcp.rs", "src/mcp/words.rs"] {
+    for file in ["src/mcp.rs", "src/mcp/words.rs", "src/mcp/import_words.rs"] {
         let text = std::fs::read_to_string(dir.join(file)).unwrap();
         for call in ["tracing::", "log::", "println!", "eprintln!", "dbg!"] {
             assert!(!text.contains(call), "{file} calls {call}");
