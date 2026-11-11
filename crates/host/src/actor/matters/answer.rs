@@ -151,40 +151,35 @@ fn listed_folder(actor: &mut Actor, id: CommandId, pending: Box<PendingMatter>, 
 }
 
 /// The import's folder has a marker naming `old`, a matter the registry did not hold and with no
-/// history here: imported again under `old`, unless `old` is known by now (the import runs
-/// again, and finds it), the host is stopping, or this import was already issued again under
-/// an adopted id (a marker that changed between the two: refused as already a matter).
+/// history here: imported again under `old`. When `old` is listed or forgotten by now, the
+/// import runs again and finds it; when the host is stopping it ends closed. It is refused as
+/// already a matter when this import was already issued again under an adopted id (the marker
+/// changed between the two), or when `old` is being made, discarded or moved by another command
+/// (running again would loop until that command ends).
 fn adopt(actor: &mut Actor, id: CommandId, pending: Box<PendingMatter>, old: MatterId) {
-    let minted = pending.new.id;
-    if pending.cancel.load(Ordering::Relaxed) || pending.adopted {
-        let error = if pending.adopted {
-            let reason = Refusal::AlreadyMatter(old);
-            let folder = pending.new.folder.clone();
-            refusal(
-                actor,
-                Error::Matters(clauseo_matters::Error::FolderRefused { folder, reason }),
-                &pending.new.folder,
-            )
-        } else {
-            Error::Closed
-        };
-        made::not_created(Some(minted), &error, "adopt");
-        actor.finish_command(id, Err(error));
+    if actor.matters.contains_key(&old) || actor.forgotten.contains_key(&old) {
+        again(actor, id, *pending);
         return;
     }
-    let known = actor.matters.contains_key(&old)
-        || actor.forgotten.contains_key(&old)
+    let busy = pending.adopted
         || actor.made.contains_key(&old)
         || actor.claims.values().any(|(matter, _)| *matter == old)
         || actor
             .scratch
             .as_ref()
             .is_some_and(|scratch| scratch.new.id == old);
-    if known {
-        again(actor, id, *pending);
-        return;
-    }
-    if let Err(error) = reissue(actor, id, pending, old) {
+    let result = if pending.cancel.load(Ordering::Relaxed) {
+        Err(Error::Closed)
+    } else if busy {
+        let reason = Refusal::AlreadyMatter(old);
+        let folder = pending.new.folder.clone();
+        let refused = Error::Matters(clauseo_matters::Error::FolderRefused { folder, reason });
+        Err(refusal(actor, refused, &pending.new.folder))
+    } else {
+        Ok(())
+    };
+    let minted = pending.new.id;
+    if let Err(error) = result.and_then(|()| reissue(actor, id, pending, old)) {
         made::not_created(Some(minted), &error, "adopt");
         actor.finish_command(id, Err(error));
     }
