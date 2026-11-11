@@ -176,6 +176,7 @@ fn a_hook_meta_setting_a_switch_or_the_guards_key_loses_both() {
         browser: false,
         sandbox: None,
         matter: None,
+        trusted_servers: &[],
     };
     let meta = session_meta(
         hook.as_object().cloned(),
@@ -227,6 +228,7 @@ fn forced_ask_drops_every_allow_rule_and_hooks_every_tool() {
             browser: false,
             sandbox: None,
             matter: None,
+            trusted_servers: &[],
         };
         session_meta(
             hook.as_object().cloned(),
@@ -289,6 +291,7 @@ fn forced_ask_adds_its_ask_rules_after_the_hooks() {
         browser: false,
         sandbox: None,
         matter: None,
+        trusted_servers: &[],
     };
     let meta = session_meta(
         hook.as_object().cloned(),
@@ -331,6 +334,7 @@ fn every_claude_session_denies_the_data_folders_clauseo_only_subtrees() {
             browser: false,
             sandbox: None,
             matter: None,
+            trusted_servers: &[],
         };
         let guard = Some(GuardHook {
             program: Path::new("/app/clauseo"),
@@ -464,6 +468,7 @@ fn claude_may_read_the_built_in_skills_without_a_prompt_and_nothing_else_in_data
         browser: false,
         sandbox: None,
         matter: None,
+        trusted_servers: &[],
     };
     let hook = json!({"claudeCode": {"options": {"settings": {"permissions": {
         "allow": ["Bash(ls:*)"]}}}}});
@@ -541,6 +546,7 @@ fn an_accept_edits_session_keeps_the_deny_rules_the_guard_and_its_two_folders() 
         browser: false,
         sandbox: None,
         matter: None,
+        trusted_servers: &[],
     };
     let guard = Some(GuardHook {
         program: Path::new("/app/clauseo"),

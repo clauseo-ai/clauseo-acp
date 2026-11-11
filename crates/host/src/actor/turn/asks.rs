@@ -6,17 +6,18 @@
 //! answered for the lawyer, rejected, in the commit that logs it. One that touches Clauseo's own
 //! data folder (`agent/data_fence.rs`) is rejected with nothing logged: the lawyer never sees it.
 //! A Codex approval of one of the guarded `browser` server's tools is allowed for the session
-//! with nothing logged ([`browser_tool_to_allow`]); one giving a shell command the network is
-//! refused, unseen (`shell_network.rs`).
+//! with nothing logged ([`browser_tool_to_allow`]), and one of a server the lawyer added is
+//! allowed once with nothing logged ([`trusted_tool_to_allow`]); one giving a shell command the
+//! network is refused, unseen (`shell_network.rs`).
 
 use std::path::PathBuf;
 
 use clauseo_acp::{AcpEvent, LimitSignal, LimitStatus, Origin, PendingKey};
 use clauseo_matters::HeldOpen;
 use clauseo_protocol::{
-    AgentChoiceId, AgentKind, AgentSessionId, CompactString, Deliverable, ElicitationId,
-    ElicitationRequest, ElicitationRequested, ElicitationResponse, LimitStopReason, MatterPath,
-    PermissionAbout, PermissionChoice, PermissionOption, PermissionRequestId, PermissionRequested,
+    AgentChoiceId, AgentSessionId, CompactString, Deliverable, ElicitationId, ElicitationRequest,
+    ElicitationRequested, ElicitationResponse, LimitStopReason, MatterPath, PermissionAbout,
+    PermissionChoice, PermissionOption, PermissionRequestId, PermissionRequested,
     PermissionResolved, Principal, StopReason, StreamId, ThreadId, TurnId,
 };
 
@@ -30,6 +31,12 @@ use crate::agent::data_fence::{self, FenceCheck, PathsChecked};
 use crate::error::Error;
 use crate::log_file::Cause;
 use crate::matter_worker::MatterJob;
+
+mod codex_auto;
+
+use codex_auto::{
+    allow_browser_tool, allow_trusted_tool, browser_tool_to_allow, trusted_tool_to_allow,
+};
 
 /// A permission request from the agent, kept until it is logged.
 #[derive(Debug, Clone)]
@@ -97,6 +104,10 @@ pub(super) fn on_permission(actor: &mut Actor, thread: ThreadId, event: AcpEvent
         allow_browser_tool(actor, thread, ask.key, &tool, option);
         return;
     }
+    if let Some((server, option)) = trusted_tool_to_allow(actor, thread, &ask, raw_input.as_ref()) {
+        allow_trusted_tool(actor, thread, ask.key, &server, option);
+        return;
+    }
     if super::shell_network::refused(actor, thread, &ask, raw_input.as_ref()) {
         return;
     }
@@ -136,77 +147,6 @@ pub(super) fn on_permission(actor: &mut Actor, thread: ThreadId, event: AcpEvent
         );
         log_for_lawyer(actor, thread, ask);
     }
-}
-
-/// The option codex-acp 2.2.2 offers to allow an MCP tool for the session, kind `allow_always`
-/// (`dist/index.js:32663-32708`); answered, Codex gets `ApprovedForSession` and, in its default
-/// `Auto` approval mode, asks no more for that server and tool in the session (codex rust-v0.162.1
-/// `core/src/mcp_tool_call.rs:1730-1751`, `:2126-2163`; codex-acp `dist/index.js:32733-32750`).
-const ALLOW_SESSION: &str = "allow_session";
-
-/// The `browser` tool and the `allow_session` option, when the host answers this request itself:
-/// the thread's agent is Codex, neither in forced ask nor unprotected (a failed folder check,
-/// `agents.rs`: the lawyer gets the card then); the request offers `allow_session`; and it names
-/// a guarded `browser` tool (`sources::browser::auto_allowed_browser_tool`; the guard refuses
-/// eval). The tool comes only from fields Codex and codex-acp build, never model-written text:
-/// the title `mcp.browser.<tool>` of the earlier tool call the request's toolCallId names (the
-/// thread's `sources::browser::CodexTools`), or a standalone request's `serverName` and exact
-/// message (`sources::browser::codex_standalone_browser_tool`). Anything else (shell commands,
-/// file writes, other servers such as `case-law`) goes to the lawyer as before.
-///
-/// Codex's own per-server `default_tools_approval_mode` would do this, but codex-acp replaces the
-/// whole `mcp_servers` table with ACP's servers (`dist/index.js:35482`), dropping that value.
-fn browser_tool_to_allow(
-    actor: &mut Actor,
-    thread: ThreadId,
-    ask: &PermissionAsk,
-    raw_input: Option<&serde_json::Value>,
-) -> Option<(String, AgentChoiceId)> {
-    let kind = actor
-        .check_thread(thread)
-        .ok()
-        .and_then(|entry| AgentKind::of(&entry.row.agent));
-    let skip = agent(actor, thread).is_none_or(|agent| agent.forced_ask || agent.unprotected());
-    if kind != Some(AgentKind::Codex) || skip {
-        return None;
-    }
-    let option = ask
-        .options
-        .iter()
-        .find(|option| option.option_id == ALLOW_SESSION)?;
-    let option = AgentChoiceId::new(&option.option_id).ok()?;
-    let standalone =
-        crate::sources::browser::codex_standalone_browser_tool(&ask.acp_tool_call_id, raw_input);
-    let tool = match standalone {
-        Some(tool) => tool.to_owned(),
-        None => super::state(actor, thread)?
-            .sources
-            .codex_browser_tool(&ask.acp_tool_call_id)?
-            .to_owned(),
-    };
-    crate::sources::browser::auto_allowed_browser_tool(&tool).then_some((tool, option))
-}
-
-/// Answers a Codex `browser` tool's approval with `option` (`allow_session`), with nothing
-/// logged on the thread: the lawyer never sees it. `tracing` gets the tool's name, never its
-/// arguments.
-fn allow_browser_tool(
-    actor: &mut Actor,
-    thread: ThreadId,
-    key: PendingKey,
-    tool: &str,
-    option: AgentChoiceId,
-) {
-    let Some(agent) = agent(actor, thread) else {
-        return;
-    };
-    let client = agent.link.client.clone();
-    tracing::info!(%thread, tool, "allowed a browser tool for the session");
-    spawn(actor, async move {
-        if let Err(error) = client.answer_permission(key, option).await {
-            tracing::warn!(error = %Cause(&error), "a browser tool's approval did not reach the agent");
-        }
-    });
 }
 
 /// The data-folder check of a request's paths and `rawInput` (`agent/data_fence.rs`), for

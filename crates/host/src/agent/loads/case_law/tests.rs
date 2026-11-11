@@ -371,6 +371,7 @@ fn claude_pre_allows_case_law_only_with_our_entry() {
             browser: false,
             sandbox: None,
             matter: None,
+            trusted_servers: &[],
         };
         claude_options(&mut options, &keys);
         options.get("allowedTools").cloned()

@@ -204,6 +204,7 @@ fn claude_gets_agent_browser_rules_only_with_the_browser() {
             browser,
             sandbox: None,
             matter: None,
+            trusted_servers: &[],
         };
         claude_options(&mut options, &keys);
         let allowed = names(&options, "allowedTools");
