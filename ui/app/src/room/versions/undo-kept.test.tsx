@@ -50,6 +50,13 @@ test("the three lines, in English and Hindi, by why the file was kept and the fo
     "Clauseo can't undo the change to Annexure 3.pdf. It didn't keep a copy of it before, so there's no earlier copy to bring back.";
   expect(words("en", "over_size_cap", ONE_DRIVE)).toBe(noCopy);
   expect(words("en", "unknown", ONE_DRIVE)).toBe(noCopy);
+  // a folder Clauseo couldn't read: the cloud line where the folder syncs, else no copy kept
+  expect(words("en", "unread_folder", ONE_DRIVE)).toBe(
+    "Clauseo can't undo the change to Annexure 3.pdf. It was only in OneDrive before, so there's no earlier copy here. OneDrive's version history has the earlier one.",
+  );
+  expect(words("en", "unread_folder", { synced: { service: "other" } })).toBe(unknown);
+  expect(words("en", "unread_folder", "local")).toBe(noCopy);
+  expect(words("en", "unread_folder")).toBe(noCopy);
   expect(words("hi", "cloud_only", ONE_DRIVE)).toBe(
     "Clauseo Annexure 3.pdf में हुआ बदलाव पूर्ववत नहीं कर सकता। यह पहले केवल OneDrive में था, इसलिए इसकी कोई पुरानी प्रति यहाँ नहीं है। पुरानी प्रति OneDrive के पुराने संस्करणों में है।",
   );
@@ -169,4 +176,11 @@ test("a marker without unversioned keeps the lines as they were", async () => {
   expect(notices()[0]?.text).toContain("brief.txt went back");
   expect(h.all("cant-undo")).toHaveLength(0);
   expect(noteLines()).toContain("You undid Clauseo's changes to 1 paper.");
+}, 30_000);
+
+test("the note counts the files the host says went back, not the ones the turn changed", async () => {
+  // old.txt stayed as the lawyer chose: not put back, and not one Clauseo lacked a copy of
+  h = await undone(["brief.txt", "old.txt"], ONE_DRIVE);
+  await hostUndid(h, ["brief.txt", "old.txt"], ["brief.txt"], []);
+  await vi.waitFor(() => expect(noteLines()).toContain("You undid Clauseo's changes to 1 paper."));
 }, 30_000);
