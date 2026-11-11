@@ -96,6 +96,51 @@ fn a_key_or_an_endpoint_refuses_every_start_with_its_own_code() {
     }
 }
 
+/// The Windows test's defect 2: a sign-in the lawyer cancelled (it ended `Failed { Cancelled
+/// }`, nothing running), then a key or an endpoint saved: its line is published at once, not
+/// "Sign-in was cancelled." until a relaunch.
+#[test]
+fn a_key_or_an_endpoint_after_a_cancelled_sign_in_is_published_at_once() {
+    for (setting, method) in [
+        (set_key(), SignInMethod::ApiKey),
+        (set_endpoint(), SignInMethod::Firm),
+    ] {
+        let rig = rig(true);
+        s18(&rig, waiting());
+        s18(
+            &rig,
+            SigninState::Failed {
+                code: SigninCode::Cancelled,
+                at: UNIX_EPOCH,
+            },
+        );
+        let mut feed = rig.events.follow();
+        let done = block_on(rig.setup().run(SETTINGS, setting));
+        assert_eq!(done, Ok(CommandOutcome::Done));
+        let shown: Vec<SignIn> = setup_events(&mut feed)
+            .into_iter()
+            .filter_map(|event| match event {
+                clauseo_protocol::SetupEvent::SignInChanged { state, .. } => Some(state),
+                _ => None,
+            })
+            .collect();
+        assert!(
+            matches!(
+                shown.first(),
+                Some(SignIn::Failed {
+                    code: ErrorCode::SigninCancelled,
+                    ..
+                })
+            ),
+            "{method:?}: the cancel showed first: {shown:?}"
+        );
+        assert!(
+            matches!(shown.last(), Some(SignIn::SignedIn { method: m, .. }) if *m == method),
+            "{method:?}: the new line is published: {shown:?}"
+        );
+    }
+}
+
 #[test]
 fn a_key_or_an_endpoint_ends_a_running_sign_in_with_no_failure_shown() {
     for (setting, method) in [

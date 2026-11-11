@@ -310,3 +310,68 @@ fn a_search_waits_through_running_states_for_its_resting_answer() {
         [reuse_off.clone(), SignIn::Queued, reuse_off]
     );
 }
+
+/// The Windows test's defect 2: a sign-in that ended `Failed` (cancelled) before a key or an
+/// endpoint arrived no longer hides it; the key's or the endpoint's line goes out at once.
+#[test]
+fn a_key_or_an_endpoint_after_a_failed_sign_in_clears_the_failure() {
+    let events = Arc::new(SetupEvents::default());
+    let mut feed = events.follow();
+    let compose = Compose::new(Arc::clone(&events), Arc::new(Fixed));
+    let cancelled = SigninState::Failed {
+        code: SigninCode::Cancelled,
+        at: at(T),
+    };
+    compose.signin(&codex(), cancelled.clone());
+    compose.set_key(&codex(), true);
+    compose.signin(&claude(), cancelled);
+    compose.set_firm(&claude(), true);
+    let failed = SignIn::Failed {
+        code: ErrorCode::SigninCancelled,
+        at: timestamp(at(T)),
+    };
+    assert_eq!(
+        sent(&mut feed),
+        [
+            failed.clone(),
+            by(SignInMethod::ApiKey),
+            failed,
+            by(SignInMethod::Firm),
+        ]
+    );
+    // Removing them shows S18's state underneath: signed out, not the old failure.
+    compose.set_key(&codex(), false);
+    assert_eq!(sent(&mut feed), [SignIn::SignedOut { found: None }]);
+}
+
+/// A key saved over one already in memory clears a failure too; a running sign-in still
+/// passes through a key (the backend ends it).
+#[test]
+fn a_saved_key_clears_a_failure_but_a_running_sign_in_still_shows() {
+    let events = Arc::new(SetupEvents::default());
+    let mut feed = events.follow();
+    let compose = Compose::new(Arc::clone(&events), Arc::new(Fixed));
+    compose.set_key(&claude(), true);
+    compose.signin(
+        &claude(),
+        SigninState::Failed {
+            code: SigninCode::LinkExpired,
+            at: at(T),
+        },
+    );
+    compose.key_saved(&claude());
+    compose.signin(&claude(), SigninState::Queued);
+    compose.key_saved(&claude());
+    assert_eq!(
+        sent(&mut feed),
+        [
+            by(SignInMethod::ApiKey),
+            SignIn::Failed {
+                code: ErrorCode::SigninLinkExpired,
+                at: timestamp(at(T)),
+            },
+            by(SignInMethod::ApiKey),
+            SignIn::Queued,
+        ]
+    );
+}

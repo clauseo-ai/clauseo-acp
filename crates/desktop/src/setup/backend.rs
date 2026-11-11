@@ -300,6 +300,7 @@ impl AgentsBackend {
             }
             return Err(error);
         }
+        self.compose.key_saved(agent);
         self.end_sign_in(agent);
         leave::restart_for_login(self, agent).await;
         Ok(())
