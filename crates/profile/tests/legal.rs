@@ -149,7 +149,18 @@ fn legal_word_budget() {
         word_count(TOOLS) + word_count(LEGAL),
         "only {{author}} is filled, with one word"
     );
-    assert!(word_count(&whole) <= 1580, "{} words", word_count(&whole));
+    assert!(word_count(&whole) <= 1650, "{} words", word_count(&whole));
+    // With a working stetdoc, as the app launches: the stetdoc line joins the tools part.
+    let stetdoc = ClauseoProfile::new(paths_under(Path::new("/data")), None)
+        .with_stetdoc_cli(true)
+        .instructions();
+    let line = clauseo_profile::instructions::STETDOC_CLI;
+    assert_eq!(word_count(&stetdoc), word_count(&whole) + word_count(line));
+    assert!(
+        word_count(&stetdoc) <= 1650,
+        "{} words",
+        word_count(&stetdoc)
+    );
 }
 
 #[test]
@@ -299,6 +310,37 @@ fn each_agent_names_a_saved_file_with_no_download_link() {
     for text in [claude, profile.codex_instructions_for(false)] {
         assert!(text.contains(RULE), "{text}");
     }
+}
+
+/// The new-document rule (decision record 0058): with a working stetdoc, both agents read that
+/// tracked changes only change a paper that already exists, and that a new document is made
+/// clean with pandoc from a Markdown file. The saved-file rule then names it.
+#[test]
+fn each_agent_makes_a_new_document_clean_with_pandoc() {
+    let profile =
+        launch_profile(&std::env::temp_dir().join("new-document-rule")).with_stetdoc_cli(true);
+    let claude = profile.claude_options().system_prompt_append().to_owned();
+    for text in [claude, profile.codex_instructions_for(false)] {
+        assert!(
+            text.contains("Tracked changes are only for changing a paper that already exists."),
+            "{text}"
+        );
+        assert!(text.contains("Make a new document clean"), "{text}");
+        assert!(
+            text.contains("`pandoc \"<file>.md\" -o \"<Name>.docx\"`"),
+            "{text}"
+        );
+        assert!(text.contains("never pipe into pandoc"), "{text}");
+        assert!(
+            text.contains("Name a file you saved or changed plainly"),
+            "{text}"
+        );
+    }
+    assert!(
+        !launch_profile(&std::env::temp_dir().join("new-document-off"))
+            .instructions()
+            .contains("pandoc")
+    );
 }
 
 /// R24's connectors paragraph (decision D6): at most 80 words, between the tools part and R22's

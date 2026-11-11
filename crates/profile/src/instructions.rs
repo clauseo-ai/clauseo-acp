@@ -139,7 +139,9 @@ pub fn browser_part_for(part: BrowserPart, mcp: bool) -> &'static str {
 
 /// The stetdoc line: what the agents are told when the app found a stetdoc whose `--version`
 /// works, whether or not its skill loaded. The profile puts it in place of `{stetdoc}` through
-/// [`stetdoc_part`].
+/// [`stetdoc_part`]. It also says a new document is made clean with pandoc, from a Markdown file
+/// in `{work_folder}`, which the host fills (decision record 0058): tracked changes only change
+/// a paper that already exists.
 pub const STETDOC_CLI: &str = include_str!("../assets/instructions/stetdoc.txt");
 
 /// The token the profile fills with [`stetdoc_part`]. It is not the host's: the profile knows

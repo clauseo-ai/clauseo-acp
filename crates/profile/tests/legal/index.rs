@@ -124,7 +124,8 @@ fn a_path_that_is_not_utf8_is_left_out_of_the_index() {
 #[test]
 fn the_budgets_hold_for_a_long_macos_path_with_the_folders_filled() {
     let data = "/Users/Ann Mary/Library/Application Support/Clauseo";
-    let profile = launch_profile(Path::new(data));
+    // As the app launches with a working stetdoc: its line joins the tools part.
+    let profile = launch_profile(Path::new(data)).with_stetdoc_cli(true);
     let index = profile.skills_index();
     assert!(word_count(&index) <= 150, "{} words", word_count(&index));
     let work = format!("{data}/run/0b7e3c1a-5d2f-4e8a-9c61-2f4d8e7a1b30/work");
@@ -143,13 +144,13 @@ fn the_budgets_hold_for_a_long_macos_path_with_the_folders_filled() {
         .unwrap()
     };
     let shared = fill(&profile.instructions_for(AgentKind::Claude));
-    assert!(word_count(&shared) <= 1580, "{} words", word_count(&shared));
+    assert!(word_count(&shared) <= 1650, "{} words", word_count(&shared));
     // What `codex_keys` sends after a successful write (checked on disk in `tests/skills`).
     let codex = fill(&format!(
         "{}\n\n{index}",
         profile.instructions_for(AgentKind::Codex)
     ));
-    assert!(word_count(&codex) <= 1580, "{} words", word_count(&codex));
+    assert!(word_count(&codex) <= 1650, "{} words", word_count(&codex));
 }
 
 #[test]

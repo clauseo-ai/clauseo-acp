@@ -5,7 +5,9 @@
 //! description is its first `# ` heading, the body its text, byte for byte.
 
 use clauseo_process::{AsyncIoTimer, PassthroughLauncher, SpawnOptions};
-use clauseo_profile::instructions::{Instructions, STETDOC, STETDOC_CLI, stetdoc_part};
+use clauseo_profile::instructions::{
+    Instructions, STETDOC, STETDOC_CLI, TOOLS, stetdoc_part, word_count,
+};
 use clauseo_profile::skills::stetdoc::{
     self, FALLBACK_DESCRIPTION, STETDOC as SKILL, load_skill, load_skill_at, skill_source,
 };
@@ -200,8 +202,16 @@ fn a_version_that_fails_or_is_empty_is_an_error_from_stetdoc() {
 #[test]
 fn the_stetdoc_line_is_in_the_instructions_only_when_stetdoc_was_found() {
     let line = "For Word documents, use the `stetdoc` command; run `stetdoc --help` and \
-                `stetdoc <command> --help` to learn it.";
+                `stetdoc <command> --help` to learn it. Tracked changes are only for changing a \
+                paper that already exists. Make a new document clean: write it as a Markdown file \
+                in `{work_folder}`, run `pandoc \"<file>.md\" -o \"<Name>.docx\"` into the matter \
+                (never pipe into pandoc; headings and numbered paragraphs become Word styles), \
+                then delete the Markdown file.";
     assert_eq!(STETDOC_CLI.trim(), line);
+    assert!(
+        word_count(TOOLS) + word_count(line) < 300,
+        "the tools part with the stetdoc line"
+    );
     assert_eq!(stetdoc_part(true), format!(" {line}"));
     assert_eq!(stetdoc_part(false), "");
     let launch = Instructions::launch();
