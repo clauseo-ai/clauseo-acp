@@ -285,7 +285,7 @@ pub(crate) async fn open_pay_link(
 /// `url` as a link `open_external` takes, https only.
 fn https_link(url: &str) -> Result<crate::open::Link, HostError> {
     let link = crate::open::check_link(url)?;
-    if !link.url.starts_with("https://") {
+    if link.url.scheme() != "https" {
         return Err(HostError::new(
             ErrorCode::CommandInvalid,
             "a pay link is https only",
@@ -298,7 +298,7 @@ fn https_link(url: &str) -> Result<crate::open::Link, HostError> {
 /// the error names no URL.
 fn open_link(opener: &dyn Opener, url: &str) -> Result<(), String> {
     let opened = match local_link(url) {
-        Some(link) => opener.open_url(&link.url),
+        Some(link) => opener.open_url(link.url.as_str()),
         None => open_url_unconfirmed(opener, url),
     };
     opened.map_err(|error| {
@@ -323,7 +323,7 @@ fn local_link(url: &str) -> Option<crate::open::Link> {
         && parsed.username().is_empty()
         && parsed.password().is_none();
     ours.then(|| crate::open::Link {
-        url: parsed.as_str().to_owned(),
+        url: parsed,
         destination: crate::open::Destination::Web(
             LOCAL_ORIGIN.trim_start_matches("http://").to_owned(),
         ),

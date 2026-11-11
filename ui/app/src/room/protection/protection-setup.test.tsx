@@ -123,7 +123,7 @@ test("admin_copy_missing: the note says not set up yet, why, the repair, and Get
   await h!.click(inBody("protection-installer"));
   await settle();
   expect(h!.transport.only("open_external")).toEqual([
-    { call: "open_external", url: installerPage(APP_VERSION) },
+    { call: "open_external", url: installerPage(APP_VERSION), alwaysAsk: true },
   ]);
   expect(h!.transport.only("quit_app")).toEqual([{ call: "quit_app" }]);
   expect(sentRetries()).toEqual([]);

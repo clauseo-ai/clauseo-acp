@@ -194,7 +194,7 @@ fn external(
         &|| clock.now(),
         language,
         &link,
-        shown,
+        Ask::IfMisleading(shown),
     ))
 }
 

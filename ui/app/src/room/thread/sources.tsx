@@ -4,8 +4,8 @@
 // one row for each search or page in the order they ran, each led by its icon: a search's glyph and its query in
 // quotes, its results nested under it as tile, title and site; a page's tile, title and site, with the browser
 // glyph in the tile's place for a page the browser opened and an info tip for one Codex opened on OpenAI's side. A turn
-// with none draws nothing. Links open through the host's open_external (its
-// own confirm names the site); none navigates the webview. Tiles are letters, never favicons: nothing here makes a
+// with none draws nothing. Links open through the host's open_external with the words they show
+// (its confirm names the site when those words name another); none navigates the webview. Tiles are letters, never favicons: nothing here makes a
 // request. Queries, titles and addresses are isolated runs, marked Hindi when most of their letters are Devanagari, and
 // an address wraps anywhere rather than being cut.
 import { use, useState, type MouseEvent, type ReactNode } from "react";
@@ -52,9 +52,11 @@ function Run({ text }: { text: string }) {
 function PageLink({ url, title }: { url: string; title: string | null }) {
   const transport = use(SourcesTransport);
   if (!linkable(url)) return <Run text={title ?? url} />;
+  const text = linkText(url, title);
   const open = (e: MouseEvent<HTMLAnchorElement>) => {
     e.preventDefault();
-    if (transport !== null) void quietly("open_external", transport.openExternal(url));
+    // the words the link shows go too: the host asks first when they name another site
+    if (transport !== null) void quietly("open_external", transport.openExternal(url, text));
   };
   return (
     <a
@@ -65,7 +67,7 @@ function PageLink({ url, title }: { url: string; title: string | null }) {
       onClick={open}
       onAuxClick={open}
     >
-      <Run text={linkText(url, title)} />
+      <Run text={text} />
     </a>
   );
 }

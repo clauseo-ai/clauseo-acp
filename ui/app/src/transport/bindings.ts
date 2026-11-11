@@ -122,14 +122,15 @@ export const commands = {
 	displayInfo: () => typedError<DisplayInfo, HostError>(__TAURI_INVOKE("display_info")),
 	/**
 	 *  Opens an https, http or mailto `url` in the default browser or mail app. `shown` is the
-	 *  link's visible text, when it has one. A plain web link opens at once; a mailto link, a link with
-	 *  a user name or an international host, and one whose `shown` text names another site open only
-	 *  after a native confirm that names where it goes, in the app's language (`open::needs_confirm`).
-	 *  Any other link is `command.invalid`; declined, nothing opens and the call fails with
+	 *  link's visible text, when it has one. A plain web link opens at once. A mailto link, a link to
+	 *  an address or an international host, one whose `shown` text names another site or could hide
+	 *  one, and any link with `always_ask` open only after a native confirm that names where it goes,
+	 *  in the app's language (`open::needs_confirm`). A link with a user name or password, and any
+	 *  other scheme, is `command.invalid`; declined, nothing opens and the call fails with
 	 *  `transport.unauthorized`. One at a time: `command.conflict` while one is in progress, for a
 	 *  second after a decline, and for a second after a link opened with no confirm.
 	 */
-	openExternal: (url: string, shown: string | null) => typedError<null, HostError>(__TAURI_INVOKE("open_external", { url, shown })),
+	openExternal: (url: string, shown: string | null, alwaysAsk: boolean | null) => typedError<null, HostError>(__TAURI_INVOKE("open_external", { url, shown, alwaysAsk })),
 	/**
 	 *  Opens the document `file` names with its default app. Refused with `command.invalid` when
 	 *  the host did not issue the ref, when the file is not inside its matter's folder, and when

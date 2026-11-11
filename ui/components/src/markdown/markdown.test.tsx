@@ -119,6 +119,8 @@ test("a link click hands the host its visible text, whatever markup is inside", 
     ),
   );
   const [court, auto] = [...host.querySelectorAll("a")];
+  // rendering opens nothing: only a press does
+  expect(seen).toEqual([]);
   click(court);
   click(auto);
   expect(seen).toEqual([
@@ -127,6 +129,37 @@ test("a link click hands the host its visible text, whatever markup is inside", 
   ]);
   // what goes to the host is the text the link renders
   expect([court?.textContent, auto?.textContent]).toEqual(seen.map(([, shown]) => shown));
+});
+
+test("an image inside a link counts as U+FFFC in its text, and a hidden character shows the real host", () => {
+  const seen: [string, string | undefined][] = [];
+  act(() =>
+    root.render(
+      <MarkdownHostContext
+        value={{ ...HOST, openExternal: (url, shown) => seen.push([url, shown]) }}
+      >
+        <Markdown
+          text={
+            "[![](data:image/png;base64,iVBORw0KGgo=)](https://evil.io/a) and [bank\uFE0F.com](https://evil.io/b) and [bank\u00B7com](https://evil.io/c) and [the order](https://evil.io/d)"
+          }
+          streaming={false}
+        />
+      </MarkdownHostContext>,
+    ),
+  );
+  const links = [...host.querySelectorAll('a[data-clauseo="link"]')];
+  for (const link of links) click(link);
+  expect(seen.map(([url]) => url)).toEqual([
+    "https://evil.io/a",
+    "https://evil.io/b",
+    "https://evil.io/c",
+    "https://evil.io/d",
+  ]);
+  expect(seen[0]?.[1]).toContain("\uFFFC");
+  // the note names the real host where the desktop asks, and only there
+  expect(
+    links.map((link) => link.querySelector('[data-clauseo="link-host"]')?.textContent ?? null),
+  ).toEqual([" (evil.io)", " (evil.io)", " (evil.io)", null]);
 });
 
 test("a file link names a paper only through PaperLinksContext: a click or Enter sends that paper's path to openPath, never a navigation", () => {

@@ -148,12 +148,14 @@ test("accepted: the release page opens, and Clauseo quits once, after it", async
     openExternal: () => new Promise<void>((resolve) => (accept = resolve)),
   });
   const done = openInstallerPage(t, RELEASE);
-  expect(t.only("open_external")).toEqual([{ call: "open_external", url: RELEASE }]);
+  expect(t.only("open_external")).toEqual([
+    { call: "open_external", url: RELEASE, alwaysAsk: true },
+  ]);
   expect(t.only("quit_app")).toEqual([]);
   accept();
   await done;
   expect(t.calls.filter((c) => c.call === "open_external" || c.call === "quit_app")).toEqual([
-    { call: "open_external", url: RELEASE },
+    { call: "open_external", url: RELEASE, alwaysAsk: true },
     { call: "quit_app" },
   ]);
 });

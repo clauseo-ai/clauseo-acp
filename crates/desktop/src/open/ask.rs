@@ -1,8 +1,8 @@
 //! Whether `open_external` asks before it opens a checked link. A plain https or http link the
 //! lawyer clicks opens at once; the native confirm stays for a link that is not on the web
-//! (mailto) and for one that could mislead: a user name or password before the host
-//! (`https://bank.example@evil.example`), an international host (a look-alike risk), or link text
-//! that names a site other than the one the link goes to (`[bank.example](https://evil.example)`).
+//! (mailto) and for one that could mislead: an address or international host (a look-alike
+//! risk), link text that names a site other than the one the link goes to
+//! (`[bank.example](https://evil.example)`), or link text that could hide a site from the check.
 
 use unicode_normalization::UnicodeNormalization as _;
 
@@ -12,30 +12,34 @@ use super::Link;
 pub(crate) const MAX_SHOWN_BYTES: usize = 4096;
 
 /// Whether to ask the lawyer before opening `link`, whose visible text is `shown` (`None` when the
-/// caller has none). True when any of these holds:
+/// caller has none). It reads the parsed URL `check_link` made, the one the OS is handed. True
+/// when any of these holds:
 /// - its scheme is not https or http;
 /// - it has a user name or password;
+/// - its host is an address (IPv4 in any form the parser takes: dotted, decimal, hex, octal; or
+///   IPv6), not a name;
 /// - its host is not ASCII, or a label of it is in `xn--` form;
+/// - `shown` could hide a host (`could_hide_a_host`): a character that shows nothing, an image,
+///   or a character outside ASCII touching an ASCII letter, digit or `.` (fail closed);
 /// - `shown` names a host (`shown_hosts`) that is neither the link's host nor a domain above or
-///   below it, compared without case and without a leading `www.`.
+///   below it, label by label, compared without case, a trailing `.` or a leading `www.`.
 ///
 /// Text that names no host ("the judgment", "here") misleads nobody about where a link goes.
 /// Text over [`MAX_SHOWN_BYTES`] asks, unread.
 pub(crate) fn needs_confirm(link: &Link, shown: Option<&str>) -> bool {
-    if shown.is_some_and(|text| text.len() > MAX_SHOWN_BYTES) {
+    if shown.is_some_and(|text| text.len() > MAX_SHOWN_BYTES || could_hide_a_host(text)) {
         return true;
     }
-    let Ok(url) = url::Url::parse(&link.url) else {
-        return true;
-    };
+    let url = &link.url;
     if !matches!(url.scheme(), "https" | "http") {
         return true;
     }
     if !url.username().is_empty() || url.password().is_some() {
         return true;
     }
-    let Some(host) = url.host_str() else {
-        return true;
+    let host = match url.host() {
+        Some(url::Host::Domain(host)) => host,
+        Some(url::Host::Ipv4(_) | url::Host::Ipv6(_)) | None => return true,
     };
     if !host.is_ascii()
         || host.split('.').any(|label| {
@@ -63,33 +67,106 @@ fn bare(host: &str) -> String {
     }
 }
 
-/// Whether `a` and `b` are one site: equal, or one a subdomain of the other.
+/// Whether `a` and `b` are one site: equal, or one a subdomain of the other, label by label
+/// (`docs.example.com` is under `example.com`; `notexample.com` and `example.com.evil.io` are not).
 fn same_site(a: &str, b: &str) -> bool {
-    a == b || a.ends_with(&format!(".{b}")) || b.ends_with(&format!(".{a}"))
+    let (a, b): (Vec<&str>, Vec<&str>) = (a.rsplit('.').collect(), b.rsplit('.').collect());
+    let shorter = a.len().min(b.len());
+    a[..shorter] == b[..shorter]
 }
 
-/// Characters that show nothing or reorder text: zero-width, bidi controls, soft hyphen, BOM
-/// (link.tsx's `INVISIBLE`).
-fn invisible(c: char) -> bool {
+/// The object replacement character: link text gets it for an image (to-react.ts's `textOf`),
+/// whose pixels could read as any site.
+pub(crate) const IMAGE: char = '\u{FFFC}';
+
+/// Characters outside ASCII that may touch a letter or digit (not a `.`) without asking: curly
+/// quotes, the en and em dash, the section sign, the rupee sign and guillemets. Each splits a run
+/// of host characters, so it can only make a host the text names fail to match, never match;
+/// link.tsx's `TYPOGRAPHIC` is the same list.
+const TYPOGRAPHIC: [char; 10] = [
+    '\u{2018}', '\u{2019}', '\u{201C}', '\u{201D}', '\u{2013}', '\u{2014}', '\u{00A7}', '\u{20B9}',
+    '\u{00AB}', '\u{00BB}',
+];
+
+/// Whether `text` could hide a host from `shown_hosts`, so the link asks rather than trusting
+/// what was found (link.tsx's `couldHideAHost` is the same rule). True when it holds:
+/// - a default-ignorable code point (`ignorable`), or an interlinear annotation mark;
+/// - an image ([`IMAGE`]);
+/// - in a word (split on ASCII whitespace), a character outside ASCII next to an ASCII letter,
+///   digit or `.`, unless it is [`TYPOGRAPHIC`] and its neighbour is not a `.`. That catches
+///   every look-alike dot (`bank·com`, `bankꓸcom`), space (`bank\u{200A}.com`) and mark
+///   (`bank\u{FE0F}.com`) without a list of them, at the cost of a confirm for `Résumé`.
+pub(crate) fn could_hide_a_host(text: &str) -> bool {
+    if text
+        .chars()
+        .any(|c| ignorable(c) || c == IMAGE || matches!(c, '\u{FFF9}'..='\u{FFFB}'))
+    {
+        return true;
+    }
+    text.split(|c: char| c.is_ascii_whitespace()).any(|word| {
+        let chars: Vec<char> = word.chars().collect();
+        chars.windows(2).any(|pair| {
+            let (a, b) = (pair[0], pair[1]);
+            let touches = |other: char, near: char| {
+                !other.is_ascii()
+                    && (near == '.'
+                        || (near.is_ascii_alphanumeric() && !TYPOGRAPHIC.contains(&other)))
+            };
+            touches(a, b) || touches(b, a)
+        })
+    })
+}
+
+/// Unicode's default-ignorable code points (`DerivedCoreProperties.txt`): characters that show
+/// nothing, bidi controls and variation selectors among them.
+fn ignorable(c: char) -> bool {
     matches!(c,
-        '\u{00AD}' | '\u{061C}' | '\u{180E}' | '\u{200B}'..='\u{200F}' | '\u{202A}'..='\u{202E}'
-        | '\u{2060}'..='\u{2064}' | '\u{2066}'..='\u{206F}' | '\u{FEFF}')
+        '\u{00AD}' | '\u{034F}' | '\u{061C}' | '\u{115F}'..='\u{1160}' | '\u{17B4}'..='\u{17B5}'
+        | '\u{180B}'..='\u{180F}' | '\u{200B}'..='\u{200F}' | '\u{202A}'..='\u{202E}'
+        | '\u{2060}'..='\u{206F}' | '\u{3164}' | '\u{FE00}'..='\u{FE0F}' | '\u{FEFF}' | '\u{FFA0}'
+        | '\u{FFF0}'..='\u{FFF8}' | '\u{1BCA0}'..='\u{1BCA3}' | '\u{1D173}'..='\u{1D17A}'
+        | '\u{E0000}'..='\u{E0FFF}')
+}
+
+/// Characters that read as a full stop, which `shown_hosts` reads as `.` after NFKC: the
+/// ideographic, full-width and half-width stops, the Lisu letter tone, the Syriac stops, the
+/// middle dots, the Arabic full stop, the Armenian full stop, the one dot leader and the small
+/// full stop (a conservative fold of UTS #39's confusables for `.`).
+fn reads_as_dot(c: char) -> bool {
+    matches!(
+        c,
+        '\u{3002}'
+            | '\u{FF0E}'
+            | '\u{FF61}'
+            | '\u{A4F8}'
+            | '\u{0701}'
+            | '\u{0702}'
+            | '\u{00B7}'
+            | '\u{0387}'
+            | '\u{2E33}'
+            | '\u{2219}'
+            | '\u{22C5}'
+            | '\u{06D4}'
+            | '\u{0589}'
+            | '\u{2024}'
+            | '\u{FE52}'
+            | '\u{30FB}'
+            | '\u{FF65}'
+    )
 }
 
 /// Every host `text` names, in the ASCII form the `url` crate writes (so a look-alike in another
 /// script differs from the name it imitates), as link.tsx's `shownHosts` finds them: the text
-/// width-folded (NFKC), its other full stops read as `.`, its invisible characters dropped; then
+/// width-folded (NFKC), what reads as a full stop read as `.` (`reads_as_dot`), default-ignorable
+/// characters dropped; then
 /// each run of letters, digits, `-` and `.` that is labels of letters, digits and `-` with a
 /// letter-only last label of two or more, such as `example.com`, `www.example.com` or the host of
 /// `https://supremecourt.gov.in/x`.
 pub(crate) fn shown_hosts(text: &str) -> Vec<String> {
     let plain: String = text
         .nfkc()
-        .filter(|c| !invisible(*c))
-        .map(|c| match c {
-            '\u{3002}' | '\u{FF0E}' | '\u{FF61}' => '.',
-            other => other,
-        })
+        .filter(|c| !ignorable(*c))
+        .map(|c| if reads_as_dot(c) { '.' } else { c })
         .collect();
     plain
         .split(|c: char| !(c.is_alphanumeric() || c == '-' || c == '.'))

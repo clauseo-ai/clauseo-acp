@@ -82,12 +82,19 @@ fn not_opened(what: &str, error: &tauri_plugin_opener::Error) -> HostError {
     )
 }
 
+/// An `internal` failure for a link the OS did not open. The opener's own error can quote the
+/// URL (`Not allowed to open url …`), and this message reaches the page's console, so it is left
+/// out: no URL goes to a log.
+fn link_not_opened() -> HostError {
+    HostError::new(ErrorCode::Internal, "the system did not open the link")
+}
+
 impl<R: Runtime> Opener for NativeOpener<R> {
     fn open_url(&self, url: &str) -> Result<(), HostError> {
         self.app
             .opener()
             .open_url(url, None::<&str>)
-            .map_err(|error| not_opened("link", &error))
+            .map_err(|_quotes_the_url| link_not_opened())
     }
 
     fn open_path(&self, path: &Path, kind: &str) -> Result<(), HostError> {
