@@ -1,7 +1,7 @@
 //! The rows made from the crate's own example day and tally (`crates/counts/src/schema/tests/
 //! strict.rs`), and the canonical form a reordered, spaced-out body is stored in.
 
-use clauseo_counts::schema::{Day, Time};
+use clauseo_counts::schema::{Day, InstallId, TallyId, Time};
 use serde_json::{Value, json};
 
 use super::*;
@@ -182,4 +182,24 @@ fn a_tally_becomes_one_row_with_managed_as_an_integer() {
         counts(&serde_json::to_vec(&tally_json()).unwrap()),
         Err(Refusal::Bad)
     );
+}
+
+/// The live check's canary ids, as `scripts/deploy.mjs` holds them.
+fn canary(name: &str) -> &'static str {
+    let script = include_str!("../../scripts/deploy.mjs");
+    let start = script.find(&format!("const {name} = \"")).unwrap() + name.len() + 10;
+    &script[start..start + 36]
+}
+
+#[test]
+fn the_canary_ids_are_ids_the_crate_reads() {
+    let install = canary("CANARY_INSTALL");
+    let tally = canary("CANARY_TALLY");
+    assert_eq!(install, "c0ffee00-0000-4000-8000-000000000001");
+    assert_eq!(tally, "c0ffee00-0000-4000-8000-000000000002");
+    assert_eq!(install.parse::<InstallId>().unwrap().to_string(), install);
+    assert_eq!(tally.parse::<TallyId>().unwrap().to_string(), tally);
+    let mut day = day_json();
+    day["install"] = json!(install);
+    assert!(counts(&serde_json::to_vec(&json!({ "days": [day] })).unwrap()).is_ok());
 }

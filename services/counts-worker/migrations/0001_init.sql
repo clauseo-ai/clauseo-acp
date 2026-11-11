@@ -9,8 +9,9 @@
 --
 -- No table has a column for the time a row arrived, an address, a country or any header.
 -- WITHOUT ROWID: rows are stored in key order, so storage order does not show arrival order.
--- The weekly cron deletes `report` rows after 90 days, `tally` rows after 396 and `rate` rows
--- after 24 hours.
+-- The daily cron deletes `report` rows after 90 days, `tally` rows after 396 and `rate` rows of
+-- past days. There is no index beyond the keys: each would add a written row to every insert,
+-- and the cron's one scan a day stays well inside Workers Free's reads.
 
 -- One install's counts for one finished UTC day. A day sent again changes nothing.
 CREATE TABLE report (
@@ -42,14 +43,10 @@ CREATE TABLE tally (
   PRIMARY KEY (tally)
 ) WITHOUT ROWID;
 
--- The global hourly caps: one count per route per UTC hour, with nothing about who sent it.
+-- The global daily caps: one count per route per UTC day, with nothing about who sent it.
 CREATE TABLE rate (
-  route TEXT,     -- counts or tally
-  hour INTEGER,   -- hours since 1970-01-01 UTC
-  n INTEGER,      -- requests that passed the schema in that hour
-  PRIMARY KEY (route, hour)
+  route TEXT,   -- counts or tally
+  day TEXT,     -- YYYY-MM-DD, UTC
+  n INTEGER,    -- requests stored that day
+  PRIMARY KEY (route, day)
 ) WITHOUT ROWID;
-
--- The cron's deletes read these.
-CREATE INDEX report_day ON report (day);
-CREATE INDEX tally_week ON tally (week);

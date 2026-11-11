@@ -1,7 +1,9 @@
 # The counts Worker on t.clauseo.chat (docs/counts-worker.md). scripts/check-deploy.mjs refuses
 # any departure from what is here: a key not listed in it, logs or traces on, a workers.dev or
-# preview URL, a Tail Worker, Logpush, a var, or another route or binding. The deploy job writes
-# the real database_id into a generated copy (wrangler.deploy.toml) and checks that copy too.
+# preview URL, a Tail Worker, Logpush, a var, or another route or binding. The deploy job builds
+# the Worker with no token present, then writes a copy (wrangler.deploy.toml) with the real
+# database_id and without [build], so wrangler deploys the built output and never builds with the
+# token; check-deploy.mjs --deployed checks that copy.
 name = "clauseo-counts"
 main = "build/worker/shim.mjs"
 compatibility_date = "2026-11-01"
@@ -30,6 +32,6 @@ database_name = "clauseo-counts"
 database_id = "00000000-0000-0000-0000-000000000000"
 migrations_dir = "migrations"
 
-# Mondays at 03:00 UTC: the retention deletes (src/retention.rs).
+# Every day at 03:00 UTC: the retention deletes (src/retention.rs).
 [triggers]
-crons = ["0 3 * * 1"]
+crons = ["0 3 * * *"]

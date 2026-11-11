@@ -31,10 +31,12 @@ pub(crate) const INSERT_TALLY: &str = "INSERT OR IGNORE INTO tally \
      (tally, week, version, channel, os, os_major, arch, install_type, managed, cells) \
      VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)";
 
-/// Adds one to the route's count for the hour and returns the new count. Run only for a request
-/// that passed every other check, and before its rows.
-pub(crate) const BUMP_RATE: &str = "INSERT INTO rate (route, hour, n) VALUES (?1, ?2, 1) \
-     ON CONFLICT (route, hour) DO UPDATE SET n = n + 1 RETURNING n";
+/// Adds one to the route's count for the UTC day (`?2`) unless it has reached the cap (`?3`),
+/// and returns the new count. At the cap the update does not happen and no row comes back, so a
+/// refused request writes nothing. Run only for a request that passed every other check, and
+/// before its rows.
+pub(crate) const BUMP_RATE: &str = "INSERT INTO rate (route, day, n) VALUES (?1, ?2, 1) \
+     ON CONFLICT (route, day) DO UPDATE SET n = n + 1 WHERE n < ?3 RETURNING n";
 
 /// A request that passed the schema: the statement and one set of values per row.
 #[derive(Debug, Clone, PartialEq, Eq)]
