@@ -33,6 +33,8 @@ use crate::write;
 pub(crate) use session::{Session, processes};
 use session::{group_of, stderr_within};
 
+#[path = "real_chrome/close.rs"]
+mod close;
 #[path = "real_chrome/idle.rs"]
 mod idle;
 #[path = "real_chrome/session.rs"]

@@ -337,7 +337,8 @@ connects to it (`AGENT_BROWSER_CDP`; `flags.rs:689`, `native/actions.rs:4334-443
 
 Behaviour that changes with it:
 - **`agent_browser_close` only disconnects** (`browser.rs:1648-1652`: `Browser.close` only for a
-  Chrome it launched). Tabs, cookies, storage and history live until the session ends, then go
+  Chrome it launched), so the guard stops its Chrome itself after the close's reply ("Lazy start
+  and the idle stop", below). Cookies, storage and history live until the session ends, then go
   with the profile. Before, each close deleted agent-browser's temp profile.
 - **agent-browser's own idle timeout** (10 minutes) ends its daemon, not Chrome; the guard's
   idle stop, at the same 10 minutes, ends both ("Lazy start and the idle stop", below).
@@ -651,6 +652,24 @@ agent's first tool call, and an idle browser stops.
   The next tool call starts both again as the first did. The guard looks at the idle time at
   least once a second. A test-only variable, `CLAUSEO_TEST_GUARD_IDLE_MS`, shortens the stop; it
   exists only in builds with the crate's `test-support` feature, which only its own tests enable.
+- **The stop at `agent_browser_close`** (B2, defence in depth). agent-browser only disconnects
+  from the guard's Chrome, so Chrome and its loopback debugging port lived on after the agent's
+  close until the idle stop (10 minutes) or the host's stop of an idle agent (5 minutes); Codex
+  closes at the end of every turn. Now, once agent-browser's reply to a close has gone to the
+  agent, the relay's thread stops the browser exactly as the idle stop does, keeping the profile,
+  so the port lives only from a turn's first browser call to its close. The stop runs after the
+  reply, never before it: its wait for Chrome's group (up to 5 s) does not delay the agent, and
+  the profile is only kept, never deleted, here. It is skipped when a request went to
+  agent-browser after the close (the agent browses again; the idle stop covers it) or the agent
+  has gone (the final stop follows). A close whose reply is an error stops the browser too. A
+  close while the browser is stopped starts nothing: the guard answers it with agent-browser
+  v0.41.1's own result (`relay.rs` `CLOSED_RESULT`, which the real-Chrome test
+  `a_close_while_stopped_starts_nothing_and_gets_agent_browsers_result` compares with the real
+  binary's); a close that waited on the state lock for a start in progress goes to the started browser and
+  stops it again. The guard's own close at stdin's end is unchanged. Cost: the next open is a
+  cold start, median 0.32 s against 0.02 s warm (max 0.34 s and 0.04 s, 10 runs each on
+  openclaw-gateway, Chromium 147, agent-browser v0.41.1, debug guard). Giving agent-browser a
+  pipe to Chrome instead of the port is for after the launch.
 - **Generations.** Each start and stop moves a counter on, and every report of a child's
   threads carries it, so a line or an exit from a browser the guard has already stopped is
   dropped and never answers a later call or ends the guard. Calls in flight are tracked by id;
@@ -1614,12 +1633,12 @@ Record 0030 has the entry; this is the browser's side of it.
   number formatting reaching agent-browser (an integer beyond `u64` becomes a float).
 - A child line over 64 MiB ends the session: a page large enough to produce one fails rather
   than exhausting the guard's memory.
-- Chrome runs only from the first browser call until 10 minutes without one; a session that
-  never browses pays a one-shot agent-browser per handshake request and no Chrome. Cookies and
-  storage survive `agent_browser_close` and the idle stop until the session ends; open tabs do
-  not survive the idle stop.
-- The first call of a session, and the first after an idle stop, waits for Chrome's start
-  (about 1 s on iris) and up to 15 s more while a dying run still holds the debugging port.
+- Chrome runs only from the first browser call until the agent's `agent_browser_close` or 10
+  minutes without a call; a session that never browses pays a one-shot agent-browser per
+  handshake request and no Chrome. Cookies and storage survive `agent_browser_close` and the
+  idle stop until the session ends; open tabs survive neither.
+- The first call of a session, and the first after a close or an idle stop, waits for Chrome's
+  start (about 1 s on iris) and up to 15 s more while a dying run still holds the debugging port.
 - A Chrome crash costs the calls in flight and a restart; a second crash ends the browser server
   for the session (the guard exits 1).
 - The host has two read-only probes for a run folder: `runs_settled` (cleanup finished) and

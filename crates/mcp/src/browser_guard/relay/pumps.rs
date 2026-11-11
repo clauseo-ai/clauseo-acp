@@ -15,9 +15,11 @@ use super::super::Child;
 use super::super::filter::{self, MAX_LINE_BYTES, RESERVED_ID as CLOSE_ID, Verdict};
 use super::super::parent::Parent;
 use super::super::port_file::{Expected, Status};
-use super::super::session::{self, Shared};
+use super::super::session::{self, Request, Shared};
 use super::lines::{Line, Overflow, answer_all, emit, lock, read_line, write_child};
-use super::{CHILD_MAX_LINE_BYTES, CLOSE_REQUEST, ENDED, Event, oneshot, send};
+use super::{
+    CHILD_MAX_LINE_BYTES, CLOSE_REQUEST, CLOSE_TOOL, ENDED, Event, closed_reply, oneshot, send,
+};
 use crate::browser_guard::note;
 use crate::connector::head;
 
@@ -125,11 +127,27 @@ fn route(shared: &Arc<Shared>, parent: &Parent, events: &mpsc::Sender<Event>, te
     let id = message.get("id").cloned();
     let method = message.get("method").and_then(Value::as_str);
     let call = id.is_some() && method == Some("tools/call");
+    let request = match (call, message["params"]["name"].as_str()) {
+        (true, Some(CLOSE_TOOL)) => Request::Close,
+        (true, _) => Request::Call,
+        (false, _) => Request::Other,
+    };
     let to_child = {
         let mut state = lock(&shared.state);
         if state.ended {
             drop(state);
             answer_all(&shared.out, &id.into_iter().collect::<Vec<_>>(), ENDED);
+            return true;
+        }
+        // A close while the browser is stopped starts nothing: the guard answers it as
+        // agent-browser would (`relay.rs`). One that waited on this lock for a start is not
+        // here: the browser runs by then, so the close goes on and its reply stops it again.
+        if state.live.is_none()
+            && request == Request::Close
+            && let Some(id) = &id
+        {
+            drop(state);
+            drop(emit(&shared.out, closed_reply(id).as_bytes()));
             return true;
         }
         if state.live.is_none()
@@ -147,7 +165,7 @@ fn route(shared: &Arc<Shared>, parent: &Parent, events: &mpsc::Sender<Event>, te
         }
         let to_child = state.live.as_ref().map(|live| Arc::clone(&live.to_child));
         if let (Some(_), Some(id)) = (&to_child, &id) {
-            state.sent(id.clone(), call);
+            state.sent(id.clone(), request);
         }
         to_child
     };
@@ -195,13 +213,14 @@ pub(crate) fn pump_child(
             send(events, Event::CloseAnswered);
             continue;
         }
-        let call = {
+        let answered = {
             let mut state = lock(&shared.state);
             if state.generation != generation {
                 continue;
             }
-            reply_id(&line).is_some_and(|id| state.answered(&id))
+            reply_id(&line).and_then(|id| state.answered(&id))
         };
+        let call = answered.is_some_and(Request::is_call);
         // A tool call's result carries the note on held downloads (`downloads/held.rs`).
         if call && let Some(noted) = shared.held.note_into(&line) {
             line = noted;
@@ -209,6 +228,10 @@ pub(crate) fn pump_child(
         line.push(b'\n');
         if agent_reads && emit(&shared.out, &line).is_err() {
             agent_reads = false;
+        }
+        // After the reply is out: the relay's thread stops the browser (`relay.rs`).
+        if answered == Some(Request::Close) {
+            send(events, Event::Closed(generation));
         }
         if let Some(reason) = refusal(&shared.launcher.port_checks) {
             return Event::PortRefused(generation, reason);
