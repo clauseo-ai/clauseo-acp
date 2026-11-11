@@ -73,6 +73,9 @@ pub(crate) struct LaunchWiring {
     /// The confirm before a server is added or its launch changes (`HostConfig::with_mcp_confirm`);
     /// `None` declines every such save.
     pub(crate) mcp_confirm: Option<Arc<dyn super::mcp::McpLaunchConfirm>>,
+    /// Finds the MCP servers other apps set up, for Settings › Tools' import
+    /// (`HostConfig::with_mcp_import`); `None`: nothing is importable.
+    pub(crate) mcp_find: Option<crate::config::mcp::McpFinder>,
     /// Run off the actor with a run folder's path just before the folder is removed, for tests
     /// (`launch_checks::discard`).
     pub(crate) run_removal_hook: Option<RunRemovalHook>,
@@ -117,6 +120,7 @@ impl Default for LaunchWiring {
             mcp_secrets: None,
             mcp_resolve: Arc::new(crate::agent::loads::lawyer::resolve_here),
             mcp_confirm: None,
+            mcp_find: None,
             run_removal_hook: None,
             tree_wait: super::DEFAULT_TREE_WAIT,
             tree_wait_hook: None,

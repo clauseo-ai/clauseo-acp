@@ -19,7 +19,7 @@
 
 use serde::{Deserialize, Deserializer, Serialize};
 
-use crate::{Error, McpServerKind, RedactedString};
+use crate::{Error, McpImportSource, McpServerKind, RedactedString};
 
 /// Most bytes in a server name, a variable's or a header's name as a command carries it. The
 /// host refuses a name over 64 bytes as `mcp.name_invalid`; this bound only keeps a command
@@ -62,6 +62,16 @@ pub enum McpCommand {
         name: String,
         /// Whether sessions get it.
         enabled: bool,
+    },
+    /// Import every server `source` set up that would import (`McpToolsView::importable`):
+    /// each is saved as `SaveServer` would add it, turned on, its variables' and headers'
+    /// values in the keychain. Answers `Done` with a receipt; what was added and what was left
+    /// out, and why, reaches app subscribers as the view's `last_import`, carrying this
+    /// command's id. An app with nothing to import answers `Done` with both lists empty. A
+    /// keychain failure is `mcp.secret_store_failed` with nothing imported.
+    Import {
+        /// The app.
+        source: McpImportSource,
     },
 }
 
@@ -142,6 +152,9 @@ enum Wire {
         name: String,
         enabled: bool,
     },
+    Import {
+        source: McpImportSource,
+    },
 }
 
 /// [`McpSecretValue`]'s derived twin.
@@ -168,6 +181,7 @@ impl<'de> Deserialize<'de> for McpCommand {
             },
             Wire::RemoveServer { name } => Self::RemoveServer { name },
             Wire::SetServerEnabled { name, enabled } => Self::SetServerEnabled { name, enabled },
+            Wire::Import { source } => Self::Import { source },
         })
     }
 }
@@ -191,6 +205,7 @@ impl McpCommand {
     /// with its own codes.
     pub(super) fn check(&self) -> Result<(), Error> {
         match self {
+            Self::Import { source: _ } => Ok(()),
             Self::RemoveServer { name } | Self::SetServerEnabled { name, enabled: _ } => bounded(
                 name,
                 MAX_MCP_NAME_BYTES,

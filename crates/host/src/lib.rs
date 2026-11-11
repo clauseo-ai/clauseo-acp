@@ -285,7 +285,9 @@ pub use clauseo_acp::McpServer;
 #[cfg(feature = "test-support")]
 pub use clock::ManualClock;
 pub use clock::{Clock, Now, SystemClock};
-pub use config::mcp::{McpLaunchAsk, McpLaunchConfirm, McpResolver};
+pub use config::mcp::{
+    McpFinder, McpLaunchAsk, McpLaunchConfirm, McpResolver, find_mcp_imports_here,
+};
 pub use config::{
     CAP_MIN_IDLE, DEFAULT_TREE_WAIT, Detect, EgressProxy, HostConfig, IDLE_LIMIT, LIVE_AGENTS,
     NoProfile, PackRequest, ProfileHook, Sandbox, SessionKey,

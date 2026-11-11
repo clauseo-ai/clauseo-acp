@@ -1,5 +1,6 @@
-//! What Settings › Tools shows ([`McpToolsView`]): who decides the list, and each server with
-//! its variables' and headers' names, never a value. It reaches every app subscriber as
+//! What Settings › Tools shows ([`McpToolsView`]): who decides the list, each server with
+//! its variables' and headers' names, never a value, what other apps set up that would import,
+//! and the last import's result. It reaches every app subscriber as
 //! `McpToolsChanged` whenever it changes (a command, or a launch that found a keychain value
 //! missing) and in every app catch-up.
 
@@ -17,6 +18,8 @@ pub(crate) fn view(actor: &Actor) -> McpToolsView {
         return McpToolsView {
             control: McpControl::FirmManaged,
             servers: Vec::new(),
+            importable: Vec::new(),
+            last_import: actor.mcp.last_import.clone(),
         };
     }
     let control = if actor.effective.mcp_locked() {
@@ -30,7 +33,16 @@ pub(crate) fn view(actor: &Actor) -> McpToolsView {
         .iter()
         .map(|(name, server)| server_view(actor, name, server))
         .collect();
-    McpToolsView { control, servers }
+    let importable = match control {
+        McpControl::Lawyer => super::import::importable(actor),
+        McpControl::FirmList | McpControl::FirmManaged => Vec::new(),
+    };
+    McpToolsView {
+        control,
+        servers,
+        importable,
+        last_import: actor.mcp.last_import.clone(),
+    }
 }
 
 /// Whether the firm's `managed-mcp.json` is on this computer: one `stat`, as each launch makes

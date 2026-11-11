@@ -70,6 +70,13 @@ impl std::fmt::Debug for Undo {
 #[derive(Default)]
 pub(crate) struct Undo(Vec<(String, Option<Zeroizing<Vec<u8>>>)>);
 
+impl Undo {
+    /// Whether the run wrote nothing.
+    pub(crate) fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+}
+
 /// The server `edit` makes, replacing `previous` (its name and entry; `None` for an add), and
 /// the keychain steps that go with it. A kept value that `previous` does not hold (under the
 /// same kind) is `command.invalid`; a name given twice is the kind's name refusal. Every set

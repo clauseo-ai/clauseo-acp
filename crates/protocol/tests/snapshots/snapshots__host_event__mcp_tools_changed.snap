@@ -41,6 +41,34 @@ expression: "HostEvent::McpToolsChanged(super::mcp::tools_view())"
         ],
         "enabled": false
       }
-    ]
+    ],
+    "importable": [
+      {
+        "source": "claude_code",
+        "count": 2
+      },
+      {
+        "source": "codex",
+        "count": 1
+      }
+    ],
+    "last_import": {
+      "command": "01900000-0000-7000-8000-000000000007",
+      "source": "claude_desktop",
+      "imported": [
+        "github"
+      ],
+      "skipped": [
+        {
+          "name": "filesystem",
+          "reason": "command_not_found",
+          "program": "npx"
+        },
+        {
+          "name": "linear",
+          "reason": "already_added"
+        }
+      ]
+    }
   }
 }

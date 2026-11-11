@@ -21,6 +21,9 @@
 //! - Each change sends `McpToolsChanged` ([`view::publish`]) and answers `Done` with a receipt,
 //!   as the other settings commands do. A command's secret value never reaches its receipt hash
 //!   (it encodes as `[redacted]`), a log line or an error.
+//! - `Import` (`import.rs`) saves the importable servers of one app as `SaveServer` adds them,
+//!   and puts its result in the view; the counts the view shows come from a scan of the apps'
+//!   config off the actor.
 //! - A session reads the list at its launch (`agent::loads::lawyer`): a change reaches the next
 //!   session started.
 
@@ -36,6 +39,7 @@ use super::input::Input;
 use crate::error::Error;
 
 mod ask;
+pub(crate) mod import;
 pub(crate) mod keychain;
 pub(crate) mod view;
 
@@ -57,6 +61,14 @@ pub(crate) struct McpOnActor {
     pub(crate) missing: BTreeSet<(String, String)>,
     /// The view last sent to app subscribers.
     pub(crate) sent: Option<clauseo_protocol::McpToolsView>,
+    /// What the last import scan found; `None` before the first one ends.
+    pub(crate) found: Option<Vec<import::Found>>,
+    /// Whether a scan runs.
+    pub(crate) scanning: bool,
+    /// Whether another scan was asked for while one ran.
+    pub(crate) rescan: bool,
+    /// How the last import went, for the view.
+    pub(crate) last_import: Option<clauseo_protocol::McpImportResult>,
 }
 
 /// A save whose keychain steps ran, and what its settings write takes.
@@ -79,6 +91,13 @@ pub(crate) enum McpInput {
     Tidied { answer: Option<(CommandCtx, Error)> },
     /// The thread ended without its answer (it panicked); its command, if any, is `internal`.
     Lost { ctx: Option<CommandCtx> },
+    /// An import's keychain writes ended.
+    Imported {
+        ctx: CommandCtx,
+        result: Result<Box<import::Imported>, import::StoreFailed>,
+    },
+    /// An import scan ended; `None` when it panicked.
+    Scanned(Option<Vec<import::Found>>),
 }
 
 impl std::fmt::Debug for McpInput {
@@ -87,13 +106,17 @@ impl std::fmt::Debug for McpInput {
             Self::Written { .. } => "Written",
             Self::Tidied { .. } => "Tidied",
             Self::Lost { .. } => "Lost",
+            Self::Imported { .. } => "Imported",
+            Self::Scanned(_) => "Scanned",
         })
     }
 }
 
 /// The start's view, as the one sent: a later change is what goes out.
+/// The first import scan starts too.
 pub(super) fn start(actor: &mut Actor) {
     actor.mcp.sent = Some(view::view(actor));
+    import::scan(actor);
 }
 
 /// One command: run now, or queued behind the keychain work running.
@@ -135,6 +158,7 @@ fn begin(actor: &mut Actor, ctx: CommandCtx, command: McpCommand) {
             previous_name,
             server,
         } => save(actor, ctx, previous_name, &server),
+        McpCommand::Import { source } => import::import(actor, ctx, source),
     };
     if let Err(error) = result {
         actor.finish_command(ctx.id, Err(error));
@@ -149,6 +173,8 @@ fn remove(actor: &mut Actor, ctx: CommandCtx, name: &str) -> Result<(), Error> {
     };
     actor.mcp.missing.retain(|(server, _)| server != name);
     changed(actor, ctx);
+    // A server the last scan found already added may import again.
+    import::scan(actor);
     let accounts = keychain::accounts(name, &removed);
     tidy(actor, accounts, None);
     Ok(())
@@ -310,6 +336,11 @@ fn tidy(actor: &mut Actor, accounts: Vec<String>, answer: Option<(CommandCtx, Er
 /// A keychain thread's answer.
 pub(super) fn on_input(actor: &mut Actor, input: McpInput) {
     match input {
+        McpInput::Scanned(found) => import::on_scanned(actor, found),
+        McpInput::Imported { ctx, result } => {
+            actor.mcp.running = false;
+            import::on_imported(actor, ctx, result);
+        }
         McpInput::Written { ctx, save, result } => {
             actor.mcp.running = false;
             let answered = match result {

@@ -4,6 +4,7 @@
 use std::sync::Arc;
 
 use clauseo_connectors::SecretStore;
+use clauseo_settings::mcp_import::ImportCandidate;
 
 use super::HostConfig;
 
@@ -38,6 +39,10 @@ pub trait McpLaunchConfirm: Send + Sync {
 /// Finds a lawyer's MCP server's program: the command as typed (a bare name or an absolute path)
 /// to the program's path, or `None` when there is none (`HostConfig::with_mcp_resolver`).
 pub type McpResolver = Arc<dyn Fn(&str) -> Option<std::path::PathBuf> + Send + Sync>;
+
+/// Finds the MCP servers Claude Desktop, Claude Code and Codex set up, given the names the
+/// lawyer's list already has (`HostConfig::with_mcp_import`).
+pub type McpFinder = Arc<dyn Fn(&[String]) -> Vec<ImportCandidate> + Send + Sync>;
 
 #[expect(
     clippy::multiple_inherent_impl,
@@ -77,4 +82,23 @@ impl HostConfig {
         self.wiring.mcp_resolve = resolve;
         self
     }
+
+    /// How Settings › Tools finds the servers other apps set up (`McpCommand::Import` and
+    /// `McpToolsView::importable`): desktop's runs `clauseo_settings::mcp_import::find_candidates`
+    /// over this computer ([`find_mcp_imports_here`]). It runs off the actor, at the start, at
+    /// each app catch-up, after a removal and at each import. Unset (the default), nothing is
+    /// importable and an import adds nothing.
+    #[must_use]
+    pub fn with_mcp_import(mut self, find: McpFinder) -> Self {
+        self.wiring.mcp_find = Some(find);
+        self
+    }
+}
+
+/// The servers Claude Desktop, Claude Code and Codex set up on this computer, for
+/// [`HostConfig::with_mcp_import`]; none on an OS Clauseo is not built for or with no home
+/// folder.
+pub fn find_mcp_imports_here(existing: &[String]) -> Vec<ImportCandidate> {
+    use clauseo_settings::mcp_import::{RealEnv, find_candidates};
+    RealEnv::from_process().map_or_else(Vec::new, |env| find_candidates(&env.env(), existing))
 }

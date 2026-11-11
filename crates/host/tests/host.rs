@@ -292,6 +292,9 @@ mod matters;
 #[path = "host/mcp.rs"]
 mod mcp;
 #[cfg(test)]
+#[path = "host/mcp_import.rs"]
+mod mcp_import;
+#[cfg(test)]
 #[path = "host/mcp_tools.rs"]
 mod mcp_tools;
 #[cfg(test)]

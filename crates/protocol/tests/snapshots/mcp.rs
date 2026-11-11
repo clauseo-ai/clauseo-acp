@@ -4,15 +4,17 @@
 
 use super::*;
 use clauseo_protocol::{
-    CommandEnvelope, McpCommand, McpControl, McpSecretEdit, McpSecretName, McpSecretValue,
-    McpServerEdit, McpServerKind, McpServerView, McpToolsView, RedactedString,
+    CommandEnvelope, McpCommand, McpControl, McpImportResult, McpImportSource, McpImportable,
+    McpSecretEdit, McpSecretName, McpSecretValue, McpServerEdit, McpServerKind, McpServerView,
+    McpSkipReason, McpSkipped, McpToolsView, RedactedString,
 };
 use zeroize::Zeroizing;
 
 /// A value that must never show in a snapshot, a log line or an error.
 const TOKEN: &str = "test-value-7Hs9kQ2mXv4LpR8tYw1Zb";
 
-/// The lawyer's list: one local server with a saved and an unsaved variable, one remote.
+/// The lawyer's list: one local server with a saved and an unsaved variable, one remote; two
+/// apps with servers to import, and the last import from Claude Desktop.
 pub(super) fn tools_view() -> McpToolsView {
     McpToolsView {
         control: McpControl::Lawyer,
@@ -51,6 +53,38 @@ pub(super) fn tools_view() -> McpToolsView {
                     saved: true,
                 }],
                 enabled: false,
+            },
+        ],
+        importable: vec![
+            McpImportable {
+                source: McpImportSource::ClaudeCode,
+                count: 2,
+            },
+            McpImportable {
+                source: McpImportSource::Codex,
+                count: 1,
+            },
+        ],
+        last_import: Some(import_result()),
+    }
+}
+
+/// An import from Claude Desktop that added one server and skipped two.
+fn import_result() -> McpImportResult {
+    McpImportResult {
+        command: fixtures::command_id(7),
+        source: McpImportSource::ClaudeDesktop,
+        imported: vec!["github".to_owned()],
+        skipped: vec![
+            McpSkipped {
+                name: "filesystem".to_owned(),
+                reason: McpSkipReason::CommandNotFound,
+                program: Some("npx".to_owned()),
+            },
+            McpSkipped {
+                name: "linear".to_owned(),
+                reason: McpSkipReason::AlreadyAdded,
+                program: None,
             },
         ],
     }
@@ -101,6 +135,7 @@ mod mcp_command {
         name: "github".to_owned(),
         enabled: false,
     };
+    Import => import: McpCommand::Import { source: McpImportSource::ClaudeCode };
     } }
 }
 
@@ -110,6 +145,22 @@ fn mcp_tools_view_and_controls() {
     snapshot!("mcp_controls", McpControl::ALL);
     round_trips(&McpControl::ALL);
     round_trips(&tools_view());
+}
+
+/// The apps an import reads and the reasons it skips a server, each in order; the empty view
+/// still encodes `importable` and leaves `last_import` out.
+#[test]
+fn mcp_import_sources_and_skip_reasons() {
+    snapshot!("mcp_import_sources", McpImportSource::ALL);
+    round_trips(&McpImportSource::ALL);
+    snapshot!("mcp_skip_reasons", McpSkipReason::ALL);
+    round_trips(&McpSkipReason::ALL);
+    let empty = serde_json::to_value(McpToolsView::EMPTY).unwrap();
+    assert_eq!(
+        empty,
+        serde_json::json!({"control": "lawyer", "servers": [], "importable": []})
+    );
+    round_trips(&McpToolsView::EMPTY);
 }
 
 /// A command holding a real value encodes as the placeholder one does: `[redacted]`, never the
