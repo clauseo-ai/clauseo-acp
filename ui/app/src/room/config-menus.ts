@@ -15,7 +15,14 @@ import type { HostTransport } from "../transport/host-transport.ts";
 import type { ConfigOption, MatterSummary, StreamId, ThreadId } from "../transport/protocol.ts";
 import { kindOf } from "./agent.ts";
 import type { Conversations, ConversationsView } from "./conversations.ts";
-import { draftValue, pickables, setOption, type Pickable } from "./pickers.ts";
+import {
+  DEFAULT_VALUE,
+  draftValue,
+  pickables,
+  resolvedDefault,
+  setOption,
+  type Pickable,
+} from "./pickers.ts";
 
 const NO_OPTIONS: readonly ConfigOption[] = [];
 
@@ -26,17 +33,26 @@ export function menusOf(
   valueOf: (p: Pickable) => string,
   pick: (p: Pickable, value: string) => void,
 ): readonly ConfigMenu[] {
-  return shown.map((p) => ({
-    id: p.id,
-    label: th(lang, p.category === "model" ? "Model" : "Effort"),
-    value: valueOf(p),
-    options: p.choices.map((c) => ({
-      value: c.value,
-      name: c.name,
-      ...(c.description === undefined ? {} : { description: c.description }),
-    })),
-    onValueChange: (value) => pick(p, value),
-  }));
+  return shown.map((p) => {
+    // the Default row in the name of what it stands for, so the trigger says "Opus 5.5", never "Default"; the menu
+    // marks it quietly as the default. Unresolved, it keeps the agent's own name.
+    const resolved = resolvedDefault(p);
+    return {
+      id: p.id,
+      label: th(lang, p.category === "model" ? "Model" : "Effort"),
+      value: valueOf(p),
+      options: p.choices.map((c) =>
+        c.value === DEFAULT_VALUE && resolved !== undefined
+          ? { value: c.value, name: resolved, note: th(lang, "(default)") }
+          : {
+              value: c.value,
+              name: c.name,
+              ...(c.description === undefined ? {} : { description: c.description }),
+            },
+      ),
+      onValueChange: (value) => pick(p, value),
+    };
+  });
 }
 
 /** A new conversation's menus, while the open conversation is a draft: undefined otherwise, and none for a plan whose

@@ -63,7 +63,13 @@ export type ConfigMenu = {
   id: string;
   label: string;
   value: string;
-  options: readonly { value: string; name: string; description?: string | undefined }[];
+  /** `note`: a quiet mark after the name, in the open menu only: "(default)" on the row that is the agent's default. */
+  options: readonly {
+    value: string;
+    name: string;
+    description?: string | undefined;
+    note?: string | undefined;
+  }[];
   onValueChange: (value: string) => void;
 };
 

@@ -2,11 +2,12 @@
 // own chunk, since only a status line that offers the agent's settings needs it. A real menu: Enter, Space or the
 // arrows open it on the value ticked now (the first with none ticked), the arrows move through the values, a typed
 // letter jumps, Enter picks and closes, Escape closes with focus back on the trigger. The values' names and
-// descriptions are the agent's own.
+// descriptions are the agent's own; a row's quiet note after its name, "(default)", is the room's.
 import { Menu as BaseMenu } from "@base-ui/react/menu";
 import { useRef } from "react";
 import { IconMore, IconTick } from "../icons/icons.tsx";
 import { cn } from "../lib/cn.ts";
+import { useDisplay } from "../lib/display.ts";
 import { useLayer } from "../ui/layer-context.ts";
 import { groupLabel, raised, row, rowNote } from "../ui/recipes-overlays.ts";
 import type { ConfigMenu } from "./status-line.tsx";
@@ -16,6 +17,7 @@ import type { ConfigMenu } from "./status-line.tsx";
  * stands at: "Model: Opus". */
 export function ConfigMenuTrigger({ menu }: { menu: ConfigMenu }) {
   const layer = useLayer();
+  const { lang } = useDisplay();
   const name = menu.options.find((o) => o.value === menu.value)?.name ?? menu.value;
   // opened by keys, the menu highlights its first value; the ticked one takes the focus in its place, so Enter keeps
   // the value as it is and the arrows move from it. A pointer's open highlights nothing, and nothing moves.
@@ -76,7 +78,15 @@ export function ConfigMenuTrigger({ menu }: { menu: ConfigMenu }) {
                     )}
                   >
                     <span className="min-w-0" lang="en">
-                      <span className="block as-en">{o.name}</span>
+                      <span className="block">
+                        <span className="as-en">{o.name}</span>
+                        {o.note !== undefined && (
+                          <span lang={lang} className="text-muted">
+                            {" "}
+                            {o.note}
+                          </span>
+                        )}
+                      </span>
                       {o.description !== undefined && (
                         <span className={cn(rowNote, "as-en")}>{o.description}</span>
                       )}
