@@ -90,8 +90,10 @@ pub(super) fn allow_browser_tool(
 /// build: a standalone request's id and `serverName`
 /// (`mcp_trust::codex_standalone_server`), or the earlier MCP tool call the request's
 /// toolCallId names, whose title and `rawInput` agree (`mcp_trust::CodexCalls`). A shell
-/// command, a file change, a server's own question (`accept`/`decline`, no `allow_once`),
-/// `browser` and `case-law` all go on as before.
+/// command, a file change and a server's own question (`accept`/`decline`, no `allow_once`)
+/// go on as before. Clauseo's own `case-law` server is answered the same way
+/// (`mcp_trust::never_asks`): it only searches, and Codex asks for its tools without
+/// `readOnlyHint` (`recharge`). The `browser` keeps its own rule above.
 pub(super) fn trusted_tool_to_allow(
     actor: &mut Actor,
     thread: ThreadId,
@@ -122,6 +124,9 @@ pub(super) fn trusted_tool_to_allow(
             .codex_mcp_server(&ask.acp_tool_call_id)?
             .to_owned(),
     };
+    if crate::agent::mcp_trust::never_asks(&server) {
+        return Some((server, option));
+    }
     let control = crate::agent::loads::mcp_control(&actor.managed_mcp);
     let trusted =
         crate::agent::mcp_trust::trusted_servers(&actor.effective.settings().mcp.servers, control);
@@ -142,7 +147,7 @@ pub(super) fn allow_trusted_tool(
         return;
     };
     let client = agent.link.client.clone();
-    tracing::info!(%thread, server, "allowed a tool of a server the lawyer added");
+    tracing::info!(%thread, server, "allowed a tool of a trusted server");
     spawn(actor, async move {
         if let Err(error) = client.answer_permission(key, option).await {
             tracing::warn!(error = %Cause(&error), "a trusted tool's approval did not reach the agent");
