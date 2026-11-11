@@ -104,6 +104,9 @@ fn under_home(command: &str) -> FenceCheck {
         ("LOCALAPPDATA", "/u/AppData/Local"),
         ("TEMP", "/u/AppData/Local/clauseo/run/s1/tmp"),
         ("CFG", "/u/AppData/Local/clauseo/state.sqlite"),
+        ("APPDIR", "AppData"),
+        ("HOMEDIR", "/u"),
+        ("SUB", "sub"),
     ];
     FenceCheck {
         data: PathBuf::from("/u/AppData/Local/clauseo"),
@@ -129,6 +132,7 @@ fn under_home_refused(command: &str) -> bool {
         ("/u/AppData/Local/clauseo/state.sqlite", Fake::File),
         ("/u/AppData/Local/clauseo/run/s1/tmp/a.txt", Fake::File),
         ("/u/Documents/matter/a.txt", Fake::File),
+        ("/u/Documents/matter/sub/a.txt", Fake::File),
         ("/u/Documents/x", Fake::File),
     ];
     refused(
@@ -150,6 +154,12 @@ fn a_variable_leading_into_the_data_folder_is_refused() {
         "type ${env:LOCALAPPDATA}/./clauseo/state.sqlite",
         "type $env:CFG",
         "Get-ChildItem -Recurse $env:NOT_SET_ANYWHERE",
+        // A variable in the middle of the path (the re-review's three), and an unknown one.
+        "type /u/$env:APPDIR/Local/clauseo/state.sqlite",
+        "type /u/./${env:APPDIR}/Local/clauseo/state.sqlite",
+        "type $env:HOMEDIR/$env:APPDIR/Local/clauseo/state.sqlite",
+        "type $env:NOT_SET_ANYWHERE/$env:APPDIR/Local/clauseo/state.sqlite",
+        "type /u/Documents/$env:NOT_SET_ANYWHERE/a.txt",
     ] {
         assert!(under_home_refused(command), "{command}");
     }
@@ -163,6 +173,7 @@ fn a_variable_leading_inside_the_matter_or_the_own_folders_passes() {
     for command in [
         "type $env:USERPROFILE/Documents/matter/a.txt",
         "type $env:TEMP/a.txt",
+        "type $env:USERPROFILE/Documents/matter/$env:SUB/a.txt",
         r#"powershell -NoProfile -Command "\$env:Path -split ';'""#,
     ] {
         assert!(!under_home_refused(command), "{command}");
