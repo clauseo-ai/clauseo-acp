@@ -104,6 +104,12 @@ const KEY: Scene = {
   setup: { first: both({ signed_in: { method: "api_key", source: "own", at: AT } }) },
 };
 const KEY_REMOVE: Scene = { ...KEY, press: ['[data-testid="plans-key-remove"]'] };
+/** Claude's key refused by Anthropic after a question failed (the host's `refused`, #984). */
+const KEY_REFUSED: Scene = {
+  setup: {
+    first: both({ signed_in: { method: "api_key", source: "own", at: AT, refused: AT } }),
+  },
+};
 /** ChatGPT's key panel, opened from its "Use an API key instead". */
 const CHATGPT_KEY: Scene = {
   ...SIGNED_OUT,
@@ -176,6 +182,8 @@ export const UD2_PLANS: Entry[] = [
   // UC-140 and UC-146: ChatGPT's key field and help name its maker, UC-146 on both cards' key panels, each with its
   // own (UC-139, UC-145, Claude's, and UC-141 are shown in the room, registry-ud1.tsx)
   entry("UC-140", firstLaunchWords("OpenAI API key"), CHATGPT_KEY),
+  // UC-150: a key the provider refused, in place of the signed-in line (key path fixes)
+  entry("UC-150", "{name} didn't accept the API key.", KEY_REFUSED),
   entry(
     "UC-146",
     firstLaunchWords("A key from the OpenAI platform. Billed to that account."),

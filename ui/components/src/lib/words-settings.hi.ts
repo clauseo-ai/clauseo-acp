@@ -80,6 +80,8 @@ export const HI = {
   "Add ChatGPT": "ChatGPT जोड़ें",
   // the same card for Claude, when Claude isn't added yet (the plans side by side)
   "Uses your Claude plan.": "आपके Claude प्लान का उपयोग करता है।",
+  // a plan whose API key the provider refused (after a question failed), in place of its signed-in line (UC-150)
+  "{name} didn't accept the API key.": "{name} ने API key स्वीकार नहीं की।",
   "Add Claude": "Claude जोड़ें",
   "Needs a download of about {mb} MB. Signing in happens in your browser.":
     "लगभग {mb} MB का डाउनलोड ज़रूरी है। साइन इन आपके ब्राउज़र में होता है।",

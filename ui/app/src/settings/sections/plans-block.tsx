@@ -5,7 +5,8 @@
 // Signing in: UD1's gate, inline. A plan not added yet, either one: "Add Claude" or "Add ChatGPT", which installs it
 // and then starts its sign-in. Once its install runs: the install line. Every plan not in use yet (not added, waiting
 // for its download, signed out, a sign-in that stopped) is the one card, plans-card.tsx, the same for both plans.
-// Under it, one quiet "Use an API key instead", which opens the key's panel (plans-key.tsx). A plan the firm's policy
+// Under it, one quiet "Use an API key instead", which opens the key's panel (plans-key.tsx), whether or not the plan is
+// added yet: a key saved for a plan not here starts its download. A key the provider refused says so in the line. A plan the firm's policy
 // locks shows its line (and for Claude the firm's address its policy set) and "Managed by firm", and no control. The
 // firm's address is set by the firm's policy only (plans.<id>, docs/firm-it.md): Plans offers no field for it.
 import { useEffect, useState, type ReactNode } from "react";
@@ -26,7 +27,14 @@ import { st, type SettingsKey } from "@clauseo/components/lib/words-settings.ts"
 import { say } from "@clauseo/components/lib/words-ui.ts";
 import { clockOf, localZone } from "../../room/when.ts";
 import { aboutMb, gateView, installView, refusalView } from "../../room/first-run/views.ts";
-import { CODEX, isReady, type AgentSetup, type SetupStore } from "../../store/setup.ts";
+import {
+  CODEX,
+  installForKey,
+  isReady,
+  keyRefused,
+  type AgentSetup,
+  type SetupStore,
+} from "../../store/setup.ts";
 import type { HostTransport } from "../../transport/host-transport.ts";
 import type { AgentId, FoundLogin, SignIn } from "../../transport/protocol.ts";
 import { Managed } from "./parts.tsx";
@@ -165,6 +173,12 @@ export function PlanBlock({
     store.command({ start_sign_in: { agent } });
   }, [ready, store, agent]);
   const command = store.command;
+  // a saved key on a plan not added yet starts its download at once (installForKey), so the next question can go
+  const saveKey = (key: string) =>
+    store.send({ set_agent_key: { agent, key } }).then((ok) => {
+      if (ok) installForKey(store, agent);
+      return ok;
+    });
   const signIn = () => {
     setPasting(false);
     setSignedOutHere(false);
@@ -219,7 +233,7 @@ export function PlanBlock({
         setKeyOpen(a.open);
         return;
       case "key":
-        return store.send({ set_agent_key: { agent, key: a.key } });
+        return saveKey(a.key);
       case "plans":
         transport
           .openExternal(PRICES[plan])
@@ -229,17 +243,24 @@ export function PlanBlock({
         return;
     }
   };
-  const signedLine = (signed: SignedIn) => (
-    <p className="set-plan-line set-plan-signed">
-      <SignedLine
-        plan={plan}
-        method={signed.method}
-        reused={signed.source === "reused"}
-        email={signed.email}
-        label={signed.plan}
-      />
-    </p>
-  );
+  const signedLine = (signed: SignedIn) =>
+    // the provider refused the key in use (the host's refused, after a question failed): said, never "✓ Using an API
+    // key"; the key's panel under the block changes or removes it
+    signed.method === "api_key" && keyRefused({ signed_in: signed }) ? (
+      <p className="set-plan-line" data-testid="plans-key-refused">
+        {say(s("{name} didn't accept the API key.", { name }))}
+      </p>
+    ) : (
+      <p className="set-plan-line set-plan-signed">
+        <SignedLine
+          plan={plan}
+          method={signed.method}
+          reused={signed.source === "reused"}
+          email={signed.email}
+          label={signed.plan}
+        />
+      </p>
+    );
   const line = (words: string) => <p className="set-plan-line">{say(words)}</p>;
   let body: ReactNode = null;
   if (locked) {
@@ -436,8 +457,9 @@ export function PlanBlock({
       }
     }
   }
-  // the key, once the plan is here and the firm's policy leaves it to the lawyer
-  const ways = !locked && stand.kind !== "none" && stand.kind !== "add" && stand.kind !== "install";
+  // the key whether or not the plan is added yet (saving it starts the download), where the firm's policy leaves it to
+  // the lawyer
+  const ways = !locked && stand.kind !== "none";
   const method = stand.kind === "signed" ? stand.signed.method : null;
   return (
     <article
@@ -461,7 +483,7 @@ export function PlanBlock({
           inUse={method === "api_key"}
           open={keyOpen}
           onOpen={setKeyOpen}
-          onKey={(key) => store.send({ set_agent_key: { agent, key } })}
+          onKey={saveKey}
           onRemove={() => command({ clear_agent_key: { agent } })}
         />
       )}
