@@ -21,7 +21,7 @@ export const HI = {
   "Install Chrome or Edge": "Chrome या Edge इंस्टॉल करें",
   // the firm's Chrome or Edge policy turns off remote debugging, so no browser starts
   // (provisional Hindi, app track final)
-  "Blocked by your firm": "आपकी फ़र्म ने रोका है",
+  "Blocked by a browser policy": "ब्राउज़र की एक नीति ने रोका है",
   // Clauseo couldn't read that browser policy, so no browser starts until it can
   // (provisional Hindi, app track final)
   "Couldn't check browser settings": "ब्राउज़र सेटिंग्स की जाँच नहीं हो सकी",

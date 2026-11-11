@@ -114,7 +114,7 @@ test("the line's name and tooltip: one sentence per tool, web search first, its 
   );
   expect(label(null, "locked_off")).toBe("Browser: off, managed by firm.");
   expect(label("available", "browser_blocked_by_policy")).toBe(
-    "Web search: on. Browser: off, blocked by your firm.",
+    "Web search: on. Browser: off, blocked by a browser policy.",
   );
   expect(label(null, "browser_policy_unreadable")).toBe(
     "Browser: off, couldn't check browser settings.",
@@ -129,7 +129,7 @@ test("sameTools reads two lists the same only when every tool and state match", 
 });
 
 const POLICY =
-  "Your firm doesn't allow apps to control a browser on this computer, so Clauseo can't use one for you.";
+  "A Chrome or Edge policy on this computer doesn't let apps control the browser, so Clauseo can't use one for you.";
 const UNREADABLE =
   "Clauseo couldn't check this computer's browser settings, so it won't use a browser for now. " +
   "It checks again the next time it needs one.";
@@ -147,7 +147,7 @@ test("each row: its glyph, name, an On or Off chip, and the reason in a few word
     locked_off: "Managed by firm",
     no_search_on_this_login: "Can't search on this login",
     browser_not_installed: "Install Chrome",
-    browser_blocked_by_policy: "Blocked by your firm",
+    browser_blocked_by_policy: "Blocked by a browser policy",
     browser_policy_unreadable: "Couldn't check browser settings",
   };
   const notes: Record<string, string> = {
@@ -216,7 +216,7 @@ test("the firm's browser policy blocks every browser, on either OS", () => {
   for (const platform of ["mac", "windows"] as const)
     expect(words(blocked, { platform })).toMatchObject({
       glyph: "locked",
-      reason: "Blocked by your firm",
+      reason: "Blocked by a browser policy",
       reasonTip: null,
       note: POLICY,
       settings: false,
@@ -257,7 +257,7 @@ test("in Hindi, the tools' words say their Hindi, and a reason keeps its brand n
   );
   // provisional Hindi, until the app thread writes it
   expect(toolsLabel("hi", "mac", [{ tool: "browser", state: "browser_blocked_by_policy" }])).toBe(
-    "ब्राउज़र: बंद, आपकी फ़र्म ने रोका है।",
+    "ब्राउज़र: बंद, ब्राउज़र की एक नीति ने रोका है।",
   );
 });
 

@@ -23,8 +23,8 @@ export const HI = {
   "Try again": "फिर से प्रयास करें",
   // under the browser's reason when the firm's policy blocks it, in full: installing a browser doesn't help
   // (provisional Hindi, app track final)
-  "Your firm doesn't allow apps to control a browser on this computer, so Clauseo can't use one for you.":
-    "आपकी फ़र्म इस कंप्यूटर पर ऐप्स को ब्राउज़र नियंत्रित करने की अनुमति नहीं देती, इसलिए Clauseo आपके लिए ब्राउज़र का उपयोग नहीं कर सकता।",
+  "A Chrome or Edge policy on this computer doesn't let apps control the browser, so Clauseo can't use one for you.":
+    "इस कंप्यूटर पर Chrome या Edge की एक नीति ऐप्स को ब्राउज़र नियंत्रित नहीं करने देती, इसलिए Clauseo आपके लिए ब्राउज़र का उपयोग नहीं कर सकता।",
   // under the browser's reason when Clauseo couldn't read that policy, in full
   // (provisional Hindi, app track final)
   "Clauseo couldn't check this computer's browser settings, so it won't use a browser for now. It checks again the next time it needs one.":

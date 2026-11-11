@@ -122,8 +122,16 @@ export const PRIVACY_KEYS = {
   line: "Turn on access for Clauseo, then ask again.",
 } as const satisfies Record<string, ErrorKey>;
 
-/** One sentence per code, in English. */
-export const ERROR_WORDS: Record<ErrorCode, ErrorKey> = {
+/** Codes still on the wire whose words are retired: they read as a code this version doesn't know ("unknown", as
+ * internal reads). signin.endpoint_in_use sent the lawyer to a firm's address in Settings, Plans, which no longer has
+ * one; only a hand-set address in testing reaches it (IT sweep). */
+export type WordlessCode = "signin.endpoint_in_use";
+
+/** A code that has its own sentence. */
+export type WordedCode = Exclude<ErrorCode, WordlessCode>;
+
+/** One sentence per code, in English; none for a WordlessCode. */
+export const ERROR_WORDS: Record<WordedCode, ErrorKey> = {
   internal: "Something went wrong inside Clauseo.",
   "command.invalid": "Clauseo couldn't take that request as it was.",
   "command.conflict": "That request clashes with one already made, so nothing changed.",
@@ -174,7 +182,7 @@ export const ERROR_WORDS: Record<ErrorCode, ErrorKey> = {
     "This matter's folder is too deep inside other folders for Clauseo to work in it on Windows. Move it nearer the top of its drive.",
   "transport.unauthorized": "That wasn't allowed, so nothing changed.",
   "transport.too_large": "That is too large to send.",
-  "settings.locked": "Your organisation manages that setting, so it can't be changed.",
+  "settings.locked": "Your firm manages that setting, so it can't be changed.",
   "settings.refused": "Clauseo couldn't save that setting. Your settings are as they were.",
   "settings.key_stored":
     "A key is already kept on this computer. To change it, open Settings, then Plans.",
@@ -184,8 +192,6 @@ export const ERROR_WORDS: Record<ErrorCode, ErrorKey> = {
     "Questions go through your firm's own account, so there's nothing to sign in to here.",
   "signin.key_in_use":
     "Clauseo is using your API key. To sign in with your plan instead, open Settings, then Plans, and remove the key.",
-  "signin.endpoint_in_use":
-    "Clauseo is using your firm's address. To sign in with your plan instead, open Settings, then Plans, and remove the address.",
   "agent.install_offline": "You're offline. Setting up waits for the connection.",
   "agent.install_blocked": "Your network is blocking the download.",
   "agent.install_disk_full": "There isn't enough free space on this computer for the download.",
@@ -285,7 +291,7 @@ export function errorSentence(lang: Lang, key: ErrorKey): string {
 /** The codes whose sentence names Claude, with their sentence for a thread on the ChatGPT plan, for an agent of no kind
  * by its name (`{name}`), and for one with no name at all. */
 const PLANNED: Partial<
-  Record<ErrorCode, { chatgpt: ErrorKey; named: ErrorKey; nameless: ErrorKey }>
+  Record<WordedCode, { chatgpt: ErrorKey; named: ErrorKey; nameless: ErrorKey }>
 > = {
   "agent.launch_failed": {
     chatgpt: "ChatGPT didn't start. Your question is kept.",
@@ -321,7 +327,7 @@ const PLANNED: Partial<
 };
 
 /** The codes PLANNED gives a sentence per agent. */
-export const PLANNED_CODES = Object.keys(PLANNED) as ErrorCode[];
+export const PLANNED_CODES = Object.keys(PLANNED) as WordedCode[];
 
 /** The thread's agent as the words name it: its kind, which picks the plan's line (Claude's or ChatGPT's), and its
  * name, for an agent of no kind (the agent's own name from its header when the host has one, else its settings id);
@@ -332,7 +338,7 @@ export type AgentName = { kind: "claude" | "codex" | undefined; name: string | n
 /** A code's sentence for the thread's agent: a codex agent picks PLANNED's ChatGPT sentence; an agent of no kind its
  * `{name}` sentence with its name, or its nameless one with no name (or an empty one); a claude agent, an agent not
  * known (undefined), or a code PLANNED doesn't hold, the code's own sentence (ERROR_WORDS, Claude's). */
-export function plannedKey(code: ErrorCode, agent?: AgentName): { key: ErrorKey; name?: string } {
+export function plannedKey(code: WordedCode, agent?: AgentName): { key: ErrorKey; name?: string } {
   const planned = PLANNED[code];
   if (planned === undefined || agent === undefined || agent.kind === "claude")
     return { key: ERROR_WORDS[code] };
@@ -347,7 +353,7 @@ export function plannedKey(code: ErrorCode, agent?: AgentName): { key: ErrorKey;
 export function errorWords(lang: Lang, code: string, agent?: AgentName): string {
   if (Object.hasOwn(APP_ERROR_WORDS, code))
     return own(lang, APP_ERROR_WORDS[code as keyof typeof APP_ERROR_WORDS]);
-  const known = Object.hasOwn(ERROR_WORDS, code) ? (code as ErrorCode) : "unknown";
+  const known = Object.hasOwn(ERROR_WORDS, code) ? (code as WordedCode) : "unknown";
   const { key, name } = plannedKey(known, agent);
   return name === undefined || key === STOPPED || isMark(key)
     ? errorSentence(lang, key)

@@ -161,11 +161,11 @@ export const UET: Entry[] = [
     WINDOWS,
   ),
   // the firm's Chrome or Edge policy blocks every browser: the reason, then in full under it
-  entry("UET-44", lineWords("Blocked by your firm"), [browser("browser_blocked_by_policy")]),
+  entry("UET-44", lineWords("Blocked by a browser policy"), [browser("browser_blocked_by_policy")]),
   entry(
     "UET-45",
     popWords(
-      "Your firm doesn't allow apps to control a browser on this computer, so Clauseo can't use one for you.",
+      "A Chrome or Edge policy on this computer doesn't let apps control the browser, so Clauseo can't use one for you.",
     ),
     [browser("browser_blocked_by_policy")],
   ),

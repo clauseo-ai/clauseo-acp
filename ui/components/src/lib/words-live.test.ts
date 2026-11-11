@@ -10,7 +10,7 @@ import {
   errorWords,
   plannedKey,
   PLANNED_CODES,
-  type ErrorCode,
+  type WordedCode,
 } from "./words-errors.ts";
 import { errorHindi } from "./words-errors.hi.ts";
 import { fr, type FolderKey } from "./words-folder.ts";
@@ -103,7 +103,7 @@ test("the working line says Answering. in both languages", () => {
 });
 
 test("every error code has a sentence with Hindi or Hindi later, and none says agent", () => {
-  const codes = Object.keys(ERROR_WORDS) as ErrorCode[];
+  const codes = Object.keys(ERROR_WORDS) as WordedCode[];
   expect(codes.length).toBeGreaterThan(30);
   // the stopped sentence is the thread's, so it is not in errorHindi and reads as undefined here
   const hindi: Readonly<Record<string, string | null>> = errorHindi;
@@ -238,7 +238,7 @@ test("an agent's name fills no other code", () => {
 });
 
 test("only the agent.* codes that name Claude have a sentence per plan", () => {
-  const naming = (Object.keys(ERROR_WORDS) as ErrorCode[]).filter((c) =>
+  const naming = (Object.keys(ERROR_WORDS) as WordedCode[]).filter((c) =>
     ERROR_WORDS[c].includes("Claude"),
   );
   expect([...PLANNED_CODES].sort()).toEqual(naming.sort());
