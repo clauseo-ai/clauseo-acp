@@ -4,6 +4,8 @@
 //! word whose name `$env:Path` holds a `:`, refused untouched as an alternate data stream.
 //! PowerShell's variable `$env:NAME` is judged by the file Windows would open for that text,
 //! `$env`: no stream of a file outside the data folder reaches it, and one inside still does.
+//! PowerShell expands the variable, so where it leads is judged too (`variables.rs`): the
+//! 2026-11-11 review's commands, a base or a search folder under a variable, are refused.
 
 #[cfg(unix)]
 use std::path::PathBuf;
@@ -28,6 +30,7 @@ fn shell(command: &str) -> FenceCheck {
         roots: candidates_roots(Some(&raw), true),
         words: candidates_words(Some(&raw), true),
         health: DataFenceHealth::default(),
+        vars: Vec::new(),
     }
 }
 
@@ -88,5 +91,80 @@ fn a_variable_shaped_stream_into_the_data_folder_is_still_refused() {
         r"type /t/matter/env:Path",
     ] {
         assert!(refused_on(command, &names), "{command}");
+    }
+}
+
+/// The review's layout, as on Windows: the home `/u`, the data folder in its local app data,
+/// the matter under its documents, the agent's `TEMP` in the data folder's run folder, and
+/// `CFG` naming a file in the data folder.
+#[cfg(unix)]
+fn under_home(command: &str) -> FenceCheck {
+    let raw = json!({ "command": command });
+    let vars = [
+        ("LOCALAPPDATA", "/u/AppData/Local"),
+        ("TEMP", "/u/AppData/Local/clauseo/run/s1/tmp"),
+        ("CFG", "/u/AppData/Local/clauseo/state.sqlite"),
+    ];
+    FenceCheck {
+        data: PathBuf::from("/u/AppData/Local/clauseo"),
+        allowed: vec![PathBuf::from("/u/AppData/Local/clauseo/run/s1")],
+        cwd: PathBuf::from("/u/Documents/matter"),
+        home: Some(PathBuf::from("/u")),
+        paths: candidates(&[], Some(&raw), true),
+        roots: candidates_roots(Some(&raw), true),
+        words: candidates_words(Some(&raw), true),
+        health: DataFenceHealth::default(),
+        vars: vars.map(|(n, v)| (n.to_owned(), v.to_owned())).to_vec(),
+    }
+}
+
+/// [`under_home`]'s files.
+#[cfg(unix)]
+fn under_home_refused(command: &str) -> bool {
+    use super::network_tests::refused;
+    use crate::network_paths::resolve::tests::{Fake, FakeFs};
+    use crate::network_paths::tests::plain_net;
+
+    let names = [
+        ("/u/AppData/Local/clauseo/state.sqlite", Fake::File),
+        ("/u/AppData/Local/clauseo/run/s1/tmp/a.txt", Fake::File),
+        ("/u/Documents/matter/a.txt", Fake::File),
+        ("/u/Documents/x", Fake::File),
+    ];
+    refused(
+        &under_home(command),
+        &plain_net(true),
+        &FakeFs::with(&names),
+    )
+}
+
+/// A variable as a search folder or a path's base is judged where PowerShell takes it.
+#[cfg(unix)]
+#[test]
+fn a_variable_leading_into_the_data_folder_is_refused() {
+    for command in [
+        "Get-ChildItem -Recurse $env:USERPROFILE",
+        "Select-String -Path $env:LOCALAPPDATA/* -Pattern secret",
+        "type $env:TEMP/../../../state.sqlite",
+        "type $env:USERPROFILE/AppData/Local/./clauseo/state.sqlite",
+        "type ${env:LOCALAPPDATA}/./clauseo/state.sqlite",
+        "type $env:CFG",
+        "Get-ChildItem -Recurse $env:NOT_SET_ANYWHERE",
+    ] {
+        assert!(under_home_refused(command), "{command}");
+    }
+}
+
+/// A variable that leads where the agent may go passes: the matter under the home, the
+/// agent's own temp folder, and the dry run's list.
+#[cfg(unix)]
+#[test]
+fn a_variable_leading_inside_the_matter_or_the_own_folders_passes() {
+    for command in [
+        "type $env:USERPROFILE/Documents/matter/a.txt",
+        "type $env:TEMP/a.txt",
+        r#"powershell -NoProfile -Command "\$env:Path -split ';'""#,
+    ] {
+        assert!(!under_home_refused(command), "{command}");
     }
 }

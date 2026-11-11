@@ -32,12 +32,28 @@ test("Claude's auto mode unavailable gives the app's line, in English and Hindi"
   );
 });
 
-test("Clauseo's data-fence refusal gives its own line, never a permission's", () => {
-  expect(noticeLine("outside_matter_blocked", en)).toBe(
-    "Clauseo blocked a request: it reaches outside this matter.",
+test("the data-fence refusal's line names the agent as the stop line does", () => {
+  const claude = { kind: "claude", name: "claude-acp" } as const;
+  expect(noticeLine("outside_matter_blocked", en, claude)).toBe(
+    "Clauseo stopped a step: Claude tried to reach outside this matter.",
   );
-  expect(noticeLine("outside_matter_blocked", words("hi"))).toBe(
-    "Clauseo ने एक अनुरोध रोक दिया: वह इस मामले के बाहर तक पहुँचता है।",
+  expect(noticeLine("outside_matter_blocked", en, { kind: "codex", name: "codex-acp" })).toBe(
+    "Clauseo stopped a step: ChatGPT tried to reach outside this matter.",
+  );
+  expect(noticeLine("outside_matter_blocked", en, { kind: undefined, name: "my-agent" })).toBe(
+    "Clauseo stopped a step: my-agent tried to reach outside this matter.",
+  );
+  expect(noticeLine("outside_matter_blocked", words("hi"), claude)).toBe(
+    "Clauseo ने एक चरण रोक दिया: Claude ने इस मामले के बाहर पहुँचने की कोशिश की।",
+  );
+});
+
+test("with no agent name known, the data-fence line names the AI", () => {
+  expect(noticeLine("outside_matter_blocked", en)).toBe(
+    "Clauseo stopped a step: the AI tried to reach outside this matter.",
+  );
+  expect(noticeLine("outside_matter_blocked", words("hi"), { kind: undefined, name: " " })).toBe(
+    "Clauseo ने एक चरण रोक दिया: AI ने इस मामले के बाहर पहुँचने की कोशिश की।",
   );
 });
 

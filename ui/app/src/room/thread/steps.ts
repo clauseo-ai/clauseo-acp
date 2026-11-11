@@ -64,10 +64,12 @@ export function segmentsOf(ids: readonly EntryId[], partOf: (id: EntryId) => Par
   return out;
 }
 
-/** `segments` with each prompt whose own tool call is in an earlier group, another group between them, moved back
- * to stand after that group and the prompts already there: an answered prompt reads only "Allowed once.", so it
- * must follow the step it answered, never the next one the agent began before asking (`callOf`: a prompt row's
- * tool call). */
+/** `segments` with each answered prompt whose own tool call is in an earlier group, another
+ * group between them, moved back to stand after that group and the prompts already there: an
+ * answered prompt reads only "Allowed once.", so it must follow the step it answered, never the
+ * next one the agent began before asking (`callOf`: an answered prompt row's tool call; null for
+ * a pending prompt, which stays where it came). It never moves ahead of a row that stays (the
+ * agent's words, a notice, a pending prompt), so those keep their order. */
 export function promptsAtTheirCalls(
   segments: readonly Segment[],
   callOf: (row: EntryId) => EntryId | null,
@@ -82,6 +84,14 @@ export function promptsAtTheirCalls(
     }
     let to = at + 1;
     while (to < out.length && out[to]?.row !== undefined && callOf(out[to]!.row!) !== null) to += 1;
+    // the last row that stays, at or after `to`: the prompt goes no further back than just after it
+    for (let i = out.length - 1; i >= to; i -= 1) {
+      const kept = out[i]?.row;
+      if (kept !== undefined && callOf(kept) === null) {
+        to = i + 1;
+        break;
+      }
+    }
     out.splice(to, 0, s);
   }
   return out;
@@ -113,7 +123,8 @@ export function segmentsPick(
     );
     last = promptsAtTheirCalls(grouped, (row) => {
       const asked = row.startsWith(PERMISSION) ? entry(row)?.permission : undefined;
-      return asked === undefined ? null : toolCallIdOf(asked);
+      // a pending prompt stays where it came, by the step still running
+      return asked === undefined || asked.state === "pending" ? null : toolCallIdOf(asked);
     });
     ready = v !== undefined;
     return last;

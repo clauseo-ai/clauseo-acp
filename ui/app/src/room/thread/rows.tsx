@@ -30,6 +30,7 @@ import type {
 import { Elicitation, LivePermission, PagedPermission } from "../permission-row.tsx";
 import { firstReadMarks, isFirstReadTurn, subscribeMarks } from "../first-read/marks.ts";
 import { stamp } from "./clock.ts";
+import { useAgentPlan } from "./agent-plan.ts";
 import { isolated, shownOf } from "./content.ts";
 import { noticeLine } from "./notice-words.ts";
 import { questionText, useQuestionText, useStreaming } from "./live.ts";
@@ -256,6 +257,7 @@ function AgentContent({ id, entry }: { id: EntryId; entry: AgentContentEntry }) 
 function Notice({ id, entry }: { id: EntryId; entry: NoticeEntry }) {
   const w = useThreadWords();
   if (entry.kind === undefined || entry.kind === null) return null;
+  const agent = useAgentPlan();
   return (
     <p
       data-testid="notice"
@@ -264,7 +266,7 @@ function Notice({ id, entry }: { id: EntryId; entry: NoticeEntry }) {
       className={`${ROW} ${QUIET}`}
       dir="auto"
     >
-      {noticeLine(entry.kind, w) ?? entry.text}
+      {noticeLine(entry.kind, w, agent) ?? entry.text}
     </p>
   );
 }

@@ -57,6 +57,7 @@ pub(super) fn check(
         roots: candidates_roots(raw_input, cfg!(windows)),
         words: candidates_words(raw_input, cfg!(windows)),
         health: super::DataFenceHealth::default(),
+        vars: Vec::new(),
     }
 }
 

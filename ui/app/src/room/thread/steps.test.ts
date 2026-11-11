@@ -4,9 +4,15 @@ import { stepLive } from "@clauseo/components/lib/words-steps-live.ts";
 import { mt } from "@clauseo/components/lib/words-matters.ts";
 import { steps } from "@clauseo/components/lib/words-steps.ts";
 import { describe, expect, test } from "vitest";
-import { agentText, header, toolCall } from "../../testing/stream-script.ts";
-import type { EntryId, ToolCallEntry, ToolCallStatus, ToolKind } from "../../transport/protocol.ts";
-import type { StreamView } from "../../store/view.ts";
+import { agentText, chosen, header, permission, toolCall } from "../../testing/stream-script.ts";
+import type {
+  EntryId,
+  PermissionEntry,
+  ToolCallEntry,
+  ToolCallStatus,
+  ToolKind,
+} from "../../transport/protocol.ts";
+import { entryIdOf, type StreamView } from "../../store/view.ts";
 import { doingOf, doingPick, internalOf, placeOf, splitPath, titleOf } from "./step-names.ts";
 import {
   doneOf,
@@ -19,6 +25,7 @@ import {
   promptsAtTheirCalls,
   restOf,
   segmentsOf,
+  segmentsPick,
   summaryOf,
   troubleOf,
   type Part,
@@ -88,6 +95,39 @@ describe("promptsAtTheirCalls", () => {
   test("a prompt right after its own step, or with no tool call, stays where it is", () => {
     const segments = [group("t1"), row("p1"), row("a5"), group("t3"), row("p3"), row("q9")];
     expect(shown(segments)).toEqual(["[t1]", "p1", "a5", "[t3]", "p3", "q9"]);
+  });
+
+  test("a prompt never moves ahead of the agent's words or a notice that came between", () => {
+    const segments = [group("t1", "t2"), row("a5"), group("t3"), row("n6"), group("t4"), row("p2")];
+    expect(shown(segments)).toEqual(["[t1 t2]", "a5", "[t3]", "n6", "p2", "[t4]"]);
+    expect(shown([group("t1", "t2"), row("a5"), group("t3"), row("p2")])).toEqual([
+      "[t1 t2]",
+      "a5",
+      "p2",
+      "[t3]",
+    ]);
+  });
+});
+
+describe("segmentsPick", () => {
+  test("only an answered prompt moves back to its step; a pending one stays put", () => {
+    const of = (state: PermissionEntry["state"]) => {
+      // two steps, a third begun, then the second one's prompt
+      const entries = [toolCall(1, 61, "completed"), toolCall(2, 62, "completed")]
+        .concat(agentText(3, 63, "Then the third."), toolCall(4, 64, "pending"))
+        .concat(permission(5, 65, state, 62));
+      const paged = new Map(entries.map((e) => [entryIdOf(e), e] as const));
+      const ids = entries.map(entryIdOf);
+      const name = (id: EntryId) => `${ids.indexOf(id)}`;
+      return segmentsPick(
+        ids,
+        paged,
+      )(undefined).map((s) =>
+        s.row !== undefined ? name(s.row) : `[${s.group.map(name).join(" ")}]`,
+      );
+    };
+    expect(of("pending")).toEqual(["[0 1]", "2", "[3]", "4"]);
+    expect(of(chosen("allow_once"))).toEqual(["[0 1]", "2", "4", "[3]"]);
   });
 });
 

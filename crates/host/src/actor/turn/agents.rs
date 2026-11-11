@@ -128,6 +128,9 @@ pub(super) struct Agent {
     /// A Claude agent's plans folder, `<config folder>/plans`, from its launch's environment
     /// (`agent/plan_note.rs`); `None` for any other agent.
     pub(super) plan_notes: Option<PathBuf>,
+    /// Its launch variables that hold a path, for the data fence's `$env:NAME`
+    /// (`data_fence::launch_vars`).
+    pub(super) fence_vars: Vec<(String, String)>,
     /// Its permission requests the host rejected for touching Clauseo's data folder
     /// (`agent/data_fence.rs`), logged as a count on its `agent ended` line.
     pub(super) denied_data_folder: u32,
@@ -228,7 +231,7 @@ pub(super) fn launch_now(
         tracing::info!(%matter, forced_ask, "Claude runs in forced ask: the matter folder is unprotected");
     }
     let mut tree = None;
-    let (link, folder, codex, plan_notes, matter_spellings, claude_home) =
+    let (link, folder, codex, plan_notes, matter_spellings, claude_home, fence_vars) =
         match launch(actor, thread, prepared, &mut tree) {
             Ok(launched) => launched,
             Err(error) => {
@@ -281,6 +284,7 @@ pub(super) fn launch_now(
         claude_home,
         mcp_sent: (!unprotected).then(Vec::new),
         plan_notes,
+        fence_vars,
         denied_data_folder: 0,
         start_failure: None,
         matter_spellings,
