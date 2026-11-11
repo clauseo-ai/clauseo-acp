@@ -54,6 +54,11 @@
     align-self: flex-start;
     height: var(--lead-h);
   }
+  /* macOS's full screen hides the lights until the pointer reaches the top: the lead keeps no room for them and starts
+     at the rail's own left, where New matter and Clauseo's lockup above it start, or the folded rail's panel */
+  .room-top[data-full-screen] .room-lead {
+    padding-left: var(--s3);
+  }
   .room-lights {
     display: flex;
     gap: var(--s2);

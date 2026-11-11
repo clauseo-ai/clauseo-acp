@@ -16,7 +16,10 @@ const subscribe = (changed: () => void) => {
 const never = () => () => {};
 const no = () => false;
 
-/** Whether the window fills its screen, watched only where `watch` is set (the Mac's own lights): elsewhere false. */
-export function useFullScreen(watch: boolean): boolean {
-  return useSyncExternalStore(watch ? subscribe : never, watch ? fills : no, no);
+/** Whether the window fills its screen, watched only where `watch` is set (the Mac's own lights): elsewhere false.
+ * `given` is the host's word where it has one, and stands in for the size; the size is read only without it. */
+export function useFullScreen(watch: boolean, given?: boolean): boolean {
+  const read = watch && given === undefined;
+  const size = useSyncExternalStore(read ? subscribe : never, read ? fills : no, no);
+  return watch && given !== undefined ? given : size;
 }
