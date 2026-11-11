@@ -1544,7 +1544,8 @@ expression: counts_schema()
         "mcp.secret_store_failed",
         "mcp.server_unknown",
         "mcp.save_declined",
-        "agent.service_error"
+        "agent.service_error",
+        "mcp.import_too_large"
       ],
       "type": "string"
     },

@@ -73,8 +73,8 @@ pub(crate) struct LaunchConfirm<D> {
 struct Flood {
     /// Whether a dialog is open.
     open: bool,
-    /// The last ask declined, and when.
-    declined: Option<(McpLaunchAsk, Instant)>,
+    /// The last ask declined (one save's, or an import's list), and when.
+    declined: Option<(Vec<McpLaunchAsk>, Instant)>,
 }
 
 impl<D> LaunchConfirm<D> {
@@ -99,18 +99,18 @@ impl<D> LaunchConfirm<D> {
     }
 }
 
-impl<D: LaunchDrawer> McpLaunchConfirm for LaunchConfirm<D> {
-    /// Blocks the host's keychain thread (never the actor, never a runtime thread) until the
-    /// lawyer answers, as `LinkOpener::open_confirmed` does; declines at once while another
-    /// dialog is open or for the same ask just cancelled.
-    fn confirm(&self, ask: &McpLaunchAsk) -> bool {
+impl<D: LaunchDrawer> LaunchConfirm<D> {
+    /// Draws the words `words` makes in the app's language, for `asks`, behind the flood
+    /// control: declined at once while another dialog is open, or when `asks` is the ask just
+    /// cancelled within [`SAME_ASK_QUIET`]. Blocks the host's keychain thread (never the actor,
+    /// never a runtime thread) until the lawyer answers, as `LinkOpener::open_confirmed` does.
+    fn gated(&self, asks: &[McpLaunchAsk], words: impl FnOnce(Language) -> LaunchWords) -> bool {
         {
             let at = (self.now)();
             let mut flood = lock(&self.flood);
-            let just_declined = flood
-                .declined
-                .as_ref()
-                .is_some_and(|(declined, when)| declined == ask && at < *when + SAME_ASK_QUIET);
+            let just_declined = flood.declined.as_ref().is_some_and(|(declined, when)| {
+                declined.as_slice() == asks && at < *when + SAME_ASK_QUIET
+            });
             if flood.open || just_declined {
                 return false;
             }
@@ -119,24 +119,27 @@ impl<D: LaunchDrawer> McpLaunchConfirm for LaunchConfirm<D> {
         let drawer = &self.drawer;
         let allowed = tauri::async_runtime::block_on(async {
             let language = drawer.language().await;
-            drawer.draw(LaunchWords::new(ask, language)).await
+            drawer.draw(words(language)).await
         });
         let mut flood = lock(&self.flood);
         flood.open = false;
-        flood.declined = (!allowed).then(|| (ask.clone(), (self.now)()));
+        flood.declined = (!allowed).then(|| (asks.to_vec(), (self.now)()));
         allowed
     }
+}
 
-    /// One confirm for the whole import, listing each server ([`import_words`]); blocks the
-    /// keychain thread as [`Self::confirm`] does.
-    fn confirm_import(&self, asks: &[McpLaunchAsk]) -> bool {
-        let drawer = &self.0;
-        tauri::async_runtime::block_on(async {
-            let language = drawer.language().await;
-            drawer
-                .draw(import_words::import_words(asks, language))
-                .await
+impl<D: LaunchDrawer> McpLaunchConfirm for LaunchConfirm<D> {
+    /// One save's confirm ([`Self::gated`]).
+    fn confirm(&self, ask: &McpLaunchAsk) -> bool {
+        self.gated(std::slice::from_ref(ask), |language| {
+            LaunchWords::new(ask, language)
         })
+    }
+
+    /// One confirm for the whole import, listing each server ([`import_words`]), behind the
+    /// same flood control.
+    fn confirm_import(&self, asks: &[McpLaunchAsk]) -> bool {
+        self.gated(asks, |language| import_words::import_words(asks, language))
     }
 }
 

@@ -42,6 +42,7 @@ use zeroize::Zeroizing;
 
 use super::super::Actor;
 use super::super::commands::CommandCtx;
+use super::ask::MAX_ASK_CHARS;
 use super::keychain::{self, Step, Undo};
 use super::{McpInput, finder};
 use crate::config::mcp::McpLaunchAsk;
@@ -92,8 +93,27 @@ struct Ready {
     steps: Vec<Step>,
 }
 
+/// Whether the one confirm of an import would hold more than A1's [`MAX_ASK_CHARS`] characters:
+/// the names, programs and arguments or URLs, and variable or header names of all its servers,
+/// counted as `ask.rs` counts one ask. Such an import is refused before any dialog
+/// (`mcp.import_too_large`): nothing in the confirm is ever cut.
+fn too_large(asks: &[McpLaunchAsk]) -> bool {
+    let shown: usize = asks
+        .iter()
+        .flat_map(|ask| {
+            std::iter::once(&ask.server)
+                .chain(&ask.program)
+                .chain(&ask.url)
+                .chain(&ask.names)
+        })
+        .map(|part| part.chars().count() + 2)
+        .sum();
+    shown > MAX_ASK_CHARS
+}
+
 impl Ready {
-    /// What the confirm shows for it: its name, and the program with its arguments or the URL.
+    /// What the confirm shows for it: its name, the program with its arguments or the URL, and
+    /// every variable or header name (all are new).
     fn ask(&self) -> McpLaunchAsk {
         let (program, url) = match &self.server.transport {
             McpTransport::Local { command, args, .. } => (
@@ -106,6 +126,7 @@ impl Ready {
             server: self.name.clone(),
             program,
             url,
+            names: self.server.values().keys().cloned().collect(),
         }
     }
 }
@@ -134,6 +155,8 @@ pub(crate) enum ImportFailed {
     Finder,
     /// The lawyer did not allow the programs, or no confirm is wired.
     Declined,
+    /// The confirm could not show every server whole ([`too_large`]).
+    TooLarge,
 }
 
 /// `McpCommand::Import`: refused while the firm's policy sets the list (the caller refused
@@ -173,6 +196,10 @@ pub(super) fn import(
         let (mut ready, skipped) = pick(found.candidates, source, &existing_names);
         if !ready.is_empty() {
             let asks: Vec<McpLaunchAsk> = ready.iter().map(Ready::ask).collect();
+            if too_large(&asks) {
+                let result = Err(ImportFailed::TooLarge);
+                return McpInput::Imported { ctx, result };
+            }
             if !confirm.is_some_and(|confirm| confirm.confirm_import(&asks)) {
                 let result = Err(ImportFailed::Declined);
                 return McpInput::Imported { ctx, result };
@@ -454,6 +481,10 @@ fn import_failed(failed: ImportFailed) -> Error {
                 "the keychain did not save the imported values",
             )
         }
+        ImportFailed::TooLarge => Error::refused(
+            ErrorCode::McpImportTooLarge,
+            "the import is too long to show whole in one confirm",
+        ),
         ImportFailed::Declined => Error::refused(
             ErrorCode::McpSaveDeclined,
             "the lawyer did not allow the imported programs",

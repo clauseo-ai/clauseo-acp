@@ -345,6 +345,10 @@ error_codes! {
         severity `error` offering `retry` or `new_session`, in a category no other code reads \
         (codex-acp's `internal_error`, `provider_error`, `overloaded`). The answer so far is \
         kept; asking again can work.";
+    McpImportTooLarge = "mcp.import_too_large", retryable: false, meaning: "The servers an \
+        import would add, with their programs, arguments, URLs and variable or header names, \
+        are too long to show whole in one confirm (over 2,000 characters), so nothing was \
+        imported.";
     Unknown = "unknown", retryable: false, meaning: "A code from a newer Clauseo that this \
         version does not know. Never produced here.";
 }

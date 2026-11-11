@@ -21,15 +21,15 @@
     "by": "orchestrator (PR A3: native confirm before an MCP import)",
     "note": "MCP import confirm: message; {list} is each server with its program or URL"
   },
-  "UC-233": {
-    "en": "and {count} more",
-    "hi": "और {count} अन्य",
+  "U3-err-mcp.import_too_large": {
+    "en": "There are too many tools to import at once, so nothing was imported. Add them one at a time.",
+    "hi": "एक साथ आयात करने के लिए टूल बहुत अधिक हैं, इसलिए कुछ भी आयात नहीं हुआ। इन्हें एक-एक करके जोड़ें।",
     "hi_status": "provisional",
-    "hi_at": "2026-11-11",
+    "hi_at": "2026-11-12",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
     "status": "provisional",
-    "at": "2026-11-11",
+    "at": "2026-11-12",
     "by": "orchestrator (PR A3: native confirm before an MCP import)",
-    "note": "MCP import confirm: the end of a list past eight servers; {count} is how many more"
+    "note": "mcp.import_too_large: the import's servers are too long for one confirm, so nothing was imported (Settings › Tools)"
   }
 }

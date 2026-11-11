@@ -3,13 +3,14 @@
 use clauseo_host::McpLaunchAsk;
 use clauseo_protocol::Language;
 
-use super::{EN, HI, MAX_LISTED, import_words};
+use super::{EN, HI, import_words};
 
 fn local(server: &str, program: &[&str]) -> McpLaunchAsk {
     McpLaunchAsk {
         server: server.to_owned(),
         program: program.iter().map(|part| (*part).to_owned()).collect(),
         url: None,
+        names: Vec::new(),
     }
 }
 
@@ -18,6 +19,7 @@ fn remote(server: &str, url: &str) -> McpLaunchAsk {
         server: server.to_owned(),
         program: Vec::new(),
         url: Some(url.to_owned()),
+        names: Vec::new(),
     }
 }
 
@@ -46,18 +48,25 @@ fn mcp_import_words_list_each_server_with_what_it_starts() {
     assert_eq!(hindi.ok, "अनुमति दें");
 }
 
+/// Every server is listed, whole, however many: the host refuses an import too long to show.
 #[test]
-fn mcp_import_words_count_the_servers_past_the_cap() {
-    let asks: Vec<McpLaunchAsk> = (0..MAX_LISTED + 3)
-        .map(|n| local(&format!("s{n}"), &["npx"]))
-        .collect();
+fn mcp_import_words_list_every_server_and_their_names() {
+    let mut asks: Vec<McpLaunchAsk> = (0..12).map(|n| local(&format!("s{n}"), &["npx"])).collect();
+    asks[0].names = vec!["GITHUB_TOKEN".to_owned()];
+    asks[11].names = vec!["NODE_OPTIONS".to_owned()];
     let words = import_words(&asks, Language::En);
     assert!(
-        words.message.contains("s7 (npx), and 3 more."),
+        words.message.contains("s11 (npx). Only allow"),
         "{}",
         words.message
     );
-    assert!(!words.message.contains("s8 "), "{}", words.message);
+    assert!(
+        words
+            .message
+            .ends_with("\n\nNew or changed settings: GITHUB_TOKEN (s0), NODE_OPTIONS (s11)."),
+        "{}",
+        words.message
+    );
 }
 
 #[test]
@@ -77,7 +86,7 @@ fn mcp_import_words_are_the_reviewed_copy() {
     let registry = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../ui/app/src/review/registry-uc-mcp-import.tsx");
     let registry = std::fs::read_to_string(&registry).unwrap();
-    let column = |table: &super::ImportTable| [table.title, table.message, table.more];
+    let column = |table: &super::ImportTable| [table.title, table.message];
     for (n, (en, hi)) in (231..).zip(column(&EN).into_iter().zip(column(&HI))) {
         let id = format!("\"UC-{n}\"");
         assert!(registry.contains(&id), "no {id}");

@@ -193,6 +193,9 @@ export const HI = {
   "ChatGPT had a problem on its side. Try again.": "ChatGPT की ओर से कोई समस्या आई। फिर से कोशिश करें।",
   "{name} had a problem on its side. Try again.": "{name} की ओर से कोई समस्या आई। फिर से कोशिश करें।",
   "The AI had a problem on its side. Try again.": "AI की ओर से कोई समस्या आई। फिर से कोशिश करें।",
+  // an MCP import too long to show whole in one native confirm (provisional Hindi)
+  "There are too many tools to import at once, so nothing was imported. Add them one at a time.":
+    "एक साथ आयात करने के लिए टूल बहुत अधिक हैं, इसलिए कुछ भी आयात नहीं हुआ। इन्हें एक-एक करके जोड़ें।",
 } as const;
 
 /** The sentences' Hindi, for the copy review to tell hi: later from Hindi. */
