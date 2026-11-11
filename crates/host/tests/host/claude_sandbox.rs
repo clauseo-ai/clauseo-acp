@@ -21,10 +21,13 @@ fn claude_runs_its_commands_in_its_sandbox_except_on_windows() {
                 "enabled": true,
                 "autoAllowBashIfSandboxed": true,
                 "allowUnsandboxedCommands": false,
+                // The lists' lengths follow the OS's spellings of the same folders (macOS adds
+                // `/private/var/...` beside `/var/...`); `agent/loads/sandbox_tests.rs` pins their
+                // entries, so here each list only has to be there.
                 "filesystem": {
-                    "denyRead": ["~/", "/Volumes", "/Users/Shared", "{{any}}", "{{any}}"],
-                    "denyWrite": ["{{any}}"],
-                    "allowWrite": ["{{any}}", "@WORK@", "{{any}}", "{{any}}", "{{any}}"],
+                    "denyRead": "{{any}}",
+                    "denyWrite": "{{any}}",
+                    "allowWrite": "{{any}}",
                 },
             }}),
             &[],
