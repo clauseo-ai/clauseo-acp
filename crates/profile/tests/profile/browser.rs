@@ -116,12 +116,13 @@ fn only_the_browser_part_names_agent_browser() {
     assert!(on.contains("with your web fetch tool. For a page that needs a real"));
     assert!(on.contains("over 125 characters, use `agent-browser read` or `curl`."));
     assert!(on.contains("`agent-browser eval`, `pdf` and `download` are off"));
+    // Upload is always refused (`claude.rs`'s deny rules), so the part says nothing of it.
+    assert!(!on.contains("Upload"));
     for rule in [
         "`agent-browser`",
         "`AGENT_BROWSER_SESSION`",
         "`--headed`",
         "`state save`",
-        "named in this conversation",
         "confidential matter text",
         "downloads folder",
         "chained only with other `agent-browser` commands",
