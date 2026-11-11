@@ -65,3 +65,40 @@ pub fn install_agent_browser(
     };
     Ok((target, installed))
 }
+
+/// What [`remove_stale_browser`] removed, for the app's support line.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct StaleBrowser {
+    /// Whether the `agent-browser` copy in `<data>/tools` was there and is gone.
+    pub command: bool,
+    /// How many files of the browser's skill, as the skills manifests record them, are gone.
+    pub skill_files: usize,
+}
+
+/// Removes what an earlier start that copied agent-browser left (on Windows, before Claude lost
+/// its browser): the copy at [`ProfilePaths::agent_browser_command`], any copy of it set aside
+/// while it ran and any temp file a crashed copy left in [`ProfilePaths::tools`] (only those
+/// Clauseo names), and the browser's skill folder in Claude's plugin and in Codex's skills,
+/// each through its manifest (`skills::retire`), so only files Clauseo wrote go. For a start
+/// where no agent gets the shell command (`servers::shell_browser`), so a stale skill never
+/// reaches an agent. Each part is tried; the first failure comes back as the error (a copy still
+/// running on Windows stays, for the next start). Nothing else under `<data>/tools` is touched.
+pub fn remove_stale_browser(paths: &ProfilePaths) -> Result<StaleBrowser, ProfileError> {
+    let mut removed = StaleBrowser::default();
+    let mut failed = None;
+    for root in [paths.claude_skills(), paths.codex_skills().to_path_buf()] {
+        match crate::skills::retire(&root, &[crate::skills::builtin::AGENT_BROWSER]) {
+            Ok(gone) => removed.skill_files += gone.len(),
+            Err(err) => failed = failed.or(Some(err)),
+        }
+    }
+    crate::write::sweep_old(paths.tools());
+    let command = paths.agent_browser_command();
+    if std::fs::symlink_metadata(&command).is_ok() {
+        match crate::write::remove_file(&command) {
+            Ok(()) => removed.command = true,
+            Err(err) => failed = failed.or(Some(err)),
+        }
+    }
+    failed.map_or(Ok(removed), Err)
+}
