@@ -32,8 +32,9 @@
 //!   command it can't split into plain parts (a substitution, a redirect to a file, a backtick,
 //!   a parse error) stays sandboxed, so `agent-browser snapshot && touch ~/x` runs sandboxed. An
 //!   excluded command still goes through the permission rules.
-//! - `network.allowedDomains: []`: a sandboxed command reaching a new host asks (the seeded
-//!   `WebFetch(domain:…)` sites probably ask too: the list is built from trusted settings only).
+//! - `network.allowedDomains: ["*"]`: every host, so a sandboxed command (`curl` of a court PDF)
+//!   never asks for a domain; Claude Code 2.1.293 accepts it (stage C, 2026-11-11: a real
+//!   judgment PDF downloaded with no prompt and no certificate error in auto mode).
 //! - `filesystem.allowWrite`: the matter folder, the work folder, the session's temp folder, the
 //!   matter's notes and Claude's short temp folder (`CLAUDE_CODE_TMPDIR`, where sandboxed
 //!   commands' `TMPDIR` is made).
@@ -206,6 +207,7 @@ impl ClaudeSandbox {
         .iter()
         .map(|path| path.to_path_buf())
         .collect();
+        folders.push(project_folder(paths.claude_home, paths.matter));
         folders.extend(paths.skills.iter().cloned());
         folders.extend(paths.env_file.map(Path::to_path_buf));
         for folder in paths.path {
@@ -228,7 +230,7 @@ impl ClaudeSandbox {
             "allowUnsandboxedCommands": false,
             "failIfUnavailable": false,
             "allowAppleEvents": false,
-            "network": {"allowedDomains": []},
+            "network": {"allowedDomains": ["*"]},
             "filesystem": {
                 "allowWrite": self.allow_write,
                 "denyWrite": self.deny_write,
@@ -251,6 +253,19 @@ impl ClaudeSandbox {
 /// Puts `sandbox`'s object in `settings`, in place of any `sandbox` the hook sent.
 pub(crate) fn sandbox_settings(settings: &mut Map<String, Value>, sandbox: &ClaudeSandbox) {
     settings.insert("sandbox".to_owned(), sandbox.settings());
+}
+
+/// Claude Code's folder for the session's project in its config folder, where `WebFetch` keeps
+/// the files it fetches (`<project>/<session>/tool-results/`, a PDF among them): the working
+/// folder's path with every character but an ASCII letter or digit as `-`, Claude Code's own
+/// naming. Only this matter's project: the other projects hold other matters' conversations.
+fn project_folder(home: &Path, matter: &Path) -> PathBuf {
+    let name: String = matter
+        .to_string_lossy()
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+        .collect();
+    home.join("projects").join(name)
 }
 
 /// The paths as UTF-8 text, in order, each once; one that is not UTF-8 is left out.

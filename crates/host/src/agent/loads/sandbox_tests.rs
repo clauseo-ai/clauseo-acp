@@ -130,6 +130,7 @@ fn texts(value: &Value) -> Vec<&str> {
 
 /// macOS (and Linux, for development): the whole object, each path the session's own.
 #[test]
+#[cfg_attr(windows, ignore = "Claude's sandbox is macOS and Linux only")]
 fn a_claude_session_runs_its_commands_in_claude_codes_sandbox() {
     let session = Session::new("s-1");
     let sandbox = ClaudeSandbox::for_os(false, &session.paths(true)).unwrap();
@@ -144,7 +145,7 @@ fn a_claude_session_runs_its_commands_in_claude_codes_sandbox() {
             "failIfUnavailable": false,
             "allowAppleEvents": false,
             "excludedCommands": ["agent-browser:*"],
-            "network": {"allowedDomains": []},
+            "network": {"allowedDomains": ["*"]},
             "filesystem": {
                 "allowWrite": [
                     "/Users/l/Clients/A",
@@ -163,6 +164,7 @@ fn a_claude_session_runs_its_commands_in_claude_codes_sandbox() {
                     format!("{run}/agent-browser/downloads"),
                     format!("{run}/skill-packs"),
                     format!("{DATA}/agent-state/m-1/notes"),
+                    format!("{DATA}/agents/claude-acp/home/projects/-Users-l-Clients-A"),
                     format!("{DATA}/profile/claude-plugin/skills"),
                     format!("{run}/clauseo-env.sh"),
                     "/Applications/Clauseo.app/Contents/Helpers/stetdoc",
