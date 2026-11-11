@@ -1,5 +1,6 @@
 //! Agent events: the rate cap per session, then each event by its origin. `Turn` of the live
-//! turn is logged; `Late` is dropped; `Idle` is logged unless it needs a turn; `Replay` is
+//! turn is logged; `Late` is dropped, but a session title still counts while its window is open
+//! (D-070); `Idle` is logged unless it needs a turn; `Replay` is
 //! dropped when the log already has it and otherwise logged outside a turn, which for text and
 //! tool calls (they name a turn) means dropped with a warning.
 
@@ -153,6 +154,20 @@ fn handle(actor: &mut Actor, thread: ThreadId, event: AcpEvent) {
     }
 }
 
+/// A session title that comes late, after a cancel, still names the thread while its title
+/// window is open (D-070): a cancel that lands mid-answer marks the session late, and the agent's
+/// title for that answer may come after it. Other late updates stay dropped.
+fn late_title_counts(
+    actor: &mut Actor,
+    thread: ThreadId,
+    origin: Origin,
+    update: &AgentUpdate,
+) -> bool {
+    matches!(origin, Origin::Late(_))
+        && matches!(update, AgentUpdate::SessionTitle { .. })
+        && super::state::title_open(actor, thread, false)
+}
+
 /// Where an update of `origin` belongs, or `None` to drop it.
 fn context(actor: &mut Actor, thread: ThreadId, origin: Origin) -> Option<Context> {
     match origin {
@@ -172,8 +187,12 @@ fn on_update(
     origin: Origin,
     update: AgentUpdate,
 ) {
-    let Some(context) = context(actor, thread, origin) else {
-        return;
+    let context = match context(actor, thread, origin) {
+        Some(context) => context,
+        None if late_title_counts(actor, thread, origin, &update) => {
+            Context::Outside { replay: false }
+        }
+        None => return,
     };
     let update = match context {
         Context::Live(turn) => match offline::on_live(actor, thread, turn, session, update) {
