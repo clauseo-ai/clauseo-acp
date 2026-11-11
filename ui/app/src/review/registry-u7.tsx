@@ -28,6 +28,7 @@ import {
   sentNowScene,
   steerMarkScene,
   steerWords,
+  waitingScene,
   type QueueScene,
 } from "./queue-hosts.ts";
 import { RoomTyped } from "./room-typed.tsx";
@@ -244,14 +245,16 @@ export const U7: Entry[] = [
   // part 2: steering the running answer (matters/steer-claude, steer-chatgpt, steer-aside)
   {
     id: "U7-20",
-    words: matterWords("Send now gives your words to Clauseo while it writes."),
+    words: matterWords(
+      "Enter adds your words to this answer. Send now stops the answer and sends them.",
+    ),
     screen: "matters/steer-claude",
     render: steerClaude,
   },
   {
     id: "U7-21",
     words: matterWords(
-      "ChatGPT can't take words mid-answer. Send now stops this answer, keeps what it wrote, and sends your words first.",
+      "Enter sends your words when {name} finishes. Send now stops the answer and sends them.",
     ),
     screen: "matters/steer-chatgpt",
     render: steerChatgpt,
@@ -270,7 +273,7 @@ export const U7: Entry[] = [
   },
   {
     id: "U7-24",
-    words: matterWords("Your words came as the answer ended, so they go next."),
+    words: matterWords("Your words waited for the answer to end, so they went next."),
     screen: "matters/steer-claude",
     render: (lang) => over(requeuedScene(lang)),
   },
@@ -325,5 +328,13 @@ export const U7: Entry[] = [
     words: threadWords("Clauseo's answer, {time}"),
     screen: "matters/held-restart",
     render: (lang) => over(heldRestartScene(lang, 3)),
+  },
+  // the steer made honest: a steer stands as the mark only once the agent took it in; until then it waits, saying when
+  // it goes, as each queued message does
+  {
+    id: "U7-33",
+    words: matterWords("Sends when {name} finishes"),
+    screen: "matters/steer-claude",
+    render: (lang) => over(waitingScene(lang)),
   },
 ];

@@ -160,15 +160,21 @@ export const HI = {
     "Clauseo एक अपडेट इंस्टॉल कर रहा है। इसके पूरा होते ही कतार में रखे आपके प्रश्न भेजे जाएँगे।",
   // UD2-58: the resume cue, after an idle stop, while the agent restarts slowly (R20b; the plan's name fills {plan})
   "Getting {plan} ready.": "{plan} तैयार हो रहा है।",
+  // under each queued message while the queue isn't held, and in a steer still waiting on the agent's word (the plan's
+  // name fills {name}: Claude, ChatGPT). Hindi provisional
+  "Sends when {name} finishes": "{name} के पूरा करने पर जाएगा",
   /* ---------- steering the running answer: the words a host gives SteerHint, SteerMark and SteerNote ---------- */
-  "Send now gives your words to Clauseo while it writes.":
-    "अभी भेजें से Clauseo लिखते समय ही आपके शब्द ले लेता है।",
-  "ChatGPT can't take words mid-answer. Send now stops this answer, keeps what it wrote, and sends your words first.":
-    "ChatGPT उत्तर के बीच में शब्द नहीं ले सकता। अभी भेजें इस उत्तर को रोकता है, जितना लिखा गया वह रखता है, और आपके शब्द पहले भेजता है।",
+  // the composer's hint: an agent that takes words mid-answer, and any other (the plan's name fills {name}). Hindi
+  // provisional
+  "Enter adds your words to this answer. Send now stops the answer and sends them.":
+    "Enter से आपके शब्द इसी उत्तर में जुड़ जाते हैं। अभी भेजें उत्तर रोककर उन्हें भेजता है।",
+  "Enter sends your words when {name} finishes. Send now stops the answer and sends them.":
+    "Enter से आपके शब्द {name} के पूरा करने पर जाते हैं। अभी भेजें उत्तर रोककर उन्हें भेजता है।",
   "You, {time}, while Clauseo answered": "आप, {time}, जब Clauseo उत्तर दे रहा था",
-  // where a steered message went: the answer had just ended (requeued), or it was stopped for the words (sent now)
-  "Your words came as the answer ended, so they go next.":
-    "आपके शब्द उत्तर पूरा होते समय पहुँचे, इसलिए वे अगले भेजे जाएँगे।",
+  // where a steered message went: it waited for the answer to end (requeued; Hindi provisional), or the answer was
+  // stopped for the words (sent now)
+  "Your words waited for the answer to end, so they went next.":
+    "आपके शब्द उत्तर पूरा होने तक रुके रहे, इसलिए वे अगले भेजे गए।",
   "Stopped at {time} to send your words first. The answer so far is kept.":
     "आपके शब्द पहले भेजने के लिए {time} बजे रोका गया। अब तक का उत्तर रखा गया है।",
   "Your words at {time} came in while Clauseo searched Indian Kanoon for {what}. That search carried on in the background, finished at {done}, and this answer uses it.":

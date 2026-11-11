@@ -3,13 +3,13 @@
 // that turn's tail under it. Here each sent question heads the exchange of its turn, every entry with a turn joins
 // that turn's exchange, and an entry without one (a notice, a permission) joins the exchange still running where it
 // arrived, else the newest. Queued and removed messages show in no exchange: they stand in the queue's strip. A steer
-// taken into the running answer (or not yet resolved while a turn runs) is no question: it joins the running answer as
-// a mark where it arrived (steer.ts).
+// taken into the running answer is no question: it joins that answer as a mark where it arrived; a steer not yet
+// resolved stands in the same place, in the answer it was sent into, waiting on the agent's word (steer.ts).
 //
 // The live list reads this through one pick (exchangesPick) that builds the grouping again only when the id list
-// changes, a turn starts or stops running, or a user message's status, turn or steer changes; an edit of a queued
-// message's words changes none of those, so it renders no exchange and no row.
-import { askedAs, injectedTurn, outcomeOf, runningIn, shapeOf } from "./steer.ts";
+// changes or a user message's status, turn or steer changes; an edit of a queued message's words changes none of
+// those, so it renders no exchange and no row.
+import { askedAs, injectedTurn, outcomeOf, shapeOf } from "./steer.ts";
 import { entryIdOf, orderOf, type StreamView } from "../../store/view.ts";
 import type { EntryId, TurnId, ViewEntry } from "../../transport/protocol.ts";
 
@@ -47,11 +47,10 @@ const turnOf = (e: ViewEntry): TurnId | undefined =>
 
 const STEP = "step:";
 
-/** The exchanges of entries in order. `running`: whether a turn runs (steer.ts runningIn), for a steer not yet
- * resolved, on an older page or in the window alike: the rows place it by the same rule. */
+/** The exchanges of entries in order, on an older page or in the window alike: the rows show each message by the same
+ * rule (steer.ts askedAs). */
 export function groupExchanges(
   items: readonly (readonly [EntryId, ViewEntry | undefined])[],
-  running: boolean,
 ): Exchange[] {
   const out: Building[] = [];
   const byTurn = new Map<TurnId, Building>();
@@ -90,10 +89,12 @@ export function groupExchanges(
     if (e === undefined) return;
     const m = e.user_message;
     if (m !== undefined) {
-      const as = askedAs(m, running);
+      const as = askedAs(m);
       if (as === "hidden") return;
-      if (as === "mark") {
-        const into = injectedTurn(m);
+      if (as === "mark" || as === "waiting") {
+        // taken in: the turn it joined; waiting: the turn it was sent into, once that turn has an exchange (else, as
+        // from a host that gave it a turn of its own, the answer still running where it arrived)
+        const into = as === "mark" ? injectedTurn(m) : byTurn.has(m.turn) ? m.turn : undefined;
         if (into === undefined) unturned(id, at);
         else turned(id, into, at);
         return;
@@ -165,7 +166,6 @@ export function exchangesPick(
   older: readonly ViewEntry[] = NO_OLDER,
 ): (v: StreamView | undefined) => Shape {
   let ids: readonly EntryId[] | null = null;
-  let running = false;
   let seen: (ViewEntry | undefined)[] = [];
   let shapes: string[] = [];
   let last = EMPTY;
@@ -174,9 +174,8 @@ export function exchangesPick(
       ids = null;
       return (last = EMPTY);
     }
-    const run = runningIn(v);
     const users = userIds(v.ids);
-    let stale = v.ids !== ids || run !== running;
+    let stale = v.ids !== ids;
     if (!stale)
       for (let i = 0; i < users.length; i += 1) {
         const e = v.entries.get(users[i]!);
@@ -190,7 +189,6 @@ export function exchangesPick(
       }
     if (!stale) return last;
     ids = v.ids;
-    running = run;
     seen = users.map((id) => v.entries.get(id));
     shapes = seen.map((e) => shapeOf(e?.user_message));
     const head = v.ids[0] === undefined ? undefined : v.entries.get(v.ids[0]);
@@ -198,10 +196,10 @@ export function exchangesPick(
     const shown = below === null ? older : older.filter((e) => orderOf(e) < below);
     const paged =
       shown.length === 0 ? NO_PAGED : new Map(shown.map((e) => [entryIdOf(e), e] as const));
-    const built = groupExchanges(
-      [...paged, ...v.ids.map((id) => [id, v.entries.get(id)] as const)],
-      run,
-    );
+    const built = groupExchanges([
+      ...paged,
+      ...v.ids.map((id) => [id, v.entries.get(id)] as const),
+    ]);
     // keep each exchange that reads the same, so its memoized rows don't render
     const before = new Map(last.exchanges.map((o) => [o.key, o]));
     const exchanges = built.map((ex) => {

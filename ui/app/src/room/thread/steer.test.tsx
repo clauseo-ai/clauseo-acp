@@ -2,7 +2,8 @@
 // U7's transcript under a queue and a steer, in the real room over FakeTransport: queued and removed messages show in
 // no exchange and are never the pinned question; a queued message whose turn starts later heads its own exchange,
 // after the earlier turn's tail (its old order); a steer the agent took in stands in the running answer as a mark with
-// its time; a requeued steer and a steer sent now say where they went, and the stopped answer stays; a tool call moved
+// its time, and only then: a steer not yet resolved waits there, saying it sends when the agent finishes, with Send now
+// (send_queued_now for the turn it was sent into); a requeued steer and a steer sent now say where they went, and the stopped answer stays; a tool call moved
 // to the background says so, and the answer's note explains it once it finished; and a queued message coming, being
 // edited or going renders no row of the transcript.
 import { act, createElement, memo, Profiler, type ProfilerOnRenderCallback } from "react";
@@ -15,6 +16,7 @@ import {
   header,
   reset,
   step,
+  THREAD,
   TURN,
   toolCall,
   upsert,
@@ -24,7 +26,7 @@ import {
 import type { BackgroundMark, UserMessageEntry } from "../../transport/protocol.ts";
 import type { EntryId, StepEntry, StreamId, TurnId, ViewEntry } from "../../transport/protocol.ts";
 import { clockTime } from "./clock.ts";
-import { mountRoom, type Harness } from "./harness.ts";
+import { defaultOutcome, mountRoom, summary, type Harness } from "./harness.ts";
 
 // each transcript row inside its own Profiler, behind a memo like the real row's (room/queue.test.tsx's way)
 const rowCommits = new Map<string, number>();
@@ -197,9 +199,9 @@ test("a steer the agent took in stands in the running answer, where it arrived, 
   expect(pinned()).toBe("Read clause nine.");
 });
 
-test("a steer not yet resolved is a mark in the running answer; requeued, it heads the next exchange and says why", async () => {
+test("a steer not yet resolved waits in the running answer, never the mark, with Send now; requeued, it heads the next exchange and says why", async () => {
   h = await mountRoom();
-  const steer = ask(3, 2, "Say who opened the account.", T2, { delivery: "steer", ts: AT });
+  const steer = ask(3, 2, "Say who opened the account.", T1, { delivery: "steer", ts: AT });
   h.deliver([
     reset(
       [ask(1, 1, "Who signed the cheque?", T1), say(2, 1, "Mr. Mehta signed it.", T1), steer],
@@ -207,22 +209,125 @@ test("a steer not yet resolved is a mark in the running answer; requeued, it hea
     ),
   ]);
   await h.settle();
-  expect(h.one("steer-mark")?.dataset["entryId"]).toBe(id("user_message", 2, 5));
+  expect(h.one("steer-mark")).toBeNull();
+  expect(thread().textContent).not.toContain("while Clauseo answered");
+  const waiting = h.one("steer-waiting");
+  expect(waiting?.dataset["entryId"]).toBe(id("user_message", 2, 5));
+  expect(waiting?.querySelector(".steer-mark-text")?.textContent).toBe(
+    "Say who opened the account.",
+  );
+  expect(waiting?.querySelector(".steer-wait-when")?.textContent).toBe(
+    mt("en", "Sends when {name} finishes", { name: "Claude" }),
+  );
+  // where the mark would stand: inside the one running answer, never a question of its own
+  expect(waiting?.closest("section")?.className).toBe("step step-answer");
+  expect(asked()).toEqual([id("user_message", 1, 5)]);
+  expect(pinned()).toBe("Who signed the cheque?");
   expect(h.one("steer-outcome")).toBeNull();
+  // Send now: send_queued_now with the turn it was sent into
+  await h.click(h.one("steer-waiting-send-now"));
+  expect(h.sent("send_queued_now")).toEqual([{ thread: THREAD, turn: T1 }]);
+  // the host moves it: the turn stopped, the words a turn of their own
   h.deliver([
-    upsert(ended(4, T1)),
-    upsert({ user_message: { ...steer.user_message!, steer: { requeued: { turn: T2 } } } }),
+    upsert(ended(4, T1, { stop: "cancelled" })),
+    upsert({
+      user_message: { ...steer.user_message!, turn: T2, steer: { requeued: { turn: T2 } } },
+    }),
     upsert(say(5, 3, "The account was opened by", T2)),
   ]);
   await h.settle();
+  expect(h.one("steer-waiting")).toBeNull();
   expect(h.one("steer-mark")).toBeNull();
   expect(asked()).toEqual([id("user_message", 1, 5), id("user_message", 2, 5)]);
   const line = h.one("steer-outcome");
   expect(line?.dataset["outcome"]).toBe("requeued");
-  expect(line?.textContent).toBe(mt("en", "Your words came as the answer ended, so they go next."));
+  expect(line?.textContent).toBe(
+    mt("en", "Your words waited for the answer to end, so they went next."),
+  );
   // under the question it follows, in the new exchange
   expect(line?.closest("section")?.className).toBe("step step-question");
   expect(shownIds().slice(-2)).toEqual([id("user_message", 2, 5), id("agent_text", 3, 6)]);
+});
+
+test("a waiting steer becomes the mark once the agent takes it in, and stays one", async () => {
+  h = await mountRoom();
+  const steer = ask(3, 2, "Deal with the board minutes first.", T1, { delivery: "steer", ts: AT });
+  h.deliver([
+    reset(
+      [ask(1, 1, "Read clause nine.", T1), say(2, 1, "Clause nine says", T1), steer],
+      header("running"),
+    ),
+  ]);
+  await h.settle();
+  expect(h.one("steer-waiting")).not.toBeNull();
+  h.deliver([
+    upsert({ user_message: { ...steer.user_message!, steer: { injected: { turn: T1 } } } }),
+    upsert(say(4, 3, "The board minutes show", T1)),
+  ]);
+  await h.settle();
+  expect(h.one("steer-waiting")).toBeNull();
+  const mark = h.one("steer-mark");
+  expect(mark?.dataset["entryId"]).toBe(id("user_message", 2, 5));
+  expect(mark?.closest("section")?.className).toBe("step step-answer");
+  expect(asked()).toEqual([id("user_message", 1, 5)]);
+});
+
+test("Send now on a waiting steer whose words had already moved says so, as the strip does", async () => {
+  h = await mountRoom({
+    dispatch: (c) => {
+      if (c.send_queued_now !== undefined)
+        throw { code: "thread.turn_not_queued", message: "raw host text", retryable: false };
+      return defaultOutcome(c);
+    },
+  });
+  h.deliver([
+    reset(
+      [
+        ask(1, 1, "Who signed the cheque?", T1),
+        ask(2, 2, "Say who opened the account.", T1, { delivery: "steer", ts: AT }),
+      ],
+      header("running"),
+    ),
+  ]);
+  await h.settle();
+  await h.click(h.one("steer-waiting-send-now"));
+  await act(async () => h!.store.flush());
+  expect(h.one("steer-waiting-note")?.textContent).toBe(mt("en", "That message had already gone."));
+  expect(thread().textContent).not.toContain("raw host text");
+});
+
+test("with ChatGPT a steer is never the mark unless taken in: one waiting names ChatGPT, one sent now heads its exchange", async () => {
+  h = await mountRoom({ threads: [{ ...summary(), agent: "codex-acp" }] });
+  h.deliver([
+    reset(
+      [
+        ask(1, 1, "Who signed the cheque?", T1),
+        say(2, 1, "Accused no. 2.", T1),
+        ask(3, 2, "Say too who opened the account.", T1, { delivery: "steer", ts: AT }),
+      ],
+      { header: { ...header("running").header!, agent: "codex-acp" } },
+    ),
+  ]);
+  await h.settle();
+  expect(h.one("steer-mark")).toBeNull();
+  expect(h.one("steer-waiting")?.querySelector(".steer-wait-when")?.textContent).toBe(
+    mt("en", "Sends when {name} finishes", { name: "ChatGPT" }),
+  );
+  expect(thread().textContent).not.toContain("Codex");
+  h.deliver([
+    upsert(
+      ask(3, 2, "Say too who opened the account.", T2, {
+        delivery: "steer",
+        ts: AT,
+        steer: { sent_now: { turn: T2 } },
+      }),
+    ),
+    upsert(ended(4, T1, { stop: "cancelled", ts: LATER })),
+  ]);
+  await h.settle();
+  expect(h.one("steer-mark")).toBeNull();
+  expect(h.one("steer-waiting")).toBeNull();
+  expect(asked()).toEqual([id("user_message", 1, 5), id("user_message", 2, 5)]);
 });
 
 test("a steer sent now: the stopped answer stays, says when it stopped and why, and the words head the next exchange", async () => {
@@ -469,26 +574,25 @@ test("a call that finished after its answer ended gives that answer no note", as
   expect(h.one("steer-note")).toBeNull();
 });
 
-test("a steer still unresolved on an older page is placed as a live one: a mark while a turn runs, else a question", async () => {
+test("a steer still unresolved on an older page waits as a live one does, in the answer it was sent into, a turn running or not", async () => {
   const page = [
     ask(1, 1, "Who signed the cheque?", T1),
     say(2, 1, "Mr. Mehta signed it.", T1),
-    ask(3, 2, "Say who opened the account.", T2, { delivery: "steer", ts: AT }),
+    ask(3, 2, "Say who opened the account.", T1, { delivery: "steer", ts: AT }),
   ];
   const window = [say(4, 3, " He signed on 3 May.", T1)];
   const steerId = id("user_message", 2, 5);
-  h = await paged(page, window, "running");
-  // inside the one running answer, as its mark; never a question of its own
-  expect(h.one("steer-mark")?.dataset["entryId"]).toBe(steerId);
-  expect(h.one("steer-mark")?.closest("section")?.className).toBe("step step-answer");
-  expect(asked()).toEqual([id("user_message", 1, 5)]);
-  expect(sectionsOf()).toEqual(["step step-question", "step step-answer"]);
-  await h.unmount();
-  document.body.replaceChildren();
-  h = await paged(page, window, "idle");
-  // no turn runs: a question heading its own exchange, the grouping and the row agreeing
-  expect(h.one("steer-mark")).toBeNull();
-  expect(asked()).toEqual([id("user_message", 1, 5), steerId]);
-  const question = h.all("message-user").find((m) => m.dataset["entryId"] === steerId);
-  expect(question?.closest("section")?.className).toBe("step step-question");
+  for (const status of ["running", "idle"] as const) {
+    h = await paged(page, window, status);
+    // inside the one answer, waiting; never the mark, never a question of its own
+    expect(h.one("steer-mark")).toBeNull();
+    expect(h.one("steer-waiting")?.dataset["entryId"]).toBe(steerId);
+    expect(h.one("steer-waiting")?.closest("section")?.className).toBe("step step-answer");
+    expect(h.one("steer-waiting-send-now")).not.toBeNull();
+    expect(asked()).toEqual([id("user_message", 1, 5)]);
+    expect(sectionsOf()).toEqual(["step step-question", "step step-answer"]);
+    await h.unmount();
+    h = null;
+    document.body.replaceChildren();
+  }
 });

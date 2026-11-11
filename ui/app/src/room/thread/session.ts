@@ -106,6 +106,10 @@ export type ThreadActions = {
   /** Sends a question again as a new turn of this thread: Try again after a Stop or a failed answer (D-027). True once
    * send_prompt is accepted; never rejects. Absent where the rows have no session to send through. */
   resend?: ((text: string) => Promise<boolean>) | undefined;
+  /** Send now on a steer still waiting on the agent's word: send_queued_now with the turn it was sent into, which the
+   * host stops (if it still runs) to send the words next. Rejects with the HostError when the host refuses
+   * (`thread.turn_not_queued`: the words had already moved). Absent where the rows have no session to send through. */
+  sendSteerNow?: ((turn: TurnId) => Promise<void>) | undefined;
 };
 
 export const ThreadActionsContext = createContext<ThreadActions | null>(null);
@@ -117,11 +121,17 @@ export function useThreadActions(): ThreadActions {
 }
 
 /** How a question goes (U7, H9): `behind`, sent while Clauseo works, so the host queues it (send_prompt with no
- * `delivery`) or, with `delivery: "steer"`, gives it to the running answer or stops that answer for it. A question
+ * `delivery`); with `delivery: "steer"` (Enter where the agent takes words mid-answer) gives it to the running answer
+ * when the agent can take it now, else the host puts it at the queue's head; with `delivery: "send_now"` (the hint's
+ * Send now) stops the running answer and sends it next, for every agent. A question
  * that goes behind a turn, or into a held or waiting queue, is not the sent turn: busy follows the status for it.
  * `files`, however it goes: the papers its `@` tokens mention, a `File` block each after its text, each once
  * (paper-mentions.ts); the host keeps them with a queued prompt, through an edit of its text too. */
-export type AskHow = { behind?: boolean; delivery?: "steer"; files?: readonly FileRefId[] };
+export type AskHow = {
+  behind?: boolean;
+  delivery?: "steer" | "send_now";
+  files?: readonly FileRefId[];
+};
 
 export type ThreadSession = {
   /** The open thread, or null before the first Ask makes one, while list_threads runs, or before the thread's chunk is
@@ -329,6 +339,19 @@ export function useThreadSession(
     [retryFrom],
   );
 
+  const sendSteerNow = useCallback(
+    async (turn: TurnId) => {
+      const id = open.current;
+      if (id === null) throw internalError("no thread is open");
+      try {
+        await command({ send_queued_now: { thread: id, turn } });
+      } catch (e) {
+        throw toHostError(e);
+      }
+    },
+    [command],
+  );
+
   const stream = thread === null ? null : streamOf(thread);
   const actions = useMemo(
     () => ({
@@ -341,8 +364,20 @@ export function useThreadSession(
       stop,
       retry,
       resend: ask,
+      sendSteerNow,
     }),
-    [stream, sentTurn, undo, previewUndo, answer, answerElicitation, stop, retry, ask],
+    [
+      stream,
+      sentTurn,
+      undo,
+      previewUndo,
+      answer,
+      answerElicitation,
+      stop,
+      retry,
+      ask,
+      sendSteerNow,
+    ],
   );
   return { thread, sentTurn, refused: refused ?? link.refused, ask, stop, actions };
 }

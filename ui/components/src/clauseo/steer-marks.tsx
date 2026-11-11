@@ -1,5 +1,6 @@
 // What an answer shows of the lawyer's words sent into it while it ran (U7, matters/steer-claude and steer-aside): the
-// steered words where they arrived, and the note on the work they moved to the background. The note
+// steered words where they arrived, once the agent took them in; the words while the agent hasn't yet, as a slip that
+// says when they go, with Send now; and the note on the work they moved to the background. The note
 // opens its list with a plain disclosure, not the base collapsible: the thread's chunk carries it, and a collapsible
 // there would become a chunk shared with the working line's details, loaded after the thread's (vite-config.test.ts).
 import { type ReactNode, useEffect, useId, useRef, useState } from "react";
@@ -81,6 +82,55 @@ export function SteerMark({
     <div className="steer-mark" data-testid={testId} data-entry-id={entryId}>
       <p className="steer-mark-who">{who}</p>
       <p className="steer-mark-text">{text}</p>
+    </div>
+  );
+}
+
+/** The lawyer's words sent while the answer ran that the agent hasn't taken in yet: no mark, since nothing says they
+ * joined the answer, but a slip like a queued message's, where the mark would stand: the words at the lawyer's weight,
+ * then when they go (`when`) and Send now (none without `onSendNow`). A refused Send now's words stand under
+ * `when`. */
+export function SteerWaiting({
+  text,
+  when,
+  onSendNow,
+  note = null,
+  entryId,
+  testIds,
+}: {
+  text: ReactNode;
+  when: string;
+  onSendNow?: (() => void) | undefined;
+  note?: { words: string; code: string } | null;
+  /** The entry it shows and the test ids, for the app's tests (additive). */
+  entryId?: string;
+  testIds?: { row?: string; sendNow?: string; note?: string } | undefined;
+}) {
+  const w = useMatterWords();
+  return (
+    <div className="steer-wait" data-testid={testIds?.row} data-entry-id={entryId}>
+      <p className="steer-mark-text">{text}</p>
+      <div className="steer-wait-row">
+        <p className="steer-wait-when">
+          <Say>{when}</Say>
+          {note !== null && (
+            <span className="queue-note" data-code={note.code} data-testid={testIds?.note}>
+              <Say>{note.words}</Say>
+            </span>
+          )}
+        </p>
+        {onSendNow !== undefined && (
+          <Button
+            kind="quiet"
+            size="small"
+            className="queue-send"
+            data-testid={testIds?.sendNow}
+            onClick={onSendNow}
+          >
+            {w.m("Send now")}
+          </Button>
+        )}
+      </div>
     </div>
   );
 }

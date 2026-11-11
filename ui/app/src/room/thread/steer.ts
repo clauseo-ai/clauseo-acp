@@ -2,11 +2,12 @@
 // (U7). Pure: the live rows and the older pages read the same rules.
 //
 // A message that waits (queued) or was taken back (removed) shows nowhere in the transcript: the strip holds it. A steer
-// the agent took into the running answer (`injected`) is a mark inside that answer, where it arrived. A steer not yet
-// resolved while a turn runs is shown the same way: claude-agent-acp takes most steers in, so the mark is where it will
-// most likely stay, and should the host requeue it or send it now, it moves once, to head its own exchange. With no
-// turn running there is nothing for it to join, so it reads as a question. Every other sent message, a requeued or
-// sent-now steer among them, is a question that heads its turn's exchange.
+// the agent took into the running answer (`injected`) is a mark inside that answer, where it arrived: only then, once
+// the agent confirmed it. A steer not yet resolved is no mark, running turn or not: until the host says, nothing tells
+// that the agent took it (it may yet go next, requeued, should the answer end or stop first), so it stands where the
+// mark would, in the answer it was sent into, saying it sends when the agent finishes, with Send now (steer-rows.tsx).
+// It moves once it resolves: into the mark, or to head its own exchange.
+// Every other sent message, a requeued or sent-now steer among them, is a question that heads its turn's exchange.
 import type {
   EntryId,
   Timestamp,
@@ -14,10 +15,10 @@ import type {
   TurnId,
   UserMessageEntry,
 } from "../../transport/protocol.ts";
-import type { StreamView } from "../../store/view.ts";
-import { turnRunning } from "./live.ts";
 
-export type AskedAs = "hidden" | "mark" | "question";
+/** Where a user message shows: nowhere, as the mark of a steer taken in, as a steer still waiting on the agent's word
+ * (`waiting`, in the answer it was sent into), or as a question. */
+export type AskedAs = "hidden" | "mark" | "waiting" | "question";
 
 /** Where a steer went: one of the three this version knows, "other" for an outcome from a newer Clauseo (a question,
  * then), or null while unresolved or for a message that was no steer. */
@@ -34,17 +35,13 @@ export function outcomeOf(m: UserMessageEntry): Outcome {
 export const injectedTurn = (m: UserMessageEntry): TurnId | undefined =>
   typeof m.steer === "object" ? m.steer.injected?.turn : undefined;
 
-/** Whether a turn runs in the view: the `running` every caller of askedAs passes, the grouping (exchanges.ts) and the
- * rows, live or on an older page, alike. A steer not yet resolved is a mark while a turn runs, wherever its entry came
- * from, else a question. */
-export const runningIn = (v: StreamView | undefined): boolean =>
-  turnRunning(v?.header?.header?.status);
-
-export function askedAs(m: UserMessageEntry, running: boolean): AskedAs {
+/** How a user message shows: the grouping (exchanges.ts), the rows, live or on an older page, and the thread's break
+ * read the same rule. */
+export function askedAs(m: UserMessageEntry): AskedAs {
   if (m.status === "queued" || m.status === "removed") return "hidden";
   const outcome = outcomeOf(m);
   if (outcome === "injected") return "mark";
-  if (outcome === null && m.delivery === "steer" && running) return "mark";
+  if (outcome === null && m.delivery === "steer") return "waiting";
   return "question";
 }
 

@@ -1,25 +1,28 @@
 // The line above the field while the lawyer types during an answer (U7, matters/steer-claude and steer-chatgpt): what
-// Send now does with this agent, and Send now and Queue at its right end. In a file of its own, so the room's first load
+// Enter and Send now do with this agent, and Send now and Queue at its right end. In a file of its own, so the room's first load
 // carries it without the queue's strip.
 import { Button } from "../ui/button.tsx";
 import { IconArrowUp } from "../icons/icons.tsx";
 import { useMatterWords } from "../lib/words-matters.ts";
 import { Say } from "./say.tsx";
 
-/** The line above the field while the lawyer types during an answer: what Send now does with this plan, and at its
- * right end Send now (with the send arrow beside its word) and Queue, two quiet buttons, so the field keeps its width. Enter still queues. With no `text`
- * (an agent whose steering isn't known) the buttons stand alone. */
+/** The line above the field while the lawyer types during an answer: what Enter and Send now do with this plan, and at
+ * its right end Send now (with the send arrow beside its word) and Queue, two quiet buttons, so the field keeps its
+ * width. With no `text` the buttons stand alone. Queue names Enter as its key unless Enter does something else here
+ * (`queueOnEnter` false: it adds the words to the answer). */
 export function SteerHint({
   text = "",
   onSendNow,
   onQueue,
   full = false,
+  queueOnEnter = true,
   testIds,
 }: {
   text?: string;
   onSendNow: () => void;
   onQueue: () => void;
   full?: boolean;
+  queueOnEnter?: boolean;
   /** For the tests: the row, Send now and Queue. */
   testIds?: { row?: string; sendNow?: string; queue?: string } | undefined;
 }) {
@@ -47,7 +50,7 @@ export function SteerHint({
           kind="quiet"
           size="small"
           className="mat-queue"
-          aria-keyshortcuts="Enter"
+          aria-keyshortcuts={queueOnEnter ? "Enter" : undefined}
           disabled={full}
           onClick={onQueue}
           data-testid={testIds?.queue}

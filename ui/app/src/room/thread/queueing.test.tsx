@@ -1,8 +1,9 @@
 // @vitest-environment happy-dom
 // U7's composer while Clauseo works, in the real room over FakeTransport: Enter queues the field's words (send_prompt
-// with no delivery, which the host queues, H9) and clears the field once accepted; a queued prompt never holds the
-// composer busy past the running turn; the hint over the field offers Send now (delivery steer) and Queue, says what
-// Send now does by the header's steer_joins_turn and the agent, and hides while the conversation waits behind another;
+// with no delivery, which the host queues, H9), or steers them (delivery steer) where the header's steer_joins_turn is
+// true, and clears the field once accepted; a queued prompt never holds the composer busy past the running turn; the
+// hint over the field offers Send now (delivery send_now) and Queue, says what Enter does by the header's
+// steer_joins_turn and names the agent, and hides while the conversation waits behind another;
 // at the cap Queue is disabled and Enter keeps the words; a send refused as thread.queue_full says the cap; and with a
 // permission waiting, Enter answers it only with the field empty (QU.9 a).
 import { act } from "react";
@@ -36,9 +37,10 @@ afterEach(async () => {
 
 const QUESTION = "Also check the summoning order.";
 const QUEUED_TURN = uuid(2, 4);
-const CLAUDE_HINT = "Send now gives your words to Clauseo while it writes.";
-const CHATGPT_HINT =
-  "ChatGPT can't take words mid-answer. Send now stops this answer, keeps what it wrote, and sends your words first.";
+const JOINS_HINT =
+  "Enter adds your words to this answer. Send now stops the answer and sends them.";
+const waitsHint = (name: string) =>
+  `Enter sends your words when ${name} finishes. Send now stops the answer and sends them.`;
 
 const field = () => h!.one("composer") as HTMLTextAreaElement;
 const hint = () => h!.one("steer-hint");
@@ -79,7 +81,7 @@ const acceptQueued = (c: HostCommand): CommandOutcome =>
 
 test("Enter while Clauseo works queues the words: send_prompt with no delivery, and the field clears once accepted", async () => {
   h = await mountRoom({ dispatch: acceptQueued });
-  h.deliver([reset([userMessage(1, 1, "Q")], running(true))]);
+  h.deliver([reset([userMessage(1, 1, "Q")], running(false))]);
   await h.type(QUESTION);
   expect(await enter()).toBe(true);
   expect(h.sent("send_prompt")).toEqual([
@@ -90,6 +92,28 @@ test("Enter while Clauseo works queues the words: send_prompt with no delivery, 
   expect(hint()).toBeNull();
 });
 
+test("Enter while Clauseo works steers the words where the agent takes them mid-answer, and queues them where not known", async () => {
+  h = await mountRoom({ dispatch: acceptQueued });
+  h.deliver([reset([userMessage(1, 1, "Q")], running(true))]);
+  await h.type(QUESTION);
+  // where Enter steers, the hint's Queue names no key
+  expect(queueButton()?.getAttribute("aria-keyshortcuts")).toBeNull();
+  expect(await enter()).toBe(true);
+  expect(h.sent("send_prompt")).toEqual([
+    { thread: THREAD, content: [{ text: { text: QUESTION } }], delivery: "steer" },
+  ]);
+  expect(field().value).toBe("");
+  // the host says nothing of steering: Enter queues
+  h.deliver([upsert(running())]);
+  await h.type(QUESTION);
+  expect(queueButton()?.getAttribute("aria-keyshortcuts")).toBe("Enter");
+  await enter();
+  expect(h.sent("send_prompt").at(-1)).toEqual({
+    thread: THREAD,
+    content: [{ text: { text: QUESTION } }],
+  });
+});
+
 test("a prompt queued behind the running turn leaves the composer idle once that turn ends", async () => {
   h = await mountRoom({ dispatch: acceptQueued });
   h.deliver([reset([], header("idle"))]);
@@ -97,7 +121,7 @@ test("a prompt queued behind the running turn leaves the composer idle once that
   await h.type("Q");
   await enter();
   expect(h.one("cancel")).not.toBeNull();
-  h.deliver([upsert(userMessage(1, 1, "Q")), upsert(running(true))]);
+  h.deliver([upsert(userMessage(1, 1, "Q")), upsert(running(false))]);
   // queued behind it (the host accepts it for its own turn)
   await h.type(QUESTION);
   await enter();
@@ -133,7 +157,7 @@ test("a prompt sent into a held queue doesn't hold the composer busy: the header
   expect(h.one("cancel")).not.toBeNull();
 });
 
-test("the hint's Queue queues the field's words as Enter does", async () => {
+test("the hint's Queue queues the field's words, also where Enter steers", async () => {
   h = await mountRoom({ dispatch: acceptQueued });
   h.deliver([reset([userMessage(1, 1, "Q")], running(true))]);
   await h.type(QUESTION);
@@ -145,16 +169,22 @@ test("the hint's Queue queues the field's words as Enter does", async () => {
   expect(field().value).toBe("");
 });
 
-test("the hint's Send now sends the words with delivery steer", async () => {
-  h = await mountRoom({ dispatch: acceptQueued });
-  h.deliver([reset([userMessage(1, 1, "Q")], running(true))]);
-  await h.type(QUESTION);
-  await h.click(h.one("steer-send-now"));
-  expect(h.sent("send_prompt")).toEqual([
-    { thread: THREAD, content: [{ text: { text: QUESTION } }], delivery: "steer" },
-  ]);
-  expect(field().value).toBe("");
-});
+test.each([
+  ["Claude, which takes words mid-answer", true, "claude-acp"],
+  ["ChatGPT", false, "codex-acp"],
+] as const)(
+  "the hint's Send now sends the words with delivery send_now: %s",
+  async (_, joins, agent) => {
+    h = await mountRoom({ dispatch: acceptQueued, threads: [{ ...summary(), agent }] });
+    h.deliver([reset([userMessage(1, 1, "Q")], running(joins, agent))]);
+    await h.type(QUESTION);
+    await h.click(h.one("steer-send-now"));
+    expect(h.sent("send_prompt")).toEqual([
+      { thread: THREAD, content: [{ text: { text: QUESTION } }], delivery: "send_now" },
+    ]);
+    expect(field().value).toBe("");
+  },
+);
 
 test("the hint shows only while busy with words in the field", async () => {
   h = await mountRoom();
@@ -168,10 +198,15 @@ test("the hint shows only while busy with words in the field", async () => {
 });
 
 test.each([
-  ["a steer that joins the turn", true, "claude-acp", CLAUDE_HINT],
-  ["Codex, which can't take words mid-answer", false, "codex-acp", CHATGPT_HINT],
-  ["an agent that doesn't join, not Codex", false, "fake-agent", null],
-  ["steering not known", undefined, "claude-acp", null],
+  ["Claude, where a steer joins the turn", true, "claude-acp", JOINS_HINT],
+  [
+    "Codex, which can't take words mid-answer: ChatGPT by name",
+    false,
+    "codex-acp",
+    waitsHint("ChatGPT"),
+  ],
+  ["Claude, steering not known", undefined, "claude-acp", waitsHint("Claude")],
+  ["Codex, steering not known", undefined, "codex-acp", waitsHint("ChatGPT")],
 ] as const)("the hint's words: %s", async (_, joins, agent, said) => {
   const own: ThreadSummary = { ...summary(), agent };
   h = await mountRoom({ threads: [own] });
@@ -179,7 +214,7 @@ test.each([
   await h.type(QUESTION);
   expect(hint()).not.toBeNull();
   expect(hintText()).toBe(said);
-  // with no words to say, Send now and Queue still stand
+  expect(h.host.textContent).not.toContain("Codex");
   expect(h.one("steer-send-now")).not.toBeNull();
   expect(queueButton()).not.toBeNull();
 });
@@ -229,7 +264,7 @@ test("a send refused as thread.queue_full says the cap on the working line, neve
   expect(field().value).toBe(QUESTION);
 });
 
-test("with a permission waiting, Enter queues the field's words and answers nothing; with the field empty it answers", async () => {
+test("with a permission waiting, Enter sends the field's words (Claude's steer, which the host queues at the head) and answers nothing; with the field empty it answers", async () => {
   h = await mountRoom({ dispatch: acceptQueued });
   h.deliver([
     reset(
@@ -240,7 +275,7 @@ test("with a permission waiting, Enter queues the field's words and answers noth
   await h.type(QUESTION);
   expect(await enter()).toBe(true);
   expect(h.sent("send_prompt")).toEqual([
-    { thread: THREAD, content: [{ text: { text: QUESTION } }] },
+    { thread: THREAD, content: [{ text: { text: QUESTION } }], delivery: "steer" },
   ]);
   expect(h.transport.only("answer_permission")).toEqual([]);
   expect(field().value).toBe("");
