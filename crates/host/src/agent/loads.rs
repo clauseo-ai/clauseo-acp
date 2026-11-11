@@ -58,24 +58,21 @@ pub(crate) const CLAUDE_SETTING_SOURCES: &[&str] = &["user"];
 pub(crate) const CLAUDE_MANAGED_SETTING_SOURCES: &[&str] = &["user"];
 
 /// The permission mode Clauseo starts every Claude session in outside forced ask: Claude Code's
-/// `acceptEdits` (Rohan, 2026-11-10: Claude as frictionless as Codex's `workspace-write`;
-/// decision records 0025 and 0030). Claude Code 2.1.293 then approves, unasked, `Edit`,
-/// `Write` and `NotebookEdit` and the Bash commands `mkdir`, `touch`, `rm`, `rmdir`, `mv`, `cp`
-/// and `sed` (PowerShell's `Set-Content`, `Add-Content`, `Clear-Content`, `Remove-Item`) whose
-/// paths are inside the working directory (the matter folder) or `additionalDirectories` (the
-/// work folder and the matter's notes, `loads/profile.rs`). Everything else asks as in
-/// `default`: a path outside them, a protected path (`.git`, `.claude`, …), any other command.
-/// Deny rules come first in every mode, so the data fence's (`data_fence.rs`) still refuse, and
-/// the guard's `PreToolUse` hook still runs before each write. Undo per turn is the lawyer's way
-/// back. A forced-ask session starts in [`forced_ask::ASK_MODE`](super::forced_ask::ASK_MODE)
+/// `auto` (Rohan, 2026-11-11: a first read of a matter's papers never asks; decision records
+/// 0025 and 0030). Claude Code's classifier then reviews each tool call that would ask in
+/// `default` and lets the safe ones through; deny rules still come first, so the data fence's
+/// (`data_fence.rs`) still refuse, and the guard's `PreToolUse` hook still runs before each
+/// write. Undo per turn is the lawyer's way back. When auto is not available (the agent offers
+/// none, refuses the switch, or moves off it at once: the CLI's account or model gate),
+/// [`CLAUDE_FALLBACK_MODE`] runs instead, with one notice (`actor/turn/session/claude_mode.rs`).
+/// A forced-ask session starts in [`forced_ask::ASK_MODE`](super::forced_ask::ASK_MODE)
 /// instead ([`claude_mode`]).
 ///
 /// The window cannot pick another mode yet (the desktop bridge refuses `SetMode`), so this is
 /// Clauseo's choice at every session start. Its cost: a mode the lawyer reached inside a session
-/// (`default` from a plan exit's "manually approve edits") goes back to this one when the
-/// session is next loaded. Re-applying the thread's last logged mode instead cannot tell such a
-/// choice from a mode the user's settings started a session in: both are logged as
-/// `ModeChanged`.
+/// goes back to this one when the session is next loaded. Re-applying the thread's last logged
+/// mode instead cannot tell such a choice from a mode the user's settings started a session in:
+/// both are logged as `ModeChanged`.
 ///
 /// claude-agent-acp 0.89.1 starts a session in the mode it reads itself: an explicit one (only
 /// its own re-creations pass one), else a resumed transcript's, else `permissions.defaultMode`
@@ -86,7 +83,15 @@ pub(crate) const CLAUDE_MANAGED_SETTING_SOURCES: &[&str] = &["user"];
 /// as the adapter's own). So neither `_meta` route can set it: the host sends
 /// `session/set_mode` with this mode before the first prompt when the session started in
 /// another (`actor/turn/session.rs`), and [`session_meta`] takes bypass off the table.
-pub(crate) const CLAUDE_MODE: &str = "acceptEdits";
+pub(crate) const CLAUDE_MODE: &str = "auto";
+
+/// The mode a Claude session outside forced ask runs in when [`CLAUDE_MODE`] is not available:
+/// `acceptEdits`. Claude Code 2.1.293 then approves, unasked, `Edit`, `Write` and
+/// `NotebookEdit` and the Bash commands `mkdir`, `touch`, `rm`, `rmdir`, `mv`, `cp` and `sed`
+/// whose paths are inside the working directory or `additionalDirectories`; everything else
+/// asks as in `default`. claude-agent-acp 0.89.1 falls back to the same mode itself when the
+/// model cannot run auto (`session-mode.js:46-53`, `:98-102`).
+pub(crate) const CLAUDE_FALLBACK_MODE: &str = "acceptEdits";
 
 /// The mode a Claude session starts in and is switched to before its first prompt:
 /// [`CLAUDE_MODE`], or `default` in forced ask

@@ -117,20 +117,20 @@ fn bypass_stays_off_and_the_hooks_mode_flags_are_taken_out() {
             "{control:?}"
         );
     }
-    assert_eq!(CLAUDE_MODE, "acceptEdits");
+    assert_eq!(CLAUDE_MODE, "auto");
 }
 
-/// A Claude session starts in `acceptEdits` outside forced ask and in `default` in it (decision
-/// 3 of 2026-11-04 stands), and in neither case in `default` by mistake or in bypass.
+/// A Claude session starts in `auto` outside forced ask (`acceptEdits` its fallback) and in
+/// `default` in it (decision 3 of 2026-11-04 stands), and never in bypass.
 #[test]
-fn claude_starts_in_accept_edits_and_forced_ask_in_default() {
-    assert_eq!(claude_mode(false), "acceptEdits");
+fn claude_starts_in_auto_and_forced_ask_in_default() {
+    assert_eq!(claude_mode(false), "auto");
+    assert_eq!(super::CLAUDE_FALLBACK_MODE, "acceptEdits");
     assert_eq!(claude_mode(true), "default");
     assert!(crate::agent::forced_ask::mode_allowed(claude_mode(true)));
     assert!(!crate::agent::forced_ask::mode_allowed(claude_mode(false)));
     for forced_ask in [false, true] {
         assert_ne!(claude_mode(forced_ask), "bypassPermissions");
-        assert_ne!(claude_mode(forced_ask), "auto");
     }
 }
 

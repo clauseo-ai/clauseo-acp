@@ -443,6 +443,23 @@ change from the settings window as `ui` does. R24 (PR5) adds a third to the patc
 
 ### Claude's permission mode
 
+- **2026-11-11 (Rohan): `auto`, so a first read of a matter's papers never asks.** Outside
+  forced ask a Claude session now starts in Claude Code's `auto` (`agent/loads.rs`
+  `CLAUDE_MODE`), switched to with `session/set_mode auto` on `session/new`, `session/load`
+  and `session/resume`. In `acceptEdits` Claude Code 2.1.293 asked for a `for … do … done`
+  loop ("A variable in this command can't be checked before it runs") and for `f=a; cat "$f"`
+  (stage C, headless); in `auto` its classifier ran them. When auto is not available the
+  session runs in `acceptEdits` (`CLAUDE_FALLBACK_MODE`) with one notice per thread
+  (`NoticeKind::AutoModeUnavailable`, TN-10): the session lists no `auto`; `set_mode auto`
+  answers an error (the CLI refuses auto for the plan, the settings or fast mode, and
+  claude-agent-acp 0.89.1 passes the error back); or the agent moves off `auto` among the
+  updates held before the attach (0.89.1 moves a model without auto to `acceptEdits` and
+  says so). A CLI that drops to `default` on its own (its remote kill switch) is not relayed
+  by 0.89.1, so the host can't see it. `auto`, `acceptEdits` and `plan` are kept when
+  Claude moves there; any other mode goes back to `auto` (or `acceptEdits` in the fallback).
+  The plan exit's "use auto mode" lands in `auto` and stays. Forced ask is unchanged. The
+  bullets below record the 2026-11-10 `acceptEdits` decision this replaces, and still describe
+  the fallback.
 - **2026-11-10 (Rohan).** Claude should be as frictionless as Codex. Outside forced ask a
   Claude session starts in Claude Code's `acceptEdits`, not `default`
   (`agent/loads.rs` `CLAUDE_MODE`). claude-agent-acp 0.89.1 picks its own starting mode (the
@@ -512,14 +529,14 @@ change from the settings window as `ui` does. R24 (PR5) adds a third to the patc
 
   | Choice | Outside forced ask | Forced ask |
   | --- | --- | --- |
-  | Allow once (`exit-plan-default`) | `default`, switched to `acceptEdits` | `default` |
+  | Allow once (`exit-plan-default`) | `default`, switched to `auto` (2026-11-11) | `default` |
   | Don't allow (`reject`) | stays in `plan` | stays in `plan` |
   | Always for this matter (`exit-plan-accept-edits`, no-`auto` branch) | `acceptEdits` | not offered |
-  | `exit-plan-auto`, `exit-plan-clear-auto` (not in the app) | `auto`, switched to `acceptEdits` | not offered |
+  | `exit-plan-auto`, `exit-plan-clear-auto` | `auto`, kept (2026-11-11) | not offered |
 
   Claude Code's `auto` would let a classifier approve commands, network calls and writes
   outside the matter, which would break "writes outside the matter still ask". So it never
-  stays. Between the adapter's move and the host's `set_mode` there is a window of one round
+  stayed (superseded 2026-11-11: `auto` is now the session's mode). Between the adapter's move and the host's `set_mode` there is a window of one round
   trip. `bypassPermissions`, `dontAsk` and unknown modes go back to `acceptEdits` too.
   In forced ask, every option but `exit-plan-default` and `reject` is dropped, and any mode
   but `default` and `plan` goes back to `default`.

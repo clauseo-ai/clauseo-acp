@@ -23,6 +23,15 @@ test("a known kind gives the app's line, in the page's words", () => {
   expect(noticeLine("context_not_restored", en)).toBe(CONTEXT);
 });
 
+test("Claude's auto mode unavailable gives the app's line, in English and Hindi", () => {
+  expect(noticeLine("auto_mode_unavailable", en)).toBe(
+    "Claude's automatic mode isn't available for this account, so Claude asks before running commands.",
+  );
+  expect(noticeLine("auto_mode_unavailable", words("hi"))).toBe(
+    "इस खाते के लिए Claude का स्वचालित मोड उपलब्ध नहीं है, इसलिए Claude कमांड चलाने से पहले पूछता है।",
+  );
+});
+
 test("no kind (an agent's notice) gives null, so the row shows its own text", () => {
   expect(noticeLine(undefined, en)).toBeNull();
 });

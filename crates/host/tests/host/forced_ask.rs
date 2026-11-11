@@ -4,8 +4,8 @@
 //! its auto-accept option and an answer naming it is refused; a mode the agent moves to itself is
 //! switched back to `default`, and a session that starts in `acceptEdits` is switched to it
 //! before its first prompt; `SetConfigOption` for the mode is refused; the row says why. With
-//! no guard program the launch is refused. A matter with no such answer runs in `acceptEdits`
-//! and keeps a plan exit's mode. Codex in
+//! no guard program the launch is refused. A matter with no such answer runs in `auto` (or
+//! `acceptEdits` when auto is not offered) and keeps a plan exit's mode. Codex in
 //! such a matter is refused. The `_meta` layers (no `allowedTools`, the `permissions.ask` rules,
 //! the hook before every tool with `--ask-all`) are pinned in `agent/loads/layering_tests.rs`
 //! and `claude-ask-unknown.jsonl`, the hook's answers in `pre_write_guard/tests/ask.rs`.
@@ -217,8 +217,9 @@ fn a_forced_ask_session_reopened_by_load_or_resume_stays_in_default() {
 }
 
 /// With no folder answer (and with `cant_change_permissions`, which forces nothing) the same plan
-/// exit offers all three options, the auto-accept one is taken, the agent stays in acceptEdits,
-/// and `SetMode acceptEdits` reaches it: as before forced ask.
+/// exit, from an agent that offers no `auto` (so the session runs in the `acceptEdits`
+/// fallback), offers all three options, the auto-accept one is taken, the agent stays in
+/// acceptEdits, and `SetMode acceptEdits` reaches it: as before forced ask.
 #[test]
 fn claude_elsewhere_runs_as_before() {
     for (test, kind) in [
@@ -261,11 +262,11 @@ fn claude_elsewhere_runs_as_before() {
 }
 
 /// Outside forced ask, a plan exit as claude-agent-acp 0.89.1 sends it (`auto` always listed)
-/// keeps all four options; "use auto mode" moves the agent to `auto`, and the host switches it to
-/// `acceptEdits`. Forced ask drops both auto options (`agent/forced_ask/tests.rs`, and
+/// keeps all four options; "use auto mode" moves the agent to `auto`, and the host keeps it
+/// there. Forced ask drops both auto options (`agent/forced_ask/tests.rs`, and
 /// [`claude_on_a_network_drive_runs_in_forced_ask`] for the accept-edits one).
 #[test]
-fn a_normal_plan_exits_auto_option_lands_in_accept_edits() {
+fn a_normal_plan_exits_auto_option_lands_in_auto() {
     let (_dir, host, _, thread) = claude_in("plan_exit_auto", "claude-plan-exit-auto", None);
     let mut events = host.events(StreamId::Thread(thread));
     let (turn, _) = host.prompt(thread, "Plan the change to clause 4.");
@@ -289,11 +290,11 @@ fn a_normal_plan_exits_auto_option_lands_in_accept_edits() {
     );
     let ended = events.until_turn_ended(turn);
     assert_eq!(ended.stop, StopReason::EndTurn, "{}", events.dump());
-    events.until("ModeChanged acceptEdits back", |e| modes(e).len() == 3);
+    events.until("ModeChanged auto", |e| modes(e).len() == 3);
     events.assert_no_mismatch();
     assert_eq!(
         modes(&events),
-        ["acceptEdits", "auto", "acceptEdits"],
+        ["auto", "plan", "auto"],
         "{}",
         events.dump()
     );
@@ -329,17 +330,17 @@ fn plan_exit(
 
 /// Outside forced ask, a plan exit answered "keep planning" stays in `plan`, and one approved
 /// with the manual option (the app's "Allow once") moves the agent to `default`, which the
-/// host switches to `acceptEdits`: approving a plan means going ahead in the matter's mode.
+/// host switches to `auto`: approving a plan means going ahead in the matter's mode.
 #[test]
-fn a_normal_plan_exit_stays_in_plan_or_goes_ahead_in_accept_edits() {
+fn a_normal_plan_exit_stays_in_plan_or_goes_ahead_in_auto() {
     let (_dir, host, _, thread) = claude_in("plan_exit_normal", "claude-plan-exit-normal", None);
     let mut events = host.events(StreamId::Thread(thread));
     plan_exit(&host, &mut events, thread, 1, "reject", 2);
-    assert_eq!(modes(&events), ["acceptEdits", "plan"], "{}", events.dump());
+    assert_eq!(modes(&events), ["auto", "plan"], "{}", events.dump());
     plan_exit(&host, &mut events, thread, 2, "exit-plan-default", 4);
     assert_eq!(
         modes(&events),
-        ["acceptEdits", "plan", "default", "acceptEdits"],
+        ["auto", "plan", "default", "auto"],
         "{}",
         events.dump()
     );

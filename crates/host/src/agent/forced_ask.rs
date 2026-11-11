@@ -6,7 +6,7 @@
 //! the host:
 //!
 //! - modes: only [`ASK_MODES`] may be set (`SetMode` refuses any other with `command.invalid`),
-//!   a session starts in `default` ([`ASK_MODE`], not the `acceptEdits` every other Claude
+//!   a session starts in `default` ([`ASK_MODE`], not the `auto` every other Claude
 //!   session starts in), and a mode the agent moves to itself is switched back to it;
 //! - options: a permission request loses every option that would stop later asks
 //!   ([`keep_option`]), so no "always" rule reaches the adapter;
@@ -47,7 +47,7 @@ pub(crate) fn applies(answer: Answer) -> bool {
 pub(crate) const ASK_MODES: [&str; 2] = [ASK_MODE, "plan"];
 
 /// The mode a forced-ask session starts in and is switched back to: `default`, which asks before
-/// each change. Outside forced ask Claude starts in `acceptEdits` (`agent/loads.rs`
+/// each change. Outside forced ask Claude starts in `auto` (`agent/loads.rs`
 /// `CLAUDE_MODE`).
 pub(crate) const ASK_MODE: &str = "default";
 

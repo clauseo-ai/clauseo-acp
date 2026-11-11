@@ -64,6 +64,8 @@ pub(crate) enum AgentReply {
         loaded: bool,
         result: Result<SessionStart, crate::error::Error>,
         picked: super::picks::Picked,
+        /// A Claude switch to `auto` was refused and fell back to `acceptEdits`.
+        fell_back: bool,
     },
     Prompt {
         turn: TurnId,

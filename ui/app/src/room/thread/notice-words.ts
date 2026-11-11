@@ -68,12 +68,17 @@ function packSkipped(pack: string, reason: string, w: NoticeWords): string | nul
 /** The line for a notice's kind in the page's language, its slots filled; null for no kind, or a kind this version
  * does not know, so the notice's own text shows. */
 export function noticeLine(kind: NoticeKind | undefined, w: NoticeWords): string | null {
-  if (typeof kind === "string")
-    return kind === "context_not_restored"
-      ? w.th(
-          "Clauseo doesn't remember the earlier questions and answers in this conversation. Include what it needs from them in your next question.",
-        )
-      : null;
+  if (typeof kind === "string") {
+    if (kind === "context_not_restored")
+      return w.th(
+        "Clauseo doesn't remember the earlier questions and answers in this conversation. Include what it needs from them in your next question.",
+      );
+    if (kind === "auto_mode_unavailable")
+      return w.th(
+        "Claude's automatic mode isn't available for this account, so Claude asks before running commands.",
+      );
+    return null;
+  }
   // read by shape: a value from a newer host, or none (null), that this version doesn't know gives null. The field
   // is read rather than trusted to `in`: beside another object kind, each variant marks the other's key optional
   const came =
