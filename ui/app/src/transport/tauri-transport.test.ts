@@ -107,6 +107,7 @@ describe("TauriTransport", () => {
   test("open_external, open_file and reveal send their argument; open_file resolves to what the host opened", async () => {
     const t = new TauriTransport({ warn: () => {} });
     await expect(t.openExternal("https://example.com/a")).resolves.toBeUndefined();
+    await expect(t.openExternal("https://example.com/b", "example.com")).resolves.toBeUndefined();
     answers.set("open_file", () => ({ protected_view: true }));
     await expect(t.openFile("ref-1")).resolves.toEqual({ protected_view: true });
     await expect(t.reveal({ matter: "m-1" })).resolves.toBeUndefined();
@@ -115,7 +116,8 @@ describe("TauriTransport", () => {
       ["open_external", "open_file", "reveal"].includes(i.command),
     );
     expect(sent).toEqual([
-      { command: "open_external", args: { url: "https://example.com/a" } },
+      { command: "open_external", args: { url: "https://example.com/a", shown: null } },
+      { command: "open_external", args: { url: "https://example.com/b", shown: "example.com" } },
       { command: "open_file", args: { file: "ref-1" } },
       { command: "reveal", args: { target: { matter: "m-1" } } },
       { command: "reveal", args: { target: "app_data" } },

@@ -406,8 +406,8 @@ export class TauriTransport
   displayInfo(): Promise<DisplayInfo> {
     return this.#background.run(() => call(commands.displayInfo()));
   }
-  async openExternal(url: string): Promise<void> {
-    await call(commands.openExternal(url));
+  async openExternal(url: string, shown?: string): Promise<void> {
+    await call(commands.openExternal(url, shown ?? null));
   }
   async quitApp(): Promise<void> {
     await call(commands.quitApp());

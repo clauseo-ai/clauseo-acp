@@ -52,10 +52,11 @@ export interface HostTransport {
    * folder's ref and its home-relative display; `null` when the lawyer cancels. */
   pickFolder(): Promise<PickedFolder | null>;
   displayInfo(): Promise<DisplayInfo>;
-  /** Opens a web or mail link (https, http, mailto) in the default browser or mail app, after the host's native
-   * confirm names its host. A declined confirm rejects with `transport.unauthorized`; a bad link with
+  /** Opens a web or mail link (https, http, mailto) in the default browser or mail app. `shown` is the link's visible
+   * text: a plain web link opens at once, and a mailto link or one whose text names another site only after the host's
+   * native confirm names its host. A declined confirm rejects with `transport.unauthorized`; a bad link with
    * `command.invalid`. */
-  openExternal(url: string): Promise<void>;
+  openExternal(url: string, shown?: string): Promise<void>;
   /** Quits Clauseo the way Cmd+Q does: the agents' installs and sign-ins stop, then the host, and
    * the app ends. Resolves once the host has the request; the window is gone after it. */
   quitApp(): Promise<void>;

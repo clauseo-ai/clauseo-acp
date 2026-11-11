@@ -78,7 +78,7 @@ export type FakeCall =
     }
   | { call: "pick_folder" }
   | FakeChooserCall
-  | { call: "open_external"; url: string }
+  | { call: "open_external"; url: string; shown?: string }
   | { call: "quit_app" }
   | { call: "open_privacy_settings" }
   | { call: "open_file"; file: FileRefId }
@@ -125,7 +125,7 @@ export type FakeHost = FakeDisplayHost & {
   /** Answer `openExternal`, `openFile` and `reveal`; throwing refuses (a HostError, such as the declined confirm's
    * `transport.unauthorized`). Without one the call succeeds; an `openFile` that returns nothing opens outside
    * Protected View. */
-  openExternal?: (url: string) => void | Promise<void>;
+  openExternal?: (url: string, shown?: string) => void | Promise<void>;
   /** Answer `quitApp`; throwing refuses. Without one the quit is accepted and nothing ends. */
   quitApp?: () => void | Promise<void>;
   /** Answer `openPrivacySettings`; throwing refuses. Without one the pane opens. */
@@ -547,9 +547,9 @@ export class FakeTransport implements HostTransport, NextHostSource, LimitsSourc
     return (await this.host.pickFolder?.()) ?? null;
   }
 
-  async openExternal(url: string): Promise<void> {
-    this.calls.push({ call: "open_external", url });
-    await this.#answer(() => this.host.openExternal?.(url));
+  async openExternal(url: string, shown?: string): Promise<void> {
+    this.calls.push({ call: "open_external", url, ...(shown === undefined ? {} : { shown }) });
+    await this.#answer(() => this.host.openExternal?.(url, shown));
   }
 
   async quitApp(): Promise<void> {

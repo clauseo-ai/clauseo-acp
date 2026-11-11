@@ -12,6 +12,7 @@ use uuid::Uuid;
 use super::*;
 use crate::test_support::Scratch;
 
+mod ask;
 mod bounded;
 mod links;
 mod privacy;
@@ -174,14 +175,15 @@ impl Clock {
     }
 }
 
-/// `open_external` as the command runs it: the link checked first, then the confirm, through a
-/// fresh gate.
+/// `open_external` as the command runs it for a link whose visible text is `shown`: the link
+/// checked first, then the confirm when it needs one, through a fresh gate.
 fn external(
     confirm: &FakeConfirm,
     opener: &FakeOpener,
     clock: &Clock,
     language: Language,
     url: &str,
+    shown: Option<&str>,
 ) -> Result<(), HostError> {
     let link = check_link(url)?;
     let gate = gate::Gate::default();
@@ -192,6 +194,7 @@ fn external(
         &|| clock.now(),
         language,
         &link,
+        shown,
     ))
 }
 

@@ -4,8 +4,9 @@
 import { createContext } from "react";
 
 export type MarkdownHost = {
-  /** Open an http(s) or mailto URL outside the app. */
-  openExternal(url: string): void;
+  /** Open an http(s) or mailto URL outside the app; `shown` is the link's visible text, which the host compares with
+   * where the link goes before it opens it unasked. */
+  openExternal(url: string, shown?: string): void;
   /** Open a citation or a paper of the matter, by its validated id. */
   openReference(kind: "citation" | "paper", id: string): void;
   /** Open the paper on the wall a file link names (PaperLinksContext), by its matter-relative path; the host says so
