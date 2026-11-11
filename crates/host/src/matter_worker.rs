@@ -11,13 +11,12 @@ use std::sync::mpsc;
 use std::thread::{self, JoinHandle};
 
 use clauseo_matters::{
-    Checkpoint, CheckpointOutcome, CommitId, CompareSide, ImportWarning, Limits, Matter,
-    MissingReason, NewMatter, OsProbe, PaperList, Place, Restore, RestorePlan, Restored, Retention,
-    Settings, TimelineEntry, TurnMeta, UndoRequest, Undone, matter_path_of_resolved,
+    Checkpoint, CheckpointOutcome, CommitId, CompareSide, Limits, Matter, MissingReason, NewMatter,
+    OsProbe, PaperList, Place, Restore, RestorePlan, Restored, Retention, Settings, TimelineEntry,
+    TurnMeta, UndoRequest, Undone, matter_path_of_resolved,
 };
 use clauseo_protocol::{
-    CheckpointId, CommandId, FileChange, FolderSupportKind, ImportSummary, MatterId, MatterPath,
-    RestoreRequest,
+    CheckpointId, FileChange, FolderSupportKind, MatterId, MatterPath, RestoreRequest,
 };
 
 use crate::agent::data_fence::{FenceCheck, PathsChecked, check_paths};
@@ -169,75 +168,6 @@ pub(crate) enum MatterJob {
     WriteSides(Sides),
     /// Tracked changes in a Word file: list them, or decide some (`revisions.rs`).
     Revisions(Box<crate::revisions::RevisionsJob>),
-}
-
-/// How an import ended.
-#[derive(Debug)]
-pub(crate) enum ImportEnd {
-    /// The matter exists; the worker keeps it.
-    Done {
-        /// The root checkpoint's commit.
-        commit: CommitId,
-        summary: ImportSummary,
-        warnings: Vec<ImportWarning>,
-        /// The folder check's answer (`agent/folder_support.rs`), made on this thread.
-        folder_support: Option<FolderSupportKind>,
-    },
-    /// The cancel flag was set; nothing was kept.
-    Cancelled,
-    /// The folder is this listed matter's own folder; nothing was made.
-    Listed(MatterId),
-    /// The folder is the one this create or import in flight is making; nothing was made.
-    Making(CommandId),
-    /// The folder's marker names this matter, which the registry does not hold and which has no
-    /// history here: nothing was written, and the host imports the folder again under its id.
-    Adopt(MatterId),
-}
-
-/// A made matter's root commit and import summary, and its folder check's answer.
-pub(crate) type Made = ((CommitId, Option<ImportSummary>), Option<FolderSupportKind>);
-
-/// The root checkpoint's commit and the import summary of a create or import that succeeded
-/// (`None` for a new folder), and the folder check's answer.
-pub(crate) fn made(reply: MatterReply) -> Result<Made, Error> {
-    match reply {
-        MatterReply::Created(result) => result.map(|(commit, support)| ((commit, None), support)),
-        MatterReply::Imported(result) => match result? {
-            ImportEnd::Done {
-                commit,
-                summary,
-                warnings,
-                folder_support,
-            } => {
-                for warning in &warnings {
-                    tracing::info!(?warning, "import warning");
-                }
-                Ok(((commit, Some(summary)), folder_support))
-            }
-            ImportEnd::Cancelled => Err(Error::Closed),
-            // Answered by the actor before it gets here (`matters/answer.rs`).
-            ImportEnd::Listed(_) | ImportEnd::Making(_) | ImportEnd::Adopt(_) => Err(
-                Error::Internal("an import's folder was held by another matter".to_owned()),
-            ),
-        },
-        MatterReply::Opened(_)
-        | MatterReply::Located(_)
-        | MatterReply::BeforeTurn(_)
-        | MatterReply::AfterTurn(_)
-        | MatterReply::Undone(_)
-        | MatterReply::Restored(_)
-        | MatterReply::Compared(_)
-        | MatterReply::Previewed(_)
-        | MatterReply::EditedSince(_)
-        | MatterReply::HeldOpen(_)
-        | MatterReply::Papers(_)
-        | MatterReply::StillGone(_)
-        | MatterReply::SidesWritten(_)
-        | MatterReply::Revisions(_)
-        | MatterReply::Discarded(_) => Err(Error::Internal(
-            "a matter's create got another job's reply".to_owned(),
-        )),
-    }
 }
 
 /// One job's result, one variant per [`MatterJob`] kind.
@@ -600,6 +530,7 @@ mod too_deep;
 use checkpoints::{repair, root_commit, timeline_entry, turn_checkpoint};
 pub(crate) use claims::{Claim, Claimed, Held, check_registry, is_same_folder, listed_folder};
 use import::import;
+pub(crate) use import::{ImportEnd, made};
 pub(crate) use relocate::{Registry, Relink};
 use relocate::{locate, relink_matter};
 pub(crate) use sides::{BlacklineDir, NEW, OLD, Sides};

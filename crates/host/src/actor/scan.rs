@@ -3,8 +3,9 @@
 //! and walks it (`clauseo_matters::scan_folder`), posting what it finds to the actor, which
 //! publishes it as `HostEvent::FolderScanned` on the app stream. A marker refuses nothing (the
 //! import adopts the matter it names or sets it aside), but a listed matter's own folder, or a
-//! folder whose marker names one, is `matter.folder_is_matter` naming it, so the form offers it. No file system call runs on
-//! the actor, and nothing is stored: not even a receipt, so a repeated `command_id` scans again.
+//! folder whose marker names one, is `matter.folder_is_matter` naming it, so the form offers it.
+//! No file system call runs on the actor, and nothing is stored: not even a receipt, so a
+//! repeated `command_id` scans again.
 //!
 //! One scan at a time: a `ScanFolder` sets the cancel flag of the scan running before it starts
 //! its own. A cancelled scan's thread stops at the walk's next check (before each folder, entry
