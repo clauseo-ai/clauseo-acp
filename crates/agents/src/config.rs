@@ -122,11 +122,19 @@ pub struct InstallConfig {
     /// file), so a test on any OS stands in for an antivirus holding the fresh files.
     #[cfg(feature = "test-support")]
     pub rename_fault: Option<Arc<RenameFault>>,
+    /// Tests only: the free bytes the disk checks read instead of the data folder's, so a test
+    /// stands in for a disk too small for two installs. `None` from it: not readable.
+    #[cfg(feature = "test-support")]
+    pub free_bytes: Option<Arc<FreeBytes>>,
 }
 
 /// Tests only: [`InstallConfig::rename_fault`].
 #[cfg(feature = "test-support")]
 pub type RenameFault = dyn Fn() -> Option<std::io::Error> + Send + Sync;
+
+/// Tests only: [`InstallConfig::free_bytes`].
+#[cfg(feature = "test-support")]
+pub type FreeBytes = dyn Fn() -> Option<u64> + Send + Sync;
 
 impl InstallConfig {
     /// `agent`'s sign-in proxy: its [`InstallConfig::signin_proxy`] entry, else

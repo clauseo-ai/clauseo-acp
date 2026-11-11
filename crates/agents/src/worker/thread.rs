@@ -1,6 +1,7 @@
 //! The worker thread: each snapshot agent's first state at start, then the handle's commands in
 //! order (installs, pauses, retries, and the sign-in jobs `signin::start_job` starts).
 
+use std::collections::BTreeMap;
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex, PoisonError, RwLock};
 
@@ -25,7 +26,10 @@ pub(super) struct Worker<T> {
     pub(super) signin_launcher: Arc<dyn Launcher>,
     pub(super) timer: Arc<T>,
     pub(super) shared: Arc<Shared>,
-    pub(super) job_lock: Arc<Mutex<()>>,
+    /// Each agent's turn lock: a job holds its agent's for its whole run, so a superseded job's
+    /// thread has stopped before the next job of that agent works. Another agent's job never
+    /// waits on it.
+    pub(super) turns: BTreeMap<AgentId, Arc<Mutex<()>>>,
     /// The OS's proxy, once a retry asked for it.
     pub(super) system_proxy: Option<String>,
 }
@@ -56,19 +60,16 @@ impl<T: Timer + Send + Sync + 'static> Worker<T> {
             let mut inner = self.shared.lock();
             if let Some(ready @ InstallState::Ready { .. }) = inner.states.get(agent).cloned() {
                 // A Ready agent's job installs Python when it is missing and no job runs (a
-                // failed one waits for a retry); otherwise `Ready` again.
+                // failed one waits for a retry; a running one fetches Python as its own second
+                // step, or is fetching it); otherwise `Ready` again.
                 let missing = matches!(inner.python, PythonState::Missing { .. });
-                if inner.current.is_some() || !missing {
+                if !inner.jobs.is_empty() || !missing {
                     let installed = inner.installed.get(agent).cloned();
                     Inner::set(&mut inner, &self.shared.events, agent, ready, installed);
                     return;
                 }
             }
-            if inner
-                .current
-                .as_ref()
-                .is_some_and(|current| current.agent == *agent)
-            {
+            if inner.running(agent) {
                 return;
             }
         }
@@ -77,13 +78,7 @@ impl<T: Timer + Send + Sync + 'static> Worker<T> {
 
     fn pause(&self, agent: &AgentId) {
         let mut inner = self.shared.lock();
-        if inner
-            .current
-            .as_ref()
-            .is_some_and(|current| current.agent == *agent)
-        {
-            inner.stop_current(&self.shared.events, None);
-        }
+        inner.stop_job(&self.shared.events, agent, false);
     }
 
     fn set_network(&mut self, network: Network) {
@@ -100,25 +95,26 @@ impl<T: Timer + Send + Sync + 'static> Worker<T> {
             return;
         }
         let restartable = {
-            let inner = self.shared.lock();
+            let mut inner = self.shared.lock();
             match inner.states.get(agent) {
                 Some(
                     InstallState::Failed(_) | InstallState::Waiting { .. } | InstallState::Paused,
                 ) => true,
                 // Python's retry: a job for a Ready agent installs only Python. While another
-                // agent's install runs, nothing starts (as `install`), so that install is not
-                // paused: it fetches Python as its own second step. A job already in its Python
-                // step (its agent Ready) is restarted, which pauses no agent.
+                // agent's install runs, nothing starts (as `install`): it fetches Python as its
+                // own second step. A job already in its Python step (its agent Ready) is
+                // stopped and Python restarted in this agent's job, which pauses no agent.
                 Some(InstallState::Ready { .. }) => {
                     let wanted = python_wanted(&inner.python)
                         || matches!(inner.python, PythonState::Waiting { .. });
-                    let installing = inner.current.as_ref().is_some_and(|current| {
-                        !matches!(
-                            inner.states.get(&current.agent),
-                            Some(InstallState::Ready { .. })
-                        )
+                    let installing = inner.jobs.keys().any(|running| {
+                        !matches!(inner.states.get(running), Some(InstallState::Ready { .. }))
                     });
-                    wanted && !installing
+                    let restart = wanted && !installing;
+                    if restart && let Some(owner) = inner.python_owner() {
+                        inner.stop_job(&self.shared.events, &owner, true);
+                    }
+                    restart
                 }
                 _ => false,
             }
@@ -133,24 +129,25 @@ impl<T: Timer + Send + Sync + 'static> Worker<T> {
         self.start_job(agent);
     }
 
-    /// Stops the running job (pausing another agent's), then starts `agent`'s on its own
-    /// thread; that thread waits for the job lock before it works.
-    fn start_job(&self, agent: &AgentId) {
+    /// Supersedes `agent`'s running job, if any (no other agent's job is touched), then starts
+    /// `agent`'s on its own thread; that thread waits for the agent's turn lock before it works.
+    fn start_job(&mut self, agent: &AgentId) {
         let ticket = {
             let mut inner = self.shared.lock();
             if inner.closed {
                 return;
             }
-            inner.stop_current(&self.shared.events, Some(agent));
+            inner.stop_job(&self.shared.events, agent, true);
             inner.next_job += 1;
             let ticket = Ticket {
                 job: inner.next_job,
                 agent: agent.clone(),
                 cancel: Arc::new(Cancel::new()),
             };
-            inner.current = Some(ticket.clone());
+            inner.add_job(ticket.clone());
             ticket
         };
+        let turn = Arc::clone(self.turns.entry(agent.clone()).or_default());
         let job = Job {
             ticket: ticket.clone(),
             config: self.config.clone(),
@@ -158,9 +155,9 @@ impl<T: Timer + Send + Sync + 'static> Worker<T> {
             launcher: Arc::clone(&self.launcher),
             timer: Arc::clone(&self.timer),
             shared: Arc::clone(&self.shared),
-            turn: Arc::clone(&self.job_lock),
+            turn,
             system_proxy: self.system_proxy.clone(),
-            data_lock: Mutex::new(None),
+            locks: install::Locks::default(),
         };
         let spawned = self
             .shared

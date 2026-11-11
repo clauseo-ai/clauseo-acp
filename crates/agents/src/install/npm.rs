@@ -13,9 +13,10 @@
 //!
 //! Every npm run starts through the launcher as `node --single-threaded <npm-cli.js> …` (no V8
 //! background tasks, so Node cannot deadlock as it exits: `NODE_SINGLE_THREADED`), with
-//! neither `NODE_OPTIONS` nor `NODE_PATH` (the spawn drops both), the private cache, and empty
-//! `agents/npmrc` and `agents/npmrc-global` files as its user and global config (npm refuses
-//! one file for both).
+//! neither `NODE_OPTIONS` nor `NODE_PATH` (the spawn drops both), and the agent's own cache
+//! (`agents/npm-cache/<id>`) and empty `agents/npmrc-<id>` and `agents/npmrc-global-<id>` as
+//! its user and global config (npm refuses one file for both), so two installs at once share no
+//! npm file; npm from the downloaded Node holds `.lock-node` shared ([`Job::use_node`]).
 //! `npm ci` runs with `--offline --ignore-scripts --no-bin-links --no-audit --no-fund` and
 //! `--allow-file=all` (npm 11 reads `npm_config_allow_file` from the environment the launch
 //! inherits, and `none` there would refuse the `file:` tarballs; npm 10 accepts the flag).
@@ -146,6 +147,9 @@ pub(super) async fn install<T: Timer + Send + Sync>(
                 node::install_runtime(path, snapshot.node(), archive, dir, platform.os)
                     .map_err(|err| TryError::extract(&err, config))?;
             }
+            // Fetched by this try (under `.lock-node`, held exclusive since its check) or by
+            // another: either way npm runs from it with `.lock-node` held shared.
+            job.use_node().await?;
             (
                 node::runtime_program(dir, platform.os),
                 node::runtime_npm_cli(dir, platform.os),
@@ -159,14 +163,15 @@ pub(super) async fn install<T: Timer + Send + Sync>(
     };
     tracing::info!(%agent, "agent install: {}", node_line(source, &program, &version));
     let io = |what: &'static str| io_error(what, config);
-    let cache = npm_cache(&config.data_dir);
+    let cache = npm_cache(&config.data_dir, agent);
     // Made through no link below the data folder, as `install/` is below, so the removals in
     // them never reach a folder a link points at.
     write::create_private_dirs_under(&config.data_dir, &cache)
         .map_err(io("making the npm cache"))?;
-    let npmrc = config.data_dir.join("agents").join("npmrc");
+    let agents_dir = config.data_dir.join("agents");
+    let npmrc = agents_dir.join(format!("npmrc-{agent}"));
     write::write_atomic(&npmrc, b"").map_err(io("writing npmrc"))?;
-    let global = config.data_dir.join("agents").join("npmrc-global");
+    let global = agents_dir.join(format!("npmrc-global-{agent}"));
     write::write_atomic(&global, b"").map_err(io("writing npmrc-global"))?;
     let root = install_root(&config.data_dir, agent);
     write::create_private_dirs_under(&config.data_dir, &root)
@@ -420,11 +425,15 @@ struct Npm<'a, T> {
 }
 
 impl<T> Npm<'_, T> {
-    /// Removes the runtime npm ran from, if it did, and says so in `detail`.
+    /// Removes the runtime npm ran from, if it did and no other try holds it
+    /// ([`super::locks::remove_runtime`]), and says so in `detail`.
     fn drop_runtime(&self, detail: &mut String) {
         if let Some(dir) = self.runtime {
-            drop(write::remove_dir_all(dir));
-            detail.push_str("; the downloaded Node is removed and will be fetched again");
+            detail.push_str(super::locks::remove_runtime(
+                &self.job.locks,
+                &self.job.config,
+                dir,
+            ));
         }
     }
 }

@@ -3,7 +3,9 @@
 //! `python/<archive name>`, copied and hashed into `downloads/`) through the same download path
 //! as Node's, then [`crate::python::install_python_runtime`] unpacks, runs and seals it. Tries,
 //! back-off and the offline wait follow the agent's (`install.rs`); every event is Python's
-//! own, and nothing here touches the agent's state.
+//! own, and nothing here touches the agent's state. One job at a time runs it: the one that
+//! claimed Python in this process (`Shared::claim_python`), holding `.lock-python` against
+//! another process.
 
 use std::path::Path;
 use std::time::Duration;
@@ -11,7 +13,6 @@ use std::time::Duration;
 use clauseo_process::Timer;
 
 use super::{BACKOFF, Job, MB, Next, OFFLINE_WAIT, TRIES, TryError, files};
-use crate::config::AgentsConfig;
 use crate::disk;
 use crate::download::firm::{BundleEntry, bundle_path, copy_from_bundle};
 use crate::download::{FetchJob, Magic, part_path};
@@ -19,7 +20,7 @@ use crate::log::InstallLog;
 use crate::python::{self, PythonError, RunFailure};
 use crate::snapshot::PythonArchive;
 use crate::state::{FailureKind, PythonFailure, PythonFailureKind, PythonState};
-use crate::write::{self, ExtractError};
+use crate::write::{self, AgentsLock, ExtractError, Mode};
 
 /// The least time between two Python `Downloading` events.
 const PROGRESS_EVERY: Duration = Duration::from_millis(250);
@@ -45,6 +46,20 @@ pub(super) async fn step<T: Timer + Send + Sync>(job: &Job<T>) -> Option<PythonS
     let archive = config.snapshot.python_archive(config.platform)?;
     let mut log = InstallLog::new(&job.ticket.agent);
     log.push(format!("python: {}", archive.name()));
+    match write::try_lock(&config.data_dir, AgentsLock::Python, Mode::Exclusive) {
+        Ok(Some(file)) => job.locks.hold_python(file),
+        Ok(None) => {
+            log.push(
+                "another Clauseo is installing Python now; try again once it is done".to_owned(),
+            );
+            return Some(failed(log, PythonFailureKind::Failed, 1));
+        }
+        Err(err) => {
+            let err = TryError::io("locking the agents folder", &err, config);
+            super::push_error(&mut log, &err);
+            return Some(failed(log, PythonFailureKind::Failed, 1));
+        }
+    }
     let mut tries = 0_u32;
     loop {
         if job.cancel().is_cancelled() {
@@ -138,7 +153,7 @@ async fn attempt<T: Timer + Send + Sync>(
     archive: &PythonArchive,
 ) -> Result<(), Stop> {
     let config = &job.config;
-    check_disk(config, archive)?;
+    check_disk(job, archive)?;
     let dest = files::downloads_dir(&config.data_dir).join(archive.name());
     fetch(job, archive, &dest)?;
     if !job
@@ -179,18 +194,26 @@ async fn attempt<T: Timer + Send + Sync>(
 }
 
 /// `DiskFull` when the free space at the data folder is below the archive, its unpacked size
-/// and 10 %. A free space that cannot be read is not checked.
-fn check_disk(config: &AgentsConfig, archive: &PythonArchive) -> Result<(), TryError> {
+/// and 10 %, with what every other running try still needs (`Shared::check_python_space`). A
+/// free space that cannot be read is not checked.
+fn check_disk<T: Timer + Send + Sync>(
+    job: &Job<T>,
+    archive: &PythonArchive,
+) -> Result<(), TryError> {
+    let config = &job.config;
     let base = archive.size().saturating_add(archive.unpacked_bytes());
     let need = base.saturating_add(base.div_ceil(10));
-    match disk::free_bytes(&config.data_dir) {
-        Ok(free) if free < need => Err(TryError::new(
-            Next::DiskFull,
-            &format!("{} MB free, {} MB needed", free / MB, need.div_ceil(MB)),
-            config,
-        )),
-        _ => Ok(()),
-    }
+    let free = disk::free_for(config);
+    job.shared
+        .check_python_space(&job.ticket, need, free)
+        .map_err(|need| {
+            let free = free.unwrap_or(0);
+            TryError::new(
+                Next::DiskFull,
+                &format!("{} MB free, {} MB needed", free / MB, need.div_ceil(MB)),
+                config,
+            )
+        })
 }
 
 /// Fetches the archive to `dest`, or copies it from the offline bundle, sending progress.
