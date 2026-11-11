@@ -188,8 +188,9 @@ on Windows.
    forwarded.
 4. An object whose `method` is exactly `tools/call` (case-sensitive, as `mcp.rs:700-709`
    matches) names a tool that is not on the allowlist, a missing or non-string name included.
-   Only the 29 tools of agent-browser v0.41.1's `core` profile pass (`ALLOWED_TOOLS`, from
-   `cli/src/mcp.rs:340-370` at the tag), the profile the host starts it with
+   Only 28 of the 29 tools of agent-browser v0.41.1's `core` profile pass (`ALLOWED_TOOLS`,
+   from `cli/src/mcp.rs:340-370` at the tag; `agent_browser_eval` is left out, as page
+   JavaScript is off for both agents), the profile the host starts it with
    (`crates/profile/src/servers.rs:81`): the guard enforces the core profile itself, so an agent
    that runs the guard with `--tools all` gains nothing, and a new or renamed tool is refused,
    never let through. `agent_browser_tools_profiles` only prints the profiles and is on the list.
@@ -243,8 +244,7 @@ on Windows.
      (`mcp.rs:2679-2681`).
    - **`extraArgs` tokens allowed:** `--json`, `--full`, `-i`, `--quiet`, `-q`, `--annotate`.
    - **Any other string shaped like a flag:** a string at any depth of the arguments (except
-     inside `extraArgs`, and `agent_browser_eval`'s `script`, which travels on stdin, never
-     argv, `mcp.rs:3950-3957`) that is `-` or `--`, then a name of ASCII letters, digits and
+     inside `extraArgs`) that is `-` or `--`, then a name of ASCII letters, digits and
      inner dashes that starts with a letter and does not end in a dash, then optionally `=` and
      anything. agent-browser puts typed values into the CLI's argv, and "the CLI reads global
      flags anywhere in argv" (`mcp.rs:2659-2661`; the CLI's loop, `flags.rs:820-900`), so a
@@ -903,7 +903,7 @@ and the agent waited for it in vain.
   Windows still refuses; the profile's deletion at the guard's exit takes any left.
 
 **Why a block in the next result.** agent-browser 0.41.1's MCP tools have no download tool: a
-download starts from a click, an `open` or `eval`, and the click's result comes back before
+download starts from a click or an `open`, and the click's result comes back before
 Chrome names the file (up to one 200 ms poll later). The guard already reads every reply line to
 take its id off the in-flight list; adding one block to a tool call's result changes none of
 agent-browser's content, and needs no new message type the agent's client would have to know.
@@ -1635,11 +1635,11 @@ Record 0030 has the entry; this is the browser's side of it.
   (`actor/turn/asks.rs`), as Claude's allow rules do for its shell browser, so prompt injection
   could make either agent open a URL carrying text from the conversation. All of this is what
   Claude's unfenced shell browser can do in the plain client, and it is accepted for launch.
-  `eval` keeps asking in both agents (Codex: the host never answers `agent_browser_eval`; Claude:
-  no allow rule, and `wait --fn` asks), which narrows H2 to redirects: the script route needs the
-  lawyer's approval. The after-launch fix, for both agents' browsers, is a guard-local proxy with
-  an open allowlist that refuses private and loopback addresses after the DNS lookup, with
-  Chrome's `--proxy-bypass-list=<-loopback>` so loopback goes through it too.
+  `eval` is off in both agents (Codex: the guard refuses `agent_browser_eval`; Claude: a
+  `permissions.deny` rule, and `wait --fn` asks), which narrows H2 to redirects: the script route
+  is closed, and no lawyer is asked. The after-launch fix, for both agents' browsers, is a
+  guard-local proxy with an open allowlist that refuses private and loopback addresses after
+  the DNS lookup, with Chrome's `--proxy-bypass-list=<-loopback>` so loopback goes through it too.
 
 ## Consequences
 
