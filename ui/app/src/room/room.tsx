@@ -61,6 +61,7 @@ import { Conversations } from "./conversations.ts";
 import { AllThreads } from "./all-threads.ts";
 import { useRailShown } from "@clauseo/components/clauseo/rail-shown.ts";
 import { UpdateNotice } from "./update-notice.tsx";
+import { useHostFullScreen } from "./host-full-screen.ts";
 import { handWaits } from "./triage.ts";
 import { LivePlan } from "./limits/live-plan.tsx";
 import { Matters, type MattersView } from "./matters.ts";
@@ -401,6 +402,8 @@ function RoomFrame({
   const caption = useWindowFrame(wired);
   // R23's update notice: at the rail's foot where the rail stands beside the work, else at the head of the wall
   const atRail = useRailShown() && versions.rail == null;
+  // the desktop's own word on macOS's full screen: a notched Mac's full-screen window is shorter than its screen
+  const hostFullScreen = useHostFullScreen(transport);
   const notice = <UpdateNotice transport={transport} threads={threads} />;
   const title =
     open !== null
@@ -424,6 +427,7 @@ function RoomFrame({
         chrome="own"
         caption={caption}
         nativeLights={controls !== null}
+        {...(hostFullScreen === undefined ? {} : { fullScreen: hostFullScreen })}
         brand
         search={false}
         unprotected={unprotectedFolder(open?.folder_support) || shield.explain !== undefined}

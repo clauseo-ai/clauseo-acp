@@ -58,6 +58,7 @@ import type {
   UpdateView,
   ViewPosition,
 } from "./protocol.ts";
+import { FullScreenFeed } from "./full-screen-feed.ts";
 import { LimitsFeed, limitsOf, type LimitsSource } from "./limits-feed.ts";
 import { Subscriptions } from "./subscriptions.ts";
 import type { SendMarks } from "../start-marks.ts";
@@ -177,6 +178,7 @@ export class FakeTransport implements HostTransport, NextHostSource, LimitsSourc
   readonly #settingsHeard = new Set<(settings: Settings) => void>();
   readonly #appHeard = new Set<(event: AppEvent) => void>();
   readonly #limits = new LimitsFeed((problem) => this.problems.push(problem));
+  readonly #fullScreen = new FullScreenFeed((problem) => this.problems.push(problem));
   /** H14's settings window, when `host.openSettings` scripts it. */
   readonly openSettings: ((section?: SettingsSection | null) => Promise<void>) | undefined;
   /** The setup wire, when `host.setup` scripts it (store/setup.ts's SetupSource). */
@@ -321,6 +323,7 @@ export class FakeTransport implements HostTransport, NextHostSource, LimitsSourc
     this.#reader = new ChannelReader(
       (event: ChannelEvent) => {
         const failed = streamFailedOf(event);
+        if (this.#fullScreen.take(event)) return;
         if (failed !== null) this.#subs.fail(failed.stream, toHostError(failed.error));
         else if ("patches" in event && event.patches !== undefined)
           this.#subs.deliver(event.patches);
@@ -350,6 +353,11 @@ export class FakeTransport implements HostTransport, NextHostSource, LimitsSourc
   onLimits(listener: (view: LimitsView) => void): () => void {
     return this.#limits.onLimits(listener);
   }
+
+  /** Plays `window_full_screen` on the channel, as the desktop sends it on the app feed (FullScreenSource). */
+  fullScreenChanged = (full: boolean) => this.deliver({ window_full_screen: full });
+  onFullScreen: FullScreenFeed["onFullScreen"] = (listener) =>
+    this.#fullScreen.onFullScreen(listener);
 
   /** The `refresh_limits` commands dispatched, in order: the agent (undefined for every agent) and why. */
   refreshes(): { agent: AgentKind | undefined; why: RefreshWhy }[] {

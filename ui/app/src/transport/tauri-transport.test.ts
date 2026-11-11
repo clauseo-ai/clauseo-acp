@@ -404,6 +404,30 @@ describe("TauriTransport", () => {
     expect(acks()).toEqual([{ positions: [], messages: 2 }]);
   });
 
+  test("window_full_screen subscribes the app feed, reaches every listener, a later one hears the last value, and is acked", async () => {
+    const { t, got, send, frame, acks } = await rig("a");
+    const heard: unknown[] = [];
+    const stop = t.onFullScreen((v) => heard.push(["one", v]));
+    await settle();
+    expect(invoked.filter((i) => i.command === "subscribe_app")).toHaveLength(1);
+    send({ window_full_screen: true });
+    t.onFullScreen((v) => heard.push(["two", v]));
+    expect(heard).toEqual([
+      ["one", true],
+      ["two", true],
+    ]);
+    stop();
+    send({ window_full_screen: false });
+    expect(heard).toEqual([
+      ["one", true],
+      ["two", true],
+      ["two", false],
+    ]);
+    expect(got).toEqual([]);
+    await frame();
+    expect(acks()).toEqual([{ positions: [], messages: 2 }]);
+  });
+
   test("outside Tauri the page transport reaches nothing", async () => {
     const t = pageTransport();
     expect(t.kind).toBe("null");
