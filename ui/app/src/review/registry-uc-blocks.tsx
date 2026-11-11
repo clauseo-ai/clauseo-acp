@@ -25,18 +25,12 @@ export const UC_BLOCKS: Entry[] = [
   room(
     "UC-80",
     pw(
-      "Something on this computer stops the Safe workspace, so Clauseo can read any file you can open on it. It asks before changing anything outside this matter's folder.",
+      "Something on this computer stops the Safe workspace, so Clauseo can read any file you can open on it.",
     ),
     "room/np-note",
     note(P.policy),
   ),
-  settings(
-    "UC-81",
-    pw(
-      "Something on this computer stops the Safe workspace, so Clauseo asks before changing anything outside a matter's folder.",
-    ),
-    held(P.policy),
-  ),
+  settings("UC-81", pw("Something on this computer stops the Safe workspace."), held(P.policy)),
   settings(
     "UC-82",
     pw("A Windows policy on this computer blocks the program that sets up the Safe workspace."),

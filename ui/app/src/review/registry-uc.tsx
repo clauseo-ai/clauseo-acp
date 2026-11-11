@@ -206,9 +206,7 @@ export const UC: Entry[] = [
   room("UC-02", toolbarWords("Not protected."), "room/protection-line", { protection: P.refused }),
   room(
     "UC-03",
-    toolbarWords(
-      "Clauseo changes files in this matter without asking, and asks before changing files outside it.",
-    ),
+    toolbarWords("Clauseo changes files in this matter without asking."),
     "room/protection-line",
     {
       protection: P.refused,
@@ -246,7 +244,7 @@ export const UC: Entry[] = [
   room(
     "UC-21",
     versionWords(
-      "The Safe workspace is off for {matter}. Claude changes files in this matter without asking, and asks before changing files outside it. ChatGPT can read any file you can open, and asks before changing files outside this matter's folder.",
+      "The Safe workspace is off for {matter}. Claude changes files in this matter without asking. ChatGPT can read any file you can open, and asks before changing files outside this matter's folder.",
     ),
     "room/np-note",
     note(P.off),
@@ -254,7 +252,7 @@ export const UC: Entry[] = [
   room(
     "UC-22",
     pw(
-      "The Safe workspace isn't set up on this computer yet. Until it is, Clauseo can read any file you can open on this computer, and asks before changing anything outside this matter's folder.",
+      "The Safe workspace isn't set up on this computer yet. Until it is, Clauseo can read any file you can open on this computer.",
     ),
     "room/np-note",
     note(P.needs),
@@ -262,7 +260,7 @@ export const UC: Entry[] = [
   room(
     "UC-23",
     pw(
-      "The Safe workspace couldn't be set up on this computer, so Clauseo can read any file you can open on it. It asks before changing anything outside this matter's folder.",
+      "The Safe workspace couldn't be set up on this computer, so Clauseo can read any file you can open on it.",
     ),
     "room/np-note",
     note(P.refused),
@@ -276,7 +274,7 @@ export const UC: Entry[] = [
   room(
     "UC-25",
     pw(
-      "This computer can't run the Safe workspace, so Clauseo can read any file you can open on it. It asks before changing anything outside this matter's folder.",
+      "This computer can't run the Safe workspace, so Clauseo can read any file you can open on it.",
     ),
     "room/np-note",
     note(P.cant),
@@ -335,19 +333,19 @@ export const UC: Entry[] = [
   room(
     "UC-38",
     pw(
-      "This version of Clauseo doesn't have the Safe workspace yet. It comes in an update. Until then, Clauseo can read any file you can open on this computer, and asks before changing anything outside this matter's folder.",
+      "This version of Clauseo doesn't have the Safe workspace yet. It comes in an update. Until then, Clauseo can read any file you can open on this computer.",
     ),
     "room/np-note",
     note(np({ unsupported: { why: "not_built" } })),
   ),
   settings(
     "UC-36",
-    "The Safe workspace isn't available on Windows on ARM yet, so Clauseo asks before changing anything outside a matter's folder.",
+    "The Safe workspace isn't available on Windows on ARM yet.",
     held(np({ unsupported: { why: "windows_arm" } })),
   ),
   settings(
     "UC-37",
-    "This version of Clauseo doesn't have the Safe workspace yet. It comes in an update. Until then, Clauseo asks before changing anything outside a matter's folder.",
+    "This version of Clauseo doesn't have the Safe workspace yet. It comes in an update.",
     held(np({ unsupported: { why: "not_built" } })),
   ),
   room("UC-40", pw("Set up the Safe workspace?"), "room/protection-confirm", {
@@ -418,34 +416,18 @@ export const UC: Entry[] = [
   settings("UC-64", "Windows keeps Clauseo inside each matter's folder.", held(P.a)),
   settings("UC-65", "Set up with Windows' permission.", held(P.b)),
   settings("UC-66", "Not protected", held(P.needs)),
-  settings(
-    "UC-67",
-    "The Safe workspace isn't set up on this computer yet, so Clauseo asks before changing anything outside a matter's folder.",
-    held(P.needs),
-  ),
-  settings(
-    "UC-68",
-    "Windows didn't allow the set-up, so Clauseo asks before changing anything outside a matter's folder.",
-    held(P.refused),
-  ),
+  settings("UC-67", "The Safe workspace isn't set up on this computer yet.", held(P.needs)),
+  settings("UC-68", "Windows didn't allow the set-up.", held(P.refused)),
   settings(
     "UC-69",
     "Set up on {date}, with Windows' permission.",
     held(P.b, { set_up_at: Date.UTC(2026, 10, 3, 6, 0) } as Partial<ProtectionView>),
   ),
-  settings(
-    "UC-70",
-    "The Safe workspace couldn't be set up on this computer, so Clauseo asks before changing anything outside a matter's folder.",
-    held(P.failed),
-  ),
-  settings(
-    "UC-71",
-    "This computer can't run the Safe workspace, so Clauseo asks before changing anything outside a matter's folder.",
-    held(P.cant),
-  ),
+  settings("UC-70", "The Safe workspace couldn't be set up on this computer.", held(P.failed)),
+  settings("UC-71", "This computer can't run the Safe workspace.", held(P.cant)),
   settings(
     "UC-72",
-    "The Safe workspace isn't available on Linux yet, so Clauseo asks before changing anything outside a matter's folder.",
+    "The Safe workspace isn't available on Linux yet.",
     held(np({ unsupported: { why: "os" } })),
   ),
   settings("UC-73", "Set up again", held(P.refused, NO_PROMPT)),

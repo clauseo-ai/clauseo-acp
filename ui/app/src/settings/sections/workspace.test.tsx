@@ -87,19 +87,14 @@ test.each([
   [
     "needs_set_up",
     PROT.needs,
-    "The Safe workspace isn't set up on this computer yet, so Clauseo asks before changing anything outside a matter's folder.",
+    "The Safe workspace isn't set up on this computer yet.",
     "Set up the Safe workspace",
   ],
-  [
-    "set_up_refused",
-    PROT.refused,
-    "Windows didn't allow the set-up, so Clauseo asks before changing anything outside a matter's folder.",
-    "Set up again",
-  ],
+  ["set_up_refused", PROT.refused, "Windows didn't allow the set-up.", "Set up again"],
   [
     "set_up_failed",
     PROT.failed,
-    "The Safe workspace couldn't be set up on this computer, so Clauseo asks before changing anything outside a matter's folder.",
+    "The Safe workspace couldn't be set up on this computer.",
     "Set up again",
   ],
 ] as const)(
@@ -287,12 +282,7 @@ test("admin_copy_missing on a per-user install: not set up yet, the repair, and 
   scripted.update = { current: "0.1.0", mode: "auto", state: "idle" };
   const t = await mount({ view: () => view(PROT.missing) });
   expect(block()?.dataset["state"]).toBe("blocked");
-  expect(text()).toContain(
-    st(
-      "en",
-      "The Safe workspace isn't set up on this computer yet, so Clauseo asks before changing anything outside a matter's folder.",
-    ),
-  );
+  expect(text()).toContain(st("en", "The Safe workspace isn't set up on this computer yet."));
   expect(one("protection-block")?.textContent).toBe(
     pw("en", "The Safe workspace wasn't set up when Clauseo was installed."),
   );
@@ -371,12 +361,7 @@ test.each([
   async (_c, p, line) => {
     await mount({ view: () => view(p, { unprotected_auto_allowed: false }) });
     expect(block()?.dataset["state"]).toBe("blocked");
-    expect(text()).toContain(
-      pw(
-        "en",
-        "Something on this computer stops the Safe workspace, so Clauseo asks before changing anything outside a matter's folder.",
-      ),
-    );
+    expect(text()).toContain(pw("en", "Something on this computer stops the Safe workspace."));
     expect(one("protection-block")?.textContent).toBe(line);
     expect(one("protection-it")?.textContent).toBe("Copy details for IT");
     expect(one("protection-repair")).toBeNull();

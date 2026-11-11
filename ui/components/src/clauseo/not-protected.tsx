@@ -20,8 +20,8 @@ export function NotProtectedMark({
   | { short: true; meaning?: undefined }
   | {
       short?: false;
-      /** What Not protected means, in the caller's words, true for the plan it runs: Claude changes files in this matter without asking and asks before changing files outside it;
-       * ChatGPT reads any file the lawyer can open and asks before changing anything outside the matter's folder.
+      /** What Not protected means, in the caller's words, true for the plan it runs: Claude changes files in this matter without asking;
+       * ChatGPT reads any file the lawyer can open and asks before changing files outside the matter's folder.
        * Protection switched off says the same, since the host runs each plan there as it does without protection. */
       meaning: string;
     }
