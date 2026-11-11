@@ -5,6 +5,12 @@ use serde_json::Value;
 
 /// The pattern string that matches any present value.
 pub(crate) const ANY: &str = "{{any}}";
+/// An array pattern that starts with it matches an array holding, for each of its other items,
+/// at least one item that matches it, in any order and among any others.
+pub(crate) const INCLUDES: &str = "{{includes}}";
+/// An array pattern that starts with it matches an array (or a missing value) holding no item
+/// that matches any of its other items.
+pub(crate) const EXCLUDES: &str = "{{excludes}}";
 /// The placeholder for the current session's `cwd`.
 pub(crate) const CWD: &str = "{{cwd}}";
 
@@ -48,14 +54,33 @@ pub(crate) fn scalar_eq(left: &Value, right: &Value) -> bool {
 /// Matches `actual` against `pattern`. `pointer` is the JSON pointer of both, for the message.
 ///
 /// An object pattern matches when every key it names matches; extra keys are fine. Arrays match
-/// element by element with equal length. `"{{any}}"` matches any present value. Scalars match
-/// by equality. The error names the first pointer that differs.
+/// element by element with equal length, unless the pattern starts with [`INCLUDES`] or
+/// [`EXCLUDES`]. `"{{any}}"` matches any present value. Scalars match by equality. The error
+/// names the first pointer that differs.
 pub(crate) fn matches(
     pattern: &Value,
     actual: Option<&Value>,
     pointer: &str,
 ) -> Result<(), String> {
     let at = if pointer.is_empty() { "/" } else { pointer };
+    if let Some((mode, wanted)) = membership(pattern) {
+        let items = match actual {
+            Some(Value::Array(items)) => items.as_slice(),
+            None if mode == EXCLUDES => &[],
+            Some(other) => return Err(format!("{at}: expected an array, got {}", short(other))),
+            None => return Err(format!("{at}: missing, expected {}", short(pattern))),
+        };
+        for want in wanted {
+            let found = items
+                .iter()
+                .any(|item| matches(want, Some(item), pointer).is_ok());
+            if found != (mode == INCLUDES) {
+                let verb = if found { "holds" } else { "lacks" };
+                return Err(format!("{at}: {verb} {}", short(want)));
+            }
+        }
+        return Ok(());
+    }
     let Some(actual) = actual else {
         return Err(format!("{at}: missing, expected {}", short(pattern)));
     };
@@ -93,6 +118,18 @@ pub(crate) fn matches(
             short(actual)
         )),
     }
+}
+
+/// An array pattern's [`INCLUDES`] or [`EXCLUDES`] and the items after it.
+fn membership(pattern: &Value) -> Option<(&'static str, &[Value])> {
+    let Value::Array(items) = pattern else {
+        return None;
+    };
+    let (first, rest) = items.split_first()?;
+    [INCLUDES, EXCLUDES]
+        .into_iter()
+        .find(|mode| first.as_str() == Some(*mode))
+        .map(|mode| (mode, rest))
 }
 
 /// Checks that every pointer in `off` is off in `actual`: missing, `null`, `false`, or a
@@ -144,6 +181,37 @@ pub(crate) fn cut(text: &str) -> String {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn includes_and_excludes() {
+        let message = json!({"allow": ["Read(//x)", "Bash(npm test)", {"a": 1}]});
+        let check = |pattern: Value| matches(&pattern, Some(&message), "");
+        assert_eq!(
+            check(json!({"allow": ["{{includes}}", "Bash(npm test)"]})),
+            Ok(())
+        );
+        assert_eq!(
+            check(json!({"allow": ["{{includes}}", {"a": "{{any}}"}]})),
+            Ok(())
+        );
+        assert_eq!(
+            check(json!({"allow": ["{{includes}}", "Bash(ls)"]})),
+            Err(r#"/allow: lacks "Bash(ls)""#.to_owned())
+        );
+        assert_eq!(
+            check(json!({"allow": ["{{excludes}}", "Bash(ls)"]})),
+            Ok(())
+        );
+        assert_eq!(check(json!({"deny": ["{{excludes}}", "Bash(ls)"]})), Ok(()));
+        assert_eq!(
+            check(json!({"allow": ["{{excludes}}", "Bash(npm test)"]})),
+            Err(r#"/allow: holds "Bash(npm test)""#.to_owned())
+        );
+        assert_eq!(
+            check(json!({"deny": ["{{includes}}", "x"]})),
+            Err(r#"/deny: missing, expected ["{{includes}}","x"]"#.to_owned())
+        );
+    }
 
     #[test]
     fn pattern_subset_and_off() {
