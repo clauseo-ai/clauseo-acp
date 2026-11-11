@@ -1,8 +1,11 @@
 //! The Worker's two handlers, the only code that touches the request, D1 and the clock. A request
 //! goes through the steps in this order, and stops at the first that refuses it: method and
 //! path, the two headers, a read capped at the gzip limit, the inflate, the crate's parser, the
-//! hourly count, then the rows. Nothing before the hourly count touches D1, so a refused request
+//! daily count, then the rows. Nothing before the daily count touches D1, so a refused request
 //! never does.
+//!
+//! This is the only file that touches the request; `tests/source.test.mjs` holds it to the one
+//! `header` function below, with its two names.
 
 use futures_util::StreamExt;
 use worker::wasm_bindgen::JsValue;
@@ -14,7 +17,7 @@ use worker::{
 use clauseo_counts::schema::Time;
 
 use crate::body::{Limited, check_headers, inflate};
-use crate::retention::{deletes, hour};
+use crate::retention::Pruner;
 use crate::route::{Refusal, Route};
 use crate::rows::{Accepted, BUMP_RATE, Param, accept};
 
@@ -57,9 +60,9 @@ async fn fetch(mut request: Request, env: Env, _context: Context) -> worker::Res
     };
     let response = Response::empty()?.with_status(status);
     if status == Refusal::Method.status() {
-        let headers = worker::Headers::new();
-        headers.set("Allow", "POST")?;
-        return Ok(response.with_headers(headers));
+        let allow = worker::Headers::new();
+        allow.set("Allow", "POST")?;
+        return Ok(response.with_headers(allow));
     }
     Ok(response)
 }
@@ -75,29 +78,35 @@ async fn receive(request: &mut Request, env: &Env) -> Result<(), Refusal> {
     let now = now();
     let accepted = accept(route, &json, now)?;
     let db = env.d1(DB)?;
-    let count = bump(&db, route, now).await?;
-    if count > route.hourly_cap() {
-        return Err(Refusal::Busy);
-    }
+    bump(&db, route, now).await?;
     store(&db, accepted).await
 }
 
-/// The body, refused as soon as it passes `cap`.
+/// The body, refused as soon as it passes `cap`. A request with no body is refused like an
+/// empty one.
 async fn read(request: &mut Request, cap: usize) -> Result<Vec<u8>, Refusal> {
     let mut body = Limited::new(cap);
-    let mut stream = request.stream()?;
+    let Ok(mut stream) = request.stream() else {
+        return Err(Refusal::Bad);
+    };
     while let Some(chunk) = stream.next().await {
         body.push(&chunk?)?;
     }
     Ok(body.into_bytes())
 }
 
-/// Adds this request to the route's count for the hour, and returns the count.
-async fn bump(db: &D1Database, route: Route, now: Time) -> Result<i64, Refusal> {
-    let hour = hour(now).ok_or(Refusal::Failed)?;
-    let values = [Param::Text(route.name().to_owned()), Param::Int(hour)];
+/// Adds this request to the route's count for the UTC day, or refuses it with
+/// [`Refusal::Busy`] when the count is at the cap, which then stays as it was.
+async fn bump(db: &D1Database, route: Route, now: Time) -> Result<(), Refusal> {
+    let today = now.day().ok_or(Refusal::Failed)?;
+    let cap = i32::try_from(route.daily_cap())?;
+    let values = [
+        Param::Text(route.name().to_owned()),
+        Param::Text(today.to_string()),
+        Param::Int(cap),
+    ];
     let count: Option<i64> = statement(db, BUMP_RATE, &values)?.first(Some("n")).await?;
-    count.ok_or(Refusal::Failed)
+    count.map(drop).ok_or(Refusal::Busy)
 }
 
 /// Inserts every row in one batch, which D1 runs as one transaction.
@@ -123,20 +132,27 @@ fn statement(db: &D1Database, sql: &str, values: &[Param]) -> Result<D1PreparedS
     Ok(db.prepare(sql).bind(&values)?)
 }
 
-/// The weekly deletes. A failed run is not retried or recorded (the Worker keeps no logs); the
-/// next Monday's run deletes the same rows and more.
+/// The daily deletes ([`Pruner`]). A failed run is not retried or recorded (the Worker keeps
+/// no logs); the next day's run deletes the same rows and more.
 #[event(scheduled)]
 async fn scheduled(_event: ScheduledEvent, env: Env, _context: ScheduleContext) {
     prune(&env).await.unwrap_or_default();
 }
 
+/// A deleted row's key, the one column each chunked delete returns.
+#[derive(serde::Deserialize)]
+struct Key {
+    #[serde(alias = "install", alias = "tally")]
+    key: String,
+}
+
 async fn prune(env: &Env) -> Result<(), Refusal> {
     let db = env.d1(DB)?;
-    let statements = deletes(now())
-        .ok_or(Refusal::Failed)?
-        .iter()
-        .map(|(sql, cut)| statement(&db, sql, std::slice::from_ref(cut)))
-        .collect::<Result<Vec<_>, _>>()?;
-    db.batch(statements).await?;
+    let mut pruner = Pruner::new(now()).ok_or(Refusal::Failed)?;
+    while let Some((sql, values)) = pruner.next() {
+        let keys: Vec<Key> = statement(&db, sql, &values)?.all().await?.results()?;
+        let keys: Vec<String> = keys.into_iter().map(|row| row.key).collect();
+        pruner.record(&keys);
+    }
     Ok(())
 }

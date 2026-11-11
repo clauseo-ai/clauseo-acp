@@ -1,15 +1,17 @@
 //! The two routes, what each may carry, and the statuses the Worker answers with. Every cap here
-//! is the crate's own constant ([`clauseo_counts::schema`]) except the hourly caps, which are
+//! is the crate's own constant ([`clauseo_counts::schema`]) except the daily caps, which are
 //! the Worker's and live only here.
 
 use clauseo_counts::schema::{
     Invalid, MAX_COUNTS_GZIP, MAX_COUNTS_JSON, MAX_TALLY_GZIP, MAX_TALLY_JSON,
 };
 
-/// The most `/v1/counts` requests the Worker stores in one UTC hour, across every sender.
-pub(crate) const HOURLY_CAP_COUNTS: i64 = 250;
-/// The most `/v1/tally` requests the Worker stores in one UTC hour, across every sender.
-pub(crate) const HOURLY_CAP_TALLY: i64 = 100;
+/// The most `/v1/counts` requests the Worker stores in one UTC day, across every sender. A day
+/// (not an hour) because the app sends within minutes of UTC midnight. At the cap a day writes
+/// at most 3,000 × 8 rows (7 reports and the count).
+pub(crate) const DAILY_CAP_COUNTS: i64 = 3_000;
+/// The most `/v1/tally` requests the Worker stores in one UTC day, across every sender.
+pub(crate) const DAILY_CAP_TALLY: i64 = 1_000;
 
 /// A path the Worker answers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -29,7 +31,7 @@ pub(crate) enum Refusal {
     Method,
     /// Anything wrong with the headers, the body's size, its gzip or its schema.
     Bad,
-    /// The route's hourly cap is spent.
+    /// The route's daily cap is spent.
     Busy,
     /// D1 or the clock failed; the sender keeps the report and tries again later.
     Failed,
@@ -123,11 +125,11 @@ impl Route {
         }
     }
 
-    /// The most requests stored in one UTC hour.
-    pub(crate) const fn hourly_cap(self) -> i64 {
+    /// The most requests stored in one UTC day.
+    pub(crate) const fn daily_cap(self) -> i64 {
         match self {
-            Route::Counts => HOURLY_CAP_COUNTS,
-            Route::Tally => HOURLY_CAP_TALLY,
+            Route::Counts => DAILY_CAP_COUNTS,
+            Route::Tally => DAILY_CAP_TALLY,
         }
     }
 
@@ -170,8 +172,8 @@ mod tests {
         assert_eq!(Route::Counts.json_cap(), 64_000);
         assert_eq!(Route::Tally.gzip_cap(), 4_000);
         assert_eq!(Route::Tally.json_cap(), 16_000);
-        assert_eq!(Route::Counts.hourly_cap(), 250);
-        assert_eq!(Route::Tally.hourly_cap(), 100);
+        assert_eq!(Route::Counts.daily_cap(), 3_000);
+        assert_eq!(Route::Tally.daily_cap(), 1_000);
         let statuses = [
             Refusal::NotFound,
             Refusal::Method,

@@ -18,13 +18,18 @@ function edited(from, to, text = committed) {
   return text.replace(from, to);
 }
 
-test("the committed file passes, and only with the placeholder id", () => {
+const BUILD = '[build]\ncommand = "worker-build --release"\n\n';
+
+test("the committed file passes with the placeholder id and [build]; the deploy copy without", () => {
   assert.deepEqual(problems(committed), []);
-  assert.equal(problems(committed, { deployed: true }).length, 1);
-  const deployCopy = edited(PLACEHOLDER_ID, REAL_ID);
+  const deployCopy = edited(BUILD, "", edited(PLACEHOLDER_ID, REAL_ID));
   assert.deepEqual(problems(deployCopy, { deployed: true }), []);
-  assert.equal(problems(deployCopy).length, 1);
-  assert.equal(problems(edited(PLACEHOLDER_ID, "not-an-id"), { deployed: true }).length, 1);
+  // Each half of the change alone fails, in either mode.
+  assert.equal(problems(committed, { deployed: true }).length, 2);
+  assert.equal(problems(edited(PLACEHOLDER_ID, REAL_ID), { deployed: true }).length, 1, "a deploy copy that would build");
+  assert.equal(problems(edited(BUILD, ""), { deployed: true }).length, 1);
+  assert.equal(problems(deployCopy).length, 2);
+  assert.equal(problems(edited(BUILD, "", edited(PLACEHOLDER_ID, "not-an-id")), { deployed: true }).length, 1);
 });
 
 test("logs, traces and observability must each be off", () => {
@@ -71,7 +76,8 @@ test("the route is the custom domain alone, and the database the one binding", (
     ['binding = "DB"', 'binding = "OTHER"'],
     ['database_name = "clauseo-counts"', 'database_name = "other"'],
     ['migrations_dir = "migrations"', 'migrations_dir = "migrations"\npreview_database_id = "x"'],
-    ['crons = ["0 3 * * 1"]', 'crons = ["0 3 * * 1", "* * * * *"]'],
+    ['crons = ["0 3 * * *"]', 'crons = ["0 3 * * *", "* * * * *"]'],
+    ['crons = ["0 3 * * *"]', 'crons = ["0 3 * * 1"]'],
     ['command = "worker-build --release"', 'command = "worker-build --dev"'],
   ]) {
     assert.notDeepEqual(problems(edited(from, to)), [], `${from} -> ${to}`);

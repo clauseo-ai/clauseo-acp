@@ -6,8 +6,10 @@
 //
 //   node scripts/check-deploy.mjs [path] [--deployed]
 //
-// The committed file must hold the placeholder database_id; a --deployed copy must hold a real
-// one. Every other rule is the same: only the keys below, each with exactly the value below.
+// The committed file must hold the placeholder database_id and the [build] command; a
+// --deployed copy must hold a real id and no [build], so wrangler deploys what the tokenless
+// build step made and runs no build with the token present. Every other rule is the same: only
+// the keys below, each with exactly the value below.
 
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -32,7 +34,7 @@ const EXPECTED = {
     logs: { enabled: false, invocation_logs: false },
     traces: { enabled: false },
   },
-  triggers: { crons: ["0 3 * * 1"] },
+  triggers: { crons: ["0 3 * * *"] },
 };
 
 /** The one D1 binding, less its id. */
@@ -44,6 +46,8 @@ const D1 = { binding: "DB", database_name: "clauseo-counts", migrations_dir: "mi
  * @param {{ deployed?: boolean }} options
  */
 export function problems(text, { deployed = false } = {}) {
+  const expected = { ...EXPECTED };
+  if (deployed) delete expected.build;
   let config;
   try {
     config = parse(text);
@@ -52,11 +56,11 @@ export function problems(text, { deployed = false } = {}) {
   }
   const found = [];
   for (const key of Object.keys(config)) {
-    if (!(key in EXPECTED) && key !== "d1_databases") {
-      found.push(`${key}: not allowed (only ${[...Object.keys(EXPECTED), "d1_databases"].join(", ")})`);
+    if (!(key in expected) && key !== "d1_databases") {
+      found.push(`${key}: not allowed (only ${[...Object.keys(expected), "d1_databases"].join(", ")})`);
     }
   }
-  for (const [key, want] of Object.entries(EXPECTED)) {
+  for (const [key, want] of Object.entries(expected)) {
     if (!isDeepStrictEqual(plain(config[key]), want)) {
       found.push(`${key}: must be ${JSON.stringify(want)}, is ${JSON.stringify(config[key])}`);
     }

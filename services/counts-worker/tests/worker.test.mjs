@@ -1,6 +1,6 @@
 // pnpm test (tests/worker.test.mjs): the Worker under `wrangler dev --local` with its local D1.
 // What it stores, what it refuses with 400, 404 and 405, the canonical form, and the cron.
-// The hourly caps are in caps.test.mjs, against a D1 of their own.
+// The daily caps are in caps.test.mjs, against a D1 of their own.
 
 import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
@@ -87,8 +87,14 @@ test("anything outside the schema is 400 with an empty body, and never touches D
     assert.equal(await response.text(), "", name);
   }
   assert.equal((await worker.post("/v1/counts", "not json")).status, 400);
+  const noBody = await worker.send("/v1/counts", { method: "POST", headers: { "content-encoding": "gzip" } });
+  assert.equal(noBody.status, 400, "no body");
+  const emptyBody = await worker.send("/v1/counts", { method: "POST", body: "", headers: { "content-encoding": "gzip" } });
+  assert.equal(emptyBody.status, 400, "an empty body");
+  const emptyTally = await worker.send("/v1/tally", { method: "POST", body: new Uint8Array(0), headers: { "content-encoding": "gzip" } });
+  assert.equal(emptyTally.status, 400, "an empty tally body");
   assert.deepEqual(reportRows(install), []);
-  assert.equal(rateTotal(), before, "no refused request bumped the hourly count");
+  assert.equal(rateTotal(), before, "no refused request bumped the daily count");
 });
 
 test("the body must be gzip, at most 16 KB compressed and 64 KB inflated", async () => {
@@ -187,8 +193,7 @@ test("any other path is 404, another method on the two paths 405", async () => {
   }
 });
 
-test("the weekly cron deletes reports after 90 days, tallies after 396, counts after 24 hours", async () => {
-  const hour = Math.floor(Date.now() / 3_600_000);
+test("the daily cron deletes reports after 90 days, tallies after 396 and past days' counts, in chunks", async () => {
   const old = uuid();
   const kept = uuid();
   const insert = (install, dayText) =>
@@ -197,20 +202,28 @@ test("the weekly cron deletes reports after 90 days, tallies after 396, counts a
     `INSERT INTO tally VALUES ('${id}', '${weekText}', '3.0.4', 'stable', 'linux', NULL, 'x86_64', 'per_user', 0, '{}')`;
   const oldTally = uuid();
   const keptTally = uuid();
+  // A backlog of more than one 1,000-row chunk in each table: 2,500 reports and 1,200 tallies.
+  const series = (count) => `WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < ${count})`;
   worker.sql(
     [
       insert(old, day(91)),
       insert(kept, day(90)),
       tally(oldTally, week(58)),
       tally(keptTally, week(55)),
-      `INSERT INTO rate VALUES ('counts', ${hour - 25}, 3), ('tally', ${hour - 23}, 4)`,
+      `${series(2_500)} INSERT INTO report SELECT printf('%08x-0000-4000-8000-00000000000a', i), '${day(120)}', '3.0.4', 'stable', 'macos', 15, 'aarch64', 'en', '{}' FROM n`,
+      `${series(1_200)} INSERT INTO tally SELECT printf('%08x-0000-4000-8000-00000000000b', i), '${week(70)}', '3.0.4', 'stable', 'linux', NULL, 'x86_64', 'per_user', 0, '{}' FROM n`,
+      `INSERT INTO rate VALUES ('counts', '${day(1)}', 3), ('tally', '${day(2)}', 4) ON CONFLICT DO NOTHING`,
     ].join("; "),
   );
-  const response = await worker.send("/__scheduled?cron=0+3+*+*+1");
+  const count = (sql) => worker.sql(sql)[0].n;
+  assert.equal(count(`SELECT COUNT(*) AS n FROM report WHERE day < '${day(90)}'`), 2_501);
+  const response = await worker.send("/__scheduled?cron=0+3+*+*+*");
   assert.equal(response.status, 200);
   const ids = (table, column, list) =>
     worker.sql(`SELECT ${column} AS id FROM ${table} WHERE ${column} IN (${list.map((id) => `'${id}'`).join(", ")})`).map((row) => row.id);
   assert.deepEqual(ids("report", "install", [old, kept]), [kept]);
   assert.deepEqual(ids("tally", "tally", [oldTally, keptTally]), [keptTally]);
-  assert.deepEqual(worker.sql(`SELECT hour FROM rate WHERE hour < ${hour - 20}`), [{ hour: hour - 23 }]);
+  assert.equal(count(`SELECT COUNT(*) AS n FROM report WHERE day < '${day(90)}'`), 0);
+  assert.equal(count(`SELECT COUNT(*) AS n FROM tally WHERE week < '${week(56)}'`), 0);
+  assert.equal(count(`SELECT COUNT(*) AS n FROM rate WHERE day < '${day(0)}'`), 0);
 });
