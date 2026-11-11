@@ -136,7 +136,8 @@ test("opened in place: its rows, each with its icon, the paper by its file name 
       read(7, 201, "papers/2019/Lease deed.pdf"),
       agentText(8, 2, "Weighing clause nine.", "thought"),
       search(9, 202, "notice period"),
-      call(10, 203, "execute", "failed"),
+      // no title: nothing names the task (tool-rows.test.tsx has the titled ones)
+      call(10, 203, "execute", "failed", { title: "" }),
       agentText(11, 3, "Clause nine needs notice."),
     ]),
   ]);
@@ -220,8 +221,8 @@ test("two failed tasks with nothing to tell them apart say Tried to run a task. 
   h.deliver([
     reset([
       ASKED,
-      call(7, 201, "execute", "failed"),
-      call(8, 202, "execute", "failed"),
+      call(7, 201, "execute", "failed", { title: "" }),
+      call(8, 202, "execute", "failed", { title: "" }),
       agentText(9, 3, "Done."),
     ]),
   ]);

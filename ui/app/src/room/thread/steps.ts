@@ -23,7 +23,8 @@ import {
 } from "./step-names.ts";
 import { taskOf } from "./task-words.ts";
 import { toolNameOf } from "./tool-names.ts";
-import { toolDone } from "./tool-words.ts";
+import { skillDone, toolDone } from "./tool-words.ts";
+import { skillOf } from "./skill-words.ts";
 
 /** One part of an answer: a row on its own, or a group of rows folded into one line. */
 export type Segment =
@@ -102,7 +103,8 @@ function namedOf(lang: Lang, entry: ToolCallEntry): string {
   const p = placeOf(entry);
   const own = p.name ?? (p.query === null ? null : `'${p.query}'`) ?? p.what;
   // a tool's name is no words to show (tool-names.ts)
-  const title = toolNameOf(entry.title) === undefined ? titleOf(entry.title) : "";
+  const title =
+    toolNameOf(entry.title) === undefined && skillOf(entry) === null ? titleOf(entry.title) : "";
   if (own !== null) return sentenceOf(own);
   return title === "" ? steps(lang, "State not known.") : sentenceOf(title);
 }
@@ -233,6 +235,9 @@ export function doneOf(lang: Lang, entry: ToolCallEntry): string {
   const tried = entry.status !== "completed";
   const say = (done: StepKey, attempt: StepKey, vars?: Record<string, string>) =>
     steps(lang, tried ? attempt : done, vars);
+  // a skill is a guide read, never its internal name (skill-words.ts)
+  const guide = skillDone(lang, entry, tried);
+  if (guide !== null) return guide;
   const p = placeOf(entry);
   const name = p.name;
   // the agent's own words where nothing else names it: as they are once done, after the attempt once not
@@ -287,6 +292,10 @@ export function doneOf(lang: Lang, entry: ToolCallEntry): string {
       // the agent's own words for the task, else the program and the paper it ran on (D-017)
       const t = taskOf(entry);
       if (t.own !== null) return agentWords(t.own);
+      if (t.program === null && t.described !== null)
+        return say("Ran {description}.", "Tried to run {description}.", {
+          description: t.described,
+        });
       if (t.program === null)
         return tool?.as == null
           ? say("Ran a task.", "Tried to run a task.")

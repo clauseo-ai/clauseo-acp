@@ -13,6 +13,7 @@ import type { ToolCallEntry } from "../../transport/protocol.ts";
 import { turnRunning } from "./live.ts";
 import { taskOf } from "./task-words.ts";
 import { toolNameOf, type ToolAs } from "./tool-names.ts";
+import { guideOf, skillOf } from "./skill-words.ts";
 
 /** What a step touched. `name`: the paper's file name, a site, or null; `where`: its folder or full place, for the
  * hover; `query`: the words searched for; `what`: the agent's own short words for a task (a command's description). */
@@ -218,6 +219,14 @@ export function titled(entry: ToolCallEntry, plain: string, lang: Lang): string 
 /** What a step is doing now, in a sentence: "Reading Lease.pdf.", "Searching for 'notice period'.", or the agent's
  * title with its paths cut, for a kind with no words of its own. */
 export function doingOf(lang: Lang, entry: ToolCallEntry): string {
+  // a skill is a guide being read, never its internal name (skill-words.ts)
+  const skill = skillOf(entry);
+  if (skill !== null) {
+    const guide = guideOf(lang, skill);
+    return guide === null
+      ? stepLive(lang, "Reading a guide.")
+      : stepLive(lang, "Reading {name}.", { name: guide });
+  }
   const p = placeOf(entry);
   const name = p.name;
   switch (entry.kind) {
@@ -258,6 +267,8 @@ export function doingOf(lang: Lang, entry: ToolCallEntry): string {
       const t = taskOf(entry);
       if (t.own !== null) return sentenceOf(t.own);
       if (t.program === null) {
+        if (t.described !== null)
+          return stepLive(lang, "Running {description}.", { description: t.described });
         const tool = toolNameOf(entry.title)?.as;
         return stepLive(lang, tool == null ? "Running a task." : TOOL_LIVE[tool]);
       }

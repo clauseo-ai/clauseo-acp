@@ -18,6 +18,7 @@ import type {
 import { isolated } from "./thread/content.ts";
 import { inMatter, taskOf, type Task } from "./thread/task-words.ts";
 import { toolNameOf, type ToolAs } from "./thread/tool-names.ts";
+import { skillTitle } from "./thread/skill-words.ts";
 
 /** The options that change the session's mode on leaving plan mode. The window can't send one (the bridge refuses
  * it, crates/desktop/src/bridge.rs MODE_OPTIONS; a test holds the two lists equal), so the prompt never offers it. */
@@ -182,13 +183,17 @@ export function permissionModel(
   const told = task !== null && (task.own !== null || task.program !== null);
   const named = tool?.as == null || (tool.as === "execute" && told) ? null : TOOL_ASK[tool.as];
   const label = plan ?? named;
+  // a skill's internal name ("Load skill: clauseo:legal-drafting") is never shown: the ask stands alone
+  const skill =
+    call !== undefined &&
+    (skillTitle(call.title) !== null || call.tool_name?.toLowerCase() === "skill");
   return {
     offers: offersOf(entry.options),
     paper,
     asks: paper === null,
     label,
     title:
-      paper === null && call !== undefined && label === null && tool === undefined
+      paper === null && call !== undefined && label === null && tool === undefined && !skill
         ? isolated(inMatter(call.title, folder))
         : null,
     task: plan === null ? task : null,
