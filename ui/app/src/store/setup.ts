@@ -49,6 +49,9 @@ export type AgentSetup = {
   signedHere?: boolean;
   /** The code of the last setup command desktop refused for it, until its next sign-in change or a press. */
   refused?: string | undefined;
+  /** Its waiting sign-in was cancelled while it downloads, and the download carries on: its row says so, with no
+   * Cancel, until the download ends (ready, failed or paused), a sign-in starts, or the lawyer presses Sign in. */
+  stillDownloading?: boolean | undefined;
 };
 
 export type CountsState = {
@@ -168,6 +171,10 @@ export function signInAhead(state: SetupState, agent: AgentId): AgentId | null {
 }
 
 /** Whether a plan's install is under way: downloading, setting up, or waiting to reconnect. */
+/** Whether an install is downloading or installing now (not waiting offline, failed or paused). */
+const downloading = (install: InstallProgress | undefined): boolean =>
+  install === "installing" || (typeof install === "object" && install.downloading !== undefined);
+
 export function installGoing(setup: AgentSetup | undefined): boolean {
   const install = setup?.install;
   if (install === "installing") return true;
@@ -237,6 +244,10 @@ export type SetupStore = {
   signIn: (agent: AgentId, how?: { console?: boolean; again?: boolean }) => void;
   /** The waiting plan's Cancel: its sign-in waits no more, and nothing is sent; its download carries on. */
   unqueue: () => void;
+  /** A plan's Cancel on its waiting sign-in: the store's own wait ends with nothing sent, or cancel_sign_in goes. Pressed
+   * while the plan downloads, the sign-in goes but the download carries on (desktop drops only the kept press), so
+   * once that is done the plan reads signed out, `stillDownloading`. */
+  cancelSignIn: (agent: AgentId) => void;
   /** The counts switch, pressed: before the first act it is local state only; after it, `set_privacy_settings`. */
   setCounts: (on: boolean) => void;
   /** The lawyer's first act: its count, then `first_act` with the switch's value, once. */
@@ -265,6 +276,23 @@ export function createSetupStore(transport: HostTransport & SetupSource): SetupS
   };
   const agent = (id: AgentId, patch: AgentSetup) =>
     emit({ ...state, agents: { ...state.agents, [id]: { ...state.agents[id], ...patch } } });
+  const setAgent = agent;
+  /** The Cancel on a waiting sign-in, as `cancelSignIn` says. */
+  const cancelSignIn = (id: AgentId) => {
+    const going = downloading(state.agents[id]?.install);
+    const dropped: AgentSetup = { signIn: { signed_out: {} }, stillDownloading: true };
+    if (state.queued === id) {
+      emit({ ...state, queued: null, pasting: false });
+      if (going) agent(id, dropped);
+      return;
+    }
+    const kept = state.agents[id]?.signIn === "queued";
+    emit({ ...state, pasting: false });
+    void send({ cancel_sign_in: { agent: id } }).then((ok) => {
+      // desktop dropped the kept press, and says signed out as it does; the row says so at once
+      if (ok && going && kept && downloading(state.agents[id]?.install)) agent(id, dropped);
+    });
+  };
   // the plans whose start_sign_in went, on an installed plan, and whose host hasn't said anything of them since: their
   // sign-in is about to be under way, so the other plan's press in that moment waits for it too
   const starting = new Set<AgentId>();
@@ -315,6 +343,8 @@ export function createSetupStore(transport: HostTransport & SetupSource): SetupS
   };
   const signIn = (agent: AgentId, how: { console?: boolean; again?: boolean } = {}) => {
     const console = how.console === true;
+    if (state.agents[agent]?.stillDownloading === true)
+      setAgent(agent, { stillDownloading: undefined });
     if (state.queued === agent) emit({ ...state, queued: null });
     // signed in, or its sign-in under way or queued at desktop already: nothing to send, but the gate's own press,
     // which starts it over
@@ -347,6 +377,7 @@ export function createSetupStore(transport: HostTransport & SetupSource): SetupS
       const { agent: id, state: install } = event.agent_install_progress;
       const was = state.agents[id];
       const patch: AgentSetup = { install };
+      if (!downloading(install)) patch.stillDownloading = undefined;
       if (typeof install === "object" && "missing" in install && install.missing !== undefined)
         patch.mb = mbOf(install.missing.download_bytes);
       if (
@@ -370,6 +401,7 @@ export function createSetupStore(transport: HostTransport & SetupSource): SetupS
       const was = state.agents[id];
       // a new sign-in state answers whatever was refused before it
       const patch: AgentSetup = { signIn, refused: undefined };
+      if (signInBusy(signIn) || isSignedIn(signIn)) patch.stillDownloading = undefined;
       if (isSignedIn(signIn) && !isSignedIn(was?.signIn)) {
         // the first word a reused login: no sign-in step, and the through line (UD1's brief)
         const reused = typeof signIn === "object" && signIn.signed_in?.source === "reused";
@@ -459,6 +491,7 @@ export function createSetupStore(transport: HostTransport & SetupSource): SetupS
     },
     signIn,
     unqueue: () => emit({ ...state, queued: null }),
+    cancelSignIn,
     setCounts: (on) => {
       if (state.counts.locked) return;
       emit({ ...state, counts: { ...state.counts, on } });

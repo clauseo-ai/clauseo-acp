@@ -557,6 +557,26 @@ const AFTER_SIGN_IN: Entry = {
   }),
 };
 
+/** UC-230: ChatGPT's waiting sign-in cancelled while it downloads, beside Claude's download: desktop drops only the
+ * sign-in, so its row says the download carries on (the parallel installs; UC's id, this file's scene). */
+const STILL_DOWNLOADING: Entry = {
+  id: "UC-230",
+  words: firstLaunchWords(
+    "Sign-in cancelled. {name} is still downloading; sign in when it's ready.",
+  ),
+  screen: "first-launch/plan-cancel-downloading",
+  render: render({
+    first: true,
+    events: [
+      install(CLAUDE, { downloading: { received: 13_000_000, total: 165_000_000 } }),
+      signIn(CLAUDE, "queued"),
+      install(CODEX, { downloading: { received: 90_000_000, total: 139_000_000 } }),
+      signIn(CODEX, "queued"),
+    ],
+    clicks: ['[data-testid="plan-row"][data-agent="codex-acp"] [data-testid="signin-foot-cancel"]'],
+  }),
+};
+
 export const UD1: readonly Entry[] = [
   ...SCENES.flatMap((scene, i) =>
     scene === null
@@ -574,4 +594,5 @@ export const UD1: readonly Entry[] = [
   TOOLS_OFFLINE,
   ...UC_KEY,
   AFTER_SIGN_IN,
+  STILL_DOWNLOADING,
 ];

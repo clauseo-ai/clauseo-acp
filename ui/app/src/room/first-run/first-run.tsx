@@ -51,7 +51,7 @@ import { copyText, IDS, installActs, NAME, PLANS, planOf } from "./acts.ts";
 import { FirstScreen } from "./first-screen.tsx";
 import { repairOf, stepWords, type StepParts } from "./step-parts.ts";
 import { gateView, installView, queuedView, refusalView } from "./views.ts";
-import { footActs, welcomeFoot } from "./welcome-foot.tsx";
+import { footActs, stillNote, welcomeFoot } from "./welcome-foot.tsx";
 
 // UD2: the expired sign-in card rides here, with the setup store and the gate; the thread's chunk places it
 provideExpiredCard((props) => <ExpiredCard {...props} />);
@@ -76,13 +76,8 @@ function actsFor(
         store.signInTo(a.plan === "chatgpt" ? CODEX : CLAUDE);
         return;
       case "cancel":
-        store.set({ pasting: false });
-        // the plan waiting its turn stops waiting; nothing was sent for it
-        if (store.state().queued === agent) {
-          store.unqueue();
-          return;
-        }
-        store.command({ cancel_sign_in: { agent } });
+        // the plan waiting its turn stops waiting (nothing sent), or cancel_sign_in goes; its download carries on
+        store.cancelSignIn(agent);
         return;
       case "paste":
         store.set({ pasting: true });
@@ -213,13 +208,16 @@ function holdOf(
   const plan = planOf(agent);
   const setup = state.agents[agent];
   const clock = (at: number) => clockOf(at, Date.now(), room.zone, lang).time;
-  const own = installLine(
+  const line = installLine(
     lang,
     installView(setup),
     NAME[plan],
     installActs(store, agent, state.copied),
     IDS.install,
   );
+  // its sign-in cancelled while it downloads: the note under its line, as the first screen's row has it
+  const note = stillNote(lang, NAME[plan], setup);
+  const own = line?.kind === "wait" && note !== null ? { ...line, note } : line;
   // the other plan's line while it downloads or its sign-in waits, compact under this plan's: choosing a plan never
   // hides the other's download, and each line keeps its own progress and Cancel
   const other = otherLine(store, state, otherPlan(agent), lang);

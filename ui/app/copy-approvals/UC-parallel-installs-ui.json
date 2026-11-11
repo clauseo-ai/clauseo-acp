@@ -9,5 +9,16 @@
     "at": "2026-11-11",
     "by": "app track (orchestrator to approve)",
     "note": "a plan's line, its download done while the other plan's sign-in is under way: sign-ins go one at a time, and its browser opens by itself after (orchestrator's decision, parallel installs)"
+  },
+  "UC-230": {
+    "en": "Sign-in cancelled. {name} is still downloading; sign in when it's ready.",
+    "hi": "साइन-इन रद्द हुआ। {name} अभी डाउनलोड हो रहा है; तैयार होने पर साइन इन करें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-11",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-11",
+    "by": "app track (orchestrator to approve)",
+    "note": "under a plan's download line, once its waiting sign-in is cancelled: desktop drops only the sign-in and the download carries on, so the row says so and loses its Cancel until the download ends (parallel installs, Mac proof)"
   }
 }
