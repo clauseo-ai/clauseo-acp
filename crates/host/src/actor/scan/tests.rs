@@ -511,11 +511,15 @@ fn an_unknown_folder_ref_and_a_refused_folder_are_refused() {
     assert_eq!(error.code(), ErrorCode::CommandInvalid, "{error}");
     assert_eq!(host.ready_scans(), []);
 
-    // The data folder: import refuses it with everything inside it.
+    // The data folder: import refuses it with everything inside it, with the same code.
     let data = host.dir.path().join("data");
     let refused = block_on(host.host.register_folder(data)).unwrap();
     let error = host.dispatch(2, scan(refused)).unwrap_err();
-    assert_eq!(error.code(), ErrorCode::MatterFolderRefused, "{error}");
+    assert_eq!(
+        error.code(),
+        ErrorCode::MatterFolderInClauseoData,
+        "{error}"
+    );
     // The window still hears the scan ended.
     let mut last = host.next_scan();
     while !last.done {
@@ -527,10 +531,11 @@ fn an_unknown_folder_ref_and_a_refused_folder_are_refused() {
 
 /// A marker refuses no scan: one naming a matter this install never had (the import adopts it)
 /// and one that does not read (the import sets it aside) scan as any folder, and so does a copy
-/// of a listed matter's folder (it becomes a new matter). A listed matter's own folder is
-/// `matter.folder_is_matter` naming it.
+/// of a listed matter's folder (it becomes a new matter). A listed matter's own folder scans too
+/// (the import answers with that matter); a folder inside it is `matter.folder_inside_matter`
+/// naming it.
 #[test]
-fn a_marker_refuses_no_scan_and_a_listed_matters_folder_is_named() {
+fn a_marker_refuses_no_scan_and_a_folder_inside_a_listed_matters_is_named() {
     let host = Running::start("scan-markers", None);
     let marker =
         r#"{"version":1,"matter_id":"01900000-0000-7000-8000-00000000abcd","created_at":0}"#;
@@ -542,7 +547,7 @@ fn a_marker_refuses_no_scan_and_a_listed_matters_folder_is_named() {
             CommandOutcome::Done
         );
     }
-    let (path, listed) = host.folder("listed", &[("c.txt", "c")]);
+    let (path, listed) = host.folder("listed", &[("c.txt", "c"), ("sub/d.txt", "d")]);
     let create = HostCommand::CreateMatter {
         name: Title::new("M").unwrap(),
         source: MatterSource::ExistingFolder { folder: listed },
@@ -552,8 +557,13 @@ fn a_marker_refuses_no_scan_and_a_listed_matters_folder_is_named() {
     let CommandOutcome::MatterCreated { matter } = host.dispatch(3, create).unwrap() else {
         panic!("no matter");
     };
-    let error = host.dispatch(4, scan(listed)).unwrap_err();
-    assert_eq!(error.code(), ErrorCode::MatterFolderIsMatter, "{error}");
+    assert_eq!(
+        host.dispatch(4, scan(listed)).unwrap(),
+        CommandOutcome::Done
+    );
+    let inside = block_on(host.host.register_folder(path.join("sub"))).unwrap();
+    let error = host.dispatch(6, scan(inside)).unwrap_err();
+    assert_eq!(error.code(), ErrorCode::MatterFolderInsideMatter, "{error}");
     assert_eq!(error.matter(), Some(matter));
     let copied = std::fs::read(path.join(".clauseo/matter.json")).unwrap();
     let copied = String::from_utf8(copied).unwrap();

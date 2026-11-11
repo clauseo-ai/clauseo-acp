@@ -46,8 +46,8 @@ beside `v1/`, decoded and pinned the same way:
    snapshots, the crate's one way to write a file from a test. For each pair it prints the two
    `mv` commands that put the files in `corpus/added/` and the pair's `ADDED_AFTER_V1` row, with
    each file's byte length and FNV-1a hash.
-3. Run the printed `mv` commands and paste the row into `ADDED_AFTER_V1` in
-   `crates/protocol/tests/corpus/added_rows.rs`. A row whose pins are still `(0, 0)` fails with
+3. Run the printed `mv` commands and paste the row into `ADDED_AFTER_V1_2` in
+   `crates/protocol/tests/corpus/added_rows_2.rs`. A row whose pins are still `(0, 0)` fails with
    the pin to set.
 
 The test fails until this is done: the known kinds must be exactly v1's plus those of the added

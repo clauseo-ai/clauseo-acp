@@ -2,13 +2,14 @@
 //! (`HostConfig::with_folder_support`, `with_folder_check_failed`) so it runs on every OS: it
 //! answers the values a matter's row shows for the place a `CreateMatter` with the same source
 //! would use, refuses what that create refuses before its matter is made with the same codes
-//! (and then never checks), and refuses a ref the host never gave. Its deadline is in
-//! `actor/query/folder_support/tests.rs`.
+//! (and then never checks), as the folder scan does, and refuses a ref the host never gave. Its
+//! deadline is in `actor/query/folder_support/tests.rs`.
 
 use std::path::Path;
 
 use clauseo_protocol::{
-    ErrorCode, FolderRefId, FolderSupportKind, HostError, HostQuery, MatterSource, QueryResult,
+    CommandOutcome, ErrorCode, FolderRefId, FolderSupportKind, HostCommand, HostError, HostQuery,
+    MatterSource, QueryResult, Title,
 };
 
 use crate::support::{Dir, Running, wait};
@@ -85,39 +86,84 @@ fn a_picked_folder_answers_as_the_row_would() {
     }
 }
 
-/// An existing folder create refuses (the data folder or one inside it, the home folder, a
-/// drive root, another matter's folder) is refused with create's code and never checked: the
-/// fixed `network` answer never shows.
+/// An existing folder create refuses (the data folder or one inside it, the matters' history
+/// folder, the home folder, a system folder, a drive root, a folder inside or holding another
+/// matter's) is refused with create's code, naming a listed matter, and never checked: the
+/// fixed `network` answer never shows. A listed matter's own folder is not refused: the import
+/// answers with that matter.
 #[test]
 fn an_existing_folder_create_refuses_is_refused_with_its_code_and_never_checked() {
     let dir = Dir::new("folder_query_refused", &[]);
     let home = dir.folder("home-of-lawyer", &[]);
+    let system = dir.folder("system", &[]);
     let matter = dir.folder("home-of-lawyer/Case", &[("a.txt", "x\n")]);
+    let inside = dir.folder("home-of-lawyer/Case/Pleadings", &[("b.txt", "y\n")]);
+    let other = dir.folder("work/Other", &[("c.txt", "z\n")]);
     let host = network(&dir, |config| {
         config
             .with_home_folder(Some(home.clone()))
-            .with_refused_folders(vec![home.clone()])
+            .with_refused_folders(vec![home.clone(), system.clone()])
     });
-    host.create_matter("Case", &matter);
+    let case = host.create_matter("Case", &matter);
+    let other_matter = host.create_matter("Other", &other);
     let inside_data = dir.data().join("y");
     crate::write::create_dir_all(&inside_data);
-    for (folder, code) in [
+    for (folder, code, named) in [
         (
             dir.data().to_path_buf(),
-            ErrorCode::MatterFolderInMattersRoot,
+            ErrorCode::MatterFolderInClauseoData,
+            None,
         ),
         // Inside the data folder: import's protected-tree check, after the registry.
-        (inside_data, ErrorCode::MatterFolderInMattersRoot),
-        (home, ErrorCode::MatterFolderIsHome),
-        (Path::new("/").to_path_buf(), ErrorCode::MatterFolderIsDrive),
-        (matter, ErrorCode::MatterFolderIsMatter),
+        (inside_data, ErrorCode::MatterFolderInClauseoData, None),
+        (
+            dir.data().join("matters"),
+            ErrorCode::MatterFolderInMattersRoot,
+            None,
+        ),
+        (home, ErrorCode::MatterFolderIsHome, None),
+        (system, ErrorCode::MatterFolderIsSystem, None),
+        (
+            Path::new("/").to_path_buf(),
+            ErrorCode::MatterFolderIsDrive,
+            None,
+        ),
+        (inside, ErrorCode::MatterFolderInsideMatter, Some(case)),
+        (
+            other.parent().unwrap().to_owned(),
+            ErrorCode::MatterFolderHoldsMatter,
+            Some(other_matter),
+        ),
     ] {
-        let source = MatterSource::ExistingFolder {
-            folder: register(&host, &folder),
-        };
-        let error = asked(&host, source).unwrap_err();
-        assert_eq!(error.code(), code, "{}: {error:?}", folder.display());
+        let folder_ref = register(&host, &folder);
+        let source = MatterSource::ExistingFolder { folder: folder_ref };
+        // The query, the folder scan and the import itself give the same code.
+        let scanned = host.dispatch(HostCommand::ScanFolder { folder: folder_ref });
+        let imported = host.dispatch(HostCommand::CreateMatter {
+            name: Title::new("Smith v Jones").unwrap(),
+            source: source.clone(),
+            client: None,
+            next_date: None,
+        });
+        for (step, error) in [
+            ("query", asked(&host, source).unwrap_err()),
+            ("scan", scanned.unwrap_err()),
+            ("import", imported.unwrap_err()),
+        ] {
+            assert_eq!(error.code(), code, "{step} {}: {error:?}", folder.display());
+            assert_eq!(error.matter(), named, "{step} {}", folder.display());
+        }
     }
+    let folder = register(&host, &matter);
+    let source = MatterSource::ExistingFolder { folder };
+    assert_eq!(
+        asked(&host, source).unwrap(),
+        Some(FolderSupportKind::Network)
+    );
+    assert_eq!(
+        host.dispatch(HostCommand::ScanFolder { folder }),
+        Ok(CommandOutcome::Done)
+    );
     host.shutdown();
 }
 
@@ -158,17 +204,22 @@ fn a_new_folder_inside_the_data_folder_is_refused_and_the_home_holding_it_is_not
     let host = network(&dir, |config| {
         config.with_home_folder(Some(dir.home().to_owned()))
     });
-    for parent in [dir.data().to_path_buf(), dir.data().join("matters"), inside] {
+    for (parent, code) in [
+        (
+            dir.data().to_path_buf(),
+            ErrorCode::MatterFolderInClauseoData,
+        ),
+        (
+            dir.data().join("matters"),
+            ErrorCode::MatterFolderInMattersRoot,
+        ),
+        (inside, ErrorCode::MatterFolderInClauseoData),
+    ] {
         let source = MatterSource::NewFolder {
             folder: register(&host, &parent),
         };
         let error = asked(&host, source).unwrap_err();
-        assert_eq!(
-            error.code(),
-            ErrorCode::MatterFolderInMattersRoot,
-            "{}: {error:?}",
-            parent.display()
-        );
+        assert_eq!(error.code(), code, "{}: {error:?}", parent.display());
     }
     let source = MatterSource::NewFolder {
         folder: register(&host, dir.home()),

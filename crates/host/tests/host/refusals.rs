@@ -1,6 +1,7 @@
 //! A refused folder gets one code per reason (decision record 0022): a drive root, the home
-//! folder, a system folder, a folder that does not read, a folder that holds or sits inside
-//! another matter's (naming it), Clauseo's own data folder, and on Windows a path too long for
+//! folder, a system folder, a folder that does not read, a folder that sits inside another
+//! matter's or holds it (naming it), Clauseo's own data folder and the matters' history folder
+//! in it, and on Windows a path too long for
 //! Windows to start programs in. A listed matter's own folder, by any spelling, is not refused:
 //! the import answers with that matter. A `matter.json` that does not read is set aside.
 
@@ -141,7 +142,7 @@ fn a_folder_clauseo_may_not_read_is_folder_unreadable() {
 }
 
 #[test]
-fn a_matters_folder_or_one_nested_with_it_is_folder_is_matter_naming_it() {
+fn a_folder_inside_or_holding_a_matters_folder_is_refused_naming_it() {
     let dir = Dir::new("refuse_is_matter", &[]);
     let folder = dir.folder("Smith v Jones", &[("a.txt", "x\n")]);
     let inside = dir.folder("Smith v Jones/Pleadings", &[("b.txt", "y\n")]);
@@ -149,12 +150,15 @@ fn a_matters_folder_or_one_nested_with_it_is_folder_is_matter_naming_it() {
     let matter = imported(&host, &folder);
     // The same folder is answered with the matter.
     assert_eq!(imported(&host, &folder), matter);
-    for (case, path) in [
-        ("a folder inside it", inside),
-        ("the folder holding it", folder.parent().unwrap().to_owned()),
+    for (path, code) in [
+        (inside, ErrorCode::MatterFolderInsideMatter),
+        (
+            folder.parent().unwrap().to_owned(),
+            ErrorCode::MatterFolderHoldsMatter,
+        ),
     ] {
-        let error = refused(&host, &path, ErrorCode::MatterFolderIsMatter);
-        assert_eq!(error.matter(), Some(matter), "{case}");
+        let error = refused(&host, &path, code);
+        assert_eq!(error.matter(), Some(matter), "{code}");
     }
     // A new folder inside the matter's folder too.
     let parent = wait(
@@ -169,19 +173,23 @@ fn a_matters_folder_or_one_nested_with_it_is_folder_is_matter_naming_it() {
             client: None,
             next_date: None,
         },
-        ErrorCode::MatterFolderIsMatter,
+        ErrorCode::MatterFolderInsideMatter,
     );
     assert_eq!(error.matter(), Some(matter));
     assert!(!folder.join("Appeal").exists(), "nothing was made");
     host.shutdown();
 }
 
+/// Clauseo's data folder, and a folder inside it, are `matter.folder_in_clauseo_data`; the
+/// matters' history folder in it, and a folder inside that, `matter.folder_in_matters_root`.
 #[test]
-fn clauseos_data_folder_is_folder_in_matters_root() {
+fn clauseos_data_folder_and_its_matters_folder_have_codes_of_their_own() {
     let dir = Dir::new("refuse_matters_root", &[]);
     let host = dir.start(0);
-    // The data folder itself, and the matters' history inside it.
-    refused(&host, dir.data(), ErrorCode::MatterFolderInMattersRoot);
+    let inside = dir.data().join("work");
+    write::create_dir_all(&inside);
+    refused(&host, dir.data(), ErrorCode::MatterFolderInClauseoData);
+    refused(&host, &inside, ErrorCode::MatterFolderInClauseoData);
     refused(
         &host,
         &dir.data().join("matters"),
@@ -191,9 +199,9 @@ fn clauseos_data_folder_is_folder_in_matters_root() {
 }
 
 /// A new folder inside Clauseo's data folder is refused as an import of the same folder is
-/// (`matter.folder_in_matters_root`), and nothing is made: no folder, no matter.
+/// (`matter.folder_in_clauseo_data`), and nothing is made: no folder, no matter.
 #[test]
-fn a_new_folder_inside_clauseos_data_folder_is_folder_in_matters_root() {
+fn a_new_folder_inside_clauseos_data_folder_is_folder_in_clauseo_data() {
     let dir = Dir::new("refuse_new_in_data", &[]);
     let host = dir.start(0);
     let parent = dir.data().join("work");
@@ -208,7 +216,7 @@ fn a_new_folder_inside_clauseos_data_folder_is_folder_in_matters_root() {
             client: None,
             next_date: None,
         },
-        ErrorCode::MatterFolderInMattersRoot,
+        ErrorCode::MatterFolderInClauseoData,
     );
     assert_eq!(error.matter(), None, "{error}");
     assert!(!parent.join("Appeal").exists(), "no folder was made");

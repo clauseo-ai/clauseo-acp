@@ -1,9 +1,10 @@
 //! The folders a new matter's folder must not be, hold or sit inside, and the check an import
 //! runs on its worker after the place check (`MatterJob::Import`).
 
+use std::cmp::Ordering;
 use std::path::{Path, PathBuf};
 
-use clauseo_protocol::{CommandId, MatterId};
+use clauseo_protocol::{CommandId, ErrorCode, HostError, MatterId};
 
 use crate::error::Error;
 
@@ -42,9 +43,11 @@ pub(crate) enum Held {
     Making(CommandId),
 }
 
-/// `matter.folder_is_matter` when `folder` is, holds or sits inside a folder of `registry`,
-/// compared as the refused-folder check compares (`same_or_nested`). The error names the matter
-/// (`HostError::matter`) only when it is on the list: there is nothing to open otherwise. The
+/// A refusal when `folder` is, holds or sits inside a folder of `registry`, compared as the
+/// refused-folder check compares (`same_or_nested`): `matter.folder_inside_matter` inside it,
+/// `matter.folder_holds_matter` holding it, `matter.folder_is_matter` the same folder. It
+/// names the matter (`HostError::matter`) only when it is on the list: there is nothing to open
+/// otherwise. The
 /// same folder is not refused when something else answers for it ([`Held`]): one a create or
 /// import in flight is making, and for an import (`import`) a listed matter's own folder (the
 /// import answers with that matter) or a forgotten matter's (the import finds its marker and
@@ -65,13 +68,16 @@ pub(crate) fn check_registry(
             (Claim::Forgotten, _) if import && same() => continue,
             _ => {}
         }
-        let refusal = clauseo_protocol::HostError::new(
-            clauseo_protocol::ErrorCode::MatterFolderIsMatter,
+        let (code, relation) = match nesting(folder, &claimed.folder) {
+            Nesting::Same => (ErrorCode::MatterFolderIsMatter, "is"),
+            Nesting::Inside => (ErrorCode::MatterFolderInsideMatter, "sits inside"),
+            Nesting::Holds => (ErrorCode::MatterFolderHoldsMatter, "holds"),
+        };
+        let refusal = HostError::new(
+            code,
             format!(
-                "{} is, holds or sits inside the folder of matter {} ({:?})",
-                folder.display(),
-                claimed.matter,
-                claimed.claim
+                "the folder {relation} the folder of matter {} ({:?})",
+                claimed.matter, claimed.claim
             ),
         );
         let refusal = match claimed.claim {
@@ -83,34 +89,44 @@ pub(crate) fn check_registry(
     Ok(Held::Free)
 }
 
-/// `matter.folder_is_matter` naming the listed `matter`, whose own folder a folder is: for the
-/// folder scan and the `FolderSupport` query, which show it with "Open it" where an import
-/// would answer with that matter.
-pub(crate) fn listed_folder(matter: MatterId) -> Error {
-    Error::Refused(
-        clauseo_protocol::HostError::new(
-            clauseo_protocol::ErrorCode::MatterFolderIsMatter,
-            format!("the folder is matter {matter}'s"),
-        )
-        .with_matter(matter),
-    )
-}
-
 /// Whether `a` and `b` are the same folder by any spelling: `same_or_nested` relates them and
-/// neither holds the other ([`same_folder`]). For the folder scan, which names a listed matter's
-/// own folder.
+/// neither holds the other ([`same_folder`]). For an import, which answers a listed matter's
+/// own folder with that matter.
 pub(crate) fn is_same_folder(a: &Path, b: &Path) -> bool {
     clauseo_matters::same_or_nested(a, b) && same_folder(a, b)
+}
+
+/// How a folder relates to a folder of the registry that `same_or_nested` relates it to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Nesting {
+    /// The same folder.
+    Same,
+    /// The folder sits inside the registry's.
+    Inside,
+    /// The folder holds the registry's.
+    Holds,
+}
+
+/// How `folder` relates to `claimed`, two folders `same_or_nested` relates: by the number of
+/// components of their paths, canonicalised (as written when that fails).
+fn nesting(folder: &Path, claimed: &Path) -> Nesting {
+    match depth(folder).cmp(&depth(claimed)) {
+        Ordering::Equal => Nesting::Same,
+        Ordering::Greater => Nesting::Inside,
+        Ordering::Less => Nesting::Holds,
+    }
 }
 
 /// Whether two folders that `same_or_nested` relates are the same folder, not one inside the
 /// other: their paths, canonicalised (as written when that fails), have as many components.
 fn same_folder(a: &Path, b: &Path) -> bool {
-    let depth = |path: &Path| {
-        dunce::canonicalize(path)
-            .unwrap_or_else(|_| path.to_path_buf())
-            .components()
-            .count()
-    };
     depth(a) == depth(b)
+}
+
+/// The number of components of `path`, canonicalised (as written when that fails).
+fn depth(path: &Path) -> usize {
+    dunce::canonicalize(path)
+        .unwrap_or_else(|_| path.to_path_buf())
+        .components()
+        .count()
 }

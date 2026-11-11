@@ -43,6 +43,9 @@ use helpers::{json_entries, json_lines, kinds, missing, packed_entries, table_op
 #[path = "corpus/added_rows.rs"]
 mod added_rows;
 use added_rows::ADDED_AFTER_V1;
+#[path = "corpus/added_rows_2.rs"]
+mod added_rows_2;
+use added_rows_2::ADDED_AFTER_V1_2;
 
 /// A frozen set of log entries: its name under `corpus/`, its JSON (one `Envelope` per line,
 /// as `serde_json::to_string` wrote it), its `MessagePack` (one array of the same entries, as
@@ -64,10 +67,11 @@ const V1: Corpus = (
     (34_613, 0x383c_376f_5604_7c2e),
 );
 
-/// V1, then every file in [`ADDED_AFTER_V1`].
+/// V1, then every file in [`ADDED_AFTER_V1`] and [`ADDED_AFTER_V1_2`].
 fn every_corpus() -> Vec<Corpus> {
     [V1].into_iter()
         .chain(ADDED_AFTER_V1.iter().copied())
+        .chain(ADDED_AFTER_V1_2.iter().copied())
         .collect()
 }
 
@@ -289,7 +293,7 @@ fn the_known_kinds_are_v1_and_the_added_ones() {
     let removed: Vec<&String> = v1.difference(&known).collect();
     assert!(removed.is_empty(), "v1 kinds no longer known: {removed:?}");
     let mut held = v1;
-    for added in ADDED_AFTER_V1 {
+    for added in ADDED_AFTER_V1.iter().chain(ADDED_AFTER_V1_2) {
         let name = added
             .0
             .strip_prefix("added/")
@@ -307,7 +311,7 @@ fn the_known_kinds_are_v1_and_the_added_ones() {
     assert!(
         unfrozen.is_empty(),
         "kinds with no frozen entry: {unfrozen:?}; add corpus/added/<kind>.jsonl and .msgpack \
-         and list them in ADDED_AFTER_V1 (see corpus/v1/README.md)"
+         and list them in ADDED_AFTER_V1_2 (see corpus/v1/README.md)"
     );
 }
 

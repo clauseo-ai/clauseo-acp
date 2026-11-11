@@ -136,7 +136,7 @@ pub(super) fn registry(actor: &Actor, matter: MatterId) -> Registry {
 }
 
 /// The folders import refuses: the configured ones and the data folder.
-fn refused_folders(actor: &Actor) -> Vec<PathBuf> {
+pub(super) fn refused_folders(actor: &Actor) -> Vec<PathBuf> {
     let mut refused = actor.refused_folders.clone();
     refused.push(actor.effective.data_dir().to_path_buf());
     refused
@@ -198,7 +198,8 @@ pub(super) fn begin_matter(
 /// commit. A new folder's parent is canonicalised and the folder looked for off the actor
 /// (`probe.rs`), as either may hang on a network share; the create goes on when that answers
 /// (`begin_create`). A folder that is, holds or sits inside another matter's folder (listed,
-/// forgotten or being made; `registry`) is refused with `matter.folder_is_matter`, naming the
+/// forgotten or being made; `registry`) is refused (`matter.folder_inside_matter`,
+/// `matter.folder_holds_matter` or, the same folder, `matter.folder_is_matter`), naming the
 /// matter when it is listed: for an import on its worker, after the place check, so a drive root
 /// or the home folder is named for what it is even when a matter sits below it; for a new folder
 /// on the actor once its probe answers, since only its parent exists. A folder that is a listed
@@ -317,7 +318,7 @@ pub(super) fn registered(
 /// The folders a new matter's folder must not be, hold or sit inside: every listed matter's,
 /// every one being made or relocated to, and every forgotten matter's (whose own folder still
 /// brings it back).
-fn claimed_folders(actor: &Actor) -> Vec<Claimed> {
+pub(super) fn claimed_folders(actor: &Actor) -> Vec<Claimed> {
     let claimed = |claim| {
         move |entry: &MatterEntry| Claimed {
             matter: entry.row.id,
@@ -361,14 +362,15 @@ fn refusal(actor: &Actor, error: Error, folder: &Path) -> Error {
 }
 
 /// What [`refusal`] tells the refused folders apart by, taken from the actor, so the
-/// `FolderSupport` query names a refusal off the actor as create does (`picked.rs`).
-struct RefusalNames {
+/// `FolderSupport` query (`picked.rs`) and the folder scan (`scan.rs`) name a refusal off
+/// the actor as create does.
+pub(super) struct RefusalNames {
     home: Option<PathBuf>,
     data_dir: PathBuf,
 }
 
 impl RefusalNames {
-    fn of(actor: &Actor) -> Self {
+    pub(super) fn of(actor: &Actor) -> Self {
         Self {
             home: actor.home.clone(),
             data_dir: actor.effective.data_dir().to_path_buf(),
@@ -376,7 +378,12 @@ impl RefusalNames {
     }
 
     /// [`refusal`]'s code for `error`; `listed` says whether a matter is on the list.
-    fn refusal(&self, error: Error, folder: &Path, listed: impl Fn(&MatterId) -> bool) -> Error {
+    pub(super) fn refusal(
+        &self,
+        error: Error,
+        folder: &Path,
+        listed: impl Fn(&MatterId) -> bool,
+    ) -> Error {
         let Error::Matters(failure) = &error else {
             return error;
         };
@@ -395,7 +402,7 @@ impl RefusalNames {
                 ErrorCode::MatterFolderIsHome
             }
             Refusal::Listed(entry) if entry.as_path() == self.data_dir => {
-                ErrorCode::MatterFolderInMattersRoot
+                ErrorCode::MatterFolderInClauseoData
             }
             Refusal::Listed(_) => ErrorCode::MatterFolderIsSystem,
             // Named only when on the list: a marker from another data folder or computer names a

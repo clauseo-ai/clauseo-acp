@@ -314,12 +314,12 @@ fn folder_support_needs_a_picked_folder() {
         let answer = block_on(bridge.query(MAIN, ask(folder)));
         // Admitted: it reaches the host, which answers or refuses the folder as create would
         // (the scratch's folders sit in its data folder, so an import's is
-        // `matter.folder_in_matters_root`); never the bridge's `command.invalid`.
+        // `matter.folder_in_clauseo_data`); never the bridge's `command.invalid`.
         assert!(
             matches!(answer, Ok(QueryResult::FolderSupport(_)))
                 || answer
                     .as_ref()
-                    .is_err_and(|error| error.code() == ErrorCode::MatterFolderInMattersRoot),
+                    .is_err_and(|error| error.code() == ErrorCode::MatterFolderInClauseoData),
             "{kind}: {answer:?}"
         );
         let refusal = block_on(bridge.query(MAIN, ask(not_picked))).unwrap_err();
