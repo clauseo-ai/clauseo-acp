@@ -177,6 +177,6 @@ export const HI = {
   Latest: "नवीनतम",
   "Go to the latest message": "नवीनतम संदेश पर जाएँ",
   // a question past eight lines, folded, and open (UC-142, UC-143)
-  "Show all": "पूरा दिखाएँ",
+  "Show all": "सभी दिखाएँ",
   "Show less": "कम दिखाएँ",
 } as const;
