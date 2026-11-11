@@ -834,7 +834,7 @@ Clauseo's readers with no warning, and fails when this table misses a key.
 | `ui.lite` | `automatic`, `on`, `off` | `automatic` | `REG_SZ` | `on` (RDS hosts without a GPU) |
 | `ui.motion` | `system`, `reduce`, `full` | `system` | `REG_SZ` | `reduce` |
 | `tools.web_search` | boolean | true | `REG_DWORD` 0 or 1 | 0: agents may not search the web or read web pages. **Security key** |
-| `tools.browser` | boolean | true on macOS and Windows; false on Linux | `REG_DWORD` 0 or 1 | 0: agents do not get Clauseo's browser. **Security key** |
+| `tools.browser` | boolean | true on macOS and Windows; false on Linux | `REG_DWORD` 0 or 1 | 0: agents do not get Clauseo's browser. On Windows, Clauseo doesn't run a browser at launch: Claude and ChatGPT read websites with their own web tools. A browser for Windows comes in an update. **Security key** |
 | `tools.connectors` | boolean | true | `REG_DWORD` 0 or 1 | 0: no data connector runs (the paid Indian case-law connector): it is not offered, and agents do not get it. On, nothing runs until a lawyer adds a connector. Amounts the app shows for it include GST; the GST breakdown is on the connector's receipt. **Security key** |
 | `privacy.counts` | boolean | true | `REG_DWORD` 0 or 1 | 0: Clauseo keeps and sends no anonymous usage counts, and deletes what it kept. Policy can only turn it off (1 is ignored with a warning). **Security key** |
 | `privacy.crash_reports` | boolean | false | `REG_DWORD` 0 or 1 | 0: Clauseo sends no crash reports. Policy can only turn it off (1 is ignored with a warning). **Security key** |
@@ -886,11 +886,11 @@ Google Chrome (on Windows, Microsoft Edge when no Chrome is installed) through C
 debugging, in a fresh profile for each session. With neither installed, the agents get no browser
 and the app tells the lawyer what to install; a browser installed later reaches the agents in the
 next new conversation, with no need to reopen Clauseo. For launch, which conversations have it
-depends on the agent: on a Mac, Codex conversations have the browser and Claude conversations
-don't (they read web pages with Claude's web fetch tool); on Windows, Claude conversations have
-it and Codex conversations don't. The browser doesn't go through Clauseo's egress proxy, so
-`network.allowed_domains` and the unsafe-site list don't apply to it; Chrome or Edge uses its own
-network settings.
+depends on the agent: on a Mac, Codex conversations have the browser and Claude conversations don't
+(they read web pages with Claude's web fetch tool). On Windows, Clauseo doesn't run a browser at
+launch: Claude and ChatGPT read websites with their own web tools. A browser for Windows comes in an
+update. The browser doesn't go through Clauseo's egress proxy, so `network.allowed_domains` and the
+unsafe-site list don't apply to it; Chrome or Edge uses its own network settings.
 
 Chrome's, Edge's and Chromium's `RemoteDebuggingAllowed` policy turns remote debugging off.
 Clauseo checks your Chrome, Edge and Chromium policy itself, before it starts any browser,

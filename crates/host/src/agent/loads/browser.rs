@@ -257,24 +257,13 @@ pub(crate) fn entry_part(state: &ToolState, chrome_found: bool) -> BrowserPart {
 }
 
 /// Whether an agent of `kind` gets no browser at all on this OS (`windows`): Codex on Windows,
-/// and Claude on macOS and Linux, whether or not its sandbox ends up on
-/// (`clauseo_profile::servers::no_browser_on`, decision record 0030). Such a session gets no
-/// entry, no shell tool (no `agent-browser` on `PATH`, no `AGENT_BROWSER_*` variables, no
-/// browser rules), no browser in its header (the app then offers no browser action: no install
-/// advice, no switch) and the part [`absent_part`] names.
+/// and Claude on every OS (`clauseo_profile::servers::no_browser_on`, decision record 0030).
+/// Such a session gets no entry, no shell tool (no `agent-browser` on `PATH`, no
+/// `AGENT_BROWSER_*` variables, no browser rules), no browser in its header (the app then offers
+/// no browser action: no install advice, no switch) and the no-browser sentence
+/// (`BrowserPart::Off`).
 pub(crate) fn no_browser(kind: Option<clauseo_protocol::AgentKind>, windows: bool) -> bool {
     clauseo_profile::servers::no_browser_on(kind, windows)
-}
-
-/// The part a session of `kind` with no browser on this OS gets ([`no_browser`]): Codex (on
-/// Windows) the Claude-only line (`BrowserPart::ClaudeOnly`), since Claude has its shell browser
-/// there; Claude (on macOS and Linux) the plain no-browser sentence (`BrowserPart::Off`).
-pub(crate) fn absent_part(kind: Option<clauseo_protocol::AgentKind>) -> BrowserPart {
-    if kind == Some(clauseo_protocol::AgentKind::Codex) {
-        BrowserPart::ClaudeOnly
-    } else {
-        BrowserPart::Off
-    }
 }
 
 /// The hook's servers for a session, without the `browser` entry when the agent has no browser
@@ -404,7 +393,6 @@ pub(crate) fn part_log(
         BrowserPart::On => "on",
         BrowserPart::Off => "off",
         BrowserPart::NotInstalled => "not_installed",
-        BrowserPart::ClaudeOnly => "claude_only",
     };
     let name = executable.map_or("none", |path| {
         let file = path.file_name().and_then(OsStr::to_str).unwrap_or_default();

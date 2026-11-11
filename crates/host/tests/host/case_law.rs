@@ -223,13 +223,9 @@ fn both_agents_get_case_law_after_the_other_servers() {
     let thread = host.create_thread(matter, CLAUDE);
     turn(&host, thread);
     turn(&host, host.create_thread(matter, CODEX));
-    // Claude has the browser on Windows alone (`servers::no_browser`).
-    let browser = cfg!(windows).then(|| tool(ClauseoTool::Browser, None));
+    // Claude has no browser on any OS (`servers::no_browser`).
     let web_search = tool(ClauseoTool::WebSearch, Some(ToolsUnavailableReason::Off));
-    let expected: Vec<ToolState> = [Some(web_search), browser, Some(case_law(None))]
-        .into_iter()
-        .flatten()
-        .collect();
+    let expected: Vec<ToolState> = vec![web_search, case_law(None)];
     assert_eq!(first_frame_tools(&host, thread), expected);
     let seen = launcher.seen();
     let tokens: Vec<String> = seen.iter().filter_map(token_of).collect();

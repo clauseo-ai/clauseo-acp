@@ -125,8 +125,8 @@ fn path_parts(seen: &Seen) -> Vec<PathBuf> {
 /// Whether this OS gives `launch`'s Codex session no browser at all (Windows,
 /// `clauseo_profile::servers::no_browser`), whatever the hook, the Chrome and the switch; if so,
 /// it checks that the session got none: no shell tool's variables, no tools folder on its
-/// `PATH`, the Claude-only line (never the shell rules nor the no-Chrome line) and no browser in
-/// its header (the app then offers no browser action).
+/// `PATH`, the no-browser sentence (never the shell rules nor the no-Chrome line) and no
+/// browser in its header (the app then offers no browser action).
 fn no_browser_here(
     dir: &Dir,
     seen: &Seen,
@@ -142,8 +142,8 @@ fn no_browser_here(
     let parts = path_parts(seen);
     assert!(!parts.contains(&dir.data().join("tools")));
     assert_eq!(parts.get(1), Some(&dir.data().join("python")));
-    let claude_only = clauseo_profile::instructions::BROWSER_CLAUDE_ONLY.trim();
-    assert!(instructions.contains(claude_only), "{instructions}");
+    let off = clauseo_profile::instructions::BROWSER_OFF.trim();
+    assert!(instructions.contains(off), "{instructions}");
     assert!(!instructions.contains("agent-browser"), "{instructions}");
     assert!(!instructions.contains("found no Google Chrome"));
     assert!(!instructions.contains("{browser}"));

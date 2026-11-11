@@ -352,9 +352,8 @@ pub(crate) fn codex_servers(servers: &[Value]) -> Vec<Value> {
         .collect()
 }
 
-/// `servers` as a Claude `session/new` carries them on this OS: without the `browser` entry
-/// where Claude has no browser at all (macOS and Linux, `clauseo_profile::servers::no_browser`),
-/// else all of them.
+/// `servers` as a Claude `session/new` carries them: without the `browser` entry, since Claude
+/// has no browser on any OS (`clauseo_profile::servers::no_browser`).
 pub(crate) fn claude_servers(servers: &[Value]) -> Vec<Value> {
     let none_here = clauseo_profile::servers::no_browser(Some(AgentKind::Claude));
     servers
@@ -364,14 +363,11 @@ pub(crate) fn claude_servers(servers: &[Value]) -> Vec<Value> {
         .collect()
 }
 
-/// A Claude session's header tools with web search on: web search, then `browser` (`browser`
-/// its reason) where Claude may have the browser (Windows alone, `servers::no_browser`).
-pub(crate) fn claude_tools(browser: Option<ToolsUnavailableReason>) -> Vec<ToolState> {
-    let browser = cfg!(windows).then(|| tool(ClauseoTool::Browser, browser));
-    [Some(tool(ClauseoTool::WebSearch, None)), browser]
-        .into_iter()
-        .flatten()
-        .collect()
+/// A Claude session's header tools with web search on: web search alone, since Claude has no
+/// browser on any OS (`servers::no_browser`). `_browser` is the reason the browser state would
+/// carry, kept so each caller still says what a session with the browser would show.
+pub(crate) fn claude_tools(_browser: Option<ToolsUnavailableReason>) -> Vec<ToolState> {
+    vec![tool(ClauseoTool::WebSearch, None)]
 }
 
 /// A generic agent's scenario: `initialize`, `method` (`session/new` or `session/load` of

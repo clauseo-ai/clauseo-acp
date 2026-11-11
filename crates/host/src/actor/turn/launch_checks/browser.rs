@@ -266,7 +266,7 @@ pub(super) fn warn_if_still_full(actor: &Actor, run: &super::RunFolders) {
 /// `clauseo_profile::servers::browser_mcp`), the guarded entry: nothing when no browser can go
 /// to it (`tools.browser` off, a proxy asked for and none set, or no slot and none coming
 /// free), else its sidecars, a Chrome search and the claims. Otherwise, with the shell tool
-/// wired (`ProfileHook::browser_tool`, Claude on Windows): its `agent-browser` command and a
+/// wired (`ProfileHook::browser_tool`, no agent's for launch): its `agent-browser` command and a
 /// Chrome search when `tools.browser` is on, else nothing. Nothing for an agent with no browser
 /// on this OS.
 pub(super) fn browser_prep(
@@ -285,7 +285,7 @@ pub(super) fn browser_prep(
         shell: false,
         proxy: false,
     };
-    // Codex on Windows, and Claude on macOS and Linux, have no browser at all
+    // Codex on Windows, and Claude on every OS, have no browser at all
     // (`agent::loads::browser::no_browser`).
     let kind = clauseo_protocol::AgentKind::of(agent);
     if crate::agent::loads::browser::no_browser(kind, cfg!(windows)) {
