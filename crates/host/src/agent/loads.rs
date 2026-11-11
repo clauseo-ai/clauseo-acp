@@ -28,6 +28,7 @@ pub(crate) mod sandbox;
 mod sandbox_tests;
 #[cfg(test)]
 mod tests;
+pub(crate) mod tls_roots;
 
 pub use codex::codex_hook_config;
 

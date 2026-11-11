@@ -4,6 +4,7 @@
 //! nothing is made here.
 
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use clauseo_profile::SkillWrite;
 use clauseo_protocol::{AgentKind, ThreadId};
@@ -14,7 +15,9 @@ use super::egress::{EgressPrep, egress_prep};
 use super::packs::{PackPrep, pack_prep};
 use super::relay::{self, CaseLawPrep};
 use crate::actor::Actor;
+use crate::agent::loads::tls_roots;
 use crate::agent::shell_path::{self, SessionPath};
+use crate::clock::Clock;
 use crate::config::SessionKey;
 use crate::error::Error;
 
@@ -60,6 +63,9 @@ pub(super) struct PathPrep {
     prepend: Option<PathBuf>,
     /// The shell browser's tools folder (`ProfileHook::browser_tool`), when the profile has it.
     browser_tool: Option<PathBuf>,
+    /// For a Claude session on macOS: the data folder the trust roots file goes in, and the
+    /// clock its `security` runs' time limit runs on.
+    tls_roots: Option<(PathBuf, Arc<dyn Clock>)>,
     /// The profile hook's absolute folders (`agent::session_path`), and whether there are any.
     hook: (Vec<PathBuf>, bool),
     /// The agent's kind.
@@ -76,7 +82,13 @@ impl PathPrep {
         let tools = self.browser_tool.filter(|_| shell);
         let (hook, hook_path) = self.hook;
         let dirs = self.prepend.into_iter().chain(tools).chain(hook).collect();
-        shell_path::prepare(dirs, hook_path, self.kind, &run.root)
+        // The trust roots for a sandbox that will be on: a Claude session on macOS with its
+        // short temp folder (`agent::loads::tls_roots`).
+        let roots = self
+            .tls_roots
+            .filter(|_| run.claude_tmp.is_some())
+            .and_then(|(data, clock)| tls_roots::write_roots(&data, &tls_roots::security(clock)));
+        shell_path::prepare(dirs, hook_path, self.kind, &run.root, roots.as_deref())
     }
 }
 
@@ -111,6 +123,8 @@ pub(super) fn launch_paths(actor: &Actor, thread: ThreadId, id: u64) -> Result<L
         path: PathPrep {
             prepend: actor.wiring.path_prepend.clone(),
             browser_tool: actor.profile.browser_tool(),
+            tls_roots: (kind == Some(AgentKind::Claude) && cfg!(target_os = "macos"))
+                .then(|| (locations.data_dir().to_owned(), Arc::clone(&actor.clock))),
             hook: crate::agent::session_path(None, actor.profile.agent_path(&row.agent)),
             kind,
         },

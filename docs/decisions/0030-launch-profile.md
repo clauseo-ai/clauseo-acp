@@ -1049,6 +1049,19 @@ this record and firm-it §8.
     Claude Code's proxy, which runs outside the sandbox, would otherwise reach them for a
     sandboxed command. The any-address forms land on loopback too. A direct loopback connect is
     refused by the sandbox already (stage C).
+  - **Trust roots** (2026-11-11, stage C's "self signed certificate"). Inside the sandbox
+    `curl` and Python can't reach the macOS trust store and fall back to `/etc/ssl/cert.pem`,
+    which lacks newer roots such as GlobalSign Root R46 (`sci.gov.in`). So the launch prep of
+    a Claude session on macOS with its short temp folder writes `<data>/tls/roots.pem`, every
+    launch: `/usr/bin/security find-certificate -a -p` of the System Roots keychain, then of
+    `/Library/Keychains/System.keychain` (an admin's roots, a firm's TLS-inspection root among
+    them), each under a 10 s limit (`agent/loads/tls_roots.rs`). `SSL_CERT_FILE`,
+    `CURL_CA_BUNDLE` and `REQUESTS_CA_BUNDLE` name it in the session's environment and again in
+    `<run>/clauseo-env.sh`, so each Bash command has them after its snapshot. `allowRead` opens
+    that one file. If the System Roots don't export, nothing is set (one warning) and `curl`
+    behaves as before. A session whose sandbox is later turned off for a path (`*`, `?`, not
+    UTF-8) still gets the variables: the same roots as the keychain. Linux and Windows are
+    unchanged.
   - **agent-browser:** `excludedCommands: ["agent-browser:*"]`, in a session with the browser
     only. It needs its daemon, Chrome and the session's sockets. The exclusion holds up when
     commands are chained. Claude Code 2.1.293's `containsExcludedCommand` splits the command

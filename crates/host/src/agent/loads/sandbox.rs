@@ -64,7 +64,9 @@
 //!   denies too. A matter registered after the launch is in no list: the accepted residual.
 //! - `filesystem.allowRead` ([`ClaudeSandbox::allow_read`]): re-opens, within those denies,
 //!   what a sandboxed command needs, with the `PATH` file Claude Code reads into each command
-//!   (`<run>/clauseo-env.sh`, `agent::shell_path`) and the shell browser's tools folder. Not
+//!   (`<run>/clauseo-env.sh`, `agent::shell_path`), the trust roots file on macOS
+//!   (`<data>/tls/roots.pem`, [`super::tls_roots`], the file alone) and the shell browser's
+//!   tools folder. Not
 //!   the whole run folder: it holds the case-law relay's
 //!   token and the browser's profile (the visited sites' cookies). Of Claude's own project
 //!   folder only `<home>/projects/<key>/*/tool-results`, where `WebFetch` keeps the files it
@@ -184,6 +186,8 @@ pub(crate) struct SandboxPaths<'a> {
     /// The file that puts those folders first in each Bash command (`<run>/clauseo-env.sh`,
     /// `agent::shell_path::ENV_FILE`), if it was written: the file alone, never its folder.
     pub(crate) env_file: Option<&'a Path>,
+    /// The trust roots file its CA variables name (`tls_roots`), if written: the file alone.
+    pub(crate) ca_file: Option<&'a Path>,
     /// Claude Code's config folder (`agent::home`).
     pub(crate) claude_home: &'a Path,
     /// Each spelling of `<data>` (`LaunchDeny::spellings`).
@@ -274,7 +278,7 @@ impl ClaudeSandbox {
     }
 
     /// `filesystem.allowRead`: the writable folders, the browser's downloads, the skill packs,
-    /// the built-in skills, the shells' `PATH` file, and each folder first on `PATH` (stetdoc's,
+    /// the built-in skills, the shells' `PATH` file, the trust roots file, and each folder first on `PATH` (stetdoc's,
     /// the shell browser's tools), except that a folder
     /// in Clauseo's Python runtime (`<rt>/bin`) opens the whole runtime, whose interpreter reads
     /// its standard library and site-packages beside it. Never a `PATH` folder's parent
@@ -294,6 +298,7 @@ impl ClaudeSandbox {
         .collect();
         folders.extend(paths.skills.iter().cloned());
         folders.extend(paths.env_file.map(Path::to_path_buf));
+        folders.extend(paths.ca_file.map(Path::to_path_buf));
         for folder in paths.path {
             let runtime = folder.parent().filter(|parent| {
                 parent
