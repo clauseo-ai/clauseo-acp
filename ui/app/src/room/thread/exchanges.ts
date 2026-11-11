@@ -4,7 +4,8 @@
 // that turn's exchange, and an entry without one (a notice, a permission) joins the exchange still running where it
 // arrived, else the newest. Queued and removed messages show in no exchange: they stand in the queue's strip. A steer
 // taken into the running answer is no question: it joins that answer as a mark where it arrived; a steer not yet
-// resolved stands in the same place, in the answer it was sent into, waiting on the agent's word (steer.ts).
+// resolved stands in the same place, in the answer it was sent into, waiting on the agent's word, and so does one the
+// host never sent (steer.ts).
 //
 // The live list reads this through one pick (exchangesPick) that builds the grouping again only when the id list
 // changes or a user message's status, turn or steer changes; an edit of a queued message's words changes none of
@@ -91,9 +92,9 @@ export function groupExchanges(
     if (m !== undefined) {
       const as = askedAs(m);
       if (as === "hidden") return;
-      if (as === "mark" || as === "waiting") {
-        // taken in: the turn it joined; waiting: the turn it was sent into, once that turn has an exchange (else, as
-        // from a host that gave it a turn of its own, the answer still running where it arrived)
+      if (as === "mark" || as === "waiting" || as === "not_sent") {
+        // taken in: the turn it joined; waiting or never sent: the turn it was sent into, once that turn has an
+        // exchange (else, as from a host that gave it a turn of its own, the answer still running where it arrived)
         const into = as === "mark" ? injectedTurn(m) : byTurn.has(m.turn) ? m.turn : undefined;
         if (into === undefined) unturned(id, at);
         else turned(id, into, at);

@@ -2,7 +2,8 @@
 // running answer, as a mark where they arrived, once the agent took them in (`injected`) and only then; a steer not
 // yet resolved, in the same place, as its words and "Sends when Claude finishes" with Send now, which sends
 // send_queued_now with the turn it was sent into (the host stops that turn, if it still runs, and sends the words next;
-// `thread.turn_not_queued`, they had already moved, says so as the queue's strip does); the quiet line under a steer
+// `thread.turn_not_queued`, they had already moved, says so as the queue's strip does); a steer the host never sent
+// (`not_sent`), in the same place, as its words and that they were not sent; the quiet line under a steer
 // that waited for the answer to end (requeued); the line in a turn stopped to send the words first (sent now), in its
 // step's place; and the note under an answer whose tool calls a steer moved to the background.
 import { use, useMemo, useRef, useState } from "react";
@@ -146,6 +147,35 @@ export function LiveSteerWaiting({
   return <SteerWaitingRow id={id} entry={entry} text={useQuestionText(stream, id, entry)} />;
 }
 
+/** A steer the host never sent (the answer stopped or ended, or the host restarted, before the agent took it in): its
+ * words, and that they were not sent, as one line for every such end (the lawyer's Stop the likeliest). No Send now:
+ * the words are back in the composer (steer-restore.ts). */
+export function SteerNotSentRow({ id, text }: { id: EntryId; text: string }) {
+  const w = useMatterWords();
+  return (
+    <div className={ROW}>
+      <SteerWaiting
+        text={<Say>{text}</Say>}
+        when={w.m("Not sent, because you stopped the answer.")}
+        entryId={id}
+        testIds={{ row: "steer-not-sent" }}
+      />
+    </div>
+  );
+}
+
+export function LiveSteerNotSent({
+  id,
+  stream,
+  entry,
+}: {
+  id: EntryId;
+  stream: StreamId;
+  entry: UserMessageEntry;
+}) {
+  return <SteerNotSentRow id={id} text={useQuestionText(stream, id, entry)} />;
+}
+
 /** Under a steer that waited for the answer to end (the agent didn't take it in, or the answer it joined was stopped or
  * failed): it went next, as its own question. */
 export function RequeuedLine() {
@@ -223,11 +253,7 @@ function notesPick(
       else if (e?.step !== undefined) endedAt = e.step.ts;
       else if (e !== undefined) byId.set(own[i]!, e);
     });
-    const next = steerNotes(
-      calls,
-      (steer) => byId.get(steerEntry(steer))?.user_message?.ts,
-      endedAt,
-    );
+    const next = steerNotes(calls, (steer) => byId.get(steerEntry(steer))?.user_message, endedAt);
     const nextKey = JSON.stringify(next);
     if (nextKey === key) return last;
     key = nextKey;

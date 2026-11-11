@@ -175,6 +175,9 @@ export const HI = {
   // stopped for the words (sent now)
   "Your words waited for the answer to end, so they went next.":
     "आपके शब्द उत्तर पूरा होने तक रुके रहे, इसलिए वे अगले भेजे गए।",
+  // a steer never sent (the answer stopped or ended first): under its words; its words go back into the composer.
+  // Hindi provisional
+  "Not sent, because you stopped the answer.": "नहीं भेजा गया, क्योंकि आपने उत्तर रोक दिया।",
   "Stopped at {time} to send your words first. The answer so far is kept.":
     "आपके शब्द पहले भेजने के लिए {time} बजे रोका गया। अब तक का उत्तर रखा गया है।",
   "Your words at {time} came in while Clauseo searched Indian Kanoon for {what}. That search carried on in the background, finished at {done}, and this answer uses it.":
