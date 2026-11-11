@@ -102,8 +102,9 @@ fn execute(cx: &ConnectionTo<Agent>, shared: &Arc<Shared>, command: Command) {
         Command::Steer {
             session,
             content,
+            held,
             reply,
-        } => steer::steer(cx, shared, &session, content, reply),
+        } => steer::steer(cx, shared, &session, content, held, reply),
         Command::AnswerPermission {
             key,
             option_id,

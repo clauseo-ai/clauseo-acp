@@ -211,6 +211,42 @@ fn codex_browser_tools_are_allowed_unseen() {
     host.shutdown();
 }
 
+/// Codex asking to run curl or wget, or for a host's network, is declined by the host with
+/// nothing logged, and its offline note steered once a turn before the answer
+/// (`actor/turn/shell_network.rs`); `rm -rf` (Codex's dangerous-command prompt) and `echo curl`
+/// reach the lawyer. The scenario checks each answer and each steer the agent gets.
+#[test]
+fn codex_shell_network_is_declined_unseen_with_one_note_a_turn() {
+    const CODEX: &str = "codex-acp";
+    let dir = Dir::new(
+        "codex_shell_offline",
+        &[(CODEX, Scenario::Local("codex-shell-offline"))],
+    );
+    let host = dir.start(0);
+    let (_, thread, _) = matter_with_thread(&dir, &host, "m", &[], CODEX);
+    let mut events = host.events(StreamId::Thread(thread));
+    let (turn, _) = host.prompt(thread, "Save the judgment.");
+    answer_from(&host, &mut events, thread, 0, &["allow_once", "allow_once"]);
+    let ended = events.until_turn_ended(turn);
+    assert_eq!(ended.stop, StopReason::EndTurn, "{}", events.dump());
+    let (turn, _) = host.prompt(thread, "And the order.");
+    let ended = events.until_turn_ended(turn);
+    events.assert_no_mismatch();
+    assert_eq!(ended.stop, StopReason::EndTurn, "{}", events.dump());
+    let seen = requested_tools(&events);
+    let ids: Vec<Option<&str>> = seen.iter().map(Option::as_deref).collect();
+    assert_eq!(
+        ids,
+        [Some("tc-rm-1"), Some("tc-echo-1")],
+        "{}",
+        events.dump()
+    );
+    // The note is never logged as a message.
+    let dump = events.dump();
+    assert!(!dump.contains("keeps your shell offline"), "{dump}");
+    host.shutdown();
+}
+
 /// A Claude session's requests are never answered by the host, even in Codex's browser shapes
 /// with `allow_session` offered.
 #[test]

@@ -5,7 +5,8 @@
 //! answered for the lawyer, rejected, in the commit that logs it. One that touches Clauseo's own
 //! data folder (`agent/data_fence.rs`) is rejected with nothing logged: the lawyer never sees it.
 //! A Codex approval of one of the guarded `browser` server's tools is allowed for the session
-//! with nothing logged ([`browser_tool_to_allow`]).
+//! with nothing logged ([`browser_tool_to_allow`]); one giving a shell command the network is
+//! refused, unseen (`shell_network.rs`).
 
 use std::path::PathBuf;
 
@@ -14,13 +15,14 @@ use clauseo_matters::HeldOpen;
 use clauseo_protocol::{
     AgentChoiceId, AgentKind, AgentSessionId, CompactString, Deliverable, ElicitationId,
     ElicitationRequest, ElicitationRequested, ElicitationResponse, LimitStopReason, MatterPath,
-    PermissionAbout, PermissionChoice, PermissionKind, PermissionOption, PermissionRequestId,
-    PermissionRequested, PermissionResolved, Principal, StopReason, StreamId, ThreadId, TurnId,
+    PermissionAbout, PermissionChoice, PermissionOption, PermissionRequestId, PermissionRequested,
+    PermissionResolved, Principal, StopReason, StreamId, ThreadId, TurnId,
 };
 
 use super::super::input::MatterTag;
 use super::super::{Actor, limits};
 use super::out::Out;
+use super::shell_network::reject_option;
 use super::updates::{agent, commit, known_tool};
 use super::{JobKind, LimitMark, Then, TurnJob, current, matter_of, spawn};
 use crate::agent::data_fence::{self, FenceCheck, PathsChecked};
@@ -91,6 +93,9 @@ pub(super) fn on_permission(actor: &mut Actor, thread: ThreadId, event: AcpEvent
     };
     if let Some((tool, option)) = browser_tool_to_allow(actor, thread, &ask, raw_input.as_ref()) {
         allow_browser_tool(actor, thread, ask.key, &tool, option);
+        return;
+    }
+    if super::shell_network::refused(actor, thread, &ask, raw_input.as_ref()) {
         return;
     }
     let fence = fence_check(actor, thread, &paths, raw_input.as_ref());
@@ -478,14 +483,6 @@ fn refuse_data_folder(actor: &mut Actor, thread: ThreadId, ask: &PermissionAsk) 
             tracing::warn!(error = %Cause(&error), "a data-folder refusal did not reach the agent");
         }
     });
-}
-
-/// The option that rejects this request only: the first `RejectOnce`. A `RejectAlways` is
-/// never taken, since it may leave a lasting rule in the agent the lawyer never chose.
-fn reject_option(options: &[PermissionOption]) -> Option<&PermissionOption> {
-    options
-        .iter()
-        .find(|option| option.kind == PermissionKind::RejectOnce)
 }
 
 /// An elicitation: logged during the live turn, else answered `Cancel`.

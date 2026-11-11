@@ -56,6 +56,9 @@ pub(crate) enum Command {
     Steer {
         session: AgentSessionId,
         content: Vec<ContentBlock>,
+        /// The turn is held open by a permission request of its own not yet answered
+        /// ([`Client::steer_held`]).
+        held: bool,
         reply: Reply<SteerResult>,
     },
     AnswerPermission {
@@ -208,6 +211,26 @@ impl AcpClient {
         self.call(|reply| Command::Steer {
             session,
             content,
+            held: false,
+            reply,
+        })
+        .await
+    }
+
+    /// [`Self::steer`] into a turn held open by one of its own permission requests, sent before
+    /// that request is answered: the agent cannot be idle then, so native steering alone is
+    /// enough, with no idle fallback (codex-acp 2.2.2 injects into its active turn,
+    /// `performSteeringRequest`, `dist/index.js:43843-43858`).
+    pub async fn steer_held(
+        &self,
+        session: &AgentSessionId,
+        content: Vec<ContentBlock>,
+    ) -> Result<SteerResult, Error> {
+        let session = session.clone();
+        self.call(|reply| Command::Steer {
+            session,
+            content,
+            held: true,
             reply,
         })
         .await

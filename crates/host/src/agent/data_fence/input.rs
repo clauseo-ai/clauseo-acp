@@ -91,6 +91,27 @@ pub(crate) fn candidates_roots(raw_input: Option<&Value>, windows: bool) -> Vec<
     out
 }
 
+/// The command names of `rawInput.command` ([`command::command_names`]): a string as one
+/// line; an array (a program and its arguments) quoted back into one, so an argument such as
+/// `echo`'s `curl` is never taken for a command, while `bash -lc '<script>'` still is read.
+pub(crate) fn command_names(raw_input: Option<&Value>, windows: bool) -> Vec<String> {
+    let line = match raw_input.and_then(|input| input.get("command")) {
+        Some(Value::String(line)) => line.clone(),
+        Some(Value::Array(words)) => {
+            let quoted = words.iter().filter_map(Value::as_str).map(|word| {
+                match (word.contains('\''), word.contains('"')) {
+                    (false, _) => format!("'{word}'"),
+                    (true, false) => format!("\"{word}\""),
+                    (true, true) => word.to_owned(),
+                }
+            });
+            quoted.collect::<Vec<_>>().join(" ")
+        }
+        _ => return Vec::new(),
+    };
+    command::command_names(&line, windows)
+}
+
 /// `rawInput.command`'s command lines: the string, or each string of an array, as Codex sends
 /// `["bash", "-lc", "…"]`.
 fn command_lines(input: &Value) -> Vec<&str> {
