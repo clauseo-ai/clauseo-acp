@@ -2,11 +2,11 @@
 //! still sends once it heard `session/cancel` (a late edit, tool call and text) is dropped, and
 //! the prompt sent now starts only once the agent has stopped, so none of it lands in the new
 //! turn, whose Undo takes back only its own edit; and a host killed while such a turn is open
-//! ends it at the next start as any interrupted turn, keeping what it logged.
+//! ends it at the next start as any interrupted turn, keeping what it logged and its Undo step.
 
 use clauseo_protocol::{
     CommandOutcome, DeliveryRequest, DomainEvent, ErrorCode, FileChoice, FileDecision, HostCommand,
-    MatterPath, StopReason, StreamId, ThreadId, TurnId,
+    HostQuery, MatterPath, QueryResult, StopReason, StreamId, ThreadId, TurnId,
 };
 
 use crate::observe::Events;
@@ -178,6 +178,12 @@ fn a_restart_ends_an_open_agent_started_turn_and_keeps_its_entries() {
     assert!(view.mentions(OWN_TEXT), "{}", view.dump());
     assert!(view.mentions("Read build.log"), "{}", view.dump());
     drop(view);
+    // Its step is kept: Undo can take it.
+    let preview = host.query(HostQuery::PreviewUndo { thread, turn: own });
+    assert!(
+        matches!(preview, Ok(QueryResult::UndoPreview(_))),
+        "{preview:?}"
+    );
     host.shutdown();
 
     // A third start repairs nothing more.
