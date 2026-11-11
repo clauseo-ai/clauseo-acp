@@ -8,6 +8,7 @@ import { fl, type FirstLaunchKey } from "@clauseo/components/lib/words-first-lau
 import type { AgentId, InstallProgress, SetupEvent, SignIn } from "../transport/protocol.ts";
 import type { Entry } from "./entry.ts";
 import { render, type Scene } from "./registry-ud1-scene.tsx";
+import { SIGNING_IN } from "./registry-ud1-signin.tsx";
 import * as T from "./registry-ud1-tools.ts";
 import { errorWords, type WordsRef } from "./words.ts";
 
@@ -234,77 +235,8 @@ const SCENES: ([FirstLaunchKey, Scene, string] | null)[] = [
     "plan-key",
   ],
   ["Sign in with an Anthropic Console account", KEY, "plan-key"],
-  // signing in, in the browser
-  [
-    "Finish signing in with your browser.",
-    { events: [READY, signIn(CLAUDE, { waiting: { since: AT, nudge: false } })] },
-    "signin-wait",
-  ],
-  [
-    "Didn't open?",
-    { events: [READY, signIn(CLAUDE, { waiting: { since: AT, nudge: true } })] },
-    "signin-nudge",
-  ],
-  [
-    "Got a code instead?",
-    { events: [READY, signIn(CLAUDE, { waiting: { since: AT, nudge: true } })] },
-    "signin-nudge",
-  ],
-  [
-    "Paste it",
-    { events: [READY, signIn(CLAUDE, { waiting: { since: AT, nudge: true } })] },
-    "signin-nudge",
-  ],
-  [
-    "Code from your browser",
-    {
-      events: [READY, signIn(CLAUDE, { waiting: { since: AT, nudge: true } })],
-      clicks: ['[data-testid="signin-paste"]'],
-    },
-    "signin-code",
-  ],
-  [
-    "Clauseo passes the code to {name} and keeps no copy.",
-    {
-      events: [READY, signIn(CLAUDE, { waiting: { since: AT, nudge: true } })],
-      clicks: ['[data-testid="signin-paste"]'],
-    },
-    "signin-code",
-  ],
-  [
-    "Send",
-    {
-      events: [READY, signIn(CLAUDE, { waiting: { since: AT, nudge: true } })],
-      clicks: ['[data-testid="signin-paste"]'],
-    },
-    "signin-code",
-  ],
-  [
-    "Signed in as {email} · {plan}",
-    signed({ email: "test@example.com", plan: "Claude Max" }),
-    "signin-done",
-  ],
-  ["Signed in as {email}", signed({ email: "test@example.com" }), "signin-done"],
-  ["Signed in to {name}", signed({}), "signin-done"],
-  ["Using an API key, billed to its own account", signed({ method: "api_key" }), "signin-done"],
-  ["Using your firm's account", signed({ method: "firm" }), "signin-done"],
-  [
-    "The sign-in link expired at {time}.",
-    { events: [READY, failed("signin.link_expired")] },
-    "signin-unfinished",
-  ],
-  ["See {name}'s plans", { events: [READY, failed("signin.no_plan")] }, "signin-noplan"],
-  ["Use another account", { events: [READY, failed("signin.no_plan")] }, "signin-noplan"],
-  [
-    "Clauseo works with a Claude Pro or Max plan.",
-    { events: [READY, failed("signin.no_plan")] },
-    "signin-noplan",
-  ],
-  [
-    "Clauseo works with a paid ChatGPT plan.",
-    chatgpt({ failed: { code: "signin.no_plan", at: AT } }),
-    "signin-noplan",
-  ],
+  // UD1-38 to UD1-54: the browser sign-in and how it ends, in registry-ud1-signin.tsx, in its place here
+  ...SIGNING_IN,
   // a login already on this computer
   [
     "Clauseo found your {name} account ({email}) from {app} and will use it here.",
