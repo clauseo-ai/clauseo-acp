@@ -123,11 +123,20 @@ fn every_other_measure_stays_command_invalid() {
     }
 }
 
-/// The first text block that crosses the limit decides: its running total is the size, and a
-/// later empty block is never reached.
+/// The first text block that crosses the limit decides: its running total is the size, and the
+/// blocks after it are never reached, an empty one (refused on its own) included.
 #[test]
 fn the_first_block_over_the_limit_decides() {
     let max_text = "a".repeat(MAX);
-    let blocks = vec![text(&max_text), text("x"), text(&"b".repeat(MAX))];
+    let blocks = vec![text(&max_text), text("x"), text(""), text(&"b".repeat(MAX))];
     assert!(too_long(send(blocks), MAX + 1));
+}
+
+/// A block whose raw bytes alone cross the limit is refused without its escapes counted: the
+/// size is the raw running total, a lower bound of the escaped one.
+#[test]
+fn raw_bytes_over_the_limit_are_over_without_a_scan() {
+    let over = "\n".repeat(MAX + 1);
+    assert!(too_long(send(vec![text(&format!("a{over}"))]), MAX + 2));
+    assert!(too_long(edit_queued(&over).validate(), MAX + 1));
 }
