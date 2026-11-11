@@ -4,10 +4,10 @@
 // permission set it up, always through its confirm); or Not protected with why, and "Set up the
 // Safe workspace" or "Set up again" where a set-up with no Windows prompt fixes it. Design B: a
 // block says its reason's line (blocked.ts); where the repair is the installer, its line stands in
-// the button's place, with "Get the installer" on a personal install (installer.ts). The waiting
+// the button's place, with "Get the installer" without a firm's policy (installer.ts). The waiting
 // line stands in the button's place while a command runs, and a refusal's words under the block.
-// A block only the firm can act on, or a sandbox.blocked refusal, adds "Copy details for IT"
-// (it-details.ts) under them.
+// While the firm's policy is active (firmPolicy, blocked.ts), a block only the firm can act on, or a
+// sandbox.blocked refusal, adds "Copy details for IT" (it-details.ts) under them.
 // Where the host doesn't answer the query yet (`command.invalid`, before R17 PR-B admits this
 // window) the section says so quietly. A matter's own state (a full pool, protection switched off)
 // is the room's, never shown here. No timers: the view is read when the window opens, after each
@@ -30,7 +30,7 @@ import { named1385, whyOf } from "../../room/protection/detail.ts";
 import {
   blockLine,
   blockOf,
-  firmInstall,
+  firmPolicy,
   needsInstaller,
   repairLine,
   setUpFixes,
@@ -153,10 +153,13 @@ export function Workspace({ ctx }: { ctx: SectionContext }) {
                     )
                   : w.s(cantKey(cause ?? { name: "unknown", group: "cant", raw: null }));
   const repair = needsInstaller(cause);
-  const page = repair && !firmInstall(view, state.managedBy) ? repairPage(display) : null;
+  const policy = firmPolicy(view, state.managedBy);
+  const page = repair && !policy ? repairPage(display) : null;
   const block = blockLine(lang, cause);
   const failed = failedWords(lang, state);
-  const forIt = itDetails.blocked(lang, cause) ?? itDetails.refused(lang, state.failed, cause);
+  const forIt = policy
+    ? (itDetails.blocked(lang, cause) ?? itDetails.refused(lang, state.failed, cause))
+    : null;
   const act = repair ? (
     page === null ? null : (
       <Button

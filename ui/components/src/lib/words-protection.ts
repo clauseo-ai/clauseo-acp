@@ -37,7 +37,7 @@ export function protectionErrorWords(lang: Lang, code: string): string {
   if (code === BLOCKED_CODE)
     return pw(
       lang,
-      "Something on this computer stops the Safe workspace, so Clauseo can't answer here. Your firm manages this computer's settings.",
+      "Something on this computer stops the Safe workspace, so Clauseo can't answer here. Settings › Safe workspace says what to do.",
     );
   return code === POOL_FULL_CODE
     ? pw(

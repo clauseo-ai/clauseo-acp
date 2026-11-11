@@ -4,111 +4,38 @@
 // while the query answers command.invalid (before R17 PR-B admits this window), never an error; no
 // section without the wire; "Remove set-up" always through its confirm, Cancel sending nothing; the
 // set-up's confirm by the same rule as the room's, after a Remove too; design B's repair, only for
-// a missing admin copy, with Get the installer on a per-user install and IT's line on a per-machine
+// a missing admin copy, with Get the installer without a firm's policy and the firm's line under
 // one; a block's reason line; the wait and a refusal; no account name or SID for any fixture; and
 // no timer at rest.
-import { settled } from "@clauseo/components/lib/late.ts";
 import { errorWords } from "@clauseo/components/lib/words-errors.ts";
 import { INSTALLER_CLOSE, pw } from "@clauseo/components/lib/words-protection.ts";
 import { st } from "@clauseo/components/lib/words-settings.ts";
 import { act } from "react";
-import { createRoot, type Root } from "react-dom/client";
 import { afterEach, expect, test, vi } from "vitest";
-import { connectDisplay } from "../../display/connect.ts";
-import { DEFAULT_UI, type DisplayStore } from "../../room/display-store.ts";
 import { NO_PROMPT, np, PROT, view } from "../../room/protection/fixtures.ts";
 import { installerPage } from "../../room/protection/installer.ts";
 import { APP_VERSION } from "../version.ts";
-import { FakeTransport, type FakeProtectionHost } from "../../transport/fake-transport.ts";
-import type { Protection, ProtectionView } from "../../transport/protocol.ts";
-import { SettingsApp } from "../settings-app.tsx";
+import type { ProtectionView } from "../../transport/protocol.ts";
+import {
+  block,
+  held,
+  mount,
+  one,
+  press,
+  reset,
+  scripted,
+  settle,
+  text,
+  unmount,
+} from "./workspace-rig.tsx";
 
-let host: HTMLDivElement | null = null;
-let root: Root | null = null;
-let store: DisplayStore | null = null;
-/** The updater's view `get_update` answers; undefined: not scripted (refused). */
-let update: unknown = undefined;
-/** The language the settings window's ui settings name. */
-let language: "en" | "hi" = "en";
-
-afterEach(async () => {
-  await act(async () => root?.unmount());
-  host?.remove();
-  store?.dispose();
-  host = null;
-  root = null;
-  store = null;
-  document.body.replaceChildren();
-  vi.restoreAllMocks();
-  update = undefined;
-  language = "en";
-});
-
-async function settle() {
-  for (let i = 0; i < 4; i += 1) {
-    await act(async () => new Promise((resolve) => setTimeout(resolve, 0)));
-    await act(async () => settled());
-  }
-}
-
-type Answer = { resolve: () => void; reject: (e: unknown) => void };
-
-/** The settings window at the Safe workspace, on `platform`, over `protection` (none: no wire). */
-async function mount(
-  protection: FakeProtectionHost | undefined,
-  platform: "mac" | "windows" | "linux" = "windows",
-  hash = "#workspace",
-) {
-  const settings = { ui: { ...DEFAULT_UI, language }, locked: [] };
-  const transport = new FakeTransport({
-    platform,
-    query: (query) => {
-      if (query === "get_settings") return { settings: settings as never };
-      if (query === "get_update" && update !== undefined) return { update: update as never };
-      throw new Error(`not scripted: ${JSON.stringify(query)}`);
-    },
-    next: { query: () => ({ settings }) as never },
-    ...(protection === undefined ? {} : { protection }),
-  });
-  history.replaceState(null, "", `/settings.html${hash}`);
-  store = connectDisplay(transport).store;
-  host = document.createElement("div");
-  document.body.append(host);
-  root = createRoot(host);
-  const made = store;
-  await act(async () =>
-    root?.render(<SettingsApp store={made} transport={transport} windowControls={null} />),
-  );
-  await settle();
-  return transport;
-}
-
-/** A computer at `computer` with `over`; each command held until the test answers it. */
-function held(computer: Protection, over: Partial<ProtectionView> = {}) {
-  const answers: Answer[] = [];
-  const state = { computer };
-  const host: FakeProtectionHost = {
-    view: () => view(state.computer, over),
-    command: () => new Promise<void>((resolve, reject) => answers.push({ resolve, reject })),
-  };
-  return { host, answers, state };
-}
-
-const one = (id: string) => document.querySelector<HTMLElement>(`[data-testid="${id}"]`);
-const block = () => one("settings-workspace");
-const text = () => block()?.textContent ?? "";
-async function press(el: HTMLElement | null) {
-  if (el === null) throw new Error("nothing to press");
-  await act(async () => el.click());
-  await settle();
-}
+afterEach(reset);
 
 test("the section is named Safe workspace, and shows only where the transport carries the protection wire", async () => {
   await mount({ view: () => view(PROT.a) }, "mac");
   expect(document.body.textContent).toContain(st("en", "Safe workspace"));
   expect(block()).not.toBeNull();
-  await act(async () => root?.unmount());
-  document.body.replaceChildren();
+  await unmount();
   await mount(undefined, "mac");
   expect(block()).toBeNull();
   expect(document.body.textContent).not.toContain(st("en", "Safe workspace"));
@@ -245,8 +172,7 @@ test("the firm's no-auto line stays hidden until the host enforces it (UC-76), w
   expect(document.body.textContent).not.toContain(
     st("en", "Your firm doesn't allow Clauseo to work without asking on this computer."),
   );
-  await act(async () => root?.unmount());
-  document.body.replaceChildren();
+  await unmount();
   await mount({ view: () => view(PROT.refused) });
   expect(one("protection-no-auto")).toBeNull();
 });
@@ -358,7 +284,7 @@ test("after a finished in-app Remove, the app offers Set up, with the announce l
 });
 
 test("admin_copy_missing on a per-user install: not set up yet, the repair, and Get the installer opens the installed version's page", async () => {
-  update = { current: "0.1.0", mode: "auto", state: "idle" };
+  scripted.update = { current: "0.1.0", mode: "auto", state: "idle" };
   const t = await mount({ view: () => view(PROT.missing) });
   expect(block()?.dataset["state"]).toBe("blocked");
   expect(text()).toContain(
@@ -382,27 +308,37 @@ test("admin_copy_missing on a per-user install: not set up yet, the repair, and 
 });
 
 test("the per-user repair says Clauseo will close, beside Get the installer, in English", async () => {
-  update = { current: "0.1.0", mode: "auto", state: "idle" };
+  scripted.update = { current: "0.1.0", mode: "auto", state: "idle" };
   await mount({ view: () => view(PROT.missing) });
   expect(one("protection-close-line")?.textContent).toBe(pw("en", INSTALLER_CLOSE));
 });
 
 test("the same line in Hindi when the window is in Hindi", async () => {
-  update = { current: "0.1.0", mode: "auto", state: "idle" };
-  language = "hi";
+  scripted.update = { current: "0.1.0", mode: "auto", state: "idle" };
+  scripted.language = "hi";
   await mount({ view: () => view(PROT.missing) });
   expect(one("protection-close-line")?.textContent).toBe(pw("hi", INSTALLER_CLOSE));
 });
 
+test("admin_copy_missing on an install for everyone with no firm's policy: the per-user repair, Get the installer", async () => {
+  scripted.update = { current: "0.1.0", mode: "auto", state: { managed: { by: "per_machine" } } };
+  await mount({ view: () => view(PROT.missing) });
+  expect(one("protection-repair")?.textContent).toBe(
+    pw("en", "Run the Clauseo installer again to set up the Safe workspace."),
+  );
+  expect(one("protection-installer")).not.toBeNull();
+  expect(text()).not.toMatch(/your firm/i);
+});
+
 test.each([
-  ["per machine, by the updater", {}, "per_machine"],
   ["update.mode none by policy", {}, "policy"],
   ["required", { required: true }, null],
   ["no unprotected auto mode", { unprotected_auto_allowed: false }, null],
 ] as const)(
-  "admin_copy_missing on a firm install (%s): the firm manages the install, with no button",
+  "admin_copy_missing under a firm's policy (%s): the firm manages the install, with no button",
   async (_c, over, by) => {
-    if (by !== null) update = { current: "0.1.0", mode: "auto", state: { managed: { by } } };
+    if (by !== null)
+      scripted.update = { current: "0.1.0", mode: "auto", state: { managed: { by } } };
     const t = await mount({ view: () => view(PROT.missing, over) });
     expect(one("protection-repair")?.textContent).toBe(
       pw("en", "Your firm manages how Clauseo is installed on this computer."),
@@ -418,33 +354,41 @@ test.each([
   [
     "policy",
     PROT.policy,
-    "A Windows policy on this computer blocks the program that sets up the Safe workspace. Your firm manages this policy on this computer.",
+    "A Windows policy on this computer blocks the program that sets up the Safe workspace.",
   ],
   [
     "other_account",
     PROT.otherAccount,
-    "The Safe workspace on this computer belongs to another Windows account. Your firm manages this computer's Windows accounts.",
+    "The Safe workspace on this computer belongs to another Windows account, so Clauseo can't use it from this one.",
   ],
   [
     "a reason from a newer Clauseo",
     PROT.blockedNewer,
-    "Something on this computer stops the Safe workspace. Your firm manages this computer's settings.",
+    "Something on this computer stops the Safe workspace.",
   ],
-] as const)("a block, %s: what stops it, its line, and no act", async (_c, p, line) => {
-  await mount({ view: () => view(p) });
-  expect(block()?.dataset["state"]).toBe("blocked");
-  expect(text()).toContain(
-    pw(
-      "en",
-      "Something on this computer stops the Safe workspace, so Clauseo asks before changing anything outside a matter's folder.",
-    ),
-  );
-  expect(one("protection-block")?.textContent).toBe(line);
-  expect(one("protection-it")?.textContent).toBe("Copy details for IT");
-  expect(one("protection-repair")).toBeNull();
-  expect(one("protection-installer")).toBeNull();
-  expect(one("protection-setup")).toBeNull();
-});
+] as const)(
+  "a block, %s: what stops it, its line, and no act; Copy details for IT only under a firm's policy",
+  async (_c, p, line) => {
+    await mount({ view: () => view(p, { unprotected_auto_allowed: false }) });
+    expect(block()?.dataset["state"]).toBe("blocked");
+    expect(text()).toContain(
+      pw(
+        "en",
+        "Something on this computer stops the Safe workspace, so Clauseo asks before changing anything outside a matter's folder.",
+      ),
+    );
+    expect(one("protection-block")?.textContent).toBe(line);
+    expect(one("protection-it")?.textContent).toBe("Copy details for IT");
+    expect(one("protection-repair")).toBeNull();
+    expect(one("protection-installer")).toBeNull();
+    expect(one("protection-setup")).toBeNull();
+    await unmount();
+    await mount({ view: () => view(p) });
+    expect(one("protection-block")?.textContent).toBe(line);
+    expect(one("protection-it")).toBeNull();
+    expect(text()).not.toMatch(/\bIT\b|[Yy]our firm/);
+  },
+);
 
 test.each([
   ["Windows' prompt follows: the set-up's confirm first, then", true],
@@ -474,11 +418,14 @@ test.each([
   },
 );
 
-test("a firm-only block offers Copy details for IT: its reason and version, never a matter's path; stage C's don't", async () => {
+test("under a firm's policy, a firm-only block offers Copy details for IT: its reason and version, never a matter's path; stage C's don't", async () => {
   const path = "C:\\Users\\asha\\Matters\\Sharma v. State of Delhi";
   const writeText = vi.fn(async (_text: string) => {});
   Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
-  await mount({ view: () => view(np({ blocked: { reason: "policy", path } })) });
+  await mount({
+    view: () =>
+      view(np({ blocked: { reason: "policy", path } }), { unprotected_auto_allowed: false }),
+  });
   await press(one("protection-it"));
   expect(writeText).toHaveBeenCalledWith(
     `Clauseo's Safe workspace is blocked on this computer.\nReason: policy\nClauseo version: ${APP_VERSION}\nClauseo for firm IT: https://github.com/clauseo-ai/clauseo-acp/blob/main/docs/firm-it.md#sandbox-policy`,
@@ -487,10 +434,10 @@ test("a firm-only block offers Copy details for IT: its reason and version, neve
   expect(one("protection-it")?.textContent).toBe("Message copied");
   Reflect.deleteProperty(navigator, "clipboard");
   for (const reason of ["tool_missing", "admin_copy_changed", "admin_copy_unsafe"]) {
-    await act(async () => root?.unmount());
-    store?.dispose();
-    document.body.replaceChildren();
-    await mount({ view: () => view(np({ blocked: { reason } })) });
+    await unmount();
+    await mount({
+      view: () => view(np({ blocked: { reason } }), { unprotected_auto_allowed: false }),
+    });
     expect(one("protection-it")).toBeNull();
   }
 });
@@ -535,8 +482,7 @@ test("no account name or SID for any fixture", async () => {
   ]) {
     await mount({ view: () => view(p, { required: true, unprotected_auto_allowed: false }) });
     expect(document.body.textContent).not.toMatch(/S-1-5-|clauseo-agent|sandbox|session/i);
-    await act(async () => root?.unmount());
-    document.body.replaceChildren();
+    await unmount();
   }
 });
 

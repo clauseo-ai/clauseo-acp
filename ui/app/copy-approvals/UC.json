@@ -563,24 +563,26 @@
     "by": "app track (provisional; Rohan batch review; design B, safe-workspace-installer-setup)"
   },
   "UC-82": {
-    "en": "A Windows policy on this computer blocks the program that sets up the Safe workspace. Your firm manages this policy on this computer.",
-    "hi": "इस कंप्यूटर की एक Windows नीति सुरक्षित कार्यक्षेत्र तैयार करने वाले प्रोग्राम को रोकती है। इस कंप्यूटर पर यह नीति आपकी फ़र्म प्रबंधित करती है।",
+    "en": "A Windows policy on this computer blocks the program that sets up the Safe workspace.",
+    "hi": "इस कंप्यूटर की एक Windows नीति सुरक्षित कार्यक्षेत्र तैयार करने वाले प्रोग्राम को रोकती है।",
     "hi_status": "provisional",
-    "hi_at": "2026-11-08",
-    "hi_by": "app track (no IT endings)",
-    "status": "provisional",
-    "at": "2026-11-08",
-    "by": "app track (no IT endings)"
+    "hi_at": "2026-11-11",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "approved",
+    "at": "2026-11-11",
+    "by": "orchestrator (IT sweep, 2026-11-11)",
+    "note": "\"Your firm manages …\" dropped: it showed on any Windows computer, firm or not (IT sweep)"
   },
   "UC-83": {
-    "en": "The program that sets up the Safe workspace is missing, or security software blocked it. Your firm manages the security software on this computer.",
-    "hi": "सुरक्षित कार्यक्षेत्र तैयार करने वाला प्रोग्राम नहीं मिला, या किसी सुरक्षा सॉफ़्टवेयर ने उसे रोक दिया। इस कंप्यूटर पर सुरक्षा सॉफ़्टवेयर आपकी फ़र्म प्रबंधित करती है।",
+    "en": "The program that sets up the Safe workspace is missing, or security software blocked it. Allow Clauseo in your security software, then install Clauseo again.",
+    "hi": "सुरक्षित कार्यक्षेत्र तैयार करने वाला प्रोग्राम नहीं मिला, या किसी सुरक्षा सॉफ़्टवेयर ने उसे रोक दिया। अपने सुरक्षा सॉफ़्टवेयर में Clauseo को अनुमति दें, उसके बाद Clauseo फिर से इंस्टॉल करें।",
     "hi_status": "provisional",
-    "hi_at": "2026-11-08",
-    "hi_by": "app track (no IT endings)",
-    "status": "provisional",
-    "at": "2026-11-08",
-    "by": "app track (no IT endings)"
+    "hi_at": "2026-11-11",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "approved",
+    "at": "2026-11-11",
+    "by": "orchestrator (IT sweep, 2026-11-11)",
+    "note": "\"Your firm manages …\" dropped: it showed on any Windows computer, firm or not (IT sweep)"
   },
   "UC-84": {
     "en": "The Safe workspace wasn't set up when Clauseo was installed.",
@@ -633,34 +635,37 @@
     "by": "app track (no IT endings)"
   },
   "UC-89": {
-    "en": "The folder that holds the Safe workspace's set-up program isn't limited to administrators, or holds files it shouldn't. Your firm manages this folder on this computer.",
-    "hi": "सुरक्षित कार्यक्षेत्र का सेटअप प्रोग्राम जिस फ़ोल्डर में है, वह केवल व्यवस्थापकों तक सीमित नहीं है, या उसमें ऐसी फ़ाइलें हैं जो नहीं होनी चाहिए। इस कंप्यूटर पर यह फ़ोल्डर आपकी फ़र्म प्रबंधित करती है।",
+    "en": "The folder that holds the Safe workspace's set-up program isn't limited to administrators, or holds files it shouldn't. Install Clauseo again to restore it.",
+    "hi": "सुरक्षित कार्यक्षेत्र का सेटअप प्रोग्राम जिस फ़ोल्डर में है, वह केवल व्यवस्थापकों तक सीमित नहीं है, या उसमें ऐसी फ़ाइलें हैं जो नहीं होनी चाहिए। उसे वापस लाने के लिए Clauseo फिर से इंस्टॉल करें।",
     "hi_status": "provisional",
-    "hi_at": "2026-11-08",
-    "hi_by": "app track (no IT endings)",
-    "status": "provisional",
-    "at": "2026-11-08",
-    "by": "app track (no IT endings)"
+    "hi_at": "2026-11-11",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "approved",
+    "at": "2026-11-11",
+    "by": "orchestrator (IT sweep, 2026-11-11)",
+    "note": "\"Your firm manages …\" dropped: it showed on any Windows computer, firm or not (IT sweep)"
   },
   "UC-90": {
-    "en": "The Safe workspace on this computer belongs to another Windows account. Your firm manages this computer's Windows accounts.",
-    "hi": "इस कंप्यूटर का सुरक्षित कार्यक्षेत्र किसी दूसरे Windows खाते का है। इस कंप्यूटर के Windows खाते आपकी फ़र्म प्रबंधित करती है।",
+    "en": "The Safe workspace on this computer belongs to another Windows account, so Clauseo can't use it from this one.",
+    "hi": "इस कंप्यूटर का सुरक्षित कार्यक्षेत्र किसी दूसरे Windows खाते का है, इसलिए Clauseo इस खाते से उसका इस्तेमाल नहीं कर सकता।",
     "hi_status": "provisional",
-    "hi_at": "2026-11-08",
-    "hi_by": "app track (no IT endings)",
-    "status": "provisional",
-    "at": "2026-11-08",
-    "by": "app track (no IT endings)"
+    "hi_at": "2026-11-11",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "approved",
+    "at": "2026-11-11",
+    "by": "orchestrator (IT sweep, 2026-11-11)",
+    "note": "\"Your firm manages …\" dropped: it showed on any Windows computer, firm or not (IT sweep)"
   },
   "UC-91": {
-    "en": "Something on this computer stops the Safe workspace. Your firm manages this computer's settings.",
-    "hi": "इस कंप्यूटर पर कोई चीज़ सुरक्षित कार्यक्षेत्र को रोक रही है। इस कंप्यूटर की सेटिंग्स आपकी फ़र्म प्रबंधित करती है।",
+    "en": "Something on this computer stops the Safe workspace.",
+    "hi": "इस कंप्यूटर पर कोई चीज़ सुरक्षित कार्यक्षेत्र को रोक रही है।",
     "hi_status": "provisional",
-    "hi_at": "2026-11-08",
-    "hi_by": "app track (no IT endings)",
-    "status": "provisional",
-    "at": "2026-11-08",
-    "by": "app track (no IT endings)"
+    "hi_at": "2026-11-11",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "approved",
+    "at": "2026-11-11",
+    "by": "orchestrator (IT sweep, 2026-11-11)",
+    "note": "\"Your firm manages …\" dropped: it showed on any Windows computer, firm or not (IT sweep)"
   },
   "UC-92": {
     "en": "Your firm requires the Safe workspace on this computer, so Clauseo can't answer here until it's set up.",
@@ -673,14 +678,15 @@
     "by": "app track (provisional; Rohan batch review; design B, safe-workspace-installer-setup)"
   },
   "UC-93": {
-    "en": "Something on this computer stops the Safe workspace, so Clauseo can't answer here. Your firm manages this computer's settings.",
-    "hi": "इस कंप्यूटर पर कोई चीज़ सुरक्षित कार्यक्षेत्र को रोक रही है, इसलिए Clauseo यहाँ उत्तर नहीं दे सकता। इस कंप्यूटर की सेटिंग्स आपकी फ़र्म प्रबंधित करती है।",
+    "en": "Something on this computer stops the Safe workspace, so Clauseo can't answer here. Settings › Safe workspace says what to do.",
+    "hi": "इस कंप्यूटर पर कोई चीज़ सुरक्षित कार्यक्षेत्र को रोक रही है, इसलिए Clauseo यहाँ उत्तर नहीं दे सकता। क्या करना है, यह सेटिंग्स › सुरक्षित कार्यक्षेत्र में बताया गया है।",
     "hi_status": "provisional",
-    "hi_at": "2026-11-08",
-    "hi_by": "app track (no IT endings)",
-    "status": "provisional",
-    "at": "2026-11-08",
-    "by": "app track (no IT endings)"
+    "hi_at": "2026-11-11",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "approved",
+    "at": "2026-11-11",
+    "by": "orchestrator (IT sweep, 2026-11-11)",
+    "note": "\"Your firm manages …\" dropped: it showed on any Windows computer, firm or not (IT sweep)"
   },
   "UC-94": {
     "en": "Add room for 4 more?",

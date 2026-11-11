@@ -133,22 +133,22 @@ test.each([
   [
     "tool_missing",
     { not_protected: { cause: { blocked: { reason: "tool_missing" } } } } as Protection,
-    "The program that sets up the Safe workspace is missing, or security software blocked it. Your firm manages the security software on this computer.",
+    "The program that sets up the Safe workspace is missing, or security software blocked it. Allow Clauseo in your security software, then install Clauseo again.",
   ],
   [
     "other_account",
     PROT.otherAccount,
-    "The Safe workspace on this computer belongs to another Windows account. Your firm manages this computer's Windows accounts.",
+    "The Safe workspace on this computer belongs to another Windows account, so Clauseo can't use it from this one.",
   ],
   [
     "policy",
     PROT.policy,
-    "A Windows policy on this computer blocks the program that sets up the Safe workspace. Your firm manages this policy on this computer.",
+    "A Windows policy on this computer blocks the program that sets up the Safe workspace.",
   ],
   [
     "a reason from a newer Clauseo",
     PROT.blockedNewer,
-    "Something on this computer stops the Safe workspace. Your firm manages this computer's settings.",
+    "Something on this computer stops the Safe workspace.",
   ],
 ] as const)(
   "a block, %s: the note says what stops it and its line, with no retry",
