@@ -1,30 +1,31 @@
 //! Start-up: a thread's queue rebuilt from its whole log, held. Its queued turns are the prompts
 //! whose turn neither started nor ended, in the order they joined the queue (a prompt's
 //! `UserMessage`, a requeued steer's `SteerResolved`), with their edits applied. A steer saved and
-//! never answered (the host stopped first) moves to a new queued turn, so it is not lost; it keeps
-//! its message's place in the log, behind any prompt queued before it, and so does a steer the
-//! agent took into a turn that then ended `Cancelled` or `Failed`, or never ended (the repair ends
-//! it `Failed`), had the host stopped before it went next (`steer.rs`). The turns put back at the
-//! head live keep that place across a restart: a requeued steer (`steer.rs`) and a turn put back
-//! for its agent's sign-in (`sign_in.rs`) both have their `TurnQueued` marked `at_head`, so they
-//! come back first, the latest put back first, as the live queue has them. The queue comes back
-//! held, so nothing runs before the lawyer looks. Only a turn put back for the sign-in marks the
-//! queue as waiting for it, so `restart_agents` resumes that one; a steer does not. An older log
-//! has no mark and restores in log order.
+//! never settled (no `SteerResolved`: the host stopped before its answer or its confirmation) gets
+//! `SteerResolved { NotSent }` with the turn it was sent into, which has ended or which the repair
+//! ends `Failed`: the host was not seen to deliver it, and sends nothing on its own (`steer.rs`).
+//! The turns put back at the head live keep that place across a restart: a requeued steer
+//! (`steer.rs`) and a turn put back for its agent's sign-in (`sign_in.rs`) both have their
+//! `TurnQueued` marked `at_head`, so they come back first, the latest put back first, as the live
+//! queue has them. The queue comes back held, so nothing runs before the lawyer looks. Only a turn
+//! put back for the sign-in marks the queue as waiting for it, so `restart_agents` resumes that
+//! one; a steer does not. An older log has no mark and restores in log order.
 
 use std::collections::{BTreeMap, BTreeSet};
 
 use clauseo_protocol::{
     ContentBlock, Delivery, DomainEvent, Envelope, MessageId, SteerOutcome, SteerResolved,
-    StopReason, ThreadId, TurnId, TurnQueued,
+    ThreadId, TurnId, TurnQueued,
 };
 
 use super::super::super::Actor;
 use super::super::out::Out;
 use super::super::reconcile::{needs_queued, previous_turn};
 use super::super::{lost, state};
+use super::steer::why;
 use super::{Queued, sync_held};
 use crate::error::Error;
+use crate::log_file::LIFECYCLE;
 
 /// A prompt as the log leaves it.
 struct Prompt {
@@ -33,9 +34,7 @@ struct Prompt {
     turn: TurnId,
     content: Vec<ContentBlock>,
     /// A steer with no `SteerResolved` yet.
-    unanswered: bool,
-    /// The turn a steer was last answered `Injected` into.
-    injected: Option<TurnId>,
+    unsettled: bool,
 }
 
 /// The queued turns of a log, in queue order, and the turn put back for the sign-in, if any.
@@ -44,17 +43,18 @@ struct QueuedTurns {
     sign_in: Option<TurnId>,
 }
 
-/// A turn the restored queue holds.
+/// A prompt the restored log leaves to settle: a queued turn, or a steer not sent.
 enum Restored {
     /// A queued turn, as logged.
     Queued(TurnId),
-    /// A steer never answered, sent into this turn: it gets a new turn now.
-    Unanswered(TurnId),
+    /// A steer never settled, sent into this turn: it was not sent.
+    Unsettled(TurnId),
 }
 
 /// Rebuilds `thread`'s queue from `log`, held, and pushes into `out` a `TurnQueued` behind
 /// its own thread (behind the thread's previous turn) for each queued turn whose last
-/// `TurnQueued` names another thread or is missing, so the view shows it queued.
+/// `TurnQueued` names another thread or is missing, so the view shows it queued, and a
+/// `SteerResolved { NotSent }` for each steer never settled.
 pub(in super::super) fn restore(
     actor: &mut Actor,
     thread: ThreadId,
@@ -73,18 +73,15 @@ pub(in super::super) fn restore(
                 }
                 turn
             }
-            Restored::Unanswered(steered) => {
-                let turn: TurnId = actor.ids.mint(actor.now().wall)?;
+            Restored::Unsettled(steered) => {
+                tracing::info!(target: LIFECYCLE, %thread, turn = %steered, why = why::RESTART, "a steer was not sent");
                 let resolved = SteerResolved {
                     message,
-                    outcome: SteerOutcome::Requeued { turn },
+                    outcome: SteerOutcome::NotSent { turn: steered },
                     aside: Vec::new(),
                 };
-                let waits = TurnQueued::new(thread, turn, thread, Some(steered))
-                    .map_err(|error| Error::Internal(error.to_string()))?;
                 out.push(actor, resolved)?;
-                out.push(actor, waits)?;
-                turn
+                continue;
             }
         };
         turns.push(Queued {
@@ -92,6 +89,7 @@ pub(in super::super) fn restore(
             message,
             content,
             forced: false,
+            host_held: false,
         });
     }
     let queue = &mut state(actor, thread).ok_or_else(|| lost("a thread"))?.queue;
@@ -111,9 +109,6 @@ fn queued_turns(log: &[Envelope]) -> QueuedTurns {
     let mut done: BTreeSet<TurnId> = BTreeSet::new();
     let mut heads: BTreeSet<TurnId> = BTreeSet::new();
     let mut steered: BTreeSet<TurnId> = BTreeSet::new();
-    // Turns that ended, and those of them that ended `Cancelled` or `Failed`.
-    let mut ended: BTreeSet<TurnId> = BTreeSet::new();
-    let mut stopped: BTreeSet<TurnId> = BTreeSet::new();
     for (at, envelope) in log.iter().enumerate() {
         let event = &envelope.event;
         if let DomainEvent::UserMessage(message) = event {
@@ -121,8 +116,7 @@ fn queued_turns(log: &[Envelope]) -> QueuedTurns {
                 at,
                 turn: message.turn,
                 content: message.content.clone(),
-                unanswered: message.delivery == Delivery::Steer,
-                injected: None,
+                unsettled: message.delivery == Delivery::Steer,
             };
             prompts.insert(message.message, prompt);
         } else if let DomainEvent::QueuedPromptEdited(edited) = event
@@ -132,14 +126,7 @@ fn queued_turns(log: &[Envelope]) -> QueuedTurns {
         } else if let DomainEvent::SteerResolved(resolved) = event
             && let Some(prompt) = prompts.get_mut(&resolved.message)
         {
-            prompt.unanswered = false;
-            prompt.injected = match &resolved.outcome {
-                SteerOutcome::Injected { turn } => Some(*turn),
-                SteerOutcome::Requeued { .. }
-                | SteerOutcome::SentNow { .. }
-                | SteerOutcome::NotSent { .. }
-                | SteerOutcome::Unknown { .. } => None,
-            };
+            prompt.unsettled = false;
             if let SteerOutcome::Requeued { turn } | SteerOutcome::SentNow { turn } =
                 &resolved.outcome
             {
@@ -157,20 +144,13 @@ fn queued_turns(log: &[Envelope]) -> QueuedTurns {
             done.insert(started.turn);
         } else if let DomainEvent::TurnEnded(end) = event {
             done.insert(end.turn);
-            ended.insert(end.turn);
-            if matches!(end.stop, StopReason::Cancelled | StopReason::Failed) {
-                stopped.insert(end.turn);
-            }
         }
     }
     let mut queued: Vec<(Place, Restored, MessageId, Vec<ContentBlock>)> = prompts
         .into_iter()
         .filter_map(|(message, prompt)| {
-            let lost = prompt
-                .injected
-                .is_some_and(|into| stopped.contains(&into) || !ended.contains(&into));
-            let (restored, head) = if prompt.unanswered || lost {
-                (Restored::Unanswered(prompt.turn), false)
+            let (restored, head) = if prompt.unsettled {
+                (Restored::Unsettled(prompt.turn), false)
             } else if done.contains(&prompt.turn) {
                 return None;
             } else {

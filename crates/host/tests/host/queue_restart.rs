@@ -1,8 +1,8 @@
 //! The queue across a restart and a steer that is never answered: a held queue whose last prompt
 //! is a later turn that ended (sent now, then cancelled) comes back held and can be edited and
-//! removed; a steer saved but not answered before the host stops comes back as a held queued
-//! turn; a steer the agent never answers goes next once its wait, which starts at its send, runs
-//! out (`steer_wait.rs` has the same while the turn runs on).
+//! removed; a steer saved but not answered before the host stops comes back not sent, with no
+//! queued turn; a steer the agent never answers, its turn ended, is not sent once its wait, which
+//! starts at its send, runs out (`steer_wait.rs` has it going next while the turn runs on).
 
 use std::time::Duration;
 
@@ -85,9 +85,9 @@ fn a_held_queue_behind_a_later_ended_turn_survives_a_restart() {
 }
 
 #[test]
-fn a_steer_never_answered_comes_back_held_after_a_restart() {
+fn a_steer_never_answered_comes_back_not_sent_after_a_restart() {
     let dir = Dir::new(
-        "a_steer_never_answered_comes_back_held_after_a_restart",
+        "a_steer_never_answered_comes_back_not_sent_after_a_restart",
         &[(FAKE, Scenario::Local("steer-unanswered"))],
     );
     let host = dir.start(0);
@@ -111,23 +111,24 @@ fn a_steer_never_answered_comes_back_held_after_a_restart() {
     events.until_caught_up();
     settle(&host, &mut events);
     let (_, resolved) = steer_resolved(&events, message)
-        .unwrap_or_else(|| panic!("the steer was dropped: {}", events.dump()));
-    let SteerOutcome::Requeued { turn: next } = resolved.outcome else {
-        panic!("not requeued: {resolved:?}");
-    };
-    let waits = events
-        .last_queued(next)
-        .unwrap_or_else(|| panic!("{}", events.dump()));
-    assert_eq!((waits.behind(), waits.behind_turn()), (thread, Some(first)));
-    assert!(held(&host, matter, thread), "the steer's turn is not held");
-    assert_eq!(starts(&events, next), 0, "{}", events.dump());
+        .unwrap_or_else(|| panic!("the steer was left unsettled: {}", events.dump()));
+    assert_eq!(
+        resolved.outcome,
+        SteerOutcome::NotSent { turn: first },
+        "{}",
+        events.dump()
+    );
+    // Nothing waits: the steer is not a queued turn, and the queue is not held for it.
+    assert!(!held(&host, matter, thread), "{}", events.dump());
+    let turns = events.count(|e| matches!(e, DomainEvent::TurnStarted(_)));
+    assert_eq!(turns, 1, "{}", events.dump());
     host.shutdown();
 }
 
 #[test]
-fn a_steer_with_no_answer_goes_next_when_its_wait_runs_out() {
+fn a_steer_with_no_answer_after_its_turn_ended_is_not_sent_when_its_wait_runs_out() {
     let dir = Dir::new(
-        "a_steer_with_no_answer_goes_next_when_its_wait_runs_out",
+        "a_steer_with_no_answer_after_its_turn_ended_is_not_sent_when_its_wait_runs_out",
         &[(FAKE, Scenario::Local("steer-no-answer"))],
     );
     let host = dir.start(0);
@@ -152,11 +153,10 @@ fn a_steer_with_no_answer_goes_next_when_its_wait_runs_out() {
     host.clock.advance(STEER_WAIT);
     events.until("SteerResolved", |e| steer_resolved(e, message).is_some());
     let (_, resolved) = steer_resolved(&events, message).unwrap();
-    let SteerOutcome::Requeued { turn: next } = resolved.outcome else {
-        panic!("not requeued: {resolved:?}");
-    };
-    assert_eq!(events.until_turn_ended(next).stop, StopReason::EndTurn);
+    assert_eq!(resolved.outcome, SteerOutcome::NotSent { turn: first });
+    // `settle` checks the agent saw no second prompt.
     settle(&host, &mut events);
-    assert_eq!(events.turn_text(next), "Focusing on clause 4.");
+    let turns = events.count(|e| matches!(e, DomainEvent::TurnStarted(_)));
+    assert_eq!(turns, 1, "{}", events.dump());
     host.shutdown();
 }

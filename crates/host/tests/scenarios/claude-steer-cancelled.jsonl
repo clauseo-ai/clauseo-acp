@@ -1,0 +1,14 @@
+{"scenario":"claude-steer-cancelled","description":"A Claude agent answers the steer injected (claude-agent-acp drops such a steer unread on a cancel), then the lawyer stops the turn: the host sends session/cancel and must not send the steer again (a second prompt here is a mismatch)","on_stdin_close":"exit"}
+{"expect":{"method":"initialize","as":"init","params":{"protocolVersion":1}}}
+{"respond":{"to":"init","result":{"protocolVersion":1,"agentCapabilities":{"loadSession":true,"_meta":{"claudeCode":{"promptQueueing":true}}},"authMethods":[],"agentInfo":{"name":"fake_agent","version":"0.0.0"},"_meta":{"steering":{"supported":true}}}}}
+{"expect":{"method":"session/new","as":"new","params":{"cwd":"{{any}}","_meta":{"claudeCode":{"options":{"allowDangerouslySkipPermissions":false}}}}}}
+{"respond":{"to":"new","result":{"sessionId":"sess-1","modes":{"currentModeId":"default","availableModes":[{"id":"default","name":"Manual"},{"id":"acceptEdits","name":"Accept edits"},{"id":"plan","name":"Plan"},{"id":"auto","name":"Auto"}]}}}}
+{"expect":{"method":"session/set_mode","as":"to-accept","params":{"sessionId":"sess-1","modeId":"acceptEdits"}}}
+{"respond":{"to":"to-accept","result":{}}}
+{"expect":{"method":"session/prompt","as":"p1","params":{"sessionId":"sess-1"}}}
+{"update":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-answer-1","content":{"type":"text","text":"The clause "}}}}
+{"expect":{"method":"_session/steering","as":"steer","params":{"sessionId":"sess-1","prompt":[{"type":"text","text":"Focus on clause 4"}],"_meta":{"steering":{"idleBehavior":"promptRequired"}}}}}
+{"respond":{"to":"steer","result":{"outcome":"injected"},"raw":true}}
+{"update":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-answer-1","content":{"type":"text","text":"caps liability."}}}}
+{"expect":{"method":"session/cancel","params":{"sessionId":"sess-1"}}}
+{"respond":{"to":"p1","result":{"stopReason":"cancelled"}}}

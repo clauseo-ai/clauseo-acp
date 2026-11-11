@@ -115,6 +115,9 @@ pub(super) struct Agent {
     /// A Claude agent's standing with `auto`, the mode it runs in outside forced ask
     /// (`session/claude_mode.rs`).
     pub(super) auto: session::Auto,
+    /// A Claude agent's home, its `CLAUDE_CONFIG_DIR`, whose transcripts confirm a steer
+    /// (`queue/confirm.rs`); `None` for any other agent.
+    pub(super) claude_home: Option<PathBuf>,
     /// A Claude agent's plans folder, `<config folder>/plans`, from its launch's environment
     /// (`agent/plan_note.rs`); `None` for any other agent.
     pub(super) plan_notes: Option<PathBuf>,
@@ -218,7 +221,7 @@ pub(super) fn launch_now(
         tracing::info!(%matter, forced_ask, "Claude runs in forced ask: the matter folder is unprotected");
     }
     let mut tree = None;
-    let (link, folder, codex, plan_notes, matter_spellings) =
+    let (link, folder, codex, plan_notes, matter_spellings, claude_home) =
         match launch(actor, thread, prepared, &mut tree) {
             Ok(launched) => launched,
             Err(error) => {
@@ -268,6 +271,7 @@ pub(super) fn launch_now(
         forced_ask,
         folder_check: prepared_folder,
         auto: session::Auto::default(),
+        claude_home,
         plan_notes,
         denied_data_folder: 0,
         start_failure: None,

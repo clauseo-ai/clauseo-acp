@@ -267,7 +267,8 @@ The queue and steer (H9, 0011's "Queue, send now and steer") fold what was logge
 before: a prompt waiting behind its own thread (`turn_queued` with `behind` its own thread) is
 `UserMessageStatus::Queued` until its `turn_started` (or a writer wait behind another thread)
 makes it `Sent`; `queued_prompt_edited` replaces its content and sets `edited`;
-`steer_resolved` sets the entry's `steer` and moves it to the outcome's turn, and marks each tool
+`steer_resolved` sets the entry's `steer` and moves it to the outcome's turn (`not_sent`, added
+2026-11-11 for a steer a turn's end left unsent, moves nothing), and marks each tool
 call in `aside` with `ToolCallEntry.background` (`BackgroundMark`, its `finished_at` from the
 update that gives it a final status). `HeaderEntry.steer_joins_turn` is new: from
 `thread_created` it is true for a `claude-acp` agent, then each `agent_session_attached` sets it

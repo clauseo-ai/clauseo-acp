@@ -18,13 +18,15 @@ use crate::agent::{self, AgentLink};
 use crate::error::Error;
 
 /// What a launch gives: the link, the folder it runs in, what a Codex launch recorded, a
-/// Claude launch's plans folder, and the matter folder's spellings for its stderr summary.
+/// Claude launch's plans folder, the matter folder's spellings for its stderr summary, and a
+/// Claude launch's home.
 pub(super) type Launched = (
     AgentLink,
     PathBuf,
     Option<CodexAgent>,
     Option<PathBuf>,
     Vec<String>,
+    Option<PathBuf>,
 );
 
 /// The launch itself: the spec from the settings (inherited environment, the agent's
@@ -48,6 +50,7 @@ pub(super) fn launch(
     // The relay token reaches the agent in a file; its stderr tail hides it all the same.
     let redacted = super::super::launch_checks::relay::redacted(&prepared.run);
     let folder = prepared.stored;
+    let claude_home = prepared.claude_home.clone();
     let (mut forced, codex) = if let Some(prepared) = prepared.codex {
         let hooks = codex_hooks(actor);
         let guard = hooks.is_some();
@@ -111,7 +114,14 @@ pub(super) fn launch(
         post,
         tree,
     )?;
-    Ok((link, folder, codex, plan_notes, matter_spellings))
+    Ok((
+        link,
+        folder,
+        codex,
+        plan_notes,
+        matter_spellings,
+        claude_home,
+    ))
 }
 
 /// THE CODEX HOOKS SEAM: the `hooks` object a Codex agent's `CODEX_CONFIG` carries, with its

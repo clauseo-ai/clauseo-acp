@@ -305,3 +305,22 @@ pub use update::{
     CachedDownload, Downloaded, InstallKind, MarkerState, NoUpdater, Offer, Opaque, Progress,
     ProgressSink, UpdateMarker, Updater, UpdaterError, read_update_marker,
 };
+
+/// Where Claude Code, with `home` as its config folder, writes the transcript of `session`
+/// started in the matter folder `stored`: the file whose lines confirm a steer
+/// (`actor/turn/queue/transcript.rs`). For tests that play Claude's part.
+#[cfg(feature = "test-support")]
+#[must_use]
+pub fn claude_transcript(
+    home: &std::path::Path,
+    stored: &std::path::Path,
+    session: &str,
+) -> std::path::PathBuf {
+    let cwd = session_folder(stored);
+    // A folder whose path is not UTF-8 has no project key; its transcript is never read.
+    let project = agent::data_fence::claude_projects(home, &[&cwd])
+        .into_iter()
+        .next()
+        .unwrap_or_else(|| home.join("projects"));
+    project.join(format!("{session}.jsonl"))
+}

@@ -2,23 +2,28 @@
 //! the answer (both of `SteeringCapability`'s flags, claude-agent-acp), only while the agent can
 //! take it now: the turn is prompting, not cancelled, and no permission or question is open
 //! (claude-agent-acp defers a steer while one is, and a cancel can then drop it). The message is
-//! logged with the running turn before it is sent; the agent's answer decides where it went:
-//! `Injected` stays in the running turn (with the tool calls it set aside), anything else moves
-//! it to a new turn at the queue's head (`Requeued`). An answer that does not come within
-//! [`STEER_WAIT`] of the send, the turn running or not, counts as `Failed`, so an agent that
-//! never answers cannot freeze the queue or leave the message unsent; should the agent take it in
-//! later all the same, it reaches the agent twice, which is better than not at all. A steer the
-//! agent took in goes next all the same when its turn then ends `Cancelled` or `Failed` (a
-//! cancel can drop a message the agent had not used yet), and so does one still unanswered then:
-//! the turn's end moves them (`turn_closed`). Every steer is logged at info on the lifecycle
-//! target as it is sent, answered and requeued, with no text. A steer this agent's steer would
-//! join but that cannot join now waits as the next turn ([`next`]); every other steer is a send
-//! now.
+//! logged with the running turn before it is sent; the agent's answer decides where it went.
+//! `injected` means only that the agent accepted it into its own queue: a Claude agent's steer
+//! counts as delivered once its transcript shows it taken in (`confirm.rs`), any other agent's
+//! at once. `promptRequired` (the turn had ended), `failed` or an error move it to a new turn
+//! at the queue's head (`Requeued`), which starts next once the steered turn has ended
+//! `EndTurn`. An answer that does not come within [`STEER_WAIT`] of the send moves it there too
+//! while the turn runs, so an agent that never answers cannot freeze the queue; once that turn
+//! has ended, no answer leaves it not sent.
+//!
+//! The steered turn's end settles the rest (`turn_closed`): after `EndTurn` a steer still
+//! unanswered waits for its answer within its wait, and one accepted gets its last check; after
+//! any other stop an unanswered one is `NotSent` at once. Nothing the host has not seen taken
+//! in is sent again on its own: the lawyer's Send now on the steered turn (`send_now`) moves its
+//! unsettled steers to a new turn that starts next and cancels the turn. A steer this agent's
+//! steer would join but that cannot join now waits, held by the host, as the next turn
+//! ([`next`]); every other steer is a send now. Every steer is logged at info on the lifecycle
+//! target as it is sent, answered, requeued, confirmed or not sent, with no text.
 
 use clauseo_acp::SteerResult;
 use clauseo_protocol::{
     AgentKind, CommandOutcome, ContentBlock, Delivery, MessageId, SteerOutcome, SteerResolved,
-    StopReason, StreamId, ThreadId, TurnId, TurnQueued,
+    StopReason, StreamId, ThreadId, Timestamp, TurnId, TurnQueued,
 };
 
 use super::super::super::Actor;
@@ -30,7 +35,7 @@ use super::super::{
     AgentReply, Then, TimerKind, TurnInput, TurnPhase, TurnTimer, cancel, lost, spawn, state,
 };
 use super::queued::{Joins, log_queued};
-use super::{After, Queued, command_tag, drop_turn, move_on, queue, sync_held};
+use super::{After, Queued, command_tag, confirm, drop_turn, move_on, queue, sync_held};
 use crate::build;
 use crate::error::Error;
 use crate::log_file::{Cause, LIFECYCLE};
@@ -51,8 +56,14 @@ pub(super) mod why {
     pub(in super::super) const STARTED_NEW_TURN: &str = "started_new_turn";
     /// No answer within [`super::STEER_WAIT`].
     pub(in super::super) const NO_ANSWER: &str = "no_answer";
-    /// Its turn ended `Cancelled` or `Failed` before the steer was settled.
+    /// Not sent: its turn, or the turn it waited behind, ended with a stop other than
+    /// `EndTurn` before the agent answered or before it started.
     pub(in super::super) const TURN_STOPPED: &str = "turn_stopped";
+    /// Not sent: its turn ended and the agent never answered, or Claude's transcript never
+    /// showed it taken in.
+    pub(in super::super) const NO_CONFIRMATION: &str = "no_confirmation";
+    /// Not sent: the host stopped before it was settled.
+    pub(in super::super) const RESTART: &str = "restart";
     /// The lawyer sent it now.
     pub(in super::super) const SEND_NOW: &str = "send_now";
     /// No attached agent to send it to.
@@ -70,9 +81,11 @@ pub(crate) struct Pending {
 #[derive(Debug)]
 pub(crate) struct Ask {
     /// The running turn it was sent into.
-    turn: TurnId,
-    message: MessageId,
-    content: Vec<ContentBlock>,
+    pub(super) turn: TurnId,
+    pub(super) message: MessageId,
+    pub(super) content: Vec<ContentBlock>,
+    /// When its message was logged.
+    pub(super) sent: Timestamp,
 }
 
 /// The agent's answer to a steer.
@@ -167,7 +180,8 @@ pub(super) fn requeued(message: MessageId, turn: TurnId) -> SteerResolved {
 /// A steer that cannot join `running` now: one commit of its `UserMessage { Steer }` with a new
 /// turn, that turn's `TurnQueued` behind `running` marked `at_head`, `SteerResolved {
 /// Requeued }` and the receipt. It is never sent as a steer: it joins the head, behind any turn
-/// already sent now or requeued there, and starts once `running` has ended, whatever its stop.
+/// already sent now or requeued there, and starts once `running` has ended `EndTurn`; any other
+/// stop leaves it not sent (`unsent.rs`).
 pub(super) fn next(
     actor: &mut Actor,
     ctx: CommandCtx,
@@ -197,6 +211,7 @@ pub(super) fn next(
                     message,
                     content,
                     forced: true,
+                    host_held: true,
                 },
             );
             After::Waits(turn)
@@ -226,6 +241,7 @@ pub(super) fn steer(
         turn,
         message,
         content,
+        sent: now,
     };
     out.send_tagged(
         actor,
@@ -278,15 +294,15 @@ fn kind(result: &Result<SteerResult, clauseo_acp::Error>) -> &'static str {
     }
 }
 
-/// The agent answered a steer: `Injected` logs where it went with the tool calls still
-/// running, and is kept until its turn ends in case that turn is cancelled; any other answer
-/// moves it to a new turn at the head. Then the queue may move.
+/// The agent answered a steer: `Injected` hands it, with the tool calls still running, to its
+/// confirmation (`confirm.rs`); any other answer moves it to a new turn at the head. Then the
+/// queue may move.
 pub(in super::super) fn on_steered(actor: &mut Actor, thread: ThreadId, steered: Steered) {
     let Steered { message, result } = steered;
     let outcome = kind(&result);
     let Some(Pending { ask, timer }) = take_pending(actor, thread, message) else {
-        // It already went next: its wait ran out, or its turn stopped, or the lawyer sent it.
-        tracing::info!(target: LIFECYCLE, %thread, outcome, "a steer was answered after it went next");
+        // Settled already: its wait ran out, its turn stopped, or the lawyer sent it.
+        tracing::info!(target: LIFECYCLE, %thread, outcome, "a steer was answered after it was settled");
         return;
     };
     if let Some(timer) = timer {
@@ -295,11 +311,11 @@ pub(in super::super) fn on_steered(actor: &mut Actor, thread: ThreadId, steered:
     tracing::info!(target: LIFECYCLE, %thread, turn = %ask.turn, outcome, "a steer was answered");
     match result {
         Ok(SteerResult::Injected) => {
-            let logged = injected(actor, thread, &ask);
-            if let Err(error) = logged {
-                tracing::warn!(%thread, error = %Cause(&error), "an injected steer was not logged");
-            }
-            keep_injected(actor, thread, ask);
+            let aside = actor
+                .loaded(StreamId::Thread(thread))
+                .map(|loaded| loaded.sent.unfinished_tools(ask.turn).collect())
+                .unwrap_or_default();
+            confirm::accepted(actor, thread, ask, aside);
         }
         Ok(SteerResult::StartedNewTurn) => {
             tracing::warn!(%thread, "the agent started a turn of its own for a steer");
@@ -317,21 +333,6 @@ pub(in super::super) fn on_steered(actor: &mut Actor, thread: ThreadId, steered:
     sync_held(actor, thread);
 }
 
-/// An injected steer of the current turn is kept until that turn ends (`turn_closed`); one
-/// whose turn has already ended stays where the agent put it.
-fn keep_injected(actor: &mut Actor, thread: ThreadId, ask: Ask) {
-    let Some(state) = state(actor, thread) else {
-        return;
-    };
-    let running = state
-        .current
-        .as_ref()
-        .is_some_and(|current| current.turn == ask.turn);
-    if running {
-        state.queue.injected.push(ask);
-    }
-}
-
 /// Arms the wait for the steer of `message`'s answer.
 fn arm(actor: &mut Actor, thread: ThreadId, message: MessageId) -> futures::future::AbortHandle {
     actor.arm_timer(
@@ -343,60 +344,52 @@ fn arm(actor: &mut Actor, thread: ThreadId, message: MessageId) -> futures::futu
     )
 }
 
-/// The end of `turn` is durable. After `Cancelled` or `Failed`, the steers sent into it that the
-/// agent may have lost (taken in, or not answered yet) are taken out, in the order they were
-/// sent, for the caller to move to new turns (`requeue_all`) once the queue has moved; a later
-/// answer is then ignored. After any other stop the injected ones stay where they went and the
-/// unanswered ones keep waiting for their answer.
-pub(super) fn turn_closed(
-    actor: &mut Actor,
-    thread: ThreadId,
-    turn: TurnId,
-    stop: StopReason,
-) -> Vec<Ask> {
-    let Some(queue) = queue(actor, thread) else {
-        return Vec::new();
-    };
-    let mut lost: Vec<Ask> = queue
-        .injected
-        .extract_if(.., |ask| ask.turn == turn)
-        .collect();
-    if !matches!(stop, StopReason::Cancelled | StopReason::Failed) {
-        return Vec::new();
+/// The end of `turn` is durable. Its steers accepted and unconfirmed get their last check
+/// (`confirm.rs`). After `EndTurn` the unanswered ones keep waiting for their answer; after any
+/// other stop they are not sent, and a later answer is ignored.
+pub(super) fn turn_closed(actor: &mut Actor, thread: ThreadId, turn: TurnId, stop: StopReason) {
+    confirm::turn_ended(actor, thread, turn);
+    if stop == StopReason::EndTurn {
+        return;
     }
-    for pending in queue
+    let Some(queue) = queue(actor, thread) else {
+        return;
+    };
+    let mut stopped: Vec<Ask> = queue
         .steers
         .extract_if(.., |pending| pending.ask.turn == turn)
-    {
-        if let Some(timer) = pending.timer {
-            timer.abort();
-        }
-        lost.push(pending.ask);
+        .map(|pending| {
+            if let Some(timer) = pending.timer {
+                timer.abort();
+            }
+            pending.ask
+        })
+        .collect();
+    stopped.sort_by_key(|ask| ask.message);
+    for ask in &stopped {
+        confirm::not_sent(actor, thread, ask, why::TURN_STOPPED);
     }
-    lost.sort_by_key(|ask| ask.message);
-    lost
 }
 
 /// `asks`, in the order they were sent, each move to a new turn at the head, the first sent
 /// first.
-pub(super) fn requeue_all(actor: &mut Actor, thread: ThreadId, asks: Vec<Ask>, why: &'static str) {
+fn requeue_all(actor: &mut Actor, thread: ThreadId, asks: Vec<Ask>, why: &'static str) {
     for ask in asks.into_iter().rev() {
         requeue(actor, thread, ask, why);
     }
 }
 
-/// Whether a steer sent into `turn` is not settled yet: unanswered, or taken into a turn still
-/// running.
+/// Whether a steer sent into `turn` is not settled yet: unanswered, or accepted and not
+/// confirmed.
 pub(super) fn unsettled(actor: &mut Actor, thread: ThreadId, turn: TurnId) -> bool {
-    queue(actor, thread).is_some_and(|queue| {
-        queue.steers.iter().any(|pending| pending.ask.turn == turn)
-            || queue.injected.iter().any(|ask| ask.turn == turn)
-    })
+    queue(actor, thread)
+        .is_some_and(|queue| queue.steers.iter().any(|pending| pending.ask.turn == turn))
+        || confirm::waits(actor, thread, turn)
 }
 
-/// `SendQueuedNow` naming the turn a steer was sent into: a running turn is cancelled, and its
-/// steers go next as it ends (`turn_closed`); a turn already ended has its steers still
-/// unanswered go next now.
+/// `SendQueuedNow` naming the turn a steer was sent into: the lawyer sends what the agent was
+/// not seen to take in. Its steers unanswered or unconfirmed move now to new turns at the head,
+/// which start once the turn has ended, whatever its stop, and a running turn is cancelled.
 pub(super) fn send_now(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
     let Some(state) = state(actor, thread) else {
         return;
@@ -405,33 +398,43 @@ pub(super) fn send_now(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
         .current
         .as_ref()
         .is_some_and(|current| current.turn == turn);
-    if running {
-        cancel::cancel_current(actor, thread, cancel::why::SEND_NOW);
-        return;
-    }
-    let mut asks = Vec::new();
-    for pending in state
+    let mut asks: Vec<Ask> = state
         .queue
         .steers
         .extract_if(.., |pending| pending.ask.turn == turn)
-    {
-        if let Some(timer) = pending.timer {
-            timer.abort();
-        }
-        asks.push(pending.ask);
-    }
+        .map(|pending| {
+            if let Some(timer) = pending.timer {
+                timer.abort();
+            }
+            pending.ask
+        })
+        .collect();
+    asks.extend(confirm::take(actor, thread, turn));
     asks.sort_by_key(|ask| ask.message);
     requeue_all(actor, thread, asks, why::SEND_NOW);
+    if running {
+        cancel::cancel_current(actor, thread, cancel::why::SEND_NOW);
+    }
 }
 
-/// The steer of `message` got no answer within [`STEER_WAIT`] of its send: it moves to a new
-/// turn, as a failed steer does, and a later answer is ignored.
+/// The steer of `message` got no answer within [`STEER_WAIT`] of its send: while its turn
+/// runs it moves to a new turn, as a failed steer does; once its turn has ended it is not sent.
+/// A later answer is ignored.
 pub(in super::super) fn on_steer_timer(actor: &mut Actor, thread: ThreadId, message: MessageId) {
     let Some(Pending { ask, .. }) = take_pending(actor, thread, message) else {
         return;
     };
     tracing::info!(target: LIFECYCLE, %thread, turn = %ask.turn, outcome = "no_answer_in_30s", "a steer was answered");
-    requeue(actor, thread, ask, why::NO_ANSWER);
+    let running = state(actor, thread)
+        .and_then(|state| state.current.as_ref())
+        .is_some_and(|current| current.turn == ask.turn);
+    if running {
+        requeue(actor, thread, ask, why::NO_ANSWER);
+    } else {
+        confirm::not_sent(actor, thread, &ask, why::NO_CONFIRMATION);
+        move_on(actor, thread);
+        sync_held(actor, thread);
+    }
 }
 
 /// Takes the steer of `message` out of those waiting for an answer.
@@ -441,22 +444,6 @@ fn take_pending(actor: &mut Actor, thread: ThreadId, message: MessageId) -> Opti
         .iter()
         .position(|pending| pending.ask.message == message)?;
     Some(steers.remove(at))
-}
-
-/// `SteerResolved { Injected }`, with the running turn's tool calls not finished.
-fn injected(actor: &mut Actor, thread: ThreadId, ask: &Ask) -> Result<(), Error> {
-    let aside = actor
-        .loaded(StreamId::Thread(thread))
-        .map(|loaded| loaded.sent.unfinished_tools(ask.turn).collect())
-        .unwrap_or_default();
-    let resolved = SteerResolved {
-        message: ask.message,
-        outcome: SteerOutcome::Injected { turn: ask.turn },
-        aside,
-    };
-    let mut out = Out::new(actor, thread, None)?;
-    out.push(actor, resolved)?;
-    out.send(actor, Then::Nothing)
 }
 
 /// An adapter ignored the opt-in and started a turn the host did not send: cancel it.
@@ -474,17 +461,20 @@ fn cancel_agent_turn(actor: &mut Actor, thread: ThreadId) {
     }
 }
 
-/// The steer moves to a new turn at the queue's head, which starts once the steered turn has
-/// ended: one commit of `SteerResolved { Requeued }` and `TurnQueued` behind the steered turn,
-/// marked `at_head` so a restart keeps it at the head too (`restore.rs`). An injected steer's
-/// `Requeued` comes after its `Injected`, which the view replaces.
+/// The steer moves to a new turn at the queue's head: one commit of `SteerResolved { Requeued }`
+/// and `TurnQueued` behind the steered turn, marked `at_head` so a restart keeps it at the head
+/// too (`restore.rs`). Sent now by the lawyer, it starts once the steered turn has ended,
+/// whatever its stop; otherwise the host holds it, and it starts only after `EndTurn`
+/// (`unsent.rs`).
 fn requeue(actor: &mut Actor, thread: ThreadId, ask: Ask, why: &'static str) {
     tracing::info!(target: LIFECYCLE, %thread, turn = %ask.turn, why, "a steer was requeued");
+    let host_held = why != why::SEND_NOW;
     let stream = StreamId::Thread(thread);
     actor.with_loaded(
         stream,
         Box::new(move |actor: &mut Actor, loaded: Result<(), Error>| {
-            if let Err(error) = loaded.and_then(|()| log_requeue(actor, thread, ask)) {
+            let logged = loaded.and_then(|()| log_requeue(actor, thread, ask, host_held));
+            if let Err(error) = logged {
                 tracing::warn!(
                     %thread,
                     error = %Cause(&error),
@@ -498,7 +488,12 @@ fn requeue(actor: &mut Actor, thread: ThreadId, ask: Ask, why: &'static str) {
     );
 }
 
-fn log_requeue(actor: &mut Actor, thread: ThreadId, ask: Ask) -> Result<(), Error> {
+fn log_requeue(
+    actor: &mut Actor,
+    thread: ThreadId,
+    ask: Ask,
+    host_held: bool,
+) -> Result<(), Error> {
     let now = actor.now().wall;
     let turn: TurnId = actor.ids.mint(now)?;
     // `at_head`: the live queue puts it at the head, and a restart does the same.
@@ -516,6 +511,7 @@ fn log_requeue(actor: &mut Actor, thread: ThreadId, ask: Ask) -> Result<(), Erro
             message: ask.message,
             content: ask.content,
             forced: true,
+            host_held,
         });
     let sent = out.send(actor, Then::Queue(After::Requeued(turn)));
     if sent.is_err() {
