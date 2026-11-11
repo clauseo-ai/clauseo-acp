@@ -134,7 +134,7 @@ fn skill_mds() -> Vec<(&'static str, &'static str)> {
 #[test]
 fn legal_word_budget() {
     let legal = word_count(LEGAL);
-    assert!(legal <= 1290, "the legal part has {legal} words");
+    assert!(legal <= 1330, "the legal part has {legal} words");
     let whole = ClauseoProfile::new(paths_under(Path::new("/data")), None).instructions();
     assert_eq!(
         whole,
@@ -149,7 +149,7 @@ fn legal_word_budget() {
         word_count(TOOLS) + word_count(LEGAL),
         "only {{author}} is filled, with one word"
     );
-    assert!(word_count(&whole) <= 1650, "{} words", word_count(&whole));
+    assert!(word_count(&whole) <= 1680, "{} words", word_count(&whole));
     // With a working stetdoc, as the app launches: the stetdoc line joins the tools part.
     let stetdoc = ClauseoProfile::new(paths_under(Path::new("/data")), None)
         .with_stetdoc_cli(true)
@@ -157,7 +157,7 @@ fn legal_word_budget() {
     let line = clauseo_profile::instructions::STETDOC_CLI;
     assert_eq!(word_count(&stetdoc), word_count(&whole) + word_count(line));
     assert!(
-        word_count(&stetdoc) <= 1650,
+        word_count(&stetdoc) <= 1680,
         "{} words",
         word_count(&stetdoc)
     );
@@ -309,6 +309,26 @@ fn each_agent_names_a_saved_file_with_no_download_link() {
     let claude = profile.claude_options().system_prompt_append().to_owned();
     for text in [claude, profile.codex_instructions_for(false)] {
         assert!(text.contains(RULE), "{text}");
+    }
+}
+
+/// The chat rule (decision record 0058): both agents answer in the chat, make a file only when
+/// the lawyer asks for one, and leave no Markdown or scratch file in the matter. It is in the
+/// legal part, so it holds with or without stetdoc.
+#[test]
+fn each_agent_answers_in_the_chat_and_leaves_no_scratch_file() {
+    const RULE: &str = "The text after your last tool call is the reply. Every caveat and \
+        limitation goes there. Answer in the chat, however long; make a file only when the lawyer \
+        asks for one, as a `.docx` unless another format is named, and never leave Markdown or \
+        scratch files in the matter.";
+    assert_eq!(LEGAL.matches(RULE).count(), 1);
+    for stetdoc in [false, true] {
+        let profile =
+            launch_profile(&std::env::temp_dir().join("chat-rule")).with_stetdoc_cli(stetdoc);
+        let claude = profile.claude_options().system_prompt_append().to_owned();
+        for text in [claude, profile.codex_instructions_for(false)] {
+            assert!(text.contains(RULE), "{text}");
+        }
     }
 }
 
