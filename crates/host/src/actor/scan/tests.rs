@@ -158,7 +158,11 @@ impl Running {
         let folder = self.dir.path().join("work").join(name);
         crate::write::create_dir_all(&folder).unwrap();
         for (file, text) in files {
-            crate::write::write_file(&folder.join(file), text.as_bytes()).unwrap();
+            let path = folder.join(file);
+            if let Some(parent) = path.parent() {
+                crate::write::create_dir_all(parent).unwrap();
+            }
+            crate::write::write_file(&path, text.as_bytes()).unwrap();
         }
         let id = block_on(self.host.register_folder(folder.clone())).unwrap();
         (folder, id)
@@ -518,5 +522,43 @@ fn an_unknown_folder_ref_and_a_refused_folder_are_refused() {
         last = host.next_scan();
     }
     assert_eq!((last.folder, last.cancelled), (refused, false));
+    host.shutdown();
+}
+
+/// A marker refuses no scan: one naming a matter this install never had (the import adopts it)
+/// and one that does not read (the import sets it aside) scan as any folder. A listed matter's
+/// own folder is `matter.folder_is_matter` naming it, by its path or by the marker inside a
+/// copy of it.
+#[test]
+fn a_marker_refuses_no_scan_and_a_listed_matters_folder_is_named() {
+    let host = Running::start("scan-markers", None);
+    let marker =
+        r#"{"version":1,"matter_id":"01900000-0000-7000-8000-00000000abcd","created_at":0}"#;
+    let (_, unknown) = host.folder("unknown", &[(".clauseo/matter.json", marker), ("a", "a")]);
+    let (_, corrupt) = host.folder("corrupt", &[(".clauseo/matter.json", "{"), ("b", "b")]);
+    for (n, folder) in [(1, unknown), (2, corrupt)] {
+        assert_eq!(
+            host.dispatch(n, scan(folder)).unwrap(),
+            CommandOutcome::Done
+        );
+    }
+    let (path, listed) = host.folder("listed", &[("c.txt", "c")]);
+    let create = HostCommand::CreateMatter {
+        name: Title::new("M").unwrap(),
+        source: MatterSource::ExistingFolder { folder: listed },
+        client: None,
+        next_date: None,
+    };
+    let CommandOutcome::MatterCreated { matter } = host.dispatch(3, create).unwrap() else {
+        panic!("no matter");
+    };
+    let error = host.dispatch(4, scan(listed)).unwrap_err();
+    assert_eq!(error.code(), ErrorCode::MatterFolderIsMatter, "{error}");
+    assert_eq!(error.matter(), Some(matter));
+    let copied = std::fs::read(path.join(".clauseo/matter.json")).unwrap();
+    let copied = String::from_utf8(copied).unwrap();
+    let (_, copy) = host.folder("copy", &[(".clauseo/matter.json", copied.as_str())]);
+    let error = host.dispatch(5, scan(copy)).unwrap_err();
+    assert_eq!(error.matter(), Some(matter), "{error}");
     host.shutdown();
 }

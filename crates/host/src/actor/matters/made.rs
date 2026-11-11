@@ -43,14 +43,15 @@ use crate::pipeline::{Draft, MatterEvent};
 /// was sent.
 pub(crate) struct Made {
     worker: MatterWorker<MatterTag>,
-    /// The matter's folder, for the marker's re-check after a discard ([`recheck_marker`]).
-    folder: PathBuf,
+    /// The matter's folder, for the marker's re-check after a discard ([`recheck_marker`]);
+    /// `None` for an adopted marker, which is the lawyer's and never re-checked.
+    folder: Option<PathBuf>,
     /// The command to answer (none for the Scratch matter) and its error.
     failed: Option<(Option<CommandId>, Error)>,
 }
 
 impl Made {
-    pub(crate) const fn new(worker: MatterWorker<MatterTag>, folder: PathBuf) -> Self {
+    pub(crate) const fn new(worker: MatterWorker<MatterTag>, folder: Option<PathBuf>) -> Self {
         Self {
             worker,
             folder,
@@ -193,8 +194,10 @@ pub(crate) fn discarded(actor: &mut Actor, matter: MatterId, reply: &MatterReply
     };
     // Joins the worker, idle now that its last job has answered.
     drop(made.worker);
-    if matches!(reply, MatterReply::Discarded(Ok(()))) {
-        recheck_marker(actor, matter, made.folder);
+    if matches!(reply, MatterReply::Discarded(Ok(())))
+        && let Some(folder) = made.folder
+    {
+        recheck_marker(actor, matter, folder);
     }
     if let Some((command, error)) = made.failed {
         answer(actor, command, error);
@@ -235,11 +238,11 @@ pub(super) fn matter_commit(
         details: (client, next_date),
         worker,
         cancel: _,
+        adopted,
     } = pending;
     // Kept aside until the commit returns, so a failure from here on can discard the matter.
-    actor
-        .made
-        .insert(new.id, Made::new(worker, new.folder.clone()));
+    let recheck = (!adopted).then(|| new.folder.clone());
+    actor.made.insert(new.id, Made::new(worker, recheck));
     let now = actor.now();
     let stream = StreamId::Matter(new.id);
     let command_id = command.map(|(id, _)| id);
@@ -304,7 +307,8 @@ pub(crate) const MARKER_RECHECK: Duration = Duration::from_secs(10);
 /// matter" there would then be refused as already a matter. Removed again (with `.clauseo`
 /// when that leaves it empty) only if it names `matter`, the id minted for that create or
 /// import, which no row holds; a marker naming any other matter, one this host knows or one
-/// from another computer, is left alone. Off the actor; never repeated. Shutdown does not wait
+/// from another computer, is left alone. Never run for an import that adopted the folder's
+/// marker (`answer.rs`): the id it would remove is the one the lawyer's own marker names. Off the actor; never repeated. Shutdown does not wait
 /// for it.
 pub(super) fn recheck_marker(actor: &Actor, matter: MatterId, folder: PathBuf) {
     let clock = Arc::clone(&actor.clock);

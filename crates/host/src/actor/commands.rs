@@ -31,7 +31,7 @@ use crate::principal::{Access, authorize};
 pub(crate) struct PendingCommand {
     pub(super) hash: [u8; 32],
     /// Everyone waiting for the answer: the first caller and its duplicates.
-    waiters: Vec<Reply<CommandOutcome>>,
+    pub(super) waiters: Vec<Reply<CommandOutcome>>,
     /// The command, until it runs.
     command: Option<ValidatedCommand>,
     /// A matter being created or imported for it.

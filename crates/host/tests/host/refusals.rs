@@ -1,7 +1,8 @@
 //! A refused folder gets one code per reason (decision record 0022): a drive root, the home
-//! folder, a system folder, a folder or `matter.json` that does not read, a folder that is, holds
-//! or sits inside another matter's (naming it), Clauseo's own data folder, and on Windows a path
-//! too long for Windows to start programs in.
+//! folder, a system folder, a folder that does not read, a folder that holds or sits inside
+//! another matter's (naming it), Clauseo's own data folder, and on Windows a path too long for
+//! Windows to start programs in. A listed matter's own folder, by any spelling, is not refused:
+//! the import answers with that matter. A `matter.json` that does not read is set aside.
 
 use std::path::Path;
 
@@ -82,16 +83,32 @@ fn home_and_system_folders_have_codes_of_their_own() {
     host.shutdown();
 }
 
+/// A `matter.json` that does not read is set aside as `.clauseo/matter.old-<stamp>.json`, its
+/// bytes kept, and the folder imported with a new one naming the new matter.
 #[test]
-fn a_matter_json_that_does_not_read_is_folder_unreadable() {
+fn a_matter_json_that_does_not_read_is_set_aside_and_the_folder_imported() {
     let dir = Dir::new("refuse_unreadable_json", &[]);
     let folder = dir.folder("Damaged", &[(".clauseo/matter.json", "not json")]);
     let host = dir.start(0);
-    refused(&host, &folder, ErrorCode::MatterFolderUnreadable);
-    // Nothing was written: the marker is as it was.
-    assert_eq!(
-        std::fs::read_to_string(folder.join(".clauseo").join("matter.json")).unwrap(),
-        "not json"
+    let matter = imported(&host, &folder);
+    let marker = std::fs::read_to_string(folder.join(".clauseo/matter.json")).unwrap();
+    assert!(marker.contains(&matter.to_string()), "{marker}");
+    let aside: Vec<_> = std::fs::read_dir(folder.join(".clauseo"))
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .filter(|path| path.file_name().unwrap() != "matter.json")
+        .collect();
+    assert_eq!(aside.len(), 1, "{aside:?}");
+    let name = aside[0].file_name().unwrap().to_str().unwrap().to_owned();
+    assert!(
+        name.starts_with("matter.old-") && name.ends_with("Z.json"),
+        "{name}"
+    );
+    assert_eq!(std::fs::read_to_string(&aside[0]).unwrap(), "not json");
+    assert!(
+        host.matters()
+            .iter()
+            .any(|summary| summary.matter == matter)
     );
     host.shutdown();
 }
@@ -130,8 +147,9 @@ fn a_matters_folder_or_one_nested_with_it_is_folder_is_matter_naming_it() {
     let inside = dir.folder("Smith v Jones/Pleadings", &[("b.txt", "y\n")]);
     let host = dir.start(0);
     let matter = imported(&host, &folder);
+    // The same folder is answered with the matter.
+    assert_eq!(imported(&host, &folder), matter);
     for (case, path) in [
-        ("the same folder", folder.clone()),
         ("a folder inside it", inside),
         ("the folder holding it", folder.parent().unwrap().to_owned()),
     ] {
@@ -228,30 +246,13 @@ fn a_missing_folder_is_still_folder_missing() {
     host.shutdown();
 }
 
-#[test]
-fn a_marker_naming_a_matter_this_install_never_had_names_no_matter() {
-    let dir = Dir::new("refuse_foreign_marker", &[]);
-    let foreign = MatterId::new(crate::support::foreign_uuid(42)).unwrap();
-    let marker = format!(r#"{{"version":1,"matter_id":"{foreign}","created_at":0}}"#);
-    let folder = dir.folder("Copied", &[(".clauseo/matter.json", marker.as_str())]);
-    let host = dir.start(0);
-    let error = refused(&host, &folder, ErrorCode::MatterFolderIsMatter);
-    assert_eq!(error.matter(), None, "nothing on the list to open: {error}");
-    assert!(
-        host.matters()
-            .iter()
-            .all(|summary| summary.matter != foreign)
-    );
-    host.shutdown();
-}
-
 /// "New matter" on a folder that is already this install's matter, picked by another spelling
-/// of its path (as `Z:\n1` and `\\server\share\n1` on Windows): the import is refused with
-/// `matter.folder_is_matter` naming that matter, and nothing is made: no second matter on the
-/// list, no second history, the folder's `matter.json` unchanged.
+/// of its path (as `Z:\n1` and `\\server\share\n1` on Windows): the import is answered with
+/// that matter, and nothing is made: no second matter on the list, no second history, the
+/// folder's `matter.json` unchanged.
 #[cfg(unix)]
 #[test]
-fn a_matters_folder_by_another_spelling_is_folder_is_matter_and_makes_nothing() {
+fn a_matters_folder_by_another_spelling_is_answered_with_it_and_makes_nothing() {
     let dir = Dir::new("refuse_is_matter_spelled", &[]);
     let folder = dir.folder("Smith v Jones", &[("a.txt", "x\n")]);
     let parent = folder.parent().unwrap().to_owned();
@@ -272,8 +273,7 @@ fn a_matters_folder_by_another_spelling_is_folder_is_matter_and_makes_nothing() 
         ("with `..`", folder.join("..").join("Smith v Jones")),
         ("with `.`", parent.join(".").join("Smith v Jones").join(".")),
     ] {
-        let error = refused(&host, &path, ErrorCode::MatterFolderIsMatter);
-        assert_eq!(error.matter(), Some(matter), "{case}: {error}");
+        assert_eq!(imported(&host, &path), matter, "{case}");
         assert_eq!(host.matters().len(), listed, "{case}: no second matter");
         assert_eq!(histories(), made, "{case}: no second history");
         assert_eq!(
