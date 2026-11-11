@@ -19,12 +19,13 @@
 //!   keychain error) is left out of the session, with a log line naming the server and the
 //!   variable or header, never a value.
 //!   A plain value (a firm's policy, a hand-edited file) goes as it is. A header value that an
-//!   HTTP header cannot hold (a control character other than tab: a CR or LF would split the
-//!   request) leaves its server out the same way.
-//! - Every value a session's servers carry, and each remote server's URL, its host and its path
-//!   and query parts, go to the agent's stderr redactor in the forms an error line prints them in
-//!   ([`redacted`], `lawyer/redact.rs`): an agent that dies before its session is ready has its
-//!   last stderr line logged, and that is when `session/new` held them.
+//!   HTTP header cannot hold ([`header_value_ok`]: a control character other than tab, which
+//!   would split the request, or a non-ASCII byte) leaves its server out the same way.
+//! - The servers are made once per run, at launch ([`Sent`]). Every value they carry, and each
+//!   remote server's URL, its host and its path and query parts, go to the agent's stderr
+//!   redactor in the forms an error line prints them in ([`redacted`], `lawyer/redact.rs`): an
+//!   agent that dies before its session is ready has its last stderr line logged, and that is
+//!   when `session/new` held them.
 //! - `PATH`: unless the server's own variables set it, the server's `PATH` is its resolved
 //!   command's folder, then the `PATH` Clauseo was started with. Each agent starts a stdio
 //!   server with its own `PATH` and the entry's variables over it; on macOS an app started from
@@ -242,6 +243,17 @@ pub(crate) struct HostEnv<'a> {
 /// variable or header.
 pub(crate) type LeftOut = (String, String);
 
+/// The lawyer's servers of one run, made once at launch ([`servers`]): the session calls send
+/// `servers` and the agent's stderr redactor hides their values ([`redacted`]), so both come
+/// from the same snapshot. `Debug` shows names only (`McpServer`'s).
+#[derive(Debug, Default, Clone)]
+pub(crate) struct Sent {
+    /// The servers, in name order.
+    pub(crate) servers: Vec<McpServer>,
+    /// Those left out for a value they lack.
+    pub(crate) left_out: Vec<LeftOut>,
+}
+
 /// The session's lawyer servers, in name order, and those left out for a missing value.
 pub(crate) fn servers(
     effective: &Effective,
@@ -363,10 +375,13 @@ fn filled(
         .collect()
 }
 
-/// Whether an HTTP header can carry `value`: no control character but tab (RFC 9110 §5.5; a
-/// CR or LF would end the header and start another).
+/// Whether an HTTP header can carry `value`: printable ASCII and tab only (RFC 9110 §5.5). A CR
+/// or LF would end the header and start another; a non-ASCII byte is refused by Node's `undici`
+/// (claude-agent-acp's and codex-acp's runtime), so the server would fail anyway.
 pub(crate) fn header_value_ok(value: &str) -> bool {
-    !value.chars().any(|c| c.is_control() && c != '\t')
+    value
+        .bytes()
+        .all(|byte| byte == b'\t' || (0x20..0x7f).contains(&byte))
 }
 
 /// Adds the `PATH` (the command's folder first) and the Windows variables to `env`, each only

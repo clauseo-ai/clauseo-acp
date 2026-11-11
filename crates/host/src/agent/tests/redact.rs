@@ -17,7 +17,8 @@ use futures::executor::LocalPool;
 use serde_json::json;
 
 use super::{ended, fake_agent, scenario};
-use crate::agent::loads::lawyer::{self, McpSecrets};
+use crate::agent::loads::McpControl;
+use crate::agent::loads::lawyer::{self, HostEnv, Lawyer, McpSecrets};
 use crate::agent::{AgentInput, Ended, launch_spec, start};
 use crate::clock::ManualClock;
 
@@ -28,6 +29,8 @@ const QUERY_DECODED: &str = "q7+Query/Token";
 /// `user1:password1`, as a `Basic` header from the keychain.
 const BASIC: &str = "Basic dXNlcjE6cGFzc3dvcmQx";
 const PLAIN_HEADER: &str = "firm\"tenant/0042";
+/// A local server's plain env value, as a firm's policy sets it.
+const POLICY_ENV: &str = "ghp_plainPolicyToken1";
 
 /// Settings with one remote server: a token in its URL's path and query and a key-like path
 /// segment, a `Basic` header from the keychain and a plain one holding a quote and a slash.
@@ -35,10 +38,14 @@ fn effective() -> Effective {
     let root = std::env::temp_dir().join(format!("clauseo-redact-mcp-{}", std::process::id()));
     crate::write::create_dir_all(&root).unwrap();
     let url = format!(
-        "https://mcp.example.com/v1/{PATH_TOKEN}/{KEY_SEGMENT}/mcp?key={QUERY_TOKEN}&region=uk"
+        "https://Mcp.Firm-Internal.example/v1/{PATH_TOKEN}/{KEY_SEGMENT}/mcp?key={QUERY_TOKEN}&region=uk"
     );
-    let servers = json!({"docs": {"url": url, "enabled": true, "headers": {
-        "Authorization": {"keychain": true}, "X-Tenant": PLAIN_HEADER}}});
+    let servers = json!({
+        "docs": {"url": url, "enabled": true, "headers": {
+            "Authorization": {"keychain": true}, "X-Tenant": PLAIN_HEADER}},
+        "github": {"command": "/tools/github-mcp", "enabled": true,
+            "env": {"GITHUB_TOKEN": POLICY_ENV}},
+    });
     let text = json!({"mcp": {"servers": servers}}).to_string();
     crate::write::write_file(&root.join("settings.json"), text.as_bytes()).unwrap();
     let effective = Effective::load(&Locations::under_root(&root), &SystemFiles, &[]);
@@ -49,8 +56,21 @@ fn effective() -> Effective {
 
 #[test]
 fn a_remote_servers_url_and_header_values_are_redacted_from_the_stderr_tail() {
-    let secrets = McpSecrets::of(&[("docs/header/Authorization", BASIC)], &[]);
-    let redacted = lawyer::redacted(&effective(), &secrets);
+    let secrets = McpSecrets::of(
+        &[("docs/header/Authorization", BASIC)],
+        &[("/tools/github-mcp", "/tools/github-mcp")],
+    );
+    let lawyer = Lawyer {
+        control: McpControl::Clauseo,
+        safe_workspace: false,
+    };
+    let host = HostEnv {
+        path: None,
+        windows_env: &[],
+    };
+    let (servers, left_out) = lawyer::servers(&effective(), lawyer, &secrets, host);
+    assert_eq!((servers.len(), left_out), (2, Vec::new()));
+    let redacted = lawyer::redacted(&servers);
     let spec = launch_spec(
         &fake_agent(scenario("stderr-mcp-remote")),
         BTreeMap::new(),
@@ -84,7 +104,9 @@ fn a_remote_servers_url_and_header_values_are_redacted_from_the_stderr_tail() {
         KEY_SEGMENT,
         QUERY_TOKEN,
         QUERY_DECODED,
-        "mcp.example.com",
+        "Mcp.Firm-Internal.example",
+        "mcp.firm-internal.example",
+        POLICY_ENV,
         "dXNlcjE6cGFzc3dvcmQx",
         "user1:password1",
         "password1",

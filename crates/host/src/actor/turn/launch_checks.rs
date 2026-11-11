@@ -191,6 +191,9 @@ pub(crate) struct RunFolders {
     /// The keychain values of the lawyer's enabled MCP servers, read by the launch prep
     /// (`agent::loads::lawyer`); each session call of the run fills its servers from them.
     pub(crate) mcp_secrets: Arc<crate::agent::loads::lawyer::McpSecrets>,
+    /// The lawyer's servers of the run, made from those values at launch: what each session call
+    /// sends and what the agent's stderr redactor hides (`agent::loads::lawyer::Sent`).
+    pub(crate) lawyer: Arc<crate::agent::loads::lawyer::Sent>,
 }
 
 impl RunFolders {
@@ -225,6 +228,7 @@ impl RunFolders {
             path: crate::agent::shell_path::SessionPath::default(),
             claude_tmp: None,
             mcp_secrets: Arc::default(),
+            lawyer: Arc::default(),
         }
     }
 
@@ -529,6 +533,7 @@ pub(super) fn on_prepared(
         agents::fail_all(actor, thread, waiting, &error);
         return;
     }
+    prepared.run.lawyer = Arc::new(super::profile_loads::lawyer_servers(actor, &prepared.run));
     let run = prepared.run.clone();
     let packs_skipped = std::mem::take(&mut prepared.packs_skipped);
     if let Some(state) = state(actor, thread) {

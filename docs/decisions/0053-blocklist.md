@@ -349,6 +349,16 @@ Release builds bundle no snapshot meanwhile (2026-11-11): the release workflow's
 no build downloads or bundles the snapshot. Nothing reads the resource folder's
 `blocklist/` while no thread runs, so its absence logs nothing.
 
+Remote MCP servers (PR B, 2026-11-11; iris's call: revisit after launch). A lawyer's remote MCP
+server is reached by the adapter's own MCP client, not through Clauseo. At Tier C the adapter
+runs with no proxy of Clauseo's in its environment (`actor/turn/agents/launch.rs`, only the
+browser entry reaches the session proxy), and in the plain build the list is not loaded at all
+(`blocklist::needed` is false without a sandbox). So neither remote-MCP traffic nor any other
+traffic of the adapter's is checked against the list. For now remote servers come only from
+settings a lawyer edits by hand or a firm's policy sets; Settings › Tools does not offer them
+yet. Revisit when the UI opens remote servers or the sandbox tiers ship: a launch-time check
+would go in `agent/loads/lawyer.rs` (`servers`), reading `BlockListSeams::current`.
+
 ## Date
 
 2026-11-07
