@@ -103,5 +103,5 @@ test("neither plan signed in on a new conversation: both stand side by side, as 
     ],
   });
   expect(byId("signin-set-up")).toBeNull();
-  expect(text()).toContain("Sign in to Claude or ChatGPT to ask about this matter");
+  expect(text()).toContain("Sign in with Claude or ChatGPT to ask about this matter");
 });

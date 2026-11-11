@@ -1,6 +1,6 @@
 // One plan's working line on the first screen, at its foot where the composer will stand (one for each plan, Claude's
-// then ChatGPT's): the install's line while the plan isn't here yet (install.tsx, with "Sign in to {name}" while it is
-// missing), and once it is installed but not signed in, the plan's "Sign in to {name}" in the same place (busy while the sign-in status check runs), so a lawyer can get the plan going
+// then ChatGPT's): the install's line while the plan isn't here yet (install.tsx, with "Sign in with {name}" while it is
+// missing), and once it is installed but not signed in, the plan's "Sign in with {name}" in the same place (busy while the sign-in status check runs), so a lawyer can get the plan going
 // without opening a matter. No gate stands on the first screen: the line says the gate's own words for a sign-in under
 // way and offers its Cancel, never a second Sign in; the states only a matter's gate walks (a device code, a login
 // found, switching accounts) leave the foot as it was. A plan whose sign-in waits (the setup store's `queued`, behind
@@ -36,7 +36,7 @@ import { gateView, installView, queuedView } from "./views.ts";
 /** The line's presses: the install's, the room gate's Sign in, and its Cancel. */
 export type FootActs = InstallActs & { signIn: () => void; cancel: () => void };
 
-/** A plan's line's presses: its install's, its "Sign in to {name}" (through the store's queue), and Cancel, which
+/** A plan's line's presses: its install's, its "Sign in with {name}" (through the store's queue), and Cancel, which
  * stops a wait for the other plan's sign-in, or cancels the sign-in under way or queued behind its download (the
  * download carries on). */
 export const footActs = (store: SetupStore, agent: AgentId, state: SetupState): FootActs => ({
@@ -186,7 +186,7 @@ export function welcomeFoot(
     ),
   });
   const signIn = {
-    words: fl(lang, "Sign in to {name}", { name }),
+    words: fl(lang, "Sign in with {name}", { name }),
     press: acts.signIn,
     testId: IDS.signIn,
   };

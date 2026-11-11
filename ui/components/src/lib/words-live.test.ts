@@ -174,10 +174,10 @@ const PLANNED_LINES = [
   ],
   [
     "agent.auth_required",
-    "Sign in to ChatGPT in Codex first. Your question is kept.",
+    "Sign in with ChatGPT in Codex first. Your question is kept.",
     "पहले Codex में ChatGPT से साइन इन करें। आपका प्रश्न रखा गया है।",
-    "Sign in to gemini first. Your question is kept.",
-    "पहले gemini में साइन इन करें। आपका प्रश्न रखा गया है।",
+    "Sign in with gemini first. Your question is kept.",
+    "पहले gemini से साइन इन करें। आपका प्रश्न रखा गया है।",
     "Sign in to the AI first. Your question is kept.",
     "पहले AI में साइन इन करें। आपका प्रश्न रखा गया है।",
   ],

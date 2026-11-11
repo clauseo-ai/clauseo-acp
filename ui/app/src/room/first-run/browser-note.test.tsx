@@ -67,7 +67,7 @@ test("matter gate: ChatGPT waiting on the browser has no note", async () => {
       signIn(CODEX, { signed_out: {} }),
     ],
   });
-  await press("Sign in to ChatGPT");
+  await press("Sign in with ChatGPT");
   await play(t, signIn(CODEX, WAITING));
   expect(byId("signin")?.dataset["agent"]).toBe("chatgpt");
   expect(byId("signin")?.textContent).toContain("Finish signing in with your browser.");

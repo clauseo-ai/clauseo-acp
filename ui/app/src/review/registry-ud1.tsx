@@ -388,7 +388,7 @@ const SCENES: ([FirstLaunchKey, Scene, string] | null)[] = [
   // ChatGPT's device code
   ["Use a code instead", chatgpt({ waiting: { since: AT, nudge: true } }), "signin-nudge"],
   [
-    "Sign in to ChatGPT on that page and enter this code.",
+    "Sign in with ChatGPT on that page and enter this code.",
     chatgpt({
       device_code: {
         url: "https://auth.openai.com/codex/device",
@@ -488,8 +488,8 @@ const SCENES: ([FirstLaunchKey, Scene, string] | null)[] = [
     T.BOTH,
     "welcome-both",
   ],
-  ["Sign in to {name}", T.BOTH, "welcome-both"],
-  ["Sign in to Claude or ChatGPT to ask about this matter", GATE, "plan"],
+  ["Sign in with {name}", T.BOTH, "welcome-both"],
+  ["Sign in with Claude or ChatGPT to ask about this matter", GATE, "plan"],
   // UD1-96: a plan's row on the first screen, after its name and " · "
   ["needs a download of about {mb} MB", T.BOTH, "welcome-both"],
   // UD1-97: Claude's browser sign-in note, under its first-screen row (also in the matter's gate and Plans' card)

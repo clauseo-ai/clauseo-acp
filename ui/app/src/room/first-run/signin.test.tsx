@@ -41,11 +41,11 @@ const gateState = () => byId("signin-state")?.dataset["state"];
 const signButton = () => byId<HTMLButtonElement>("signin")?.querySelector("button") ?? null;
 const field = () => byId<HTMLTextAreaElement>("composer");
 
-test("plan: the composer offers Claude and ChatGPT, and Sign in to Claude sends StartSignIn; never a model's name", async () => {
+test("plan: the composer offers Claude and ChatGPT, and Sign in with Claude sends StartSignIn; never a model's name", async () => {
   const t = await at({ signed_out: {} });
   expect(byId("signin")?.dataset["agent"]).toBe("claude");
   expect(gateState()).toBe("signed-out");
-  expect(text()).toContain("Sign in to Claude or ChatGPT to ask about this matter");
+  expect(text()).toContain("Sign in with Claude or ChatGPT to ask about this matter");
   // both offered, nothing chosen, neither signed in: the gate's foot names both plans (UD1-93)
   expect(text()).toContain(
     "Your papers stay on this computer. Claude or ChatGPT sees the parts it reads to answer you.",
@@ -57,10 +57,10 @@ test("plan: the composer offers Claude and ChatGPT, and Sign in to Claude sends 
   expect(byId("signin")?.querySelector("img, svg[aria-label]")).toBeNull();
   // both plans, equal: Claude's then ChatGPT's own Sign in, the same kind of button
   const plans = [...(byId("signin")?.querySelectorAll<HTMLButtonElement>(".fl-gate-plan") ?? [])];
-  expect(plans.map((b) => b.textContent)).toEqual(["Sign in to Claude", "Sign in to ChatGPT"]);
+  expect(plans.map((b) => b.textContent)).toEqual(["Sign in with Claude", "Sign in with ChatGPT"]);
   expect(plans[0]?.className).toBe(plans[1]?.className);
   expect(button("Use ChatGPT instead")).toBeNull();
-  await press("Sign in to Claude");
+  await press("Sign in with Claude");
   expect(setups(t)).toEqual([{ start_sign_in: { agent: CLAUDE } }]);
 });
 
@@ -68,20 +68,20 @@ test("checking: while the sign-in status check runs the composer says it is chec
   const t = await at("checking");
   expect(gateState()).toBe("checking");
   expect(text()).toContain("Checking whether you're signed in to Claude…");
-  expect(text()).not.toContain("Sign in to Claude or ChatGPT to ask about this matter");
+  expect(text()).not.toContain("Sign in with Claude or ChatGPT to ask about this matter");
   expect(signButton()?.disabled).toBe(true);
   expect(signButton()?.getAttribute("aria-busy")).toBe("true");
   await play(t, signIn(CLAUDE, { signed_out: {} }));
   expect(gateState()).toBe("signed-out");
   expect(text()).not.toContain("Checking whether");
-  expect(text()).toContain("Sign in to Claude or ChatGPT to ask about this matter");
-  expect(button("Sign in to Claude")).not.toBeNull();
+  expect(text()).toContain("Sign in with Claude or ChatGPT to ask about this matter");
+  expect(button("Sign in with Claude")).not.toBeNull();
 });
 
 test("a Sign in press shows the checking line and a busy button until the check answers", async () => {
   const t = await at({ signed_out: {} });
   expect(signButton()?.disabled).toBe(false);
-  await press("Sign in to Claude");
+  await press("Sign in with Claude");
   expect(setups(t)).toEqual([{ start_sign_in: { agent: CLAUDE } }]);
   // the quick status check runs first: the line says so, and Sign in waits, busy
   await play(t, signIn(CLAUDE, "checking"));
@@ -103,7 +103,7 @@ test("plan-early, plan-queued: Sign in works before the install is ready, and th
       signIn(CLAUDE, { signed_out: {} }),
     ],
   });
-  await press("Sign in to Claude");
+  await press("Sign in with Claude");
   expect(setups(t)).toEqual([{ start_sign_in: { agent: CLAUDE } }]);
   await play(t, signIn(CLAUDE, "queued"));
   expect(gateState()).toBe("queued");
@@ -115,7 +115,7 @@ test("plan-early, plan-queued: Sign in works before the install is ready, and th
   expect(setups(t).at(-1)).toEqual({ cancel_sign_in: { agent: CLAUDE } });
 });
 
-test("plan-chatgpt: Sign in to ChatGPT with neither plan busy sends StartSignIn for codex-acp, and the gate moves to ChatGPT", async () => {
+test("plan-chatgpt: Sign in with ChatGPT with neither plan busy sends StartSignIn for codex-acp, and the gate moves to ChatGPT", async () => {
   const t = await mountFirstRun({
     first: [
       install(CLAUDE, READY),
@@ -124,7 +124,7 @@ test("plan-chatgpt: Sign in to ChatGPT with neither plan busy sends StartSignIn 
       signIn(CODEX, { signed_out: {} }),
     ],
   });
-  await press("Sign in to ChatGPT");
+  await press("Sign in with ChatGPT");
   expect(setups(t)).toEqual([{ start_sign_in: { agent: CODEX } }]);
   expect(byId("signin")?.dataset["agent"]).toBe("chatgpt");
   expect(setups(t).some((c) => c.install_agent !== undefined)).toBe(false);
@@ -238,7 +238,7 @@ test("signin-nudge (ChatGPT): Codex has no paste route; Use a code instead sends
       signIn(CODEX, { waiting: { since: AT, nudge: true } }),
     ],
   });
-  await press("Sign in to ChatGPT");
+  await press("Sign in with ChatGPT");
   expect(byId("signin")?.dataset["agent"]).toBe("chatgpt");
   expect(byId("signin-paste")).toBeNull();
   await press("Use a code instead");
@@ -260,9 +260,9 @@ test("signin-device: the code large, Open page sends OpenSignInPage, Copy copies
       }),
     ],
   });
-  await press("Sign in to ChatGPT");
+  await press("Sign in with ChatGPT");
   expect(byId("signin-device-code")?.textContent).toBe("ABCD-1234");
-  expect(text()).toContain("Sign in to ChatGPT on that page and enter this code.");
+  expect(text()).toContain("Sign in with ChatGPT on that page and enter this code.");
   expect(text()).toContain("The code works until 11:02 am.");
   await press("Open page");
   expect(setups(t).at(-1)).toEqual({ open_sign_in_page: { agent: CODEX } });
@@ -278,7 +278,7 @@ test("signin-device-off: the refusal says how to turn it on, Try again sends Use
       signIn(CODEX, { failed: { code: "signin.device_code_off", at: AT } }),
     ],
   });
-  await press("Sign in to ChatGPT");
+  await press("Sign in with ChatGPT");
   expect(gateState()).toBe("signin.device_code_off");
   expect(text()).toContain("Sign-in with a code is turned off for this ChatGPT account.");
   expect(text()).toContain("Enable device code sign-in for Codex, Excel, PowerPoint, and Word");
@@ -296,7 +296,7 @@ test("signin-device is never the first offer: the plan and the waiting screen of
       signIn(CODEX, { signed_out: {} }),
     ],
   });
-  await press("Sign in to ChatGPT");
+  await press("Sign in with ChatGPT");
   expect(text()).not.toContain("Use a code instead");
 });
 
@@ -354,7 +354,7 @@ test("signin-port-busy: Try again sends StartSignIn and Use a code instead UseDe
       signIn(CODEX, { failed: { code: "signin.port_busy", at: AT } }),
     ],
   });
-  await press("Sign in to ChatGPT");
+  await press("Sign in with ChatGPT");
   expect(text()).toContain("Another program on this computer is using ChatGPT's sign-in.");
   await press("Try again");
   expect(setups(t).at(-1)).toEqual({ start_sign_in: { agent: CODEX } });
@@ -427,7 +427,7 @@ test("login-found (ChatGPT, no email): the line without the email, from Codex", 
       signIn(CODEX, { login_found: { from: "codex" } }),
     ],
   });
-  await press("Sign in to ChatGPT");
+  await press("Sign in with ChatGPT");
   expect(byId("login-found")?.textContent).toBe(
     "Clauseo found your ChatGPT account from Codex and will use it here.",
   );
@@ -477,7 +477,7 @@ test.each<FoundLogin>(["none_found", "reuse_off"])(
   async (found) => {
     const t = await at({ signed_out: { found } });
     for (const [, line] of FOUND) expect(text()).not.toContain(line);
-    await press("Sign in to Claude");
+    await press("Sign in with Claude");
     expect(setups(t)).toEqual([{ start_sign_in: { agent: CLAUDE } }]);
   },
 );
@@ -509,7 +509,7 @@ test.each<[FoundLogin, string]>([
       signIn(CODEX, { signed_out: { found } }),
     ],
   });
-  await press("Sign in to ChatGPT");
+  await press("Sign in with ChatGPT");
   expect(text()).toContain(line);
   expect(text()).not.toContain("Use an API key instead");
   await press("Sign in");
@@ -550,7 +550,7 @@ test("papers line: the gate's foot names one plan only once it is in play (picke
   expect(text()).toContain(
     "Your papers stay on this computer. Claude or ChatGPT sees the parts it reads to answer you.",
   );
-  await press("Sign in to ChatGPT");
+  await press("Sign in with ChatGPT");
   expect(byId("signin")?.dataset["agent"]).toBe("chatgpt");
   expect(text()).toContain(
     "Your papers stay on this computer. ChatGPT sees the parts it reads to answer you.",

@@ -232,7 +232,7 @@ export type SetupStore = {
   set: (
     patch: Partial<Pick<SetupState, "keyOpen" | "pasting" | "copied" | "chosen" | "pending">>,
   ) => void;
-  /** A plan's "Sign in to {name}" (or the gate's "Use … instead"), pressed: it becomes the chosen plan (and the new
+  /** A plan's "Sign in with {name}" (or the gate's "Use … instead"), pressed: it becomes the chosen plan (and the new
    * conversation's), and its sign-in goes through `signIn`. */
   signInTo: (agent: AgentId) => void;
   /** Every sign-in press goes here (the first screen's, the gate's Sign in and Try again, "Use … instead"): the

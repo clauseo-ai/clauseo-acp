@@ -1,7 +1,7 @@
 // Signing in, in the composer's well where the question will go (design/03-system/src/pages/first-launch/gate.tsx):
 // the one act left before the first question. Two rows on the well: the act, with its words and its button where Ask
 // will stand, and beneath it the quiet ways round it. It covers the plan (signed out, both plans offered side by side,
-// each with its own "Sign in to {name}"), a login already on this computer (said before
+// each with its own "Sign in with {name}"), a login already on this computer (said before
 // it is used), signing in in the browser with each way that can end, ChatGPT's device code (never the first offer:
 // only after the browser didn't work), and an API key. No model is named and no lab's logo shows.
 import { useEffect, useRef, type ReactNode } from "react";
@@ -60,7 +60,7 @@ export type GateRefusal = { code: string; switching: boolean };
 /** What a press asks for; the app turns each into the host's command, or the gate's own state. */
 export type GateAct =
   | { act: "sign-in"; console?: boolean }
-  /** A plan's own "Sign in to {name}", where both are offered: this gate's plan or the other. */
+  /** A plan's own "Sign in with {name}", where both are offered: this gate's plan or the other. */
   | { act: "sign-in-to"; plan: Plan }
   | { act: "cancel" }
   | { act: "paste" }
@@ -86,7 +86,7 @@ export type GateTestIds = {
   loginFound?: string;
   loginUse?: string;
   loginOther?: string;
-  /** Each plan's "Sign in to {name}", suffixed with its plan: `${signInTo}-claude`. */
+  /** Each plan's "Sign in with {name}", suffixed with its plan: `${signInTo}-claude`. */
   signInTo?: string;
   /** The set-up view's one act: "Set up {name}" or "Sign in again". */
   setUp?: string;
@@ -184,7 +184,7 @@ export function Gate({
           data-plan={p}
           data-testid={testIds.signInTo === undefined ? undefined : `${testIds.signInTo}-${p}`}
         >
-          {w("Sign in to {name}", { name: NAME[p] })}
+          {w("Sign in with {name}", { name: NAME[p] })}
         </Button>
       ))}
     </span>
@@ -196,7 +196,7 @@ export function Gate({
         view.found === undefined ? (
           <>
             <Act act={both}>
-              <Say>{w("Sign in to Claude or ChatGPT to ask about this matter")}</Say>
+              <Say>{w("Sign in with Claude or ChatGPT to ask about this matter")}</Say>
             </Act>
             <Ways>
               {way(w("Use an API key instead"), { act: "key-panel", open: true }, undefined, true)}
@@ -359,7 +359,7 @@ export function Gate({
                 {view.code}
               </span>
               <span className="fl-gate-why">
-                <Say>{w("Sign in to ChatGPT on that page and enter this code.")}</Say>{" "}
+                <Say>{w("Sign in with ChatGPT on that page and enter this code.")}</Say>{" "}
                 <Say>{w("The code works until {time}.", { time: view.until })}</Say>
               </span>
             </span>

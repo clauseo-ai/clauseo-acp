@@ -1,5 +1,5 @@
 // The first screen (UD1), apart from first-run.tsx to keep it under the size limit: the question, and both plans side
-// by side at its foot, Claude's working line then ChatGPT's, each with its own "Sign in to {name}". A press makes that
+// by side at its foot, Claude's working line then ChatGPT's, each with its own "Sign in with {name}". A press makes that
 // plan the chosen one and starts its install and sign-in at once, beside the other plan's download; only its sign-in
 // waits, for the other plan's sign-in under way (the setup store's queue: one sign-in at a time, and nothing dropped).
 import { lazy, Suspense, useEffect, useLayoutEffect, useState } from "react";

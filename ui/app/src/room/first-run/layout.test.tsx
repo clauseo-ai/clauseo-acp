@@ -49,8 +49,8 @@ test("the gate's quiet buttons wrap their words: the button's nowrap gives way",
   await mountFirstRun({ first: [install(CLAUDE, READY), signIn(CLAUDE, { signed_out: {} })] });
   expect(wraps(button("Use an API key instead"))).toBe(true);
   // both plans' Sign in wrap their words too, and their row wraps under the words where they don't fit
-  expect(wraps(button("Sign in to Claude"))).toBe(true);
-  expect(wraps(button("Sign in to ChatGPT"))).toBe(true);
+  expect(wraps(button("Sign in with Claude"))).toBe(true);
+  expect(wraps(button("Sign in with ChatGPT"))).toBe(true);
   expect(rule(".fl-gate-plans")).toContain("flex-wrap: wrap");
   expect(rule(".fl-gate-plans")).toContain("max-width: 100%");
 });

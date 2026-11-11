@@ -34,7 +34,7 @@ test("install: missing on the first screen says the size, about, and sends nothi
   expect(text()).toContain("Claude · needs a download of about 160 MB");
   expect(setups(t)).toEqual([]);
   const sign = byId("install-sign-in");
-  expect(sign?.textContent).toBe("Sign in to Claude");
+  expect(sign?.textContent).toBe("Sign in with Claude");
   expect(foot()?.contains(sign)).toBe(true);
   await press(sign);
   expect(setups(t)).toEqual([{ start_sign_in: { agent: CLAUDE } }]);

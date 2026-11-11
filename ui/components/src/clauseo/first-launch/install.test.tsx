@@ -146,12 +146,14 @@ test("install lines: where both plans stand side by side, Sign in names its plan
       throw new Error("no actions");
     return renderToStaticMarkup(line.actions as ReactElement);
   };
-  expect(markup("en", true)).toContain(">Sign in to ChatGPT<");
-  expect(markup("hi", true)).toContain(">ChatGPT में साइन इन करें<");
-  expect(markup("en", true, "Claude")).toContain(">Sign in to Claude<");
+  expect(markup("en", true)).toContain(">Sign in with ChatGPT<");
+  expect(markup("hi", true)).toContain(">ChatGPT से साइन इन करें<");
+  expect(markup("en", true, "Claude")).toContain(">Sign in with Claude<");
   expect(markup("en", false)).toContain(">Sign in<");
   // the status check's busy button names it the same way
   const checking = checkingLine("en", "ChatGPT", { signIn: "sign" }, true);
   if (checking.kind !== "wait") throw new Error("no wait line");
-  expect(renderToStaticMarkup(checking.actions as ReactElement)).toContain(">Sign in to ChatGPT<");
+  expect(renderToStaticMarkup(checking.actions as ReactElement)).toContain(
+    ">Sign in with ChatGPT<",
+  );
 });
