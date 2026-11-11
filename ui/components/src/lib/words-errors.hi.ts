@@ -76,13 +76,18 @@ export const HI = {
   "A paper is open in another program. Close it, then try again.":
     "कोई दस्तावेज़ किसी दूसरे प्रोग्राम में खुला है। उसे बंद करें, फिर दोबारा प्रयास करें।",
   "Wait for the answer to finish first.": "पहले उत्तर पूरा होने दें।",
-  "A whole drive can't be a matter.": "पूरी ड्राइव मामला नहीं बन सकती।",
-  "Your home folder can't be a matter.": "आपका होम फ़ोल्डर मामला नहीं बन सकता।",
-  "A system folder can't be a matter.": "कोई सिस्टम फ़ोल्डर मामला नहीं बन सकता।",
+  "This is the top of a drive. Choose a folder on it.":
+    "यह किसी ड्राइव का सबसे ऊपरी स्तर है। उस पर कोई फ़ोल्डर चुनें।",
+  "This is your home folder. Choose a folder inside it.":
+    "यह आपका होम फ़ोल्डर है। उसके भीतर कोई फ़ोल्डर चुनें।",
+  "This is a system folder. Choose another folder.": "यह एक सिस्टम फ़ोल्डर है। दूसरा फ़ोल्डर चुनें।",
   "Clauseo can't read that folder.": "Clauseo वह फ़ोल्डर नहीं पढ़ पा रहा।",
-  "That folder is already a matter's, or inside one.":
-    "वह फ़ोल्डर पहले से किसी मामले का है, या किसी मामले के भीतर है।",
-  "That folder holds Clauseo's own data.": "उस फ़ोल्डर में Clauseo का अपना डेटा है।",
+  "Clauseo can't make a matter of this folder. Choose another folder.":
+    "Clauseo इस फ़ोल्डर से मामला नहीं बना सकता। दूसरा फ़ोल्डर चुनें।",
+  "That folder is where Clauseo keeps matters. Choose the folder for one matter.":
+    "उस फ़ोल्डर में Clauseo मामले रखता है। एक मामले का फ़ोल्डर चुनें।",
+  "This folder is part of Clauseo's own data. Choose another folder.":
+    "यह फ़ोल्डर Clauseo के अपने डेटा का हिस्सा है। दूसरा फ़ोल्डर चुनें।",
   "That wasn't allowed, so nothing changed.": "इसकी अनुमति नहीं थी, इसलिए कुछ नहीं बदला।",
   "That is too large to send.": "यह भेजने के लिए बहुत बड़ा है।",
   "Your firm manages that setting, so it can't be changed.":

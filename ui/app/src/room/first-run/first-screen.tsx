@@ -2,7 +2,7 @@
 // by side at its foot, Claude's working line then ChatGPT's, each with its own "Sign in with {name}". A press makes that
 // plan the chosen one and starts its install and sign-in at once, beside the other plan's download; only its sign-in
 // waits, for the other plan's sign-in under way (the setup store's queue: one sign-in at a time, and nothing dropped).
-import { lazy, Suspense, useEffect, useLayoutEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { late } from "@clauseo/components/lib/late.ts";
 import { Welcome, type FootPlan } from "@clauseo/components/clauseo/first-launch/welcome.tsx";
 import { ToolsLine } from "@clauseo/components/clauseo/first-launch/tools.tsx";
@@ -18,6 +18,7 @@ import {
   type SetupStore,
 } from "../../store/setup.ts";
 import type { Matters } from "../matters.ts";
+import type { Refused } from "../new-matter.tsx";
 import { usePickWait } from "../picker-wait.ts";
 import { markButton, markWelcome } from "../../start-marks.ts";
 import { IDS, NAME, planOf } from "./acts.ts";
@@ -29,6 +30,7 @@ import { browserNote, footActs, stillNote, welcomeFoot } from "./welcome-foot.ts
 const loadNewMatter = () => late(import("../new-matter.tsx"));
 const FirstMatter = lazy(() => loadNewMatter().then((m) => ({ default: m.FirstMatter })));
 const RefusedLine = lazy(() => loadNewMatter().then((m) => ({ default: m.RefusedLine })));
+const RefusedOpen = lazy(() => loadNewMatter().then((m) => ({ default: m.RefusedOpen })));
 
 /** The folder's own name, the last part of how it reads. */
 const folderName = (display: string) =>
@@ -83,22 +85,34 @@ export function FirstScreen({
   const tools = toolsView(state);
   const retryThrough = readyPlan(state);
   const [form, setForm] = useState(false);
-  const [refused, setRefused] = useState<{ code: string; path: string } | null>(null);
+  const [refused, setRefused] = useState<Refused | null>(null);
+  // the folder picked is being made a matter: "Opening the folder…", and Open the folder waits (a second press does
+  // nothing) until the host answers
+  const [making, setMaking] = useState(false);
+  const makingNow = useRef(false);
   const wait = usePickWait();
   useEffect(() => store.count({ onboarding_step: { step: "welcome_shown" } }), [store]);
   // the start-up's marks (start-marks.ts): the welcome's first commit, then its button, which sends them all once
   useLayoutEffect(markWelcome, []);
   const openFolder = async () => {
+    if (makingNow.current) return;
     setRefused(null);
     const picked = await wait.track(() => matters.pickFolder());
-    if (picked === null) return;
+    if (picked === null || makingNow.current) return;
     store.firstAct("folder_chosen");
+    makingNow.current = true;
+    setMaking(true);
     try {
+      // made, or a matter the host already has for it (MatterCreated either way): the room opens it
       await matters.create(folderName(picked.display), {
         existing_folder: { folder: picked.folder },
       });
     } catch (thrown) {
-      setRefused({ code: toHostError(thrown).code, path: picked.display });
+      const { code, matter } = toHostError(thrown);
+      setRefused({ code, path: picked.display, ...(matter === undefined ? {} : { matter }) });
+    } finally {
+      makingNow.current = false;
+      setMaking(false);
     }
   };
   const openSettings = transport.openSettings;
@@ -121,6 +135,7 @@ export function FirstScreen({
       counts={{ ...state.counts, onChange: store.setCounts }}
       onOpenFolder={() => void openFolder()}
       opening={wait.opening}
+      making={making}
       onNewMatter={() => {
         setRefused(null);
         setForm(true);
@@ -141,7 +156,14 @@ export function FirstScreen({
       error={
         refused === null ? null : (
           <Suspense fallback={null}>
-            <RefusedLine code={refused.code} path={refused.path} />
+            <RefusedLine matters={matters} refused={refused} />
+          </Suspense>
+        )
+      }
+      errorAction={
+        refused === null ? null : (
+          <Suspense fallback={null}>
+            <RefusedOpen matters={matters} refused={refused} />
           </Suspense>
         )
       }

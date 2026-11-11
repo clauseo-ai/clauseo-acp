@@ -3,15 +3,20 @@
 // host has H20's default location, "Use a new folder in" offers it (default_location, no picker). Create matter waits
 // for one of the two, and makes the matter from it. The host's refusal is said in the form by its code
 // (matter-form-check.ts), never its message. Made, the new matter opens, the dialog
-// closes and focus goes back to New matter (or, where the room folded the rail on onMade, to Matters). A folder that is
-// already a matter (matter.folder_is_matter) names that matter when the list has it, and Open it opens it, as the rail does.
+// closes and focus goes back to New matter (or, where the room folded the rail on onMade, to Matters). A folder inside
+// or holding a matter's folder (matter.folder_inside_matter, matter.folder_holds_matter) names that matter when the list
+// has it, and Open {name} opens it, as the rail does; with no name it takes the line of any folder refused.
 // The first screen (UD1's first run) takes the same form in place, titled, with Back (FirstMatter), and says a folder
-// its Open the folder couldn't make a matter of by the same code's words (RefusedLine); both load with this chunk. A
-// folder picked, either form asks the host about it first and warns or refuses as folder-check.tsx says.
+// its Open the folder couldn't make a matter of by the same code's words (RefusedLine, with RefusedOpen's Open {name});
+// all load with this chunk. A folder picked, either form asks the host about it first and warns or refuses as
+// folder-check.tsx says.
 import { useEffect, useState, type RefObject } from "react";
 import { NewMatterForm } from "@clauseo/components/clauseo/matter-form.tsx";
 import { NewMatterDialog } from "@clauseo/components/clauseo/new-matter-dialog.tsx";
-import { createErrorLine } from "@clauseo/components/clauseo/matter-form-check.ts";
+import { createErrorLine, nestedRefusal } from "@clauseo/components/clauseo/matter-form-check.ts";
+import { isolate } from "@clauseo/components/lib/bidi.ts";
+import { mt } from "@clauseo/components/lib/words-matters.ts";
+import { Button } from "@clauseo/components/ui/button.tsx";
 import { useWords } from "@clauseo/components/lib/words.ts";
 import { toHostError } from "../transport/host-transport.ts";
 import type { HostError } from "../transport/protocol.ts";
@@ -19,13 +24,27 @@ import { usePickedFolder } from "./folder-check.tsx";
 import type { MatterInfo } from "./host-next.ts";
 import type { Matters } from "./matters.ts";
 
-/** Whether a refusal is of the folder itself, the one already a matter included: Create waits for another. */
+/** Whether a refusal is of the folder itself: Create waits for another, and the line offers another (or, for a folder
+ * nested with a matter on the list, Open {name} in its place). */
 const refusesFolder = (code: string | undefined) =>
   code !== undefined && code.startsWith("matter.folder_");
 
-/** Whether a refusal is about the folder, so its line offers another. */
-const aboutFolder = (code: string | undefined) =>
-  code !== undefined && code.startsWith("matter.folder_") && code !== "matter.folder_is_matter";
+/** The matter on the list a refusal names: a folder inside or holding its folder, where the host gave the matter. */
+const namedBy = (matters: Matters, refused: Pick<HostError, "code" | "matter">) =>
+  nestedRefusal(refused.code) && refused.matter !== undefined
+    ? (matters.view().matters.find((m) => m.matter === refused.matter) ?? null)
+    : null;
+
+/** A refusal's line, and the matter on the list it names. */
+const refusalOf = (
+  matters: Matters,
+  lang: Parameters<typeof createErrorLine>[0],
+  refused: Pick<HostError, "code" | "matter">,
+  path: string | undefined,
+) => {
+  const at = namedBy(matters, refused);
+  return { line: createErrorLine(lang, refused.code, path, at?.name), at };
+};
 
 export function NewMatter({
   matters,
@@ -43,7 +62,7 @@ export function NewMatter({
   onOpenChange: (open: boolean) => void;
   /** Optional: the matter was made, before the dialog closes. */
   onMade?: () => void;
-  /** Optional: Open it, on a folder that is already a matter, opened that matter, before the dialog closes. */
+  /** Optional: Open {name}, on a folder nested with a matter on the list, opened that matter, before the dialog closes. */
   onOpened?: () => void;
   /** Where focus goes back as the dialog closes: New matter's button. */
   finalFocus: RefObject<HTMLElement | null>;
@@ -61,16 +80,10 @@ export function NewMatter({
     }
     return shown;
   };
-  // the matter the refusal names, when the list has it: Open it opens it
+  // the matter the refusal names, when the list has it: Open {name} opens it
   const [named, setNamed] = useState<MatterInfo | null>(null);
-  /** A refusal's line, and the matter on the list it names. */
-  const refusal = (refused: HostError, path: string | undefined) => {
-    const at =
-      refused.code === "matter.folder_is_matter" && refused.matter !== undefined
-        ? (matters.view().matters.find((m) => m.matter === refused.matter) ?? null)
-        : null;
-    return { line: createErrorLine(w.lang, refused.code, path, at?.name), at };
-  };
+  const refusal = (refused: HostError, path: string | undefined) =>
+    refusalOf(matters, w.lang, refused, path);
   // the existing folder's check refused it: its line at once
   const checked = pick.refused === null ? null : refusal(pick.refused, pick.existing?.display);
   const opens = named ?? checked?.at ?? null;
@@ -130,7 +143,7 @@ export function NewMatter({
         setNamed(null);
       }}
       error={error?.line ?? checked?.line ?? null}
-      folderError={aboutFolder(error?.code ?? pick.refused?.code)}
+      folderError={refusesFolder(error?.code ?? pick.refused?.code)}
       warning={pick.warning}
       scan={pick.scan}
       unpick={pick.unpick}
@@ -140,10 +153,13 @@ export function NewMatter({
       {...(opens === null
         ? {}
         : {
-            openMatter: () => {
-              matters.open(opens.matter);
-              onOpened?.();
-              close(false);
+            openMatter: {
+              name: opens.name,
+              open: () => {
+                matters.open(opens.matter);
+                onOpened?.();
+                close(false);
+              },
             },
           })}
       onCreate={create}
@@ -177,11 +193,19 @@ export function FirstMatter({
   const pick = usePickedFolder(matters, w.lang);
   const [location, setLocation] = useState<string | null>(null);
   const [error, setError] = useState<{ line: string; code: string } | null>(null);
+  // the matter the refusal names, when the list has it: Open {name} opens it
+  const [named, setNamed] = useState<MatterInfo | null>(null);
   const choose = async () => {
     const shown = await pick.pickExisting();
-    if (shown !== null) setError(null);
+    if (shown !== null) {
+      setError(null);
+      setNamed(null);
+    }
     return shown;
   };
+  const checked =
+    pick.refused === null ? null : refusalOf(matters, w.lang, pick.refused, pick.existing?.display);
+  const opens = named ?? checked?.at ?? null;
   useEffect(() => {
     if (!detailed) return;
     let live = true;
@@ -194,12 +218,15 @@ export function FirstMatter({
   }, [detailed, matters]);
   const create = async (name: string, client: string, made: boolean) => {
     setError(null);
+    setNamed(null);
     const where = await pick.where(made && detailed && location !== null);
     if (where === null) return false;
     const { source, path } = where;
     if (where.refused !== undefined) {
-      const { code } = where.refused;
-      setError({ line: createErrorLine(w.lang, code, path), code });
+      setError({
+        line: refusalOf(matters, w.lang, where.refused, path).line,
+        code: where.refused.code,
+      });
       return false;
     }
     onAct();
@@ -207,8 +234,10 @@ export function FirstMatter({
     try {
       await matters.create(name, source, details);
     } catch (thrown) {
-      const { code } = toHostError(thrown);
-      setError({ line: createErrorLine(w.lang, code, path), code });
+      const refused = toHostError(thrown);
+      const { line, at } = refusalOf(matters, w.lang, refused, path);
+      setError({ line, code: refused.code });
+      setNamed(at);
       return false;
     }
     return true;
@@ -222,19 +251,18 @@ export function FirstMatter({
       onMade={() => {
         pick.reset();
         setError(null);
+        setNamed(null);
       }}
-      folderError={aboutFolder(error?.code ?? pick.refused?.code)}
-      error={
-        error?.line ??
-        (pick.refused === null
-          ? null
-          : createErrorLine(w.lang, pick.refused.code, pick.existing?.display))
-      }
+      folderError={refusesFolder(error?.code ?? pick.refused?.code)}
+      error={error?.line ?? checked?.line ?? null}
       warning={pick.warning}
       scan={pick.scan}
       unpick={pick.unpick}
       opening={pick.opening}
       blocked={pick.refused !== null || refusesFolder(error?.code)}
+      {...(opens === null
+        ? {}
+        : { openMatter: { name: opens.name, open: () => matters.open(opens.matter) } })}
       onCreate={create}
       onCancel={onBack}
       testIds={{
@@ -242,6 +270,7 @@ export function FirstMatter({
         existing: "matter-existing",
         made: "matter-made",
         create: "create-matter",
+        open: "open-matter",
         choose: "folder-choose",
         anyway: "folder-anyway",
       }}
@@ -249,8 +278,29 @@ export function FirstMatter({
   );
 }
 
-/** A folder the first screen's Open the folder couldn't make a matter of, said by the refusal's code. */
-export function RefusedLine({ code, path }: { code: string; path: string }) {
+/** What the first screen's Open the folder heard back: the refusal's code and matter, and the folder as it reads. */
+export type Refused = Pick<HostError, "code" | "matter"> & { path: string };
+
+/** A folder the first screen's Open the folder couldn't make a matter of, said by the refusal's code, naming the matter
+ * on the list a nested folder belongs with. */
+export function RefusedLine({ matters, refused }: { matters: Matters; refused: Refused }) {
   const w = useWords();
-  return <>{createErrorLine(w.lang, code, path)}</>;
+  return <>{refusalOf(matters, w.lang, refused, refused.path).line}</>;
+}
+
+/** Under that line, for a folder inside or holding a matter on the list: Open {name}, which opens it. */
+export function RefusedOpen({ matters, refused }: { matters: Matters; refused: Refused }) {
+  const w = useWords();
+  const at = namedBy(matters, refused);
+  if (at === null) return null;
+  return (
+    <Button
+      kind="tone"
+      size="small"
+      data-testid="open-matter"
+      onClick={() => matters.open(at.matter)}
+    >
+      <span className="deva-nudge">{mt(w.lang, "Open {name}", { name: isolate(at.name) })}</span>
+    </Button>
+  );
 }

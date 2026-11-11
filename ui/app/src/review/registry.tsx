@@ -412,43 +412,8 @@ export const REGISTRY: readonly Entry[] = [
   railState("U2-07", limitWords("Limit reached until {time}")),
   railState("U2-08", limitWords("Limit reached until {day} {time}")),
   railState("U2-09", limitWords("Limit reached")),
-  refusal(
-    "U2-10",
-    matterWords("{path} is a whole drive."),
-    "matter.folder_is_drive",
-    "/Volumes/Case",
-  ),
-  // the second line of a whole drive (matter.folder_refused has its own line, U2-31)
-  refusal(
-    "U2-11",
-    matterWords("A matter is one folder of papers. Choose the folder for one matter."),
-    "matter.folder_is_drive",
-    "/Volumes/Case",
-  ),
-  refusal(
-    "U2-12",
-    matterWords("{path} is your home folder."),
-    "matter.folder_is_home",
-    "/Users/rmehra",
-  ),
-  refusal(
-    "U2-13",
-    matterWords("It holds far more than one matter. Choose the folder for one matter."),
-    "matter.folder_is_home",
-    "/Users/rmehra",
-  ),
-  refusal(
-    "U2-14",
-    matterWords("{path} is a folder the computer keeps for itself."),
-    "matter.folder_is_system",
-    "/System",
-  ),
-  refusal(
-    "U2-15",
-    matterWords("Choose the folder that holds the matter's papers."),
-    "matter.folder_is_system",
-    "/System",
-  ),
+  // U2-10 to U2-15, retired: a whole drive, the home folder and a system folder each say folder PR 2's one line
+  // (ME-06 to ME-08)
   refusal(
     "U2-16",
     matterWords("Clauseo can't read {path}."),
@@ -551,8 +516,8 @@ export const REGISTRY: readonly Entry[] = [
     ...RAIL,
     render: () => <RoomAfter host={railHost} steps={[{ find: "Zaveri" }]} />,
   },
-  // matter.folder_refused, which doesn't say why: true of a folder already a matter, an unreadable matter file, the
-  // matters' own folder, a drive, the home folder and a system folder
+  // matter.folder_refused, which doesn't say why; also a folder nested with a matter the list doesn't have, and
+  // matter.folder_is_matter
   refusal(
     "U2-31",
     matterWords("Clauseo can't make a matter of this folder. Choose another folder."),

@@ -105,6 +105,10 @@ export type RigOptions = {
   command?: (command: SetupCommand) => void | Promise<void>;
   /** The host has the settings window (open_settings). */
   openSettings?: boolean;
+  /** Answers create_matter in place of making MADE_MATTER: refuse by throwing, hold by never settling. */
+  create?: (name: string) => CommandOutcome | Promise<CommandOutcome>;
+  /** The matters the host lists once `create` answers with a matter. */
+  listAfter?: MatterSummary[];
   /** The folder the picker gives; null: cancelled. */
   picked?: { folder: string; display: string } | null;
   /** The open matter's threads (list_threads); none by default. */
@@ -125,9 +129,18 @@ export async function mountFirstRun(o: RigOptions = {}) {
       if (typeof query === "object" && "list_threads" in query) return { threads: o.threads ?? [] };
       throw new Error(`not scripted: ${JSON.stringify(query)}`);
     },
-    dispatch: (envelope): CommandOutcome => {
+    dispatch: (envelope): CommandOutcome | Promise<CommandOutcome> => {
       const c = envelope.command;
       if (c.create_thread !== undefined) return { thread_created: { thread: MADE_THREAD } };
+      const answer = o.create;
+      if (c.create_matter !== undefined && answer !== undefined) {
+        const name = c.create_matter.name;
+        return (async () => {
+          const outcome = await answer(name);
+          if (o.listAfter !== undefined) matters = o.listAfter;
+          return outcome;
+        })();
+      }
       if (c.create_matter !== undefined) {
         matters = [{ matter: MADE_MATTER, name: c.create_matter.name, kind: "folder" }];
         return { matter_created: { matter: MADE_MATTER } };
