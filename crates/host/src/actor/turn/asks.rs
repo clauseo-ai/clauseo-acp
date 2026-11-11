@@ -104,7 +104,7 @@ pub(super) fn on_permission(actor: &mut Actor, thread: ThreadId, event: AcpEvent
         allow_browser_tool(actor, thread, ask.key, &tool, option);
         return;
     }
-    if let Some((server, option)) = trusted_tool_to_allow(actor, thread, &ask) {
+    if let Some((server, option)) = trusted_tool_to_allow(actor, thread, &ask, raw_input.as_ref()) {
         allow_trusted_tool(actor, thread, ask.key, &server, option);
         return;
     }

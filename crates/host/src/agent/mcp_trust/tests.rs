@@ -9,7 +9,10 @@ use clauseo_protocol::{CompactString, TextOrBlob, ToolCallPatch, ToolCallStatus,
 use clauseo_settings::McpServerLaunch;
 use serde_json::{Value, json};
 
-use super::{CodexCalls, claude_rule, codex_call, is_trusted, never_asks, trusted_servers};
+use super::{
+    CodexCalls, claude_rule, codex_call, codex_standalone_server, codex_standalone_tool,
+    is_trusted, never_asks, trusted_servers,
+};
 use crate::agent::loads::McpControl;
 
 fn launch(enabled: bool) -> McpServerLaunch {
@@ -402,4 +405,107 @@ fn a_call_is_answered_once() {
         Some(("docs".to_owned(), "search".to_owned()))
     );
     assert_eq!(calls.take("tc-1"), None);
+}
+
+#[test]
+fn a_standalone_codex_approval_names_its_server_twice() {
+    let input = |server: &str| {
+        json!({"serverName": server, "description": "Allow the docs MCP server to run tool \"search\"?",
+            "schema": {"type": "object", "properties": {}}})
+    };
+    let docs = input("docs");
+    assert_eq!(
+        codex_standalone_server("sess-1", "elicitation:sess-1:docs:0", Some(&docs)),
+        Some("docs")
+    );
+    assert_eq!(
+        codex_standalone_server("sess-1", "elicitation:sess-1:docs:17", Some(&docs)),
+        Some("docs")
+    );
+    for id in [
+        "elicitation:sess-2:docs:0",
+        "elicitation:sess-1:docs-2:0",
+        "elicitation:sess-1:doc:0",
+        "elicitation:sess-1:docs:",
+        "elicitation:sess-1:docs:1a",
+        "elicitation:sess-1:docs",
+        "elicitation-sess-1:docs:0",
+        "tc-1",
+    ] {
+        assert_eq!(
+            codex_standalone_server("sess-1", id, Some(&docs)),
+            None,
+            "{id}"
+        );
+    }
+    // The id's server and `serverName` must be the same: `case` never stands for `case-law`.
+    let case = input("case");
+    assert_eq!(
+        codex_standalone_server("sess-1", "elicitation:sess-1:case-law:0", Some(&case)),
+        None
+    );
+    let law = input("case-law");
+    assert_eq!(
+        codex_standalone_server("sess-1", "elicitation:sess-1:case:0", Some(&law)),
+        None
+    );
+    assert_eq!(
+        codex_standalone_server("sess-1", "elicitation:sess-1:docs:0", None),
+        None
+    );
+    assert_eq!(
+        codex_standalone_server("sess-1", "elicitation:sess-1::0", Some(&input(""))),
+        None
+    );
+}
+
+/// A standalone approval names its tool only in Codex's exact fallback message.
+#[test]
+fn a_standalone_codex_approval_names_its_tool_in_the_exact_message() {
+    let input = |text: &str| json!({"serverName": "case-law", "description": text});
+    let tool =
+        |text: &str| codex_standalone_tool("case-law", Some(&input(text))).map(str::to_owned);
+    assert_eq!(
+        tool("Allow the case-law MCP server to run tool \"search_law\"?").as_deref(),
+        Some("search_law")
+    );
+    for text in [
+        "Allow the case-law MCP server to run tool \"recharge\"? Or search_law",
+        "Allow the case MCP server to run tool \"search_law\"?",
+        "Allow the case-law MCP server to run tool \"\"?",
+        "Allow the case-law MCP server to run tool \"a\"b\"?",
+        "Run search_law?",
+    ] {
+        assert_eq!(tool(text), None, "{text}");
+    }
+    assert_eq!(codex_standalone_tool("case-law", None), None);
+}
+
+/// A standalone approval takes the oldest unanswered call of its exact server and tool, one per
+/// approval; with none left, or for another tool or server, nothing.
+#[test]
+fn a_standalone_approval_takes_the_oldest_matching_call() {
+    let mut calls = CodexCalls::default();
+    let search = json!({"server": "case-law", "tool": "search_law"});
+    let recharge = json!({"server": "case-law", "tool": "recharge"});
+    for (id, input) in [("tc-1", &search), ("tc-2", &recharge), ("tc-3", &search)] {
+        let title = format!("mcp.case-law.{}", input["tool"].as_str().unwrap());
+        calls.started(&call(
+            id,
+            &title,
+            Some(input.clone()),
+            ToolCallStatus::InProgress,
+        ));
+    }
+    assert!(calls.take_oldest("case-law", "search_law"));
+    assert_eq!(calls.call("tc-1"), None, "the oldest goes first");
+    assert!(calls.call("tc-3").is_some());
+    assert!(!calls.take_oldest("case", "search_law"));
+    assert!(!calls.take_oldest("case-law", "Search_law"));
+    assert!(calls.take_oldest("case-law", "search_law"));
+    assert!(!calls.take_oldest("case-law", "search_law"), "none left");
+    assert!(
+        calls.call("tc-2").is_some(),
+        "recharge is never taken for a search"
+    );
 }

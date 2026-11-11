@@ -13,7 +13,8 @@
 //! - Codex: the host answers a trusted server's tool approval `allow_once` itself, once per
 //!   call (`actor/turn/asks/codex_auto.rs`), only for a server Clauseo sent that session. The
 //!   server comes only from what codex-acp 2.2.2 and Codex build, never from model-written text
-//!   ([`codex_call`]), and is compared by exact string. A standalone request always asks.
+//!   ([`codex_call`]), and is compared by exact string. A standalone request (parallel calls)
+//!   is matched to the oldest unanswered call of its exact server and tool, and asks without one.
 //! - Forced ask (`agent/forced_ask.rs`) withholds the trust: Claude then gets no `allowedTools`
 //!   at all, and the `mcp__*` ask rule; the host answers no Codex approval for it.
 
@@ -97,7 +98,12 @@ const MAX_CODEX_CALLS: usize = 64;
 /// agent's tool call id, so a permission request that names only the call can be attributed.
 /// Only a call [`codex_call`] reads is kept; a final status drops it.
 #[derive(Debug, Default)]
-pub(crate) struct CodexCalls(BTreeMap<CompactString, (CompactString, CompactString)>);
+pub(crate) struct CodexCalls {
+    /// By tool call id: the order it started in, its server and its tool.
+    calls: BTreeMap<CompactString, (u64, CompactString, CompactString)>,
+    /// The next call's order.
+    next: u64,
+}
 
 impl CodexCalls {
     /// A Codex tool call started: an MCP one is kept until it ends. codex-acp sends an MCP call
@@ -122,11 +128,16 @@ impl CodexCalls {
         let Some((server, tool)) = codex_call(&call.title, &input) else {
             return;
         };
-        if self.0.len() >= MAX_CODEX_CALLS {
-            self.0.clear();
+        if self.calls.len() >= MAX_CODEX_CALLS {
+            self.calls.clear();
         }
-        let entry = (CompactString::from(server), CompactString::from(tool));
-        self.0.insert(call.acp_id.clone(), entry);
+        let entry = (
+            self.next,
+            CompactString::from(server),
+            CompactString::from(tool),
+        );
+        self.next = self.next.wrapping_add(1);
+        self.calls.insert(call.acp_id.clone(), entry);
     }
 
     /// An update of the call the agent knows as `acp_id`: a final status forgets it.
@@ -135,30 +146,84 @@ impl CodexCalls {
             patch.status,
             Some(ToolCallStatus::Completed | ToolCallStatus::Failed | ToolCallStatus::Cancelled)
         ) {
-            self.0.remove(acp_id);
+            self.calls.remove(acp_id);
         }
     }
 
     /// How many calls are kept.
     #[cfg(test)]
     pub(crate) fn len(&self) -> usize {
-        self.0.len()
+        self.calls.len()
     }
 
     /// The server and tool of the unfinished MCP call `acp_id`, taken out, if it is one.
     pub(crate) fn take(&mut self, acp_id: &str) -> Option<(String, String)> {
-        self.0
+        self.calls
             .remove(acp_id)
-            .map(|(server, tool)| (server.to_string(), tool.to_string()))
+            .map(|(_, server, tool)| (server.to_string(), tool.to_string()))
+    }
+
+    /// Takes the oldest unanswered call of exactly `server` and `tool`, for a standalone
+    /// approval: codex-acp sends one when two calls of a server are pending at once
+    /// (`popPendingMcpApproval`, `dist/index.js:32528-32537`), and calls of the same server
+    /// and tool are alike to an approval. Whether one was there.
+    pub(crate) fn take_oldest(&mut self, server: &str, tool: &str) -> bool {
+        let oldest = self
+            .calls
+            .iter()
+            .filter(|(_, (_, own_server, own_tool))| own_server == server && own_tool == tool)
+            .min_by_key(|(_, (order, _, _))| *order)
+            .map(|(id, _)| id.clone());
+        oldest.is_some_and(|id| self.calls.remove(&id).is_some())
     }
 
     /// The server and tool of the unfinished MCP call `acp_id`, if it is one.
     #[cfg(test)]
     pub(crate) fn call(&self, acp_id: &str) -> Option<(&str, &str)> {
-        self.0
+        self.calls
             .get(acp_id)
-            .map(|(server, tool)| (server.as_str(), tool.as_str()))
+            .map(|(_, server, tool)| (server.as_str(), tool.as_str()))
     }
+}
+
+/// The server of a Codex standalone MCP tool approval (one no earlier tool call names): codex-acp
+/// 2.2.2 gives it the toolCallId `elicitation:<session>:<server>:<n>`
+/// (`dist/index.js:32486-32489`) and `rawInput` `{serverName, description, schema}`
+/// (`:32611-32626`), both from Codex's `serverName`. Both must name the same server, the id
+/// this session's, with a decimal sequence number.
+pub(crate) fn codex_standalone_server<'a>(
+    session: &str,
+    acp_tool_call_id: &str,
+    raw_input: Option<&'a Value>,
+) -> Option<&'a str> {
+    let server = raw_input?.get("serverName")?.as_str()?;
+    if server.is_empty() {
+        return None;
+    }
+    let sequence = acp_tool_call_id
+        .strip_prefix("elicitation:")?
+        .strip_prefix(session)?
+        .strip_prefix(':')?
+        .strip_prefix(server)?
+        .strip_prefix(':')?;
+    (!sequence.is_empty() && sequence.bytes().all(|b| b.is_ascii_digit())).then_some(server)
+}
+
+/// The tool a Codex standalone MCP approval for `server` names: its `description` is Codex's
+/// fallback message `Allow the <server> MCP server to run tool "<tool>"?` (codex rust-v0.162.1
+/// `core/src/mcp_tool_call.rs`, as `sources::browser::codex_standalone_browser_tool` reads it).
+/// Any other text, a rendered template included, names no tool.
+pub(crate) fn codex_standalone_tool<'a>(
+    server: &str,
+    raw_input: Option<&'a Value>,
+) -> Option<&'a str> {
+    let message = raw_input?.get("description")?.as_str()?;
+    let tool = message
+        .strip_prefix("Allow the ")?
+        .strip_prefix(server)?
+        .strip_prefix(" MCP server to run tool \"")?
+        .strip_suffix("\"?")?;
+    (!tool.is_empty() && !tool.contains('"')).then_some(tool)
 }
 
 /// The option the host answers a trusted server's approval with: codex-acp 2.2.2's `allow_once`
