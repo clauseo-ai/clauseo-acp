@@ -17,8 +17,8 @@ use serde_json::json;
 use clauseo_host::McpServer;
 
 use crate::profile_rig::{
-    BROWSING, Hook, Wired, agent_lines, agents, browser_server, filled_browser, first_frame_tools,
-    settings, template, turn,
+    BROWSING, Hook, Wired, agent_lines, agents, browser_parts, browser_server, filled_browser,
+    first_frame_tools, settings, template, turn,
 };
 use crate::support::{Dir, FAKE, Scenario, matter_with_thread};
 use crate::write;
@@ -280,12 +280,7 @@ fn reason_with_entry(test: &str, entry: McpServer) -> Option<ToolsUnavailableRea
 #[test]
 fn a_missing_sidecar_leaves_the_browser_out() {
     let missing = std::env::temp_dir().join("clauseo-no-such-sidecar");
-    let McpServer::Stdio {
-        name,
-        command,
-        args,
-        env,
-    } = browser_server();
+    let (name, command, args, env) = browser_parts();
     let no_guard = McpServer::Stdio {
         name: name.clone(),
         command: missing.clone(),
@@ -349,12 +344,7 @@ fn the_socket_folder_lives_until_the_agents_tree_has_exited() {
         agents(&[(BROWSING, &claude, json!({}))]),
         json!({"tools": {"browser": true, "web_search": false}}),
     );
-    let McpServer::Stdio {
-        name,
-        command,
-        args,
-        mut env,
-    } = browser_server();
+    let (name, command, args, mut env) = browser_parts();
     env.push((
         "AGENT_BROWSER_SOCKET_DIR".to_owned(),
         "{socket_dir}".to_owned(),

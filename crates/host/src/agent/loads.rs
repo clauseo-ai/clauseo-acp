@@ -22,6 +22,8 @@ mod codex_entry_tests;
 mod layering_tests;
 pub(crate) mod profile;
 #[cfg(test)]
+mod profile_keys_tests;
+#[cfg(test)]
 mod profile_tests;
 pub(crate) mod sandbox;
 #[cfg(test)]

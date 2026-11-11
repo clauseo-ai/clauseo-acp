@@ -171,7 +171,9 @@ fn every_agent_with_a_kind_gets_the_author_and_the_case_law_entry() {
             clauseo_profile::servers::browser_mcp(AgentKind::of(&agent(id)))
         );
         if clauseo_profile::servers::browser_mcp(AgentKind::of(&agent(id))) {
-            let McpServer::Stdio { name, command, .. } = servers.remove(0);
+            let McpServer::Stdio { name, command, .. } = servers.remove(0) else {
+                panic!("expected a stdio server");
+            };
             assert_eq!((name.as_str(), &command), ("browser", &clauseo_mcp));
         }
         let [

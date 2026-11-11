@@ -69,10 +69,9 @@ pub(crate) fn hook_servers(
     hook: Vec<McpServer>,
     inputs: &CaseLawInputs<'_>,
 ) -> (Vec<McpServer>, Option<McpServer>, Option<ToolState>) {
-    let (offered, rest): (Vec<McpServer>, Vec<McpServer>) = hook.into_iter().partition(|server| {
-        let McpServer::Stdio { name, .. } = server;
-        name == CASE_LAW
-    });
+    let (offered, rest): (Vec<McpServer>, Vec<McpServer>) = hook
+        .into_iter()
+        .partition(|server| server.name() == CASE_LAW);
     let Some(entry) = offered.into_iter().next() else {
         return (rest, None, None);
     };
@@ -116,7 +115,11 @@ fn fill(
         command,
         args,
         env,
-    } = server;
+    } = server
+    else {
+        tracing::error!("the case-law entry is not a stdio server: case law is left out");
+        return Err(ToolsUnavailableReason::NoRelay);
+    };
     let filled = (|| -> Result<McpServer, placeholders::Unfilled> {
         let mut env: Vec<(String, String)> = env
             .iter()

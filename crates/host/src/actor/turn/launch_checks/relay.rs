@@ -120,10 +120,11 @@ pub(super) struct CaseLawPrep {
 
 /// The case-law part of `agent`'s launch prep, from the actor's state.
 pub(super) fn case_law_prep(actor: &Actor, agent: &AgentId) -> CaseLawPrep {
-    let offered = actor.profile.mcp_servers(agent).iter().any(|server| {
-        let clauseo_acp::McpServer::Stdio { name, .. } = server;
-        name == clauseo_profile::servers::CASE_LAW
-    });
+    let offered = actor
+        .profile
+        .mcp_servers(agent)
+        .iter()
+        .any(|server| server.name() == clauseo_profile::servers::CASE_LAW);
     CaseLawPrep {
         relays: actor.wiring.relays.clone().filter(|_| offered),
         switch: Switch {

@@ -17,8 +17,8 @@ use serde_json::json;
 
 use crate::egress::{Recording, calls};
 use crate::profile_rig::{
-    CLAUDE, CODEX, Hook, Wired, agent_lines, agents, browser_server, codex_lines,
-    first_frame_tools, path_text, settings, sidecar, template, turn,
+    CLAUDE, CODEX, Hook, Wired, agent_lines, agents, browser_parts, codex_lines, first_frame_tools,
+    path_text, settings, sidecar, template, turn,
 };
 use crate::support::Dir;
 use crate::write;
@@ -26,12 +26,7 @@ use crate::write;
 /// Codex's entry as `clauseo_profile::servers::browser` builds it, but for the tokens one OS
 /// alone holds (as `browser_server`): no `AGENT_BROWSER_PROXY`, so no `{proxy_port}`.
 fn codex_browser() -> McpServer {
-    let McpServer::Stdio {
-        name,
-        command,
-        args,
-        env,
-    } = browser_server();
+    let (name, command, args, env) = browser_parts();
     let env = env
         .into_iter()
         .filter(|(name, _)| name != "AGENT_BROWSER_PROXY")

@@ -30,4 +30,5 @@ tracing = { workspace = true }
 [dev-dependencies]
 clauseo-fake_agent = { path = "../fake_agent" }
 async-process = { workspace = true }
+tracing-subscriber = { workspace = true, features = ["fmt", "std"] }
 uuid = { workspace = true }

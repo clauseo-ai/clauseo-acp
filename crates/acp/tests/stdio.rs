@@ -38,3 +38,7 @@ mod tools;
 #[cfg(test)]
 #[path = "stdio/steer.rs"]
 mod steer;
+
+#[cfg(test)]
+#[path = "stdio/mcp.rs"]
+mod mcp;

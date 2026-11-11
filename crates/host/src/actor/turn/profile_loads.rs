@@ -372,10 +372,11 @@ fn socket_dir(run: &RunFolders) -> Option<&Path> {
 }
 
 fn offers_entry(actor: &Actor, agent: &AgentId) -> bool {
-    actor.profile.mcp_servers(agent).iter().any(|server| {
-        let McpServer::Stdio { name, .. } = server;
-        name == clauseo_profile::servers::BROWSER
-    })
+    actor
+        .profile
+        .mcp_servers(agent)
+        .iter()
+        .any(|server| server.name() == clauseo_profile::servers::BROWSER)
 }
 
 /// The shell tool's header state and browser part for `run`'s session, or none when the app
