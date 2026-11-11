@@ -122,10 +122,42 @@ fn path_parts(seen: &Seen) -> Vec<PathBuf> {
         .collect()
 }
 
+/// Whether this OS gives `launch`'s Codex session no browser at all (Windows,
+/// `clauseo_profile::servers::no_browser`), whatever the hook, the Chrome and the switch; if so,
+/// it checks that the session got none: no shell tool's variables, no tools folder on its
+/// `PATH`, the Claude-only line (never the shell rules nor the no-Chrome line) and no browser in
+/// its header (the app then offers no browser action).
+fn no_browser_here(
+    dir: &Dir,
+    seen: &Seen,
+    instructions: &str,
+    header: &[clauseo_protocol::ToolState],
+) -> bool {
+    if !clauseo_profile::servers::no_browser(Some(clauseo_protocol::AgentKind::Codex)) {
+        return false;
+    }
+    for name in NAMES {
+        assert_eq!(var(seen, name), None, "{name}");
+    }
+    let parts = path_parts(seen);
+    assert!(!parts.contains(&dir.data().join("tools")));
+    assert_eq!(parts.get(1), Some(&dir.data().join("python")));
+    let claude_only = clauseo_profile::instructions::BROWSER_CLAUDE_ONLY.trim();
+    assert!(instructions.contains(claude_only), "{instructions}");
+    assert!(!instructions.contains("agent-browser"), "{instructions}");
+    assert!(!instructions.contains("found no Google Chrome"));
+    assert!(!instructions.contains("{browser}"));
+    assert_eq!(header_browser(header), None, "{instructions}");
+    true
+}
+
 #[test]
 fn a_session_with_a_chrome_gets_the_shell_browser() {
     let chrome = PathBuf::from("/opt/chrome/chrome");
     let (dir, seen, instructions, header) = launch("shell_browser_on", Some(&chrome), ON);
+    if no_browser_here(&dir, &seen, &instructions, &header) {
+        return;
+    }
     assert_eq!(
         header_browser(&header),
         Some(tool(ClauseoTool::Browser, None)),
@@ -189,6 +221,9 @@ fn a_session_with_a_chrome_gets_the_shell_browser() {
 #[test]
 fn a_session_with_no_chrome_gets_no_browser_and_is_told_why() {
     let (dir, seen, instructions, header) = launch("shell_browser_none", None, ON);
+    if no_browser_here(&dir, &seen, &instructions, &header) {
+        return;
+    }
     for name in NAMES {
         assert_eq!(var(&seen, name), None, "{name}");
     }
@@ -220,6 +255,9 @@ fn a_session_with_the_browser_off_gets_no_browser() {
         Some(&chrome),
         r#"{"tools": {"browser": false}}"#,
     );
+    if no_browser_here(&dir, &seen, &instructions, &header) {
+        return;
+    }
     for name in NAMES {
         assert_eq!(var(&seen, name), None, "{name}");
     }

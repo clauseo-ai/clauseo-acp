@@ -333,6 +333,18 @@ pub(crate) fn filled_browser() -> Value {
     ]})
 }
 
+/// `servers` as a Codex `session/new` carries them on this OS: without the `browser` entry
+/// where Codex has no browser at all (Windows, `clauseo_profile::servers::no_browser`), else
+/// all of them. Claude's keep it everywhere.
+pub(crate) fn codex_servers(servers: &[Value]) -> Vec<Value> {
+    let none_here = clauseo_profile::servers::no_browser(Some(AgentKind::Codex));
+    servers
+        .iter()
+        .filter(|server| !(none_here && server["name"] == "browser"))
+        .cloned()
+        .collect()
+}
+
 /// A generic agent's scenario: `initialize`, `method` (`session/new` or `session/load` of
 /// `sess-1`) matching `params` with `off` off, one prompt. The answer carries claude-agent-acp
 /// 0.89.1's modes, in `acceptEdits`, as a Claude agent's launch outside forced ask requires

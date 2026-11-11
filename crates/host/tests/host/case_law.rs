@@ -21,7 +21,7 @@ use serde_json::{Value, json};
 
 use crate::profile_rig::{
     CLAUDE, CODEX, Hook, Seen, Wired, agent_lines, agents, browser_server, codex_lines,
-    filled_browser, first_frame_tools, settings, sidecar, template, tool, turn,
+    codex_servers, filled_browser, first_frame_tools, settings, sidecar, template, tool, turn,
 };
 use crate::support::Dir;
 
@@ -207,7 +207,7 @@ fn both_agents_get_case_law_after_the_other_servers() {
     let codex = template(
         &dir,
         "cl-codex",
-        &codex_lines("cl-codex", &json!({"mcpServers": servers})),
+        &codex_lines("cl-codex", &json!({"mcpServers": codex_servers(&servers)})),
     );
     settings(
         &dir,
