@@ -8,9 +8,12 @@
 //! 1. S18's running states (`Queued`, `Waiting`, `DeviceCode`) and `Failed` pass through as they
 //!    are, whatever else holds, so a running sign-in can still be joined (`Setup::start_sign_in`
 //!    joins only while the latest state is a running one) and is never restarted under an
-//!    `ApiKey` or `Firm` line, and a failure is shown. An automatic leave that did not finish
-//!    (`leave/auto.rs`) shows `Switching { since, stuck }` between the two: a running sign-in
-//!    still shows, and a failure of the leave's own S18 call never does.
+//!    `ApiKey` or `Firm` line, and a failure is shown, until a key or an endpoint arrives after
+//!    it: a first key, a saved key or a first endpoint takes S18's resting `Failed` as
+//!    `SignedOut` (`took_over`), so a cancelled or failed sign-in never hides the line that
+//!    replaced it. An automatic leave that did not finish (`leave/auto.rs`) shows `Switching {
+//!    since, stuck }` between the two: a running sign-in still shows, and a failure of the
+//!    leave's own S18 call never does.
 //! 2. Otherwise, with policy unreadable and the `firm-policy` marker there (`firm_policy.rs`),
 //!    `Failed { code: signin.policy_unreadable }`: the agent is never sent to the plan login.
 //! 3. Otherwise, while the agent's stored key could not be read (`setup/keys.rs`), `Failed {
@@ -442,9 +445,19 @@ impl Compose {
     /// one change, so the windows never see one without the other.
     pub(crate) fn set_key_read(&self, agent: &AgentId, in_memory: bool, unreadable: bool) {
         self.change(agent, |known, now| {
+            if in_memory && known.facts.key.is_none() {
+                took_over(agent, known);
+            }
             known.facts.key = in_memory.then(|| known.facts.key.unwrap_or(now));
             known.facts.unreadable = unreadable.then(|| known.facts.unreadable.unwrap_or(now));
         });
+    }
+
+    /// A key for `agent` was saved: a sign-in that ended `Failed` before it is cleared (as
+    /// [`Compose::set_key_read`] does for a first key), so the window shows the new key's line
+    /// at once.
+    pub(crate) fn key_saved(&self, agent: &AgentId) {
+        self.change(agent, |known, _| took_over(agent, known));
     }
 
     /// [`Compose::set_key_read`] as `keys` holds `agent`'s key now: in memory, or unreadable.
@@ -462,6 +475,9 @@ impl Compose {
     /// Whether `agent` has an endpoint or a provider.
     pub(crate) fn set_firm(&self, agent: &AgentId, firm: bool) {
         self.change(agent, |known, now| {
+            if firm && known.facts.firm.is_none() {
+                took_over(agent, known);
+            }
             known.facts.firm = firm.then(|| known.facts.firm.unwrap_or(now));
         });
     }
@@ -527,6 +543,18 @@ impl Compose {
                 state,
             });
         }
+    }
+}
+
+/// A key or an endpoint for `agent` took over: S18's resting `Failed` (a sign-in that was
+/// cancelled or failed before it) is taken as `SignedOut`, as [`Compose::expect_end`] does
+/// for a running one, so rule 1 no longer shows it over the key's or the endpoint's line. A
+/// running sign-in is left as it is: the backend ends it, and its end comes through
+/// [`Compose::signin`].
+fn took_over(agent: &AgentId, known: &mut Known) {
+    if matches!(known.s18, Some(SigninState::Failed { .. })) {
+        tracing::info!(%agent, "an ended sign-in's failure is cleared: a key or an endpoint took over");
+        known.s18 = Some(SigninState::SignedOut { found: None });
     }
 }
 
