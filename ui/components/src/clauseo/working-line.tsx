@@ -79,6 +79,9 @@ export type WorkingOne =
       /** Optional: what leads the row instead of the clock: nothing (a plan only offered, its slot kept so the words
        * line up) or the tick (a plan that is ready). */
       lead?: "none" | "done";
+      /** Optional: a muted line under the row, as the first screen's plan rows have one (a cancelled sign-in's note
+       * under its download that carries on). */
+      note?: string;
     };
 
 /** What leads the row: the permission's shield or the question mark while it waits on the lawyer; the pen while Clauseo writes; the break on an error (a stop, not responding, or a wait that
@@ -220,6 +223,12 @@ export function WorkingSaid({ state }: { state: WorkingState }) {
     <>
       <Say>{said}</Say>
       {pill !== null && ` ${pill}`}
+      {state.kind === "wait" && state.note !== undefined && (
+        <>
+          {" "}
+          <Say>{state.note}</Say>
+        </>
+      )}
       {also !== null && (
         <>
           {" "}
@@ -253,12 +262,29 @@ export function WorkingLine({
     return (
       <>
         <WorkingRow state={state} testId={testId} />
+        <Note state={state} />
         <div className="working-also">
           <WorkingRow state={state.also} />
+          <Note state={state.also} />
         </div>
       </>
     );
-  return <WorkingRow state={state} testId={testId} />;
+  return (
+    <>
+      <WorkingRow state={state} testId={testId} />
+      <Note state={state} />
+    </>
+  );
+}
+
+/** A row's note, muted under it; nothing without one. The live region hears it with the row (WorkingSaid). */
+function Note({ state }: { state: WorkingOne }) {
+  if (state.kind !== "wait" || state.note === undefined) return null;
+  return (
+    <p className="working-note" aria-hidden="true" data-testid="working-note">
+      <Say>{state.note}</Say>
+    </p>
+  );
 }
 
 /** One row of the line. */
