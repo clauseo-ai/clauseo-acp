@@ -48,8 +48,7 @@ const WORDS = "Say who opened the account.";
 const NOT_SENT_LINE = "Not sent, because you stopped the answer.";
 
 type Steer = NonNullable<UserMessageEntry["steer"]>;
-// the wire's form, `{"not_sent":{"turn":"…"}}`
-const notSent = (turn: TurnId) => ({ not_sent: { turn } }) as unknown as Steer;
+const notSent = (turn: TurnId): Steer => ({ not_sent: { turn } });
 
 const ask = (
   order: number,

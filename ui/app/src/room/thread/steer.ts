@@ -32,10 +32,10 @@ export function outcomeOf(m: UserMessageEntry): Outcome {
   const s = m.steer;
   if (s === undefined) return null;
   if (typeof s === "string") return "other";
-  if ("not_sent" in s) return "not_sent";
   if (s.injected !== undefined) return "injected";
   if (s.requeued !== undefined) return "requeued";
-  return s.sent_now !== undefined ? "sent_now" : "other";
+  if (s.sent_now !== undefined) return "sent_now";
+  return s.not_sent !== undefined ? "not_sent" : "other";
 }
 
 /** The running turn a steer joined, when the agent took it in. */
