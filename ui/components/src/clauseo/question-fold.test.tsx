@@ -176,3 +176,28 @@ test("under reduced motion the press goes to the question at once", async () => 
   expect(glides).not.toContain("smooth");
   expect(document.activeElement).toBe(document.querySelector(".step-question"));
 });
+
+test("a pasted question keeps its paragraphs and line breaks: the text is drawn as it was pasted", async () => {
+  const pasted = "First paragraph.\n\nSecond paragraph.\nThird line.";
+  await mount(<FoldedQuestion text={pasted} />);
+  expect(asked()?.textContent).toBe(pasted);
+  expect(asked()?.textContent?.split("\n").length).toBe(4);
+  // the thread's .asked rule keeps the breaks (pre-wrap) and wraps a long unbroken path or URL inside the column
+  const askedRule = /\.asked \{([^}]*)\}/.exec(sheet)?.[1] ?? "";
+  expect(askedRule).toMatch(/white-space: pre-wrap;/);
+  expect(askedRule).toMatch(/overflow-wrap: anywhere;/);
+});
+
+test("the pinned question's line is nowrap, outside .asked, so its breaks show as spaces on one line", async () => {
+  await mount(
+    <Thread question={"Pinned first line.\n\nPinned second line."} who="You">
+      <Question text={"Pinned first line.\n\nPinned second line."} />
+    </Thread>,
+  );
+  const line = document.querySelector<HTMLElement>(".room-pin .room-pin-line");
+  expect(line).not.toBeNull();
+  // not a descendant of the paragraph whose rule keeps the breaks
+  expect(line?.closest(".asked")).toBeNull();
+  const pinLine = /\.room-pin-line \{([^}]*)\}/.exec(sheet)?.[1] ?? "";
+  expect(pinLine).toMatch(/white-space: nowrap;/);
+});

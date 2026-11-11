@@ -12,9 +12,12 @@
   .who b {
     @apply font-ui text-primary;
   }
+  /* a pasted question keeps its paragraphs and line breaks */
   .asked {
     @apply text-asked font-accepted;
     margin-top: var(--s1);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
   }
   /* a question past eight lines, folded by the line clamp, which needs no measure (question-fold.tsx); eight lines
      or fewer, nothing is cut and it draws as it did */
