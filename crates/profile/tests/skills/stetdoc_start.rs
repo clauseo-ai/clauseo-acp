@@ -1,12 +1,15 @@
 //! stetdoc at the app's start (`skills::stetdoc::start`): a `--version` that only passed the
 //! first limit keeps stetdoc on at once (with the cached skill when one loads) and is checked
 //! again in the background, whose answer the next agent start gets; a real failure within the
-//! first limit is absent at once and never checked again. The stub stetdoc runs for real; a
-//! timer whose waits end at once stands in for a slow one, a timer that never ends for a
-//! stetdoc that answers in time.
+//! first limit is absent at once and never checked again. The stub stetdoc runs for real. A slow
+//! stetdoc is the stub held by `stub-hang` with a timer whose waits end at once: the run cannot
+//! answer, so the deadline wins whichever future `select` polls first. A stetdoc that answers in
+//! time is the stub with a timer whose waits never end. No outcome hangs on the wall clock.
 
 use std::future::Future;
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 use clauseo_process::{PassthroughLauncher, SpawnOptions, Timer};
@@ -18,6 +21,7 @@ use clauseo_profile::skills::stetdoc::{STETDOC, skill_source};
 use clauseo_profile::skills::{self, render, write_rendered};
 use clauseo_profile::{ClauseoProfile, SkillSource, write_skills};
 use clauseo_protocol::AgentKind;
+use futures::channel::oneshot;
 use futures::executor::block_on;
 
 use super::{Scratch, profile_paths, stub, write};
@@ -25,8 +29,9 @@ use super::{Scratch, profile_paths, stub, write};
 /// What `stetdoc skills get core` printed, byte for byte, from stetdoc 0.9.3 (macOS arm64).
 const REAL_0_9_3: &[u8] = include_bytes!("../fixtures/stetdoc-0.9.3-skills-get-core.md");
 
-/// A timer whose waits end at once: every limit has passed, as for a stetdoc that the OS holds
-/// while it scans the program.
+/// A timer whose waits end at once: every limit has passed. With the stub held ([`slow`]), as
+/// for a stetdoc that the OS holds while it scans the program; a stub free to answer could
+/// finish before the first poll and beat it.
 struct Passed;
 
 impl Timer for Passed {
@@ -44,6 +49,53 @@ impl Timer for Never {
     }
 }
 
+/// A timer for one [`start::check`] whose skill run hangs: its first wait, the check's own
+/// deadline, ends once its third begins, which is the limit of `skills get core`, so after
+/// `--version` answered and the skill run started; every other wait never ends.
+#[cfg(test)]
+struct AtTheSkillRun {
+    calls: AtomicUsize,
+    fire: Mutex<Option<oneshot::Sender<()>>>,
+    fired: Mutex<Option<oneshot::Receiver<()>>>,
+}
+
+#[cfg(test)]
+impl AtTheSkillRun {
+    fn new() -> Self {
+        let (fire, fired) = oneshot::channel();
+        Self {
+            calls: AtomicUsize::new(0),
+            fire: Mutex::new(Some(fire)),
+            fired: Mutex::new(Some(fired)),
+        }
+    }
+}
+
+#[cfg(test)]
+impl Timer for AtTheSkillRun {
+    fn after(&self, _duration: Duration) -> impl Future<Output = ()> + Send {
+        let call = self.calls.fetch_add(1, Ordering::SeqCst);
+        if call == 2
+            && let Some(fire) = self.fire.lock().unwrap().take()
+        {
+            let _sent = fire.send(());
+        }
+        let fired = if call == 0 {
+            self.fired.lock().unwrap().take()
+        } else {
+            None
+        };
+        async move {
+            match fired {
+                Some(fired) => {
+                    let _ended = fired.await;
+                }
+                None => std::future::pending().await,
+            }
+        }
+    }
+}
+
 /// A stub stetdoc in `<root>/bin` printing `version` and 0.9.3's skill text, and the skills
 /// folder of Claude's plugin, which the launch writes fill and the start reads as its cache.
 #[cfg(test)]
@@ -55,6 +107,18 @@ fn stetdoc_in(root: &Scratch, version: &str) -> (PathBuf, PathBuf) {
         stub(&bin, version, real),
         profile_paths(root).claude_skills(),
     )
+}
+
+/// Holds every run of the stub in `root` until [`answers`]: it prints nothing and does not exit.
+#[cfg(test)]
+fn slow(root: &Scratch) {
+    write::write(&root.join("bin").join("stub-hang"), b"").unwrap();
+}
+
+/// Lets the stub in `root` answer again.
+#[cfg(test)]
+fn answers(root: &Scratch) {
+    write::remove_file(&root.join("bin").join("stub-hang")).unwrap();
 }
 
 /// 0.9.3's skill as it loads.
@@ -122,6 +186,7 @@ fn the_limits_are_3_s_at_start_and_30_s_in_the_background() {
 fn a_timeout_then_a_background_success_brings_the_skill() {
     let root = Scratch::new("start-timeout-success");
     let (program, cached) = stetdoc_in(&root, "stetdoc 0.9.3\n");
+    slow(&root);
     let started = first(&Passed, &program, &cached);
     assert_eq!(
         started,
@@ -132,6 +197,7 @@ fn a_timeout_then_a_background_success_brings_the_skill() {
     );
     assert_eq!(told(&root, &started.state), (true, None));
 
+    answers(&root);
     let next = again(&Never, &program, &cached, &started.state);
     assert_eq!(next, Some(State::On(Some(skill_0_9_3()))));
     let (line, skill) = told(&root, &next.unwrap());
@@ -147,6 +213,7 @@ fn a_timeout_then_a_background_failure_turns_stetdoc_off() {
     for (at, version) in ["", "\n"].into_iter().enumerate() {
         let root = Scratch::new(&format!("start-timeout-broken-{at}"));
         let (program, cached) = stetdoc_in(&root, "stetdoc 0.9.3\n");
+        slow(&root);
         let started = first(&Passed, &program, &cached);
         assert!(started.recheck, "case {at}");
         assert_eq!(told(&root, &started.state), (true, None), "case {at}");
@@ -160,6 +227,7 @@ fn a_timeout_then_a_background_failure_turns_stetdoc_off() {
             )
             .unwrap();
         }
+        answers(&root);
         let next = again(&Never, &program, &cached, &started.state);
         assert_eq!(next, Some(State::Off), "case {at}");
         assert_eq!(told(&root, &State::Off), (false, None), "case {at}");
@@ -176,6 +244,7 @@ fn a_timeout_uses_the_cached_skill_and_the_background_refreshes_it() {
     let old = cache_old_skill(&cached);
     assert_eq!(cached_skill(&cached), Some(old.clone()));
 
+    slow(&root);
     let started = first(&Passed, &program, &cached);
     assert_eq!(
         started,
@@ -188,6 +257,7 @@ fn a_timeout_uses_the_cached_skill_and_the_background_refreshes_it() {
     assert!(line);
     assert!(skill.unwrap().ends_with("old body\n"));
 
+    answers(&root);
     let next = again(&Never, &program, &cached, &started.state).unwrap();
     assert_eq!(next, State::On(Some(skill_0_9_3())));
     let fresh = next.skill().unwrap().clone();
@@ -212,6 +282,7 @@ fn a_drifted_cached_skill_is_not_used() {
 fn a_second_timeout_leaves_stetdoc_on() {
     let root = Scratch::new("start-timeout-twice");
     let (program, cached) = stetdoc_in(&root, "stetdoc 0.9.3\n");
+    slow(&root);
     let started = first(&Passed, &program, &cached);
     assert_eq!(again(&Passed, &program, &cached, &started.state), None);
     assert_eq!(told(&root, &started.state), (true, None));
@@ -295,12 +366,14 @@ fn a_background_failure_takes_the_cached_skill_off_the_disk() {
     let root = Scratch::new("start-timeout-broken-cached");
     let (program, cached) = stetdoc_in(&root, "stetdoc 0.9.3\n");
     let old = cache_old_skill(&cached);
+    slow(&root);
     let started = first(&Passed, &program, &cached);
     assert_eq!(started.state, State::On(Some(old)));
     launch_write(&root, &started.state);
     assert!(cached.join(STETDOC).join("SKILL.md").exists());
 
     write::remove_file(&root.join("bin").join("stub-version.txt")).unwrap();
+    answers(&root);
     let next = again(&Never, &program, &cached, &started.state).unwrap();
     assert_eq!(next, State::Off);
     launch_write(&root, &next);
@@ -329,24 +402,18 @@ fn a_failure_at_start_takes_the_cached_skill_off_the_disk() {
 
 /// A `--version` that works, then a `skills get core` that hangs past the limit: the skill is
 /// left out, stetdoc stays on, and nothing is checked again.
-#[cfg(unix)]
 #[test]
 fn a_skill_past_the_limit_is_left_out_with_no_recheck() {
     let root = Scratch::new("start-skill-hangs");
-    let program = root.join("bin").join("stetdoc");
-    let script =
-        b"#!/bin/sh\nif [ \"$1\" = --version ]; then echo 'stetdoc 9'; else sleep 30; fi\n";
-    write::write(&program, script).unwrap();
-    write::make_executable(&program).unwrap();
-    let cached = profile_paths(&root).claude_skills();
+    let (program, cached) = stetdoc_in(&root, "stetdoc 9\n");
+    write::write(&root.join("bin").join("stub-skill-hang"), b"").unwrap();
     let launcher = PassthroughLauncher::new(SpawnOptions::new());
-    let limit = Duration::from_millis(500);
     let found = block_on(start::check(
         &launcher,
-        &clauseo_process::AsyncIoTimer,
+        &AtTheSkillRun::new(),
         &program,
         &cached,
-        limit,
+        FIRST_LIMIT,
     ));
     assert_eq!(found, Found::NoSkill);
     assert_eq!(
