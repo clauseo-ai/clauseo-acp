@@ -5,6 +5,11 @@
 // the wall does. Pure: the matter's folder comes in as the host shows it (`folder_display`, below the home folder the
 // part after it, elsewhere the whole path), and is only ever matched as text.
 
+import type { PaperLinks } from "@clauseo/components/markdown/host.ts";
+import { useMemo } from "react";
+import type { MatterId } from "../transport/protocol.ts";
+import type { ListedPapers } from "./open.ts";
+
 /** A scheme (`https:`, `sandbox:`), but not a Windows drive (`C:`). */
 const SCHEME = /^([a-z][a-z0-9+.-]+):/i;
 /** A Windows drive's root, `C:/`. */
@@ -130,4 +135,18 @@ export function paperLinkOf(
   }
   const name = nameOf(path);
   return back(only(papers, (p) => nameOf(p) === name));
+}
+
+/** Which paper on the wall a file link in an answer names (paperLinkOf): the open matter's listed papers, in its
+ * folder as the host shows it. A new list makes a new one, so a link to a paper that just arrived becomes a link. */
+export function usePaperLinks(
+  matter: MatterId | null,
+  listed: ListedPapers,
+  folder: string | null,
+): PaperLinks {
+  return useMemo(() => {
+    const paths =
+      matter !== null && listed?.matter === matter ? listed.papers.papers.map((p) => p.path) : [];
+    return (href: string) => paperLinkOf(href, paths, folder);
+  }, [matter, listed, folder]);
 }
