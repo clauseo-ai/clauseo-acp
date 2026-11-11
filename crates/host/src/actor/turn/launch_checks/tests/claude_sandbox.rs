@@ -8,6 +8,7 @@ use super::folders;
 /// whole, the relay's token, agent-browser's folder, its config or the browser's profile (the
 /// visited sites' cookies), but the browser's downloads.
 #[test]
+#[cfg_attr(windows, ignore = "Claude's sandbox is macOS and Linux only")]
 fn claudes_sandbox_opens_no_secret_of_the_real_run_folder() {
     use crate::agent::loads::sandbox::{ClaudeSandbox, SandboxPaths};
     let data = PathBuf::from("/Users/l/Library/Application Support/Clauseo");
