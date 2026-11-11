@@ -12,6 +12,7 @@ import type { AgentId, ErrorCode } from "../transport/protocol.ts";
 import { agentText, step, userMessage } from "../testing/stream-script.ts";
 import type { Entry } from "./entry.ts";
 import { threadHost } from "./hosts.ts";
+import { refusedKeyRoom } from "./registry-ud2.tsx";
 import { RoomAsking, RoomOver } from "./states.tsx";
 import { errorWords, threadWords } from "./words.ts";
 
@@ -42,13 +43,18 @@ const setupFailed = (agent: AgentName) => (lang: Lang) => (
   </main>
 );
 
-/** agent.auth_required for a plan that runs on an API key, alone, as the thread and the composer say it (UC-149): the
- * key wasn't accepted, never a sign-in. */
-const keyRefused = (lang: Lang) => (
-  <main lang={lang} className="review-alone">
-    <p>{sentence(lang, "agent.auth_required", { kind: "codex", name: "codex-acp", key: true })}</p>
-  </main>
-);
+/** agent.auth_required for ChatGPT on an API key OpenAI refused, in the real room (UC-149): the thread's line and the
+ * card under the field say the key wasn't accepted, never a sign-in, and Codex's own 401 notice shows nothing. Its
+ * cf-ray and request id are made up. */
+const keyRefused = refusedKeyRoom({
+  notice: {
+    order: 3,
+    event: "00000000-0000-4000-8000-000000000301",
+    level: "warning",
+    text: "Falling back from WebSockets to HTTPS transport. unexpected status 401 Unauthorized: Incorrect API key provided: sk-proj-****************alid. You can find your API key at https://platform.openai.com/account/api-keys., url: wss://api.openai.com/v1/responses, cf-ray: 9f00000000000000-BOM, request id: req_00000000000000000000000000000000, auth error: 401, auth error code: invalid_api_key",
+    ts: 3500,
+  },
+});
 
 /** U6f's entries, each id written as it is: an id never moves when an entry is added or taken out. */
 export const U6F: Entry[] = [
