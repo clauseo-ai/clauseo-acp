@@ -149,7 +149,7 @@ fn a_claude_session_runs_its_commands_in_claude_codes_sandbox() {
             "enabled": true,
             "autoAllowBashIfSandboxed": true,
             "allowUnsandboxedCommands": false,
-            "failIfUnavailable": false,
+            "failIfUnavailable": true,
             "allowAppleEvents": false,
             "network": {
                 "allowedDomains": ["*"],
@@ -374,6 +374,16 @@ fn no_short_temp_folder_sends_no_sandbox() {
     assert_eq!(mac(&session.paths()), Err(Off::NoTemp));
 }
 
+/// Every reason for no sandbox but Windows holds the session off `auto` (`acceptEdits`), so no
+/// command runs on the classifier alone where the sandbox was meant to be.
+#[test]
+fn no_sandbox_where_one_was_meant_holds_auto_back() {
+    for off in [Off::NoTemp, Off::NotUtf8, Off::Wildcard] {
+        assert!(off.holds_auto_back(), "{off:?}");
+    }
+    assert!(!Off::Windows.holds_auto_back());
+}
+
 /// Windows: no `sandbox` key at all, so Claude's commands keep asking there.
 #[test]
 fn windows_gets_no_sandbox() {
@@ -397,14 +407,16 @@ fn forced_ask_still_asks_inside_the_sandbox() {
     assert_eq!(object["filesystem"]["denyRead"][0], "~/");
 }
 
-/// No command breaks out: the model's `dangerouslyDisableSandbox` is ignored, whatever the hook
-/// sent, and the hook's own `sandbox` goes whole.
+/// No command breaks out: the model's `dangerouslyDisableSandbox` is ignored, a sandbox that
+/// fails fails the command (`failIfUnavailable`), whatever the hook sent, and the hook's own
+/// `sandbox` goes whole.
 #[test]
 fn no_command_breaks_out_and_the_hooks_sandbox_is_replaced() {
     let session = Session::new("s-1");
     let sandbox = mac(&session.paths()).unwrap();
     let hook = json!({"settings": {"sandbox": {
         "allowUnsandboxedCommands": true,
+        "failIfUnavailable": false,
         "excludedCommands": ["*"],
         "allowAppleEvents": true,
         "filesystem": {"allowWrite": ["/"]},
@@ -412,6 +424,7 @@ fn no_command_breaks_out_and_the_hooks_sandbox_is_replaced() {
     let settings = settings(&session, Some(&sandbox), false, false, &hook);
     let object = &settings["sandbox"];
     assert_eq!(object["allowUnsandboxedCommands"], false);
+    assert_eq!(object["failIfUnavailable"], true);
     assert_eq!(object["allowAppleEvents"], false);
     assert!(object.get("excludedCommands").is_none(), "{object}");
     assert!(!texts(&object["filesystem"]["allowWrite"]).contains(&"/"));
