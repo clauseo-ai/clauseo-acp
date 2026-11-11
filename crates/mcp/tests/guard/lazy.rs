@@ -134,6 +134,63 @@ fn write_marker(profile: &std::path::Path) {
     crate::write::write(profile.join("marker"), "kept").unwrap();
 }
 
+/// A tool call to `agent_browser_close` with `id`.
+#[cfg(unix)]
+fn close_call(id: &str) -> Value {
+    json!({"jsonrpc": "2.0", "id": id, "method": "tools/call",
+        "params": {"name": "agent_browser_close", "arguments": {}}})
+}
+
+/// `agent_browser_close`'s reply goes to the agent, then the guard stops Chrome and the daemon
+/// as the idle stop does, keeping the profile; a close while stopped is answered by the guard
+/// and starts nothing; the next call starts both again on the same profile.
+#[cfg(unix)]
+#[test]
+fn a_close_stops_chrome_and_the_daemon_and_keeps_the_profile() {
+    let scratch = Scratch::new("lazy_close");
+    let mut guard = guard(&scratch, None);
+    guard.call("open");
+    let first = session_pids(&scratch);
+    let profile = profile_of(&scratch, &guard);
+    write_marker(&profile);
+    guard.send(&close_call("close-1"));
+    let reply = guard.read();
+    assert_eq!(reply["id"], "close-1", "{reply}");
+    guard.stderr_until("agent_browser_close: stopped Chrome and agent-browser");
+    assert!(within(|| !alive(first[1])), "Chrome {} is left", first[1]);
+    assert!(
+        within(|| !alive(first[0])),
+        "the daemon {} is left",
+        first[0]
+    );
+    assert!(
+        profile.join("marker").is_file(),
+        "the close deleted the profile"
+    );
+    let chrome_pid = scratch.path().join("chrome.pid");
+    let stopped = std::fs::read_to_string(&chrome_pid).unwrap();
+    guard.send(&close_call("close-2"));
+    let reply = guard.read();
+    assert_eq!(reply["id"], "close-2", "{reply}");
+    assert_eq!(reply["result"]["isError"], false, "{reply}");
+    // The Chrome stand-in writes its pid at each start (`chrome_stub`), before any reply.
+    assert_eq!(
+        std::fs::read_to_string(&chrome_pid).unwrap(),
+        stopped,
+        "a close while stopped started Chrome"
+    );
+    guard.call("again");
+    let mut pids = [0, 0];
+    assert!(within(|| {
+        pids = session_pids(&scratch);
+        pids[1] != first[1] && alive(pids[1])
+    }));
+    assert_eq!(profile_of(&scratch, &guard), profile, "a new profile");
+    let (status, _) = guard.finish();
+    assert_eq!(status.code(), Some(0));
+    assert_nothing_left(&scratch, pids);
+}
+
 /// Chrome's first death: the call in flight gets an error, the daemon is ended, the guard stays
 /// and the next call starts Chrome again. Its second: the call in flight gets an error and the
 /// guard exits 1, leaving nothing.

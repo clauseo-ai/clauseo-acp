@@ -9,8 +9,9 @@
 //! [`stop`] ends both as the guard's exit does: on Windows the job; on Unix agent-browser's
 //! process group, the run's daemon (`reaper::kill_daemon`) and Chrome's group, each reaped here
 //! and told to the reaper. The profile stays until the guard exits. The relay stops the browser
-//! after [`IDLE_STOP`] with no tool call in flight or completed, when Chrome dies the first time
-//! (the next call starts it again), and when the guard ends.
+//! after [`IDLE_STOP`] with no tool call in flight or completed, once the agent's
+//! `agent_browser_close` is answered, when Chrome dies the first time (the next call starts it
+//! again), and when the guard ends.
 //!
 //! Each start and each stop moves the generation on. What an incarnation's threads report
 //! carries its generation, and the relay ignores what an ended one reports, so a child the guard
@@ -40,7 +41,8 @@ use super::{Child, ChildStdin, PARENT_GONE, env, note, now, pause};
 
 /// How long the browser runs with no tool call in flight or completed before the guard stops
 /// it: agent-browser's own idle timeout, `AGENT_BROWSER_IDLE_TIMEOUT_MS` (`env::FIXED`), so the
-/// daemon's end and the guard's stop come together rather than one undoing the other.
+/// daemon's end and the guard's stop come together rather than one undoing the other. An agent
+/// that closes the browser (`agent_browser_close`, `relay.rs`) stops it sooner.
 pub(crate) const IDLE_STOP: Duration = Duration::from_secs(600);
 /// Tests only (the `test-support` feature, never in a shipped build): the idle stop in
 /// milliseconds, read from the guard's own environment.
@@ -178,9 +180,9 @@ pub(crate) struct State {
     pub(crate) generation: u64,
     /// Chrome and agent-browser, while they run.
     pub(crate) live: Option<Live>,
-    /// The requests sent to the running agent-browser and not yet answered: each id, and
-    /// whether it is a tool call.
-    in_flight: Vec<(Value, bool)>,
+    /// The requests sent to the running agent-browser and not yet answered: each id, and what
+    /// it is.
+    in_flight: Vec<(Value, Request)>,
     /// When the browser started or last answered a tool call.
     idle_since: Instant,
     /// Whether Chrome has died once already; a second death ends the guard.
@@ -190,6 +192,24 @@ pub(crate) struct State {
     /// Set by the relay's end, under this lock, before its final [`stop`]: from then on no
     /// request starts the browser or a one-shot agent-browser; each gets an error instead.
     pub(crate) ended: bool,
+}
+
+/// What a request sent to the running agent-browser is.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Request {
+    /// A tool call but `agent_browser_close`.
+    Call,
+    /// An `agent_browser_close` call: its reply stops the browser (`relay.rs`).
+    Close,
+    /// Any other request (`tools/list`, `ping`).
+    Other,
+}
+
+impl Request {
+    /// Whether it is a tool call, whose reply restarts the idle time.
+    pub(crate) fn is_call(self) -> bool {
+        self != Request::Other
+    }
 }
 
 /// The running Chrome and agent-browser.
@@ -209,21 +229,25 @@ pub(crate) struct Stopped {
 
 impl State {
     /// Notes request `id` sent to the running agent-browser.
-    pub(crate) fn sent(&mut self, id: Value, call: bool) {
-        self.in_flight.push((id, call));
+    pub(crate) fn sent(&mut self, id: Value, request: Request) {
+        self.in_flight.push((id, request));
     }
 
-    /// Takes the reply to `id` off the list, and returns whether it answers a tool call. A tool
-    /// call's reply restarts the idle time.
-    pub(crate) fn answered(&mut self, id: &Value) -> bool {
-        let Some(at) = self.in_flight.iter().position(|(sent, _)| sent == id) else {
-            return false;
-        };
-        let (_, call) = self.in_flight.remove(at);
-        if call {
+    /// Takes the reply to `id` off the list, and returns what it answers (`None` for no request
+    /// in flight). A tool call's reply restarts the idle time.
+    pub(crate) fn answered(&mut self, id: &Value) -> Option<Request> {
+        let at = self.in_flight.iter().position(|(sent, _)| sent == id)?;
+        let (_, request) = self.in_flight.remove(at);
+        if request.is_call() {
             self.idle_since = now();
         }
-        call
+        Some(request)
+    }
+
+    /// Whether the browser runs with nothing in flight and the agent still there: what the stop
+    /// after an `agent_browser_close` reply needs (`relay.rs`).
+    pub(crate) fn quiet(&self) -> bool {
+        self.live.is_some() && self.in_flight.is_empty() && !self.closing
     }
 
     /// The ids still unanswered, which the guard now answers itself.
@@ -234,7 +258,7 @@ impl State {
     /// How long until the browser has idled for `idle`: `None` unless it runs with nothing in
     /// flight and the agent is still there.
     pub(crate) fn idle_left(&self, idle: Duration) -> Option<Duration> {
-        (self.live.is_some() && self.in_flight.is_empty() && !self.closing)
+        self.quiet()
             .then(|| idle.saturating_sub(self.idle_since.elapsed()))
     }
 }
