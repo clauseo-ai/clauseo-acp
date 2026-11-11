@@ -31,9 +31,36 @@ const WINDIR: &str = "windir";
 /// Passed to the entry on Windows only when the host has them.
 const OPTIONAL_WINDOWS_VARS: [&str; 3] = ["TEMP", "TMP", "PATHEXT"];
 
-/// The pre-allow rule Claude gets when the entry is sent (decision D7): every tool of our
-/// `case-law` server. The name is reserved, so no other server of that name reaches Claude.
-pub(crate) const CLAUDE_ALLOW: &str = "mcp__case-law";
+/// Our `case-law` server as Claude names it: `mcp__case-law`, and its tools
+/// `mcp__case-law__<tool>`. The name is reserved, so no other server of that name reaches Claude.
+pub(crate) const CLAUDE_SERVER: &str = "mcp__case-law";
+
+/// The connector's tools that run without asking, on both agents: the searches and reads, and
+/// the free balance read (`crates/connectors/fixtures/mcp/tools-list.json`, each
+/// `readOnlyHint: true`). The searches and reads spend credits under the relay's turn and day
+/// caps (`connectors/limits.rs` `Spend`). `recharge` is left out: it opens a payment for a
+/// credit pack and hands back its pay link (`clauseo_connectors::Connectors::create_recharge`),
+/// so the lawyer is asked before it, as before any tool not named here.
+pub(crate) const UNASKED_TOOLS: [&str; 5] = [
+    "search_law",
+    "read_document",
+    "citator",
+    "check_citations",
+    "account",
+];
+
+/// Whether `tool` is one of [`UNASKED_TOOLS`], by exact name.
+pub(crate) fn unasked_tool(tool: &str) -> bool {
+    UNASKED_TOOLS.contains(&tool)
+}
+
+/// The pre-allow rules Claude gets when the entry is sent (decision D7): one
+/// `mcp__case-law__<tool>` per [`UNASKED_TOOLS`], never the whole server, so `recharge` asks.
+pub(crate) fn claude_allow() -> impl Iterator<Item = String> {
+    UNASKED_TOOLS
+        .iter()
+        .map(|tool| format!("{CLAUDE_SERVER}__{tool}"))
+}
 
 /// What the launch prep made of the session's relay, as plain values.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -211,7 +238,7 @@ pub(crate) fn windows_directory() -> Option<OsString> {
 /// Claude's `allowedTools` without any rule for a `case-law` server: `mcp__case-law` itself
 /// and its `mcp__case-law__<tool>` rules. The host adds its own back only with its entry.
 pub(crate) fn is_case_law_rule(rule: &str) -> bool {
-    rule.strip_prefix(CLAUDE_ALLOW)
+    rule.strip_prefix(CLAUDE_SERVER)
         .is_some_and(|rest| rest.is_empty() || rest.starts_with("__"))
 }
 

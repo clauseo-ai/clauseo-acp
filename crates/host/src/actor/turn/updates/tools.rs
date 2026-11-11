@@ -39,6 +39,7 @@ pub(super) fn tool_call(
     let now = actor.clock.now();
     let id = actor.ids.mint(now.wall)?;
     let case_law = source_of(actor, thread, |sources, agent| {
+        sources.codex_mcp_started(agent, &call);
         sources.case_law.started(now.mono, turn, id, agent, &call)
     });
     let source = if case_law.is_some() {
@@ -124,6 +125,9 @@ pub(super) fn tool_update(
         Context::Outside { replay: true } => return Ok(()),
         Context::Live(turn) => {
             let now = actor.now().mono;
+            if let Some(state) = state(actor, thread) {
+                state.sources.codex_mcp_updated(acp_id, &patch);
+            }
             let case_law = source_of(actor, thread, |sources, agent| {
                 sources.case_law.updated(now, turn, acp_id, agent, &patch)
             });

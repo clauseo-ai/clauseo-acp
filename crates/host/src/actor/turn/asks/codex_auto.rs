@@ -91,9 +91,9 @@ pub(super) fn allow_browser_tool(
 /// (`mcp_trust::codex_standalone_server`), or the earlier MCP tool call the request's
 /// toolCallId names, whose title and `rawInput` agree (`mcp_trust::CodexCalls`). A shell
 /// command, a file change and a server's own question (`accept`/`decline`, no `allow_once`)
-/// go on as before. Clauseo's own `case-law` server is answered the same way
-/// (`mcp_trust::never_asks`): it only searches, and Codex asks for its tools without
-/// `readOnlyHint` (`recharge`). The `browser` keeps its own rule above.
+/// go on as before. Clauseo's own `case-law` server's search and read tools are answered the
+/// same way, by exact tool name (`mcp_trust::never_asks`); its `recharge`, which opens a
+/// payment, and any tool the host cannot name still ask. The `browser` keeps its own rule above.
 pub(super) fn trusted_tool_to_allow(
     actor: &mut Actor,
     thread: ThreadId,
@@ -117,14 +117,16 @@ pub(super) fn trusted_tool_to_allow(
         &ask.acp_tool_call_id,
         raw_input,
     );
-    let server = match standalone {
-        Some(server) => server.to_owned(),
-        None => super::super::state(actor, thread)?
+    let (server, tool) = if let Some(server) = standalone {
+        let tool = crate::agent::mcp_trust::codex_standalone_tool(server, raw_input);
+        (server.to_owned(), tool.map(str::to_owned))
+    } else {
+        let (server, tool) = super::super::state(actor, thread)?
             .sources
-            .codex_mcp_server(&ask.acp_tool_call_id)?
-            .to_owned(),
+            .codex_mcp_call(&ask.acp_tool_call_id)?;
+        (server.to_owned(), Some(tool.to_owned()))
     };
-    if crate::agent::mcp_trust::never_asks(&server) {
+    if crate::agent::mcp_trust::never_asks(&server, tool.as_deref()) {
         return Some((server, option));
     }
     let control = crate::agent::loads::mcp_control(&actor.managed_mcp);

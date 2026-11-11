@@ -171,7 +171,16 @@ fn claude_params(servers: &[Value], with_case_law: bool) -> Value {
         .map(|name| format!("mcp__{name}"))
         .collect();
     if with_case_law {
-        allowed.push("mcp__case-law".to_owned());
+        allowed.extend(
+            [
+                "search_law",
+                "read_document",
+                "citator",
+                "check_citations",
+                "account",
+            ]
+            .map(|tool| format!("mcp__case-law__{tool}")),
+        );
     }
     json!({"mcpServers": claude_servers(servers), "_meta": {
         "systemPrompt": {"append": instructions(with_case_law)},
@@ -193,7 +202,8 @@ fn case_law(reason: Option<ToolsUnavailableReason>) -> ToolState {
 /// The done-when's profile entry: both agents get `case-law` after the lawyer's server and
 /// `browser`, on `session/new` and then `session/load`; the two sessions have their own token
 /// files and tokens, which their stderr redactors hold and which are gone once the host stops;
-/// Claude pre-allows `mcp__case-law`; both agents' instructions hold the paragraph.
+/// Claude pre-allows case law's search and read tools; both agents' instructions hold the
+/// paragraph.
 #[test]
 fn both_agents_get_case_law_after_the_other_servers() {
     let connector = Connector::new(true);

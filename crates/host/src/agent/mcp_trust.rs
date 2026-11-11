@@ -51,16 +51,35 @@ pub(crate) fn is_trusted(trusted: &[String], server: &str) -> bool {
         && trusted.iter().any(|name| name == server)
 }
 
-/// Whether `server` is the built-in that never asks: Clauseo's own `case-law` connector
-/// (`clauseo_profile::servers::CASE_LAW`), by exact name. It only searches the case-law
-/// database. Codex 0.162.1 asks before an MCP tool unless the tool says `readOnlyHint: true`
-/// (`core/src/mcp_tool_call.rs:2461-2491`, the `Auto` mode codex-acp's servers run in), and
-/// the connector's `recharge` does not (`crates/connectors/fixtures/mcp/tools-list.json`), so
-/// the host answers for it. The name is reserved: no settings entry of it, in any case, is sent
+/// Whether `tool` of `server` is a built-in's that never asks: one of Clauseo's own `case-law`
+/// connector's search and read tools (`loads::case_law::UNASKED_TOOLS`), by exact server and
+/// tool name. Codex 0.162.1 asks before an MCP tool unless the tool says `readOnlyHint: true`
+/// (`core/src/mcp_tool_call.rs:2461-2491`, the `Auto` mode codex-acp's servers run in), so a
+/// tool whose hint is missing would ask; the host answers for these. `recharge`, which opens a
+/// payment, and any other tool still ask; so does a request whose tool the host cannot read. The
+/// server name is reserved: no settings entry of it, in any case, is sent
 /// (`clauseo_settings::reserved_mcp_server`), so a lawyer's or firm's server cannot borrow it.
 /// The `browser`'s own rule is `sources::browser::auto_allowed_browser_tool`.
-pub(crate) fn never_asks(server: &str) -> bool {
+pub(crate) fn never_asks(server: &str, tool: Option<&str>) -> bool {
     server == clauseo_profile::servers::CASE_LAW
+        && tool.is_some_and(crate::agent::loads::case_law::unasked_tool)
+}
+
+/// The tool a Codex standalone MCP approval for `server` names: its `description` is Codex's
+/// fallback message `Allow the <server> MCP server to run tool "<tool>"?` (codex rust-v0.162.1
+/// `core/src/mcp_tool_call.rs`, as `sources::browser::codex_standalone_browser_tool` reads it).
+/// Any other text, a rendered template included, names no tool.
+pub(crate) fn codex_standalone_tool<'a>(
+    server: &str,
+    raw_input: Option<&'a Value>,
+) -> Option<&'a str> {
+    let message = raw_input?.get("description")?.as_str()?;
+    let tool = message
+        .strip_prefix("Allow the ")?
+        .strip_prefix(server)?
+        .strip_prefix(" MCP server to run tool \"")?
+        .strip_suffix("\"?")?;
+    (!tool.is_empty() && !tool.contains('"')).then_some(tool)
 }
 
 /// Claude's allow rule for every tool of `server`.
@@ -114,11 +133,11 @@ pub(crate) fn codex_standalone_server<'a>(
 /// dropped, so calls an agent never finished cannot pile up for the host's life.
 const MAX_CODEX_CALLS: usize = 64;
 
-/// A thread's Codex MCP tool calls that have not finished: the server each belongs to, by the
+/// A thread's Codex MCP tool calls that have not finished: the server and tool of each, by the
 /// agent's tool call id, so a permission request that names only the call can be attributed.
 /// Only a call [`codex_call`] reads is kept; a final status drops it.
 #[derive(Debug, Default)]
-pub(crate) struct CodexCalls(BTreeMap<CompactString, CompactString>);
+pub(crate) struct CodexCalls(BTreeMap<CompactString, (CompactString, CompactString)>);
 
 impl CodexCalls {
     /// A Codex tool call started: an MCP one is kept until it ends.
@@ -135,14 +154,14 @@ impl CodexCalls {
         let Ok(input) = serde_json::from_str::<Value>(text) else {
             return;
         };
-        let Some((server, _)) = codex_call(&call.title, &input) else {
+        let Some((server, tool)) = codex_call(&call.title, &input) else {
             return;
         };
         if self.0.len() >= MAX_CODEX_CALLS {
             self.0.clear();
         }
-        self.0
-            .insert(call.acp_id.clone(), CompactString::from(server));
+        let entry = (CompactString::from(server), CompactString::from(tool));
+        self.0.insert(call.acp_id.clone(), entry);
     }
 
     /// An update of the call the agent knows as `acp_id`: a final status forgets it.
@@ -155,9 +174,11 @@ impl CodexCalls {
         }
     }
 
-    /// The server of the unfinished MCP call `acp_id`, if it is one.
-    pub(crate) fn server(&self, acp_id: &str) -> Option<&str> {
-        self.0.get(acp_id).map(CompactString::as_str)
+    /// The server and tool of the unfinished MCP call `acp_id`, if it is one.
+    pub(crate) fn call(&self, acp_id: &str) -> Option<(&str, &str)> {
+        self.0
+            .get(acp_id)
+            .map(|(server, tool)| (server.as_str(), tool.as_str()))
     }
 }
 

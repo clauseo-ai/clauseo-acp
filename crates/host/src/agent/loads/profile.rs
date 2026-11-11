@@ -4,9 +4,10 @@
 //! - Claude ([`claude_options`]): `disallowedTools` always holds `WebSearch` and `WebFetch`
 //!   when `tools.web_search` is off, whatever the hook sent; when it is on, `allowedTools` gains
 //!   `WebSearch` (not on a Bedrock login, which has none), a bare `WebFetch` (every page fetched
-//!   unasked) and one `WebFetch(domain:…)` per seed site, and `mcp__case-law` only in a
-//!   session that got the `case-law` entry (any hook rule for that server is dropped otherwise),
-//!   and before it `mcp__<name>` for each of the lawyer's servers that runs without asking
+//!   unasked) and one `WebFetch(domain:…)` per seed site, and `mcp__case-law__<tool>` per
+//!   search and read tool (`case_law::UNASKED_TOOLS`) only in a session that got the
+//!   `case-law` entry (any hook rule for that server is dropped otherwise), and before it
+//!   `mcp__<name>` for each of the lawyer's servers that runs without asking
 //!   (`agent/mcp_trust.rs`); in forced ask (`agent/forced_ask.rs`) there is no `allowedTools`
 //!   at all, the hook's included. `additionalDirectories` gains the work folder and the matter
 //!   notes folder, after any hook entries. `settings` gains `disableSkillShellExecution: true`
@@ -174,8 +175,9 @@ pub(crate) struct ClaudeKeys<'a> {
     pub(crate) forced_ask: bool,
     /// The data folder's deny rules (`RunFolders::data_deny`).
     pub(crate) data: &'a crate::agent::data_fence::LaunchDeny,
-    /// The session gets the `case-law` entry (R24): `allowedTools` gains `mcp__case-law`
-    /// (decision D7). Without it, any hook rule for a `case-law` server is dropped.
+    /// The session gets the `case-law` entry (R24): `allowedTools` gains
+    /// `mcp__case-law__<tool>` per `case_law::UNASKED_TOOLS` (decision D7), never `recharge`.
+    /// Without it, any hook rule for a `case-law` server is dropped.
     pub(crate) case_law: bool,
     /// The session has the browser as a shell tool: `allowedTools` gains agent-browser's page
     /// subcommands, `disallowedTools` its denied flags, subcommands and file or JavaScript
@@ -219,7 +221,9 @@ pub(crate) fn claude_options(options: &mut Map<String, Value>, keys: &ClaudeKeys
         push_new(&mut allowed, &crate::agent::mcp_trust::claude_rule(server));
     }
     if keys.case_law {
-        push_new(&mut allowed, super::case_law::CLAUDE_ALLOW);
+        for rule in super::case_law::claude_allow() {
+            push_new(&mut allowed, &rule);
+        }
     }
     let names_browser = |rule: &Value| rule.as_str().is_some_and(|r| r.contains("agent-browser"));
     allowed.retain(|rule| !names_browser(rule));

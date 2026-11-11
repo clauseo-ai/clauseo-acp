@@ -1,8 +1,9 @@
 //! The lawyer's MCP servers run without asking (`agent/mcp_trust.rs`): Claude gets `mcp__<name>`
 //! for each server turned on in `mcp.servers` and none under the firm's `managed-mcp.json`; a
-//! Codex approval of a listed server's tool, or of Clauseo's own `case-law`, is answered
-//! `allow_once` by the host, unseen, while an unlisted or turned-off server (`case-law-2`
-//! included), a look-alike shell command and a server's own question still reach the lawyer.
+//! Codex approval of a listed server's tool, or of a search tool of Clauseo's own `case-law`, is
+//! answered `allow_once` by the host, unseen, while case law's `recharge`, an unlisted or
+//! turned-off server (`case-law-2` included), a look-alike shell command and a server's own
+//! question still reach the lawyer.
 
 use std::sync::Arc;
 
@@ -108,9 +109,9 @@ fn requested_tools(events: &crate::observe::Events) -> Vec<Option<String>> {
 }
 
 /// `codex-trusted-mcp`: the host answers `docs` (correlated and standalone), `case` and
-/// `case-law` (both forms) `allow_once` with nothing logged; the scenario checks each answer,
-/// so a request the host answered that the lawyer should have seen (or the other way round) is
-/// a mismatch.
+/// `case-law`'s `search_law` (both forms) `allow_once` with nothing logged; the scenario checks
+/// each answer, so a request the host answered that the lawyer should have seen (or the other
+/// way round) is a mismatch.
 #[test]
 fn codex_runs_listed_servers_tools_unasked_and_asks_for_the_rest() {
     let dir = Dir::new("mcp_trust_codex", &[]);
@@ -125,18 +126,22 @@ fn codex_runs_listed_servers_tools_unasked_and_asks_for_the_rest() {
         &mut events,
         thread,
         0,
-        &["cancel", "cancel", "cancel", "cancel", "cancel", "decline"],
+        &[
+            "cancel", "cancel", "cancel", "cancel", "cancel", "cancel", "cancel", "decline",
+        ],
     );
     let ended = events.until_turn_ended(turn);
     events.assert_no_mismatch();
     assert_eq!(ended.stop, StopReason::EndTurn, "{}", events.dump());
     let seen = requested_tools(&events);
-    assert_eq!(seen.len(), 6, "{}", events.dump());
+    assert_eq!(seen.len(), 8, "{}", events.dump());
     assert_eq!(seen[0].as_deref(), Some("tc-extra"));
     assert_eq!(seen[1].as_deref(), Some("tc-off"));
-    assert_eq!(seen[2].as_deref(), Some("tc-law2"));
-    assert_eq!(seen[3], None, "case-law-2's standalone request");
-    assert_eq!(seen[4].as_deref(), Some("tc-shell"));
+    assert_eq!(seen[2].as_deref(), Some("tc-recharge"));
+    assert_eq!(seen[3], None, "recharge's standalone request");
+    assert_eq!(seen[4].as_deref(), Some("tc-law2"));
+    assert_eq!(seen[5], None, "case-law-2's standalone request");
+    assert_eq!(seen[6].as_deref(), Some("tc-shell"));
     assert!(
         !seen
             .iter()
