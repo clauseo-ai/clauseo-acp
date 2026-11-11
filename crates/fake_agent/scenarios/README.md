@@ -118,6 +118,8 @@ value matches a pattern by these rules (`pattern.rs`, `matches`):
 |---|---|
 | An object | An object that has every key the pattern names, each matching. Extra keys are fine (a subset match). `{}` matches any object, and only an object. |
 | An array | An array of the same length whose items match one by one, in order. |
+| An array starting with `"{{includes}}"` | An array that holds, for each of the pattern's other items, at least one item matching it, in any order, among any others. |
+| An array starting with `"{{excludes}}"` | An array holding no item that matches any of the pattern's other items; a missing value matches too. |
 | `"{{any}}"` | Any value that is present, `null` included. Only the whole string counts; `"x {{any}}"` is a plain string. |
 | A string holding `{{cwd}}` | The string with every `{{cwd}}` replaced by the session cwd. |
 | A number | An equal number. When either side is a float, both compare as 64-bit floats, so `1` matches `1.0`. Two integers compare exactly, so `9007199254740993` does not match `9007199254740992`. |
