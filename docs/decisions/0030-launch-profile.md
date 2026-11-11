@@ -452,6 +452,19 @@ change from the settings window as `ui` does. R24 (PR5) adds a third to the patc
   The plan exit's "use auto mode" lands in `auto` and stays. Forced ask is unchanged. The
   bullets below record the 2026-11-10 `acceptEdits` decision this replaces, and still describe
   the fallback.
+- **2026-11-11: Windows stays in `auto`, with shell deny rules.** Claude has no browser on
+  Windows and no sandbox there, so a command in no rule goes to `auto`'s classifier alone.
+  Beside the data folder's `Read` and `Edit` denies, a Windows session's flag settings get
+  `Bash(*<form>*)` and `PowerShell(*<form>*)` deny rules for each way a command may name the
+  data folder (`agent/data_fence/shell_deny.rs`): its path with `\`, `/` and `\\`, Git Bash's
+  `/c/…`, `%LOCALAPPDATA%`, `$env:LOCALAPPDATA`, `$LOCALAPPDATA` and `${LOCALAPPDATA}` (and
+  the same for `APPDATA`) followed by the rest of the path, and the folder's own name
+  `ai.clauseo.desktop` when it has it. Claude Code matches `*` anywhere in a Bash or
+  PowerShell rule, a leading one too; PowerShell rules in any case, Bash rules as written.
+  The PowerShell rules also keep the PowerShell tool on, which a Bash deny rule alone turns
+  off. **Residual risk:** classifier-only on Windows; a determined injection could read
+  Clauseo's own data through a script (a path built at run time, a variable, a `cd` first, other
+  letter cases in Bash), which no deny rule sees.
 - **2026-11-10 (Rohan).** Claude should be as frictionless as Codex. Outside forced ask a
   Claude session starts in Claude Code's `acceptEdits`, not `default`
   (`agent/loads.rs` `CLAUDE_MODE`). claude-agent-acp 0.89.1 picks its own starting mode (the

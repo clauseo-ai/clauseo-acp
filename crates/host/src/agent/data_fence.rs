@@ -49,6 +49,7 @@ use crate::network_paths::{FOLD_CASE, NetEnv, fold_name, refused_windows_name, t
 pub(crate) use health::DataFenceHealth;
 pub(crate) use input::{candidates, candidates_roots, candidates_words};
 pub(crate) use launch::{LaunchDeny, claude_projects, launch_deny};
+pub(crate) use shell_deny::windows_shell_deny_rules;
 
 /// What of `<data>` only Clauseo uses, named whether or not it exists at the launch (the
 /// launch adds every other entry that exists then, `launch.rs`), as rule patterns under it,
@@ -503,6 +504,7 @@ mod resolve;
 mod search;
 #[cfg(test)]
 mod search_tests;
+mod shell_deny;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]
