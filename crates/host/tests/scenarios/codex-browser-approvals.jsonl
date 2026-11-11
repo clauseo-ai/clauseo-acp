@@ -1,4 +1,4 @@
-{"scenario":"codex-browser-approvals","description":"Codex's MCP approvals of the guarded browser server (codex-acp 2.2.2 shapes): a click and an eval (correlated) and a snapshot and an eval (standalone) are answered allow_session by the host unseen, the guard refusing eval itself; a case-law search and a shell command reach the lawyer, who answers each allow_once","on_stdin_close":"exit"}
+{"scenario":"codex-browser-approvals","description":"Codex's MCP approvals of the guarded browser server (codex-acp 2.2.2 shapes): a click and an eval (correlated) and a snapshot and an eval (standalone) are answered allow_session by the host unseen, the guard refusing eval itself, and a case-law search allow_once; a shell command reaches the lawyer, who answers it allow_once","on_stdin_close":"exit"}
 {"expect":{"method":"initialize","as":"init","params":{"protocolVersion":1}}}
 {"respond":{"to":"init","result":{"protocolVersion":1,"agentCapabilities":{"loadSession":true},"authMethods":[],"agentInfo":{"name":"@agentclientprotocol/codex-acp","title":"Codex","version":"2.2.2"}}}}
 {"expect":{"method":"session/new","as":"new","params":{"cwd":"{{any}}"}}}

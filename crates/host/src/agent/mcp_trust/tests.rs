@@ -10,7 +10,8 @@ use clauseo_settings::McpServerLaunch;
 use serde_json::{Value, json};
 
 use super::{
-    CodexCalls, claude_rule, codex_call, codex_standalone_server, is_trusted, trusted_servers,
+    CodexCalls, claude_rule, codex_call, codex_standalone_server, is_trusted, never_asks,
+    trusted_servers,
 };
 use crate::agent::loads::McpControl;
 
@@ -305,4 +306,28 @@ fn codex_calls_keep_unfinished_mcp_calls_by_id() {
         },
     );
     assert_eq!(calls.server("tc-1"), None);
+}
+
+/// Only Clauseo's own `case-law`, by exact name, gets the built-in's pass; a lawyer's server
+/// named like it does not, and a settings entry of the reserved name is never trusted or sent.
+#[test]
+fn only_the_built_in_case_law_never_asks() {
+    assert!(never_asks("case-law"));
+    for other in [
+        "case",
+        "case-law-2",
+        "Case-Law",
+        "CASE-LAW",
+        "case-law ",
+        "case_law",
+        "browser",
+        "docs",
+    ] {
+        assert!(!never_asks(other), "{other:?} gets the pass");
+    }
+    let servers = list(&[("case-law", true), ("Case-Law", true), ("case-law-2", true)]);
+    assert_eq!(
+        trusted_servers(&servers, McpControl::Clauseo),
+        names(&["case-law-2"])
+    );
 }

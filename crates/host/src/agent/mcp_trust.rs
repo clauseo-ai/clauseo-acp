@@ -51,6 +51,18 @@ pub(crate) fn is_trusted(trusted: &[String], server: &str) -> bool {
         && trusted.iter().any(|name| name == server)
 }
 
+/// Whether `server` is the built-in that never asks: Clauseo's own `case-law` connector
+/// (`clauseo_profile::servers::CASE_LAW`), by exact name. It only searches the case-law
+/// database. Codex 0.162.1 asks before an MCP tool unless the tool says `readOnlyHint: true`
+/// (`core/src/mcp_tool_call.rs:2461-2491`, the `Auto` mode codex-acp's servers run in), and
+/// the connector's `recharge` does not (`crates/connectors/fixtures/mcp/tools-list.json`), so
+/// the host answers for it. The name is reserved: no settings entry of it, in any case, is sent
+/// (`clauseo_settings::reserved_mcp_server`), so a lawyer's or firm's server cannot borrow it.
+/// The `browser`'s own rule is `sources::browser::auto_allowed_browser_tool`.
+pub(crate) fn never_asks(server: &str) -> bool {
+    server == clauseo_profile::servers::CASE_LAW
+}
+
 /// Claude's allow rule for every tool of `server`.
 pub(crate) fn claude_rule(server: &str) -> String {
     format!("mcp__{server}")

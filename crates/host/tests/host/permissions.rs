@@ -180,8 +180,9 @@ fn requested_tools(events: &Events) -> Vec<Option<String>> {
 
 /// Codex's approvals of the guarded browser server: a click and an eval (correlated with their
 /// tool calls) and a snapshot and an eval (standalone) are answered `allow_session` by the host
-/// with nothing logged, the guard refusing eval itself; a case-law search and a shell command
-/// reach the lawyer. The scenario checks each answer the agent gets.
+/// with nothing logged, the guard refusing eval itself, and a case-law search `allow_once`
+/// (`agent/mcp_trust.rs`); a shell command reaches the lawyer. The scenario checks each answer
+/// the agent gets.
 #[test]
 fn codex_browser_tools_are_allowed_unseen() {
     const CODEX: &str = "codex-acp";
@@ -193,18 +194,17 @@ fn codex_browser_tools_are_allowed_unseen() {
     let (_, thread, _) = matter_with_thread(&dir, &host, "m", &[], CODEX);
     let mut events = host.events(StreamId::Thread(thread));
     let (turn, _) = host.prompt(thread, "Find the judgment.");
-    answer_from(&host, &mut events, thread, 0, &["allow_once", "approved"]);
+    answer_from(&host, &mut events, thread, 0, &["approved"]);
     let ended = events.until_turn_ended(turn);
     events.assert_no_mismatch();
     assert_eq!(ended.stop, StopReason::EndTurn, "{}", events.dump());
     let seen = requested_tools(&events);
-    assert_eq!(seen.len(), 2, "{}", events.dump());
-    assert_eq!(seen[0].as_deref(), Some("tc-law"));
-    assert_eq!(seen[1].as_deref(), Some("tc-shell"));
+    assert_eq!(seen.len(), 1, "{}", events.dump());
+    assert_eq!(seen[0].as_deref(), Some("tc-shell"));
     assert!(
         !seen
             .iter()
-            .any(|tool| matches!(tool.as_deref(), Some("tc-click" | "tc-eval"))),
+            .any(|tool| matches!(tool.as_deref(), Some("tc-click" | "tc-eval" | "tc-law"))),
         "{}",
         events.dump()
     );
