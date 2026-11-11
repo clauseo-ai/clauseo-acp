@@ -144,23 +144,39 @@ Amended by H9 (2026-11-02), the brief's "Later" list. The code is `actor/turn/qu
   the model reads it, sends nothing when it does, and drops a queued steer unread on
   `session/cancel`. So for an agent with a Claude home `injected` only accepts the steer; nothing
   is logged until Claude's transcript (`<home>/projects/<project key>/<session>.jsonl`) shows it
-  taken in: a `user` line, a `queued_command` attachment or a queue operation `remove` with
-  `absorbed_mid_turn` holding one of its text blocks exactly (both trimmed), stamped no earlier
-  than 2 s before the send. The host reads the last 256 KiB of the file, off the actor, every
-  2 s while the steer's turn runs and once more at its end; a missing or unreadable file counts
-  as not taken in. Confirmed, it logs `SteerResolved { Injected }` with `aside`, the turn's tool
+  taken in: a line stamped no earlier than 2 s before the send whose words hold one of its text
+  blocks exactly (both trimmed). The words are a `user` line's message content (a string, or its
+  `text` blocks; never a `tool_result` block nor anything beside the message, which hold a tool's
+  output), a `queued_command` attachment's `prompt`, or the `content` of a queue operation
+  `remove` with `absorbed_mid_turn`. Just before the steer goes out the host marks each
+  transcript file at its length (one `stat` each, in the host's data folder; a file not there yet
+  is marked at its start), and each check reads on from where the last stopped, off the actor, at
+  most 2 MiB per file, up to the last whole line: a line cut by that cap or still being written is
+  read again from its start, one longer than the cap is skipped (never a steer's own: eight times
+  the longest prompt text), and a file shorter than its mark is read from its start. A read that
+  stopped at the cap is followed by the next check at once. Nothing before the mark is read and
+  nothing is ever read whole; a missing or unreadable file counts as not taken in. Checks run every
+  2 s on the host clock while the steer's turn runs, at once when it ends, then every 2 s for 10 s
+  more: Claude Code may write the line late, or run the queued steer as a turn of its own once the
+  turn has ended (an agent-started turn, `own_turn.rs`), which then shows it taken in. Confirmed,
+  it logs `SteerResolved { Injected }` naming the steered turn, with `aside`, the turn's tool
   calls not finished when the agent answered (the view marks them as carried on in the
-  background). An agent with no Claude home (Codex never steers for real; the tests' fake
-  agent) has no better signal, so its `injected` counts as confirmed at once.
-- The steered turn's end, whatever its stop, with a steer unconfirmed: the last check, then
-  `Injected` or `SteerResolved { NotSent }` with that turn; never sent again on its own. A steer
-  still unanswered at the end: after `EndTurn` the queue waits for its answer within 30 s of the
-  send (`promptRequired` requeues it and it runs next; `injected` gets the last check; no answer
-  is `NotSent`); after any other stop it is `NotSent` at once and a later answer is ignored.
-  `promptRequired`, `failed`, an error or `startedNewTurn` (cancelled at once) log
-  `SteerResolved { Requeued }` and a `TurnQueued` behind the steered turn marked `at_head`; no
-  answer within 30 s of the send while the turn still runs does too, so an agent that never
-  answers cannot freeze the queue.
+  background). An agent with no Claude home (Codex never steers for real; the tests' fake agent)
+  has no better signal, so its `injected` counts as confirmed at once; a Claude agent whose
+  transcript cannot be placed (no home or no session known) has nothing to read, so its steer gets
+  no check and no timer and is `NotSent` as soon as its turn ends.
+- The steered turn's end, whatever its stop, with a steer unconfirmed: the checks go on for 10 s
+  after the end (after a cancel, which drops the steer, the check at the end is the last), then
+  `Injected` or `SteerResolved { NotSent }` with that turn; never sent again on its own. Nothing in
+  the queue waits for those checks: the next queued turn starts as it would (`move_on` waits only
+  for steers not answered yet), and Send now naming the ended turn within the 10 s requeues the
+  steer as for a running one. A steer still unanswered at the end: after `EndTurn` the queue
+  waits for its answer within 30 s of the send (`promptRequired` requeues it and it runs next;
+  `injected` starts its checks with 10 s from the answer; no answer is `NotSent`); after any
+  other stop it is `NotSent` at once and a later answer is ignored. `promptRequired`, `failed`, an
+  error or `startedNewTurn` (cancelled at once) log `SteerResolved { Requeued }` and a
+  `TurnQueued` behind the steered turn marked `at_head`; no answer within 30 s of the send while
+  the turn still runs does too, so an agent that never answers cannot freeze the queue.
 - Send now on a steer. `SendQueuedNow` naming the turn a steer not yet settled was sent into is
   the lawyer sending it: its steers unanswered or unconfirmed move at once to new turns at the
   head (`Requeued`), which start once that turn has ended whatever its stop, and a running turn
