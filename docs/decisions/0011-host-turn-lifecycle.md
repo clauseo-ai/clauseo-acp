@@ -63,6 +63,32 @@ checkpoint.
 Agent exit: expiries with `AgentExited`, step 7 with `TurnFailed { agent.exited }`, then
 `AgentSessionDetached { Exited }` last.
 
+**Agent-started turns** (2026-11-11, `actor/turn/own_turn.rs`). claude-agent-acp starts a turn of
+its own, with no `session/prompt`, when a command Claude Code put in the background finishes (a
+steer during a Bash call backgrounds the command and ends the prompt `end_turn`). Its updates
+come with no prompt in flight (`Origin::Idle`), and agent output outside a turn is never
+dropped: answer or thought text, or a tool call the host does not have, opens a turn on the same
+thread. It has no `UserMessage` and is otherwise a turn: step 3 (the writer) at once, step 4
+(the before checkpoint, with the outside edits since the last turn as for a prompt, then
+`TurnStarted`), its updates logged live, steps 6 to 8 with the after checkpoint, so the view shows
+an exchange with no question and Undo has its step. No protocol change: `TurnStarted` needs no
+prompt, the reducer's step needs only the turn, and the UI already draws an exchange with no
+question. Until it is live, and while another turn of the thread starts or ends, the updates
+wait in memory in order; they are logged in the agent-started turn once it starts, or in a turn
+a prompt starts meanwhile, which they then come first in. It ends `EndTurn` on the agent's
+`usage_update` with a cost (claude-agent-acp sends it from the SDK's `result` at the end of every
+turn, its own turns included, with `_meta._claude/origin.kind: "task-notification"` there, read
+from 0.89.1's source, not recorded), or after 60 s with no update, unless a tool call or request
+of the turn is open, which it waits for up to 10 minutes of silence. Queued prompts wait behind
+it as behind any turn. A cancel (Stop, Send now) sends `session/cancel` and ends it `Cancelled` at
+once (no prompt answers it); agent output while a turn is cancelled, waiting when it ends, or
+within 5 s of its end is that turn's tail and is dropped. `acp`'s `Origin::Late` now ends at the
+cancelled prompt's response, so output after it can open such a turn. A host restart repairs an
+agent-started turn left open as it repairs any (`Failed`, `thread.interrupted`). codex-acp
+does not start turns of its own for a client without AIR's async tasks (its background terminals
+are AIR-only), so this applies to Claude; were it to, the same path would take it, ended by the
+quiet period, as Codex sends no cost-bearing usage at a turn's end.
+
 ### Queue, send now and steer
 
 Amended by H9 (2026-11-02), the brief's "Later" list. The code is `actor/turn/queue.rs` and its

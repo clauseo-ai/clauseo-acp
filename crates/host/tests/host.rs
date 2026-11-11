@@ -308,6 +308,9 @@ mod packs_timing;
 mod papers;
 // Every test here waits for a live folder watch, which Windows does not have (decision record
 // 0055); the turn rig's `papers` tests cover Windows' re-list at an answer's end on every OS.
+#[cfg(test)]
+#[path = "host/own_turn.rs"]
+mod own_turn;
 #[cfg(not(windows))]
 #[cfg(test)]
 #[path = "host/papers_live.rs"]

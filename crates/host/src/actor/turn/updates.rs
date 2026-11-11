@@ -1,8 +1,9 @@
 //! Agent events: the rate cap per session, then each event by its origin. `Turn` of the live
 //! turn is logged; `Late` is dropped, but a session title still counts while its window is open
-//! (D-070); `Idle` is logged unless it needs a turn; `Replay` is
-//! dropped when the log already has it and otherwise logged outside a turn, which for text and
-//! tool calls (they name a turn) means dropped with a warning.
+//! (D-070); `Idle` is the live agent-started turn's, else logged, unless it needs a turn: text
+//! and new tool calls then wait for a turn of their own (`own_turn.rs`); `Replay` is dropped
+//! when the log already has it and otherwise logged outside a turn, which for text and tool
+//! calls (they name a turn) means dropped with a warning.
 
 use clauseo_acp::{AcpEvent, AgentUpdate, MessageRole, Origin};
 use clauseo_protocol::{
@@ -15,7 +16,7 @@ use clauseo_store::BlobIn;
 use super::super::Actor;
 use super::agents::{Agent, Stage};
 use super::out::Out;
-use super::{Then, TimerKind, TurnTimer, asks, current, lost, offline, state, text};
+use super::{Then, TimerKind, TurnTimer, asks, current, lost, offline, own_turn, state, text};
 use crate::build;
 use crate::coalesce::TextIn;
 use crate::error::Error;
@@ -176,7 +177,9 @@ fn context(actor: &mut Actor, thread: ThreadId, origin: Origin) -> Option<Contex
         }
         Origin::Late(_) => None,
         Origin::Replay => Some(Context::Outside { replay: true }),
-        Origin::Idle => Some(Context::Outside { replay: false }),
+        Origin::Idle => Some(
+            own_turn::live(actor, thread).map_or(Context::Outside { replay: false }, Context::Live),
+        ),
     }
 }
 
@@ -199,9 +202,17 @@ fn on_update(
             Some(update) => update,
             None => return,
         },
+        Context::Outside { replay: false } if own_turn::holds(actor, thread, session, &update) => {
+            own_turn::hold(actor, thread, session, update);
+            return;
+        }
         Context::Outside { .. } => update,
     };
+    let ends = own_turn::ends_turn(&update);
     log_update(actor, thread, session, context, update);
+    if ends && let Context::Live(turn) = context {
+        own_turn::usage_ended(actor, thread, turn);
+    }
 }
 
 /// A live update of `turn` the offline watch held back, logged now (`offline.rs`).

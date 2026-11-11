@@ -28,7 +28,8 @@ fn cancel_late_updates_tagged_late() {
         assert_eq!(keys, Vec::new());
         assert_eq!(end.unwrap().stop, StopReason::Cancelled);
         // The agent sends one chunk after the cancelled response and before it reads the second
-        // prompt. A chunk is `Late` until the second prompt starts on this side, so wait for it
+        // prompt. The response ends the late updates, so that chunk is `Idle` (the agent's own,
+        // as a turn it starts by itself would be) until the second prompt starts; wait for it
         // here: started at once, the prompt can win the race with the inbound handler (it did on
         // Linux CI) and the chunk is then rightly `Turn(t2)`.
         let before = ctx
@@ -59,7 +60,7 @@ fn cancel_late_updates_tagged_late() {
                 Origin::Late(t1),
                 Origin::Late(t1),
                 Origin::Late(t1),
-                Origin::Late(t1),
+                Origin::Idle,
                 Origin::Turn(t2)
             ]
         );

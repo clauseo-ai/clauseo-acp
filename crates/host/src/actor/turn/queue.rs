@@ -438,6 +438,8 @@ pub(super) fn on_turn_closed(actor: &mut Actor, thread: ThreadId, turn: TurnId, 
     let lost = steer::turn_closed(actor, thread, turn, stop);
     closed(actor, thread, turn, stop);
     steer::requeue_all(actor, thread, lost, steer::why::TURN_STOPPED);
+    // Agent output that came while the turn ended opens a turn of its own if nothing started.
+    super::own_turn::open_if_idle(actor, thread);
 }
 
 fn closed(actor: &mut Actor, thread: ThreadId, turn: TurnId, stop: StopReason) {

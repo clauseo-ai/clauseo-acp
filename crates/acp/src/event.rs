@@ -92,8 +92,8 @@ pub enum AcpEvent {
 pub enum Origin {
     /// While the prompt of this turn is in flight.
     Turn(TurnId),
-    /// From `cancel()` until the next `prompt()` starts, whether or not the cancelled prompt's
-    /// response has come. The host drops these by turn.
+    /// From `cancel()` until the cancelled prompt's response comes (or the next `prompt()`
+    /// starts). The host drops these by turn.
     Late(TurnId),
     /// Between sending `session/load` and its response: history the agent replays.
     Replay,
