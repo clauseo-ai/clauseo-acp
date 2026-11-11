@@ -3854,6 +3854,12 @@ export type NoticeKind =
 	/**  Why the launch left it out. */
 	reason: PackSkipReason,
 } }) & { files_came_back?: never } | 
+/**
+ *  Claude Code's `auto` permission mode is not available for this session (the account,
+ *  the model or the agent ruled it out), so Claude runs in `acceptEdits` and asks before
+ *  running commands.
+ */
+"auto_mode_unavailable" | 
 /**  A kind from a newer Clauseo; written back as the plain string `kind`. */
 string;
 

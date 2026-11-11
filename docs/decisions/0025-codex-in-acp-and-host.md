@@ -40,6 +40,10 @@ agent message text to one that does not (`:29655-29658`, `:44519-44523`). It nev
   before writing outside it or escalating; Undo per turn is the lawyer's way back. No screen may
   promise per-edit approval for Codex. The Word-open guard still applies to Codex's writes,
   through the hooks object in `CODEX_CONFIG` (clauseo-acp #152).
+- **Claude runs in `auto` (Rohan, 2026-11-11).** Outside forced ask Claude now starts in Claude
+  Code's `auto` mode, so a first read of a matter's papers never asks; `acceptEdits`, described
+  below, is its fallback when auto is not available, with one notice (decision record 0030,
+  "Claude's permission mode").
 - **Claude edits the same way (Rohan, 2026-11-10).** Outside forced ask, Claude now starts in
   Claude Code's `acceptEdits` and is switched to it before the first prompt
   (`agent/loads.rs` `CLAUDE_MODE`, `claude_mode`; `actor/turn/session.rs` `claude_start`), so

@@ -576,4 +576,11 @@ pub(crate) const ADDED_AFTER_V1: &[Corpus] = &[
         (358, 0x8e3b_faa7_4797_d6f7),
         (240, 0xfd08_788b_99e1_7347),
     ),
+    (
+        "added/notice-AutoModeUnavailable",
+        include_bytes!("added/notice-AutoModeUnavailable.jsonl"),
+        include_bytes!("added/notice-AutoModeUnavailable.msgpack"),
+        (379, 0xb8e3_e709_5d67_fdd5),
+        (300, 0xad80_7693_32d6_d464),
+    ),
 ];

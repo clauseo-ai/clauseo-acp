@@ -12,6 +12,8 @@ import { threadWords } from "./words.ts";
 
 const CONTEXT =
   "Clauseo doesn't remember the earlier questions and answers in this conversation. Include what it needs from them in your next question.";
+const AUTO_UNAVAILABLE =
+  "Claude's automatic mode isn't available for this account, so Claude asks before running commands.";
 const ONE_BACK = "1 paper came back after the undo: {papers}. Clauseo didn't remove it again.";
 const MANY_BACK =
   "{n} papers came back after the undo: {papers}. Clauseo didn't remove them again.";
@@ -66,6 +68,8 @@ const notice = (order: number, over: Partial<NoticeEntry>): ViewEntry => ({
 });
 
 const CONTEXT_NOTICE = notice(6, { text: CONTEXT, kind: "context_not_restored" });
+/** Claude's auto mode isn't available, so the session runs in acceptEdits. */
+const AUTO_NOTICE = notice(6, { text: AUTO_UNAVAILABLE, kind: "auto_mode_unavailable" });
 /** One paper a sync client put back after the undo. */
 const ONE_PAPER = notice(6, {
   kind: { files_came_back: { files: ["Pleadings/Reply.docx"], more: 0 } },
@@ -121,4 +125,10 @@ export const TN: Entry[] = [
     screen: "room/thread",
     render: thread(packSkipped(reason)),
   })),
+  {
+    id: "TN-10",
+    words: threadWords(AUTO_UNAVAILABLE),
+    screen: "room/thread",
+    render: thread(AUTO_NOTICE),
+  },
 ];

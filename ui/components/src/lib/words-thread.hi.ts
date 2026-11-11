@@ -142,6 +142,9 @@ export const HI = {
     "Clauseo ने स्किल पैक '{pack}' लोड नहीं किया। इसकी फ़ाइलें मान्य स्किल पैक नहीं हैं।",
   "Clauseo didn't load the skill pack '{pack}'. Clauseo loads at most 16 skill packs at a time.":
     "Clauseo ने स्किल पैक '{pack}' लोड नहीं किया। Clauseo एक बार में अधिकतम 16 स्किल पैक लोड करता है।",
+  // Claude's auto mode isn't available, so the session runs in acceptEdits (en settled, hi provisional, TN-10)
+  "Claude's automatic mode isn't available for this account, so Claude asks before running commands.":
+    "इस खाते के लिए Claude का स्वचालित मोड उपलब्ध नहीं है, इसलिए Claude कमांड चलाने से पहले पूछता है।",
   // the composer
   // in the composer's place while the open conversation is archived (U16a's Find opens one): it takes no question
   "Archived. Read only.": "संग्रहीत। केवल पढ़ने के लिए।",

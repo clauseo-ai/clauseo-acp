@@ -276,7 +276,7 @@ impl Agent {
         let answer = self.read_line();
         assert_eq!(answer["result"]["sessionId"], "sess-1", "{answer}");
         assert_eq!(
-            answer["result"]["modes"]["currentModeId"], "acceptEdits",
+            answer["result"]["modes"]["currentModeId"], "auto",
             "{answer}"
         );
     }
