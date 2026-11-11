@@ -115,6 +115,7 @@ export type ErrorCode =
   | "mcp.server_unknown"
   | "mcp.save_declined"
   | "agent.service_error"
+  | "mcp.import_too_large"
   | "unknown";
 
 /** The thread's own sentence for an answer cut short: its Hindi lives in words-thread.ts, once. */
@@ -316,6 +317,9 @@ export const ERROR_WORDS: Record<WordedCode, ErrorKey> = {
   // the agent's service had a problem on its side and the agent gave up on the turn (#1030): Try again under the
   // answer, never Restart. ChatGPT's sentence approved (orchestrator, 2026-11-12); Claude's derived from it
   "agent.service_error": "Claude had a problem on its side. Try again.",
+  // an import whose servers are too long to show whole in one confirm: nothing was added
+  "mcp.import_too_large":
+    "There are too many tools to import at once, so nothing was imported. Add them one at a time.",
   // a code from a newer Clauseo: as internal reads, since this version can say nothing truer
   unknown: "Something went wrong inside Clauseo.",
 };

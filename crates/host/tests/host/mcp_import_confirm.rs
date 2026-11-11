@@ -1,6 +1,7 @@
 //! The one native confirm before an import (A1's `McpLaunchConfirm`): Allow imports every
 //! listed server turned on; Cancel imports nothing and answers `mcp.save_declined`; an import
-//! with nothing to import never asks. Split from `mcp_import.rs` for its length.
+//! with nothing to import never asks; one too long to show whole in one confirm is refused before
+//! it. Split from `mcp_import.rs` for its length.
 
 use std::sync::Mutex;
 
@@ -73,11 +74,13 @@ fn mcp_import_allow_asks_once_with_every_server_and_imports_them_on() {
             "server-github".to_owned(),
         ],
         url: None,
+        names: vec!["GITHUB_TOKEN".to_owned()],
     };
     let notes = McpLaunchAsk {
         server: "notes".to_owned(),
         program: Vec::new(),
         url: Some("https://notes.example.test/mcp".to_owned()),
+        names: vec!["Authorization".to_owned()],
     };
     assert_eq!(answers.imports(), [vec![github, notes]]);
     assert!(view.servers.iter().all(|server| server.enabled), "{view:?}");
@@ -119,5 +122,43 @@ fn mcp_import_with_nothing_to_import_never_asks() {
     let (_, last) = imported(&host, &mut sub, Codex);
     assert_eq!(last.imported, Vec::<String>::new());
     assert_eq!(answers.imports(), Vec::<Vec<McpLaunchAsk>>::new());
+    host.shutdown();
+}
+
+/// An import whose servers and programs would pass A1's 2,000 characters in one confirm is
+/// refused before any dialog (`mcp.import_too_large`), with nothing written: nothing is cut.
+#[test]
+fn mcp_import_too_long_for_one_confirm_is_refused_unasked() {
+    let dir = Dir::new("mcp_import_too_large", &[]);
+    let long = "x".repeat(150);
+    let servers: serde_json::Map<String, Value> = (0..20)
+        .map(|n| {
+            (
+                format!("tool{n:02}"),
+                json!({"command": program(), "args": [long]}),
+            )
+        })
+        .collect();
+    let fs = FakeFs::default().file(&program(), "").file(
+        &desktop_config(),
+        &json!({ "mcpServers": servers }).to_string(),
+    );
+    let (store, answers) = (
+        Arc::new(MemoryStore::new()),
+        Arc::new(Answers::allowing(true)),
+    );
+    let answered = Arc::clone(&answers);
+    let host = dir.start_with(0, |config| {
+        wired(config, &store, fs).with_mcp_confirm(answered)
+    });
+    let before = dir.settings_json();
+    host.refused(import(ClaudeDesktop), ErrorCode::McpImportTooLarge);
+    assert_eq!(
+        answers.imports(),
+        Vec::<Vec<McpLaunchAsk>>::new(),
+        "no dialog"
+    );
+    assert_eq!(store.writes(), 0);
+    assert_eq!(dir.settings_json(), before);
     host.shutdown();
 }

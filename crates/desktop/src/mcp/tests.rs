@@ -295,9 +295,9 @@ fn mcp_import_confirm_only_allow_allows() {
         (Answer::Cancel, false),
         (Answer::Never, false),
     ] {
-        let confirm = LaunchConfirm(FakeDrawer::new(Language::En, answer));
+        let confirm = LaunchConfirm::new(FakeDrawer::new(Language::En, answer));
         assert_eq!(confirm.confirm_import(&asks), allowed);
-        let drawn = confirm.0.drawn.lock().unwrap();
+        let drawn = confirm.drawer().drawn.lock().unwrap();
         let words = super::import_words::import_words(&asks, Language::En);
         assert_eq!(drawn.as_slice(), [words]);
     }

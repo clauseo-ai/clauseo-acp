@@ -176,6 +176,10 @@ fn mcp_failures() -> Vec<DomainEvent> {
             ErrorCode::McpSaveDeclined,
             "the lawyer did not allow the program",
         ),
+        failed(
+            ErrorCode::McpImportTooLarge,
+            "the import is too long to show in one confirm",
+        ),
     ]
 }
 
