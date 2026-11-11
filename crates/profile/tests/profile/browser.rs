@@ -16,9 +16,10 @@ fn agent_browser_rules_are_the_hosts_per_session() {
         AGENT_BROWSER_ALLOWED, AGENT_BROWSER_DENIED, agent_browser_allowed, agent_browser_denied,
     };
     let allowed: Vec<String> = agent_browser_allowed().collect();
-    assert_eq!(allowed.len(), AGENT_BROWSER_ALLOWED.len());
+    assert_eq!(allowed.len(), 2 * AGENT_BROWSER_ALLOWED.len());
     for rule in [
         "Bash(agent-browser open:*)",
+        "Bash(agent-browser --json snapshot:*)",
         "Bash(agent-browser snapshot:*)",
         "Bash(agent-browser read:*)",
     ] {
@@ -28,13 +29,19 @@ fn agent_browser_rules_are_the_hosts_per_session() {
     let rules = ["eval", "pdf", "download"].map(|sub| format!("Bash(agent-browser {sub}:*)"));
     let none = rules.iter().all(|rule| !allowed.contains(rule));
     assert!(none, "{rules:?}");
-    assert_eq!(
-        clauseo_profile::claude::agent_browser_ask().collect::<Vec<_>>(),
-        [
-            "Bash(agent-browser wait*-f*)",
-            "Bash(agent-browser get*cdp-url*)"
-        ]
-    );
+    let ask: Vec<String> = clauseo_profile::claude::agent_browser_ask().collect();
+    assert_eq!(ask.len(), 2 * 6 + 4);
+    for rule in [
+        "Bash(agent-browser wait*-f*)",
+        "Bash(agent-browser get*cdp-url*)",
+        "Bash(agent-browser eval*)",
+        "Bash(agent-browser --json eval*)",
+        "Bash(agent-browser pdf*)",
+        "Bash(agent-browser download*)",
+        "Bash(agent-browser *file://*)",
+    ] {
+        assert!(ask.iter().any(|a| a == rule), "{rule}");
+    }
     for asks in [
         "upload", "eval", "state", "cookies", "storage", "network", "set", "install",
     ] {
@@ -44,7 +51,7 @@ fn agent_browser_rules_are_the_hosts_per_session() {
         );
     }
     let denied: Vec<String> = agent_browser_denied().collect();
-    assert_eq!(denied.len(), AGENT_BROWSER_DENIED.len() + 2);
+    assert_eq!(denied.len(), AGENT_BROWSER_DENIED.len() + 2 * 2);
     for rule in [
         "Bash(agent-browser *--profile*)",
         "Bash(agent-browser *--auto-connect*)",
@@ -57,6 +64,8 @@ fn agent_browser_rules_are_the_hosts_per_session() {
         "Bash(agent-browser *--extension*)",
         "Bash(agent-browser state*)",
         "Bash(agent-browser connect*)",
+        "Bash(agent-browser --json state*)",
+        "Bash(agent-browser *--args*)",
     ] {
         assert!(denied.iter().any(|d| d == rule), "{rule}");
     }

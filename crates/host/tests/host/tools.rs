@@ -63,6 +63,7 @@ fn seeded(web_search: bool) -> Vec<String> {
     web_search
         .then(|| "WebSearch".to_owned())
         .into_iter()
+        .chain(["WebFetch".to_owned()])
         .chain(SEEDED.map(|host| format!("WebFetch(domain:{host})")))
         .collect()
 }
