@@ -1,9 +1,10 @@
 //! Turns, steps and the thread's status.
 
 use clauseo_protocol::{
-    DetachReason, EntryId, EventId, FilesChanged, LimitStopEntry, MarkerKind, Seq, StepEntry,
-    StepUndone, StopReason, ThreadStatus, Timestamp, TurnEnded, TurnFailed, TurnId, TurnQueued,
-    TurnStoppedAtLimit, UserMessage, UserMessageEntry, UserMessageStatus, ViewEntry,
+    DetachReason, EntryId, EventId, FileChange, FilesChanged, LimitStopEntry, MarkerKind, Seq,
+    SkippedFile, StepEntry, StepUndone, StopReason, ThreadStatus, Timestamp, TurnEnded, TurnFailed,
+    TurnId, TurnQueued, TurnStoppedAtLimit, UserMessage, UserMessageEntry, UserMessageStatus,
+    ViewEntry, is_excluded_path,
 };
 
 use super::queue::{mark_prompt, mark_put_back, settle_prompt};
@@ -164,18 +165,29 @@ pub(super) fn turn_started(state: &mut ThreadState, turn: TurnId, out: &mut Appl
     set_status(state, "turn_started", out, status);
 }
 
-/// Keeps the turn's files for its step, or updates the step when the turn has ended.
+/// Keeps the turn's files for its step, or updates the step when the turn has ended. A file
+/// the exclusion rule passes over (`clauseo_protocol::is_excluded_path`) is left out: a turn
+/// logged before the rule covered its folder (`.claude`) counts no paper there.
 pub(super) fn files_changed(state: &mut ThreadState, event: &FilesChanged, out: &mut Applied) {
+    let files: Vec<FileChange> = event
+        .files
+        .iter()
+        .filter(|file| !is_excluded_path(file.path().as_str()))
+        .cloned()
+        .collect();
+    let skipped: Vec<SkippedFile> = event
+        .skipped
+        .iter()
+        .filter(|file| !is_excluded_path(file.path.as_str()))
+        .cloned()
+        .collect();
     if let Some(order) = state.index.steps.get(&event.turn).copied() {
         update_step(state, order, out, |step| {
-            set_vec(&mut step.files, &event.files) | set_vec(&mut step.skipped, &event.skipped)
+            set_vec(&mut step.files, &files) | set_vec(&mut step.skipped, &skipped)
         });
         return;
     }
-    let files = TurnFiles {
-        files: event.files.clone(),
-        skipped: event.skipped.clone(),
-    };
+    let files = TurnFiles { files, skipped };
     state.files.insert(event.turn, files);
 }
 

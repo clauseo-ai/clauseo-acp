@@ -34,7 +34,7 @@ use crate::no_download::{NoDownload, not_downloaded};
 use crate::stat::{CacheEntry, EntryState, Stat, StatCache};
 use crate::types::{Progress, Settings};
 use crate::walk::{self, Found, FoundKind};
-use crate::{Error, locks};
+use crate::{Error, locks, rules};
 
 /// The waits before each new look at the files that vanished during a walk, about 300 ms in
 /// all: Word's swap is two renames back to back (on Windows the document is missing between
@@ -317,7 +317,8 @@ impl Taker<'_, '_> {
 }
 
 /// Adds to `entries` (sorted) the entries of `cache` under each folder of `unread` that the
-/// walk did not find, as they were, and sorts them again.
+/// walk did not find, as they were, and sorts them again; never one the exclusion rule passes
+/// over (a cache from before the rule covered a `.claude` folder may hold it).
 fn keep_unread(cache: &StatCache, entries: &mut Vec<CacheEntry>, unread: &[String]) {
     let found: BTreeSet<String> = entries
         .iter()
@@ -326,7 +327,9 @@ fn keep_unread(cache: &StatCache, entries: &mut Vec<CacheEntry>, unread: &[Strin
     for dir in unread {
         let prefix = format!("{dir}/");
         let kept = cache.entries.iter().filter(|entry| {
-            entry.path.as_str().starts_with(&prefix) && !found.contains(entry.path.as_str())
+            entry.path.as_str().starts_with(&prefix)
+                && !found.contains(entry.path.as_str())
+                && !rules::is_excluded_path(entry.path.as_str())
         });
         entries.extend(kept.cloned());
     }

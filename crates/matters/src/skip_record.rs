@@ -36,6 +36,7 @@ use std::collections::BTreeMap;
 use clauseo_protocol::{MatterPath, SkippedFileReason};
 
 use crate::history::HistoryStore;
+use crate::rules;
 use crate::stat::{CacheEntry, EntryState, FileTime, Stat, find_by_path};
 
 /// What a commit says of its skip record.
@@ -98,7 +99,11 @@ impl SkipRecord {
             mtime: entry.stat.mtime,
         };
         let mut record = Self::default();
-        for entry in entries {
+        // A cache from before the exclusion rule covered a folder (`.claude`) may hold its files.
+        let kept = entries
+            .iter()
+            .filter(|entry| !rules::is_excluded_path(entry.path.as_str()));
+        for entry in kept {
             match entry.state {
                 EntryState::Skipped => record.skipped.push(skip(entry, reason_of(entry))),
                 EntryState::Unread(_) => {
@@ -107,7 +112,11 @@ impl SkipRecord {
                 EntryState::Read(_) => {}
             }
         }
-        record.unread = unread.to_vec();
+        record.unread = unread
+            .iter()
+            .filter(|folder| !excluded_folder(folder))
+            .cloned()
+            .collect();
         record.unread.sort_unstable();
         record.unread.dedup();
         record
@@ -217,7 +226,8 @@ impl SkipRecord {
     }
 
     /// The record a blob's text holds; `None` when its header is not one this version reads, or
-    /// any line does not read: then nothing about the turn's start is known.
+    /// any line does not read: then nothing about the turn's start is known. A path the exclusion
+    /// rule passes over (written before the rule covered its folder) is left out.
     pub(crate) fn decode(text: &str) -> Option<Self> {
         let body = text.strip_suffix('\n')?;
         let mut lines = body.split('\n');
@@ -238,6 +248,13 @@ impl SkipRecord {
                 record.unread.push(folder.to_owned());
             }
         }
+        record
+            .skipped
+            .retain(|entry| !rules::is_excluded_path(entry.path.as_str()));
+        record
+            .stale
+            .retain(|entry| !rules::is_excluded_path(entry.path.as_str()));
+        record.unread.retain(|folder| !excluded_folder(folder));
         record
             .skipped
             .sort_by(|a, b| a.path.as_str().as_bytes().cmp(b.path.as_str().as_bytes()));
@@ -269,6 +286,12 @@ pub(crate) fn read(history: &impl HistoryStore, skips: SkipsRef) -> Option<SkipR
         tracing::warn!("a skip record did not decode");
     }
     record
+}
+
+/// Whether the folder at `folder` (relative to the matter folder) is one the exclusion rule
+/// passes over, or lies in one.
+fn excluded_folder(folder: &str) -> bool {
+    folder.split('/').any(|name| rules::is_excluded(name, true))
 }
 
 /// `<reason> <size> <secs>.<nanos> <path>`.

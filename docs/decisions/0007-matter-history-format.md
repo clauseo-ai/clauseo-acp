@@ -182,7 +182,15 @@ documents with 3 changed).
 - Never versioned and never listed, by name, ASCII-case-insensitively on every OS (the same folder may
   sync between Windows and macOS): files matching `~$*`, `*.tmp` (which covers `~WRL*.tmp` and
   Clauseo's own `.clauseo-<n>.tmp` temp files), `Thumbs.db`, `desktop.ini`, `.DS_Store`,
-  `.~lock.*#`; and any file or folder named `.git` or `.clauseo`, with everything under it.
+  `.~lock.*#`; a file named `.git` or `.clauseo`; and any folder whose name starts with `.`
+  (`.git`, `.clauseo`, `.claude`, `.codex`, `.agents`, `.github`), with everything under it, at any
+  depth. Other dot-files (`.gitignore`) are papers. The rule is
+  `clauseo_protocol::is_excluded_path`.
+  A history written before a folder was covered keeps its files in old trees, but every reader
+  (changes, versions, compare, undo, restore, a logged turn's files) leaves them out, so they are
+  never reported deleted and never written or deleted by undo. A skip record never lists such a
+  path (one read from an older record is dropped), and a paper an old step moved out of such a
+  folder (same blob) is kept by undo, not deleted.
 - A file over the per-file size cap (512 MB by default; the stat cache keeps 32-bit sizes, so a cap of
   4 GiB or more acts as `u32::MAX` bytes) is never read and is not in the tree. A file that grows over
   the cap leaves the tree and is reported as skipped, never as deleted; so does one found over it

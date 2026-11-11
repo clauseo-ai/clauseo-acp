@@ -16,7 +16,7 @@ use crate::no_download::NoDownload;
 use crate::skip_record::{self, SkipRecord, SkipsRef};
 use crate::stat::{CacheEntry, EntryState, Stat, StatCache, find_by_path};
 use crate::types::{Checkpoint, CheckpointOutcome, CommitId, Progress, Settings, TimelineEntry};
-use crate::{Error, trailers};
+use crate::{Error, rules, trailers};
 pub(crate) use timeline::Timeline;
 pub(crate) use walk_folder::OnHeld;
 use walk_folder::walk_folder;
@@ -128,7 +128,9 @@ impl Core {
     /// `None` when the cache's blobs match tree `tree`; otherwise the cache rebuilt from the tree
     /// with empty stats.
     fn rebuilt_cache(&self, tree: Oid) -> Result<Option<StatCache>, Error> {
-        let files = self.history.read_tree(tree)?;
+        let mut files = self.history.read_tree(tree)?;
+        // A file versioned before the exclusion rule covered it is never walked again.
+        files.retain(|file| !rules::is_excluded_path(&file.path));
         let cached = self
             .cache
             .entries
@@ -249,7 +251,10 @@ impl Core {
         if !held.is_empty() {
             return Err(Error::FileLocked { paths: held });
         }
-        let old_tree = tree_of(&self.cache.entries);
+        // A file the cache has from before the exclusion rule covered it is not taken for a
+        // deletion (the walk never lists it now).
+        let mut old_tree = tree_of(&self.cache.entries);
+        old_tree.retain(|file| !rules::is_excluded_path(file.path.as_str()));
         let new_tree = tree_of(&entries);
         let over_cap: BTreeSet<&str> = entries
             .iter()
@@ -475,10 +480,13 @@ impl Core {
     }
 }
 
-/// `files` (sorted by path bytes) as checked paths.
+/// `files` (sorted by path bytes) as checked paths, without the ones the exclusion rule passes
+/// over: a history may hold files versioned before the rule covered them (a `.claude` folder),
+/// and a version, a step's changes, undo and restore never show or touch them.
 fn version_entries(files: Vec<TreeFile>) -> Result<Vec<VersionEntry>, Error> {
     files
         .into_iter()
+        .filter(|file| !rules::is_excluded_path(&file.path))
         .map(|file| {
             let path = MatterPath::new(&file.path).map_err(|err| Error::history("tree", err))?;
             Ok(VersionEntry {
@@ -556,6 +564,9 @@ fn tree_of(entries: &[CacheEntry]) -> Vec<SizedFile> {
 mod baselines;
 mod timeline;
 mod walk_folder;
+
+#[cfg(test)]
+mod dot_folder_tests;
 
 #[cfg(test)]
 mod tests;

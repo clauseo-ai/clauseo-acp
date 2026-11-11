@@ -102,6 +102,27 @@ fn papers_are_the_folder_now_sorted_with_skipped_apart() {
 }
 
 #[test]
+fn a_dot_folder_is_never_listed_and_a_dot_file_is() {
+    let fx = Fixture::new("papers-dot-folders");
+    fx.write("memo.txt", "memo");
+    let matter = fx.import();
+    for rel in [
+        ".claude/settings.local.json",
+        "a/.codex/config.toml",
+        ".Agents/skills/x.md",
+        ".github/workflows/ci.yml",
+        ".gitignore",
+        "a/.env",
+    ] {
+        fx.write(rel, "x");
+    }
+    let papers = matter.papers(100).unwrap();
+    assert_eq!(paths(&papers), [".gitignore", "a/.env", "memo.txt"]);
+    assert_eq!(papers.papers.len(), 3);
+    assert_eq!(papers.skipped, Vec::<SkippedFile>::new());
+}
+
+#[test]
 fn the_cap_counts_papers_and_skipped_together() {
     let mut fx = Fixture::new("papers-cap");
     fx.limits = Limits {

@@ -1,4 +1,4 @@
-use super::{is_excluded, is_excluded_any, is_excluded_file, is_excluded_path};
+use super::{is_excluded_file, is_excluded_folder, is_excluded_name, is_excluded_path};
 
 #[test]
 fn excluded_file_names_in_any_case() {
@@ -48,13 +48,35 @@ fn near_misses_are_kept() {
 }
 
 #[test]
-fn only_git_and_clauseo_exclude_folders() {
-    assert!(is_excluded_any(".git"));
-    assert!(is_excluded_any(".CLAUSEO"));
-    assert!(!is_excluded_any("~$x"));
-    assert!(!is_excluded_any("x.tmp"));
-    assert!(!is_excluded_any("Thumbs.db"));
-    assert!(!is_excluded_any(".github"));
+fn every_dot_folder_is_excluded_and_no_other() {
+    for name in [
+        ".git", ".CLAUSEO", ".github", ".claude", ".codex", ".Agents", ".", ".x y",
+    ] {
+        assert!(is_excluded_folder(name), "{name} should be excluded");
+    }
+    for name in [
+        "~$x",
+        "x.tmp",
+        "Thumbs.db",
+        "claude",
+        "a.claude",
+        "Contract",
+    ] {
+        assert!(!is_excluded_folder(name), "{name} should be kept");
+    }
+}
+
+#[test]
+fn a_dot_folder_excludes_everything_under_it_at_any_depth() {
+    assert!(is_excluded_path(".claude/settings.local.json"));
+    assert!(is_excluded_path("a/.codex/x"));
+    assert!(is_excluded_path(".Agents/skills/a.md"));
+    assert!(is_excluded_path(".github/workflows/ci.yml"));
+    // Dot-files are papers, at any depth; only the named ones are not.
+    assert!(!is_excluded_path(".gitignore"));
+    assert!(!is_excluded_path("a/.env"));
+    assert!(!is_excluded_path(".claude"));
+    assert!(is_excluded_path("a/.DS_Store"));
 }
 
 #[test]
@@ -66,7 +88,9 @@ fn a_path_is_excluded_by_any_folder_on_the_way_or_its_file_name() {
     // File-name rules do not apply to folders.
     assert!(!is_excluded_path("x.tmp/a.txt"));
     assert!(!is_excluded_path("a/b.txt"));
-    assert!(is_excluded("x.tmp", false));
-    assert!(!is_excluded("x.tmp", true));
-    assert!(is_excluded(".git", true));
+    assert!(is_excluded_name("x.tmp", false));
+    assert!(!is_excluded_name("x.tmp", true));
+    assert!(is_excluded_name(".git", true));
+    assert!(is_excluded_name(".claude", true));
+    assert!(!is_excluded_name(".claude", false));
 }
