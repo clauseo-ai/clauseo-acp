@@ -178,7 +178,7 @@ pub fn run(args: &[OsString]) -> Result<i32, Failure> {
     );
     let folders = env::folders(env::Os::CURRENT, &command.cwd);
     for folder in folders.iter().chain([&command.downloads]) {
-        make_folder(folder).map_err(|error| {
+        write::make_folder(folder).map_err(|error| {
             failed(&format!(
                 "cannot make the folder {}: {error}",
                 folder.display()
@@ -428,20 +428,6 @@ fn parse(args: &[OsString], os: env::Os) -> Result<Command, &'static str> {
         daemon_port,
         child_args: child_args.to_vec(),
     })
-}
-
-/// Makes `path` if it is missing, then insists it is a real folder, not a link or a file.
-fn make_folder(path: &Path) -> io::Result<()> {
-    match write::create_dir(path) {
-        Ok(()) => {}
-        Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
-        Err(error) => return Err(error),
-    }
-    if std::fs::symlink_metadata(path)?.is_dir() {
-        Ok(())
-    } else {
-        Err(io::Error::other("it exists and is not a folder"))
-    }
 }
 
 #[cfg(test)]

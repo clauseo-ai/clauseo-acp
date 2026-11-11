@@ -70,8 +70,9 @@ fn a_file_that_appears_at_the_target_is_not_replaced() {
     write::remove_dir_all(&dir).unwrap();
 }
 
-/// A downloads folder swapped for a link after the start-up check (here, between the look and
-/// the move) is refused: the file stays where it was and nothing lands where the link points.
+/// A downloads folder swapped for a link after `place` opened it (here, between the look and
+/// the move) is never followed: the move goes through the opened folder, which is gone, so it
+/// is refused; the file stays where it was and nothing lands where the link points.
 #[cfg(unix)]
 #[test]
 fn a_downloads_folder_swapped_for_a_link_is_refused() {
@@ -97,6 +98,120 @@ fn a_downloads_folder_swapped_for_a_link_is_refused() {
     assert!(from.exists());
     assert!(!elsewhere.join("evil.plist").exists());
     write::remove_file(&downloads).unwrap();
+    write::remove_dir_all(&dir).unwrap();
+}
+
+/// The race the review found: the agent renames the real downloads folder aside (it can write
+/// the matter) and puts a link to a folder outside the matter in its place, after `place` opened
+/// the folder and before the move. The file lands in the folder that was opened, now
+/// `<matter>/moved`, still in the matter; nothing lands where the link points.
+#[cfg(unix)]
+#[test]
+fn a_downloads_folder_moved_aside_for_a_link_keeps_the_file_in_the_matter() {
+    let (dir, staging, downloads) = scratch("moved-aside");
+    let (moved, outside) = (dir.join("moved"), dir.join("outside"));
+    write::create_dir_all(&outside).unwrap();
+    let from = staging.join("x.plist");
+    write::write(&from, "download").unwrap();
+    let placed = place(&from, &downloads, "x.plist", |_: &Path| {
+        write::replace(&downloads, &moved).unwrap();
+        write::symlink(&outside, &downloads).unwrap();
+    })
+    .unwrap();
+    assert_eq!(placed, downloads.join("x.plist"));
+    assert_eq!(names(&outside), NONE);
+    assert_eq!(names(&moved), ["x.plist"]);
+    assert_eq!(
+        std::fs::read_to_string(moved.join("x.plist")).unwrap(),
+        "download"
+    );
+    assert!(!from.exists());
+    write::remove_file(&downloads).unwrap();
+    write::remove_dir_all(&dir).unwrap();
+}
+
+/// A downloads folder that is a link already when a sweep looks (one swapped in between sweeps)
+/// is refused at the open: nothing moves, and nothing lands where the link points.
+#[cfg(unix)]
+#[test]
+fn a_downloads_folder_that_is_a_link_moves_nothing() {
+    let (dir, staging, downloads) = scratch("link-at-open");
+    let outside = dir.join("outside");
+    write::create_dir_all(&outside).unwrap();
+    write::remove_dir(&downloads).unwrap();
+    write::symlink(&outside, &downloads).unwrap();
+    write::write(&staging.join("x.plist"), "download").unwrap();
+    let placed = place(
+        &staging.join("x.plist"),
+        &downloads,
+        "x.plist",
+        |_: &Path| {},
+    );
+    assert!(placed.is_err(), "{placed:?}");
+    sweep(&staging, &downloads);
+    assert_eq!(names(&staging), ["x.plist"]);
+    assert_eq!(names(&outside), NONE);
+    write::remove_file(&downloads).unwrap();
+    write::remove_dir_all(&dir).unwrap();
+}
+
+/// The normal move through the opened folder: a protected name lands as `<stem> (download)<ext>`,
+/// a taken name as ` (2)`, each with its mark, and the file already there is kept.
+#[test]
+fn a_sweep_lands_protected_and_taken_names_with_their_marks() {
+    let (dir, staging, downloads) = scratch("names-marks");
+    write::write(&downloads.join("report.pdf"), "the agent's own").unwrap();
+    write::write(&staging.join("report.pdf"), "download").unwrap();
+    write::write(&staging.join("CLAUDE.md"), "instructions").unwrap();
+    sweep(&staging, &downloads);
+    assert_eq!(names(&staging), NONE);
+    assert_eq!(
+        names(&downloads),
+        ["CLAUDE (download).md", "report (2).pdf", "report.pdf"]
+    );
+    let read = |name: &str| std::fs::read_to_string(downloads.join(name)).unwrap();
+    assert_eq!(read("report.pdf"), "the agent's own");
+    assert_eq!(read("report (2).pdf"), "download");
+    assert_eq!(read("CLAUDE (download).md"), "instructions");
+    for moved in ["report (2).pdf", "CLAUDE (download).md"] {
+        assert!(marks::marked(&downloads.join(moved)), "{moved}");
+        assert_eq!(
+            marks::read(&downloads.join(moved)).is_some(),
+            MARKS,
+            "{moved}"
+        );
+    }
+    write::remove_dir_all(&dir).unwrap();
+}
+
+/// The guard's making of the downloads folder: a missing folder is made, an existing one kept;
+/// a link at the name (to a folder, or dangling) or a file is refused, and nothing is made where
+/// a link points.
+#[cfg(unix)]
+#[test]
+fn making_the_downloads_folder_never_follows_a_link() {
+    let (dir, _, _) = scratch("make-folder");
+    let matter = dir.join("matter");
+    write::create_dir_all(&matter).unwrap();
+    let downloads = matter.join("downloads");
+    write::make_folder(&downloads).unwrap();
+    write::write(&downloads.join("kept.pdf"), "a").unwrap();
+    write::make_folder(&downloads).unwrap();
+    assert_eq!(names(&downloads), ["kept.pdf"]);
+    write::remove_dir_all(&downloads).unwrap();
+    let outside = dir.join("outside");
+    write::create_dir_all(&outside).unwrap();
+    write::symlink(&outside, &downloads).unwrap();
+    assert!(write::make_folder(&downloads).is_err());
+    write::remove_file(&downloads).unwrap();
+    let missing = dir.join("LaunchAgents");
+    write::symlink(&missing, &downloads).unwrap();
+    assert!(write::make_folder(&downloads).is_err());
+    assert!(!missing.exists());
+    write::remove_file(&downloads).unwrap();
+    write::write(&downloads, "a file").unwrap();
+    assert!(write::make_folder(&downloads).is_err());
+    assert_eq!(names(&outside), NONE);
     write::remove_dir_all(&dir).unwrap();
 }
 
@@ -178,7 +293,7 @@ fn a_half_written_guid_tmp_stays_until_chrome_renames_it() {
         ["9bfaa860-c93d-4921-a7ba-75f845a80d7f.tmp"]
     );
     assert_eq!(names(&downloads), NONE);
-    write::move_new(&partial, &staging.join("report.pdf")).unwrap();
+    write::replace(&partial, &staging.join("report.pdf")).unwrap();
     sweep(&staging, &downloads);
     assert_eq!(names(&staging), NONE);
     assert_eq!(names(&downloads), ["report.pdf"]);
