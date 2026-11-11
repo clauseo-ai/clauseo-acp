@@ -87,6 +87,7 @@ fn import_result() -> McpImportResult {
                 program: None,
             },
         ],
+        others: 3,
     }
 }
 

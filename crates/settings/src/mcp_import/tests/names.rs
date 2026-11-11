@@ -331,3 +331,53 @@ fn every_imported_name_passes_the_leaf_rule() {
         );
     }
 }
+
+/// Names compare case-blind (Credential Manager's accounts do): a config named in another case
+/// is one base name with a suffix, and a name Clauseo has in any case is already added.
+#[test]
+fn names_compare_case_blind() {
+    let claude = r#"{"mcpServers": {
+        "GitHub": {"command": "/bin/x"},
+        "github": {"command": "/bin/y"},
+        "Search": {"command": "/bin/x"}
+    }}"#;
+    let fs = FakeFs::default()
+        .file("/Users/ana/.claude.json", claude)
+        .program("/bin/x")
+        .program("/bin/y");
+    let found = run(Os::Mac, "/Users/ana", &[], &fs, &["search"]);
+    let mut lowered: Vec<String> = found.iter().map(|c| c.name.to_ascii_lowercase()).collect();
+    lowered.sort();
+    lowered.dedup();
+    assert_eq!(
+        lowered.len(),
+        found.len(),
+        "two names differ only in case: {:?}",
+        names(&found)
+    );
+    assert!(names(&found).contains(&"github-2") || names(&found).contains(&"GitHub-2"));
+    let search = found.iter().find(|c| c.name == "Search").unwrap();
+    assert!(search.problems.contains(&Problem::AlreadyAdded));
+}
+
+/// One source reads at most `MAX_ENTRIES_PER_SOURCE` servers; the rest are counted.
+#[test]
+fn a_source_reads_at_most_its_cap_and_counts_the_rest() {
+    let servers: Vec<String> = (0..MAX_ENTRIES_PER_SOURCE + 7)
+        .map(|n| format!(r#""s{n:04}": {{"command": "/bin/x"}}"#))
+        .collect();
+    let claude = format!(r#"{{"mcpServers": {{{}}}}}"#, servers.join(","));
+    let fs = FakeFs::default()
+        .file("/Users/ana/.claude.json", &claude)
+        .program("/bin/x");
+    let env_vars = |_: &str| None;
+    let env = Env {
+        os: Os::Mac,
+        home: Path::new("/Users/ana"),
+        vars: &env_vars,
+        fs: &fs,
+    };
+    let (found, left_out) = find_candidates_counted(&env, &[]);
+    assert_eq!(found.len(), MAX_ENTRIES_PER_SOURCE);
+    assert_eq!(left_out, 7);
+}

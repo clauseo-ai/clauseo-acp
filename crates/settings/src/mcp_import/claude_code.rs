@@ -6,14 +6,15 @@
 //! (`enabledMcpjsonServers`, or `enableAllProjectMcpServers`, and `hasTrustDialogAccepted`); a
 //! server in `disabledMcpjsonServers` is left out.
 
+use super::Entries;
 use super::path::{self, join};
-use super::{Entry, Env, MAX_CLAUDE_JSON_BYTES, MAX_CONFIG_BYTES, Problem, Source, json_entry};
+use super::{Env, MAX_CLAUDE_JSON_BYTES, MAX_CONFIG_BYTES, Problem, Source, json_entry};
 use serde_json::{Map, Value};
 use std::path::{Path, PathBuf};
 
 /// Adds Claude Code's servers to `out`: the user-wide `mcpServers`, each `projects.<folder>`
 /// entry's `mcpServers`, and each listed folder's `.mcp.json` that exists.
-pub(crate) fn read(env: &Env<'_>, out: &mut Vec<Entry>) {
+pub(crate) fn read(env: &Env<'_>, out: &mut Entries) {
     let config = join(env.os, &path::home(env), ".claude.json");
     let Some(doc) = json_entry::read_json(env, &config, MAX_CLAUDE_JSON_BYTES) else {
         return;
@@ -22,7 +23,8 @@ pub(crate) fn read(env: &Env<'_>, out: &mut Vec<Entry>) {
     let Some(projects) = doc.get("projects").and_then(Value::as_object) else {
         return;
     };
-    for (folder, project) in projects {
+    out.left_out += projects.len().saturating_sub(super::MAX_ENTRIES_PER_SOURCE);
+    for (folder, project) in projects.iter().take(super::MAX_ENTRIES_PER_SOURCE) {
         // A project key must be a local absolute folder; a relative or network key is skipped.
         if !path::is_local_absolute(env.os, folder) {
             continue;
@@ -37,13 +39,7 @@ pub(crate) fn read(env: &Env<'_>, out: &mut Vec<Entry>) {
 
 /// Adds the servers of the project's `.mcp.json` to `out` (verbatim text), leaving out those it
 /// disables and marking those it has not approved.
-fn add_mcp_json(
-    env: &Env<'_>,
-    folder: &str,
-    project: &Value,
-    source: &Source,
-    out: &mut Vec<Entry>,
-) {
+fn add_mcp_json(env: &Env<'_>, folder: &str, project: &Value, source: &Source, out: &mut Entries) {
     let mcp_json = join(env.os, folder, ".mcp.json");
     if !env.fs.is_file(Path::new(&mcp_json)) {
         return;
@@ -52,9 +48,10 @@ fn add_mcp_json(
         return;
     };
     let approval = Approval::of(project);
-    let mut found = Vec::new();
+    let mut found = Entries::default();
     json_entry::servers_in(env, &file, source, false, &mut found);
-    for mut entry in found {
+    out.left_out += found.left_out;
+    for mut entry in found.list {
         if approval.disabled.contains(&entry.raw_name) {
             continue;
         }

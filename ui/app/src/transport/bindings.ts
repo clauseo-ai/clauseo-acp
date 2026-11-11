@@ -3841,8 +3841,16 @@ export type McpImportResult = {
 	source: McpImportSource,
 	/**  The servers added, by their name in Clauseo, in name order. */
 	imported: string[],
-	/**  The app's servers left out, in name order, each with why. */
+	/**
+	 *  The app's servers left out, in name order, each with why; at most
+	 *  [`MCP_SKIPPED_MAX`].
+	 */
 	skipped: McpSkipped[],
+	/**
+	 *  The servers left out past [`MCP_SKIPPED_MAX`], and those the app's config held past
+	 *  the per-source read cap (counted, never read); 0 when `skipped` names them all.
+	 */
+	others?: number,
 };
 
 /**  An app whose MCP servers the lawyer can import. */

@@ -18,12 +18,13 @@ pub(crate) fn servers_in(
     doc: &Value,
     source: &Source,
     expand: bool,
-    out: &mut Vec<Entry>,
+    out: &mut super::Entries,
 ) {
     let Some(servers) = doc.get("mcpServers").and_then(Value::as_object) else {
         return;
     };
-    for (name, value) in servers {
+    out.left_out += servers.len().saturating_sub(super::MAX_ENTRIES_PER_SOURCE);
+    for (name, value) in servers.iter().take(super::MAX_ENTRIES_PER_SOURCE) {
         out.extend(entry(env, name, value, source.clone(), expand));
     }
 }

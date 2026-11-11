@@ -68,7 +68,8 @@ expression: "HostEvent::McpToolsChanged(super::mcp::tools_view())"
           "name": "linear",
           "reason": "already_added"
         }
-      ]
+      ],
+      "others": 3
     }
   }
 }

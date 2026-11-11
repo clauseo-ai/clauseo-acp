@@ -370,11 +370,47 @@ pub(crate) struct Entry {
 /// `existing_names` are the names Clauseo already has; a candidate with one of them is marked
 /// [`Problem::AlreadyAdded`]. Results are sorted by name.
 pub fn find_candidates(env: &Env<'_>, existing_names: &[String]) -> Vec<ImportCandidate> {
-    let mut entries = Vec::new();
+    find_candidates_counted(env, existing_names).0
+}
+
+/// As [`find_candidates`], with how many servers (or Claude Code projects) the per-source cap
+/// [`MAX_ENTRIES_PER_SOURCE`] left unread.
+pub fn find_candidates_counted(
+    env: &Env<'_>,
+    existing_names: &[String],
+) -> (Vec<ImportCandidate>, usize) {
+    let mut entries = Entries::default();
     claude_desktop::read(env, &mut entries);
     claude_code::read(env, &mut entries);
     codex::read(env, &mut entries);
-    name::assemble(entries, existing_names)
+    (
+        name::assemble(entries.list, existing_names),
+        entries.left_out,
+    )
+}
+
+/// The most servers read from one source (one file's `mcpServers`, a `.claude.json` project's,
+/// Codex's `mcp_servers`), and the most `.claude.json` projects read; the rest are counted,
+/// never turned into entries.
+pub const MAX_ENTRIES_PER_SOURCE: usize = 500;
+
+/// The entries read so far, and how many a cap left unread.
+#[derive(Default)]
+pub(crate) struct Entries {
+    pub(crate) list: Vec<Entry>,
+    pub(crate) left_out: usize,
+}
+
+impl Entries {
+    pub(crate) fn push(&mut self, entry: Entry) {
+        self.list.push(entry);
+    }
+}
+
+impl Extend<Entry> for Entries {
+    fn extend<I: IntoIterator<Item = Entry>>(&mut self, iter: I) {
+        self.list.extend(iter);
+    }
 }
 
 /// The text of the config file at `path`, when it is a file no bigger than `max` bytes.

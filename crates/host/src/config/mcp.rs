@@ -1,11 +1,10 @@
 //! The keychain seam of the lawyer's MCP servers (Settings › Tools), kept apart from
 //! `config.rs`.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use clauseo_connectors::SecretStore;
-use clauseo_settings::mcp_import::{CandidateKind, Env, ImportCandidate, find_candidates};
 
 use super::HostConfig;
 
@@ -45,14 +44,16 @@ pub trait McpLaunchConfirm: Send + Sync {
 }
 
 mod bare;
+mod found;
+pub use found::{McpFileStamp, McpFound, McpHereFinder, McpImportFinder, find_mcp_imports_in};
 
 /// Finds a lawyer's MCP server's program: the command as typed (a bare name or an absolute path)
 /// to the program's path, or `None` when there is none (`HostConfig::with_mcp_resolver`).
 pub type McpResolver = Arc<dyn Fn(&str) -> Option<PathBuf> + Send + Sync>;
 
-/// Finds the MCP servers Claude Desktop, Claude Code and Codex set up, given the names the
-/// lawyer's list already has (`HostConfig::with_mcp_import`).
-pub type McpFinder = Arc<dyn Fn(&[String]) -> Vec<ImportCandidate> + Send + Sync>;
+/// Finds the MCP servers Claude Desktop, Claude Code and Codex set up
+/// (`HostConfig::with_mcp_import`).
+pub type McpFinder = Arc<dyn McpImportFinder>;
 
 #[expect(
     clippy::multiple_inherent_impl,
@@ -94,45 +95,13 @@ impl HostConfig {
     }
 
     /// How Settings › Tools finds the servers other apps set up (`McpCommand::Import` and
-    /// `McpToolsView::importable`): desktop's runs `clauseo_settings::mcp_import::find_candidates`
-    /// over this computer ([`find_mcp_imports_here`]). It runs off the actor, at the start, at
-    /// each app catch-up, after a removal and at each import. Unset (the default), nothing is
+    /// `McpToolsView::importable`): desktop's is [`McpHereFinder`], the settings crate's
+    /// `find_candidates` over this computer. It runs off the actor, at the start, at each app
+    /// catch-up, after a removal and at each import. Unset (the default), nothing is
     /// importable and an import adds nothing.
     #[must_use]
     pub fn with_mcp_import(mut self, find: McpFinder) -> Self {
         self.wiring.mcp_find = Some(find);
         self
     }
-}
-
-/// The servers Claude Desktop, Claude Code and Codex set up on this computer, for
-/// [`HostConfig::with_mcp_import`]; none on an OS Clauseo is not built for or with no home
-/// folder. As [`find_mcp_imports_in`], with `dunce::canonicalize`.
-pub fn find_mcp_imports_here(existing: &[String]) -> Vec<ImportCandidate> {
-    use clauseo_settings::mcp_import::RealEnv;
-    let canonical = |path: &Path| dunce::canonicalize(path).ok();
-    RealEnv::from_process().map_or_else(Vec::new, |env| {
-        find_mcp_imports_in(&env.env(), &canonical, existing)
-    })
-}
-
-/// The servers `find_candidates` finds under `env`, each local one's program as the settings
-/// keep it: the bare file name (`npx`) when searching for that name under `env` finds the same
-/// program and it lives under a version manager's or Homebrew's folder, both compared by
-/// `canonical` (`bare.rs`), so a launch finds it again after an upgrade moves it; else the
-/// absolute path found.
-pub fn find_mcp_imports_in(
-    env: &Env<'_>,
-    canonical: &dyn Fn(&Path) -> Option<PathBuf>,
-    existing: &[String],
-) -> Vec<ImportCandidate> {
-    let mut candidates = find_candidates(env, existing);
-    for candidate in &mut candidates {
-        if let CandidateKind::Local { command, .. } = &mut candidate.kind
-            && let Some(name) = bare::bare_name(env, canonical, command)
-        {
-            *command = PathBuf::from(name);
-        }
-    }
-    candidates
 }

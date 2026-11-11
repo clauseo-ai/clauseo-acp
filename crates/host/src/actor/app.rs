@@ -229,7 +229,7 @@ fn catch_up(actor: &mut Actor) -> Vec<EncodedEvent> {
     events.extend(super::connectors::current(actor));
     // A window opening (Settings among them) reads the other apps' MCP config again, off the
     // actor; the counts follow in an `McpToolsChanged` when they differ.
-    super::mcp::import::scan(actor);
+    super::mcp::scan::scan(actor);
     events.push(super::mcp::view::current(actor));
     events
         .iter()

@@ -13,7 +13,9 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use clauseo_connectors::MemoryStore;
-use clauseo_host::{AppSubscription, HostConfig, log_file};
+use clauseo_host::{
+    AppSubscription, HostConfig, McpFileStamp, McpFound, McpImportFinder, log_file,
+};
 use clauseo_protocol::{
     ErrorCode, HostCommand, HostEvent, McpCommand, McpImportResult, McpImportSource, McpImportable,
     McpSkipReason, McpSkipped, McpToolsView,
@@ -124,6 +126,15 @@ fn off_path() -> String {
     at(&format!("opt/drafts/{}", npx_name()))
 }
 
+/// Claude Desktop's config file under the fake home.
+fn desktop_config() -> String {
+    if cfg!(windows) {
+        at("AppData/Roaming/Claude/claude_desktop_config.json")
+    } else {
+        at("Library/Application Support/Claude/claude_desktop_config.json")
+    }
+}
+
 /// The three apps' config:
 /// - Claude Desktop: `github` (local, with `ENV_VALUE`) and `notes` (remote http, with
 ///   `HEADER_VALUE`) import; `files` runs a program not found (written as a path); `weather`
@@ -157,11 +168,7 @@ fn apps() -> FakeFs {
          [mcp_servers.billing]\ncommand = '{npx}'\nenv_vars = [\"NOT_SET_ANYWHERE\"]\n\n\
          [mcp_servers.paused]\ncommand = '{npx}'\nenabled = false\n"
     );
-    let desktop_path = if cfg!(windows) {
-        at("AppData/Roaming/Claude/claude_desktop_config.json")
-    } else {
-        at("Library/Application Support/Claude/claude_desktop_config.json")
-    };
+    let desktop_path = desktop_config();
     FakeFs::default()
         .file(&npx, "")
         .file(&off_path(), "")
@@ -171,24 +178,35 @@ fn apps() -> FakeFs {
         .file(&at("codex/config.toml"), &codex)
 }
 
+/// The finder over a fake filesystem: desktop's rule (`find_mcp_imports_in`) on this OS's rules
+/// under the fake home, each fake path its own canonical form. It knows no files, so no scan is
+/// ever skipped as unchanged.
+struct FakeFinder(Arc<FakeFs>);
+
+impl McpImportFinder for FakeFinder {
+    fn find(&self, existing: &[String]) -> McpFound {
+        let env = Env {
+            os: os(),
+            home: Path::new(home()),
+            vars: &vars,
+            fs: self.0.as_ref(),
+        };
+        let canonical = |path: &Path| Some(path.to_path_buf());
+        clauseo_host::find_mcp_imports_in(&env, &canonical, existing)
+    }
+
+    fn stamps(&self, _: &[PathBuf]) -> Vec<McpFileStamp> {
+        Vec::new()
+    }
+}
+
 /// The config with the keychain double, a finder over `fs`, and a confirm that allows every
 /// import (`confirm::Answers`).
 fn wired(config: HostConfig, store: &Arc<MemoryStore>, fs: FakeFs) -> HostConfig {
-    let fs = Arc::new(fs);
     config
         .with_mcp_secrets(Arc::<MemoryStore>::clone(store))
         .with_mcp_confirm(Arc::new(confirm::Answers::allowing(true)))
-        .with_mcp_import(Arc::new(move |existing: &[String]| {
-            let env = Env {
-                os: os(),
-                home: Path::new(home()),
-                vars: &vars,
-                fs: fs.as_ref(),
-            };
-            // The fake paths are their own canonical form.
-            let canonical = |path: &Path| Some(path.to_path_buf());
-            clauseo_host::find_mcp_imports_in(&env, &canonical, existing)
-        }))
+        .with_mcp_import(Arc::new(FakeFinder(Arc::new(fs))))
 }
 
 /// The next `McpToolsChanged` on `sub` that `wanted` accepts, skipping every other event.

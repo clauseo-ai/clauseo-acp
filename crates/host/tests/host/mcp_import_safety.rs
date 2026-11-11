@@ -92,3 +92,67 @@ fn mcp_import_settings_write_failure_rolls_the_keychain_back() {
     assert_eq!(store.peek("github/env/GITHUB_TOKEN"), None);
     host.shutdown();
 }
+
+/// A saved `github` and an app's `GitHub` (Credential Manager's accounts are case-blind):
+/// skipped as already added before any keychain write, so github's item keeps its value.
+#[test]
+fn mcp_import_a_case_only_collision_writes_nothing() {
+    let dir = Dir::new("mcp_import_case_collision", &[]);
+    let mine = json!({"command": program(), "env": {"TOKEN": {"keychain": true}}});
+    dir.set_settings(&[], json!({"mcp": {"servers": {"github": mine}}}));
+    let store = Arc::new(MemoryStore::new());
+    store.set("github/env/TOKEN", b"mine").unwrap();
+    let desktop = json!({"mcpServers": {
+        "GitHub": {"command": program(), "env": {"TOKEN": ENV_VALUE}},
+    }});
+    let fs = FakeFs::default()
+        .file(&program(), "")
+        .file(&desktop_config(), &desktop.to_string());
+    let host = dir.start_with(0, |config| wired(config, &store, fs));
+    let mut sub = subscribe(&host);
+    let (_, last) = imported(&host, &mut sub, ClaudeDesktop);
+    assert_eq!(last.imported, Vec::<String>::new());
+    assert_eq!(
+        last.skipped,
+        [skip("GitHub", McpSkipReason::AlreadyAdded, None)]
+    );
+    assert_eq!(store.writes(), 1, "only the seed was written");
+    assert_eq!(
+        store.peek("github/env/TOKEN").as_deref(),
+        Some(b"mine".as_slice())
+    );
+    assert_eq!(store.peek("GitHub/env/TOKEN"), None);
+    host.shutdown();
+}
+
+/// A generated `.mcp.json` of 600 unapproved servers: 500 read (the per-source cap), 100 named
+/// as skipped, and the other 500 counted in `others`; nothing is offered or asked.
+#[test]
+fn mcp_import_caps_a_large_config() {
+    let dir = Dir::new("mcp_import_caps", &[]);
+    let project = at("Matters/Big");
+    let claude = json!({"projects": {project.clone(): {"hasTrustDialogAccepted": true}}});
+    let servers: serde_json::Map<String, Value> = (0..600)
+        .map(|n| (format!("s{n:03}"), json!({"command": program()})))
+        .collect();
+    let mcp_json = json!({ "mcpServers": servers });
+    let fs = FakeFs::default()
+        .file(&program(), "")
+        .file(&at(".claude.json"), &claude.to_string())
+        .file(&format!("{project}/.mcp.json"), &mcp_json.to_string());
+    let store = Arc::new(MemoryStore::new());
+    let host = dir.start_with(0, |config| wired(config, &store, fs));
+    let mut sub = subscribe(&host);
+    let (view, last) = imported(&host, &mut sub, ClaudeCode);
+    assert!(view.importable.is_empty(), "{:?}", view.importable);
+    assert_eq!(last.imported, Vec::<String>::new());
+    assert_eq!(last.skipped.len(), 100);
+    assert!(
+        last.skipped
+            .iter()
+            .all(|one| one.reason == McpSkipReason::NotApproved)
+    );
+    assert_eq!(last.others, 500, "400 past the list, 100 never read");
+    assert_eq!(store.writes(), 0);
+    host.shutdown();
+}
