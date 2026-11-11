@@ -71,6 +71,9 @@ mod claude_mode;
 #[path = "host/clear_env.rs"]
 mod clear_env;
 #[cfg(test)]
+#[path = "host/copied_folder.rs"]
+mod copied_folder;
+#[cfg(test)]
 #[path = "host/start_refused_log.rs"]
 mod start_refused_log;
 #[cfg(test)]

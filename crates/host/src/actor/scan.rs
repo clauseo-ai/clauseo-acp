@@ -2,8 +2,8 @@
 //! short-lived `clauseo-scan` thread tells where the folder lives (`clauseo_matters::place`)
 //! and walks it (`clauseo_matters::scan_folder`), posting what it finds to the actor, which
 //! publishes it as `HostEvent::FolderScanned` on the app stream. A marker refuses nothing (the
-//! import adopts the matter it names or sets it aside), but a listed matter's own folder, or a
-//! folder whose marker names one, is `matter.folder_is_matter` naming it, so the form offers it.
+//! import adopts the matter it names, sets it aside, or relinks a moved matter), but a listed
+//! matter's own folder is `matter.folder_is_matter` naming it, so the form offers it.
 //! No file system call runs on the actor, and nothing is stored: not even a receipt, so a
 //! repeated `command_id` scans again.
 //!
@@ -459,16 +459,11 @@ impl Job {
     }
 }
 
-/// The listed matter whose own folder `folder` is: the one its marker names, or the one whose
-/// folder it is by any spelling. A marker naming no listed matter, or one that does not read,
-/// counts for nothing: the import adopts that matter or sets the marker aside. A marker that
-/// cannot be read is left to the walk, which meets the same error.
+/// The listed matter whose own folder `folder` is, by any spelling. A marker inside it counts
+/// for nothing here: one naming no known matter is adopted, one that does not read is set
+/// aside, a copy of a known matter's folder becomes a new matter, and a listed matter's moved
+/// folder is relinked, so the scan passes for each.
 fn listed_matter(folder: &Path, listed: &[(MatterId, PathBuf)]) -> Option<MatterId> {
-    if let Ok(Some(named)) = clauseo_matters::read_marker(folder)
-        && listed.iter().any(|(matter, _)| *matter == named)
-    {
-        return Some(named);
-    }
     listed
         .iter()
         .find(|(_, own)| crate::matter_worker::is_same_folder(folder, own))

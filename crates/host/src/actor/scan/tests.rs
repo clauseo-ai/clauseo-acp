@@ -526,9 +526,9 @@ fn an_unknown_folder_ref_and_a_refused_folder_are_refused() {
 }
 
 /// A marker refuses no scan: one naming a matter this install never had (the import adopts it)
-/// and one that does not read (the import sets it aside) scan as any folder. A listed matter's
-/// own folder is `matter.folder_is_matter` naming it, by its path or by the marker inside a
-/// copy of it.
+/// and one that does not read (the import sets it aside) scan as any folder, and so does a copy
+/// of a listed matter's folder (it becomes a new matter). A listed matter's own folder is
+/// `matter.folder_is_matter` naming it.
 #[test]
 fn a_marker_refuses_no_scan_and_a_listed_matters_folder_is_named() {
     let host = Running::start("scan-markers", None);
@@ -558,7 +558,6 @@ fn a_marker_refuses_no_scan_and_a_listed_matters_folder_is_named() {
     let copied = std::fs::read(path.join(".clauseo/matter.json")).unwrap();
     let copied = String::from_utf8(copied).unwrap();
     let (_, copy) = host.folder("copy", &[(".clauseo/matter.json", copied.as_str())]);
-    let error = host.dispatch(5, scan(copy)).unwrap_err();
-    assert_eq!(error.matter(), Some(matter), "{error}");
+    assert_eq!(host.dispatch(5, scan(copy)).unwrap(), CommandOutcome::Done);
     host.shutdown();
 }

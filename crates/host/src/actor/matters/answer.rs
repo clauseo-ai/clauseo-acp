@@ -6,7 +6,10 @@
 //!   matter's folder is (`MatterCreated` naming it), with a receipt and nothing else: no new
 //!   matter, no count, no history touched;
 //! - a folder another create or import in flight is making: the command joins that one and gets
-//!   its answer, whatever it is ([`join`]);
+//!   its answer, whatever it is, dropping its own client and next date ([`join`]);
+//! - a folder whose marker names a listed matter whose own folder is gone (moved here): relinked
+//!   here as `RelocateMatter` would (`relocate::relocate_moved`), answered with that matter. A
+//!   copy (the matter's folder still there) becomes a new matter on the worker (`import.rs`);
 //! - a folder whose marker names a matter this install has no record of (its data was wiped, or
 //!   the folder is a colleague's): imported again under that id, on a new worker of that id,
 //!   with the same claim, cancel flag and details. The marker is kept as it is, and a failed or
@@ -67,6 +70,16 @@ pub(super) fn create_replied(
                 super::super::matter_details::unforget(actor, &ctx, known, &folder, details)
             })
         }
+        // The worker refuses a listed matter's marker in another folder only when that matter's
+        // own folder is gone (a move; a copy became a new matter): relinked to this folder.
+        Err(Error::Matters(clauseo_matters::Error::FolderRefused {
+            reason: Refusal::AlreadyMatter(known),
+            ..
+        })) if actor.matters.contains_key(&known) => command_ctx(actor, id).and_then(|ctx| {
+            // The import's claim on the folder would refuse the locate's registry check.
+            actor.claims.remove(&id);
+            super::super::relocate::relocate_moved(actor, &ctx, known, folder.clone())
+        }),
         Err(error) => Err(error),
         Ok((import, support)) => {
             // Made on disk from here: a failure discards it before the answer.
@@ -232,7 +245,8 @@ fn again(actor: &mut Actor, id: CommandId, pending: PendingMatter) {
 /// Joins command `id` to command `to`, which makes the same matter folder: `id`'s callers wait
 /// for `to`'s answer and get it as `to`'s duplicates do (`commands::finish_command`), and `id`
 /// is dropped with its claim, unanswered and with no receipt (a retry runs again and finds the
-/// matter listed). False, changing nothing, when `to` is `id` or either is not pending.
+/// matter listed). Its own client and next date are dropped: the answer is `to`'s, made with
+/// `to`'s. False, changing nothing, when `to` is `id` or either is not pending.
 pub(super) fn join(actor: &mut Actor, id: CommandId, to: CommandId) -> bool {
     if id == to || !actor.commands.contains_key(&to) {
         return false;

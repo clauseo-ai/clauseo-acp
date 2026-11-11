@@ -18,7 +18,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use clauseo_matters::{DEFAULT_MARKER, NewMatter, Refusal};
 use clauseo_protocol::{
-    ClientName, CommandId, Date, ErrorCode, HostError, MatterId, MatterKind, MatterSource, Title,
+    ClientName, CommandId, CommandOutcome, Date, ErrorCode, HostError, MatterId, MatterKind,
+    MatterSource, Title,
 };
 
 use super::commands::CommandCtx;
@@ -441,8 +442,17 @@ pub(super) fn on_matter_reply(
             }
         }
         MatterTag::Open => super::matter_details::opened(matter, reply),
-        MatterTag::Relocate { command, folder } => {
-            super::relocate::located(actor, matter, command, &folder, reply);
+        MatterTag::Relocate {
+            command,
+            folder,
+            created,
+        } => {
+            let answer = if created {
+                CommandOutcome::MatterCreated { matter }
+            } else {
+                CommandOutcome::Done
+            };
+            super::relocate::located(actor, matter, (command, answer), &folder, reply);
         }
         MatterTag::Turn(job) => turn::matter_reply(actor, matter, job, reply),
         MatterTag::Restore(ask) => {

@@ -15,6 +15,10 @@
 //! (`matter.turn_running`). A turn whose agent was started in the old folder starts it again in
 //! the new one when it takes the writer (step 4). The picked folder is claimed on the actor
 //! (`Actor::claims`) until the command is answered, so other locates and relinks count it.
+//!
+//! An import of a listed matter's folder that moved (its recorded folder is gone, the picked
+//! folder's marker names it) takes the same path from the state checks on ([`relocate_moved`]),
+//! answered `MatterCreated` naming the matter, so it opens from the new place.
 
 use std::path::PathBuf;
 
@@ -39,21 +43,36 @@ pub(super) fn relocate_matter(
     matter: MatterId,
     folder: FolderRefId,
 ) {
-    if let Err(error) = begin(actor, ctx, matter, folder) {
+    let begun = actor.check_matter(matter).map(|_| ()).and_then(|()| {
+        let folder = actor.folders.get(&folder).cloned().ok_or_else(|| {
+            Error::refused(ErrorCode::CommandInvalid, format!("no folder ref {folder}"))
+        })?;
+        begin(actor, ctx, matter, folder, false)
+    });
+    if let Err(error) = begun {
         actor.finish_command(ctx.id, Err(error));
     }
+}
+
+/// An import whose folder is the listed `matter`'s, moved to `folder`: relocated there as
+/// `RelocateMatter` would be, answered `MatterCreated { matter }` once committed.
+pub(super) fn relocate_moved(
+    actor: &mut Actor,
+    ctx: &CommandCtx,
+    matter: MatterId,
+    folder: PathBuf,
+) -> Result<(), Error> {
+    actor.check_matter(matter)?;
+    begin(actor, ctx, matter, folder, true)
 }
 
 fn begin(
     actor: &mut Actor,
     ctx: &CommandCtx,
     matter: MatterId,
-    folder: FolderRefId,
+    folder: PathBuf,
+    created: bool,
 ) -> Result<(), Error> {
-    actor.check_matter(matter)?;
-    let folder = actor.folders.get(&folder).cloned().ok_or_else(|| {
-        Error::refused(ErrorCode::CommandInvalid, format!("no folder ref {folder}"))
-    })?;
     if turn::writer_busy(actor, matter) {
         return Err(Error::refused(
             ErrorCode::MatterTurnRunning,
@@ -61,7 +80,7 @@ fn begin(
         ));
     }
     let registry = registry(actor, matter);
-    let sent = send_locate(actor, ctx, matter, folder.clone(), registry);
+    let sent = send_locate(actor, ctx, matter, (folder.clone(), created), registry);
     if sent.is_err() {
         turn::release_relocate(actor, matter);
     } else {
@@ -75,7 +94,7 @@ fn send_locate(
     actor: &mut Actor,
     ctx: &CommandCtx,
     matter: MatterId,
-    folder: PathBuf,
+    (folder, created): (PathBuf, bool),
     registry: crate::matter_worker::Registry,
 ) -> Result<(), Error> {
     let started = match actor.check_matter(matter)?.worker {
@@ -113,6 +132,7 @@ fn send_locate(
         MatterTag::Relocate {
             command: ctx.id,
             folder,
+            created,
         },
     )?;
     actor.work.matter_jobs += 1;
@@ -123,7 +143,7 @@ fn send_locate(
 pub(super) fn located(
     actor: &mut Actor,
     matter: MatterId,
-    command: CommandId,
+    (command, answer): (CommandId, CommandOutcome),
     folder: &std::path::Path,
     reply: MatterReply,
 ) {
@@ -154,7 +174,7 @@ pub(super) fn located(
         actor.finish_command(command, Err(error));
         return;
     }
-    if let Err(error) = commit(actor, matter, command, folder) {
+    if let Err(error) = commit(actor, matter, (command, answer), folder) {
         // The worker holds the matter at the new folder: put it back on the recorded one
         // before any turn's job reaches it.
         reopen_recorded(actor, matter);
@@ -163,11 +183,11 @@ pub(super) fn located(
     }
 }
 
-/// One commit: `MatterRelocated`, the row with the new path, the receipt.
+/// One commit: `MatterRelocated`, the row with the new path, the receipt answering `outcome`.
 fn commit(
     actor: &mut Actor,
     matter: MatterId,
-    command: CommandId,
+    (command, outcome): (CommandId, CommandOutcome),
     folder: &std::path::Path,
 ) -> Result<(), Error> {
     let hash = actor
@@ -181,7 +201,6 @@ fn commit(
     row.folder_path.clone_from(&path);
     let now = actor.now();
     let stream = StreamId::Matter(matter);
-    let outcome = CommandOutcome::Done;
     let mut draft = Draft::new();
     actor.pipeline.push(
         &mut draft,

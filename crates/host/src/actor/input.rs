@@ -167,10 +167,12 @@ pub(crate) enum MatterTag {
     Scratch,
     /// The open the actor sends first to a matter's new worker; its reply is only logged.
     Open,
-    /// The locate of a `RelocateMatter` command, with the folder it locates.
+    /// The locate of a `RelocateMatter` command, with the folder it locates; `created` for an
+    /// import of a listed matter's moved folder, answered `MatterCreated` (`answer.rs`).
     Relocate {
         command: CommandId,
         folder: std::path::PathBuf,
+        created: bool,
     },
     /// A turn's job.
     Turn(TurnJob),
