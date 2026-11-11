@@ -1,5 +1,6 @@
 //! The agent's asks and signals: permission requests and elicitations (logged `Live` during
-//! the live turn, else answered cancelled with nothing logged) and limit signals (a rejection
+//! the live turn; with no prompt in flight they wait for an agent-started turn, `own_turn.rs`;
+//! else answered cancelled with nothing logged) and limit signals (a rejection
 //! or a stop marks the live turn; the first wins; a rate limit also feeds the limits model). A
 //! permission request that names a file of the matter a program holds open (Word, say) is
 //! answered for the lawyer, rejected, in the commit that logs it. One that touches Clauseo's own
@@ -61,6 +62,7 @@ pub(super) struct HeldOpenCheck {
 pub(super) fn on_permission(actor: &mut Actor, thread: ThreadId, event: AcpEvent) {
     let AcpEvent::PermissionRequested {
         session,
+        origin: _,
         key,
         acp_tool_call_id,
         mut options,
@@ -88,7 +90,7 @@ pub(super) fn on_permission(actor: &mut Actor, thread: ThreadId, event: AcpEvent
         about,
     };
     let Some(turn) = live_turn(actor, thread) else {
-        cancel_outside_turn(actor, thread, &ask.session);
+        super::own_turn::cancel_outside_turn(actor, thread, &ask.session);
         return;
     };
     if let Some((tool, option)) = browser_tool_to_allow(actor, thread, &ask, raw_input.as_ref()) {
@@ -341,20 +343,6 @@ fn live_turn(actor: &mut Actor, thread: ThreadId) -> Option<TurnId> {
     current(actor, thread)
         .filter(|current| current.live())
         .map(|current| current.turn)
-}
-
-/// Answers the session's pending permission requests `cancelled`, outside the live turn.
-fn cancel_outside_turn(actor: &mut Actor, thread: ThreadId, session: &AgentSessionId) {
-    if let Some(agent) = agent(actor, thread) {
-        let client = agent.link.client.clone();
-        let session = session.clone();
-        spawn(actor, async move {
-            // `cancel` answers every pending permission of the session `cancelled`.
-            if let Err(error) = client.cancel(&session).await {
-                tracing::debug!(%error, "a permission outside a turn was not cancelled");
-            }
-        });
-    }
 }
 
 /// Logs the request `Live`; the lawyer's answer goes to the agent.

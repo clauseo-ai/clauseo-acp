@@ -7,8 +7,10 @@
 //! since the last turn, as for a prompt), `TurnStarted`, live updates, and steps 6 to 8 with the
 //! after checkpoint, so the view shows it as an exchange with no question and Undo has its step.
 //!
-//! Until it is live (and while another turn of the thread starts or ends) the updates wait here
-//! in order, then are logged as the turn's own: the agent-started turn's once it starts, or the
+//! A permission request or an elicitation with no live turn opens it too, and waits with the
+//! updates: its card shows once the turn is live, never cancelled as outside a turn. Until it is
+//! live (and while another turn of the thread starts or ends) these wait here in order, then are
+//! logged as the turn's own: the agent-started turn's once it starts, or the
 //! turn a prompt starts meanwhile, which they then come first in. Queued prompts wait behind it
 //! as behind any turn, and a cancel (Stop, Send now) sends `session/cancel` and ends it
 //! `Cancelled` at once, as no prompt answers it.
@@ -23,7 +25,7 @@
 
 use std::time::Duration;
 
-use clauseo_acp::AgentUpdate;
+use clauseo_acp::{AcpEvent, AgentUpdate, Origin};
 use clauseo_protocol::{AgentSessionId, ExpiryReason, StopReason, StreamId, ThreadId, TurnId};
 use futures::future::AbortHandle;
 
@@ -47,7 +49,8 @@ pub(super) const OPEN_CAP: Duration = Duration::from_secs(600);
 /// Agent output that came outside any turn, waiting for one to hold it.
 #[derive(Debug, Default)]
 pub(crate) struct Held {
-    updates: Vec<(AgentSessionId, AgentUpdate)>,
+    /// Updates (as `Idle`), permission requests and elicitations, in the order they came.
+    updates: Vec<AcpEvent>,
     /// When the thread's last cancelled turn ended, on the monotonic clock.
     cancelled_at: Option<Duration>,
 }
@@ -109,28 +112,73 @@ pub(super) fn hold(
     session: &AgentSessionId,
     update: AgentUpdate,
 ) {
-    let now = actor.now().mono;
-    let Some(state) = state(actor, thread) else {
-        return;
+    let event = AcpEvent::Update {
+        session: session.clone(),
+        origin: Origin::Idle,
+        update,
     };
-    let cancelling = state
-        .current
-        .as_ref()
-        .is_some_and(|current| current.cancelled);
-    let held = &mut state.own_held;
-    let tail = cancelling
-        || held
-            .cancelled_at
-            .is_some_and(|at| now.saturating_sub(at) < CANCEL_WAIT);
-    if tail {
+    if !hold_event(actor, thread, event) {
         tracing::debug!(%thread, "agent output after a cancelled turn was dropped");
-        return;
     }
+}
+
+/// A permission request or an elicitation that came with no prompt in flight (`Idle`) waits for a
+/// turn, unless the agent-started turn is live (it is that turn's) or it is a cancelled turn's
+/// tail: then it is handed back, for `asks.rs` to ask it, or answer it cancelled. A prompted turn
+/// the host still has live has had its prompt answered: the request is the agent's own turn's.
+/// Any other event is handed back at once.
+pub(super) fn hold_ask(actor: &mut Actor, thread: ThreadId, event: AcpEvent) -> Option<AcpEvent> {
+    let idle = matches!(
+        event,
+        AcpEvent::PermissionRequested {
+            origin: Origin::Idle,
+            ..
+        } | AcpEvent::ElicitationRequested {
+            origin: Origin::Idle,
+            ..
+        }
+    );
+    let own_live =
+        current(actor, thread).is_some_and(|current| current.live() && current.own.is_some());
+    if !idle || own_live || tail(actor, thread) {
+        return Some(event);
+    }
+    hold_event(actor, thread, event);
+    None
+}
+
+/// Whether agent output now is a cancelled turn's tail: the current turn is cancelled, or the
+/// last one ended cancelled within [`CANCEL_WAIT`].
+fn tail(actor: &mut Actor, thread: ThreadId) -> bool {
+    let now = actor.now().mono;
+    state(actor, thread).is_some_and(|state| {
+        state
+            .current
+            .as_ref()
+            .is_some_and(|current| current.cancelled)
+            || state
+                .own_held
+                .cancelled_at
+                .is_some_and(|at| now.saturating_sub(at) < CANCEL_WAIT)
+    })
+}
+
+/// Keeps `event` until a turn holds it, and opens one when the thread has none; false, keeping
+/// nothing, for a cancelled turn's tail.
+fn hold_event(actor: &mut Actor, thread: ThreadId, event: AcpEvent) -> bool {
+    if tail(actor, thread) {
+        return false;
+    }
+    let Some(state) = state(actor, thread) else {
+        return false;
+    };
+    let held = &mut state.own_held;
     if held.updates.is_empty() {
         tracing::info!(target: LIFECYCLE, %thread, "agent output outside a turn waits for a turn");
     }
-    held.updates.push((session.clone(), update));
+    held.updates.push(event);
     open_if_idle(actor, thread);
+    true
 }
 
 /// Opens an agent-started turn for the waiting updates when the thread has no turn (none
@@ -215,16 +263,28 @@ pub(super) fn started(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
     flush(actor, thread, turn);
 }
 
-/// A turn of `thread` started: the updates waiting for a turn are logged as `turn`'s own.
+/// A turn of `thread` is live: what waits for a turn is logged as `turn`'s own, its requests
+/// asked as the live turn's.
 pub(super) fn flush(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
     let waiting = state(actor, thread)
         .map(|state| std::mem::take(&mut state.own_held.updates))
         .unwrap_or_default();
-    for (session, update) in waiting {
-        let ends = ends_turn(&update);
-        updates::log_live(actor, thread, turn, &session, update);
-        if ends {
-            usage_ended(actor, thread, turn);
+    for event in waiting {
+        match event {
+            AcpEvent::Update {
+                session, update, ..
+            } => {
+                let ends = ends_turn(&update);
+                updates::log_live(actor, thread, turn, &session, update);
+                if ends {
+                    usage_ended(actor, thread, turn);
+                }
+            }
+            event @ (AcpEvent::PermissionRequested { .. }
+            | AcpEvent::ElicitationRequested { .. }
+            | AcpEvent::ElicitationCompleted { .. }
+            | AcpEvent::Limit { .. }
+            | AcpEvent::Warning { .. }) => updates::handle(actor, thread, event),
         }
     }
 }
@@ -351,5 +411,20 @@ pub(super) fn turn_ending(actor: &mut Actor, thread: ThreadId, stop: StopReason)
             state.own_held.updates.clear();
             tracing::debug!(%thread, "agent output of a cancelled turn was dropped");
         }
+    }
+}
+
+/// Answers the session's pending permission requests `cancelled`, outside the live turn (a
+/// cancelled turn's tail, `asks.rs`).
+pub(super) fn cancel_outside_turn(actor: &mut Actor, thread: ThreadId, session: &AgentSessionId) {
+    if let Some(agent) = updates::agent(actor, thread) {
+        let client = agent.link.client.clone();
+        let session = session.clone();
+        super::spawn(actor, async move {
+            // `cancel` answers every pending permission of the session `cancelled`.
+            if let Err(error) = client.cancel(&session).await {
+                tracing::debug!(%error, "a permission outside a turn was not cancelled");
+            }
+        });
     }
 }

@@ -67,8 +67,9 @@ Agent exit: expiries with `AgentExited`, step 7 with `TurnFailed { agent.exited 
 its own, with no `session/prompt`, when a command Claude Code put in the background finishes (a
 steer during a Bash call backgrounds the command and ends the prompt `end_turn`). Its updates
 come with no prompt in flight (`Origin::Idle`), and agent output outside a turn is never
-dropped: answer or thought text, or a tool call the host does not have, opens a turn on the same
-thread. It has no `UserMessage` and is otherwise a turn: step 3 (the writer) at once, step 4
+dropped: answer or thought text, a tool call the host does not have, or a permission request or
+elicitation (`acp` now tags those with their `Origin` too) opens a turn on the same thread; a
+request is asked once the turn is live, never cancelled as outside a turn. It has no `UserMessage` and is otherwise a turn: step 3 (the writer) at once, step 4
 (the before checkpoint, with the outside edits since the last turn as for a prompt, then
 `TurnStarted`), its updates logged live, steps 6 to 8 with the after checkpoint, so the view shows
 an exchange with no question and Undo has its step. No protocol change: `TurnStarted` needs no

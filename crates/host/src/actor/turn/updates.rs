@@ -113,7 +113,12 @@ pub(super) fn flush_rate(actor: &mut Actor, thread: ThreadId) {
     }
 }
 
-fn handle(actor: &mut Actor, thread: ThreadId, event: AcpEvent) {
+/// One event, past the rate cap. A request with no prompt in flight waits for a turn
+/// (`own_turn.rs`).
+pub(super) fn handle(actor: &mut Actor, thread: ThreadId, event: AcpEvent) {
+    let Some(event) = own_turn::hold_ask(actor, thread, event) else {
+        return;
+    };
     match event {
         AcpEvent::Update {
             session,
@@ -123,6 +128,7 @@ fn handle(actor: &mut Actor, thread: ThreadId, event: AcpEvent) {
         event @ AcpEvent::PermissionRequested { .. } => asks::on_permission(actor, thread, event),
         AcpEvent::ElicitationRequested {
             session,
+            origin: _,
             key,
             elicitation_id,
             acp_tool_call_id,

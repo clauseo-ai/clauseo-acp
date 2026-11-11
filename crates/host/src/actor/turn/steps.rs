@@ -427,9 +427,9 @@ pub(super) fn on_started(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
     } else if current.own.is_some() {
         super::own_turn::started(actor, thread, turn);
     } else {
+        prompt::prompt(actor, thread, turn);
         // Agent output that came between turns comes first in this one (`own_turn.rs`).
         super::own_turn::flush(actor, thread, turn);
-        prompt::prompt(actor, thread, turn);
     }
 }
 
