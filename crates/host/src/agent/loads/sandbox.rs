@@ -35,6 +35,9 @@
 //! - `network.allowedDomains: ["*"]`: every host, so a sandboxed command (`curl` of a court PDF)
 //!   never asks for a domain; Claude Code 2.1.293 accepts it (stage C, 2026-11-11: a real
 //!   judgment PDF downloaded with no prompt and no certificate error in auto mode).
+//!   `network.deniedDomains` keeps loopback out even through Claude Code's own proxy, which runs
+//!   outside the sandbox: the browser's debugging port and agent-browser's daemon listen there.
+//!   A direct loopback connect is refused by the sandbox already (stage C, the same day).
 //! - `filesystem.allowWrite`: the matter folder, the work folder, the session's temp folder, the
 //!   matter's notes and Claude's short temp folder (`CLAUDE_CODE_TMPDIR`, where sandboxed
 //!   commands' `TMPDIR` is made).
@@ -230,7 +233,10 @@ impl ClaudeSandbox {
             "allowUnsandboxedCommands": false,
             "failIfUnavailable": false,
             "allowAppleEvents": false,
-            "network": {"allowedDomains": ["*"]},
+            "network": {
+                "allowedDomains": ["*"],
+                "deniedDomains": ["localhost", "127.0.0.1", "::1", "[::1]"],
+            },
             "filesystem": {
                 "allowWrite": self.allow_write,
                 "denyWrite": self.deny_write,
