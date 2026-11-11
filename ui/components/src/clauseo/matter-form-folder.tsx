@@ -3,13 +3,13 @@
 // name stays) with the whole path under the pointer and to a screen reader, and Choose folder… at its end, which opens
 // the computer's own folder picker at once. With nothing chosen the field reads "No folder chosen" and Choose folder…
 // is the main button. Under the field: where the host has a place for new matters, a quiet "Use a new folder in
-// ~/Documents/Clauseo", always offered until it's the choice; once chosen, a line says Clauseo makes that folder. The
+// ~/Documents/Clauseo" on one line, its path cut short in its middle as the field's is and whole under the pointer,
+// always offered until it's the choice; once chosen, a line says Clauseo makes that folder. The
 // paths are the computer's own, in English in both languages.
 import { useId } from "react";
 import { Button } from "../ui/button.tsx";
 import { fieldLabel } from "../ui/recipes-controls.ts";
 import { IconFolder, IconNewMatter } from "../icons/icons.tsx";
-import { isolate } from "../lib/bidi.ts";
 import { cn } from "../lib/cn.ts";
 import { useMatterFormWords } from "../lib/words-matter-form.ts";
 import { splitPath } from "./folder-path.ts";
@@ -24,6 +24,36 @@ export function PathLine({ path, className }: { path: string; className?: string
       {head !== "" && <span className="folder-path-head">{head}</span>}
       {tail !== "" && <span className="folder-path-tail">{tail}</span>}
     </bdi>
+  );
+}
+
+/** Where the path goes in the offer's words, so the words can sit around a PathLine. */
+const SLOT = "\u0000";
+
+/** "Use a new folder in {folder}" on one line: the words stay whole and the path is cut short in its middle, as the
+ * row's path is. The path keeps its isolates in the text, so the line reads, and is named, as the words have it. */
+function OfferWords({ words, path }: { words: string; path: string }) {
+  const at = words.indexOf(SLOT);
+  const before = at < 0 ? words : words.slice(0, at);
+  const after = at < 0 ? "" : words.slice(at + SLOT.length);
+  return (
+    <span className="matter-form-offer-line deva-nudge">
+      {before !== "" && (
+        <span className="matter-form-offer-words">
+          <Say>{before}</Say>
+        </span>
+      )}
+      <span className="matter-form-offer-path">
+        {"\u2068"}
+        <PathLine path={path} />
+        {"\u2069"}
+      </span>
+      {after !== "" && (
+        <span className="matter-form-offer-words">
+          <Say>{after}</Say>
+        </span>
+      )}
+    </span>
   );
 }
 
@@ -101,13 +131,12 @@ export function FolderRow({
           kind="quiet"
           size="small"
           className="matter-form-offer"
+          title={offer}
           data-testid={testIds?.offer}
           onClick={onOffer}
         >
           <IconNewMatter size={16} />
-          <span className="deva-nudge">
-            <Say>{w("Use a new folder in {folder}", { folder: isolate(offer) })}</Say>
-          </span>
+          <OfferWords words={w("Use a new folder in {folder}", { folder: SLOT })} path={offer} />
         </Button>
       )}
     </div>

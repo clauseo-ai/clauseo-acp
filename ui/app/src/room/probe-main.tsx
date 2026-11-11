@@ -33,7 +33,10 @@
 // ?thread=commands) has Snooze until and Mark done. With ?sac=evaluation, Windows says Smart App Control is still
 // deciding, so the room shows its note (room/sac/), shown again on each load. With ?thread=long-command, the thread
 // is a finished turn that ran one command line wider than the thread, then quoted it in a shell block
-// (testing/long-command.ts), for a block's Copy beside a line that scrolls sideways. Not shipped.
+// (testing/long-command.ts), for a block's Copy beside a line that scrolls sideways. With ?scan=small, empty or large,
+// New matter's picker gives a folder and its scan plays those counts (scan/probe-scan.ts); with ?scan=long-path, the
+// folder picked and the place for new matters have long paths, for the folder row and its "Use a new folder in" line
+// cut short in their middle. Not shipped.
 import { whenWordsReady } from "@clauseo/components/lib/display.ts";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
@@ -70,7 +73,7 @@ import {
 import { installDevHooks, queryPatch } from "./dev-hooks.ts";
 import { askEntry, ONE_QUESTION, TWO_QUESTIONS } from "./elicitation-fixtures.ts";
 import { detailed, fakeNext, railStates } from "./fake-next.ts";
-import { scanProbe } from "./scan/probe-scan.ts";
+import { scanLocation, scanProbe } from "./scan/probe-scan.ts";
 import type { MatterInfo, PaperSummary } from "./host-next.ts";
 import { planProbe } from "./limits/probe-plan.ts";
 import { probeThreads } from "./probe-threads.ts";
@@ -318,7 +321,7 @@ const transport = new FakeTransport({
       : {}),
   // ?reveal=refused: Show in Finder is refused as the folder can't be found, so the row offers Locate folder
   ...(page.get("reveal") === "refused" ? { reveal: refuseReveal } : {}),
-  // ?scan=small, empty or large: New matter's picker and its folder's counts (scan/probe-scan.ts)
+  // ?scan=small, empty, large or long-path: New matter's picker and its folder's counts (scan/probe-scan.ts)
   ...scanProbe(page.get("scan")),
   // on the pages whose undo meets a lock, every undo_step is refused with matter.file_locked
   dispatch: (envelope): CommandOutcome => {
@@ -359,7 +362,8 @@ const transport = new FakeTransport({
   next: fakeNext({
     matters: () => matters,
     papers,
-    location: "Documents/Clauseo",
+    // ?scan=long-path: a long place for new matters, for New matter's "Use a new folder in" line
+    location: scanLocation(page.get("scan")),
     // ?rail=triage: every matter's threads arrive at the start, so the matter's menu has Snooze until and Mark done
     frames: page.get("rail") === "triage",
     ...(planning !== null
