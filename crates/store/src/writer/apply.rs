@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 
 use clauseo_protocol::{
-    AccountLimits, AgentKind, AgentSessionId, ClientName, Seq, StreamId, Timestamp,
+    AccountLimits, AccountRef, AgentKind, AgentSessionId, ClientName, Seq, StreamId, Timestamp,
 };
 use rusqlite::{Connection, params};
 
@@ -361,6 +361,18 @@ pub(super) fn put_account_limits(conn: &Connection, limits: &AccountLimits) -> R
          ON CONFLICT (agent, account) DO UPDATE SET limits = excluded.limits",
     )?
     .execute(params![agent_text(limits.agent), limits.account.0, json])?;
+    Ok(())
+}
+
+/// Deletes `agent`'s limits for every account but `keep`, or for every account when `keep` is
+/// `None` (`account IS NOT NULL` holds for every row).
+pub(super) fn forget_account_limits(
+    conn: &Connection,
+    agent: AgentKind,
+    keep: Option<&AccountRef>,
+) -> Result<(), Error> {
+    conn.prepare_cached("DELETE FROM account_limits WHERE agent = ?1 AND account IS NOT ?2")?
+        .execute(params![agent_text(agent), keep.map(|keep| keep.0.as_str())])?;
     Ok(())
 }
 

@@ -35,9 +35,10 @@ first three through and calls the fourth:
 - `ReadOutcome::SignedOut`: the vendor's tool says no account is signed in (Codex's
   `account/read` with no account, in a home with no login). The model gives that agent a row with
   no account and no windows, whose view shows `MissingScope`'s freshness and so the sign-in-again
-  action. It sends no `Action::Changed`, so nothing is stored. An earlier account's stored entry
-  stays as it is, and the next good read with an account replaces the row. A fixed `signed-out`
-  account would have been stored, and would come back at start beside the real one.
+  action. It sends no `Action::Changed`, so nothing is stored. When the model held an account,
+  it sends `Action::Forget` with no `keep` (amended 2026-11-11, below), so that account's stored
+  entry goes too. A fixed `signed-out` account would have been stored, and would come back at
+  start beside the real one.
 - `ProcessReaders::new(effective, codex_home, launcher, timer)`, from #160: Clauseo owns the
   Codex home (below).
 - G16 adds one hidden, additive hook: `ProcessReaders::with_stdout_tap(StdoutTap)` copies each
@@ -241,6 +242,16 @@ keeps the last email it held for a `NotRead` read when the identity matches: a p
 and now with the same named plan; otherwise the ref is `plan`. An `account/read` that says
 `email: null` is `Read` and is never filled from before. One app-server per read, and the 10 s
 limit, are unchanged.
+
+Amended 2026-11-11: `Action::Forget { agent, keep: Option<AccountRef> }` deletes an agent's
+stored limits, all but `keep`'s entry. `SignedOut` sends it with no `keep` when the model held an
+account; before, the signed-out account stayed in the store and came back, stale, at the next
+start. A good read whose account differs from the one held sends it after its `Changed`, keeping
+the new account. Before, an earlier account's entry stayed beside the new one, and start-up picks
+the entry with the newest checked time, so an entry with no time (an API key's `NotApplicable`)
+lost to the earlier plan account's. A first read with no account held, and a read of the same
+account, send no `Forget`, so the usual read writes nothing more. The host deletes off the loop,
+as it stores, and publishes no event of its own for it: the view goes out again.
 
 ## Date
 
