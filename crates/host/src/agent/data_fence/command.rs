@@ -12,8 +12,9 @@ use crate::pre_write_guard::{Escape, shell_script};
 
 /// The tokens of a shell command line that may be paths: each word ([`segments`]), and of a
 /// word holding `=` the part after it (`--file=/x`, `VAR=/x`), when it starts with `~`, `$HOME`
-/// or `${HOME}` (each made `~`), holds a path separator, or is `..`; then the targets of each
-/// `ln` ([`link_targets`]).
+/// or `${HOME}` (each made `~`), holds a path separator, is `..`, or with Windows' rules starts
+/// with PowerShell's `$env:NAME` (judged where it leads, `variables.rs`); then the targets of
+/// each `ln` ([`link_targets`]).
 pub(crate) fn command_paths(line: &str, windows: bool) -> Vec<PathBuf> {
     let mut out = Vec::new();
     let segments = segments(line, windows);
@@ -24,7 +25,8 @@ pub(crate) fn command_paths(line: &str, windows: bool) -> Vec<PathBuf> {
         };
         let word = home_as_tilde(word);
         let separator = word.contains('/') || (windows && word.contains('\\'));
-        if word.starts_with('~') || separator || word == ".." {
+        let variable = windows && super::variables::starts_with_variable(&word);
+        if word.starts_with('~') || separator || word == ".." || variable {
             out.push(PathBuf::from(word));
         }
     }
@@ -53,10 +55,16 @@ pub(crate) fn glob_roots(line: &str, windows: bool) -> Vec<PathBuf> {
             Some((name, value)) if !name.contains('/') && !name.contains('\\') => value,
             _ => word.as_str(),
         };
+        // PowerShell's `${env:NAME}` is no brace to expand.
+        let word = if windows {
+            super::variables::unbraced(word)
+        } else {
+            word.to_owned()
+        };
         if word.starts_with('-') || !word.contains(['*', '?', '[', '{']) {
             continue;
         }
-        let word = home_as_tilde(word);
+        let word = home_as_tilde(&word);
         out.extend(super::search::pattern_roots(&word, ".", windows));
     }
     out

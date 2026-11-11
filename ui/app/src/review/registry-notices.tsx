@@ -2,7 +2,8 @@
 // notice the host sends with its kind, in the room's thread, shown in the app's words (notice-words.ts). Each over the
 // thread the notice is in, as the host sends it.
 import type { ReactNode } from "react";
-import type { ThreadKey } from "@clauseo/components/lib/words-thread.ts";
+import type { Lang } from "@clauseo/components/lib/display.ts";
+import { th, type ThreadKey } from "@clauseo/components/lib/words-thread.ts";
 import { uuid, userMessage } from "../testing/stream-script.ts";
 import type { NoticeEntry, PackSkipReason, ViewEntry } from "../transport/protocol.ts";
 import type { Entry } from "./entry.ts";
@@ -39,7 +40,7 @@ const packSkipped = (reason: PackSkipReason): ViewEntry =>
     kind: { skill_pack_not_loaded: { pack: "nda-kit", reason } },
   });
 
-/** The lawyer's question, then the host's notice. */
+/** The lawyer's question, then the host's notice, in a thread of claude-acp. */
 const thread =
   (notice: ViewEntry): (() => ReactNode) =>
   () => (
@@ -70,11 +71,12 @@ const notice = (order: number, over: Partial<NoticeEntry>): ViewEntry => ({
 const CONTEXT_NOTICE = notice(6, { text: CONTEXT, kind: "context_not_restored" });
 /** Claude's auto mode isn't available, so the session runs in acceptEdits. */
 const AUTO_NOTICE = notice(6, { text: AUTO_UNAVAILABLE, kind: "auto_mode_unavailable" });
-const BLOCKED = "Clauseo blocked a request: it reaches outside this matter.";
+const BLOCKED = "Clauseo stopped a step: {name} tried to reach outside this matter.";
+const BLOCKED_ALONE = "Clauseo stopped a step: the AI tried to reach outside this matter.";
 /** Clauseo's data fence refused, unasked, a request of the agent's (once a turn). */
 const BLOCKED_NOTICE = notice(6, {
   level: "warning",
-  text: BLOCKED,
+  text: BLOCKED_ALONE,
   kind: "outside_matter_blocked",
 });
 /** One paper a sync client put back after the undo. */
@@ -143,5 +145,16 @@ export const TN: Entry[] = [
     words: threadWords(BLOCKED),
     screen: "room/thread",
     render: thread(BLOCKED_NOTICE),
+  },
+  {
+    // Where the room knows no agent name, which it never has today: rendered alone, as U3-53.
+    id: "TN-12",
+    words: threadWords(BLOCKED_ALONE),
+    screen: "room/thread",
+    render: (lang: Lang) => (
+      <main lang={lang} className="review-alone">
+        <p>{th(lang, BLOCKED_ALONE)}</p>
+      </main>
+    ),
   },
 ];

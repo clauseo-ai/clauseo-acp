@@ -3,14 +3,16 @@
 //! running turn, the host's note that Clauseo blocked it and the lawyer did not decline it; the
 //! lawyer sees one `OutsideMatterBlocked` notice, never a permission row for it. The agent
 //! retrying the request gets the reject again, and no second note or notice. The note is never
-//! logged as a message.
+//! logged as a message. A request into the data folder after the lawyer's Stop gets no note.
 
 use std::path::Path;
 
-use clauseo_protocol::{DomainEvent, NoticeKind, NoticeLevel, StopReason, StreamId};
+use clauseo_protocol::{
+    CommandOutcome, DomainEvent, HostCommand, NoticeKind, NoticeLevel, StopReason, StreamId,
+};
 use serde_json::{Value, json};
 
-use crate::permissions::answer_from;
+use crate::permissions::{answer_from, until_first_request};
 use crate::support::{Dir, FAKE, Scenario};
 use crate::write;
 
@@ -19,7 +21,7 @@ const NOTE: &str =
     "Clauseo blocked that request: it reaches outside this matter. The lawyer did not decline it.";
 
 /// The notice's fallback words (`outside.rs`'s `NOTICE_TEXT`).
-const NOTICE: &str = "Clauseo blocked a request: it reaches outside this matter.";
+const NOTICE: &str = "Clauseo stopped a step: the AI tried to reach outside this matter.";
 
 /// claude-agent-acp's options, in forced ask (no `allow_always`).
 fn options() -> Value {
@@ -41,16 +43,20 @@ fn ask(id: &str, command: &str, answer: &str) -> [Value; 2] {
     ]
 }
 
-/// A claude-agent-acp with steering: one request the lawyer allows, then two into the data
-/// folder at `data`, the note expected between them.
-fn scenario(data: &Path) -> String {
-    let skill = format!(
+/// A command that reads a file in the data folder at `data`.
+fn skill(data: &Path) -> String {
+    format!(
         "cat '{}/skill-packs/x/skills/brief/SKILL.md'",
         data.display()
-    );
-    let mut lines = vec![
-        json!({"scenario": "outside-told", "description": "An allowed request, then two into \
-            the data folder: rejected, one note steered, one notice", "on_stdin_close": "exit"}),
+    )
+}
+
+/// A claude-agent-acp with steering, up to its prompt: the scenario `name` (its file's stem),
+/// described as `description`.
+fn handshake(name: &str, description: &str) -> Vec<Value> {
+    vec![
+        json!({"scenario": name, "description": description,
+            "on_stdin_close": "exit"}),
         json!({"expect": {"method": "initialize", "as": "init", "params": {"protocolVersion": 1}}}),
         json!({"respond": {"to": "init", "result": {"protocolVersion": 1,
             "agentCapabilities": {"loadSession": true,
@@ -61,7 +67,28 @@ fn scenario(data: &Path) -> String {
         json!({"respond": {"to": "new", "result": {"sessionId": "sess-1"}}}),
         json!({"expect": {"method": "session/prompt", "as": "p1",
             "params": {"sessionId": "sess-1"}}}),
-    ];
+    ]
+}
+
+/// The scenario's text, one JSON line each.
+fn text_of(lines: Vec<Value>) -> String {
+    let mut text = String::new();
+    for line in lines {
+        text.push_str(&line.to_string());
+        text.push('\n');
+    }
+    text
+}
+
+/// One request the lawyer allows, then two into the data folder at `data`, the note expected
+/// between them.
+fn scenario(data: &Path) -> String {
+    let skill = skill(data);
+    let mut lines = handshake(
+        "outside-told",
+        "An allowed request, then two into the data folder: rejected, one note steered, one \
+        notice",
+    );
     lines.extend(ask("version", "stetdoc --version", "allow"));
     lines.extend(ask("fence-1", &skill, "reject"));
     lines.push(
@@ -72,12 +99,49 @@ fn scenario(data: &Path) -> String {
     lines.push(json!({"respond": {"to": "steer", "result": {"outcome": "injected"}, "raw": true}}));
     lines.extend(ask("fence-2", &skill, "reject"));
     lines.push(json!({"respond": {"to": "p1", "result": {"stopReason": "end_turn"}}}));
-    let mut text = String::new();
-    for line in lines {
-        text.push_str(&line.to_string());
-        text.push('\n');
-    }
-    text
+    text_of(lines)
+}
+
+/// One request the lawyer stops instead of answering, then one into the data folder at `data`
+/// after the Stop: it is answered `cancelled` with no steer (a steer would be a mismatch).
+fn stopped_scenario(data: &Path) -> String {
+    let mut lines = handshake(
+        "outside-told-stop",
+        "A Stop, then a request into the data folder: no note",
+    );
+    let [request, _] = ask("version", "stetdoc --version", "allow");
+    lines.push(request);
+    lines.push(
+        json!({"note": "Either order: the stopped request and the cancel notification.",
+        "all": [
+            {"expect_response": {"id": "version",
+                "result": {"outcome": {"outcome": "cancelled"}}}},
+            {"expect": {"method": "session/cancel", "params": {"sessionId": "sess-1"}}},
+        ]}),
+    );
+    let [request, _] = ask("fence-1", &skill(data), "reject");
+    lines.push(request);
+    lines.push(
+        json!({"note": "Outside the turn: the request is cancelled, never steered.",
+        "all": [
+            {"expect_response": {"id": "fence-1",
+                "result": {"outcome": {"outcome": "cancelled"}}}},
+            {"expect": {"method": "session/cancel", "params": {"sessionId": "sess-1"}}},
+        ]}),
+    );
+    lines.push(json!({"respond": {"to": "p1", "result": {"stopReason": "cancelled"}}}));
+    text_of(lines)
+}
+
+/// The thread's notices.
+fn notices(events: &crate::observe::Events) -> Vec<clauseo_protocol::Notice> {
+    events
+        .events()
+        .filter_map(|event| match event {
+            DomainEvent::Notice(notice) => Some(notice.clone()),
+            _ => None,
+        })
+        .collect()
 }
 
 #[test]
@@ -106,13 +170,7 @@ fn a_fence_refusal_after_an_allow_is_told_as_clauseos_block() {
     assert_eq!(ended.stop, StopReason::EndTurn, "{}", events.dump());
     // Only the allowed request reached the lawyer: no row reads "Allowed once." for the others.
     assert_eq!(events.permission_requests().len(), 1, "{}", events.dump());
-    let notices: Vec<_> = events
-        .events()
-        .filter_map(|event| match event {
-            DomainEvent::Notice(notice) => Some(notice.clone()),
-            _ => None,
-        })
-        .collect();
+    let notices = notices(&events);
     assert_eq!(notices.len(), 1, "{}", events.dump());
     assert_eq!(notices[0].kind, Some(NoticeKind::OutsideMatterBlocked));
     assert_eq!(notices[0].level, NoticeLevel::Warning);
@@ -123,5 +181,37 @@ fn a_fence_refusal_after_an_allow_is_told_as_clauseos_block() {
         .filter(|event| matches!(event, DomainEvent::UserMessage(_)))
         .count();
     assert_eq!(messages, 1, "{}", events.dump());
+    host.shutdown();
+}
+
+#[test]
+fn a_fence_refusal_after_a_stop_sends_no_note() {
+    let dir = Dir::new("outside_told_stop", &[]);
+    let data = dir.data().to_owned();
+    write::write(
+        &data.join("skill-packs/x/skills/brief/SKILL.md"),
+        b"# brief\n",
+    );
+    let folder = dir.folder("m", &[("a.txt", "a")]);
+    let file = folder.with_file_name("outside-told-stop.jsonl");
+    write::write(&file, stopped_scenario(&data).as_bytes());
+    dir.set_agents(&[(FAKE, Scenario::Written(file))]);
+
+    let host = dir.start(0);
+    let matter = host.create_matter("m", &folder);
+    let thread = host.create_thread(matter, FAKE);
+    let mut events = host.events(StreamId::Thread(thread));
+    let (turn, _) = host.prompt(thread, "Run the commands.");
+    until_first_request(&mut events);
+    assert_eq!(
+        host.ok(HostCommand::Cancel { thread }),
+        CommandOutcome::Done
+    );
+    let ended = events.until_turn_ended(turn);
+    host.settle();
+    events.drain_ready();
+    events.assert_no_mismatch();
+    assert_eq!(ended.stop, StopReason::Cancelled, "{}", events.dump());
+    assert!(notices(&events).is_empty(), "{}", events.dump());
     host.shutdown();
 }

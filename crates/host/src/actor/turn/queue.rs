@@ -25,7 +25,7 @@ mod install;
 mod queued;
 mod restore;
 mod sign_in;
-mod steer;
+pub(in crate::actor::turn) mod steer;
 mod transcript;
 mod unsent;
 

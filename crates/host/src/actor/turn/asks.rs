@@ -190,6 +190,7 @@ fn fence_check(
         roots,
         words,
         health: actor.protection.data_fence().clone(),
+        vars: agent.fence_vars.clone(),
     }))
 }
 

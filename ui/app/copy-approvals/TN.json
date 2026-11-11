@@ -100,14 +100,25 @@
     "by": "orchestrator (settled en)"
   },
   "TN-11": {
-    "en": "Clauseo blocked a request: it reaches outside this matter.",
-    "hi": "Clauseo ने एक अनुरोध रोक दिया: वह इस मामले के बाहर तक पहुँचता है।",
+    "en": "Clauseo stopped a step: {name} tried to reach outside this matter.",
+    "hi": "Clauseo ने एक चरण रोक दिया: {name} ने इस मामले के बाहर पहुँचने की कोशिश की।",
     "hi_status": "provisional",
     "hi_at": "2026-11-11",
     "hi_by": "fence-after-allow (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
+    "status": "approved",
     "at": "2026-11-11",
-    "by": "fence-after-allow (provisional; orchestrator to approve)",
-    "note": "Host notice NoticeKind::OutsideMatterBlocked: Clauseo's data fence refused, unasked, a request of the agent's that reached outside the matter (actor/turn/outside.rs), once a turn; the agent is told separately by a steer"
+    "by": "orchestrator (settled en)",
+    "note": "Host notice NoticeKind::OutsideMatterBlocked: Clauseo's data fence refused, unasked, a request of the agent's that reached outside the matter (actor/turn/outside.rs), once a turn; the agent is told separately by a steer. {name} is the agent as U3-52 names it (stops.ts: Claude, ChatGPT for Codex, or its own name). Reworded 2026-11-11 to U3-52's shape"
+  },
+  "TN-12": {
+    "en": "Clauseo stopped a step: the AI tried to reach outside this matter.",
+    "hi": "Clauseo ने एक चरण रोक दिया: AI ने इस मामले के बाहर पहुँचने की कोशिश की।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-11",
+    "hi_by": "fence-after-allow (provisional; Hindi-speaking lawyer to review)",
+    "status": "approved",
+    "at": "2026-11-11",
+    "by": "orchestrator (settled en)",
+    "note": "TN-11 where the room knows no agent name (notice-words.ts), as U3-53's the AI; rendered alone. The host's own notice text is this English, for a view that does not know the kind"
   }
 }

@@ -50,6 +50,7 @@ pub(crate) use health::DataFenceHealth;
 pub(crate) use input::{candidates, candidates_roots, candidates_words, command_names};
 pub(crate) use launch::{LaunchDeny, claude_project_key, claude_projects, launch_deny};
 pub(crate) use shell_deny::windows_shell_deny_rules;
+pub(crate) use variables::launch_vars;
 
 /// What of `<data>` only Clauseo uses, named whether or not it exists at the launch (the
 /// launch adds every other entry that exists then, `launch.rs`), as rule patterns under it,
@@ -282,6 +283,9 @@ pub(crate) struct FenceCheck {
     /// The host's data-fence health: the data folder's identity kept once read, retried while
     /// it can't be, and whether the fence compares by names only.
     pub(crate) health: DataFenceHealth,
+    /// The agent's launch variables that hold a path ([`launch_vars`]), for PowerShell's
+    /// `$env:NAME` in a path; a variable not among them is read from the host's environment.
+    pub(crate) vars: Vec<(String, String)>,
 }
 
 impl FenceCheck {
@@ -345,28 +349,48 @@ impl FenceCheck {
                 }
             }
         };
-        // An agent's text with a name Windows reads as another place is refused untouched.
-        let agent = |path: &PathBuf| {
-            let path = &variables::file_of_variables(path, disk.net.windows);
-            if refused_windows_name(path, disk.net) {
-                vec![Found::Refused]
-            } else {
-                resolve::resolve_all(path, &self.cwd, home, disk)
+        let var = |name: &str| {
+            let launch = self
+                .vars
+                .iter()
+                .find(|(var, _)| var.eq_ignore_ascii_case(name));
+            launch
+                .map(|(_, value)| value.clone())
+                .or_else(|| std::env::var(name).ok())
+        };
+        // An agent's text with a name Windows reads as another place is refused untouched, and
+        // a search folder whose variable can't be expanded too.
+        let agent = |path: &PathBuf, root: bool| {
+            let Some(paths) = variables::judged(path, disk.net.windows, root, &var) else {
+                return vec![Found::Refused];
+            };
+            let mut found = Vec::new();
+            for path in &paths {
+                if refused_windows_name(path, disk.net) {
+                    found.push(Found::Refused);
+                } else {
+                    found.extend(resolve::resolve_all(path, &self.cwd, home, disk));
+                }
             }
+            found
         };
         let embedded = self.embedded(&real_data, !network_data, insensitive, disk.net.windows);
         let reached = self
             .paths
             .iter()
             .chain(&embedded)
-            .any(|path| agent(path).iter().any(inside));
+            .any(|path| agent(path, false).iter().any(inside));
         // A search from a folder that holds `<data>` (or is it) reaches all of it.
         let holds = |found: &Found| {
             inside(found)
                 || matches!(found, Found::Path(root) if !network_data
                     && (data.starts_with(&key(root, insensitive)) || identity.is_on_line(root)))
         };
-        reached || self.roots.iter().any(|root| agent(root).iter().any(holds))
+        reached
+            || self
+                .roots
+                .iter()
+                .any(|root| agent(root, true).iter().any(holds))
     }
 
     /// The own folders that count ([`Self::allowed`], [`Self::cwd`]), as keys.

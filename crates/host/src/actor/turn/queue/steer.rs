@@ -108,7 +108,7 @@ impl Steered {
 
 /// Where a steer goes (`target`).
 #[derive(Debug, Clone, Copy)]
-pub(super) enum Target {
+pub(in crate::actor::turn) enum Target {
     /// A real steer into this running turn.
     Join(TurnId),
     /// The agent's steer joins a turn, but not now: the message waits as the next turn, behind
@@ -122,8 +122,9 @@ pub(super) enum Target {
 /// answer (both flags), a prompting turn not cancelled, and no permission or question open. An
 /// agent whose steer joins (by its flags, or before its first attach by its kind, as the view's
 /// `steer_joins_turn` guesses: Claude's) but cannot take it now gets [`Target::Next`] while a
-/// turn runs or closes.
-pub(super) fn target(actor: &mut Actor, thread: ThreadId) -> Target {
+/// turn runs or closes. The data fence's note goes only where a real steer would
+/// ([`Target::Join`], `outside.rs`).
+pub(in crate::actor::turn) fn target(actor: &mut Actor, thread: ThreadId) -> Target {
     let claude = actor
         .threads
         .get(&thread)

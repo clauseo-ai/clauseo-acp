@@ -10,7 +10,7 @@ export type StopLine =
 
 /** The agent as the error words name it (words-errors.ts's plannedKey): Claude, ChatGPT for Codex, else its own name;
  * null where the room doesn't know it or it has no name. */
-function agentNameOf(agent: AgentName): string | null {
+export function agentNameOf(agent: AgentName): string | null {
   if (agent?.kind === "claude") return "Claude";
   if (agent?.kind === "codex") return "ChatGPT";
   const name = agent?.name?.trim() ?? "";

@@ -18,8 +18,8 @@ use crate::agent::{self, AgentLink};
 use crate::error::Error;
 
 /// What a launch gives: the link, the folder it runs in, what a Codex launch recorded, a
-/// Claude launch's plans folder, the matter folder's spellings for its stderr summary, and a
-/// Claude launch's home.
+/// Claude launch's plans folder, the matter folder's spellings for its stderr summary, a Claude
+/// launch's home, and the launch variables the data fence expands (`data_fence::launch_vars`).
 pub(super) type Launched = (
     AgentLink,
     PathBuf,
@@ -27,6 +27,7 @@ pub(super) type Launched = (
     Option<PathBuf>,
     Vec<String>,
     Option<PathBuf>,
+    Vec<(String, String)>,
 );
 
 /// The launch itself: the spec from the settings (inherited environment, the agent's
@@ -101,6 +102,7 @@ pub(super) fn launch(
     let plan_notes = claude
         .then(|| agent::plan_note::plans_folder(spec.env(), cfg!(windows)))
         .flatten();
+    let fence_vars = agent::data_fence::launch_vars(spec.env());
     let post = actor.post.clone();
     let post: Rc<dyn Fn(agent::AgentInput)> = Rc::new(move |input| {
         // The actor may be gone by then.
@@ -121,6 +123,7 @@ pub(super) fn launch(
         plan_notes,
         matter_spellings,
         claude_home,
+        fence_vars,
     ))
 }
 
