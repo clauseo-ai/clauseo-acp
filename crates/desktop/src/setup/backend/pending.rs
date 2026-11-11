@@ -3,7 +3,18 @@
 //! and is kept here as a pending press (the agent, the method, Claude's console flag), shown as
 //! `Queued`; the command answers `Done`.
 //!
-//! - **On the install's `Ready`** the pump runs it ([`run_press`]) through the
+//! **Sign-ins run one at a time.** A sign-in press for an agent while another agent's sign-in
+//! is going (`SetupAgents::sign_in_going`: S18's job is a sign-in, running or queued) is kept
+//! the same way, shown `Queued`, and starts no install of an agent installed already. Only
+//! sign-in presses wait ([`Press`]); a status check, a sign-out, a search and `UseFoundLogin`
+//! never do.
+//!
+//! - **When the other sign-in ends** (signed in, cancelled, failed, a login found: any state or
+//!   `SigninUnchanged` from S18, which frees the job before it says its last state) the pump
+//!   runs the first kept press, by agent, whose install is `Ready` or `Managed` and with no
+//!   sign-in going ([`run_next`]), with no new command, through [`run_press`]'s path.
+//! - **On the install's `Ready`** the pump runs it ([`run_press`]), unless another agent's
+//!   sign-in is going (kept then, and no status check runs over its `Queued`), through the
 //!   same gate and checks as a direct press (`signin_gate`, `refuse_reused`, `refuse_start`),
 //!   checked then: a key, an endpoint or a policy that bars it now refuses it, with the
 //!   refusal logged by its code and the sign-in state back to S18's. That holds for Codex's
@@ -20,6 +31,7 @@
 //! - **Dropped** when the install ends `Paused`, when the agent turns out `Managed`, on
 //!   `CancelSignIn` (the install carries on), on `SignOut`, and when a key or an endpoint takes
 //!   over (`AgentsBackend::end_sign_in`).
+//!   Nothing another agent does drops it.
 //! - One per agent: a second press replaces the first (`Setup` lets it past the sign-in join).
 //! - Memory only: nothing of it outlives a quit.
 //!
@@ -58,16 +70,25 @@ fn installed(state: Option<&InstallState>) -> bool {
     )
 }
 
+/// Whether a sign-in of a known agent other than `agent` is going: `agent`'s waits for it.
+fn other_going(backend: &AgentsBackend, agent: &AgentId) -> bool {
+    backend
+        .known
+        .keys()
+        .any(|other| other != agent && backend.agents.sign_in_going(other))
+}
+
 /// A press for `agent` whose checks passed, with the gate held: when the agent is not
-/// installed, or a press is still kept for it, keeps `press` with `switch`, the lawyer's yes
-/// (replacing the one kept before it), shows `Queued` and starts or joins the install; `true`
-/// then. `false` when the agent is installed and nothing is kept, so the caller starts the
+/// installed, a press is still kept for it, or another agent's sign-in is going, keeps `press`
+/// with `switch`, the lawyer's yes (replacing the one kept before it), shows `Queued` and,
+/// for an agent not installed, starts or joins the install; `true` then. `false` when the
+/// agent is installed, nothing is kept and no other sign-in is going, so the caller starts the
 /// sign-in at once.
 ///
 /// A kept press is replaced even once the install is `Ready`: S18 says `Ready` before the
 /// pump has handled it (it writes the entry first), and a press started directly then would be
-/// restarted by the older press at [`run_press`]. Replaced, the latest is the one that runs
-/// (the install of a ready agent says `Ready` again, which the pump handles too).
+/// restarted by the older press at [`run_press`]. Replaced, the latest is the one that runs:
+/// at the pump's `Ready`, still on its way, or at the other sign-in's end ([`run_next`]).
 pub(super) fn keep_press(
     backend: &AgentsBackend,
     agent: &AgentId,
@@ -75,16 +96,24 @@ pub(super) fn keep_press(
     switch: Option<OwnLogin>,
 ) -> bool {
     let kept = lock(&backend.pending).contains_key(agent);
-    if !kept && installed(backend.agents.state(agent).as_ref()) {
+    let installed = installed(backend.agents.state(agent).as_ref());
+    let waits = other_going(backend, agent);
+    if !kept && installed && !waits {
         return false;
     }
     let replaced = lock(&backend.pending)
         .insert(agent.clone(), Kept { press, switch })
         .is_some();
     let switch = switch.is_some();
-    tracing::info!(%agent, method = ?press, switch, replaced, "sign-in pending: installing first");
+    if installed {
+        tracing::info!(%agent, method = ?press, switch, replaced, waits, "sign-in pending: installed");
+    } else {
+        tracing::info!(%agent, method = ?press, switch, replaced, waits, "sign-in pending: installing first");
+    }
     backend.compose.signin(agent, SigninState::Queued);
-    backend.agents.install(agent);
+    if !installed {
+        backend.agents.install(agent);
+    }
     true
 }
 
@@ -153,28 +182,67 @@ pub(super) fn follow_press(backend: &AgentsBackend, agent: &AgentId, state: &Ins
     drop_press(backend, agent, why);
 }
 
+/// What [`run_press`] did with an agent's pending press.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum Ran {
+    /// None was kept, or it was refused and dropped.
+    Nothing,
+    /// Its sign-in started.
+    Started,
+    /// Kept: another agent's sign-in is going ([`run_next`] runs it at that one's end).
+    Waits,
+}
+
 /// `agent`'s install is `Ready`: its pending press, if any, runs now as a direct press does,
-/// checked now. Whether a sign-in started.
-pub(super) fn run_press(backend: &AgentsBackend, agent: &AgentId) -> bool {
+/// checked now, unless another agent's sign-in is going (kept then).
+pub(super) fn run_press(backend: &AgentsBackend, agent: &AgentId) -> Ran {
     let _gate = lock(&backend.signin_gate);
+    if lock(&backend.pending).contains_key(agent) && other_going(backend, agent) {
+        tracing::info!(%agent, "pending sign-in kept at Ready: another sign-in is going");
+        return Ran::Waits;
+    }
+    start_kept(backend, agent)
+}
+
+/// A sign-in of some agent ended (the pump saw a state or `SigninUnchanged`): the first kept
+/// press, by agent, whose install is `Ready` or `Managed` runs as at [`run_press`], while no
+/// other sign-in is going. One refused at its checks is dropped and the next tried; one started
+/// ends the walk. Whether a sign-in started.
+pub(super) fn run_next(backend: &AgentsBackend) -> bool {
+    let _gate = lock(&backend.signin_gate);
+    let agents: Vec<AgentId> = lock(&backend.pending).keys().cloned().collect();
+    for agent in agents {
+        if !installed(backend.agents.state(&agent).as_ref()) || other_going(backend, &agent) {
+            continue;
+        }
+        if start_kept(backend, &agent) == Ran::Started {
+            return true;
+        }
+    }
+    false
+}
+
+/// `agent`'s kept press, if any, taken and started, with the gate held: a refusal is logged and
+/// the sign-in state goes back to S18's.
+fn start_kept(backend: &AgentsBackend, agent: &AgentId) -> Ran {
     let Some(kept) = lock(&backend.pending).remove(agent) else {
-        return false;
+        return Ran::Nothing;
     };
     let press = kept.press;
     match start_press(backend, agent, kept) {
         Ok(()) => {
-            tracing::info!(%agent, method = ?press, "sign-in started: pressed before the install");
+            tracing::info!(%agent, method = ?press, "sign-in started: pressed before it could run");
             backend.replaced(agent);
-            true
+            Ran::Started
         }
         Err(error) => {
             tracing::warn!(
                 %agent,
                 code = error.code().as_str(),
-                "a sign-in pressed before the install was refused at its end"
+                "a kept sign-in press was refused when it came to run"
             );
             show_s18(backend, agent);
-            false
+            Ran::Nothing
         }
     }
 }
