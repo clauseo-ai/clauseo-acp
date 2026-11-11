@@ -6,6 +6,7 @@ import { act } from "react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { THREAD, TURN } from "../../testing/stream-script.ts";
 import type { HostQuery, ViewEntry } from "../../transport/protocol.ts";
+import { EDITED_WAIT_MS } from "./reading.ts";
 import {
   answering,
   file,
@@ -157,4 +158,57 @@ test("with no answer from the host, a file that may hold the lawyer's edits is k
   expect(dialog()?.textContent).toContain(
     "Nothing goes back. Every document it changed is kept as it is now.",
   );
+});
+
+test("with no answer within the wait, the flags decide and Undo goes ahead", async () => {
+  // the wait's timer is held here and fired by hand; every other timer runs as ever
+  let fire: (() => void) | null = null;
+  const real = globalThis.setTimeout;
+  const spy = vi.spyOn(globalThis, "setTimeout").mockImplementation(((
+    fn: () => void,
+    ms?: number,
+  ) => {
+    if (ms === EDITED_WAIT_MS) {
+      fire = fn;
+      return 0 as unknown as ReturnType<typeof setTimeout>;
+    }
+    return real(fn, ms);
+  }) as typeof setTimeout);
+  h = await mountVersions(
+    VERSIONS,
+    [
+      stepEntry(5, {
+        files: [
+          file("notes.txt", { change: "added", may_include_lawyer_edits: true }),
+          file("brief.docx"),
+        ],
+        checkpoint_after: "cp2",
+      }),
+    ],
+    { query: answering({ preview_undo: () => new Promise(() => undefined) }) },
+  );
+  await h.openVersions();
+  await h.click(h.all("version").find((r) => r.dataset["checkpoint"] === "cp2"));
+  await h.click(h.one("version-undo"));
+  expect(h.one("dialog-confirm")?.getAttribute("aria-disabled")).toBe("true");
+  expect(fire).not.toBeNull();
+  await act(async () => fire?.());
+  await h.settle();
+  spy.mockRestore();
+  expect(h.one("dialog-confirm")?.getAttribute("aria-disabled")).toBeNull();
+  const row = choiceRow("notes.txt");
+  expect(row?.querySelector(".ver-edited-at")?.textContent).toBe(
+    "Changed during the answer, though Clauseo didn't say it was changing it.",
+  );
+  await h.click(h.one("dialog-confirm"));
+  expect(h.sent("undo_step")).toEqual([
+    {
+      thread: THREAD,
+      turn: TURN,
+      files: [
+        { path: "notes.txt", choice: "keep" },
+        { path: "brief.docx", choice: "undo" },
+      ],
+    },
+  ]);
 });
