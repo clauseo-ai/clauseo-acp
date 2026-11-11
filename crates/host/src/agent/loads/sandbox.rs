@@ -1,15 +1,28 @@
 //! Claude Code's own sandbox for a Claude session on macOS (and Linux, for development;
 //! decision record 0030, "Claude's sandbox"): the `sandbox` object of the flag settings, which
 //! runs each Bash command under Seatbelt (bubblewrap on Linux) and lets a sandboxed command run
-//! without asking (`autoAllowBashIfSandboxed`). A session gets none ([`ClaudeSandbox::for_os`]),
-//! so its commands keep asking:
+//! without asking (`autoAllowBashIfSandboxed`). A session gets none ([`ClaudeSandbox::for_os`],
+//! [`Off`]), so its commands go to the mode (`auto`'s classifier):
 //!
 //! - on Windows: Claude Code 2.1.293 never auto-allows there, and its Windows sandbox needs a
 //!   one-time admin install behind a feature gate;
 //! - when Claude's short temp folder could not be made (`agent::temp::make_claude_tmp`);
-//! - when a path in its lists holds a glob character (`*`, `?`, `[`, `]`): Claude Code reads
-//!   sandbox paths as patterns and does not escape them, so `Smith [2024]` would open `Smith 2`;
+//! - when a path in its lists holds `*` or `?`, which Claude Code reads as a pattern with no
+//!   escape ([`Off::Wildcard`]); that session also leaves `auto` for `acceptEdits`
+//!   (`actor/turn/session/claude_mode.rs`, `Auto::NoSandbox`), so no command runs on the
+//!   classifier alone where the sandbox was meant to be;
 //! - when a path it must deny is not UTF-8 (it could not be named).
+//!
+//! A `[` (in `Smith [2024]`) is escaped instead ([`escape_brackets`]). Claude Code 2.1.293
+//! reads a sandbox path holding `*`, `?`, `[` or `]` as a glob (its `W4t`: `[…]` stays a
+//! regex class, `*` becomes `[^/]*` even inside one, a `\` is a literal backslash, so no
+//! escape exists for `*` or `?`). `[[]` is a class holding only `[`, and a lone `]` is literal,
+//! so `Smith [[]2024]` names `Smith [2024]` alone. A glob deny covers all under it (`z4t`
+//! adds `(/.*)?`), but a glob allow only the path itself (`W4t`, Seatbelt's `(regex …)`), so
+//! each escaped allowed folder goes in twice, as itself and with `/**`. Which lists read globs
+//! differs by OS (code.claude.com/docs/en/settings-reference, "Sandbox path prefixes"): every
+//! list on macOS, only `denyRead` and `allowRead` on Linux, where a glob write path is
+//! skipped, so the write lists stay as written there.
 //!
 //! What the object says, every key Clauseo's:
 //!
@@ -38,6 +51,8 @@
 //!   `network.deniedDomains` keeps loopback out even through Claude Code's own proxy, which runs
 //!   outside the sandbox: the browser's debugging port and agent-browser's daemon listen there.
 //!   A direct loopback connect is refused by the sandbox already (stage C, the same day).
+//!   `0.0.0.0` and `[::]` are denied too: a connect to the any-address lands on loopback
+//!   (stage C on a Mac) ([`DENIED_DOMAINS`]).
 //! - `filesystem.allowWrite`: the matter folder, the work folder, the session's temp folder, the
 //!   matter's notes and Claude's short temp folder (`CLAUDE_CODE_TMPDIR`, where sandboxed
 //!   commands' `TMPDIR` is made).
@@ -51,7 +66,9 @@
 //!   what a sandboxed command needs, with the `PATH` file Claude Code reads into each command
 //!   (`<run>/clauseo-env.sh`, `agent::shell_path`) and the shell browser's tools folder. Not
 //!   the whole run folder: it holds the case-law relay's
-//!   token and the browser's profile (the visited sites' cookies).
+//!   token and the browser's profile (the visited sites' cookies). Of Claude's own project
+//!   folder only `<home>/projects/<key>/*/tool-results`, where `WebFetch` keeps the files it
+//!   fetches (a PDF among them): never the transcripts or the memory beside them.
 //! - `ignoreViolations`: Claude Code's shell snapshot folder in its home, which the data fence
 //!   denies. Each command starts with `source <snapshot> 2>/dev/null || true`, so a denied read
 //!   costs only the lawyer's shell functions and aliases, never the command (the snapshot's
@@ -65,6 +82,13 @@ use std::path::{Path, PathBuf};
 
 use serde_json::{Map, Value, json};
 
+/// The hosts a sandboxed command may not reach even through Claude Code's proxy: loopback, where
+/// the browser's debugging port and agent-browser's daemon listen, and the any-address
+/// `0.0.0.0` and `[::]`, which reach loopback too (stage C on a Mac, 2026-11-11). `127.1`, the
+/// decimal forms and `[::ffff:127.0.0.1]` come out as `127.0.0.1` once the proxy reads them.
+pub(crate) const DENIED_DOMAINS: [&str; 6] =
+    ["localhost", "127.0.0.1", "::1", "[::1]", "0.0.0.0", "[::]"];
+
 /// The command patterns that run outside the sandbox in a session with the browser.
 pub(crate) const EXCLUDED_COMMANDS: [&str; 1] = ["agent-browser:*"];
 
@@ -72,8 +96,43 @@ pub(crate) const EXCLUDED_COMMANDS: [&str; 1] = ["agent-browser:*"];
 /// Claude Code expands it, and macOS's shared places where matters may be kept.
 pub(crate) const DENY_READ: [&str; 3] = ["~/", "/Volumes", "/Users/Shared"];
 
-/// The characters Claude Code reads as a pattern in a sandbox path.
-const GLOB: [char; 4] = ['*', '?', '[', ']'];
+/// The characters Claude Code reads as a pattern in a sandbox path that no escape makes literal.
+const WILDCARDS: [char; 2] = ['*', '?'];
+
+/// The OS a sandbox is built for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SandboxOs {
+    /// Seatbelt: every list reads globs.
+    Mac,
+    /// bubblewrap, for development: only the read lists read globs.
+    Linux,
+    /// No sandbox.
+    Windows,
+}
+
+impl SandboxOs {
+    /// The OS this build runs on.
+    pub(crate) const CURRENT: Self = if cfg!(windows) {
+        Self::Windows
+    } else if cfg!(target_os = "macos") {
+        Self::Mac
+    } else {
+        Self::Linux
+    };
+}
+
+/// Why a session gets no sandbox.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Off {
+    /// Windows (see the module doc).
+    Windows,
+    /// Claude's short temp folder was not made.
+    NoTemp,
+    /// A path to deny is not UTF-8.
+    NotUtf8,
+    /// A path holds `*` or `?`: the session also runs in `acceptEdits`, not `auto`.
+    Wildcard,
+}
 
 /// Claude Code's shell snapshot folder in its config folder.
 const SNAPSHOTS: &str = "shell-snapshots";
@@ -139,26 +198,21 @@ pub(crate) struct SandboxPaths<'a> {
 const RUNTIME_PREFIX: &str = "clauseo-python-";
 
 impl ClaudeSandbox {
-    /// The sandbox for a session on Windows (`windows`) or not: none on Windows, nor when
-    /// [`Self::of`] gives none.
-    pub(crate) fn for_os(windows: bool, paths: &SandboxPaths<'_>) -> Option<Self> {
-        if windows {
-            return None;
+    /// The sandbox for `paths` on `os`; none on Windows, without Claude's short temp folder,
+    /// when a path to deny is not UTF-8, or when any path holds `*` or `?` (one info line, no
+    /// path). A `[` is escaped ([`escape_brackets`]).
+    pub(crate) fn for_os(os: SandboxOs, paths: &SandboxPaths<'_>) -> Result<Self, Off> {
+        if os == SandboxOs::Windows {
+            return Err(Off::Windows);
         }
-        Self::of(paths)
-    }
-
-    /// The sandbox for `paths`; none without Claude's short temp folder, when a path to deny is
-    /// not UTF-8, or when any path holds a glob character (one info line, no path).
-    pub(crate) fn of(paths: &SandboxPaths<'_>) -> Option<Self> {
         let Some(claude_tmp) = paths.claude_tmp else {
             tracing::info!("Claude's sandbox is off: its temp folder was not made");
-            return None;
+            return Err(Off::NoTemp);
         };
         let denied = paths.data.iter().chain(paths.other_matters);
         let Some(mut deny_read) = strict_texts(denied.map(PathBuf::as_path)) else {
             tracing::info!("Claude's sandbox is off: a folder to deny is not UTF-8");
-            return None;
+            return Err(Off::NotUtf8);
         };
         deny_read.splice(0..0, DENY_READ.iter().map(|path| (*path).to_owned()));
         let marker = paths.matter.join(MATTER_MARKER);
@@ -170,15 +224,43 @@ impl ClaudeSandbox {
             quiet: texts([paths.claude_home.join(SNAPSHOTS).as_path()]),
             browser: paths.browser,
         };
-        if sandbox.has_glob() {
-            tracing::info!("Claude's sandbox is off: a sandbox path holds a glob character");
-            return None;
+        if sandbox.has_wildcard() {
+            tracing::info!("Claude's sandbox is off: a sandbox path holds * or ?; acceptEdits");
+            return Err(Off::Wildcard);
         }
-        Some(sandbox)
+        let mut sandbox = sandbox.escaped(os);
+        sandbox
+            .allow_read
+            .extend(tool_results(paths.claude_home, paths.matter));
+        Ok(sandbox)
     }
 
-    /// Whether any path in the lists holds a [`GLOB`] character.
-    fn has_glob(&self) -> bool {
+    /// The lists with each `[` escaped where `os` reads globs, each escaped allowed path also
+    /// with `/**` (see the module doc).
+    fn escaped(self, os: SandboxOs) -> Self {
+        let globs_in_writes = os == SandboxOs::Mac;
+        let allowed = |list: Vec<String>| list.into_iter().flat_map(allowed_entries).collect();
+        let denied = |list: Vec<String>| list.iter().map(|path| escape_brackets(path)).collect();
+        Self {
+            allow_write: if globs_in_writes {
+                allowed(self.allow_write)
+            } else {
+                self.allow_write
+            },
+            deny_write: if globs_in_writes {
+                denied(self.deny_write)
+            } else {
+                self.deny_write
+            },
+            deny_read: denied(self.deny_read),
+            allow_read: allowed(self.allow_read),
+            quiet: denied(self.quiet),
+            browser: self.browser,
+        }
+    }
+
+    /// Whether any path in the lists holds one of [`WILDCARDS`].
+    fn has_wildcard(&self) -> bool {
         [
             &self.allow_write,
             &self.deny_write,
@@ -188,7 +270,7 @@ impl ClaudeSandbox {
         ]
         .into_iter()
         .flatten()
-        .any(|path| path.contains(GLOB))
+        .any(|path| path.contains(WILDCARDS))
     }
 
     /// `filesystem.allowRead`: the writable folders, the browser's downloads, the skill packs,
@@ -210,7 +292,6 @@ impl ClaudeSandbox {
         .iter()
         .map(|path| path.to_path_buf())
         .collect();
-        folders.push(project_folder(paths.claude_home, paths.matter));
         folders.extend(paths.skills.iter().cloned());
         folders.extend(paths.env_file.map(Path::to_path_buf));
         for folder in paths.path {
@@ -235,7 +316,7 @@ impl ClaudeSandbox {
             "allowAppleEvents": false,
             "network": {
                 "allowedDomains": ["*"],
-                "deniedDomains": ["localhost", "127.0.0.1", "::1", "[::1]"],
+                "deniedDomains": DENIED_DOMAINS,
             },
             "filesystem": {
                 "allowWrite": self.allow_write,
@@ -261,17 +342,36 @@ pub(crate) fn sandbox_settings(settings: &mut Map<String, Value>, sandbox: &Clau
     settings.insert("sandbox".to_owned(), sandbox.settings());
 }
 
-/// Claude Code's folder for the session's project in its config folder, where `WebFetch` keeps
-/// the files it fetches (`<project>/<session>/tool-results/`, a PDF among them): the working
-/// folder's path with every character but an ASCII letter or digit as `-`, Claude Code's own
-/// naming. Only this matter's project: the other projects hold other matters' conversations.
-fn project_folder(home: &Path, matter: &Path) -> PathBuf {
-    let name: String = matter
-        .to_string_lossy()
-        .chars()
-        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
-        .collect();
-    home.join("projects").join(name)
+/// The tool results of every session of this matter's project in Claude Code's config folder,
+/// where `WebFetch` keeps the files it fetches: `<home>/projects/<key>/*/tool-results`, and the
+/// same with `/**` (a glob allow opens only what it names), the key Claude Code's own
+/// (`data_fence::claude_project_key`). Never the project folder itself, which holds the
+/// session transcripts and the memory. None when a path is not UTF-8. The `*` stands for one
+/// session's folder; Claude Code reads it after the first folder name, as Linux requires.
+fn tool_results(home: &Path, matter: &Path) -> Vec<String> {
+    let (Some(home), Some(matter)) = (home.to_str(), matter.to_str()) else {
+        return Vec::new();
+    };
+    let key = crate::agent::data_fence::claude_project_key(matter);
+    let base = format!("{}/projects/{key}/*/tool-results", escape_brackets(home));
+    vec![base.clone(), format!("{base}/**")]
+}
+
+/// `text` with each `[` as `[[]`, a glob class holding only `[`; a lone `]` is literal already
+/// (see the module doc).
+pub(crate) fn escape_brackets(text: &str) -> String {
+    text.replace('[', "[[]")
+}
+
+/// An allowed path's entries: itself, and with `/**` too once escaped (a glob allow opens only
+/// what it names).
+fn allowed_entries(path: String) -> Vec<String> {
+    if path.contains('[') {
+        let escaped = escape_brackets(&path);
+        vec![escaped.clone(), format!("{escaped}/**")]
+    } else {
+        vec![path]
+    }
 }
 
 /// The paths as UTF-8 text, in order, each once; one that is not UTF-8 is left out.

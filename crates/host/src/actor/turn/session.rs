@@ -33,8 +33,8 @@ use crate::sent::SentView;
 mod claude_mode;
 mod named;
 
-pub(super) use claude_mode::Auto;
 use claude_mode::claude_start;
+pub(super) use claude_mode::{Auto, hold_auto_back};
 
 /// The fallback words of the notice a thread gets when its agent starts a new session after
 /// earlier turns (`NoticeKind::ContextNotRestored`), for a view that does not know the kind.
