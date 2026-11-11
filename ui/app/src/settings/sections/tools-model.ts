@@ -1,36 +1,30 @@
-// Settings › Tools (UC-169 on): the seam between the section and the host's MCP server protocol (PR A1). The types
-// below are A1's names as its writer gave them (not committed yet): the view arrives as the app event
-// `{ mcp_tools_changed: McpToolsView }`, in every catch-up and after every change, and the commands go as
-// `HostCommand { mcp: McpCommand }`, each answering Done or a HostError with one of MCP_ERROR_CODES. The section reads
-// and writes only through ToolsCommands, which this file finds for a transport. Until A1's bindings land no transport
-// carries them, so toolsCommandsOf answers null and the section stays hidden; tests, the copy review and the probe hand
-// a fake over with provideTools (tools-fake.ts). When A1 lands, its bindings are wired here and nowhere else. Secret
+// Settings › Tools (UC-169 on): the seam between the section and the host's MCP servers (PR A1, ui/app/src/transport/
+// bindings.ts). The view is the app event `{ mcp_tools_changed: McpToolsView }`, which the host sends in every catch-up
+// and after every change, and the three commands go as `HostCommand { mcp: McpCommand }` from the settings window (the
+// host refuses them from the main window; only the settings window's Tools section asks for them here). Each answers
+// Done, or a HostError with one of MCP_ERROR_CODES. The section reads and writes only through ToolsCommands. Secret
 // values go to the host in `set` alone and never come back: a view says only which names hold a saved value. Import
-// (`importable`, mcpImport) is A3's, later, and only the fake has it for now.
+// (`importable`, mcpImport) is A3's, later: no host binding has it, so the Import buttons show over a fake alone.
+// Tests, the copy review and the probe hand a fake over with provideTools (tools-fake.ts, never shipped).
+import { useCallback, useSyncExternalStore } from "react";
+import { nextHostOf } from "../../room/host-next.ts";
 import type { HostTransport } from "../../transport/host-transport.ts";
+import type {
+  ErrorCode,
+  HostCommand,
+  McpCommand,
+  McpServerEdit,
+  McpToolsView,
+} from "../../transport/protocol.ts";
 
-/** Who holds the list: the lawyer (editable); the firm's policy `mcp.servers` (read-only, locked); or the firm's
- * managed-mcp.json, which runs MCP itself (no list to show). */
-export type McpControl = "lawyer" | "firm_list" | "firm_managed";
-
-/** A secret's name, and whether a value is saved for it. The value never leaves the host. */
-export type McpSecretName = { name: string; saved: boolean };
-
-/** One server, as the host shows it. */
-export type McpServerView = {
-  name: string;
-  kind: "local" | "remote";
-  /** Local: what the lawyer typed, a bare program name or a full path. */
-  command?: string;
-  /** Local: its arguments, in order. */
-  args: string[];
-  /** Remote: its address. */
-  url?: string;
-  env: McpSecretName[];
-  /** Remote: its headers. */
-  headers: McpSecretName[];
-  enabled: boolean;
-};
+export type {
+  McpControl,
+  McpSecretEdit,
+  McpSecretName,
+  McpServerEdit,
+  McpServerView,
+  McpToolsView,
+} from "../../transport/protocol.ts";
 
 /** Another app whose MCP servers Clauseo can import (A3, later). */
 export type ImportSource = "claudeDesktop" | "claudeCode" | "codex";
@@ -38,13 +32,8 @@ export type ImportSource = "claudeDesktop" | "claudeCode" | "codex";
 /** A source with servers to import, and how many. */
 export type Importable = { source: ImportSource; count: number };
 
-/** The section's whole view: who holds the list and the servers in name order; `importable` (A3, the fake only for
- * now) the sources found to import from. */
-export type McpToolsView = {
-  control: McpControl;
-  servers: McpServerView[];
-  importable?: Importable[];
-};
+/** The section's view: the host's, and the sources found to import from (A3; only a fake sends them for now). */
+export type ToolsView = McpToolsView & { importable?: Importable[] };
 
 /** Why an import left a server out; the section says it plainly, one line a server. notApproved: a Claude Code project's
  * server the lawyer hasn't approved there. */
@@ -56,30 +45,11 @@ export type SkipReason =
   | "unreadable"
   | "notApproved";
 
-/** An import's answer: the servers added, and those left out. */
-export type ImportResult = { imported: string[]; skipped: Skipped[] };
-
 /** A server an import left out, and why; `program` names what commandNotFound couldn't find. */
 export type Skipped = { name: string; reason: SkipReason; program?: string };
 
-/** A secret in a save: keep the value saved under this name, or set a new one. A name saved before and missing now
- * is removed, its saved value deleted. */
-export type McpSecretEdit = {
-  name: string;
-  value: { keep: Record<string, never> } | { set: string };
-};
-
-/** A server as a save sends it (`McpCommand::save_server`'s `server`). */
-export type McpServerEdit = {
-  name: string;
-  kind: "local" | "remote";
-  command?: string;
-  args: string[];
-  url?: string;
-  env: McpSecretEdit[];
-  headers: McpSecretEdit[];
-  enabled: boolean;
-};
+/** An import's answer: the servers added, and those left out. */
+export type ImportResult = { imported: string[]; skipped: Skipped[] };
 
 /** The host's refusals of an MCP command: A1's codes, the firm's lock (`settings.locked`) and a command the host
  * couldn't read (`command.invalid`). `mcp.command_not_found` carries no program: the form names the one it sent. */
@@ -97,7 +67,7 @@ export const MCP_ERROR_CODES = [
   "mcp.server_unknown",
   "settings.locked",
   "command.invalid",
-] as const;
+] as const satisfies readonly ErrorCode[];
 
 export type McpErrorCode = (typeof MCP_ERROR_CODES)[number];
 
@@ -106,18 +76,71 @@ export type ToolsAnswer = McpErrorCode | null;
 
 /** What the section reads and sends. */
 export interface ToolsCommands {
-  /** Calls `listener` with the view now (the catch-up) and after every change; answers the unsubscribe. */
-  subscribe(listener: (view: McpToolsView) => void): () => void;
+  /** The latest view; null until the first arrives. */
+  current(): ToolsView | null;
+  /** Calls `listener` with each view: the latest at once, when there is one, then each change. Answers the
+   * unsubscribe. */
+  subscribe(listener: (view: ToolsView) => void): () => void;
   /** `save_server`: adds a server (previousName null) or replaces one, renaming it where the name changed. */
   save(previousName: string | null, server: McpServerEdit): Promise<ToolsAnswer>;
   /** `remove_server`: removes a server and its saved values. */
   remove(name: string): Promise<ToolsAnswer>;
   /** `set_server_enabled`. */
   setEnabled(name: string, enabled: boolean): Promise<ToolsAnswer>;
-  /** Imports a source's servers, their saved values with them (A3, later; the fake only for now). */
+  /** Imports a source's servers, their saved values with them (A3, later; a fake only for now). */
   mcpImport?(source: ImportSource): Promise<ImportResult | McpErrorCode>;
   /** Only a fake sets it: offers the remote form before REMOTE_TOOLS turns on, for its shot. */
   readonly previewRemote?: boolean;
+}
+
+/** A refusal's code as the section maps it: one of MCP_ERROR_CODES, else `command.invalid`'s generic line. */
+export function refusalCode(error: unknown): McpErrorCode {
+  const code =
+    typeof error === "object" && error !== null && "code" in error
+      ? String((error as { code: unknown }).code)
+      : "";
+  return (MCP_ERROR_CODES as readonly string[]).includes(code)
+    ? (code as McpErrorCode)
+    : "command.invalid";
+}
+
+/** The commands over a host: the view from the app feed, the commands through `HostCommand { mcp }`. Listens from the
+ * first ask for the window's life, so the catch-up and every change are heard. Null where the transport has no app
+ * feed. */
+function hostTools(transport: HostTransport): ToolsCommands | null {
+  const app = nextHostOf(transport).app;
+  if (app === null) return null;
+  let view: ToolsView | null = null;
+  const listeners = new Set<(view: ToolsView) => void>();
+  app.subscribeApp((event) => {
+    if (!("mcp_tools_changed" in event)) return;
+    const next = event.mcp_tools_changed;
+    view = next;
+    for (const listener of listeners) listener(next);
+  });
+  const send = async (mcp: McpCommand): Promise<ToolsAnswer> => {
+    const command: HostCommand = { mcp };
+    try {
+      await transport.dispatch({ command_id: crypto.randomUUID(), command });
+      return null;
+    } catch (error: unknown) {
+      return refusalCode(error);
+    }
+  };
+  return {
+    current: () => view,
+    subscribe: (listener) => {
+      listeners.add(listener);
+      if (view !== null) listener(view);
+      return () => void listeners.delete(listener);
+    },
+    save: (previousName, server) =>
+      send({
+        save_server: { ...(previousName === null ? {} : { previous_name: previousName }), server },
+      }),
+    remove: (name) => send({ remove_server: { name } }),
+    setEnabled: (name, enabled) => send({ set_server_enabled: { name, enabled } }),
+  };
 }
 
 /** Whether a lawyer may add a server at an address (PR B, remote http servers). Off until it lands; a server the
@@ -133,17 +156,36 @@ export const remoteOffered = (commands: ToolsCommands): boolean =>
   REMOTE_TOOLS || commands.previewRemote === true;
 
 const provided = new WeakMap<HostTransport, ToolsCommands>();
+const hosts = new WeakMap<HostTransport, ToolsCommands | null>();
 
 /** Hands a transport its tools commands: tests, the copy review and the probe, with a fake. */
 export function provideTools(transport: HostTransport, commands: ToolsCommands): void {
   provided.set(transport, commands);
 }
 
-/** The tools commands a transport carries, or null where it carries none (the section hides). A1 wires the host's
- * bindings in here. Only the settings window's sections ask (sections.tsx's Tools): the host accepts MCP commands from
+/** The tools commands for a transport: a fake handed over, else the host's, made once and listening from the first ask; null
+ * where the transport has no app feed. Only the settings window's sections ask (sections.tsx's Tools): the host accepts MCP commands from
  * the settings window alone and refuses the main window's. */
-export const toolsCommandsOf = (transport: HostTransport): ToolsCommands | null =>
-  provided.get(transport) ?? null;
+export function toolsCommandsOf(transport: HostTransport): ToolsCommands | null {
+  const fake = provided.get(transport);
+  if (fake !== undefined) return fake;
+  if (!hosts.has(transport)) hosts.set(transport, hostTools(transport));
+  return hosts.get(transport) ?? null;
+}
+
+/** Whether Tools shows: once the host has sent its first view, so a host without MCP servers shows no section. */
+export const toolsShown = (transport: HostTransport): boolean =>
+  toolsCommandsOf(transport)?.current() != null;
+
+/** Whether the first view is in, as state: the settings window renders again when it arrives, so Tools appears. */
+export function useToolsHeard(transport: HostTransport): boolean {
+  const subscribe = useCallback(
+    (wake: () => void) => toolsCommandsOf(transport)?.subscribe(() => wake()) ?? (() => {}),
+    [transport],
+  );
+  const heard = useCallback(() => toolsShown(transport), [transport]);
+  return useSyncExternalStore(subscribe, heard, heard);
+}
 
 /** Whether a command names a program by its full path: from the root (`/usr/local/bin/npx`), a drive
  * (`C:\Program Files\nodejs\npx.cmd`) or a share (`\\server\tools\run.exe`). A bare name (`npx`) is not. */

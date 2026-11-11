@@ -10,6 +10,7 @@ import { useSettingsWords } from "@clauseo/components/lib/words-settings.ts";
 import { PartsRoot } from "@clauseo/components/ui/root.tsx";
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { DisplayStore } from "../room/display-store.ts";
+import { useToolsHeard } from "./sections/tools-model.ts";
 import { connectorsStoreOf, useConnectors, useConnectorsHeard } from "../store/connectors.ts";
 import { LimitsContext, limitsStoreOf } from "../store/limits.ts";
 import type { HostTransport } from "../transport/host-transport.ts";
@@ -60,6 +61,8 @@ export function SettingsApp({
     checked.current = true;
     sendConnector(transport, { check: {} }).catch(() => {});
   }, [transport]);
+  // Settings › Tools shows once the host's first MCP view is in: the window renders again when it arrives
+  useToolsHeard(transport);
   // each plan's sign-in off the setup wire: a plan that isn't set up shows no billing in Plan and usage (D-060)
   const notSetUp = useNotSetUp(transport);
   const ctx = contextOf(

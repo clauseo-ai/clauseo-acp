@@ -9,10 +9,13 @@ import { RoomOver } from "./states.tsx";
 import { errorWords } from "./words.ts";
 
 /** Whether an error code's sentence needs no "U3-err-<code>" refusal on a send: Versions' own (the Word blackline's,
- * words-errors.ts's MARK_KEYS, UC-114 and UC-115), and agent.offline, a turn's failure with its own entry below. Only
- * the false answer narrows: a key it refuses is never one of MARK_KEYS. */
+ * words-errors.ts's MARK_KEYS, UC-114 and UC-115), agent.offline, a turn's failure with its own entry below, and the
+ * MCP servers' `mcp.*`, which only Settings › Tools' commands answer and its form says in its own words (UC's
+ * entries in registry-mcp-tools.tsx). Only the false answer narrows: a key it refuses is never one of MARK_KEYS. */
 export const ownEntry = (code: ErrorCode, key: ErrorKey): key is (typeof MARK_KEYS)[number] =>
-  code === "agent.offline" || (MARK_KEYS as readonly string[]).includes(key);
+  code === "agent.offline" ||
+  code.startsWith("mcp.") ||
+  (MARK_KEYS as readonly string[]).includes(key);
 
 /** agent.offline is never a send's refusal: the stop line under the answer so far, with Try again. */
 const OFFLINE: Entry[] = [

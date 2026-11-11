@@ -47,7 +47,7 @@ import { ConnectorsSection } from "./sections/connectors-load.tsx";
 import { PlansSection } from "./sections/plans-load.tsx";
 import { carriesSetup } from "./sections/plans-shown.ts";
 import { ToolsSection } from "./sections/mcp-tools-load.tsx";
-import { toolsCommandsOf } from "./sections/tools-model.ts";
+import { toolsShown } from "./sections/tools-model.ts";
 import { WorkspaceSection } from "./sections/workspace-load.tsx";
 import { carriesProtectionWire } from "./sections/workspace-shown.ts";
 import { connectorsNote } from "./sections/connectors-note.ts";
@@ -146,7 +146,7 @@ export const SECTIONS: readonly SectionEntry[] = [
     Body: ConnectorsSection,
   },
   {
-    // UC-169 to UC-189: the lawyer's own MCP servers, where the transport carries their commands (tools-model.ts); the
+    // UC-169 on: the lawyer's own MCP servers, once the host's first view is in (tools-model.ts); the
     // lead is the plain line on what a tool can reach. No side note, so the list stays out of the first load
     id: "tools",
     name: (lang) => mw(lang, "Tools"),
@@ -156,7 +156,7 @@ export const SECTIONS: readonly SectionEntry[] = [
         lang,
         "Tools run on this computer with the same access you have: your files, your programs and the internet. Add only tools you trust.",
       ),
-    shown: (ctx) => toolsCommandsOf(ctx.transport) !== null,
+    shown: (ctx) => toolsShown(ctx.transport),
     Body: ToolsSection,
   },
   {
