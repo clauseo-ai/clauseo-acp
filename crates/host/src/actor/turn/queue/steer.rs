@@ -12,18 +12,18 @@
 //! has ended, no answer leaves it not sent.
 //!
 //! The steered turn's end settles the rest (`turn_closed`): after `EndTurn` a steer still
-//! unanswered waits for its answer within its wait, and one accepted gets its last check; after
-//! any other stop an unanswered one is `NotSent` at once. Nothing the host has not seen taken
-//! in is sent again on its own: the lawyer's Send now on the steered turn (`send_now`) moves its
-//! unsettled steers to a new turn that starts next and cancels the turn. A steer this agent's
-//! steer would join but that cannot join now waits, held by the host, as the next turn
-//! ([`next`]); every other steer is a send now. Every steer is logged at info on the lifecycle
-//! target as it is sent, answered, requeued, confirmed or not sent, with no text.
+//! unanswered waits for its answer within its wait, and one accepted gets its checks after the
+//! end; after any other stop an unanswered one is `NotSent` at once. Nothing the host has not
+//! seen taken in is sent again on its own: the lawyer's Send now on the steered turn
+//! (`send_now`) moves its unsettled steers to a new turn that starts next and cancels the turn.
+//! A steer this agent's steer would join but that cannot join now waits, held by the host, as
+//! the next turn ([`next`]); every other steer is a send now. Every steer is logged at info on
+//! the lifecycle target as it is sent, answered, requeued, confirmed or not sent, with no text.
 
 use clauseo_acp::SteerResult;
 use clauseo_protocol::{
     AgentKind, CommandOutcome, ContentBlock, Delivery, MessageId, SteerOutcome, SteerResolved,
-    StopReason, StreamId, ThreadId, Timestamp, TurnId, TurnQueued,
+    StopReason, StreamId, ThreadId, Timestamp, TurnId,
 };
 
 use super::super::super::Actor;
@@ -31,14 +31,16 @@ use super::super::super::commands::CommandCtx;
 use super::super::super::input::Input;
 use super::super::agents::Stage;
 use super::super::out::Out;
-use super::super::{
-    AgentReply, Then, TimerKind, TurnInput, TurnPhase, TurnTimer, cancel, lost, spawn, state,
-};
+use super::super::{AgentReply, TimerKind, TurnInput, TurnPhase, TurnTimer, cancel, spawn, state};
 use super::queued::{Joins, log_queued};
-use super::{After, Queued, command_tag, confirm, drop_turn, move_on, queue, sync_held};
+use super::{After, Queued, command_tag, confirm, move_on, queue, sync_held};
 use crate::build;
 use crate::error::Error;
 use crate::log_file::{Cause, LIFECYCLE};
+
+mod requeue;
+
+use requeue::{requeue, requeue_all};
 
 /// How long a steer waits for the agent's answer, from its send, before it moves to a new turn.
 const STEER_WAIT: std::time::Duration = std::time::Duration::from_secs(30);
@@ -86,6 +88,8 @@ pub(crate) struct Ask {
     pub(super) content: Vec<ContentBlock>,
     /// When its message was logged.
     pub(super) sent: Timestamp,
+    /// Claude's transcripts, marked as the steer went out (`confirm::mark`).
+    pub(super) places: Vec<super::transcript::Place>,
 }
 
 /// The agent's answer to a steer.
@@ -242,6 +246,7 @@ pub(super) fn steer(
         message,
         content,
         sent: now,
+        places: Vec::new(),
     };
     out.send_tagged(
         actor,
@@ -249,10 +254,10 @@ pub(super) fn steer(
     )
 }
 
-/// The steer's message is durable: send it to the agent, even if the turn has just ended (the
-/// agent then answers `promptRequired`), and arm its wait. With no attached agent it moves to a
-/// new turn.
-pub(super) fn send(actor: &mut Actor, thread: ThreadId, ask: Ask) {
+/// The steer's message is durable: mark Claude's transcripts, send it to the agent, even if the
+/// turn has just ended (the agent then answers `promptRequired`), and arm its wait. With no
+/// attached agent it moves to a new turn.
+pub(super) fn send(actor: &mut Actor, thread: ThreadId, mut ask: Ask) {
     let agent = state(actor, thread)
         .and_then(|state| state.agent.as_deref())
         .filter(|agent| agent.stage == Stage::Attached)
@@ -267,6 +272,7 @@ pub(super) fn send(actor: &mut Actor, thread: ThreadId, ask: Ask) {
     let message = ask.message;
     let content = ask.content.clone();
     tracing::info!(target: LIFECYCLE, %thread, turn = %ask.turn, "a steer was sent");
+    ask.places = confirm::mark(actor, thread);
     let timer = Some(arm(actor, thread, message));
     if let Some(queue) = queue(actor, thread) {
         queue.steers.push(Pending { ask, timer });
@@ -344,11 +350,11 @@ fn arm(actor: &mut Actor, thread: ThreadId, message: MessageId) -> futures::futu
     )
 }
 
-/// The end of `turn` is durable. Its steers accepted and unconfirmed get their last check
-/// (`confirm.rs`). After `EndTurn` the unanswered ones keep waiting for their answer; after any
-/// other stop they are not sent, and a later answer is ignored.
+/// The end of `turn` is durable. Its steers accepted and unconfirmed get their checks after the
+/// end (`confirm.rs`). After `EndTurn` the unanswered ones keep waiting for their answer; after
+/// any other stop they are not sent, and a later answer is ignored.
 pub(super) fn turn_closed(actor: &mut Actor, thread: ThreadId, turn: TurnId, stop: StopReason) {
-    confirm::turn_ended(actor, thread, turn);
+    confirm::turn_ended(actor, thread, turn, stop);
     if stop == StopReason::EndTurn {
         return;
     }
@@ -368,14 +374,6 @@ pub(super) fn turn_closed(actor: &mut Actor, thread: ThreadId, turn: TurnId, sto
     stopped.sort_by_key(|ask| ask.message);
     for ask in &stopped {
         confirm::not_sent(actor, thread, ask, why::TURN_STOPPED);
-    }
-}
-
-/// `asks`, in the order they were sent, each move to a new turn at the head, the first sent
-/// first.
-fn requeue_all(actor: &mut Actor, thread: ThreadId, asks: Vec<Ask>, why: &'static str) {
-    for ask in asks.into_iter().rev() {
-        requeue(actor, thread, ask, why);
     }
 }
 
@@ -459,63 +457,4 @@ fn cancel_agent_turn(actor: &mut Actor, thread: ThreadId) {
             }
         });
     }
-}
-
-/// The steer moves to a new turn at the queue's head: one commit of `SteerResolved { Requeued }`
-/// and `TurnQueued` behind the steered turn, marked `at_head` so a restart keeps it at the head
-/// too (`restore.rs`). Sent now by the lawyer, it starts once the steered turn has ended,
-/// whatever its stop; otherwise the host holds it, and it starts only after `EndTurn`
-/// (`unsent.rs`).
-fn requeue(actor: &mut Actor, thread: ThreadId, ask: Ask, why: &'static str) {
-    tracing::info!(target: LIFECYCLE, %thread, turn = %ask.turn, why, "a steer was requeued");
-    let host_held = why != why::SEND_NOW;
-    let stream = StreamId::Thread(thread);
-    actor.with_loaded(
-        stream,
-        Box::new(move |actor: &mut Actor, loaded: Result<(), Error>| {
-            let logged = loaded.and_then(|()| log_requeue(actor, thread, ask, host_held));
-            if let Err(error) = logged {
-                tracing::warn!(
-                    %thread,
-                    error = %Cause(&error),
-                    "a steer was not moved to a new turn"
-                );
-            }
-            move_on(actor, thread);
-            sync_held(actor, thread);
-            actor.release(stream);
-        }),
-    );
-}
-
-fn log_requeue(
-    actor: &mut Actor,
-    thread: ThreadId,
-    ask: Ask,
-    host_held: bool,
-) -> Result<(), Error> {
-    let now = actor.now().wall;
-    let turn: TurnId = actor.ids.mint(now)?;
-    // `at_head`: the live queue puts it at the head, and a restart does the same.
-    let waits = TurnQueued::new(thread, turn, thread, Some(ask.turn))
-        .map_err(|error| Error::Internal(error.to_string()))?
-        .at_head();
-    let mut out = Out::new(actor, thread, None)?;
-    out.push(actor, requeued(ask.message, turn))?;
-    out.push(actor, waits)?;
-    queue(actor, thread)
-        .ok_or_else(|| lost("a thread"))?
-        .turns
-        .push_front(Queued {
-            turn,
-            message: ask.message,
-            content: ask.content,
-            forced: true,
-            host_held,
-        });
-    let sent = out.send(actor, Then::Queue(After::Requeued(turn)));
-    if sent.is_err() {
-        drop_turn(actor, thread, turn);
-    }
-    sent
 }

@@ -1,4 +1,4 @@
-{"scenario":"claude-steer-unconfirmed","description":"A Claude agent answers the steer injected and ends prompt 1 end_turn without the transcript ever showing it: the host must not send it again (a second prompt here is a mismatch)","on_stdin_close":"exit"}
+{"scenario":"claude-steer-unconfirmed","description":"A Claude agent (claude-acp, as claude-steer-confirmed) answers the steer injected, then asks a permission, so the turn runs until the test allows it; prompt 1 then ends end_turn and nothing more comes: the transcript shows the steer late or never, and the host must not send it again (a second prompt here is a mismatch)","on_stdin_close":"exit"}
 {"expect":{"method":"initialize","as":"init","params":{"protocolVersion":1}}}
 {"respond":{"to":"init","result":{"protocolVersion":1,"agentCapabilities":{"loadSession":true,"_meta":{"claudeCode":{"promptQueueing":true}}},"authMethods":[],"agentInfo":{"name":"fake_agent","version":"0.0.0"},"_meta":{"steering":{"supported":true}}}}}
 {"expect":{"method":"session/new","as":"new","params":{"cwd":"{{any}}","_meta":{"claudeCode":{"options":{"allowDangerouslySkipPermissions":false}}}}}}
@@ -9,5 +9,7 @@
 {"update":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-answer-1","content":{"type":"text","text":"The clause "}}}}
 {"expect":{"method":"_session/steering","as":"steer","params":{"sessionId":"sess-1","prompt":[{"type":"text","text":"Focus on clause 4"}],"_meta":{"steering":{"idleBehavior":"promptRequired"}}}}}
 {"respond":{"to":"steer","result":{"outcome":"injected"},"raw":true}}
-{"update":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-answer-1","content":{"type":"text","text":"caps liability."}}}}
+{"request":{"id":"perm-1","method":"session/request_permission","params":{"sessionId":"sess-1","toolCall":{"toolCallId":"tc-perm-1","title":"Edit clause 4","kind":"edit","status":"pending"},"options":[{"optionId":"allow-once","name":"Allow once","kind":"allow_once"},{"optionId":"reject-once","name":"Reject","kind":"reject_once"}]}}}
+{"expect_response":{"id":"perm-1","result":"{{any}}"}}
+{"update":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-answer-1","content":{"type":"text","text":"caps liability, as to clause 4."}}}}
 {"respond":{"to":"p1","result":{"stopReason":"end_turn"}}}
