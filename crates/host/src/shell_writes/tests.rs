@@ -30,7 +30,7 @@ fn write_targets_count() {
     assert_eq!(targets("echo x>>log.txt 2>&1"), ["log.txt"]);
     assert_eq!(targets("make 2> err.txt"), ["err.txt"]);
     assert_eq!(targets("cp a.docx Sub/Memo.docx"), ["Sub/Memo.docx"]);
-    assert_eq!(targets("mv -f draft.docx out/Memo.docx"), ["out/Memo.docx"]);
+    assert_eq!(targets("cp -f draft.docx out/Memo.docx"), ["out/Memo.docx"]);
     assert_eq!(
         targets("pandoc a.md | tee one.md two.md"),
         ["one.md", "two.md"]
@@ -63,6 +63,41 @@ fn a_leading_cd_sets_the_folder_and_anything_unclear_writes_nothing() {
     assert_eq!(targets("cp a.docx Sub/"), none());
     assert_eq!(targets("echo x > ../outside.md"), none());
     assert_eq!(targets("cp a.docx"), none());
+}
+
+#[test]
+fn a_heredoc_body_is_text_not_commands() {
+    assert_eq!(
+        targets("cat > notes.md <<'EOF'\npandoc in.md -o Memo.docx\nEOF"),
+        ["notes.md"]
+    );
+    // `<<-` strips leading tabs from the delimiter line, and a bare or double-quoted
+    // delimiter works too
+    assert_eq!(
+        targets("cat > a.md <<-\"END\"\n\tcp x Memo.docx\n\tEND\necho y > b.md"),
+        ["a.md", "b.md"]
+    );
+    assert_eq!(
+        targets("cat <<EOF > a.md\necho > Memo.docx\nEOF\ncp x c.docx"),
+        ["a.md", "c.docx"]
+    );
+}
+
+#[test]
+fn pushd_and_popd_leave_the_folder_unknown() {
+    assert_eq!(targets("pushd Sub && pandoc in.md -o Memo.docx"), none());
+    assert_eq!(targets("echo x > a.md && popd && echo y > b.md"), ["a.md"]);
+}
+
+#[test]
+fn mv_writes_nothing() {
+    assert_eq!(targets("mv lawyer.docx tmp && mv tmp lawyer.docx"), none());
+    assert_eq!(targets("mv -t Sub lawyer.docx"), none());
+}
+
+#[test]
+fn unzip_dash_o_writes_nothing() {
+    assert_eq!(targets("unzip -o pack.zip"), none());
 }
 
 #[test]
