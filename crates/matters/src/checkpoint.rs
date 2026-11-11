@@ -9,7 +9,7 @@ use clauseo_protocol::{
     CheckpointId, CheckpointKind, FileChange, MatterPath, SkippedFile, SkippedFileReason, Timestamp,
 };
 
-use crate::diff::{DiffFile, diff_by, flag};
+use crate::diff::{DiffFile, TurnStart, diff_by, flag};
 use crate::first_read::{FirstReads, StepReads, first_reads};
 use crate::history::{GixStore, Hasher, HistoryStore, Oid, TreeFile};
 use crate::no_download::NoDownload;
@@ -291,9 +291,16 @@ impl Core {
             return Err(Error::DuplicateCheckpoint { id: spec.entry.id });
         }
         if let Some(tools) = spec.tool_paths {
+            let start = TurnStart {
+                record: tip_recorded.then_some(&tip_record),
+                tree: &old_tree,
+                reads: &reads,
+                entries: &entries,
+                at: spec.at,
+            };
             changes = changes
                 .into_iter()
-                .map(|change| flag(change, tools))
+                .map(|change| flag(change, tools, &start))
                 .collect();
         }
         let files: Vec<TreeFile> = new_tree

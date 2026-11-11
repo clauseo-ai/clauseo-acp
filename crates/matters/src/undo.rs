@@ -58,9 +58,6 @@ fn step(
     let changes = kept;
     let there = core.step_reads(before, after).there;
     let start = core.skip_record(before);
-    // A folder that did not list at the start: what was in it is unknown, and a file the step
-    // added may have come out of it, whatever the folder did later.
-    let gap = start.as_ref().is_some_and(|start| !start.unread.is_empty());
     let before_files = core.files_of(before)?;
     let blob = |path: &MatterPath| {
         find(&before_files, path.as_str())
@@ -85,7 +82,7 @@ fn step(
                 return Err(Error::history("undo", "a change of an unknown kind"));
             }
         };
-        if let Some(reason) = kept_because(&ops, &there, start.as_ref(), gap, &before_files) {
+        if let Some(reason) = kept_because(&ops, &there, start.as_ref(), &before_files) {
             steps.push(Step {
                 path,
                 ops: Vec::new(),
@@ -106,15 +103,13 @@ fn step(
 /// A path the step read for the first time (`there`: skipped before, or moved from a skipped
 /// file) is never deleted or written, nor written when the step's first checkpoint's skip record
 /// (`start`) has it as cloud-only and not read, its content then unknown. Any other path is
-/// deleted only when that record proves it absent then: recorded (else `Unknown`), not a skipped
-/// file there (its reason), under no folder that did not list (`UnreadFolder`), and not in its
-/// tree; and never when `gap` (a folder did not list at the start: a file the step added may
-/// have come out of it), then `UnreadFolder`.
+/// deleted only when that record proves it absent then: recorded (else `Unknown`), and
+/// [`SkipRecord::not_absent`] finds no reason (a folder that did not list at the start makes every
+/// added file unknown: it may have come out of that folder, whatever the folder did later).
 fn kept_because(
     ops: &[Op],
     there: &BTreeMap<MatterPath, SkippedFileReason>,
     start: Option<&SkipRecord>,
-    gap: bool,
     before_files: &[SizedFile],
 ) -> Option<SkippedFileReason> {
     for op in ops {
@@ -131,17 +126,9 @@ fn kept_because(
             let Some(start) = start else {
                 return Some(SkippedFileReason::Unknown);
             };
-            if let Some(skip) = start.skipped_at(target.as_str()) {
-                return Some(skip.reason);
-            }
-            if start.under_unread(target.as_str()) {
-                return Some(SkippedFileReason::UnreadFolder);
-            }
-            if find(before_files, target.as_str()).is_some() {
-                return Some(SkippedFileReason::Unknown);
-            }
-            if gap {
-                return Some(SkippedFileReason::UnreadFolder);
+            let in_tree = find(before_files, target.as_str()).is_some();
+            if let Some(reason) = start.not_absent(target.as_str(), in_tree) {
+                return Some(reason);
             }
         }
     }

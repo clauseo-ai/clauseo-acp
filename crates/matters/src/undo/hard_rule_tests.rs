@@ -216,24 +216,28 @@ fn a_deletion_of_a_path_the_first_tree_holds_is_kept() {
     let there = BTreeMap::new();
     let delete = |text: &str| [Op::Delete(memo(text))];
     assert_eq!(
-        kept_because(&delete("memo.txt"), &there, Some(&start), false, &before),
+        kept_because(&delete("memo.txt"), &there, Some(&start), &before),
         Some(SkippedFileReason::Unknown)
     );
     assert_eq!(
-        kept_because(&delete("Memo.txt"), &there, Some(&start), false, &before),
+        kept_because(&delete("Memo.txt"), &there, Some(&start), &before),
         None
     );
     assert_eq!(
-        kept_because(&delete("new.txt"), &there, Some(&start), false, &before),
+        kept_because(&delete("new.txt"), &there, Some(&start), &before),
         None
     );
     assert_eq!(
-        kept_because(&delete("new.txt"), &there, None, false, &before),
+        kept_because(&delete("new.txt"), &there, None, &before),
         Some(SkippedFileReason::Unknown)
     );
     // A folder did not list at the start.
+    let gap = SkipRecord {
+        unread: vec!["Sub".to_owned()],
+        ..SkipRecord::default()
+    };
     assert_eq!(
-        kept_because(&delete("new.txt"), &there, Some(&start), true, &before),
+        kept_because(&delete("new.txt"), &there, Some(&gap), &before),
         Some(SkippedFileReason::UnreadFolder)
     );
 }
