@@ -21,6 +21,20 @@ export function stepUndoneOf(
 
 const NONE: readonly SkippedFile[] = [];
 
+/**  The files `turn`'s undo put back, as the host's marker lists them; null until it comes. The
+ * same array while the marker is unchanged. */
+export function undoneRestoredOf(
+  view: StreamView | undefined,
+  turn: TurnId,
+): readonly string[] | null {
+  let found: readonly string[] | null = null;
+  for (const id of view?.ids ?? []) {
+    const undone = view?.entries.get(id)?.marker?.kind.step_undone;
+    if (undone?.turn === turn) found = undone.restored;
+  }
+  return found;
+}
+
 /**  The files of `turn`'s undo that stay as they are because Clauseo had no earlier copy of them;
  * the same array while the marker is unchanged, as a store hook's pick needs. Empty when none, or
  * until the marker comes. */

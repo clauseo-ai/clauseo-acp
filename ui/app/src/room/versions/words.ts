@@ -264,9 +264,10 @@ export function doneLines(
 }
 
 /**  Why an undo left a file as it is: Clauseo had no earlier copy of it. A file that was only in
- * the cloud says where its earlier copy may be, by the folder's sync service where the room knows
- * one (sync-services.ts); a file over the size cap, or kept for a reason this version doesn't
- * know, says only that Clauseo kept no copy. */
+ * the cloud, or in a folder Clauseo couldn't read when the folder syncs with a cloud service, says
+ * where its earlier copy may be, by the folder's sync service where the room knows one
+ * (sync-services.ts); any other (over the size cap, a folder not synced, a reason not known) says
+ * only that Clauseo kept no copy. */
 export function cantUndoWords(
   lang: Lang,
   path: string,
@@ -274,7 +275,8 @@ export function cantUndoWords(
   place: FolderPlace | undefined,
 ): string {
   const file = fileName(path);
-  if (reason !== "cloud_only")
+  const synced = typeof place === "object" && "synced" in place;
+  if (reason !== "cloud_only" && !(reason === "unread_folder" && synced))
     return vt(
       lang,
       "Clauseo can't undo the change to {file}. It didn't keep a copy of it before, so there's no earlier copy to bring back.",

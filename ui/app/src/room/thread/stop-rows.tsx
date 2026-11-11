@@ -23,7 +23,7 @@ import { useNow } from "../../store/limits.ts";
 import { useStreamPart, useViewStore } from "../../store/hooks.ts";
 import type { StreamView } from "../../store/view.ts";
 import { FolderPlaceContext } from "../folder-place.ts";
-import { unversionedOf } from "../undone-marker.ts";
+import { undoneRestoredOf, unversionedOf } from "../undone-marker.ts";
 import { toHostError } from "../../transport/host-transport.ts";
 import { locatable, useLocateFolder } from "../act-refusals.ts";
 import { StoppedMark } from "../stopped-mark.tsx";
@@ -85,14 +85,23 @@ function Changed({ entry }: { entry: StepEntry }) {
   const box = useRef<HTMLDivElement>(null);
   const papers = entry.files.map((f) => f.path);
   // undone: the files the host's marker says stayed as they are, Clauseo having no earlier copy of
-  // them; the note counts only the rest, and says nothing of its own when none went back
+  // them, and those it says went back: the note counts those, and says nothing of its own when
+  // none went back
   const pickKept = useCallback(
     (v: StreamView | undefined) => unversionedOf(v, entry.turn),
     [entry.turn],
   );
   const kept = useStreamPart(useViewStore(), entry.undone ? stream : null, pickKept);
   const place = use(FolderPlaceContext);
-  const back = papers.filter((p) => !kept.some((f) => f.path === p));
+  const pickBack = useCallback(
+    (v: StreamView | undefined) => undoneRestoredOf(v, entry.turn),
+    [entry.turn],
+  );
+  const restored = useStreamPart(useViewStore(), entry.undone ? stream : null, pickBack);
+  const back =
+    entry.undone && restored !== null
+      ? restored
+      : papers.filter((p) => !kept.some((f) => f.path === p));
   const undoable = entry.checkpoint_after !== undefined;
   // a program holds a file: the lock's lines stand under the note, and Try again takes Undo's place
   const locked = refused?.code === LOCKED && !entry.undone;
