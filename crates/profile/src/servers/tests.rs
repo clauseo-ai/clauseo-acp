@@ -99,35 +99,23 @@ fn the_case_law_entry_names_the_relay_and_the_token_file_only() {
     );
 }
 
-/// Codex gets the entry on macOS and Linux and no browser at all on Windows, where its part points
-/// the lawyer to a Claude conversation with no install advice and no tool named. Claude never gets
-/// the entry, and has its shell command on Windows alone (the exclusion hijack elsewhere), so the
-/// command is copied only there. An agent with no kind (a test's) is left as it was.
+/// Codex gets the entry on macOS and Linux and no browser at all on Windows. Claude has no
+/// browser on any OS, neither the entry nor its shell command, so the command is copied nowhere.
+/// An agent with no kind (a test's) is left as it was.
 #[test]
-fn codex_has_the_entry_off_windows_and_claude_a_browser_on_windows_alone() {
-    use crate::instructions::{BrowserPart, browser_part};
+fn codex_has_the_entry_off_windows_and_claude_no_browser_anywhere() {
     use clauseo_protocol::AgentKind;
     for windows in [false, true] {
         assert!(!browser_mcp_on(Some(AgentKind::Claude), windows));
         assert!(!browser_mcp_on(None, windows));
         assert!(!no_browser_on(None, windows));
     }
-    assert!(no_browser_on(Some(AgentKind::Claude), false));
-    assert!(!no_browser_on(Some(AgentKind::Claude), true));
-    assert!(!shell_browser_on(false));
-    assert!(shell_browser_on(true));
+    for windows in [false, true] {
+        assert!(no_browser_on(Some(AgentKind::Claude), windows));
+        assert!(!shell_browser_on(windows));
+    }
     assert!(browser_mcp_on(Some(AgentKind::Codex), false));
     assert!(!no_browser_on(Some(AgentKind::Codex), false));
     assert!(!browser_mcp_on(Some(AgentKind::Codex), true));
     assert!(no_browser_on(Some(AgentKind::Codex), true));
-    let claude_only = browser_part(BrowserPart::ClaudeOnly);
-    assert!(claude_only.contains("You have no browser in this session"));
-    assert!(
-        claude_only.contains("a Claude conversation can"),
-        "{claude_only}"
-    );
-    for word in ["Chrome", "install", "MCP", "tool", "skill", "agent-browser"] {
-        assert!(!claude_only.contains(word), "{word}: {claude_only}");
-    }
-    assert!(claude_only.split_whitespace().count() <= 40);
 }

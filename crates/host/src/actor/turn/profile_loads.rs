@@ -66,8 +66,7 @@ pub(super) fn launch_keys(
         let (_, entry) = browser::hook_servers(actor.profile.mcp_servers(&agent_id), &inputs);
         let shell = shell_browser(actor, &prepared.run, &agent_id);
         let kind = AgentKind::of(&agent_id);
-        let none_here =
-            browser::no_browser(kind, cfg!(windows)).then(|| browser::absent_part(kind));
+        let none_here = browser::no_browser(kind, cfg!(windows)).then_some(BrowserPart::Off);
         let browser = session_part(shell.as_ref(), entry.as_ref(), &prepared.run, none_here);
         let folders = Folders::of(&prepared.run.work, &prepared.run.notes)?
             .with_connectors(part)
@@ -127,9 +126,9 @@ pub(super) fn session_loads(
     let inputs = browser_inputs(actor, &run, control, browser_switch);
     // Codex's `browser` entry (`clauseo_profile::servers::browser_mcp`), filled or left out.
     let (hook_servers, browser_state) = browser::hook_servers(hook, &inputs);
-    // Claude's shell tool (Windows alone); none for an agent offered the entry.
+    // The shell tool (no agent's for launch); none for an agent offered the entry.
     let shell = shell_browser(actor, &run, &agent_id);
-    let absent = none_here.then(|| browser::absent_part(kind));
+    let absent = none_here.then_some(BrowserPart::Off);
     let session_browser = session_part(shell.as_ref(), browser_state.as_ref(), &run, absent);
     if shell.is_some() || browser_state.is_some() || none_here {
         // For support: whether this session has the browser, and which Chrome by file name.
@@ -426,10 +425,9 @@ fn shell_chrome<'a>(actor: &Actor, run: &'a RunFolders) -> Option<&'a Path> {
 }
 
 /// Which browser part `run`'s session gets: `none_here`'s for an agent with no browser on this
-/// OS (`browser::no_browser`: the Claude-only line for Codex on Windows, the no-browser sentence
-/// for Claude on macOS and Linux, `browser::absent_part`); else the shell tool's (Claude on
-/// Windows), else the one the `browser` entry's state gives (Codex, `browser::entry_part`),
-/// else none.
+/// OS (`browser::no_browser`: the no-browser sentence for Claude anywhere and Codex on
+/// Windows); else the shell tool's (no agent's for launch), else the one the `browser` entry's
+/// state gives (Codex, `browser::entry_part`), else none.
 fn session_part(
     shell: Option<&(clauseo_protocol::ToolState, BrowserPart)>,
     entry: Option<&clauseo_protocol::ToolState>,

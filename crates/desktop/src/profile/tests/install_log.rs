@@ -113,8 +113,8 @@ fn each_start_logs_what_the_copy_did_and_no_path() {
 /// `<data>/tools` and wires that folder, and the browser's skill comes with that copy whether
 /// or not this machine has a Chrome (each session's `{browser}` says whether it has one). With no
 /// program anywhere there is no browser and no skill. Where no agent gets the shell command
-/// (macOS and Linux, `clauseo_profile::servers::shell_browser`) nothing is copied, and there is
-/// no skill either: Claude has no browser there, and Codex's entry runs the bundled sidecar.
+/// (every OS for launch, `clauseo_profile::servers::shell_browser`) nothing is copied, and there
+/// is no skill either: Claude has no browser, and Codex's entry runs the bundled sidecar.
 #[test]
 fn build_copies_agent_browser_from_path_in_a_debug_build() {
     let scratch = Scratch::new("profile-build-browser", &["data", "bin"]);

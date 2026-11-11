@@ -79,26 +79,17 @@ pub fn claude_shell(macos: bool) -> Option<&'static str> {
     macos.then(|| CLAUDE_SHELL_MACOS.trim())
 }
 
-/// What a Codex session on Windows is told, which has no browser for this agent there
-/// (`servers::no_browser`): one plain line pointing the lawyer to a Claude conversation, which
-/// has its shell browser on Windows. Never a macOS or Linux session's, where Claude has none.
-pub const BROWSER_CLAUDE_ONLY: &str =
-    include_str!("../assets/instructions/browser-claude-only.txt");
-
 /// Which browser part a session gets in place of `{browser}`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BrowserPart {
     /// The session has the browser: Claude the `agent-browser` command ([`BROWSER`]), Codex the
     /// `browser` MCP entry's tools ([`BROWSER_CODEX`]).
     On,
-    /// Turned off, left out by policy, or Claude on macOS or Linux (`servers::no_browser`):
-    /// [`BROWSER_OFF`].
+    /// Turned off, left out by policy, or no browser for this agent on this OS (Claude anywhere,
+    /// Codex on Windows, `servers::no_browser`): [`BROWSER_OFF`].
     Off,
     /// No supported browser on this computer: [`BROWSER_NONE`].
     NotInstalled,
-    /// No browser for this agent on this computer (Codex on Windows, `servers::no_browser`):
-    /// [`BROWSER_CLAUDE_ONLY`].
-    ClaudeOnly,
 }
 
 /// What the host fills `{browser}` with: a space and the part `part` names. Only this part names
@@ -110,13 +101,10 @@ pub fn browser_part(part: BrowserPart) -> &'static str {
         std::sync::LazyLock::new(|| format!(" {}", BROWSER_OFF.trim()));
     static NONE: std::sync::LazyLock<String> =
         std::sync::LazyLock::new(|| format!(" {}", BROWSER_NONE.trim()));
-    static CLAUDE_ONLY: std::sync::LazyLock<String> =
-        std::sync::LazyLock::new(|| format!(" {}", BROWSER_CLAUDE_ONLY.trim()));
     match part {
         BrowserPart::On => &ON,
         BrowserPart::Off => &OFF,
         BrowserPart::NotInstalled => &NONE,
-        BrowserPart::ClaudeOnly => &CLAUDE_ONLY,
     }
 }
 

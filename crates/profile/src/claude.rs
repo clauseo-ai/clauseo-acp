@@ -1,4 +1,7 @@
 //! Claude's part: the options under `_meta.claudeCode.options` and the system prompt append.
+//!
+//! The agent-browser rules here are dormant for launch: no Claude session has a browser on any
+//! OS (`servers::no_browser`), so the host adds them to none. They stay for the way back.
 
 use std::path::PathBuf;
 

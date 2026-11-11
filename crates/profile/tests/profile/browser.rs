@@ -131,11 +131,7 @@ fn only_the_browser_part_names_agent_browser() {
     ] {
         assert!(on.contains(rule), "{rule}");
     }
-    for part in [
-        BrowserPart::Off,
-        BrowserPart::NotInstalled,
-        BrowserPart::ClaudeOnly,
-    ] {
+    for part in [BrowserPart::Off, BrowserPart::NotInstalled] {
         let off = fill(part);
         assert!(!off.contains("agent-browser") && !off.contains("AGENT_BROWSER"));
         assert!(off.contains("You have no browser in this session"));
@@ -168,11 +164,7 @@ fn only_the_browser_part_names_agent_browser() {
         browser_part_for(BrowserPart::On, false),
         browser_part(BrowserPart::On)
     );
-    for part in [
-        BrowserPart::Off,
-        BrowserPart::NotInstalled,
-        BrowserPart::ClaudeOnly,
-    ] {
+    for part in [BrowserPart::Off, BrowserPart::NotInstalled] {
         assert_eq!(browser_part_for(part, true), browser_part(part));
         assert!(!browser_part_for(part, true).contains("agent-browser"));
     }

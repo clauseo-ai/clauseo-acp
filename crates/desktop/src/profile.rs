@@ -208,8 +208,9 @@ impl DesktopProfile {
 /// SHA-256 changed). Returns the folder, or none, with a log line, when there is no program to
 /// copy or the copy failed: then no session gets the browser, its skill or its instructions, and
 /// the app runs on. None, with nothing copied, when no agent gets the shell command on this OS
-/// (`shell` false: macOS and Linux, where Claude has no browser for launch and Codex's entry runs
-/// the bundled sidecar itself, `clauseo_profile::servers::shell_browser`).
+/// (`shell` false: every OS for launch, where Claude has no browser and Codex's entry runs the
+/// bundled sidecar itself, `clauseo_profile::servers::shell_browser`). So the app copies nothing
+/// now; the copy stays for the way back.
 ///
 /// Each outcome is one line on [`LIFECYCLE`], for support: `copied`, `up_to_date`,
 /// `copied_running_copy_set_aside` (Windows), `no_sidecar`, `off_on_this_os`, or a warning

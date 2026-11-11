@@ -50,9 +50,9 @@ The host thread set the conditions the profile must keep: Claude keeps `settingS
     splits each on `.`, and `config_manager.rs:438` reads `bypass_hook_trust` straight from
     the request. The host merges the keys after the overrides and before `hooks`, adding only
     where no key is, and treats a dotted key as a clash with its first part.
-  - `servers(kind)`: `browser` for Codex alone (`servers::browser_mcp`; Claude drives
-    agent-browser as a shell tool, its rules and skill unchanged, on Windows alone for launch:
-    "No browser for Claude on macOS and Linux"), then `case-law`. `env()`:
+  - `servers(kind)`: `browser` for Codex alone (`servers::browser_mcp`; Claude has no browser on
+    any OS for launch: "No browser for Claude on macOS and Linux" and "No browser for Claude on
+    Windows either"), then `case-law`. `env()`:
     `STETDOC_AUTHOR`. `path_prepend()`: `Option`, stetdoc's parent folder, or none (with a
     warning) when that folder also holds a browser sidecar or the app's own executable, or is a
     root. Folders compare without regard to case or separator.
@@ -963,9 +963,9 @@ this record and firm-it §8.
   agent-browser's daemon and Chrome's debugging port take no password, so with the entry a shell
   command Codex runs without a prompt could drive the unfenced browser past the filter and write
   outside Codex's writable roots. So on Windows Codex gets neither the entry nor the shell tool
-  (`servers::no_browser`), no browser in its header (the app offers no browser action), and a
-  line telling the lawyer a Claude conversation can open web pages. The way back is the elevated
-  sandbox (its firewall) or an authenticated daemon. Claude on Windows keeps its shell tool.
+  (`servers::no_browser`), no browser in its header (the app offers no browser action), and the
+  no-browser sentence. The way back is the elevated sandbox (its firewall) or an authenticated
+  daemon. Claude has no browser on Windows either (below), so no agent has one there.
 - **No browser for Claude on macOS and Linux, for launch** (2026-11-11, security review of
   #940). Claude's shell `agent-browser` would have to run outside Claude Code's sandbox
   (`excludedCommands`), and Claude Code 2.1.293's exclusion check reworks a command before it
@@ -979,9 +979,23 @@ this record and firm-it §8.
   The app copies no `agent-browser` into `<data>/tools` there, so no session gets that folder or
   the browser's skill (`servers::shell_browser`): Codex's entry runs the bundled sidecar itself.
   The agent-browser ask and allow rules stay in the code, with no session to apply to. Codex
-  keeps its guarded entry on macOS and Linux, and Windows is unchanged: Claude's shell browser is
-  Windows-only for launch, and the Claude-only line Codex gets there stays true. The way back is
+  keeps its guarded entry on macOS and Linux. The way back is
   a Clauseo-owned shim, after launch ("Claude's sandbox" below).
+- **No browser for Claude on Windows either, for launch** (2026-11-11, security review round 4
+  of #1014). Claude Code has no sandbox on Windows, so Claude's shell `agent-browser` ran on deny
+  rules alone, and a deny list cannot be complete: Bash rules match the command as written, so
+  brace expansion (`agent-browser {upload,} …`), a glob (`upl?ad`), a variable
+  (`S=eval; agent-browser $S`), `${IFS}`, `cmd //c`, `xargs`, `npx`, `agent-browser.exe` and
+  another letter case each spell a refused command that no rule sees; the match-anywhere denies
+  catch only the plain spellings. So `servers::no_browser` is true for Claude
+  on every OS: on Windows too it gets no entry, no `agent-browser` on its `PATH`, no
+  `AGENT_BROWSER_*` variables, no browser in its header and the no-browser sentence. No agent
+  gets the shell command anywhere now (`servers::shell_browser` is false), so the app copies
+  no `agent-browser` into `<data>/tools` and renders the browser's skill for no session; the
+  copy code stays for the way back. The Claude-only line Codex on Windows got
+  (`browser-claude-only.txt`) is gone with it, since a Claude conversation has no browser there
+  either. Claude's rule code (the allow and ask rules, the match-anywhere denies) stays,
+  dormant. The way back is the same Clauseo-owned shim.
 - **Accepted at Claude parity** (H2, M1, and no prompts). With no proxy, nothing stops Chrome
   reaching loopback or private addresses after a redirect or a page's own navigation; the guard
   checks only the address it is given. A page on `127.0.0.1:<debugging port>` could ask Chrome's
