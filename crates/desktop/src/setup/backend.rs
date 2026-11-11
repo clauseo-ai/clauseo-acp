@@ -17,6 +17,11 @@
 //!   an agent's install is `Ready`; an agent not installed shows `SignedOut`. A queue newly held
 //!   for an agent's sign-in (`agent.auth_required`) checks its status again
 //!   (`recheck_sign_in`), one at a time per agent.
+//! - **One sign-in at a time.** Installs run side by side, one per agent, each published as it
+//!   goes; sign-ins do not. A sign-in press (`StartSignIn`, `UseDeviceCode`,
+//!   `UseDifferentAccount`) while another agent's sign-in is going is kept as a pending press,
+//!   shown `Queued` (`pending.rs`), and the pump starts it once that sign-in ends, with no new
+//!   command. Status checks, sign-outs and searches never wait.
 //! - **Confirms.** `SetFirmEndpoint` asks the lawyer first; a decline runs nothing and answers
 //!   `transport.unauthorized`. So does a Codex sign-in over Clauseo's own login (`switch.rs`),
 //!   whose decline answers `Done`. `RetryAgentInstall` is `command.invalid` unless the install
@@ -484,7 +489,8 @@ impl AgentsBackend {
     }
 
     /// Follows `Agents`' events until they end: installs out as `AgentInstallProgress` (and the
-    /// entry written on `Ready`), sign-ins through [`Compose`], `OpenUrl` opened, notes logged.
+    /// entry written on `Ready`), sign-ins through [`Compose`] (then `pending::run_next`),
+    /// `OpenUrl` opened, notes logged.
     pub(crate) async fn pump(&self, source: impl Stream<Item = AgentsEvent>) {
         let mut source = std::pin::pin!(source);
         let mut checked = BTreeSet::new();
@@ -502,6 +508,7 @@ impl AgentsBackend {
                     lock(&self.rechecks).remove(&agent);
                     tally.signin(&*self.counts, &self.compose, &agent, &state);
                     leave::signin_event(self, &agent, state).await;
+                    pending::run_next(self);
                 }
                 AgentsEvent::OpenUrl { agent, url } => {
                     if let Err(error) = open_url_unconfirmed(&*self.opener, &url) {
@@ -514,6 +521,7 @@ impl AgentsBackend {
                 // `auth_required` re-check of it is over, so the next hold may ask again.
                 AgentsEvent::SigninUnchanged { agent } => {
                     lock(&self.rechecks).remove(&agent);
+                    pending::run_next(self);
                 }
                 _ => {}
             }
@@ -521,8 +529,8 @@ impl AgentsBackend {
     }
 
     /// One install state: sent to the windows; on `Ready` the entry written, then a pending
-    /// sign-in run (`pending.rs`) or else the status checked (once per agent); an agent with no
-    /// sign-in state yet shown signed out.
+    /// sign-in run (`pending.rs`) or else the status checked (once per agent; not over a press
+    /// still waiting for another sign-in); an agent with no sign-in state yet shown signed out.
     async fn install_event(
         &self,
         agent: &AgentId,
@@ -542,8 +550,9 @@ impl AgentsBackend {
         }
         if matches!(state, InstallState::Ready { .. }) {
             write_entry(self, agent).await;
-            let started = pending::run_press(self, agent);
-            if checked.insert(agent.clone()) && !started {
+            let ran = pending::run_press(self, agent);
+            let fresh = ran != pending::Ran::Waits && checked.insert(agent.clone());
+            if fresh && ran == pending::Ran::Nothing {
                 super::status_timing::asked(agent, "installed");
                 if let Err(error) = self.agents.check_status(agent) {
                     tracing::warn!(%agent, %error, "no status check");
