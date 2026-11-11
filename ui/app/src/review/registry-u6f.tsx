@@ -106,7 +106,7 @@ export const U6F: Entry[] = [
   },
   {
     id: "U6F-11",
-    words: errorWords("Sign in to the AI first. Your question is kept."),
+    words: errorWords("Sign in first. Your question is kept."),
     screen: "room/composer",
     render: nameless("agent.auth_required"),
   },

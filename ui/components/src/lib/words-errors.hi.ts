@@ -40,7 +40,7 @@ export const HI = {
     "पहले Codex में ChatGPT से साइन इन करें। आपका प्रश्न रखा गया है।",
   "Sign in with {name} first. Your question is kept.":
     "पहले {name} से साइन इन करें। आपका प्रश्न रखा गया है।",
-  "Sign in to the AI first. Your question is kept.": "पहले AI में साइन इन करें। आपका प्रश्न रखा गया है।",
+  "Sign in first. Your question is kept.": "पहले साइन इन करें। आपका प्रश्न रखा गया है।",
   "This version of Codex doesn't work with Clauseo.":
     "Codex का यह संस्करण Clauseo के साथ काम नहीं करता।",
   "This version of {name} doesn't work with Clauseo.":
