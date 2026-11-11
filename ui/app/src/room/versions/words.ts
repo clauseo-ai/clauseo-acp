@@ -14,7 +14,13 @@ import { clock } from "@clauseo/components/lib/words.ts";
 import { errorWords } from "@clauseo/components/lib/words-errors.ts";
 import { mt } from "@clauseo/components/lib/words-matters.ts";
 import { listOf, vt } from "@clauseo/components/lib/words-versions.ts";
-import type { ThreadId, Timestamp } from "../../transport/protocol.ts";
+import type {
+  FolderPlace,
+  SkippedFileReason,
+  ThreadId,
+  Timestamp,
+} from "../../transport/protocol.ts";
+import { serviceName } from "../sync-services.ts";
 import { clockOf } from "../when.ts";
 import { changedSince, type Ask, type Done, type Snapshot, type Unsaved } from "./state.ts";
 import { fileName, namesOf } from "@clauseo/components/lib/words-core.ts";
@@ -234,6 +240,58 @@ export function doneLine(lang: Lang, cal: Calendar, s: Snapshot, done: Done): st
         { time: timeOfTs(lang, s, done.of), papers: listOf(lang, done.papers.map(fileName)) },
       );
   }
+}
+
+/**  The lines under the band for what the room last did: doneLine's, then, after an undo, one for
+ * each file it kept because Clauseo had no earlier copy (cantUndoWords). An undo that put none
+ * back says only those: it has no paper to name as gone back. */
+export function doneLines(
+  lang: Lang,
+  cal: Calendar,
+  s: Snapshot,
+  done: Done,
+  place: FolderPlace | undefined,
+): { text: string; kept: boolean }[] {
+  const kept = done.kind === "undidChange" ? (done.kept ?? []) : [];
+  const own =
+    done.kind === "undidChange" && done.papers.length === 0 && kept.length > 0
+      ? []
+      : [{ text: doneLine(lang, cal, s, done), kept: false }];
+  return [
+    ...own,
+    ...kept.map((f) => ({ text: cantUndoWords(lang, f.path, f.reason, place), kept: true })),
+  ];
+}
+
+/**  Why an undo left a file as it is: Clauseo had no earlier copy of it. A file that was only in
+ * the cloud says where its earlier copy may be, by the folder's sync service where the room knows
+ * one (sync-services.ts); a file over the size cap, or kept for a reason this version doesn't
+ * know, says only that Clauseo kept no copy. */
+export function cantUndoWords(
+  lang: Lang,
+  path: string,
+  reason: SkippedFileReason,
+  place: FolderPlace | undefined,
+): string {
+  const file = fileName(path);
+  if (reason !== "cloud_only")
+    return vt(
+      lang,
+      "Clauseo can't undo the change to {file}. It didn't keep a copy of it before, so there's no earlier copy to bring back.",
+      { file },
+    );
+  const service = serviceName(place);
+  return service === null
+    ? vt(
+        lang,
+        "Clauseo can't undo the change to {file}. It was only online before, so there's no earlier copy here. Your cloud service's version history may have the earlier one.",
+        { file },
+      )
+    : vt(
+        lang,
+        "Clauseo can't undo the change to {file}. It was only in {service} before, so there's no earlier copy here. {service}'s version history has the earlier one.",
+        { file, service },
+      );
 }
 
 /** A moment's clock time in the language: "4:31 pm", or "शाम 4:31". */

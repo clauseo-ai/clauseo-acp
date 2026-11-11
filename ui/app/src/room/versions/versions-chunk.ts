@@ -10,6 +10,8 @@ export { VersionsCentre, VersionsRail } from "./versions-parts.tsx";
 // the change note's lock lines (word/word-lock.tsx) share Versions' words: the thread loads them from here, so the words
 // stay in one chunk
 export { WordLock } from "../word/word-lock.tsx";
+// and the lines after its undo for a file Clauseo had no earlier copy of
+export { CantUndo } from "./cant-undo.tsx";
 
 let loading: Promise<void> | null = null;
 

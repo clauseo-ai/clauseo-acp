@@ -6,7 +6,7 @@
 // under the note when Word opened the file in Protected View (until the next open or Undo). Focus follows the lock: to Try again when the lines come, back to Undo (or the
 // note) when they go. A stop macOS kept out of the matter's folder offers Open Privacy settings on the Mac
 // (privacy-settings.tsx).
-import { lazy, Suspense, useLayoutEffect, useRef, useState } from "react";
+import { lazy, Suspense, use, useCallback, useLayoutEffect, useRef, useState } from "react";
 import { late } from "@clauseo/components/lib/late.ts";
 import { ChangeNote } from "@clauseo/components/clauseo/change-note.tsx";
 import { NoticeCard, StopMark } from "@clauseo/components/clauseo/limit-note.tsx";
@@ -20,6 +20,10 @@ import { th } from "@clauseo/components/lib/words-thread.ts";
 import { revealKey, ui } from "@clauseo/components/lib/words-ui.ts";
 import { useWords } from "@clauseo/components/lib/words.ts";
 import { useNow } from "../../store/limits.ts";
+import { useStreamPart, useViewStore } from "../../store/hooks.ts";
+import type { StreamView } from "../../store/view.ts";
+import { FolderPlaceContext } from "../folder-place.ts";
+import { unversionedOf } from "../undone-marker.ts";
 import { toHostError } from "../../transport/host-transport.ts";
 import { locatable, useLocateFolder } from "../act-refusals.ts";
 import { StoppedMark } from "../stopped-mark.tsx";
@@ -46,6 +50,11 @@ import { useWordOpen, type WordOpener } from "../word/open-in-word.ts";
 /** The lock's lines, from Versions' chunk, which holds their words: loaded on the first lock. */
 const WordLock = lazy(() =>
   late(import("../versions/versions-chunk.ts")).then((m) => ({ default: m.WordLock })),
+);
+
+/** After an undo, the lines for the files Clauseo had no earlier copy of, from the same chunk. */
+const CantUndo = lazy(() =>
+  late(import("../versions/versions-chunk.ts")).then((m) => ({ default: m.CantUndo })),
 );
 
 const LOCKED = "matter.file_locked";
@@ -75,6 +84,15 @@ function Changed({ entry }: { entry: StepEntry }) {
   const [protectedView, setProtectedView] = useState(false);
   const box = useRef<HTMLDivElement>(null);
   const papers = entry.files.map((f) => f.path);
+  // undone: the files the host's marker says stayed as they are, Clauseo having no earlier copy of
+  // them; the note counts only the rest, and says nothing of its own when none went back
+  const pickKept = useCallback(
+    (v: StreamView | undefined) => unversionedOf(v, entry.turn),
+    [entry.turn],
+  );
+  const kept = useStreamPart(useViewStore(), entry.undone ? stream : null, pickKept);
+  const place = use(FolderPlaceContext);
+  const back = papers.filter((p) => !kept.some((f) => f.path === p));
   const undoable = entry.checkpoint_after !== undefined;
   // a program holds a file: the lock's lines stand under the note, and Try again takes Undo's place
   const locked = refused?.code === LOCKED && !entry.undone;
@@ -150,29 +168,36 @@ function Changed({ entry }: { entry: StepEntry }) {
   const shown = undoRefusal ?? openFailed;
   return (
     <div data-testid="files-changed" ref={box}>
-      <ChangeNote
-        papers={papers}
-        askUndo={askUndo}
-        state={entry.undone ? "undone" : "changed"}
-        {...(undoable && !locked ? { onUndo } : {})}
-        {...(open === undefined ? {} : { open })}
-        undoDisabled={busy || pending}
-        error={shown === null ? null : { words: errorWords(w.lang, shown, plan), code: shown }}
-        errorAction={
-          shown === "matter.document_path_too_long" && opener !== undefined
-            ? { label: ui(w.lang, revealKey(platform)), onAction: reveal(opener) }
-            : locatable(shown) && locate !== null
-              ? { label: ui(w.lang, "Locate folder"), onAction: locate }
-              : undefined
-        }
-        testIds={{
-          paper: "file-changed",
-          undo: "undo",
-          error: "error",
-          errorAction: locatable(shown) ? "locate-folder" : "reveal",
-          open: "open-in-word",
-        }}
-      />
+      {(back.length > 0 || kept.length === 0) && (
+        <ChangeNote
+          papers={back}
+          askUndo={askUndo}
+          state={entry.undone ? "undone" : "changed"}
+          {...(undoable && !locked ? { onUndo } : {})}
+          {...(open === undefined ? {} : { open })}
+          undoDisabled={busy || pending}
+          error={shown === null ? null : { words: errorWords(w.lang, shown, plan), code: shown }}
+          errorAction={
+            shown === "matter.document_path_too_long" && opener !== undefined
+              ? { label: ui(w.lang, revealKey(platform)), onAction: reveal(opener) }
+              : locatable(shown) && locate !== null
+                ? { label: ui(w.lang, "Locate folder"), onAction: locate }
+                : undefined
+          }
+          testIds={{
+            paper: "file-changed",
+            undo: "undo",
+            error: "error",
+            errorAction: locatable(shown) ? "locate-folder" : "reveal",
+            open: "open-in-word",
+          }}
+        />
+      )}
+      {kept.length > 0 && (
+        <Suspense fallback={null}>
+          <CantUndo files={kept} place={place} testId="cant-undo" />
+        </Suspense>
+      )}
       {protectedView && opener !== undefined && shown === null && (
         <p className={QUIET} role="status" data-testid="open-protected-view">
           <Say>{opener.protectedLine}</Say>

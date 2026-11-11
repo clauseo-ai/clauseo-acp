@@ -25,7 +25,7 @@ import { IconUndo } from "@clauseo/components/icons/icons.tsx";
 import { Button } from "@clauseo/components/ui/button.tsx";
 import type { Lang, Platform } from "@clauseo/components/lib/display.ts";
 import { useVersionWords, vt } from "@clauseo/components/lib/words-versions.ts";
-import type { FileChange, FileRefId } from "../../transport/protocol.ts";
+import type { FileChange, FileRefId, FolderPlace } from "../../transport/protocol.ts";
 import { locatable, useLocateFolder } from "../act-refusals.ts";
 import { LocateButton } from "../locate-button.tsx";
 import { PAPER_GONE, refusalOf } from "../open.ts";
@@ -38,7 +38,7 @@ import { calendarOf, fileName, undoable } from "./timeline.ts";
 import {
   askOf,
   conversationOf,
-  doneLine,
+  doneLines,
   failedLine,
   named,
   unsavedAt,
@@ -170,6 +170,7 @@ export function VersionsCentre({
   onLeave,
   onPanel,
   onAway,
+  place,
 }: {
   controller: VersionsController;
   /** The Word documents' marked-up changes, kept while Versions is open. */
@@ -183,6 +184,10 @@ export function VersionsCentre({
   onPanel: (() => void) | null;
   /** With the panel over the band on a mid window: puts it away, Escape's first step from inside it. */
   onAway: (() => void) | null;
+  /**  Where the matter's folder lives, as list_papers says: its sync service names where a file
+   * that was only in the cloud has an earlier copy, after an undo. Undefined until the papers are
+   * listed. */
+  place?: FolderPlace | undefined;
 }) {
   const w = useVersionWords();
   const { lang } = w;
@@ -234,11 +239,13 @@ export function VersionsCentre({
     const done = s.done;
     // the restored line's Undo, once the host's marker says the restore was written
     const restore = done === null ? null : restoreOf(s, done);
-    if (done !== null)
+    // after an undo, a file it kept because Clauseo had no earlier copy says so on a line of its
+    // own
+    for (const [i, line] of (done === null ? [] : doneLines(lang, cal, s, done, place)).entries())
       notices.push({
-        tone: "done",
-        text: doneLine(lang, cal, s, done),
-        ...(restore !== null
+        tone: line.kept ? "failed" : "done",
+        text: line.text,
+        ...(restore !== null && i === 0
           ? {
               action: (
                 <WaitingButton

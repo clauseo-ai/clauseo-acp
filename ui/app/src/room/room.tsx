@@ -83,6 +83,7 @@ import { ScratchLine } from "./scratch-line.tsx";
 import type { StandIns } from "./versions/stand-ins.ts";
 import { useVersions } from "./versions/use-versions.ts";
 import { useWordOpeners, WordOpenContext } from "./word/open-in-word.ts";
+import { FolderPlaceContext } from "./folder-place.ts";
 import { PaperWall } from "./paper-wall.tsx";
 import { NewConversationLine } from "./new-conversation-line.tsx";
 import { hasLine, wallEmpty } from "./wall-away.ts";
@@ -544,29 +545,31 @@ function RoomFrame({
               <MarkdownHostContext value={answers}>
                 <PaperLinksContext value={paperLinks}>
                   <WordOpenContext value={word}>
-                    <AgentPlanContext value={agentPlan}>
-                      <ToolLineContext value={toolRoom}>
-                        <ProtectionContext value={shield.composer}>
-                          <Work
-                            key={talks.open ?? open?.matter ?? "none"}
-                            transport={transport}
-                            matter={open}
-                            drafts={drafts}
-                            draftKey={talks.open}
-                            conversation={link}
-                            choice={choice}
-                            menus={draftMenus}
-                            plan={plan}
-                            focus={talks.focus?.n ?? null}
-                            archived={talks.archived}
-                            onThread={matters.onThread}
-                            conversations={conversations}
-                            folderShut={folderShut}
-                            openRefused={opened?.act === "open" ? opened.code : null}
-                          />
-                        </ProtectionContext>
-                      </ToolLineContext>
-                    </AgentPlanContext>
+                    <FolderPlaceContext value={papers?.place}>
+                      <AgentPlanContext value={agentPlan}>
+                        <ToolLineContext value={toolRoom}>
+                          <ProtectionContext value={shield.composer}>
+                            <Work
+                              key={talks.open ?? open?.matter ?? "none"}
+                              transport={transport}
+                              matter={open}
+                              drafts={drafts}
+                              draftKey={talks.open}
+                              conversation={link}
+                              choice={choice}
+                              menus={draftMenus}
+                              plan={plan}
+                              focus={talks.focus?.n ?? null}
+                              archived={talks.archived}
+                              onThread={matters.onThread}
+                              conversations={conversations}
+                              folderShut={folderShut}
+                              openRefused={opened?.act === "open" ? opened.code : null}
+                            />
+                          </ProtectionContext>
+                        </ToolLineContext>
+                      </AgentPlanContext>
+                    </FolderPlaceContext>
                   </WordOpenContext>
                 </PaperLinksContext>
               </MarkdownHostContext>
