@@ -30,7 +30,7 @@ fn agent_browser_rules_are_the_hosts_per_session() {
     let none = rules.iter().all(|rule| !allowed.contains(rule));
     assert!(none, "{rules:?}");
     let ask: Vec<String> = clauseo_profile::claude::agent_browser_ask().collect();
-    assert_eq!(ask.len(), 2 * 6 + 4);
+    assert_eq!(ask.len(), 2 * 6 + 12);
     for rule in [
         "Bash(agent-browser wait*-f*)",
         "Bash(agent-browser get*cdp-url*)",
@@ -39,6 +39,8 @@ fn agent_browser_rules_are_the_hosts_per_session() {
         "Bash(agent-browser pdf*)",
         "Bash(agent-browser download*)",
         "Bash(agent-browser *file://*)",
+        "Bash(agent-browser * upload*)",
+        "Bash(agent-browser * state load*)",
     ] {
         assert!(ask.iter().any(|a| a == rule), "{rule}");
     }

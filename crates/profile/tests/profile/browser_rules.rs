@@ -236,6 +236,56 @@ fn the_denied_options_and_subcommands_are_refused() {
     );
 }
 
+/// Every subcommand that reads or writes a local file or runs page JavaScript asks wherever it
+/// sits: bare, behind `--json`, behind `-q` or another global option, with a full path.
+#[test]
+fn file_and_javascript_subcommands_ask_behind_any_option() {
+    let data = "\"/Users/a/Library/Application Support/ai.clauseo.desktop/agents/auth.json\"";
+    let subs = [
+        format!("upload @f {data}"),
+        "eval \"document.cookie\"".to_owned(),
+        format!("pdf {data}"),
+        format!("download @e1 {data}"),
+        format!("state load {data}"),
+        format!("state save {data}"),
+        "wait --fn \"window.ok\"".to_owned(),
+        "wait -f x".to_owned(),
+        "get cdp-url".to_owned(),
+    ];
+    let lead = [
+        "",
+        "--json ",
+        "-q ",
+        "--max-output 5 ",
+        "-q --json ",
+        "--json -q ",
+        "--timeout=3 -q ",
+    ];
+    for sub in &subs {
+        for lead in lead {
+            let command = format!("agent-browser {lead}{sub}");
+            // Bare `state` stays denied; behind another option it asks.
+            let want = if sub.starts_with("state ") && matches!(lead, "" | "--json ") {
+                Verdict::Deny
+            } else {
+                Verdict::Ask
+            };
+            assert_eq!(verdict(&command), want, "{command}");
+            let chained = format!("agent-browser open https://a.in && {command}");
+            assert_eq!(verdict(&chained), want, "{chained}");
+        }
+    }
+    // A word that only holds one of them, or the allowed `wait --download`, does not ask.
+    assert_all(
+        Verdict::Allow,
+        &[
+            "agent-browser fill @e2 \"medieval\"",
+            "agent-browser wait --download",
+            "agent-browser fill @e2 \"state bank\"",
+        ],
+    );
+}
+
 /// Forms in no rule, which the mode decides: another global option first, a full path, `npx`,
 /// a subcommand outside the list, or a chain with another command.
 #[test]
@@ -248,7 +298,6 @@ fn other_forms_are_left_to_the_mode() {
             "npx agent-browser open https://a.in",
             "agent-browser cookies",
             "agent-browser keyboard type x",
-            "agent-browser -q state load s.json",
             "agent-browser snapshot | head -50",
             "agent-browser open https://a.in && curl https://b.in",
         ],
