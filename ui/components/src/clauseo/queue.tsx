@@ -16,11 +16,12 @@ import { QUEUE_CAP, type QueueHold, type QueuedMessage, type QueueTestIds } from
 export { OtherConversationWait } from "./queue-wait.tsx";
 // the steer's parts live apart, for the same reason: the hint in the composer, the marks in the thread's chunk
 export { SteerHint } from "./steer-hint.tsx";
-export { SteerMark, SteerNote } from "./steer-marks.tsx";
+export { SteerMark, SteerNote, SteerWaiting } from "./steer-marks.tsx";
 
 function QueueItem({
   item,
   index,
+  when,
   onEdit,
   onRemove,
   onSendNow,
@@ -28,6 +29,7 @@ function QueueItem({
 }: {
   item: QueuedMessage;
   index: number;
+  when: string | null;
   onEdit: OnEdit;
   onRemove: (id: string) => void;
   onSendNow: (id: string) => void;
@@ -138,6 +140,11 @@ function QueueItem({
           {w.m("Send now")}
         </Button>
       </span>
+      {when !== null && (
+        <p className="queue-when" data-testid={testIds?.when}>
+          <Say>{when}</Say>
+        </p>
+      )}
     </li>
   );
 }
@@ -155,12 +162,15 @@ const SHOWN = 2;
  * the next at the top. Two show, then a row that opens the rest; opened, the list scrolls and casts an edge where it
  * is cut. Nothing in it is numbered: the order is the order they stand in. Held with no stop to name, the head says
  * only how many wait ("2 queued.", nothing sent until the lawyer sends) and offers Send next. A refused press's words stand under the head while the host gives them.
- * After Remove or Send now takes a row away, the focus goes to the next row's Send now, or out (`onFocusOut`). */
+ * After Remove or Send now takes a row away, the focus goes to the next row's Send now, or out (`onFocusOut`). Under
+ * each message's words, while the queue isn't held, when it goes (`when`, "Sends when Claude finishes"): held, the
+ * head says nothing goes until the lawyer sends, so the rows say nothing of it. */
 export function QueueStrip({
   items,
   held: heldProp = null,
   resume = null,
   note = null,
+  when = null,
   onEdit,
   onRemove,
   onSendNow,
@@ -176,6 +186,8 @@ export function QueueStrip({
   resume?: string | null;
   /** A refused press's words and its code, under the head; null for none. */
   note?: { words: string; code: string } | null;
+  /** When each message goes, under its words while the queue isn't held; null for none. */
+  when?: string | null;
   onEdit: OnEdit;
   onRemove: OnRowPress;
   onSendNow: OnRowPress;
@@ -340,6 +352,7 @@ export function QueueStrip({
             key={item.id}
             item={item}
             index={i}
+            when={held === null ? when : null}
             onEdit={onEdit}
             onRemove={(id) => press(id, onRemove)}
             onSendNow={(id) => press(id, onSendNow)}

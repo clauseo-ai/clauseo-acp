@@ -63,10 +63,11 @@ function endsOf(ids: readonly EntryId[]): readonly EntryId[] {
 }
 
 /** Whether a user message starts a turn of its own in the thread: not one that waits in the queue or was taken back
- * (the strip holds those, and a held queue keeps the break standing), nor a steer taken into an answer (thread/steer.ts). */
+ * (the strip holds those, and a held queue keeps the break standing), nor a steer taken into an answer or still waiting
+ * on the agent's word in the answer it was sent into (thread/steer.ts). */
 const asks = (view: StreamView, id: EntryId): boolean => {
   const m = view.entries.get(id)?.user_message;
-  return m !== undefined && askedAs(m, false) === "question";
+  return m !== undefined && askedAs(m) === "question";
 };
 
 /** The thread's last end, a step or a limit stop, or a question asked after it, and where it stands among the ends. */

@@ -8,8 +8,11 @@
 // plan the conversation uses; paused at the plan's limit, it says where the answer stopped (U12). `/` opens the menu
 // of the agent's commands, as the thread's header lists them, and `@` the matter's papers (paper-mentions.ts): a send,
 // queued or steered too, names each paper its tokens still mention.
-// U7: while Clauseo works, Enter queues the field's words (the host queues a send during a turn, H9), and the line above
-// the field offers Send now and Queue (composer-steer.tsx); at QUEUE_CAP Enter queues nothing and keeps the words, and a
+// U7: while Clauseo works, Enter gives the field's words to the running answer where the agent takes words mid-answer
+// (the header's `steer_joins_turn`: `delivery: "steer"`, which the host queues at the head when the agent can't take
+// them now), else queues them (the host queues a send during a turn, H9); the line above the field offers Send now
+// (`delivery: "send_now"`: the answer stops and the words go next) and Queue (composer-steer.tsx); at QUEUE_CAP Enter
+// sends nothing and keeps the words, and a
 // send refused as `thread.queue_full` says the cap. The queue's strip sits over the field for every conversation
 // with a thread (queue-slot.tsx), under the wait for another conversation (queue.tsx). After the hint's Send now or Queue
 // the focus goes back to the field, so the emptied words can be undone. An edit the strip couldn't make because its
@@ -56,7 +59,7 @@ import { OutOfCredit } from "../connectors/out-of-credit.tsx";
 import { useAgentPlan } from "./agent-plan.ts";
 import { useNow } from "../../store/limits.ts";
 import { pausedLine, type Paused } from "./limit-words.ts";
-import { pickFull, queueFullLine } from "./composer-queue.ts";
+import { joinsIn, pickFull, queueFullLine } from "./composer-queue.ts";
 import { ComposerSteer } from "./composer-steer.tsx";
 import { asksWords } from "./step-names.ts";
 import { holdLine, useHold } from "../first-run/hold.ts";
@@ -231,13 +234,13 @@ export function WorkComposer({
     if (text === "") drafts.delete(draftKey);
     else drafts.set(draftKey, text);
   };
-  // Enter comes here empty too, and sends nothing then: it never breaks the line. While Clauseo works it queues the
-  // words, but not past the cap, when they stay in the field; while another conversation holds the matter, it raises
-  // the wait instead, whose Queue sends
+  // Enter comes here empty too, and sends nothing then: it never breaks the line. While Clauseo works it steers the
+  // words where the agent takes words mid-answer, else queues them, but not past the cap, when they stay in the field;
+  // while another conversation holds the matter, it raises the wait instead, whose Queue sends
   const ask = (asked: string) => {
     if (disabled || shield?.blocked === true || gated || asked.trim() === "") return;
     if (busy) {
-      queue(asked);
+      queue(asked, joinsIn(stream === null ? undefined : store?.view(stream)));
       return;
     }
     if (wait !== null && !wait.sent) {
@@ -246,10 +249,11 @@ export function WorkComposer({
     }
     send(asked);
   };
-  // the field's words behind the running turn: the host queues them (send_prompt with no `delivery`)
-  const queue = (asked: string) => {
+  // the field's words behind the running turn: the host queues them (send_prompt with no `delivery`), or, `steer`,
+  // gives them to the running answer (or the queue's head, when the agent can't take them now)
+  const queue = (asked: string, steer = false) => {
     if (pickFull(stream === null ? undefined : store?.view(stream))) return;
-    send(asked, { behind: true });
+    send(asked, steer ? { behind: true, delivery: "steer" } : { behind: true });
   };
   const send = (asked: string, how?: AskHow) => {
     if (disabled || shield?.blocked === true || gated || asked.trim() === "") return;
@@ -280,7 +284,7 @@ export function WorkComposer({
   };
   // U7's Queue: the field's words, sent as Ask sends them (send_prompt with no `delivery`, the wire's queue)
   const queueNow = () => send(field.current?.text() ?? "");
-  // the hint's Queue, as Enter; its Send now steers the running answer
+  // the hint's Queue, as Enter where the agent takes no words mid-answer; its Send now stops the answer for the words
   const queueField = () => queue(field.current?.text() ?? "");
   const focusField = useCallback(() => field.current?.focus(), []);
   // the strip's lost edit: into an empty field as it is, else after the words there with a blank line between; never
@@ -298,7 +302,8 @@ export function WorkComposer({
     },
     [lost, store, stream],
   );
-  const steerField = () => send(field.current?.text() ?? "", { behind: true, delivery: "steer" });
+  const sendNowField = () =>
+    send(field.current?.text() ?? "", { behind: true, delivery: "send_now" });
   // the stopped question, once per break, and only into an empty field: words typed since keep their place, and fill
   // never moves the lawyer's focus or breaks a composition. The host's answer to send_prompt and the turn over the
   // stream come back two ways, in either order: an agent that exits at once can stop the turn while the field still
@@ -413,7 +418,7 @@ export function WorkComposer({
         // while Clauseo works and the field holds words, unless the conversation waits behind another (design
         // room.tsx: `busy && hasText && live.behind === null`)
         busy && !empty && !disabled && wait === null ? (
-          <ComposerSteer stream={stream} onSendNow={steerField} onQueue={queueField} />
+          <ComposerSteer stream={stream} onSendNow={sendNowField} onQueue={queueField} />
         ) : null
       }
       queue={

@@ -230,7 +230,18 @@ export const heldScene = (lang: Lang, how: "stopped" | "not_allowed" | "failed")
   held: true,
 });
 
-/** matters/steer-claude, after Send now: the words stand in the running answer, taken in at 4:31 pm. */
+/** matters/steer-claude, after Enter, before Claude has taken the words: they wait in the running answer, sent at
+ * 4:31 pm, saying they send when Claude finishes, with Send now. */
+export const waitingScene = (lang: Lang): QueueScene => ({
+  title: say(lang, SAY.summoning),
+  entries: [
+    ...asked(lang),
+    ask(3, 2, say(lang, SAY.steerClaude), T1, pm(31), { delivery: "steer" }),
+  ],
+  joins: true,
+});
+
+/** matters/steer-claude, after Enter, once Claude took the words in: they stand in the running answer, at 4:31 pm. */
 export const steerMarkScene = (lang: Lang): QueueScene => ({
   title: say(lang, SAY.summoning),
   entries: [
@@ -244,7 +255,7 @@ export const steerMarkScene = (lang: Lang): QueueScene => ({
   joins: true,
 });
 
-/** matters/steer-claude, the answer ending as the words came: they head the next exchange and say why. */
+/** matters/steer-claude, the words waiting for the answer to end: they head the next exchange and say why. */
 export const requeuedScene = (lang: Lang): QueueScene => ({
   title: say(lang, SAY.summoning),
   entries: [
