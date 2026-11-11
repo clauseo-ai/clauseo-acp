@@ -170,11 +170,11 @@ mod write;
 #[cfg(any(test, feature = "test-support"))]
 pub mod testing;
 
-#[cfg(feature = "test-support")]
-pub use config::RenameFault;
 pub use config::{
     AgentsConfig, Clock, InstallConfig, Network, NodeSearch, RefreshFn, SigninConfig, SystemClock,
 };
+#[cfg(feature = "test-support")]
+pub use config::{FreeBytes, RenameFault};
 pub use fileid::same_file;
 pub use log::InstallLog;
 pub use pins::{AgentPins, PinsError};

@@ -15,6 +15,8 @@ use std::fs::{File, OpenOptions};
 use std::io::{self, Write as _};
 use std::path::Path;
 
+use clauseo_protocol::AgentId;
+
 pub(crate) mod extract;
 
 pub(crate) use extract::{
@@ -200,17 +202,61 @@ fn open_no_follow(options: &mut OpenOptions, path: &Path) -> io::Result<File> {
     options.open(path)
 }
 
-/// Takes the exclusive lock on `<data_dir>/agents/.lock` (made if missing) without waiting:
-/// `Ok(None)` when another process holds it, i.e. another Clauseo is installing. The lock lasts
-/// as long as the file it gives.
-pub(crate) fn try_lock_agents(data_dir: &Path) -> io::Result<Option<File>> {
+/// One of the lock files in `<data_dir>/agents` (decision 0033, "Two installs at once").
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum AgentsLock<'a> {
+    /// `.lock`: every install job holds it shared, so an older Clauseo, which takes it
+    /// exclusive, never installs beside this one; an exclusive hold is the whole folder's.
+    All,
+    /// `.lock-<id>`: held exclusive by the one job installing that agent, with its install
+    /// folder, its downloads, its npm cache and its npmrc files.
+    Agent(&'a AgentId),
+    /// `.lock-node`: the downloaded Node runtime and its archive. Exclusive to fetch, unpack or
+    /// remove them; shared while an npm runs from the runtime.
+    Node,
+    /// `.lock-python`: the Python runtime and its archive, exclusive while one job installs it.
+    Python,
+}
+
+impl AgentsLock<'_> {
+    /// The lock file's name in `agents`.
+    fn file_name(self) -> String {
+        match self {
+            AgentsLock::All => ".lock".to_owned(),
+            AgentsLock::Agent(agent) => format!(".lock-{agent}"),
+            AgentsLock::Node => ".lock-node".to_owned(),
+            AgentsLock::Python => ".lock-python".to_owned(),
+        }
+    }
+}
+
+/// How a lock is held: one holder, or any number of shared ones.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Mode {
+    Exclusive,
+    Shared,
+}
+
+/// Takes `lock` in `mode` without waiting (the file made if missing, a link refused): `Ok(None)`
+/// while another holder's lock conflicts, in this process or another. Every open is its own
+/// holder (`flock` on Unix, `LockFileEx` on Windows), so two jobs of one process exclude each
+/// other as two processes do. The lock lasts as long as the file it gives.
+pub(crate) fn try_lock(
+    data_dir: &Path,
+    lock: AgentsLock<'_>,
+    mode: Mode,
+) -> io::Result<Option<File>> {
     let agents = data_dir.join("agents");
     create_dir_all(&agents)?;
     let file = open_no_follow(
         OpenOptions::new().create(true).write(true).truncate(false),
-        &agents.join(".lock"),
+        &agents.join(lock.file_name()),
     )?;
-    match file.try_lock() {
+    let taken = match mode {
+        Mode::Exclusive => file.try_lock(),
+        Mode::Shared => file.try_lock_shared(),
+    };
+    match taken {
         Ok(()) => Ok(Some(file)),
         Err(std::fs::TryLockError::WouldBlock) => Ok(None),
         Err(std::fs::TryLockError::Error(err)) => Err(err),
@@ -277,6 +323,12 @@ pub(crate) fn remove_file(path: &Path) -> io::Result<()> {
         Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(()),
         other => other,
     }
+}
+
+/// Removes the folder at `path` when it is empty; anything else (a file left in it, no folder,
+/// a link) leaves it as it is.
+pub(crate) fn remove_empty_dir(path: &Path) {
+    drop(std::fs::remove_dir(path));
 }
 
 /// Removes the folder at `path` and everything in it, never following a link out of it; a
