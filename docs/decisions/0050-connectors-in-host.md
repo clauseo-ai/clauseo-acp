@@ -219,7 +219,9 @@ Claude gets one `mcp__case-law__<tool>` rule per search and read tool in `allowe
 (`agent/loads/case_law.rs`, `UNASKED_TOOLS`: `search_law`, `read_document`, `citator`,
 `check_citations`, `account`) only when the host sends our entry; otherwise any hook rule for
 that server is dropped. `recharge` opens a payment and is not pre-allowed, so it asks (MCP tools
-PR C; ChatGPT gets the same list through the host's auto-answer, `agent/mcp_trust.rs`).
+PR C; ChatGPT gets the same list through the host's auto-answer, `agent/mcp_trust.rs`, only in
+a session our entry went to). The servers in `mcp.servers`, the lawyer's or a firm policy's, run
+unasked the same way: adding a server is the trust (`agent/mcp_trust.rs`).
 `case-law` is a reserved server name (`settings/src/leaf.rs`, `RESERVED_MCP_SERVERS`): a firm's or
 the lawyer's `mcp.servers.case-law` is dropped with a visible warning ("the server name case-law
 is reserved for Clauseo's case-law connector"). No server name may hold `__` or end in `_`, since

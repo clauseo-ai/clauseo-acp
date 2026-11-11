@@ -98,6 +98,20 @@ pub(super) fn launch_keys(
 /// `additionalDirectories`.
 pub(super) type SessionLoads = (Map<String, Value>, Vec<McpServer>, Vec<PathBuf>);
 
+/// Notes on `thread`'s agent what may run unasked in its session (`agent/mcp_trust.rs`): only
+/// what Clauseo sent, the lawyer's `trusted` servers and `case-law` when its entry went.
+fn note_mcp_sent(actor: &mut Actor, thread: ThreadId, trusted: &[String], case_law: bool) {
+    let mut sent = trusted.to_vec();
+    if case_law {
+        sent.push(clauseo_profile::servers::CASE_LAW.to_owned());
+    }
+    if let Some(agent) = super::state(actor, thread).and_then(|state| state.agent.as_deref_mut())
+        && let Some(slot) = agent.mcp_sent.as_mut()
+    {
+        *slot = sent;
+    }
+}
+
 /// The `_meta`, MCP servers and extra roots for `thread`'s `session/new`, `session/load` or
 /// `session/resume`, whose matter folder is `matter`: the profile hook's `_meta` with the
 /// host's switches and keys over it and its tokens filled (the hook gets this launch's own skill
@@ -158,17 +172,8 @@ pub(super) fn session_loads(
     let browser_on = shell
         .as_ref()
         .is_some_and(|(_, part)| *part == BrowserPart::On);
-    let sandbox =
-        (kind == Some(AgentKind::Claude)).then(|| claude_sandbox(actor, &agent_id, &run, matter));
-    if let Some(Err(off)) = sandbox
-        && off.holds_auto_back()
-    {
-        // No sandbox where one was meant to be: no command may run on the classifier alone.
-        super::session::hold_auto_back(actor, thread);
-    }
-    let sandbox = sandbox.and_then(Result::ok);
-    // The lawyer's servers that run without asking (`agent/mcp_trust.rs`): the ones this
-    // session gets from the settings, less the reserved names.
+    let sandbox = session_sandbox(actor, thread, kind, &agent_id, &run, matter);
+    // The lawyer's servers this session gets that run unasked (`agent/mcp_trust.rs`).
     let trusted =
         crate::agent::mcp_trust::trusted_servers(&actor.effective.settings().mcp.servers, control);
     let claude = (kind == Some(AgentKind::Claude)).then_some(ClaudeKeys {
@@ -221,6 +226,7 @@ pub(super) fn session_loads(
         super::super::browser_policy::on_launch_read(actor, run.browser_blocked);
     }
     let mut servers = loads::mcp_servers(&actor.effective, control);
+    note_mcp_sent(actor, thread, &trusted, case_law_entry.is_some());
     servers.extend(hook_servers);
     servers.extend(case_law_entry);
     if browser_state
@@ -244,6 +250,27 @@ pub(super) fn session_loads(
         Vec::new()
     };
     Ok((meta, servers, directories))
+}
+
+/// A Claude session's sandbox ([`claude_sandbox`]); none for another agent. Where one was meant
+/// to be and is not, holds `auto` back for `thread`.
+fn session_sandbox(
+    actor: &mut Actor,
+    thread: ThreadId,
+    kind: Option<AgentKind>,
+    agent_id: &clauseo_protocol::AgentId,
+    run: &RunFolders,
+    matter: &Path,
+) -> Option<ClaudeSandbox> {
+    let sandbox =
+        (kind == Some(AgentKind::Claude)).then(|| claude_sandbox(actor, agent_id, run, matter));
+    if let Some(Err(off)) = sandbox
+        && off.holds_auto_back()
+    {
+        // No sandbox where one was meant to be: no command may run on the classifier alone.
+        super::session::hold_auto_back(actor, thread);
+    }
+    sandbox.and_then(Result::ok)
 }
 
 /// Claude Code's own sandbox for a Claude session of `agent_id` in `run`, whose matter folder

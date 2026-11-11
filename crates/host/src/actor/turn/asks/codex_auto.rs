@@ -25,7 +25,7 @@ const ALLOW_SESSION: &str = "allow_session";
 /// the title `mcp.browser.<tool>` of the earlier tool call the request's toolCallId names (the
 /// thread's `sources::browser::CodexTools`), or a standalone request's `serverName` and exact
 /// message (`sources::browser::codex_standalone_browser_tool`). Anything else (shell commands,
-/// file writes, other servers such as `case-law`) goes to the lawyer as before.
+/// file writes) goes to the lawyer as before; other servers go on to [`trusted_tool_to_allow`].
 ///
 /// Codex's own per-server `default_tools_approval_mode` would do this, but codex-acp replaces the
 /// whole `mcp_servers` table with ACP's servers (`dist/index.js:35482`), dropping that value.
@@ -83,22 +83,25 @@ pub(super) fn allow_browser_tool(
 }
 
 /// The server and the `allow_once` option, when the host answers this request itself because
-/// the lawyer added the server (`agent/mcp_trust.rs`): the thread's agent is Codex, not in
-/// forced ask; the request offers `allow_once` of kind `allow_once`; and it belongs to a
-/// server that is trusted now (turned on in the effective `mcp.servers`, not reserved, and
-/// Clauseo controls MCP), by exact name. The server comes only from what codex-acp and Codex
-/// build: a standalone request's id and `serverName`
-/// (`mcp_trust::codex_standalone_server`), or the earlier MCP tool call the request's
-/// toolCallId names, whose title and `rawInput` agree (`mcp_trust::CodexCalls`). A shell
-/// command, a file change and a server's own question (`accept`/`decline`, no `allow_once`)
-/// go on as before. Clauseo's own `case-law` server's search and read tools are answered the
-/// same way, by exact tool name (`mcp_trust::never_asks`); its `recharge`, which opens a
-/// payment, and any tool the host cannot name still ask. The `browser` keeps its own rule above.
+/// the server may run unasked (`agent/mcp_trust.rs`):
+/// - the thread's agent is Codex, and the request offers `allow_once` of kind `allow_once`;
+/// - it names an earlier MCP tool call whose title and `rawInput` agree
+///   (`mcp_trust::CodexCalls`), which is taken so it is answered once; the server comes only
+///   from what codex-acp and Codex build;
+/// - that server is one Clauseo sent this session (`Agent::mcp_sent`, `None` where Claude would
+///   be in forced ask), by exact name;
+/// - and it is Clauseo's own `case-law` with one of its search and read tools, by exact tool
+///   name (`mcp_trust::never_asks`), or a lawyer's server trusted now (turned on in the
+///   effective `mcp.servers`, not reserved, and Clauseo controls MCP).
+///
+/// Everything else goes on as before: a standalone request (an `elicitation:` id, which a server
+/// can shape like Codex's), a shell command, a file change, a server's own question
+/// (`accept`/`decline`, no `allow_once`), case law's `recharge`, which opens a payment, and
+/// any tool the host cannot name. The `browser` keeps its own rule above.
 pub(super) fn trusted_tool_to_allow(
     actor: &mut Actor,
     thread: ThreadId,
     ask: &PermissionAsk,
-    raw_input: Option<&serde_json::Value>,
 ) -> Option<(String, AgentChoiceId)> {
     let kind = actor
         .check_thread(thread)
@@ -112,20 +115,22 @@ pub(super) fn trusted_tool_to_allow(
             && option.kind == PermissionKind::AllowOnce
     })?;
     let option = AgentChoiceId::new(&option.option_id).ok()?;
-    let standalone = crate::agent::mcp_trust::codex_standalone_server(
-        ask.session.as_str(),
-        &ask.acp_tool_call_id,
-        raw_input,
-    );
-    let (server, tool) = if let Some(server) = standalone {
-        let tool = crate::agent::mcp_trust::codex_standalone_tool(server, raw_input);
-        (server.to_owned(), tool.map(str::to_owned))
-    } else {
-        let (server, tool) = super::super::state(actor, thread)?
-            .sources
-            .codex_mcp_call(&ask.acp_tool_call_id)?;
-        (server.to_owned(), Some(tool.to_owned()))
-    };
+    // One answer per call: Codex asks once, before the call runs (codex rust-v0.162.1
+    // `core/src/mcp_tool_call.rs`, `notify_mcp_tool_call_started` then
+    // `maybe_request_mcp_tool_approval`), so a second request naming the same call is a server's
+    // own question and goes to the lawyer. A standalone request (no earlier call) is never answered
+    // here: a server can send one shaped like Codex's.
+    let (server, tool) = super::super::state(actor, thread)?
+        .sources
+        .take_codex_mcp_call(&ask.acp_tool_call_id)?;
+    let tool = Some(tool);
+    // Only a server Clauseo itself sent this session: under the firm's `managed-mcp.json`, or
+    // with nothing sent, Codex keeps servers of its own, which may share a name.
+    // `None` where Claude would be in forced ask: nothing is answered (`Agent::mcp_sent`).
+    let sent = agent(actor, thread).and_then(|agent| agent.mcp_sent.as_ref());
+    if sent.is_none_or(|sent| !sent.contains(&server)) {
+        return None;
+    }
     if crate::agent::mcp_trust::never_asks(&server, tool.as_deref()) {
         return Some((server, option));
     }

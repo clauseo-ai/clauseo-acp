@@ -11,7 +11,9 @@ use clauseo_protocol::{DomainEvent, StopReason, StreamId};
 use serde_json::{Value, json};
 
 use crate::permissions::answer_from;
-use crate::profile_rig::{CLAUDE, CODEX, Wired, agent_lines, agents, settings, template, turn};
+use crate::profile_rig::{
+    CLAUDE, CODEX, Wired, agent_lines, agents, codex_lines, settings, template, turn,
+};
 use crate::support::{Dir, Scenario, matter_with_thread};
 
 /// `docs` and `case` turned on, `off` turned off; nothing launches them.
@@ -25,10 +27,21 @@ fn servers(dir: &Dir) -> Value {
     }}})
 }
 
+/// [`servers`] with a lawyer's entries of the reserved names, turned on: they are left out.
+fn servers_with_reserved(dir: &Dir) -> Value {
+    let mut all = servers(dir);
+    let bin = dir.folder("bin", &[]);
+    for name in ["browser", "case-law", "Case-Law"] {
+        all["mcp"]["servers"][name] =
+            json!({"command": bin.join("x").display().to_string(), "enabled": true});
+    }
+    all
+}
+
 /// The settings for a Claude session: the servers, with web search and the browser off so
 /// `allowedTools` holds only the servers' rules.
 fn claude_settings(dir: &Dir) -> Value {
-    let mut extra = servers(dir);
+    let mut extra = servers_with_reserved(dir);
     extra["tools"] = json!({"web_search": false, "browser": false});
     extra
 }
@@ -37,7 +50,8 @@ fn entry(name: &str) -> Value {
     json!({"name": name, "command": "{{any}}", "args": [], "env": []})
 }
 
-/// Claude gets one allow rule per server turned on, in name order, and none for `off`.
+/// Claude gets one allow rule per server turned on, in name order, and none for `off` or for a
+/// lawyer's entry of a reserved name (`browser`, `case-law`), which is not sent at all.
 #[test]
 fn claude_allows_the_listed_servers_it_gets() {
     let dir = Dir::new("mcp_trust_claude", &[]);
@@ -108,10 +122,9 @@ fn requested_tools(events: &crate::observe::Events) -> Vec<Option<String>> {
         .collect()
 }
 
-/// `codex-trusted-mcp`: the host answers `docs` (correlated and standalone), `case` and
-/// `case-law`'s `search_law` (both forms) `allow_once` with nothing logged; the scenario checks
-/// each answer, so a request the host answered that the lawyer should have seen (or the other
-/// way round) is a mismatch.
+/// `codex-trusted-mcp`: the host answers the first approval of the `docs` call and of the
+/// `case` call `allow_once` with nothing logged; the scenario checks each answer, so a request
+/// the host answered that the lawyer should have seen (or the other way round) is a mismatch.
 #[test]
 fn codex_runs_listed_servers_tools_unasked_and_asks_for_the_rest() {
     let dir = Dir::new("mcp_trust_codex", &[]);
@@ -121,33 +134,137 @@ fn codex_runs_listed_servers_tools_unasked_and_asks_for_the_rest() {
     let (_, thread, _) = matter_with_thread(&dir, &host, "m", &[], CODEX);
     let mut events = host.events(StreamId::Thread(thread));
     let (turn, _) = host.prompt(thread, "Find the judgment.");
-    answer_from(
-        &host,
-        &mut events,
-        thread,
-        0,
-        &[
-            "cancel", "cancel", "cancel", "cancel", "cancel", "cancel", "cancel", "decline",
-        ],
-    );
+    let mut answers = vec!["cancel"; 10];
+    answers.push("decline");
+    answer_from(&host, &mut events, thread, 0, &answers);
     let ended = events.until_turn_ended(turn);
     events.assert_no_mismatch();
     assert_eq!(ended.stop, StopReason::EndTurn, "{}", events.dump());
     let seen = requested_tools(&events);
-    assert_eq!(seen.len(), 8, "{}", events.dump());
-    assert_eq!(seen[0].as_deref(), Some("tc-extra"));
-    assert_eq!(seen[1].as_deref(), Some("tc-off"));
-    assert_eq!(seen[2].as_deref(), Some("tc-recharge"));
-    assert_eq!(seen[3], None, "recharge's standalone request");
-    assert_eq!(seen[4].as_deref(), Some("tc-law2"));
-    assert_eq!(seen[5], None, "case-law-2's standalone request");
-    assert_eq!(seen[6].as_deref(), Some("tc-shell"));
-    assert!(
-        !seen
-            .iter()
-            .any(|tool| matches!(tool.as_deref(), Some("tc-docs" | "tc-case" | "tc-law"))),
-        "{}",
-        events.dump()
+    let expected = [
+        Some("tc-docs"), // the same call asked again: a server's own question
+        None,            // docs standalone
+        Some("tc-extra"),
+        Some("tc-off"),
+        Some("tc-law"), // no case-law entry was sent this session
+        None,
+        Some("tc-recharge"),
+        Some("tc-law2"),
+        None,
+        Some("tc-shell"),
+        None, // docs's question
+    ];
+    let seen: Vec<Option<&str>> = seen.iter().map(Option::as_deref).collect();
+    assert_eq!(seen, expected, "{}", events.dump());
+    host.shutdown();
+}
+
+/// Starts `scenario` for a Codex agent with the servers, `adjust` given the config, and checks
+/// that `asked` requests reach the lawyer, each answered `cancel`, and the turn ends.
+fn codex_all_ask(
+    test: &str,
+    scenario: &'static str,
+    asked: usize,
+    managed: bool,
+    adjust: impl FnOnce(clauseo_host::HostConfig) -> clauseo_host::HostConfig,
+) {
+    let dir = Dir::new(test, &[]);
+    if managed {
+        dir.set_managed_mcp();
+    }
+    let extra = servers(&dir);
+    dir.set_settings(&[(CODEX, Scenario::Local(scenario))], extra);
+    let host = dir.start_with(0, adjust);
+    let (_, thread, _) = matter_with_thread(&dir, &host, "m", &[], CODEX);
+    let mut events = host.events(StreamId::Thread(thread));
+    let (turn, _) = host.prompt(thread, "Find the judgment.");
+    answer_from(&host, &mut events, thread, 0, &vec!["cancel"; asked]);
+    let ended = events.until_turn_ended(turn);
+    events.assert_no_mismatch();
+    assert_eq!(ended.stop, StopReason::EndTurn, "{}", events.dump());
+    assert_eq!(requested_tools(&events).len(), asked, "{}", events.dump());
+    host.shutdown();
+}
+
+/// Under the firm's `managed-mcp.json` a listed server's tools ask on Codex too.
+#[test]
+fn codex_trusts_no_listed_server_under_the_firms_file() {
+    codex_all_ask(
+        "mcp_trust_codex_managed",
+        "codex-trusted-mcp-managed",
+        2,
+        true,
+        |config| config,
     );
+}
+
+/// A failed folder check, where Claude would run in forced ask: Codex asks for the lawyer's
+/// servers and case law too.
+#[test]
+fn codex_asks_for_every_mcp_tool_where_claude_would_be_forced_to_ask() {
+    codex_all_ask(
+        "mcp_trust_codex_unprotected",
+        "codex-trusted-mcp-unprotected",
+        4,
+        false,
+        clauseo_host::HostConfig::with_folder_check_failed,
+    );
+}
+
+/// With Clauseo's `case-law` entry sent (the connector signed in, its relay open): the first
+/// approval of a `search_law` call is answered by the host; `recharge` and a standalone request
+/// reach the lawyer.
+#[test]
+fn codex_runs_case_law_search_unasked_only_with_our_entry() {
+    use crate::case_law::{Connector, wire};
+    let connector = Connector::new(true);
+    let dir = Dir::new("mcp_trust_case_law_on", &[]);
+    let opts = json!([{"optionId": "allow_once", "name": "Allow", "kind": "allow_once"},
+        {"optionId": "cancel", "name": "Cancel", "kind": "reject_once"}]);
+    let call = |tc: &str, tool: &str| {
+        json!({"update": {"update": {"sessionUpdate": "tool_call", "toolCallId": tc,
+            "title": format!("mcp.case-law.{tool}"), "kind": "execute", "status": "in_progress",
+            "rawInput": {"server": "case-law", "tool": tool, "arguments": {}}}}})
+    };
+    let ask = |id: &str, tc: &str, answer: &str| {
+        [
+            json!({"request": {"id": id, "method": "session/request_permission", "params": {
+                "sessionId": "sess-1", "toolCall": {"toolCallId": tc, "kind": "execute",
+                "status": "pending"}, "options": opts, "_meta": {"is_mcp_tool_approval": true}}}}),
+            json!({"expect_response": {"id": id, "result": {"outcome": {"outcome": "selected",
+                "optionId": answer}}}}),
+        ]
+    };
+    let mut added = vec![call("tc-law", "search_law")];
+    added.extend(ask("perm-law", "tc-law", "allow_once"));
+    added.push(call("tc-recharge", "recharge"));
+    added.extend(ask("perm-recharge", "tc-recharge", "cancel"));
+    added.extend(ask("perm-alone", "elicitation:sess-1:case-law:0", "cancel"));
+    let base = codex_lines("cl-on", &json!({"cwd": "{{any}}"}));
+    let mut lines: Vec<String> = base.lines().map(str::to_owned).collect();
+    let prompt = lines
+        .iter()
+        .position(|line| line.contains("\"session/prompt\""))
+        .unwrap();
+    for (n, line) in added.iter().enumerate() {
+        lines.insert(prompt + 1 + n, line.to_string());
+    }
+    let codex = template(&dir, "cl-on", &lines.join("\n"));
+    settings(&dir, agents(&[(CODEX, &codex, json!({}))]), json!({}));
+    let launcher = Wired::new(&dir);
+    let host = dir.start_launching(0, Arc::<Wired>::clone(&launcher), |config| {
+        wire(config, Some(&connector.relays))
+    });
+    let matter = host.create_matter("m", &dir.folder("m", &[]));
+    let thread = host.create_thread(matter, CODEX);
+    let mut events = host.events(StreamId::Thread(thread));
+    let (turn, _) = host.prompt(thread, "Find the judgment.");
+    answer_from(&host, &mut events, thread, 0, &["cancel", "cancel"]);
+    let ended = events.until_turn_ended(turn);
+    events.assert_no_mismatch();
+    assert_eq!(ended.stop, StopReason::EndTurn, "{}", events.dump());
+    let seen = requested_tools(&events);
+    let seen: Vec<Option<&str>> = seen.iter().map(Option::as_deref).collect();
+    assert_eq!(seen, [Some("tc-recharge"), None], "{}", events.dump());
     host.shutdown();
 }
