@@ -77,11 +77,6 @@ pub(super) fn on_prompt_done(
     updates::flush_rate(actor, thread);
     // A turn whose commit already failed ends `Failed` whatever the read says.
     let store_failed = current(actor, thread).is_some_and(|current| current.store_failed.is_some());
-    // A prompt that failed offline skips the limits read: it needs the network too.
-    let went_offline = match &result {
-        Err(error) => offline::prompt_failed_offline(actor, thread, error),
-        Ok(_) => None,
-    };
     // A prompt refused as too long ends `TooLong`, never `Failed`, and is never read as a limit.
     let too_long = matches!(&result, Err(error) if error.prompt_too_long());
     // A too-long `sessionFailure`, on the answer or an update before it, ends the turn `TooLong`
@@ -92,6 +87,9 @@ pub(super) fn on_prompt_done(
     }
     .or_else(|| current(actor, thread).and_then(|current| current.too_long));
     let said_too_long = said.is_some_and(|kind| too_long_stops(actor, thread, kind));
+    // Offline skips the limits read: it needs the network too. `TooLong` wins over offline.
+    let ends_too_long = too_long || (result.is_ok() && said_too_long);
+    let (went_offline, lost) = offline::prompt_ended(actor, thread, &result, ends_too_long);
     let fallback = matches!(result, Err(clauseo_acp::Error::Rpc { .. }))
         && !too_long
         && went_offline.is_none()
@@ -104,6 +102,7 @@ pub(super) fn on_prompt_done(
     current.prompt_call = None;
     let end = match result {
         Ok(_) | Err(_) if current.cancelled => End::cancelled(None),
+        Ok(_) if let Some((code, detail)) = lost => End::failed(code, detail, None),
         Ok(answer) => {
             if current.limit.is_none() {
                 current.limit = answer.limit.as_ref().and_then(asks::limit_mark);

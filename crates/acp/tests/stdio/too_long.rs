@@ -33,6 +33,7 @@ fn too_long(kind: TooLong) -> PromptEnd {
         stop: StopReason::EndTurn,
         limit: None,
         too_long: Some(kind),
+        connection: None,
     }
 }
 
@@ -110,6 +111,7 @@ fn codex_input_too_long_reads_as_the_internal_error_it_says() {
                 stop: StopReason::EndTurn,
                 limit: None,
                 too_long: None,
+                connection: None,
             }
         );
         let warnings: Vec<_> = events

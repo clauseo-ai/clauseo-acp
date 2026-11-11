@@ -93,6 +93,16 @@ pub enum AcpEvent {
         /// How it said so.
         kind: crate::TooLong,
     },
+    /// An AIR `sessionFailure` of category `connection` on a `session_info_update`: the agent
+    /// could not reach its service (codex-acp's `transport_lost`), and retries or gave up.
+    ConnectionLost {
+        /// The agent's session.
+        session: AgentSessionId,
+        /// When it came.
+        origin: Origin,
+        /// What it says.
+        lost: ConnectionLost,
+    },
     /// Something the agent sent that the driver skipped or did not understand.
     Warning {
         /// The agent's session it is about, when the message named one: `None` for a malformed
@@ -256,6 +266,17 @@ pub enum LimitSignal {
     },
 }
 
+/// An AIR `sessionFailure` of category `connection`: the agent lost its connection to its
+/// service. codex-acp sends one with severity `warning` for each retry Codex makes by itself,
+/// and one with severity `error` when its retries ran out.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConnectionLost {
+    /// Its `severity` is `error`: the agent gave up. Anything else, it retries by itself.
+    pub gave_up: bool,
+    /// Its `title`, the agent's own error text, when it is a string. Never shown or logged.
+    pub title: Option<String>,
+}
+
 /// The `status` of Claude's rate limit.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum LimitStatus {
@@ -295,7 +316,8 @@ pub enum ProtocolWarning {
         /// The status; `None` when it is missing or not a string.
         status: Option<String>,
     },
-    /// An AIR `sessionFailure` that is not a plan limit (`context_exhausted`, a warning, ...).
+    /// An AIR `sessionFailure` that is neither a plan limit nor a lost connection
+    /// (`context_exhausted`, a limit's warning, ...).
     /// Each field is `None` when it is missing or not a string.
     SessionFailure {
         /// Its `category`.

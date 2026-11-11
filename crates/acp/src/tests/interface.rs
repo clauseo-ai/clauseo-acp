@@ -70,6 +70,61 @@ fn session_failure_warning_names_its_session() {
     assert_eq!(drain(&events), [expected.clone(), expected]);
 }
 
+/// codex-acp 2.2.2's `transport_lost` (`CodexEventHandler.recordSessionFailure`): a retry
+/// warning in a `session_info_update`, then the prompt's `end_turn` once the retries ran out.
+#[test]
+fn connection_failures_reach_the_host_typed() {
+    let (client, events, driver, mut agent) = pipes();
+    let turn = TurnId::new(uuid::Uuid::from_u128(
+        0x0190_0000_0000_7000_8000_0000_0000_0002,
+    ))
+    .unwrap();
+    let failure = |severity: &str, title: &str, actions: Value| {
+        json!({"jetbrains": {"air": {"version": 1, "sessionFailure": {
+            "id": "turn-1:error", "revision": 1, "category": "connection",
+            "severity": severity, "title": title, "actions": actions,
+        }}}})
+    };
+    let refused = "stream disconnected before completion: Connection refused (os error 61)";
+    let calls = async move {
+        client.initialize().await.unwrap();
+        client.new_session(new_session()).await.unwrap();
+        let end = client.prompt(&session(), turn, Vec::new()).await.unwrap();
+        assert_eq!(end.limit, None);
+        let lost = ConnectionLost {
+            gave_up: true,
+            title: Some(refused.to_owned()),
+        };
+        assert_eq!(end.connection, Some(lost));
+    };
+    let script = async {
+        agent.start().await;
+        let prompt = agent.read().await;
+        let retry = failure("warning", "Reconnecting... waiting for network", json!([]));
+        agent.update(&json!({"sessionId": "s-1", "update": {
+            "sessionUpdate": "session_info_update", "_meta": retry,
+        }}));
+        let gave_up = failure("error", refused, json!(["retry", "new_session"]));
+        agent.respond(
+            &prompt,
+            &json!({"stopReason": "end_turn", "_meta": gave_up}),
+        );
+        assert!(agent.written.next().await.is_none());
+    };
+    let (driver, (), ()) =
+        futures::executor::block_on(async { futures::join!(driver, calls, script) });
+    assert_eq!(driver, Ok(()));
+    let lost = AcpEvent::ConnectionLost {
+        session: session(),
+        origin: Origin::Turn(turn),
+        lost: ConnectionLost {
+            gave_up: false,
+            title: Some("Reconnecting... waiting for network".to_owned()),
+        },
+    };
+    assert_eq!(drain(&events), [lost]);
+}
+
 #[test]
 fn update_warnings_name_their_session_and_set_mode_round_trips() {
     let (client, events, driver, mut agent) = pipes();
@@ -120,6 +175,7 @@ fn update_warnings_name_their_session_and_set_mode_round_trips() {
             | AcpEvent::ElicitationCompleted { .. }
             | AcpEvent::Limit { .. }
             | AcpEvent::TooLong { .. }
+            | AcpEvent::ConnectionLost { .. }
             | AcpEvent::Warning { .. }) => panic!("expected a warning, got {other:?}"),
         })
         .collect();

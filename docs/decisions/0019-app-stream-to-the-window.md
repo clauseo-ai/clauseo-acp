@@ -104,6 +104,15 @@ host added later reached the page without anyone deciding it should.
   transport", Claude's connection line): after it, 30 s of silence ends the turn only when the
   probe fails, since Codex then retries over HTTPS, which a blip or a proxy that blocks only
   WebSockets lets through. A tool call open after such a note does not extend the wait.
+- **Codex's typed failures arm it too (2026-11-11, stage C):** to a client that advertises notices
+  and the AIR `sessionFailure`, as Clauseo does, codex-acp 2.2.2 sends each of Codex's retries as
+  a `session_info_update` whose `sessionFailure` has category `connection` (its `transport_lost`),
+  Codex's fallback warning as a `notice`, and the end of its retries as the prompt's `end_turn`
+  with a `connection` failure of severity `error`. Codex 0.162 retries a failed connection without
+  end, so only the watch ends such a turn. A `connection` failure arms the watch like the note;
+  the notice is the note and never reaches the transcript; a prompt that ends on one ends
+  `agent.offline` when a note armed the watch or its title names a connection failure, and never
+  when it says a server answered.
 
 ## Status
 

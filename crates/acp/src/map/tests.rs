@@ -1,14 +1,14 @@
 use std::path::{Path, PathBuf};
 
 use clauseo_protocol::{
-    LimitStopReason, MatterPath, RawFrom, SteeringCapability, TextOrBlob, ToolCallContent,
-    ToolLocation,
+    LimitStopReason, MatterPath, NoticeLevel, RawFrom, SteeringCapability, TextOrBlob,
+    ToolCallContent, ToolLocation,
 };
 use serde_json::json;
 
 use super::content::MAX_TEXT_CHUNK_BYTES;
 use super::*;
-use crate::event::{LimitSignal, LimitStatus};
+use crate::event::{ConnectionLost, LimitSignal, LimitStatus};
 
 fn session() -> AgentSessionId {
     AgentSessionId::new("s-1").unwrap()
@@ -286,6 +286,8 @@ fn session_failure_categories() {
         ("limit", "warning", json!(["new_session"]), "T"),
         ("limit", "error", json!(["retry", "new_session"]), "T"),
         ("context", "error", json!([]), "T"),
+        ("access", "error", json!(["login"]), "T"),
+        ("unknown", "warning", json!([]), "T"),
         (
             "request",
             "error",
@@ -331,6 +333,70 @@ fn a_too_long_failure_update_is_its_own_event() {
             origin: Origin::Idle,
             kind: crate::TooLong::ContextExhausted,
         }]
+    );
+}
+
+/// codex-acp 2.2.2's `transport_lost` as `CodexEventHandler.recordSessionFailure` builds it:
+/// a retry (`recordRetryWarning`: severity `warning`, no actions, Codex's retry line as the
+/// title), and the end once the retries ran out (`recordTypedSessionFailure`).
+#[test]
+fn codex_connection_failures_are_lost_connections() {
+    let retry = json!({"jetbrains": {"air": {"version": 1, "sessionFailure": {
+        "id": "019a-turn:error", "revision": 3, "category": "connection",
+        "severity": "warning", "title": "Reconnecting... waiting for network", "actions": [],
+    }}}});
+    let gave_up = json!({"jetbrains": {"air": {"version": 1, "sessionFailure": {
+        "id": "019a-turn:error", "revision": 4, "category": "connection", "severity": "error",
+        "title": "stream disconnected before completion: Connection refused (os error 61)",
+        "actions": ["retry", "new_session"],
+    }}}});
+    assert_eq!(
+        session_failure(retry.as_object().unwrap()),
+        Some(Failure::Connection(ConnectionLost {
+            gave_up: false,
+            title: Some("Reconnecting... waiting for network".to_owned()),
+        }))
+    );
+    let Some(Failure::Connection(lost)) = session_failure(gave_up.as_object().unwrap()) else {
+        panic!("expected a lost connection");
+    };
+    assert!(lost.gave_up);
+    // Too long reads categories limit, service and request only: a lost connection whose
+    // title has Claude's too-long words is still a lost connection, never `TooLong`.
+    let titled = json!({"jetbrains": {"air": {"sessionFailure": {
+        "category": "connection", "severity": "error", "title": "Prompt is too long",
+        "actions": ["retry", "new_session"],
+    }}}});
+    assert!(matches!(
+        session_failure(titled.as_object().unwrap()),
+        Some(Failure::Connection(ConnectionLost { gave_up: true, .. }))
+    ));
+    // In a `session_info_update`, it is its own event, with no title change.
+    let update = json!({"sessionUpdate": "session_info_update", "_meta": retry});
+    let events = map_update(update, None);
+    assert!(
+        matches!(
+            &events[..],
+            [AcpEvent::ConnectionLost { origin: Origin::Idle, lost, .. }] if !lost.gave_up
+        ),
+        "{events:?}"
+    );
+}
+
+/// Codex's warning that its WebSocket failed, as codex-acp 2.2.2 sends it to a client that
+/// takes notices (`createWarningEvent`, `createSessionNotice`): a warning notice, never a
+/// `sessionFailure`.
+#[test]
+fn codex_fallback_warning_is_a_notice() {
+    let text = "Falling back from WebSockets to HTTPS transport. stream disconnected before \
+                completion: Connection refused (os error 61)";
+    let notice = json!({"sessionUpdate": "notice", "severity": "warning", "title": text});
+    assert_eq!(
+        only_update(map_update(notice, None)),
+        AgentUpdate::Notice {
+            level: NoticeLevel::Warning,
+            text: text.to_owned(),
+        }
     );
 }
 
