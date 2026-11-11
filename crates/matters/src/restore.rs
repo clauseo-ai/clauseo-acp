@@ -334,7 +334,7 @@ fn added_by(
         .changed_files(before_tree, core.timeline.tree(id)?)?;
     let old: BTreeSet<&str> = old.iter().map(|file| file.path.as_str()).collect();
     new.into_iter()
-        .filter(|file| !old.contains(file.path.as_str()))
+        .filter(|file| !old.contains(file.path.as_str()) && !rules::is_excluded_path(&file.path))
         .map(|file| {
             let path = MatterPath::new(&file.path).map_err(|err| Error::history("tree", err))?;
             Ok(VersionEntry {

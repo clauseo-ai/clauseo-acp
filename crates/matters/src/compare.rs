@@ -8,12 +8,12 @@ use std::path::Path;
 
 use clauseo_protocol::{CheckpointId, FileChange, MatterPath};
 
-use crate::Error;
 use crate::checkpoint::{Core, OnHeld, Walked};
 use crate::diff::{DiffFile, content_id, diff_by};
 use crate::history::{HistoryStore, Oid};
 use crate::stat::{CacheEntry, EntryState};
 use crate::types::{CompareSide, Settings, VersionFile};
+use crate::{Error, rules};
 
 /// One file of a side of a comparison, with its size when it is known without a lookup.
 struct SideFile {
@@ -87,6 +87,10 @@ fn pin_baselines(
     let mut pins: BTreeMap<MatterPath, Oid> = BTreeMap::new();
     if let Some((head, _, _)) = core.timeline.head() {
         for (path, tree) in core.timeline.step_reads(id, head).baseline {
+            // One recorded before the exclusion rule covered its folder stays left out.
+            if rules::is_excluded_path(path.as_str()) {
+                continue;
+            }
             if let Some(blob) = core.history.file_at(tree, path.as_str())? {
                 pins.insert(path, blob);
             }

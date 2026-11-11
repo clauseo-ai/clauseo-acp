@@ -5,8 +5,9 @@
 //! The event envelope and the domain events the log stores; the commands a client sends and
 //! their shape validation; the queries; the view entries and view patches a subscriber receives;
 //! ids and the other small validated values; error codes and `HostError`; account limit types;
-//! the inline cost rules for large payloads (`TextOrBlob`, `escaped_len`, `utf16_len`). Decision
-//! records 0002 (event schema) and 0003 (error codes) freeze the wire form.
+//! the inline cost rules for large payloads (`TextOrBlob`, `escaped_len`, `utf16_len`); the names
+//! a matter never versions or lists (`is_excluded_path`, shared by `clauseo-matters` and the
+//! reducer). Decision records 0002 (event schema) and 0003 (error codes) freeze the wire form.
 //!
 //! # Interface
 //!
@@ -151,6 +152,7 @@ mod envelope;
 mod error;
 mod error_code;
 mod event;
+mod excluded;
 mod ids;
 mod limits;
 mod lists;
@@ -339,6 +341,7 @@ pub use compact_str::CompactString;
 pub use envelope::EnvelopeRead;
 // The crate's error; it never crosses the boundary (`HostError` does).
 pub use error::Error;
+pub use excluded::{is_excluded_name, is_excluded_path};
 pub use ids::{MAX_ID_TEXT_BYTES, is_windows_reserved_name};
 pub use number::MAX_SAFE;
 // The most picks a `ConfigPicks` holds: a constant, so outside `wire_types!`.

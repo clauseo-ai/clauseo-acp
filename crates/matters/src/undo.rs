@@ -17,7 +17,7 @@ use crate::skip_record::SkipRecord;
 use crate::stat::{CacheEntry, EntryState, Stat, find_by_path};
 use crate::types::{Checkpoint, CheckpointOutcome, Settings, TimelineEntry, UndoRequest, Undone};
 use crate::writeback::{self, Names, Op, skipped, writable};
-use crate::{Error, locks};
+use crate::{Error, locks, rules};
 
 /// One changed file of the step, by the path decisions name, and the operations undoing it.
 struct Step {
@@ -59,6 +59,7 @@ fn step(
     let there = core.step_reads(before, after).there;
     let start = core.skip_record(before);
     let before_files = core.files_of(before)?;
+    let moved_out = moved_out_of_excluded(core, before, after)?;
     let blob = |path: &MatterPath| {
         find(&before_files, path.as_str())
             .map(|file| file.blob)
@@ -82,7 +83,14 @@ fn step(
                 return Err(Error::history("undo", "a change of an unknown kind"));
             }
         };
-        if let Some(reason) = kept_because(&ops, &there, start.as_ref(), &before_files) {
+        let moved =
+            matches!(change.change(), ChangeKind::Added) && moved_out.contains(path.as_str());
+        let reason = if moved {
+            Some(SkippedFileReason::Unknown)
+        } else {
+            kept_because(&ops, &there, start.as_ref(), &before_files)
+        };
+        if let Some(reason) = reason {
             steps.push(Step {
                 path,
                 ops: Vec::new(),
@@ -97,6 +105,34 @@ fn step(
         }
     }
     Ok(steps)
+}
+
+/// The paths the step added that hold the content of a file it took out of a folder the
+/// exclusion rule passes over (`.claude/x` moved to `x`, in a history written before the rule
+/// covered `.claude`): that file was in the folder at the start, so undo keeps it, as it keeps
+/// a file moved from a skipped one. Its diff no longer shows the move: the old path is left out.
+fn moved_out_of_excluded(
+    core: &Core,
+    before: CheckpointId,
+    after: CheckpointId,
+) -> Result<BTreeSet<String>, Error> {
+    let (old, new) = core
+        .history
+        .changed_files(core.timeline.tree(before)?, core.timeline.tree(after)?)?;
+    let still: BTreeSet<&str> = new.iter().map(|file| file.path.as_str()).collect();
+    let gone: BTreeSet<Oid> = old
+        .iter()
+        .filter(|file| rules::is_excluded_path(&file.path) && !still.contains(file.path.as_str()))
+        .map(|file| file.blob)
+        .collect();
+    if gone.is_empty() {
+        return Ok(BTreeSet::new());
+    }
+    Ok(new
+        .into_iter()
+        .filter(|file| !rules::is_excluded_path(&file.path) && gone.contains(&file.blob))
+        .map(|file| file.path)
+        .collect())
 }
 
 /// Why undo must leave a step's file as it is, if it must: the reason it had not been versioned.

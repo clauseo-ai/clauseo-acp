@@ -21,8 +21,9 @@ day, beside Clauseo.
   watch limit, an error from the share) is not tried again until another folder or matter is
   followed.
 - A change to a file the listing never shows (`clauseo_matters::is_excluded_path`: `~$` owner
-  files, `*.tmp`, `.clauseo`, `.git`) and a read are passed over; a path the event does not say
-  is a file or a folder counts unless the listing passes it over as both. The rest wait on a
+  files, `*.tmp`, every folder whose name starts with `.`) and a read are passed over; a path
+  the event does not say is a file or a folder counts unless the listing passes it over as both.
+  The rest wait on a
   `clauseo-papers` thread until the folder has been quiet for 300 ms (a Word save is temporary
   files and a rename), or 2 s after the burst's first change, whichever comes first. The thread
   then looks at the folder: only one not found or not a folder, twice 2 s apart, is missing (a

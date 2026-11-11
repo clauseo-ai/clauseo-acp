@@ -7,8 +7,8 @@ use std::collections::BTreeMap;
 use clauseo_protocol::MatterPath;
 
 use super::VersionEntry;
-use crate::Error;
 use crate::history::{HistoryStore, Oid};
+use crate::{Error, rules};
 
 /// Sets, for each baseline of `baselines` (path, and the tree of the checkpoint that read it),
 /// its content there on the `earlier` side and its content in `later_tree` on the `later` side
@@ -21,7 +21,11 @@ pub(super) fn pin(
     earlier: &mut Vec<VersionEntry>,
     later: &mut Vec<VersionEntry>,
 ) -> Result<(), Error> {
-    for (path, tree) in baselines {
+    // A baseline recorded before the exclusion rule covered its folder stays left out.
+    let kept = baselines
+        .iter()
+        .filter(|(path, _)| !rules::is_excluded_path(path.as_str()));
+    for (path, tree) in kept {
         let then = history.file_at(*tree, path.as_str())?;
         let now = history.file_at(later_tree, path.as_str())?;
         set(earlier, path, then);
