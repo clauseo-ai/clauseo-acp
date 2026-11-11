@@ -134,7 +134,7 @@ fn skill_mds() -> Vec<(&'static str, &'static str)> {
 #[test]
 fn legal_word_budget() {
     let legal = word_count(LEGAL);
-    assert!(legal <= 1250, "the legal part has {legal} words");
+    assert!(legal <= 1290, "the legal part has {legal} words");
     let whole = ClauseoProfile::new(paths_under(Path::new("/data")), None).instructions();
     assert_eq!(
         whole,
@@ -149,7 +149,7 @@ fn legal_word_budget() {
         word_count(TOOLS) + word_count(LEGAL),
         "only {{author}} is filled, with one word"
     );
-    assert!(word_count(&whole) <= 1550, "{} words", word_count(&whole));
+    assert!(word_count(&whole) <= 1580, "{} words", word_count(&whole));
 }
 
 #[test]
@@ -278,6 +278,27 @@ fn each_agent_is_told_it_is_clauseo_on_its_own_account() {
         profile.codex_instructions_for(true).matches(PLAN).count(),
         0
     );
+}
+
+/// The saved-file rule (decision record 0058): both agents name a file they saved in the matter
+/// in plain words, with no download, `file://` or `sandbox:` link and no full path, in the
+/// Conduct bullet on what never goes in text for the lawyer.
+#[test]
+fn each_agent_names_a_saved_file_with_no_download_link() {
+    const RULE: &str = "Name a file you saved or changed plainly (\"I saved it as Reply to legal \
+        notice.docx in the matter.\"), with no download link, `file://` or `sandbox:` link or \
+        full path: the lawyer opens it from the papers list.";
+    let bullet = LEGAL
+        .lines()
+        .find(|line| line.starts_with("- Never put tool names"))
+        .unwrap();
+    assert!(bullet.ends_with(RULE), "{bullet}");
+    assert_eq!(LEGAL.matches(RULE).count(), 1);
+    let profile = launch_profile(&std::env::temp_dir().join("saved-file-rule"));
+    let claude = profile.claude_options().system_prompt_append().to_owned();
+    for text in [claude, profile.codex_instructions_for(false)] {
+        assert!(text.contains(RULE), "{text}");
+    }
 }
 
 /// R24's connectors paragraph (decision D6): at most 80 words, between the tools part and R22's
