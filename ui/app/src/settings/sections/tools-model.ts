@@ -104,13 +104,18 @@ export function refusalCode(error: unknown): McpErrorCode {
     : "command.invalid";
 }
 
+/** The view before any `mcp_tools_changed`: the host sends none for the lawyer's empty list. */
+export const NO_TOOLS: ToolsView = { control: "lawyer", servers: [] };
+
 /** The commands over a host: the view from the app feed, the commands through `HostCommand { mcp }`. Listens from the
  * first ask for the window's life, so the catch-up and every change are heard. Null where the transport has no app
  * feed. */
 function hostTools(transport: HostTransport): ToolsCommands | null {
   const app = nextHostOf(transport).app;
   if (app === null) return null;
-  let view: ToolsView | null = null;
+  // a catch-up leaves mcp_tools_changed out while the list is the lawyer's and empty: start there, and take each
+  // view that comes, an empty one included
+  let view: ToolsView = NO_TOOLS;
   const listeners = new Set<(view: ToolsView) => void>();
   app.subscribeApp((event) => {
     if (!("mcp_tools_changed" in event)) return;
@@ -131,7 +136,7 @@ function hostTools(transport: HostTransport): ToolsCommands | null {
     current: () => view,
     subscribe: (listener) => {
       listeners.add(listener);
-      if (view !== null) listener(view);
+      listener(view);
       return () => void listeners.delete(listener);
     },
     save: (previousName, server) =>
@@ -173,11 +178,11 @@ export function toolsCommandsOf(transport: HostTransport): ToolsCommands | null 
   return hosts.get(transport) ?? null;
 }
 
-/** Whether Tools shows: once the host has sent its first view, so a host without MCP servers shows no section. */
+/** Whether Tools shows: wherever there are commands; the host's start from the empty list (NO_TOOLS). */
 export const toolsShown = (transport: HostTransport): boolean =>
   toolsCommandsOf(transport)?.current() != null;
 
-/** Whether the first view is in, as state: the settings window renders again when it arrives, so Tools appears. */
+/** Whether Tools shows, as state: the settings window renders again on each view. */
 export function useToolsHeard(transport: HostTransport): boolean {
   const subscribe = useCallback(
     (wake: () => void) => toolsCommandsOf(transport)?.subscribe(() => wake()) ?? (() => {}),

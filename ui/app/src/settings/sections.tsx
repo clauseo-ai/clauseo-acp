@@ -146,7 +146,7 @@ export const SECTIONS: readonly SectionEntry[] = [
     Body: ConnectorsSection,
   },
   {
-    // UC-169 on: the lawyer's own MCP servers, once the host's first view is in (tools-model.ts); the
+    // UC-169 on: the lawyer's own MCP servers (tools-model.ts), from the empty list until the host sends one; the
     // lead is the plain line on what a tool can reach. No side note, so the list stays out of the first load
     id: "tools",
     name: (lang) => mw(lang, "Tools"),

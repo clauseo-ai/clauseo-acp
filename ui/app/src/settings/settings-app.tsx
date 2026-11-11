@@ -61,7 +61,7 @@ export function SettingsApp({
     checked.current = true;
     sendConnector(transport, { check: {} }).catch(() => {});
   }, [transport]);
-  // Settings › Tools shows once the host's first MCP view is in: the window renders again when it arrives
+  // Settings › Tools: the window follows the MCP view (tools-model.ts), which starts from the empty list
   useToolsHeard(transport);
   // each plan's sign-in off the setup wire: a plan that isn't set up shows no billing in Plan and usage (D-060)
   const notSetUp = useNotSetUp(transport);

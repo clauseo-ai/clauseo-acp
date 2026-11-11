@@ -139,9 +139,33 @@ async function mount(
   };
 }
 
-test("a host that sends no MCP view shows no Tools", async () => {
+test("no event yet: the host leaves an empty list out of its catch-up, so Tools starts empty, then follows each view", async () => {
   rig = await mount(null);
-  expect(rig.nav()).not.toContain("Tools");
+  expect(rig.nav()).toContain("Tools");
+  expect(rig.q('[data-testid="tools-section"]')?.getAttribute("data-control")).toBe("lawyer");
+  expect(rig.q('[data-testid="tools-empty"]')?.textContent).toBe("No tools yet.");
+  expect(rig.q('[data-testid="tools-add"]')).not.toBeNull();
+  const one: McpToolsView = {
+    control: "lawyer",
+    servers: [
+      {
+        name: "notes",
+        kind: "local",
+        command: "uvx",
+        args: [],
+        env: [],
+        headers: [],
+        enabled: true,
+      },
+    ],
+  };
+  await act(async () => rig!.transport.appEvent({ mcp_tools_changed: one }));
+  expect(rig.rows()).toEqual(["notesuvx"]);
+  // and back to empty, which the host does send as a change
+  await act(async () =>
+    rig!.transport.appEvent({ mcp_tools_changed: { control: "lawyer", servers: [] } }),
+  );
+  expect(rig.q('[data-testid="tools-empty"]')).not.toBeNull();
 });
 
 test("over the host: the view from mcp_tools_changed, the commands as HostCommand { mcp }, refusals by code, no Import", async () => {
