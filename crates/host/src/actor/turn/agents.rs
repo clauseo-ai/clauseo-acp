@@ -110,6 +110,9 @@ pub(super) struct Agent {
     /// A Claude agent whose launch's folder check found a network drive or a drive without
     /// permissions: it runs in forced ask (`agent/forced_ask.rs`).
     pub(super) forced_ask: bool,
+    /// A Claude agent's standing with `auto`, the mode it runs in outside forced ask
+    /// (`session/claude_mode.rs`).
+    pub(super) auto: session::Auto,
     /// A Claude agent's plans folder, `<config folder>/plans`, from its launch's environment
     /// (`agent/plan_note.rs`); `None` for any other agent.
     pub(super) plan_notes: Option<PathBuf>,
@@ -251,6 +254,7 @@ pub(super) fn launch_now(
         codex,
         mcp_commands: Vec::new(),
         forced_ask,
+        auto: session::Auto::default(),
         plan_notes,
         denied_data_folder: 0,
         start_failure: None,
@@ -381,7 +385,8 @@ pub(super) fn on_reply(actor: &mut Actor, thread: ThreadId, id: u64, reply: Agen
             result: Ok(start),
             loaded,
             picked,
-        } => session::on_prepared(actor, thread, start, loaded, &picked),
+            fell_back,
+        } => session::on_prepared(actor, thread, start, (loaded, fell_back), &picked),
         // `Refused`: a session call's `.codex` re-check refused it, so no call was sent.
         AgentReply::Prepared {
             result: Err(error), ..

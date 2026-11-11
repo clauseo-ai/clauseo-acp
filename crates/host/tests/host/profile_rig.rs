@@ -347,7 +347,7 @@ pub(crate) fn codex_servers(servers: &[Value]) -> Vec<Value> {
 
 /// A generic agent's scenario: `initialize`, `method` (`session/new` or `session/load` of
 /// `sess-1`) matching `params` with `off` off, one prompt. The answer carries claude-agent-acp
-/// 0.89.1's modes, in `acceptEdits`, as a Claude agent's launch outside forced ask requires
+/// 0.89.1's modes, in `auto`, as a Claude agent's launch outside forced ask requires
 /// (`claude-handshake`).
 pub(crate) fn agent_lines(name: &str, method: &str, params: &Value, off: &[&str]) -> String {
     let label = if method == "session/new" {
@@ -355,7 +355,7 @@ pub(crate) fn agent_lines(name: &str, method: &str, params: &Value, off: &[&str]
     } else {
         "load"
     };
-    let modes = json!({"currentModeId": "acceptEdits", "availableModes": [
+    let modes = json!({"currentModeId": "auto", "availableModes": [
         {"id": "default", "name": "Manual"}, {"id": "acceptEdits", "name": "Accept edits"},
         {"id": "plan", "name": "Plan"}, {"id": "auto", "name": "Auto"}]});
     let respond = if method == "session/new" {

@@ -88,5 +88,15 @@
     "status": "provisional",
     "at": "2026-11-06",
     "by": "app track (provisional; Rohan batch review)"
+  },
+  "TN-10": {
+    "en": "Claude's automatic mode isn't available for this account, so Claude asks before running commands.",
+    "hi": "इस खाते के लिए Claude का स्वचालित मोड उपलब्ध नहीं है, इसलिए Claude कमांड चलाने से पहले पूछता है।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-11",
+    "hi_by": "claudeauto (provisional; Hindi-speaking lawyer to review)",
+    "status": "approved",
+    "at": "2026-11-11",
+    "by": "orchestrator (settled en)"
   }
 }

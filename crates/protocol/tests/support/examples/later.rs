@@ -155,6 +155,13 @@ pub(super) fn notices() -> Vec<DomainEvent> {
                 more: 0,
             }),
         },
+        Notice {
+            level: NoticeLevel::Info,
+            text: "Claude's automatic mode isn't available for this account, so Claude asks \
+                   before running commands."
+                .to_owned(),
+            kind: Some(NoticeKind::AutoModeUnavailable),
+        },
     ];
     notices.extend(
         [
