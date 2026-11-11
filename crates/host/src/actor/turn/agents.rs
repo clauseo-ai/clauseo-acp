@@ -110,6 +110,8 @@ pub(super) struct Agent {
     /// A Claude agent whose launch's folder check found a network drive or a drive without
     /// permissions: it runs in forced ask (`agent/forced_ask.rs`).
     pub(super) forced_ask: bool,
+    /// The launch's folder check answer, when it ran; read through [`Agent::unprotected`].
+    pub(super) folder_check: Option<crate::agent::folder_support::Answer>,
     /// A Claude agent's standing with `auto`, the mode it runs in outside forced ask
     /// (`session/claude_mode.rs`).
     pub(super) auto: session::Auto,
@@ -125,6 +127,15 @@ pub(super) struct Agent {
     pub(super) matter_spellings: Vec<String>,
     /// Its idle clock and config calls in flight (`idle.rs`).
     pub(super) idle: super::idle::Mark,
+}
+
+impl Agent {
+    /// The launch's folder check would put Claude in forced ask (`forced_ask::applies`); for
+    /// Codex only a failed check, since the other two refuse it. A Codex agent gets no browser
+    /// auto-answer then (`asks.rs` `browser_tool_to_allow`).
+    pub(super) fn unprotected(&self) -> bool {
+        self.folder_check.is_some_and(agent::forced_ask::applies)
+    }
 }
 
 /// What a Codex agent's launch recorded.
@@ -199,8 +210,9 @@ pub(super) fn launch_now(
     prepared: Prepared,
 ) -> Option<TreeWatch> {
     // Only a Claude launch has a folder answer without a Codex preparation.
-    let forced_ask =
-        prepared.codex.is_none() && prepared.folder.is_some_and(agent::forced_ask::applies);
+    let unprotected = prepared.folder.is_some_and(agent::forced_ask::applies);
+    let forced_ask = prepared.codex.is_none() && unprotected;
+    let prepared_folder = prepared.folder;
     if forced_ask {
         let matter = prepared.run.key.matter;
         tracing::info!(%matter, forced_ask, "Claude runs in forced ask: the matter folder is unprotected");
@@ -254,6 +266,7 @@ pub(super) fn launch_now(
         codex,
         mcp_commands: Vec::new(),
         forced_ask,
+        folder_check: prepared_folder,
         auto: session::Auto::default(),
         plan_notes,
         denied_data_folder: 0,

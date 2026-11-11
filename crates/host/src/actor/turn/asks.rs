@@ -143,15 +143,14 @@ pub(super) fn on_permission(actor: &mut Actor, thread: ThreadId, event: AcpEvent
 const ALLOW_SESSION: &str = "allow_session";
 
 /// The `browser` tool and the `allow_session` option, when the host answers this request itself:
-/// the thread's agent is Codex, not in forced ask; the request offers `allow_session`; and it
-/// names one of the guarded `browser` server's tools
-/// (`sources::browser::auto_allowed_browser_tool`; the guard refuses eval). The tool comes only
-/// from fields Codex and codex-acp build, never from model-written text: the title
-/// `mcp.browser.<tool>` of the earlier tool call the request's toolCallId names, which the
-/// thread's sources keep (`sources::browser::CodexTools`), or a standalone request's
-/// `serverName` and exact message (`sources::browser::codex_standalone_browser_tool`).
-/// Everything else (shell commands, file writes, other servers such as `case-law`) goes to the
-/// lawyer as before.
+/// the thread's agent is Codex, neither in forced ask nor unprotected (a failed folder check,
+/// `agents.rs`: the lawyer gets the card then); the request offers `allow_session`; and it names
+/// a guarded `browser` tool (`sources::browser::auto_allowed_browser_tool`; the guard refuses
+/// eval). The tool comes only from fields Codex and codex-acp build, never model-written text:
+/// the title `mcp.browser.<tool>` of the earlier tool call the request's toolCallId names (the
+/// thread's `sources::browser::CodexTools`), or a standalone request's `serverName` and exact
+/// message (`sources::browser::codex_standalone_browser_tool`). Anything else (shell commands,
+/// file writes, other servers such as `case-law`) goes to the lawyer as before.
 ///
 /// Codex's own per-server `default_tools_approval_mode` would do this, but codex-acp replaces the
 /// whole `mcp_servers` table with ACP's servers (`dist/index.js:35482`), dropping that value.
@@ -165,7 +164,8 @@ fn browser_tool_to_allow(
         .check_thread(thread)
         .ok()
         .and_then(|entry| AgentKind::of(&entry.row.agent));
-    if kind != Some(AgentKind::Codex) || agent(actor, thread).is_none_or(|agent| agent.forced_ask) {
+    let skip = agent(actor, thread).is_none_or(|agent| agent.forced_ask || agent.unprotected());
+    if kind != Some(AgentKind::Codex) || skip {
         return None;
     }
     let option = ask

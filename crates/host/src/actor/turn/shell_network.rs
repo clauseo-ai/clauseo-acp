@@ -17,7 +17,8 @@
 //!   `wget`, bare or with a path (`agent::data_fence::command_names`).
 //!
 //! It only ever refuses, never allows, so a wrong match costs a command the offline shell could
-//! not run anyway. Any other request reaches the lawyer as before. The answer is codex-acp's
+//! not run anyway; so it applies in forced ask and with an unprotected folder too. Any other
+//! request reaches the lawyer as before. The answer is codex-acp's
 //! `decline` ("continue without running it"), else the first reject-once option, else
 //! `cancelled`. The note ([`AGENT_NOTE`]) goes as a steer into the running turn, never logged,
 //! sent before the answer while the request still holds the turn open, so it cannot start a
