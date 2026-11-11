@@ -16,7 +16,7 @@
 //! the move keeps it: `MoveFileExW` within one volume renames the file with its streams, and the
 //! Unix hard link is the same inode with its attributes. The staging folder and the downloads
 //! folder are both in the guard's `--cwd`; a move across volumes fails and is retried
-//! (`write::move_new` has no copy fallback), so no move drops a mark.
+//! (`write::Folder::move_new` has no copy fallback), so no move drops a mark.
 
 use std::io;
 use std::path::Path;
