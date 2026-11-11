@@ -267,7 +267,7 @@ fn the_hooks_launch_variables_and_the_connector_switch_reach_the_agent() {
 fn hook_servers_follow_the_lawyers_with_their_per_session_values() {
     use crate::profile_rig::{
         CLAUDE, CODEX, Hook, Wired, agent_lines, agents, browser_server, codex_lines,
-        filled_browser, settings, template, turn,
+        codex_servers, filled_browser, settings, template, turn,
     };
     let dir = Dir::new("mcp_hook_servers", &[]);
     let bin = dir.folder("bin", &[]);
@@ -287,7 +287,7 @@ fn hook_servers_follow_the_lawyers_with_their_per_session_values() {
     let codex = template(
         &dir,
         "hs-codex",
-        &codex_lines("hs-codex", &json!({"mcpServers": servers})),
+        &codex_lines("hs-codex", &json!({"mcpServers": codex_servers(&servers)})),
     );
     let claude = crate::support::Scenario::Local("tools-mcp-servers");
     settings(
