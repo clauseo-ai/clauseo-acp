@@ -68,9 +68,10 @@ and about 19 in Codex's whole text with a long data folder (about 1,481 of 1,500
   `legal.md` at most 1,360 words, and the whole instructions at most 1,800, which also caps
   Codex's text with the skills index (`the_budgets_hold_for_a_long_macos_path_with_the_folders_filled`). The
   whole now counts the stetdoc line as the app launches with it; before, the budget tests
-  measured a profile without it, so its 17 words were never counted. At this change: `legal.md`
-  1,313 words, the stetdoc line 66, the whole 1,569 with a data folder at `/data`, and Codex's
-  whole about 1,671 with the long macOS folder. The tools part with the stetdoc line is 256
+  measured a profile without it, so its 17 words were never counted. At this change, rebased
+  on #940 and #999 (estimates): `legal.md` about 1,327 words, the stetdoc line 70, the whole about
+  1,600 with a data folder at `/data`, Claude's on macOS (with its shell line) about 1,655, and
+  Codex's about 1,700 with the long macOS folder. The tools part with the stetdoc line is 276
   words, under R21's 300.
 
 ## Consequences

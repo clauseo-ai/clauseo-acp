@@ -333,7 +333,8 @@ fn the_browser_entry_runs_the_guard_with_its_ports_and_variables() {
 #[test]
 fn every_token_the_profile_sends_is_one_the_host_is_told_to_fill() {
     let profile = profile();
-    let mut texts = vec![profile.instructions()];
+    // What each agent is sent: `{plan}` is the profile's own token, filled per agent.
+    let mut texts = vec![profile.claude_instructions(), profile.codex_instructions()];
     let tokens: Vec<&str> = IN_INSTRUCTIONS.iter().chain(&IN_SERVERS).copied().collect();
     for server in profile.servers(Some(AgentKind::Codex)) {
         texts.extend(server.args);
