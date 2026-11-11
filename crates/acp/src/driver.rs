@@ -381,19 +381,20 @@ fn prompt(
             }
         }
         let response = result?;
-        let mut limit = None;
-        if let Some(failure) = response.meta.as_ref().and_then(map::session_failure) {
-            match failure {
-                Ok(signal) => limit = Some(signal),
-                Err(warning) => {
-                    let event = map::warning_event(Some(session), warning);
-                    state.emit(event).await;
-                }
+        let (mut limit, mut too_long) = (None, false);
+        match response.meta.as_ref().and_then(map::session_failure) {
+            Some(map::Failure::Limit(signal)) => limit = Some(signal),
+            Some(map::Failure::TooLong) => too_long = true,
+            Some(map::Failure::Warning(warning)) => {
+                let event = map::warning_event(Some(session), warning);
+                state.emit(event).await;
             }
+            None => {}
         }
         Ok(PromptEnd {
             stop: map::stop_reason(response.stop_reason),
             limit,
+            too_long,
         })
     };
     send_with(cx, shared, request, reply, on_answer);
@@ -537,6 +538,7 @@ fn rpc_error(shared: &Shared, method: &str, error: agent_client_protocol::Error)
         code: error.code.into(),
         data: crate::diagnose::data_shape(error.data.as_ref()),
         data_text: crate::error::data_text(error.data.as_ref()),
+        data_fields: crate::error::RpcData::read(error.data.as_ref()),
         message: error.message,
     }
 }

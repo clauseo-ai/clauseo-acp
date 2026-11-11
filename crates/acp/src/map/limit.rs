@@ -1,10 +1,12 @@
 //! Plan limit signals: Claude's `_claude/rateLimit` and the AIR `sessionFailure`. `_meta` is
 //! read at these two keys only, and only on `usage_update`, `session_info_update` and the
-//! prompt response.
+//! prompt response. A `sessionFailure` that says the turn was too long is not a limit
+//! (`too_long.rs`).
 
 use clauseo_protocol::{Finite, LimitStopReason, Timestamp};
 use serde_json::{Map, Value};
 
+use super::too_long::session_failure_says_too_long;
 use crate::event::{LimitSignal, LimitStatus, ProtocolWarning};
 
 /// `_meta["_claude/rateLimit"]` of a `usage_update`, when present: the signal, or a warning for
@@ -42,13 +44,23 @@ pub(crate) fn rate_limit(
     }))
 }
 
+/// What an AIR `sessionFailure` says.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum Failure {
+    /// A plan limit stopped the turn.
+    Limit(LimitSignal),
+    /// The model refused the turn as too long to read (`too_long.rs`). Not a plan limit.
+    TooLong,
+    /// Any other failure, which the driver only reports.
+    Warning(ProtocolWarning),
+}
+
 /// `_meta.jetbrains.air.sessionFailure`, when present. Both adapters set `category`, `severity`
 /// and `actions` from one policy table: `limit`, `error` and no actions is the plan window
-/// (`quota_exhausted`); with `["retry"]` it is a temporary limit (`rate_limited`). Any other
-/// failure is a warning.
-pub(crate) fn session_failure(
-    meta: &Map<String, Value>,
-) -> Option<Result<LimitSignal, ProtocolWarning>> {
+/// (`quota_exhausted`); with `["retry"]` it is a temporary limit (`rate_limited`). A failure
+/// that says the turn was too long to read is [`Failure::TooLong`], read by
+/// [`session_failure_says_too_long`]. Any other failure is a warning.
+pub(crate) fn session_failure(meta: &Map<String, Value>) -> Option<Failure> {
     let failure = meta
         .get("jetbrains")?
         .get("air")?
@@ -65,12 +77,20 @@ pub(crate) fn session_failure(
         (Some("limit"), Some("error"), Some(["retry"])) => Some(LimitStopReason::Temporary),
         _ => None,
     };
-    Some(match reason {
-        Some(reason) => Ok(LimitSignal::Stopped { reason, title }),
-        None => Err(ProtocolWarning::SessionFailure {
-            category,
-            severity,
-            title,
-        }),
-    })
+    if let Some(reason) = reason {
+        return Some(Failure::Limit(LimitSignal::Stopped { reason, title }));
+    }
+    if session_failure_says_too_long(
+        category.as_deref(),
+        severity.as_deref(),
+        actions.as_deref(),
+        title.as_deref(),
+    ) {
+        return Some(Failure::TooLong);
+    }
+    Some(Failure::Warning(ProtocolWarning::SessionFailure {
+        category,
+        severity,
+        title,
+    }))
 }

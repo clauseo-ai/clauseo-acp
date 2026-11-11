@@ -1,0 +1,4 @@
+{"scenario":"codex-input-too-long","description":"A Codex prompt refused before any turn starts as over Codex's 1,048,576 characters (shape from source; to be replaced by the live recording): error -32603 to session/prompt with Codex's refusal at data.message, as codex-acp passes Codex's other errors. The client must end the turn TooLong, not agent.protocol_error","on_stdin_close":"exit"}
+{"include":"codex-handshake.jsonl"}
+{"note":"shape from source; to be replaced by the live recording. Codex's MAX_USER_INPUT_TEXT_CHARS refusal text (codex-rs/protocol/src/user_input.rs at rust-v0.162.1); codex-acp puts Codex's error message at data.message under a bare Internal error.","expect":{"method":"session/prompt","as":"p1","params":{"sessionId":"sess-1"}}}
+{"respond":{"to":"p1","error":{"code":-32603,"message":"Internal error","data":{"message":"Input exceeds the maximum length of 1048576 characters."}}}}

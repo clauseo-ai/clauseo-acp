@@ -7,6 +7,10 @@
 //! logged after the read (`limits::stop_later`); an agent id with no kind gets no read, so its
 //! stop rides in the end commit as before.
 //!
+//! A turn the model refused as too long to read (`PromptEnd::too_long`, or a prompt error for
+//! which `clauseo_acp::Error::prompt_too_long` holds) ends `TooLong`: no `TurnFailed`, the
+//! answer so far kept, the queue held, and no limits read for either agent.
+//!
 //! The Codex fallback: a Codex prompt that fails with a JSON-RPC error may be codex-acp's form
 //! of the limit, which Clauseo never parses from prose. Step 6 runs as for any failure, then
 //! asks for one Codex read; step 7's commit waits until that read is done, or 10 s on the host
@@ -78,7 +82,10 @@ pub(super) fn on_prompt_done(
         Err(error) => offline::prompt_failed_offline(actor, thread, error),
         Ok(_) => None,
     };
+    // A prompt refused as too long ends `TooLong`, never `Failed`, and is never read as a limit.
+    let too_long = matches!(&result, Err(error) if error.prompt_too_long());
     let fallback = matches!(result, Err(clauseo_acp::Error::Rpc { .. }))
+        && !too_long
         && went_offline.is_none()
         && !host_stopping(actor)
         && !store_failed
@@ -97,6 +104,9 @@ pub(super) fn on_prompt_done(
             // one), not on a Stop.
             let stop = match current.refused {
                 Some(refused) if answer.stop == StopReason::Cancelled => refused,
+                // The model refused the turn as too long to read (an AIR `sessionFailure` on
+                // its `end_turn`): a stop of its own, the answer so far kept.
+                _ if answer.too_long => StopReason::TooLong,
                 _ => answer.stop,
             };
             End {
@@ -106,6 +116,12 @@ pub(super) fn on_prompt_done(
                 detach: None,
             }
         }
+        Err(_) if too_long => End {
+            stop: StopReason::TooLong,
+            failure: None,
+            expiry: ExpiryReason::TurnEnded,
+            detach: None,
+        },
         Err(error) => {
             if fallback {
                 current.limit_read = Some(LimitRead::default());

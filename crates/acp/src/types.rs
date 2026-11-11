@@ -200,6 +200,9 @@ pub struct PromptEnd {
     pub stop: StopReason,
     /// A plan limit the response carried (an AIR `sessionFailure` in its `_meta`).
     pub limit: Option<LimitSignal>,
+    /// The response's AIR `sessionFailure` says the model refused the turn as too long to
+    /// read (`map/too_long.rs`). Never a plan limit: `limit` stays `None` for it.
+    pub too_long: bool,
 }
 
 /// What `steer()` did. `steer()` gives `Error::SteerUnsupported`, sending nothing, unless the

@@ -41,6 +41,9 @@ pub enum Error {
         /// 4 KiB ([`data_text`]). For classifying only ([`Error::rpc_data`]): never in the
         /// error's text nor the log, as it may quote the lawyer's words.
         data_text: Option<String>,
+        /// The few named fields of its `data` that classify it, and nothing else
+        /// ([`RpcData`]): never the lawyer's words.
+        data_fields: RpcData,
     },
     /// The agent broke the protocol: a line over 8 MiB, or an answer the driver cannot use.
     #[error("the agent broke the protocol: {0}")]
@@ -69,6 +72,76 @@ pub enum Error {
     /// The agent cannot steer a running turn safely.
     #[error("the agent cannot steer a running turn")]
     SteerUnsupported,
+}
+
+/// The allowlisted fields of an RPC error's `data`, each kept only when it is a short token
+/// (at most [`MAX_FIELD_BYTES`] of ASCII letters, digits, `_`, `-` and `.`), so no text the
+/// lawyer wrote can ride along: an adapter's error data may quote the prompt. Read by
+/// `map/too_long.rs` to tell a too-long refusal from other errors.
+///
+/// Boxed, and `None` when no field is kept, so `Error` stays small.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct RpcData(Option<Box<RpcFields>>);
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct RpcFields {
+    error_kind: Option<String>,
+    terminal_reason: Option<String>,
+    codex_error_info: Option<String>,
+}
+
+/// The most bytes of one [`RpcData`] field.
+pub(crate) const MAX_FIELD_BYTES: usize = 64;
+
+impl RpcData {
+    /// The allowlisted fields of `data`: `errorKind` (claude-agent-acp), `terminal_reason` (the
+    /// Claude SDK's) and `codex_error_info` (codex-acp's, or `codexErrorInfo` as Codex's
+    /// app-server spells it, when it is a plain string). Any other field, and any value that is
+    /// not a short token, is dropped.
+    pub(crate) fn read(data: Option<&serde_json::Value>) -> Self {
+        let field = |key: &str| {
+            data.and_then(|data| data.get(key))
+                .and_then(serde_json::Value::as_str)
+                .filter(|value| is_token(value))
+                .map(str::to_owned)
+        };
+        let fields = RpcFields {
+            error_kind: field("errorKind"),
+            terminal_reason: field("terminal_reason"),
+            codex_error_info: field("codex_error_info").or_else(|| field("codexErrorInfo")),
+        };
+        let kept = fields.error_kind.is_some()
+            || fields.terminal_reason.is_some()
+            || fields.codex_error_info.is_some();
+        Self(kept.then(|| Box::new(fields)))
+    }
+
+    fn fields(&self) -> Option<&RpcFields> {
+        self.0.as_deref()
+    }
+
+    /// `data.errorKind`.
+    pub fn error_kind(&self) -> Option<&str> {
+        self.fields()?.error_kind.as_deref()
+    }
+
+    /// `data.terminal_reason`.
+    pub fn terminal_reason(&self) -> Option<&str> {
+        self.fields()?.terminal_reason.as_deref()
+    }
+
+    /// `data.codex_error_info` (or `codexErrorInfo`), when a string.
+    pub fn codex_error_info(&self) -> Option<&str> {
+        self.fields()?.codex_error_info.as_deref()
+    }
+}
+
+fn is_token(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= MAX_FIELD_BYTES
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-' | b'.'))
 }
 
 /// The most of an RPC error's `data` kept.
@@ -103,6 +176,22 @@ impl Error {
             return None;
         };
         data_text.as_deref()
+    }
+
+    /// Whether the agent refused the prompt as too long to read (`map/too_long.rs`): an RPC
+    /// error whose allowlisted `data` fields, or Codex's exact refusal text, say so. The host
+    /// ends such a turn `TooLong`, never `Failed`.
+    pub fn prompt_too_long(&self) -> bool {
+        let Self::Rpc {
+            message,
+            data_text,
+            data_fields,
+            ..
+        } = self
+        else {
+            return false;
+        };
+        crate::map::rpc_says_too_long(message, data_fields, data_text.as_deref())
     }
 
     /// The code a client sees.

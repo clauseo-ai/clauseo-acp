@@ -265,6 +265,9 @@ mod lists;
 #[path = "host/lists_folder.rs"]
 mod lists_folder;
 #[cfg(test)]
+#[path = "host/load_line_cap.rs"]
+mod load_line_cap;
+#[cfg(test)]
 #[path = "host/locate.rs"]
 mod locate;
 #[cfg(test)]
@@ -309,6 +312,12 @@ mod packs_timing;
 #[cfg(test)]
 #[path = "host/papers.rs"]
 mod papers;
+#[cfg(test)]
+#[path = "host/too_long.rs"]
+mod too_long;
+#[cfg(test)]
+#[path = "host/too_long_log.rs"]
+mod too_long_log;
 // Every test here waits for a live folder watch, which Windows does not have (decision record
 // 0055); the turn rig's `papers` tests cover Windows' re-list at an answer's end on every OS.
 #[cfg(test)]

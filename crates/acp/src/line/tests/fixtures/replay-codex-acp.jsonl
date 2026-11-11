@@ -1,0 +1,2 @@
+{"fixture":"replay-codex-acp","recorded":false,"note":"PLACEHOLDER: shape from source; to be replaced by the live recording. The line below is written by hand from codex-acp 2.2.2's session/load replay of a user message, not recorded. Replace both lines with the recording and set recorded to true."}
+{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"019a5c3e-7d21-7f40-9b6e-2c8d4a1e5f73","update":{"sessionUpdate":"user_message_chunk","content":{"type":"text","text":"Summarise clause 4 of the lease."}}}}
