@@ -77,13 +77,11 @@ const dayOf = (at: number, lang: Lang): string =>
  * one, takes the generic line. */
 function cantKey(cause: Cause): SettingsKey {
   const why = whyOf(cause);
-  if (why === "os")
-    return "The Safe workspace isn't available on Linux yet, so Clauseo asks before changing anything outside a matter's folder.";
-  if (why === "windows_arm")
-    return "The Safe workspace isn't available on Windows on ARM yet, so Clauseo asks before changing anything outside a matter's folder.";
+  if (why === "os") return "The Safe workspace isn't available on Linux yet.";
+  if (why === "windows_arm") return "The Safe workspace isn't available on Windows on ARM yet.";
   if (why === "not_built")
-    return "This version of Clauseo doesn't have the Safe workspace yet. It comes in an update. Until then, Clauseo asks before changing anything outside a matter's folder.";
-  return "This computer can't run the Safe workspace, so Clauseo asks before changing anything outside a matter's folder.";
+    return "This version of Clauseo doesn't have the Safe workspace yet. It comes in an update.";
+  return "This computer can't run the Safe workspace.";
 }
 
 export function Workspace({ ctx }: { ctx: SectionContext }) {
@@ -135,22 +133,13 @@ export function Workspace({ ctx }: { ctx: SectionContext }) {
             ? w.s("Set up with Windows' permission.")
             : w.s("Set up on {date}, with Windows' permission.", { date: dayOf(at, lang) })
           : status === "needs_set_up" || blockOf(cause) === "admin_copy_missing"
-            ? w.s(
-                "The Safe workspace isn't set up on this computer yet, so Clauseo asks before changing anything outside a matter's folder.",
-              )
+            ? w.s("The Safe workspace isn't set up on this computer yet.")
             : status === "set_up_refused"
-              ? w.s(
-                  "Windows didn't allow the set-up, so Clauseo asks before changing anything outside a matter's folder.",
-                )
+              ? w.s("Windows didn't allow the set-up.")
               : status === "set_up_failed"
-                ? w.s(
-                    "The Safe workspace couldn't be set up on this computer, so Clauseo asks before changing anything outside a matter's folder.",
-                  )
+                ? w.s("The Safe workspace couldn't be set up on this computer.")
                 : status === "blocked"
-                  ? pw(
-                      lang,
-                      "Something on this computer stops the Safe workspace, so Clauseo asks before changing anything outside a matter's folder.",
-                    )
+                  ? pw(lang, "Something on this computer stops the Safe workspace.")
                   : w.s(cantKey(cause ?? { name: "unknown", group: "cant", raw: null }));
   const repair = needsInstaller(cause);
   const policy = firmPolicy(view, state.managedBy);

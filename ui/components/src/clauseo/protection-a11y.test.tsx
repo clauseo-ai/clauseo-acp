@@ -148,7 +148,7 @@ test("the pressable mark says it opens a dialog; the mark alone is no control", 
   await show(
     <>
       <NotProtectedMark short onPress={() => {}} />
-      <NotProtectedMark meaning="Clauseo changes files in this matter without asking, and asks before changing files outside it." />
+      <NotProtectedMark meaning="Clauseo changes files in this matter without asking." />
     </>,
   );
   const marks = document.querySelectorAll(".np-mark");

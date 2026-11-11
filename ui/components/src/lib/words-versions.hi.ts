@@ -208,8 +208,8 @@ const EDGE = {
     "Clauseo इस मामले में सुरक्षित कार्यक्षेत्र के बाहर काम करने की अनुमति माँगता है, ताकि इस कंप्यूटर के एक प्रोग्राम से स्कैन किए गए अनुलग्नक पढ़ सके।",
   "Clauseo works only in this matter's folder. It can't open your other files unless you allow it.":
     "Clauseo सिर्फ़ इस मामले के फ़ोल्डर में काम करता है। आपकी अनुमति के बिना वह आपकी दूसरी फ़ाइलें नहीं खोल सकता।",
-  "Outside the Safe workspace, Clauseo can read any file you can open, and asks before changing anything outside this matter's folder.":
-    "सुरक्षित कार्यक्षेत्र के बाहर Clauseo हर वह फ़ाइल पढ़ सकता है जिसे आप खोल सकते हैं, और इस मामले के फ़ोल्डर के बाहर कुछ भी बदलने से पहले पूछता है।",
+  "Outside the Safe workspace, Clauseo can read any file you can open.":
+    "सुरक्षित कार्यक्षेत्र के बाहर Clauseo हर वह फ़ाइल पढ़ सकता है जिसे आप खोल सकते हैं।",
   Allow: "अनुमति दें",
   "Don't allow": "अनुमति न दें",
   "Keep the Safe workspace": "सुरक्षित कार्यक्षेत्र बनाए रखें",
@@ -267,22 +267,22 @@ const EDGE = {
   "Safe workspace": "सुरक्षित कार्यक्षेत्र",
   "On. Clauseo works only in this matter's folder. It can't open your other files unless you allow it.":
     "चालू। Clauseo सिर्फ़ इस मामले के फ़ोल्डर में काम करता है। आपकी अनुमति के बिना वह आपकी दूसरी फ़ाइलें नहीं खोल सकता।",
-  "Off since {time} today. Clauseo can read any file you can open on this computer, and asks before changing anything outside the matter's folder.":
-    "आज {time} बजे से बंद। Clauseo इस कंप्यूटर की हर वह फ़ाइल पढ़ सकता है जिसे आप खोल सकते हैं, और मामले के फ़ोल्डर के बाहर कुछ भी बदलने से पहले पूछता है।",
-  "Couldn't be set up on this computer. Clauseo can read any file you can open on it, and asks before changing anything outside the matter's folder.":
-    "इस कंप्यूटर पर सेट अप नहीं हो सका। Clauseo इसकी हर वह फ़ाइल पढ़ सकता है जिसे आप खोल सकते हैं, और मामले के फ़ोल्डर के बाहर कुछ भी बदलने से पहले पूछता है।",
-  "Clauseo can read any file you can open on this computer, and asks before changing anything outside the matter's folder.":
-    "Clauseo इस कंप्यूटर की हर वह फ़ाइल पढ़ सकता है जिसे आप खोल सकते हैं, और मामले के फ़ोल्डर के बाहर कुछ भी बदलने से पहले पूछता है।",
-  "The Safe workspace couldn't be set up on this computer, so Clauseo can read any file you can open on it. It asks before changing anything outside the matter's folder.":
-    "इस कंप्यूटर पर सुरक्षित कार्यक्षेत्र तैयार नहीं हो सका, इसलिए Clauseo इसकी हर वह फ़ाइल पढ़ सकता है जिसे आप खोल सकते हैं। वह मामले के फ़ोल्डर के बाहर कुछ भी बदलने से पहले पूछता है।",
+  "Off since {time} today. Clauseo can read any file you can open on this computer.":
+    "आज {time} बजे से बंद। Clauseo इस कंप्यूटर की हर वह फ़ाइल पढ़ सकता है जिसे आप खोल सकते हैं।",
+  "Couldn't be set up on this computer. Clauseo can read any file you can open on it.":
+    "इस कंप्यूटर पर सेट अप नहीं हो सका। Clauseo इसकी हर वह फ़ाइल पढ़ सकता है जिसे आप खोल सकते हैं।",
+  "Clauseo can read any file you can open on this computer.":
+    "Clauseo इस कंप्यूटर की हर वह फ़ाइल पढ़ सकता है जिसे आप खोल सकते हैं।",
+  "The Safe workspace couldn't be set up on this computer, so Clauseo can read any file you can open on it.":
+    "इस कंप्यूटर पर सुरक्षित कार्यक्षेत्र तैयार नहीं हो सका, इसलिए Clauseo इसकी हर वह फ़ाइल पढ़ सकता है जिसे आप खोल सकते हैं।",
   "Switch off the Safe workspace": "सुरक्षित कार्यक्षेत्र बंद करें",
   "Switch the Safe workspace on": "सुरक्षित कार्यक्षेत्र चालू करें",
   "Safe workspace. Clauseo works only in this matter's folder. It can't open your other files unless you allow it.":
     "सुरक्षित कार्यक्षेत्र। Clauseo सिर्फ़ इस मामले के फ़ोल्डर में काम करता है। आपकी अनुमति के बिना वह आपकी दूसरी फ़ाइलें नहीं खोल सकता।",
   // not protected
   "This matter is not protected": "यह मामला संरक्षित नहीं है",
-  "The Safe workspace is off for {matter}. Claude changes files in this matter without asking, and asks before changing files outside it. ChatGPT can read any file you can open, and asks before changing files outside this matter's folder.":
-    "{matter} के लिए सुरक्षित कार्यक्षेत्र बंद है। Claude इस मामले की फ़ाइलें बिना पूछे बदलता है, और इसके बाहर की फ़ाइलें बदलने से पहले पूछता है। ChatGPT हर वह फ़ाइल पढ़ सकता है जिसे आप खोल सकते हैं, और इस मामले के फ़ोल्डर के बाहर की फ़ाइलें बदलने से पहले पूछता है।",
+  "The Safe workspace is off for {matter}. Claude changes files in this matter without asking. ChatGPT can read any file you can open, and asks before changing files outside this matter's folder.":
+    "{matter} के लिए सुरक्षित कार्यक्षेत्र बंद है। Claude इस मामले की फ़ाइलें बिना पूछे बदलता है। ChatGPT हर वह फ़ाइल पढ़ सकता है जिसे आप खोल सकते हैं, और इस मामले के फ़ोल्डर के बाहर की फ़ाइलें बदलने से पहले पूछता है।",
   "Windows didn't allow the Safe workspace on this computer.":
     "Windows ने इस कंप्यूटर पर सुरक्षित कार्यक्षेत्र की अनुमति नहीं दी।",
   "macOS didn't allow the Safe workspace on this computer.":
@@ -294,8 +294,8 @@ const EDGE = {
   Understood: "ठीक है",
   // the computer's own dialogs, as edgeDialogWords builds them
   "Switch off the Safe workspace for {matter}?": "{matter} के लिए सुरक्षित कार्यक्षेत्र बंद करें?",
-  "If you switch it off, Clauseo can read any file you can open while it works on this matter, and asks before changing anything outside its folder.":
-    "बंद करने पर Clauseo इस मामले पर काम करते समय हर वह फ़ाइल पढ़ सकता है जिसे आप खोल सकते हैं, और इसके फ़ोल्डर के बाहर कुछ भी बदलने से पहले पूछता है।",
+  "If you switch it off, Clauseo can read any file you can open while it works on this matter.":
+    "बंद करने पर Clauseo इस मामले पर काम करते समय हर वह फ़ाइल पढ़ सकता है जिसे आप खोल सकते हैं।",
   "If you keep it, Clauseo stays inside this matter's folder, and the scanned annexures stay unread.":
     "बनाए रखने पर Clauseo इस मामले के फ़ोल्डर के भीतर रहता है, और स्कैन किए गए अनुलग्नक बिना पढ़े रहते हैं।",
   "You can switch it back on from the line under the question box.":

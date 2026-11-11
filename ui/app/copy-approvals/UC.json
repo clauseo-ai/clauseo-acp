@@ -17,14 +17,15 @@
     "by": "design"
   },
   "UC-03": {
-    "en": "Clauseo changes files in this matter without asking, and asks before changing files outside it.",
-    "hi": "Clauseo इस मामले की फ़ाइलें बिना पूछे बदलता है, और इसके बाहर की फ़ाइलें बदलने से पहले पूछता है।",
+    "en": "Clauseo changes files in this matter without asking.",
+    "hi": "Clauseo इस मामले की फ़ाइलें बिना पूछे बदलता है।",
     "hi_status": "provisional",
-    "hi_at": "2026-11-10",
-    "hi_by": "app track (provisional; orchestrator approved the words 2026-11-10 for Claude acceptEdits, copy review pending)",
-    "status": "provisional",
-    "at": "2026-11-06",
-    "by": "app track (provisional; orchestrator approved the words 2026-11-10 for Claude acceptEdits, copy review pending)"
+    "hi_at": "2026-11-11",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "approved",
+    "at": "2026-11-11",
+    "by": "orchestrator (decision 2026-11-11: Claude runs in auto mode, #999; no promised ask)",
+    "note": "second half dropped 2026-11-11"
   },
   "UC-04": {
     "en": "Clauseo can read any file you can open, and changes files in this matter without asking. It asks before changing files outside it.",
@@ -110,34 +111,37 @@
     "by": "design"
   },
   "UC-21": {
-    "en": "The Safe workspace is off for {matter}. Claude changes files in this matter without asking, and asks before changing files outside it. ChatGPT can read any file you can open, and asks before changing files outside this matter's folder.",
-    "hi": "{matter} के लिए सुरक्षित कार्यक्षेत्र बंद है। Claude इस मामले की फ़ाइलें बिना पूछे बदलता है, और इसके बाहर की फ़ाइलें बदलने से पहले पूछता है। ChatGPT हर वह फ़ाइल पढ़ सकता है जिसे आप खोल सकते हैं, और इस मामले के फ़ोल्डर के बाहर की फ़ाइलें बदलने से पहले पूछता है।",
+    "en": "The Safe workspace is off for {matter}. Claude changes files in this matter without asking. ChatGPT can read any file you can open, and asks before changing files outside this matter's folder.",
+    "hi": "{matter} के लिए सुरक्षित कार्यक्षेत्र बंद है। Claude इस मामले की फ़ाइलें बिना पूछे बदलता है। ChatGPT हर वह फ़ाइल पढ़ सकता है जिसे आप खोल सकते हैं, और इस मामले के फ़ोल्डर के बाहर की फ़ाइलें बदलने से पहले पूछता है।",
     "hi_status": "provisional",
-    "hi_at": "2026-11-09",
+    "hi_at": "2026-11-11",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-09",
-    "by": "app track (provisional; orchestrator approved the words 2026-11-10 for Claude acceptEdits, copy review pending)"
+    "status": "approved",
+    "at": "2026-11-11",
+    "by": "orchestrator (decision 2026-11-11: Claude runs in auto mode, #999; no promised ask)",
+    "note": "second half dropped 2026-11-11"
   },
   "UC-22": {
-    "en": "The Safe workspace isn't set up on this computer yet. Until it is, Clauseo can read any file you can open on this computer, and asks before changing anything outside this matter's folder.",
-    "hi": "इस कंप्यूटर पर सुरक्षित कार्यक्षेत्र अभी तैयार नहीं है। तब तक Clauseo इस कंप्यूटर की हर वह फ़ाइल पढ़ सकता है जिसे आप खोल सकते हैं, और इस मामले के फ़ोल्डर के बाहर कुछ भी बदलने से पहले पूछता है।",
+    "en": "The Safe workspace isn't set up on this computer yet. Until it is, Clauseo can read any file you can open on this computer.",
+    "hi": "इस कंप्यूटर पर सुरक्षित कार्यक्षेत्र अभी तैयार नहीं है। तब तक Clauseo इस कंप्यूटर की हर वह फ़ाइल पढ़ सकता है जिसे आप खोल सकते हैं।",
     "hi_status": "provisional",
-    "hi_at": "2026-11-07",
+    "hi_at": "2026-11-11",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-07",
-    "by": "app track (provisional; Rohan batch review; design B, safe-workspace-installer-setup)"
+    "status": "approved",
+    "at": "2026-11-11",
+    "by": "orchestrator (rule 2026-11-11: no promised ask outside the matter; Claude auto mode #999)",
+    "note": "ask clause dropped 2026-11-11"
   },
   "UC-23": {
-    "en": "The Safe workspace couldn't be set up on this computer, so Clauseo can read any file you can open on it. It asks before changing anything outside this matter's folder.",
-    "hi": "इस कंप्यूटर पर सुरक्षित कार्यक्षेत्र तैयार नहीं हो सका, इसलिए Clauseo इसकी हर वह फ़ाइल पढ़ सकता है जिसे आप खोल सकते हैं। वह इस मामले के फ़ोल्डर के बाहर कुछ भी बदलने से पहले पूछता है।",
+    "en": "The Safe workspace couldn't be set up on this computer, so Clauseo can read any file you can open on it.",
+    "hi": "इस कंप्यूटर पर सुरक्षित कार्यक्षेत्र तैयार नहीं हो सका, इसलिए Clauseo इसकी हर वह फ़ाइल पढ़ सकता है जिसे आप खोल सकते हैं।",
     "hi_status": "provisional",
-    "hi_at": "2026-11-07",
+    "hi_at": "2026-11-11",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-07",
-    "by": "app track (provisional; Rohan batch review; design B, safe-workspace-installer-setup)"
+    "status": "approved",
+    "at": "2026-11-11",
+    "by": "orchestrator (rule 2026-11-11: no promised ask outside the matter; Claude auto mode #999)",
+    "note": "ask clause dropped 2026-11-11"
   },
   "UC-24": {
     "en": "Windows didn't allow the Safe workspace on this computer.",
@@ -150,14 +154,15 @@
     "by": "app track (provisional; Rohan batch review; design B, safe-workspace-installer-setup)"
   },
   "UC-25": {
-    "en": "This computer can't run the Safe workspace, so Clauseo can read any file you can open on it. It asks before changing anything outside this matter's folder.",
-    "hi": "यह कंप्यूटर सुरक्षित कार्यक्षेत्र नहीं चला सकता, इसलिए Clauseo इसकी हर वह फ़ाइल पढ़ सकता है जिसे आप खोल सकते हैं। वह इस मामले के फ़ोल्डर के बाहर कुछ भी बदलने से पहले पूछता है।",
+    "en": "This computer can't run the Safe workspace, so Clauseo can read any file you can open on it.",
+    "hi": "यह कंप्यूटर सुरक्षित कार्यक्षेत्र नहीं चला सकता, इसलिए Clauseo इसकी हर वह फ़ाइल पढ़ सकता है जिसे आप खोल सकते हैं।",
     "hi_status": "provisional",
-    "hi_at": "2026-11-07",
+    "hi_at": "2026-11-11",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-07",
-    "by": "app track (provisional; Rohan batch review; design B, safe-workspace-installer-setup)"
+    "status": "approved",
+    "at": "2026-11-11",
+    "by": "orchestrator (rule 2026-11-11: no promised ask outside the matter; Claude auto mode #999)",
+    "note": "ask clause dropped 2026-11-11"
   },
   "UC-26": {
     "en": "Every change inside the matter's folder is still kept, and Versions can undo it.",
@@ -257,34 +262,37 @@
     "by": "app track (provisional; Rohan batch review)"
   },
   "UC-36": {
-    "en": "The Safe workspace isn't available on Windows on ARM yet, so Clauseo asks before changing anything outside a matter's folder.",
-    "hi": "सुरक्षित कार्यक्षेत्र अभी ARM वाले Windows पर उपलब्ध नहीं है, इसलिए Clauseo किसी मामले के फ़ोल्डर के बाहर कुछ भी बदलने से पहले पूछता है।",
+    "en": "The Safe workspace isn't available on Windows on ARM yet.",
+    "hi": "सुरक्षित कार्यक्षेत्र अभी ARM वाले Windows पर उपलब्ध नहीं है।",
     "hi_status": "provisional",
-    "hi_at": "2026-11-07",
+    "hi_at": "2026-11-11",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-07",
-    "by": "app track (provisional; Rohan batch review; design B, safe-workspace-installer-setup)"
+    "status": "approved",
+    "at": "2026-11-11",
+    "by": "orchestrator (rule 2026-11-11: no promised ask outside the matter; Claude auto mode #999)",
+    "note": "ask clause dropped 2026-11-11"
   },
   "UC-37": {
-    "en": "This version of Clauseo doesn't have the Safe workspace yet. It comes in an update. Until then, Clauseo asks before changing anything outside a matter's folder.",
-    "hi": "Clauseo के इस संस्करण में अभी सुरक्षित कार्यक्षेत्र नहीं है। यह एक अपडेट में आएगा। तब तक Clauseo किसी मामले के फ़ोल्डर के बाहर कुछ भी बदलने से पहले पूछता है।",
+    "en": "This version of Clauseo doesn't have the Safe workspace yet. It comes in an update.",
+    "hi": "Clauseo के इस संस्करण में अभी सुरक्षित कार्यक्षेत्र नहीं है। यह एक अपडेट में आएगा।",
     "hi_status": "provisional",
-    "hi_at": "2026-11-07",
+    "hi_at": "2026-11-11",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-07",
-    "by": "app track (provisional; Rohan batch review; design B, safe-workspace-installer-setup)"
+    "status": "approved",
+    "at": "2026-11-11",
+    "by": "orchestrator (rule 2026-11-11: no promised ask outside the matter; Claude auto mode #999)",
+    "note": "ask clause dropped 2026-11-11"
   },
   "UC-38": {
-    "en": "This version of Clauseo doesn't have the Safe workspace yet. It comes in an update. Until then, Clauseo can read any file you can open on this computer, and asks before changing anything outside this matter's folder.",
-    "hi": "Clauseo के इस संस्करण में अभी सुरक्षित कार्यक्षेत्र नहीं है। यह एक अपडेट में आएगा। तब तक Clauseo इस कंप्यूटर की हर वह फ़ाइल पढ़ सकता है जिसे आप खोल सकते हैं, और इस मामले के फ़ोल्डर के बाहर कुछ भी बदलने से पहले पूछता है।",
+    "en": "This version of Clauseo doesn't have the Safe workspace yet. It comes in an update. Until then, Clauseo can read any file you can open on this computer.",
+    "hi": "Clauseo के इस संस्करण में अभी सुरक्षित कार्यक्षेत्र नहीं है। यह एक अपडेट में आएगा। तब तक Clauseo इस कंप्यूटर की हर वह फ़ाइल पढ़ सकता है जिसे आप खोल सकते हैं।",
     "hi_status": "provisional",
-    "hi_at": "2026-11-07",
+    "hi_at": "2026-11-11",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-07",
-    "by": "app track (provisional; Rohan batch review; design B, safe-workspace-installer-setup)"
+    "status": "approved",
+    "at": "2026-11-11",
+    "by": "orchestrator (rule 2026-11-11: no promised ask outside the matter; Claude auto mode #999)",
+    "note": "ask clause dropped 2026-11-11"
   },
   "UC-40": {
     "en": "Set up the Safe workspace?",
@@ -449,24 +457,26 @@
     "by": "design"
   },
   "UC-67": {
-    "en": "The Safe workspace isn't set up on this computer yet, so Clauseo asks before changing anything outside a matter's folder.",
-    "hi": "इस कंप्यूटर पर सुरक्षित कार्यक्षेत्र अभी तैयार नहीं है, इसलिए Clauseo किसी मामले के फ़ोल्डर के बाहर कुछ भी बदलने से पहले पूछता है।",
+    "en": "The Safe workspace isn't set up on this computer yet.",
+    "hi": "इस कंप्यूटर पर सुरक्षित कार्यक्षेत्र अभी तैयार नहीं है।",
     "hi_status": "provisional",
-    "hi_at": "2026-11-07",
+    "hi_at": "2026-11-11",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-07",
-    "by": "app track (provisional; Rohan batch review; design B, safe-workspace-installer-setup)"
+    "status": "approved",
+    "at": "2026-11-11",
+    "by": "orchestrator (rule 2026-11-11: no promised ask outside the matter; Claude auto mode #999)",
+    "note": "ask clause dropped 2026-11-11"
   },
   "UC-68": {
-    "en": "Windows didn't allow the set-up, so Clauseo asks before changing anything outside a matter's folder.",
-    "hi": "Windows ने सेटअप की अनुमति नहीं दी, इसलिए Clauseo किसी मामले के फ़ोल्डर के बाहर कुछ भी बदलने से पहले पूछता है।",
+    "en": "Windows didn't allow the set-up.",
+    "hi": "Windows ने सेटअप की अनुमति नहीं दी।",
     "hi_status": "provisional",
-    "hi_at": "2026-11-06",
+    "hi_at": "2026-11-11",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-06",
-    "by": "app track (provisional; Rohan batch review)"
+    "status": "approved",
+    "at": "2026-11-11",
+    "by": "orchestrator (rule 2026-11-11: no promised ask outside the matter; Claude auto mode #999)",
+    "note": "ask clause dropped 2026-11-11"
   },
   "UC-69": {
     "en": "Set up on {date}, with Windows' permission.",
@@ -476,34 +486,37 @@
     "by": "design"
   },
   "UC-70": {
-    "en": "The Safe workspace couldn't be set up on this computer, so Clauseo asks before changing anything outside a matter's folder.",
-    "hi": "इस कंप्यूटर पर सुरक्षित कार्यक्षेत्र तैयार नहीं हो सका, इसलिए Clauseo किसी मामले के फ़ोल्डर के बाहर कुछ भी बदलने से पहले पूछता है।",
+    "en": "The Safe workspace couldn't be set up on this computer.",
+    "hi": "इस कंप्यूटर पर सुरक्षित कार्यक्षेत्र तैयार नहीं हो सका।",
     "hi_status": "provisional",
-    "hi_at": "2026-11-07",
+    "hi_at": "2026-11-11",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-07",
-    "by": "app track (provisional; Rohan batch review; design B, safe-workspace-installer-setup)"
+    "status": "approved",
+    "at": "2026-11-11",
+    "by": "orchestrator (rule 2026-11-11: no promised ask outside the matter; Claude auto mode #999)",
+    "note": "ask clause dropped 2026-11-11"
   },
   "UC-71": {
-    "en": "This computer can't run the Safe workspace, so Clauseo asks before changing anything outside a matter's folder.",
-    "hi": "यह कंप्यूटर सुरक्षित कार्यक्षेत्र नहीं चला सकता, इसलिए Clauseo किसी मामले के फ़ोल्डर के बाहर कुछ भी बदलने से पहले पूछता है।",
+    "en": "This computer can't run the Safe workspace.",
+    "hi": "यह कंप्यूटर सुरक्षित कार्यक्षेत्र नहीं चला सकता।",
     "hi_status": "provisional",
-    "hi_at": "2026-11-07",
+    "hi_at": "2026-11-11",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-07",
-    "by": "app track (provisional; Rohan batch review; design B, safe-workspace-installer-setup)"
+    "status": "approved",
+    "at": "2026-11-11",
+    "by": "orchestrator (rule 2026-11-11: no promised ask outside the matter; Claude auto mode #999)",
+    "note": "ask clause dropped 2026-11-11"
   },
   "UC-72": {
-    "en": "The Safe workspace isn't available on Linux yet, so Clauseo asks before changing anything outside a matter's folder.",
-    "hi": "सुरक्षित कार्यक्षेत्र अभी Linux पर उपलब्ध नहीं है, इसलिए Clauseo किसी मामले के फ़ोल्डर के बाहर कुछ भी बदलने से पहले पूछता है।",
+    "en": "The Safe workspace isn't available on Linux yet.",
+    "hi": "सुरक्षित कार्यक्षेत्र अभी Linux पर उपलब्ध नहीं है।",
     "hi_status": "provisional",
-    "hi_at": "2026-11-07",
+    "hi_at": "2026-11-11",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-07",
-    "by": "app track (provisional; Rohan batch review; design B, safe-workspace-installer-setup)"
+    "status": "approved",
+    "at": "2026-11-11",
+    "by": "orchestrator (rule 2026-11-11: no promised ask outside the matter; Claude auto mode #999)",
+    "note": "ask clause dropped 2026-11-11"
   },
   "UC-73": {
     "en": "Set up again",
@@ -543,24 +556,26 @@
     "by": "app track (provisional; Rohan batch review)"
   },
   "UC-80": {
-    "en": "Something on this computer stops the Safe workspace, so Clauseo can read any file you can open on it. It asks before changing anything outside this matter's folder.",
-    "hi": "इस कंप्यूटर पर कोई चीज़ सुरक्षित कार्यक्षेत्र को रोक रही है, इसलिए Clauseo इसकी हर वह फ़ाइल पढ़ सकता है जिसे आप खोल सकते हैं। वह इस मामले के फ़ोल्डर के बाहर कुछ भी बदलने से पहले पूछता है।",
+    "en": "Something on this computer stops the Safe workspace, so Clauseo can read any file you can open on it.",
+    "hi": "इस कंप्यूटर पर कोई चीज़ सुरक्षित कार्यक्षेत्र को रोक रही है, इसलिए Clauseo इसकी हर वह फ़ाइल पढ़ सकता है जिसे आप खोल सकते हैं।",
     "hi_status": "provisional",
-    "hi_at": "2026-11-07",
+    "hi_at": "2026-11-11",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-07",
-    "by": "app track (provisional; Rohan batch review; design B, safe-workspace-installer-setup)"
+    "status": "approved",
+    "at": "2026-11-11",
+    "by": "orchestrator (rule 2026-11-11: no promised ask outside the matter; Claude auto mode #999)",
+    "note": "ask clause dropped 2026-11-11"
   },
   "UC-81": {
-    "en": "Something on this computer stops the Safe workspace, so Clauseo asks before changing anything outside a matter's folder.",
-    "hi": "इस कंप्यूटर पर कोई चीज़ सुरक्षित कार्यक्षेत्र को रोक रही है, इसलिए Clauseo किसी मामले के फ़ोल्डर के बाहर कुछ भी बदलने से पहले पूछता है।",
+    "en": "Something on this computer stops the Safe workspace.",
+    "hi": "इस कंप्यूटर पर कोई चीज़ सुरक्षित कार्यक्षेत्र को रोक रही है।",
     "hi_status": "provisional",
-    "hi_at": "2026-11-07",
+    "hi_at": "2026-11-11",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-07",
-    "by": "app track (provisional; Rohan batch review; design B, safe-workspace-installer-setup)"
+    "status": "approved",
+    "at": "2026-11-11",
+    "by": "orchestrator (rule 2026-11-11: no promised ask outside the matter; Claude auto mode #999)",
+    "note": "ask clause dropped 2026-11-11"
   },
   "UC-82": {
     "en": "A Windows policy on this computer blocks the program that sets up the Safe workspace.",

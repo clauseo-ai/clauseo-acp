@@ -61,9 +61,7 @@ export function WorkspaceLine({
           </>
         ) : (
           <NotProtectedMark
-            meaning={w.v(
-              "Clauseo can read any file you can open on this computer, and asks before changing anything outside the matter's folder.",
-            )}
+            meaning={w.v("Clauseo can read any file you can open on this computer.")}
           />
         )}
       </BasePopover.Trigger>
@@ -229,11 +227,11 @@ export function AllowedList({
                   )
                 : unprotected.why === "off"
                   ? w.v(
-                      "Off since {time} today. Clauseo can read any file you can open on this computer, and asks before changing anything outside the matter's folder.",
+                      "Off since {time} today. Clauseo can read any file you can open on this computer.",
                       { time: w.clock(unprotected.since) },
                     )
                   : w.v(
-                      "Couldn't be set up on this computer. Clauseo can read any file you can open on it, and asks before changing anything outside the matter's folder.",
+                      "Couldn't be set up on this computer. Clauseo can read any file you can open on it.",
                     )}
             </Say>
           </span>

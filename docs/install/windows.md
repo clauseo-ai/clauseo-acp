@@ -108,8 +108,8 @@ installs for everyone on the computer, so Windows asks the same question.
 It shows "Publisher: Unknown". Click **Yes**. If you aren't an administrator, Windows asks for
 one's name and password; someone who is can type theirs.
 
-If you click **No**, Clauseo still installs and works, but without the Safe workspace: Claude and ChatGPT change files in the matter's folder without asking, and ask
-before changing files outside it. Undo takes back each answer's changes. In a matter on a network drive, on a drive
+If you click **No**, Clauseo still installs and works, but without the Safe workspace: Claude and ChatGPT change files in the matter's folder without asking.
+Undo takes back each answer's changes. In a matter on a network drive, on a drive
 without permissions, or in a folder Clauseo couldn't check, Clauseo asks before every change. To
 set the Safe workspace up later, run the Clauseo installer again. On the usual installer, Clauseo's Settings, under Safe workspace, has a
 button that opens the download page for your version; on the per-machine one, ask your IT team.

@@ -114,7 +114,7 @@ test("admin_copy_missing: the note says not set up yet, why, the repair, and Get
   const note = inBody("np-note");
   expect(note?.dataset["cause"]).toBe("needs_set_up");
   for (const line of [
-    "The Safe workspace isn't set up on this computer yet. Until it is, Clauseo can read any file you can open on this computer, and asks before changing anything outside this matter's folder.",
+    "The Safe workspace isn't set up on this computer yet. Until it is, Clauseo can read any file you can open on this computer.",
     "The Safe workspace wasn't set up when Clauseo was installed.",
     "Run the Clauseo installer again to set up the Safe workspace.",
   ] as const)
@@ -161,7 +161,7 @@ test.each([
     expect(note?.textContent).toContain(
       pw(
         "en",
-        "Something on this computer stops the Safe workspace, so Clauseo can read any file you can open on it. It asks before changing anything outside this matter's folder.",
+        "Something on this computer stops the Safe workspace, so Clauseo can read any file you can open on it.",
       ),
     );
     expect(note?.textContent).toContain(pw("en", line));

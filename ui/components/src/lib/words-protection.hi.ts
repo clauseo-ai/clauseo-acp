@@ -34,16 +34,16 @@ export const HI = {
     "आपकी फ़र्म सुरक्षित कार्यक्षेत्र ज़रूरी मानती है, इसलिए इसके बाद, जब तक यह फिर से तैयार नहीं होता, Clauseo इस कंप्यूटर पर उत्तर नहीं देगा।",
   "Remove set-up": "सेटअप हटाएँ",
   // the notes (UC-22, UC-23, UC-25)
-  "The Safe workspace isn't set up on this computer yet. Until it is, Clauseo can read any file you can open on this computer, and asks before changing anything outside this matter's folder.":
-    "इस कंप्यूटर पर सुरक्षित कार्यक्षेत्र अभी तैयार नहीं है। तब तक Clauseo इस कंप्यूटर की हर वह फ़ाइल पढ़ सकता है जिसे आप खोल सकते हैं, और इस मामले के फ़ोल्डर के बाहर कुछ भी बदलने से पहले पूछता है।",
-  "The Safe workspace couldn't be set up on this computer, so Clauseo can read any file you can open on it. It asks before changing anything outside this matter's folder.":
-    "इस कंप्यूटर पर सुरक्षित कार्यक्षेत्र तैयार नहीं हो सका, इसलिए Clauseo इसकी हर वह फ़ाइल पढ़ सकता है जिसे आप खोल सकते हैं। वह इस मामले के फ़ोल्डर के बाहर कुछ भी बदलने से पहले पूछता है।",
-  "This computer can't run the Safe workspace, so Clauseo can read any file you can open on it. It asks before changing anything outside this matter's folder.":
-    "यह कंप्यूटर सुरक्षित कार्यक्षेत्र नहीं चला सकता, इसलिए Clauseo इसकी हर वह फ़ाइल पढ़ सकता है जिसे आप खोल सकते हैं। वह इस मामले के फ़ोल्डर के बाहर कुछ भी बदलने से पहले पूछता है।",
+  "The Safe workspace isn't set up on this computer yet. Until it is, Clauseo can read any file you can open on this computer.":
+    "इस कंप्यूटर पर सुरक्षित कार्यक्षेत्र अभी तैयार नहीं है। तब तक Clauseo इस कंप्यूटर की हर वह फ़ाइल पढ़ सकता है जिसे आप खोल सकते हैं।",
+  "The Safe workspace couldn't be set up on this computer, so Clauseo can read any file you can open on it.":
+    "इस कंप्यूटर पर सुरक्षित कार्यक्षेत्र तैयार नहीं हो सका, इसलिए Clauseo इसकी हर वह फ़ाइल पढ़ सकता है जिसे आप खोल सकते हैं।",
+  "This computer can't run the Safe workspace, so Clauseo can read any file you can open on it.":
+    "यह कंप्यूटर सुरक्षित कार्यक्षेत्र नहीं चला सकता, इसलिए Clauseo इसकी हर वह फ़ाइल पढ़ सकता है जिसे आप खोल सकते हैं।",
   // a build without protection (R17 PR-B's unsupported { why: "not_built" }, every real build until desktop wires
   // protection in), said calmly (UC-38)
-  "This version of Clauseo doesn't have the Safe workspace yet. It comes in an update. Until then, Clauseo can read any file you can open on this computer, and asks before changing anything outside this matter's folder.":
-    "Clauseo के इस संस्करण में अभी सुरक्षित कार्यक्षेत्र नहीं है। यह एक अपडेट में आएगा। तब तक Clauseo इस कंप्यूटर की हर वह फ़ाइल पढ़ सकता है जिसे आप खोल सकते हैं, और इस मामले के फ़ोल्डर के बाहर कुछ भी बदलने से पहले पूछता है।",
+  "This version of Clauseo doesn't have the Safe workspace yet. It comes in an update. Until then, Clauseo can read any file you can open on this computer.":
+    "Clauseo के इस संस्करण में अभी सुरक्षित कार्यक्षेत्र नहीं है। यह एक अपडेट में आएगा। तब तक Clauseo इस कंप्यूटर की हर वह फ़ाइल पढ़ सकता है जिसे आप खोल सकते हैं।",
   // the pool, counts only (UC-27 to UC-32, UC-34, UC-35)
   "All {size} places in this computer's Safe workspace are in use, so this matter works without it for now. It goes back in once a place is free.":
     "इस कंप्यूटर के सुरक्षित कार्यक्षेत्र की सभी {size} जगहें उपयोग में हैं, इसलिए यह मामला अभी उसके बिना काम करता है। कोई जगह खाली होते ही यह फिर उसमें आ जाएगा।",
@@ -68,10 +68,8 @@ export const HI = {
   // design B: what stops the Safe workspace (R17 PR-E's NotProtectedCause blocked { reason } and
   // other_account), said by blocked.ts; the body, in the note and in Settings, then the reason's
   // line (UC-80 to UC-95)
-  "Something on this computer stops the Safe workspace, so Clauseo can read any file you can open on it. It asks before changing anything outside this matter's folder.":
-    "इस कंप्यूटर पर कोई चीज़ सुरक्षित कार्यक्षेत्र को रोक रही है, इसलिए Clauseo इसकी हर वह फ़ाइल पढ़ सकता है जिसे आप खोल सकते हैं। वह इस मामले के फ़ोल्डर के बाहर कुछ भी बदलने से पहले पूछता है।",
-  "Something on this computer stops the Safe workspace, so Clauseo asks before changing anything outside a matter's folder.":
-    "इस कंप्यूटर पर कोई चीज़ सुरक्षित कार्यक्षेत्र को रोक रही है, इसलिए Clauseo किसी मामले के फ़ोल्डर के बाहर कुछ भी बदलने से पहले पूछता है।",
+  "Something on this computer stops the Safe workspace, so Clauseo can read any file you can open on it.":
+    "इस कंप्यूटर पर कोई चीज़ सुरक्षित कार्यक्षेत्र को रोक रही है, इसलिए Clauseo इसकी हर वह फ़ाइल पढ़ सकता है जिसे आप खोल सकते हैं।",
   "A Windows policy on this computer blocks the program that sets up the Safe workspace.":
     "इस कंप्यूटर की एक Windows नीति सुरक्षित कार्यक्षेत्र तैयार करने वाले प्रोग्राम को रोकती है।",
   "The program that sets up the Safe workspace is missing, or security software blocked it. Allow Clauseo in your security software, then install Clauseo again.":
