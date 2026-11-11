@@ -386,7 +386,7 @@ pub(super) fn catch_up(actor: &Actor) -> Option<HostEvent> {
 }
 
 /// The protocol's place for `matters`'.
-fn folder_place(place: Place) -> FolderPlace {
+pub(crate) fn folder_place(place: Place) -> FolderPlace {
     match place {
         Place::Local => FolderPlace::Local,
         Place::Network => FolderPlace::Network,

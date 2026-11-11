@@ -26,6 +26,7 @@ const PAPERS: Papers = {
   skipped: [],
   unread: [],
   truncated: false,
+  place: "local",
 };
 
 /** A fake host with H8 alone, answering list_papers from `answer`, and the list_papers it was asked. */

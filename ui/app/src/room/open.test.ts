@@ -20,6 +20,7 @@ const papers: Papers = {
   skipped: [],
   unread: [],
   truncated: false,
+  place: "local",
 };
 const listed: ListedPapers = { matter: "m-1", papers };
 const flush = () => new Promise((done) => setTimeout(done, 0));

@@ -146,7 +146,8 @@ pub(super) fn answer(
 }
 
 /// `papers` with each file's id, minted on first sight of its path in `matter`'s folder, and
-/// whether a `.docx` holds tracked changes or comments as far as the scan has read.
+/// whether a `.docx` holds tracked changes or comments as far as the scan has read, with where
+/// the folder lives (`clauseo_matters::place`: one OS call for its mount or drive, no file read).
 fn summarise(actor: &mut Actor, matter: MatterId, papers: PaperList) -> Result<QueryResult, Error> {
     let folder = PathBuf::from(&actor.check_matter(matter)?.row.folder_path);
     let tracked = scan::listed(actor, matter, &folder, &papers.papers);
@@ -167,6 +168,7 @@ fn summarise(actor: &mut Actor, matter: MatterId, papers: PaperList) -> Result<Q
         skipped: papers.skipped,
         unread: papers.unread,
         truncated: papers.truncated,
+        place: super::scan::folder_place(clauseo_matters::place(&folder)),
     })
 }
 
