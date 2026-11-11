@@ -78,6 +78,7 @@ impl Current {
             cancelled: false,
             stopped: key_retry::Stopped::default(),
             refused: None,
+            offline_told: false,
             limit: None,
             tool_paths: crate::sent::TurnPaths::default(),
             checkpoint_before: None,

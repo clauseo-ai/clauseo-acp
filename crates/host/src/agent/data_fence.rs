@@ -47,7 +47,7 @@ use resolve::{Disk, Found};
 use crate::network_paths::resolve::Entry;
 use crate::network_paths::{FOLD_CASE, NetEnv, fold_name, refused_windows_name, touchable};
 pub(crate) use health::DataFenceHealth;
-pub(crate) use input::{candidates, candidates_roots, candidates_words};
+pub(crate) use input::{candidates, candidates_roots, candidates_words, command_names};
 pub(crate) use launch::{LaunchDeny, claude_project_key, claude_projects, launch_deny};
 pub(crate) use shell_deny::windows_shell_deny_rules;
 

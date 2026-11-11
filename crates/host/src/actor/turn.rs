@@ -35,6 +35,7 @@ mod reconcile;
 mod restore;
 mod route;
 mod session;
+mod shell_network;
 pub(super) mod sign_in;
 mod state;
 mod steps;
@@ -191,6 +192,8 @@ struct Current {
     /// was a refusal with no Stop since (Codex's only reject ends the turn): `NotAllowed` for
     /// the lawyer's, `OutsideMatter` for the host's data folder. An answer or a Stop clears it.
     refused: Option<StopReason>,
+    /// The agent was told its shell stays offline this turn (`shell_network.rs`).
+    offline_told: bool,
     /// The first limit signal of the turn.
     limit: Option<LimitMark>,
     /// The places the turn's tool calls named, for the after-turn checkpoint.
