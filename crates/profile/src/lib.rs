@@ -190,8 +190,8 @@ impl ClauseoProfile {
     }
 
     /// [`Self::instructions`] for an agent of `kind`: `{plan}` filled with
-    /// [`instructions::plan_name`], so Claude reads "your Claude account" and Codex "your ChatGPT
-    /// account". Claude's options and Codex's keys are built from this.
+    /// [`instructions::plan_name`], so each agent reads its own plan's name: `Claude` for Claude,
+    /// `ChatGPT` for Codex. Claude's options and Codex's keys are built from this.
     pub fn instructions_for(&self, kind: AgentKind) -> String {
         let text = self.instructions();
         let plan = instructions::plan_name(kind);
