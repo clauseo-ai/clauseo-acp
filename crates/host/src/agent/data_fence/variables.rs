@@ -14,6 +14,9 @@
 //!   value, not a path, and so is one holding no absolute path (a name, an address): its name is
 //!   cut to the file Windows would open for the text (`$env`, `${env`), resolved like any
 //!   other; one holding a single path is judged there too; an unknown one is only cut;
+//! - every variable of a path (not a search folder) is expanded too, wherever it stands
+//!   (`C:\Users\$env:USERNAME\…`), and that is judged beside the forms above; an unknown one
+//!   before the last name refuses the request;
 //! - in a search folder a variable that can't be expanded refuses the request.
 //!
 //! A stream with a type (a second `:`), a bare `$env:` and every other `:` name stay refused.
@@ -26,12 +29,32 @@ use std::path::{Path, PathBuf};
 pub(super) type Var<'a> = &'a dyn Fn(&str) -> Option<String>;
 
 /// The paths to judge for the agent's `path` with Windows' rules (`windows`), as a search
-/// folder when `root`: `None` refuses it (a search folder's variable that can't be expanded).
-/// Without Windows' rules, or when it is not UTF-8, `path` itself.
+/// folder when `root`: `None` refuses it (a search folder's variable that can't be expanded, or
+/// a path's unknown variable before its last name). Without Windows' rules, or when it is not
+/// UTF-8, `path` itself.
 pub(super) fn judged(path: &Path, windows: bool, root: bool, var: Var<'_>) -> Option<Vec<PathBuf>> {
     let Some(text) = path.to_str().filter(|_| windows) else {
         return Some(vec![path.to_owned()]);
     };
+    let mut out = leading_forms(text, root, var)?;
+    if !root {
+        match every_expanded(text, var) {
+            Every::Refused => return None,
+            Every::Path(every) => out.push(PathBuf::from(every)),
+            Every::Nothing => {}
+        }
+    }
+    let mut seen = Vec::new();
+    out.retain(|path| {
+        let new = !seen.contains(path);
+        seen.push(path.clone());
+        new
+    });
+    Some(out)
+}
+
+/// The forms of `text` by its leading variable (the module's list), later variables cut.
+fn leading_forms(text: &str, root: bool, var: Var<'_>) -> Option<Vec<PathBuf>> {
     let cut = cut_variables(text);
     let body = text.trim_start_matches(['/', '\\']);
     let leading = (text.len() - body.len() <= 1)
@@ -41,6 +64,7 @@ pub(super) fn judged(path: &Path, windows: bool, root: bool, var: Var<'_>) -> Op
         // A search folder with a variable inside it can't be judged.
         return (!root || cut == text).then(|| vec![PathBuf::from(cut)]);
     };
+    let suffix = cut_variables(suffix);
     if name.eq_ignore_ascii_case("USERPROFILE") {
         return Some(vec![PathBuf::from(format!("~{suffix}"))]);
     }
@@ -62,6 +86,65 @@ pub(super) fn judged(path: &Path, windows: bool, root: bool, var: Var<'_>) -> Op
         out.push(PathBuf::from(cut));
     }
     Some(out)
+}
+
+/// `text` with every name that starts with a variable expanded (`USERPROFILE` first as `~`), as
+/// PowerShell reads it: [`Every::Nothing`] when it holds none (or starts with two separators),
+/// [`Every::Refused`] when one before the last name is unknown or a list. An unknown or list
+/// last name is cut ([`variable_file`]), and so is a whole word's value that is no absolute path.
+fn every_expanded(text: &str, var: Var<'_>) -> Every {
+    let body = text.trim_start_matches(['/', '\\']);
+    let mut lead = text.get(..text.len() - body.len()).unwrap_or_default();
+    if lead.len() > 1 {
+        return Every::Nothing;
+    }
+    let pieces: Vec<&str> = body.split_inclusive(['/', '\\']).collect();
+    let mut out = String::with_capacity(text.len());
+    let mut any = false;
+    for (at, piece) in pieces.iter().enumerate() {
+        let name = piece.trim_end_matches(['/', '\\']);
+        let tail = piece.get(name.len()..).unwrap_or_default();
+        let Some((variable, rest)) = leading_variable(name) else {
+            out.push_str(name);
+            out.push_str(tail);
+            continue;
+        };
+        any = true;
+        let last = at + 1 == pieces.len();
+        let value = if at == 0 && variable.eq_ignore_ascii_case("USERPROFILE") {
+            Some("~".to_owned())
+        } else {
+            var(variable).filter(|value| !value.is_empty() && !is_list(value))
+        };
+        let place = |value: &String| value == "~" || is_absolute(value);
+        match value {
+            Some(value) if pieces.len() != 1 || place(&value) => {
+                if at == 0 && place(&value) {
+                    lead = "";
+                }
+                out.push_str(&value);
+                out.push_str(rest);
+            }
+            _ if last => out.push_str(variable_file(name).unwrap_or(name)),
+            _ => return Every::Refused,
+        }
+        out.push_str(tail);
+    }
+    if any {
+        Every::Path(format!("{lead}{out}"))
+    } else {
+        Every::Nothing
+    }
+}
+
+/// What [`every_expanded`] found.
+enum Every {
+    /// No variable to expand.
+    Nothing,
+    /// A variable before the last name can't be expanded.
+    Refused,
+    /// The path with every variable expanded.
+    Path(String),
 }
 
 /// Whether `word` starts with PowerShell's `$env:NAME` or `${env:NAME}` ([`leading_variable`]).
@@ -109,7 +192,8 @@ fn is_absolute(value: &str) -> bool {
 }
 
 /// The variable's name and what follows it, when `body` starts with `$env:NAME` or
-/// `${env:NAME}` and nothing after it holds a `:` (a stream form stays as it is).
+/// `${env:NAME}` and the rest of its name holds no `:` (a stream form stays as it is; a later
+/// name's `:`, another variable's or a stream's, is judged as that name).
 fn leading_variable(body: &str) -> Option<(&str, &str)> {
     let (file, stream) = body.split_once(':')?;
     let braced = variable_head(file)?;
@@ -120,7 +204,13 @@ fn leading_variable(body: &str) -> Option<(&str, &str)> {
     } else {
         rest
     };
-    (!name.is_empty() && !rest.contains(':')).then_some((name, rest))
+    (!name.is_empty()
+        && !rest
+            .split(['/', '\\'])
+            .next()
+            .unwrap_or_default()
+            .contains(':'))
+    .then_some((name, rest))
 }
 
 /// Whether `file` is `$env` (`Some(false)`) or `${env` (`Some(true)`), `env` in any case.
@@ -168,6 +258,7 @@ mod tests {
             "PATH" => Some(r"C:\Windows;C:\bin".to_owned()),
             "LOCALAPPDATA" => Some(r"C:\Users\a\AppData\Local".to_owned()),
             "USERNAME" => Some("a".to_owned()),
+            "SYSTEMDRIVE" => Some("C:".to_owned()),
             _ => None,
         }
     }
@@ -187,7 +278,6 @@ mod tests {
         let cut = |text: &str| judge(text, false).unwrap();
         assert_eq!(cut(r"\$env:Path -split ';'"), [r"\$env"]);
         assert_eq!(cut(r"\${ENV:Path} -split ';'"), [r"\${ENV"]);
-        assert_eq!(cut(r"C:\x\$Env:PATH.Split(\y"), [r"C:\x\$Env\y"]);
         assert_eq!(cut(r"\$env:NOPE"), [r"\$env"]);
         assert_eq!(cut("$env:USERNAME"), ["$env"]);
         assert_eq!(
@@ -230,7 +320,34 @@ mod tests {
             judge(r"$env:LOCALAPPDATA", false).unwrap(),
             [r"C:\Users\a\AppData\Local", "$env"]
         );
-        assert_eq!(judge(r"$env:NOPE\x", false).unwrap(), [r"\x", r"$env\x"]);
+    }
+
+    #[test]
+    fn every_variable_of_a_path_is_expanded_and_an_unknown_one_inside_refuses() {
+        assert_eq!(
+            judge(r"C:\Users\$env:USERNAME\AppData\x", false).unwrap(),
+            [r"C:\Users\$env\AppData\x", r"C:\Users\a\AppData\x"]
+        );
+        assert_eq!(
+            judge(r"\Users\${env:USERNAME}\x", false).unwrap(),
+            [r"\Users\${env\x", r"\Users\a\x"]
+        );
+        assert_eq!(
+            judge(r"$env:SystemDrive\Users\$env:USERNAME\x", false).unwrap(),
+            [r"C:\Users\$env\x", r"\Users\$env\x", r"C:\Users\a\x"]
+        );
+        assert_eq!(
+            judge(r"$env:USERPROFILE\m\$env:USERNAME\x", false).unwrap(),
+            [r"~\m\$env\x", r"~\m\a\x"]
+        );
+        assert_eq!(judge(r"C:\x\$env:NOPE", false).unwrap(), [r"C:\x\$env"]);
+        for refused in [
+            r"$env:NOPE\x",
+            r"C:\x\$env:NOPE\y",
+            r"C:\x\$Env:PATH.Split(\y",
+        ] {
+            assert_eq!(judge(refused, false), None, "{refused}");
+        }
     }
 
     #[test]
