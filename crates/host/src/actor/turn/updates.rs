@@ -64,6 +64,7 @@ pub(super) fn on_event(actor: &mut Actor, thread: ThreadId, event: Box<AcpEvent>
             | AcpEvent::ElicitationCompleted { .. }
             | AcpEvent::Limit { .. }
             | AcpEvent::TooLong { .. }
+            | AcpEvent::ConnectionLost { .. }
             | AcpEvent::Warning { .. } => false,
         }
     {
@@ -166,10 +167,10 @@ pub(super) fn handle(actor: &mut Actor, thread: ThreadId, event: AcpEvent) {
                 current.too_long = current.too_long.or(Some(kind));
             }
         }
-        AcpEvent::Warning { session, warning } => {
-            let warning = warning::kind(&warning);
-            tracing::warn!(%thread, ?session, warning, "the agent sent something unreadable");
+        AcpEvent::ConnectionLost { origin, lost, .. } => {
+            offline::on_connection_lost(actor, thread, origin, &lost);
         }
+        AcpEvent::Warning { session, warning } => warning::log(thread, session.as_ref(), &warning),
     }
 }
 
@@ -224,6 +225,7 @@ fn on_update(
             Some(update) => update,
             None => return,
         },
+        Context::Outside { .. } if offline::outside_note(thread, &update) => return,
         Context::Outside { replay: false } if own_turn::holds(actor, thread, session, &update) => {
             own_turn::hold(actor, thread, session, update);
             return;

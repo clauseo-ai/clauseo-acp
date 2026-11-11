@@ -144,6 +144,7 @@ fn item_plans_by_plan_id() {
             | AcpEvent::ElicitationCompleted { .. }
             | AcpEvent::Limit { .. }
             | AcpEvent::TooLong { .. }
+            | AcpEvent::ConnectionLost { .. }
             | AcpEvent::Warning { .. }) => panic!("unexpected {other:?}"),
         })
         .collect();

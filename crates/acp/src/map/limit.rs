@@ -1,13 +1,13 @@
-//! Plan limit signals: Claude's `_claude/rateLimit` and the AIR `sessionFailure`. `_meta` is
-//! read at these two keys only, and only on `usage_update`, `session_info_update` and the
-//! prompt response. A `sessionFailure` that says the turn was too long is not a limit
-//! (`too_long.rs`).
+//! Plan limit signals and lost connections: Claude's `_claude/rateLimit` and the AIR
+//! `sessionFailure`. `_meta` is read at these two keys only, and only on `usage_update`,
+//! `session_info_update` and the prompt response. A `sessionFailure` that says the turn was
+//! too long is not a limit (`too_long.rs`).
 
 use clauseo_protocol::{Finite, LimitStopReason, Timestamp};
 use serde_json::{Map, Value};
 
 use super::too_long::session_failure_says_too_long;
-use crate::event::{LimitSignal, LimitStatus, ProtocolWarning};
+use crate::event::{ConnectionLost, LimitSignal, LimitStatus, ProtocolWarning};
 
 /// `_meta["_claude/rateLimit"]` of a `usage_update`, when present: the signal, or a warning for
 /// a `status` this crate does not know. A missing or unreadable field is `None`.
@@ -51,6 +51,8 @@ pub(crate) enum Failure {
     Limit(LimitSignal),
     /// The model refused the turn as too long to read (`too_long.rs`). Not a plan limit.
     TooLong(crate::TooLong),
+    /// The agent could not reach its service.
+    Connection(ConnectionLost),
     /// Any other failure, which the driver only reports.
     Warning(ProtocolWarning),
 }
@@ -59,7 +61,12 @@ pub(crate) enum Failure {
 /// and `actions` from one policy table: `limit`, `error` and no actions is the plan window
 /// (`quota_exhausted`); with `["retry"]` it is a temporary limit (`rate_limited`). A failure
 /// that says the turn was too long to read is [`Failure::TooLong`], read by
-/// [`session_failure_says_too_long`]. Any other failure is a warning.
+/// [`session_failure_says_too_long`]. Category `connection` is codex-acp 2.2.2's
+/// `transport_lost` (Codex's `httpConnectionFailed`, `responseStreamConnectionFailed`,
+/// `responseStreamDisconnected`, `responseTooManyFailedAttempts`): severity `warning` with no
+/// actions while Codex retries, `error` with `["retry", "new_session"]` once it gave up. The
+/// order is limit, too long, connection, warning; too long reads only categories `limit`,
+/// `service` and `request`, so no failure is both too long and a lost connection.
 pub(crate) fn session_failure(meta: &Map<String, Value>) -> Option<Failure> {
     let failure = meta
         .get("jetbrains")?
@@ -87,6 +94,10 @@ pub(crate) fn session_failure(meta: &Map<String, Value>) -> Option<Failure> {
         title.as_deref(),
     ) {
         return Some(Failure::TooLong(kind));
+    }
+    if category.as_deref() == Some("connection") {
+        let gave_up = severity.as_deref() == Some("error");
+        return Some(Failure::Connection(ConnectionLost { gave_up, title }));
     }
     Some(Failure::Warning(ProtocolWarning::SessionFailure {
         category,

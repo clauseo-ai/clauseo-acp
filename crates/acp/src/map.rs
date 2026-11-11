@@ -170,7 +170,7 @@ pub(crate) fn update(
                 .meta
                 .as_ref()
                 .and_then(limit::session_failure)
-                .map(|failure| limit_event(session.clone(), origin, failure));
+                .map(|failure| failure_event(session.clone(), origin, failure));
             let title = match update.title {
                 MaybeUndefined::Value(title) => Some(Some(title)),
                 MaybeUndefined::Null => Some(None),
@@ -350,7 +350,7 @@ fn tool_blocks(quarantined: impl Iterator<Item = Quarantined>) -> Vec<(usize, Co
 }
 
 /// The event an update's `sessionFailure` makes.
-fn limit_event(session: AgentSessionId, origin: Origin, failure: Failure) -> AcpEvent {
+fn failure_event(session: AgentSessionId, origin: Origin, failure: Failure) -> AcpEvent {
     match failure {
         Failure::Limit(signal) => AcpEvent::Limit {
             session,
@@ -361,6 +361,11 @@ fn limit_event(session: AgentSessionId, origin: Origin, failure: Failure) -> Acp
             session,
             origin,
             kind,
+        },
+        Failure::Connection(lost) => AcpEvent::ConnectionLost {
+            session,
+            origin,
+            lost,
         },
         Failure::Warning(warning) => warning_event(Some(session), warning),
     }

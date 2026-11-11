@@ -3,18 +3,23 @@
 //! words say so and offer Try again.
 //!
 //! How it arrives:
-//! - Codex: codex-acp forwards each Codex warning as answer text, so a dropped connection reads
-//!   `Falling back from WebSockets to HTTPS transport. stream disconnected before completion:
-//!   Connection refused (os error 61)`. Codex then retries over HTTPS by itself, sending nothing
-//!   (its stream errors only reach its own log), until its retries run out and the prompt fails
-//!   with a JSON-RPC error whose `data.message` names the failure. Each connect may wait out the
-//!   system's connect timeout, so that can take minutes.
+//! - Codex (codex-acp 2.2.2, to a client like Clauseo that advertises notices and the AIR
+//!   `sessionFailure`): each retry Codex makes by itself is a `session_info_update` whose
+//!   `sessionFailure` has category `connection` and severity `warning`, titled with Codex's
+//!   `Reconnecting... 2/5` or `Reconnecting... waiting for network` (Codex 0.162 retries a
+//!   failed connection without end, at most a minute apart). Its warning that the WebSocket
+//!   failed is a `notice`: `Falling back from WebSockets to HTTPS transport. stream disconnected
+//!   before completion: Connection refused (os error 61)`. Once its retries run out, the prompt
+//!   answers `end_turn` with a `connection` failure of severity `error` in its `_meta`. To a
+//!   client without those, codex-acp writes the warning as answer text and fails the prompt with
+//!   a JSON-RPC error whose `data.message` names the failure.
 //! - Claude: Claude Code retries on its own too, then sends its API error line as answer text
 //!   ("API Error: Unable to connect to API (ECONNREFUSED)") and the prompt fails with
 //!   "Internal error: <that line>".
 //! - The window: `SetNetwork { online: false }` when the webview's `offline` event fires.
 //!
-//! So a watch arms on the live turn: on an agent note that names a connection failure
+//! So a watch arms on the live turn: on a `connection` failure ([`on_connection_lost`]), on an
+//! agent note, in its answer text or a notice, that names a connection failure
 //! ([`classify::transport_note`]), or for every running turn while the window says offline.
 //! Codex's note is surely its own and is dropped; Claude's line is only suspected (a model could
 //! write the same words), so it is held in the watch and put back in order if the agent goes on
@@ -29,12 +34,13 @@
 //! which a blip or a proxy that blocks only WebSocket connections lets through, and a reasoning
 //! model may stay silent past the wait. A probe that gets through makes it wait again. A prompt
 //! that fails with a connection-class error, or while an agent's note armed the watch, ends
-//! `agent.offline` too, unless its error says a server answered or asks for a sign-in. The log
-//! gets fixed fields only, never the agent's text (decision 0047).
+//! `agent.offline` too, unless its error says a server answered or asks for a sign-in; so does
+//! one that ends carrying a `connection` failure. The log gets fixed fields only, never the
+//! agent's text (decision 0047).
 
 use std::time::Duration;
 
-use clauseo_acp::{AgentUpdate, MessageRole};
+use clauseo_acp::{AgentUpdate, ConnectionLost, MessageRole, Origin, PromptEnd};
 use clauseo_protocol::{
     AgentSessionId, CommandOutcome, ContentBlock, ErrorCode, StreamId, ThreadId, TurnId,
 };
@@ -57,6 +63,9 @@ pub(super) const WORKING_LIMIT: Duration = Duration::from_secs(600);
 /// The failure's detail when the window's report armed the watch.
 const NETWORK_DETAIL: &str = "the window said the computer is offline, the agent sent \
                               nothing for 30 s and the host's probe did not get through";
+
+/// The note a `connection` failure without a title arms the watch with.
+const LOST_DETAIL: &str = "the agent said it lost its connection to its service";
 
 /// The watch on the live turn.
 #[derive(Debug)]
@@ -85,6 +94,39 @@ impl Watch {
     pub(super) const fn probing(&self) -> bool {
         self.probing
     }
+
+    /// The agent's note that armed it last.
+    pub(super) fn note(&self) -> Option<&str> {
+        self.note.as_deref()
+    }
+}
+
+/// The text of an update that may be the agent's note about its connection: answer text, or a
+/// notice (codex-acp sends Codex's warnings as notices to a client that takes them).
+fn note_text(update: &AgentUpdate) -> Option<&str> {
+    if let AgentUpdate::MessageChunk {
+        role: MessageRole::Answer,
+        content: ContentBlock::Text { text },
+        ..
+    }
+    | AgentUpdate::Notice { text, .. } = update
+    {
+        Some(text)
+    } else {
+        None
+    }
+}
+
+/// Whether an update outside a turn is Codex's note about its connection, which never reaches
+/// the transcript, turn or not.
+pub(super) fn outside_note(thread: ThreadId, update: &AgentUpdate) -> bool {
+    let sure = note_text(update)
+        .and_then(classify::transport_note)
+        .is_some_and(|note| note.sure);
+    if sure {
+        tracing::info!(%thread, "the agent's note about its connection, outside a turn");
+    }
+    sure
 }
 
 /// A live update of `turn`: `None` when it is held back or dropped as the agent's note about
@@ -97,16 +139,8 @@ pub(super) fn on_live(
     session: &AgentSessionId,
     update: AgentUpdate,
 ) -> Option<AgentUpdate> {
-    let note = if let AgentUpdate::MessageChunk {
-        role: MessageRole::Answer,
-        content: ContentBlock::Text { text },
-        ..
-    } = &update
-    {
-        classify::transport_note(text).map(|note| (note, text.clone()))
-    } else {
-        None
-    };
+    let note = note_text(&update)
+        .and_then(|text| classify::transport_note(text).map(|note| (note, text.to_owned())));
     let Some((note, text)) = note else {
         let idle = matches!(
             update,
@@ -124,23 +158,59 @@ pub(super) fn on_live(
     let (source, offline) = (note.source, note.offline);
     tracing::warn!(%thread, source, offline, len = text.len(), "the agent's note about its connection");
     if offline {
-        let now = actor.now().mono;
-        let current = current(actor, thread).filter(|current| current.turn == turn)?;
-        let watch = current.offline.get_or_insert_with(|| Watch {
-            since: now,
-            first: now,
-            note: None,
-            held: Vec::new(),
-            probing: false,
-        });
-        watch.since = now;
-        watch.note = Some(text);
-        if !note.sure {
-            watch.held.push((session.clone(), update));
-        }
-        arm_timer(actor, thread, turn);
+        let held = (!note.sure).then(|| (session.clone(), update));
+        arm_note(actor, thread, turn, text, held);
     }
     None
+}
+
+/// An AIR `sessionFailure` of category `connection` (codex-acp's retry warnings, or its
+/// giving up): during `thread`'s live turn it arms the watch as Codex's fallback note does, and
+/// the host's probe decides once the agent stays quiet. It is never shown.
+pub(super) fn on_connection_lost(
+    actor: &mut Actor,
+    thread: ThreadId,
+    origin: Origin,
+    lost: &ConnectionLost,
+) {
+    let turn = match origin {
+        Origin::Turn(turn) => Some(turn),
+        Origin::Late(_) | Origin::Replay | Origin::Idle => None,
+    };
+    let live = turn.filter(|turn| {
+        current(actor, thread).is_some_and(|current| current.turn == *turn && current.live())
+    });
+    let gave_up = lost.gave_up;
+    tracing::warn!(%thread, gave_up, live = live.is_some(), "the agent lost its connection");
+    if let Some(turn) = live {
+        let note = lost.title.clone().unwrap_or_else(|| LOST_DETAIL.to_owned());
+        arm_note(actor, thread, turn, note, None);
+    }
+}
+
+/// Arms (or arms again) the watch of `thread`'s `turn` on an agent's note, holding `held`.
+fn arm_note(
+    actor: &mut Actor,
+    thread: ThreadId,
+    turn: TurnId,
+    note: String,
+    held: Option<(AgentSessionId, AgentUpdate)>,
+) {
+    let now = actor.now().mono;
+    let Some(current) = current(actor, thread).filter(|current| current.turn == turn) else {
+        return;
+    };
+    let watch = current.offline.get_or_insert_with(|| Watch {
+        since: now,
+        first: now,
+        note: None,
+        held: Vec::new(),
+        probing: false,
+    });
+    watch.since = now;
+    watch.note = Some(note);
+    watch.held.extend(held);
+    arm_timer(actor, thread, turn);
 }
 
 /// The agent of `turn` is at work (an answer, a tool call, a permission request, a limit): the
@@ -355,6 +425,49 @@ pub(super) fn prompt_failed_offline(
         .and_then(|current| current.offline.as_ref())
         .is_some_and(|watch| watch.note.is_some());
     (!server && (noted || connection)).then_some(ErrorCode::AgentOffline)
+}
+
+/// The code a prompt of `thread` that ended carrying a `connection` failure (codex-acp's, once
+/// Codex's retries ran out) ends with: `agent.offline`, unless its title says a server answered,
+/// when an agent's note armed the watch or the title names a connection failure. Else the
+/// turn ends as the agent said (codex-acp's own "Connection to Codex was lost." when its
+/// app-server exits names none).
+pub(super) fn connection_ended_offline(
+    actor: &mut Actor,
+    thread: ThreadId,
+    lost: &ConnectionLost,
+) -> Option<ErrorCode> {
+    let title = lost.title.as_deref().unwrap_or_default();
+    let noted = current(actor, thread)
+        .and_then(|current| current.offline.as_ref())
+        .is_some_and(|watch| watch.note.is_some());
+    let offline = !classify::says_server(title) && (noted || classify::says_connection(title));
+    tracing::info!(%thread, offline, noted, "the prompt ended on a lost connection");
+    offline.then_some(ErrorCode::AgentOffline)
+}
+
+/// How a prompt of `thread` that ended `result` fails for its connection: `(offline, lost)`. An
+/// error is offline by [`prompt_failed_offline`]. An answer that carried a `connection` failure
+/// fails offline by [`connection_ended_offline`], its title the detail. A turn that ends
+/// `TooLong` (`too_long`) does neither.
+pub(super) fn prompt_ended(
+    actor: &mut Actor,
+    thread: ThreadId,
+    result: &Result<PromptEnd, clauseo_acp::Error>,
+    too_long: bool,
+) -> (Option<ErrorCode>, Option<(ErrorCode, Option<String>)>) {
+    match result {
+        _ if too_long => (None, None),
+        Err(error) => (prompt_failed_offline(actor, thread, error), None),
+        Ok(PromptEnd {
+            connection: Some(lost),
+            ..
+        }) => {
+            let code = connection_ended_offline(actor, thread, lost);
+            (None, code.map(|code| (code, lost.title.clone())))
+        }
+        Ok(_) => (None, None),
+    }
 }
 
 #[cfg(test)]

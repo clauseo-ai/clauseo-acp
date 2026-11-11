@@ -6,7 +6,7 @@ use clauseo_protocol::{
     AgentCapabilities, AgentSessionId, CompactString, ConfigOption, StopReason,
 };
 
-use crate::event::{LimitSignal, RawFrame};
+use crate::event::{ConnectionLost, LimitSignal, RawFrame};
 
 /// Options for [`connect`](crate::connect).
 #[derive(Debug, Clone, Default)]
@@ -203,6 +203,9 @@ pub struct PromptEnd {
     /// The response's AIR `sessionFailure` says the model refused the turn as too long to
     /// read, and how (`map/too_long.rs`). Never a plan limit: `limit` stays `None` for it.
     pub too_long: Option<TooLong>,
+    /// A lost connection the response carried (an AIR `sessionFailure` of category
+    /// `connection` in its `_meta`): codex-acp ends a turn whose retries ran out so.
+    pub connection: Option<ConnectionLost>,
 }
 
 /// How an AIR `sessionFailure` said a turn was too long to read. The driver does not know the
