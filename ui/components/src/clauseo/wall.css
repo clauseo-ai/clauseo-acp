@@ -77,6 +77,36 @@
   .tile:not([data-state="uncited"]) .tile-glyph {
     color: inherit;
   }
+  /* a file's type in its colour (file-type.ts's tones): the glyph's tab only, so the page's outline keeps the wall's
+     quiet ink and the colour sits where each app puts its own. On a lit tile the glyph takes the tile's ink, as its
+     words do. A dimmed tile's tab dims with it, to the token's -away twin: colours, never opacity */
+  .tile[data-file="word"] {
+    --file-ink: var(--file-word);
+  }
+  .tile[data-file="pdf"] {
+    --file-ink: var(--file-pdf);
+  }
+  .tile[data-file="excel"] {
+    --file-ink: var(--file-excel);
+  }
+  .tile[data-file="powerpoint"] {
+    --file-ink: var(--file-powerpoint);
+  }
+  .tile[data-away][data-file="word"] {
+    --file-ink: var(--file-word-away);
+  }
+  .tile[data-away][data-file="pdf"] {
+    --file-ink: var(--file-pdf-away);
+  }
+  .tile[data-away][data-file="excel"] {
+    --file-ink: var(--file-excel-away);
+  }
+  .tile[data-away][data-file="powerpoint"] {
+    --file-ink: var(--file-powerpoint-away);
+  }
+  .tile[data-state="uncited"][data-file] .tile-glyph .file-badge {
+    fill: var(--file-ink);
+  }
   .tile {
     position: relative;
   }

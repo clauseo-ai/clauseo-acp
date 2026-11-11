@@ -15,16 +15,18 @@ test("Clauseo's own glyphs live in glyphs.tsx, outside the Lucide file's licence
   expect(sorted(Object.keys(glyphs))).toEqual([
     "IconAccept",
     "IconFileEmail",
+    "IconFileExcel",
     "IconFileGeneric",
     "IconFileMarkdown",
     "IconFilePdf",
+    "IconFilePowerPoint",
     "IconFileWord",
     "IconPageTurn",
     "IconPaperBookPage",
     "IconSafeWorkspace",
   ]);
   const lucide = new Set(Object.keys(icons).filter((name) => !(name in glyphs)));
-  expect(lucide.size).toBe(ICON_NAMES.length - 9);
+  expect(lucide.size).toBe(ICON_NAMES.length - 11);
 });
 
 /** Each vertical line's x in an icon's paths: the x of every "M{x} {y}v…" or "…V…" segment that starts one. */

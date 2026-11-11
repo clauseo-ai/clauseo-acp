@@ -6,7 +6,7 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, expect, test } from "vitest";
 import { PaperTile, type PaperTileProps } from "./paper-tile.tsx";
-import { IconFilePdf } from "../icons/icons.tsx";
+import { IconFilePdf, IconFileWord, IconFolder } from "../icons/icons.tsx";
 import { iconIn } from "../icons/icon-in.tsx";
 import { RoomScopeProvider } from "./room-scope-provider.tsx";
 
@@ -132,4 +132,65 @@ test("a tile away from this computer says why on its face, does nothing, and say
   expect(tile?.id).toMatch(/paper-away-0$/);
   await act(async () => face?.click());
   expect(turned).toBe(0);
+});
+
+/* ---------- the file's colour ---------- */
+
+test.each([
+  ["word", "Reply.docx"],
+  ["pdf", "Notice.pdf"],
+  ["excel", "Ledger.xlsx"],
+  ["powerpoint", "Outline.pptx"],
+] as const)(
+  "a %s file's tile carries its tone for the wall to colour its glyph's tab",
+  async (tone, title) => {
+    await mount({
+      id: "f1",
+      state: "uncited",
+      title,
+      fileName: true,
+      fileIcon: IconFilePdf,
+      fileTone: tone,
+    });
+    const tile = host?.querySelector("li.tile");
+    expect(tile?.getAttribute("data-file")).toBe(tone);
+    // the tab is its own path, so the colour lands on it and the page keeps its ink
+    expect(tile?.querySelectorAll(".tile-glyph .file-badge")).toHaveLength(1);
+  },
+);
+
+test("a neutral file, a tile without a tone and a tile without a glyph carry no colour", async () => {
+  await mount({
+    id: "f1",
+    state: "uncited",
+    title: "scan.jpg",
+    fileIcon: IconFolder,
+    fileTone: "neutral",
+  });
+  expect(host?.querySelector("li.tile")?.hasAttribute("data-file")).toBe(false);
+  await act(async () => root?.unmount());
+  host?.remove();
+  await mount({ id: "f2", state: "uncited", title: "brief.txt", fileIcon: IconFilePdf });
+  expect(host?.querySelector("li.tile")?.hasAttribute("data-file")).toBe(false);
+  await act(async () => root?.unmount());
+  host?.remove();
+  await mount({ id: "f3", state: "uncited", title: "Reply.docx", fileTone: "word" });
+  expect(host?.querySelector("li.tile")?.hasAttribute("data-file")).toBe(false);
+});
+
+test("a dimmed tile keeps its tone beside its dim, so the wall paints the tone's dimmed twin", async () => {
+  await mount({
+    id: "away-0",
+    state: "uncited",
+    title: "Old reply.docx",
+    fileName: true,
+    tip: "Not on this computer.",
+    away: "Only in OneDrive",
+    fileIcon: IconFileWord,
+    fileTone: "word",
+  });
+  const tile = host?.querySelector("li.tile");
+  expect(tile?.hasAttribute("data-away")).toBe(true);
+  expect(tile?.getAttribute("data-file")).toBe("word");
+  expect(tile?.matches('.tile[data-away][data-file="word"]')).toBe(true);
 });

@@ -32,6 +32,7 @@
 // refusal; with ?rail=triage, every matter's threads arrive at the start, so the open matter's menu (with
 // ?thread=commands) has Snooze until and Mark done. With ?sac=evaluation, Windows says Smart App Control is still
 // deciding, so the room shows its note (room/sac/), shown again on each load. Not shipped.
+// With ?papers=types, the wall holds a file of every type and three files only online, dimmed (wall-types-probe.ts).
 import { whenWordsReady } from "@clauseo/components/lib/display.ts";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
@@ -73,6 +74,7 @@ import { planProbe } from "./limits/probe-plan.ts";
 import { probeThreads } from "./probe-threads.ts";
 import { connectRoom } from "./start.ts";
 import { versionsHost, versionsPageOf } from "./versions/probe-states.tsx";
+import { wallTypesProbe } from "./wall-types-probe.ts";
 import { LOCKED, wordFiles, wordHost, wordPageOf } from "./word/probe-states.ts";
 
 const FILES = [
@@ -110,6 +112,7 @@ const HINDI = [
 const page = new URLSearchParams(location.search);
 const mixedPapers = page.get("papers") === "mixed";
 const hindiPapers = page.get("papers") === "hindi";
+const typedPapers = wallTypesProbe(page.get("papers"));
 
 /** ?word=…: the Word pages (word/probe-states.ts), in place of the scripted stream, with the petition on the wall. */
 const wordPage = wordPageOf(page.get("word"));
@@ -122,7 +125,7 @@ const papers: PaperSummary[] = (
       ? [...FILES, ...MIXED]
       : hindiPapers
         ? HINDI
-        : FILES
+        : (typedPapers?.names ?? FILES)
 ).map((name, i) => ({
   file: uuid(i + 1, 8),
   path: `papers/${name}`,
@@ -349,6 +352,7 @@ const transport = new FakeTransport({
   next: fakeNext({
     matters: () => matters,
     papers,
+    ...(typedPapers === null ? {} : { listing: typedPapers.listing }),
     location: "Documents/Clauseo",
     // ?rail=triage: every matter's threads arrive at the start, so the matter's menu has Snooze until and Mark done
     frames: page.get("rail") === "triage",
