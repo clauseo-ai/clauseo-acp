@@ -124,21 +124,34 @@ test.each(ALL)(
 );
 
 test.each(ALL)(
-  "on %s, Cmd or Ctrl with Enter never grants more than the button says",
+  "on %s, Cmd or Ctrl with Enter gives that button's answer, once, and never a broader one",
   async (a) => {
     for (const mod of [{ ctrlKey: true }, { metaKey: true }]) {
       const onAnswer = await show();
       button(a).focus();
-      await key(button(a), "Enter", mod);
+      // prevented: the key is handled here, so nothing else also answers it
+      expect(await key(button(a), "Enter", mod)).toBe(true);
       for (const [given] of onAnswer.mock.calls)
         expect(BREADTH[given]).toBeLessThanOrEqual(BREADTH[a]);
-      // Always answers from its own button; on any other, the key is left to that button
-      expect(onAnswer.mock.calls).toEqual(a === "always" ? [["always"]] : []);
+      expect(onAnswer.mock.calls).toEqual([[a]]);
       await act(async () => root?.unmount());
       host?.remove();
     }
   },
 );
+
+test("on Allow once, Deny and Don't allow for this matter, Cmd or Ctrl with Enter never answers Always", async () => {
+  for (const a of ["once", "deny", "never"] as const) {
+    for (const mod of [{ ctrlKey: true }, { metaKey: true }]) {
+      const onAnswer = await show();
+      button(a).focus();
+      await key(button(a), "Enter", mod);
+      expect(onAnswer.mock.calls.map(([given]) => given)).not.toContain("always");
+      await act(async () => root?.unmount());
+      host?.remove();
+    }
+  }
+});
 
 test.each(ALL)("on %s, Escape answers Don't allow: it grants nothing", async (a) => {
   const onAnswer = await show();

@@ -2,7 +2,8 @@
 // for one, it asks inline, in the thread, never in a modal: what it wants to do, that every change is kept, and the
 // answers the agent offers, in ACP's kind order. Enter allows once, Cmd or Ctrl with Enter allows for this matter,
 // Escape declines; the keys act from the empty composer, from the page or from inside the prompt, without taking the
-// composer's focus. Once answered, the prompt folds to one line that says what was decided.
+// composer's focus. On a focused answer button, Enter is that button's answer, and Cmd or Ctrl with Enter gives that
+// same answer, never a broader one. Once answered, the prompt folds to one line that says what was decided.
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, type ReactNode } from "react";
 import { Button } from "../ui/button.tsx";
 import { Kbd } from "../ui/kbd.tsx";
@@ -134,9 +135,15 @@ export function PermissionPrompt({
         if (target instanceof HTMLButtonElement) {
           // a focused answer keeps its own plain Enter: its click answers
           if (a === "once") return;
-          // and a focused button never grants more than it says (D-065): Cmd or Ctrl with Enter allows for the matter
-          // only from Always for this matter itself; on another, the key is that button's own, as a plain Enter
-          if (a === "always" && target.dataset["permAnswer"] !== "always") return;
+          // and a focused button never grants more than it says (D-065): Cmd or Ctrl with Enter on Always for this
+          // matter answers it; on any other answer, the key gives that answer, as its click would, and never Always.
+          // macOS WebKit does nothing with Cmd+Enter on a button, so the key is handled here, not left to the button
+          if (a === "always" && target.dataset["permAnswer"] !== "always") {
+            e.preventDefault();
+            e.stopPropagation();
+            target.click();
+            return;
+          }
         }
         where = "prompt";
       } else if (fromComposer(room, target)) {
