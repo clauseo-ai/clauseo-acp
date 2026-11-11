@@ -19,12 +19,17 @@ pub struct McpLaunchAsk {
     pub program: Vec<String>,
     /// A remote server's URL; `None` for a local one.
     pub url: Option<String>,
+    /// The variables (a local server's) or headers (a remote one's) that are new, or whose value
+    /// changes how the program loads (`NODE_OPTIONS`, `PATH`, `DYLD_*`, …), verbatim, in name
+    /// order; empty when none. Never a value.
+    pub names: Vec<String>,
 }
 
 /// The native confirm before a lawyer's MCP server is added or its launch changes (its command,
-/// arguments, variable names or URL): `true` when the lawyer allows it. It blocks: the host
-/// calls it off the actor, on its keychain thread, one at a time, after the program is found
-/// and before anything is written. Desktop draws it in Rust, as the pay link's.
+/// arguments, variable or header names, URL, or a loader variable's value): `true` when the
+/// lawyer allows it. It blocks: the host calls it off the actor, on its keychain thread, one at
+/// a time, after the program is found and before anything is written. Desktop draws it in Rust,
+/// as the pay link's.
 pub trait McpLaunchConfirm: Send + Sync {
     /// Asks about `ask`; `true` allows the save.
     fn confirm(&self, ask: &McpLaunchAsk) -> bool;
@@ -51,10 +56,11 @@ impl HostConfig {
     }
 
     /// The confirm a `SaveServer` that adds a server, or changes its command, arguments,
-    /// variable names or URL, must pass (`McpLaunchConfirm`): declined, the save answers
-    /// `mcp.save_declined` with nothing written. A rename, a turn on or off, or new values alone
-    /// ask nothing. Unset, every such save is declined: no settings-window script adds a program
-    /// unseen.
+    /// variable or header names, URL, or a loader variable's value (`NODE_OPTIONS`, `PATH`,
+    /// `DYLD_*`, …), must pass (`McpLaunchConfirm`): declined, the save answers
+    /// `mcp.save_declined` with nothing written. A rename, a turn on or off, or other new values
+    /// alone ask nothing; an ask too long to show whole is refused before it. Unset, every such
+    /// save is declined: no settings-window script adds a program unseen.
     #[must_use]
     pub fn with_mcp_confirm(mut self, confirm: Arc<dyn McpLaunchConfirm>) -> Self {
         self.wiring.mcp_confirm = Some(confirm);

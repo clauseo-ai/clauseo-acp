@@ -423,3 +423,42 @@ fn a_network_command_is_left_out_with_a_warning() {
     assert!(!crate::mcp::command_ok("\\\\server\\share\\tool.exe"));
     assert!(crate::mcp::command_ok("npx"));
 }
+
+/// A `\\?\` path is refused for how it is written, not called a network share; a UNC path is.
+#[test]
+fn a_device_path_and_a_share_are_told_apart() {
+    let mut warnings = Vec::new();
+    let raw = Raw {
+        key: "mcp.servers".to_owned(),
+        value: json!({
+            "device": {"command": r"\\?\C:\tool.exe"},
+            "unc": {"command": r"\\server\share\tool.exe"},
+        }),
+        origin: origin(),
+    };
+    let _ = typed(vec![raw], Vec::new(), &mut warnings);
+    let message = |name: &str| {
+        warnings
+            .iter()
+            .find_map(|warning| match &warning.kind {
+                WarningKind::InvalidValue { key, message }
+                    if key == &format!("mcp.servers.{name}") =>
+                {
+                    Some(message.clone())
+                }
+                _ => None,
+            })
+            .unwrap_or_default()
+    };
+    assert!(
+        message("device").contains(r"written with \\?\"),
+        "{}",
+        message("device")
+    );
+    assert!(!message("device").contains("network share"));
+    assert!(
+        message("unc").contains("network share"),
+        "{}",
+        message("unc")
+    );
+}

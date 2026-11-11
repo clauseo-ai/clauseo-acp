@@ -1,9 +1,11 @@
 //! The words of the confirm before a lawyer's MCP server is added or what it starts changes
 //! (`super::LaunchConfirm`), in English and Hindi by the app's language (`ui.language`). Their
-//! review home is `ui/app/src/review/registry-uc-mcp-confirm.tsx` (UC-214 to UC-219), where the
+//! review home is `ui/app/src/review/registry-uc-mcp-confirm.tsx` (UC-214 to UC-221), where the
 //! Hindi is provisional; a test fails when the two disagree. `{program}` is a local server's
 //! command and arguments ([`shown_program`]), `{address}` a remote server's URL
-//! ([`shown_address`]): the only parts of the dialog that come from the settings window.
+//! ([`shown_address`]), and `{names}` the new or changed variables or headers ([`shown_names`]):
+//! the only parts of the dialog that come from the settings window. Nothing is ever cut: the host
+//! refuses an ask too long to show whole (`MAX_ASK_CHARS`) before it reaches here.
 
 use clauseo_host::McpLaunchAsk;
 use clauseo_protocol::Language;
@@ -24,6 +26,11 @@ pub(super) struct Table {
     pub(super) remote_title: &'static str,
     /// UC-219: its message; `{address}` is the URL.
     pub(super) remote_message: &'static str,
+    /// UC-220: the line under a local server's message when variables are new or changed;
+    /// `{names}` is their names.
+    pub(super) local_names: &'static str,
+    /// UC-221: the same for a remote server's headers.
+    pub(super) remote_names: &'static str,
 }
 
 pub(super) const EN: Table = Table {
@@ -34,6 +41,8 @@ pub(super) const EN: Table = Table {
     remote_title: "Let Clauseo connect to this tool?",
     remote_message: "Clauseo will connect to “{address}” when you work in a matter. Only allow \
                      tools you trust.",
+    local_names: "New or changed settings: {names}.",
+    remote_names: "New or changed headers: {names}.",
 };
 
 /// Provisional Hindi, for the copy review (module docs).
@@ -46,6 +55,8 @@ pub(super) const HI: Table = Table {
     remote_title: "Clauseo को इस टूल से जुड़ने दें?",
     remote_message: "जब आप किसी मामले में काम करेंगे, तब Clauseo “{address}” से जुड़ेगा। केवल उन्हीं \
                      टूल को अनुमति दें जिन पर आपको भरोसा है।",
+    local_names: "नई या बदली हुई सेटिंग्स: {names}।",
+    remote_names: "नए या बदले हुए हेडर: {names}।",
 };
 
 /// The table for `language`.
@@ -56,15 +67,13 @@ pub(super) fn table(language: Language) -> &'static Table {
     }
 }
 
-/// The most characters `{program}` or `{address}` shows; a longer one loses its middle.
-pub(super) const MAX_SHOWN: usize = 300;
-
 /// The confirm's words for one ask, in one language.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct LaunchWords {
     /// The dialog's title.
     pub(crate) title: String,
-    /// Its message, naming what starts or where it connects.
+    /// Its message, naming what starts or where it connects, then, when variables or headers are
+    /// new or changed, a line naming them.
     pub(crate) message: String,
     /// The button that allows the save.
     pub(crate) ok: String,
@@ -78,10 +87,11 @@ impl LaunchWords {
     /// it is.
     pub(crate) fn new(ask: &McpLaunchAsk, language: Language) -> Self {
         let table = table(language);
-        let (title, message) = match &ask.url {
+        let (title, mut message, names_line) = match &ask.url {
             Some(url) => (
                 table.remote_title,
                 fill(table.remote_message, &[("address", &shown_address(url))]),
+                table.remote_names,
             ),
             None => (
                 table.local_title,
@@ -89,8 +99,13 @@ impl LaunchWords {
                     table.local_message,
                     &[("program", &shown_program(&ask.program))],
                 ),
+                table.local_names,
             ),
         };
+        if !ask.names.is_empty() {
+            message.push_str("\n\n");
+            message.push_str(&fill(names_line, &[("names", &shown_names(&ask.names))]));
+        }
         Self {
             title: title.to_owned(),
             message,
@@ -100,22 +115,29 @@ impl LaunchWords {
     }
 }
 
-/// A local server's command and arguments, verbatim, joined by spaces, each quoted as a shell
-/// would when it is empty or holds a space or a quote ([`quoted`]), at most [`MAX_SHOWN`]
-/// characters ([`shortened`]).
+/// A local server's command and arguments, verbatim and whole, joined by spaces, each quoted as
+/// a shell would when it is empty or holds a space or a quote ([`quoted`]).
 pub(super) fn shown_program(program: &[String]) -> String {
-    let joined = program
+    program
         .iter()
         .map(|part| quoted(part))
         .collect::<Vec<_>>()
-        .join(" ");
-    shortened(&joined)
+        .join(" ")
 }
 
-/// A remote server's URL, its invisible characters written out, at most [`MAX_SHOWN`]
-/// characters.
+/// A remote server's URL, whole, its invisible characters written out.
 pub(super) fn shown_address(url: &str) -> String {
-    shortened(&visible(url))
+    visible(url)
+}
+
+/// The new or changed names, verbatim and whole, joined by ", ", their invisible characters
+/// written out.
+pub(super) fn shown_names(names: &[String]) -> String {
+    names
+        .iter()
+        .map(|name| visible(name))
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 /// `part` as a shell reads it back: as it is, or in single quotes when it is empty or holds
@@ -157,21 +179,6 @@ fn hides(c: char) -> bool {
     matches!(c, '\u{200B}'..='\u{200F}' | '\u{202A}'..='\u{202E}' | '\u{2060}'..='\u{2069}' | '\u{FEFF}')
 }
 
-/// `text`, or at most [`MAX_SHOWN`] characters of it, its middle cut to "…" so its start and
-/// end both show. Cut by characters, so never inside one.
-pub(super) fn shortened(text: &str) -> String {
-    let count = text.chars().count();
-    if count <= MAX_SHOWN {
-        return text.to_owned();
-    }
-    let keep = MAX_SHOWN - 1;
-    let head = keep.div_ceil(2);
-    let tail = keep - head;
-    let start: String = text.chars().take(head).collect();
-    let end: String = text.chars().skip(count - tail).collect();
-    format!("{start}…{end}")
-}
-
 #[cfg(test)]
 impl LaunchWords {
     /// The words for a local and a remote ask in every language, for tests.
@@ -180,11 +187,13 @@ impl LaunchWords {
             server: "files".to_owned(),
             program: vec!["npx".to_owned(), "-y".to_owned(), "files-mcp".to_owned()],
             url: None,
+            names: vec!["FILES_TOKEN".to_owned()],
         };
         let remote = McpLaunchAsk {
             server: "search".to_owned(),
             program: Vec::new(),
             url: Some("https://tools.example/mcp".to_owned()),
+            names: vec!["Authorization".to_owned()],
         };
         [Language::En, Language::Hi]
             .into_iter()

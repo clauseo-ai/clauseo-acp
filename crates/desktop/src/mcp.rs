@@ -12,14 +12,15 @@
 
 mod words;
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use clauseo_connectors::KeyringStore;
 use clauseo_host::{HostConfig, McpLaunchAsk, McpLaunchConfirm};
 use clauseo_protocol::Language;
 use tauri::{AppHandle, Manager as _, Runtime};
 
-use crate::bridge::Bridge;
+use crate::bridge::{Bridge, lock};
 use crate::dialogs::BoxFuture;
 
 use words::LaunchWords;
@@ -37,7 +38,7 @@ pub(crate) fn with_mcp_secrets(config: HostConfig, store: Option<KeyringStore>) 
 
 /// `config` with the native confirm on `app` ([`LaunchConfirm`] over [`NativeLaunchDrawer`]).
 pub(crate) fn with_mcp_confirm<R: Runtime>(config: HostConfig, app: AppHandle<R>) -> HostConfig {
-    config.with_mcp_confirm(Arc::new(LaunchConfirm(NativeLaunchDrawer { app })))
+    config.with_mcp_confirm(Arc::new(LaunchConfirm::new(NativeLaunchDrawer { app })))
 }
 
 /// Draws the confirm, so tests answer without a window.
@@ -49,18 +50,79 @@ pub(crate) trait LaunchDrawer: Send + Sync {
     fn draw(&self, words: LaunchWords) -> BoxFuture<'_, bool>;
 }
 
+/// How long after a Cancel the same ask is declined with no dialog.
+pub(crate) const SAME_ASK_QUIET: Duration = Duration::from_secs(10);
+
+/// The clock the flood control reads: `open::gate::now` in the app, a hand-moved one in tests.
+pub(crate) type Clock = Arc<dyn Fn() -> Instant + Send + Sync>;
+
 /// The host's [`McpLaunchConfirm`]: the words for the ask, in the app's language, drawn by `D`.
-pub(crate) struct LaunchConfirm<D>(pub(crate) D);
+/// Flood control, so a script in the settings window can't wear the lawyer down: at most one
+/// dialog at a time (another ask meanwhile is declined at once), and after a Cancel the same ask
+/// within [`SAME_ASK_QUIET`] is declined with no dialog.
+pub(crate) struct LaunchConfirm<D> {
+    drawer: D,
+    now: Clock,
+    flood: Mutex<Flood>,
+}
+
+/// What the flood control remembers.
+#[derive(Default)]
+struct Flood {
+    /// Whether a dialog is open.
+    open: bool,
+    /// The last ask declined, and when.
+    declined: Option<(McpLaunchAsk, Instant)>,
+}
+
+impl<D> LaunchConfirm<D> {
+    /// A confirm drawn by `drawer`, on the app's clock.
+    pub(crate) fn new(drawer: D) -> Self {
+        Self::with_clock(drawer, Arc::new(crate::open::now))
+    }
+
+    /// A confirm drawn by `drawer`, on `now`.
+    pub(crate) fn with_clock(drawer: D, now: Clock) -> Self {
+        Self {
+            drawer,
+            now,
+            flood: Mutex::new(Flood::default()),
+        }
+    }
+
+    /// The drawer (tests).
+    #[cfg(test)]
+    pub(crate) fn drawer(&self) -> &D {
+        &self.drawer
+    }
+}
 
 impl<D: LaunchDrawer> McpLaunchConfirm for LaunchConfirm<D> {
     /// Blocks the host's keychain thread (never the actor, never a runtime thread) until the
-    /// lawyer answers, as `LinkOpener::open_confirmed` does.
+    /// lawyer answers, as `LinkOpener::open_confirmed` does; declines at once while another
+    /// dialog is open or for the same ask just cancelled.
     fn confirm(&self, ask: &McpLaunchAsk) -> bool {
-        let drawer = &self.0;
-        tauri::async_runtime::block_on(async {
+        {
+            let at = (self.now)();
+            let mut flood = lock(&self.flood);
+            let just_declined = flood
+                .declined
+                .as_ref()
+                .is_some_and(|(declined, when)| declined == ask && at < *when + SAME_ASK_QUIET);
+            if flood.open || just_declined {
+                return false;
+            }
+            flood.open = true;
+        }
+        let drawer = &self.drawer;
+        let allowed = tauri::async_runtime::block_on(async {
             let language = drawer.language().await;
             drawer.draw(LaunchWords::new(ask, language)).await
-        })
+        });
+        let mut flood = lock(&self.flood);
+        flood.open = false;
+        flood.declined = (!allowed).then(|| (ask.clone(), (self.now)()));
+        allowed
     }
 }
 

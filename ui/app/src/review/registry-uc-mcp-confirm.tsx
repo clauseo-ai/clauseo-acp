@@ -1,5 +1,5 @@
 // UC's entries for the native confirm before a lawyer's MCP server is added in Settings › Tools, or what it starts
-// changes (UC-214 to UC-219): the dialog Rust draws, which the webview never shows. Its words live in
+// changes (UC-214 to UC-221): the dialog Rust draws, which the webview never shows. Its words live in
 // crates/desktop/src/mcp/words.rs; a Rust test there fails unless its strings are in this file verbatim, in both
 // languages. It follows Clauseo's own language (`ui.language`). Each state is a mock of the dialog, its slot filled
 // with an example. The English was settled by the orchestrator: every entry is provisional, its Hindi too.
@@ -29,9 +29,15 @@ const REMOTE_MESSAGE = words(
   "जब आप किसी मामले में काम करेंगे, तब Clauseo “{address}” से जुड़ेगा। केवल उन्हीं टूल को अनुमति दें जिन पर आपको भरोसा है।",
 );
 
+const LOCAL_NAMES = words("New or changed settings: {names}.", "नई या बदली हुई सेटिंग्स: {names}।");
+const REMOTE_NAMES = words("New or changed headers: {names}.", "नए या बदले हुए हेडर: {names}।");
+
 /** The examples the mocks put in the slots, as words.rs shows them: the program's parts joined, one quoted. */
 const PROGRAM = "npx -y @modelcontextprotocol/server-filesystem '/Users/mehra/Case Files'";
 const ADDRESS = "https://mcp.mehrachambers.in/tools";
+/** The names line's examples, joined with ", " as words.rs joins them. */
+const ENV_NAMES = "FILES_TOKEN, NODE_OPTIONS";
+const HEADER_NAMES = "Authorization";
 
 const local = (lang: Lang) => (
   <ConfirmMock
@@ -52,6 +58,26 @@ const remote = (lang: Lang) => (
   />
 );
 
+/** The same dialogs with the line naming new or changed variables or headers under the message. */
+const localNames = (lang: Lang) => (
+  <ConfirmMock
+    lang={lang}
+    cancel={CANCEL}
+    title={LOCAL_TITLE}
+    message={`${LOCAL_MESSAGE.text(lang).replace("{program}", PROGRAM)}\n\n${LOCAL_NAMES.text(lang).replace("{names}", ENV_NAMES)}`}
+    ok={OK}
+  />
+);
+const remoteNames = (lang: Lang) => (
+  <ConfirmMock
+    lang={lang}
+    cancel={CANCEL}
+    title={REMOTE_TITLE}
+    message={`${REMOTE_MESSAGE.text(lang).replace("{address}", ADDRESS)}\n\n${REMOTE_NAMES.text(lang).replace("{names}", HEADER_NAMES)}`}
+    ok={OK}
+  />
+);
+
 /** A native dialog is a small window of its own. */
 const DIALOG = { width: 520, height: 260 } as const;
 
@@ -63,4 +89,18 @@ export const UC_MCP_CONFIRM: Entry[] = [
   { id: "UC-217", words: CANCEL, screen: "native/mcp-run", ...DIALOG, render: local },
   { id: "UC-218", words: REMOTE_TITLE, screen: "native/mcp-connect", ...DIALOG, render: remote },
   { id: "UC-219", words: REMOTE_MESSAGE, screen: "native/mcp-connect", ...DIALOG, render: remote },
+  {
+    id: "UC-220",
+    words: LOCAL_NAMES,
+    screen: "native/mcp-run-names",
+    ...DIALOG,
+    render: localNames,
+  },
+  {
+    id: "UC-221",
+    words: REMOTE_NAMES,
+    screen: "native/mcp-connect-names",
+    ...DIALOG,
+    render: remoteNames,
+  },
 ];

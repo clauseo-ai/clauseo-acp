@@ -6,7 +6,8 @@
 //!   (`keychain::plan`), checked by the settings crate (`Effective::check_mcp_server`), then on
 //!   a thread of their own a local server's program is found (`mcp.command_not_found` when it is
 //!   not, with nothing written; the settings keep it as typed), the lawyer's native confirm is
-//!   asked when the save adds a server or changes what starts (`launch_changed`;
+//!   asked when the save adds a server, changes what starts or a loader variable's value
+//!   (`ask.rs`;
 //!   `mcp.save_declined` when declined, with nothing written), and its values are written to the
 //!   keychain, then the settings on the actor
 //!   (`Effective::save_mcp_server`). A keychain failure is `mcp.secret_store_failed` with the
@@ -34,6 +35,7 @@ use super::commands::CommandCtx;
 use super::input::Input;
 use crate::error::Error;
 
+mod ask;
 pub(crate) mod keychain;
 pub(crate) mod view;
 
@@ -178,8 +180,8 @@ fn save(
     actor
         .effective
         .check_mcp_server(previous.as_deref(), &edit.name, &server)?;
-    let ask = launch_changed(held.as_ref().map(|(_, held)| held), &server)
-        .then(|| launch_ask(&edit.name, &server));
+    // Refused before any prompt when too long to show whole.
+    let ask = ask::ask(held.as_ref().map(|(_, held)| held), &server, edit)?;
     let save = Box::new(Save {
         previous,
         name: edit.name.clone(),
@@ -221,47 +223,6 @@ fn save(
         };
         McpInput::Written { ctx, save, result }
     })
-}
-
-/// Whether a save of `new` over `old` (`None` for an add) asks the lawyer first: an add, or a
-/// change of what starts or where it goes: the kind, the command, the arguments, the variables'
-/// names or the URL. A rename, a turn on or off, or new values alone ask nothing.
-fn launch_changed(old: Option<&McpServerLaunch>, new: &McpServerLaunch) -> bool {
-    use clauseo_settings::McpTransport::{Local, Remote};
-    let Some(old) = old else {
-        return true;
-    };
-    match (&old.transport, &new.transport) {
-        (
-            Local { command, args, env },
-            Local {
-                command: new_command,
-                args: new_args,
-                env: new_env,
-            },
-        ) => command != new_command || args != new_args || !env.keys().eq(new_env.keys()),
-        (Remote { url, .. }, Remote { url: new_url, .. }) => url != new_url,
-        _ => true,
-    }
-}
-
-/// What the confirm shows for `server`: its program and arguments verbatim, or its URL.
-fn launch_ask(name: &str, server: &McpServerLaunch) -> crate::config::mcp::McpLaunchAsk {
-    use clauseo_settings::McpTransport::{Local, Remote};
-    let (program, url) = match &server.transport {
-        Local { command, args, .. } => (
-            std::iter::once(command.clone())
-                .chain(args.iter().cloned())
-                .collect(),
-            None,
-        ),
-        Remote { url, .. } => (Vec::new(), Some(url.clone())),
-    };
-    crate::config::mcp::McpLaunchAsk {
-        server: name.to_owned(),
-        program,
-        url,
-    }
 }
 
 /// Why a save's work off the actor wrote nothing.

@@ -1,13 +1,14 @@
 //! The MCP server confirm: its words in both languages, how a program and an address show
 //! (quoted, written out, shortened), and the answer: only Allow allows.
 
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
+use std::time::Instant;
 
 use clauseo_host::{McpLaunchAsk, McpLaunchConfirm as _};
 use clauseo_protocol::Language;
 use futures::channel::oneshot;
 
-use super::words::{EN, HI, MAX_SHOWN, shortened, shown_address, shown_program, table};
+use super::words::{EN, HI, shown_address, shown_program, table};
 use super::{BoxFuture, LaunchConfirm, LaunchDrawer, LaunchWords};
 use crate::dialogs::words::OFF_VOICE;
 
@@ -16,6 +17,7 @@ fn local(program: &[&str]) -> McpLaunchAsk {
         server: "files".to_owned(),
         program: program.iter().map(|&part| part.to_owned()).collect(),
         url: None,
+        names: Vec::new(),
     }
 }
 
@@ -24,6 +26,7 @@ fn remote(url: &str) -> McpLaunchAsk {
         server: "search".to_owned(),
         program: Vec::new(),
         url: Some(url.to_owned()),
+        names: Vec::new(),
     }
 }
 
@@ -166,25 +169,60 @@ fn mcp_slots_fill_once() {
     );
 }
 
+/// Nothing is ever cut: padding a program to the host's limit (`MAX_ASK_CHARS`) leaves a dangerous
+/// argument at its end in view, and a long URL shows whole.
 #[test]
-fn mcp_long_program_loses_its_middle() {
-    let long = "a".repeat(400);
-    let shown = shown_program(&parts(&["start", &long, "end"]));
-    assert_eq!(shown.chars().count(), MAX_SHOWN);
-    assert!(shown.starts_with("start aaa"), "{shown}");
-    assert!(shown.ends_with("aaa end"), "{shown}");
-    assert_eq!(shown.matches('…').count(), 1);
-    // short enough: as it is
-    let exact = "b".repeat(MAX_SHOWN);
-    assert_eq!(shortened(&exact), exact);
-    // cut by characters, never inside one
-    let wide = "मामला🙂".repeat(100);
-    let shown = shortened(&wide);
-    assert_eq!(shown.chars().count(), MAX_SHOWN);
-    assert!(shown.starts_with("मामला🙂") && shown.contains('…'));
-    let address = shown_address(&format!("https://a.example/{}", "p".repeat(500)));
-    assert_eq!(address.chars().count(), MAX_SHOWN);
-    assert!(address.starts_with("https://a.example/"));
+fn mcp_long_program_shows_whole() {
+    let padding = "a".repeat(1_900);
+    let shown = shown_program(&parts(&["npx", &padding, "--require=/tmp/x.js"]));
+    assert!(shown.ends_with(" --require=/tmp/x.js"), "{shown}");
+    assert!(!shown.contains('…'));
+    let words = LaunchWords::new(
+        &local(&["npx", &padding, "--require=/tmp/x.js"]),
+        Language::En,
+    );
+    assert!(
+        words.message.contains("--require=/tmp/x.js"),
+        "{}",
+        words.message
+    );
+    let url = format!("https://a.example/{}", "p".repeat(1_500));
+    assert_eq!(shown_address(&url), url);
+}
+
+/// The line naming new or changed variables (a local server) or headers (a remote one) sits
+/// under the message when there are names, joined with ", " verbatim, and not at all otherwise.
+#[test]
+fn mcp_names_line_shows_only_with_names() {
+    for language in [Language::En, Language::Hi] {
+        let table = table(language);
+        let plain = LaunchWords::new(&local(&["npx", "files-mcp"]), language);
+        assert!(!plain.message.contains("\n\n"), "{}", plain.message);
+        let mut ask = local(&["npx", "files-mcp"]);
+        ask.names = vec!["FILES_TOKEN".to_owned(), "NODE_OPTIONS".to_owned()];
+        let named = LaunchWords::new(&ask, language);
+        let line = table
+            .local_names
+            .replace("{names}", "FILES_TOKEN, NODE_OPTIONS");
+        assert!(
+            named.message.ends_with(&format!("\n\n{line}")),
+            "{}",
+            named.message
+        );
+        let mut ask = remote("https://tools.example/mcp");
+        ask.names = vec!["Authorization".to_owned()];
+        let named = LaunchWords::new(&ask, language);
+        let line = table.remote_names.replace("{names}", "Authorization");
+        assert!(
+            named.message.ends_with(&format!("\n\n{line}")),
+            "{}",
+            named.message
+        );
+        let plain = LaunchWords::new(&remote("https://tools.example/mcp"), language);
+        assert!(!plain.message.contains("\n\n"), "{}", plain.message);
+    }
+    assert_eq!(EN.local_names, "New or changed settings: {names}.");
+    assert_eq!(EN.remote_names, "New or changed headers: {names}.");
 }
 
 /// How the fake drawer answers.
@@ -238,18 +276,18 @@ fn mcp_only_allow_allows() {
         (Answer::Cancel, false),
         (Answer::Never, false),
     ] {
-        let confirm = LaunchConfirm(FakeDrawer::new(Language::En, answer));
+        let confirm = LaunchConfirm::new(FakeDrawer::new(Language::En, answer));
         assert_eq!(confirm.confirm(&ask), allowed);
-        let drawn = confirm.0.drawn.lock().unwrap();
+        let drawn = confirm.drawer().drawn.lock().unwrap();
         assert_eq!(drawn.as_slice(), [LaunchWords::new(&ask, Language::En)]);
     }
 }
 
 #[test]
 fn mcp_confirm_speaks_the_apps_language() {
-    let confirm = LaunchConfirm(FakeDrawer::new(Language::Hi, Answer::Cancel));
+    let confirm = LaunchConfirm::new(FakeDrawer::new(Language::Hi, Answer::Cancel));
     assert!(!confirm.confirm(&remote("https://tools.example/mcp")));
-    let drawn = confirm.0.drawn.lock().unwrap();
+    let drawn = confirm.drawer().drawn.lock().unwrap();
     assert_eq!(drawn[0].title, "Clauseo को इस टूल से जुड़ने दें?");
 }
 
@@ -281,6 +319,8 @@ fn mcp_words_are_the_reviewed_copy() {
             table.cancel,
             table.remote_title,
             table.remote_message,
+            table.local_names,
+            table.remote_names,
         ]
     };
     for (n, (en, hi)) in (214..).zip(column(&EN).into_iter().zip(column(&HI))) {
@@ -291,4 +331,78 @@ fn mcp_words_are_the_reviewed_copy() {
             assert!(registry.contains(&quoted), "{id} lacks {quoted}");
         }
     }
+}
+
+/// A hand-moved clock for the flood control.
+fn clock() -> (super::Clock, Arc<Mutex<Instant>>) {
+    let at = Arc::new(Mutex::new(crate::open::now()));
+    let read = Arc::clone(&at);
+    (Arc::new(move || *read.lock().unwrap()), at)
+}
+
+/// After a Cancel the same ask within ten seconds is declined with no dialog; another ask, or
+/// the same one later, draws one.
+#[test]
+fn mcp_a_cancelled_ask_is_not_asked_again_at_once() {
+    let (now, at) = clock();
+    let confirm = LaunchConfirm::with_clock(FakeDrawer::new(Language::En, Answer::Cancel), now);
+    let ask = local(&["npx", "files-mcp"]);
+    assert!(!confirm.confirm(&ask));
+    assert!(!confirm.confirm(&ask));
+    assert_eq!(
+        confirm.drawer().drawn.lock().unwrap().len(),
+        1,
+        "a second dialog came"
+    );
+    assert!(!confirm.confirm(&local(&["npx", "other-mcp"])));
+    assert_eq!(confirm.drawer().drawn.lock().unwrap().len(), 2);
+    *at.lock().unwrap() += super::SAME_ASK_QUIET;
+    assert!(!confirm.confirm(&ask));
+    assert_eq!(confirm.drawer().drawn.lock().unwrap().len(), 3);
+}
+
+/// A drawer whose dialog stays open until the test answers it.
+struct Held {
+    shown: std::sync::mpsc::Sender<()>,
+    answer: Mutex<Option<oneshot::Receiver<bool>>>,
+}
+
+impl LaunchDrawer for Held {
+    fn language(&self) -> BoxFuture<'_, Language> {
+        Box::pin(async { Language::En })
+    }
+
+    fn draw(&self, _words: LaunchWords) -> BoxFuture<'_, bool> {
+        let rx = self.answer.lock().unwrap().take();
+        self.shown.send(()).unwrap();
+        Box::pin(async move {
+            match rx {
+                Some(rx) => rx.await.unwrap_or(false),
+                None => false,
+            }
+        })
+    }
+}
+
+/// While one dialog is open, another ask is declined at once, without a second dialog.
+#[test]
+fn mcp_one_dialog_at_a_time() {
+    let (shown_tx, shown_rx) = std::sync::mpsc::channel();
+    let (answer_tx, answer_rx) = oneshot::channel();
+    let confirm = Arc::new(LaunchConfirm::new(Held {
+        shown: shown_tx,
+        answer: Mutex::new(Some(answer_rx)),
+    }));
+    let first = {
+        let confirm = Arc::clone(&confirm);
+        std::thread::spawn(move || confirm.confirm(&local(&["npx", "files-mcp"])))
+    };
+    shown_rx.recv().unwrap();
+    assert!(
+        !confirm.confirm(&local(&["npx", "other-mcp"])),
+        "a second dialog was drawn"
+    );
+    assert!(shown_rx.try_recv().is_err());
+    answer_tx.send(true).unwrap();
+    assert!(first.join().unwrap());
 }
