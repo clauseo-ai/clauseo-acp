@@ -146,12 +146,11 @@ export const keyInUse = (state: SignIn | undefined): boolean =>
   state.signed_in !== undefined &&
   state.signed_in.method === "api_key";
 
-/** Whether the provider refused the API key in use: the host's `signed_in.refused`, read by shape so both wires compile
- * (the host PR key-path-host adds it); false for a plan login, the firm's account, or a host before it. */
+/** Whether the provider refused the API key in use: the host's `signed_in.refused` (#984), set after a question failed
+ * and cleared when a key is saved or removed; false for a plan login or the firm's account. */
 export const keyRefused = (state: SignIn | undefined): boolean => {
   if (!keyInUse(state) || typeof state !== "object" || state.signed_in === undefined) return false;
-  const refused = (state.signed_in as { refused?: unknown }).refused;
-  return typeof refused === "number";
+  return state.signed_in.refused !== undefined;
 };
 
 /** Whether a plan isn't installed here yet, and the firm's install doesn't stand in for it: missing, paused behind the

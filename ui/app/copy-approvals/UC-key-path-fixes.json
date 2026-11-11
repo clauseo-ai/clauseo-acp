@@ -31,5 +31,16 @@
     "at": "2026-11-11",
     "by": "app track (provisional; orchestrator to approve)",
     "note": "agent.auth_required in the thread and the composer while the plan runs on an API key, in place of U6F-05's \"Sign in to ChatGPT in Codex first.\" and U3's \"Sign in to Claude first.\"; the words and Hindi of UD2-29, the room's key card (key path fixes, defect 3)"
+  },
+  "UC-150": {
+    "en": "{name} didn't accept the API key.",
+    "hi": "{name} ने API key स्वीकार नहीं की।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-11",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-11",
+    "by": "app track (provisional; orchestrator to approve)",
+    "note": "Settings, Plans: a plan whose API key the provider refused after a question failed, in place of \"Using an API key, billed to its own account\"; UD2-29's words without the question (key path fixes, defect 4)"
   }
 }
