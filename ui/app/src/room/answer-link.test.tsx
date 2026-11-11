@@ -34,10 +34,10 @@ const wall = (): PaperSummary[] => [
   { file: BRIEF_B, path: "b/Brief.docx", size: 1, modified: 0 },
 ];
 
-async function answer(text: string, papers = wall()): Promise<Harness> {
+async function answer(text: string, papers = wall(), folder = FOLDER): Promise<Harness> {
   const room = await mountRoom({
     next: fakeNext({
-      matters: () => [detailed(THE_MATTER, { folder_display: FOLDER })],
+      matters: () => [detailed(THE_MATTER, { folder_display: folder })],
       threads: () => [{ ...summary(), seen: true }],
       papers,
     }),
@@ -189,4 +189,50 @@ test("a web link still goes to the host's open_external, and a deceptive one sti
     "mailto:clerk@court.in",
   ]);
   expect(opened()).toEqual([]);
+});
+
+test("the forms ChatGPT wrote on Rohan's MacBook open their papers: angle brackets, spaces, parentheses, a line suffix", async () => {
+  const MSA = "Master Services Agreement - Acme and Kestrel - draft v2 (Kestrel comments).docx";
+  const papers: PaperSummary[] = [
+    { file: REPLY, path: "Reply to legal notice.docx", size: 1, modified: 0 },
+    { file: uuid(30, 8), path: MSA, size: 1, modified: 0 },
+    { file: uuid(31, 8), path: "Bank statement (March).pdf", size: 1, modified: 0 },
+    { file: uuid(32, 8), path: "Ledger - FY 2025 (draft).csv", size: 1, modified: 0 },
+    { file: uuid(33, 8), path: "My Project/My Report.md", size: 1, modified: 0 },
+  ];
+  const root = "/Users/rohan/Documents/tmatter";
+  h = await answer(
+    [
+      `[Open the reply](<${root}/Reply to legal notice.docx>)`,
+      `[Open the agreement](<${root}/${MSA}>)`,
+      `[Open the statement](<${root}/Bank statement (March).pdf>)`,
+      `[Open the ledger](<${root}/Ledger - FY 2025 (draft).csv>)`,
+      `[Open the report](<${root}/My Project/My Report.md:3>)`,
+      `[Report at a line and column](<${root}/My Project/My Report.md:3:7>)`,
+      `[Report at a GitHub line](<${root}/My Project/My Report.md#L12-L20>)`,
+      "[outside, at a line](/Users/rohan/code/app.py:12)",
+      `[not on the wall, at a line](<${root}/Reply notes.md:12>)`,
+      "[a bare name at a line](<Reply notes.md:12>)",
+    ].join("\n\n"),
+    papers,
+    "Documents/tmatter",
+  );
+  const opens = [
+    "Open the reply",
+    "Open the agreement",
+    "Open the statement",
+    "Open the ledger",
+    "Open the report",
+    "Report at a line and column",
+    "Report at a GitHub line",
+  ];
+  expect(answerLinks().map((a) => a.textContent)).toEqual(opens);
+  for (const name of opens) await h.click(linkNamed(name));
+  await h.settle();
+  const files = papers.map((p) => p.file);
+  expect(opened()).toEqual([...files, files[4], files[4]]);
+  for (const name of opens) await enter(linkNamed(name));
+  expect(opened()).toEqual([...files, files[4], files[4], ...files, files[4], files[4]]);
+  for (const name of ["outside, at a line", "not on the wall, at a line", "a bare name at a line"])
+    expect(plainNamed(name)?.tagName).toBe("SPAN");
 });
