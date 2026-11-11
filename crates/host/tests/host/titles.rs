@@ -29,17 +29,17 @@ use crate::observe::Events;
 use crate::support::{Dir, FAKE, Running, Scenario, matter_with_thread, wait};
 
 /// The agent's title in `title-after-rename`, `title-load` and `title-load-replay-in-prompt`.
-const AGENT_TITLE: &str = "Indemnity cap review";
+pub(crate) const AGENT_TITLE: &str = "Indemnity cap review";
 
 /// The room's first-words title: the first words of the first prompt.
-const FIRST_WORDS: &str = "Review the indemnity cap in clause 9";
+pub(crate) const FIRST_WORDS: &str = "Review the indemnity cap in clause 9";
 
 /// The lawyer's hand-typed title.
 const TYPED: &str = "Acme MSA";
 
 /// A rename of `thread` to `title`: the app's first-words placeholder, or a title the lawyer
 /// typed. The command must be answered `Done` either way.
-fn rename(host: &Running, thread: ThreadId, title: &str, placeholder: bool) {
+pub(crate) fn rename(host: &Running, thread: ThreadId, title: &str, placeholder: bool) {
     let command = HostCommand::RenameThread {
         thread,
         title: Title::new(title).unwrap(),
@@ -49,7 +49,11 @@ fn rename(host: &Running, thread: ThreadId, title: &str, placeholder: bool) {
 }
 
 /// The title `ListThreads` gives (the sidebar's row) and the last `ThreadRenamed` (the header).
-fn titles(host: &Running, matter: MatterId, thread: ThreadId) -> (Option<String>, Option<String>) {
+pub(crate) fn titles(
+    host: &Running,
+    matter: MatterId,
+    thread: ThreadId,
+) -> (Option<String>, Option<String>) {
     let row = host
         .threads(matter)
         .into_iter()
@@ -62,7 +66,7 @@ fn titles(host: &Running, matter: MatterId, thread: ThreadId) -> (Option<String>
 }
 
 /// The renames in `events`, in order: each title and who set it.
-fn renames_in(events: &Events) -> Vec<(String, RenameSource)> {
+pub(crate) fn renames_in(events: &Events) -> Vec<(String, RenameSource)> {
     events
         .events()
         .filter_map(|event| match event {
@@ -103,7 +107,7 @@ pub(crate) fn open_store(dir: &Path) -> Store {
 }
 
 /// The source each stored thread row holds, read after the host has stopped.
-fn stored_sources(dir: &Dir, matter: MatterId) -> Vec<Option<RenameSource>> {
+pub(crate) fn stored_sources(dir: &Dir, matter: MatterId) -> Vec<Option<RenameSource>> {
     let store = open_store(dir.data());
     let rows = wait("threads", store.threads(matter)).unwrap();
     rows.into_iter().map(|row| row.title_source).collect()
@@ -136,7 +140,7 @@ fn two_turns(
 }
 
 /// One turn on `scenario`, then one more prompt; the events are drained when it returns.
-fn turn(host: &Running, events: &mut Events, thread: ThreadId, prompt: &str) {
+pub(crate) fn turn(host: &Running, events: &mut Events, thread: ThreadId, prompt: &str) {
     let (turn, _) = host.prompt(thread, prompt);
     assert_eq!(
         events.until_turn_ended(turn).stop,
