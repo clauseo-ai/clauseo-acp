@@ -73,6 +73,7 @@ import { detailed, fakeNext, railStates } from "./fake-next.ts";
 import { scanProbe } from "./scan/probe-scan.ts";
 import type { MatterInfo, PaperSummary } from "./host-next.ts";
 import { planProbe } from "./limits/probe-plan.ts";
+import { pickersProbe } from "./probe-pickers.ts";
 import { probeThreads } from "./probe-threads.ts";
 import { connectRoom } from "./start.ts";
 import { versionsHost, versionsPageOf } from "./versions/probe-states.tsx";
@@ -266,6 +267,8 @@ const NATIVE_LIGHTS = {
 const planning = planProbe(page.get("plan"));
 /** ?plans=chatgpt: both plans installed and listed, Claude's sign-in cancelled and ChatGPT signed in (D-014's default). */
 const chatgptOnly = page.get("plans") === "chatgpt";
+/** ?pickers=default: both plans signed in, each agent's options at its defaults (probe-pickers.ts). */
+const picking = pickersProbe(page.get("pickers"));
 const SETUP_CHATGPT_ONLY: SetupEvent[] = [
   { agent_install_progress: { agent: "claude-acp", state: { ready: { version: "0.1.0" } } } },
   { agent_install_progress: { agent: "codex-acp", state: { ready: { version: "0.1.0" } } } },
@@ -315,7 +318,9 @@ const transport = new FakeTransport({
     ? { setup: planning.setup, openSettings: () => {} }
     : chatgptOnly
       ? { setup: { first: () => SETUP_CHATGPT_ONLY } }
-      : {}),
+      : picking !== null
+        ? { setup: picking.setup }
+        : {}),
   // ?reveal=refused: Show in Finder is refused as the folder can't be found, so the row offers Locate folder
   ...(page.get("reveal") === "refused" ? { reveal: refuseReveal } : {}),
   // ?scan=small, empty or large: New matter's picker and its folder's counts (scan/probe-scan.ts)
@@ -371,7 +376,9 @@ const transport = new FakeTransport({
               { id: "codex-acp", kind: "codex" as const },
             ],
           }
-        : {}),
+        : picking !== null
+          ? { agents: picking.agents }
+          : {}),
     // ?thread=ask lists its thread as ?thread=permission does: waiting on the lawyer, so the room opens it
     threads: () =>
       probeThreads(

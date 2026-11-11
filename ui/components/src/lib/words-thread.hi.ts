@@ -167,6 +167,8 @@ export const HI = {
   // the agent's own model and effort on the status line (PK): each menu's title, and its trigger's name before the value
   Model: "मॉडल",
   Effort: "प्रयास",
+  // after the model's name in its menu, quietly, on the row that follows the agent's own default (UC-152)
+  "(default)": "(डिफ़ॉल्ट)",
   // empty states
   "Clauseo has read this matter's {n} papers.": "Clauseo ने इस मामले के {n} दस्तावेज़ पढ़ लिए हैं।",
   "Ask the first question below. Each answer cites the paper and page it relies on.":
