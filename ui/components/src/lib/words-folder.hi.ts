@@ -5,15 +5,9 @@ export const HI = {
   // FR1: the notice's title, then its tooltip and accessible name
   "Clauseo asks before each edit": "Clauseo हर संपादन से पहले पूछता है",
   "Clauseo asks before each edit in this folder": "Clauseo इस फ़ोल्डर में हर संपादन से पहले पूछता है",
-  // FR2: behind FR1's info icon
-  "You can change files here, but not this folder's permissions. Clauseo needs them to keep Claude and ChatGPT inside the matter. Some edits won't go through.":
-    "आप यहाँ फ़ाइलें बदल सकते हैं, पर इस फ़ोल्डर की अनुमतियाँ नहीं। Claude और ChatGPT को मामले के भीतर रखने के लिए Clauseo को इनकी ज़रूरत है। कुछ संपादन नहीं हो पाएँगे।",
-  // FR3: the notice's button, which opens FR5
-  "What to tell IT": "IT को क्या बताएँ",
-  // FR5: the text to send IT, selected, with Copy; {path} is the matter's folder
-  'Please give my account "Change permissions" on this folder: {path}. Clauseo, the app I use for this matter, adds one entry to the folder\'s permissions so Claude and ChatGPT, which it runs, can write only inside it.':
-    'कृपया इस फ़ोल्डर पर मेरे खाते को "Change permissions" दें: {path}। इस मामले के लिए मेरा ऐप Clauseo फ़ोल्डर की अनुमतियों में एक प्रविष्टि जोड़ता है, ताकि वह जिन Claude और ChatGPT को चलाता है, वे केवल इसी फ़ोल्डर के भीतर लिख सकें।',
-  Copy: "कॉपी करें",
+  // FR2: behind FR1's info icon: why it asks, and where it needn't (provisional)
+  "Clauseo can't add its protection to this folder, so it asks before each edit. In a folder you made yourself on this computer, such as one in Documents, it doesn't need to ask.":
+    "Clauseo इस फ़ोल्डर में अपनी सुरक्षा नहीं जोड़ सकता, इसलिए हर संपादन से पहले पूछता है। इस कंप्यूटर पर आपके खुद बनाए फ़ोल्डर में, जैसे Documents के किसी फ़ोल्डर में, उसे पूछने की ज़रूरत नहीं होती।",
   // FR12: a network drive's notice: its words, its tooltip and accessible name, and behind its info icon
   "On a network drive.": "नेटवर्क ड्राइव पर।",
   "Claude asks before every change. ChatGPT can't work here.":

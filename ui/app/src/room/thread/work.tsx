@@ -245,7 +245,6 @@ export function Work({
           <FolderNotice
             key={matter.matter}
             kind={noted}
-            folder={matter.folder_display ?? ""}
             onClose={() => {
               folderShut?.add(matter.matter);
               setClose(matter.matter);
