@@ -1,23 +1,9 @@
-// What the host's step_undone marker on a conversation's stream says of one turn's undo: for
-// Versions' line after it (versions/reading.ts) and the thread's change note
-// (thread/stop-rows.tsx). Small and alone, so the thread's chunk doesn't carry Versions'.
+// What the host's step_undone marker on a conversation's stream says of one turn's undo, for the
+// thread's change note (thread/stop-rows.tsx). Versions reads the marker itself
+// (versions/reading.ts): a module both imported would be a chunk of its own that the thread's lazy
+// list imports, which the release build allows only for a chunk that bare chunks alone import.
 import type { StreamView } from "../store/view.ts";
 import type { SkippedFile, TurnId } from "../transport/protocol.ts";
-
-/**  The step_undone marker's body for the undo of `turn`, the newest on the stream's window; null
- * until it comes. */
-export function stepUndoneOf(
-  view: StreamView | undefined,
-  turn: TurnId,
-): { restored: readonly string[]; unversioned: readonly SkippedFile[] } | null {
-  let found: { restored: readonly string[]; unversioned: readonly SkippedFile[] } | null = null;
-  for (const id of view?.ids ?? []) {
-    const undone = view?.entries.get(id)?.marker?.kind.step_undone;
-    if (undone?.turn === turn)
-      found = { restored: undone.restored, unversioned: undone.unversioned ?? NONE };
-  }
-  return found;
-}
 
 const NONE: readonly SkippedFile[] = [];
 

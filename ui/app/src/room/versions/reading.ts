@@ -8,6 +8,7 @@ import type {
   HostError,
   MatterId,
   RestorePreview,
+  SkippedFile,
   StreamId,
   ThreadId,
   ThreadSummary,
@@ -15,7 +16,6 @@ import type {
   ViewEntry,
 } from "../../transport/protocol.ts";
 import { orderOf, pageBefore } from "../matter-stream.ts";
-import { stepUndoneOf } from "../undone-marker.ts";
 import { lockedFiles, wordLocks } from "../word/lock.ts";
 import { inRowOrder, type Ask, type Done, type Unsaved } from "./state.ts";
 import type { Timeline } from "./timeline.ts";
@@ -110,6 +110,23 @@ export function movedPast(view: StreamView, base: ReadonlySet<string>, own: Own)
   }
   return false;
 }
+
+/**  The step_undone marker's body for the undo of `turn`, the newest on the stream's window; null
+ * until it comes. (The thread's note reads the marker through room/undone-marker.ts.) */
+function stepUndoneOf(
+  view: StreamView | undefined,
+  turn: TurnId,
+): { restored: readonly string[]; unversioned: readonly SkippedFile[] } | null {
+  let found: { restored: readonly string[]; unversioned: readonly SkippedFile[] } | null = null;
+  for (const id of view?.ids ?? []) {
+    const undone = view?.entries.get(id)?.marker?.kind.step_undone;
+    if (undone?.turn === turn)
+      found = { restored: undone.restored, unversioned: undone.unversioned ?? NO_FILES };
+  }
+  return found;
+}
+
+const NO_FILES: readonly SkippedFile[] = [];
 
 /** The undo a line says was done: the turn's conversation, the turn, and the version it took back. */
 export type Undid = { thread: ThreadId; turn: TurnId; id: string };
