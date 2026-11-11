@@ -248,7 +248,7 @@ export const notSentScene = (lang: Lang): QueueScene => ({
     ...asked(lang),
     ask(3, 2, say(lang, SAY.steerClaude), T1, pm(31), {
       delivery: "steer",
-      steer: { not_sent: { turn: T1 } } as unknown as NonNullable<UserMessageEntry["steer"]>,
+      steer: { not_sent: { turn: T1 } },
     }),
     ended(4, T1, pm(32), { stop: "cancelled" }),
   ],
