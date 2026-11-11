@@ -272,12 +272,34 @@ jobs:
           sparse-checkout: crates/blocklist/keys/stage-f.pub
           sparse-checkout-cone-mode: false
 
+      # minisign comes from its own release, pinned by hash, not from apt: on 2026-11-11 the runner's
+      # Ubuntu mirror (azure.archive.ubuntu.com) did not resolve for over 10 minutes and every release
+      # run failed here. The hash was taken after `minisign -V` verified the tarball with the key the
+      # project publishes in its README for its tarballs and binaries.
+      # The fetch goes through the API with the job's token and is retried, as the snapshot's is.
       - name: Install minisign
         if: needs.check.outputs.bundle_blocklist == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          sudo apt-get update -q
-          sudo apt-get install -y minisign
+          tarball=minisign-0.12-linux.tar.gz
+          sha=9a599b48ba6eb7b1e80f12f36b94ceca7c00b7a5173c95c3efc88d9822957e73
+          for attempt in 1 2 3 4 5; do
+            if gh release download 0.12 --repo jedisct1/minisign --clobber --pattern "$tarball"; then
+              break
+            elif [ "$attempt" -eq 5 ]; then
+              echo "::error::could not download $tarball from jedisct1/minisign (5 attempts)"
+              exit 1
+            fi
+            sleep 30
+          done
+          echo "$sha  $tarball" | sha256sum -c - ||
+            { echo "::error::$tarball does not have the pinned SHA-256"; exit 1; }
+          tar -xzf "$tarball" minisign-linux/x86_64/minisign
+          sudo install -m 0755 minisign-linux/x86_64/minisign /usr/local/bin/minisign
+          rm -rf "$tarball" minisign-linux
+          minisign -v
 
       # The fetch goes through the API with the job's token and is retried: during GitHub's
       # incidents of 2026-11-08 and 2026-11-09 anonymous downloads got HTTP 504 (a dry run failed
