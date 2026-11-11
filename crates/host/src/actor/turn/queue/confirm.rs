@@ -5,7 +5,8 @@
 //! the actor from where it stood when the steer went out: every [`EVERY`] while the steer's turn
 //! runs, at once when that turn ends, then every [`EVERY`] for [`GRACE`] more, as Claude Code
 //! may write the line late or run the queued steer as a turn of its own once the turn has ended
-//! (`own_turn.rs`). After a cancel, which drops the steer, the check at the end is the last.
+//! (`own_turn.rs`). After a cancel, which drops the steer, the check at the end is the last. A
+//! last check whose read stops at its cap reads on at once, to 16 MiB in all, before it settles.
 //! Confirmed, it is logged `SteerResolved { Injected }` with the tool calls that were running
 //! when the agent answered; still unconfirmed at the last check, `SteerResolved { NotSent }`,
 //! and it is never sent on its own: the lawyer sends it again (Send now on it requeues it,
@@ -42,6 +43,9 @@ const EVERY: Duration = Duration::from_secs(2);
 /// How long after its turn's end, whatever its stop but a cancel, a steer may still be seen
 /// taken in.
 const GRACE: Duration = Duration::from_secs(10);
+/// How many more reads, each at its cap, a steer's last check may take to reach the end of a
+/// transcript before it settles `NotSent`: 16 MiB in all.
+const LAST_READS: u8 = 7;
 /// A check, waited on for `PREPARE_WAIT`; past it the steers it looked for are unconfirmed.
 const JOB: Job = Job::short("steer check", None);
 
@@ -68,6 +72,8 @@ struct Accepted {
     until: Option<Duration>,
     /// The next check is due now: its turn has just ended, or a read stopped at its cap.
     due: bool,
+    /// The further reads its last check took, each stopped at its cap ([`LAST_READS`]).
+    last_reads: u8,
 }
 
 /// A check's answer: for each steer it looked for, what it saw and whether this was its last
@@ -129,6 +135,7 @@ pub(super) fn accepted(actor: &mut Actor, thread: ThreadId, mut ask: Ask, aside:
         places,
         until: ended.then(|| now.saturating_add(GRACE)),
         due: ended,
+        last_reads: 0,
     });
     settle_unplaced(actor, thread);
     schedule(actor, thread);
@@ -327,8 +334,9 @@ fn check(actor: &mut Actor, thread: ThreadId) {
 }
 
 /// A check answered: each steer found is logged `Injected`; each not found at its last check,
-/// `NotSent`; every other reads on from where this check stopped, at once when a read stopped
-/// at its cap. Then the next check is scheduled.
+/// `NotSent`, unless a read stopped at its cap with more to read, when the last check reads on
+/// at once, up to [`LAST_READS`] times; every other reads on from where this check stopped, at
+/// once when a read stopped at its cap. Then the next check is scheduled.
 pub(in super::super) fn on_checked(actor: &mut Actor, checked: Checked) {
     let Checked { thread, found } = checked;
     let Some(confirms) = confirms(actor, thread) else {
@@ -344,11 +352,16 @@ pub(in super::super) fn on_checked(actor: &mut Actor, checked: Checked) {
         let Some(at) = at else {
             continue;
         };
-        if seen.found || last {
+        let reads_on = confirms
+            .accepted
+            .get(at)
+            .is_some_and(|accepted| seen.behind && accepted.last_reads < LAST_READS);
+        if seen.found || (last && !reads_on) {
             settled.push((confirms.accepted.remove(at), seen.found));
         } else if let Some(accepted) = confirms.accepted.get_mut(at) {
             accepted.places = seen.places;
             accepted.due |= seen.behind;
+            accepted.last_reads += u8::from(last);
         }
     }
     for (accepted, found) in settled {

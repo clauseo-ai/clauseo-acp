@@ -62,7 +62,7 @@ fn transcript(dir: &Dir, folder: &Path) -> PathBuf {
 }
 
 /// Appends `lines` to the transcript, one per line.
-fn append(dir: &Dir, folder: &Path, lines: &[Value]) {
+pub(crate) fn append(dir: &Dir, folder: &Path, lines: &[Value]) {
     let path = transcript(dir, folder);
     let mut text = std::fs::read_to_string(&path).unwrap_or_default();
     for line in lines {
@@ -74,7 +74,7 @@ fn append(dir: &Dir, folder: &Path, lines: &[Value]) {
 
 /// A `user` line holding the steer, as Claude Code writes the lawyer's message. Stamped far
 /// ahead, so it is never earlier than the steer's send on the test clock.
-fn steer_line() -> Value {
+pub(crate) fn steer_line() -> Value {
     json!({"type": "user", "timestamp": "2999-01-01T00:00:00.000Z",
         "message": {"role": "user", "content": [{"type": "text", "text": STEER}]}})
 }
