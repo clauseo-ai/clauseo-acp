@@ -278,9 +278,9 @@ impl ClaudeSandbox {
     }
 
     /// `filesystem.allowRead`: the writable folders, the browser's downloads, the skill packs,
-    /// the built-in skills, the shells' `PATH` file, the trust roots file, and each folder first on `PATH` (stetdoc's,
-    /// the shell browser's tools), except that a folder
-    /// in Clauseo's Python runtime (`<rt>/bin`) opens the whole runtime, whose interpreter reads
+    /// the built-in skills, the shells' `PATH` file, the trust roots file, and each folder first
+    /// on `PATH` (stetdoc's, the shell browser's tools), except that a folder in Clauseo's
+    /// Python runtime (`<rt>/bin`) opens the whole runtime, whose interpreter reads
     /// its standard library and site-packages beside it. Never a `PATH` folder's parent
     /// otherwise: it could be the home itself.
     fn allow_read(paths: &SandboxPaths<'_>, claude_tmp: &Path) -> Vec<String> {
