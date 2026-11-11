@@ -3,9 +3,8 @@
 // import leaves.
 import type { Lang } from "@clauseo/components/lib/display.ts";
 import { errorWords } from "@clauseo/components/lib/words-errors.ts";
-import { listOf } from "@clauseo/components/lib/words-core.ts";
 import { mw } from "@clauseo/components/lib/words-mcp-tools.ts";
-import type { ImportResult, ImportSource, McpErrorCode } from "./tools-model.ts";
+import type { ImportResult, ImportSource, McpErrorCode, Skipped } from "./tools-model.ts";
 
 /** Where a refusal shows: under a field, or under the form's buttons. */
 export type Place = "name" | "command" | "url" | "env" | "headers" | "form";
@@ -63,8 +62,32 @@ export const SOURCE_NAME: Record<ImportSource, string> = {
   codex: "Codex",
 };
 
-/** An import's one line: how many came in, then how many didn't and their names. */
-export function importLine(lang: Lang, result: ImportResult): string {
+/** A left-out server's line: its name, then why, plainly. */
+export function skippedLine(lang: Lang, s: Skipped): string {
+  const name = s.name;
+  switch (s.reason) {
+    case "commandNotFound":
+      return mw(lang, "{name}: Clauseo couldn't find {program} on this computer.", {
+        name,
+        program: s.program ?? "",
+      });
+    case "unsupportedTransport":
+      return mw(lang, "{name}: it uses a setting Clauseo doesn't support yet.", { name });
+    case "unresolvedVariable":
+      return mw(lang, "{name}: it needs a value that isn't set on this computer.", { name });
+    case "alreadyAdded":
+      return mw(lang, "{name}: a tool with this name is already added.", { name });
+    case "unreadable":
+      return mw(lang, "{name}: Clauseo couldn't read its settings.", { name });
+    case "notApproved":
+      return mw(lang, "{name}: it comes from a project you haven't approved in Claude Code.", {
+        name,
+      });
+  }
+}
+
+/** An import's lines: how many came in and how many didn't, then one line for each left out. */
+export function importLines(lang: Lang, result: ImportResult): string[] {
   const n = result.imported.length;
   const came =
     n === 0
@@ -75,12 +98,7 @@ export function importLine(lang: Lang, result: ImportResult): string {
   const left =
     result.skipped.length === 0
       ? null
-      : mw(lang, "{count} couldn't be imported: {names}.", {
-          count: result.skipped.length,
-          names: listOf(
-            lang,
-            result.skipped.map((s) => s.name),
-          ),
-        });
-  return [came, left].filter((l) => l !== null).join(" ");
+      : mw(lang, "{count} couldn't be imported.", { count: result.skipped.length });
+  const head = [came, left].filter((l) => l !== null).join(" ");
+  return [head, ...result.skipped.map((s) => skippedLine(lang, s))];
 }

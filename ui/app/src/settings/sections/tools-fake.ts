@@ -15,6 +15,7 @@ import {
   type McpServerEdit,
   type McpServerView,
   type McpToolsView,
+  type Skipped,
   type ToolsAnswer,
   type ToolsCommands,
 } from "./tools-model.ts";
@@ -25,7 +26,7 @@ const RESERVED = ["browser", "case-law"];
 const FOUND = ["npx", "uvx", "bunx", "node", "python3", "deno", "docker", "pnpm"];
 
 /** What a source holds for the fake to import: servers it adds, and names it leaves out. */
-export type FakeImports = Partial<Record<ImportSource, { add: McpServerView[]; skip: string[] }>>;
+export type FakeImports = Partial<Record<ImportSource, { add: McpServerView[]; skip: Skipped[] }>>;
 
 /** A view as a fixture writes it: the sources to import come from the fake's imports. */
 export type FakeView = Omit<McpToolsView, "importable">;
@@ -68,7 +69,7 @@ export class FakeTools implements ToolsCommands {
 
   private current(): McpToolsView {
     const importable = (
-      Object.entries(this.imports) as [ImportSource, { add: McpServerView[]; skip: string[] }][]
+      Object.entries(this.imports) as [ImportSource, { add: McpServerView[]; skip: Skipped[] }][]
     )
       .map(([source, found]) => ({ source, count: found.add.length + found.skip.length }))
       .filter((i) => i.count > 0);
@@ -109,7 +110,7 @@ export class FakeTools implements ToolsCommands {
     return Promise.resolve({
       imported: add.map((s) => s.name),
       skipped: [
-        ...found.skip.map((name) => ({ name, reason: "commandNotFound" as const })),
+        ...found.skip,
         ...found.add
           .filter((s) => taken.has(s.name))
           .map((s) => ({ name: s.name, reason: "alreadyAdded" as const })),

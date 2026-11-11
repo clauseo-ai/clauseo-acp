@@ -1312,15 +1312,15 @@
     "note": "Settings › Tools: UC-192 for one"
   },
   "UC-194": {
-    "en": "{count} couldn't be imported: {names}.",
-    "hi": "{count} इम्पोर्ट नहीं हो सके: {names}।",
+    "en": "{count} couldn't be imported.",
+    "hi": "{count} इम्पोर्ट नहीं हो सके।",
     "hi_status": "provisional",
     "hi_at": "2026-11-11",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
     "status": "provisional",
     "at": "2026-11-11",
-    "by": "app track (provisional; orchestrator's changes after the first look, 2026-11-11)",
-    "note": "Settings › Tools: after UC-192/193 (or alone), the servers an import left out by name, no reasons"
+    "by": "app track (provisional; orchestrator's import reasons, 2026-11-11)",
+    "note": "Settings › Tools: after UC-192/193 (or alone), how many an import left out; the names and reasons follow, one line each (UC-206 to UC-211)"
   },
   "UC-195": {
     "en": "Clauseo couldn't find {program} on this computer.",
@@ -1354,5 +1354,71 @@
     "at": "2026-11-11",
     "by": "app track (provisional; orchestrator's changes after the first look, 2026-11-11)",
     "note": "Settings › Tools form: refusal envNameInvalid, under Environment values ('-' isn't valid in an environment variable's name)"
+  },
+  "UC-206": {
+    "en": "{name}: Clauseo couldn't find {program} on this computer.",
+    "hi": "{name}: Clauseo को इस कंप्यूटर पर {program} नहीं मिला।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-11",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-11",
+    "by": "app track (provisional; orchestrator's import reasons, 2026-11-11)",
+    "note": "Settings › Tools: one line under the import's count line; import skipped: commandNotFound; {program} as the source names it"
+  },
+  "UC-207": {
+    "en": "{name}: it uses a setting Clauseo doesn't support yet.",
+    "hi": "{name}: इसमें ऐसी सेटिंग है जिसे Clauseo अभी सपोर्ट नहीं करता।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-11",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-11",
+    "by": "app track (provisional; orchestrator's import reasons, 2026-11-11)",
+    "note": "Settings › Tools: one line under the import's count line; import skipped: unsupportedTransport"
+  },
+  "UC-208": {
+    "en": "{name}: it needs a value that isn't set on this computer.",
+    "hi": "{name}: इसे एक ऐसी वैल्यू चाहिए जो इस कंप्यूटर पर सेट नहीं है।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-11",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-11",
+    "by": "app track (provisional; orchestrator's import reasons, 2026-11-11)",
+    "note": "Settings › Tools: one line under the import's count line; import skipped: unresolvedVariable"
+  },
+  "UC-209": {
+    "en": "{name}: a tool with this name is already added.",
+    "hi": "{name}: इस नाम का टूल पहले से जुड़ा है।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-11",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-11",
+    "by": "app track (provisional; orchestrator's import reasons, 2026-11-11)",
+    "note": "Settings › Tools: one line under the import's count line; import skipped: alreadyAdded"
+  },
+  "UC-210": {
+    "en": "{name}: Clauseo couldn't read its settings.",
+    "hi": "{name}: Clauseo इसकी सेटिंग नहीं पढ़ सका।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-11",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-11",
+    "by": "app track (provisional; orchestrator's import reasons, 2026-11-11)",
+    "note": "Settings › Tools: one line under the import's count line; import skipped: unreadable"
+  },
+  "UC-211": {
+    "en": "{name}: it comes from a project you haven't approved in Claude Code.",
+    "hi": "{name}: यह ऐसे प्रोजेक्ट से है जिसे आपने Claude Code में मंज़ूरी नहीं दी है।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-11",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-11",
+    "by": "app track (provisional; orchestrator's import reasons, 2026-11-11)",
+    "note": "Settings › Tools: one line under the import's count line; import skipped: notApproved (a Claude Code project's server not approved there)"
   }
 }

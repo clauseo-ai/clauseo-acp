@@ -25,7 +25,7 @@ import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import type { SectionContext } from "../sections.tsx";
 import { carriesProtectionWire } from "./workspace-shown.ts";
 import { ToolForm } from "./mcp-tools-form.tsx";
-import { importLine, refusalOf, SOURCE_NAME } from "./mcp-tools-refusal.ts";
+import { importLines, refusalOf, SOURCE_NAME } from "./mcp-tools-refusal.ts";
 import { Group, PlateRow } from "./parts.tsx";
 import {
   hostOf,
@@ -79,7 +79,7 @@ function Tools({ commands, safe }: { commands: ToolsCommands; safe: boolean }) {
   const [open, setOpen] = useState<Open>(null);
   const [removing, setRemoving] = useState<string | null>(null);
   const [failed, setFailed] = useState<string | null>(null);
-  const [importedLine, setImportedLine] = useState<string | null>(null);
+  const [importedLines, setImportedLines] = useState<string[] | null>(null);
   const [importing, setImporting] = useState(false);
   // where focus goes once the list is back: a tool's Edit (its name), or Add a tool ("")
   const back = useRef<string | null>(null);
@@ -119,7 +119,7 @@ function Tools({ commands, safe }: { commands: ToolsCommands; safe: boolean }) {
     const answer = await mcpImport(source).catch(() => "mcp.secret_store_failed" as const);
     setImporting(false);
     if (typeof answer === "object" && "imported" in answer)
-      setImportedLine(importLine(lang, answer));
+      setImportedLines(importLines(lang, answer));
     else setFailed(refusalOf(lang, answer).words);
   };
   const close = (name: string | null) => {
@@ -171,10 +171,18 @@ function Tools({ commands, safe }: { commands: ToolsCommands; safe: boolean }) {
               ))}
             </div>
           )}
-          {importedLine !== null && (
-            <p className="set-note" role="status" data-testid="tools-imported">
-              {say(importedLine)}
-            </p>
+          {importedLines !== null && (
+            <div className="set-tools-imported" role="status" data-testid="tools-imported">
+              {importedLines.map((line, i) => (
+                <p
+                  key={i}
+                  className="set-note"
+                  data-testid={i === 0 ? "tools-imported-head" : "tools-skipped"}
+                >
+                  {say(line)}
+                </p>
+              ))}
+            </div>
           )}
           <Group {...(firm ? { note: mw(lang, "Your firm set these tools.") } : {})}>
             {view.servers.length === 0 && (

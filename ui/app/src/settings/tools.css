@@ -9,6 +9,14 @@
   .set-tools > .set-note {
     margin-top: 0;
   }
+  /* an import's lines: the count, then one line for each tool left out */
+  .set-tools-imported {
+    display: grid;
+    gap: var(--s1);
+  }
+  .set-tools-imported > .set-note {
+    margin-top: 0;
+  }
   .set-tools-row {
     display: flex;
     flex-wrap: wrap;
