@@ -36,14 +36,26 @@ pub(crate) fn on_path(name: &str) -> Option<PathBuf> {
 
 /// Opens `path` (made if missing) and takes its exclusive lock, as another Clauseo would.
 pub(crate) fn hold_lock(path: &Path) -> io::Result<std::fs::File> {
+    let file = open_lock(path)?;
+    file.lock()?;
+    Ok(file)
+}
+
+/// Opens `path` (made if missing) and takes its shared lock, as another Clauseo installing
+/// holds `agents/.lock`.
+pub(crate) fn hold_shared(path: &Path) -> io::Result<std::fs::File> {
+    let file = open_lock(path)?;
+    file.lock_shared()?;
+    Ok(file)
+}
+
+fn open_lock(path: &Path) -> io::Result<std::fs::File> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    let file = std::fs::OpenOptions::new()
+    std::fs::OpenOptions::new()
         .create(true)
         .write(true)
         .truncate(false)
-        .open(path)?;
-    file.lock()?;
-    Ok(file)
+        .open(path)
 }

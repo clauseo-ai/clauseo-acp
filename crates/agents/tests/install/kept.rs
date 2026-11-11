@@ -215,7 +215,10 @@ fn a_retry_that_renames_the_kept_tree_alone_removes_the_downloads_and_the_npm_ca
     };
     assert_eq!(failure.kind.code(), "agent.install_setup_failed");
     let agents_dir = fx.data.path().join("agents");
-    let (downloads, cache) = (agents_dir.join("downloads"), agents_dir.join("npm-cache"));
+    let (downloads, cache) = (
+        agents_dir.join("downloads"),
+        agents_dir.join("npm-cache").join("agent-a"),
+    );
     assert!(
         !files_under(&downloads).is_empty(),
         "the failed tries keep their downloads"

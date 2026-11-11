@@ -3,6 +3,19 @@
 use std::io;
 use std::path::Path;
 
+use crate::config::AgentsConfig;
+
+/// The bytes free at `config`'s data folder, as the install's checks read them (`None`: not
+/// readable, so not checked); under `test-support`, a test's
+/// [`crate::config::InstallConfig::free_bytes`] when it sets one.
+pub(crate) fn free_for(config: &AgentsConfig) -> Option<u64> {
+    #[cfg(feature = "test-support")]
+    if let Some(free) = &config.install.free_bytes {
+        return free();
+    }
+    free_bytes(&config.data_dir).ok()
+}
+
 /// The bytes free to this user at `path`, or at its nearest existing ancestor when `path`
 /// is not made yet (a first install's data folder).
 pub(crate) fn free_bytes(path: &Path) -> io::Result<u64> {
