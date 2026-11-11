@@ -124,6 +124,7 @@ mod jailed;
 mod machine_memory;
 #[cfg(feature = "marks")]
 mod marks;
+mod mcp;
 #[cfg(any(test, target_os = "macos"))]
 mod menu;
 mod native_mark;
@@ -448,6 +449,7 @@ fn start_host<R: Runtime>(
         let secrets = connectors::secret_store();
         let config = connectors::with_connectors(config, app.clone(), &data_dir, secrets);
         let config = blocklist::with_blocklist(&app, config, secrets);
+        let config = mcp::with_mcp_secrets(config, secrets);
         let config = match counts {
             Some(counts) => {
                 start_counts(&app, counts.clone());

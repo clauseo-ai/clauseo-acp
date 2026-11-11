@@ -1,0 +1,46 @@
+---
+source: crates/protocol/tests/snapshots.rs
+expression: "HostEvent::McpToolsChanged(super::mcp::tools_view())"
+---
+{
+  "mcp_tools_changed": {
+    "control": "lawyer",
+    "servers": [
+      {
+        "name": "github",
+        "kind": "local",
+        "command": "/opt/homebrew/bin/npx",
+        "args": [
+          "-y",
+          "@modelcontextprotocol/server-github"
+        ],
+        "env": [
+          {
+            "name": "GITHUB_PERSONAL_ACCESS_TOKEN",
+            "saved": true
+          },
+          {
+            "name": "GITHUB_TOOLSETS",
+            "saved": false
+          }
+        ],
+        "headers": [],
+        "enabled": true
+      },
+      {
+        "name": "linear",
+        "kind": "remote",
+        "args": [],
+        "url": "https://mcp.linear.app/mcp",
+        "env": [],
+        "headers": [
+          {
+            "name": "Authorization",
+            "saved": true
+          }
+        ],
+        "enabled": false
+      }
+    ]
+  }
+}

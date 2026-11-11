@@ -4,8 +4,10 @@
 //! key. [`json_schema`] gives the JSON Schema, for tests and docs only: `Effective::load` never
 //! builds it.
 
+mod mcp;
 #[cfg(test)]
 mod tests;
+pub use mcp::{KeychainRef, McpServerLaunch, McpTransport, McpValue, Saved};
 
 use crate::ui::UiPatch;
 use schemars::{JsonSchema, Schema, SchemaGenerator, json_schema};
@@ -247,28 +249,12 @@ pub enum SkillsExtra {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, JsonSchema)]
 #[serde(default)]
 pub struct McpSettings {
-    /// The MCP servers by name: 1 to 64 letters, digits, `_` or `-`. Each is off until it is
-    /// turned on. A policy value replaces the whole list. Empty by default.
+    /// The MCP servers by name: 1 to 64 letters, digits, `_` or `-`, never holding `__` nor
+    /// ending in `_`; `browser`, `case-law`, `ide`, `claude-in-chrome` and `computer-use` are
+    /// kept for Clauseo's and Claude Code's own. Each is off until it is turned on. A policy
+    /// value replaces the whole list. Empty by default. Settings › Tools writes the lawyer's list
+    /// here, every value they type in the keychain.
     pub servers: BTreeMap<String, McpServerLaunch>,
-}
-
-/// How to start one MCP server. `host` passes the enabled ones to the agent in
-/// `session/new`; this crate only reads them.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-pub struct McpServerLaunch {
-    /// The program, as an absolute path.
-    pub command: String,
-    /// Its arguments.
-    #[serde(default)]
-    pub args: Vec<String>,
-    /// Variables added to its environment. Stored in plain text in `settings.json` and sent to
-    /// the agent in `session/new`: do not put a token here. No keychain store for MCP keys
-    /// exists yet.
-    #[serde(default)]
-    pub env: BTreeMap<String, String>,
-    /// Whether the agent gets it. Off unless set.
-    #[serde(default)]
-    pub enabled: bool,
 }
 
 /// The `tools` section: Clauseo's own tools. Every key is a security key: a policy source that

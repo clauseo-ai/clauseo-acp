@@ -63,6 +63,13 @@ pub(crate) struct LaunchWiring {
     pub(crate) relays: Option<crate::connectors::Relays>,
     /// The connector commands' wiring (R24, `with_connectors`); `None`: each is refused.
     pub(crate) connectors: Option<crate::connectors::ConnectorsWiring>,
+    /// The keychain the lawyer's MCP server values live in (`HostConfig::with_mcp_secrets`);
+    /// `None`: no value can be saved (`mcp.secret_store_failed`) and no server that names one
+    /// starts.
+    pub(crate) mcp_secrets: Option<Arc<dyn clauseo_connectors::SecretStore>>,
+    /// Finds a lawyer's MCP server's program at a save and a launch
+    /// (`HostConfig::with_mcp_resolver`); by default the settings crate's resolver.
+    pub(crate) mcp_resolve: crate::agent::loads::lawyer::Resolve,
     /// Run off the actor with a run folder's path just before the folder is removed, for tests
     /// (`launch_checks::discard`).
     pub(crate) run_removal_hook: Option<RunRemovalHook>,
@@ -104,6 +111,8 @@ impl Default for LaunchWiring {
             pack_read_hook: None,
             relays: None,
             connectors: None,
+            mcp_secrets: None,
+            mcp_resolve: Arc::new(crate::agent::loads::lawyer::resolve_here),
             run_removal_hook: None,
             tree_wait: super::DEFAULT_TREE_WAIT,
             tree_wait_hook: None,
@@ -130,6 +139,7 @@ impl std::fmt::Debug for LaunchWiring {
             .field("sign_in", &self.sign_in)
             .field("relays", &self.relays)
             .field("connectors", &self.connectors)
+            .field("mcp_secrets", &self.mcp_secrets.is_some())
             .field("tree_wait", &self.tree_wait)
             .field("stetdoc", &self.stetdoc)
             .finish_non_exhaustive()

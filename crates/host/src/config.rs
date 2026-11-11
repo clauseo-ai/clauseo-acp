@@ -19,11 +19,10 @@ use crate::browser::install::InstallTools;
 use crate::browser::limits::BrowserSlots;
 use crate::browser::{BrowserLaunch, UnsupportedLaunch};
 use crate::clock::{Clock, SystemClock};
+use crate::handle::SUBSCRIPTION_CAPACITY;
 use crate::ids::{IdSource, RandomV7};
 use crate::search::SearchSeams;
 use crate::update::{NoUpdater, Updater};
-
-use crate::handle::SUBSCRIPTION_CAPACITY;
 use crate::window::PATCH_WINDOW_BYTES;
 
 mod idle;
@@ -45,6 +44,7 @@ mod session;
 pub use session::SessionKey;
 mod wiring;
 pub(crate) use wiring::{LaunchWiring, PackReadHook, Stetdoc};
+pub(crate) mod mcp;
 
 pub use crate::actor::turn::PackRequest;
 

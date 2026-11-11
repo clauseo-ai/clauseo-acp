@@ -51,6 +51,7 @@ mod locate;
 mod main_loop;
 mod matter_details;
 mod matters;
+mod mcp;
 mod papers;
 pub(crate) mod protection;
 mod query;
@@ -143,6 +144,8 @@ pub(crate) struct Actor {
     pub(crate) protection: protection::ProtectionHost,
     /// The connector state and the commands' work in flight (R24).
     pub(crate) connectors: connectors::ConnectorsOnActor,
+    /// The lawyer's MCP servers: the commands' keychain work and the view sent (`mcp.rs`).
+    pub(crate) mcp: mcp::McpOnActor,
     /// The tools each thread's header shows, laid over the header unlogged.
     pub(crate) header_tools: header_tools::HeaderTools,
     /// The turn path's host-wide state: the start-up `run/` sweep, `stop_agents`' waits.
@@ -521,6 +524,7 @@ impl Actor {
             Input::SkillPack(read) => settings::packs::on_read(self, *read),
             Input::Update(input) => update::on_input(self, input),
             Input::Connector(input) => connectors::on_input(self, *input),
+            Input::Mcp(input) => mcp::on_input(self, *input),
             Input::Protection(done) => protection::work::on_done(self, *done),
             Input::Allowed(input) => allowed::on_input(self, *input),
             Input::SiteBlocked { session, site } => blocked::site_blocked(self, session, site),

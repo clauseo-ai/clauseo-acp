@@ -3,7 +3,7 @@
 
 use super::tests::{invalid, one, origin};
 use super::{Leaf, RESERVED_MCP_SERVERS, Raw, reserved_mcp_server, typed};
-use crate::schema::{McpServerLaunch, Settings};
+use crate::schema::{McpServerLaunch, McpTransport, McpValue, Settings};
 use crate::testing::abs_str;
 use crate::warning::WarningKind;
 use serde_json::json;
@@ -15,7 +15,8 @@ fn mcp_servers_type_entry_by_entry() {
     let mut value = json!({
             "ok": {"command": command, "args": ["-v"], "env": {"A": "1"}, "enabled": true, "url": "x"},
             "off_by-default_9": {"command": command},
-            "relative": {"command": "server"},
+            "relative": {"command": "bin/server"},
+            "bare": {"command": "npx"},
             "no-command": {"args": []},
             "enabled-not-bool": {"command": command, "enabled": "yes"},
             "": {"command": command},
@@ -37,16 +38,16 @@ fn mcp_servers_type_entry_by_entry() {
     };
     assert_eq!(
         servers.keys().map(String::as_str).collect::<Vec<_>>(),
-        ["a".repeat(64).as_str(), "off_by-default_9", "ok"]
+        ["a".repeat(64).as_str(), "bare", "off_by-default_9", "ok"]
     );
     assert_eq!(
         servers.get("ok"),
-        Some(&McpServerLaunch {
+        Some(&McpServerLaunch::local(
             command,
-            args: vec!["-v".to_owned()],
-            env: BTreeMap::from([("A".to_owned(), "1".to_owned())]),
-            enabled: true,
-        })
+            vec!["-v".to_owned()],
+            BTreeMap::from([("A".to_owned(), McpValue::Plain("1".to_owned()))]),
+            true,
+        ))
     );
     assert!(!servers.get("off_by-default_9").unwrap().enabled);
     let mut keys: Vec<String> = warnings
@@ -99,7 +100,13 @@ fn an_mcp_list_that_is_not_an_object_is_refused() {
 fn the_reserved_mcp_server_name_is_left_out_and_the_rest_load() {
     assert_eq!(
         RESERVED_MCP_SERVERS.map(|(name, _)| name),
-        ["browser", "case-law"]
+        [
+            "browser",
+            "case-law",
+            "ide",
+            "claude-in-chrome",
+            "computer-use"
+        ]
     );
     let command = abs_str("bin/s");
     let value = json!({
@@ -259,4 +266,117 @@ fn a_double_underscore_or_a_reserved_name_in_any_case_is_left_out() {
             double("case-law__x"),
         ]
     );
+}
+
+/// The servers and the warnings' keys `value` types to.
+fn load(value: serde_json::Value) -> (BTreeMap<String, McpServerLaunch>, Vec<String>) {
+    let mut warnings = Vec::new();
+    let raw = Raw {
+        key: "mcp.servers".to_owned(),
+        value,
+        origin: origin(),
+    };
+    let leaves = typed(vec![raw], Vec::new(), &mut warnings);
+    let Some(Leaf::McpServers(servers)) = leaves.into_iter().next() else {
+        panic!("no list");
+    };
+    let mut keys: Vec<String> = warnings
+        .into_iter()
+        .map(|warning| match warning.kind {
+            WarningKind::InvalidValue { key, .. } | WarningKind::UnknownKey { key } => key,
+            other => panic!("{other:?}"),
+        })
+        .collect();
+    keys.sort();
+    (servers, keys)
+}
+
+/// Remote entries, keychain refs and plain values load; an entry that breaks a rule is left
+/// out with a warning naming it; a file's variable names are held only to what an OS takes.
+#[test]
+fn remote_entries_and_keychain_refs_type() {
+    let command = abs_str("bin/s");
+    let (servers, warnings) = load(json!({
+        "local": {"command": command, "env": {"TOKEN": {"keychain": true}, "PLAIN": "v",
+            "ProgramFiles(x86)": "C:\\x"}, "enabled": true},
+        "remote": {"url": "https://mcp.example.com/mcp",
+            "headers": {"Authorization": {"keychain": true}, "X-Plain": "p"}},
+        "local-http": {"url": "http://127.0.0.1:3000/mcp"},
+        "both": {"command": command, "url": "https://x.example", "headers": {}},
+        "remote-args": {"url": "https://x.example", "args": ["a"]},
+        "keychain-false": {"command": command, "env": {"A": {"keychain": false}}},
+        "keychain-extra": {"command": command, "env": {"A": {"keychain": true, "x": 1}}},
+        "http-remote": {"url": "http://example.com/mcp"},
+        "bad-header": {"url": "https://x.example", "headers": {"Bad Header": "v"}},
+        "header-twice": {"url": "https://x.example", "headers": {"A": "1", "a": "2"}},
+        "env-equals": {"command": command, "env": {"A=B": "v"}},
+        "neither": {"enabled": true},
+    }));
+    assert_eq!(
+        servers.keys().map(String::as_str).collect::<Vec<_>>(),
+        ["both", "local", "local-http", "remote", "remote-args"]
+    );
+    let saved = McpValue::Keychain(crate::schema::KeychainRef::default());
+    assert_eq!(
+        servers.get("local"),
+        Some(&McpServerLaunch::local(
+            command.clone(),
+            Vec::new(),
+            BTreeMap::from([
+                ("PLAIN".to_owned(), McpValue::Plain("v".to_owned())),
+                (
+                    "ProgramFiles(x86)".to_owned(),
+                    McpValue::Plain("C:\\x".to_owned())
+                ),
+                ("TOKEN".to_owned(), saved.clone()),
+            ]),
+            true,
+        ))
+    );
+    assert_eq!(
+        servers.get("remote").map(|server| &server.transport),
+        Some(&McpTransport::Remote {
+            url: "https://mcp.example.com/mcp".to_owned(),
+            headers: BTreeMap::from([
+                ("Authorization".to_owned(), saved),
+                ("X-Plain".to_owned(), McpValue::Plain("p".to_owned())),
+            ]),
+        })
+    );
+    assert_eq!(
+        servers.get("both").and_then(|s| s.command()),
+        Some(command.as_str())
+    );
+    let expected: Vec<String> = [
+        "bad-header",
+        "both.headers",
+        "both.url",
+        "env-equals",
+        "header-twice",
+        "http-remote",
+        "keychain-extra",
+        "keychain-false",
+        "neither",
+        "remote-args.args",
+    ]
+    .iter()
+    .map(|name| format!("mcp.servers.{name}"))
+    .collect();
+    assert_eq!(warnings, expected);
+}
+
+/// A server written by a build before remote servers (and before keychain refs) loads as it
+/// did, and writes back the same JSON.
+#[test]
+fn an_old_entry_loads_and_writes_back_unchanged() {
+    let entry = json!({"command": abs_str("bin/s"), "args": ["-v"], "env": {"A": "1"},
+        "enabled": true});
+    let (servers, warnings) = load(json!({ "old": &entry }));
+    assert_eq!(warnings, Vec::<String>::new());
+    let server = &servers["old"];
+    assert_eq!(serde_json::to_value(server).unwrap(), entry);
+    let remote = json!({"url": "https://x.example/mcp", "headers": {"A": {"keychain": true}},
+        "enabled": false});
+    let (servers, _) = load(json!({ "r": &remote }));
+    assert_eq!(serde_json::to_value(&servers["r"]).unwrap(), remote);
 }

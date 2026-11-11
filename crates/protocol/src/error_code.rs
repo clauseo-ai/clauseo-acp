@@ -312,6 +312,31 @@ error_codes! {
         same way when sent or edited, or, when the undo note added as it goes out takes it over, \
         its turn fails with this code before anything is sent, the queue held. Only the prompt's \
         text gets this code: every other size limit stays `command.invalid`.";
+    McpNameEmpty = "mcp.name_empty", retryable: false, meaning: "The MCP server has no name.";
+    McpNameTaken = "mcp.name_taken", retryable: false, meaning: "Another of the lawyer's MCP \
+        servers already has this name.";
+    McpNameReserved = "mcp.name_reserved", retryable: false, meaning: "The MCP server name is \
+        kept for one of Clauseo's own tools (`browser`, `case-law`) or Claude Code's built-ins \
+        (`ide`, `claude-in-chrome`, `computer-use`), in any case.";
+    McpNameInvalid = "mcp.name_invalid", retryable: false, meaning: "The MCP server name is not \
+        1 to 64 letters, digits, `_` or `-`, or holds `__`, or ends in `_`.";
+    McpCommandInvalid = "mcp.command_invalid", retryable: false, meaning: "The local MCP \
+        server's program is neither a bare name (`npx`) nor an absolute path: a relative path, or \
+        empty.";
+    McpCommandNotFound = "mcp.command_not_found", retryable: false, meaning: "The local MCP \
+        server's program is not on this computer: a bare name found on no search path, or an \
+        absolute path with no file. The program is the one the command named.";
+    McpUrlInvalid = "mcp.url_invalid", retryable: false, meaning: "The remote MCP server's URL \
+        is not an `https` URL with a host (`http` only for `localhost` or `127.0.0.1`), or \
+        holds a user name or password.";
+    McpHeaderNameInvalid = "mcp.header_name_invalid", retryable: false, meaning: "A header name \
+        is not an HTTP token, or appears twice in any case.";
+    McpEnvNameInvalid = "mcp.env_name_invalid", retryable: false, meaning: "A variable name is \
+        not a letter or `_` followed by letters, digits or `_`, or appears twice.";
+    McpSecretStoreFailed = "mcp.secret_store_failed", retryable: true, meaning: "The OS \
+        keychain refused or failed to save a value, so the MCP server was not changed.";
+    McpServerUnknown = "mcp.server_unknown", retryable: false, meaning: "The lawyer has no MCP \
+        server of that name.";
     Unknown = "unknown", retryable: false, meaning: "A code from a newer Clauseo that this \
         version does not know. Never produced here.";
 }

@@ -149,7 +149,7 @@ const RESERVED: [&str; 5] = [
 ];
 
 /// The number of `HostEvent` variants [`variant`] names.
-const VARIANTS: usize = 18;
+const VARIANTS: usize = 19;
 
 /// Each `HostEvent` variant's place. A new variant fails to compile here, so it gets a place, a
 /// sample in the test below, and its key checked against [`RESERVED`].
@@ -173,6 +173,7 @@ fn variant(event: &HostEvent) -> usize {
         HostEvent::SiteBlocked { .. } => 15,
         HostEvent::BrowserPolicy { .. } => 16,
         HostEvent::PapersChanged { .. } => 17,
+        HostEvent::McpToolsChanged(_) => 18,
     }
 }
 
@@ -300,6 +301,7 @@ fn no_host_event_kind_takes_a_reserved_key() {
         HostEvent::PapersChanged {
             matter: clauseo_protocol::MatterId::new(v7()).unwrap(),
         },
+        HostEvent::McpToolsChanged(clauseo_protocol::McpToolsView::EMPTY),
     ];
     let mut places: Vec<usize> = samples.iter().map(variant).collect();
     places.sort_unstable();

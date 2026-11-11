@@ -35,6 +35,8 @@
 //! is found and closed as the run drops. Last, the same thread fixes the session's `PATH`
 //! folders and what its shells get ([`claim`], `agent/shell_path.rs`): Claude's
 //! `clauseo-env.sh` in the run folder, and on macOS the folders `path_helper` adds, for Codex.
+//! It also reads the keychain values of the lawyer's enabled MCP servers and resolves their
+//! programs (`agent::loads::lawyer`).
 //!
 //! At the first launch, before any folder is made, `<data>/run` from an earlier run is set
 //! aside in one rename and deleted on a thread of its own ([`RunSweep`]). Nothing is made or
@@ -186,6 +188,9 @@ pub(crate) struct RunFolders {
     /// Claude's short temp folder (`agent::claude_tmp`): set for a Claude session off Windows,
     /// and none again when the launch prep could not make it (its sandbox is then off).
     pub(crate) claude_tmp: Option<PathBuf>,
+    /// The keychain values of the lawyer's enabled MCP servers, read by the launch prep
+    /// (`agent::loads::lawyer`); each session call of the run fills its servers from them.
+    pub(crate) mcp_secrets: Arc<crate::agent::loads::lawyer::McpSecrets>,
 }
 
 impl RunFolders {
@@ -219,6 +224,7 @@ impl RunFolders {
             slot_waited: false,
             path: crate::agent::shell_path::SessionPath::default(),
             claude_tmp: None,
+            mcp_secrets: Arc::default(),
         }
     }
 
@@ -320,6 +326,7 @@ pub(super) fn prepare(
     let check_clock = std::sync::Arc::clone(&actor.clock);
     let block_list_wait = claims.egress.block_list_wait(Arc::clone(&actor.clock));
     let matter = run.key.matter;
+    let mcp = crate::agent::loads::lawyer::Reads::of(actor);
     actor.spawn_post(async move {
         if let Some(keys_wait) = keys_wait {
             keys_wait.await;
@@ -375,6 +382,7 @@ pub(super) fn prepare(
                 run.data_deny = launch_deny(&run, &stored, &data, claude_home.as_deref());
                 run.codex_listed = crate::agent::codex_fence::list(&data, &run.root, &run.notes);
                 claim(&mut run, &data, claims, slot);
+                run.mcp_secrets = Arc::new(mcp.read());
                 let skills_written = write_skills(&skills);
                 let packs_skipped;
                 (run.packs_written, packs_skipped) = packs.run(&run.skill_packs);

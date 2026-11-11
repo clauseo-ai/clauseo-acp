@@ -17,6 +17,7 @@ use super::launch_checks::{Prepared, RunFolders};
 use crate::agent::loads;
 use crate::agent::loads::browser::{self, BrowserInputs, Claims, Switch};
 use crate::agent::loads::case_law::{self, CaseLawInputs, Relay};
+use crate::agent::loads::lawyer;
 use crate::agent::loads::profile::{self, ClaudeKeys, Folders, Login};
 use crate::agent::loads::sandbox::{ClaudeSandbox, Off, SandboxOs, SandboxPaths};
 use crate::browser::seed_sites::SEED_SITES;
@@ -116,7 +117,8 @@ fn note_mcp_sent(actor: &mut Actor, thread: ThreadId, trusted: &[String], case_l
 /// `session/resume`, whose matter folder is `matter`: the profile hook's `_meta` with the
 /// host's switches and keys over it and its tokens filled (the hook gets this launch's own skill
 /// packs token, so Claude's second plugin is this launch's); the servers the lawyer turned on, then
-/// the hook's (none when the firm's `managed-mcp.json` is present); and for Codex, its run folder
+/// the hook's (none when the firm's `managed-mcp.json` is present; none of the lawyer's in the
+/// Safe workspace, nor one whose keychain value is missing); and for Codex, its run folder
 /// and the matter's notes ([`codex_directories`]). Holds the session's tool state for the
 /// thread's header until the session call answers ([`show_tools`]).
 pub(super) fn session_loads(
@@ -173,9 +175,14 @@ pub(super) fn session_loads(
         .as_ref()
         .is_some_and(|(_, part)| *part == BrowserPart::On);
     let sandbox = session_sandbox(actor, thread, kind, &agent_id, &run, matter);
-    // The lawyer's servers this session gets that run unasked (`agent/mcp_trust.rs`).
-    let trusted =
+    // The lawyer's servers this session gets, and those left out (a keychain value or the
+    // program missing, the Safe workspace).
+    let (lawyer_sent, left_out) = lawyer_servers(actor, &run, control);
+    // Of those, the ones that run unasked (`agent/mcp_trust.rs`): only a server this session is
+    // sent, so the trust never names one left out.
+    let mut trusted =
         crate::agent::mcp_trust::trusted_servers(&actor.effective.settings().mcp.servers, control);
+    trusted.retain(|name| lawyer_sent.iter().any(|server| server.name() == name));
     let claude = (kind == Some(AgentKind::Claude)).then_some(ClaudeKeys {
         web_search,
         login,
@@ -225,7 +232,8 @@ pub(super) fn session_loads(
         // What the app heard from a "Try again" follows this newer read.
         super::super::browser_policy::on_launch_read(actor, run.browser_blocked);
     }
-    let mut servers = loads::mcp_servers(&actor.effective, control);
+    let mut servers = lawyer_sent;
+    super::super::mcp::left_out(actor, left_out);
     note_mcp_sent(actor, thread, &trusted, case_law_entry.is_some());
     servers.extend(hook_servers);
     servers.extend(case_law_entry);
@@ -318,6 +326,38 @@ fn claude_sandbox(
         other_matters: &other_matters,
     };
     ClaudeSandbox::for_os(SandboxOs::CURRENT, &paths)
+}
+
+/// The lawyer's servers `run`'s session gets (`agent::loads::lawyer`), and those left out for a
+/// keychain value they lack. None in the Safe workspace.
+fn lawyer_servers(
+    actor: &Actor,
+    run: &RunFolders,
+    control: loads::McpControl,
+) -> (Vec<McpServer>, Vec<lawyer::LeftOut>) {
+    let host: Vec<(OsString, OsString)> = match &actor.wiring.inherited_env {
+        Some(env) => env.clone(),
+        None => std::env::vars_os().collect(),
+    };
+    let lookup = |name: &str| {
+        host.iter()
+            .find(|(key, _)| key.eq_ignore_ascii_case(name))
+            .map(|(_, value)| value.clone())
+    };
+    let windows_env = case_law::windows_env(cfg!(windows), lookup, case_law::windows_directory);
+    let path = host
+        .iter()
+        .find(|(key, _)| key.eq_ignore_ascii_case("PATH"))
+        .and_then(|(key, value)| Some((key.to_str()?, value)));
+    let lawyer = lawyer::Lawyer {
+        control,
+        safe_workspace: actor.protection.safe_workspace(),
+    };
+    let env = lawyer::HostEnv {
+        path,
+        windows_env: &windows_env,
+    };
+    lawyer::servers(&actor.effective, lawyer, &run.mcp_secrets, env)
 }
 
 /// The hook's servers without `case-law`, the `case-law` entry `run`'s session gets (after

@@ -5,6 +5,7 @@
 //! turned-off server (`case-law-2` included), a look-alike shell command and a server's own
 //! question still reach the lawyer.
 
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use clauseo_protocol::{DomainEvent, StopReason, StreamId};
@@ -47,7 +48,7 @@ fn claude_settings(dir: &Dir) -> Value {
 }
 
 fn entry(name: &str) -> Value {
-    json!({"name": name, "command": "{{any}}", "args": [], "env": []})
+    json!({"name": name, "command": "{{any}}", "args": [], "env": "{{any}}"})
 }
 
 /// Claude gets one allow rule per server turned on, in name order, and none for `off` or for a
@@ -69,6 +70,35 @@ fn claude_allows_the_listed_servers_it_gets() {
     );
     let launcher = Wired::new(&dir);
     let host = dir.start_launching(0, Arc::<Wired>::clone(&launcher), |config| config);
+    let matter = host.create_matter("m", &dir.folder("m", &[]));
+    turn(&host, host.create_thread(matter, CLAUDE));
+    host.shutdown();
+}
+
+/// A server turned on but not sent gets no allow rule: one whose program is missing, and a
+/// remote one (not yet started). The trust is the servers the session gets.
+#[test]
+fn claude_allows_only_the_servers_it_is_sent() {
+    let dir = Dir::new("mcp_trust_claude_sent", &[]);
+    let params = json!({"mcpServers": [entry("case"), entry("docs")],
+        "_meta": {"claudeCode": {"options": {"allowedTools": ["mcp__case", "mcp__docs"]}}}});
+    let claude = template(
+        &dir,
+        "trust-sent",
+        &agent_lines("trust-sent", "session/new", &params, &[]),
+    );
+    let mut extra = claude_settings(&dir);
+    let gone = dir.folder("bin", &[]).join("gone").display().to_string();
+    extra["mcp"]["servers"]["gone"] = json!({"command": gone, "enabled": true});
+    extra["mcp"]["servers"]["far"] =
+        json!({"url": "https://tools.example.com/mcp", "enabled": true});
+    settings(&dir, agents(&[(CLAUDE, &claude, json!({}))]), extra);
+    let launcher = Wired::new(&dir);
+    // `gone`'s program is not on this computer.
+    let finds = |typed: &str| (!typed.ends_with("gone")).then(|| PathBuf::from(typed));
+    let host = dir.start_launching(0, Arc::<Wired>::clone(&launcher), |config| {
+        config.with_mcp_resolver(Arc::new(finds))
+    });
     let matter = host.create_matter("m", &dir.folder("m", &[]));
     turn(&host, host.create_thread(matter, CLAUDE));
     host.shutdown();

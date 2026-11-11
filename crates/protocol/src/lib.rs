@@ -157,6 +157,7 @@ mod ids;
 mod limits;
 mod lists;
 mod matter;
+mod mcp;
 mod number;
 mod open_enum;
 mod patch;
@@ -212,7 +213,8 @@ wire_types! {
     browser_policy::{BrowserPolicyState},
     command::{
         CommandEnvelope, CommandOutcome, ConfigValue, ConnectorCommand, DeliveryRequest,
-        HostCommand, MatterSource, RefreshWhy, RestoreRequest,
+        HostCommand, MatterSource, McpCommand, McpSecretEdit, McpSecretValue, McpServerEdit,
+        RefreshWhy, RestoreRequest,
     },
     connectors::{
         Balance, ConnectorErrorKind, ConnectorStatus, ConnectorView, ConnectorsState,
@@ -250,6 +252,7 @@ wire_types! {
         CheckpointKind, FileChoice, FileDecision, FolderPlace, FolderScanned, ImportSummary,
         MatterKind, RestoreScope, SyncService,
     },
+    mcp::{McpControl, McpSecretName, McpServerKind, McpServerView, McpToolsView},
     number::{Count, Cursor, Finite, Seq, Timestamp},
     picks::{AgentPrefs, ConfigPicks},
     patch::{
@@ -320,6 +323,9 @@ pub use command::{
     MAX_ELICITATION_VALUES_BYTES,
     MAX_FILE_LIST,
     MAX_MATTER_NAME_BYTES,
+    MAX_MCP_LIST,
+    MAX_MCP_NAME_BYTES,
+    MAX_MCP_TEXT_BYTES,
     MAX_PATH_LIST_BYTES,
     MAX_PROMPT_BLOCKS,
     MAX_PROMPT_FILES,

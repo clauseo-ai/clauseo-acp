@@ -214,7 +214,7 @@ pub(crate) fn address_ok(url: &str, scheme: &str) -> bool {
 
 /// Whether `authority` is a host, or `[` an IPv6 literal `]`, then `:` and a port of 1 to 5
 /// digits up to 65535 if any.
-fn authority_ok(authority: &str) -> bool {
+pub(crate) fn authority_ok(authority: &str) -> bool {
     let (host, port) = match authority.strip_prefix('[') {
         Some(literal) => match literal.split_once(']') {
             Some((inside, "")) => (inside, None),

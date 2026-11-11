@@ -159,6 +159,9 @@ impl Dir {
             .with_clock(Arc::new(clock.clone()))
             .with_ids(Box::new(SequentialIds::with_run(run)))
             .with_managed_mcp_path(self.root.join("managed-mcp.json"))
+            // Every lawyer's MCP server's program is found where it says, on any machine; the
+            // tests of the search set their own.
+            .with_mcp_resolver(Arc::new(|typed: &str| Some(std::path::PathBuf::from(typed))))
     }
 
     /// The clock of run `run`.

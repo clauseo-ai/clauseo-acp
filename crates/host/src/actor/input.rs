@@ -278,6 +278,8 @@ pub(crate) enum Input {
     Update(super::update::UpdateInput),
     /// A connector command's work, or a relay's event (`connectors.rs`).
     Connector(Box<super::connectors::ConnectorInput>),
+    /// A keychain thread of an MCP server command (`mcp.rs`).
+    Mcp(Box<super::mcp::McpInput>),
     /// A sandbox set-up, removal or check ended, from its thread (`protection/work.rs`).
     Protection(Box<super::protection::work::Done>),
     /// A session proxy's sink reports a site the block list made it refuse (`blocked.rs`), as
@@ -335,6 +337,7 @@ impl std::fmt::Debug for Input {
             Self::SkillPack(_) => "SkillPack",
             Self::Update(_) => "Update",
             Self::Connector(_) => "Connector",
+            Self::Mcp(_) => "Mcp",
             Self::Protection(_) => "Protection",
             Self::SiteBlocked { .. } => "SiteBlocked",
             #[cfg(feature = "test-support")]

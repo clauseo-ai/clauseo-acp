@@ -128,6 +128,47 @@ pub(super) fn failures() -> Vec<DomainEvent> {
             "SendPrompt: prompt text in JSON-escaped bytes is 6291457, over the limit of 6291456",
         ),
     ]
+    .into_iter()
+    .chain(mcp_failures())
+    .collect()
+}
+
+/// The Settings › Tools codes (`mcp.*`): never a turn's failure in practice; here for the corpus.
+fn mcp_failures() -> Vec<DomainEvent> {
+    vec![
+        failed(ErrorCode::McpNameEmpty, "the server has no name"),
+        failed(ErrorCode::McpNameTaken, "another server has this name"),
+        failed(
+            ErrorCode::McpNameReserved,
+            "the name is kept for Clauseo's own tool",
+        ),
+        failed(
+            ErrorCode::McpNameInvalid,
+            "the name holds a character it may not",
+        ),
+        failed(
+            ErrorCode::McpCommandInvalid,
+            "the program is a relative path",
+        ),
+        failed(
+            ErrorCode::McpCommandNotFound,
+            "the program is not on this computer",
+        ),
+        failed(ErrorCode::McpUrlInvalid, "the URL is not https"),
+        failed(
+            ErrorCode::McpHeaderNameInvalid,
+            "a header name is not a token",
+        ),
+        failed(
+            ErrorCode::McpEnvNameInvalid,
+            "a variable name is not an identifier",
+        ),
+        failed(
+            ErrorCode::McpSecretStoreFailed,
+            "the keychain refused the write",
+        ),
+        failed(ErrorCode::McpServerUnknown, "no server of that name"),
+    ]
 }
 
 /// A `TurnFailed` of turn 3 with `code` and `detail`.

@@ -131,6 +131,7 @@ fn replay(events: &mut EventSubscription) -> (Vec<&'static str>, Vec<u64>, Seq) 
             | HostEvent::BrowserPolicy { .. }
             | HostEvent::UpdateChanged(_)
             | HostEvent::ConnectorsChanged(_)
+            | HostEvent::McpToolsChanged(_)
             | HostEvent::CaseLawHint { .. }
             | HostEvent::ProtectionChanged { .. }
             | HostEvent::ProtectionViewChanged { .. }

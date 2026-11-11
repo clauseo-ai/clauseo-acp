@@ -280,8 +280,9 @@ fn hook_servers_follow_the_lawyers_with_their_per_session_values() {
     }}});
     let lawyers = json!([
         {"name": "alpha", "command": "{{any}}", "args": ["--stdio"],
-            "env": [{"name": "REGION", "value": "uk"}]},
-        {"name": "gamma", "command": "{{any}}", "args": [], "env": []},
+            "env": crate::support::lawyer_env(vec![json!({"name": "REGION", "value": "uk"})])},
+        {"name": "gamma", "command": "{{any}}", "args": [],
+            "env": crate::support::lawyer_env(Vec::new())},
     ]);
     let mut servers = lawyers.as_array().cloned().unwrap();
     servers.push(filled_browser());

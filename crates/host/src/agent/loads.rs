@@ -18,6 +18,9 @@ pub(crate) mod case_law;
 mod codex;
 #[cfg(test)]
 mod codex_entry_tests;
+pub(crate) mod lawyer;
+#[cfg(test)]
+mod lawyer_tests;
 #[cfg(test)]
 mod layering_tests;
 pub(crate) mod profile;
@@ -38,8 +41,6 @@ use std::collections::BTreeMap;
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
-use clauseo_acp::McpServer;
-use clauseo_settings::Effective;
 use serde_json::{Map, Value};
 
 /// Claude Code's `settingSources` for every Clauseo session: the user settings only. For a
@@ -352,27 +353,6 @@ pub(crate) fn take_object(map: &mut Map<String, Value>, key: &str) -> Map<String
     match map.remove(key) {
         Some(Value::Object(inner)) => inner,
         _ => Map::new(),
-    }
-}
-
-/// The servers a session gets: under [`McpControl::Clauseo`] the enabled ones, in name order,
-/// as stdio servers; under [`McpControl::Managed`] none.
-pub(crate) fn mcp_servers(effective: &Effective, control: McpControl) -> Vec<McpServer> {
-    match control {
-        McpControl::Managed => Vec::new(),
-        McpControl::Clauseo => effective
-            .enabled_mcp_servers()
-            .map(|(name, server)| McpServer::Stdio {
-                name: name.to_owned(),
-                command: PathBuf::from(&server.command),
-                args: server.args.clone(),
-                env: server
-                    .env
-                    .iter()
-                    .map(|(name, value)| (name.clone(), value.clone()))
-                    .collect(),
-            })
-            .collect(),
     }
 }
 
