@@ -87,7 +87,7 @@ open_data_enum! {
 
 open_unit_enum! {
     /// Why a turn stopped: ACP v1's stop reasons plus Clauseo's `NotAllowed`, `OutsideMatter`,
-    /// `AtLimit` and `Failed`.
+    /// `AtLimit`, `Failed` and `TooLong`.
     pub enum StopReason {
         /// The agent finished. Only this ending moves the thread's queue on.
         EndTurn,
@@ -113,6 +113,11 @@ open_unit_enum! {
         AtLimit,
         /// It failed; a `TurnFailed` before it says why.
         Failed,
+        /// The model refused the turn as too long to read: the question by itself, or the
+        /// conversation with it (decision 0057). A stop, not a failure: no `TurnFailed` comes
+        /// before it, the answer so far is kept, and the queue holds, as for every stop but
+        /// `EndTurn`.
+        TooLong,
     }
     test mod stop_reason;
 }

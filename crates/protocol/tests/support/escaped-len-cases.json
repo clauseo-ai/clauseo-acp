@@ -1,0 +1,70 @@
+{
+  "note": "Shared by crates/protocol/tests/text.rs and ui/app/src/room/thread/prompt-cost.test.ts: escaped_len (Rust) and escapedLen (TypeScript) must give each text its escaped bytes. Add a case here, never in one test only.",
+  "cases": [
+    {
+      "name": "empty",
+      "text": "",
+      "escaped_bytes": 0
+    },
+    {
+      "name": "plain",
+      "text": "Clause 4.2",
+      "escaped_bytes": 10
+    },
+    {
+      "name": "quote",
+      "text": "\"",
+      "escaped_bytes": 2
+    },
+    {
+      "name": "newline",
+      "text": "\n",
+      "escaped_bytes": 2
+    },
+    {
+      "name": "tab",
+      "text": "\t",
+      "escaped_bytes": 2
+    },
+    {
+      "name": "control U+0001",
+      "text": "\u0001",
+      "escaped_bytes": 6
+    },
+    {
+      "name": "control U+001F",
+      "text": "\u001f",
+      "escaped_bytes": 6
+    },
+    {
+      "name": "backslash",
+      "text": "\\",
+      "escaped_bytes": 2
+    },
+    {
+      "name": "DEL U+007F",
+      "text": "",
+      "escaped_bytes": 1
+    },
+    {
+      "name": "Hindi",
+      "text": "अनुबंध की धारा ४",
+      "escaped_bytes": 42
+    },
+    {
+      "name": "emoji",
+      "text": "📄😀",
+      "escaped_bytes": 8
+    },
+    {
+      "name": "mixed",
+      "text": "Line 1\n\t\"quoted\" \\ path \u0001 धारा 😀",
+      "escaped_bytes": 53
+    },
+    {
+      "name": "short escapes",
+      "text": "\b\f\r",
+      "escaped_bytes": 6
+    }
+  ]
+}

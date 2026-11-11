@@ -199,6 +199,8 @@ export const commands = {
 /* Constants */
 export const KNOWN_DOMAIN_EVENT_KINDS = ["thread_created","thread_renamed","thread_archived","thread_snoozed","thread_done","agent_session_attached","agent_named","agent_session_detached","user_message","turn_queued","queued_prompt_edited","steer_resolved","turn_started","text_appended","content_appended","tool_call_started","tool_call_updated","web_search_recorded","page_visited","permission_requested","permission_resolved","permission_expired","elicitation_requested","elicitation_resolved","elicitation_expired","plan_replaced","mode_changed","config_options_replaced","commands_available","usage_updated","notice","compaction_changed","files_changed","turn_failed","turn_stopped_at_limit","turn_ended","step_undone","matter_created","checkpoint_recorded","outside_edits","version_restored","matter_relocated"] as const;
 
+export const MAX_PROMPT_TEXT_BYTES = 6291456 as const;
+
 /* Types */
 /**  One account's limits, as `limits` last read them. */
 export type AccountLimits = {
@@ -1860,6 +1862,8 @@ export type ErrorCode =
 "matter.folder_inside_matter" | 
 /** The folder holds a matter's folder; the error's `matter` names that matter when it is on Clauseo's list. */
 "matter.folder_holds_matter" | 
+/** The prompt's text is over `MAX_PROMPT_TEXT_BYTES` (6 MiB, counted as JSON-escaped bytes), in a `SendPrompt` or an `EditQueuedPrompt`, so nothing was sent; the draft is kept. Only the prompt's text gets this code: every other size limit stays `command.invalid`. */
+"prompt.too_long" | 
 /** A code from a newer Clauseo that this version does not know. Never produced here. */
 "unknown";
 
@@ -2340,8 +2344,8 @@ export type HostCommand =
 	/**
 	 *  The prompt: 1 to [`MAX_PROMPT_BLOCKS`] blocks, no empty `Text` block, at least one
 	 *  character that shows (as [`check_display_title`](crate::check_display_title) counts
-	 *  it) or one `File` block, at most [`MAX_PROMPT_TEXT_BYTES`] of text and
-	 *  [`MAX_PROMPT_FILES`] `File` blocks.
+	 *  it) or one `File` block, at most [`MAX_PROMPT_TEXT_BYTES`] of text (JSON-escaped
+	 *  bytes) and [`MAX_PROMPT_FILES`] `File` blocks.
 	 */
 	content: PromptBlock[],
 	/**
@@ -2359,8 +2363,8 @@ export type HostCommand =
 	/**
 	 *  The new text: it replaces the prompt's first text block, its other text blocks are
 	 *  dropped, and every file block stays where it was. At most
-	 *  [`MAX_PROMPT_TEXT_BYTES`] UTF-8 bytes. Empty keeps only the files, so the host
-	 *  refuses it for a prompt without one (`command.invalid`).
+	 *  [`MAX_PROMPT_TEXT_BYTES`] JSON-escaped bytes. Empty keeps only the files, so the
+	 *  host refuses it for a prompt without one (`command.invalid`).
 	 */
 	text: string,
 } }) & { allow_blocked_site?: never; answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; cancel_browser_install?: never; cancel_scan?: never; cancel_scheduled_update?: never; check_for_update?: never; connector?: never; create_matter?: never; create_thread?: never; decide_revisions?: never; first_act?: never; forget_matter?: never; install_browser?: never; install_update?: never; mark_seen?: never; mark_thread_done?: never; open_matter?: never; recheck_browser_policy?: never; refresh_limits?: never; relocate_matter?: never; remove_queued_prompt?: never; remove_sandbox_setup?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; retry_protection?: never; revoke_allowed_site?: never; scan_folder?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_network?: never; set_privacy_settings?: never; set_skill_pack?: never; set_tool_settings?: never; set_ui_settings?: never; set_update_mode?: never; snooze_thread?: never; sweep_done?: never; undo_step?: never; update_matter?: never } | 
@@ -5735,7 +5739,7 @@ export type StepUndone = {
 
 /**
  *  Why a turn stopped: ACP v1's stop reasons plus Clauseo's `NotAllowed`, `OutsideMatter`,
- *  `AtLimit` and `Failed`.
+ *  `AtLimit`, `Failed` and `TooLong`.
  */
 export type StopReason = 
 /**  The agent finished. Only this ending moves the thread's queue on. */
@@ -5766,6 +5770,13 @@ export type StopReason =
 "at_limit" | 
 /**  It failed; a `TurnFailed` before it says why. */
 "failed" | 
+/**
+ *  The model refused the turn as too long to read: the question by itself, or the
+ *  conversation with it (decision 0057). A stop, not a failure: no `TurnFailed` comes
+ *  before it, the answer so far is kept, and the queue holds, as for every stop but
+ *  `EndTurn`.
+ */
+"too_long" | 
 /**  A value from a newer Clauseo that this version does not know. */
 "unknown";
 

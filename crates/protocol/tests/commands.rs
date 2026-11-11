@@ -75,6 +75,10 @@ mod revisions;
 #[path = "commands/picks.rs"]
 mod picks;
 
+#[cfg(test)]
+#[path = "commands/prompt_text.rs"]
+mod prompt_text;
+
 use std::str::FromStr;
 
 use clauseo_protocol::{
@@ -236,52 +240,18 @@ fn command_rejects_unknown_field() {
 }
 
 #[test]
-fn command_size_limits() {
-    let max_text = "a".repeat(MAX_PROMPT_TEXT_BYTES);
-    // Bytes, not characters: 2-byte characters reach the limit at half as many characters.
-    let accented = "é".repeat(MAX_PROMPT_TEXT_BYTES / 2);
-    let half = "b".repeat(MAX_PROMPT_TEXT_BYTES / 2);
-    let over = MAX_PROMPT_TEXT_BYTES + 1;
-    {
-        let build = send_prompt;
-        // Text: at the limit passes, one byte over fails, summed across blocks.
-        assert!(build(vec![text(&max_text)]).validate().is_ok());
-        assert!(build(vec![text(&accented)]).validate().is_ok());
-        assert!(build(vec![text(&half), text(&half)]).validate().is_ok());
-        let one_over = build(vec![text(&(max_text + "x"))]).validate();
-        assert!(
-            too_large(&one_over, over, MAX_PROMPT_TEXT_BYTES),
-            "{one_over:?}"
-        );
-        let split = build(vec![
-            text(&half),
-            files(1).remove(0),
-            text(&(half.clone() + "x")),
-        ]);
-        assert!(too_large(&split.validate(), over, MAX_PROMPT_TEXT_BYTES));
-        let accented_over = build(vec![text(&(accented + "x"))]).validate();
-        assert!(too_large(&accented_over, over, MAX_PROMPT_TEXT_BYTES));
-        // Files: 50 pass, 51 fail.
-        let mut at_limit = files(MAX_PROMPT_FILES);
-        at_limit.push(text("see these"));
-        assert!(build(at_limit).validate().is_ok());
-        let too_many = build(files(MAX_PROMPT_FILES + 1)).validate();
-        assert!(too_large(&too_many, MAX_PROMPT_FILES + 1, MAX_PROMPT_FILES));
-        // An empty prompt is refused.
-        assert!(invalid(&build(Vec::new()).validate()));
-    }
-}
-
-/// `EditQueuedPrompt` carries text only (its file blocks stay with the queued turn): the text
-/// limit applies, and empty text passes the shape check, since the host knows the files.
-#[test]
-fn edit_queued_text_limit() {
-    let max_text = "a".repeat(MAX_PROMPT_TEXT_BYTES);
-    assert!(edit_queued(&max_text).validate().is_ok());
-    assert!(edit_queued("").validate().is_ok());
-    let over = edit_queued(&(max_text + "x")).validate();
-    let size = MAX_PROMPT_TEXT_BYTES + 1;
-    assert!(too_large(&over, size, MAX_PROMPT_TEXT_BYTES), "{over:?}");
+fn prompt_file_limit() {
+    let build = send_prompt;
+    // Files: 50 pass, 51 fail, as `command.invalid`.
+    let mut at_limit = files(MAX_PROMPT_FILES);
+    at_limit.push(text("see these"));
+    assert!(build(at_limit).validate().is_ok());
+    let too_many = build(files(MAX_PROMPT_FILES + 1)).validate();
+    assert!(too_large(&too_many, MAX_PROMPT_FILES + 1, MAX_PROMPT_FILES));
+    let code = HostError::invalid_command(too_many.unwrap_err()).code();
+    assert_eq!(code, ErrorCode::CommandInvalid);
+    // An empty prompt is refused.
+    assert!(invalid(&build(Vec::new()).validate()));
 }
 
 #[test]
@@ -319,7 +289,7 @@ fn limits_are_public() {
     assert_eq!(MAX_ID_TEXT_BYTES, 256);
     assert_eq!(MAX_FILE_LIST, 10_000);
     assert_eq!(MAX_PATH_LIST_BYTES, 1024 * 1024);
-    assert_eq!(MAX_PROMPT_TEXT_BYTES, 256 * 1024);
+    assert_eq!(MAX_PROMPT_TEXT_BYTES, 6 * 1024 * 1024);
     assert_eq!(MAX_ELICITATION_VALUES_BYTES, 64 * 1024);
     assert_eq!(MAX_BLOB_READ_BYTES, 1024 * 1024);
     assert_eq!(MAX_QUEUED_TURNS, 10);

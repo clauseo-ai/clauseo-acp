@@ -49,6 +49,28 @@ fn escaped_len_counts_json_escapes() {
     }
 }
 
+/// The case table the UI's `escapedLen` reads too (`support/escaped-len-cases.json`), so the
+/// composer's check before sending and the host's limit count alike.
+#[test]
+fn escaped_len_meets_the_shared_case_table() {
+    let table: serde_json::Value =
+        serde_json::from_str(include_str!("support/escaped-len-cases.json")).unwrap();
+    let cases = table["cases"].as_array().unwrap();
+    assert!(cases.len() >= 7, "the table holds its cases");
+    for case in cases {
+        let text = case["text"].as_str().unwrap();
+        let expected = usize::try_from(case["escaped_bytes"].as_u64().unwrap()).unwrap();
+        assert_eq!(escaped_len(text), expected, "{}", case["name"]);
+        let json = serde_json::to_string(text).unwrap();
+        assert_eq!(
+            json.len() - 2,
+            expected,
+            "serde_json disagrees on {}",
+            case["name"]
+        );
+    }
+}
+
 proptest! {
     #[test]
     fn escaped_len_matches_serde_json(text in tricky_text()) {

@@ -305,6 +305,10 @@ error_codes! {
     MatterFolderHoldsMatter = "matter.folder_holds_matter", retryable: false, meaning: "The \
         folder holds a matter's folder; the error's `matter` names that matter when it is on \
         Clauseo's list.";
+    PromptTooLong = "prompt.too_long", retryable: false, meaning: "The prompt's text is over \
+        `MAX_PROMPT_TEXT_BYTES` (6 MiB, counted as JSON-escaped bytes), in a `SendPrompt` or an \
+        `EditQueuedPrompt`, so nothing was sent; the draft is kept. Only the prompt's text gets \
+        this code: every other size limit stays `command.invalid`.";
     Unknown = "unknown", retryable: false, meaning: "A code from a newer Clauseo that this \
         version does not know. Never produced here.";
 }
@@ -428,15 +432,29 @@ impl HostError {
     }
 
     /// A `command.invalid` failure for a command whose own input broke a rule: a value that did
-    /// not parse or a limit `validate` checks. Only for a command's input; a value read back from
-    /// the store that does not parse is `store.corrupt`, which the store builds with
+    /// not parse or a limit `validate` checks. A prompt's text over its limit
+    /// ([`Measure::PromptText`](crate::Measure::PromptText)) is `prompt.too_long` instead, read
+    /// from the typed measure, never from the message. Only for a command's input; a value read
+    /// back from the store that does not parse is `store.corrupt`, which the store builds with
     /// [`HostError::new`].
     #[expect(
         clippy::needless_pass_by_value,
         reason = "taken by value so a caller writes `.map_err(HostError::invalid_command)`"
     )]
     pub fn invalid_command(error: Error) -> Self {
-        Self::new(ErrorCode::CommandInvalid, error.to_string())
+        let prompt_text = matches!(
+            error,
+            Error::TooLarge {
+                what: crate::Measure::PromptText,
+                ..
+            }
+        );
+        let code = if prompt_text {
+            ErrorCode::PromptTooLong
+        } else {
+            ErrorCode::CommandInvalid
+        };
+        Self::new(code, error.to_string())
     }
 }
 

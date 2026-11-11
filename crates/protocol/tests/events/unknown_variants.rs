@@ -115,7 +115,7 @@ fn permission_about() {
 fn stop_reason() {
     use StopReason::{
         AtLimit, Cancelled, EndTurn, Failed, MaxTokens, MaxTurnRequests, NotAllowed, OutsideMatter,
-        Refusal,
+        Refusal, TooLong,
     };
     let cases = [
         (EndTurn, "end_turn"),
@@ -127,6 +127,7 @@ fn stop_reason() {
         (OutsideMatter, "outside_matter"),
         (AtLimit, "at_limit"),
         (Failed, "failed"),
+        (TooLong, "too_long"),
     ];
     unit_enum(&StopReason::ALL, &cases, StopReason::Unknown);
     let names: Vec<_> = StopReason::ALL

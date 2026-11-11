@@ -21,8 +21,10 @@ must therefore stay stable across versions.
   copy still names the code. Clauseo never produces `unknown` itself.
 - `protocol`'s own `Error` (a value that did not parse or broke a rule) maps to no code by
   itself; each caller picks one. `HostError::invalid_command(error)` builds `command.invalid` for a
-  command's own input. A value read back from the store that does not parse, such as a
-  `StreamId` or a `MatterPath` in a row, is `store.corrupt`, built with `HostError::new`.
+  command's own input, except a prompt's text over its limit (`Error::TooLarge` with the typed
+  measure `Measure::PromptText`), which is `prompt.too_long`. A value read back from the store
+  that does not parse, such as a `StreamId` or a `MatterPath` in a row, is `store.corrupt`, built
+  with `HostError::new`.
 - A limit is not an error: reaching an account limit has no code.
 - Retryable means the same call may succeed if made again later with nothing else changed. A
   retryable failure may be retried by the client; any other needs the lawyer or a code fix first.
@@ -133,6 +135,7 @@ as `yes` or `no`. The meaning is also each variant's doc comment in `error_code.
 | `matter.folder_in_clauseo_data` | The folder is, holds or sits inside Clauseo's data folder; one that is or sits inside the matters' history folder in it is `matter.folder_in_matters_root`. | no | host (from matters' refusal on create, import, the folder scan and the folder query; folder PR 2) |
 | `matter.folder_inside_matter` | The folder sits inside a matter's folder; the error's `matter` names that matter when it is on Clauseo's list. | no | host (the registry check on create, import, the folder scan and the folder query; folder PR 2) |
 | `matter.folder_holds_matter` | The folder holds a matter's folder; the error's `matter` names that matter when it is on Clauseo's list. | no | host (the registry check on create, import, the folder scan and the folder query; folder PR 2) |
+| `prompt.too_long` | The prompt's text is over `MAX_PROMPT_TEXT_BYTES` (6 MiB, counted as JSON-escaped bytes), in a `SendPrompt` or an `EditQueuedPrompt`, so nothing was sent; the draft is kept. Only the prompt's text gets this code: every other size limit stays `command.invalid`. | no | `HostError::invalid_command` for `Error::TooLarge` of `Measure::PromptText` (desktop, transport_ws, cli); the composer's own check before sending |
 | `unknown` | A code from a newer Clauseo that this version does not know. Never produced here. | no | decoding only |
 
 Judgement calls on retryable: `agent.launch_failed` and `agent.exited` are retryable because a new

@@ -185,7 +185,7 @@ impl DecideRevisions {
         if self.ids.len() > MAX_REVISIONS {
             return Err(Error::TooLarge {
                 kind: KIND,
-                what: "change ids",
+                what: crate::Measure::ChangeIds,
                 size: self.ids.len(),
                 max: MAX_REVISIONS,
             });

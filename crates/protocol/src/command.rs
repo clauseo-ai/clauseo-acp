@@ -255,8 +255,8 @@ pub enum HostCommand {
         thread: ThreadId,
         /// The prompt: 1 to [`MAX_PROMPT_BLOCKS`] blocks, no empty `Text` block, at least one
         /// character that shows (as [`check_display_title`](crate::check_display_title) counts
-        /// it) or one `File` block, at most [`MAX_PROMPT_TEXT_BYTES`] of text and
-        /// [`MAX_PROMPT_FILES`] `File` blocks.
+        /// it) or one `File` block, at most [`MAX_PROMPT_TEXT_BYTES`] of text (JSON-escaped
+        /// bytes) and [`MAX_PROMPT_FILES`] `File` blocks.
         content: Vec<PromptBlock>,
         /// How to deliver it while a turn runs; missing means queue, and queue is written as a
         /// missing field. A mode this version does not know is refused when the command decodes.
@@ -271,8 +271,8 @@ pub enum HostCommand {
         turn: TurnId,
         /// The new text: it replaces the prompt's first text block, its other text blocks are
         /// dropped, and every file block stays where it was. At most
-        /// [`MAX_PROMPT_TEXT_BYTES`] UTF-8 bytes. Empty keeps only the files, so the host
-        /// refuses it for a prompt without one (`command.invalid`).
+        /// [`MAX_PROMPT_TEXT_BYTES`] JSON-escaped bytes. Empty keeps only the files, so the
+        /// host refuses it for a prompt without one (`command.invalid`).
         text: String,
     },
     /// Remove a queued prompt; its turn ends cancelled without starting.
