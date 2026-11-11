@@ -162,6 +162,38 @@ test("an image inside a link counts as U+FFFC in its text, and a hidden characte
   ).toEqual([" (evil.io)", " (evil.io)", " (evil.io)", null]);
 });
 
+test("a word that folds into a host, or an image nested in markup, shows the real host (iris's second round)", () => {
+  const dots = ["\u1803", "\u1809", "\u0660", "\u06F0", "\uA60E", "\u{1D16D}", "\u{10A50}"];
+  const spaces = ["\u200A", "\u2009", "\u00A0", "\u0BCD"];
+  const words = [
+    ...dots.map((dot) => `ｂａｎｋ${dot}ｃｏｍ`),
+    ...spaces.map((space) => `ｂａｎｋ${space}．ｃｏｍ`),
+    "𝐛𝐚𝐧𝐤᠃𝐜𝐨𝐦",
+    "аррӏе᠃сом",
+  ];
+  const text = [
+    ...words.map((word, k) => `[${word}](https://evil.io/${k})`),
+    "[**_![](data:image/png;base64,iVBORw0KGgo=)_**](https://evil.io/nested)",
+    "[निर्णय देखें](https://evil.io/plain)",
+  ].join(" and ");
+  const seen: (string | undefined)[] = [];
+  act(() =>
+    root.render(
+      <MarkdownHostContext value={{ ...HOST, openExternal: (_url, shown) => seen.push(shown) }}>
+        <Markdown text={text} streaming={false} />
+      </MarkdownHostContext>,
+    ),
+  );
+  const links = [...host.querySelectorAll('a[data-clauseo="link"]')];
+  expect(links).toHaveLength(words.length + 2);
+  const notes = links.map(
+    (link) => link.querySelector('[data-clauseo="link-host"]')?.textContent ?? null,
+  );
+  expect(notes).toEqual([...words.map(() => " (evil.io)"), " (evil.io)", null]);
+  click(links[words.length]);
+  expect(seen[0]).toContain("\uFFFC");
+});
+
 test("a file link names a paper only through PaperLinksContext: a click or Enter sends that paper's path to openPath, never a navigation", () => {
   const asked: string[] = [];
   const papers: PaperLinks = (href) => {
