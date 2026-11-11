@@ -143,7 +143,8 @@ pub async fn load_skill_at<T: Timer>(
 ///
 /// - A text with a frontmatter (its first line `---`, ending in LF or CRLF) keeps stetdoc's
 ///   `description`; every other key is dropped. A frontmatter with no `description` is an
-///   error for this skill alone. A CRLF frontmatter's text is read with LF line ends.
+///   error for this skill alone. A CRLF frontmatter is read with LF line ends; the body after
+///   it is kept as it is.
 /// - A text with none (stetdoc 0.9.3 prints the body alone) gets one from Clauseo: the
 ///   description is the first `# ` heading in its first [`HEADING_WITHIN`] non-empty lines,
 ///   trimmed, or [`FALLBACK_DESCRIPTION`]; the body is the text, unchanged.
@@ -154,7 +155,7 @@ pub fn skill_source(version: &str, text: &[u8]) -> Result<SkillSource, ProfileEr
         .map_err(|err| ProfileError::skill(STETDOC, format!("its text is not UTF-8: {err}")))?;
     let text = text.strip_prefix('\u{feff}').unwrap_or(text);
     let rendered = if text.starts_with("---\r\n") {
-        with_own_frontmatter(&text.replace("\r\n", "\n"))?
+        with_own_frontmatter(&lf_frontmatter(text))?
     } else if text.starts_with("---\n") {
         with_own_frontmatter(text)?
     } else {
@@ -189,15 +190,32 @@ fn with_own_frontmatter(text: &str) -> Result<String, ProfileError> {
     ))
 }
 
-/// The first `# ` heading's text, trimmed, in the first [`HEADING_WITHIN`] non-empty lines of
-/// `text` (LF or CRLF line ends); none when there is none or it is empty.
+/// `text`, whose first line is `---` with a CRLF end, with LF ends in its frontmatter alone: up
+/// to and including the next `---` line (all of `text` when there is none, which the parse
+/// then refuses). The body after it is kept byte for byte.
+fn lf_frontmatter(text: &str) -> String {
+    let mut end = text.len();
+    let mut at = 0;
+    for (index, line) in text.split_inclusive('\n').enumerate() {
+        at += line.len();
+        if index > 0 && line.trim_end_matches(['\r', '\n']) == "---" {
+            end = at;
+            break;
+        }
+    }
+    let (head, body) = text.split_at(end);
+    format!("{}{body}", head.replace("\r\n", "\n"))
+}
+
+/// The first non-empty `# ` heading's text, trimmed, in the first [`HEADING_WITHIN`] non-empty
+/// lines of `text` (LF or CRLF line ends); none when there is none.
 fn first_heading(text: &str) -> Option<&str> {
     text.lines()
         .filter(|line| !line.trim().is_empty())
         .take(HEADING_WITHIN)
-        .find_map(|line| line.strip_prefix("# "))
+        .filter_map(|line| line.strip_prefix("# "))
         .map(str::trim)
-        .filter(|heading| !heading.is_empty())
+        .find(|heading| !heading.is_empty())
 }
 
 /// Why a [`run_within`] gave no text to use: the run only passed its limit (a stetdoc that may

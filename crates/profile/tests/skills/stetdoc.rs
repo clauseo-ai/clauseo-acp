@@ -121,6 +121,13 @@ fn a_text_with_no_heading_gets_the_fallback_and_stetdocs_frontmatter_wins() {
         skill_text(&loaded),
         format!("{}{crlf_heading}", own_front("Edits Word."))
     );
+    // An empty heading is passed over for the next one.
+    let empty_first = "# \n#\n# Edits Word.\nbody\n";
+    let loaded = skill_source("stetdoc 1", empty_first.as_bytes()).unwrap();
+    assert_eq!(
+        skill_text(&loaded),
+        format!("{}{empty_first}", own_front("Edits Word."))
+    );
 
     let own = "---\nname: other\ndescription: Edit Word files.\n---\n# stetdoc\n";
     let expected = "---\nname: stetdoc\ndescription: \"Edit Word files.\"\n---\n# stetdoc\n";
@@ -128,14 +135,24 @@ fn a_text_with_no_heading_gets_the_fallback_and_stetdocs_frontmatter_wins() {
         skill_text(&skill_source("v", own.as_bytes()).unwrap()),
         expected
     );
-    let own_crlf = own.replace('\n', "\r\n");
+    // A CRLF frontmatter is read with LF ends; the body after it stays byte for byte, a
+    // `---` rule in it included.
+    let own_crlf = "---\r\nname: other\r\ndescription: Edit Word files.\r\n---\r\n\
+                    # stetdoc\r\n---\r\nmixed\nends\r\n";
+    let expected_crlf = "---\nname: stetdoc\ndescription: \"Edit Word files.\"\n---\n\
+                         # stetdoc\r\n---\r\nmixed\nends\r\n";
     let bom_crlf = format!("\u{feff}{own_crlf}");
-    for text in [own_crlf.as_str(), bom_crlf.as_str()] {
+    for text in [own_crlf, bom_crlf.as_str()] {
         assert_eq!(
             skill_text(&skill_source("v", text.as_bytes()).unwrap()),
-            expected
+            expected_crlf
         );
     }
+    // Read back from that form (as from the cache), it is the same.
+    assert_eq!(
+        skill_text(&skill_source("v", expected_crlf.as_bytes()).unwrap()),
+        expected_crlf
+    );
     // A frontmatter of stetdoc's with no description is still refused, not given a heading's.
     let error = skill_source("v", b"---\nname: stetdoc\n---\n# stetdoc\n").unwrap_err();
     assert!(matches!(error, ProfileError::Skill { .. }), "{error:?}");

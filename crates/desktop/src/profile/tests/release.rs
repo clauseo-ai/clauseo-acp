@@ -201,11 +201,14 @@ fn a_missing_stetdoc_or_one_whose_version_fails_is_absent_for_the_agents() {
 }
 
 /// A stand-in whose first `--version` takes 5 s (as a new program's first run while the OS
-/// scans it), its later runs as `then` says: `ok` answers as [`STUB`], `fail` exits 3.
+/// scans it), its later runs as `then` says: `ok` answers as [`STUB`], `fail` exits 3. Its
+/// second run (the background check's `--version`) waits 1.5 s first, so a test sees the
+/// state the build left before the check's answer lands.
 fn slow_once(then: &str) -> Vec<u8> {
     format!(
         "#!/bin/sh\nd=\"$(dirname \"$0\")\"\n\
-         if [ ! -e \"$d/ran\" ]; then : > \"$d/ran\"; sleep 5; fi\n\
+         if [ ! -e \"$d/ran\" ]; then : > \"$d/ran\"; sleep 5\n\
+         elif [ ! -e \"$d/ran2\" ]; then : > \"$d/ran2\"; sleep 1.5; fi\n\
          [ {then} = fail ] && exit 3\n\
          if [ \"$1\" = --version ]; then echo 'stetdoc 0.9.3'\n\
          elif [ \"$*\" = 'skills get core' ]; then cat \"$d/skill.txt\"\n\
@@ -231,11 +234,12 @@ fn bundle_within_7_s(
         .expect("the build returns within 7 s")
 }
 
-/// Waits up to 40 s, in steps of 100 ms, for `done` to hold of `hook`.
+/// Waits up to 10 s, in steps of 100 ms, for `done` to hold of `hook`: the background check's
+/// answer lands about 1.5 s after the build.
 fn eventually(hook: &DesktopProfile, done: impl Fn(&DesktopProfile) -> bool) -> bool {
     // A channel whose sender stays alive: each `recv_timeout` waits out its step.
     let (_tx, rx) = std::sync::mpsc::channel::<()>();
-    for _ in 0..400 {
+    for _ in 0..100 {
         if done(hook) {
             return true;
         }
