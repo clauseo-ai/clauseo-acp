@@ -1,13 +1,12 @@
 //! Settings › Tools' import of the MCP servers Claude Desktop, Claude Code and Codex set up
-//! (`McpCommand::Import`), and the counts the screen's import buttons show
-//! (`McpToolsView::importable`).
+//! (`McpCommand::Import`); the counts the screen's import buttons show come from `scan.rs`.
 //!
 //! - The apps' config files are read by the finder (`HostConfig::with_mcp_import`, over
 //!   `clauseo_settings::mcp_import::find_candidates`), always off the actor and bounded
 //!   (`finder.rs`: one worker of each kind at a time, waited for at most 10 s): at the start,
 //!   at each app catch-up (a window opening), after a removal, and at each import. One scan runs
 //!   at a time; asks while it runs fold into one more after it.
-//! - A scan keeps names and sources only ([`Found`]), never a value. The counts are worked out
+//! - A scan keeps names and sources only (`scan::Found`), never a value. The counts are worked out
 //!   from it at each view against the list as it is then, so an import or a save lowers them at
 //!   once.
 //! - A server counts, and imports, unless a problem blocks it: already added, not approved in
@@ -32,7 +31,7 @@
 
 use clauseo_connectors::{SecretStore, StoreError};
 use clauseo_protocol::{
-    ErrorCode, McpImportResult, McpImportSource, McpImportable, McpSkipReason, McpSkipped,
+    ErrorCode, MCP_SKIPPED_MAX, McpImportResult, McpImportSource, McpSkipReason, McpSkipped,
 };
 use clauseo_settings::mcp_import::{CandidateKind, ImportCandidate, ImportSecret, Problem, Source};
 use clauseo_settings::{
@@ -43,9 +42,8 @@ use zeroize::Zeroizing;
 
 use super::super::Actor;
 use super::super::commands::CommandCtx;
-use super::super::input::Input;
 use super::keychain::{self, Step, Undo};
-use super::{McpInput, finder, view};
+use super::{McpInput, finder};
 use crate::config::mcp::McpLaunchAsk;
 use crate::error::Error;
 
@@ -53,33 +51,8 @@ use crate::error::Error;
 #[path = "import_tests.rs"]
 mod tests;
 
-/// The name of a scan's thread; the finder itself runs on a worker of [`super::finder`].
-const SCAN_THREAD: &str = "clauseo-mcp-import";
-
-/// One server a scan found, as the actor keeps it: its name in Clauseo, the apps that set it
-/// up, and whether a problem blocks it. Never a value.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct Found {
-    name: String,
-    sources: Vec<McpImportSource>,
-    blocked: bool,
-}
-
-impl Found {
-    fn of(candidate: &ImportCandidate) -> Self {
-        let mut sources: Vec<McpImportSource> = candidate.sources.iter().map(source_of).collect();
-        sources.sort_unstable();
-        sources.dedup();
-        Self {
-            name: candidate.name.clone(),
-            sources,
-            blocked: skip_of(&candidate.problems).is_some(),
-        }
-    }
-}
-
 /// The app a source belongs to: Claude Code's user and project scopes are one.
-fn source_of(source: &Source) -> McpImportSource {
+pub(super) fn source_of(source: &Source) -> McpImportSource {
     match source {
         Source::ClaudeDesktop => McpImportSource::ClaudeDesktop,
         Source::ClaudeCodeUser | Source::ClaudeCodeProject { .. } => McpImportSource::ClaudeCode,
@@ -89,7 +62,7 @@ fn source_of(source: &Source) -> McpImportSource {
 
 /// Why a candidate with `problems` is skipped (the first reason in declaration order), with the
 /// program for `command_not_found`; `None` when it imports.
-fn skip_of(problems: &[Problem]) -> Option<(McpSkipReason, Option<String>)> {
+pub(super) fn skip_of(problems: &[Problem]) -> Option<(McpSkipReason, Option<String>)> {
     McpSkipReason::ALL.into_iter().find_map(|reason| {
         problems.iter().find_map(|problem| match (reason, problem) {
             (McpSkipReason::CommandNotFound, Problem::CommandNotFound { original }) => {
@@ -110,82 +83,6 @@ fn skip_of(problems: &[Problem]) -> Option<(McpSkipReason, Option<String>)> {
 fn program_name(original: &str) -> String {
     let name = original.rsplit(['/', '\\']).next().unwrap_or(original);
     if name.is_empty() { original } else { name }.to_owned()
-}
-
-/// Each app with servers that would import now, with how many: the last scan's unblocked
-/// servers whose name the list does not hold in any case. Empty before the first scan.
-pub(crate) fn importable(actor: &Actor) -> Vec<McpImportable> {
-    let Some(found) = &actor.mcp.found else {
-        return Vec::new();
-    };
-    let held = actor.effective.mcp_servers();
-    let free = |name: &str| !held.keys().any(|have| have.eq_ignore_ascii_case(name));
-    McpImportSource::ALL
-        .into_iter()
-        .filter_map(|source| {
-            let count = found
-                .iter()
-                .filter(|one| !one.blocked && one.sources.contains(&source) && free(&one.name))
-                .count();
-            let count = u32::try_from(count).unwrap_or(u32::MAX);
-            (count > 0).then_some(McpImportable { source, count })
-        })
-        .collect()
-}
-
-/// Starts a scan on a thread of its own, unless one runs (then one more follows it), the
-/// finder is not wired, or the firm decides the list. Its answer is [`McpInput::Scanned`].
-pub(crate) fn scan(actor: &mut Actor) {
-    let Some(find) = actor.wiring.mcp_find.clone() else {
-        return;
-    };
-    if actor.mcp.scanning {
-        actor.mcp.rescan = true;
-        return;
-    }
-    if actor.effective.mcp_locked() || view::managed(actor) {
-        return;
-    }
-    let existing: Vec<String> = actor.effective.mcp_servers().keys().cloned().collect();
-    let post = actor.post.clone();
-    let busy = std::sync::Arc::clone(&actor.mcp.scan_busy);
-    let started = std::thread::Builder::new()
-        .name(SCAN_THREAD.to_owned())
-        .spawn(move || {
-            let mut unanswered = ScanUnanswered(Some(post.clone()));
-            let found = finder::bounded(&find, existing, &busy, finder::TIMEOUT)
-                .map(|found| found.iter().map(Found::of).collect());
-            unanswered.0 = None;
-            let _gone = post.try_send(Input::Mcp(Box::new(McpInput::Scanned(found))));
-        });
-    match started {
-        Ok(_) => actor.mcp.scanning = true,
-        Err(error) => tracing::warn!(%error, "the MCP import scan did not start"),
-    }
-}
-
-/// Posts an empty [`McpInput::Scanned`] when dropped while armed: the scan panicked.
-struct ScanUnanswered(Option<async_channel::Sender<Input>>);
-
-impl Drop for ScanUnanswered {
-    fn drop(&mut self) {
-        if let Some(post) = self.0.take() {
-            let _gone = post.try_send(Input::Mcp(Box::new(McpInput::Scanned(None))));
-        }
-    }
-}
-
-/// A scan ended: its servers kept (unless it failed), the view sent when it changed, and the
-/// scan asked for meanwhile started.
-pub(super) fn on_scanned(actor: &mut Actor, found: Option<Vec<Found>>) {
-    actor.mcp.scanning = false;
-    if let Some(found) = found {
-        actor.mcp.found = Some(found);
-        view::publish(actor);
-    }
-    if std::mem::take(&mut actor.mcp.rescan) {
-        scan(actor);
-    }
 }
 
 /// One server ready to import: its entry, and the keychain writes of its values.
@@ -225,6 +122,8 @@ pub(crate) struct Imported {
     source: McpImportSource,
     written: Vec<Written>,
     skipped: Vec<McpSkipped>,
+    /// The servers the read cap left unread.
+    left_out: usize,
 }
 
 /// Why an import's keychain thread saved nothing.
@@ -254,6 +153,7 @@ pub(super) fn import(
             source,
             written: Vec::new(),
             skipped: Vec::new(),
+            left_out: 0,
         };
         on_imported(actor, ctx, Ok(Box::new(nothing)));
         return Ok(());
@@ -264,11 +164,13 @@ pub(super) fn import(
     let confirm = actor.wiring.mcp_confirm.clone();
     super::off_actor(actor, Some(ctx), move || {
         let existing_names = existing.clone();
-        let Some(found) = finder::bounded(&find, existing, &busy, finder::TIMEOUT) else {
+        let job = move || find.find(&existing);
+        let Some(found) = finder::bounded(job, &busy, finder::TIMEOUT) else {
             let result = Err(ImportFailed::Finder);
             return McpInput::Imported { ctx, result };
         };
-        let (mut ready, skipped) = pick(found, source, &existing_names);
+        let left_out = found.left_out;
+        let (mut ready, skipped) = pick(found.candidates, source, &existing_names);
         if !ready.is_empty() {
             let asks: Vec<McpLaunchAsk> = ready.iter().map(Ready::ask).collect();
             if !confirm.is_some_and(|confirm| confirm.confirm_import(&asks)) {
@@ -285,6 +187,7 @@ pub(super) fn import(
                     source,
                     written,
                     skipped,
+                    left_out,
                 })
             })
             .map_err(ImportFailed::Store);
@@ -304,10 +207,12 @@ fn pick(
         if !candidate.sources.iter().any(|of| source_of(of) == source) {
             continue;
         }
-        // A name the list holds in any case is never replaced or renamed, and gets no keychain
-        // write: Credential Manager's accounts are case-blind.
+        // A name the list holds in any case, or one this import takes already in another case,
+        // is never replaced or renamed, and gets no keychain write: Credential Manager's accounts
+        // are case-blind.
         let held = existing
             .iter()
+            .chain(ready.iter().map(|one: &Ready| &one.name))
             .any(|name| name.eq_ignore_ascii_case(&candidate.name));
         if held {
             skipped.push(skipped_as(candidate.name, McpSkipReason::AlreadyAdded));
@@ -458,6 +363,7 @@ pub(super) fn on_imported(
         source,
         written,
         mut skipped,
+        left_out,
     } = match result {
         Ok(imported) => *imported,
         Err(failed) => {
@@ -517,13 +423,20 @@ pub(super) fn on_imported(
         ?source,
         imported = imported.len(),
         skipped = skipped.len(),
+        left_out,
         "MCP servers imported"
     );
+    // The view names at most `MCP_SKIPPED_MAX` skipped servers; the rest, and those the read
+    // cap left unread, are counted.
+    let past = skipped.len().saturating_sub(MCP_SKIPPED_MAX);
+    skipped.truncate(MCP_SKIPPED_MAX);
+    let others = u32::try_from(past.saturating_add(left_out)).unwrap_or(u32::MAX);
     actor.mcp.last_import = Some(McpImportResult {
         command: ctx.id,
         source,
         imported,
         skipped,
+        others,
     });
     super::changed(actor, ctx);
     put_back(actor, undos, None);

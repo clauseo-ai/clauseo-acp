@@ -338,6 +338,7 @@ pub use command::{
     // A checked command inside Rust; never serialised (the client sends `CommandEnvelope`).
     ValidatedCommand,
 };
+pub use mcp::MCP_SKIPPED_MAX;
 // The text a `RedactedString` encodes and prints as.
 pub use connectors::REDACTED_TEXT;
 // How `UpdateMatter` changes an optional detail; its fields export as the value's type or null.

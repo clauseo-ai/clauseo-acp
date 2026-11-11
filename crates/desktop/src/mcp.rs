@@ -175,5 +175,5 @@ mod tests;
 /// `config` finding the MCP servers Claude Desktop, Claude Code and Codex set up on this
 /// computer, for Settings › Tools' import.
 pub(crate) fn with_mcp_import(config: HostConfig) -> HostConfig {
-    config.with_mcp_import(Arc::new(clauseo_host::find_mcp_imports_here))
+    config.with_mcp_import(Arc::new(clauseo_host::McpHereFinder))
 }

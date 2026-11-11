@@ -42,6 +42,7 @@ mod ask;
 pub(crate) mod finder;
 pub(crate) mod import;
 pub(crate) mod keychain;
+pub(crate) mod scan;
 pub(crate) mod view;
 
 #[cfg(test)]
@@ -63,7 +64,9 @@ pub(crate) struct McpOnActor {
     /// The view last sent to app subscribers.
     pub(crate) sent: Option<clauseo_protocol::McpToolsView>,
     /// What the last import scan found; `None` before the first one ends.
-    pub(crate) found: Option<Vec<import::Found>>,
+    pub(crate) found: Option<Vec<scan::Found>>,
+    /// What the last fresh scan saw, so a scan with nothing changed reads nothing.
+    pub(crate) last_scan: Option<scan::LastScan>,
     /// Whether a scan runs.
     pub(crate) scanning: bool,
     /// Whether another scan was asked for while one ran.
@@ -101,8 +104,8 @@ pub(crate) enum McpInput {
         ctx: CommandCtx,
         result: Result<Box<import::Imported>, import::ImportFailed>,
     },
-    /// An import scan ended; `None` when it panicked.
-    Scanned(Option<Vec<import::Found>>),
+    /// An import scan ended; `None` when it panicked or timed out.
+    Scanned(Option<scan::ScanAnswer>),
 }
 
 impl std::fmt::Debug for McpInput {
@@ -121,7 +124,7 @@ impl std::fmt::Debug for McpInput {
 /// The first import scan starts too.
 pub(super) fn start(actor: &mut Actor) {
     actor.mcp.sent = Some(view::view(actor));
-    import::scan(actor);
+    scan::scan(actor);
 }
 
 /// One command: run now, or queued behind the keychain work running.
@@ -179,7 +182,7 @@ fn remove(actor: &mut Actor, ctx: CommandCtx, name: &str) -> Result<(), Error> {
     actor.mcp.missing.retain(|(server, _)| server != name);
     changed(actor, ctx);
     // A server the last scan found already added may import again.
-    import::scan(actor);
+    scan::scan(actor);
     let accounts = keychain::accounts(name, &removed);
     tidy(actor, accounts, None);
     Ok(())
@@ -341,7 +344,7 @@ fn tidy(actor: &mut Actor, accounts: Vec<String>, answer: Option<(CommandCtx, Er
 /// A keychain thread's answer.
 pub(super) fn on_input(actor: &mut Actor, input: McpInput) {
     match input {
-        McpInput::Scanned(found) => import::on_scanned(actor, found),
+        McpInput::Scanned(found) => scan::on_scanned(actor, found),
         McpInput::Imported { ctx, result } => {
             actor.mcp.running = false;
             import::on_imported(actor, ctx, result);

@@ -34,7 +34,7 @@ pub(crate) fn view(actor: &Actor) -> McpToolsView {
         .map(|(name, server)| server_view(actor, name, server))
         .collect();
     let importable = match control {
-        McpControl::Lawyer => super::import::importable(actor),
+        McpControl::Lawyer => super::scan::importable(actor),
         McpControl::FirmList | McpControl::FirmManaged => Vec::new(),
     };
     McpToolsView {

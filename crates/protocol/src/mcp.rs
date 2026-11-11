@@ -121,9 +121,17 @@ pub struct McpImportResult {
     pub source: McpImportSource,
     /// The servers added, by their name in Clauseo, in name order.
     pub imported: Vec<String>,
-    /// The app's servers left out, in name order, each with why.
+    /// The app's servers left out, in name order, each with why; at most
+    /// [`MCP_SKIPPED_MAX`].
     pub skipped: Vec<McpSkipped>,
+    /// The servers left out past [`MCP_SKIPPED_MAX`], and those the app's config held past
+    /// the per-source read cap (counted, never read); 0 when `skipped` names them all.
+    #[serde(default)]
+    pub others: u32,
 }
+
+/// The most servers `McpImportResult::skipped` names; the rest are counted in `others`.
+pub const MCP_SKIPPED_MAX: usize = 100;
 
 /// A server an import left out.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

@@ -15,7 +15,7 @@ use super::{CandidateKind, Entry, Env, ImportSecret, MAX_CONFIG_BYTES, Problem, 
 
 /// Adds the enabled servers of Codex's `config.toml` to `out`. `CODEX_HOME` names the folder
 /// when it is set, else `~/.codex`.
-pub(crate) fn read(env: &Env<'_>, out: &mut Vec<Entry>) {
+pub(crate) fn read(env: &Env<'_>, out: &mut super::Entries) {
     let config = match path::var(env, "CODEX_HOME") {
         Some(dir) => join(env.os, &dir, "config.toml"),
         None => join(env.os, &path::home(env), ".codex/config.toml"),
@@ -29,7 +29,8 @@ pub(crate) fn read(env: &Env<'_>, out: &mut Vec<Entry>) {
     let Some(servers) = doc.get("mcp_servers").and_then(toml::Value::as_table) else {
         return;
     };
-    for (name, value) in servers {
+    out.left_out += servers.len().saturating_sub(super::MAX_ENTRIES_PER_SOURCE);
+    for (name, value) in servers.iter().take(super::MAX_ENTRIES_PER_SOURCE) {
         let Some(table) = value.as_table() else {
             continue;
         };

@@ -7,36 +7,30 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
-use clauseo_settings::mcp_import::ImportCandidate;
-
-use crate::config::mcp::McpFinder;
-
 /// How long a scan or an import waits for the finder.
 pub(crate) const TIMEOUT: Duration = Duration::from_secs(10);
 
 /// The name of a finder's worker thread.
 const WORKER_THREAD: &str = "clauseo-mcp-find";
 
-/// What `find` found for `existing`, or `None` when it took longer than `timeout`, panicked,
-/// its thread did not start, or the worker before it (`busy`) still runs.
-pub(crate) fn bounded(
-    find: &McpFinder,
-    existing: Vec<String>,
+/// What `work` (a run of the finder) answered, or `None` when it took longer than `timeout`,
+/// panicked, its thread did not start, or the worker before it (`busy`) still runs.
+pub(crate) fn bounded<T: Send + 'static>(
+    work: impl FnOnce() -> T + Send + 'static,
     busy: &Arc<AtomicBool>,
     timeout: Duration,
-) -> Option<Vec<ImportCandidate>> {
+) -> Option<T> {
     if busy.swap(true, Ordering::AcqRel) {
         tracing::warn!("the MCP import finder before still runs; this one does not start");
         return None;
     }
     let (send, receive) = std::sync::mpsc::sync_channel(1);
-    let find = Arc::clone(find);
     let clear = Clear(Arc::clone(busy));
     let started = std::thread::Builder::new()
         .name(WORKER_THREAD.to_owned())
         .spawn(move || {
             let _clear = clear;
-            let _gone = send.send(find(&existing));
+            let _gone = send.send(work());
         });
     if let Err(error) = started {
         tracing::warn!(%error, "the MCP import finder did not start");

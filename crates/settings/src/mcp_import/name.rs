@@ -1,7 +1,7 @@
 //! Names: the MCP name rules, the reserved names, and the merge of entries into candidates.
 
 use super::{CandidateKind, Entry, ImportCandidate, Problem, Source};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 /// The longest MCP server name (leaf/mcp.rs).
 const NAME_MAX: usize = 64;
@@ -26,23 +26,23 @@ struct Group {
 
 /// Merges the entries into candidates. The first config of a base name keeps the name; each
 /// further distinct config gets ` 2`, ` 3`, … as `-2`, `-3`, skipping names already taken.
+/// Names compare case-blind throughout (Credential Manager's accounts are): `GitHub` and
+/// `github` are one base name, and either is already added when Clauseo has the other.
 pub(crate) fn assemble(entries: Vec<Entry>, existing: &[String]) -> Vec<ImportCandidate> {
     let mut groups: Vec<Group> = Vec::new();
+    let mut by_base: HashMap<String, usize> = HashMap::new();
     for entry in entries {
         let (base, name_problem) = clean(&entry.raw_name);
         let mut problems = entry.problems;
         problems.extend(name_problem);
         let kind = normalized(entry.kind);
-        let gi = groups
-            .iter()
-            .position(|group| group.base == base)
-            .unwrap_or_else(|| {
-                groups.push(Group {
-                    base: base.clone(),
-                    variants: Vec::new(),
-                });
-                groups.len() - 1
+        let gi = *by_base.entry(base.to_ascii_lowercase()).or_insert_with(|| {
+            groups.push(Group {
+                base: base.clone(),
+                variants: Vec::new(),
             });
+            groups.len() - 1
+        });
         let group = &mut groups[gi];
         let vi = group
             .variants
@@ -65,8 +65,12 @@ pub(crate) fn assemble(entries: Vec<Entry>, existing: &[String]) -> Vec<ImportCa
     }
 
     // Names taken before any suffix is chosen: the base names and the names Clauseo has.
-    let mut taken: HashSet<String> = existing.iter().cloned().collect();
-    taken.extend(groups.iter().map(|group| group.base.clone()));
+    let held: HashSet<String> = existing
+        .iter()
+        .map(|name| name.to_ascii_lowercase())
+        .collect();
+    let mut taken = held.clone();
+    taken.extend(groups.iter().map(|group| group.base.to_ascii_lowercase()));
 
     let mut out = Vec::new();
     for group in groups {
@@ -84,7 +88,7 @@ pub(crate) fn assemble(entries: Vec<Entry>, existing: &[String]) -> Vec<ImportCa
                 );
                 name
             };
-            if existing.contains(&name) {
+            if held.contains(&name.to_ascii_lowercase()) {
                 push_unique(&mut problems, Problem::AlreadyAdded);
             }
             out.push(ImportCandidate {
@@ -147,9 +151,9 @@ fn next_free(base: &str, taken: &mut HashSet<String>) -> String {
             let stem_len = base.len().min(NAME_MAX - suffix.len());
             format!("{}{suffix}", &base[..stem_len])
         })
-        .find(|candidate| !taken.contains(candidate))
+        .find(|candidate| !taken.contains(&candidate.to_ascii_lowercase()))
         .unwrap_or_else(|| base.to_owned());
-    taken.insert(name.clone());
+    taken.insert(name.to_ascii_lowercase());
     name
 }
 
