@@ -44,6 +44,12 @@ use crate::write;
 pub(crate) const START_WAIT: Duration = Duration::from_secs(15);
 /// The folder in the profile Chrome downloads into, before `downloads.rs` moves each file.
 pub(crate) const STAGING: &str = "downloads-staging";
+/// How long a stop waits for Chrome's process group to be gone, as the reaper does (`reaper.rs`).
+#[cfg(unix)]
+const GROUP_WAIT: Duration = Duration::from_secs(5);
+/// How often that wait looks.
+#[cfg(unix)]
+const GROUP_LOOK: Duration = Duration::from_millis(20);
 /// How often the watcher looks whether Chrome has exited.
 const WATCH_EVERY: Duration = Duration::from_millis(250);
 /// The longest stderr line kept; longer ones are skipped.
@@ -93,8 +99,8 @@ pub(crate) struct Spec<'a> {
     pub(crate) env: &'a BTreeMap<String, OsString>,
 }
 
-/// The running Chrome. Dropping it kills Chrome's tree and moves the last finished downloads;
-/// the profile stays.
+/// The running Chrome. Dropping it kills Chrome's tree, waits (Unix) until no process of its group
+/// is left, and moves the last finished downloads; the profile stays.
 pub(crate) struct Chrome {
     child: Arc<Mutex<Tracked>>,
     /// Unix: also the id of Chrome's process group.
@@ -313,6 +319,32 @@ impl Chrome {
             tracked.reaped();
         }
         drop(tracked.child.wait());
+        drop(tracked);
+        #[cfg(unix)]
+        self.wait_for_group();
+    }
+
+    /// Returns once no process is left in Chrome's group, at most [`GROUP_WAIT`]. Chrome's
+    /// helpers (its zygotes, GPU process, broker, utility services) outlive a browser process
+    /// that died by itself, which the guard then does not signal (its group's id may be reused
+    /// once it is reaped), and still write to the profile until they notice and exit; a group the
+    /// guard killed takes a moment to go too. Before this wait the guard deleted the profile
+    /// while one still ran, and it wrote the folder back: the real-Chrome test
+    /// `calls_after_the_final_stop_start_no_chrome` found the profile left after the guard's exit
+    /// (CI #907, 2026-11-10). Only probes the group (`kill(-pgid, 0)`), never signals it.
+    #[cfg(unix)]
+    fn wait_for_group(&self) {
+        let group = super::record::ChromeProcess {
+            id: self.pid,
+            created: 0,
+        };
+        for _ in 0..GROUP_WAIT.as_millis() / GROUP_LOOK.as_millis() {
+            if group.gone() {
+                return;
+            }
+            pause(GROUP_LOOK);
+        }
+        super::note("Chrome's helpers were still running when the guard stopped waiting for them");
     }
 }
 
