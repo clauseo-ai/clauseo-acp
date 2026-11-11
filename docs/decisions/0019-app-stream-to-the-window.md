@@ -109,10 +109,15 @@ host added later reached the page without anyone deciding it should.
   a `session_info_update` whose `sessionFailure` has category `connection` (its `transport_lost`),
   Codex's fallback warning as a `notice`, and the end of its retries as the prompt's `end_turn`
   with a `connection` failure of severity `error`. Codex 0.162 retries a failed connection without
-  end, so only the watch ends such a turn. A `connection` failure arms the watch like the note;
-  the notice is the note and never reaches the transcript; a prompt that ends on one ends
-  `agent.offline` when a note armed the watch or its title names a connection failure, and never
-  when it says a server answered.
+  end, so only the watch ends such a turn. A `connection` failure arms the watch like the note,
+  and the wait runs from the first note: later retries only replace it, so retries less than
+  30 s apart never put the probe off. The notice is the note and never reaches the transcript,
+  in a turn or outside one (idle, or replayed by `session/load`); answer text outside a turn is
+  never touched. A prompt that ends on a failure Codex gave up on ends `agent.offline` when a
+  note armed the watch or its title names a connection failure, unless its title says a server
+  answered or the host's last probe got through (an outage of the service, not of the
+  computer); else it fails `agent.protocol_error`, as the same failure over JSON-RPC does, so a
+  cut-off answer never shows as complete.
 
 ## Status
 
