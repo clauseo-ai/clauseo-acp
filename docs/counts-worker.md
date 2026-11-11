@@ -173,13 +173,23 @@ and `c0ffee00-0000-4000-8000-000000000002` for the tally (`CANARY_INSTALL` and `
 
 ### One-time set-up
 
-Before the first deploy, Rohan creates a Cloudflare API token with Workers and D1 edit rights for
-the account and the `clauseo.chat` zone. He saves it as the `counts-deploy` environment's secret
-`CLOUDFLARE_API_TOKEN` (and the account ID as `CLOUDFLARE_ACCOUNT_ID`, if the token sees more than
-one account). He sets the environment's branch rule to `main` with himself as reviewer, and sets
-`COUNTS_DEPLOY_ENABLED` to `true`. The click-by-click steps follow
-[Cloudflare's guide to creating an API token](https://developers.cloudflare.com/fundamentals/api/get-started/create-token/)
-and are added here when they are written. No secret is ever committed.
+Before the first deploy, Rohan creates the token and saves it; no secret is ever committed.
+
+1. In the Cloudflare dashboard: My Profile, API Tokens, Create Token, Custom token. Name it
+   `counts-deploy`, with three permissions: Account / D1 / Edit, Account / Workers Scripts / Edit,
+   and Zone / Workers Routes / Edit. Account Resources: include his one account (not all
+   accounts), so wrangler can find the account without an id. Zone Resources: include the
+   specific zone `clauseo.chat`. No DNS or SSL right is needed: Cloudflare makes the custom
+   domain's record and certificate itself. Without Zone / Workers Routes, every deploy after the
+   first fails (workers-sdk issue 15863).
+2. On GitHub: the repository's Settings, Environments, `counts-deploy`. Set its deployment
+   branch rule to `main` only and Rohan as its required reviewer. Then Add environment secret,
+   named `CLOUDFLARE_API_TOKEN`. Only if the token can see more than one account, add the
+   account's ID as the environment secret `CLOUDFLARE_ACCOUNT_ID`.
+3. The repository variable `COUNTS_DEPLOY_ENABLED` is set to `true`, and each deploy is approved
+   in the `counts-deploy` environment.
+
+See [Cloudflare's guide to creating an API token](https://developers.cloudflare.com/fundamentals/api/get-started/create-token/).
 
 ## Running it locally
 
