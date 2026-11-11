@@ -5,7 +5,7 @@
 import { INSTALLER_CLOSE, pw } from "@clauseo/components/lib/words-protection.ts";
 import { afterEach, expect, test, vi } from "vitest";
 import { causeOf } from "./causes.ts";
-import { blockLine, blockOf, firmInstall, needsInstaller, setUpFixes } from "./blocked.ts";
+import { blockLine, blockOf, firmPolicy, needsInstaller, setUpFixes } from "./blocked.ts";
 import { canRetry } from "./view.ts";
 import { PROT, view } from "./fixtures.ts";
 import { installerPage, openInstallerPage, repairPage } from "./installer.ts";
@@ -62,11 +62,11 @@ test.each([
   ],
   [
     "policy",
-    "A Windows policy on this computer blocks the program that sets up the Safe workspace. Your firm manages this policy on this computer.",
+    "A Windows policy on this computer blocks the program that sets up the Safe workspace.",
   ],
   [
     "tool_missing",
-    "The program that sets up the Safe workspace is missing, or security software blocked it. Your firm manages the security software on this computer.",
+    "The program that sets up the Safe workspace is missing, or security software blocked it. Allow Clauseo in your security software, then install Clauseo again.",
   ],
   ["admin_copy_missing", "The Safe workspace wasn't set up when Clauseo was installed."],
   [
@@ -75,7 +75,7 @@ test.each([
   ],
   [
     "admin_copy_unsafe",
-    "The folder that holds the Safe workspace's set-up program isn't limited to administrators, or holds files it shouldn't. Your firm manages this folder on this computer.",
+    "The folder that holds the Safe workspace's set-up program isn't limited to administrators, or holds files it shouldn't. Install Clauseo again to restore it.",
   ],
 ] as const)("blocked { reason: %s } has its own line", (reason, line) => {
   const c = cause({ blocked: { reason } });
@@ -88,15 +88,12 @@ test("other_account has its own line; an unknown reason, or none, asks IT", () =
   expect(blockLine("en", cause("other_account"))).toBe(
     pw(
       "en",
-      "The Safe workspace on this computer belongs to another Windows account. Your firm manages this computer's Windows accounts.",
+      "The Safe workspace on this computer belongs to another Windows account, so Clauseo can't use it from this one.",
     ),
   );
   for (const c of [{ blocked: { reason: "something_new" } }, { blocked: {} }, "blocked"])
     expect(blockLine("en", cause(c))).toBe(
-      pw(
-        "en",
-        "Something on this computer stops the Safe workspace. Your firm manages this computer's settings.",
-      ),
+      pw("en", "Something on this computer stops the Safe workspace."),
     );
   expect(blockLine("en", cause("needs_set_up"))).toBeNull();
 });
@@ -130,13 +127,13 @@ test("setting up again is offered for logon_right only; every other block keeps 
   expect(setUpFixes(cause("set_up_failed"))).toBe(false);
 });
 
-test("a firm install: per machine, or the firm's policy as a hint; a per-user install isn't", () => {
-  expect(firmInstall(view(PROT.missing), null)).toBe(false);
-  expect(firmInstall(view(PROT.missing), "package")).toBe(false);
-  expect(firmInstall(view(PROT.missing), "per_machine")).toBe(true);
-  expect(firmInstall(view(PROT.missing), "policy")).toBe(true);
-  expect(firmInstall(view(PROT.missing, { required: true }), null)).toBe(true);
-  expect(firmInstall(view(PROT.missing, { unprotected_auto_allowed: false }), null)).toBe(true);
+test("the firm's policy: update.mode none, sandbox.required or unprotected auto off; an install for everyone alone isn't", () => {
+  expect(firmPolicy(view(PROT.missing), null)).toBe(false);
+  expect(firmPolicy(view(PROT.missing), "package")).toBe(false);
+  expect(firmPolicy(view(PROT.missing), "per_machine")).toBe(false);
+  expect(firmPolicy(view(PROT.missing), "policy")).toBe(true);
+  expect(firmPolicy(view(PROT.missing, { required: true }), null)).toBe(true);
+  expect(firmPolicy(view(PROT.missing, { unprotected_auto_allowed: false }), null)).toBe(true);
 });
 
 // Get the installer: the page opens through open_external, and only then Clauseo quits through

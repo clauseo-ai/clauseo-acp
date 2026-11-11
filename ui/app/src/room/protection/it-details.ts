@@ -1,7 +1,9 @@
 // "Copy details for IT" on the Safe workspace's firm-only lines: the note each surface copies
-// (words-first-launch.ts's itNote says its shape and what it may hold). Only the blocks the lawyer
-// can't fix and the firm can offer it: a Windows policy, a reason from a newer Clauseo, the logon
-// right and another Windows account. tool_missing and the admin copy's blocks get self-fixes from
+// (words-first-launch.ts's itNote says its shape and what it may hold). Shown only while the firm's
+// policy is active: the firm's requirement (required.tsx), or firmPolicy (blocked.ts) where the Not
+// protected note and Settings ask, so a lawyer without a firm is never sent to IT. Only the blocks
+// the lawyer can't fix and the firm can offer it: a Windows policy, a reason from a newer Clauseo,
+// the logon right and another Windows account. tool_missing and the admin copy's blocks get self-fixes from
 // stage C, and a full pool has its own ways out, so none offers it. Each builder reads only the
 // cause's names (the reason, why a computer can't) and Clauseo's version: a cause carries no path
 // from a matter, and the ProtectionView carries no program path or hash yet, so the note names

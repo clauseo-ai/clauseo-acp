@@ -72,20 +72,20 @@ export const HI = {
     "इस कंप्यूटर पर कोई चीज़ सुरक्षित कार्यक्षेत्र को रोक रही है, इसलिए Clauseo इसकी हर वह फ़ाइल पढ़ सकता है जिसे आप खोल सकते हैं। वह इस मामले के फ़ोल्डर के बाहर कुछ भी बदलने से पहले पूछता है।",
   "Something on this computer stops the Safe workspace, so Clauseo asks before changing anything outside a matter's folder.":
     "इस कंप्यूटर पर कोई चीज़ सुरक्षित कार्यक्षेत्र को रोक रही है, इसलिए Clauseo किसी मामले के फ़ोल्डर के बाहर कुछ भी बदलने से पहले पूछता है।",
-  "A Windows policy on this computer blocks the program that sets up the Safe workspace. Your firm manages this policy on this computer.":
-    "इस कंप्यूटर की एक Windows नीति सुरक्षित कार्यक्षेत्र तैयार करने वाले प्रोग्राम को रोकती है। इस कंप्यूटर पर यह नीति आपकी फ़र्म प्रबंधित करती है।",
-  "The program that sets up the Safe workspace is missing, or security software blocked it. Your firm manages the security software on this computer.":
-    "सुरक्षित कार्यक्षेत्र तैयार करने वाला प्रोग्राम नहीं मिला, या किसी सुरक्षा सॉफ़्टवेयर ने उसे रोक दिया। इस कंप्यूटर पर सुरक्षा सॉफ़्टवेयर आपकी फ़र्म प्रबंधित करती है।",
+  "A Windows policy on this computer blocks the program that sets up the Safe workspace.":
+    "इस कंप्यूटर की एक Windows नीति सुरक्षित कार्यक्षेत्र तैयार करने वाले प्रोग्राम को रोकती है।",
+  "The program that sets up the Safe workspace is missing, or security software blocked it. Allow Clauseo in your security software, then install Clauseo again.":
+    "सुरक्षित कार्यक्षेत्र तैयार करने वाला प्रोग्राम नहीं मिला, या किसी सुरक्षा सॉफ़्टवेयर ने उसे रोक दिया। अपने सुरक्षा सॉफ़्टवेयर में Clauseo को अनुमति दें, उसके बाद Clauseo फिर से इंस्टॉल करें।",
   "The Safe workspace wasn't set up when Clauseo was installed.":
     "Clauseo इंस्टॉल होते समय सुरक्षित कार्यक्षेत्र तैयार नहीं हुआ।",
   "The program that sets up the Safe workspace has changed since Clauseo was installed. Install Clauseo again to restore it.":
     "Clauseo इंस्टॉल होने के बाद से सुरक्षित कार्यक्षेत्र तैयार करने वाला प्रोग्राम बदल गया है। उसे वापस लाने के लिए Clauseo फिर से इंस्टॉल करें।",
-  "The folder that holds the Safe workspace's set-up program isn't limited to administrators, or holds files it shouldn't. Your firm manages this folder on this computer.":
-    "सुरक्षित कार्यक्षेत्र का सेटअप प्रोग्राम जिस फ़ोल्डर में है, वह केवल व्यवस्थापकों तक सीमित नहीं है, या उसमें ऐसी फ़ाइलें हैं जो नहीं होनी चाहिए। इस कंप्यूटर पर यह फ़ोल्डर आपकी फ़र्म प्रबंधित करती है।",
-  "The Safe workspace on this computer belongs to another Windows account. Your firm manages this computer's Windows accounts.":
-    "इस कंप्यूटर का सुरक्षित कार्यक्षेत्र किसी दूसरे Windows खाते का है। इस कंप्यूटर के Windows खाते आपकी फ़र्म प्रबंधित करती है।",
-  "Something on this computer stops the Safe workspace. Your firm manages this computer's settings.":
-    "इस कंप्यूटर पर कोई चीज़ सुरक्षित कार्यक्षेत्र को रोक रही है। इस कंप्यूटर की सेटिंग्स आपकी फ़र्म प्रबंधित करती है।",
+  "The folder that holds the Safe workspace's set-up program isn't limited to administrators, or holds files it shouldn't. Install Clauseo again to restore it.":
+    "सुरक्षित कार्यक्षेत्र का सेटअप प्रोग्राम जिस फ़ोल्डर में है, वह केवल व्यवस्थापकों तक सीमित नहीं है, या उसमें ऐसी फ़ाइलें हैं जो नहीं होनी चाहिए। उसे वापस लाने के लिए Clauseo फिर से इंस्टॉल करें।",
+  "The Safe workspace on this computer belongs to another Windows account, so Clauseo can't use it from this one.":
+    "इस कंप्यूटर का सुरक्षित कार्यक्षेत्र किसी दूसरे Windows खाते का है, इसलिए Clauseo इस खाते से उसका इस्तेमाल नहीं कर सकता।",
+  "Something on this computer stops the Safe workspace.":
+    "इस कंप्यूटर पर कोई चीज़ सुरक्षित कार्यक्षेत्र को रोक रही है।",
   // the repair, where the installer's set-up didn't happen: a personal install's line and its
   // button (which opens the installed version's release page, installer.ts), and a firm install's
   // line
@@ -101,8 +101,8 @@ export const HI = {
   "Your firm requires the Safe workspace on this computer, so Clauseo can't answer here until it's set up.":
     "आपकी फ़र्म इस कंप्यूटर पर सुरक्षित कार्यक्षेत्र ज़रूरी मानती है, इसलिए जब तक यह तैयार नहीं होता, Clauseo यहाँ उत्तर नहीं दे सकता।",
   // sandbox.blocked, a command's refusal (not in ErrorCode on this base; #639 adds it)
-  "Something on this computer stops the Safe workspace, so Clauseo can't answer here. Your firm manages this computer's settings.":
-    "इस कंप्यूटर पर कोई चीज़ सुरक्षित कार्यक्षेत्र को रोक रही है, इसलिए Clauseo यहाँ उत्तर नहीं दे सकता। इस कंप्यूटर की सेटिंग्स आपकी फ़र्म प्रबंधित करती है।",
+  "Something on this computer stops the Safe workspace, so Clauseo can't answer here. Settings › Safe workspace says what to do.":
+    "इस कंप्यूटर पर कोई चीज़ सुरक्षित कार्यक्षेत्र को रोक रही है, इसलिए Clauseo यहाँ उत्तर नहीं दे सकता। क्या करना है, यह सेटिंग्स › सुरक्षित कार्यक्षेत्र में बताया गया है।",
   // the lead line of a note for IT ("Copy details for IT", room/protection/it-details.ts): a block,
   // or the firm's requirement this computer can't meet (new, provisional)
   "Clauseo's Safe workspace is blocked on this computer.":

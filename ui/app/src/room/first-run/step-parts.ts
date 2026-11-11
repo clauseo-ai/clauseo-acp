@@ -20,7 +20,7 @@ export type StepParts = Pick<
   | "blockOf"
   | "blockLine"
   | "needsInstaller"
-  | "firmInstall"
+  | "firmPolicy"
   | "repairLine"
   | "repairPage"
   | "openInstallerPage"
@@ -57,6 +57,6 @@ export function repairOf(
       ...(block === null ? [] : [block]),
       parts.repairLine(lang, state.view, state.managedBy),
     ],
-    page: parts.firmInstall(state.view, state.managedBy) ? null : parts.repairPage(display),
+    page: parts.firmPolicy(state.view, state.managedBy) ? null : parts.repairPage(display),
   };
 }
