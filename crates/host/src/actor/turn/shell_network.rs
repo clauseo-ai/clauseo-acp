@@ -38,7 +38,7 @@ use crate::log_file::Cause;
 
 /// What the agent is told after the first refusal of the turn.
 pub(super) const AGENT_NOTE: &str =
-    "Clauseo keeps your shell offline: save files with the browser's download tool.";
+    "Clauseo keeps your shell offline: save files by clicking their link in the browser.";
 
 /// codex-acp's option that declines a command and lets the turn go on (`dist/index.js:32026`).
 const DECLINE: &str = "decline";
