@@ -230,9 +230,9 @@ fn again(actor: &mut Actor, id: CommandId, pending: PendingMatter) {
 }
 
 /// Joins command `id` to command `to`, which makes the same matter folder: `id`'s callers wait
-/// for `to`'s answer and get it as `to`'s duplicates do (`commands::finish_command`), and `id` is dropped
-/// with its claim, unanswered and with no receipt (a retry runs again and finds the matter
-/// listed). False, changing nothing, when `to` is `id` or either is not pending.
+/// for `to`'s answer and get it as `to`'s duplicates do (`commands::finish_command`), and `id`
+/// is dropped with its claim, unanswered and with no receipt (a retry runs again and finds the
+/// matter listed). False, changing nothing, when `to` is `id` or either is not pending.
 pub(super) fn join(actor: &mut Actor, id: CommandId, to: CommandId) -> bool {
     if id == to || !actor.commands.contains_key(&to) {
         return false;

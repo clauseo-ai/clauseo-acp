@@ -1,4 +1,6 @@
-//! The worker's import: `Matter::import`, then the folder check, on the matter's thread.
+//! The worker's import: `Matter::import`, then the folder check, on the matter's thread; how it
+//! ended ([`ImportEnd`]), and what a create or import that made a matter hands the actor
+//! ([`made`]).
 //!
 //! A folder whose marker names a matter the registry does not hold (Clauseo's data was wiped,
 //! or the folder came from a colleague's install) is not refused. With no history of that
@@ -10,9 +12,10 @@
 use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
 
-use clauseo_matters::{Imported, Matter, NewMatter, Refusal, Settings};
+use clauseo_matters::{CommitId, ImportWarning, Imported, Matter, NewMatter, Refusal, Settings};
+use clauseo_protocol::{CommandId, FolderSupportKind, ImportSummary, MatterId};
 
-use super::{Claimed, ImportEnd, Slot, root_commit};
+use super::{Claimed, MatterReply, Slot, root_commit};
 use crate::agent::folder_support::CheckSource;
 use crate::error::Error;
 
@@ -66,5 +69,74 @@ pub(super) fn import(
             })
         }
         Imported::Cancelled => Ok(ImportEnd::Cancelled),
+    }
+}
+
+/// How an import ended.
+#[derive(Debug)]
+pub(crate) enum ImportEnd {
+    /// The matter exists; the worker keeps it.
+    Done {
+        /// The root checkpoint's commit.
+        commit: CommitId,
+        summary: ImportSummary,
+        warnings: Vec<ImportWarning>,
+        /// The folder check's answer (`agent/folder_support.rs`), made on this thread.
+        folder_support: Option<FolderSupportKind>,
+    },
+    /// The cancel flag was set; nothing was kept.
+    Cancelled,
+    /// The folder is this listed matter's own folder; nothing was made.
+    Listed(MatterId),
+    /// The folder is the one this create or import in flight is making; nothing was made.
+    Making(CommandId),
+    /// The folder's marker names this matter, which the registry does not hold and which has no
+    /// history here: nothing was written, and the host imports the folder again under its id.
+    Adopt(MatterId),
+}
+
+/// A made matter's root commit and import summary, and its folder check's answer.
+pub(crate) type Made = ((CommitId, Option<ImportSummary>), Option<FolderSupportKind>);
+
+/// The root checkpoint's commit and the import summary of a create or import that succeeded
+/// (`None` for a new folder), and the folder check's answer.
+pub(crate) fn made(reply: MatterReply) -> Result<Made, Error> {
+    match reply {
+        MatterReply::Created(result) => result.map(|(commit, support)| ((commit, None), support)),
+        MatterReply::Imported(result) => match result? {
+            ImportEnd::Done {
+                commit,
+                summary,
+                warnings,
+                folder_support,
+            } => {
+                for warning in &warnings {
+                    tracing::info!(?warning, "import warning");
+                }
+                Ok(((commit, Some(summary)), folder_support))
+            }
+            ImportEnd::Cancelled => Err(Error::Closed),
+            // Answered by the actor before it gets here (`matters/answer.rs`).
+            ImportEnd::Listed(_) | ImportEnd::Making(_) | ImportEnd::Adopt(_) => Err(
+                Error::Internal("an import's folder was held by another matter".to_owned()),
+            ),
+        },
+        MatterReply::Opened(_)
+        | MatterReply::Located(_)
+        | MatterReply::BeforeTurn(_)
+        | MatterReply::AfterTurn(_)
+        | MatterReply::Undone(_)
+        | MatterReply::Restored(_)
+        | MatterReply::Compared(_)
+        | MatterReply::Previewed(_)
+        | MatterReply::EditedSince(_)
+        | MatterReply::HeldOpen(_)
+        | MatterReply::Papers(_)
+        | MatterReply::StillGone(_)
+        | MatterReply::SidesWritten(_)
+        | MatterReply::Revisions(_)
+        | MatterReply::Discarded(_) => Err(Error::Internal(
+            "a matter's create got another job's reply".to_owned(),
+        )),
     }
 }

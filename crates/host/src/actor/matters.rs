@@ -4,7 +4,8 @@
 //! first use (relinking a deleted `matter.json` once, when no other matter claims the folder). A
 //! refused folder gets one code per reason (`refusal`), and an import of a forgotten matter's
 //! folder brings that matter back (`matter_details.rs`); a listed matter's folder, one being made
-//! and one whose marker names a matter this install does not know are answered in `answer.rs`. `RelocateMatter` is in `relocate.rs`.
+//! and one whose marker names a matter this install does not know are answered in `answer.rs`.
+//! `RelocateMatter` is in `relocate.rs`.
 //!
 //! A matter's worker starts lazily: at start-up the host only lists matters, and the first
 //! turn or undo of a matter starts its thread and opens it. Most matters are not touched in a

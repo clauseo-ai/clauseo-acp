@@ -308,8 +308,8 @@ pub(crate) const MARKER_RECHECK: Duration = Duration::from_secs(10);
 /// when that leaves it empty) only if it names `matter`, the id minted for that create or
 /// import, which no row holds; a marker naming any other matter, one this host knows or one
 /// from another computer, is left alone. Never run for an import that adopted the folder's
-/// marker (`answer.rs`): the id it would remove is the one the lawyer's own marker names. Off the actor; never repeated. Shutdown does not wait
-/// for it.
+/// marker (`answer.rs`): the id it would remove is the one the lawyer's own marker names. Off
+/// the actor; never repeated. Shutdown does not wait for it.
 pub(super) fn recheck_marker(actor: &Actor, matter: MatterId, folder: PathBuf) {
     let clock = Arc::clone(&actor.clock);
     let task = async move {
