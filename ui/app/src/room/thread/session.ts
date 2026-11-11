@@ -29,6 +29,7 @@ import { queueCountPick } from "../queue-entries.ts";
 import { turnRunning } from "./live.ts";
 import { loadThread, threadLoaded } from "./chunk.ts";
 import { promptContent } from "./paper-mentions.ts";
+import { tooLong } from "./prompt-cost.ts";
 
 /** The code of a refused command, and its setter, which makes no set to the code already held: React drops such a
  * set at once but keeps it queued at its lane (Ask's click: sync), and the next render of Work at another lane (a
@@ -197,6 +198,12 @@ export function useThreadSession(
   const ask = useCallback(
     async (text: string, how: AskHow = {}): Promise<boolean> => {
       if (matter === null || key === null || sending.current) return false;
+      // over the host's cap on a prompt's text: refused here as the host would refuse it, measured once per send, before
+      // a draft's thread is made; nothing goes and the field keeps the words
+      if (tooLong(text)) {
+        refuse("prompt.too_long");
+        return false;
+      }
       sending.current = true;
       refuse(null);
       try {

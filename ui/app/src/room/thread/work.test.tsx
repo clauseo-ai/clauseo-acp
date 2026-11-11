@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 // The room's thread over FakeTransport, the composer's side: reopening a thread, the first Ask making exactly one,
-// Enter and the input method's Enter, busy and Stop, a refused send, a lost stream with Try again, no matter, and the
+// Enter and the input method's Enter, busy and Stop, a refused send, a question over the host's cap on a prompt's text
+// (refused before it goes, or by the host, in the same words), a lost stream with Try again, no matter, and the
 // `/` menu listing the commands the thread's header has.
 import { act } from "react";
 import { settled } from "@clauseo/components/lib/late.ts";
@@ -22,6 +23,7 @@ import {
 } from "../../testing/stream-script.ts";
 import type { HostError } from "../../transport/protocol.ts";
 import { defaultOutcome, mountRoom, summary, THE_MATTER, type Harness } from "./harness.ts";
+import { MAX_PROMPT_TEXT_BYTES } from "./prompt-cost.ts";
 
 let h: Harness | null = null;
 afterEach(async () => {
@@ -188,6 +190,43 @@ test("a refused send shows its code's words on the working line and keeps the wo
   await h.key({ key: "Enter", keyCode: 13 });
   expect(h.one("error")).toBeNull();
   expect(field().value).toBe("");
+});
+
+test("a question over the cap sends nothing, keeps its words and says prompt.too_long's words; at the cap it goes", async () => {
+  h = await mountRoom();
+  h.deliver([reset([])]);
+  // one byte over: a newline costs 2 as the host counts it
+  const over = "a".repeat(MAX_PROMPT_TEXT_BYTES - 1) + "\n";
+  await h.type(over);
+  await h.key({ key: "Enter", keyCode: 13 });
+  expect(h.sent("send_prompt")).toEqual([]);
+  const line = h.one("error");
+  expect(line?.dataset["code"]).toBe("prompt.too_long");
+  expect(line?.textContent).toBe(
+    "This question is too long to send. Save the text as a file in the matter's folder, then ask about it. Your words are kept.",
+  );
+  expect(field().value).toBe(over);
+  expect(h.one("working")).toBeNull();
+  await h.type("a".repeat(MAX_PROMPT_TEXT_BYTES));
+  await h.key({ key: "Enter", keyCode: 13 });
+  expect(h.sent("send_prompt")).toHaveLength(1);
+  expect(h.one("error")).toBeNull();
+});
+
+test("the host's own prompt.too_long says the same words, and keeps the words", async () => {
+  h = await mountRoom({
+    dispatch: (command) => {
+      if (command.send_prompt !== undefined) throw refusal("prompt.too_long");
+      return defaultOutcome(command);
+    },
+  });
+  h.deliver([reset([])]);
+  await h.type("Summarise it");
+  await h.key({ key: "Enter", keyCode: 13 });
+  expect(h.sent("send_prompt")).toHaveLength(1);
+  expect(h.one("error")?.dataset["code"]).toBe("prompt.too_long");
+  expect(h.one("error")?.textContent).toBe(errorWords("en", "prompt.too_long"));
+  expect(field().value).toBe("Summarise it");
 });
 
 test("a refused Stop shows on the working line", async () => {

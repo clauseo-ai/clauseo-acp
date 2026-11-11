@@ -36,6 +36,12 @@ export const HI = {
     "Clauseo ने उत्तर रोक दिया: {name} ने इस मामले के बाहर की फ़ाइलें खोलने की कोशिश की। अब तक का उत्तर रखा गया है।",
   "Clauseo stopped the answer: the AI tried to open files outside this matter. The answer so far is kept.":
     "Clauseo ने उत्तर रोक दिया: AI ने इस मामले के बाहर की फ़ाइलें खोलने की कोशिश की। अब तक का उत्तर रखा गया है।",
+  // the model refused the turn as too long to read (StopReason too_long): {name} as the outside-matter line names the
+  // agent (Claude, ChatGPT, or its own name), the AI where none is known
+  "That was too long for {name} to read at once. Shorten your question, or ask it in a new conversation. Your question and the answer so far are kept.":
+    "यह {name} के लिए एक बार में पढ़ने के लिए बहुत लंबा था। अपना प्रश्न छोटा करें, या उसे एक नई बातचीत में पूछें। आपका प्रश्न और अब तक का उत्तर रखे गए हैं।",
+  "That was too long for the AI to read at once. Shorten your question, or ask it in a new conversation. Your question and the answer so far are kept.":
+    "यह AI के लिए एक बार में पढ़ने के लिए बहुत लंबा था। अपना प्रश्न छोटा करें, या उसे एक नई बातचीत में पूछें। आपका प्रश्न और अब तक का उत्तर रखे गए हैं।",
   "The answer stopped at its limit, before it finished.": "उत्तर पूरा होने से पहले अपनी सीमा पर रुक गया।",
   "This question was declined, so there is no answer.":
     "इस प्रश्न को अस्वीकार किया गया, इसलिए कोई उत्तर नहीं है।",

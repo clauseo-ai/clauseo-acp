@@ -182,6 +182,9 @@ export const HI = {
   // the connection dropped mid-answer (provisional Hindi)
   "You're offline, so the answer stopped. The answer so far is kept. Try again when you're back online.":
     "आप ऑफ़लाइन हैं, इसलिए उत्तर रुक गया। अब तक का उत्तर रखा गया है। ऑनलाइन होने पर फिर से प्रयास करें।",
+  // prompt.too_long: a question over the host's cap on a prompt's text, kept in the field (provisional Hindi)
+  "This question is too long to send. Save the text as a file in the matter's folder, then ask about it. Your words are kept.":
+    "यह प्रश्न भेजने के लिए बहुत लंबा है। पाठ को मामले के फ़ोल्डर में एक फ़ाइल के रूप में सहेजें, फिर उसके बारे में पूछें। आपके शब्द रखे गए हैं।",
 } as const;
 
 /** The sentences' Hindi, for the copy review to tell hi: later from Hindi. */

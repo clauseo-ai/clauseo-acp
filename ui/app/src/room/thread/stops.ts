@@ -17,7 +17,8 @@ function agentNameOf(agent: AgentName): string | null {
   return name === "" ? null : name;
 }
 
-/** `agent`: the open conversation's agent (useAgentPlan), named by a stop Clauseo made for the agent's request. */
+/** `agent`: the open conversation's agent (useAgentPlan), named by a stop Clauseo made for the agent's request, and by
+ * the model's refusal of a turn too long to read. */
 export function stopLine(step: StepEntry, agent?: AgentName): StopLine | null {
   switch (step.stop) {
     case "cancelled":
@@ -37,6 +38,20 @@ export function stopLine(step: StepEntry, agent?: AgentName): StopLine | null {
         : {
             kind: "thread",
             key: "Clauseo stopped the answer: {name} tried to open files outside this matter. The answer so far is kept.",
+            slots: { name },
+          };
+    }
+    case "too_long": {
+      // the model's own refusal of the turn as too long to read: a stop, never a failure
+      const name = agentNameOf(agent);
+      return name === null
+        ? {
+            kind: "thread",
+            key: "That was too long for the AI to read at once. Shorten your question, or ask it in a new conversation. Your question and the answer so far are kept.",
+          }
+        : {
+            kind: "thread",
+            key: "That was too long for {name} to read at once. Shorten your question, or ask it in a new conversation. Your question and the answer so far are kept.",
             slots: { name },
           };
     }
