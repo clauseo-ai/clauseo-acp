@@ -7,7 +7,21 @@ import { useSyncExternalStore, type ReactNode } from "react";
 import type { WorkingState } from "@clauseo/components/clauseo/working-line.tsx";
 import type { NoticeCard } from "@clauseo/components/clauseo/limit-note.tsx";
 
-export type Hold = { gate?: ReactNode; working?: WorkingState | null; line?: ReactNode };
+/** `also`: the other plan's working line, compact under `working`, while both plans have something to say (both
+ * downloading, or one waiting on the other's sign-in). */
+export type Hold = {
+  gate?: ReactNode;
+  working?: WorkingState | null;
+  also?: WorkingState | null;
+  line?: ReactNode;
+};
+
+/** The hold's working line for the composer, the other plan's line carried under it as its `also`; null without one. */
+export function holdLine(hold: Hold | null | undefined): WorkingState | null {
+  const working = hold?.working ?? null;
+  const also = hold?.also ?? null;
+  return working === null || also === null ? working : { ...working, also };
+}
 
 /** `read` gives the hold for the setup store's state now (the first run sets it, null before); `heard` hears each change,
  * the store's own emits forwarded, so the composer renders in the same commit as the first run. */

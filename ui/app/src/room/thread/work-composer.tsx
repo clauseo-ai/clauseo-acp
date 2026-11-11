@@ -59,7 +59,7 @@ import { pausedLine, type Paused } from "./limit-words.ts";
 import { pickFull, queueFullLine } from "./composer-queue.ts";
 import { ComposerSteer } from "./composer-steer.tsx";
 import { asksWords } from "./step-names.ts";
-import { useHold } from "../first-run/hold.ts";
+import { holdLine, useHold } from "../first-run/hold.ts";
 import { useStopKey } from "./stop-key.ts";
 import type { AskHow, Drafts } from "./session.ts";
 import { ProtectionContext } from "../protection/context.ts";
@@ -401,7 +401,7 @@ export function WorkComposer({
       hint={null}
       commands={commands}
       mentions={mentions}
-      working={line?.state ?? hold?.working ?? null}
+      working={line?.state ?? holdLine(hold)}
       {...(gated ? { gate: hold?.gate } : {})}
       opening
       busy={busy}

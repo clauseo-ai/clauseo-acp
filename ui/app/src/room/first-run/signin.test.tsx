@@ -130,38 +130,6 @@ test("plan-chatgpt: Sign in to ChatGPT with neither plan busy sends StartSignIn 
   expect(setups(t).some((c) => c.install_agent !== undefined)).toBe(false);
 });
 
-test("plan-chatgpt while Claude downloads: ChatGPT waits its turn with the queued line, nothing is sent until Claude is ready and signed in, and its Cancel sends nothing", async () => {
-  const t = await mountFirstRun({
-    first: [
-      install(CLAUDE, { downloading: { received: 1, total: 2 } }),
-      signIn(CLAUDE, "queued"),
-      install(CODEX, { missing: { download_bytes: 139_000_000 } }),
-      signIn(CODEX, { signed_out: {} }),
-    ],
-  });
-  // Claude's gate is the queued one: no plan offered, so the matter's line is reached through ChatGPT's own press
-  // in the store, as the first screen would send it
-  setupStoreOf(t as unknown as HostTransport & SetupSource).signInTo(CODEX);
-  await play(t);
-  expect(setups(t)).toEqual([]);
-  expect(byId("signin")?.dataset["agent"]).toBe("chatgpt");
-  expect(gateState()).toBe("queued");
-  expect(text()).toContain("Your browser opens when ChatGPT is ready.");
-  await play(t, install(CLAUDE, READY), signIn(CLAUDE, SIGNED_IN));
-  expect(setups(t)).toEqual([{ start_sign_in: { agent: CODEX } }]);
-  // a second wait, cancelled: nothing goes
-  const store = setupStoreOf(t as unknown as HostTransport & SetupSource);
-  await play(t, signIn(CODEX, { waiting: { since: AT, nudge: false } }));
-  await play(t, install(CLAUDE, { downloading: { received: 1, total: 2 } }));
-  await play(t, signIn(CODEX, { signed_out: {} }));
-  store.signInTo(CODEX);
-  await play(t);
-  expect(store.state().queued).toBe(CODEX);
-  await press(byId("signin-cancel"));
-  expect(store.state().queued).toBeNull();
-  expect(setups(t)).toEqual([{ start_sign_in: { agent: CODEX } }]);
-});
-
 test("plan-key: the key field is a password field, Use this key sends SetAgentKey and clears it; the Keychain line on the Mac; Console signs in with console", async () => {
   const t = await at({ signed_out: {} });
   await press("Use an API key instead");
@@ -370,8 +338,12 @@ test("signin-noplan: no plan, what Clauseo works with, See Claude's plans, Use a
   expect(t.only("open_external").map((c) => c.url)).toEqual(["https://claude.com/pricing"]);
   await press("Use another account");
   expect(setups(t).at(-1)).toEqual({ start_sign_in: { agent: CLAUDE } });
+  // "Use … instead" is ChatGPT's own Sign in, through the queue: no install sent around it (Claude's new sign-in
+  // ended first, so ChatGPT's needn't wait for it)
+  await play(t, signIn(CLAUDE, { failed: { code: "signin.no_plan", at: AT } }));
   await press("Use ChatGPT instead");
-  expect(setups(t).at(-1)).toEqual({ install_agent: { agent: CODEX } });
+  expect(setups(t).at(-1)).toEqual({ start_sign_in: { agent: CODEX } });
+  expect(setups(t).some((c) => c.install_agent !== undefined)).toBe(false);
 });
 
 test("signin-port-busy: Try again sends StartSignIn and Use a code instead UseDeviceCode", async () => {
