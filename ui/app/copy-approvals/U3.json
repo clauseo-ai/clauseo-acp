@@ -679,23 +679,17 @@
   "U3-52": {
     "en": "Clauseo stopped the answer: {name} tried to open files outside this matter. The answer so far is kept.",
     "hi": "Clauseo ने उत्तर रोक दिया: {name} ने इस मामले के बाहर की फ़ाइलें खोलने की कोशिश की। अब तक का उत्तर रखा गया है।",
-    "hi_status": "provisional",
-    "hi_at": "2026-11-10",
-    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-10",
-    "by": "orchestrator (settled en)",
+    "status": "approved",
+    "at": "2026-11-11",
+    "by": "orchestrator (English and Hindi settled for the outside-matter stop)",
     "note": "A turn ended StopReason::OutsideMatter: Clauseo refused, unasked, a request into its data folder and the agent stopped (stops.ts); {name} is the agent as the error words name it (Claude, ChatGPT, or its own name); the partial answer is kept as after a Stop. Reworded 2026-11-10: it named no one"
   },
   "U3-53": {
     "en": "Clauseo stopped the answer: the AI tried to open files outside this matter. The answer so far is kept.",
     "hi": "Clauseo ने उत्तर रोक दिया: AI ने इस मामले के बाहर की फ़ाइलें खोलने की कोशिश की। अब तक का उत्तर रखा गया है।",
-    "hi_status": "provisional",
-    "hi_at": "2026-11-10",
-    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-10",
-    "by": "orchestrator (settled en)",
+    "status": "approved",
+    "at": "2026-11-11",
+    "by": "orchestrator (English and Hindi settled for the outside-matter stop)",
     "note": "U3-52 where the room knows no agent name (stops.ts), as U6F-09's The AI; rendered alone"
   },
   "U3-err-settings.refused": {
