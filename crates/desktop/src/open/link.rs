@@ -34,8 +34,9 @@ pub(crate) enum Destination {
 /// A link `open_external` may open: the URL to hand the OS, and where it goes.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Link {
-    /// The URL as the `url` crate writes it back.
-    pub(crate) url: String,
+    /// The URL as the `url` crate parsed it: the one value every check reads and, written back
+    /// (`as_str`), what the OS is handed. Nothing parses it again.
+    pub(crate) url: url::Url,
     /// Where it goes, as the confirm names it.
     pub(crate) destination: Destination,
 }
@@ -66,10 +67,7 @@ pub(crate) fn check_link(text: &str) -> Result<Link, HostError> {
             )));
         }
     };
-    Ok(Link {
-        url: url.as_str().to_owned(),
-        destination,
-    })
+    Ok(Link { url, destination })
 }
 
 /// The host an https or http link goes to, as ASCII (an international name in its `xn--`

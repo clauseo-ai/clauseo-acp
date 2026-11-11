@@ -301,7 +301,7 @@ test("admin_copy_missing on a per-user install: not set up yet, the repair, and 
   );
   await press(one("protection-installer"));
   expect(t.only("open_external")).toEqual([
-    { call: "open_external", url: installerPage(APP_VERSION) },
+    { call: "open_external", url: installerPage(APP_VERSION), alwaysAsk: true },
   ]);
   expect(t.only("quit_app")).toEqual([{ call: "quit_app" }]);
   expect(t.protectionCommands()).toEqual([]);

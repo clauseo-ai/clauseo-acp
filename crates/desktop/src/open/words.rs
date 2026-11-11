@@ -82,7 +82,7 @@ impl LinkWords {
         let (title, message, ok) = match &link.destination {
             Destination::Web(host) => {
                 let decides = table.web_message.replace("{host}", host);
-                let address = shown_address(&link.url);
+                let address = shown_address(link.url.as_str());
                 let full = table.web_address.replace("{address}", &address);
                 (
                     table.web_title,
@@ -121,7 +121,7 @@ impl LinkWords {
                     Destination::Mail("a@b.example".to_owned()),
                 ),
             ] {
-                let url = url.to_owned();
+                let url = url::Url::parse(url).expect("a fixed link parses");
                 all.push(Self::new(&Link { url, destination }, language));
             }
         }

@@ -202,7 +202,7 @@ test("admin_copy_missing: the repair's words and Get the installer, no command; 
   await press(byId("protection-installer"));
   await settle();
   expect(t.only("open_external")).toEqual([
-    { call: "open_external", url: installerPage(APP_VERSION) },
+    { call: "open_external", url: installerPage(APP_VERSION), alwaysAsk: true },
   ]);
   expect(t.only("quit_app")).toEqual([{ call: "quit_app" }]);
   expect(t.protectionCommands()).toEqual([]);

@@ -7,7 +7,10 @@ use super::*;
 fn web_links_name_their_host_in_ascii() {
     let link = check_link("https://www.sci.gov.in/judgments?q=1#top").unwrap();
     assert_eq!(link.destination, Destination::Web("www.sci.gov.in".into()));
-    assert_eq!(link.url, "https://www.sci.gov.in/judgments?q=1#top");
+    assert_eq!(
+        link.url.as_str(),
+        "https://www.sci.gov.in/judgments?q=1#top"
+    );
 
     let link = check_link("http://www.example.com:8080/x").unwrap();
     assert_eq!(
@@ -30,7 +33,7 @@ fn web_links_name_their_host_in_ascii() {
         link.destination,
         Destination::Web("xn--pple-43d.com".into())
     );
-    assert_eq!(link.url, "https://xn--pple-43d.com/");
+    assert_eq!(link.url.as_str(), "https://xn--pple-43d.com/");
 
     // Upper case and spaces around are the url crate's to tidy; the host is what shows.
     let link = check_link("HTTPS://Example.COM").unwrap();

@@ -197,10 +197,10 @@ pub(crate) fn check_document(path: &Path, folder: &Path) -> Result<Document, Hos
 /// `command.invalid`.
 pub(crate) fn open_url_unconfirmed(opener: &dyn Opener, url: &str) -> Result<(), HostError> {
     let link = check_link(url)?;
-    if !link.url.starts_with("https://") {
+    if link.url.scheme() != "https" {
         return Err(invalid("only https links open without a confirm"));
     }
-    opener.open_url(&link.url)
+    opener.open_url(link.url.as_str())
 }
 
 /// macOS's Files and Folders pane in System Settings' Privacy & Security.
@@ -217,9 +217,19 @@ pub(crate) fn open_privacy_settings(opener: &dyn Opener, mac: bool) -> Result<()
     opener.open_url(PRIVACY_FILES_AND_FOLDERS)
 }
 
-/// `open_external` for a checked `link` whose visible text is `shown`: when [`needs_confirm`]
-/// says so (a mailto link, a user name before the host, an international host, or text naming
-/// another site) it asks first, as [`open_confirmed`] does; otherwise it opens at once. Both go
+/// When `open_external` asks before it opens a link.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Ask<'a> {
+    /// Whatever the link: for an open that leads to more, such as Get installer, which quits
+    /// Clauseo once the page opened. It can only add a confirm, never remove one.
+    Always,
+    /// When [`needs_confirm`] says so, for a link whose visible text is this (`None`: it has none).
+    IfMisleading(Option<&'a str>),
+}
+
+/// `open_external` for a checked `link`: when `ask` is [`Ask::Always`], or when [`needs_confirm`]
+/// says so (a mailto link, an address or international host, or text that names another site or
+/// could hide one), it asks first, as [`open_confirmed`] does; otherwise it opens at once. Both go
 /// through `gate`: one call at a time (`command.conflict`), none for [`AFTER_DECLINE`] after a
 /// decline, and none for [`BETWEEN_OPENS`] after a link opened with no confirm, so script in the
 /// page cannot open a stream of tabs the lawyer was never asked about. An accepted confirm sets no
@@ -231,14 +241,18 @@ pub(crate) async fn open_external(
     now: Now<'_>,
     language: Language,
     link: &Link,
-    shown: Option<&str>,
+    ask: Ask<'_>,
 ) -> Result<(), HostError> {
-    if needs_confirm(link, shown) {
+    let asks = match ask {
+        Ask::Always => true,
+        Ask::IfMisleading(shown) => needs_confirm(link, shown),
+    };
+    if asks {
         return open_confirmed(confirm, opener, gate, now, language, link).await;
     }
     let pass = gate.enter(now())?;
     pass.quiet_for(now(), BETWEEN_OPENS);
-    opener.open_url(&link.url)
+    opener.open_url(link.url.as_str())
 }
 
 /// Opens a checked `link` after asking the lawyer in `language`, whatever the link: through
@@ -261,7 +275,7 @@ pub(crate) async fn open_confirmed(
             "the lawyer declined to open the link",
         ));
     }
-    opener.open_url(&link.url)
+    opener.open_url(link.url.as_str())
 }
 
 /// `open_file`: through `gate` (one at a time, and at most one document opened per

@@ -78,7 +78,7 @@ export type FakeCall =
     }
   | { call: "pick_folder" }
   | FakeChooserCall
-  | { call: "open_external"; url: string; shown?: string }
+  | { call: "open_external"; url: string; shown?: string; alwaysAsk?: true }
   | { call: "quit_app" }
   | { call: "open_privacy_settings" }
   | { call: "open_file"; file: FileRefId }
@@ -547,8 +547,13 @@ export class FakeTransport implements HostTransport, NextHostSource, LimitsSourc
     return (await this.host.pickFolder?.()) ?? null;
   }
 
-  async openExternal(url: string, shown?: string): Promise<void> {
-    this.calls.push({ call: "open_external", url, ...(shown === undefined ? {} : { shown }) });
+  async openExternal(url: string, shown?: string, alwaysAsk?: boolean): Promise<void> {
+    this.calls.push({
+      call: "open_external",
+      url,
+      ...(shown === undefined ? {} : { shown }),
+      ...(alwaysAsk === true ? { alwaysAsk } : {}),
+    });
     await this.#answer(() => this.host.openExternal?.(url, shown));
   }
 

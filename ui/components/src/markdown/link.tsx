@@ -58,16 +58,78 @@ function decoded(url: string): string {
   }
 }
 
-/** Characters that show nothing or reorder text: zero-width, bidi controls, soft hyphen, BOM. */
-const INVISIBLE = /[\u00AD\u061C\u180E\u200B-\u200F\u202A-\u202E\u2060-\u2064\u2066-\u206F\uFEFF]/g;
-/** Full stops that read as `.`: ideographic, and the full-width and half-width forms NFKC may miss. */
-const DOTS = /[\u3002\uFF0E\uFF61]/g;
+/** Unicode's default-ignorable code points, as ranges: characters that show nothing, bidi controls, variation
+ * selectors, tags (open/ask.rs's `ignorable`). */
+const IGNORABLE: readonly (readonly [number, number])[] = [
+  [0xad, 0xad],
+  [0x34f, 0x34f],
+  [0x61c, 0x61c],
+  [0x115f, 0x1160],
+  [0x17b4, 0x17b5],
+  [0x180b, 0x180f],
+  [0x200b, 0x200f],
+  [0x202a, 0x202e],
+  [0x2060, 0x206f],
+  [0x3164, 0x3164],
+  [0xfe00, 0xfe0f],
+  [0xfeff, 0xfeff],
+  [0xffa0, 0xffa0],
+  [0xfff0, 0xfff8],
+  [0x1bca0, 0x1bca3],
+  [0x1d173, 0x1d17a],
+  [0xe0000, 0xe0fff],
+];
+/** Whether a character (one code point) is default-ignorable. */
+function ignorable(c: string): boolean {
+  const code = c.codePointAt(0) ?? 0;
+  return IGNORABLE.some(([from, to]) => code >= from && code <= to);
+}
+/** What reads as a full stop, read as `.` after NFKC (open/ask.rs's `reads_as_dot`). */
+const DOTS =
+  /[\u3002\uFF0E\uFF61\uA4F8\u0701\u0702\u00B7\u0387\u2E33\u2219\u22C5\u06D4\u0589\u2024\uFE52\u30FB\uFF65]/g;
+/** An image in a link (to-react.ts's textOf), interlinear annotation marks, or any ignorable character. */
+const HIDING = /[\uFFFC\uFFF9-\uFFFB]/u;
+/** Characters outside ASCII that may touch a letter or digit, not a `.` (open/ask.rs's `TYPOGRAPHIC`). */
+const TYPOGRAPHIC = new Set([
+  "\u2018",
+  "\u2019",
+  "\u201C",
+  "\u201D",
+  "\u2013",
+  "\u2014",
+  "\u00A7",
+  "\u20B9",
+  "\u00AB",
+  "\u00BB",
+]);
 /** A host-like token anywhere in link text: labels of letters, digits and `-`, a letter-only last label. */
 const HOST_TOKEN = /(?<![\p{L}\p{N}.-])((?:[\p{L}\p{N}-]+\.)+\p{L}{2,})(?![\p{L}\p{N}-])/gu;
 
-/** Every host link text shows: width-folded, dots unified, invisible characters dropped. */
+/**
+ * Whether link text could hide a host from shownHosts (open/ask.rs's `could_hide_a_host`, the same rule): an
+ * ignorable character, an image, or in a word a character outside ASCII next to an ASCII letter, digit or `.`
+ * (a TYPOGRAPHIC one may touch a letter or digit).
+ */
+function couldHideAHost(text: string): boolean {
+  if (HIDING.test(text) || Array.from(text).some(ignorable)) return true;
+  const touches = (other: string, near: string) =>
+    other.charCodeAt(0) > 0x7f &&
+    (near === "." || (/^[A-Za-z0-9]$/.test(near) && !TYPOGRAPHIC.has(other)));
+  return text.split(/[\t\n\f\r ]/).some((word) => {
+    const chars = Array.from(word);
+    return chars.some((a, k) => {
+      const b = chars[k + 1];
+      return b !== undefined && (touches(a, b) || touches(b, a));
+    });
+  });
+}
+
+/** Every host link text shows: width-folded, dots unified, ignorable characters dropped. */
 function shownHosts(text: string): string[] {
-  const plain = text.normalize("NFKC").replace(DOTS, ".").replace(INVISIBLE, "");
+  const plain = Array.from(text.normalize("NFKC"))
+    .filter((c) => !ignorable(c))
+    .join("")
+    .replace(DOTS, ".");
   const hosts: string[] = [];
   for (const [, token] of plain.matchAll(HOST_TOKEN)) {
     try {
@@ -79,19 +141,31 @@ function shownHosts(text: string): string[] {
   return hosts;
 }
 
+/** A host lower case, without a trailing `.` or a leading `www.`, as its labels from the right. */
+function labels(host: string): string[] {
+  const bare = host.toLowerCase().replace(/\.+$/, "");
+  return (bare.startsWith("www.") && bare.length > 4 ? bare.slice(4) : bare).split(".").reverse();
+}
+
+/** One site: equal, or one a subdomain of the other, label by label (open/ask.rs's `same_site`). */
+function sameSite(a: string, b: string): boolean {
+  const [x, y] = [labels(a), labels(b)];
+  return x.slice(0, y.length).every((label, k) => label === y[k]);
+}
+
 /**
- * The real host, shown next to link text that names another host anywhere in it (link-text spoofing:
- * `[Visit bank.example.com](https://evil.example.net)`).
+ * The real host, shown next to link text that names another site anywhere in it (link-text spoofing:
+ * `[Visit bank.example.com](https://evil.example.net)`), or that could hide one (couldHideAHost): the links the
+ * host asks about before it opens them.
  */
 function spoofedHost(text: string, href: string | undefined): string | undefined {
   if (!href || !/^https?:\/\//i.test(href)) return undefined;
   // An autolink's text is its destination (percent-encoded in the href): there is nothing else to show.
   if (text === href || text === decoded(href)) return undefined;
-  const shown = shownHosts(text);
-  if (shown.length === 0) return undefined;
   try {
     const real = new URL(href).hostname;
-    return shown.every((host) => host === real) ? undefined : real;
+    if (couldHideAHost(text)) return real;
+    return shownHosts(text).every((host) => sameSite(host, real)) ? undefined : real;
   } catch {
     return undefined;
   }
