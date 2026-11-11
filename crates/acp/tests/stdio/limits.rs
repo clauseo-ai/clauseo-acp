@@ -141,6 +141,7 @@ fn codex_limit_error_without_session_failure() {
                 message: "You've hit your usage limit · resets 3pm".to_owned(),
                 data: "none".to_owned(),
                 data_text: None,
+                data_fields: clauseo_acp::RpcData::default(),
             })
         );
         // The chunk before the error, and no limit event: the error is not a session failure.
@@ -177,6 +178,7 @@ fn session_failure_typed() {
             PromptEnd {
                 stop: StopReason::EndTurn,
                 limit: Some(stopped.clone()),
+                too_long: false,
             }
         );
         // The session_info_update carries only the failure: no title event.

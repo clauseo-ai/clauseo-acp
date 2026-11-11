@@ -96,7 +96,7 @@ use agent_client_protocol::{Client, Lines};
 
 pub use client::AcpClient;
 pub use driver::Driver;
-pub use error::Error;
+pub use error::{Error, RpcData};
 pub use event::{
     AcpEvent, AgentUpdate, FrameDirection, LimitSignal, LimitStatus, MessageRole, Origin,
     PendingKey, ProtocolWarning, RawFrame, ToolCall,

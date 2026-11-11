@@ -236,15 +236,18 @@ fn rate_limit_fields_and_unknown_status() {
 
 #[test]
 fn session_failure_categories() {
-    let failure = |category: &str, severity: &str, actions: Value| {
+    let failure_titled = |category: &str, severity: &str, actions: Value, title: &str| {
         let meta = json!({"jetbrains": {"air": {"sessionFailure": {
             "id": "f", "revision": 1, "category": category, "severity": severity,
-            "title": "T", "actions": actions,
+            "title": title, "actions": actions,
         }}}});
         session_failure(meta.as_object().unwrap()).unwrap()
     };
+    let failure = |category: &str, severity: &str, actions: Value| {
+        failure_titled(category, severity, actions, "T")
+    };
     let stopped = |reason| {
-        Ok(LimitSignal::Stopped {
+        Failure::Limit(LimitSignal::Stopped {
             reason,
             title: Some("T".to_owned()),
         })
@@ -257,20 +260,59 @@ fn session_failure_categories() {
         failure("limit", "error", json!(["retry"])),
         stopped(LimitStopReason::Temporary)
     );
-    for (category, severity, actions) in [
-        ("limit", "error", json!(["new_session"])),
-        ("limit", "warning", json!([])),
-        ("context", "error", json!([])),
+    // Too long to read, never a limit: codex-acp's context_exhausted, and Claude's API refusal
+    // of a prompt over the context (its title, any case, the token counts after it).
+    assert_eq!(
+        failure("limit", "error", json!(["new_session"])),
+        Failure::TooLong
+    );
+    for title in [
+        "Prompt is too long",
+        "prompt is too long: 1043211 tokens > 1000000 maximum",
     ] {
         assert_eq!(
-            failure(category, severity, actions),
-            Err(ProtocolWarning::SessionFailure {
-                category: Some(category.to_owned()),
-                severity: Some(severity.to_owned()),
-                title: Some("T".to_owned()),
-            })
+            failure_titled("request", "error", json!([]), title),
+            Failure::TooLong,
+            "{title}"
         );
     }
+    for (category, severity, actions, title) in [
+        ("limit", "warning", json!([]), "T"),
+        ("limit", "warning", json!(["new_session"]), "T"),
+        ("limit", "error", json!(["retry", "new_session"]), "T"),
+        ("context", "error", json!([]), "T"),
+        (
+            "request",
+            "error",
+            json!([]),
+            "Claude could not process this request.",
+        ),
+        ("request", "warning", json!([]), "Prompt is too long"),
+        ("service", "error", json!(["retry"]), "Prompt is too long"),
+    ] {
+        assert_eq!(
+            failure_titled(category, severity, actions, title),
+            Failure::Warning(ProtocolWarning::SessionFailure {
+                category: Some(category.to_owned()),
+                severity: Some(severity.to_owned()),
+                title: Some(title.to_owned()),
+            }),
+            "{category} {severity} {title}"
+        );
+    }
+}
+
+/// A too-long `sessionFailure` on a `session_info_update` makes no event: the prompt's answer
+/// carries the same record and ends the turn by it.
+#[test]
+fn a_too_long_failure_update_makes_no_event() {
+    let failure = json!({"jetbrains": {"air": {"sessionFailure": {
+        "id": "f", "revision": 1, "category": "limit", "severity": "error",
+        "title": "Codex ran out of room in the model's context window.",
+        "actions": ["new_session"],
+    }}}});
+    let update = json!({"sessionUpdate": "session_info_update", "_meta": failure});
+    assert_eq!(map_update(update, None), []);
 }
 
 #[test]

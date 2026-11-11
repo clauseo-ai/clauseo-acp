@@ -21,6 +21,7 @@ mod prompts;
 mod requests;
 mod sdk_refused_lines;
 mod stdout;
+mod too_long;
 mod unread;
 mod updates;
 
@@ -320,6 +321,7 @@ fn error_codes_map() {
                 message: String::new(),
                 data: String::new(),
                 data_text: None,
+                data_fields: crate::RpcData::default(),
             },
             ErrorCode::AgentProtocolError,
         ),
@@ -371,6 +373,7 @@ fn rpc_data_keeps_codex_s_message() {
         message: "Internal error".to_owned(),
         data: "keys: codex_error_info, message".to_owned(),
         data_text: kept,
+        data_fields: crate::RpcData::default(),
     };
     // The data's text is for classifying only: never in the text a turn's detail or a log gets.
     assert_eq!(
