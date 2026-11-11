@@ -11,7 +11,7 @@ pub(crate) mod scan;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
-use clauseo_matters::PaperList;
+use clauseo_matters::{PaperList, Place};
 use clauseo_protocol::{
     Count, ErrorCode, FileRefId, MAX_PAPERS, MatterId, MatterPath, PaperSummary, QueryResult,
 };
@@ -121,7 +121,7 @@ pub(super) fn answer(
                 }
                 Err(_) => {}
             }
-            listed.and_then(|papers| summarise(actor, matter, papers))
+            listed.and_then(|(papers, place)| summarise(actor, matter, papers, place))
         }
         MatterReply::Created(_)
         | MatterReply::Imported(_)
@@ -146,9 +146,14 @@ pub(super) fn answer(
 }
 
 /// `papers` with each file's id, minted on first sight of its path in `matter`'s folder, and
-/// whether a `.docx` holds tracked changes or comments as far as the scan has read, with where
-/// the folder lives (`clauseo_matters::place`: one OS call for its mount or drive, no file read).
-fn summarise(actor: &mut Actor, matter: MatterId, papers: PaperList) -> Result<QueryResult, Error> {
+/// whether a `.docx` holds tracked changes or comments as far as the scan has read, with
+/// `place`, where the folder lives, as the matter's worker found it beside the listing.
+fn summarise(
+    actor: &mut Actor,
+    matter: MatterId,
+    papers: PaperList,
+    place: Place,
+) -> Result<QueryResult, Error> {
     let folder = PathBuf::from(&actor.check_matter(matter)?.row.folder_path);
     let tracked = scan::listed(actor, matter, &folder, &papers.papers);
     let mut summaries = Vec::with_capacity(papers.papers.len());
@@ -168,7 +173,7 @@ fn summarise(actor: &mut Actor, matter: MatterId, papers: PaperList) -> Result<Q
         skipped: papers.skipped,
         unread: papers.unread,
         truncated: papers.truncated,
-        place: super::scan::folder_place(clauseo_matters::place(&folder)),
+        place: super::scan::folder_place(place),
     })
 }
 

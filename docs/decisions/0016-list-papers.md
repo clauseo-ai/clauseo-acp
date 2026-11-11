@@ -12,10 +12,12 @@ so the list must give each file one.
 ## Decision
 
 **Query.** `HostQuery::ListPapers { matter }` returns `QueryResult::Papers { papers, skipped,
-unread, truncated }`; each paper is a `PaperSummary { file: FileRefId, path: MatterPath, size:
+unread, truncated, place }`; each paper is a `PaperSummary { file: FileRefId, path: MatterPath, size:
 Count, modified: Timestamp }`, `skipped` reuses `SkippedFile`, and `unread` is a list of
-`MatterPath` folders. JSON: `{"list_papers":{"matter":"<id>"}}` answered by
-`{"papers":{"papers":[{"file","path","size","modified"}],"skipped":[{"path","reason"}],"unread":["<folder>"],"truncated":false}}`.
+`MatterPath` folders, and `place` is the folder's `FolderPlace` as `FolderScanned` gives it
+(`"local"`, `"network"` or `{"synced": {"service": "one_drive"}}`), so the window can name the
+service a cloud-only file is kept in (added 2026-11-11). JSON: `{"list_papers":{"matter":"<id>"}}` answered by
+`{"papers":{"papers":[{"file","path","size","modified"}],"skipped":[{"path","reason"}],"unread":["<folder>"],"truncated":false,"place":{"synced":{"service":"one_drive"}}}}`.
 Errors: `command.unknown_matter` for a matter the host does not know, `matter.folder_missing`
 when the folder is gone, `matter.folder_not_a_matter` when its `matter.json` is missing, does not
 read or names another matter (`matter.folder_missing` before 2026-11-07).
@@ -39,8 +41,9 @@ reads a folder that sorts after it, and takes the stat of no file that does but 
 first file. That first stat tells whether the folder can be entered: a folder whose every stat
 is denied (mode `0o444`) is unread, as a checkpoint has it, even when the cut falls inside it.
 
-**Where it runs.** On the matter's worker thread, as checkpoints do; the actor only adds the
-ids. No push event: the window asks again after `checkpoint_recorded` or `outside_edits`.
+**Where it runs.** On the matter's worker thread, as checkpoints do, which also asks where the
+folder lives (`clauseo_matters::place`, a `statfs` or drive-type call that can block on a share
+that has gone); the actor only adds the ids. No push event: the window asks again after `checkpoint_recorded` or `outside_edits`.
 
 **File ids.** The host keeps one registry of file refs, both ways (`FileRefId` to path and path
 to `FileRefId`), for its run. `ListPapers` and `RegisterFile` both use it, so a path (as written)
