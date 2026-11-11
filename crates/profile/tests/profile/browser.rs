@@ -97,7 +97,8 @@ fn only_the_browser_part_names_agent_browser() {
         .unwrap()
     };
     let on = fill(BrowserPart::On);
-    assert!(on.contains("Read web pages with your web fetch tool. For a page that needs a real"));
+    assert!(on.contains("over 125 characters, use `curl`. For a page that needs a real"));
+    assert!(on.contains("over 125 characters, `agent-browser read` gives the page's text."));
     for rule in [
         "`agent-browser`",
         "`AGENT_BROWSER_SESSION`",
