@@ -444,3 +444,18 @@ fn the_own_agent_browser_folder_is_open_and_another_sessions_is_denied() {
     let theirs = text(&data.join("run/s2/agent-browser/downloads/a.pdf"));
     assert!(check(root, &[&theirs], None).touches_data(), "{theirs}");
 }
+
+/// The trust roots file (`<data>/tls/roots.pem`, `loads::tls_roots`) is denied to Claude's
+/// Read and Edit, so its Write and Edit tools can't put a root of their own in it, which `curl`
+/// and Python in later sessions would trust; the folder whole, so a file beside it can't stand in.
+#[test]
+fn the_trust_roots_are_denied_to_claudes_file_tools() {
+    assert!(DENIED.contains(&"tls/**"));
+    let [folder, file] = crate::agent::loads::tls_roots::ROOTS_FILE;
+    assert_eq!(folder, "tls");
+    assert_eq!(file, "roots.pem");
+    let rules = claude_deny_rules(&LaunchDeny::fixed(vec![std::path::PathBuf::from("/d")]));
+    for rule in ["Read(//d/tls/**)", "Edit(//d/tls/**)"] {
+        assert!(rules.iter().any(|r| r == rule), "{rule}");
+    }
+}

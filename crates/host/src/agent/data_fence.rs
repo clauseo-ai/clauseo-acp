@@ -56,6 +56,8 @@ pub(crate) use shell_deny::windows_shell_deny_rules;
 /// each denied to Claude for Read and Edit: the skill packs' sources, the version store, the
 /// logs, the updater's downloads, the usage counts, the Windows sandbox's ledger, the limits
 /// reader's state, the browser's config, the block list's store and the lawyer's allowed sites, the
+/// trust roots file Claude's sandboxed commands trust (`tls/roots.pem`, `loads::tls_roots`: a
+/// root Claude wrote there would be trusted by `curl` and Python in every later session), the
 /// settings file, the updater's marker, the counts' first-act marker, the host's store, the search
 /// index (every matter's prompts and answers). Not the built-in plugin ([`SHARED`]).
 /// Under `agents`: Codex's home, the installs, the runtime and npm folders, the sign-in shim and
@@ -72,7 +74,7 @@ pub(crate) use shell_deny::windows_shell_deny_rules;
 /// the `agent-browser` deny rules refuse as flags (`--profile`, `--config`).
 /// Under `agents/runtime`, Node and the half-unpacked `.tmp-` folders, but not Clauseo's Python
 /// runtime ([`READ_ONLY`]); the launch denies every other entry there that exists.
-pub(crate) const DENIED: [&str; 38] = [
+pub(crate) const DENIED: [&str; 39] = [
     "run/*/relay-token",
     "run/*/agent-browser/config.json",
     "skill-packs/**",
@@ -84,6 +86,7 @@ pub(crate) const DENIED: [&str; 38] = [
     "limits/**",
     "browser/**",
     "blocklist/**",
+    "tls/**",
     clauseo_settings::SETTINGS_FILE,
     "update.json",
     clauseo_counts::FIRST_ACT,
