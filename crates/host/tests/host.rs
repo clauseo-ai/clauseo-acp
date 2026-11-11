@@ -311,6 +311,9 @@ mod papers;
 #[cfg(test)]
 #[path = "host/own_turn.rs"]
 mod own_turn;
+#[cfg(test)]
+#[path = "host/own_turn_cancel.rs"]
+mod own_turn_cancel;
 #[cfg(not(windows))]
 #[cfg(test)]
 #[path = "host/papers_live.rs"]

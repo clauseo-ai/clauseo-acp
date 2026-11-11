@@ -196,6 +196,10 @@ fn on_update(
     origin: Origin,
     update: AgentUpdate,
 ) {
+    // A cancelled agent-started turn's output, with no prompt in flight (`own_turn/late.rs`).
+    if origin == Origin::Idle && own_turn::late_drops(actor, thread, &update) {
+        return;
+    }
     let context = match context(actor, thread, origin) {
         Some(context) => context,
         None if late_title_counts(actor, thread, origin, &update) => {

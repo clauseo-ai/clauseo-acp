@@ -347,6 +347,8 @@ enum TimerKind {
     StopWait(u64),
     /// An agent-started turn went quiet (`own_turn.rs`).
     OwnQuiet(TurnId),
+    /// A cancelled agent-started turn's late window may close (`own_turn/late.rs`).
+    OwnLate,
 }
 
 /// What a matter job of a turn (a checkpoint, an undo) continues with.
@@ -434,6 +436,7 @@ pub(crate) fn timer(actor: &mut Actor, timer: TurnTimer) {
         TimerKind::SteerCheck => queue::on_steer_check_timer(actor, thread),
         TimerKind::StopWait(id) => sign_in::stop_timer(actor, id),
         TimerKind::OwnQuiet(turn) => own_turn::on_quiet(actor, thread, turn),
+        TimerKind::OwnLate => own_turn::on_late_timer(actor, thread),
     }
 }
 

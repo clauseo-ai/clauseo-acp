@@ -10,7 +10,7 @@ use super::super::super::commands::{AfterCommand, CommandCtx};
 use super::super::super::{Actor, Tag};
 use super::super::out::Out;
 use super::super::{Then, TurnTag, lost};
-use super::{After, ThreadQueue, drop_turn, queue, steer};
+use super::{After, Queued, ThreadQueue, drop_turn, queue, steer};
 use crate::build;
 use crate::error::Error;
 
@@ -100,4 +100,42 @@ pub(in crate::actor::turn) fn command_tag(
             then: Then::Queue(after),
         }),
     }
+}
+
+/// A prompt while no turn runs but a cancelled agent-started turn's late window holds starts
+/// (`own_turn/late.rs`): it waits in the queue, a send now (or a steer) as the forced head, and
+/// starts once the window lets it.
+pub(super) fn wait_late(
+    actor: &mut Actor,
+    ctx: CommandCtx,
+    thread: ThreadId,
+    ahead: Option<TurnId>,
+    blocks: Vec<ContentBlock>,
+    delivery: DeliveryRequest,
+) -> Result<(), Error> {
+    let forced = delivery != DeliveryRequest::Queue;
+    log_queued(
+        actor,
+        ctx,
+        thread,
+        ahead,
+        blocks,
+        Joins::As(delivery),
+        |turn, message, content, queue| {
+            let queued = Queued {
+                turn,
+                message,
+                content,
+                forced,
+                host_held: false,
+            };
+            if forced {
+                queue.turns.push_front(queued);
+                After::Jumped(turn)
+            } else {
+                queue.turns.push_back(queued);
+                After::Appended(turn)
+            }
+        },
+    )
 }

@@ -48,6 +48,8 @@ pub(super) fn cancel_command(
 ) -> Result<(), Error> {
     let found =
         current(actor, thread).map(|current| (current.phase, current.cancelled, current.turn));
+    // The agent runs an agent-started turn whatever the host's phase: it hears the cancel now.
+    super::own_turn::cancel_agent(actor, thread, why::STOP);
     match found {
         Some((TurnPhase::Accepting | TurnPhase::Launching | TurnPhase::Queued, false, turn)) => {
             dequeue(actor, Some(ctx), thread, turn)
@@ -102,9 +104,7 @@ pub(super) fn cancel_current(actor: &mut Actor, thread: ThreadId, why: &'static 
         tracing::info!(target: LIFECYCLE, %thread, %turn, ?phase, cancelled, why, "a turn ends without a cancel sent");
     }
     // The agent runs an agent-started turn whatever the host's phase: it hears the cancel now.
-    if matches!(found, Some((phase, false, _)) if phase != TurnPhase::Prompting) {
-        super::own_turn::cancel_agent(actor, thread, why);
-    }
+    super::own_turn::cancel_agent(actor, thread, why);
     match found {
         Some((TurnPhase::Accepting | TurnPhase::Launching | TurnPhase::Queued, false, turn)) => {
             if let Err(error) = dequeue(actor, None, thread, turn) {

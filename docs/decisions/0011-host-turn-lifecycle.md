@@ -81,11 +81,20 @@ a prompt starts meanwhile, which they then come first in. It ends `EndTurn` on t
 turn, its own turns included, with `_meta._claude/origin.kind: "task-notification"` there, read
 from 0.89.1's source, not recorded), or after 60 s with no update, unless a tool call or request
 of the turn is open, which it waits for up to 10 minutes of silence. Queued prompts wait behind
-it as behind any turn. A cancel (Stop, Send now) sends `session/cancel` and ends it `Cancelled` at
-once (no prompt answers it); agent output while a turn is cancelled, waiting when it ends, or
-within 5 s of its end is that turn's tail and is dropped. `acp`'s `Origin::Late` now ends at the
-cancelled prompt's response, so output after it can open such a turn. A host restart repairs an
-agent-started turn left open as it repairs any (`Failed`, `thread.interrupted`). codex-acp
+it as behind any turn. A cancel (Stop, Send now), in every phase (waiting for the writer,
+checkpointing, starting or live), sends `session/cancel`, drops the output waiting for the turn
+and ends it `Cancelled` (at once once live, as no prompt answers it), and opens the turn's late
+window, the own-turn counterpart of a prompt's `Origin::Late`: no prompt response tells the host
+when the agent has stopped, so until its stop signal (the cost-bearing `usage_update`) or 3 s with
+no answer, thought, tool or plan update with no prompt in flight, that output is dropped (a
+lifecycle line counts it, with no text), no agent-started turn opens, and a prompt sent now (or
+sent meanwhile) waits, at most 3 s after the cancel, so the agent's late edits come before the new
+turn's before checkpoint and its Undo takes back only its own. The window closes at the latest
+30 s after the cancel. Agent output while a prompted turn is cancelled, waiting when it ends, or
+within 5 s of its end is that turn's tail and is dropped too. `acp`'s `Origin::Late` now ends at
+the cancelled prompt's response, so output after it can open such a turn. A host restart repairs
+an agent-started turn left open as it repairs any (`Failed`, `thread.interrupted`), keeping what
+it logged. codex-acp
 does not start turns of its own for a client without AIR's async tasks (its background terminals
 are AIR-only), so this applies to Claude; were it to, the same path would take it, ended by the
 quiet period, as Codex sends no cost-bearing usage at a turn's end.
