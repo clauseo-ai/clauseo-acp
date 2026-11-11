@@ -3,25 +3,41 @@
 //!
 //! # Owns
 //!
-//! The three readers, one per app (Claude Desktop, Claude Code and Codex): where each
-//! keeps its config on each OS, what an entry means and which entries are usable. Also the
-//! `${VAR}` expansion Claude Code's text takes, the command search path, and the name rules
-//! (those of `leaf/mcp.rs`, plus `browser` and `case-law` reserved).
+//! The three readers, one per app (Claude Desktop, Claude Code and Codex): where each keeps its
+//! config on each OS, what an entry means and which entries are usable. Also the `${VAR}`
+//! expansion of the lawyer's own Claude Code and Codex config, the command search path, the name
+//! rules (those of `leaf/mcp.rs`, plus `browser` and `case-law` reserved) and the approval rules
+//! for a project's `.mcp.json`, which a cloned repository can hold.
 //!
 //! # Interface
 //!
 //! [`find_candidates`] takes an [`Env`]: the OS, the home folder, the environment variables and an
-//! [`ImportFs`]. [`RealFs`] reads the disk; tests pass a fake. Nothing here writes a file or
-//! starts a process.
+//! [`ImportFs`]. [`RealEnv`] builds one over the real process. [`resolve_command`] is the search
+//! path on its own. Nothing here writes a file or starts a process.
+//!
+//! Env and header values, `args` and URLs that come from a variable are [`ImportSecret`]s. The
+//! import hands them only to the keychain (A3), never to the settings file.
 //!
 //! # Invariants
 //!
-//! - The `Debug` output of [`ImportCandidate`] and [`CandidateKind`] names the env and header
-//!   entries and never prints their values. A URL prints without its query string.
+//! - `Debug` of [`ImportCandidate`] and [`CandidateKind`] prints names only: env and header names,
+//!   the argument count, a URL's scheme and host, a command's file name. It never prints a value
+//!   ([`ImportSecret`] prints `<redacted>`), a folder name, a URL's user name, path or query, or
+//!   an argument. [`Source`] prints no project folder.
+//! - A project's `.mcp.json` is repository text. Its servers are not expanded, and a server is
+//!   imported only when Claude Code has approved it, or is marked [`Problem::NotApproved`]. A
+//!   server in `disabledMcpjsonServers` is left out.
+//! - Only the lawyer's own config is expanded: `~/.claude.json`'s user scope and Codex's
+//!   `config.toml`. `%VAR%` (Windows) is never expanded; `${VAR:-${OTHER}}` closes at the first
+//!   `}`.
+//! - A program is never searched for in a relative or empty folder, nor on a network share (a
+//!   path that starts with two separators). See [`resolve_command`].
+//! - Each file is read only up to its cap ([`MAX_CLAUDE_JSON_BYTES`], [`MAX_CONFIG_BYTES`]); a
+//!   bigger one gives no candidates, as does one that cannot be read or parsed. A parse error
+//!   never echoes the file's text.
 //! - Output is sorted by name. Every name passes the MCP name rules, is unique among the
 //!   candidates and is not one of the names in `existing_names` unless it is marked
 //!   [`Problem::AlreadyAdded`].
-//! - A file that cannot be read or parsed gives no candidates; nothing panics on bad input.
 
 mod claude_code;
 mod claude_desktop;
@@ -38,6 +54,7 @@ pub use command::resolve_command;
 
 use std::fmt;
 use std::path::{Path, PathBuf};
+use zeroize::Zeroizing;
 
 /// The operating system whose rules the import follows. Passed in, so the Windows rules are
 /// tested on any machine.
@@ -74,10 +91,18 @@ pub struct Env<'a> {
     pub fs: &'a dyn ImportFs,
 }
 
+/// The largest `~/.claude.json` the import reads (64 MiB): it keeps history, so it can be large.
+pub const MAX_CLAUDE_JSON_BYTES: u64 = 64 * 1024 * 1024;
+
+/// The largest other config file the import reads (16 MiB): a project's `.mcp.json`, Codex's
+/// `config.toml` and Claude Desktop's config.
+pub const MAX_CONFIG_BYTES: u64 = 16 * 1024 * 1024;
+
 /// The reads the import makes. [`RealFs`] is the disk; tests use a fake.
 pub trait ImportFs {
-    /// The text of the file at `p`, or `None` when it cannot be read.
-    fn read_to_string(&self, p: &Path) -> Option<String>;
+    /// The text of the file at `p`, read up to `max` bytes. `None` when it cannot be read, is not
+    /// text, or is longer than `max`; a longer file is never read whole.
+    fn read_to_string(&self, p: &Path, max: u64) -> Option<String>;
     /// Whether `p` is a file (a symlink to one counts).
     fn is_file(&self, p: &Path) -> bool;
     /// The entries of the folder `p`, as full paths; empty when it cannot be read.
@@ -88,8 +113,16 @@ pub trait ImportFs {
 pub struct RealFs;
 
 impl ImportFs for RealFs {
-    fn read_to_string(&self, p: &Path) -> Option<String> {
-        std::fs::read_to_string(p).ok()
+    /// Reads at most `max + 1` bytes: one more than the cap, so a longer file is seen and refused
+    /// without being read whole (the `take` pattern of `chromium_policy.rs`).
+    fn read_to_string(&self, p: &Path, max: u64) -> Option<String> {
+        use std::io::Read;
+        let file = std::fs::File::open(p).ok()?;
+        let mut text = String::new();
+        file.take(max.saturating_add(1))
+            .read_to_string(&mut text)
+            .ok()?;
+        (u64::try_from(text.len()).ok()? <= max).then_some(text)
     }
 
     fn is_file(&self, p: &Path) -> bool {
@@ -145,6 +178,30 @@ impl RealEnv {
     }
 }
 
+/// A value the import took from the environment or from a `${VAR}` in config. It is zeroed when
+/// dropped, prints as `<redacted>`, and has no `Display`. The import hands it only to the
+/// keychain (A3), never to the settings file.
+#[derive(Clone, PartialEq, Eq)]
+pub struct ImportSecret(Zeroizing<String>);
+
+impl ImportSecret {
+    /// Wraps `value`.
+    pub(crate) fn new(value: String) -> Self {
+        ImportSecret(Zeroizing::new(value))
+    }
+
+    /// The value. Hand it to the keychain only (A3); never print it or write it to settings.
+    pub fn expose(&self) -> &str {
+        self.0.as_str()
+    }
+}
+
+impl fmt::Debug for ImportSecret {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("<redacted>")
+    }
+}
+
 /// One server an app has set up, ready to import.
 #[derive(Clone, PartialEq, Eq)]
 pub struct ImportCandidate {
@@ -170,7 +227,7 @@ impl fmt::Debug for ImportCandidate {
 }
 
 /// Where a candidate was found.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub enum Source {
     /// Claude Desktop's config file.
     ClaudeDesktop,
@@ -178,15 +235,28 @@ pub enum Source {
     ClaudeCodeUser,
     /// Claude Code's servers for one project folder: its `projects` entry or its `.mcp.json`.
     ClaudeCodeProject {
-        /// The project folder.
+        /// The project folder. Never printed by `Debug`: a folder name can be a matter's name.
         folder: PathBuf,
     },
     /// Codex's `[mcp_servers.<name>]` table.
     Codex,
 }
 
-/// How a candidate runs or is reached. Env and header values are secrets: [`fmt::Debug`] names
-/// them and never prints them.
+impl fmt::Debug for Source {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Source::ClaudeDesktop => f.write_str("ClaudeDesktop"),
+            Source::ClaudeCodeUser => f.write_str("ClaudeCodeUser"),
+            Source::ClaudeCodeProject { .. } => {
+                f.debug_struct("ClaudeCodeProject").finish_non_exhaustive()
+            }
+            Source::Codex => f.write_str("Codex"),
+        }
+    }
+}
+
+/// How a candidate runs or is reached. Env and header values, args and the URL can hold secrets:
+/// [`fmt::Debug`] prints names, a count and the scheme and host only.
 #[derive(Clone, PartialEq, Eq)]
 pub enum CandidateKind {
     /// A local program started with `command`.
@@ -194,16 +264,16 @@ pub enum CandidateKind {
         /// The program's path: resolved when it was found, else the command as given.
         command: PathBuf,
         /// Its arguments.
-        args: Vec<String>,
+        args: Vec<ImportSecret>,
         /// Its environment variables, sorted by name.
-        env: Vec<(String, String)>,
+        env: Vec<(String, ImportSecret)>,
     },
     /// A server reached over the network.
     Remote {
         /// The server's address.
-        url: String,
+        url: ImportSecret,
         /// The headers sent with each request, sorted by name.
-        headers: Vec<(String, String)>,
+        headers: Vec<(String, ImportSecret)>,
     },
 }
 
@@ -212,13 +282,13 @@ impl fmt::Debug for CandidateKind {
         match self {
             CandidateKind::Local { command, args, env } => f
                 .debug_struct("Local")
-                .field("command", command)
-                .field("args", args)
+                .field("command", &file_name_only(command))
+                .field("args", &format_args!("{} not shown", args.len()))
                 .field("env", &names(env))
                 .finish(),
             CandidateKind::Remote { url, headers } => f
                 .debug_struct("Remote")
-                .field("url", &without_query(url))
+                .field("url", &scheme_and_host(url.expose()))
                 .field("headers", &names(headers))
                 .finish(),
         }
@@ -226,16 +296,29 @@ impl fmt::Debug for CandidateKind {
 }
 
 /// The names of a list of pairs, never their values.
-fn names(pairs: &[(String, String)]) -> Vec<&str> {
+fn names(pairs: &[(String, ImportSecret)]) -> Vec<&str> {
     pairs.iter().map(|(name, _)| name.as_str()).collect()
 }
 
-/// The URL up to its query string, which can hold a key.
-fn without_query(url: &str) -> String {
-    match url.find('?') {
-        Some(at) => format!("{}?<query omitted>", &url[..at]),
-        None => url.to_owned(),
-    }
+/// The last part of a path, splitting on both separators: the file name, no folder.
+fn file_name_only(path: &Path) -> String {
+    let text = path.to_string_lossy();
+    text.rsplit(['/', '\\']).next().unwrap_or("").to_owned()
+}
+
+/// `scheme://host[:port]` of a URL: no user name or password, path, query or fragment.
+fn scheme_and_host(url: &str) -> String {
+    let Some(at) = url.find("://") else {
+        return "<not a URL>".to_owned();
+    };
+    let scheme = &url[..at];
+    let rest = &url[at + 3..];
+    let authority_end = rest.find(['/', '?', '#']).unwrap_or(rest.len());
+    let authority = &rest[..authority_end];
+    let host = authority
+        .rsplit_once('@')
+        .map_or(authority, |(_, host)| host);
+    format!("{scheme}://{host}")
 }
 
 /// Something the lawyer should know about a candidate before importing it.
@@ -265,6 +348,9 @@ pub enum Problem {
     AlreadyAdded,
     /// Part of the entry could not be read and was left out.
     Unreadable,
+    /// A server in a project's `.mcp.json` that Claude Code has not approved for this project.
+    /// The candidate is offered, but the lawyer should approve it in Claude Code first.
+    NotApproved,
 }
 
 /// The entry of one app's config, before names are settled.
@@ -289,4 +375,13 @@ pub fn find_candidates(env: &Env<'_>, existing_names: &[String]) -> Vec<ImportCa
     claude_code::read(env, &mut entries);
     codex::read(env, &mut entries);
     name::assemble(entries, existing_names)
+}
+
+/// The text of the config file at `path`, when it is a file no bigger than `max` bytes.
+pub(crate) fn read_config(env: &Env<'_>, path: &str, max: u64) -> Option<String> {
+    let p = Path::new(path);
+    if !env.fs.is_file(p) {
+        return None;
+    }
+    env.fs.read_to_string(p, max)
 }

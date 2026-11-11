@@ -23,6 +23,8 @@ unicode-normalization = { workspace = true }
 plist = { workspace = true }
 # The Codex config.toml the MCP import reads (the same toml crate desktop uses).
 toml = "1"
+# Zeroes the env and header values the MCP import holds (the same workspace crate as protocol).
+zeroize = { workspace = true }
 
 # The registry and the known folders; the owner, DACL and link count of policy.json and its
 # folder (Security, Security_Authorization, Storage_FileSystem).

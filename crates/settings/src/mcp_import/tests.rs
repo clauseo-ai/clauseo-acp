@@ -33,8 +33,9 @@ impl FakeFs {
 }
 
 impl ImportFs for FakeFs {
-    fn read_to_string(&self, p: &Path) -> Option<String> {
-        self.files.get(&p.to_string_lossy().into_owned()).cloned()
+    fn read_to_string(&self, p: &Path, max: u64) -> Option<String> {
+        let text = self.files.get(&p.to_string_lossy().into_owned())?;
+        (u64::try_from(text.len()).ok()? <= max).then(|| text.clone())
     }
 
     fn is_file(&self, p: &Path) -> bool {
@@ -91,23 +92,28 @@ fn names(found: &[ImportCandidate]) -> Vec<&str> {
         .collect()
 }
 
+/// A secret from a test literal.
+fn secret(value: &str) -> ImportSecret {
+    ImportSecret::new(value.to_owned())
+}
+
 fn local(command: &str, args: &[&str], env: &[(&str, &str)]) -> CandidateKind {
     CandidateKind::Local {
         command: PathBuf::from(command),
-        args: args.iter().map(|arg| (*arg).to_owned()).collect(),
+        args: args.iter().map(|arg| secret(arg)).collect(),
         env: env
             .iter()
-            .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
+            .map(|(k, v)| ((*k).to_owned(), secret(v)))
             .collect(),
     }
 }
 
 fn remote(url: &str, headers: &[(&str, &str)]) -> CandidateKind {
     CandidateKind::Remote {
-        url: url.to_owned(),
+        url: secret(url),
         headers: headers
             .iter()
-            .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
+            .map(|(k, v)| ((*k).to_owned(), secret(v)))
             .collect(),
     }
 }
@@ -116,7 +122,10 @@ const DESKTOP_MAC: &str =
     "/Users/ana/Library/Application Support/Claude/claude_desktop_config.json";
 const DESKTOP_WIN: &str = "C:\\Users\\ana\\AppData\\Roaming\\Claude\\claude_desktop_config.json";
 
+mod approval;
+mod caps;
 mod misc;
 mod names;
 mod resolve;
+mod secrets;
 mod sources;

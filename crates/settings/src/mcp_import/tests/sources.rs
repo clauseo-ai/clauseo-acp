@@ -245,19 +245,15 @@ fn claude_code_user_project_and_mcp_json() {
             folder: PathBuf::from("/Users/ana/Matters/Smith")
         }]
     );
+    // Project-scope text is kept as written: no expansion, so no unresolved-variable problem.
     assert_eq!(
         case_tool.kind,
         remote(
-            "https://tool.example.com/mcp?key=dev",
+            "https://tool.example.com/mcp?key=${TOOL_KEY:-dev}",
             &[("X-Api", "${MISSING_KEY}")]
         )
     );
-    assert_eq!(
-        case_tool.problems,
-        [Problem::UnresolvedVariable {
-            name: "MISSING_KEY".to_owned()
-        }]
-    );
+    assert!(case_tool.problems.is_empty(), "{:?}", case_tool.problems);
 
     let fs_server = by_name(&found, "fs");
     assert_eq!(
@@ -266,7 +262,12 @@ fn claude_code_user_project_and_mcp_json() {
             folder: PathBuf::from("/Users/ana/Matters/Jones")
         }]
     );
-    assert_eq!(fs_server.kind, local("/opt/fs-server", &["/tmp"], &[]));
+    // The repository's .mcp.json is kept verbatim and is not approved here (no approval keys).
+    assert_eq!(
+        fs_server.kind,
+        local("/opt/fs-server", &["${HOME_ROOT:-/tmp}"], &[])
+    );
+    assert_eq!(fs_server.problems, [Problem::NotApproved]);
 }
 
 #[test]

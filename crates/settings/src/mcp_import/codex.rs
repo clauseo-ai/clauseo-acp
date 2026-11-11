@@ -5,11 +5,13 @@
 //! `env_http_headers` (header to variable name), `bearer_token_env_var` (streamable HTTP);
 //! `env_vars` (stdio) names variables forwarded from the parent environment; each becomes an
 //! `env` entry with its current value. `cwd` and `auth` are not read.
+//!
+//! Values that come from the environment are [`ImportSecret`]s. A parse error is never reported
+//! with the file's text: an unparsable file gives no candidates.
 
 use super::command;
 use super::path::{self, join};
-use super::{CandidateKind, Entry, Env, Problem, Source};
-use std::path::Path;
+use super::{CandidateKind, Entry, Env, ImportSecret, MAX_CONFIG_BYTES, Problem, Source};
 
 /// Adds the enabled servers of Codex's `config.toml` to `out`. `CODEX_HOME` names the folder
 /// when it is set, else `~/.codex`.
@@ -18,7 +20,7 @@ pub(crate) fn read(env: &Env<'_>, out: &mut Vec<Entry>) {
         Some(dir) => join(env.os, &dir, "config.toml"),
         None => join(env.os, &path::home(env), ".codex/config.toml"),
     };
-    let Some(text) = env.fs.read_to_string(Path::new(&config)) else {
+    let Some(text) = super::read_config(env, &config, MAX_CONFIG_BYTES) else {
         return;
     };
     let Ok(doc) = toml::from_str::<toml::Table>(&text) else {
@@ -53,14 +55,14 @@ fn entry(env: &Env<'_>, name: &str, table: &toml::Table) -> Option<Entry> {
     } else {
         let url = table.get("url")?.as_str()?.to_owned();
         let mut headers = toml_pairs(table.get("http_headers"), &mut problems);
-        for (header, var) in toml_pairs(table.get("env_http_headers"), &mut problems) {
+        for (header, var) in toml_names(table.get("env_http_headers"), &mut problems) {
             let value = if let Some(value) = path::var(env, &var) {
                 value
             } else {
                 problems.push(Problem::UnresolvedVariable { name: var.clone() });
                 format!("${{{var}}}")
             };
-            headers.push((header, value));
+            headers.push((header, ImportSecret::new(value)));
         }
         if let Some(var) = table
             .get("bearer_token_env_var")
@@ -74,9 +76,12 @@ fn entry(env: &Env<'_>, name: &str, table: &toml::Table) -> Option<Entry> {
                 });
                 format!("Bearer ${{{var}}}")
             };
-            headers.push(("Authorization".to_owned(), value));
+            headers.push(("Authorization".to_owned(), ImportSecret::new(value)));
         }
-        CandidateKind::Remote { url, headers }
+        CandidateKind::Remote {
+            url: ImportSecret::new(url),
+            headers,
+        }
     };
     Some(Entry {
         raw_name: name.to_owned(),
@@ -95,7 +100,7 @@ fn forwarded_env(
     env: &Env<'_>,
     table: &toml::Table,
     problems: &mut Vec<Problem>,
-) -> Vec<(String, String)> {
+) -> Vec<(String, ImportSecret)> {
     let mut pairs = toml_pairs(table.get("env"), problems);
     let Some(items) = table.get("env_vars").and_then(toml::Value::as_array) else {
         return pairs;
@@ -128,15 +133,15 @@ fn forwarded_env(
             });
             format!("${{{var}}}")
         };
-        pairs.push((var.to_owned(), value));
+        pairs.push((var.to_owned(), ImportSecret::new(value)));
     }
-    pairs.sort();
+    pairs.sort_by(|a, b| a.0.cmp(&b.0));
     pairs
 }
 
-/// The string items of a TOML array. An item that is not a string is left out with
+/// The string items of a TOML array, as secrets. An item that is not a string is left out with
 /// [`Problem::Unreadable`].
-fn toml_list(value: Option<&toml::Value>, problems: &mut Vec<Problem>) -> Vec<String> {
+fn toml_list(value: Option<&toml::Value>, problems: &mut Vec<Problem>) -> Vec<ImportSecret> {
     let Some(value) = value else {
         return Vec::new();
     };
@@ -147,7 +152,7 @@ fn toml_list(value: Option<&toml::Value>, problems: &mut Vec<Problem>) -> Vec<St
     let mut texts = Vec::new();
     for item in items {
         if let Some(text) = item.as_str() {
-            texts.push(text.to_owned());
+            texts.push(ImportSecret::new(text.to_owned()));
         } else {
             problems.push(Problem::Unreadable);
         }
@@ -155,9 +160,12 @@ fn toml_list(value: Option<&toml::Value>, problems: &mut Vec<Problem>) -> Vec<St
     texts
 }
 
-/// The string values of a TOML table, sorted by key. A value that is not a string is left out
-/// with [`Problem::Unreadable`].
-fn toml_pairs(value: Option<&toml::Value>, problems: &mut Vec<Problem>) -> Vec<(String, String)> {
+/// The string values of a TOML table, as secrets, sorted by key. A value that is not a string is
+/// left out with [`Problem::Unreadable`].
+fn toml_pairs(
+    value: Option<&toml::Value>,
+    problems: &mut Vec<Problem>,
+) -> Vec<(String, ImportSecret)> {
     let Some(value) = value else {
         return Vec::new();
     };
@@ -168,11 +176,20 @@ fn toml_pairs(value: Option<&toml::Value>, problems: &mut Vec<Problem>) -> Vec<(
     let mut pairs = Vec::new();
     for (key, value) in table {
         if let Some(text) = value.as_str() {
-            pairs.push((key.clone(), text.to_owned()));
+            pairs.push((key.clone(), ImportSecret::new(text.to_owned())));
         } else {
             problems.push(Problem::Unreadable);
         }
     }
-    pairs.sort();
+    pairs.sort_by(|a, b| a.0.cmp(&b.0));
     pairs
+}
+
+/// The string values of a TOML table as plain names (a header to a variable name, say), sorted by
+/// key. A value that is not a string is left out with [`Problem::Unreadable`].
+fn toml_names(value: Option<&toml::Value>, problems: &mut Vec<Problem>) -> Vec<(String, String)> {
+    toml_pairs(value, problems)
+        .into_iter()
+        .map(|(key, value)| (key, value.expose().to_owned()))
+        .collect()
 }

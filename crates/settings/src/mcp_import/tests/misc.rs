@@ -54,9 +54,12 @@ fn real_fs_reads_this_crate() {
     let fs = RealFs;
     assert!(fs.is_file(&manifest.join("Cargo.toml")));
     assert!(!fs.is_file(&manifest.join("no-such-file.json")));
-    assert!(fs.read_to_string(&manifest.join("Cargo.toml")).is_some());
     assert!(
-        fs.read_to_string(&manifest.join("no-such-file.json"))
+        fs.read_to_string(&manifest.join("Cargo.toml"), MAX_CONFIG_BYTES)
+            .is_some()
+    );
+    assert!(
+        fs.read_to_string(&manifest.join("no-such-file.json"), MAX_CONFIG_BYTES)
             .is_none()
     );
     let src = fs.list_dir(&manifest.join("src"));
@@ -64,6 +67,7 @@ fn real_fs_reads_this_crate() {
     assert_eq!(fs.list_dir(&manifest.join("no-such-dir")).len(), 0);
 }
 
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 #[test]
 fn real_env_reads_this_process() {
     let real = RealEnv::from_process().expect("a supported OS with a home folder");
@@ -77,4 +81,12 @@ fn real_env_reads_this_process() {
     // The real env resolves a program that every OS has on its search path.
     let program = if cfg!(windows) { "cmd" } else { "sh" };
     assert!(resolve_command(&env, program).is_some());
+}
+
+/// On an OS Clauseo is not built for (Linux), the real environment is not made.
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+#[test]
+fn real_env_is_none_on_an_unsupported_os() {
+    assert_eq!(Os::current(), None);
+    assert!(RealEnv::from_process().is_none());
 }
