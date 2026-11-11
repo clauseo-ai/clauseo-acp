@@ -318,6 +318,20 @@ pub(crate) fn browser_server() -> McpServer {
     }
 }
 
+/// [`browser_server`]'s parts: its name, program, arguments and environment.
+pub(crate) fn browser_parts() -> (String, PathBuf, Vec<String>, Vec<(String, String)>) {
+    let McpServer::Stdio {
+        name,
+        command,
+        args,
+        env,
+    } = browser_server()
+    else {
+        panic!("the browser entry is a stdio server");
+    };
+    (name, command, args, env)
+}
+
 /// The `browser` entry `session/new` carries once filled, with the proxy on 8123 and Chrome at
 /// `/chrome`, for a template. The claimed ports differ per run, so they match any value, and so
 /// does the session name on Windows: there it is the name the host drew for agent-browser's

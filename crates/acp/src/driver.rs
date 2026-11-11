@@ -158,11 +158,7 @@ fn new_session(
     reply: Reply<SessionStart>,
 ) {
     let cwd = request.cwd;
-    let servers = request
-        .mcp_servers
-        .into_iter()
-        .map(mcp_server)
-        .collect::<Vec<_>>();
+    let servers = mcp_servers(shared, request.mcp_servers);
     let mut sent = acp::NewSessionRequest::new(cwd.clone())
         .additional_directories(request.additional_directories)
         .mcp_servers(servers);
@@ -223,8 +219,10 @@ fn initialize(cx: &ConnectionTo<Agent>, shared: &Arc<Shared>, reply: Reply<crate
             state.stop(error.clone());
             return Err(error);
         }
+        let mcp_http = response.agent_capabilities.mcp_capabilities.http;
         let info = map::agent_info(response);
         let mut locked = state.state();
+        locked.mcp_http = mcp_http;
         locked.prompt_capabilities = info.capabilities.prompt;
         locked.steering = info.capabilities.steering;
         locked.auth_methods.clone_from(&info.auth_methods);
@@ -284,13 +282,7 @@ fn load_session(
     shared.state().sessions.insert(key.clone(), entry);
     let mut sent = acp::LoadSessionRequest::new(request.session.as_str().to_owned(), request.cwd)
         .additional_directories(request.additional_directories)
-        .mcp_servers(
-            request
-                .mcp_servers
-                .into_iter()
-                .map(mcp_server)
-                .collect::<Vec<_>>(),
-        );
+        .mcp_servers(mcp_servers(shared, request.mcp_servers));
     sent.meta = request.meta;
     let state = Arc::clone(shared);
     let session = request.session;
@@ -325,13 +317,7 @@ fn resume_session(
     shared.state().sessions.insert(key.clone(), entry);
     let mut sent = acp::ResumeSessionRequest::new(request.session.as_str().to_owned(), request.cwd)
         .additional_directories(request.additional_directories)
-        .mcp_servers(
-            request
-                .mcp_servers
-                .into_iter()
-                .map(mcp_server)
-                .collect::<Vec<_>>(),
-        );
+        .mcp_servers(mcp_servers(shared, request.mcp_servers));
     sent.meta = request.meta;
     let state = Arc::clone(shared);
     let session = request.session;
@@ -432,8 +418,38 @@ fn session_start(
     })
 }
 
+/// The servers as ACP has them, for `session/new`, `session/load` and `session/resume`. An
+/// http server goes only to an agent whose `initialize` said `mcpCapabilities.http`; to any
+/// other it is left out with a warning that names it and nothing else (its URL and header
+/// values can hold secrets).
+fn mcp_servers(shared: &Shared, servers: Vec<McpServer>) -> Vec<acp::McpServer> {
+    let http = shared.state().mcp_http;
+    servers
+        .into_iter()
+        .filter(|server| {
+            let sent = http || !matches!(server, McpServer::Http { .. });
+            if !sent {
+                tracing::warn!(
+                    server = server.name(),
+                    "left out an http MCP server: the agent did not advertise mcpCapabilities.http"
+                );
+            }
+            sent
+        })
+        .map(mcp_server)
+        .collect()
+}
+
 fn mcp_server(server: McpServer) -> acp::McpServer {
     match server {
+        McpServer::Http { name, url, headers } => acp::McpServer::Http(
+            acp::McpServerHttp::new(name, url).headers(
+                headers
+                    .into_iter()
+                    .map(|(name, value)| acp::HttpHeader::new(name, value))
+                    .collect::<Vec<_>>(),
+            ),
+        ),
         McpServer::Stdio {
             name,
             command,

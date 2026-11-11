@@ -90,9 +90,15 @@ pub struct LoadSession {
     pub meta: Option<serde_json::Map<String, serde_json::Value>>,
 }
 
-/// An MCP server the agent starts. A stdio server goes on the wire with no `type` field, as ACP
-/// v1 has it: claude-agent-acp 0.89.1 drops a stdio server sent with `"type": "stdio"`.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// An MCP server the agent starts or reaches. A stdio server goes on the wire with no `type`
+/// field, as ACP v1 has it: claude-agent-acp 0.89.1 drops a stdio server sent with
+/// `"type": "stdio"`. An http server goes as `{"type": "http", name, url, headers}`, ACP v1's
+/// `McpServerHttp`, and only to an agent whose `initialize` said `mcpCapabilities.http`; to
+/// any other it is left out and its name logged. There is no sse variant: codex-acp 2.2.2 has
+/// none.
+///
+/// `Debug` prints names only: env and header values are secrets and never reach a log.
+#[derive(Clone, PartialEq, Eq)]
 pub enum McpServer {
     /// Over stdio, the transport every agent must support.
     Stdio {
@@ -105,6 +111,55 @@ pub enum McpServer {
         /// Its environment variables.
         env: Vec<(String, String)>,
     },
+    /// Over streamable HTTP, which the agent's own MCP client reaches.
+    Http {
+        /// Its name.
+        name: String,
+        /// Its URL.
+        url: String,
+        /// The HTTP headers the agent sends with each request, as name and value.
+        headers: Vec<(String, String)>,
+    },
+}
+
+impl McpServer {
+    /// Its name, whichever transport.
+    #[must_use]
+    pub fn name(&self) -> &str {
+        match self {
+            Self::Stdio { name, .. } | Self::Http { name, .. } => name,
+        }
+    }
+}
+
+impl std::fmt::Debug for McpServer {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let names = |pairs: &[(String, String)]| {
+            pairs
+                .iter()
+                .map(|(name, _)| name.clone())
+                .collect::<Vec<_>>()
+        };
+        match self {
+            Self::Stdio {
+                name,
+                command,
+                args,
+                env,
+            } => f
+                .debug_struct("Stdio")
+                .field("name", name)
+                .field("command", command)
+                .field("args", args)
+                .field("env_names", &names(env))
+                .finish(),
+            Self::Http { name, headers, .. } => f
+                .debug_struct("Http")
+                .field("name", name)
+                .field("header_names", &names(headers))
+                .finish_non_exhaustive(),
+        }
+    }
 }
 
 /// What `session/new` and `session/load` gave back.

@@ -71,7 +71,9 @@ fn codex_s_entry_goes_without_a_proxy_on_each_os() {
         assert!(!asks_for_proxy(&server));
         let (servers, state) = hook_servers(vec![server], &no_proxy);
         assert_eq!(reason(state.clone()), None, "windows {windows}: {state:?}");
-        let McpServer::Stdio { args, env, .. } = &servers[0];
+        let McpServer::Stdio { args, env, .. } = &servers[0] else {
+            panic!("expected a stdio server");
+        };
         let mut want_args = vec![
             "browser-guard",
             "--agent-browser",

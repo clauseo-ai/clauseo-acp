@@ -137,8 +137,7 @@ pub(crate) fn hook_servers(
     let mut servers = Vec::new();
     let mut state = None;
     for server in hook {
-        let McpServer::Stdio { name, .. } = &server;
-        if name != BROWSER {
+        if server.name() != BROWSER {
             if inputs.control == McpControl::Clauseo {
                 servers.push(server);
             }
@@ -233,7 +232,11 @@ fn browser_entry(
         command,
         args,
         env,
-    } = server;
+    } = server
+    else {
+        tracing::error!("the browser entry is not a stdio server: the browser is left out");
+        return Err(ToolsUnavailableReason::BrowserNotInstalled);
+    };
     let filled = (|| -> Result<McpServer, placeholders::Unfilled> {
         Ok(McpServer::Stdio {
             name,
@@ -281,10 +284,7 @@ pub(crate) fn no_browser(kind: Option<clauseo_protocol::AgentKind>, windows: boo
 /// header state for the browser.
 pub(crate) fn offered(mut servers: Vec<McpServer>, none_here: bool) -> Vec<McpServer> {
     if none_here {
-        servers.retain(|server| {
-            let McpServer::Stdio { name, .. } = server;
-            name != BROWSER
-        });
+        servers.retain(|server| server.name() != BROWSER);
     }
     servers
 }
@@ -293,7 +293,9 @@ pub(crate) fn offered(mut servers: Vec<McpServer>, none_here: bool) -> Vec<McpSe
 /// `{proxy_port}`. The plain client's Codex entry does not (Chrome goes direct, as Claude's shell
 /// browser does); the parked Safe workspace's would.
 pub(crate) fn asks_for_proxy(server: &McpServer) -> bool {
-    let McpServer::Stdio { args, env, .. } = server;
+    let McpServer::Stdio { args, env, .. } = server else {
+        return false;
+    };
     args.iter()
         .chain(env.iter().map(|(_, value)| value))
         .any(|text| text.contains(PROXY_PORT))

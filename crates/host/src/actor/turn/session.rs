@@ -254,12 +254,14 @@ fn session_loads(
     super::profile_loads::session_loads(actor, thread, &matter)
 }
 
-/// The program of each MCP server, which a cancelled turn's sweep leaves running.
+/// The program of each stdio MCP server, which a cancelled turn's sweep leaves running. An
+/// http server runs nowhere on this computer, so it has none.
 fn commands(servers: &[McpServer]) -> Vec<PathBuf> {
     servers
         .iter()
-        .map(|server| match server {
-            McpServer::Stdio { command, .. } => command.clone(),
+        .filter_map(|server| match server {
+            McpServer::Stdio { command, .. } => Some(command.clone()),
+            McpServer::Http { .. } => None,
         })
         .collect()
 }

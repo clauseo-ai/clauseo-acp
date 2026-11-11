@@ -291,10 +291,11 @@ pub(super) fn browser_prep(
     if crate::agent::loads::browser::no_browser(kind, cfg!(windows)) {
         return skip;
     }
-    let entry = actor.profile.mcp_servers(agent).into_iter().find(|server| {
-        let clauseo_acp::McpServer::Stdio { name, .. } = server;
-        name == clauseo_profile::servers::BROWSER
-    });
+    let entry = actor
+        .profile
+        .mcp_servers(agent)
+        .into_iter()
+        .find(|server| server.name() == clauseo_profile::servers::BROWSER);
     if let (None, Some(tools)) = (&entry, actor.profile.browser_tool()) {
         if !settings.tools.browser {
             return skip;
@@ -315,7 +316,9 @@ pub(super) fn browser_prep(
         return skip;
     };
     let proxy = crate::agent::loads::browser::asks_for_proxy(&entry);
-    let clauseo_acp::McpServer::Stdio { command, args, .. } = entry;
+    let clauseo_acp::McpServer::Stdio { command, args, .. } = entry else {
+        return skip;
+    };
     if !settings.tools.browser
         || (proxy && actor.wiring.proxy.is_none())
         || !(actor.wiring.browser_slots.free_for(key) || actor.wiring.browser_slots.releasing(key))

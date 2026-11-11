@@ -116,6 +116,8 @@ pub(crate) struct State {
     pub(crate) steering: Option<SteeringCapability>,
     /// From `initialize`: the auth methods, for `Error::AuthRequired` and `authenticate`.
     pub(crate) auth_methods: Vec<AuthMethod>,
+    /// From `initialize`: `mcpCapabilities.http`, whether an http MCP server may be sent.
+    pub(crate) mcp_http: bool,
 }
 
 impl State {
