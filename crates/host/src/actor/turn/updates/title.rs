@@ -5,21 +5,31 @@ use clauseo_protocol::{CompactString, RenameSource, ThreadId, ThreadRenamed};
 use super::super::super::{Actor, title_source};
 use super::super::out::Out;
 use super::super::{Then, current, lost};
-use super::agent;
+use super::{Context, agent};
 use crate::error::Error;
 
 /// A session title: `ThreadRenamed { by: Agent }` and the row, when it is a valid title the
-/// thread takes (see `title_source`). A title the thread already has from the agent makes no
-/// event, so the replay Codex sends on load adds nothing.
+/// thread takes (see `title_source`). The agent's titles count only until a turn of the thread
+/// has ended (`state::turn_ended`): after the first answer the name settles, and the title is
+/// ignored (D-070). A title the thread already has from the agent makes no event, so the replay
+/// Codex sends on load adds nothing.
 pub(super) fn changed(
     actor: &mut Actor,
     thread: ThreadId,
     title: Option<String>,
+    context: Context,
 ) -> Result<(), Error> {
     let Some(title) = title else {
         tracing::debug!(%thread, "the agent cleared its session title");
         return Ok(());
     };
+    // An update outside the live turn comes after the prompt's answer when a prompt is in
+    // flight: the answer's reply may not be handled yet.
+    let idle = matches!(context, Context::Outside { replay: false });
+    if super::super::state::turn_ended(actor, thread, idle) {
+        tracing::debug!(%thread, "a turn has ended; the agent's session title is ignored");
+        return Ok(());
+    }
     let prompt = current(actor, thread).map(|current| current.prompt.as_slice());
     let Some(title) = title_source::agent_title(thread, &title, prompt) else {
         return Ok(());

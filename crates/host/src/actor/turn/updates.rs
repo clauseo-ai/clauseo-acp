@@ -230,7 +230,7 @@ fn log_update(
         | AgentUpdate::Notice { .. }
         | AgentUpdate::CompactionStarted { .. }
         | AgentUpdate::CompactionEnded { .. }
-        | AgentUpdate::CompactionSummaryChunk { .. }) => plain(actor, thread, update),
+        | AgentUpdate::CompactionSummaryChunk { .. }) => plain(actor, thread, update, context),
     };
     if let Err(error) = done {
         tracing::warn!(%thread, error = %Cause(&error), "an agent update was not logged");
@@ -493,7 +493,12 @@ pub(super) fn known_tool(
 }
 
 /// An update that needs no turn: logged as its event.
-fn plain(actor: &mut Actor, thread: ThreadId, update: AgentUpdate) -> Result<(), Error> {
+fn plain(
+    actor: &mut Actor,
+    thread: ThreadId,
+    update: AgentUpdate,
+    context: Context,
+) -> Result<(), Error> {
     let event: DomainEvent = match update {
         AgentUpdate::Plan(entries) => PlanReplaced { entries }.into(),
         AgentUpdate::Commands(commands) => CommandsAvailable {
@@ -518,7 +523,9 @@ fn plain(actor: &mut Actor, thread: ThreadId, update: AgentUpdate) -> Result<(),
             kind: None,
         }
         .into(),
-        AgentUpdate::SessionTitle { title } => return title::changed(actor, thread, title),
+        AgentUpdate::SessionTitle { title } => {
+            return title::changed(actor, thread, title, context);
+        }
         AgentUpdate::CompactionStarted { acp_id } => {
             if let Some(agent) = agent(actor, thread) {
                 agent.compaction.remove(&acp_id);
