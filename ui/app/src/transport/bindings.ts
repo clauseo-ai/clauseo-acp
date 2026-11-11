@@ -2728,10 +2728,11 @@ export type HostCommand =
 	online: boolean,
 } }) & { allow_blocked_site?: never; answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; cancel_browser_install?: never; cancel_scan?: never; cancel_scheduled_update?: never; check_for_update?: never; connector?: never; create_matter?: never; create_thread?: never; decide_revisions?: never; edit_queued_prompt?: never; first_act?: never; forget_matter?: never; install_browser?: never; install_update?: never; mark_seen?: never; mark_thread_done?: never; mcp?: never; open_matter?: never; recheck_browser_policy?: never; refresh_limits?: never; relocate_matter?: never; remove_queued_prompt?: never; remove_sandbox_setup?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; retry_protection?: never; revoke_allowed_site?: never; scan_folder?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_privacy_settings?: never; set_skill_pack?: never; set_tool_settings?: never; set_ui_settings?: never; set_update_mode?: never; snooze_thread?: never; sweep_done?: never; undo_step?: never; update_matter?: never } | 
 /**
- *  The lawyer's own MCP servers, Settings › Tools (`command/mcp.rs`): add, replace,
- *  remove, turn on or off. Each answers `Done` with a receipt, or a refusal; the new list
- *  reaches app subscribers as `HostEvent::McpToolsChanged`. A secret value it carries
- *  encodes as `[redacted]`. JSON: `{"mcp": {"remove_server": {"name": "github"}}}`.
+ *  The lawyer's own MCP servers, Settings › Tools (`command/mcp.rs`): add, replace, remove,
+ *  turn on or off, import from another app. Each answers `Done` with a receipt, or a
+ *  refusal; the new list reaches app subscribers as `HostEvent::McpToolsChanged`. A secret
+ *  value it carries encodes as `[redacted]`.
+ *  JSON: `{"mcp": {"remove_server": {"name": "github"}}}`.
  */
 ({ mcp: McpCommand }) & { allow_blocked_site?: never; answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; cancel_browser_install?: never; cancel_scan?: never; cancel_scheduled_update?: never; check_for_update?: never; connector?: never; create_matter?: never; create_thread?: never; decide_revisions?: never; edit_queued_prompt?: never; first_act?: never; forget_matter?: never; install_browser?: never; install_update?: never; mark_seen?: never; mark_thread_done?: never; open_matter?: never; recheck_browser_policy?: never; refresh_limits?: never; relocate_matter?: never; remove_queued_prompt?: never; remove_sandbox_setup?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; retry_protection?: never; revoke_allowed_site?: never; scan_folder?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_network?: never; set_privacy_settings?: never; set_skill_pack?: never; set_tool_settings?: never; set_ui_settings?: never; set_update_mode?: never; snooze_thread?: never; sweep_done?: never; undo_step?: never; update_matter?: never };
 
@@ -3786,7 +3787,7 @@ export type McpCommand =
 	previous_name?: string,
 	/**  The server as it is to be. */
 	server: McpServerEdit,
-} }) & { remove_server?: never; set_server_enabled?: never } | 
+} }) & { import?: never; remove_server?: never; set_server_enabled?: never } | 
 /**
  *  Remove a server and delete its keychain items. Removing a server that is not there
  *  does nothing and answers `Done`.
@@ -3794,14 +3795,26 @@ export type McpCommand =
 ({ remove_server: {
 	/**  The server. */
 	name: string,
-} }) & { save_server?: never; set_server_enabled?: never } | 
+} }) & { import?: never; save_server?: never; set_server_enabled?: never } | 
 /**  Turn a server on or off for both plans. A server not there is `mcp.server_unknown`. */
 ({ set_server_enabled: {
 	/**  The server. */
 	name: string,
 	/**  Whether sessions get it. */
 	enabled: boolean,
-} }) & { remove_server?: never; save_server?: never };
+} }) & { import?: never; remove_server?: never; save_server?: never } | 
+/**
+ *  Import every server `source` set up that would import (`McpToolsView::importable`):
+ *  each is saved as `SaveServer` would add it, turned on, its variables' and headers'
+ *  values in the keychain. Answers `Done` with a receipt; what was added and what was left
+ *  out, and why, reaches app subscribers as the view's `last_import`, carrying this
+ *  command's id. An app with nothing to import answers `Done` with both lists empty. A
+ *  keychain failure is `mcp.secret_store_failed` with nothing imported.
+ */
+({ import: {
+	/**  The app. */
+	source: McpImportSource,
+} }) & { remove_server?: never; save_server?: never; set_server_enabled?: never };
 
 /**  Who decides the list of MCP servers. */
 export type McpControl = 
@@ -3819,6 +3832,35 @@ export type McpControl =
  *  `HostCommand::Mcp` is refused with `settings.locked`.
  */
 "firm_managed";
+
+/**  What one `McpCommand::Import` did. */
+export type McpImportResult = {
+	/**  The import's command id. */
+	command: CommandId,
+	/**  The app imported from. */
+	source: McpImportSource,
+	/**  The servers added, by their name in Clauseo, in name order. */
+	imported: string[],
+	/**  The app's servers left out, in name order, each with why. */
+	skipped: McpSkipped[],
+};
+
+/**  An app whose MCP servers the lawyer can import. */
+export type McpImportSource = 
+/**  Claude Desktop's config file. */
+"claude_desktop" | 
+/**  Claude Code: its user-wide servers and each project's, as one source. */
+"claude_code" | 
+/**  Codex's `config.toml` (the screen names it `ChatGPT`). */
+"codex";
+
+/**  One app with servers to import, and how many would import. */
+export type McpImportable = {
+	/**  The app. */
+	source: McpImportSource,
+	/**  How many of its servers an import would add; never 0. */
+	count: number,
+};
 
 /**  One variable or header of a [`McpServerEdit`]. */
 export type McpSecretEdit = {
@@ -3916,12 +3958,56 @@ export type McpServerView = {
 	enabled: boolean,
 };
 
+/**
+ *  Why an import left a server out. A server with more than one of these gets the first in
+ *  declaration order.
+ */
+export type McpSkipReason = 
+/**  Clauseo already has a server of this name. */
+"already_added" | 
+/**  A server in a project's `.mcp.json` that Claude Code has not approved. */
+"not_approved" | 
+/**
+ *  The app reaches it in a way Clauseo does not (such as `sse`), or at a URL Clauseo does
+ *  not allow (`http` to another computer).
+ */
+"unsupported_transport" | 
+/**  Its program is not on this computer (`program` names it). */
+"command_not_found" | 
+/**  Its config names a variable that is not set. */
+"unresolved_variable" | 
+/**  Part of its entry could not be read, or Clauseo's rules refuse it. */
+"unreadable";
+
+/**  A server an import left out. */
+export type McpSkipped = {
+	/**  Its name in Clauseo. */
+	name: string,
+	/**  Why it was left out. */
+	reason: McpSkipReason,
+	/**  The program as the app's config names it, for `command_not_found`; left out otherwise. */
+	program?: string,
+};
+
 /**  The MCP servers Settings › Tools shows. */
 export type McpToolsView = {
 	/**  Whose list it is. */
 	control: McpControl,
 	/**  The servers, in name order; empty under [`McpControl::FirmManaged`]. */
 	servers: McpServerView[],
+	/**
+	 *  Each app whose servers can be imported now, in [`McpImportSource::ALL`]'s order, with
+	 *  how many would import: a server that would be skipped (any [`McpSkipReason`]) does not
+	 *  count, and an app with none is left out. Empty while the firm decides the list. The host
+	 *  reads the apps' config at its start and at each app catch-up (a window opening), off its
+	 *  own thread, so the counts can be a little behind the files.
+	 */
+	importable: McpImportable[],
+	/**
+	 *  How the last `McpCommand::Import` since the host started went; left out before any.
+	 *  Its `command` is the import's command id: a window matches it to its own command.
+	 */
+	last_import?: McpImportResult,
 };
 
 /**

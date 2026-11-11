@@ -252,7 +252,10 @@ wire_types! {
         CheckpointKind, FileChoice, FileDecision, FolderPlace, FolderScanned, ImportSummary,
         MatterKind, RestoreScope, SyncService,
     },
-    mcp::{McpControl, McpSecretName, McpServerKind, McpServerView, McpToolsView},
+    mcp::{
+        McpControl, McpImportResult, McpImportSource, McpImportable, McpSecretName,
+        McpServerKind, McpServerView, McpSkipReason, McpSkipped, McpToolsView,
+    },
     number::{Count, Cursor, Finite, Seq, Timestamp},
     picks::{AgentPrefs, ConfigPicks},
     patch::{

@@ -1,0 +1,12 @@
+---
+source: crates/protocol/tests/snapshots/mcp.rs
+expression: "McpSkipReason::ALL"
+---
+[
+  "already_added",
+  "not_approved",
+  "unsupported_transport",
+  "command_not_found",
+  "unresolved_variable",
+  "unreadable"
+]

@@ -1,5 +1,6 @@
 //! The lawyer's MCP servers (Settings › Tools) on the desktop side:
 //!
+//! - the finder of Settings › Tools' import ([`with_mcp_import`]);
 //! - their keychain: the connectors' keychain (`connectors::secret_store`), under its own
 //!   service, `clauseo_settings::MCP_KEYCHAIN_SERVICE` ([`with_mcp_secrets`]);
 //! - the native confirm before a save adds a server or changes what starts
@@ -157,3 +158,9 @@ impl<R: Runtime> LaunchDrawer for NativeLaunchDrawer<R> {
 
 #[cfg(test)]
 mod tests;
+
+/// `config` finding the MCP servers Claude Desktop, Claude Code and Codex set up on this
+/// computer, for Settings › Tools' import.
+pub(crate) fn with_mcp_import(config: HostConfig) -> HostConfig {
+    config.with_mcp_import(Arc::new(clauseo_host::find_mcp_imports_here))
+}

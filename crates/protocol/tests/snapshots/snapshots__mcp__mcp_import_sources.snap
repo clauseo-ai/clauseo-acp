@@ -1,0 +1,9 @@
+---
+source: crates/protocol/tests/snapshots/mcp.rs
+expression: "McpImportSource::ALL"
+---
+[
+  "claude_desktop",
+  "claude_code",
+  "codex"
+]

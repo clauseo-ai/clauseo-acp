@@ -478,6 +478,7 @@ fn stream_commands_need_open_stream_and_acks_are_bounded() {
 
 mod admit;
 mod admit_browser;
+mod admit_mcp;
 mod allowed_sites;
 mod app;
 mod connectors;
