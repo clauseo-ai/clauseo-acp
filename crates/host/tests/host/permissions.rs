@@ -211,6 +211,48 @@ fn codex_browser_tools_are_allowed_unseen() {
     host.shutdown();
 }
 
+/// A Codex launch whose folder check failed is unprotected (`forced_ask::applies`), so its
+/// browser tool approval reaches the lawyer as a card; in a checked folder the host answers it
+/// `allow_session` with nothing logged. Each scenario checks the answer the agent gets.
+#[test]
+fn a_codex_browser_approval_is_a_card_only_when_the_folder_is_unprotected() {
+    const CODEX: &str = "codex-acp";
+    for unprotected in [true, false] {
+        let scenario = if unprotected {
+            "codex-browser-click-unprotected"
+        } else {
+            "codex-browser-click"
+        };
+        let dir = Dir::new(
+            &format!("codex_browser_click_{unprotected}"),
+            &[(CODEX, Scenario::Local(scenario))],
+        );
+        let host = if unprotected {
+            dir.start_with(0, clauseo_host::HostConfig::with_folder_check_failed)
+        } else {
+            dir.start(0)
+        };
+        let (_, thread, _) = matter_with_thread(&dir, &host, "m", &[], CODEX);
+        let mut events = host.events(StreamId::Thread(thread));
+        let (turn, _) = host.prompt(thread, "Open the judgment.");
+        if unprotected {
+            answer_from(&host, &mut events, thread, 0, &["allow_once"]);
+        }
+        let ended = events.until_turn_ended(turn);
+        events.assert_no_mismatch();
+        assert_eq!(ended.stop, StopReason::EndTurn, "{}", events.dump());
+        let seen = requested_tools(&events);
+        let want: &[Option<&str>] = if unprotected {
+            &[Some("tc-click")]
+        } else {
+            &[]
+        };
+        let seen: Vec<Option<&str>> = seen.iter().map(Option::as_deref).collect();
+        assert_eq!(seen, want, "{}", events.dump());
+        host.shutdown();
+    }
+}
+
 /// Codex asking to run curl or wget, or for a host's network, is declined by the host with
 /// nothing logged, and its offline note steered once a turn before the answer
 /// (`actor/turn/shell_network.rs`); `rm -rf` (Codex's dangerous-command prompt) and `echo curl`
