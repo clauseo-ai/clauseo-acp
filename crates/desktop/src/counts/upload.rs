@@ -14,8 +14,8 @@
 //!   `ProxyServer`, `ProxyOverride`), through hyper-util's `client-proxy-system`. No PAC file
 //!   (Later, G10). Never the agents' egress proxy: that goes to agents in their own environment,
 //!   never into this process's.
-//! - The endpoint: release builds post to `RELEASE_ENDPOINT`, which is empty until S23's live
-//!   checks pass, so they send nothing. Debug and `e2e` builds read `ENDPOINT_VAR` instead,
+//! - The endpoint: release builds post to `RELEASE_ENDPOINT`, `https://t.clauseo.chat` (S23's
+//!   Worker, `services/counts-worker/`). Debug and `e2e` builds read `ENDPOINT_VAR` instead,
 //!   and have none without it; release builds never read it. With no endpoint every POST fails
 //!   without touching the network, and the days wait in the queue until they age out.
 
@@ -25,10 +25,9 @@ use clauseo_counts::{Upload, UploadError, UploadPath};
 use futures::future::BoxFuture;
 use reqwest::header::{CONTENT_ENCODING, CONTENT_TYPE, USER_AGENT};
 
-/// The release builds' endpoint. Empty until a follow-up pull request, made after S23's live
-/// checks pass, sets it to `https://t.clauseo.chat`.
+/// The release builds' endpoint: S23's Worker, set once its live checks passed (2026-11-11).
 #[cfg(any(test, not(any(debug_assertions, feature = "e2e"))))]
-pub(crate) const RELEASE_ENDPOINT: &str = "";
+pub(crate) const RELEASE_ENDPOINT: &str = "https://t.clauseo.chat";
 
 /// The variable debug and `e2e` builds read their endpoint from.
 #[cfg(any(debug_assertions, feature = "e2e"))]

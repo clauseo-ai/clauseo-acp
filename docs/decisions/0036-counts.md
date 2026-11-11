@@ -232,6 +232,8 @@ cells, the weekly tally, the queue and the sender. Its row bans `matters`, `acp`
   Debug and `e2e` builds read `CLAUSEO_COUNTS_URL` instead and have no endpoint without it;
   release builds never read it. An endpoint is an `https` origin with no user, query, fragment or
   path. With none, every POST fails without touching the network, and the days age out of the queue.
+  - **Set** (2026-11-11): S23's live checks passed, and release builds now post to
+    `https://t.clauseo.chat` ([decision 0056](0056-counts-worker.md), `docs/counts-worker.md`).
 - **`count_ui(event: UiCount)`**, granted to `main` alone by its own capability
   (`capabilities/counts.json`): `error_shown` (its code read as `StrictErrorCode`, so `unknown` or
   a code this build does not know is refused with the argument),
