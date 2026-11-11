@@ -175,6 +175,6 @@ export const U6: Entry[] = [
   },
   // The wall following the open matter's folder (0055): PL-01 to PL-03.
   ...PAPERS_LIVE,
-  // The wall's dimmed tiles, files only online and folders not opened: WA-01 to WA-13.
+  // The wall's dimmed tiles, files only online and folders not opened: WA-01 to WA-19.
   ...WALL_AWAY,
 ];

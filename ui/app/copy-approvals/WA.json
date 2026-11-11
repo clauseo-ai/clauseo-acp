@@ -141,5 +141,71 @@
     "at": "2026-11-11",
     "by": "orchestrator, 2026-11-11, stage D cloud-only tiles",
     "note": "the wall's dimmed tiles for files only online and folders not opened, and the new conversation's count"
+  },
+  "WA-14": {
+    "en": "A new conversation. This matter's {n} papers are only in {service}.",
+    "hi": "एक नई बातचीत। इस मामले के {n} दस्तावेज़ केवल {service} में हैं।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-11",
+    "hi_by": "orchestrator draft (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-11",
+    "by": "orchestrator, 2026-11-11, stage D cloud-only tiles",
+    "note": "the new conversation's line in a matter with no paper to read: its papers all only online, or only folders not opened"
+  },
+  "WA-15": {
+    "en": "A new conversation. This matter's one paper is only in {service}.",
+    "hi": "एक नई बातचीत। इस मामले का एक दस्तावेज़ केवल {service} में है।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-11",
+    "hi_by": "orchestrator draft (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-11",
+    "by": "orchestrator, 2026-11-11, stage D cloud-only tiles",
+    "note": "the new conversation's line in a matter with no paper to read: its papers all only online, or only folders not opened"
+  },
+  "WA-16": {
+    "en": "A new conversation. This matter's {n} papers are only online.",
+    "hi": "एक नई बातचीत। इस मामले के {n} दस्तावेज़ केवल ऑनलाइन हैं।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-11",
+    "hi_by": "orchestrator draft (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-11",
+    "by": "orchestrator, 2026-11-11, stage D cloud-only tiles",
+    "note": "the new conversation's line in a matter with no paper to read: its papers all only online, or only folders not opened"
+  },
+  "WA-17": {
+    "en": "A new conversation. This matter's one paper is only online.",
+    "hi": "एक नई बातचीत। इस मामले का एक दस्तावेज़ केवल ऑनलाइन है।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-11",
+    "hi_by": "orchestrator draft (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-11",
+    "by": "orchestrator, 2026-11-11, stage D cloud-only tiles",
+    "note": "the new conversation's line in a matter with no paper to read: its papers all only online, or only folders not opened"
+  },
+  "WA-18": {
+    "en": "A new conversation. Clauseo couldn't open this matter's folders.",
+    "hi": "एक नई बातचीत। Clauseo इस मामले के फ़ोल्डर नहीं खोल सका।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-11",
+    "hi_by": "orchestrator draft (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-11",
+    "by": "orchestrator, 2026-11-11, stage D cloud-only tiles",
+    "note": "the new conversation's line in a matter with no paper to read: its papers all only online, or only folders not opened"
+  },
+  "WA-19": {
+    "en": "A new conversation. Clauseo couldn't open this matter's folder.",
+    "hi": "एक नई बातचीत। Clauseo इस मामले के फ़ोल्डर नहीं खोल सका।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-11",
+    "hi_by": "orchestrator draft (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-11",
+    "by": "orchestrator, 2026-11-11, stage D cloud-only tiles",
+    "note": "the new conversation's line in a matter with no paper to read: its papers all only online, or only folders not opened"
   }
 }

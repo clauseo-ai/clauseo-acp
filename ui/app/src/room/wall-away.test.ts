@@ -9,7 +9,15 @@ import { expect, test } from "vitest";
 import { uuid } from "../testing/stream-script.ts";
 import type { FolderPlace } from "../transport/protocol.ts";
 import type { Papers } from "./host-next.ts";
-import { awayWords, cloudOnlyCount, moreWords, wallEmpty, wallItems } from "./wall-away.ts";
+import {
+  allAwayWords,
+  awayWords,
+  cloudOnlyCount,
+  hasLine,
+  moreWords,
+  wallEmpty,
+  wallItems,
+} from "./wall-away.ts";
 
 const paper = (n: number, path: string) => ({
   file: uuid(n, 8),
@@ -120,4 +128,54 @@ test("the count's sentence, in its four forms, and none at 0", () => {
     mt("hi", "{n} more are only in {service}.", { n: 2, service: "OneDrive" }),
   );
   expect(moreWords("hi", "local", 1)).toBe("1 और दस्तावेज़ केवल ऑनलाइन है।");
+});
+
+test("with no paper to read, the new conversation's line says the papers are all only online, in its four forms", () => {
+  expect(allAwayWords("en", ONE_DRIVE, 3, 0)).toBe(
+    "A new conversation. This matter's 3 papers are only in OneDrive.",
+  );
+  expect(allAwayWords("en", ONE_DRIVE, 1, 0)).toBe(
+    "A new conversation. This matter's one paper is only in OneDrive.",
+  );
+  expect(allAwayWords("en", "local", 2, 0)).toBe(
+    "A new conversation. This matter's 2 papers are only online.",
+  );
+  expect(allAwayWords("en", { synced: { service: "other" } }, 1, 0)).toBe(
+    "A new conversation. This matter's one paper is only online.",
+  );
+  // folders not opened are never counted, and files only online come first
+  expect(allAwayWords("en", ONE_DRIVE, 2, 3)).toBe(
+    "A new conversation. This matter's 2 papers are only in OneDrive.",
+  );
+  expect(allAwayWords("hi", ONE_DRIVE, 2, 0)).toBe(
+    "एक नई बातचीत। इस मामले के 2 दस्तावेज़ केवल OneDrive में हैं।",
+  );
+  expect(allAwayWords("hi", "local", 1, 0)).toBe(
+    "एक नई बातचीत। इस मामले का एक दस्तावेज़ केवल ऑनलाइन है।",
+  );
+});
+
+test("with only folders not opened, the line says Clauseo couldn't open them, one or more", () => {
+  expect(allAwayWords("en", ONE_DRIVE, 0, 1)).toBe(
+    "A new conversation. Clauseo couldn't open this matter's folder.",
+  );
+  expect(allAwayWords("en", "local", 0, 2)).toBe(
+    "A new conversation. Clauseo couldn't open this matter's folders.",
+  );
+  expect(allAwayWords("hi", "local", 0, 1)).toBe(
+    "एक नई बातचीत। Clauseo इस मामले के फ़ोल्डर नहीं खोल सका।",
+  );
+  expect(allAwayWords("hi", "local", 0, 2)).toBe(
+    "एक नई बातचीत। Clauseo इस मामले के फ़ोल्डर नहीं खोल सका।",
+  );
+});
+
+test("a new conversation has a line whenever the wall has a tile", () => {
+  expect(hasLine(listing({}))).toBe(false);
+  expect(hasLine(listing({ skipped: [{ path: "Hearing.mp4", reason: "over_size_cap" }] }))).toBe(
+    false,
+  );
+  expect(hasLine(listing({ papers: [paper(1, "Plaint.pdf")] }))).toBe(true);
+  expect(hasLine(listing({ skipped: [{ path: "Lease.pdf", reason: "cloud_only" }] }))).toBe(true);
+  expect(hasLine(listing({ unread: ["Annexures"] }))).toBe(true);
 });

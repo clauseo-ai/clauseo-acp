@@ -2,7 +2,7 @@
 // Clauseo couldn't open, among the papers, and the new conversation's count of how many more are only online. On
 // Windows in OneDrive with two files away and a folder not opened; on the Mac in OneDrive with one; in a folder synced
 // by a service Clauseo doesn't name, with two; on this computer with one; a matter whose files are all in OneDrive; and
-// one whose only entry is a folder not opened. A tile's tip shows on hover or focus; its words are its description for
+// one whose only entry is a folder not opened; and the new conversation's line in a matter with no paper to read. A tile's tip shows on hover or focus; its words are its description for
 // assistive technology, so the page marks them in the room as it stands. Spread into registry-u6.tsx.
 import type { Entry } from "./entry.ts";
 import type { Papers, PaperSummary } from "../room/host-next.ts";
@@ -49,6 +49,14 @@ const STATES = {
     "windows",
   ),
   onlyUnread: room([], { place: "local", unread: ["Annexures"] }, "windows"),
+  allOnlineOne: room([], { place: ONE_DRIVE, skipped: only("Lease deed.pdf") }, "mac"),
+  allOnlineOther: room(
+    [],
+    { place: { synced: { service: "other" } }, skipped: only("Lease deed.pdf", "Plaint.pdf") },
+    "windows",
+  ),
+  allOnlineLocalOne: room([], { place: "local", skipped: only("Lease deed.pdf") }, "mac"),
+  twoUnread: room([], { place: "local", unread: ["Annexures", "Correspondence"] }, "windows"),
 };
 
 /** The dimmed tiles' entries, each id written as it is. */
@@ -136,6 +144,42 @@ export const WALL_AWAY: Entry[] = [
     words: roomWords(
       "Clauseo couldn't look inside this folder. It may be only online, or Clauseo may not be allowed to open it.",
     ),
+    screen: "room/wall-away",
+    render: STATES.onlyUnread,
+  },
+  {
+    id: "WA-14",
+    words: matterWords("A new conversation. This matter's {n} papers are only in {service}."),
+    screen: "room/wall-away",
+    render: STATES.allOnline,
+  },
+  {
+    id: "WA-15",
+    words: matterWords("A new conversation. This matter's one paper is only in {service}."),
+    screen: "room/wall-away",
+    render: STATES.allOnlineOne,
+  },
+  {
+    id: "WA-16",
+    words: matterWords("A new conversation. This matter's {n} papers are only online."),
+    screen: "room/wall-away",
+    render: STATES.allOnlineOther,
+  },
+  {
+    id: "WA-17",
+    words: matterWords("A new conversation. This matter's one paper is only online."),
+    screen: "room/wall-away",
+    render: STATES.allOnlineLocalOne,
+  },
+  {
+    id: "WA-18",
+    words: matterWords("A new conversation. Clauseo couldn't open this matter's folders."),
+    screen: "room/wall-away",
+    render: STATES.twoUnread,
+  },
+  {
+    id: "WA-19",
+    words: matterWords("A new conversation. Clauseo couldn't open this matter's folder."),
     screen: "room/wall-away",
     render: STATES.onlyUnread,
   },

@@ -106,6 +106,21 @@ export const HI = {
   "1 more is only in {service}.": "1 और दस्तावेज़ केवल {service} में है।",
   "{n} more are only online.": "{n} और दस्तावेज़ केवल ऑनलाइन हैं।",
   "1 more is only online.": "1 और दस्तावेज़ केवल ऑनलाइन है।",
+  // in its place with no paper to read, when the matter's papers are all only online (folders not opened aren't
+  // counted). Hindi provisional (stage D, 2026-11-11)
+  "A new conversation. This matter's {n} papers are only in {service}.":
+    "एक नई बातचीत। इस मामले के {n} दस्तावेज़ केवल {service} में हैं।",
+  "A new conversation. This matter's one paper is only in {service}.":
+    "एक नई बातचीत। इस मामले का एक दस्तावेज़ केवल {service} में है।",
+  "A new conversation. This matter's {n} papers are only online.":
+    "एक नई बातचीत। इस मामले के {n} दस्तावेज़ केवल ऑनलाइन हैं।",
+  "A new conversation. This matter's one paper is only online.":
+    "एक नई बातचीत। इस मामले का एक दस्तावेज़ केवल ऑनलाइन है।",
+  // with no paper and no file only online, only folders Clauseo couldn't open: one key each, the same Hindi
+  "A new conversation. Clauseo couldn't open this matter's folders.":
+    "एक नई बातचीत। Clauseo इस मामले के फ़ोल्डर नहीं खोल सका।",
+  "A new conversation. Clauseo couldn't open this matter's folder.":
+    "एक नई बातचीत। Clauseo इस मामले के फ़ोल्डर नहीं खोल सका।",
   // H13: Retry from here on one of the lawyer's questions, the line a retried conversation opens with, and its way
   // back to the first
   "Retry from here": "यहाँ से फिर पूछें",
