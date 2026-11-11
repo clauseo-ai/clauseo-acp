@@ -2,10 +2,8 @@
 
 /// Claude Code's own sandbox (the host's `agent::loads::sandbox`) runs Claude's commands on
 /// macOS under Seatbelt with Apple events off and no way out, so the same services fail for it:
-/// Claude on macOS is told, in one sentence of its own, with agent-browser's rule: a command that
-/// pipes or chains it with another runs sandboxed (`excludedCommands`), where it cannot reach its
-/// browser, and agent-browser itself runs outside it, so it takes no sandbox options. Claude
-/// elsewhere (Windows has no sandbox for it) and Codex never are.
+/// Claude on macOS is told, in one sentence of its own; Claude elsewhere (Windows has no sandbox
+/// for it) and Codex never are.
 #[test]
 fn only_claude_on_macos_is_told_which_commands_its_sandbox_blocks() {
     use clauseo_profile::instructions::{claude_shell, codex_shell};
@@ -23,12 +21,9 @@ fn only_claude_on_macos_is_told_which_commands_its_sandbox_blocks() {
         "stetdoc",
         "textutil",
         "python3",
-        "agent-browser",
     ] {
         assert!(line.contains(&format!("`{command}`")), "{command}");
     }
-    // agent-browser runs outside the sandbox, so it takes no allowed domains (stage C).
-    assert!(line.contains("no sandbox options such as allowed domains"));
     let profile = super::launch_profile(&std::env::temp_dir().join("claude-shell-line"));
     assert_eq!(
         profile.claude_instructions_for(true),
