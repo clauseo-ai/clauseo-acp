@@ -11,6 +11,7 @@ use std::os::windows::ffi::OsStrExt;
 use std::path::{Component, Path, PathBuf, Prefix};
 use std::sync::Arc;
 
+use clauseo_protocol::MatterId;
 use unicode_normalization::UnicodeNormalization;
 
 use crate::matter::json;
@@ -156,32 +157,66 @@ pub fn check_protected(folder: &Path, settings: &Settings) -> Result<(), Error> 
     Ok(())
 }
 
-/// Refuses `folder` if it already holds a `.clauseo/matter.json` (it belongs to a matter;
-/// importing it again would take it from that matter), or for its place as
-/// [`check_outside_root`] does. Called after [`check_folder`].
-pub(crate) fn check_new_matter(folder: &Path, settings: &Settings) -> Result<(), Error> {
-    let refuse = |reason| Error::FolderRefused {
-        folder: folder.to_path_buf(),
-        reason,
-    };
-    match json::read(folder)? {
-        json::Found::NoMarker => {}
-        json::Found::NoFolder => {
-            return Err(Error::FolderMissing {
+/// The `.clauseo/matter.json` an import found in its folder, when it does not refuse it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Existing {
+    /// None.
+    None,
+    /// One naming the matter being imported: [`Matter::import`](crate::Matter::import) keeps it.
+    Same,
+    /// One that does not read: set aside before the import writes its own.
+    Unreadable,
+}
+
+/// Refuses `folder` if it holds a `.clauseo/matter.json` naming a matter other than `id` (it
+/// belongs to that matter; importing it would take it from that matter), or for its place as
+/// [`check_outside_root`] does; otherwise says which marker it holds. Called after
+/// [`check_folder`]. A marker that cannot be read (permissions) is an [`Error::Io`].
+pub(crate) fn check_new_matter(
+    folder: &Path,
+    id: MatterId,
+    settings: &Settings,
+) -> Result<Existing, Error> {
+    let existing = match json::read(folder)? {
+        json::Found::NoMarker => Existing::None,
+        json::Found::NoFolder => return Err(missing(folder)),
+        json::Found::Matter(found) if found == id => Existing::Same,
+        json::Found::Matter(other) => {
+            return Err(Error::FolderRefused {
                 folder: folder.to_path_buf(),
-                reason: MissingReason::NoFolder,
+                reason: Refusal::AlreadyMatter(other),
             });
         }
-        json::Found::Matter(id) => return Err(refuse(Refusal::AlreadyMatter(id))),
-        json::Found::Unreadable => return Err(refuse(Refusal::UnreadableMatterJson)),
+        json::Found::Unreadable => Existing::Unreadable,
+    };
+    check_outside_root(folder, settings)?;
+    Ok(existing)
+}
+
+/// The scans' check after [`check_folder`]: `folder` must be a folder ([`Error::FolderMissing`]
+/// otherwise, as import answers) outside the matters root ([`check_outside_root`]). Its marker is
+/// not read: an import adopts the matter it names or sets it aside, so it refuses nothing.
+pub(crate) fn check_scanned(folder: &Path, settings: &Settings) -> Result<(), Error> {
+    match std::fs::metadata(folder) {
+        Ok(metadata) if metadata.is_dir() => {}
+        Ok(_) => return Err(missing(folder)),
+        Err(err) if err.kind() == io::ErrorKind::NotFound => return Err(missing(folder)),
+        Err(err) => return Err(Error::io("stat", folder, err)),
     }
     check_outside_root(folder, settings)
+}
+
+fn missing(folder: &Path) -> Error {
+    Error::FolderMissing {
+        folder: folder.to_path_buf(),
+        reason: MissingReason::NoFolder,
+    }
 }
 
 /// Refuses `folder` if it is, holds or sits inside the matters root (`Refusal::MattersRoot`: the
 /// history would version itself), or if it is, holds or sits inside a `refused_trees` entry
 /// (`Refusal::Listed(entry)`, the entry as the host passed it). Import checks it after the marker;
-/// locate and relink, which need a marker, check it alone.
+/// locate and relink, which need a marker, and the scans, which do not read it, check it alone.
 pub(crate) fn check_outside_root(folder: &Path, settings: &Settings) -> Result<(), Error> {
     dunce::canonicalize(folder).map_err(|err| Error::io("canonicalize", folder, err))?;
     check_protected(folder, settings)
