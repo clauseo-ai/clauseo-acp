@@ -261,9 +261,12 @@ function AgentContent({ id, entry }: { id: EntryId; entry: AgentContentEntry }) 
   );
 }
 
-/** A host notice in the app's words for its kind; its own text for an agent's, or a kind this version doesn't know. */
+/** A host notice in the app's words for its kind, or its English fallback for a kind this version doesn't know. An
+ * agent's notice (no kind) shows nothing: it is the agent's own free text, such as Codex's raw error with its request id
+ * and the key's masked ending, and the lawyer reads the app's own line for what went wrong instead. */
 function Notice({ id, entry }: { id: EntryId; entry: NoticeEntry }) {
   const w = useThreadWords();
+  if (entry.kind === undefined || entry.kind === null) return null;
   return (
     <p
       data-testid="notice"
