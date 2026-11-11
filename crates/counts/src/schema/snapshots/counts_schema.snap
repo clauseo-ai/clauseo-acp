@@ -1530,7 +1530,8 @@ expression: counts_schema()
         "agent.offline",
         "matter.folder_in_clauseo_data",
         "matter.folder_inside_matter",
-        "matter.folder_holds_matter"
+        "matter.folder_holds_matter",
+        "prompt.too_long"
       ],
       "type": "string"
     },

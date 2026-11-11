@@ -69,8 +69,10 @@ pub enum Error {
     TooLarge {
         /// The command, query or type being checked, such as `"SendPrompt"`.
         kind: &'static str,
-        /// What was measured, as a fixed phrase such as `"prompt text in bytes"`.
-        what: &'static str,
+        /// What was measured. Typed, so a caller picks a code by it without reading a phrase:
+        /// [`HostError::invalid_command`](crate::HostError::invalid_command) gives
+        /// `prompt.too_long` for [`Measure::PromptText`] only.
+        what: Measure,
         /// The size found.
         size: usize,
         /// The largest size allowed.
@@ -87,4 +89,57 @@ pub enum Error {
     /// encoder's message.
     #[error("no JSON text form: {0}")]
     NotJson(String),
+}
+
+/// What a [`Error::TooLarge`] measured. Its `Display` is the fixed phrase the error's text
+/// shows, such as `prompt text in JSON-escaped bytes`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum Measure {
+    /// A prompt's text, in JSON-escaped bytes summed over its `Text` blocks (`SendPrompt`), or
+    /// a queued prompt's new text (`EditQueuedPrompt`): the one measure the lawyer's own words
+    /// reach, so the one with its own code, `prompt.too_long`.
+    PromptText,
+    /// A prompt's blocks.
+    PromptBlocks,
+    /// A prompt's `File` blocks.
+    FileReferences,
+    /// A new matter folder's name, in UTF-8 bytes.
+    NewFolderName,
+    /// An elicitation's values, as compact JSON in bytes.
+    ElicitationValues,
+    /// The files a file list names.
+    FilesNamed,
+    /// A file list's paths, in bytes summed.
+    PathBytes,
+    /// A site's host, in bytes.
+    HostBytes,
+    /// A title, in characters.
+    TitleChars,
+    /// A revision request's change ids.
+    ChangeIds,
+}
+
+impl Measure {
+    /// The fixed phrase the error's text shows.
+    pub const fn phrase(self) -> &'static str {
+        match self {
+            Self::PromptText => "prompt text in JSON-escaped bytes",
+            Self::PromptBlocks => "prompt blocks",
+            Self::FileReferences => "file references",
+            Self::NewFolderName => "new folder name in UTF-8 bytes",
+            Self::ElicitationValues => "values as compact JSON in bytes",
+            Self::FilesNamed => "files named",
+            Self::PathBytes => "bytes of paths named",
+            Self::HostBytes => "host in bytes",
+            Self::TitleChars => "title in characters",
+            Self::ChangeIds => "change ids",
+        }
+    }
+}
+
+impl std::fmt::Display for Measure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.phrase())
+    }
 }

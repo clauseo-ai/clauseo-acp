@@ -123,6 +123,10 @@ pub(super) fn failures() -> Vec<DomainEvent> {
             ErrorCode::AgentOffline,
             "the window said the computer is offline",
         ),
+        failed(
+            ErrorCode::PromptTooLong,
+            "SendPrompt: prompt text in JSON-escaped bytes is 6291457, over the limit of 6291456",
+        ),
     ]
 }
 
@@ -262,7 +266,8 @@ fn case_law() -> Vec<DomainEvent> {
     ]
 }
 
-/// One `TurnEnded` of turn 3 for each stop reason added after v1: `NotAllowed`, `OutsideMatter`.
+/// One `TurnEnded` of turn 3 for each stop reason added after v1: `NotAllowed`, `OutsideMatter`,
+/// `TooLong`.
 pub(super) fn stops() -> Vec<DomainEvent> {
     vec![
         TurnEnded {
@@ -275,6 +280,13 @@ pub(super) fn stops() -> Vec<DomainEvent> {
         TurnEnded {
             turn: turn_id(3),
             stop: StopReason::OutsideMatter,
+            usage: None,
+            checkpoint_after: Some(checkpoint_id(14)),
+        }
+        .into(),
+        TurnEnded {
+            turn: turn_id(3),
+            stop: StopReason::TooLong,
             usage: None,
             checkpoint_after: Some(checkpoint_id(14)),
         }

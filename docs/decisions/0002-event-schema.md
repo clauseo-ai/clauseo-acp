@@ -347,10 +347,10 @@ Every limit and rule, with its constant:
 | Where | Rule | Constant |
 |---|---|---|
 | `SendPrompt` `content` | 1 to 100 blocks | `MAX_PROMPT_BLOCKS` |
-| same | at most 256 KiB of text, UTF-8 bytes summed over `Text` blocks, not escaped | `MAX_PROMPT_TEXT_BYTES` |
+| same | at most 6 MiB of text, JSON-escaped bytes (`escaped_len`) summed over `Text` blocks, so the agent's replay of the prompt fits the ACP client's 8 MiB line; over it is `prompt.too_long` | `MAX_PROMPT_TEXT_BYTES` |
 | same | at most 50 `File` blocks | `MAX_PROMPT_FILES` |
 | same | no empty `Text` block; a visible character (as titles count it) or a `File` block | |
-| `EditQueuedPrompt.text` | at most 256 KiB, UTF-8 bytes; it replaces the queued prompt's text and keeps its file blocks, so empty text is refused by the host only for a prompt without files | `MAX_PROMPT_TEXT_BYTES` |
+| `EditQueuedPrompt.text` | at most 6 MiB, JSON-escaped bytes (`prompt.too_long`); it replaces the queued prompt's text and keeps its file blocks, so empty text is refused by the host only for a prompt without files | `MAX_PROMPT_TEXT_BYTES` |
 | `SendPrompt.delivery` | a `DeliveryRequest`: closed, so a newer mode fails to decode, never run as another mode; queue is written as a missing field | |
 | `Title` (`RenameThread.title`, `CreateMatter.name`) | at most 200 characters (`char`s) | `MAX_TITLE_CHARS` |
 | same | a visible character: not only whitespace, `Default_Ignorable_Code_Point` characters, U+2800 and combining marks (a heuristic) | |

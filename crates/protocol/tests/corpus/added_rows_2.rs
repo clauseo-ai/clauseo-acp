@@ -28,4 +28,18 @@ pub(crate) const ADDED_AFTER_V1_2: &[Corpus] = &[
         (354, 0x9867_94c3_8ae8_b4a2),
         (255, 0xb5a5_fcdc_8f39_3357),
     ),
+    (
+        "added/turn_failed-PromptTooLong",
+        include_bytes!("added/turn_failed-PromptTooLong.jsonl"),
+        include_bytes!("added/turn_failed-PromptTooLong.msgpack"),
+        (397, 0xb8b2_3a69_7983_4b22),
+        (299, 0xc180_6c5c_0edc_2d6b),
+    ),
+    (
+        "added/turn_ended-TooLong",
+        include_bytes!("added/turn_ended-TooLong.jsonl"),
+        include_bytes!("added/turn_ended-TooLong.msgpack"),
+        (352, 0x3b96_01ab_d792_59bb),
+        (234, 0x9e7a_7ca8_dbba_7255),
+    ),
 ];

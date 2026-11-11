@@ -47,7 +47,7 @@ pub fn check_display_title(title: &str) -> Result<(), Error> {
     if chars > MAX_TITLE_CHARS {
         return Err(Error::TooLarge {
             kind: "Title",
-            what: "title in characters",
+            what: crate::Measure::TitleChars,
             size: chars,
             max: MAX_TITLE_CHARS,
         });

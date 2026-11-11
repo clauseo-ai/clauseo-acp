@@ -129,6 +129,7 @@ reported it.
 | Ended by a refusal: the agent cancelled the turn right after the lawyer's Don't allow (Codex), with no Stop after it | `StopReason::NotAllowed` | as cancelled; the words say the lawyer did not allow it and the answer ended there |
 | Ended by Clauseo's own refusal: the agent cancelled the turn right after the host refused, unasked, a request into Clauseo's data folder (Codex), with no Stop after it | `StopReason::OutsideMatter` | as cancelled; the words say Clauseo stopped the answer because the agent, named as the error words name it (else "the AI"), tried to open files outside the matter, and the answer so far is kept |
 | Stopped at the usage limit | `StopReason::AtLimit` | as above; the `ViewEntry::LimitStop` card in section 8 |
+| Too long for the model: the agent refused the question, or the conversation with it, as too long to read (decision 0057) | `StopReason::TooLong` | as above (the queue is held, no `turn_failed` before it); the words name the agent (Claude, ChatGPT), say to shorten the question or ask it in a new conversation, and that the question and the answer so far are kept |
 | Failed | `StopReason::Failed` | `failure`: the error code (section 9); the event's detail is never shown |
 | Stop reason from a newer Clauseo | `StopReason::Unknown` | as failed, without a code |
 | File added | `ChangeKind::Added` | path, size, after content id |
@@ -365,6 +366,7 @@ retried as they are; the others need the lawyer or a fix first. Meanings are in 
 | Tracked changes: no stetdoc, a file that is not a Word document, or a list that went stale | `ErrorCode::WordStetdocMissing`, `ErrorCode::WordNotDocx`, `ErrorCode::WordRevisionsStale` | no |
 | Tracked changes: stetdoc failed or timed out | `ErrorCode::WordEditFailed` | yes |
 | Offline mid-answer (D-050): the agent couldn't reach its service, or the window said offline (`HostCommand::SetNetwork`) and the agent then sent nothing for 30 s; the answer so far stays, the stop line says so and offers Try again | `ErrorCode::AgentOffline` | yes |
+| A question whose text is over 6 MiB (`MAX_PROMPT_TEXT_BYTES`, counted as JSON-escaped bytes): the composer checks it when Ask is pressed and sends nothing; a command that reaches the host anyway gets the code too; the working line says so and the draft is kept | `ErrorCode::PromptTooLong` | no |
 | A code from a newer Clauseo | `ErrorCode::Unknown` | no |
 
 A failed turn shows its code from `turn_failed` on the step card (section 3).

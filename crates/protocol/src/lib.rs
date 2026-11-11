@@ -340,7 +340,7 @@ pub use compact_str::CompactString;
 // What a store decodes a stored envelope as; it is never written, so it has no wire form.
 pub use envelope::EnvelopeRead;
 // The crate's error; it never crosses the boundary (`HostError` does).
-pub use error::Error;
+pub use error::{Error, Measure};
 pub use excluded::{is_excluded_name, is_excluded_path};
 pub use ids::{MAX_ID_TEXT_BYTES, is_windows_reserved_name};
 pub use number::MAX_SAFE;
