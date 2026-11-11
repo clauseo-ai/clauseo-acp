@@ -164,9 +164,12 @@ fn size(bytes: u64) -> Count {
 }
 
 /// What an after-turn checkpoint knew of the folder at the start of its step (the last commit),
-/// and what its walk found, to tell a file the agent made though no tool call named it (a
-/// document Bash wrote with pandoc) from one the lawyer may have made: see [`TurnStart::own`].
+/// what its walk found and what the turn's shell commands named, to tell a file the agent made
+/// though no tool call named it (a document Bash wrote with pandoc) from one the lawyer may have
+/// saved meanwhile: see [`TurnStart::own`].
 pub(crate) struct TurnStart<'a> {
+    /// The file names the turn's shell commands named.
+    pub(crate) commands: &'a BTreeSet<String>,
     /// The last commit's skip record; `None` when it has none (written before records were).
     pub(crate) record: Option<&'a SkipRecord>,
     /// The last commit's tree.
@@ -180,14 +183,20 @@ pub(crate) struct TurnStart<'a> {
 }
 
 impl TurnStart<'_> {
-    /// Whether `change` adds a file the step's start record proves absent (as undo needs it to
-    /// delete the file: [`SkipRecord::not_absent`]), not read for the first time, and last
-    /// modified at or before the checkpoint's time: the agent's, wherever no tool call named it.
+    /// Whether `change` adds a file whose name a shell command of the turn named whole, that
+    /// the step's start record proves absent (as undo needs it to delete the file:
+    /// [`SkipRecord::not_absent`]), not read for the first time, and last modified at or
+    /// before the checkpoint's time: the agent's, though no tool call named it. A file named by
+    /// nothing may be one the lawyer saved during the turn.
     fn own(&self, change: &FileChange) -> bool {
         let path = change.path();
         let (ChangeKind::Added, Some(record)) = (change.change(), self.record) else {
             return false;
         };
+        let name = path.as_str().rsplit('/').next().unwrap_or(path.as_str());
+        if !self.commands.contains(name) {
+            return false;
+        }
         let in_tree = find_by_path(self.tree, path.as_str(), |file| file.path.as_str()).is_some();
         if record.not_absent(path.as_str(), in_tree).is_some()
             || self.reads.changed.iter().any(|file| file.path == *path)
@@ -205,7 +214,8 @@ impl TurnStart<'_> {
 }
 
 /// `change`, flagged as possibly holding the lawyer's edits when no tool call named its path
-/// (for a rename: neither path) and it is not a file the agent added (`start`: [`TurnStart::own`]).
+/// (for a rename: neither path) and it is not a file the agent added that a shell command named
+/// (`start`: [`TurnStart::own`]).
 pub(crate) fn flag(
     change: FileChange,
     tools: &BTreeSet<MatterPath>,

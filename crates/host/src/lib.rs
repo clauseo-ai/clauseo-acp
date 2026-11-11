@@ -244,6 +244,7 @@ pub mod browser;
 mod build;
 mod clock;
 mod coalesce;
+mod command_names;
 mod config;
 pub mod connectors;
 mod encode;

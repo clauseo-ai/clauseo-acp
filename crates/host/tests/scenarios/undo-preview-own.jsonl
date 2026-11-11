@@ -1,9 +1,10 @@
-{"scenario":"undo-preview-own","description":"One turn makes reply.docx by moving pandoc's scratch file draft.tmp (never versioned) onto it, with no tool call naming either: the agent's own new file, its mtime the scratch file's","on_stdin_close":"exit"}
+{"scenario":"undo-preview-own","description":"One turn makes reply.docx by moving pandoc's scratch file draft.tmp (never versioned) onto it; a shell call whose command names reply.docx (pandoc -o \"reply.docx\") and no location: the agent's own new file, its mtime the scratch file's","on_stdin_close":"exit"}
 {"expect":{"method":"initialize","as":"init","params":{"protocolVersion":1}}}
 {"respond":{"to":"init","result":{"protocolVersion":1,"agentCapabilities":{"loadSession":true},"authMethods":[],"agentInfo":{"name":"fake_agent","version":"0.0.0"}}}}
 {"expect":{"method":"session/new","as":"new","params":{"cwd":"{{any}}"}}}
 {"respond":{"to":"new","result":{"sessionId":"sess-1"}}}
 {"expect":{"method":"session/prompt","as":"p1","params":{"sessionId":"sess-1"}}}
 {"move_file":{"from":"draft.tmp","to":"reply.docx"}}
+{"update":{"update":{"sessionUpdate":"tool_call","toolCallId":"t1-pandoc","title":"Run pandoc","kind":"execute","status":"completed","rawInput":{"command":"pandoc in.md -o \"reply.docx\""}}}}
 {"update":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-answer-1","content":{"type":"text","text":"Wrote reply.docx."}}}}
 {"respond":{"to":"p1","result":{"stopReason":"end_turn"}}}

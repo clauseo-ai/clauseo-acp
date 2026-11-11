@@ -32,14 +32,22 @@ pub(crate) struct Core {
     pub(crate) timeline: Timeline,
 }
 
+/// What an after-turn checkpoint's turn named: the paths its tool calls named, and the file
+/// names its shell commands named (`crate::Matter::after_turn_named`).
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Named<'a> {
+    pub(crate) paths: &'a BTreeSet<MatterPath>,
+    pub(crate) commands: &'a BTreeSet<String>,
+}
+
 /// What a checkpoint is for: its trailers and, after a turn, the paths the agent's tool calls
 /// named.
 pub(crate) struct Spec<'a> {
     pub(crate) entry: TimelineEntry,
     pub(crate) at: Timestamp,
-    /// `Some` for an `after-turn` checkpoint: a change to a path outside the set may hold the
-    /// lawyer's edits.
-    pub(crate) tool_paths: Option<&'a BTreeSet<MatterPath>>,
+    /// `Some` for an `after-turn` checkpoint: a change to a path the turn did not name may
+    /// hold the lawyer's edits.
+    pub(crate) tool_paths: Option<Named<'a>>,
 }
 
 /// A walk's result: the new cache entries, the skipped files worth listing, whether any file
@@ -290,8 +298,9 @@ impl Core {
         if self.timeline.contains(spec.entry.id) {
             return Err(Error::DuplicateCheckpoint { id: spec.entry.id });
         }
-        if let Some(tools) = spec.tool_paths {
+        if let Some(named) = spec.tool_paths {
             let start = TurnStart {
+                commands: named.commands,
                 record: tip_recorded.then_some(&tip_record),
                 tree: &old_tree,
                 reads: &reads,
@@ -300,7 +309,7 @@ impl Core {
             };
             changes = changes
                 .into_iter()
-                .map(|change| flag(change, tools, &start))
+                .map(|change| flag(change, named.paths, &start))
                 .collect();
         }
         let files: Vec<TreeFile> = new_tree
