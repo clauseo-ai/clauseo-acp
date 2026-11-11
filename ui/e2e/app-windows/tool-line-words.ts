@@ -15,6 +15,6 @@ export const BROWSER_REASONS = [
   "In Settings",
   "Managed by firm",
   "Install Chrome or Edge",
-  "Blocked by your firm",
+  "Blocked by a browser policy",
   "Couldn't check browser settings",
 ];
