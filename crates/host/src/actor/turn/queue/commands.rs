@@ -305,7 +305,9 @@ fn send_now_loaded(
         && let Some(at) = queue.position(turn)
         && let Some(mut queued) = queue.turns.remove(at)
     {
+        // Sent now by the lawyer: it starts whatever the current turn's stop (`unsent.rs`).
         queued.forced = true;
+        queued.host_held = false;
         queue.turns.push_front(queued);
         queue.held = false;
     }

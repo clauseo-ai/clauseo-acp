@@ -341,6 +341,8 @@ enum TimerKind {
     Offline(TurnId),
     /// A steer's answer did not come in time (`queue/steer.rs`).
     Steer(clauseo_protocol::MessageId),
+    /// The next read of Claude's transcript for unconfirmed steers (`queue/confirm.rs`).
+    SteerCheck,
     /// A `stop_agents` wait ran out (`sign_in/stops.rs`), for any thread of its agent.
     StopWait(u64),
     /// An agent-started turn went quiet (`own_turn.rs`).
@@ -397,6 +399,7 @@ pub(crate) fn turn_input(actor: &mut Actor, input: TurnInput) {
         }
         TurnInput::RunRemoved { key, freed } => launch_checks::on_run_removed(actor, key, freed),
         TurnInput::CameBack(check) => came_back::on_due(actor, check),
+        TurnInput::SteerChecked(checked) => queue::on_steer_checked(actor, *checked),
         TurnInput::OfflineProbe {
             thread,
             turn,
@@ -428,6 +431,7 @@ pub(crate) fn timer(actor: &mut Actor, timer: TurnTimer) {
         TimerKind::LimitRead(turn) => end::on_limit_read_timer(actor, thread, turn),
         TimerKind::Offline(turn) => offline::on_timer(actor, thread, turn),
         TimerKind::Steer(message) => queue::on_steer_timer(actor, thread, message),
+        TimerKind::SteerCheck => queue::on_steer_check_timer(actor, thread),
         TimerKind::StopWait(id) => sign_in::stop_timer(actor, id),
         TimerKind::OwnQuiet(turn) => own_turn::on_quiet(actor, thread, turn),
     }

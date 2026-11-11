@@ -102,7 +102,8 @@ Amended by H9 (2026-11-02), the brief's "Later" list. The code is `actor/turn/qu
   `thread.queue_full` and nothing is logged. A thread whose own undo holds the writer still
   refuses with `thread.turn_running`, as does one whose last end failed twice.
 - The queue moves on when the current turn's `TurnEnded` is durable: always to a head sent now
-  (send now, `SendQueuedNow`, a requeued steer), else only after `EndTurn`. Any other stop holds
+  (send now, `SendQueuedNow`, a steer the lawyer sent now), else only after `EndTurn`, which
+  also starts a steer the host held (below). Any other stop holds
   it, `AtLimit` included (taken from `TurnEnded`, never from a later `TurnStoppedAtLimit`), until
   `ResumeQueue`, `SendQueuedNow` or a new `SendPrompt`. While a steer request is out the queue
   waits for its answer, and while the thread's own undo holds the matter's writer nothing
@@ -115,18 +116,49 @@ Amended by H9 (2026-11-02), the brief's "Later" list. The code is `actor/turn/qu
   behind the current turn, the receipt and, for a steer, `SteerResolved { SentNow }`; the new turn
   takes the head and the current turn takes the Cancel path. With no current turn it starts at
   once, ahead of a held queue, which moves on after it. Send now is not counted against the limit.
-- A real steer needs the running turn's prompt in flight and both of the agent's
-  `SteeringCapability` flags (claude-agent-acp; `acp` reads `_meta.steering.supported` and
-  `agentCapabilities._meta.claudeCode.promptQueueing`). Its `UserMessage` names the running turn
-  and is durable before `_session/steering` goes out with `idleBehavior: promptRequired`.
-  `Injected` logs `SteerResolved { Injected }` with `aside`, the running turn's tool calls not yet
-  finished (the view marks them as carried on in the background); `promptRequired`, a failure or
-  `startedNewTurn` (cancelled at once) log `SteerResolved { Requeued }` and a `TurnQueued` behind
-  the steered turn, and the new turn takes the head with the steered content. An answer that
-  has not come 30 s after the steered turn's end counts as a failure, so an agent that never
-  answers cannot freeze the queue (a later answer is ignored). The wait starts at the end, not
-  at the send: an agent may answer only once it takes the message in, and a steer requeued
-  while its turn runs would reach the agent twice.
+- Steering (amended 2026-11-11: a steer counts as delivered only once confirmed). A real steer
+  goes only to an agent with both `SteeringCapability` flags (claude-agent-acp; `acp` reads
+  `_meta.steering.supported` and `agentCapabilities._meta.claudeCode.promptQueueing`), and only
+  while Claude can take it now: the turn is prompting, not cancelled, and no permission or
+  question is open (claude-agent-acp defers a steer while one is, and a cancel then drops it).
+  Its `UserMessage` names the running turn and is durable before `_session/steering` goes out
+  with `idleBehavior: promptRequired`. Every other steer is a send now (`SentNow`), Codex's
+  included, or is held by the host.
+- Host-held steers. A steer Claude could take later but not now waits as the next turn: its
+  `UserMessage` with a new turn, `TurnQueued` behind the running turn marked `at_head`, and
+  `SteerResolved { Requeued }`; it is never sent as a steer. It starts once the running turn ends
+  `EndTurn` (a permission allowed or rejected, the turn carrying on to its end). After any other
+  stop (Stop, Send now of another message, a failure) it is not sent: one commit of its turn's
+  `TurnEnded { Cancelled }`, as `RemoveQueuedPrompt` logs it, and `SteerResolved { NotSent }`
+  naming the turn that ended. A steer requeued before Claude took it is held the same way.
+- Confirmation. claude-agent-acp answers `injected` once the steer is in its own queue, not when
+  the model reads it, sends nothing when it does, and drops a queued steer unread on
+  `session/cancel`. So for an agent with a Claude home `injected` only accepts the steer; nothing
+  is logged until Claude's transcript (`<home>/projects/<project key>/<session>.jsonl`) shows it
+  taken in: a `user` line, a `queued_command` attachment or a queue operation `remove` with
+  `absorbed_mid_turn` holding one of its text blocks exactly (both trimmed), stamped no earlier
+  than 2 s before the send. The host reads the last 256 KiB of the file, off the actor, every
+  2 s while the steer's turn runs and once more at its end; a missing or unreadable file counts
+  as not taken in. Confirmed, it logs `SteerResolved { Injected }` with `aside`, the turn's tool
+  calls not finished when the agent answered (the view marks them as carried on in the
+  background). An agent with no Claude home (Codex never steers for real; the tests' fake
+  agent) has no better signal, so its `injected` counts as confirmed at once.
+- The steered turn's end, whatever its stop, with a steer unconfirmed: the last check, then
+  `Injected` or `SteerResolved { NotSent }` with that turn; never sent again on its own. A steer
+  still unanswered at the end: after `EndTurn` the queue waits for its answer within 30 s of the
+  send (`promptRequired` requeues it and it runs next; `injected` gets the last check; no answer
+  is `NotSent`); after any other stop it is `NotSent` at once and a later answer is ignored.
+  `promptRequired`, `failed`, an error or `startedNewTurn` (cancelled at once) log
+  `SteerResolved { Requeued }` and a `TurnQueued` behind the steered turn marked `at_head`; no
+  answer within 30 s of the send while the turn still runs does too, so an agent that never
+  answers cannot freeze the queue.
+- Send now on a steer. `SendQueuedNow` naming the turn a steer not yet settled was sent into is
+  the lawyer sending it: its steers unanswered or unconfirmed move at once to new turns at the
+  head (`Requeued`), which start once that turn has ended whatever its stop, and a running turn
+  is cancelled.
+- Logs. Each steer is logged at info on the lifecycle target, with no text: sent, answered (with
+  the answer's kind), requeued (why), confirmed, and not sent (why: `turn_stopped`,
+  `no_confirmation`, `restart`).
 - `EditQueuedPrompt { thread, turn, text }` replaces the prompt's first text block, drops its other
   text blocks and keeps its file blocks (`QueuedPromptEdited`); empty text for a prompt without
   files is `command.invalid`. `RemoveQueuedPrompt` logs `TurnEnded { Cancelled }` without holding
@@ -140,8 +172,9 @@ Amended by H9 (2026-11-02), the brief's "Later" list. The code is `actor/turn/qu
   whole log (edits applied, requeued steers in their new turns) and holds it; the started open
   turn is the one the fold shows running, no longer the last prompt, and a held queue is found
   behind a later turn that ended (the newest prompt without a step counts, not the last one). A
-  steer saved but never answered before the stop moves to a new held queued turn
-  (`SteerResolved { Requeued }` and its `TurnQueued`), as a failed answer would have moved it.
+  steer saved but never settled before the stop (no `SteerResolved`: unanswered or unconfirmed)
+  gets `SteerResolved { NotSent }` with the turn it was sent into, which has ended or which the
+  repair ends `Failed`; nothing is queued for it.
   A restart restores the log's order, except for the turns put back at the head: a requeued
   steer and a turn held for its agent's sign-in keep that head place as they have it live (their
   `TurnQueued` is `at_head`), the latest put back first. A send now's place at the head is not

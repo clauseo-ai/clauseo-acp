@@ -3,18 +3,20 @@
 //!
 //! A queued turn has its `UserMessage` and a `TurnQueued` behind its own thread logged, and no
 //! `TurnStarted` or `TurnEnded`. The queue moves on when the current turn's `TurnEnded` is durable:
-//! always to a head sent now (send now, a queued prompt sent now, a requeued steer), else only
-//! after `EndTurn`. Any other stop (`Cancelled`, `NotAllowed`, `Failed`, `AtLimit`, `Refusal`,
-//! `MaxTokens`, `MaxTurnRequests`) holds it until the lawyer moves it: `ResumeQueue`,
+//! always to a head sent now (send now, a queued prompt sent now, a steer the lawyer sent now),
+//! else only after `EndTurn`. Any other stop (`Cancelled`, `NotAllowed`, `Failed`, `AtLimit`,
+//! `Refusal`, `MaxTokens`, `MaxTurnRequests`) holds it until the lawyer moves it: `ResumeQueue`,
 //! `SendQueuedNow` or a new `SendPrompt` (which only queues held while a hold applies: the
 //! sign-in's or an install's, `hold.rs`). While a steer request is out, it waits for the answer (at
 //! most `steer.rs`'s wait), so a requeued steer takes the head; a steer that cannot join the
-//! running turn now waits as the next turn instead (`steer.rs`). The held flag lives here only
-//! (nothing is logged for it); the view shows it, with why the queue waits, through
+//! running turn now waits as the next turn instead (`steer.rs`). Such a steer the host held starts
+//! only after `EndTurn`; any other stop leaves it not sent (`unsent.rs`). The held flag lives
+//! here only (nothing is logged for it); the view shows it, with why the queue waits, through
 //! `clauseo_reducer::set_queue_held` (`held.rs`). At start-up every queued turn comes back held,
 //! rebuilt from the log ([`restore`]).
 
 mod commands;
+mod confirm;
 #[cfg(feature = "test-support")]
 pub(in crate::actor::turn) mod dump;
 mod held;
@@ -24,6 +26,8 @@ mod queued;
 mod restore;
 mod sign_in;
 mod steer;
+mod transcript;
+mod unsent;
 
 use std::collections::VecDeque;
 
@@ -41,6 +45,8 @@ use crate::log_file::Cause;
 
 use commands::put_content;
 pub(super) use commands::{edit, remove, resume, send_now};
+pub(crate) use confirm::Checked as SteerChecked;
+pub(super) use confirm::{on_checked as on_steer_checked, on_timer as on_steer_check_timer};
 #[cfg(test)]
 pub(super) use held::queue_held;
 #[cfg(test)]
@@ -63,9 +69,8 @@ pub(crate) struct ThreadQueue {
     held: bool,
     /// Real steer requests not answered yet; the queue waits for them.
     steers: Vec<steer::Pending>,
-    /// Steers the agent took into the current turn: they go next if it ends `Cancelled` or
-    /// `Failed` (`steer.rs`).
-    injected: Vec<steer::Ask>,
+    /// Steers the agent accepted and that are not confirmed taken in yet (`confirm.rs`).
+    confirms: confirm::Confirms,
     /// A current turn the lawyer removed before it started: its end neither holds nor moves
     /// the queue differently from the turn before it.
     removed: Option<TurnId>,
@@ -92,8 +97,11 @@ pub(super) struct Queued {
     pub(super) turn: TurnId,
     pub(super) message: MessageId,
     pub(super) content: Vec<ContentBlock>,
-    /// It starts when the current turn has ended, whatever its stop.
+    /// It starts when the current turn has ended, whatever its stop, unless `host_held`.
     pub(super) forced: bool,
+    /// A steer the host held (`unsent.rs`): with `forced`, it starts only after the current
+    /// turn ends `EndTurn`, and any other stop leaves it not sent.
+    pub(super) host_held: bool,
 }
 
 impl ThreadQueue {
@@ -302,6 +310,7 @@ fn append(
         message,
         content,
         forced: false,
+        host_held: false,
     };
     log_queued(
         actor,
@@ -352,6 +361,7 @@ fn jump(
                 message,
                 content,
                 forced: true,
+                host_held: false,
             });
             After::Jumped(turn)
         },
@@ -431,13 +441,17 @@ pub(super) fn committed(actor: &mut Actor, thread: ThreadId, after: After, ok: b
     sync_held(actor, thread);
 }
 
-/// The commit ending the current turn `turn` is durable: a head sent now starts; else the
-/// queue moves on after `EndTurn` (or a removed turn) and holds after any other stop. Then the
-/// steers the agent may have lost with the turn go next (`steer.rs`), behind a head sent now.
+/// The commit ending the current turn `turn` is durable. Its steers are settled (`steer.rs`),
+/// and after a stop other than `EndTurn` the steers the host held behind it leave the queue
+/// not sent (`unsent.rs`; not for a turn the lawyer removed). Then a head sent now starts; else
+/// the queue moves on after `EndTurn` (or a removed turn) and holds after any other stop.
 pub(super) fn on_turn_closed(actor: &mut Actor, thread: ThreadId, turn: TurnId, stop: StopReason) {
-    let lost = steer::turn_closed(actor, thread, turn, stop);
+    steer::turn_closed(actor, thread, turn, stop);
+    let removed = queue(actor, thread).is_some_and(|queue| queue.removed == Some(turn));
+    if !removed {
+        unsent::turn_closed(actor, thread, turn, stop);
+    }
     closed(actor, thread, turn, stop);
-    steer::requeue_all(actor, thread, lost, steer::why::TURN_STOPPED);
     // Agent output that came while the turn ended opens a turn of its own if nothing started.
     super::own_turn::open_if_idle(actor, thread);
 }
@@ -548,6 +562,7 @@ fn put_back(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
         message,
         content: prompt,
         forced: false,
+        host_held: false,
     });
     state.queue.held = true;
     state.queue.held_for_limit = false;

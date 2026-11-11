@@ -132,6 +132,7 @@ pub(super) fn hold_prompt(
                 message,
                 content,
                 forced: sent_now,
+                host_held: false,
             };
             if holds.sign_ins() {
                 queue.turns.push_back(queued);

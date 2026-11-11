@@ -1,10 +1,11 @@
 //! A message typed while Claude answers reaches it once, and only what reached it shows as
 //! taken in: Send now with a permission pending cancels the turn (the permission answered
 //! cancelled) and sends the message next; a steer while a permission is open is never sent as a
-//! steer and waits as the next turn; a steer with no answer while the turn runs on goes next once
-//! its wait runs out; a steer taken in and then cancelled goes next, and so does one taken into a
-//! turn the host stopped in; an unanswered steer sent now cancels the turn and goes next; and on
-//! Codex, Send now cancels and sends.
+//! steer and waits as the next turn, which starts once the turn ends `end_turn` (the permission
+//! allowed or rejected) and is not sent when the lawyer stops the turn; a steer with no answer
+//! while the turn runs on goes next once its wait runs out; an unanswered steer sent now cancels
+//! the turn and goes next; and on Codex, Send now cancels and sends. A Claude agent's steer
+//! taken in only as far as its adapter's queue is in `steer_confirm.rs`.
 
 use std::time::Duration;
 
@@ -15,8 +16,8 @@ use clauseo_protocol::{
 
 use crate::codex::CODEX;
 use crate::observe::{Events, ended_with, started};
-use crate::permissions::until_first_request;
-use crate::queue::{DURABLE, allow, held, send, settle, starts, user_message};
+use crate::permissions::{answer_from, until_first_request};
+use crate::queue::{DURABLE, allow, held, send, settle, starts, until_queued, user_message};
 use crate::support::{Dir, FAKE, Running, Scenario, matter_with_thread, text};
 
 /// How long the host waits for a steer's answer.
@@ -34,6 +35,14 @@ fn resolutions(events: &Events, message: MessageId) -> Vec<SteerResolved> {
             }
             _ => None,
         })
+        .collect()
+}
+
+/// The outcomes of `message`'s `SteerResolved`s, in order.
+fn outcomes(events: &Events, message: MessageId) -> Vec<SteerOutcome> {
+    resolutions(events, message)
+        .into_iter()
+        .map(|r| r.outcome)
         .collect()
 }
 
@@ -173,76 +182,68 @@ fn a_steer_with_no_answer_while_the_turn_runs_goes_next_when_its_wait_runs_out()
 }
 
 #[test]
-fn an_injected_steer_whose_turn_is_cancelled_goes_next() {
+fn a_steer_held_behind_a_permission_goes_next_when_the_permission_is_rejected() {
     let (dir, host) = running(
-        "an_injected_steer_whose_turn_is_cancelled_goes_next",
-        "steer-injected-cancelled",
+        "a_steer_held_behind_a_permission_goes_next_when_the_permission_is_rejected",
+        "steer-during-permission",
     );
     let (_, thread, _) = matter_with_thread(&dir, &host, "m", &[("brief.txt", "x\n")], FAKE);
     let mut events = host.events(StreamId::Thread(thread));
     let (first, _) = host.prompt(thread, "Summarise the clause.");
-    host.wait_armed(DURABLE);
-    let (_, message) = send(&host, thread, text(STEER), DeliveryRequest::Steer);
-    events.until("SteerResolved { Injected }", |e| {
-        !resolutions(e, message).is_empty()
-    });
+    until_first_request(&mut events);
+    let (next, message) = send(&host, thread, text(STEER), DeliveryRequest::Steer);
+    until_queued(&mut events, next);
+
+    // Rejected, the agent carries on and ends `end_turn`: the held steer goes as the next turn.
+    answer_from(&host, &mut events, thread, 0, &["reject-once"]);
+    assert_eq!(events.until_turn_ended(first).stop, StopReason::EndTurn);
+    assert_eq!(events.until_turn_ended(next).stop, StopReason::EndTurn);
+    settle(&host, &mut events);
+    assert_eq!(
+        outcomes(&events, message),
+        [SteerOutcome::Requeued { turn: next }],
+        "{}",
+        events.dump()
+    );
+    assert_eq!(events.turn_text(next), "Focusing on clause 4.");
+    host.shutdown();
+}
+
+#[test]
+fn a_steer_held_behind_a_permission_is_not_sent_when_the_turn_is_stopped() {
+    let (dir, host) = running(
+        "a_steer_held_behind_a_permission_is_not_sent_when_the_turn_is_stopped",
+        "steer-held-stop",
+    );
+    let (matter, thread, _) = matter_with_thread(&dir, &host, "m", &[("brief.txt", "x\n")], FAKE);
+    let mut events = host.events(StreamId::Thread(thread));
+    let (first, _) = host.prompt(thread, "Summarise the clause.");
+    until_first_request(&mut events);
+    let (next, message) = send(&host, thread, text(STEER), DeliveryRequest::Steer);
+    until_queued(&mut events, next);
 
     assert_eq!(
         host.ok(HostCommand::Cancel { thread }),
         CommandOutcome::Done
     );
     assert_eq!(events.until_turn_ended(first).stop, StopReason::Cancelled);
-    let next = until_requeued(&mut events, message);
-    assert_eq!(events.until_turn_ended(next).stop, StopReason::EndTurn);
+    assert_eq!(events.until_turn_ended(next).stop, StopReason::Cancelled);
+    events.until("SteerResolved { NotSent }", |e| {
+        outcomes(e, message).len() == 2
+    });
+    // `settle` checks the agent saw no second prompt.
     settle(&host, &mut events);
-    let outcomes: Vec<_> = resolutions(&events, message)
-        .into_iter()
-        .map(|r| r.outcome)
-        .collect();
     assert_eq!(
-        outcomes,
+        outcomes(&events, message),
         [
-            SteerOutcome::Injected { turn: first },
-            SteerOutcome::Requeued { turn: next }
+            SteerOutcome::Requeued { turn: next },
+            SteerOutcome::NotSent { turn: first }
         ],
         "{}",
         events.dump()
     );
-    assert_eq!(events.last_queued(next).unwrap().behind_turn(), Some(first));
-    assert_eq!(events.turn_text(next), "Focusing on clause 4.");
-    host.shutdown();
-}
-
-#[test]
-fn an_injected_steer_of_a_turn_the_host_stopped_in_comes_back_held() {
-    let (dir, host) = running(
-        "an_injected_steer_of_a_turn_the_host_stopped_in_comes_back_held",
-        "steer-injected-restart",
-    );
-    let (matter, thread, _) = matter_with_thread(&dir, &host, "m", &[("brief.txt", "x\n")], FAKE);
-    let mut events = host.events(StreamId::Thread(thread));
-    let (first, _) = host.prompt(thread, "Summarise the clause.");
-    host.wait_armed(DURABLE);
-    let (_, message) = send(&host, thread, text(STEER), DeliveryRequest::Steer);
-    events.until("SteerResolved { Injected }", |e| {
-        !resolutions(e, message).is_empty()
-    });
-    drop(events);
-    host.abort();
-
-    let host = dir.start(1);
-    let mut events = host.events(StreamId::Thread(thread));
-    events.until_caught_up();
-    let next = until_requeued(&mut events, message);
-    settle(&host, &mut events);
-    assert_eq!(
-        events.last_queued(next).unwrap().behind_turn(),
-        Some(first),
-        "{}",
-        events.dump()
-    );
-    assert!(held(&host, matter, thread), "the steer's turn is not held");
     assert_eq!(starts(&events, next), 0, "{}", events.dump());
+    assert!(!held(&host, matter, thread), "an emptied queue is not held");
     host.shutdown();
 }
 

@@ -40,6 +40,8 @@ pub(crate) enum TurnInput {
     },
     /// A check for papers an undo removed that came back is due (`came_back.rs`).
     CameBack(super::came_back::Check),
+    /// A read of Claude's transcript for unconfirmed steers answered (`queue/confirm.rs`).
+    SteerChecked(Box<super::queue::SteerChecked>),
     /// The host's probe of the agent's service for `thread`'s `turn` answered (`offline.rs`).
     OfflineProbe {
         thread: ThreadId,
