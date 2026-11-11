@@ -117,6 +117,9 @@ release (S23)" step stays as it is, skipped while `COUNTS_RELEASES_ENABLED` is u
 - The caps are sized for the beta: about 3,000 installs' requests a day. Raising them is a change
   to `src/route.rs`, as production has no variable for them. A sender past the cap retries, so a
   full day delays counts but does not lose them while they stay within the 14-day window.
+- A cron run decodes the keys its deletes return, up to 40,000 in a flood. That may pass Free's
+  10 ms of CPU. The run then stops part-way, its finished chunks stay deleted, and the next day's
+  run continues.
 - **Alerting / Workers Paid**, after launch. Nothing alerts on a spent cap, failing inserts or a
   filling database, and a flood can fill Free's 500 MB (above). Workers Paid raises the limits
   and Time Travel to 30 days; alerting should land with it or before.
