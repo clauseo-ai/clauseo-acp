@@ -210,18 +210,30 @@ impl DesktopProfile {
 /// the app runs on. None, with nothing copied, when no agent gets the shell command on this OS
 /// (`shell` false: every OS for launch, where Claude has no browser and Codex's entry runs the
 /// bundled sidecar itself, `clauseo_profile::servers::shell_browser`). So the app copies nothing
-/// now; the copy stays for the way back.
+/// now, and removes what an earlier start copied, with the browser's skill
+/// (`clauseo_profile::tools::remove_stale_browser`); the copy stays for the way back.
 ///
 /// Each outcome is one line on [`LIFECYCLE`], for support: `copied`, `up_to_date`,
 /// `copied_running_copy_set_aside` (Windows), `no_sidecar`, `off_on_this_os`, or a warning
 /// with the error's [`ProfileError::log_text`]; never a path.
 fn install_browser(paths: &ProfilePaths, path: Option<&OsStr>, shell: bool) -> Option<PathBuf> {
     if !shell {
-        tracing::info!(
-            target: LIFECYCLE,
-            outcome = "off_on_this_os",
-            "agent-browser left out: no agent gets it as a shell command on this OS"
-        );
+        // An earlier start's copy and the browser's skill go, so a stale skill reaches no agent.
+        match clauseo_profile::tools::remove_stale_browser(paths) {
+            Ok(removed) => tracing::info!(
+                target: LIFECYCLE,
+                outcome = "off_on_this_os",
+                removed_command = removed.command,
+                removed_skill_files = removed.skill_files,
+                "agent-browser left out: no agent gets it as a shell command on this OS"
+            ),
+            Err(err) => tracing::warn!(
+                target: LIFECYCLE,
+                outcome = "off_on_this_os",
+                err = %err.log_text(),
+                "agent-browser left out, but an earlier copy or its skill could not be removed"
+            ),
+        }
         return None;
     }
     let Some(source) = browser_program(paths, path) else {

@@ -158,3 +158,62 @@ fn build_copies_agent_browser_from_path_in_a_debug_build() {
     let token = write_skills(&none.launch_writes(&agent(CLAUDE))[0]).unwrap();
     assert!(!token.root().join("agent-browser").exists());
 }
+
+/// A start where no agent gets the shell command removes an earlier start's copy and the
+/// browser's skill folder before any launch, says so on the lifecycle line, leaves anything else
+/// in `<data>/tools` alone, and offers no browser skill.
+#[test]
+fn a_start_without_the_shell_command_removes_an_earlier_copy_and_its_skill() {
+    let scratch = Scratch::new("profile-stale-browser", &["data", "bin"]);
+    scratch.file(
+        "bin/agent-browser",
+        b"#!/bin/sh\necho 'agent-browser 0.41.1'\n",
+    );
+    scratch.executable("bin/agent-browser");
+    let folder = scratch.dir("bin");
+    let locations = Locations::under_root(&scratch.dir("data"));
+    let tools = locations.data_dir().join("tools");
+    let earlier = build(&locations, &folder, true);
+    let token = write_skills(&earlier.launch_writes(&agent(CLAUDE))[0]).unwrap();
+    let skill = token.root().join("agent-browser");
+    assert!(skill.join("SKILL.md").is_file());
+    assert!(tools.join("agent-browser").is_file());
+    scratch.file("data/tools/other", b"not Clauseo's");
+
+    let lines = captured(|| {
+        build(&locations, &folder, false);
+    });
+    let lifecycle: Vec<&String> = lines.iter().filter(|l| l.contains(LIFECYCLE)).collect();
+    assert_eq!(lifecycle.len(), 1, "{lines:?}");
+    assert!(lifecycle[0].contains("off_on_this_os"), "{}", lifecycle[0]);
+    assert!(
+        lifecycle[0].contains("removed_command=true"),
+        "{}",
+        lifecycle[0]
+    );
+    assert!(
+        lifecycle[0].contains("removed_skill_files=1"),
+        "{}",
+        lifecycle[0]
+    );
+    assert!(!tools.join("agent-browser").exists());
+    assert!(!skill.exists());
+    assert_eq!(
+        std::fs::read(tools.join("other")).unwrap(),
+        b"not Clauseo's"
+    );
+    let off = build(&locations, &folder, false);
+    assert_eq!(off.browser_tool(), None);
+    let write = &off.launch_writes(&agent(CLAUDE))[0];
+    let skills = write.rendered().skills();
+    assert!(skills.iter().all(|skill| skill.name() != "agent-browser"));
+    let token = write_skills(write).unwrap();
+    assert!(!token.root().join("agent-browser").exists());
+    assert!(
+        token
+            .report()
+            .written
+            .iter()
+            .all(|path| !path.to_string_lossy().contains("agent-browser"))
+    );
+}
