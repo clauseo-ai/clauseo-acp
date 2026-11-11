@@ -12,7 +12,7 @@ import { stubFonts } from "../../room/thread/testing.ts";
 import { FakeTransport } from "../../transport/fake-transport.ts";
 import { SettingsApp } from "../settings-app.tsx";
 import { errorWords } from "@clauseo/components/lib/words-errors.ts";
-import { importLine, refusalOf, type Place } from "./mcp-tools-refusal.ts";
+import { importLines, refusalOf, type Place } from "./mcp-tools-refusal.ts";
 import { FakeTools, local, type FakeImports, type FakeView } from "./tools-fake.ts";
 import {
   fileName,
@@ -492,7 +492,7 @@ const IMPORTS: FakeImports = {
       local("legal-citations", "uvx", { args: ["legal-citations-mcp"] }),
       local("pdf-tools", "node"),
     ],
-    skip: ["filesystem"],
+    skip: [{ name: "filesystem", reason: "commandNotFound", program: "npx" }],
   },
   codex: { add: [local("docket", "npx", { args: ["-y", "docket-mcp"] })], skip: [] },
 };
@@ -521,26 +521,44 @@ test("an import: one command, then one line, the left-out names without reasons;
   rig = await mount(fake);
   await rig.click(rig.q('[data-testid="tools-import-claudeDesktop"]'));
   expect(fake.imported).toEqual(["claudeDesktop"]);
-  expect(rig.q('[data-testid="tools-imported"]')?.textContent).toBe(
-    "Imported 2 tools. 1 couldn't be imported: filesystem.",
-  );
+  const lines = () =>
+    [...rig!.pane().querySelectorAll('[data-testid="tools-imported"] p')].map((l) => l.textContent);
+  expect(lines()).toEqual([
+    "Imported 2 tools. 1 couldn't be imported.",
+    "filesystem: Clauseo couldn't find npx on this computer.",
+  ]);
+  expect(rig.q('[data-testid="tools-imported"]')?.getAttribute("role")).toBe("status");
   expect(rig.rows()).toContain("legal-citationslegal-citations-mcp");
   // the source is used up; the other stays
   expect(rig.q('[data-testid="tools-import-claudeDesktop"]')).toBeNull();
   await rig.click(rig.q('[data-testid="tools-import-codex"]'));
-  expect(rig.q('[data-testid="tools-imported"]')?.textContent).toBe("Imported 1 tool.");
+  expect(lines()).toEqual(["Imported 1 tool."]);
   expect(rig.q('[data-testid="tools-imports"]')).toBeNull();
 });
 
-test("the import line's forms", () => {
-  expect(importLine("en", { imported: ["a", "b", "c"], skipped: [] })).toBe("Imported 3 tools.");
+test("the import's lines: the count, then each tool left out with its reason in plain words", () => {
+  expect(importLines("en", { imported: ["a", "b", "c"], skipped: [] })).toEqual([
+    "Imported 3 tools.",
+  ]);
   expect(
-    importLine("en", {
+    importLines("en", {
       imported: [],
       skipped: [
-        { name: "a", reason: "alreadyAdded" },
-        { name: "b", reason: "unreadable" },
+        { name: "filesystem", reason: "commandNotFound", program: "npx" },
+        { name: "github", reason: "unsupportedTransport" },
+        { name: "court-diary", reason: "unresolvedVariable" },
+        { name: "docket", reason: "alreadyAdded" },
+        { name: "notes", reason: "unreadable" },
+        { name: "matter-search", reason: "notApproved" },
       ],
     }),
-  ).toBe("2 couldn't be imported: a and b.");
+  ).toEqual([
+    "6 couldn't be imported.",
+    "filesystem: Clauseo couldn't find npx on this computer.",
+    "github: it uses a setting Clauseo doesn't support yet.",
+    "court-diary: it needs a value that isn't set on this computer.",
+    "docket: a tool with this name is already added.",
+    "notes: Clauseo couldn't read its settings.",
+    "matter-search: it comes from a project you haven't approved in Claude Code.",
+  ]);
 });

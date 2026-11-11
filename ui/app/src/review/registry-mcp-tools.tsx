@@ -1,4 +1,4 @@
-// Settings › Tools' copy review entries (UC-169 to UC-196, UC-205): each new string in the real settings window over the fake
+// Settings › Tools' copy review entries (UC-169 to UC-196, UC-205 to UC-211): each new string in the real settings window over the fake
 // host, open at Tools in the scene that shows it (settings/sections/tools-probe.tsx, the probe's scenes), at the
 // window's size. The address form's strings show with its preview on, as REMOTE_TOOLS keeps it hidden until remote
 // tools land. Hindi provisional.
@@ -58,8 +58,19 @@ export const MCP_TOOLS: Entry[] = [
   entry("UC-191", "Import 1 tool from {source}", "empty-import"),
   entry("UC-192", "Imported {count} tools.", "list-import"),
   entry("UC-193", "Imported 1 tool.", "imported-one"),
-  entry("UC-194", "{count} couldn't be imported: {names}.", "list-import"),
+  entry("UC-194", "{count} couldn't be imported.", "list-import"),
   entry("UC-195", "Clauseo couldn't find {program} on this computer.", "add-error"),
   entry("UC-196", "Use a program name or its full path.", "command-invalid"),
   entry("UC-205", "Use letters, numbers and _ only.", "env-invalid"),
+  // one line for each tool an import left out, why in plain words
+  entry("UC-206", "{name}: Clauseo couldn't find {program} on this computer.", "import-reasons"),
+  entry("UC-207", "{name}: it uses a setting Clauseo doesn't support yet.", "import-reasons"),
+  entry("UC-208", "{name}: it needs a value that isn't set on this computer.", "import-reasons"),
+  entry("UC-209", "{name}: a tool with this name is already added.", "import-reasons"),
+  entry("UC-210", "{name}: Clauseo couldn't read its settings.", "import-reasons"),
+  entry(
+    "UC-211",
+    "{name}: it comes from a project you haven't approved in Claude Code.",
+    "import-reasons",
+  ),
 ];

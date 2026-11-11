@@ -57,7 +57,10 @@ const LIST_IMPORTS: FakeImports = {
         args: ["/Users/rmehra/mcp/pdf-tools/index.js"],
       }),
     ],
-    skip: ["filesystem"],
+    skip: [
+      { name: "filesystem", reason: "commandNotFound", program: "npx" },
+      { name: "github", reason: "unsupportedTransport" },
+    ],
   },
   claudeCode: { add: [local("docket", "npx", { args: ["-y", "docket-mcp"] })], skip: [] },
 };
@@ -111,6 +114,23 @@ export const TOOLS_SCENES = {
     view: EMPTY,
     imports: { codex: DESKTOP.codex! },
     steps: [{ click: '[data-testid="tools-import-codex"]' }],
+  },
+  "import-reasons": {
+    view: EMPTY,
+    imports: {
+      claudeCode: {
+        add: [],
+        skip: [
+          { name: "filesystem", reason: "commandNotFound", program: "npx" },
+          { name: "github", reason: "unsupportedTransport" },
+          { name: "court-diary", reason: "unresolvedVariable" },
+          { name: "docket", reason: "alreadyAdded" },
+          { name: "notes", reason: "unreadable" },
+          { name: "matter-search", reason: "notApproved" },
+        ],
+      },
+    },
+    steps: [{ click: '[data-testid="tools-import-claudeCode"]' }],
   },
   "command-invalid": {
     view: EMPTY,

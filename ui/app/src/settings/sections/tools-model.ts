@@ -46,16 +46,21 @@ export type McpToolsView = {
   importable?: Importable[];
 };
 
-/** Why an import left a server out. The section names the server, not the reason. */
+/** Why an import left a server out; the section says it plainly, one line a server. notApproved: a Claude Code project's
+ * server the lawyer hasn't approved there. */
 export type SkipReason =
   | "commandNotFound"
   | "unsupportedTransport"
   | "unresolvedVariable"
   | "alreadyAdded"
-  | "unreadable";
+  | "unreadable"
+  | "notApproved";
 
 /** An import's answer: the servers added, and those left out. */
-export type ImportResult = { imported: string[]; skipped: { name: string; reason: SkipReason }[] };
+export type ImportResult = { imported: string[]; skipped: Skipped[] };
+
+/** A server an import left out, and why; `program` names what commandNotFound couldn't find. */
+export type Skipped = { name: string; reason: SkipReason; program?: string };
 
 /** A secret in a save: keep the value saved under this name, or set a new one. A name saved before and missing now
  * is removed, its saved value deleted. */
