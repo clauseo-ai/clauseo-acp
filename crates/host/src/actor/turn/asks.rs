@@ -147,9 +147,8 @@ const ALLOW_SESSION: &str = "allow_session";
 /// (`sources::browser::codex_standalone_browser_tool`). Everything else (shell commands, file
 /// writes, other servers such as `case-law`, eval) goes to the lawyer as before.
 ///
-/// Codex's own per-server `default_tools_approval_mode` would do this without a prompt, but it
-/// cannot reach Codex: codex-acp replaces the whole `mcp_servers` table with the servers ACP
-/// gives it (`dist/index.js:35482`), so a `CODEX_CONFIG` value for that server is dropped.
+/// Codex's own per-server `default_tools_approval_mode` would do this, but codex-acp replaces the
+/// whole `mcp_servers` table with ACP's servers (`dist/index.js:35482`), dropping that value.
 fn browser_tool_to_allow(
     actor: &mut Actor,
     thread: ThreadId,
