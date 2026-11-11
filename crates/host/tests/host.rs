@@ -425,6 +425,9 @@ mod tools;
 #[path = "host/titles.rs"]
 mod titles;
 #[cfg(test)]
+#[path = "host/titles_restart.rs"]
+mod titles_restart;
+#[cfg(test)]
 #[path = "host/triage.rs"]
 mod triage;
 #[cfg(test)]
