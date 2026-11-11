@@ -583,4 +583,11 @@ pub(crate) const ADDED_AFTER_V1: &[Corpus] = &[
         (379, 0xb8e3_e709_5d67_fdd5),
         (300, 0xad80_7693_32d6_d464),
     ),
+    (
+        "added/step_undone-UnreadFolder",
+        include_bytes!("added/step_undone-UnreadFolder.jsonl"),
+        include_bytes!("added/step_undone-UnreadFolder.msgpack"),
+        (449, 0xac36_f803_e066_24d7),
+        (311, 0xf93b_8823_004c_622e),
+    ),
 ];

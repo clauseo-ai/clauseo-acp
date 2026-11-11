@@ -252,6 +252,9 @@ open_unit_enum! {
         OverSizeCap,
         /// A cloud placeholder whose content is not on this computer.
         CloudOnly,
+        /// In a folder that did not list when the turn began (not downloaded, or no
+        /// permission), so nothing in it was versioned. Only an undo's kept files say this.
+        UnreadFolder,
     }
     test mod skipped_file_reason;
 }

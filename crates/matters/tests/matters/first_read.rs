@@ -107,7 +107,10 @@ fn a_turn_that_only_read_a_cloud_only_file_changed_nothing() {
     fx.probe.unmark(fx.file("notes.txt"));
     let checkpoint = matter.after_turn(&meta(3), &tools(&["notes.txt"])).unwrap();
     assert_none(&created(checkpoint, 3));
-    assert!(tip_message(&fx.git_dir()).starts_with("After turn: 0 files changed\n"));
+    let message = tip_message(&fx.git_dir());
+    assert!(message.starts_with("After turn: 0 files changed\n"));
+    // Nothing skipped any more: the commit says so.
+    assert!(message.contains("\nClauseo-Skips: none\n"), "{message}");
     assert_none(&matter.changes_between(cid(1), cid(3)).unwrap());
     let undone = undo(&mut matter, (1, 3), &[], (4, 5)).unwrap();
     assert_none(&undone.restored);
@@ -132,11 +135,10 @@ fn an_over_cap_file_read_after_the_cap_is_raised_is_a_baseline() {
     let mut matter = fx.open(&fx.folder).unwrap();
     let checkpoint = matter.after_turn(&meta(3), &tools(&[])).unwrap();
     assert_none(&created(checkpoint, 3));
-    // Opened again, the cache no longer says why it was skipped: by the new cap, not for its
-    // size. The reason only picks the words of a "not undone" line.
+    // The skip record says why it was skipped, whatever the cap is now.
     assert_eq!(
         first_read_lines(&fx),
-        ["Clauseo-Baseline: cloud-only big.bin"]
+        ["Clauseo-Baseline: over-size-cap big.bin"]
     );
     assert_eq!(read_at(&matter, 3, "big.bin"), [7; 20]);
     let undone = undo(&mut matter, (1, 3), &[], (4, 5)).unwrap();

@@ -32,6 +32,10 @@ mod skipped;
 mod first_read;
 
 #[cfg(test)]
+#[path = "matters/start_record.rs"]
+mod start_record;
+
+#[cfg(test)]
 #[path = "matters/undo.rs"]
 mod undo;
 

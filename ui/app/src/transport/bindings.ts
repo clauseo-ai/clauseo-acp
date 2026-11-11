@@ -5540,6 +5540,11 @@ export type SkippedFileReason =
 "over_size_cap" | 
 /**  A cloud placeholder whose content is not on this computer. */
 "cloud_only" | 
+/**
+ *  In a folder that did not list when the turn began (not downloaded, or no
+ *  permission), so nothing in it was versioned. Only an undo's kept files say this.
+ */
+"unread_folder" | 
 /**  A value from a newer Clauseo that this version does not know. */
 "unknown";
 

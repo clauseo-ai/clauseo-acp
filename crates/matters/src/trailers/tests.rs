@@ -6,6 +6,8 @@ use clauseo_protocol::{
 
 use super::{first_reads, message, parse};
 use crate::first_read::FirstReads;
+use crate::history::Oid;
+use crate::skip_record::SkipsRef;
 use crate::types::TimelineEntry;
 
 const ID: &str = "0190a6c8-6f8e-7c3a-8b1e-2f4d5a6b7c8d";
@@ -102,6 +104,7 @@ fn skipped(path: &str, reason: SkippedFileReason) -> SkippedFile {
 #[test]
 fn files_read_for_the_first_time_follow_the_turn_and_round_trip() {
     let reads = FirstReads {
+        skips: SkipsRef::Blob(Oid([0xab; 20])),
         baseline: vec![
             skipped("notes.txt", SkippedFileReason::CloudOnly),
             skipped("Exhibits/scan 2.pdf ", SkippedFileReason::OverSizeCap),
@@ -112,6 +115,7 @@ fn files_read_for_the_first_time_follow_the_turn_and_round_trip() {
     let expected = format!(
         "After turn: 1 file changed\n\nClauseo-Checkpoint: {ID}\nClauseo-Kind: after-turn\n\
          Clauseo-Thread: {THREAD}\nClauseo-Turn: {TURN}\n\
+         Clauseo-Skips: abababababababababababababababababababab\n\
          Clauseo-Baseline: cloud-only notes.txt\n\
          Clauseo-Baseline: over-size-cap Exhibits/scan 2.pdf \n\
          Clauseo-Was-Skipped: cloud-only brief: v2.docx\n"
@@ -121,14 +125,26 @@ fn files_read_for_the_first_time_follow_the_turn_and_round_trip() {
     assert_eq!(first_reads(&text), reads);
     // Older readers see the same checkpoint: the new keys are unknown to them.
     assert_eq!(parse(&text), Some(entry(CheckpointKind::AfterTurn, true)));
-    assert_eq!(
-        first_reads(&message(
-            &entry(CheckpointKind::Undo, false),
-            0,
-            &FirstReads::default()
-        )),
-        FirstReads::default()
+    // A commit that skipped nothing says so.
+    let empty = FirstReads {
+        skips: SkipsRef::Empty,
+        ..FirstReads::default()
+    };
+    let none = message(&entry(CheckpointKind::Undo, false), 0, &empty);
+    assert!(none.ends_with("Clauseo-Kind: undo\nClauseo-Skips: none\n"));
+    assert_eq!(first_reads(&none), empty);
+    assert_eq!(parse(&none), Some(entry(CheckpointKind::Undo, false)));
+}
+
+#[test]
+fn a_commit_from_before_the_record_records_nothing() {
+    let old = format!(
+        "After turn: 1 file changed\n\nClauseo-Checkpoint: {ID}\nClauseo-Kind: after-turn\n"
     );
+    assert_eq!(first_reads(&old).skips, SkipsRef::Unrecorded);
+    // A value that is not an id records nothing either.
+    let bad = format!("{old}Clauseo-Skips: ABAB\n");
+    assert_eq!(first_reads(&bad).skips, SkipsRef::Unrecorded);
 }
 
 #[test]
@@ -141,6 +157,7 @@ fn a_reason_from_a_newer_clauseo_reads_as_unknown_and_a_bad_value_is_left_out() 
     assert_eq!(
         first_reads(&text),
         FirstReads {
+            skips: SkipsRef::Unrecorded,
             baseline: Vec::new(),
             changed: vec![skipped("a/b.txt", SkippedFileReason::Unknown)],
         }

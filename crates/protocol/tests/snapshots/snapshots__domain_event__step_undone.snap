@@ -10,7 +10,14 @@ expression: "event(\"step_undone\")"
       "a.docx"
     ],
     "kept": [
-      "b/new.docx"
+      "b/new.docx",
+      "Sub/c.docx"
+    ],
+    "unversioned": [
+      {
+        "path": "Sub/c.docx",
+        "reason": "unread_folder"
+      }
     ]
   }
 }

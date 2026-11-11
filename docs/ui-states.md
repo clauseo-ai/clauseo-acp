@@ -137,6 +137,7 @@ reported it.
 | File may include the lawyer's edits | `FileChange.may_include_lawyer_edits` | unticked by default in the undo choice |
 | File skipped: over the size cap | `SkippedFileReason::OverSizeCap` | path |
 | File skipped: cloud-only | `SkippedFileReason::CloudOnly` | path |
+| Undo kept a file in a folder that did not list at the turn's start | `SkippedFileReason::UnreadFolder` | path (undo only: the cloud line if the folder syncs, else the no-copy line) |
 | File skipped for a reason from a newer Clauseo | `SkippedFileReason::Unknown` | path |
 | Checkpoint missing, undo impossible | no `checkpoint_after`, so the UI derives undo as not possible | shown, never silent |
 | Step already undone | `undone` true | the undo marker (section 2) |
