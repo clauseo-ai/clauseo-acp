@@ -145,7 +145,10 @@ fn a_claude_session_runs_its_commands_in_claude_codes_sandbox() {
             "failIfUnavailable": false,
             "allowAppleEvents": false,
             "excludedCommands": ["agent-browser:*"],
-            "network": {"allowedDomains": ["*"]},
+            "network": {
+                "allowedDomains": ["*"],
+                "deniedDomains": ["localhost", "127.0.0.1", "::1", "[::1]"],
+            },
             "filesystem": {
                 "allowWrite": [
                     "/Users/l/Clients/A",
