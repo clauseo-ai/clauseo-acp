@@ -90,7 +90,13 @@ fn a_failed_undo_commit_keeps_the_writer_and_is_retried() {
         .note
         .clone()
         .unwrap_or_default();
-    let names: Vec<_> = note.iter().map(MatterPath::as_str).collect();
+    let names: Vec<_> = note
+        .iter()
+        .map(|told| match told {
+            crate::undo_note::Told::Undone(path) => path.as_str(),
+            crate::undo_note::Told::Restored(_) => "a restore",
+        })
+        .collect();
     assert_eq!(names, ["brief.txt"]);
     rig.finish();
 }

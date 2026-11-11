@@ -23,6 +23,7 @@ use super::{Then, TurnInput, prompt, state};
 use crate::error::Error;
 use crate::log_file::Cause;
 use crate::matter_worker::{MatterJob, MatterReply};
+use crate::undo_note::Told;
 
 /// The first check, after the undo is logged: a sync client's quick put-back is seen by then.
 pub(crate) const FIRST_CHECK: Duration = Duration::from_secs(10);
@@ -193,7 +194,7 @@ fn found(actor: &mut Actor, check: Check, back: &[MatterPath]) {
 fn trim_note(actor: &mut Actor, thread: ThreadId, reported: &[MatterPath]) {
     prompt::ensure_note(actor, thread);
     if let Some(note) = state(actor, thread).and_then(|state| state.note.as_mut()) {
-        note.retain(|path| !reported.contains(path));
+        note.retain(|told| !matches!(told, Told::Undone(path) if reported.contains(path)));
     }
 }
 

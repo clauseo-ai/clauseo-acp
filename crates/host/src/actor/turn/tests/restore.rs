@@ -13,6 +13,7 @@ use super::rig::{Rig, command_id};
 use crate::actor::input::{Input, Request};
 use crate::actor::turn::{End, end};
 use crate::pipeline::tests::support::notice;
+use crate::undo_note::Told;
 
 /// A Scratch thread whose one turn rewrote `brief.txt`; returns the thread and the restore
 /// command that puts the after-turn version back.
@@ -70,11 +71,17 @@ fn restores(rig: &mut Rig) -> usize {
         .count()
 }
 
+/// The files the restores the thread's next note tells name, held or in the note already.
 fn noted(rig: &Rig, thread: ThreadId) -> Vec<String> {
-    rig.actor.threads[&thread]
-        .turn
-        .restored
+    let turn = &rig.actor.threads[&thread].turn;
+    let told = turn.note.iter().flatten().filter_map(|told| match told {
+        Told::Restored(restore) => Some(restore),
+        Told::Undone(_) => None,
+    });
+    turn.restored
         .iter()
+        .chain(told)
+        .flat_map(|restore| restore.back.iter().chain(&restore.removed))
         .map(|path| MatterPath::as_str(path).to_owned())
         .collect()
 }

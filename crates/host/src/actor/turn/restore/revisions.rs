@@ -186,7 +186,7 @@ fn log(actor: &Actor, ask: &RevisionsAsk, decided: Decided) -> RestoreLog {
     RestoreLog {
         ctx: ask.ctx,
         events,
-        written: Vec::new(),
+        note: None,
         thread: None,
         outcome: CommandOutcome::RevisionsDecided {
             before,
