@@ -82,5 +82,8 @@ pub(crate) fn preferences() -> serde_json::Value {
         "browser": {"enable_spellchecking": false},
         "url_keyed_anonymized_data_collection": {"enabled": false},
         "autofill": {"profile_enabled": false, "credit_card_enabled": false},
+        // A PDF link downloads rather than opening in Chrome's viewer, so agent-browser's
+        // `download` gets its download event.
+        "plugins": {"always_open_pdf_externally": true},
     })
 }

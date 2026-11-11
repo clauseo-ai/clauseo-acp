@@ -152,6 +152,7 @@ fn chrome_gets_one_feature_list_of_each_kind_and_no_weakened_security() {
     let preferences = super::quiet::preferences();
     assert_eq!(preferences["safebrowsing"]["enabled"], false);
     assert_eq!(preferences["net"]["network_prediction_options"], 2);
+    assert_eq!(preferences["plugins"]["always_open_pdf_externally"], true);
 }
 
 /// The profile's own preferences, `quiet`'s and `logon`'s share no top-level key, so none may
