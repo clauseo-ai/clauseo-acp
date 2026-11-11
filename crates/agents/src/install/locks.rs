@@ -71,8 +71,10 @@ fn guard<L>(lock: &Mutex<L>) -> MutexGuard<'_, L> {
 
 /// Takes `lock` in `mode` for `job`, trying again every [`LOCK_POLL`] while another holder's
 /// conflicts, and hands it to `keep`. The wait is raced against the job's pause (a cancelled
-/// try's error) and fails the try past [`LOCK_POLLS`] tries; a lock that cannot be opened fails
-/// it at once.
+/// try's error). While a job of this process is fetching Node (on a slow line that may take
+/// long), it waits as long as that job does; otherwise (another process holds the lock) the try
+/// fails past [`LOCK_POLLS`] tries. A lock that cannot be opened fails it at once, but for
+/// Windows' sharing errors (an antivirus scanning the file), which count as held.
 pub(super) async fn wait_for<T: Timer + Send + Sync>(
     job: &Job<T>,
     lock: AgentsLock<'_>,
@@ -81,19 +83,24 @@ pub(super) async fn wait_for<T: Timer + Send + Sync>(
 ) -> Result<(), TryError> {
     let config = &job.config;
     let mut waited = false;
-    for _ in 0..LOCK_POLLS {
-        match write::try_lock(&config.data_dir, lock, mode) {
-            Ok(Some(file)) => {
+    let mut polls = 0_u32;
+    loop {
+        match try_held(config, lock, mode)? {
+            Some(file) => {
                 if waited {
                     tracing::info!(agent = %job.ticket.agent, ?lock, "agent install: lock taken");
                 }
                 keep(file);
                 return Ok(());
             }
-            Ok(None) => {}
-            // An antivirus scanning the lock file holds it a moment (Windows' 5, 32, 33).
-            Err(err) if super::npm::windows_busy(&err, config.platform.os).is_some() => {}
-            Err(err) => return Err(TryError::io("locking the agents folder", &err, config)),
+            None if crate::worker::space::node_fetch_here(&job.shared) => {}
+            None => polls += 1,
+        }
+        if polls > LOCK_POLLS {
+            return Err(TryError::retry(
+                "another Clauseo held the downloaded Node for 15 minutes",
+                config,
+            ));
         }
         if !waited {
             waited = true;
@@ -107,10 +114,20 @@ pub(super) async fn wait_for<T: Timer + Send + Sync>(
             return Err(TryError::cancelled());
         }
     }
-    Err(TryError::retry(
-        "another install held the downloaded Node for 15 minutes",
-        config,
-    ))
+}
+
+/// [`write::try_lock`], with Windows' sharing errors (5, 32, 33: an antivirus scanning the lock
+/// file a moment) taken as a lock held elsewhere.
+pub(super) fn try_held(
+    config: &AgentsConfig,
+    lock: AgentsLock<'_>,
+    mode: Mode,
+) -> Result<Option<File>, TryError> {
+    match write::try_lock(&config.data_dir, lock, mode) {
+        Ok(file) => Ok(file),
+        Err(err) if super::npm::windows_busy(&err, config.platform.os).is_some() => Ok(None),
+        Err(err) => Err(TryError::io("locking the agents folder", &err, config)),
+    }
 }
 
 /// Removes the downloaded runtime at `dir`, which npm could not start from or load its modules

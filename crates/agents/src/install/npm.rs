@@ -127,8 +127,14 @@ pub(super) async fn install<T: Timer + Send + Sync>(
     let entry = snapshot.agent(agent).ok_or_else(missing)?;
     let pins = snapshot.pins(agent).ok_or_else(missing)?;
     let hash = snapshot.install_hash(agent, platform).ok_or_else(missing)?;
-    // As soon as every file is fetched and checked, before Node's unpack (thousands of files,
-    // seconds under an antivirus): the set-up has started.
+    // The downloaded Node, unpacked by this try as soon as its archive was checked
+    // ([`Job::unpack_node`]) or by another: npm runs from it with `.lock-node` held shared. A
+    // wait for another try's Node comes before `Installing`, so the agent shows its finished
+    // download meanwhile, not a set-up that does not move.
+    if matches!(node_choice, NodeChoice::Runtime { .. }) {
+        job.use_node().await?;
+    }
+    // As soon as every file is fetched and checked and Node is in place: the set-up has started.
     if !job.emit(InstallState::Installing, false) {
         return Err(TryError::cancelled());
     }
@@ -138,24 +144,11 @@ pub(super) async fn install<T: Timer + Send + Sync>(
             found.npm_cli.clone(),
             found.version.clone(),
         ),
-        NodeChoice::Runtime { dir, fetch } => {
-            if *fetch {
-                let archive = snapshot.node_archive(platform);
-                let (Some(path), Some(archive)) = (&fetched.node_archive, archive) else {
-                    return Err(missing_archive(config));
-                };
-                node::install_runtime(path, snapshot.node(), archive, dir, platform.os)
-                    .map_err(|err| TryError::extract(&err, config))?;
-            }
-            // Fetched by this try (under `.lock-node`, held exclusive since its check) or by
-            // another: either way npm runs from it with `.lock-node` held shared.
-            job.use_node().await?;
-            (
-                node::runtime_program(dir, platform.os),
-                node::runtime_npm_cli(dir, platform.os),
-                format!("v{}", snapshot.node().version()),
-            )
-        }
+        NodeChoice::Runtime { dir, .. } => (
+            node::runtime_program(dir, platform.os),
+            node::runtime_npm_cli(dir, platform.os),
+            format!("v{}", snapshot.node().version()),
+        ),
     };
     let source = match node_choice {
         NodeChoice::User(_) => NodeSource::User,

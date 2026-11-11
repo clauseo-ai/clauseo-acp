@@ -34,7 +34,7 @@ mod python;
 mod ready;
 mod try_error;
 
-pub(crate) use files::{empty_npm_cache, remove_legacy_shared};
+pub(crate) use files::{empty_npm_cache, remove_legacy_shared, written};
 #[cfg(test)]
 pub(crate) use kept::MARKER;
 pub(crate) use kept::marked_for;
@@ -334,8 +334,7 @@ impl<T: Timer + Send + Sync> Job<T> {
     async fn runtime_node(&self) -> Result<NodeChoice, TryError> {
         let config = &self.config;
         let dir = node::runtime_dir(&config.data_dir, config.snapshot.node(), config.platform);
-        let lock = write::try_lock(&config.data_dir, AgentsLock::Node, Mode::Exclusive)
-            .map_err(|err| TryError::io("locking the Node runtime", &err, config))?;
+        let lock = locks::try_held(config, AgentsLock::Node, Mode::Exclusive)?;
         let Some(lock) = lock else {
             tracing::info!(
                 agent = %self.ticket.agent,
@@ -350,6 +349,33 @@ impl<T: Timer + Send + Sync> Job<T> {
             self.locks.hold_node(lock);
         }
         Ok(NodeChoice::Runtime { dir, fetch })
+    }
+
+    /// Unpacks Node's checked archive at `archive` into this try's runtime folder (`node`,
+    /// fetched by this try under `.lock-node`, held exclusive since its check), then gives the
+    /// lock up: right after Node's download, before the agent's own packages, so another try
+    /// waits for Node alone. A failed unpack is the set-up's failure, as npm's is.
+    pub(crate) fn unpack_node(
+        &self,
+        node: &NodeChoice,
+        archive: &std::path::Path,
+    ) -> Result<(), TryError> {
+        let config = &self.config;
+        let (NodeChoice::Runtime { dir, fetch: true }, Some(entry)) =
+            (node, config.snapshot.node_archive(config.platform))
+        else {
+            return Err(npm::missing_archive(config));
+        };
+        node::install_runtime(
+            archive,
+            config.snapshot.node(),
+            entry,
+            dir,
+            config.platform.os,
+        )
+        .map_err(|err| TryError::extract(&err, config).in_setup())?;
+        self.locks.release_node();
+        Ok(())
     }
 
     /// Holds `.lock-node` shared for this try's npm runs, waiting while another try holds it
@@ -375,21 +401,25 @@ impl<T: Timer + Send + Sync> Job<T> {
     }
 
     /// `DiskFull` when the free space at the data folder is below this try's need and every
-    /// other running try's remaining need ([`Shared::check_space`]). A free space that cannot be
+    /// other running try's remaining need (`worker/space.rs`). A free space that cannot be
     /// read is not checked.
     fn check_disk(&self, node_needed: bool) -> Result<(), TryError> {
-        let (agent, python) = self.need(node_needed);
-        let free = disk::free_for(&self.config);
-        self.shared
-            .check_space(&self.ticket, agent, python, free)
-            .map_err(|need| {
-                let free = free.unwrap_or(0);
-                TryError::new(
-                    Next::DiskFull,
-                    &format!("{} MB free, {} MB needed", free / MB, need.div_ceil(MB)),
-                    &self.config,
-                )
-            })
+        let need = self.need(node_needed);
+        crate::worker::space::check_space(
+            &self.shared,
+            &self.config,
+            &self.ticket,
+            need,
+            node_needed,
+        )
+        .map_err(|(need, free)| {
+            let free = free.unwrap_or(0);
+            TryError::new(
+                Next::DiskFull,
+                &format!("{} MB free, {} MB needed", free / MB, need.div_ceil(MB)),
+                &self.config,
+            )
+        })
     }
 
     /// The bytes this install needs, its agent's part and Python's (0 when Python is installed
@@ -417,7 +447,11 @@ impl<T: Timer + Send + Sync> Job<T> {
         let (agent, python) = self.need(node_needed);
         let need = agent
             .saturating_add(python)
-            .saturating_add(self.shared.others_left(&self.ticket));
+            .saturating_add(crate::worker::space::others_left(
+                &self.shared,
+                &self.config,
+                &self.ticket,
+            ));
         (need, disk::free_for(&self.config))
     }
 
@@ -435,7 +469,12 @@ impl<T: Timer + Send + Sync> Job<T> {
         let state = InstallState::Ready { version };
         // Python is one for the computer: a job reaching `Ready` while another installs it
         // ends here, and that job reports Python.
-        if !crate::python::needed(&self.config) || !self.shared.claim_python(&self.ticket) {
+        // Checked again once claimed: a job that finished Python just before needs no second.
+        let config = &self.config;
+        if !crate::python::needed(config)
+            || !self.shared.claim_python(&self.ticket)
+            || !crate::python::needed(config)
+        {
             self.release_lock();
             self.shared
                 .emit_job(&self.ticket, state, Some(installed), true);

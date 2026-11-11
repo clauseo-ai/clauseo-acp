@@ -7,7 +7,7 @@
 //! an agent supersedes that agent's running one, and takes the agent's turn lock before its
 //! work, so it starts only once the superseded job's thread has stopped. What the two share on
 //! disk (the Node runtime, Python, the folder's lock files) is held through `agents/.lock-*`
-//! (`install.rs`), and the free space is counted for both (`Shared::check_space`). Every event
+//! (`install.rs`), and the free space is counted for both (`worker/space.rs`). Every event
 //! a job sends goes through [`Shared::emit_job`], under the same lock `pause` takes, and is
 //! dropped once the job is paused or superseded: a paused job never speaks after its `Paused`.
 //!
@@ -41,6 +41,7 @@ mod first;
 mod python_log;
 mod shared;
 mod signin;
+pub(crate) mod space;
 mod stop;
 mod switch;
 mod thread;
@@ -82,6 +83,8 @@ pub(crate) struct Shared {
     /// ends.
     jobs: Mutex<usize>,
     job_ended: Condvar,
+    /// Held through each disk check (`space.rs`), so two tries never both count on one byte.
+    space: Mutex<()>,
     events: async_channel::Sender<AgentsEvent>,
     /// Every agent's sign-in state and running sign-in job.
     pub(crate) signin: SigninHub,
@@ -150,30 +153,7 @@ struct Slot {
     ticket: Ticket,
     /// What its try's disk check counted on, once passed: other tries' checks count what of
     /// it is not written yet.
-    reserve: Reserve,
-}
-
-/// The bytes a running try still needs written, by part: the agent's (its packages twice, the
-/// unpacked tree, Node's archive and runtime when it fetches them) and Python's (when this job
-/// counted it), each less the bytes downloaded so far.
-#[derive(Debug, Default, Clone, Copy)]
-struct Reserve {
-    agent: u64,
-    agent_received: u64,
-    python: u64,
-    python_received: u64,
-}
-
-impl Reserve {
-    /// What is still to come of the agent's part.
-    fn agent_left(&self) -> u64 {
-        self.agent.saturating_sub(self.agent_received)
-    }
-
-    /// What is still to come of Python's part.
-    fn python_left(&self) -> u64 {
-        self.python.saturating_sub(self.python_received)
-    }
+    reserve: space::Reserve,
 }
 
 /// One job's identity and pause signal.
@@ -217,6 +197,7 @@ impl Agents {
             }),
             jobs: Mutex::new(0),
             job_ended: Condvar::new(),
+            space: Mutex::new(()),
             signin: SigninHub::new(&config, events.clone()),
             events,
         });

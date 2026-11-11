@@ -5,6 +5,7 @@
 //! holding only an agent's `.lock-<id>` stops that agent's alone.
 
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use clauseo_agents::testing::Behaviour;
 use clauseo_agents::{FailureKind, InstallState};
@@ -208,6 +209,59 @@ fn the_disk_check_counts_the_install_in_flight() {
     assert!(is_ready(&last), "{last:?}");
 }
 
+/// What an install in flight has written counts once (decision 0033, "The disk need"): with
+/// about 1.5 GB free and each agent needing about 700 MB, A has written 600 MB of its need (a
+/// sparse file in its npm cache stands in for its `npm ci`), the free space has dropped by as
+/// much, and B, started then, fits: A's remaining 100 MB and B's 700 MB are under the 900 MB
+/// left. Counted twice (A's whole need beside the lower free space) B would be `DiskFull`.
+#[cfg(unix)]
+#[test]
+fn what_an_install_in_flight_has_written_counts_once() {
+    const FREE: u64 = 1_500_000_000;
+    const WRITTEN: u64 = 600_000_000;
+    let mut fx = Fixture::new("disk-once");
+    fx.config.snapshot = crate::support::snapshot(
+        crate::support::BASE,
+        crate::support::node_entry(None),
+        636_000_000,
+    );
+    let need = |agent| {
+        fx.config
+            .snapshot
+            .need_bytes(&agent, platform(), false, false)
+            .unwrap()
+    };
+    let (need_a, need_b) = (need(agent_a()), need(agent_b()));
+    assert!((690_000_000..710_000_000).contains(&need_a), "{need_a}");
+    assert!(
+        need_a + need_b > FREE - WRITTEN,
+        "counted twice, B would not fit"
+    );
+    let big = fx
+        .data
+        .path()
+        .join("agents/npm-cache/agent-a/_cacache/content-v2/big");
+    let measured = big.clone();
+    fx.config.install.free_bytes = Some(Arc::new(move || {
+        let written = std::fs::symlink_metadata(&measured).map_or(0, |meta| meta.len());
+        Some(FREE - written)
+    }));
+    fx.registry
+        .then(&tarball_path("adapter-a"), Behaviour::Stall);
+    let (agents, events) = fx.start();
+    events.first_states();
+    agents.install(&agent_a());
+    fx.registry.wait_for_stalls(1);
+    write::sparse(&big, WRITTEN).unwrap();
+    agents.install(&agent_b());
+    let (_, last) = events.until_end(&agent_b());
+    assert!(is_ready(&last), "{last:?}");
+    fx.registry.release();
+    let (_, last) = events.until_end(&agent_a());
+    assert!(is_ready(&last), "{last:?}");
+    assert!(!big.exists(), "A's npm cache goes at its Ready");
+}
+
 /// An older Clauseo holds `agents/.lock` exclusive while it installs: neither the clean-up nor
 /// an install runs here until it is done.
 #[test]
@@ -321,4 +375,46 @@ fn a_relative_bundle_path_fails_the_install_clearly() {
         "{}",
         failure.log
     );
+}
+
+/// A job whose thread panics (a dev or test build; a release build aborts) frees its slot: A
+/// ends `Failed` saying so, B installs beside it, and A's retry installs.
+#[test]
+fn a_panicking_install_job_frees_its_slot() {
+    let mut fx = Fixture::new("panic");
+    let armed = Arc::new(AtomicBool::new(true));
+    let fire = Arc::clone(&armed);
+    fx.config.install.rename_fault = Some(Arc::new(move || {
+        let in_a = std::thread::current().name() == Some("clauseo-install-agent-a");
+        assert!(
+            !(in_a && fire.swap(false, Ordering::SeqCst)),
+            "a test's panic in A's job"
+        );
+        None
+    }));
+    let (agents, events) = fx.start();
+    events.first_states();
+    agents.install(&agent_a());
+    agents.install(&agent_b());
+    let (mut seen, last) = events.until_end(&agent_a());
+    let InstallState::Failed(failure) = last else {
+        panic!("not failed: {last:?}");
+    };
+    assert!(
+        failure
+            .log
+            .lines()
+            .iter()
+            .any(|line| line == "the install stopped unexpectedly"),
+        "{}",
+        failure.log
+    );
+    if !matches!(agents.state(&agent_b()), Some(InstallState::Ready { .. })) {
+        let (rest, last) = events.until_end(&agent_b());
+        assert!(is_ready(&last), "{last:?}");
+        seen.extend(rest);
+    }
+    agents.retry(&agent_a(), false);
+    let (_, last) = events.until_end(&agent_a());
+    assert!(is_ready(&last), "{last:?}");
 }

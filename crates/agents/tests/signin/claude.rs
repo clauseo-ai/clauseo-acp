@@ -393,3 +393,28 @@ fn a_status_run_that_never_answers_holds_no_caller() {
     }
     assert_eq!(runs, 1, "one status run, still going");
 }
+
+/// A sign-in job whose thread panics frees its job with `Failed` (a dev or test build; a release
+/// build aborts), so the agent is not left signing in and the next sign-in runs.
+#[test]
+fn a_panicking_sign_in_job_frees_its_slot() {
+    let fx = Fixture::new("signin-panic", "ok-after:0");
+    let (agents, events) = fx.start();
+    fx.panic_on("login");
+    agents.sign_in(&claude(), Method::ClaudeAi).unwrap();
+    let (_, last) = events.until_end();
+    assert!(
+        matches!(
+            last,
+            SigninState::Failed {
+                code: SigninCode::Failed,
+                ..
+            }
+        ),
+        "{last:?}"
+    );
+    assert!(!agents.sign_in_going(&claude()));
+    agents.sign_in(&claude(), Method::ClaudeAi).unwrap();
+    let (_, last) = events.until_end();
+    assert_eq!(last, signed_in());
+}
