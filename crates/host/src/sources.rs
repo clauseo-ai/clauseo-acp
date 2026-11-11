@@ -66,7 +66,6 @@ impl Sources {
     ) -> Option<DomainEvent> {
         if is_codex(agent) {
             self.codex_browser.started(call);
-            self.codex_mcp.started(call);
         }
         let page = self
             .browser
@@ -86,7 +85,6 @@ impl Sources {
         patch: &ToolCallPatch,
     ) -> Option<DomainEvent> {
         self.codex_browser.updated(acp_id, patch);
-        self.codex_mcp.updated(acp_id, patch);
         let page = self
             .browser
             .updated(turn, acp_id, patch)
@@ -101,10 +99,25 @@ impl Sources {
         self.codex_browser.tool(acp_id)
     }
 
-    /// The MCP server that the Codex call `acp_id`, started in a live turn and not finished,
-    /// belongs to (`agent::mcp_trust::CodexCalls`).
-    pub(crate) fn codex_mcp_server(&self, acp_id: &str) -> Option<&str> {
-        self.codex_mcp.server(acp_id)
+    /// A tool call started, by `agent`: a Codex MCP call is kept for its permission requests
+    /// (`agent::mcp_trust::CodexCalls`). Asked of every call, case law's included, before any
+    /// source claims it.
+    pub(crate) fn codex_mcp_started(&mut self, agent: &AgentId, call: &ToolCall) {
+        if is_codex(agent) {
+            self.codex_mcp.started(call);
+        }
+    }
+
+    /// An update of the call the agent knows as `acp_id`: a final status forgets its Codex MCP
+    /// call. Asked of every update, before any source claims it.
+    pub(crate) fn codex_mcp_updated(&mut self, acp_id: &str, patch: &ToolCallPatch) {
+        self.codex_mcp.updated(acp_id, patch);
+    }
+
+    /// The MCP server and tool of the Codex call `acp_id`, started in a live turn and not
+    /// finished (`agent::mcp_trust::CodexCalls`).
+    pub(crate) fn codex_mcp_call(&self, acp_id: &str) -> Option<(&str, &str)> {
+        self.codex_mcp.call(acp_id)
     }
 }
 

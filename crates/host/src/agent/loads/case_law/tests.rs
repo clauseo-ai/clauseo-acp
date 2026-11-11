@@ -335,7 +335,8 @@ fn only_rules_for_the_case_law_server_are_case_law_rules() {
     }
 }
 
-/// Claude's pre-allow (decision D7): `mcp__case-law` only with our entry; a hook's rule for a
+/// Claude's pre-allow (decision D7): `mcp__case-law__<tool>` per search and read tool, never
+/// `recharge` or the whole server, and only with our entry; a hook's rule for a
 /// `case-law` server never goes without it, so a firm's own server of that name (under its
 /// `managed-mcp.json`, where our entry never goes) inherits nothing. Forced ask: no
 /// `allowedTools` at all.
@@ -381,7 +382,11 @@ fn claude_pre_allows_case_law_only_with_our_entry() {
         Some(json!([
             "mcp__browser",
             "mcp__case-law-firm",
-            "mcp__case-law"
+            "mcp__case-law__search_law",
+            "mcp__case-law__read_document",
+            "mcp__case-law__citator",
+            "mcp__case-law__check_citations",
+            "mcp__case-law__account"
         ]))
     );
     assert_eq!(

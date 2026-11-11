@@ -10,8 +10,8 @@ use clauseo_settings::McpServerLaunch;
 use serde_json::{Value, json};
 
 use super::{
-    CodexCalls, claude_rule, codex_call, codex_standalone_server, is_trusted, never_asks,
-    trusted_servers,
+    CodexCalls, claude_rule, codex_call, codex_standalone_server, codex_standalone_tool,
+    is_trusted, never_asks, trusted_servers,
 };
 use crate::agent::loads::McpControl;
 
@@ -119,7 +119,15 @@ fn claude_gets_allow_rules_unless_forced_ask() {
     let open = options(&trusted, true, false);
     assert_eq!(
         open.get("allowedTools"),
-        Some(&json!(["mcp__docs", "mcp__case", "mcp__case-law"]))
+        Some(&json!([
+            "mcp__docs",
+            "mcp__case",
+            "mcp__case-law__search_law",
+            "mcp__case-law__read_document",
+            "mcp__case-law__citator",
+            "mcp__case-law__check_citations",
+            "mcp__case-law__account"
+        ]))
     );
     let none = options(&[], false, false);
     assert_eq!(none.get("allowedTools"), Some(&json!(["mcp__docs"])));
@@ -294,10 +302,10 @@ fn codex_calls_keep_unfinished_mcp_calls_by_id() {
         Some(input),
         ToolCallStatus::Completed,
     ));
-    assert_eq!(calls.server("tc-1"), Some("docs"));
-    assert_eq!(calls.server("tc-shell"), None);
-    assert_eq!(calls.server("tc-none"), None);
-    assert_eq!(calls.server("tc-done"), None);
+    assert_eq!(calls.call("tc-1"), Some(("docs", "search")));
+    assert_eq!(calls.call("tc-shell"), None);
+    assert_eq!(calls.call("tc-none"), None);
+    assert_eq!(calls.call("tc-done"), None);
     calls.updated(
         "tc-1",
         &ToolCallPatch {
@@ -305,17 +313,36 @@ fn codex_calls_keep_unfinished_mcp_calls_by_id() {
             ..ToolCallPatch::default()
         },
     );
-    assert_eq!(calls.server("tc-1"), None);
+    assert_eq!(calls.call("tc-1"), None);
 }
 
-/// Only Clauseo's own `case-law`, by exact name, gets the built-in's pass; a lawyer's server
-/// named like it does not, and a settings entry of the reserved name is never trusted or sent.
+/// Only Clauseo's own `case-law`, by exact name, and only its search and read tools, by exact
+/// name, get the built-in's pass: not `recharge`, not an unknown tool, not a tool the host could
+/// not read, and not a lawyer's server named like it. A settings entry of the reserved name is
+/// never trusted or sent.
 #[test]
-fn only_the_built_in_case_law_never_asks() {
-    assert!(never_asks("case-law"));
+fn only_the_built_in_case_laws_search_and_read_tools_never_ask() {
+    for tool in [
+        "search_law",
+        "read_document",
+        "citator",
+        "check_citations",
+        "account",
+    ] {
+        assert!(never_asks("case-law", Some(tool)), "{tool}");
+        assert!(!never_asks("case", Some(tool)), "{tool}");
+        assert!(!never_asks("case-law-2", Some(tool)), "{tool}");
+    }
+    for tool in [
+        Some("recharge"),
+        Some("Search_law"),
+        Some("search_law "),
+        Some("x"),
+        None,
+    ] {
+        assert!(!never_asks("case-law", tool), "{tool:?}");
+    }
     for other in [
-        "case",
-        "case-law-2",
         "Case-Law",
         "CASE-LAW",
         "case-law ",
@@ -323,11 +350,36 @@ fn only_the_built_in_case_law_never_asks() {
         "browser",
         "docs",
     ] {
-        assert!(!never_asks(other), "{other:?} gets the pass");
+        assert!(
+            !never_asks(other, Some("search_law")),
+            "{other:?} gets the pass"
+        );
     }
     let servers = list(&[("case-law", true), ("Case-Law", true), ("case-law-2", true)]);
     assert_eq!(
         trusted_servers(&servers, McpControl::Clauseo),
         names(&["case-law-2"])
     );
+}
+
+/// A standalone approval names its tool only in Codex's exact fallback message.
+#[test]
+fn a_standalone_codex_approval_names_its_tool_in_the_exact_message() {
+    let input = |text: &str| json!({"serverName": "case-law", "description": text});
+    let tool =
+        |text: &str| codex_standalone_tool("case-law", Some(&input(text))).map(str::to_owned);
+    assert_eq!(
+        tool("Allow the case-law MCP server to run tool \"search_law\"?").as_deref(),
+        Some("search_law")
+    );
+    for text in [
+        "Allow the case-law MCP server to run tool \"recharge\"? Or search_law",
+        "Allow the case MCP server to run tool \"search_law\"?",
+        "Allow the case-law MCP server to run tool \"\"?",
+        "Allow the case-law MCP server to run tool \"a\"b\"?",
+        "Run search_law?",
+    ] {
+        assert_eq!(tool(text), None, "{text}");
+    }
+    assert_eq!(codex_standalone_tool("case-law", None), None);
 }
