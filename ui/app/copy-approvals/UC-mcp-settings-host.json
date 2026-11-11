@@ -65,6 +65,28 @@
     "by": "orchestrator (PR A1: native confirm before an MCP server starts)",
     "note": "MCP confirm, remote server: message; {address} is the URL"
   },
+  "UC-220": {
+    "en": "New or changed settings: {names}.",
+    "hi": "नई या बदली हुई सेटिंग्स: {names}।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-11",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-11",
+    "by": "orchestrator (PR A1: native confirm before an MCP server starts)",
+    "note": "MCP confirm, local server: the line under the message when variables are new or changed; {names} is their names, joined with \", \""
+  },
+  "UC-221": {
+    "en": "New or changed headers: {names}.",
+    "hi": "नए या बदले हुए हेडर: {names}।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-11",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-11",
+    "by": "orchestrator (PR A1: native confirm before an MCP server starts)",
+    "note": "MCP confirm, remote server: the line under the message when headers are new or changed; {names} is their names, joined with \", \""
+  },
   "U3-err-mcp.save_declined": {
     "en": "You chose Cancel, so nothing was saved.",
     "hi": "आपने रद्द करें चुना, इसलिए कुछ भी सहेजा नहीं गया।",

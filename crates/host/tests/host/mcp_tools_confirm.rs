@@ -70,6 +70,7 @@ fn mcp_tools_an_add_asks_and_allow_saves() {
                 "@firm/docs tool".to_owned()
             ],
             url: None,
+            names: vec!["TOKEN".to_owned()],
         }]
     );
     assert_eq!(
@@ -153,6 +154,91 @@ fn mcp_tools_only_a_change_of_what_starts_asks() {
     );
     names.args = vec!["--read-only".to_owned()];
     host.ok(save(Some("gh"), names));
-    assert_eq!(confirm.take().len(), 1, "a new variable name did not ask");
+    let asks = confirm.take();
+    assert_eq!(asks.len(), 1, "a new variable name did not ask");
+    assert_eq!(asks[0].names, ["REGION"], "the new name is not shown");
+    host.shutdown();
+}
+
+/// A forged save that adds a loader variable to a trusted server names it in the confirm; a new
+/// value for a loader variable asks again, naming it, while a new value for another does not.
+#[test]
+fn mcp_tools_a_loader_variable_is_named_and_its_value_asks() {
+    let dir = Dir::new("mcp_tools_confirm_loader", &[]);
+    let (store, confirm) = (store(&[]), Arc::new(Recording::default()));
+    let host = start(&dir, &store, &confirm);
+    host.ok(save(None, local("github", "npx", vec![set("TOKEN", HELD)])));
+    confirm.take();
+    host.ok(save(
+        Some("github"),
+        local(
+            "github",
+            "npx",
+            vec![keep("TOKEN"), set("NODE_OPTIONS", "--require /tmp/evil.js")],
+        ),
+    ));
+    let asks = confirm.take();
+    assert_eq!(asks.len(), 1);
+    assert_eq!(asks[0].names, ["NODE_OPTIONS"]);
+    assert_eq!(asks[0].program[0], "npx");
+    host.ok(save(
+        Some("github"),
+        local(
+            "github",
+            "npx",
+            vec![
+                keep("TOKEN"),
+                set("NODE_OPTIONS", "--require /tmp/other.js"),
+            ],
+        ),
+    ));
+    let asks = confirm.take();
+    assert_eq!(asks.len(), 1, "a loader value change did not ask");
+    assert_eq!(asks[0].names, ["NODE_OPTIONS"]);
+    host.ok(save(
+        Some("github"),
+        local(
+            "github",
+            "npx",
+            vec![set("TOKEN", "a-newer-token-0042"), keep("NODE_OPTIONS")],
+        ),
+    ));
+    assert_eq!(confirm.take(), Vec::new(), "an ordinary value change asked");
+    host.shutdown();
+}
+
+/// A rename and a change of what starts in one save asks.
+#[test]
+fn mcp_tools_a_rename_with_a_launch_change_asks() {
+    let dir = Dir::new("mcp_tools_confirm_rename", &[]);
+    let (store, confirm) = (store(&[]), Arc::new(Recording::default()));
+    let host = start(&dir, &store, &confirm);
+    host.ok(save(None, local("github", "npx", vec![set("TOKEN", HELD)])));
+    confirm.take();
+    let mut changed = local("gh", "npx", vec![keep("TOKEN")]);
+    changed.args = vec!["--write".to_owned()];
+    host.ok(save(Some("github"), changed));
+    let asks = confirm.take();
+    assert_eq!(asks.len(), 1, "a rename with new arguments did not ask");
+    assert_eq!(asks[0].server, "gh");
+    host.shutdown();
+}
+
+/// An ask too long to show whole is refused before any prompt: padding can't push a dangerous
+/// argument out of view.
+#[test]
+fn mcp_tools_an_ask_too_long_to_show_is_refused_unasked() {
+    let dir = Dir::new("mcp_tools_confirm_long", &[]);
+    let (store, confirm) = (store(&[]), Arc::new(Recording::default()));
+    let host = start(&dir, &store, &confirm);
+    let mut padded = local("github", "npx", Vec::new());
+    padded.args = vec![
+        "a".repeat(1_000),
+        "b".repeat(1_000),
+        "--require=/tmp/evil.js".to_owned(),
+    ];
+    host.refused(save(None, padded), ErrorCode::McpCommandInvalid);
+    assert_eq!(confirm.take(), Vec::new(), "it prompted");
+    assert!(!dir.data().join("settings.json").exists() || !dir.settings_json().contains("evil"));
     host.shutdown();
 }

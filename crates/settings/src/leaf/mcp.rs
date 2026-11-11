@@ -121,6 +121,9 @@ fn known_fields(
 /// header's or a variable's place.
 fn server_rule(server: &McpServerLaunch) -> Option<String> {
     match &server.transport {
+        McpTransport::Local { command, .. } if command.starts_with(r"\\?\") => Some(format!(
+            r"{command} is written with \\?\, which Clauseo does not start; write the plain path"
+        )),
         McpTransport::Local { command, .. } if command_on_network(command) => Some(format!(
             "{command} is on a network share; Clauseo starts programs from this computer only"
         )),
