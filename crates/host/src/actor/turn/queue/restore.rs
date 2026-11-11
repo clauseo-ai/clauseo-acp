@@ -137,6 +137,7 @@ fn queued_turns(log: &[Envelope]) -> QueuedTurns {
                 SteerOutcome::Injected { turn } => Some(*turn),
                 SteerOutcome::Requeued { .. }
                 | SteerOutcome::SentNow { .. }
+                | SteerOutcome::NotSent { .. }
                 | SteerOutcome::Unknown { .. } => None,
             };
             if let SteerOutcome::Requeued { turn } | SteerOutcome::SentNow { turn } =

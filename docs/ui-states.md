@@ -60,6 +60,7 @@ entries page in on scroll through `HostQuery::PageEntries`, which returns `Query
 | Steer taken into the running turn | `SteerOutcome::Injected` | the turn that answers it |
 | Steer moved to the next turn (the turn had just ended) | `SteerOutcome::Requeued` | the new turn, which starts next |
 | Steer sent as send now (no real steer for this agent) | `SteerOutcome::SentNow` | the new turn; the running one is cancelled |
+| Steer not sent (a turn ended before Claude was seen to take it in) | `SteerOutcome::NotSent` | the turn that ended; the text stays, to send again |
 | Steer outcome from a newer Clauseo | `SteerOutcome::Unknown` | the outcome's kind only |
 | Answer, streaming | `ViewEntry::AgentText`, `TextKind::Answer` | text so far, growing by `AppendText` |
 | Answer, complete | `ViewEntry::AgentText` | full text; the turn has ended |

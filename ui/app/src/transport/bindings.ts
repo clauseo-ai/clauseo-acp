@@ -5609,7 +5609,8 @@ export type StartPoint = {
 };
 
 /**
- *  Where a steered message went. `turn` is always the turn that answers the message.
+ *  Where a steered message went. `turn` is the turn that answers the message, except for
+ *  `NotSent`, which no turn answers.
  * 
  *  A one-key object; a kind from a newer Clauseo decodes to `Unknown`.
  */
@@ -5618,17 +5619,29 @@ export type SteerOutcome =
 ({ injected: {
 	/**  The running turn. */
 	turn: TurnId,
-} }) & { requeued?: never; sent_now?: never } | 
+} }) & { not_sent?: never; requeued?: never; sent_now?: never } | 
 /**  That turn had just ended; the message moved to a new turn, which starts next. */
 ({ requeued: {
 	/**  The new turn. */
 	turn: TurnId,
-} }) & { injected?: never; sent_now?: never } | 
+} }) & { injected?: never; not_sent?: never; sent_now?: never } | 
 /**  No real steer: the running turn was cancelled and a new turn starts next. */
 ({ sent_now: {
 	/**  The new turn. */
 	turn: TurnId,
-} }) & { injected?: never; requeued?: never } | 
+} }) & { injected?: never; not_sent?: never; requeued?: never } | 
+/**
+ *  Never delivered: a turn ended before the agent was seen to take it in, and it is not
+ *  sent on its own. Claude's adapter accepts a steer into a queue of its own and may
+ *  drop it unread; the host counts it delivered only once Claude's transcript shows it.
+ */
+({ not_sent: {
+	/**
+	 *  The turn whose end left it unsent: the turn it was sent into, or the running
+	 *  turn a steer the host held waited behind.
+	 */
+	turn: TurnId,
+} }) & { injected?: never; requeued?: never; sent_now?: never } | 
 /**  An outcome from a newer Clauseo; written back as the plain string `kind`. */
 string;
 

@@ -36,7 +36,8 @@ impl Delivery {
 }
 
 open_data_enum! {
-    /// Where a steered message went. `turn` is always the turn that answers the message.
+    /// Where a steered message went. `turn` is the turn that answers the message, except for
+    /// `NotSent`, which no turn answers.
     ///
     /// A one-key object; a kind from a newer Clauseo decodes to `Unknown`.
     #[derive(Debug, Clone, PartialEq, Eq)]
@@ -56,6 +57,14 @@ open_data_enum! {
             /// The new turn.
             turn: TurnId,
         },
+        /// Never delivered: a turn ended before the agent was seen to take it in, and it is not
+        /// sent on its own. Claude's adapter accepts a steer into a queue of its own and may
+        /// drop it unread; the host counts it delivered only once Claude's transcript shows it.
+        NotSent = "not_sent" {
+            /// The turn whose end left it unsent: the turn it was sent into, or the running
+            /// turn a steer the host held waited behind.
+            turn: TurnId,
+        },
         _ =>
         /// An outcome from a newer Clauseo; written back as the plain string `kind`.
         Unknown,
@@ -68,6 +77,9 @@ open_data_enum! {
             turn: TurnId::new(uuid::Uuid::from_u128(0x0190_0000_0000_7000_8000_0000_0000_0007)).unwrap(),
         },
         SteerOutcome::SentNow {
+            turn: TurnId::new(uuid::Uuid::from_u128(0x0190_0000_0000_7000_8000_0000_0000_0007)).unwrap(),
+        },
+        SteerOutcome::NotSent {
             turn: TurnId::new(uuid::Uuid::from_u128(0x0190_0000_0000_7000_8000_0000_0000_0007)).unwrap(),
         },
     ];
