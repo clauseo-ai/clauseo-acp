@@ -13,6 +13,17 @@ import { useRoom, type RoomNodes } from "./room-scope.ts";
 import { Say } from "./say.tsx";
 import { startOf } from "./question-fold-logic.ts";
 
+/** Whether `target` is in a question's Show all or Show less (data-fold), below `top`. */
+function isFoldPress(target: EventTarget | null, top: HTMLElement): boolean {
+  for (
+    let at = target instanceof HTMLElement ? target : null;
+    at !== null && at !== top;
+    at = at.parentElement
+  )
+    if (at.dataset.fold !== undefined) return true;
+  return false;
+}
+
 /** The pinned question's words: its start, more than one line holds at any width, so a 6 MiB question costs the bar
  * no more layout than a short one; the line's ellipsis (thread.css) shows where it is cut. */
 const PIN_CHARS = 240;
@@ -299,7 +310,7 @@ export function Thread({
     // so the view lets go of the end before the question grows or shrinks, and stays where it is. In the capture
     // phase, before React's own listener at the root changes the question
     const onFold = (e: MouseEvent) => {
-      if (e.target instanceof Element && e.target.closest("[data-fold]") !== null) follow.leave();
+      if (isFoldPress(e.target, t)) follow.leave();
     };
     t.addEventListener("scroll", onScroll, { passive: true });
     window.addEventListener("scroll", onScroll, { passive: true });

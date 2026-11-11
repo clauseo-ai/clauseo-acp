@@ -11,6 +11,20 @@ import { useWords } from "../lib/words.ts";
 import { FOLD_CHARS, startOf } from "./question-fold-logic.ts";
 import { Say } from "./say.tsx";
 
+/** The thread's row holding `el`: the nearest element up with a data-entry-id. */
+function rowOf(el: HTMLElement | null): HTMLElement | null {
+  for (let at = el; at !== null; at = at.parentElement)
+    if (at.dataset.entryId !== undefined) return at;
+  return null;
+}
+
+/** The thread's scroller holding `el`. */
+function threadOf(el: HTMLElement | null): HTMLElement | null {
+  for (let at = el; at !== null; at = at.parentElement)
+    if (at.classList.contains("room-thread")) return at;
+  return null;
+}
+
 /** The question's words, folded past eight lines. `ref` is the paragraph's (the room's "asked" node, which the
  * pinned question measures). */
 export function FoldedQuestion({ text, ref }: { text: string; ref?: Ref<HTMLParagraphElement> }) {
@@ -39,11 +53,12 @@ export function FoldedQuestion({ text, ref }: { text: string; ref?: Ref<HTMLPara
     if (open || !closing.current) return;
     closing.current = false;
     // the question's row stands clear of the pinned bar by its scroll margin (shell.css)
-    const row = own.current?.closest("[data-entry-id]") ?? own.current;
+    const row = rowOf(own.current) ?? own.current;
     const top = row?.getBoundingClientRect().top ?? 0;
     // what covers the view's top: the pinned bar, or the edge of the thread where the thread scrolls on its own
-    const pin = document.querySelector<HTMLElement>(".room-pin:not([hidden])");
-    const thread = row?.closest<HTMLElement>(".room-thread");
+    const bar = document.querySelector<HTMLElement>(".room-pin");
+    const pin = bar === null || bar.hidden ? null : bar;
+    const thread = threadOf(row ?? null);
     const scrolls = thread != null && getComputedStyle(thread).overflowY !== "visible";
     const clear = Math.max(
       pin === null ? 0 : pin.getBoundingClientRect().bottom,

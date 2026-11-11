@@ -103,7 +103,7 @@ test("a short question the clamp cuts (nine lines) folds; one of eight lines has
 
 test("Show all and Show less say themselves in Hindi", async () => {
   await mount(<FoldedQuestion text={LONG} />, { lang: "hi" });
-  expect(toggle()?.textContent).toBe("पूरा दिखाएँ");
+  expect(toggle()?.textContent).toBe("सभी दिखाएँ");
   await press(toggle());
   expect(toggle()?.textContent).toBe("कम दिखाएँ");
 });
