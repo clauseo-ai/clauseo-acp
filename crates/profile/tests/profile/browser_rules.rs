@@ -178,10 +178,10 @@ fn browsing_and_reading_run_unasked() {
     );
 }
 
-/// `eval`, `pdf` and `download` are refused, bare, behind `--json` or chained: a deny rule
-/// wins over every allow and ask rule.
+/// `eval`, `pdf`, `download`, `upload`, a JavaScript wait and `cdp-url` are refused, bare,
+/// behind `--json` or chained: a deny rule wins over every allow and ask rule.
 #[test]
-fn eval_pdf_and_download_are_refused() {
+fn file_and_javascript_commands_are_refused() {
     assert_all(
         Verdict::Deny,
         &[
@@ -197,17 +197,6 @@ fn eval_pdf_and_download_are_refused() {
             "agent-browser download @e1 /tmp/x.pdf",
             "agent-browser --json download @e1 x.pdf",
             "agent-browser click @e1 && agent-browser download @e2 x.pdf",
-        ],
-    );
-}
-
-/// `upload`, a JavaScript wait, `cdp-url`, a local file and an option that loads page
-/// JavaScript ask, bare, behind `--json` or chained.
-#[test]
-fn page_javascript_and_files_ask() {
-    assert_all(
-        Verdict::Ask,
-        &[
             "agent-browser upload @e5 a.pdf",
             "agent-browser --json upload @e5 a.pdf",
             "agent-browser wait --fn \"window.ok\"",
@@ -215,6 +204,17 @@ fn page_javascript_and_files_ask() {
             "agent-browser --json wait --fn x",
             "agent-browser get cdp-url",
             "agent-browser --json get cdp-url",
+        ],
+    );
+}
+
+/// A local file and an option that loads page JavaScript or hands the browser to a provider
+/// ask, wherever they sit.
+#[test]
+fn local_files_and_risky_options_ask() {
+    assert_all(
+        Verdict::Ask,
+        &[
             "agent-browser open https://a.in --init-script /tmp/a.js",
             "agent-browser --enable react-devtools open https://a.in",
             "agent-browser open file:///etc/passwd",
@@ -253,10 +253,10 @@ fn the_denied_options_and_subcommands_are_refused() {
     );
 }
 
-/// Every subcommand that reads or writes a local file or runs page JavaScript asks wherever it
-/// sits: bare, behind `--json`, behind `-q` or another global option, with a full path.
+/// Every subcommand that reads or writes a local file or runs page JavaScript is refused
+/// wherever it sits: bare, behind `--json`, behind `-q` or another global option, chained.
 #[test]
-fn file_and_javascript_subcommands_ask_behind_any_option() {
+fn file_and_javascript_subcommands_are_refused_behind_any_option() {
     let data = "\"/Users/a/Library/Application Support/ai.clauseo.desktop/agents/auth.json\"";
     let subs = [
         format!("upload @f {data}"),
@@ -281,18 +281,17 @@ fn file_and_javascript_subcommands_ask_behind_any_option() {
     for sub in &subs {
         for lead in lead {
             let command = format!("agent-browser {lead}{sub}");
-            // Bare `state` stays denied; behind another option it asks.
-            let want = if sub.starts_with("state ") && matches!(lead, "" | "--json ") {
-                Verdict::Deny
-            } else {
-                Verdict::Ask
-            };
-            assert_eq!(verdict(&command), want, "{command}");
+            assert_eq!(verdict(&command), Verdict::Deny, "{command}");
             let chained = format!("agent-browser open https://a.in && {command}");
-            assert_eq!(verdict(&chained), want, "{chained}");
+            assert_eq!(verdict(&chained), Verdict::Deny, "{chained}");
         }
     }
-    // A word that only holds one of them, or the allowed `wait --download`, does not ask.
+    // Page text holding one of the words after a space is refused too (the documented price).
+    assert_eq!(
+        verdict("agent-browser fill @e1 \"please upload the deed\""),
+        Verdict::Deny
+    );
+    // A word that only holds one of them, or the allowed `wait --download`, is not refused.
     assert_all(
         Verdict::Allow,
         &[
