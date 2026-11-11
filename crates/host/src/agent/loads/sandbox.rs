@@ -8,10 +8,12 @@
 //!   one-time admin install behind a feature gate;
 //! - when Claude's short temp folder could not be made (`agent::temp::make_claude_tmp`);
 //! - when a path in its lists holds `*` or `?`, which Claude Code reads as a pattern with no
-//!   escape ([`Off::Wildcard`]); that session also leaves `auto` for `acceptEdits`
-//!   (`actor/turn/session/claude_mode.rs`, `Auto::NoSandbox`), so no command runs on the
-//!   classifier alone where the sandbox was meant to be;
+//!   escape ([`Off::Wildcard`]);
 //! - when a path it must deny is not UTF-8 (it could not be named).
+//!
+//! Each of those but Windows also leaves `auto` for `acceptEdits` ([`Off::holds_auto_back`],
+//! `actor/turn/session/claude_mode.rs`, `Auto::NoSandbox`), so no command runs on the
+//! classifier alone where the sandbox was meant to be.
 //!
 //! A `[` (in `Smith [2024]`) is escaped instead ([`escape_brackets`]). Claude Code 2.1.293
 //! reads a sandbox path holding `*`, `?`, `[` or `]` as a glob (its `W4t`: `[…]` stays a
@@ -31,10 +33,12 @@
 //!   or not.
 //! - `allowUnsandboxedCommands: false`: the model's `dangerouslyDisableSandbox` is ignored, so
 //!   no command breaks out, asked or not.
-//! - `failIfUnavailable: false`: a Mac where the sandbox can't start keeps the session, and its
-//!   commands ask, since Claude Code auto-allows only while sandboxing is running (2.1.293 checks
-//!   `isSandboxingEnabled()` before auto-allowing; a sandbox that fails to start for one command
-//!   refuses it and is off for the rest of the session). `true` would end Claude at start-up.
+//! - `failIfUnavailable: true` (the security review of #940): a sandbox that fails at run time
+//!   fails the command instead of running it unsandboxed, and a Mac (or a Linux machine without
+//!   bubblewrap) where it can't start at all ends Claude at start-up, so the launch fails rather
+//!   than run commands with no sandbox (the setting's own description). The host's own checks
+//!   come first and still fall back, before the launch, to no sandbox and `acceptEdits` (the
+//!   list above).
 //! - `allowAppleEvents: false`: `open` and `osascript` can't launch or drive other apps. With
 //!   the Spotlight and Quick Look services outside the sandbox's Mach list, `mdls`, `mdfind` and
 //!   `qlmanage` fail too: the accepted breakages, which Claude is told of on macOS
@@ -129,8 +133,16 @@ pub(crate) enum Off {
     NoTemp,
     /// A path to deny is not UTF-8.
     NotUtf8,
-    /// A path holds `*` or `?`: the session also runs in `acceptEdits`, not `auto`.
+    /// A path holds `*` or `?`.
     Wildcard,
+}
+
+impl Off {
+    /// Whether a session with no sandbox for this reason runs in `acceptEdits`, not `auto`:
+    /// every reason but Windows, where no sandbox was meant to be (see the module doc).
+    pub(crate) fn holds_auto_back(self) -> bool {
+        self != Self::Windows
+    }
 }
 
 /// Claude Code's shell snapshot folder in its config folder.
@@ -309,7 +321,7 @@ impl ClaudeSandbox {
             "enabled": true,
             "autoAllowBashIfSandboxed": true,
             "allowUnsandboxedCommands": false,
-            "failIfUnavailable": false,
+            "failIfUnavailable": true,
             "allowAppleEvents": false,
             "network": {
                 "allowedDomains": ["*"],

@@ -45,10 +45,11 @@ pub(crate) enum Auto {
     Set { held: usize },
     /// Not available: the session runs in `acceptEdits` and goes back to it.
     Unavailable,
-    /// Held back by the host: Claude's sandbox could not name a path of this session (a `*` or
-    /// `?` in it, `agent::loads::sandbox::Off::Wildcard`), so the session runs in
-    /// `acceptEdits` and goes back to it, as when unavailable, with no notice: the account has
-    /// auto, and only this matter's folder name keeps it off.
+    /// Held back by the host: Claude's sandbox is off before the launch on macOS or Linux (a
+    /// `*` or `?` in a path, a path to deny that is not UTF-8, or no short temp folder:
+    /// `agent::loads::sandbox::Off::holds_auto_back`), so the session runs in `acceptEdits` and
+    /// goes back to it, as when unavailable, with no notice: the account has auto, and only this
+    /// launch's paths keep it off.
     NoSandbox,
 }
 
@@ -63,7 +64,7 @@ impl Auto {
 /// its session starts (`profile_loads.rs`), so [`claude_start`] switches it to `acceptEdits`.
 pub(crate) fn hold_auto_back(actor: &mut Actor, thread: ThreadId) {
     if let Some(agent) = state(actor, thread).and_then(|state| state.agent.as_deref_mut()) {
-        tracing::info!(%thread, "Claude's sandbox is off for a path it cannot name; acceptEdits");
+        tracing::info!(%thread, "Claude's sandbox is off before its launch; acceptEdits");
         agent.auto = Auto::NoSandbox;
     }
 }

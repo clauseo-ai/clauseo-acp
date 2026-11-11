@@ -158,8 +158,10 @@ pub(super) fn session_loads(
         .is_some_and(|(_, part)| *part == BrowserPart::On);
     let sandbox =
         (kind == Some(AgentKind::Claude)).then(|| claude_sandbox(actor, &agent_id, &run, matter));
-    if let Some(Err(Off::Wildcard)) = sandbox {
-        // A path the sandbox cannot name: no command may run on the classifier alone.
+    if let Some(Err(off)) = sandbox
+        && off.holds_auto_back()
+    {
+        // No sandbox where one was meant to be: no command may run on the classifier alone.
         super::session::hold_auto_back(actor, thread);
     }
     let sandbox = sandbox.and_then(Result::ok);
