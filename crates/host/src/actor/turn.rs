@@ -52,7 +52,7 @@ use std::collections::VecDeque;
 
 use clauseo_protocol::{
     AgentChoiceId, ContentBlock, DetachReason, ElicitationResponse, ErrorCode, LimitStopReason,
-    MatterId, MatterPath, StopReason, StreamId, ThreadId, Timestamp, TurnId,
+    MatterId, StopReason, StreamId, ThreadId, Timestamp, TurnId,
 };
 use futures::future::AbortHandle;
 
@@ -116,12 +116,12 @@ pub(crate) struct TurnState {
     sources: crate::sources::Sources,
     /// Text not durable yet.
     text: ThreadText,
-    /// The files put back since the last `TurnStarted`; `None` until first needed, then
-    /// read from the loaded state.
-    note: Option<Vec<MatterPath>>,
-    /// The files restores of the thread's matter wrote since the last `TurnStarted`, held in
-    /// memory only (`restore.rs`); the next prompt's note adds them.
-    restored: Vec<MatterPath>,
+    /// The undos and restores since the last `TurnStarted`, in order; `None` until first
+    /// needed, then read from the loaded state with [`TurnState::restored`].
+    note: Option<Vec<crate::undo_note::Told>>,
+    /// The restores of the thread's matter while `note` is `None`, held in memory only
+    /// (`restore.rs`); the note takes them when first read.
+    restored: Vec<crate::undo_note::RestoreNote>,
     /// Start-up reconciliation of this thread is in progress.
     reconciling: bool,
     /// The last turn, until the commit holding its `TurnEnded` returns `Ok`. A new prompt is

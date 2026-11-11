@@ -111,40 +111,43 @@ pub(super) fn prompt(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
 fn take_note(actor: &mut Actor, thread: ThreadId) -> Option<String> {
     ensure_note(actor, thread);
     let state = state(actor, thread)?;
-    let undone = state.note.replace(Vec::new()).unwrap_or_default();
-    let restored = std::mem::take(&mut state.restored);
-    let paths = undo_note::paths_since_last_turn([
-        NoteInput::Undone { restored: &undone },
-        NoteInput::Restored { paths: &restored },
-    ]);
-    undo_note::note_text(&paths)
+    let told = state.note.replace(Vec::new()).unwrap_or_default();
+    undo_note::note_text(&told)
 }
 
 /// Reads the note from the loaded state the first time it is needed: the files undone since
-/// the last turn's step.
+/// the last turn's step, with the restores held until then put among them by time.
 pub(super) fn ensure_note(actor: &mut Actor, thread: ThreadId) {
     if state(actor, thread).is_none_or(|state| state.note.is_some()) {
         return;
     }
-    let paths = actor
+    let restores = state(actor, thread)
+        .map(|state| std::mem::take(&mut state.restored))
+        .unwrap_or_default();
+    let loaded = actor
         .loaded(StreamId::Thread(thread))
-        .and_then(|loaded| loaded.state.as_thread())
-        .map(|state| {
+        .and_then(|loaded| loaded.state.as_thread());
+    let told = match loaded {
+        None => undo_note::since_last_turn([], restores),
+        Some(state) => {
             let inputs = state.entries().values().filter_map(|entry| {
                 if matches!(entry, ViewEntry::Step(_)) {
                     Some(NoteInput::TurnStarted)
                 } else if let ViewEntry::Marker(marker) = entry
                     && let clauseo_protocol::MarkerKind::StepUndone { restored, .. } = &marker.kind
                 {
-                    Some(NoteInput::Undone { restored })
+                    Some(NoteInput::Undone {
+                        restored,
+                        at: marker.ts,
+                    })
                 } else {
                     None
                 }
             });
-            undo_note::paths_since_last_turn(inputs)
-        })
-        .unwrap_or_default();
+            undo_note::since_last_turn(inputs, restores)
+        }
+    };
     if let Some(state) = state(actor, thread) {
-        state.note = Some(paths);
+        state.note = Some(told);
     }
 }

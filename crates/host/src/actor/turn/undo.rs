@@ -385,10 +385,8 @@ pub(super) fn on_logged(actor: &mut Actor, thread: ThreadId) {
     counting::feature_used(actor, Feature::Undo);
     prompt::ensure_note(actor, thread);
     if let Some(note) = state(actor, thread).and_then(|state| state.note.as_mut()) {
-        for path in log.step.restored {
-            if !note.contains(&path) {
-                note.push(path);
-            }
+        for path in &log.step.restored {
+            crate::undo_note::add_undone(note, path);
         }
     }
     came_back::watch(actor, thread, log.matter, log.deleted, &log.resurrected);
