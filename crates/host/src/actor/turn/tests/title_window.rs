@@ -1,7 +1,8 @@
-//! The name's grace window (D-070) on the manual clock: an agent's title that arrives within
+//! The name's title window (D-070) on the manual clock: an agent's title that arrives within
 //! `TITLE_GRACE` after the first answered turn ends is taken, one that arrives after it, or
-//! after the next prompt went out, is not. The agent's title is held back by the rig until the
-//! test has moved the clock, so its arrival time is the test's.
+//! after the next prompt went out, is not. A cancelled or failed answer's title counts the
+//! same. The agent's title is held back by the rig until the turn has ended, so its arrival
+//! time is the test's.
 
 use std::time::Duration;
 
@@ -9,7 +10,7 @@ use clauseo_acp::{AcpEvent, AgentUpdate};
 use clauseo_protocol::{CommandOutcome, DomainEvent, HostCommand, RenameSource, ThreadId, Title};
 
 use super::super::TurnPhase;
-use super::super::state::TITLE_GRACE;
+use super::super::state::{TITLE_GRACE, TitleWindow};
 use super::agents::send_prompt;
 use super::rig::Rig;
 use crate::actor::Actor;
@@ -45,6 +46,22 @@ const ERROR_THEN_TITLE: &str = r#"{"expect":{"method":"session/prompt","as":"p1"
 {"update":{"update":{"sessionUpdate":"session_info_update","title":"Indemnity cap review"}}}
 "#;
 
+/// An answer that streams, then the lawyer cancels: the agent answers `cancelled`, and its
+/// title comes after that, as a late update.
+const ANSWER_CANCEL_THEN_TITLE: &str = r#"{"expect":{"method":"session/prompt","as":"p1","params":{"sessionId":"sess-1"}}}
+{"update":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-answer-1","content":{"type":"text","text":"First answer."}}}}
+{"expect":{"method":"session/cancel","params":{"sessionId":"sess-1"}}}
+{"respond":{"to":"p1","result":{"stopReason":"cancelled"}}}
+{"update":{"update":{"sessionUpdate":"session_info_update","title":"Indemnity cap review"}}}
+"#;
+
+/// An answer that streams and then fails, with the agent's title after the failure.
+const ANSWER_ERROR_THEN_TITLE: &str = r#"{"expect":{"method":"session/prompt","as":"p1","params":{"sessionId":"sess-1"}}}
+{"update":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-answer-1","content":{"type":"text","text":"First answer."}}}}
+{"respond":{"to":"p1","error":{"code":-32603,"message":"Internal error"}}}
+{"update":{"update":{"sessionUpdate":"session_info_update","title":"Indemnity cap review"}}}
+"#;
+
 /// Whether `input` is an agent's session title, held or not.
 fn is_title(_: &Actor, input: &Input) -> bool {
     matches!(
@@ -76,26 +93,40 @@ fn renames(rig: &mut Rig, thread: ThreadId) -> Vec<(String, RenameSource)> {
         .collect()
 }
 
-/// Runs the first answered turn of `thread` until it has ended, with the agent's title held
-/// back. Its end is in the log's events, and the title is in `rig.held`.
-fn answered_turn_with_title_held(rig: &mut Rig, thread: ThreadId) {
-    let _first = send_prompt(rig, 10, thread);
+/// Holds the agent's title back until the turn has ended: the turn's end is the first thing
+/// the test waits for, then the title is in `rig.held` and the stream is unloaded.
+fn title_held_past_the_turn_end(rig: &mut Rig, thread: ThreadId) {
     rig.hold_next("the agent's title", is_title);
-    rig.run_holding("the first turn's end", is_title, |actor| {
+    rig.run_holding("the turn's end", is_title, |actor| {
         let state = &actor.threads[&thread].turn;
         state.current.is_none() && actor.work.commits == 0
     });
-    assert_eq!(rig.held.len(), 1, "the agent's title is held back");
+    assert_eq!(
+        rig.held.len(),
+        1,
+        "the agent's title is held past the turn's end"
+    );
     assert!(
         renames(rig, thread).is_empty(),
         "no rename before the title is handled"
     );
 }
 
+/// Runs the first turn of `thread` until it has answered, with the agent's title held back.
+fn answered_turn_with_title_held(rig: &mut Rig, thread: ThreadId) {
+    let _first = send_prompt(rig, 10, thread);
+    title_held_past_the_turn_end(rig, thread);
+}
+
 /// Handles the held title and every commit it makes.
 fn release_title(rig: &mut Rig) {
     rig.release_held();
     rig.settle_commits();
+}
+
+/// The title window of `thread` now.
+fn window(rig: &Rig, thread: ThreadId) -> TitleWindow {
+    rig.actor.threads[&thread].turn.title
 }
 
 #[test]
@@ -168,20 +199,88 @@ fn a_lawyers_rename_within_the_grace_window_keeps_its_title() {
     rig.finish();
 }
 
-/// Between turns the rig's stream is unloaded, so the window reads the folded history: an
-/// unanswered first turn settles nothing, and its title is taken (D-070).
+#[test]
+fn a_lawyers_rename_after_the_window_closed_still_works() {
+    let mut rig = Rig::start("title-window-typed-late", ANSWER_THEN_TITLE);
+    let thread = rig.thread();
+    answered_turn_with_title_held(&mut rig, thread);
+    rig.clock.advance(TITLE_GRACE + Duration::from_secs(1));
+    let typed = HostCommand::RenameThread {
+        thread,
+        title: Title::new(TYPED).unwrap(),
+        placeholder: false,
+    };
+    assert_eq!(rig.dispatch(11, typed).unwrap(), CommandOutcome::Done);
+    release_title(&mut rig);
+    assert_eq!(
+        renames(&mut rig, thread),
+        [(TYPED.to_owned(), RenameSource::Lawyer)],
+        "{:?}",
+        rig.log(thread)
+    );
+    rig.finish();
+}
+
+#[test]
+fn a_title_within_the_grace_after_an_answer_then_error_is_taken() {
+    let mut rig = Rig::start("title-window-error", ANSWER_ERROR_THEN_TITLE);
+    let thread = rig.thread();
+    answered_turn_with_title_held(&mut rig, thread);
+    assert!(
+        matches!(window(&rig, thread), TitleWindow::Grace(_)),
+        "the answered turn that failed opens the window"
+    );
+    rig.clock.advance(Duration::from_secs(3));
+    release_title(&mut rig);
+    assert_eq!(
+        renames(&mut rig, thread),
+        [(AGENT_TITLE.to_owned(), RenameSource::Agent)],
+        "{:?}",
+        rig.log(thread)
+    );
+    rig.finish();
+}
+
+#[test]
+fn a_title_after_an_answer_then_cancel_is_taken_as_a_late_update() {
+    let mut rig = Rig::start("title-window-cancel", ANSWER_CANCEL_THEN_TITLE);
+    let thread = rig.thread();
+    let _first = send_prompt(&mut rig, 10, thread);
+    rig.run_until("the answer's first text", |actor| {
+        actor.threads[&thread]
+            .turn
+            .current
+            .as_ref()
+            .is_some_and(|current| current.first_words.is_some())
+    });
+    let cancel = rig.dispatch_holding(11, HostCommand::Cancel { thread }, is_title);
+    assert_eq!(cancel.unwrap(), CommandOutcome::Done);
+    rig.run_holding("the cancelled turn's end", is_title, |actor| {
+        let state = &actor.threads[&thread].turn;
+        state.current.is_none() && actor.work.commits == 0
+    });
+    assert_eq!(
+        rig.held.len(),
+        1,
+        "the agent's title is held past the cancelled turn's end"
+    );
+    rig.clock.advance(Duration::from_secs(5));
+    release_title(&mut rig);
+    assert_eq!(
+        renames(&mut rig, thread),
+        [(AGENT_TITLE.to_owned(), RenameSource::Agent)],
+        "{:?}",
+        rig.log(thread)
+    );
+    rig.finish();
+}
+
 #[test]
 fn a_title_between_turns_after_an_unanswered_first_turn_is_taken() {
     let mut rig = Rig::start("title-window-unanswered", ERROR_THEN_TITLE);
     let thread = rig.thread();
     let _first = send_prompt(&mut rig, 10, thread);
-    rig.run_holding("the first turn's end", is_title, |actor| {
-        let state = &actor.threads[&thread].turn;
-        state.current.is_none() && actor.work.commits == 0
-    });
-    if rig.held.is_empty() {
-        rig.hold_next("the agent's title", is_title);
-    }
+    title_held_past_the_turn_end(&mut rig, thread);
     release_title(&mut rig);
     assert_eq!(
         renames(&mut rig, thread),

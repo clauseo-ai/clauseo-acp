@@ -271,7 +271,8 @@ since the Unix epoch. Inside `events.envelope`, the envelope's own encoding appl
   text ends: an agent's title is taken for 60 s after that end (`TITLE_GRACE`, since the adapters
   title in the background after `end_turn`), and never once the next prompt has gone out or after
   a session load of a thread whose answered turn is in its history (D-070). A turn with no answer
-  text settles nothing.
+  text settles nothing. A cancel marks the session's updates late; a title that comes late still
+  counts while the window is open, and no other late update does.
 - A commit's matter and thread rows insert or replace the row with that id.
 - `checkpoints` keeps only the id, the matter, the shadow repository's commit id and the `seq` of
   its `CheckpointRecorded` in the matter stream. The event already carries the rest; the commit id
