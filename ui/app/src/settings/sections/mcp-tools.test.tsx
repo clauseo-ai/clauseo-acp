@@ -11,16 +11,19 @@ import type { Settings } from "../../room/host-next.ts";
 import { stubFonts } from "../../room/thread/testing.ts";
 import { FakeTransport } from "../../transport/fake-transport.ts";
 import { SettingsApp } from "../settings-app.tsx";
-import { commandExample, refusalOf } from "./mcp-tools-refusal.ts";
-import { FakeTools, local } from "./tools-fake.ts";
+import { errorWords } from "@clauseo/components/lib/words-errors.ts";
+import { importLine, refusalOf, type Place } from "./mcp-tools-refusal.ts";
+import { FakeTools, local, type FakeImports, type FakeView } from "./tools-fake.ts";
 import {
   fileName,
   hostOf,
+  isCommand,
   isFullPath,
+  localDetail,
   provideTools,
   REMOTE_TOOLS,
-  type McpToolsError,
-  type McpToolsView,
+  MCP_ERROR_CODES,
+  type McpErrorCode,
 } from "./tools-model.ts";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -33,9 +36,9 @@ const SETTINGS: Settings = {
 };
 
 const PLAIN =
-  "A tool runs on this computer. It can reach anything your account here can: your files, your programs and the internet.";
+  "Tools run on this computer with the same access you have: your files, your programs and the internet. Add only tools you trust.";
 
-const THREE: McpToolsView = {
+const THREE: FakeView = {
   control: "lawyer",
   servers: [
     local("court-diary", "/opt/homebrew/bin/npx", { args: ["-y", "court-diary-mcp"] }),
@@ -52,7 +55,7 @@ afterEach(async () => {
   rig = null;
 });
 
-async function mount(tools: FakeTools | null) {
+async function mount(tools: FakeTools | null, { safe = false }: { safe?: boolean } = {}) {
   history.replaceState(null, "", "/settings.html#tools");
   const transport = new FakeTransport({
     next: {
@@ -63,6 +66,8 @@ async function mount(tools: FakeTools | null) {
     },
   });
   if (tools !== null) provideTools(transport, tools);
+  // a build with the Safe workspace: the transport carries its wire, as sections.tsx reads it
+  if (safe) Object.defineProperty(transport, "protectionWire", { value: true });
   const store = connectDisplay(transport).store;
   const el = document.createElement("div");
   document.body.append(el);
@@ -133,13 +138,13 @@ test("without the host's commands the section doesn't show", async () => {
   expect(rig.nav()).not.toContain("Tools");
 });
 
-test("the list: each tool's name and its program's file name, the plain line, the Safe workspace's line", async () => {
+test("the list: each tool's name and its detail, the plain line; no Safe workspace line in a build without it", async () => {
   rig = await mount(new FakeTools(THREE));
   expect(rig.nav()).toContain("Tools");
   expect(rig.el.querySelector("h2")?.textContent).toBe("Tools");
   expect(rig.text()).toContain(PLAIN);
-  expect(rig.text()).toContain("Not used in the Safe workspace.");
-  expect(rig.rows()).toEqual(["court-diarynpx", "filingsfilings-server", "notesuvx"]);
+  expect(rig.text()).not.toContain("Not used in the Safe workspace.");
+  expect(rig.rows()).toEqual(["court-diarycourt-diary-mcp", "filingsfilings-server", "notesuvx"]);
   const switches = [...rig.pane().querySelectorAll('[role="switch"]')];
   expect(switches.map((s) => s.getAttribute("aria-checked"))).toEqual(["true", "false", "true"]);
   expect(switches.map((s) => s.getAttribute("aria-label"))).toEqual([
@@ -149,6 +154,13 @@ test("the list: each tool's name and its program's file name, the plain line, th
   ]);
   expect(rig.has("Edit")).toBe(true);
   expect(rig.has("Add a tool")).toBe(true);
+});
+
+test("the Safe workspace's line shows where the build has the Safe workspace", async () => {
+  rig = await mount(new FakeTools(THREE), { safe: true });
+  expect(rig.q('[data-testid="tools-safe-note"]')?.textContent).toBe(
+    "Not used in the Safe workspace.",
+  );
 });
 
 test("empty: one line and Add a tool", async () => {
@@ -193,7 +205,6 @@ test("add: name, full path, arguments one per line, a new value; the list shows 
         kind: "local",
         command: "/opt/homebrew/bin/npx",
         args: ["-y", "court-diary-mcp"],
-        url: null,
         env: [{ name: "DIARY_TOKEN", value: { set: "(set)" } }],
         headers: [],
         enabled: true,
@@ -202,7 +213,7 @@ test("add: name, full path, arguments one per line, a new value; the list shows 
   ]);
   expect(fake.holds("court-diary", "env", "DIARY_TOKEN")).toBe(true);
   expect(rig.q('[data-testid="tools-form"]')).toBeNull();
-  expect(rig.rows()).toEqual(["court-diarynpx"]);
+  expect(rig.rows()).toEqual(["court-diarycourt-diary-mcp"]);
   expect(document.activeElement?.getAttribute("data-tool-edit")).toBe("court-diary");
 });
 
@@ -245,7 +256,7 @@ test("edit with saved values: one kept, one replaced, one removed; no saved valu
   await rig.click(inRow("REMOVE_ME", "Remove"));
   await rig.save();
   expect(fake.saves.at(-1)?.server.env).toEqual([
-    { name: "KEEP_ME", value: { keep: true } },
+    { name: "KEEP_ME", value: { keep: {} } },
     { name: "REPLACE_ME", value: { set: "(set)" } },
   ]);
   expect(fake.saves.at(-1)?.previousName).toBe("notes");
@@ -264,55 +275,65 @@ test("Replace left empty keeps the saved value", async () => {
   await rig.press("Edit");
   await rig.press("Replace");
   await rig.save();
-  expect(fake.saves.at(-1)?.server.env).toEqual([{ name: "TOKEN", value: { keep: true } }]);
+  expect(fake.saves.at(-1)?.server.env).toEqual([{ name: "TOKEN", value: { keep: {} } }]);
 });
 
-test("a bare program name: the form says to use the full path, with an example, and sends nothing", async () => {
+test("a bare program name is saved as typed; one not found, and a relative path, are refused under Command", async () => {
   const fake = new FakeTools({ control: "lawyer", servers: [] });
   rig = await mount(fake);
   await rig.press("Add a tool");
+  // the help is quiet until a refusal stands in its place
+  expect(rig.text()).toContain("A program name such as npx, or its full path.");
+  expect(rig.errors()).toEqual([]);
   await rig.type(rig.field("tools-name"), "diary");
-  await rig.type(rig.field("tools-command"), "npx");
+  await rig.type(rig.field("tools-command"), "bin/server");
   await rig.save();
   expect(fake.saves).toEqual([]);
-  // the example is this computer's system's (the test's display is Linux's)
-  expect(rig.errors()).toEqual([
-    `Use the program's full path, such as ${commandExample(document.documentElement.dataset["platform"] ?? "")}.`,
-  ]);
-  expect(rig.errors()[0]).toMatch(/^Use the program's full path, such as \/.+\/npx\.$/);
-  expect(rig.field("tools-command").getAttribute("aria-invalid")).toBe("true");
+  expect(rig.errors()).toEqual(["Use a program name or its full path."]);
+  const command = rig.field("tools-command");
+  expect(command.getAttribute("aria-invalid")).toBe("true");
+  const said = document.getElementById(command.getAttribute("aria-describedby") ?? "");
+  expect(said?.textContent).toBe("Use a program name or its full path.");
+  expect(said?.classList.contains("set-tools-error")).toBe(true);
+  expect(said?.querySelector("svg")).not.toBeNull();
+  expect(rig.text()).not.toContain("A program name such as npx, or its full path.");
+  await rig.type(command, "court-diary-server");
+  await rig.save();
+  expect(rig.errors()).toEqual(["Clauseo couldn't find court-diary-server on this computer."]);
+  await rig.type(command, "npx");
+  await rig.save();
+  expect(fake.saves.at(-1)?.server.command).toBe("npx");
+  expect(rig.rows()).toEqual(["diarynpx"]);
 });
 
 test("each refusal the host sends shows in its place, in its words", async () => {
-  const cases: [McpToolsError, string][] = [
-    ["nameEmpty", "Give the tool a name."],
-    ["nameTaken", "That name can't be used. Choose another."],
-    ["nameReserved", "That name can't be used. Choose another."],
-    ["nameInvalid", "Use letters, numbers, - and _ only."],
-    ["commandNotAbsolute", "Use the program's full path, such as /opt/homebrew/bin/npx."],
-    ["urlInvalid", "Use a full address, such as https://example.com/mcp."],
-    ["envNameInvalid", "Use letters, numbers, - and _ only."],
-    ["headerNameInvalid", "Use letters, numbers, - and _ only."],
-    ["lockedByFirm", "Your firm manages tools on this computer."],
-    ["secretStoreFailed", "Clauseo couldn't save that setting. Your settings are as they were."],
+  const cases: [McpErrorCode, Place, string][] = [
+    ["mcp.name_empty", "name", "Give the tool a name."],
+    ["mcp.name_taken", "name", "That name can't be used. Choose another."],
+    ["mcp.name_reserved", "name", "That name can't be used. Choose another."],
+    ["mcp.name_invalid", "name", "Use letters, numbers, - and _ only."],
+    ["mcp.command_invalid", "command", "Use a program name or its full path."],
+    ["mcp.command_not_found", "command", "Clauseo couldn't find uvx on this computer."],
+    ["mcp.url_invalid", "url", "Use a full address, such as https://tools.example.com/mcp."],
+    ["mcp.env_name_invalid", "env", "Use letters, numbers and _ only."],
+    ["mcp.header_name_invalid", "headers", "Use letters, numbers, - and _ only."],
+    ["settings.locked", "form", "Your firm manages tools on this computer."],
+    [
+      "mcp.secret_store_failed",
+      "form",
+      "Clauseo couldn't save that setting. Your settings are as they were.",
+    ],
+    [
+      "command.invalid",
+      "form",
+      "Clauseo couldn't save that setting. Your settings are as they were.",
+    ],
+    ["mcp.server_unknown", "form", errorWords("en", "mcp.server_unknown")],
   ];
-  const places: Record<McpToolsError, string> = {
-    nameEmpty: "name",
-    nameTaken: "name",
-    nameReserved: "name",
-    nameInvalid: "name",
-    commandNotAbsolute: "command",
-    urlInvalid: "url",
-    envNameInvalid: "env",
-    headerNameInvalid: "headers",
-    lockedByFirm: "form",
-    secretStoreFailed: "form",
-  };
-  for (const [code, words] of cases)
-    expect(refusalOf("en", "mac", code)).toEqual({ place: places[code], words });
-  expect(refusalOf("en", "windows", "commandNotAbsolute").words).toBe(
-    "Use the program's full path, such as C:\\Program Files\\nodejs\\npx.cmd.",
-  );
+  // every code the host may answer has its place
+  expect(cases.map(([code]) => code).sort()).toEqual([...MCP_ERROR_CODES].sort());
+  for (const [code, place, words] of cases)
+    expect(refusalOf("en", code, "uvx")).toEqual({ place, words });
   // in the form: each refusal the host answers a well-formed save with, under its field
   const fake = new FakeTools({ control: "lawyer", servers: [] });
   rig = await mount(fake);
@@ -320,18 +341,18 @@ test("each refusal the host sends shows in its place, in its words", async () =>
   await rig.type(rig.field("tools-name"), "diary");
   await rig.type(rig.field("tools-command"), "/opt/homebrew/bin/npx");
   for (const code of [
-    "nameTaken",
-    "envNameInvalid",
-    "secretStoreFailed",
-    "lockedByFirm",
+    "mcp.name_taken",
+    "mcp.env_name_invalid",
+    "mcp.secret_store_failed",
+    "settings.locked",
   ] as const) {
     fake.refuseNext = code;
     await rig.save();
-    expect(rig.errors()).toEqual([refusalOf("en", "mac", code).words]);
+    expect(rig.errors()).toEqual([refusalOf("en", code, "/opt/homebrew/bin/npx").words]);
     expect(rig.q('[data-testid="tools-form"]')).not.toBeNull();
   }
   // the name field carries its refusal
-  fake.refuseNext = "nameReserved";
+  fake.refuseNext = "mcp.name_reserved";
   await rig.save();
   expect(rig.field("tools-name").getAttribute("aria-invalid")).toBe("true");
 });
@@ -350,7 +371,7 @@ test("Remove asks first; Cancel keeps the tool, Remove sends one remove", async 
   await rig.click(removeOf("filings"));
   await rig.click(document.querySelector('[data-testid="tools-remove-ok"]'));
   expect(fake.removed).toEqual(["filings"]);
-  expect(rig.rows()).toEqual(["court-diarynpx", "notesuvx"]);
+  expect(rig.rows()).toEqual(["court-diarycourt-diary-mcp", "notesuvx"]);
 });
 
 test("Escape and Cancel leave the form without saving, focus back where it was", async () => {
@@ -374,8 +395,8 @@ test("Escape and Cancel leave the form without saving, focus back where it was",
   expect(fake.saves).toEqual([]);
 });
 
-test("firmList: the list read-only with the lock's treatment, and the firm's line", async () => {
-  rig = await mount(new FakeTools({ ...THREE, control: "firmList" }));
+test("firm_list: the list read-only with the lock's treatment, and the firm's line", async () => {
+  rig = await mount(new FakeTools({ ...THREE, control: "firm_list" }));
   expect(rig.text()).toContain("Your firm set these tools.");
   expect(rig.rows().length).toBe(3);
   expect(rig.has("Edit")).toBe(false);
@@ -388,8 +409,8 @@ test("firmList: the list read-only with the lock's treatment, and the firm's lin
   expect(rig.pane().querySelectorAll(".set-tools-row[data-disabled]").length).toBe(3);
 });
 
-test("firmManaged: one line and no list", async () => {
-  rig = await mount(new FakeTools({ ...THREE, control: "firmManaged" }));
+test("firm_managed: one line and no list", async () => {
+  rig = await mount(new FakeTools({ ...THREE, control: "firm_managed" }));
   expect(rig.q('[data-testid="tools-section"]')?.textContent).toBe(
     "Your firm manages tools on this computer.",
   );
@@ -418,15 +439,15 @@ test("REMOTE_TOOLS off: adding offers no address; a preview turns the address fo
   await rig.save();
   expect(fake.saves.at(-1)?.server).toMatchObject({
     kind: "remote",
-    command: null,
     url: "https://mcp.example.com/research",
     headers: [{ name: "Authorization", value: { set: "(set)" } }],
     env: [],
   });
+  expect(fake.saves.at(-1)?.server).not.toHaveProperty("command");
   expect(rig.rows()).toEqual(["researchmcp.example.com"]);
 });
 
-test("the model's helpers: full paths, file names, hosts, the example per system", () => {
+test("the model's helpers: full paths, commands, file names, hosts", () => {
   expect(isFullPath("/opt/homebrew/bin/npx")).toBe(true);
   expect(isFullPath("C:\\Program Files\\nodejs\\npx.cmd")).toBe(true);
   expect(isFullPath("\\\\server\\tools\\run.exe")).toBe(true);
@@ -436,5 +457,90 @@ test("the model's helpers: full paths, file names, hosts, the example per system
   expect(fileName("/usr/local/bin/uvx")).toBe("uvx");
   expect(hostOf("https://mcp.example.com:8443/x")).toBe("mcp.example.com:8443");
   expect(hostOf("not an address")).toBe("not an address");
-  expect(commandExample("linux")).toBe("/usr/bin/npx");
+  expect(isCommand("npx")).toBe(true);
+  expect(isCommand("C:\\Program Files\\nodejs\\npx.cmd")).toBe(true);
+  expect(isCommand("bin/server")).toBe(false);
+  expect(isCommand("bin\\server.exe")).toBe(false);
+  expect(isCommand("")).toBe(false);
+});
+
+test("the list's detail: a launcher's first argument that isn't a flag, else the program's file name", () => {
+  expect(localDetail("/opt/homebrew/bin/npx", ["-y", "court-diary-mcp"])).toBe("court-diary-mcp");
+  expect(localDetail("npx", ["-y", "@modelcontextprotocol/server-filesystem", "/Users/r"])).toBe(
+    "server-filesystem",
+  );
+  expect(localDetail("C:\\Program Files\\nodejs\\npx.cmd", ["--yes", "docket-mcp"])).toBe(
+    "docket-mcp",
+  );
+  expect(localDetail("uvx", ["notes-mcp", "--folder", "/Users/r"])).toBe("notes-mcp");
+  expect(localDetail("/usr/bin/python3", ["-m", "notes_server"])).toBe("notes_server");
+  expect(localDetail("node", ["/Users/r/mcp/pdf-tools/index.js"])).toBe("index.js");
+  expect(localDetail("docker", ["run", "-i", "--rm", "-e", "TOKEN=x", "ghcr.io/acme/mcp"])).toBe(
+    "mcp",
+  );
+  expect(localDetail("pnpm", ["dlx", "court-diary-mcp"])).toBe("court-diary-mcp");
+  for (const launcher of ["bunx", "pnpx", "python", "deno"])
+    expect(localDetail(launcher, ["--flag", "the-server"])).toBe("the-server");
+  // a launcher with nothing named, and any other program: its own file name
+  expect(localDetail("/usr/local/bin/uvx", [])).toBe("uvx");
+  expect(localDetail("/Users/r/tools/filings-server", ["--port", "9"])).toBe("filings-server");
+});
+
+const IMPORTS: FakeImports = {
+  claudeDesktop: {
+    add: [
+      local("legal-citations", "uvx", { args: ["legal-citations-mcp"] }),
+      local("pdf-tools", "node"),
+    ],
+    skip: ["filesystem"],
+  },
+  codex: { add: [local("docket", "npx", { args: ["-y", "docket-mcp"] })], skip: [] },
+};
+
+test("import leads: one button per app found, singular for one; Add a tool secondary; none when nothing is found", async () => {
+  rig = await mount(new FakeTools({ control: "lawyer", servers: [] }, { imports: IMPORTS }));
+  const imports = () =>
+    [...rig!.pane().querySelectorAll('[data-testid="tools-imports"] button')].map(
+      (b) => b.textContent,
+    );
+  expect(imports()).toEqual(["Import 3 tools from Claude Desktop", "Import 1 tool from Codex"]);
+  expect(rig.q('[data-testid="tools-empty"]')).not.toBeNull();
+  expect(rig.q('[data-testid="tools-add"]')?.className).not.toBe(
+    rig.q('[data-testid="tools-import-codex"]')?.className,
+  );
+  await rig.unmount();
+  rig = await mount(new FakeTools(THREE));
+  expect(rig.q('[data-testid="tools-imports"]')).toBeNull();
+  await rig.unmount();
+  rig = await mount(new FakeTools({ ...THREE, control: "firm_list" }, { imports: IMPORTS }));
+  expect(rig.q('[data-testid="tools-imports"]')).toBeNull();
+});
+
+test("an import: one command, then one line, the left-out names without reasons; the list gains the rest", async () => {
+  const fake = new FakeTools(THREE, { imports: IMPORTS });
+  rig = await mount(fake);
+  await rig.click(rig.q('[data-testid="tools-import-claudeDesktop"]'));
+  expect(fake.imported).toEqual(["claudeDesktop"]);
+  expect(rig.q('[data-testid="tools-imported"]')?.textContent).toBe(
+    "Imported 2 tools. 1 couldn't be imported: filesystem.",
+  );
+  expect(rig.rows()).toContain("legal-citationslegal-citations-mcp");
+  // the source is used up; the other stays
+  expect(rig.q('[data-testid="tools-import-claudeDesktop"]')).toBeNull();
+  await rig.click(rig.q('[data-testid="tools-import-codex"]'));
+  expect(rig.q('[data-testid="tools-imported"]')?.textContent).toBe("Imported 1 tool.");
+  expect(rig.q('[data-testid="tools-imports"]')).toBeNull();
+});
+
+test("the import line's forms", () => {
+  expect(importLine("en", { imported: ["a", "b", "c"], skipped: [] })).toBe("Imported 3 tools.");
+  expect(
+    importLine("en", {
+      imported: [],
+      skipped: [
+        { name: "a", reason: "alreadyAdded" },
+        { name: "b", reason: "unreadable" },
+      ],
+    }),
+  ).toBe("2 couldn't be imported: a and b.");
 });

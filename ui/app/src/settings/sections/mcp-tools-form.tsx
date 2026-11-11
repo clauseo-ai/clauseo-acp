@@ -10,9 +10,9 @@ import { cw } from "@clauseo/components/lib/words-connectors.ts";
 import { mt } from "@clauseo/components/lib/words-matters.ts";
 import { mw, type McpToolsKey } from "@clauseo/components/lib/words-mcp-tools.ts";
 import { say, ui } from "@clauseo/components/lib/words-ui.ts";
+import { IconFailed } from "@clauseo/components/icons/icons.tsx";
 import { Button } from "@clauseo/components/ui/button.tsx";
 import {
-  fieldError,
   fieldLabel,
   fieldNote,
   settingLabel,
@@ -30,20 +30,48 @@ import {
   type ReactNode,
 } from "react";
 import {
-  isFullPath,
-  type McpServerDraft,
+  ENV_NAME,
+  HEADER_NAME,
+  isCommand,
+  type McpErrorCode,
+  type McpSecretEdit,
+  type McpServerEdit,
   type McpServerView,
-  type McpToolsError,
-  type SecretEdit,
   type ToolsAnswer,
 } from "./tools-model.ts";
-import { commandExample, refusalOf, URL_EXAMPLE, type Place } from "./mcp-tools-refusal.ts";
+import { refusalOf, URL_EXAMPLE, type Place } from "./mcp-tools-refusal.ts";
 
 /** One secret's row: saved before (its value kept unless replaced), or new. */
 type Row = { key: number; name: string; saved: boolean; replacing: boolean };
 
 /** The form field holding a row's new value. */
 const valueField = (list: string, key: number) => `${list}-${key}`;
+
+/** A refusal's line: the attention glyph, then the words in the error's weight, so it never reads as the quiet hint
+ * it replaces. */
+function ErrorLine({
+  id,
+  words,
+  status = false,
+}: {
+  id?: string;
+  words: string;
+  status?: boolean;
+}) {
+  return (
+    <p
+      id={id}
+      className="set-tools-error"
+      role={status ? "status" : undefined}
+      data-testid="tools-error"
+    >
+      <span className="set-tools-error-icon" aria-hidden="true">
+        <IconFailed size={14} />
+      </span>
+      <span>{say(words)}</span>
+    </p>
+  );
+}
 
 /** A field: its label, the control, and under it its line, or its refusal in the line's place. */
 function FieldBox({
@@ -69,14 +97,14 @@ function FieldBox({
         describedBy: line === undefined ? undefined : `${id}-line`,
         invalid: error !== undefined,
       })}
-      {line !== undefined && (
-        <p
-          id={`${id}-line`}
-          className={error === undefined ? fieldNote : fieldError}
-          data-testid={error === undefined ? undefined : "tools-error"}
-        >
-          {say(line)}
-        </p>
+      {error !== undefined ? (
+        <ErrorLine id={`${id}-line`} words={error} />
+      ) : (
+        note !== undefined && (
+          <p id={`${id}-line`} className={fieldNote}>
+            {say(note)}
+          </p>
+        )
       )}
     </div>
   );
@@ -100,6 +128,10 @@ function Secrets({
 }) {
   const { lang } = useDisplay();
   const head = useId();
+  const errorId = useId();
+  // under a refusal, the new names that break the rule carry it: aria-invalid, and the refusal as their description
+  const wrong = (name: string) =>
+    error !== undefined && !(list === "env" ? ENV_NAME : HEADER_NAME).test(name);
   // the field to focus once it renders: a new row's name, or a saved row's new value after Replace
   const focusNext = useRef<string | null>(null);
   const focusOnce = (id: string) => (el: HTMLInputElement | null) => {
@@ -144,6 +176,8 @@ function Secrets({
               spellCheck={false}
               autoComplete="off"
               value={row.name}
+              aria-invalid={wrong(row.name) || undefined}
+              aria-describedby={wrong(row.name) ? errorId : undefined}
               ref={focusOnce(`name-${row.key}`)}
               onChange={(e) => update(row.key, { name: e.currentTarget.value })}
               data-testid="tools-secret-name"
@@ -183,11 +217,7 @@ function Secrets({
           </Button>
         </div>
       ))}
-      {error !== undefined && (
-        <p className={fieldError} data-testid="tools-error">
-          {say(error)}
-        </p>
-      )}
+      {error !== undefined && <ErrorLine id={errorId} words={error} />}
       <div>
         <Button
           kind="quiet"
@@ -217,12 +247,12 @@ export function ToolForm({
   editing: McpServerView | null;
   /** Whether adding may choose a tool at an address (REMOTE_TOOLS). */
   remote: boolean;
-  save: (previousName: string | null, draft: McpServerDraft) => Promise<ToolsAnswer>;
+  save: (previousName: string | null, draft: McpServerEdit) => Promise<ToolsAnswer>;
   /** Saved, under this name. */
   onDone: (name: string) => void;
   onCancel: () => void;
 }) {
-  const { lang, platform } = useDisplay();
+  const { lang } = useDisplay();
   // a new row's key: past every key the rows started with (env from 0, headers from 10,000)
   const counter = useRef(20_000);
   // the form opens on the lawyer's press, at its first field
@@ -243,7 +273,7 @@ export function ToolForm({
   const errorAt = (place: Place) => (refusal?.place === place ? refusal.words : undefined);
   const m = (key: McpToolsKey, slots?: Record<string, string>) => mw(lang, key, slots);
 
-  const edits = (rows: Row[], list: "env" | "header", data: FormData): SecretEdit[] =>
+  const edits = (rows: Row[], list: "env" | "header", data: FormData): McpSecretEdit[] =>
     rows
       .filter((r) => r.name.trim() !== "")
       .map((r) => {
@@ -251,7 +281,7 @@ export function ToolForm({
         const value = typeof typed === "string" ? typed : "";
         return {
           name: r.name.trim(),
-          value: r.saved && value === "" ? { keep: true } : { set: value },
+          value: r.saved && value === "" ? { keep: {} } : { set: value },
         };
       });
 
@@ -261,20 +291,20 @@ export function ToolForm({
     const data = new FormData(event.currentTarget);
     const trimmed = name.trim();
     // what the form can tell before the host: a missing name, a program named without its path
-    const early: McpToolsError | null =
+    const early: McpErrorCode | null =
       trimmed === ""
-        ? "nameEmpty"
-        : kind === "local" && !isFullPath(command.trim())
-          ? "commandNotAbsolute"
+        ? "mcp.name_empty"
+        : kind === "local" && !isCommand(command.trim())
+          ? "mcp.command_invalid"
           : null;
     if (early !== null) {
-      setRefusal(refusalOf(lang, platform, early));
+      setRefusal(refusalOf(lang, early));
       return;
     }
-    const draft: McpServerDraft = {
+    const draft: McpServerEdit = {
       name: trimmed,
       kind,
-      command: kind === "local" ? command.trim() : null,
+      ...(kind === "local" ? { command: command.trim() } : { url: url.trim() }),
       args:
         kind === "local"
           ? args
@@ -282,7 +312,6 @@ export function ToolForm({
               .map((a) => a.trim())
               .filter((a) => a !== "")
           : [],
-      url: kind === "remote" ? url.trim() : null,
       env: kind === "local" ? edits(env, "env", data) : [],
       headers: kind === "remote" ? edits(headers, "header", data) : [],
       enabled: editing?.enabled ?? true,
@@ -293,11 +322,11 @@ export function ToolForm({
       (answer) => {
         setSending(false);
         if (answer === null) onDone(trimmed);
-        else setRefusal(refusalOf(lang, platform, answer));
+        else setRefusal(refusalOf(lang, answer, command.trim()));
       },
       () => {
         setSending(false);
-        setRefusal(refusalOf(lang, platform, "secretStoreFailed"));
+        setRefusal(refusalOf(lang, "mcp.secret_store_failed"));
       },
     );
   };
@@ -308,9 +337,7 @@ export function ToolForm({
     onCancel();
   };
 
-  const commandLine = m("Use the program's full path, such as {example}.", {
-    example: commandExample(platform),
-  });
+  const commandLine = m("A program name such as npx, or its full path.");
   const urlLine = m("Use a full address, such as {example}.", { example: URL_EXAMPLE });
   return (
     <form
@@ -431,11 +458,7 @@ export function ToolForm({
           />
         </>
       )}
-      {refusal?.place === "form" && (
-        <p className={fieldError} role="status" data-testid="tools-error">
-          {say(refusal.words)}
-        </p>
-      )}
+      {refusal?.place === "form" && <ErrorLine words={refusal.words} status />}
       <div className="set-cn-actions">
         <Button kind="tone" size="small" type="submit" disabled={sending} data-testid="tools-save">
           {mt(lang, "Save")}

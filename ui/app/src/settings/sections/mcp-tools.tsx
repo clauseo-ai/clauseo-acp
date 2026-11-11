@@ -1,11 +1,13 @@
-// Settings › Tools (UC-169 to UC-189): the lawyer's own MCP servers, called tools. The section's lead says plainly what
-// a tool can reach; under it, while SAFE_WORKSPACE_NOTE holds, that the Safe workspace doesn't use them. Then the list:
-// each tool's name, a quiet detail (its program's file name, or its address's host), its switch, Edit and Remove
-// (through a confirm); or, with none, one line and Add a tool. The form (mcp-tools-form.tsx) stands in the list's
+// Settings › Tools (UC-169 on): the lawyer's own MCP servers, called tools. The section's lead says plainly what a tool
+// can reach; under it, where this build has the Safe workspace, that the Safe workspace doesn't use them. Then one
+// Import button per app found with servers to import, leading, and after an import one line on how it went. Then the
+// list: each tool's name, a quiet detail (the program a launcher runs, else its program's file name, or its address's
+// host), its switch, Edit and Remove (through a confirm); or, with none, one line. Add a tool comes last, secondary
+// while there is something to import. The form (mcp-tools-form.tsx) stands in the list's
 // place while open, and on Save or Cancel focus goes back to the row or the button that opened it. A firm's policy list
 // is read-only with the lock's treatment (its rows greyed, the switches off limits) and says the firm set it; the
-// firm's own MCP shows one line and no list. The view is read as the section opens, after each command and when the
-// window regains focus; every command goes through tools-model.ts's ToolsCommands.
+// firm's own MCP shows one line and no list. The view is the host's, sent at the catch-up and after every change
+// (mcp_tools_changed); every command goes through tools-model.ts's ToolsCommands.
 import { IconCommand } from "@clauseo/components/icons/icons.tsx";
 import { useDisplay } from "@clauseo/components/lib/display.ts";
 import { mt } from "@clauseo/components/lib/words-matters.ts";
@@ -21,15 +23,17 @@ import { settingLabel, settingNote } from "@clauseo/components/ui/recipes-contro
 import { Switch } from "@clauseo/components/ui/switch.tsx";
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import type { SectionContext } from "../sections.tsx";
+import { carriesProtectionWire } from "./workspace-shown.ts";
 import { ToolForm } from "./mcp-tools-form.tsx";
-import { refusalOf } from "./mcp-tools-refusal.ts";
+import { importLine, refusalOf, SOURCE_NAME } from "./mcp-tools-refusal.ts";
 import { Group, PlateRow } from "./parts.tsx";
 import {
-  fileName,
   hostOf,
+  localDetail,
   remoteOffered,
   SAFE_WORKSPACE_NOTE,
   toolsCommandsOf,
+  type ImportSource,
   type McpServerView,
   type McpToolsView,
   type ToolsAnswer,
@@ -41,59 +45,42 @@ type Open = null | { editing: McpServerView | null };
 
 /** A server's quiet detail: its program's file name, or its address's host. */
 const detailOf = (server: McpServerView): string =>
-  server.kind === "remote" ? hostOf(server.url ?? "") : fileName(server.command ?? "");
+  server.kind === "remote"
+    ? hostOf(server.url ?? "")
+    : localDetail(server.command ?? "", server.args);
 
-/** The view over the commands: null before the first answer; an answer stands only while no later read was asked. */
-function viewOver(commands: ToolsCommands) {
-  let view: McpToolsView | null = null;
-  let asked = 0;
-  const listeners = new Set<() => void>();
-  const read = async (): Promise<void> => {
-    const n = (asked += 1);
-    try {
-      const next = await commands.read();
-      if (n !== asked) return;
-      view = next;
-      for (const listener of listeners) listener();
-    } catch {
-      // the view stays as last read
-    }
-  };
-  return {
-    subscribe: (listener: () => void) => {
-      listeners.add(listener);
-      return () => void listeners.delete(listener);
-    },
-    view: () => view,
-    read,
-  };
-}
-
-/** The view, read now, after each command and whenever the window regains focus. */
-function useToolsView(commands: ToolsCommands) {
-  const [over] = useState(() => viewOver(commands));
-  const view = useSyncExternalStore(over.subscribe, over.view, over.view);
-  useEffect(() => {
-    void over.read();
-    const focused = () => void over.read();
-    window.addEventListener("focus", focused);
-    return () => window.removeEventListener("focus", focused);
-  }, [over]);
-  return { view, read: over.read };
+/** The view the host sends (`mcp_tools_changed`): null before the catch-up, then each one as it comes. */
+function useToolsView(commands: ToolsCommands): McpToolsView | null {
+  const [over] = useState(() => {
+    let view: McpToolsView | null = null;
+    return {
+      subscribe: (wake: () => void) =>
+        commands.subscribe((next) => {
+          view = next;
+          wake();
+        }),
+      view: () => view,
+    };
+  });
+  return useSyncExternalStore(over.subscribe, over.view, over.view);
 }
 
 export function McpTools({ ctx }: { ctx: SectionContext }) {
   const commands = toolsCommandsOf(ctx.transport);
   if (commands === null) return null;
-  return <Tools commands={commands} />;
+  return (
+    <Tools commands={commands} safe={SAFE_WORKSPACE_NOTE && carriesProtectionWire(ctx.transport)} />
+  );
 }
 
-function Tools({ commands }: { commands: ToolsCommands }) {
-  const { lang, platform } = useDisplay();
-  const { view, read } = useToolsView(commands);
+function Tools({ commands, safe }: { commands: ToolsCommands; safe: boolean }) {
+  const { lang } = useDisplay();
+  const view = useToolsView(commands);
   const [open, setOpen] = useState<Open>(null);
   const [removing, setRemoving] = useState<string | null>(null);
   const [failed, setFailed] = useState<string | null>(null);
+  const [importedLine, setImportedLine] = useState<string | null>(null);
+  const [importing, setImporting] = useState(false);
   // where focus goes once the list is back: a tool's Edit (its name), or Add a tool ("")
   const back = useRef<string | null>(null);
   const root = useRef<HTMLDivElement>(null);
@@ -110,26 +97,38 @@ function Tools({ commands }: { commands: ToolsCommands }) {
   });
 
   const answered = async (answer: Promise<ToolsAnswer>) => {
-    const refusal = await answer.catch(() => "secretStoreFailed" as const);
-    setFailed(refusal === null ? null : refusalOf(lang, platform, refusal).words);
-    await read();
+    const refusal = await answer.catch(() => "mcp.secret_store_failed" as const);
+    setFailed(refusal === null ? null : refusalOf(lang, refusal).words);
   };
 
   if (view === null) return null;
-  if (view.control === "firmManaged")
+  if (view.control === "firm_managed")
     return (
-      <p className="set-note" data-testid="tools-section" data-control="firmManaged">
+      <p className="set-note" data-testid="tools-section" data-control="firm_managed">
         {say(mw(lang, "Your firm manages tools on this computer."))}
       </p>
     );
-  const firm = view.control === "firmList";
+  const firm = view.control === "firm_list";
+  const mcpImport = commands.mcpImport?.bind(commands);
+  const imports = firm || mcpImport === undefined ? [] : (view.importable ?? []);
+  const importFrom = async (source: ImportSource) => {
+    if (importing) return;
+    setImporting(true);
+    setFailed(null);
+    if (mcpImport === undefined) return;
+    const answer = await mcpImport(source).catch(() => "mcp.secret_store_failed" as const);
+    setImporting(false);
+    if (typeof answer === "object" && "imported" in answer)
+      setImportedLine(importLine(lang, answer));
+    else setFailed(refusalOf(lang, answer).words);
+  };
   const close = (name: string | null) => {
     back.current = name ?? "";
     setOpen(null);
   };
   return (
     <div ref={root} className="set-tools" data-testid="tools-section" data-control={view.control}>
-      {SAFE_WORKSPACE_NOTE && (
+      {safe && (
         <p className="set-note" data-testid="tools-safe-note">
           {say(mw(lang, "Not used in the Safe workspace."))}
         </p>
@@ -140,11 +139,7 @@ function Tools({ commands }: { commands: ToolsCommands }) {
             <ToolForm
               editing={open.editing}
               remote={remoteOffered(commands)}
-              save={async (previousName, draft) => {
-                const answer = await commands.save(previousName, draft);
-                if (answer === null) await read();
-                return answer;
-              }}
+              save={(previousName, draft) => commands.save(previousName, draft)}
               onDone={(name) => {
                 setFailed(null);
                 close(name);
@@ -155,6 +150,32 @@ function Tools({ commands }: { commands: ToolsCommands }) {
         </Group>
       ) : (
         <>
+          {imports.length > 0 && (
+            <div className="set-cn-actions" data-testid="tools-imports">
+              {imports.map(({ source, count }) => (
+                <Button
+                  key={source}
+                  kind="tone"
+                  size="small"
+                  disabled={importing}
+                  data-testid={`tools-import-${source}`}
+                  onClick={() => void importFrom(source)}
+                >
+                  {count === 1
+                    ? mw(lang, "Import 1 tool from {source}", { source: SOURCE_NAME[source] })
+                    : mw(lang, "Import {count} tools from {source}", {
+                        count,
+                        source: SOURCE_NAME[source],
+                      })}
+                </Button>
+              ))}
+            </div>
+          )}
+          {importedLine !== null && (
+            <p className="set-note" role="status" data-testid="tools-imported">
+              {say(importedLine)}
+            </p>
+          )}
           <Group {...(firm ? { note: mw(lang, "Your firm set these tools.") } : {})}>
             {view.servers.length === 0 && (
               <PlateRow>
@@ -217,7 +238,7 @@ function Tools({ commands }: { commands: ToolsCommands }) {
           {!firm && (
             <div>
               <Button
-                kind="tone"
+                kind={imports.length > 0 ? "quiet" : "tone"}
                 size="small"
                 data-testid="tools-add"
                 onClick={() => {
