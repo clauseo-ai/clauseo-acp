@@ -11,6 +11,11 @@ import { render, type Scene } from "./registry-ud1-scene.tsx";
 import { SIGNING_IN } from "./registry-ud1-signin.tsx";
 import * as T from "./registry-ud1-tools.ts";
 import { errorWords, threadWords, type WordsRef } from "./words.ts";
+import { keyRoom } from "./registry-ud2.tsx";
+import { step } from "../testing/stream-script.ts";
+
+/** A turn that failed with agent.auth_required: the key wasn't accepted (UC-147 and UC-148's rooms). */
+const FAILED = step(4, { stop: "failed", failure: "agent.auth_required" });
 
 const CLAUDE: AgentId = "claude-acp";
 const CODEX: AgentId = "codex-acp";
@@ -524,21 +529,14 @@ const UC_KEY_LINE: Entry[] = [
   {
     id: "UC-147",
     words: threadWords("Uses your Anthropic API key"),
-    screen: "first-launch/signin-done",
-    render: render(signed({ method: "api_key" })),
+    screen: "room/composer",
+    render: keyRoom("claude-acp", [FAILED]),
   },
   {
     id: "UC-148",
     words: threadWords("Uses your OpenAI API key"),
-    screen: "first-launch/signin-done",
-    render: render({
-      events: [
-        install(CLAUDE, { missing: { download_bytes: 182_000_000 } }),
-        SIGNED_OUT,
-        install(CODEX, { ready: { version: "0.1.0" } }),
-        signIn(CODEX, { signed_in: { method: "api_key", source: "own", at: AT } }),
-      ],
-    }),
+    screen: "room/composer",
+    render: keyRoom("codex-acp", [FAILED]),
   },
 ];
 
