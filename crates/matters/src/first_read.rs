@@ -49,8 +49,9 @@ impl FirstReads {
 /// The files `old` (the skip record of the last commit) has as skipped that `new` (the walk's
 /// entries, sorted by path bytes) has as read. One read with the size and mtime it was skipped
 /// with is a baseline, one read otherwise changed. A file new to the folder with the size and
-/// mtime of a skipped file the walk no longer finds is that file moved or renamed: changed, with
-/// its reason, so undo keeps it too. `versioned` says whether a path is in the last tree.
+/// mtime of a skipped file, or of a stale one (versioned, cloud-only and not read), the walk no
+/// longer finds is that file moved or renamed: changed, with its reason, so undo keeps it too.
+/// `versioned` says whether a path is in the last tree.
 pub(crate) fn first_reads(
     old: &SkipRecord,
     new: &[CacheEntry],
@@ -61,9 +62,12 @@ pub(crate) fn first_reads(
         return reads;
     }
     let found = |path: &str| find_by_path(new, path, |entry| entry.path.as_str()).is_some();
+    // A skipped file, or a versioned one cloud-only and not read (its content then unknown), that
+    // the walk no longer finds: a new file with its size and mtime is that file moved.
     let vanished: Vec<&SkipEntry> = old
         .skipped
         .iter()
+        .chain(&old.stale)
         .filter(|entry| !found(entry.path.as_str()))
         .collect();
     for entry in new {

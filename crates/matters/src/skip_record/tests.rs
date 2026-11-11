@@ -68,26 +68,31 @@ fn a_path_under_an_unread_folder_is_one_inside_it() {
 }
 
 #[test]
-fn a_record_from_a_newer_writer_reads_what_it_can() {
+fn a_record_with_a_line_that_does_not_read_is_unreadable() {
     assert_eq!(SkipRecord::decode("clauseo-skips 2\nunread Sub\n"), None);
-    let text = "clauseo-skips 1\n\
-                skipped too-deep 3 1.000000000 deep.txt\n\
-                renamed a b\n\
-                skipped cloud-only x 1.0 bad.txt\n\
-                unread /rooted\n";
+    // A reason it does not know is still a skipped file.
+    let unknown = "clauseo-skips 1\nskipped too-deep 3 1.000000000 deep.txt\n";
     assert_eq!(
-        SkipRecord::decode(text),
-        Some(SkipRecord {
-            skipped: vec![SkipEntry {
-                path: MatterPath::new("deep.txt").unwrap(),
-                reason: SkippedFileReason::Unknown,
-                size: 3,
-                mtime: FileTime { secs: 1, nanos: 0 },
-            }],
-            stale: Vec::new(),
-            unread: Vec::new(),
-        })
+        SkipRecord::decode(unknown).map(|record| record.skipped),
+        Some(vec![SkipEntry {
+            path: MatterPath::new("deep.txt").unwrap(),
+            reason: SkippedFileReason::Unknown,
+            size: 3,
+            mtime: FileTime { secs: 1, nanos: 0 },
+        }])
     );
+    for bad in [
+        "renamed a b",
+        "skipped cloud-only x 1.0 bad.txt",
+        "stale 3 nowhen bad.txt",
+        "unread /rooted",
+        "",
+    ] {
+        let text = format!("clauseo-skips 1\nunread Sub\n{bad}\n");
+        assert_eq!(SkipRecord::decode(&text), None, "{bad:?}");
+    }
+    // Every line ends with a line break, the last too.
+    assert_eq!(SkipRecord::decode("clauseo-skips 1\nunread Sub"), None);
 }
 
 #[test]

@@ -165,7 +165,8 @@ fn undo_never_deletes_or_overwrites_a_file_that_was_there_before_the_step() {
         }
     }
     // The `-same` files are baselines, no change at all; the `-changed` ones, and every file of
-    // the folder that did not list (nothing known of them, so both added), are kept.
+    // the folder that did not list (nothing known of them, so both added), are kept. That folder
+    // lists at the end, so a file the step added may have come out of it: `new.txt` is kept too.
     let names: Vec<(&str, bool)> = steps
         .iter()
         .map(|step| (step.path.as_str(), step.unversioned.is_some()))
@@ -176,7 +177,7 @@ fn undo_never_deletes_or_overwrites_a_file_that_was_there_before_the_step() {
             ("big-changed.txt", true),
             ("cloud-changed.txt", true),
             ("gone.txt", false),
-            ("new.txt", false),
+            ("new.txt", true),
             ("read.txt", false),
             ("unread/changed.txt", true),
             ("unread/same.txt", true),
@@ -189,10 +190,7 @@ fn undo_never_deletes_or_overwrites_a_file_that_was_there_before_the_step() {
         .iter()
         .find(|step| step.path.as_str() == "new.txt")
         .unwrap();
-    assert!(
-        matches!(new.ops.as_slice(), [Op::Delete(path)] if path.as_str() == "new.txt"),
-        "a file the step added is still deleted"
-    );
+    assert_eq!(new.unversioned, Some(SkippedFileReason::UnreadFolder));
 }
 
 /// The guard against a path the step's first checkpoint holds: a deletion of one is kept, by its
@@ -218,19 +216,44 @@ fn a_deletion_of_a_path_the_first_tree_holds_is_kept() {
     let there = BTreeMap::new();
     let delete = |text: &str| [Op::Delete(memo(text))];
     assert_eq!(
-        kept_because(&delete("memo.txt"), &there, Some(&start), &before),
+        kept_because(&delete("memo.txt"), &there, Some(&start), false, &before),
         Some(SkippedFileReason::Unknown)
     );
     assert_eq!(
-        kept_because(&delete("Memo.txt"), &there, Some(&start), &before),
+        kept_because(&delete("Memo.txt"), &there, Some(&start), false, &before),
         None
     );
     assert_eq!(
-        kept_because(&delete("new.txt"), &there, Some(&start), &before),
+        kept_because(&delete("new.txt"), &there, Some(&start), false, &before),
         None
     );
     assert_eq!(
-        kept_because(&delete("new.txt"), &there, None, &before),
+        kept_because(&delete("new.txt"), &there, None, false, &before),
         Some(SkippedFileReason::Unknown)
     );
+    // A folder that did not list at the start lists, or is gone, at the end.
+    assert_eq!(
+        kept_because(&delete("new.txt"), &there, Some(&start), true, &before),
+        Some(SkippedFileReason::UnreadFolder)
+    );
+}
+
+/// When a folder that did not list at a step's start counts as opened by its end: it lists, or
+/// is gone; not while it, or a folder above it, still does not list.
+#[test]
+fn an_unread_folder_that_lists_or_is_gone_at_the_end_opens_a_gap() {
+    use super::unread_opened;
+    use crate::skip_record::SkipRecord;
+
+    let unread = |folders: &[&str]| SkipRecord {
+        unread: folders.iter().map(|folder| (*folder).to_owned()).collect(),
+        ..SkipRecord::default()
+    };
+    let start = unread(&["Sub/inner"]);
+    assert!(!unread_opened(&start, Some(&unread(&["Sub/inner"]))));
+    assert!(!unread_opened(&start, Some(&unread(&["Sub"]))));
+    assert!(unread_opened(&start, Some(&unread(&[]))));
+    assert!(unread_opened(&start, Some(&unread(&["Other"]))));
+    assert!(unread_opened(&start, None));
+    assert!(!unread_opened(&unread(&[]), Some(&unread(&[]))));
 }

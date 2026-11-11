@@ -1,6 +1,7 @@
-//! Undo of a step whose checkpoints a Clauseo from before skip records wrote: what was in the
-//! folder at the step's start is unknown, so no file the step added is deleted (each is kept,
-//! with an unknown reason), not even one the agent made. Modified files are put back as ever.
+//! Undo of a step whose first checkpoint has no skip record it can read (a Clauseo from before
+//! records wrote it, or its record has a line that does not read): what was in the folder at the
+//! step's start is unknown, so no file the step added is deleted (each is kept, with an unknown
+//! reason), not even one the agent made. Modified files are put back as ever.
 
 use std::collections::HashSet;
 use std::io::Write as _;
@@ -15,6 +16,7 @@ use clauseo_protocol::{
 use super::{step, undo};
 use crate::checkpoint::{Core, Spec};
 use crate::history::{GixStore, HistoryStore};
+use crate::skip_record;
 use crate::test_dir::TestDir;
 use crate::trailers::before_marker;
 use crate::types::{Limits, Retention, Settings, TimelineEntry, UndoRequest};
@@ -170,4 +172,67 @@ fn an_old_step_keeps_every_added_file_and_says_why_is_unknown() {
         std::fs::read(folder.join("new.txt")).unwrap(),
         b"made by the agent"
     );
+}
+
+#[test]
+fn a_step_whose_start_record_does_not_read_keeps_every_added_file() {
+    let dir = TestDir::new("undo-corrupt-record");
+    let folder = dir.path().join("matter");
+    write::create_dir_all(&folder).unwrap();
+    let git_dir = dir.path().join("root/m/history.git");
+    let probe = Arc::new(Probe::default());
+    let settings = Settings {
+        matters_root: dir.path().join("root"),
+        refused_trees: Vec::new(),
+        limits: Limits::DEFAULT,
+        retention: Retention::KeepAll,
+        probe: Arc::clone(&probe) as Arc<dyn PlaceholderProbe + Send + Sync>,
+    };
+    let mut core = Core::load(GixStore::create(&git_dir, &folder).unwrap()).unwrap();
+    put(&folder, "read.txt", b"read v1");
+    put(&folder, "notes.txt", b"the lawyer's notes");
+    probe
+        .marked
+        .lock()
+        .unwrap()
+        .insert(folder.join("notes.txt"));
+    // The record of the step's start has a line no reader can read.
+    skip_record::corrupt::write(|| core.take(&folder, &settings, &spec(1))).unwrap();
+    assert_eq!(core.skip_record(cid(1)), None);
+
+    put(&folder, "new.txt", b"made by the agent");
+    put(&folder, "read.txt", b"read v2");
+    core.take(&folder, &settings, &spec(2)).unwrap();
+    let decisions: Vec<FileDecision> = ["new.txt", "read.txt"]
+        .iter()
+        .map(|path| FileDecision {
+            path: mpath(path),
+            choice: FileChoice::Undo,
+        })
+        .collect();
+    let request = UndoRequest {
+        before: cid(1),
+        after: cid(2),
+        decisions: &decisions,
+        thread: None,
+        turn: None,
+        outside_edits: cid(3),
+        checkpoint: cid(4),
+        at: at(4),
+    };
+    let undone = undo(&mut core, &folder, &settings, &request).unwrap();
+    assert_eq!(
+        undone.unversioned,
+        [SkippedFile {
+            path: mpath("new.txt"),
+            reason: SkippedFileReason::Unknown,
+        }]
+    );
+    assert_eq!(undone.restored, [mpath("read.txt")]);
+    assert_eq!(undone.deleted, [] as [MatterPath; 0]);
+    assert_eq!(
+        std::fs::read(folder.join("new.txt")).unwrap(),
+        b"made by the agent"
+    );
+    assert_eq!(std::fs::read(folder.join("read.txt")).unwrap(), b"read v1");
 }

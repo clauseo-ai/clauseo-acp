@@ -123,8 +123,9 @@ documents with 3 changed).
     `skipped <reason> <size> <mtime seconds>.<nanoseconds> <path>` is a file not versioned (over
     the cap, or cloud-only and never versioned), with its size and mtime as the stat cache keeps
     them; `unread <folder>` is a folder that did not list (not downloaded, permission denied), of
-    which nothing is known. The path runs to the end of the line (no control character). Readers
-    skip a line they do not know, and read a header they do not know as no record. A commit
+    which nothing is known. The path runs to the end of the line (no control character). A header,
+    or any line, a reader cannot read makes the whole record unreadable (a path left out would look
+    absent); a reason it does not know reads as unknown. A commit
     without `Clauseo-Skips`, or whose record does not read, has no record: nothing about its
     walk's skips is known.
   - **Reuse.** A checkpoint reuses the last one only when the tree **and** the record are
@@ -133,8 +134,9 @@ documents with 3 changed).
   - **Files read for the first time.** A file the last commit's record (for a tip with none, the
     stat cache) has as skipped that a walk reads was there before: never an added file. A file new
     to the folder with the size and mtime of a skipped file the walk no longer finds is that file
-    moved or renamed, and counts the same. Writers add one line per such file after
-    `Clauseo-Skips`, each list sorted by path bytes:
+    moved or renamed, and counts the same; so does one with the size and mtime of a `stale` file
+    the walk no longer finds. Writers add one line per such file after `Clauseo-Skips`, each list
+    sorted by path bytes:
 
     ```
     Clauseo-Baseline: cloud-only notes.txt
@@ -150,21 +152,25 @@ documents with 3 changed).
     when it downloads a file is assumed, not verified (OneDrive included); one that does not makes
     the file `Clauseo-Was-Skipped` instead, listed but still kept by undo. A versioned file that
     was cloud-only and not read (`stale` in the record), read with the size and mtime it had then,
-    is a baseline too: its content is what the folder held (a colleague's edit in the cloud, say). `Clauseo-Was-Skipped` is read
-    otherwise, or moved: a change (listed as added, never a rename's new name).
+    is a baseline too: its content is what the folder held (a colleague's edit in the cloud, say).
+    `Clauseo-Was-Skipped` is read otherwise, or moved: a change (listed as added, never a rename's
+    new name).
   - **Diffs.** Any diff of two checkpoints (a step's, undo's, "edited since", a compare either
     way round) reads the first-read trailers of the checkpoints after the earlier up to the later:
     each baseline is compared from its content at the checkpoint that read it, so one unchanged
     since is no change. A compare with the folder does the same, and takes a file the folder holds
     unchanged since the last commit's record skipped it as its baseline too.
   - **Undo.** Undo deletes a path (an added file, a rename's new name) only when the step's
-    first checkpoint has a record and the path is neither a skipped file in it nor under one of its
-    unread folders, nor named by the step's first-read trailers; it never writes a path those
-    trailers name, nor one the record has as `stale` (its content then unknown). Any other file is kept, no delete and no write, and reported
-    (`Undone::unversioned`, `StepUndone.unversioned`) with why: the skip reason,
+    first checkpoint has a record and the path is neither a skipped file in it nor under one of
+    its unread folders, nor named by the step's first-read trailers, and no folder unread at the
+    start lists, or is gone, by the end (by the step's last checkpoint's record: a file the step
+    added may have come out of such a folder, so then every added file is kept, as
+    `unread_folder`). It never writes a path those trailers name, nor one the start record has as
+    `stale` (its content then unknown). Any other file is kept, no delete and no write, and
+    reported (`Undone::unversioned`, `StepUndone.unversioned`) with why: the skip reason,
     `unread_folder`, or `unknown` (no record: a step from before this, whose added files are all
-    kept, the agent's own included). Modified and deleted files have earlier blobs and are put back
-    as ever.
+    kept, the agent's own included). Modified and deleted files have earlier blobs and are put
+    back as ever.
   - An older Clauseo reading a newer history ignores these keys and undoes as it did.
 - There is no `Clauseo-Seq` trailer: the commit is written before the host logs
   `CheckpointRecorded`, so the `seq` is not known yet, and the parent chain already orders the
