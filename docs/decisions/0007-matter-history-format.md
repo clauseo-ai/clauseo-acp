@@ -162,10 +162,9 @@ documents with 3 changed).
     unchanged since the last commit's record skipped it as its baseline too.
   - **Undo.** Undo deletes a path (an added file, a rename's new name) only when the step's
     first checkpoint has a record and the path is neither a skipped file in it nor under one of
-    its unread folders, nor named by the step's first-read trailers, and no folder unread at the
-    start lists, or is gone, by the end (by the step's last checkpoint's record: a file the step
-    added may have come out of such a folder, so then every added file is kept, as
-    `unread_folder`). It never writes a path those trailers name, nor one the start record has as
+    its unread folders, nor named by the step's first-read trailers, and the start record has no
+    unread folder at all: a file the step added may have come out of one (it may list for a while
+    and stop again), so then every added file is kept, as `unread_folder`. It never writes a path those trailers name, nor one the start record has as
     `stale` (its content then unknown). Any other file is kept, no delete and no write, and
     reported (`Undone::unversioned`, `StepUndone.unversioned`) with why: the skip reason,
     `unread_folder`, or `unknown` (no record: a step from before this, whose added files are all

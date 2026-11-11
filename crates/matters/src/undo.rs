@@ -58,9 +58,9 @@ fn step(
     let changes = kept;
     let there = core.step_reads(before, after).there;
     let start = core.skip_record(before);
-    let gap = start
-        .as_ref()
-        .is_some_and(|start| unread_opened(start, core.skip_record(after).as_ref()));
+    // A folder that did not list at the start: what was in it is unknown, and a file the step
+    // added may have come out of it, whatever the folder did later.
+    let gap = start.as_ref().is_some_and(|start| !start.unread.is_empty());
     let before_files = core.files_of(before)?;
     let blob = |path: &MatterPath| {
         find(&before_files, path.as_str())
@@ -108,8 +108,8 @@ fn step(
 /// (`start`) has it as cloud-only and not read, its content then unknown. Any other path is
 /// deleted only when that record proves it absent then: recorded (else `Unknown`), not a skipped
 /// file there (its reason), under no folder that did not list (`UnreadFolder`), and not in its
-/// tree; and never when `gap` (a folder that did not list at the start lists, or is gone, at the
-/// end: a file the step added may have come out of it), then `UnreadFolder`.
+/// tree; and never when `gap` (a folder did not list at the start: a file the step added may
+/// have come out of it), then `UnreadFolder`.
 fn kept_because(
     ops: &[Op],
     there: &BTreeMap<MatterPath, SkippedFileReason>,
@@ -146,15 +146,6 @@ fn kept_because(
         }
     }
     None
-}
-
-/// Whether a folder that did not list at a step's start (`start`) lists, or is gone, by its end
-/// (`end`, the last checkpoint's record): what was in it is unknown, and may have moved out. An
-/// end with no record counts as such.
-fn unread_opened(start: &SkipRecord, end: Option<&SkipRecord>) -> bool {
-    start.unread.iter().any(|folder| {
-        end.is_none_or(|end| !end.unread.contains(folder) && !end.under_unread(folder))
-    })
 }
 
 fn find<'a>(files: &'a [SizedFile], path: &str) -> Option<&'a SizedFile> {

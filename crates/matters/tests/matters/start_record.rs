@@ -109,11 +109,11 @@ fn a_file_moved_out_of_a_folder_unread_at_the_start_is_kept_by_undo() {
     assert_eq!(fx.read("lawyer.txt"), b"the lawyer's file");
 }
 
-/// A folder that did not list at the start and still does not at the end: nothing can have come
-/// out of it, so a file the agent made elsewhere is still deleted.
+/// A folder that did not list at the start and still does not at the end: it may have listed
+/// in between, so a file the agent made elsewhere is kept too.
 #[cfg(unix)]
 #[test]
-fn a_folder_still_unread_at_the_end_keeps_the_normal_rule() {
+fn a_folder_unread_at_the_start_keeps_a_file_made_elsewhere() {
     let Some(fx) = unread_sub("start-still-unread") else {
         return;
     };
@@ -128,9 +128,67 @@ fn a_folder_still_unread_at_the_end_keeps_the_normal_rule() {
     let undone = undo(&mut matter, (1, 3), &["new.txt"], (4, 5));
     support::set_mode(fx.file("Sub"), 0o755);
     let undone = undone.unwrap();
-    assert_eq!(undone.deleted, [path("new.txt")]);
+    assert_none(&undone.deleted);
+    assert_eq!(
+        undone.unversioned,
+        [kept("new.txt", SkippedFileReason::UnreadFolder)]
+    );
+    assert_eq!(fx.read("new.txt"), b"made by the agent");
+    assert_eq!(fx.read("Sub/lawyer.txt"), b"the lawyer's file");
+}
+
+/// A folder unread at the start, listing in the middle of the turn (the agent moves the lawyer's
+/// file out), and unread again by the end (a sync client freed space, a permission flipped back):
+/// the moved file is kept.
+#[cfg(unix)]
+#[test]
+fn a_file_moved_out_of_a_folder_unread_at_both_ends_is_kept_by_undo() {
+    let Some(fx) = unread_sub("start-unread-both-ends") else {
+        return;
+    };
+    let mut matter = fx.import();
+    matter.before_turn(&meta(2)).unwrap();
+    support::set_mode(fx.file("Sub"), 0o755);
+    support::rename(fx.file("Sub/lawyer.txt"), fx.file("lawyer.txt"));
+    support::set_mode(fx.file("Sub"), 0o000);
+    let checkpoint = matter
+        .after_turn(&meta(3), &tools(&["lawyer.txt"]))
+        .unwrap();
+    assert_eq!(
+        created(checkpoint, 3),
+        [added("lawyer.txt", b"the lawyer's file")]
+    );
+    let undone = undo(&mut matter, (1, 3), &["lawyer.txt"], (4, 5));
+    support::set_mode(fx.file("Sub"), 0o755);
+    let undone = undone.unwrap();
+    assert_none(&undone.deleted);
+    assert_eq!(
+        undone.unversioned,
+        [kept("lawyer.txt", SkippedFileReason::UnreadFolder)]
+    );
+    assert_eq!(fx.read("lawyer.txt"), b"the lawyer's file");
+}
+
+/// No folder unread at the start: a file the agent made is new for certain, and Undo deletes it.
+#[test]
+fn with_every_folder_read_at_the_start_a_file_the_agent_made_is_deleted() {
+    let fx = Fixture::new("start-all-read");
+    fx.write("a.txt", "one");
+    fx.write("Sub/lawyer.txt", "the lawyer's file");
+    let mut matter = fx.import();
+    matter.before_turn(&meta(2)).unwrap();
+    fx.write("Sub/new.txt", "made by the agent");
+    let checkpoint = matter
+        .after_turn(&meta(3), &tools(&["Sub/new.txt"]))
+        .unwrap();
+    assert_eq!(
+        created(checkpoint, 3),
+        [added("Sub/new.txt", b"made by the agent")]
+    );
+    let undone = undo(&mut matter, (1, 3), &["Sub/new.txt"], (4, 5)).unwrap();
+    assert_eq!(undone.deleted, [path("Sub/new.txt")]);
     assert_none(&undone.unversioned);
-    assert!(!fx.exists("new.txt"));
+    assert!(!fx.exists("Sub/new.txt"));
     assert_eq!(fx.read("Sub/lawyer.txt"), b"the lawyer's file");
 }
 
