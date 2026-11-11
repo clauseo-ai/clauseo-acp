@@ -164,7 +164,9 @@ pub use locks::{
     HeldOpen, OwnersBeside, held_open, held_open_at, held_open_beside, held_open_resolved,
     matter_path_in, matter_path_of_resolved,
 };
-pub use matter::{Matter, check_marker, remove_marker_of};
+pub use matter::{
+    Matter, check_marker, history_exists, read_marker, remove_marker_of, set_aside_marker,
+};
 pub use papers::{Paper, PaperList};
 pub use place::{Place, SyncService, place};
 pub use probe::{OsProbe, PlaceholderProbe};
