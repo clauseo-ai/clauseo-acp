@@ -1854,6 +1854,12 @@ export type ErrorCode =
 "matter.folder_permission" | 
 /** The agent lost its connection while answering: it could not reach its service (connection refused, no network, no name resolution, connect timed out). The answer so far is kept; asking again can work once the computer is back online. */
 "agent.offline" | 
+/** The folder is, holds or sits inside Clauseo's data folder; one that is or sits inside the matters' history folder in it is `matter.folder_in_matters_root`. */
+"matter.folder_in_clauseo_data" | 
+/** The folder sits inside a matter's folder; the error's `matter` names that matter when it is on Clauseo's list. */
+"matter.folder_inside_matter" | 
+/** The folder holds a matter's folder; the error's `matter` names that matter when it is on Clauseo's list. */
+"matter.folder_holds_matter" | 
 /** A code from a newer Clauseo that this version does not know. Never produced here. */
 "unknown";
 

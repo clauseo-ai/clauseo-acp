@@ -89,8 +89,9 @@ pub(crate) enum MatterJob {
     Create { new: NewMatter, check: CheckSource },
     /// `Matter::import` with a no-op progress callback; `cancel` is set by shutdown.
     /// Before it, the place check (`check_place`) and then the registry: a folder that is,
-    /// holds or sits inside one of `registry`'s folders is `matter.folder_is_matter`
-    /// (`check_registry`), and a listed matter's own folder or one being made is answered
+    /// holds or sits inside one of `registry`'s folders is refused (`check_registry`:
+    /// `matter.folder_is_matter`, `matter.folder_inside_matter`, `matter.folder_holds_matter`),
+    /// and a listed matter's own folder or one being made is answered
     /// without an import (`ImportEnd::Listed`, `ImportEnd::Making`). A marker naming a matter
     /// the registry does not hold is adopted or set aside (`import.rs`). Its folder check uses
     /// `check`, the actor's source.
@@ -541,7 +542,7 @@ mod sides;
 mod too_deep;
 
 use checkpoints::{repair, root_commit, timeline_entry, turn_checkpoint};
-pub(crate) use claims::{Claim, Claimed, Held, check_registry, is_same_folder, listed_folder};
+pub(crate) use claims::{Claim, Claimed, Held, check_registry, is_same_folder};
 use import::import;
 pub(crate) use import::{ImportEnd, made};
 pub(crate) use relocate::{Registry, Relink};

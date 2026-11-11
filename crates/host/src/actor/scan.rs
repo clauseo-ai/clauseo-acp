@@ -1,9 +1,12 @@
 //! The folder scan before a matter (`ScanFolder`, `CancelScan`), read off the actor. A
 //! short-lived `clauseo-scan` thread tells where the folder lives (`clauseo_matters::place`)
 //! and walks it (`clauseo_matters::scan_folder`), posting what it finds to the actor, which
-//! publishes it as `HostEvent::FolderScanned` on the app stream. A marker refuses nothing (the
-//! import adopts the matter it names, sets it aside, or relinks a moved matter), but a listed
-//! matter's own folder is `matter.folder_is_matter` naming it, so the form offers it.
+//! publishes it as `HostEvent::FolderScanned` on the app stream. It refuses what an import
+//! refuses, in its order and with its codes (`RefusalNames`): the place check, then the
+//! registry (a folder inside or holding another matter's is `matter.folder_inside_matter` or
+//! `matter.folder_holds_matter`, naming a listed one), then the walk's own checks. A marker
+//! refuses nothing (the import adopts the matter it names, sets it aside, or relinks a moved
+//! matter), and a listed matter's own folder is scanned (the import answers with that matter).
 //! No file system call runs on the actor, and nothing is stored: not even a receipt, so a
 //! repeated `command_id` scans again.
 //!
@@ -25,14 +28,14 @@ use std::time::Duration;
 use clauseo_matters::{FolderScan, Place, ScanProgress, Settings};
 use clauseo_protocol::{
     CommandId, CommandOutcome, Count, ErrorCode, FolderPlace, FolderRefId, FolderScanned,
-    HostEvent, MatterId, MatterPath,
+    HostEvent, MatterPath,
 };
 
 use super::Actor;
 use super::commands::CommandCtx;
 use super::input::Input;
 use crate::error::Error;
-use crate::matter_worker::matter_settings;
+use crate::matter_worker::{Claimed, Held, check_registry, matter_settings};
 
 /// The least time between two progress events of a scan.
 pub(crate) const THROTTLE: Duration = Duration::from_millis(250);
@@ -189,14 +192,11 @@ fn start(actor: &mut Actor, ctx: &CommandCtx, folder: FolderRefId) -> Result<(),
     let job = Job {
         id,
         path,
-        // The same refusals import makes: the configured folders here, the data folder and
-        // the matters root through the settings.
-        refused: actor.refused_folders.clone(),
-        listed: actor
-            .matters
-            .values()
-            .map(|entry| (entry.row.id, PathBuf::from(&entry.row.folder_path)))
-            .collect(),
+        // The same refusals import makes: the configured folders and the data folder here, the
+        // matters root through the settings, and the registry.
+        refused: super::matters::refused_folders(actor),
+        registry: super::matters::claimed_folders(actor),
+        names: super::matters::RefusalNames::of(actor),
         settings: matter_settings(actor.effective.data_dir()),
         walk: Arc::clone(&actor.scan_walk),
         cancel: Arc::clone(&cancel),
@@ -407,8 +407,10 @@ struct Job {
     id: u64,
     path: PathBuf,
     refused: Vec<PathBuf>,
-    /// Every listed matter's id and folder: a scan of one's own folder names it.
-    listed: Vec<(MatterId, PathBuf)>,
+    /// The folders claimed by matters, as an import checks them (`check_registry`).
+    registry: Vec<Claimed>,
+    /// What a refusal's code is told apart by, as for an import.
+    names: super::matters::RefusalNames,
     settings: Settings,
     walk: Walk,
     cancel: Arc<AtomicBool>,
@@ -423,7 +425,8 @@ impl Job {
             id,
             path,
             refused,
-            listed,
+            registry,
+            names,
             settings,
             walk,
             cancel,
@@ -451,23 +454,21 @@ impl Job {
                 send(ScanInput::Progress { id });
             }
         };
-        let result = match listed_matter(&path, &listed) {
-            Some(matter) => Err(crate::matter_worker::listed_folder(matter)),
-            None => walk(&path, &refused, &settings, &mut progress, &cancel).map_err(Error::from),
-        };
+        // The import's order: the place, then the registry (a listed matter's own folder and
+        // one being made pass), then the walk, which checks the place again and the matters
+        // root. A marker inside counts for nothing here: one naming no known matter is adopted,
+        // one that does not read is set aside, a copy of a known matter's folder becomes a new
+        // matter, and a listed matter's moved folder is relinked, so the scan passes for each.
+        let result = clauseo_matters::check_place(&path, &refused)
+            .map_err(Error::Matters)
+            .and_then(|()| check_registry(&path, &registry, true).map(|_: Held| ()))
+            .and_then(|()| {
+                walk(&path, &refused, &settings, &mut progress, &cancel).map_err(Error::from)
+            })
+            // The scan never reads a marker, so no `AlreadyMatter` names a matter here.
+            .map_err(|error| names.refusal(error, &path, |_| false));
         send(ScanInput::Ended { id, result });
     }
-}
-
-/// The listed matter whose own folder `folder` is, by any spelling. A marker inside it counts
-/// for nothing here: one naming no known matter is adopted, one that does not read is set
-/// aside, a copy of a known matter's folder becomes a new matter, and a listed matter's moved
-/// folder is relinked, so the scan passes for each.
-fn listed_matter(folder: &Path, listed: &[(MatterId, PathBuf)]) -> Option<MatterId> {
-    listed
-        .iter()
-        .find(|(_, own)| crate::matter_worker::is_same_folder(folder, own))
-        .map(|(matter, _)| *matter)
 }
 
 #[cfg(test)]

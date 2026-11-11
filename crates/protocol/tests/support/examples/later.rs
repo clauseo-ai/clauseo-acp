@@ -123,6 +123,19 @@ pub(super) fn failures() -> Vec<DomainEvent> {
             ErrorCode::AgentOffline,
             "the window said the computer is offline",
         ),
+        // Folder refusals, never a turn's failure in practice; here for the corpus.
+        failed(
+            ErrorCode::MatterFolderInClauseoData,
+            "inside Clauseo's data folder",
+        ),
+        failed(
+            ErrorCode::MatterFolderInsideMatter,
+            "inside another matter's folder",
+        ),
+        failed(
+            ErrorCode::MatterFolderHoldsMatter,
+            "holds another matter's folder",
+        ),
     ]
 }
 

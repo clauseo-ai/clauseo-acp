@@ -296,6 +296,15 @@ error_codes! {
         while answering: it could not reach its service (connection refused, no network, no \
         name resolution, connect timed out). The answer so far is kept; asking again can work \
         once the computer is back online.";
+    MatterFolderInClauseoData = "matter.folder_in_clauseo_data", retryable: false,
+        meaning: "The folder is, holds or sits inside Clauseo's data folder; one that is or sits \
+        inside the matters' history folder in it is `matter.folder_in_matters_root`.";
+    MatterFolderInsideMatter = "matter.folder_inside_matter", retryable: false, meaning: "The \
+        folder sits inside a matter's folder; the error's `matter` names that matter when it is \
+        on Clauseo's list.";
+    MatterFolderHoldsMatter = "matter.folder_holds_matter", retryable: false, meaning: "The \
+        folder holds a matter's folder; the error's `matter` names that matter when it is on \
+        Clauseo's list.";
     Unknown = "unknown", retryable: false, meaning: "A code from a newer Clauseo that this \
         version does not know. Never produced here.";
 }
@@ -353,7 +362,8 @@ pub struct HostError {
     /// Whether the same call may succeed later.
     retryable: bool,
     /// The matter the failure is about, where the code says so: for
-    /// `matter.folder_is_matter`, the matter on Clauseo's list that has the folder. Missing
+    /// `matter.folder_is_matter`, `matter.folder_inside_matter` and
+    /// `matter.folder_holds_matter`, the matter on Clauseo's list that has the folder. Missing
     /// otherwise, and when that matter is not on the list (forgotten, or from another install).
     #[serde(skip_serializing_if = "Option::is_none", default)]
     matter: Option<MatterId>,
@@ -384,7 +394,7 @@ impl HostError {
     }
 
     /// The matter the failure is about, for the codes that name one
-    /// (`matter.folder_is_matter`).
+    /// (`matter.folder_is_matter`, `matter.folder_inside_matter`, `matter.folder_holds_matter`).
     pub const fn matter(&self) -> Option<MatterId> {
         self.matter
     }

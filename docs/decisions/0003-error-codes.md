@@ -28,7 +28,8 @@ must therefore stay stable across versions.
   retryable failure may be retried by the client; any other needs the lawyer or a code fix first.
   `HostError.retryable` carries the value below.
 - `HostError.matter` (optional, left out when empty) names the matter a failure is about, for the
-  codes whose meaning says so (`matter.folder_is_matter`), so the UI can name it and offer to
+  codes whose meaning says so (`matter.folder_is_matter`, `matter.folder_inside_matter`,
+  `matter.folder_holds_matter`), so the UI can name it and offer to
   open it without reading `message`. Added by decision record 0022.
 - `HostError.files` (optional, left out when empty) lists the matter's files a failure is about, as
   matter paths: for `matter.file_locked`, the files held open, so the UI can name the document to
@@ -129,6 +130,9 @@ as `yes` or `no`. The meaning is also each variant's doc comment in `error_code.
 | `word.edit_failed` | stetdoc failed or did not finish in time while reading or editing the Word file, or the file is not on this computer or is too large to version, so nothing was written. | yes | host (`ListRevisions`, `DecideRevisions`: stetdoc timed out, exited with another error, or printed output that does not read; the file is cloud-only or over the checkpoint size cap); retryable because a passing failure (a slow disk, a busy machine) can clear |
 | `matter.folder_permission` | The computer's privacy settings keep Clauseo, or the agent it starts, from opening the matter's folder (on macOS, Files and Folders in Privacy & Security), so no agent works in it: allow Clauseo there, then ask again. | no | host (a launch's folder check on macOS: the host's own open of the matter folder is refused, EPERM or EACCES, or is still unanswered after two minutes, the prompt macOS shows left up or a volume that hangs; and on every OS an agent's `session/new` answered with JSON-RPC -32602 saying its `cwd` does not exist, after the host found the folder there) |
 | `agent.offline` | The agent lost its connection while answering: it could not reach its service (connection refused, no network, no name resolution, connect timed out). The answer so far is kept; asking again can work once the computer is back online. | yes | host (a turn whose prompt failed with a connection-class error, or whose agent said its connection failed and then went quiet; `actor/turn/offline.rs`) |
+| `matter.folder_in_clauseo_data` | The folder is, holds or sits inside Clauseo's data folder; one that is or sits inside the matters' history folder in it is `matter.folder_in_matters_root`. | no | host (from matters' refusal on create, import, the folder scan and the folder query; folder PR 2) |
+| `matter.folder_inside_matter` | The folder sits inside a matter's folder; the error's `matter` names that matter when it is on Clauseo's list. | no | host (the registry check on create, import, the folder scan and the folder query; folder PR 2) |
+| `matter.folder_holds_matter` | The folder holds a matter's folder; the error's `matter` names that matter when it is on Clauseo's list. | no | host (the registry check on create, import, the folder scan and the folder query; folder PR 2) |
 | `unknown` | A code from a newer Clauseo that this version does not know. Never produced here. | no | decoding only |
 
 Judgement calls on retryable: `agent.launch_failed` and `agent.exited` are retryable because a new
@@ -167,6 +171,15 @@ folder with -32602 "`cwd` does not exist", which said nothing the lawyer could a
 now opens the folder itself before a launch on macOS and refuses with this code, and maps that one
 agent answer to it too. The open waits while macOS asks the lawyer, for up to two minutes; one
 unanswered by then is this code too, never `matter.folder_missing`. Not retryable: the lawyer changes a privacy setting first, then asks again.
+
+`matter.folder_in_clauseo_data`, `matter.folder_inside_matter` and `matter.folder_holds_matter`
+were added on 2026-11-11 (folder PR 2), so the app can say a refused folder's reason in plain
+words. `matter.folder_in_matters_root` and `matter.folder_is_matter` keep their meanings; the host
+now answers `matter.folder_in_clauseo_data` for the data folder outside the matters' history
+folder, and `matter.folder_inside_matter` or `matter.folder_holds_matter` for a folder nested with
+another matter's, keeping `matter.folder_is_matter` for the same folder. The folder scan answers
+the same codes as the import (before, it answered `matter.folder_refused`). An older app reads the
+new codes as `unknown`, which it shows as a generic failure.
 
 ## Consequences
 

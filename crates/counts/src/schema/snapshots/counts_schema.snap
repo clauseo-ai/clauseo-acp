@@ -1527,7 +1527,10 @@ expression: counts_schema()
         "word.not_docx",
         "word.edit_failed",
         "matter.folder_permission",
-        "agent.offline"
+        "agent.offline",
+        "matter.folder_in_clauseo_data",
+        "matter.folder_inside_matter",
+        "matter.folder_holds_matter"
       ],
       "type": "string"
     },
