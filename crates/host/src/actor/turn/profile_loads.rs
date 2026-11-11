@@ -201,7 +201,7 @@ pub(super) fn session_loads(
     let sandbox = session_sandbox(actor, thread, kind, &agent_id, &run, matter);
     // The lawyer's servers this session gets, and those left out (a keychain value or the
     // program missing, the Safe workspace).
-    let (lawyer_sent, left_out) = lawyer_servers(actor, &run, control);
+    let (lawyer_sent, left_out) = sent_lawyer_servers(&run, control);
     let trusted = trusted_sent(actor, thread, control, &lawyer_sent);
     let claude = (kind == Some(AgentKind::Claude)).then_some(ClaudeKeys {
         web_search,
@@ -348,13 +348,22 @@ fn claude_sandbox(
     ClaudeSandbox::for_os(SandboxOs::CURRENT, &paths)
 }
 
-/// The lawyer's servers `run`'s session gets (`agent::loads::lawyer`), and those left out for a
-/// keychain value they lack. None in the Safe workspace.
-fn lawyer_servers(
-    actor: &Actor,
+/// The run's snapshot of the lawyer's servers, made at launch ([`lawyer_servers`]), and those
+/// left out; none once the firm's `managed-mcp.json` is present.
+fn sent_lawyer_servers(
     run: &RunFolders,
     control: loads::McpControl,
 ) -> (Vec<McpServer>, Vec<lawyer::LeftOut>) {
+    if control != loads::McpControl::Clauseo {
+        return (Vec::new(), Vec::new());
+    }
+    (run.lawyer.servers.clone(), run.lawyer.left_out.clone())
+}
+
+/// The lawyer's servers `run`'s sessions get (`agent::loads::lawyer`), and those left out for a
+/// keychain value they lack: made once, at launch, from the values the launch prep read. None in
+/// the Safe workspace. The firm's `managed-mcp.json` is checked at each session call.
+pub(super) fn lawyer_servers(actor: &Actor, run: &RunFolders) -> lawyer::Sent {
     let host: Vec<(OsString, OsString)> = match &actor.wiring.inherited_env {
         Some(env) => env.clone(),
         None => std::env::vars_os().collect(),
@@ -370,14 +379,15 @@ fn lawyer_servers(
         .find(|(key, _)| key.eq_ignore_ascii_case("PATH"))
         .and_then(|(key, value)| Some((key.to_str()?, value)));
     let lawyer = lawyer::Lawyer {
-        control,
+        control: loads::McpControl::Clauseo,
         safe_workspace: actor.protection.safe_workspace(),
     };
     let env = lawyer::HostEnv {
         path,
         windows_env: &windows_env,
     };
-    lawyer::servers(&actor.effective, lawyer, &run.mcp_secrets, env)
+    let (servers, left_out) = lawyer::servers(&actor.effective, lawyer, &run.mcp_secrets, env);
+    lawyer::Sent { servers, left_out }
 }
 
 /// The hook's servers without `case-law`, the `case-law` entry `run`'s session gets (after

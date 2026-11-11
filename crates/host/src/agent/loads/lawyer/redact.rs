@@ -1,56 +1,55 @@
 //! What the agent's stderr redactor hides for a session's lawyer servers ([`redacted`]): an
 //! agent that ends before its session is ready has its last stderr line logged
-//! (`start_failure`), and that is when `session/new` held every value and URL below. The
+//! (`start_failure`), and that is when `session/new` held every value and URL below. The set is
+//! built from the very servers the session is sent (the run's `lawyer::Sent`, one snapshot). The
 //! redactor matches each string exactly (`clauseo_process`, `stderr/redact.rs`), so each value
 //! goes in the forms an error line commonly prints it in.
 //!
-//! - Each value (a keychain value, env or header, and a plain variable or header value): as it is,
-//!   JSON-escaped, percent-encoded (upper- and lowercase hex), the credential after an
-//!   `<scheme> ` prefix (`Bearer x`, `Basic x`), and for `Basic` its base64 decoded
-//!   (`user:pass`) and the password alone.
-//! - Each enabled remote server's URL: whole and percent-decoded; its host (decision record
-//!   0047: no host the agent reached in a log), with and without the port, unless it is
-//!   `localhost` or `127.0.0.1`; its path with its query; its query; each query value, as it is,
-//!   percent-decoded and percent-encoded; each path segment of 16 or more characters, which
-//!   looks like a key.
-//! - A value under [`MIN`] bytes is not hidden: it would wreck the log wherever those few
-//!   characters appear. Such a header or variable value is logged at WARN, naming its server and
-//!   name, never the value. A short URL part (`/mcp`, `v1`) is left as it is.
+//! - Each value, a header's and a local server's variable's (from the keychain or plain, a
+//!   firm's policy or a hand-edited file): as it is, JSON-escaped, percent-encoded (upper- and
+//!   lowercase hex), the credential after an `<scheme> ` prefix (`Bearer x`, `Basic x`), and for
+//!   `Basic` its base64 decoded (`user:pass`) and the password alone. The variables the host
+//!   adds itself (`PATH` and the Windows basics, [`HOST_VARS`]) are not secrets and are left.
+//! - Each remote server's URL: whole and percent-decoded; its host as written and lower-cased,
+//!   with and without the port (decision record 0047: no host the agent reached in a log),
+//!   unless it is `localhost` or a loopback address; its path with its query, its path alone,
+//!   its query; each path segment and each query value of [`URL_PART`] bytes or more, as it is,
+//!   percent-decoded and percent-encoded.
+//! - Nothing under [`MIN`] bytes is hidden: it would wreck the log wherever those few characters
+//!   appear. A header value that short is logged at WARN, naming its server and header, never
+//!   the value; a short variable value (`REGION=uk`) or URL part (`/mcp`, `v1`) is left as
+//!   it is.
 
 use std::fmt::Write as _;
 
 use base64::Engine as _;
-use clauseo_settings::{Effective, McpTransport, McpValue};
-
-use super::McpSecrets;
+use clauseo_acp::McpServer;
 
 /// The shortest string the redactor hides (`clauseo_process`'s floor for a named secret).
 pub(super) const MIN: usize = 6;
-/// The shortest path segment taken as a key.
-const KEY_SEGMENT: usize = 16;
+/// The shortest URL host, path segment or query value hidden on its own.
+const URL_PART: usize = 8;
+/// The variables the host adds to a local server (`lawyer::add_host_env`), by name in any case.
+const HOST_VARS: [&str; 6] = ["PATH", "SystemRoot", "windir", "TEMP", "TMP", "PATHEXT"];
 
-/// Every keychain value `secrets` read and every plain header value of the enabled servers, and
-/// each enabled remote server's URL, in each form above; sorted, without duplicates, none under
-/// [`MIN`] bytes.
-pub(crate) fn redacted(effective: &Effective, secrets: &McpSecrets) -> Vec<String> {
+/// Every value and URL of `servers` (the lawyer's servers the session is sent), in each form
+/// above; sorted, without duplicates, none under [`MIN`] bytes.
+pub(crate) fn redacted(servers: &[McpServer]) -> Vec<String> {
     let mut hidden = Vec::new();
-    for (account, value) in &secrets.values {
-        let mut parts = account.splitn(3, '/');
-        let server = parts.next().unwrap_or_default();
-        let name = parts.nth(1).unwrap_or_default();
-        value_forms(&mut hidden, server, name, value);
-    }
-    for (server, entry) in effective.enabled_mcp_servers() {
-        let values = match &entry.transport {
-            McpTransport::Local { env, .. } => env,
-            McpTransport::Remote { url, headers } => {
-                url_forms(&mut hidden, url);
-                headers
+    for server in servers {
+        match server {
+            McpServer::Stdio { name, env, .. } => {
+                for (var, value) in env {
+                    if !HOST_VARS.iter().any(|host| host.eq_ignore_ascii_case(var)) {
+                        value_forms(&mut hidden, name, var, value, false);
+                    }
+                }
             }
-        };
-        for (name, value) in values {
-            if let McpValue::Plain(text) = value {
-                value_forms(&mut hidden, server, name, text);
+            McpServer::Http { name, url, headers } => {
+                url_forms(&mut hidden, url);
+                for (header, value) in headers {
+                    value_forms(&mut hidden, name, header, value, true);
+                }
             }
         }
     }
@@ -60,11 +59,11 @@ pub(crate) fn redacted(effective: &Effective, secrets: &McpSecrets) -> Vec<Strin
     hidden
 }
 
-/// `value`'s forms ([module docs](self)), or a WARN naming `server` and `name` when it is
-/// too short to hide.
-fn value_forms(hidden: &mut Vec<String>, server: &str, name: &str, value: &str) {
+/// `value`'s forms ([module docs](self)); when it is too short to hide, nothing, with a WARN
+/// naming `server` and `name` if `warn_short` (a header).
+fn value_forms(hidden: &mut Vec<String>, server: &str, name: &str, value: &str, warn_short: bool) {
     if value.len() < MIN {
-        if !value.is_empty() {
+        if warn_short && !value.is_empty() {
             tracing::warn!(
                 server,
                 name,
@@ -117,37 +116,48 @@ fn url_forms(hidden: &mut Vec<String>, url: &str) {
         .rsplit_once(':')
         .filter(|(_, port)| port.bytes().all(|byte| byte.is_ascii_digit()))
         .map_or(authority, |(host, _)| host);
-    if !host.eq_ignore_ascii_case("localhost") && host != "127.0.0.1" {
-        hidden.push(authority.to_owned());
-        hidden.push(host.to_owned());
+    if !loopback(host) {
+        for part in [authority, host] {
+            if part.len() >= URL_PART {
+                hidden.push(part.to_owned());
+                hidden.push(part.to_ascii_lowercase());
+            }
+        }
     }
     let Some(tail) = after_scheme.get(end..).filter(|tail| !tail.is_empty()) else {
         return;
     };
     hidden.push(tail.to_owned());
     let (path, query) = tail.split_once('?').unwrap_or((tail, ""));
-    for segment in path.split('/') {
-        if segment.len() >= KEY_SEGMENT {
-            hidden.push(segment.to_owned());
-            hidden.extend(percent_decoded(segment));
-        }
-    }
-    if query.is_empty() {
-        return;
-    }
-    hidden.push(query.to_owned());
-    for value in query
+    hidden.push(path.to_owned());
+    hidden.extend(percent_decoded(path));
+    let values = query
         .split('&')
-        .filter_map(|pair| pair.split_once('=').map(|(_, value)| value))
-    {
-        hidden.push(value.to_owned());
-        if let Some(decoded) = percent_decoded(value) {
+        .filter_map(|pair| pair.split_once('=').map(|(_, value)| value));
+    if !query.is_empty() {
+        hidden.push(query.to_owned());
+    }
+    for part in path.split('/').chain(values) {
+        if part.len() < URL_PART {
+            continue;
+        }
+        hidden.push(part.to_owned());
+        if let Some(decoded) = percent_decoded(part) {
             hidden.push(percent_encoded(&decoded));
             hidden.push(decoded);
         } else {
-            hidden.push(percent_encoded(value));
+            hidden.push(percent_encoded(part));
         }
     }
+}
+
+/// Whether `host` is this computer: `localhost`, an IPv4 address in `127.0.0.0/8` or `::1`.
+fn loopback(host: &str) -> bool {
+    let bare = host.trim_start_matches('[').trim_end_matches(']');
+    host.eq_ignore_ascii_case("localhost")
+        || bare
+            .parse::<std::net::IpAddr>()
+            .is_ok_and(|ip| ip.is_loopback())
 }
 
 /// `text` with every byte but RFC 3986's unreserved ones (letters, digits, `-._~`) as `%XX`.

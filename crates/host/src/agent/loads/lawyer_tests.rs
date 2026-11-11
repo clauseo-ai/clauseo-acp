@@ -217,21 +217,27 @@ fn reads_keep_only_usable_values() {
 }
 
 /// Every value an enabled server carries is hidden in the agent's stderr tail: the keychain
-/// values read and each plain variable or header value; a disabled server's are not needed.
+/// values read and each plain variable or header value of the servers sent; a disabled server's
+/// are not sent, so not needed.
 #[test]
 fn every_value_of_an_enabled_server_is_redacted() {
+    let npx = abs("/opt/homebrew/bin/npx");
     let effective = effective(
         "redacted",
         &json!({
-            "github": {"command": abs("/opt/homebrew/bin/npx"), "enabled": true,
+            "github": {"command": npx, "enabled": true,
                 "env": {"TOKEN": {"keychain": true}, "PLAIN": "plain-value-0042"}},
             "remote": {"url": "https://x.example/mcp", "enabled": true,
                 "headers": {"X-Key": "header-value-0042"}},
             "off": {"command": abs("/opt/off"), "env": {"OFF": "off-value-0042"}},
         }),
     );
-    let secrets = McpSecrets::of(&[("github/env/TOKEN", "keychain-value-0042")], &[]);
-    let redacted = lawyer::redacted(&effective, &secrets);
+    let secrets = McpSecrets::of(
+        &[("github/env/TOKEN", "keychain-value-0042")],
+        &[(npx.as_str(), npx.as_str())],
+    );
+    let (servers, _) = lawyer::servers(&effective, CLAUSEO, &secrets, NO_HOST);
+    let redacted = lawyer::redacted(&servers);
     for value in [
         "keychain-value-0042",
         "plain-value-0042",
@@ -393,20 +399,25 @@ fn no_remote_server_goes_in_the_safe_workspace_or_under_managed_mcp() {
     assert_eq!(lawyer::wanted(&effective, true), lawyer::Wanted::default());
 }
 
-/// What the stderr redactor gets, in the forms an error line prints them in: each keychain
-/// value and plain header value as it is, JSON-escaped, percent-encoded and after its scheme
-/// (Basic: decoded, and the password); the URL whole, its host, its path with its query, its
-/// query, each query value (decoded too) and each long path segment. A value under 6 bytes is
-/// left out (and logged by name).
+/// What the stderr redactor gets from the servers sent, in the forms an error line prints them
+/// in: each header and variable value (keychain or plain) as it is, JSON-escaped,
+/// percent-encoded and after its scheme (Basic: decoded, and the password); the URL whole, its
+/// host as written and lower-cased, its path with and without its query, its query, and each
+/// path segment and query value of 8 bytes or more (decoded too). A value under 6 bytes, the
+/// variables the host adds and loopback hosts are left out.
+#[cfg(unix)]
 #[test]
 fn the_redacted_list_holds_each_value_and_url_part_in_its_forms() {
     let effective = effective(
         "redacted",
         &json!({
-            "docs": {"url": "https://mcp.example.com:8443/v1/k3yLikeSegment0123/mcp?key=q7%2Btoken&n=1",
+            "docs": {"url": "https://Mcp.Example.com:8443/v1/AbCdEf123456/mcp?key=q7%2Btoken&n=1",
                 "enabled": true, "headers": {"Authorization": {"keychain": true},
                     "X-Tenant": "firm\"tenant/7", "X-Short": "abc"}},
-            "local": {"command": "/tools/srv", "enabled": true, "env": {"TOKEN": {"keychain": true}}},
+            "here": {"url": "http://127.0.0.1:8080/mcp", "enabled": true},
+            "local": {"command": "/tools/srv", "enabled": true,
+                "env": {"TOKEN": {"keychain": true}, "GITHUB_TOKEN": "ghp_plainPolicyToken1",
+                    "REGION": "uk"}},
         }),
     );
     let secrets = McpSecrets::of(
@@ -415,53 +426,84 @@ fn the_redacted_list_holds_each_value_and_url_part_in_its_forms() {
             ("docs/header/Authorization", "Basic dXNlcjE6cGFzc3dvcmQx"),
             ("local/env/TOKEN", "env-t0ken-value"),
         ],
-        &[],
+        &[("/tools/srv", "/tools/srv")],
     );
-    let redacted = lawyer::redacted(&effective, &secrets);
+    let host_path = OsString::from("/usr/bin:/bin");
+    let host = HostEnv {
+        path: Some(("PATH", &host_path)),
+        windows_env: &[],
+    };
+    let (servers, left_out) = lawyer::servers(&effective, CLAUSEO, &secrets, host);
+    assert_eq!((servers.len(), left_out), (3, Vec::new()));
+    let redacted = lawyer::redacted(&servers);
     for form in [
         "Basic dXNlcjE6cGFzc3dvcmQx",
         "dXNlcjE6cGFzc3dvcmQx",
         "user1:password1",
         "password1",
         "env-t0ken-value",
+        "ghp_plainPolicyToken1",
         "firm\"tenant/7",
         "firm\\\"tenant/7",
         "firm%22tenant%2F7",
         "firm%22tenant%2f7",
-        "https://mcp.example.com:8443/v1/k3yLikeSegment0123/mcp?key=q7%2Btoken&n=1",
-        "https://mcp.example.com:8443/v1/k3yLikeSegment0123/mcp?key=q7+token&n=1",
+        "https://Mcp.Example.com:8443/v1/AbCdEf123456/mcp?key=q7%2Btoken&n=1",
+        "https://Mcp.Example.com:8443/v1/AbCdEf123456/mcp?key=q7+token&n=1",
+        "Mcp.Example.com:8443",
         "mcp.example.com:8443",
+        "Mcp.Example.com",
         "mcp.example.com",
-        "/v1/k3yLikeSegment0123/mcp?key=q7%2Btoken&n=1",
+        "/v1/AbCdEf123456/mcp?key=q7%2Btoken&n=1",
+        "/v1/AbCdEf123456/mcp",
+        "AbCdEf123456",
         "key=q7%2Btoken&n=1",
         "q7%2Btoken",
         "q7+token",
-        "k3yLikeSegment0123",
     ] {
         assert!(
             redacted.iter().any(|hidden| hidden == form),
             "{form} not in {redacted:?}"
         );
     }
-    for short in ["abc", "1", "/mcp", "v1"] {
+    for left in [
+        "abc",
+        "uk",
+        "1",
+        "/mcp",
+        "v1",
+        "127.0.0.1",
+        "127.0.0.1:8080",
+        "/usr/bin:/bin",
+    ] {
         assert!(
-            !redacted.iter().any(|hidden| hidden == short),
-            "{short} in {redacted:?}"
+            !redacted.iter().any(|hidden| hidden == left),
+            "{left} in {redacted:?}"
         );
     }
+    assert!(
+        !redacted.iter().any(|hidden| hidden.contains("/usr/bin")),
+        "the host's PATH: {redacted:?}"
+    );
     assert!(
         redacted.iter().all(|hidden| hidden.len() >= 6),
         "{redacted:?}"
     );
 }
 
-/// A header value holding CR, LF, NUL or DEL, plain (a firm's policy, a hand-edited file) or
-/// from the keychain, never reaches the wire: its server is left out, named with the header.
+/// A header value holding CR, LF, NUL, DEL or a non-ASCII character, plain (a firm's policy, a
+/// hand-edited file) or from the keychain, never reaches the wire: its server is left out, named
+/// with the header.
 #[test]
 fn a_header_value_with_a_control_character_never_goes() {
-    for (n, bad) in ["a\rb", "a\nX-Evil: 1", "a\u{0}b", "a\u{7f}b"]
-        .iter()
-        .enumerate()
+    for (n, bad) in [
+        "a\rb",
+        "a\nX-Evil: 1",
+        "a\u{0}b",
+        "a\u{7f}b",
+        "r\u{e9}sum\u{e9}",
+    ]
+    .iter()
+    .enumerate()
     {
         let effective = effective(
             &format!("control-{n}"),
@@ -497,10 +539,17 @@ fn a_header_value_with_a_control_character_never_goes() {
 }
 
 #[test]
-fn a_header_value_holds_no_control_character_but_tab() {
+fn a_header_value_is_printable_ascii_or_tab() {
     assert!(lawyer::header_value_ok("Bearer abc\tdef"));
-    assert!(lawyer::header_value_ok("r\u{e9}sum\u{e9}"));
-    for bad in ["a\rb", "a\nb", "a\0b", "a\u{7f}b"] {
+    assert!(lawyer::header_value_ok("Bearer A-z_0.9~+/= !#"));
+    for bad in [
+        "a\rb",
+        "a\nb",
+        "a\0b",
+        "a\u{7f}b",
+        "r\u{e9}sum\u{e9}",
+        "\u{2028}",
+    ] {
         assert!(!lawyer::header_value_ok(bad), "{bad:?}");
     }
 }
