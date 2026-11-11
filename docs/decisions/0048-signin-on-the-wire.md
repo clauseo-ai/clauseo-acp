@@ -95,14 +95,18 @@ window sent still passes through Tauri's buffers, which Clauseo does not zero.
   lines it left out, and decoding refuses more. Sizes are `Count`s.
 - `SignInChanged { agent, state: SignIn }`, S18's `SigninState` with how the agent is signed in:
   `SignedOut { found }`, `Queued`, `Waiting { since, nudge }`, `DeviceCode { url, code,
-  expires_at }`, `LoginFound { from, email }`, `SignedIn { email, plan, method, source, at }`,
+  expires_at }`, `LoginFound { from, email }`, `SignedIn { email, plan, method, source, at, refused }`,
   `Failed { code, at }`, and desktop's own `Switching { since, stuck }` (P5b, below). `found`
   is a `FoundLogin` (`claude_settings`,
   `claude_windows_sandbox`, `codex_keyring`, `reused_failed`, `reused_signed_out`,
   `reused_changed`, `codex_link_split`, then UD2's `none_found`: the search ran and found no
   login, and `reuse_off`: S18's `no-reuse` is there, so nothing was looked for); `from` is a `LoginFrom` (`claude_code`, `codex`);
   `method` a `SignInMethod` (`plan`, `api_key`, `firm`); `source` a `SignInSource` (`reused`,
-  the lawyer's own CLI login, or `own`, Clauseo's). `plan` is a `PlanLabel` in words, from
+  the lawyer's own CLI login, or `own`, Clauseo's). `refused` is optional and comes only with
+  `method: api_key`: it is set when a sign-in recheck meets an `agent.auth_required` hold while a
+  key is in memory and no endpoint or provider outranks it, so the provider refused that key,
+  and it clears when a key is saved or removed. A later turn the provider accepts with the same
+  key does not clear it. `plan` is a `PlanLabel` in words, from
   `limits`' plan words; desktop turns S18's raw plan string into it. Times are `Timestamp`s. A
   device code is shown to the lawyer, so it is a plain string, not a `Secret`.
 
