@@ -361,16 +361,29 @@ pub(super) fn entry_folder(run: &mut super::RunFolders, data: &Path) {
     }
 }
 
+/// Chrome's `Default/Preferences` for the shell tool's profile: a PDF link downloads rather than
+/// opening in Chrome's viewer, so agent-browser's `download` gets the download event it waits for
+/// (`always_open_pdf_externally`; the guard's Chrome has the same entry, `browser_guard/quiet.rs`).
+const PROFILE_PREFERENCES: &str = r#"{"plugins":{"always_open_pdf_externally":true}}"#;
+
 /// Makes the shell tool's downloads and profile folders and writes its `{}` config file, all in
 /// the launch's own `agent-browser` folder, so the profile starts empty (no earlier launch's
-/// cookies) and the lawyer's `~/.agent-browser/config.json` is never read. One that cannot be
-/// made leaves the session without the browser (`BrowserNotInstalled`), with a warning; the
-/// launch goes on.
+/// cookies) and the lawyer's `~/.agent-browser/config.json` is never read. The profile's
+/// `Default/Preferences` is written with [`PROFILE_PREFERENCES`]. One that cannot be made leaves
+/// the session without the browser (`BrowserNotInstalled`), with a warning; the launch goes on.
 pub(super) fn shell_folders(run: &mut super::RunFolders, data: &Path) {
-    let made = [&run.agent_browser, &run.downloads, &run.browser_profile]
-        .into_iter()
-        .try_for_each(|folder| crate::write::create_private_dirs_under(data, folder))
-        .and_then(|()| crate::browser::write_session_config(&run.browser_config));
+    let default = run.browser_profile.join("Default");
+    let (preferences, bytes) = (default.join("Preferences"), PROFILE_PREFERENCES.as_bytes());
+    let made = [
+        &run.agent_browser,
+        &run.downloads,
+        &run.browser_profile,
+        &default,
+    ]
+    .into_iter()
+    .try_for_each(|folder| crate::write::create_private_dirs_under(data, folder))
+    .and_then(|()| crate::write::replace_private_file(&preferences, bytes))
+    .and_then(|()| crate::browser::write_session_config(&run.browser_config));
     if let Err(error) = made {
         tracing::warn!(
             error = %crate::log_file::Cause(&error),

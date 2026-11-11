@@ -561,6 +561,25 @@ fn the_shell_browser_folders_and_config_are_made_in_the_own_agent_browser_folder
     write::remove_dir_all(&data).unwrap();
 }
 
+/// The shell tool's profile saves a PDF link rather than opening it: its `Default/Preferences`
+/// holds `always_open_pdf_externally`, and a planted one is replaced at the next launch.
+#[test]
+fn the_shell_profile_saves_a_pdf_link_instead_of_opening_it() {
+    let data = scratch("profile-preferences");
+    let mut run = folders(&data, 1);
+    run.make(&data, &RunSweep::default()).unwrap();
+    run.chrome = Some(PathBuf::from("/opt/chrome"));
+    let file = run.browser_profile.join("Default").join("Preferences");
+    let on = r#"{"plugins":{"always_open_pdf_externally":true}}"#;
+    super::browser::shell_folders(&mut run, &data);
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), on);
+    write::write_file(&file, b"{}").unwrap();
+    super::browser::shell_folders(&mut run, &data);
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), on);
+    run.remove();
+    write::remove_dir_all(&data).unwrap();
+}
+
 /// The session's temp folder (D-023) is made with its run folder and goes with it.
 #[test]
 fn the_temp_folder_is_made_in_the_run_folder_and_goes_with_it() {
