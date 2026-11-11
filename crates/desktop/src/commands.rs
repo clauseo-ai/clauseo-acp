@@ -308,10 +308,13 @@ pub(crate) async fn display_info<R: Runtime>(_app: AppHandle<R>) -> Result<Displ
     .await
 }
 
-/// Opens an https, http or mailto `url` in the default browser or mail app, after a native
-/// confirm that names where it goes, in the app's language. Any other link is
-/// `command.invalid`; declined, nothing opens and the call fails with `transport.unauthorized`.
-/// One confirm at a time: `command.conflict` while one is open, and for a second after a decline.
+/// Opens an https, http or mailto `url` in the default browser or mail app. `shown` is the
+/// link's visible text, when it has one. A plain web link opens at once; a mailto link, a link with
+/// a user name or an international host, and one whose `shown` text names another site open only
+/// after a native confirm that names where it goes, in the app's language (`open::needs_confirm`).
+/// Any other link is `command.invalid`; declined, nothing opens and the call fails with
+/// `transport.unauthorized`. One at a time: `command.conflict` while one is in progress, for a
+/// second after a decline, and for a second after a link opened with no confirm.
 #[tauri::command]
 #[cfg_attr(test, specta::specta)]
 pub(crate) async fn open_external<R: Runtime>(
@@ -319,6 +322,7 @@ pub(crate) async fn open_external<R: Runtime>(
     bridge: State<'_, Bridge>,
     gates: State<'_, OpenGates>,
     url: String,
+    shown: Option<String>,
 ) -> Result<(), HostError> {
     crate::ipc::timed("open_external", async {
         // The link is checked before anything else, the settings read included.
@@ -333,6 +337,7 @@ pub(crate) async fn open_external<R: Runtime>(
             &crate::open::now,
             language,
             &link,
+            shown.as_deref(),
         )
         .await
     })

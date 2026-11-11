@@ -1,5 +1,5 @@
-//! `open_external`'s link check and confirm, its words against their review home, and the Rust-only
-//! opener with no confirm.
+//! `open_external`'s link check and confirm (when it asks is in `ask.rs`), its words against their
+//! review home, and the Rust-only opener with no confirm.
 
 use super::*;
 
@@ -168,6 +168,7 @@ fn a_bad_scheme_is_refused_before_any_confirm() {
         &Clock::new(),
         Language::En,
         "file:///Applications/Calculator.app",
+        None,
     );
     assert_eq!(code(refused), ErrorCode::CommandInvalid);
     assert_eq!(confirm.shown(), []);
@@ -184,6 +185,7 @@ fn a_declined_confirm_opens_nothing_and_is_unauthorized() {
         &Clock::new(),
         Language::En,
         "https://example.com/a",
+        Some("example.org"),
     );
     let error = declined.unwrap_err();
     assert_eq!(error.code(), ErrorCode::TransportUnauthorized);
@@ -202,6 +204,7 @@ fn an_accepted_confirm_opens_the_link_it_named() {
         &Clock::new(),
         Language::En,
         "https://example.com/a",
+        Some("example.org"),
     )
     .unwrap();
     assert_eq!(
@@ -229,6 +232,7 @@ fn the_confirm_speaks_the_apps_language() {
         &Clock::new(),
         Language::Hi,
         "mailto:clerk@court.example",
+        None,
     )
     .unwrap();
     let shown = confirm.shown();
@@ -342,7 +346,7 @@ fn confirms_come_one_at_a_time_and_pause_after_a_decline() {
     // While one is open, a second is refused before anything is drawn.
     let pass = gate.enter(clock.now()).unwrap();
     let confirm = FakeConfirm::new(true);
-    let busy = block_on(open_external(
+    let busy = block_on(open_confirmed(
         &confirm,
         &opener,
         &gate,
@@ -356,7 +360,7 @@ fn confirms_come_one_at_a_time_and_pause_after_a_decline() {
     // Declined, the next is refused until AFTER_DECLINE has passed.
     let declining = FakeConfirm::new(false);
     let run = |confirm: &FakeConfirm| {
-        block_on(open_external(
+        block_on(open_confirmed(
             confirm,
             &opener,
             &gate,

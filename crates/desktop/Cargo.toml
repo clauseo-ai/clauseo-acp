@@ -85,6 +85,8 @@ async-io = { workspace = true }
 memchr = { workspace = true }
 # open_external's link check (src/open.rs): the scheme, the host in its ASCII form.
 url = { workspace = true }
+# open_external's look at a link's visible text (src/open/ask.rs): width-folded as link.tsx does.
+unicode-normalization = { workspace = true }
 # open_file's containment check resolves paths; clippy.toml bans std's canonicalize.
 dunce = { workspace = true }
 # The command ids the bridge mints for `answer_permission` and the focus refresh.

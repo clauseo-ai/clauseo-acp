@@ -267,9 +267,9 @@ impl<R: Runtime> ConnectorOpener for LinkOpener<R> {
     }
 }
 
-/// `OpenPayLink`'s open: the host's checked pay link, https only, through `open_external`'s
-/// native confirm and gate (one confirm at a time, a pause after a decline). Declined, nothing
-/// opens (`transport.unauthorized`).
+/// `OpenPayLink`'s open: the host's checked pay link, https only, always through `open_external`'s
+/// native confirm (`open::open_confirmed`) and gate (one confirm at a time, a pause after a
+/// decline). Declined, nothing opens (`transport.unauthorized`).
 pub(crate) async fn open_pay_link(
     confirm: &dyn LinkConfirm,
     opener: &dyn Opener,
@@ -279,7 +279,7 @@ pub(crate) async fn open_pay_link(
     url: &str,
 ) -> Result<(), HostError> {
     let link = local_link(url).map_or_else(|| https_link(url), Ok)?;
-    crate::open::open_external(confirm, opener, gate, now, language, &link).await
+    crate::open::open_confirmed(confirm, opener, gate, now, language, &link).await
 }
 
 /// `url` as a link `open_external` takes, https only.

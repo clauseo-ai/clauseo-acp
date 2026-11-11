@@ -104,6 +104,31 @@ test("a link click is cancelled and goes to the host; a file link that names no 
   ]);
 });
 
+test("a link click hands the host its visible text, whatever markup is inside", () => {
+  const seen: [string, string | undefined][] = [];
+  act(() =>
+    root.render(
+      <MarkdownHostContext
+        value={{ ...HOST, openExternal: (url, shown) => seen.push([url, shown]) }}
+      >
+        <Markdown
+          text="See [the **Supreme** Court](https://sci.gov.in/x) and <https://example.com/y>."
+          streaming={false}
+        />
+      </MarkdownHostContext>,
+    ),
+  );
+  const [court, auto] = [...host.querySelectorAll("a")];
+  click(court);
+  click(auto);
+  expect(seen).toEqual([
+    ["https://sci.gov.in/x", "the Supreme Court"],
+    ["https://example.com/y", "https://example.com/y"],
+  ]);
+  // what goes to the host is the text the link renders
+  expect([court?.textContent, auto?.textContent]).toEqual(seen.map(([, shown]) => shown));
+});
+
 test("a file link names a paper only through PaperLinksContext: a click or Enter sends that paper's path to openPath, never a navigation", () => {
   const asked: string[] = [];
   const papers: PaperLinks = (href) => {

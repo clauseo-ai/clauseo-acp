@@ -31,10 +31,13 @@ afterEach(() => vi.restoreAllMocks());
 describe("AnswerHost", () => {
   test("a link goes to openExternal", async () => {
     const t = new FakeTransport();
-    answerHost(t, "m-1", () => listed).openExternal("https://example.com/x");
+    const host = answerHost(t, "m-1", () => listed);
+    host.openExternal("https://example.com/x");
+    host.openExternal("https://example.com/y", "the judgment");
     await flush();
     expect(t.only("open_external")).toEqual([
       { call: "open_external", url: "https://example.com/x" },
+      { call: "open_external", url: "https://example.com/y", shown: "the judgment" },
     ]);
   });
 

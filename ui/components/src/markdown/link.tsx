@@ -129,7 +129,7 @@ export function Link({ href, id, children, text, ...rest }: LinkProps) {
       document.getElementById(fragmentId(url.slice(1)))?.scrollIntoView();
       return;
     }
-    host.openExternal(url);
+    host.openExternal(url, text);
   };
   const realHost = spoofedHost(text ?? "", url);
   return (

@@ -31,7 +31,14 @@ added: the dialog and opener plugins are called from Rust, as before.
     name.
 
   Anything else is `command.invalid`, checked before the settings are read and before any dialog.
-  Then a native confirm drawn by Rust names where the link goes: the host in its ASCII form (an
+  The command also takes the link's visible text (`shown`, optional). A plain https or http link
+  opens with no confirm (amended 2026-11-11). The confirm stays for a mailto link, a link with a user name or password, an
+  international host or a label in `xn--` form, and a link whose visible text names a host
+  (a token such as `example.com` or a whole URL, width-folded, invisible characters dropped) that is
+  neither the link's host nor a domain above or below it, `www.` aside (`open/ask.rs`). Text that
+  names no host ("the judgment") asks nothing. A connector's pay link always asks. A link opened
+  with no confirm holds the next for a second, so script in the page cannot open a stream of tabs.
+  For the links that ask, a native confirm drawn by Rust names where the link goes: the host in its ASCII form (an
   international name as `xn--`, so a look-alike cannot pass), with the port when the link names
   one, or the mail addresses. Its words follow the app's language (`ui.language`, read from the
   host when the dialog opens), in English and Hindi (`open/words.rs`, copy H11-01 to H11-07).
@@ -127,8 +134,8 @@ added: the dialog and opener plugins are called from Rust, as before.
 - On macOS, Escape cancels a confirm whose cancel button macOS recognises by its English title
   ("Cancel"); in Hindi Escape may do nothing (the dialog stays, nothing opens), since rfd cannot
   give the button its key.
-- A new type in `DOCUMENT_TYPES`, a new scheme, a confirm that is skipped, or a new reveal target
-  needs a new record.
+- A new type in `DOCUMENT_TYPES`, a new scheme, a confirm skipped beyond the plain web links
+  above, or a new reveal target needs a new record.
 
 ## Status
 
