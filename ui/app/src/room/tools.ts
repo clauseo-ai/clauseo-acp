@@ -82,7 +82,7 @@ const REASON: Record<
   off: "In Settings",
   locked_off: "Managed by firm",
   no_search_on_this_login: "Can't search on this login",
-  browser_blocked_by_policy: "Blocked by your firm",
+  browser_blocked_by_policy: "Blocked by a browser policy",
   browser_policy_unreadable: "Couldn't check browser settings",
 };
 

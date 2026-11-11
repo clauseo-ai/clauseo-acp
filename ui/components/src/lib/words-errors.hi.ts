@@ -85,8 +85,8 @@ export const HI = {
   "That folder holds Clauseo's own data.": "उस फ़ोल्डर में Clauseo का अपना डेटा है।",
   "That wasn't allowed, so nothing changed.": "इसकी अनुमति नहीं थी, इसलिए कुछ नहीं बदला।",
   "That is too large to send.": "यह भेजने के लिए बहुत बड़ा है।",
-  "Your organisation manages that setting, so it can't be changed.":
-    "यह सेटिंग आपका संगठन संभालता है, इसलिए इसे बदला नहीं जा सकता।",
+  "Your firm manages that setting, so it can't be changed.":
+    "यह सेटिंग आपकी फ़र्म प्रबंधित करती है, इसलिए इसे बदला नहीं जा सकता।",
   "Clauseo couldn't save that setting. Your settings are as they were.":
     "Clauseo वह सेटिंग सहेज नहीं सका। आपकी सेटिंग्स पहले जैसी हैं।",
   "A key is already kept on this computer. To change it, open Settings, then Plans.":
@@ -97,8 +97,6 @@ export const HI = {
     "प्रश्न आपकी फ़र्म के अपने खाते से जाते हैं, इसलिए यहाँ साइन इन करने को कुछ नहीं है।",
   "Clauseo is using your API key. To sign in with your plan instead, open Settings, then Plans, and remove the key.":
     "Clauseo आपकी API key इस्तेमाल कर रहा है। इसके बजाय अपने प्लान से साइन इन करने के लिए सेटिंग्स खोलें, फिर प्लान, और key हटाएँ।",
-  "Clauseo is using your firm's address. To sign in with your plan instead, open Settings, then Plans, and remove the address.":
-    "Clauseo आपकी फ़र्म का पता इस्तेमाल कर रहा है। इसके बजाय अपने प्लान से साइन इन करने के लिए सेटिंग्स खोलें, फिर प्लान, और पता हटाएँ।",
   "You're offline. Setting up waits for the connection.":
     "आप ऑफ़लाइन हैं। कनेक्शन मिलने तक सेटअप रुका रहेगा।",
   "Your network is blocking the download.": "आपका नेटवर्क डाउनलोड रोक रहा है।",

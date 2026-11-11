@@ -189,7 +189,7 @@ const ROWS: [ToolState, string | null][] = [
   [browser(off("off")), "In Settings"],
   [browser(off("locked_off")), "Managed by firm"],
   [browser(off("browser_not_installed")), "Install Chrome"],
-  [browser(off("browser_blocked_by_policy")), "Blocked by your firm"],
+  [browser(off("browser_blocked_by_policy")), "Blocked by a browser policy"],
   [browser(off("browser_policy_unreadable")), "Couldn't check browser settings"],
 ];
 
@@ -219,9 +219,9 @@ test.each(ROWS)(
     const offer =
       reason === "Install Chrome"
         ? "Install Google Chrome, then start a new conversation."
-        : reason === "Blocked by your firm"
-          ? "Your firm doesn't allow apps to control a browser on this computer, so Clauseo can't use " +
-            "one for you."
+        : reason === "Blocked by a browser policy"
+          ? "A Chrome or Edge policy on this computer doesn't let apps control the browser, so Clauseo " +
+            "can't use one for you."
           : reason === "Couldn't check browser settings"
             ? "Clauseo couldn't check this computer's browser settings, so it won't use a browser for " +
               "now. It checks again the next time it needs one." +

@@ -391,6 +391,21 @@ test.each([
   );
 });
 
+test("signin.endpoint_in_use, whose words are retired, reads as the generic error", async () => {
+  await at(
+    { signed_out: {} },
+    {
+      command: () => {
+        throw { code: "signin.endpoint_in_use", message: "refused", retryable: false };
+      },
+    },
+  );
+  await press(button("Sign in", block("claude")!));
+  expect(block("claude")!.querySelector('[data-testid="plans-refused"]')?.textContent).toBe(
+    "Something went wrong inside Clauseo.",
+  );
+});
+
 test("a command.conflict while switching says Clauseo is still switching accounts, and the typed key stays", async () => {
   const t = await at(
     { switching: { since: AT, stuck: false } },

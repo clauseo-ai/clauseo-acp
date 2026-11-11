@@ -24,7 +24,7 @@ export const HI = {
   // signed in: the balance in credits ({credits} is count()); its worth in rupees waits for stage E's gross rate
   "Ready to search.": "खोज के लिए तैयार।",
   // signed in with a pasted key: the firm's key, not the lawyer's account
-  "Using your firm's key.": "आपकी फ़र्म की key इस्तेमाल हो रही है।",
+  "Using your key.": "आपकी key इस्तेमाल हो रही है।",
   "{credits} credits left": "{credits} क्रेडिट बाकी",
   // the balance's worth in rupees and when it was read (U15-15, U15-76); GST-inclusive, as every amount
   "Worth {rupees}.": "मूल्य {rupees}।",
@@ -82,8 +82,8 @@ export const HI = {
   // the API key
   // the field's own word, in Hindi: "API key" stays the term, as everywhere in the Hindi (D-069)
   "API key": "API key डालें",
-  "Your firm's key for Clauseo's case-law service. Kept on this computer.":
-    "Clauseo की निर्णय-खोज सेवा के लिए आपकी फ़र्म की key। इसी कंप्यूटर पर रखी है।",
+  "Your key for Clauseo's case-law service. Kept on this computer.":
+    "Clauseo की निर्णय-खोज सेवा के लिए आपकी key। इसी कंप्यूटर पर रखी है।",
   "Add key": "key जोड़ें",
   // what each search sends; {name} is the agents' names (Claude, ChatGPT)
   "What each search sends": "हर खोज क्या भेजती है",

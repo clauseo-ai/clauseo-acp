@@ -131,7 +131,7 @@ function Block({ ctx, c, lang }: { ctx: SectionContext; c: ConnectorView; lang: 
   const payUrl = c.pay_url;
   // a signed-in status on the firm's pasted key says so; an account's, or none from an older host, says Ready to search
   const signedInWords = (method: string | undefined) =>
-    method === "api_key" ? w("Using your firm's key.") : w("Ready to search.");
+    method === "api_key" ? w("Using your key.") : w("Ready to search.");
   // the last watched recharge's outcome: a quiet line while the wire says it (an unknown word shows nothing)
   const recharge = c.last_recharge === undefined ? undefined : RECHARGE_LINE[c.last_recharge];
 

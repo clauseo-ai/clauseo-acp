@@ -48,7 +48,7 @@ export function KeyField({
         name={KEY}
         lang="en"
         label={cw(lang, "API key")}
-        note={cw(lang, "Your firm's key for Clauseo's case-law service. Kept on this computer.")}
+        note={cw(lang, "Your key for Clauseo's case-law service. Kept on this computer.")}
       />
       <div className="set-cn-actions">
         <Button kind="tone" size="small" type="submit" disabled={sending}>

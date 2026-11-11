@@ -71,6 +71,6 @@ test("Try again sends recheck_browser_policy once and waits until the read ends;
 
 test("the firm's block offers no Try again", async () => {
   h = await open("browser_blocked_by_policy");
-  expect(inRow("tool-row-reason")?.textContent).toBe("Blocked by your firm");
+  expect(inRow("tool-row-reason")?.textContent).toBe("Blocked by a browser policy");
   expect(inRow("tool-recheck")).toBeNull();
 });

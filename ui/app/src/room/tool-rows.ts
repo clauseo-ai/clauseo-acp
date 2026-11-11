@@ -46,7 +46,7 @@ export type ToolRowRoom = {
 };
 
 const POLICY: ToolsKey =
-  "Your firm doesn't allow apps to control a browser on this computer, so Clauseo can't use one for you.";
+  "A Chrome or Edge policy on this computer doesn't let apps control the browser, so Clauseo can't use one for you.";
 const UNREADABLE: ToolsKey =
   "Clauseo couldn't check this computer's browser settings, so it won't use a browser for now. It checks again the next time it needs one.";
 

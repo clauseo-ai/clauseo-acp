@@ -637,12 +637,15 @@
     "note": "Rohan, on the review page (built from U3 635858d3)"
   },
   "U3-err-settings.locked": {
-    "en": "Your organisation manages that setting, so it can't be changed.",
-    "hi": "यह सेटिंग आपका संगठन संभालता है, इसलिए इसे बदला नहीं जा सकता।",
+    "en": "Your firm manages that setting, so it can't be changed.",
+    "hi": "यह सेटिंग आपकी फ़र्म प्रबंधित करती है, इसलिए इसे बदला नहीं जा सकता।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-11",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
     "status": "approved",
-    "at": "2026-11-02",
-    "by": "Rohan",
-    "note": "Rohan, on the review page (built from U3 00b64f56)"
+    "at": "2026-11-11",
+    "by": "orchestrator (IT sweep, 2026-11-11)",
+    "note": "Rohan, on the review page (built from U3 00b64f56); was \"Your organisation manages that setting, so it can't be changed.\" (IT sweep)"
   },
   "U3-err-update.failed": {
     "en": "The update didn't install. Try again.",
@@ -726,16 +729,6 @@
   "U3-err-signin.key_in_use": {
     "en": "Clauseo is using your API key. To sign in with your plan instead, open Settings, then Plans, and remove the key.",
     "hi": "Clauseo आपकी API key इस्तेमाल कर रहा है। इसके बजाय अपने प्लान से साइन इन करने के लिए सेटिंग्स खोलें, फिर प्लान, और key हटाएँ।",
-    "hi_status": "provisional",
-    "hi_at": "2026-11-06",
-    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-05",
-    "by": "app track (provisional; Rohan batch review)"
-  },
-  "U3-err-signin.endpoint_in_use": {
-    "en": "Clauseo is using your firm's address. To sign in with your plan instead, open Settings, then Plans, and remove the address.",
-    "hi": "Clauseo आपकी फ़र्म का पता इस्तेमाल कर रहा है। इसके बजाय अपने प्लान से साइन इन करने के लिए सेटिंग्स खोलें, फिर प्लान, और पता हटाएँ।",
     "hi_status": "provisional",
     "hi_at": "2026-11-06",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",

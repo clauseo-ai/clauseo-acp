@@ -33,10 +33,10 @@ export const HI = {
     "Clauseo अपडेट की जाँच नहीं कर सका। फिर से प्रयास करें।",
   // who manages updates, where Clauseo doesn't update itself
   "Your firm manages updates for Clauseo.": "आपकी फ़र्म Clauseo के अपडेट संभालती है।",
-  "Clauseo is installed for everyone on this computer, so whoever looks after it installs updates.":
-    "Clauseo इस कंप्यूटर पर सभी के लिए इंस्टॉल है, इसलिए इसकी देखरेख करने वाले व्यक्ति अपडेट इंस्टॉल करते हैं।",
-  "Clauseo can't update itself from where it's installed. Ask whoever looks after this computer.":
-    "Clauseo जहाँ इंस्टॉल है, वहाँ से वह ख़ुद को अपडेट नहीं कर सकता। इस कंप्यूटर की देखरेख करने वाले व्यक्ति से पूछें।",
+  "Clauseo is installed for everyone on this computer, so it doesn't update itself. To update, run the new installer from an administrator account.":
+    "Clauseo इस कंप्यूटर पर सभी के लिए इंस्टॉल है, इसलिए वह ख़ुद को अपडेट नहीं करता। अपडेट करने के लिए, किसी व्यवस्थापक खाते से नया इंस्टॉलर चलाएँ।",
+  "Clauseo can't update itself from where it's installed. To update, install the new version over this one.":
+    "Clauseo जहाँ इंस्टॉल है, वहाँ से वह ख़ुद को अपडेट नहीं कर सकता। अपडेट करने के लिए, नया संस्करण इसी के ऊपर इंस्टॉल करें।",
   "Updates come through the package manager that installed Clauseo.":
     "अपडेट उसी पैकेज मैनेजर से आते हैं जिससे Clauseo इंस्टॉल हुआ था।",
   "This version of Clauseo doesn't update itself. To update, install the new version over this one. Your matters and settings stay.":
