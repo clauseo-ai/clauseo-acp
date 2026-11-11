@@ -182,12 +182,14 @@ export const ids = {
    * the count line otherwise.
    */
   queueSay: "queue-say",
-  /** The line above the field while the lawyer types during an answer the agent can steer. */
+  /** The line above the field while the lawyer types during an answer. */
   steerHint: "steer-hint",
-  /** In steerHint: sends the typed words now, steering the answer or stopping it. */
+  /** In steerHint: sends the typed words now (`delivery: "send_now"`), stopping the answer, on every agent. */
   steerSendNow: "steer-send-now",
-  /** The lawyer's words steered into an answer, standing in it where they arrived (`data-entry-id`). */
+  /** The lawyer's words steered into an answer, once the host confirmed the agent took them in (`data-entry-id`). */
   steerMark: "steer-mark",
+  /** A steer the host never sent: its words, and that they were not sent; they are back in the field. */
+  steerNotSent: "steer-not-sent",
   /** Where a steered message went, with `data-outcome` ("requeued" or "sent_now"). */
   steerOutcome: "steer-outcome",
   /** The status line's tool line, after the plan: the conversation's tools as glyphs, named in words (aria-label),
@@ -401,12 +403,16 @@ export function window(page: Page) {
     sendNext: id(ids.sendNext),
     /** The strip's head line: the held line, or the count line. */
     queueSay: id(ids.queueSay),
-    /** The steer hint above the field, shown while the lawyer types during a steerable answer. */
+    /** The steer hint above the field, shown while the lawyer types during an answer. */
     steerHint: id(ids.steerHint),
+    /** The hint's words: what Enter and Send now do with this agent. */
+    steerHintText: id(ids.steerHint).locator(".steer-hint-text"),
     /** Send now in the steer hint. */
     steerSendNow: id(ids.steerSendNow),
     /** The steered words in the answer. */
     steerMark: id(ids.steerMark),
+    /** The rows of steers never sent. */
+    steerNotSent: id(ids.steerNotSent),
     /** The steer outcome line of `outcome`: `requeued` or `sent_now`. */
     steerOutcome: (outcome: SteerOutcomeKind): Locator =>
       page.locator(`[data-testid="${ids.steerOutcome}"][data-outcome="${outcome}"]`),
