@@ -45,7 +45,7 @@ use clauseo_agents::{
 use clauseo_protocol::{AgentId, CommandOutcome, ErrorCode, HostError, SetupCommand, SetupEvent};
 use futures::{Stream, StreamExt as _};
 
-use super::admit::{key_stored, sign_in_barred};
+use super::admit::sign_in_barred;
 use super::compose::Compose;
 use super::confirm::{Ask, SetupConfirm};
 use super::host_calls::SetupHost;
@@ -62,7 +62,7 @@ use self::count::Tally;
 use self::entry::log_published;
 pub(crate) use self::entry::{launch, progress};
 pub(crate) use self::parts::signin_error;
-use self::parts::{checked_endpoint, invalid, network_first, plan_method, retry};
+use self::parts::{invalid, network_first, plan_method, retry};
 use self::pending::{Kept, Press};
 pub(crate) use self::seam::SetupAgents;
 use self::write::write_entry;
@@ -243,7 +243,9 @@ impl AgentsBackend {
                 })?;
                 self.replaced(&agent);
             }
-            SetupCommand::SetAgentKey { key, .. } => self.set_key(&agent, key, key_write).await?,
+            SetupCommand::SetAgentKey { key, .. } => {
+                key_endpoint::set_key(self, &agent, key, key_write).await?;
+            }
             SetupCommand::ClearAgentKey { .. } => {
                 let hold = leave::hold_reads(self, &agent).await;
                 let then = self.key_trigger(&agent);
@@ -253,103 +255,9 @@ impl AgentsBackend {
                 leave::restart_for_login(self, &agent).await;
             }
             SetupCommand::SetFirmEndpoint { url, .. } => {
-                self.set_endpoint(&agent, info, url).await?;
+                key_endpoint::set_endpoint(self, &agent, info, url).await?;
             }
         }
-        Ok(())
-    }
-
-    /// `SetAgentKey`: refused while policy blocks the agent, for a key the keychain would
-    /// refuse (`command.invalid`), and from `main` while a key is there; a reused login is left
-    /// first (the leave order), but only once the key is known to be taken: `main`'s first key
-    /// on a reused login reads the keychain first, and a read that fails refuses it, so no
-    /// refusal ever follows a leave (the security review's M5), and a computer with no keychain
-    /// refuses any key before it (review N1). The reads are held while the
-    /// key is written, then the agents restart with it and the limits read it.
-    async fn set_key(
-        &self,
-        agent: &AgentId,
-        key: clauseo_protocol::Secret,
-        key_write: KeyWrite,
-    ) -> Result<(), HostError> {
-        self.refuse_blocked(agent)?;
-        KeyCache::check(agent, &key)?;
-        self.keys.refuse_unavailable(agent)?;
-        // `main`'s first key leaves no login for a key that is there already. One marked
-        // unreadable goes on to the keychain's check, which reads it again.
-        if key_write == KeyWrite::OnlyIfAbsent && self.keys.in_memory(agent) {
-            return Err(key_stored(agent));
-        }
-        let left = self.reused(agent);
-        if left
-            && key_write == KeyWrite::OnlyIfAbsent
-            && self.keys.probe(agent, self.key_trigger(agent)).await?
-        {
-            return Err(key_stored(agent));
-        }
-        if left {
-            leave::leave_first(self, agent, leave::After::Command).await?;
-        }
-        let hold = leave::hold_reads(self, agent).await;
-        let then = self.key_trigger(agent);
-        let stored = self.keys.set(agent, key, key_write, then).await;
-        drop(hold);
-        if let Err(error) = stored {
-            if left {
-                leave::restart_if_usable(self, agent).await;
-            }
-            return Err(error);
-        }
-        self.compose.key_saved(agent);
-        self.end_sign_in(agent);
-        leave::restart_for_login(self, agent).await;
-        Ok(())
-    }
-
-    /// `SetFirmEndpoint`: every check before the confirm, so a refused endpoint asks nothing and
-    /// a page cannot write its own words into the dialog: `signin.policy_unreadable` while
-    /// policy is unreadable for a firm plan, `settings.locked` for a plan policy sets, and
-    /// `command.invalid` for an address the settings crate would refuse. Then the confirm, then
-    /// the endpoint alone written, the plan's provider and variables kept.
-    async fn set_endpoint(
-        &self,
-        agent: &AgentId,
-        info: &AgentInfo,
-        url: Option<String>,
-    ) -> Result<(), HostError> {
-        self.refuse_blocked(agent)?;
-        if info.plan_locked {
-            return Err(HostError::new(
-                ErrorCode::SettingsLocked,
-                format!("the firm's policy sets plans.{agent}"),
-            ));
-        }
-        let url = url.as_deref().map(checked_endpoint).transpose()?;
-        let name = info.name.clone();
-        self.ask(Ask::Endpoint {
-            name,
-            url: url.clone(),
-        })
-        .await?;
-        let left = url.is_some() && self.reused(agent);
-        if left {
-            leave::leave_first(self, agent, leave::After::Command).await?;
-        }
-        let firm = url.is_some() || info.provider;
-        let hold = leave::hold_reads(self, agent).await;
-        let set = self.host.set_endpoint(agent.clone(), url).await;
-        drop(hold);
-        if let Err(error) = set {
-            if left {
-                leave::restart_if_usable(self, agent).await;
-            }
-            return Err(error);
-        }
-        self.compose.set_firm(agent, firm);
-        if firm {
-            self.end_sign_in(agent);
-        }
-        leave::restart_for_login(self, agent).await;
         Ok(())
     }
 
@@ -600,6 +508,7 @@ impl AgentsBackend {
 
 mod count;
 mod entry;
+mod key_endpoint;
 mod parts;
 mod pending;
 mod seam;
