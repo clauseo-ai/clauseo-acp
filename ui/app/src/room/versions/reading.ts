@@ -257,19 +257,32 @@ export async function refusedPreview(
   return ask.stage === "word" || (ask.act === "restore" && ask.preview !== none) ? ask : null;
 }
 
+/** How long Undo waits for the host to say what changed since: a busy matter or a share that doesn't answer leaves
+ * each file's flag to decide after it. */
+export const EDITED_WAIT_MS = 5_000;
+
 /** The files of a turn's step changed since its after-turn version, as the thread's Undo asks the host
- * (preview_undo): null where the host refuses or answers another shape (an older host has none), and the dialog keeps
- * to what the versions say. */
+ * (preview_undo): null where the host refuses, answers another shape (an older host has none) or doesn't answer within
+ * EDITED_WAIT_MS, and the dialog keeps to what the versions say. */
 export async function editedSince(
   transport: Pick<HostTransport, "query">,
   thread: ThreadId | undefined,
   turn: TurnId,
 ): Promise<readonly string[] | null> {
   if (thread === undefined) return null;
-  try {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<null>((resolve) => {
+    timer = setTimeout(() => resolve(null), EDITED_WAIT_MS);
+  });
+  const ask = async (): Promise<readonly string[] | null> => {
     const r = await transport.query({ preview_undo: { thread, turn } });
     return "undo_preview" in r && r.undo_preview !== undefined ? r.undo_preview.edited_since : null;
+  };
+  try {
+    return await Promise.race([ask(), late]);
   } catch {
     return null;
+  } finally {
+    clearTimeout(timer);
   }
 }
