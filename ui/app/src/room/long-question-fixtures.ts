@@ -1,6 +1,11 @@
 // Scratch fixtures for the long-question audit (probe-main.tsx's ?question=2page|50page|2page-hi): a very long pasted
 // question in fake legal text, between fake parties, and a short answer. The text is built, not stored: numbered
 // paragraphs of sentences drawn in turn from a fixed bank, so every run gives the same words. Not shipped.
+// On the probe page, with ?question=4line, 2page, 50page, 2page-hi or 6mib, the thread is one finished exchange whose
+// question is a pasted text in fake legal words: about four lines, about 1,000 words, about 27,000 words (160 KB), two
+// pages of Hindi, or 6 MiB played as the host sends it (an Upsert with its first 4 KiB, then AppendText patches of
+// 4 KiB); window.__clauseoLongOpen times its arrival (delivered, first frame, whole), window.__clauseoLongText(words)
+// builds a text to paste into the composer, and window.__clauseoProbeCalls is what was sent.
 
 const PARTIES = [
   "Meridian Agro Traders Pvt. Ltd.",

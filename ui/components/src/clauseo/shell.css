@@ -308,10 +308,10 @@
   :root[data-render="lite"] .room-pin {
     border-bottom: var(--hairline) solid var(--divide-mid);
   }
-  /* a row a Find result jumps to lands clear of the pinned question's band (two lines and their padding), so no cut
+  /* a row a Find result jumps to lands clear of the pinned question's band (its one line and its padding), so no cut
      line of it shows under the pin (D-071; jump-entry.ts) */
   .room-thread [data-entry-id] {
-    scroll-margin-top: calc(2 * var(--lh-ui-loose) * var(--k) + 2 * var(--pin-pad-y) + var(--s2));
+    scroll-margin-top: calc(var(--lh-ui-loose) * var(--k) + 2 * var(--pin-pad-y) + var(--s2));
   }
   .room-centre:is([data-turn="page"], [data-turn="opening"]) .room-pin {
     visibility: hidden;

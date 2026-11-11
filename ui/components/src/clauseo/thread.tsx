@@ -11,6 +11,11 @@ import { dur, ease } from "./motion.ts";
 import type { Flourish } from "./flourish.ts";
 import { useRoom, type RoomNodes } from "./room-scope.ts";
 import { Say } from "./say.tsx";
+import { startOf } from "./question-fold-logic.ts";
+
+/** The pinned question's words: its start, more than one line holds at any width, so a 6 MiB question costs the bar
+ * no more layout than a short one; the line's ellipsis (thread.css) shows where it is cut. */
+const PIN_CHARS = 240;
 
 type Anchor = { i: number; frac: number; off: number };
 
@@ -290,6 +295,12 @@ export function Thread({
     const onPress = (e: PointerEvent) => {
       if (e.target === t && e.offsetX >= t.clientWidth) follow.leave();
     };
+    // a question's Show all or Show less (question-fold.tsx), by pointer or key: the lawyer is reading the question,
+    // so the view lets go of the end before the question grows or shrinks, and stays where it is. In the capture
+    // phase, before React's own listener at the root changes the question
+    const onFold = (e: MouseEvent) => {
+      if (e.target instanceof Element && e.target.closest("[data-fold]") !== null) follow.leave();
+    };
     t.addEventListener("scroll", onScroll, { passive: true });
     window.addEventListener("scroll", onScroll, { passive: true });
     window.addEventListener("resize", onScroll);
@@ -297,6 +308,7 @@ export function Thread({
     window.addEventListener("touchmove", onTouch, { passive: true });
     window.addEventListener("keydown", onKey);
     t.addEventListener("pointerdown", onPress);
+    t.addEventListener("click", onFold, true);
     return () => {
       cancelAnimationFrame(raf);
       t.removeEventListener("scroll", onScroll);
@@ -306,6 +318,7 @@ export function Thread({
       window.removeEventListener("touchmove", onTouch);
       window.removeEventListener("keydown", onKey);
       t.removeEventListener("pointerdown", onPress);
+      t.removeEventListener("click", onFold, true);
     };
   }, [follow]);
 
@@ -317,16 +330,21 @@ export function Thread({
     if (had) reach.current.nodes.get("field")?.focus({ preventScroll: true });
   };
 
+  // the pinned question pressed: the thread glides back to the question (at once under reduced motion or in lite) and
+  // the focus goes to it, so the keyboard and a screen reader go on from there. A folded question stays folded
   const backToQuestion = () => {
     const q = reach.current.nodes.get("questionStep");
     const t = thread.current;
     if (q === null || t === null) return;
     follow.leave();
-    if (!isWide()) window.scrollBy({ top: q.getBoundingClientRect().top - 72 });
-    else t.scrollTop = Math.max(0, q.offsetTop - 16);
+    const behavior = motionAllowed() ? "smooth" : "instant";
+    if (!isWide()) window.scrollBy({ top: q.getBoundingClientRect().top - 72, behavior });
+    else t.scrollTo({ top: Math.max(0, q.offsetTop - 16), behavior });
+    q.focus({ preventScroll: true });
     check();
   };
 
+  const pinWords = startOf(question, PIN_CHARS);
   return (
     <>
       <button
@@ -341,8 +359,8 @@ export function Thread({
       >
         <span className="room-pin-line">
           <span className="room-pin-who">{who}</span>
-          <span className="room-pin-text" lang={langOfText(question)}>
-            <Say>{question}</Say>
+          <span className="room-pin-text" lang={langOfText(pinWords)}>
+            <Say>{pinWords}</Say>
           </span>
           <span className="sr-only">
             {scrollBack(w.t("Your question: {q} Scroll back to it", { q: "\u0000" }))}

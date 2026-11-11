@@ -5,9 +5,9 @@
 // answer shows as its mark (steer.ts, steer-rows.tsx).
 import { memo, useState, useSyncExternalStore, type ReactNode } from "react";
 import { QuestionLine, Who } from "@clauseo/components/clauseo/answer.tsx";
+import { FoldedQuestion } from "@clauseo/components/clauseo/question-fold.tsx";
 import { Say } from "@clauseo/components/clauseo/say.tsx";
 import { mt } from "@clauseo/components/lib/words-matters.ts";
-import { langOfText } from "@clauseo/components/lib/script.ts";
 import { useThreadWords } from "@clauseo/components/lib/words-thread.ts";
 import { frd } from "@clauseo/components/lib/words-first-read.ts";
 import { Image } from "@clauseo/components/markdown/image.tsx";
@@ -87,9 +87,7 @@ function Question({
       ) : (
         <>
           <Who name={w.t("You")} time={at} />
-          <p className="asked" lang={langOfText(text)}>
-            <Say>{text}</Say>
-          </p>
+          <FoldedQuestion text={text} />
         </>
       )}
       {entry.content.map((block, i) =>

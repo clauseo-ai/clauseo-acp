@@ -14,6 +14,7 @@ import { U12 } from "./registry-u12.tsx";
 import { U15 } from "./registry-u15.tsx";
 import { U15_ROOM } from "./registry-u15-room.tsx";
 import { U17 } from "./registry-u17.tsx";
+import { LONG_QUESTION } from "./registry-long-question.tsx";
 import { WEB_SETTINGS } from "./registry-web-settings.tsx";
 import { U16A_RAIL } from "./registry-u16a-rail.tsx";
 import { U16A_FIND } from "./registry-u16a-find.tsx";
@@ -372,6 +373,7 @@ export const REGISTRY: readonly Entry[] = [
   ...U15,
   ...U15_ROOM,
   ...U17,
+  ...LONG_QUESTION,
   ...WEB_SETTINGS,
   ...U16A_RAIL,
   ...U16A_FIND,
