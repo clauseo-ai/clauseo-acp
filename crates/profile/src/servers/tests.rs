@@ -36,6 +36,8 @@ fn each_os_gets_its_own_port_and_socket_tokens() {
         after_cwd(&unix.args),
         [
             "{browser_dir}",
+            "--downloads",
+            "{matter_downloads}",
             "--cdp-port",
             "{cdp_port}",
             "--",
@@ -48,6 +50,8 @@ fn each_os_gets_its_own_port_and_socket_tokens() {
         after_cwd(&windows.args),
         [
             "{browser_dir}",
+            "--downloads",
+            "{matter_downloads}",
             "--cdp-port",
             "{cdp_port}",
             "--daemon-port",

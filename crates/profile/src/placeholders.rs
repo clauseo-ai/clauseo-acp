@@ -26,6 +26,10 @@ pub const MATTER_NOTES: &str = "{matter_notes}";
 /// guard's `--cwd`. The host joins it with the platform's own separators and fills it with a
 /// `dunce`-simplified path (no `\\?\` prefix on Windows), as one whole argument.
 pub const BROWSER_DIR: &str = "{browser_dir}";
+/// The matter's downloads folder, `<matter folder>/downloads` (the session's folder, as the
+/// agent's `cwd`), as the browser guard's `--downloads`: where a file the browser saves is
+/// delivered. Filled like [`BROWSER_DIR`]; the guard makes the folder.
+pub const MATTER_DOWNLOADS: &str = "{matter_downloads}";
 /// The egress proxy's port for the session. Unfillable (no proxy): the host drops `browser`
 /// and shows `NoProxy`.
 pub const PROXY_PORT: &str = "{proxy_port}";
@@ -80,8 +84,9 @@ pub const IN_INSTRUCTIONS: [&str; 4] = [WORK_FOLDER, MATTER_NOTES, CONNECTORS, B
 /// The tokens the host fills in the `browser` and `case-law` entries. The browser entry holds
 /// [`SOCKET_DIR`] on macOS and Linux only and [`DAEMON_PORT`] on Windows only; the host fills
 /// whichever it finds. Only `case-law` holds [`RELAY_PORT`] and [`RELAY_TOKEN_FILE`].
-pub const IN_SERVERS: [&str; 10] = [
+pub const IN_SERVERS: [&str; 11] = [
     BROWSER_DIR,
+    MATTER_DOWNLOADS,
     PROXY_PORT,
     SESSION_ID,
     BROWSER_EXECUTABLE,

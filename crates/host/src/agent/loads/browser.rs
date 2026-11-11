@@ -33,13 +33,17 @@ use std::path::Path;
 use clauseo_acp::McpServer;
 use clauseo_profile::instructions::BrowserPart;
 use clauseo_profile::placeholders::{
-    self, BROWSER_DIR, BROWSER_EXECUTABLE, CDP_PORT, DAEMON_PORT, IN_SERVERS, PROXY_PORT,
-    SESSION_ID, SOCKET_DIR, STREAM_PORT,
+    self, BROWSER_DIR, BROWSER_EXECUTABLE, CDP_PORT, DAEMON_PORT, IN_SERVERS, MATTER_DOWNLOADS,
+    PROXY_PORT, SESSION_ID, SOCKET_DIR, STREAM_PORT,
 };
 use clauseo_profile::servers::BROWSER;
 use clauseo_protocol::{ClauseoTool, ToolAvailability, ToolState, ToolsUnavailableReason};
 
 use super::McpControl;
+
+/// The matter's folder for what the browser saves, `<session folder>/downloads`
+/// (`{matter_downloads}`), which the guard makes.
+pub(crate) const DOWNLOADS_FOLDER: &str = "downloads";
 
 /// A `tools.*` switch as the settings hold it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -80,6 +84,9 @@ pub(crate) struct BrowserInputs<'a> {
     pub(crate) executable: Option<&'a Path>,
     /// The session's browser state folder, `<data>/run/<session id>/browser`.
     pub(crate) browser_dir: &'a Path,
+    /// The matter's downloads folder, `<session folder>/downloads`, where the guard delivers
+    /// what the browser saves (`{matter_downloads}`).
+    pub(crate) matter_downloads: &'a Path,
     /// The session's claimed ports, socket folder and agent-browser name, if they were claimed.
     pub(crate) claims: Option<Claims<'a>>,
 }
@@ -185,12 +192,14 @@ fn browser_entry(
     } else {
         None
     };
-    let (Some(executable), Some(browser_dir)) = (
+    let (Some(executable), Some(browser_dir), Some(matter_downloads)) = (
         executable.to_str(),
         dunce::simplified(inputs.browser_dir).to_str(),
+        dunce::simplified(inputs.matter_downloads).to_str(),
     ) else {
         tracing::warn!(
-            "the Chrome or the session's browser folder is not UTF-8: the browser is left out"
+            "the Chrome, the session's browser folder or the matter's folder is not UTF-8: the \
+             browser is left out"
         );
         return Err(ToolsUnavailableReason::BrowserNotInstalled);
     };
@@ -209,6 +218,7 @@ fn browser_entry(
     // Windows) is unfillable if the entry holds it, which leaves the browser out below.
     let mut values = vec![
         (BROWSER_DIR, browser_dir),
+        (MATTER_DOWNLOADS, matter_downloads),
         (SESSION_ID, claims.name),
         (BROWSER_EXECUTABLE, executable),
         (CDP_PORT, cdp_port.as_str()),

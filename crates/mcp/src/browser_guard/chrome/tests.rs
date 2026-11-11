@@ -34,6 +34,7 @@ fn chrome_gets_the_proxy_the_profile_and_the_claimed_port_never_port_zero() {
     let spec = Spec {
         executable: Path::new("/chrome"),
         cwd: Path::new("/state/browser"),
+        downloads: Path::new("/matter/downloads"),
         profile: Path::new("/state/browser/chrome-profile-1-0000abcd"),
         cdp_port: 61_101,
         proxy: Some(OsStr::new("http://127.0.0.1:8080")),
@@ -67,6 +68,7 @@ fn chrome_without_a_proxy_gets_no_proxy_switch() {
     let spec = Spec {
         executable: Path::new("/chrome"),
         cwd: Path::new("/state/browser"),
+        downloads: Path::new("/matter/downloads"),
         profile: Path::new("/state/browser/chrome-profile-1-0000abcd"),
         cdp_port: 61_101,
         proxy: None,
@@ -95,6 +97,7 @@ fn chrome_gets_one_feature_list_of_each_kind_and_no_weakened_security() {
     let spec = Spec {
         executable: Path::new("/chrome"),
         cwd: Path::new("/state/browser"),
+        downloads: Path::new("/matter/downloads"),
         profile: Path::new("/state/browser/chrome-profile-1-0000abcd"),
         cdp_port: 61_101,
         proxy: Some(OsStr::new("http://127.0.0.1:8080")),

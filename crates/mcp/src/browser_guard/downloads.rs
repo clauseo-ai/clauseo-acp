@@ -1,5 +1,7 @@
-//! Chrome's own downloads, moved from the profile's staging folder into `<cwd>/downloads` under
-//! a name that is never one of the names that would plant agent instructions or config.
+//! Chrome's own downloads, moved from the profile's staging folder into the downloads folder
+//! (the guard's `--downloads`: `<matter>/downloads` in a Codex session, else `<cwd>/downloads`)
+//! under a name that is never one of the names that would plant agent instructions or config.
+//! Each delivered file is told to the agent in its next tool result (`saved.rs`).
 //!
 //! A web page picks a download's name (`Content-Disposition`, `<a download>`), so a page could
 //! save `CLAUDE.md` or `.mcp.json`. Chrome therefore downloads into the staging folder in its
@@ -38,8 +40,10 @@ use crate::write;
 
 mod held;
 mod marks;
+mod saved;
 
 pub(crate) use held::Held;
+pub(crate) use saved::{OPEN_WAIT, Saved, open_reply};
 
 /// Names no download may take, compared without ASCII case: the matter root's write-denied
 /// names, `clauseo_sandbox::policy::PROTECTED_NAMES` (this crate may not depend on the sandbox;
@@ -89,11 +93,17 @@ pub(crate) struct Mover {
 
 impl Mover {
     /// Starts moving from `staging` to `downloads` every [`POLL`], recording each held download
-    /// in `held`.
-    pub(crate) fn start(staging: PathBuf, downloads: PathBuf, held: Arc<Held>) -> Mover {
+    /// in `held` and each delivered file in `saved`.
+    pub(crate) fn start(
+        staging: PathBuf,
+        downloads: PathBuf,
+        held: Arc<Held>,
+        saved: Arc<Saved>,
+    ) -> Mover {
         let (stop, stopped) = mpsc::channel::<()>();
         let mut sweeper = Sweeper::new(staging.clone(), downloads.clone(), MARK_WAIT);
         sweeper.held = Some(held);
+        sweeper.saved = Some(saved);
         let thread = thread::spawn(move || {
             while let Err(RecvTimeoutError::Timeout) = stopped.recv_timeout(POLL) {
                 sweeper.sweep();
@@ -143,7 +153,8 @@ pub(crate) struct Sweeper {
     wait: u32,
     /// Finished files seen without Chrome's mark, with how many sweeps each has waited.
     waited: HashMap<PathBuf, u32>,
-    /// Files whose mark could not be written, each noted once.
+    /// Files whose mark could not be written, or that cannot move to another drive, each noted
+    /// once.
     unmarkable: HashSet<PathBuf>,
     /// Whether a mark can be written in the staging folder: probed at the first finished file.
     marks_work: Option<bool>,
@@ -153,6 +164,8 @@ pub(crate) struct Sweeper {
     held: Option<Arc<Held>>,
     /// The held downloads seen, with how many sweeps in a row each was seen.
     held_seen: HashMap<PathBuf, u32>,
+    /// Where each delivered file is recorded (the reaper's sweep has none).
+    saved: Option<Arc<Saved>>,
 }
 
 impl Sweeper {
@@ -176,6 +189,7 @@ impl Sweeper {
             probe,
             held: None,
             held_seen: HashMap::new(),
+            saved: None,
         }
     }
 
@@ -230,9 +244,35 @@ impl Sweeper {
             }
             // A refusal (Windows: a sharing violation while Chrome, or a scanner, still holds the
             // file without delete sharing) is retried on the next sweep: the file stays in staging.
-            if place(&path, &self.downloads, &safe_name(&name), |_| {}).is_ok() {
-                self.waited.remove(&path);
-                self.unmarkable.remove(&path);
+            match place(&path, &self.downloads, &safe_name(&name), |_| {}) {
+                Ok(placed) => {
+                    self.waited.remove(&path);
+                    self.unmarkable.remove(&path);
+                    if let (Some(saved), Some(given)) = (&self.saved, placed.file_name()) {
+                        saved.record(&given.to_string_lossy());
+                    }
+                }
+                // A matter on another drive than the data folder: the move, which keeps the
+                // mark, cannot happen, ever. Told once; the file goes with the profile.
+                Err(error) if error.kind() == io::ErrorKind::CrossesDevices => {
+                    if self.unmarkable.insert(path.clone()) {
+                        super::note(
+                            "a download stays in staging: the downloads folder is on another drive",
+                        );
+                        if let Some(saved) = &self.saved {
+                            saved.record_unsaved(format!(
+                                "The browser downloaded {}, but it is not in the matter: the \
+                                 matter is on a different drive from Clauseo's data folder, so \
+                                 the file stayed in Clauseo's browser folder, which is cleared \
+                                 when the browser closes. Tell your user it was not saved to the \
+                                 matter, and that they can download it from the page in their \
+                                 own browser.",
+                                safe_name(&name)
+                            ));
+                        }
+                    }
+                }
+                Err(_) => {}
             }
         }
         let exists = |path: &PathBuf| std::fs::symlink_metadata(path).is_ok();

@@ -62,7 +62,9 @@ pub(super) fn launch_keys(
         // as it stands now (a slot taken in between leaves wrong words, but no browser).
         let control = loads::mcp_control(&actor.managed_mcp);
         let (_, browser_switch) = switches(actor);
-        let inputs = browser_inputs(actor, &prepared.run, control, browser_switch);
+        let matter = super::session::folder(actor, thread)?;
+        let downloads = matter.join(browser::DOWNLOADS_FOLDER);
+        let inputs = browser_inputs(actor, &prepared.run, (control, browser_switch), &downloads);
         let (_, entry) = browser::hook_servers(actor.profile.mcp_servers(&agent_id), &inputs);
         let shell = shell_browser(actor, &prepared.run, &agent_id);
         let kind = AgentKind::of(&agent_id);
@@ -123,7 +125,8 @@ pub(super) fn session_loads(
     let (hook, case_law_entry, case_law_state) = case_law_servers(actor, &run, offered, control);
     let part = connectors_part(case_law_entry.is_some());
     let (web_search, browser_switch) = switches(actor);
-    let inputs = browser_inputs(actor, &run, control, browser_switch);
+    let downloads = matter.join(browser::DOWNLOADS_FOLDER);
+    let inputs = browser_inputs(actor, &run, (control, browser_switch), &downloads);
     // Codex's `browser` entry (`clauseo_profile::servers::browser_mcp`), filled or left out.
     let (hook_servers, browser_state) = browser::hook_servers(hook, &inputs);
     // The shell tool (no agent's for launch); none for an agent offered the entry.
@@ -332,12 +335,13 @@ fn case_law_servers(
     (rest, entry, state)
 }
 
-/// What the `browser` entry of `run`'s session needs (`agent::loads::browser`).
+/// What the `browser` entry of `run`'s session needs (`agent::loads::browser`), whose
+/// matter's downloads folder is `matter_downloads`.
 fn browser_inputs<'a>(
     actor: &Actor,
     run: &'a RunFolders,
-    control: loads::McpControl,
-    switch: Switch,
+    (control, switch): (loads::McpControl, Switch),
+    matter_downloads: &'a Path,
 ) -> BrowserInputs<'a> {
     BrowserInputs {
         switch,
@@ -349,6 +353,7 @@ fn browser_inputs<'a>(
         blocked_by_policy: run.browser_blocked,
         executable: run.chrome.as_deref(),
         browser_dir: &run.browser,
+        matter_downloads,
         claims: run.browser_session.as_deref().map(Claims::of),
     }
 }

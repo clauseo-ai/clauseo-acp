@@ -18,6 +18,8 @@ fn codex_server(windows: bool) -> McpServer {
         "/app/agent-browser",
         "--cwd",
         "{browser_dir}",
+        "--downloads",
+        "{matter_downloads}",
         "--cdp-port",
         "{cdp_port}",
     ];
@@ -76,6 +78,8 @@ fn codex_s_entry_goes_without_a_proxy_on_each_os() {
             "/app/agent-browser",
             "--cwd",
             "/data/run/t-1/browser",
+            "--downloads",
+            "/matters/smith/downloads",
             "--cdp-port",
             "61101",
         ];
