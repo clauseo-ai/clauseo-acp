@@ -140,7 +140,13 @@ fn a_raw_control_character_is_escaped_inside_a_fragment() {
 }
 
 /// The top-level keys the reader takes for a message of the bridge's own, never an event's.
-const RESERVED: [&str; 4] = ["fragment", "stream_failed", "setup", "timed"];
+const RESERVED: [&str; 5] = [
+    "fragment",
+    "stream_failed",
+    "setup",
+    "window_full_screen",
+    "timed",
+];
 
 /// The number of `HostEvent` variants [`variant`] names.
 const VARIANTS: usize = 18;
@@ -424,4 +430,17 @@ fn an_event_too_long_to_wrap_goes_as_it_would_untimed() {
     // A time that is not finite goes plain.
     let small = event_of(500);
     assert_eq!(timed_messages(&small, f64::NAN, 0), messages(&small, 0));
+}
+
+/// `main`'s full-screen message, desktop's own on the app feed, under its reserved key.
+#[test]
+fn the_full_screen_message_is_one_bool_under_its_key() {
+    assert_eq!(
+        window_full_screen_text(true),
+        r#"{"window_full_screen":true}"#
+    );
+    assert_eq!(
+        window_full_screen_text(false),
+        r#"{"window_full_screen":false}"#
+    );
 }

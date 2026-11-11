@@ -492,3 +492,51 @@ fn a_late_close_of_an_old_window_leaves_the_newer_one() {
         "the newer window's own close kept it"
     );
 }
+
+/// The next `window_full_screen` message on `messages`, skipping the host's app events; panics
+/// on any other message.
+fn next_full_screen(messages: &Messages) -> String {
+    loop {
+        let text = messages.next_text();
+        if text.starts_with(r#"{"window_full_screen":"#) {
+            return text;
+        }
+        let _event = messages_event(&text);
+    }
+}
+
+/// `main`'s full screen on the app feed (`window_events::on_main_resized`): a subscription starts
+/// with the value read before it, each change after is one message, and the same value again
+/// sends none. The settings window, which follows the app feed too, never gets it.
+#[test]
+fn main_s_app_feed_starts_with_the_full_screen_value_and_carries_each_change_once() {
+    let scratch = Scratch::new("app-full-screen", &[]);
+    let host = scratch.start(Vec::new());
+    let bridge = host.bridge();
+    assert!(bridge.window_full_screen(true));
+    let main = open(&bridge, MAIN);
+    let settings_page = open(&bridge, SETTINGS);
+    block_on(bridge.subscribe_app(MAIN)).unwrap();
+    block_on(bridge.subscribe_app(SETTINGS)).unwrap();
+    assert_eq!(next_full_screen(&main), r#"{"window_full_screen":true}"#);
+
+    assert!(
+        !bridge.window_full_screen(true),
+        "the same value is no change"
+    );
+    assert!(bridge.window_full_screen(false));
+    assert_eq!(next_full_screen(&main), r#"{"window_full_screen":false}"#);
+    // A settings change after: had the repeat been sent, it would come before this.
+    block_on(bridge.dispatch(MAIN, set_theme(Theme::Dark))).unwrap();
+    loop {
+        let text = main.next_text();
+        assert!(!text.starts_with(r#"{"window_full_screen":"#), "{text}");
+        if let HostEvent::SettingsChanged(changed) = messages_event(&text) {
+            assert_eq!(changed.ui.theme, Theme::Dark);
+            break;
+        }
+    }
+    assert_eq!(settings(settings_page.next_event()).ui.theme, Theme::System);
+    assert_eq!(settings(settings_page.next_event()).ui.theme, Theme::Dark);
+    assert_eq!(settings_page.drain(), Vec::<String>::new());
+}

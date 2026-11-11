@@ -233,7 +233,8 @@ pub(crate) async fn unsubscribe<R: Runtime>(
 
 /// Subscribes the window's channel to the app-wide events, those of no stream (today
 /// `settings_changed`). It starts with nothing: subscribe, then read the current state with
-/// `query`. Subscribing again restarts it; a new `open_stream` drops it.
+/// `query`. Subscribing again restarts it; a new `open_stream` drops it. For `main` it also
+/// carries desktop's `window_full_screen`, read here first so the feed starts with it.
 #[tauri::command]
 #[cfg_attr(test, specta::specta)]
 pub(crate) async fn subscribe_app<R: Runtime>(
@@ -241,6 +242,13 @@ pub(crate) async fn subscribe_app<R: Runtime>(
     bridge: State<'_, Bridge>,
 ) -> Result<(), HostError> {
     crate::ipc::timed("subscribe_app", async {
+        // `main`'s full-screen value as it is now, so the feed starts with it even before the
+        // window's first resize (`window_events::on_main_resized` keeps it after).
+        if webview.label() == crate::MAIN_WINDOW
+            && let Ok(full) = webview.window().is_fullscreen()
+        {
+            bridge.window_full_screen(full);
+        }
         bridge.subscribe_app(webview.label()).await
     })
     .await

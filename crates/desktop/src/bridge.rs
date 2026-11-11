@@ -29,6 +29,7 @@ use crate::host_start::HostCell;
 use crate::picked::{self, PickedFolder};
 use crate::settings_window::SETTINGS_WINDOW;
 use crate::setup::Setup;
+use crate::window_events::FullScreen;
 
 mod admit;
 mod permission;
@@ -87,6 +88,8 @@ pub(crate) struct Bridge {
     refreshes: RefreshThrottle,
     /// The `setup` command's path and its events (`setup.rs`, 0048).
     setup: Setup,
+    /// Whether `main` is in the OS's own full screen, for its app feed (`window_events.rs`).
+    full_screen: Arc<FullScreen>,
 }
 
 /// Locks `mutex`, taking the data of one a panicking holder left: every critical section here
@@ -123,7 +126,15 @@ impl Bridge {
             issued: Mutex::new(HashSet::new()),
             refreshes: RefreshThrottle::default(),
             setup,
+            full_screen: Arc::default(),
         }
+    }
+
+    /// Keeps whether `main` is in the OS's own full screen, and sends it on the app feed of
+    /// every window that follows it when it changed (`FullScreen::set`). Returns whether it
+    /// changed.
+    pub(crate) fn window_full_screen(&self, full: bool) -> bool {
+        self.full_screen.set(full)
     }
 
     /// Runs the window `label`'s setup command (`setup.rs`): its allow-list first.
@@ -303,7 +314,13 @@ impl Bridge {
         let number = self.opens.fetch_add(1, Ordering::Relaxed);
         let host = self.host().await?;
         let app_events = pump::AppEvents::of(label);
-        let window = Window::open(host.clone(), channel, app_events, self.setup.events());
+        let window = Window::open(
+            host.clone(),
+            channel,
+            app_events,
+            self.setup.events(),
+            Arc::clone(&self.full_screen),
+        );
         let mut windows = lock(&self.windows);
         let newer = windows.get(label).is_some_and(|(kept, _)| *kept > number);
         let dead = lock(&self.closed)

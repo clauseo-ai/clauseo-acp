@@ -39,7 +39,8 @@ export const commands = {
 	/**
 	 *  Subscribes the window's channel to the app-wide events, those of no stream (today
 	 *  `settings_changed`). It starts with nothing: subscribe, then read the current state with
-	 *  `query`. Subscribing again restarts it; a new `open_stream` drops it.
+	 *  `query`. Subscribing again restarts it; a new `open_stream` drops it. For `main` it also
+	 *  carries desktop's `window_full_screen`, read here first so the feed starts with it.
 	 */
 	subscribeApp: () => typedError<null, HostError>(__TAURI_INVOKE("subscribe_app")),
 	/**
@@ -5799,7 +5800,9 @@ FragmentMessage |
 /**  A stream the bridge could not restart. */
 StreamFailedMessage | 
 /**  An install or sign-in change (0048). */
-SetupMessage;
+SetupMessage | 
+/**  Whether `main` is in the OS's own full screen. */
+WindowFullScreenMessage;
 
 /**
  *  The parameters of `subscribe`: the tail after `after`, or a `Reset` when `after` is `None`,
@@ -7038,6 +7041,15 @@ export type WindowFreshness =
 "loading" | 
 /**  Its reset time passed and a refresh is running ("Reset at 4:10 pm. Refreshing..."). */
 "reset_passed";
+
+/**
+ *  `{"window_full_screen": <bool>}`: whether `main` is in the OS's own full screen
+ *  (`Window::is_fullscreen`). On a notched Mac that window is shorter than its screen, so the
+ *  page cannot tell from its size.
+ */
+export type WindowFullScreenMessage = {
+	window_full_screen: boolean,
+};
 
 /**  What a usage window counts. */
 export type WindowKind = 
