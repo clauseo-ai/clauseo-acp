@@ -3453,6 +3453,13 @@ export type MarkerKind =
 	restored: MatterPath[],
 	/**  Files kept as they were. */
 	kept: MatterPath[],
+	/**
+	 *  The kept files the lawyer chose to undo that Clauseo had no earlier copy of, with why
+	 *  each had not been versioned: in the folder before the turn but skipped (cloud-only or
+	 *  over the size cap), then changed by it. Undo never deletes or overwrites them. Missing
+	 *  reads as empty, and empty is left out, so an entry from before the field still decodes.
+	 */
+	unversioned?: SkippedFile[],
 } }) & { compaction?: never; matter_relocated?: never; version_restored?: never } | 
 /**
  *  A version was restored (matter stream, and the stream of the conversation it was asked
@@ -5687,6 +5694,13 @@ export type StepUndone = {
 	restored: MatterPath[],
 	/**  The files the lawyer chose to keep. */
 	kept: MatterPath[],
+	/**
+	 *  The kept files the lawyer chose to undo that Clauseo had no earlier copy of, with why
+	 *  each had not been versioned: in the folder before the turn but skipped (cloud-only or
+	 *  over the size cap), then changed by it. Undo never deletes or overwrites them. Missing
+	 *  reads as empty, and empty is left out, so an entry from before the field still decodes.
+	 */
+	unversioned?: SkippedFile[],
 };
 
 /**

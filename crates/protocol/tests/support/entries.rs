@@ -219,6 +219,7 @@ fn turn_entries() -> Vec<ViewEntry> {
                 checkpoint: checkpoint_id(15),
                 restored: vec![path("a.docx")],
                 kept: vec![],
+                unversioned: Vec::new(),
             },
             ts: Timestamp::new(1_760_000_006_000).unwrap(),
         }),

@@ -447,6 +447,7 @@ fn turn_end_events() -> Vec<DomainEvent> {
             checkpoint: checkpoint_id(15),
             restored: vec![path("a.docx")],
             kept: vec![path("b/new.docx")],
+            unversioned: Vec::new(),
         }
         .into(),
     ]

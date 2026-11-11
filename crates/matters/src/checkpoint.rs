@@ -513,6 +513,11 @@ impl Core {
             self.size_of(file.path.as_str(), file.blob)
         })
     }
+
+    /// What the step from `before` to `after` read for the first time.
+    pub(crate) fn step_reads(&self, before: CheckpointId, after: CheckpointId) -> StepReads {
+        self.timeline.step_reads(before, after)
+    }
 }
 
 /// `files` (sorted by path bytes) as checked paths.

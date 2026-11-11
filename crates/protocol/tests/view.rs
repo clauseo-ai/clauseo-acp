@@ -164,6 +164,7 @@ fn entry_inline_len_sums_vec_items() {
         checkpoint: checkpoint_id(15),
         restored: vec![path("a.docx")],
         kept: vec![],
+        unversioned: Vec::new(),
     };
     assert_eq!(marker(undone).inline_len(), 0);
     assert_eq!(header().inline_len(), 0);

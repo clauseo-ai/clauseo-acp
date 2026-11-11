@@ -5,7 +5,8 @@ use std::collections::{BTreeMap, HashSet};
 use std::path::Path;
 
 use clauseo_protocol::{
-    ChangeKind, CheckpointId, CheckpointKind, ContentId, FileChoice, MatterPath,
+    ChangeKind, CheckpointId, CheckpointKind, ContentId, FileChoice, MatterPath, SkippedFile,
+    SkippedFileReason,
 };
 
 use crate::checkpoint::{Core, SizedFile, Spec};
@@ -21,11 +22,19 @@ use crate::{Error, locks};
 struct Step {
     path: MatterPath,
     ops: Vec<Op>,
+    /// `Some` for a file that was in the folder before the step but never versioned (skipped
+    /// for this reason, then read changed: `first_read.rs`): there is no earlier copy, so undo
+    /// keeps it as it is. Its `ops` are empty.
+    unversioned: Option<SkippedFileReason>,
 }
 
 /// The step from `before` to `after` as undo operations, sorted by path. A deletion whose
 /// file is there now but over the cap or cloud-only is left out: the checkpoint that saw it
 /// leave the tree reported it as skipped, not deleted, and undo never writes such a file.
+///
+/// Undo never deletes or writes a file that was in the folder before the step, versioned or
+/// not: a file the step read for the first time (`Core::step_reads`) gets no operation and is
+/// kept ([`Step::unversioned`]), and so would a deletion of a file `before` holds.
 fn step(
     core: &Core,
     folder: &Path,
@@ -45,6 +54,7 @@ fn step(
         kept.push(change);
     }
     let changes = kept;
+    let there = core.step_reads(before, after).there;
     let before_files = core.files_of(before)?;
     let blob = |path: &MatterPath| {
         find(&before_files, path.as_str())
@@ -69,7 +79,29 @@ fn step(
                 return Err(Error::history("undo", "a change of an unknown kind"));
             }
         };
-        steps.push(Step { path, ops });
+        let was_there = |op: &Op| match op {
+            Op::Delete(target) => {
+                there.contains_key(target) || find(&before_files, target.as_str()).is_some()
+            }
+            Op::Write(target, _) => there.contains_key(target),
+        };
+        if ops.iter().any(was_there) {
+            let reason = there
+                .get(&path)
+                .copied()
+                .unwrap_or(SkippedFileReason::Unknown);
+            steps.push(Step {
+                path,
+                ops: Vec::new(),
+                unversioned: Some(reason),
+            });
+        } else {
+            steps.push(Step {
+                path,
+                ops,
+                unversioned: None,
+            });
+        }
     }
     Ok(steps)
 }
@@ -98,11 +130,16 @@ pub(crate) fn edited_since(
     after: CheckpointId,
 ) -> Result<Vec<MatterPath>, Error> {
     let changes = core.changes_between(before, after)?;
+    // As in `step`: a file that was there before the step, never versioned, is never undone.
+    let there = core.step_reads(before, after).there;
     let mut edited = Vec::new();
     let mut names = Names::default();
     let guard = NoDownload::begin(settings.probe.as_ref());
     for change in &changes {
         let path = change.path();
+        if there.contains_key(path) {
+            continue;
+        }
         // Each path undoing the change writes or deletes, with what `after` holds there.
         let targets: Vec<(&MatterPath, Option<&ContentId>)> = match change.change() {
             ChangeKind::Added | ChangeKind::Modified => vec![(path, change.after())],
@@ -187,7 +224,18 @@ pub(crate) fn undo(
     let choices = choices(&steps, request)?;
     let mut acting: Vec<&Step> = Vec::new();
     let mut kept: Vec<MatterPath> = Vec::new();
+    let mut unversioned: Vec<SkippedFile> = Vec::new();
     for (step, choice) in steps.iter().zip(&choices) {
+        if let Some(reason) = step.unversioned {
+            if *choice == FileChoice::Undo {
+                unversioned.push(SkippedFile {
+                    path: step.path.clone(),
+                    reason,
+                });
+            }
+            kept.push(step.path.clone());
+            continue;
+        }
         let mut ok = *choice == FileChoice::Undo;
         if ok {
             for op in &step.ops {
@@ -279,6 +327,7 @@ pub(crate) fn undo(
         checkpoint,
         restored,
         kept,
+        unversioned,
         edited_since,
         resurrected,
         deleted: sorted(deleted),
@@ -437,5 +486,7 @@ fn keep_respelled(
     }
 }
 
+#[cfg(test)]
+mod hard_rule_tests;
 #[cfg(test)]
 mod tests;
