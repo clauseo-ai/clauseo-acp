@@ -134,7 +134,8 @@ fn only_the_browser_part_names_agent_browser() {
         "never a browser command in your shell",
         "confidential matter text",
         "The eval tool is off",
-        "Your shell has no internet, so save files with the download tool, never curl or wget.",
+        "Your shell has no internet, so save a file by clicking its link in the browser, never with \
+         curl or wget.",
         "close tool",
     ] {
         assert!(codex_on.contains(rule), "{rule}: {codex_on}");
