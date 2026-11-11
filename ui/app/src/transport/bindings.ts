@@ -4700,6 +4700,12 @@ export type QueryResult =
 	 *  where `<folder>/` sorts).
 	 */
 	truncated: boolean,
+	/**
+	 *  Where the matter's folder lives, as `FolderScanned`'s `place` says it: for the
+	 *  words of a cloud-only file in `skipped`. Asked of the OS on each listing; reads no
+	 *  file.
+	 */
+	place: FolderPlace,
 } }) & { agents?: never; allowed_sites?: never; blob?: never; default_location?: never; entries?: never; file_changes?: never; folder_support?: never; matters?: never; protection?: never; restore_preview?: never; revisions?: never; search?: never; settings?: never; skill_packs?: never; threads?: never; undo_preview?: never; update?: never; word_blackline?: never } | 
 /**  For `ListAgents`: one per settings agent whose id is a valid [`AgentId`], sorted by id. */
 ({ agents: AgentSummary[] }) & { allowed_sites?: never; blob?: never; default_location?: never; entries?: never; file_changes?: never; folder_support?: never; matters?: never; papers?: never; protection?: never; restore_preview?: never; revisions?: never; search?: never; settings?: never; skill_packs?: never; threads?: never; undo_preview?: never; update?: never; word_blackline?: never } | 

@@ -9,6 +9,7 @@ import {
   type AgentSummary,
   type MatterInfo,
   type NextPart,
+  type Papers,
   type PaperSummary,
   type ThreadInfo,
 } from "./host-next.ts";
@@ -28,6 +29,7 @@ export const detailed = (m: MatterSummary, over: Partial<MatterInfo> = {}): Matt
 export function fakeNext({
   matters,
   papers = [],
+  listing = {},
   location = null,
   threads = () => [],
   agents = [],
@@ -38,6 +40,9 @@ export function fakeNext({
   matters: () => readonly MatterInfo[];
   /** The papers, or a read of them on each list_papers (a folder changed while the matter is open, 0055). */
   papers?: readonly PaperSummary[] | (() => readonly PaperSummary[]);
+  /** The rest of each list_papers answer, or a read of it beside the papers: the files left out, the folders not read,
+   * where the folder lives (none, nowhere, here by default). */
+  listing?: Partial<Omit<Papers, "papers">> | (() => Partial<Omit<Papers, "papers">>);
   threads?: (matter: MatterId) => readonly ThreadInfo[];
   /** The agents, or a read of them on each list_agents (a plan set up while the room is open). */
   agents?: readonly AgentSummary[] | (() => readonly AgentSummary[]);
@@ -64,6 +69,8 @@ export function fakeNext({
             skipped: [],
             unread: [],
             truncated: false,
+            place: "local",
+            ...(typeof listing === "function" ? listing() : listing),
           },
         };
       return { threads: [...threads(query.list_threads.matter)] };

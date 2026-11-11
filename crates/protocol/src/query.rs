@@ -9,11 +9,11 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
 use crate::open_enum::open_unit_enum;
 use crate::{
     AgentId, AgentKind, AgentPrefs, AllowedSite, BlobHash, CheckpointId, ClientName, CompactString,
-    ConfigOption, Count, Date, Error, FileChange, FileRefId, LastStop, MatterId, MatterKind,
-    MatterPath, MatterSource, MatterStatus, PackList, PackStatus, Protection, ProtectionView,
-    QueueHoldReason, RestoreRequest, RevisionList, SearchAnswer, SearchRequest, Seq, SettingsView,
-    SkippedFile, StreamId, ThreadId, ThreadStatus, Timestamp, TurnId, UpdateView, ViewEntry,
-    WordBlackline,
+    ConfigOption, Count, Date, Error, FileChange, FileRefId, FolderPlace, LastStop, MatterId,
+    MatterKind, MatterPath, MatterSource, MatterStatus, PackList, PackStatus, Protection,
+    ProtectionView, QueueHoldReason, RestoreRequest, RevisionList, SearchAnswer, SearchRequest,
+    Seq, SettingsView, SkippedFile, StreamId, ThreadId, ThreadStatus, Timestamp, TurnId,
+    UpdateView, ViewEntry, WordBlackline,
 };
 
 /// Most entries one `PageEntries` returns: the size of a `Reset`'s view window (about 200 recent
@@ -269,6 +269,10 @@ pub enum QueryResult {
         /// `unread` together are then its first [`MAX_PAPERS`] by path (a folder counted
         /// where `<folder>/` sorts).
         truncated: bool,
+        /// Where the matter's folder lives, as `FolderScanned`'s `place` says it: for the
+        /// words of a cloud-only file in `skipped`. Asked of the OS on each listing; reads no
+        /// file.
+        place: FolderPlace,
     },
     /// For `ListAgents`: one per settings agent whose id is a valid [`AgentId`], sorted by id.
     Agents(Vec<AgentSummary>),

@@ -82,7 +82,9 @@ async function room(busy = false) {
       parts: ["papers"],
       query: (q) => {
         if (typeof q === "object" && "list_papers" in q)
-          return { papers: { papers: PAPERS, skipped: [], unread: [], truncated: false } };
+          return {
+            papers: { papers: PAPERS, skipped: [], unread: [], truncated: false, place: "local" },
+          };
         throw new Error(`not scripted: ${JSON.stringify(q)}`);
       },
     },

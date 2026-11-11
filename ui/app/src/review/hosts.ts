@@ -14,6 +14,7 @@ import type {
   FolderSupportKind,
   LimitsView,
   MatterSummary,
+  SkippedFile,
   ThreadStatus,
   ViewEntry,
 } from "../transport/protocol.ts";
@@ -22,6 +23,7 @@ import {
   WIRE,
   type NextErrorCode,
   type NextHostError,
+  type Papers,
   type PaperSummary,
   type SiteBlocked,
 } from "../room/host-next.ts";
@@ -41,15 +43,24 @@ const SCRATCH: MatterSummary = {
 };
 
 /** A host with these matters; with papers, also H8's list of the matter's papers (and the matters' details). */
-export function roomHost(matters: MatterSummary[], papers?: PaperSummary[]): FakeTransport {
+export function roomHost(
+  matters: MatterSummary[],
+  papers?: PaperSummary[],
+  away?: { listing: Partial<Omit<Papers, "papers">>; platform?: "mac" | "windows" },
+): FakeTransport {
   const host: FakeHost = {
+    ...(away?.platform === undefined ? {} : { platform: away.platform }),
     query: (query) => {
       if (query === "list_matters") return { matters };
       throw new Error(`the review's host answers list_matters only, not ${JSON.stringify(query)}`);
     },
   };
   if (papers !== undefined)
-    host.next = fakeNext({ matters: () => matters.map((m) => detailed(m)), papers });
+    host.next = fakeNext({
+      matters: () => matters.map((m) => detailed(m)),
+      papers,
+      ...(away === undefined ? {} : { listing: away.listing }),
+    });
   return new FakeTransport(host);
 }
 
@@ -81,6 +92,8 @@ export type ThreadState = {
   undoLocked?: string[];
   /** H8's papers, as list_papers lists them: the wall's tiles, and a change note's Open in Word (U9). */
   papers?: PaperSummary[];
+  /** The files list_papers leaves out, with why: the wall's dimmed tiles. */
+  skipped?: SkippedFile[];
   /** open_file says Word opened the file in Protected View, as for a path too long for Word (U9). */
   protectedView?: boolean;
   /** open_file is refused with this code, as matter.document_path_too_long for a path too long for Word (U9). */
@@ -144,9 +157,10 @@ function papersNext(state: ThreadState): FakeNextHost {
       return {
         papers: {
           papers: state.papers ?? [],
-          skipped: [],
+          skipped: state.skipped ?? [],
           unread: [],
           truncated: state.papersAnswer === "truncated",
+          place: "local",
         },
       };
     },

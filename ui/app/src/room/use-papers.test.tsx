@@ -30,6 +30,7 @@ const papers = (tracked: boolean): Papers =>
     skipped: [],
     unread: [],
     truncated: false,
+    place: "local",
   }) as unknown as Papers;
 
 /** A papers host whose answers the test settles, one per call, in any order. */

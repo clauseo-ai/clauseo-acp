@@ -221,6 +221,7 @@ const PAPERS: Papers = {
   skipped: [],
   unread: [],
   truncated: false,
+  place: "local",
 };
 
 test("papers: list_papers names the matter, and the answer's papers come back as they are", async () => {

@@ -48,7 +48,7 @@ describe("an answer's paper (AnswerHost)", () => {
     const answer = new AnswerHost(t, MATTER, refusals);
     answer.show({
       matter: MATTER,
-      papers: { papers: PAPERS, skipped: [], unread: [], truncated: false },
+      papers: { papers: PAPERS, skipped: [], unread: [], truncated: false, place: "local" },
     });
     return answer;
   };

@@ -520,8 +520,8 @@ fn compare_versions_to_is_a_checkpoint_or_the_folder_now() {
 #[test]
 fn list_papers_and_its_answer_on_the_wire() {
     use clauseo_protocol::{
-        Count, MAX_PAPERS, MatterId, MatterPath, PaperSummary, QueryResult, SkippedFile,
-        SkippedFileReason, Timestamp,
+        Count, FolderPlace, MAX_PAPERS, MatterId, MatterPath, PaperSummary, QueryResult,
+        SkippedFile, SkippedFileReason, SyncService, Timestamp,
     };
     let matter = MatterId::new(fixtures::v7(1)).unwrap();
     let query = HostQuery::ListPapers { matter };
@@ -544,6 +544,9 @@ fn list_papers_and_its_answer_on_the_wire() {
         }],
         unread: vec![MatterPath::new("OneDrive/Archive").unwrap()],
         truncated: false,
+        place: FolderPlace::Synced {
+            service: SyncService::OneDrive,
+        },
     };
     round_trips(&result);
     assert_eq!(
@@ -552,7 +555,8 @@ fn list_papers_and_its_answer_on_the_wire() {
             r#"{"papers":{"papers":[{"file":"01900000-0000-7000-8000-000000000002","#,
             r#""path":"pleadings/claim.docx","size":1200,"modified":1577836800250}],"#,
             r#""skipped":[{"path":"video.mp4","reason":"over_size_cap"}],"#,
-            r#""unread":["OneDrive/Archive"],"truncated":false}}"#
+            r#""unread":["OneDrive/Archive"],"truncated":false,"#,
+            r#""place":{"synced":{"service":"one_drive"}}}}"#
         )
     );
     assert_eq!(MAX_PAPERS, 2_000);
