@@ -2,9 +2,10 @@
 //! import per app with its skipped servers and why, the values in the keychain double and never
 //! in the settings file or a log, and the firm's lock.
 //!
-//! The finder runs the settings crate's `find_candidates` over a fake filesystem: Claude Desktop,
-//! Claude Code (user and project scopes) and Codex config under a fake home, on this machine's
-//! OS rules, so each program's path is absolute here. The import log test installs the log
+//! The finder is desktop's (`find_mcp_imports_in`, the settings crate's `find_candidates` with
+//! the bare-name rule) over a fake filesystem: Claude Desktop, Claude Code (user and project
+//! scopes) and Codex config under a fake home, on this machine's OS rules, so each program's
+//! path is absolute here. The import log test installs the log
 //! file, the process's global subscriber: nextest runs each test in a process of its own.
 
 use std::collections::BTreeMap;
@@ -18,7 +19,7 @@ use clauseo_protocol::{
     McpSkipReason, McpSkipped, McpToolsView,
 };
 use clauseo_settings::Locations;
-use clauseo_settings::mcp_import::{Env, ImportFs, Os, find_candidates};
+use clauseo_settings::mcp_import::{Env, ImportFs, Os};
 use futures::StreamExt as _;
 use serde_json::{Value, json};
 
@@ -86,22 +87,31 @@ fn at(rel: &str) -> String {
     format!("{}{sep}{}", home(), rel.replace('/', sep))
 }
 
-/// The fake `APPDATA` (Windows' Claude Desktop folder) and `CODEX_HOME`.
+/// The fake `APPDATA` (Windows' Claude Desktop folder), `CODEX_HOME`, and a `PATH` holding
+/// [`program`]'s folder only.
 fn vars(name: &str) -> Option<String> {
     match name {
+        "PATH" | "Path" => Some(at("bin")),
         "APPDATA" => Some(at("AppData/Roaming")),
         "CODEX_HOME" => Some(at("codex")),
         _ => None,
     }
 }
 
-/// The program every importable server runs: an absolute path that is a file.
+/// The program most importable servers run: a file on the fake `PATH`, so the settings keep
+/// its bare name.
 fn program() -> String {
-    if cfg!(windows) {
-        at("bin/npx.cmd")
-    } else {
-        at("bin/npx")
-    }
+    at(&format!("bin/{}", npx_name()))
+}
+
+/// `npx`'s file name on this OS.
+fn npx_name() -> &'static str {
+    if cfg!(windows) { "npx.cmd" } else { "npx" }
+}
+
+/// A program off the search path: the settings keep its absolute path.
+fn off_path() -> String {
+    at(&format!("opt/drafts/{}", npx_name()))
 }
 
 /// The three apps' config:
@@ -109,7 +119,8 @@ fn program() -> String {
 ///   `HEADER_VALUE`) import; `files` runs a program not found; `weather` is `sse`.
 /// - Claude Code: the user-wide `search` imports; a project's `.mcp.json` `repo-tool` is not
 ///   approved.
-/// - Codex: `drafts` imports; `billing` names a variable not set.
+/// - Codex: `drafts` (a program off the search path) imports; `billing` names a variable not
+///   set.
 fn apps() -> FakeFs {
     let npx = program();
     let desktop = json!({"mcpServers": {
@@ -127,8 +138,9 @@ fn apps() -> FakeFs {
             "enabledMcpjsonServers": []}},
     });
     let mcp_json = json!({"mcpServers": {"repo-tool": {"command": npx}}});
+    let drafts = off_path();
     let codex = format!(
-        "[mcp_servers.drafts]\ncommand = '{npx}'\n\n\
+        "[mcp_servers.drafts]\ncommand = '{drafts}'\n\n\
          [mcp_servers.billing]\ncommand = '{npx}'\nenv_vars = [\"NOT_SET_ANYWHERE\"]\n"
     );
     let desktop_path = if cfg!(windows) {
@@ -138,6 +150,7 @@ fn apps() -> FakeFs {
     };
     FakeFs::default()
         .file(&npx, "")
+        .file(&off_path(), "")
         .file(&desktop_path, &desktop.to_string())
         .file(&at(".claude.json"), &claude.to_string())
         .file(&format!("{project}/.mcp.json"), &mcp_json.to_string())
@@ -156,7 +169,7 @@ fn wired(config: HostConfig, store: &Arc<MemoryStore>, fs: FakeFs) -> HostConfig
                 vars: &vars,
                 fs: fs.as_ref(),
             };
-            find_candidates(&env, existing)
+            clauseo_host::find_mcp_imports_in(&env, existing)
         }))
 }
 
@@ -253,7 +266,8 @@ fn mcp_import_counts_imports_and_skips_and_keeps_values_in_the_keychain() {
     let names: Vec<&str> = view.servers.iter().map(|s| s.name.as_str()).collect();
     assert_eq!(names, ["github", "notes"]);
     assert!(view.servers.iter().all(|server| server.enabled));
-    assert_eq!(view.servers[0].command.as_deref(), Some(program().as_str()));
+    // On the search path: the bare name, which a launch finds again after an upgrade.
+    assert_eq!(view.servers[0].command.as_deref(), Some(npx_name()));
     assert_eq!(view.servers[0].args, ["-y", "server-github"]);
     assert!(view.servers[0].env.iter().all(|var| var.saved));
     assert_eq!(
@@ -301,6 +315,13 @@ fn mcp_import_counts_imports_and_skips_and_keeps_values_in_the_keychain() {
     // Codex: one in, one with a variable not set.
     let (view, last) = imported(&host, &mut sub, Codex);
     assert_eq!(last.imported, ["drafts"]);
+    // Off the search path: the absolute path found.
+    let drafts = view.servers.iter().find(|server| server.name == "drafts");
+    assert_eq!(
+        drafts.and_then(|server| server.command.as_deref()),
+        Some(off_path().as_str()),
+        "{view:?}"
+    );
     assert_eq!(
         last.skipped,
         [skip("billing", McpSkipReason::UnresolvedVariable, None)]

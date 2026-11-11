@@ -4,7 +4,9 @@
 use std::sync::Arc;
 
 use clauseo_connectors::SecretStore;
-use clauseo_settings::mcp_import::ImportCandidate;
+use clauseo_settings::mcp_import::{
+    CandidateKind, Env, ImportCandidate, find_candidates, resolve_command,
+};
 
 use super::HostConfig;
 
@@ -97,8 +99,25 @@ impl HostConfig {
 
 /// The servers Claude Desktop, Claude Code and Codex set up on this computer, for
 /// [`HostConfig::with_mcp_import`]; none on an OS Clauseo is not built for or with no home
-/// folder.
+/// folder. As [`find_mcp_imports_in`].
 pub fn find_mcp_imports_here(existing: &[String]) -> Vec<ImportCandidate> {
-    use clauseo_settings::mcp_import::{RealEnv, find_candidates};
-    RealEnv::from_process().map_or_else(Vec::new, |env| find_candidates(&env.env(), existing))
+    use clauseo_settings::mcp_import::RealEnv;
+    RealEnv::from_process().map_or_else(Vec::new, |env| find_mcp_imports_in(&env.env(), existing))
+}
+
+/// The servers `find_candidates` finds under `env`, each local one's program as the settings
+/// keep it: the bare file name (`npx`) when searching for that name under `env` finds the same
+/// program, so a launch finds it again after an nvm, Homebrew or Volta upgrade moves it; else
+/// the absolute path found.
+pub fn find_mcp_imports_in(env: &Env<'_>, existing: &[String]) -> Vec<ImportCandidate> {
+    let mut candidates = find_candidates(env, existing);
+    for candidate in &mut candidates {
+        if let CandidateKind::Local { command, .. } = &mut candidate.kind
+            && let Some(name) = command.file_name().and_then(|name| name.to_str())
+            && resolve_command(env, name).as_deref() == Some(command.as_path())
+        {
+            *command = std::path::PathBuf::from(name);
+        }
+    }
+    candidates
 }
