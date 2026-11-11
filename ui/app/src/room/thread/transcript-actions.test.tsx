@@ -57,10 +57,19 @@ test("a finished answer offers Copy, its words as written; no Try again after an
   expect(h.one("answer-try-again")).toBeNull();
   await h.click(h.one("answer-copy"));
   expect(writeText).toHaveBeenCalledWith("It asks for payment.\n\n```\nSection 138\n```");
-  expect(h.one("answer-copy")?.textContent).toBe("Copied");
-  // the code block's own Copy, its code alone
-  await h.click(h.one("code-copy"));
+  // the copy icon, named Copy; once pressed a polite live region beside it says Copied
+  const answerCopy = h.one("answer-copy")!;
+  expect(answerCopy.getAttribute("aria-label")).toBe("Copy");
+  expect(answerCopy.textContent).toBe("");
+  expect(answerCopy.parentElement?.querySelector('[role="status"]')?.textContent).toBe("Copied");
+  // the code block's own Copy, its code alone, the same control
+  const codeCopy = h.one("code-copy")!;
+  expect(codeCopy.getAttribute("aria-label")).toBe("Copy");
+  await h.click(codeCopy);
   expect(writeText).toHaveBeenLastCalledWith("Section 138");
+  // it stands in the block's wrapper beside the pre, never inside the code that scrolls
+  expect(codeCopy.closest('[data-clauseo="code-block"]')).not.toBeNull();
+  expect(codeCopy.closest("pre")).toBeNull();
 });
 
 test("after a Stop, Try again sends the same question as a new turn; only on the latest answer", async () => {

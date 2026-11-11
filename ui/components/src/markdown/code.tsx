@@ -1,10 +1,8 @@
-import { useContext, useState } from "react";
+import { useContext } from "react";
+import { CopyButton } from "../ui/copy-button.tsx";
 import { TokenLines } from "./highlight/code-block.tsx";
 import { useHighlight } from "./highlight/use-highlight.ts";
 import { CodeCopyContext, InertLinksContext } from "./host.ts";
-
-/** How long "Copied" stands in Copy's place. */
-const COPIED_MS = 2_000;
 
 /**
  * A fenced or indented code block: the `pre` component, given its code's text and language (to-react.ts). It shows
@@ -27,36 +25,20 @@ export function CodeBlock({ text = "", lang }: { text?: string; lang?: string | 
     </pre>
   );
   if (words === null) return pre;
-  // Copy over the block's corner once its fence has closed: the code is whole by then
+  // Copy in the block's own column at its top corner (thread.css), beside the code that scrolls and never over it,
+  // once its fence has closed: the code is whole by then
   return (
-    <div data-clauseo="code-block" className="relative">
+    <div data-clauseo="code-block">
       {pre}
-      {finished && <CopyCode text={body} words={words} />}
+      {finished && (
+        <CopyButton
+          className="code-copy mx-s1-5 my-s1 self-start"
+          testId="code-copy"
+          text={() => body}
+          label={words(false)}
+          done={words(true)}
+        />
+      )}
     </div>
-  );
-}
-
-/** A code block's Copy (D-026): its text on the clipboard as written, and "Copied" for a moment. */
-function CopyCode({ text, words }: { text: string; words: (copied: boolean) => string }) {
-  const [copied, setCopied] = useState(false);
-  return (
-    <button
-      type="button"
-      className="code-copy"
-      data-testid="code-copy"
-      aria-live="polite"
-      onClick={() => {
-        if (navigator.clipboard === undefined) return;
-        navigator.clipboard.writeText(text).then(
-          () => {
-            setCopied(true);
-            setTimeout(() => setCopied(false), COPIED_MS);
-          },
-          () => {},
-        );
-      }}
-    >
-      {words(copied)}
-    </button>
   );
 }

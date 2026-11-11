@@ -485,15 +485,14 @@
     white-space: pre;
     overflow-wrap: normal;
   }
-  /* a code block's Copy (D-026): a quiet small word over the block's top corner (code.tsx's wrapper is relative) */
-  .reply-text [data-clauseo="code-block"] .code-copy {
-    position: absolute;
-    top: var(--s1-5);
-    inset-inline-end: var(--s2);
-    padding: 0 var(--s1);
+  /* a code block's Copy (D-026, code.tsx): the icon in its own column at the top corner, beside the pre that scrolls */
+  .reply-text [data-clauseo="code-block"] {
+    display: flex;
     background: var(--well);
-    color: var(--muted);
-    font-size: var(--t13);
+    border-radius: var(--r-control);
+  }
+  .reply-text [data-clauseo="code-block"] > pre {
+    flex: 1;
   }
   .reply-text [data-clauseo="markdown"] pre code {
     font: inherit;
