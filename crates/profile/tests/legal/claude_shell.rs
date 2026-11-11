@@ -27,11 +27,11 @@ fn only_claude_on_macos_is_told_which_commands_its_sandbox_blocks() {
     let profile = super::launch_profile(&std::env::temp_dir().join("claude-shell-line"));
     assert_eq!(
         profile.claude_instructions_for(true),
-        format!("{}\n\n{line}", profile.instructions())
+        format!("{}\n\n{line}", profile.instructions_for(AgentKind::Claude))
     );
     assert_eq!(
         profile.claude_instructions_for(false),
-        profile.instructions()
+        profile.instructions_for(AgentKind::Claude)
     );
     let meta = profile.session_meta(Some(AgentKind::Claude)).unwrap();
     assert_eq!(

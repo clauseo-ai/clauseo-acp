@@ -182,10 +182,21 @@ impl ClauseoProfile {
     }
 
     /// The composed instructions, `{author}` and `{stetdoc}` filled, `{work_folder}`,
-    /// `{matter_notes}` and `{connectors}` left.
+    /// `{matter_notes}` and `{connectors}` left, and `{plan}` left for
+    /// [`Self::instructions_for`]. No agent gets this text as it is.
     pub fn instructions(&self) -> String {
         self.instructions
             .compose_for(&self.author, self.stetdoc_cli)
+    }
+
+    /// [`Self::instructions`] for an agent of `kind`: `{plan}` filled with
+    /// [`instructions::plan_name`], so Claude reads "your Claude account" and Codex "your ChatGPT
+    /// account". Claude's options and Codex's keys are built from this.
+    pub fn instructions_for(&self, kind: AgentKind) -> String {
+        let text = self.instructions();
+        let plan = instructions::plan_name(kind);
+        placeholders::fill(&text, &[instructions::PLAN], &[(instructions::PLAN, plan)])
+            .unwrap_or(text)
     }
 
     /// The servers for an agent of `kind`: `browser` for Codex ([`servers::browser_mcp`]; Claude
@@ -212,17 +223,17 @@ impl ClauseoProfile {
         self.claude_instructions_for(cfg!(target_os = "macos"))
     }
 
-    /// Claude's instructions: [`Self::instructions`], then on macOS (`macos`) a blank line and
-    /// [`instructions::claude_shell`]'s line, which Codex never gets.
+    /// Claude's instructions: [`Self::instructions_for`] Claude, then on macOS (`macos`) a blank
+    /// line and [`instructions::claude_shell`]'s line, which Codex never gets.
     pub fn claude_instructions_for(&self, macos: bool) -> String {
-        let text = self.instructions();
+        let text = self.instructions_for(AgentKind::Claude);
         match instructions::claude_shell(macos) {
             Some(line) => format!("{text}\n\n{line}"),
             None => text,
         }
     }
 
-    /// Codex's keys with no skills index: `developer_instructions` is [`Self::instructions`].
+    /// Codex's keys with no skills index: `developer_instructions` is [`Self::codex_instructions`].
     /// The index goes in only through [`Self::codex_keys`], with a [`SkillsWritten`].
     pub fn codex_config(&self) -> CodexConfig {
         CodexConfig::with_instructions(self.codex_instructions())
@@ -233,10 +244,10 @@ impl ClauseoProfile {
         self.codex_instructions_for(cfg!(target_os = "macos"))
     }
 
-    /// Codex's instructions: [`Self::instructions`], then on macOS (`macos`) a blank line and
-    /// [`instructions::codex_shell`]'s line, which Claude never gets (it has its own).
+    /// Codex's instructions: [`Self::instructions_for`] Codex, then on macOS (`macos`) a blank
+    /// line and [`instructions::codex_shell`]'s line, which Claude never gets.
     pub fn codex_instructions_for(&self, macos: bool) -> String {
-        let text = self.instructions();
+        let text = self.instructions_for(AgentKind::Codex);
         match instructions::codex_shell(macos) {
             Some(line) => format!("{text}\n\n{line}"),
             None => text,

@@ -7,8 +7,24 @@
 pub const TOOLS: &str = include_str!("../assets/instructions/tools.txt");
 
 /// R22's legal part, appended after the tools part. It holds `{work_folder}` and
-/// `{matter_notes}`, which the host fills per session.
+/// `{matter_notes}`, which the host fills per session, and `{plan}`, which the profile fills per
+/// agent ([`PLAN`]).
 pub const LEGAL: &str = include_str!("../assets/instructions/legal.md");
+
+/// The token the profile fills with [`plan_name`] of the agent the text is for, in the identity
+/// rule (decision record 0058): the assistant is Clauseo, working through the lawyer's Claude or
+/// ChatGPT account. It is not the host's: the profile knows the agent when it builds Claude's
+/// options and Codex's keys (`ClauseoProfile::instructions_for`).
+pub const PLAN: &str = "{plan}";
+
+/// The plan an agent of `kind` works through, as the app names it to the lawyer (the window's
+/// `agent.ts` `PLAN`): `Claude` for Claude, `ChatGPT` for Codex.
+pub fn plan_name(kind: clauseo_protocol::AgentKind) -> &'static str {
+    match kind {
+        clauseo_protocol::AgentKind::Claude => "Claude",
+        clauseo_protocol::AgentKind::Codex => "ChatGPT",
+    }
+}
 
 /// The connectors paragraph (R24): what a session with the `case-law` entry is told about the
 /// case-law tools. At most 80 words. The host puts it in place of `{connectors}` through
