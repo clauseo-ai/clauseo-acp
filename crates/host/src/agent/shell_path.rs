@@ -27,7 +27,11 @@
 //! - Claude Code (2.1.293) sources a login-shell snapshot before each Bash command, then the
 //!   file `CLAUDE_ENV_FILE` names. The launch writes [`ENV_FILE`] in the session's own run
 //!   folder, one line putting the folders first on the `PATH` the snapshot built (so it keeps
-//!   everything there), and sets [`ENV_FILE_VAR`] to it.
+//!   everything there), and sets [`ENV_FILE_VAR`] to it. It also gets [`SHELL_VAR`] set to
+//!   [`BASH`], with folders or without: Claude Code otherwise runs its commands in the
+//!   account's shell, zsh on a Mac, where Claude's bash-style commands go wrong (an unmatched
+//!   `*.docx` is an error, `$var` is not split into words). On Linux only when `/bin/bash`
+//!   is there (NixOS has none): elsewhere Claude Code picks its own shell as before.
 //!
 //! The file system work ([`prepare`]) runs on the launch-prep thread; [`apply`] edits the
 //! launch's merged environment on the actor. Windows is left as it was: no key, no file. Logs
@@ -43,6 +47,12 @@ use crate::log_file::Cause;
 
 /// The variable naming the file Claude Code pastes into each Bash command after its snapshot.
 pub(crate) const ENV_FILE_VAR: &str = "CLAUDE_ENV_FILE";
+
+/// The variable naming the shell Claude Code runs its Bash commands in.
+pub(crate) const SHELL_VAR: &str = "CLAUDE_CODE_SHELL";
+
+/// The shell a Claude session's commands run in, off Windows ([`SHELL_VAR`]).
+pub(crate) const BASH: &str = "/bin/bash";
 
 /// The name of that file in the session's run folder.
 pub(crate) const ENV_FILE: &str = "clauseo-env.sh";
@@ -88,6 +98,8 @@ pub(crate) struct SessionPath {
     pub(crate) etc_paths: Vec<PathBuf>,
     /// For a Claude session with folders, off Windows: the [`ENV_FILE`] written.
     pub(crate) env_file: Option<PathBuf>,
+    /// For a Claude session, on macOS, and on Linux when it is there: [`BASH`].
+    pub(crate) shell: Option<PathBuf>,
 }
 
 /// [`SessionPath`] for an agent of `kind` with `dirs` first on its `PATH`, its file written in
@@ -123,7 +135,11 @@ pub(crate) fn prepare_on(
         Some(AgentKind::Codex) if os == Os::Mac && !path.dirs.is_empty() => {
             path.etc_paths = path_helper_entries(etc);
         }
-        Some(AgentKind::Claude) => path.env_file = write_env_file(run_root, &path.dirs),
+        Some(AgentKind::Claude) => {
+            path.env_file = write_env_file(run_root, &path.dirs);
+            let bash = Path::new(BASH);
+            path.shell = (os == Os::Mac || bash.is_file()).then(|| bash.to_owned());
+        }
         _ => {}
     }
     path
@@ -238,9 +254,17 @@ pub(crate) fn apply(env: &mut BTreeMap<OsString, OsString>, path: &SessionPath) 
 /// `allow_login_shell = false` and `features.shell_snapshot = false`, and on macOS its `PATH`
 /// goes through [`mac_shell_path`]; a Claude session with its file gets [`ENV_FILE_VAR`],
 /// over any inherited one. Otherwise `env` is left as it is, an inherited `CLAUDE_ENV_FILE`
-/// included.
+/// included. Off Windows, with folders or without, a Claude session with its shell gets
+/// [`SHELL_VAR`], over any inherited one.
 pub(crate) fn apply_on(env: &mut BTreeMap<OsString, OsString>, path: &SessionPath, os: Os) {
-    if os == Os::Windows || path.dirs.is_empty() {
+    if os == Os::Windows {
+        return;
+    }
+    if let Some(shell) = &path.shell {
+        env.retain(|name, _| !name.eq_ignore_ascii_case(SHELL_VAR));
+        env.insert(OsString::from(SHELL_VAR), shell.as_os_str().to_owned());
+    }
+    if path.dirs.is_empty() {
         return;
     }
     if let Some(file) = &path.env_file {
