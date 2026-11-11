@@ -17,8 +17,14 @@ import type { Timeline } from "./timeline.ts";
  * back at a version, comparing it with the folder now or not. */
 export type Look = { kind: "now"; id?: string } | { kind: "back"; id: string; comparing: boolean };
 
-/** An undo of one turn's change, with the lawyer's choice for each of its files. */
-type UndoAsk = { act: "undo"; id: string; choices: ReadonlyMap<string, FileChoice> };
+/** An undo of one turn's change, with the lawyer's choice for each of its files; edited: the files the host says changed
+ * since the turn's version (preview_undo, as the thread's Undo asks it), once it answers. */
+type UndoAsk = {
+  act: "undo";
+  id: string;
+  choices: ReadonlyMap<string, FileChoice>;
+  edited?: ReadonlySet<string>;
+};
 /** A restore of the matter to a version, with what restoring it writes now; undoes: the restore it takes back. */
 type RestoreAsk = { act: "restore"; id: string; preview: RestorePreview; undoes: string | null };
 
@@ -173,6 +179,24 @@ export function keepChangedSince(
     next.set(path, "keep");
   }
   return next;
+}
+
+/** The undo dialog for version `id` once the host said which files changed since that version (edited; null: it
+ * didn't say): each is kept, unless the lawyer chose for it (`chosen`), as a file a newer version changed is. A file
+ * the turn added and the lawyer edited after it would otherwise go with the lawyer's edits. Null when the dialog is
+ * no longer that undo's, or the host didn't say. */
+export function keepEdited(
+  ask: Ask | null,
+  id: string,
+  edited: readonly string[] | null,
+  chosen: ReadonlySet<string>,
+): Ask | null {
+  if (edited === null || ask?.act !== "undo" || ask.stage !== "confirm" || ask.id !== id)
+    return null;
+  const choices = new Map(ask.choices);
+  for (const path of edited)
+    if (!chosen.has(path) && choices.get(path) === "undo") choices.set(path, "keep");
+  return { ...ask, choices, edited: new Set(edited) };
 }
 
 /** The files of a step changed again by a later version, by path, with the newest version that did. */
