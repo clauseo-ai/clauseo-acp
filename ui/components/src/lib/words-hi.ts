@@ -18,6 +18,7 @@ import { HI as limits } from "./words-limits.hi.ts";
 import { HI as list } from "./words-list.hi.ts";
 import { HI as matterForm } from "./words-matter-form.hi.ts";
 import { HI as matters } from "./words-matters.hi.ts";
+import { HI as mcpTools } from "./words-mcp-tools.hi.ts";
 import { HI as planCard } from "./words-plan-card.hi.ts";
 import { HI as protection } from "./words-protection.hi.ts";
 import { HI as reader } from "./words-reader.hi.ts";
@@ -59,6 +60,7 @@ export const HINDI = {
   list,
   "matter-form": matterForm,
   matters,
+  "mcp-tools": mcpTools,
   "plan-card": planCard,
   protection,
   reader,

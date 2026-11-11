@@ -1,0 +1,29 @@
+/* Settings › Tools (UC-169 to UC-189), apart from settings.css so the copy review page (review.css) can take it without
+   the window's frame sheets: settings.css imports this file. The section's lines, a tool's row (its glyph, its name and
+   detail, Edit and Remove, its switch at the end), and the form's fields one under another. */
+@layer components {
+  .set-tools {
+    display: grid;
+    gap: var(--s5);
+  }
+  .set-tools > .set-note {
+    margin-top: 0;
+  }
+  .set-tools-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--s2) var(--s3);
+  }
+  .set-tools-icon {
+    @apply flex flex-none self-start items-center h-ui-line text-muted;
+  }
+  .set-tools-row[data-disabled] .set-tools-icon {
+    @apply text-faint;
+  }
+  .set-tools-form {
+    display: grid;
+    gap: var(--s5);
+    padding-block: var(--s2);
+  }
+}

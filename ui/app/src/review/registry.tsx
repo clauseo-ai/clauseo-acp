@@ -75,6 +75,7 @@ import { UBL } from "./registry-blocklist.tsx";
 import { R23 } from "./registry-update.tsx";
 import { IT_ENTRIES } from "./registry-it.tsx";
 import { UC_MCP_CONFIRM } from "./registry-uc-mcp-confirm.tsx";
+import { MCP_TOOLS } from "./registry-mcp-tools.tsx";
 
 /* ---------- U3: the live thread's states ---------- */
 
@@ -547,4 +548,5 @@ export const REGISTRY: readonly Entry[] = [
   ...IT_ENTRIES,
   ...NM,
   ...PK,
+  ...MCP_TOOLS,
 ];
