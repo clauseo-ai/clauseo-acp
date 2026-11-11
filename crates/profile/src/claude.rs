@@ -14,9 +14,11 @@ pub const STETDOC_READ_ONLY: [&str; 5] = ["view", "inspect", "check", "lookup", 
 /// `press` :603, `hover` :524, `focus` :531, `select` :552, `check` :538, `uncheck` :545,
 /// `scroll` :660, `scrollintoview` :704, `wait` :713, `get` :1459, `is` :1462, `find` :1465,
 /// `screenshot` :872, `tab` :1650, `back` :441, `forward` :442, `reload` :443, `close` :1063,
-/// `frame` :1717, `dialog` :1730, `read` :444). Every other one (`upload`, `eval`, `pdf`,
-/// `download`, `state`, `cookies`, `storage`, `network`, `set`, `install`, ...) asks, and so does
-/// an allowed one that matches [`AGENT_BROWSER_ASK`]. They are Codex's 29 core MCP tools
+/// `frame` :1717, `dialog` :1730, `read` :444), each written bare and behind `--json`
+/// ([`AGENT_BROWSER_PREFIXES`]). `eval`, `pdf`, `download` and `upload` always ask
+/// ([`AGENT_BROWSER_ASK`]), and so does an allowed one that matches it. Every other one
+/// (`cookies`, `storage`, `network`, `set`, `install`, `keyboard`, ...) is in no rule: the mode
+/// decides (`acceptEdits` asks, `auto`'s classifier reviews it). They are Codex's 29 core MCP tools
 /// (`clauseo_mcp`'s `browser_guard/filter.rs` `ALLOWED_TOOLS`) less `eval`, which runs page
 /// JavaScript. `pdf <path>` and `download <sel> <path>` ask: Claude's agent-browser runs outside
 /// its sandbox, so they would write page-chosen content to any path the agent names (Codex's guard
@@ -51,21 +53,47 @@ pub const AGENT_BROWSER_ALLOWED: [&str; 27] = [
     "read",
 ];
 
-/// agent-browser commands that ask even though their subcommand is allowed: Claude Code checks
-/// deny rules, then ask rules, then allow rules (code.claude.com/docs/en/permissions), and `*`
-/// matches anywhere, spaces included.
+/// How a command starts in a rule: bare, and with `--json` before the subcommand
+/// (`agent-browser --json snapshot`), the one global option that changes nothing but the output
+/// format. Behind any other global option (`-q`, `--max-output 5`) a command is in no allow
+/// rule, so the mode decides. A full path (`/…/agent-browser open`) or `npx agent-browser` is in
+/// no rule either: Clauseo puts `agent-browser` on the `PATH` and names it so, and `npx` would
+/// fetch another build from npm.
+pub const AGENT_BROWSER_PREFIXES: [&str; 2] = ["agent-browser", "agent-browser --json"];
+
+/// agent-browser commands that ask, written after each of [`AGENT_BROWSER_PREFIXES`]
+/// (`Bash(agent-browser eval*)`, `Bash(agent-browser --json eval*)`). Claude Code checks deny
+/// rules, then ask rules, then allow rules, `*` matches anywhere, spaces included, and an ask
+/// rule prompts even in `auto` mode, where a command in no rule goes to the classifier instead
+/// (code.claude.com/docs/en/permissions, /permission-modes).
+/// - `eval` runs page JavaScript; `pdf <path>` and `download <sel> <path>` write page-chosen
+///   content to any path the agent names (Codex's guard refuses them; a clicked download still
+///   lands in the session's downloads folder unasked); `upload` sends a local file to the site.
 /// - `wait --fn <js>` (also `-f`) runs page JavaScript (`cli/src/commands.rs` :811 at v0.41.1):
-///   `Bash(agent-browser wait*-f*)` catches `--fn`, `--fn=` and `-f`, and so also a wait whose
-///   text holds `-f` (`wait --text "self-filing"`), which then asks too.
+///   `wait*-f*` catches `--fn`, `--fn=` and `-f`, and so also a wait whose text holds `-f`
+///   (`wait --text "self-filing"`), which then asks too.
 /// - `get cdp-url` prints Chrome's debugging address (:3009), the route `eval` is kept from.
 ///
 /// Checked at the tag and found to take no JavaScript: `get` :2970, `is`
 /// :3043, `find` :3079, `frame` :1717, `dialog` :1730, `tab` :1650, `scroll` :660, `select`
 /// :552, `open` :399, `read` :2365.
-pub const AGENT_BROWSER_ASK: [&str; 2] = [
-    "Bash(agent-browser wait*-f*)",
-    "Bash(agent-browser get*cdp-url*)",
+pub const AGENT_BROWSER_ASK: [&str; 6] = [
+    "wait*-f*",
+    "get*cdp-url*",
+    "eval*",
+    "pdf*",
+    "download*",
+    "upload*",
 ];
+
+/// agent-browser text that asks wherever it sits in the command (`Bash(agent-browser *<text>)`):
+/// agent-browser reads its global options anywhere in the arguments (`cli/src/flags.rs`
+/// `parse_flags` :569 at v0.41.1), so an allowed `open` can carry them.
+/// - `--init-script <path>` and `--enable <feature>` load page JavaScript, as `eval` does.
+/// - `-p <provider>` (`--provider` is denied) hands the browser to a cloud provider.
+/// - `file://` opens a local file in a browser that no sandbox fences, so any file it names.
+pub const AGENT_BROWSER_ASK_ANYWHERE: [&str; 4] =
+    ["--init-script*", "--enable*", "-p *", "file://*"];
 
 /// agent-browser's options and subcommands Claude may never run, whatever the lawyer answers:
 /// each attaches the browser to the lawyer's own Chrome or profile, shows a window, swaps
@@ -74,8 +102,11 @@ pub const AGENT_BROWSER_ASK: [&str; 2] = [
 /// refuses a denied command without asking (code.claude.com/docs/en/permissions). So
 /// `Bash(agent-browser *--profile*)` also catches `--profile=x`, a flag after the subcommand,
 /// and the command inside `cd x && …`. A deny list is not a fence: the same options have
-/// `AGENT_BROWSER_*` twins that these rules do not see (decision noted in the PR).
-pub const AGENT_BROWSER_DENIED: [&str; 9] = [
+/// `AGENT_BROWSER_*` twins that these rules do not see (decision noted in the PR). Also denied:
+/// `--args` (Chrome's own options, such as another profile's folder), `--restore` and its
+/// `--restore-*` kin (saved state), `--namespace` (another session's sockets), `--download-path`,
+/// `--proxy`, `--provider` (a cloud browser) and `--allow-file-access`.
+pub const AGENT_BROWSER_DENIED: [&str; 16] = [
     "--profile",
     "--auto-connect",
     "--cdp",
@@ -85,41 +116,65 @@ pub const AGENT_BROWSER_DENIED: [&str; 9] = [
     "--session",
     "--state",
     "--extension",
+    "--args",
+    "--restore",
+    "--namespace",
+    "--download-path",
+    "--proxy",
+    "--provider",
+    "--allow-file-access",
 ];
 
-/// agent-browser's subcommands Claude may never run, as the first word after the command
-/// (`Bash(agent-browser state*)`): loading or saving browser state, and attaching to a running
-/// browser. Not matched anywhere, so a page's text that holds the word (`fill @e1 "state bank"`)
-/// is not refused; behind a global flag (`agent-browser --json state load`) the command is in no
-/// allow rule, so Claude asks.
+/// agent-browser's subcommands Claude may never run, as the first word after each of
+/// [`AGENT_BROWSER_PREFIXES`] (`Bash(agent-browser state*)`): loading or saving browser state,
+/// and attaching to a running browser. Not matched anywhere, so a page's text that holds the word
+/// (`fill @e1 "state bank"`) is not refused; behind another global option (`agent-browser -q
+/// state load`) the command is in no rule, so the mode decides.
 pub const AGENT_BROWSER_DENIED_SUBCOMMANDS: [&str; 2] = ["state", "connect"];
 
-/// `Bash(agent-browser <sub>:*)` for each of [`AGENT_BROWSER_ALLOWED`]: the allow rules the host
-/// adds to a Claude session that has the browser, and to no other.
+/// `Bash(<prefix> <rest><suffix>)` for each of [`AGENT_BROWSER_PREFIXES`] and each of `rests`.
+fn after_each_prefix<'a>(
+    rests: &'a [&'a str],
+    suffix: &'a str,
+) -> impl Iterator<Item = String> + 'a {
+    AGENT_BROWSER_PREFIXES.iter().flat_map(move |prefix| {
+        rests
+            .iter()
+            .map(move |rest| format!("Bash({prefix} {rest}{suffix})"))
+    })
+}
+
+/// `Bash(<prefix> <sub>:*)` for each of [`AGENT_BROWSER_PREFIXES`] and each of
+/// [`AGENT_BROWSER_ALLOWED`]: the allow rules the host adds to a Claude session that has the
+/// browser, and to no other.
 pub fn agent_browser_allowed() -> impl Iterator<Item = String> {
-    AGENT_BROWSER_ALLOWED
-        .iter()
-        .map(|sub| format!("Bash(agent-browser {sub}:*)"))
+    AGENT_BROWSER_PREFIXES.iter().flat_map(|prefix| {
+        AGENT_BROWSER_ALLOWED
+            .iter()
+            .map(move |sub| format!("Bash({prefix} {sub}:*)"))
+    })
 }
 
-/// [`AGENT_BROWSER_ASK`]: the `permissions.ask` rules the host adds to a Claude session that has
-/// the browser, and to no other.
+/// [`AGENT_BROWSER_ASK`] after each of [`AGENT_BROWSER_PREFIXES`], then
+/// `Bash(agent-browser *<text>)` for each of [`AGENT_BROWSER_ASK_ANYWHERE`]: the
+/// `permissions.ask` rules the host adds to a Claude session that has the browser, and to no
+/// other.
 pub fn agent_browser_ask() -> impl Iterator<Item = String> {
-    AGENT_BROWSER_ASK.iter().map(|rule| (*rule).to_owned())
+    after_each_prefix(&AGENT_BROWSER_ASK, "").chain(
+        AGENT_BROWSER_ASK_ANYWHERE
+            .iter()
+            .map(|text| format!("Bash(agent-browser *{text})")),
+    )
 }
 
-/// `Bash(agent-browser *<flag>*)` for each of [`AGENT_BROWSER_DENIED`], then
-/// `Bash(agent-browser <sub>*)` for each of [`AGENT_BROWSER_DENIED_SUBCOMMANDS`]: the deny rules
+/// `Bash(agent-browser *<flag>*)` for each of [`AGENT_BROWSER_DENIED`], then `<sub>*` for each of
+/// [`AGENT_BROWSER_DENIED_SUBCOMMANDS`] after each of [`AGENT_BROWSER_PREFIXES`]: the deny rules
 /// the host adds to a Claude session that has the browser, and to no other.
 pub fn agent_browser_denied() -> impl Iterator<Item = String> {
     AGENT_BROWSER_DENIED
         .iter()
         .map(|flag| format!("Bash(agent-browser *{flag}*)"))
-        .chain(
-            AGENT_BROWSER_DENIED_SUBCOMMANDS
-                .iter()
-                .map(|sub| format!("Bash(agent-browser {sub}*)")),
-        )
+        .chain(after_each_prefix(&AGENT_BROWSER_DENIED_SUBCOMMANDS, "*"))
 }
 
 /// The keys [`ClaudeOptions::meta_fragment`] may put under `claudeCode.options`. Everything the
@@ -131,8 +186,9 @@ pub const OPTION_KEYS: [&str; 4] = ["allowedTools", "disallowedTools", "plugins"
 /// The keys the profile sets in `options.settings`.
 pub const SETTINGS_KEYS: [&str; 1] = ["disableSkillShellExecution"];
 
-/// What the profile sends a Claude session. The host adds after it: `WebSearch` and the seeded
-/// `WebFetch(domain:…)` rules to `allowedTools` when web search is on, `WebSearch` and
+/// What the profile sends a Claude session. The host adds after it: `WebSearch`, a bare
+/// `WebFetch` (every fetch unasked) and the seeded `WebFetch(domain:…)` rules (already covered
+/// by the bare one) to `allowedTools` when web search is on, `WebSearch` and
 /// `WebFetch` to `disallowedTools` when it is off, and `skipWebFetchPreflight` to `settings` on
 /// a cloud login.
 ///

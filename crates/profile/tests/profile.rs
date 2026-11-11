@@ -3,6 +3,8 @@
 
 #[path = "profile/browser.rs"]
 mod browser;
+#[path = "profile/browser_rules.rs"]
+mod browser_rules;
 
 use std::path::{Path, PathBuf};
 

@@ -3,12 +3,13 @@
 //!
 //! - Claude ([`claude_options`]): `disallowedTools` always holds `WebSearch` and `WebFetch`
 //!   when `tools.web_search` is off, whatever the hook sent; when it is on, `allowedTools` gains
-//!   `WebSearch` (not on a Bedrock login, which has none) and one `WebFetch(domain:…)` per seed
-//!   site, and `mcp__case-law` only in a session that got the `case-law` entry (any hook rule
-//!   for that server is dropped otherwise); in forced ask (`agent/forced_ask.rs`) there is no
-//!   `allowedTools` at all, the hook's included. `additionalDirectories` gains the work folder and
-//!   the matter notes folder, after any hook entries. `settings` gains
-//!   `disableSkillShellExecution: true` always, and `skipWebFetchPreflight: true` on a Bedrock,
+//!   `WebSearch` (not on a Bedrock login, which has none), a bare `WebFetch` (every page fetched
+//!   unasked) and one `WebFetch(domain:…)` per seed site, and `mcp__case-law` only in a
+//!   session that got the `case-law` entry (any hook rule for that server is dropped otherwise);
+//!   in forced ask (`agent/forced_ask.rs`) there is no `allowedTools` at all, the hook's
+//!   included. `additionalDirectories` gains the work folder and the matter notes folder, after
+//!   any hook entries. `settings` gains `disableSkillShellExecution: true` always, and
+//!   `skipWebFetchPreflight: true` on a Bedrock,
 //!   Vertex or Foundry login, and always `permissions.deny` gains the data folder's rules
 //!   (`agent/data_fence.rs`), after any the hook put there; in forced ask it also gains the
 //!   `permissions.ask` rules and `sandbox.autoAllowBashIfSandboxed: false`. These are flag
@@ -162,7 +163,8 @@ pub(crate) struct ClaudeKeys<'a> {
     pub(crate) login: Login,
     /// The session's folders.
     pub(crate) folders: Folders<'a>,
-    /// The hosts seeded as `WebFetch(domain:…)` rules.
+    /// The hosts seeded as `WebFetch(domain:…)` rules, beside the bare `WebFetch` that already
+    /// covers them: kept as the record of the trusted sites (R21's list).
     pub(crate) seed_sites: &'a [&'a str],
     /// The session runs in forced ask (`agent/forced_ask.rs`): no `allowedTools` at all, the
     /// hook's included, and the forced-ask `permissions.ask` rules in the flag settings.
@@ -188,6 +190,7 @@ pub(crate) fn claude_options(options: &mut Map<String, Value>, keys: &ClaudeKeys
         if keys.login != Login::Bedrock {
             push_new(&mut allowed, "WebSearch");
         }
+        push_new(&mut allowed, "WebFetch");
         for site in keys.seed_sites {
             push_new(&mut allowed, &format!("WebFetch(domain:{site})"));
         }
@@ -262,7 +265,8 @@ fn deny_data_folder(
 }
 
 /// `permissions.ask` gains agent-browser's allowed commands that still ask
-/// (`clauseo_profile::claude::agent_browser_ask`: a `wait --fn` running page JavaScript), after
+/// (`clauseo_profile::claude::agent_browser_ask`: `eval`, `pdf`, `download`, `upload`, a
+/// `wait --fn`, a `file://` URL, an option that loads page JavaScript), after
 /// any the hook put there. A hook value at `permissions` or `ask` of another type is replaced.
 fn browser_ask_settings(settings: &mut Map<String, Value>) {
     let mut permissions = take_object(settings, "permissions");
