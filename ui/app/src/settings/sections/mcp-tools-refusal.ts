@@ -1,4 +1,4 @@
-// Settings › Tools' refusals and import line (UC-175, UC-184 to UC-187, UC-192 to UC-196, UC-205): where each of the
+// Settings › Tools' refusals and import lines (UC-175, UC-184 to UC-187, UC-192 to UC-196, UC-205, UC-251): where each of the
 // host's typed errors shows in the form and in which words, the example the Address line gives, and the one line an
 // import leaves.
 import type { Lang } from "@clauseo/components/lib/display.ts";
@@ -52,16 +52,17 @@ export function refusalOf(
     case "mcp.secret_store_failed":
     case "command.invalid":
       return { place: "form", words: errorWords(lang, "settings.refused") };
-    // removed meanwhile: the generic line for what the app can't place
+    // removed meanwhile, or an import too long for one confirm: words-errors.ts's line
     case "mcp.server_unknown":
+    case "mcp.import_too_large":
       return { place: "form", words: errorWords(lang, code) };
   }
 }
 
 /** An app's name as the lawyer knows it. */
 export const SOURCE_NAME: Record<ImportSource, string> = {
-  claudeDesktop: "Claude Desktop",
-  claudeCode: "Claude Code",
+  claude_desktop: "Claude Desktop",
+  claude_code: "Claude Code",
   codex: "Codex",
 };
 
@@ -69,28 +70,30 @@ export const SOURCE_NAME: Record<ImportSource, string> = {
 export function skippedLine(lang: Lang, s: Skipped): string {
   const name = s.name;
   switch (s.reason) {
-    case "commandNotFound":
+    case "command_not_found":
       return mw(lang, "{name}: Clauseo couldn't find {program} on this computer.", {
         name,
         program: s.program ?? "",
       });
-    case "unsupportedTransport":
+    case "unsupported_transport":
       return mw(lang, "{name}: it uses a setting Clauseo doesn't support yet.", { name });
-    case "unresolvedVariable":
+    case "unresolved_variable":
       return mw(lang, "{name}: it needs a value that isn't set on this computer.", { name });
-    case "alreadyAdded":
+    case "already_added":
       return mw(lang, "{name}: a tool with this name is already added.", { name });
     case "unreadable":
       return mw(lang, "{name}: Clauseo couldn't read its settings.", { name });
-    case "notApproved":
+    case "not_approved":
       return mw(lang, "{name}: it comes from a project you haven't approved in Claude Code.", {
         name,
       });
   }
 }
 
-/** An import's lines: how many came in and how many didn't, then one line for each left out. */
+/** An import's lines: how many came in and how many didn't, then one line for each left out by name, then how many
+ * more the host left unnamed (`others`). None when the import changed nothing. */
 export function importLines(lang: Lang, result: ImportResult): string[] {
+  const others = result.others ?? 0;
   const n = result.imported.length;
   const came =
     n === 0
@@ -98,10 +101,14 @@ export function importLines(lang: Lang, result: ImportResult): string[] {
       : n === 1
         ? mw(lang, "Imported 1 tool.")
         : mw(lang, "Imported {count} tools.", { count: n });
-  const left =
-    result.skipped.length === 0
-      ? null
-      : mw(lang, "{count} couldn't be imported.", { count: result.skipped.length });
+  const out = result.skipped.length + others;
+  const left = out === 0 ? null : mw(lang, "{count} couldn't be imported.", { count: out });
+  if (came === null && left === null) return [];
   const head = [came, left].filter((l) => l !== null).join(" ");
-  return [head, ...result.skipped.map((s) => skippedLine(lang, s))];
+  // the unnamed ones after the named; with none named, the head has already counted them
+  const more =
+    others > 0 && result.skipped.length > 0
+      ? [mw(lang, "{count} more couldn't be imported.", { count: others })]
+      : [];
+  return [head, ...result.skipped.map((s) => skippedLine(lang, s)), ...more];
 }

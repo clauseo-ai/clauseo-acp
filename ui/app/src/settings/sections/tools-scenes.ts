@@ -1,6 +1,7 @@
 // Settings › Tools' scenes (UC-169 to UC-189), for the probe's ?tools= pages and the copy review: each a view the fake
 // host starts with and the presses and typing that reach the state. Never shipped.
 import { local, type FakeImports, type FakeView } from "./tools-fake.ts";
+import type { McpErrorCode } from "./tools-model.ts";
 
 /** One thing a scene does once rendered: press the element a selector finds, press the button with these words, type
  * into the field a selector finds, or send the form. */
@@ -14,6 +15,10 @@ export type ToolsScene = {
   view: FakeView;
   previewRemote?: boolean;
   imports?: FakeImports;
+  /** The fake's answer to the first command: a refusal, as the host's. */
+  refuse?: McpErrorCode;
+  /** Keeps an import in flight, for its button's working state. */
+  holdImport?: boolean;
   steps?: ToolsStep[];
 };
 
@@ -37,7 +42,7 @@ const EMPTY: FakeView = { control: "lawyer", servers: [] };
 
 /** What Claude Desktop, Claude Code and Codex hold to import. */
 const DESKTOP: FakeImports = {
-  claudeDesktop: {
+  claude_desktop: {
     add: [
       local("filesystem", "npx", { args: ["-y", "@modelcontextprotocol/server-filesystem"] }),
       local("legal-citations", "uvx", { args: ["legal-citations-mcp"] }),
@@ -50,7 +55,7 @@ const DESKTOP: FakeImports = {
   codex: { add: [local("docket", "npx", { args: ["-y", "docket-mcp"] })], skip: [] },
 };
 const LIST_IMPORTS: FakeImports = {
-  claudeDesktop: {
+  claude_desktop: {
     add: [
       local("legal-citations", "uvx", { args: ["legal-citations-mcp"] }),
       local("pdf-tools", "/opt/homebrew/bin/node", {
@@ -58,11 +63,11 @@ const LIST_IMPORTS: FakeImports = {
       }),
     ],
     skip: [
-      { name: "filesystem", reason: "commandNotFound", program: "npx" },
-      { name: "github", reason: "unsupportedTransport" },
+      { name: "filesystem", reason: "command_not_found", program: "npx" },
+      { name: "github", reason: "unsupported_transport" },
     ],
   },
-  claudeCode: { add: [local("docket", "npx", { args: ["-y", "docket-mcp"] })], skip: [] },
+  claude_code: { add: [local("docket", "npx", { args: ["-y", "docket-mcp"] })], skip: [] },
 };
 
 const ADD: ToolsStep[] = [{ click: '[data-testid="tools-add"]' }];
@@ -107,7 +112,7 @@ export const TOOLS_SCENES = {
   "list-import": {
     view: THREE,
     imports: LIST_IMPORTS,
-    steps: [{ click: '[data-testid="tools-import-claudeDesktop"]' }],
+    steps: [{ click: '[data-testid="tools-import-claude_desktop"]' }],
   },
   // the copy review's states beyond the shots
   "imported-one": {
@@ -118,19 +123,51 @@ export const TOOLS_SCENES = {
   "import-reasons": {
     view: EMPTY,
     imports: {
-      claudeCode: {
-        add: [],
+      claude_code: {
+        add: [local("docket-search", "npx", { args: ["-y", "docket-search-mcp"] })],
         skip: [
-          { name: "filesystem", reason: "commandNotFound", program: "npx" },
-          { name: "github", reason: "unsupportedTransport" },
-          { name: "court-diary", reason: "unresolvedVariable" },
-          { name: "docket", reason: "alreadyAdded" },
+          { name: "filesystem", reason: "command_not_found", program: "npx" },
+          { name: "github", reason: "unsupported_transport" },
+          { name: "court-diary", reason: "unresolved_variable" },
+          { name: "docket", reason: "already_added" },
           { name: "notes", reason: "unreadable" },
-          { name: "matter-search", reason: "notApproved" },
+          { name: "matter-search", reason: "not_approved" },
         ],
       },
     },
-    steps: [{ click: '[data-testid="tools-import-claudeCode"]' }],
+    steps: [{ click: '[data-testid="tools-import-claude_code"]' }],
+  },
+  // A4: the real host's import, its result with skips and unnamed others, its refusal, and its button in flight
+  "import-result": {
+    view: THREE,
+    imports: {
+      claude_desktop: {
+        add: [
+          local("legal-citations", "uvx", { args: ["legal-citations-mcp"] }),
+          local("pdf-tools", "/opt/homebrew/bin/node", {
+            args: ["/Users/rmehra/mcp/pdf-tools/index.js"],
+          }),
+        ],
+        skip: [
+          { name: "filesystem", reason: "command_not_found", program: "npx" },
+          { name: "github", reason: "unsupported_transport" },
+        ],
+        others: 3,
+      },
+    },
+    steps: [{ click: '[data-testid="tools-import-claude_desktop"]' }],
+  },
+  "import-too-large": {
+    view: THREE,
+    imports: LIST_IMPORTS,
+    refuse: "mcp.import_too_large",
+    steps: [{ click: '[data-testid="tools-import-claude_desktop"]' }],
+  },
+  importing: {
+    view: THREE,
+    imports: LIST_IMPORTS,
+    holdImport: true,
+    steps: [{ click: '[data-testid="tools-import-claude_desktop"]' }],
   },
   "command-invalid": {
     view: EMPTY,

@@ -213,6 +213,7 @@ test("each refusal the host sends shows in its place, in its words", async () =>
       "Clauseo couldn't save that setting. Your settings are as they were.",
     ],
     ["mcp.server_unknown", "form", errorWords("en", "mcp.server_unknown")],
+    ["mcp.import_too_large", "form", errorWords("en", "mcp.import_too_large")],
   ];
   // every code the host may answer has its place
   // every code the host may answer has its place, but a declined confirm, which shows nothing
@@ -336,23 +337,23 @@ test("REMOTE_TOOLS off: adding offers no address; a preview turns the address fo
 });
 
 const IMPORTS: FakeImports = {
-  claudeDesktop: {
+  claude_desktop: {
     add: [
       local("legal-citations", "uvx", { args: ["legal-citations-mcp"] }),
       local("pdf-tools", "node"),
     ],
-    skip: [{ name: "filesystem", reason: "commandNotFound", program: "npx" }],
+    skip: [{ name: "filesystem", reason: "command_not_found", program: "npx" }],
   },
   codex: { add: [local("docket", "npx", { args: ["-y", "docket-mcp"] })], skip: [] },
 };
 
-test("import leads: one button per app found, singular for one; Add a tool secondary; none when nothing is found", async () => {
+test("import leads: one button per app found, counting what would import, singular for one; Add a tool secondary; none when nothing is found", async () => {
   rig = await mount(new FakeTools({ control: "lawyer", servers: [] }, { imports: IMPORTS }));
   const imports = () =>
     [...rig!.pane().querySelectorAll('[data-testid="tools-imports"] button')].map(
       (b) => b.textContent,
     );
-  expect(imports()).toEqual(["Import 3 tools from Claude Desktop", "Import 1 tool from Codex"]);
+  expect(imports()).toEqual(["Import 2 tools from Claude Desktop", "Import 1 tool from Codex"]);
   expect(rig.q('[data-testid="tools-empty"]')).not.toBeNull();
   expect(rig.q('[data-testid="tools-add"]')?.className).not.toBe(
     rig.q('[data-testid="tools-import-codex"]')?.className,
@@ -368,8 +369,8 @@ test("import leads: one button per app found, singular for one; Add a tool secon
 test("an import: one command, then one line, the left-out names without reasons; the list gains the rest", async () => {
   const fake = new FakeTools(THREE, { imports: IMPORTS });
   rig = await mount(fake);
-  await rig.click(rig.q('[data-testid="tools-import-claudeDesktop"]'));
-  expect(fake.imported).toEqual(["claudeDesktop"]);
+  await rig.click(rig.q('[data-testid="tools-import-claude_desktop"]'));
+  expect(fake.imported).toEqual(["claude_desktop"]);
   const lines = () =>
     [...rig!.pane().querySelectorAll('[data-testid="tools-imported"] p')].map((l) => l.textContent);
   expect(lines()).toEqual([
@@ -379,7 +380,7 @@ test("an import: one command, then one line, the left-out names without reasons;
   expect(rig.q('[data-testid="tools-imported"]')?.getAttribute("role")).toBe("status");
   expect(rig.rows()).toContain("legal-citationslegal-citations-mcp");
   // the source is used up; the other stays
-  expect(rig.q('[data-testid="tools-import-claudeDesktop"]')).toBeNull();
+  expect(rig.q('[data-testid="tools-import-claude_desktop"]')).toBeNull();
   await rig.click(rig.q('[data-testid="tools-import-codex"]'));
   expect(lines()).toEqual(["Imported 1 tool."]);
   expect(rig.q('[data-testid="tools-imports"]')).toBeNull();

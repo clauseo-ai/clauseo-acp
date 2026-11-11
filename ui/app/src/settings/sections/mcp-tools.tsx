@@ -1,6 +1,8 @@
 // Settings › Tools (UC-169 on): the lawyer's own MCP servers, called tools. The section's lead says plainly what a tool
 // can reach; under it, where this build has the Safe workspace, that the Safe workspace doesn't use them. Then one
-// Import button per app found with servers to import, leading, and after an import one line on how it went. Then the
+// Import button per app the host found with servers to import (the view's `importable`), leading; the pressed one says
+// Importing… while the host's confirm and the import run, and after it the lines on how it went (`last_import`), or the
+// host's refusal; Cancel in the confirm leaves the section as it was. Then the
 // list: each tool's name, a quiet detail (the program a launcher runs, else its program's file name, or its address's
 // host), its switch, Edit and Remove (through a confirm); or, with none, one line. Add a tool comes last, secondary
 // while there is something to import. The form (mcp-tools-form.tsx) stands in the list's
@@ -73,7 +75,9 @@ function Tools({ commands, safe }: { commands: ToolsCommands; safe: boolean }) {
   const [removing, setRemoving] = useState<string | null>(null);
   const [failed, setFailed] = useState<string | null>(null);
   const [importedLines, setImportedLines] = useState<string[] | null>(null);
-  const [importing, setImporting] = useState(false);
+  const [importFailed, setImportFailed] = useState<string | null>(null);
+  // the app being imported from, while its import (and the host's confirm) is in flight
+  const [importing, setImporting] = useState<ImportSource | null>(null);
   // where focus goes once the list is back: a tool's Edit (its name), or Add a tool ("")
   const back = useRef<string | null>(null);
   const root = useRef<HTMLDivElement>(null);
@@ -104,18 +108,20 @@ function Tools({ commands, safe }: { commands: ToolsCommands; safe: boolean }) {
       </p>
     );
   const firm = view.control === "firm_list";
-  const mcpImport = commands.mcpImport?.bind(commands);
-  const imports = firm || mcpImport === undefined ? [] : (view.importable ?? []);
+  const imports = firm ? [] : view.importable;
   const importFrom = async (source: ImportSource) => {
-    if (importing) return;
-    setImporting(true);
+    if (importing !== null) return;
+    setImporting(source);
     setFailed(null);
-    if (mcpImport === undefined) return;
-    const answer = await mcpImport(source).catch(() => "mcp.secret_store_failed" as const);
-    setImporting(false);
-    if (typeof answer === "object" && "imported" in answer)
-      setImportedLines(importLines(lang, answer));
-    else if (answer !== "mcp.save_declined") setFailed(refusalOf(lang, answer).words);
+    const answer = await commands.mcpImport(source).catch(() => "mcp.secret_store_failed" as const);
+    setImporting(null);
+    // Cancel in the host's confirm: the section as it was, the last import's lines included
+    if (answer === "mcp.save_declined") return;
+    setImportedLines(null);
+    setImportFailed(null);
+    if (answer === null) return;
+    if (typeof answer === "object") setImportedLines(importLines(lang, answer));
+    else setImportFailed(refusalOf(lang, answer).words);
   };
   const close = (name: string | null) => {
     back.current = name ?? "";
@@ -152,21 +158,29 @@ function Tools({ commands, safe }: { commands: ToolsCommands; safe: boolean }) {
                   key={source}
                   kind="tone"
                   size="small"
-                  disabled={importing}
+                  disabled={importing !== null}
+                  aria-busy={importing === source}
                   data-testid={`tools-import-${source}`}
                   onClick={() => void importFrom(source)}
                 >
-                  {count === 1
-                    ? mw(lang, "Import 1 tool from {source}", { source: SOURCE_NAME[source] })
-                    : mw(lang, "Import {count} tools from {source}", {
-                        count,
-                        source: SOURCE_NAME[source],
-                      })}
+                  {importing === source
+                    ? mw(lang, "Importing…")
+                    : count === 1
+                      ? mw(lang, "Import 1 tool from {source}", { source: SOURCE_NAME[source] })
+                      : mw(lang, "Import {count} tools from {source}", {
+                          count,
+                          source: SOURCE_NAME[source],
+                        })}
                 </Button>
               ))}
             </div>
           )}
-          {importedLines !== null && (
+          {importFailed !== null && (
+            <p className="set-note" role="status" data-testid="tools-import-failed">
+              {say(importFailed)}
+            </p>
+          )}
+          {importedLines !== null && importedLines.length > 0 && (
             <div className="set-tools-imported" role="status" data-testid="tools-imported">
               {importedLines.map((line, i) => (
                 <p

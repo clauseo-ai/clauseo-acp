@@ -1,0 +1,24 @@
+{
+  "UC-250": {
+    "en": "Importing…",
+    "hi": "इम्पोर्ट हो रहा है…",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-12",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-12",
+    "by": "app track (provisional; A4, import over A3's host)",
+    "note": "Settings › Tools: the pressed Import button's words while its import (and the host's confirm) is in flight; every Import button is off meanwhile"
+  },
+  "UC-251": {
+    "en": "{count} more couldn't be imported.",
+    "hi": "{count} और इम्पोर्ट नहीं हो सके।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-12",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-12",
+    "by": "app track (provisional; A4, import over A3's host)",
+    "note": "Settings › Tools: last line under the import's per-tool lines, when the host leaves some out without naming them (McpImportResult.others); with none named, the count line counts them instead"
+  }
+}

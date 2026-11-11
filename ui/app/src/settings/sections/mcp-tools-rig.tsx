@@ -41,7 +41,7 @@ export async function mount(
     safe?: boolean;
     /** The app feed's first frames, for a host without a fake. */
     first?: AppEvent[];
-    dispatch?: (envelope: CommandEnvelope) => CommandOutcome;
+    dispatch?: (envelope: CommandEnvelope) => CommandOutcome | Promise<CommandOutcome>;
   } = {},
 ) {
   history.replaceState(null, "", "/settings.html#tools");
