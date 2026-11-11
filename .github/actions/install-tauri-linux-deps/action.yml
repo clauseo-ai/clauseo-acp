@@ -22,6 +22,13 @@
 #   is never overwritten: a key is written once.
 # - The release workflow passes `cache: "false"`: a release build installs from the Ubuntu archive,
 #   never from a cache entry.
+# - On 2026-11-11 azure.archive.ubuntu.com, the hosted runners' mirror (through
+#   mirror+file:/etc/apt/apt-mirrors.txt), did not resolve for over an hour. Release run 43050087438
+#   hung 76 minutes in apt-get and then failed. So every apt-get call now gives up on a dead host
+#   after 30 seconds and 3 tries, and the update and install run up to 3 times, 30 and then 60
+#   seconds apart. After the first attempt fails, apt is pointed at http://mirrors.edge.kernel.org/ubuntu/
+#   for the archive and the security pocket. apt still checks the Ubuntu archive's signatures on what
+#   that mirror serves, so the packages are trusted exactly as before.
 
 name: Install the Linux system packages Tauri needs
 description: Installs WebKitGTK 4.1 and any extra packages, from a cache of the .deb files when it has them.
@@ -84,19 +91,67 @@ runs:
             [ "$(dpkg-query -W -f='${Status}' "$p" 2> /dev/null)" = "install ok installed" ] || return 1
           done
         }
+        # A dead host fails in seconds, not after an hour (see the top of this file).
+        apt_opts=(-q -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30)
+        fix_broken=false
         if [ "$HIT" = true ] && compgen -G "$DEBS/*.deb" > /dev/null; then
           echo "Installing $(find "$DEBS" -maxdepth 1 -name '*.deb' | wc -l) cached .deb files with dpkg, no network"
           if sudo dpkg -i "$DEBS"/*.deb && all_installed; then
             exit 0
           fi
           echo "::warning::the cached .deb files did not install every package; installing with apt-get instead"
-          sudo apt-get update -q
-          sudo apt-get install -f -y -q
-        else
-          sudo apt-get update -q
+          fix_broken=true
         fi
         mkdir -p "$DEBS/partial"
-        sudo apt-get install -y -q --no-install-recommends -o Dir::Cache::archives="$DEBS" "${packages[@]}"
+        # One attempt: update the package index, then install. set -e does not apply inside a function
+        # called from an if, so each step returns its failure itself.
+        apt_attempt() {
+          sudo apt-get "${apt_opts[@]}" update || return 1
+          if [ "$fix_broken" = true ]; then
+            sudo apt-get "${apt_opts[@]}" install -f -y || return 1
+          fi
+          sudo apt-get "${apt_opts[@]}" install -y --no-install-recommends -o Dir::Cache::archives="$DEBS" "${packages[@]}"
+        }
+        # Points apt at the kernel.org mirror for the archive and the security pocket. apt still checks
+        # the Ubuntu archive's signatures on everything it fetches, so trust is unchanged. The mirror
+        # carries amd64 and i386 only (no ubuntu-ports), so other architectures keep their sources.
+        use_fallback_mirror() {
+          local fallback=http://mirrors.edge.kernel.org/ubuntu/ f
+          if [ "$(dpkg --print-architecture)" != amd64 ]; then
+            echo "::warning::no fallback mirror for $(dpkg --print-architecture); retrying with the same sources"
+            return 0
+          fi
+          # apt tries the entries of a mirror list by priority, lowest first, and an entry with no
+          # priority last, so the fallback gets priority 0. The old entries stay after it.
+          if [ -f /etc/apt/apt-mirrors.txt ]; then
+            { printf '%s\tpriority:0\n' "$fallback"; grep -v "^$fallback" /etc/apt/apt-mirrors.txt || true; } > "$RUNNER_TEMP/apt-mirrors.txt"
+            sudo cp "$RUNNER_TEMP/apt-mirrors.txt" /etc/apt/apt-mirrors.txt
+            echo "Put $fallback first in /etc/apt/apt-mirrors.txt, which now reads:"
+            cat /etc/apt/apt-mirrors.txt
+          fi
+          for f in /etc/apt/sources.list /etc/apt/sources.list.d/*.sources; do
+            [ -f "$f" ] || continue
+            if grep -qE 'https?://(security|([a-z0-9-]+\.)?archive)\.ubuntu\.com/ubuntu' "$f"; then
+              sudo sed -i -E "s#https?://(security|([a-z0-9-]+\\.)?archive)\\.ubuntu\\.com/ubuntu/?#$fallback#g" "$f"
+              echo "Pointed the Ubuntu URIs in $f at $fallback:"
+              grep -nF "$fallback" "$f"
+            fi
+          done
+        }
+        attempt=1
+        until apt_attempt; do
+          if [ "$attempt" -ge 3 ]; then
+            echo "::error::apt-get failed 3 times; the log above shows each attempt"
+            exit 1
+          fi
+          delay=$((attempt * 30))
+          echo "::warning::apt-get attempt $attempt failed; trying again in $delay seconds"
+          if [ "$attempt" = 1 ]; then
+            use_fallback_mirror
+          fi
+          sleep "$delay"
+          attempt=$((attempt + 1))
+        done
         sudo rm -rf "$DEBS/partial" "$DEBS/lock"
         sudo chown -R "$(id -u):$(id -g)" "$DEBS"
         echo "Downloaded $(find "$DEBS" -maxdepth 1 -name '*.deb' | wc -l) .deb files into the cache folder"
