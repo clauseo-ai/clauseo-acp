@@ -141,7 +141,7 @@ fn an_existing_folder_create_refuses_is_refused_with_its_code_and_never_checked(
         let scanned = host.dispatch(HostCommand::ScanFolder { folder: folder_ref });
         let imported = host.dispatch(HostCommand::CreateMatter {
             name: Title::new("Smith v Jones").unwrap(),
-            source: source.clone(),
+            source,
             client: None,
             next_date: None,
         });

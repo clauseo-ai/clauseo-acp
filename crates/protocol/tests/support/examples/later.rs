@@ -123,7 +123,13 @@ pub(super) fn failures() -> Vec<DomainEvent> {
             ErrorCode::AgentOffline,
             "the window said the computer is offline",
         ),
-        // Folder refusals, never a turn's failure in practice; here for the corpus.
+    ]
+}
+
+/// A `TurnFailed` of turn 3 with `code` and `detail`.
+/// Folder PR 2's refusal codes, never a turn's failure in practice; here for the corpus.
+fn folder_failures() -> Vec<DomainEvent> {
+    vec![
         failed(
             ErrorCode::MatterFolderInClauseoData,
             "inside Clauseo's data folder",
@@ -139,7 +145,6 @@ pub(super) fn failures() -> Vec<DomainEvent> {
     ]
 }
 
-/// A `TurnFailed` of turn 3 with `code` and `detail`.
 fn failed(code: ErrorCode, detail: &str) -> DomainEvent {
     TurnFailed {
         turn: turn_id(3),
@@ -222,9 +227,13 @@ fn skill_pack_notice(reason: PackSkipReason, words: &str) -> Notice {
     }
 }
 
-/// [`failures`], then [`case_law`], as the corpus first saw them.
+/// [`failures`], then [`folder_failures`], then [`case_law`], as the corpus first saw them.
 pub(super) fn failures_then_case_law() -> Vec<DomainEvent> {
-    failures().into_iter().chain(case_law()).collect()
+    failures()
+        .into_iter()
+        .chain(folder_failures())
+        .chain(case_law())
+        .collect()
 }
 
 /// R24: a document read through the case-law connector, and the connector's search.

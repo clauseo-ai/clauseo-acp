@@ -2715,7 +2715,8 @@ export type HostError = {
 	retryable: boolean,
 	/**
 	 *  The matter the failure is about, where the code says so: for
-	 *  `matter.folder_is_matter`, the matter on Clauseo's list that has the folder. Missing
+	 *  `matter.folder_is_matter`, `matter.folder_inside_matter` and
+	 *  `matter.folder_holds_matter`, the matter on Clauseo's list that has the folder. Missing
 	 *  otherwise, and when that matter is not on the list (forgotten, or from another install).
 	 */
 	matter?: MatterId,
