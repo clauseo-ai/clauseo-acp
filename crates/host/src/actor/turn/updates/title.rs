@@ -9,10 +9,11 @@ use super::{Context, agent};
 use crate::error::Error;
 
 /// A session title: `ThreadRenamed { by: Agent }` and the row, when it is a valid title the
-/// thread takes (see `title_source`). The agent's titles count only until a turn of the thread
-/// has ended (`state::turn_ended`): after the first answer the name settles, and the title is
-/// ignored (D-070). A title the thread already has from the agent makes no event, so the replay
-/// Codex sends on load adds nothing.
+/// thread takes (see `title_source`). The name settles after the first answered turn ends
+/// (`state::title_open`): an agent title is taken within `TITLE_GRACE` after that end, and never
+/// once the next prompt has gone out, a title replayed on load or sent later is ignored (D-070).
+/// A turn with no answer text settles nothing. A title the thread already has from the agent
+/// makes no event, so the replay Codex sends on load adds nothing.
 pub(super) fn changed(
     actor: &mut Actor,
     thread: ThreadId,
@@ -23,11 +24,9 @@ pub(super) fn changed(
         tracing::debug!(%thread, "the agent cleared its session title");
         return Ok(());
     };
-    // An update outside the live turn comes after the prompt's answer when a prompt is in
-    // flight: the answer's reply may not be handled yet.
     let idle = matches!(context, Context::Outside { replay: false });
-    if super::super::state::turn_ended(actor, thread, idle) {
-        tracing::debug!(%thread, "a turn has ended; the agent's session title is ignored");
+    if !super::super::state::title_open(actor, thread, idle) {
+        tracing::debug!(%thread, "the name has settled; the agent's session title is ignored");
         return Ok(());
     }
     let prompt = current(actor, thread).map(|current| current.prompt.as_slice());

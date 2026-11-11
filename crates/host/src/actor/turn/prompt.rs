@@ -48,6 +48,7 @@ pub(super) fn prompt(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
     };
     current.phase = TurnPhase::Prompting;
     let stopped = std::rc::Rc::clone(&current.stopped);
+    super::state::prompt_sent(actor, thread);
     // The prompt goes out: the case-law relay's turn caps start again (R24), and while the
     // window says the computer is offline, the turn is watched (`offline.rs`).
     super::launch_checks::relay::turn_started(actor, thread);

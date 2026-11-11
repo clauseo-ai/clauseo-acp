@@ -267,9 +267,11 @@ since the Unix epoch. Inside `events.envelope`, the envelope's own encoding appl
   agent title; a placeholder fills in only a thread with no title. The host checks it in one
   function (`title_may_change`, `crates/host/src/actor/title_source.rs`) before it writes the row,
   and a rename it refuses makes no event and no row write, so a fast agent title is not undone by
-  the app's later first-words rename. The agent's title counts only until a turn of the thread has
-  ended (its prompt returned, or its end is logged), so after the first answer the name settles,
-  and a title sent later, or replayed on a session load, is ignored (D-070).
+  the app's later first-words rename. The name settles after the first turn that produced answer
+  text ends: an agent's title is taken for 60 s after that end (`TITLE_GRACE`, since the adapters
+  title in the background after `end_turn`), and never once the next prompt has gone out or after
+  a session load of a thread whose answered turn is in its history (D-070). A turn with no answer
+  text settles nothing.
 - A commit's matter and thread rows insert or replace the row with that id.
 - `checkpoints` keeps only the id, the matter, the shadow repository's commit id and the `seq` of
   its `CheckpointRecorded` in the matter stream. The event already carries the rest; the commit id

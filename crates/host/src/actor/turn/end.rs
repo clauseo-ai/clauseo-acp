@@ -160,8 +160,13 @@ pub(super) fn end_turn(actor: &mut Actor, thread: ThreadId, mut end: End) {
         return;
     }
     current.phase = TurnPhase::Ending;
+    let answered = current.first_words.is_some();
     if let Some(call) = current.prompt_call.take() {
         call.abort();
+    }
+    if answered {
+        let now = actor.now().mono;
+        super::state::answered_end(actor, thread, now);
     }
     // Case-law calls from now on count against the between-turns bucket (R24).
     super::launch_checks::relay::turn_ended(actor, thread);
