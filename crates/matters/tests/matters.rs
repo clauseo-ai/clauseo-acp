@@ -40,6 +40,10 @@ mod start_record;
 mod undo;
 
 #[cfg(test)]
+#[path = "matters/own_file.rs"]
+mod own_file;
+
+#[cfg(test)]
 #[path = "matters/undo_case.rs"]
 mod undo_case;
 

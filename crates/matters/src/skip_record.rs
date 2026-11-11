@@ -157,6 +157,27 @@ impl SkipRecord {
         })
     }
 
+    /// Why the checkpoint with this record does not prove `path` absent from the folder, if it
+    /// does not: a skipped file there (its reason), under a folder that did not list, or after
+    /// any folder did not list (a file new since may have come out of it: `UnreadFolder`), or in
+    /// its tree (`in_tree`: `Unknown`). Undo deletes a file a step added only when the step's
+    /// first record proves it absent (`undo.rs`), and so the agent's own (`diff::TurnStart`).
+    pub(crate) fn not_absent(&self, path: &str, in_tree: bool) -> Option<SkippedFileReason> {
+        if let Some(skip) = self.skipped_at(path) {
+            return Some(skip.reason);
+        }
+        if self.under_unread(path) {
+            return Some(SkippedFileReason::UnreadFolder);
+        }
+        if in_tree {
+            return Some(SkippedFileReason::Unknown);
+        }
+        if !self.unread.is_empty() {
+            return Some(SkippedFileReason::UnreadFolder);
+        }
+        None
+    }
+
     /// The blob's text.
     pub(crate) fn encode(&self) -> String {
         let mut lines: Vec<(&str, String)> = Vec::new();

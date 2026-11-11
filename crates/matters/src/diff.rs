@@ -3,11 +3,14 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use clauseo_protocol::{ChangeKind, ContentId, Count, FileChange, MatterPath};
+use clauseo_protocol::{ChangeKind, ContentId, Count, FileChange, MatterPath, Timestamp};
 
 use crate::Error;
 use crate::checkpoint::SizedFile;
+use crate::first_read::FirstReads;
 use crate::history::Oid;
+use crate::skip_record::SkipRecord;
+use crate::stat::{CacheEntry, find_by_path};
 
 /// The content id `ContentId` carries for `blob`.
 pub(crate) fn content_id(blob: Oid) -> Result<ContentId, Error> {
@@ -160,12 +163,57 @@ fn size(bytes: u64) -> Count {
     Count::clamped(bytes)
 }
 
+/// What an after-turn checkpoint knew of the folder at the start of its step (the last commit),
+/// and what its walk found, to tell a file the agent made though no tool call named it (a
+/// document Bash wrote with pandoc) from one the lawyer may have made: see [`TurnStart::own`].
+pub(crate) struct TurnStart<'a> {
+    /// The last commit's skip record; `None` when it has none (written before records were).
+    pub(crate) record: Option<&'a SkipRecord>,
+    /// The last commit's tree.
+    pub(crate) tree: &'a [SizedFile],
+    /// What this checkpoint reads for the first time.
+    pub(crate) reads: &'a FirstReads,
+    /// The walk's entries, sorted by path bytes.
+    pub(crate) entries: &'a [CacheEntry],
+    /// The checkpoint's time: the turn's end.
+    pub(crate) at: Timestamp,
+}
+
+impl TurnStart<'_> {
+    /// Whether `change` adds a file the step's start record proves absent (as undo needs it to
+    /// delete the file: [`SkipRecord::not_absent`]), not read for the first time, and last
+    /// modified at or before the checkpoint's time: the agent's, wherever no tool call named it.
+    fn own(&self, change: &FileChange) -> bool {
+        let path = change.path();
+        let (ChangeKind::Added, Some(record)) = (change.change(), self.record) else {
+            return false;
+        };
+        let in_tree = find_by_path(self.tree, path.as_str(), |file| file.path.as_str()).is_some();
+        if record.not_absent(path.as_str(), in_tree).is_some()
+            || self.reads.changed.iter().any(|file| file.path == *path)
+        {
+            return false;
+        }
+        find_by_path(self.entries, path.as_str(), |entry| entry.path.as_str()).is_some_and(
+            |entry| {
+                let mtime = i64::from(entry.stat.mtime.secs) * 1000
+                    + i64::from(entry.stat.mtime.nanos / 1_000_000);
+                mtime <= self.at.as_millis()
+            },
+        )
+    }
+}
+
 /// `change`, flagged as possibly holding the lawyer's edits when no tool call named its path
-/// (for a rename: neither path).
-pub(crate) fn flag(change: FileChange, tools: &BTreeSet<MatterPath>) -> FileChange {
+/// (for a rename: neither path) and it is not a file the agent added (`start`: [`TurnStart::own`]).
+pub(crate) fn flag(
+    change: FileChange,
+    tools: &BTreeSet<MatterPath>,
+    start: &TurnStart<'_>,
+) -> FileChange {
     let named = tools.contains(change.path())
         || matches!(change.change(), ChangeKind::Renamed { from } if tools.contains(from));
-    if named {
+    if named || start.own(&change) {
         change
     } else {
         change.with_lawyer_edits()
