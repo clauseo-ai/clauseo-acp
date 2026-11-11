@@ -13,6 +13,10 @@
 //!   `protection_view_changed` (its protection section, 0051) of it, and any other label none
 //!   ([`AppEvents`], 0028, 0037). The host's own catch-up after a subscribe carries the whole
 //!   connector state, so a restart reads nothing for it.
+//!   Desktop adds one message of its own to it: `window_full_screen`, whether `main` is in the
+//!   OS's own full screen (`window_events.rs`). Each subscription, a restart's included, starts
+//!   with the last value, then each change, so a restart needs no read; only `main` carries it.
+//!   It ends with the host's subscription.
 //! - The limits (`HostHandle::subscribe_limits`), which `open_stream` follows for `main` and
 //!   the settings window (U12). The host starts
 //!   every limits subscription with the current `limits_view_changed`, so a restart needs no
@@ -32,12 +36,14 @@ use std::sync::{Arc, Mutex, Weak};
 use clauseo_host::{EncodedEvent, HostHandle};
 use clauseo_protocol::{ErrorCode, HostError, HostEvent, HostQuery, QueryResult};
 use futures::StreamExt as _;
-use futures::stream::BoxStream;
+use futures::future::ready;
+use futures::stream::{self, BoxStream};
 use tauri::async_runtime;
 
 use super::{Feed, Forward, Window};
 use crate::bridge::{PRINCIPAL, lock};
 use crate::setup::SetupEvents;
+use crate::window_events::FullScreen;
 
 /// Which feed events a window's channel carries: an allow-list keyed on its label (0028).
 /// `main` carries them all. The settings window carries the limits (U12) and, of the app feed,
@@ -162,10 +168,11 @@ fn other_result(query: &str) -> HostError {
     )
 }
 
-/// One event of a feed: the host's, as it encoded it, or a setup message's text.
+/// One event of a feed: the host's, as it encoded it, or the text of a message of desktop's own
+/// (a `setup` or a `window_full_screen` message).
 enum FeedEvent {
     Host(EncodedEvent),
-    Setup(Arc<str>),
+    Own(Arc<str>),
 }
 
 impl FeedEvent {
@@ -173,7 +180,7 @@ impl FeedEvent {
     fn json(&self) -> &str {
         match self {
             Self::Host(event) => event.json(),
-            Self::Setup(text) => text,
+            Self::Own(text) => text,
         }
     }
 }
@@ -182,7 +189,7 @@ impl FeedEvent {
 /// `current`, the settings and the updater's view, read after subscribing.
 async fn subscribe(
     host: &HostHandle,
-    setup: &SetupEvents,
+    (setup, full_screen): (&SetupEvents, &FullScreen),
     feed: Feed,
     current: bool,
 ) -> Result<(BoxStream<'static, FeedEvent>, Vec<String>), HostError> {
@@ -195,7 +202,7 @@ async fn subscribe(
             } else {
                 Vec::new()
             };
-            Ok((subscription.map(FeedEvent::Host).boxed(), views))
+            Ok((with_full_screen(subscription, full_screen), views))
         }
         // Its first event is the current view.
         Feed::Limits => {
@@ -203,8 +210,24 @@ async fn subscribe(
             Ok((subscription.map(FeedEvent::Host).boxed(), Vec::new()))
         }
         // Its first events are the latest states.
-        Feed::Setup => Ok((setup.follow().map(FeedEvent::Setup).boxed(), Vec::new())),
+        Feed::Setup => Ok((setup.follow().map(FeedEvent::Own).boxed(), Vec::new())),
     }
+}
+
+/// The host's app subscription with `main`'s full-screen value beside it, the last value first
+/// (`FullScreen::follow`). It ends when the host's subscription ends, as it did alone.
+fn with_full_screen(
+    subscription: impl futures::Stream<Item = EncodedEvent> + Send + 'static,
+    full_screen: &FullScreen,
+) -> BoxStream<'static, FeedEvent> {
+    let host = subscription
+        .map(|event| Some(FeedEvent::Host(event)))
+        .chain(stream::once(ready(None)));
+    let own = full_screen.follow().map(|text| Some(FeedEvent::Own(text)));
+    stream::select(host, own)
+        .take_while(|event| ready(event.is_some()))
+        .filter_map(ready)
+        .boxed()
 }
 
 /// Subscribes to `feed` for `restart_id` and starts its pump, unless the window paused or a
@@ -219,15 +242,16 @@ pub(crate) async fn start_feed(
     restart_id: u64,
     current: bool,
 ) -> Result<(), HostError> {
-    let setup = {
+    let (setup, full_screen) = {
         let guard = lock(window);
         if guard.state.is_paused() {
             // Started when acks catch up.
             return Ok(());
         }
-        Arc::clone(&guard.setup)
+        (Arc::clone(&guard.setup), Arc::clone(&guard.full_screen))
     };
-    let (subscription, firsts) = match subscribe(host, &setup, feed, current).await {
+    let sources = (setup.as_ref(), full_screen.as_ref());
+    let (subscription, firsts) = match subscribe(host, sources, feed, current).await {
         Ok(started) => started,
         Err(error) => {
             let mut guard = lock(window);

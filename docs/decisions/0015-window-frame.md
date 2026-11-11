@@ -105,6 +105,25 @@ windowed controller (`CreateCoreWebView2Controller`, `wry/src/webview2/mod.rs`),
   away and our window's name is read. This is Tauri's, for every undecorated window; raising our
   window above it would cost resizing from the top edge over the button. A follow-up, upstream.
 
+## Amendment 2026-11-11: macOS's full screen from the host
+
+- **Why.** In macOS's own full screen the page drops the traffic lights' room. It read that
+  from its size against the screen's, but a notched MacBook puts a full-screen window below
+  the camera band, about 32 px shorter than its screen, so the size read says "windowed".
+- **What the host sends.** On each `Resized` of `main`, desktop reads `Window::is_fullscreen`
+  (`window_events::on_main_resized`) and, when the value changed, sends
+  `{"window_full_screen": <bool>}` on `main`'s app feed, the last value first on every
+  subscription and restart (`window_events/full_screen.rs`, `bridge/pump/feeds.rs`).
+  `subscribe_app` from `main` reads the value first. `window_full_screen` is a reserved
+  top-level key of desktop's own, beside `setup` (`frame.rs`); no `HostEvent` and no protocol
+  type changes. The settings window and other labels never carry it (`AppEvents`). It goes on
+  every desktop OS; the page acts on it only with the Mac's own lights.
+- **Why `Resized` is enough.** tao 0.37 sends `Resized` from `windowDidEnterFullScreen:` and
+  `windowDidExitFullScreen:`, after its full-screen state is set and cleared, so the last
+  resize of each transition reads the value it ends on.
+- **No new capability.** No command, permission or event is added: the value rides the
+  channel `subscribe_app` already fills.
+
 ## Status
 
 proposed
