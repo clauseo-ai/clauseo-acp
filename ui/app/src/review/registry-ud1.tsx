@@ -10,7 +10,7 @@ import type { Entry } from "./entry.ts";
 import { render, type Scene } from "./registry-ud1-scene.tsx";
 import { SIGNING_IN } from "./registry-ud1-signin.tsx";
 import * as T from "./registry-ud1-tools.ts";
-import { errorWords, type WordsRef } from "./words.ts";
+import { errorWords, threadWords, type WordsRef } from "./words.ts";
 
 const CLAUDE: AgentId = "claude-acp";
 const CODEX: AgentId = "codex-acp";
@@ -519,6 +519,29 @@ const STILL_DOWNLOADING: Entry = {
   }),
 };
 
+/** The composer's line while the plan runs on the lawyer's API key, named by its maker (UC-147, UC-148). */
+const UC_KEY_LINE: Entry[] = [
+  {
+    id: "UC-147",
+    words: threadWords("Uses your Anthropic API key"),
+    screen: "first-launch/signin-done",
+    render: render(signed({ method: "api_key" })),
+  },
+  {
+    id: "UC-148",
+    words: threadWords("Uses your OpenAI API key"),
+    screen: "first-launch/signin-done",
+    render: render({
+      events: [
+        install(CLAUDE, { missing: { download_bytes: 182_000_000 } }),
+        SIGNED_OUT,
+        install(CODEX, { ready: { version: "0.1.0" } }),
+        signIn(CODEX, { signed_in: { method: "api_key", source: "own", at: AT } }),
+      ],
+    }),
+  },
+];
+
 export const UD1: readonly Entry[] = [
   ...SCENES.flatMap((scene, i) =>
     scene === null
@@ -537,4 +560,5 @@ export const UD1: readonly Entry[] = [
   ...UC_KEY,
   AFTER_SIGN_IN,
   STILL_DOWNLOADING,
+  ...UC_KEY_LINE,
 ];

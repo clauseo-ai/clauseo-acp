@@ -139,6 +139,37 @@ export const isSignedIn = (state: SignIn | undefined): boolean =>
   "signed_in" in state &&
   state.signed_in !== undefined;
 
+/** Whether the plan is signed in with the lawyer's API key. */
+export const keyInUse = (state: SignIn | undefined): boolean =>
+  isSignedIn(state) &&
+  typeof state === "object" &&
+  state.signed_in !== undefined &&
+  state.signed_in.method === "api_key";
+
+/** Whether the provider refused the API key in use: the host's `signed_in.refused`, read by shape so both wires compile
+ * (the host PR key-path-host adds it); false for a plan login, the firm's account, or a host before it. */
+export const keyRefused = (state: SignIn | undefined): boolean => {
+  if (!keyInUse(state) || typeof state !== "object" || state.signed_in === undefined) return false;
+  const refused = (state.signed_in as { refused?: unknown }).refused;
+  return typeof refused === "number";
+};
+
+/** Whether a plan isn't installed here yet, and the firm's install doesn't stand in for it: missing, paused behind the
+ * other plan's download, downloading, or a download that stopped. */
+export const awaitsInstall = (setup: AgentSetup | undefined): boolean => {
+  const install = setup?.install;
+  return install !== undefined && install !== "managed" && !isReady(install);
+};
+
+/** A key was just saved for `agent`: a plan not here yet starts its normal download (install_agent), so the next
+ * question can go once it is ready. A download already running, paused behind the other plan's, or stopped (its line
+ * offers Try again) is left as it is. */
+export function installForKey(store: Pick<SetupStore, "state" | "command">, agent: AgentId): void {
+  const install = store.state().agents[agent]?.install;
+  if (typeof install === "object" && "missing" in install && install.missing !== undefined)
+    store.command({ install_agent: { agent } });
+}
+
 /** The plans, in the order every screen offers them: Claude, then ChatGPT. */
 export const PLANS: readonly AgentId[] = [CLAUDE, CODEX];
 

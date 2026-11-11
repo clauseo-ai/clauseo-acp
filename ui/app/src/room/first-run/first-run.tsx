@@ -14,8 +14,11 @@ import type { AgentId } from "../../transport/protocol.ts";
 import {
   CLAUDE,
   CODEX,
+  awaitsInstall,
+  installForKey,
   installGoing,
   isSignedIn,
+  keyInUse,
   otherPlan,
   planInPlay,
   signInWaits,
@@ -70,11 +73,17 @@ function actsFor(
         store.set({ pasting: false, keyOpen: false });
         store.signIn(agent, { console: a.console === true, again: true });
         return;
-      case "sign-in-to":
+      case "sign-in-to": {
         // either plan's own Sign in, through the store's queue: the other plan's choice moves the new conversation to
-        // it as "Use … instead" did
-        store.signInTo(a.plan === "chatgpt" ? CODEX : CLAUDE);
+        // it as "Use … instead" did. A plan with its key saved and not installed yet installs instead (no sign-in)
+        const to = a.plan === "chatgpt" ? CODEX : CLAUDE;
+        if (keyInUse(store.state().agents[to]?.signIn)) {
+          store.command({ install_agent: { agent: to } });
+          return;
+        }
+        store.signInTo(to);
         return;
+      }
       case "cancel":
         // the plan waiting its turn stops waiting (nothing sent), or cancel_sign_in goes; its download carries on
         store.cancelSignIn(agent);
@@ -113,7 +122,11 @@ function actsFor(
         store.set({ keyOpen: a.open });
         return;
       case "key":
-        return store.send({ set_agent_key: { agent, key: a.key } });
+        // a saved key on a plan not here yet starts its download at once, so the next question can go
+        return store.send({ set_agent_key: { agent, key: a.key } }).then((ok) => {
+          if (ok) installForKey(store, agent);
+          return ok;
+        });
       case "plans":
         transport
           .openExternal(PLANS[planOf(agent)])
@@ -160,6 +173,17 @@ function stepActs(transport: HostTransport, store: ProtectionStore, parts: StepP
 function viewFor(state: SetupState, room: RoomSide, clock: (at: number) => string) {
   const { agent, drafting } = room;
   const setup = state.agents[agent];
+  // its API key is saved but the plan isn't here yet: nothing can go until it is installed, so the set-up view holds the
+  // question (its act installs; busy while the download runs, which the working line follows), never "Sign in"
+  if (keyInUse(setup?.signIn) && awaitsInstall(setup)) {
+    const install = setup?.install;
+    // not started (missing, or paused behind the other plan's download): its act starts it; else it runs, or stopped
+    // with the working line's own Try again
+    const idle =
+      install === "paused" ||
+      (typeof install === "object" && "missing" in install && install.missing !== undefined);
+    return { kind: "set-up", expired: false, instead: drafting, keyed: true, busy: !idle } as const;
+  }
   if (state.queued === agent && !isSignedIn(setup?.signIn)) return queuedView(setup, state, agent);
   const view = gateView(setup, state, clock, agent);
   if (view?.kind !== "signed-out" || view.found !== undefined) return view;
