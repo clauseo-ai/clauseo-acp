@@ -7,6 +7,7 @@ import { late } from "@clauseo/components/lib/late.ts";
 import { Welcome, type FootPlan } from "@clauseo/components/clauseo/first-launch/welcome.tsx";
 import { ToolsLine } from "@clauseo/components/clauseo/first-launch/tools.tsx";
 import { useDisplay } from "@clauseo/components/lib/display.ts";
+import type { WorkingState } from "@clauseo/components/clauseo/working-line.tsx";
 import { toHostError, type HostTransport } from "../../transport/host-transport.ts";
 import {
   PLANS,
@@ -21,7 +22,7 @@ import { usePickWait } from "../picker-wait.ts";
 import { markButton, markWelcome } from "../../start-marks.ts";
 import { IDS, NAME, planOf } from "./acts.ts";
 import { readyPlan, toolsView } from "./views.ts";
-import { browserNote, footActs, welcomeFoot } from "./welcome-foot.tsx";
+import { browserNote, footActs, stillNote, welcomeFoot } from "./welcome-foot.tsx";
 
 /** U2's new matter form in place, and a refused folder's words: New matter's chunk (new-matter.tsx), loaded as the
  * first screen needs them. */
@@ -35,6 +36,13 @@ const folderName = (display: string) =>
     .split(/[\\/]/)
     .filter((p) => p !== "")
     .pop() ?? display;
+
+/** A row without its note: the first screen says the note under the row instead. */
+function unnoted(row: WorkingState | null): WorkingState | null {
+  if (row?.kind !== "wait" || row.note === undefined) return row;
+  const { note: _note, ...rest } = row;
+  return rest;
+}
 
 /** The first screen: the question, both plans at its foot, the counts switch. Its acts make the first matter: a
  * folder chosen opens it at once (the room opens the moment it is made); a new matter takes U2's form, in place. */
@@ -53,20 +61,15 @@ export function FirstScreen({
   const plans: FootPlan[] = PLANS.map((agent) => {
     const name = NAME[planOf(agent)];
     const setup = state.agents[agent];
-    const install = welcomeFoot(
-      lang,
-      agent,
-      name,
-      setup,
-      state,
-      footActs(store, agent, state),
-      IDS.install,
+    // the cancelled sign-in's note goes under the row, in Welcome's own slot, not in it
+    const install = unnoted(
+      welcomeFoot(lang, agent, name, setup, state, footActs(store, agent, state), IDS.install),
     );
     return {
       key: agent,
       name,
       install,
-      note: browserNote(lang, agent, install, setup),
+      note: stillNote(lang, name, setup) ?? browserNote(lang, agent, install, setup),
       // ready here, or installed and signed in wherever that happened (D-012: Settings' sign-in left this window
       // with no row for the plan, since its install was never seen turning ready here)
       ready:

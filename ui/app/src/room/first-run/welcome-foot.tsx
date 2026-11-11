@@ -42,15 +42,19 @@ export type FootActs = InstallActs & { signIn: () => void; cancel: () => void };
 export const footActs = (store: SetupStore, agent: AgentId, state: SetupState): FootActs => ({
   ...installActs(store, agent, state.copied),
   signIn: () => store.signInTo(agent),
-  cancel: () => {
-    if (store.state().queued === agent) {
-      store.unqueue();
-      return;
-    }
-    store.set({ pasting: false });
-    store.command({ cancel_sign_in: { agent } });
-  },
+  cancel: () => store.cancelSignIn(agent),
 });
+
+/** The note under a plan's download line once its waiting sign-in was cancelled and the download carries on (the store's
+ * `stillDownloading`); null otherwise. */
+export const stillNote = (
+  lang: Lang,
+  name: string,
+  setup: AgentSetup | undefined,
+): string | null =>
+  setup?.stillDownloading === true
+    ? fl(lang, "Sign-in cancelled. {name} is still downloading; sign in when it's ready.", { name })
+    : null;
 
 /** The test ids of the signed-out line. */
 const IDS = { line: "signin-foot", signIn: "signin-foot-sign-in", cancel: "signin-foot-cancel" };
@@ -145,13 +149,17 @@ export function welcomeFoot(
   // a waiting sign-in over its download: the download's own line and progress, and the wait's Cancel beside them
   if (waits && install !== null && view0?.kind !== "missing")
     return named(withCancel(install, lang, acts.cancel), lang, name, null);
-  if (!waits && (install !== null || !installed(setup) || locked))
-    return named(
+  if (!waits && (install !== null || !installed(setup) || locked)) {
+    const row = named(
       install,
       lang,
       name,
       view0?.kind === "missing" && view0.reinstall !== true ? view0.mb : null,
     );
+    // its sign-in cancelled while it downloads: the download's line, no Cancel, and the note saying it carries on
+    const note = stillNote(lang, name, setup);
+    return note === null || row?.kind !== "wait" ? row : { ...row, note };
+  }
   // no clock time is said by the states shown here; a waiting sign-in says when its browser opens
   const view = waits ? queuedView(setup, state, agent) : gateView(setup, state, () => "", agent);
   if (view === null) return null;

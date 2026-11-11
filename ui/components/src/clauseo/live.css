@@ -49,6 +49,11 @@
     border-radius: var(--r-field) var(--r-field) 0 0;
   }
   /* a second line under the first (the first run's other plan): compact, square at the top, one hair below the first */
+  /* a row's note, muted under it (a cancelled sign-in's under its download), in the first screen's plan note's type */
+  .working-note {
+    @apply text-small text-muted;
+    padding: var(--s1) var(--s4) var(--s2);
+  }
   .working-also > .working {
     min-height: var(--size-control-small);
     border-radius: 0;

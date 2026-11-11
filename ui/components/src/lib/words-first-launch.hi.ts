@@ -73,6 +73,9 @@ export const HI = {
   // the plan ready while the other plan's sign-in is under way: sign-ins go one at a time (new, UC-153)
   "Your browser opens for {name} after {other}'s sign-in.":
     "{other} का साइन इन पूरा होते ही {name} के लिए आपका ब्राउज़र खुलेगा।",
+  // a waiting sign-in cancelled while its plan downloads: the download carries on (new, UC-230)
+  "Sign-in cancelled. {name} is still downloading; sign in when it's ready.":
+    "साइन-इन रद्द हुआ। {name} अभी डाउनलोड हो रहा है; तैयार होने पर साइन इन करें।",
   // where the key is kept, by display_info's platform, and a computer with no keyring (new)
   "Kept in this Mac's Keychain.": "इस Mac के Keychain में रखी है।",
   "Kept in Windows Credential Manager.": "Windows Credential Manager में रखी है।",
