@@ -1,70 +1,133 @@
 {
-  "note": "Shared by crates/protocol/tests/text.rs and ui/app/src/room/thread/prompt-cost.test.ts: escaped_len (Rust) and escapedLen (TypeScript) must give each text its escaped bytes. Add a case here, never in one test only.",
+  "note": "Shared by crates/protocol/tests/text.rs, crates/host/src/codex_input/tests.rs and ui/app/src/room/thread/prompt-cost.test.ts. escaped_bytes is escaped_len (Rust) and escapedLen (TypeScript): the host's prompt cap, which the composer checks too. scalar_values is chars().count(): what Codex counts against its input cap, which only the host checks. codex_links is what codex-acp's \"[@name](uri)\" for a resource link costs against Codex's cap (crates/host/src/codex_input/tests.rs). Add a case here, never in one test only.",
   "cases": [
     {
       "name": "empty",
       "text": "",
-      "escaped_bytes": 0
+      "escaped_bytes": 0,
+      "scalar_values": 0
     },
     {
       "name": "plain",
       "text": "Clause 4.2",
-      "escaped_bytes": 10
+      "escaped_bytes": 10,
+      "scalar_values": 10
     },
     {
       "name": "quote",
       "text": "\"",
-      "escaped_bytes": 2
+      "escaped_bytes": 2,
+      "scalar_values": 1
     },
     {
       "name": "newline",
       "text": "\n",
-      "escaped_bytes": 2
+      "escaped_bytes": 2,
+      "scalar_values": 1
     },
     {
       "name": "tab",
       "text": "\t",
-      "escaped_bytes": 2
+      "escaped_bytes": 2,
+      "scalar_values": 1
     },
     {
       "name": "control U+0001",
       "text": "\u0001",
-      "escaped_bytes": 6
+      "escaped_bytes": 6,
+      "scalar_values": 1
     },
     {
       "name": "control U+001F",
       "text": "\u001f",
-      "escaped_bytes": 6
+      "escaped_bytes": 6,
+      "scalar_values": 1
     },
     {
       "name": "backslash",
       "text": "\\",
-      "escaped_bytes": 2
+      "escaped_bytes": 2,
+      "scalar_values": 1
     },
     {
       "name": "DEL U+007F",
       "text": "",
-      "escaped_bytes": 1
+      "escaped_bytes": 1,
+      "scalar_values": 1
     },
     {
       "name": "Hindi",
       "text": "अनुबंध की धारा ४",
-      "escaped_bytes": 42
+      "escaped_bytes": 42,
+      "scalar_values": 16
     },
     {
       "name": "emoji",
       "text": "📄😀",
-      "escaped_bytes": 8
+      "escaped_bytes": 8,
+      "scalar_values": 2
     },
     {
       "name": "mixed",
       "text": "Line 1\n\t\"quoted\" \\ path \u0001 धारा 😀",
-      "escaped_bytes": 53
+      "escaped_bytes": 53,
+      "scalar_values": 32
     },
     {
       "name": "short escapes",
       "text": "\b\f\r",
-      "escaped_bytes": 6
+      "escaped_bytes": 6,
+      "scalar_values": 3
+    },
+    {
+      "name": "CRLF",
+      "text": "Line 1\r\nLine 2\r\n",
+      "escaped_bytes": 20,
+      "scalar_values": 16
+    },
+    {
+      "name": "astral only",
+      "text": "𝔸😀🏳️‍🌈",
+      "escaped_bytes": 22,
+      "scalar_values": 6
+    },
+    {
+      "name": "Hindi conjuncts",
+      "text": "क्षत्रिय श्री ज्ञान",
+      "escaped_bytes": 53,
+      "scalar_values": 19
+    }
+  ],
+  "codex_links": [
+    {
+      "name": "paper.txt",
+      "uri": "file:///tmp/vm2/cxbound/scratch/r3/paper.txt",
+      "codex_chars": 58,
+      "note": "measured live: codex-boundary r3, actual_chars over by 58"
+    },
+    {
+      "name": "",
+      "uri": "file:///tmp/vm2/cxbound/scratch/r3/paper.txt",
+      "codex_chars": 58,
+      "note": "empty name: codex-acp uses the file:// path's last segment"
+    },
+    {
+      "name": "मसौदा.docx",
+      "uri": "file:///m/%E0%A4%AE.docx",
+      "codex_chars": 39,
+      "note": "a non-ASCII name counts its scalar values; the URI is percent-encoded ASCII"
+    },
+    {
+      "name": "",
+      "uri": "file:///a/",
+      "codex_chars": 15,
+      "note": "empty name, trailing slash: an empty last segment"
+    },
+    {
+      "name": "",
+      "uri": "https://x.test/a",
+      "codex_chars": 16,
+      "note": "empty name, not file://: the URI alone"
     }
   ]
 }

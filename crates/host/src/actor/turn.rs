@@ -16,6 +16,7 @@ mod came_back;
 mod cancel;
 pub(super) mod case_law;
 mod close;
+mod codex_cap;
 mod end;
 mod failure;
 mod forced_mode;
