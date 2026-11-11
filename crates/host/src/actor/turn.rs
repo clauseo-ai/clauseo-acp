@@ -10,6 +10,7 @@
 //! held text (`out.rs`), so text and other events keep their order.
 
 mod agents;
+mod always;
 mod answers;
 mod asks;
 mod came_back;

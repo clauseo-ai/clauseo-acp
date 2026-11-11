@@ -392,7 +392,8 @@ fn every_claude_session_denies_the_data_folders_clauseo_only_subtrees() {
                 (rule.contains("/run/")
                     && !rule.ends_with("/run/*/relay-token)")
                     && !rule.ends_with("/run/*/agent-browser/config.json)"))
-                    || rule.contains("/agent-state")
+                    || (rule.contains("/agent-state")
+                        && !rule.ends_with("/agent-state/*/claude-allow.json)"))
             }),
             "{rules:?}"
         );

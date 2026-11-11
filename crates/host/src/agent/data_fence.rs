@@ -79,14 +79,17 @@ pub(crate) use variables::launch_vars;
 /// need it, and a token read through them would land in the transcript; and the shell
 /// browser's config file
 /// (`browser::SESSION_CONFIG`), which agent-browser reads itself: an edit to it could set what
-/// the `agent-browser` deny rules refuse as flags (`--profile`, `--config`).
+/// the `agent-browser` deny rules refuse as flags (`--profile`, `--config`). And beside each
+/// matter's notes, the Claude rules the host keeps for it (`agent/always.rs`), which Claude
+/// may neither change nor need to read, whether or not the file existed at the launch.
 /// Under `agents/runtime`, Node and the half-unpacked `.tmp-` folders, but not Clauseo's Python
 /// runtime ([`READ_ONLY`]); the launch denies every other entry there that exists. And every
 /// session's Claude settings file (`agent::launch_settings`), its own too: Claude Code reads
 /// it itself at its start, so its tools never need it, and it holds every session's rules.
 /// And Claude's config folder's names (`claude_home::CLAUDE_HOME`, added by the launch).
-pub(crate) const DENIED: [&str; 31] = [
+pub(crate) const DENIED: [&str; 32] = [
     "run/*/relay-token",
+    "agent-state/*/claude-allow.json",
     "run/*/agent-browser/config.json",
     "skill-packs/**",
     "matters/**",

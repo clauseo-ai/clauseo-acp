@@ -146,6 +146,8 @@ pub(super) struct Agent {
     pub(super) matter_spellings: Vec<String>,
     /// Its idle clock and config calls in flight (`idle.rs`).
     pub(super) idle: super::idle::Mark,
+    /// A Claude agent's kept "Always for this matter" rules (`always.rs`).
+    pub(super) always: super::always::Always,
 }
 
 impl Agent {
@@ -241,6 +243,9 @@ pub(super) fn launch_now(
         let matter = prepared.run.key.matter;
         tracing::info!(%matter, forced_ask, "Claude runs in forced ask: the matter folder is unprotected");
     }
+    let kind = actor.check_thread(thread).ok();
+    let kind = kind.and_then(|entry| clauseo_protocol::AgentKind::of(&entry.row.agent));
+    let always = super::always::Always::at_launch(&prepared.run, kind, forced_ask);
     let mut tree = None;
     let (link, folder, codex, plan_notes, matter_spellings, claude_home, fence_vars, probe) =
         match launch(actor, thread, prepared, &mut tree) {
@@ -302,6 +307,7 @@ pub(super) fn launch_now(
         start_failure: None,
         matter_spellings,
         idle: super::idle::Mark::default(),
+        always,
     };
     if let Some(state) = state(actor, thread) {
         state.agent = Some(Box::new(agent));

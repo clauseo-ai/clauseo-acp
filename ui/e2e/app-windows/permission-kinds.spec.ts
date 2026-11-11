@@ -1,6 +1,7 @@
 // fake_agent `claude-permission-kinds`: four permission requests, each offering all four kinds; the
-// scenario accepts only allow_once, allow_always, reject_once, reject_always in that order (any
-// other answer ends fake_agent, so the closing answer never comes). allow_always passes Rust's
+// lawyer answers allow_once, allow_always, reject_once, reject_always in that order, and the
+// scenario takes allow_once for the second, as the host sends a Claude agent (any other answer
+// ends fake_agent, so the closing answer never comes). allow_always passes Rust's
 // native confirmation because the fixture sets E2E_CONFIRM_ALWAYS=accept. The requests come with
 // no earlier tool call, so a card shows no title: cards are found by order, the Nth for the Nth
 // request, each appearing once the one before is answered.

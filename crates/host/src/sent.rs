@@ -35,6 +35,9 @@ pub(crate) struct SentTool {
     /// The matter paths it has named so far ([`note_paths`]), for a permission request about
     /// it that names none.
     pub(crate) paths: BTreeSet<MatterPath>,
+    /// The agent's tool `name` as last sent (`ToolCallStarted.tool_name`, then any patch's),
+    /// for the rule of a Claude "Always for this matter" (`actor/turn/always.rs`).
+    pub(crate) tool_name: Option<CompactString>,
 }
 
 /// Adds the matter paths a tool call names (its in-matter locations and diffs).
@@ -115,6 +118,7 @@ impl Layer {
                         fields: ToolFields::of_started(started),
                         finished: is_final(started.status),
                         paths,
+                        tool_name: started.tool_name.clone(),
                     },
                 );
             }
@@ -127,6 +131,9 @@ impl Layer {
                     let locations = updated.patch.locations.as_deref().unwrap_or_default();
                     let content = updated.patch.content.as_deref().unwrap_or_default();
                     note_paths(&mut tool.paths, locations, content);
+                    if let Some(name) = &updated.patch.tool_name {
+                        tool.tool_name = Some(name.clone());
+                    }
                 }
             }
             DomainEvent::PermissionRequested(requested) => {

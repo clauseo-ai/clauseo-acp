@@ -1,24 +1,25 @@
 //! The agent's asks and signals: permission requests and elicitations (logged `Live` during
 //! the live turn; with no prompt in flight they wait for an agent-started turn, `own_turn.rs`;
-//! else answered cancelled with nothing logged) and limit signals (a rejection
-//! or a stop marks the live turn; the first wins; a rate limit also feeds the limits model). A
+//! else answered cancelled with nothing logged) and limit signals (`limit.rs`). A
 //! permission request that names a file of the matter a program holds open (Word, say) is
 //! answered for the lawyer, rejected, in the commit that logs it. One that touches Clauseo's own
 //! data folder (`agent/data_fence.rs`) is rejected unasked, with a notice (`outside.rs`).
 //! A Codex approval of one of the guarded `browser` server's tools is allowed for the session
 //! with nothing logged ([`browser_tool_to_allow`]), and one of a server the lawyer added is
 //! allowed once with nothing logged ([`trusted_tool_to_allow`]); one giving a shell command the
-//! network is refused without asking, told by a notice once a turn (`shell_network.rs`).
+//! network is refused without asking, told by a notice once a turn (`shell_network.rs`). A
+//! Claude request whose rule the lawyer chose to keep (`always.rs`) is allowed once for the
+//! lawyer, logged.
 
 use std::path::PathBuf;
 
-use clauseo_acp::{AcpEvent, LimitSignal, LimitStatus, Origin, PendingKey};
+use clauseo_acp::{AcpEvent, PendingKey};
 use clauseo_matters::HeldOpen;
 use clauseo_protocol::{
     AgentChoiceId, AgentSessionId, CompactString, Deliverable, ElicitationId, ElicitationRequest,
-    ElicitationRequested, ElicitationResponse, LimitStopReason, MatterPath, PermissionAbout,
-    PermissionChoice, PermissionOption, PermissionRequestId, PermissionRequested,
-    PermissionResolved, Principal, StreamId, ThreadId, TurnId,
+    ElicitationRequested, ElicitationResponse, MatterPath, PermissionAbout, PermissionChoice,
+    PermissionOption, PermissionRequestId, PermissionRequested, PermissionResolved, Principal,
+    StreamId, ThreadId, TurnId,
 };
 
 use super::super::input::MatterTag;
@@ -26,11 +27,14 @@ use super::super::{Actor, limits};
 use super::out::Out;
 use super::shell_network::reject_option;
 use super::updates::{agent, commit, known_tool};
-use super::{JobKind, LimitMark, Then, TurnJob, current, matter_of, spawn};
+use super::{JobKind, Then, TurnJob, current, matter_of, spawn};
 use crate::agent::data_fence::{self, FenceCheck, PathsChecked};
 use crate::error::Error;
 use crate::log_file::Cause;
 use crate::matter_worker::MatterJob;
+pub(super) use limit::{limit_mark, on_limit};
+
+mod limit;
 
 mod codex_auto;
 
@@ -47,6 +51,8 @@ pub(super) struct PermissionAsk {
     pub(super) options: Vec<PermissionOption>,
     /// What it is about, when the host can tell (`agent/plan_note.rs`).
     pub(super) about: Option<PermissionAbout>,
+    /// A Claude request's rule and `allow_once` option (`always.rs`).
+    pub(super) always: Option<super::always::AlwaysAsk>,
 }
 
 /// A permission request and the turn it came in, while the matter thread checks its paths.
@@ -89,12 +95,15 @@ pub(super) fn on_permission(actor: &mut Actor, thread: ThreadId, event: AcpEvent
     // Read from the paths the request itself names, before any fallback to the tool call's.
     let plans = agent(actor, thread).and_then(|agent| agent.plan_notes.clone());
     let about = crate::agent::plan_note::about(plans.as_deref(), &paths, cfg!(windows));
+    let (id, raw) = (&acp_tool_call_id, raw_input.as_ref());
+    let always = super::always::ask(actor, thread, &session, id, &mut options, raw);
     let ask = PermissionAsk {
         session,
         key,
         acp_tool_call_id,
         options,
         about,
+        always,
     };
     let Some(turn) = live_turn(actor, thread) else {
         super::own_turn::cancel_outside_turn(actor, thread, &ask.session);
@@ -286,20 +295,26 @@ fn live_turn(actor: &mut Actor, thread: ThreadId) -> Option<TurnId> {
         .map(|current| current.turn)
 }
 
-/// Logs the request `Live`; the lawyer's answer goes to the agent.
+/// Logs the request `Live`; the lawyer's answer goes to the agent. One whose rule the host
+/// keeps is answered for the lawyer instead (`always.rs`).
 fn log_for_lawyer(actor: &mut Actor, thread: ThreadId, ask: PermissionAsk) {
+    let Some(ask) = super::always::auto_allow(actor, thread, ask) else {
+        return;
+    };
     let PermissionAsk {
         session,
         key,
         acp_tool_call_id,
         options,
         about,
+        always,
     } = ask;
     let tool_call = known_tool(actor, thread, &session, &acp_tool_call_id);
     let logged = (|| -> Result<(), Error> {
         let request: PermissionRequestId = actor.ids.mint(actor.clock.now().wall)?;
         if let Some(agent) = agent(actor, thread) {
             agent.permissions.insert(request, key);
+            super::always::asked(agent, request, always);
         }
         let event = PermissionRequested {
             request,
@@ -331,6 +346,7 @@ fn refuse_held_open(
         acp_tool_call_id,
         options,
         about,
+        ..
     } = ask;
     let tool_call = known_tool(actor, thread, &session, &acp_tool_call_id);
     let agent_id = agent(actor, thread)
@@ -432,61 +448,6 @@ pub(super) fn on_elicitation(
     limits::asking_changed(actor);
     if let Err(error) = logged {
         tracing::warn!(%thread, error = %Cause(&error), "an elicitation was not logged");
-    }
-}
-
-/// A limit signal: a rejection or a stop during the turn marks it (the first wins); anything
-/// else goes to `tracing`. A rate limit, in a turn or outside one, also goes to the limits
-/// model as a live signal, unless it is history replayed by `session/load`.
-pub(super) fn on_limit(
-    actor: &mut Actor,
-    thread: ThreadId,
-    session: &AgentSessionId,
-    origin: Origin,
-    signal: &LimitSignal,
-) {
-    if !matches!(origin, Origin::Replay) {
-        limits::live(actor, thread, signal);
-    }
-    let mark = limit_mark(signal);
-    let turn = match origin {
-        Origin::Turn(turn) => Some(turn),
-        Origin::Late(_) | Origin::Replay | Origin::Idle => None,
-    };
-    if let Some(turn) = turn {
-        super::offline::agent_active(actor, thread, turn);
-    }
-    let current = current(actor, thread).filter(|current| Some(current.turn) == turn);
-    if let (Some(current), Some(mark)) = (current, mark) {
-        if current.limit.is_none() {
-            current.limit = Some(mark);
-        }
-    } else {
-        tracing::info!(%thread, %session, ?signal, "a limit signal");
-    }
-}
-
-/// The limit stop a signal means, if it stops the turn.
-pub(super) fn limit_mark(signal: &LimitSignal) -> Option<LimitMark> {
-    match signal {
-        LimitSignal::RateLimit {
-            window,
-            status,
-            resets_at,
-            ..
-        } => match status {
-            LimitStatus::Rejected => Some(LimitMark {
-                window: window.clone(),
-                resets_at: *resets_at,
-                reason: LimitStopReason::PlanWindow,
-            }),
-            LimitStatus::Allowed | LimitStatus::Warning => None,
-        },
-        LimitSignal::Stopped { reason, .. } => Some(LimitMark {
-            window: None,
-            resets_at: None,
-            reason: *reason,
-        }),
     }
 }
 

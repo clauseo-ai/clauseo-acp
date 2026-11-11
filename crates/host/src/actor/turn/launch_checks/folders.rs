@@ -1,14 +1,37 @@
 //! The data-fence and folder-path helpers of a launch: the deny rules Claude's data folder gets
 //! (`agent/data_fence.rs`), the paths a session's folders sit at under the data folder, and the
-//! removal of a launch's run folder. Nothing here is made; the callers in `launch_checks` make and
+//! removal of a launch's run folder (and of a late prep's, [`undo_late`]). Only Claude's own parts
+//! of the run are made here ([`make_claude`]); the callers in `launch_checks` make and
 //! remove the folders, off the actor.
 
 use std::path::{Path, PathBuf};
 
 use clauseo_protocol::MatterId;
 
-use super::RunFolders;
-use crate::agent::data_fence;
+use super::{Prepared, RunFolders, relay};
+use crate::agent::{always, claude_tmp, data_fence};
+
+/// Claude's own parts of `run`, after [`RunFolders::make`]: its short temp folder, none
+/// again when it could not be made (`agent::claude_tmp`), and, for `claude`, the matter's kept
+/// "Always for this matter" rules (`agent::always::read_beside`). File system calls: off the
+/// actor.
+pub(super) fn make_claude(run: &mut RunFolders, claude: bool) {
+    let short = run.claude_tmp.take();
+    run.claude_tmp = short.filter(|dir| claude_tmp::make_claude_tmp(&run.root, dir));
+    run.always = always::read_beside(&run.notes, claude);
+}
+
+/// A prep nobody waits for any more takes back what it made: the relay's token first, then the
+/// run folder with the token file. No agent was started, so nothing waits.
+pub(super) fn undo_late(late: Prepared) {
+    let Prepared { run, .. } = late;
+    // Nothing to wait for: no agent was started, so its parts are freed as it drops.
+    run.lease.wait_done();
+    relay::end(&run);
+    run.remove();
+    // Its claims, relay and proxy go now, after the folder.
+    drop(run);
+}
 
 /// The data folder canonicalised, then as configured when that differs; as configured alone
 /// when it does not resolve (the data-folder refusal has refused that launch already).
