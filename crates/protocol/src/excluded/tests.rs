@@ -22,6 +22,9 @@ fn excluded_file_names_in_any_case() {
         ".GIT",
         ".clauseo",
         ".Clauseo",
+        "._Contract.docx",
+        "._claude",
+        "._cc-writes",
     ] {
         assert!(is_excluded_file(name), "{name} should be excluded");
     }
@@ -38,6 +41,9 @@ fn near_misses_are_kept() {
         ".DS_Store2",
         ".~lock.x",
         ".gitignore",
+        "._",
+        "a._b",
+        "_.x",
         ".git2",
         "clauseo",
         "Contract.docx",
@@ -93,4 +99,14 @@ fn a_path_is_excluded_by_any_folder_on_the_way_or_its_file_name() {
     assert!(is_excluded_name(".git", true));
     assert!(is_excluded_name(".claude", true));
     assert!(!is_excluded_name(".claude", false));
+}
+
+#[test]
+fn apple_double_files_are_excluded_anywhere() {
+    for path in ["._Contract.docx", "Pleadings/._Plaint.pdf", "a/b/._c.txt"] {
+        assert!(is_excluded_path(path), "{path} should be excluded");
+    }
+    // A folder starting `._` is a dot-folder, so it goes too; a file inside a normal folder stays.
+    assert!(is_excluded_path("._x/y.txt"));
+    assert!(!is_excluded_path("Pleadings/_notes.txt"));
 }

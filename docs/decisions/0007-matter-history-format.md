@@ -182,7 +182,8 @@ documents with 3 changed).
 - Never versioned and never listed, by name, ASCII-case-insensitively on every OS (the same folder may
   sync between Windows and macOS): files matching `~$*`, `*.tmp` (which covers `~WRL*.tmp` and
   Clauseo's own `.clauseo-<n>.tmp` temp files), `Thumbs.db`, `desktop.ini`, `.DS_Store`,
-  `.~lock.*#`; a file named `.git` or `.clauseo`; and any folder whose name starts with `.`
+  `.~lock.*#`, macOS's AppleDouble files `._*` (FAT, exFAT, SMB and NAS shares); a file named
+  `.git` or `.clauseo`; and any folder whose name starts with `.`
   (`.git`, `.clauseo`, `.claude`, `.codex`, `.agents`, `.github`), with everything under it, at any
   depth. Other dot-files (`.gitignore`) are papers. The rule is
   `clauseo_protocol::is_excluded_path`.

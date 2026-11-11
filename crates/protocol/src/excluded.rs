@@ -34,8 +34,9 @@ pub fn is_excluded_path(path: &str) -> bool {
 const EXCLUDED_NAMES: [&str; 3] = ["thumbs.db", "desktop.ini", ".ds_store"];
 
 /// Whether a file named `name` is never versioned and never listed: `~$*`, `*.tmp`,
-/// `Thumbs.db`, `desktop.ini`, `.DS_Store`, `.~lock.*#`, and a file named `.git` or
-/// `.clauseo`. ASCII-case-insensitive on every OS. Other dot-files (`.gitignore`) are kept.
+/// `Thumbs.db`, `desktop.ini`, `.DS_Store`, `.~lock.*#`, macOS's `AppleDouble` files `._*`
+/// (written beside every file on FAT, exFAT, SMB and some NAS shares), and a file named `.git`
+/// or `.clauseo`. ASCII-case-insensitive on every OS. Other dot-files (`.gitignore`) are kept.
 fn is_excluded_file(name: &str) -> bool {
     name.eq_ignore_ascii_case(".git")
         || name.eq_ignore_ascii_case(".clauseo")
@@ -46,6 +47,8 @@ fn is_excluded_file(name: &str) -> bool {
             .any(|excluded| excluded.eq_ignore_ascii_case(name))
         // The prefix does not end in `#`, so a name ending in one is longer than the prefix.
         || (starts_with_ignore_case(name, ".~lock.") && name.ends_with('#'))
+        // `AppleDouble`: `._` and the name of the file it describes.
+        || (name.len() > 2 && name.starts_with("._"))
 }
 
 /// Whether a folder named `name` is skipped with everything under it: any name that starts
