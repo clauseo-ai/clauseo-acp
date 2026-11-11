@@ -3,7 +3,9 @@
 //! from codex-acp's source. A too-long `sessionFailure` on `end_turn` sets `PromptEnd::too_long`
 //! with no limit and no warning; Codex's recorded refusal reads as the internal error it says.
 
-use clauseo_acp::{AcpEvent, AgentUpdate, MessageRole, Origin, PromptEnd, ProtocolWarning};
+use clauseo_acp::{
+    AcpEvent, AgentUpdate, MessageRole, Origin, PromptEnd, ProtocolWarning, TooLong,
+};
 use clauseo_protocol::{AgentChoiceId, StopReason};
 
 use crate::harness::{self, Ctx, chunk, sess1, text, turn, update_event};
@@ -26,11 +28,11 @@ fn one_prompt(scenario: &str, codex: bool, check: impl FnOnce(PromptEnd, Vec<Acp
     outcome.assert_clean();
 }
 
-fn too_long() -> PromptEnd {
+fn too_long(kind: TooLong) -> PromptEnd {
     PromptEnd {
         stop: StopReason::EndTurn,
         limit: None,
-        too_long: true,
+        too_long: Some(kind),
     }
 }
 
@@ -43,13 +45,21 @@ fn no_limit_nor_warning(events: &[AcpEvent]) -> bool {
 #[test]
 fn codex_context_full_ends_too_long() {
     one_prompt("codex-context-full", true, |end, events| {
-        assert_eq!(end, too_long());
+        assert_eq!(end, too_long(TooLong::ContextExhausted));
+        // The session_info_update's copy is its own event, before the answer's.
         assert_eq!(
             events,
-            [update_event(
-                Origin::Turn(turn(1)),
-                chunk(MessageRole::Answer, "m-answer-1", "Reading the lease. ")
-            )]
+            [
+                update_event(
+                    Origin::Turn(turn(1)),
+                    chunk(MessageRole::Answer, "m-answer-1", "Reading the lease. ")
+                ),
+                AcpEvent::TooLong {
+                    session: sess1(),
+                    origin: Origin::Turn(turn(1)),
+                    kind: TooLong::ContextExhausted,
+                },
+            ]
         );
     });
 }
@@ -59,7 +69,7 @@ fn codex_context_full_ends_too_long() {
 #[test]
 fn claude_prompt_too_long_ends_too_long() {
     one_prompt("claude-prompt-too-long", false, |end, events| {
-        assert_eq!(end, too_long());
+        assert_eq!(end, too_long(TooLong::PromptTooLong));
         assert!(no_limit_nor_warning(&events), "{events:?}");
         let compaction: Vec<_> = events
             .iter()
@@ -99,7 +109,7 @@ fn codex_input_too_long_reads_as_the_internal_error_it_says() {
             PromptEnd {
                 stop: StopReason::EndTurn,
                 limit: None,
-                too_long: false,
+                too_long: None,
             }
         );
         let warnings: Vec<_> = events

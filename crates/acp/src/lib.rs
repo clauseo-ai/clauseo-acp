@@ -104,7 +104,7 @@ pub use event::{
 pub use line::{ReadMark, ReadProgress};
 pub use types::{
     AgentInfo, AuthKind, AuthMethod, ConnectOptions, LoadSession, McpServer, NewSession, PromptEnd,
-    SessionMode, SessionModes, SessionStart, SteerResult,
+    SessionMode, SessionModes, SessionStart, SteerResult, TooLong,
 };
 
 /// How many events the channel holds before the driver stops reading the agent.

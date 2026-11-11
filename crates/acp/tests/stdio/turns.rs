@@ -128,7 +128,7 @@ fn prompt_stream_text_events() {
             PromptEnd {
                 stop: StopReason::EndTurn,
                 limit: None,
-                too_long: false,
+                too_long: None,
             }
         );
         let t1 = Origin::Turn(turn(1));

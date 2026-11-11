@@ -166,13 +166,11 @@ pub(crate) fn update(
             }
         }
         acp::SessionUpdate::SessionInfoUpdate(update) => {
-            // A too-long failure here is left out: the prompt's answer carries the same record
-            // and ends the turn by it (`PromptEnd::too_long`).
             let failure = update
                 .meta
                 .as_ref()
                 .and_then(limit::session_failure)
-                .and_then(|failure| limit_event(session.clone(), origin, failure));
+                .map(|failure| limit_event(session.clone(), origin, failure));
             let title = match update.title {
                 MaybeUndefined::Value(title) => Some(Some(title)),
                 MaybeUndefined::Null => Some(None),
@@ -351,16 +349,20 @@ fn tool_blocks(quarantined: impl Iterator<Item = Quarantined>) -> Vec<(usize, Co
         .collect()
 }
 
-/// The event an update's `sessionFailure` makes: none for a too-long one.
-fn limit_event(session: AgentSessionId, origin: Origin, failure: Failure) -> Option<AcpEvent> {
+/// The event an update's `sessionFailure` makes.
+fn limit_event(session: AgentSessionId, origin: Origin, failure: Failure) -> AcpEvent {
     match failure {
-        Failure::Limit(signal) => Some(AcpEvent::Limit {
+        Failure::Limit(signal) => AcpEvent::Limit {
             session,
             origin,
             signal,
-        }),
-        Failure::TooLong => None,
-        Failure::Warning(warning) => Some(warning_event(Some(session), warning)),
+        },
+        Failure::TooLong(kind) => AcpEvent::TooLong {
+            session,
+            origin,
+            kind,
+        },
+        Failure::Warning(warning) => warning_event(Some(session), warning),
     }
 }
 

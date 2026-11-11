@@ -119,6 +119,7 @@ fn update_warnings_name_their_session_and_set_mode_round_trips() {
             | AcpEvent::ElicitationRequested { .. }
             | AcpEvent::ElicitationCompleted { .. }
             | AcpEvent::Limit { .. }
+            | AcpEvent::TooLong { .. }
             | AcpEvent::Warning { .. }) => panic!("expected a warning, got {other:?}"),
         })
         .collect();

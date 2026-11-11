@@ -381,10 +381,10 @@ fn prompt(
             }
         }
         let response = result?;
-        let (mut limit, mut too_long) = (None, false);
+        let (mut limit, mut too_long) = (None, None);
         match response.meta.as_ref().and_then(map::session_failure) {
             Some(map::Failure::Limit(signal)) => limit = Some(signal),
-            Some(map::Failure::TooLong) => too_long = true,
+            Some(map::Failure::TooLong(kind)) => too_long = Some(kind),
             Some(map::Failure::Warning(warning)) => {
                 let event = map::warning_event(Some(session), warning);
                 state.emit(event).await;

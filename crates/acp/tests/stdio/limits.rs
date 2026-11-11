@@ -178,7 +178,7 @@ fn session_failure_typed() {
             PromptEnd {
                 stop: StopReason::EndTurn,
                 limit: Some(stopped.clone()),
-                too_long: false,
+                too_long: None,
             }
         );
         // The session_info_update carries only the failure: no title event.

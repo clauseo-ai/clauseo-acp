@@ -14,28 +14,25 @@
 //!   billing): Codex's `contextWindowExceeded` becomes `context_exhausted`, sent to an AIR client
 //!   as `end_turn` with a `sessionFailure` of category `limit`, severity `error`, actions
 //!   `["new_session"]`. Claude's own `context_exhausted` (its configured turn or output limit) has
-//!   the same shape and reads the same.
+//!   the same shape: both read as `TooLong::ContextExhausted`, which the host stops on only for
+//!   codex-acp.
 //! - codex-acp 2.2.2, a question over Codex's 1,048,576 characters, recorded
 //!   (`codex-overcap-reply.jsonl`): `end_turn` with a `sessionFailure` of category `service`,
 //!   title "Codex encountered an internal error.", actions `["retry", "new_session"]`. The length
 //!   reason is only on codex-acp's stderr, so the wire cannot tell it from a real internal error,
-//!   and it is NOT read as too long here.
+//!   and it is NOT read as too long here; the host checks Codex's cap before sending instead
+//!   (`crates/host/src/codex_input.rs`).
 //! - claude-agent-acp without a session failure, from source: error -32603 with
 //!   `data.errorKind`. The SDK's `terminal_reason: "prompt_too_long"` is read too, should the
 //!   adapter forward it.
 
+use crate::TooLong;
 use crate::error::RpcData;
 
 /// Claude Code's text for a prompt over the model's context, recorded as the `sessionFailure`
 /// title. Its categories (`service`, `request`) also hold other failures, so only this title says
 /// "too long"; matched as a prefix, ASCII case ignored, since the API may append token counts.
 const CLAUDE_PROMPT_TOO_LONG: &str = "prompt is too long";
-
-/// Codex's refusal of input over its 1,048,576 characters (`MAX_USER_INPUT_TEXT_CHARS`), matched
-/// by its exact prefix and nothing looser. The recording showed it never reaches the wire in
-/// codex-acp 2.2.2 (it is only on stderr; the wire says "Codex encountered an internal error."),
-/// so this match is kept only for an adapter that forwards Codex's text as an RPC error.
-const CODEX_INPUT_TOO_LONG: &str = "Input exceeds the maximum length of";
 
 /// The structured values that say too long: the SDK's terminal reason, and Codex's error kind
 /// for a full context should codex-acp forward it as an error.
@@ -45,37 +42,37 @@ const TOO_LONG_KINDS: &[&str] = &[
     "contextWindowExceeded",
 ];
 
-/// Whether an AIR `sessionFailure` with these fields says the turn was too long to read.
+/// How an AIR `sessionFailure` with these fields says the turn was too long to read, if it does.
+/// `ContextExhausted` ends a turn `TooLong` only for codex-acp; the host decides by the agent.
 pub(crate) fn session_failure_says_too_long(
     category: Option<&str>,
     severity: Option<&str>,
     actions: Option<&[&str]>,
     title: Option<&str>,
-) -> bool {
+) -> Option<TooLong> {
     match (category, severity, actions) {
-        (Some("limit"), Some("error"), Some(["new_session"])) => true,
-        (Some("service" | "request"), Some("error"), _) => {
-            title.is_some_and(starts_with_claude_text)
+        (Some("limit"), Some("error"), Some(["new_session"])) => Some(TooLong::ContextExhausted),
+        (Some("service" | "request"), Some("error"), _)
+            if title.is_some_and(starts_with_claude_text) =>
+        {
+            Some(TooLong::PromptTooLong)
         }
-        _ => false,
+        _ => None,
     }
 }
 
-/// Whether a JSON-RPC error to `session/prompt` says the question was too long to read: a
-/// structured value first (`data`'s allowlisted fields), else Codex's exact refusal text in the
-/// message or at `data.message`.
-pub(crate) fn rpc_says_too_long(message: &str, data: &RpcData, data_text: Option<&str>) -> bool {
-    let structured = [
+/// Whether a JSON-RPC error's allowlisted `data` fields say the question was too long to read.
+/// No free text is read: Codex's own refusal text ("Input exceeds the maximum length of ...")
+/// never reaches the wire in codex-acp 2.2.2 (recorded), so its prefix match was removed.
+pub(crate) fn rpc_says_too_long(data: &RpcData) -> bool {
+    [
         data.error_kind(),
         data.terminal_reason(),
         data.codex_error_info(),
     ]
     .into_iter()
     .flatten()
-    .any(|kind| TOO_LONG_KINDS.contains(&kind));
-    structured
-        || message.starts_with(CODEX_INPUT_TOO_LONG)
-        || data_text.is_some_and(|text| text.starts_with(CODEX_INPUT_TOO_LONG))
+    .any(|kind| TOO_LONG_KINDS.contains(&kind))
 }
 
 fn starts_with_claude_text(title: &str) -> bool {

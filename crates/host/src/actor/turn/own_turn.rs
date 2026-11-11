@@ -310,6 +310,7 @@ pub(super) fn flush(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
             | AcpEvent::ElicitationRequested { .. }
             | AcpEvent::ElicitationCompleted { .. }
             | AcpEvent::Limit { .. }
+            | AcpEvent::TooLong { .. }
             | AcpEvent::Warning { .. }) => updates::handle(actor, thread, event),
         }
     }

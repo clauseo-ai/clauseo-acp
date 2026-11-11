@@ -50,7 +50,7 @@ pub(crate) enum Failure {
     /// A plan limit stopped the turn.
     Limit(LimitSignal),
     /// The model refused the turn as too long to read (`too_long.rs`). Not a plan limit.
-    TooLong,
+    TooLong(crate::TooLong),
     /// Any other failure, which the driver only reports.
     Warning(ProtocolWarning),
 }
@@ -80,13 +80,13 @@ pub(crate) fn session_failure(meta: &Map<String, Value>) -> Option<Failure> {
     if let Some(reason) = reason {
         return Some(Failure::Limit(LimitSignal::Stopped { reason, title }));
     }
-    if session_failure_says_too_long(
+    if let Some(kind) = session_failure_says_too_long(
         category.as_deref(),
         severity.as_deref(),
         actions.as_deref(),
         title.as_deref(),
     ) {
-        return Some(Failure::TooLong);
+        return Some(Failure::TooLong(kind));
     }
     Some(Failure::Warning(ProtocolWarning::SessionFailure {
         category,

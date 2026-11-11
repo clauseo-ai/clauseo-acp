@@ -33,8 +33,11 @@ it was."). The research behind this record is the private `measurements/long-que
   `EditQueuedPrompt.text`. 6 MiB leaves 2 MiB of the 8 MiB line for the replay's envelope, and
   is above what either model accepts, so the model refuses first. The 8 MiB line cap stays.
 - **Its code.** Over the cap is `prompt.too_long` (not retryable), read from the typed measure
-  of `Error::TooLarge` (`Measure::PromptText`), never from its text. Every other size limit
-  stays `command.invalid`. The constant is exported to the UI, which ports `escaped_len` and
+  of `Error::TooLarge` (`Measure::PromptText`), never from its text, in one place
+  (`HostError::invalid_command_code`, which the host's own `Error::code` uses too). Every other
+  size limit stays `command.invalid`. The code has its frozen corpus pair
+  (`corpus/added/turn_failed-PromptTooLong`). The measure stops at the first text block that
+  crosses the cap. The constant is exported to the UI, which ports `escaped_len` and
   checks the draft when Ask is pressed (never per keystroke); one case table
   (`crates/protocol/tests/support/escaped-len-cases.json`) is read by the Rust and the TypeScript
   tests, so the two measures cannot drift. The draft is kept and nothing is sent.
@@ -44,16 +47,21 @@ it was."). The research behind this record is the private `measurements/long-que
   as for every stop but `EndTurn`. Counts report it `agent_stopped` (0036). Not `AtLimit`,
   which is the account's usage limit, and not `MaxTokens`, which is the answer's length.
 - **Where it is read.** In `crates/acp`, `map/too_long.rs` is the one home of every shape that
-  says "too long": a `sessionFailure` of category `limit`, severity `error`, actions exactly
-  `["new_session"]` (codex-acp's full context, from its source); one of category `service` or
-  `request`, severity `error`, titled "Prompt is too long" (prefix, ASCII case ignored; Claude,
-  recorded); and a JSON-RPC error whose allowlisted `data` fields say `prompt_too_long` or a
-  context-window kind, or whose text begins with Codex's exact "Input exceeds the maximum length
-  of" (kept for an adapter that forwards it; codex-acp 2.2.2 does not). Codex's recorded
-  "internal error" is not read as too long: the wire cannot tell it from a real internal error. It is never a `LimitSignal`: it reaches the host as
+  says "too long", each a `TooLong` kind: a `sessionFailure` of category `limit`, severity
+  `error`, actions exactly `["new_session"]` (`ContextExhausted`; codex-acp's full context, from
+  its source); one of category `service` or `request`, severity `error`, titled "Prompt is too
+  long" (`PromptTooLong`; prefix, ASCII case ignored; Claude, recorded); and a JSON-RPC error to
+  `session/prompt` whose allowlisted `data` fields say `prompt_too_long` or a context-window
+  kind. No free text is matched anywhere else: Codex's "Input exceeds the maximum length of"
+  never reaches the wire (recorded), so its prefix match was removed. Codex's recorded
+  "internal error" is not read as too long: the wire cannot tell it from a real internal error.
+- **Which agent.** The host ends a turn `TooLong` for `PromptTooLong` from any agent, and for
+  `ContextExhausted` only from codex-acp: claude-agent-acp sends that shape for its configured
+  turn or output limit, which shortening the question does not fix; there it is logged by kind. It is never a `LimitSignal`: it reaches the host as
   `PromptEnd::too_long` or `Error::prompt_too_long`, so it never reaches the limits store nor the
-  Codex limits read. A too-long `sessionFailure` on a `session_info_update` makes no event; the
-  prompt's answer carries the same record.
+  Codex limits read. A too-long `sessionFailure` on a `session_info_update` is its own event,
+  `AcpEvent::TooLong`, which the host ORs into the turn's end, so a failure sent only on the
+  update is not lost; it is never logged as a warning.
 - **Codex's own cap, checked by the host.** Codex refuses a turn whose text items hold more than
   `MAX_USER_INPUT_TEXT_CHARS` (`1 << 20`) Unicode scalar values together, and codex-acp 2.2.2
   passes that refusal on only as "Codex encountered an internal error.". So the host refuses a
@@ -96,8 +104,8 @@ it was."). The research behind this record is the private `measurements/long-que
 - Codex's refusal of an over-long input, should one still reach Codex (a Codex whose count
   differs), reaches the lawyer as nothing: the turn ends `EndTurn` with no answer and the queue
   moves on. The host's check keeps such questions back.
-- Claude's `context_exhausted` failure (its configured turn or output limit) has Codex's shape
-  and reads as too long too.
+- Claude's `context_exhausted` failure (its configured turn or output limit) has Codex's shape;
+  the host reads it as too long only for codex-acp, so it stays logged, not worded, for Claude.
 - A question near 6 MiB is about 1,500 view changes and several copies in memory while it is
   sent; the thread's drawing of it is not measured.
 - A later change that raises the cap must keep the replayed line under `MAX_LINE_BYTES`

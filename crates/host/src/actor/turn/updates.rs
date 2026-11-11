@@ -16,7 +16,7 @@ use clauseo_store::BlobIn;
 use super::super::Actor;
 use super::agents::{Agent, Stage};
 use super::out::Out;
-use super::{Then, TimerKind, TurnTimer, asks, lost, offline, own_turn, state, text};
+use super::{Then, TimerKind, TurnTimer, asks, current, lost, offline, own_turn, state, text};
 use crate::build;
 use crate::coalesce::TextIn;
 use crate::error::Error;
@@ -63,6 +63,7 @@ pub(super) fn on_event(actor: &mut Actor, thread: ThreadId, event: Box<AcpEvent>
             | AcpEvent::ElicitationRequested { .. }
             | AcpEvent::ElicitationCompleted { .. }
             | AcpEvent::Limit { .. }
+            | AcpEvent::TooLong { .. }
             | AcpEvent::Warning { .. } => false,
         }
     {
@@ -157,6 +158,14 @@ pub(super) fn handle(actor: &mut Actor, thread: ThreadId, event: AcpEvent) {
             origin,
             signal,
         } => asks::on_limit(actor, thread, &session, origin, &signal),
+        AcpEvent::TooLong { origin, kind, .. } => {
+            // The turn's end reads it with the answer's own (`end.rs`).
+            if let Origin::Turn(turn) = origin
+                && let Some(current) = current(actor, thread).filter(|current| current.turn == turn)
+            {
+                current.too_long = current.too_long.or(Some(kind));
+            }
+        }
         AcpEvent::Warning { session, warning } => {
             let warning = warning::kind(&warning);
             tracing::warn!(%thread, ?session, warning, "the agent sent something unreadable");

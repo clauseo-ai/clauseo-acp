@@ -201,8 +201,21 @@ pub struct PromptEnd {
     /// A plan limit the response carried (an AIR `sessionFailure` in its `_meta`).
     pub limit: Option<LimitSignal>,
     /// The response's AIR `sessionFailure` says the model refused the turn as too long to
-    /// read (`map/too_long.rs`). Never a plan limit: `limit` stays `None` for it.
-    pub too_long: bool,
+    /// read, and how (`map/too_long.rs`). Never a plan limit: `limit` stays `None` for it.
+    pub too_long: Option<TooLong>,
+}
+
+/// How an AIR `sessionFailure` said a turn was too long to read. The driver does not know the
+/// agent; the host decides by the agent's kind which of these ends a turn `TooLong`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum TooLong {
+    /// Titled "Prompt is too long" (Claude Code's own words): the question, or the conversation
+    /// with it, is over the model's context.
+    PromptTooLong,
+    /// Category `limit`, actions `["new_session"]`: codex-acp's `context_exhausted`, a full
+    /// context. claude-agent-acp sends the same shape for its configured turn or output limit,
+    /// which is not "too long".
+    ContextExhausted,
 }
 
 /// What `steer()` did. `steer()` gives `Error::SteerUnsupported`, sending nothing, unless the

@@ -57,8 +57,10 @@ fn rpc_data_keeps_only_allowlisted_tokens() {
     assert_eq!(RpcData::read(Some(&json!(PROMPT))), RpcData::default());
 }
 
+/// Only the allowlisted `data` fields of an error to `session/prompt` say too long: never free
+/// text (Codex's "Input exceeds ..." never reaches the wire, recorded), never another method.
 #[test]
-fn prompt_too_long_reads_structure_first_then_codex_s_exact_text() {
+fn prompt_too_long_reads_only_allowlisted_fields_of_a_prompt_error() {
     let none = json!(null);
     let too_long = [
         rpc("Internal error", &json!({"errorKind": "prompt_too_long"})),
@@ -74,14 +76,6 @@ fn prompt_too_long_reads_structure_first_then_codex_s_exact_text() {
             "Internal error",
             &json!({"codexErrorInfo": "contextWindowExceeded"}),
         ),
-        rpc(
-            "Internal error",
-            &json!({"message": "Input exceeds the maximum length of 1048576 characters."}),
-        ),
-        rpc(
-            "Input exceeds the maximum length of 1048576 characters.",
-            &none,
-        ),
     ];
     for error in too_long {
         assert!(error.prompt_too_long(), "{error:?}");
@@ -96,12 +90,30 @@ fn prompt_too_long_reads_structure_first_then_codex_s_exact_text() {
             "Error: Input exceeds the maximum length of 1048576 characters.",
             &none,
         ),
+        // Codex's refusal text, as a message, at `data.message` or as bare-string data: never read.
+        rpc(
+            "Input exceeds the maximum length of 1048576 characters.",
+            &none,
+        ),
+        rpc(
+            "Internal error",
+            &json!({"message": "Input exceeds the maximum length of 1048576 characters."}),
+        ),
+        rpc(
+            "Internal error",
+            &json!("Input exceeds the maximum length of 1048576 characters."),
+        ),
         rpc("Internal error", &json!({"message": "Prompt is too long"})),
         rpc("Internal error", &json!({"other": "prompt_too_long"})),
     ];
     for error in other {
         assert!(!error.prompt_too_long(), "{error:?}");
     }
+    let mut load = rpc("Internal error", &json!({"errorKind": "prompt_too_long"}));
+    if let Error::Rpc { method, .. } = &mut load {
+        *method = "session/load".to_owned();
+    }
+    assert!(!load.prompt_too_long(), "only an error to session/prompt");
     assert!(!Error::Closed.prompt_too_long());
     assert!(!Error::Protocol("prompt_too_long".to_owned()).prompt_too_long());
 }

@@ -200,6 +200,8 @@ struct Current {
     offline_told: bool,
     /// The first limit signal of the turn.
     limit: Option<LimitMark>,
+    /// The first too-long `sessionFailure` of the turn sent on an update (`AcpEvent::TooLong`).
+    too_long: Option<clauseo_acp::TooLong>,
     /// The places the turn's tool calls named, for the after-turn checkpoint.
     tool_paths: crate::sent::TurnPaths,
     /// A web search of the turn looked like case law (`connectors/hint.rs`): its end asks
