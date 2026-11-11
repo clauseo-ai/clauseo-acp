@@ -11,7 +11,8 @@
 # python-runtime bump` word for word.
 # The ik-*.json case-law fixtures are the live server's replies byte for byte, its quoted judgment
 # text included, misspellings and all; so are the real adapter transcripts under
-# crates/acp/src/tests/fixtures/.
+# crates/acp/src/tests/fixtures/, and the two scenarios built from live recordings
+# (claude-prompt-too-long, codex-input-too-long), which quote the adapters' command lists.
 extend-exclude = [
   "Cargo.lock",
   "ui/pnpm-lock.yaml",
@@ -25,6 +26,8 @@ extend-exclude = [
   "python-runtime/THIRD-PARTY-NOTICES.txt",
   "crates/connectors/fixtures/mcp/ik-*.json",
   "crates/acp/src/tests/fixtures/*.jsonl",
+  "crates/fake_agent/scenarios/claude-prompt-too-long.jsonl",
+  "crates/fake_agent/scenarios/codex-input-too-long.jsonl",
 ]
 
 [default]
