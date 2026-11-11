@@ -411,7 +411,10 @@ fn a_builtin_skill_is_rendered_with_name_and_description_alone() {
     assert!(SkillSource::builtin("other-name", vec![file("SKILL.md", source)]).is_err());
 }
 
-/// The stub copied into `dir` with what it prints.
+/// The stub linked into `dir` with what it prints. A hard link to cargo's build, not a copy: a
+/// copy's write handle leaks into any child another test thread forks meanwhile, and Linux then
+/// refuses to start the copy (`ETXTBSY`, "Text file busy") until that child's exec closes it.
+/// `CARGO_TARGET_TMPDIR` is in the target folder, on the same disk as the build.
 #[cfg(test)]
 fn stub(dir: &Path, version: &str, skill: &str) -> PathBuf {
     let exe = std::env::current_exe().unwrap();
@@ -419,7 +422,7 @@ fn stub(dir: &Path, version: &str, skill: &str) -> PathBuf {
     let name = format!("stetdoc_stub{}", std::env::consts::EXE_SUFFIX);
     let target = dir.join(&name);
     if !target.exists() {
-        write::copy(&examples.join(&name), &target).unwrap();
+        write::hard_link(&examples.join(&name), &target).unwrap();
     }
     write::write(&dir.join("stub-version.txt"), version.as_bytes()).unwrap();
     write::write(&dir.join("stub-skill.md"), skill.as_bytes()).unwrap();

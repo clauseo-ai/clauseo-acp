@@ -20,13 +20,6 @@ pub(crate) fn fresh_dir(path: &Path) -> io::Result<()> {
     fs::create_dir_all(path)
 }
 
-/// Makes `path` a program: mode 0755.
-#[cfg(unix)]
-pub(crate) fn make_executable(path: &Path) -> io::Result<()> {
-    use std::os::unix::fs::PermissionsExt as _;
-    fs::set_permissions(path, fs::Permissions::from_mode(0o755))
-}
-
 /// `fs::write`, making the folder first.
 pub(crate) fn write(path: &Path, contents: &[u8]) -> io::Result<()> {
     if let Some(dir) = path.parent() {
@@ -35,9 +28,9 @@ pub(crate) fn write(path: &Path, contents: &[u8]) -> io::Result<()> {
     fs::write(path, contents)
 }
 
-/// `fs::copy`.
-pub(crate) fn copy(from: &Path, to: &Path) -> io::Result<()> {
-    fs::copy(from, to).map(|_| ())
+/// `fs::hard_link`.
+pub(crate) fn hard_link(original: &Path, link: &Path) -> io::Result<()> {
+    fs::hard_link(original, link)
 }
 
 /// `fs::remove_file`.
