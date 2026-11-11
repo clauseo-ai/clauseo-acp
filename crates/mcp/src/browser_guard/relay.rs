@@ -69,6 +69,8 @@ pub(crate) const CLOSE_REQUEST: &str = r#"{"jsonrpc":"2.0","id":"clauseo-guard-c
 pub(crate) const CLOSE_TOOL: &str = "agent_browser_close";
 /// The tool whose failed navigation may be a download (`downloads/saved.rs`).
 pub(crate) const OPEN_TOOL: &str = "agent_browser_open";
+/// The tool that lists agent-browser's profiles (`filter::without_eval`).
+pub(crate) const PROFILES_TOOL: &str = "agent_browser_tools_profiles";
 /// agent-browser v0.41.1's result for `agent_browser_close` on the guard's Chrome, the same JSON
 /// as it sends, which the guard sends for a close while its browser is stopped. The real-Chrome
 /// test `real_chrome::close::a_close_while_stopped_starts_nothing_and_gets_agent_browsers_result`

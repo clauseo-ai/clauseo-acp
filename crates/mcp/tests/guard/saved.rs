@@ -1,6 +1,6 @@
 //! A PDF link Chrome saves rather than shows, at the guard's level with the stand-ins: the file
 //! lands in the matter's downloads folder (`--downloads`), and the `open` that started it is
-//! answered as a success naming it (`downloads/saved.rs`).
+//! answered as a success naming it (`downloads/saved.rs`). And the profiles' text loses eval.
 
 use std::ffi::OsString;
 use std::process::Command;
@@ -61,6 +61,22 @@ fn opening_a_pdf_link_saves_it_in_the_matter_and_says_so() {
     // Told once: the next result carries no note.
     let next = guard.call("after");
     assert!(texts(&next).is_empty(), "told twice: {next}");
+    let (status, _) = guard.finish();
+    assert_eq!(status.code(), Some(0));
+}
+
+#[test]
+fn the_profiles_never_mention_javascript_eval() {
+    let scratch = Scratch::new("profiles_eval");
+    let (mut guard, _) = guard_for_matter(&scratch);
+    guard.send(
+        &json!({"jsonrpc": "2.0", "id": "profiles", "method": "tools/call",
+        "params": {"name": "agent_browser_tools_profiles", "arguments": {}}}),
+    );
+    let answer = guard.read();
+    let text = texts(&answer).join("\n");
+    assert!(text.contains("tab basics, close, and profile"), "{answer}");
+    assert!(!text.contains("eval"), "{answer}");
     let (status, _) = guard.finish();
     assert_eq!(status.code(), Some(0));
 }
