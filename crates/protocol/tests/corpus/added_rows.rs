@@ -590,4 +590,11 @@ pub(crate) const ADDED_AFTER_V1: &[Corpus] = &[
         (449, 0xac36_f803_e066_24d7),
         (311, 0xf93b_8823_004c_622e),
     ),
+    (
+        "added/steer_resolved-NotSent",
+        include_bytes!("added/steer_resolved-NotSent.jsonl"),
+        include_bytes!("added/steer_resolved-NotSent.msgpack"),
+        (354, 0xf0c7_a161_1b8d_a0d4),
+        (234, 0x9fff_e8e6_f108_8b28),
+    ),
 ];

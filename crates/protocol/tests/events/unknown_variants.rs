@@ -381,6 +381,7 @@ fn steer_outcome() {
         (SteerOutcome::Injected { turn }, "injected"),
         (SteerOutcome::Requeued { turn }, "requeued"),
         (SteerOutcome::SentNow { turn }, "sent_now"),
+        (SteerOutcome::NotSent { turn }, "not_sent"),
     ];
     for (value, key) in &cases {
         let json = format!(r#"{{"{key}":{{"turn":"{}"}}}}"#, v7_text(7));
@@ -396,7 +397,10 @@ fn steer_outcome() {
         r#"invalid type: string "not-a-uuid", expected 16 bytes"#,
     );
     let names = SteerOutcome::VARIANT_NAMES;
-    assert_eq!(names, ["Injected", "Requeued", "SentNow", "Unknown"]);
+    assert_eq!(
+        names,
+        ["Injected", "Requeued", "SentNow", "NotSent", "Unknown"]
+    );
 }
 
 #[test]

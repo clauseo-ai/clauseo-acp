@@ -179,7 +179,8 @@ impl ThreadMemo {
             SteerOutcome::Injected { turn }
             | SteerOutcome::Requeued { turn }
             | SteerOutcome::SentNow { turn } => *turn,
-            SteerOutcome::Unknown { .. } => return,
+            // Not sent: the reducer leaves the prompt's turn as it was.
+            SteerOutcome::NotSent { .. } | SteerOutcome::Unknown { .. } => return,
         };
         let (Some(&order), Some(old)) = (
             self.prompts.get(&event.message),

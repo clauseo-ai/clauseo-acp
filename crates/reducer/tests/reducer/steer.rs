@@ -281,6 +281,46 @@ fn requeued_steer_waits_as_its_new_turn() {
 }
 
 #[test]
+fn not_sent_steer_keeps_its_turn() {
+    let (mut log, _, _) = created();
+    let steered = start_turn(&mut log, "Read the lease.").unwrap();
+    let mut state = fold(log.events());
+    let message = log.fresh().unwrap();
+    push(
+        &mut log,
+        &mut state,
+        UserMessage {
+            turn: steered,
+            message,
+            acp_message_id: None,
+            content: vec![ContentBlock::Text {
+                text: "Focus on clause 4".to_owned(),
+            }],
+            delivery: clauseo_protocol::Delivery::Steer,
+        },
+    );
+    let checkpoint = log.fresh().unwrap();
+    push(
+        &mut log,
+        &mut state,
+        turn_ended(steered, checkpoint).unwrap(),
+    );
+    let resolved = SteerResolved {
+        message,
+        outcome: SteerOutcome::NotSent { turn: steered },
+        aside: Vec::new(),
+    };
+    push(&mut log, &mut state, resolved);
+    let shown = prompt(&state, message);
+    assert_eq!(
+        (shown.turn, shown.steer),
+        (steered, Some(SteerOutcome::NotSent { turn: steered }))
+    );
+    assert_eq!(state, fold(log.events()));
+    assert_eq!(round_trip(&state), state);
+}
+
+#[test]
 fn steer_joins_turn_from_kind_then_session() {
     let kinds = [
         ("claude-acp", true),
