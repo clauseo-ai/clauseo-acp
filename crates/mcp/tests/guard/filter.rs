@@ -319,9 +319,13 @@ fn the_review_rules_end_to_end() {
         "params": {"name": "agent_browser_select",
             "arguments": {"selector": "#state", "values": ["--Select--", "-Select-", "-5"]}}});
     session.passes(&select);
+    // eval is off for both agents: refused as any tool off the list, never forwarded.
     let eval = json!({"jsonrpc": "2.0", "id": "ev", "method": "tools/call",
-        "params": {"name": "agent_browser_eval", "arguments": {"script": "--x"}}});
-    session.passes(&eval);
+        "params": {"name": "agent_browser_eval", "arguments": {"script": "1"}}});
+    session.guard.send(&eval);
+    let answer = session.guard.read();
+    assert_eq!(answer["id"], "ev", "{answer}");
+    assert_eq!(answer["result"]["isError"], true, "{answer}");
     assert_eq!(
         session.refused(&json!({"text": "--proxy=x"})),
         refusal("--proxy")

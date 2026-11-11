@@ -237,16 +237,8 @@ fn typed_strings_that_read_as_flags_are_refused() {
 }
 
 #[test]
-fn eval_script_alone_may_look_like_a_flag() {
+fn no_script_may_look_like_a_flag() {
     for script in ["--x", "-p", "--headed"] {
-        assert_eq!(
-            refused_on("agent_browser_eval", &json!({ "script": script })),
-            None
-        );
-        assert_eq!(
-            refused_on("agent_browser_eval", &json!({ "text": script })).as_deref(),
-            Some(script)
-        );
         assert_eq!(
             refused_on("agent_browser_fill", &json!({ "script": script })).as_deref(),
             Some(script)

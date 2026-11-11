@@ -47,10 +47,10 @@ fn every_live_view_is_unavailable() {
     }
 }
 
-/// The allowlist is agent-browser v0.41.1's `core` profile, all 29 tools, and each passes.
+/// The allowlist is agent-browser v0.41.1's `core` profile less eval, 28 tools, and each passes.
 #[test]
 fn every_core_tool_passes() {
-    assert_eq!(ALLOWED_TOOLS.len(), 29);
+    assert_eq!(ALLOWED_TOOLS.len(), 28);
     for tool in ALLOWED_TOOLS {
         assert_eq!(refused_on(tool, &json!({})), None, "{tool}");
     }
@@ -64,6 +64,7 @@ fn an_unknown_tool_is_refused() {
     assert_ne!(UNKNOWN_TOOL, UNAVAILABLE);
     for tool in [
         "agent_browser_connect",
+        "agent_browser_eval",
         "agent_browser_get_cdp_url",
         "agent_browser_install",
         "agent_browser_plugin_run",

@@ -27,7 +27,6 @@
 //!    g. any other string, at any depth, shaped like a command-line flag (`-x`, `--x`,
 //!    `--x=y`, see [`looks_like_flag`]): agent-browser's MCP server puts typed values into the
 //!    CLI's argv, and the CLI reads global flags anywhere in argv (`mcp.rs:2659-2661`).
-//!    `agent_browser_eval`'s `script` is exempt: it travels on stdin (`mcp.rs:3950-3957`).
 //!
 //!    A refused request gets an `isError` tool result with its id; a refused notification is
 //!    dropped. Anything else is forwarded.
@@ -78,8 +77,6 @@ pub(crate) const RESERVED_ID: &str = "clauseo-guard-close";
 
 /// The tool whose single positional may be read as a file path (`commands.rs:912-933`).
 const TOOL_SCREENSHOT: &str = "agent_browser_screenshot";
-/// The tool whose `script` goes to agent-browser on stdin, never into argv.
-const TOOL_EVAL: &str = "agent_browser_eval";
 const TOOL_READ: &str = "agent_browser_read";
 
 /// The keys on `agent_browser_read` that make agent-browser's daemon fetch over HTTP itself
@@ -104,12 +101,14 @@ pub(crate) const EXTRA_ARGS_ALLOWED: &[&str] =
 /// The text of a refused batch.
 pub(crate) const BATCH_MESSAGE: &str = "Clauseo does not allow batched requests in the browser.";
 
-/// The only tools that reach agent-browser: exactly agent-browser v0.41.1's `core` profile
+/// The only tools that reach agent-browser: agent-browser v0.41.1's `core` profile
 /// (`CORE_PROFILE_TOOLS`, `cli/src/mcp.rs:340-370` at tag v0.41.1), the profile the host starts
-/// it with (`mcp --tools core`, `crates/profile/src/servers.rs:81`). An agent that starts the
-/// guard itself with `--tools all` gains nothing: every other tool, a new or renamed one
-/// included, is refused here. `agent_browser_tools_profiles` only prints the profiles
-/// (`call_tools_profiles`, `mcp.rs:2539-2560`); it changes none.
+/// it with (`mcp --tools core`, `crates/profile/src/servers.rs:81`), less `agent_browser_eval`:
+/// page JavaScript is off for both agents, so it is refused as any other tool off the list. The
+/// guard leaves `tools/list` as agent-browser answers it, so eval is still listed there. An
+/// agent that starts the guard itself with `--tools all` gains nothing: every other tool, a new
+/// or renamed one included, is refused here. `agent_browser_tools_profiles` only prints the
+/// profiles (`call_tools_profiles`, `mcp.rs:2539-2560`); it changes none.
 pub(crate) const ALLOWED_TOOLS: &[&str] = &[
     "agent_browser_tools_profiles",
     "agent_browser_open",
@@ -138,7 +137,6 @@ pub(crate) const ALLOWED_TOOLS: &[&str] = &[
     "agent_browser_tab_list",
     "agent_browser_tab_switch",
     "agent_browser_tab_close",
-    "agent_browser_eval",
     "agent_browser_close",
 ];
 
@@ -282,8 +280,7 @@ fn check_arguments(tool: &str, arguments: &Map<String, Value>) -> Result<(), Str
         check_extra_args(extra)?;
     }
     for (key, value) in arguments {
-        let exempt = key == "extraArgs" || (tool == TOOL_EVAL && key == "script");
-        if !exempt {
+        if key != "extraArgs" {
             check_no_flags(value)?;
         }
     }
