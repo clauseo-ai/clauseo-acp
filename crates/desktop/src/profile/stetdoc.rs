@@ -6,6 +6,12 @@
 //! start. stetdoc's folder on the agents' `PATH` and the Word blackline's program are given to
 //! the host once, at its start (`with_profile`): after a background check that fails for real,
 //! they stay until the app restarts, and the agents are no longer told about stetdoc.
+//!
+//! Each hook call reads the profile as it is then, and one launch makes several calls (its
+//! skills writes on the launch-prep thread, then its `_meta` and Codex keys). So once per
+//! session, when the background check's answer lands between them, within its 30 s window, a
+//! launch may mix the two: a Codex launch may get the new skills index over the files the old
+//! profile wrote. The next launch is consistent.
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, PoisonError, RwLock};
@@ -31,10 +37,15 @@ impl Live {
         Arc::clone(&self.0.read().unwrap_or_else(PoisonError::into_inner))
     }
 
-    /// Puts `profile` in place for every later [`Self::get`].
+    /// Puts `profile` in place for every later [`Self::get`]. The old one is dropped after the
+    /// lock is released.
     fn set(&self, profile: ClauseoProfile) {
         let profile = Arc::new(profile);
-        *self.0.write().unwrap_or_else(PoisonError::into_inner) = profile;
+        let old = {
+            let mut held = self.0.write().unwrap_or_else(PoisonError::into_inner);
+            std::mem::replace(&mut *held, profile)
+        };
+        drop(old);
     }
 }
 

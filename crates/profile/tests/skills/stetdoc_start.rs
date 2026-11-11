@@ -16,7 +16,7 @@ use clauseo_profile::skills::stetdoc::start::{
 };
 use clauseo_profile::skills::stetdoc::{STETDOC, skill_source};
 use clauseo_profile::skills::{self, render, write_rendered};
-use clauseo_profile::{ClauseoProfile, SkillSource};
+use clauseo_profile::{ClauseoProfile, SkillSource, write_skills};
 use clauseo_protocol::AgentKind;
 use futures::executor::block_on;
 
@@ -44,14 +44,17 @@ impl Timer for Never {
     }
 }
 
-/// A stub stetdoc in `<root>/bin` printing `version` and 0.9.3's skill text, and the empty
-/// skills folder the launch writes would fill.
+/// A stub stetdoc in `<root>/bin` printing `version` and 0.9.3's skill text, and the skills
+/// folder of Claude's plugin, which the launch writes fill and the start reads as its cache.
 #[cfg(test)]
 fn stetdoc_in(root: &Scratch, version: &str) -> (PathBuf, PathBuf) {
     let bin = root.join("bin");
     write::fresh_dir(&bin).unwrap();
     let real = std::str::from_utf8(REAL_0_9_3).unwrap();
-    (stub(&bin, version, real), root.join("skills"))
+    (
+        stub(&bin, version, real),
+        profile_paths(root).claude_skills(),
+    )
 }
 
 /// 0.9.3's skill as it loads.
@@ -90,6 +93,21 @@ fn told(root: &Scratch, state: &State) -> (bool, Option<String>) {
         .find(|skill| skill.name() == STETDOC)
         .map(|skill| String::from_utf8(skill.files()[0].bytes.clone()).unwrap());
     (line, skill)
+}
+
+/// A Claude launch's skills write under `state`, as the host runs it before the agent starts.
+#[cfg(test)]
+fn launch_write(root: &Scratch, state: &State) {
+    let (profile, _) = ClauseoProfile::new(profile_paths(root), None).with_stetdoc(state, false);
+    write_skills(&profile.launch_writes(Some(AgentKind::Claude))[0]).unwrap();
+}
+
+/// An older stetdoc's skill in `cached`, as an earlier start's launch write left it.
+#[cfg(test)]
+fn cache_old_skill(cached: &Path) -> SkillSource {
+    let old = skill_source("stetdoc 0.9.2", b"---\ndescription: Old.\n---\nold body\n").unwrap();
+    write_rendered(cached, &render(std::slice::from_ref(&old)).unwrap()).unwrap();
+    old
 }
 
 #[test]
@@ -155,8 +173,7 @@ fn a_timeout_then_a_background_failure_turns_stetdoc_off() {
 fn a_timeout_uses_the_cached_skill_and_the_background_refreshes_it() {
     let root = Scratch::new("start-timeout-cached");
     let (program, cached) = stetdoc_in(&root, "stetdoc 0.9.3\n");
-    let old = skill_source("stetdoc 0.9.2", b"---\ndescription: Old.\n---\nold body\n").unwrap();
-    write_rendered(&cached, &render(std::slice::from_ref(&old)).unwrap()).unwrap();
+    let old = cache_old_skill(&cached);
     assert_eq!(cached_skill(&cached), Some(old.clone()));
 
     let started = first(&Passed, &program, &cached);
@@ -268,5 +285,92 @@ fn only_a_skill_or_a_failure_changes_the_state_after_a_recheck() {
     assert_eq!(
         start::first(Found::Broken, || Some(skill_0_9_3())).state,
         State::Off
+    );
+}
+
+/// A timeout with an older skill cached, then a background check that fails for real: the
+/// launch write that follows takes the cached skill out of Claude's plugin.
+#[test]
+fn a_background_failure_takes_the_cached_skill_off_the_disk() {
+    let root = Scratch::new("start-timeout-broken-cached");
+    let (program, cached) = stetdoc_in(&root, "stetdoc 0.9.3\n");
+    let old = cache_old_skill(&cached);
+    let started = first(&Passed, &program, &cached);
+    assert_eq!(started.state, State::On(Some(old)));
+    launch_write(&root, &started.state);
+    assert!(cached.join(STETDOC).join("SKILL.md").exists());
+
+    write::remove_file(&root.join("bin").join("stub-version.txt")).unwrap();
+    let next = again(&Never, &program, &cached, &started.state).unwrap();
+    assert_eq!(next, State::Off);
+    launch_write(&root, &next);
+    assert!(!cached.join(STETDOC).exists(), "the skill's folder is gone");
+    assert_eq!(cached_skill(&cached), None);
+}
+
+/// A `--version` that fails for real at the start, with an older skill cached: the launch
+/// write takes the cached skill out of Claude's plugin.
+#[test]
+fn a_failure_at_start_takes_the_cached_skill_off_the_disk() {
+    let root = Scratch::new("start-broken-cached");
+    let (program, cached) = stetdoc_in(&root, "\n");
+    cache_old_skill(&cached);
+    let started = first(&Never, &program, &cached);
+    assert_eq!(
+        started,
+        Start {
+            state: State::Off,
+            recheck: false
+        }
+    );
+    launch_write(&root, &started.state);
+    assert!(!cached.join(STETDOC).exists(), "the skill's folder is gone");
+}
+
+/// A `--version` that works, then a `skills get core` that hangs past the limit: the skill is
+/// left out, stetdoc stays on, and nothing is checked again.
+#[cfg(unix)]
+#[test]
+fn a_skill_past_the_limit_is_left_out_with_no_recheck() {
+    let root = Scratch::new("start-skill-hangs");
+    let program = root.join("bin").join("stetdoc");
+    let script =
+        b"#!/bin/sh\nif [ \"$1\" = --version ]; then echo 'stetdoc 9'; else sleep 30; fi\n";
+    write::write(&program, script).unwrap();
+    write::make_executable(&program).unwrap();
+    let cached = profile_paths(&root).claude_skills();
+    let launcher = PassthroughLauncher::new(SpawnOptions::new());
+    let limit = Duration::from_millis(500);
+    let found = block_on(start::check(
+        &launcher,
+        &clauseo_process::AsyncIoTimer,
+        &program,
+        &cached,
+        limit,
+    ));
+    assert_eq!(found, Found::NoSkill);
+    assert_eq!(
+        start::first(found, || None),
+        Start {
+            state: State::On(None),
+            recheck: false
+        }
+    );
+}
+
+/// A stetdoc that cannot start (a file with no execute bit): absent at once, not checked again.
+#[cfg(unix)]
+#[test]
+fn a_stetdoc_that_cannot_start_is_absent_and_not_checked_again() {
+    let root = Scratch::new("start-not-a-program");
+    let program = root.join("bin").join("stetdoc");
+    write::write(&program, b"not a program\n").unwrap();
+    let cached = profile_paths(&root).claude_skills();
+    assert_eq!(
+        first(&Never, &program, &cached),
+        Start {
+            state: State::Off,
+            recheck: false
+        }
     );
 }

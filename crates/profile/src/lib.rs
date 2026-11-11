@@ -435,8 +435,11 @@ const PLUGIN_MANIFEST_PATH: [&str; 2] = [".claude-plugin", "plugin.json"];
 /// the launch-prep thread, never the host's.
 ///
 /// Then the retired built-ins ([`skills::builtin::RETIRED_BUILTINS`]) go from the folder
-/// ([`skills::retire`]), and so does the browser's skill when `skills` does not carry it (this
-/// start has no browser), and their files are reported as removed.
+/// ([`skills::retire`]), and so does each optional skill `skills` does not carry: the
+/// browser's (this start has no browser) and stetdoc's (none found, its `--version` failed at
+/// the start or in the background check, or its skill was left out). A copy an earlier start
+/// wrote would otherwise stay in Claude's plugin, which Claude reads whole. Their files are
+/// reported as removed.
 ///
 /// The host logs an error from here as a warning and never fails a launch on it: the agent then
 /// runs with the skills the folder already holds, or none, and a Codex agent gets
@@ -452,15 +455,16 @@ pub fn write_skills(skills: &SkillWrite) -> Result<SkillsWritten, ProfileError> 
     }
     let mut report = skills::write_unlocked(&skills.root, &skills.rendered)?;
     let mut retired = skills::builtin::RETIRED_BUILTINS.to_vec();
-    let browser = skills::builtin::AGENT_BROWSER;
-    if !skills
-        .rendered
-        .skills()
-        .iter()
-        .any(|skill| skill.name() == browser)
-    {
-        // A launch without the browser leaves no browser skill behind from one with it.
-        retired.push(browser);
+    // A launch without the browser or stetdoc's skill leaves none behind from one with it.
+    for optional in [skills::builtin::AGENT_BROWSER, skills::stetdoc::STETDOC] {
+        if !skills
+            .rendered
+            .skills()
+            .iter()
+            .any(|skill| skill.name() == optional)
+        {
+            retired.push(optional);
+        }
     }
     report
         .removed
