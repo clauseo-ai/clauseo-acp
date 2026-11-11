@@ -58,9 +58,10 @@ and about 19 in Codex's whole text with a long data folder (about 1,481 of 1,500
   without stetdoc: "Answer in the chat, however long; make a file only when the lawyer asks for
   one, as a `.docx` unless another format is named, and never leave Markdown or scratch files
   in the matter."
-- 0031's budgets are amended by what the four rules need plus about 10 words: `legal.md` at
-  most 1,330 words, and the whole instructions at most 1,680, which also caps Codex's text with
-  the skills index (`the_budgets_hold_for_a_long_macos_path_with_the_folders_filled`). The
+- 0031's budgets are amended once, to fit these rules, stage E's browser lines that follow
+  (2-4 lines) and about 40 words of headroom, so they need not move with every new line:
+  `legal.md` at most 1,360 words, and the whole instructions at most 1,800, which also caps
+  Codex's text with the skills index (`the_budgets_hold_for_a_long_macos_path_with_the_folders_filled`). The
   whole now counts the stetdoc line as the app launches with it; before, the budget tests
   measured a profile without it, so its 17 words were never counted. At this change: `legal.md`
   1,313 words, the stetdoc line 66, the whole 1,569 with a data folder at `/data`, and Codex's

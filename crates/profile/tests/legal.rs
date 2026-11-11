@@ -134,7 +134,7 @@ fn skill_mds() -> Vec<(&'static str, &'static str)> {
 #[test]
 fn legal_word_budget() {
     let legal = word_count(LEGAL);
-    assert!(legal <= 1330, "the legal part has {legal} words");
+    assert!(legal <= 1360, "the legal part has {legal} words");
     let whole = ClauseoProfile::new(paths_under(Path::new("/data")), None).instructions();
     assert_eq!(
         whole,
@@ -149,7 +149,7 @@ fn legal_word_budget() {
         word_count(TOOLS) + word_count(LEGAL),
         "only {{author}} is filled, with one word"
     );
-    assert!(word_count(&whole) <= 1680, "{} words", word_count(&whole));
+    assert!(word_count(&whole) <= 1800, "{} words", word_count(&whole));
     // With a working stetdoc, as the app launches: the stetdoc line joins the tools part.
     let stetdoc = ClauseoProfile::new(paths_under(Path::new("/data")), None)
         .with_stetdoc_cli(true)
@@ -157,7 +157,7 @@ fn legal_word_budget() {
     let line = clauseo_profile::instructions::STETDOC_CLI;
     assert_eq!(word_count(&stetdoc), word_count(&whole) + word_count(line));
     assert!(
-        word_count(&stetdoc) <= 1680,
+        word_count(&stetdoc) <= 1800,
         "{} words",
         word_count(&stetdoc)
     );
