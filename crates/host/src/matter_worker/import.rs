@@ -10,11 +10,14 @@
 //! histories: the marker is set aside and the folder imported under the minted id.
 //!
 //! A marker naming a matter the registry does hold (listed, forgotten or being made) in another
-//! folder is a copy or a move ([`recorded`]). A copy (that matter's folder is still there, or
-//! whether it is cannot be told) becomes a new matter: its marker is set aside and the folder
-//! imported under the minted id, so the matter it was copied from is never taken over. A move
-//! (that folder is gone) ends refused as already that matter, and the actor relinks a listed one
-//! to this folder or brings a forgotten one back here (`answer.rs`).
+//! folder is a copy or a move ([`recorded`]). A move is only a recorded folder that is surely
+//! gone: its parent is there as a folder and it is not ([`gone`]). It ends refused as already
+//! that matter, and the actor relinks a listed one to this folder or brings a forgotten one back
+//! here (`answer.rs`). Anything else is a copy: the folder still there, its parent missing (an
+//! unmounted share, an unplugged drive, an unmapped drive letter or an unreachable server all
+//! read as not found), or any error reading either. A copy becomes a new matter: its marker is
+//! set aside and the folder imported under the minted id, so the matter it was copied from is
+//! never taken over on doubt, and keeps showing its folder as not found until it is located.
 
 use std::io;
 use std::path::{Path, PathBuf};
@@ -96,10 +99,9 @@ enum Recorded {
     Unknown,
     /// At `folder` itself, by any spelling.
     Here,
-    /// Elsewhere, and every folder recorded for it is gone (not found).
+    /// Elsewhere, and every folder recorded for it is surely gone ([`gone`]).
     Moved,
-    /// Elsewhere, and a folder recorded for it is still there, or whether it is cannot be told
-    /// (a read error other than not found): never taken over on doubt.
+    /// Elsewhere, and a folder recorded for it is not surely gone: never taken over on doubt.
     Copied,
 }
 
@@ -113,14 +115,21 @@ fn recorded(old: MatterId, folder: &Path, registry: &[Claimed]) -> Recorded {
         Recorded::Unknown
     } else if folders.iter().any(|own| is_same_folder(folder, own)) {
         Recorded::Here
-    } else if folders
-        .iter()
-        .all(|own| std::fs::metadata(own).is_err_and(|err| err.kind() == io::ErrorKind::NotFound))
-    {
+    } else if folders.iter().all(|own| gone(own)) {
         Recorded::Moved
     } else {
         Recorded::Copied
     }
+}
+
+/// Whether the recorded folder `own` is surely gone: its parent reads as a folder and `own`
+/// itself is not found. A missing parent is no proof (a volume that is not mounted vanishes
+/// whole), and neither is any other error.
+fn gone(own: &Path) -> bool {
+    let parent_there = own
+        .parent()
+        .is_some_and(|parent| std::fs::metadata(parent).is_ok_and(|meta| meta.is_dir()));
+    parent_there && std::fs::metadata(own).is_err_and(|err| err.kind() == io::ErrorKind::NotFound)
 }
 
 /// How an import ended.

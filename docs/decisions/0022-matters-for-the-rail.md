@@ -95,13 +95,15 @@ unreadable `matter.json` and Clauseo's own data folder alike.
   - a folder a create or import in flight is making: the second command joins the first and gets
     its answer, so two "New matter"s of one folder make one matter;
   - a marker naming a matter this install lists or has forgotten, recorded at another path, is a
-    copy or a move. A copy (that matter's recorded folder is still there, or whether it is
-    cannot be told) becomes a new matter: the copy's marker is set aside as above and the folder
-    imported with a new id and a fresh history, and the matter it was copied from keeps its
-    folder, conversations and marker. A move (the recorded folder is gone) is that matter at the
-    new path: a listed one is relinked there as "Locate folder" relinks it and the import
-    answers with it, and a forgotten one comes back there. A matter is never taken over on
-    doubt;
+    copy or a move. A move is only a recorded folder whose parent is there, as a folder, and
+    which is not found: that matter at the new path, a listed one relinked there as "Locate
+    folder" relinks it (the import answers with it), a forgotten one brought back there. Anything
+    else is a copy: the recorded folder still there, its parent missing (an unmounted share, an
+    unplugged drive, an unmapped drive letter or an unreachable server all read as not found),
+    or any error reading either. A copy becomes a new matter: the copy's marker is set aside as
+    above and the folder imported with a new id and a fresh history, and the matter it was copied
+    from keeps its folder, conversations and marker, showing its folder as not found until
+    located. A matter is never taken over on doubt;
   - a create or import that joins another drops its own client and next date: the answer is the
     first command's.
 
