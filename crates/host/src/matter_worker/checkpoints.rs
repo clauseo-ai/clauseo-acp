@@ -67,7 +67,7 @@ pub(super) fn turn_checkpoint(
 pub(super) fn repair(
     matter: &mut Matter,
     meta: &TurnMeta,
-    tool_paths: &BTreeSet<MatterPath>,
+    (tool_paths, commands): &(BTreeSet<MatterPath>, BTreeSet<String>),
     before: Option<CheckpointId>,
     last: bool,
 ) -> Result<TurnCheckpoint, Error> {
@@ -98,7 +98,7 @@ pub(super) fn repair(
             .copied();
         return reused(matter, before, entry, Vec::new(), false);
     }
-    let checkpoint = matter.after_turn(meta, tool_paths)?;
+    let checkpoint = matter.after_turn_named(meta, tool_paths, commands)?;
     turn_checkpoint(matter, checkpoint, before)
 }
 

@@ -121,7 +121,8 @@ fn a_turn_with_no_step_is_refused() {
 }
 
 /// D-sweep: the agent's own new file (moved from a scratch file the walk never lists, so absent at
-/// the turn's start, its mtime set before the turn's end, no tool call naming it) is not flagged,
+/// the turn's start, its mtime set before the turn's end, named by a shell call's command
+/// `pandoc in.md -o "reply.docx"` and by no tool location) is not flagged,
 /// and nothing is edited since. Edited by the lawyer after the turn, it is: the thread's Undo and
 /// Versions' undo both ask this. Put back as the turn left it, Undo deletes it.
 #[test]
@@ -178,5 +179,42 @@ fn the_agents_own_file_is_unflagged_and_edited_since_only_once_edited() {
         !folder.join("reply.docx").exists(),
         "the undo left the reply"
     );
+    host.shutdown();
+}
+
+/// D-sweep review: the same new file named by nothing (no tool call, no command), as a file the
+/// lawyer saves during a long turn, keeps the flag: the dialogs warn and keep it by default.
+#[test]
+fn a_new_file_named_by_nothing_stays_flagged() {
+    let dir = Dir::new(
+        "preview_undo_unnamed_file",
+        &[(FAKE, Scenario::Local("undo-preview-unnamed"))],
+    );
+    let host = dir.start(0);
+    let (_, thread, folder) = matter_with_thread(
+        &dir,
+        &host,
+        "m",
+        &[
+            ("brief.txt", "Clause 4 draft\n"),
+            ("draft.tmp", "the lawyer's reply\n"),
+        ],
+        FAKE,
+    );
+    let before_end = std::time::UNIX_EPOCH
+        + std::time::Duration::from_millis(u64::try_from(START_MS - 60_000).unwrap());
+    write::set_mtime(&folder.join("draft.tmp"), before_end);
+    let mut events = host.events(StreamId::Thread(thread));
+    let (turn, _) = host.prompt(thread, "Write the reply.");
+    assert_eq!(events.until_turn_ended(turn).stop, StopReason::EndTurn);
+    let changed = events
+        .files_changed(turn)
+        .unwrap_or_else(|| panic!("no FilesChanged: {}", events.dump()));
+    let flags: Vec<(&str, bool)> = changed
+        .files
+        .iter()
+        .map(|file| (file.path().as_str(), file.may_include_lawyer_edits()))
+        .collect();
+    assert_eq!(flags, [("reply.docx", true)]);
     host.shutdown();
 }

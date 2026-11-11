@@ -1,8 +1,11 @@
-//! A file the agent made with no tool call naming it (Bash running pandoc, say): proved absent
-//! at the turn's start by its first checkpoint's skip record and last modified by the turn's
-//! end, it is the agent's own, not flagged as maybe holding the lawyer's edits, and Undo deletes
-//! it with no warning. Any doubt (a pre-existing file, a later mtime, a folder that did not
-//! list) keeps the flag.
+//! A file the agent made with no tool call naming it (Bash running pandoc, say): named whole by
+//! a shell command of the turn, proved absent at the turn's start by its first checkpoint's skip
+//! record and last modified by the turn's end, it is the agent's own, not flagged as maybe
+//! holding the lawyer's edits, and Undo deletes it with no warning. Any doubt (named by nothing,
+//! as a file the lawyer saves during the turn is, or only within a longer name; a pre-existing
+//! file; a later mtime; a folder that did not list) keeps the flag.
+
+use std::collections::BTreeSet;
 
 use std::time::{Duration, SystemTime};
 
@@ -31,17 +34,37 @@ fn started(name: &str) -> (Fixture, Matter) {
     (fx, matter)
 }
 
-/// The agent writes `reply.docx` with no tool call naming it, last modified `secs` from the
-/// turn's end; the turn ends with checkpoint 3.
+/// The file names `pandoc in.md -o "Reply.docx"`-style commands named.
+fn commands(names: &[&str]) -> BTreeSet<String> {
+    names.iter().map(|name| (*name).to_owned()).collect()
+}
+
+/// `rel` appears with no tool call naming it, last modified `secs` from the turn's end, and the
+/// turn (its shell commands naming `names`) ends with checkpoint 3.
+fn made_named(
+    fx: &Fixture,
+    matter: &mut Matter,
+    rel: &str,
+    secs: i64,
+    names: &[&str],
+) -> Vec<FileChange> {
+    fx.write(rel, "the agent's reply");
+    support::set_mtime(fx.file(rel), around_end(secs));
+    let checkpoint = matter
+        .after_turn_named(&meta(3), &tools(&[]), &commands(names))
+        .unwrap();
+    created(checkpoint, 3)
+}
+
+/// The agent writes `reply.docx` through a shell command that names it, last modified `secs`
+/// from the turn's end.
 fn made_reply(fx: &Fixture, matter: &mut Matter, secs: i64) -> Vec<FileChange> {
-    fx.write("reply.docx", "the agent's reply");
-    support::set_mtime(fx.file("reply.docx"), around_end(secs));
-    created(matter.after_turn(&meta(3), &tools(&[])).unwrap(), 3)
+    made_named(fx, matter, "reply.docx", secs, &["in.md", "reply.docx"])
 }
 
 #[test]
-fn a_file_the_agent_made_unnamed_is_its_own_and_undo_deletes_it() {
-    let (fx, mut matter) = started("own-unnamed");
+fn a_file_a_pandoc_command_named_is_the_agents_and_undo_deletes_it() {
+    let (fx, mut matter) = started("own-named");
     let changes = made_reply(&fx, &mut matter, -1);
     assert_eq!(changes, [added("reply.docx", b"the agent's reply")]);
     assert!(!changes[0].may_include_lawyer_edits());
@@ -54,6 +77,29 @@ fn a_file_the_agent_made_unnamed_is_its_own_and_undo_deletes_it() {
     assert_none(&undone.unversioned);
     assert!(!fx.exists("reply.docx"));
     assert_eq!(fx.read("a.txt"), b"one");
+}
+
+/// D-sweep review: a file someone saved during the turn, named by no tool call and no command,
+/// may be the lawyer's: flagged, so the dialog warns and keeps it by default.
+#[test]
+fn a_new_file_named_by_nothing_is_flagged() {
+    let (fx, mut matter) = started("own-named-by-nothing");
+    let changes = made_named(&fx, &mut matter, "reply.docx", -1, &["in.md", "out.docx"]);
+    assert_eq!(
+        changes,
+        [added("reply.docx", b"the agent's reply").with_lawyer_edits()]
+    );
+}
+
+/// A name only within a longer one names nothing, either way round.
+#[test]
+fn a_name_only_within_a_longer_one_is_flagged() {
+    let (fx, mut matter) = started("own-substring");
+    let changes = made_named(&fx, &mut matter, "Reply.docx", -1, &["Reply.docx.bak"]);
+    assert!(changes[0].may_include_lawyer_edits());
+    let (fx, mut matter) = started("own-superstring");
+    let changes = made_named(&fx, &mut matter, "Reply.docx.bak", -1, &["Reply.docx"]);
+    assert!(changes[0].may_include_lawyer_edits());
 }
 
 /// Its mtime at the turn's end exactly still counts as the turn's.

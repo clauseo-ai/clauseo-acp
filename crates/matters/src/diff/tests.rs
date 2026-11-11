@@ -97,6 +97,7 @@ fn only_changes_no_tool_call_named_are_flagged() {
     let tools = BTreeSet::from([path("a.docx"), path("old.docx")]);
     // No start record: no added file is known as the agent's.
     let start = TurnStart {
+        commands: &BTreeSet::new(),
         record: None,
         tree: &old,
         reads: &FirstReads::default(),
@@ -136,13 +137,26 @@ fn entry(path_: &str, blob: u8, secs: u32) -> CacheEntry {
     }
 }
 
-/// Whether the added `made.docx` (blob 9, modified at 100 s, the turn ending at 100 s) comes out
-/// flagged, with no tool call naming it, given the start `record` and first `reads`.
+/// Whether the added `made.docx` (blob 9, modified at `secs`, the turn ending at 100 s) comes out
+/// flagged, with no tool call naming it and a shell command naming `made.docx`, given the start
+/// `record` and first `reads`.
 fn made_flagged(record: &SkipRecord, reads: &FirstReads, secs: u32) -> bool {
+    made_flagged_named(record, reads, secs, &["made.docx"])
+}
+
+/// [`made_flagged`], the turn's shell commands naming `commands`.
+fn made_flagged_named(
+    record: &SkipRecord,
+    reads: &FirstReads,
+    secs: u32,
+    commands: &[&str],
+) -> bool {
+    let commands: BTreeSet<String> = commands.iter().map(|name| (*name).to_owned()).collect();
     let old = [file("a.docx", 1)];
     let new = [file("a.docx", 1), file("made.docx", 9)];
     let entries = [entry("a.docx", 1, 50), entry("made.docx", 9, secs)];
     let start = TurnStart {
+        commands: &commands,
         record: Some(record),
         tree: &old,
         reads,
@@ -155,13 +169,22 @@ fn made_flagged(record: &SkipRecord, reads: &FirstReads, secs: u32) -> bool {
     flag(change, &BTreeSet::new(), &start).may_include_lawyer_edits()
 }
 
-/// D-sweep: a file the turn added that its start record proves absent, untouched since the turn
-/// ended, is the agent's even with no tool call naming it; any doubt keeps the flag.
+/// D-sweep: a file the turn added that a shell command names and its start record proves absent,
+/// untouched since the turn ended, is the agent's even with no tool call naming it; any doubt
+/// keeps the flag.
 #[test]
-fn an_added_file_proved_absent_at_the_start_is_the_agents() {
+fn an_added_file_a_command_names_proved_absent_at_the_start_is_the_agents() {
     let clean = SkipRecord::default();
     let none = FirstReads::default();
     assert!(!made_flagged(&clean, &none, 100));
+    // Named by nothing (a file the lawyer saved during the turn), or only within a longer name.
+    assert!(made_flagged_named(&clean, &none, 100, &[]));
+    assert!(made_flagged_named(
+        &clean,
+        &none,
+        100,
+        &["made.docx.bak", "made"]
+    ));
     // Modified after the turn's end.
     assert!(made_flagged(&clean, &none, 101));
     // A skipped file there at the start, or a folder that did not list.

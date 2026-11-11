@@ -20,7 +20,7 @@ use clauseo_protocol::{
     CheckpointId, CheckpointKind, FileChange, ImportSummary, MatterId, MatterPath, Timestamp,
 };
 
-use crate::checkpoint::{Core, Spec};
+use crate::checkpoint::{Core, Named, Spec};
 use crate::history::{GixStore, HistoryStore, recorded_worktree};
 use crate::stat::EntryState;
 use crate::types::{
@@ -351,14 +351,32 @@ impl Matter {
         meta: &TurnMeta,
         tool_paths: &BTreeSet<MatterPath>,
     ) -> Result<Checkpoint, Error> {
-        self.turn_checkpoint(meta, CheckpointKind::AfterTurn, Some(tool_paths))
+        self.after_turn_named(meta, tool_paths, &BTreeSet::new())
+    }
+
+    /// [`Matter::after_turn`], with the file names the turn's shell commands named
+    /// (`commands`: `Reply.docx` for pandoc's `-o out/Reply.docx`). A file the turn added that
+    /// no tool call named is the agent's own, and not flagged, only when its name is among
+    /// them, the step's first skip record proves it absent then, and it was last modified by
+    /// the turn's end: a file the lawyer saved meanwhile is named by nothing, and stays flagged.
+    pub fn after_turn_named(
+        &mut self,
+        meta: &TurnMeta,
+        tool_paths: &BTreeSet<MatterPath>,
+        commands: &BTreeSet<String>,
+    ) -> Result<Checkpoint, Error> {
+        let named = Named {
+            paths: tool_paths,
+            commands,
+        };
+        self.turn_checkpoint(meta, CheckpointKind::AfterTurn, Some(named))
     }
 
     fn turn_checkpoint(
         &mut self,
         meta: &TurnMeta,
         kind: CheckpointKind,
-        tool_paths: Option<&BTreeSet<MatterPath>>,
+        tool_paths: Option<Named<'_>>,
     ) -> Result<Checkpoint, Error> {
         json::check(&self.folder, self.id)?;
         let spec = Spec {

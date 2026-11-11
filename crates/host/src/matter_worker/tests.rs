@@ -338,6 +338,7 @@ fn tool_paths_resolve_outside_spellings_into_the_matter() {
             text(root.join("gone").join("a.txt")),
         ]
         .into(),
+        ..TurnPaths::default()
     };
     // The matter folder as the lawyer picked it, through the link.
     let found = tool_paths(&link, paths);

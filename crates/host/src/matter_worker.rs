@@ -39,6 +39,7 @@ pub(crate) fn tool_paths(folder: &Path, paths: TurnPaths) -> BTreeSet<MatterPath
     let TurnPaths {
         mut inside,
         outside,
+        ..
     } = paths;
     let net = NetEnv::current();
     let disk = Disk::resolved(&net);
@@ -398,21 +399,23 @@ fn handle(settings: &Settings, slot: &mut Slot, job: MatterJob) -> MatterReply {
         }
         MatterJob::AfterTurn {
             meta,
-            tool_paths,
+            mut tool_paths,
             before,
         } => MatterReply::AfterTurn(open(settings, slot).and_then(|matter| {
+            let commands = std::mem::take(&mut tool_paths.commands);
             let tool_paths = self::tool_paths(matter.folder(), tool_paths);
-            let checkpoint = matter.after_turn(&meta, &tool_paths)?;
+            let checkpoint = matter.after_turn_named(&meta, &tool_paths, &commands)?;
             turn_checkpoint(matter, checkpoint, before)
         })),
         MatterJob::Repair {
             meta,
-            tool_paths,
+            mut tool_paths,
             before,
             last,
         } => MatterReply::AfterTurn(open(settings, slot).and_then(|matter| {
-            let tool_paths = self::tool_paths(matter.folder(), tool_paths);
-            repair(matter, &meta, &tool_paths, before, last)
+            let commands = std::mem::take(&mut tool_paths.commands);
+            let named = (self::tool_paths(matter.folder(), tool_paths), commands);
+            repair(matter, &meta, &named, before, last)
         })),
         MatterJob::Undo(job) => MatterReply::Undone(open(settings, slot).and_then(|matter| {
             let request = UndoRequest {
