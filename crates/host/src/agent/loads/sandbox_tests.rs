@@ -27,6 +27,7 @@ struct Session {
     skills: Vec<PathBuf>,
     path: Vec<PathBuf>,
     env_file: PathBuf,
+    ca_file: Option<PathBuf>,
     home: PathBuf,
     claude_tmp: Option<PathBuf>,
     data: Vec<PathBuf>,
@@ -55,6 +56,7 @@ impl Session {
                 data.join("agents/runtime/clauseo-python-3.13.9-aarch64/bin"),
             ],
             env_file: run.join("clauseo-env.sh"),
+            ca_file: Some(data.join("tls/roots.pem")),
             home: data.join("agents/claude-acp/home"),
             claude_tmp: Some(PathBuf::from(SHORT)),
             data: vec![data.to_path_buf()],
@@ -75,6 +77,7 @@ impl Session {
             skills: &self.skills,
             path: &self.path,
             env_file: Some(&self.env_file),
+            ca_file: self.ca_file.as_deref(),
             claude_home: &self.home,
             data: &self.data,
             other_matters: &self.other_matters,
@@ -177,6 +180,7 @@ fn a_claude_session_runs_its_commands_in_claude_codes_sandbox() {
                     format!("{DATA}/agent-state/m-1/notes"),
                     format!("{DATA}/profile/claude-plugin/skills"),
                     format!("{run}/clauseo-env.sh"),
+                    format!("{DATA}/tls/roots.pem"),
                     "/Applications/Clauseo.app/Contents/Helpers/stetdoc",
                     format!("{DATA}/tools"),
                     format!("{DATA}/agents/runtime/clauseo-python-3.13.9-aarch64"),
@@ -491,4 +495,19 @@ fn the_matter_marker_is_denied_to_claudes_edit() {
         deny.contains(&"Edit(//Users/l/Clients/A/.clauseo/**)"),
         "{deny:?}"
     );
+}
+
+/// The trust roots file opens alone, never its folder or `<data>`; without one nothing opens.
+#[test]
+fn only_the_trust_roots_file_opens() {
+    let mut session = Session::new("s-1");
+    let sandbox = mac(&session.paths(false)).unwrap();
+    let file = format!("{DATA}/tls/roots.pem");
+    assert!(sandbox.allow_read.contains(&file));
+    for folder in [format!("{DATA}/tls"), DATA.to_owned()] {
+        assert!(!sandbox.allow_read.contains(&folder), "{folder}");
+    }
+    session.ca_file = None;
+    let sandbox = mac(&session.paths(false)).unwrap();
+    assert!(!sandbox.allow_read.iter().any(|path| path.contains("/tls")));
 }

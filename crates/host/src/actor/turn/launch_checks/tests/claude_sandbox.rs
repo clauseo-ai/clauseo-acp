@@ -27,6 +27,7 @@ fn claudes_sandbox_opens_no_secret_of_the_real_run_folder() {
         skills: &[],
         path: &[],
         env_file: Some(&run.root.join(crate::agent::shell_path::ENV_FILE)),
+        ca_file: Some(&data.join("tls/roots.pem")),
         claude_home: &data.join("agents/claude-acp/home"),
         data: &run.data_deny.spellings,
         other_matters: &[],

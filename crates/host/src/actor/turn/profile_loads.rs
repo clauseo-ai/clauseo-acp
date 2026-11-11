@@ -274,6 +274,7 @@ fn claude_sandbox(
         skills: &skills,
         path: &run.path.dirs,
         env_file: run.path.env_file.as_deref(),
+        ca_file: run.path.ca_file.as_deref(),
         claude_home: &claude_home,
         data: &run.data_deny.spellings,
         other_matters: &other_matters,

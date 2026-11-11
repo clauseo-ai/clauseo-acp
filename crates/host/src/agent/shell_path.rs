@@ -32,6 +32,10 @@
 //!   account's shell, zsh on a Mac, where Claude's bash-style commands go wrong (an unmatched
 //!   `*.docx` is an error, `$var` is not split into words). On Linux only when `/bin/bash`
 //!   is there (NixOS has none): elsewhere Claude Code picks its own shell as before.
+//! - A Claude session on macOS whose sandbox is on gets the trust roots file
+//!   (`agent::loads::tls_roots`): `SSL_CERT_FILE`, `CURL_CA_BUNDLE` and `REQUESTS_CA_BUNDLE` name
+//!   it in the session's environment and again in [`ENV_FILE`], after the `PATH` line, so they
+//!   hold in each Bash command whatever the login-shell snapshot set.
 //!
 //! The file system work ([`prepare`]) runs on the launch-prep thread; [`apply`] edits the
 //! launch's merged environment on the actor. Windows is left as it was: no key, no file. Logs
@@ -100,17 +104,29 @@ pub(crate) struct SessionPath {
     pub(crate) env_file: Option<PathBuf>,
     /// For a Claude session, on macOS, and on Linux when it is there: [`BASH`].
     pub(crate) shell: Option<PathBuf>,
+    /// For a Claude session off Windows: the trust roots file its CA variables name
+    /// (`agent::loads::tls_roots`), if the launch prep wrote one.
+    pub(crate) ca_file: Option<PathBuf>,
 }
 
 /// [`SessionPath`] for an agent of `kind` with `dirs` first on its `PATH`, its file written in
-/// `run_root`. File system calls: off the actor.
+/// `run_root`, a Claude session's CA variables naming `ca_file`. File system calls: off the
+/// actor.
 pub(crate) fn prepare(
     dirs: Vec<PathBuf>,
     hook_path: bool,
     kind: Option<AgentKind>,
     run_root: &Path,
+    ca_file: Option<&Path>,
 ) -> SessionPath {
-    prepare_on(dirs, hook_path, kind, run_root, Os::host(), Path::new(ETC))
+    prepare_on(
+        dirs,
+        hook_path,
+        kind,
+        (run_root, ca_file),
+        Os::host(),
+        Path::new(ETC),
+    )
 }
 
 /// [`prepare`] on `os`, with `path_helper`'s files under `etc`.
@@ -118,7 +134,7 @@ pub(crate) fn prepare_on(
     dirs: Vec<PathBuf>,
     hook_path: bool,
     kind: Option<AgentKind>,
-    run_root: &Path,
+    (run_root, ca_file): (&Path, Option<&Path>),
     os: Os,
     etc: &Path,
 ) -> SessionPath {
@@ -136,7 +152,8 @@ pub(crate) fn prepare_on(
             path.etc_paths = path_helper_entries(etc);
         }
         Some(AgentKind::Claude) => {
-            path.env_file = write_env_file(run_root, &path.dirs);
+            path.ca_file = ca_file.map(Path::to_path_buf);
+            path.env_file = write_env_file(run_root, &path.dirs, ca_file);
             let bash = Path::new(BASH);
             path.shell = (os == Os::Mac || bash.is_file()).then(|| bash.to_owned());
         }
@@ -198,10 +215,35 @@ pub(crate) fn mac_shell_path(dirs: &[PathBuf], helper: &[PathBuf], path: &str) -
     kept.join(":")
 }
 
-/// The one line of [`ENV_FILE`]: `export PATH='<dir1>:<dir2>…':"$PATH"`, each folder inside
-/// the single quotes with a `'` written as `'\''`. A folder that holds `:`, a line break or is
-/// not UTF-8 is left out (counted in a warning); none left is `None`.
-pub(crate) fn env_file_text(dirs: &[PathBuf]) -> Option<String> {
+/// The text of [`ENV_FILE`]: [`path_line`], then, with `ca_file`, one line exporting each of
+/// `agent::loads::tls_roots::CA_VARS` as it, quoted the same way (left out when it holds a
+/// line break or is not UTF-8). Neither is `None`.
+pub(crate) fn env_file_text(dirs: &[PathBuf], ca_file: Option<&Path>) -> Option<String> {
+    let ca = ca_file
+        .and_then(Path::to_str)
+        .filter(|file| !file.contains(['\n', '\r']))
+        .map(|file| {
+            let quoted = file.replace('\'', r"'\''");
+            let exports: Vec<String> = crate::agent::loads::tls_roots::CA_VARS
+                .iter()
+                .map(|name| format!("{name}='{quoted}'"))
+                .collect();
+            format!("export {}\n", exports.join(" "))
+        });
+    match (path_line(dirs), ca) {
+        (None, None) => None,
+        (line, ca) => Some(format!(
+            "{}{}",
+            line.unwrap_or_default(),
+            ca.unwrap_or_default()
+        )),
+    }
+}
+
+/// The `PATH` line: `export PATH='<dir1>:<dir2>…':"$PATH"`, each folder inside the single
+/// quotes with a `'` written as `'\''`. A folder that holds `:`, a line break or is not UTF-8
+/// is left out (counted in a warning); none left is `None`.
+fn path_line(dirs: &[PathBuf]) -> Option<String> {
     let usable: Vec<&str> = dirs
         .iter()
         .filter_map(|dir| dir.to_str())
@@ -223,11 +265,11 @@ pub(crate) fn env_file_text(dirs: &[PathBuf]) -> Option<String> {
     Some(format!("export PATH='{}':\"$PATH\"\n", quoted.join(":")))
 }
 
-/// Writes [`env_file_text`] of `dirs` to `<run_root>/clauseo-env.sh` and gives its path; with
-/// no line, removes a file left there and gives `None`, as it does when the write fails.
-fn write_env_file(run_root: &Path, dirs: &[PathBuf]) -> Option<PathBuf> {
+/// Writes [`env_file_text`] to `<run_root>/clauseo-env.sh` and gives its path; with no line,
+/// removes a file left there and gives `None`, as it does when the write fails.
+fn write_env_file(run_root: &Path, dirs: &[PathBuf], ca_file: Option<&Path>) -> Option<PathBuf> {
     let file = run_root.join(ENV_FILE);
-    let Some(text) = env_file_text(dirs) else {
+    let Some(text) = env_file_text(dirs, ca_file) else {
         if let Err(error) = crate::write::remove_old_file(&file) {
             tracing::warn!(error = %Cause(&error), "an old Claude shell PATH file stayed");
         }
@@ -252,10 +294,10 @@ pub(crate) fn apply(env: &mut BTreeMap<OsString, OsString>, path: &SessionPath) 
 
 /// [`apply`] on `os`. With folders, off Windows: a Codex session's `CODEX_CONFIG` gets
 /// `allow_login_shell = false` and `features.shell_snapshot = false`, and on macOS its `PATH`
-/// goes through [`mac_shell_path`]; a Claude session with its file gets [`ENV_FILE_VAR`],
-/// over any inherited one. Otherwise `env` is left as it is, an inherited `CLAUDE_ENV_FILE`
-/// included. Off Windows, with folders or without, a Claude session with its shell gets
-/// [`SHELL_VAR`], over any inherited one.
+/// goes through [`mac_shell_path`]. Off Windows, a Claude session with its file gets
+/// [`ENV_FILE_VAR`], over any inherited one; without, an inherited `CLAUDE_ENV_FILE` stays.
+/// A Claude session with its shell gets [`SHELL_VAR`], and one with its trust roots file
+/// each of `tls_roots::CA_VARS` naming it, each over any inherited one.
 pub(crate) fn apply_on(env: &mut BTreeMap<OsString, OsString>, path: &SessionPath, os: Os) {
     if os == Os::Windows {
         return;
@@ -264,12 +306,18 @@ pub(crate) fn apply_on(env: &mut BTreeMap<OsString, OsString>, path: &SessionPat
         env.retain(|name, _| !name.eq_ignore_ascii_case(SHELL_VAR));
         env.insert(OsString::from(SHELL_VAR), shell.as_os_str().to_owned());
     }
-    if path.dirs.is_empty() {
-        return;
+    if let Some(file) = &path.ca_file {
+        for var in crate::agent::loads::tls_roots::CA_VARS {
+            env.retain(|name, _| !name.eq_ignore_ascii_case(var));
+            env.insert(OsString::from(var), file.as_os_str().to_owned());
+        }
     }
     if let Some(file) = &path.env_file {
         env.retain(|name, _| !name.eq_ignore_ascii_case(ENV_FILE_VAR));
         env.insert(OsString::from(ENV_FILE_VAR), file.as_os_str().to_owned());
+    }
+    if path.dirs.is_empty() {
+        return;
     }
     if path.codex {
         codex_keys(env, path, os);

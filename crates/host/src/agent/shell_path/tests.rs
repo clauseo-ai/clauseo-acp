@@ -56,6 +56,7 @@ fn codex_path(dirs: Vec<PathBuf>, etc_paths: Vec<PathBuf>) -> SessionPath {
         etc_paths,
         env_file: None,
         shell: None,
+        ca_file: None,
     }
 }
 
@@ -173,7 +174,14 @@ fn path_helper_folders_are_read_in_its_order() {
 fn mac_codex_path_puts_path_helper_after_clauseo_and_drops_repeats() {
     let etc = fake_etc("mac");
     let run = scratch("mac-run");
-    let path = prepare_on(dirs(), true, Some(AgentKind::Codex), &run, Os::Mac, &etc);
+    let path = prepare_on(
+        dirs(),
+        true,
+        Some(AgentKind::Codex),
+        (&run, None),
+        Os::Mac,
+        &etc,
+    );
     assert_eq!(path.etc_paths.len(), 6);
     let mut env = codex_env("/stet:/rt/bin:/usr/bin:/bin:/usr/sbin:/sbin:/Users/ada/bin");
     apply_on(&mut env, &path, Os::Mac);
@@ -184,13 +192,20 @@ fn mac_codex_path_puts_path_helper_after_clauseo_and_drops_repeats() {
     assert!(!run.join(ENV_FILE).exists(), "Codex gets no file");
     assert!(path.shell.is_none(), "nor a shell");
     // Linux reads no `path_helper`; nor does a Codex session without folders.
-    let linux = prepare_on(dirs(), true, Some(AgentKind::Codex), &run, Os::Linux, &etc);
+    let linux = prepare_on(
+        dirs(),
+        true,
+        Some(AgentKind::Codex),
+        (&run, None),
+        Os::Linux,
+        &etc,
+    );
     assert_eq!(linux.etc_paths, [] as [PathBuf; 0]);
     let none = prepare_on(
         Vec::new(),
         false,
         Some(AgentKind::Codex),
-        &run,
+        (&run, None),
         Os::Mac,
         &etc,
     );
@@ -221,7 +236,7 @@ fn claude_gets_its_env_file_with_quoted_folders() {
         dirs,
         true,
         Some(AgentKind::Claude),
-        &run,
+        (&run, None),
         Os::Mac,
         Path::new("/nowhere"),
     );
@@ -266,7 +281,7 @@ fn claude_without_folders_gets_no_file_and_keeps_an_inherited_one() {
         Vec::new(),
         false,
         Some(AgentKind::Claude),
-        &run,
+        (&run, None),
         Os::Linux,
         Path::new("/nowhere"),
     );
@@ -302,7 +317,7 @@ fn windows_claude_is_left_alone() {
         dirs(),
         true,
         Some(AgentKind::Claude),
-        &run,
+        (&run, None),
         Os::Windows,
         Path::new("/nowhere"),
     );
@@ -328,10 +343,10 @@ fn unusable_folders_are_left_out_of_the_line() {
         PathBuf::from("/ok"),
     ];
     assert_eq!(
-        env_file_text(&dirs).as_deref(),
+        env_file_text(&dirs, None).as_deref(),
         Some("export PATH='/ok':\"$PATH\"\n")
     );
-    assert_eq!(env_file_text(&dirs[..2]), None);
+    assert_eq!(env_file_text(&dirs[..2], None), None);
 }
 
 /// The file is the user's own: 0600.
@@ -344,7 +359,7 @@ fn the_env_file_is_private() {
         dirs(),
         true,
         Some(AgentKind::Claude),
-        &run,
+        (&run, None),
         Os::Linux,
         Path::new("/nowhere"),
     );
@@ -371,7 +386,7 @@ fn sourcing_the_env_file_runs_nothing() {
         vec![odd.clone()],
         true,
         Some(AgentKind::Claude),
-        &run,
+        (&run, None),
         Os::Linux,
         Path::new("/nowhere"),
     );
@@ -409,5 +424,92 @@ fn sourcing_the_env_file_runs_nothing() {
     assert_eq!(String::from_utf8(said).unwrap(), expected);
     assert!(!run.join("PWNED").exists(), "the substitution ran");
     assert!(!run.join("TICKED").exists(), "the backtick ran");
+    write::remove_dir_all(&run).unwrap();
+}
+
+/// A Claude session with the trust roots file gets `SSL_CERT_FILE`, `CURL_CA_BUNDLE` and
+/// `REQUESTS_CA_BUNDLE` naming it in its environment, over inherited ones of any case, and in its
+/// shells' file after the `PATH` line, also with no folders; a Bash command that sources the
+/// file, as Claude Code does after its snapshot, sees all three even when the snapshot set
+/// others.
+#[test]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "runs bash on the file, as Claude Code does"
+)]
+fn claudes_shell_gets_the_three_ca_variables() {
+    let run = scratch("claude-ca");
+    let roots = PathBuf::from("/Users/ada/Clauseo Data/tls/roots.pem");
+    let path = prepare_on(
+        Vec::new(),
+        false,
+        Some(AgentKind::Claude),
+        (&run, Some(&roots)),
+        Os::Mac,
+        Path::new("/nowhere"),
+    );
+    let file = run.join(ENV_FILE);
+    assert_eq!(path.env_file.as_deref(), Some(file.as_path()));
+    assert_eq!(path.ca_file.as_deref(), Some(roots.as_path()));
+    let quoted = "'/Users/ada/Clauseo Data/tls/roots.pem'";
+    assert_eq!(
+        std::fs::read_to_string(&file).unwrap(),
+        format!(
+            "export SSL_CERT_FILE={quoted} CURL_CA_BUNDLE={quoted} REQUESTS_CA_BUNDLE={quoted}\n"
+        )
+    );
+    let mut env = BTreeMap::from([(
+        OsString::from("ssl_cert_file"),
+        OsString::from("/etc/ssl/cert.pem"),
+    )]);
+    apply_on(&mut env, &path, Os::Mac);
+    for var in crate::agent::loads::tls_roots::CA_VARS {
+        assert_eq!(
+            env.get(&OsString::from(var)),
+            Some(&roots.clone().into_os_string())
+        );
+    }
+    assert!(!env.contains_key(&OsString::from("ssl_cert_file")));
+    assert_eq!(
+        env.get(&OsString::from(ENV_FILE_VAR)),
+        Some(&file.clone().into_os_string())
+    );
+    // With folders too: the PATH line first, then the CA line.
+    let path = prepare_on(
+        dirs(),
+        true,
+        Some(AgentKind::Claude),
+        (&run, Some(&roots)),
+        Os::Linux,
+        Path::new("/nowhere"),
+    );
+    let text = std::fs::read_to_string(path.env_file.as_ref().unwrap()).unwrap();
+    assert!(text.starts_with("export PATH='/stet:/rt/bin':\"$PATH\"\nexport SSL_CERT_FILE="));
+    if Path::new(BASH).is_file() {
+        let shell = std::process::Command::new(BASH)
+            .arg("-c")
+            .arg(format!(
+                "export SSL_CERT_FILE=/etc/ssl/cert.pem; source '{}'; \
+                 printf '%s|%s|%s' \"$SSL_CERT_FILE\" \"$CURL_CA_BUNDLE\" \"$REQUESTS_CA_BUNDLE\"",
+                file.display()
+            ))
+            .output()
+            .unwrap();
+        let roots = roots.to_str().unwrap();
+        assert_eq!(
+            String::from_utf8(shell.stdout).unwrap(),
+            format!("{roots}|{roots}|{roots}")
+        );
+    }
+    // Codex never gets them.
+    let codex = prepare_on(
+        dirs(),
+        true,
+        Some(AgentKind::Codex),
+        (&run, Some(&roots)),
+        Os::Linux,
+        Path::new("/nowhere"),
+    );
+    assert!(codex.ca_file.is_none());
     write::remove_dir_all(&run).unwrap();
 }
