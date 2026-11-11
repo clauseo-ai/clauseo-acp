@@ -5,7 +5,6 @@
 //! history is here with no row is set aside instead (decision record 0022).
 
 use std::path::{Path, PathBuf};
-use std::time::Duration;
 
 use clauseo_protocol::{
     CheckpointKind, CommandEnvelope, CommandOutcome, HostCommand, HostError, HostQuery, MatterId,
@@ -175,7 +174,7 @@ fn a_failed_adopting_import_leaves_the_marker_byte_for_byte() {
                 .exists()
         );
     }
-    host.clock.advance(Duration::from_secs(600));
+    host.clock.advance(std::time::Duration::from_secs(600));
     host.settle();
     assert_eq!(std::fs::read_to_string(marker(&folder)).unwrap(), bytes);
     crate::write::set_mode(&folder.join("brief.txt"), 0o644);
