@@ -130,7 +130,8 @@ impl Events {
         (first, second)
     }
 
-    /// Every agent's event already sent, without waiting.
+    /// Every agent's event already sent, without waiting. Only the unix-only python tests read it.
+    #[cfg(unix)]
     pub(crate) fn drain(&self) -> Vec<(AgentId, InstallState)> {
         let mut out: Vec<_> = self.installs.borrow_mut().drain(..).collect();
         out.extend(
