@@ -9,8 +9,8 @@ use clauseo_protocol::AgentKind;
 use serde_json::{Map, Value, json};
 
 use super::{
-    ENV_FILE, ENV_FILE_VAR, Os, SessionPath, apply_on, env_file_text, mac_shell_path,
-    path_helper_entries, prepare_on,
+    BASH, ENV_FILE, ENV_FILE_VAR, Os, SHELL_VAR, SessionPath, apply_on, env_file_text,
+    mac_shell_path, path_helper_entries, prepare_on,
 };
 use crate::write;
 
@@ -55,6 +55,7 @@ fn codex_path(dirs: Vec<PathBuf>, etc_paths: Vec<PathBuf>) -> SessionPath {
         codex: true,
         etc_paths,
         env_file: None,
+        shell: None,
     }
 }
 
@@ -181,6 +182,7 @@ fn mac_codex_path_puts_path_helper_after_clauseo_and_drops_repeats() {
     assert_eq!(&env[&OsString::from("PATH")], expected);
     assert_eq!(codex_config(&env)["allow_login_shell"], json!(false));
     assert!(!run.join(ENV_FILE).exists(), "Codex gets no file");
+    assert!(path.shell.is_none(), "nor a shell");
     // Linux reads no `path_helper`; nor does a Codex session without folders.
     let linux = prepare_on(dirs(), true, Some(AgentKind::Codex), &run, Os::Linux, &etc);
     assert_eq!(linux.etc_paths, [] as [PathBuf; 0]);
@@ -244,12 +246,17 @@ fn claude_gets_its_env_file_with_quoted_folders() {
         Some(&file.into_os_string())
     );
     assert!(!env.contains_key(&OsString::from("claude_env_file")));
-    assert_eq!(env.len(), 2);
+    assert_eq!(
+        env.get(&OsString::from(SHELL_VAR)),
+        Some(&OsString::from(BASH))
+    );
+    assert_eq!(env.len(), 3);
     write::remove_dir_all(&run).unwrap();
 }
 
 /// With no folders, a file left in the run folder is removed, no `CLAUDE_ENV_FILE` is set and
-/// an inherited one stays as it was.
+/// an inherited one stays as it was; `CLAUDE_CODE_SHELL` is still bash, over an inherited one,
+/// on Linux when `/bin/bash` is there.
 #[test]
 fn claude_without_folders_gets_no_file_and_keeps_an_inherited_one() {
     let run = scratch("claude-none");
@@ -265,13 +272,25 @@ fn claude_without_folders_gets_no_file_and_keeps_an_inherited_one() {
     );
     assert!(path.env_file.is_none());
     assert!(!file.exists(), "the old file is gone");
+    let bash = Path::new(BASH).is_file().then(|| PathBuf::from(BASH));
+    assert_eq!(path.shell, bash);
     let original = BTreeMap::from([(
         OsString::from(ENV_FILE_VAR),
         OsString::from("/Users/ada/mine.sh"),
     )]);
     let mut env = original.clone();
+    env.insert(
+        OsString::from("claude_code_shell"),
+        OsString::from("/bin/zsh"),
+    );
+    let path = SessionPath {
+        shell: Some(PathBuf::from(BASH)),
+        ..path
+    };
     apply_on(&mut env, &path, Os::Linux);
-    assert_eq!(env, original);
+    let mut want = original;
+    want.insert(OsString::from(SHELL_VAR), OsString::from(BASH));
+    assert_eq!(env, want);
     write::remove_dir_all(&run).unwrap();
 }
 
@@ -287,11 +306,12 @@ fn windows_claude_is_left_alone() {
         Os::Windows,
         Path::new("/nowhere"),
     );
-    assert!(path.env_file.is_none());
+    assert!(path.env_file.is_none() && path.shell.is_none());
     assert!(!run.join(ENV_FILE).exists());
     let mut env = BTreeMap::new();
     let with_file = SessionPath {
         env_file: Some(run.join(ENV_FILE)),
+        shell: Some(PathBuf::from(BASH)),
         ..path
     };
     apply_on(&mut env, &with_file, Os::Windows);
