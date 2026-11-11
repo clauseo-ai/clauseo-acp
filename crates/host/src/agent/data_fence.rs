@@ -55,7 +55,9 @@ use crate::network_paths::{FOLD_CASE, NetEnv, fold_name, refused_windows_name, t
 pub(crate) use command::ShellKind;
 pub(crate) use health::DataFenceHealth;
 pub(crate) use input::{candidates, candidates_roots, candidates_words, command_names};
-pub(crate) use launch::{LaunchDeny, claude_project_key, claude_projects, launch_deny, own_reads};
+pub(crate) use launch::{
+    LaunchDeny, claude_project_key, claude_projects, launch_deny, other_matters, own_reads,
+};
 pub(crate) use shell_deny::{
     own_shell_allow_rules, own_shell_glob_deny_rules, windows_shell_deny_rules,
     windows_shell_deny_rules_without_variables,
@@ -158,6 +160,7 @@ pub(crate) fn is_python_runtime(name: &str) -> bool {
 /// Claude's `permissions.deny` rules for a launch: for the data folder spelled each way in
 /// `deny.spellings` (its canonical path first, then the path as configured when that differs),
 /// `Read` and `Edit` for each of `deny.targets`, then `Edit` alone for each of [`READ_ONLY`]
+/// and all under it; then `Read` and `Edit` of each of `deny.matters` (other matters' folders)
 /// and all under it; then, unless the launch has Claude's shell sandbox (`sandboxed`: macOS
 /// or Linux with `agent::loads::sandbox` on; never Windows, nor a launch whose sandbox is
 /// `Off`), the own folders' glob denies ([`own_shell_glob_deny_rules`]), which refuse an
@@ -193,6 +196,15 @@ pub(crate) fn claude_deny_rules_on(
         }
         for place in READ_ONLY {
             push(format!("Edit({base}/{place}/**)"));
+        }
+    }
+    for folder in &deny.matters {
+        let Some(base) = folder.to_str().map(|text| rule_path(text, windows)) else {
+            continue;
+        };
+        for tool in ["Read", "Edit"] {
+            push(format!("{tool}({base})"));
+            push(format!("{tool}({base}/**)"));
         }
     }
     if !sandboxed {
@@ -564,6 +576,8 @@ mod input;
 mod launch;
 #[cfg(test)]
 mod launch_tests;
+#[cfg(test)]
+mod matters_tests;
 #[cfg(test)]
 mod names_only_tests;
 #[cfg(test)]
