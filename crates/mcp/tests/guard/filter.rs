@@ -251,6 +251,35 @@ fn allowed_calls_tools_list_and_initialize_reach_the_child_unchanged() {
     session.finish();
 }
 
+/// The `tools/list` reply loses the eval tool, which the guard refuses, from the one-shot that
+/// answers a stopped browser's request and from the running child alike; the open tool stays.
+#[test]
+fn the_tool_list_never_names_eval() {
+    let mut session = Session::start("filter_tool_list");
+    let names = |reply: &Value| -> Vec<String> {
+        reply["result"]["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|tool| tool["name"].as_str().unwrap().to_owned())
+            .collect()
+    };
+    let list = json!({"jsonrpc": "2.0", "id": "l1", "method": "tools/list"});
+    session.guard.send(&list);
+    let reply = session.guard.read();
+    assert_eq!(reply["result"]["received"], list, "{reply}");
+    assert_eq!(names(&reply), ["agent_browser_open"], "{reply}");
+    session.forwarded.push(list);
+    session.start_browser();
+    let list = json!({"jsonrpc": "2.0", "id": "l2", "method": "tools/list"});
+    session.guard.send(&list);
+    let reply = session.guard.read();
+    assert_eq!(reply["result"]["received"], list, "{reply}");
+    assert_eq!(names(&reply), ["agent_browser_open"], "{reply}");
+    session.forwarded.push(list);
+    session.finish();
+}
+
 /// Whether the one-shot answering a stopped browser's request exits or the running child does.
 #[test]
 fn when_the_child_exits_first_the_guard_exits_with_its_code() {
