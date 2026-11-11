@@ -1,4 +1,4 @@
-{"scenario":"claude-steer-injected","description":"claude-agent-acp steering: a _session/steering request during the turn is answered injected; the turn then ends normally (as steer-injected, with claude-agent-acp 0.89.1's modes, in default, in the session/new answer)","on_stdin_close":"exit"}
+{"scenario":"claude-steer-injected","description":"claude-agent-acp steering: a _session/steering request during the turn is answered injected, and Claude Code's transcript then shows the words taken in (a user line, which the host reads to confirm the steer); the turn then ends normally (as steer-injected, with claude-agent-acp 0.89.1's modes, in default, in the session/new answer)","on_stdin_close":"exit"}
 {"expect":{"method":"initialize","as":"init","params":{"protocolVersion":1}}}
 {"respond":{"to":"init","result":{"protocolVersion":1,"agentCapabilities":{"loadSession":true,"_meta":{"claudeCode":{"promptQueueing":true}}},"authMethods":[],"agentInfo":{"name":"fake_agent","version":"0.0.0"},"_meta":{"steering":{"supported":true}}}}}
 {"expect":{"method":"session/new","as":"new","params":{"cwd":"{{any}}","mcpServers":[]}}}
@@ -7,6 +7,7 @@
 {"update":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-answer-1","content":{"type":"text","text":"The clause "}}}}
 {"expect":{"method":"_session/steering","as":"steer","params":{"sessionId":"sess-1","prompt":[{"type":"text","text":"Focus on clause 4"}],"_meta":{"steering":{"idleBehavior":"promptRequired"}}}}}
 {"respond":{"to":"steer","result":{"outcome":"injected"},"raw":true}}
+{"note":"As Claude Code writes the words it takes in to <CLAUDE_CONFIG_DIR>/projects/<cwd key>/sess-1.jsonl: the host confirms the steer only from this line.","transcript_user":"Focus on clause 4"}
 {"update":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-answer-1","content":{"type":"text","text":"caps liability "}}}}
 {"update":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-answer-1","content":{"type":"text","text":"at the fees paid."}}}}
 {"respond":{"to":"p1","result":{"stopReason":"end_turn"}}}
