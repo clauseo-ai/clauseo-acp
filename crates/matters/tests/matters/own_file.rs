@@ -1,9 +1,9 @@
-//! A file the agent made with no tool call naming it (Bash running pandoc, say): named whole by
-//! a shell command of the turn, proved absent at the turn's start by its first checkpoint's skip
-//! record and last modified by the turn's end, it is the agent's own, not flagged as maybe
-//! holding the lawyer's edits, and Undo deletes it with no warning. Any doubt (named by nothing,
-//! as a file the lawyer saves during the turn is, or only within a longer name; a pre-existing
-//! file; a later mtime; a folder that did not list) keeps the flag.
+//! A file the agent made with no tool call naming it (Bash running pandoc, say): written by a
+//! shell command of the turn (its whole path in the matter), proved absent at the turn's start
+//! by its first checkpoint's skip record and last modified by the turn's end, it is the agent's
+//! own, not flagged as maybe holding the lawyer's edits, and Undo deletes it with no warning.
+//! Any doubt (named by nothing, as a file the lawyer saves during the turn is, or only within a
+//! longer name; a pre-existing file; a later mtime; a folder that did not list) keeps the flag.
 
 use std::collections::BTreeSet;
 
@@ -34,7 +34,7 @@ fn started(name: &str) -> (Fixture, Matter) {
     (fx, matter)
 }
 
-/// The file names `pandoc in.md -o "Reply.docx"`-style commands named.
+/// The paths in the matter `pandoc in.md -o "Reply.docx"`-style commands wrote.
 fn commands(names: &[&str]) -> BTreeSet<String> {
     names.iter().map(|name| (*name).to_owned()).collect()
 }
@@ -100,6 +100,17 @@ fn a_name_only_within_a_longer_one_is_flagged() {
     let (fx, mut matter) = started("own-superstring");
     let changes = made_named(&fx, &mut matter, "Reply.docx.bak", -1, &["Reply.docx"]);
     assert!(changes[0].may_include_lawyer_edits());
+}
+
+/// The whole path counts: `out/Memo.docx` written clears no `Sub/Memo.docx`.
+#[test]
+fn only_the_whole_path_written_counts() {
+    let (fx, mut matter) = started("own-other-folder");
+    let changes = made_named(&fx, &mut matter, "Sub/Memo.docx", -1, &["out/Memo.docx"]);
+    assert!(changes[0].may_include_lawyer_edits());
+    let (fx, mut matter) = started("own-same-folder");
+    let changes = made_named(&fx, &mut matter, "Sub/Memo.docx", -1, &["Sub/Memo.docx"]);
+    assert!(!changes[0].may_include_lawyer_edits());
 }
 
 /// Its mtime at the turn's end exactly still counts as the turn's.

@@ -138,13 +138,13 @@ fn entry(path_: &str, blob: u8, secs: u32) -> CacheEntry {
 }
 
 /// Whether the added `made.docx` (blob 9, modified at `secs`, the turn ending at 100 s) comes out
-/// flagged, with no tool call naming it and a shell command naming `made.docx`, given the start
+/// flagged, with no tool call naming it and a shell command writing `made.docx`, given the start
 /// `record` and first `reads`.
 fn made_flagged(record: &SkipRecord, reads: &FirstReads, secs: u32) -> bool {
     made_flagged_named(record, reads, secs, &["made.docx"])
 }
 
-/// [`made_flagged`], the turn's shell commands naming `commands`.
+/// [`made_flagged`], the turn's shell commands writing `commands`.
 fn made_flagged_named(
     record: &SkipRecord,
     reads: &FirstReads,
@@ -169,7 +169,7 @@ fn made_flagged_named(
     flag(change, &BTreeSet::new(), &start).may_include_lawyer_edits()
 }
 
-/// D-sweep: a file the turn added that a shell command names and its start record proves absent,
+/// D-sweep: a file the turn added that a shell command writes and its start record proves absent,
 /// untouched since the turn ended, is the agent's even with no tool call naming it; any doubt
 /// keeps the flag.
 #[test]

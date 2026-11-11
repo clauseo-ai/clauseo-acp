@@ -182,14 +182,26 @@ fn the_agents_own_file_is_unflagged_and_edited_since_only_once_edited() {
     host.shutdown();
 }
 
-/// D-sweep review: the same new file named by nothing (no tool call, no command), as a file the
-/// lawyer saves during a long turn, keeps the flag: the dialogs warn and keep it by default.
+/// D-sweep review: the same new file named by nothing (no tool call, no command writing it),
+/// as a file the lawyer saves during a long turn, keeps the flag: the dialogs warn and keep it by
+/// default. So does one a shell call only lists (`ls -la`, its output naming `reply.docx`).
 #[test]
-fn a_new_file_named_by_nothing_stays_flagged() {
-    let dir = Dir::new(
-        "preview_undo_unnamed_file",
-        &[(FAKE, Scenario::Local("undo-preview-unnamed"))],
-    );
+fn a_new_file_no_command_writes_stays_flagged() {
+    for (test, scenario) in [
+        ("preview_undo_unnamed_file", "undo-preview-unnamed"),
+        ("preview_undo_listed_file", "undo-preview-listed"),
+    ] {
+        assert_eq!(
+            flags_after(test, scenario),
+            [("reply.docx".to_owned(), true)]
+        );
+    }
+}
+
+/// The flags of the turn `scenario` runs, `reply.docx` appearing from a scratch file dated
+/// before the turn's end.
+fn flags_after(test: &str, scenario: &'static str) -> Vec<(String, bool)> {
+    let dir = Dir::new(test, &[(FAKE, Scenario::Local(scenario))]);
     let host = dir.start(0);
     let (_, thread, folder) = matter_with_thread(
         &dir,
@@ -210,11 +222,15 @@ fn a_new_file_named_by_nothing_stays_flagged() {
     let changed = events
         .files_changed(turn)
         .unwrap_or_else(|| panic!("no FilesChanged: {}", events.dump()));
-    let flags: Vec<(&str, bool)> = changed
+    host.shutdown();
+    changed
         .files
         .iter()
-        .map(|file| (file.path().as_str(), file.may_include_lawyer_edits()))
-        .collect();
-    assert_eq!(flags, [("reply.docx", true)]);
-    host.shutdown();
+        .map(|file| {
+            (
+                file.path().as_str().to_owned(),
+                file.may_include_lawyer_edits(),
+            )
+        })
+        .collect()
 }

@@ -354,11 +354,12 @@ impl Matter {
         self.after_turn_named(meta, tool_paths, &BTreeSet::new())
     }
 
-    /// [`Matter::after_turn`], with the file names the turn's shell commands named
-    /// (`commands`: `Reply.docx` for pandoc's `-o out/Reply.docx`). A file the turn added that
-    /// no tool call named is the agent's own, and not flagged, only when its name is among
-    /// them, the step's first skip record proves it absent then, and it was last modified by
-    /// the turn's end: a file the lawyer saved meanwhile is named by nothing, and stays flagged.
+    /// [`Matter::after_turn`], with the files the turn's shell commands wrote (`commands`: their
+    /// paths in the matter, `out/Reply.docx` for pandoc's `-o out/Reply.docx`). A file the turn
+    /// added that no tool call named is the agent's own, and not flagged, only when its path is
+    /// among them, the step's first skip record proves it absent then, and it was last modified
+    /// by the turn's end: a file the lawyer saved meanwhile is written by no command, and stays
+    /// flagged.
     pub fn after_turn_named(
         &mut self,
         meta: &TurnMeta,

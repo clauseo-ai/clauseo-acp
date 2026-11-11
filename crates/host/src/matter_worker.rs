@@ -26,6 +26,7 @@ use crate::log_file::Cause;
 use crate::network_paths::resolve::Disk;
 use crate::network_paths::{self, NetEnv};
 use crate::sent::TurnPaths;
+use crate::shell_writes;
 
 pub(crate) use jobs::{RestoreJob, UndoJob};
 
@@ -53,6 +54,15 @@ pub(crate) fn tool_paths(folder: &Path, paths: TurnPaths) -> BTreeSet<MatterPath
         }
     }
     inside
+}
+
+/// The files the turn's shell commands write that lie in `folder`, as paths relative to it
+/// ([`shell_writes::in_matter`]).
+fn writes_in(folder: &Path, writes: &BTreeSet<String>) -> BTreeSet<String> {
+    writes
+        .iter()
+        .filter_map(|target| shell_writes::in_matter(folder, target))
+        .collect()
 }
 
 /// The name every matter thread carries.
@@ -399,21 +409,21 @@ fn handle(settings: &Settings, slot: &mut Slot, job: MatterJob) -> MatterReply {
         }
         MatterJob::AfterTurn {
             meta,
-            mut tool_paths,
+            tool_paths,
             before,
         } => MatterReply::AfterTurn(open(settings, slot).and_then(|matter| {
-            let commands = std::mem::take(&mut tool_paths.commands);
+            let commands = writes_in(matter.folder(), &tool_paths.writes);
             let tool_paths = self::tool_paths(matter.folder(), tool_paths);
             let checkpoint = matter.after_turn_named(&meta, &tool_paths, &commands)?;
             turn_checkpoint(matter, checkpoint, before)
         })),
         MatterJob::Repair {
             meta,
-            mut tool_paths,
+            tool_paths,
             before,
             last,
         } => MatterReply::AfterTurn(open(settings, slot).and_then(|matter| {
-            let commands = std::mem::take(&mut tool_paths.commands);
+            let commands = writes_in(matter.folder(), &tool_paths.writes);
             let named = (self::tool_paths(matter.folder(), tool_paths), commands);
             repair(matter, &meta, &named, before, last)
         })),

@@ -32,8 +32,8 @@ pub(crate) struct Core {
     pub(crate) timeline: Timeline,
 }
 
-/// What an after-turn checkpoint's turn named: the paths its tool calls named, and the file
-/// names its shell commands named (`crate::Matter::after_turn_named`).
+/// What an after-turn checkpoint's turn named: the paths its tool calls named, and the paths
+/// its shell commands wrote (`crate::Matter::after_turn_named`).
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct Named<'a> {
     pub(crate) paths: &'a BTreeSet<MatterPath>,
