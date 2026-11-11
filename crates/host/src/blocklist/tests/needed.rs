@@ -1,6 +1,6 @@
 //! Whether the host fetches the list at all ([`needed`]): the plain build, with the guarded
-//! browser parked (`BROWSER_MCP` off) and no sandbox wired, starts no updater and makes no
-//! request; a sandbox wired, or the seams' test switch, starts it and it fetches.
+//! browser's entry proxy-free (`servers::browser_mcp`) and no sandbox wired, starts no updater
+//! and makes no request; a sandbox wired, or the seams' test switch, starts it and it fetches.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -59,7 +59,7 @@ fn starts_and_fetches(rig: &Rig, config: &HostConfig) {
 
 /// The plain build: no thread, so no start-up load and no request, now or at any interval; the
 /// first load's teller is gone, so a launch's wait for it would end at once. (This fails once
-/// `BROWSER_MCP` is on again, which is when the list is fetched for every build.)
+/// a shipped entry has a proxy again, which is when the list is fetched for every build.)
 #[test]
 fn the_plain_build_starts_no_updater_and_makes_no_request() {
     let rig = Rig::new("needed-plain");
