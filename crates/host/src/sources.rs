@@ -126,6 +126,12 @@ impl Sources {
         self.codex_mcp.take(acp_id)
     }
 
+    /// Takes the oldest unanswered Codex MCP call of exactly `server` and `tool`
+    /// (`agent::mcp_trust::CodexCalls::take_oldest`); whether one was there.
+    pub(crate) fn take_oldest_codex_mcp_call(&mut self, server: &str, tool: &str) -> bool {
+        self.codex_mcp.take_oldest(server, tool)
+    }
+
     /// [`Self::take_codex_mcp_call`] without taking it.
     #[cfg(test)]
     pub(crate) fn codex_mcp_call(&self, acp_id: &str) -> Option<(&str, &str)> {

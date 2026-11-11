@@ -211,9 +211,10 @@ fn codex_asks_for_every_mcp_tool_where_claude_would_be_forced_to_ask() {
     );
 }
 
-/// With Clauseo's `case-law` entry sent (the connector signed in, its relay open): the first
-/// approval of a `search_law` call is answered by the host; `recharge` and a standalone request
-/// reach the lawyer.
+/// With Clauseo's `case-law` entry sent (the connector signed in, its relay open): the approval
+/// of a `search_law` call is answered by the host, and so are two standalone approvals while two
+/// `search_law` calls run at once (codex-acp's form for parallel calls), each taking one call;
+/// a third standalone approval, with no call left, and `recharge` reach the lawyer.
 #[test]
 fn codex_runs_case_law_search_unasked_only_with_our_entry() {
     use crate::case_law::{Connector, wire};
@@ -235,11 +236,29 @@ fn codex_runs_case_law_search_unasked_only_with_our_entry() {
                 "optionId": answer}}}}),
         ]
     };
+    let alone = |id: &str, n: u32, answer: &str| {
+        let tc = format!("elicitation:sess-1:case-law:{n}");
+        [
+            json!({"request": {"id": id, "method": "session/request_permission", "params": {
+                "sessionId": "sess-1", "toolCall": {"toolCallId": tc,
+                "kind": "execute", "status": "pending", "title": "MCP tool call approval",
+                "rawInput": {"serverName": "case-law",
+                    "description": "Allow the case-law MCP server to run tool \"search_law\"?",
+                    "schema": {"type": "object", "properties": {}}}},
+                "options": opts, "_meta": {"is_mcp_tool_approval": true}}}}),
+            json!({"expect_response": {"id": id, "result": {"outcome": {"outcome": "selected",
+                "optionId": answer}}}}),
+        ]
+    };
     let mut added = vec![call("tc-law", "search_law")];
     added.extend(ask("perm-law", "tc-law", "allow_once"));
+    added.push(call("tc-p1", "search_law"));
+    added.push(call("tc-p2", "search_law"));
+    added.extend(alone("perm-p1", 1, "allow_once"));
+    added.extend(alone("perm-p2", 2, "allow_once"));
+    added.extend(alone("perm-p3", 3, "cancel"));
     added.push(call("tc-recharge", "recharge"));
     added.extend(ask("perm-recharge", "tc-recharge", "cancel"));
-    added.extend(ask("perm-alone", "elicitation:sess-1:case-law:0", "cancel"));
     let base = codex_lines("cl-on", &json!({"cwd": "{{any}}"}));
     let mut lines: Vec<String> = base.lines().map(str::to_owned).collect();
     let prompt = lines
@@ -265,6 +284,6 @@ fn codex_runs_case_law_search_unasked_only_with_our_entry() {
     assert_eq!(ended.stop, StopReason::EndTurn, "{}", events.dump());
     let seen = requested_tools(&events);
     let seen: Vec<Option<&str>> = seen.iter().map(Option::as_deref).collect();
-    assert_eq!(seen, [Some("tc-recharge"), None], "{}", events.dump());
+    assert_eq!(seen, [None, Some("tc-recharge")], "{}", events.dump());
     host.shutdown();
 }

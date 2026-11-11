@@ -86,22 +86,25 @@ pub(super) fn allow_browser_tool(
 /// the server may run unasked (`agent/mcp_trust.rs`):
 /// - the thread's agent is Codex, and the request offers `allow_once` of kind `allow_once`;
 /// - it names an earlier MCP tool call whose title and `rawInput` agree
-///   (`mcp_trust::CodexCalls`), which is taken so it is answered once; the server comes only
-///   from what codex-acp and Codex build;
+///   (`mcp_trust::CodexCalls`), or is a standalone request (id and `serverName` agreeing,
+///   Codex's exact fallback message) matched to the oldest unanswered such call of its exact
+///   server and tool; the call is taken so it is answered once; the server comes only from what
+///   codex-acp and Codex build;
 /// - that server is one Clauseo sent this session (`Agent::mcp_sent`, `None` where Claude would
 ///   be in forced ask), by exact name;
 /// - and it is Clauseo's own `case-law` with one of its search and read tools, by exact tool
 ///   name (`mcp_trust::never_asks`), or a lawyer's server trusted now (turned on in the
 ///   effective `mcp.servers`, not reserved, and Clauseo controls MCP).
 ///
-/// Everything else goes on as before: a standalone request (an `elicitation:` id, which a server
-/// can shape like Codex's), a shell command, a file change, a server's own question
-/// (`accept`/`decline`, no `allow_once`), case law's `recharge`, which opens a payment, and
-/// any tool the host cannot name. The `browser` keeps its own rule above.
+/// Everything else goes on as before: a request with no unanswered call to take (a server's
+/// own look-alike question with none of its calls pending), a shell command, a file change, a
+/// server's own question (`accept`/`decline`, no `allow_once`), case law's `recharge`, which
+/// opens a payment, and any tool the host cannot name. The `browser` keeps its own rule above.
 pub(super) fn trusted_tool_to_allow(
     actor: &mut Actor,
     thread: ThreadId,
     ask: &PermissionAsk,
+    raw_input: Option<&serde_json::Value>,
 ) -> Option<(String, AgentChoiceId)> {
     let kind = actor
         .check_thread(thread)
@@ -117,12 +120,25 @@ pub(super) fn trusted_tool_to_allow(
     let option = AgentChoiceId::new(&option.option_id).ok()?;
     // One answer per call: Codex asks once, before the call runs (codex rust-v0.162.1
     // `core/src/mcp_tool_call.rs`, `notify_mcp_tool_call_started` then
-    // `maybe_request_mcp_tool_approval`), so a second request naming the same call is a server's
-    // own question and goes to the lawyer. A standalone request (no earlier call) is never answered
-    // here: a server can send one shaped like Codex's.
-    let (server, tool) = super::super::state(actor, thread)?
-        .sources
-        .take_codex_mcp_call(&ask.acp_tool_call_id)?;
+    // `maybe_request_mcp_tool_approval`). A request naming a call takes it; a standalone one
+    // (codex-acp sends it when two calls of the server are pending) takes the oldest unanswered
+    // call of its exact server and tool. A request with no call left to take, a server's own
+    // look-alike question included, goes to the lawyer.
+    let standalone = crate::agent::mcp_trust::codex_standalone_server(
+        ask.session.as_str(),
+        &ask.acp_tool_call_id,
+        raw_input,
+    );
+    let sources = &mut super::super::state(actor, thread)?.sources;
+    let (server, tool) = if let Some(server) = standalone {
+        let tool = crate::agent::mcp_trust::codex_standalone_tool(server, raw_input)?;
+        if !sources.take_oldest_codex_mcp_call(server, tool) {
+            return None;
+        }
+        (server.to_owned(), tool.to_owned())
+    } else {
+        sources.take_codex_mcp_call(&ask.acp_tool_call_id)?
+    };
     let tool = Some(tool);
     // Only a server Clauseo itself sent this session: under the firm's `managed-mcp.json`, or
     // with nothing sent, Codex keeps servers of its own, which may share a name.
