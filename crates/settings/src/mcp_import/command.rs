@@ -1,7 +1,7 @@
 //! Where a command runs from: an absolute path kept as it is, or the first match on the search
 //! path (the PATH variable, then the folders each OS's tools install into).
 
-use super::path::{self, file_name, is_absolute, join};
+use super::path::{self, file_name, is_absolute, is_local_absolute, is_network, join};
 use super::{Env, Os, Problem};
 use std::path::{Path, PathBuf};
 
@@ -18,9 +18,11 @@ const DEFAULT_PATHEXT: &str = ".COM;.EXE;.BAT;.CMD";
 ///
 /// An absolute path is returned when it is a file (on Windows too, with the same extension rule
 /// when it has none). Any other path, such as `bin/tool`, `./tool` or `.\npx`, gives `None`: a
-/// relative path with a separator is not searched for.
+/// relative path with a separator is not searched for. A network path (two leading separators:
+/// a UNC share, `//server/share`, a `\\?\` device path) gives `None` on either OS, and the
+/// search path keeps only local absolute folders.
 pub fn resolve_command(env: &Env<'_>, program: &str) -> Option<PathBuf> {
-    if program.is_empty() {
+    if program.is_empty() || is_network(program) {
         return None;
     }
     let absolute = is_absolute(env.os, program);
@@ -79,8 +81,17 @@ fn pathext(env: &Env<'_>) -> Vec<String> {
         .collect()
 }
 
-/// The folders to search, in order: PATH, then the well-known folders for the OS.
+/// The folders to search, in order: PATH, then the well-known folders for the OS. Only local
+/// absolute folders count: an empty, `.`, `bin`, `./x` or network entry would search the current
+/// folder (a matter's folder, say) or a share, so each is dropped.
 fn search_dirs(env: &Env<'_>) -> Vec<String> {
+    let mut dirs = unfiltered_search_dirs(env);
+    dirs.retain(|dir| is_local_absolute(env.os, dir));
+    dirs
+}
+
+/// The folders to search before the absolute-only filter of [`search_dirs`].
+fn unfiltered_search_dirs(env: &Env<'_>) -> Vec<String> {
     let os = env.os;
     let mut dirs = Vec::new();
     if let Some(search) = path::var(env, "PATH") {

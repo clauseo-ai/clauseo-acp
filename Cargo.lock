@@ -1336,6 +1336,7 @@ dependencies = [
  "tracing-subscriber",
  "unicode-normalization",
  "windows",
+ "zeroize",
 ]
 
 [[package]]

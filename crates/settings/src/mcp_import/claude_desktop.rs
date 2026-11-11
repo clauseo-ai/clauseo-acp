@@ -20,7 +20,7 @@ pub(crate) fn read(env: &Env<'_>, out: &mut Vec<Entry>) {
             join(Os::Windows, &appdata, "Claude/claude_desktop_config.json")
         }
     };
-    let Some(doc) = json_entry::read_json(env, &config) else {
+    let Some(doc) = json_entry::read_json(env, &config, super::MAX_CONFIG_BYTES) else {
         return;
     };
     json_entry::servers_in(env, &doc, &Source::ClaudeDesktop, false, out);

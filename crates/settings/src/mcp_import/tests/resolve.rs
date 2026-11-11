@@ -237,3 +237,161 @@ fn windows_does_not_search_mac_folders() {
         None
     );
 }
+
+#[test]
+fn empty_and_relative_path_entries_are_never_searched() {
+    // An empty entry would join to "/tool", the root; "." and "bin" are the current folder.
+    let fs = FakeFs::default()
+        .program("/tool")
+        .program("tool")
+        .program("bin/tool")
+        .program("./tool");
+    for path in ["::/usr/bin", ".:bin:./x", "::"] {
+        let pairs = [("PATH", path)];
+        assert_eq!(
+            resolve(Os::Mac, "/Users/ana", &pairs, &fs, "tool"),
+            None,
+            "{path}"
+        );
+    }
+    // The absolute folder after them still counts.
+    let fs = fs.program("/usr/bin/tool");
+    let pairs = [("PATH", ":.:bin:/usr/bin")];
+    assert_eq!(
+        resolve(Os::Mac, "/Users/ana", &pairs, &fs, "tool"),
+        Some(PathBuf::from("/usr/bin/tool"))
+    );
+}
+
+#[test]
+fn windows_relative_and_empty_path_entries_are_never_searched() {
+    let fs = FakeFs::default()
+        .program("tool.exe")
+        .program("bin\\tool.exe")
+        .program(".\\tool.exe")
+        .program("C:tools\\tool.exe");
+    let pairs = [("PATH", ";.;bin;.\\;C:tools")];
+    assert_eq!(
+        resolve(Os::Windows, "C:\\Users\\ana", &pairs, &fs, "tool.exe"),
+        None
+    );
+
+    let fs = fs.program("C:\\tools\\tool.exe");
+    let pairs = [("PATH", ";.;bin;C:\\tools")];
+    assert_eq!(
+        resolve(Os::Windows, "C:\\Users\\ana", &pairs, &fs, "tool.exe"),
+        Some(PathBuf::from("C:\\tools\\tool.exe"))
+    );
+}
+
+#[test]
+fn well_known_folders_built_from_relative_variables_are_skipped() {
+    // A relative APPDATA would make "npm\\npx.cmd" in the current folder.
+    let fs = FakeFs::default().program("npm\\npx.cmd");
+    let pairs = [("APPDATA", "relative")];
+    assert_eq!(
+        resolve(Os::Windows, "C:\\Users\\ana", &pairs, &fs, "npx"),
+        None
+    );
+}
+
+#[test]
+fn nvm_orders_versions_by_number_not_by_text() {
+    let fs = FakeFs::default()
+        .program("/Users/ana/.nvm/versions/node/v20.9.1/bin/npx")
+        .program("/Users/ana/.nvm/versions/node/v20.10.0/bin/npx")
+        .program("/Users/ana/.nvm/versions/node/v9.0.0/bin/npx")
+        .program("/Users/ana/.nvm/versions/node/v10.0.0/bin/npx")
+        .dir(
+            "/Users/ana/.nvm/versions/node",
+            &[
+                "/Users/ana/.nvm/versions/node/v20.9.1",
+                "/Users/ana/.nvm/versions/node/v20.10.0",
+                "/Users/ana/.nvm/versions/node/v9.0.0",
+                "/Users/ana/.nvm/versions/node/v10.0.0",
+            ],
+        );
+    let found = resolve(Os::Mac, "/Users/ana", &[("PATH", "/usr/bin")], &fs, "npx");
+    assert_eq!(
+        found,
+        Some(PathBuf::from(
+            "/Users/ana/.nvm/versions/node/v20.10.0/bin/npx"
+        ))
+    );
+
+    // v10 beats v9, and a folder that is not a version is ignored.
+    let fs = FakeFs::default()
+        .program("/Users/ana/.nvm/versions/node/v9.0.0/bin/npx")
+        .program("/Users/ana/.nvm/versions/node/v10.0.0/bin/npx")
+        .dir(
+            "/Users/ana/.nvm/versions/node",
+            &[
+                "/Users/ana/.nvm/versions/node/v9.0.0",
+                "/Users/ana/.nvm/versions/node/v10.0.0",
+                "/Users/ana/.nvm/versions/node/v99.0.0-rc.1",
+                "/Users/ana/.nvm/versions/node/latest",
+            ],
+        );
+    let found = resolve(Os::Mac, "/Users/ana", &[("PATH", "/usr/bin")], &fs, "npx");
+    assert_eq!(
+        found,
+        Some(PathBuf::from(
+            "/Users/ana/.nvm/versions/node/v10.0.0/bin/npx"
+        ))
+    );
+}
+
+#[test]
+fn unc_and_network_programs_are_refused_on_both_oses() {
+    let mac = ["//server/share/tool", "//server/share/x"];
+    let windows = [
+        "\\\\server\\share\\tool.exe",
+        "\\\\?\\UNC\\server\\share\\tool.exe",
+        "\\\\.\\pipe\\tool",
+        "//server/share/tool",
+    ];
+    for program in mac {
+        let fs = FakeFs::default().program(program);
+        assert_eq!(
+            resolve(Os::Mac, "/Users/ana", &[], &fs, program),
+            None,
+            "{program}"
+        );
+    }
+    for program in windows {
+        let fs = FakeFs::default().program(program);
+        assert_eq!(
+            resolve(Os::Windows, "C:\\Users\\ana", &[], &fs, program),
+            None,
+            "{program}"
+        );
+    }
+}
+
+#[test]
+fn unc_folders_on_the_search_path_are_never_searched() {
+    let fs = FakeFs::default()
+        .program("//server/share/tool")
+        .program("/usr/bin/tool");
+    let pairs = [("PATH", "//server/share:/usr/bin")];
+    assert_eq!(
+        resolve(Os::Mac, "/Users/ana", &pairs, &fs, "tool"),
+        Some(PathBuf::from("/usr/bin/tool"))
+    );
+
+    let fs = FakeFs::default()
+        .program("\\\\server\\share\\tool.exe")
+        .program("C:\\tools\\tool.exe");
+    let pairs = [("PATH", "\\\\server\\share;C:\\tools")];
+    assert_eq!(
+        resolve(Os::Windows, "C:\\Users\\ana", &pairs, &fs, "tool.exe"),
+        Some(PathBuf::from("C:\\tools\\tool.exe"))
+    );
+
+    let fs = FakeFs::default().program("\\\\server\\u\\npm\\npx.cmd");
+    let pairs = [("APPDATA", "\\\\server\\u")];
+    assert_eq!(
+        resolve(Os::Windows, "C:\\Users\\ana", &pairs, &fs, "npx"),
+        None
+    );
+}

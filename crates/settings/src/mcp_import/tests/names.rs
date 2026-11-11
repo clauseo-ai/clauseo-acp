@@ -250,10 +250,84 @@ fn debug_prints_names_never_values() {
     assert!(!printed.contains("SECRET"), "{printed}");
     assert!(printed.contains("API_KEY"), "{printed}");
     assert!(printed.contains("Authorization"), "{printed}");
-    assert!(
-        printed.contains("https://r.example.com/mcp?<query omitted>"),
-        "{printed}"
-    );
+    assert!(printed.contains("\"https://r.example.com\""), "{printed}");
+    assert!(!printed.contains("/mcp"), "{printed}");
     let kind = format!("{:?}", found[1].kind);
     assert!(!kind.contains("SECRET"), "{kind}");
+}
+
+/// leaf/mcp.rs's name rule, copied (its `mcp_name_ok` is private): 1 to 64 ASCII letters, digits,
+/// `_` or `-`; no `__`; not ending in `_`; not a reserved name in any case.
+fn leaf_name_ok(name: &str) -> bool {
+    (1..=64).contains(&name.len())
+        && name
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
+        && !name.contains("__")
+        && !name.ends_with('_')
+        && crate::reserved_mcp_server(name).is_none()
+}
+
+#[test]
+fn every_imported_name_passes_the_leaf_rule() {
+    let raws: Vec<String> = [
+        "",
+        "_",
+        "__",
+        "___",
+        "-",
+        "--",
+        "-lead",
+        "_lead",
+        "a--b",
+        "a__",
+        "a___b",
+        "trail-",
+        "x/y",
+        "a b",
+        "a.b",
+        "héllo",
+        "名前",
+        "x\u{0}y",
+        "browser",
+        "BROWSER",
+        "Browser_",
+        "case-law",
+        "Case-Law_",
+        "case-law__x",
+        "a-2",
+        "a 2",
+        "x_-y",
+        "%%%",
+        "\n",
+    ]
+    .into_iter()
+    .map(str::to_owned)
+    .chain([
+        "x".repeat(63),
+        "x".repeat(64),
+        "x".repeat(65),
+        "x".repeat(200),
+        format!("{}_", "y".repeat(64)),
+    ])
+    .collect();
+    let mut servers = serde_json::Map::new();
+    for raw in &raws {
+        servers.insert(raw.clone(), serde_json::json!({"command": "/bin/x"}));
+    }
+    let config = serde_json::json!({"mcpServers": servers}).to_string();
+    let fs = FakeFs::default()
+        .file("/Users/ana/.claude.json", &config)
+        .program("/bin/x");
+    let found = run(Os::Mac, "/Users/ana", &[], &fs, &[]);
+    assert_ne!(found.len(), 0);
+    let mut seen = std::collections::BTreeSet::new();
+    for candidate in &found {
+        assert!(leaf_name_ok(&candidate.name), "{:?}", candidate.name);
+        assert!(
+            seen.insert(candidate.name.clone()),
+            "duplicate {:?}",
+            candidate.name
+        );
+    }
 }

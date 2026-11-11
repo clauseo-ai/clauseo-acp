@@ -162,11 +162,11 @@ fn normalized(kind: CandidateKind) -> CandidateKind {
             args,
             mut env,
         } => {
-            env.sort();
+            env.sort_by(|a, b| a.0.cmp(&b.0));
             CandidateKind::Local { command, args, env }
         }
         CandidateKind::Remote { url, mut headers } => {
-            headers.sort();
+            headers.sort_by(|a, b| a.0.cmp(&b.0));
             CandidateKind::Remote { url, headers }
         }
     }

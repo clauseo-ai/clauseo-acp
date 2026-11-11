@@ -1,18 +1,18 @@
 //! The `mcpServers` entries of a Claude config (Claude Code's `.claude.json` and `.mcp.json`, and
 //! Claude Desktop's config file), read the way Claude writes them.
 
-use super::{CandidateKind, Entry, Env, Problem, Source, command, expand};
+use super::{CandidateKind, Entry, Env, ImportSecret, Problem, Source, command, expand};
 use serde_json::Value;
-use std::path::Path;
 
-/// The JSON document at `path`, or `None` when it is missing, unreadable or not JSON.
-pub(crate) fn read_json(env: &Env<'_>, path: &str) -> Option<Value> {
-    let text = env.fs.read_to_string(Path::new(path))?;
+/// The JSON document at `path`, read up to `max` bytes, or `None` when it is missing, unreadable,
+/// too big or not JSON. A parse error is never reported with the file's text.
+pub(crate) fn read_json(env: &Env<'_>, path: &str, max: u64) -> Option<Value> {
+    let text = super::read_config(env, path, max)?;
     serde_json::from_str(&text).ok()
 }
 
 /// Adds the entries under `mcpServers` in `doc` to `out`, each read from `source`. With `expand`,
-/// `${VAR}` in its text is filled from the environment.
+/// `${VAR}` in its text is filled from the environment; without it, the text is kept as written.
 pub(crate) fn servers_in(
     env: &Env<'_>,
     doc: &Value,
@@ -64,7 +64,7 @@ fn entry(
     let kind = if remote {
         let url = url?;
         CandidateKind::Remote {
-            url: fill(url, env, expand, &mut problems),
+            url: ImportSecret::new(fill(url, env, expand, &mut problems)),
             headers: text_pairs(fields.get("headers"), env, expand, &mut problems),
         }
     } else {
@@ -94,14 +94,14 @@ fn fill(text: &str, env: &Env<'_>, expand: bool, problems: &mut Vec<Problem>) ->
     }
 }
 
-/// The string values of a JSON object, sorted by key. A value that is not a string is left out
-/// with [`Problem::Unreadable`].
+/// The string values of a JSON object, as secrets, sorted by key. A value that is not a string is
+/// left out with [`Problem::Unreadable`].
 fn text_pairs(
     value: Option<&Value>,
     env: &Env<'_>,
     expand: bool,
     problems: &mut Vec<Problem>,
-) -> Vec<(String, String)> {
+) -> Vec<(String, ImportSecret)> {
     let Some(value) = value else {
         return Vec::new();
     };
@@ -112,22 +112,25 @@ fn text_pairs(
     let mut pairs = Vec::new();
     for (key, value) in map {
         match value.as_str() {
-            Some(text) => pairs.push((key.clone(), fill(text, env, expand, problems))),
+            Some(text) => pairs.push((
+                key.clone(),
+                ImportSecret::new(fill(text, env, expand, problems)),
+            )),
             None => problems.push(Problem::Unreadable),
         }
     }
-    pairs.sort();
+    pairs.sort_by(|a, b| a.0.cmp(&b.0));
     pairs
 }
 
-/// The string items of a JSON array. An item that is not a string is left out with
+/// The string items of a JSON array, as secrets. An item that is not a string is left out with
 /// [`Problem::Unreadable`].
 fn text_list(
     value: Option<&Value>,
     env: &Env<'_>,
     expand: bool,
     problems: &mut Vec<Problem>,
-) -> Vec<String> {
+) -> Vec<ImportSecret> {
     let Some(value) = value else {
         return Vec::new();
     };
@@ -138,7 +141,7 @@ fn text_list(
     let mut texts = Vec::new();
     for item in items {
         match item.as_str() {
-            Some(text) => texts.push(fill(text, env, expand, problems)),
+            Some(text) => texts.push(ImportSecret::new(fill(text, env, expand, problems))),
             None => problems.push(Problem::Unreadable),
         }
     }

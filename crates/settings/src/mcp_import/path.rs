@@ -39,6 +39,17 @@ pub(crate) fn is_absolute(os: Os, p: &str) -> bool {
     }
 }
 
+/// Whether `p` starts with two separators: a UNC share, a network path, or a device path (`\\?\`,
+/// `\\.\`). Refused on both OSes, since a probe of one can reach a server.
+pub(crate) fn is_network(p: &str) -> bool {
+    p.starts_with(r"\\") || p.starts_with("//")
+}
+
+/// Whether `p` is absolute on `os` and not a network path: a folder the search may use.
+pub(crate) fn is_local_absolute(os: Os, p: &str) -> bool {
+    is_absolute(os, p) && !is_network(p)
+}
+
 /// The last part of `p` on `os`.
 pub(crate) fn file_name(os: Os, p: &str) -> &str {
     let last = match os {
