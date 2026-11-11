@@ -371,21 +371,20 @@ fn the_words_about_the_admin_copy_are_the_provisional_ones() {
             "adminCopyDeclined",
             "Clauseo is installed, but the Safe workspace isn't set up, because permission was \
              refused when Windows asked. Clauseo works without it. To set it up, run this \
-             installer again and choose Yes. If Windows asks for an administrator's password, ask \
-             whoever looks after this computer to enter it.",
+             installer again and choose Yes. If Windows asks for an administrator's password, \
+             enter the password of an administrator account on this computer.",
         ),
         (
             "adminCopyBlocked",
             "Clauseo is installed, but the Safe workspace isn't set up, because your Windows \
-             account isn't allowed to approve this change. To set it up, ask whoever looks after \
-             this computer to run this installer with an administrator account, or to install \
-             Clauseo for all users.",
+             account isn't allowed to approve this change. To set it up, run this installer again \
+             from an administrator account, or install Clauseo for all users.",
         ),
         (
             "adminCopyFailed",
             "Clauseo is installed, but the Safe workspace couldn't be set up. Clauseo works \
-             without it. Run this installer again to try once more. If it still isn't set up, ask \
-             whoever looks after this computer.",
+             without it. Run this installer again to try once more. If it still isn't set up, \
+             Settings > Safe workspace in Clauseo says what's stopping it.",
         ),
         (
             "adminCopyOtherAccount",
@@ -395,8 +394,7 @@ fn the_words_about_the_admin_copy_are_the_provisional_ones() {
         (
             "adminCopyMachineFailed",
             "Clauseo is installed, but the Safe workspace couldn't be set up on this computer. \
-             Clauseo works without it. Whoever looks after this computer can run this installer \
-             again to set it up.",
+             Clauseo works without it. Run this installer again to set it up.",
         ),
         (
             "adminCopyNewerKept",

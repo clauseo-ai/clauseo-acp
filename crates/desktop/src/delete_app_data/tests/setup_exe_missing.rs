@@ -440,12 +440,12 @@ fn the_two_messages_are_the_drafts_and_name_no_path() {
     let removed = "\"Windows security removed part of Clauseo while it was installing: the \
                    program that sets up the Safe workspace. Until it's restored, Clauseo won't \
                    start Claude or ChatGPT in the Safe workspace. Run this installer again to \
-                   restore it. If Windows security removes it again, Clauseo's notes for IT say \
-                   what to allow.\"";
+                   restore it. If Windows security removes it again, open Windows Security, choose \
+                   Protection history, allow Clauseo, then run this installer again.\"";
     let missing = "\"Clauseo couldn't remove the Safe workspace, because Windows security removed \
                    the program that sets it up. The Safe workspace's hidden Windows accounts are \
                    still on this computer. Run Clauseo's installer again to restore that program, \
-                   then uninstall Clauseo again. If that doesn't work, Clauseo's notes for IT \
+                   then uninstall Clauseo again. If that doesn't work, Clauseo's notes on GitHub \
                    explain how to remove them.\"";
     assert_eq!(english("setupExeRemoved"), removed);
     assert_eq!(english("removeExeMissing"), missing);
