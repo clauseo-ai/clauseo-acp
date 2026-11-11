@@ -61,7 +61,7 @@ export const HI = {
   "Web search": "वेब खोज",
   "Search the web and read pages.": "वेब पर खोजें और पेज पढ़ें।",
   Browser: "ब्राउज़र",
-  "Runs on this computer.": "इसी कंप्यूटर पर चलता है।",
+  "ChatGPT uses it. Runs on this computer.": "ChatGPT इसका उपयोग करता है। यह इसी कंप्यूटर पर चलता है।",
   // Plans (UD2): each plan's block, its confirms, and the other ways in; English only for now
   Plans: "प्लान",
   "The plans Clauseo works with. Each signs in through its own page in your browser.":
