@@ -398,7 +398,7 @@ fn strings(value: &Value) -> Vec<&str> {
         .unwrap_or_default()
 }
 
-/// R21's "Permissions": the profile's allow list, then `WebSearch`, then one rule per seed site.
+/// R21's "Permissions": the profile's allow list, `WebSearch`, bare `WebFetch`, the seed sites.
 #[test]
 fn the_allow_list_is_exactly_the_permissions_list() {
     let hook = json!({"allowedTools": [
@@ -418,6 +418,7 @@ fn the_allow_list_is_exactly_the_permissions_list() {
         "Bash(stetdoc lookup:*)".to_owned(),
         "Bash(stetdoc capabilities:*)".to_owned(),
         "WebSearch".to_owned(),
+        "WebFetch".to_owned(),
     ];
     expected.extend(
         SEED_SITES
@@ -425,7 +426,6 @@ fn the_allow_list_is_exactly_the_permissions_list() {
             .map(|site| format!("WebFetch(domain:{site})")),
     );
     assert_eq!(strings(&options["allowedTools"]), expected);
-    assert!(strings(&options["allowedTools"]).contains(&"WebFetch(domain:sci.gov.in)"));
     assert_eq!(options.get("disallowedTools"), None);
 }
 
@@ -448,7 +448,7 @@ fn a_bedrock_login_keeps_webfetch_and_skips_the_preflight() {
     let options = options(&json!({}), &keys(ON, Login::Bedrock));
     let allowed = strings(&options["allowedTools"]);
     assert!(!allowed.contains(&"WebSearch"));
-    assert!(allowed.contains(&"WebFetch(domain:indiacode.nic.in)"));
+    assert!(allowed.contains(&"WebFetch") && allowed.contains(&"WebFetch(domain:sci.gov.in)"));
     assert_eq!(options["settings"]["skipWebFetchPreflight"], json!(true));
     assert_eq!(options.get("disallowedTools"), None);
     let other = self::options(&json!({}), &keys(ON, Login::OtherCloud));

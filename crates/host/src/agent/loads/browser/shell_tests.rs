@@ -221,12 +221,15 @@ fn claude_gets_agent_browser_rules_only_with_the_browser() {
             assert!(allowed.contains(&"Bash(agent-browser read:*)".to_owned()));
             let want: Vec<String> = clauseo_profile::claude::agent_browser_denied().collect();
             assert_eq!(denied, want);
-            // A wait running page JavaScript asks though `wait` is allowed.
+            // A wait running page JavaScript asks though `wait` is allowed, and so does eval.
+            let want: Vec<String> = clauseo_profile::claude::agent_browser_ask().collect();
+            assert_eq!(asked, want);
             assert_eq!(
-                asked,
+                asked[..3],
                 [
                     "Bash(agent-browser wait*-f*)",
-                    "Bash(agent-browser get*cdp-url*)"
+                    "Bash(agent-browser get*cdp-url*)",
+                    "Bash(agent-browser eval*)"
                 ]
             );
         } else {
