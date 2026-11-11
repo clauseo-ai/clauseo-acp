@@ -176,6 +176,9 @@ export const HI = {
   "Not every file in this folder is listed.": "इस फ़ोल्डर की सभी फ़ाइलें सूची में नहीं हैं।",
   // the plan in the status line, for a plan other than Claude
   "Uses your {name} plan": "आपके {name} प्लान का उपयोग करता है",
+  // the same place while the plan runs on the lawyer's API key, named by its maker (UC-147, UC-148)
+  "Uses your Anthropic API key": "आपकी Anthropic API key का उपयोग करता है",
+  "Uses your OpenAI API key": "आपकी OpenAI API key का उपयोग करता है",
   // the agent's own model and effort on the status line (PK): each menu's title, and its trigger's name before the value
   Model: "मॉडल",
   Effort: "प्रयास",

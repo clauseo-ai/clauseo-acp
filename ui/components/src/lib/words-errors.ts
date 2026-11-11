@@ -331,14 +331,34 @@ export const PLANNED_CODES = Object.keys(PLANNED) as WordedCode[];
 
 /** The thread's agent as the words name it: its kind, which picks the plan's line (Claude's or ChatGPT's), and its
  * name, for an agent of no kind (the agent's own name from its header when the host has one, else its settings id);
- * null with no name at all. The whole is undefined where the caller doesn't know the thread. The kind is the app's
+ * null with no name at all; and whether the plan runs on an API key. The whole is undefined where the caller doesn't know the thread. The kind is the app's
  * AgentKind, copied as ErrorCode is. */
-export type AgentName = { kind: "claude" | "codex" | undefined; name: string | null } | undefined;
+export type AgentName =
+  | {
+      kind: "claude" | "codex" | undefined;
+      name: string | null;
+      /** The plan runs on the lawyer's API key: its refusal (agent.auth_required) is the key's, never a sign-in. */
+      key?: boolean | undefined;
+    }
+  | undefined;
+
+/** agent.auth_required on a plan that runs on an API key: the provider refused the key, so the line names the key. */
+const KEY_REFUSED = "{name} didn't accept the API key. Your question is kept." satisfies ErrorKey;
 
 /** A code's sentence for the thread's agent: a codex agent picks PLANNED's ChatGPT sentence; an agent of no kind its
  * `{name}` sentence with its name, or its nameless one with no name (or an empty one); a claude agent, an agent not
  * known (undefined), or a code PLANNED doesn't hold, the code's own sentence (ERROR_WORDS, Claude's). */
 export function plannedKey(code: WordedCode, agent?: AgentName): { key: ErrorKey; name?: string } {
+  // a key in use: the key wasn't accepted, by the plan's name (the agent's own for one of no kind)
+  if (code === "agent.auth_required" && agent?.key === true) {
+    const name =
+      agent.kind === "codex"
+        ? "ChatGPT"
+        : agent.kind === "claude"
+          ? "Claude"
+          : agent.name?.trim() || null;
+    if (name !== null) return { key: KEY_REFUSED, name };
+  }
   const planned = PLANNED[code];
   if (planned === undefined || agent === undefined || agent.kind === "claude")
     return { key: ERROR_WORDS[code] };

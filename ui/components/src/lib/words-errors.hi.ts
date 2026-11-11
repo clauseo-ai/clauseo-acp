@@ -36,6 +36,10 @@ export const HI = {
   "ChatGPT sent something Clauseo can't read.": "ChatGPT ने कुछ ऐसा भेजा जिसे Clauseo पढ़ नहीं सकता।",
   "{name} sent something Clauseo can't read.": "{name} ने कुछ ऐसा भेजा जिसे Clauseo पढ़ नहीं सकता।",
   "The AI sent something Clauseo can't read.": "AI ने कुछ ऐसा भेजा जिसे Clauseo पढ़ नहीं सकता।",
+  // agent.auth_required while the plan runs on an API key: the key wasn't accepted, never a sign-in (UC-149, UD2-29's
+  // words and Hindi)
+  "{name} didn't accept the API key. Your question is kept.":
+    "{name} ने API key स्वीकार नहीं की। आपका प्रश्न रखा गया है।",
   "Sign in with ChatGPT in Codex first. Your question is kept.":
     "पहले Codex में ChatGPT से साइन इन करें। आपका प्रश्न रखा गया है।",
   "Sign in with {name} first. Your question is kept.":

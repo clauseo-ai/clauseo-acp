@@ -40,8 +40,10 @@ const PLANS: readonly Plan[] = ["claude", "chatgpt"];
 export type GateView =
   | { kind: "signed-out"; found?: Found | undefined }
   /** The plan a conversation runs isn't ready here while the other is, or the conversation is fixed to it: its one
-   * act, "Set up {name}", or "Sign in again" when its sign-in expired; `instead` offers the other plan, on a draft. */
-  | { kind: "set-up"; expired: boolean; instead: boolean }
+   * act, "Set up {name}", or "Sign in again" when its sign-in expired; `instead` offers the other plan, on a draft.
+   * `keyed`: its API key is saved but the plan isn't installed yet, so no key is offered, and `busy` holds the act
+   * while the download runs (the working line says how far). */
+  | { kind: "set-up"; expired: boolean; instead: boolean; keyed?: boolean; busy?: boolean }
   | { kind: "checking" }
   /** `after`: the plan installed, its browser opening once the other plan's sign-in, named here, ends (one sign-in at
    * a time). */
@@ -232,6 +234,7 @@ export function Gate({
                 className={cn(WRAP, "room-field-ask")}
                 onClick={act({ act: "sign-in-to", plan })}
                 data-testid={testIds.setUp}
+                {...(view.busy === true ? { disabled: true, "aria-busy": true } : {})}
               >
                 {view.expired ? sx(lang, "Sign in again") : w("Set up {name}", { name })}
               </Button>
@@ -243,9 +246,13 @@ export function Gate({
                 : w("{name} isn't set up on this computer.", { name })}
             </Say>
           </Act>
-          {view.instead && (
+          {/* the key whether or not the plan is set up yet (saving it starts the download), unless it is saved */}
+          {(view.instead || view.keyed !== true) && (
             <Ways>
-              {way(w("Use {name} instead", { name: NAME[other(plan)] }), { act: "instead" })}
+              {view.instead &&
+                way(w("Use {name} instead", { name: NAME[other(plan)] }), { act: "instead" })}
+              {view.keyed !== true &&
+                way(w("Use an API key instead"), { act: "key-panel", open: true }, undefined, true)}
             </Ways>
           )}
         </>

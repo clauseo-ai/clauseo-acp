@@ -42,8 +42,22 @@ const setupFailed = (agent: AgentName) => (lang: Lang) => (
   </main>
 );
 
+/** agent.auth_required for a plan that runs on an API key, alone, as the thread and the composer say it (UC-149): the
+ * key wasn't accepted, never a sign-in. */
+const keyRefused = (lang: Lang) => (
+  <main lang={lang} className="review-alone">
+    <p>{sentence(lang, "agent.auth_required", { kind: "codex", name: "codex-acp", key: true })}</p>
+  </main>
+);
+
 /** U6f's entries, each id written as it is: an id never moves when an entry is added or taken out. */
 export const U6F: Entry[] = [
+  {
+    id: "UC-149",
+    words: errorWords("{name} didn't accept the API key. Your question is kept."),
+    screen: "room/composer",
+    render: keyRefused,
+  },
   {
     id: "U6F-01",
     words: errorWords("ChatGPT didn't start. Your question is kept."),

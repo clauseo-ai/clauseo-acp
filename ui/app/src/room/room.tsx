@@ -38,7 +38,6 @@ import { RoomToolbar } from "@clauseo/components/clauseo/room-toolbar.tsx";
 import { useDisplay } from "@clauseo/components/lib/display.ts";
 import { frame } from "@clauseo/components/lib/words-frame.ts";
 import { mt } from "@clauseo/components/lib/words-matters.ts";
-import { th } from "@clauseo/components/lib/words-thread.ts";
 import { useWords } from "@clauseo/components/lib/words.ts";
 import {
   MarkdownHostContext,
@@ -56,6 +55,7 @@ import type { HostTransport } from "../transport/host-transport.ts";
 import type { MatterId } from "../transport/protocol.ts";
 import type { AgentName } from "@clauseo/components/lib/words-errors.ts";
 import { kindOf, knownPlan } from "./agent.ts";
+import { planLine, useKeyInUse } from "./key-in-use.ts";
 import { AgentPlanContext, useThreadAgentName } from "./thread/agent-plan.ts";
 import { Conversations } from "./conversations.ts";
 import { AllThreads } from "./all-threads.ts";
@@ -372,11 +372,14 @@ function RoomFrame({
   // the agent as the error words name it (AgentPlanContext): its kind, and its own name, the open thread's agent_name
   // when its header has one, else the settings id; undefined where not known, so those words keep Claude's line there
   const threadName = useThreadAgentName(store, talks.thread);
+  // the open conversation's plan runs on the lawyer's API key: the line names the key, and a refusal is the key's
+  const openKind = kindOf(openAgent, talks.agents);
+  const key = useKeyInUse(transport, open === null || talks.open === null ? null : openAgent);
   const agentPlan: AgentName =
     open === null || talks.open === null || talks.phase === "loading"
       ? undefined
-      : { kind: kindOf(openAgent, talks.agents), name: threadName ?? openAgent };
-  const plan = planOfOpen === null ? "" : th(w.lang, "Uses your {name} plan", { name: planOfOpen });
+      : { kind: openKind, name: threadName ?? openAgent, key };
+  const plan = planOfOpen === null ? "" : planLine(w.lang, planOfOpen, key ? openKind : undefined);
   // UC: the open matter's protection: the composer's line and hold, the toolbar's mark, and the note
   const shield = useRoomProtection(transport, open, kindOf(openAgent, talks.agents));
   // the tool line's room: the plan's name its words use, Settings, and the transport whose browser policy re-read it
