@@ -68,6 +68,8 @@ fn the_instructions_are_the_tools_part_under_300_words() {
     assert!(text.contains("--author \"Clauseo\""));
     assert!(text.contains("{work_folder}"));
     assert!(!text.contains("{author}"));
+    // Both agents, every OS: a long PDF is read through pypdf (Claude's Read needs poppler).
+    assert!(text.contains("PDFs over 10 pages with `python3` pypdf (`python` on Windows)"));
     insta::assert_snapshot!(text);
 }
 
