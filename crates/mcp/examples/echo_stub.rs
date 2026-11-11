@@ -1,7 +1,8 @@
 //! A stand-in for agent-browser in the guard's tests (`tests/guard/filter.rs`). Usage:
 //! `echo_stub <log file> [ignore-close] [hang]`. It appends every stdin line, as received, to the
 //! log file, and answers each request (an object with an `id` and a `method`) with
-//! `{"result": {"received": <the request>}}`. It exits 0 at EOF. Methods that do otherwise:
+//! `{"result": {"received": <the request>}}` (a `tools/list` also gets `"tools"`: an open tool
+//! and the eval tool, `STUB_TOOLS`). It exits 0 at EOF. Methods that do otherwise:
 //! - `stub/exit`: exit 7 at once, unanswered;
 //! - `stub/partial`: write half a JSON line, no newline, and exit 7;
 //! - `stub/flood`: write 64 MiB and one byte with no newline, then wait to be killed.
@@ -15,6 +16,9 @@ use std::path::Path;
 use std::process::ExitCode;
 
 use serde_json::{Value, json};
+
+/// The tools a `tools/list` reply names: one the guard allows and one it refuses.
+const STUB_TOOLS: [&str; 2] = ["agent_browser_open", "agent_browser_eval"];
 
 #[expect(
     clippy::disallowed_methods,
@@ -74,7 +78,15 @@ fn main() -> std::io::Result<ExitCode> {
             continue;
         }
         if let (Some(id), Some(_)) = (message.get("id"), message.get("method")) {
-            let reply = json!({"jsonrpc": "2.0", "id": id, "result": {"received": message}});
+            let mut result = json!({"received": message});
+            if message.get("method").and_then(Value::as_str) == Some("tools/list") {
+                let tools: Vec<Value> = STUB_TOOLS
+                    .iter()
+                    .map(|name| json!({"name": name}))
+                    .collect();
+                result["tools"] = Value::Array(tools);
+            }
+            let reply = json!({"jsonrpc": "2.0", "id": id, "result": result});
             writeln!(out, "{reply}")?;
             out.flush()?;
         }

@@ -198,21 +198,23 @@ pub(crate) struct State {
     pub(crate) ended: bool,
 }
 
-/// What a request sent to the running agent-browser is.
+/// What a request sent to the running agent-browser is, for its reply.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Request {
-    /// A tool call but `agent_browser_close`.
+    /// A tool call but `agent_browser_close`: its reply carries the held-download note.
     Call,
     /// An `agent_browser_close` call: its reply stops the browser (`relay.rs`).
     Close,
-    /// Any other request (`tools/list`, `ping`).
+    /// `tools/list`: its reply loses the tools the guard refuses (`filter::only_allowed_tools`).
+    List,
+    /// Any other request (`ping`), relayed as read.
     Other,
 }
 
 impl Request {
     /// Whether it is a tool call, whose reply restarts the idle time.
     pub(crate) fn is_call(self) -> bool {
-        self != Request::Other
+        matches!(self, Request::Call | Request::Close)
     }
 }
 

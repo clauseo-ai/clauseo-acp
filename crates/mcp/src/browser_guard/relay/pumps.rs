@@ -130,6 +130,7 @@ fn route(shared: &Arc<Shared>, parent: &Parent, events: &mpsc::Sender<Event>, te
     let request = match (call, message["params"]["name"].as_str()) {
         (true, Some(CLOSE_TOOL)) => Request::Close,
         (true, _) => Request::Call,
+        (false, _) if method == Some("tools/list") => Request::List,
         (false, _) => Request::Other,
     };
     let to_child = {
@@ -173,7 +174,7 @@ fn route(shared: &Arc<Shared>, parent: &Parent, events: &mpsc::Sender<Event>, te
         // A failed write: agent-browser has ended or Chrome died, and the relay answers the call.
         (Some(to_child), _) => drop(write_child(&to_child, text)),
         (None, Some(id)) => {
-            return oneshot::answer(shared, events, text, &id, method == Some("shutdown"));
+            return oneshot::answer(shared, events, text, &id, method);
         }
         (None, None) => {}
     }
@@ -181,7 +182,8 @@ fn route(shared: &Arc<Shared>, parent: &Parent, events: &mpsc::Sender<Event>, te
 }
 
 /// Child to agent, for the start of agent-browser numbered `generation`: each whole line as
-/// read (a tool call's result with the held-download note added, `downloads/held.rs`), but the
+/// read (a tool call's result with the held-download note added, `downloads/held.rs`, and the
+/// tool list without the tools the guard refuses, `filter::only_allowed_tools`), but the
 /// reply to the close request, and nothing once the guard has ended this start
 /// (it answered what was in flight itself). After each line, every one of the port checks.
 /// Returns the event that ends it: [`Event::ChildEnded`], [`Event::ChildOversize`] or
@@ -222,10 +224,15 @@ pub(crate) fn pump_child(
             (answered, state.sent_count())
         };
         let (answered, sent) = answered;
-        let call = answered.is_some_and(Request::is_call);
-        // A tool call's result carries the note on held downloads (`downloads/held.rs`).
-        if call && let Some(noted) = shared.held.note_into(&line) {
-            line = noted;
+        // A tool call's result carries the note on held downloads (`downloads/held.rs`); the
+        // tool list loses the tools the guard refuses.
+        let changed = match answered {
+            Some(Request::Call | Request::Close) => shared.held.note_into(&line),
+            Some(Request::List) => filter::only_allowed_tools(&line),
+            Some(Request::Other) | None => None,
+        };
+        if let Some(changed) = changed {
+            line = changed;
         }
         line.push(b'\n');
         if agent_reads && emit(&shared.out, &line).is_err() {

@@ -2,7 +2,7 @@
 
 use serde_json::{Value, json};
 
-use super::super::{ALLOWED_TOOLS, LIVE_VIEW_TOOLS, UNAVAILABLE, UNKNOWN_TOOL};
+use super::super::{ALLOWED_TOOLS, LIVE_VIEW_TOOLS, UNAVAILABLE, UNKNOWN_TOOL, only_allowed_tools};
 use super::{Verdict, call_tool, refused_on, verdict};
 
 /// A refused call's text, after checking it is an `isError` result with the call's id.
@@ -169,4 +169,38 @@ fn no_tool_can_name_a_file_outside_the_browser_folder() {
         .as_deref(),
         Some("file URLs")
     );
+}
+
+/// A `tools/list` reply loses every tool off the allowlist (eval, a live view), keeping the
+/// rest in order and every other key; a reply with nothing to drop, or no tool list, is left as
+/// read.
+#[test]
+fn the_tool_list_keeps_only_allowed_tools() {
+    let reply = json!({"jsonrpc": "2.0", "id": 3, "result": {"tools": [
+        {"name": "agent_browser_open", "inputSchema": {}},
+        {"name": "agent_browser_eval"},
+        {"name": "agent_browser_stream_enable"},
+        {"name": "agent_browser_snapshot"},
+        {"title": "no name"},
+    ], "nextCursor": null}});
+    let only = only_allowed_tools(reply.to_string().as_bytes()).unwrap();
+    let only: Value = serde_json::from_slice(&only).unwrap();
+    assert_eq!(
+        only,
+        json!({"jsonrpc": "2.0", "id": 3, "result": {"tools": [
+            {"name": "agent_browser_open", "inputSchema": {}},
+            {"name": "agent_browser_snapshot"},
+            {"title": "no name"},
+        ], "nextCursor": null}})
+    );
+    let kept =
+        json!({"jsonrpc": "2.0", "id": 4, "result": {"tools": [{"name": "agent_browser_open"}]}});
+    assert_eq!(only_allowed_tools(kept.to_string().as_bytes()), None);
+    for other in [
+        json!({"jsonrpc": "2.0", "id": 5, "result": {"content": []}}),
+        json!({"jsonrpc": "2.0", "id": 6, "error": {"code": -1, "message": "x"}}),
+    ] {
+        assert_eq!(only_allowed_tools(other.to_string().as_bytes()), None);
+    }
+    assert_eq!(only_allowed_tools(b"not json"), None);
 }

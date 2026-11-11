@@ -259,6 +259,8 @@ on Windows.
    reaches the child. A refused notification (no `id`) is dropped unanswered.
 7. Everything else passes: other methods (`initialize`, `tools/list`, ...), calls to the core
    tools that rule 5 does not refuse, and `allowedDomains`, which can only narrow.
+8. The reply to a `tools/list` (from the running agent-browser or the one-shot) loses every tool
+   off the allowlist (`only_allowed_tools`), so the agent is never offered `agent_browser_eval`.
 
 A unit test in `filter.rs` fails when the three lists above differ from the code's.
 

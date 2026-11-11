@@ -7,7 +7,8 @@
 //! request but a tool call by starting agent-browser with its arguments and environment, less
 //! `AGENT_BROWSER_CDP` (no Chrome exists), writing the request, closing its stdin and relaying
 //! its whole lines until it exits; the next start of the running agent-browser needs no replayed
-//! handshake. The answer is agent-browser's own, so no copy of its tool list can drift from it.
+//! handshake. The answer is agent-browser's own, so no copy of its tool list can drift from it;
+//! a `tools/list` reply only loses the tools the guard refuses (`filter::only_allowed_tools`).
 //!
 //! It runs as the running one does: its own process group (Unix) or the guard's job (Windows),
 //! told to the reaper, and killed whole once it ends. It has [`ONESHOT_WAIT`] to exit; then the
@@ -41,7 +42,9 @@ enum Once {
     TooLong,
 }
 
-/// Answers request `text` with a one-shot agent-browser. `false` when the guard ends: the
+/// Answers request `text` (its `method`, if it has one) with a one-shot agent-browser; a
+/// `tools/list` reply loses the tools the guard refuses (`filter::only_allowed_tools`). `false`
+/// when the guard ends: the
 /// one-shot exited with a code other than 0, or after `shutdown`, or wrote an oversize line, or
 /// could not start; the event that says so is sent. Once the relay has ended, request `id` gets
 /// an error and no one-shot starts.
@@ -50,9 +53,10 @@ pub(crate) fn answer(
     events: &mpsc::Sender<Event>,
     text: &str,
     id: &Value,
-    shutdown: bool,
+    method: Option<&str>,
 ) -> bool {
-    match run_once(shared, text) {
+    let shutdown = method == Some("shutdown");
+    match run_once(shared, text, method == Some("tools/list")) {
         Ok(Once::Ended) => {
             answer_all(&shared.out, std::slice::from_ref(id), ENDED);
             return true;
@@ -73,7 +77,7 @@ pub(crate) fn answer(
 /// Starts the one-shot, relays its lines and reaps it. It starts, and is stored where
 /// [`end`] finds it, under the state's lock and only if the relay has not ended, so the relay's
 /// end either sees it or keeps it from starting.
-fn run_once(shared: &Arc<Shared>, text: &str) -> io::Result<Once> {
+fn run_once(shared: &Arc<Shared>, text: &str, list: bool) -> io::Result<Once> {
     let launcher = &shared.launcher;
     let (stdin, stdout) = {
         let state = lock(&shared.state);
@@ -121,6 +125,11 @@ fn run_once(shared: &Arc<Shared>, text: &str) -> io::Result<Once> {
         loop {
             match read_line(&mut input, &mut line, CHILD_MAX_LINE_BYTES, Overflow::Stop) {
                 Ok(Line::Whole) => {
+                    if list
+                        && let Some(only) = crate::browser_guard::filter::only_allowed_tools(&line)
+                    {
+                        line = only;
+                    }
                     line.push(b'\n');
                     // An agent that stopped reading: its stdin's end follows.
                     drop(emit(&shared.out, &line));

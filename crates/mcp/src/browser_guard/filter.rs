@@ -1,5 +1,6 @@
 //! The check on each line the agent sends to agent-browser. It sees only that direction; what
-//! agent-browser sends back is relayed untouched (`relay.rs`).
+//! agent-browser sends back is relayed as read (`relay.rs`), but a `tools/list` reply, which
+//! loses the tools refused here ([`only_allowed_tools`]).
 //!
 //! A line is parsed once, as a `serde_json::Value`, and only that value moves on: the child gets
 //! the guard's own serialisation of it, so a duplicate key, odd whitespace or an escape cannot
@@ -104,11 +105,11 @@ pub(crate) const BATCH_MESSAGE: &str = "Clauseo does not allow batched requests 
 /// The only tools that reach agent-browser: agent-browser v0.41.1's `core` profile
 /// (`CORE_PROFILE_TOOLS`, `cli/src/mcp.rs:340-370` at tag v0.41.1), the profile the host starts
 /// it with (`mcp --tools core`, `crates/profile/src/servers.rs:81`), less `agent_browser_eval`:
-/// page JavaScript is off for both agents, so it is refused as any other tool off the list. The
-/// guard leaves `tools/list` as agent-browser answers it, so eval is still listed there. An
-/// agent that starts the guard itself with `--tools all` gains nothing: every other tool, a new
-/// or renamed one included, is refused here. `agent_browser_tools_profiles` only prints the
-/// profiles (`call_tools_profiles`, `mcp.rs:2539-2560`); it changes none.
+/// page JavaScript is off for both agents, so it is refused as any other tool off the list, and
+/// dropped from agent-browser's `tools/list` reply ([`only_allowed_tools`]). An agent that starts
+/// the guard itself with `--tools all` gains nothing: every other tool, a new or renamed one
+/// included, is refused here. `agent_browser_tools_profiles` only prints the profiles
+/// (`call_tools_profiles`, `mcp.rs:2539-2560`); it changes none.
 pub(crate) const ALLOWED_TOOLS: &[&str] = &[
     "agent_browser_tools_profiles",
     "agent_browser_open",
@@ -139,6 +140,26 @@ pub(crate) const ALLOWED_TOOLS: &[&str] = &[
     "agent_browser_tab_close",
     "agent_browser_close",
 ];
+
+/// A reply to `tools/list` (`line`, without its newline) with every tool off [`ALLOWED_TOOLS`]
+/// dropped from `result.tools` (`agent_browser_eval` in the core profile), so the agent never
+/// sees a tool the guard refuses; an entry with no string name stays. `None` when `line` is no
+/// such reply or drops nothing: it then goes on as read. The relay calls it only for the reply to
+/// a `tools/list` request (`relay/pumps.rs`, `relay/oneshot.rs`).
+pub(crate) fn only_allowed_tools(line: &[u8]) -> Option<Vec<u8>> {
+    let mut reply: Value = serde_json::from_slice(line).ok()?;
+    let tools = reply.get_mut("result")?.get_mut("tools")?.as_array_mut()?;
+    let before = tools.len();
+    tools.retain(|tool| {
+        tool.get("name")
+            .and_then(Value::as_str)
+            .is_none_or(|name| ALLOWED_TOOLS.contains(&name))
+    });
+    if tools.len() == before {
+        return None;
+    }
+    serde_json::to_vec(&reply).ok()
+}
 
 /// agent-browser's live views, none of them on [`ALLOWED_TOOLS`], named only so their refusal
 /// reads as a feature Clauseo leaves out: each serves the browser on a loopback port, the stream
