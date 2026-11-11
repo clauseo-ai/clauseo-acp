@@ -6,8 +6,9 @@ use std::time::Duration;
 
 use clauseo_protocol::AgentId;
 
-use super::{Inner, Reserve, Shared, Slot, Ticket};
-use crate::state::{AgentsEvent, InstallState, Installed, PythonState};
+use super::space::Reserve;
+use super::{Inner, Shared, Slot, Ticket};
+use crate::state::{AgentsEvent, Failure, FailureKind, InstallState, Installed, PythonState};
 
 impl Shared {
     pub(super) fn lock(&self) -> MutexGuard<'_, Inner> {
@@ -110,59 +111,50 @@ impl Shared {
         Inner::set_python(&mut inner, &self.events, state);
     }
 
-    /// The disk check of a try of `ticket`'s job, which needs `agent` bytes for its agent
-    /// and `python` for Python (0 when Python is installed or this platform has none), with
-    /// `free` bytes free (`None`: not readable, so not checked). Every other running try's
-    /// remaining need is counted too (what its check counted, less what it has downloaded since),
-    /// and Python only once: not here when another try counted it. Checked and recorded under
-    /// one lock, so two tries starting together never both count on the same bytes. `Err` with
-    /// the bytes needed in all, this try's and the others' remaining; else this try's need is
-    /// recorded for the next check.
-    pub(crate) fn check_space(
-        &self,
-        ticket: &Ticket,
-        agent: u64,
-        python: u64,
-        free: Option<u64>,
-    ) -> Result<(), u64> {
+    /// The job of `ticket` panicked: unless paused or superseded, its slot and Python claim go,
+    /// and its agent's install is `Failed` with a log saying so (an agent `Ready` already
+    /// stays so, and Python, if this job was fetching it, goes back to `Missing`).
+    pub(super) fn end_after_panic(&self, ticket: &Ticket) {
         let mut inner = self.lock();
-        let others = inner.others(ticket);
-        let python_counted = others.iter().any(|reserve| reserve.python > 0);
-        let python = if python_counted { 0 } else { python };
-        let left: u64 = others
-            .iter()
-            .map(|reserve| reserve.agent_left().saturating_add(reserve.python_left()))
-            .fold(0, u64::saturating_add);
-        inner.reserve(ticket, agent, python, left, free)
-    }
-
-    /// Python's disk check in the job of `ticket`, the one installing it
-    /// ([`Shared::claim_python`]): `python` bytes, with every other running try's remaining need
-    /// for its agent (a Python part another try counted is this job's now, so not counted
-    /// again). As [`Shared::check_space`].
-    pub(crate) fn check_python_space(
-        &self,
-        ticket: &Ticket,
-        python: u64,
-        free: Option<u64>,
-    ) -> Result<(), u64> {
-        let mut inner = self.lock();
-        let left: u64 = inner
-            .others(ticket)
-            .iter()
-            .map(Reserve::agent_left)
-            .fold(0, u64::saturating_add);
-        inner.reserve(ticket, 0, python, left, free)
-    }
-
-    /// The bytes every running try but `ticket`'s still needs, for a `DiskFull` failure's
-    /// need.
-    pub(crate) fn others_left(&self, ticket: &Ticket) -> u64 {
-        self.lock()
-            .others(ticket)
-            .iter()
-            .map(|reserve| reserve.agent_left().saturating_add(reserve.python_left()))
-            .fold(0, u64::saturating_add)
+        if ticket.cancel.is_cancelled() || inner.slot_mut(ticket).is_none() {
+            return;
+        }
+        let python = inner.python_job == Some(ticket.job);
+        inner.end_slot(ticket);
+        tracing::warn!(agent = %ticket.agent, "agent install: the job's thread panicked");
+        if matches!(
+            inner.states.get(&ticket.agent),
+            Some(InstallState::Ready { .. })
+        ) {
+            if python {
+                let download_bytes = inner.python_bytes;
+                Inner::set_python(
+                    &mut inner,
+                    &self.events,
+                    PythonState::Missing { download_bytes },
+                );
+            }
+            return;
+        }
+        let mut log = crate::log::InstallLog::new(&ticket.agent);
+        log.push("the install stopped unexpectedly".to_owned());
+        log.push(format!(
+            "result: {} after 1 tries",
+            FailureKind::Failed.word()
+        ));
+        let failure = Failure {
+            kind: FailureKind::Failed,
+            need_mb: None,
+            free_mb: None,
+            log,
+        };
+        Inner::set(
+            &mut inner,
+            &self.events,
+            &ticket.agent,
+            InstallState::Failed(failure),
+            None,
+        );
     }
 
     /// Records `tries` as `agent`'s last install job's, just before that job's last event.
@@ -195,15 +187,11 @@ impl Shared {
         }
         if ends {
             inner.end_slot(ticket);
-        } else if let Some(slot) = inner.slot_mut(ticket) {
-            match state {
-                InstallState::Downloading { received, .. } => {
-                    slot.reserve.agent_received = received;
-                }
-                // The agent's files are on the disk: only Python's part, if any, is to come.
-                InstallState::Ready { .. } => slot.reserve.agent = 0,
-                _ => {}
-            }
+        } else if let Some(slot) = inner.slot_mut(ticket)
+            && matches!(state, InstallState::Ready { .. })
+        {
+            // The agent's files are on the disk: only Python's part, if any, is to come.
+            slot.reserve.agent = 0;
         }
         let ready = matches!(state, InstallState::Ready { .. });
         if ready || state == InstallState::Installing {
@@ -294,7 +282,7 @@ impl Inner {
     }
 
     /// `ticket`'s slot, while it is its agent's running job.
-    fn slot_mut(&mut self, ticket: &Ticket) -> Option<&mut Slot> {
+    pub(super) fn slot_mut(&mut self, ticket: &Ticket) -> Option<&mut Slot> {
         self.jobs
             .get_mut(&ticket.agent)
             .filter(|slot| slot.ticket.job == ticket.job)
@@ -308,40 +296,6 @@ impl Inner {
         if self.python_job == Some(ticket.job) {
             self.python_job = None;
         }
-    }
-
-    /// The reserves of every running job but `ticket`'s.
-    fn others(&self, ticket: &Ticket) -> Vec<Reserve> {
-        self.jobs
-            .values()
-            .filter(|slot| slot.ticket.job != ticket.job)
-            .map(|slot| slot.reserve)
-            .collect()
-    }
-
-    /// Checks `agent` and `python` bytes, with `others` still needed by the other tries,
-    /// against `free`, and records them as `ticket`'s reserve when they fit (or `free` is not
-    /// known). `Err` with the bytes needed in all.
-    fn reserve(
-        &mut self,
-        ticket: &Ticket,
-        agent: u64,
-        python: u64,
-        others: u64,
-        free: Option<u64>,
-    ) -> Result<(), u64> {
-        let need = agent.saturating_add(python).saturating_add(others);
-        if free.is_some_and(|free| free < need) {
-            return Err(need);
-        }
-        if let Some(slot) = self.slot_mut(ticket) {
-            slot.reserve = Reserve {
-                agent,
-                python,
-                ..Reserve::default()
-            };
-        }
-        Ok(())
     }
 
     /// Adds `ticket` as its agent's running job, with nothing reserved yet.

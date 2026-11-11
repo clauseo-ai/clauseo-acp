@@ -176,13 +176,13 @@ pub(super) async fn finish_kept<T: Timer + Send + Sync>(
         return Ok(None);
     };
     tracing::info!(%agent, "agent install: a finished set-up was kept; only its rename runs");
-    if !job.emit(InstallState::Installing, false) {
-        return Err(TryError::cancelled());
-    }
     // The receipt names the downloaded Node: it must be there, and another try fetching it
     // (`.lock-node` held) is waited for, as a full try's npm waits.
     if matches!(node, NodeChoice::Runtime { .. }) {
         job.use_node().await?;
+    }
+    if !job.emit(InstallState::Installing, false) {
+        return Err(TryError::cancelled());
     }
     let placed = Placed {
         hash: &hash,

@@ -97,8 +97,8 @@ pub enum InstallState {
     },
     /// Stopped with a failure; `retry` starts again.
     Failed(Failure),
-    /// Paused because another agent's install started; its own `install` resumes it, keeping
-    /// its partial files.
+    /// Paused by its own `pause` (the lawyer's cancel); its own `install` resumes it, keeping its
+    /// partial files. Another agent's install never pauses it.
     Paused,
     /// IT's runtime: policy sets `agents.<id>`, so nothing is installed for it.
     Managed,

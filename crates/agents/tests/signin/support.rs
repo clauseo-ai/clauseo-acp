@@ -217,13 +217,15 @@ struct Recording {
     inner: PassthroughLauncher,
     launches: Arc<Mutex<Vec<Launch>>>,
     stall: Arc<Mutex<Option<String>>>,
+    panic_on: Arc<Mutex<Option<String>>>,
 }
 
 impl Launcher for Recording {
     fn launch(&self, spec: &LaunchSpec) -> Result<Launched, clauseo_process::Error> {
-        let stalled = lock(&self.stall)
-            .as_ref()
-            .is_some_and(|word| spec.args().iter().any(|arg| arg == word.as_str()));
+        let holds = |word: &str| spec.args().iter().any(|arg| arg == word);
+        let armed = lock(&self.panic_on).take_if(|word| holds(word));
+        assert!(armed.is_none(), "a test's panic in the job: {armed:?}");
+        let stalled = lock(&self.stall).as_deref().is_some_and(holds);
         let launched = if stalled {
             let sleep = LaunchSpec::new(
                 PathBuf::from("/bin/sleep"),
@@ -274,6 +276,7 @@ pub(crate) struct Fixture {
     pub(crate) timer: KeyedTimer,
     launches: Arc<Mutex<Vec<Launch>>>,
     stall: Arc<Mutex<Option<String>>>,
+    panic_on: Arc<Mutex<Option<String>>>,
     online: Arc<AtomicBool>,
     lookups: Arc<Mutex<Vec<String>>>,
 }
@@ -355,6 +358,7 @@ impl Fixture {
             timer: KeyedTimer::default(),
             launches: Arc::default(),
             stall: Arc::default(),
+            panic_on: Arc::default(),
             online,
             lookups,
         }
@@ -446,7 +450,13 @@ impl Fixture {
             inner: PassthroughLauncher::new(SpawnOptions::new().clear_env()),
             launches: Arc::clone(&self.launches),
             stall: Arc::clone(&self.stall),
+            panic_on: Arc::clone(&self.panic_on),
         })
+    }
+
+    /// The next run whose arguments hold `word` panics in its job's thread instead of starting.
+    pub(crate) fn panic_on(&self, word: &str) {
+        *lock(&self.panic_on) = Some(word.to_owned());
     }
 
     fn events(agent: AgentId, events: async_channel::Receiver<AgentsEvent>) -> Events {

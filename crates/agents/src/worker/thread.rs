@@ -159,9 +159,14 @@ impl<T: Timer + Send + Sync + 'static> Worker<T> {
             system_proxy: self.system_proxy.clone(),
             locks: install::Locks::default(),
         };
+        let ended = PanicEnd {
+            shared: Arc::clone(&self.shared),
+            ticket: ticket.clone(),
+        };
         let spawned = self
             .shared
             .spawn_job(format!("clauseo-install-{agent}"), move || {
+                let _ended = ended;
                 install::run(&job);
             });
         if let Err(err) = spawned {
@@ -180,6 +185,22 @@ impl<T: Timer + Send + Sync + 'static> Worker<T> {
             };
             self.shared
                 .emit_job(&ticket, InstallState::Failed(failure), None, true);
+        }
+    }
+}
+
+/// Frees a job's slot if its thread panics (a dev or test build; a release build aborts), so its
+/// agent can install again and the other agent's Python claim or disk reserve never waits on it:
+/// the agent's install `Failed` (or, past its `Ready`, Python back to `Missing`).
+struct PanicEnd {
+    shared: Arc<Shared>,
+    ticket: Ticket,
+}
+
+impl Drop for PanicEnd {
+    fn drop(&mut self) {
+        if std::thread::panicking() {
+            self.shared.end_after_panic(&self.ticket);
         }
     }
 }

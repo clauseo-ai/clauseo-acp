@@ -13,7 +13,6 @@ use std::time::Duration;
 use clauseo_process::Timer;
 
 use super::{BACKOFF, Job, MB, Next, OFFLINE_WAIT, TRIES, TryError, files};
-use crate::disk;
 use crate::download::firm::{BundleEntry, bundle_path, copy_from_bundle};
 use crate::download::{FetchJob, Magic, part_path};
 use crate::log::InstallLog;
@@ -203,17 +202,16 @@ fn check_disk<T: Timer + Send + Sync>(
     let config = &job.config;
     let base = archive.size().saturating_add(archive.unpacked_bytes());
     let need = base.saturating_add(base.div_ceil(10));
-    let free = disk::free_for(config);
-    job.shared
-        .check_python_space(&job.ticket, need, free)
-        .map_err(|need| {
+    crate::worker::space::check_python_space(&job.shared, config, &job.ticket, need).map_err(
+        |(need, free)| {
             let free = free.unwrap_or(0);
             TryError::new(
                 Next::DiskFull,
                 &format!("{} MB free, {} MB needed", free / MB, need.div_ceil(MB)),
                 config,
             )
-        })
+        },
+    )
 }
 
 /// Fetches the archive to `dest`, or copies it from the offline bundle, sending progress.
