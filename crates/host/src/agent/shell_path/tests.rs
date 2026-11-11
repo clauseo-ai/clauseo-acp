@@ -371,37 +371,25 @@ fn the_env_file_is_private() {
     write::remove_dir_all(&run).unwrap();
 }
 
-/// A folder named with a command substitution, a backtick and `$HOME` stays inert when `sh`
-/// sources the file: nothing runs, and the literal folder comes back first on `PATH`. The
-/// shell runs through the host's own launcher (`clauseo_process::spawn_in_tree`).
+/// Runs `shell -c script sh file` in `cwd` through the host's own launcher
+/// (`clauseo_process::spawn_in_tree`), with only `PATH` and `HOME` set, and returns what it
+/// printed; the test fails when the shell does.
 #[cfg(unix)]
-#[test]
-fn sourcing_the_env_file_runs_nothing() {
+fn shell_output(shell: &Path, script: &str, file: &Path, cwd: &Path) -> String {
     use clauseo_process::{LaunchSpec, Launched, SpawnOptions, spawn_in_tree};
     use futures::AsyncReadExt as _;
 
-    let run = scratch("claude-inert");
-    let odd = run.join("a $(touch PWNED) `touch TICKED` $HOME 'q'");
-    let path = prepare_on(
-        vec![odd.clone()],
-        true,
-        Some(AgentKind::Claude),
-        (&run, None),
-        Os::Linux,
-        Path::new("/nowhere"),
-    );
-    let file = path.env_file.unwrap();
     let env = BTreeMap::from([
         (OsString::from("PATH"), OsString::from("/usr/bin:/bin")),
         (OsString::from("HOME"), OsString::from("/home/nobody")),
     ]);
     let args = vec![
         OsString::from("-c"),
-        OsString::from(". \"$1\" && printf %s \"$PATH\""),
+        OsString::from(script),
         OsString::from("sh"),
-        file.into_os_string(),
+        file.as_os_str().to_owned(),
     ];
-    let spec = LaunchSpec::new(PathBuf::from("/bin/sh"), args, env, run.clone()).unwrap();
+    let spec = LaunchSpec::new(shell.to_path_buf(), args, env, cwd.to_path_buf()).unwrap();
     let Launched {
         mut handle,
         mut stdout,
@@ -417,11 +405,37 @@ fn sourcing_the_env_file_runs_nothing() {
     assert_eq!(
         report.code(),
         Some(0),
-        "sh failed: {}",
+        "{} failed: {}",
+        shell.display(),
         report.stderr_tail()
     );
+    String::from_utf8(said).unwrap()
+}
+
+/// A folder named with a command substitution, a backtick and `$HOME` stays inert when `sh`
+/// sources the file: nothing runs, and the literal folder comes back first on `PATH`.
+#[cfg(unix)]
+#[test]
+fn sourcing_the_env_file_runs_nothing() {
+    let run = scratch("claude-inert");
+    let odd = run.join("a $(touch PWNED) `touch TICKED` $HOME 'q'");
+    let path = prepare_on(
+        vec![odd.clone()],
+        true,
+        Some(AgentKind::Claude),
+        (&run, None),
+        Os::Linux,
+        Path::new("/nowhere"),
+    );
+    let file = path.env_file.unwrap();
+    let said = shell_output(
+        Path::new("/bin/sh"),
+        ". \"$1\" && printf %s \"$PATH\"",
+        &file,
+        &run,
+    );
     let expected = format!("{}:/usr/bin:/bin", odd.to_str().unwrap());
-    assert_eq!(String::from_utf8(said).unwrap(), expected);
+    assert_eq!(said, expected);
     assert!(!run.join("PWNED").exists(), "the substitution ran");
     assert!(!run.join("TICKED").exists(), "the backtick ran");
     write::remove_dir_all(&run).unwrap();
@@ -433,10 +447,6 @@ fn sourcing_the_env_file_runs_nothing() {
 /// file, as Claude Code does after its snapshot, sees all three even when the snapshot set
 /// others.
 #[test]
-#[expect(
-    clippy::disallowed_methods,
-    reason = "runs bash on the file, as Claude Code does"
-)]
 fn claudes_shell_gets_the_three_ca_variables() {
     let run = scratch("claude-ca");
     let roots = PathBuf::from("/Users/ada/Clauseo Data/tls/roots.pem");
@@ -471,8 +481,9 @@ fn claudes_shell_gets_the_three_ca_variables() {
     }
     assert!(!env.contains_key(&OsString::from("ssl_cert_file")));
     assert_eq!(
-        env.get(&OsString::from(ENV_FILE_VAR)),
-        Some(&file.clone().into_os_string())
+        env.get(&OsString::from(ENV_FILE_VAR))
+            .map(OsString::as_os_str),
+        Some(file.as_os_str())
     );
     // With folders too: the PATH line first, then the CA line.
     let path = prepare_on(
@@ -485,21 +496,17 @@ fn claudes_shell_gets_the_three_ca_variables() {
     );
     let text = std::fs::read_to_string(path.env_file.as_ref().unwrap()).unwrap();
     assert!(text.starts_with("export PATH='/stet:/rt/bin':\"$PATH\"\nexport SSL_CERT_FILE="));
+    #[cfg(unix)]
     if Path::new(BASH).is_file() {
-        let shell = std::process::Command::new(BASH)
-            .arg("-c")
-            .arg(format!(
-                "export SSL_CERT_FILE=/etc/ssl/cert.pem; source '{}'; \
-                 printf '%s|%s|%s' \"$SSL_CERT_FILE\" \"$CURL_CA_BUNDLE\" \"$REQUESTS_CA_BUNDLE\"",
-                file.display()
-            ))
-            .output()
-            .unwrap();
-        let roots = roots.to_str().unwrap();
-        assert_eq!(
-            String::from_utf8(shell.stdout).unwrap(),
-            format!("{roots}|{roots}|{roots}")
+        let said = shell_output(
+            Path::new(BASH),
+            "export SSL_CERT_FILE=/etc/ssl/cert.pem; source \"$1\"; \
+             printf '%s|%s|%s' \"$SSL_CERT_FILE\" \"$CURL_CA_BUNDLE\" \"$REQUESTS_CA_BUNDLE\"",
+            &file,
+            &run,
         );
+        let roots = roots.to_str().unwrap();
+        assert_eq!(said, format!("{roots}|{roots}|{roots}"));
     }
     // Codex never gets them.
     let codex = prepare_on(
