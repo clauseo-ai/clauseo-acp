@@ -47,7 +47,10 @@ documents with 3 changed).
 - The matter folder holds one thing of Clauseo's: `.clauseo/matter.json`, version 1:
   `{"version": 1, "matter_id": "<uuid>", "created_at": <milliseconds since the Unix epoch>}`, written
   by temp file and rename. Readers accept any `version` (or none) and ignore keys they do not know;
-  they need `matter_id` and `created_at`. A later format that drops either uses a new file name. Opening a
+  they need `matter_id` and `created_at`. A later format that drops either uses a new file name. An
+  import keeps a `matter.json` naming the matter it imports, byte for byte, and renames one that
+  does not read to `.clauseo/matter.old-<UTC stamp>.json` before writing its own (decision record
+  0022). Opening a
   matter whose folder is gone fails with `matter.folder_missing`; one whose folder has no
   `matter.json`, has one that does not read, or has one naming another matter fails with
   `matter.folder_not_a_matter` (`matter.folder_missing` before 2026-11-07, decision record 0003).
