@@ -6,12 +6,12 @@
 use std::time::{Duration, UNIX_EPOCH};
 
 use clauseo_agents::{AgentsEvent, SigninState, Source};
-use clauseo_protocol::{AgentId, SetupEvent, SignIn, Timestamp};
+use clauseo_protocol::{AgentId, CommandOutcome, SetupEvent, SignIn, SignInMethod, Timestamp};
 use futures::StreamExt as _;
 use serde_json::json;
 
-use super::codex;
-use super::fakes::{Rig, rig, setup_events};
+use super::fakes::{Rig, command, rig, setup_events};
+use super::{SETTINGS, codex};
 use crate::bridge::lock;
 use crate::setup::host_calls::SignInHolds;
 use crate::setup::start::follow_sign_in_holds;
@@ -225,6 +225,118 @@ fn a_recheck_that_finds_another_account_is_sent_with_its_new_time() {
         "{shown:?}"
     );
     assert_ne!(at(shown.last()), first, "a new time");
+}
+
+/// The latest `SignInChanged` for Codex, as a new follower gets it.
+fn shown(rig: &Rig) -> Option<SignIn> {
+    let mut feed = rig.events.follow();
+    codex_changes(setup_events(&mut feed)).pop()
+}
+
+/// The Windows test's defect 4: a turn refused `agent.auth_required` while a key is in memory
+/// marks the key's line `refused` (the status check, kept, reads only the plan login), so the
+/// Settings window can say the key was not accepted; saving a key or removing it clears it.
+#[test]
+fn a_hold_with_a_key_in_memory_marks_the_key_refused_until_a_key_is_saved_or_removed() {
+    let rig = rig(true);
+    let set_key = |key: &str| command("set_agent_key", &codex(), &json!({ "key": key }));
+    rig.s18_was(&codex(), SigninState::SignedOut { found: None });
+    assert_eq!(
+        block_on(
+            rig.setup()
+                .run(SETTINGS, set_key("sk-proj-NEVER-IN-A-LOG-0001"))
+        ),
+        Ok(CommandOutcome::Done)
+    );
+    assert!(
+        matches!(
+            shown(&rig),
+            Some(SignIn::SignedIn {
+                method: SignInMethod::ApiKey,
+                refused: None,
+                ..
+            })
+        ),
+        "{:?}",
+        shown(&rig)
+    );
+    lock(&rig.agents.answers).insert("check_status", SigninState::SignedOut { found: None });
+    feed_holds(&rig, vec![frame(&[(2, true)])]);
+    rig.pumped(follow_sign_in_holds(&rig.backend));
+    assert_eq!(status_checks(&rig), 1, "the status check still runs");
+    assert!(
+        matches!(
+            shown(&rig),
+            Some(SignIn::SignedIn {
+                method: SignInMethod::ApiKey,
+                refused: Some(_),
+                ..
+            })
+        ),
+        "the refusal is published: {:?}",
+        shown(&rig)
+    );
+
+    assert_eq!(
+        block_on(
+            rig.setup()
+                .run(SETTINGS, set_key("sk-proj-NEVER-IN-A-LOG-0002"))
+        ),
+        Ok(CommandOutcome::Done)
+    );
+    assert!(
+        matches!(
+            shown(&rig),
+            Some(SignIn::SignedIn {
+                method: SignInMethod::ApiKey,
+                refused: None,
+                ..
+            })
+        ),
+        "a saved key clears it: {:?}",
+        shown(&rig)
+    );
+
+    rig.backend.recheck_sign_in(&codex());
+    assert!(matches!(
+        shown(&rig),
+        Some(SignIn::SignedIn {
+            refused: Some(_),
+            ..
+        })
+    ));
+    let clear = command("clear_agent_key", &codex(), &json!({}));
+    assert_eq!(
+        rig.pumped(rig.setup().run(SETTINGS, clear)),
+        Ok(CommandOutcome::Done)
+    );
+    assert_eq!(
+        shown(&rig),
+        Some(SignIn::SignedOut { found: None }),
+        "a removed key takes its refusal with it"
+    );
+}
+
+/// With no key in memory a hold marks nothing: a plan's line never carries `refused`.
+#[test]
+fn a_hold_with_no_key_marks_no_refusal() {
+    let rig = rig(true);
+    rig.s18_was(&codex(), signed_in());
+    lock(&rig.agents.answers).insert("check_status", signed_in());
+    feed_holds(&rig, vec![frame(&[(2, true)])]);
+    rig.pumped(follow_sign_in_holds(&rig.backend));
+    assert!(
+        matches!(
+            shown(&rig),
+            Some(SignIn::SignedIn {
+                method: SignInMethod::Plan,
+                refused: None,
+                ..
+            })
+        ),
+        "{:?}",
+        shown(&rig)
+    );
 }
 
 #[test]

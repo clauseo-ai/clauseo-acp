@@ -259,6 +259,7 @@ fn every_sign_in() -> Vec<SignIn> {
                 method,
                 source,
                 at: at(7),
+                refused: None,
             });
         }
     }
@@ -268,6 +269,15 @@ fn every_sign_in() -> Vec<SignIn> {
         method: SignInMethod::ApiKey,
         source: SignInSource::Own,
         at: at(8),
+        refused: None,
+    });
+    states.push(SignIn::SignedIn {
+        email: None,
+        plan: None,
+        method: SignInMethod::ApiKey,
+        source: SignInSource::Own,
+        at: at(8),
+        refused: Some(at(10)),
     });
     states
 }
@@ -440,6 +450,45 @@ fn setup_events_have_their_json_form() {
     ];
     for (event, json) in cases {
         assert_eq!(serde_json::to_string(&event).unwrap(), json);
+    }
+}
+
+/// `refused` is on the wire only when set, so a host before it and one after it agree.
+#[test]
+fn a_signed_in_carries_refused_only_when_set() {
+    let cases = [
+        (
+            SetupEvent::SignInChanged {
+                agent: claude(),
+                state: SignIn::SignedIn {
+                    email: None,
+                    plan: None,
+                    method: SignInMethod::ApiKey,
+                    source: SignInSource::Own,
+                    at: at(8),
+                    refused: None,
+                },
+            },
+            r#"{"sign_in_changed":{"agent":"claude-acp","state":{"signed_in":{"method":"api_key","source":"own","at":8}}}}"#,
+        ),
+        (
+            SetupEvent::SignInChanged {
+                agent: claude(),
+                state: SignIn::SignedIn {
+                    email: None,
+                    plan: None,
+                    method: SignInMethod::ApiKey,
+                    source: SignInSource::Own,
+                    at: at(8),
+                    refused: Some(at(10)),
+                },
+            },
+            r#"{"sign_in_changed":{"agent":"claude-acp","state":{"signed_in":{"method":"api_key","source":"own","at":8,"refused":10}}}}"#,
+        ),
+    ];
+    for (event, json) in cases {
+        assert_eq!(serde_json::to_string(&event).unwrap(), json);
+        assert_eq!(serde_json::from_str::<SetupEvent>(json).unwrap(), event);
     }
 }
 
