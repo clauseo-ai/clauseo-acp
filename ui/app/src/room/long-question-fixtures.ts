@@ -5,7 +5,9 @@
 // question is a pasted text in fake legal words: about four lines, about 1,000 words, about 27,000 words (160 KB), two
 // pages of Hindi, or 6 MiB played as the host sends it (an Upsert with its first 4 KiB, then AppendText patches of
 // 4 KiB); window.__clauseoLongOpen times its arrival (delivered, first frame, whole), window.__clauseoLongText(words)
-// builds a text to paste into the composer, and window.__clauseoProbeCalls is what was sent.
+// builds a text to paste into the composer, and window.__clauseoProbeCalls is what was sent. ?question=paragraphs is
+// a short question in four paragraphs with one line break inside the third (PARAGRAPHS_QUESTION), for the thread's
+// paragraphs and line breaks.
 
 const PARTIES = [
   "Meridian Agro Traders Pvt. Ltd.",
@@ -93,7 +95,16 @@ export const LONG_ANSWER = [
   "**Next steps.** Collect the original challans, the ledger, the postal receipts for the demand notice, and an affidavit from the managing director. Trace the former warehouse manager now: a summons later is slower than a statement today.",
 ].join("\n\n");
 
-export type LongQuestionKind = "4line" | "2page" | "50page" | "2page-hi" | "6mib";
+/** ?question=paragraphs: a short pasted question in four paragraphs, blank lines between, and one single line break
+ * inside the third (a numbered list), between fake parties, for the thread's paragraphs and line breaks. */
+export const PARAGRAPHS_QUESTION = [
+  "Acme Traders supplied 300 bags of seed to Bluebird Foods in March 2021.",
+  "Bluebird Foods paid nothing, and the cheque it gave for the balance came back unpaid.",
+  "Our questions:\n1. Is a complaint under section 138 of the Negotiable Instruments Act open to Acme Traders?\n2. Does the prior notice clause apply first?",
+  "Please reply by Friday with a short view on the notice and the next steps.",
+].join("\n\n");
+
+export type LongQuestionKind = "4line" | "2page" | "50page" | "2page-hi" | "6mib" | "paragraphs";
 
 /** ?question=…: the kind asked for, or null. */
 export function longQuestionOf(value: string | null): LongQuestionKind | null {
@@ -101,7 +112,8 @@ export function longQuestionOf(value: string | null): LongQuestionKind | null {
     value === "2page" ||
     value === "50page" ||
     value === "2page-hi" ||
-    value === "6mib"
+    value === "6mib" ||
+    value === "paragraphs"
     ? value
     : null;
 }
@@ -113,6 +125,7 @@ export const CHUNK = 4 * 1024;
 
 export function longQuestionText(kind: LongQuestionKind): string {
   if (kind === "2page-hi") return longHindiQuestion();
+  if (kind === "paragraphs") return PARAGRAPHS_QUESTION;
   // about four lines at 1280: one sentence and a short second paragraph
   if (kind === "4line")
     return `${longQuestion(1)} Please reply by Friday with a short view on the notice and on the next steps.`;
