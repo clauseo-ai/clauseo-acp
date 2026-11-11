@@ -49,9 +49,10 @@ fn escaped_len_counts_json_escapes() {
     }
 }
 
-/// The case table the UI's `escapedLen` and code point count read too
-/// (`support/escaped-len-cases.json`), so the composer's checks before sending and the host's
-/// count alike.
+/// The case table (`support/escaped-len-cases.json`): the UI's `escapedLen` (`prompt-cost.ts`),
+/// the escaped length the composer measures when Ask is pressed, reads its `escaped_bytes` too,
+/// so the composer and the host count alike. Its `scalar_values` are the host's Codex count
+/// only; the UI does not check Codex's cap.
 #[test]
 fn escaped_len_meets_the_shared_case_table() {
     let table: serde_json::Value =
