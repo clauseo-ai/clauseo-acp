@@ -1,8 +1,8 @@
 // The Smart App Control note, once (use-sac-note.ts decides when): a quiet status line at the top of the work column,
-// never a dialog. It says Windows is still deciding whether to let apps like Clauseo run, and where to turn Smart App
-// Control off if it later blocks Clauseo. "How to do this" opens the install guide's Smart App Control section through
-// the host's link confirm; "Got it" puts it away for good. Its own chunk, loaded only when it shows; "Got it" is New
-// matter's synced-folder notice's words, Hindi and all.
+// never a dialog. One line: if Windows ever blocks Clauseo, turn Smart App Control off. "How to do this" opens the
+// install guide's Smart App Control section, with the steps, through the host's link confirm; "Got it" puts it away
+// for good. Its own chunk, loaded only when it shows; "Got it" is New matter's synced-folder notice's words, Hindi and
+// all.
 import { Say } from "@clauseo/components/clauseo/say.tsx";
 import { IconAbout } from "@clauseo/components/icons/icons.tsx";
 import { useDisplay } from "@clauseo/components/lib/display.ts";
@@ -17,17 +17,12 @@ export function SacNote({ transport, onGotIt }: { transport: HostTransport; onGo
   const { lang } = useDisplay();
   return (
     <div className="mx-auto box-content max-w-measure px-thread-pad pt-s4" data-testid="sac-note">
-      <div className="flex items-start gap-s2 text-small text-muted" role="status">
-        <span className="mt-s1 flex-none" aria-hidden="true">
+      <div className="flex items-center gap-s2 text-small text-muted" role="status">
+        <span className="flex-none" aria-hidden="true">
           <IconAbout size={16} />
         </span>
         <p className="min-w-0 flex-1">
-          <Say>
-            {rt(
-              lang,
-              "Only if Windows ever blocks Clauseo on this computer: open Windows Security, go to App & browser control, then Smart App Control settings, and turn it off. On an up-to-date Windows 11, you can turn it back on later. Until then, there's nothing to do.",
-            )}
-          </Say>{" "}
+          <Say>{rt(lang, "If Windows ever blocks Clauseo, turn off Smart App Control.")}</Say>{" "}
           <Button
             kind="link"
             size="small"

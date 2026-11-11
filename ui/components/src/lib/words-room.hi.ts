@@ -14,10 +14,10 @@ export const HI = {
   // after D2d, when Claude works on its own inside the Safe workspace (safe-workspace-line.tsx)
   "Safe workspace. Clauseo changes files in this matter without asking. It can't open your other files unless you allow it.":
     "सुरक्षित कार्यक्षेत्र। Clauseo बिना पूछे इस मामले की फ़ाइलें बदलता है। आपकी अनुमति के बिना वह आपकी दूसरी फ़ाइलें नहीं खोल सकता।",
-  // the one-time note on Windows while Smart App Control is still in evaluation (room/sac/). Windows Security's own
-  // labels stay in English, as Windows shows them.
-  "Only if Windows ever blocks Clauseo on this computer: open Windows Security, go to App & browser control, then Smart App Control settings, and turn it off. On an up-to-date Windows 11, you can turn it back on later. Until then, there's nothing to do.":
-    "केवल तभी, जब Windows कभी इस कंप्यूटर पर Clauseo को रोके: Windows Security खोलें, App & browser control में जाएँ, फिर Smart App Control settings में इसे बंद करें। अप-टू-डेट Windows 11 पर आप इसे बाद में फिर से चालू कर सकते हैं। तब तक कुछ करने की ज़रूरत नहीं है।",
+  // the one-time note on Windows while Smart App Control is still in evaluation (room/sac/). "Smart App Control"
+  // stays in English, as Windows shows it.
+  "If Windows ever blocks Clauseo, turn off Smart App Control.":
+    "अगर Windows कभी Clauseo को रोके, तो Smart App Control बंद करें।",
   // the note's link: the install guide's Smart App Control section, through the link confirm
   "How to do this": "यह कैसे करें",
   // the wall's dimmed tiles (room/wall-away.ts), Hindi provisional (stage D, 2026-11-11). A file only online: the
