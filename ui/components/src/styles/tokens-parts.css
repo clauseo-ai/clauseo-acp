@@ -267,7 +267,7 @@
   --ref-offset: 5px; /* a reference's underline clears Devanagari's descenders */
   --ref-touch-pad: 7px; /* a reference grows to a 32 px target, narrow, without moving its line */
   --otherside-pad-end: 18px; /* the other side's plane: 16 above, 20 at the sides, 18 below */
-  --pin-pad-y: 11px; /* the pinned question: two loose lines in a 66 px band */
+  --pin-pad-y: 11px; /* the pinned question: one loose line in a 44 px band */
   --pin-pad-y-narrow: 10px;
   --pin-space: calc(
     4.5rem + 2 * var(--pin-pad-y-narrow) + env(safe-area-inset-top)

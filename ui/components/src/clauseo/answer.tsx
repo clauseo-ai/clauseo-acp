@@ -4,7 +4,6 @@ import { Collapsible as BaseCollapsible } from "@base-ui/react/collapsible";
 import { CollapsiblePanel } from "../ui/collapsible.tsx";
 import { IconFold, IconGoodLaw } from "../icons/icons.tsx";
 import { useWords } from "../lib/words.ts";
-import { langOfText } from "../lib/script.ts";
 import type { Target } from "./hand.ts";
 import {
   isLatinOnly,
@@ -18,6 +17,7 @@ import { AnswerContext, useMatter } from "./matter-context.ts";
 import { useRoom } from "./room-scope.ts";
 import { Say } from "./say.tsx";
 import { Heading } from "./heading.tsx";
+import { FoldedQuestion } from "./question-fold.tsx";
 
 /** "You, 4:31 pm" or "Clauseo, 4:31 pm": who wrote this, and when; "You" alone without a time. */
 export function Who({
@@ -66,9 +66,7 @@ export function QuestionLine({
   return (
     <>
       <Who name={who} time={time} ref={nodes.slot("askedWho")} />
-      <p className="asked" ref={nodes.slot("asked")} lang={langOfText(text)}>
-        <Say>{text}</Say>
-      </p>
+      <FoldedQuestion text={text} ref={nodes.slot("asked")} />
     </>
   );
 }

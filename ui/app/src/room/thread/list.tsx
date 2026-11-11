@@ -106,6 +106,8 @@ function Sections({
         <section
           className="step step-question"
           ref={latest ? nodes.slot("questionStep") : undefined}
+          // the pinned question's press moves the focus here (thread.tsx); never in the tab order
+          tabIndex={latest ? -1 : undefined}
           aria-label={askedRepeats ? undefined : askedName}
         >
           {question}
