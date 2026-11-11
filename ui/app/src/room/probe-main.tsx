@@ -56,6 +56,7 @@ import { SHAPING_ANSWER, SHAPING_QUESTION } from "../testing/shaping-answer.ts";
 import { firstReadProbe } from "./first-read/probe-state.ts";
 import { installsProbe } from "./first-run/probe-installs.ts";
 import { fakeFullScreen } from "./probe-full-screen.ts";
+import { fakeNotched } from "./probe-notched.ts";
 import {
   batch,
   chosen,
@@ -502,6 +503,7 @@ if (longKind !== null) window.__clauseoLongText = longQuestion;
 installDevHooks(connectRoom(transport, queryPatch(location.search)));
 
 fakeFullScreen(page.get("fullscreen"));
+fakeNotched(page.get("notched"), transport);
 
 const container = document.getElementById("root");
 if (container === null) throw new Error("index.html has no #root element");

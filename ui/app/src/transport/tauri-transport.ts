@@ -43,6 +43,7 @@ import type {
   ViewPosition,
 } from "./protocol.ts";
 import { Lane } from "./lane.ts";
+import { FullScreenFeed, type FullScreenSource } from "./full-screen-feed.ts";
 import { LimitsFeed, limitsOf, type LimitsSource } from "./limits-feed.ts";
 import type { SetupFeed } from "./setup-feed.ts";
 
@@ -86,7 +87,9 @@ export type TauriOptions = {
   nextFrame?: (run: () => void) => void;
 };
 
-export class TauriTransport implements HostTransport, AppFeedSource, LimitsSource {
+export class TauriTransport
+  implements HostTransport, AppFeedSource, LimitsSource, FullScreenSource
+{
   readonly kind = "tauri";
   /** UC: whether the desktop carries the protection wire (settings/sections/workspace-shown.ts). Off: the Safe
    * workspace is parked for launch (Rohan, 2026-11-09), so Settings › Safe workspace and the first-run step stay
@@ -125,6 +128,9 @@ export class TauriTransport implements HostTransport, AppFeedSource, LimitsSourc
   #appReady: Promise<void> | null = null;
   /** The limits view the channel carries from `open_stream` on (R16): the last one, and its listeners. */
   readonly #limits: LimitsFeed;
+  /** Whether the main window is in the OS's own full screen, as the desktop says on the app feed: the last value, and
+   * its listeners. */
+  readonly #fullScreen: FullScreenFeed;
   /** The install and sign-in events `subscribe_app` brings (0048): the last of each, and their listeners. Loaded on
    * the first `onSetup` or setup message (setup-feed.ts lives outside the first load); null until then. */
   #setup: SetupFeed | null = null;
@@ -139,6 +145,7 @@ export class TauriTransport implements HostTransport, AppFeedSource, LimitsSourc
     this.#warn = warn;
     this.#nextFrame = options.nextFrame ?? ((run) => requestAnimationFrame(() => run()));
     this.#limits = new LimitsFeed(warn);
+    this.#fullScreen = new FullScreenFeed(warn);
     this.#subs = new Subscriptions(
       {
         subscribe: async (stream, after) => {
@@ -157,7 +164,9 @@ export class TauriTransport implements HostTransport, AppFeedSource, LimitsSourc
         // An `events` arm falls through unheard: the host subscribes no window to a thread's events. The web sources
         // under an answer (room/thread/sources.tsx) come from the view's tool calls, each one's `web`.
         const failed = streamFailedOf(event);
-        if ("setup" in (event as object)) {
+        if (this.#fullScreen.take(event)) {
+          // desktop's own, on the app feed: no stream and no position, processed at once
+        } else if ("setup" in (event as object)) {
           // no stream and no position: processed at once, as settings_changed is
           if (this.#setup !== null) this.#setup.receive(event);
           else {
@@ -215,8 +224,11 @@ export class TauriTransport implements HostTransport, AppFeedSource, LimitsSourc
       // a channel opened again (after a failed open) carries no app events until subscribed again
       opened.then(
         () => {
-          if ((this.#appListeners.size > 0 || this.#setupListeners > 0) && this.#appReady === null)
-            this.#subscribeApp().catch(() => {});
+          const listening =
+            this.#appListeners.size > 0 ||
+            this.#setupListeners > 0 ||
+            this.#fullScreen.listeners > 0;
+          if (listening && this.#appReady === null) this.#subscribeApp().catch(() => {});
         },
         () => {},
       );
@@ -279,6 +291,15 @@ export class TauriTransport implements HostTransport, AppFeedSource, LimitsSourc
    * carries them from `open_stream` on, so nothing is subscribed here. */
   onLimits(listener: (view: LimitsView) => void): () => void {
     return this.#limits.onLimits(listener);
+  }
+
+  /** Hears whether the main window is in the OS's own full screen, as the desktop reads it; one that comes after the
+   * first value hears the last one at once. The desktop sends it on the app feed, which the first listener asks for. */
+  onFullScreen(listener: (fullScreen: boolean) => void): () => void {
+    const stop = this.#fullScreen.onFullScreen(listener);
+    // a refusal is warned in #subscribeApp; the next listener, or the next open, tries again
+    this.#subscribeApp().catch(() => {});
+    return stop;
   }
 
   #onMessage(): void {
