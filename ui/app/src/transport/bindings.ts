@@ -1741,7 +1741,7 @@ export type ErrorCode =
 "matter.folder_is_home" | 
 /** The folder may not be a matter: it is a system folder or a folder of app data or keys, or holds one. */
 "matter.folder_is_system" | 
-/** Clauseo may not read the folder, or its `.clauseo/matter.json` does not read, so it may belong to a matter. */
+/** Clauseo may not read the folder (a `.clauseo/matter.json` that does not read is set aside, not refused, since 2026-11-11). */
 "matter.folder_unreadable" | 
 /** The folder is a matter's folder, or sits inside one or holds one; the error's `matter` names that matter when it is on Clauseo's list. */
 "matter.folder_is_matter" | 

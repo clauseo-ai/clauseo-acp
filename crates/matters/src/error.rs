@@ -172,7 +172,8 @@ pub enum Refusal {
     Listed(PathBuf),
     /// It holds a `.clauseo/matter.json` naming this matter: it already belongs to one.
     AlreadyMatter(MatterId),
-    /// It holds a `.clauseo/matter.json` that does not read, so it may belong to a matter.
+    /// It holds a `.clauseo/matter.json` that does not read. Not produced since 2026-11-11: an
+    /// import sets such a marker aside and goes on.
     UnreadableMatterJson,
     /// It is, contains or sits inside the matters root.
     MattersRoot,
