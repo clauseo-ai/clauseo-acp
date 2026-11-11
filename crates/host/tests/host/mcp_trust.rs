@@ -76,7 +76,8 @@ fn claude_allows_the_listed_servers_it_gets() {
 }
 
 /// A server turned on but not sent gets no allow rule: one whose program is missing, and a
-/// remote one (not yet started). The trust is the servers the session gets.
+/// remote one to an agent that takes none (no `mcpCapabilities.http`). The trust is the servers
+/// the session gets.
 #[test]
 fn claude_allows_only_the_servers_it_is_sent() {
     let dir = Dir::new("mcp_trust_claude_sent", &[]);
@@ -99,6 +100,36 @@ fn claude_allows_only_the_servers_it_is_sent() {
     let host = dir.start_launching(0, Arc::<Wired>::clone(&launcher), |config| {
         config.with_mcp_resolver(Arc::new(finds))
     });
+    let matter = host.create_matter("m", &dir.folder("m", &[]));
+    turn(&host, host.create_thread(matter, CLAUDE));
+    host.shutdown();
+}
+
+/// A remote server sent to an agent that takes them (`mcpCapabilities.http`) joins the trust
+/// like a local one: the session gets it and an allow rule for it.
+#[test]
+fn claude_allows_a_remote_server_it_is_sent() {
+    let dir = Dir::new("mcp_trust_claude_remote", &[]);
+    let far = json!({"type": "http", "name": "far", "url": "https://tools.example.com/mcp",
+        "headers": []});
+    let params = json!({"mcpServers": [entry("case"), entry("docs"), far],
+        "_meta": {"claudeCode": {"options": {
+            "allowedTools": ["mcp__case", "mcp__docs", "mcp__far"]}}}});
+    let lines = agent_lines("trust-remote", "session/new", &params, &[]).replace(
+        r#""agentCapabilities":{"loadSession":true}"#,
+        r#""agentCapabilities":{"loadSession":true,"mcpCapabilities":{"http":true}}"#,
+    );
+    assert!(
+        lines.contains("mcpCapabilities"),
+        "the rig's initialize answer changed"
+    );
+    let claude = template(&dir, "trust-remote", &lines);
+    let mut extra = claude_settings(&dir);
+    extra["mcp"]["servers"]["far"] =
+        json!({"url": "https://tools.example.com/mcp", "enabled": true});
+    settings(&dir, agents(&[(CLAUDE, &claude, json!({}))]), extra);
+    let launcher = Wired::new(&dir);
+    let host = dir.start_launching(0, Arc::<Wired>::clone(&launcher), |config| config);
     let matter = host.create_matter("m", &dir.folder("m", &[]));
     turn(&host, host.create_thread(matter, CLAUDE));
     host.shutdown();

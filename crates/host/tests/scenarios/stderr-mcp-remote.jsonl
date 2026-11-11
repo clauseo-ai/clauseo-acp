@@ -1,0 +1,6 @@
+{"scenario":"stderr-mcp-remote","description":"No handshake: writes stderr lines as an adapter's MCP client might, holding a lawyer's remote server's URL (a token in its path and its query) and header values the host filled, then exits 1","on_stdin_close":"exit"}
+{"stderr":{"line":"MCP server docs: POST https://mcp.example.com/v1/p4thToken77/mcp?key=q7QueryToken12&region=uk failed: 401"}}
+{"stderr":{"line":"retrying /v1/p4thToken77/mcp?key=q7QueryToken12&region=uk with key=q7QueryToken12"}}
+{"stderr":{"line":"request headers: {\"X-Api-Key\":\"x5HeaderToken77\",\"X-Tenant\":\"firm-tenant-0042\"}"}}
+{"stderr":{"line":"stderr-mcp-remote: last line"}}
+{"exit":{"code":1}}

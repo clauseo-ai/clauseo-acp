@@ -180,7 +180,7 @@ source: crates/settings/src/schema/tests.rs
           "type": "object"
         },
         {
-          "description": "A server at an `https` URL (`http` only for `localhost` or `127.0.0.1`). Stored and\nshown; this version sends it to no agent.",
+          "description": "A server at an `https` URL (`http` only for `localhost` or `127.0.0.1`). Sent to an\nagent that takes remote MCP servers (ACP's `mcpCapabilities.http`), which reaches it.",
           "properties": {
             "headers": {
               "additionalProperties": {

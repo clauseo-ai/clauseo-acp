@@ -113,6 +113,30 @@ fn note_mcp_sent(actor: &mut Actor, thread: ThreadId, trusted: &[String], case_l
     }
 }
 
+/// Of the lawyer's servers `sent` to `thread`'s session, the ones that run unasked
+/// (`agent/mcp_trust.rs`): only a server the agent gets, so the trust never names one left out,
+/// nor a remote one when the agent takes none (no `mcpCapabilities.http`: `clauseo-acp` leaves
+/// it out of the session call).
+fn trusted_sent(
+    actor: &mut Actor,
+    thread: ThreadId,
+    control: loads::McpControl,
+    sent: &[McpServer],
+) -> Vec<String> {
+    let http = super::state(actor, thread)
+        .and_then(|state| state.agent.as_deref())
+        .and_then(|agent| agent.info.as_ref())
+        .is_some_and(|info| info.mcp_http);
+    let gets = |server: &McpServer| http || !matches!(server, McpServer::Http { .. });
+    let mut trusted =
+        crate::agent::mcp_trust::trusted_servers(&actor.effective.settings().mcp.servers, control);
+    trusted.retain(|name| {
+        sent.iter()
+            .any(|server| server.name() == name && gets(server))
+    });
+    trusted
+}
+
 /// The `_meta`, MCP servers and extra roots for `thread`'s `session/new`, `session/load` or
 /// `session/resume`, whose matter folder is `matter`: the profile hook's `_meta` with the
 /// host's switches and keys over it and its tokens filled (the hook gets this launch's own skill
@@ -178,11 +202,7 @@ pub(super) fn session_loads(
     // The lawyer's servers this session gets, and those left out (a keychain value or the
     // program missing, the Safe workspace).
     let (lawyer_sent, left_out) = lawyer_servers(actor, &run, control);
-    // Of those, the ones that run unasked (`agent/mcp_trust.rs`): only a server this session is
-    // sent, so the trust never names one left out.
-    let mut trusted =
-        crate::agent::mcp_trust::trusted_servers(&actor.effective.settings().mcp.servers, control);
-    trusted.retain(|name| lawyer_sent.iter().any(|server| server.name() == name));
+    let trusted = trusted_sent(actor, thread, control, &lawyer_sent);
     let claude = (kind == Some(AgentKind::Claude)).then_some(ClaudeKeys {
         web_search,
         login,

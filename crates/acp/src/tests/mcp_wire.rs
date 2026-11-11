@@ -282,3 +282,122 @@ fn debug_shows_names_and_no_secret_values() {
         assert!(!printed.contains(secret), "{secret} in {printed}");
     }
 }
+
+/// Before `initialize` answers, the agent's `mcpCapabilities` are not known: no http server
+/// goes.
+#[test]
+fn no_http_server_goes_before_initialize_answers() {
+    let (client, _events, driver, mut agent) = pipes();
+    let calls = async move {
+        let new = client.new_session(NewSession {
+            cwd: cwd(),
+            additional_directories: Vec::new(),
+            mcp_servers: vec![http_server(), server()],
+            meta: None,
+        });
+        new.await.unwrap();
+    };
+    let script = async {
+        let new = agent.read().await;
+        assert_eq!(new["method"], "session/new");
+        assert_eq!(new["params"]["mcpServers"], json!([expected_server()]));
+        agent.respond(&new, &json!({"sessionId": "s-1"}));
+        assert!(agent.written.next().await.is_none());
+    };
+    let (driver, (), ()) =
+        futures::executor::block_on(async { futures::join!(driver, calls, script) });
+    assert_eq!(driver, Ok(()));
+}
+
+/// Every formatted log line, for the test to read.
+#[derive(Clone, Default)]
+struct Captured(std::sync::Arc<std::sync::Mutex<Vec<u8>>>);
+
+impl io::Write for Captured {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        self.0.lock().unwrap().extend_from_slice(buf);
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
+
+impl tracing_subscriber::fmt::MakeWriter<'_> for Captured {
+    type Writer = Captured;
+
+    fn make_writer(&self) -> Captured {
+        self.clone()
+    }
+}
+
+/// A server left out on `http: false` is logged once on the connection, at WARN with its name,
+/// however many sessions it was meant for; a second server gets its own line.
+#[test]
+fn a_left_out_http_server_is_logged_once_per_connection() {
+    let captured = Captured::default();
+    let subscriber = tracing_subscriber::fmt()
+        .with_ansi(false)
+        .with_writer(captured.clone())
+        .finish();
+    tracing::subscriber::with_default(subscriber, || {
+        let (client, _events, driver, mut agent) = pipes();
+        let other = McpServer::Http {
+            name: "wiki".to_owned(),
+            url: "https://wiki.example.com/mcp".to_owned(),
+            headers: Vec::new(),
+        };
+        let calls = async move {
+            client.initialize().await.unwrap();
+            let new = client.new_session(NewSession {
+                cwd: cwd(),
+                additional_directories: Vec::new(),
+                mcp_servers: vec![http_server()],
+                meta: None,
+            });
+            new.await.unwrap();
+            client
+                .load_session(load("s-0", vec![http_server(), other.clone()]))
+                .await
+                .unwrap();
+            client
+                .resume_session(load("s-2", vec![http_server(), other]))
+                .await
+                .unwrap();
+        };
+        let script = async {
+            agent
+                .initialize_with(json!({"mcpCapabilities": {"http": false}}))
+                .await;
+            for answer in [json!({"sessionId": "s-1"}), json!({}), json!({})] {
+                let request = agent.read().await;
+                // `session/resume` leaves out an empty list (the schema's `skip_serializing_if`).
+                let servers = request["params"].get("mcpServers");
+                assert!(
+                    servers.is_none_or(|servers| servers == &json!([])),
+                    "{request}"
+                );
+                agent.respond(&request, &answer);
+            }
+            assert!(agent.written.next().await.is_none());
+        };
+        let (driver, (), ()) =
+            futures::executor::block_on(async { futures::join!(driver, calls, script) });
+        assert_eq!(driver, Ok(()));
+    });
+    let log = String::from_utf8(captured.0.lock().unwrap().clone()).unwrap();
+    let lines: Vec<&str> = log
+        .lines()
+        .filter(|line| line.contains("left out an http MCP server"))
+        .collect();
+    assert_eq!(lines.len(), 2, "{log}");
+    assert!(
+        lines[0].contains("WARN") && lines[0].contains("server=\"docs\""),
+        "{log}"
+    );
+    assert!(lines[1].contains("server=\"wiki\""), "{log}");
+    for secret in ["s3cret-header", "firm-7", "example.com"] {
+        assert!(!log.contains(secret), "{secret} in {log}");
+    }
+}

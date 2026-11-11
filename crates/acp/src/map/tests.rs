@@ -501,6 +501,15 @@ fn agent_info_without_a_title_has_none() {
     assert_eq!(info.title, None);
 }
 
+/// `mcpCapabilities.http` reaches the host, which trusts a remote server only where it goes.
+#[test]
+fn agent_info_says_whether_the_agent_takes_http_mcp_servers() {
+    assert!(!agent_info(initialize_answer(None)).mcp_http);
+    let answer = json!({"protocolVersion": 1,
+        "agentCapabilities": {"mcpCapabilities": {"http": true, "sse": false}}});
+    assert!(agent_info(serde_json::from_value(answer).unwrap()).mcp_http);
+}
+
 #[test]
 fn agent_info_absent_has_no_title() {
     let info = agent_info(initialize_answer(None));
