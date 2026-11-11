@@ -1611,6 +1611,22 @@ Record 0030 has the entry; this is the browser's side of it.
   (`servers::no_browser`), no browser in its header (the app offers no browser action), and a
   line telling the lawyer a Claude conversation can open web pages. The way back is the elevated
   sandbox (its firewall) or an authenticated daemon. Claude on Windows keeps its shell tool.
+- **No browser for Claude on macOS and Linux, for launch** (2026-11-11, security review of
+  #940). Claude's shell `agent-browser` would have to run outside Claude Code's sandbox
+  (`excludedCommands`), and Claude Code 2.1.293's exclusion check reworks a command before it
+  matches: it strips `env` and rewrites `VAR=` prefixes, so `PATH=$CLAUDE_CODE_TMPDIR
+  agent-browser …` would run a program Claude wrote, unsandboxed, and quoting (`-q "upload"`,
+  `e"v"al`, a tab) would run unsandboxed and slip past the ask rules. So on macOS and Linux a
+  Claude session gets no browser, whether or not its sandbox ends up on (`servers::no_browser` is
+  true for Claude there): no entry, no `agent-browser` on its `PATH`, no `AGENT_BROWSER_*`
+  variables, no browser in its header (the app offers no browser action), and the no-browser
+  sentence ("You have no browser in this session."), so it reads pages with web fetch and `curl`.
+  The app copies no `agent-browser` into `<data>/tools` there, so no session gets that folder or
+  the browser's skill (`servers::shell_browser`): Codex's entry runs the bundled sidecar itself.
+  The agent-browser ask and allow rules stay in the code, with no session to apply to. Codex
+  keeps its guarded entry on macOS and Linux, and Windows is unchanged: Claude's shell browser is
+  Windows-only for launch, and the Claude-only line Codex gets there stays true. The way back is
+  a Clauseo-owned shim, after launch (record 0030, "Claude's sandbox").
 - **Accepted at Claude parity** (H2, M1, and no prompts). With no proxy, nothing stops Chrome
   reaching loopback or private addresses after a redirect or a page's own navigation; the guard
   checks only the address it is given. A page on `127.0.0.1:<debugging port>` could ask Chrome's

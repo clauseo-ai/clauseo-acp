@@ -885,7 +885,10 @@ Clauseo's browser is agent-browser, a command the agents run, which drives the c
 Google Chrome (on Windows, Microsoft Edge when no Chrome is installed) through Chrome's remote
 debugging, in a fresh profile for each session. With neither installed, the agents get no browser
 and the app tells the lawyer what to install; a browser installed later reaches the agents in the
-next new conversation, with no need to reopen Clauseo. The browser doesn't go through Clauseo's egress proxy, so
+next new conversation, with no need to reopen Clauseo. For launch, which conversations have it
+depends on the agent: on a Mac, Codex conversations have the browser and Claude conversations
+don't (they read web pages with Claude's web fetch tool); on Windows, Claude conversations have
+it and Codex conversations don't. The browser doesn't go through Clauseo's egress proxy, so
 `network.allowed_domains` and the unsafe-site list don't apply to it; Chrome or Edge uses its own
 network settings.
 
