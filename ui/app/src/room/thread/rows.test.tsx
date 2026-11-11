@@ -95,6 +95,8 @@ test("the answer under a step group stands the reply's space below it; first in 
   }
 });
 
+const TOO_LONG =
+  "That was too long for {name} to read at once. Shorten your question, or ask it in a new conversation. Your question and the answer so far are kept.";
 test("each stop: always a turn-stopped row with its reason, and its line where it has one", async () => {
   h = await mountRoom();
   const stops: [StepEntry["stop"], StepEntry["failure"] | undefined, string][] = [
@@ -115,6 +117,7 @@ test("each stop: always a turn-stopped row with its reason, and its line where i
         { name: "Claude" },
       ),
     ],
+    ["too_long", undefined, th("en", TOO_LONG, { name: "Claude" })],
     ["max_tokens", undefined, th("en", "The answer stopped at its limit, before it finished.")],
     [
       "max_turn_requests",

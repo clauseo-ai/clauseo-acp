@@ -101,6 +101,9 @@ test("a turn ended on the lawyer's refusal is no answer ready, as a Stop is not"
   expect(needOf({ status: "idle", seen: false, last_stop: { reason: "end_turn", at: 1 } })).toBe(
     "ready",
   );
+  // a turn too long for the model to read is the model's stop, as a refusal is: ready to read, never failed
+  for (const reason of ["refusal", "too_long"] as const)
+    expect(needOf({ status: "idle", seen: false, last_stop: { reason, at: 1 } })).toBe("ready");
 });
 
 test("a matter's row names the thread behind it: the oldest waiting, over an answer ready", () => {

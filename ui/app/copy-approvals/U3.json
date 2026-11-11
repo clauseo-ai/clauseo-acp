@@ -1007,5 +1007,38 @@
     "at": "2026-11-11",
     "by": "Rohan",
     "note": "Rohan, folder PR 2: where no name is at hand; U2-31's approved line (the form names a listed matter, ME-12)"
+  },
+  "U3-54": {
+    "en": "That was too long for {name} to read at once. Shorten your question, or ask it in a new conversation. Your question and the answer so far are kept.",
+    "hi": "यह {name} के लिए एक बार में पढ़ने के लिए बहुत लंबा था। अपना प्रश्न छोटा करें, या उसे एक नई बातचीत में पूछें। आपका प्रश्न और अब तक का उत्तर रखे गए हैं।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-11",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "approved",
+    "at": "2026-11-11",
+    "by": "orchestrator (settled en)",
+    "note": "A turn ended StopReason::TooLong: the model refused it as too long to read, the question alone or the conversation with it (stops.ts); {name} is the agent as U3-52 names it. Settled for Claude and ChatGPT; another agent's own name fills the same slot"
+  },
+  "U3-55": {
+    "en": "That was too long for the AI to read at once. Shorten your question, or ask it in a new conversation. Your question and the answer so far are kept.",
+    "hi": "यह AI के लिए एक बार में पढ़ने के लिए बहुत लंबा था। अपना प्रश्न छोटा करें, या उसे एक नई बातचीत में पूछें। आपका प्रश्न और अब तक का उत्तर रखे गए हैं।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-11",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-11",
+    "by": "app track (provisional; the fallback as U3-53's the AI, orchestrator to settle)",
+    "note": "U3-54 where the room knows no agent name (stops.ts), as U3-53; rendered alone"
+  },
+  "U3-err-prompt.too_long": {
+    "en": "This question is too long to send. Save the text as a file in the matter's folder, then ask about it. Your words are kept.",
+    "hi": "यह प्रश्न भेजने के लिए बहुत लंबा है। पाठ को मामले के फ़ोल्डर में एक फ़ाइल के रूप में सहेजें, फिर उसके बारे में पूछें। आपके शब्द रखे गए हैं।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-11",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "approved",
+    "at": "2026-11-11",
+    "by": "orchestrator (settled en)",
+    "note": "prompt.too_long: a question over MAX_PROMPT_TEXT_BYTES, refused by the composer before it sends (prompt-cost.ts) or by the host, on the working line; on a queued message's edit, under the queue's head. The field keeps the words"
   }
 }

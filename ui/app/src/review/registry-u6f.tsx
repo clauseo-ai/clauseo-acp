@@ -4,7 +4,8 @@
 // named by its settings id. The nameless lines (U6F-09 to U6F-12) show only where no name is known at all, which the
 // room never has today (a thread always names its agent's id), so they render by themselves. U3-52 and U3-53, the
 // thread's line for a turn Clauseo stopped on the agent's request for files outside the matter, name the agent the same
-// way: Codex's turn as ChatGPT, and the AI alone.
+// way: Codex's turn as ChatGPT, and the AI alone. So do U3-54 and U3-55, the line for a turn the model refused as too
+// long to read (StopReason too_long).
 import type { Lang } from "@clauseo/components/lib/display.ts";
 import { th } from "@clauseo/components/lib/words-thread.ts";
 import { type AgentName, errorWords as sentence } from "@clauseo/components/lib/words-errors.ts";
@@ -201,6 +202,40 @@ export const U6F: Entry[] = [
           {th(
             lang,
             "Clauseo stopped the answer: the AI tried to open files outside this matter. The answer so far is kept.",
+          )}
+        </p>
+      </main>
+    ),
+  },
+  {
+    id: "U3-54",
+    words: threadWords(
+      "That was too long for {name} to read at once. Shorten your question, or ask it in a new conversation. Your question and the answer so far are kept.",
+    ),
+    screen: "room/thread",
+    render: () => (
+      <RoomOver
+        host={() =>
+          threadHost({
+            entries: [QUESTION, ANSWER, step(7, { stop: "too_long" })],
+            agent: "codex-acp",
+          })
+        }
+      />
+    ),
+  },
+  {
+    id: "U3-55",
+    words: threadWords(
+      "That was too long for the AI to read at once. Shorten your question, or ask it in a new conversation. Your question and the answer so far are kept.",
+    ),
+    screen: "room/thread",
+    render: (lang: Lang) => (
+      <main lang={lang} className="review-alone">
+        <p>
+          {th(
+            lang,
+            "That was too long for the AI to read at once. Shorten your question, or ask it in a new conversation. Your question and the answer so far are kept.",
           )}
         </p>
       </main>

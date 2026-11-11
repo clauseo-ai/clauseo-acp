@@ -101,6 +101,7 @@ export type ErrorCode =
   | "word.not_docx"
   | "word.edit_failed"
   | "agent.offline"
+  | "prompt.too_long"
   | "unknown";
 
 /** The thread's own sentence for an answer cut short: its Hindi lives in words-thread.ts, once. */
@@ -280,6 +281,10 @@ export const ERROR_WORDS: Record<WordedCode, ErrorKey> = {
   // the connection dropped mid-answer (D-050); provisional, with Try again under the answer
   "agent.offline":
     "You're offline, so the answer stopped. The answer so far is kept. Try again when you're back online.",
+  // a question over the host's cap on a prompt's text (MAX_PROMPT_TEXT_BYTES): refused by the host, or by the composer
+  // before it sends; the draft stays in the field. Settled by the orchestrator (2026-11-11)
+  "prompt.too_long":
+    "This question is too long to send. Save the text as a file in the matter's folder, then ask about it. Your words are kept.",
   // a code from a newer Clauseo: as internal reads, since this version can say nothing truer
   unknown: "Something went wrong inside Clauseo.",
 };
