@@ -56,11 +56,12 @@ else. `docs/counts-worker.md` describes what is accepted, stored and kept, and h
 - **Retention.** A pure-SQL cron runs daily at 03:00 UTC, not weekly. It deletes `report` rows
   older than 90 days (gone at most 91 days after their day), `tally` rows whose week is older than
   396 days (gone at most 403 days after the week's Monday), and `rate` rows of past days. The
-  Worker computes the cut-offs with the crate's `Day` and `Week` and reads only the keys each
-  delete returns. The deletes are chunked: at most 1,000 rows a statement, behind a cursor in key
-  order (`WITHOUT ROWID` has no rowid to page by), and at most 40 statements a run. A larger
-  backlog is cleared over the next days. Time Travel adds 7 days on Workers Free, not S23's 30 on
-  Paid.
+  Worker computes the cut-offs with the crate's `Day` and `Week`. The deletes go by fixed ranges
+  of the key's first hex digit (`0` to `f`, the last range ending below `g`; the crate stores
+  lowercase UUID v4 ids, which spread evenly): 16 for `report`, 16 for `tally` and one for
+  `rate`, 33 statements under the 40-statement budget. No statement returns rows and none has a
+  `LIMIT`, so the Worker decodes nothing per row, and one run clears the whole backlog. Time
+  Travel adds 7 days on Workers Free, not S23's 30 on Paid.
 - **The account ID.** Wrangler uses the one account the token sees. An optional environment
   secret `CLOUDFLARE_ACCOUNT_ID` is for a token that sees more; GitHub masks secrets, and an empty
   one is dropped before wrangler runs. No step runs `wrangler whoami`.
@@ -88,8 +89,8 @@ else. `docs/counts-worker.md` describes what is accepted, stored and kept, and h
 - **The deploy.** `counts-deploy.yml` runs on pushes to `main` that touch the Worker,
   `crates/counts` or `crates/protocol`, so a new value in the crate needs no Worker change. It
   finds the D1 database by name or creates it with `--jurisdiction=eu`, and never falls back to
-  another jurisdiction. Its `check` action prints one count for one given id, as run logs on this
-  public repo are public.
+  another jurisdiction. Its `check` action takes no input and prints only the two canary counts,
+  as run logs on this public repo are public.
 
 Left out of the launch cut, with no stubs: `/v1/crash` and R2, `/dash`, `/v1/query` and
 `/v1/releases` with Access, JWT checks and `sqlparser`, the unreleased-version check and the
@@ -117,9 +118,12 @@ release (S23)" step stays as it is, skipped while `COUNTS_RELEASES_ENABLED` is u
 - The caps are sized for the beta: about 3,000 installs' requests a day. Raising them is a change
   to `src/route.rs`, as production has no variable for them. A sender past the cap retries, so a
   full day delays counts but does not lose them while they stay within the 14-day window.
-- A cron run decodes the keys its deletes return, up to 40,000 in a flood. That may pass Free's
-  10 ms of CPU. The run then stops part-way, its finished chunks stay deleted, and the next day's
-  run continues.
+- A cron run's CPU is the same at any backlog: 33 statements with nothing returned. A range
+  that holds many expired rows is D1's work, not the Worker's. If a run fails part-way, the ranges
+  it finished stay deleted and the next day's run deletes the rest.
+- The canary ids are public, so anyone can send rows under them. `check` showing rows means only
+  that some request landed. That is why the live check runs it right after its own POST and
+  deletes the rows.
 - **Alerting / Workers Paid**, after launch. Nothing alerts on a spent cap, failing inserts or a
   filling database, and a flood can fill Free's 500 MB (above). Workers Paid raises the limits
   and Time Travel to 30 days; alerting should land with it or before.

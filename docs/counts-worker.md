@@ -75,8 +75,10 @@ A cron runs every day at 03:00 UTC. It deletes:
   week's Monday, which is 397 days after the week ends (about 13 months);
 - `rate` rows of days before today.
 
-The deletes go in chunks of at most 1,000 rows, and at most 40 statements a run (Workers Free
-allows 50 D1 queries a run). A backlog larger than one run is cleared over the next days' runs.
+The deletes go by the first hex digit of the key, `0` to `f`: 16 ranges for `report`, 16 for
+`tally` and one `rate` delete, 33 statements a run (Workers Free allows 50 D1 queries a run).
+No statement returns rows, so a run costs the Worker the same CPU at any backlog, and one run
+clears it all.
 
 D1's Time Travel can also restore the database to any point in the last 7 days on Workers Free
 (30 days on Workers Paid), and it cannot be turned off. So a deleted row can be recovered for
@@ -170,6 +172,10 @@ and `c0ffee00-0000-4000-8000-000000000002` for the tally (`CANARY_INSTALL` and `
 3. Run the deploy workflow by hand with `action: check`. It takes no input. It prints
    `canary report rows: N` and `canary tally rows: M`, then deletes the canary rows, so the check
    leaves nothing behind.
+
+The canary ids are public, in this repo, so anyone can send rows under them. `check` showing
+rows means only that *some* request with those ids landed, not that it was ours. That is why the
+live check runs `check` right after its own POSTs, and deletes the rows each time.
 
 ### One-time set-up
 
