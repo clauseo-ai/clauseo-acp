@@ -9,10 +9,7 @@ use clauseo_protocol::{CompactString, TextOrBlob, ToolCallPatch, ToolCallStatus,
 use clauseo_settings::McpServerLaunch;
 use serde_json::{Value, json};
 
-use super::{
-    CodexCalls, claude_rule, codex_call, codex_standalone_server, codex_standalone_tool,
-    is_trusted, never_asks, trusted_servers,
-};
+use super::{CodexCalls, claude_rule, codex_call, is_trusted, never_asks, trusted_servers};
 use crate::agent::loads::McpControl;
 
 fn launch(enabled: bool) -> McpServerLaunch {
@@ -208,58 +205,6 @@ fn a_codex_call_needs_its_title_and_input_to_agree() {
     );
 }
 
-#[test]
-fn a_standalone_codex_approval_names_its_server_twice() {
-    let input = |server: &str| {
-        json!({"serverName": server, "description": "Allow the docs MCP server to run tool \"search\"?",
-            "schema": {"type": "object", "properties": {}}})
-    };
-    let docs = input("docs");
-    assert_eq!(
-        codex_standalone_server("sess-1", "elicitation:sess-1:docs:0", Some(&docs)),
-        Some("docs")
-    );
-    assert_eq!(
-        codex_standalone_server("sess-1", "elicitation:sess-1:docs:17", Some(&docs)),
-        Some("docs")
-    );
-    for id in [
-        "elicitation:sess-2:docs:0",
-        "elicitation:sess-1:docs-2:0",
-        "elicitation:sess-1:doc:0",
-        "elicitation:sess-1:docs:",
-        "elicitation:sess-1:docs:1a",
-        "elicitation:sess-1:docs",
-        "elicitation-sess-1:docs:0",
-        "tc-1",
-    ] {
-        assert_eq!(
-            codex_standalone_server("sess-1", id, Some(&docs)),
-            None,
-            "{id}"
-        );
-    }
-    // The id's server and `serverName` must be the same: `case` never stands for `case-law`.
-    let case = input("case");
-    assert_eq!(
-        codex_standalone_server("sess-1", "elicitation:sess-1:case-law:0", Some(&case)),
-        None
-    );
-    let law = input("case-law");
-    assert_eq!(
-        codex_standalone_server("sess-1", "elicitation:sess-1:case:0", Some(&law)),
-        None
-    );
-    assert_eq!(
-        codex_standalone_server("sess-1", "elicitation:sess-1:docs:0", None),
-        None
-    );
-    assert_eq!(
-        codex_standalone_server("sess-1", "elicitation:sess-1::0", Some(&input(""))),
-        None
-    );
-}
-
 fn call(id: &str, title: &str, input: Option<Value>, status: ToolCallStatus) -> ToolCall {
     ToolCall {
         acp_id: CompactString::from(id),
@@ -362,24 +307,99 @@ fn only_the_built_in_case_laws_search_and_read_tools_never_ask() {
     );
 }
 
-/// A standalone approval names its tool only in Codex's exact fallback message.
+/// A listed name holds only ASCII letters, digits, `_` and `-`
+/// (`clauseo_settings`'s `leaf/mcp.rs` `mcp_name_ok`), so no `.` or `:` can make a title or an
+/// id ambiguous; even so, the server is the input's own field, compared byte for byte.
 #[test]
-fn a_standalone_codex_approval_names_its_tool_in_the_exact_message() {
-    let input = |text: &str| json!({"serverName": "case-law", "description": text});
-    let tool =
-        |text: &str| codex_standalone_tool("case-law", Some(&input(text))).map(str::to_owned);
+fn dots_colons_and_case_cannot_fake_a_server() {
+    // The server and tool come from the input; the title must be exactly theirs.
     assert_eq!(
-        tool("Allow the case-law MCP server to run tool \"search_law\"?").as_deref(),
-        Some("search_law")
+        codex_call("mcp.a.b.c", &json!({"server": "a.b", "tool": "c"})),
+        Some(("a.b", "c"))
     );
-    for text in [
-        "Allow the case-law MCP server to run tool \"recharge\"? Or search_law",
-        "Allow the case MCP server to run tool \"search_law\"?",
-        "Allow the case-law MCP server to run tool \"\"?",
-        "Allow the case-law MCP server to run tool \"a\"b\"?",
-        "Run search_law?",
-    ] {
-        assert_eq!(tool(text), None, "{text}");
-    }
-    assert_eq!(codex_standalone_tool("case-law", None), None);
+    assert_eq!(
+        codex_call("mcp.a.b.c", &json!({"server": "a", "tool": "b.c"})),
+        Some(("a", "b.c"))
+    );
+    assert!(!is_trusted(&names(&["a"]), "a.b"));
+    // Case-sensitive, byte for byte.
+    assert_eq!(
+        codex_call(
+            "mcp.Docs.search",
+            &json!({"server": "Docs", "tool": "search"})
+        ),
+        Some(("Docs", "search"))
+    );
+    assert!(!is_trusted(&names(&["docs"]), "Docs"));
+    assert_eq!(
+        codex_call(
+            "mcp.Docs.search",
+            &json!({"server": "docs", "tool": "search"})
+        ),
+        None
+    );
+    assert!(!is_trusted(&names(&["docs"]), "docs:1"));
+    // No server field, or not a string: no pass.
+    assert_eq!(
+        codex_call("mcp.docs.search", &json!({"tool": "search", "server": 1})),
+        None
+    );
+    assert_eq!(
+        codex_call(
+            "mcp.docs.search",
+            &json!({"server": null, "tool": "search"})
+        ),
+        None
+    );
+}
+
+/// Only an MCP call is kept: a dynamic tool (it has a `name`) or a shell command (its input is a
+/// command), even with a server-like input and an MCP-like title, never is; nor is the same call
+/// kept twice.
+#[test]
+fn only_mcp_calls_are_kept_once() {
+    let mut calls = CodexCalls::default();
+    let input = json!({"server": "docs", "tool": "search"});
+    let mut named = call(
+        "tc-dyn",
+        "mcp.docs.search",
+        Some(input.clone()),
+        ToolCallStatus::InProgress,
+    );
+    named.tool_name = Some(CompactString::from("search"));
+    calls.started(&named);
+    calls.started(&call(
+        "tc-shell",
+        "mcp.docs.search",
+        Some(json!({"command": ["mcp.docs.search"], "cwd": "/m", "server": "docs", "tool": "search"})),
+        ToolCallStatus::Pending,
+    ));
+    assert_eq!(calls.len(), 0);
+    let mcp = call(
+        "tc-1",
+        "mcp.docs.search",
+        Some(input),
+        ToolCallStatus::InProgress,
+    );
+    calls.started(&mcp);
+    calls.started(&mcp);
+    assert_eq!(calls.len(), 1);
+}
+
+/// A call is taken by the host's one answer: a second request naming it finds nothing.
+#[test]
+fn a_call_is_answered_once() {
+    let mut calls = CodexCalls::default();
+    let input = json!({"server": "docs", "tool": "search"});
+    calls.started(&call(
+        "tc-1",
+        "mcp.docs.search",
+        Some(input),
+        ToolCallStatus::InProgress,
+    ));
+    assert_eq!(
+        calls.take("tc-1"),
+        Some(("docs".to_owned(), "search".to_owned()))
+    );
+    assert_eq!(calls.take("tc-1"), None);
 }

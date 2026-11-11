@@ -114,8 +114,20 @@ impl Sources {
         self.codex_mcp.updated(acp_id, patch);
     }
 
+    /// How many Codex MCP calls are kept.
+    #[cfg(test)]
+    pub(crate) fn codex_mcp_len(&self) -> usize {
+        self.codex_mcp.len()
+    }
+
     /// The MCP server and tool of the Codex call `acp_id`, started in a live turn and not
-    /// finished (`agent::mcp_trust::CodexCalls`).
+    /// finished (`agent::mcp_trust::CodexCalls`), taken: a second ask finds none.
+    pub(crate) fn take_codex_mcp_call(&mut self, acp_id: &str) -> Option<(String, String)> {
+        self.codex_mcp.take(acp_id)
+    }
+
+    /// [`Self::take_codex_mcp_call`] without taking it.
+    #[cfg(test)]
     pub(crate) fn codex_mcp_call(&self, acp_id: &str) -> Option<(&str, &str)> {
         self.codex_mcp.call(acp_id)
     }

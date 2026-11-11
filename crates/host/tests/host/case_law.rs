@@ -33,17 +33,17 @@ impl RelayEvents for NoEvents {
 }
 
 /// The fake connector, its handle and the app's relays.
-struct Connector {
+pub(crate) struct Connector {
     fake: FakeHandle,
     _scratch: ScratchDir,
     _connectors: Connectors,
     handle: ConnectorHandle,
-    relays: Relays,
+    pub(crate) relays: Relays,
 }
 
 impl Connector {
     /// The connector, `signed_in` with an API key the fake accepts or not added.
-    fn new(signed_in: bool) -> Self {
+    pub(crate) fn new(signed_in: bool) -> Self {
         let fake = FakeConnector::start(FakeOptions::default()).unwrap();
         let scratch = ScratchDir::new("host-case-law").unwrap();
         let config = fake.config(scratch.state_file());
@@ -135,7 +135,7 @@ fn hook() -> Hook {
 }
 
 /// The hook, the proxy and Chrome the browser entry needs, and the relays when given.
-fn wire(config: HostConfig, relays: Option<&Relays>) -> HostConfig {
+pub(crate) fn wire(config: HostConfig, relays: Option<&Relays>) -> HostConfig {
     let config = config
         .with_profile_hook(Box::new(hook()))
         .with_egress_proxy(Arc::new(TestProxy(8123)))

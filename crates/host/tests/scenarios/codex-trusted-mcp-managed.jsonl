@@ -1,0 +1,14 @@
+{"scenario":"codex-trusted-mcp-managed","description":"Under the firm's managed-mcp.json no listed server is trusted: docs's approvals (correlated and standalone) reach the lawyer, who answers each cancel","on_stdin_close":"exit"}
+{"expect":{"method":"initialize","as":"init","params":{"protocolVersion":1}}}
+{"respond":{"to":"init","result":{"protocolVersion":1,"agentCapabilities":{"loadSession":true},"authMethods":[],"agentInfo":{"name":"@agentclientprotocol/codex-acp","title":"Codex","version":"2.2.2"}}}}
+{"expect":{"method":"session/new","as":"new","params":{"cwd":"{{any}}"}}}
+{"respond":{"to":"new","result":{"sessionId":"sess-1","modes":{"currentModeId":"workspace-write","availableModes":[{"id":"read-only","name":"Read-only"},{"id":"workspace-write","name":"Workspace access"},{"id":"agent","name":"Auto review"}]}}}}
+{"expect":{"method":"session/prompt","as":"p1","params":{"sessionId":"sess-1"}}}
+{"update":{"update":{"sessionUpdate":"tool_call","toolCallId":"tc-docs","title":"mcp.docs.search","kind":"execute","status":"in_progress","rawInput":{"server":"docs","tool":"search","arguments":{"query":"section 138"}}}}}
+{"request":{"id":"perm-docs","method":"session/request_permission","params":{"sessionId":"sess-1","toolCall":{"toolCallId":"tc-docs","kind":"execute","status":"pending"},"options":[{"optionId":"allow_once","name":"Allow","kind":"allow_once"},{"optionId":"allow_session","name":"Allow for this session","kind":"allow_always"},{"optionId":"cancel","name":"Cancel","kind":"reject_once"}],"_meta":{"is_mcp_tool_approval":true}}}}
+{"expect_response":{"id":"perm-docs","result":{"outcome":{"outcome":"selected","optionId":"cancel"}}}}
+{"update":{"update":{"sessionUpdate":"tool_call_update","toolCallId":"tc-docs","status":"completed"}}}
+{"request":{"id":"perm-docs-alone","method":"session/request_permission","params":{"sessionId":"sess-1","toolCall":{"toolCallId":"elicitation:sess-1:docs:0","kind":"execute","status":"pending","title":"MCP tool call approval","rawInput":{"serverName":"docs","description":"Allow the docs MCP server to run tool \"search\"?","schema":{"type":"object","properties":{}}}},"options":[{"optionId":"allow_once","name":"Allow","kind":"allow_once"},{"optionId":"allow_session","name":"Allow for this session","kind":"allow_always"},{"optionId":"cancel","name":"Cancel","kind":"reject_once"}],"_meta":{"is_mcp_tool_approval":true}}}}
+{"expect_response":{"id":"perm-docs-alone","result":{"outcome":{"outcome":"selected","optionId":"cancel"}}}}
+{"update":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-answer-1","content":{"type":"text","text":"Done."}}}}
+{"respond":{"to":"p1","result":{"stopReason":"end_turn"}}}

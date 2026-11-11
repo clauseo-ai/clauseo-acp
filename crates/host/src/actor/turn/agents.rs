@@ -118,6 +118,13 @@ pub(super) struct Agent {
     /// A Claude agent's home, its `CLAUDE_CONFIG_DIR`, whose transcripts confirm a steer
     /// (`queue/confirm.rs`); `None` for any other agent.
     pub(super) claude_home: Option<PathBuf>,
+    /// The MCP servers Clauseo itself sent this session that may run unasked
+    /// (`agent/mcp_trust.rs`), filled by `profile_loads::session_loads`: the lawyer's trusted
+    /// servers, and `case-law` when our entry went. A server Codex got from anywhere else is
+    /// never answered for. `None` when the launch's folder check would put Claude in forced ask
+    /// (`forced_ask::applies`; for Codex only a failed check, since the other two refuse it):
+    /// then none is, so Codex asks where Claude would.
+    pub(super) mcp_sent: Option<Vec<String>>,
     /// A Claude agent's plans folder, `<config folder>/plans`, from its launch's environment
     /// (`agent/plan_note.rs`); `None` for any other agent.
     pub(super) plan_notes: Option<PathBuf>,
@@ -272,6 +279,7 @@ pub(super) fn launch_now(
         folder_check: prepared_folder,
         auto: session::Auto::default(),
         claude_home,
+        mcp_sent: (!unprotected).then(Vec::new),
         plan_notes,
         denied_data_folder: 0,
         start_failure: None,
