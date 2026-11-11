@@ -5,9 +5,11 @@
 //! "Codex encountered an internal error.", so it cannot be told apart once sent.
 //!
 //! It runs where the thread's agent is known: `SendPrompt` (start now, queue, send now, steer)
-//! and `EditQueuedPrompt`. A thread's agent is fixed when it is created, so a prompt checked when
-//! it was sent or edited needs no check again when its queued turn starts. Any other agent's
-//! prompts pass; Claude's own refusal ends its turn `TooLong`.
+//! and `EditQueuedPrompt`, on the question alone; and again at step 5 (`prompt.rs`), on the
+//! text as it will be sent, since the undo note is added only then and has no length cap. That
+//! refusal ends the turn failed with `prompt.too_long` before anything is sent, the queue held.
+//! A steer carries no note. Any other agent's prompts pass; Claude's own refusal ends its turn
+//! `TooLong`.
 
 use clauseo_protocol::{AgentKind, ContentBlock, ErrorCode, ThreadId};
 
