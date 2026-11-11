@@ -1,6 +1,11 @@
-{"scenario":"stderr-mcp-remote","description":"No handshake: writes stderr lines as an adapter's MCP client might, holding a lawyer's remote server's URL (a token in its path and its query) and header values the host filled, then exits 1","on_stdin_close":"exit"}
-{"stderr":{"line":"MCP server docs: POST https://mcp.example.com/v1/p4thToken77/mcp?key=q7QueryToken12&region=uk failed: 401"}}
-{"stderr":{"line":"retrying /v1/p4thToken77/mcp?key=q7QueryToken12&region=uk with key=q7QueryToken12"}}
-{"stderr":{"line":"request headers: {\"X-Api-Key\":\"x5HeaderToken77\",\"X-Tenant\":\"firm-tenant-0042\"}"}}
+{"scenario":"stderr-mcp-remote","description":"No handshake: writes stderr lines as an adapter's MCP client might, holding a lawyer's remote server's URL, host, path and query tokens and header values the host filled, in the forms error lines print them (whole, decoded, JSON-escaped, percent-encoded, Basic decoded), then exits 1","on_stdin_close":"exit"}
+{"stderr":{"line":"MCP server docs: POST https://mcp.example.com/v1/p4thToken77/k3yLikeSegment0123/mcp?key=q7%2BQuery%2FToken&region=uk failed: 401"}}
+{"stderr":{"line":"retrying /v1/p4thToken77/k3yLikeSegment0123/mcp?key=q7%2BQuery%2FToken&region=uk"}}
+{"stderr":{"line":"query key decoded: q7+Query/Token"}}
+{"stderr":{"line":"dns lookup mcp.example.com failed"}}
+{"stderr":{"line":"unknown tenant segment k3yLikeSegment0123"}}
+{"stderr":{"line":"request headers: {\"X-Tenant\":\"firm\\\"tenant/0042\",\"Authorization\":\"Basic dXNlcjE6cGFzc3dvcmQx\"}"}}
+{"stderr":{"line":"basic credential dXNlcjE6cGFzc3dvcmQx is user1:password1"}}
+{"stderr":{"line":"form-encoded tenant firm%22tenant%2F0042"}}
 {"stderr":{"line":"stderr-mcp-remote: last line"}}
 {"exit":{"code":1}}

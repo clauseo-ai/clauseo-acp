@@ -21,9 +21,10 @@
 //!   A plain value (a firm's policy, a hand-edited file) goes as it is. A header value that an
 //!   HTTP header cannot hold (a control character other than tab: a CR or LF would split the
 //!   request) leaves its server out the same way.
-//! - Every value a session's servers carry, and each remote server's URL with its path and query
-//!   parts, go to the agent's stderr redactor ([`redacted`]): an agent that dies before its
-//!   session is ready has its last stderr line logged, and that is when `session/new` held them.
+//! - Every value a session's servers carry, and each remote server's URL, its host and its path
+//!   and query parts, go to the agent's stderr redactor in the forms an error line prints them in
+//!   ([`redacted`], `lawyer/redact.rs`): an agent that dies before its session is ready has its
+//!   last stderr line logged, and that is when `session/new` held them.
 //! - `PATH`: unless the server's own variables set it, the server's `PATH` is its resolved
 //!   command's folder, then the `PATH` Clauseo was started with. Each agent starts a stdio
 //!   server with its own `PATH` and the entry's variables over it; on macOS an app started from
@@ -46,6 +47,10 @@ use clauseo_settings::{Effective, McpTransport, McpValue, McpValueKind, keychain
 use zeroize::Zeroizing;
 
 use super::McpControl;
+
+mod redact;
+
+pub(crate) use redact::redacted;
 
 /// Finds a server's program: a bare name on this computer's search paths, or an absolute path
 /// that is a file; `None` when there is none. File system calls: off the actor only.
@@ -362,66 +367,6 @@ fn filled(
 /// CR or LF would end the header and start another).
 pub(crate) fn header_value_ok(value: &str) -> bool {
     !value.chars().any(|c| c.is_control() && c != '\t')
-}
-
-/// What the agent's stderr redactor hides for the session's lawyer servers, beyond its own
-/// environment's secrets: every value `secrets` read from the keychain (variables and headers),
-/// every plain variable value of an enabled local server and every plain header value of a
-/// remote one, and each enabled remote server's URL whole, its path with its query, and each
-/// query value. An agent that dies before its session is ready has its last stderr line logged
-/// (`start_failure`), and `session/new` held these then. A remote server's URL can carry a token in its path or query;
-/// the redactor already hides a URL's user name and password. Values under 8 bytes stay as they
-/// are, as for every redacted secret (`clauseo_process`'s `MIN_SECRET`).
-pub(crate) fn redacted(effective: &Effective, secrets: &McpSecrets) -> Vec<String> {
-    let mut hidden: Vec<String> = secrets
-        .values
-        .values()
-        .map(|value| value.as_str().to_owned())
-        .collect();
-    let plain = |values: &BTreeMap<String, McpValue>| {
-        values
-            .values()
-            .filter_map(|value| match value {
-                McpValue::Plain(text) => Some(text.clone()),
-                McpValue::Keychain(_) => None,
-            })
-            .collect::<Vec<_>>()
-    };
-    for (_, server) in effective.enabled_mcp_servers() {
-        match &server.transport {
-            McpTransport::Local { env, .. } => hidden.extend(plain(env)),
-            McpTransport::Remote { url, headers } => {
-                hidden.push(url.clone());
-                hidden.extend(url_parts(url));
-                hidden.extend(plain(headers));
-            }
-        }
-    }
-    hidden
-}
-
-/// `url`'s path with its query (from the first `/` or `?` after `scheme://host`), its query
-/// alone, and each query parameter's value; whatever of them `url` has.
-fn url_parts(url: &str) -> Vec<String> {
-    let after_scheme = url.split_once("://").map_or(url, |(_, rest)| rest);
-    let Some(tail) = after_scheme
-        .find(['/', '?'])
-        .and_then(|start| after_scheme.get(start..))
-    else {
-        return Vec::new();
-    };
-    let mut parts = vec![tail.to_owned()];
-    if let Some((_, query)) = tail.split_once('?') {
-        parts.push(query.to_owned());
-        parts.extend(
-            query
-                .split('&')
-                .filter_map(|pair| pair.split_once('=').map(|(_, value)| value))
-                .filter(|value| !value.is_empty())
-                .map(str::to_owned),
-        );
-    }
-    parts
 }
 
 /// Adds the `PATH` (the command's folder first) and the Windows variables to `env`, each only
