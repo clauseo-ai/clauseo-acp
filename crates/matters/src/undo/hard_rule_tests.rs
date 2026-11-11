@@ -3,7 +3,7 @@
 //! truly added is still deleted.
 
 use std::collections::{BTreeSet, HashSet};
-use std::io::Write as _;
+use std::io::{self, Write as _};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
@@ -12,6 +12,7 @@ use clauseo_protocol::{CheckpointId, CheckpointKind, SkippedFileReason, Timestam
 use super::step;
 use crate::checkpoint::{Core, Spec};
 use crate::history::{GixStore, HistoryStore};
+use crate::no_download::fault;
 use crate::test_dir::TestDir;
 use crate::types::{Limits, Retention, Settings, TimelineEntry};
 use crate::writeback::Op;
@@ -75,23 +76,32 @@ fn spec(n: u64) -> Spec<'static> {
     }
 }
 
-/// The two files skipped for `reason` before the step, with their contents: `<reason>-same`
-/// is read unchanged by the step, `<reason>-changed` is rewritten. Every reason the walk skips
-/// a file for is here; a new one fails to build until it is added.
-fn skipped_files(reason: SkippedFileReason) -> [(String, Vec<u8>); 2] {
+/// The files not versioned for `reason` before the step, with their contents: `<reason>-same`
+/// is read unchanged by the step, `<reason>-changed` is rewritten; for a folder that did not
+/// list, the files in it. Every reason is here; a new one fails to build until it is added.
+fn skipped_files(reason: SkippedFileReason) -> Vec<(String, Vec<u8>)> {
     let (name, bytes) = match reason {
         SkippedFileReason::CloudOnly => ("cloud", b"in the cloud".to_vec()),
         SkippedFileReason::OverSizeCap => ("big", vec![7_u8; 20]),
+        SkippedFileReason::UnreadFolder => {
+            return vec![
+                ("unread/same.txt".to_owned(), b"unread".to_vec()),
+                ("unread/changed.txt".to_owned(), b"unread".to_vec()),
+            ];
+        }
         SkippedFileReason::Unknown => panic!("the walk never skips a file for an unknown reason"),
     };
-    [
+    vec![
         (format!("{name}-same.txt"), bytes.clone()),
         (format!("{name}-changed.txt"), bytes),
     ]
 }
 
-const REASONS: [SkippedFileReason; 2] =
-    [SkippedFileReason::CloudOnly, SkippedFileReason::OverSizeCap];
+const REASONS: [SkippedFileReason; 3] = [
+    SkippedFileReason::CloudOnly,
+    SkippedFileReason::OverSizeCap,
+    SkippedFileReason::UnreadFolder,
+];
 
 #[test]
 fn undo_never_deletes_or_overwrites_a_file_that_was_there_before_the_step() {
@@ -107,6 +117,7 @@ fn undo_never_deletes_or_overwrites_a_file_that_was_there_before_the_step() {
     put(&folder, "read.txt", b"read v1");
     put(&folder, "gone.txt", b"gone");
     let mut skipped = BTreeSet::new();
+    write::create_dir_all(&folder.join("unread")).unwrap();
     for reason in REASONS {
         for (name, bytes) in skipped_files(reason) {
             put(&folder, &name, &bytes);
@@ -116,8 +127,12 @@ fn undo_never_deletes_or_overwrites_a_file_that_was_there_before_the_step() {
             skipped.insert(name);
         }
     }
-    core.take(&folder, &settings(&root, &probe, CAP), &spec(1))
-        .unwrap();
+    // `unread/` does not list at the step's start (permission denied), and does after.
+    fault::clear();
+    fault::fail(&folder.join("unread"), 0, io::ErrorKind::PermissionDenied);
+    let first = core.take(&folder, &settings(&root, &probe, CAP), &spec(1));
+    fault::clear();
+    first.unwrap();
     let mut there: BTreeSet<String> = skipped.clone();
     there.extend(["read.txt".to_owned(), "gone.txt".to_owned()]);
 
@@ -149,7 +164,8 @@ fn undo_never_deletes_or_overwrites_a_file_that_was_there_before_the_step() {
             }
         }
     }
-    // The `-same` files are baselines, no change at all; the `-changed` ones are kept.
+    // The `-same` files are baselines, no change at all; the `-changed` ones, and every file of
+    // the folder that did not list (nothing known of them, so both added), are kept.
     let names: Vec<(&str, bool)> = steps
         .iter()
         .map(|step| (step.path.as_str(), step.unversioned.is_some()))
@@ -162,10 +178,12 @@ fn undo_never_deletes_or_overwrites_a_file_that_was_there_before_the_step() {
             ("gone.txt", false),
             ("new.txt", false),
             ("read.txt", false),
+            ("unread/changed.txt", true),
+            ("unread/same.txt", true),
         ]
     );
     for step in steps.iter().filter(|step| step.unversioned.is_some()) {
-        assert!(step.ops.is_empty(), "{} is kept as it is", step.path);
+        assert_eq!(step.ops.len(), 0, "{} is kept as it is", step.path);
     }
     let new = steps
         .iter()
@@ -174,5 +192,45 @@ fn undo_never_deletes_or_overwrites_a_file_that_was_there_before_the_step() {
     assert!(
         matches!(new.ops.as_slice(), [Op::Delete(path)] if path.as_str() == "new.txt"),
         "a file the step added is still deleted"
+    );
+}
+
+/// The guard against a path the step's first checkpoint holds: a deletion of one is kept, by its
+/// exact name; a case-only rename's new name is another name, left to the respelled check.
+#[test]
+fn a_deletion_of_a_path_the_first_tree_holds_is_kept() {
+    use std::collections::BTreeMap;
+
+    use clauseo_protocol::MatterPath;
+
+    use super::kept_because;
+    use crate::checkpoint::SizedFile;
+    use crate::history::Oid;
+    use crate::skip_record::SkipRecord;
+
+    let memo = |text: &str| MatterPath::new(text).unwrap();
+    let before = [SizedFile {
+        path: memo("memo.txt"),
+        blob: Oid([1; 20]),
+        size: 4,
+    }];
+    let start = SkipRecord::default();
+    let there = BTreeMap::new();
+    let delete = |text: &str| [Op::Delete(memo(text))];
+    assert_eq!(
+        kept_because(&delete("memo.txt"), &there, Some(&start), &before),
+        Some(SkippedFileReason::Unknown)
+    );
+    assert_eq!(
+        kept_because(&delete("Memo.txt"), &there, Some(&start), &before),
+        None
+    );
+    assert_eq!(
+        kept_because(&delete("new.txt"), &there, Some(&start), &before),
+        None
+    );
+    assert_eq!(
+        kept_because(&delete("new.txt"), &there, None, &before),
+        Some(SkippedFileReason::Unknown)
     );
 }

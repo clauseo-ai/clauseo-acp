@@ -127,7 +127,7 @@ An unknown kind has no row and no answer (`None`): its envelope's `stream` decid
 | `turn_failed` | turn, code, detail? (never shown) | host, acp | yes | T |
 | `turn_stopped_at_limit` | turn, window?, resets_at?, reason | limits, through the host | yes | T |
 | `turn_ended` | turn, stop, usage?, checkpoint_after? | host | yes | T |
-| `step_undone` | turn, checkpoint, restored, kept | host, matters | yes | T |
+| `step_undone` | turn, checkpoint, restored, kept, unversioned? | host, matters | yes | T |
 | `matter_created` | name, kind, import? | host | yes | M |
 | `checkpoint_recorded` | checkpoint, kind, thread?, turn? | matters, through the host | yes | M |
 | `outside_edits` | checkpoint, files | matters, through the host | yes | M |

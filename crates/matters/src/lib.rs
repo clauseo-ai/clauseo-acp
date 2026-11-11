@@ -66,7 +66,7 @@
 //!   sets an environment variable, never runs `git` or any process, never reads or writes a `.git`
 //!   in the folder, and opens repositories isolated from every git config and variable.
 //! - The timeline only moves forward: one ref, each checkpoint a commit whose parent is the ref's
-//!   tip. No empty commits: an unchanged tree reuses the last checkpoint
+//!   tip. No empty commits: an unchanged tree and skip record reuse the last checkpoint
 //!   ([`CheckpointOutcome::Reused`]).
 //! - Objects, then the ref and the stat cache, are durable before a checkpoint returns.
 //! - Every object read from history is checked against its id: blobs as they stream, trees and
@@ -147,6 +147,7 @@ mod replace;
 mod restore;
 mod rules;
 mod scan;
+mod skip_record;
 mod stat;
 #[cfg(test)]
 mod test_dir;

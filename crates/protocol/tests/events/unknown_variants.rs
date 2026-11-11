@@ -257,6 +257,7 @@ fn skipped_file_reason() {
     let cases = [
         (SkippedFileReason::OverSizeCap, "over_size_cap"),
         (SkippedFileReason::CloudOnly, "cloud_only"),
+        (SkippedFileReason::UnreadFolder, "unread_folder"),
     ];
     unit_enum(&SkippedFileReason::ALL, &cases, SkippedFileReason::Unknown);
 }

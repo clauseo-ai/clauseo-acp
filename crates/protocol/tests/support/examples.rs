@@ -446,8 +446,11 @@ fn turn_end_events() -> Vec<DomainEvent> {
             turn,
             checkpoint: checkpoint_id(15),
             restored: vec![path("a.docx")],
-            kept: vec![path("b/new.docx")],
-            unversioned: Vec::new(),
+            kept: vec![path("b/new.docx"), path("Sub/c.docx")],
+            unversioned: vec![SkippedFile {
+                path: path("Sub/c.docx"),
+                reason: SkippedFileReason::UnreadFolder,
+            }],
         }
         .into(),
     ]
