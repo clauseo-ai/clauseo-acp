@@ -23,6 +23,15 @@ export const HI = {
   "Working on it.": "काम चल रहा है।",
   // a step named only by the sandbox's permission for the internet (UC-168; provisional)
   "Letting a task reach the internet.": "एक काम को इंटरनेट तक पहुँचने दिया जा रहा है।",
+  // a task named by its own title or the text it shows, where it gave no other words (UC-240; provisional)
+  "Running {description}.": "{description} चल रहा है।",
+  // a skill read, as a guide (UC-241 to UC-245; provisional): Clauseo's own by name, any other as a guide; the
+  // guides' names fill "Reading {name}." here and "Read {name}." in words-steps.ts
+  "Reading a guide.": "एक मार्गदर्शिका पढ़ी जा रही है।",
+  "Clauseo's drafting guide": "Clauseo की मसौदा मार्गदर्शिका",
+  "Clauseo's research guide": "Clauseo की शोध मार्गदर्शिका",
+  "Clauseo's matter brief guide": "Clauseo की मामला सारांश मार्गदर्शिका",
+  "Clauseo's browser guide": "Clauseo की ब्राउज़र मार्गदर्शिका",
 } as const;
 
 /** Every key, for the banned-words screen in the tests. */

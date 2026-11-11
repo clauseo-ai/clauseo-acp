@@ -15,6 +15,9 @@ export type Task = {
   paper: string | null;
   /** The whole command, its paths within the matter cut to the matter, or null with none. */
   command: string | null;
+  /** What the task does, from the call's own title or the text it shows, ready to follow "Ran" ("the checks",
+   * "convert the MSA to Markdown"); null with neither, or when the agent's words or the command say it. */
+  described: string | null;
 };
 
 /** Past this, raw input or output isn't parsed: a long write's whole text is no place to look. */
@@ -158,13 +161,50 @@ export function taskOf(entry: ToolCallEntry, folder: string | null = null): Task
     toolNameOf(titled) === undefined;
   const command = given ?? (looks ? titled : null);
   const cwd = text(raw?.["cwd"]) ?? text(raw?.["workdir"]);
+  const program = command === null ? null : programOf(command);
   return {
     own: own === null ? null : short(own),
-    program: command === null ? null : programOf(command),
+    program,
     paper: command === null ? null : paperOf(command),
     command: command === null ? null : inMatter(command, folder, cwd),
+    described: own === null && program === null ? describedOf(entry, titled, looks) : null,
   };
 }
+
+/** A task's title in words ("Run the checks"), else the first line of the text it shows (Claude's description of a
+ * command): its leading "Run" and closing stop off, in sentence case after "Ran", cut short. Never a tool's name. */
+function describedOf(entry: ToolCallEntry, titled: string, looks: boolean): string | null {
+  let shown: string | undefined;
+  for (const c of entry.content)
+    if (typeof c === "object" && c.text?.text.inline !== undefined) {
+      shown = c.text.text.inline;
+      break;
+    }
+  const from =
+    titled !== "" && !looks && toolNameOf(titled) === undefined
+      ? titled
+      : (shown?.split(/\r?\n/).find((l: string) => l.trim() !== "") ?? "");
+  const words = from
+    .trim()
+    .replace(/^(?:run|running|ran)\s+/i, "")
+    .replace(/[.!?।…]+$/, "")
+    .trim();
+  if (words === "" || toolNameOf(words) !== undefined) return null;
+  // sentence case: the first word lower, unless it is a name or an acronym ("MSA", "McKinsey", "Word")
+  const first = words.split(/\s/)[0]!;
+  const lower = /^[A-Z][a-z]+$/.test(first) && !PROPER.has(first) ? first.toLowerCase() : first;
+  return short(lower + words.slice(first.length));
+}
+
+/** Names a task's words may start with that stay capitalised. */
+const PROPER: ReadonlySet<string> = new Set([
+  "Word",
+  "Excel",
+  "Clauseo",
+  "Python",
+  "Claude",
+  "ChatGPT",
+]);
 
 /** The last line of what went wrong in a failed call's output: its stderr, its error, or its text's last line; null
  * when it didn't fail, or its output says nothing (or is too large to read here). */

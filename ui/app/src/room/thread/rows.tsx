@@ -44,9 +44,10 @@ import {
   SteerWaitingRow,
 } from "./steer-rows.tsx";
 import { LimitStopRow, StepRow } from "./stop-rows.tsx";
-import { plainOf, thoughtText, titled, unsettled } from "./step-names.ts";
+import { doingOf, plainOf, thoughtText, titled, unsettled } from "./step-names.ts";
+import { skillOf } from "./skill-words.ts";
 import { toolNameOf } from "./tool-names.ts";
-import { overTitle } from "./tool-words.ts";
+import { overTitle, skillDone } from "./tool-words.ts";
 
 const QUIET = "text-small text-quiet";
 /** The space above a row under another in its section, on the spacing tokens; first in its section, the thread's own
@@ -221,11 +222,15 @@ function ToolCall({ id, entry }: { id: EntryId; entry: ToolCallEntry }) {
       className={`${ROW} ${QUIET}`}
     >
       <bdi>
-        {toolNameOf(entry.title) === undefined
-          ? plainOf(entry.title)
-          : unsettled(entry)
-            ? titled(entry, stepLive(w.lang, "Working on it."), w.lang)
-            : overTitle(w.lang, entry.title, entry.status !== "completed")}
+        {skillOf(entry) !== null
+          ? unsettled(entry)
+            ? doingOf(w.lang, entry)
+            : skillDone(w.lang, entry, entry.status !== "completed")
+          : toolNameOf(entry.title) === undefined
+            ? plainOf(entry.title)
+            : unsettled(entry)
+              ? titled(entry, stepLive(w.lang, "Working on it."), w.lang)
+              : overTitle(w.lang, entry.title, entry.status !== "completed")}
       </bdi>
       {mark !== null && (
         <>

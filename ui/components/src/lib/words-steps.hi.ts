@@ -24,6 +24,12 @@ export const HI = {
   "Searched {site} for '{query}'.": "{site} पर '{query}' खोजा गया।",
   "Thought it through.": "विचार किया गया।",
   "Did one other thing.": "एक अन्य काम किया गया।",
+  // a task named by its own title or the text it shows (UC-246, UC-247; provisional)
+  "Ran {description}.": "{description} चलाया गया।",
+  "Tried to run {description}.": "{description} चलाने की कोशिश की गई।",
+  // a skill Clauseo doesn't ship, read as a guide (UC-248, UC-249; provisional)
+  "Read a guide.": "एक मार्गदर्शिका पढ़ी गई।",
+  "Tried to read a guide.": "एक मार्गदर्शिका पढ़ने की कोशिश की गई।",
   // a step named only by the sandbox's permission for the internet (UC-166; provisional)
   "Let a task reach the internet.": "एक काम को इंटरनेट तक पहुँचने दिया गया।",
   // a step that failed or was stopped: what it set out to do, in the past, never as if it were still going; the row's

@@ -36,6 +36,7 @@ import { UD2 } from "./registry-ud2.tsx";
 import { UD2_PLANS } from "./registry-ud2-plans.tsx";
 import { UC_ALL } from "./registry-uc-word.tsx";
 import { UC_TOOLNAMES } from "./registry-uc-toolnames.tsx";
+import { UC_TOOL_ROWS } from "./registry-uc-tool-rows.tsx";
 import { SAC } from "./registry-sac.tsx";
 import { NM } from "./registry-nm.tsx";
 import { ownEntries, ownEntry } from "./registry-offline.tsx";
@@ -399,6 +400,7 @@ export const REGISTRY: readonly Entry[] = [
   ...UD2_PLANS,
   ...UC_ALL,
   ...UC_TOOLNAMES,
+  ...UC_TOOL_ROWS,
   ...SAC,
   {
     id: "U2-01",
