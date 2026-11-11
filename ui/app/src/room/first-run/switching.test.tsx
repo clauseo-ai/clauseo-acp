@@ -47,7 +47,7 @@ test("switching: the status and the line, with no button and no field", async ()
   expect(gate()?.querySelector('[role="status"]')?.textContent).toContain(STATUS);
   expect(byId("signin")?.querySelectorAll("button, input")).toHaveLength(0);
   expect(text()).not.toContain(QUIT);
-  expect(text()).not.toContain("Sign in to Claude");
+  expect(text()).not.toContain("Sign in with Claude");
 });
 
 test("switching, stuck: the quit line follows", async () => {
@@ -106,7 +106,7 @@ test("another refusal says its code's sentence, and a press clears it", async ()
       if (c.start_sign_in !== undefined) throw refusal("signin.key_in_use");
     },
   });
-  await press("Sign in to Claude");
+  await press("Sign in with Claude");
   await settle();
   expect(byId("signin-refused")?.textContent).toBe(
     "Clauseo is using your API key. To sign in with your plan instead, open Settings, then Plans, and remove the key.",

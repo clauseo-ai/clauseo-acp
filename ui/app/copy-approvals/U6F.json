@@ -32,20 +32,23 @@
     "note": "Rohan, via the orchestrator (U6-followup page)"
   },
   "U6F-05": {
-    "en": "Sign in to ChatGPT in Codex first. Your question is kept.",
+    "en": "Sign in with ChatGPT in Codex first. Your question is kept.",
     "hi": "पहले Codex में ChatGPT से साइन इन करें। आपका प्रश्न रखा गया है।",
     "status": "approved",
-    "at": "2026-11-02",
-    "by": "Rohan",
+    "at": "2026-11-11",
+    "by": "Rohan (via the orchestrator)",
     "note": "Rohan, via the orchestrator (U6-followup page)"
   },
   "U6F-06": {
-    "en": "Sign in to {name} first. Your question is kept.",
-    "hi": "पहले {name} में साइन इन करें। आपका प्रश्न रखा गया है।",
+    "en": "Sign in with {name} first. Your question is kept.",
+    "hi": "पहले {name} से साइन इन करें। आपका प्रश्न रखा गया है।",
     "status": "approved",
-    "at": "2026-11-02",
-    "by": "Rohan",
-    "note": "Rohan, via the orchestrator (U6-followup page)"
+    "at": "2026-11-11",
+    "by": "Rohan (via the orchestrator)",
+    "note": "Rohan, via the orchestrator (U6-followup page)",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-11",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)"
   },
   "U6F-07": {
     "en": "This version of Codex doesn't work with Clauseo.",

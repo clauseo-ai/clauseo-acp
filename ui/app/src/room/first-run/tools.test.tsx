@@ -101,7 +101,7 @@ test("downloading after Claude is ready: done of size in whole MB with the plan 
   expect(line()?.querySelector(".fl-bar")).not.toBeNull();
   expect(line()?.querySelector('[role="status"]')).toBeNull();
   expect(claudeRow()?.textContent).toContain("Claude is ready");
-  expect(claudeRow()?.querySelector("button")?.textContent).toBe("Sign in to Claude");
+  expect(claudeRow()?.querySelector("button")?.textContent).toBe("Sign in with Claude");
   await play(t, tools("installing"));
   expect(line()?.dataset["state"]).toBe("installing");
   expect(line()?.textContent).toContain("Downloading document tools… 120 MB of 120 MB");

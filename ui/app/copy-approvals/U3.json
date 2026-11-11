@@ -232,12 +232,15 @@
     "note": "Rohan, on the review page (built from U3 53b4ca5d, approved as U3-32)"
   },
   "U3-err-agent.auth_required": {
-    "en": "Sign in to Claude first. Your question is kept.",
-    "hi": "पहले Claude में साइन इन करें। आपका प्रश्न रखा गया है।",
+    "en": "Sign in with Claude first. Your question is kept.",
+    "hi": "पहले Claude से साइन इन करें। आपका प्रश्न रखा गया है।",
     "status": "approved",
-    "at": "2026-11-02",
-    "by": "Rohan",
-    "note": "Rohan, on the review page (built from U3 53b4ca5d, approved as U3-33)"
+    "at": "2026-11-11",
+    "by": "Rohan (via the orchestrator)",
+    "note": "Rohan, on the review page (built from U3 53b4ca5d, approved as U3-33)",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-11",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)"
   },
   "U3-err-agent.unsupported_version": {
     "en": "This version of Claude Code doesn't work with Clauseo.",

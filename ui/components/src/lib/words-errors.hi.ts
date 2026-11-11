@@ -21,8 +21,8 @@ export const HI = {
   "Those answers don't fit the question.": "ये उत्तर प्रश्न से मेल नहीं खाते।",
   "Claude didn't start. Your question is kept.": "Claude शुरू नहीं हुआ। आपका प्रश्न रखा गया है।",
   "Claude sent something Clauseo can't read.": "Claude ने कुछ ऐसा भेजा जिसे Clauseo पढ़ नहीं सकता।",
-  "Sign in to Claude first. Your question is kept.":
-    "पहले Claude में साइन इन करें। आपका प्रश्न रखा गया है।",
+  "Sign in with Claude first. Your question is kept.":
+    "पहले Claude से साइन इन करें। आपका प्रश्न रखा गया है।",
   "This version of Claude Code doesn't work with Clauseo.":
     "Claude Code का यह संस्करण Clauseo के साथ काम नहीं करता।",
   "Clauseo can't start Claude safely here. Reinstall Clauseo.":
@@ -36,10 +36,10 @@ export const HI = {
   "ChatGPT sent something Clauseo can't read.": "ChatGPT ने कुछ ऐसा भेजा जिसे Clauseo पढ़ नहीं सकता।",
   "{name} sent something Clauseo can't read.": "{name} ने कुछ ऐसा भेजा जिसे Clauseo पढ़ नहीं सकता।",
   "The AI sent something Clauseo can't read.": "AI ने कुछ ऐसा भेजा जिसे Clauseo पढ़ नहीं सकता।",
-  "Sign in to ChatGPT in Codex first. Your question is kept.":
+  "Sign in with ChatGPT in Codex first. Your question is kept.":
     "पहले Codex में ChatGPT से साइन इन करें। आपका प्रश्न रखा गया है।",
-  "Sign in to {name} first. Your question is kept.":
-    "पहले {name} में साइन इन करें। आपका प्रश्न रखा गया है।",
+  "Sign in with {name} first. Your question is kept.":
+    "पहले {name} से साइन इन करें। आपका प्रश्न रखा गया है।",
   "Sign in to the AI first. Your question is kept.": "पहले AI में साइन इन करें। आपका प्रश्न रखा गया है।",
   "This version of Codex doesn't work with Clauseo.":
     "Codex का यह संस्करण Clauseo के साथ काम नहीं करता।",

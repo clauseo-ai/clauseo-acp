@@ -48,7 +48,7 @@ export type InstallActs = {
    * the plan isn't here yet. Desktop starts the download on the press and keeps it, so the sign-in goes on once the
    * plan is ready (0033, "When an install starts"). Left out in a matter, whose gate has the press. */
   signIn?: (() => void) | undefined;
-  /** The Sign in names its plan, "Sign in to {name}": where both plans stand side by side (the first screen). */
+  /** The Sign in names its plan, "Sign in with {name}": where both plans stand side by side (the first screen). */
   named?: boolean | undefined;
   /** The plan's install, the normal one (`install_agent`, its size, progress and failures on this line): offered as
    * "Install {plan}" for a plan whose install went missing after Clauseo installed it (#859). Left out, that plan's
@@ -89,7 +89,7 @@ export function checkingLine(
           aria-busy="true"
           data-testid={ids.signIn}
         >
-          {named ? w("Sign in to {name}", { name }) : w("Sign in")}
+          {named ? w("Sign in with {name}", { name }) : w("Sign in")}
         </Button>
       </span>
     ),
@@ -174,7 +174,7 @@ export function installLine(
               onClick={acts.signIn}
               data-testid={ids.signIn}
             >
-              {acts.named === true ? w("Sign in to {name}", { name }) : w("Sign in")}
+              {acts.named === true ? w("Sign in with {name}", { name }) : w("Sign in")}
             </Button>
           ),
         ),

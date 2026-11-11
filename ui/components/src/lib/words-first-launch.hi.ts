@@ -54,8 +54,8 @@ export const HI = {
     "आपके दस्तावेज़ इसी कंप्यूटर पर रहते हैं। {name} उतना ही देखता है, जितना वह आपको जवाब देने के लिए पढ़ता है।",
 
   // the plan, in the composer (design)
-  "Sign in to Claude or ChatGPT to ask about this matter":
-    "इस मामले के बारे में पूछने के लिए Claude या ChatGPT में साइन इन करें",
+  "Sign in with Claude or ChatGPT to ask about this matter":
+    "इस मामले के बारे में पूछने के लिए Claude या ChatGPT से साइन इन करें",
   "Sign in": "साइन इन करें",
   "Use {name} instead": "इसके बजाय {name} इस्तेमाल करें",
   // UC-141: the quiet way to the key panel, in Connectors' Hindi (U15-09)
@@ -136,8 +136,8 @@ export const HI = {
 
   // ChatGPT's device code, offered only after the browser didn't work (new)
   "Use a code instead": "इसके बजाय कोड इस्तेमाल करें",
-  "Sign in to ChatGPT on that page and enter this code.":
-    "उस पेज पर ChatGPT में साइन इन करें और यह कोड डालें।",
+  "Sign in with ChatGPT on that page and enter this code.":
+    "उस पेज पर ChatGPT से साइन इन करें और यह कोड डालें।",
   "The code works until {time}.": "यह कोड {time} बजे तक काम करेगा।",
   Copy: "कॉपी करें",
   "Open page": "पेज खोलें",
@@ -183,7 +183,7 @@ export const HI = {
     "जिस प्लान का भुगतान आप करते हैं, उससे साइन इन करें: Claude, ChatGPT या दोनों।",
   "Your papers stay on this computer. Claude or ChatGPT sees the parts it reads to answer you.":
     "आपके दस्तावेज़ इसी कंप्यूटर पर रहते हैं। Claude या ChatGPT उतना ही देखता है, जितना वह आपको जवाब देने के लिए पढ़ता है।",
-  "Sign in to {name}": "{name} में साइन इन करें",
+  "Sign in with {name}": "{name} से साइन इन करें",
   // the plan chosen for a conversation, not set up on this computer (PK): its one act, in the composer
   "{name} isn't set up on this computer.": "{name} इस कंप्यूटर पर सेट अप नहीं है।",
   "Set up {name}": "{name} सेट अप करें",

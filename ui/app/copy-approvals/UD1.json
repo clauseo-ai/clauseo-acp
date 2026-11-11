@@ -576,14 +576,14 @@
     "note": "Rohan, running-page batch 2026-11-05 (written by app track)"
   },
   "UD1-71": {
-    "en": "Sign in to ChatGPT on that page and enter this code.",
-    "hi": "उस पेज पर ChatGPT में साइन इन करें और यह कोड डालें।",
+    "en": "Sign in with ChatGPT on that page and enter this code.",
+    "hi": "उस पेज पर ChatGPT से साइन इन करें और यह कोड डालें।",
     "hi_status": "provisional",
-    "hi_at": "2026-11-06",
+    "hi_at": "2026-11-11",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
     "status": "approved",
-    "at": "2026-11-05",
-    "by": "Rohan",
+    "at": "2026-11-11",
+    "by": "Rohan (via the orchestrator)",
     "note": "Rohan, running-page batch 2026-11-05 (written by app track)"
   },
   "UD1-72": {
@@ -812,24 +812,24 @@
     "by": "app track (provisional; orchestrator approved the words 2026-11-10, copy review pending)"
   },
   "UD1-94": {
-    "en": "Sign in to {name}",
-    "hi": "{name} में साइन इन करें",
+    "en": "Sign in with {name}",
+    "hi": "{name} से साइन इन करें",
     "hi_status": "provisional",
-    "hi_at": "2026-11-10",
+    "hi_at": "2026-11-11",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-10",
-    "by": "app track (provisional; orchestrator approved the words 2026-11-10, copy review pending)"
+    "status": "approved",
+    "at": "2026-11-11",
+    "by": "Rohan (via the orchestrator)"
   },
   "UD1-95": {
-    "en": "Sign in to Claude or ChatGPT to ask about this matter",
-    "hi": "इस मामले के बारे में पूछने के लिए Claude या ChatGPT में साइन इन करें",
+    "en": "Sign in with Claude or ChatGPT to ask about this matter",
+    "hi": "इस मामले के बारे में पूछने के लिए Claude या ChatGPT से साइन इन करें",
     "hi_status": "provisional",
-    "hi_at": "2026-11-10",
+    "hi_at": "2026-11-11",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-10",
-    "by": "app track (provisional; orchestrator approved the words 2026-11-10, copy review pending)"
+    "status": "approved",
+    "at": "2026-11-11",
+    "by": "Rohan (via the orchestrator)"
   },
   "UD1-96": {
     "en": "needs a download of about {mb} MB",

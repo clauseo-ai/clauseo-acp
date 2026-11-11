@@ -332,7 +332,7 @@ test.each([
 
 // the other agent.* codes that name Claude take the plan by the same path: the step's row in a Codex thread
 test.each([
-  ["agent.auth_required", "Sign in to ChatGPT in Codex first. Your question is kept."],
+  ["agent.auth_required", "Sign in with ChatGPT in Codex first. Your question is kept."],
   ["agent.protocol_error", "ChatGPT sent something Clauseo can't read."],
 ] as const)("a Codex thread's %s names ChatGPT on the step's row", async (code, said) => {
   const agent = "codex-acp";

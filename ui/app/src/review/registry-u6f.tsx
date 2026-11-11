@@ -70,13 +70,13 @@ export const U6F: Entry[] = [
   },
   {
     id: "U6F-05",
-    words: errorWords("Sign in to ChatGPT in Codex first. Your question is kept."),
+    words: errorWords("Sign in with ChatGPT in Codex first. Your question is kept."),
     screen: "room/composer",
     render: refused("agent.auth_required", "codex-acp"),
   },
   {
     id: "U6F-06",
-    words: errorWords("Sign in to {name} first. Your question is kept."),
+    words: errorWords("Sign in with {name} first. Your question is kept."),
     screen: "room/composer",
     render: refused("agent.auth_required", "gemini"),
   },

@@ -140,7 +140,7 @@ export const ERROR_WORDS: Record<ErrorCode, ErrorKey> = {
   "agent.launch_failed": "Claude didn't start. Your question is kept.",
   "agent.exited": STOPPED,
   "agent.protocol_error": "Claude sent something Clauseo can't read.",
-  "agent.auth_required": "Sign in to Claude first. Your question is kept.",
+  "agent.auth_required": "Sign in with Claude first. Your question is kept.",
   "agent.unsupported_version": "This version of Claude Code doesn't work with Clauseo.",
   "store.disk_full": "The computer's disk is full. Free some space, then try again.",
   "store.corrupt": "Clauseo couldn't read back its saved data.",
@@ -298,8 +298,8 @@ const PLANNED: Partial<
     nameless: "The AI sent something Clauseo can't read.",
   },
   "agent.auth_required": {
-    chatgpt: "Sign in to ChatGPT in Codex first. Your question is kept.",
-    named: "Sign in to {name} first. Your question is kept.",
+    chatgpt: "Sign in with ChatGPT in Codex first. Your question is kept.",
+    named: "Sign in with {name} first. Your question is kept.",
     nameless: "Sign in to the AI first. Your question is kept.",
   },
   "agent.unsupported_version": {

@@ -1,7 +1,7 @@
 // The first screen (design/03-system/src/pages/first-launch/welcome.tsx, way B, papers first). It is already the room,
 // with no matter in it yet: the work across the window asks for one thing, the folder for a matter, or a new matter
 // (U2's form, in place). Both plans stand at the foot where the composer will stand, Claude then ChatGPT, equal: a lead
-// line, then each plan's own working line (its size and "Sign in to {name}" until the lawyer presses it, since nothing
+// line, then each plan's own working line (its size and "Sign in with {name}" until the lawyer presses it, since nothing
 // downloads before then, then its progress, failures and "{name} is ready"), with the fine print under them;
 // and the anonymous counts Clauseo sends by default, said plainly, with the switch. The sample matter waits (UD1's
 // brief), and so does the Safe workspace's line: no screen names it before UC.
