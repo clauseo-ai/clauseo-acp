@@ -1,5 +1,6 @@
 import type { FocusEvent, KeyboardEvent, MouseEvent, PointerEvent, ReactElement } from "react";
 import { useRef, type ComponentType } from "react";
+import type { FileTone } from "../icons/file-type.ts";
 import type { IconProps } from "../icons/icon.tsx";
 import { Button } from "../ui/button.tsx";
 import { Chip } from "../ui/chip.tsx";
@@ -58,6 +59,10 @@ export type PaperTileProps = {
   /** Optional: the paper's file type's glyph (fileTypeIcon), at 24 px on the tile's top line, above its title. Hidden
    * from assistive technology: the file's name says its type. */
   fileIcon?: ComponentType<IconProps>;
+  /** Optional: the colour of the glyph's tab (fileToneOf), on an uncited tile: Word blue, PDF red, Excel green,
+   * PowerPoint orange; neutral, or left out, the glyph keeps the quiet ink. On a dimmed tile (`away`) the colour dims
+   * with it (wall.css). */
+  fileTone?: FileTone;
   /** Optional: the title is a file's name, in two lines at most: a name too long for them loses letters from its
    * middle, never its end, so its extension shows. Its whole name stays in the face's text; pair it with a `tip` that
    * shows it whole to the eye. */
@@ -97,6 +102,7 @@ function FileName({
  * and its own words step out. */
 export function PaperTile({
   fileIcon: FileIcon,
+  fileTone,
   id,
   state,
   numeral,
@@ -158,6 +164,7 @@ export function PaperTile({
       data-era={era}
       data-act={action === undefined ? undefined : ""}
       data-away={away === undefined ? undefined : ""}
+      data-file={FileIcon === undefined || fileTone === "neutral" ? undefined : fileTone}
       inert={era === "gone" ? true : undefined}
       aria-hidden={era === "gone" ? true : undefined}
     >

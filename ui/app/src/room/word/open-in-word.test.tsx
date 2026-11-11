@@ -116,6 +116,12 @@ test("every tile carries its file type's glyph by extension, at 24 px, and the W
   expect(iconIn(faceOf("brief.txt"), IconFileGeneric, 24, "tile-glyph")).not.toBeNull();
   for (const name of ["Reply.docx", "Exhibit.pdf"])
     expect(glyph(name)?.getAttribute("aria-hidden")).toBe("true");
+  // and its type's colour, for the wall to paint the glyph's tab: none for a plain file
+  const tone = (name: string) => faceOf(name)?.closest("li.tile")?.getAttribute("data-file");
+  expect(tone("Reply.docx")).toBe("word");
+  expect(tone("Old notice.DOC")).toBe("word");
+  expect(tone("Exhibit.pdf")).toBe("pdf");
+  expect(tone("brief.txt")).toBeNull();
   expect(titles(h.all("open-in-word"))).toEqual(["Reply.docx", "Old notice.DOC"]);
 });
 

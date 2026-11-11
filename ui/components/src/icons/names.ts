@@ -221,6 +221,16 @@ export const ICON_NAMES = [
     meaning: "A Word document (.docx, .doc): the page with W on its tab",
   },
   {
+    component: "IconFileExcel",
+    source: "fileExcel",
+    meaning: "An Excel workbook or a CSV table (.xlsx, .xls, .csv): the page with X on its tab",
+  },
+  {
+    component: "IconFilePowerPoint",
+    source: "filePowerPoint",
+    meaning: "A PowerPoint deck (.pptx, .ppt): the page with P on its tab",
+  },
+  {
     component: "IconFilePdf",
     source: "filePdf",
     meaning: "A PDF: the page with PDF on its tab",

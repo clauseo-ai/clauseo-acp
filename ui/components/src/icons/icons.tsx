@@ -23,9 +23,11 @@ import { Icon, type IconProps } from "./icon.tsx";
 export {
   IconAccept,
   IconFileEmail,
+  IconFileExcel,
   IconFileGeneric,
   IconFileMarkdown,
   IconFilePdf,
+  IconFilePowerPoint,
   IconFileWord,
   IconPageTurn,
   IconPaperBookPage,
