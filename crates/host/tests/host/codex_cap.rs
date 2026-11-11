@@ -274,6 +274,29 @@ fn after_an_undo(
         agent,
     );
     let mut events = host.events(StreamId::Thread(thread));
+    edit_and_undo(&host, &mut events, thread);
+    let (first, _) = host.prompt(thread, &just_under());
+    let (second, _) = host.prompt(thread, NEXT);
+    until_queued(&mut events, second);
+    events.until_turn_ended(first);
+    if runs_on {
+        events.until_turn_ended(second);
+    }
+    host.settle();
+    events.drain_ready();
+    events.assert_no_mismatch();
+    let held = held(&host, matter, thread);
+    host.shutdown();
+    (events, [first, second], held)
+}
+
+/// Runs the first turn, which edits brief.txt, and undoes it, so the next prompt carries the
+/// undo note.
+fn edit_and_undo(
+    host: &crate::support::Running,
+    events: &mut crate::observe::Events,
+    thread: clauseo_protocol::ThreadId,
+) {
     let (edited, _) = host.prompt(thread, "Finish the brief.");
     assert_eq!(events.until_turn_ended(edited).stop, StopReason::EndTurn);
     host.ok(HostCommand::UndoStep {
@@ -288,19 +311,6 @@ fn after_an_undo(
         e.position(|event| matches!(event, DomainEvent::StepUndone(_)))
             .is_some()
     });
-    let (first, _) = host.prompt(thread, &just_under());
-    let (second, _) = host.prompt(thread, NEXT);
-    until_queued(&mut events, second);
-    events.until_turn_ended(first);
-    if runs_on {
-        events.until_turn_ended(second);
-    }
-    host.settle();
-    events.drain_ready();
-    events.assert_no_mismatch();
-    let held = held(&host, matter, thread);
-    host.shutdown();
-    (events, [first, second], held)
 }
 
 /// After an undo the host adds its note to the next prompt as it goes out. A `ChatGPT` question
@@ -349,4 +359,41 @@ fn a_claude_question_with_the_undo_note_over_codex_s_cap_is_sent() {
         events.turn_ended(second).map(|ended| ended.stop),
         Some(StopReason::EndTurn)
     );
+}
+
+/// The undo note's text after brief.txt was undone (`crates/host/src/undo_note.rs`).
+const BRIEF_NOTE: &str = "Note from Clauseo: since your last turn, the lawyer put these files \
+    back to an earlier version, and removed those it did not have: brief.txt. Read them again \
+    before relying on what you remember about them.";
+
+/// A `ChatGPT` question refused as it goes out keeps the undo note: the next question's
+/// `session/prompt` starts with it (the agent expects exactly the note, then the question).
+#[test]
+fn the_undo_note_kept_by_a_refusal_goes_out_with_the_next_chatgpt_question() {
+    let dir = Dir::new("codex_cap_undo_note_kept", &[]);
+    let mut steps = edits_the_brief();
+    steps.push(
+        json!({"expect": {"method": "session/prompt", "as": "p2", "params": {
+        "sessionId": "sess-1", "prompt": [{"type": "text", "text": BRIEF_NOTE},
+            {"type": "text", "text": NEXT}]}}}),
+    );
+    steps.push(end_turn("p2"));
+    let scenario = written(&dir, "undo-note-kept", "codex-handshake.jsonl", steps);
+    dir.set_agents(&[(CODEX, scenario)]);
+    let host = dir.start(0);
+    let files = [("brief.txt", "Clause 4 draft\n")];
+    let (_, thread, _) = matter_with_thread(&dir, &host, "m", &files, CODEX);
+    let mut events = host.events(StreamId::Thread(thread));
+    edit_and_undo(&host, &mut events, thread);
+    let (refused, _) = host.prompt(thread, &just_under());
+    assert_eq!(events.until_turn_ended(refused).stop, StopReason::Failed);
+    let failed = turn_failed(&events, refused).expect("the turn failed");
+    assert_eq!(failed.code, ErrorCode::PromptTooLong, "{}", events.dump());
+    let (next, _) = host.prompt(thread, NEXT);
+    let ended = events.until_turn_ended(next);
+    host.settle();
+    events.drain_ready();
+    events.assert_no_mismatch();
+    assert_eq!(ended.stop, StopReason::EndTurn, "{}", events.dump());
+    host.shutdown();
 }
