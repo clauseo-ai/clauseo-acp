@@ -294,4 +294,10 @@ pub struct StepUndone {
     pub restored: Vec<MatterPath>,
     /// The files the lawyer chose to keep.
     pub kept: Vec<MatterPath>,
+    /// The kept files the lawyer chose to undo that Clauseo had no earlier copy of, with why
+    /// each had not been versioned: in the folder before the turn but skipped (cloud-only or
+    /// over the size cap), then changed by it. Undo never deletes or overwrites them. Missing
+    /// reads as empty, and empty is left out, so an entry from before the field still decodes.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub unversioned: Vec<SkippedFile>,
 }

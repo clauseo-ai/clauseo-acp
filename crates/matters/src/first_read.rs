@@ -7,7 +7,7 @@
 //!   same content and mtime). Its content becomes the versioned baseline: it is in the tree but
 //!   is not a change of the checkpoint, so nothing reports it and nothing undoes it.
 //! - Read with another size or mtime, it **changed** since it was skipped: still a change of
-//!   the checkpoint (listed as added), never the new name of a renamed file.
+//!   the checkpoint (listed as added), but undo keeps it, neither deleted nor overwritten.
 //!
 //! Each checkpoint's commit records both in `Clauseo-Baseline` and `Clauseo-Was-Skipped`
 //! trailers (`trailers.rs`, decision 0007), so an undo or a diff long after still knows.
@@ -23,7 +23,7 @@ use crate::stat::{CacheEntry, EntryState};
 pub(crate) struct FirstReads {
     /// Read unchanged: in the tree, not a change.
     pub(crate) baseline: Vec<SkippedFile>,
-    /// Read changed: a change, never a rename's new name.
+    /// Read changed: a change undo never deletes or overwrites.
     pub(crate) changed: Vec<SkippedFile>,
 }
 
@@ -83,7 +83,7 @@ pub(crate) struct StepReads {
     /// earlier checkpoint of a longer step may have changed since, so it is only in `there`.
     pub(crate) baseline: Vec<MatterPath>,
     /// Every file any checkpoint of the step read for the first time, with the reason it had
-    /// been skipped: it was in the folder before the step, so it is never a rename's new name.
+    /// been skipped: it was in the folder before the step, so undo never deletes it.
     pub(crate) there: BTreeMap<MatterPath, SkippedFileReason>,
 }
 

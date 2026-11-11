@@ -123,12 +123,13 @@ documents with 3 changed).
     unchanged (a sync client keeps both when it downloads a file). It is in the commit's tree but
     is not a change: the diff leaves it out, so no `FilesChanged` names it and nothing undoes it.
   - `Clauseo-Was-Skipped`: read with another size or mtime. It is a change (listed as added, and
-    never paired as the new name of a rename).
+    never paired as the new name of a rename), but undo never deletes or overwrites it: there is no
+    earlier copy. Undo keeps it and reports it (`Undone::unversioned`, `StepUndone.unversioned`).
   - The diff of a step (`changes_between`, undo, "edited since") reads these trailers from every
     checkpoint after the step's first up to its last: the last checkpoint's baselines are left
-    out, and no file any of them names is a rename's new name. A baseline of an earlier
-    checkpoint of a longer step may have changed since, so it is listed.
-  - A history written before these trailers has none: a Clauseo that reads it lists such a file
+    out, and every file any of them names is one undo never deletes or overwrites. A baseline of an
+    earlier checkpoint of a longer step may have changed since, so it is listed but kept.
+  - A history written before these trailers has none: a Clauseo that reads it undoes such a file
     as an added one, as before. An older Clauseo reading a newer history ignores them likewise.
 - There is no `Clauseo-Seq` trailer: the commit is written before the host logs
   `CheckpointRecorded`, so the `seq` is not known yet, and the parent chain already orders the

@@ -1,14 +1,16 @@
 //! A file the last checkpoint skipped (cloud-only, or over the cap) that a turn reads for the
 //! first time: it was in the folder before, so it is never an added paper and undo never
-//! deletes it. Read unchanged it is a baseline (no change, a `Clauseo-Baseline` trailer).
+//! deletes or overwrites it. Read unchanged it is a baseline (no change, a `Clauseo-Baseline`
+//! trailer); read changed it is listed, but undo keeps it (`Undone::unversioned`).
 
 use std::path::Path;
 
 use clauseo_matters::{Error, Limits};
+use clauseo_protocol::{SkippedFile, SkippedFileReason};
 
 use crate::fixture::{
-    Fixture, assert_none, cid, created, meta, modified, path, read_at, tools, undo, undo_all,
-    undo_request,
+    Fixture, added, assert_none, cid, created, meta, modified, path, read_at, tools, undo,
+    undo_all, undo_request,
 };
 
 /// The message of the commit the timeline's ref (`refs/clauseo/timeline`) names.
@@ -80,6 +82,7 @@ fn a_cloud_only_file_the_agent_only_read_is_a_baseline_and_undo_leaves_it() {
     let undone = undo(&mut matter, (1, 3), &["brief.txt"], (6, 7)).unwrap();
     assert_eq!(undone.restored, [path("brief.txt")]);
     assert_none(&undone.deleted);
+    assert_none(&undone.unversioned);
     assert_eq!(fx.read("brief.txt"), b"draft");
     assert_eq!(fx.read("notes.txt"), b"the lawyer's notes");
 
@@ -139,4 +142,76 @@ fn an_over_cap_file_read_after_the_cap_is_raised_is_a_baseline() {
     let undone = undo(&mut matter, (1, 3), &[], (4, 5)).unwrap();
     assert_none(&undone.deleted);
     assert_eq!(fx.read("big.bin"), [7; 20]);
+}
+
+/// A placeholder the agent downloaded and then edited, and an over-cap file it cut under the
+/// cap, are changes, listed as added; but Clauseo had no copy from before, so Undo keeps each
+/// byte for byte and says so, while a file the agent made is still deleted.
+#[test]
+fn a_skipped_file_the_agent_changed_is_listed_and_undo_keeps_it() {
+    let mut fx = Fixture::new("first-read-changed");
+    fx.limits = Limits {
+        file_cap_bytes: 30,
+        import_warn_bytes: 1_000_000,
+    };
+    cloud_only(&fx, "notes.txt", b"the lawyer's notes");
+    cloud_only(&fx, "same-size.txt", b"twelve bytes");
+    fx.write("big.bin", [7; 40]);
+    let mut matter = fx.import();
+    matter.before_turn(&meta(2)).unwrap();
+
+    for rel in ["notes.txt", "same-size.txt"] {
+        fx.probe.unmark(fx.file(rel));
+    }
+    fx.write("notes.txt", "the agent's notes, longer");
+    // Same size, another mtime.
+    fx.write("same-size.txt", "twelve BYTES");
+    crate::support::settle(fx.file("same-size.txt"));
+    fx.write("big.bin", "cut");
+    fx.write("new.txt", "made by the agent");
+    let all = ["big.bin", "new.txt", "notes.txt", "same-size.txt"];
+    let checkpoint = matter.after_turn(&meta(3), &tools(&all)).unwrap();
+    assert_eq!(
+        created(checkpoint, 3),
+        [
+            added("big.bin", b"cut"),
+            added("new.txt", b"made by the agent"),
+            added("notes.txt", b"the agent's notes, longer"),
+            added("same-size.txt", b"twelve BYTES"),
+        ]
+    );
+    assert_eq!(
+        first_read_lines(&fx),
+        [
+            "Clauseo-Was-Skipped: over-size-cap big.bin",
+            "Clauseo-Was-Skipped: cloud-only notes.txt",
+            "Clauseo-Was-Skipped: cloud-only same-size.txt",
+        ]
+    );
+    // Undo would leave them as they are: none counts as edited since.
+    assert_none(&matter.edited_since(cid(1), cid(3)).unwrap());
+
+    let undone = undo(&mut matter, (1, 3), &all, (4, 5)).unwrap();
+    assert_eq!(undone.restored, [path("new.txt")]);
+    assert_eq!(undone.deleted, [path("new.txt")]);
+    assert_eq!(
+        undone.kept,
+        [path("big.bin"), path("notes.txt"), path("same-size.txt")]
+    );
+    let unversioned = |rel: &str, reason| SkippedFile {
+        path: path(rel),
+        reason,
+    };
+    assert_eq!(
+        undone.unversioned,
+        [
+            unversioned("big.bin", SkippedFileReason::OverSizeCap),
+            unversioned("notes.txt", SkippedFileReason::CloudOnly),
+            unversioned("same-size.txt", SkippedFileReason::CloudOnly),
+        ]
+    );
+    assert!(!fx.exists("new.txt"));
+    assert_eq!(fx.read("notes.txt"), b"the agent's notes, longer");
+    assert_eq!(fx.read("same-size.txt"), b"twelve BYTES");
+    assert_eq!(fx.read("big.bin"), b"cut");
 }

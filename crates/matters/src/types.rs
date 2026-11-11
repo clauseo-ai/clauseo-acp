@@ -226,6 +226,11 @@ pub struct Undone {
     /// spelled otherwise (another case or Unicode normalisation, on APFS or NTFS), where writing
     /// would replace that other file.
     pub kept: Vec<MatterPath>,
+    /// The files of `kept` the lawyer chose to undo that were in the folder before the step
+    /// but never versioned (cloud-only or over the cap, then changed by the step), with the
+    /// reason each had been skipped, sorted: there is no earlier copy to put back, so undo
+    /// never deletes or overwrites them.
+    pub unversioned: Vec<SkippedFile>,
     /// The undone files that had been edited since the step ("Undo anyway"), sorted. Their
     /// edits are in the `outside_edits` checkpoint or an earlier one.
     pub edited_since: Vec<MatterPath>,

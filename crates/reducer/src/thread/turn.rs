@@ -325,6 +325,7 @@ pub(super) fn step_undone(
         checkpoint: event.checkpoint,
         restored: event.restored.clone(),
         kept: event.kept.clone(),
+        unversioned: event.unversioned.clone(),
     };
     insert_marker(state, seq, event_id, ts, kind, out);
 }

@@ -222,6 +222,7 @@ fn an_edited_queued_prompt_replaces_it_and_an_undone_step_takes_its_entries() {
         checkpoint: id::<CheckpointId>(31),
         restored: Vec::new(),
         kept: Vec::new(),
+        unversioned: Vec::new(),
     }));
     let (_, writes) = fold(&envelopes(events));
     assert_eq!(
@@ -287,6 +288,7 @@ fn review_a_requeued_steer_belongs_to_its_new_turn() {
         checkpoint: id::<CheckpointId>(31),
         restored: Vec::new(),
         kept: Vec::new(),
+        unversioned: Vec::new(),
     }));
     let envelopes = envelopes(events);
     // The reducer: the steer (seq 4) is turn B's prompt.
