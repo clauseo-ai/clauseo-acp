@@ -104,12 +104,11 @@ test("registry ids are unique and typeable", () => {
   ).toEqual(["U3-err-", "U3-err-Store.full", "U3-err-a..b"]);
 });
 
-test("U3's ids are written as they are: one per error code but U3-07's, Versions' own and Settings › Tools' mcp.*, and the limit row's own Reset not given.", () => {
+test("U3's ids are written as they are: one per error code but U3-07's and Versions' own, and the limit row's own Reset not given.", () => {
   const ids = REGISTRY.map((e) => e.id).filter((id) => id.startsWith("U3-"));
   const codes = (Object.entries(ERROR_WORDS) as [string, string][])
     .filter(
-      ([code, key]) =>
-        !code.startsWith("mcp.") &&
+      ([, key]) =>
         key !== "The answer stopped. Your question and the answer so far are kept." &&
         !(MARK_KEYS as readonly string[]).includes(key),
     )

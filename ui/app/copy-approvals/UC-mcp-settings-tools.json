@@ -297,15 +297,15 @@
     "note": "Settings › Tools form: refusal commandNotFound { program }, under Command; {program} as typed"
   },
   "UC-196": {
-    "en": "Use a program name or its full path.",
-    "hi": "प्रोग्राम का नाम या उसका पूरा पाथ लिखें।",
+    "en": "Use a program name or its full path on this computer.",
+    "hi": "प्रोग्राम का नाम या इस कंप्यूटर पर उसका पूरा पाथ लिखें।",
     "hi_status": "provisional",
     "hi_at": "2026-11-11",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
     "status": "provisional",
     "at": "2026-11-11",
     "by": "app track (provisional; orchestrator's changes after the first look, 2026-11-11)",
-    "note": "Settings › Tools form: refusal commandInvalid (a relative path such as bin/x), under Command"
+    "note": "Settings › Tools form: refusal mcp.command_invalid (a relative path such as bin/x, or a network path such as \\\\server\\share\\x.exe), under Command"
   },
   "UC-205": {
     "en": "Use letters, numbers and _ only.",

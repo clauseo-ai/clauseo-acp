@@ -60,7 +60,7 @@ export const MCP_TOOLS: Entry[] = [
   entry("UC-193", "Imported 1 tool.", "imported-one"),
   entry("UC-194", "{count} couldn't be imported.", "list-import"),
   entry("UC-195", "Clauseo couldn't find {program} on this computer.", "add-error"),
-  entry("UC-196", "Use a program name or its full path.", "command-invalid"),
+  entry("UC-196", "Use a program name or its full path on this computer.", "command-invalid"),
   entry("UC-205", "Use letters, numbers and _ only.", "env-invalid"),
   // one line for each tool an import left out, why in plain words
   entry("UC-206", "{name}: Clauseo couldn't find {program} on this computer.", "import-reasons"),

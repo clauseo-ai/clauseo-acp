@@ -16,7 +16,7 @@ export const URL_EXAMPLE = "https://tools.example.com/mcp";
  * carries none. */
 export function refusalOf(
   lang: Lang,
-  code: McpErrorCode,
+  code: Exclude<McpErrorCode, "mcp.save_declined">,
   program = "",
 ): { place: Place; words: string } {
   switch (code) {
@@ -28,7 +28,10 @@ export function refusalOf(
     case "mcp.name_invalid":
       return { place: "name", words: mw(lang, "Use letters, numbers, - and _ only.") };
     case "mcp.command_invalid":
-      return { place: "command", words: mw(lang, "Use a program name or its full path.") };
+      return {
+        place: "command",
+        words: mw(lang, "Use a program name or its full path on this computer."),
+      };
     case "mcp.command_not_found":
       return {
         place: "command",

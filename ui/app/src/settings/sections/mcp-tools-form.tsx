@@ -270,6 +270,14 @@ export function ToolForm({
   const [headers, setHeaders] = useState<Row[]>(() => rowsOf(editing?.headers ?? [], 10_000));
   const [refusal, setRefusal] = useState<{ place: Place; words: string } | null>(null);
   const [sending, setSending] = useState(false);
+  // after a declined confirm, focus goes back to Save once it takes presses again
+  const backToSave = useRef(false);
+  const form = useRef<HTMLFormElement>(null);
+  useEffect(() => {
+    if (sending || !backToSave.current) return;
+    backToSave.current = false;
+    form.current?.querySelector<HTMLElement>('[data-testid="tools-save"]')?.focus();
+  }, [sending]);
   const errorAt = (place: Place) => (refusal?.place === place ? refusal.words : undefined);
   const m = (key: McpToolsKey, slots?: Record<string, string>) => mw(lang, key, slots);
 
@@ -328,6 +336,8 @@ export function ToolForm({
       (answer) => {
         setSending(false);
         if (answer === null) onDone(trimmed);
+        // the lawyer chose Cancel in the host's confirm: the form as it was, no line, focus back on Save
+        else if (answer === "mcp.save_declined") backToSave.current = true;
         else setRefusal(refusalOf(lang, answer, command.trim()));
       },
       () => {
@@ -347,6 +357,7 @@ export function ToolForm({
   const urlLine = m("Use a full address, such as {example}.", { example: URL_EXAMPLE });
   return (
     <form
+      ref={form}
       className="set-tools-form"
       onSubmit={submit}
       onKeyDown={escape}
