@@ -34,6 +34,8 @@ mod path;
 #[cfg(test)]
 mod tests;
 
+pub use command::resolve_command;
+
 use std::fmt;
 use std::path::{Path, PathBuf};
 
@@ -109,6 +111,38 @@ impl ImportFs for RealFs {
 /// The process's own environment variables, for [`Env::vars`].
 pub fn process_vars(name: &str) -> Option<String> {
     std::env::var(name).ok()
+}
+
+/// The real process as an [`Env`]: the OS this build runs on, the home folder, the process's
+/// environment variables and the disk.
+pub struct RealEnv {
+    os: Os,
+    home: PathBuf,
+    fs: RealFs,
+}
+
+impl RealEnv {
+    /// The real process's environment, or `None` on an OS Clauseo is not built for or when there
+    /// is no home folder.
+    pub fn from_process() -> Option<RealEnv> {
+        let os = Os::current()?;
+        let home = std::env::home_dir()?;
+        Some(RealEnv {
+            os,
+            home,
+            fs: RealFs,
+        })
+    }
+
+    /// This process as an [`Env`], for [`find_candidates`] or [`resolve_command`].
+    pub fn env(&self) -> Env<'_> {
+        Env {
+            os: self.os,
+            home: &self.home,
+            vars: &process_vars,
+            fs: &self.fs,
+        }
+    }
 }
 
 /// One server an app has set up, ready to import.

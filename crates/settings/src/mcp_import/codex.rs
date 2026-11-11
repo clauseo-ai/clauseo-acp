@@ -3,7 +3,8 @@
 //! Keys read (from the Codex docs, developers.openai.com/codex/mcp, the "STDIO servers" and
 //! "Streamable HTTP servers" lists): `command`, `args`, `env` (stdio); `url`, `http_headers`,
 //! `env_http_headers` (header to variable name), `bearer_token_env_var` (streamable HTTP);
-//! `enabled = false` disables a server. Codex's `env_vars`, `cwd` and `auth` are not read.
+//! `env_vars` (stdio) names variables forwarded from the parent environment; each becomes an
+//! `env` entry with its current value. `cwd` and `auth` are not read.
 
 use super::command;
 use super::path::{self, join};
@@ -47,7 +48,7 @@ fn entry(env: &Env<'_>, name: &str, table: &toml::Table) -> Option<Entry> {
         CandidateKind::Local {
             command: resolved,
             args: toml_list(table.get("args"), &mut problems),
-            env: toml_pairs(table.get("env"), &mut problems),
+            env: forwarded_env(env, table, &mut problems),
         }
     } else {
         let url = table.get("url")?.as_str()?.to_owned();
@@ -83,6 +84,54 @@ fn entry(env: &Env<'_>, name: &str, table: &toml::Table) -> Option<Entry> {
         kind,
         problems,
     })
+}
+
+/// The stdio `env` table, then each `env_vars` name not already in it, filled from the
+/// environment. A name that is not set keeps its `${NAME}` text and gives
+/// [`Problem::UnresolvedVariable`]. An `env_vars` entry for the remote executor
+/// (`source = "remote"`) cannot be read here and is left out with [`Problem::Unreadable`]; so is
+/// an entry that is neither a name nor a table with a `name`.
+fn forwarded_env(
+    env: &Env<'_>,
+    table: &toml::Table,
+    problems: &mut Vec<Problem>,
+) -> Vec<(String, String)> {
+    let mut pairs = toml_pairs(table.get("env"), problems);
+    let Some(items) = table.get("env_vars").and_then(toml::Value::as_array) else {
+        return pairs;
+    };
+    for item in items {
+        let (var, source) = match item {
+            toml::Value::String(name) => (Some(name.as_str()), None),
+            toml::Value::Table(spec) => (
+                spec.get("name").and_then(toml::Value::as_str),
+                spec.get("source").and_then(toml::Value::as_str),
+            ),
+            _ => (None, None),
+        };
+        let Some(var) = var else {
+            problems.push(Problem::Unreadable);
+            continue;
+        };
+        if source == Some("remote") {
+            problems.push(Problem::Unreadable);
+            continue;
+        }
+        if pairs.iter().any(|(key, _)| key == var) {
+            continue;
+        }
+        let value = if let Some(value) = (env.vars)(var) {
+            value
+        } else {
+            problems.push(Problem::UnresolvedVariable {
+                name: var.to_owned(),
+            });
+            format!("${{{var}}}")
+        };
+        pairs.push((var.to_owned(), value));
+    }
+    pairs.sort();
+    pairs
 }
 
 /// The string items of a TOML array. An item that is not a string is left out with

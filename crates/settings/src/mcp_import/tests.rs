@@ -118,4 +118,5 @@ const DESKTOP_WIN: &str = "C:\\Users\\ana\\AppData\\Roaming\\Claude\\claude_desk
 
 mod misc;
 mod names;
+mod resolve;
 mod sources;
