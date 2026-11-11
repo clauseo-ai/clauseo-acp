@@ -57,9 +57,9 @@ pub const AGENT_BROWSER_ALLOWED: [&str; 27] = [
 /// (`agent-browser --json snapshot`), the one global option that changes nothing but the output
 /// format. Behind any other global option (`-q`, `--max-output 5`) a command is in no allow
 /// rule, so the mode decides, unless an ask or deny rule matched anywhere catches it
-/// ([`AGENT_BROWSER_ASK_ANYWHERE`], [`AGENT_BROWSER_DENIED`]). A full path (`/…/agent-browser open`) or `npx agent-browser` is in
-/// no rule either: Clauseo puts `agent-browser` on the `PATH` and names it so, and `npx` would
-/// fetch another build from npm.
+/// ([`AGENT_BROWSER_ASK_ANYWHERE`], [`AGENT_BROWSER_DENIED`]). A full path
+/// (`/…/agent-browser open`) or `npx agent-browser` is in no rule either: Clauseo puts
+/// `agent-browser` on the `PATH` and names it so, and `npx` would fetch another build from npm.
 pub const AGENT_BROWSER_PREFIXES: [&str; 2] = ["agent-browser", "agent-browser --json"];
 
 /// agent-browser commands that ask, written after each of [`AGENT_BROWSER_PREFIXES`]

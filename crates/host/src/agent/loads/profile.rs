@@ -273,8 +273,9 @@ fn deny_data_folder(
 
 /// `permissions.ask` gains agent-browser's allowed commands that still ask
 /// (`clauseo_profile::claude::agent_browser_ask`: `eval`, `pdf`, `download`, `upload`,
-/// `state load` and `state save` behind another option, a `wait --fn`, a `file://` URL, an option that loads page JavaScript), after
-/// any the hook put there. A hook value at `permissions` or `ask` of another type is replaced.
+/// `state load` and `state save` behind another option, a `wait --fn`, a `file://` URL, an
+/// option that loads page JavaScript), after any the hook put there. A hook value at
+/// `permissions` or `ask` of another type is replaced.
 fn browser_ask_settings(settings: &mut Map<String, Value>) {
     let mut permissions = take_object(settings, "permissions");
     let mut ask = take_array(&mut permissions, "ask");
