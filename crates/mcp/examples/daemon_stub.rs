@@ -14,7 +14,8 @@
 //! has left agent-browser's group but not yet bound its socket. That process writes its pid to
 //! `late.pid` in the socket folder, waits until a file `late-go` appears there, then serves as
 //! the daemon does. An `agent_browser_wait_for_text` call for the text `stub_hold` is never
-//! answered (a call in flight; a core tool, so the guard's allowlist passes it). Cargo builds it
+//! answered (a call in flight; a core tool, so the guard's allowlist passes it); a request whose
+//! id is a string starting `stub-error` gets a JSON-RPC error instead of a result. Cargo builds it
 //! for the tests; it is never shipped.
 
 use std::io::{BufRead, Write};
@@ -177,7 +178,12 @@ fn main() -> std::io::Result<()> {
             continue;
         }
         if let Some(id) = message.get("id") {
-            writeln!(out, "{}", json!({"jsonrpc": "2.0", "id": id, "result": {}}))?;
+            let reply = if id.as_str().is_some_and(|id| id.starts_with("stub-error")) {
+                json!({"jsonrpc": "2.0", "id": id, "error": {"code": -32603, "message": "stub"}})
+            } else {
+                json!({"jsonrpc": "2.0", "id": id, "result": {}})
+            };
+            writeln!(out, "{reply}")?;
             out.flush()?;
         }
     }

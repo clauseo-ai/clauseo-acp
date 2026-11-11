@@ -161,6 +161,7 @@ impl Shared {
                 generation: 0,
                 live: None,
                 in_flight: Vec::new(),
+                sent: 0,
                 idle_since: now(),
                 restarted: false,
                 closing: false,
@@ -183,6 +184,9 @@ pub(crate) struct State {
     /// The requests sent to the running agent-browser and not yet answered: each id, and what
     /// it is.
     in_flight: Vec<(Value, Request)>,
+    /// How many requests have gone to agent-browser in the guard's life: a close's stop is
+    /// skipped once another has gone since its reply was taken (`relay.rs`).
+    sent: u64,
     /// When the browser started or last answered a tool call.
     idle_since: Instant,
     /// Whether Chrome has died once already; a second death ends the guard.
@@ -231,6 +235,12 @@ impl State {
     /// Notes request `id` sent to the running agent-browser.
     pub(crate) fn sent(&mut self, id: Value, request: Request) {
         self.in_flight.push((id, request));
+        self.sent += 1;
+    }
+
+    /// How many requests have gone to agent-browser so far.
+    pub(crate) fn sent_count(&self) -> u64 {
+        self.sent
     }
 
     /// Takes the reply to `id` off the list, and returns what it answers (`None` for no request
@@ -244,10 +254,17 @@ impl State {
         Some(request)
     }
 
-    /// Whether the browser runs with nothing in flight and the agent still there: what the stop
-    /// after an `agent_browser_close` reply needs (`relay.rs`).
+    /// Whether the browser runs with nothing in flight and the agent still there.
     pub(crate) fn quiet(&self) -> bool {
         self.live.is_some() && self.in_flight.is_empty() && !self.closing
+    }
+
+    /// Whether the stop after an `agent_browser_close` reply may run (`relay.rs`): the browser
+    /// is [`State::quiet`] and no request has gone to agent-browser since the close's reply was
+    /// taken, when [`State::sent_count`] read `sent`. A call sent and answered in between would
+    /// leave the browser quiet, and the stop would end the Chrome that call just used.
+    pub(crate) fn close_may_stop(&self, sent: u64) -> bool {
+        self.quiet() && self.sent == sent
     }
 
     /// The ids still unanswered, which the guard now answers itself.
@@ -432,4 +449,29 @@ fn wait_for_port(port: u16, parent: &Parent) -> Result<(), String> {
         "the claimed debugging port {port} stayed taken for {} s",
         PORT_WAIT.as_secs()
     ))
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use serde_json::json;
+
+    use super::{Request, Shared};
+
+    /// A call sent and answered after a close's reply was taken leaves nothing in flight, but
+    /// moves the count on, so the close's stop is skipped (`relay.rs`'s `stop_after_close`):
+    /// without the count the stop would end the Chrome that call had just used.
+    #[test]
+    fn a_call_answered_after_the_close_moves_the_count_on() {
+        let dir = std::env::temp_dir();
+        let shared = Shared::new(super::Launcher::for_tests(&dir, Vec::new()));
+        let mut state = shared.state.lock().unwrap();
+        state.sent(json!("close"), Request::Close);
+        assert_eq!(state.answered(&json!("close")), Some(Request::Close));
+        let at_close = state.sent_count();
+        assert_eq!(state.in_flight.len(), 0);
+        state.sent(json!("open"), Request::Call);
+        assert_eq!(state.answered(&json!("open")), Some(Request::Call));
+        assert_eq!(state.in_flight.len(), 0, "the open is answered");
+        assert_ne!(state.sent_count(), at_close, "the open went unnoticed");
+    }
 }

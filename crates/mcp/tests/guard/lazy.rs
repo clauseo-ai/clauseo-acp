@@ -141,6 +141,35 @@ fn close_call(id: &str) -> Value {
         "params": {"name": "agent_browser_close", "arguments": {}}})
 }
 
+/// A close that agent-browser answers with an error stops Chrome and the daemon too.
+#[cfg(unix)]
+#[test]
+fn a_close_answered_with_an_error_still_stops_chrome() {
+    let scratch = Scratch::new("lazy_close_error");
+    let mut guard = guard(&scratch, None);
+    guard.call("open");
+    let first = session_pids(&scratch);
+    guard.send(&close_call("stub-error-close"));
+    let reply = guard.read();
+    assert_eq!(reply["id"], "stub-error-close", "{reply}");
+    assert!(reply.get("error").is_some(), "{reply}");
+    guard.stderr_until("agent_browser_close: stopped Chrome and agent-browser");
+    assert!(within(|| !alive(first[1])), "Chrome {} is left", first[1]);
+    assert!(
+        within(|| !alive(first[0])),
+        "the daemon {} is left",
+        first[0]
+    );
+    assert_eq!(
+        profiles(&scratch.cwd()).len(),
+        1,
+        "the close deleted the profile"
+    );
+    let (status, _) = guard.finish();
+    assert_eq!(status.code(), Some(0));
+    assert_nothing_left(&scratch, first);
+}
+
 /// `agent_browser_close`'s reply goes to the agent, then the guard stops Chrome and the daemon
 /// as the idle stop does, keeping the profile; a close while stopped is answered by the guard
 /// and starts nothing; the next call starts both again on the same profile.
