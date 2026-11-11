@@ -40,7 +40,12 @@ import { frame } from "@clauseo/components/lib/words-frame.ts";
 import { mt } from "@clauseo/components/lib/words-matters.ts";
 import { th } from "@clauseo/components/lib/words-thread.ts";
 import { useWords } from "@clauseo/components/lib/words.ts";
-import { MarkdownHostContext, type MarkdownHost } from "@clauseo/components/markdown/host.ts";
+import {
+  MarkdownHostContext,
+  PaperLinksContext,
+  type MarkdownHost,
+  type PaperLinks,
+} from "@clauseo/components/markdown/host.ts";
 import { PartsRoot } from "@clauseo/components/ui/root.tsx";
 import { frameBatch } from "../store/batch.ts";
 import { blockedSitesOf } from "../store/blocked-sites.ts";
@@ -62,6 +67,7 @@ import { LivePlan } from "./limits/live-plan.tsx";
 import { Matters, type MattersView } from "./matters.ts";
 import type { PapersHost } from "./host-next.ts";
 import { AnswerHost, quietly, type ListedPapers } from "./open.ts";
+import { paperLinkOf } from "./paper-links.ts";
 import { useMatterMoves, usePapers } from "./use-papers.ts";
 import { LocateFolderContext, type ActRefusals } from "./act-refusals.ts";
 import { LocateGate, MovedFolder } from "./moved.tsx";
@@ -126,6 +132,20 @@ function useAnswerHost(
   );
   useEffect(() => host.show(listed), [host, listed]);
   return host;
+}
+
+/** Which paper on the wall a file link in an answer names (paper-links.ts): the open matter's listed papers, in its
+ * folder as the host shows it. A new list makes a new one, so a link to a paper that just arrived becomes a link. */
+function usePaperLinks(
+  matter: MatterId | null,
+  listed: ListedPapers,
+  folder: string | null,
+): PaperLinks {
+  return useMemo(() => {
+    const paths =
+      matter !== null && listed?.matter === matter ? listed.papers.papers.map((p) => p.path) : [];
+    return (href: string) => paperLinkOf(href, paths, folder);
+  }, [matter, listed, folder]);
 }
 
 /** What Versions opens and shows files with in the desktop app: the transport's own (H11). */
@@ -273,6 +293,7 @@ function RoomFrame({
     matters.refusals,
     matters.next.papers,
   );
+  const paperLinks = usePaperLinks(open?.matter ?? null, listed, open?.folder_display || null);
   // the open matter's refused open (an answer's paper, Find's), on the composer's line; Locate
   // folder for its folder
   const { refusals } = matters;
@@ -536,31 +557,33 @@ function RoomFrame({
               )}
               {/* one thread's state per conversation: each starts its own; with no matter open, the composer waits */}
               <MarkdownHostContext value={answers}>
-                <WordOpenContext value={word}>
-                  <AgentPlanContext value={agentPlan}>
-                    <ToolLineContext value={toolRoom}>
-                      <ProtectionContext value={shield.composer}>
-                        <Work
-                          key={talks.open ?? open?.matter ?? "none"}
-                          transport={transport}
-                          matter={open}
-                          drafts={drafts}
-                          draftKey={talks.open}
-                          conversation={link}
-                          choice={choice}
-                          menus={draftMenus}
-                          plan={plan}
-                          focus={talks.focus?.n ?? null}
-                          archived={talks.archived}
-                          onThread={matters.onThread}
-                          conversations={conversations}
-                          folderShut={folderShut}
-                          openRefused={opened?.act === "open" ? opened.code : null}
-                        />
-                      </ProtectionContext>
-                    </ToolLineContext>
-                  </AgentPlanContext>
-                </WordOpenContext>
+                <PaperLinksContext value={paperLinks}>
+                  <WordOpenContext value={word}>
+                    <AgentPlanContext value={agentPlan}>
+                      <ToolLineContext value={toolRoom}>
+                        <ProtectionContext value={shield.composer}>
+                          <Work
+                            key={talks.open ?? open?.matter ?? "none"}
+                            transport={transport}
+                            matter={open}
+                            drafts={drafts}
+                            draftKey={talks.open}
+                            conversation={link}
+                            choice={choice}
+                            menus={draftMenus}
+                            plan={plan}
+                            focus={talks.focus?.n ?? null}
+                            archived={talks.archived}
+                            onThread={matters.onThread}
+                            conversations={conversations}
+                            folderShut={folderShut}
+                            openRefused={opened?.act === "open" ? opened.code : null}
+                          />
+                        </ProtectionContext>
+                      </ToolLineContext>
+                    </AgentPlanContext>
+                  </WordOpenContext>
+                </PaperLinksContext>
               </MarkdownHostContext>
             </StoreContext>
           )}
