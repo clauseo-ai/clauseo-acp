@@ -1,4 +1,4 @@
-// Settings › Tools' copy review entries (UC-169 to UC-196, UC-205 to UC-211): each new string in the real settings window over the fake
+// Settings › Tools' copy review entries (UC-169 to UC-196, UC-205 to UC-211, UC-250 and UC-251): each new string in the real settings window over the fake
 // host, open at Tools in the scene that shows it (settings/sections/tools-probe.tsx, the probe's scenes), at the
 // window's size. The address form's strings show with its preview on, as REMOTE_TOOLS keeps it hidden until remote
 // tools land. Hindi provisional.
@@ -73,4 +73,7 @@ export const MCP_TOOLS: Entry[] = [
     "{name}: it comes from a project you haven't approved in Claude Code.",
     "import-reasons",
   ),
+  // A4, import over the real host: the button while in flight, and the left-out ones the host doesn't name
+  entry("UC-250", "Importing…", "importing"),
+  entry("UC-251", "{count} more couldn't be imported.", "import-result"),
 ];

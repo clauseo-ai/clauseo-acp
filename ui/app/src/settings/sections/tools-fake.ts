@@ -1,8 +1,8 @@
 // A fake host for Settings › Tools (tools-model.ts's ToolsCommands): its list in memory, sending the view on subscribe
 // and after every change as A1's `mcp_tools_changed` does, and refusing with A1's codes. For tests, the copy review and
 // the probe; never shipped. A saved value is kept apart from the view, which says only that it is saved, and `saves`
-// records each save with its values replaced by "(set)", so no value reaches a test's output. Import (A3) lives here
-// only for now.
+// records each save with its values replaced by "(set)", so no value reaches a test's output. An import adds what its
+// app holds and sends the view with `last_import`, as A3's host does; `holdImport` keeps one in flight for a test.
 import {
   ENV_NAME,
   HEADER_NAME,
@@ -25,11 +25,13 @@ const RESERVED = ["browser", "case-law"];
 /** The bare names the fake finds on "this computer"; any other is mcp.command_not_found. */
 const FOUND = ["npx", "uvx", "bunx", "node", "python3", "deno", "docker", "pnpm"];
 
-/** What a source holds for the fake to import: servers it adds, and names it leaves out. */
-export type FakeImports = Partial<Record<ImportSource, { add: McpServerView[]; skip: Skipped[] }>>;
+/** What a source holds for the fake to import: servers it adds, names it leaves out, and how many more it leaves out
+ * unnamed (the host's `others`). */
+export type FakeImport = { add: McpServerView[]; skip: Skipped[]; others?: number };
+export type FakeImports = Partial<Record<ImportSource, FakeImport>>;
 
-/** A view as a fixture writes it: the sources to import come from the fake's imports. */
-export type FakeView = Omit<ToolsView, "importable">;
+/** A view as a fixture writes it: the sources to import come from the fake's imports, last_import from its imports. */
+export type FakeView = Omit<ToolsView, "importable" | "last_import">;
 
 /** One save as the fake had it, its values hidden. */
 export type FakeSave = { previousName: string | null; server: McpServerEdit };
@@ -49,6 +51,10 @@ export class FakeTools implements ToolsCommands {
   readonly imported: ImportSource[] = [];
   /** The next command's refusal, whatever it carries; cleared once used. */
   refuseNext: McpErrorCode | null = null;
+  /** Keeps the next import in flight until releaseImport. */
+  holdImport = false;
+  private letImportGo: (() => void) | null = null;
+  private lastImport: ImportResult | null = null;
   readonly previewRemote: boolean;
   private readonly imports: FakeImports;
   private readonly listeners = new Set<(view: ToolsView) => void>();
@@ -76,12 +82,15 @@ export class FakeTools implements ToolsCommands {
   }
 
   private made(): ToolsView {
-    const importable = (
-      Object.entries(this.imports) as [ImportSource, { add: McpServerView[]; skip: Skipped[] }][]
-    )
-      .map(([source, found]) => ({ source, count: found.add.length + found.skip.length }))
+    const importable = (Object.entries(this.imports) as [ImportSource, FakeImport][])
+      // as the host counts: only the servers that would import
+      .map(([source, found]) => ({ source, count: found.add.length }))
       .filter((i) => i.count > 0);
-    return structuredClone({ ...this.view, importable });
+    return structuredClone({
+      ...this.view,
+      importable,
+      ...(this.lastImport === null ? {} : { last_import: this.lastImport }),
+    });
   }
 
   /** Sends the view to every subscriber, as the host's `mcp_tools_changed` after a change. */
@@ -103,25 +112,38 @@ export class FakeTools implements ToolsCommands {
     return this.view.control === "lawyer" ? null : "settings.locked";
   }
 
-  mcpImport(source: ImportSource): Promise<ImportResult | McpErrorCode> {
+  async mcpImport(source: ImportSource): Promise<ImportResult | McpErrorCode | null> {
+    if (this.holdImport) await new Promise<void>((go) => (this.letImportGo = go));
     const refusal = this.refused();
-    if (refusal !== null) return Promise.resolve(refusal);
+    if (refusal !== null) return refusal;
     const found = this.imports[source] ?? { add: [], skip: [] };
     delete this.imports[source];
     this.imported.push(source);
     const taken = new Set(this.view.servers.map((s) => s.name));
     const add = found.add.filter((s) => !taken.has(s.name));
     this.view.servers = [...this.view.servers, ...add].sort(byName);
-    this.changed();
-    return Promise.resolve({
+    const result: ImportResult = {
+      command: `fake-import-${this.imported.length}`,
+      source,
       imported: add.map((s) => s.name),
       skipped: [
         ...found.skip,
         ...found.add
           .filter((s) => taken.has(s.name))
-          .map((s) => ({ name: s.name, reason: "alreadyAdded" as const })),
+          .map((s) => ({ name: s.name, reason: "already_added" as const })),
       ],
-    });
+      ...(found.others === undefined ? {} : { others: found.others }),
+    };
+    this.lastImport = result;
+    this.changed();
+    return result;
+  }
+
+  /** Lets an import held by `holdImport` go on. */
+  releaseImport(): void {
+    this.holdImport = false;
+    this.letImportGo?.();
+    this.letImportGo = null;
   }
 
   save(previousName: string | null, server: McpServerEdit): Promise<ToolsAnswer> {

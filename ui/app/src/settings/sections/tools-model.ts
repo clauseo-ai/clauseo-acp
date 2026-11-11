@@ -1,10 +1,11 @@
 // Settings › Tools (UC-169 on): the seam between the section and the host's MCP servers (PR A1, ui/app/src/transport/
 // bindings.ts). The view is the app event `{ mcp_tools_changed: McpToolsView }`, which the host sends in every catch-up
-// and after every change, and the three commands go as `HostCommand { mcp: McpCommand }` from the settings window (the
+// and after every change, and the commands go as `HostCommand { mcp: McpCommand }` from the settings window (the
 // host refuses them from the main window; only the settings window's Tools section asks for them here). Each answers
 // Done, or a HostError with one of MCP_ERROR_CODES. The section reads and writes only through ToolsCommands. Secret
 // values go to the host in `set` alone and never come back: a view says only which names hold a saved value. Import
-// (`importable`, mcpImport) is A3's, later: no host binding has it, so the Import buttons show over a fake alone.
+// (A3): the view's `importable` names the apps with servers to import; `import` answers Done, and how it went comes
+// in a later view as `last_import`, carrying the command's id.
 // Tests, the copy review and the probe hand a fake over with provideTools (tools-fake.ts, never shipped).
 import { useCallback, useSyncExternalStore } from "react";
 import { nextHostOf } from "../../room/host-next.ts";
@@ -13,7 +14,11 @@ import type {
   ErrorCode,
   HostCommand,
   McpCommand,
+  McpImportResult,
+  McpImportSource,
   McpServerEdit,
+  McpSkipped,
+  McpSkipReason,
   McpToolsView,
 } from "../../transport/protocol.ts";
 
@@ -26,33 +31,20 @@ export type {
   McpToolsView,
 } from "../../transport/protocol.ts";
 
-/** Another app whose MCP servers Clauseo can import (A3, later). */
-export type ImportSource = "claudeDesktop" | "claudeCode" | "codex";
+/** An app whose MCP servers Clauseo can import. */
+export type ImportSource = McpImportSource;
 
-/** A source with servers to import, and how many. */
-export type Importable = { source: ImportSource; count: number };
+/** Why an import left a server out; the section says it plainly, one line a server. */
+export type SkipReason = McpSkipReason;
 
-/** The section's view: the host's list, and the sources found to import from (only a fake sends them for now). The
- * host's own `importable` and `last_import` wait for the Import wiring, so the host model leaves them out. */
-export type ToolsView = Omit<McpToolsView, "importable" | "last_import"> & {
-  importable?: Importable[];
-};
+/** A server an import left out, and why; `program` names what command_not_found couldn't find. */
+export type Skipped = McpSkipped;
 
-/** Why an import left a server out; the section says it plainly, one line a server. notApproved: a Claude Code project's
- * server the lawyer hasn't approved there. */
-export type SkipReason =
-  | "commandNotFound"
-  | "unsupportedTransport"
-  | "unresolvedVariable"
-  | "alreadyAdded"
-  | "unreadable"
-  | "notApproved";
+/** How an import went: the servers added, those left out by name, and how many more (`others`). */
+export type ImportResult = McpImportResult;
 
-/** A server an import left out, and why; `program` names what commandNotFound couldn't find. */
-export type Skipped = { name: string; reason: SkipReason; program?: string };
-
-/** An import's answer: the servers added, and those left out. */
-export type ImportResult = { imported: string[]; skipped: Skipped[] };
+/** The section's view: the host's. */
+export type ToolsView = McpToolsView;
 
 /** The host's refusals of an MCP command: A1's codes, the firm's lock (`settings.locked`) and a command the host
  * couldn't read (`command.invalid`). `mcp.command_not_found` carries no program: the form names the one it sent.
@@ -71,6 +63,7 @@ export const MCP_ERROR_CODES = [
   "mcp.secret_store_failed",
   "mcp.server_unknown",
   "mcp.save_declined",
+  "mcp.import_too_large",
   "settings.locked",
   "command.invalid",
 ] as const satisfies readonly ErrorCode[];
@@ -93,8 +86,9 @@ export interface ToolsCommands {
   remove(name: string): Promise<ToolsAnswer>;
   /** `set_server_enabled`. */
   setEnabled(name: string, enabled: boolean): Promise<ToolsAnswer>;
-  /** Imports a source's servers, their saved values with them (A3, later; a fake only for now). */
-  mcpImport?(source: ImportSource): Promise<ImportResult | McpErrorCode>;
+  /** `import`: adds an app's servers, their saved values with them, behind the host's confirm. Answers how it went
+   * (the view's `last_import` for this command), the host's refusal, or null when Done came but no result did. */
+  mcpImport(source: ImportSource): Promise<ImportResult | McpErrorCode | null>;
   /** Only a fake sets it: offers the remote form before REMOTE_TOOLS turns on, for its shot. */
   readonly previewRemote?: boolean;
 }
@@ -111,7 +105,10 @@ export function refusalCode(error: unknown): McpErrorCode {
 }
 
 /** The view before any `mcp_tools_changed`: the host sends none for the lawyer's empty list. */
-export const NO_TOOLS: ToolsView = { control: "lawyer", servers: [] };
+export const NO_TOOLS: ToolsView = { control: "lawyer", servers: [], importable: [] };
+
+/** How long an import waits, after Done, for the view that says how it went: the host sends it with the change. */
+export const IMPORT_HEARD_MS = 10_000;
 
 /** The commands over a host: the view from the app feed, the commands through `HostCommand { mcp }`. Listens from the
  * first ask for the window's life, so the catch-up and every change are heard. Null where the transport has no app
@@ -125,20 +122,40 @@ function hostTools(transport: HostTransport): ToolsCommands | null {
   const listeners = new Set<(view: ToolsView) => void>();
   app.subscribeApp((event) => {
     if (!("mcp_tools_changed" in event)) return;
-    const { control, servers } = event.mcp_tools_changed;
-    const next: ToolsView = { control, servers };
+    const next = event.mcp_tools_changed;
     view = next;
     for (const listener of listeners) listener(next);
   });
-  const send = async (mcp: McpCommand): Promise<ToolsAnswer> => {
+  const send = async (mcp: McpCommand, id: string = crypto.randomUUID()): Promise<ToolsAnswer> => {
     const command: HostCommand = { mcp };
     try {
-      await transport.dispatch({ command_id: crypto.randomUUID(), command });
+      await transport.dispatch({ command_id: id, command });
       return null;
     } catch (error: unknown) {
       return refusalCode(error);
     }
   };
+  // the view whose last_import is this command's: it may come before Done or after it
+  const resultOf = (id: string): Promise<ImportResult | null> =>
+    new Promise((resolve) => {
+      const mine = (v: ToolsView) => (v.last_import?.command === id ? v.last_import : null);
+      const now = mine(view);
+      if (now !== null) {
+        resolve(now);
+        return;
+      }
+      const finish = (result: ImportResult | null) => {
+        listeners.delete(hear);
+        clearTimeout(late);
+        resolve(result);
+      };
+      const hear = (v: ToolsView) => {
+        const heard = mine(v);
+        if (heard !== null) finish(heard);
+      };
+      const late = setTimeout(() => finish(null), IMPORT_HEARD_MS);
+      listeners.add(hear);
+    });
   return {
     current: () => view,
     subscribe: (listener) => {
@@ -152,6 +169,11 @@ function hostTools(transport: HostTransport): ToolsCommands | null {
       }),
     remove: (name) => send({ remove_server: { name } }),
     setEnabled: (name, enabled) => send({ set_server_enabled: { name, enabled } }),
+    mcpImport: async (source) => {
+      const id = crypto.randomUUID();
+      const answer = await send({ import: { source } }, id);
+      return answer ?? resultOf(id);
+    },
   };
 }
 

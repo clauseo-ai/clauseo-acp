@@ -2,7 +2,16 @@
 // launcher, and an import's lines with each left-out tool's reason. The section's states are mcp-tools.test.tsx's.
 import { expect, test } from "vitest";
 import { importLines } from "./mcp-tools-refusal.ts";
-import { fileName, hostOf, isCommand, isFullPath, localDetail } from "./tools-model.ts";
+import {
+  fileName,
+  hostOf,
+  isCommand,
+  isFullPath,
+  localDetail,
+  type ImportResult,
+} from "./tools-model.ts";
+
+const RESULT: ImportResult = { command: "c-1", source: "claude_code", imported: [], skipped: [] };
 
 test("the model's helpers: full paths, commands, file names, hosts", () => {
   expect(isFullPath("/opt/homebrew/bin/npx")).toBe(true);
@@ -46,19 +55,20 @@ test("the list's detail: a launcher's first argument that isn't a flag, else the
 });
 
 test("the import's lines: the count, then each tool left out with its reason in plain words", () => {
-  expect(importLines("en", { imported: ["a", "b", "c"], skipped: [] })).toEqual([
+  expect(importLines("en", { ...RESULT, imported: ["a", "b", "c"] })).toEqual([
     "Imported 3 tools.",
   ]);
   expect(
     importLines("en", {
+      ...RESULT,
       imported: [],
       skipped: [
-        { name: "filesystem", reason: "commandNotFound", program: "npx" },
-        { name: "github", reason: "unsupportedTransport" },
-        { name: "court-diary", reason: "unresolvedVariable" },
-        { name: "docket", reason: "alreadyAdded" },
+        { name: "filesystem", reason: "command_not_found", program: "npx" },
+        { name: "github", reason: "unsupported_transport" },
+        { name: "court-diary", reason: "unresolved_variable" },
+        { name: "docket", reason: "already_added" },
         { name: "notes", reason: "unreadable" },
-        { name: "matter-search", reason: "notApproved" },
+        { name: "matter-search", reason: "not_approved" },
       ],
     }),
   ).toEqual([
@@ -70,4 +80,17 @@ test("the import's lines: the count, then each tool left out with its reason in 
     "notes: Clauseo couldn't read its settings.",
     "matter-search: it comes from a project you haven't approved in Claude Code.",
   ]);
+});
+
+test("others: counted in the head, then one line after the named; alone, the head says it; nothing at all, no line", () => {
+  const skipped: ImportResult["skipped"] = [{ name: "github", reason: "unsupported_transport" }];
+  expect(importLines("en", { ...RESULT, imported: ["a"], skipped, others: 4 })).toEqual([
+    "Imported 1 tool. 5 couldn't be imported.",
+    "github: it uses a setting Clauseo doesn't support yet.",
+    "4 more couldn't be imported.",
+  ]);
+  expect(importLines("en", { ...RESULT, imported: ["a", "b"], others: 3 })).toEqual([
+    "Imported 2 tools. 3 couldn't be imported.",
+  ]);
+  expect(importLines("en", { ...RESULT, others: 0 })).toEqual([]);
 });

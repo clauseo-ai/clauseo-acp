@@ -47,13 +47,15 @@ async function run(steps: readonly ToolsStep[]) {
 /** The settings window at Tools in one scene's state. */
 export function ToolsSceneOver({ page, lang }: { page: ToolsPage; lang: Lang }) {
   const scene: ToolsScene = TOOLS_SCENES[page];
-  const [tools] = useState(
-    () =>
-      new FakeTools(scene.view, {
-        previewRemote: scene.previewRemote ?? false,
-        imports: scene.imports ?? {},
-      }),
-  );
+  const [tools] = useState(() => {
+    const fake = new FakeTools(scene.view, {
+      previewRemote: scene.previewRemote ?? false,
+      imports: scene.imports ?? {},
+    });
+    fake.refuseNext = scene.refuse ?? null;
+    fake.holdImport = scene.holdImport ?? false;
+    return fake;
+  });
   const ran = useRef(false);
   useEffect(() => {
     // once, though Strict Mode runs the effect twice

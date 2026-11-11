@@ -43,6 +43,8 @@ export const HI = {
   "Imported {count} tools.": "{count} टूल इम्पोर्ट हुए।",
   "Imported 1 tool.": "1 टूल इम्पोर्ट हुआ।",
   "{count} couldn't be imported.": "{count} इम्पोर्ट नहीं हो सके।",
+  "{count} more couldn't be imported.": "{count} और इम्पोर्ट नहीं हो सके।",
+  "Importing…": "इम्पोर्ट हो रहा है…",
   // UC-195, UC-196: the Command field's refusals; {program} is what the lawyer typed, as filed
   "Clauseo couldn't find {program} on this computer.": "Clauseo को इस कंप्यूटर पर {program} नहीं मिला।",
   "Use a program name or its full path on this computer.":
