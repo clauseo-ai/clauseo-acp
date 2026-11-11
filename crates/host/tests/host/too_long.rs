@@ -150,7 +150,8 @@ fn gated_input_too_long() -> String {
 /// (category `service`), so the turn ends `EndTurn` with no answer text and no `TurnFailed`; the
 /// failure is only logged as a warning, and the queue moves on to the next question. The lawyer is
 /// told nothing. The host's own Codex check before sending is what keeps such a question back.
-/// This test will flip when #983 MED-3 lands.
+/// It pins today's behaviour. Mapping Codex's generic `service` failure is a separate fix the
+/// orchestrator holds for before launch.
 #[test]
 fn codex_input_refusal_today_ends_end_turn_and_moves_the_queue_on() {
     let dir = Dir::new("codex_input_too_long_holds_the_queue", &[]);
