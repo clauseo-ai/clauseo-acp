@@ -475,9 +475,10 @@ fn a_non_executable_stetdoc_does_not_shadow_the_real_one() {
     assert_eq!(hook.path_prepend(), Some(scratch.dir("b")));
 }
 
-/// D3: a stetdoc that hangs on `skills get core` is stopped within `STETDOC_START_LIMIT`: the
-/// build returns well before stetdoc's own 10 s limit, with no stetdoc skill. Its `--version`
-/// worked, so it stays on: its folder first on PATH and the stetdoc line in the instructions.
+/// D3: a stetdoc that hangs on `skills get core` is stopped within the first limit
+/// (`start::FIRST_LIMIT`, 3 s): the build returns well before stetdoc's own 10 s limit, with
+/// no stetdoc skill. Its `--version` worked, so it stays on: its folder first on PATH and the
+/// stetdoc line in the instructions.
 #[cfg(all(unix, not(target_os = "macos"), debug_assertions))]
 #[test]
 fn a_stetdoc_slow_to_print_its_skill_stays_on_without_it() {
@@ -501,7 +502,7 @@ fn a_stetdoc_slow_to_print_its_skill_stays_on_without_it() {
     let token = write_skills(&hook.launch_writes(&agent(CODEX))[0]).unwrap();
     assert!(!token.root().join("stetdoc").exists());
     let line = clauseo_profile::instructions::STETDOC_CLI.trim();
-    assert!(hook.profile.instructions().contains(line));
+    assert!(hook.profile().instructions().contains(line));
 }
 
 #[test]

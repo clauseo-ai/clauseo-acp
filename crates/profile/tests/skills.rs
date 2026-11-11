@@ -15,6 +15,9 @@ mod tools;
 #[path = "skills/stetdoc.rs"]
 mod stetdoc_cli;
 
+#[path = "skills/stetdoc_start.rs"]
+mod stetdoc_start;
+
 use std::path::{Path, PathBuf};
 
 use clauseo_process::{AsyncIoTimer, PassthroughLauncher, SpawnOptions};
@@ -507,8 +510,12 @@ fn a_bad_stetdoc_text_fails_its_skill_alone() {
         .map(clauseo_profile::RenderedSkill::name)
         .collect();
     assert_eq!(names, ["alpha"]);
-    // No description at all: an error from the load, for stetdoc alone.
-    stub(&root, "stetdoc 0.9.1\n", "# no frontmatter\n");
+    // A frontmatter with no description: an error from the load, for stetdoc alone.
+    stub(
+        &root,
+        "stetdoc 0.9.1\n",
+        "---\nname: stetdoc\n---\n# no description\n",
+    );
     assert!(
         block_on(load_skill(
             &launcher,

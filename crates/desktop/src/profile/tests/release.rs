@@ -1,8 +1,10 @@
 //! A release bundle laid out in a scratch folder, its stetdoc a stand-in. The agents get stetdoc
 //! as a command: its folder first on their `PATH` and the stetdoc line in their instructions,
 //! whenever its `--version` works, with its skill or without. stetdoc 0.9.3's skill text (the
-//! body alone, no frontmatter) is refused, and only the skill is left out. A stetdoc whose
-//! `--version` fails is treated as absent.
+//! body alone, no frontmatter) loads under a frontmatter Clauseo writes, its first `# ` heading
+//! as the description. A stetdoc whose `--version` fails is treated as absent; one whose first
+//! `--version` only passes the first limit (`start::FIRST_LIMIT`, 3 s) stays on and is checked
+//! again in the background, whose answer the next agent start gets.
 
 use std::path::{Path, PathBuf};
 
@@ -92,13 +94,12 @@ fn folder_of(program: &Path) -> Option<PathBuf> {
     program.parent().map(Path::to_path_buf)
 }
 
-/// stetdoc's skill fails after a working `--version` (the real 0.9.3 body-only text, a
-/// frontmatter with no description, bytes that are not UTF-8, a `skills get core` that exits
-/// with an error): the skill is left out, and stetdoc stays on for the agents and the app.
+/// stetdoc's skill fails after a working `--version` (a frontmatter of stetdoc's with no
+/// description, bytes that are not UTF-8, a `skills get core` that exits with an error): the
+/// skill is left out, and stetdoc stays on for the agents and the app.
 #[test]
 fn a_release_bundle_whose_skill_fails_keeps_stetdoc_as_a_command() {
-    let failing: [(&[u8], &[u8]); 4] = [
-        (STUB, REAL_0_9_3),
+    let failing: [(&[u8], &[u8]); 3] = [
         (STUB, b"---\nname: stetdoc\n---\n# stetdoc\n"),
         (STUB, b"\xff\xfe not UTF-8\n"),
         (
@@ -118,7 +119,7 @@ fn a_release_bundle_whose_skill_fails_keeps_stetdoc_as_a_command() {
 }
 
 /// A stetdoc whose `--version` works but whose `skills get core` hangs is stopped within
-/// `STETDOC_START_LIMIT` all told, and stays on without its skill.
+/// the first limit (`start::FIRST_LIMIT`, 3 s) all told, and stays on without its skill.
 #[test]
 fn a_stetdoc_slow_to_print_its_skill_stays_on_without_it() {
     let scratch = Scratch::new("profile-release-slow-skill", &[]);
@@ -139,7 +140,8 @@ fn a_stetdoc_slow_to_print_its_skill_stays_on_without_it() {
     assert_eq!(both_have_the_stetdoc_line(&hook), [true; 2]);
 }
 
-/// Windows and Linux: `<resources>/stetdoc/stetdoc`, Tauri's resource folder.
+/// Windows and Linux: `<resources>/stetdoc/stetdoc`, Tauri's resource folder. stetdoc 0.9.3's
+/// body-only skill text loads, its body unchanged.
 #[test]
 fn a_resource_folder_release_layout_keeps_stetdoc_as_a_command() {
     let scratch = Scratch::new("profile-release-resources", &["app"]);
@@ -152,7 +154,10 @@ fn a_resource_folder_release_layout_keeps_stetdoc_as_a_command() {
     };
     let locations = Locations::under_root(&scratch.dir("data"));
     let hook = DesktopProfile::build_in(&locations, &layout, None).unwrap();
-    assert_eq!(written_skill(&hook), None);
+    let skill = written_skill(&hook).expect("0.9.3's skill is written");
+    let front = b"---\nname: stetdoc\ndescription: \"stetdoc: editing Word documents with tracked \
+                  changes\"\n---\n";
+    assert_eq!(skill, [front.as_slice(), REAL_0_9_3].concat());
     assert_eq!(hook.stetdoc(), Some(program.as_path()));
     assert_eq!(hook.path_prepend(), folder_of(&program));
     assert_eq!(both_have_the_stetdoc_line(&hook), [true; 2]);
@@ -174,16 +179,14 @@ fn a_skill_that_parses_loads_beside_the_stetdoc_line() {
     assert_eq!(both_have_the_stetdoc_line(&hook), [true; 2]);
 }
 
-/// A stetdoc whose `--version` exits with an error, prints no version or hangs past
-/// `STETDOC_START_LIMIT` is treated as absent, as is a bundle with no stetdoc: no skill, no
-/// `PATH` entry and no stetdoc line.
+/// A stetdoc whose `--version` exits with an error or prints no version is treated as absent,
+/// as is a bundle with no stetdoc: no skill, no `PATH` entry and no stetdoc line.
 #[test]
 fn a_missing_stetdoc_or_one_whose_version_fails_is_absent_for_the_agents() {
-    let broken: [Option<&[u8]>; 4] = [
+    let broken: [Option<&[u8]>; 3] = [
         None,
         Some(b"#!/bin/sh\nexit 3\n"),
         Some(b"#!/bin/sh\nif [ \"$1\" = --version ]; then echo; else echo '# stetdoc'; fi\n"),
-        Some(b"#!/bin/sh\nsleep 60\n"),
     ];
     for (at, script) in broken.into_iter().enumerate() {
         let scratch = Scratch::new(&format!("profile-release-broken-{at}"), &[]);
@@ -195,4 +198,96 @@ fn a_missing_stetdoc_or_one_whose_version_fails_is_absent_for_the_agents() {
             assert_eq!(hook.stetdoc(), None);
         }
     }
+}
+
+/// A stand-in whose first `--version` takes 5 s (as a new program's first run while the OS
+/// scans it), its later runs as `then` says: `ok` answers as [`STUB`], `fail` exits 3.
+fn slow_once(then: &str) -> Vec<u8> {
+    format!(
+        "#!/bin/sh\nd=\"$(dirname \"$0\")\"\n\
+         if [ ! -e \"$d/ran\" ]; then : > \"$d/ran\"; sleep 5; fi\n\
+         [ {then} = fail ] && exit 3\n\
+         if [ \"$1\" = --version ]; then echo 'stetdoc 0.9.3'\n\
+         elif [ \"$*\" = 'skills get core' ]; then cat \"$d/skill.txt\"\n\
+         else exit 2; fi\n"
+    )
+    .into_bytes()
+}
+
+/// [`macos_bundle`] on a thread, which must return within 7 s: the first check stops at
+/// the first limit (`start::FIRST_LIMIT`, 3 s).
+fn bundle_within_7_s(
+    script: Vec<u8>,
+    skill: &'static [u8],
+    name: &str,
+) -> (DesktopProfile, Scratch) {
+    let scratch = Scratch::new(name, &[]);
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let hook = macos_bundle(&scratch, Some((script.as_slice(), skill)));
+        let _sent = tx.send((hook, scratch));
+    });
+    rx.recv_timeout(std::time::Duration::from_secs(7))
+        .expect("the build returns within 7 s")
+}
+
+/// Waits up to 40 s, in steps of 100 ms, for `done` to hold of `hook`.
+fn eventually(hook: &DesktopProfile, done: impl Fn(&DesktopProfile) -> bool) -> bool {
+    // A channel whose sender stays alive: each `recv_timeout` waits out its step.
+    let (_tx, rx) = std::sync::mpsc::channel::<()>();
+    for _ in 0..400 {
+        if done(hook) {
+            return true;
+        }
+        let _waited = rx.recv_timeout(std::time::Duration::from_millis(100));
+    }
+    done(hook)
+}
+
+/// A stetdoc whose first `--version` passes the first limit (`start::FIRST_LIMIT`, 3 s) stays
+/// on at once: its folder on `PATH`, the blackline's program, and the instructions' stetdoc
+/// line, with no skill (none cached). The background check that answers brings the skill to
+/// the next agent start.
+#[test]
+fn a_stetdoc_slow_on_its_first_run_stays_on_and_gets_its_skill_later() {
+    let (hook, scratch) =
+        bundle_within_7_s(slow_once("ok"), REAL_0_9_3, "profile-release-slow-once");
+    let program = helpers_stetdoc(&scratch);
+    assert_eq!(written_skill(&hook), None);
+    assert_eq!(hook.stetdoc(), Some(program.as_path()));
+    assert_eq!(hook.path_prepend(), folder_of(&program));
+    assert_eq!(both_have_the_stetdoc_line(&hook), [true; 2]);
+    assert!(
+        eventually(&hook, |hook| written_skill(hook).is_some()),
+        "the background check brings the skill"
+    );
+    assert_eq!(both_have_the_stetdoc_line(&hook), [true; 2]);
+}
+
+/// A stetdoc whose first `--version` passes the limit and whose background check fails for
+/// real: on at once, then the agents are no longer told about it. Its `PATH` entry and the
+/// blackline's program were given to the host at its start and stay until the app restarts.
+#[test]
+fn a_stetdoc_slow_then_broken_is_no_longer_told_to_the_agents() {
+    let (hook, scratch) = bundle_within_7_s(slow_once("fail"), b"", "profile-release-slow-broken");
+    let program = helpers_stetdoc(&scratch);
+    assert_eq!(both_have_the_stetdoc_line(&hook), [true; 2]);
+    assert!(
+        eventually(&hook, |hook| both_have_the_stetdoc_line(hook) == [false; 2]),
+        "the background check takes the stetdoc line out"
+    );
+    assert_eq!(written_skill(&hook), None);
+    assert_eq!(hook.stetdoc(), Some(program.as_path()));
+}
+
+/// A stetdoc that hangs on `--version` stays on at once, without a skill, its stetdoc line in
+/// the instructions; the background check (30 s) is not waited for here.
+#[test]
+fn a_stetdoc_that_hangs_on_its_version_stays_on_for_now() {
+    let script = b"#!/bin/sh\nsleep 60\n".to_vec();
+    let (hook, scratch) = bundle_within_7_s(script, REAL_0_9_3, "profile-release-hangs");
+    let program = helpers_stetdoc(&scratch);
+    assert_eq!(written_skill(&hook), None);
+    assert_eq!(hook.path_prepend(), folder_of(&program));
+    assert_eq!(both_have_the_stetdoc_line(&hook), [true; 2]);
 }
