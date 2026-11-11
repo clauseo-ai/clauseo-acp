@@ -142,11 +142,14 @@ fn the_budgets_hold_for_a_long_macos_path_with_the_folders_filled() {
         )
         .unwrap()
     };
-    let shared = fill(&profile.instructions());
-    assert!(word_count(&shared) <= 1500, "{} words", word_count(&shared));
+    let shared = fill(&profile.instructions_for(AgentKind::Claude));
+    assert!(word_count(&shared) <= 1550, "{} words", word_count(&shared));
     // What `codex_keys` sends after a successful write (checked on disk in `tests/skills`).
-    let codex = fill(&format!("{}\n\n{index}", profile.instructions()));
-    assert!(word_count(&codex) <= 1500, "{} words", word_count(&codex));
+    let codex = fill(&format!(
+        "{}\n\n{index}",
+        profile.instructions_for(AgentKind::Codex)
+    ));
+    assert!(word_count(&codex) <= 1550, "{} words", word_count(&codex));
 }
 
 #[test]

@@ -134,7 +134,7 @@ fn skill_mds() -> Vec<(&'static str, &'static str)> {
 #[test]
 fn legal_word_budget() {
     let legal = word_count(LEGAL);
-    assert!(legal <= 1200, "the legal part has {legal} words");
+    assert!(legal <= 1250, "the legal part has {legal} words");
     let whole = ClauseoProfile::new(paths_under(Path::new("/data")), None).instructions();
     assert_eq!(
         whole,
@@ -149,7 +149,7 @@ fn legal_word_budget() {
         word_count(TOOLS) + word_count(LEGAL),
         "only {{author}} is filled, with one word"
     );
-    assert!(word_count(&whole) <= 1500, "{} words", word_count(&whole));
+    assert!(word_count(&whole) <= 1550, "{} words", word_count(&whole));
 }
 
 #[test]
@@ -193,11 +193,9 @@ fn only_codex_on_macos_is_told_which_commands_never_run() {
     }
     let profile = launch_profile(&std::env::temp_dir().join("d045-codex-line"));
     let mac = profile.codex_instructions_for(true);
-    assert_eq!(mac, format!("{}\n\n{line}", profile.instructions()));
-    assert_eq!(
-        profile.codex_instructions_for(false),
-        profile.instructions()
-    );
+    let shared = profile.instructions_for(AgentKind::Codex);
+    assert_eq!(mac, format!("{shared}\n\n{line}"));
+    assert_eq!(profile.codex_instructions_for(false), shared);
     let codex = profile.codex_keys_without_index(Some(AgentKind::Codex));
     assert_eq!(
         codex["developer_instructions"],
@@ -219,22 +217,67 @@ fn only_codex_on_macos_is_told_which_commands_never_run() {
 
 #[test]
 fn the_launch_instructions_hold_only_tokens_the_host_fills() {
-    let text = ClauseoProfile::new(paths_under(Path::new("/data")), None).instructions();
-    assert!(text.contains(WORK_FOLDER) && text.contains(MATTER_NOTES));
-    assert!(!text.contains("{author}"));
-    let filled = clauseo_profile::placeholders::fill(
-        &text,
-        &IN_INSTRUCTIONS,
-        &[
-            (WORK_FOLDER, "W"),
-            (MATTER_NOTES, "M"),
-            (CONNECTORS, ""),
-            (BROWSER, ""),
-        ],
-    )
-    .unwrap();
-    assert!(!filled.contains("{work_folder}") && !filled.contains("{matter_notes}"));
-    assert!(!filled.contains(CONNECTORS));
+    use clauseo_profile::instructions::PLAN;
+    use clauseo_protocol::AgentKind;
+    let profile = ClauseoProfile::new(paths_under(Path::new("/data")), None);
+    assert_eq!(profile.instructions().matches(PLAN).count(), 2);
+    for kind in [AgentKind::Claude, AgentKind::Codex] {
+        let text = profile.instructions_for(kind);
+        assert!(text.contains(WORK_FOLDER) && text.contains(MATTER_NOTES));
+        assert!(!text.contains("{author}") && !text.contains(PLAN));
+        let filled = clauseo_profile::placeholders::fill(
+            &text,
+            &IN_INSTRUCTIONS,
+            &[
+                (WORK_FOLDER, "W"),
+                (MATTER_NOTES, "M"),
+                (CONNECTORS, ""),
+                (BROWSER, ""),
+            ],
+        )
+        .unwrap();
+        assert!(!filled.contains("{work_folder}") && !filled.contains("{matter_notes}"));
+        assert!(!filled.contains(CONNECTORS));
+    }
+}
+
+/// The identity rule (decision record 0058): the assistant is Clauseo and, only when asked,
+/// names the account the session works through as the app names the plan: ChatGPT in what
+/// Codex gets, Claude in what Claude gets. The senior-lawyer sentence still opens the section.
+#[test]
+fn each_agent_is_told_it_is_clauseo_on_its_own_account() {
+    use clauseo_profile::instructions::{PLAN, plan_name};
+    use clauseo_protocol::AgentKind;
+    const SENIOR: &str = "## Identity and audience\n\nYou think like a senior lawyer in Indian \
+        practice: identify the controlling legal question first, then which statutes govern, \
+        which courts have spoken and where binding authority lies.";
+    let rule = |plan: &str| {
+        format!(
+            "You are Clauseo, working through the lawyer's {plan} account. Only when asked who \
+             you are or what AI you run on, say so plainly: \"I'm Clauseo. I'm using your \
+             {plan} account to work on this matter.\" Never claim to be another product or \
+             hide which account you use."
+        )
+    };
+    assert!(LEGAL.starts_with(SENIOR));
+    assert_eq!(LEGAL.matches(&rule(PLAN)).count(), 1);
+    assert_eq!(plan_name(AgentKind::Claude), "Claude");
+    assert_eq!(plan_name(AgentKind::Codex), "ChatGPT");
+    let profile = launch_profile(&std::env::temp_dir().join("identity-rule"));
+    let claude = profile.claude_options().system_prompt_append().to_owned();
+    let codex = profile.codex_instructions_for(false);
+    assert!(claude.contains(&rule("Claude")), "{claude}");
+    assert!(codex.contains(&rule("ChatGPT")), "{codex}");
+    assert!(!claude.contains("ChatGPT"));
+    assert!(!codex.contains("your Claude account"));
+    for text in [&claude, &codex] {
+        assert!(text.contains(SENIOR));
+        assert!(!text.contains(PLAN));
+    }
+    assert_eq!(
+        profile.codex_instructions_for(true).matches(PLAN).count(),
+        0
+    );
 }
 
 /// R24's connectors paragraph (decision D6): at most 80 words, between the tools part and R22's
