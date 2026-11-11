@@ -1,7 +1,9 @@
 //! The folder scan before a matter (`ScanFolder`, `CancelScan`), read off the actor. A
 //! short-lived `clauseo-scan` thread tells where the folder lives (`clauseo_matters::place`)
 //! and walks it (`clauseo_matters::scan_folder`), posting what it finds to the actor, which
-//! publishes it as `HostEvent::FolderScanned` on the app stream. No file system call runs on
+//! publishes it as `HostEvent::FolderScanned` on the app stream. A marker refuses nothing (the
+//! import adopts the matter it names or sets it aside), but a listed matter's own folder, or a
+//! folder whose marker names one, is `matter.folder_is_matter` naming it, so the form offers it. No file system call runs on
 //! the actor, and nothing is stored: not even a receipt, so a repeated `command_id` scans again.
 //!
 //! One scan at a time: a `ScanFolder` sets the cancel flag of the scan running before it starts
@@ -22,7 +24,7 @@ use std::time::Duration;
 use clauseo_matters::{FolderScan, Place, ScanProgress, Settings};
 use clauseo_protocol::{
     CommandId, CommandOutcome, Count, ErrorCode, FolderPlace, FolderRefId, FolderScanned,
-    HostEvent, MatterPath,
+    HostEvent, MatterId, MatterPath,
 };
 
 use super::Actor;
@@ -78,7 +80,7 @@ pub(crate) enum ScanInput {
     /// The walk ended.
     Ended {
         id: u64,
-        result: Result<FolderScan, clauseo_matters::Error>,
+        result: Result<FolderScan, Error>,
     },
     /// The throttle's timer fired.
     Tick { id: u64 },
@@ -189,6 +191,11 @@ fn start(actor: &mut Actor, ctx: &CommandCtx, folder: FolderRefId) -> Result<(),
         // The same refusals import makes: the configured folders here, the data folder and
         // the matters root through the settings.
         refused: actor.refused_folders.clone(),
+        listed: actor
+            .matters
+            .values()
+            .map(|entry| (entry.row.id, PathBuf::from(&entry.row.folder_path)))
+            .collect(),
         settings: matter_settings(actor.effective.data_dir()),
         walk: Arc::clone(&actor.scan_walk),
         cancel: Arc::clone(&cancel),
@@ -323,7 +330,7 @@ fn progressed(actor: &mut Actor, id: u64) {
 /// same folder has started, this one's end is not published and the catch-up keeps the newer
 /// one's events: `FolderScanned` names no scan, so a late cancelled end would read as that
 /// folder's last word. Its command is answered either way.
-fn ended(actor: &mut Actor, id: u64, result: Result<FolderScan, clauseo_matters::Error>) {
+fn ended(actor: &mut Actor, id: u64, result: Result<FolderScan, Error>) {
     let Some(mut scan) = actor.scans.running.remove(&id) else {
         return;
     };
@@ -357,7 +364,7 @@ fn ended(actor: &mut Actor, id: u64, result: Result<FolderScan, clauseo_matters:
             event.cancelled = true;
             Ok(CommandOutcome::Done)
         }
-        Err(error) => Err(Error::from(error)),
+        Err(error) => Err(error),
     };
     if !superseded {
         publish(actor, event);
@@ -399,6 +406,8 @@ struct Job {
     id: u64,
     path: PathBuf,
     refused: Vec<PathBuf>,
+    /// Every listed matter's id and folder: a scan of one's own folder names it.
+    listed: Vec<(MatterId, PathBuf)>,
     settings: Settings,
     walk: Walk,
     cancel: Arc<AtomicBool>,
@@ -413,6 +422,7 @@ impl Job {
             id,
             path,
             refused,
+            listed,
             settings,
             walk,
             cancel,
@@ -440,9 +450,28 @@ impl Job {
                 send(ScanInput::Progress { id });
             }
         };
-        let result = walk(&path, &refused, &settings, &mut progress, &cancel);
+        let result = match listed_matter(&path, &listed) {
+            Some(matter) => Err(crate::matter_worker::listed_folder(matter)),
+            None => walk(&path, &refused, &settings, &mut progress, &cancel).map_err(Error::from),
+        };
         send(ScanInput::Ended { id, result });
     }
+}
+
+/// The listed matter whose own folder `folder` is: the one its marker names, or the one whose
+/// folder it is by any spelling. A marker naming no listed matter, or one that does not read,
+/// counts for nothing: the import adopts that matter or sets the marker aside. A marker that
+/// cannot be read is left to the walk, which meets the same error.
+fn listed_matter(folder: &Path, listed: &[(MatterId, PathBuf)]) -> Option<MatterId> {
+    if let Ok(Some(named)) = clauseo_matters::read_marker(folder)
+        && listed.iter().any(|(matter, _)| *matter == named)
+    {
+        return Some(named);
+    }
+    listed
+        .iter()
+        .find(|(_, own)| crate::matter_worker::is_same_folder(folder, own))
+        .map(|(matter, _)| *matter)
 }
 
 #[cfg(test)]

@@ -7,7 +7,8 @@
 //! - `ExistingFolder`: the import's own checks before it makes anything, in its order: the
 //!   place check (`clauseo_matters::check_place`: a drive root, the home folder, a system
 //!   folder, the data folder) and the registry (`check_registry`: a folder that is, holds or
-//!   sits inside another matter's), as `MatterJob::Import` runs them on its worker, then the
+//!   sits inside another matter's; a listed matter's own folder is named, and one being made
+//!   passes), as `MatterJob::Import` runs them on its worker, then the
 //!   protected-tree check `Matter::import` runs (`clauseo_matters::check_protected`: inside
 //!   the data folder or the matters root).
 //! - `NewFolder`: the parent, canonicalised as create's probe does (`probe.rs`), then the
@@ -26,7 +27,7 @@ use clauseo_protocol::MatterSource;
 
 use super::{Actor, RefusalNames, check_registry, claimed_folders, refused_folders, registered};
 use crate::error::Error;
-use crate::matter_worker::matter_settings;
+use crate::matter_worker::{Held, listed_folder, matter_settings};
 
 /// The refusals of [`place`], run off the actor: the folder to check, or create's refusal.
 pub(crate) type PlaceCheck = Box<dyn FnOnce() -> Result<PathBuf, Error> + Send>;
@@ -45,6 +46,12 @@ pub(crate) fn place(actor: &Actor, source: &MatterSource) -> Result<PlaceCheck, 
                 clauseo_matters::check_place(&path, &refused)
                     .map_err(Error::Matters)
                     .and_then(|()| check_registry(&path, &registry, true))
+                    .and_then(|held| match held {
+                        // The import would answer with it: named, so the dialog offers it.
+                        Held::Listed(matter) => Err(listed_folder(matter)),
+                        // The import would join the one making it.
+                        Held::Free | Held::Making(_) => Ok(()),
+                    })
                     .and_then(|()| {
                         clauseo_matters::check_protected(&path, &settings).map_err(Error::Matters)
                     })

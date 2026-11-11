@@ -20,6 +20,9 @@ mod support;
 mod write;
 
 #[cfg(test)]
+#[path = "host/adopt.rs"]
+mod adopt;
+#[cfg(test)]
 #[path = "host/agent_homes.rs"]
 mod agent_homes;
 #[cfg(test)]

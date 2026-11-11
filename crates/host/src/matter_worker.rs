@@ -16,7 +16,7 @@ use clauseo_matters::{
     Settings, TimelineEntry, TurnMeta, UndoRequest, Undone, matter_path_of_resolved,
 };
 use clauseo_protocol::{
-    CheckpointId, FileChange, FolderSupportKind, ImportSummary, MatterId, MatterPath,
+    CheckpointId, CommandId, FileChange, FolderSupportKind, ImportSummary, MatterId, MatterPath,
     RestoreRequest,
 };
 
@@ -80,7 +80,10 @@ pub(crate) enum MatterJob {
     /// `Matter::import` with a no-op progress callback; `cancel` is set by shutdown.
     /// Before it, the place check (`check_place`) and then the registry: a folder that is,
     /// holds or sits inside one of `registry`'s folders is `matter.folder_is_matter`
-    /// (`check_registry`). Its folder check uses `check`, the actor's source.
+    /// (`check_registry`), and a listed matter's own folder or one being made is answered
+    /// without an import (`ImportEnd::Listed`, `ImportEnd::Making`). A marker naming a matter
+    /// the registry does not hold is adopted or set aside (`import.rs`). Its folder check uses
+    /// `check`, the actor's source.
     Import {
         new: NewMatter,
         refused: Vec<PathBuf>,
@@ -182,6 +185,13 @@ pub(crate) enum ImportEnd {
     },
     /// The cancel flag was set; nothing was kept.
     Cancelled,
+    /// The folder is this listed matter's own folder; nothing was made.
+    Listed(MatterId),
+    /// The folder is the one this create or import in flight is making; nothing was made.
+    Making(CommandId),
+    /// The folder's marker names this matter, which the registry does not hold and which has no
+    /// history here: nothing was written, and the host imports the folder again under its id.
+    Adopt(MatterId),
 }
 
 /// A made matter's root commit and import summary, and its folder check's answer.
@@ -205,6 +215,10 @@ pub(crate) fn made(reply: MatterReply) -> Result<Made, Error> {
                 Ok(((commit, Some(summary)), folder_support))
             }
             ImportEnd::Cancelled => Err(Error::Closed),
+            // Answered by the actor before it gets here (`matters/answer.rs`).
+            ImportEnd::Listed(_) | ImportEnd::Making(_) | ImportEnd::Adopt(_) => Err(
+                Error::Internal("an import's folder was held by another matter".to_owned()),
+            ),
         },
         MatterReply::Opened(_)
         | MatterReply::Located(_)
@@ -428,7 +442,13 @@ fn handle(settings: &Settings, slot: &mut Slot, job: MatterJob) -> MatterReply {
             clauseo_matters::check_place(&new.folder, &refused)
                 .map_err(Error::Matters)
                 .and_then(|()| check_registry(&new.folder, &registry, true))
-                .and_then(|()| import(settings, slot, new, &refused, &cancel, check)),
+                .and_then(|held| match held {
+                    Held::Free => {
+                        import(settings, slot, new, (&refused, &registry), &cancel, check)
+                    }
+                    Held::Listed(matter) => Ok(ImportEnd::Listed(matter)),
+                    Held::Making(command) => Ok(ImportEnd::Making(command)),
+                }),
         ),
         MatterJob::Open { id, folder, relink } => {
             *slot = Slot::Unopened { id, folder, relink };
@@ -578,7 +598,7 @@ mod sides;
 mod too_deep;
 
 use checkpoints::{repair, root_commit, timeline_entry, turn_checkpoint};
-pub(crate) use claims::{Claim, Claimed, check_registry};
+pub(crate) use claims::{Claim, Claimed, Held, check_registry, is_same_folder, listed_folder};
 use import::import;
 pub(crate) use relocate::{Registry, Relink};
 use relocate::{locate, relink_matter};
