@@ -8,14 +8,22 @@
 //! imports it again under that id, on a worker of that id (`actor/matters/answer.rs`). With a
 //! history of it here, which no row lists (a record that failed), adopting it would mix two
 //! histories: the marker is set aside and the folder imported under the minted id.
+//!
+//! A marker naming a matter the registry does hold (listed, forgotten or being made) in another
+//! folder is a copy or a move ([`recorded`]). A copy (that matter's folder is still there, or
+//! whether it is cannot be told) becomes a new matter: its marker is set aside and the folder
+//! imported under the minted id, so the matter it was copied from is never taken over. A move
+//! (that folder is gone) ends refused as already that matter, and the actor relinks a listed one
+//! to this folder or brings a forgotten one back here (`answer.rs`).
 
-use std::path::PathBuf;
+use std::io;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 
 use clauseo_matters::{CommitId, ImportWarning, Imported, Matter, NewMatter, Refusal, Settings};
 use clauseo_protocol::{CommandId, FolderSupportKind, ImportSummary, MatterId};
 
-use super::{Claimed, MatterReply, Slot, root_commit};
+use super::{Claimed, MatterReply, Slot, is_same_folder, root_commit};
 use crate::agent::folder_support::CheckSource;
 use crate::error::Error;
 
@@ -31,19 +39,29 @@ pub(super) fn import(
     let at = new.created_at;
     let imported = match Matter::import(settings.clone(), new.clone(), refused, &mut |_| {}, cancel)
     {
-        Err(clauseo_matters::Error::FolderRefused {
-            reason: Refusal::AlreadyMatter(old),
-            ..
-        }) if !registry.iter().any(|claimed| claimed.matter == old) => {
-            if !clauseo_matters::history_exists(settings, old)? {
-                return Ok(ImportEnd::Adopt(old));
+        Err(
+            error @ clauseo_matters::Error::FolderRefused {
+                reason: Refusal::AlreadyMatter(old),
+                ..
+            },
+        ) => {
+            match recorded(old, &folder, registry) {
+                Recorded::Unknown if !clauseo_matters::history_exists(settings, old)? => {
+                    return Ok(ImportEnd::Adopt(old));
+                }
+                Recorded::Unknown => tracing::warn!(
+                    matter = %id,
+                    %old,
+                    "a marker naming a matter with a history but no row is set aside"
+                ),
+                Recorded::Copied => tracing::info!(
+                    matter = %id,
+                    %old,
+                    "a copy of a known matter's folder is imported as a new matter"
+                ),
+                Recorded::Here | Recorded::Moved => return Err(Error::Matters(error)),
             }
             clauseo_matters::set_aside_marker(&folder, at)?;
-            tracing::warn!(
-                matter = %id,
-                %old,
-                "a marker naming a matter with a history but no row was set aside"
-            );
             Matter::import(settings.clone(), new, refused, &mut |_| {}, cancel)?
         }
         other => other?,
@@ -69,6 +87,39 @@ pub(super) fn import(
             })
         }
         Imported::Cancelled => Ok(ImportEnd::Cancelled),
+    }
+}
+
+/// Where the matter `old` that `folder`'s marker names is recorded.
+enum Recorded {
+    /// Nowhere in the registry.
+    Unknown,
+    /// At `folder` itself, by any spelling.
+    Here,
+    /// Elsewhere, and every folder recorded for it is gone (not found).
+    Moved,
+    /// Elsewhere, and a folder recorded for it is still there, or whether it is cannot be told
+    /// (a read error other than not found): never taken over on doubt.
+    Copied,
+}
+
+fn recorded(old: MatterId, folder: &Path, registry: &[Claimed]) -> Recorded {
+    let folders: Vec<&Path> = registry
+        .iter()
+        .filter(|claimed| claimed.matter == old)
+        .map(|claimed| claimed.folder.as_path())
+        .collect();
+    if folders.is_empty() {
+        Recorded::Unknown
+    } else if folders.iter().any(|own| is_same_folder(folder, own)) {
+        Recorded::Here
+    } else if folders
+        .iter()
+        .all(|own| std::fs::metadata(own).is_err_and(|err| err.kind() == io::ErrorKind::NotFound))
+    {
+        Recorded::Moved
+    } else {
+        Recorded::Copied
     }
 }
 

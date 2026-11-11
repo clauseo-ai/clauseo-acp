@@ -94,11 +94,20 @@ unreadable `matter.json` and Clauseo's own data folder alike.
     (`MatterCreated` naming it): nothing is made, as for a forgotten matter's folder;
   - a folder a create or import in flight is making: the second command joins the first and gets
     its answer, so two "New matter"s of one folder make one matter;
-  - a marker naming a matter this install lists or has forgotten, in another folder, is still
-    `matter.folder_is_matter` (naming it when listed).
+  - a marker naming a matter this install lists or has forgotten, recorded at another path, is a
+    copy or a move. A copy (that matter's recorded folder is still there, or whether it is
+    cannot be told) becomes a new matter: the copy's marker is set aside as above and the folder
+    imported with a new id and a fresh history, and the matter it was copied from keeps its
+    folder, conversations and marker. A move (the recorded folder is gone) is that matter at the
+    new path: a listed one is relinked there as "Locate folder" relinks it and the import
+    answers with it, and a forgotten one comes back there. A matter is never taken over on
+    doubt;
+  - a create or import that joins another drops its own client and next date: the answer is the
+    first command's.
 
-  `ScanFolder` reads no marker for a refusal; a listed matter's own folder, by its path or by the
-  marker it holds, is `matter.folder_is_matter` naming it, so the form offers to open it. For an import the registry check runs on the matter's
+  `ScanFolder` reads no marker for a refusal: an unknown, unreadable, copied or moved marker
+  passes. A listed matter's own folder, by any spelling of its path, is
+  `matter.folder_is_matter` naming it, so the form offers to open it. For an import the registry check runs on the matter's
   worker after `matters::check_place` (drive root, refused list), so a refused place is named for
   what it is even when a matter sits below it; for a new folder it runs on the host, since only
   the parent exists.
