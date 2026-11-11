@@ -350,7 +350,7 @@ test("after a finished in-app Remove, the app offers Set up, with the announce l
   expect(confirm?.textContent).toContain(
     pw(
       "en",
-      "Windows will ask to let Clauseo set up the Safe workspace. It will say the publisher is unknown. That's expected for Clauseo. Choose Yes. If Windows asks for an administrator's password, whoever looks after this computer can enter it.",
+      "Windows will ask to let Clauseo set up the Safe workspace. It will say the publisher is unknown. That's expected for Clauseo. Choose Yes. If Windows asks for an administrator's password, enter the password of an administrator account on this computer.",
     ),
   );
   await press(one("protection-confirm-ok"));

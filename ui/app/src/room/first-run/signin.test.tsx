@@ -130,14 +130,17 @@ test("plan-chatgpt: Sign in to ChatGPT with neither plan busy sends StartSignIn 
   expect(setups(t).some((c) => c.install_agent !== undefined)).toBe(false);
 });
 
-test("plan-key: the key field is a password field, Use this key sends SetAgentKey and clears it; the Keychain line on the Mac; Console signs in with console", async () => {
+test("plan-key: the key field is a password field, Use this key sends SetAgentKey and clears it; the help names the Anthropic Console, then the Keychain line on the Mac; Console signs in with console", async () => {
   const t = await at({ signed_out: {} });
   await press("Use an API key instead");
   expect(gateState()).toBe("key");
   const key = byId<HTMLInputElement>("signin-key");
   expect(key?.type).toBe("password");
   expect(key?.getAttribute("aria-label")).toBe("Anthropic API key");
-  expect(text()).toContain("Kept in this Mac's Keychain.");
+  expect(text()).toContain(
+    "A key from the Anthropic Console. Billed to that account. Kept in this Mac's Keychain.",
+  );
+  expect(text()).not.toMatch(/\bIT\b|your firm/);
   await typeInto(key as HTMLInputElement, "sk-test-secret");
   await press("Use this key");
   expect(setups(t)).toEqual([{ set_agent_key: { agent: CLAUDE, key: "sk-test-secret" } }]);
@@ -164,6 +167,9 @@ test("plan-key with ChatGPT the plan to ask with: the field reads OpenAI API key
   await press("Use an API key instead");
   const key = byId<HTMLInputElement>("signin-key");
   expect(key?.getAttribute("aria-label")).toBe("OpenAI API key");
+  expect(text()).toContain(
+    "A key from the OpenAI platform. Billed to that account. Kept in this Mac's Keychain.",
+  );
   await typeInto(key as HTMLInputElement, "sk-proj-test");
   await press("Use this key");
   expect(setups(t)).toEqual([{ set_agent_key: { agent: CODEX, key: "sk-proj-test" } }]);

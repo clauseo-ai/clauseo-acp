@@ -150,14 +150,15 @@ const SCENES: ([FirstLaunchKey, Scene, string] | null)[] = [
   ],
   ["Setting up {name}…", { first: true, events: [install(CLAUDE, "installing")] }, "welcome"],
   ["Use the system proxy", { first: true, events: [blocked] }, "dl-blocked"],
-  ["Copy details for IT", { first: true, events: [blocked] }, "dl-blocked"],
+  // UD1-15, retired: the blocked download's button reads Copy addresses (UC-144); "Copy details for IT" stays IT's
+  null,
   [
     "Message copied",
     { first: true, events: [blocked], clicks: ['[data-testid="install-ask-it"]'] },
     "dl-blocked",
   ],
   [
-    "Clauseo needs to download {name} to work. Please allow these addresses on the firm's network: {list}.",
+    "Clauseo needs to download {name}. These addresses must be reachable from this computer: {list}.",
     { first: true, events: [blocked] },
     "dl-blocked",
   ],
@@ -222,11 +223,8 @@ const SCENES: ([FirstLaunchKey, Scene, string] | null)[] = [
   // UD1-30, retired: the key's field names its maker (UC-139, UC-140)
   null,
   ["Use this key", KEY, "plan-key"],
-  [
-    "A key from Claude or ChatGPT, or one from your firm's IT team. Billed to the key's own account.",
-    KEY,
-    "plan-key",
-  ],
+  // UD1-32, retired: the key's help names its maker (UC-145; UC-146, ChatGPT's, is shown in Plans)
+  null,
   ["Kept in this Mac's Keychain.", KEY, "plan-key"],
   ["Kept in Windows Credential Manager.", { ...KEY, platform: "windows" }, "plan-key"],
   ["Kept in this computer's keyring.", { ...KEY, platform: "linux" }, "plan-key"],
@@ -526,17 +524,29 @@ const TOOLS_OFFLINE: Entry = {
   render: render(T.TOOLS_WAITING),
 };
 
-/** The key's words named by its maker, and the quiet way to it (UC-139 and UC-141; UC-140, ChatGPT's, is shown in
- * Plans, registry-ud2-plans.tsx). */
+/** The key's words named by its maker, and the quiet way to it (UC-139, UC-141 and UC-145; UC-140 and UC-146,
+ * ChatGPT's, are shown in Plans, registry-ud2-plans.tsx), and a blocked download's Copy addresses (UC-144). */
 const UC_KEY: Entry[] = (
   [
-    { id: "UC-139", key: "Anthropic API key", scene: KEY },
-    { id: "UC-141", key: "Use an API key instead", scene: GATE },
-  ] satisfies { id: string; key: FirstLaunchKey; scene: Scene }[]
-).map(({ id, key, scene }) => ({
+    { id: "UC-139", key: "Anthropic API key", scene: KEY, screen: "plan-key" },
+    { id: "UC-141", key: "Use an API key instead", scene: GATE, screen: "plan-key" },
+    {
+      id: "UC-144",
+      key: "Copy addresses",
+      scene: { first: true, events: [blocked] },
+      screen: "dl-blocked",
+    },
+    {
+      id: "UC-145",
+      key: "A key from the Anthropic Console. Billed to that account.",
+      scene: KEY,
+      screen: "plan-key",
+    },
+  ] satisfies { id: string; key: FirstLaunchKey; scene: Scene; screen: string }[]
+).map(({ id, key, scene, screen }) => ({
   id,
   words: firstLaunchWords(key),
-  screen: "first-launch/plan-key",
+  screen: `first-launch/${screen}`,
   render: render(scene),
 }));
 

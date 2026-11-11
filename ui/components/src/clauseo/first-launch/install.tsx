@@ -39,7 +39,7 @@ export type InstallView =
 export type InstallActs = {
   retry: () => void;
   proxy: () => void;
-  /** Copies the log ("Copy details for IT" copies its message itself, copy-for-it.tsx). */
+  /** Copies the log (Copy addresses copies its message itself, copy-for-it.tsx). */
   copy: (text: string) => void;
   /** Whether the log was copied for the failure on screen now: the line reads it back. */
   copied: "log" | null;
@@ -217,7 +217,7 @@ export function installLine(
       };
     case "blocked": {
       const message = w(
-        "Clauseo needs to download {name} to work. Please allow these addresses on the firm's network: {list}.",
+        "Clauseo needs to download {name}. These addresses must be reachable from this computer: {list}.",
         { name, list: view.hosts.join(", ") },
       );
       return {
@@ -230,6 +230,7 @@ export function installLine(
             {proxyButton("tone")}
             <CopyForIt
               lang={lang}
+              label={w("Copy addresses")}
               text={message}
               className="working-act"
               {...(ids.askIt === undefined ? {} : { testId: ids.askIt })}

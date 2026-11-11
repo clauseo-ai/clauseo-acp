@@ -170,7 +170,7 @@ test("install: dl-offline's Use the system proxy sends RetryAgentInstall with us
   expect(setups(t)).toEqual([{ retry_agent_install: { agent: CLAUDE, use_system_proxy: true } }]);
 });
 
-test("install: dl-blocked offers the system proxy (RetryAgentInstall with use_system_proxy) and copies the IT message", async () => {
+test("install: dl-blocked offers the system proxy (RetryAgentInstall with use_system_proxy) and Copy addresses copies the addresses", async () => {
   const writeText = stubClipboard();
   const t = await mountFirstRun({
     matters: [],
@@ -180,10 +180,10 @@ test("install: dl-blocked offers the system proxy (RetryAgentInstall with use_sy
   expect(text()).toContain("Your network is blocking the download.");
   await press(byId("install-proxy"));
   expect(setups(t)).toEqual([{ retry_agent_install: { agent: CLAUDE, use_system_proxy: true } }]);
-  expect(byId("install-ask-it")?.textContent).toBe("Copy details for IT");
+  expect(byId("install-ask-it")?.textContent).toBe("Copy addresses");
   await press(byId("install-ask-it"));
   expect(writeText).toHaveBeenCalledWith(
-    "Clauseo needs to download Claude to work. Please allow these addresses on the firm's network: registry.npmjs.org, nodejs.org.",
+    "Clauseo needs to download Claude. These addresses must be reachable from this computer: registry.npmjs.org, nodejs.org.",
   );
   expect(byId("install-ask-it")?.textContent).toBe("Message copied");
 });
