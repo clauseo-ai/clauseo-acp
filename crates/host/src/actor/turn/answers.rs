@@ -52,6 +52,9 @@ pub(super) fn answer_permission(
         .and_then(|state| state.agent.as_deref_mut())
         .ok_or_else(not_pending)?;
     let key = agent.permissions.remove(&request).ok_or_else(not_pending)?;
+    // A Claude "Always for this matter" reaches the agent as allow once (`always.rs`); the log
+    // keeps the lawyer's choice.
+    let sent = super::always::answer(agent, request, &option).unwrap_or(option_id);
     let refused = matches!(
         option.kind,
         PermissionKind::RejectOnce | PermissionKind::RejectAlways
@@ -60,7 +63,7 @@ pub(super) fn answer_permission(
     let then = Then::Permission {
         agent: agent.id,
         key,
-        option: option_id,
+        option: sent,
     };
     limits::asking_changed(actor);
     super::offline::ask_ended(actor, thread);

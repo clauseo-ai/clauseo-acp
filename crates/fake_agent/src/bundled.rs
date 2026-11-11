@@ -256,8 +256,15 @@ mod tests {
         }
     }
 
+    /// The lines (0-based) a `claude-<name>` scenario may differ in from `<name>`, with why:
+    /// `claude-permission-kinds`'s perm-2 answer, since the host answers a Claude agent's
+    /// `allow_always` with `allow_once` and keeps the rule itself (route A,
+    /// `clauseo-host` `agent/always.rs`).
+    const CLAUDE_DIFFERS: [(&str, usize); 1] = [("claude-permission-kinds", 6)];
+
     /// A `claude-<name>` scenario on `claude-handshake.jsonl` is `<name>` on `handshake.jsonl`
-    /// after its header: a change to one cannot leave the other behind.
+    /// after its header, but for [`CLAUDE_DIFFERS`]: a change to one cannot leave the other
+    /// behind.
     #[test]
     fn claude_variants_match_their_scenario_after_the_handshake() {
         let mut checked = 0;
@@ -272,7 +279,18 @@ mod tests {
             if variant.get(1) != Some(&r#"{"include":"claude-handshake.jsonl"}"#) {
                 continue;
             }
-            let base_lines: Vec<&str> = base_text.lines().collect();
+            // A line allowed to differ is compared as empty on both sides.
+            let differs = |at: usize| CLAUDE_DIFFERS.contains(&(*name, at));
+            let variant: Vec<&str> = variant
+                .iter()
+                .enumerate()
+                .map(|(at, line)| if differs(at) { "" } else { *line })
+                .collect();
+            let base_lines: Vec<&str> = base_text
+                .lines()
+                .enumerate()
+                .map(|(at, line)| if differs(at) { "" } else { line })
+                .collect();
             assert_eq!(
                 base_lines.get(1),
                 Some(&r#"{"include":"handshake.jsonl"}"#),

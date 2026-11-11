@@ -150,6 +150,8 @@ pub(super) struct Agent {
     pub(super) idle: super::idle::Mark,
     /// What of its guard's record file is read and told (`updates/guard_blocks.rs`).
     pub(super) guard_blocks: super::updates::guard_blocks::Reads,
+    /// A Claude agent's kept "Always for this matter" rules (`always.rs`).
+    pub(super) always: super::always::Always,
 }
 
 impl Agent {
@@ -246,6 +248,9 @@ pub(super) fn launch_now(
         let matter = prepared.run.key.matter;
         tracing::info!(%matter, forced_ask, "Claude runs in forced ask: the matter folder is unprotected");
     }
+    let kind = actor.check_thread(thread).ok();
+    let kind = kind.and_then(|entry| clauseo_protocol::AgentKind::of(&entry.row.agent));
+    let always = super::always::Always::at_launch(&prepared.run, kind, forced_ask);
     let mut tree = None;
     let (link, folder, codex, plan_notes, matter_spellings, claude_home, fence_vars, probe) =
         match launch(actor, thread, prepared, &mut tree) {
@@ -308,6 +313,7 @@ pub(super) fn launch_now(
         matter_spellings,
         idle: super::idle::Mark::on_profile(profile),
         guard_blocks: super::updates::guard_blocks::Reads::default(),
+        always,
     };
     if let Some(state) = state(actor, thread) {
         state.agent = Some(Box::new(agent));

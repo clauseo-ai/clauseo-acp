@@ -61,7 +61,7 @@ use crate::agent::data_fence::LaunchDeny;
 use crate::agent::folder_support::{Answer, FolderCheck};
 use crate::agent::loads::lawyer::Reads as McpReads;
 use crate::agent::login_link::{self, Checked, LoginCheck};
-use crate::agent::{claude_tmp, codex, data_folder};
+use crate::agent::{codex, data_folder};
 use crate::browser::session::BrowserSession;
 use crate::config::SessionKey;
 use crate::error::Error;
@@ -209,6 +209,9 @@ pub(crate) struct RunFolders {
     /// Where the run's Claude session calls write their flag settings (`agent::launch_settings`,
     /// `<data>/launch-settings/<run id>.json`); gone with the run folder.
     pub(crate) launch_settings: crate::agent::launch_settings::Target,
+    /// A Claude launch's kept "Always for this matter" rules, read by the launch prep
+    /// (`folders::make_claude`, `agent/always.rs`); empty for any other agent.
+    pub(crate) always: Vec<String>,
 }
 
 impl RunFolders {
@@ -251,6 +254,7 @@ impl RunFolders {
                 folder: crate::agent::launch_settings::folder(data),
                 run: key.id(),
             },
+            always: Vec::new(),
         }
     }
 
@@ -376,8 +380,7 @@ pub(super) fn prepare(
                 }
                 run.make(&data, &sweep)?;
                 make_guard(&mut run, &data, claude)?;
-                let short = run.claude_tmp.take();
-                run.claude_tmp = short.filter(|dir| claude_tmp::make_claude_tmp(&run.root, dir));
+                make_claude(&mut run, claude_home.is_some());
                 run.data_deny = launch_deny(&run, &stored, &data, claude_home.as_deref());
                 run.codex_listed = crate::agent::codex_fence::list(&data, &run.root, &run.notes);
                 claim(&mut run, &data, claims, slot);
@@ -414,18 +417,6 @@ pub(super) fn prepare(
         let result = result.map(Box::new);
         Input::Turn(TurnInput::Prepared { thread, id, result })
     });
-}
-
-/// A prep nobody waits for any more takes back what it made: the relay's token first, then the
-/// run folder with the token file. No agent was started, so nothing waits.
-fn undo_late(late: Prepared) {
-    let Prepared { run, .. } = late;
-    // Nothing to wait for: no agent was started, so its parts are freed as it drops.
-    run.lease.wait_done();
-    relay::end(&run);
-    run.remove();
-    // Its claims, relay and proxy go now, after the folder.
-    drop(run);
 }
 
 /// The sign-in hook and the agent it asks about, for a Codex thread when a hook is set.
@@ -559,7 +550,10 @@ pub use packs::PackRequest;
 use packs::PackSkip;
 pub(super) use packs::{PackNotices, pack_notices};
 mod folders;
-use folders::{browser_run_dir, launch_deny, make_guard, notes_dir, remove_tree, run_dir};
+use folders::{
+    browser_run_dir, launch_deny, make_claude, make_guard, notes_dir, remove_tree, run_dir,
+    undo_late,
+};
 mod paths;
 use paths::{LaunchPaths, launch_paths};
 mod skill_wait;

@@ -2,7 +2,8 @@
 // answer the waiting prompt from the composer only while its field is empty; with words in the
 // field Enter keeps its field job, which while Clauseo works (a waiting permission included) is to queue them (U7):
 // the host holds the queued turn behind the running one, and the test removes it before answering, as
-// permission-kinds expects no second prompt. fake_agent `permission-kinds` asks four times and takes only allow_once, allow_always,
+// permission-kinds expects no second prompt. fake_agent `permission-kinds` asks four times and takes only allow_once, allow_always
+// (allow_once from a Claude agent's host, `claude-permission-kinds`),
 // reject_once, reject_always in that order (any other answer ends it), so a wrong key fails the
 // next step. allow_always passes Rust's native confirm because the fixture sets
 // E2E_CONFIRM_ALWAYS=accept. fake_agent `permission-cancelled` leaves its request pending until
