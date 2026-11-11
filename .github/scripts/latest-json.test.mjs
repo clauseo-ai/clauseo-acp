@@ -21,8 +21,12 @@
 // path is behind, its updater signature before NSIS, its .sig in both installers, assemble's checks
 // of the published exe and .sig against both installers and the updater key, assemble's check
 // that with the switch off neither installer holds a sandbox file, and the build env its build.rs
-// reads; and every job that passes release.conf.json to passing blocklist.conf.json
-// with it, needing `blocklist` and downloading blocklist-snapshot before it builds or bundles.
+// reads; and the block-list switch (check's output bundle_blocklist, 'false' for launch): the
+// `blocklist` job behind it, and every job that passes release.conf.json passing
+// blocklist.conf.json only through $BLOCKLIST_OVERLAY, which the same switch sets, needing
+// `blocklist` and downloading blocklist-snapshot, behind the same switch, before it builds or
+// bundles; and every step of `blocklist` but its off-notice behind the switch, with no job-level
+// `if:`, so with the switch off it runs as a no-op and every job below it runs as with it on.
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
@@ -848,37 +852,95 @@ test("release.yml's build tells the sandbox's build.rs the mode and, for release
   assert.ok(release === "" || pubFormat(release), "tauri.conf.json's pubkey, once set, is that format");
 });
 
+// The block-list switch: check's output, set from one literal. Each piece of the snapshot's path
+// is behind it, spelled the same way everywhere.
+const BLOCKLIST_SWITCH = "needs.check.outputs.bundle_blocklist == 'true'";
+const BLOCKLIST_ARG = '${BLOCKLIST_OVERLAY:+--config "$BLOCKLIST_OVERLAY"}';
+const BLOCKLIST_ENV = `BLOCKLIST_OVERLAY: \${{ ${BLOCKLIST_SWITCH} && 'release/blocklist.conf.json' || '' }}`;
+
+/** A job's own keys: its lines up to `runs-on:`, comments dropped. */
+function jobHead(text, job) {
+  const lines = jobCommands(text, job);
+  return lines.slice(0, lines.findIndex((line) => line.startsWith("runs-on:")));
+}
+
+/** The jobs named in <job>'s `needs:`. */
+function jobNeeds(text, job) {
+  const line = jobHead(text, job).find((one) => one.startsWith("needs:")) ?? "needs: []";
+  return line
+    .replace(/^needs:\s*/, "")
+    .replace(/^\[|\]$/g, "")
+    .split(",")
+    .map((one) => one.trim())
+    .filter(Boolean);
+}
+
 /**
- * The jobs that pass release.conf.json, and every way one of them leaves out the block-list
- * snapshot: a line passing release.conf.json without blocklist.conf.json, no `blocklist` in its
- * `needs:`, or no blocklist-snapshot download before its first `tauri build` or `tauri bundle`.
+ * Every way release.yml breaks the block-list switch: check's bundle_blocklist not the literal
+ * 'false'; the `blocklist` job skipped by a job-level `if:` (it runs and succeeds either way, so
+ * every job below it runs as with the switch on) or a step of it, other than the off-notice, not
+ * behind the switch; and, in each job that passes release.conf.json, blocklist.conf.json passed
+ * other than through $BLOCKLIST_OVERLAY, $BLOCKLIST_OVERLAY not set from the switch, no
+ * `blocklist` in its `needs:`, a blocklist-snapshot download not behind the switch, or none
+ * before its first `tauri build` or `tauri bundle` (with the switch on, it must be there as before).
  */
 function snapshotProblems(text) {
   const checked = [];
   const problems = [];
-  for (const [, job] of text.matchAll(/^  ([a-z-]+):\s*$/gm)) {
+  const outputs = jobCommands(text, "check").filter((line) => line.startsWith("bundle_blocklist:"));
+  const anywhere = text.split("\n").filter((line) => /^\s*bundle_blocklist:/.test(line));
+  if (outputs.length !== 1 || anywhere.length !== 1 || outputs[0] !== "bundle_blocklist: 'false'") {
+    problems.push(`check: bundle_blocklist is not the one literal 'false' (${outputs.join(" | ")})`);
+  }
+  if (jobHead(text, "blocklist").some((line) => line.startsWith("if:"))) {
+    problems.push("blocklist: skipped by a job-level if:");
+  }
+  // Its steps, from its raw lines: each starts with `      - `; a step's own `if:` is at 8 spaces.
+  const body = text.split(/^  blocklist:\s*$/m)[1].split(/^  \S/m)[0];
+  for (const step of body.split(/^ {6}- /m).slice(1)) {
+    const name = step.split("\n")[0];
+    const gate = step.match(/^ {8}if: (.*)$/m)?.[1] ?? "";
+    const off = name === "name: The block-list snapshot is not bundled";
+    if (off ? gate !== "needs.check.outputs.bundle_blocklist != 'true'" : gate !== BLOCKLIST_SWITCH) {
+      problems.push(`blocklist: step ${name} is not behind the switch`);
+    }
+  }
+  for (const [, job] of text.matchAll(/^  ([a-z0-9-]+):\s*$/gm)) {
     const lines = jobCommands(text, job);
     const release = lines.filter((line) => line.includes("--config release/release.conf.json"));
     if (release.length === 0) {
       continue;
     }
     checked.push(job);
-    for (const line of release.filter((one) => !one.includes("--config release/blocklist.conf.json"))) {
-      problems.push(`${job}: ${line}`);
+    for (const line of release.filter((one) => !one.includes(BLOCKLIST_ARG))) {
+      problems.push(`${job}: no $BLOCKLIST_OVERLAY in ${line}`);
     }
-    if (!/^needs:.*\bblocklist\b/.test(lines.find((line) => line.startsWith("needs:")) ?? "")) {
+    for (const line of lines.filter((one) => one.includes("release/blocklist.conf.json") && one !== BLOCKLIST_ENV)) {
+      problems.push(`${job}: blocklist.conf.json outside the switch: ${line}`);
+    }
+    if (!lines.includes(BLOCKLIST_ENV)) {
+      problems.push(`${job}: BLOCKLIST_OVERLAY is not set from the switch`);
+    }
+    if (!jobNeeds(text, job).includes("blocklist")) {
       problems.push(`${job}: no blocklist in needs`);
     }
     const download = lines.indexOf("name: blocklist-snapshot");
     const first = lines.findIndex((line) => /\btauri (build|bundle)\b/.test(line));
     if (download === -1 || download > first) {
       problems.push(`${job}: no blocklist-snapshot download before its first tauri build or bundle`);
+    } else {
+      // The download step's own keys: from its `- uses:` line to the artifact's name.
+      const step = lines.slice(0, download + 1);
+      const own = step.slice(step.findLastIndex((line) => line.startsWith("- ")));
+      if (!own.includes(`if: ${BLOCKLIST_SWITCH}`)) {
+        problems.push(`${job}: the blocklist-snapshot download is not behind the switch`);
+      }
     }
   }
   return { checked, problems };
 }
 
-test("release.yml's builds with release.conf.json take the verified block-list snapshot", () => {
+test("release.yml bundles the block-list snapshot only behind its one switch, off for launch", () => {
   const text = readFileSync(RELEASE_YML, "utf8");
   assert.deepEqual(snapshotProblems(text), { checked: ["build", "sign-windows", "measure-builds"], problems: [] });
   const broken = (from, to) => {
@@ -886,10 +948,49 @@ test("release.yml's builds with release.conf.json take the verified block-list s
     assert.notEqual(changed, text, from);
     return snapshotProblems(changed).problems;
   };
-  assert.equal(broken(/(--config release\/release\.conf\.json) --config release\/blocklist\.conf\.json --no-bundle/, "$1 --no-bundle").length, 1);
+  // The switch: one literal, 'false'.
+  assert.deepEqual(broken("bundle_blocklist: 'false'", "bundle_blocklist: 'true'"), [
+    "check: bundle_blocklist is not the one literal 'false' (bundle_blocklist: 'true')",
+  ]);
+  // The blocklist job: never skipped, each step but the off-notice behind the switch.
+  assert.deepEqual(broken("    name: blocklist\n    needs: check\n", `    name: blocklist\n    needs: check\n    if: ${BLOCKLIST_SWITCH}\n`), [
+    "blocklist: skipped by a job-level if:",
+  ]);
+  assert.deepEqual(broken(/(- name: Install minisign\n) {8}if: [^\n]*\n/, "$1"), [
+    "blocklist: step name: Install minisign is not behind the switch",
+  ]);
+  assert.deepEqual(broken(/(- uses: actions\/upload-artifact@[^\n]*\n) {8}if: [^\n]*\n( {8}with:\n {10}name: blocklist-snapshot)/, "$1$2"), [
+    "blocklist: step uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2 is not behind the switch",
+  ]);
+  assert.deepEqual(broken("if: needs.check.outputs.bundle_blocklist != 'true'", `if: ${BLOCKLIST_SWITCH}`), [
+    "blocklist: step name: The block-list snapshot is not bundled is not behind the switch",
+  ]);
+  // The overlay only through $BLOCKLIST_OVERLAY, which the switch sets.
+  const measureBuild = `--config release/release.conf.json ${BLOCKLIST_ARG} --no-bundle`;
+  const dropped = broken(measureBuild, "--config release/release.conf.json --no-bundle");
+  assert.equal(dropped.length, 1, dropped.join("\n"));
+  assert.match(dropped[0], /^measure-builds: no \$BLOCKLIST_OVERLAY in pnpm -C ui tauri build /);
+  const ungated = broken(measureBuild, `--config release/release.conf.json ${BLOCKLIST_ARG} --config release/blocklist.conf.json --no-bundle`);
+  assert.equal(ungated.length, 1, ungated.join("\n"));
+  assert.match(ungated[0], /^measure-builds: blocklist\.conf\.json outside the switch: pnpm -C ui tauri build /);
+  assert.deepEqual(broken(/( {6}# As in build: blocklist\.conf\.json[^\n]*\n)[^\n]*\n/, "$1"), [
+    "sign-windows: BLOCKLIST_OVERLAY is not set from the switch",
+  ]);
+  // Needing blocklist.
   assert.deepEqual(broken("needs: [check, build, blocklist]", "needs: [check, build]"), ["sign-windows: no blocklist in needs"]);
+  // The download: behind the switch, before the first build or bundle.
+  assert.deepEqual(broken(/( {6}# The same verified snapshot[^]*?)\n {8}if: [^\n]*/, "$1"), [
+    "sign-windows: the blocklist-snapshot download is not behind the switch",
+  ]);
   assert.deepEqual(broken(/( {6}# The same verified snapshot)[^]*?path: crates\/desktop\/blocklist\n/, ""), [
     "sign-windows: no blocklist-snapshot download before its first tauri build or bundle",
+  ]);
+  const snapshotStep = /\n( {6}# The same snapshot as the shipped builds[^]*?path: crates\/desktop\/blocklist\n)/;
+  const step = text.match(snapshotStep)[1];
+  const moved = text.replace(snapshotStep, "\n").replace(/(fake_agent --target "\$TARGET"\n)/, `$1\n${step}`);
+  assert.notEqual(moved, text);
+  assert.deepEqual(snapshotProblems(moved).problems, [
+    "measure-builds: no blocklist-snapshot download before its first tauri build or bundle",
   ]);
 });
 

@@ -86,8 +86,9 @@ Developer ID.
   `release.conf.json` (`mainBinaryName: "Clauseo"`, and no `beforeBuildCommand`, since the legs embed
   the `ui` job's build); `windows.conf.json` (`bundle.windows.nsis.installerHooks`, the uninstall hook
   in `crates/desktop/windows/hooks.nsh`); `machine.conf.json` (`installMode: "perMachine"`);
-  `blocklist.conf.json` (`bundle.resources`, the block-list snapshot: see "The block-list snapshot"
-  below). `check` fails on any other key in them. Sidecars are in none of them: see "Sidecars" below.
+  `blocklist.conf.json` (`bundle.resources`, the block-list snapshot, passed only with the block-list
+  switch on: see "The block-list snapshot" below). `check` fails on any other key in them. Sidecars
+  are in none of them: see "Sidecars" below.
 - **The sidecar seam.** Each `build` leg has one step, "Sidecars for this target", after the installs
   and before the app is built (tauri-build checks that every `externalBin` file exists). It runs
   `.github/scripts/sidecars.mjs` for the leg's target ("Sidecars" below). A sidecar task adds a row to
@@ -395,6 +396,23 @@ S15's tools sat in `windows.conf.json` and S27's in `tauri.conf.json`.
 - **Stale is a warning.** The job writes `generated`, `entries` and both files' SHA-256 to its
   summary. A snapshot generated more than 24 hours before the run adds a warning there, and the run
   goes on: an older signed list is still better than none.
+- **Off for launch (Rohan, 2026-11-11).** The plain build never reads the snapshot: nothing in it
+  enforces the list, so the host starts no block-list thread (0053's status). Bundling it cost
+  installer size and made every release depend on clauseo-ai/blocklist. One switch now governs
+  all of the above: the `check` job's output `bundle_blocklist`, set from one literal in
+  `release.yml`, `'false'` for launch. Off, the `blocklist` job still runs but does nothing: each
+  of its steps is behind the switch, and one step that runs only with it off writes "block-list
+  snapshot not bundled" to the log and the run's summary. It succeeds, so every job that needs it,
+  directly or through another job, runs on exactly the `needs:` and `if:` it had before; a skipped
+  job would have skipped them all (GitHub skips a job below a skipped one unless its `if:` holds
+  a status function), and rewriting the release gate's conditions was not worth that. No leg
+  downloads `blocklist-snapshot` (that step is behind the switch), and no `tauri build` or
+  `tauri bundle` passes `blocklist.conf.json`: each passes
+  `${BLOCKLIST_OVERLAY:+--config "$BLOCKLIST_OVERLAY"}`, and the job's `BLOCKLIST_OVERLAY` is empty
+  unless the switch is on. The Safe workspace sets it to `'true'`, which restores exactly the
+  behaviour described above; `blocklist.conf.json`, the minisign checks and `crates/blocklist` stay
+  in the repo for that. `latest-json.test.mjs` fails on a break in any of this, and
+  `local-mac-dmg.sh` reads the same switch from `release.yml`.
 
 ## Safe workspace off for launch (Rohan, 2026-11-09)
 
