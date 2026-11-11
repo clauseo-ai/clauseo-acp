@@ -164,10 +164,11 @@ test("plan-chatgpt while Claude downloads: ChatGPT waits its turn with the queue
 
 test("plan-key: the key field is a password field, Use this key sends SetAgentKey and clears it; the Keychain line on the Mac; Console signs in with console", async () => {
   const t = await at({ signed_out: {} });
-  await press("Use an API key or my firm's account");
+  await press("Use an API key instead");
   expect(gateState()).toBe("key");
   const key = byId<HTMLInputElement>("signin-key");
   expect(key?.type).toBe("password");
+  expect(key?.getAttribute("aria-label")).toBe("Anthropic API key");
   expect(text()).toContain("Kept in this Mac's Keychain.");
   await typeInto(key as HTMLInputElement, "sk-test-secret");
   await press("Use this key");
@@ -180,18 +181,38 @@ test("plan-key: the key field is a password field, Use this key sends SetAgentKe
   expect(setups(t).at(-1)).toEqual({ start_sign_in: { agent: CLAUDE, console: true } });
 });
 
+test("plan-key with ChatGPT the plan to ask with: the field reads OpenAI API key, and Use this key sends SetAgentKey for ChatGPT", async () => {
+  const t = await mountFirstRun({
+    first: [
+      info(true),
+      install(CLAUDE, READY),
+      signIn(CLAUDE, { signed_out: {} }),
+      install(CODEX, READY),
+      signIn(CODEX, { signed_out: {} }),
+    ],
+  });
+  // the composer's "Plan to ask with" switch, at ChatGPT
+  await press("ChatGPT");
+  await press("Use an API key instead");
+  const key = byId<HTMLInputElement>("signin-key");
+  expect(key?.getAttribute("aria-label")).toBe("OpenAI API key");
+  await typeInto(key as HTMLInputElement, "sk-proj-test");
+  await press("Use this key");
+  expect(setups(t)).toEqual([{ set_agent_key: { agent: CODEX, key: "sk-proj-test" } }]);
+});
+
 test("plan-key: Windows keeps the key in Credential Manager", async () => {
   await mountFirstRun({
     platform: "windows",
     first: [info(true), install(CLAUDE, READY), signIn(CLAUDE, { signed_out: {} })],
   });
-  await press("Use an API key or my firm's account");
+  await press("Use an API key instead");
   expect(text()).toContain("Kept in Windows Credential Manager.");
 });
 
 test("plan-key: with keys_available false there is no key field, and the screen says there is no keyring", async () => {
   await at({ signed_out: {} }, false);
-  await press("Use an API key or my firm's account");
+  await press("Use an API key instead");
   expect(byId("signin-key")).toBeNull();
   expect(document.querySelector('input[type="password"]')).toBeNull();
   expect(text()).toContain("This computer has no keyring to keep an API key in.");
@@ -490,13 +511,13 @@ test.each<FoundLogin>(["none_found", "reuse_off"])(
 );
 
 test.each(FOUND)(
-  "plan-found (%s): its line, Sign in sending StartSignIn, and the key or firm's account for Claude",
+  "plan-found (%s): its line, Sign in sending StartSignIn, and the key for Claude",
   async (found, line) => {
     const t = await at({ signed_out: { found } });
     expect(text()).toContain(line);
     await press("Sign in");
     expect(setups(t)).toEqual([{ start_sign_in: { agent: CLAUDE } }]);
-    await press("Use an API key or my firm's account");
+    await press("Use an API key instead");
     expect(byId("signin-key")).not.toBeNull();
   },
 );
@@ -518,20 +539,20 @@ test.each<[FoundLogin, string]>([
   });
   await press("Sign in to ChatGPT");
   expect(text()).toContain(line);
-  expect(text()).not.toContain("Use an API key or my firm's account");
+  expect(text()).not.toContain("Use an API key instead");
   await press("Sign in");
   expect(setups(t).at(-1)).toEqual({ start_sign_in: { agent: CODEX } });
 });
 
 test("plan-key: opening the key panel puts the focus in the API key field, and Cancel gives it back to the button that opened it", async () => {
   await at({ signed_out: {} });
-  const opener = button("Use an API key or my firm's account") as HTMLButtonElement;
+  const opener = button("Use an API key instead") as HTMLButtonElement;
   opener.focus();
   await press(opener);
   expect(document.activeElement).toBe(byId("signin-key"));
   await press(byId("signin")?.querySelector<HTMLButtonElement>(".fl-gate-cancel") ?? null);
   expect(byId("signin-key")).toBeNull();
-  expect(document.activeElement?.textContent).toBe("Use an API key or my firm's account");
+  expect(document.activeElement?.textContent).toBe("Use an API key instead");
 });
 
 test("signin-nudge: Paste it puts the focus in the code field, and Cancel gives it back to Paste it", async () => {

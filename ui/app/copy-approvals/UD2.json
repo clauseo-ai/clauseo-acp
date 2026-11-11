@@ -429,16 +429,6 @@
     "at": "2026-11-07",
     "by": "app track (provisional; Rohan batch review)"
   },
-  "UD2-45": {
-    "en": "Other ways in",
-    "hi": "जुड़ने के दूसरे तरीके",
-    "hi_status": "provisional",
-    "hi_at": "2026-11-06",
-    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "approved",
-    "at": "2026-11-06",
-    "by": "design"
-  },
   "UD2-46": {
     "en": "Change key",
     "hi": "key बदलें",
@@ -488,46 +478,6 @@
     "status": "approved",
     "at": "2026-11-06",
     "by": "design"
-  },
-  "UD2-51": {
-    "en": "Your firm's address",
-    "hi": "आपकी फ़र्म का पता",
-    "hi_status": "provisional",
-    "hi_at": "2026-11-06",
-    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "approved",
-    "at": "2026-11-06",
-    "by": "design"
-  },
-  "UD2-52": {
-    "en": "Your IT team gives you this. Questions go through your firm's own account, on its terms.",
-    "hi": "यह आपकी IT टीम देती है। प्रश्न आपकी फ़र्म के अपने खाते से, उसकी शर्तों पर जाते हैं।",
-    "hi_status": "provisional",
-    "hi_at": "2026-11-06",
-    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "approved",
-    "at": "2026-11-06",
-    "by": "design"
-  },
-  "UD2-53": {
-    "en": "Connect",
-    "hi": "कनेक्ट करें",
-    "hi_status": "provisional",
-    "hi_at": "2026-11-06",
-    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "approved",
-    "at": "2026-11-06",
-    "by": "design"
-  },
-  "UD2-54": {
-    "en": "Remove address",
-    "hi": "पता हटाएँ",
-    "hi_status": "provisional",
-    "hi_at": "2026-11-06",
-    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-06",
-    "by": "app track (provisional; Rohan batch review)"
   },
   "UD2-55": {
     "en": "No {app} sign-in on this computer.",

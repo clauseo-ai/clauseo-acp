@@ -945,5 +945,38 @@
     "at": "2026-11-10",
     "by": "orchestrator (decision: KB under 1 MB; an empty folder says so)",
     "note": "New matter's folder line, the scan done with no file (D-072; was 0 files, 0 MB)"
+  },
+  "UC-139": {
+    "en": "Anthropic API key",
+    "hi": "Anthropic API key",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-11",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "approved",
+    "at": "2026-11-11",
+    "by": "Rohan (via the orchestrator)",
+    "note": "the key field's label under Claude, on the first screen's key panel and in Settings, Plans; was UD1-30's \"API key\" (other ways in)"
+  },
+  "UC-140": {
+    "en": "OpenAI API key",
+    "hi": "OpenAI API key",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-11",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "approved",
+    "at": "2026-11-11",
+    "by": "Rohan (via the orchestrator)",
+    "note": "the key field's label under ChatGPT, on the first screen's key panel and in Settings, Plans; was UD1-30's \"API key\" (other ways in)"
+  },
+  "UC-141": {
+    "en": "Use an API key instead",
+    "hi": "इसके बजाय API key इस्तेमाल करें",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-11",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "approved",
+    "at": "2026-11-11",
+    "by": "Rohan (via the orchestrator)",
+    "note": "the quiet way to the key panel, on the first screen and under each plan in Settings, Plans; was UD1-27's \"Use an API key or my firm's account\" and UD2-45's \"Other ways in\"; the words and Hindi of Connectors' U15-09 (other ways in)"
   }
 }

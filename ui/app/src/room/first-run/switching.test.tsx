@@ -70,7 +70,7 @@ async function keyRefused(code: string, switching: boolean) {
       if (c.set_agent_key !== undefined) throw refusal(code);
     },
   });
-  await press("Use an API key or my firm's account");
+  await press("Use an API key instead");
   if (switching) await play(t, signIn(CLAUDE, SWITCHING));
   const key = byId<HTMLInputElement>("signin-key") as HTMLInputElement;
   await typeInto(key, KEY);
@@ -112,7 +112,7 @@ test("another refusal says its code's sentence, and a press clears it", async ()
     "Clauseo is using your API key. To sign in with your plan instead, open Settings, then Plans, and remove the key.",
   );
   // opening the panel sends nothing, so the refusal stands; the next command answers it
-  await press("Use an API key or my firm's account");
+  await press("Use an API key instead");
   expect(byId("signin-refused")).not.toBeNull();
   await typeInto(byId<HTMLInputElement>("signin-key") as HTMLInputElement, KEY);
   await press("Use this key");
@@ -127,7 +127,7 @@ test("Send waits while desktop answers a key: a second press sends nothing more,
     first: [info(), install(CLAUDE, READY), signIn(CLAUDE, { signed_out: {} })],
     command: () => new Promise<void>((done) => (answer = done)),
   });
-  await press("Use an API key or my firm's account");
+  await press("Use an API key instead");
   const key = byId<HTMLInputElement>("signin-key") as HTMLInputElement;
   await typeInto(key, KEY);
   await press("Use this key");

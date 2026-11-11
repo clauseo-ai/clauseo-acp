@@ -17,7 +17,7 @@ import { Say } from "../say.tsx";
 import { WRAP } from "./classes.ts";
 import { Failed } from "./gate-failed.tsx";
 import { Act, Note, PasteRow, Ways } from "./parts.tsx";
-import { APP, FOUND, NAME, other } from "./plan-names.ts";
+import { APP, FOUND, KEY_LABEL, NAME, other } from "./plan-names.ts";
 
 /** A login seen but not reusable, or why reuse stopped: the host's `FoundLogin`. */
 export type Found =
@@ -167,13 +167,7 @@ export function Gate({
   const instead = (key: boolean) => (
     <Ways>
       {way(w("Use {name} instead", { name: NAME[other(plan)] }), { act: "instead" })}
-      {key &&
-        way(
-          w("Use an API key or my firm's account"),
-          { act: "key-panel", open: true },
-          undefined,
-          true,
-        )}
+      {key && way(w("Use an API key instead"), { act: "key-panel", open: true }, undefined, true)}
     </Ways>
   );
   // both plans side by side and equal, Claude then ChatGPT, each its own sign-in
@@ -203,12 +197,7 @@ export function Gate({
               <Say>{w("Sign in to Claude or ChatGPT to ask about this matter")}</Say>
             </Act>
             <Ways>
-              {way(
-                w("Use an API key or my firm's account"),
-                { act: "key-panel", open: true },
-                undefined,
-                true,
-              )}
+              {way(w("Use an API key instead"), { act: "key-panel", open: true }, undefined, true)}
             </Ways>
           </>
         ) : (
@@ -216,11 +205,11 @@ export function Gate({
             <Act act={signIn(w("Sign in"))}>
               <Say>{w(FOUND[view.found], { app })}</Say>
             </Act>
-            {/* a login that can't be shared offers Clauseo's own sign-in, and for Claude a key or the firm's account */}
+            {/* a login that can't be shared offers Clauseo's own sign-in, and for Claude a key */}
             {plan === "claude" && (
               <Ways>
                 {way(
-                  w("Use an API key or my firm's account"),
+                  w("Use an API key instead"),
                   { act: "key-panel", open: true },
                   undefined,
                   true,
@@ -436,7 +425,7 @@ export function Gate({
             </Act>
           ) : (
             <PasteRow
-              label={w("API key")}
+              label={w(KEY_LABEL[plan])}
               secret
               go={w("Use this key")}
               onGo={(key) => onAct({ act: "key", key })}

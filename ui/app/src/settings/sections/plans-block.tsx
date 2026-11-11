@@ -5,8 +5,9 @@
 // Signing in: UD1's gate, inline. A plan not added yet, either one: "Add Claude" or "Add ChatGPT", which installs it
 // and then starts its sign-in. Once its install runs: the install line. Every plan not in use yet (not added, waiting
 // for its download, signed out, a sign-in that stopped) is the one card, plans-card.tsx, the same for both plans.
-// Under it, the other ways in (a key; for Claude the firm's address). A plan the firm's policy locks shows its line
-// and "Managed by firm", and no control.
+// Under it, one quiet "Use an API key instead", which opens the key's panel (plans-key.tsx). A plan the firm's policy
+// locks shows its line (and for Claude the firm's address its policy set) and "Managed by firm", and no control. The
+// firm's address is set by the firm's policy only (plans.<id>, docs/firm-it.md): Plans offers no field for it.
 import { useEffect, useState, type ReactNode } from "react";
 import {
   Gate,
@@ -30,7 +31,6 @@ import type { HostTransport } from "../../transport/host-transport.ts";
 import type { AgentId, FoundLogin, SignIn } from "../../transport/protocol.ts";
 import { Managed } from "./parts.tsx";
 import { MainAct, OtherAct, PlanCard, Stopped } from "./plans-card.tsx";
-import { PlansEndpoint } from "./plans-endpoint.tsx";
 import { PlansKey } from "./plans-key.tsx";
 import { Confirm, Refused } from "./plans-parts.tsx";
 
@@ -142,6 +142,7 @@ export function PlanBlock({
   const name = NAME[plan];
   const app = APP[plan];
   const [pasting, setPasting] = useState(false);
+  const [keyOpen, setKeyOpen] = useState(false);
   const [signedOutHere, setSignedOutHere] = useState(false);
   // "Add {plan}" pressed: the add waits in the store's set until the install is ready (the state only re-renders)
   const [, setAdding] = useState(false);
@@ -214,11 +215,8 @@ export function PlanBlock({
         else onOther();
         return;
       case "key-panel":
-        // the key's field stands under the block already: the press takes the lawyer there
-        if (a.open)
-          document
-            .querySelector<HTMLInputElement>(`[data-agent="${plan}"] [data-testid="plans-key"]`)
-            ?.focus();
+        // the key's panel under the block opens, its field taking the focus (plans-key.tsx)
+        setKeyOpen(a.open);
         return;
       case "key":
         return store.send({ set_agent_key: { agent, key: a.key } });
@@ -438,7 +436,7 @@ export function PlanBlock({
       }
     }
   }
-  // the other ways in, once the plan is here and the firm's policy leaves them to the lawyer
+  // the key, once the plan is here and the firm's policy leaves it to the lawyer
   const ways = !locked && stand.kind !== "none" && stand.kind !== "add" && stand.kind !== "install";
   const method = stand.kind === "signed" ? stand.signed.method : null;
   return (
@@ -456,28 +454,16 @@ export function PlanBlock({
       {body}
       <Refused refused={refusalView(setup)} />
       {ways && (
-        <section className="set-plan-ways" aria-label={s("Other ways in")}>
-          <Heading level={4} className="set-plan-sub">
-            {say(s("Other ways in"))}
-          </Heading>
-          <PlansKey
-            plan={plan}
-            keys={keys}
-            keysKnown={keysKnown}
-            inUse={method === "api_key"}
-            onKey={(key) => store.send({ set_agent_key: { agent, key } })}
-            onRemove={() => command({ clear_agent_key: { agent } })}
-          />
-          {plan === "claude" && (
-            <PlansEndpoint
-              key={endpoint ?? ""}
-              endpoint={endpoint}
-              onConnect={(url) =>
-                command({ set_firm_endpoint: url === undefined ? { agent } : { agent, url } })
-              }
-            />
-          )}
-        </section>
+        <PlansKey
+          plan={plan}
+          keys={keys}
+          keysKnown={keysKnown}
+          inUse={method === "api_key"}
+          open={keyOpen}
+          onOpen={setKeyOpen}
+          onKey={(key) => store.send({ set_agent_key: { agent, key } })}
+          onRemove={() => command({ clear_agent_key: { agent } })}
+        />
       )}
     </article>
   );

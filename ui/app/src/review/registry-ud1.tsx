@@ -202,7 +202,8 @@ const SCENES: ([FirstLaunchKey, Scene, string] | null)[] = [
   ["Sign in", { events: [READY, failed("signin.cancelled")] }, "signin-cancelled"],
   // signed out, the box offers both plans' own Sign in; "Use … instead" stays where a sign-in stopped
   ["Use {name} instead", { events: [READY, failed("signin.cancelled")] }, "plan-chatgpt"],
-  ["Use an API key or my firm's account", GATE, "plan-key"],
+  // UD1-27, retired: the quiet way to the key is "Use an API key instead" (UC-141); the firm's address is its policy's
+  null,
   [
     "Your browser opens when {name} is ready.",
     { events: [DOWNLOADING, signIn(CLAUDE, "queued")] },
@@ -218,7 +219,8 @@ const SCENES: ([FirstLaunchKey, Scene, string] | null)[] = [
     },
     "plan-queued",
   ],
-  ["API key", KEY, "plan-key"],
+  // UD1-30, retired: the key's field names its maker (UC-139, UC-140)
+  null,
   ["Use this key", KEY, "plan-key"],
   [
     "A key from Claude or ChatGPT, or one from your firm's IT team. Billed to the key's own account.",
@@ -524,6 +526,20 @@ const TOOLS_OFFLINE: Entry = {
   render: render(T.TOOLS_WAITING),
 };
 
+/** The key's words named by its maker, and the quiet way to it (UC-139 and UC-141; UC-140, ChatGPT's, is shown in
+ * Plans, registry-ud2-plans.tsx). */
+const UC_KEY: Entry[] = (
+  [
+    { id: "UC-139", key: "Anthropic API key", scene: KEY },
+    { id: "UC-141", key: "Use an API key instead", scene: GATE },
+  ] satisfies { id: string; key: FirstLaunchKey; scene: Scene }[]
+).map(({ id, key, scene }) => ({
+  id,
+  words: firstLaunchWords(key),
+  screen: "first-launch/plan-key",
+  render: render(scene),
+}));
+
 export const UD1: readonly Entry[] = [
   ...SCENES.flatMap((scene, i) =>
     scene === null
@@ -539,4 +555,5 @@ export const UD1: readonly Entry[] = [
   ),
   REFUSAL,
   TOOLS_OFFLINE,
+  ...UC_KEY,
 ];

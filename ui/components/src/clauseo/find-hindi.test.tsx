@@ -1,8 +1,8 @@
 // @vitest-environment happy-dom
 // D-069: what the Hindi room left in English. Find draws no native clear button ("cancel", WebKit's English, under
 // display: none in base.css) and asks for no autocorrect, whose bubble under the field dismisses with an English
-// "cancel" too; and the API key field's word is Hindi in both its places (first launch and Connectors), keeping
-// "API key" as the term the rest of the Hindi uses.
+// "cancel" too; and Connectors' API key field's word is Hindi, keeping "API key" as the term the rest of the Hindi
+// uses. First launch's field names the key by its maker (UC-139, UC-140), the whole label kept in Latin script.
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -49,9 +49,9 @@ test("the search field's native clear button isn't drawn, so it isn't read out",
   expect(rule).toMatch(/display:\s*none/);
 });
 
-test("the API key field's word is Hindi, keeping the term", () => {
-  for (const words of [FIRST_LAUNCH, CONNECTORS]) {
-    expect(words["API key"]).toBe("API key डालें");
-    expect(words["API key"]).toMatch(/[\u0900-\u097f]/);
-  }
+test("the API key field's word is Hindi in Connectors, keeping the term; first launch's names the maker in Latin script", () => {
+  expect(CONNECTORS["API key"]).toBe("API key डालें");
+  expect(CONNECTORS["API key"]).toMatch(/[\u0900-\u097f]/);
+  expect(FIRST_LAUNCH["Anthropic API key"]).toBe("Anthropic API key");
+  expect(FIRST_LAUNCH["OpenAI API key"]).toBe("OpenAI API key");
 });
