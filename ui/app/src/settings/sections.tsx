@@ -7,6 +7,7 @@ import type { IconProps } from "@clauseo/components/icons/icon.tsx";
 import {
   IconAbout,
   IconAppearance,
+  IconCommand,
   IconConversation,
   IconLanguage,
   IconPlanLimit,
@@ -18,6 +19,7 @@ import {
 import type { Display, Lang } from "@clauseo/components/lib/display.ts";
 import { cw } from "@clauseo/components/lib/words-connectors.ts";
 import { frame } from "@clauseo/components/lib/words-frame.ts";
+import { mw } from "@clauseo/components/lib/words-mcp-tools.ts";
 import { LANGUAGE_NAMES, st, type SettingsKey } from "@clauseo/components/lib/words-settings.ts";
 import { uw } from "@clauseo/components/lib/words-update.ts";
 import type { DisplayStore } from "../room/display-store.ts";
@@ -44,6 +46,8 @@ import { carriesUpdate } from "../store/update.ts";
 import { ConnectorsSection } from "./sections/connectors-load.tsx";
 import { PlansSection } from "./sections/plans-load.tsx";
 import { carriesSetup } from "./sections/plans-shown.ts";
+import { ToolsSection } from "./sections/mcp-tools-load.tsx";
+import { toolsCommandsOf } from "./sections/tools-model.ts";
 import { WorkspaceSection } from "./sections/workspace-load.tsx";
 import { carriesProtectionWire } from "./sections/workspace-shown.ts";
 import { connectorsNote } from "./sections/connectors-note.ts";
@@ -54,6 +58,7 @@ export const SECTION_ORDER = [
   "plans",
   "usage",
   "connectors",
+  "tools",
   "matters",
   "workspace",
   "language",
@@ -139,6 +144,20 @@ export const SECTIONS: readonly SectionEntry[] = [
     note: (ctx, lang) => connectorsNote(ctx.connectors, lang),
     shown: (ctx) => ctx.connectors.connectors.length > 0,
     Body: ConnectorsSection,
+  },
+  {
+    // UC-169 to UC-189: the lawyer's own MCP servers, where the transport carries their commands (tools-model.ts); the
+    // lead is the plain line on what a tool can reach. No side note, so the list stays out of the first load
+    id: "tools",
+    name: (lang) => mw(lang, "Tools"),
+    icon: IconCommand,
+    lead: (lang) =>
+      mw(
+        lang,
+        "A tool runs on this computer. It can reach anything your account here can: your files, your programs and the internet.",
+      ),
+    shown: (ctx) => toolsCommandsOf(ctx.transport) !== null,
+    Body: ToolsSection,
   },
   {
     // UC: this computer's protection, where the transport carries its wire; built now, live once R17 PR-B admits

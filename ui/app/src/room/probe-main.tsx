@@ -508,13 +508,18 @@ fakeNotched(page.get("notched"), transport);
 const container = document.getElementById("root");
 if (container === null) throw new Error("index.html has no #root element");
 // as the room's main.tsx: a Hindi page renders once its words are in
+const toolsPage = page.get("tools");
 whenWordsReady(() =>
-  createRoot(container).render(
-    <StrictMode>
-      <App
-        transport={transport}
-        {...(page.get("lights") === "native" ? { windowControls: NATIVE_LIGHTS } : {})}
-      />
-    </StrictMode>,
-  ),
+  toolsPage !== null
+    ? void import("../settings/sections/tools-probe-page.tsx").then((m) =>
+        m.renderToolsProbe(container, toolsPage, page.get("lang") === "hi" ? "hi" : "en"),
+      )
+    : createRoot(container).render(
+        <StrictMode>
+          <App
+            transport={transport}
+            {...(page.get("lights") === "native" ? { windowControls: NATIVE_LIGHTS } : {})}
+          />
+        </StrictMode>,
+      ),
 );

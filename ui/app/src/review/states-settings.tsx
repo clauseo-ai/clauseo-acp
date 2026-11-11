@@ -5,6 +5,7 @@ import { createDisplayStore, DEFAULT_UI } from "../room/display-store.ts";
 import { nextHostOf, type MatterInfo } from "../room/host-next.ts";
 import type { SectionId } from "../settings/sections.tsx";
 import { SettingsApp } from "../settings/settings-app.tsx";
+import { provideTools, type ToolsCommands } from "../settings/sections/tools-model.ts";
 import type { FakeBlocklistHost } from "../transport/fake-blocklist.ts";
 import type { FakeUpdateHost } from "../transport/fake-update.ts";
 import { FakeTransport, type FakeProtectionHost } from "../transport/fake-transport.ts";
@@ -44,6 +45,7 @@ export function SettingsOver({
   blocklist,
   update,
   matters = [],
+  mcpTools,
 }: {
   section: SectionId;
   lang: Lang;
@@ -68,6 +70,8 @@ export function SettingsOver({
   update?: FakeUpdateHost;
   /** The matters the app feed's first frames list, for the allowed sites' matter names. */
   matters?: MatterInfo[];
+  /** Settings › Tools' commands (tools-fake.ts); none when left out, and Tools doesn't show. */
+  mcpTools?: ToolsCommands;
 }) {
   const [made] = useState(() => {
     const transport = new FakeTransport({
@@ -111,6 +115,7 @@ export function SettingsOver({
           }),
     });
     if (limits !== undefined) transport.limitsChanged(limits);
+    if (mcpTools !== undefined) provideTools(transport, mcpTools);
     const store = createDisplayStore({
       storage: null,
       matchMedia: null,
