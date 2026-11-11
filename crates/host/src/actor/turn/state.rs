@@ -80,6 +80,7 @@ impl Current {
             refused: None,
             offline_told: false,
             limit: None,
+            too_long: None,
             tool_paths: crate::sent::TurnPaths::default(),
             checkpoint_before: None,
             prompt_call: None,

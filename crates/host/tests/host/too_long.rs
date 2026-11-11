@@ -1,9 +1,9 @@
-//! A turn the model refuses as too long to read ends `StopReason::TooLong` (decision 0057): Claude's
-//! "Prompt is too long" (recorded live) and Codex's full context (from codex-acp's source), each
-//! an AIR `sessionFailure` on `end_turn`. No `TurnFailed`, no limit stop, no limits read to wait
-//! for, the answer so far and the question kept. Codex's recorded refusal of an over-long input
-//! says only "Codex encountered an internal error.", which is not read as too long; what the host
-//! does with it today is pinned here too.
+//! A turn the model refuses as too long to read ends `StopReason::TooLong` (decision 0057):
+//! Claude's "Prompt is too long" (recorded live) and Codex's full context (from codex-acp's
+//! source), each an AIR `sessionFailure` on `end_turn`. No `TurnFailed`, no limit stop, no limits
+//! read to wait for, the answer so far and the question kept. Codex's recorded refusal of an
+//! over-long input says only "Codex encountered an internal error.", which is not read as too long;
+//! what the host does with it today is pinned here too.
 
 use std::sync::Arc;
 
@@ -195,4 +195,75 @@ fn codex_input_refusal_today_ends_end_turn_and_moves_the_queue_on() {
     assert!(!held(&host, matter, thread), "the queue held");
     assert_eq!(starts(&events, second), 1, "{}", events.dump());
     host.shutdown();
+}
+
+/// One turn of `agent` whose agent sends `failure` as an AIR `sessionFailure`, on a
+/// `session_info_update` and, when `on_answer`, on its `end_turn` too; returns how it ended.
+fn ends_after_failure(
+    test: &str,
+    agent: &str,
+    failure: &serde_json::Value,
+    on_answer: bool,
+) -> StopReason {
+    let dir = Dir::new(test, &[]);
+    let meta = json!({"jetbrains": {"air": {"version": 1, "sessionFailure": failure}}});
+    let result = if on_answer {
+        json!({"stopReason": "end_turn", "_meta": meta})
+    } else {
+        json!({"stopReason": "end_turn"})
+    };
+    let handshake = if agent == CODEX {
+        "codex-handshake.jsonl"
+    } else {
+        "claude-handshake.jsonl"
+    };
+    let steps = vec![
+        json!({"expect": {"method": "session/prompt", "as": "p1", "params": {"sessionId": "sess-1"}}}),
+        json!({"update": {"update": {"sessionUpdate": "session_info_update", "_meta": meta}}}),
+        json!({"respond": {"to": "p1", "result": result}}),
+    ];
+    let scenario = crate::codex_cap::written(&dir, "failure", handshake, steps);
+    dir.set_agents(&[(agent, scenario)]);
+    let host = dir.start(0);
+    let (_, thread, _) = matter_with_thread(&dir, &host, "m", &[("lease.txt", "x\n")], agent);
+    let mut events = host.events(StreamId::Thread(thread));
+    let (turn, _) = host.prompt(thread, QUESTION);
+    let stop = events.until_turn_ended(turn).stop;
+    host.settle();
+    events.drain_ready();
+    events.assert_no_mismatch();
+    assert_eq!(turn_failed(&events, turn), None, "{}", events.dump());
+    host.shutdown();
+    stop
+}
+
+fn context_exhausted() -> serde_json::Value {
+    json!({"id": "t1:error", "revision": 1, "category": "limit", "severity": "error",
+        "title": "This Claude turn reached its configured limit.", "actions": ["new_session"]})
+}
+
+/// claude-agent-acp sends `context_exhausted` (category `limit`, actions `["new_session"]`) for
+/// its configured turn or output limit: not "too long" for Claude, so the turn ends as the agent
+/// said; the same shape from codex-acp, its full context, ends `TooLong`.
+#[test]
+fn context_exhausted_is_too_long_only_for_codex() {
+    let claude = ends_after_failure(
+        "context_exhausted_claude",
+        CLAUDE,
+        &context_exhausted(),
+        true,
+    );
+    assert_eq!(claude, StopReason::EndTurn);
+    let codex = ends_after_failure("context_exhausted_codex", CODEX, &context_exhausted(), true);
+    assert_eq!(codex, StopReason::TooLong);
+}
+
+/// A too-long failure sent only on the `session_info_update`, the answer a plain `end_turn`,
+/// still ends the turn `TooLong`.
+#[test]
+fn a_too_long_failure_only_on_the_update_ends_too_long() {
+    let failure = json!({"id": "t1:error", "revision": 1, "category": "service",
+        "severity": "error", "title": "Prompt is too long", "actions": ["retry"]});
+    let stop = ends_after_failure("too_long_update_only", CLAUDE, &failure, false);
+    assert_eq!(stop, StopReason::TooLong);
 }

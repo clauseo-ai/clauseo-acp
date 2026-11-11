@@ -264,7 +264,7 @@ fn session_failure_categories() {
     // of a prompt over the context (its title, any case, the token counts after it).
     assert_eq!(
         failure("limit", "error", json!(["new_session"])),
-        Failure::TooLong
+        Failure::TooLong(crate::TooLong::ContextExhausted)
     );
     // Claude's recorded shape: category service, actions ["retry"]; and request, from source.
     for (category, title) in [
@@ -277,7 +277,7 @@ fn session_failure_categories() {
     ] {
         assert_eq!(
             failure_titled(category, "error", json!(["retry"]), title),
-            Failure::TooLong,
+            Failure::TooLong(crate::TooLong::PromptTooLong),
             "{category} {title}"
         );
     }
@@ -314,17 +314,24 @@ fn session_failure_categories() {
     }
 }
 
-/// A too-long `sessionFailure` on a `session_info_update` makes no event: the prompt's answer
-/// carries the same record and ends the turn by it.
+/// A too-long `sessionFailure` on a `session_info_update` is its own event, so a failure sent only
+/// on the update still ends the turn `TooLong`; it is never a limit nor a warning.
 #[test]
-fn a_too_long_failure_update_makes_no_event() {
+fn a_too_long_failure_update_is_its_own_event() {
     let failure = json!({"jetbrains": {"air": {"sessionFailure": {
         "id": "f", "revision": 1, "category": "limit", "severity": "error",
         "title": "Codex ran out of room in the model's context window.",
         "actions": ["new_session"],
     }}}});
     let update = json!({"sessionUpdate": "session_info_update", "_meta": failure});
-    assert_eq!(map_update(update, None), []);
+    assert_eq!(
+        map_update(update, None),
+        [AcpEvent::TooLong {
+            session: session(),
+            origin: Origin::Idle,
+            kind: crate::TooLong::ContextExhausted,
+        }]
+    );
 }
 
 #[test]

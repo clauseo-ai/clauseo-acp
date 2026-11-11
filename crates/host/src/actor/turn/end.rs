@@ -84,6 +84,14 @@ pub(super) fn on_prompt_done(
     };
     // A prompt refused as too long ends `TooLong`, never `Failed`, and is never read as a limit.
     let too_long = matches!(&result, Err(error) if error.prompt_too_long());
+    // A too-long `sessionFailure`, on the answer or an update before it, ends the turn `TooLong`
+    // when it fits the agent (`too_long_stops`).
+    let said = match &result {
+        Ok(answer) => answer.too_long,
+        Err(_) => None,
+    }
+    .or_else(|| current(actor, thread).and_then(|current| current.too_long));
+    let said_too_long = said.is_some_and(|kind| too_long_stops(actor, thread, kind));
     let fallback = matches!(result, Err(clauseo_acp::Error::Rpc { .. }))
         && !too_long
         && went_offline.is_none()
@@ -106,7 +114,7 @@ pub(super) fn on_prompt_done(
                 Some(refused) if answer.stop == StopReason::Cancelled => refused,
                 // The model refused the turn as too long to read (an AIR `sessionFailure` on
                 // its `end_turn`): a stop of its own, the answer so far kept.
-                _ if answer.too_long => StopReason::TooLong,
+                _ if said_too_long => StopReason::TooLong,
                 _ => answer.stop,
             };
             End {
@@ -133,6 +141,25 @@ pub(super) fn on_prompt_done(
         }
     };
     end_turn(actor, thread, end);
+}
+
+/// Whether a too-long `sessionFailure` of `kind` ends `thread`'s turn `TooLong`: Claude Code's
+/// "Prompt is too long" from any agent; `context_exhausted` only from codex-acp, since Claude's
+/// adapter sends that shape for its configured turn or output limit, which shortening a question
+/// does not fix. Any other is logged by its kind alone, no text.
+fn too_long_stops(actor: &Actor, thread: ThreadId, kind: clauseo_acp::TooLong) -> bool {
+    let codex = actor
+        .threads
+        .get(&thread)
+        .is_some_and(|entry| AgentKind::of(&entry.row.agent) == Some(AgentKind::Codex));
+    let stops = match kind {
+        clauseo_acp::TooLong::PromptTooLong => true,
+        clauseo_acp::TooLong::ContextExhausted => codex,
+    };
+    if !stops {
+        tracing::warn!(%thread, ?kind, "a session failure that is not too long for this agent");
+    }
+    stops
 }
 
 /// A Codex prompt's `.codex` re-check refused it, so nothing reached the agent: the agent is

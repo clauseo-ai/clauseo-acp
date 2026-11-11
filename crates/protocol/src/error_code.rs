@@ -442,19 +442,25 @@ impl HostError {
         reason = "taken by value so a caller writes `.map_err(HostError::invalid_command)`"
     )]
     pub fn invalid_command(error: Error) -> Self {
-        let prompt_text = matches!(
+        Self::new(Self::invalid_command_code(&error), error.to_string())
+    }
+
+    /// The code [`HostError::invalid_command`] gives `error`: `prompt.too_long` for a prompt's
+    /// text over its limit (`Error::TooLarge` of
+    /// [`Measure::PromptText`](crate::Measure::PromptText)), `command.invalid` for anything else.
+    /// The one place that choice is made, so a caller that logs the code logs what the wire says.
+    pub const fn invalid_command_code(error: &Error) -> ErrorCode {
+        if matches!(
             error,
             Error::TooLarge {
                 what: crate::Measure::PromptText,
                 ..
             }
-        );
-        let code = if prompt_text {
+        ) {
             ErrorCode::PromptTooLong
         } else {
             ErrorCode::CommandInvalid
-        };
-        Self::new(code, error.to_string())
+        }
     }
 }
 

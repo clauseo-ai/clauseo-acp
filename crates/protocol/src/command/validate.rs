@@ -381,18 +381,19 @@ fn check_prompt(kind: &'static str, content: &[PromptBlock]) -> Result<(), Error
             }
             PromptBlock::Text { text } => {
                 text_bytes = text_bytes.saturating_add(escaped_len(text));
+                // The first block that crosses the limit decides: the rest is not measured.
+                if text_bytes > MAX_PROMPT_TEXT_BYTES {
+                    return Err(too_large(
+                        kind,
+                        Measure::PromptText,
+                        text_bytes,
+                        MAX_PROMPT_TEXT_BYTES,
+                    ));
+                }
                 visible_text = visible_text || shows_something(text);
             }
             PromptBlock::File { file: _ } => files += 1,
         }
-    }
-    if text_bytes > MAX_PROMPT_TEXT_BYTES {
-        return Err(too_large(
-            kind,
-            Measure::PromptText,
-            text_bytes,
-            MAX_PROMPT_TEXT_BYTES,
-        ));
     }
     if files > MAX_PROMPT_FILES {
         return Err(too_large(

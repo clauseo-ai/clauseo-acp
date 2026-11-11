@@ -45,7 +45,7 @@ impl Error {
     /// The code a client sees for this failure.
     pub fn code(&self) -> ErrorCode {
         match self {
-            Self::Invalid(_) => ErrorCode::CommandInvalid,
+            Self::Invalid(invalid) => HostError::invalid_command_code(invalid),
             Self::Refused(error) => error.code(),
             Self::Store(error) => error.code(),
             Self::Matters(error) => error.code(),

@@ -90,3 +90,44 @@ fn edit_queued_text_limit() {
     assert!(edit_queued("").validate().is_ok());
     assert!(too_long(edit_queued(&(max_text + "x")).validate(), MAX + 1));
 }
+
+/// Only the prompt's text gets `prompt.too_long`: every other size limit (titles, change ids,
+/// file lists and their paths, elicitation values, ...) stays `command.invalid`, chosen in one
+/// place (`HostError::invalid_command_code`).
+#[test]
+fn every_other_measure_stays_command_invalid() {
+    let code = |what| {
+        let error = Error::TooLarge {
+            kind: "Test",
+            what,
+            size: 2,
+            max: 1,
+        };
+        let code = HostError::invalid_command_code(&error);
+        assert_eq!(HostError::invalid_command(error).code(), code);
+        code
+    };
+    assert_eq!(code(Measure::PromptText), ErrorCode::PromptTooLong);
+    for what in [
+        Measure::TitleChars,
+        Measure::ChangeIds,
+        Measure::PathBytes,
+        Measure::FilesNamed,
+        Measure::ElicitationValues,
+        Measure::PromptBlocks,
+        Measure::FileReferences,
+        Measure::NewFolderName,
+        Measure::HostBytes,
+    ] {
+        assert_eq!(code(what), ErrorCode::CommandInvalid, "{what:?}");
+    }
+}
+
+/// The first text block that crosses the limit decides: its running total is the size, and a
+/// later empty block is never reached.
+#[test]
+fn the_first_block_over_the_limit_decides() {
+    let max_text = "a".repeat(MAX);
+    let blocks = vec![text(&max_text), text("x"), text(&"b".repeat(MAX))];
+    assert!(too_long(send(blocks), MAX + 1));
+}

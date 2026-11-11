@@ -82,6 +82,17 @@ pub enum AcpEvent {
         /// What it says.
         signal: LimitSignal,
     },
+    /// An AIR `sessionFailure` on a `session_info_update` that says the turn was too long to
+    /// read. The prompt's answer usually carries the same record (`PromptEnd::too_long`); this
+    /// keeps a failure sent only on the update from being lost.
+    TooLong {
+        /// The agent's session.
+        session: AgentSessionId,
+        /// When it came.
+        origin: Origin,
+        /// How it said so.
+        kind: crate::TooLong,
+    },
     /// Something the agent sent that the driver skipped or did not understand.
     Warning {
         /// The agent's session it is about, when the message named one: `None` for a malformed

@@ -179,19 +179,18 @@ impl Error {
     }
 
     /// Whether the agent refused the prompt as too long to read (`map/too_long.rs`): an RPC
-    /// error whose allowlisted `data` fields, or Codex's exact refusal text, say so. The host
-    /// ends such a turn `TooLong`, never `Failed`.
+    /// error to `session/prompt` whose allowlisted `data` fields say so. The host ends such a
+    /// turn `TooLong`, never `Failed`.
     pub fn prompt_too_long(&self) -> bool {
         let Self::Rpc {
-            message,
-            data_text,
+            method,
             data_fields,
             ..
         } = self
         else {
             return false;
         };
-        crate::map::rpc_says_too_long(message, data_fields, data_text.as_deref())
+        method == "session/prompt" && crate::map::rpc_says_too_long(data_fields)
     }
 
     /// The code a client sees.
