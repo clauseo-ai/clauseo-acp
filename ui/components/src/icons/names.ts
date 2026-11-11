@@ -246,6 +246,11 @@ export const ICON_NAMES = [
     meaning: "Browser: Clauseo's own browser, on this computer",
   },
   { component: "IconDownload", source: "download", meaning: "Download Chrome" },
+  {
+    component: "IconCopy",
+    source: "copy",
+    meaning: "Copy: an answer's or a code block's words to the clipboard",
+  },
   { component: "IconInfo", source: "info", meaning: "More about it: an info tip" },
   { component: "IconSettings", source: "settings", meaning: "Settings, at the rail's foot" },
 ] as const;

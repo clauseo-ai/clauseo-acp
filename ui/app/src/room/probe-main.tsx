@@ -31,7 +31,9 @@
 // With ?reveal=refused, Show in Finder is refused with the folder missing, for the rail's Locate folder beside the
 // refusal; with ?rail=triage, every matter's threads arrive at the start, so the open matter's menu (with
 // ?thread=commands) has Snooze until and Mark done. With ?sac=evaluation, Windows says Smart App Control is still
-// deciding, so the room shows its note (room/sac/), shown again on each load. Not shipped.
+// deciding, so the room shows its note (room/sac/), shown again on each load. With ?thread=long-command, the thread
+// is a finished turn that ran one command line wider than the thread, then quoted it in a shell block
+// (testing/long-command.ts), for a block's Copy beside a line that scrolls sideways. Not shipped.
 import { whenWordsReady } from "@clauseo/components/lib/display.ts";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
@@ -46,6 +48,7 @@ import type {
 } from "../transport/protocol.ts";
 import { type FakeCall, FakeTransport } from "../transport/fake-transport.ts";
 import { HINDI_ANSWER, HINDI_QUESTION } from "../testing/hindi-answer.ts";
+import { longCommandEntries } from "../testing/long-command.ts";
 import { SHAPING_ANSWER, SHAPING_QUESTION } from "../testing/shaping-answer.ts";
 import { firstReadProbe } from "./first-read/probe-state.ts";
 import {
@@ -146,8 +149,10 @@ const hindiThread = page.get("thread") === "hindi";
 const shapingThread = page.get("thread") === "shaping";
 /** ?thread=first-read: the matter's first read, reading codex's quoted read of a file outside the matter. */
 const firstReading = page.get("thread") === "first-read";
+/** ?thread=long-command: an idle thread, a finished turn with one command line wider than the thread. */
+const longCommand = page.get("thread") === "long-command";
 /** The pages whose matter lists one idle thread, which the room opens and subscribes to. */
-const idleThread = commanding || hindiThread || shapingThread;
+const idleThread = commanding || hindiThread || shapingThread || longCommand;
 
 /** The agent's commands on ?thread=commands, in the order the composer's `/` menu lists them: the first six are the
  * spike's fixture (spike/src/mentions/fixtures.json), the last two match a name typed in Devanagari or Tamil. */
@@ -182,41 +187,46 @@ function stream(): HostEvent[] {
             header("idle"),
           ),
         ]
-      : shapingThread
-        ? [
-            reset(
-              [userMessage(2, 1, SHAPING_QUESTION), agentText(3, 100, SHAPING_ANSWER)],
-              header("idle"),
-            ),
-          ]
-        : commanding
+      : longCommand
+        ? [reset(longCommandEntries(), header("idle"))]
+        : shapingThread
           ? [
               reset(
-                [
-                  userMessage(2, 1, "When did the bank reply?"),
-                  agentText(3, 100, "The bank replied on 12 March 2001."),
-                ],
-                header("idle", COMMANDS),
+                [userMessage(2, 1, SHAPING_QUESTION), agentText(3, 100, SHAPING_ANSWER)],
+                header("idle"),
               ),
             ]
-          : asking
+          : commanding
             ? [
-                reset([userMessage(2, 1, "Tighten the notice to the bank.")], header("needs_you")),
-                ...turn.slice(0, -1),
-                ...PERMISSIONS,
+                reset(
+                  [
+                    userMessage(2, 1, "When did the bank reply?"),
+                    agentText(3, 100, "The bank replied on 12 March 2001."),
+                  ],
+                  header("idle", COMMANDS),
+                ),
               ]
-            : questioning
+            : asking
               ? [
                   reset(
-                    [
-                      userMessage(2, 1, "Draft the petition to quash."),
-                      askEntry(3, uuid(1, 9), TWO_QUESTIONS),
-                      askEntry(4, uuid(2, 9), ONE_QUESTION),
-                    ],
+                    [userMessage(2, 1, "Tighten the notice to the bank.")],
                     header("needs_you"),
                   ),
+                  ...turn.slice(0, -1),
+                  ...PERMISSIONS,
                 ]
-              : [reset([userMessage(2, 1, "When did the bank reply?")]), ...turn];
+              : questioning
+                ? [
+                    reset(
+                      [
+                        userMessage(2, 1, "Draft the petition to quash."),
+                        askEntry(3, uuid(1, 9), TWO_QUESTIONS),
+                        askEntry(4, uuid(2, 9), ONE_QUESTION),
+                      ],
+                      header("needs_you"),
+                    ),
+                  ]
+                : [reset([userMessage(2, 1, "When did the bank reply?")]), ...turn];
   const events: HostEvent[] = [];
   for (let at = 0; at < bodies.length; at += 25) {
     events.push(event(batch(at + 1, bodies.slice(at, at + 25))));
