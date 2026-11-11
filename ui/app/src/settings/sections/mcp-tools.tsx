@@ -35,7 +35,7 @@ import {
   toolsCommandsOf,
   type ImportSource,
   type McpServerView,
-  type McpToolsView,
+  type ToolsView,
   type ToolsAnswer,
   type ToolsCommands,
 } from "./tools-model.ts";
@@ -50,18 +50,11 @@ const detailOf = (server: McpServerView): string =>
     : localDetail(server.command ?? "", server.args);
 
 /** The view the host sends (`mcp_tools_changed`): null before the catch-up, then each one as it comes. */
-function useToolsView(commands: ToolsCommands): McpToolsView | null {
-  const [over] = useState(() => {
-    let view: McpToolsView | null = null;
-    return {
-      subscribe: (wake: () => void) =>
-        commands.subscribe((next) => {
-          view = next;
-          wake();
-        }),
-      view: () => view,
-    };
-  });
+function useToolsView(commands: ToolsCommands): ToolsView | null {
+  const [over] = useState(() => ({
+    subscribe: (wake: () => void) => commands.subscribe(() => wake()),
+    view: () => commands.current(),
+  }));
   return useSyncExternalStore(over.subscribe, over.view, over.view);
 }
 

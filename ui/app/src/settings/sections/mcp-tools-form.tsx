@@ -301,21 +301,27 @@ export function ToolForm({
       setRefusal(refusalOf(lang, early));
       return;
     }
-    const draft: McpServerEdit = {
-      name: trimmed,
-      kind,
-      ...(kind === "local" ? { command: command.trim() } : { url: url.trim() }),
-      args:
-        kind === "local"
-          ? args
+    // each kind's own fields only: a field of the other kind is command.invalid
+    const draft: McpServerEdit =
+      kind === "local"
+        ? {
+            name: trimmed,
+            kind,
+            command: command.trim(),
+            args: args
               .split("\n")
               .map((a) => a.trim())
-              .filter((a) => a !== "")
-          : [],
-      env: kind === "local" ? edits(env, "env", data) : [],
-      headers: kind === "remote" ? edits(headers, "header", data) : [],
-      enabled: editing?.enabled ?? true,
-    };
+              .filter((a) => a !== ""),
+            env: edits(env, "env", data),
+            enabled: editing?.enabled ?? true,
+          }
+        : {
+            name: trimmed,
+            kind,
+            url: url.trim(),
+            headers: edits(headers, "header", data),
+            enabled: editing?.enabled ?? true,
+          };
     setSending(true);
     setRefusal(null);
     void save(editing?.name ?? null, draft).then(

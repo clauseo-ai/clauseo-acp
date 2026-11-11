@@ -14,7 +14,7 @@ import {
   type McpSecretEdit,
   type McpServerEdit,
   type McpServerView,
-  type McpToolsView,
+  type ToolsView,
   type Skipped,
   type ToolsAnswer,
   type ToolsCommands,
@@ -29,7 +29,7 @@ const FOUND = ["npx", "uvx", "bunx", "node", "python3", "deno", "docker", "pnpm"
 export type FakeImports = Partial<Record<ImportSource, { add: McpServerView[]; skip: Skipped[] }>>;
 
 /** A view as a fixture writes it: the sources to import come from the fake's imports. */
-export type FakeView = Omit<McpToolsView, "importable">;
+export type FakeView = Omit<ToolsView, "importable">;
 
 /** One save as the fake had it, its values hidden. */
 export type FakeSave = { previousName: string | null; server: McpServerEdit };
@@ -37,7 +37,7 @@ export type FakeSave = { previousName: string | null; server: McpServerEdit };
 const byName = (a: McpServerView, b: McpServerView) =>
   a.name < b.name ? -1 : a.name > b.name ? 1 : 0;
 
-const hidden = (edits: McpSecretEdit[]): McpSecretEdit[] =>
+const hidden = (edits: McpSecretEdit[] = []): McpSecretEdit[] =>
   edits.map((e) => ("set" in e.value ? { ...e, value: { set: "(set)" } } : e));
 
 export class FakeTools implements ToolsCommands {
@@ -51,7 +51,7 @@ export class FakeTools implements ToolsCommands {
   refuseNext: McpErrorCode | null = null;
   readonly previewRemote: boolean;
   private readonly imports: FakeImports;
-  private readonly listeners = new Set<(view: McpToolsView) => void>();
+  private readonly listeners = new Set<(view: ToolsView) => void>();
   /** The values saved per server and secret name. Never shown. */
   private readonly values = new Map<string, string>();
 
@@ -67,7 +67,15 @@ export class FakeTools implements ToolsCommands {
     this.imports = { ...imports };
   }
 
-  private current(): McpToolsView {
+  /** The view as last sent: the same object until a change, as a store's snapshot must be. */
+  private shown: ToolsView | null = null;
+
+  current(): ToolsView {
+    this.shown ??= this.made();
+    return this.shown;
+  }
+
+  private made(): ToolsView {
     const importable = (
       Object.entries(this.imports) as [ImportSource, { add: McpServerView[]; skip: Skipped[] }][]
     )
@@ -78,15 +86,13 @@ export class FakeTools implements ToolsCommands {
 
   /** Sends the view to every subscriber, as the host's `mcp_tools_changed` after a change. */
   private changed(): void {
+    this.shown = null;
     for (const listener of this.listeners) listener(this.current());
   }
 
-  subscribe(listener: (view: McpToolsView) => void): () => void {
+  subscribe(listener: (view: ToolsView) => void): () => void {
     this.listeners.add(listener);
-    // the catch-up, after the subscriber is in place
-    queueMicrotask(() => {
-      if (this.listeners.has(listener)) listener(this.current());
-    });
+    listener(this.current());
     return () => void this.listeners.delete(listener);
   }
 
@@ -121,7 +127,11 @@ export class FakeTools implements ToolsCommands {
   save(previousName: string | null, server: McpServerEdit): Promise<ToolsAnswer> {
     this.saves.push({
       previousName,
-      server: { ...server, env: hidden(server.env), headers: hidden(server.headers) },
+      server: {
+        ...server,
+        ...(server.env === undefined ? {} : { env: hidden(server.env) }),
+        ...(server.headers === undefined ? {} : { headers: hidden(server.headers) }),
+      },
     });
     const answer = this.check(previousName, server);
     if (answer === null) this.changed();
@@ -145,8 +155,10 @@ export class FakeTools implements ToolsCommands {
       return "mcp.command_not_found";
     if (server.kind === "remote" && !/^https?:\/\/[^\s/]+/.test(server.url ?? ""))
       return "mcp.url_invalid";
-    if (server.env.some((e) => !ENV_NAME.test(e.name))) return "mcp.env_name_invalid";
-    if (server.headers.some((h) => !HEADER_NAME.test(h.name))) return "mcp.header_name_invalid";
+    const env = server.env ?? [];
+    const headers = server.headers ?? [];
+    if (env.some((e) => !ENV_NAME.test(e.name))) return "mcp.env_name_invalid";
+    if (headers.some((h) => !HEADER_NAME.test(h.name))) return "mcp.header_name_invalid";
     const before = this.view.servers.find((s) => s.name === previousName);
     // the values this save leaves: each set one, and each kept one from before; the rest are deleted
     const kept = new Map<string, string>();
@@ -161,9 +173,9 @@ export class FakeTools implements ToolsCommands {
       name,
       kind: server.kind,
       ...(server.kind === "local" ? { command } : { url: server.url ?? "" }),
-      args: server.kind === "local" ? server.args : [],
-      env: secrets(server.env, "env"),
-      headers: server.kind === "remote" ? secrets(server.headers, "header") : [],
+      args: server.kind === "local" ? (server.args ?? []) : [],
+      env: server.kind === "local" ? secrets(env, "env") : [],
+      headers: server.kind === "remote" ? secrets(headers, "header") : [],
       enabled: before?.enabled ?? server.enabled,
     };
     for (const key of this.values.keys())

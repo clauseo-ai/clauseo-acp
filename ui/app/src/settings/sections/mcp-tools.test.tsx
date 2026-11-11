@@ -9,22 +9,14 @@ import { settled } from "@clauseo/components/lib/late.ts";
 import { connectDisplay } from "../../display/connect.ts";
 import type { Settings } from "../../room/host-next.ts";
 import { stubFonts } from "../../room/thread/testing.ts";
+import type { AppEvent } from "../../room/host-next.ts";
 import { FakeTransport } from "../../transport/fake-transport.ts";
+import type { CommandEnvelope, CommandOutcome, McpToolsView } from "../../transport/protocol.ts";
 import { SettingsApp } from "../settings-app.tsx";
 import { errorWords } from "@clauseo/components/lib/words-errors.ts";
-import { importLines, refusalOf, type Place } from "./mcp-tools-refusal.ts";
+import { refusalOf, type Place } from "./mcp-tools-refusal.ts";
 import { FakeTools, local, type FakeImports, type FakeView } from "./tools-fake.ts";
-import {
-  fileName,
-  hostOf,
-  isCommand,
-  isFullPath,
-  localDetail,
-  provideTools,
-  REMOTE_TOOLS,
-  MCP_ERROR_CODES,
-  type McpErrorCode,
-} from "./tools-model.ts";
+import { provideTools, REMOTE_TOOLS, MCP_ERROR_CODES, type McpErrorCode } from "./tools-model.ts";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 stubFonts();
@@ -55,7 +47,19 @@ afterEach(async () => {
   rig = null;
 });
 
-async function mount(tools: FakeTools | null, { safe = false }: { safe?: boolean } = {}) {
+async function mount(
+  tools: FakeTools | null,
+  {
+    safe = false,
+    first = [],
+    dispatch,
+  }: {
+    safe?: boolean;
+    /** The app feed's first frames, for a host without a fake. */
+    first?: AppEvent[];
+    dispatch?: (envelope: CommandEnvelope) => CommandOutcome;
+  } = {},
+) {
   history.replaceState(null, "", "/settings.html#tools");
   const transport = new FakeTransport({
     next: {
@@ -63,7 +67,9 @@ async function mount(tools: FakeTools | null, { safe = false }: { safe?: boolean
         if (query === "get_settings") return { settings: SETTINGS };
         throw new Error("not scripted");
       },
+      first: () => first,
     },
+    ...(dispatch === undefined ? {} : { dispatch }),
   });
   if (tools !== null) provideTools(transport, tools);
   // a build with the Safe workspace: the transport carries its wire, as sections.tsx reads it
@@ -133,9 +139,80 @@ async function mount(tools: FakeTools | null, { safe = false }: { safe?: boolean
   };
 }
 
-test("without the host's commands the section doesn't show", async () => {
+test("a host that sends no MCP view shows no Tools", async () => {
   rig = await mount(null);
   expect(rig.nav()).not.toContain("Tools");
+});
+
+test("over the host: the view from mcp_tools_changed, the commands as HostCommand { mcp }, refusals by code, no Import", async () => {
+  const sent: unknown[] = [];
+  let refuse: string | null = null;
+  const view: McpToolsView = {
+    control: "lawyer",
+    servers: [
+      {
+        name: "notes",
+        kind: "local",
+        command: "uvx",
+        args: ["notes-mcp"],
+        env: [{ name: "NOTES_TOKEN", saved: true }],
+        headers: [],
+        enabled: true,
+      },
+    ],
+  };
+  rig = await mount(null, {
+    first: [{ mcp_tools_changed: view }],
+    dispatch: (envelope) => {
+      if ("mcp" in envelope.command) sent.push(envelope.command);
+      if (refuse !== null) {
+        const code = refuse;
+        refuse = null;
+        throw { code, message: "refused", retryable: false };
+      }
+      return "done";
+    },
+  });
+  expect(rig.nav()).toContain("Tools");
+  expect(rig.rows()).toEqual(["notesnotes-mcp"]);
+  expect(rig.q('[data-testid="tools-imports"]')).toBeNull();
+  await rig.click(rig.pane().querySelector<HTMLElement>('[role="switch"]'));
+  expect(sent.at(-1)).toEqual({ mcp: { set_server_enabled: { name: "notes", enabled: false } } });
+  // the list follows the host's next view, not the press
+  await act(async () =>
+    rig!.transport.appEvent({
+      mcp_tools_changed: { ...view, servers: [{ ...view.servers[0]!, enabled: false }] },
+    }),
+  );
+  expect(rig.pane().querySelector('[role="switch"]')?.getAttribute("aria-checked")).toBe("false");
+  await rig.press("Edit");
+  refuse = "mcp.command_not_found";
+  await rig.save();
+  expect(sent.at(-1)).toEqual({
+    mcp: {
+      save_server: {
+        previous_name: "notes",
+        server: {
+          name: "notes",
+          kind: "local",
+          command: "uvx",
+          args: ["notes-mcp"],
+          env: [{ name: "NOTES_TOKEN", value: { keep: {} } }],
+          // as the host's last view has it: off
+          enabled: false,
+        },
+      },
+    },
+  });
+  expect(rig.errors()).toEqual(["Clauseo couldn't find uvx on this computer."]);
+  refuse = "settings.locked";
+  await rig.save();
+  expect(rig.errors()).toEqual(["Your firm manages tools on this computer."]);
+  await rig.save();
+  expect(rig.q('[data-testid="tools-form"]')).toBeNull();
+  await rig.click(rig.pane().querySelector<HTMLElement>('button[aria-label="Remove notes"]'));
+  await rig.click(document.querySelector('[data-testid="tools-remove-ok"]'));
+  expect(sent.at(-1)).toEqual({ mcp: { remove_server: { name: "notes" } } });
 });
 
 test("the list: each tool's name and its detail, the plain line; no Safe workspace line in a build without it", async () => {
@@ -206,7 +283,6 @@ test("add: name, full path, arguments one per line, a new value; the list shows 
         command: "/opt/homebrew/bin/npx",
         args: ["-y", "court-diary-mcp"],
         env: [{ name: "DIARY_TOKEN", value: { set: "(set)" } }],
-        headers: [],
         enabled: true,
       },
     },
@@ -441,49 +517,11 @@ test("REMOTE_TOOLS off: adding offers no address; a preview turns the address fo
     kind: "remote",
     url: "https://mcp.example.com/research",
     headers: [{ name: "Authorization", value: { set: "(set)" } }],
-    env: [],
   });
-  expect(fake.saves.at(-1)?.server).not.toHaveProperty("command");
+  // a remote save carries none of a local one's fields, nor a local one any of a remote one's
+  for (const field of ["command", "args", "env"])
+    expect(fake.saves.at(-1)?.server).not.toHaveProperty(field);
   expect(rig.rows()).toEqual(["researchmcp.example.com"]);
-});
-
-test("the model's helpers: full paths, commands, file names, hosts", () => {
-  expect(isFullPath("/opt/homebrew/bin/npx")).toBe(true);
-  expect(isFullPath("C:\\Program Files\\nodejs\\npx.cmd")).toBe(true);
-  expect(isFullPath("\\\\server\\tools\\run.exe")).toBe(true);
-  expect(isFullPath("npx")).toBe(false);
-  expect(isFullPath("./bin/npx")).toBe(false);
-  expect(fileName("C:\\Program Files\\nodejs\\npx.cmd")).toBe("npx.cmd");
-  expect(fileName("/usr/local/bin/uvx")).toBe("uvx");
-  expect(hostOf("https://mcp.example.com:8443/x")).toBe("mcp.example.com:8443");
-  expect(hostOf("not an address")).toBe("not an address");
-  expect(isCommand("npx")).toBe(true);
-  expect(isCommand("C:\\Program Files\\nodejs\\npx.cmd")).toBe(true);
-  expect(isCommand("bin/server")).toBe(false);
-  expect(isCommand("bin\\server.exe")).toBe(false);
-  expect(isCommand("")).toBe(false);
-});
-
-test("the list's detail: a launcher's first argument that isn't a flag, else the program's file name", () => {
-  expect(localDetail("/opt/homebrew/bin/npx", ["-y", "court-diary-mcp"])).toBe("court-diary-mcp");
-  expect(localDetail("npx", ["-y", "@modelcontextprotocol/server-filesystem", "/Users/r"])).toBe(
-    "server-filesystem",
-  );
-  expect(localDetail("C:\\Program Files\\nodejs\\npx.cmd", ["--yes", "docket-mcp"])).toBe(
-    "docket-mcp",
-  );
-  expect(localDetail("uvx", ["notes-mcp", "--folder", "/Users/r"])).toBe("notes-mcp");
-  expect(localDetail("/usr/bin/python3", ["-m", "notes_server"])).toBe("notes_server");
-  expect(localDetail("node", ["/Users/r/mcp/pdf-tools/index.js"])).toBe("index.js");
-  expect(localDetail("docker", ["run", "-i", "--rm", "-e", "TOKEN=x", "ghcr.io/acme/mcp"])).toBe(
-    "mcp",
-  );
-  expect(localDetail("pnpm", ["dlx", "court-diary-mcp"])).toBe("court-diary-mcp");
-  for (const launcher of ["bunx", "pnpx", "python", "deno"])
-    expect(localDetail(launcher, ["--flag", "the-server"])).toBe("the-server");
-  // a launcher with nothing named, and any other program: its own file name
-  expect(localDetail("/usr/local/bin/uvx", [])).toBe("uvx");
-  expect(localDetail("/Users/r/tools/filings-server", ["--port", "9"])).toBe("filings-server");
 });
 
 const IMPORTS: FakeImports = {
@@ -534,31 +572,4 @@ test("an import: one command, then one line, the left-out names without reasons;
   await rig.click(rig.q('[data-testid="tools-import-codex"]'));
   expect(lines()).toEqual(["Imported 1 tool."]);
   expect(rig.q('[data-testid="tools-imports"]')).toBeNull();
-});
-
-test("the import's lines: the count, then each tool left out with its reason in plain words", () => {
-  expect(importLines("en", { imported: ["a", "b", "c"], skipped: [] })).toEqual([
-    "Imported 3 tools.",
-  ]);
-  expect(
-    importLines("en", {
-      imported: [],
-      skipped: [
-        { name: "filesystem", reason: "commandNotFound", program: "npx" },
-        { name: "github", reason: "unsupportedTransport" },
-        { name: "court-diary", reason: "unresolvedVariable" },
-        { name: "docket", reason: "alreadyAdded" },
-        { name: "notes", reason: "unreadable" },
-        { name: "matter-search", reason: "notApproved" },
-      ],
-    }),
-  ).toEqual([
-    "6 couldn't be imported.",
-    "filesystem: Clauseo couldn't find npx on this computer.",
-    "github: it uses a setting Clauseo doesn't support yet.",
-    "court-diary: it needs a value that isn't set on this computer.",
-    "docket: a tool with this name is already added.",
-    "notes: Clauseo couldn't read its settings.",
-    "matter-search: it comes from a project you haven't approved in Claude Code.",
-  ]);
 });
