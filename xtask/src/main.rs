@@ -37,7 +37,9 @@
 //!   the format, lint, typecheck and build steps only, and CI never passes. A fourth, approved
 //!   by Rohan 2026-11-09: `check --quick --no-dependents`, which `.github/scripts/pre-push.sh`
 //!   always passes so that a push lints the changed packages and not their dependents, and CI
-//!   never passes.
+//!   never passes. A fifth, approved by the orchestrator 2026-11-11: the local merge train's fast
+//!   lane runs `check --quick` on Linux for a batch whose diff is ui-only (no path a Rust test
+//!   reads); every other CI run is a full `check`.
 //! - `python-runtime` checks, bumps and builds Clauseo's pinned Python runtime from
 //!   `python-runtime/lock.toml` (`python_runtime.rs` says how). It is not a check of
 //!   `cargo xtask check`: its offline lock check runs there as the xtask test `real_lock_passes`.
