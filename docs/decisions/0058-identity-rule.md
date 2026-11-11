@@ -49,8 +49,10 @@ and about 19 in Codex's whole text with a long data folder (about 1,481 of 1,500
   frontmatter, so the profile leaves it out, and stage C saw the agent run `stetdoc skills` blind
   and fail), and gains: "Tracked changes are only for
   changing a paper that already exists. Make a new document clean: write it as a Markdown file in
-  `{work_folder}`, run `pandoc "<file>.md" -o "<Name>.docx"` into the matter (never pipe into
-  pandoc; headings and numbered paragraphs become Word styles), then delete the Markdown file."
+  `{work_folder}`, then run `pandoc "{work_folder}/<file>.md" -o "<Name>.docx"` into the matter.
+  Never pipe into pandoc. Headings and numbered paragraphs in the Markdown become Word styles.
+  Then delete the Markdown file." The command names the folder because the agent's shell starts
+  in the matter (stage E's review).
   The Word guidance stays in one place, so the rule goes only where stetdoc was found; pandoc
   itself comes with the Python runtime, which the profile does not see. The saved-file rule then
   names the new file.

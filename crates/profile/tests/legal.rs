@@ -347,10 +347,10 @@ fn each_agent_makes_a_new_document_clean_with_pandoc() {
         );
         assert!(text.contains("Make a new document clean"), "{text}");
         assert!(
-            text.contains("`pandoc \"<file>.md\" -o \"<Name>.docx\"`"),
+            text.contains("`pandoc \"{work_folder}/<file>.md\" -o \"<Name>.docx\"`"),
             "{text}"
         );
-        assert!(text.contains("never pipe into pandoc"), "{text}");
+        assert!(text.contains("Never pipe into pandoc."), "{text}");
         assert!(
             text.contains("Name a file you saved or changed plainly"),
             "{text}"
