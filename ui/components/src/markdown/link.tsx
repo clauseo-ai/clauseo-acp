@@ -84,9 +84,14 @@ function ignorable(c: string): boolean {
   const code = c.codePointAt(0) ?? 0;
   return IGNORABLE.some(([from, to]) => code >= from && code <= to);
 }
-/** What reads as a full stop, read as `.` after NFKC (open/ask.rs's `reads_as_dot`). */
-const DOTS =
-  /[\u3002\uFF0E\uFF61\uA4F8\u0701\u0702\u00B7\u0387\u2E33\u2219\u22C5\u06D4\u0589\u2024\uFE52\u30FB\uFF65]/g;
+/** What reads as a full stop, read as `.` after NFKC (open/ask.rs's `reads_as_dot`), by code point. */
+const DOTS = new Set(
+  [
+    0x3002, 0x0660, 0x06f0, 0xa60e, 0x10a50, 0x1d16d, 0x1803, 0x1809, 0xff0e, 0xff61, 0xa4f8,
+    0x0701, 0x0702, 0x00b7, 0x0387, 0x2e33, 0x2219, 0x22c5, 0x06d4, 0x0589, 0x2024, 0xfe52, 0x30fb,
+    0xff65,
+  ].map((code) => String.fromCodePoint(code)),
+);
 /** An image in a link (to-react.ts's textOf), interlinear annotation marks, or any ignorable character. */
 const HIDING = /[\uFFFC\uFFF9-\uFFFB]/u;
 /** Characters outside ASCII that may touch a letter or digit, not a `.` (open/ask.rs's `TYPOGRAPHIC`). */
@@ -105,31 +110,60 @@ const TYPOGRAPHIC = new Set([
 /** A host-like token anywhere in link text: labels of letters, digits and `-`, a letter-only last label. */
 const HOST_TOKEN = /(?<![\p{L}\p{N}.-])((?:[\p{L}\p{N}-]+\.)+\p{L}{2,})(?![\p{L}\p{N}-])/gu;
 
+/** A letter or digit of any script (Rust's `char::is_alphanumeric`). */
+const ALNUM = /^[\p{Alphabetic}\p{N}]$/u;
+
 /**
- * Whether link text could hide a host from shownHosts (open/ask.rs's `could_hide_a_host`, the same rule): an
- * ignorable character, an image, or in a word a character outside ASCII next to an ASCII letter, digit or `.`
- * (a TYPOGRAPHIC one may touch a letter or digit).
+ * Text as the host finder reads it (open/ask.rs's `fold`): each space outside ASCII as U+FFFD, NFKC, ignorable
+ * characters dropped, what reads as a full stop as `.`, the en and em dash as `-`.
  */
-function couldHideAHost(text: string): boolean {
-  if (HIDING.test(text) || Array.from(text).some(ignorable)) return true;
+function fold(text: string): string {
+  const spaced = Array.from(text)
+    .map((c) => (c.charCodeAt(0) > 0x7f && /^\s$/u.test(c) ? "\uFFFD" : c))
+    .join("");
+  return Array.from(spaced.normalize("NFKC"))
+    .filter((c) => !ignorable(c))
+    .map((c) => (c === "\u2013" || c === "\u2014" ? "-" : DOTS.has(c) ? "." : c))
+    .join("");
+}
+
+/** A character outside ASCII next to an ASCII letter, digit or `.` (a TYPOGRAPHIC one may touch a letter or digit). */
+function touchesAscii(word: string): boolean {
   const touches = (other: string, near: string) =>
     other.charCodeAt(0) > 0x7f &&
     (near === "." || (/^[A-Za-z0-9]$/.test(near) && !TYPOGRAPHIC.has(other)));
+  const chars = Array.from(word);
+  return chars.some((a, k) => {
+    const b = chars[k + 1];
+    return b !== undefined && (touches(a, b) || touches(b, a));
+  });
+}
+
+/** A `.` between two letters or digits of any script. */
+function dottedRun(text: string): boolean {
+  const chars = Array.from(text);
+  return chars.some(
+    (c, k) => c === "." && ALNUM.test(chars[k - 1] ?? "") && ALNUM.test(chars[k + 1] ?? ""),
+  );
+}
+
+/**
+ * Whether link text could hide a host from shownHosts (open/ask.rs's `could_hide_a_host`, the same rule): an
+ * ignorable character or an image; or in a word holding a character outside ASCII, such a character next to an
+ * ASCII letter, digit or `.`, as written or folded, or once folded a `.` between two letters or digits.
+ */
+function couldHideAHost(text: string): boolean {
+  if (HIDING.test(text) || Array.from(text).some(ignorable)) return true;
   return text.split(/[\t\n\f\r ]/).some((word) => {
-    const chars = Array.from(word);
-    return chars.some((a, k) => {
-      const b = chars[k + 1];
-      return b !== undefined && (touches(a, b) || touches(b, a));
-    });
+    if (!Array.from(word).some((c) => c.charCodeAt(0) > 0x7f)) return false;
+    const folded = fold(word);
+    return touchesAscii(word) || touchesAscii(folded) || dottedRun(folded);
   });
 }
 
 /** Every host link text shows: width-folded, dots unified, ignorable characters dropped. */
 function shownHosts(text: string): string[] {
-  const plain = Array.from(text.normalize("NFKC"))
-    .filter((c) => !ignorable(c))
-    .join("")
-    .replace(DOTS, ".");
+  const plain = fold(text);
   const hosts: string[] = [];
   for (const [, token] of plain.matchAll(HOST_TOKEN)) {
     try {

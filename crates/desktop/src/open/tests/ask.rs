@@ -155,10 +155,10 @@ fn text_naming_another_site_asks() {
         confirms("https://evil.com/", Some("exam\u{200B}ple.com")),
         1
     );
-    // Full-width text that names the real site still matches it.
+    // Full-width text asks even when it folds to the real site: only ASCII words are matched.
     assert_eq!(
         confirms("https://example.com/", Some("ｅｘａｍｐｌｅ。ｃｏｍ")),
-        0
+        1
     );
     // Text too long to read asks.
     let long = "a ".repeat(ask_limit());
@@ -405,7 +405,8 @@ fn one_hidden_character_cannot_hide_the_site_named() {
     }
 }
 
-/// A look-alike dot in text with no ASCII beside it is read as `.` before hosts are found.
+/// A look-alike dot in text with no ASCII beside it is read as `.` before hosts are found, and
+/// a word outside ASCII that folds to a host asks whatever the link.
 #[test]
 fn a_look_alike_dot_reads_as_a_dot() {
     let hosts = crate::open::ask::shown_hosts("ｂａｎｋ\u{A4F8}ｃｏｍ");
@@ -416,7 +417,7 @@ fn a_look_alike_dot_reads_as_a_dot() {
     );
     assert_eq!(
         confirms("https://bank.com/", Some("ｂａｎｋ\u{A4F8}ｃｏｍ")),
-        0
+        1
     );
 }
 
@@ -474,4 +475,46 @@ fn always_ask_adds_a_confirm() {
     }
     assert_eq!(confirm.shown().len(), 2);
     assert_eq!(opener.opened().len(), 2);
+}
+
+/// Iris's second round on #1007: words with no ASCII letter as written, which NFKC folds into
+/// one, around a dot look-alike or a space outside ASCII. Linking to `evil.io`, each asks.
+#[test]
+fn a_folded_word_cannot_hide_the_site_named() {
+    let mut pairs: Vec<String> = [
+        '\u{1803}',
+        '\u{1809}',
+        '\u{0660}',
+        '\u{06F0}',
+        '\u{A60E}',
+        '\u{1D16D}',
+        '\u{10A50}',
+    ]
+    .iter()
+    .map(|dot| format!("ｂａｎｋ{dot}ｃｏｍ"))
+    .collect();
+    for space in ['\u{200A}', '\u{2009}', '\u{00A0}', '\u{0BCD}'] {
+        pairs.push(format!("ｂａｎｋ{space}．ｃｏｍ"));
+    }
+    pairs.push("𝐛𝐚𝐧𝐤᠃𝐜𝐨𝐦".to_owned());
+    pairs.push("аррӏе᠃сом".to_owned());
+    pairs.push("१२.०३.२०२४".to_owned());
+    for shown in &pairs {
+        assert_eq!(confirms("https://evil.io/", Some(shown)), 1, "{shown:?}");
+    }
+    // Words outside ASCII with no dot between letters still open.
+    for shown in ["निर्णय देखें", "आदेश।", "ｔｈｅ ｏｒｄｅｒ"]
+    {
+        assert_eq!(confirms("https://example.com/", Some(shown)), 0, "{shown}");
+    }
+}
+
+/// The en and em dash read as `-` when hosts are found, so they cannot split one.
+#[test]
+fn a_dash_does_not_split_a_host() {
+    assert_eq!(
+        crate::open::ask::shown_hosts("bank–of–x.com and a—b.org"),
+        ["bank-of-x.com", "a-b.org"]
+    );
+    assert_eq!(confirms("https://x.com/", Some("bank–of–x.com")), 1);
 }

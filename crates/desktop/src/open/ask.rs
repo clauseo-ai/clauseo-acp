@@ -92,8 +92,11 @@ const TYPOGRAPHIC: [char; 10] = [
 /// what was found (link.tsx's `couldHideAHost` is the same rule). True when it holds:
 /// - a default-ignorable code point (`ignorable`), or an interlinear annotation mark;
 /// - an image ([`IMAGE`]);
-/// - in a word (split on ASCII whitespace), a character outside ASCII next to an ASCII letter,
-///   digit or `.`, unless it is [`TYPOGRAPHIC`] and its neighbour is not a `.`. That catches
+/// - in a word (split on ASCII whitespace) holding a character outside ASCII: such a character
+///   next to an ASCII letter, digit or `.`, as written or once folded (`fold`), unless it is
+///   [`TYPOGRAPHIC`] and its neighbour is not a `.`; or, folded, a `.` between two letters or
+///   digits of any script (`ｂａｎｋ．ｃｏｍ`, `𝐛𝐚𝐧𝐤᠃𝐜𝐨𝐦`, `аррӏе᠃сом`). Only all-ASCII words
+///   go on to host matching. That catches
 ///   every look-alike dot (`bank·com`, `bankꓸcom`), space (`bank\u{200A}.com`) and mark
 ///   (`bank\u{FE0F}.com`) without a list of them, at the cost of a confirm for `Résumé`.
 pub(crate) fn could_hide_a_host(text: &str) -> bool {
@@ -104,17 +107,58 @@ pub(crate) fn could_hide_a_host(text: &str) -> bool {
         return true;
     }
     text.split(|c: char| c.is_ascii_whitespace()).any(|word| {
-        let chars: Vec<char> = word.chars().collect();
-        chars.windows(2).any(|pair| {
-            let (a, b) = (pair[0], pair[1]);
-            let touches = |other: char, near: char| {
-                !other.is_ascii()
-                    && (near == '.'
-                        || (near.is_ascii_alphanumeric() && !TYPOGRAPHIC.contains(&other)))
-            };
-            touches(a, b) || touches(b, a)
-        })
+        if word.is_ascii() {
+            return false;
+        }
+        let folded = fold(word);
+        touches_ascii(word) || touches_ascii(&folded) || dotted_run(&folded)
     })
+}
+
+/// Whether `word` has a character outside ASCII next to an ASCII letter, digit or `.`, other
+/// than a [`TYPOGRAPHIC`] one next to a letter or digit.
+fn touches_ascii(word: &str) -> bool {
+    let chars: Vec<char> = word.chars().collect();
+    chars.windows(2).any(|pair| {
+        let (a, b) = (pair[0], pair[1]);
+        let touches = |other: char, near: char| {
+            !other.is_ascii()
+                && (near == '.' || (near.is_ascii_alphanumeric() && !TYPOGRAPHIC.contains(&other)))
+        };
+        touches(a, b) || touches(b, a)
+    })
+}
+
+/// Whether `text` has a `.` between two letters or digits, of any script.
+fn dotted_run(text: &str) -> bool {
+    let chars: Vec<char> = text.chars().collect();
+    chars
+        .windows(3)
+        .any(|w| w[1] == '.' && w[0].is_alphanumeric() && w[2].is_alphanumeric())
+}
+
+/// `text` as the host finder reads it: each space outside ASCII as U+FFFD (so it cannot fold into
+/// a plain space and split a word), width- and style-folded (NFKC, so `ｂａｎｋ` and `𝐛𝐚𝐧𝐤` read
+/// `bank`), default-ignorable characters dropped, what reads as a full stop as `.` and the en
+/// and em dash as `-`.
+fn fold(text: &str) -> String {
+    text.chars()
+        .map(|c| {
+            if !c.is_ascii() && c.is_whitespace() {
+                '\u{FFFD}'
+            } else {
+                c
+            }
+        })
+        .collect::<String>()
+        .nfkc()
+        .filter(|c| !ignorable(*c))
+        .map(|c| match c {
+            '\u{2013}' | '\u{2014}' => '-',
+            c if reads_as_dot(c) => '.',
+            c => c,
+        })
+        .collect()
 }
 
 /// Unicode's default-ignorable code points (`DerivedCoreProperties.txt`): characters that show
@@ -136,6 +180,13 @@ fn reads_as_dot(c: char) -> bool {
     matches!(
         c,
         '\u{3002}'
+            | '\u{0660}'
+            | '\u{06F0}'
+            | '\u{A60E}'
+            | '\u{10A50}'
+            | '\u{1D16D}'
+            | '\u{1803}'
+            | '\u{1809}'
             | '\u{FF0E}'
             | '\u{FF61}'
             | '\u{A4F8}'
@@ -157,18 +208,11 @@ fn reads_as_dot(c: char) -> bool {
 
 /// Every host `text` names, in the ASCII form the `url` crate writes (so a look-alike in another
 /// script differs from the name it imitates), as link.tsx's `shownHosts` finds them: the text
-/// width-folded (NFKC), what reads as a full stop read as `.` (`reads_as_dot`), default-ignorable
-/// characters dropped; then
-/// each run of letters, digits, `-` and `.` that is labels of letters, digits and `-` with a
-/// letter-only last label of two or more, such as `example.com`, `www.example.com` or the host of
-/// `https://supremecourt.gov.in/x`.
+/// folded (`fold`), then each run of letters, digits, `-` and `.` that is labels of letters,
+/// digits and `-` with a letter-only last label of two or more, such as `example.com`,
+/// `www.example.com` or the host of `https://supremecourt.gov.in/x`.
 pub(crate) fn shown_hosts(text: &str) -> Vec<String> {
-    let plain: String = text
-        .nfkc()
-        .filter(|c| !ignorable(*c))
-        .map(|c| if reads_as_dot(c) { '.' } else { c })
-        .collect();
-    plain
+    fold(text)
         .split(|c: char| !(c.is_alphanumeric() || c == '-' || c == '.'))
         .filter_map(|run| {
             let run = run.trim_end_matches('.');
