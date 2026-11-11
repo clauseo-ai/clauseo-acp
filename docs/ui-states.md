@@ -366,7 +366,7 @@ retried as they are; the others need the lawyer or a fix first. Meanings are in 
 | Tracked changes: no stetdoc, a file that is not a Word document, or a list that went stale | `ErrorCode::WordStetdocMissing`, `ErrorCode::WordNotDocx`, `ErrorCode::WordRevisionsStale` | no |
 | Tracked changes: stetdoc failed or timed out | `ErrorCode::WordEditFailed` | yes |
 | Offline mid-answer (D-050): the agent couldn't reach its service, or the window said offline (`HostCommand::SetNetwork`) and the agent then sent nothing for 30 s; the answer so far stays, the stop line says so and offers Try again | `ErrorCode::AgentOffline` | yes |
-| A question whose text is over 6 MiB (`MAX_PROMPT_TEXT_BYTES`, counted as JSON-escaped bytes): the composer checks it when Ask is pressed and sends nothing; a command that reaches the host anyway gets the code too; the working line says so and the draft is kept | `ErrorCode::PromptTooLong` | no |
+| A question whose text is over 6 MiB (`MAX_PROMPT_TEXT_BYTES`, counted as JSON-escaped bytes), or, to a ChatGPT conversation, over Codex's own 1,048,576 characters (`codex_input.rs`, checked by the host only): the composer checks the 6 MiB cap when Ask is pressed and sends nothing; a command that reaches the host anyway gets the code too; the working line says so and the draft is kept | `ErrorCode::PromptTooLong` | no |
 | A code from a newer Clauseo | `ErrorCode::Unknown` | no |
 
 A failed turn shows its code from `turn_failed` on the step card (section 3).

@@ -67,6 +67,7 @@ fn edit_loaded(
     };
     let content = edited(&old, text)?;
     super::super::logout::refuse(actor, thread, &content)?;
+    super::super::codex_cap::refuse(actor, thread, &content)?;
     let built = build::queued_prompt_edited(turn, message, content.clone());
     let now = actor.now().wall;
     let mut out = Out::new(actor, thread, Some(ctx.id))?;

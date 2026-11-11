@@ -54,6 +54,35 @@ it was."). The research behind this record is the private `measurements/long-que
   `PromptEnd::too_long` or `Error::prompt_too_long`, so it never reaches the limits store nor the
   Codex limits read. A too-long `sessionFailure` on a `session_info_update` makes no event; the
   prompt's answer carries the same record.
+- **Codex's own cap, checked by the host.** Codex refuses a turn whose text items hold more than
+  `MAX_USER_INPUT_TEXT_CHARS` (`1 << 20`) Unicode scalar values together, and codex-acp 2.2.2
+  passes that refusal on only as "Codex encountered an internal error.". So the host refuses a
+  question to a Codex thread over that cap with `prompt.too_long`, the same words as Clauseo's own
+  cap, before anything is queued or sent: on `SendPrompt` (start now, queue, send now, steer) and
+  `EditQueuedPrompt`. A thread's agent is fixed when it is created, so a queued turn needs no
+  second check when it starts. Claude is not checked; its own refusal ends `TooLong`.
+  - How the limit was found: in codex-rs at `rust-v0.162.1` (the Codex codex-acp 2.2.2 bundles),
+    `protocol/src/user_input.rs:9-10` sets the cap; `app-server/src/request_processors/
+    turn_processor.rs:552-556` (`turn/start`) and `:515-516` (`turn/steer`) sum
+    `text_char_count` over the input items; `app-server-protocol/src/protocol/v2/turn.rs:532-541`
+    counts a text item's `chars().count()` and every other item 0. codex-acp 2.2.2's
+    `buildPromptItems` (`dist/index.js:35754`) passes a text block as it is and turns a
+    `resource_link` into the text `[@name](uri)` (`formatUriAsLink`, `:35808`), which counts too.
+  - Measured live with codex-acp 2.2.2 on Codex 0.162.1, no request leaving the machine (private
+    `measurements/long-question/recordings/codex-boundary/README.md`): 1,048,576 characters are
+    accepted and 1,048,577 refused; 1,048,576 emoji and 1,048,576 Devanagari letters are accepted;
+    a link adds exactly `5 + chars(name) + chars(uri)` (58 for `paper.txt` with a 44-character
+    URI), and with it the boundary holds to one character either way. Codex's own answer to
+    codex-acp then carries `input_error_code: "input_too_large"`, which codex-acp drops.
+  - Clauseo pins both: codex-acp 2.2.2, and `@openai/codex` 0.162.1 through an `overrides` entry
+    (codex-acp itself asks for `^0.160.1`), in `crates/limits/tests/live/package.json` and its
+    lock, which the agents install runs `npm ci` on.
+  - `crates/host/src/codex_input.rs` counts exactly that, with no margin; its constants name
+    codex-acp 2.2.2 and Codex 0.162.1, and a test fails when the pinned versions move. The limit
+    must be re-checked on every codex-acp bump. `codex-input-too-long` keeps the recorded refusal
+    as evidence of what the lawyer would otherwise get.
+  - The UI does not check Codex's cap: the composer would need the thread's agent and the file
+    links' text, which only the host has. A host refusal shows the same words, the draft kept.
 - **Error data.** The driver keeps only a few allowlisted fields of a JSON-RPC error's `data`
   (`errorKind`, `terminal_reason`, `codex_error_info`), each only when it is a short token of
   at most 64 ASCII letters, digits, `_`, `-` and `.`; the raw data, which may echo the
@@ -64,8 +93,9 @@ it was."). The research behind this record is the private `measurements/long-que
 - `claude-prompt-too-long` and `codex-input-too-long` are built from the live recordings, and
   the replay-line fixtures are the recorded lines; `codex-context-full` is still from source (not
   recorded, to avoid billing).
-- Codex's refusal of an over-long input reaches the lawyer as nothing: the turn ends `EndTurn`
-  with no answer and the queue moves on, until Clauseo checks Codex's limit itself.
+- Codex's refusal of an over-long input, should one still reach Codex (a Codex whose count
+  differs), reaches the lawyer as nothing: the turn ends `EndTurn` with no answer and the queue
+  moves on. The host's check keeps such questions back.
 - Claude's `context_exhausted` failure (its configured turn or output limit) has Codex's shape
   and reads as too long too.
 - A question near 6 MiB is about 1,500 view changes and several copies in memory while it is

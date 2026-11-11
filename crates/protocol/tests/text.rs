@@ -49,8 +49,9 @@ fn escaped_len_counts_json_escapes() {
     }
 }
 
-/// The case table the UI's `escapedLen` reads too (`support/escaped-len-cases.json`), so the
-/// composer's check before sending and the host's limit count alike.
+/// The case table the UI's `escapedLen` and code point count read too
+/// (`support/escaped-len-cases.json`), so the composer's checks before sending and the host's
+/// count alike.
 #[test]
 fn escaped_len_meets_the_shared_case_table() {
     let table: serde_json::Value =
@@ -67,7 +68,9 @@ fn escaped_len_meets_the_shared_case_table() {
             expected,
             "serde_json disagrees on {}",
             case["name"]
-        );
+        ); // Codex's count (the host's Codex check): Unicode scalar values.
+        let scalars = usize::try_from(case["scalar_values"].as_u64().unwrap()).unwrap();
+        assert_eq!(text.chars().count(), scalars, "{}", case["name"]);
     }
 }
 
