@@ -97,6 +97,7 @@ impl Current {
             first_words: None,
             first_update: None,
             withheld: super::withheld::Withheld::default(),
+            own: None,
         }
     }
 

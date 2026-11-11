@@ -27,6 +27,7 @@ mod launch_checks;
 mod logout;
 mod offline;
 mod out;
+mod own_turn;
 mod picks;
 mod profile_loads;
 mod prompt;
@@ -136,6 +137,8 @@ pub(crate) struct TurnState {
     stopped_for_sign_in: Option<TurnId>,
     /// Where the thread's name stands for the agent's titles (D-070), in this run.
     title: state::TitleWindow,
+    /// Agent output that came outside any turn, waiting for one (`own_turn.rs`).
+    own_held: own_turn::Held,
 }
 
 /// A turn whose `TurnEnded` is sent but not durable yet.
@@ -235,6 +238,8 @@ struct Current {
     /// Elicitation values withheld from the turn's tool output (`withheld.rs`), zeroized when
     /// the turn ends.
     withheld: withheld::Withheld,
+    /// The agent started it, with no prompt (`own_turn.rs`).
+    own: Option<own_turn::Own>,
 }
 
 /// Where a current turn is.
@@ -338,6 +343,8 @@ enum TimerKind {
     Steer(clauseo_protocol::MessageId),
     /// A `stop_agents` wait ran out (`sign_in/stops.rs`), for any thread of its agent.
     StopWait(u64),
+    /// An agent-started turn went quiet (`own_turn.rs`).
+    OwnQuiet(TurnId),
 }
 
 /// What a matter job of a turn (a checkpoint, an undo) continues with.
@@ -422,6 +429,7 @@ pub(crate) fn timer(actor: &mut Actor, timer: TurnTimer) {
         TimerKind::Offline(turn) => offline::on_timer(actor, thread, turn),
         TimerKind::Steer(message) => queue::on_steer_timer(actor, thread, message),
         TimerKind::StopWait(id) => sign_in::stop_timer(actor, id),
+        TimerKind::OwnQuiet(turn) => own_turn::on_quiet(actor, thread, turn),
     }
 }
 

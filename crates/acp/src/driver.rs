@@ -387,7 +387,9 @@ fn prompt(
                 && entry.prompt == Some(turn)
             {
                 entry.prompt = None;
-                if entry.origin == Origin::Turn(turn) {
+                // A cancelled prompt's answer ends its late updates too: what comes after is
+                // the agent's own (a turn it starts by itself), not the cancelled turn's tail.
+                if entry.origin == Origin::Turn(turn) || entry.origin == Origin::Late(turn) {
                     entry.origin = Origin::Idle;
                 }
             }

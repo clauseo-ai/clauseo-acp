@@ -251,6 +251,10 @@ pub(super) fn requeue_of(
     stopped: Option<TurnId>,
     close: &TurnClose,
 ) -> Option<Requeue> {
+    // An agent-started turn has no prompt to send again.
+    if current.own.is_some() {
+        return None;
+    }
     let failed = close
         .failure
         .as_ref()
