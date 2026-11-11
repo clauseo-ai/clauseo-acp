@@ -208,9 +208,13 @@ data folder shows as `<data>`, and any other absolute path as `<path>`.
 **The disk need** is twice the download (downloads plus the npm cache) plus the unpacked size,
 plus Node's archive and unpacked size when Node is downloaded, plus Python's archive and unpacked
 size when Python is missing, plus 10 %. Another install in flight in this process counts too: a
-try's check adds every other running try's remaining need (what that try's check counted, less
-the bytes it has downloaded since; its agent part drops to 0 at its `Ready`), and counts Python
-only once, in whichever try counted it first. The check and the recording of the try's own need
+try's check adds every other running try's remaining need: what that try's check counted, less
+the bytes of its own files on the disk now (its package downloads, its npm cache, its install
+trees, and Node's archive and runtime when it fetches them), in whatever phase it is (download,
+Node's unpack, `npm ci`), so a byte already written, which the free space read now has lost, is
+never counted again in the other's need. Its agent part drops to 0 at its `Ready`; its Python
+part is less the bytes of Python downloaded. Python counts only once, in whichever try counted it
+first. The check and the recording of the try's own need
 happen under one lock, so two tries starting together never both count on the same free bytes.
 When the space is short for both, the later try fails `DiskFull` (`agent.install_disk_full`,
 its need the bytes for both) and the one in flight goes on. Another process's install is not
@@ -226,15 +230,22 @@ under the lock `pause` takes, and dropped once the job is paused or superseded. 
 progress is its own stream of `Install` events, published as it comes, so both rows move
 together. What the two installs share is kept safe so:
 - **Node's runtime** is fetched and unpacked once. A try that finds `agents/.lock-node` free takes
-  it exclusive, checks the runtime under it, and when it is not usable keeps the lock through the
-  fetch and the unpack. A try that finds the lock held (another try fetching Node, or an npm
-  running from it) fetches no Node and counts none in its need: it downloads its own packages,
-  then waits (every 150 ms, raced against its pause, at most 15 minutes) for `.lock-node` shared
-  before its npm. Every npm run from the runtime holds `.lock-node` shared, so nothing replaces or
+  it exclusive, checks the runtime under it, and when it is not usable keeps the lock through
+  Node's fetch and unpack alone: Node's archive is the try's first file, unpacked as soon as it is
+  checked (the state still `Downloading`; a failed unpack is a set-up failure), and the lock is
+  given up before the agent's own packages. A try that finds the lock held (another try fetching
+  Node, or an npm running from it, or an antivirus scanning the file on Windows) fetches no Node
+  and counts none in its need: it downloads its own packages, then waits for `.lock-node` shared
+  before `Installing`, so its row shows its finished download meanwhile. The wait polls every
+  150 ms, raced against its pause, for as long as a job of this process is fetching Node (a slow
+  line may take long), and at most 15 minutes while another process holds the lock. Every npm run from the runtime holds `.lock-node` shared, so nothing replaces or
   removes the runtime under it: removing a runtime npm could not start from takes the lock
   exclusive, and is skipped while another holds it. A runtime the other try failed to fetch is
   this try's error, and its next try fetches Node itself. Node's archive is removed only with
   the lock free. A kept set-up's rename waits for the runtime too, since its receipt names it.
+- **A job whose thread panics** (a dev or test build; a release build aborts) frees its slot in a
+  drop guard: an install ends `Failed` ("the install stopped unexpectedly"), a sign-in `Failed`,
+  so neither the agent nor the other agent's waiting press is held.
 - **npm**: a cache per agent (`agents/npm-cache/<id>`) and npmrc files per agent, rather than one
   cache and a lock around its writes. It is the simpler correct choice: every try empties its
   cache at its start, and every `Ready` empties it again, so one shared cache would need every
@@ -308,7 +319,11 @@ fetches nothing. Desktop starts an install from three presses only, and nothing 
    way, shown `Queued`, and starts no install of an agent already installed. When that sign-in
    ends (signed in, cancelled, failed, a login found, or ended unchanged), desktop's pump starts
    the first kept press whose install is `Ready` or `Managed`, through the same checks, with no
-   new press. Status checks, sign-outs and searches never wait.
+   new press. Status checks, sign-outs and searches never wait. A press kept at its install's
+   `Ready` owes the agent the status check that `Ready` skipped: when the press is cancelled or
+   refused instead of starting, the check runs then, so a login already there shows at once.
+   A sign-in abandoned in the browser holds the queue until it times out (10 to 20 minutes) or
+   is cancelled; accepted for launch.
 
 A policy that pre-selects or requires agents, a policy reload, a settings change, a managed
 agent and an update start no install either: the agent waits for first use. A firm's bundle or
