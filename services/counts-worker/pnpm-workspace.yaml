@@ -1,0 +1,12 @@
+# The install policy of ui/pnpm-workspace.yaml, for this folder's own lockfile.
+minimumReleaseAge: 10080 # 7 days, in minutes
+minimumReleaseAgeExclude: []
+trustPolicy: no-downgrade
+blockExoticSubdeps: true
+strictDepBuilds: true
+# Both postinstall scripts only check or copy the platform binary that pnpm already installs as an
+# optional dependency (@esbuild/linux-x64, @cloudflare/workerd-linux-64); wrangler runs without them.
+allowBuilds:
+  esbuild: false
+  workerd: false
+savePrefix: "" # exact versions in package.json
