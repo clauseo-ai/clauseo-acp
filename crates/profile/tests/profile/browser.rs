@@ -109,6 +109,8 @@ fn only_the_browser_part_names_agent_browser() {
         "named in this conversation",
         "confidential matter text",
         "downloads folder",
+        "chained only with other `agent-browser` commands",
+        "no sandbox options such as allowed domains",
         "`agent-browser close`",
     ] {
         assert!(on.contains(rule), "{rule}");
