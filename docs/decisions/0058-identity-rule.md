@@ -44,7 +44,10 @@ and about 19 in Codex's whole text with a long data folder (about 1,481 of 1,500
   notice.docx in the matter."), with no download link, `file://` or `sandbox:` link or full
   path: the lawyer opens it from the papers list."
 - The stetdoc line (`instructions::STETDOC_CLI`, `stetdoc.txt`), which the tools part gets when
-  the app found a working stetdoc, keeps its sentence and gains: "Tracked changes are only for
+  the app found a working stetdoc, points the agent at stetdoc's own skill first ("learn it from
+  `stetdoc skills get core` and `stetdoc <command> --help`": stetdoc 0.9.3's skill text has no
+  frontmatter, so the profile leaves it out, and stage C saw the agent run `stetdoc skills` blind
+  and fail), and gains: "Tracked changes are only for
   changing a paper that already exists. Make a new document clean: write it as a Markdown file in
   `{work_folder}`, run `pandoc "<file>.md" -o "<Name>.docx"` into the matter (never pipe into
   pandoc; headings and numbered paragraphs become Word styles), then delete the Markdown file."
@@ -60,8 +63,8 @@ and about 19 in Codex's whole text with a long data folder (about 1,481 of 1,500
   the skills index (`the_budgets_hold_for_a_long_macos_path_with_the_folders_filled`). The
   whole now counts the stetdoc line as the app launches with it; before, the budget tests
   measured a profile without it, so its 17 words were never counted. At this change: `legal.md`
-  1,313 words, the stetdoc line 65, the whole 1,568 with a data folder at `/data`, and Codex's
-  whole about 1,670 with the long macOS folder. The tools part with the stetdoc line is 255
+  1,313 words, the stetdoc line 66, the whole 1,569 with a data folder at `/data`, and Codex's
+  whole about 1,671 with the long macOS folder. The tools part with the stetdoc line is 256
   words, under R21's 300.
 
 ## Consequences

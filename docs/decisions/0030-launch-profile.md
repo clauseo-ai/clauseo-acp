@@ -389,7 +389,7 @@ two dependencies, `profile` and `tracing`.
   (`<exe folder>/stetdoc/stetdoc`), which is neither run nor put on `PATH`. When stetdoc is
   found and its `--version` works, with its skill or without, the instructions get the stetdoc
   line (`{stetdoc}`, filled by the profile: `instructions::STETDOC_CLI`, which points the agent
-  at `stetdoc --help`), and `with_agent_path_prepend` takes `ClauseoProfile::path_prepend()`,
+  at `stetdoc skills get core`, amended by 0058), and `with_agent_path_prepend` takes `ClauseoProfile::path_prepend()`,
   but only when stetdoc is the only program in its folder. A folder found on `PATH` that holds
   others (`~/.cargo/bin`, `/usr/local/bin`) is not put first (a warning says so), since it would
   shadow the system's programs; the agent still finds stetdoc on the `PATH` it inherits.

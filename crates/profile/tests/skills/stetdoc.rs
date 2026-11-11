@@ -201,8 +201,8 @@ fn a_version_that_fails_or_is_empty_is_an_error_from_stetdoc() {
 
 #[test]
 fn the_stetdoc_line_is_in_the_instructions_only_when_stetdoc_was_found() {
-    let line = "For Word documents, use the `stetdoc` command; run `stetdoc --help` and \
-                `stetdoc <command> --help` to learn it. Tracked changes are only for changing a \
+    let line = "For Word documents, use the `stetdoc` command; learn it from `stetdoc skills \
+                get core` and `stetdoc <command> --help`. Tracked changes are only for changing a \
                 paper that already exists. Make a new document clean: write it as a Markdown file \
                 in `{work_folder}`, run `pandoc \"<file>.md\" -o \"<Name>.docx\"` into the matter \
                 (never pipe into pandoc; headings and numbered paragraphs become Word styles), \
