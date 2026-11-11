@@ -168,7 +168,7 @@ test("on the Mac, in a folder no named service syncs, the tile says online and i
   );
 });
 
-test("a matter whose files are all only online shows their tiles, not No papers yet., and no count", async () => {
+test("a matter whose files are all only online shows their tiles, not No papers yet., and says so in its line", async () => {
   await mount(
     scripted({
       papers: [],
@@ -182,13 +182,32 @@ test("a matter whose files are all only online shows their tiles, not No papers 
   );
   expect(shown()).toEqual(["Lease deed.pdf (Only in OneDrive)", "Plaint.pdf (Only in OneDrive)"]);
   expect(pane()?.textContent).not.toContain(t("en", "No papers yet."));
-  expect(line()).toBeNull();
+  expect(line()).toBe("A new conversation. This matter's 2 papers are only in OneDrive.");
+});
+
+test("files only online win over folders not opened in the line, which counts the files alone", async () => {
+  await mount(
+    scripted({
+      papers: [],
+      rest: {
+        skipped: [{ path: "Lease deed.pdf", reason: "cloud_only" }],
+        unread: ["Annexures", "Orders"],
+      },
+    }),
+  );
+  expect(line()).toBe("A new conversation. This matter's one paper is only in OneDrive.");
 });
 
 test("a matter with only a folder not opened shows its tile, not No papers yet.", async () => {
   await mount(scripted({ papers: [], rest: { unread: ["Annexures"] } }));
   expect(shown()).toEqual([`Annexures (${rt("en", "Not opened")})`]);
   expect(pane()?.textContent).not.toContain(t("en", "No papers yet."));
+  expect(line()).toBe("A new conversation. Clauseo couldn't open this matter's folder.");
+});
+
+test("with two folders not opened and nothing else, the line says folders", async () => {
+  await mount(scripted({ papers: [], rest: { place: "local", unread: ["Annexures", "Orders"] } }));
+  expect(line()).toBe("A new conversation. Clauseo couldn't open this matter's folders.");
 });
 
 test("with only a file over the size cap the wall still says No papers yet.", async () => {
@@ -196,6 +215,7 @@ test("with only a file over the size cap the wall still says No papers yet.", as
     scripted({ papers: [], rest: { skipped: [{ path: "Hearing.mp4", reason: "over_size_cap" }] } }),
   );
   expect(pane()?.textContent).toBe(t("en", "No papers yet."));
+  expect(line()).toBeNull();
 });
 
 test("a file downloaded turns into a paper's tile and the count drops; a folder opened shows its papers", async () => {
@@ -250,4 +270,24 @@ test("in Hindi the tiles and the count say it in Hindi, the OS's menu names in E
   ]);
   expect(describedBy(away[1]!)).toContain("Always keep on this device चुनें।");
   expect(line()).toContain("2 और दस्तावेज़ केवल OneDrive में हैं।");
+});
+
+test("in Hindi a matter with nothing to read says so where a new conversation starts", async () => {
+  await mount(
+    scripted({
+      papers: [],
+      rest: {
+        skipped: [
+          { path: "Lease deed.pdf", reason: "cloud_only" },
+          { path: "Plaint.pdf", reason: "cloud_only" },
+        ],
+      },
+    }),
+    "hi",
+  );
+  expect(line()).toBe("एक नई बातचीत। इस मामले के 2 दस्तावेज़ केवल OneDrive में हैं।");
+  await act(async () => root?.unmount());
+  host?.remove();
+  await mount(scripted({ papers: [], rest: { unread: ["Annexures"] } }), "hi");
+  expect(line()).toBe("एक नई बातचीत। Clauseo इस मामले के फ़ोल्डर नहीं खोल सका।");
 });

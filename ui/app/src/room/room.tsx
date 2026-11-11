@@ -80,7 +80,7 @@ import { useVersions } from "./versions/use-versions.ts";
 import { useWordOpeners, WordOpenContext } from "./word/open-in-word.ts";
 import { PaperWall } from "./paper-wall.tsx";
 import { NewConversationLine } from "./new-conversation-line.tsx";
-import { wallEmpty } from "./wall-away.ts";
+import { hasLine, wallEmpty } from "./wall-away.ts";
 import { clockOf } from "./when.ts";
 import { useJumpFollows } from "./thread/jump-entry.ts";
 import type { Drafts } from "./thread/session.ts";
@@ -526,11 +526,12 @@ function RoomFrame({
                 </Suspense>
               )}
               {/* a new conversation, before its first question: what it reads, once the papers are counted (a matter
-                with no conversation yet too), then the first read's offer (D-015). Not yet the design's FirstQuestion */}
-              {talks.drafting && !scratch && papers !== null && papers.papers.length > 0 && (
+                with no conversation yet too, or one with nothing to read: wall-away.ts), then the first read's offer
+                (D-015), with a paper to read. Not yet the design's FirstQuestion */}
+              {talks.drafting && !scratch && papers !== null && hasLine(papers) && (
                 <>
                   <NewConversationLine papers={papers} />
-                  <OfferSlot transport={transport} />
+                  {papers.papers.length > 0 && <OfferSlot transport={transport} />}
                 </>
               )}
               {/* one thread's state per conversation: each starts its own; with no matter open, the composer waits */}

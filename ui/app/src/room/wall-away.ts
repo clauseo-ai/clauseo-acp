@@ -114,6 +114,29 @@ export function awayWords(
   };
 }
 
+/** Whether a new conversation has a line to say: whenever the wall has a tile. */
+export const hasLine = (papers: Papers): boolean => !wallEmpty(papers);
+
+/** A new conversation's line in a matter with no paper to read: its `n` papers are all only online, or, with none
+ * of those, Clauseo couldn't open its `folders`. */
+export function allAwayWords(lang: Lang, place: FolderPlace, n: number, folders: number): string {
+  if (n === 0)
+    return folders === 1
+      ? mt(lang, "A new conversation. Clauseo couldn't open this matter's folder.")
+      : mt(lang, "A new conversation. Clauseo couldn't open this matter's folders.");
+  const service = serviceName(place);
+  if (service !== null)
+    return n === 1
+      ? mt(lang, "A new conversation. This matter's one paper is only in {service}.", { service })
+      : mt(lang, "A new conversation. This matter's {n} papers are only in {service}.", {
+          n: count(n),
+          service,
+        });
+  return n === 1
+    ? mt(lang, "A new conversation. This matter's one paper is only online.")
+    : mt(lang, "A new conversation. This matter's {n} papers are only online.", { n: count(n) });
+}
+
 /** What the new conversation's count adds: how many more papers are only online; null with none. */
 export function moreWords(lang: Lang, place: FolderPlace, n: number): string | null {
   if (n <= 0) return null;
