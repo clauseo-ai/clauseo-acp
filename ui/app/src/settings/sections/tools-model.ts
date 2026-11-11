@@ -52,7 +52,9 @@ export type Skipped = { name: string; reason: SkipReason; program?: string };
 export type ImportResult = { imported: string[]; skipped: Skipped[] };
 
 /** The host's refusals of an MCP command: A1's codes, the firm's lock (`settings.locked`) and a command the host
- * couldn't read (`command.invalid`). `mcp.command_not_found` carries no program: the form names the one it sent. */
+ * couldn't read (`command.invalid`). `mcp.command_not_found` carries no program: the form names the one it sent.
+ * `mcp.save_declined` is no refusal to show: the lawyer chose Cancel in the host's own confirm, so the form stays as it
+ * was. */
 export const MCP_ERROR_CODES = [
   "mcp.name_empty",
   "mcp.name_taken",
@@ -65,6 +67,7 @@ export const MCP_ERROR_CODES = [
   "mcp.env_name_invalid",
   "mcp.secret_store_failed",
   "mcp.server_unknown",
+  "mcp.save_declined",
   "settings.locked",
   "command.invalid",
 ] as const satisfies readonly ErrorCode[];
@@ -192,10 +195,11 @@ export function useToolsHeard(transport: HostTransport): boolean {
   return useSyncExternalStore(subscribe, heard, heard);
 }
 
-/** Whether a command names a program by its full path: from the root (`/usr/local/bin/npx`), a drive
- * (`C:\Program Files\nodejs\npx.cmd`) or a share (`\\server\tools\run.exe`). A bare name (`npx`) is not. */
+/** Whether a command names a program by its full path on this computer: from the root (`/usr/local/bin/npx`) or a
+ * drive (`C:\Program Files\nodejs\npx.cmd`). A bare name (`npx`) is not, nor a network path
+ * (`\\server\tools\run.exe`), which the host refuses as mcp.command_invalid. */
 export const isFullPath = (command: string): boolean =>
-  command.startsWith("/") || /^[A-Za-z]:[\\/]/.test(command) || command.startsWith("\\\\");
+  command.startsWith("/") || /^[A-Za-z]:[\\/]/.test(command);
 
 /** An environment value's name, as a shell takes it: letters, digits and _, not starting with a digit. */
 export const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;

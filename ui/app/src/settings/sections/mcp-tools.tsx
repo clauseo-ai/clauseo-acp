@@ -91,7 +91,9 @@ function Tools({ commands, safe }: { commands: ToolsCommands; safe: boolean }) {
 
   const answered = async (answer: Promise<ToolsAnswer>) => {
     const refusal = await answer.catch(() => "mcp.secret_store_failed" as const);
-    setFailed(refusal === null ? null : refusalOf(lang, refusal).words);
+    setFailed(
+      refusal === null || refusal === "mcp.save_declined" ? null : refusalOf(lang, refusal).words,
+    );
   };
 
   if (view === null) return null;
@@ -113,7 +115,7 @@ function Tools({ commands, safe }: { commands: ToolsCommands; safe: boolean }) {
     setImporting(false);
     if (typeof answer === "object" && "imported" in answer)
       setImportedLines(importLines(lang, answer));
-    else setFailed(refusalOf(lang, answer).words);
+    else if (answer !== "mcp.save_declined") setFailed(refusalOf(lang, answer).words);
   };
   const close = (name: string | null) => {
     back.current = name ?? "";

@@ -4,239 +4,23 @@
 // confirm, Escape, and REMOTE_TOOLS hiding the address form. No real secret: the fake hides every value it is sent.
 import { afterEach, expect, test, vi } from "vitest";
 import { act } from "react";
-import { createRoot, type Root } from "react-dom/client";
 import { settled } from "@clauseo/components/lib/late.ts";
-import { connectDisplay } from "../../display/connect.ts";
-import type { Settings } from "../../room/host-next.ts";
 import { stubFonts } from "../../room/thread/testing.ts";
-import type { AppEvent } from "../../room/host-next.ts";
-import { FakeTransport } from "../../transport/fake-transport.ts";
-import type { CommandEnvelope, CommandOutcome, McpToolsView } from "../../transport/protocol.ts";
-import { SettingsApp } from "../settings-app.tsx";
 import { errorWords } from "@clauseo/components/lib/words-errors.ts";
 import { refusalOf, type Place } from "./mcp-tools-refusal.ts";
-import { FakeTools, local, type FakeImports, type FakeView } from "./tools-fake.ts";
-import { provideTools, REMOTE_TOOLS, MCP_ERROR_CODES, type McpErrorCode } from "./tools-model.ts";
+import { mount, PLAIN, THREE, type Rig } from "./mcp-tools-rig.tsx";
+import { FakeTools, local, type FakeImports } from "./tools-fake.ts";
+import { REMOTE_TOOLS, MCP_ERROR_CODES, type McpErrorCode } from "./tools-model.ts";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 stubFonts();
 vi.mock("../../transport/window-title.ts", () => ({ setWindowTitle: () => {} }));
 
-const SETTINGS: Settings = {
-  ui: { theme: "system", font_size: 16, language: "en", lite: "automatic", motion: "system" },
-  locked: [],
-};
-
-const PLAIN =
-  "Tools run on this computer with the same access you have: your files, your programs and the internet. Add only tools you trust.";
-
-const THREE: FakeView = {
-  control: "lawyer",
-  servers: [
-    local("court-diary", "/opt/homebrew/bin/npx", { args: ["-y", "court-diary-mcp"] }),
-    local("filings", "/Users/r/tools/filings-server", { enabled: false }),
-    local("notes", "/usr/local/bin/uvx", { env: [{ name: "NOTES_TOKEN", saved: true }] }),
-  ],
-};
-
-type Rig = Awaited<ReturnType<typeof mount>>;
 let rig: Rig | null = null;
 
 afterEach(async () => {
   await rig?.unmount();
   rig = null;
-});
-
-async function mount(
-  tools: FakeTools | null,
-  {
-    safe = false,
-    first = [],
-    dispatch,
-  }: {
-    safe?: boolean;
-    /** The app feed's first frames, for a host without a fake. */
-    first?: AppEvent[];
-    dispatch?: (envelope: CommandEnvelope) => CommandOutcome;
-  } = {},
-) {
-  history.replaceState(null, "", "/settings.html#tools");
-  const transport = new FakeTransport({
-    next: {
-      query: (query) => {
-        if (query === "get_settings") return { settings: SETTINGS };
-        throw new Error("not scripted");
-      },
-      first: () => first,
-    },
-    ...(dispatch === undefined ? {} : { dispatch }),
-  });
-  if (tools !== null) provideTools(transport, tools);
-  // a build with the Safe workspace: the transport carries its wire, as sections.tsx reads it
-  if (safe) Object.defineProperty(transport, "protectionWire", { value: true });
-  const store = connectDisplay(transport).store;
-  const el = document.createElement("div");
-  document.body.append(el);
-  const root: Root = createRoot(el);
-  const settle = async () => {
-    for (let i = 0; i < 3; i += 1) await act(async () => settled());
-  };
-  await act(async () =>
-    root.render(<SettingsApp store={store} transport={transport} windowControls={null} />),
-  );
-  await settle();
-  const pane = () => el.querySelector("main.set-pane") as HTMLElement;
-  const q = <E extends Element = HTMLElement>(sel: string) => pane().querySelector<E>(sel);
-  const button = (words: string) =>
-    [...document.querySelectorAll<HTMLButtonElement>("button")].find(
-      (b) => b.textContent === words,
-    );
-  const type = async (target: HTMLInputElement | HTMLTextAreaElement, text: string) => {
-    const proto =
-      target instanceof HTMLTextAreaElement
-        ? HTMLTextAreaElement.prototype
-        : HTMLInputElement.prototype;
-    await act(async () => {
-      Reflect.set(proto, "value", text, target);
-      target.dispatchEvent(new Event("input", { bubbles: true }));
-    });
-  };
-  return {
-    el,
-    transport,
-    pane,
-    q,
-    text: () => pane()?.textContent ?? "",
-    nav: () =>
-      [...el.querySelectorAll(".set-nav-row .set-nav-name")].map((n) => n.textContent ?? ""),
-    rows: () =>
-      [...pane().querySelectorAll('[data-testid="tools-row"]')].map((r) => r.textContent ?? ""),
-    errors: () =>
-      [...pane().querySelectorAll('[data-testid="tools-error"]')].map((r) => r.textContent ?? ""),
-    press: async (words: string) => {
-      const b = button(words);
-      if (b === undefined) throw new Error(`no button "${words}"`);
-      await act(async () => b.click());
-      await settle();
-    },
-    click: async (target: HTMLElement | null) => {
-      if (target === null) throw new Error("nothing to click");
-      await act(async () => target.click());
-      await settle();
-    },
-    has: (words: string) => button(words) !== undefined,
-    type,
-    field: (id: string) => q<HTMLInputElement>(`[data-testid="${id}"]`)!,
-    save: async () => {
-      await act(async () => q<HTMLFormElement>('[data-testid="tools-form"]')!.requestSubmit());
-      await settle();
-    },
-    unmount: async () => {
-      await act(async () => root.unmount());
-      el.remove();
-      store.dispose();
-    },
-  };
-}
-
-test("no event yet: the host leaves an empty list out of its catch-up, so Tools starts empty, then follows each view", async () => {
-  rig = await mount(null);
-  expect(rig.nav()).toContain("Tools");
-  expect(rig.q('[data-testid="tools-section"]')?.getAttribute("data-control")).toBe("lawyer");
-  expect(rig.q('[data-testid="tools-empty"]')?.textContent).toBe("No tools yet.");
-  expect(rig.q('[data-testid="tools-add"]')).not.toBeNull();
-  const one: McpToolsView = {
-    control: "lawyer",
-    servers: [
-      {
-        name: "notes",
-        kind: "local",
-        command: "uvx",
-        args: [],
-        env: [],
-        headers: [],
-        enabled: true,
-      },
-    ],
-  };
-  await act(async () => rig!.transport.appEvent({ mcp_tools_changed: one }));
-  expect(rig.rows()).toEqual(["notesuvx"]);
-  // and back to empty, which the host does send as a change
-  await act(async () =>
-    rig!.transport.appEvent({ mcp_tools_changed: { control: "lawyer", servers: [] } }),
-  );
-  expect(rig.q('[data-testid="tools-empty"]')).not.toBeNull();
-});
-
-test("over the host: the view from mcp_tools_changed, the commands as HostCommand { mcp }, refusals by code, no Import", async () => {
-  const sent: unknown[] = [];
-  let refuse: string | null = null;
-  const view: McpToolsView = {
-    control: "lawyer",
-    servers: [
-      {
-        name: "notes",
-        kind: "local",
-        command: "uvx",
-        args: ["notes-mcp"],
-        env: [{ name: "NOTES_TOKEN", saved: true }],
-        headers: [],
-        enabled: true,
-      },
-    ],
-  };
-  rig = await mount(null, {
-    first: [{ mcp_tools_changed: view }],
-    dispatch: (envelope) => {
-      if ("mcp" in envelope.command) sent.push(envelope.command);
-      if (refuse !== null) {
-        const code = refuse;
-        refuse = null;
-        throw { code, message: "refused", retryable: false };
-      }
-      return "done";
-    },
-  });
-  expect(rig.nav()).toContain("Tools");
-  expect(rig.rows()).toEqual(["notesnotes-mcp"]);
-  expect(rig.q('[data-testid="tools-imports"]')).toBeNull();
-  await rig.click(rig.pane().querySelector<HTMLElement>('[role="switch"]'));
-  expect(sent.at(-1)).toEqual({ mcp: { set_server_enabled: { name: "notes", enabled: false } } });
-  // the list follows the host's next view, not the press
-  await act(async () =>
-    rig!.transport.appEvent({
-      mcp_tools_changed: { ...view, servers: [{ ...view.servers[0]!, enabled: false }] },
-    }),
-  );
-  expect(rig.pane().querySelector('[role="switch"]')?.getAttribute("aria-checked")).toBe("false");
-  await rig.press("Edit");
-  refuse = "mcp.command_not_found";
-  await rig.save();
-  expect(sent.at(-1)).toEqual({
-    mcp: {
-      save_server: {
-        previous_name: "notes",
-        server: {
-          name: "notes",
-          kind: "local",
-          command: "uvx",
-          args: ["notes-mcp"],
-          env: [{ name: "NOTES_TOKEN", value: { keep: {} } }],
-          // as the host's last view has it: off
-          enabled: false,
-        },
-      },
-    },
-  });
-  expect(rig.errors()).toEqual(["Clauseo couldn't find uvx on this computer."]);
-  refuse = "settings.locked";
-  await rig.save();
-  expect(rig.errors()).toEqual(["Your firm manages tools on this computer."]);
-  await rig.save();
-  expect(rig.q('[data-testid="tools-form"]')).toBeNull();
-  await rig.click(rig.pane().querySelector<HTMLElement>('button[aria-label="Remove notes"]'));
-  await rig.click(document.querySelector('[data-testid="tools-remove-ok"]'));
-  expect(sent.at(-1)).toEqual({ mcp: { remove_server: { name: "notes" } } });
 });
 
 test("the list: each tool's name and its detail, the plain line; no Safe workspace line in a build without it", async () => {
@@ -389,11 +173,11 @@ test("a bare program name is saved as typed; one not found, and a relative path,
   await rig.type(rig.field("tools-command"), "bin/server");
   await rig.save();
   expect(fake.saves).toEqual([]);
-  expect(rig.errors()).toEqual(["Use a program name or its full path."]);
+  expect(rig.errors()).toEqual(["Use a program name or its full path on this computer."]);
   const command = rig.field("tools-command");
   expect(command.getAttribute("aria-invalid")).toBe("true");
   const said = document.getElementById(command.getAttribute("aria-describedby") ?? "");
-  expect(said?.textContent).toBe("Use a program name or its full path.");
+  expect(said?.textContent).toBe("Use a program name or its full path on this computer.");
   expect(said?.classList.contains("set-tools-error")).toBe(true);
   expect(said?.querySelector("svg")).not.toBeNull();
   expect(rig.text()).not.toContain("A program name such as npx, or its full path.");
@@ -407,12 +191,12 @@ test("a bare program name is saved as typed; one not found, and a relative path,
 });
 
 test("each refusal the host sends shows in its place, in its words", async () => {
-  const cases: [McpErrorCode, Place, string][] = [
+  const cases: [Exclude<McpErrorCode, "mcp.save_declined">, Place, string][] = [
     ["mcp.name_empty", "name", "Give the tool a name."],
     ["mcp.name_taken", "name", "That name can't be used. Choose another."],
     ["mcp.name_reserved", "name", "That name can't be used. Choose another."],
     ["mcp.name_invalid", "name", "Use letters, numbers, - and _ only."],
-    ["mcp.command_invalid", "command", "Use a program name or its full path."],
+    ["mcp.command_invalid", "command", "Use a program name or its full path on this computer."],
     ["mcp.command_not_found", "command", "Clauseo couldn't find uvx on this computer."],
     ["mcp.url_invalid", "url", "Use a full address, such as https://tools.example.com/mcp."],
     ["mcp.env_name_invalid", "env", "Use letters, numbers and _ only."],
@@ -431,7 +215,10 @@ test("each refusal the host sends shows in its place, in its words", async () =>
     ["mcp.server_unknown", "form", errorWords("en", "mcp.server_unknown")],
   ];
   // every code the host may answer has its place
-  expect(cases.map(([code]) => code).sort()).toEqual([...MCP_ERROR_CODES].sort());
+  // every code the host may answer has its place, but a declined confirm, which shows nothing
+  expect(cases.map(([code]) => code).sort()).toEqual(
+    MCP_ERROR_CODES.filter((c) => c !== "mcp.save_declined").sort(),
+  );
   for (const [code, place, words] of cases)
     expect(refusalOf("en", code, "uvx")).toEqual({ place, words });
   // in the form: each refusal the host answers a well-formed save with, under its field
@@ -596,4 +383,22 @@ test("an import: one command, then one line, the left-out names without reasons;
   await rig.click(rig.q('[data-testid="tools-import-codex"]'));
   expect(lines()).toEqual(["Imported 1 tool."]);
   expect(rig.q('[data-testid="tools-imports"]')).toBeNull();
+});
+
+test("a declined confirm (mcp.save_declined): the form stays as it was, no error, the hint as before, no ring; focus back on Save; the list unchanged", async () => {
+  const fake = new FakeTools(THREE);
+  rig = await mount(fake);
+  await rig.press("Add a tool");
+  await rig.type(rig.field("tools-name"), "court-notes");
+  await rig.type(rig.field("tools-command"), "npx");
+  fake.refuseNext = "mcp.save_declined";
+  await rig.save();
+  expect(rig.q('[data-testid="tools-form"]')).not.toBeNull();
+  expect(rig.field("tools-name").value).toBe("court-notes");
+  expect(rig.field("tools-command").value).toBe("npx");
+  expect(rig.errors()).toEqual([]);
+  expect(rig.text()).toContain("A program name such as npx, or its full path.");
+  expect(rig.pane().querySelectorAll('[aria-invalid="true"]').length).toBe(0);
+  expect(document.activeElement?.getAttribute("data-testid")).toBe("tools-save");
+  expect(fake.view.servers.map((s) => s.name)).toEqual(["court-diary", "filings", "notes"]);
 });

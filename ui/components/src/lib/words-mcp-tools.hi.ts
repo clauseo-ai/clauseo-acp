@@ -45,7 +45,8 @@ export const HI = {
   "{count} couldn't be imported.": "{count} इम्पोर्ट नहीं हो सके।",
   // UC-195, UC-196: the Command field's refusals; {program} is what the lawyer typed, as filed
   "Clauseo couldn't find {program} on this computer.": "Clauseo को इस कंप्यूटर पर {program} नहीं मिला।",
-  "Use a program name or its full path.": "प्रोग्राम का नाम या उसका पूरा पाथ लिखें।",
+  "Use a program name or its full path on this computer.":
+    "प्रोग्राम का नाम या इस कंप्यूटर पर उसका पूरा पाथ लिखें।",
   // UC-206 to UC-211: one line for each tool an import left out, under the count line; {name} is the tool's name and
   // {program} the program it names, as filed
   "{name}: Clauseo couldn't find {program} on this computer.":

@@ -7,7 +7,9 @@ import { fileName, hostOf, isCommand, isFullPath, localDetail } from "./tools-mo
 test("the model's helpers: full paths, commands, file names, hosts", () => {
   expect(isFullPath("/opt/homebrew/bin/npx")).toBe(true);
   expect(isFullPath("C:\\Program Files\\nodejs\\npx.cmd")).toBe(true);
-  expect(isFullPath("\\\\server\\tools\\run.exe")).toBe(true);
+  // a network path is no path on this computer: the host refuses it as mcp.command_invalid
+  expect(isFullPath("\\\\server\\tools\\run.exe")).toBe(false);
+  expect(isCommand("\\\\server\\share\\run.exe")).toBe(false);
   expect(isFullPath("npx")).toBe(false);
   expect(isFullPath("./bin/npx")).toBe(false);
   expect(fileName("C:\\Program Files\\nodejs\\npx.cmd")).toBe("npx.cmd");
