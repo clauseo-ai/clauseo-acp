@@ -15,12 +15,14 @@ use std::path::Path;
 use windows::Win32::Foundation::{CloseHandle, HANDLE};
 use windows::Win32::Storage::FileSystem::{
     CreateFileW, FILE_ATTRIBUTE_TAG_INFO, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT,
-    FILE_ID_INFO, FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE, FileAttributeTagInfo,
-    FileIdInfo, FindClose, FindFirstFileW, GetFileInformationByHandleEx, GetShortPathNameW,
-    OPEN_EXISTING, QueryDosDeviceW, WIN32_FIND_DATAW,
+    FILE_ID_INFO, FILE_REMOTE_PROTOCOL_INFO, FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE,
+    FileAttributeTagInfo, FileIdInfo, FileRemoteProtocolInfo, FindClose, FindFirstFileW,
+    GetFileInformationByHandleEx, GetShortPathNameW, GetVolumeInformationByHandleW, OPEN_EXISTING,
+    QueryDosDeviceW, WIN32_FIND_DATAW,
 };
 use windows::core::{HSTRING, PCWSTR};
 
+use super::file_ids::{INVALID_PARAMETER, file_id_failure};
 use super::windows_names::drive_is_local;
 
 /// Room for a device name (`QueryDosDeviceW` writes each target NUL-terminated, then a NUL).
@@ -83,8 +85,11 @@ pub(crate) fn attribute_tag(file: &std::fs::File) -> std::io::Result<(u32, u32)>
 }
 
 /// The identity of the local file or folder at `path`: its volume's serial number and its
-/// 128-bit file ID, opened with no access, without following a link at it.
+/// 128-bit file ID, opened with no access, without following a link at it. A UNC path never
+/// counts as having no file IDs ([`handle_identity`]).
 pub(super) fn identity(path: &Path) -> std::io::Result<(u64, u128)> {
+    let text = path.to_string_lossy();
+    let unc = text.starts_with(r"\\") || text.starts_with("//");
     let path = wide(path);
     // SAFETY: `path` is NUL-terminated and outlives the call; no access is asked, every share
     // mode is allowed, and a link at the path is opened itself, never followed.
@@ -100,7 +105,7 @@ pub(super) fn identity(path: &Path) -> std::io::Result<(u64, u128)> {
         )
     }
     .map_err(|error| std::io::Error::from_raw_os_error(error.code().0 & 0xFFFF))?;
-    let read = handle_identity(handle);
+    let read = handle_identity(handle, unc);
     // SAFETY: `handle` was opened above and is closed once.
     let _closed = unsafe { CloseHandle(handle) };
     read
@@ -111,21 +116,61 @@ pub(super) fn identity(path: &Path) -> std::io::Result<(u64, u128)> {
 pub(crate) fn file_identity(file: &std::fs::File) -> std::io::Result<(u64, u128)> {
     use std::os::windows::io::AsRawHandle as _;
     // `file` keeps the handle open for the call, and closes it itself
-    handle_identity(HANDLE(file.as_raw_handle()))
+    handle_identity(HANDLE(file.as_raw_handle()), false)
 }
 
-/// The volume serial number and 128-bit file ID of the open `handle` (`FileIdInfo`).
-fn handle_identity(handle: HANDLE) -> std::io::Result<(u64, u128)> {
+/// The volume serial number and 128-bit file ID of the open `handle` (`FileIdInfo`). When the
+/// query fails with `ERROR_INVALID_PARAMETER`, the volume's file system name and whether the
+/// handle is on a network redirector (`FileRemoteProtocolInfo` answers, or `unc`) decide
+/// whether the object has no file IDs ([`super::file_ids::no_file_ids`]).
+fn handle_identity(handle: HANDLE, unc: bool) -> std::io::Result<(u64, u128)> {
     let mut info = FILE_ID_INFO::default();
     let size = u32::try_from(size_of::<FILE_ID_INFO>()).unwrap_or(0);
     // SAFETY: the caller keeps `handle` open; `info` is a FILE_ID_INFO of `size` bytes written
     // in place.
-    unsafe { GetFileInformationByHandleEx(handle, FileIdInfo, (&raw mut info).cast(), size) }
-        .map_err(|error| std::io::Error::from_raw_os_error(error.code().0 & 0xFFFF))?;
+    let queried =
+        unsafe { GetFileInformationByHandleEx(handle, FileIdInfo, (&raw mut info).cast(), size) };
+    if let Err(error) = queried {
+        let code = error.code().0 & 0xFFFF;
+        if code != INVALID_PARAMETER {
+            return Err(std::io::Error::from_raw_os_error(code));
+        }
+        let remote = unc || remote_handle(handle);
+        return Err(file_id_failure(
+            code,
+            file_system(handle).as_deref(),
+            remote,
+        ));
+    }
     Ok((
         info.VolumeSerialNumber,
         u128::from_le_bytes(info.FileId.Identifier),
     ))
+}
+
+/// The name of the file system of the open `handle`'s volume (`NTFS`, `exFAT`), `None` when
+/// it can't be read.
+fn file_system(handle: HANDLE) -> Option<String> {
+    let mut name = [0_u16; 64];
+    // SAFETY: the caller keeps `handle` open; `name` is written in place, at most its length;
+    // every other output is left out.
+    unsafe { GetVolumeInformationByHandleW(handle, None, None, None, None, Some(&mut name)) }
+        .ok()?;
+    let end = name.iter().position(|&c| c == 0)?;
+    String::from_utf16(name.get(..end)?).ok()
+}
+
+/// Whether the open `handle` is on a network redirector: `FileRemoteProtocolInfo` answers only
+/// for a remote file.
+fn remote_handle(handle: HANDLE) -> bool {
+    let mut info = FILE_REMOTE_PROTOCOL_INFO::default();
+    let size = u32::try_from(size_of::<FILE_REMOTE_PROTOCOL_INFO>()).unwrap_or(0);
+    // SAFETY: the caller keeps `handle` open; `info` is a FILE_REMOTE_PROTOCOL_INFO of `size`
+    // bytes written in place.
+    unsafe {
+        GetFileInformationByHandleEx(handle, FileRemoteProtocolInfo, (&raw mut info).cast(), size)
+    }
+    .is_ok()
 }
 
 /// The 8.3 short form of the local path `path` (`GetShortPathNameW`), asked only of the data

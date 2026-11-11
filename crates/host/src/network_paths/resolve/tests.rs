@@ -13,6 +13,7 @@ use std::path::{Path, PathBuf};
 use super::MAX_HOPS;
 use super::{Disk, Entry, Fs, Walked, walk};
 use crate::network_paths::NetEnv;
+use crate::network_paths::file_ids::{INVALID_PARAMETER, file_id_failure};
 use crate::network_paths::tests::plain_net;
 
 /// One name on the fake disk.
@@ -38,6 +39,10 @@ pub(crate) struct FakeFs {
     pub(crate) ids: BTreeMap<PathBuf, (u64, u128)>,
     /// The paths whose identity can't be read (permission denied).
     pub(crate) unreadable_ids: Vec<PathBuf>,
+    /// Volumes whose `FileIdInfo` query fails with `ERROR_INVALID_PARAMETER`: each name at or
+    /// under the root, with no identity in [`Self::ids`], answers as Windows does there
+    /// ([`file_id_failure`]), by the volume's file system name and whether it is remote.
+    pub(crate) no_id_volumes: Vec<(PathBuf, Option<String>, bool)>,
 }
 
 impl FakeFs {
@@ -89,10 +94,19 @@ impl Fs for FakeFs {
         {
             return Err(io::ErrorKind::PermissionDenied.into());
         }
-        self.ids
-            .get(path)
-            .copied()
-            .ok_or_else(|| io::ErrorKind::NotFound.into())
+        if let Some(id) = self.ids.get(path) {
+            return Ok(*id);
+        }
+        let volume = self
+            .no_id_volumes
+            .iter()
+            .find(|(root, _, _)| path.starts_with(root));
+        match volume {
+            Some((_, name, remote)) if self.names.contains_key(path) => {
+                Err(file_id_failure(INVALID_PARAMETER, name.as_deref(), *remote))
+            }
+            _ => Err(io::ErrorKind::NotFound.into()),
+        }
     }
 }
 

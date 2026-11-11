@@ -101,7 +101,9 @@ fn windows_file(path: &Path, file: std::fs::File) -> Option<std::fs::File> {
         reparse::Reparse::Skip | reparse::Reparse::Unknown => None,
         reparse::Reparse::Reopen => {
             // `file` stays open while the path is opened again, so the same volume and file ID
-            // on both proves the second open followed nothing swapped in between
+            // on both proves the second open followed nothing swapped in between. A FAT or exFAT
+            // volume, which has no file IDs, holds no reparse point, so never gets here; an
+            // identity that can't be read, or no file ID, proves nothing and skips the file
             let again = std::fs::File::open(path).ok()?;
             let first = file_identity(&file).ok()?;
             if file_identity(&again).ok()? != first {

@@ -8,6 +8,9 @@
 //!   home never refuses every local matter;
 //! - a missing name, or one the system rejects as a name (a shell word's `*`, a URL's `https:`:
 //!   the walk keeps such a name as written), is no file, so it can't be `<data>`: not an error;
+//! - an object on a local FAT or exFAT volume, which has no file IDs ([`is_no_file_ids`]), is
+//!   not `<data>`: `<data>`'s own identity was read, so its volume has file IDs. Only for a
+//!   path a request leads to; `<data>`'s own folders keep the fallback below;
 //! - `<data>`'s own identity and its folders' above it (the host's own folders, which a search
 //!   root is compared with): when one can't be read, nothing can be compared with it, and
 //!   refusing every path or search for it would refuse every local matter. The text compare
@@ -21,6 +24,7 @@ use std::cell::Cell;
 use std::path::Path;
 
 use super::health::{Captured, DataFenceHealth, Id};
+use crate::network_paths::file_ids::is_no_file_ids;
 use crate::network_paths::resolve::{Fs, no_such_name};
 
 /// An identity that could not be read.
@@ -155,12 +159,13 @@ impl<'a> DataIdentity<'a> {
     }
 
     /// `path`'s identity: `None` for no such name ([`no_such_name`]: missing, or a name the
-    /// system rejects), [`Unreadable`] when it can't be read (the first time per decision
-    /// logged by its kind, no path).
+    /// system rejects) and for an object with no file ID ([`is_no_file_ids`]),
+    /// [`Unreadable`] when it can't be read (the first time per decision logged by its kind, no
+    /// path).
     fn read(&self, path: &Path) -> Result<Option<Id>, Unreadable> {
         match self.fs.identity(path) {
             Ok(id) => Ok(Some(id)),
-            Err(error) if no_such_name(&error) => Ok(None),
+            Err(error) if no_such_name(&error) || is_no_file_ids(&error) => Ok(None),
             Err(error) => {
                 if !self.unreadable.replace(true) {
                     tracing::warn!(

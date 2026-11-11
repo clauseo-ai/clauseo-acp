@@ -499,6 +499,8 @@ mod names_only_tests;
 mod network_forms_tests;
 #[cfg(test)]
 mod network_tests;
+#[cfg(test)]
+mod no_file_ids_tests;
 mod resolve;
 mod search;
 #[cfg(test)]
