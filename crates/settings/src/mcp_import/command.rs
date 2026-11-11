@@ -8,13 +8,27 @@ use std::path::{Path, PathBuf};
 /// The PATHEXT extensions when the variable is not set.
 const DEFAULT_PATHEXT: &str = ".COM;.EXE;.BAT;.CMD";
 
-/// The path `command` runs from, or `None` when no file is found.
-pub(crate) fn resolve(env: &Env<'_>, command: &str) -> Option<PathBuf> {
-    if command.is_empty() {
+/// The file `program` runs from, or `None` when no file is found.
+///
+/// A bare name (no separator) is searched for on the search path: the PATH variable, then the
+/// folders each OS's tools install into (on Mac: Homebrew, the newest nvm Node, Volta, `.bun`,
+/// `.local`, `.cargo`; on Windows: `%APPDATA%\npm`, `%ProgramFiles%\nodejs`,
+/// `%LOCALAPPDATA%\Volta\bin`, `%SystemRoot%\System32`). On Windows a name without an extension
+/// is tried with each PATHEXT extension, in order (`npx` finds `npx.cmd`).
+///
+/// An absolute path is returned when it is a file (on Windows too, with the same extension rule
+/// when it has none). Any other path, such as `bin/tool`, `./tool` or `.\npx`, gives `None`: a
+/// relative path with a separator is not searched for.
+pub fn resolve_command(env: &Env<'_>, program: &str) -> Option<PathBuf> {
+    if program.is_empty() {
         return None;
     }
-    let names = file_names(env, command);
-    let dirs = if is_absolute(env.os, command) {
+    let absolute = is_absolute(env.os, program);
+    if !absolute && has_separator(env.os, program) {
+        return None;
+    }
+    let names = file_names(env, program);
+    let dirs = if absolute {
         vec![String::new()]
     } else {
         search_dirs(env)
@@ -32,6 +46,14 @@ pub(crate) fn resolve(env: &Env<'_>, command: &str) -> Option<PathBuf> {
         }
     }
     None
+}
+
+/// Whether `p` contains a separator on `os`.
+fn has_separator(os: Os, p: &str) -> bool {
+    match os {
+        Os::Mac => p.contains('/'),
+        Os::Windows => p.contains(['/', '\\']),
+    }
 }
 
 /// `command` as the file name or names to look for. On Windows a name without an extension gets
@@ -132,7 +154,7 @@ pub(crate) fn resolve_or_problem(
     command: &str,
     problems: &mut Vec<Problem>,
 ) -> PathBuf {
-    if let Some(found) = resolve(env, command) {
+    if let Some(found) = resolve_command(env, command) {
         return found;
     }
     problems.push(Problem::CommandNotFound {

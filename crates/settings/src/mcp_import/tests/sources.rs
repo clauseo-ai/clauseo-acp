@@ -418,3 +418,57 @@ fn windows_codex_resolves_npx_from_appdata() {
         local("C:\\Users\\ana\\AppData\\Roaming\\npm\\npx.cmd", &[], &[])
     );
 }
+
+#[test]
+fn codex_env_vars_are_forwarded_with_their_current_values() {
+    let fs = FakeFs::default()
+        .file(
+            "/Users/ana/.codex/config.toml",
+            r#"[mcp_servers.gh]
+command = "/opt/gh"
+env_vars = [
+    "GH_TOKEN",
+    "UNSET_ONE",
+    "OWN",
+    { name = "LOCAL_ONE", source = "local" },
+    { name = "REMOTE_ONE", source = "remote" },
+]
+env = { OWN = "1" }
+"#,
+        )
+        .program("/opt/gh");
+    let pairs = [
+        ("GH_TOKEN", "hidden-forwarded-four"),
+        ("LOCAL_ONE", "hidden-forwarded-five"),
+        ("OWN", "from-the-environment"),
+    ];
+    let found = run(Os::Mac, "/Users/ana", &pairs, &fs, &[]);
+    let gh = by_name(&found, "gh");
+    assert_eq!(
+        gh.kind,
+        local(
+            "/opt/gh",
+            &[],
+            &[
+                ("GH_TOKEN", "hidden-forwarded-four"),
+                ("LOCAL_ONE", "hidden-forwarded-five"),
+                ("OWN", "1"),
+                ("UNSET_ONE", "${UNSET_ONE}"),
+            ]
+        )
+    );
+    // The table's OWN wins over the forwarded one; the remote entry cannot be read here.
+    assert_eq!(
+        gh.problems,
+        [
+            Problem::UnresolvedVariable {
+                name: "UNSET_ONE".to_owned()
+            },
+            Problem::Unreadable,
+        ]
+    );
+    let printed = format!("{found:?}");
+    assert!(!printed.contains("hidden-forwarded"), "{printed}");
+    assert!(!printed.contains("from-the-environment"), "{printed}");
+    assert!(printed.contains("GH_TOKEN"), "{printed}");
+}

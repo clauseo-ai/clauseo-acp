@@ -63,3 +63,18 @@ fn real_fs_reads_this_crate() {
     assert!(src.iter().any(|entry| entry.ends_with("lib.rs")));
     assert_eq!(fs.list_dir(&manifest.join("no-such-dir")).len(), 0);
 }
+
+#[test]
+fn real_env_reads_this_process() {
+    let real = RealEnv::from_process().expect("a supported OS with a home folder");
+    let env = real.env();
+    assert_eq!(Some(env.os), Os::current());
+    assert_eq!(
+        env.home,
+        std::env::home_dir().expect("a home folder").as_path()
+    );
+    assert!((env.vars)("PATH").is_some());
+    // The real env resolves a program that every OS has on its search path.
+    let program = if cfg!(windows) { "cmd" } else { "sh" };
+    assert!(resolve_command(&env, program).is_some());
+}
