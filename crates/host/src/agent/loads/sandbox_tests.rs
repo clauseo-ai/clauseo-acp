@@ -6,7 +6,7 @@ use serde_json::{Value, json};
 
 use super::browser::Switch;
 use super::profile::{ClaudeKeys, Folders, Login, claude_options};
-use super::sandbox::{ClaudeSandbox, EXCLUDED_COMMANDS, Off, SandboxOs, SandboxPaths};
+use super::sandbox::{ClaudeSandbox, Off, SandboxOs, SandboxPaths};
 use crate::agent::data_fence::LaunchDeny;
 
 static NO_DENY: LaunchDeny = LaunchDeny {
@@ -52,7 +52,6 @@ impl Session {
             skills: vec![data.join("profile/claude-plugin/skills")],
             path: vec![
                 PathBuf::from("/Applications/Clauseo.app/Contents/Helpers/stetdoc"),
-                data.join("tools"),
                 data.join("agents/runtime/clauseo-python-3.13.9-aarch64/bin"),
             ],
             env_file: run.join("clauseo-env.sh"),
@@ -65,7 +64,7 @@ impl Session {
         }
     }
 
-    fn paths(&self, browser: bool) -> SandboxPaths<'_> {
+    fn paths(&self) -> SandboxPaths<'_> {
         SandboxPaths {
             matter: &self.matter,
             work: &self.work,
@@ -81,7 +80,6 @@ impl Session {
             claude_home: &self.home,
             data: &self.data,
             other_matters: &self.other_matters,
-            browser,
         }
     }
 }
@@ -142,8 +140,8 @@ fn texts(value: &Value) -> Vec<&str> {
 #[cfg_attr(windows, ignore = "Claude's sandbox is macOS and Linux only")]
 fn a_claude_session_runs_its_commands_in_claude_codes_sandbox() {
     let session = Session::new("s-1");
-    let sandbox = ClaudeSandbox::for_os(SandboxOs::Mac, &session.paths(true)).unwrap();
-    let settings = settings(&session, Some(&sandbox), false, true, &json!({}));
+    let sandbox = ClaudeSandbox::for_os(SandboxOs::Mac, &session.paths()).unwrap();
+    let settings = settings(&session, Some(&sandbox), false, false, &json!({}));
     let run = session.run.to_str().unwrap();
     assert_eq!(
         settings["sandbox"],
@@ -153,7 +151,6 @@ fn a_claude_session_runs_its_commands_in_claude_codes_sandbox() {
             "allowUnsandboxedCommands": false,
             "failIfUnavailable": false,
             "allowAppleEvents": false,
-            "excludedCommands": ["agent-browser:*"],
             "network": {
                 "allowedDomains": ["*"],
                 "deniedDomains": [
@@ -182,7 +179,6 @@ fn a_claude_session_runs_its_commands_in_claude_codes_sandbox() {
                     format!("{run}/clauseo-env.sh"),
                     format!("{DATA}/tls/roots.pem"),
                     "/Applications/Clauseo.app/Contents/Helpers/stetdoc",
-                    format!("{DATA}/tools"),
                     format!("{DATA}/agents/runtime/clauseo-python-3.13.9-aarch64"),
                     format!("{PROJECT}/*/tool-results"),
                     format!("{PROJECT}/*/tool-results/**"),
@@ -197,8 +193,8 @@ fn a_claude_session_runs_its_commands_in_claude_codes_sandbox() {
 #[test]
 fn two_sessions_get_two_sandboxes() {
     let (one, two) = (Session::new("s-1"), Session::new("s-2"));
-    let first = mac(&one.paths(false)).unwrap();
-    let second = mac(&two.paths(false)).unwrap();
+    let first = mac(&one.paths()).unwrap();
+    let second = mac(&two.paths()).unwrap();
     let run_two = two.run.to_str().unwrap();
     for path in first.allow_read.iter().chain(&first.allow_write) {
         assert!(!path.starts_with(run_two), "{path}");
@@ -213,7 +209,7 @@ fn two_sessions_get_two_sandboxes() {
 fn the_home_never_opens_through_a_path_folder() {
     let mut session = Session::new("s-1");
     session.path.push(PathBuf::from("/Users/l/bin"));
-    let sandbox = mac(&session.paths(true)).unwrap();
+    let sandbox = mac(&session.paths()).unwrap();
     for path in &sandbox.allow_read {
         assert!(path != "/Users/l" && path != "/Users/l/", "{path}");
     }
@@ -232,7 +228,7 @@ fn the_data_folder_and_other_matters_are_denied_wherever_they_are() {
         PathBuf::from("/Volumes/x/Clients/B"),
         PathBuf::from("/opt/C"),
     ];
-    let sandbox = mac(&session.paths(false)).unwrap();
+    let sandbox = mac(&session.paths()).unwrap();
     for denied in [
         "/srv/clauseo",
         "/srv/link",
@@ -275,18 +271,18 @@ fn a_wildcard_in_any_path_sends_no_sandbox() {
         let mut session = Session::new("s-1");
         session.matter = PathBuf::from("/Users/l/Clients").join(glob);
         for os in [SandboxOs::Mac, SandboxOs::Linux] {
-            let off = ClaudeSandbox::for_os(os, &session.paths(false));
+            let off = ClaudeSandbox::for_os(os, &session.paths());
             assert_eq!(off, Err(Off::Wildcard), "{glob}");
         }
         let mut session = Session::new("s-1");
         session
             .other_matters
             .push(PathBuf::from("/Users/l/Clients").join(glob));
-        assert_eq!(mac(&session.paths(false)), Err(Off::Wildcard), "{glob}");
+        assert_eq!(mac(&session.paths()), Err(Off::Wildcard), "{glob}");
         let settings = settings(&session, None, false, false, &json!({}));
         assert!(settings.get("sandbox").is_none());
     }
-    assert!(mac(&Session::new("s-1").paths(false)).is_ok());
+    assert!(mac(&Session::new("s-1").paths()).is_ok());
 }
 
 /// A `[` keeps the sandbox on, escaped as `[[]` where Claude Code reads globs: every list on
@@ -298,7 +294,7 @@ fn a_bracket_is_escaped_and_the_sandbox_stays_on() {
     session.matter = PathBuf::from("/Users/l/Clients/Smith [2024]");
     session.other_matters = vec![PathBuf::from("/Users/l/Clients/Jones [a-b]")];
     let escaped = "/Users/l/Clients/Smith [[]2024]";
-    let on_mac = mac(&session.paths(false)).unwrap();
+    let on_mac = mac(&session.paths()).unwrap();
     for list in [&on_mac.allow_write, &on_mac.allow_read] {
         assert!(list.iter().any(|p| p == escaped), "{list:?}");
         assert!(
@@ -325,7 +321,7 @@ fn a_bracket_is_escaped_and_the_sandbox_stays_on() {
         "{:?}",
         on_mac.allow_read
     );
-    let linux = ClaudeSandbox::for_os(SandboxOs::Linux, &session.paths(false)).unwrap();
+    let linux = ClaudeSandbox::for_os(SandboxOs::Linux, &session.paths()).unwrap();
     assert!(
         linux
             .allow_write
@@ -341,7 +337,7 @@ fn a_bracket_is_escaped_and_the_sandbox_stays_on() {
             .any(|p| p == "/Users/l/Clients/Jones [[]a-b]")
     );
     // Without a bracket nothing changes and nothing doubles.
-    let plain = mac(&Session::new("s-1").paths(false)).unwrap();
+    let plain = mac(&Session::new("s-1").paths()).unwrap();
     assert!(!plain.allow_write.iter().any(|p| p.ends_with("/**")));
 }
 
@@ -352,7 +348,7 @@ fn a_bracket_is_escaped_and_the_sandbox_stays_on() {
 fn only_the_projects_tool_results_open() {
     let mut session = Session::new("s-1");
     session.matter = PathBuf::from(format!("/Users/l/{}", "x".repeat(220)));
-    let sandbox = mac(&session.paths(false)).unwrap();
+    let sandbox = mac(&session.paths()).unwrap();
     let home = session.home.to_str().unwrap();
     let key = crate::agent::data_fence::claude_project_key(session.matter.to_str().unwrap());
     assert!(key.len() < 220, "{key}");
@@ -375,14 +371,14 @@ fn only_the_projects_tool_results_open() {
 fn no_short_temp_folder_sends_no_sandbox() {
     let mut session = Session::new("s-1");
     session.claude_tmp = None;
-    assert_eq!(mac(&session.paths(true)), Err(Off::NoTemp));
+    assert_eq!(mac(&session.paths()), Err(Off::NoTemp));
 }
 
 /// Windows: no `sandbox` key at all, so Claude's commands keep asking there.
 #[test]
 fn windows_gets_no_sandbox() {
     let session = Session::new("s-1");
-    let off = ClaudeSandbox::for_os(SandboxOs::Windows, &session.paths(true));
+    let off = ClaudeSandbox::for_os(SandboxOs::Windows, &session.paths());
     assert_eq!(off, Err(Off::Windows));
     let settings = settings(&session, None, false, true, &json!({}));
     assert!(settings.get("sandbox").is_none(), "{settings}");
@@ -392,7 +388,7 @@ fn windows_gets_no_sandbox() {
 #[test]
 fn forced_ask_still_asks_inside_the_sandbox() {
     let session = Session::new("s-1");
-    let sandbox = mac(&session.paths(true)).unwrap();
+    let sandbox = mac(&session.paths()).unwrap();
     let settings = settings(&session, Some(&sandbox), true, true, &json!({}));
     let object = &settings["sandbox"];
     assert_eq!(object["autoAllowBashIfSandboxed"], false);
@@ -406,7 +402,7 @@ fn forced_ask_still_asks_inside_the_sandbox() {
 #[test]
 fn no_command_breaks_out_and_the_hooks_sandbox_is_replaced() {
     let session = Session::new("s-1");
-    let sandbox = mac(&session.paths(false)).unwrap();
+    let sandbox = mac(&session.paths()).unwrap();
     let hook = json!({"settings": {"sandbox": {
         "allowUnsandboxedCommands": true,
         "excludedCommands": ["*"],
@@ -421,24 +417,21 @@ fn no_command_breaks_out_and_the_hooks_sandbox_is_replaced() {
     assert!(!texts(&object["filesystem"]["allowWrite"]).contains(&"/"));
 }
 
-/// The one exclusion is agent-browser's prefix rule, which Claude Code 2.1.293 honours only
-/// when every part of a command is agent-browser (`agent-browser snapshot && touch ~/x` runs
-/// sandboxed); and only in a session with the browser.
+/// No command runs outside the sandbox: there is no `excludedCommands`, whatever the session's
+/// keys, since Claude Code's exclusion check can be steered by a `VAR=` prefix, `env` or quoting
+/// (Claude has no browser on macOS and Linux for launch, decision record 0030).
 #[test]
-fn only_agent_browser_runs_outside_the_sandbox_and_only_with_the_browser() {
-    assert_eq!(EXCLUDED_COMMANDS, ["agent-browser:*"]);
-    for rule in EXCLUDED_COMMANDS {
-        let prefix = rule.strip_suffix(":*").unwrap();
+fn no_command_is_excluded_from_the_sandbox() {
+    let session = Session::new("s-1");
+    let sandbox = mac(&session.paths()).unwrap();
+    assert!(sandbox.settings().get("excludedCommands").is_none());
+    for (forced_ask, browser) in [(false, false), (false, true), (true, true)] {
+        let settings = settings(&session, Some(&sandbox), forced_ask, browser, &json!({}));
         assert!(
-            !prefix.contains(['*', ' ', ';', '&', '|', '$', '`']),
-            "{rule}"
+            settings["sandbox"].get("excludedCommands").is_none(),
+            "{settings}"
         );
     }
-    let session = Session::new("s-1");
-    let with = mac(&session.paths(true)).unwrap().settings();
-    assert_eq!(with["excludedCommands"], json!(EXCLUDED_COMMANDS));
-    let without = mac(&session.paths(false)).unwrap().settings();
-    assert!(without.get("excludedCommands").is_none());
 }
 
 /// An allowed path that is not UTF-8 is left out (neither readable nor writable); a path to
@@ -451,7 +444,7 @@ fn a_path_that_is_not_utf8_fails_closed() {
     let odd = PathBuf::from(OsStr::from_bytes(b"/Users/l/\xff"));
     let mut session = Session::new("s-1");
     session.matter = odd.clone();
-    let sandbox = mac(&session.paths(false)).unwrap();
+    let sandbox = mac(&session.paths()).unwrap();
     assert_eq!(sandbox.allow_write.len(), 4);
     assert!(
         !sandbox
@@ -461,7 +454,7 @@ fn a_path_that_is_not_utf8_fails_closed() {
     );
     let mut session = Session::new("s-1");
     session.other_matters.push(odd);
-    assert_eq!(mac(&session.paths(false)), Err(Off::NotUtf8));
+    assert_eq!(mac(&session.paths()), Err(Off::NotUtf8));
 }
 
 /// Claude may not edit the matter's `.clauseo` folder (its `matter.json`), sandbox or not.
@@ -501,13 +494,13 @@ fn the_matter_marker_is_denied_to_claudes_edit() {
 #[test]
 fn only_the_trust_roots_file_opens() {
     let mut session = Session::new("s-1");
-    let sandbox = mac(&session.paths(false)).unwrap();
+    let sandbox = mac(&session.paths()).unwrap();
     let file = format!("{DATA}/tls/roots.pem");
     assert!(sandbox.allow_read.contains(&file));
     for folder in [format!("{DATA}/tls"), DATA.to_owned()] {
         assert!(!sandbox.allow_read.contains(&folder), "{folder}");
     }
     session.ca_file = None;
-    let sandbox = mac(&session.paths(false)).unwrap();
+    let sandbox = mac(&session.paths()).unwrap();
     assert!(!sandbox.allow_read.iter().any(|path| path.contains("/tls")));
 }

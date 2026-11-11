@@ -55,6 +55,7 @@ fn macos_bundle(scratch: &Scratch, stand_in: Option<(&[u8], &[u8])>) -> DesktopP
         exe: scratch.path().join("Clauseo.app/Contents/MacOS/Clauseo"),
         macos: true,
         resource_dir: None,
+        shell_browser: clauseo_profile::servers::shell_browser(),
     };
     let locations = Locations::under_root(&scratch.dir("data"));
     DesktopProfile::build_in(&locations, &layout, None).unwrap()
@@ -151,6 +152,7 @@ fn a_resource_folder_release_layout_keeps_stetdoc_as_a_command() {
         exe: scratch.path().join("app").join("clauseo"),
         macos: false,
         resource_dir: Some(&resources),
+        shell_browser: clauseo_profile::servers::shell_browser(),
     };
     let locations = Locations::under_root(&scratch.dir("data"));
     let hook = DesktopProfile::build_in(&locations, &layout, None).unwrap();

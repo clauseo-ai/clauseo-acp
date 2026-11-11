@@ -17,7 +17,7 @@ use serde_json::json;
 use clauseo_host::McpServer;
 
 use crate::profile_rig::{
-    CLAUDE, Hook, Wired, agent_lines, agents, browser_server, filled_browser, first_frame_tools,
+    BROWSING, Hook, Wired, agent_lines, agents, browser_server, filled_browser, first_frame_tools,
     settings, template, turn,
 };
 use crate::support::{Dir, FAKE, Scenario, matter_with_thread};
@@ -35,7 +35,7 @@ fn browser_hook() -> Hook {
     }
 }
 
-/// `count` threads of `CLAUDE` in one matter, each one turn, all alive at once on a machine of
+/// `count` threads of `BROWSING` in one matter, each one turn, all alive at once on a machine of
 /// `memory` bytes; returns the browser state each thread's header shows.
 fn browsers(test: &str, memory: u64, count: usize) -> Vec<Option<ToolsUnavailableReason>> {
     let dir = Dir::new(test, &[]);
@@ -46,7 +46,7 @@ fn browsers(test: &str, memory: u64, count: usize) -> Vec<Option<ToolsUnavailabl
     );
     settings(
         &dir,
-        agents(&[(CLAUDE, &claude, json!({}))]),
+        agents(&[(BROWSING, &claude, json!({}))]),
         json!({"tools": {"browser": true, "web_search": false}}),
     );
     let launcher = Wired::new(&dir);
@@ -56,7 +56,7 @@ fn browsers(test: &str, memory: u64, count: usize) -> Vec<Option<ToolsUnavailabl
     let matter = host.create_matter("m", &dir.folder("m", &[]));
     let threads: Vec<_> = (0..count)
         .map(|_| {
-            let thread = host.create_thread(matter, CLAUDE);
+            let thread = host.create_thread(matter, BROWSING);
             turn(&host, thread);
             thread
         })
@@ -127,7 +127,10 @@ fn a_slot_is_free_once_its_session_ends() {
     let exiting = template(&dir, "exiting", &exiting_lines);
     settings(
         &dir,
-        agents(&[(CLAUDE, &claude, json!({})), (EXITING, &exiting, json!({}))]),
+        agents(&[
+            (BROWSING, &claude, json!({})),
+            (EXITING, &exiting, json!({})),
+        ]),
         json!({"tools": {"browser": true, "web_search": false}}),
     );
     let launcher = Wired::new(&dir);
@@ -149,7 +152,7 @@ fn a_slot_is_free_once_its_session_ends() {
     host.settle();
     let reasons: Vec<_> = (0..3)
         .map(|_| {
-            let thread = host.create_thread(matter, CLAUDE);
+            let thread = host.create_thread(matter, BROWSING);
             turn(&host, thread);
             browser_reason(&first_frame_tools(&host, thread))
         })
@@ -185,7 +188,7 @@ fn the_chrome_the_prep_finds_fills_the_entry() {
     );
     settings(
         &dir,
-        agents(&[(CLAUDE, &claude, json!({}))]),
+        agents(&[(BROWSING, &claude, json!({}))]),
         json!({"tools": {"browser": true, "web_search": false}}),
     );
     let roots = |root: &Path| ChromeRoots {
@@ -206,7 +209,7 @@ fn the_chrome_the_prep_finds_fills_the_entry() {
             .with_chrome_roots(found)
     });
     let matter = host.create_matter("m", &dir.folder("m", &[]));
-    let thread = host.create_thread(matter, CLAUDE);
+    let thread = host.create_thread(matter, BROWSING);
     turn(&host, thread);
     assert_eq!(browser_reason(&first_frame_tools(&host, thread)), None);
     host.shutdown();
@@ -222,7 +225,7 @@ fn the_chrome_the_prep_finds_fills_the_entry() {
     );
     settings(
         &dir,
-        agents(&[(CLAUDE, &generic, json!({}))]),
+        agents(&[(BROWSING, &generic, json!({}))]),
         json!({"tools": {"browser": true, "web_search": false}}),
     );
     let host = dir.start_launching(1, Arc::<Wired>::clone(&launcher), move |config| {
@@ -231,7 +234,7 @@ fn the_chrome_the_prep_finds_fills_the_entry() {
             .with_egress_proxy(Arc::new(TestProxy(8123)))
             .with_chrome_roots(empty)
     });
-    let thread = host.create_thread(matter, CLAUDE);
+    let thread = host.create_thread(matter, BROWSING);
     turn(&host, thread);
     assert_eq!(
         browser_reason(&first_frame_tools(&host, thread)),
@@ -240,7 +243,7 @@ fn the_chrome_the_prep_finds_fills_the_entry() {
     host.shutdown();
 }
 
-/// The browser state one `CLAUDE` session shows with `entry` as the hook's browser entry.
+/// The browser state one `BROWSING` session shows with `entry` as the hook's browser entry.
 fn reason_with_entry(test: &str, entry: McpServer) -> Option<ToolsUnavailableReason> {
     let dir = Dir::new(test, &[]);
     let generic = template(
@@ -250,7 +253,7 @@ fn reason_with_entry(test: &str, entry: McpServer) -> Option<ToolsUnavailableRea
     );
     settings(
         &dir,
-        agents(&[(CLAUDE, &generic, json!({}))]),
+        agents(&[(BROWSING, &generic, json!({}))]),
         json!({"tools": {"browser": true, "web_search": false}}),
     );
     let hook = Hook {
@@ -264,7 +267,7 @@ fn reason_with_entry(test: &str, entry: McpServer) -> Option<ToolsUnavailableRea
             .with_browser_executable(Some(PathBuf::from("/chrome")))
     });
     let matter = host.create_matter("m", &dir.folder("m", &[]));
-    let thread = host.create_thread(matter, CLAUDE);
+    let thread = host.create_thread(matter, BROWSING);
     turn(&host, thread);
     let reason = browser_reason(&first_frame_tools(&host, thread));
     host.shutdown();
@@ -343,7 +346,7 @@ fn the_socket_folder_lives_until_the_agents_tree_has_exited() {
     );
     settings(
         &dir,
-        agents(&[(CLAUDE, &claude, json!({}))]),
+        agents(&[(BROWSING, &claude, json!({}))]),
         json!({"tools": {"browser": true, "web_search": false}}),
     );
     let McpServer::Stdio {
@@ -375,7 +378,7 @@ fn the_socket_folder_lives_until_the_agents_tree_has_exited() {
             .with_browser_socket_root(root)
     });
     let matter = host.create_matter("m", &dir.folder("m", &[]));
-    let thread = host.create_thread(matter, CLAUDE);
+    let thread = host.create_thread(matter, BROWSING);
     turn(&host, thread);
     assert_eq!(browser_reason(&first_frame_tools(&host, thread)), None);
     // The agent still runs: its folder and lock file are there.

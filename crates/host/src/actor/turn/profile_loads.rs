@@ -65,7 +65,9 @@ pub(super) fn launch_keys(
         let inputs = browser_inputs(actor, &prepared.run, control, browser_switch);
         let (_, entry) = browser::hook_servers(actor.profile.mcp_servers(&agent_id), &inputs);
         let shell = shell_browser(actor, &prepared.run, &agent_id);
-        let none_here = browser::no_browser(AgentKind::of(&agent_id), cfg!(windows));
+        let kind = AgentKind::of(&agent_id);
+        let none_here =
+            browser::no_browser(kind, cfg!(windows)).then(|| browser::absent_part(kind));
         let browser = session_part(shell.as_ref(), entry.as_ref(), &prepared.run, none_here);
         let folders = Folders::of(&prepared.run.work, &prepared.run.notes)?
             .with_connectors(part)
@@ -125,9 +127,10 @@ pub(super) fn session_loads(
     let inputs = browser_inputs(actor, &run, control, browser_switch);
     // Codex's `browser` entry (`clauseo_profile::servers::browser_mcp`), filled or left out.
     let (hook_servers, browser_state) = browser::hook_servers(hook, &inputs);
-    // Claude's shell tool; none for an agent offered the entry.
+    // Claude's shell tool (Windows alone); none for an agent offered the entry.
     let shell = shell_browser(actor, &run, &agent_id);
-    let session_browser = session_part(shell.as_ref(), browser_state.as_ref(), &run, none_here);
+    let absent = none_here.then(|| browser::absent_part(kind));
+    let session_browser = session_part(shell.as_ref(), browser_state.as_ref(), &run, absent);
     if shell.is_some() || browser_state.is_some() || none_here {
         // For support: whether this session has the browser, and which Chrome by file name.
         let (browser, chrome) = browser::part_log(session_browser, run.chrome.as_deref());
@@ -153,8 +156,8 @@ pub(super) fn session_loads(
     let browser_on = shell
         .as_ref()
         .is_some_and(|(_, part)| *part == BrowserPart::On);
-    let sandbox = (kind == Some(AgentKind::Claude))
-        .then(|| claude_sandbox(actor, &agent_id, &run, matter, browser_on));
+    let sandbox =
+        (kind == Some(AgentKind::Claude)).then(|| claude_sandbox(actor, &agent_id, &run, matter));
     if let Some(Err(Off::Wildcard)) = sandbox {
         // A path the sandbox cannot name: no command may run on the classifier alone.
         super::session::hold_auto_back(actor, thread);
@@ -242,7 +245,6 @@ fn claude_sandbox(
     agent_id: &clauseo_protocol::AgentId,
     run: &RunFolders,
     matter: &Path,
-    browser: bool,
 ) -> Result<ClaudeSandbox, Off> {
     let tmp = crate::agent::temp::temp_dir(&run.root);
     let skills: Vec<PathBuf> = run
@@ -278,7 +280,6 @@ fn claude_sandbox(
         claude_home: &claude_home,
         data: &run.data_deny.spellings,
         other_matters: &other_matters,
-        browser,
     };
     ClaudeSandbox::for_os(SandboxOs::CURRENT, &paths)
 }
@@ -422,18 +423,19 @@ fn shell_chrome<'a>(actor: &Actor, run: &'a RunFolders) -> Option<&'a Path> {
     run.chrome.as_deref().filter(|_| run.browser_shell)
 }
 
-/// Which browser part `run`'s session gets: the Claude-only line for an agent with no browser on
-/// this OS (`none_here`, Codex on Windows: `browser::no_browser`); else the shell tool's
-/// (Claude), else the one the `browser` entry's state gives (Codex, `browser::entry_part`),
+/// Which browser part `run`'s session gets: `none_here`'s for an agent with no browser on this
+/// OS (`browser::no_browser`: the Claude-only line for Codex on Windows, the no-browser sentence
+/// for Claude on macOS and Linux, `browser::absent_part`); else the shell tool's (Claude on
+/// Windows), else the one the `browser` entry's state gives (Codex, `browser::entry_part`),
 /// else none.
 fn session_part(
     shell: Option<&(clauseo_protocol::ToolState, BrowserPart)>,
     entry: Option<&clauseo_protocol::ToolState>,
     run: &RunFolders,
-    none_here: bool,
+    none_here: Option<BrowserPart>,
 ) -> BrowserPart {
-    if none_here {
-        return BrowserPart::ClaudeOnly;
+    if let Some(part) = none_here {
+        return part;
     }
     match (shell, entry) {
         (Some((_, part)), _) => *part,

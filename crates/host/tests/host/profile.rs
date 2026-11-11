@@ -5,15 +5,13 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use clauseo_protocol::{
-    ClauseoTool, StreamId, ToolState, ToolsUnavailableReason, ViewEntry, ViewPatchBody,
-};
+use clauseo_protocol::{StreamId, ToolState, ToolsUnavailableReason, ViewEntry, ViewPatchBody};
 use serde_json::json;
 
 use crate::profile_rig::{
-    CLAUDE, CODEX, Hook, Seen, Wired, agent_lines, agents, browser_server, codex_lines,
-    codex_lines_for, escaped, filled_browser, first_frame_tools, notes, path_text, settings,
-    template, tool, turn,
+    CLAUDE, CODEX, Hook, Seen, Wired, agent_lines, agents, browser_server, claude_servers,
+    claude_tools, codex_lines, codex_lines_for, escaped, filled_browser, first_frame_tools, notes,
+    path_text, settings, template, turn,
 };
 use crate::support::{Dir, FAKE, Scenario};
 use crate::write;
@@ -382,10 +380,7 @@ fn the_header_shows_the_tools_and_a_relaunch_replaces_them() {
     turn(&host, thread);
     assert_eq!(
         first_frame_tools(&host, thread),
-        [
-            tool(ClauseoTool::WebSearch, None),
-            tool(ClauseoTool::Browser, Some(ToolsUnavailableReason::NoProxy)),
-        ]
+        claude_tools(Some(ToolsUnavailableReason::NoProxy))
     );
     host.shutdown();
 
@@ -395,7 +390,7 @@ fn the_header_shows_the_tools_and_a_relaunch_replaces_them() {
         &agent_lines(
             "hd-load",
             "session/load",
-            &json!({"sessionId": "sess-1", "mcpServers": [filled_browser()]}),
+            &json!({"sessionId": "sess-1", "mcpServers": claude_servers(&[filled_browser()])}),
             &[],
         ),
     );
@@ -411,13 +406,7 @@ fn the_header_shows_the_tools_and_a_relaunch_replaces_them() {
             .with_browser_executable(Some(PathBuf::from("/chrome")))
     });
     turn(&host, thread);
-    assert_eq!(
-        first_frame_tools(&host, thread),
-        [
-            tool(ClauseoTool::WebSearch, None),
-            tool(ClauseoTool::Browser, None)
-        ]
-    );
+    assert_eq!(first_frame_tools(&host, thread), claude_tools(None));
     host.shutdown();
 }
 
@@ -463,10 +452,7 @@ fn an_open_subscriber_gets_the_tools_once_the_session_starts() {
     let mut view = host.view(StreamId::Thread(thread), None);
     view.until_items(1);
     turn(&host, thread);
-    let shown = vec![
-        tool(ClauseoTool::WebSearch, None),
-        tool(ClauseoTool::Browser, Some(ToolsUnavailableReason::NoProxy)),
-    ];
+    let shown = claude_tools(Some(ToolsUnavailableReason::NoProxy));
     view.until("the header's tools", |view| {
         upserted_tools(view).last() == Some(&shown)
     });

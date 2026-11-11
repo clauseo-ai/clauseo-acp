@@ -24,8 +24,9 @@ pub const BROWSER: &str = "browser";
 /// child instead, with no Seatbelt and no permission profile (codex 0.162.1
 /// `codex-mcp/src/rmcp_client.rs:1216-1238`, `rmcp-client/src/stdio_server_launcher.rs:262-288`),
 /// so the guard, which refuses every tool off agent-browser's `core` profile and every argument
-/// naming a file, is what holds the browser to its own folder there. Claude keeps the shell
-/// command, its rules and its skill (`ProfileHook::browser_tool`).
+/// naming a file, is what holds the browser to its own folder there. Claude has the shell
+/// command, its rules and its skill on Windows alone (`ProfileHook::browser_tool`,
+/// [`no_browser`]).
 ///
 /// Not on Windows ([`no_browser`]).
 pub fn browser_mcp(kind: Option<AgentKind>) -> bool {
@@ -37,21 +38,47 @@ pub fn browser_mcp_on(kind: Option<AgentKind>, windows: bool) -> bool {
     kind == Some(AgentKind::Codex) && !windows
 }
 
-/// Whether an agent of `kind` gets no browser at all, neither the entry nor the shell command:
-/// Codex on Windows. Clauseo gives Codex's shell the unelevated restricted-token sandbox there
-/// (`windows.sandbox = "unelevated"`), whose only network block is proxy variables that leave
-/// loopback out (codex 0.162.1 `windows-sandbox-rs/src/env.rs:126-170`, applied at
-/// `spawn_prep.rs:141-143`; the firewall rules exist only in the elevated setup). agent-browser's
-/// daemon port and Chrome's debugging port are unauthenticated, so with the entry a shell command
-/// Codex runs without a prompt could drive the unfenced guard's browser past its filter
-/// (decision record 0030). The way back is the elevated sandbox or an authenticated daemon.
+/// Whether an agent of `kind` gets no browser at all, neither the entry nor the shell command,
+/// for launch (decision record 0030):
+///
+/// - Codex on Windows. Clauseo gives Codex's shell the unelevated restricted-token sandbox there
+///   (`windows.sandbox = "unelevated"`), whose only network block is proxy variables that leave
+///   loopback out (codex 0.162.1 `windows-sandbox-rs/src/env.rs:126-170`, applied at
+///   `spawn_prep.rs:141-143`; the firewall rules exist only in the elevated setup).
+///   agent-browser's daemon port and Chrome's debugging port are unauthenticated, so with the
+///   entry a shell command Codex runs without a prompt could drive the unfenced guard's browser
+///   past its filter. The way back is the elevated sandbox or an authenticated daemon.
+/// - Claude on macOS and Linux, whether or not its sandbox ends up on. The shell command would
+///   have to run outside Claude Code's sandbox (`excludedCommands`), and Claude Code's exclusion
+///   check strips `env` and reworks `VAR=` prefixes before it matches, so
+///   `PATH=<a folder Claude writes> agent-browser …` would run Claude's own program unsandboxed,
+///   and quoting (`-q "upload"`, `e"v"al`, a tab) would run unsandboxed past the ask rules too.
+///   The way back is Clauseo's own `agent-browser` shim, after launch.
+///
+/// Claude on Windows keeps its shell command, and Codex on macOS and Linux its guarded entry.
 pub fn no_browser(kind: Option<AgentKind>) -> bool {
     no_browser_on(kind, cfg!(windows))
 }
 
 /// [`no_browser`] as it is on Windows when `windows` is true, and elsewhere when it is false.
 pub fn no_browser_on(kind: Option<AgentKind>, windows: bool) -> bool {
-    kind == Some(AgentKind::Codex) && windows
+    match kind {
+        Some(AgentKind::Codex) => windows,
+        Some(AgentKind::Claude) => !windows,
+        None => false,
+    }
+}
+
+/// Whether any agent gets the `agent-browser` shell command on this OS: Claude on Windows only
+/// ([`no_browser`]; Codex has the `browser` entry instead, [`browser_mcp`]). The app copies the
+/// command into `<data>/tools`, and renders the browser's skill, only then.
+pub fn shell_browser() -> bool {
+    shell_browser_on(cfg!(windows))
+}
+
+/// [`shell_browser`] as it is on Windows when `windows` is true, and elsewhere when it is false.
+pub fn shell_browser_on(windows: bool) -> bool {
+    !no_browser_on(Some(AgentKind::Claude), windows)
 }
 
 /// The case-law connector's reserved server name (R24): a `mcp.servers.case-law` entry in the

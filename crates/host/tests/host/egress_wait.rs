@@ -18,7 +18,7 @@ use clauseo_protocol::{AgentId, StopReason, StreamId, ThreadId};
 use serde_json::{Value, json};
 
 use crate::egress::{Recording, calls, claude_then, wired};
-use crate::profile_rig::{CLAUDE, Wired, turn};
+use crate::profile_rig::{BROWSING, Wired, turn};
 use crate::support::{Dir, Running, wait};
 
 /// The agent's last line: it exits once its turn has ended.
@@ -132,7 +132,7 @@ fn the_proxy_closes_only_once_the_agents_group_is_gone() {
     });
     let folder = dir.folder("m", &[]);
     let matter = host.create_matter("m", &folder);
-    let thread = host.create_thread(matter, CLAUDE);
+    let thread = host.create_thread(matter, BROWSING);
     turn(&host, thread);
     let helper = group::pid(&folder);
     group::until_zombie(helper);
@@ -172,7 +172,7 @@ fn a_straggler_past_the_cap_holds_the_proxy_and_folder_until_the_host_stops() {
     });
     let folder = dir.folder("m", &[]);
     let matter = host.create_matter("m", &folder);
-    let thread = host.create_thread(matter, CLAUDE);
+    let thread = host.create_thread(matter, BROWSING);
     turn(&host, thread);
     let helper = group::pid(&folder);
     group::until_zombie(helper);
@@ -211,7 +211,7 @@ fn a_stop_mid_wait_frees_the_proxy_without_waiting_out_the_cap() {
     });
     let folder = dir.folder("m", &[]);
     let matter = host.create_matter("m", &folder);
-    let thread = host.create_thread(matter, CLAUDE);
+    let thread = host.create_thread(matter, BROWSING);
     turn(&host, thread);
     let helper = group::pid(&folder);
     group::until_zombie(helper);
@@ -253,7 +253,7 @@ fn a_listener_on_the_chrome_port_holds_the_proxy_past_the_agents_exit() {
         }))
     });
     let matter = host.create_matter("m", &dir.folder("m", &[]));
-    let thread = host.create_thread(matter, CLAUDE);
+    let thread = host.create_thread(matter, BROWSING);
     turn(&host, thread);
     let chrome = listener
         .recv_timeout(Duration::from_secs(30))
@@ -279,11 +279,11 @@ fn two_sessions_of_one_matter_close_their_proxies_independently() {
         wired(config, proxy, removals)
     });
     let matter = host.create_matter("m", &dir.folder("m", &[]));
-    let first = host.create_thread(matter, CLAUDE);
+    let first = host.create_thread(matter, BROWSING);
     turn(&host, first);
     // The second session's agent exits after its turn; the first's keeps running.
     claude_then(&dir, &json!([{"name": "browser"}]), &[exit()]);
-    let second = host.create_thread(matter, CLAUDE);
+    let second = host.create_thread(matter, BROWSING);
     turn(&host, second);
     let closed = closes
         .recv_timeout(Duration::from_secs(30))
@@ -294,7 +294,7 @@ fn two_sessions_of_one_matter_close_their_proxies_independently() {
     // The first session ends too, before the host stops: a stop's removal waits only a short
     // grace for the tree's end, which a loaded Windows runner can outlast, and then closes
     // the proxy without the removal.
-    let agent = AgentId::new(CLAUDE).unwrap();
+    let agent = AgentId::new(BROWSING).unwrap();
     wait("stop_agents", host.handle.stop_agents(agent)).unwrap();
     let closed = closes
         .recv_timeout(Duration::from_secs(30))
@@ -329,7 +329,7 @@ fn a_panic_in_the_removal_still_closes_the_proxy() {
         }))
     });
     let matter = host.create_matter("m", &dir.folder("m", &[]));
-    let thread = host.create_thread(matter, CLAUDE);
+    let thread = host.create_thread(matter, BROWSING);
     turn(&host, thread);
     closes
         .recv_timeout(Duration::from_secs(30))
@@ -352,7 +352,7 @@ fn a_panic_in_the_wait_holds_the_proxy_until_the_host_stops() {
         }))
     });
     let matter = host.create_matter("m", &dir.folder("m", &[]));
-    let thread = host.create_thread(matter, CLAUDE);
+    let thread = host.create_thread(matter, BROWSING);
     turn(&host, thread);
     no_close_within(&closes, Duration::from_secs(1));
     assert_eq!(calls(&log), ["open 1"]);
@@ -376,11 +376,11 @@ fn a_removal_thread_that_does_not_start_holds_the_proxy() {
         wired(config, proxy, removals).with_removal_thread_failing()
     });
     let matter = host.create_matter("m", &dir.folder("m", &[]));
-    let thread = host.create_thread(matter, CLAUDE);
+    let thread = host.create_thread(matter, BROWSING);
     turn(&host, thread);
     no_close_within(&closes, Duration::from_secs(1));
     // The host thread was not held up: it still answers.
-    let other = host.create_thread(matter, CLAUDE);
+    let other = host.create_thread(matter, BROWSING);
     assert_ne!(other, thread);
     assert_eq!(calls(&log), ["open 1"]);
     host.shutdown();
@@ -427,15 +427,15 @@ fn a_launch_gets_the_slot_an_ending_session_frees() {
         }))
     });
     let matter = host.create_matter("m", &dir.folder("m", &[]));
-    let ending = host.create_thread(matter, CLAUDE);
+    let ending = host.create_thread(matter, BROWSING);
     turn(&host, ending);
     claude_then(&dir, &json!("{{any}}"), &[]);
-    let running = host.create_thread(matter, CLAUDE);
+    let running = host.create_thread(matter, BROWSING);
     turn(&host, running);
     removing
         .recv_timeout(Duration::from_secs(30))
         .expect("the ended session's removal began");
-    let next = host.create_thread(matter, CLAUDE);
+    let next = host.create_thread(matter, BROWSING);
     turn_after_slot_wait(&host, next, || go.send(()).unwrap());
     let tools = crate::profile_rig::first_frame_tools(&host, next);
     let browser = tools
@@ -481,16 +481,16 @@ fn the_browser_slot_stays_taken_during_the_wait() {
         }))
     });
     let matter = host.create_matter("m", &dir.folder("m", &[]));
-    let waiting = host.create_thread(matter, CLAUDE);
+    let waiting = host.create_thread(matter, BROWSING);
     turn(&host, waiting);
     let chrome = listener
         .recv_timeout(Duration::from_secs(30))
         .expect("the first session's removal began its wait");
     claude_then(&dir, &json!("{{any}}"), &[]);
-    let running = host.create_thread(matter, CLAUDE);
+    let running = host.create_thread(matter, BROWSING);
     turn(&host, running);
     assert_eq!(browser(&host, running), ToolAvailability::Available);
-    let third = host.create_thread(matter, CLAUDE);
+    let third = host.create_thread(matter, BROWSING);
     // Its launch waits for the waiting session's removal, which runs on, until the slot wait
     // runs out.
     turn_after_slot_wait(&host, third, || host.clock.advance(SLOT_WAIT));
@@ -520,7 +520,7 @@ fn the_browser_slot_stays_taken_during_the_wait() {
     let (_keep, never) = channel::<()>();
     let _timed_out = never.recv_timeout(Duration::from_millis(500));
     host.settle();
-    let fourth = host.create_thread(matter, CLAUDE);
+    let fourth = host.create_thread(matter, BROWSING);
     turn(&host, fourth);
     assert_eq!(browser(&host, fourth), ToolAvailability::Available);
     host.shutdown();
