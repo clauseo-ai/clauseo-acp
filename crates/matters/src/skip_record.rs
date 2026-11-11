@@ -26,8 +26,10 @@
 //! - `unread <folder>`: a folder that did not list (not downloaded, permission denied): nothing
 //!   under it is known.
 //!
-//! The path is last and taken to the end of the line (a path holds no control character).
-//! Readers skip a line they do not know.
+//! The path is last and taken to the end of the line (a path holds no control character). A line
+//! a reader cannot read (a kind it does not know, a field that does not parse, a path that fails
+//! `MatterPath`'s check) makes the whole record unreadable: a path left out would look absent, so
+//! nothing is known instead. A reason it does not know reads as `Unknown`.
 
 use std::collections::BTreeMap;
 
@@ -186,29 +188,32 @@ impl SkipRecord {
             text.push_str(&line);
             text.push('\n');
         }
+        #[cfg(test)]
+        if corrupt::active() {
+            text.push_str("skipped cloud-only not-a-size 1.0 notes.txt\n");
+        }
         text
     }
 
-    /// The record a blob's text holds; `None` when its header is not one this version reads
-    /// (then nothing about the turn's start is known). A line that does not read is left out.
+    /// The record a blob's text holds; `None` when its header is not one this version reads, or
+    /// any line does not read: then nothing about the turn's start is known.
     pub(crate) fn decode(text: &str) -> Option<Self> {
-        let mut lines = text.split('\n');
+        let body = text.strip_suffix('\n')?;
+        let mut lines = body.split('\n');
         if lines.next() != Some(HEADER) {
             return None;
         }
         let mut record = Self::default();
         for line in lines {
             if let Some(rest) = line.strip_prefix("skipped ") {
-                if let Some(entry) = skipped_line(rest) {
-                    record.skipped.push(entry);
-                }
+                record.skipped.push(skipped_line(rest)?);
             } else if let Some(rest) = line.strip_prefix("stale ") {
-                if let Some(entry) = skipped_line(&format!("cloud-only {rest}")) {
-                    record.stale.push(entry);
-                }
-            } else if let Some(folder) = line.strip_prefix("unread ")
-                && MatterPath::new(folder).is_ok()
-            {
+                record
+                    .stale
+                    .push(skipped_line(&format!("cloud-only {rest}"))?);
+            } else {
+                let folder = line.strip_prefix("unread ")?;
+                MatterPath::new(folder).ok()?;
                 record.unread.push(folder.to_owned());
             }
         }
@@ -290,6 +295,29 @@ pub(crate) fn reason_from(name: &str) -> SkippedFileReason {
 /// Whether `stat` has the size and modification time of `entry`.
 pub(crate) fn same_stat(entry: &SkipEntry, stat: &Stat) -> bool {
     entry.size == stat.size && entry.mtime == stat.mtime
+}
+
+/// Unit tests only: records written with one line no reader can read, as a damaged or foreign
+/// writer might leave them.
+#[cfg(test)]
+pub(crate) mod corrupt {
+    use std::cell::Cell;
+
+    thread_local! {
+        static ACTIVE: Cell<bool> = const { Cell::new(false) };
+    }
+
+    /// Runs `run` with every record encoded on this thread given a line that does not read.
+    pub(crate) fn write<T>(run: impl FnOnce() -> T) -> T {
+        ACTIVE.set(true);
+        let out = run();
+        ACTIVE.set(false);
+        out
+    }
+
+    pub(super) fn active() -> bool {
+        ACTIVE.get()
+    }
 }
 
 #[cfg(test)]
