@@ -81,12 +81,15 @@ fn data_spellings(data: &Path) -> Vec<PathBuf> {
 
 /// Claude's data folder deny rules for this launch: every entry of `data` that is not the
 /// session's own ([`own_folders`]), nor, for Claude, a `tool-results` folder in its project for
-/// the matter folder (`stored`, and the real path the agent works in); and the own work and
-/// notes folders, which its allow rules let it list and read (`data_fence::own_allow_rules`).
+/// the matter folder (`stored`, and the real path the agent works in); the own work and
+/// notes folders, which its allow rules let it list and read (`data_fence::own_allow_rules`);
+/// and every spelling of each of `others`, the other matters' folders
+/// (`data_fence::other_matters`).
 pub(super) fn launch_deny(
     run: &RunFolders,
     stored: &Path,
     data: &Path,
+    others: &[PathBuf],
     claude_home: Option<&Path>,
 ) -> data_fence::LaunchDeny {
     let own = own_folders(run, stored, claude_home);
@@ -94,8 +97,15 @@ pub(super) fn launch_deny(
     let projects = claude_home.map_or_else(Vec::new, |home| {
         data_fence::claude_projects(home, &[&cwd, stored])
     });
-    let mut deny = data_fence::launch_deny(data_spellings(data), data, &own, &projects);
+    let spellings = data_spellings(data);
+    let keep: Vec<&Path> = [cwd.as_path(), stored]
+        .into_iter()
+        .chain(spellings.iter().map(PathBuf::as_path))
+        .collect();
+    let matters = data_fence::other_matters(others, &keep);
+    let mut deny = data_fence::launch_deny(spellings, data, &own, &projects);
     deny.own_reads = data_fence::own_reads(data, &[&run.work, &run.notes]);
+    deny.matters = matters;
     deny
 }
 
