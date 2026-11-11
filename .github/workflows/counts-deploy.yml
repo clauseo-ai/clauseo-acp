@@ -1,19 +1,26 @@
-# Deploys the counts Worker to t.clauseo.chat (docs/counts-worker.md, "Deploying"), or answers
-# whether one install or tally id has a row.
+# Deploys the counts Worker to t.clauseo.chat (docs/counts-worker.md, "Deploying"), or runs the
+# live check's canary.
 #
 # - Runs on a push to main that touches the Worker, the crate whose schema it takes
 #   (crates/counts, crates/protocol) or this file, so a new value in the crate reaches the
-#   Worker with no Worker change; and by hand (workflow_dispatch): `deploy`, or `check` with one
-#   install or tally id. Never on a pull request: this is the only workflow with the token.
+#   Worker with no Worker change; and by hand (workflow_dispatch, from main): `deploy`, or
+#   `check`, which takes no input. Never on a pull request: this is the only workflow with the
+#   token.
 # - Skipped until Rohan's Cloudflare set-up sets the repository variable COUNTS_DEPLOY_ENABLED to
-#   true. The job runs in the environment counts-deploy (main only, Rohan reviews), and the
-#   secret CLOUDFLARE_API_TOKEN is set on the steps that call Cloudflare, never on the job.
-# - Order: the schema snapshot, then the privacy guard on wrangler.toml, then the account, the
-#   D1 database (found by name, else created in the EU; a refused jurisdiction fails the job),
-#   the guard again on the generated wrangler.deploy.toml, the migrations, and the deploy.
-# - Run logs on this public repo are public. No step prints a database id, an account, a row,
-#   a total or an id other than the one `check` was given; `check` prints one count, 0 or 1.
-#   No step runs `wrangler whoami` or `wrangler tail`.
+#   true, and on any ref but main. The job runs in the environment counts-deploy, whose branch
+#   rule allows main only and whose reviewer is Rohan.
+# - Order: the schema snapshot, the Worker's own tests (cargo test, pnpm test), the privacy guard
+#   and the wasm build all run before any step has a secret. The build runs with no token, and
+#   the deploy copy (wrangler.deploy.toml) has no [build], so wrangler never builds with the
+#   token present. Then the D1 database (found by name, else created in the EU; a refused
+#   jurisdiction fails the job), the guard on the deploy copy, the migrations and the deploy.
+# - Secrets: CLOUDFLARE_API_TOKEN, and optionally CLOUDFLARE_ACCOUNT_ID (unset: wrangler uses the
+#   one account the token can see). Both are set only on the steps that call Cloudflare, and
+#   GitHub masks them. No env value carries any other id.
+# - Run logs on this public repo are public. Every wrangler call goes through
+#   scripts/deploy.mjs, which prints wrangler's output only through a redactor (UUIDs, 32-hex ids,
+#   emails, account names) and masks the database id once found. `check` prints only the canary's
+#   two row counts, then deletes the canary rows. No step runs `wrangler whoami` or `wrangler tail`.
 name: counts-deploy
 
 on:
@@ -27,18 +34,10 @@ on:
   workflow_dispatch:
     inputs:
       action:
-        description: deploy, or check one id
+        description: "deploy, or check: count and delete the live check's canary rows"
         type: choice
         options: [deploy, check]
         default: deploy
-      install:
-        description: "check: the install id to count in report (or leave empty)"
-        required: false
-        default: ""
-      tally:
-        description: "check: the tally id to count in tally (or leave empty)"
-        required: false
-        default: ""
 
 permissions:
   contents: read
@@ -56,10 +55,10 @@ env:
 
 jobs:
   deploy:
-    name: ${{ inputs.action == 'check' && 'check one id' || 'deploy' }}
-    if: vars.COUNTS_DEPLOY_ENABLED == 'true'
+    name: ${{ inputs.action == 'check' && 'check the canary' || 'deploy' }}
+    if: vars.COUNTS_DEPLOY_ENABLED == 'true' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    timeout-minutes: 60
     environment: counts-deploy
     permissions:
       contents: read
@@ -73,15 +72,28 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Install the Rust toolchain from rust-toolchain.toml
-        run: rustup toolchain install
+      - name: Install the Rust toolchain from rust-toolchain.toml, and the wasm target
+        run: |
+          rustup toolchain install
+          rustup target add wasm32-unknown-unknown
 
+      # Exactly one test must run: a renamed test would otherwise pass by matching nothing.
       - name: The committed JSON Schema matches the crate's types
         working-directory: .
         env:
           INSTA_UPDATE: "no"
           CI: "true"
-        run: cargo test --locked -p clauseo-counts --lib schema::tests::wire::the_committed_schema_matches
+        run: |
+          set -euo pipefail
+          cargo test --locked -p clauseo-counts --lib schema::tests::wire::the_committed_schema_matches -- --exact 2>&1 | tee "$RUNNER_TEMP/snapshot.log"
+          grep -q "test result: ok. 1 passed;" "$RUNNER_TEMP/snapshot.log" ||
+            { echo "::error::the schema snapshot test did not run exactly once"; exit 1; }
+
+      - name: The Worker's native tests
+        run: cargo test --locked
+
+      - name: Install worker-build
+        run: cargo install --locked worker-build --version "$WORKER_BUILD_VERSION"
 
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
         with:
@@ -95,60 +107,51 @@ jobs:
       - name: Install wrangler
         run: pnpm install --frozen-lockfile
 
+      - name: The Worker's tests against wrangler dev --local
+        run: pnpm test
+
       - name: Check wrangler.toml's privacy settings
         run: node scripts/check-deploy.mjs
 
-      # Set: wrangler uses it. Not set: wrangler finds the one account the token can see, and
-      # fails with "More than one account available" when it sees more. Nothing is printed.
-      - name: Find the account ID
-        env:
-          ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
-        run: |
-          if [ -n "$ACCOUNT_ID" ]; then
-            echo "CLOUDFLARE_ACCOUNT_ID=$ACCOUNT_ID" >> "$GITHUB_ENV"
-            echo "Using the repository variable CLOUDFLARE_ACCOUNT_ID."
-          else
-            echo "CLOUDFLARE_ACCOUNT_ID is not set: wrangler picks the token's one account."
-          fi
+      # No secret here: wrangler deploy uploads this output and builds nothing.
+      - name: Build the Worker
+        if: env.ACTION == 'deploy'
+        run: worker-build --release
 
       - name: Find or create the D1 database, and write the checked deploy config
         if: env.ACTION == 'deploy'
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: node scripts/deploy.mjs config
 
       - name: Find the D1 database, and write the checked deploy config
         if: env.ACTION == 'check'
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: node scripts/deploy.mjs config --no-create
 
       - name: Check the deploy config's privacy settings
         run: node scripts/check-deploy.mjs wrangler.deploy.toml --deployed
 
-      - name: Count the one id given
+      - name: Count and delete the canary rows
         if: env.ACTION == 'check'
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          INSTALL: ${{ inputs.install }}
-          TALLY: ${{ inputs.tally }}
-        run: node scripts/deploy.mjs check-id
-
-      - name: Install the wasm target and worker-build
-        if: env.ACTION == 'deploy'
-        run: |
-          rustup target add wasm32-unknown-unknown
-          cargo install --locked worker-build --version "$WORKER_BUILD_VERSION"
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: node scripts/deploy.mjs canary
 
       - name: Apply the migrations
         if: env.ACTION == 'deploy'
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-        run: pnpm exec wrangler d1 migrations apply clauseo-counts --remote --config wrangler.deploy.toml
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: node scripts/deploy.mjs migrate
 
-      # wrangler deploy runs the build command in wrangler.toml (worker-build --release).
       - name: Deploy
         if: env.ACTION == 'deploy'
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-        run: pnpm exec wrangler deploy --config wrangler.deploy.toml
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: node scripts/deploy.mjs deploy
