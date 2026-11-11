@@ -264,7 +264,7 @@ fn commands(servers: &[McpServer]) -> Vec<PathBuf> {
         .collect()
 }
 
-fn folder(actor: &Actor, thread: ThreadId) -> Result<PathBuf, Error> {
+pub(super) fn folder(actor: &Actor, thread: ThreadId) -> Result<PathBuf, Error> {
     let matter = actor.check_thread(thread)?.row.matter;
     Ok(crate::agent::session_folder(std::path::Path::new(
         &actor.check_matter(matter)?.row.folder_path,

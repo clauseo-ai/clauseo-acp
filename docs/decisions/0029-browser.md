@@ -50,7 +50,7 @@ passed exactly as given. Anything else exits 2 with a reason and the mode's usag
 | `AGENT_BROWSER_MAX_OUTPUT` | `25000` (characters; see below) |
 | `AGENT_BROWSER_DEFAULT_TIMEOUT` | `30000` |
 | `HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY` (and lower case on Unix) | the validated proxy URL; no `NO_PROXY` |
-| `AGENT_BROWSER_DOWNLOAD_PATH`, `_SCREENSHOT_DIR` | `<cwd>/downloads`, `<cwd>/screenshots` |
+| `AGENT_BROWSER_DOWNLOAD_PATH`, `_SCREENSHOT_DIR` | the downloads folder (`--downloads`, else `<cwd>/downloads`), `<cwd>/screenshots` |
 | `AGENT_BROWSER_SOCKET_DIR` | Unix: from the guard's environment, the folder the host made for the session (below); Windows: `<cwd>\run`, whatever the environment says |
 | `AGENT_BROWSER_STREAM_PORT` | from the guard's environment, set by the host; a port from 1024 to 65535, no leading zero |
 | Unix: `HOME`, `TMPDIR` | `<cwd>/home`, `<cwd>/tmp` |
@@ -357,7 +357,10 @@ Behaviour that changes with it:
   relay ends, so a Chrome that died between two polls while agent-browser ended (the agent
   closing its stdin at the same moment) still makes the guard exit 1: an agent that has gone gets
   no restart.
-- **Downloads** land in `<cwd>/downloads` as before, now moved there by the guard
+- **Downloads** land in the matter: the guard's `--downloads`, which the host fills with
+  `<matter folder>/downloads` (`{matter_downloads}`) and the guard makes; without the flag,
+  `<cwd>/downloads`, the run folder, where the agent never looked (stage C, 2026-11-11: three
+  PDFs saved there, the agent never told). Each file is moved there by the guard
   (`browser_guard/downloads.rs`): Chrome downloads into `<profile>/downloads-staging`, and every
   200 ms the guard moves each finished file (Chrome renames `*.crdownload`, or on Windows its
   first name `<guid>.tmp`, only when done: "Windows fixes from G17", below) into the downloads
@@ -381,6 +384,13 @@ Behaviour that changes with it:
   (`browser.rs:784`, `browser.rs:2563-2574`), and Chrome resets it when the client that set it
   disconnects. agent-browser's explicit `download` tool, with a path the agent picks, is not in
   `--tools core` and is unchanged.
+- **The agent is told** (`downloads/saved.rs`). Each delivered file is recorded under the name
+  the mover gave it, and the next tool result the guard relays carries `Saved <name> to
+  downloads/ in the matter.` An `agent_browser_open` of a URL Chrome saves rather than shows (a
+  PDF, with `plugins.always_open_pdf_externally`) fails in agent-browser with
+  `net::ERR_ABORTED`; the guard waits up to 5 s for the mover and answers that call as a success
+  naming the file, or saying the download is still in progress (no error) when a file is still
+  in staging then. With nothing in staging by then, the error goes on as it was.
 - **Launch options from the agent** (`extraArgs` and the like) have no effect: agent-browser
   launches nothing. `headed` and `webgpu` were refused already.
 
@@ -840,9 +850,10 @@ held back (fail closed).
 - **The mark is made sure of in staging, then the file moves.** Once the wait ends, the guard
   checks the mark in the staging folder, which Chrome made and the agent cannot reach, and writes
   one where needed; the move then keeps it: `MoveFileExW` within one volume renames the file with
-  its streams, the Unix hard link is the same inode with its attributes. Staging and the
-  downloads folder are both under the guard's `--cwd`, and `write::move_new` has no copy
-  fallback: a move across volumes fails and is retried, never made without the mark. Nothing is
+  its streams, the Unix hard link is the same inode with its attributes. `write::move_new` has
+  no copy fallback: a matter on another volume than the data folder gets no download (the
+  move fails with `CrossesDevices`; the file stays in staging and goes with the profile), and
+  the agent is told once that the file was not saved, never given it without the mark. Nothing is
   written after the move, so no write lands in the agent-writable downloads folder, follows a
   link planted there, or leaves a moment where the file is there unmarked.
 - **The zone rules (Windows).** A `Zone.Identifier` whose `ZoneId` is 1 (intranet), 2 (trusted),

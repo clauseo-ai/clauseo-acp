@@ -440,6 +440,7 @@ crates/mcp/src/write/windows.rs - unsafe_code
 crates/mcp/src/write/mac.rs - unsafe_code
 crates/mcp/examples/chrome_stub.rs record clippy::disallowed_methods
 crates/mcp/examples/daemon_stub.rs daemon clippy::disallowed_methods
+crates/mcp/examples/daemon_stub.rs chrome_part clippy::disallowed_methods
 crates/mcp/examples/parent_stub.rs main clippy::disallowed_methods
 crates/mcp/tests/guard/lifecycle.rs within clippy::disallowed_methods
 crates/mcp/tests/guard/lifecycle.rs throughout clippy::disallowed_methods

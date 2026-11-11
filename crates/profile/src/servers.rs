@@ -9,8 +9,8 @@ use clauseo_protocol::AgentKind;
 
 use crate::paths::ProfilePaths;
 use crate::placeholders::{
-    BROWSER_DIR, BROWSER_EXECUTABLE, CDP_PORT, DAEMON_PORT, RELAY_PORT, RELAY_TOKEN_FILE,
-    SESSION_ID, SOCKET_DIR, STREAM_PORT,
+    BROWSER_DIR, BROWSER_EXECUTABLE, CDP_PORT, DAEMON_PORT, MATTER_DOWNLOADS, RELAY_PORT,
+    RELAY_TOKEN_FILE, SESSION_ID, SOCKET_DIR, STREAM_PORT,
 };
 
 /// The reserved server name: a `mcp.servers.browser` entry in the settings is dropped.
@@ -107,15 +107,17 @@ pub struct ProfileServer {
 
 /// The `browser` entry. The command is `clauseo-mcp`; its `browser-guard` runs agent-browser's
 /// `mcp --tools core` with `--cwd` the session's browser state folder (`{browser_dir}`, one
-/// token the host fills with a native path) and `--cdp-port {cdp_port}`, plus
-/// `--daemon-port {daemon_port}` on Windows. It derives from `--cwd` every other folder
-/// agent-browser needs (downloads, screenshots, its run profile, `HOME`, `TMPDIR` or `TEMP`,
-/// and the Windows socket folder), and fixes the idle timeout. The entry carries four variables,
-/// five on macOS and Linux with the host's socket folder (`{socket_dir}`): no proxy, so Chrome
-/// goes direct, as Claude's shell browser does; the egress allowlist belongs to the parked Safe
-/// workspace (an entry holding `{proxy_port}` would get the session's proxy, and the host opens
-/// one only then). A sidecar path that is no UTF-8 is
-/// written lossily: the host's launch would then fail, which is no worse than a missing browser.
+/// token the host fills with a native path), `--downloads` the matter's downloads folder
+/// (`{matter_downloads}`, where the files the browser saves are delivered) and
+/// `--cdp-port {cdp_port}`, plus `--daemon-port {daemon_port}` on Windows. It derives from
+/// `--cwd` every other folder agent-browser needs (screenshots, its run profile, Chrome's
+/// download staging, `HOME`, `TMPDIR` or `TEMP`, and the Windows socket folder), and fixes the
+/// idle timeout. The entry carries four variables, five on macOS and Linux with the host's
+/// socket folder (`{socket_dir}`): no proxy, so Chrome goes direct, as Claude's shell browser
+/// does; the egress allowlist belongs to the parked Safe workspace (an entry holding
+/// `{proxy_port}` would get the session's proxy, and the host opens one only then). A sidecar
+/// path that is no UTF-8 is written lossily: the host's launch would then fail, which is no
+/// worse than a missing browser.
 pub fn browser(paths: &ProfilePaths) -> ProfileServer {
     browser_for(paths, cfg!(windows))
 }
@@ -129,6 +131,8 @@ fn browser_for(paths: &ProfilePaths, windows: bool) -> ProfileServer {
         agent_browser,
         "--cwd".to_owned(),
         BROWSER_DIR.to_owned(),
+        "--downloads".to_owned(),
+        MATTER_DOWNLOADS.to_owned(),
         "--cdp-port".to_owned(),
         CDP_PORT.to_owned(),
     ];

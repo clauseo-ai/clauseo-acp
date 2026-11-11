@@ -396,14 +396,24 @@ fn a_moved_file_is_quarantined_with_or_without_a_mark_before() {
 #[test]
 fn an_idle_stop_delivers_what_finished_and_the_next_start_delivers_again() {
     let (dir, staging, downloads) = scratch("idle-stop");
-    let mover = Mover::start(staging.clone(), downloads.clone(), Arc::default());
+    let mover = Mover::start(
+        staging.clone(),
+        downloads.clone(),
+        Arc::default(),
+        Arc::default(),
+    );
     write::write(&staging.join("report.pdf"), "first").unwrap();
     write::write(&staging.join("big.zip.crdownload"), "half").unwrap();
     mover.finish();
     assert_eq!(names(&downloads), ["report.pdf"]);
     assert_eq!(names(&staging), ["big.zip.crdownload"]);
     assert!(marks::marked(&downloads.join("report.pdf")));
-    let mover = Mover::start(staging.clone(), downloads.clone(), Arc::default());
+    let mover = Mover::start(
+        staging.clone(),
+        downloads.clone(),
+        Arc::default(),
+        Arc::default(),
+    );
     write::write(&staging.join("second.pdf"), "second").unwrap();
     mover.finish();
     assert_eq!(names(&downloads), ["report.pdf", "second.pdf"]);

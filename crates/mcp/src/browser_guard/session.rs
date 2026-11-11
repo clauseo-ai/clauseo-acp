@@ -31,7 +31,7 @@ use std::time::{Duration, Instant};
 use serde_json::Value;
 
 use super::chrome::{self, Chrome, Spec};
-use super::downloads::Held;
+use super::downloads::{Held, Saved};
 use super::parent::{self, Parent};
 use super::port_file::Expected;
 use super::record::{self, ChromeState};
@@ -85,6 +85,8 @@ pub(crate) struct Launcher {
     /// `AGENT_BROWSER_EXECUTABLE_PATH`.
     pub(crate) executable: PathBuf,
     pub(crate) cwd: PathBuf,
+    /// The downloads folder (the guard's `--downloads`), which the mover delivers to.
+    pub(crate) downloads: PathBuf,
     /// The run's id and profile (`runs.rs`), kept from one start to the next.
     pub(crate) run: String,
     pub(crate) profile: PathBuf,
@@ -120,6 +122,7 @@ impl Launcher {
         Launcher {
             executable: dir.join("chrome"),
             cwd: dir.to_owned(),
+            downloads: dir.join("downloads"),
             run: "1-0000abcd".to_owned(),
             profile: dir.join("chrome-profile-1-0000abcd"),
             cdp_port: 61_101,
@@ -151,6 +154,9 @@ pub(crate) struct Shared {
     /// The downloads Chrome holds for confirmation, which the agent has not been told about yet
     /// (`downloads/held.rs`); kept across starts.
     pub(crate) held: Arc<Held>,
+    /// The files the mover delivered, which the agent has not been told about yet
+    /// (`downloads/saved.rs`); kept across starts.
+    pub(crate) saved: Arc<Saved>,
 }
 
 impl Shared {
@@ -171,6 +177,7 @@ impl Shared {
             closing: AtomicBool::new(false),
             oneshot: Mutex::new(None),
             held: Arc::default(),
+            saved: Arc::default(),
         }
     }
 }
@@ -201,8 +208,11 @@ pub(crate) struct State {
 /// What a request sent to the running agent-browser is, for its reply.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Request {
-    /// A tool call but `agent_browser_close`: its reply carries the held-download note.
+    /// A tool call but those below: its reply carries the download notes.
     Call,
+    /// An `agent_browser_open` call: its reply, when the URL turned into a download, says the
+    /// file was saved (`downloads/saved.rs`).
+    Open,
     /// An `agent_browser_close` call: its reply stops the browser (`relay.rs`).
     Close,
     /// `tools/list`: its reply loses the tools the guard refuses (`filter::only_allowed_tools`).
@@ -214,7 +224,7 @@ pub(crate) enum Request {
 impl Request {
     /// Whether it is a tool call, whose reply restarts the idle time.
     pub(crate) fn is_call(self) -> bool {
-        matches!(self, Request::Call | Request::Close)
+        matches!(self, Request::Call | Request::Close | Request::Open)
     }
 }
 
@@ -311,6 +321,7 @@ fn start_both(
     let spec = Spec {
         executable: &launcher.executable,
         cwd: &launcher.cwd,
+        downloads: &launcher.downloads,
         profile: &launcher.profile,
         cdp_port: launcher.cdp_port,
         proxy: launcher.proxy.as_deref(),
@@ -339,7 +350,7 @@ fn start_both(
         launcher.cdp_port,
         start_wait(),
         parent,
-        Arc::clone(&shared.held),
+        (Arc::clone(&shared.held), Arc::clone(&shared.saved)),
     )?;
     note(&format!(
         "Chrome is listening on the claimed debugging port {}",

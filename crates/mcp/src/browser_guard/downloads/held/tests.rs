@@ -155,7 +155,12 @@ fn a_held_name_counts_only_once_it_stays_for_two_sweeps() {
 #[test]
 fn a_stop_clears_held_downloads_and_keeps_the_rest() {
     let (dir, staging, downloads) = scratch("clear");
-    let mover = Mover::start(staging.clone(), downloads.clone(), Arc::default());
+    let mover = Mover::start(
+        staging.clone(),
+        downloads.clone(),
+        Arc::default(),
+        Arc::default(),
+    );
     write::write(&staging.join("Unconfirmed 1.crdownload"), "MZ").unwrap();
     write::write(&staging.join("big.zip.crdownload"), "half").unwrap();
     mover.finish();

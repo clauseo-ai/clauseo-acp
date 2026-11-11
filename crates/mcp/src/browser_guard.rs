@@ -1,6 +1,8 @@
 //! The `browser-guard` mode: `clauseo-mcp browser-guard --agent-browser <file> --cwd <folder>
-//! --cdp-port <port> -- <agent-browser args...>`, with `--daemon-port <port>` after
-//! `--cdp-port` on Windows.
+//! [--downloads <folder>] --cdp-port <port> -- <agent-browser args...>`, with
+//! `--daemon-port <port>` after `--cdp-port` on Windows. `--downloads` is where Chrome's
+//! downloads are delivered (`downloads.rs`): `<matter>/downloads` in a Codex session, made
+//! here if missing; without it, `<cwd>/downloads`.
 //!
 //! In order: note the guard's parent (`parent.rs`; exit 1 if it is gone already), read the
 //! command line (exit 2 on anything else), build the child's environment from the host's
@@ -77,6 +79,8 @@ const USAGE_WINDOWS: &str = "usage: clauseo-mcp browser-guard --agent-browser <f
 
 /// The exit code for a bad command line or environment.
 const EXIT_USAGE: i32 = 2;
+/// agent-browser's download folder variable, set to `--downloads`.
+const DOWNLOAD_PATH: &str = "AGENT_BROWSER_DOWNLOAD_PATH";
 /// The exit code when the guard cannot make its folders or start agent-browser.
 const EXIT_FAILED: i32 = 1;
 
@@ -85,6 +89,8 @@ const EXIT_FAILED: i32 = 1;
 struct Command {
     agent_browser: PathBuf,
     cwd: PathBuf,
+    /// `--downloads`, or `<cwd>/downloads`.
+    downloads: PathBuf,
     /// Chrome's debugging port, passed to the guard's Chrome as `--remote-debugging-port`.
     cdp_port: u16,
     /// Windows only: the port agent-browser's daemon must listen on.
@@ -163,8 +169,16 @@ pub fn run(args: &[OsString]) -> Result<i32, Failure> {
         env.insert(env::SESSION.to_owned(), OsString::from(&session));
         (env, session)
     };
-    for folder in env::folders(env::Os::CURRENT, &command.cwd) {
-        make_folder(&folder).map_err(|error| {
+    let mut env = env;
+    // The download tool's folder is the mover's: agent-browser's own `download` is refused
+    // (`filter.rs`), but nothing names a folder outside the matter for a download.
+    env.insert(
+        DOWNLOAD_PATH.to_owned(),
+        command.downloads.clone().into_os_string(),
+    );
+    let folders = env::folders(env::Os::CURRENT, &command.cwd);
+    for folder in folders.iter().chain([&command.downloads]) {
+        make_folder(folder).map_err(|error| {
             failed(&format!(
                 "cannot make the folder {}: {error}",
                 folder.display()
@@ -188,13 +202,19 @@ fn serve(
         .get(env::SOCKET_DIR)
         .map_or_else(PathBuf::new, PathBuf::from);
     #[cfg(unix)]
-    let reaper = reaper::Reaper::start(&socket_dir, session, &command.cwd, run.id())
-        .map_err(|error| failed(&format!("cannot start the reaper: {error}")))?;
+    let reaper = reaper::Reaper::start(
+        &socket_dir,
+        session,
+        (&command.cwd, &command.downloads),
+        run.id(),
+    )
+    .map_err(|error| failed(&format!("cannot start the reaper: {error}")))?;
     let launcher = session::Launcher {
         executable: env
             .get(env::EXECUTABLE_PATH)
             .map_or_else(PathBuf::new, PathBuf::from),
         cwd: command.cwd.clone(),
+        downloads: command.downloads.clone(),
         run: run.id().to_owned(),
         profile: run.profile().to_owned(),
         cdp_port: command.cdp_port,
@@ -332,10 +352,19 @@ const EXPECTED_UNIX: &str =
 const EXPECTED_WINDOWS: &str = "expected --agent-browser <file> --cwd <folder> --cdp-port <port> --daemon-port <port> -- <args...>";
 
 /// Exactly `--agent-browser <file> --cwd <folder> --cdp-port <port> -- <args...>`, in that
-/// order, with `--daemon-port <port>` after `--cdp-port` on Windows and never on Unix; each
-/// path absolute and existing, each port from 1024 to 65535 in plain decimal. The child's
-/// arguments are kept as given.
+/// order, with `--downloads <folder>` after `--cwd` or not, and `--daemon-port <port>` after
+/// `--cdp-port` on Windows and never on Unix; each path absolute and existing (for
+/// `--downloads`, its parent: the guard makes the folder), each port from 1024 to 65535 in plain
+/// decimal. The child's arguments are kept as given.
 fn parse(args: &[OsString], os: env::Os) -> Result<Command, &'static str> {
+    let (args, downloads) = match args.get(4..6) {
+        Some([flag, folder]) if flag == "--downloads" => {
+            let mut rest = args.get(..4).unwrap_or_default().to_vec();
+            rest.extend_from_slice(args.get(6..).unwrap_or_default());
+            (rest, Some(PathBuf::from(folder)))
+        }
+        _ => (args.to_vec(), None),
+    };
     let expected = match os {
         env::Os::Unix => EXPECTED_UNIX,
         env::Os::Windows => EXPECTED_WINDOWS,
@@ -348,7 +377,7 @@ fn parse(args: &[OsString], os: env::Os) -> Result<Command, &'static str> {
         flag_cdp,
         cdp,
         rest @ ..,
-    ] = args
+    ] = args.as_slice()
     else {
         return Err(expected);
     };
@@ -378,6 +407,10 @@ fn parse(args: &[OsString], os: env::Os) -> Result<Command, &'static str> {
     if !cwd.is_absolute() || !cwd.is_dir() {
         return Err("--cwd must be the absolute path of an existing folder");
     }
+    let downloads = downloads.unwrap_or_else(|| cwd.join("downloads"));
+    if !downloads.is_absolute() || !downloads.parent().is_some_and(Path::is_dir) {
+        return Err("--downloads must be an absolute path in an existing folder");
+    }
     let cdp_port = env::port_of(cdp)
         .ok_or("--cdp-port must be a port from 1024 to 65535 with no leading zero")?;
     let daemon_port = match daemon {
@@ -390,6 +423,7 @@ fn parse(args: &[OsString], os: env::Os) -> Result<Command, &'static str> {
     Ok(Command {
         agent_browser: program.to_owned(),
         cwd: cwd.to_owned(),
+        downloads,
         cdp_port,
         daemon_port,
         child_args: child_args.to_vec(),

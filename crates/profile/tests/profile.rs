@@ -297,6 +297,8 @@ fn the_browser_entry_runs_the_guard_with_its_ports_and_variables() {
         agent_browser.as_str(),
         "--cwd",
         "{browser_dir}",
+        "--downloads",
+        "{matter_downloads}",
         "--cdp-port",
         "{cdp_port}",
     ];

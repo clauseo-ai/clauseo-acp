@@ -12,13 +12,16 @@ use std::sync::{Arc, mpsc};
 use serde_json::Value;
 
 use super::super::Child;
+use super::super::chrome::STAGING;
+use super::super::downloads::{self, OPEN_WAIT};
 use super::super::filter::{self, MAX_LINE_BYTES, RESERVED_ID as CLOSE_ID, Verdict};
 use super::super::parent::Parent;
 use super::super::port_file::{Expected, Status};
 use super::super::session::{self, Request, Shared};
 use super::lines::{Line, Overflow, answer_all, emit, lock, read_line, write_child};
 use super::{
-    CHILD_MAX_LINE_BYTES, CLOSE_REQUEST, CLOSE_TOOL, ENDED, Event, closed_reply, oneshot, send,
+    CHILD_MAX_LINE_BYTES, CLOSE_REQUEST, CLOSE_TOOL, ENDED, Event, OPEN_TOOL, closed_reply,
+    oneshot, send,
 };
 use crate::browser_guard::note;
 use crate::connector::head;
@@ -129,6 +132,7 @@ fn route(shared: &Arc<Shared>, parent: &Parent, events: &mpsc::Sender<Event>, te
     let call = id.is_some() && method == Some("tools/call");
     let request = match (call, message["params"]["name"].as_str()) {
         (true, Some(CLOSE_TOOL)) => Request::Close,
+        (true, Some(OPEN_TOOL)) => Request::Open,
         (true, _) => Request::Call,
         (false, _) if method == Some("tools/list") => Request::List,
         (false, _) => Request::Other,
@@ -182,8 +186,9 @@ fn route(shared: &Arc<Shared>, parent: &Parent, events: &mpsc::Sender<Event>, te
 }
 
 /// Child to agent, for the start of agent-browser numbered `generation`: each whole line as
-/// read (a tool call's result with the held-download note added, `downloads/held.rs`, and the
-/// tool list without the tools the guard refuses, `filter::only_allowed_tools`), but the
+/// read (a tool call's result with the download notes added, `downloads/held.rs` and
+/// `downloads/saved.rs`; an `open` that became a download answered as saved; and the tool
+/// list without the tools the guard refuses, `filter::only_allowed_tools`), but the
 /// reply to the close request, and nothing once the guard has ended this start
 /// (it answered what was in flight itself). After each line, every one of the port checks.
 /// Returns the event that ends it: [`Event::ChildEnded`], [`Event::ChildOversize`] or
@@ -224,15 +229,27 @@ pub(crate) fn pump_child(
             (answered, state.sent_count())
         };
         let (answered, sent) = answered;
-        // A tool call's result carries the note on held downloads (`downloads/held.rs`); the
-        // tool list loses the tools the guard refuses.
-        let changed = match answered {
-            Some(Request::Call | Request::Close) => shared.held.note_into(&line),
+        // An `open` that turned into a download waits for the file (`downloads/saved.rs`); a
+        // tool call's result carries the download notes; the tool list loses the tools the
+        // guard refuses.
+        let first = match answered {
+            Some(Request::Open) => {
+                let staging = shared.launcher.profile.join(STAGING);
+                downloads::open_reply(&line, &shared.saved, &staging, OPEN_WAIT)
+            }
             Some(Request::List) => filter::only_allowed_tools(&line),
-            Some(Request::Other) | None => None,
+            Some(Request::Call | Request::Close | Request::Other) | None => None,
         };
-        if let Some(changed) = changed {
+        if let Some(changed) = first {
             line = changed;
+        }
+        if answered.is_some_and(Request::is_call) {
+            if let Some(changed) = shared.held.note_into(&line) {
+                line = changed;
+            }
+            if let Some(changed) = shared.saved.note_into(&line) {
+                line = changed;
+            }
         }
         line.push(b'\n');
         if agent_reads && emit(&shared.out, &line).is_err() {

@@ -36,6 +36,7 @@ fn the_cdp_port_is_required_and_parsed() {
         Command {
             agent_browser: program.clone().into(),
             cwd: cwd.clone().into(),
+            downloads: std::path::Path::new(&cwd).join("downloads"),
             cdp_port: 61_101,
             daemon_port: None,
             child_args: args(&["mcp"]),
@@ -46,6 +47,39 @@ fn the_cdp_port_is_required_and_parsed() {
         Os::Unix,
     );
     assert!(without.unwrap_err().starts_with("expected --agent-browser"));
+}
+
+/// `--downloads` after `--cwd` names the mover's folder (a Codex session's
+/// `<matter>/downloads`), which need not exist yet; its parent must. Anywhere else it is refused.
+#[test]
+fn downloads_names_the_matters_folder_after_cwd() {
+    let (program, cwd) = program_and_cwd();
+    let matter_downloads = std::path::Path::new(&cwd).join("matter-downloads");
+    let folder = matter_downloads.to_str().unwrap();
+    let with = |at_end: bool, folder: &str| {
+        let mut list = vec!["--agent-browser", &program, "--cwd", &cwd];
+        if !at_end {
+            list.extend(["--downloads", folder]);
+        }
+        list.extend(["--cdp-port", "61101", "--", "mcp"]);
+        if at_end {
+            list.extend(["--downloads", folder]);
+        }
+        args(&list)
+    };
+    let parsed = parse(&with(false, folder), Os::Unix).unwrap();
+    assert_eq!(parsed.downloads, matter_downloads);
+    assert_eq!(parsed.child_args, args(&["mcp"]));
+    // After `--` it is agent-browser's argument, not the guard's.
+    let late = parse(&with(true, folder), Os::Unix).unwrap();
+    assert_eq!(late.downloads, std::path::Path::new(&cwd).join("downloads"));
+    assert_eq!(late.child_args, args(&["mcp", "--downloads", folder]));
+    for bad in ["relative/downloads", "/no/such/parent/downloads"] {
+        assert_eq!(
+            parse(&with(false, bad), Os::Unix).unwrap_err(),
+            "--downloads must be an absolute path in an existing folder"
+        );
+    }
 }
 
 #[test]

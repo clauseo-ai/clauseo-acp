@@ -16,7 +16,7 @@
 //! start and kept by every later one, so tabs, cookies and storage outlive an idle stop or a
 //! crash; the guard deletes it when it exits. Its `Default/Preferences` sends Chrome's own
 //! downloads to a staging folder inside it, from which `downloads.rs` moves each finished file
-//! into `<cwd>/downloads`.
+//! into the downloads folder (the guard's `--downloads`).
 //!
 //! Chrome is the guard's child: on Unix the leader of its own process group, which [`Chrome`]'s
 //! drop kills whole; on Windows in the guard's Job Object (`job.rs`). The guard drops it on
@@ -34,7 +34,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 use std::thread;
 use std::time::Duration;
 
-use super::downloads::{Held, Mover};
+use super::downloads::{Held, Mover, Saved};
 use super::parent::{self, Parent};
 use super::relay::{Line, Overflow, read_line};
 use super::{Child, ChildStderr, env, pause, quiet};
@@ -89,6 +89,8 @@ pub(crate) struct Spec<'a> {
     /// `AGENT_BROWSER_EXECUTABLE_PATH`, checked by `env.rs`.
     pub(crate) executable: &'a Path,
     pub(crate) cwd: &'a Path,
+    /// The downloads folder the mover delivers to: `<matter>/downloads` in a Codex session.
+    pub(crate) downloads: &'a Path,
     /// The run's profile (`runs.rs`), which [`launch`] makes.
     pub(crate) profile: &'a Path,
     /// `--cdp-port`.
@@ -156,7 +158,7 @@ pub(crate) fn launch(
 ) -> Result<Chrome, String> {
     let profile = spec.profile.to_owned();
     let staging = profile.join(STAGING);
-    let downloads = spec.cwd.join("downloads");
+    let downloads = spec.downloads.to_owned();
     ready_profile(&profile, &staging, &downloads)
         .map_err(|error| format!("cannot make Chrome's profile: {error}"))?;
     let args = chrome_args(spec, &profile);
@@ -188,7 +190,8 @@ pub(crate) fn launch(
 
 impl Chrome {
     /// Waits for Chrome's endpoint, at most `wait` ([`START_WAIT`] but in tests), checks it is on
-    /// the claimed port and starts the download mover, which records held downloads in `held`.
+    /// the claimed port and starts the download mover, which records held downloads in `held`
+    /// and delivered ones in `saved`.
     /// Every [`parent::POLL`] it also looks whether the guard's parent has gone, and gives up if
     /// so.
     pub(crate) fn endpoint(
@@ -196,7 +199,7 @@ impl Chrome {
         cdp_port: u16,
         wait: Duration,
         parent: &Parent,
-        held: Arc<Held>,
+        (held, saved): (Arc<Held>, Arc<Saved>),
     ) -> Result<String, String> {
         let inbox = self
             .starting
@@ -240,6 +243,7 @@ impl Chrome {
             self.staging.clone(),
             self.downloads.clone(),
             held,
+            saved,
         ));
         Ok(endpoint)
     }

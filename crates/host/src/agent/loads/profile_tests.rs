@@ -110,6 +110,7 @@ pub(super) fn inputs<'a>(browser_dir: &'a Path, chrome: Option<&'a Path>) -> Bro
         blocked_by_policy: None,
         executable: chrome,
         browser_dir,
+        matter_downloads: Path::new("/matters/smith/downloads"),
         claims: Some(claims()),
     }
 }
@@ -269,9 +270,8 @@ fn each_reason_drops_the_browser_in_order() {
     }
 }
 
-/// The Windows entry's `{daemon_port}` fills from the daemon claim; a token the session's claims
-/// cannot fill (`{daemon_port}` with no daemon claim, `{socket_dir}` with no folder) drops the
-/// entry with `BrowserNotInstalled`.
+/// The Windows entry's `{daemon_port}` fills from the daemon claim; an unfillable token
+/// (`{daemon_port}` with no daemon claim, `{socket_dir}` with no folder) drops the entry.
 #[test]
 fn the_port_tokens_fill_and_an_unfillable_one_drops_the_entry() {
     let dir = PathBuf::from("/b");

@@ -15,8 +15,9 @@
 //! `late.pid` in the socket folder, waits until a file `late-go` appears there, then serves as
 //! the daemon does. An `agent_browser_wait_for_text` call for the text `stub_hold` is never
 //! answered (a call in flight; a core tool, so the guard's allowlist passes it); a request whose
-//! id is a string starting `stub-error` gets a JSON-RPC error instead of a result. Cargo builds it
-//! for the tests; it is never shipped.
+//! id is a string starting `stub-error` gets a JSON-RPC error instead of a result. An `open` of a
+//! `.pdf` URL gets agent-browser's own answer ([`chrome_part::stand_in`]). Cargo builds it for
+//! the tests; it is never shipped.
 
 use std::io::{BufRead, Write};
 
@@ -177,6 +178,11 @@ fn main() -> std::io::Result<()> {
         {
             continue;
         }
+        if let Some(reply) = chrome_part::stand_in(&message) {
+            writeln!(out, "{reply}")?;
+            out.flush()?;
+            continue;
+        }
         if let Some(id) = message.get("id") {
             let reply = if id.as_str().is_some_and(|id| id.starts_with("stub-error")) {
                 json!({"jsonrpc": "2.0", "id": id, "error": {"code": -32603, "message": "stub"}})
@@ -188,4 +194,71 @@ fn main() -> std::io::Result<()> {
         }
     }
     Ok(())
+}
+
+/// Chrome's part in two calls, played with the files Chrome would write.
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the test stub plays Chrome: it writes, marks and renames a download in staging"
+)]
+mod chrome_part {
+    use serde_json::{Value, json};
+
+    /// agent-browser's answer, with Chrome's part, to one call: an `agent_browser_open` of a URL
+    /// ending in `.pdf` plays Chrome saving the file (`plugins.always_open_pdf_externally`):
+    /// `<name>.crdownload` appears in the run's staging folder at once, with the OS mark Chrome
+    /// gives it, and is renamed to `<name>` 300 ms later, while the call fails with
+    /// `net::ERR_ABORTED`, as the navigation turned into a download.
+    pub(super) fn stand_in(message: &Value) -> Option<Value> {
+        let id = message.get("id")?;
+        match message.pointer("/params/name").and_then(Value::as_str)? {
+            "agent_browser_open" => {
+                let url = message.pointer("/params/arguments/url")?.as_str()?;
+                let name = url.rsplit('/').next().filter(|name| {
+                    std::path::Path::new(name)
+                        .extension()
+                        .is_some_and(|ext| ext.eq_ignore_ascii_case("pdf"))
+                })?;
+                let staging = staging()?;
+                let partial = staging.join(format!("{name}.crdownload"));
+                std::fs::write(&partial, b"%PDF-1.4 stub judgment").ok()?;
+                mark(&partial);
+                let done = staging.join(name);
+                drop(std::thread::spawn(move || {
+                    std::thread::sleep(std::time::Duration::from_millis(300));
+                    drop(std::fs::rename(&partial, &done));
+                }));
+                let text = format!("Navigation failed: net::ERR_ABORTED at {url}");
+                Some(json!({"jsonrpc": "2.0", "id": id,
+                    "result": {"content": [{"type": "text", "text": text}], "isError": true}}))
+            }
+            _ => None,
+        }
+    }
+
+    /// The run's staging folder: `<cwd>/chrome-profile-<id>/downloads-staging`, the guard having
+    /// started this stub in its `--cwd`.
+    fn staging() -> Option<std::path::PathBuf> {
+        std::fs::read_dir(".").ok()?.flatten().find_map(|entry| {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            let staging = entry.path().join("downloads-staging");
+            (name.starts_with("chrome-profile-") && staging.is_dir()).then_some(staging)
+        })
+    }
+
+    /// Chrome's OS mark on `file`: Windows' `Zone.Identifier` stream, macOS' quarantine attribute.
+    fn mark(file: &std::path::Path) {
+        if cfg!(windows) {
+            let stream = format!("{}:Zone.Identifier", file.display());
+            drop(std::fs::write(stream, "[ZoneTransfer]\r\nZoneId=3\r\n"));
+        } else if cfg!(target_os = "macos") {
+            let value = "0081;00000000;Chrome;";
+            drop(
+                std::process::Command::new("/usr/bin/xattr")
+                    .args(["-w", "com.apple.quarantine", value])
+                    .arg(file)
+                    .status(),
+            );
+        }
+    }
 }
