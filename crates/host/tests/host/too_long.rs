@@ -1,9 +1,9 @@
-//! A turn the model refuses as too long to read ends `StopReason::TooLong` (decision 0057), on
-//! the placeholder scenarios built from the adapters' source until the live recordings replace
-//! them: Codex's full context and Claude's "Prompt is too long" (an AIR `sessionFailure` on
-//! `end_turn`), and Codex's refusal of input over its 1,048,576 characters (an RPC error before
-//! any turn starts). No `TurnFailed`, no limit stop, no limits read to wait for, the answer so
-//! far and the question kept, and the queue held.
+//! A turn the model refuses as too long to read ends `StopReason::TooLong` (decision 0057): Claude's
+//! "Prompt is too long" (recorded live) and Codex's full context (from codex-acp's source), each
+//! an AIR `sessionFailure` on `end_turn`. No `TurnFailed`, no limit stop, no limits read to wait
+//! for, the answer so far and the question kept. Codex's recorded refusal of an over-long input
+//! says only "Codex encountered an internal error.", which is not read as too long; what the host
+//! does with it today is pinned here too.
 
 use std::sync::Arc;
 
@@ -21,7 +21,7 @@ use crate::write;
 /// The bundled scenarios' folder.
 const SCENARIOS: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../fake_agent/scenarios");
 
-/// The answer so far in the two `sessionFailure` scenarios.
+/// The answer so far in `codex-context-full`; the recorded Claude refusal has none.
 const PARTIAL: &str = "Reading the lease. ";
 const QUESTION: &str = "Read the whole lease and list every break clause.";
 
@@ -55,7 +55,13 @@ fn assert_too_long(events: &Events, turn: TurnId) {
 }
 
 /// One turn of `scenario` ends `TooLong`, keeping the answer so far and the question.
-fn one_turn_ends_too_long(test: &str, id: &str, agent: AgentKind, scenario: &'static str) {
+fn one_turn_ends_too_long(
+    test: &str,
+    id: &str,
+    agent: AgentKind,
+    scenario: &'static str,
+    partial: &str,
+) {
     let (dir, host, _reads) = start(test, id, agent, Scenario::Bundled(scenario));
     let (_, thread, _) = matter_with_thread(&dir, &host, "m", &[("lease.txt", "x\n")], id);
     let mut events = host.events(StreamId::Thread(thread));
@@ -65,7 +71,7 @@ fn one_turn_ends_too_long(test: &str, id: &str, agent: AgentKind, scenario: &'st
     events.drain_ready();
     events.assert_no_mismatch();
     assert_too_long(&events, turn);
-    assert_eq!(events.turn_text(turn), PARTIAL, "{}", events.dump());
+    assert_eq!(events.turn_text(turn), partial, "{}", events.dump());
     let (_, asked) = user_message(&events, message);
     assert_eq!(
         asked.content,
@@ -83,6 +89,7 @@ fn codex_context_full_ends_too_long() {
         CODEX,
         AgentKind::Codex,
         "codex-context-full",
+        PARTIAL,
     );
 }
 
@@ -93,12 +100,13 @@ fn claude_prompt_too_long_ends_too_long() {
         CLAUDE,
         AgentKind::Claude,
         "claude-prompt-too-long",
+        "",
     );
 }
 
-/// `codex-input-too-long` with one step added before its refusal: a permission request the test
-/// answers once a second question is queued, so the queue is seen to hold. Everything else is
-/// the bundled scenario's.
+/// The recorded `codex-input-too-long` with a permission request added before its refusal, which
+/// the test answers once a second question is queued, and an answer to that second question.
+/// Everything else is the bundled scenario's.
 fn gated_input_too_long() -> String {
     let bundled =
         std::fs::read_to_string(format!("{SCENARIOS}/codex-input-too-long.jsonl")).unwrap();
@@ -109,6 +117,10 @@ fn gated_input_too_long() -> String {
             {"optionId": "allow_once", "name": "Yes, proceed", "kind": "allow_once"},
             {"optionId": "cancel", "name": "No", "kind": "reject_once"}]}}}),
         json!({"expect_response": {"id": "gate", "result": "{{any}}"}}),
+    ];
+    let second = [
+        json!({"expect": {"method": "session/prompt", "as": "p2", "params": {"sessionId": "sess-1"}}}),
+        json!({"respond": {"to": "p2", "result": {"stopReason": "end_turn"}}}),
     ];
     let mut out = String::new();
     for line in bundled.lines() {
@@ -121,19 +133,25 @@ fn gated_input_too_long() -> String {
         out.push_str(line);
         out.push('\n');
     }
+    for step in &second {
+        out.push_str(&step.to_string());
+        out.push('\n');
+    }
     assert_eq!(
         out.lines().count(),
-        bundled.lines().count() + 2,
-        "the gate went in"
+        bundled.lines().count() + 4,
+        "the gate and the second answer went in"
     );
     out
 }
 
-/// Codex's refusal of an over-long input (an RPC error to `session/prompt`) ends the turn
-/// `TooLong` at once, never the Codex limits read's 10 s wait nor `agent.protocol_error`; the
-/// question stays, and the question queued behind it does not start.
+/// TODAY's behaviour with Codex's recorded refusal of a question over its 1,048,576 characters
+/// (decision 0057 leaves it open): the wire says only "Codex encountered an internal error."
+/// (category `service`), so the turn ends `EndTurn` with no answer text and no `TurnFailed`; the
+/// failure is only logged as a warning, and the queue moves on to the next question. The lawyer is
+/// told nothing. The host's own Codex check before sending is what keeps such a question back.
 #[test]
-fn codex_input_too_long_ends_too_long_and_holds_the_queue() {
+fn codex_input_refusal_today_ends_end_turn_and_moves_the_queue_on() {
     let dir = Dir::new("codex_input_too_long_holds_the_queue", &[]);
     // A scenario read from a path takes its includes from the `common/` folder beside it, and
     // its header names its file.
@@ -161,7 +179,10 @@ fn codex_input_too_long_ends_too_long_and_holds_the_queue() {
     events.until_turn_ended(first);
     settle(&host, &mut events);
     events.assert_no_mismatch();
-    assert_too_long(&events, first);
+    let ended = events.turn_ended(first).expect("the turn ended");
+    assert_eq!(ended.stop, StopReason::EndTurn, "{}", events.dump());
+    assert_eq!(turn_failed(&events, first), None, "{}", events.dump());
+    assert_eq!(events.turn_text(first), "", "{}", events.dump());
     let (_, asked) = user_message(&events, message);
     assert_eq!(
         asked.content,
@@ -169,8 +190,9 @@ fn codex_input_too_long_ends_too_long_and_holds_the_queue() {
             text: QUESTION.to_owned()
         }]
     );
-    assert!(held(&host, matter, thread), "the queue is not held");
-    assert_eq!(starts(&events, second), 0, "{}", events.dump());
-    assert!(events.turn_ended(second).is_none(), "{}", events.dump());
+    let next = events.until_turn_ended(second);
+    assert_eq!(next.stop, StopReason::EndTurn, "{}", events.dump());
+    assert!(!held(&host, matter, thread), "the queue held");
+    assert_eq!(starts(&events, second), 1, "{}", events.dump());
     host.shutdown();
 }

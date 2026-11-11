@@ -4,32 +4,37 @@
 //! [`LimitSignal`](crate::LimitSignal), so it never reaches the limits store nor the Codex
 //! limits read.
 //!
-//! The shapes, until the live recordings replace them (each from the adapter's source):
-//! - codex-acp 2.2.2, a full context: Codex's `contextWindowExceeded` becomes
-//!   `context_exhausted`, sent to an AIR client as `end_turn` with a `sessionFailure` of
-//!   category `limit`, severity `error`, actions `["new_session"]`.
-//! - codex-acp, a question over Codex's 1,048,576 characters: Codex refuses the input with
-//!   "Input exceeds the maximum length of 1048576 characters."; how codex-acp passes it on is not
-//!   yet recorded, most likely as a JSON-RPC error to `session/prompt` with Codex's text at
-//!   `data.message` (as for its other errors).
-//! - claude-agent-acp 0.89.1, an AIR client: a result with `is_error` becomes `end_turn` with a
-//!   `sessionFailure` from the assistant's error kind; an API `invalid_request` is category
-//!   `request`, severity `error`, no actions, titled with the error's text, which Claude Code
-//!   writes "Prompt is too long". Its `context_exhausted` (category `limit`, actions
-//!   `["new_session"]`) has Codex's shape and reads the same.
-//! - claude-agent-acp without a session failure: error -32603 with `data.errorKind`. The SDK's
-//!   `terminal_reason: "prompt_too_long"` is read too, should the adapter forward it.
+//! The shapes (recordings in the private `measurements/long-question/recordings/`, 2026-11-11):
+//! - claude-agent-acp 0.89.1, recorded (`claude-overcap-reply.jsonl`, a 6,000,000-character
+//!   question): `end_turn` with a `sessionFailure` of category `service`, severity `error`,
+//!   title "Prompt is too long", actions `["retry"]`, after a failed compaction and no answer
+//!   text. From its source, the same title can come under category `request` (an API
+//!   `invalid_request`), so both categories are read, keyed on the title.
+//! - codex-acp 2.2.2, a full context, from source, not recorded (the run was skipped to avoid
+//!   billing): Codex's `contextWindowExceeded` becomes `context_exhausted`, sent to an AIR client
+//!   as `end_turn` with a `sessionFailure` of category `limit`, severity `error`, actions
+//!   `["new_session"]`. Claude's own `context_exhausted` (its configured turn or output limit) has
+//!   the same shape and reads the same.
+//! - codex-acp 2.2.2, a question over Codex's 1,048,576 characters, recorded
+//!   (`codex-overcap-reply.jsonl`): `end_turn` with a `sessionFailure` of category `service`,
+//!   title "Codex encountered an internal error.", actions `["retry", "new_session"]`. The length
+//!   reason is only on codex-acp's stderr, so the wire cannot tell it from a real internal error,
+//!   and it is NOT read as too long here.
+//! - claude-agent-acp without a session failure, from source: error -32603 with
+//!   `data.errorKind`. The SDK's `terminal_reason: "prompt_too_long"` is read too, should the
+//!   adapter forward it.
 
 use crate::error::RpcData;
 
-/// Claude Code's text for an API refusal of a prompt over the model's context. The `request`
-/// category also holds other bad requests, so only this title says "too long"; matched as a
-/// prefix, ASCII case ignored, since the API appends the token counts.
+/// Claude Code's text for a prompt over the model's context, recorded as the `sessionFailure`
+/// title. Its categories (`service`, `request`) also hold other failures, so only this title says
+/// "too long"; matched as a prefix, ASCII case ignored, since the API may append token counts.
 const CLAUDE_PROMPT_TOO_LONG: &str = "prompt is too long";
 
-/// Codex's refusal of input over its 1,048,576 characters (`MAX_USER_INPUT_TEXT_CHARS`). It
-/// comes with no structured field Clauseo has seen, so its exact prefix is matched, and nothing
-/// looser: any other error text stays the error it was.
+/// Codex's refusal of input over its 1,048,576 characters (`MAX_USER_INPUT_TEXT_CHARS`), matched
+/// by its exact prefix and nothing looser. The recording showed it never reaches the wire in
+/// codex-acp 2.2.2 (it is only on stderr; the wire says "Codex encountered an internal error."),
+/// so this match is kept only for an adapter that forwards Codex's text as an RPC error.
 const CODEX_INPUT_TOO_LONG: &str = "Input exceeds the maximum length of";
 
 /// The structured values that say too long: the SDK's terminal reason, and Codex's error kind
@@ -49,7 +54,9 @@ pub(crate) fn session_failure_says_too_long(
 ) -> bool {
     match (category, severity, actions) {
         (Some("limit"), Some("error"), Some(["new_session"])) => true,
-        (Some("request"), Some("error"), _) => title.is_some_and(starts_with_claude_text),
+        (Some("service" | "request"), Some("error"), _) => {
+            title.is_some_and(starts_with_claude_text)
+        }
         _ => false,
     }
 }

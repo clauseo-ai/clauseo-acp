@@ -266,14 +266,19 @@ fn session_failure_categories() {
         failure("limit", "error", json!(["new_session"])),
         Failure::TooLong
     );
-    for title in [
-        "Prompt is too long",
-        "prompt is too long: 1043211 tokens > 1000000 maximum",
+    // Claude's recorded shape: category service, actions ["retry"]; and request, from source.
+    for (category, title) in [
+        ("service", "Prompt is too long"),
+        ("request", "Prompt is too long"),
+        (
+            "request",
+            "prompt is too long: 1043211 tokens > 1000000 maximum",
+        ),
     ] {
         assert_eq!(
-            failure_titled("request", "error", json!([]), title),
+            failure_titled(category, "error", json!(["retry"]), title),
             Failure::TooLong,
-            "{title}"
+            "{category} {title}"
         );
     }
     for (category, severity, actions, title) in [
@@ -288,7 +293,14 @@ fn session_failure_categories() {
             "Claude could not process this request.",
         ),
         ("request", "warning", json!([]), "Prompt is too long"),
-        ("service", "error", json!(["retry"]), "Prompt is too long"),
+        ("service", "warning", json!(["retry"]), "Prompt is too long"),
+        // Codex's recorded refusal of an over-long input: indistinguishable from an internal error.
+        (
+            "service",
+            "error",
+            json!(["retry", "new_session"]),
+            "Codex encountered an internal error.",
+        ),
     ] {
         assert_eq!(
             failure_titled(category, severity, actions, title),

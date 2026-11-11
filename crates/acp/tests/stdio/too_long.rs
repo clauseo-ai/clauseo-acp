@@ -1,78 +1,121 @@
-//! A turn the model refuses as too long to read (`map/too_long.rs`), on the placeholder
-//! scenarios built from the adapters' source until the live recordings replace them: a
-//! `sessionFailure` on `end_turn` sets `PromptEnd::too_long` with no limit and no event, and
-//! Codex's refusal of an over-long input is an RPC error that `Error::prompt_too_long` reads.
+//! A turn the model refuses as too long to read (`map/too_long.rs`). Claude's refusal and
+//! Codex's refusal of an over-long input are live recordings; Codex's full context is written
+//! from codex-acp's source. A too-long `sessionFailure` on `end_turn` sets `PromptEnd::too_long`
+//! with no limit and no warning; Codex's recorded refusal reads as the internal error it says.
 
-use clauseo_acp::{AcpEvent, Error, MessageRole, Origin, PromptEnd};
+use clauseo_acp::{AcpEvent, AgentUpdate, MessageRole, Origin, PromptEnd, ProtocolWarning};
 use clauseo_protocol::{AgentChoiceId, StopReason};
 
 use crate::harness::{self, Ctx, chunk, sess1, text, turn, update_event};
 
-/// The scenario's one prompt ends `EndTurn` flagged too long, with no limit, and the only event
-/// is the answer so far: no limit event and no warning.
-fn ends_too_long(scenario: &str, codex: bool) {
+/// Plays `scenario`'s one prompt and returns its end and the events it brought.
+fn one_prompt(scenario: &str, codex: bool, check: impl FnOnce(PromptEnd, Vec<AcpEvent>)) {
     let outcome = harness::run(scenario, async |ctx: Ctx| {
         ctx.handshake().await;
         if codex {
-            let ask = AgentChoiceId::new("workspace-write").unwrap();
-            ctx.client.set_mode(&sess1(), ask).await.unwrap();
+            let mode = AgentChoiceId::new("workspace-write").unwrap();
+            ctx.client.set_mode(&sess1(), mode).await.unwrap();
         }
         let end = ctx
             .client
             .prompt(&sess1(), turn(1), text("Read the whole lease"))
             .await
             .unwrap();
+        check(end, ctx.drain());
+    });
+    outcome.assert_clean();
+}
+
+fn too_long() -> PromptEnd {
+    PromptEnd {
+        stop: StopReason::EndTurn,
+        limit: None,
+        too_long: true,
+    }
+}
+
+fn no_limit_nor_warning(events: &[AcpEvent]) -> bool {
+    !events
+        .iter()
+        .any(|event| matches!(event, AcpEvent::Limit { .. } | AcpEvent::Warning { .. }))
+}
+
+#[test]
+fn codex_context_full_ends_too_long() {
+    one_prompt("codex-context-full", true, |end, events| {
+        assert_eq!(end, too_long());
         assert_eq!(
-            end,
-            PromptEnd {
-                stop: StopReason::EndTurn,
-                limit: None,
-                too_long: true,
-            }
-        );
-        assert_eq!(
-            ctx.drain(),
+            events,
             [update_event(
                 Origin::Turn(turn(1)),
                 chunk(MessageRole::Answer, "m-answer-1", "Reading the lease. ")
             )]
         );
     });
-    outcome.assert_clean();
 }
 
-#[test]
-fn codex_context_full_ends_too_long() {
-    ends_too_long("codex-context-full", true);
-}
-
+/// The recorded refusal: a compaction that starts and fails, no answer text, then `end_turn`
+/// with the "Prompt is too long" failure of category `service`.
 #[test]
 fn claude_prompt_too_long_ends_too_long() {
-    ends_too_long("claude-prompt-too-long", false);
+    one_prompt("claude-prompt-too-long", false, |end, events| {
+        assert_eq!(end, too_long());
+        assert!(no_limit_nor_warning(&events), "{events:?}");
+        let compaction: Vec<_> = events
+            .iter()
+            .filter_map(|event| match event {
+                AcpEvent::Update {
+                    update:
+                        update @ (AgentUpdate::CompactionStarted { .. }
+                        | AgentUpdate::CompactionEnded { .. }),
+                    ..
+                } => Some(update.clone()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            compaction,
+            [
+                AgentUpdate::CompactionStarted {
+                    acp_id: "<id-1>".into()
+                },
+                AgentUpdate::CompactionEnded {
+                    acp_id: "<id-1>".into(),
+                    completed: false
+                },
+            ]
+        );
+    });
 }
 
-/// Codex's refusal of input over 1,048,576 characters comes as an RPC error, before any update:
-/// `prompt_too_long` holds, and the error's text holds no data.
+/// The recorded refusal of a question over Codex's 1,048,576 characters says only "Codex
+/// encountered an internal error." (category `service`), which is not read as too long: the
+/// prompt ends `EndTurn` and the failure is a warning.
 #[test]
-fn codex_input_too_long_is_a_too_long_rpc_error() {
-    let outcome = harness::run("codex-input-too-long", async |ctx: Ctx| {
-        ctx.handshake().await;
-        let ask = AgentChoiceId::new("workspace-write").unwrap();
-        ctx.client.set_mode(&sess1(), ask).await.unwrap();
-        let end = ctx
-            .client
-            .prompt(&sess1(), turn(1), text("Read the whole lease"))
-            .await;
-        let Err(error @ Error::Rpc { .. }) = end else {
-            panic!("expected an RPC error, got {end:?}");
-        };
-        assert!(error.prompt_too_long(), "{error:?}");
+fn codex_input_too_long_reads_as_the_internal_error_it_says() {
+    one_prompt("codex-input-too-long", true, |end, events| {
         assert_eq!(
-            error.to_string(),
-            "the agent answered session/prompt with error -32603: Internal error"
+            end,
+            PromptEnd {
+                stop: StopReason::EndTurn,
+                limit: None,
+                too_long: false,
+            }
         );
-        let events: Vec<AcpEvent> = ctx.drain();
-        assert_eq!(events, [], "no event before the refusal");
+        let warnings: Vec<_> = events
+            .into_iter()
+            .filter_map(|event| match event {
+                AcpEvent::Warning { warning, .. } => Some(warning),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            warnings,
+            [ProtocolWarning::SessionFailure {
+                category: Some("service".to_owned()),
+                severity: Some("error".to_owned()),
+                title: Some("Codex encountered an internal error.".to_owned()),
+            }]
+        );
     });
-    outcome.assert_clean();
 }

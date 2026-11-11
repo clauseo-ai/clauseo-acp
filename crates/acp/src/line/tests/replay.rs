@@ -1,7 +1,8 @@
 //! Reopening a conversation whose question is as long as Clauseo sends: the agent replays the
 //! question as one `user_message_chunk` line, which must fit [`MAX_LINE_BYTES`]. Each fixture holds
-//! a header line (`recorded`: whether the line after it is a live recording or a placeholder
-//! written from the adapter's source) and one replay line. The test swaps the line's question for
+//! a header line (`recorded`: whether the line after it is a live recording) and one replay line,
+//! recorded from claude-agent-acp 0.89.1 and codex-acp 2.2.2, byte for byte but for the redacted
+//! ids. The test swaps the line's question for
 //! one of [`MAX_PROMPT_TEXT_BYTES`] escaped bytes, keeping every other byte as the adapter wrote
 //! it, and reads the result through the line splitter.
 
@@ -47,10 +48,19 @@ fn a_replayed_maximal_question_fits_the_line_cap() {
         assert_eq!(update["sessionUpdate"], "user_message_chunk", "{agent}");
         let original = update["content"]["text"].as_str().unwrap();
         let written = serde_json::to_string(original).unwrap();
+        assert_eq!(header["recorded"], true, "{agent}: a live recording");
+        // The adapter escapes as serde_json does (lowercase \u0001, raw UTF-8 for Devanagari and
+        // emoji), so the line is its envelope plus our escaped measure of the text, quotes aside.
         assert_eq!(
             line.matches(written.as_str()).count(),
             1,
             "{agent}: the question once"
+        );
+        assert_eq!(written.len(), escaped_len(original) + 2, "{agent}");
+        let envelope = line.len() - written.len();
+        assert!(
+            envelope + MAX_PROMPT_TEXT_BYTES + 2 <= MAX_LINE_BYTES,
+            "{agent}: envelope {envelope} bytes"
         );
         let long = line.replacen(written.as_str(), &question, 1);
         assert!(
