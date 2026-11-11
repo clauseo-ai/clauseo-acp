@@ -90,6 +90,7 @@ import { probeThreads } from "./probe-threads.ts";
 import { RAW_TOOL_PERMISSIONS, rawTools } from "./probe-toolnames.ts";
 import { connectRoom } from "./start.ts";
 import { versionsHost, versionsPageOf } from "./versions/probe-states.tsx";
+import { wallTypesProbe } from "./wall-types-probe.ts";
 import { LOCKED, wordFiles, wordHost, wordPageOf } from "./word/probe-states.ts";
 
 const FILES = [
@@ -127,6 +128,7 @@ const HINDI = [
 const page = new URLSearchParams(location.search);
 const mixedPapers = page.get("papers") === "mixed";
 const hindiPapers = page.get("papers") === "hindi";
+const typedPapers = wallTypesProbe(page.get("papers"));
 
 /** ?word=…: the Word pages (word/probe-states.ts), in place of the scripted stream, with the petition on the wall. */
 const wordPage = wordPageOf(page.get("word"));
@@ -139,7 +141,7 @@ const papers: PaperSummary[] = (
       ? [...FILES, ...MIXED]
       : hindiPapers
         ? HINDI
-        : FILES
+        : (typedPapers?.names ?? FILES)
 ).map((name, i) => ({
   file: uuid(i + 1, 8),
   path: `papers/${name}`,
@@ -447,6 +449,7 @@ const transport = new FakeTransport({
   // HostQuery form), so ?thread=permission lists its thread waiting on the lawyer, and ?thread=commands its idle one
   next: fakeNext({
     matters: () => matters,
+    ...(typedPapers === null ? {} : { listing: typedPapers.listing }),
     papers,
     // ?scan=long-path: a long place for new matters, for New matter's "Use a new folder in" line
     location: scanLocation(page.get("scan")),
