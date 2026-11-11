@@ -1,14 +1,13 @@
 // The first screen (UD1), apart from first-run.tsx to keep it under the size limit: the question, and both plans side
 // by side at its foot, Claude's working line then ChatGPT's, each with its own "Sign in to {name}". A press makes that
-// plan the chosen one and starts its install and sign-in, or, while the other plan is downloading or signing in, has it
-// wait its turn (the setup store's queue: one download at a time, and nothing dropped).
+// plan the chosen one and starts its install and sign-in at once, beside the other plan's download; only its sign-in
+// waits, for the other plan's sign-in under way (the setup store's queue: one sign-in at a time, and nothing dropped).
 import { lazy, Suspense, useEffect, useLayoutEffect, useState } from "react";
 import { late } from "@clauseo/components/lib/late.ts";
 import { Welcome, type FootPlan } from "@clauseo/components/clauseo/first-launch/welcome.tsx";
 import { ToolsLine } from "@clauseo/components/clauseo/first-launch/tools.tsx";
 import { useDisplay } from "@clauseo/components/lib/display.ts";
 import { toHostError, type HostTransport } from "../../transport/host-transport.ts";
-import type { AgentId } from "../../transport/protocol.ts";
 import {
   PLANS,
   isReady,
@@ -20,24 +19,9 @@ import {
 import type { Matters } from "../matters.ts";
 import { usePickWait } from "../picker-wait.ts";
 import { markButton, markWelcome } from "../../start-marks.ts";
-import { IDS, NAME, installActs, planOf } from "./acts.ts";
+import { IDS, NAME, planOf } from "./acts.ts";
 import { readyPlan, toolsView } from "./views.ts";
-import { browserNote, welcomeFoot, type FootActs } from "./welcome-foot.tsx";
-
-/** A plan's line's presses: its install's, its "Sign in to {name}" (through the store's queue), and Cancel, which
- * stops a wait for the other plan or cancels the sign-in under way. */
-const footActs = (store: SetupStore, agent: AgentId, state: SetupState): FootActs => ({
-  ...installActs(store, agent, state.copied),
-  signIn: () => store.signInTo(agent),
-  cancel: () => {
-    if (store.state().queued === agent) {
-      store.unqueue();
-      return;
-    }
-    store.set({ pasting: false });
-    store.command({ cancel_sign_in: { agent } });
-  },
-});
+import { browserNote, footActs, welcomeFoot } from "./welcome-foot.tsx";
 
 /** U2's new matter form in place, and a refused folder's words: New matter's chunk (new-matter.tsx), loaded as the
  * first screen needs them. */

@@ -53,7 +53,7 @@ type SignedIn = NonNullable<Extract<SignIn, { signed_in: unknown }>["signed_in"]
 /** Where the block stands. */
 type Stand =
   | { kind: "none" }
-  /** Not here yet; `paused` when it waits for the other plan's download. */
+  /** Not here yet; `paused` when the lawyer paused its download (the other plan's never pauses it). */
   | { kind: "add"; mb: number; paused?: true }
   | { kind: "install" }
   | { kind: "signed"; signed: SignedIn }
@@ -68,7 +68,7 @@ function standOf(setup: AgentSetup | undefined, adding: boolean): Stand {
   if (install !== undefined && install !== "managed" && !isReady(install)) {
     if (!adding && typeof install === "object" && install.missing !== undefined)
       return { kind: "add", mb: aboutMb(setup?.mb ?? 0) };
-    // waiting for the other plan's download: the same card, whose press queues the sign-in; once queued, the gate
+    // its download paused by the lawyer: the same card, whose press queues the sign-in; once queued, the gate
     if (!adding && install === "paused")
       return setup?.signIn === "queued"
         ? { kind: "gate" }

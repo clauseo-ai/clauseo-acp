@@ -54,6 +54,7 @@ import { HINDI_ANSWER, HINDI_QUESTION } from "../testing/hindi-answer.ts";
 import { longCommandEntries } from "../testing/long-command.ts";
 import { SHAPING_ANSWER, SHAPING_QUESTION } from "../testing/shaping-answer.ts";
 import { firstReadProbe } from "./first-read/probe-state.ts";
+import { installsProbe } from "./first-run/probe-installs.ts";
 import {
   batch,
   chosen,
@@ -294,6 +295,9 @@ const SETUP_CHATGPT_ONLY: SetupEvent[] = [
   },
 ];
 
+/** ?installs=both, chatgpt-signing or after: both plans' installs at once (first-run/probe-installs.ts). */
+const installing = installsProbe(page.get("installs"));
+
 /** ?reveal=refused: every Show in Finder answers the folder missing. */
 const refuseReveal = (): never => {
   throw { code: "matter.folder_missing", message: "missing", retryable: false };
@@ -318,7 +322,9 @@ const transport = new FakeTransport({
     ? { setup: planning.setup, openSettings: () => {} }
     : chatgptOnly
       ? { setup: { first: () => SETUP_CHATGPT_ONLY } }
-      : {}),
+      : installing !== null
+        ? { setup: installing }
+        : {}),
   // ?reveal=refused: Show in Finder is refused as the folder can't be found, so the row offers Locate folder
   ...(page.get("reveal") === "refused" ? { reveal: refuseReveal } : {}),
   // ?scan=small, empty, large or long-path: New matter's picker and its folder's counts (scan/probe-scan.ts)

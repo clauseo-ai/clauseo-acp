@@ -70,6 +70,9 @@ export const HI = {
   "Using an API key, billed to its own account": "API key से, उसी के खाते पर शुल्क",
   // Sign in pressed before the install is ready, in place of the design's "Sign in at {time}" (new)
   "Your browser opens when {name} is ready.": "{name} तैयार होते ही आपका ब्राउज़र खुलेगा।",
+  // the plan ready while the other plan's sign-in is under way: sign-ins go one at a time (new, UC-153)
+  "Your browser opens for {name} after {other}'s sign-in.":
+    "{other} का साइन इन पूरा होते ही {name} के लिए आपका ब्राउज़र खुलेगा।",
   // where the key is kept, by display_info's platform, and a computer with no keyring (new)
   "Kept in this Mac's Keychain.": "इस Mac के Keychain में रखी है।",
   "Kept in Windows Credential Manager.": "Windows Credential Manager में रखी है।",
