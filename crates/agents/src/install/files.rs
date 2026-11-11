@@ -37,8 +37,6 @@ pub(crate) struct Fetched {
     /// Each checked tarball's absolute path, by its lock entry's path: the `file:` URLs of the
     /// lock `npm ci` reads.
     pub(crate) tarballs: BTreeMap<String, PathBuf>,
-    /// Node's checked archive, when the runtime is to be unpacked.
-    pub(crate) node_archive: Option<PathBuf>,
     /// The files this install put in `downloads/`, removed once it is `Ready`.
     downloaded: Vec<PathBuf>,
 }
@@ -100,7 +98,6 @@ pub(super) fn fetch_all<T: Timer + Send + Sync>(
     let mut fetcher = None;
     let mut fetched = Fetched {
         tarballs: BTreeMap::new(),
-        node_archive: None,
         downloaded: Vec::new(),
     };
     for (n, item) in items.into_iter().enumerate() {
@@ -152,7 +149,9 @@ pub(super) fn fetch_all<T: Timer + Send + Sync>(
             Some(entry) => {
                 fetched.tarballs.insert(entry, path);
             }
-            None => fetched.node_archive = Some(path),
+            // Node first: unpacked now, and `.lock-node` given up, so another install waits for
+            // Node alone, never for this one's packages.
+            None => job.unpack_node(node, &path)?,
         }
     }
     progress.tick(job, run, true);
@@ -397,6 +396,43 @@ pub(super) fn install_downloads(
         .into_iter()
         .map(|package| package_dest(&packages_dir, package));
     node.into_iter().chain(packages).collect()
+}
+
+/// The bytes of `agent`'s install files on the disk now, for the disk check of another try
+/// (`worker/space.rs`): its package downloads, its npm cache, its temp install trees and the
+/// finished folder of this snapshot's `<hash>`, and with `node` Node's archive, its temp
+/// folder and runtime. Read through no link; what cannot be read counts 0.
+pub(crate) fn written(config: &AgentsConfig, agent: &AgentId, node: bool) -> u64 {
+    let data = &config.data_dir;
+    let mut paths = vec![agent_downloads(data, agent), npm_cache(data, agent)];
+    let root = crate::receipt::install_root(data, agent);
+    if let (Some(hash), Ok(entries)) = (
+        config.snapshot.install_hash(agent, config.platform),
+        std::fs::read_dir(&root),
+    ) {
+        let tmp = format!(".tmp-{hash}-");
+        for entry in entries.flatten() {
+            let name = entry.file_name();
+            let name = name.to_string_lossy();
+            if name == hash.as_str() || name.starts_with(&tmp) {
+                paths.push(entry.path());
+            }
+        }
+    }
+    if node {
+        let dir = crate::node::runtime_dir(data, config.snapshot.node(), config.platform);
+        if let (Some(parent), Some(name)) = (dir.parent(), dir.file_name()) {
+            let mut tmp = std::ffi::OsString::from(".tmp-");
+            tmp.push(name);
+            paths.push(parent.join(tmp));
+        }
+        paths.push(dir);
+        paths.extend(node_archive_path(config));
+    }
+    paths
+        .iter()
+        .map(|path| crate::disk::bytes_under(path))
+        .fold(0, u64::saturating_add)
 }
 
 /// Where Node's archive for this platform is downloaded to, when the snapshot has one.

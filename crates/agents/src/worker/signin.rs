@@ -10,7 +10,7 @@ use std::time::Duration;
 use clauseo_process::Timer;
 use clauseo_protocol::AgentId;
 
-use super::stop::{JobEnd, Stopped};
+use super::stop::{JobEnd, SigninEnd, Stopped};
 use super::switch::{self, OwnLogin, Switch};
 use super::thread::Worker;
 use super::{Ticket, Ticks};
@@ -578,10 +578,15 @@ pub(super) fn start_job<T: Timer + Send + Sync + 'static>(worker: &Worker<T>, st
     let spawned = worker
         .shared
         .spawn_job(format!("clauseo-signin-{}", ticket.agent), {
-            let ended = Arc::clone(&ended);
+            let end = SigninEnd {
+                shared: Arc::clone(&worker.shared),
+                ticket: ticket.clone(),
+                ended: Arc::clone(&ended),
+                clock: Arc::clone(&worker.config.clock),
+            };
             move || {
+                let _end = end;
                 job::run(job, kick);
-                ended.mark();
             }
         });
     if spawned.is_err() {

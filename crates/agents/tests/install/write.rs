@@ -59,3 +59,13 @@ fn open_lock(path: &Path) -> io::Result<std::fs::File> {
         .truncate(false)
         .open(path)
 }
+
+/// A file of `len` bytes at `path` that takes no room (sparse, on Unix's file systems), made
+/// with its folders: what a large install has written, for the disk check's tests.
+#[cfg(unix)]
+pub(crate) fn sparse(path: &Path, len: u64) -> io::Result<()> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::File::create(path)?.set_len(len)
+}
