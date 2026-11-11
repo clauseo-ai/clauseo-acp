@@ -143,7 +143,7 @@ pub(super) fn cancel_running(actor: &mut Actor, thread: ThreadId, ctx: Option<Co
     running.cancelled = true;
     running.stopped.set(true);
     // A Stop after a refusal ends the turn `Cancelled`: the lawyer stopped it.
-    running.refused = false;
+    running.refused = None;
     let turn = running.turn;
     let logged = log_cancel(actor, thread, turn, ctx);
     if let Err(error) = logged {
@@ -298,7 +298,10 @@ pub(super) fn sweep_leftovers(actor: &mut Actor, thread: ThreadId, stop: StopRea
     }
     let listed = current(actor, thread)
         .filter(|current| {
-            matches!(stop, StopReason::Cancelled | StopReason::NotAllowed) || current.cancelled
+            matches!(
+                stop,
+                StopReason::Cancelled | StopReason::NotAllowed | StopReason::OutsideMatter
+            ) || current.cancelled
         })
         .and_then(|current| current.before_prompt.take())
         .and_then(|listed| listed.borrow_mut().take());

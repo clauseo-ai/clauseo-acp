@@ -19,12 +19,12 @@ test("a working matter with no end time says only that it's answering", () => {
   expect(frame("hi", "Answering.")).toBe("उत्तर दिया जा रहा है।");
 });
 
-test("the date groups and the empty rail's line have their Hindi", () => {
-  expect(
-    (["Tomorrow", "This week", "Next week", "Later", "No date yet"] as const).map((k) =>
-      frame("hi", k),
-    ),
-  ).toEqual(["कल", "इस सप्ताह", "अगले सप्ताह", "बाद में", "अभी कोई तारीख नहीं"]);
+test("the rail's groups and the empty rail's line have their Hindi", () => {
+  expect((["Needs you", "Working", "Other matters"] as const).map((k) => frame("hi", k))).toEqual([
+    "आपकी ज़रूरत है",
+    "काम चल रहा है",
+    "बाकी मामले",
+  ]);
   expect(frame("hi", "Add a matter's folder.")).toBe("मामले का फ़ोल्डर जोड़ें।");
 });
 

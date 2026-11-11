@@ -7,8 +7,8 @@ import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
 import { afterAll, afterEach, beforeAll, expect, test, vi } from "vitest";
 import { DEFAULT_DISPLAY, showDisplay } from "../lib/display.ts";
-import { MarkdownHostContext } from "./host.ts";
-import type { MarkdownHost } from "./host.ts";
+import { MarkdownHostContext, PaperLinksContext } from "./host.ts";
+import type { MarkdownHost, PaperLinks } from "./host.ts";
 import { Markdown } from "./markdown.tsx";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -17,6 +17,7 @@ const calls: string[] = [];
 const HOST: MarkdownHost = {
   openExternal: (url) => calls.push(`external ${url}`),
   openReference: (kind, id) => calls.push(`${kind} ${id}`),
+  openPath: (path) => calls.push(`path ${path}`),
 };
 
 let host: HTMLDivElement;
@@ -87,17 +88,66 @@ test.each([
   ).toBeNull();
 });
 
-test("a link click is cancelled and goes to the host; a relative link is inert", () => {
+test("a link click is cancelled and goes to the host; a file link that names no paper is its text alone", () => {
   show("Read [the act](https://indiacode.nic.in/act) or [this](/local/path).");
-  const [external, relative] = [...host.querySelectorAll("a")];
+  const links = [...host.querySelectorAll("a")];
+  expect(links).toHaveLength(1);
+  const [external] = links;
   expect(click(external).defaultPrevented).toBe(true);
   expect(click(external, { button: 1 }).defaultPrevented).toBe(true);
-  expect(relative?.hasAttribute("href")).toBe(false);
-  expect(click(relative).defaultPrevented).toBe(true);
+  expect(host.textContent).toBe("Read the act or this.");
+  expect(host.querySelector('[data-clauseo="link-text"]')?.textContent).toBe("this");
+  expect(host.querySelector('[role="link"], [tabindex]')).toBeNull();
   expect(calls).toEqual([
     "external https://indiacode.nic.in/act",
     "external https://indiacode.nic.in/act",
   ]);
+});
+
+test("a file link names a paper only through PaperLinksContext: a click or Enter sends that paper's path to openPath, never a navigation", () => {
+  const asked: string[] = [];
+  const papers: PaperLinks = (href) => {
+    asked.push(href);
+    return href.endsWith("Reply%20to%20bank.docx") ? "drafts/Reply to bank.docx" : undefined;
+  };
+  act(() =>
+    root.render(
+      <MarkdownHostContext value={HOST}>
+        <PaperLinksContext value={papers}>
+          <Markdown
+            text={
+              "See [Reply notes.md](Reply%20notes.md), [the draft](/Users/a/M/drafts/Reply%20to%20bank.docx) and [mail](mailto:a@b.in)."
+            }
+            streaming={false}
+          />
+        </PaperLinksContext>
+      </MarkdownHostContext>,
+    ),
+  );
+  const [draft, mail] = [...host.querySelectorAll("a")];
+  // a paper the context doesn't name is plain text; mailto never asks it
+  expect(host.querySelectorAll("a")).toHaveLength(2);
+  expect(host.textContent).toBe("See Reply notes.md, the draft and mail.");
+  expect([...new Set(asked)]).toEqual([
+    "Reply%20notes.md",
+    "/Users/a/M/drafts/Reply%20to%20bank.docx",
+  ]);
+  // no href to follow: a link the keyboard reaches, which the host opens
+  expect(draft?.hasAttribute("href")).toBe(false);
+  expect(draft?.getAttribute("role")).toBe("link");
+  expect(draft?.tabIndex).toBe(0);
+  expect(draft?.getAttribute("data-clauseo")).toBe("link");
+  expect(click(draft).defaultPrevented).toBe(true);
+  act(() => {
+    draft?.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+  });
+  click(mail);
+  expect(calls).toEqual([
+    "path drafts/Reply to bank.docx",
+    "path drafts/Reply to bank.docx",
+    "external mailto:a@b.in",
+  ]);
+  expect(mail?.getAttribute("role")).toBeNull();
 });
 
 test("a footnote reference reaches its note's id (one prefix, not two) and scrolls there, not out", () => {

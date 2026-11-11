@@ -7,6 +7,7 @@ import type { Lang } from "./display.ts";
 import { wordsOf } from "./words-core.ts";
 import { th } from "./words-thread.ts";
 import type { HI } from "./words-errors.hi.ts";
+import type { VersionKey } from "./words-versions.ts";
 
 /** Why a host call failed: the protocol's `ErrorCode` (ui/app/src/transport/bindings.ts), copied, since the parts
  * can't import the app. ui/app/src/room/thread/error-codes.test.ts fails when the two differ. */
@@ -37,6 +38,7 @@ export type ErrorCode =
   | "matter.checkpoint_failed"
   | "matter.folder_missing"
   | "matter.folder_not_a_matter"
+  | "matter.folder_permission"
   | "matter.folder_refused"
   | "matter.codex_folder"
   | "matter.file_locked"
@@ -63,6 +65,7 @@ export type ErrorCode =
   | "agent.install_blocked"
   | "agent.install_disk_full"
   | "agent.install_failed"
+  | "agent.install_setup_failed"
   | "signin.cancelled"
   | "signin.link_expired"
   | "signin.no_plan"
@@ -86,13 +89,38 @@ export type ErrorCode =
   | "blocklist.notice_expired"
   | "blocklist.allow_not_saved"
   | "blocklist.revoke_not_saved"
+  | "sandbox.cleaning_up"
+  | "blackline.no_word_tool"
+  | "blackline.not_word"
+  | "blackline.failed"
+  | "word.stetdoc_missing"
+  | "word.revisions_stale"
+  | "word.not_docx"
+  | "word.edit_failed"
+  | "agent.offline"
   | "unknown";
 
 /** The thread's own sentence for an answer cut short: its Hindi lives in words-thread.ts, once. */
 const STOPPED = "The answer stopped. Your question and the answer so far are kept." as const;
 
+/** The Word blackline's sentences, said in Versions over the sheet: their words live in words-versions.ts, once, and
+ * the copy review registers them there (UC-114, UC-115). */
+export const MARK_KEYS = [
+  "Clauseo's Word tool is missing. Reinstall Clauseo to see the marked-up changes.",
+  "The changes in this document couldn't be marked up.",
+] as const satisfies readonly VersionKey[];
+type MarkKey = (typeof MARK_KEYS)[number];
+const isMark = (key: ErrorKey): key is MarkKey => (MARK_KEYS as readonly string[]).includes(key);
+
 /** Every error sentence, in English. */
-export type ErrorKey = keyof typeof HI | typeof STOPPED;
+export type ErrorKey = keyof typeof HI | typeof STOPPED | MarkKey;
+
+/** matter.folder_permission's button on the Mac, which opens macOS's Files and Folders privacy pane, and the line under
+ * it (room/thread/privacy-settings.tsx). Settled by the orchestrator (2026-11-10); copy review pending. */
+export const PRIVACY_KEYS = {
+  button: "Open Privacy settings",
+  line: "Turn on access for Clauseo, then ask again.",
+} as const satisfies Record<string, ErrorKey>;
 
 /** One sentence per code, in English. */
 export const ERROR_WORDS: Record<ErrorCode, ErrorKey> = {
@@ -125,9 +153,11 @@ export const ERROR_WORDS: Record<ErrorCode, ErrorKey> = {
     "This matter's folder can't be reached. It may have moved, or its drive or network isn't connected.",
   "matter.folder_not_a_matter":
     "This folder doesn't hold this matter's Clauseo file. Locate the matter's folder to carry on.",
+  // settled (orchestrator, 2026-11-10); the app's Open Privacy settings button and its line are the room's
+  "matter.folder_permission": "Clauseo needs permission to open this folder.",
   "matter.folder_refused": "A whole drive, your home folder or a system folder can't be a matter.",
   "matter.codex_folder":
-    "This matter's folder holds a .codex folder. Rename or remove it to use Codex here.",
+    "This matter's folder holds a .codex folder. Rename or remove it to use ChatGPT here.",
   "matter.file_locked": "A paper is open in another program. Close it, then try again.",
   "matter.turn_running": "Wait for the answer to finish first.",
   "matter.folder_is_drive": "A whole drive can't be a matter.",
@@ -136,9 +166,10 @@ export const ERROR_WORDS: Record<ErrorCode, ErrorKey> = {
   "matter.folder_unreadable": "Clauseo can't read that folder.",
   "matter.folder_is_matter": "That folder is already a matter's, or inside one.",
   "matter.folder_in_matters_root": "That folder holds Clauseo's own data.",
-  "matter.folder_network": "Codex can't work on a network drive. Move the matter to this computer.",
+  "matter.folder_network":
+    "ChatGPT can't work on a network drive. Move the matter to this computer.",
   "matter.folder_no_permissions":
-    "Codex can't work on a drive without file permissions. Move the matter to this computer.",
+    "ChatGPT can't work on a drive without file permissions. Move the matter to this computer.",
   "matter.folder_too_deep":
     "This matter's folder is too deep inside other folders for Clauseo to work in it on Windows. Move it nearer the top of its drive.",
   "transport.unauthorized": "That wasn't allowed, so nothing changed.",
@@ -159,6 +190,9 @@ export const ERROR_WORDS: Record<ErrorCode, ErrorKey> = {
   "agent.install_blocked": "Your network is blocking the download.",
   "agent.install_disk_full": "There isn't enough free space on this computer for the download.",
   "agent.install_failed": "Setting up didn't finish. Try again.",
+  // provisional (install resume PR): copy review and Hindi review are the app's
+  "agent.install_setup_failed":
+    "Claude was downloaded, but setting it up didn't finish. Try again.",
   "signin.cancelled": "Sign-in was cancelled.",
   "signin.link_expired": "The sign-in link expired. Try again.",
   "signin.no_plan": "This account has no plan that works with Clauseo.",
@@ -182,19 +216,18 @@ export const ERROR_WORDS: Record<ErrorCode, ErrorKey> = {
   // design B's "Safe workspace" words
   "sandbox.setup_refused":
     "Windows didn't get permission for the change Clauseo asked it to approve, so nothing changed. Try again, and choose Yes when Windows asks.",
-  "sandbox.setup_failed":
-    "The Safe workspace couldn't be set up on this computer. Try again. If it keeps failing, ask whoever looks after this computer to look into it.",
+  "sandbox.setup_failed": "The Safe workspace couldn't be set up on this computer. Try again.",
   "sandbox.setup_required":
     "Clauseo can't answer here until the Safe workspace is set up on this computer. Your question is kept.",
   "sandbox.required":
-    "Your firm requires the Safe workspace, and this computer can't provide it, so Clauseo can't answer here. Ask whoever looks after this computer.",
+    "Your firm requires the Safe workspace, and this computer can't provide it, so Clauseo can't answer here.",
   // provisional (app track, Rohan's batch review): in design B's "Safe workspace" words
   "sandbox.blocked":
     "Clauseo can't use the Safe workspace on this computer: a Windows setting or security software is blocking it, so nothing was started. Settings › Safe workspace says what to do.",
   // provisional (stage E, Rohan's batch review): "Allow this site" refused while the firm's policy forbids overriding
   // the unsafe-site list (decision record 0053)
   "blocklist.override_off":
-    "Your firm has turned off allowing sites on Clauseo's unsafe-site list, so this site stays blocked. Ask your IT team if you need it.",
+    "Your firm has turned off allowing sites on Clauseo's unsafe-site list, so this site stays blocked.",
   // provisional (stage E, Rohan's batch review): "Allow this site" from a blocked-site notice the host no longer
   // keeps (decision record 0053)
   "blocklist.notice_expired":
@@ -207,15 +240,46 @@ export const ERROR_WORDS: Record<ErrorCode, ErrorKey> = {
   // Clauseo closes, because the host couldn't save that (decision record 0053)
   "blocklist.revoke_not_saved":
     "This site is blocked again until Clauseo closes. Clauseo couldn't save the change, so it may be allowed again next time Clauseo opens.",
+  // provisional (sandbox track, for the app thread to replace): a launch refused while an earlier
+  // session's clean-up is still running (decision record 0049); retryable
+  "sandbox.cleaning_up":
+    "Clauseo is still tidying up the Safe workspace after it last closed. Try again in a moment. Your question is kept.",
+  // provisional (UC-114, UC-115): the Word blackline's refusals, as Versions says them over the sheet
+  "blackline.no_word_tool":
+    "Clauseo's Word tool is missing. Reinstall Clauseo to see the marked-up changes.",
+  "blackline.not_word": "The changes in this document couldn't be marked up.",
+  "blackline.failed": "The changes in this document couldn't be marked up.",
+  // provisional (English settled by the orchestrator): a Word file's tracked changes, accepted or rejected from its
+  // tile on the wall (room/word/changes-pane.tsx); edit_failed's line stands beside Try again
+  "word.stetdoc_missing":
+    "Clauseo's Word tool is missing. Reinstall Clauseo to accept or reject changes.",
+  "word.revisions_stale":
+    "This file changed after the list was made, so nothing was accepted or rejected. The list now shows its current changes.",
+  "word.not_docx":
+    "Clauseo can't read the tracked changes in this file. It may be damaged, or it may not be a Word document.",
+  "word.edit_failed": "Clauseo couldn't save your decision. The file is as it was.",
+  // the connection dropped mid-answer (D-050); provisional, with Try again under the answer
+  "agent.offline":
+    "You're offline, so the answer stopped. The answer so far is kept. Try again when you're back online.",
   // a code from a newer Clauseo: as internal reads, since this version can say nothing truer
   unknown: "Something went wrong inside Clauseo.",
 };
 
+/** Codes the app gives itself, never the host, so outside ErrorCode: an answer's link, or Versions' Open now, to a
+ * paper the matter's folder no longer holds (room/open.ts). */
+export const APP_ERROR_WORDS = {
+  "paper.not_in_folder": "This paper is no longer in the matter's folder.",
+} as const satisfies Record<string, ErrorKey>;
+
 const own = wordsOf("errors");
+/** Versions' words, read from the shared list rather than words-versions.ts, which stays out of the room's first
+ * load (first-load.test.ts). */
+const versions = wordsOf("versions");
 
 /** An error sentence in the language. */
 export function errorSentence(lang: Lang, key: ErrorKey): string {
-  return key === STOPPED ? th(lang, key) : own(lang, key);
+  if (key === STOPPED) return th(lang, key);
+  return isMark(key) ? versions(lang, key) : own(lang, key);
 }
 
 /** The codes whose sentence names Claude, with their sentence for a thread on the ChatGPT plan, for an agent of no kind
@@ -242,6 +306,12 @@ const PLANNED: Partial<
     chatgpt: "This version of Codex doesn't work with Clauseo.",
     named: "This version of {name} doesn't work with Clauseo.",
     nameless: "This version of the AI doesn't work with Clauseo.",
+  },
+  // provisional (install resume PR), as ERROR_WORDS' sentence
+  "agent.install_setup_failed": {
+    chatgpt: "Codex was downloaded, but setting it up didn't finish. Try again.",
+    named: "{name} was downloaded, but setting it up didn't finish. Try again.",
+    nameless: "The AI was downloaded, but setting it up didn't finish. Try again.",
   },
   "agent.guard_missing": {
     chatgpt: "Clauseo can't start ChatGPT safely here. Reinstall Clauseo.",
@@ -275,9 +345,11 @@ export function plannedKey(code: ErrorCode, agent?: AgentName): { key: ErrorKey;
  * `agent` is the thread's agent (AgentName), for the codes whose sentence names it (plannedKey); a caller that
  * doesn't know the thread leaves it out. */
 export function errorWords(lang: Lang, code: string, agent?: AgentName): string {
+  if (Object.hasOwn(APP_ERROR_WORDS, code))
+    return own(lang, APP_ERROR_WORDS[code as keyof typeof APP_ERROR_WORDS]);
   const known = Object.hasOwn(ERROR_WORDS, code) ? (code as ErrorCode) : "unknown";
   const { key, name } = plannedKey(known, agent);
-  return name === undefined || key === STOPPED
+  return name === undefined || key === STOPPED || isMark(key)
     ? errorSentence(lang, key)
     : own(lang, key, { name });
 }

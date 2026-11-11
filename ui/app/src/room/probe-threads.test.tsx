@@ -70,7 +70,11 @@ test("?thread=shaping: the room subscribes to the idle thread and renders every 
       threads: () => probeThreads(SHAPING, []),
     }),
   });
-  expect(h.transport.only("subscribe").map((c) => c.stream)).toEqual([STREAM]);
+  // the matter's own stream too, held for the wall's papers (use-papers.ts)
+  expect(h.transport.only("subscribe").map((c) => c.stream)).toEqual([
+    `matter:${THE_MATTER.matter}`,
+    STREAM,
+  ]);
   // the thread's entries as the probe streams them
   h.deliver([
     reset([userMessage(2, 1, SHAPING_QUESTION), agentText(3, 100, SHAPING_ANSWER)], header("idle")),
@@ -123,7 +127,11 @@ test("?thread=permission: the room subscribes to the turn's thread and shows its
     }),
   });
   // the room asks the host for the matter's threads and subscribes to the one it lists
-  expect(h.transport.only("subscribe").map((c) => c.stream)).toEqual([STREAM]);
+  // the matter's own stream too, held for the wall's papers (use-papers.ts)
+  expect(h.transport.only("subscribe").map((c) => c.stream)).toEqual([
+    `matter:${THE_MATTER.matter}`,
+    STREAM,
+  ]);
   // the turn's entries as the probe streams them: a pending prompt above one answered once
   h.deliver([
     reset([userMessage(2, 1, "Tighten the notice to the bank.")], header("needs_you")),

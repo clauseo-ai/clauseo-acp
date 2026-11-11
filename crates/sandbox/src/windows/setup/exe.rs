@@ -3,9 +3,9 @@
 //!
 //! `--set-up` takes the owner from the verified parent (`Owner::of_parent`, D-B2), and resolves
 //! `--data-dir` as the owner: no junction or link below the drive's root, a folder the owner
-//! owns, recorded and used as its final path from then on (a `subst` drive resolves to the real
-//! folder). One owned by anyone else exits `DataDirNotOwned`, anything else `Usage`, with
-//! nothing touched. It builds
+//! owns (or Administrators does, for an owner in Administrators), recorded and used as its
+//! final path from then on (a `subst` drive resolves to the real folder). One owned by anyone
+//! else exits `DataDirNotOwned`, anything else `Usage`, with nothing touched. It builds
 //! the request for that owner and checks it names that owner ([`owner_failure`]), then runs
 //! [`set_up`] over a [`WindowsMachine`], which reads the registered matters from the owner's
 //! files once it holds the lock, and writes `setup-result.json` as the owner. Every read and
@@ -30,11 +30,17 @@
 //! After a `--remove --uninstall` that leaves no pool owner on the machine, the admin copy is
 //! removed last (`admin_remove.rs`), by the removal of the install that placed it only (the
 //! app's plain `--remove` keeps it, with its record values); a failure there is
-//! logged and the exit stays the removal's, as what is left is only administrators' to change.
+//! written to the Event Log with its step and code, and exits `AdminCopyLeft` (10), which the
+//! uninstall hook counts as removed, as what is left is only administrators' to change.
+//!
+//! The exe has no log output of its own: `--adopt`'s failures go to the Event Log and the
+//! result file (`explain.rs`), and `tracing` lines at warn and above go to the Event Log as
+//! their message alone (`event_trace.rs`).
 //!
 //! `--refresh` (`crate::windows::refresh`) is the SYSTEM task's: it exits with its own codes
-//! (`RefreshExit`, from 32), which is why [`main`] returns the process's exit code. So does
-//! `--stop` (`stop.rs`), the other SYSTEM task's (`StopExit`, from 45).
+//! (`RefreshExit`, from 32), which is why [`main`] returns the process's exit code. So do
+//! `--stop` (`stop.rs`, `StopExit`, from 45) and `--sweep-tasks` (`sweep.rs`, `SweepExit`,
+//! from 53, after the WSL deny task's 51 and 52), the other SYSTEM tasks'.
 
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
@@ -44,30 +50,37 @@ use super::adopt::Target;
 use super::adopt::windows_adopter::run_adopt;
 use super::args::{self, Mode};
 use super::around::Around;
+use super::explain::{AdoptFailure, AdoptStep, Cause, CopyLeft, removal_exit};
 use super::ffi::restrict_dll_search;
 use super::machine::{MachineError, owned};
 use super::outcome::{SetupExit, SetupFailure, SetupReport, Step};
 use super::owner::{Owner, this_process};
 use super::reclaim_run::run_reclaim;
 use super::record_write::RECORD_KEY;
-use super::remove::{WindowsRemoval, per_machine_allowed, remove};
+use super::remove::{Removed, WindowsRemoval, per_machine_allowed, remove_then};
 use super::result_file::{self, SetupResult};
 use super::stop;
+use super::sweep;
 use super::windows_machine::{Names, WindowsMachine};
 use super::{SetupRequest, owner_failure, set_up};
 use crate::windows::NtfsAcl;
 use crate::windows::admin_copy::{Removal, copy_removable};
 use crate::windows::private_dir::resolve_folder;
 use crate::windows::refresh;
-use crate::windows::sids::Sid;
+use crate::windows::sids::{Sid, data_dir_owner_allowed};
 
 /// Runs the exe on `args` (those after its name) and returns its process exit code: a
 /// [`SetupExit`]'s, for `--refresh` a [`refresh::RefreshExit`]'s, for `--stop` a
-/// [`stop::StopExit`]'s.
+/// [`stop::StopExit`]'s, for `--sweep-tasks` a [`sweep::SweepExit`]'s.
 pub fn main(args: impl IntoIterator<Item = OsString>) -> u8 {
     // First: no DLL from beside the exe (a folder a standard user may write) loads from here on.
     if let Err(error) = restrict_dll_search() {
         tracing::error!(%error, "the DLL search couldn't be kept to System32");
+        let failure = AdoptFailure {
+            step: AdoptStep::DllSearch,
+            cause: Cause::from(error),
+        };
+        refresh::event_log(true, &failure.line());
         return SetupExit::Failed.as_code();
     }
     let mode = match args::parse(args) {
@@ -83,10 +96,14 @@ pub fn main(args: impl IntoIterator<Item = OsString>) -> u8 {
     if mode == Mode::Stop {
         return stop::windows_stopper::run().as_code();
     }
+    if mode == Mode::SweepTasks {
+        return sweep::windows_sweeper::run().as_code();
+    }
+    super::event_trace::install();
     run_mode(mode).as_code()
 }
 
-/// Every mode but `--refresh` and `--stop`, which [`main`] runs.
+/// Every mode but `--refresh`, `--stop` and `--sweep-tasks`, which [`main`] runs.
 fn run_mode(mode: Mode) -> SetupExit {
     match mode {
         Mode::SetUp {
@@ -133,7 +150,7 @@ fn run_mode(mode: Mode) -> SetupExit {
                 .ok();
             run_remove(Names::production(), invoker, per_machine, uninstall)
         }
-        Mode::Refresh | Mode::Stop => SetupExit::Usage,
+        Mode::Refresh | Mode::Stop | Mode::SweepTasks => SetupExit::Usage,
     }
 }
 
@@ -196,16 +213,18 @@ fn request_and_run(
 }
 
 /// The data folder `given`, resolved as `owner` (`private_dir::resolve_folder`: no junction or
-/// link below the drive's root, a folder at the end) and owned by `owner`: its final path, which
-/// is what is recorded and used from then on. Otherwise the exit and why: one owned by anyone
-/// else is [`SetupExit::DataDirNotOwned`]; one that can't be resolved so is `Usage`.
+/// link below the drive's root, a folder at the end) and owned by `owner`, or by Administrators
+/// when `owner` is a member (`sids::data_dir_owner_allowed`): its final path, which is what is
+/// recorded and used from then on. Otherwise the exit and why: one owned by anyone else
+/// (SYSTEM included) is [`SetupExit::DataDirNotOwned`]; one that can't be resolved so is `Usage`.
 pub(super) fn owners_data_dir(owner: &Owner, given: &Path) -> Result<PathBuf, (SetupExit, String)> {
     let usage = |error: String| (SetupExit::Usage, error);
     let (canonical, folder_owner) = owner
         .run_as(|| resolve_folder(given))
         .map_err(|error| usage(error.to_string()))?
         .map_err(|error| usage(error.to_string()))?;
-    if folder_owner != *owner.sid() {
+    let in_admins = || owner.in_administrators();
+    if !data_dir_owner_allowed(&folder_owner, owner.sid(), in_admins) {
         return Err((
             SetupExit::DataDirNotOwned,
             format!(
@@ -249,11 +268,17 @@ pub(crate) fn run_remove(
     let record_key = names.record_key.clone();
     let invoker_sid = invoker.as_ref().map(|owner| owner.sid().clone());
     let mut machine = WindowsRemoval::new(names, invoker);
-    match remove(&mut machine, &mut acl, per_machine) {
+    // The admin copy goes while the set-up lock is still held (`remove_then`), so a refresh
+    // skips. When the teardown doesn't run (a per-user removal by someone else), nothing goes.
+    let mut taken = Ok(());
+    let mut teardown = |_: &Removed| {
+        taken =
+            remove_admin_copy_if_theirs(&record_key, uninstall, per_machine, invoker_sid.as_ref());
+    };
+    match remove_then(&mut machine, &mut acl, per_machine, &mut teardown) {
         Ok(removed) => {
             tracing::info!(?removed, "the removal finished");
-            remove_admin_copy_if_theirs(&record_key, uninstall, per_machine, invoker_sid.as_ref());
-            SetupExit::Removed
+            removal_exit(taken, &mut |line| refresh::event_log(true, line))
         }
         Err(failure) => {
             tracing::error!(step = %failure.step, cause = %failure.cause, "the removal stopped");
@@ -266,13 +291,14 @@ pub(crate) fn run_remove(
 /// the uninstaller's removal (`uninstall`; the app's in-app one never takes it), the pool under
 /// `record_key` has no owner left, and this removal is the one of the install that placed the
 /// copy (`AdminCopyOwner`): a per-machine one for `machine`, the lawyer's own
-/// per-user one (`invoker`) for theirs.
+/// per-user one (`invoker`) for theirs. A copy that stays, or a record that can't be read to
+/// tell, is the step that failed and why.
 fn remove_admin_copy_if_theirs(
     record_key: &str,
     uninstall: bool,
     per_machine: bool,
     invoker: Option<&Sid>,
-) {
+) -> Result<(), CopyLeft> {
     let read = super::record_write::read(record_key)
         .and_then(|pool| Ok((pool, super::record_write::read_admin(record_key)?)));
     match read {
@@ -283,14 +309,22 @@ fn remove_admin_copy_if_theirs(
                 invoker,
             };
             if copy_removable(&removal, pool.is_some(), copy_owner.as_ref()) {
-                if let Err(error) = remove_admin_copy(record_key) {
+                remove_admin_copy(record_key).inspect_err(|left| {
+                    let error = &left.cause.text;
                     tracing::error!(%error, "the admin copy couldn't be removed in full");
-                }
+                })
             } else {
                 tracing::info!("the admin copy isn't this removal's to take; it stays");
+                Ok(())
             }
         }
-        Err(error) => tracing::error!(%error, "the record can't be read; the admin copy stays"),
+        Err(error) => {
+            tracing::error!(%error, "the record can't be read; the admin copy stays");
+            Err(CopyLeft {
+                step: "record",
+                cause: Cause::from(error),
+            })
+        }
     }
 }
 

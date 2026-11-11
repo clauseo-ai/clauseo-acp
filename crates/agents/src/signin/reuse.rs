@@ -1,6 +1,7 @@
 //! Reusing the lawyer's Codex login: the hard link, the guard and the split rule (the brief,
-//! "Codex, reused", "The split rule" and "The login source"). The one file under `src` that may
-//! name Codex's login file, and it never opens or reads it (`tests/credential_names.rs`).
+//! "Codex, reused", "The split rule" and "The login source"), and detection's stats of both
+//! agents' login files. The one file under `src` that may name Codex's login file and Claude's
+//! credential file, and it never opens or reads either (`tests/credential_names.rs`).
 //!
 //! Every operation here on a login file's name, for the security review:
 //! - `std::fs::symlink_metadata` to see whether a name is there and is a plain file: an `lstat`
@@ -14,11 +15,15 @@
 //! - `crate::write::remove_file` (`std::fs::remove_file`), which removes the home's name and
 //!   never reads it.
 //!
-//! Claude needs nothing here: its reuse is an environment (`CLAUDE_SECURESTORAGE_CONFIG_DIR=""`
-//! with Clauseo's `CLAUDE_CONFIG_DIR`, `signin/env.rs`), and "Claude needs no link anywhere".
+//! Claude needs only detection's stat here: its reuse is an environment
+//! (`CLAUDE_SECURESTORAGE_CONFIG_DIR=""` with Clauseo's `CLAUDE_CONFIG_DIR`, `signin/env.rs`), and
+//! "Claude needs no link anywhere".
 
 use std::io;
 use std::path::{Path, PathBuf};
+use std::time::SystemTime;
+
+use clauseo_protocol::AgentId;
 
 use crate::fileid::same_file;
 use crate::signin::Found;
@@ -30,9 +35,43 @@ const LOGIN_FILE: &str = "auth.json";
 /// The lawyer's own Codex folder under their home folder.
 const LAWYER_CODEX: &str = ".codex";
 
+/// Claude Code's login in the lawyer's default store, as a file: `~/.claude/.credentials.json` on
+/// Linux and Windows (`%USERPROFILE%\.claude`, Node's `homedir()`). macOS keeps it in the
+/// Keychain, so there this file is normally absent.
+const CLAUDE_LAWYER_FILE: [&str; 2] = [".claude", ".credentials.json"];
+
+/// Detection's stat of Claude's login: whether `<lawyer_home>/.claude/.credentials.json` is a
+/// regular file (a symbolic link, junction or other reparse point there is no login found).
+/// Never an open: `symlink_metadata` (see the module docs).
+pub(crate) fn claude_login_present(lawyer_home: &Path) -> bool {
+    let file = CLAUDE_LAWYER_FILE
+        .iter()
+        .fold(lawyer_home.to_path_buf(), |path, part| path.join(part));
+    std::fs::symlink_metadata(file).is_ok_and(|meta| plain_file(&meta))
+}
+
 /// The login file in a Codex home (Clauseo's, or a matter's state folder in stage C).
 fn home_file(codex_home: &Path) -> PathBuf {
     codex_home.join(LOGIN_FILE)
+}
+
+/// The login file's path in `codex_home`, for a stat of it (`codex::written`).
+pub(crate) fn login_file(codex_home: &Path) -> PathBuf {
+    home_file(codex_home)
+}
+
+/// Tests only: the login file's path in `codex_home`, so a test elsewhere in `src` need not name
+/// it.
+#[cfg(test)]
+pub(crate) fn login_file_for_tests(codex_home: &Path) -> PathBuf {
+    home_file(codex_home)
+}
+
+/// Tests only: writes a dummy (never a credential) at `path`, making its folder.
+#[cfg(test)]
+pub(crate) fn write_for_tests(path: &Path, contents: &[u8]) {
+    crate::write::create_dir_all(path.parent().unwrap()).unwrap();
+    crate::write::write_atomic(path, contents).unwrap();
 }
 
 /// The lawyer's login file, `<lawyer_home>/.codex/<login file>`.
@@ -147,12 +186,68 @@ pub(crate) fn remove_home_login(codex_home: &Path) -> io::Result<()> {
     crate::write::remove_file(&home_file(codex_home))
 }
 
-/// Detection's stat: whether the lawyer's login file is there ("a stat (never an open) of
-/// `~/.codex/auth.json`: present is a file-mode login, reusable; absent is a keyring or
-/// Windows secrets login"). On Windows `symlink_metadata` opens a handle with access 0, which
-/// cannot read the contents.
+/// When [`remove_empty_home_login`] looks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Empty {
+    /// Right after a kill of a run that used the home: an empty file is that run's cut save.
+    AfterKill,
+    /// Before a status read: an empty file counts only when untouched since `cutoff`, so a
+    /// Codex writing it now (it truncates, then writes) is never cut short.
+    AtStatus {
+        /// The newest modification time an empty file may have.
+        cutoff: SystemTime,
+    },
+}
+
+/// Removes the login file of `codex_home` (a run's own `CODEX_HOME`) when, and only when, a stat
+/// (never an open; on Windows `symlink_metadata` opens a handle with access 0) says it is a file
+/// of 0 bytes, with `when`'s rule; logs fixed words with `agent`. Never while the file is the
+/// lawyer's, reused ([`codex_login_shared`] with `lawyer_home`), and never when the lawyer's home
+/// folder is not known, since that cannot then be told. Returns whether it was removed.
+pub(crate) fn remove_empty_home_login(
+    codex_home: &Path,
+    lawyer_home: Option<&Path>,
+    when: Empty,
+    agent: &AgentId,
+) -> bool {
+    let Some(lawyer_home) = lawyer_home else {
+        return false;
+    };
+    if codex_login_shared(codex_home, lawyer_home) {
+        return false;
+    }
+    let file = home_file(codex_home);
+    let Ok(meta) = std::fs::symlink_metadata(&file) else {
+        return false;
+    };
+    if !meta.is_file() || meta.len() != 0 {
+        return false;
+    }
+    if let Empty::AtStatus { cutoff } = when
+        && !meta.modified().is_ok_and(|modified| modified <= cutoff)
+    {
+        return false;
+    }
+    if crate::write::remove_file(&file).is_err() {
+        return false;
+    }
+    match when {
+        Empty::AfterKill => {
+            tracing::warn!(%agent, "codex auth.json was empty after a forced stop; removed");
+        }
+        Empty::AtStatus { .. } => {
+            tracing::warn!(%agent, "codex auth.json was empty at a status read; removed");
+        }
+    }
+    true
+}
+
+/// Detection's stat: whether the lawyer's login file is there as a regular file (a stat, never
+/// an open, of `~/.codex/auth.json`). A symbolic link, a junction or any other reparse point
+/// there is no login found: "Use it" would refuse to link it. On Windows `symlink_metadata`
+/// opens a handle with access 0, which cannot read the contents.
 pub(crate) fn lawyer_login_present(lawyer_home: &Path) -> bool {
-    std::fs::symlink_metadata(lawyer_file(lawyer_home)).is_ok()
+    std::fs::symlink_metadata(lawyer_file(lawyer_home)).is_ok_and(|meta| plain_file(&meta))
 }
 
 /// Whether a Codex home's login is the lawyer's, reused: `login-source` says `reused`, or, per

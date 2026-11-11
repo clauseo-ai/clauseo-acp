@@ -11,8 +11,12 @@ use crate::agent::login_link::SignIn;
 use crate::browser::chrome::ChromeRoots;
 use crate::browser::install::InstallTools;
 use crate::browser::limits::BrowserSlots;
+use crate::browser::rd_policy::RdPolicy;
 
 use super::EgressProxy;
+
+mod stetdoc;
+pub(crate) use stetdoc::Stetdoc;
 
 /// A hook run with a session's run folder just before it is removed
 /// (`HostConfig::with_run_removal_hook`).
@@ -36,6 +40,10 @@ pub(crate) struct LaunchWiring {
     /// Where the launch prep looks for Chrome; `None` is this machine's roots
     /// (`ChromeRoots::system` with the data folder as app data).
     pub(crate) chrome_roots: Option<ChromeRoots>,
+    /// Reads the firm's Chrome, Edge and Chromium `RemoteDebuggingAllowed` before any browser
+    /// is picked (`browser::rd_policy`): this machine's stores in production, nothing set in
+    /// tests (`RdPolicy::wired`) unless a test passes a fake.
+    pub(crate) rd_policy: Arc<RdPolicy>,
     /// The browser slots: the limit from the machine's memory, and the sessions holding one.
     pub(crate) browser_slots: BrowserSlots,
     /// macOS and Linux: where the browser socket folders go and the start-up sweep looks;
@@ -70,9 +78,13 @@ pub(crate) struct LaunchWiring {
     /// The sessions whose removal ran past [`Self::tree_wait`]: their proxy, relay and claims,
     /// held until the host stops (`launch_checks::straggler`).
     pub(crate) held: HeldRuns,
-    /// The block list's seams (ADR 0053, `BlockListSeams::apply`); `None`: no fetch. Boxed, so
-    /// the actor (which keeps this wiring) stays within the host thread's close-future budget.
+    /// The block list's seams (ADR 0053, `BlockListSeams::apply`); `None`, or nothing
+    /// enforcing the list (`blocklist::needed`): no fetch. Boxed, so the actor (which keeps
+    /// this wiring) stays within the host thread's close-future budget.
     pub(crate) blocklist: Option<Box<crate::blocklist::BlockListSeams>>,
+    /// The stetdoc the Word blackline and tracked changes run (`HostConfig::with_stetdoc`);
+    /// `None`: refused.
+    pub(crate) stetdoc: Option<Stetdoc>,
 }
 
 impl Default for LaunchWiring {
@@ -82,6 +94,7 @@ impl Default for LaunchWiring {
             path_prepend: None,
             browser_executable: None,
             chrome_roots: None,
+            rd_policy: Arc::new(RdPolicy::wired()),
             browser_slots: BrowserSlots::new(None),
             #[cfg(unix)]
             browser_socket_root: None,
@@ -97,6 +110,7 @@ impl Default for LaunchWiring {
             removal_thread_fails: false,
             held: HeldRuns::default(),
             blocklist: None,
+            stetdoc: None,
         }
     }
 }
@@ -108,6 +122,7 @@ impl std::fmt::Debug for LaunchWiring {
             .field("path_prepend", &self.path_prepend)
             .field("browser_executable", &self.browser_executable)
             .field("chrome_roots", &self.chrome_roots)
+            .field("rd_policy", &self.rd_policy)
             .field("browser_slots", &self.browser_slots)
             // Names and values stay out: the environment holds secrets.
             .field("inherited_env", &self.inherited_env.is_some())
@@ -116,6 +131,7 @@ impl std::fmt::Debug for LaunchWiring {
             .field("relays", &self.relays)
             .field("connectors", &self.connectors)
             .field("tree_wait", &self.tree_wait)
+            .field("stetdoc", &self.stetdoc)
             .finish_non_exhaustive()
     }
 }

@@ -1,7 +1,8 @@
 // The matter's versions as the Versions parts read them (ui/components versions-model.ts's Version), from the host's
 // `version` entries on the matter's stream. Who made each comes from its kind, as HANDOFF item 11's table gives it:
 // after_turn is Clauseo in the conversation `list_threads` names, outside_edits the lawyer outside Clauseo, undo an undo
-// of the change its turn made, restore a restore to the version its marker names, import the papers first brought in.
+// of the change its turn made, restore a restore to the version its marker names, import the papers first brought in,
+// revisions the lawyer's accept or reject of a Word file's tracked changes (room/word/changes-pane.tsx).
 // A before_turn version is shown only when it holds files: the lawyer's edits caught as a turn began. A kind this
 // version doesn't know shows its time alone. A turn's papers come from its step (StepEntry) where the room holds its
 // conversation; elsewhere a version says who and when only. Pure: the clock and the zone come in as arguments.
@@ -123,6 +124,11 @@ function whoOf(v: VersionEntry, input: TimelineInput, afterTurn: ReadonlyMap<Tur
       return { kind: "restore", to: input.restores.get(v.checkpoint) ?? "" };
     case "import":
       return { kind: "import", n: input.header?.import?.files ?? null };
+    case "revisions":
+      // the Word file whose tracked changes the lawyer decided; with none named, its time alone
+      return v.files.length === 0
+        ? { kind: "unknown" }
+        : { kind: "revisions", files: v.files.map((f) => f.path) };
     default:
       return { kind: "unknown" };
   }

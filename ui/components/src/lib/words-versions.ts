@@ -50,7 +50,7 @@ export function edgeDialogWords(lang: Lang, ask: EdgeAsk) {
       title: v("Switch off the Safe workspace for {matter}?", { matter: ask.matter }),
       lines: [
         v(
-          "If you switch it off, Clauseo can read and change any file on this computer while it works on this matter, without asking.",
+          "If you switch it off, Clauseo can read any file you can open while it works on this matter, and asks before changing anything outside its folder.",
         ),
         v(
           "If you keep it, Clauseo stays inside this matter's folder, and the scanned annexures stay unread.",

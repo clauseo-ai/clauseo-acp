@@ -12,8 +12,9 @@ pub const FILE_NAME: &str = "search.sqlite";
 
 /// The index format. Any change to the schema, the tokenizer or what a column means bumps it;
 /// an index of another format is emptied and rebuilt, never migrated. Format 2 stores the text
-/// normalised (NFC, zero-width joiners removed); format 1 stored it as given.
-pub const FORMAT: u32 = 2;
+/// normalised (NFC, zero-width joiners removed); format 1 stored it as given. Format 3 stores
+/// text on one line, an answer as its plain words (`plain.rs`), not as its Markdown.
+pub const FORMAT: u32 = 3;
 
 /// The FTS5 tokenizer. `M*` keeps combining marks (Devanagari vowel signs and the virama) inside
 /// words; `remove_diacritics 2` folds Latin accents.

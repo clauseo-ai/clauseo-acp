@@ -6,7 +6,7 @@ use std::io;
 use std::path::PathBuf;
 
 use super::late_steps::{
-    fence, journals, network, own_protected, refuse_pool_owner, registered, stop_task,
+    admin_lock, fence, journals, network, own_protected, refuse_pool_owner, registered, stop_task,
 };
 use super::machine::{LogonRight, Machine, Password, ServiceStart, owned};
 use super::outcome::{
@@ -285,6 +285,7 @@ fn change(
         write_record(machine, &record).map_err(|cause| (Step::WriteRecord, cause))?;
         run.recorded = Some(record);
     }
+    admin_lock(machine, &group)?;
     // A failure after this leaves the task registered, naming this run's owner: the rollback has
     // no step for it. It still stops only what the record names: after a first set-up's rollback
     // there is no record (`--stop` then does nothing) or only the users the rollback couldn't
@@ -338,7 +339,8 @@ fn change(
 }
 
 /// Step 3: the group, adopted only when its SID is the record's, made when missing. A group by
-/// that name that isn't the record's (or with no record) refuses: it is someone else's.
+/// that name that isn't the record's (or with no record) refuses: it is someone else's. Either
+/// way, every run then denies it Remote Desktop logon, which repairs a deny someone took off.
 fn group(machine: &mut impl Machine, run: &mut Run) -> Result<Sid, Failed> {
     let failed = |cause: String| (Step::Group, cause);
     let found = machine.group().map_err(|error| failed(cause_of(&error)))?;
@@ -359,6 +361,9 @@ fn group(machine: &mut impl Machine, run: &mut Run) -> Result<Sid, Failed> {
         }
     };
     run.group = Some(sid.clone());
+    machine
+        .deny_remote_logon(&sid)
+        .map_err(|error| (Step::RemoteLogon, cause_of(&error)))?;
     Ok(sid)
 }
 

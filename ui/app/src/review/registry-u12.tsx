@@ -383,6 +383,11 @@ export const U12: Entry[] = [
   ),
   // a per-model window's label, the model as the host names it: a Max plan's Fable row (#236)
   card("U12-44", planCardWords("{model} weekly limit"), "limits/plan-card", EVERY_WINDOW, 900),
+  // Settings' Plan and usage never blank: a plan's first read running, and no plan set up
+  usage("U12-45", settingsWords("Checking what's left…"), {
+    claude: bare({ freshness: "loading" }),
+  }),
+  usage("U12-46", settingsWords("Set up Claude or ChatGPT to see what each plan has left."), {}),
   // a per-model 5-hour window: a ChatGPT plan's Spark bucket
-  card("U12-45", planCardWords("{model} 5-hour limit"), "limits/plan-card", MODEL_BUCKET, 700),
+  card("U12-47", planCardWords("{model} 5-hour limit"), "limits/plan-card", MODEL_BUCKET, 700),
 ];

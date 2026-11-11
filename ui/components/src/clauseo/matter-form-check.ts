@@ -1,78 +1,13 @@
-// The new matter form's checks, pure: the next date as the lawyer types it, read into a calendar date, and the line
-// the form shows when the host refuses a folder or a matter can't be made. Never the host's own message.
+// The new matter form's check, pure: the line the form shows when the host refuses a folder or a matter can't be
+// made. Never the host's own message.
 import type { Lang } from "../lib/display.ts";
 import { isolate } from "../lib/bidi.ts";
+import { homeShown } from "./folder-path.ts";
 import { mt } from "../lib/words-matters.ts";
 import { ERROR_WORDS, errorWords } from "../lib/words-errors.ts";
 
-const EN_MONTHS = [
-  "january",
-  "february",
-  "march",
-  "april",
-  "may",
-  "june",
-  "july",
-  "august",
-  "september",
-  "october",
-  "november",
-  "december",
-];
-
-/** Hindi month names as the form's placeholder writes them, "30 अक्टूबर 2026", with the common spellings beside. */
-const HI_MONTHS: readonly (readonly string[])[] = [
-  ["जनवरी"],
-  ["फ़रवरी", "फरवरी"],
-  ["मार्च"],
-  ["अप्रैल", "अप्रेल"],
-  ["मई"],
-  ["जून"],
-  ["जुलाई"],
-  ["अगस्त"],
-  ["सितंबर", "सितम्बर"],
-  ["अक्टूबर", "अक्तूबर"],
-  ["नवंबर", "नवम्बर"],
-  ["दिसंबर", "दिसम्बर"],
-];
-
-/** The month's index from its name: English in full or its first three letters, any case, or Hindi; -1 if none. */
-function monthOf(word: string): number {
-  const w = word.toLowerCase().replace(/\.$/, "");
-  const en = EN_MONTHS.findIndex((m) => m === w || (w.length >= 3 && m.startsWith(w)));
-  if (en >= 0) return en;
-  return HI_MONTHS.findIndex((names) => names.includes(word));
-}
-
-const pad = (n: number) => String(n).padStart(2, "0");
-
-/** A calendar date as the host keeps it, "2026-10-30", if the day exists. */
-function iso(year: number, month: number, day: number): string | null {
-  if (year < 1000 || year > 9999 || month < 0 || month > 11 || day < 1) return null;
-  const last = new Date(Date.UTC(year, month + 1, 0)).getUTCDate();
-  return day > last ? null : `${year}-${pad(month + 1)}-${pad(day)}`;
-}
-
-/** The next date as the lawyer types it, read: "30 October 2026" (or "30 Oct 2026", or "30 अक्टूबर 2026") and
- * "2026-10-30" give "2026-10-30"; anything else, a day that doesn't exist included, gives null. Empty text is no
- * date, and gives null too: the caller tells the two apart by the text. */
-export function parseNextDate(text: string): string | null {
-  const s = text.trim().replace(/\s+/g, " ");
-  const isoForm = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
-  if (isoForm !== null) return iso(Number(isoForm[1]), Number(isoForm[2]) - 1, Number(isoForm[3]));
-  const written = /^(\d{1,2}) ([^\s\d]+),? (\d{4})$/u.exec(s);
-  if (written === null) return null;
-  return iso(Number(written[3]), monthOf(written[2] ?? ""), Number(written[1]));
-}
-
-/** The line under the next date when its text doesn't read as a date; null when it's empty or reads. */
-export function nextDateError(lang: Lang, text: string): string | null {
-  if (text.trim() === "" || parseNextDate(text) !== null) return null;
-  return mt(lang, "Write the date as 30 October 2026.");
-}
-
 /** The form's line for a matter the host wouldn't make, from the error's code and, where the caller has it, the
- * folder's display ("Documents/Acme", "C:\\"), isolated in the line, and for matter.folder_is_matter the name of the
+ * folder's display ("Documents/Acme", "C:\\"), home written as "~" and isolated in the line, and for matter.folder_is_matter the name of the
  * matter that has the folder, when the matters list has it. matter.folder_refused, which doesn't say why, takes a line
  * true of every reason the host gives it: a folder already a matter, an unreadable matter file, the matters' own
  * folder, a drive, the home folder, a system folder. H5's codes each say their reason; any other matter.folder_ code
@@ -86,7 +21,8 @@ export function createErrorLine(
   const both = (first: string | null, second: string) =>
     first === null ? second : `${first} ${second}`;
   const named = shown !== undefined && shown !== "";
-  const path = named ? isolate(shown) : "";
+  // home as "~", as the form's Folder row writes it (folder-path.ts)
+  const path = named ? isolate(homeShown(shown)) : "";
   switch (code) {
     case "matter.folder_refused":
       return mt(lang, "Clauseo can't make a matter of this folder. Choose another folder.");

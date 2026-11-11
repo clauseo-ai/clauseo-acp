@@ -5,12 +5,14 @@
 // to their file names. Kept per entry object (an update makes a new one), so a flush reads them once. In the room's
 // first chunk with the working line: small, with nothing of the settled group's words.
 import type { Lang } from "@clauseo/components/lib/display.ts";
-import { stepLive } from "@clauseo/components/lib/words-steps-live.ts";
+import { stepLive, type StepLiveKey } from "@clauseo/components/lib/words-steps-live.ts";
 import { frame } from "@clauseo/components/lib/words-frame.ts";
 import { sentence } from "@clauseo/components/clauseo/matter.ts";
 import type { StreamView } from "../../store/view.ts";
 import type { ToolCallEntry } from "../../transport/protocol.ts";
 import { turnRunning } from "./live.ts";
+import { taskOf } from "./task-words.ts";
+import { toolNameOf, type ToolAs } from "./tool-names.ts";
 
 /** What a step touched. `name`: the paper's file name, a site, or null; `where`: its folder or full place, for the
  * hover; `query`: the words searched for; `what`: the agent's own short words for a task (a command's description). */
@@ -78,6 +80,9 @@ function siteOf(url: string): { name: string; where: string } | null {
 /** An absolute path, Unix or Windows, as a run of non-space characters. Never a slash inside a word or after a colon
  * or another slash, so a web address ("https://indiankanoon.org/doc/1/") is no path and stays whole. */
 const ABSOLUTE = /(?<![\w:/\\.])(?:[A-Za-z]:\\|\/)[^\s"'`]*[/\\][^\s"'`]+/g;
+/** An absolute path in quotes, as a shell command quotes it ("cat '/Users/…/Application Support/…/notes.md'"): spaces
+ * and all, up to its closing quote, which is never part of the name. */
+const QUOTED = /(['"`])((?:[A-Za-z]:\\|\/)[^'"`]*[/\\][^'"`]+)\1/g;
 /** The kinds whose title names the paper they touched. */
 const PAPER_KINDS: ReadonlySet<string> = new Set(["read", "edit", "delete", "move"]);
 /** The paper's whole path in a title, from where `named` (its first run without a space) starts up to its file's
@@ -89,9 +94,48 @@ function paperIn(title: string, named: string): string {
 /** A web address in a title. */
 const WEB = /\bhttps?:\/\/[^\s"'`]+/;
 
-/** The agent's title with each absolute path cut to its file name: the fallback when nothing else names the step. */
+/** Text with Markdown's strong and emphasis marks and a heading's hashes taken off (D-018): an agent's title or
+ * thought ("**Inspecting docx headers**") reads as its words. Code spans keep their text, without the backticks. */
+export const plainOf = (s: string): string =>
+  s
+    .replace(/^#{1,6}\s+/gm, "")
+    .replace(/(\*\*|__)(?=\S)([\s\S]*?\S)\1/g, "$2")
+    .replace(/(^|[\s(])\*(?=\S)([^*\n]*?\S)\*(?=[\s).,;:!?]|$)/g, "$1$2")
+    .replace(/`([^`\n]+)`/g, "$1");
+
+/** A thought's words as its row shows them: its Markdown marks off (D-018), with no blank line before or after it
+ * and none more than one in a row, so a reasoning summary's leading newlines leave no gap (D-030). */
+export const thoughtText = (text: string): string =>
+  plainOf(text)
+    .replace(/^\s+|\s+$/g, "")
+    .replace(/\n\s*\n(\s*\n)+/g, "\n\n");
+
+/** The agent's title with each absolute path cut to its file name and its Markdown marks off: the fallback when
+ * nothing else names the step. */
 export const titleOf = (title: string): string =>
-  title.replace(ABSOLUTE, (p) => splitPath(p).name || p).trim();
+  plainOf(
+    title
+      .replace(
+        QUOTED,
+        (_whole, quote: string, p: string) => `${quote}${splitPath(p).name || p}${quote}`,
+      )
+      .replace(ABSOLUTE, (p) => splitPath(p).name || p),
+  ).trim();
+
+/** A web search's words as the lawyer reads them (D-028): the sites a `site:` operator names taken out to say on
+ * their own ("indiacode.nic.in"), and the quotes around the rest dropped; `site` null when none is named. */
+export function siteQuery(query: string): { site: string | null; query: string } {
+  const sites: string[] = [];
+  const rest = query
+    .replace(/(?:^|\s)-?site:(\S+)/gi, (m: string, s: string) => {
+      if (!m.trim().startsWith("-")) sites.push(s.replace(/^https?:\/\//, "").replace(/\/$/, ""));
+      return " ";
+    })
+    .replace(/["“”]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  return { site: sites.length === 0 ? null : sites.join(", "), query: rest === "" ? query : rest };
+}
 
 const places = new WeakMap<ToolCallEntry, StepPlace>();
 
@@ -123,11 +167,12 @@ export function placeOf(entry: ToolCallEntry): StepPlace {
   } else {
     // nothing names it but the agent's title, whose paths the row cuts to their file names: the first one's folder is
     // the hover, so where the paper is stays a pointer away; with no path, a web address in it, whole
-    const named = entry.title.match(ABSOLUTE)?.[0];
+    // a quoted path is whole up to its quote; a bare one, a paper's own step's, runs on past a space to the paper's
+    // extension ("Form DIR-12.pdf"), so its words (and their tried form) are the room's own
+    const quoted = [...entry.title.matchAll(QUOTED)][0]?.[2];
+    const named = quoted ?? entry.title.match(ABSOLUTE)?.[0];
     const folder = named === undefined ? "" : splitPath(named).folder;
-    // a paper's own step names the paper the title names, so its words (and their tried form) are the room's own: the
-    // path runs on past a space to the paper's extension ("Form DIR-12.pdf")
-    const file = named === undefined ? "" : splitPath(paperIn(entry.title, named)).name;
+    const file = named === undefined ? "" : splitPath(quoted ?? paperIn(entry.title, named)).name;
     if (PAPER_KINDS.has(entry.kind) && file !== "") place.name = file;
     place.where = folder === "" ? (entry.title.match(WEB)?.[0] ?? null) : folder;
   }
@@ -135,8 +180,37 @@ export function placeOf(entry: ToolCallEntry): StepPlace {
   return place;
 }
 
-/** The agent's title as a sentence, its paths cut, where nothing else names the step; `plain` with no title. */
-export function titled(entry: ToolCallEntry, plain: string): string {
+/** A segment of Clauseo's data folder that holds only the agents' own state: each matter's notes and its brief. */
+const AGENT_STATE = /(?:^|[/\\])agent-state[/\\]/;
+
+/** Whether a step touched only the agent's own notes (`<data>/agent-state/<matter>/notes`, the matter brief among them)
+ * by every place it names: its locations, its input's path, or its title's paths. Such a step is the agent's upkeep, never
+ * a paper, so the folded line neither counts it nor tells it as failed. A step that names no place is not internal. */
+export function internalOf(entry: ToolCallEntry): boolean {
+  const places: string[] = [];
+  for (const l of entry.locations)
+    if (typeof l === "object") places.push(l.inside?.path ?? l.outside?.display ?? "");
+  const raw = first(rawOf(entry), PATH_KEYS);
+  if (raw !== null) places.push(raw);
+  places.push(...(entry.title.match(ABSOLUTE) ?? []));
+  return places.length > 0 && places.every((p) => AGENT_STATE.test(p));
+}
+
+/** What a step titled with a known tool's name (tool-names.ts) is doing. */
+const TOOL_LIVE: Record<ToolAs, StepLiveKey> = {
+  network: "Letting a task reach the internet.",
+  execute: "Running a task.",
+  read: "Reading the papers.",
+  edit: "Changing a paper.",
+  search: "Searching the papers.",
+  fetch: "Looking online.",
+};
+
+/** The agent's title as a sentence, its paths cut, where nothing else names the step; `plain` with no title. A title
+ * that is a tool's name is never shown: a known one says what it does, any other reads as `plain`. */
+export function titled(entry: ToolCallEntry, plain: string, lang: Lang): string {
+  const tool = toolNameOf(entry.title);
+  if (tool !== undefined) return tool.as === null ? plain : stepLive(lang, TOOL_LIVE[tool.as]);
   const title = titleOf(entry.title);
   return title === "" ? plain : sentenceOf(title);
 }
@@ -149,36 +223,52 @@ export function doingOf(lang: Lang, entry: ToolCallEntry): string {
   switch (entry.kind) {
     case "read":
       return name === null
-        ? titled(entry, stepLive(lang, "Reading the papers."))
+        ? titled(entry, stepLive(lang, "Reading the papers."), lang)
         : stepLive(lang, "Reading {name}.", { name });
     case "edit":
       return name === null
-        ? titled(entry, stepLive(lang, "Changing a paper."))
+        ? titled(entry, stepLive(lang, "Changing a paper."), lang)
         : stepLive(lang, "Changing {name}.", { name });
     case "delete":
       return name === null
-        ? titled(entry, stepLive(lang, "Deleting a paper."))
+        ? titled(entry, stepLive(lang, "Deleting a paper."), lang)
         : stepLive(lang, "Deleting {name}.", { name });
     case "move":
       return name === null
-        ? titled(entry, stepLive(lang, "Moving a paper."))
+        ? titled(entry, stepLive(lang, "Moving a paper."), lang)
         : stepLive(lang, "Moving {name}.", { name });
     case "search":
       return p.query === null
-        ? titled(entry, stepLive(lang, "Searching the papers."))
+        ? titled(entry, stepLive(lang, "Searching the papers."), lang)
         : stepLive(lang, "Searching for '{query}'.", { query: p.query });
-    case "fetch":
-      return p.query !== null
-        ? stepLive(lang, "Searching online for '{query}'.", { query: p.query })
+    case "fetch": {
+      const sq = p.query === null ? null : siteQuery(p.query);
+      if (sq?.site != null)
+        return stepLive(lang, "Searching {site} for '{query}'.", {
+          site: sq.site,
+          query: sq.query,
+        });
+      return sq !== null
+        ? stepLive(lang, "Searching online for '{query}'.", { query: sq.query })
         : name !== null
           ? stepLive(lang, "Reading {name} online.", { name })
-          : titled(entry, stepLive(lang, "Looking online."));
-    case "execute":
-      return p.what === null ? stepLive(lang, "Running a task.") : sentenceOf(p.what);
+          : titled(entry, stepLive(lang, "Looking online."), lang);
+    }
+    case "execute": {
+      const t = taskOf(entry);
+      if (t.own !== null) return sentenceOf(t.own);
+      if (t.program === null) {
+        const tool = toolNameOf(entry.title)?.as;
+        return stepLive(lang, tool == null ? "Running a task." : TOOL_LIVE[tool]);
+      }
+      return t.paper === null
+        ? stepLive(lang, "Running {program}.", { program: t.program })
+        : stepLive(lang, "Running {program} on {name}.", { program: t.program, name: t.paper });
+    }
     case "think":
       return stepLive(lang, "Thinking it through.");
     default:
-      return titled(entry, stepLive(lang, "Working on it."));
+      return titled(entry, stepLive(lang, "Working on it."), lang);
   }
 }
 

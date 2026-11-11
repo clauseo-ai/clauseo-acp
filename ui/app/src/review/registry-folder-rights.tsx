@@ -1,18 +1,27 @@
 // Folder rights' copy review entries (FR-01 to FR-15, FR-20, FR-21): the room's notice for a matter folder Clauseo can't
 // fence or couldn't check, the text it opens for IT, the toolbar's Not protected, the reason on an Editing files card,
 // in the real room over FakeTransport, the host's folder_support set on the one matter; and New matter's warning for
-// a folder picked, the host's FolderSupport answering. Apart from registry.tsx to keep that file under the size
+// a folder picked, the host's FolderSupport answering; and on the Mac, Open Privacy settings and its line under a turn
+// macOS kept out of the matter's folder (FR-22, FR-23). Apart from registry.tsx to keep that file under the size
 // limit. The mode picker's off options (FR16, FR17) wait on a mode picker.
 import type { ReactNode } from "react";
 import type { Lang } from "@clauseo/components/lib/display.ts";
 import { tbt } from "@clauseo/components/lib/words-toolbar.ts";
-import { TURN, uuid } from "../testing/stream-script.ts";
+import { PRIVACY_KEYS } from "@clauseo/components/lib/words-errors.ts";
+import { step, TURN, userMessage, uuid } from "../testing/stream-script.ts";
 import { FakeTransport } from "../transport/fake-transport.ts";
 import type { FolderSupportKind, ViewEntry } from "../transport/protocol.ts";
 import type { Entry } from "./entry.ts";
 import { MATTER, NEW_MATTER, roomHost, threadHost, type Step } from "./hosts.ts";
 import { RoomAfter, RoomFocusing, RoomOver, RoomPressing } from "./states.tsx";
-import { folderCardWords, folderWords as w, matterWords, uiWords, type WordsRef } from "./words.ts";
+import {
+  errorWords,
+  folderCardWords,
+  folderWords as w,
+  matterWords,
+  uiWords,
+  type WordsRef,
+} from "./words.ts";
 
 /** Several lines of one id, joined with " / " as the approved page writes them. */
 const joined = (parts: readonly WordsRef[]): WordsRef => ({
@@ -62,6 +71,15 @@ const entry = (id: string, words: WordsRef, render: () => ReactNode): Entry => (
   render,
 });
 
+/** A turn macOS kept out of the matter's folder: the question, and its stop with matter.folder_permission. */
+const kept = () =>
+  threadHost({
+    entries: [
+      userMessage(5, 1, "What does clause nine of the lease say about notice?"),
+      step(9, { stop: "failed", failure: "matter.folder_permission" }),
+    ],
+  });
+
 /** A pending Editing files card in a folder whose permissions can't change. */
 const EDITING: ViewEntry[] = [
   {
@@ -105,7 +123,7 @@ export const FOLDER_RIGHTS: Entry[] = [
   entry(
     "FR-02",
     w(
-      "You can change files here, but not this folder's permissions. Clauseo needs them to keep Claude and Codex inside the matter. Some edits won't go through.",
+      "You can change files here, but not this folder's permissions. Clauseo needs them to keep Claude and ChatGPT inside the matter. Some edits won't go through.",
     ),
     () => <RoomFocusing host={room("cant_change_permissions")} focus={INFO} />,
   ),
@@ -119,7 +137,7 @@ export const FOLDER_RIGHTS: Entry[] = [
     "FR-05",
     joined([
       w(
-        'Please give my account "Change permissions" on this folder: {path}. Clauseo, the app I use for this matter, adds one entry to the folder\'s permissions so Claude and Codex, which it runs, can write only inside it.',
+        'Please give my account "Change permissions" on this folder: {path}. Clauseo, the app I use for this matter, adds one entry to the folder\'s permissions so Claude and ChatGPT, which it runs, can write only inside it.',
       ),
       w("Copy"),
     ]),
@@ -146,8 +164,8 @@ export const FOLDER_RIGHTS: Entry[] = [
   entry(
     "FR-08",
     joined([
-      w("Claude asks before every change. Codex can't work here."),
-      w("Clauseo can't keep Claude and Codex inside a folder on a network drive."),
+      w("Claude asks before every change. ChatGPT can't work here."),
+      w("Clauseo can't keep Claude and ChatGPT inside a folder on a network drive."),
     ]),
     warned("network"),
   ),
@@ -161,10 +179,10 @@ export const FOLDER_RIGHTS: Entry[] = [
     "FR-12",
     joined([
       w("On a network drive."),
-      w("Claude asks before every change. Codex can't work here."),
+      w("Claude asks before every change. ChatGPT can't work here."),
       w("This matter's folder is on a network drive"),
       w(
-        "Clauseo can't keep Claude and Codex inside this folder. To work in the Safe workspace, move the matter to a folder on this computer.",
+        "Move the matter to a folder on this computer to use ChatGPT here and let Claude work without asking before every change. Clauseo can't keep them inside a folder on a network drive.",
       ),
     ]),
     () => <RoomFocusing host={room("network")} focus={INFO} />,
@@ -174,10 +192,10 @@ export const FOLDER_RIGHTS: Entry[] = [
     "FR-15",
     joined([
       w("No file permissions."),
-      w("Claude asks before every change. Codex can't work here."),
+      w("Claude asks before every change. ChatGPT can't work here."),
       w("This matter's folder is on a drive that doesn't keep file permissions"),
       w(
-        "Clauseo can't keep Claude and Codex inside this folder. USB drives often don't keep permissions. To work in the Safe workspace, move the matter to a folder on this computer.",
+        "Move the matter to a folder on this computer to use ChatGPT here and let Claude work without asking before every change. Clauseo can't keep them inside this folder, and USB drives often don't keep file permissions.",
       ),
     ]),
     () => <RoomFocusing host={room("no_permissions")} focus={INFO} />,
@@ -191,9 +209,9 @@ export const FOLDER_RIGHTS: Entry[] = [
   entry(
     "FR-14",
     joined([
-      w("Claude asks before every change. Codex can't work here."),
+      w("Claude asks before every change. ChatGPT can't work here."),
       w(
-        "Clauseo can't keep Claude and Codex inside a folder on this drive. USB drives often don't keep permissions.",
+        "Clauseo can't keep Claude and ChatGPT inside a folder on this drive. USB drives often don't keep permissions.",
       ),
     ]),
     warned("no_permissions"),
@@ -208,4 +226,7 @@ export const FOLDER_RIGHTS: Entry[] = [
   entry("FR-21", matterWords("Opening the folder picker…"), () => (
     <RoomAfter host={holding} steps={PICKED} />
   )),
+  // matter.folder_permission's stop on the Mac (room/thread/privacy-settings.tsx): the button, then the line under it
+  entry("FR-22", errorWords(PRIVACY_KEYS.button), () => <RoomOver host={kept} />),
+  entry("FR-23", errorWords(PRIVACY_KEYS.line), () => <RoomOver host={kept} />),
 ];

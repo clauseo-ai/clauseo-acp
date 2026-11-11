@@ -3,6 +3,10 @@
    it, so the review page, which renders SettingsApp too, keeps its own sheet. Tests are not sources, so their classes never reach the shipped CSS. */
 @import "../styles/system.css";
 @import "@clauseo/components/clauseo/shell.css";
+/* the Ask-sized buttons of UD1's sign-in gate and Safe workspace step, which Plans and the Safe workspace show */
+@import "@clauseo/components/clauseo/composer.css";
+/* the Safe workspace's set-up and removal confirm (ProtectionConfirm, np-note-*) */
+@import "@clauseo/components/clauseo/edge.css";
 @import "@clauseo/components/clauseo/lockup.css";
 @import "@clauseo/components/clauseo/settings-window.css";
 @import "./usage.css";

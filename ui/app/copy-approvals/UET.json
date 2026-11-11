@@ -87,141 +87,20 @@
     "by": "Rohan",
     "note": "Rohan, on the review page (web and browser, icon-first v2)"
   },
-  "UET-18": {
-    "en": "Not available yet",
-    "hi": "अभी उपलब्ध नहीं",
-    "hi_status": "provisional",
-    "hi_at": "2026-11-06",
-    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "approved",
-    "at": "2026-11-04",
-    "by": "Rohan",
-    "note": "Rohan, on the review page (web and browser, icon-first v2)"
-  },
-  "UET-19": {
-    "en": "Too many browsers open",
-    "hi": "बहुत सारे ब्राउज़र खुले हैं",
-    "hi_status": "provisional",
-    "hi_at": "2026-11-06",
-    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "approved",
-    "at": "2026-11-04",
-    "by": "Rohan",
-    "note": "Rohan, on the review page (web and browser, icon-first v2)"
-  },
   "UET-20": {
-    "en": "Needs Chrome",
-    "hi": "Chrome चाहिए",
+    "en": "Install Chrome",
+    "hi": "Chrome इंस्टॉल करें",
     "hi_status": "provisional",
-    "hi_at": "2026-11-06",
+    "hi_at": "2026-11-09",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "approved",
-    "at": "2026-11-04",
-    "by": "Rohan",
-    "note": "Rohan, on the review page (web and browser, icon-first v2)"
-  },
-  "UET-21": {
-    "en": "From Google, once. Needs 1 GB free.",
-    "hi": "Google से, एक बार। 1 GB खाली जगह चाहिए।",
-    "hi_status": "provisional",
-    "hi_at": "2026-11-06",
-    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "approved",
-    "at": "2026-11-04",
-    "by": "Rohan",
-    "note": "Rohan, on the review page (web and browser, icon-first v2)"
-  },
-  "UET-22": {
-    "en": "Download Chrome",
-    "hi": "Chrome डाउनलोड करें",
-    "hi_status": "provisional",
-    "hi_at": "2026-11-06",
-    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "approved",
-    "at": "2026-11-04",
-    "by": "Rohan",
-    "note": "Rohan, on the review page (web and browser, icon-first v2)"
-  },
-  "UET-23": {
-    "en": "Install Chrome to use it",
-    "hi": "इसके लिए Chrome इंस्टॉल करें",
-    "hi_status": "provisional",
-    "hi_at": "2026-11-06",
-    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "approved",
-    "at": "2026-11-04",
-    "by": "Rohan",
-    "note": "Rohan, on the review page (web and browser, icon-first v2)"
-  },
-  "UET-24": {
-    "en": "{done} of {total} MB",
-    "hi": "{total} MB में से {done}",
-    "hi_status": "provisional",
-    "hi_at": "2026-11-06",
-    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "approved",
-    "at": "2026-11-04",
-    "by": "Rohan",
-    "note": "Rohan, on the review page (web and browser, icon-first v2)"
-  },
-  "UET-25": {
-    "en": "Unpacking",
-    "hi": "अनपैक हो रहा है",
-    "hi_status": "provisional",
-    "hi_at": "2026-11-06",
-    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "approved",
-    "at": "2026-11-04",
-    "by": "Rohan",
-    "note": "Rohan, on the review page (web and browser, icon-first v2)"
+    "status": "provisional",
+    "at": "2026-11-09",
+    "by": "app track (provisional; Rohan approved the words 2026-11-09, copy review pending)",
+    "note": "No browser on a Mac (browser_not_installed), after #870's shell browser: the lawyer's step, replacing Needs Chrome"
   },
   "UET-26": {
     "en": "Ready for new conversations",
     "hi": "नई बातचीत के लिए तैयार",
-    "hi_status": "provisional",
-    "hi_at": "2026-11-06",
-    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "approved",
-    "at": "2026-11-04",
-    "by": "Rohan",
-    "note": "Rohan, on the review page (web and browser, icon-first v2)"
-  },
-  "UET-27": {
-    "en": "Needs 1 GB free",
-    "hi": "1 GB खाली जगह चाहिए",
-    "hi_status": "provisional",
-    "hi_at": "2026-11-06",
-    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "approved",
-    "at": "2026-11-04",
-    "by": "Rohan",
-    "note": "Rohan, on the review page (web and browser, icon-first v2)"
-  },
-  "UET-28": {
-    "en": "Network blocked it",
-    "hi": "नेटवर्क ने रोक दिया",
-    "hi_status": "provisional",
-    "hi_at": "2026-11-06",
-    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "approved",
-    "at": "2026-11-04",
-    "by": "Rohan",
-    "note": "Rohan, on the review page (web and browser, icon-first v2)"
-  },
-  "UET-29": {
-    "en": "File didn't match",
-    "hi": "फ़ाइल मेल नहीं खाई",
-    "hi_status": "provisional",
-    "hi_at": "2026-11-06",
-    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "approved",
-    "at": "2026-11-04",
-    "by": "Rohan",
-    "note": "Rohan, on the review page (web and browser, icon-first v2)"
-  },
-  "UET-30": {
-    "en": "Download failed",
-    "hi": "डाउनलोड विफल",
     "hi_status": "provisional",
     "hi_at": "2026-11-06",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
@@ -244,28 +123,6 @@
   "UET-33": {
     "en": "Changes apply to new conversations.",
     "hi": "बदलाव नई बातचीत पर लागू होते हैं।",
-    "hi_status": "provisional",
-    "hi_at": "2026-11-06",
-    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "approved",
-    "at": "2026-11-04",
-    "by": "Rohan",
-    "note": "Rohan, on the review page (web and browser, icon-first v2)"
-  },
-  "UET-34": {
-    "en": "Connection dropped",
-    "hi": "कनेक्शन टूट गया",
-    "hi_status": "provisional",
-    "hi_at": "2026-11-06",
-    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "approved",
-    "at": "2026-11-04",
-    "by": "Rohan",
-    "note": "Rohan, on the review page (web and browser, icon-first v2)"
-  },
-  "UET-35": {
-    "en": "Couldn't unpack",
-    "hi": "अनपैक नहीं हो सका",
     "hi_status": "provisional",
     "hi_at": "2026-11-06",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
@@ -318,17 +175,6 @@
     "by": "Rohan",
     "note": "Rohan, on the review page (web and browser, icon-first v2)"
   },
-  "UET-42": {
-    "en": "200 MB",
-    "hi": "200 MB",
-    "hi_status": "provisional",
-    "hi_at": "2026-11-06",
-    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "approved",
-    "at": "2026-11-04",
-    "by": "Rohan",
-    "note": "Rohan, on the review page (web and browser, icon-first v2)"
-  },
   "UET-43": {
     "en": "The browser comes with your next conversation.",
     "hi": "ब्राउज़र आपकी अगली बातचीत के साथ आएगा।",
@@ -339,5 +185,82 @@
     "at": "2026-11-04",
     "by": "Rohan",
     "note": "Rohan, on the review page (web and browser, icon-first v2)"
+  },
+  "UET-44": {
+    "en": "Blocked by your firm",
+    "hi": "आपकी फ़र्म ने रोका है",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-08",
+    "hi_by": "app track (final provisional Hindi; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-08",
+    "by": "app track (provisional; Rohan batch review)",
+    "note": "Browser blocked by the firm's RemoteDebuggingAllowed policy (browser_blocked_by_policy): pending copy review; no download offered"
+  },
+  "UET-45": {
+    "en": "Your firm doesn't allow apps to control a browser on this computer, so Clauseo can't use one for you.",
+    "hi": "आपकी फ़र्म इस कंप्यूटर पर ऐप्स को ब्राउज़र नियंत्रित करने की अनुमति नहीं देती, इसलिए Clauseo आपके लिए ब्राउज़र का उपयोग नहीं कर सकता।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-08",
+    "hi_by": "app track (final provisional Hindi; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-08",
+    "by": "app track (provisional; reworded 2026-11-08)",
+    "note": "Browser blocked by the firm's RemoteDebuggingAllowed policy (browser_blocked_by_policy): pending copy review; no download offered"
+  },
+  "UET-46": {
+    "en": "Couldn't check browser settings",
+    "hi": "ब्राउज़र सेटिंग्स की जाँच नहीं हो सकी",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-08",
+    "hi_by": "app track (final provisional Hindi; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-08",
+    "by": "app track (provisional; Rohan batch review)",
+    "note": "Browser policy (RemoteDebuggingAllowed) couldn't be read (browser_policy_unreadable): pending copy review; no download offered"
+  },
+  "UET-47": {
+    "en": "Clauseo couldn't check this computer's browser settings, so it won't use a browser for now. It checks again the next time it needs one.",
+    "hi": "Clauseo इस कंप्यूटर की ब्राउज़र सेटिंग्स की जाँच नहीं कर सका, इसलिए वह अभी ब्राउज़र का उपयोग नहीं करेगा। अगली बार ब्राउज़र की ज़रूरत होने पर वह फिर से जाँच करेगा।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-08",
+    "hi_by": "app track (final provisional Hindi; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-08",
+    "by": "app track (provisional; Rohan batch review)",
+    "note": "Browser policy (RemoteDebuggingAllowed) couldn't be read (browser_policy_unreadable): pending copy review; no download offered"
+  },
+  "UET-48": {
+    "en": "Install Chrome or Edge",
+    "hi": "Chrome या Edge इंस्टॉल करें",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-09",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-09",
+    "by": "app track (provisional; Rohan approved the words 2026-11-09, copy review pending)",
+    "note": "No browser on Windows (browser_not_installed): the host takes Edge when it finds no Chrome"
+  },
+  "UET-49": {
+    "en": "Install Google Chrome, then start a new conversation.",
+    "hi": "Google Chrome इंस्टॉल करें, फिर एक नई बातचीत शुरू करें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-10",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-10",
+    "by": "app track (provisional; Rohan approved the words 2026-11-09, start a new conversation after #899 2026-11-10, copy review pending)",
+    "note": "Under Install Chrome on a Mac: the browser's skill loads as each conversation starts (#899), so a new conversation finds it"
+  },
+  "UET-50": {
+    "en": "Install Google Chrome or Microsoft Edge, then start a new conversation.",
+    "hi": "Google Chrome या Microsoft Edge इंस्टॉल करें, फिर एक नई बातचीत शुरू करें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-10",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-10",
+    "by": "app track (provisional; Rohan approved the words 2026-11-09, start a new conversation after #899 2026-11-10, copy review pending)",
+    "note": "Under Install Chrome or Edge on Windows: the browser's skill loads as each conversation starts (#899), so a new conversation finds it"
   }
 }

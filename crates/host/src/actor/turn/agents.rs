@@ -4,13 +4,11 @@
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
-use std::rc::Rc;
-use std::sync::Arc;
 
 use clauseo_acp::{AcpEvent, AgentInfo, MessageRole, PendingKey};
 use clauseo_protocol::{
-    AgentChoiceId, AgentKind, AgentSessionId, CompactString, ConfigValue, ElicitationId, ErrorCode,
-    MessageId, PermissionRequestId, ThreadId, TurnId,
+    AgentChoiceId, AgentSessionId, CompactString, ConfigValue, ElicitationId, ErrorCode, MessageId,
+    PermissionRequestId, ThreadId, TurnId,
 };
 
 use clauseo_process::TreeWatch;
@@ -30,9 +28,14 @@ use crate::rate::{RateCap, RatedUpdate};
 use crate::sent::SentView;
 
 mod ended;
+mod launch;
+mod path;
+mod start_failure;
 
 use ended::{StopCause, stop_closed};
 pub(super) use ended::{hold_stop, idle_stop, log_detach, on_ended, stop};
+use launch::launch;
+pub(super) use start_failure::launch_failed;
 
 /// Work that waits for the agent's session.
 #[derive(Debug)]
@@ -107,12 +110,19 @@ pub(super) struct Agent {
     /// A Claude agent whose launch's folder check found a network drive or a drive without
     /// permissions: it runs in forced ask (`agent/forced_ask.rs`).
     pub(super) forced_ask: bool,
+    /// A Claude agent's standing with `auto`, the mode it runs in outside forced ask
+    /// (`session/claude_mode.rs`).
+    pub(super) auto: session::Auto,
     /// A Claude agent's plans folder, `<config folder>/plans`, from its launch's environment
     /// (`agent/plan_note.rs`); `None` for any other agent.
     pub(super) plan_notes: Option<PathBuf>,
     /// Its permission requests the host rejected for touching Clauseo's data folder
     /// (`agent/data_fence.rs`), logged as a count on its `agent ended` line.
     pub(super) denied_data_folder: u32,
+    /// Its launch's failure code (`launch_failed`); its end then logs its start's stderr summary.
+    pub(super) start_failure: Option<ErrorCode>,
+    /// Its matter folder's spellings, read at the launch (`start_failure::matter_spellings`).
+    pub(super) matter_spellings: Vec<String>,
     /// Its idle clock and config calls in flight (`idle.rs`).
     pub(super) idle: super::idle::Mark,
 }
@@ -124,8 +134,7 @@ pub(super) struct CodexAgent {
     /// it. Each prompt and session call checks the stored folder for `.codex` first, resolved
     /// again.
     pub(super) folder: PathBuf,
-    /// A hooks object went into its `CODEX_CONFIG`, so its session start checks that Codex
-    /// trusts the guard.
+    /// Its `CODEX_CONFIG` got a hooks object: its session start checks Codex trusts the guard.
     pub(super) guard: bool,
     /// Its one `authenticate` with its key (`key_retry.rs`).
     pub(super) key_retry: KeyRetry,
@@ -197,13 +206,14 @@ pub(super) fn launch_now(
         tracing::info!(%matter, forced_ask, "Claude runs in forced ask: the matter folder is unprotected");
     }
     let mut tree = None;
-    let (link, folder, codex, plan_notes) = match launch(actor, thread, prepared, &mut tree) {
-        Ok(launched) => launched,
-        Err(error) => {
-            fail_all(actor, thread, waiting, &error);
-            return tree;
-        }
-    };
+    let (link, folder, codex, plan_notes, matter_spellings) =
+        match launch(actor, thread, prepared, &mut tree) {
+            Ok(launched) => launched,
+            Err(error) => {
+                fail_all(actor, thread, waiting, &error);
+                return tree;
+            }
+        };
     let id = next_agent_id();
     let client = link.client.clone();
     call(actor, thread, id, async move {
@@ -244,8 +254,11 @@ pub(super) fn launch_now(
         codex,
         mcp_commands: Vec::new(),
         forced_ask,
+        auto: session::Auto::default(),
         plan_notes,
         denied_data_folder: 0,
+        start_failure: None,
+        matter_spellings,
         idle: super::idle::Mark::default(),
     };
     if let Some(state) = state(actor, thread) {
@@ -259,119 +272,6 @@ pub(super) fn launch_now(
 pub(super) fn next_agent_id() -> u64 {
     static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
     NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
-}
-
-/// What a launch gives: the link, the folder it runs in, what a Codex launch recorded, and a
-/// Claude launch's plans folder.
-type Launched = (AgentLink, PathBuf, Option<CodexAgent>, Option<PathBuf>);
-
-/// The launch itself: the spec from the settings (inherited environment, the agent's
-/// variables, then the profile hook's with the host's switches over them, then what the host
-/// forces for the agent's kind), in the matter folder that was checked (`prepared`). A Codex
-/// agent's `.codex` refusal (#184), its home and its `config.toml` are done by then.
-fn launch(
-    actor: &Actor,
-    thread: ThreadId,
-    prepared: Prepared,
-    tree: &mut Option<TreeWatch>,
-) -> Result<Launched, Error> {
-    let row = &actor.check_thread(thread)?.row;
-    let settings = actor.effective.agent(row.agent.as_str()).ok_or_else(|| {
-        Error::refused(
-            ErrorCode::AgentLaunchFailed,
-            format!("no agent {} in the settings", row.agent),
-        )
-    })?;
-    // The relay token reaches the agent in a file; its stderr tail hides it all the same.
-    let redacted = super::launch_checks::relay::redacted(&prepared.run);
-    let folder = prepared.stored;
-    let (forced, codex) = if let Some(prepared) = prepared.codex {
-        let hooks = codex_hooks(actor);
-        let guard = hooks.is_some();
-        let forced = agent::codex::launch_env(&prepared.home, &settings.env, prepared.keys, hooks);
-        let codex = CodexAgent {
-            folder: prepared.folder,
-            guard,
-            key_retry: KeyRetry::default(),
-        };
-        (forced, Some((codex, prepared.login)))
-    } else {
-        // A Claude agent's home goes in before `plans_folder` reads the merged map below.
-        let forced = prepared
-            .claude_home
-            .as_deref()
-            .map(agent::home::claude_launch_env);
-        (forced.unwrap_or_default(), None)
-    };
-    let hook = agent::loads::launch_env(actor.profile.launch_env(&row.agent));
-    // The key retry is armed by the hook's key and the launch's sign-in check.
-    let codex = codex.map(|(mut codex, login)| {
-        codex.key_retry = KeyRetry::at_launch(&hook, login);
-        codex
-    });
-    let dropped: &[&str] = if codex.is_some() {
-        &agent::codex::DROPPED_VARS
-    } else {
-        &[]
-    };
-    let inherited: Vec<_> = match &actor.wiring.inherited_env {
-        Some(env) => env.clone(),
-        None => std::env::vars_os().collect(),
-    };
-    // Tier C (no jail) leaves the agent's environment alone: no session proxy variables here
-    // (`ProxyHandle::env`); only the browser entry reaches the proxy, advisory without a jail.
-    let spec = agent::launch_spec(
-        settings,
-        hook,
-        forced,
-        dropped,
-        inherited.into_iter(),
-        agent::session_folder(&folder),
-        actor.wiring.path_prepend.as_deref(),
-    )
-    .map_err(super::launch_checks::folder::gone_at_spawn)?
-    .with_redacted(redacted);
-    let claude = AgentKind::of(&row.agent) == Some(AgentKind::Claude);
-    let plan_notes = claude
-        .then(|| agent::plan_note::plans_folder(spec.env(), cfg!(windows)))
-        .flatten();
-    let post = actor.post.clone();
-    let post: Rc<dyn Fn(agent::AgentInput)> = Rc::new(move |input| {
-        // The actor may be gone by then.
-        let _gone = post.try_send(Input::Agent { thread, input });
-    });
-    let link = agent::start(
-        &actor.spawner,
-        actor.launcher.as_ref(),
-        &spec,
-        Arc::clone(&actor.clock),
-        post,
-        tree,
-    )?;
-    Ok((link, folder, codex, plan_notes))
-}
-
-/// THE CODEX HOOKS SEAM: the `hooks` object a Codex agent's `CODEX_CONFIG` carries, with its
-/// `state` trust entry and `trusted_hash`: the one a test set (`HostConfig::with_codex_hooks`),
-/// else [`codex_hook_config`](agent::loads::codex_hook_config) for the guard program the
-/// Claude Code entry runs (`HostConfig::with_pre_write_guard`), so its `PreToolUse` holds one
-/// group, the guard's. `None` with no guard program, or (with a warning) one that
-/// `codex_hook_config` cannot quote. It is read once per launch, which records on the agent
-/// whether one went in (`Agent::guard`); with none the session start skips the guard's trust
-/// check.
-fn codex_hooks(actor: &Actor) -> Option<serde_json::Map<String, serde_json::Value>> {
-    if let Some(hooks) = &actor.codex_hooks {
-        return Some(hooks.clone());
-    }
-    let program = actor.pre_write_guard.as_deref()?;
-    let Some(serde_json::Value::Object(hooks)) = agent::loads::codex_hook_config(program) else {
-        tracing::warn!(
-            "the pre-write guard's path cannot go in Codex's hook command, so Codex runs without \
-             the guard"
-        );
-        return None;
-    };
-    Some(hooks)
 }
 
 /// Step 4 for a turn whose agent was started in another folder than its matter's row now names
@@ -453,8 +353,8 @@ pub(super) fn on_reply(actor: &mut Actor, thread: ThreadId, id: u64, reply: Agen
     }
     match reply {
         AgentReply::Prompt { turn, result } => end::on_prompt_done(actor, thread, turn, result),
-        AgentReply::Config { ctx, result } => {
-            super::answers::on_config(actor, thread, ctx, same, result);
+        AgentReply::Config { ctx, pick, result } => {
+            super::answers::on_config(actor, thread, (ctx, pick), same, result);
         }
         AgentReply::Mode { ctx, mode, result } => {
             super::answers::on_mode(actor, thread, ctx, same, &mode, result);
@@ -463,8 +363,8 @@ pub(super) fn on_reply(actor: &mut Actor, thread: ThreadId, id: u64, reply: Agen
             end::on_prompt_refused(actor, thread, turn, &error);
         }
         AgentReply::Steer(steered) => super::queue::on_steered(actor, thread, *steered),
-        AgentReply::ModeReset(result) => {
-            super::forced_mode::on_mode_reset(actor, thread, same, result);
+        AgentReply::ModeReset(mode, result) => {
+            super::forced_mode::on_mode_reset(actor, thread, same, mode, result);
         }
         AgentReply::Initialized(_)
         | AgentReply::Session { .. }
@@ -484,7 +384,9 @@ pub(super) fn on_reply(actor: &mut Actor, thread: ThreadId, id: u64, reply: Agen
         AgentReply::Prepared {
             result: Ok(start),
             loaded,
-        } => session::attach(actor, thread, start, loaded),
+            picked,
+            fell_back,
+        } => session::on_prepared(actor, thread, start, (loaded, fell_back), &picked),
         // `Refused`: a session call's `.codex` re-check refused it, so no call was sent.
         AgentReply::Prepared {
             result: Err(error), ..
@@ -536,8 +438,9 @@ pub(super) fn run_waiting(actor: &mut Actor, thread: ThreadId, waiting: Waiting)
         Waiting::Config(ctx, option, value) => {
             super::idle::call_started(actor, thread);
             call(actor, thread, id, async move {
-                let result = client.set_config_option(&session, option, value).await;
-                AgentReply::Config { ctx, result }
+                let result = client.set_config_option(&session, option.clone(), value.clone());
+                let (pick, result) = ((option, value), result.await);
+                AgentReply::Config { ctx, pick, result }
             });
         }
         Waiting::Mode(ctx, mode) if forced && !agent::forced_ask::mode_allowed(mode.as_str()) => {
@@ -582,19 +485,5 @@ fn fail_waiting(actor: &mut Actor, thread: ThreadId, waiting: &Waiting, error: &
             let error = Error::refused(error.code(), error.to_string());
             actor.finish_command(ctx.id, Err(error));
         }
-    }
-}
-
-/// The launch failed after the agent started: stop it and fail what waits for it.
-pub(super) fn launch_failed(actor: &mut Actor, thread: ThreadId, error: &Error) {
-    let Some(agent) = state(actor, thread).and_then(|state| state.agent.as_deref_mut()) else {
-        return;
-    };
-    tracing::warn!(%thread, error = %Cause(error), "the agent did not start");
-    agent.link.stop();
-    agent.stage = Stage::Stopping;
-    let waiting = std::mem::take(&mut agent.waiting);
-    for item in waiting {
-        fail_waiting(actor, thread, &item, error);
     }
 }

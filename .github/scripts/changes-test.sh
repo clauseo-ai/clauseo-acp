@@ -40,6 +40,7 @@ check "$F $F $F $F" rustfmt.toml taplo.toml _typos.toml deny.toml .gitleaks.toml
 check "$F $F $F $F" .gitignore .gitattributes
 check "$F $F $F $T" ui/.gitignore
 check "$F $F $F $F" fuzz/fuzz_targets/acp.rs fuzz/nightly.sh
+check "$F $F $F $F" services/counts-worker/src/lib.rs services/counts-worker/pnpm-lock.yaml
 
 # ui-only: smoke runs, the Rust build matrix does not.
 check "$F $T $T $T" ui/app/src/App.tsx
@@ -48,6 +49,8 @@ check "$F $T $T $T" ui/components/button.tsx docs/ui.md
 # Read by Rust tests (the scan at the end finds every such file).
 check "$T $T $T $T" ui/app/src/transport/bindings.ts
 check "$T $T $T $T" ui/components/src/clauseo/shell.css
+check "$T $T $T $T" ui/app/index.html
+check "$T $T $T $T" ui/app/src/review/registry-nd.tsx
 check "$T $T $T $T" ui/e2e/app-windows/smoke.spec.ts
 check "$T $T $T $T" ui/e2e/app-windows/scenarios/word-one-docx.jsonl
 check "$T $F $F $F" docs/decisions/0006-store-format.md

@@ -16,9 +16,12 @@
 //!    other account write, append, delete (of it or of a child), `WRITE_DAC`, `WRITE_OWNER` or
 //!    a generic right that holds one of those ([`level_safe`]); the volume root itself, where
 //!    every account may add a folder, is held only to the rights that could replace what is in
-//!    it ([`root_safe`]): else [`Blocked::AdminCopyUnsafe`]. Deny entries don't matter:
-//!    they only take rights away. The admin folder holds nothing but the copy, its signature and
-//!    the staging folder ([`expected_entry`]): a DLL planted beside the copy is refused too;
+//!    it ([`root_safe`]): else [`Blocked::AdminCopyUnsafe`]. Deny entries don't matter to
+//!    that: they only take rights away. Once the record names the pool's group, `Sandbox` and
+//!    the copy must deny it everything, first ([`group_denied`], `locked.rs` says why; a copy
+//!    lacking only that is healed first, `heal.rs`). The
+//!    admin folder holds nothing but the copy, its signature and the staging folder
+//!    ([`expected_entry`]): a DLL planted beside the copy is refused too;
 //! 3. the copy's SHA-256 is the recorded one: else [`Blocked::AdminCopyChanged`].
 //!
 //! The folder check comes before the hash: a copy in a folder others can change proves nothing
@@ -41,9 +44,19 @@ use crate::{Blocked, SetupState};
 #[cfg(test)]
 mod chain_tests;
 #[cfg(test)]
+mod deny_tests;
+#[cfg(test)]
 pub(crate) mod fake;
+mod heal;
+#[cfg(windows)]
+pub(crate) mod heal_os;
+#[cfg(test)]
+mod heal_tests;
 #[cfg(test)]
 mod launch_tests;
+#[cfg(windows)]
+pub(crate) mod lock_tree_os;
+mod locked;
 #[cfg(windows)]
 pub(crate) mod mark_os;
 #[cfg(test)]
@@ -52,11 +65,18 @@ mod ntfs_tests;
 #[cfg(windows)]
 pub(crate) mod os;
 mod security_block;
+pub(crate) mod take_back;
+#[cfg(windows)]
+pub(crate) mod take_back_os;
 #[cfg(test)]
 mod tests;
+mod text;
 mod version;
 
+pub use heal::{Owed, owed};
+pub use locked::{group_denied, locked, locked_file_sddl, locked_folder_sddl};
 pub use security_block::launch_recorded;
+pub use text::{hex, is_sha256_hex};
 pub use version::{compare_versions, parse_version, version_not_older};
 
 /// The admin copy's folder under `%ProgramFiles%`, one part at a time.
@@ -122,14 +142,6 @@ pub const FULL_ACCESS: u32 = 0x1F_01FF;
 /// `FILE_GENERIC_READ | FILE_GENERIC_EXECUTE`: read and run.
 pub const READ_EXECUTE: u32 = 0x12_00A9;
 
-/// The admin folder as the installer's `--adopt` leaves it: owner Administrators, a protected
-/// DACL, full control for SYSTEM and Administrators and read and run for Users, each inherited
-/// by files and folders inside.
-pub const LOCKED_FOLDER_SDDL: &str =
-    "O:BAD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;0x1200a9;;;BU)";
-/// The admin copy itself: the folder's entries, written on the file and protected, so it never
-/// depends on what it would inherit.
-pub const LOCKED_FILE_SDDL: &str = "O:BAD:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;0x1200a9;;;BU)";
 /// `BUILTIN\Users`.
 const USERS: &str = "S-1-5-32-545";
 
@@ -164,6 +176,9 @@ pub trait AdminCopyFs {
     fn sha256_held(&self, path: &Path) -> io::Result<(String, Held)>;
     /// The record's `AdminCopySha256`, when it holds one.
     fn recorded_sha256(&self) -> io::Result<Option<String>>;
+    /// The record's `GroupSid`, the pool's group, when it holds one; text that isn't a SID is
+    /// an error.
+    fn recorded_group(&self) -> io::Result<Option<Sid>>;
     /// The names of what is in the folder `dir`.
     fn entries(&self, dir: &Path) -> io::Result<Vec<String>>;
     /// Whether the record names another Windows user than this process's as the pool's owner
@@ -173,6 +188,16 @@ pub trait AdminCopyFs {
     fn security_blocked(&self) -> io::Result<bool>;
     /// Records the mark (`true`, at the time now) or deletes it (`false`).
     fn set_security_blocked(&self, blocked: bool) -> io::Result<()>;
+    /// Asks the SYSTEM refresh task to run now, which gives the copy a missing deny (`heal.rs`).
+    fn request_refresh(&self) -> io::Result<()> {
+        Err(io::ErrorKind::Unsupported.into())
+    }
+    /// Waits `pause` between looks at a copy being healed.
+    fn pause(&self, _pause: std::time::Duration) {}
+    /// A monotonic clock, for the heal's back-off.
+    fn clock(&self) -> std::time::Duration {
+        std::time::Duration::ZERO
+    }
 }
 
 /// What keeps a hashed admin copy unchanged ([`AdminCopyFs::sha256_held`]): on Windows the
@@ -196,6 +221,7 @@ impl Held {
 /// be read does: [`Blocked::AdminCopyMissing`], never "no other owner".
 pub fn check_launchable(fs: &dyn AdminCopyFs) -> Result<PathBuf, Blocked> {
     owner_check(fs)?;
+    heal::heal_owed(fs, heal::Asker::Launch);
     check(fs)
 }
 
@@ -208,7 +234,8 @@ pub fn launch_checked<T>(
     start: impl FnOnce(&Path) -> T,
 ) -> Result<T, Blocked> {
     owner_check(fs)?;
-    let (exe, held) = checked(fs, |exe| fs.sha256_held(exe))?;
+    heal::heal_owed(fs, heal::Asker::Launch);
+    let (exe, held) = checked(fs, true, |exe| fs.sha256_held(exe))?;
     let started = start(&exe);
     drop(held);
     Ok(started)
@@ -253,12 +280,13 @@ pub fn admin_exe(program_files: &Path) -> PathBuf {
 /// The admin copy's path once it passes the module's three rules, else the first rule it
 /// breaks. The path is the one to start: nothing else is ever started elevated.
 pub fn check(fs: &dyn AdminCopyFs) -> Result<PathBuf, Blocked> {
-    checked(fs, |exe| fs.sha256(exe).map(|hash| (hash, ()))).map(|(exe, ())| exe)
+    checked(fs, true, |exe| fs.sha256(exe).map(|hash| (hash, ()))).map(|(exe, ())| exe)
 }
 
-/// [`check`], the copy hashed by `hash`, which also gives what it holds for the caller.
+/// [`check`], the copy hashed by `hash`, which gives what it holds too; the deny only if `deny`.
 fn checked<H>(
     fs: &dyn AdminCopyFs,
+    deny: bool,
     hash: impl FnOnce(&Path) -> io::Result<(String, H)>,
 ) -> Result<(PathBuf, H), Blocked> {
     let program_files = fs.program_files().map_err(|error| {
@@ -282,6 +310,9 @@ fn checked<H>(
         }
     };
     check_chain(fs, &program_files, &exe)?;
+    if deny {
+        check_denied(fs, &program_files, &exe)?;
+    }
     match fs.entries(&admin_dir(&program_files)) {
         Ok(names) if names.iter().all(|name| expected_entry(name)) => {}
         Ok(_) => {
@@ -344,6 +375,31 @@ fn check_chain(fs: &dyn AdminCopyFs, program_files: &Path, exe: &Path) -> Result
                 ?found,
                 "a level of the admin copy's folders isn't safe"
             );
+            return Err(Blocked::AdminCopyUnsafe);
+        }
+    }
+    Ok(())
+}
+
+/// Rule 2's deny: once the record names the pool's group, `Sandbox` and the copy each deny it
+/// everything, first ([`group_denied`]), else [`Blocked::AdminCopyUnsafe`]. With no recorded
+/// group there is none to require. A group that can't be read is [`Blocked::AdminCopyMissing`],
+/// as the record's other values are.
+fn check_denied(fs: &dyn AdminCopyFs, program_files: &Path, exe: &Path) -> Result<(), Blocked> {
+    let group = match fs.recorded_group() {
+        Ok(Some(group)) => group,
+        Ok(None) => return Ok(()),
+        Err(error) => {
+            tracing::warn!(%error, "the record's group can't be read");
+            return Err(Blocked::AdminCopyMissing);
+        }
+    };
+    for path in [admin_dir(program_files), exe.to_path_buf()] {
+        if !fs
+            .security(&path)
+            .is_ok_and(|bytes| group_denied(&bytes, &group))
+        {
+            tracing::warn!("the admin copy's folder or file doesn't deny the sandbox group");
             return Err(Blocked::AdminCopyUnsafe);
         }
     }
@@ -429,67 +485,6 @@ fn safe_against(bytes: &[u8], rights: u32) -> bool {
     })
 }
 
-/// Whether the self-relative descriptor `bytes` is exactly [`LOCKED_FOLDER_SDDL`]'s (`folder`)
-/// or [`LOCKED_FILE_SDDL`]'s: owner Administrators, a protected DACL, and its three allow
-/// entries with those masks and inheritance and nothing else, in any order. `--adopt` reads the
-/// folder and the copy back and refuses on anything else.
-pub fn locked(bytes: &[u8], folder: bool) -> bool {
-    let inherit = if folder {
-        acl_bytes::OBJECT_INHERIT | acl_bytes::CONTAINER_INHERIT
-    } else {
-        0
-    };
-    let owner = acl_bytes::owner_sid(bytes);
-    if owner.as_ref().map(super::sids::Sid::as_str) != Some(ADMINISTRATORS) {
-        return false;
-    }
-    let Ok(descriptor) = Descriptor::parse(bytes) else {
-        return false;
-    };
-    let Some(dacl) = descriptor.dacl.filter(|_| descriptor.dacl_protected()) else {
-        return false;
-    };
-    let Ok(dacl) = Acl::parse(dacl) else {
-        return false;
-    };
-    let mut seen: Vec<(String, u32)> = Vec::new();
-    for ace in dacl.aces() {
-        let sid = acl_bytes::sid(ace).and_then(acl_bytes::sid_text);
-        let (Some(sid), Some(mask)) = (sid, acl_bytes::mask(ace)) else {
-            return false;
-        };
-        if acl_bytes::kind(ace) != acl_bytes::ALLOWED || acl_bytes::flags(ace) != inherit {
-            return false;
-        }
-        seen.push((sid.as_str().to_owned(), mask));
-    }
-    seen.sort();
-    let mut want = vec![
-        (SYSTEM.to_owned(), FULL_ACCESS),
-        (ADMINISTRATORS.to_owned(), FULL_ACCESS),
-        (USERS.to_owned(), READ_EXECUTE),
-    ];
-    want.sort();
-    seen == want
-}
-
-/// Whether `text` is a SHA-256 as the record holds it: 64 lowercase hex digits.
-pub fn is_sha256_hex(text: &str) -> bool {
-    text.len() == 64
-        && text
-            .bytes()
-            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
-}
-
-/// `bytes` as lowercase hex.
-pub fn hex(bytes: &[u8]) -> String {
-    use std::fmt::Write as _;
-    bytes.iter().fold(String::new(), |mut out, byte| {
-        let _infallible = write!(out, "{byte:02x}");
-        out
-    })
-}
-
 /// A Windows path's text as compared here: `/` read as `\`, a `\\?\` prefix (not `\\?\UNC\`)
 /// dropped, and no trailing `\` but a root's.
 fn normal(path: &Path) -> String {
@@ -539,6 +534,7 @@ pub fn protection_state(
     marker: SetupState,
     combined: SetupState,
 ) -> SetupState {
+    heal::heal_owed(fs, heal::Asker::State);
     if let Err(blocked) = check(fs) {
         return SetupState::Blocked(blocked);
     }

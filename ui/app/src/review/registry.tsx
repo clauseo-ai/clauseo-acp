@@ -1,11 +1,11 @@
 // Every string the copy review shows, one entry each. A brief that adds or changes a string adds its entry here: the
-// next free id for the brief ("U1-04"), the words file and English key (words.ts's helpers), the screen, the state
-// that shows it (the real screen over a scripted host, built in the render function), and, where the default desktop
-// window (entry.ts) doesn't suit, the width and height to render at. Approvals live in ui/app/copy-approvals/, one file per brief.
+// brief's next free id, the words file and English key (words.ts's helpers), the screen, the state that shows it (the
+// real screen over a scripted host), and the window's size where entry.ts's default doesn't suit. Approvals: copy-approvals/.
 import { LocateGate, MovedFolder } from "../room/moved.tsx";
 import { ScratchLine } from "../room/scratch-line.tsx";
 import type { Entry } from "./entry.ts";
 import { H11 } from "./registry-h11.tsx";
+import { NATIVE } from "./registry-mn.tsx";
 import { U4 } from "./registry-u4.tsx";
 import { U4B } from "./registry-u4b.tsx";
 import { U10 } from "./registry-u10.tsx";
@@ -14,6 +14,7 @@ import { U12 } from "./registry-u12.tsx";
 import { U15 } from "./registry-u15.tsx";
 import { U15_ROOM } from "./registry-u15-room.tsx";
 import { U17 } from "./registry-u17.tsx";
+import { LONG_QUESTION } from "./registry-long-question.tsx";
 import { WEB_SETTINGS } from "./registry-web-settings.tsx";
 import { U16A_RAIL } from "./registry-u16a-rail.tsx";
 import { U16A_FIND } from "./registry-u16a-find.tsx";
@@ -22,6 +23,7 @@ import { U8 } from "./registry-u8.tsx";
 import { U9 } from "./registry-u9.tsx";
 import { U6 } from "./registry-u6.tsx";
 import { U7 } from "./registry-u7.tsx";
+import { TF } from "./registry-follow.tsx";
 import { C117 } from "./registry-c117.tsx";
 import { U6F } from "./registry-u6f.tsx";
 import { ME } from "./registry-me.tsx";
@@ -31,7 +33,12 @@ import { UET } from "./registry-uet.tsx";
 import { UD1 } from "./registry-ud1.tsx";
 import { UD2 } from "./registry-ud2.tsx";
 import { UD2_PLANS } from "./registry-ud2-plans.tsx";
-import { UC } from "./registry-uc.tsx";
+import { UC_ALL } from "./registry-uc-word.tsx";
+import { UC_TOOLNAMES } from "./registry-uc-toolnames.tsx";
+import { SAC } from "./registry-sac.tsx";
+import { NM } from "./registry-nm.tsx";
+import { ownEntries, ownEntry } from "./registry-offline.tsx";
+import { PK } from "./registry-pk.tsx";
 import {
   MATTER,
   NEW_MATTER,
@@ -48,13 +55,13 @@ import {
   errorWords,
   frameWords,
   limitWords,
-  matterFormWords,
   matterWords,
   shared,
   threadWords,
   type WordsRef,
 } from "./words.ts";
 import type { NextErrorCode } from "../room/host-next.ts";
+import type { ThreadKey } from "@clauseo/components/lib/words-thread.ts";
 import { ERROR_WORDS, type ErrorKey } from "@clauseo/components/lib/words-errors.ts";
 import { agentText, step, toolCall, TURN, userMessage, uuid } from "../testing/stream-script.ts";
 import type { ErrorCode, StepEntry, ViewEntry } from "../transport/protocol.ts";
@@ -63,6 +70,8 @@ import { FOLDER_RIGHTS } from "./registry-folder-rights.tsx";
 import { FOLDER_CHOOSER } from "./registry-folder-chooser.tsx";
 import { TN } from "./registry-notices.tsx";
 import { UBL } from "./registry-blocklist.tsx";
+import { R23 } from "./registry-update.tsx";
+import { IT_ENTRIES } from "./registry-it.tsx";
 
 /* ---------- U3: the live thread's states ---------- */
 
@@ -119,13 +128,22 @@ const limit = (reason: string, resets_at?: number): ViewEntry => ({
 });
 
 const thread = (state: ThreadState) => () => <RoomOver host={() => threadHost(state)} />;
+/** A turn's end under the answer so far: its stop, and the line that stop says. */
+const stoppedAt = (id: string, key: ThreadKey, stop: StepEntry["stop"]): Entry => ({
+  id,
+  words: threadWords(key),
+  screen: "room/thread",
+  render: thread({ entries: [QUESTION, PARTIAL, ended({ stop })] }),
+});
 
 /** One entry per error code, "U3-err-<code>", refused on a send: an id that names its code never moves when a code
- * is added. Codes whose sentence is U3-07's (words-thread.ts's) need no entry of their own. */
+ * is added. Codes whose sentence is U3-07's (words-thread.ts's), or that registry-offline.tsx's ownEntry names, need
+ * no entry of their own. */
 const ERRORS: Entry[] = (Object.entries(ERROR_WORDS) as [ErrorCode, ErrorKey][]).flatMap(
   ([code, key]) =>
-    key === "The answer stopped. Your question and the answer so far are kept."
-      ? []
+    key === "The answer stopped. Your question and the answer so far are kept." ||
+    ownEntry(code, key)
+      ? ownEntries(code)
       : [
           {
             id: `U3-err-${code}`,
@@ -163,18 +181,8 @@ const U3: Entry[] = [
       entries: [QUESTION, PARTIAL, toolCall(7, 1, "cancelled"), ended({ stop: "cancelled" })],
     }),
   },
-  {
-    id: "U3-04",
-    words: threadWords("You stopped the answer. The answer so far is kept."),
-    screen: "room/thread",
-    render: thread({ entries: [QUESTION, PARTIAL, ended({ stop: "cancelled" })] }),
-  },
-  {
-    id: "U3-05",
-    words: threadWords("The answer stopped at its limit, before it finished."),
-    screen: "room/thread",
-    render: thread({ entries: [QUESTION, PARTIAL, ended({ stop: "max_tokens" })] }),
-  },
+  stoppedAt("U3-04", "You stopped the answer. The answer so far is kept.", "cancelled"),
+  stoppedAt("U3-05", "The answer stopped at its limit, before it finished.", "max_tokens"),
   {
     id: "U3-06",
     words: threadWords("This question was declined, so there is no answer."),
@@ -262,7 +270,7 @@ const U3: Entry[] = [
     screen: "room/thread",
     render: thread({ entries: [QUESTION, PARTIAL, limit("workspace_credits", atLocal(2, 9, 0))] }),
   },
-  // U3-16 was "Limit reached. Reset not given.", the toolbar's sentence, which the limit row no longer says
+  // U3-16 was "Limit reached", the toolbar's sentence, which the limit row no longer says
   {
     id: "U3-48",
     words: limitWords("Reset not given."),
@@ -282,14 +290,11 @@ const U3: Entry[] = [
     screen: "room/thread",
     render: thread({ entries: [QUESTION, PARTIAL, limit("plan_window", atLocal(-2, 9, 0))] }),
   },
-  {
-    id: "U3-51",
-    words: threadWords(
-      "You didn't allow a request, so the answer stopped. The answer so far is kept.",
-    ),
-    screen: "room/thread",
-    render: thread({ entries: [QUESTION, PARTIAL, ended({ stop: "not_allowed" })] }),
-  },
+  stoppedAt(
+    "U3-51",
+    "You didn't allow a request, so the answer stopped. The answer so far is kept.",
+    "not_allowed",
+  ),
 ];
 
 /* ---------- U2: the rail and matters ---------- */
@@ -307,15 +312,15 @@ const railState = (id: string, words: WordsRef): Entry => ({
   render: () => <RoomOver host={railHost} />,
 });
 
-/** Change, then Create the matter: the picked folder refused with `code`. */
+/** Choose folder…, then Create matter: the picked folder refused with `code`. */
 const CHANGE_CREATE: readonly Step[] = [
   ...NEW_MATTER,
   { press: "matter-existing" },
   { press: "create-matter" },
 ];
 
-/** A line of the new matter form's refusal (matter-form-check.ts's createErrorLine), after Change and Create, or with
- * `next` after Create into the default location, where the line names no folder. */
+/** A line of the new matter form's refusal (matter-form-check.ts's createErrorLine), after Choose folder… and Create,
+ * or with `next` after Use a new folder and Create, in the default location, where the line names no folder. */
 const refusal = (
   id: string,
   words: WordsRef,
@@ -329,7 +334,9 @@ const refusal = (
   render: () => (
     <RoomAfter
       host={() => refusingHost(code, display, next)}
-      steps={next ? [...NEW_MATTER, { press: "create-matter" }] : CHANGE_CREATE}
+      steps={
+        next ? [...NEW_MATTER, { press: "matter-made" }, { press: "create-matter" }] : CHANGE_CREATE
+      }
     />
   ),
 });
@@ -367,6 +374,7 @@ export const REGISTRY: readonly Entry[] = [
   ...U15,
   ...U15_ROOM,
   ...U17,
+  ...LONG_QUESTION,
   ...WEB_SETTINGS,
   ...U16A_RAIL,
   ...U16A_FIND,
@@ -374,8 +382,10 @@ export const REGISTRY: readonly Entry[] = [
   ...U8,
   ...U9,
   ...H11,
+  ...NATIVE,
   ...U6,
   ...U7,
+  ...TF,
   ...UTC,
   ...C117,
   ...U6F,
@@ -385,7 +395,9 @@ export const REGISTRY: readonly Entry[] = [
   ...UD1,
   ...UD2,
   ...UD2_PLANS,
-  ...UC,
+  ...UC_ALL,
+  ...UC_TOOLNAMES,
+  ...SAC,
   {
     id: "U2-01",
     words: frameWords("Add a matter's folder."),
@@ -393,14 +405,11 @@ export const REGISTRY: readonly Entry[] = [
     ...RAIL,
     render: () => <RoomOver host={() => roomHost([])} />,
   },
-  railState("U2-02", frameWords("Tomorrow")),
-  railState("U2-03", frameWords("This week")),
-  railState("U2-04", frameWords("Next week")),
-  railState("U2-05", frameWords("Later")),
-  railState("U2-06", frameWords("No date yet")),
+  // U2-02 to U2-06, retired: the rail's date groups (Tomorrow, This week, Next week, Later, No date yet) gave way to
+  // Needs you, Working and the rest by latest activity (NM-11, NM-12)
   railState("U2-07", limitWords("Limit reached until {time}")),
   railState("U2-08", limitWords("Limit reached until {day} {time}")),
-  railState("U2-09", limitWords("Limit reached. Reset not given.")),
+  railState("U2-09", limitWords("Limit reached")),
   refusal(
     "U2-10",
     matterWords("{path} is a whole drive."),
@@ -463,21 +472,7 @@ export const REGISTRY: readonly Entry[] = [
     "internal",
     "Documents/Mehta",
   ),
-  {
-    id: "U2-20",
-    words: matterWords("Write the date as 30 October 2026."),
-    screen: "matters/new-matter",
-    render: () => (
-      <RoomAfter
-        host={() => refusingHost("internal", "", true)}
-        steps={[
-          ...NEW_MATTER,
-          { type: { field: 2, text: "next Tuesday" } },
-          { press: "create-matter" },
-        ]}
-      />
-    ),
-  },
+  // U2-20, retired: the next date's line went with the field (a matter is a name, a client and a folder)
   {
     id: "U2-21",
     words: matterWords("A matter for quick questions, with no papers of its own."),
@@ -571,16 +566,14 @@ export const REGISTRY: readonly Entry[] = [
     render: () => <RoomOver host={scratchHost} />,
   },
   railState("U2-33", frameWords("Stopped on {day} at {time}")),
-  // what Change changes, for a screen reader, where no folder line says it (without H20)
-  {
-    id: "U2-34",
-    words: matterFormWords("The matter's folder"),
-    screen: "matters/new-matter",
-    render: () => <RoomAfter host={() => refusingHost("internal")} steps={NEW_MATTER} />,
-  },
+  // U2-34, retired: the Folder row's label names it for a screen reader too
   ...U16B,
   ...FOLDER_RIGHTS,
   ...FOLDER_CHOOSER,
   ...TN,
   ...UBL,
+  ...R23,
+  ...IT_ENTRIES,
+  ...NM,
+  ...PK,
 ];

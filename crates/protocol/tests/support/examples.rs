@@ -103,13 +103,6 @@ pub fn file_changes() -> Vec<FileChange> {
 /// no example opens a page with, and the stop reasons no example turn ends with.
 pub fn later_variants() -> Vec<DomainEvent> {
     vec![
-        TurnEnded {
-            turn: turn_id(3),
-            stop: StopReason::NotAllowed,
-            usage: None,
-            checkpoint_after: Some(checkpoint_id(14)),
-        }
-        .into(),
         ThreadRenamed {
             title: short("Read the lease"),
             by: RenameSource::Placeholder,
@@ -207,6 +200,9 @@ pub fn later_variants() -> Vec<DomainEvent> {
             detail: Some("the guard hook has no program".to_owned()),
         }
         .into(),
+        CheckpointRecorded::new(checkpoint_id(18), CheckpointKind::Revisions, None, None)
+            .unwrap()
+            .into(),
         // Never a turn's failure in practice (the updater's code); here for the corpus.
         TurnFailed {
             turn: turn_id(3),
@@ -219,6 +215,7 @@ pub fn later_variants() -> Vec<DomainEvent> {
     .chain(later::failures_then_case_law())
     .chain(setup::turns())
     .chain(later::notices())
+    .chain(later::stops())
     .collect()
 }
 
@@ -484,6 +481,7 @@ fn matter_events() -> Vec<DomainEvent> {
         }
         .into(),
         VersionRestored {
+            undoes: None,
             from: checkpoint_id(8),
             checkpoint: checkpoint_id(17),
             scope: RestoreScope::Files {

@@ -104,7 +104,11 @@ pub(crate) const WINDOWS_SANDBOX: &str = "unelevated";
 /// bundled skills off, and no skills instructions) as nested keys over them all, so R15's pins
 /// win; then `hooks`, the object the [hooks seam](crate::actor::turn) gives, when there is one,
 /// over everything. On Windows, `windows.sandbox` is [`WINDOWS_SANDBOX`], set with R15's pins.
-/// Nothing here reaches `<agent_home>/config.toml` ([`home_config`]).
+/// Nothing here reaches `<agent_home>/config.toml` ([`home_config`]). With folders on the
+/// session's `PATH`, off Windows, the launch then adds `allow_login_shell = false` and
+/// `features.shell_snapshot = false` ([`without_login_shell`]), so Codex's shells keep the
+/// `PATH` the agent gets (`agent/shell_path.rs`): this object is the session's own, where the
+/// home's `config.toml` is shared by every session of the agent.
 pub(crate) fn config(
     settings_env: &BTreeMap<String, String>,
     profile: Map<String, Value>,
@@ -154,6 +158,23 @@ pub(crate) fn config_on(
         config.insert("hooks".to_owned(), Value::Object(hooks));
     }
     config
+}
+
+/// Sets the two keys that let Codex's shell commands keep the session's `PATH` on macOS and
+/// Linux (`agent/shell_path.rs`, decision record 0048), at `rust-v0.162.1`:
+/// `allow_login_shell = false`, so `exec_command` runs `<shell> -c`, never `-lc`
+/// (`core/src/tools/handlers/unified_exec.rs:104-113, 135`), and `features.shell_snapshot =
+/// false`, so no login-shell snapshot is made or sourced (the wrap only takes `-lc` anyway,
+/// `core/src/tools/runtimes/mod.rs:323-326`). The command then gets Codex's process
+/// environment (`protocol/src/shell_environment.rs:91-158`; `PATH` is in no default exclude)
+/// with Codex's own folders put first on its `PATH` (its bundled tools,
+/// `core/src/tools/runtimes/unified_exec.rs:505-520`). No `shell_environment_policy.set.PATH`:
+/// that would stop Codex replaying those folders after a snapshot (`runtimes/mod.rs:105-111`).
+/// The other features (`clauseo_limits::CODEX_OVERRIDES`) stay. Only with folders on the
+/// session's `PATH`.
+pub(crate) fn without_login_shell(config: &mut Map<String, Value>) {
+    config.insert("allow_login_shell".to_owned(), Value::Bool(false));
+    insert_dotted(config, "features.shell_snapshot", Value::Bool(false));
 }
 
 /// Merges `keys` into `config` without replacing anything: objects on both sides merge key by
@@ -256,7 +277,10 @@ pub(crate) fn home_config() -> String {
 /// cache into `CODEX_HOME/plugins` (G8a counted 176 folders and 57 skills;
 /// `core-plugins/src/manager.rs:2814-2824` at `rust-v0.162.1`), fetched from
 /// `github.com/openai/plugins` (#203), whose skills reach the session's command list. Nothing
-/// else in the home is read or touched: `auth.json` and the rest are Codex's.
+/// else in the home is read or touched: `auth.json` and the rest are Codex's. Nor does the
+/// session's shell keys go here (`allow_login_shell` and `features.shell_snapshot`,
+/// [`without_login_shell`]): they come with the session's `PATH`, which differs between
+/// sessions of the agent, so they ride in each session's own `CODEX_CONFIG`.
 ///
 /// The hooks table never goes in this file, only through `CODEX_CONFIG`: the guard's trust entry
 /// is keyed by the session-flags source (`/<session-flags>/config.toml:pre_tool_use:0:0`), so a

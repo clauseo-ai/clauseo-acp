@@ -83,7 +83,7 @@ export const LazyShelf = (p: ShelfProps) => createElement(use(preloadSnooze()).S
 export const LazyDoneRows = (p: { rows: readonly DoneRow[] }) =>
   createElement(use(preloadSnooze()).DoneRows, p);
 export const LazyItems = (p: ItemsProps) => createElement(use(preloadSnooze()).Items, p);
-export const LazyLine = (p: { text: string; onUndo: () => void }) =>
+export const LazyLine = (p: { text: string; onUndo: () => void; take?: boolean }) =>
   createElement(use(preloadSnooze()).Line, p);
 export const LazyButtons = (p: { triage: Triage; title: string }) =>
   createElement(use(preloadSnooze()).Buttons, p);

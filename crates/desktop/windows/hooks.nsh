@@ -29,8 +29,8 @@
 ;    The start looks its verb up in HKLM\SOFTWARE\Classes\exefile alone (SEE_MASK_CLASSKEY),
 ;    never in HKCU\Software\Classes, which the uninstalling user can write.
 ;    Both pass `--uninstall`, which the app's in-app removal never does: it also takes the admin
-;    copy, its record values and the refresh and stop tasks away, last, for the install that
-;    placed them.
+;    copy, its record values and the tasks \Clauseo\SandboxRefresh, \Clauseo\SandboxStop and
+;    \Clauseo\SandboxSweep away, last, for the install that placed them.
 ;    The per-user installer passes `--remove --uninstall`: only the Windows user who set the
 ;    protection up removes it; anyone else's uninstall exits 0 having touched nothing. The
 ;    per-machine installer passes `--remove --uninstall --per-machine` (chosen when it is built,
@@ -41,8 +41,9 @@
 ;    The wait is bounded at 2 minutes; past that the uninstall carries on as after a failed
 ;    removal and never stops the tool, which finishes later and leaves its records consistent at
 ;    every step. Only an ended wait (WAIT_OBJECT_0), an exit code read and that code 0 count as
-;    removed. A removal that didn't finish (any exit but 0) keeps `sandbox\` and the machine's
-;    record; the recovery is to reinstall Clauseo, then uninstall it again (decision 0049).
+;    removed, or 10 (CLAUSEO_REMOVED_COPY_LEFT): removed, with the admin copy left. A removal
+;    that didn't finish (any exit but 0 or 10) keeps `sandbox\` and the machine's record; the
+;    recovery is to reinstall Clauseo, then uninstall it again (decision 0049).
 ;    With the tool missing (Windows security can quarantine it: Defender called it
 ;    Trojan:Win32/Bearfoos.A!ml, a false positive) nothing can be removed. When the machine's
 ;    record (HKLM\SOFTWARE\Clauseo\Sandbox, 64-bit view) shows a set-up, the uninstaller says so
@@ -60,7 +61,8 @@
 ;
 ; The words are in English.nsh and Hindi.nsh (deleteAppDataFailed, deleteAppDataKept,
 ; removeStillRunning, removeSkippedSilent, removeExeMissing, removeAdminCopyRefused,
-; setupExeRemoved, and admin_copy.nsh's adminCopy* lines); the uninstall-declined line is S15a's.
+; setupExeRemoved, clauseoAppRemovedByAv, and admin_copy.nsh's adminCopy* lines); the
+; uninstall-declined line is S15a's.
 ;
 ; NSIS_HOOK_POSTINSTALL, the template's last step of `Section Install`: the per-machine installer
 ; creates $APPDATA\Clauseo (C:\ProgramData\Clauseo, where a firm's policy.json goes; see
@@ -69,6 +71,8 @@
 ; context to all around its work (NSIS has no COMMONAPPDATA; the old name was taken as text).
 ; A folder that is already there is left as it is.
 ; The uninstaller leaves that folder, since a firm's policy may be in it.
+; On an ARM64 computer the x64 per-machine installer also names the arm64 one in a details line
+; (CLAUSEO_NATIVE_ARM64_NOTICE).
 ; Windows security can remove clauseo-sandbox-setup.exe as it is written. Launches run only the
 ; admin copy, so only a run that wrote that copy says it was removed (setupExeRemoved, exit code
 ; CLAUSEO_EXIT_SETUP_EXE_REMOVED): when --adopt couldn't be started and the file is gone
@@ -79,15 +83,46 @@
 ; .onInit and un.onInit (NSIS 3.11 Source/exehead/Ui.c:396-397, set_language; Docs/src/var.but:54
 ; "You can only change this variable in .onInit"), and the template gives neither a hook, so
 ; MUI_CUSTOMFUNCTION_GUIINIT (Ui.c:525, after set_language) would be too late. So the template's
-; block "ui-language" in .onInit inserts CLAUSEO_UI_LANGUAGE (below): the installer speaks the
-; language the lawyer chose in the app when there is one, else Windows' display language (NSIS's
-; own choice), English otherwise. The uninstaller's un.onInit runs MUI_UNGETLANGUAGE
-; (installer.nsi:770), which reads HKCU\${MANUPRODUCTKEY} "Installer Language"
-; (installer.nsi:164-166) and, when that is empty and
+; block "ui-language" in .onInit inserts CLAUSEO_UI_LANGUAGE (below), which chooses in this order:
+; the language the lawyer chose in the app (HKCU\Software\Clauseo\UiLanguage, `hi` or `en`, which
+; the app writes); else, unless the install is silent (/S), a dialog with English and Hindi only
+; (LangDLL, a first install; the dialog's own preselection is LangDLL's); else NSIS's own choice
+; (Windows' display language when it is Hindi, English otherwise), which a silent first install
+; keeps. An upgrade from a build that wrote the value doesn't ask. Cancel aborts.
+; The uninstaller's un.onInit runs MUI_UNGETLANGUAGE (installer.nsi:770), which reads
+; HKCU\${MANUPRODUCTKEY} "Installer Language" (installer.nsi:164-166) and, when that is empty and
 ; the uninstall is not silent, shows LangDLL's language picker (two languages). So
 ; NSIS_HOOK_POSTINSTALL writes that value at every install and update: the language the lawyer
 ; chose in the app (HKCU\Software\Clauseo\UiLanguage, `en` or `hi`, which the app writes), else
 ; the installer's own. The template deletes it with the data (installer.nsi:884, and step 2).
+; NSIS_HOOK_POSTINSTALL also writes UiLanguage itself, once, when the app has none (absent or
+; empty), for both installers: the language the installer ran in, `hi` or `en`. The app seeds its
+; own ui.language from UiLanguage when it has none, so a new user's first launch is in the
+; language the installer ran in. Once the value is there, whatever it says, it is never written
+; again, so the app's choice wins. The per-machine installer writes the HKCU of the user running
+; it. Over-the-shoulder elevation (a standard user typing an admin's credentials for the per-machine
+; installer) runs it as the admin, so UiLanguage lands in the admin's HKCU, not the lawyer's; the
+; app then falls back to Windows' display language when its own UiLanguage is absent (the app's
+; side). Detecting that case in NSIS isn't attempted.
+;
+; Repair (/CLAUSEO_REPAIR, the per-user installer only; the per-machine one ignores it): the
+; desktop app's "Download and run the installer again" button (repair_install, #777) runs this
+; version's per-user installer interactively with exactly that switch, then closes its windows and
+; exits within about 6 s. NSIS_HOOK_PREINSTALL, which the template inserts right before its own
+; CheckIfAppIsRunning (installer.nsi:691-695), waits first up to 10 s, every 250 ms, until both
+; Clauseo.exe in $INSTDIR (the template's own test: Restart Manager's list for the file) and any
+; Clauseo main window (CLAUSEO_MAIN_WINDOW_CLASS) are gone; still there at 10 s, it carries on and
+; the usual checks apply (the template's box, admin_copy.nsh's adminCopyAppRunning and exit 24,
+; which comes later still, in NSIS_HOOK_POSTINSTALL). NSIS_HOOK_POSTINSTALL ends, after the admin
+; step whatever its outcome, by starting Clauseo once as the user, as the finish page's "Run
+; Clauseo" does (RunAsUser), and by taking the template's passive path from there: $PassiveMode 1,
+; so the template's SkipIfPassive skips the finish page (no second start from its box) and
+; SetAutoClose closes the installer. Only an install that ran to the end of Section Install gets
+; there: a cancelled "Clauseo is running" box, a failed file, any Abort or a closed installer
+; never reaches it, so nothing starts. A wait for the elevated instance that timed out
+; ($ClauseoAdminTimedOut) keeps the usual finish page, its "Run Clauseo" hidden, and starts
+; nothing, as without the switch. .onInstSuccess runs RunAsUser too under $PassiveMode, but only
+; with /R, which the app never passes.
 
 ; NSIS's warning 6000 is "unknown variable/constant detected, ignoring" (Source/build.h,
 ; DW_VAR_IGNORED_UNKNOWN): an unknown name stays as literal text and the hook does the wrong thing
@@ -96,10 +131,34 @@
 ; source test the_installer_scripts_use_only_known_nsis_variables checks the names as well.
 !pragma warning error 6000 ; an unknown variable name is an error, not a silent literal (the COMMONAPPDATA bug)
 
+; The Safe workspace's elevated set-up is off for launch (decision 0035, "Safe workspace off for
+; launch"): with CLAUSEO_SAFE_WORKSPACE undefined, the release default, the installers never start
+; themselves elevated, never write or run the set-up program, never write the machine's Sandbox
+; record, and the uninstaller never starts the elevated removal. Defining it turns all of it back
+; on: hooks_safe_workspace.nsh does, and release.yml's SAFE_WORKSPACE switch names that file as
+; the hooks and has sidecars.mjs build the set-up program. The per-machine temporary folder and
+; the in-place uninstall stay either way.
+;
 ; The admin copy of the sandbox's set-up program (S15 tier B) is in admin_copy.nsh, included
 ; here: the elevated instance's branch, which the template's .onInit block inserts
-; (admin_elevated.nsh), and the macros NSIS_HOOK_POSTINSTALL ends with.
+; (admin_elevated.nsh), and the macros NSIS_HOOK_POSTINSTALL ends with. It includes
+; safe_temp.nsh and uninstall_in_place.nsh itself; with the Safe workspace off those two come here.
+!ifdef CLAUSEO_SAFE_WORKSPACE
 !include "${__FILEDIR__}\admin_copy.nsh"
+!else
+!include "${__FILEDIR__}\safe_temp.nsh"
+!include "${__FILEDIR__}\uninstall_in_place.nsh"
+; Repair mode's wait looks for Clauseo's main window by its class, which admin_copy.nsh defines;
+; with the Safe workspace off it is defined here, the same value (lib.rs's MAIN_WINDOW_CLASS).
+!define CLAUSEO_MAIN_WINDOW_CLASS "ClauseoMainWindow"
+!endif
+
+; Repair mode (the paragraph "Repair" above): the switch, how long the installer waits for
+; Clauseo to go and how often it looks, and 1 when the per-user installer was given the switch.
+!define CLAUSEO_REPAIR_SWITCH "/CLAUSEO_REPAIR"
+!define CLAUSEO_REPAIR_WAIT_MS 10000
+!define CLAUSEO_REPAIR_POLL_MS 250
+Var ClauseoRepair
 
 ; Exit codes of `Clauseo.exe --delete-app-data` (crates/desktop/src/delete_app_data.rs; a test
 ; holds them equal).
@@ -110,14 +169,23 @@
 
 ; The installers' own exit codes (SetErrorLevel), listed in docs/firm-it.md, "If Windows security
 ; removed Clauseo's set-up program": 20 set by admin_copy.nsh's macros (never under /P), 21 by the
-; uninstaller under /S. Tauri's template sets none, and NSIS uses 0, 1
-; (cancelled) and 2 (aborted); these stay clear of those and of the codes Intune and SCCM read as
-; success or retry (1223, 1618, 1641, 1707, 3010).
+; uninstaller under /S, 28 by both installers in every mode. Tauri's template sets none, and
+; NSIS uses 0, 1 (cancelled) and 2 (aborted); these stay clear of those and of the codes Intune
+; and SCCM read as success or retry (1223, 1618, 1641, 1707, 3010).
 !define CLAUSEO_EXIT_SETUP_EXE_REMOVED 20
 !define CLAUSEO_EXIT_REMOVE_EXE_MISSING 21
 ; 22 to 26 are the installers' and the per-machine uninstaller's (admin_copy.nsh, safe_temp.nsh,
 ; uninstall_in_place.nsh).
 !define CLAUSEO_EXIT_ADMIN_COPY_REFUSED 27
+; 28: both installers, every mode, when Clauseo.exe isn't in $INSTDIR after the files are placed
+; (CLAUSEO_APP_EXE_CHECK): Windows security removed or blocked it as setup wrote it.
+!define CLAUSEO_EXIT_APP_EXE_REMOVED 28
+
+; The setup exe's --remove --uninstall exit 10 (SetupExit::AdminCopyLeft): the protection is
+; removed, but the admin copy, or part of it, stays; the tool wrote the step and its error code
+; to the Event Log. What is left is only administrators' to change, so the hook counts it as
+; removed, as it does 0.
+!define CLAUSEO_REMOVED_COPY_LEFT 10
 
 ; The rights admin_copy.rs's chain rule counts: CHANGE_RIGHTS on every level below the drive's
 ; root, ROOT_CHANGE_RIGHTS on the root (a test holds them equal); and TrustedInstaller's SID,
@@ -460,6 +528,10 @@
         !error "hooks.nsh supports only the currentUser and perMachine install modes"
       !endif
     !endif
+    ; With the Safe workspace off (CLAUSEO_SAFE_WORKSPACE undefined, the release default) the
+    ; removal and the missing-tool line are left out: nothing elevated starts, $R5 stays 0 and
+    ; the app keeps any `sandbox\` folder.
+    !ifdef CLAUSEO_SAFE_WORKSPACE
     !ifndef CLAUSEO_REMOVE
       !if "${INSTALLMODE}" == "perMachine"
         !define CLAUSEO_REMOVE "--remove --uninstall --per-machine"
@@ -510,7 +582,7 @@
         ${If} $R3 != ""
           DetailPrint "$(removeAdminCopyRefused)"
           ${IfNot} ${Silent}
-            MessageBox MB_OK|MB_ICONEXCLAMATION "$(removeAdminCopyRefused)"
+            MessageBox MB_OK|MB_ICONEXCLAMATION|MB_SETFOREGROUND|MB_TOPMOST "$(removeAdminCopyRefused)"
           ${EndIf}
         ${ElseIf} $R4 = 0
           DetailPrint "the sandbox tool in Program Files failed its check, so it wasn't started"
@@ -554,6 +626,7 @@
           ${EndIf}
           System::Call 'kernel32::CloseHandle(p R7)'
           ${If} $R8 = 0
+          ${OrIf} $R8 = ${CLAUSEO_REMOVED_COPY_LEFT}
             StrCpy $R5 1
           ${EndIf}
         ${EndIf}
@@ -575,10 +648,11 @@
         ${If} ${Silent}
           SetErrorLevel ${CLAUSEO_EXIT_REMOVE_EXE_MISSING}
         ${Else}
-          MessageBox MB_OK|MB_ICONEXCLAMATION "$(removeExeMissing)"
+          MessageBox MB_OK|MB_ICONEXCLAMATION|MB_SETFOREGROUND|MB_TOPMOST "$(removeExeMissing)"
         ${EndIf}
       ${EndIf}
     ${EndIf}
+    !endif
 
     ; 2. The data folders, deleted by the app.
     ${If} $DeleteAppDataCheckboxState = 1
@@ -668,14 +742,14 @@
       ${AndIf} $R7 <> ${CLAUSEO_DELETED}
       ${AndIf} $R6 <> 0
         ${If} $R6 = 2
-          MessageBox MB_OK|MB_ICONEXCLAMATION "$(deleteAppDataFailedUnnamed)"
+          MessageBox MB_OK|MB_ICONEXCLAMATION|MB_SETFOREGROUND|MB_TOPMOST "$(deleteAppDataFailedUnnamed)"
         ${ElseIf} $R8 == ""
-          MessageBox MB_OK|MB_ICONEXCLAMATION "$(deleteAppDataFailed)"
+          MessageBox MB_OK|MB_ICONEXCLAMATION|MB_SETFOREGROUND|MB_TOPMOST "$(deleteAppDataFailed)"
         ${ElseIf} $R7 = ${CLAUSEO_KEPT_SANDBOX}
         ${OrIf} $R7 = ${CLAUSEO_KEPT_SET_ASIDE}
-          MessageBox MB_OK|MB_ICONEXCLAMATION "$(deleteAppDataKept)"
+          MessageBox MB_OK|MB_ICONEXCLAMATION|MB_SETFOREGROUND|MB_TOPMOST "$(deleteAppDataKept)"
         ${Else}
-          MessageBox MB_OK|MB_ICONEXCLAMATION "$(deleteAppDataKeptFailed)"
+          MessageBox MB_OK|MB_ICONEXCLAMATION|MB_SETFOREGROUND|MB_TOPMOST "$(deleteAppDataKeptFailed)"
         ${EndIf}
       ${EndIf}
     ${EndIf}
@@ -696,20 +770,185 @@
     !error "hooks.nsh needs Hindi in bundle.windows.nsis.languages"
   !endif
   Push $R0
-  ; A failed read leaves "", which is neither: NSIS's choice is kept.
+  ; A failed read leaves "", which is neither: the dialog below asks.
   ReadRegStr $R0 HKCU "${MANUKEY}" "UiLanguage"
   ${If} $R0 S== "hi"
     StrCpy $LANGUAGE ${LANG_HINDI}
   ${ElseIf} $R0 S== "en"
     StrCpy $LANGUAGE ${LANG_ENGLISH}
+  ${ElseIfNot} ${Silent}
+    ; No language chosen in the app yet (a first install), and not silent: ask, English or Hindi
+    ; only. LangDLL reads its arguments from the stack, which the example in NSIS's docs
+    ; (languages.nsi) fills: "" first, then each language's id and name, then "A" (count the
+    ; languages). Hindi is pushed last, so it is the first pair read. The dialog's answer is the
+    ; id, or "cancel", which is popped into $LANGUAGE.
+    Push ""
+    Push ${LANG_ENGLISH}
+    Push "English"
+    Push ${LANG_HINDI}
+    Push "हिन्दी"
+    Push "A"
+    LangDLL::LangDialog "Installer Language" "Please select a language."
+    Pop $LANGUAGE
+    ${If} $LANGUAGE S== "cancel"
+      Abort
+    ${EndIf}
   ${EndIf}
   Pop $R0
+!macroend
+
+; Repair mode's switch and wait (the paragraph "Repair" above), first in Section Install: the
+; template inserts this right before its own CheckIfAppIsRunning. The per-machine installer
+; ignores the switch: $ClauseoRepair stays 0 there.
+!macro NSIS_HOOK_PREINSTALL
+  StrCpy $ClauseoRepair 0
+  !if "${INSTALLMODE}" == "currentUser"
+    Push $R0
+    ${GetOptions} $CMDLINE "${CLAUSEO_REPAIR_SWITCH}" $R0
+    ${IfNot} ${Errors}
+      StrCpy $ClauseoRepair 1
+    ${EndIf}
+    Pop $R0
+    ${If} $ClauseoRepair = 1
+      !insertmacro CLAUSEO_REPAIR_WAIT
+    ${EndIf}
+  !endif
+!macroend
+
+; Waits until Clauseo is gone, at most CLAUSEO_REPAIR_WAIT_MS, looking every
+; CLAUSEO_REPAIR_POLL_MS: gone is both no process using $INSTDIR\Clauseo.exe, found as the
+; template's CheckIfAppIsRunning finds it (a Restart Manager session with the file registered,
+; RmGetList's ERROR_MORE_DATA meaning some process has it), and no top-level window of class
+; CLAUSEO_MAIN_WINDOW_CLASS (FindWindow, hidden ones included), which admin_copy.nsh's check
+; looks for. A session or a registration that fails leaves only the window to wait for, as the
+; template's own check then finds nothing. Past the wait it carries on: what follows decides.
+; Keeps every register.
+!macro CLAUSEO_REPAIR_WAIT
+  Push $0
+  Push $1
+  Push $2
+  Push $3
+  Push $R0
+  Push $R1
+  Push $R2
+  Push $R3
+  StrCpy $R3 0
+  !insertmacro RestartManager_StartSession $R0
+  ${If} $R0 != ""
+    !insertmacro RestartManager_RegisterFile $R0 "$INSTDIR\${MAINBINARYNAME}.exe"
+    ${If} $0 = 0
+      StrCpy $R3 1
+    ${EndIf}
+  ${EndIf}
+  StrCpy $R1 0
+  ${Do}
+    StrCpy $R2 0
+    ${If} $R3 = 1
+      System::Call 'RSTRTMGR::RmGetList(p R0, *i .r1, *i .r2, p 0, *i .r3) i .r0'
+      ${If} $0 = ${ERROR_MORE_DATA}
+        StrCpy $R2 1
+      ${EndIf}
+    ${EndIf}
+    FindWindow $1 "${CLAUSEO_MAIN_WINDOW_CLASS}"
+    ${If} $1 <> 0
+      StrCpy $R2 1
+    ${EndIf}
+    ${If} $R2 = 0
+    ${OrIf} $R1 >= ${CLAUSEO_REPAIR_WAIT_MS}
+      ${ExitDo}
+    ${EndIf}
+    Sleep ${CLAUSEO_REPAIR_POLL_MS}
+    IntOp $R1 $R1 + ${CLAUSEO_REPAIR_POLL_MS}
+  ${Loop}
+  ${If} $R0 != ""
+    !insertmacro RestartManager_EndSession $R0
+  ${EndIf}
+  Pop $R3
+  Pop $R2
+  Pop $R1
+  Pop $R0
+  Pop $3
+  Pop $2
+  Pop $1
+  Pop $0
+!macroend
+
+; Repair mode's end, last in the per-user NSIS_HOOK_POSTINSTALL, after the admin step whatever its
+; outcome: Clauseo started once, unelevated as the user, as the template's RunMainBinary does;
+; then the template's passive path, so its SkipIfPassive skips the finish page and its "Run
+; Clauseo" box, and the installer closes by itself. Not after a wait for the elevated instance that
+; timed out: the usual finish page then, which hides "Run Clauseo" (CLAUSEO_FINISH_SHOW). Outside
+; any Push and Pop, as RunAsUser may leave a result on the stack.
+!macro CLAUSEO_REPAIR_RELAUNCH
+  ${If} $ClauseoRepair = 1
+  ; With the Safe workspace off there is no admin step to time out (admin_copy.nsh, which
+  ; declares the variable, isn't included).
+  !ifdef CLAUSEO_SAFE_WORKSPACE
+  ${AndIf} $ClauseoAdminTimedOut <> 1
+  !endif
+    nsis_tauri_utils::RunAsUser "$INSTDIR\${MAINBINARYNAME}.exe" ""
+    StrCpy $PassiveMode 1
+    SetAutoClose true
+  ${EndIf}
+!macroend
+
+; The x64 per-machine installer on a computer whose processor is ARM64 (Windows on ARM runs it, and
+; the x64 Clauseo it installs, under emulation): one details line naming the arm64 per-machine
+; installer as the computer's native one, so IT can deploy that one next time. It installs as
+; always: no prompt, no box, no exit code (a non-zero code reads as a failure in Intune and SCCM),
+; and the same under /S. The per-user installer says nothing: the app's updater moves an x64
+; per-user install to the arm64 build at its next update. The native machine is
+; IsWow64Process2's (kernel32, Windows 10 1709 and later), as crates/sandbox/src/windows/detect.rs
+; reads it; where the call is missing or fails the line is left out. IMAGE_FILE_MACHINE_ARM64 is
+; 0xAA64. The line is in the installer's language, like the other strings: nativeArm64Notice in
+; English.nsh and Hindi.nsh.
+!macro CLAUSEO_NATIVE_ARM64_NOTICE
+  !ifndef ARCH
+    !error "hooks.nsh needs the template's ARCH define"
+  !endif
+  !if "${ARCH}" == "x64"
+    Push $R1
+    Push $R2
+    Push $R3
+    StrCpy $R1 0
+    StrCpy $R3 0
+    System::Call 'kernel32::GetCurrentProcess() p .R2'
+    ; Both USHORTs written into 4-byte buffers that start at 0; a missing export leaves $R1 "error".
+    System::Call 'kernel32::IsWow64Process2(p R2, *i 0 .R2, *i 0 .R3) i .R1'
+    ${If} $R1 <> 0
+    ${AndIf} $R3 = 0xAA64
+      DetailPrint "$(nativeArm64Notice)"
+    ${EndIf}
+    Pop $R3
+    Pop $R2
+    Pop $R1
+  !endif
+!macroend
+
+; Clauseo.exe missing from $INSTDIR once the template has placed the files: Windows security
+; (Defender's cloud verdict on a hash it already knows) removed or blocked it as setup wrote it.
+; Without this the installer would say it finished, its "Run Clauseo" would start nothing, and /S
+; would exit 0. So the install fails here, first in NSIS_HOOK_POSTINSTALL, in both installers and
+; every mode: a box (clauseoAppRemovedByAv; none under /S, /SD), exit code 28, then Abort, which
+; ends Section Install as failed: no finish page, no "Run Clauseo", no repair relaunch. Unlike 20
+; (admin_copy.nsh) the box also shows under /P and /UPDATE: the updater's lawyer is there, and
+; nothing else would tell them why Clauseo no longer opens. MB_SETFOREGROUND and MB_TOPMOST put
+; it above the installer's window and anything else open.
+!macro CLAUSEO_APP_EXE_CHECK
+  ${IfNot} ${FileExists} "$INSTDIR\${MAINBINARYNAME}.exe"
+    DetailPrint "$(clauseoAppRemovedByAv)"
+    MessageBox MB_OK|MB_ICONSTOP|MB_SETFOREGROUND|MB_TOPMOST "$(clauseoAppRemovedByAv)" /SD IDOK
+    SetErrorLevel ${CLAUSEO_EXIT_APP_EXE_REMOVED}
+    Abort
+  ${EndIf}
 !macroend
 
 ; The firm-policy folder and the admin copy, per-machine installs; the per-user installer asks for
 ; the admin section. The test is inside the macro: the template (installer.nsi) includes this file
 ; at line 36, before `!define INSTALLMODE` at line 46, so a test at file scope would see none.
 !macro NSIS_HOOK_POSTINSTALL
+  ; Clauseo.exe still there, before anything else (CLAUSEO_APP_EXE_CHECK, above); else exit 28.
+  !insertmacro CLAUSEO_APP_EXE_CHECK
   ; The uninstaller's language, both installers. LANG_HINDI and LANG_ENGLISH come from the
   ; template's MUI_LANGUAGE lines (installer.nsi:471), after this file is included but before the
   ; section this macro is inserted in.
@@ -725,6 +964,16 @@
     StrCpy $R1 ${LANG_HINDI}
   ${ElseIf} $R0 S== "en"
     StrCpy $R1 ${LANG_ENGLISH}
+  ${ElseIf} $R0 S== ""
+    ; No language chosen in the app yet (a first install, or one before this): record the one this
+    ; installer ran in, so the app's first run starts in it (it seeds ui.language from UiLanguage
+    ; when it has none of its own). Both installers, as the owner ruled.
+    ; S== compares text: `== ""` compares numbers, where "fr" reads as 0 and would match too.
+    ${If} $LANGUAGE = ${LANG_HINDI}
+      WriteRegStr HKCU "${MANUKEY}" "UiLanguage" "hi"
+    ${Else}
+      WriteRegStr HKCU "${MANUKEY}" "UiLanguage" "en"
+    ${EndIf}
   ${EndIf}
   WriteRegStr HKCU "${MANUPRODUCTKEY}" "Installer Language" $R1
   Pop $R1
@@ -783,14 +1032,48 @@
     ${If} $R9 = 1
       SetShellVarContext current
     ${EndIf}
-    ; The admin copy, every run (admin_copy.nsh).
-    !insertmacro CLAUSEO_ADMIN_COPY_MACHINE
+    ; The x64 installer on an ARM64 computer names the native one (a details line only).
+    !insertmacro CLAUSEO_NATIVE_ARM64_NOTICE
+    ; The admin copy, every run (admin_copy.nsh), only with the Safe workspace on.
+    !ifdef CLAUSEO_SAFE_WORKSPACE
+      !insertmacro CLAUSEO_ADMIN_COPY_MACHINE
+    !endif
     Pop $R9
     Pop $R8
     Pop $R7
     Pop $R6
     Pop $R5
   !else
-    !insertmacro CLAUSEO_ASK_FOR_THE_ADMIN_SECTION
+    ; The per-user installer's ask (admin_copy.nsh), only with the Safe workspace on: off, it
+    ; never starts itself elevated, so no UAC prompt.
+    !ifdef CLAUSEO_SAFE_WORKSPACE
+      !insertmacro CLAUSEO_ASK_FOR_THE_ADMIN_SECTION
+    !endif
+    !insertmacro CLAUSEO_REPAIR_RELAUNCH
+  !endif
+!macroend
+
+; The per-machine uninstaller's install-folder key. The template's Section Install writes
+; HKLM\SOFTWARE\Clauseo\Clauseo (MANUPRODUCTKEY under SHCTX, whose default value is $INSTDIR, in
+; the 64-bit view SetContext picks on x64 and arm64). The uninstall deleted it only with the
+; "delete app data" box ticked (NSIS_HOOK_PREUNINSTALL, which takes over the template's block for
+; the box); unticked, and always under /S, the key outlived the uninstall, naming a deleted
+; folder. The template inserts this hook near the end of Section Uninstall, after its own
+; removals and before the self-delete (uninstall_in_place.nsh); an uninstall that refuses or
+; aborts before then (exit 26, Clauseo running) never gets here. Then HKLM\SOFTWARE\Clauseo, only
+; when empty: the sandbox's record (Sandbox) or anything else keeps it. Not under /UPDATE, which
+; keeps everything; the template's update mode doesn't run the old uninstaller at all, and a
+; reinstall that runs it (the reinstall page, without /UPDATE) writes the key again in its own
+; Section Install afterwards. Per user the HKCU key still stays unless the box is ticked, as
+; before. The test is inside the macro: INSTALLMODE isn't defined yet where this file is
+; included.
+!macro NSIS_HOOK_POSTUNINSTALL
+  !if "${INSTALLMODE}" == "perMachine"
+    ${If} $UpdateMode <> 1
+      SetRegView 64
+      DeleteRegKey HKLM "${MANUPRODUCTKEY}"
+      DeleteRegKey /ifempty HKLM "${MANUKEY}"
+      SetRegView lastused
+    ${EndIf}
   !endif
 !macroend

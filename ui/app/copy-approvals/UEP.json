@@ -1,15 +1,4 @@
 {
-  "UEP-06": {
-    "en": "Anthropic lists Brave Search as its web search subprocessor.",
-    "hi": "Anthropic, Brave Search को अपने वेब खोज सब-प्रोसेसर के रूप में सूचीबद्ध करता है।",
-    "hi_status": "provisional",
-    "hi_at": "2026-11-06",
-    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "approved",
-    "at": "2026-11-04",
-    "by": "Rohan",
-    "note": "Rohan, on the review page (web and browser, icon-first v2)"
-  },
   "UEP-07": {
     "en": "On the web",
     "hi": "वेब पर",
@@ -65,17 +54,6 @@
     "by": "Rohan",
     "note": "Rohan, on the review page (web and browser, icon-first v2)"
   },
-  "UEP-16": {
-    "en": "Not available yet",
-    "hi": "अभी उपलब्ध नहीं",
-    "hi_status": "provisional",
-    "hi_at": "2026-11-06",
-    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "approved",
-    "at": "2026-11-04",
-    "by": "Rohan",
-    "note": "Rohan, on the review page (web and browser, icon-first v2)"
-  },
   "UEP-18": {
     "en": "Search the web and read pages.",
     "hi": "वेब पर खोजें और पेज पढ़ें।",
@@ -118,7 +96,7 @@
     "status": "approved",
     "at": "2026-11-04",
     "by": "Rohan",
-    "note": "Rohan, on the review page (web and browser, icon-first v2)"
+    "note": "Rohan, on the review page (web and browser, icon-first v2); D-068: now on Web search's row"
   },
   "UEP-22": {
     "en": "About websites",
@@ -176,5 +154,49 @@
     "at": "2026-11-03",
     "by": "design",
     "note": "the design's approved words and Hindi (design/03-system words-settings.ts, privacy)"
+  },
+  "UEP-25": {
+    "en": "Send anonymous counts",
+    "hi": "गुमनाम गिनती भेजें",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-10",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-10",
+    "by": "app track (provisional; words pending orchestrator 2026-11-10)",
+    "note": "D-052: the anonymous counts' switch in Settings, Privacy; UD1-06's approved words and Hindi, reused"
+  },
+  "UEP-26": {
+    "en": "How many questions, which features, how long answers take. Never your papers, your questions or the answers.",
+    "hi": "कितने प्रश्न, कौन-सी सुविधाएँ, और उत्तर कितना समय लेते हैं। आपके दस्तावेज़, आपके प्रश्न या उत्तर कभी नहीं।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-10",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-10",
+    "by": "app track (provisional; words pending orchestrator 2026-11-10)",
+    "note": "D-052: the counts switch's line in Settings, Privacy; UD1-08's approved words and Hindi, reused"
+  },
+  "UEP-27": {
+    "en": "When it starts, Clauseo asks Claude or ChatGPT how much of your plan is left. No papers or questions go with it.",
+    "hi": "शुरू होने पर Clauseo, Claude या ChatGPT से पूछता है कि आपके प्लान में कितना बाकी है। इसके साथ कोई दस्तावेज़ या प्रश्न नहीं जाते।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-10",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-10",
+    "by": "app track (provisional; words pending orchestrator 2026-11-10)",
+    "note": "D-064: under What leaves this computer, what Clauseo fetches by itself at start; the orchestrator's English"
+  },
+  "UEP-28": {
+    "en": "Claude's web searches go through Brave Search, a service Anthropic uses to run web searches.",
+    "hi": "Claude की वेब खोजें Brave Search से होकर जाती हैं, एक सेवा जिसे Anthropic वेब खोज चलाने के लिए इस्तेमाल करता है।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-10",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-10",
+    "by": "app track (provisional; words pending orchestrator 2026-11-10)",
+    "note": "D-068: behind Web search's info icon, replacing UEP-06's \"subprocessor\" on Claude's row"
   }
 }

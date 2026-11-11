@@ -381,8 +381,10 @@ fn dispatch_refuses_a_folder_ref_it_did_not_issue_and_a_permission_answer() {
     assert_eq!(refusal.code(), ErrorCode::CommandInvalid, "{refusal:?}");
 }
 
+/// `SetMode` and an on-or-off `SetConfigOption` (Claude's `fast`) never leave the bridge. A
+/// choice passes it, and the host checks its option's category (`host/tests/host/pickers.rs`).
 #[test]
-fn dispatch_refuses_set_mode_and_set_config_option() {
+fn dispatch_refuses_set_mode_and_an_on_or_off_option() {
     let scratch = Scratch::new("dispatch-mode", &[]);
     let host = scratch.start(Vec::new());
     let thread = host.thread();
@@ -391,12 +393,12 @@ fn dispatch_refuses_set_mode_and_set_config_option() {
     let commands = [
         HostCommand::SetMode {
             thread,
-            mode_id: bypass.clone(),
+            mode_id: bypass,
         },
         HostCommand::SetConfigOption {
             thread,
-            option_id: AgentChoiceId::new("mode").unwrap(),
-            value: ConfigValue::Select(bypass),
+            option_id: AgentChoiceId::new("fast").unwrap(),
+            value: ConfigValue::Boolean(true),
         },
     ];
     for command in commands {
@@ -475,6 +477,7 @@ fn stream_commands_need_open_stream_and_acks_are_bounded() {
 }
 
 mod admit;
+mod admit_browser;
 mod allowed_sites;
 mod app;
 mod connectors;

@@ -12,9 +12,34 @@
   .who b {
     @apply font-ui text-primary;
   }
+  /* a pasted question keeps its paragraphs and line breaks */
   .asked {
     @apply text-asked font-accepted;
     margin-top: var(--s1);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+  /* a question past eight lines, folded by the line clamp, which needs no measure (question-fold.tsx); eight lines
+     or fewer, nothing is cut and it draws as it did */
+  .asked[data-folded] {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 8;
+    line-clamp: 8;
+    overflow: hidden;
+  }
+  /* its Show all and Show less: a quiet link on its own line under the question, at the meta line's size */
+  .asked-fold {
+    display: block;
+    margin-top: var(--s1);
+    padding: 0;
+    background: transparent;
+    color: var(--muted);
+    text-decoration: underline;
+    text-decoration-color: var(--ref-line-quiet);
+    text-underline-offset: var(--cite-offset);
+    cursor: pointer;
+    @apply text-small-row font-ui is-hover:text-primary;
   }
   .reply {
     margin-top: var(--s4);
@@ -372,10 +397,14 @@
     outline-offset: var(--ring-inset);
     border-radius: var(--r-surface) var(--r-surface) 0 0;
   }
+  /* one line at every width, size and language, cut with an ellipsis: never more of the screen than that */
   .room-pin-line {
     display: block;
     min-width: 0;
     max-width: var(--measure);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
   .room-pin-who {
     @apply text-small text-muted;
@@ -484,6 +513,15 @@
     overflow-x: auto;
     white-space: pre;
     overflow-wrap: normal;
+  }
+  /* a code block's Copy (D-026, code.tsx): the icon in its own column at the top corner, beside the pre that scrolls */
+  .reply-text [data-clauseo="code-block"] {
+    display: flex;
+    background: var(--well);
+    border-radius: var(--r-control);
+  }
+  .reply-text [data-clauseo="code-block"] > pre {
+    flex: 1;
   }
   .reply-text [data-clauseo="markdown"] pre code {
     font: inherit;

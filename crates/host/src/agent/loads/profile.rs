@@ -3,15 +3,18 @@
 //!
 //! - Claude ([`claude_options`]): `disallowedTools` always holds `WebSearch` and `WebFetch`
 //!   when `tools.web_search` is off, whatever the hook sent; when it is on, `allowedTools` gains
-//!   `WebSearch` (not on a Bedrock login, which has none) and one `WebFetch(domain:…)` per seed
-//!   site, and `mcp__case-law` only in a session that got the `case-law` entry (any hook rule
-//!   for that server is dropped otherwise); in forced ask (`agent/forced_ask.rs`) there is no
-//!   `allowedTools` at all, the hook's included. `additionalDirectories` gains the work folder and
-//!   the matter notes folder, after any hook entries. `settings` gains
-//!   `disableSkillShellExecution: true` always, and `skipWebFetchPreflight: true` on a Bedrock,
+//!   `WebSearch` (not on a Bedrock login, which has none), a bare `WebFetch` (every page fetched
+//!   unasked) and one `WebFetch(domain:…)` per seed site, and `mcp__case-law` only in a
+//!   session that got the `case-law` entry (any hook rule for that server is dropped otherwise);
+//!   in forced ask (`agent/forced_ask.rs`) there is no `allowedTools` at all, the hook's
+//!   included. `additionalDirectories` gains the work folder and the matter notes folder, after
+//!   any hook entries. `settings` gains `disableSkillShellExecution: true` always, and
+//!   `skipWebFetchPreflight: true` on a Bedrock,
 //!   Vertex or Foundry login, and always `permissions.deny` gains the data folder's rules
 //!   (`agent/data_fence.rs`), after any the hook put there; in forced ask it also gains the
-//!   `permissions.ask` rules and `sandbox.autoAllowBashIfSandboxed: false`. These are flag
+//!   `permissions.ask` rules and `sandbox.autoAllowBashIfSandboxed: false`, over Claude Code's
+//!   own sandbox, which the settings gain before it on macOS and Linux (`agent/loads/sandbox.rs`;
+//!   none on Windows). These are flag
 //!   settings: they outrank the user's settings, and Claude Code merges every source's
 //!   `permissions.deny`, so no user rule takes one out.
 //! - Codex ([`codex_keys`]): of the hook's keys only `developer_instructions`
@@ -33,7 +36,9 @@ use std::collections::BTreeMap;
 use std::ffi::OsString;
 use std::path::Path;
 
-use clauseo_profile::placeholders::{self, CONNECTORS, IN_INSTRUCTIONS, MATTER_NOTES, WORK_FOLDER};
+use clauseo_profile::placeholders::{
+    self, BROWSER, CONNECTORS, IN_INSTRUCTIONS, MATTER_NOTES, WORK_FOLDER,
+};
 use clauseo_protocol::{
     AgentKind, ClauseoTool, ErrorCode, ToolAvailability, ToolState, ToolsUnavailableReason,
 };
@@ -112,6 +117,10 @@ pub(crate) struct Folders<'a> {
     /// (`clauseo_profile::instructions::connectors_part`), else the sentence that says there is no
     /// case-law database, which [`Folders::of`] starts with: a caller that never says gets that.
     pub(crate) connectors: &'a str,
+    /// `{browser}`: the browser part (`clauseo_profile::instructions::browser_part`), the
+    /// `agent-browser` rules in a session with the shell tool, else the sentence that says it
+    /// has no browser, which [`Folders::of`] starts with.
+    pub(crate) browser: &'a str,
 }
 
 impl<'a> Folders<'a> {
@@ -130,7 +139,15 @@ impl<'a> Folders<'a> {
             work: text(work, WORK_FOLDER)?,
             notes: text(notes, MATTER_NOTES)?,
             connectors: clauseo_profile::instructions::connectors_part(false),
+            browser: clauseo_profile::instructions::browser_part(
+                clauseo_profile::instructions::BrowserPart::Off,
+            ),
         })
+    }
+
+    /// The same folders, with `{browser}` filled by `browser`.
+    pub(crate) fn with_browser(self, browser: &'a str) -> Self {
+        Self { browser, ..self }
     }
 
     /// The same folders, with `{connectors}` filled by `connectors`.
@@ -148,7 +165,8 @@ pub(crate) struct ClaudeKeys<'a> {
     pub(crate) login: Login,
     /// The session's folders.
     pub(crate) folders: Folders<'a>,
-    /// The hosts seeded as `WebFetch(domain:…)` rules.
+    /// The hosts seeded as `WebFetch(domain:…)` rules, beside the bare `WebFetch` that already
+    /// covers them: kept as the record of the trusted sites (R21's list).
     pub(crate) seed_sites: &'a [&'a str],
     /// The session runs in forced ask (`agent/forced_ask.rs`): no `allowedTools` at all, the
     /// hook's included, and the forced-ask `permissions.ask` rules in the flag settings.
@@ -158,6 +176,18 @@ pub(crate) struct ClaudeKeys<'a> {
     /// The session gets the `case-law` entry (R24): `allowedTools` gains `mcp__case-law`
     /// (decision D7). Without it, any hook rule for a `case-law` server is dropped.
     pub(crate) case_law: bool,
+    /// The session has the browser as a shell tool: `allowedTools` gains agent-browser's page
+    /// subcommands, `disallowedTools` its denied flags and subcommands, and `permissions.ask`
+    /// the allowed commands that still ask (`clauseo_profile::claude::agent_browser_allowed`,
+    /// `agent_browser_denied`, `agent_browser_ask`). Without it,
+    /// any hook rule naming agent-browser is dropped, so a session without the browser has none.
+    pub(crate) browser: bool,
+    /// Claude Code's own sandbox (`agent::loads::sandbox`), on macOS and Linux; none on
+    /// Windows, where commands keep asking.
+    pub(crate) sandbox: Option<&'a super::sandbox::ClaudeSandbox>,
+    /// The matter folder: Claude's `Edit` is denied its `.clauseo` folder (`matter.json`, the
+    /// marker that finds a moved matter folder again). None in a test that is about other keys.
+    pub(crate) matter: Option<&'a Path>,
 }
 
 /// Adds [`ClaudeKeys`] to `claudeCode.options` (see the module doc).
@@ -168,6 +198,7 @@ pub(crate) fn claude_options(options: &mut Map<String, Value>, keys: &ClaudeKeys
         if keys.login != Login::Bedrock {
             push_new(&mut allowed, "WebSearch");
         }
+        push_new(&mut allowed, "WebFetch");
         for site in keys.seed_sites {
             push_new(&mut allowed, &format!("WebFetch(domain:{site})"));
         }
@@ -180,6 +211,13 @@ pub(crate) fn claude_options(options: &mut Map<String, Value>, keys: &ClaudeKeys
     allowed.retain(|rule| !rule.as_str().is_some_and(super::case_law::is_case_law_rule));
     if keys.case_law {
         push_new(&mut allowed, super::case_law::CLAUDE_ALLOW);
+    }
+    let names_browser = |rule: &Value| rule.as_str().is_some_and(|r| r.contains("agent-browser"));
+    allowed.retain(|rule| !names_browser(rule));
+    disallowed.retain(|rule| !names_browser(rule));
+    if keys.browser {
+        allowed.extend(clauseo_profile::claude::agent_browser_allowed().map(Value::String));
+        disallowed.extend(clauseo_profile::claude::agent_browser_denied().map(Value::String));
     }
     if !disallowed.is_empty() {
         options.insert("disallowedTools".to_owned(), Value::Array(disallowed));
@@ -200,13 +238,24 @@ pub(crate) fn claude_options(options: &mut Map<String, Value>, keys: &ClaudeKeys
         settings.insert("skipWebFetchPreflight".to_owned(), Value::Bool(true));
     }
     deny_data_folder(&mut settings, keys.data);
+    if keys.browser {
+        browser_ask_settings(&mut settings);
+    }
+    if let Some(matter) = keys.matter {
+        deny_matter_marker(&mut settings, matter);
+    }
+    // Before forced ask, whose `autoAllowBashIfSandboxed: false` must win.
+    if let Some(sandbox) = keys.sandbox {
+        super::sandbox::sandbox_settings(&mut settings, sandbox);
+    }
     if keys.forced_ask {
         forced_ask_settings(&mut settings);
     }
     options.insert("settings".to_owned(), Value::Object(settings));
 }
 
-/// `permissions.deny` gains the data folder's rules (`agent/data_fence.rs`), and
+/// `permissions.deny` gains the data folder's rules (`agent/data_fence.rs`; on Windows also its
+/// `Bash` and `PowerShell` rules, `data_fence::windows_shell_deny_rules`), and
 /// `permissions.allow` the Read of the built-in skills' folder, each after any the hook put
 /// there. A hook value at `permissions`, `deny` or `allow` of another type is replaced. With no
 /// spelling (a unit test's keys) nothing changes.
@@ -222,12 +271,53 @@ fn deny_data_folder(
     for rule in crate::agent::data_fence::claude_deny_rules(data) {
         push_new(&mut deny, &rule);
     }
+    if cfg!(windows) {
+        let var = |name: &str| std::env::var_os(name);
+        for rule in crate::agent::data_fence::windows_shell_deny_rules(&data.spellings, &var) {
+            push_new(&mut deny, &rule);
+        }
+    }
     permissions.insert("deny".to_owned(), Value::Array(deny));
     let mut allow = take_array(&mut permissions, "allow");
     for rule in crate::agent::data_fence::claude_allow_rules(data) {
         push_new(&mut allow, &rule);
     }
     permissions.insert("allow".to_owned(), Value::Array(allow));
+    settings.insert("permissions".to_owned(), Value::Object(permissions));
+}
+
+/// `permissions.ask` gains agent-browser's allowed commands that still ask
+/// (`clauseo_profile::claude::agent_browser_ask`: `eval`, `pdf`, `download`, `upload`,
+/// `state load` and `state save` behind another option, a `wait --fn`, a `file://` URL, an
+/// option that loads page JavaScript), after any the hook put there. A hook value at
+/// `permissions` or `ask` of another type is replaced.
+fn browser_ask_settings(settings: &mut Map<String, Value>) {
+    let mut permissions = take_object(settings, "permissions");
+    let mut ask = take_array(&mut permissions, "ask");
+    for rule in clauseo_profile::claude::agent_browser_ask() {
+        push_new(&mut ask, &rule);
+    }
+    permissions.insert("ask".to_owned(), Value::Array(ask));
+    settings.insert("permissions".to_owned(), Value::Object(permissions));
+}
+
+/// `permissions.deny` gains `Edit` of the matter's `.clauseo` folder and all in it, after any
+/// rules already there. A matter folder that is not UTF-8 gets none (no rule could name it).
+fn deny_matter_marker(settings: &mut Map<String, Value>, matter: &Path) {
+    let Some(text) = matter.to_str() else {
+        return;
+    };
+    let base = crate::agent::data_fence::rule_path(text, cfg!(windows));
+    let marker = super::sandbox::MATTER_MARKER;
+    let mut permissions = take_object(settings, "permissions");
+    let mut deny = take_array(&mut permissions, "deny");
+    for rule in [
+        format!("Edit({base}/{marker})"),
+        format!("Edit({base}/{marker}/**)"),
+    ] {
+        push_new(&mut deny, &rule);
+    }
+    permissions.insert("deny".to_owned(), Value::Array(deny));
     settings.insert("permissions".to_owned(), Value::Object(permissions));
 }
 
@@ -307,8 +397,9 @@ pub(crate) fn fill_meta(meta: &mut Map<String, Value>, folders: Folders<'_>) -> 
     Ok(())
 }
 
-/// The instructions with `{work_folder}`, `{matter_notes}` and `{connectors}` filled, in one
-/// pass. An unfillable token is a host bug: `agent.launch_failed`, naming it in the log.
+/// The instructions with `{work_folder}`, `{matter_notes}`, `{connectors}` and `{browser}`
+/// filled, in one pass. An unfillable token is a host bug: `agent.launch_failed`, naming it in
+/// the log.
 pub(crate) fn fill_instructions(text: &str, folders: Folders<'_>) -> Result<String, Error> {
     placeholders::fill(
         text,
@@ -317,6 +408,7 @@ pub(crate) fn fill_instructions(text: &str, folders: Folders<'_>) -> Result<Stri
             (WORK_FOLDER, folders.work),
             (MATTER_NOTES, folders.notes),
             (CONNECTORS, folders.connectors),
+            (BROWSER, folders.browser),
         ],
     )
     .map_err(|unfilled| {

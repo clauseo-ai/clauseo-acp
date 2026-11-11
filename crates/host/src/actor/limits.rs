@@ -22,7 +22,8 @@
 //!   the first event it gets; a later one gets the current view alone; the last one to go turns
 //!   `Watching` off.
 //! - With no `claude-acp` or `codex-acp` entry in the settings there is no model: nothing reads,
-//!   the view is empty and every input does nothing.
+//!   the view is empty and every input does nothing, until a plan is set up ([`plan_added`],
+//!   `limits/plans.rs`). Each read logs at info when it starts and when it ends.
 //! - Each read started gets a number, in order, so a pending stop can tell a read that began
 //!   before it from one that began after.
 //! - A turn stopped at the limit with no reset time leaves a pending stop here ([`stop_later`],
@@ -59,7 +60,10 @@ use crate::handle::Subscription;
 use crate::log_file::Cause;
 use crate::principal::{Access, authorize};
 
+mod plans;
 mod stops;
+
+pub(crate) use plans::plan_added;
 
 pub(crate) use stops::{
     busy as stops_busy, committed as stop_committed, decide_now as decide_stops_now,
@@ -201,7 +205,9 @@ pub(super) fn on_input(actor: &mut Actor, input: LimitsInput) {
             number,
         } => {
             let failed = matches!(outcome, ReadOutcome::Failed(_));
+            let word = plans::outcome_word(&outcome);
             feed(actor, ModelInput::ReadDone { agent, outcome });
+            plans::log_read_done(actor, agent, word);
             stops::read_done(actor, agent, failed, number);
             super::turn::limits_read(actor, agent);
         }
@@ -397,12 +403,14 @@ fn carry_out(actor: &mut Actor, actions: Vec<Action>, now: Timestamp) {
 }
 
 /// Starts one read on the pool, numbered; its outcome comes back as [`LimitsInput::Read`].
-/// Under `sandbox.required` no reader starts (it would run outside the jail, 0051): the read
-/// fails at once, so the plan-limits line shows it could not read.
+/// Under `sandbox.required`, with a sandbox wired, no reader starts (it would run outside the
+/// jail, 0051): the read fails at once, so the plan-limits line shows it could not read.
 fn start_read(actor: &mut Actor, agent: AgentKind) {
     let number = actor.limits.next_read;
     actor.limits.next_read = number.saturating_add(1);
-    if actor.effective.settings().sandbox.required {
+    // Safe workspace parked for launch: `sandbox.required` blocks no read until desktop wires
+    // `with_sandbox`.
+    if actor.protection.sandbox_wired() && actor.effective.settings().sandbox.required {
         if !actor.limits.refused_reads.contains(&agent) {
             actor.limits.refused_reads.push(agent);
             tracing::info!(?agent, "limits not read: the firm requires the sandbox");
@@ -419,6 +427,7 @@ fn start_read(actor: &mut Actor, agent: AgentKind) {
         });
         return;
     }
+    tracing::info!(?agent, number, "limits: read started");
     let read = actor.limits.reader.read(agent);
     actor.spawn_post(async move {
         let outcome = read.await;

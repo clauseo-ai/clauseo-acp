@@ -14,9 +14,11 @@ import {
 } from "../testing/stream-script.ts";
 import { FakeTransport } from "../transport/fake-transport.ts";
 import type {
+  BlacklineParagraph,
   CheckpointKind,
   FileChange,
   MatterSummary,
+  QueryResult,
   RestorePreview,
   StepEntry,
   ViewEntry,
@@ -26,7 +28,7 @@ import type { Entry } from "./entry.ts";
 import { detailed, fakeNext } from "../room/fake-next.ts";
 import { NO_STAND_INS, type StandIns } from "../room/versions/stand-ins.ts";
 import { RoomClicking } from "./states.tsx";
-import { versionWords, type WordsRef } from "./words.ts";
+import { threadWords, versionWords, type WordsRef } from "./words.ts";
 
 const THE_MATTER: MatterSummary = {
   matter: MATTER,
@@ -73,6 +75,28 @@ const version = (
   },
 });
 
+/** The host's marker for a restore: `checkpoint` restored the matter to `from`. */
+const restoreMarker = (
+  order: number,
+  from: string,
+  checkpoint: string,
+  undoes?: string,
+): ViewEntry => ({
+  marker: {
+    order,
+    event: uuid(order, 9),
+    ts: Date.now(),
+    kind: {
+      version_restored: {
+        from,
+        checkpoint,
+        scope: "matter",
+        ...(undoes === undefined ? {} : { undoes }),
+      },
+    },
+  },
+});
+
 const stepEntry = (order: number, over: Partial<StepEntry>): ViewEntry => ({
   step: {
     order,
@@ -108,7 +132,47 @@ export type Matter = {
   openable?: boolean;
   /** preview_restore names these as locked, and the restore is refused with matter.file_locked (U9). */
   locked?: string[];
+  /** word_blackline's answer for a Word document compared with now: marked up (by default, whole), left unanswered,
+   * or refused with a code. */
+  mark?: "hold" | { truncated: boolean } | { refused: string; retryable: boolean };
+  /** The lawyer accepted or rejected tracked changes in these files after the next turn: version cp6 (UC). */
+  revisions?: FileChange[];
+  /** The newest version is a restore to the turn's version three days ago, cp7, marked by the host. */
+  restored?: boolean;
+  /** preview_restore's removes, when it is asked to undo a restore. */
+  removes?: string[];
+  /** The conversation's stream records a restore made from Versions while it was open, or the undo of one. */
+  recorded?: "restore" | "undo";
 };
+
+/** The host's Word tool's marking up of the notice: a word out and a word in, and a paragraph added. */
+const MARKED_NOTICE: BlacklineParagraph[] = [
+  {
+    change: "same",
+    runs: [{ kind: "same", text: "To the Branch Manager, State Bank of India, Connaught Place." }],
+  },
+  {
+    change: "changed",
+    runs: [
+      { kind: "same", text: "My client asks that the account be restored within " },
+      { kind: "del", text: "thirty" },
+      { kind: "ins", text: "fifteen" },
+      { kind: "same", text: " days of this notice." },
+    ],
+  },
+  {
+    change: "added",
+    runs: [{ kind: "ins", text: "A copy of the statement of 3 March is annexed." }],
+  },
+];
+
+/** word_blackline's answer, as `mark` asks. */
+function marking(mark: Matter["mark"]): QueryResult | Promise<QueryResult> {
+  if (mark === "hold") return new Promise<QueryResult>(() => {});
+  if (mark !== undefined && "refused" in mark)
+    return Promise.reject({ code: mark.refused, message: "", retryable: mark.retryable });
+  return { word_blackline: { paragraphs: MARKED_NOTICE, truncated: mark?.truncated ?? false } };
+}
 
 /** The matter's history: its papers brought in three days ago, a turn of the conversation's that morning, the
  * lawyer's edits outside Clauseo this hour, and the conversation's next turn, now. */
@@ -119,6 +183,10 @@ export function versionsHost(m: Matter): FakeTransport {
     version(2, "after_turn", atLocal(-3, 10, 30), files, TURN),
     version(3, "outside_edits", today(0), m.outside ?? [file(LEASE)]),
     version(4, "after_turn", today(10), [], uuid(3, 4)),
+    ...(m.revisions === undefined ? [] : [version(6, "revisions", today(15), m.revisions)]),
+    ...(m.restored === true
+      ? [version(7, "restore", today(20)), restoreMarker(70, "cp2", "cp7")]
+      : []),
   ];
   const steps = [
     stepEntry(9, { files, checkpoint_after: "cp2" }),
@@ -131,6 +199,9 @@ export function versionsHost(m: Matter): FakeTransport {
           }),
         ]
       : []),
+    ...(m.recorded === undefined
+      ? []
+      : [restoreMarker(29, "cp2", "cp7", m.recorded === "undo" ? "cp5" : undefined)]),
   ];
   const matterReset: ViewPatchBody = {
     reset: {
@@ -178,7 +249,15 @@ export function versionsHost(m: Matter): FakeTransport {
           ],
         };
       if (query.compare_versions !== undefined) return { file_changes: m.compare ?? [] };
-      if (query.preview_restore !== undefined) return { restore_preview: preview };
+      // a restore's added files: asked to undo it, they go; asked to restore the version before it alone, they stay
+      if (query.preview_restore !== undefined)
+        return {
+          restore_preview:
+            query.preview_restore.undoes === undefined
+              ? { ...preview, added_since: [...preview.added_since, ...(m.removes ?? [])] }
+              : { ...preview, removes: m.removes ?? [] },
+        };
+      if (query.word_blackline !== undefined) return marking(m.mark);
       throw new Error(`not scripted: ${JSON.stringify(query)}`);
     },
     dispatch: (envelope) => {
@@ -192,17 +271,7 @@ export function versionsHost(m: Matter): FakeTransport {
           event(
             batch(
               2,
-              [
-                upsert(version(5, "restore", Date.now())),
-                upsert({
-                  marker: {
-                    order: 50,
-                    event: uuid(50, 9),
-                    ts: Date.now(),
-                    kind: { version_restored: { from: to, checkpoint: "cp5", scope: "matter" } },
-                  },
-                }),
-              ],
+              [upsert(version(5, "restore", Date.now())), upsert(restoreMarker(50, to, "cp5"))],
               undefined,
               MATTER_STREAM,
             ),
@@ -238,6 +307,10 @@ const CONFIRM = '[data-testid="dialog-confirm"]';
 /** Versions open beside the work: a window past the room's 1200 px breakpoint, tall enough for the dialogs. */
 const WINDOW = { width: 1280, height: 760 } as const;
 
+/** Versions at the turn's version three days ago, compared with now, over `m`'s host. */
+export const compared = (id: string, words: WordsRef, m: Matter): Entry =>
+  state(id, words, m, [OPEN, EARLIER, COMPARE]);
+
 const state = (id: string, words: WordsRef, m: Matter, clicks: readonly string[]): Entry => ({
   id,
   words,
@@ -252,7 +325,16 @@ const state = (id: string, words: WordsRef, m: Matter, clicks: readonly string[]
   ),
 });
 
-const SHEET = [file(NOTICE)];
+/** The newest version a restore that brought back one file, and the presses that ask to undo it. */
+const UNDO_RESTORE: Matter = { restored: true, removes: ["Reply notes.md"] };
+const UNDOING = [OPEN, '[data-testid="version"][data-checkpoint="cp7"]', UNDO] as const;
+
+/** A file added since the version, and one removed since. */
+const ADDED: FileChange[] = [{ ...file("Reply notes.md"), change: "added" }];
+const REMOVED: FileChange[] = [{ ...file("Old memo.txt"), change: "deleted" }];
+
+/** A document whose words can't be compared yet: a Word document is marked up instead (registry-uc-blackline.tsx). */
+const SHEET = [file("Notes for counsel.txt")];
 /** A PDF, whose sheet shows both sides and says a PDF shows only whether it changed. */
 const PDF_SHEET = [file("Annexure 3.pdf")];
 /** H11's open_file, standing in on the review page: it opens nothing. */
@@ -372,4 +454,59 @@ export const U8: Entry[] = [
     CONFIRM,
   ]),
   state("U8-24", versionWords("Restored to {time} today"), {}, [OPEN, TODAY, RESTORE, CONFIRM]),
+  // undoing the newest version, a restore: the dialog names the restore, and the files it added, which go
+  state("U8-25", versionWords("Undo the restore at {time}?"), UNDO_RESTORE, UNDOING),
+  state(
+    "U8-26",
+    versionWords("'{papers}', added by the restore, will be removed."),
+    UNDO_RESTORE,
+    UNDOING,
+  ),
+  state("U8-36", versionWords("You can undo this."), UNDO_RESTORE, UNDOING),
+  state(
+    "U8-27",
+    versionWords("{papers}, added by the restore, will be removed."),
+    { restored: true, removes: ["Rejoinder.docx", "Synopsis.docx"] },
+    UNDOING,
+  ),
+  // the conversation open as the restore was made records it, as a quiet line under its last answer
+  state(
+    "U8-28",
+    threadWords("You restored an earlier version of the matter."),
+    { recorded: "restore" },
+    [],
+  ),
+  state("U8-29", threadWords("You undid the restore."), { recorded: "undo" }, []),
+  // compared with now, a file added since the version, and one removed since: the sheet says which, and the side with
+  // no paper says so
+  state("U8-30", versionWords("Added since {time} on {date}"), { compare: ADDED }, [
+    OPEN,
+    EARLIER,
+    COMPARE,
+  ]),
+  state("U8-31", versionWords("Added since {time} today"), { compare: ADDED }, [
+    OPEN,
+    TODAY,
+    COMPARE,
+  ]),
+  state("U8-32", versionWords("Removed since {time} on {date}"), { compare: REMOVED }, [
+    OPEN,
+    EARLIER,
+    COMPARE,
+  ]),
+  state("U8-33", versionWords("Removed since {time} today"), { compare: REMOVED }, [
+    OPEN,
+    TODAY,
+    COMPARE,
+  ]),
+  state("U8-34", versionWords("This paper wasn't in the matter then."), { compare: ADDED }, [
+    OPEN,
+    TODAY,
+    COMPARE,
+  ]),
+  state("U8-35", versionWords("This paper isn't in the matter now."), { compare: REMOVED }, [
+    OPEN,
+    TODAY,
+    COMPARE,
+  ]),
 ];

@@ -42,6 +42,9 @@ pub(crate) const MAX_RESULT_URL_CHARS: usize = 2_000;
 #[derive(Debug, Default)]
 pub(crate) struct Sources {
     browser: browser::Opens,
+    /// A Codex agent's unfinished calls of the `browser` server's tools, for its permission
+    /// requests (`actor/turn/asks.rs`); no record comes of them.
+    codex_browser: browser::CodexTools,
     calls: calls::Calls,
     /// The case-law calls and the relay's results waiting for them. The host asks it first
     /// (`actor/turn/updates.rs`); a call it claims is not offered to the others.
@@ -58,6 +61,9 @@ impl Sources {
         agent: &AgentId,
         call: &ToolCall,
     ) -> Option<DomainEvent> {
+        if is_codex(agent) {
+            self.codex_browser.started(call);
+        }
         let page = self
             .browser
             .started(turn, tool_call, call)
@@ -75,6 +81,7 @@ impl Sources {
         agent: &AgentId,
         patch: &ToolCallPatch,
     ) -> Option<DomainEvent> {
+        self.codex_browser.updated(acp_id, patch);
         let page = self
             .browser
             .updated(turn, acp_id, patch)
@@ -82,6 +89,17 @@ impl Sources {
         let web = self.calls.updated(turn, acp_id, agent, patch);
         page.or(web)
     }
+
+    /// The `browser` server's tool that the Codex call `acp_id`, started in a live turn and not
+    /// finished, runs (`browser::CodexTools`).
+    pub(crate) fn codex_browser_tool(&self, acp_id: &str) -> Option<&str> {
+        self.codex_browser.tool(acp_id)
+    }
+}
+
+/// Whether `agent` is a Codex agent.
+fn is_codex(agent: &AgentId) -> bool {
+    clauseo_protocol::AgentKind::of(agent) == Some(clauseo_protocol::AgentKind::Codex)
 }
 
 /// What a finished web tool call found, before it is an event.

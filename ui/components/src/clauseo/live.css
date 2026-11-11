@@ -48,6 +48,17 @@
     background: var(--well-strong);
     border-radius: var(--r-field) var(--r-field) 0 0;
   }
+  /* a second line under the first (the first run's other plan): compact, square at the top, one hair below the first */
+  /* a row's note, muted under it (a cancelled sign-in's under its download), in the first screen's plan note's type */
+  .working-note {
+    @apply text-small text-muted;
+    padding: var(--s1) var(--s4) var(--s2);
+  }
+  .working-also > .working {
+    min-height: var(--size-control-small);
+    border-radius: 0;
+    border-top: var(--hairline) solid var(--well);
+  }
   /* the lead: the icon's own 16 px, or, while the pen writes, an empty slot of the same 16 px, so the words keep
      their place */
   .working-lead {
@@ -59,6 +70,18 @@
   .working-lead[data-lead="pen"] {
     width: var(--s4);
     height: var(--s4);
+  }
+  /* a plan only offered: no icon, and no slot for one, so its words start at the row's own padding, in the column
+     where the lead line's words and the other rows' icons (the tick, the clock) start */
+  .working-lead[data-lead="none"] {
+    display: none;
+  }
+  /* a row for one of two plans: the plan's name in the row's own tone, the words muted after it */
+  .working-plan {
+    color: var(--primary);
+  }
+  .working-done {
+    color: var(--primary);
   }
   .working-icon {
     flex: none;

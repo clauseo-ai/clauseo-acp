@@ -2,20 +2,20 @@
 //! it (after reading the thread's whole log for replay dedupe), else `session/resume` when it
 //! offers that (nothing is replayed), else `session/new`; for a Codex agent the checks before
 //! its first prompt (the ask mode, the guard's trust), for a Claude agent the switch to
-//! Clauseo's mode; then the attach commit, the held replay and the work that waited. When
-//! `initialize` gave the agent a title, its name is logged first (`AgentNamed`,
-//! `log_agent_name`), so a failed `session/new` leaves it in the thread. A Codex agent with a
-//! key that answers a session call with auth-required gets its one `authenticate` first
-//! (`key_retry.rs`).
+//! Clauseo's mode, for any agent the model and effort picks (`picks.rs`); then the attach
+//! commit, the held replay and the work that waited. When `initialize` gave the agent a title,
+//! its name is logged first (`AgentNamed`, `session/named.rs`), so a failed `session/new`
+//! leaves it in the thread. A Codex agent with a key that answers a session call with
+//! auth-required gets its one `authenticate` first (`key_retry.rs`).
 
 use std::path::PathBuf;
 use std::sync::Arc;
 
 use clauseo_acp::{AcpClient, AgentInfo, LoadSession, McpServer, NewSession, SessionStart};
 use clauseo_protocol::{
-    AgentChoiceId, AgentKind, AgentNamed, AgentSessionAttached, CompactString,
-    ConfigOptionsReplaced, Envelope, ErrorCode, MatterId, ModeChanged, Notice, NoticeKind,
-    NoticeLevel, StreamId, ThreadId, ViewEntry,
+    AgentChoiceId, AgentKind, AgentSessionAttached, CompactString, ConfigOptionsReplaced, Envelope,
+    ErrorCode, MatterId, ModeChanged, Notice, NoticeKind, NoticeLevel, StreamId, ThreadId,
+    ViewEntry,
 };
 
 use super::super::Actor;
@@ -23,11 +23,18 @@ use super::super::input::Input;
 use super::agents::{Stage, call, launch_failed, run_waiting};
 use super::key_retry;
 use super::out::Out;
+use super::picks::{Pick, Picked};
 use super::{AgentReply, LogFor, Then, TurnInput, lost, state, updates};
 use crate::agent::{self, codex};
 use crate::error::Error;
-use crate::log_file::Cause;
+use crate::log_file::{Cause, LIFECYCLE};
 use crate::sent::SentView;
+
+mod claude_mode;
+mod named;
+
+use claude_mode::claude_start;
+pub(super) use claude_mode::{Auto, hold_auto_back};
 
 /// The fallback words of the notice a thread gets when its agent starts a new session after
 /// earlier turns (`NoticeKind::ContextNotRestored`), for a view that does not know the kind.
@@ -35,6 +42,7 @@ const CONTEXT_NOT_RESTORED: &str = "Clauseo doesn't remember the earlier questio
      in this conversation. Include what it needs from them in your next question.";
 
 pub(super) fn on_initialized(actor: &mut Actor, thread: ThreadId, info: AgentInfo) {
+    tracing::info!(target: LIFECYCLE, %thread, "agent initialized");
     let stored = actor
         .threads
         .get(&thread)
@@ -48,7 +56,7 @@ pub(super) fn on_initialized(actor: &mut Actor, thread: ThreadId, info: AgentInf
     agent.info = Some(info);
     agent.stage = Stage::Loading;
     // Before the session starts, so a `session/new` that fails leaves the name in the log first.
-    log_agent_name(actor, thread, name);
+    named::log_agent_name(actor, thread, name);
     if resumes {
         resume_session(actor, thread);
         return;
@@ -265,17 +273,20 @@ fn folder(actor: &Actor, thread: ThreadId) -> Result<PathBuf, Error> {
 
 /// The session is up. A Codex agent's session first runs [`prepare`]'s checks; a Claude
 /// agent's session that started in another mode than Clauseo's is first switched to it
-/// ([`claude_start`]); any other attaches now.
+/// ([`claude_start`]); a session with model or effort picks to set takes them there too
+/// (`picks.rs`); any other attaches now.
 pub(super) fn on_started(actor: &mut Actor, thread: ThreadId, start: SessionStart, loaded: bool) {
     super::profile_loads::show_tools(actor, thread);
+    let picks = super::picks::wanted(actor, thread, &start.config_options);
     let kind = actor
         .threads
         .get(&thread)
         .and_then(|entry| AgentKind::of(&entry.row.agent));
     match kind {
         Some(AgentKind::Codex) => {}
-        Some(AgentKind::Claude) => return claude_start(actor, thread, start, loaded),
-        None => return attach(actor, thread, start, loaded),
+        Some(AgentKind::Claude) => return claude_start(actor, thread, (start, loaded), picks),
+        None if picks.is_empty() => return attach(actor, thread, start, loaded),
+        None => return before_attach(actor, thread, (start, loaded), (None, None, picks)),
     }
     let ask =
         AgentChoiceId::new(codex::ASK_MODE).map_err(|error| Error::Internal(error.to_string()));
@@ -314,44 +325,105 @@ pub(super) fn on_started(actor: &mut Actor, thread: ThreadId, start: SessionStar
             return;
         }
     };
-    let Some(agent) = state(actor, thread).and_then(|state| state.agent.as_deref_mut()) else {
-        return;
-    };
     // Whether a hooks object went in was recorded at launch, with the folder resolved then.
-    let guard = agent
-        .codex
-        .as_ref()
+    let guard = state(actor, thread)
+        .and_then(|state| state.agent.as_deref())
+        .and_then(|agent| agent.codex.as_ref())
         .filter(|codex| codex.guard)
         .map(|codex| codex.folder.clone());
-    if !switch && guard.is_none() {
+    if !switch && guard.is_none() && picks.is_empty() {
         attach(actor, thread, start, loaded);
         return;
     }
+    let ask = switch.then_some(Switch {
+        mode: ask,
+        fallback: None,
+    });
+    before_attach(actor, thread, (start, loaded), (ask, guard, picks));
+}
+
+/// Runs [`prepare`] for the session, holding its updates until the attach.
+fn before_attach(
+    actor: &mut Actor,
+    thread: ThreadId,
+    (start, loaded): (SessionStart, bool),
+    (mode, guard, picks): (Option<Switch>, Option<PathBuf>, Vec<Pick>),
+) {
+    let Some(agent) = state(actor, thread).and_then(|state| state.agent.as_deref_mut()) else {
+        return;
+    };
     agent.preparing = true;
     let (id, client, fence) = (agent.id, agent.link.client.clone(), agent.link.fence());
     call(actor, thread, id, async move {
-        let result = prepare(&client, start, (ask, switch), guard).await;
+        let (result, picked, fell_back) = prepare(&client, start, (mode, guard), picks).await;
         fence.await;
-        AgentReply::Prepared { loaded, result }
+        AgentReply::Prepared {
+            loaded,
+            result,
+            picked,
+            fell_back,
+        }
     });
 }
 
-/// A session's checks before its first prompt, in order: `session/set_mode` to `ask` when
-/// `switch` (Codex's ask mode: the host owns the mode, `INITIAL_AGENT_MODE` set it at launch,
-/// and this covers an adapter that did not take it; Claude's [`agent::loads::CLAUDE_MODE`],
-/// see [`claude_start`]); then, for Codex, when a hooks object went into
-/// `CODEX_CONFIG` (`guard` is the session's folder), `_codex/hooks/list` once, which must
-/// show the guard trusted. The start comes back with the mode it now has.
+/// A session's work before its first prompt, in order: `session/set_mode` to `mode` when given
+/// (Codex's ask mode: the host owns the mode, `INITIAL_AGENT_MODE` set it at launch, and this
+/// covers an adapter that did not take it; Claude's [`agent::loads::CLAUDE_MODE`], see
+/// [`claude_start`], with `acceptEdits` as its fallback when the switch to `auto` fails); then,
+/// for Codex, when a hooks object went into `CODEX_CONFIG` (`guard` is the session's folder),
+/// `_codex/hooks/list` once, which must show the guard trusted; then
+/// the model and effort `picks` (`picks::apply`), whose failures fail nothing. The start comes
+/// back with the mode and options it now has, and whether the mode switch fell back.
 async fn prepare(
     client: &AcpClient,
     mut start: SessionStart,
-    (ask, switch): (AgentChoiceId, bool),
-    guard: Option<PathBuf>,
-) -> Result<SessionStart, Error> {
-    if switch {
-        client.set_mode(&start.session, ask.clone()).await?;
-        if let Some(modes) = &mut start.modes {
-            modes.current = CompactString::from(ask.as_str());
+    (mode, guard): (Option<Switch>, Option<PathBuf>),
+    picks: Vec<Pick>,
+) -> (Result<SessionStart, Error>, Picked, bool) {
+    let fell_back = match checks(client, &mut start, (mode, guard)).await {
+        Ok(fell_back) => fell_back,
+        Err(error) => return (Err(error), Picked::default(), false),
+    };
+    let picked = super::picks::apply(client, &mut start, picks).await;
+    (Ok(start), picked, fell_back)
+}
+
+/// A `session/set_mode` before the attach: to `mode`, and, should the agent refuse it, to
+/// `fallback` when there is one (Claude's `acceptEdits` for `auto`), else the launch fails.
+#[derive(Debug)]
+pub(super) struct Switch {
+    pub(super) mode: AgentChoiceId,
+    pub(super) fallback: Option<AgentChoiceId>,
+}
+
+/// [`prepare`]'s mode switch and guard check; `true` when the switch fell back.
+async fn checks(
+    client: &AcpClient,
+    start: &mut SessionStart,
+    (mode, guard): (Option<Switch>, Option<PathBuf>),
+) -> Result<bool, Error> {
+    let mut fell_back = false;
+    if let Some(Switch { mode, fallback }) = mode {
+        let mode = match (
+            client.set_mode(&start.session, mode.clone()).await,
+            fallback,
+        ) {
+            (Ok(()), _) => Some(mode),
+            (Err(error), None) => return Err(error.into()),
+            (Err(error), Some(fallback)) => {
+                tracing::warn!(error = %Cause(&error), to = %fallback.as_str(), "the agent refused its mode; falling back");
+                fell_back = true;
+                let current = start.modes.as_ref().map(|modes| modes.current.as_str());
+                if current == Some(fallback.as_str()) {
+                    None
+                } else {
+                    client.set_mode(&start.session, fallback.clone()).await?;
+                    Some(fallback)
+                }
+            }
+        };
+        if let (Some(mode), Some(modes)) = (mode, &mut start.modes) {
+            modes.current = CompactString::from(mode.as_str());
         }
     }
     if let Some(cwd) = guard {
@@ -360,61 +432,22 @@ async fn prepare(
             return Err(codex::guard_untrusted(&answer));
         }
     }
-    Ok(start)
+    Ok(fell_back)
 }
 
-/// A Claude agent's session started in another mode than [`CLAUDE_MODE`]: claude-agent-acp
-/// 0.89.1 starts it in the user's own `permissions.defaultMode` (or a resumed transcript's
-/// mode), which `_meta` cannot override (see `agent/loads.rs`). So `session/set_mode` goes
-/// first, before any prompt, through [`prepare`]; a failed switch fails the launch, so no
-/// prompt runs in the user's mode. A session already in it attaches now. One that reports no
-/// modes, or offers no such mode, fails the launch ([`claude_no_mode`]): the host could not
-/// tell or change the mode it runs in. On load this also resets a mode the lawyer reached in
-/// the session (see [`agent::loads::CLAUDE_MODE`]).
-fn claude_start(actor: &mut Actor, thread: ThreadId, start: SessionStart, loaded: bool) {
-    let Some(modes) = start.modes.as_ref() else {
-        return claude_no_mode(actor, thread, "reported no modes");
-    };
-    if modes.current == agent::loads::CLAUDE_MODE {
-        return attach(actor, thread, start, loaded);
-    }
-    let offered = modes
-        .available
-        .iter()
-        .any(|mode| mode.id == agent::loads::CLAUDE_MODE);
-    let mode = AgentChoiceId::new(agent::loads::CLAUDE_MODE);
-    let (true, Ok(mode)) = (offered, mode) else {
-        return claude_no_mode(actor, thread, "offered no \"default\" mode");
-    };
-    tracing::info!(%thread, from = %modes.current, "switching the Claude session to Clauseo's mode");
-    let Some(agent) = state(actor, thread).and_then(|state| state.agent.as_deref_mut()) else {
-        return;
-    };
-    agent.preparing = true;
-    let (id, client, fence) = (agent.id, agent.link.client.clone(), agent.link.fence());
-    call(actor, thread, id, async move {
-        let result = prepare(&client, start, (mode, true), None).await;
-        fence.await;
-        AgentReply::Prepared { loaded, result }
-    });
-}
-
-/// Fails the launch of a Claude session whose mode the host cannot set to [`CLAUDE_MODE`]:
-/// `why` says what the agent's answer lacked.
-fn claude_no_mode(actor: &mut Actor, thread: ThreadId, why: &str) {
-    let error = Error::refused(
-        ErrorCode::AgentProtocolError,
-        format!(
-            "Claude Code {why}, so Clauseo cannot run it in its \"{}\" mode and sent no message",
-            agent::loads::CLAUDE_MODE
-        ),
-    );
-    tracing::warn!(
-        %thread,
-        error = %Cause(&error),
-        "the Claude session cannot run in Clauseo's mode"
-    );
-    launch_failed(actor, thread, &error);
+/// [`prepare`] ended well: a Claude switch to `auto` is judged (`claude_mode::prepared`,
+/// before the picks may drop held updates), the picks' outcome (`picks::after`), then the
+/// attach.
+pub(super) fn on_prepared(
+    actor: &mut Actor,
+    thread: ThreadId,
+    start: SessionStart,
+    (loaded, fell_back): (bool, bool),
+    picked: &Picked,
+) {
+    claude_mode::prepared(actor, thread, fell_back);
+    super::picks::after(actor, thread, picked);
+    attach(actor, thread, start, loaded);
 }
 
 /// The session is up: one commit of `AgentSessionAttached`, the thread row, the session's mode
@@ -431,6 +464,7 @@ pub(super) fn attach(actor: &mut Actor, thread: ThreadId, start: SessionStart, l
     let Some(agent) = state(actor, thread).and_then(|state| state.agent.as_deref_mut()) else {
         return;
     };
+    tracing::info!(target: LIFECYCLE, %thread, loaded, "session attached");
     agent.session = Some(start.session);
     agent.stage = Stage::Attached;
     agent.preparing = false;
@@ -443,7 +477,9 @@ pub(super) fn attach(actor: &mut Actor, thread: ThreadId, start: SessionStart, l
         agent.replay = None;
     }
     for item in waiting {
-        run_waiting(actor, thread, item);
+        if let Some(item) = super::picks::waited(actor, &start.config_options, item) {
+            run_waiting(actor, thread, item);
+        }
     }
 }
 
@@ -493,6 +529,9 @@ fn attach_commit(
             },
         )?;
     }
+    if let Some(notice) = claude_mode::notice(actor, thread) {
+        out.push(actor, notice)?;
+    }
     // The skill packs the launch left out, each pack and reason told once per thread (0040).
     for notice in super::launch_checks::pack_notices(actor, thread) {
         out.push(actor, notice)?;
@@ -506,57 +545,6 @@ fn attach_commit(
     entry.row.updated = now;
     out.draft.thread_row(entry.row.clone());
     out.send(actor, Then::Nothing)
-}
-
-/// The name the thread's header holds: from the loaded stream, else from the header the actor
-/// kept when the stream was unloaded.
-fn held_name(actor: &Actor, thread: ThreadId) -> Option<CompactString> {
-    let entry = actor.threads.get(&thread)?;
-    let header = actor
-        .loaded(StreamId::Thread(thread))
-        .and_then(|loaded| loaded.state.as_thread())
-        .and_then(|state| state.header())
-        .or(entry.header.as_ref())?;
-    header.agent_name.clone()
-}
-
-/// Logs `AgentNamed` for `thread` when `name` is set and differs from the name its header holds,
-/// so a restart with the same agent logs nothing. A push or send refused at once is logged and
-/// the session goes on without the name. A store write that fails later is a store failure like
-/// any other commit's: `turn.rs` fails the launching turn with it.
-fn log_agent_name(actor: &mut Actor, thread: ThreadId, name: Option<CompactString>) {
-    let Some(name) = name else {
-        return;
-    };
-    if held_name(actor, thread).as_ref() == Some(&name) {
-        return;
-    }
-    let logged = (|| -> Result<(), Error> {
-        let mut out = Out::new(actor, thread, None)?;
-        out.push(
-            actor,
-            AgentNamed {
-                agent_name: name.clone(),
-            },
-        )?;
-        out.send(actor, Then::Nothing)
-    })();
-    match logged {
-        Ok(()) => {
-            // An unloaded stream folds nothing, so the header the actor kept takes the name here:
-            // a second start while it is unloaded then logs nothing.
-            if let Some(header) = actor
-                .threads
-                .get_mut(&thread)
-                .and_then(|entry| entry.header.as_mut())
-            {
-                header.agent_name = Some(name);
-            }
-        }
-        Err(error) => {
-            tracing::warn!(%thread, error = %Cause(&error), "the agent's name was not logged");
-        }
-    }
 }
 
 /// Whether the thread has turns before its current one.

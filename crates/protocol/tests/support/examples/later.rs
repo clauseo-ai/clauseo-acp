@@ -1,13 +1,15 @@
 //! `TurnFailed` examples for codes added after the 0048 install and sign-in set, which
 //! `later_variants` in the parent module chains on before them, R24's case-law records, and the
-//! host notices with a kind, which it chains on last, the skill pack notices among them.
+//! host notices with a kind, which it chains on next, the skill pack notices among them, and the
+//! later stop reasons (`NotAllowed`'s moved here from it), which it chains on last.
 
 use clauseo_protocol::{
     AgentId, DomainEvent, ErrorCode, MatterPath, Notice, NoticeKind, NoticeLevel, PackId,
-    PackSkipReason, PageVia, PageVisited, SearchSource, TurnFailed, WebResult, WebSearchRecorded,
+    PackSkipReason, PageVia, PageVisited, SearchSource, StopReason, TurnEnded, TurnFailed,
+    WebResult, WebSearchRecorded,
 };
 
-use crate::fixtures::{tool_call_id, turn_id};
+use crate::fixtures::{checkpoint_id, tool_call_id, turn_id};
 
 /// One `TurnFailed` of turn 3 for each later code, in the order the corpus first saw them.
 pub(super) fn failures() -> Vec<DomainEvent> {
@@ -97,6 +99,29 @@ pub(super) fn failures() -> Vec<DomainEvent> {
             ErrorCode::BlocklistRevokeNotSaved,
             "the data folder is read-only",
         ),
+        failed(
+            ErrorCode::SandboxCleaningUp,
+            "the sandbox's clean-up after an earlier session isn't finished",
+        ),
+        failed(ErrorCode::BlacklineNoWordTool, "stetdoc is not configured"),
+        failed(ErrorCode::BlacklineNotWord, "the path is not a .docx"),
+        failed(ErrorCode::BlacklineFailed, "stetdoc compare exited 1"),
+        // Never a turn's failure in practice (tracked-change codes); here for the corpus.
+        failed(ErrorCode::WordStetdocMissing, "no stetdoc program"),
+        failed(
+            ErrorCode::WordRevisionsStale,
+            "the file changed since the list",
+        ),
+        failed(ErrorCode::WordNotDocx, "not a Word document"),
+        failed(ErrorCode::WordEditFailed, "stetdoc timed out"),
+        failed(
+            ErrorCode::MatterFolderPermission,
+            "the privacy settings keep Clauseo from opening the matter folder",
+        ),
+        failed(
+            ErrorCode::AgentOffline,
+            "the window said the computer is offline",
+        ),
     ]
 }
 
@@ -129,6 +154,13 @@ pub(super) fn notices() -> Vec<DomainEvent> {
                 ],
                 more: 0,
             }),
+        },
+        Notice {
+            level: NoticeLevel::Info,
+            text: "Claude's automatic mode isn't available for this account, so Claude asks \
+                   before running commands."
+                .to_owned(),
+            kind: Some(NoticeKind::AutoModeUnavailable),
         },
     ];
     notices.extend(
@@ -203,6 +235,26 @@ fn case_law() -> Vec<DomainEvent> {
             )
             .with_source(SearchSource::CaseLaw, Some("search_law")),
         )
+        .into(),
+    ]
+}
+
+/// One `TurnEnded` of turn 3 for each stop reason added after v1: `NotAllowed`, `OutsideMatter`.
+pub(super) fn stops() -> Vec<DomainEvent> {
+    vec![
+        TurnEnded {
+            turn: turn_id(3),
+            stop: StopReason::NotAllowed,
+            usage: None,
+            checkpoint_after: Some(checkpoint_id(14)),
+        }
+        .into(),
+        TurnEnded {
+            turn: turn_id(3),
+            stop: StopReason::OutsideMatter,
+            usage: None,
+            checkpoint_after: Some(checkpoint_id(14)),
+        }
         .into(),
     ]
 }

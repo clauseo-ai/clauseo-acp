@@ -47,7 +47,10 @@ documents with 3 changed).
 - The matter folder holds one thing of Clauseo's: `.clauseo/matter.json`, version 1:
   `{"version": 1, "matter_id": "<uuid>", "created_at": <milliseconds since the Unix epoch>}`, written
   by temp file and rename. Readers accept any `version` (or none) and ignore keys they do not know;
-  they need `matter_id` and `created_at`. A later format that drops either uses a new file name. Opening a
+  they need `matter_id` and `created_at`. A later format that drops either uses a new file name. An
+  import keeps a `matter.json` naming the matter it imports, byte for byte, and renames one that
+  does not read to `.clauseo/matter.old-<UTC stamp>.json` before writing its own (decision record
+  0022). Opening a
   matter whose folder is gone fails with `matter.folder_missing`; one whose folder has no
   `matter.json`, has one that does not read, or has one naming another matter fails with
   `matter.folder_not_a_matter` (`matter.folder_missing` before 2026-11-07, decision record 0003).
@@ -92,7 +95,8 @@ documents with 3 changed).
 
   `Clauseo-Checkpoint` is the `CheckpointId` the host minted; the commit id never leaves `matters`
   and `store`. `Clauseo-Kind` is one of `import`, `before-turn`, `after-turn`, `outside-edits`,
-  `undo`, `restore`. `Clauseo-Thread` and `Clauseo-Turn` are present when the checkpoint has them
+  `undo`, `restore`, `revisions` (tracked changes of a Word file accepted or rejected, no thread or
+  turn). `Clauseo-Thread` and `Clauseo-Turn` are present when the checkpoint has them
   (turn checkpoints, and an undo's when the host passes them). Writers emit them in that order.
   Readers take the message's last paragraph, accept the trailers in any order, ignore keys they do
   not know, read a kind they do not know as `Unknown`, and need only `Clauseo-Checkpoint`; a commit
@@ -236,6 +240,17 @@ form; ext4 (Linux) and NTFS (Windows) keep each form a separate file.
   the matter's, which joins a turn's paths and frees a folder for the guard's "outside" reads)
   and the folder `Matter::relink` writes `matter.json` into; folding there would cover a sibling
   spelled in the other form.
+
+### Security
+
+- Clauseo never opens a matter's own `.git`. It is only ever a name, refused by the sandbox and the
+  fence (decision record 0038).
+- Clauseo never spawns `git`, or any tool a repository configures, as the lawyer.
+- The shadow `history.git` lives outside the matter folder, in Clauseo's data area, and is opened
+  only with gix's isolated options: no system, global, user or `GIT_*` environment config, and no
+  hooks, filters, diff drivers or fsmonitor. The test
+  `recorded_worktree_ignores_the_global_system_and_user_config` (in
+  `crates/matters/src/history/tests/repo.rs`) pins that.
 
 ### `ARCHITECTURE.md`
 

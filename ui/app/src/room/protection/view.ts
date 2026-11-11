@@ -5,13 +5,17 @@
 import type { ProtectionView } from "../../transport/protocol.ts";
 import { notProtectedCause, type Cause } from "./causes.ts";
 import { poolOf } from "./detail.ts";
+import { setUpFixes } from "./blocked.ts";
 
 /** The pool's size past which Retry adds no room (R17: 4 more each time, up to 32). */
 export const POOL_MAX = 32;
 
-/** Whether a cause offers Try again: the set-up group, and a full pool still under its largest size. */
+/** Whether a cause offers Try again: the set-up group, a block setting up again fixes (blocked.ts's setUpFixes), and
+ * a full pool still under its largest size. */
 export const canRetry = (cause: Cause): boolean =>
-  cause.group === "setup" || (cause.group === "pool" && poolOf(cause).size < POOL_MAX);
+  cause.group === "setup" ||
+  setUpFixes(cause) ||
+  (cause.group === "pool" && poolOf(cause).size < POOL_MAX);
 
 /** R17 PR-E's `set_up_at`, when the view has it: when the set-up was done, in ms. */
 export function setUpAt(view: ProtectionView | null | undefined): number | null {

@@ -16,4 +16,6 @@ export const HI = {
   "Read 1 file.": "1 फ़ाइल पढ़ी गई।",
   // UD2-20: stopped
   "Clauseo stopped. The answer so far is kept.": "Clauseo रुक गया। अब तक का उत्तर सुरक्षित है।",
+  // UD2-65: the first read's button, in a new conversation; nothing reads the papers until it is pressed
+  "Read the papers": "दस्तावेज़ पढ़ें",
 } satisfies Hindi<string>;

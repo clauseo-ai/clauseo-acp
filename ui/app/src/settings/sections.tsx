@@ -13,10 +13,13 @@ import {
   IconSafeWorkspace,
   IconSearch,
   IconSend,
+  IconTryAgain,
 } from "@clauseo/components/icons/icons.tsx";
 import type { Display, Lang } from "@clauseo/components/lib/display.ts";
 import { cw } from "@clauseo/components/lib/words-connectors.ts";
+import { frame } from "@clauseo/components/lib/words-frame.ts";
 import { LANGUAGE_NAMES, st, type SettingsKey } from "@clauseo/components/lib/words-settings.ts";
+import { uw } from "@clauseo/components/lib/words-update.ts";
 import type { DisplayStore } from "../room/display-store.ts";
 import type { UiSettings } from "../room/host-next.ts";
 import type { HostTransport } from "../transport/host-transport.ts";
@@ -28,6 +31,7 @@ import type {
   ToolsSettingsView,
 } from "../transport/protocol.ts";
 import { APP_VERSION } from "./version.ts";
+import type { NotSetUp } from "./plan-setup.ts";
 import { lockKey, type LiveSettings } from "./use-settings.ts";
 import { hashId } from "./use-hash-section.ts";
 import { About } from "./sections/about.tsx";
@@ -35,6 +39,8 @@ import { Appearance } from "./sections/appearance.tsx";
 import { Language } from "./sections/language.tsx";
 import { Privacy } from "./sections/privacy.tsx";
 import { Usage } from "./sections/usage.tsx";
+import { Updates } from "./sections/updates.tsx";
+import { carriesUpdate } from "../store/update.ts";
 import { ConnectorsSection } from "./sections/connectors-load.tsx";
 import { PlansSection } from "./sections/plans-load.tsx";
 import { carriesSetup } from "./sections/plans-shown.ts";
@@ -68,6 +74,8 @@ export type SectionContext = {
   display: Display;
   /** Every agent's limits, from the window's limits store: Plan and usage's note reads them. */
   limits: LimitsView;
+  /** Whether the setup wire says a plan isn't signed in (plan-setup.ts): Plan and usage shows no billing for it. */
+  notSetUp: NotSetUp;
   /** The release date the host reports (`YYYY-MM-DD`), or null: About's line reads it. */
   releaseDate: string | null;
   /** Whether a firm's policy locks this setting. */
@@ -82,6 +90,10 @@ export type SectionContext = {
   /** The lawyer's choice of a tool's switch: one patch, unless the key is locked or already holds the value. The
    * connectors' switch (`connectors`, U15) reads both from the connectors' state, since ToolsSettingsView has none. */
   chooseTool: (key: keyof ToolsPatch, value: boolean) => void;
+  /** Whether a firm's policy locks the anonymous counts' switch (`privacy.counts`). */
+  countsLocked: () => boolean;
+  /** The lawyer's choice of the anonymous counts' switch: one patch, unless locked or already holding the value. */
+  chooseCounts: (value: boolean) => void;
 };
 
 export type SectionEntry = {
@@ -116,7 +128,7 @@ export const SECTIONS: readonly SectionEntry[] = [
     name: "Plan and usage",
     icon: IconPlanLimit,
     lead: "What each plan has left, and when it resets.",
-    note: (ctx, lang) => usageNote(ctx.limits, lang),
+    note: (ctx, lang) => usageNote(ctx.limits, lang, ctx.notSetUp),
     Body: Usage,
   },
   {
@@ -150,12 +162,24 @@ export const SECTIONS: readonly SectionEntry[] = [
     name: "Appearance",
     icon: IconAppearance,
     lead: "How Clauseo looks on this computer.",
+    // the Theme control's choice, in its words: Follow the computer, not the light it gives now (D-067)
     note: (ctx, lang) =>
       st(lang, "{theme}, text size {n}", {
-        theme: st(lang, ctx.display.theme === "night" ? "Night" : "Day"),
+        theme:
+          ctx.settings.ui.theme === "system"
+            ? frame(lang, "Follow the computer")
+            : st(lang, ctx.settings.ui.theme === "dark" ? "Night" : "Day"),
         n: ctx.display.textSize,
       }),
     Body: Appearance,
+  },
+  {
+    // R23: where the transport carries the updater; no side note, so nothing waits on the updater's first answer
+    id: "updates",
+    name: (lang) => uw(lang, "Updates"),
+    icon: IconTryAgain,
+    shown: (ctx) => carriesUpdate(ctx.transport),
+    Body: Updates,
   },
   {
     id: "privacy",
@@ -182,15 +206,18 @@ export function contextOf(
   limits: LimitsView = {},
   releaseDate: string | null = null,
   connectors: ConnectorsState = NO_CONNECTORS,
+  notSetUp: NotSetUp = () => false,
 ): SectionContext {
   const locked = (key: keyof UiSettings) => settings.locked.includes(lockKey(key));
   const toolLocked = (key: keyof ToolsSettingsView) => settings.locked.includes(`tools.${key}`);
+  const countsLocked = () => settings.locked.includes("privacy.counts");
   return {
     store,
     transport,
     settings,
     display,
     limits,
+    notSetUp,
     releaseDate,
     connectors,
     locked,
@@ -207,6 +234,12 @@ export function contextOf(
       }
       if (toolLocked(key) || settings.tools === undefined || settings.tools[key] === value) return;
       store.setTools({ [key]: value });
+    },
+    countsLocked,
+    chooseCounts: (value) => {
+      if (countsLocked() || settings.privacy === undefined || settings.privacy.counts === value)
+        return;
+      store.setPrivacy({ counts: value });
     },
   };
 }

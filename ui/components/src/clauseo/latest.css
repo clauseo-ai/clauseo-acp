@@ -1,0 +1,31 @@
+/* Latest: over the thread's foot once the view has left the thread's end (thread.tsx, follow.ts), a raised small
+   button, centred on the work, that goes back to the end. Its dock stands outside the thread's log, so its showing
+   is never read out. */
+
+@layer components {
+  /* a dock of no height at the transcript's foot: on a wide window that is the composer's top edge, so the button
+     floats just above the composer, over the thread's last lines */
+  .room-latest {
+    position: relative;
+    z-index: 2;
+    height: 0;
+    display: flex;
+    justify-content: center;
+  }
+  .room-latest[hidden] {
+    display: none;
+  }
+  .room-latest > button {
+    position: absolute;
+    bottom: var(--s3);
+  }
+}
+
+@variant max-mid {
+  /* the page scrolls under 1000 px: the dock holds at the window's foot, on the docked composer's top edge, whose
+     height the composer keeps on the room (--composer-h) */
+  .room-latest {
+    position: sticky;
+    bottom: var(--composer-h, 0px);
+  }
+}

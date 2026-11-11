@@ -57,6 +57,15 @@ pub const DAEMON_PORT: &str = "{daemon_port}";
 /// sentence that says the session has no case-law database. Instructions only.
 pub const CONNECTORS: &str = "{connectors}";
 
+/// The browser part, inside the tools part's sentence on reading web pages, with no separator.
+/// The host fills it with [`crate::instructions::browser_part_for`]: a space and the
+/// `agent-browser` rules in a Claude session whose launch put the command on its `PATH`, or the
+/// line naming the `browser` MCP entry's tools in a Codex session that got the entry; in any
+/// other, a space and the sentence that says the session has no browser (and why, when none is
+/// installed).
+/// Instructions only.
+pub const BROWSER: &str = "{browser}";
+
 /// The port of the session's case-law relay, as `CLAUSEO_RELAY=127.0.0.1:{relay_port}` (R24).
 /// Unfillable (no relay): the host drops `case-law`.
 pub const RELAY_PORT: &str = "{relay_port}";
@@ -67,7 +76,7 @@ pub const RELAY_TOKEN_FILE: &str = "{relay_token_file}";
 
 /// The tokens the host fills in the instructions. An unfillable one is a host bug: the host
 /// fails the launch with `agent.launch_failed`, naming the token ([`Unfilled`]'s message).
-pub const IN_INSTRUCTIONS: [&str; 3] = [WORK_FOLDER, MATTER_NOTES, CONNECTORS];
+pub const IN_INSTRUCTIONS: [&str; 4] = [WORK_FOLDER, MATTER_NOTES, CONNECTORS, BROWSER];
 /// The tokens the host fills in the `browser` and `case-law` entries. The browser entry holds
 /// [`SOCKET_DIR`] on macOS and Linux only and [`DAEMON_PORT`] on Windows only; the host fills
 /// whichever it finds. Only `case-law` holds [`RELAY_PORT`] and [`RELAY_TOKEN_FILE`].

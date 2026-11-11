@@ -1,11 +1,13 @@
 //! The words of `open_external`'s confirm, in English and Hindi, by the app's language
 //! (`ui.language`). Their review home is `ui/app/src/review/registry-h11.tsx` (H11-01 to
-//! H11-07); a test fails when the two disagree. `{host}` and `{address}` stand for where the
-//! link goes, the one part of the dialog that comes from the link.
+//! H11-08); a test fails when the two disagree. `{host}` and `{address}` stand for where the
+//! link goes (a web link's host, then the whole link; a mailto link's addresses), the only parts
+//! of the dialog that come from the link.
 
 use clauseo_protocol::Language;
 
-use super::Destination;
+use super::link::shown_address;
+use super::{Destination, Link};
 
 /// One language's words for both kinds of link.
 pub(super) struct Table {
@@ -23,6 +25,9 @@ pub(super) struct Table {
     pub(super) mail_message: &'static str,
     /// H11-07: the button that opens the mail app.
     pub(super) mail_ok: &'static str,
+    /// H11-08: the line below a web link's message; `{address}` is the whole link, as
+    /// [`shown_address`] writes it.
+    pub(super) web_address: &'static str,
 }
 
 pub(super) const EN: Table = Table {
@@ -33,6 +38,7 @@ pub(super) const EN: Table = Table {
     mail_title: "Write an email?",
     mail_message: "Your email app will open a new message to {address}.",
     mail_ok: "Open email app",
+    web_address: "Full address: {address}",
 };
 
 pub(super) const HI: Table = Table {
@@ -43,6 +49,7 @@ pub(super) const HI: Table = Table {
     mail_title: "ईमेल लिखें?",
     mail_message: "आपका ईमेल ऐप {address} के लिए नया संदेश खोलेगा।",
     mail_ok: "ईमेल ऐप खोलें",
+    web_address: "पूरा पता: {address}",
 };
 
 /// The table for `language`.
@@ -58,7 +65,8 @@ pub(super) fn table(language: Language) -> &'static Table {
 pub(crate) struct LinkWords {
     /// The dialog's title.
     pub(crate) title: String,
-    /// Its message, naming where the link goes.
+    /// Its message, naming where the link goes: for a web link, its host, then a blank line and
+    /// the whole link.
     pub(crate) message: String,
     /// The button that opens the link.
     pub(crate) ok: String,
@@ -67,15 +75,21 @@ pub(crate) struct LinkWords {
 }
 
 impl LinkWords {
-    /// The words for a link to `destination`, in `language`.
-    pub(crate) fn new(destination: &Destination, language: Language) -> Self {
+    /// The words for `link`, in `language`. Each slot is filled in its own line, so a link
+    /// that spells `{host}` cannot fill another.
+    pub(crate) fn new(link: &Link, language: Language) -> Self {
         let table = table(language);
-        let (title, message, ok) = match destination {
-            Destination::Web(host) => (
-                table.web_title,
-                table.web_message.replace("{host}", host),
-                table.web_ok,
-            ),
+        let (title, message, ok) = match &link.destination {
+            Destination::Web(host) => {
+                let decides = table.web_message.replace("{host}", host);
+                let address = shown_address(&link.url);
+                let full = table.web_address.replace("{address}", &address);
+                (
+                    table.web_title,
+                    format!("{decides}\n\n{full}"),
+                    table.web_ok,
+                )
+            }
             Destination::Mail(address) => (
                 table.mail_title,
                 table.mail_message.replace("{address}", address),
@@ -97,11 +111,18 @@ impl LinkWords {
     pub(crate) fn every_table_for_tests() -> Vec<Self> {
         let mut all = Vec::new();
         for language in [Language::En, Language::Hi] {
-            for destination in [
-                Destination::Web("example.com".to_owned()),
-                Destination::Mail("a@b.example".to_owned()),
+            for (url, destination) in [
+                (
+                    "https://example.com/",
+                    Destination::Web("example.com".to_owned()),
+                ),
+                (
+                    "mailto:a@b.example",
+                    Destination::Mail("a@b.example".to_owned()),
+                ),
             ] {
-                all.push(Self::new(&destination, language));
+                let url = url.to_owned();
+                all.push(Self::new(&Link { url, destination }, language));
             }
         }
         all

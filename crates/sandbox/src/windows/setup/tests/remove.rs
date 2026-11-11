@@ -25,7 +25,7 @@ fn other() -> Sid {
 }
 
 /// The calls of a full removal of [`pool`]'s eight users by its owner, with no ledger, in order.
-fn full_removal() -> Vec<String> {
+pub(super) fn full_removal() -> Vec<String> {
     let users = 1..=MIN_FREE_AFTER_RUN;
     let strays: Vec<String> = users.clone().map(|n| format!("100{n}")).collect();
     let mut lines: Vec<String> = [
@@ -61,7 +61,9 @@ fn full_removal() -> Vec<String> {
             "owners_ledger",
             "group",
             "group_members 1000",
+            "remove_remote_logon_deny 1000",
             "delete_group 1000",
+            "clear_markers",
             "delete_record",
             "unlock",
         ]
@@ -106,6 +108,22 @@ fn a_full_removal_takes_each_user_off_in_the_uninstall_order_then_the_rest() {
         "{:?}",
         acl.removes
     );
+}
+
+/// The uninstaller's admin-copy teardown (`remove_then`) runs with the set-up lock still held:
+/// after the record goes and before the unlock, so a refresh can't race the staging teardown.
+#[test]
+fn the_teardown_after_a_removal_runs_before_the_lock_is_given_back() {
+    let (mut machine, mut acl) = pool("remove-then-locked", Some(owner()));
+    let log = std::rc::Rc::clone(&machine.log);
+    let mut teardown = |removed: &Removed| {
+        assert!(matches!(removed, Removed::All(_)), "{removed:?}");
+        log.borrow_mut().push("teardown".to_owned());
+    };
+    remove_then(&mut machine, &mut acl, false, &mut teardown).unwrap();
+    let mut expected = full_removal();
+    expected.insert(expected.len() - 1, "teardown".to_owned());
+    assert_eq!(machine.lines(), expected);
 }
 
 /// A user whose profile has a reparse point on the way to `LocalLow` doesn't stop the removal:
@@ -243,6 +261,8 @@ fn the_steps_are_named_by_what_failed() {
         "remove" | "walk" => RemoveStep::LocalLow,
         "owners_ledger" => RemoveStep::Ledger,
         "group" | "group_members" | "delete_group" => RemoveStep::Group,
+        "remove_remote_logon_deny" => RemoveStep::RemoteLogon,
+        "clear_markers" => RemoveStep::Markers,
         "delete_record" => RemoveStep::Record,
         other => panic!("no step for {other}"),
     };
@@ -436,6 +456,8 @@ fn a_per_machine_removal_takes_the_whole_pool_off_whoever_asks() {
         let mut expected = full_removal();
         let at = expected.iter().position(|l| l == "owners_ledger").unwrap();
         expected[at] = "admins_ledger".to_owned();
+        // An administrator deletes nothing in the owner's folders: the markers stay.
+        expected.retain(|l| l != "clear_markers");
         assert_eq!(machine.lines(), expected, "{invoker:?}");
         assert_all_gone(&machine, &acl);
     }
@@ -502,6 +524,7 @@ fn the_exit_codes_append_to_the_set_ups_and_removed_is_the_hooks_0() {
     assert_eq!(SetupExit::Removed, SetupExit::Done);
     assert_eq!(SetupExit::RemovedPartly.as_code(), 4);
     assert_eq!(SetupExit::LockHeld.as_code(), 5);
+    assert_eq!(SetupExit::AdminCopyLeft.as_code(), 10);
     let codes: Vec<u8> = SetupExit::ALL.iter().map(|exit| exit.as_code()).collect();
-    assert_eq!(codes, (0..10).collect::<Vec<u8>>(), "no number used twice");
+    assert_eq!(codes, (0..11).collect::<Vec<u8>>(), "no number used twice");
 }

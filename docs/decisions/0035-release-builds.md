@@ -35,9 +35,9 @@ Developer ID.
     branch, so a fix can be dry-run before it merges (`gh workflow run release.yml --ref <branch>`).
 - **Jobs:** `check` (mode, tag against version and branch, the release overlays, no test feature in a
   `v*` build); `ui` (the ui built once for every leg, with hidden source maps moved out of
-  its `dist` folder before any leg embeds it); `build` (the matrix below); `sign-windows` (SignPath's slot, then both NSIS
+  its `dist` folder before any leg embeds it); `build` (the matrix below); `build`'s macOS legs rename the bundler's `Clauseo.app.tar.gz` to `Clauseo_<v>_<arch>.app.tar.gz`, drop its `.sig` and sign the renamed file; `sign-windows` (SignPath's slot, then both NSIS
   installers from the one exe with `tauri bundle --no-binary-patching`, then the updater signature,
-  last); `assemble` (names the Mac archives `Clauseo_<v>_<arch>.app.tar.gz`, writes `latest.json` and
+  last); `assemble` (refuses a bundler-named `Clauseo.app.tar.gz`, checks each Mac archive's signature, writes `latest.json` and
   `SHA256SUMS.txt`, attests every asset, creates the Release); `publish`; `measure-builds` (the
   `marks` build on macOS and the `e2e` build on Windows for the laptop pass, never on a Release).
 - **Workflow rules:** every action pinned by commit SHA; `permissions:` on every job (none at the
@@ -60,13 +60,28 @@ Developer ID.
   release notes when missing: the same for Intel Mac (`x64`, cross-built on `macos-15`) and Windows
   ARM64 (`arm64`, `windows-11-arm`), and `Clauseo_<v>_amd64.deb` and `Clauseo-<v>-1.x86_64.rpm`
   (`ubuntu-22.04`, the oldest glibc we support). The `.app.tar.gz` and the `currentUser` installers
-  carry a `.sig`; Linux never updates itself, so its packages have none and its leg holds no secret.
+  carry a `.sig`, each signed under the published name, so the trusted comment's `file:` carries the
+  arch (`file:Clauseo_<v>_aarch64.app.tar.gz`, `file:Clauseo_<v>_x64.app.tar.gz`): the app's updater
+  binds an update to its arch by it (#728), and `latest-json.mjs` refuses a `.sig` signed under any
+  other name; Linux never updates itself, so its packages have none and its leg holds no secret.
   `latest-json.mjs` is the one home of this table.
 - **The base config** (`crates/desktop/tauri.conf.json`) holds what every build shares: the bundle
   targets, `createUpdaterArtifacts: true`, macOS 13 and the hardened runtime, the WebView2 bootstrapper
-  (silent) with `minimumWebview2Version` `155.0.0.0` (Microsoft Edge 155.0.4283.62 on the
-  `windows-2025` image 20261021.299.1, actions/runner-images `Windows2025-Readme.md`; raised only on
-  purpose), NSIS `currentUser` in English, `allowDowngrades: false`.
+  (silent) with `minimumWebview2Version` `111.0.1661.41`, what the app needs (2026-11-09), the
+  higher of two floors. The UI's newest required feature is CSS `color-mix()` (Chromium 111;
+  111.0.1661.41 is the first stable runtime); below about 110 it would start broken (no
+  `Object.hasOwn`, 93; no `:has()` or `@container`, 105; no `dvh`, 108) instead of showing the
+  too-old dialog. wry's floor is lower: Tauri states no minimum (no version check in tauri 2.12.4 or
+  tauri-runtime-wry 2.12.2), and the newest WebView2 interface wry 0.57.0 requires without a
+  fallback is `ICoreWebView2Controller2`, for the window's background colour, which came in SDK
+  1.0.774.44 with runtime 89.0.774.44 (Microsoft's release notes). Every newer interface wry uses is
+  optional; `ICoreWebView2_22` (runtime
+  122.0.2365.46), for cross-origin iframes and shared workers on the custom protocol, isn't needed:
+  the review iframe is same-origin and dev-only, the highlighter's worker dedicated. It was
+  155.0.0.0, the `windows-2025` runner's version, which no feature needed, and which made the
+  per-user installer ask a standard user on clean Windows 11 (WebView2 152) for an administrator.
+  Below the floor a per-user install never elevates (the `webview2-no-elevation` block). NSIS
+  `currentUser` in English, `allowDowngrades: false`.
 - **Release overlays,** in `crates/desktop/release/`, passed with `--config`:
   `release.conf.json` (`mainBinaryName: "Clauseo"`, and no `beforeBuildCommand`, since the legs embed
   the `ui` job's build); `windows.conf.json` (`bundle.windows.nsis.installerHooks`, the uninstall hook
@@ -139,14 +154,20 @@ Developer ID.
 - **Stock installer pages.** Tauri's MUI pages as they come, with no page words of our own. The
   installer is built from `crates/desktop/windows/nsis/installer.nsi`
   (`bundle.windows.nsis.template`): a byte-identical copy of tauri-cli 2.12.2's template plus
-  nine marked blocks (S15 tier B, 2026-11-07; `ui-language`, above, 2026-11-08).
-  `admin-section`, at the top of `.onInit`, runs the per-user installer's elevated instance
-  (`/CLAUSEO_ADMIN_SECTION`) and quits before any plug-in, page or section; in the per-machine installer it first makes the run's own temporary folder
-  under `%ProgramFiles%\Clauseo\installer-temp`, locked to Administrators and SYSTEM, and points
+  ten marked blocks (S15 tier B, 2026-11-07; `ui-language`, above, 2026-11-08; and
+  `version-info`). `admin-section`, at the top of `.onInit`, runs the per-user installer's
+  elevated instance (`/CLAUSEO_ADMIN_SECTION`) and quits before any plug-in, page or section; in
+  the per-machine installer it first makes the run's own temporary folder directly in
+  `%ProgramFiles%\Clauseo`, locked to Administrators and SYSTEM, and points
   `$PLUGINSDIR` and `$TEMP` at it (`safe_temp.nsh`, decision 0049). The hooks alone couldn't do
   either: the template's `.onInit` calls plug-ins (`${RunningX64}` in `SetContext` on every run,
   `SemverCompare` under `/S`), which NSIS extracts into `$PLUGINSDIR` under `%TEMP%`, a folder
   the lawyer's processes can rename while the elevated instance is about to load from it.
+  `version-info` stands in for upstream's six version lines with the full set the sandbox's set-up
+  exe has (`CompanyName` from `bundle.publisher`, `FileDescription` "Clauseo Setup" or "Clauseo
+  Setup (all users)", `InternalName` and `OriginalFilename` "Clauseo Setup"), after Defender's
+  machine-learning check quarantined test-v0.0.1's per-user installer as
+  `Trojan:Win32/Bearfoos.A!ml`; NSIS refuses a key given twice, so the block replaces the lines.
   `no-solid` drops `/SOLID`, so the stub reads each file straight from the installer instead of
   unpacking all its data into a file in `%TEMP%` first, which the elevated instance would read
   the sandbox's set-up program from. `finish-show` and `finish-show-function` hide "Run Clauseo"
@@ -246,7 +267,7 @@ S15's tools sat in `windows.conf.json` and S27's in `tauri.conf.json`.
     `clauseo-sandbox-setup` and `clauseo-sandbox-run` (Windows targets) as rows of their own.
 - **The overlay goes last.** Every `tauri build` and `tauri bundle` of a shipped leg passes
   `--config release/sidecars.generated.json` after every other `--config`. A JSON merge patch
-  replaces arrays, so one generated list per target is the only safe shape. `sidecars.mjs --check`,
+  replaces arrays, so one generated list per target is the only safe shape. `sidecars.mjs --check <triple>`,
   after the seam and again in `sign-windows` after the download, fails if the file holds anything
   but `bundle.externalBin` or an entry not under `binaries/clauseo-`; `check` now allows only
   `bundle.windows.nsis.installerHooks` in `windows.conf.json`. `latest-json.test.mjs` fails when a
@@ -258,9 +279,41 @@ S15's tools sat in `windows.conf.json` and S27's in `tauri.conf.json`.
   `crates/desktop/` before `tauri bundle --no-binary-patching`, so both installers take
   exactly the files that were built. SignPath (S20a) signs every PE there and `Clauseo.exe`, before
   NSIS and before the updater signature.
+- **The C runtime (2026-11-09).** Every Rust binary for Windows links the C runtime statically
+  (`-C target-feature=+crt-static` in release.yml's Windows rows and setup-exe-repro.yml; not in
+  `.cargo/config.toml`, whose `rustflags` keys the core-io check refuses): a clean Windows has
+  no VC++ Redistributable, so the set-up and `clauseo-mcp`, which imported `VCRUNTIME140.dll`,
+  failed to start there, and the set-up's System32-only `/DEPENDENTLOADFLAG:0x800` rules out a
+  copy beside it anyway. The Universal CRT
+  (`api-ms-win-crt-*`) stays allowed, being part of Windows 10 and later. Before the
+  `windows-exe-<target>` upload, `.github/scripts/pe-crt-imports.mjs` reads each shipped exe's
+  import and delay-import tables, agent-browser's included, and fails on a VC++ runtime DLL.
+  `sign-windows` gates what ships rather than a list: it extracts both NSIS installers with 7-Zip
+  and runs the same check, with no exceptions, over each installer and every `.exe`, `.dll` and
+  `.node` inside.
 - **Where they land:** beside the app's exe in every bundle: `Clauseo.app/Contents/MacOS/`,
   `/usr/bin/` in the `.deb` and `.rpm` (hence the `clauseo-` prefix), and the install folder of
   both NSIS installers, which install and remove each `externalBin` with `Clauseo.exe`.
+- **The macOS browser helper (2026-11-09).** `Contents/MacOS` is within the agent's sandbox, so on
+  the darwin targets `clauseo-agent-browser` leaves `externalBin` and the overlay puts it in
+  `bundle.macOS.files` as `Helpers/clauseo-agent-browser` (Apple's folder for nested helpers;
+  notarisation refuses Mach-O in `Contents/Resources`). `--check <triple>` allows that one entry
+  on darwin and nothing else. The bundler copies `macOS.files` unsigned, so the macOS bundle step
+  signs the helper first, as the bundler signs the app (`--options runtime`, no entitlements,
+  `--timestamp` with a real identity), and a check after it fails the leg unless `Contents/MacOS`
+  holds exactly `Clauseo` and the overlay's `externalBin`, `Contents/Helpers` holds only the
+  signed helper, and `codesign --verify --deep --strict` passes on the `.app`. Stage C's J3 adds
+  the sandbox deny on `Contents/Helpers`.
+- **stetdoc (2026-11-09, U13).** stetdoc ships in a folder of its own, so that only that folder
+  goes first on the agents' `PATH`: never in `externalBin`, which puts it beside the app and the
+  other sidecars. `sidecars.mjs` fetches it from `crates/desktop/stetdoc.toml` (version, then url
+  and SHA-256 per release target, the agent-browser pin's mechanism; the archive's one program is
+  kept, the licence files are not) as `binaries/clauseo-stetdoc-<triple>`, and the overlay puts it
+  at `Helpers/stetdoc/stetdoc` in `bundle.macOS.files` on darwin (signed with the browser helper,
+  and checked in the `.app`) and at `stetdoc/stetdoc[.exe]` in `bundle.resources` elsewhere (NSIS
+  installs it under `$INSTDIR`, the resource folder; S20a signs it with the rest of `binaries/`).
+  A target the pin marks `pending` fails the seam: both Windows targets are pending until the
+  stetdoc release built with `+crt-static` (with an ARM64 asset) exists.
 - **Sizes.** The size table lists each sidecar on its own row beside the app's exe; none counts
   towards `release_binary_size`. On Linux each has its own budget row (`agent_browser_size`,
   `clauseo_mcp_size`), `deb_total_size` is the .deb as shipped, and `deb_size` stays the app's own
@@ -342,6 +395,26 @@ S15's tools sat in `windows.conf.json` and S27's in `tauri.conf.json`.
 - **Stale is a warning.** The job writes `generated`, `entries` and both files' SHA-256 to its
   summary. A snapshot generated more than 24 hours before the run adds a warning there, and the run
   goes on: an older signed list is still better than none.
+
+## Safe workspace off for launch (Rohan, 2026-11-09)
+
+Clauseo launches as a plain AI-tool client with the Safe workspace parked. The Windows installers
+run none of its elevated set-up: no UAC prompt, no `clauseo-sandbox-setup --adopt`, no admin copy
+in `C:\Program Files\Clauseo\Sandbox`, and the uninstaller starts no elevated removal (it keeps any
+`sandbox` folder, as after a declined removal). No sandbox exe is built, signed, bundled or
+published, and `assemble` fails if either Windows installer holds one. The code stays behind two
+names, both off. In NSIS, the compile-time define `CLAUSEO_SAFE_WORKSPACE`: `hooks.nsh` wraps
+`admin_copy.nsh`'s include and every insert of the set-up and the removal in `!ifdef`, and
+`windows/hooks_safe_workspace.nsh` defines it and includes `hooks.nsh` (the bundler cannot pass
+makensis a `-D`). In the release, `release.yml`'s top-level env `SAFE_WORKSPACE: "false"`, which
+it passes to `sidecars.mjs --safe-workspace=<true|false>` (the set-up tool's row has
+`safeWorkspace: true` and is left out otherwise), and which gates the signing, the `.sig`
+resource, the hooks overlay, the published exe and its checks in `assemble`, and the release
+notes' table. To turn it back on, set `SAFE_WORKSPACE: "true"`: that one change builds the tool,
+bundles it with `hooks_safe_workspace.nsh` as the hooks, and publishes it. `setup-exe-repro.yml`
+(`--setup-exe`) builds the exe on demand whatever the switch. The NSIS tests compile the hooks
+with the define for the set-up's coverage and without it to show it is gone
+(`delete_app_data/tests/safe_workspace_off.rs`).
 
 ## Status
 

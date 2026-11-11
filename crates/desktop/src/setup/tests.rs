@@ -390,6 +390,7 @@ fn setup_reaches_the_backend_and_its_events_stream_to_both_windows_in_order() {
     // Published before the windows follow: each gets the latest first.
     events.publish(SetupEvent::SetupInfo {
         keys_available: false,
+        python: None,
     });
     events.publish(sign_in(SignIn::SignedOut { found: None }));
     let main = open(&bridge, MAIN);
@@ -404,7 +405,8 @@ fn setup_reaches_the_backend_and_its_events_stream_to_both_windows_in_order() {
         assert_eq!(
             next_setup(window),
             SetupEvent::SetupInfo {
-                keys_available: false
+                keys_available: false,
+                python: None,
             }
         );
         assert_eq!(
@@ -513,6 +515,7 @@ fn a_late_follower_gets_info_then_each_agent_s_latest_states() {
     }));
     events.publish(SetupEvent::SetupInfo {
         keys_available: true,
+        python: None,
     });
     events.publish(sign_in(SignIn::Queued));
     let mut feed = events.follow();
@@ -523,7 +526,8 @@ fn a_late_follower_gets_info_then_each_agent_s_latest_states() {
         got,
         vec![
             SetupEvent::SetupInfo {
-                keys_available: true
+                keys_available: true,
+                python: None,
             },
             install(InstallProgress::Ready {
                 version: "1".to_owned()

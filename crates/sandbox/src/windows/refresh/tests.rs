@@ -179,3 +179,54 @@ fn a_held_set_up_lock_reads_and_moves_nothing_and_a_run_holds_it_throughout() {
         assert_eq!(fake.calls.last(), Some(&"unlock"), "{fail:?}");
     }
 }
+
+#[test]
+fn every_run_past_the_clear_leaves_no_staging_folder() {
+    let key = key();
+    // A swap: the set-aside copy is the running image, so it and the folder go at restart.
+    let mut fake = Fake::new(&old(), &new(), &key, &good());
+    assert_eq!(run_fake(&mut fake, &key), RefreshExit::Done);
+    assert!(fake.calls.contains(&"leave_staging"));
+    assert_eq!(
+        fake.staging,
+        Staging::AtRestart,
+        "scheduled for deletion at restart"
+    );
+    // Nothing to swap, or a refusal or failure at any step after staging: the staged file is
+    // discarded and the folder removed.
+    let mut current = Fake::new(&old(), &old(), &key, &good_for(&old()));
+    assert_eq!(run_fake(&mut current, &key), RefreshExit::Done);
+    assert_eq!(current.staging, Staging::Absent, "{:?}", current.calls);
+    for fail in ["stage", "secure_staged", "hold", "set_aside"] {
+        let mut fake = Fake::new(&old(), &new(), &key, &good());
+        fake.fail = Some(fail);
+        assert_ne!(run_fake(&mut fake, &key), RefreshExit::Done, "{fail}");
+        assert!(fake.calls.contains(&"leave_staging"), "{fail}");
+        assert_eq!(fake.staging, Staging::Absent, "{fail}: {:?}", fake.calls);
+    }
+    // A source refused before staging: the run still ends by leaving no folder.
+    let mut fake = Fake::new(&old(), &new(), &key, &good());
+    fake.source_exe = Err(SourceError::Missing);
+    assert_eq!(run_fake(&mut fake, &key), RefreshExit::SourceRefused);
+    assert!(fake.calls.contains(&"leave_staging"));
+    assert_eq!(fake.staging, Staging::Absent);
+}
+
+#[test]
+fn the_staged_copy_denies_the_recorded_group_and_none_without_one() {
+    let key = key();
+    let group = "S-1-5-21-1-2-3-1100";
+    for recorded in [None, Some(group)] {
+        let mut fake = Fake::new(&old(), &new(), &key, &good());
+        fake.record.group_sid = recorded.map(str::to_owned);
+        assert_eq!(run_fake(&mut fake, &key), RefreshExit::Done, "{recorded:?}");
+        let want = recorded.map(|sid| Sid::parse(sid).unwrap());
+        assert_eq!(fake.secured_for, [want], "{recorded:?}");
+    }
+    // A `GroupSid` that isn't a SID refuses before anything is staged.
+    let mut fake = Fake::new(&old(), &new(), &key, &good());
+    fake.record.group_sid = Some("ClauseoSandboxUsers".to_owned());
+    assert_eq!(run_fake(&mut fake, &key), RefreshExit::NoRecord);
+    assert_eq!(fake.secured_for, Vec::<Option<Sid>>::new());
+    assert_eq!(fake.admin_file, Some(old()));
+}

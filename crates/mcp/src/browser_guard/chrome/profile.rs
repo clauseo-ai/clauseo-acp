@@ -9,10 +9,11 @@
 //! are relative to that open folder (`write::replace_in_folder`): a link swapped in for
 //! `Default` after its check fails the open, and is never written through. On Windows the
 //! temporary file and the rename resolve the folder's path again, so a junction swapped in for
-//! `Default` between the check and the write would redirect it. That window is bounded by the
-//! jail: the guard runs inside the agent's jail with the agent's own rights (decision record 0029,
-//! "Chrome on the claimed port"), so a write through a swapped link reaches nothing the agent
-//! could not write itself.
+//! `Default` between the check and the write would redirect it. In the plain client the guard
+//! runs outside any sandbox, with the user's rights, so that window is closed by where the
+//! profile lives instead: the host puts the guard's `--cwd` in `<data>/browser/run/<session>`,
+//! which Codex's shell fence denies whole, read and write (`codex_fence.rs`; decision record
+//! 0030). A process that could swap a link there could write anywhere the user can anyway.
 
 use std::io;
 use std::path::Path;

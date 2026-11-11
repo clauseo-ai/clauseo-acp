@@ -68,13 +68,14 @@ fn the_uninstall_hook_checks_the_app_then_removes_s15s_set_up_then_runs_the_dele
         cleared < runs.min(runs_removed),
         "the box is cleared before the app runs"
     );
-    // --sandbox-removed only after the removal exited 0: $R5 starts at 0 and becomes 1 only
-    // right under the exit code's test, and only $R5 = 1 picks the call that passes it.
+    // --sandbox-removed only after the removal exited 0 (or 10, the admin copy left): $R5
+    // starts at 0 and becomes 1 only right under the exit code's test, and only $R5 = 1 picks
+    // the call that passes it.
     let unremoved = line_with(body, &["StrCpy $R5 0"]);
     let exited_zero = line_with(body, &["${If} $R8 = 0"]);
     let removed = line_with(body, &["StrCpy $R5 1"]);
     assert!(unremoved < remove, "{body:?}");
-    assert_eq!(exited_zero + 1, removed, "{body:?}");
+    assert_eq!(exited_zero + 2, removed, "{body:?}");
     let sets = body.iter().filter(|line| line.contains("StrCpy $R5 1"));
     assert_eq!(sets.count(), 1, "{body:?}");
     assert_eq!(
@@ -116,11 +117,12 @@ fn the_hooks_removal_passes_the_exes_own_arguments_and_reads_its_0_within_two_mi
 
     let code = hook_code();
     let body = preuninstall(&code);
-    // A finished removal is exit 0 (`SetupExit::Removed`), and only that sets $R5.
+    // A finished removal is exit 0 (`SetupExit::Removed`), or 10 (the test below), and only
+    // those set $R5.
     let removed = SetupExit::Removed.as_code();
     assert_eq!(removed, 0);
     let exited = line_with(body, &[&format!("${{If}} $R8 = {removed}")]);
-    assert_eq!(body[exited + 1], "StrCpy $R5 1", "{body:?}");
+    assert_eq!(body[exited + 2], "StrCpy $R5 1", "{body:?}");
     // The arguments: exactly `--remove --uninstall` (the app's in-app removal passes `--remove`
     // alone, keeping the admin copy), and `--per-machine` after it in the per-machine
     // installer only, chosen when the installer is built (stage F), never at run time. The
@@ -457,7 +459,7 @@ fn the_hook_shows_no_box_when_the_data_folder_is_gone_and_no_path_through_a_link
     assert_eq!(body[silent + 3], "${If} $R6 = 2");
     assert_eq!(
         body[silent + 4],
-        "MessageBox MB_OK|MB_ICONEXCLAMATION \"$(deleteAppDataFailedUnnamed)\""
+        "MessageBox MB_OK|MB_ICONEXCLAMATION|MB_SETFOREGROUND|MB_TOPMOST \"$(deleteAppDataFailedUnnamed)\""
     );
     assert_eq!(body[silent + 5], "${ElseIf} $R8 == \"\"");
     let deletion = line_with(body, &["${If} $DeleteAppDataCheckboxState = 1"]);
@@ -492,7 +494,10 @@ fn the_hooks_exit_codes_and_words_are_the_apps() {
     for (key, register) in [("deleteAppDataFailed", "$R9"), ("deleteAppDataKept", "$R8")] {
         line_with(
             &code,
-            &["MessageBox MB_OK|MB_ICONEXCLAMATION", &format!("$({key})")],
+            &[
+                "MessageBox MB_OK|MB_ICONEXCLAMATION|MB_SETFOREGROUND|MB_TOPMOST",
+                &format!("$({key})"),
+            ],
         );
         // The path stands alone after a blank line.
         let line = english
@@ -505,7 +510,7 @@ fn the_hooks_exit_codes_and_words_are_the_apps() {
     line_with(
         &code,
         &[
-            "MessageBox MB_OK|MB_ICONEXCLAMATION",
+            "MessageBox MB_OK|MB_ICONEXCLAMATION|MB_SETFOREGROUND|MB_TOPMOST",
             "$(deleteAppDataKeptFailed)",
         ],
     );
@@ -519,4 +524,26 @@ fn the_hooks_exit_codes_and_words_are_the_apps() {
     );
     // The messages never show under /S.
     line_with(&code, &["${IfNot} ${Silent}"]);
+}
+
+#[test]
+fn the_hook_counts_an_admin_copy_left_as_removed() {
+    use clauseo_sandbox::windows::setup::SetupExit;
+
+    // 10 (`AdminCopyLeft`): the protection is gone and only the admin copy, administrators'
+    // alone, stays; the tool logged why. The hook sets $R5 for it as for 0.
+    let code = hook_code();
+    let body = preuninstall(&code);
+    let left = SetupExit::AdminCopyLeft.as_code();
+    line_with(
+        &code,
+        &[&format!("!define CLAUSEO_REMOVED_COPY_LEFT {left}")],
+    );
+    let exited = line_with(body, &["${If} $R8 = 0"]);
+    let or = "${OrIf} $R8 = ${CLAUSEO_REMOVED_COPY_LEFT}";
+    assert_eq!(
+        body[exited + 1..=exited + 2],
+        [or, "StrCpy $R5 1"],
+        "{body:?}"
+    );
 }

@@ -143,6 +143,15 @@ pub(crate) fn remove_tree(path: &Path) -> io::Result<()> {
     }
 }
 
+/// The new file `path`, opened to write; anything already there, a link included, fails with
+/// `AlreadyExists` and is never followed. A Word blackline's copies (`matter_worker/sides.rs`).
+pub(crate) fn create_new_file(path: &Path) -> io::Result<std::fs::File> {
+    std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(path)
+}
+
 /// Removes the link or file `path` itself, never what a link points to: a leftover download's
 /// working entry that is not a real folder (`browser/install/archive.rs`). On Windows a link to
 /// a folder (or a junction) is removed as a folder, which removes the link only.
@@ -267,6 +276,22 @@ pub(crate) fn remove_file(path: &Path) -> io::Result<()> {
 pub(crate) fn set_mode(path: &Path, mode: u32) -> io::Result<()> {
     use std::os::unix::fs::PermissionsExt;
     std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode))
+}
+
+/// Opens `path` for reading, never through a link at its last component: `O_NOFOLLOW` on Unix
+/// (the open fails on a link), and on Windows `FILE_FLAG_OPEN_REPARSE_POINT`, which opens the
+/// link itself, not what it points at. A read changes nothing; it lives here for the flags.
+pub(crate) fn open_read_nofollow(path: &Path) -> io::Result<std::fs::File> {
+    let mut options = std::fs::OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    std::os::unix::fs::OpenOptionsExt::custom_flags(&mut options, nix::libc::O_NOFOLLOW);
+    #[cfg(windows)]
+    std::os::windows::fs::OpenOptionsExt::custom_flags(
+        &mut options,
+        windows::Win32::Storage::FileSystem::FILE_FLAG_OPEN_REPARSE_POINT.0,
+    );
+    options.open(path)
 }
 
 /// Opens `path` for reading with a share mode that lets others read but not write or delete

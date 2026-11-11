@@ -15,6 +15,7 @@
 // the focus goes back to the field, so the emptied words can be undone. An edit the strip couldn't make because its
 // message had already gone comes back into the field (after the words there, a blank line between); when it was the
 // last queued, the working line says so until the next send or the drained turn starts (else the strip does).
+// Escape, and ⌘. on the Mac or Ctrl+. elsewhere, stop a running answer as Stop does (stop-key.ts).
 import {
   use,
   useCallback,
@@ -29,6 +30,7 @@ import {
 import {
   Composer,
   type ComposerHandle,
+  type ConfigMenu,
   type Mentions,
   type PlanChoice,
   type SlashCommand,
@@ -39,6 +41,7 @@ import { errorWords } from "@clauseo/components/lib/words-errors.ts";
 import { frame } from "@clauseo/components/lib/words-frame.ts";
 import { mt } from "@clauseo/components/lib/words-matters.ts";
 import { useWords } from "@clauseo/components/lib/words.ts";
+import { useDisplay } from "@clauseo/components/lib/display.ts";
 import { StoreContext } from "../../store/hooks.ts";
 import type { StreamView } from "../../store/view.ts";
 import type { HostTransport } from "../../transport/host-transport.ts";
@@ -56,7 +59,8 @@ import { pausedLine, type Paused } from "./limit-words.ts";
 import { pickFull, queueFullLine } from "./composer-queue.ts";
 import { ComposerSteer } from "./composer-steer.tsx";
 import { asksWords } from "./step-names.ts";
-import { useHold } from "../first-run/hold.ts";
+import { holdLine, useHold } from "../first-run/hold.ts";
+import { useStopKey } from "./stop-key.ts";
 import type { AskHow, Drafts } from "./session.ts";
 import { ProtectionContext } from "../protection/context.ts";
 
@@ -65,6 +69,7 @@ export function WorkComposer({
   drafts,
   draftKey,
   choice,
+  menus,
   plan = "",
   tools = null,
   commands,
@@ -97,6 +102,8 @@ export function WorkComposer({
   draftKey: string | null;
   /** A new conversation's plan choice, before its first question; absent once fixed, or with one plan. */
   choice?: PlanChoice | undefined;
+  /** The agent's model and effort menus, the draft's or the thread's (config-menus.ts); none without options. */
+  menus?: readonly ConfigMenu[] | undefined;
   /** The status line's plan words, "Uses your Claude plan"; "" for none. Not drawn while the choice stands. */
   plan?: string;
   /** The tool line after the plan, from the open thread's header's tools (tool-line.tsx); null for none. */
@@ -150,6 +157,9 @@ export function WorkComposer({
   // the view store, read as Enter queues (the cap); none where the composer is mounted alone
   const store = use(StoreContext);
   const w = useWords();
+  // Escape and ⌘. (Ctrl+. off the Mac) stop the running answer, as Stop does (stop-key.ts)
+  const { platform } = useDisplay();
+  useStopKey(busy, onStop, platform === "mac");
   // the paused line's time against this render's clock (U12)
   const now = useNow();
   const agentPlan = useAgentPlan();
@@ -385,11 +395,13 @@ export function WorkComposer({
       // under the gate the plan is the gate's to name: the status line says nothing of it
       plan={gated ? "" : plan}
       tools={tools}
+      // under the gate the plan isn't ready: its model and effort wait with it
+      menus={gated ? undefined : menus}
       {...(choice === undefined ? {} : { choice })}
       hint={null}
       commands={commands}
       mentions={mentions}
-      working={line?.state ?? hold?.working ?? null}
+      working={line?.state ?? holdLine(hold)}
       {...(gated ? { gate: hold?.gate } : {})}
       opening
       busy={busy}

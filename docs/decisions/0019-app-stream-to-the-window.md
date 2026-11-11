@@ -80,6 +80,31 @@ host added later reached the page without anyone deciding it should.
   `every_command_and_read_the_windows_send_today_is_admitted`, lists them and fails if one is
   refused.
 
+## Amendment 2026-11-10: the window's network signal (D-050)
+
+- **One more host command, `HostCommand::SetNetwork { online }`,** on `dispatch` as the rule above
+  says: one arm in `admit_main`, `main` only, and the bridge test lists it. No new Tauri command
+  and no new permission.
+- **What it carries:** one flag from the page, the webview's `navigator.onLine`. The main window
+  sends it once when it mounts (the host outlives a reload), at each `online`/`offline` event, and
+  before a `send_prompt` when `navigator.onLine` changed unseen, but only when the value differs
+  from the last one sent (`ui/app/src/transport/network.ts`). It answers `Done` and stores no
+  receipt or event.
+- **What it can do:** while it says offline, a running turn whose agent then sends nothing for
+  30 s is checked by the host itself: one TCP connection, within 3 s, to the agent's service or
+  the proxy the egress route names (`offline/probe.rs`). Only if that fails too does the turn end
+  `Failed { agent.offline }` through the Cancel path, the answer so far kept
+  (`crates/host/src/actor/turn/offline.rs`); if it gets through, the watch waits another 30 s.
+  Any agent activity, or `online`, takes the watch back. A turn waiting on the lawyer (a
+  permission, an elicitation) is never ended, and one running a tool call is not for 10 minutes
+  from the watch's start; after that the probe decides. The window's word alone never makes a
+  failed prompt read as offline. So a page that lies can stop only a turn whose agent is
+  already silent and whose service the host cannot reach either.
+- **The same probe guards an agent's own note** (Codex's "Falling back from WebSockets to HTTPS
+  transport", Claude's connection line): after it, 30 s of silence ends the turn only when the
+  probe fails, since Codex then retries over HTTPS, which a blip or a proxy that blocks only
+  WebSockets lets through. A tool call open after such a note does not extend the wait.
+
 ## Status
 
 proposed

@@ -32,7 +32,9 @@
 //! agent's process tree and its Chrome are gone ([`straggler`]), or the agent never started.
 //! The session's case-law relay and its token file (R24, [`relay`]) are made on the same thread
 //! and ride the same way, and so does its egress proxy ([`egress`]), opened there once Chrome
-//! is found and closed as the run drops.
+//! is found and closed as the run drops. Last, the same thread fixes the session's `PATH`
+//! folders and what its shells get ([`claim`], `agent/shell_path.rs`): Claude's
+//! `clauseo-env.sh` in the run folder, and on macOS the folders `path_helper` adds, for Codex.
 //!
 //! At the first launch, before any folder is made, `<data>/run` from an earlier run is set
 //! aside in one rename and deleted on a thread of its own ([`RunSweep`]). Nothing is made or
@@ -50,14 +52,15 @@ use super::super::input::Input;
 use super::agents::{self, Waiting};
 use super::{TurnInput, host_stopping, state};
 
+use crate::agent::codex_fence::Listed;
 use crate::agent::data_fence::LaunchDeny;
 use crate::agent::folder_support::{Answer, FolderCheck};
 use crate::agent::login_link::{self, Checked, LoginCheck};
-use crate::agent::{codex, data_folder};
+use crate::agent::{claude_tmp, codex, data_folder};
 use crate::browser::session::BrowserSession;
 use crate::config::SessionKey;
 use crate::error::Error;
-use crate::log_file::Cause;
+use crate::log_file::{Cause, LIFECYCLE};
 
 /// A launch whose checks are running.
 #[derive(Debug)]
@@ -100,7 +103,12 @@ pub(crate) struct RunFolders {
     pub(crate) root: PathBuf,
     /// `{work_folder}`, `<root>/work`.
     pub(crate) work: PathBuf,
-    /// `{browser_dir}`, `<root>/browser`.
+    /// `{browser_dir}`, the guard's `--cwd`: `<data>/browser/run/<session id>`, outside the
+    /// run folder, since Codex's shell may write the run folder and the guard, unfenced, writes
+    /// through this one (its downloads, screenshots, home, temporary files and Chrome's profile).
+    /// Made by the launch prep only for a session the entry goes to (`browser::entry_folder`),
+    /// removed with the run folder ([`Self::remove`]); an earlier run's are swept at start
+    /// ([`RunSweep`]).
     pub(crate) browser: PathBuf,
     /// `{matter_notes}`, `<data>/agent-state/<matter id>/notes`: the matter's, shared by its
     /// agents, kept when a session ends.
@@ -117,6 +125,22 @@ pub(crate) struct RunFolders {
     /// `PolicyBuilder::browser_socket_dir(&session.socket_dir)` and
     /// `Loopback::Ports(session.ports.loopback())`.
     pub(crate) browser_session: Option<Arc<BrowserSession>>,
+    /// Why the firm's browser policy left the browser out, if it did (`browser::rd_policy`):
+    /// `BrowserBlockedByPolicy` or `BrowserPolicyUnreadable`.
+    pub(crate) browser_blocked: Option<clauseo_protocol::ToolsUnavailableReason>,
+    /// Whether the launch prep read that policy (it does whenever the browser could come).
+    pub(crate) browser_policy_read: bool,
+    /// The browser as a shell tool (`ProfileHook::browser_tool`, `tools.browser` on): the
+    /// session has it once [`Self::chrome`] is found and its two folders below are made.
+    pub(crate) browser_shell: bool,
+    /// `<root>/agent-browser` (`browser::SESSION_DIR`): the shell tool's own folder, holding
+    /// `config.json` (`AGENT_BROWSER_CONFIG`), `downloads` (`AGENT_BROWSER_DOWNLOAD_PATH`) and
+    /// `profile` (`AGENT_BROWSER_PROFILE`): made only for the shell tool, gone with the run
+    /// folder. Inside the run folder, so the data fences reopen it for this session only.
+    pub(crate) agent_browser: PathBuf,
+    pub(crate) browser_config: PathBuf,
+    pub(crate) downloads: PathBuf,
+    pub(crate) browser_profile: PathBuf,
     /// `<root>/skill-packs`: the launch's own plugin of skill packs (decision record 0040),
     /// written by the launch prep only when a pack loaded. R17 passes this to
     /// `PolicyBuilder::read_only_in_state`.
@@ -129,6 +153,10 @@ pub(crate) struct RunFolders {
     /// entry that is not this session's own enumerated by the launch prep. Run folders and
     /// matters' notes made after the launch are in no rule (the accepted residual).
     pub(crate) data_deny: LaunchDeny,
+    /// What the launch prep listed for Codex's data fence (`agent::codex_fence::list`): the
+    /// siblings of this session's run folder and notes, `run.old-*`, and what of `<data>/agents`
+    /// and its runtime folder the shell needs not. Each folder is denied whole until then.
+    pub(crate) codex_listed: Listed,
     /// `<root>/relay-token`: the case-law relay's token file (R24), written by the launch prep
     /// only when the session's relay opened, and gone with the run folder. R17 passes this to
     /// `PolicyBuilder::read_only_in_state`.
@@ -152,28 +180,45 @@ pub(crate) struct RunFolders {
     pub(crate) lease: Arc<straggler::Lease>,
     /// Whether the launch prep waited for a browser slot (`browser::slot_wait`).
     pub(crate) slot_waited: bool,
+    /// Its `PATH` folders and what its shells get, found by the launch prep after the claims
+    /// (`claim.rs`, `agent/shell_path.rs`); `<root>/clauseo-env.sh` goes with the folder.
+    pub(crate) path: crate::agent::shell_path::SessionPath,
+    /// Claude's short temp folder (`agent::claude_tmp`): set for a Claude session off Windows,
+    /// and none again when the launch prep could not make it (its sandbox is then off).
+    pub(crate) claude_tmp: Option<PathBuf>,
 }
 
 impl RunFolders {
     /// The folders of `key`'s session under `data`. Paths only: nothing is made here.
     pub(crate) fn new(data: &Path, key: SessionKey) -> Self {
         let root = run_dir(data).join(key.id());
+        let agent_browser = root.join(crate::browser::SESSION_DIR);
         Self {
             key,
             work: root.join("work"),
-            browser: root.join("browser"),
+            browser: browser_run_dir(data).join(key.id()),
+            browser_config: agent_browser.join(crate::browser::SESSION_CONFIG),
+            downloads: agent_browser.join("downloads"),
+            browser_profile: agent_browser.join("profile"),
+            agent_browser,
             skill_packs: root.join("skill-packs"),
             relay_token: relay::token_file(&root),
             notes: notes_dir(data, key.matter),
             root,
             chrome: None,
             browser_session: None,
+            browser_blocked: None,
+            browser_policy_read: false,
+            browser_shell: false,
             packs_written: None,
             data_deny: LaunchDeny::fixed(vec![data.to_owned()]),
+            codex_listed: Listed::default(),
             case_law: relay::CaseLaw::Absent,
             egress: None,
             lease: Arc::default(),
             slot_waited: false,
+            path: crate::agent::shell_path::SessionPath::default(),
+            claude_tmp: None,
         }
     }
 
@@ -182,7 +227,8 @@ impl RunFolders {
     /// run folder is taken back. File system calls: off the actor.
     pub(crate) fn make(&self, data: &Path, sweep: &RunSweep) -> Result<(), Error> {
         sweep.once(data);
-        for folder in [&self.work, &self.browser, &self.notes] {
+        let tmp = crate::agent::temp::temp_dir(&self.root);
+        for folder in [&self.work, &tmp, &self.notes] {
             if let Err(error) = crate::write::create_private_dirs_under(data, folder) {
                 self.remove();
                 return Err(Error::refused(
@@ -206,21 +252,11 @@ impl RunFolders {
         Ok(())
     }
 
-    /// Removes this launch's run folder and all it holds, when it is a real folder; the notes
-    /// folder stays. Only the folder the host made: the path as built (`<data>/run/<session id>`),
-    /// never canonicalized, removed with `remove_dir_all`, which removes a link inside and never
-    /// follows it. Called once the agent's process has exited, or when it never started. File
-    /// system calls: off the actor.
+    /// Removes this launch's run folder, its browser folder and Claude's short temp folder,
+    /// through no link ([`folders::remove_folders`]); the notes folder stays. File system
+    /// calls: off the actor.
     pub(crate) fn remove(&self) {
-        let ours = self.root.file_name() == Some(std::ffi::OsStr::new(&self.key.id()))
-            && self.root.parent().and_then(Path::file_name) == Some(std::ffi::OsStr::new("run"));
-        if !ours {
-            tracing::warn!("not a run folder the host made; it stays");
-            return;
-        }
-        if crate::write::is_real_dir(&self.root) {
-            remove_tree(&self.root);
-        }
+        folders::remove_folders(self);
     }
 }
 
@@ -248,6 +284,7 @@ pub(super) fn prepare(
     waiting: Vec<Waiting>,
     keys_wait: Option<impl std::future::Future<Output = ()> + Send + 'static>,
 ) {
+    tracing::info!(target: LIFECYCLE, %thread, "launch prep started");
     let id = agents::next_agent_id();
     let paths = launch_paths(actor, thread, id);
     let sweep = actor.turn_path.run_sweep.clone();
@@ -281,6 +318,7 @@ pub(super) fn prepare(
     };
     let clock = std::sync::Arc::clone(&actor.clock);
     let check_clock = std::sync::Arc::clone(&actor.clock);
+    let block_list_wait = claims.egress.block_list_wait(Arc::clone(&actor.clock));
     let matter = run.key.matter;
     actor.spawn_post(async move {
         if let Some(keys_wait) = keys_wait {
@@ -296,11 +334,7 @@ pub(super) fn prepare(
                 result: Err(error),
             });
         }
-        // Whether a slot is there for the browser after a wait; without one, it is.
-        let slot = match slot_wait {
-            Some(slot_wait) => slot_wait.await,
-            None => true,
-        };
+        let slot = browser::slot_then_block_list(slot_wait, block_list_wait).await;
         let result = codex::prepare::off_actor_or_undo(
             clock,
             job,
@@ -336,7 +370,10 @@ pub(super) fn prepare(
                     }
                 }
                 run.make(&data, &sweep)?;
+                let short = run.claude_tmp.take();
+                run.claude_tmp = short.filter(|dir| claude_tmp::make_claude_tmp(&run.root, dir));
                 run.data_deny = launch_deny(&run, &stored, &data, claude_home.as_deref());
+                run.codex_listed = crate::agent::codex_fence::list(&data, &run.root, &run.notes);
                 claim(&mut run, &data, claims, slot);
                 let skills_written = write_skills(&skills);
                 let packs_skipped;
@@ -368,29 +405,6 @@ pub(super) fn prepare(
         let result = result.map(Box::new);
         Input::Turn(TurnInput::Prepared { thread, id, result })
     });
-}
-
-/// The session's egress proxy, browser claims and case-law relay (`claims`), made on the
-/// launch-prep thread. `slot`: whether a browser slot is there after the prep's slot wait.
-fn claim(run: &mut RunFolders, data: &Path, claims: Claims, slot: bool) {
-    let Claims {
-        browser,
-        case_law,
-        egress,
-        held,
-    } = claims;
-    let browser = if slot { browser } else { browser.skipped() };
-    (run.chrome, run.browser_session) = browser.prepare(data, &run.key.id());
-    // The launch offers the browser only once its Chrome was found and claimed.
-    let offered = run.chrome.is_some() && run.browser_session.is_some();
-    run.egress = egress.open(run.key, offered);
-    run.case_law = case_law.open(run);
-    let parts = straggler::Parts {
-        browser: run.browser_session.clone(),
-        case_law: run.case_law.clone(),
-        egress: run.egress.clone(),
-    };
-    run.lease.keep(held, parts);
 }
 
 /// A prep nobody waits for any more takes back what it made: the relay's token first, then the
@@ -475,6 +489,7 @@ pub(super) fn on_prepared(
         return;
     };
     let waiting = preparing.waiting;
+    tracing::info!(target: LIFECYCLE, %thread, ok = result.is_ok(), "launch prep done");
     remember_folder_support(actor, thread, &result);
     let mut prepared = match result {
         Ok(prepared) => prepared,
@@ -533,6 +548,8 @@ pub(super) fn remove_run(actor: &mut Actor, thread: ThreadId, tree: TreeWatch) {
 }
 
 mod browser;
+mod claim;
+use claim::claim;
 mod egress;
 use paths::Claims;
 pub(super) mod folder;
@@ -549,7 +566,7 @@ pub use packs::PackRequest;
 use packs::PackSkip;
 pub(super) use packs::{PackNotices, pack_notices};
 mod folders;
-use folders::{launch_deny, notes_dir, remove_tree, run_dir};
+use folders::{browser_run_dir, launch_deny, notes_dir, remove_tree, run_dir};
 mod paths;
 use paths::{LaunchPaths, launch_paths};
 

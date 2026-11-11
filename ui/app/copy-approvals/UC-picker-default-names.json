@@ -1,0 +1,13 @@
+{
+  "UC-152": {
+    "en": "(default)",
+    "hi": "(डिफ़ॉल्ट)",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-11",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-11",
+    "by": "app track (provisional; words pending orchestrator 2026-11-11)",
+    "note": "the model menu on the composer's status line, quiet after the name of the row the agent uses by default: \"Opus 5.5 (default)\"; never in place of the name, never on the closed picker"
+  }
+}

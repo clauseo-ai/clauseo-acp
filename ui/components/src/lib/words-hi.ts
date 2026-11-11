@@ -37,6 +37,7 @@ import { HI as tools } from "./words-tools.hi.ts";
 import { HI as triageLate } from "./words-triage-late.hi.ts";
 import { HI as triage } from "./words-triage.hi.ts";
 import { HI as ui } from "./words-ui.hi.ts";
+import { HI as update } from "./words-update.hi.ts";
 import { HI as versions } from "./words-versions.hi.ts";
 import { HI as words } from "./words.hi.ts";
 
@@ -77,6 +78,7 @@ export const HINDI = {
   "triage-late": triageLate,
   triage,
   ui,
+  update,
   versions,
   words,
 } as const;

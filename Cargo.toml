@@ -95,7 +95,7 @@ rmp-serde = "1.3.1"
 # clauseo-store: SQLite (its crate line turns on `bundled` and `blob`; the defaults keep `cache`
 # for `prepare_cached`), BLAKE3 blob hashes, zstd snapshots, and the request and reply channels
 # of its writer and reader threads.
-rusqlite = "0.40"
+rusqlite = "0.41"
 blake3 = "1.8.7"
 zstd = { version = "0.14.3", default-features = false }
 async-channel = { version = "2.5", default-features = false }
@@ -127,6 +127,11 @@ async-process = "2"
 # clauseo-process (it also uses the async-process, futures, memchr, nix and windows lines above):
 # the timer of its shutdown ladder.
 async-io = "2"
+# The open matter's folder watch (crates/host, decision record 0055): FSEvents and inotify, no
+# polling; macOS and Linux only.
+notify = { version = "8.2.2", default-features = false, features = [
+  "macos_fsevent",
+] }
 # clauseo-host: SHA-256 for the trust hash of the pre-write guard's Codex hook, as Codex 0.162.1
 # computes it with sha2 0.10 (crates/host/src/agent/loads/codex.rs). clauseo-connectors: the PKCE
 # S256 challenge. clauseo-sandbox: the admin copy's hash, which the refresh records, and its Windows

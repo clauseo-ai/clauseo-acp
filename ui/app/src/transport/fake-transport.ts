@@ -17,6 +17,9 @@ import type {
 } from "../room/host-next.ts";
 import { NO_NEXT, WIRE } from "../room/host-next.ts";
 import { isBlocklistCommand, type FakeBlocklistHost } from "./fake-blocklist.ts";
+import { protectionCommandOf, quietScan, type FakeProtectionHost } from "./fake-protection.ts";
+import { isUpdateCommand, type FakeUpdateHost } from "./fake-update.ts";
+import { displayInfoOf, type FakeDisplayHost } from "./fake-display.ts";
 import { ChannelReader, streamFailedOf, type ChannelEvent } from "./channel.ts";
 import { chooserOf } from "./chooser.ts";
 import { fakeChooserSession, type FakeChooser, type FakeChooserCall } from "./fake-chooser.ts";
@@ -45,7 +48,6 @@ import type {
   PermissionRequestId,
   PickedFolder,
   Protection,
-  ProtectionView,
   QueryResult,
   RevealTarget,
   SetupCommand,
@@ -53,6 +55,7 @@ import type {
   StreamId,
   ThreadId,
   UiCount,
+  UpdateView,
   ViewPosition,
 } from "./protocol.ts";
 import { LimitsFeed, limitsOf, type LimitsSource } from "./limits-feed.ts";
@@ -76,6 +79,7 @@ export type FakeCall =
   | FakeChooserCall
   | { call: "open_external"; url: string }
   | { call: "quit_app" }
+  | { call: "open_privacy_settings" }
   | { call: "open_file"; file: FileRefId }
   | { call: "reveal"; target: RevealTarget }
   | { call: "open_settings"; section: SettingsSection | null }
@@ -108,7 +112,7 @@ export type FakeNextHost = {
   first?: () => readonly AppEvent[];
 };
 
-export type FakeHost = {
+export type FakeHost = FakeDisplayHost & {
   dispatch?: (command: CommandEnvelope) => CommandOutcome | Promise<CommandOutcome>;
   query?: (query: HostQuery) => QueryResult | Promise<QueryResult>;
   /** Answers the folder picker; a promise holds it open (the picker's line shows while it waits). */
@@ -123,6 +127,8 @@ export type FakeHost = {
   openExternal?: (url: string) => void | Promise<void>;
   /** Answer `quitApp`; throwing refuses. Without one the quit is accepted and nothing ends. */
   quitApp?: () => void | Promise<void>;
+  /** Answer `openPrivacySettings`; throwing refuses. Without one the pane opens. */
+  openPrivacySettings?: () => void | Promise<void>;
   openFile?: (file: FileRefId) => OpenedFile | void | Promise<OpenedFile | void>;
   reveal?: (target: RevealTarget) => void | Promise<void>;
   /** With it, the fake has the settings window (`openSettings`), and this answers each open; throwing refuses. Without
@@ -130,14 +136,6 @@ export type FakeHost = {
   openSettings?: () => void | Promise<void>;
   /** Answers each subscribe; throwing refuses it. */
   subscribe?: (stream: StreamId, after: ViewPosition | null) => void;
-  platform?: DisplayInfo["platform"];
-  /** The release date display_info reports; null, the dev and CI build's, when left out. */
-  releaseDate?: DisplayInfo["release_date"];
-  /** Whether display_info says this is a test build; false, a release build's, when left out. */
-  testBuild?: boolean;
-  /** The release mode display_info reports: `test` in a test build, `release` otherwise, when
-   * left out. */
-  releaseMode?: DisplayInfo["release_mode"];
   /** With it, the fake is a NextHost (room/host-next.ts): the rows the host doesn't have yet, answered from here. */
   next?: FakeNextHost;
   /** UD2: the `folder_scanned` events a `scan_folder` the host took plays, in order, to every app listener. Left out,
@@ -151,32 +149,18 @@ export type FakeHost = {
   protection?: FakeProtectionHost;
   /** 0053: the unsafe-site list's host (fake-blocklist.ts); without it allowed_sites lists none. */
   blocklist?: FakeBlocklistHost;
+  /** R23: with it, the fake carries the updater (`updateWire`, fake-update.ts). Read when made. */
+  update?: FakeUpdateHost;
 };
 
-/** UC's protection wire, scripted: the `protection` query and the two commands. Their events are the test's to play
- * (`protectionChanged`, `protectionViewChanged`, which need `host.next`'s app part). */
-export type FakeProtectionHost = {
-  /** Answers each `protection` query; throwing refuses it (`command.invalid`, before PR-B admits it). */
-  view: () => ProtectionView | Promise<ProtectionView>;
-  /** Answers `retry_protection` and `remove_sandbox_setup`; throwing refuses. Done when left out. */
-  command?: (command: "retry_protection" | "remove_sandbox_setup") => void | Promise<void>;
-};
-
-/** A scan the fake host says nothing of: cancelled, nothing counted. */
-const quietScan = (folder: FolderRefId): FolderScanned => ({
-  folder,
-  files: 0,
-  bytes: 0,
-  place: "local",
-  cloud_only: 0,
-  done: true,
-  cancelled: true,
-});
+export type { FakeProtectionHost };
 
 export class FakeTransport implements HostTransport, NextHostSource, LimitsSource {
   readonly kind = "fake";
   /** UC: whether the protection wire is scripted (`host.protection`). */
   readonly protectionWire: boolean;
+  /** R23: whether the updater is scripted (`host.update`). */
+  readonly updateWire: boolean;
   readonly calls: FakeCall[] = [];
   /** The start-up marks' send (start-marks.ts): none unless a test sets it. */
   pageMarks: SendMarks | undefined = undefined;
@@ -219,6 +203,9 @@ export class FakeTransport implements HostTransport, NextHostSource, LimitsSourc
       },
       setToolSettings: async (patch) => {
         await this.#nextCommand({ [WIRE.setToolSettings]: { patch } });
+      },
+      setPrivacySettings: async (patch) => {
+        await this.#nextCommand({ [WIRE.setPrivacySettings]: { patch } });
       },
       onSettingsChanged: (listener) => {
         this.#settingsHeard.add(listener);
@@ -285,6 +272,7 @@ export class FakeTransport implements HostTransport, NextHostSource, LimitsSourc
   constructor(host: FakeHost = {}) {
     this.host = host;
     this.protectionWire = host.protection !== undefined;
+    this.updateWire = host.update !== undefined;
     this.openSettings =
       host.openSettings === undefined
         ? undefined
@@ -417,8 +405,8 @@ export class FakeTransport implements HostTransport, NextHostSource, LimitsSourc
     return this.only("setup").map((c) => c.command);
   }
 
-  /** Plays one app event (H4) as the host would send it to every window; `{ browser_install: { state } }` is the
-   * Chrome download's state (room/browser-install.ts). A new app listener hears `host.next.first` first, the catch-up. */
+  /** Plays one app event (H4) as the host would send it to every window; `{ browser_policy: { state } }` is the
+   * firm's browser policy re-read (room/browser-policy.ts). A new app listener hears `host.next.first` first, the catch-up. */
   appEvent(event: AppEvent): void {
     for (const listener of this.#appHeard) listener(event);
   }
@@ -442,13 +430,12 @@ export class FakeTransport implements HostTransport, NextHostSource, LimitsSourc
 
   /** UC: the protection commands dispatched, in order. */
   protectionCommands(): ("retry_protection" | "remove_sandbox_setup")[] {
-    return this.only("dispatch").flatMap(({ command }) =>
-      command.command.retry_protection !== undefined
-        ? ["retry_protection" as const]
-        : command.command.remove_sandbox_setup !== undefined
-          ? ["remove_sandbox_setup" as const]
-          : [],
-    );
+    return this.only("dispatch").flatMap(({ command }) => protectionCommandOf(command) ?? []);
+  }
+
+  /** R23: plays `update_changed`, the whole view, as the host sends it to every window. */
+  updateChanged(view: UpdateView): void {
+    this.appEvent({ update_changed: view });
   }
 
   async #nextCommand(command: NextCommand): Promise<NextOutcome> {
@@ -488,17 +475,17 @@ export class FakeTransport implements HostTransport, NextHostSource, LimitsSourc
     for (const listener of this.#dispatched) listener(command);
     this.calls.push({ call: "dispatch", command });
     let outcome: CommandOutcome = "done";
-    const protecting =
-      command.command.retry_protection !== undefined
-        ? "retry_protection"
-        : command.command.remove_sandbox_setup !== undefined
-          ? "remove_sandbox_setup"
-          : null;
+    const protecting = protectionCommandOf(command);
+    const update = this.host.update;
     if (protecting !== null && this.host.protection !== undefined)
       await this.#answer(() => this.host.protection?.command?.(protecting));
     else if (isBlocklistCommand(command.command) && this.host.blocklist !== undefined) {
       const [blocklist, sent] = [this.host.blocklist, command.command];
       await this.#answer(() => blocklist.command?.(sent));
+    } else if (isUpdateCommand(command.command) && update !== undefined) {
+      const sent = command.command;
+      const view = await this.#answer(() => update.command?.(sent));
+      if (view !== undefined) this.updateChanged(view);
     } else if (this.host.dispatch !== undefined)
       try {
         outcome = await this.host.dispatch(command);
@@ -519,6 +506,9 @@ export class FakeTransport implements HostTransport, NextHostSource, LimitsSourc
     const protection = this.host.protection;
     if (query === "protection" && protection !== undefined)
       return { protection: await this.#answer(() => protection.view()) };
+    const update = this.host.update;
+    if (query === "get_update" && update !== undefined)
+      return { update: await this.#answer(() => update.view()) };
     if (this.host.query === undefined) throw internalError("the fake host answers no query");
     try {
       return await this.host.query(query);
@@ -559,6 +549,11 @@ export class FakeTransport implements HostTransport, NextHostSource, LimitsSourc
     await this.#answer(() => this.host.quitApp?.());
   }
 
+  async openPrivacySettings(): Promise<void> {
+    this.calls.push({ call: "open_privacy_settings" });
+    await this.#answer(() => this.host.openPrivacySettings?.());
+  }
+
   async openFile(file: FileRefId): Promise<OpenedFile> {
     this.calls.push({ call: "open_file", file });
     return (await this.#answer(() => this.host.openFile?.(file))) ?? { protected_view: false };
@@ -578,12 +573,7 @@ export class FakeTransport implements HostTransport, NextHostSource, LimitsSourc
   }
 
   async displayInfo(): Promise<DisplayInfo> {
-    return {
-      platform: this.host.platform ?? "linux",
-      release_date: this.host.releaseDate ?? null,
-      test_build: this.host.testBuild ?? false,
-      release_mode: this.host.releaseMode ?? (this.host.testBuild ? "test" : "release"),
-    };
+    return displayInfoOf(this.host);
   }
 
   subscribe(stream: StreamId, after: ViewPosition | null, subscriber: BatchSubscriber): () => void {

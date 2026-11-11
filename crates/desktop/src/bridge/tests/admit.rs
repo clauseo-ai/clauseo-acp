@@ -5,7 +5,7 @@
 //! usage, U12), both protection commands (0051), and reads `GetSettings` and `Protection`;
 //! `FirstAct` comes from `main` only; another
 //! label sends nothing (0028, 0036).
-//! The Chrome for Testing download's two commands are main's alone (0029). The updater's
+//! The browser's commands are main's alone (0029; `admit_browser.rs`). The updater's
 //! commands and `GetUpdate` go by the table in `the_update_commands_go_by_window` (0037).
 
 use clauseo_protocol::{MatterId, ThreadId};
@@ -60,6 +60,16 @@ fn every_command_and_read_the_windows_send_today_is_admitted() {
         json!({"snooze_thread": {"thread": thread}}),
         json!({"mark_thread_done": {"thread": thread, "done": true}}),
         json!({"sweep_done": {"day_start": 1_790_000_000_000_u64}}),
+        // The room's tracked changes in a Word file.
+        json!({"decide_revisions": {"matter": matter, "path": "Lease.docx",
+            "version": "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff",
+            "ids": [1, 2], "decision": "accept"}}),
+        // The pickers: a choice of an option (the host takes only the model's or the effort's).
+        json!({"set_config_option": {"thread": thread, "option_id": "model",
+            "value": {"select": "opus"}}}),
+        json!({"update_matter": {"matter": matter, "agent_prefs": {"claude": {"effort": "high"}}}}),
+        // The window's network signal (D-050).
+        json!({"set_network": {"online": false}}),
     ];
     for body in commands {
         let admitted = bridge.admit(MAIN, &command(body.clone()));
@@ -101,8 +111,8 @@ fn every_refused_command_is_refused_before_open_stream() {
             "request": Uuid::now_v7(), "option_id": "allow"}})),
         command(json!({"set_mode": {"thread": thread, "mode_id": "bypassPermissions"}})),
         command(
-            json!({"set_config_option": {"thread": thread, "option_id": "mode",
-            "value": {"select": "bypassPermissions"}}}),
+            json!({"set_config_option": {"thread": thread, "option_id": "fast",
+            "value": {"boolean": true}}}),
         ),
     ];
     for refused in refused {
@@ -224,6 +234,31 @@ fn preview_undo_is_read_from_main_and_refused_from_settings() {
         refusal.to_string().contains("reads only the settings"),
         "{refusal}"
     );
+}
+
+/// `ListRevisions` reaches the host from the main window, which refuses a file that is not a
+/// Word document with its own code, and the settings window is refused it by the bridge;
+/// `DecideRevisions` is main's alone.
+#[test]
+fn list_revisions_is_read_from_main_and_decide_revisions_is_mains() {
+    let scratch = Scratch::new("admit-revisions", &[]);
+    let host = scratch.start(Vec::new());
+    let bridge = host.bridge();
+    let body = json!({"list_revisions": {"matter": host.scratch(), "path": "notes.txt"}});
+    let refusal = block_on(bridge.query(MAIN, read(body.clone()))).unwrap_err();
+    assert_eq!(refusal.code(), ErrorCode::WordNotDocx, "{refusal:?}");
+    let refusal = block_on(bridge.query(SETTINGS, read(body))).unwrap_err();
+    assert_eq!(refusal.code(), ErrorCode::CommandInvalid, "{refusal:?}");
+    assert!(
+        refusal.to_string().contains("reads only the settings"),
+        "{refusal}"
+    );
+    let decide = command(json!({"decide_revisions": {"matter": host.scratch(),
+        "path": "Lease.docx",
+        "version": "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff",
+        "ids": [1], "decision": "reject"}}));
+    let refusal = bridge.admit(SETTINGS, &decide).unwrap_err();
+    assert_eq!(refusal.code(), ErrorCode::CommandInvalid);
 }
 
 /// `ScanFolder` passes `admit` only with a folder this run's picker issued; `CancelScan`
@@ -404,32 +439,6 @@ fn review_a_reloaded_main_window_can_search_again() {
         ),
         "the reloaded page's first search: {after:?}"
     );
-}
-
-/// The Chrome for Testing download (0029) is the main window's: its consent dialog sends
-/// `install_browser` and its Cancel `cancel_browser_install`. The settings window and any other
-/// label are refused both with `command.invalid`, before the host sees them.
-#[test]
-fn only_the_main_window_starts_or_cancels_the_browser_download() {
-    let scratch = Scratch::new("admit-browser", &[]);
-    let host = scratch.start(Vec::new());
-    let bridge = host.bridge();
-    let install = command(json!({"install_browser": {}}));
-    let cancel = command(json!({"cancel_browser_install": {}}));
-    for browser in [&install, &cancel] {
-        assert!(bridge.admit(MAIN, browser).is_ok(), "{browser:?}");
-        for label in [SETTINGS, "other"] {
-            let refusal = block_on(bridge.dispatch(label, envelope(browser.clone()))).unwrap_err();
-            assert_eq!(
-                refusal.code(),
-                ErrorCode::CommandInvalid,
-                "{label} {browser:?}"
-            );
-        }
-    }
-    // With no download running, main's cancel reaches the host and does nothing.
-    let outcome = block_on(bridge.dispatch(MAIN, envelope(cancel)));
-    assert!(matches!(outcome, Ok(CommandOutcome::Done)), "{outcome:?}");
 }
 
 /// The updater (0037), one row per window and command: main installs, cancels a scheduled

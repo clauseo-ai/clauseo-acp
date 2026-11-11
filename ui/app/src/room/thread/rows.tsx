@@ -1,15 +1,16 @@
 // The thread's rows, one per entry. A live row reads only its own entry and its own text from the view store, and is
 // memoized on its id, so a flush renders only the rows whose part changed. A paged row (older entries, page_entries)
-// shows the entry it was given. Permissions and elicitations are permission-row.tsx's; markers, versions and compaction
-// show nothing yet. A queued or removed message shows nothing (the queue's strip holds it), and a steer taken into the
+// shows the entry it was given. Permissions and elicitations are permission-row.tsx's; a restore made from Versions
+// while the conversation was open shows as a quiet line; other markers, versions and compaction show nothing yet. A queued or removed message shows nothing (the queue's strip holds it), and a steer taken into the
 // answer shows as its mark (steer.ts, steer-rows.tsx).
 import { memo, useState, useSyncExternalStore, type ReactNode } from "react";
 import { QuestionLine, Who } from "@clauseo/components/clauseo/answer.tsx";
+import { FoldedQuestion } from "@clauseo/components/clauseo/question-fold.tsx";
 import { Say } from "@clauseo/components/clauseo/say.tsx";
 import { mt } from "@clauseo/components/lib/words-matters.ts";
-import { langOfText } from "@clauseo/components/lib/script.ts";
 import { useThreadWords } from "@clauseo/components/lib/words-thread.ts";
 import { frd } from "@clauseo/components/lib/words-first-read.ts";
+import { stepLive } from "@clauseo/components/lib/words-steps-live.ts";
 import { Image } from "@clauseo/components/markdown/image.tsx";
 import { Markdown } from "@clauseo/components/markdown/markdown.tsx";
 import { useEntry, useStreamPart, useText, useViewStore } from "../../store/hooks.ts";
@@ -18,6 +19,7 @@ import type {
   AgentContentEntry,
   ContentBlock,
   EntryId,
+  MarkerEntry,
   NoticeEntry,
   StreamId,
   ToolCallEntry,
@@ -33,6 +35,9 @@ import { questionText, useQuestionText, useStreaming } from "./live.ts";
 import { askedAs, backgroundOf, outcomeOf, runningIn } from "./steer.ts";
 import { LiveSteerMark, RequeuedLine, SteerMarkRow } from "./steer-rows.tsx";
 import { LimitStopRow, StepRow } from "./stop-rows.tsx";
+import { plainOf, thoughtText, titled, unsettled } from "./step-names.ts";
+import { toolNameOf } from "./tool-names.ts";
+import { overTitle } from "./tool-words.ts";
 
 const QUIET = "text-small text-quiet";
 /** The space above a row under another in its section, on the spacing tokens; first in its section, the thread's own
@@ -85,9 +90,7 @@ function Question({
       ) : (
         <>
           <Who name={w.t("You")} time={at} />
-          <p className="asked" lang={langOfText(text)}>
-            <Say>{text}</Say>
-          </p>
+          <FoldedQuestion text={text} />
         </>
       )}
       {entry.content.map((block, i) =>
@@ -158,6 +161,8 @@ function LiveUserMessage({
 }
 
 function Answer({ id, text, streaming }: { id: EntryId; text: string; streaming: boolean }) {
+  // no words yet, or only blank lines: no empty block standing in the answer's space (D-030)
+  if (text.trim() === "") return null;
   return (
     // busy while it streams, so a screen reader reads the answer once it ends, not each flush's words
     <div
@@ -171,15 +176,22 @@ function Answer({ id, text, streaming }: { id: EntryId; text: string; streaming:
   );
 }
 
+/** The space above a thought under another row: the reply's own (REPLY), so a thought that opens an answer stands
+ * under the meta line as the answer's first words would (D-030). */
+const THOUGHT = "not-first:mt-(--s4)";
+
 function Thought({ id, text }: { id: EntryId; text: string }) {
+  const shown = thoughtText(text);
+  // a thought with no words yet (or only blank lines) draws nothing, never an empty row
+  if (shown === "") return null;
   return (
     <p
       data-testid="thought"
       data-entry-id={id}
-      className={`${ROW} ${QUIET} whitespace-pre-wrap`}
+      className={`${THOUGHT} ${QUIET} whitespace-pre-wrap`}
       dir="auto"
     >
-      {text}
+      {shown}
     </p>
   );
 }
@@ -224,7 +236,13 @@ function ToolCall({ id, entry }: { id: EntryId; entry: ToolCallEntry }) {
       data-background={backgroundOf(entry) === undefined ? undefined : true}
       className={`${ROW} ${QUIET}`}
     >
-      <bdi>{entry.title}</bdi>
+      <bdi>
+        {toolNameOf(entry.title) === undefined
+          ? plainOf(entry.title)
+          : unsettled(entry)
+            ? titled(entry, stepLive(w.lang, "Working on it."), w.lang)
+            : overTitle(w.lang, entry.title, entry.status !== "completed")}
+      </bdi>
       {mark !== null && (
         <>
           {" · "}
@@ -259,6 +277,23 @@ function Notice({ id, entry }: { id: EntryId; entry: NoticeEntry }) {
   );
 }
 
+/** A restore of the matter made from Versions while this conversation was open (the host's version_restored marker on
+ * its stream), as a quiet line; any other marker shows nothing. */
+function Marker({ id, entry }: { id: EntryId; entry: MarkerEntry }) {
+  const w = useThreadWords();
+  const restored = entry.kind.version_restored;
+  if (restored === undefined) return null;
+  return (
+    <p data-testid="marker-restored" data-entry-id={id} className={`${ROW} ${QUIET}`}>
+      <Say>
+        {restored.undoes === undefined
+          ? w.th("You restored an earlier version of the matter.")
+          : w.th("You undid the restore.")}
+      </Say>
+    </p>
+  );
+}
+
 /** The kinds that read nothing but their entry. */
 function EntryRow({
   id,
@@ -276,6 +311,7 @@ function EntryRow({
   if (entry.limit_stop !== undefined) return <LimitStopRow id={id} entry={entry.limit_stop} />;
   if (entry.notice !== undefined) return <Notice id={id} entry={entry.notice} />;
   if (entry.elicitation !== undefined) return <Elicitation id={id} entry={entry.elicitation} />;
+  if (entry.marker !== undefined) return <Marker id={id} entry={entry.marker} />;
   return null;
 }
 

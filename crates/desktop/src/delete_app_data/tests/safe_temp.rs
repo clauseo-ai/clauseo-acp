@@ -2,9 +2,11 @@
 //! Program Files, owned by Administrators and locked to Administrators and SYSTEM, then set as
 //! `$PLUGINSDIR` and `$TEMP`, first in every elevated path and before any plug-in call: in the
 //! per-user installer's elevated branch and at the start of the per-machine installer's
-//! `.onInit`. The Windows VM checks the folder and its DACL for real.
+//! `.onInit`. Each per-machine run then removes earlier runs' folders, run here on a fake folder
+//! listing. The Windows VM checks the folder and its DACL for real.
 
 use super::admin_copy::{admin_code, macro_body};
+use super::nsis_run::{Machine, defines, parse_all, words};
 use super::sources::{line_with, read};
 use super::template::{TEMPLATE, reached, split_blocks};
 
@@ -81,13 +83,17 @@ fn the_per_machine_installer_makes_its_folder_before_its_first_plug_in() {
             "!insertmacro CLAUSEO_SAFE_PLUGINSDIR",
             "System::Call 'kernel32::SetEnvironmentVariableW(w \"TEMP\", w \"$TEMP\")'",
             "System::Call 'kernel32::SetEnvironmentVariableW(w \"TMP\", w \"$TEMP\")'",
+            // Last, with System loaded from this run's folder: earlier runs' folders.
+            "!insertmacro CLAUSEO_REMOVE_OLD_PLUGINSDIRS",
             "!endif",
         ]
     );
-    // And the folder's own macro loads nothing.
-    for (name, body) in reached(&code, "CLAUSEO_SAFE_PLUGINSDIR") {
-        for line in body {
-            assert!(!loads_a_plug_in(line), "{name}: {line}");
+    // And the folder's own macro loads nothing, nor does the removal.
+    for start in ["CLAUSEO_SAFE_PLUGINSDIR", "CLAUSEO_REMOVE_OLD_PLUGINSDIRS"] {
+        for (name, body) in reached(&code, start) {
+            for line in body {
+                assert!(!loads_a_plug_in(line), "{name}: {line}");
+            }
         }
     }
 }
@@ -102,8 +108,11 @@ fn the_per_user_elevated_branch_makes_its_folder_before_it_writes_or_runs_anythi
     assert!(line_with(body, &["FindWindow "]) < folder);
     assert!(folder < line_with(body, &["!insertmacro CLAUSEO_RECORD_CHECK"]));
     assert!(folder < line_with(body, &["!insertmacro CLAUSEO_ADMIN_COPY "]));
-    // Nothing the branch reaches loads a plug-in, before the folder or after it.
+    // Nothing the branch reaches loads a plug-in, before the folder or after it. It removes no
+    // earlier folder either: per user stays as it was (its folder holds no plug-in, so NSIS's exit
+    // removes it).
     for (name, body) in reached(&code, "CLAUSEO_ELEVATED_BRANCH") {
+        assert_ne!(name, "CLAUSEO_REMOVE_OLD_PLUGINSDIRS");
         for line in body {
             assert!(!loads_a_plug_in(line), "{name}: {line}");
         }
@@ -115,7 +124,11 @@ fn the_folder_is_made_fresh_under_program_files_owned_locked_and_then_used() {
     let code = admin_code();
     line_with(
         &code,
-        &["!define CLAUSEO_INSTALLER_TEMP \"$PROGRAMFILES64\\Clauseo\\installer-temp\""],
+        &["!define CLAUSEO_TEMP_PARENT \"$PROGRAMFILES64\\Clauseo\""],
+    );
+    line_with(
+        &code,
+        &["!define CLAUSEO_OLD_TEMP_PARENT \"$PROGRAMFILES64\\Clauseo\\installer-temp\""],
     );
     line_with(
         &code,
@@ -123,7 +136,9 @@ fn the_folder_is_made_fresh_under_program_files_owned_locked_and_then_used() {
     );
     line_with(&code, &["!define CLAUSEO_SID_SYSTEM \"*S-1-5-18\""]);
     line_with(&code, &["!define CLAUSEO_EXIT_TEMP_FAILED 25"]);
-    // Every step, in order: a name GetTempFileName made free, a folder in its place, icacls'
+    // Every step, in order: earlier builds' parent removed only when empty (never /r: an older
+    // install running meanwhile keeps its folder), a name GetTempFileName made free directly in
+    // %ProgramFiles%\Clauseo (no parent of its own to stay behind), a folder in its place, icacls'
     // owner and protected DACL (each exit code 0, a start that failed counted as a failure), then
     // $PLUGINSDIR and $TEMP. Any failure removes what it made, never recursively, and quits.
     assert_eq!(
@@ -131,10 +146,11 @@ fn the_folder_is_made_fresh_under_program_files_owned_locked_and_then_used() {
         [
             "Push $0",
             "Push $1",
+            "RMDir \"${CLAUSEO_OLD_TEMP_PARENT}\"",
             "StrCpy $1 1",
             "ClearErrors",
-            "CreateDirectory \"${CLAUSEO_INSTALLER_TEMP}\"",
-            "GetTempFileName $0 \"${CLAUSEO_INSTALLER_TEMP}\"",
+            "CreateDirectory \"${CLAUSEO_TEMP_PARENT}\"",
+            "GetTempFileName $0 \"${CLAUSEO_TEMP_PARENT}\"",
             "${IfNot} ${Errors}",
             "Delete \"$0\"",
             "CreateDirectory \"$0\"",
@@ -163,9 +179,9 @@ fn the_folder_is_made_fresh_under_program_files_owned_locked_and_then_used() {
             "!insertmacro CLAUSEO_PASSIVE_OR_UPDATE $1",
             "${If} $1 = 0",
             "!ifdef __UNINSTALL__",
-            "MessageBox MB_OK|MB_ICONSTOP \"$(uninstallTempFailed)\" /SD IDOK",
+            "MessageBox MB_OK|MB_ICONSTOP|MB_SETFOREGROUND|MB_TOPMOST \"$(uninstallTempFailed)\" /SD IDOK",
             "!else",
-            "MessageBox MB_OK|MB_ICONSTOP \"$(installTempFailed)\" /SD IDOK",
+            "MessageBox MB_OK|MB_ICONSTOP|MB_SETFOREGROUND|MB_TOPMOST \"$(installTempFailed)\" /SD IDOK",
             "!endif",
             "${EndIf}",
             "SetErrorLevel ${CLAUSEO_EXIT_TEMP_FAILED}",
@@ -242,4 +258,165 @@ fn the_box_is_skipped_under_passive_and_update_by_a_native_scan_of_the_command_l
     assert_eq!(temp[scan + 1], "${If} $1 = 0");
     assert!(scan < line_with(temp, &["MessageBox "]));
     assert!(line_with(temp, &["MessageBox "]) < line_with(temp, &["SetErrorLevel ${CLAUSEO_EXIT"]));
+}
+
+/// The lines of macro `name` with `args` put in for its parameters (NSIS drops an argument's
+/// quotes), each macro it inserts inlined the same way.
+fn inlined(code: &[String], name: &str, args: &[&str]) -> Vec<String> {
+    let body = macro_body(code, name);
+    let params = words(&body[0]);
+    assert_eq!(params.len() - 2, args.len(), "{}", body[0]);
+    let mut out = Vec::new();
+    for line in &body[1..] {
+        let mut line = line.clone();
+        for (param, arg) in params[2..].iter().zip(args) {
+            line = line.replace(&format!("${{{param}}}"), arg);
+        }
+        let parts = words(&line);
+        let parts: Vec<&str> = parts.iter().map(String::as_str).collect();
+        if let ["!insertmacro", inner, rest @ ..] = parts.as_slice() {
+            out.extend(inlined(code, inner, rest));
+        } else {
+            out.push(line);
+        }
+    }
+    out
+}
+
+/// What `CLAUSEO_NSIS_TEMP_NAME` says of `name`, run as written.
+fn nsis_temp_name(name: &str) -> bool {
+    let code = admin_code();
+    let nodes = parse_all(&inlined(&code, "CLAUSEO_NSIS_TEMP_NAME", &["$1", "$2"]));
+    let mut machine = Machine::new(defines(&code), None);
+    machine.set_var("$1", name);
+    assert!(!machine.run(&nodes), "{name}");
+    assert!(machine.stack.is_empty(), "{name}");
+    machine.vars["$2"] == "1"
+}
+
+#[test]
+fn a_folder_counts_as_an_nsis_one_only_by_the_name_nsis_gives_it() {
+    // "ns", a letter, 1-4 hex digits, ".tmp" (my_GetTempFileName, util.c:473-485, then Win32's
+    // GetTempFileName), any case: the three the smoke found, and the edges.
+    for name in [
+        "nsoA5E5.tmp",
+        "nsu9CAD.tmp",
+        "nsz8DF8.tmp",
+        "nsa0.tmp",
+        "nsqffff.tmp",
+        "NSB12.TMP",
+    ] {
+        assert!(nsis_temp_name(name), "{name}");
+    }
+    for name in [
+        "",
+        "Sandbox",
+        "uninstall.exe",
+        "ns.tmp",
+        "nsa.tmp",
+        "ns1A5E5.tmp",
+        "nsaG5E5.tmp",
+        "nsaA5E5F.tmp",
+        "nsa5 5.tmp",
+        "xsa5E5.tmp",
+        "nsa5E5.tmpx",
+        "nsa5E5.tmp.old",
+        "nsa5E5.dll",
+    ] {
+        assert!(!nsis_temp_name(name), "{name}");
+    }
+}
+
+#[test]
+fn earlier_runs_folders_go_only_when_named_by_nsis_and_their_system_dll_could_go() {
+    let code = admin_code();
+    let nodes = parse_all(&inlined(&code, "CLAUSEO_REMOVE_OLD_PLUGINSDIRS", &[]));
+    let mut machine = Machine::new(defines(&code), None);
+    let parent = "$PROGRAMFILES64\\Clauseo";
+    let at = |name: &str| format!("{parent}\\{name}");
+    // This run's folder, and an install folder that happens to have an NSIS name.
+    machine.set_var("$PLUGINSDIR", &at("nsb0001.tmp"));
+    machine.set_var("$INSTDIR", &at("nsd0002.tmp"));
+    // What FindFirst finds: two earlier runs' folders, this run's, one whose System.dll a run
+    // still has loaded, one with no System.dll (a run that hasn't loaded it yet), the install
+    // folder, and a name only an 8.3 match of ns*.tmp returns.
+    machine.found = [
+        "nsoA5E5.tmp",
+        "nsb0001.tmp",
+        "nsz8DF8.tmp",
+        "nsc12.tmp",
+        "nsd0002.tmp",
+        "nsfoo.tmpl",
+        "nsu9CAD.tmp",
+    ]
+    .map(str::to_owned)
+    .to_vec();
+    machine.files = [
+        "nsoA5E5.tmp",
+        "nsb0001.tmp",
+        "nsz8DF8.tmp",
+        "nsd0002.tmp",
+        "nsfoo.tmpl",
+        "nsu9CAD.tmp",
+    ]
+    .iter()
+    .map(|name| at(&format!("{name}\\System.dll")))
+    .collect();
+    machine.locked = vec![at("nsz8DF8.tmp\\System.dll")];
+    machine.error = true;
+    assert!(!machine.run(&nodes));
+    assert_eq!(
+        machine.said,
+        [
+            format!("FindFirst {parent}\\ns*.tmp"),
+            format!("Delete {}", at("nsoA5E5.tmp\\System.dll")),
+            format!("RMDir /r {}", at("nsoA5E5.tmp")),
+            format!("Delete {}", at("nsz8DF8.tmp\\System.dll")),
+            format!("Delete {}", at("nsu9CAD.tmp\\System.dll")),
+            format!("RMDir /r {}", at("nsu9CAD.tmp")),
+        ]
+    );
+    // The error flag clear, as the start leaves it, and the registers back.
+    assert!(!machine.error);
+    assert!(machine.stack.is_empty(), "{:?}", machine.stack);
+    // The only recursive delete in the elevated code is that one, on a path in
+    // CLAUSEO_TEMP_PARENT.
+    let recursive: Vec<&String> = code
+        .iter()
+        .filter(|line| line.contains("RMDir /r"))
+        .collect();
+    assert_eq!(recursive, ["RMDir /r \"$3\""]);
+    let body = macro_body(&code, "CLAUSEO_REMOVE_OLD_PLUGINSDIRS");
+    line_with(body, &["StrCpy $3 \"${CLAUSEO_TEMP_PARENT}\\$1\""]);
+    line_with(body, &["RMDir /r \"$3\""]);
+}
+
+/// What `CLAUSEO_OWN_PLUGINSDIR` says of `plugins_dir`, run as written.
+fn own_plugins_dir(plugins_dir: &str) -> bool {
+    let code = admin_code();
+    let nodes = parse_all(&inlined(&code, "CLAUSEO_OWN_PLUGINSDIR", &["$0"]));
+    let mut machine = Machine::new(defines(&code), None);
+    machine.set_var("$PLUGINSDIR", plugins_dir);
+    assert!(!machine.run(&nodes), "{plugins_dir}");
+    assert!(machine.stack.is_empty(), "{plugins_dir}");
+    machine.vars["$0"] == "1"
+}
+
+#[test]
+fn the_uninstaller_removes_only_a_plug_in_folder_directly_in_program_files_clauseo() {
+    // The folder CLAUSEO_SAFE_PLUGINSDIR makes, which the uninstaller's delayed cmd line removes
+    // with rmdir /s (uninstall_in_place.rs); nothing else, $INSTDIR included.
+    assert!(own_plugins_dir("$PROGRAMFILES64\\Clauseo\\nsoA5E5.tmp"));
+    for path in [
+        "",
+        "$PROGRAMFILES64\\Clauseo",
+        "$PROGRAMFILES64\\Clauseo\\",
+        "$PROGRAMFILES64\\Clauseo\\Sandbox",
+        "$PROGRAMFILES64\\Clauseo\\nsoA5E5.tmp\\",
+        "$PROGRAMFILES64\\Clauseo\\nsoA5E5.tmp\\nsu9CAD.tmp",
+        "$PROGRAMFILES64\\Clauseo2\\nsoA5E5.tmp",
+        "C:\\Users\\lawyer\\AppData\\Local\\Temp\\nsoA5E5.tmp",
+    ] {
+        assert!(!own_plugins_dir(path), "{path}");
+    }
 }

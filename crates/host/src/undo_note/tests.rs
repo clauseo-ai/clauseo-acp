@@ -22,8 +22,8 @@ fn lists_undo_and_restore_since_last_turn() {
     assert_eq!(
         note_text(&listed).unwrap(),
         "Note from Clauseo: since your last turn, the lawyer put these files back to an earlier \
-         version: notes/a.txt, brief.txt. Read them again before relying on what you remember \
-         about them."
+         version, and removed those it did not have: notes/a.txt, brief.txt. Read them again \
+         before relying on what you remember about them."
     );
 
     let after_turn = paths_since_last_turn([

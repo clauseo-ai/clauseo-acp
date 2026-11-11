@@ -1,5 +1,5 @@
 // The room's rail over FakeTransport, at the room's interface: the scratch matter only at the foot, each row's
-// status words (none on the open matter's), date groups across a Sunday, finding by name only without a NextHost and
+// status words (none on the open matter's), Needs you, Working and the rest by latest activity, finding by name only without a NextHost and
 // by client with one, each saying so, Pinned and Recent (five), no Find on an empty rail, Remove from the list, Show in
 // Finder and the open matter's chevron, isolated folder paths, matters_changed updating a row, and a left matter's thread waiting on a
 // permission, and U12's paused rail.
@@ -153,7 +153,7 @@ test("each status says its words; a moved folder says so over its status", async
     [5, "stopped", `Stopped at ${time}`],
     [6, "limit", `Limit reached until ${time}`],
     [7, "limit", `Limit reached until ${other.day} ${other.time}`],
-    [8, "limit", "Limit reached. Reset not given."],
+    [8, "limit", "Limit reached"],
     [9, "moved", "Folder moved"],
   ];
   for (const [n, state, line] of words) {
@@ -167,34 +167,50 @@ test("each status says its words; a moved folder says so over its status", async
   expect(said("Matter 10")).toBe("Matter 10");
 });
 
-test("date groups across a Sunday, in the rail's order, with no empty group", async () => {
-  vi.useFakeTimers({ toFake: ["Date"] });
-  vi.setSystemTime(new Date(2026, 10, 1, 12, 0)); // Sunday 1 November 2026
-  const m = (n: number, next_date?: string) =>
-    detailed(
-      { matter: uuid(n, 2), name: `Matter ${n}`, kind: "folder" },
-      next_date === undefined ? {} : { next_date },
-    );
+test("the order: Needs you (a permission, then an answer ready), Working, Pinned, then the rest by latest activity", async () => {
+  const m = (n: number, over: Partial<MatterInfo>) =>
+    detailed({ matter: uuid(n, 2), name: `Matter ${n}`, kind: "folder" }, over);
   await mount(
     withNext(() => [
-      m(1, "2026-11-03"),
-      m(2, "2026-11-02"),
-      m(3, "2026-11-01"),
-      m(4),
-      m(5, "2026-11-30"),
+      // the one the lawyer opened last opens, and says nothing of its work, which is in view
+      m(1, { last_activity: NOW - 5 * 60_000, last_opened: NOW }),
+      m(2, { status: "ready", last_activity: NOW - 60_000 }),
+      m(3, { status: "working", last_activity: NOW - 9 * 60_000 }),
+      m(4, { last_activity: NOW - 60_000 }),
+      m(5, { status: "needs_permission", last_activity: NOW - 3_600_000 }),
+      m(6, { status: "working", last_activity: NOW - 60_000 }),
+      // a next date kept in the store orders nothing and shows nowhere
+      m(7, { next_date: "2026-11-04" }),
+      // pinned: answering, it stands in Working; at rest, in Pinned
+      m(8, { pinned: true, status: "working", last_activity: NOW - 30 * 60_000 }),
+      m(9, { pinned: true, last_activity: NOW }),
     ]),
   );
-  expect(headings()).toEqual(["Tomorrow", "This week", "Next week", "Later", "No date yet"]);
-  expect(names()).toEqual(["Matter 2", "Matter 3", "Matter 1", "Matter 5", "Matter 4"]);
+  expect(headings()).toEqual(["Needs you", "Working", "Pinned", "Other matters"]);
+  expect(names()).toEqual([
+    "Matter 5",
+    "Matter 2",
+    "Matter 6",
+    "Matter 3",
+    "Matter 8",
+    "Matter 9",
+    "Matter 4",
+    "Matter 1",
+    "Matter 7",
+  ]);
+  expect(said("Matter 5")).toContain("Needs your permission");
+  expect(said("Matter 2")).toContain("Answer ready");
+  expect(said("Matter 6")).toContain("Answering.");
+  expect(rail()?.textContent).not.toMatch(/Tomorrow|This week|No date yet|Next date/);
 });
 
-test("without a NextHost: one group, No date yet, newest first; no Pinned, and find matches names only", async () => {
+test("without a NextHost: one group, Matters, newest first; no Pinned, and find matches names only", async () => {
   await mount(today([A, B, C]));
-  expect(headings()).toEqual(["No date yet"]);
+  expect(headings()).toEqual(["Matters"]);
   expect(names()).toEqual([C.name, B.name, A.name]);
   // focused and empty: no Recent, the groups stay
   await act(async () => find()?.focus());
-  expect(headings()).toEqual(["No date yet"]);
+  expect(headings()).toEqual(["Matters"]);
   await act(async () => type(find() as HTMLInputElement, "sharma"));
   await settle();
   expect(names()).toEqual([B.name]);
@@ -206,7 +222,7 @@ test("without a NextHost: one group, No date yet, newest first; no Pinned, and f
   expect(rail()?.textContent).not.toContain("client");
 });
 
-test("with a NextHost: find by client, Pinned above the dates, and Recent by last opened", async () => {
+test("with a NextHost: find by client, Pinned above the rest, and Recent by last opened", async () => {
   await mount(
     withNext(() => [
       detailed(A, { client: "Asha Rao", last_opened: 30 }),
@@ -214,8 +230,8 @@ test("with a NextHost: find by client, Pinned above the dates, and Recent by las
       detailed(C, { last_opened: 20 }),
     ]),
   );
-  expect(headings()).toEqual(["Pinned", "No date yet"]);
-  // pinned above every date; the rest newest first
+  expect(headings()).toEqual(["Pinned", "Other matters"]);
+  // pinned above the rest; the rest newest first
   expect(names()).toEqual([B.name, C.name, A.name]);
   await act(async () => find()?.focus());
   expect(headings()).toEqual(["Recent"]);
@@ -307,7 +323,7 @@ test("with H5 the open matter's row carries its actions' chevron, reached by key
   );
 });
 
-test("Remove from the list sends forget_matter and the row leaves", async () => {
+test("D-054: Remove from the list asks first; Cancel sends nothing, and Remove sends forget_matter and the row leaves", async () => {
   let list = [detailed(A), detailed(B)];
   const sent: NextCommand[] = [];
   await mount(
@@ -330,7 +346,35 @@ test("Remove from the list sends forget_matter and the row leaves", async () => 
   expect(remove).toBeDefined();
   await act(async () => remove?.click());
   await settle();
-  expect(sent).toContainEqual({ forget_matter: { matter: A.matter } });
+  // nothing brings a removed matter back from the list, so it asks, and says what happens
+  const ask = () => document.querySelector<HTMLElement>('[data-testid="remove-confirm"]');
+  expect(ask()?.textContent).toContain(`Remove ${A.name} from the list?`);
+  expect(ask()?.textContent).toContain(
+    "The matter and its conversations leave the list and Recent. Its folder and papers stay where they are.",
+  );
+  expect(sent.some((c) => "forget_matter" in c)).toBe(false);
+  const button = (id: string) => document.querySelector<HTMLElement>(`[data-testid="${id}"]`);
+  await act(async () => button("remove-confirm-cancel")?.click());
+  await settle();
+  expect(sent.some((c) => "forget_matter" in c)).toBe(false);
+  expect(names()).toEqual(expect.arrayContaining([A.name, B.name]));
+  expect(names()).toHaveLength(2);
+  await act(async () =>
+    rowOf(A.name)?.dispatchEvent(
+      new MouseEvent("contextmenu", { bubbles: true, cancelable: true }),
+    ),
+  );
+  await settle();
+  const again = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find((i) =>
+    i.textContent?.includes("Remove from the list"),
+  );
+  await act(async () => again?.click());
+  await settle();
+  await act(async () => button("remove-confirm-ok")?.click());
+  await settle();
+  expect(sent.filter((c) => "forget_matter" in c)).toEqual([
+    { forget_matter: { matter: A.matter } },
+  ]);
   expect(names()).toEqual([B.name]);
 });
 
@@ -369,6 +413,48 @@ test("a refused Show in Finder says why on its row's note line and in the consol
   expect(rowOf(A.name)?.querySelector(".room-matter-note")?.textContent).toBe(
     errorWords("en", "matter.folder_missing"),
   );
+  warn.mockRestore();
+});
+
+test("D-057: a refused Show in Finder's words have Locate folder beside them, which relocates the matter", async () => {
+  const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+  const sent: NextCommand[] = [];
+  const transport = await mount({
+    ...withNext(
+      () => [detailed(A), detailed(B)],
+      (c) => void sent.push(c),
+    ),
+    platform: "mac",
+    reveal: () => {
+      throw { code: "matter.folder_missing", message: "gone", retryable: true };
+    },
+    pickFolder: () => ({ folder: "ref-found", display: "Desktop/Acme" }),
+  });
+  const locate = () =>
+    rowOf(A.name)?.closest("li")?.querySelector<HTMLElement>('[data-testid="locate-folder"]');
+  expect(locate()).toBeNull();
+  await act(async () =>
+    rowOf(A.name)?.dispatchEvent(
+      new MouseEvent("contextmenu", { bubbles: true, cancelable: true }),
+    ),
+  );
+  await settle();
+  const reveal = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find((i) =>
+    i.textContent?.includes("Show in Finder"),
+  );
+  await act(async () => reveal?.click());
+  await settle();
+  expect(transport.only("reveal")).toHaveLength(1);
+  expect(rowOf(A.name)?.querySelector(".room-matter-note")?.textContent).toBe(
+    errorWords("en", "matter.folder_missing"),
+  );
+  // beside the words, not inside the row's own button: the existing Locate folder, and only on that row
+  expect(locate()?.textContent).toBe("Locate folder");
+  expect(rowOf(A.name)?.contains(locate() ?? null)).toBe(false);
+  expect(rowOf(B.name)?.closest("li")?.querySelector('[data-testid="locate-folder"]')).toBeNull();
+  await act(async () => locate()?.click());
+  await settle();
+  expect(sent).toContainEqual({ relocate_matter: { matter: A.matter, folder: "ref-found" } });
   warn.mockRestore();
 });
 

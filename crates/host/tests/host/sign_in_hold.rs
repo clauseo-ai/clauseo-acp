@@ -16,7 +16,9 @@ use crate::codex::{CODEX, codex_dir};
 use crate::observe::Events;
 use crate::permissions::{answer_from, until_first_request};
 use crate::queue::{allow, held, hold_reason, send, settle, starts, until_queued, view_queue};
-use crate::support::{Dir, FAKE, Running, Scenario, matter_with_thread, text, wait};
+use crate::support::{
+    Dir, FAKE, Running, Scenario, matter_with_thread, text, trace_to_stderr, wait,
+};
 
 /// The prompt every test sends first.
 const ASKED: &str = "Look at the matter.";
@@ -129,6 +131,8 @@ fn a_turn_failing_refresh_token_reused_is_held_as_auth_required() {
 
 #[test]
 fn stop_agents_puts_a_running_turn_back_held_and_restart_sends_it() {
+    // A stop that hangs fails naming the step it stayed in (private#513).
+    trace_to_stderr();
     let dir = Dir::new(
         "sign_in_hold_stop",
         &[(FAKE, Scenario::Bundled("stop-mid-turn-then-load"))],
@@ -138,7 +142,8 @@ fn stop_agents_puts_a_running_turn_back_held_and_restart_sends_it() {
     let mut events = host.events(StreamId::Thread(thread));
     let (first, _) = host.prompt(thread, ASKED);
     events.until("the turn starts", |events| starts(events, first) == 1);
-    wait("stop_agents", host.handle.stop_agents(fake())).unwrap();
+    host.wait_dumping("stop_agents", host.handle.stop_agents(fake()))
+        .unwrap();
     assert_eq!(events.until_turn_ended(first).stop, StopReason::Cancelled);
     let (again, text) = put_back(&mut events, first);
     assert_eq!(text, ASKED);

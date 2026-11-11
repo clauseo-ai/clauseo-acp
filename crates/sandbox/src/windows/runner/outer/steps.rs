@@ -37,7 +37,7 @@ impl Steps for Start<'_> {
             .ok_or_else(|| Failure::new(RunExit::Logon, "the password was spent"))?;
         // `log_on` takes the password and wipes it as it returns.
         let args = format!("--inner {}", self.base);
-        log_on(self.pool_name, password, self.exe, &args, self.cwd, None).map_err(logon_failure)
+        log_on(self.pool_name, password, self.exe, &args, self.cwd).map_err(logon_failure)
     }
 
     /// Its token's user, read now: from its first instruction the inner shuts its token to all

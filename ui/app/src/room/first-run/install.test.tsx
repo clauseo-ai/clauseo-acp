@@ -31,10 +31,10 @@ test("install: missing on the first screen says the size, about, and sends nothi
     first: [install(CLAUDE, { missing: { download_bytes: 160_000_000 } })],
   });
   expect(foot()?.dataset["state"]).toBe("missing");
-  expect(text()).toContain("Needs a download of about 160 MB");
+  expect(text()).toContain("Claude · needs a download of about 160 MB");
   expect(setups(t)).toEqual([]);
   const sign = byId("install-sign-in");
-  expect(sign?.textContent).toBe("Sign in");
+  expect(sign?.textContent).toBe("Sign in to Claude");
   expect(foot()?.contains(sign)).toBe(true);
   await press(sign);
   expect(setups(t)).toEqual([{ start_sign_in: { agent: CLAUDE } }]);
@@ -180,7 +180,7 @@ test("install: dl-blocked offers the system proxy (RetryAgentInstall with use_sy
   expect(text()).toContain("Your network is blocking the download.");
   await press(byId("install-proxy"));
   expect(setups(t)).toEqual([{ retry_agent_install: { agent: CLAUDE, use_system_proxy: true } }]);
-  expect(byId("install-ask-it")?.textContent).toBe("Ask your IT team");
+  expect(byId("install-ask-it")?.textContent).toBe("Copy details for IT");
   await press(byId("install-ask-it"));
   expect(writeText).toHaveBeenCalledWith(
     "Clauseo needs to download Claude to work. Please allow these addresses on the firm's network: registry.npmjs.org, nodejs.org.",
@@ -284,7 +284,7 @@ test("install: the live region says each state once and never a byte update", as
     first: [install(CLAUDE, { missing: { download_bytes: 160_000_000 } })],
   });
   const region = byId("install-said");
-  expect(region?.textContent).toBe("Needs a download of about 160 MB");
+  expect(region?.textContent).toBe("Claude · needs a download of about 160 MB");
   let changes = 0;
   const watch = new MutationObserver((records) => {
     changes += records.length;
@@ -331,4 +331,18 @@ test("install: each install code's screen counts error_shown with its code, once
     { error_shown: { code: "agent.install_failed" } },
     { error_shown: { code: "agent.install_offline" } },
   ]);
+});
+
+test("checking on the first screen: the foot says it is checking and Sign in is busy until the check answers", async () => {
+  const t = await mountFirstRun({
+    matters: [],
+    first: [install(CLAUDE, READY), signIn(CLAUDE, "checking")],
+  });
+  expect(foot()?.dataset["state"]).toBe("checking");
+  expect(text()).toContain("Checking whether you're signed in to Claude…");
+  expect(byId<HTMLButtonElement>("install-sign-in")?.disabled).toBe(true);
+  expect(byId("install-sign-in")?.getAttribute("aria-busy")).toBe("true");
+  await play(t, signIn(CLAUDE, { signed_out: {} }));
+  expect(text()).not.toContain("Checking whether");
+  expect(byId("install-sign-in")).toBeNull();
 });

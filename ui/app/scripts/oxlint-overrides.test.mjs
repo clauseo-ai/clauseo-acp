@@ -25,6 +25,7 @@ const DOORS = {
   "scripts/buildtime-lib.test.mjs": ["write"],
   "scripts/guard.test.mjs": ["write"],
   "scripts/oxlint-bans.test.mjs": ["write"],
+  "scripts/oxlint-geometry.test.mjs": ["write"],
   "scripts/buildtime-proc.test.mjs": ["write", "process"],
   // the one-shot split of copy-approvals.json into copy-approvals/, and its test's scratch folders
   "scripts/split-copy-approvals.mjs": ["write"],
@@ -32,6 +33,9 @@ const DOORS = {
   // the running copy review page: writes ../copy-review/running/ and drives agent-browser for its shots
   "scripts/copy-running.mjs": ["write", "process"],
 };
+
+/** A page file of ui/app or ui/components (through the link ui/app/components), not a script. */
+const isPageFile = (file) => file.startsWith("src/") || file.startsWith("components/src/");
 
 /** The import rule `scripts/**` sets with the paths of `doors` taken out. */
 function withoutDoors(scripts, doors) {
@@ -47,10 +51,12 @@ function withoutDoors(scripts, doors) {
  */
 function overrideProblems(config) {
   const problems = [];
-  const [transport, scripts, ...exact] = config.overrides;
+  const [transport, scripts, ...rest] = config.overrides;
   if (transport?.files?.join() !== "src/transport/**" || scripts?.files?.join() !== "scripts/**") {
     return ["the first two overrides must be src/transport/** and then scripts/**"];
   }
+  // the overrides of the geometry bans name page code, not scripts; oxlint-geometry.test.mjs holds them
+  const exact = rest.filter((override) => !(override.files ?? []).every(isPageFile));
   const seen = new Set();
   for (const override of exact) {
     const rules = Object.keys(override.rules ?? {});
@@ -104,6 +110,7 @@ describe("the exact-name overrides of .oxlintrc.json", () => {
       lacks("scripts/buildtime-lib.test.mjs", "write"),
       lacks("scripts/guard.test.mjs", "write"),
       lacks("scripts/oxlint-bans.test.mjs", "write"),
+      lacks("scripts/oxlint-geometry.test.mjs", "write"),
       lacks("scripts/buildtime-proc.test.mjs", "write and process"),
       lacks("scripts/split-copy-approvals.mjs", "write"),
       lacks("scripts/split-copy-approvals.test.mjs", "write"),

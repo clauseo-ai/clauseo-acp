@@ -3,15 +3,20 @@
 # writes one line per ref it is about to push, `<local ref> <local sha> <remote ref> <remote sha>`,
 # and a delete (`git push origin --delete <branch>`, `git push origin :<branch>`) has a local sha
 # of all zeros. A push of deletes only sends no commits, so there is nothing to check: it passes at
-# once. Every other push runs `cargo xtask check --quick --no-tests` in CI mode, so clippy denies
-# warnings as fast-lane's does (#210); `CI=0 git push` runs it in local mode. With no ref on stdin
-# (`lefthook run pre-push` by hand) the check runs too.
+# once. Every other push runs `cargo xtask check --quick --no-tests --no-dependents` in CI mode,
+# so clippy denies warnings as fast-lane's does (#210); `CI=0 git push` runs it in local mode.
+# With no ref on stdin (`lefthook run pre-push` by hand) the check runs too.
 #
 # `--no-tests` leaves out the five test steps (nextest, nextest-specta, doctest, vitest,
 # playwright-unit): a push runs the format, lint, typecheck and build steps only (fmt, both clippy
 # steps, deny, shear, typos, taplo, gitleaks, the static checks, tsc, oxlint, oxfmt, vite-build).
 # Under load on the dev machines the tests timed out and failed pushes; CI and the merge queue run
 # them.
+#
+# `--no-dependents` narrows `--quick` to the changed packages: clippy lints them and not the
+# crates that depend on them. A change to a core crate otherwise pulled in most of the workspace,
+# the Tauri desktop crate included, and built a desktop-sized target on every push. CI lints and
+# tests the whole workspace on every PR.
 #
 # The ui steps are about half of the check, so a push that changes no ui path skips them with
 # `--skip-ui` as well; CI runs them whatever the branch. For each pushed ref that is not a delete, the
@@ -78,7 +83,7 @@ if [ "${#shas[@]}" -gt 0 ]; then
 fi
 
 export CI="${CI:-1}"
-args=(--quick --no-tests)
+args=(--quick --no-tests --no-dependents)
 if [ "$skip_ui" = true ]; then
   echo "pre-push: no ui change on the pushed branch; skipping the ui steps (CI runs them)"
   args+=(--skip-ui)

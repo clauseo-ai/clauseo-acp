@@ -124,8 +124,9 @@ fn no_seam_is_not_built_and_both_commands_are_invalid() {
     assert_eq!(answer.computer, not_built);
     assert_eq!(answer.tier, ProtectionTier::C);
     assert!(!answer.retry_asks_admin);
+    // The Safe workspace is parked for launch: with no sandbox wired, rows carry none.
     for row in host.matters() {
-        assert_eq!(row.protection.as_ref(), Some(&not_built));
+        assert_eq!(row.protection, None);
     }
     for command in [
         HostCommand::RetryProtection {},
@@ -423,6 +424,7 @@ fn sandbox_required_refuses_create_thread_by_cause() {
             let command = HostCommand::CreateThread {
                 matter,
                 agent: clauseo_protocol::AgentId::new(FAKE).unwrap(),
+                config: None,
             };
             match expected {
                 Some(code) => drop(host.refused(command, code)),

@@ -3,7 +3,8 @@
 //! next sign-in state reaches the windows, with `took_ms` between. The check answers only
 //! through the setup feed, never to a caller, so this pairing is how the log measures it. A
 //! check that could not tell sends no state and logs no answer. No path, email or code: the
-//! agent and the state's kind only. The first [`LINES`] lines of a run.
+//! agent and the state's kind only. The first [`LINES`] lines of a run. Each change of an
+//! agent's sign-in state kind gets a line of its own ([`changed`]).
 
 use std::collections::BTreeMap;
 use std::sync::Mutex;
@@ -51,6 +52,28 @@ pub(crate) fn answered(agent: &AgentId, state: &str) {
         tracing::info!(target: TARGET, at_ms = at_ms(), took_ms = since(began),
             agent = agent.as_str(), state, "sign-in status check answered");
     }
+}
+
+/// How many state-change lines a run logs.
+const CHANGES: u32 = 200;
+
+/// The state-change lines logged so far.
+static CHANGES_LOGGED: AtomicU32 = AtomicU32::new(0);
+
+/// Each agent's last sign-in state kind that reached the windows.
+static LAST: Mutex<BTreeMap<AgentId, String>> = Mutex::new(BTreeMap::new());
+
+/// `agent`'s sign-in state of kind `state` is going to the windows: one line when its kind
+/// differs from the last one sent (`from` is empty for the first), the first [`CHANGES`] of a
+/// run. The kinds only: never an email, a plan, a code, a URL or a path.
+pub(crate) fn changed(agent: &AgentId, state: &str) {
+    let from = lock(&LAST).insert(agent.clone(), state.to_owned());
+    let from = from.unwrap_or_default();
+    if from == state || CHANGES_LOGGED.fetch_add(1, Ordering::Relaxed) >= CHANGES {
+        return;
+    }
+    tracing::info!(target: TARGET, at_ms = at_ms(), agent = agent.as_str(), from = from.as_str(),
+        to = state, "sign-in state changed");
 }
 
 #[cfg(test)]

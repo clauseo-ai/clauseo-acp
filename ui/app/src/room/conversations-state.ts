@@ -1,7 +1,9 @@
 // One visited matter's conversations as conversations.ts keeps them, and a fresh one. Apart from conversations.ts to
 // keep that file under the size limit.
 import type { AgentId, ErrorCode, MatterId, ThreadId, Timestamp } from "../transport/protocol.ts";
+import type { DraftPicks } from "./conversations-agents.ts";
 import type { ConversationsView, Known } from "./conversations-view.ts";
+import type { ThreadsChanged } from "./host-next.ts";
 
 /** Each visited matter's conversations, kept while the room lives. */
 export type MatterState = {
@@ -9,8 +11,9 @@ export type MatterState = {
   threads: Map<ThreadId, Known>;
   /** Threads known to the room by a key other than their id. */
   keys: Map<ThreadId, string>;
-  /** The draft: its key, whether its row shows (New conversation was pressed), and the plan chosen for it. */
-  draft: { key: string; shown: boolean; chosen: AgentId | null } | null;
+  /** The draft: its key, whether its row shows (New conversation was pressed), the plan chosen for it, and the model
+   * and effort picked for each plan. */
+  draft: { key: string; shown: boolean; chosen: AgentId | null; picks?: DraftPicks } | null;
   /** The conversation open, by key; null before the matter is first opened. */
   open: string | null;
   /** The key that stands for what opens before the list says what that is: the thread to reopen, or a draft. */
@@ -63,4 +66,33 @@ export function keepKept(m: MatterState, threads: Map<ThreadId, Known>): void {
   if (kept === null) return;
   if (m.open !== (m.keys.get(kept.thread) ?? kept.thread)) m.kept = null;
   else if (!threads.has(kept.thread)) threads.set(kept.thread, kept);
+}
+
+/** H4's threads_changed into a visited matter's threads: a whole list, or what changed in it, each with its header
+ * where the store holds its view (`withHeader`). A whole list that predates a thread this room made keeps it, as a
+ * read does, and is as good as a read: one in flight is older. */
+export function applyChange(
+  m: MatterState,
+  change: ThreadsChanged,
+  withHeader: (t: Known) => Known,
+): void {
+  const threads = change.all ? new Map<ThreadId, Known>() : new Map(m.threads);
+  for (const t of change.threads) threads.set(t.thread, withHeader(t));
+  if (change.all)
+    for (const made of m.made) {
+      const known = m.threads.get(made);
+      if (!threads.has(made) && known !== undefined) threads.set(made, known);
+    }
+  keepKept(m, threads);
+  for (const gone of change.removed) {
+    threads.delete(gone);
+    m.made.delete(gone);
+    m.unsent.delete(gone);
+  }
+  m.threads = threads;
+  if (change.all) {
+    m.ticket += 1;
+    m.phase = "ready";
+    m.refused = null;
+  }
 }

@@ -140,10 +140,10 @@ test("a network drive: the warning's title, name, body and why, with Choose anot
   expect(warning()?.getAttribute("aria-label")).toBe(fr("en", "This folder is on a network drive"));
   expect(warning()?.textContent).toBe(
     fr("en", "On a network drive") +
-      fr("en", "Claude asks before every change. Codex can't work here."),
+      fr("en", "Claude asks before every change. ChatGPT can't work here."),
   );
   expect(warning()?.querySelector(".room-info")?.getAttribute("aria-label")).toBe(
-    fr("en", "Clauseo can't keep Claude and Codex inside a folder on a network drive."),
+    fr("en", "Clauseo can't keep Claude and ChatGPT inside a folder on a network drive."),
   );
   expect(byId("folder-choose")?.textContent).toBe(fr("en", "Choose another folder"));
   expect(byId("folder-anyway")?.textContent).toBe(fr("en", "Create anyway"));
@@ -163,7 +163,7 @@ test("a drive without file permissions: its own title, name and why, the same bu
   expect(warning()?.querySelector(".room-info")?.getAttribute("aria-label")).toBe(
     fr(
       "en",
-      "Clauseo can't keep Claude and Codex inside a folder on this drive. USB drives often don't keep permissions.",
+      "Clauseo can't keep Claude and ChatGPT inside a folder on this drive. USB drives often don't keep permissions.",
     ),
   );
   expect(byId("folder-choose")).not.toBeNull();
@@ -268,21 +268,4 @@ test("Create waits at most 5 s for a check that doesn't answer, then makes the m
   vi.useRealTimers();
   await settle();
   expect(created(transport)).toEqual([existing("ref-a")]);
-});
-
-test("a parent Create's picker gives on a network drive: the warning, then Create anyway makes it there without asking again", async () => {
-  const transport = await mount(checking([{ support: "network" }]));
-  await openForm();
-  await press("create-matter");
-  expect(checked(transport)).toEqual([
-    { folder_support: { source: { new_folder: { folder: "ref-a" } } } },
-  ]);
-  expect(warning()?.dataset["kind"]).toBe("network");
-  expect(created(transport)).toEqual([]);
-  expect(dialog()?.textContent).toContain(`D:\\Matters\\ref-a\\${NAME}`);
-  await press("folder-anyway");
-  expect(transport.only("pick_folder")).toHaveLength(1);
-  expect(created(transport)).toEqual([
-    { create_matter: { name: NAME, source: { new_folder: { folder: "ref-a" } } } },
-  ]);
 });

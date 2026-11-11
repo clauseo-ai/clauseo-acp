@@ -11,18 +11,24 @@
 //! - With no seam the computer is `Unsupported { why: not_built }`, never what
 //!   `clauseo_sandbox::detect` would say on its own (tier A on macOS, with nothing jailing).
 //! - The view goes to every app subscriber whenever it changes: the detection, the work in
-//!   progress, `retry_asks_admin`, or either setting (the loop's [`tick`] compares the
-//!   settings after every input, so any path that changes them is covered). Like
+//!   progress, `retry_asks_admin`, either setting, or the data fence's names-only flag (the
+//!   loop's [`tick`] compares the settings and the flag after every input, so any path that
+//!   changes them is covered; a fence check runs on a matter thread, whose reply is an input). Like
 //!   `ProtectionChanged`, no app catch-up carries it: the query gives the current view.
 //! - A change of the computer's protection sends `ProtectionChanged` for every listed matter.
+//! - With no sandbox wired ([`ProtectionHost::sandbox_wired`]) the Safe workspace is parked for
+//!   launch (Rohan, 2026-11-09): rows carry no protection, nothing refuses, no view change goes
+//!   out, and a set `sandbox.*` key is logged once as ignored. The query still answers.
 
 use clauseo_protocol::{
     ErrorCode, HostEvent, NotProtectedCause, Protection, ProtectionTier, ProtectionView,
     UnsupportedWhy,
 };
 use clauseo_sandbox::{Detection, NoSandbox, SetupState, Tier};
+use clauseo_settings::{Effective, SandboxSettings};
 
 use super::Actor;
+use crate::agent::data_fence::DataFenceHealth;
 use crate::config::Sandbox;
 use crate::error::Error;
 
@@ -48,6 +54,11 @@ pub(crate) struct ProtectionHost {
     next_work: u64,
     /// The view last sent to app subscribers (at start, the start's view).
     sent: Option<ProtectionView>,
+    /// With no sandbox wired, the `sandbox.*` keys last logged as set but ignored.
+    ignored: Vec<&'static str>,
+    /// The data fence's health, shared with every fence check (`agent/data_fence/health.rs`):
+    /// the actor only loads its flag, never touching the disk.
+    data_fence: DataFenceHealth,
 }
 
 impl ProtectionHost {
@@ -59,7 +70,22 @@ impl ProtectionHost {
             running: None,
             next_work: 0,
             sent: None,
+            ignored: Vec::new(),
+            data_fence: DataFenceHealth::default(),
         }
+    }
+
+    /// Whether a sandbox is wired (`HostConfig::with_sandbox`). With none, the host is a plain
+    /// ACP client: rows carry no protection, `sandbox.*` never refuses and no view change goes
+    /// out (the Safe workspace is parked for launch, Rohan 2026-11-09; it returns by itself when
+    /// desktop wires `with_sandbox`).
+    pub(crate) fn sandbox_wired(&self) -> bool {
+        self.sandbox.is_some()
+    }
+
+    /// The data fence's health, for each permission request's fence check.
+    pub(crate) fn data_fence(&self) -> &DataFenceHealth {
+        &self.data_fence
     }
 
     /// The computer's protection now.
@@ -72,6 +98,7 @@ impl ProtectionHost {
         let mut view = ProtectionView::new(self.observed.computer.clone(), required, auto);
         view.in_progress = self.running.as_ref().map(work::Running::work);
         view.retry_asks_admin = self.observed.asks_admin;
+        view.data_fence_names_only = self.data_fence.names_only();
         view
     }
 
@@ -86,11 +113,33 @@ impl ProtectionHost {
         Some(view)
     }
 
-    /// Whether the settings moved from the view last sent.
-    fn settings_moved(&self, required: bool, auto: bool) -> bool {
-        self.sent
-            .as_ref()
-            .is_none_or(|sent| sent.required != required || sent.unprotected_auto_allowed != auto)
+    /// With no sandbox wired, one warning naming the `sandbox.*` keys `set` when they differ
+    /// from the ones last logged: once per settings load or change, never per launch. Keys only,
+    /// no values or paths (0047).
+    fn warn_ignored(&mut self, set: Vec<&'static str>) {
+        if self.sandbox_wired() || set == self.ignored {
+            return;
+        }
+        if !set.is_empty() {
+            let verb = if set.len() == 1 { "is" } else { "are" };
+            tracing::warn!(
+                "{} {verb} set but ignored in this version: the Safe workspace isn't part of this \
+                 release",
+                set.join(" and ")
+            );
+        }
+        self.ignored = set;
+    }
+
+    /// Whether the settings, or the data fence's names-only flag, moved from the view last
+    /// sent.
+    fn moved(&self, required: bool, auto: bool) -> bool {
+        let names_only = self.data_fence.names_only();
+        self.sent.as_ref().is_none_or(|sent| {
+            sent.required != required
+                || sent.unprotected_auto_allowed != auto
+                || sent.data_fence_names_only != names_only
+        })
     }
 }
 
@@ -178,6 +227,27 @@ fn settings(actor: &Actor) -> (bool, bool) {
     (sandbox.required, sandbox.allow_unprotected_auto)
 }
 
+/// The `sandbox.*` keys set, from a policy or `settings.json`: each one a policy locks with
+/// its own value, or whose value is not the default (one at its default changes nothing). A key
+/// a broken policy locked off (it has a lock reason) was set by no one.
+pub(crate) fn set_keys(effective: &Effective) -> Vec<&'static str> {
+    let sandbox = &effective.settings().sandbox;
+    let default = SandboxSettings::default();
+    let reasoned = |key| effective.lock_reason(key).is_some();
+    let by_policy = |key| effective.is_locked(key) && !reasoned(key);
+    [
+        ("sandbox.required", sandbox.required != default.required),
+        (
+            "sandbox.allow_unprotected_auto",
+            sandbox.allow_unprotected_auto != default.allow_unprotected_auto,
+        ),
+    ]
+    .into_iter()
+    .filter(|&(key, moved)| by_policy(key) || (moved && !reasoned(key)))
+    .map(|(key, _)| key)
+    .collect()
+}
+
 /// The view `HostQuery::Protection` answers.
 pub(crate) fn view(actor: &Actor) -> ProtectionView {
     let (required, auto) = settings(actor);
@@ -186,24 +256,46 @@ pub(crate) fn view(actor: &Actor) -> ProtectionView {
 
 /// The start's view, as the one sent: a later change is what goes out.
 pub(super) fn start(actor: &mut Actor) {
+    warn_ignored(actor);
     let (required, auto) = settings(actor);
     let _first = actor.protection.take_changed(required, auto);
 }
 
 /// Sends `ProtectionViewChanged` to every app subscriber when the view changed.
 pub(super) fn publish_view(actor: &mut Actor) {
+    // Safe workspace parked for launch: no view goes out until desktop wires `with_sandbox`.
+    if !actor.protection.sandbox_wired() {
+        return;
+    }
     let (required, auto) = settings(actor);
     if let Some(view) = actor.protection.take_changed(required, auto) {
         super::app::publish(actor, &HostEvent::ProtectionViewChanged { view });
     }
 }
 
-/// After every input: when either protection setting changed, the new view goes out.
+/// After every input: when either protection setting changed, or the data fence started or
+/// stopped comparing by names only (a fence check's reply is an input), the new view goes out.
 pub(super) fn tick(actor: &mut Actor) {
+    // Safe workspace parked for launch: only the ignored-keys warning, until desktop wires
+    // `with_sandbox`.
+    if !actor.protection.sandbox_wired() {
+        warn_ignored(actor);
+        return;
+    }
     let (required, auto) = settings(actor);
-    if actor.protection.settings_moved(required, auto) {
+    if actor.protection.moved(required, auto) {
         publish_view(actor);
     }
+}
+
+/// With no sandbox wired, the warning that the `sandbox.*` keys set are ignored, when they changed.
+fn warn_ignored(actor: &mut Actor) {
+    // Safe workspace parked for launch: the keys are read again once desktop wires `with_sandbox`.
+    if actor.protection.sandbox_wired() {
+        return;
+    }
+    let set = set_keys(&actor.effective);
+    actor.protection.warn_ignored(set);
 }
 
 /// The computer's protection changed: `ProtectionChanged` for every listed matter (B1: each
@@ -221,10 +313,14 @@ fn matters_changed(actor: &mut Actor) {
     actor.lists.touch_all();
 }
 
-/// `sandbox.required`'s refusal of `CreateThread` and of a turn's launch: none when the setting
-/// is off or the computer is protected; `sandbox.setup_required` when the set-up would fix it
-/// (`NeedsSetUp`, `SetUpRefused`); `sandbox.required` for every other cause.
+/// `sandbox.required`'s refusal of `CreateThread` and of a turn's launch: none when no sandbox
+/// is wired, the setting is off or the computer is protected; `sandbox.setup_required` when the
+/// set-up would fix it (`NeedsSetUp`, `SetUpRefused`); `sandbox.required` for every other cause.
 pub(crate) fn refusal(actor: &Actor) -> Option<Error> {
+    // Safe workspace parked for launch: never refuses until desktop wires `with_sandbox`.
+    if !actor.protection.sandbox_wired() {
+        return None;
+    }
     if !actor.effective.settings().sandbox.required {
         return None;
     }

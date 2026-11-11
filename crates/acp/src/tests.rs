@@ -12,6 +12,7 @@ use serde_json::{Value, json};
 
 use super::*;
 
+mod claude_089;
 mod codex;
 mod interface;
 mod mcp_wire;
@@ -20,6 +21,7 @@ mod prompts;
 mod requests;
 mod sdk_refused_lines;
 mod stdout;
+mod unread;
 mod updates;
 
 /// The agent's stdin: each write arrives as one message (the line sink writes a line at once).
@@ -313,8 +315,11 @@ fn error_codes_map() {
         ),
         (
             Error::Rpc {
+                method: String::new(),
                 code: -32603,
                 message: String::new(),
+                data: String::new(),
+                data_text: None,
             },
             ErrorCode::AgentProtocolError,
         ),
@@ -337,4 +342,44 @@ fn error_codes_map() {
     for (error, code) in cases {
         assert_eq!(error.code(), code, "{error:?}");
     }
+}
+
+/// An RPC error's `data` as kept: codex-acp's `data.message` (Codex's own error under a bare
+/// "Internal error"), else a string or the JSON, cut at a char boundary; none for `null`.
+#[test]
+fn rpc_data_keeps_codex_s_message() {
+    use crate::error::{MAX_DATA_BYTES, data_text};
+    let codex = json!({"message": "stream disconnected before completion: Connection refused \
+        (os error 61)", "codex_error_info": "other"});
+    let kept = data_text(Some(&codex));
+    assert_eq!(
+        kept.as_deref(),
+        Some("stream disconnected before completion: Connection refused (os error 61)")
+    );
+    assert_eq!(data_text(Some(&json!("closed"))).as_deref(), Some("closed"));
+    assert_eq!(
+        data_text(Some(&json!({"errorKind": "x"}))).as_deref(),
+        Some(r#"{"errorKind":"x"}"#)
+    );
+    assert_eq!(data_text(Some(&Value::Null)), None);
+    assert_eq!(data_text(None), None);
+    let long = data_text(Some(&json!("é".repeat(MAX_DATA_BYTES)))).unwrap();
+    assert!(long.len() <= MAX_DATA_BYTES && long.chars().all(|c| c == 'é'));
+    let error = Error::Rpc {
+        method: "session/prompt".to_owned(),
+        code: -32603,
+        message: "Internal error".to_owned(),
+        data: "keys: codex_error_info, message".to_owned(),
+        data_text: kept,
+    };
+    // The data's text is for classifying only: never in the text a turn's detail or a log gets.
+    assert_eq!(
+        error.to_string(),
+        "the agent answered session/prompt with error -32603: Internal error"
+    );
+    assert_eq!(
+        error.rpc_data(),
+        Some("stream disconnected before completion: Connection refused (os error 61)")
+    );
+    assert_eq!(Error::Closed.rpc_data(), None);
 }

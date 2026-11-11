@@ -16,6 +16,7 @@
 //!   `Matter::undo` (its two checkpoints), `Matter::restore` (its walk and its checkpoint),
 //!   `Matter::preview_restore` and `Matter::compare` with the folder (the hash-only walk);
 //! - `undo::edited_since`: `Matter::edited_since` (hashes of the step's targets);
+//! - `replace::read_local`: `Matter::read_local` (one file, checked with the probe first);
 //! - [`crate::scan`]: its listings (it reads no content).
 //!
 //! The others read no file in the folder but `matter.json`: `Matter::open`, `locate`,

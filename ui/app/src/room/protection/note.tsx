@@ -2,11 +2,16 @@
 // (components' protection.tsx), its retry through the set-up confirm where Windows' administrator
 // prompt follows (setup.tsx), the waiting line in the button's place and a refusal's words under
 // the body. Design B: a block says its reason's line (blocked.ts), and where the repair is the
-// installer the retry gives way to its line and, on a personal install, "Get the installer". When
-// the matter becomes protected the note closes. The firm's notice (required.tsx) rides in the same
-// chunk.
+// installer the retry gives way to its line and, on a personal install, "Get the installer". A
+// block only the firm can act on, or a sandbox.blocked refusal, adds "Copy details for IT"
+// (it-details.ts). When the matter becomes protected the note closes. While the firm requires the
+// Safe workspace (ProtectionView.required) the body says the firm's line for the cause
+// (required-words.ts), never that Clauseo works without it, and the note waits for a press: the
+// firm's notice already says it in the composer. The firm's notice (required.tsx) rides in the
+// same chunk.
 import { NotProtectedNote, type NoteWhy } from "@clauseo/components/clauseo/protection.tsx";
 import { useDisplay } from "@clauseo/components/lib/display.ts";
+import { itDetails } from "./it-details.ts";
 import { blockLine, blockOf, firmInstall, needsInstaller, repairLine } from "./blocked.ts";
 import { openInstallerPage, repairPage } from "./installer.ts";
 import { useEffect, useState } from "react";
@@ -20,6 +25,7 @@ import { retryProtection } from "./commands.ts";
 import { failedWords, useSetUpPress, waitingWords } from "./setup.tsx";
 import { canRetry } from "./view.ts";
 import { named1385, poolOf, whyOf } from "./detail.ts";
+import { requiredWords } from "./required-words.ts";
 
 /** The note's `why` for a cause: a missing admin copy reads as not set up yet. */
 const noteWhy = (cause: Cause): NoteWhy =>
@@ -72,10 +78,12 @@ export function ProtectionNote({
   const [auto, setAuto] = useState(
     () => cause !== null && whyOf(cause) !== "not_built" && explainDue(cause.group, matterId),
   );
+  // the firm's requirement: the composer's notice says it, so the note opens only on a press, and stays unexplained
+  const required = state.view?.required === true;
   const group = cause?.group ?? null;
   useEffect(() => {
-    if (auto && group !== null) markExplained(group, matterId);
-  }, [auto, group, matterId]);
+    if (auto && !required && group !== null) markExplained(group, matterId);
+  }, [auto, required, group, matterId]);
   const close = () => {
     setAuto(false);
     onClose();
@@ -96,14 +104,19 @@ export function ProtectionNote({
   return (
     <>
       <NotProtectedNote
-        open={open || auto}
+        open={open || (auto && !required)}
         matter={matter}
         why={noteWhy(cause)}
+        required={required ? requiredWords(lang, cause) : null}
         {...(cause.group === "pool" ? { pool: poolOf(cause), addRoom: retry } : {})}
         named1385={named1385(cause)}
         waiting={retry ? waitingWords(lang, state, cause) : null}
         failed={retry ? failedWords(lang, state) : null}
         extra={extra}
+        forIt={
+          itDetails.blocked(lang, cause) ??
+          (retry ? itDetails.refused(lang, state.failed, cause) : null)
+        }
         onGetInstaller={page === null ? undefined : () => void openInstallerPage(transport, page)}
         onClose={close}
         onProtect={retry ? press : undefined}

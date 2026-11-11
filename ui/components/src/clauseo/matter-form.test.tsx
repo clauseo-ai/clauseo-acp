@@ -1,10 +1,14 @@
 // @vitest-environment happy-dom
-// The new matter form and its dialog: Create the matter waits for a name, the words go to the host trimmed, the
-// folder follows the name, and the dialog opens with focus on the name and closes on Cancel.
+// The new matter form and its dialog: Create matter waits for a name and a folder; the Folder row with no folder, a
+// folder the picker gave (home as "~", the whole path in the text and its title, the last part kept), and the new folder
+// in Clauseo's place; Choose folder… opening the picker at once; Enter before the form is ready saying what's missing;
+// the refusal's one way on; and the dialog opening with focus on the name, Tab going name, client, Choose folder…,
+// Create, and closing on Cancel.
 import { act, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, expect, test } from "vitest";
 import { matterFormWords } from "../lib/words-matter-form.hi.ts";
+import { homeShown, splitPath, under } from "./folder-path.ts";
 import { NewMatterForm } from "./matter-form.tsx";
 import { NewMatterDialog } from "./new-matter-dialog.tsx";
 
@@ -38,58 +42,13 @@ const type = async (input: HTMLInputElement | undefined, value: string) => {
     input?.dispatchEvent(new Event("input", { bubbles: true }));
   });
 };
-const folderFor = (name: string) => `Documents/Clauseo/${name}`;
 const byTestId = (id: string) =>
   document.querySelector<HTMLButtonElement>(`[data-testid="${id}"]`) ?? undefined;
-
-test("Create the matter waits for a name, then gives the host the words trimmed", async () => {
-  const made: (string | null)[][] = [];
-  await mount(<NewMatterForm folderFor={folderFor} onCreate={(...a) => made.push(a)} />);
-  expect(button("Create the matter")?.disabled).toBe(true);
-  const [name, client, next] = [
-    ...document.querySelectorAll<HTMLInputElement>(".matter-form input"),
-  ];
-  await type(name, "   ");
-  expect(button("Create the matter")?.disabled).toBe(true);
-  await type(name, " Acme Ltd v. State ");
-  await type(client, "Acme Ltd");
-  await type(next, "3 March 2027");
-  expect(document.querySelector(".matter-form-path")?.textContent).toBe(
-    "Documents/Clauseo/Acme Ltd v. State",
-  );
-  await act(async () => button("Create the matter")?.click());
-  expect(made).toEqual([["Acme Ltd v. State", "Acme Ltd", "3 March 2027", "2027-03-03"]]);
-});
-
-test("Change takes the folder the picker gives, and keeps it when the picker gives none", async () => {
-  let pick: string | null = "Documents/Cases/Acme";
-  await mount(
-    <NewMatterForm
-      folderFor={folderFor}
-      name="Acme Ltd v. State"
-      pickFolder={() => pick}
-      onCreate={() => {}}
-    />,
-  );
-  await act(async () => button("Change")?.click());
-  expect(document.querySelector(".matter-form-path")?.textContent).toBe("Documents/Cases/Acme");
-  pick = null;
-  await act(async () => button("Change")?.click());
-  expect(document.querySelector(".matter-form-path")?.textContent).toBe("Documents/Cases/Acme");
-});
-
-test("the dialog opens with focus on the name, and Cancel closes it", async () => {
-  const changes: boolean[] = [];
-  await mount(<NewMatterDialog open onOpenChange={(o) => changes.push(o)} onCreate={() => {}} />);
-  expect(document.querySelector("[role=dialog] .matter-form")).not.toBeNull();
-  // Base UI moves the starting focus on the next frames, so wait for them, not for a clock
-  for (let i = 0; i < 3; i += 1)
-    await act(async () => new Promise<void>((r) => requestAnimationFrame(() => r())));
-  expect(document.activeElement?.tagName).toBe("INPUT");
-  expect(document.activeElement?.closest("[role=dialog]")).not.toBeNull();
-  await act(async () => button("Cancel")?.click());
-  expect(changes).toEqual([false]);
-});
+const inputs = () => [...document.querySelectorAll<HTMLInputElement>(".matter-form input")];
+const path = () => document.querySelector<HTMLElement>("[data-testid=matter-folder-path]");
+const create = () => button("Create matter");
+const choose = () => button("Choose folder…");
+const IDS = { name: "matter-name", existing: "matter-existing", made: "matter-made" };
 
 /** A promise and the hands that settle it, so a test holds a picker or a create open. */
 function held<T>() {
@@ -102,90 +61,178 @@ function held<T>() {
   return { promise, resolve, reject };
 }
 
-test("without details, the form asks only the name, and gives no client or date", async () => {
+test("paths: home as ~, a full path as it is, and the last part apart from its parent", () => {
+  expect(homeShown("Documents/Clients/Acme")).toBe("~/Documents/Clients/Acme");
+  expect(homeShown("Documents\\Clients\\Acme")).toBe("~\\Documents\\Clients\\Acme");
+  expect(homeShown("/Volumes/Work/Acme")).toBe("/Volumes/Work/Acme");
+  expect(homeShown("D:\\Cases")).toBe("D:\\Cases");
+  expect(homeShown("\\\\server\\share")).toBe("\\\\server\\share");
+  expect(under("~/Documents/Clauseo/", "Acme")).toBe("~/Documents/Clauseo/Acme");
+  expect(splitPath("~/Documents/Clients/Acme")).toEqual({
+    head: "~/Documents/Clients/",
+    tail: "Acme",
+  });
+  expect(splitPath("D:\\Cases\\Acme")).toEqual({ head: "D:\\Cases\\", tail: "Acme" });
+  expect(splitPath("/")).toEqual({ head: "/", tail: "" });
+  expect(splitPath("Acme")).toEqual({ head: "", tail: "Acme" });
+});
+
+test("Create matter waits for a name and a folder, then gives the host the words trimmed", async () => {
+  const made: unknown[][] = [];
+  await mount(
+    <NewMatterForm pickFolder={() => "Documents/Acme"} onCreate={(...a) => made.push(a)} />,
+  );
+  const [name, client] = inputs();
+  expect(create()?.disabled).toBe(true);
+  await type(name, "   ");
+  expect(create()?.disabled).toBe(true);
+  await type(name, " Acme share purchase ");
+  // a name, no folder: still waiting
+  expect(create()?.disabled).toBe(true);
+  await act(async () => choose()?.click());
+  expect(create()?.disabled).toBe(false);
+  await type(client, " Acme Holdings ");
+  await act(async () => create()?.click());
+  expect(made).toEqual([["Acme share purchase", "Acme Holdings", false]]);
+  // a folder, no name: waiting again
+  await type(name, "");
+  expect(create()?.disabled).toBe(true);
+});
+
+test("no folder: the row says so, Choose folder… is the main button, and no title stands over nothing", async () => {
+  await mount(<NewMatterForm name="Acme" pickFolder={() => null} onCreate={() => {}} />);
+  expect(path()?.textContent).toBe("No folder chosen");
+  expect(document.querySelector(".matter-form-folder-field")?.getAttribute("title")).toBeNull();
+  expect(choose()?.className).toContain("bg-primary");
+  // a cancelled picker keeps nothing chosen
+  await act(async () => choose()?.click());
+  expect(path()?.textContent).toBe("No folder chosen");
+  expect(create()?.disabled).toBe(true);
+});
+
+test("a folder chosen: home as ~, the whole path in the text and the title, the last part kept apart", async () => {
+  const long =
+    "Documents/Clients/Acme Holdings Private Limited/Corporate/2026 Share purchase and disclosure schedules/Working papers";
+  await mount(<NewMatterForm name="Acme" folder={long} onCreate={() => {}} />);
+  const full = `~/${long}`;
+  // the whole path is in the text, for a screen reader, and under the pointer
+  expect(path()?.textContent).toBe(full);
+  expect(document.querySelector(".matter-form-folder-field")?.getAttribute("title")).toBe(full);
+  // isolated, in English, the parent cut short by CSS before the folder's own name
+  const bdi = path()?.querySelector("bdi");
+  expect(bdi?.getAttribute("dir")).toBe("ltr");
+  expect(bdi?.getAttribute("lang")).toBe("en");
+  expect(bdi?.querySelector(".folder-path-head")?.textContent).toBe(
+    "~/Documents/Clients/Acme Holdings Private Limited/Corporate/2026 Share purchase and disclosure schedules/",
+  );
+  expect(bdi?.querySelector(".folder-path-tail")?.textContent).toBe("Working papers");
+  // Choose folder… steps down to a raised button, and is described by the path
+  expect(choose()?.className).not.toContain("bg-primary");
+  expect(choose()?.getAttribute("aria-describedby")).toBe(path()?.id);
+});
+
+test("Choose folder… opens the picker at once, waits for it, and a cancel keeps what was there", async () => {
+  const pick = held<string | null>();
+  let asked = 0;
+  await mount(
+    <NewMatterForm
+      name="Acme"
+      testIds={IDS}
+      pickFolder={() => {
+        asked += 1;
+        return pick.promise;
+      }}
+      onCreate={() => {}}
+    />,
+  );
+  const button = byTestId("matter-existing");
+  await act(async () => button?.click());
+  expect(asked).toBe(1);
+  expect(button?.disabled).toBe(true);
+  await act(async () => pick.resolve("Documents/Acme"));
+  expect(path()?.textContent).toBe("~/Documents/Acme");
+  expect(button?.disabled).toBe(false);
+  await act(async () => button?.click());
+  expect(asked).toBe(2);
+});
+
+test("Use a new folder: offered under the row, it shows the folder Clauseo makes, named as the matter", async () => {
+  const made: unknown[][] = [];
+  let told = 0;
+  await mount(
+    <NewMatterForm
+      location="Documents/Clauseo"
+      testIds={IDS}
+      pickFolder={() => "Documents/Acme"}
+      onMade={() => {
+        told += 1;
+      }}
+      onCreate={(...a) => made.push(a)}
+    />,
+  );
+  const offer = byTestId("matter-made");
+  expect(offer?.textContent).toBe("Use a new folder in \u2068~/Documents/Clauseo\u2069");
+  await act(async () => offer?.click());
+  expect(told).toBe(1);
+  expect(byTestId("matter-made")).toBeUndefined();
+  expect(path()?.textContent).toBe("~/Documents/Clauseo/…");
+  expect(document.querySelector(".matter-form-folder-note")?.textContent).toBe(
+    "Clauseo creates this folder. Add papers to it any time.",
+  );
+  await type(inputs()[0], "Acme lease");
+  expect(path()?.textContent).toBe("~/Documents/Clauseo/Acme lease");
+  await act(async () => create()?.click());
+  expect(made).toEqual([["Acme lease", "", true]]);
+  // a folder picked afterwards replaces it, and the offer comes back
+  await act(async () => choose()?.click());
+  expect(path()?.textContent).toBe("~/Documents/Acme");
+  expect(byTestId("matter-made")).toBeDefined();
+});
+
+test("no place for new matters, no offer", async () => {
+  await mount(<NewMatterForm testIds={IDS} pickFolder={() => null} onCreate={() => {}} />);
+  expect(byTestId("matter-made")).toBeUndefined();
+});
+
+test("Enter before the form is ready says what's missing under each field, and sends nothing", async () => {
+  const made: unknown[][] = [];
+  await mount(
+    <NewMatterForm pickFolder={() => "Documents/Acme"} onCreate={(...a) => made.push(a)} />,
+  );
+  const [name] = inputs();
+  const enter = () =>
+    act(async () => {
+      name?.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    });
+  await enter();
+  const lines = () =>
+    [...document.querySelectorAll(".matter-form-error")].map((e) => e.textContent);
+  expect(lines()).toEqual(["Name the matter.", "Choose a folder for the matter."]);
+  expect(name?.getAttribute("aria-invalid")).toBe("true");
+  expect(made).toEqual([]);
+  await type(name, "Acme");
+  expect(lines()).toEqual(["Choose a folder for the matter."]);
+  // the folder's line describes Choose folder…
+  const describedBy = choose()?.getAttribute("aria-describedby") ?? "";
+  expect(describedBy.split(" ")).toContain(document.querySelectorAll(".matter-form-error")[0]?.id);
+  await act(async () => choose()?.click());
+  expect(lines()).toEqual([]);
+});
+
+test("without details, the form asks the name alone, and gives no client", async () => {
   const made: unknown[][] = [];
   await mount(
     <NewMatterForm
       details={false}
       name="Acme"
       client="Old"
-      next="nonsense"
+      folder="Documents/Acme"
       onCreate={(...a) => made.push(a)}
     />,
   );
-  expect(document.querySelectorAll(".matter-form input")).toHaveLength(1);
-  await act(async () => button("Create the matter")?.click());
-  expect(made).toEqual([["Acme", "", "", null]]);
-});
-
-test("a next date that doesn't read says how to write it once the field is left, and holds Create back", async () => {
-  await mount(<NewMatterForm name="Acme" onCreate={() => {}} />);
-  const next = document.querySelectorAll<HTMLInputElement>(".matter-form input")[2];
-  // half typed: Create waits, but nothing says the field is wrong yet
-  await type(next, "3");
-  expect(document.querySelector(".matter-form-error")).toBeNull();
-  expect(next?.getAttribute("aria-invalid")).toBeNull();
-  expect(button("Create the matter")?.disabled).toBe(true);
-  await type(next, "next Tuesday");
-  expect(document.querySelector(".matter-form-error")).toBeNull();
-  await act(async () => next?.dispatchEvent(new FocusEvent("focusout", { bubbles: true })));
-  expect(document.querySelector(".matter-form-error")?.textContent).toBe(
-    "Write the date as 30 October 2026.",
-  );
-  expect(next?.getAttribute("aria-invalid")).toBe("true");
-  expect(button("Create the matter")?.disabled).toBe(true);
-  await type(next, "30 October 2026");
-  expect(document.querySelector(".matter-form-error")).toBeNull();
-  expect(button("Create the matter")?.disabled).toBe(false);
-});
-
-test("folder null shows Change alone; Change waits for the picker, and a cancel keeps what was there", async () => {
-  const pick = held<string | null>();
-  const asked: string[] = [];
-  await mount(
-    <NewMatterForm
-      folder={null}
-      name="Acme"
-      testIds={{ name: "matter-name", existing: "matter-existing", create: "create-matter" }}
-      pickFolder={(current) => {
-        asked.push(current);
-        return pick.promise;
-      }}
-      onCreate={() => {}}
-    />,
-  );
-  expect(document.querySelector("[data-testid=matter-name]")?.tagName).toBe("INPUT");
-  expect(document.querySelector("[data-testid=create-matter]")).not.toBeNull();
-  expect(document.querySelector(".matter-form-path")).toBeNull();
-  // no folder icon beside nothing
-  expect(document.querySelector(".matter-form-folder-icon")).toBeNull();
-  // no folder words on screen; Change is described, for a screen reader, by what it changes
-  const words = document.querySelector(".matter-form-folder-words");
-  expect(words?.querySelector(".sr-only")?.textContent).toBe("The matter's folder");
-  expect(words?.textContent).toBe("The matter's folder");
-  const change = document.querySelector<HTMLButtonElement>("[data-testid=matter-existing]");
-  expect(change?.getAttribute("aria-describedby")).toBe(words?.id);
-  await act(async () => change?.click());
-  expect(asked).toEqual([""]);
-  expect(change?.disabled).toBe(true);
-  await act(async () => pick.resolve("Documents/Acme"));
-  expect(document.querySelector(".matter-form-path")?.textContent).toBe("Documents/Acme");
-  // the path is isolated, and Change is described by the folder line
-  expect(document.querySelector(".matter-form-path")?.tagName).toBe("BDI");
-  expect(document.getElementById(change?.getAttribute("aria-describedby") ?? "")?.textContent).toBe(
-    "Folder: Documents/Acme",
-  );
-  expect(change?.disabled).toBe(false);
-  await act(async () => change?.click());
-  expect(asked).toEqual(["", "Documents/Acme"]);
-});
-
-test("a picker that gives nothing keeps the folder line hidden", async () => {
-  await mount(
-    <NewMatterForm folder={null} name="Acme" pickFolder={async () => null} onCreate={() => {}} />,
-  );
-  await act(async () => button("Change")?.click());
-  expect(document.querySelector(".matter-form-path")).toBeNull();
+  expect(inputs()).toHaveLength(1);
+  await act(async () => create()?.click());
+  expect(made).toEqual([["Acme", "", false]]);
 });
 
 test("Create stands pressed while the create runs, and the caller's error shows as an alert", async () => {
@@ -194,7 +241,7 @@ test("Create stands pressed while the create runs, and the caller's error shows 
   await mount(
     <NewMatterForm
       name="Acme"
-      folder={null}
+      folder="Documents/Acme"
       error="Clauseo couldn't create the matter. Try again, or choose another folder."
       onCreate={() => {
         calls += 1;
@@ -205,26 +252,31 @@ test("Create stands pressed while the create runs, and the caller's error shows 
   expect(document.querySelector("[role=alert]")?.textContent).toBe(
     "Clauseo couldn't create the matter. Try again, or choose another folder.",
   );
-  await act(async () => button("Create the matter")?.click());
-  const create = button("Create the matter");
-  expect(create?.disabled).toBe(true);
-  expect(create?.getAttribute("aria-busy")).toBe("true");
-  await act(async () => create?.click());
+  await act(async () => create()?.click());
+  expect(create()?.disabled).toBe(true);
+  expect(create()?.getAttribute("aria-busy")).toBe("true");
+  await act(async () => create()?.click());
   expect(calls).toBe(1);
   await act(async () => run.reject(new Error("refused")));
-  expect(button("Create the matter")?.disabled).toBe(false);
+  expect(create()?.disabled).toBe(false);
 });
 
-test("Open it sits under the line only when the caller gives it, and presses through to the caller", async () => {
+test("a refusal's one way on: Open it for a matter on the list, else Choose another folder for a folder refused", async () => {
   const line = "This folder is already a matter: Acme.";
   let opened = 0;
-  const onCreate = () => {};
+  let picks = 0;
+  const pickFolder = () => {
+    picks += 1;
+    return "Documents/Other";
+  };
   await mount(
     <NewMatterForm
       name="Acme"
-      folder={null}
+      folder="Documents/Acme"
       error={line}
-      onCreate={onCreate}
+      folderError
+      pickFolder={pickFolder}
+      onCreate={() => {}}
       openMatter={() => {
         opened += 1;
       }}
@@ -232,26 +284,67 @@ test("Open it sits under the line only when the caller gives it, and presses thr
     />,
   );
   expect(document.querySelector("[role=alert]")?.textContent).toBe(line);
+  expect(button("Choose another folder")).toBeUndefined();
   await act(async () => byTestId("open-matter")?.click());
   expect(opened).toBe(1);
-  // a line with no matter to open: no button
-  await act(async () => root?.unmount());
-  host?.remove();
-  await mount(<NewMatterForm name="Acme" folder={null} error={line} onCreate={onCreate} />);
-  expect(button("Open it")).toBeUndefined();
-  // no line, no button, even with a matter to open
   await act(async () => root?.unmount());
   host?.remove();
   await mount(
     <NewMatterForm
       name="Acme"
-      folder={null}
-      onCreate={onCreate}
-      openMatter={() => {}}
-      testIds={{ open: "open-matter" }}
+      folder="Documents/Acme"
+      error="Clauseo can't read ~/Documents/Acme."
+      folderError
+      pickFolder={pickFolder}
+      onCreate={() => {}}
     />,
   );
-  expect(byTestId("open-matter")).toBeUndefined();
+  expect(button("Open it")).toBeUndefined();
+  await act(async () => button("Choose another folder")?.click());
+  expect(picks).toBe(1);
+  expect(path()?.textContent).toBe("~/Documents/Other");
+  // a line that isn't about the folder: no button under it
+  await act(async () => root?.unmount());
+  host?.remove();
+  await mount(
+    <NewMatterForm
+      name="Acme"
+      folder="Documents/Acme"
+      error="x"
+      pickFolder={pickFolder}
+      onCreate={() => {}}
+    />,
+  );
+  expect(button("Choose another folder")).toBeUndefined();
+});
+
+test("the dialog opens with focus on the name, Tab runs name, client, Choose folder…, Create, and Cancel closes it", async () => {
+  const changes: boolean[] = [];
+  await mount(
+    <NewMatterDialog
+      open
+      folder="Documents/Acme"
+      onOpenChange={(o) => changes.push(o)}
+      pickFolder={() => null}
+      onCreate={() => {}}
+    />,
+  );
+  expect(document.querySelector("[role=dialog] .matter-form")).not.toBeNull();
+  // Base UI moves the starting focus on the next frames, so wait for them, not for a clock
+  for (let i = 0; i < 3; i += 1)
+    await act(async () => new Promise<void>((r) => requestAnimationFrame(() => r())));
+  expect(document.activeElement?.tagName).toBe("INPUT");
+  expect(document.activeElement?.closest("[role=dialog]")).not.toBeNull();
+  // the document's order is the Tab order: no tabindex reorders it
+  const order = [
+    ...document.querySelectorAll<HTMLElement>("[role=dialog] input, [role=dialog] button"),
+  ].map((e) => e.textContent?.trim() || e.tagName);
+  expect(order).toEqual(["INPUT", "INPUT", "Choose folder…", "Create matter", "Cancel"]);
+  expect(
+    document.querySelector("[role=dialog] [tabindex]:not([tabindex='-1']):not([tabindex='0'])"),
+  ).toBeNull();
+  await act(async () => button("Cancel")?.click());
+  expect(changes).toEqual([false]);
 });
 
 test("the dialog closes only when an async create succeeds", async () => {
@@ -262,28 +355,29 @@ test("the dialog closes only when an async create succeeds", async () => {
       open
       name="Acme"
       details={false}
-      folder={null}
+      folder="Documents/Acme"
       onOpenChange={(o) => changes.push(o)}
       onCreate={async () => answer}
     />,
   );
-  await act(async () => button("Create the matter")?.click());
+  await act(async () => create()?.click());
   expect(changes).toEqual([]);
   answer = undefined;
-  await act(async () => button("Create the matter")?.click());
+  await act(async () => create()?.click());
   expect(changes).toEqual([false]);
 });
 
 test("the form's words keep the voice: no banned word, and Hindi sentences end in the danda", () => {
   for (const [en, hi] of Object.entries(matterFormWords)) {
     if (hi === null) continue; // hi: later, no Hindi yet
-    expect(en).not.toMatch(/\bI\b|\b(pencil|ink|step|git|token|session)\b/i);
+    expect(en).not.toMatch(/\bI\b|\b(pencil|ink|step|git|token|session|agent)\b/i);
+    expect(en).not.toMatch(/next date|cause list|hearing|court/i);
     expect(hi).not.toMatch(/पेंसिल|स्याही|चरण|कदम|(^|\s)मैं(\s|$)/);
     if (en.endsWith(".")) expect(hi.endsWith("।")).toBe(true);
   }
 });
 
-test("while the folder picker opens, a polite status line says so under the folder line, and only while it is told", async () => {
+test("while the folder picker opens, a polite status line says so under the folder row, and only while it is told", async () => {
   await mount(<NewMatterForm folder="Documents/Acme" name="Acme" onCreate={() => {}} />);
   expect(byTestId("picker-opening")).toBeUndefined();
   await act(async () =>

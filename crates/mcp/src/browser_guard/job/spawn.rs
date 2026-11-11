@@ -27,9 +27,9 @@
 use std::collections::BTreeMap;
 use std::ffi::OsString;
 use std::io::{self, PipeReader, PipeWriter};
-use std::os::windows::ffi::OsStrExt;
+use std::os::windows::ffi::{OsStrExt, OsStringExt};
 use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle, RawHandle};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use windows::Win32::Foundation::{
     DUPLICATE_SAME_ACCESS, DuplicateHandle, GENERIC_READ, GENERIC_WRITE, HANDLE,
@@ -39,6 +39,7 @@ use windows::Win32::Security::SECURITY_ATTRIBUTES;
 use windows::Win32::Storage::FileSystem::{
     CreateFileW, FILE_FLAGS_AND_ATTRIBUTES, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING,
 };
+use windows::Win32::System::SystemInformation::{GetSystemDirectoryW, GetWindowsDirectoryW};
 use windows::Win32::System::Threading::{
     CREATE_NO_WINDOW, CREATE_UNICODE_ENVIRONMENT, CreateProcessW, DeleteProcThreadAttributeList,
     EXTENDED_STARTUPINFO_PRESENT, GetCurrentProcess, InitializeProcThreadAttributeList,
@@ -49,6 +50,7 @@ use windows::Win32::System::Threading::{
 use windows::core::{PCWSTR, PWSTR, w};
 
 use super::super::command_line::{command_line, current_dir, env_block, is_batch};
+use super::super::env::WindowsDirs;
 use super::child::Child;
 
 /// What one of a child's stdin, stdout and stderr is.
@@ -170,6 +172,29 @@ pub(super) fn spawn(job: HANDLE, launch: &Launch<'_>) -> io::Result<Child> {
         stdout.ours.map(PipeReader::from),
         stderr.ours.map(PipeReader::from),
     ))
+}
+
+/// The Windows directory and the system directory, as Windows reports them: the defaults the
+/// child's environment gives `SystemRoot`, `windir` and `ComSpec` (`env.rs`). A call that fails
+/// leaves its field `None`.
+pub(crate) fn windows_dirs() -> WindowsDirs {
+    WindowsDirs {
+        windows: directory(GetWindowsDirectoryW),
+        system: directory(GetSystemDirectoryW),
+    }
+}
+
+/// The folder `call` writes into a buffer, or `None` when the call fails or the folder does not
+/// fit the buffer (a too-small buffer gets the length it needs back, at least the buffer's).
+fn directory(call: unsafe fn(Option<&mut [u16]>) -> u32) -> Option<PathBuf> {
+    let mut buffer = [0_u16; 1024];
+    // SAFETY: `buffer` is a live array the call may write up to its length of UTF-16 units
+    // into; it is read only after the call returns.
+    let length = usize::try_from(unsafe { call(Some(&mut buffer[..])) }).ok()?;
+    if length == 0 || length >= buffer.len() {
+        return None;
+    }
+    Some(PathBuf::from(OsString::from_wide(&buffer[..length])))
 }
 
 /// One of a child's standard handles: the child's end, inheritable and closed once the child

@@ -1,10 +1,16 @@
-// Each plan's name as the gate says it, the other plan, each plan's CLI, and the line for a login found but not
-// reusable: shared by gate.tsx, gate-failed.tsx and the settings window's Plans (UD2).
+// Each plan's name as the gate says it, the other plan, its key's label, each plan's CLI, and the line for a login
+// found but not reusable: shared by gate.tsx, gate-failed.tsx and the settings window's Plans (UD2).
 import type { FirstLaunchKey } from "../../lib/words-first-launch.ts";
 import type { Found, Plan } from "./gate.tsx";
 
 export const NAME: Record<Plan, string> = { claude: "Claude", chatgpt: "ChatGPT" };
 export const other = (p: Plan): Plan => (p === "claude" ? "chatgpt" : "claude");
+
+/** The key field's label: the key is named by its maker. */
+export const KEY_LABEL: Record<Plan, FirstLaunchKey> = {
+  claude: "Anthropic API key",
+  chatgpt: "OpenAI API key",
+};
 
 /** Each plan's CLI, whose login Clauseo may reuse. */
 export const APP: Record<Plan, string> = { claude: "Claude Code", chatgpt: "Codex" };

@@ -44,6 +44,17 @@ copy of the matter: a log holding paths, file names or prompts would itself be m
   matter's folder, its file names, the prompt, the agent's text or the thread's title. A formatted
   panic message can hold content (a slicing panic prints the string, an `expect` text can name
   a path), so only a literal one is written.
+- **The one exception: an agent's start-phase stderr.** When an agent ends before its session
+  is ready, one WARN line holds its adapter's start-phase stderr lines (claude-agent-acp's
+  `[session/create] … phase=…`) and its stderr's last line, the one most likely to name the
+  failure, since without them a failed start cannot be told apart
+  (`crates/host/src/actor/turn/agents/start_failure.rs`). They are redacted first: the home
+  folder becomes `~`, secret values, `sk-` words and bearer tokens become `[redacted]` (the
+  process crate's redaction), and the matter folder, in every spelling the host knows (as
+  stored, canonical with the case on disk, on macOS with or without `/private`, and with the
+  home as `~`), and any path below it become `<matter>`. The line is cut at 2 KiB, after the
+  redaction, and goes to `host.log` only: never to a persisted event or the wire. The rest of
+  the stderr tail stays out of the log.
 - **Backpressure.** A caller formats its line and hands it to a bounded channel (1024 lines)
   with `try_send`. A full channel drops the line and counts it; no thread ever waits for the
   disk. One `clauseo-log` thread writes, in batches, and puts `dropped N lines` before the next

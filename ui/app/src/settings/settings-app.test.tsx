@@ -210,19 +210,59 @@ test("without a host each choice moves <html> and writes clauseo.display, one ke
   expect(el.querySelector('nav[aria-label="अनुभाग"]')).not.toBeNull();
 });
 
-test("text size offers 14 to 20, shows 16 by default, and a choice sets data-text-size", async () => {
+/** A choice of the text size's native select, as the OS's pop-up or the keyboard makes it: a change event. */
+const chooseSize = async (select: HTMLSelectElement | null, value: string) => {
+  expect(select).toBeTruthy();
+  await act(async () => {
+    select!.value = value;
+    select!.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+};
+
+test("text size is a native select named by its label, 14 to 20, 16 by default, and a choice sets data-text-size", async () => {
   history.replaceState(null, "", "/settings.html#appearance");
   const { el } = await mount();
   expect(html().dataset["textSize"]).toBe("16");
-  const trigger = el.querySelector<HTMLElement>('[role="combobox"]');
-  expect(trigger?.textContent).toContain("16");
-  await press(trigger);
-  await act(async () => settled());
-  const options = [...document.querySelectorAll<HTMLElement>('[role="option"]')];
-  expect(options.map((o) => o.textContent)).toEqual(["14", "15", "16", "17", "18", "19", "20"]);
-  await press(options.find((o) => o.textContent === "18"));
+  const select = el.querySelector<HTMLSelectElement>('select[data-testid="text-size"]');
+  expect(select?.value).toBe("16");
+  // its label names it, and its line describes it
+  const label = el.querySelector(`label[for="${select?.id}"]`);
+  expect(label?.textContent).toBe("Text size");
+  expect(document.getElementById(select?.getAttribute("aria-describedby") ?? "")?.textContent).toBe(
+    "Every word on screen grows or shrinks with it.",
+  );
+  expect([...(select?.options ?? [])].map((o) => o.textContent)).toEqual([
+    "14",
+    "15",
+    "16",
+    "17",
+    "18",
+    "19",
+    "20",
+  ]);
+  await chooseSize(select, "18");
   expect(html().dataset["textSize"]).toBe("18");
   expect(saved()).toMatchObject({ font_size: 18 });
+  await chooseSize(select, "20");
+  expect(html().dataset["textSize"]).toBe("20");
+  expect(saved()).toMatchObject({ font_size: 20 });
+});
+
+test("the side's Appearance note names the Theme control's choice: Follow the computer while it follows, not the light it gives", async () => {
+  history.replaceState(null, "", "/settings.html#appearance");
+  const { el } = await mount(withHost());
+  const note = () =>
+    [...el.querySelectorAll(".set-nav-row")]
+      .find((r) => r.querySelector(".set-nav-name")?.textContent === "Appearance")
+      ?.querySelector(".set-nav-note")?.textContent;
+  expect(side(el, "Theme", "Follow the computer")?.getAttribute("aria-pressed")).toBe("true");
+  expect(note()).toBe("Follow the computer, text size 16");
+  await press(side(el, "Theme", "Night"));
+  expect(note()).toBe("Night, text size 16");
+  await press(side(el, "Theme", "Day"));
+  expect(note()).toBe("Day, text size 16");
+  await press(side(el, "Theme", "Follow the computer"));
+  expect(note()).toBe("Follow the computer, text size 16");
 });
 
 test("lite offers On and Off only, and a stored automatic shows as Off", async () => {
@@ -255,7 +295,7 @@ test("with a host one choice sends one set_ui_settings, and settings_changed fro
     transport.settingsChanged({ ui: { ...HOST.ui, theme: "light", font_size: 19 }, locked: [] }),
   );
   expect(side(el, "Theme", "Day")?.getAttribute("aria-pressed")).toBe("true");
-  expect(el.querySelector('[role="combobox"]')?.textContent).toContain("19");
+  expect(el.querySelector<HTMLSelectElement>('select[data-testid="text-size"]')?.value).toBe("19");
   expect(html().dataset["textSize"]).toBe("19");
   expect(transport.only("next_command")).toHaveLength(1);
 });
@@ -296,7 +336,9 @@ test("every locked control names its managed line in aria-describedby: switches,
   expect(el.querySelectorAll('[data-testid="managed"]')).toHaveLength(4);
   expect(described(el.querySelector('[aria-label="Theme"]'))).toBe(managed);
   expect(described(el.querySelector('[aria-label="Reduced motion"]'))).toBe(managed);
-  expect(described(el.querySelector('[role="combobox"]'))).toBe(managed);
+  expect(described(el.querySelector('select[data-testid="text-size"]'))).toBe(
+    `Every word on screen grows or shrinks with it. ${managed}`,
+  );
   // the radio group keeps its own line first
   expect(described(el.querySelector('[role="radiogroup"]'))).toBe(
     `Takes away every shadow and all motion. ${managed}`,
@@ -309,7 +351,11 @@ test("a control that is not locked names no managed line", async () => {
   history.replaceState(null, "", "/settings.html#appearance");
   const { el } = await mount(withHost());
   expect(el.querySelector('[aria-label="Theme"]')?.hasAttribute("aria-describedby")).toBe(false);
-  expect(el.querySelector('[role="combobox"]')?.hasAttribute("aria-describedby")).toBe(false);
+  // the text size names its own line only
+  const select = el.querySelector('select[data-testid="text-size"]');
+  expect(document.getElementById(select?.getAttribute("aria-describedby") ?? "")?.textContent).toBe(
+    "Every word on screen grows or shrinks with it.",
+  );
 });
 
 test("Appearance opens with the design's preview: three papers as filed and the answer's line, hidden from assistive technology", async () => {

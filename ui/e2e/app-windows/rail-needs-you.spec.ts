@@ -4,11 +4,11 @@
 // parts (the `rail-wire` change), without which the rail has no Needs you.
 //
 // The e2e build's pick_folder always returns E2E_MATTER_DIR, so both matters are made as new folders beside each other
-// (room-matters.spec.ts says why).
+// in the host's default location (room-matters.spec.ts says why).
 
 import { expect } from "@playwright/test";
 import { test } from "./fixture.ts";
-import { createRoomMatter, moveTo, sendPrompt, showRail } from "./flow.ts";
+import { createRoomMatter, moveTo, offRail, sendPrompt, showRail } from "./flow.ts";
 import { window } from "./selectors.ts";
 
 test.use({ scenario: "claude-permission-kinds" });
@@ -32,6 +32,8 @@ test("a permission in another matter brings it to Needs you, and a press opens i
 
   await moveTo(w, FIRST);
   await showRail(w);
+  // the press on FIRST left the pointer over the rail, which holds the rows where they stood
+  await offRail(w);
   const row = w.needsYouRow(SECOND);
   await expect(row).toBeVisible();
   await expect(row).toHaveAttribute("data-state", "permission");

@@ -1,9 +1,11 @@
 # Release builds: one commit becomes every installer, the updater's files, latest.json and
 # SHA256SUMS.txt. docs/decisions/0035-release-builds.md records why it is built this way.
-# SHA256SUMS.txt covers every asset. Those include S15's sandbox tool (SANDBOX_EXE below) per
-# Windows architecture with its updater-key .sig: the same exe and .sig both installers place in
-# the install folder, which assemble checks, and the release notes repeat its SHA-256 for IT to
-# compare a copy Defender restored from quarantine.
+# SHA256SUMS.txt covers every asset. With SAFE_WORKSPACE (below) "true", those include S15's
+# sandbox tool (SANDBOX_EXE below) per Windows architecture with its updater-key .sig: the same exe
+# and .sig both installers place in the install folder, which assemble checks, and the release
+# notes repeat its SHA-256 for IT to compare a copy Defender restored from quarantine. The Safe
+# workspace is off for launch (SAFE_WORKSPACE "false"): no sandbox exe is built, signed, bundled
+# or published, and assemble checks that neither Windows installer holds one.
 #
 # Three modes, which `check` decides from what started the run:
 # - release: a pushed tag v<X.Y.Z> on a commit on main. Builds under the environment `release`
@@ -38,14 +40,19 @@
 #   windows.conf.json (the uninstall hook), machine.conf.json (the perMachine installer) and
 #   blocklist.conf.json (bundle.resources: the block-list snapshot, blocklist/ in the app's
 #   resources). `check` fails on any other key in them. The sidecar seam writes a fourth,
-#   sidecars.generated.json (bundle.externalBin only, gitignored), which every `tauri build` and
-#   `tauri bundle` of a shipped build passes last.
+#   sidecars.generated.json (bundle.externalBin only, plus on macOS one bundle.macOS.files entry
+#   putting clauseo-agent-browser in Contents/Helpers; gitignored), which every `tauri build` and
+#   `tauri bundle` of a shipped build passes last. It also puts stetdoc (crates/desktop/stetdoc.toml)
+#   in a folder of its own: Contents/Helpers/stetdoc/stetdoc on macOS (bundle.macOS.files),
+#   <resources>/stetdoc/stetdoc[.exe] elsewhere (bundle.resources; on Windows the install folder).
 # - The block-list snapshot: the `blocklist` job downloads clauseo-ai/blocklist's `current`
 #   release, fails unless minisign verifies it with crates/blocklist/keys/stage-f.pub (the key the
 #   app compiles in), and every job that builds or bundles with release.conf.json downloads it into
 #   crates/desktop/blocklist/ (gitignored) first and passes blocklist.conf.json after it.
-# - Tier 1 is macOS Apple silicon and Windows x64; tier 2 (Intel macOS, Windows ARM64, Linux) is
-#   continue-on-error, and the release notes name a tier 2 asset that is missing.
+# - Tier 1 is macOS Apple silicon, Windows x64 and Windows ARM64; tier 2 (Intel macOS, Linux) is
+#   continue-on-error, and the release notes name a tier 2 asset that is missing. A release needs
+#   both Windows architectures: the x64 app on Windows on ARM moves itself to the ARM64 build at
+#   its next update (the updater's windows-aarch64 target), which a release without it would strand.
 
 name: release
 
@@ -74,6 +81,12 @@ env:
   # it as crates/desktop/binaries/<name>-<target>.exe). The one place its name is written here and
   # in latest-json.test.mjs.
   SANDBOX_EXE: clauseo-sandbox-setup.exe
+  # The Safe workspace switch (decision 0035, "Safe workspace off for launch"), "false" for launch.
+  # "true" turns it all back on in this one place: sidecars.mjs builds and lists the sandbox tool
+  # (--safe-workspace), sign-windows signs it and bundles with windows/hooks_safe_workspace.nsh,
+  # which defines CLAUSEO_SAFE_WORKSPACE for hooks.nsh (the elevated set-up and removal), and
+  # assemble publishes and checks it. Exactly "true" or "false"; sidecars.mjs refuses anything else.
+  SAFE_WORKSPACE: "false"
 
 jobs:
   # What started the run, and whether it may: the mode, the version, the environment of the jobs
@@ -91,6 +104,7 @@ jobs:
       environment: ${{ steps.mode.outputs.environment }}
       features: ${{ steps.mode.outputs.features }}
       release_date: ${{ steps.mode.outputs.release_date }}
+      version_suffix: ${{ steps.mode.outputs.version_suffix }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -189,6 +203,9 @@ jobs:
             echo "environment=$environment"
             echo "features=$features"
             echo "release_date=$release_date"
+            # About's version in a dry run, after the plain one: dev.<the commit's first 9 hex digits>
+            # (ui/app/vite.config.ts, appVersion). Tags show their own version alone.
+            if [ "$mode" = dry ]; then echo "version_suffix=dev.${GITHUB_SHA:0:9}"; else echo "version_suffix="; fi
           } | tee -a "$GITHUB_OUTPUT"
 
       # The overlays may hold only what they are for. Every sidecar, S15's included, goes through
@@ -231,8 +248,6 @@ jobs:
     timeout-minutes: 10
     permissions:
       contents: read
-    env:
-      BASE: https://github.com/clauseo-ai/blocklist/releases/download/current
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -246,11 +261,32 @@ jobs:
           sudo apt-get update -q
           sudo apt-get install -y minisign
 
+      # The fetch goes through the API with the job's token and is retried: during GitHub's
+      # incidents of 2026-11-08 and 2026-11-09 anonymous downloads got HTTP 504 (a dry run failed
+      # here), and the publisher replaces the two assets one after the other every 6 hours, so a
+      # fetch can also meet a missing asset or a new file with the old signature. The pair is
+      # fetched again until it verifies, five times at most, 30 s apart; the next step verifies it
+      # again and names the failure if it still does not.
       - name: Download the snapshot and its signature
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          for file in blocklist-v1.txt.gz blocklist-v1.txt.gz.minisig; do
-            curl --fail --retry 3 --location --silent --show-error -o "$file" "$BASE/$file"
+          for attempt in 1 2 3 4 5; do
+            if gh release download current --repo clauseo-ai/blocklist --clobber \
+              --pattern blocklist-v1.txt.gz --pattern blocklist-v1.txt.gz.minisig; then
+              if minisign -V -q -p crates/blocklist/keys/stage-f.pub -m blocklist-v1.txt.gz \
+                -x blocklist-v1.txt.gz.minisig; then
+                break
+              fi
+              echo "The pair does not verify (attempt $attempt of 5)."
+            elif [ "$attempt" -eq 5 ]; then
+              echo "::error::could not download the snapshot from clauseo-ai/blocklist (5 attempts)"
+              exit 1
+            fi
+            if [ "$attempt" -lt 5 ]; then
+              sleep 30
+            fi
           done
 
       # minisign checks the file's signature and the signature over the trusted comment, so the
@@ -321,6 +357,7 @@ jobs:
       - name: Build the ui with hidden source maps, then move the maps out
         env:
           MAPS: ${{ runner.temp }}/ui-sourcemaps
+          CLAUSEO_VERSION_SUFFIX: ${{ needs.check.outputs.version_suffix }}
         run: |
           set -euo pipefail
           pnpm -C ui --filter @clauseo/app exec vite build --sourcemap hidden
@@ -362,11 +399,15 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        # Windows links the C runtime statically (+crt-static), as a clean machine has no VC++
+        # Redistributable; pe-crt-imports.mjs checks the exes. Never on macOS or Linux (static
+        # glibc). setup-exe-repro.yml's RUSTFLAGS repeat the Windows rows' byte for byte, as cargo
+        # hashes them into symbol names; pe-crt-imports.test.mjs fails when they differ.
         include:
           - { target: aarch64-apple-darwin, runner: macos-15, tier: 1, signs: true, arch: aarch64, rustflags: "-C force-frame-pointers=yes" }
           - { target: x86_64-apple-darwin, runner: macos-15, tier: 2, signs: true, arch: x64, rustflags: "-C force-frame-pointers=yes" }
-          - { target: x86_64-pc-windows-msvc, runner: windows-2025, tier: 1, signs: false, arch: x64, rustflags: "-C force-frame-pointers=yes" }
-          - { target: aarch64-pc-windows-msvc, runner: windows-11-arm, tier: 2, signs: false, arch: arm64, rustflags: "-C force-frame-pointers=yes" }
+          - { target: x86_64-pc-windows-msvc, runner: windows-2025, tier: 1, signs: false, arch: x64, rustflags: "-C force-frame-pointers=yes -C target-feature=+crt-static" }
+          - { target: aarch64-pc-windows-msvc, runner: windows-11-arm, tier: 1, signs: false, arch: arm64, rustflags: "-C force-frame-pointers=yes -C target-feature=+crt-static" }
           - { target: x86_64-unknown-linux-gnu, runner: ubuntu-22.04, tier: 2, signs: false, arch: amd64, rustflags: "-C force-frame-pointers=yes -C link-arg=-Wl,--build-id=sha1" }
     env:
       TARGET: ${{ matrix.target }}
@@ -431,9 +472,12 @@ jobs:
       # checks both). sidecars.mjs builds or fetches each sidecar for $TARGET (clauseo-mcp with
       # this job's RUSTFLAGS and profile, clauseo-agent-browser from agent-browser's pin) as
       # crates/desktop/binaries/<name>-$TARGET (.exe on Windows), and writes
-      # release/sidecars.generated.json: bundle.externalBin for exactly those. Every tauri build
+      # release/sidecars.generated.json: bundle.externalBin for exactly those (on macOS,
+      # clauseo-agent-browser in bundle.macOS.files instead, for Contents/Helpers). Every tauri build
       # and tauri bundle below passes it last (a merge patch replaces arrays, so it is the
-      # target's whole list). S15 adds its rows to the script's table.
+      # target's whole list). S15 adds its rows to the script's table. stetdoc is fetched from its
+      # pin as binaries/clauseo-stetdoc-$TARGET and bundled in its own stetdoc/ folder, never in
+      # externalBin; a target its pin marks pending (Windows, until the crt-static release) fails here.
       # The updater public key the sandbox's build.rs builds in (stage C), before sidecars.mjs
       # compiles it, always in plugins.updater.pubkey's format (base64 of the whole minisign .pub
       # text): a release's from tauri.conf.json, a test run's updater-test.pub, which is stored in
@@ -461,11 +505,16 @@ jobs:
             echo "CLAUSEO_UPDATER_PUBKEY is unset ($MODE)"
           fi
 
+      # GH_TOKEN (the job's read-only token) makes the agent-browser and stetdoc downloads go
+      # through the GitHub API instead of github.com's anonymous downloads, whose 504s failed
+      # dry runs (#850); either way the pinned SHA-256 decides (crates/desktop/sidecars/fetch.mjs).
       - name: Sidecars for this target
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          node .github/scripts/sidecars.mjs "$TARGET"
-          node .github/scripts/sidecars.mjs --check
+          node .github/scripts/sidecars.mjs --safe-workspace="$SAFE_WORKSPACE" "$TARGET"
+          node .github/scripts/sidecars.mjs --check "$TARGET"
 
       # CLAUSEO_RELEASE_DATE is set only for a tag (release and test); unset, the app has none.
       - name: Build the app
@@ -552,8 +601,19 @@ jobs:
           jq -n --arg key "$pub" '{plugins: {updater: {pubkey: $key}}}' > "$RUNNER_TEMP/updater-key.conf.json"
 
       # The bundler signs the .app ad hoc (APPLE_SIGNING_IDENTITY "-") until S20a's Developer ID,
-      # then the updater archive with the mode's key, which only this step holds.
-      - name: Bundle the .app and the DMG, and sign the updater archive
+      # then the updater archive with the mode's key, which only this step holds. First this step
+      # signs the browser helper and stetdoc, which the overlay's bundle.macOS.files puts in
+      # Contents/Helpers and Contents/Helpers/stetdoc:
+      # the bundler copies those files without signing them, and the .app's seal needs nested code
+      # signed before it. The same identity and options as the bundler's own codesign (--force,
+      # the hardened runtime of tauri.conf.json, no entitlements); a real identity adds a secure
+      # timestamp, which an ad hoc signature cannot take.
+      # After the bundle, both legs' bundler names the updater archive Clauseo.app.tar.gz, and its
+      # .sig's trusted comment says file:Clauseo.app.tar.gz, so the step renames it to the published
+      # Clauseo_<version>_<arch>.app.tar.gz, drops the bundler's .sig and signs it again, as
+      # sign-windows signs the installer: the trusted comment's file: then carries the arch, which
+      # the app's updater checks (#728).
+      - name: Bundle the .app and the DMG, and sign the updater archive under its arch name
         if: runner.os == 'macOS'
         env:
           APPLE_SIGNING_IDENTITY: "-"
@@ -567,12 +627,64 @@ jobs:
             export TAURI_SIGNING_PRIVATE_KEY TAURI_SIGNING_PRIVATE_KEY_PASSWORD
           fi
           [ -n "$TAURI_SIGNING_PRIVATE_KEY" ] || { echo "::error::no updater key for a $MODE run"; exit 1; }
+          [ -n "$APPLE_SIGNING_IDENTITY" ] || { echo "::error::APPLE_SIGNING_IDENTITY is empty"; exit 1; }
+          for key in Helpers/clauseo-agent-browser Helpers/stetdoc/stetdoc; do
+            rel=$(jq -er --arg key "$key" '.bundle.macOS.files[$key]' crates/desktop/release/sidecars.generated.json) ||
+              { echo "::error::sidecars.generated.json puts nothing at Contents/$key"; exit 1; }
+            helper=crates/desktop/$rel
+            [ -f "$helper" ] || { echo "::error::no helper for Contents/$key at $helper"; exit 1; }
+            if [ "$APPLE_SIGNING_IDENTITY" = - ]; then
+              codesign --force -s "$APPLE_SIGNING_IDENTITY" --options runtime "$helper"
+            else
+              codesign --force -s "$APPLE_SIGNING_IDENTITY" --options runtime --timestamp "$helper"
+            fi
+            codesign --verify --strict --verbose=2 "$helper" || { echo "::error::$helper does not verify after signing"; exit 1; }
+          done
           pnpm -C ui tauri bundle --ci --target "$TARGET" ${FEATURES:+--features "$FEATURES"} --bundles app,dmg \
             --config release/release.conf.json --config release/blocklist.conf.json \
             --config "$RUNNER_TEMP/updater-key.conf.json" --config release/sidecars.generated.json
+          macos=$RELEASE_DIR/bundle/macos
+          tarball=Clauseo_${VERSION}_${{ matrix.arch }}.app.tar.gz
+          mv "$macos/Clauseo.app.tar.gz" "$macos/$tarball"
+          rm "$macos/Clauseo.app.tar.gz.sig"
+          # pnpm -C ui runs the signer in ui/, so the archive's path must be absolute.
+          pnpm -C ui tauri signer sign --app-version "$VERSION" "$PWD/$macos/$tarball"
 
-      # Each leg's assets, under the names latest-json.mjs lists (assemble renames the macOS
-      # archive, which both macOS legs call Clauseo.app.tar.gz).
+      # The .app as bundled, before anything uploads it. Contents/MacOS, which the agent's sandbox
+      # can reach, holds exactly the main executable and the overlay's externalBin sidecars;
+      # Contents/Helpers holds exactly clauseo-agent-browser and stetdoc/ (holding only stetdoc),
+      # each executable and signed; and the whole
+      # bundle verifies, strictly and deep. Each check fails the leg.
+      - name: The .app keeps the browser helper in Contents/Helpers, and verifies
+        if: runner.os == 'macOS'
+        run: |
+          set -euo pipefail
+          app=$RELEASE_DIR/bundle/macos/Clauseo.app
+          [ -d "$app" ] || { echo "::error::no .app at $app"; exit 1; }
+          main=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$app/Contents/Info.plist")
+          [ "$main" = Clauseo ] || { echo "::error::$app's CFBundleExecutable is $main, not Clauseo"; exit 1; }
+          want=$({ echo "$main"; jq -r '.bundle.externalBin[] | ltrimstr("binaries/")' crates/desktop/release/sidecars.generated.json; } |
+            LC_ALL=C sort | tr '\n' ' ')
+          have=$(ls -A "$app/Contents/MacOS" | LC_ALL=C sort | tr '\n' ' ')
+          [ "$have" = "$want" ] ||
+            { echo "::error::$app/Contents/MacOS holds $have; it may hold only $want"; exit 1; }
+          [ -d "$app/Contents/Helpers" ] || { echo "::error::$app has no Contents/Helpers"; exit 1; }
+          helpers=$(ls -A "$app/Contents/Helpers" | LC_ALL=C sort | tr '\n' ' ')
+          [ "$helpers" = "clauseo-agent-browser stetdoc " ] ||
+            { echo "::error::$app/Contents/Helpers holds $helpers; it must hold only clauseo-agent-browser and stetdoc/"; exit 1; }
+          [ "$(ls -A "$app/Contents/Helpers/stetdoc")" = stetdoc ] ||
+            { echo "::error::$app/Contents/Helpers/stetdoc must hold only stetdoc"; exit 1; }
+          for helper in "$app/Contents/Helpers/clauseo-agent-browser" "$app/Contents/Helpers/stetdoc/stetdoc"; do
+            [ -f "$helper" ] && [ -x "$helper" ] || { echo "::error::$helper is not an executable file"; exit 1; }
+            codesign --verify --strict --verbose=2 "$helper" ||
+              { echo "::error::codesign --verify --strict fails on $helper"; exit 1; }
+          done
+          codesign --verify --deep --strict --verbose=2 "$app" ||
+            { echo "::error::codesign --verify --deep --strict fails on $app"; exit 1; }
+          echo "- $TARGET Clauseo.app: Contents/MacOS holds $have; Contents/Helpers holds $helpers(stetdoc/stetdoc; signed); the .app verifies --deep --strict" |
+            tee -a "$GITHUB_STEP_SUMMARY"
+
+      # Each leg's assets, under the names latest-json.mjs lists.
       - name: Collect this leg's assets
         if: runner.os != 'Windows'
         run: |
@@ -581,7 +693,8 @@ jobs:
           bundle=$RELEASE_DIR/bundle
           if [ "$RUNNER_OS" = macOS ]; then
             cp "$bundle/dmg/Clauseo_${VERSION}_${{ matrix.arch }}.dmg" "$OUT/"
-            cp "$bundle/macos/Clauseo.app.tar.gz" "$bundle/macos/Clauseo.app.tar.gz.sig" "$OUT/"
+            tarball=Clauseo_${VERSION}_${{ matrix.arch }}.app.tar.gz
+            cp "$bundle/macos/$tarball" "$bundle/macos/$tarball.sig" "$OUT/"
           else
             cp "$bundle/deb/Clauseo_${VERSION}_amd64.deb" "$bundle/rpm/Clauseo-${VERSION}-1.x86_64.rpm" "$OUT/"
           fi
@@ -593,6 +706,30 @@ jobs:
           name: release-${{ matrix.target }}
           path: ${{ env.OUT }}
           if-no-files-found: error
+
+      # A dry run's throwaway public key, for assemble to check this leg's archive signature with.
+      # Never on a Release.
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: matrix.signs && env.MODE == 'dry'
+        with:
+          name: dry-updater-pub-${{ matrix.target }}
+          path: ${{ runner.temp }}/dry-updater.key.pub
+          if-no-files-found: error
+
+      # A clean Windows has no VC++ Redistributable, so a PE importing VCRUNTIME140.dll won't start
+      # there (ADR 0035, "The C runtime"). Every exe the upload below ships, fetched ones too, and
+      # any DLL placed beside them or in the bundle's resources. None ships today (WebView2Loader is
+      # linked statically on msvc; bundle.resources is the block-list), so one that appears is
+      # checked here before anyone has to remember it.
+      - name: Check that no shipped Windows binary imports the VC++ runtime
+        if: runner.os == 'Windows'
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          dlls=("$RELEASE_DIR"/*.dll crates/desktop/binaries/*.dll crates/desktop/blocklist/*.dll)
+          [ ${#dlls[@]} -gt 0 ] || echo "No DLL beside the exes or in the bundle's resources: no DLL ships"
+          node .github/scripts/pe-crt-imports.mjs "$RELEASE_DIR/Clauseo.exe" \
+            crates/desktop/binaries/*-"$TARGET".exe ${dlls[@]+"${dlls[@]}"}
 
       # The exe exactly as linked, the sidecars as placed and the overlay that lists them, for
       # sign-windows to sign and bundle. Paths are kept from the repo root, so the download puts
@@ -621,9 +758,9 @@ jobs:
 
       # budgets.toml's release_binary_size is the app binary alone; each sidecar gets its own row
       # beside it, never counted in that limit. deb_size is the .deb.
-      # minimumWebview2Version in tauri.conf.json is this runner's WebView2 major version as of
-      # when S20 landed, raised only on purpose. This line shows what the runner has now. It never
-      # fails the job.
+      # minimumWebview2Version in tauri.conf.json is what the app needs (111.0.1661.41: the UI's
+      # color-mix(); decision 0035), raised only on purpose. This line shows what the runner has
+      # now. It never fails the job.
       - name: The runner's WebView2 version, beside minimumWebview2Version
         if: runner.os == 'Windows'
         shell: pwsh
@@ -704,7 +841,14 @@ jobs:
   # signed binary, then the currentUser installer's updater signature, last.
   sign-windows:
     name: sign-windows (${{ matrix.target }})
+    # It waits for the whole build matrix, but a macOS or Linux leg that failed or never got a
+    # runner doesn't skip it: it runs unless the run was cancelled or check or the block list
+    # failed. Its own Windows leg's exe comes as the windows-exe-<target> artifact, so a failed
+    # Windows build still fails it, at the download. Its installers upload as release-<target>.
+    # assemble and publish keep the default (every job they need succeeded): no release, and no
+    # dist-assets, with a leg missing.
     needs: [check, build, blocklist]
+    if: ${{ !cancelled() && needs.check.result == 'success' && needs.blocklist.result == 'success' }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
     continue-on-error: ${{ matrix.tier == 2 }}
@@ -716,7 +860,7 @@ jobs:
       matrix:
         include:
           - { target: x86_64-pc-windows-msvc, runner: windows-2025, tier: 1, arch: x64 }
-          - { target: aarch64-pc-windows-msvc, runner: windows-11-arm, tier: 2, arch: arm64 }
+          - { target: aarch64-pc-windows-msvc, runner: windows-11-arm, tier: 1, arch: arm64 }
     env:
       TARGET: ${{ matrix.target }}
       MODE: ${{ needs.check.outputs.mode }}
@@ -759,7 +903,7 @@ jobs:
           name: windows-exe-${{ matrix.target }}
 
       - name: The downloaded overlay holds only bundle.externalBin
-        run: node .github/scripts/sidecars.mjs --check
+        run: node .github/scripts/sidecars.mjs --check "$TARGET"
 
       # The same verified snapshot the build leg compiled with, for both installers.
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
@@ -768,7 +912,8 @@ jobs:
           path: crates/desktop/blocklist
 
       # S20a signs every PE the installers take: Clauseo.exe and each file in
-      # crates/desktop/binaries/ (clauseo-mcp, clauseo-agent-browser, later S15's tools), before NSIS.
+      # crates/desktop/binaries/ (clauseo-mcp, clauseo-agent-browser, clauseo-stetdoc, which the
+      # installers place as stetdoc\stetdoc.exe, later S15's tools), before NSIS.
       - name: SignPath, the exe and the sidecars (S20a)
         if: needs.check.outputs.mode == 'release' && vars.SIGNPATH_ENABLED == 'true'
         run: |
@@ -785,8 +930,10 @@ jobs:
 
       # S15's sandbox tool, with the updater key the currentUser installer is signed with below,
       # after SignPath (which changes its bytes) and before NSIS: its .sig is over the bytes that
-      # ship. tauri signer writes <exe>.sig beside it, for both installers and the Release.
+      # ship. tauri signer writes <exe>.sig beside it, for both installers and the Release. Only
+      # with the Safe workspace on: off, sidecars.mjs built no sandbox tool.
       - name: Sign the sandbox tool for the updater
+        if: env.SAFE_WORKSPACE == 'true'
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ needs.check.outputs.mode == 'release' && secrets.TAURI_SIGNING_PRIVATE_KEY || needs.check.outputs.mode == 'test' && secrets.TAURI_SIGNING_PRIVATE_KEY_TEST || '' }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ needs.check.outputs.mode == 'release' && secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD || needs.check.outputs.mode == 'test' && secrets.TAURI_SIGNING_PRIVATE_KEY_TEST_PASSWORD || '' }}
@@ -817,30 +964,76 @@ jobs:
       # resources and externalBin alike under $INSTDIR, each at its target name. That exe and .sig
       # also go on the Release as <name>-<arch>.exe and .exe.sig. A merge patch merges objects, so
       # its bundle.resources entry joins blocklist.conf.json's two rather than replacing them.
+      # The same overlay names windows/hooks_safe_workspace.nsh as the installer hooks, after
+      # windows.conf.json's hooks.nsh: it defines CLAUSEO_SAFE_WORKSPACE, which turns on the
+      # elevated set-up and removal. All of that only with the Safe workspace on; off, the overlay
+      # is empty, so the installers take hooks.nsh alone and ship no sandbox tool and no .sig.
       - name: Bundle the currentUser and perMachine installers
         run: |
           set -euo pipefail
           mkdir -p "$OUT"
           nsis=$RELEASE_DIR/bundle/nsis
           sig=binaries/${SANDBOX_EXE%.exe}-$TARGET.exe.sig
-          [ -f "crates/desktop/$sig" ] || { echo "::error::no crates/desktop/$sig"; exit 1; }
-          node -e 'require("fs").writeFileSync(process.argv[1], JSON.stringify({ bundle: { resources: { [process.argv[2]]: process.argv[3] } } }))' \
-            "$RUNNER_TEMP/sandbox-sig.conf.json" "$sig" "$SANDBOX_EXE.sig"
+          if [ "$SAFE_WORKSPACE" = true ]; then
+            [ -f "crates/desktop/$sig" ] || { echo "::error::no crates/desktop/$sig"; exit 1; }
+            node -e 'require("fs").writeFileSync(process.argv[1], JSON.stringify({ bundle: { resources: { [process.argv[2]]: process.argv[3] }, windows: { nsis: { installerHooks: process.argv[4] } } } }))' \
+              "$RUNNER_TEMP/safe-workspace.conf.json" "$sig" "$SANDBOX_EXE.sig" windows/hooks_safe_workspace.nsh
+          else
+            echo '{}' > "$RUNNER_TEMP/safe-workspace.conf.json"
+          fi
+          # makensis's warnings (an unused LangString, a macro left out, a jump to nowhere) don't fail its
+          # compile, and the bundler hides makensis's output unless --verbose. So both bundles run verbose
+          # into one log (each call piped to tee; pipefail keeps tauri's own exit code), which must hold
+          # makensis's output, so the check can't pass on an empty log, and no "N warning(s):" summary.
+          log=$RUNNER_TEMP/makensis.log
+          : > "$log"
           bundle() {
             rm -rf "$nsis"
-            pnpm -C ui tauri bundle --ci --target "$TARGET" ${FEATURES:+--features "$FEATURES"} --bundles nsis \
+            pnpm -C ui tauri bundle --ci --verbose --target "$TARGET" ${FEATURES:+--features "$FEATURES"} --bundles nsis \
               --no-binary-patching --no-sign --config release/release.conf.json --config release/blocklist.conf.json \
               --config release/windows.conf.json "$@" \
-              --config "$RUNNER_TEMP/sandbox-sig.conf.json" --config release/sidecars.generated.json
+              --config "$RUNNER_TEMP/safe-workspace.conf.json" --config release/sidecars.generated.json
           }
-          bundle
+          bundle 2>&1 | tee -a "$log"
           mv "$nsis/Clauseo_${VERSION}_${{ matrix.arch }}-setup.exe" "$OUT/"
-          bundle --config release/machine.conf.json
+          bundle --config release/machine.conf.json 2>&1 | tee -a "$log"
           mv "$nsis/Clauseo_${VERSION}_${{ matrix.arch }}-setup.exe" "$OUT/Clauseo_${VERSION}_${{ matrix.arch }}-machine-setup.exe"
-          asset=${SANDBOX_EXE%.exe}-${{ matrix.arch }}.exe
-          cp "crates/desktop/${sig%.sig}" "$OUT/$asset"
-          cp "crates/desktop/$sig" "$OUT/$asset.sig"
+          if ! grep -Eq 'Processing script file|Output: ".*\.exe"' "$log"; then
+            echo "::error::no makensis output in the bundle log, so its warnings can't be checked"
+            exit 1
+          fi
+          # Not anchored: the bundler may prefix each line of makensis's output with its own log tag.
+          if grep -Eq '(^|[^0-9])[0-9]+ warnings?:' "$log"; then
+            echo "::error::makensis warned while building the installers"
+            grep -E -A40 '(^|[^0-9])[0-9]+ warnings?:' "$log"
+            exit 1
+          fi
+          if [ "$SAFE_WORKSPACE" = true ]; then
+            asset=${SANDBOX_EXE%.exe}-${{ matrix.arch }}.exe
+            cp "crates/desktop/${sig%.sig}" "$OUT/$asset"
+            cp "crates/desktop/$sig" "$OUT/$asset.sig"
+          fi
           ls -l "$OUT"
+
+      # Whatever the installers ship, not a list (ADR 0035, "The C runtime"): 7-Zip reads NSIS, so
+      # each installer is extracted into a folder of its own and every .exe, .dll and .node in it
+      # is checked, with the installer itself, whose stub is also the uninstaller it writes. No
+      # exceptions: NSIS's x86 plug-ins import msvcrt.dll, which CRT_RULES allows. Both images list
+      # 7-Zip (runner-images' Windows2025-Readme.md, partner-runner-images'
+      # arm-windows-11-image.md) at its install path; 7z on PATH is the fallback.
+      - name: Check every PE inside both installers for the VC++ runtime
+        run: |
+          set -euo pipefail
+          sevenzip="/c/Program Files/7-Zip/7z.exe"
+          [ -x "$sevenzip" ] || sevenzip=$(command -v 7z) ||
+            { echo "::error::no 7-Zip in C:\\Program Files\\7-Zip or on PATH"; exit 1; }
+          for installer in "$OUT/Clauseo_${VERSION}_${{ matrix.arch }}-setup.exe" \
+            "$OUT/Clauseo_${VERSION}_${{ matrix.arch }}-machine-setup.exe"; do
+            dir=$RUNNER_TEMP/extracted-$(basename "$installer" .exe)
+            rm -rf "$dir"
+            "$sevenzip" x -y "-o$dir" "$installer" > /dev/null
+            node .github/scripts/pe-crt-imports.mjs "$installer" "$dir"
+          done
 
       - name: SignPath, the installers (S20a)
         if: needs.check.outputs.mode == 'release' && vars.SIGNPATH_ENABLED == 'true'
@@ -891,11 +1084,242 @@ jobs:
             done
           } >> "$GITHUB_STEP_SUMMARY"
 
+  # Windows on ARM, per machine: the x64 installer silently, the arm64 one over it, then the
+  # registered silent uninstall, which must leave nothing behind (decision 0035's tier 1, design
+  # VM row A4). Every mode, dry included. Blocking: assemble needs it, so a leftover stops the
+  # release.
+  arm64-install-smoke:
+    name: arm64-install-smoke
+    needs: [check, sign-windows]
+    runs-on: windows-11-arm
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    env:
+      VERSION: ${{ needs.check.outputs.version }}
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: release-*-pc-windows-msvc
+          path: ${{ runner.temp }}/legs
+
+      - name: Install x64, then arm64 over it, uninstall, and check what is left
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $log = New-Item -ItemType Directory -Force "$env:RUNNER_TEMP/smoke"
+          Start-Transcript "$log/smoke.log"
+          $legs = "$env:RUNNER_TEMP/legs"
+          $dir = "$env:ProgramFiles\Clauseo"
+          $uninstKey = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\Clauseo'
+          # Which processes Restart Manager says use a file: what Tauri's CheckIfAppIsRunning asks
+          # of the main exe before the uninstall removes it, and aborts on (exit 2) under /S when
+          # RmShutdown can't stop one (uninstall_in_place.nsh, un.onUninstFailed). Compiled now, so
+          # the query just before the uninstall takes no time. A failure to compile or to query is
+          # a notice, never the smoke's failure.
+          $rm = $true
+          try {
+            Add-Type -TypeDefinition @'
+          using System;
+          using System.Collections.Generic;
+          using System.Runtime.InteropServices;
+          using System.Text;
+          public static class RmUsers {
+            [StructLayout(LayoutKind.Sequential)]
+            public struct UniqueProcess { public int Pid; public System.Runtime.InteropServices.ComTypes.FILETIME Start; }
+            [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+            public struct ProcessInfo {
+              public UniqueProcess Process;
+              [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 256)] public string AppName;
+              [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 64)] public string ServiceShortName;
+              public int AppType;
+              public uint AppStatus;
+              public uint SessionId;
+              [MarshalAs(UnmanagedType.Bool)] public bool Restartable;
+            }
+            [DllImport("rstrtmgr.dll", CharSet = CharSet.Unicode)]
+            static extern int RmStartSession(out uint session, int flags, StringBuilder key);
+            [DllImport("rstrtmgr.dll", CharSet = CharSet.Unicode)]
+            static extern int RmRegisterResources(uint session, uint files, string[] names, uint apps, IntPtr unique, uint services, string[] serviceNames);
+            [DllImport("rstrtmgr.dll")]
+            static extern int RmGetList(uint session, out uint needed, ref uint count, [In, Out] ProcessInfo[] info, ref uint reasons);
+            [DllImport("rstrtmgr.dll")]
+            static extern int RmEndSession(uint session);
+            public static string[] Of(string path) {
+              uint session;
+              int r = RmStartSession(out session, 0, new StringBuilder(64));
+              if (r != 0) return new[] { "RmStartSession failed: " + r };
+              try {
+                r = RmRegisterResources(session, 1, new[] { path }, 0, IntPtr.Zero, 0, null);
+                if (r != 0) return new[] { "RmRegisterResources failed: " + r };
+                uint needed, count = 0, reasons = 0;
+                r = RmGetList(session, out needed, ref count, null, ref reasons);
+                if (r == 0) return new string[0];
+                if (r != 234) return new[] { "RmGetList failed: " + r };
+                var info = new ProcessInfo[needed];
+                count = needed;
+                r = RmGetList(session, out needed, ref count, info, ref reasons);
+                if (r != 0) return new[] { "RmGetList failed: " + r };
+                var users = new List<string>();
+                for (int i = 0; i < count; i++) {
+                  var p = info[i];
+                  users.Add(string.Format("pid {0} {1} (type {2}, service '{3}', status {4}, session {5})", p.Process.Pid, p.AppName, p.AppType, p.ServiceShortName, p.AppStatus, p.SessionId));
+                }
+                return users.ToArray();
+              } finally {
+                RmEndSession(session);
+              }
+            }
+          }
+          '@
+          } catch {
+            $rm = $false
+            Write-Host "::notice::the Restart Manager query didn't compile: $($_.Exception.Message)"
+          }
+          function RmNotices($when, $path) {
+            if (-not $rm) { return }
+            try { $users = @([RmUsers]::Of($path)) } catch { $users = @("the query failed: $($_.Exception.Message)") }
+            if ($users.Count -eq 0) { Write-Host "::notice::$when, Restart Manager: nothing uses $path" }
+            foreach ($user in $users) { Write-Host "::notice::$when, Restart Manager on ${path}: $user" }
+          }
+          function Run($exe, $arguments) {
+            Write-Host "> $exe $arguments"
+            $code = (Start-Process -FilePath $exe -ArgumentList $arguments -Wait -PassThru).ExitCode
+            if ($code -ne 0) { throw "exit code $code from $exe" }
+          }
+          # IMAGE_FILE_HEADER.Machine: the u16 after "PE\0\0", whose offset is at 0x3C.
+          function Machine($exe) {
+            $b = [IO.File]::ReadAllBytes($exe)
+            $pe = [BitConverter]::ToInt32($b, 0x3C)
+            if ([BitConverter]::ToUInt32($b, $pe) -ne 0x4550) { throw "$exe has no PE header" }
+            [BitConverter]::ToUInt16($b, $pe + 4)
+          }
+          # The elevated runs' plug-in folders (safe_temp.nsh) in the folder after each install:
+          # each run leaves its own, and removes earlier runs' ones.
+          function PluginFolders($after) {
+            foreach ($folder in @(Get-ChildItem -Force -Directory $dir -Filter 'ns*.tmp')) {
+              Write-Host "::notice::after $after, a plug-in folder: $($folder.Name) ($((Get-ChildItem -Force -Name $folder.FullName) -join ', '))"
+            }
+          }
+          Run "$legs/release-x86_64-pc-windows-msvc/Clauseo_${env:VERSION}_x64-machine-setup.exe" '/S'
+          if ((Machine "$dir\Clauseo.exe") -ne 0x8664) { throw 'the x64 install is not x64' }
+          PluginFolders 'the x64 install'
+          Run "$legs/release-aarch64-pc-windows-msvc/Clauseo_${env:VERSION}_arm64-machine-setup.exe" '/S'
+          PluginFolders 'the arm64 install'
+          $m = Machine "$dir\Clauseo.exe"
+          if ($m -ne 0xAA64) { throw ('Clauseo.exe over the x64 install has machine 0x{0:X4}, not ARM64' -f $m) }
+          # The uninstall the install registered: "<dir>\uninstall.exe" /S _?=<dir>, which runs in
+          # place (uninstall_in_place.nsh), so the wait is for the uninstall itself; its
+          # self-delete removes uninstall.exe, its plug-in folder and the folder about 3 s after it
+          # exits (the plug-in folder once more about 5 s later if it is still there).
+          $quiet = (Get-ItemProperty $uninstKey).QuietUninstallString
+          if ($quiet -notmatch '^"([^"]+)"\s+(/S _\?=.+)$') { throw "unexpected QuietUninstallString: $quiet" }
+          # Its standard output to a file (un.onUninstFailed's line), which needs CreateProcess;
+          # when the runner's token can't start an elevated image that way (740), the plain start
+          # the installs use.
+          $exe = $Matches[1]
+          $arguments = $Matches[2]
+          $out = "$log/uninstall-stdout.txt"
+          RmNotices 'before the uninstall' "$dir\Clauseo.exe"
+          Write-Host "> $exe $arguments"
+          try {
+            $code = (Start-Process -FilePath $exe -ArgumentList $arguments -Wait -PassThru -NoNewWindow -RedirectStandardOutput $out).ExitCode
+          } catch {
+            Write-Host "::notice::the uninstall can't start with its output redirected ($($_.Exception.Message)); starting it plainly"
+            $code = (Start-Process -FilePath $exe -ArgumentList $arguments -Wait -PassThru).ExitCode
+          }
+          if ((Test-Path $out) -and (Get-Item $out).Length -gt 0) {
+            Get-Content $out | ForEach-Object { Write-Host "::notice::the uninstaller said: $_" }
+          }
+          if ($code -ne 0) {
+            # Where it stopped: un.onUninstFailed's line above means in the section
+            # (CheckIfAppIsRunning); none, with a plug-in folder newer than the arm64 install's,
+            # means in un.onInit; none and no newer folder, before any script (a header NSIS
+            # couldn't read).
+            RmNotices 'after the failed uninstall' "$dir\Clauseo.exe"
+            foreach ($entry in @(Get-ChildItem -Force $dir -ErrorAction SilentlyContinue)) {
+              Write-Host "::notice::after the failed uninstall, in the folder: $($entry.Name) ($($entry.LastWriteTime.ToString('HH:mm:ss.fff')))"
+            }
+            PluginFolders 'the failed uninstall'
+            foreach ($process in @(Get-Process | Where-Object { $_.Path -and $_.Path.StartsWith("$dir\", [StringComparison]::OrdinalIgnoreCase) })) {
+              Write-Host "::notice::after the failed uninstall, running from the folder: pid $($process.Id) $($process.Path)"
+            }
+            try {
+              foreach ($threat in @(Get-MpThreatDetection -ErrorAction Stop)) {
+                Write-Host "::notice::Defender detection: $($threat.InitialDetectionTime) $($threat.Resources -join ', ')"
+              }
+            } catch { Write-Host "::notice::Defender detections unreadable: $($_.Exception.Message)" }
+            throw "exit code $code from $exe"
+          }
+          for ($i = 0; $i -lt 30 -and (Test-Path $dir); $i++) { Start-Sleep 2 }
+          $left = @()
+          # What a restart deletes: PendingFileRenameOperations holds source, target pairs, and an
+          # empty target means delete at the next restart. A source reads \??\C:\... (stripped here).
+          # MoveFileEx appends to PendingFileRenameOperations2 instead while that value exists.
+          $pending = @()
+          $session = Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager'
+          foreach ($value in 'PendingFileRenameOperations', 'PendingFileRenameOperations2') {
+            $pairs = @($session.$value)
+            for ($p = 0; $p + 1 -lt $pairs.Count; $p += 2) {
+              if ($pairs[$p + 1] -eq '') { $pending += $pairs[$p] -replace '^\\\?\?\\', '' }
+            }
+          }
+          $pendingHere = @($pending | Where-Object { $_.StartsWith("$dir\", [StringComparison]::OrdinalIgnoreCase) } | Sort-Object -Unique)
+          foreach ($path in $pendingHere) { Write-Host "::notice::pending delete at the next restart: $path" }
+          # Each leftover under the folder, the folder too: a notice if that path is itself pending.
+          if (Test-Path $dir) {
+            foreach ($entry in @(Get-Item -Force $dir) + @(Get-ChildItem -Recurse -Force $dir)) {
+              if ($pending -contains $entry.FullName) { Write-Host "::notice::removed at the next restart: $($entry.FullName)" } else { $left += $entry.FullName }
+            }
+          }
+          if (Test-Path $uninstKey) { $left += $uninstKey }
+          # HKLM\SOFTWARE\Clauseo\Clauseo (and the then-empty HKLM\SOFTWARE\Clauseo) goes only with
+          # #769's NSIS_HOOK_POSTUNINSTALL; before it lands, a notice instead of a failure.
+          $regkeyFix = Select-String -Quiet -Path crates/desktop/windows/hooks.nsh -Pattern '^!macro NSIS_HOOK_POSTUNINSTALL'
+          foreach ($key in 'HKLM:\SOFTWARE\Clauseo\Clauseo', 'HKLM:\SOFTWARE\Clauseo') {
+            if (-not (Test-Path $key)) { continue }
+            if ($regkeyFix) { $left += $key } else { Write-Host "::notice::$key is left; expected gone once #769 lands" }
+          }
+          # Any other key under it (the sandbox's record, Sandbox) is left whatever #769 does.
+          if (Test-Path 'HKLM:\SOFTWARE\Clauseo') {
+            $extra = Get-ChildItem 'HKLM:\SOFTWARE\Clauseo' | Where-Object PSChildName -ne 'Clauseo' | ForEach-Object Name
+            if ($extra) { $left += $extra }
+          }
+          $tasks = Get-ScheduledTask -TaskPath '\Clauseo\*' -ErrorAction SilentlyContinue
+          if ($tasks) { $left += $tasks | ForEach-Object { "task $($_.TaskPath)$($_.TaskName)" } }
+          foreach ($lnk in "$env:ProgramData\Microsoft\Windows\Start Menu\Programs\Clauseo.lnk", "$env:PUBLIC\Desktop\Clauseo.lnk") {
+            if (Test-Path $lnk) { $left += $lnk }
+          }
+          # C:\ProgramData\Clauseo, the firm-policy folder, stays by design (hooks.nsh).
+          if ($left) {
+            $left | ForEach-Object { Write-Host "::error::left after the uninstall: $_" }
+            # Whether anything still holds a file that stayed: a delete now, and why it fails.
+            foreach ($file in @($left | Where-Object { Test-Path -PathType Leaf $_ })) {
+              try { [IO.File]::Delete($file); Write-Host "::notice::a delete now works: $file" }
+              catch { Write-Host "::notice::a delete now fails: ${file}: $($_.Exception.Message)" }
+            }
+            exit 1
+          }
+          Write-Host 'arm64 over x64 per machine: installed, Clauseo.exe is ARM64, uninstalled clean'
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: arm64-install-smoke-log
+          path: ${{ runner.temp }}/smoke
+          if-no-files-found: warn
+
   # The Release: latest.json, SHA256SUMS.txt, an attestation per asset, then a draft (release) or
   # a public pre-release (test). A dry run stops at the artifact dist-assets.
   assemble:
     name: assemble
-    needs: [check, build, sign-windows]
+    needs: [check, build, sign-windows, arm64-install-smoke]
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     permissions:
@@ -916,13 +1340,13 @@ jobs:
           node-version-file: ui/package.json
           package-manager-cache: false
 
-      # Each leg in a folder of its own: both macOS legs hold a Clauseo.app.tar.gz.
+      # Each leg in a folder of its own.
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: release-*
           path: ${{ runner.temp }}/legs
 
-      # A dry run signs each Windows leg with that leg's throwaway key; a release or a test run
+      # A dry run signs each macOS and Windows leg with that leg's throwaway key; a release or a test run
       # takes its public key from the repo.
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         if: env.MODE == 'dry'
@@ -938,26 +1362,31 @@ jobs:
         run: |
           set -euo pipefail
           mkdir dist
+          # The macOS legs sign their archive under its published, arch-named name. The bundler's
+          # Clauseo.app.tar.gz means a leg that did not, whose .sig binds no arch: refused.
           for leg in "$RUNNER_TEMP"/legs/release-*; do
-            case "$leg" in
-              *-aarch64-apple-darwin) arch=aarch64 ;;
-              *-x86_64-apple-darwin) arch=x64 ;;
-              *) arch="" ;;
-            esac
-            if [ -n "$arch" ]; then
-              mv "$leg/Clauseo.app.tar.gz" "$leg/Clauseo_${VERSION}_${arch}.app.tar.gz"
-              mv "$leg/Clauseo.app.tar.gz.sig" "$leg/Clauseo_${VERSION}_${arch}.app.tar.gz.sig"
-            fi
+            for old in Clauseo.app.tar.gz Clauseo.app.tar.gz.sig; do
+              [ ! -e "$leg/$old" ] ||
+                { echo "::error::$(basename "$leg") holds $old: the macOS archive must be signed as Clauseo_${VERSION}_<arch>.app.tar.gz"; exit 1; }
+            done
             mv "$leg"/* dist/
           done
           # A dry run publishes nothing; its URLs point at a tag that does not exist.
           base="https://github.com/$GITHUB_REPOSITORY/releases/download/${TAG:-dry-run}"
-          node .github/scripts/latest-json.mjs dist "$VERSION" "$base" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$SANDBOX_EXE" > missing.txt
+          # The sandbox tool's rows only with the Safe workspace on (SAFE_WORKSPACE).
+          pub_date=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          if [ "$SAFE_WORKSPACE" = true ]; then
+            node .github/scripts/latest-json.mjs dist "$VERSION" "$base" "$pub_date" "$SANDBOX_EXE" > missing.txt
+            sandbox_exe=$SANDBOX_EXE
+          else
+            node .github/scripts/latest-json.mjs dist "$VERSION" "$base" "$pub_date" > missing.txt
+            sandbox_exe=""
+          fi
           # Nothing but the table's assets, their .sig and latest.json.
           known=$(node --input-type=module -e "
             import { assets } from './.github/scripts/latest-json.mjs';
-            for (const a of assets(process.argv[1], process.argv[2])) console.log(a.platforms || a.signed ? a.name + '\n' + a.name + '.sig' : a.name);
-          " "$VERSION" "$SANDBOX_EXE")
+            for (const a of assets(process.argv[1], process.argv[2] || null)) console.log(a.platforms || a.signed ? a.name + '\n' + a.name + '.sig' : a.name);
+          " "$VERSION" "$sandbox_exe")
           for file in dist/*; do
             name=$(basename "$file")
             [ "$name" = latest.json ] || grep -qxF "$name" <<< "$known" ||
@@ -965,10 +1394,12 @@ jobs:
           done
           (cd dist && sha256sum -- * > ../SHA256SUMS.txt) && mv SHA256SUMS.txt dist/
           (cd dist && sha256sum -c SHA256SUMS.txt)
-          # S15's sandbox tool: per architecture, both installers must place exactly the published
-          # exe and its .sig at the install folder's root, and the .sig (and the currentUser
-          # installer's) must hold under this mode's updater public key. A tier 2 leg that failed
-          # left none of these files; latest-json.mjs has already required the tier 1 ones.
+          # S15's sandbox tool, with the Safe workspace on: per architecture, both installers must
+          # place exactly the published exe and its .sig at the install folder's root, and the .sig
+          # must hold under this mode's updater public key. Off, neither installer may hold any
+          # file of the sandbox's. Either way the currentUser installer's .sig must hold. Both
+          # architectures are tier 1, so all of each one's files must be here (latest-json.mjs has
+          # already required them).
           updater_pub() {
             case "$MODE" in
               dry) cat "$RUNNER_TEMP/pub/dry-updater-pub-$1/dry-updater.key.pub" ;;
@@ -983,20 +1414,29 @@ jobs:
               arm64) target=aarch64-pc-windows-msvc label="Windows ARM64" ;;
             esac
             exe=dist/${SANDBOX_EXE%.exe}-$arch.exe
-            files=("dist/Clauseo_${VERSION}_${arch}-setup.exe" "dist/Clauseo_${VERSION}_${arch}-machine-setup.exe" "$exe" "$exe.sig")
+            files=("dist/Clauseo_${VERSION}_${arch}-setup.exe" "dist/Clauseo_${VERSION}_${arch}-machine-setup.exe")
+            [ "$SAFE_WORKSPACE" != true ] || files+=("$exe" "$exe.sig")
             present=0
             for file in "${files[@]}"; do [ ! -f "$file" ] || present=$((present + 1)); done
-            [ "$present" != 0 ] || continue
-            [ "$present" = 4 ] || { echo "::error::the $arch leg left only some of ${files[*]}"; exit 1; }
+            [ "$present" = "${#files[@]}" ] || { echo "::error::the $arch leg left $present of ${files[*]}"; exit 1; }
             pub=$RUNNER_TEMP/updater-$arch.pub
             updater_pub "$target" > "$pub" || true
             [ -n "$(tr -d '[:space:]' < "$pub")" ] || { echo "::error::no updater public key for $arch in a $MODE run"; exit 1; }
             # Each signed for this version, under the name it was signed as (the trusted comment's
-            # file:): the sandbox tool as installed, the installer as published.
-            node .github/scripts/latest-json.mjs --verify "$exe" "$pub" "$SANDBOX_EXE" "$VERSION" ||
-              { echo "::error::$(basename "$exe").sig does not hold under the $MODE updater key for file:$SANDBOX_EXE, version:$VERSION"; exit 1; }
+            # file:): the installer as published and, with the Safe workspace on, the sandbox tool
+            # as installed.
             node .github/scripts/latest-json.mjs --verify "${files[0]}" "$pub" "$(basename "${files[0]}")" "$VERSION" ||
               { echo "::error::$(basename "${files[0]}").sig does not hold under the $MODE updater key"; exit 1; }
+            if [ "$SAFE_WORKSPACE" != true ]; then
+              for installer in "${files[0]}" "${files[1]}"; do
+                listing=$(7z l -slt -ba "$installer" | sed -n 's/^Path = //p')
+                ! grep -qiF "${SANDBOX_EXE%-*}" <<< "$listing" ||
+                  { echo "::error::$(basename "$installer") holds a sandbox file with the Safe workspace off"; exit 1; }
+              done
+              continue
+            fi
+            node .github/scripts/latest-json.mjs --verify "$exe" "$pub" "$SANDBOX_EXE" "$VERSION" ||
+              { echo "::error::$(basename "$exe").sig does not hold under the $MODE updater key for file:$SANDBOX_EXE, version:$VERSION"; exit 1; }
             # The updater key ID the tool was built with (its VERSIONINFO string UpdaterKeyId, stage
             # C) must be this mode's: test's updater-test.pub, release's tauri.conf.json pubkey, dry's
             # the same when set, else build.rs's placeholder (latest-json.mjs, expectedKeyId). A tool
@@ -1020,6 +1460,38 @@ jobs:
             done
             inside+=("| $label | \`$(basename "$exe")\` | \`$(sha256sum < "$exe" | cut -d ' ' -f 1)\` |")
           done
+          # The x64 and arm64 installers of each kind hold the same paths, so the arm64 per-user
+          # installer run over an x64 install (the app's cross-architecture update, /UPDATE) and the
+          # arm64 per-machine one run over an x64 per-machine install replace every file and leave
+          # no stale x64 one. No path is architecture-specific today: the sidecars and the sandbox
+          # tool are installed under names without the target triple. One that becomes so must be
+          # named here as an exception, not dropped from the check.
+          for kind in setup machine-setup; do
+            listings=()
+            for arch in x64 arm64; do
+              listings+=("$RUNNER_TEMP/paths-$arch-$kind.txt")
+              7z l -slt -ba "dist/Clauseo_${VERSION}_${arch}-$kind.exe" | sed -n 's/^Path = //p' | LC_ALL=C sort > "${listings[-1]}"
+              [ -s "${listings[-1]}" ] || { echo "::error::7-Zip listed no files in Clauseo_${VERSION}_${arch}-$kind.exe"; exit 1; }
+            done
+            diff "${listings[0]}" "${listings[1]}" ||
+              { echo "::error::the x64 and arm64 $kind installers hold different files (above: < x64, > arm64)"; exit 1; }
+          done
+          # Each macOS archive signed for this version under its published name, which carries the
+          # arch (the trusted comment's file:), so the app's updater can bind it to its arch. A
+          # tier 2 leg that failed left no archive; latest-json.mjs has already required tier 1's.
+          for arch in aarch64 x64; do
+            case $arch in
+              aarch64) target=aarch64-apple-darwin ;;
+              x64) target=x86_64-apple-darwin ;;
+            esac
+            tarball=dist/Clauseo_${VERSION}_${arch}.app.tar.gz
+            [ -f "$tarball" ] || continue
+            pub=$RUNNER_TEMP/updater-$target.pub
+            updater_pub "$target" > "$pub" || true
+            [ -n "$(tr -d '[:space:]' < "$pub")" ] || { echo "::error::no updater public key for $target in a $MODE run"; exit 1; }
+            node .github/scripts/latest-json.mjs --verify "$tarball" "$pub" "$(basename "$tarball")" "$VERSION" ||
+              { echo "::error::$(basename "$tarball").sig does not hold under the $MODE updater key for file:$(basename "$tarball"), version:$VERSION"; exit 1; }
+          done
           {
             echo "Clauseo $VERSION, built from $GITHUB_SHA by $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID."
             echo
@@ -1029,19 +1501,27 @@ jobs:
             echo
             echo "- **For your own Windows account** (most people): \`Clauseo_${VERSION}_x64-setup.exe\`, or \`Clauseo_${VERSION}_arm64-setup.exe\` on Windows on ARM."
             echo "- **For every account on the computer** (IT, run as an administrator): \`Clauseo_${VERSION}_x64-machine-setup.exe\`, or \`Clauseo_${VERSION}_arm64-machine-setup.exe\`."
+            echo "- If Windows says it only runs Microsoft-verified apps, see [Switching out of S mode](https://github.com/clauseo-ai/clauseo-acp/blob/main/docs/install/windows-s-mode.md)."
+            echo "- **Installed the x64 Clauseo on Windows on ARM?** Installed for your own account, it moves itself to the ARM64 build at its next update. Installed for every account, it doesn't update itself: IT deploys \`Clauseo_${VERSION}_arm64-machine-setup.exe\` instead."
+            # Only while Macs with Clauseo 0.0.4 or earlier exist (orchestrator): their updater expects
+            # the old archive name, so they install one release by hand; drop the line once none remain.
+            echo "- On a Mac with Clauseo 0.0.4 or earlier, download and install this version once. After that, updates arrive by themselves."
             if [ -s missing.txt ]; then
               echo
               echo "Not in this release (a tier 2 build failed):"
               sed 's/^missing /- /' missing.txt
             fi
-            echo
-            echo "## Inside the Windows installers"
-            echo
-            echo "Both Windows installers of an architecture, per-user and per-machine, place the same \`$SANDBOX_EXE\`, Clauseo's sandbox tool, and its signature \`$SANDBOX_EXE.sig\` in the install folder. Both are on this release too, under the asset name below. IT can compare a copy restored from quarantine with this SHA-256 (\`Get-FileHash\` in PowerShell)."
-            echo
-            echo "| architecture | asset | SHA-256 of $SANDBOX_EXE |"
-            echo "|---|---|---|"
-            printf '%s\n' "${inside[@]}"
+            # The sandbox tool's hashes, only with the Safe workspace on.
+            if [ "$SAFE_WORKSPACE" = true ]; then
+              echo
+              echo "## Inside the Windows installers"
+              echo
+              echo "Both Windows installers of an architecture, per-user and per-machine, place the same \`$SANDBOX_EXE\`, Clauseo's sandbox tool, and its signature \`$SANDBOX_EXE.sig\` in the install folder. Both are on this release too, under the asset name below. IT can compare a copy restored from quarantine with this SHA-256 (\`Get-FileHash\` in PowerShell)."
+              echo
+              echo "| architecture | asset | SHA-256 of $SANDBOX_EXE |"
+              echo "|---|---|---|"
+              printf '%s\n' "${inside[@]}"
+            fi
           } > notes.md
           {
             echo "### Release assets, $MODE"
@@ -1135,12 +1615,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        # build's rustflags for the same target: crt-static on Windows only.
         include:
-          - { target: aarch64-apple-darwin, runner: macos-15, feature: marks, exe: "" }
-          - { target: x86_64-pc-windows-msvc, runner: windows-2025, feature: e2e, exe: .exe }
+          - { target: aarch64-apple-darwin, runner: macos-15, feature: marks, exe: "", rustflags: "-C force-frame-pointers=yes" }
+          - { target: x86_64-pc-windows-msvc, runner: windows-2025, feature: e2e, exe: .exe, rustflags: "-C force-frame-pointers=yes -C target-feature=+crt-static" }
     env:
       TARGET: ${{ matrix.target }}
-      RUSTFLAGS: "-C force-frame-pointers=yes"
+      RUSTFLAGS: ${{ matrix.rustflags }}
       RELEASE_DIR: target/${{ matrix.target }}/release
     defaults:
       run:

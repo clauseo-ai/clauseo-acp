@@ -10,7 +10,7 @@ use serde_json::Value;
 
 use super::codex::{patch_targets, text_has_codex_part};
 use super::words::{Escape, Segments, candidates, shell_segments};
-use super::{Ignored, MAX_WORDS, Targets, existing_resolved, lexical};
+use super::{Ignored, MAX_WORDS, Reach, Targets, existing_resolved, lexical};
 
 /// The most folders [`Folders`] keeps; past it, the folder is unknown.
 const MAX_FOLDERS: usize = 16;
@@ -52,12 +52,13 @@ struct Part<'a> {
 /// far ([`Folders`], [`moved`]). When the command names a folder change anywhere, followed or
 /// not, a relative candidate is also taken from `cwd` with its leading `..` and `.` parts off: a
 /// backstop for changes the guard misreads, at the cost of a rare refusal of a write that lands
-/// elsewhere. Each path counts as spelled and resolved ([`resolutions`]). A command of another
-/// JSON type is ignored.
+/// elsewhere. Each path counts as spelled and resolved ([`walked_resolutions`]). A command of
+/// another JSON type is ignored.
 pub(super) fn shell_targets(
     command: Option<&Value>,
     cwd: &Path,
     escape: Escape,
+    reach: &Reach,
 ) -> Result<Targets, Ignored> {
     let mut segments = Segments::new(MAX_WORDS);
     let mut text = String::new();
@@ -127,9 +128,12 @@ pub(super) fn shell_targets(
                 names_codex |= text_has_codex_part(candidate);
                 let candidate = native(candidate, part.escape);
                 for path in starts(&folders, changes, Path::new(candidate.as_ref())) {
-                    for path in resolutions(&path) {
+                    for path in walked_resolutions(&path, reach) {
                         let file = (path, word.clone());
-                        if !files.contains(&file) && file.0.metadata().is_ok_and(|m| m.is_file()) {
+                        // The walked path, its links already followed: not followed again.
+                        if !files.contains(&file)
+                            && std::fs::symlink_metadata(&file.0).is_ok_and(|m| m.is_file())
+                        {
                             files.push(file);
                         }
                     }
@@ -137,7 +141,7 @@ pub(super) fn shell_targets(
             }
         }
         if part.command {
-            moved(&mut folders, part.words, part.escape);
+            moved(&mut folders, part.words, part.escape, reach);
         }
     }
     Ok(Targets::Shell {
@@ -150,23 +154,21 @@ pub(super) fn shell_targets(
     })
 }
 
-/// `path` as spelled when it has no `.` or `..` part; else `path` resolved two ways through its
-/// deepest existing folder: as spelled (a symlinked folder's `..` is its target's parent, as the
-/// OS reads it; when the path exists this is the file the OS opens, so the spelling itself is not
-/// checked again), and with `..` and `.` resolved by their text first (`mkdir -p D && echo x >
-/// D/../Contract.docx`, or a `D` that never exists).
-pub(super) fn resolutions(path: &Path) -> Vec<PathBuf> {
+/// Where `path` may lead, each place as the network-safe walk resolved it ([`Reach::walked`],
+/// used as it is from then on): as spelled (a symlinked folder's `..` is its target's parent on
+/// Unix, as the OS reads it), and, when it has a `.` or `..` part, with those taken by their
+/// text first (`mkdir -p D && echo x > D/../Contract.docx`, or a `D` that never exists). A place
+/// the walk does not vouch for (a network location, one it can't look at) is left out.
+pub(super) fn walked_resolutions(path: &Path, reach: &Reach) -> Vec<PathBuf> {
+    let mut found: Vec<PathBuf> = reach.walked(path).into_iter().collect();
     let normal = lexical(path);
-    if normal == path {
-        return vec![normal];
+    if normal != path
+        && let Some(walked) = reach.walked(&normal)
+        && !found.contains(&walked)
+    {
+        found.push(walked);
     }
-    let spelled = existing_resolved(path);
-    let normal = existing_resolved(&normal);
-    if spelled == normal {
-        vec![spelled]
-    } else {
-        vec![spelled, normal]
-    }
+    found
 }
 
 /// `candidate` with its separators as the OS reads them: PowerShell takes `\` as a separator on
@@ -311,7 +313,7 @@ pub(crate) fn script(words: &[String], escape: Escape) -> Option<(String, Escape
 /// with `~` (home is usually above the matter) or holding `$`, `` ` ``, a glob or a brace is
 /// unknown. `popd` and `Pop-Location` go back to a folder already reached, or to an unknown one
 /// when the command pushed none.
-fn moved(folders: &mut Folders, words: &[String], escape: Escape) {
+fn moved(folders: &mut Folders, words: &[String], escape: Escape, reach: &Reach) {
     let Some((command, args)) = command_words(words).split_first() else {
         return;
     };
@@ -375,7 +377,7 @@ fn moved(folders: &mut Folders, words: &[String], escape: Escape) {
             .collect()
     };
     for path in joined {
-        for folder in [lexical(&path), existing_resolved(&path)] {
+        for folder in [lexical(&path), existing_resolved(&path, reach)] {
             if folders.reached.contains(&folder) {
                 continue;
             }

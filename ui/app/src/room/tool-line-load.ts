@@ -3,7 +3,7 @@
 // stands as it does without tools.
 import { useEffect, useState } from "react";
 import type { ToolsSegment } from "@clauseo/components/clauseo/composer.tsx";
-import type { Lang } from "@clauseo/components/lib/display.ts";
+import { useDisplay, type Lang } from "@clauseo/components/lib/display.ts";
 import { late } from "@clauseo/components/lib/late.ts";
 import { useStreamPart } from "../store/hooks.ts";
 import type { ViewStore } from "../store/store.ts";
@@ -20,12 +20,13 @@ const hasTools = (v: StreamView | undefined): boolean =>
   (v?.header?.header?.tools?.length ?? 0) > 0;
 
 /** The status line's tool segment for the stream's header (tool-line-room.ts), once the line's chunk is in; null
- * before, and with no tools to speak for. */
+ * before, and with no tools to speak for. Its words follow the computer's OS too (what to install for the browser). */
 export function useToolsSegment(
   store: ViewStore,
   stream: StreamId | null,
   lang: Lang,
 ): ToolsSegment | null {
+  const { platform } = useDisplay();
   const [chunk, setChunk] = useState(loaded);
   // the header's tools as the line reads them once its chunk is in, and until then whether it has any
   const tools = useStreamPart<readonly KnownTool[] | boolean>(
@@ -40,5 +41,7 @@ export function useToolsSegment(
         () => {},
       );
   }, [tools]);
-  return typeof tools === "boolean" || chunk === null ? null : chunk.toolsSegment(lang, tools);
+  return typeof tools === "boolean" || chunk === null
+    ? null
+    : chunk.toolsSegment(lang, platform, tools);
 }

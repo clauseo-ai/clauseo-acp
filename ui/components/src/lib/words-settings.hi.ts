@@ -27,6 +27,9 @@ export const HI = {
   "Updated at {time}": "{time} बजे अपडेट किया गया",
   "No limits to show. Each question is billed to the key's account.":
     "दिखाने को कोई सीमा नहीं। हर प्रश्न का शुल्क उसी key के खाते पर लगता है।",
+  "Checking what's left…": "कितना बाकी है, इसकी जाँच हो रही है…",
+  "Set up Claude or ChatGPT to see what each plan has left.":
+    "हर प्लान में कितना बाकी है, यह देखने के लिए Claude या ChatGPT सेट अप करें।",
   // language and appearance
   "Changes at once, and everything stays where it was.": "तुरंत बदलती है, और सब कुछ वहीं रहता है जहाँ था।",
   Day: "दिन",
@@ -43,8 +46,11 @@ export const HI = {
     "प्रश्न, उनके लिए ज़रूरी दस्तावेज़ों के अंश, वेब खोजें।",
   // behind an info icon: the button's name, then what it holds
   "More about Brave Search": "Brave Search के बारे में और",
-  "Anthropic lists Brave Search as its web search subprocessor.":
-    "Anthropic, Brave Search को अपने वेब खोज सब-प्रोसेसर के रूप में सूचीबद्ध करता है।",
+  "Claude's web searches go through Brave Search, a service Anthropic uses to run web searches.":
+    "Claude की वेब खोजें Brave Search से होकर जाती हैं, एक सेवा जिसे Anthropic वेब खोज चलाने के लिए इस्तेमाल करता है।",
+  // under the rows: what Clauseo fetches by itself when it starts (D-064)
+  "When it starts, Clauseo asks Claude or ChatGPT how much of your plan is left. No papers or questions go with it.":
+    "शुरू होने पर Clauseo, Claude या ChatGPT से पूछता है कि आपके प्लान में कितना बाकी है। इसके साथ कोई दस्तावेज़ या प्रश्न नहीं जाते।",
   "To the websites Clauseo visits": "Clauseo जिन वेबसाइटों पर जाता है, उन्हें",
   "About websites": "वेबसाइटों के बारे में",
   "Websites see Clauseo's visits, as they see any browser's.":
@@ -72,21 +78,21 @@ export const HI = {
   "Look for my {app} sign-in": "मेरा {app} साइन इन खोजें",
   "Uses your ChatGPT plan.": "आपके ChatGPT प्लान का उपयोग करता है।",
   "Add ChatGPT": "ChatGPT जोड़ें",
+  // the same card for Claude, when Claude isn't added yet (the plans side by side)
+  "Uses your Claude plan.": "आपके Claude प्लान का उपयोग करता है।",
+  "Add Claude": "Claude जोड़ें",
   "Needs a download of about {mb} MB. Signing in happens in your browser.":
     "लगभग {mb} MB का डाउनलोड ज़रूरी है। साइन इन आपके ब्राउज़र में होता है।",
   "Signing in happens in your browser.": "साइन इन आपके ब्राउज़र में होता है।",
-  "Other ways in": "जुड़ने के दूसरे तरीके",
+  // the key's help under each plan's card names that plan only
+  "A key from {name}, yours or your firm's. Billed to that key's account.":
+    "{name} की key, आपकी या आपकी फ़र्म की। शुल्क उसी key के खाते पर लगता है।",
   "Change key": "key बदलें",
   "Remove key": "key हटाएँ",
   "Remove the API key?": "API key हटाएँ?",
   "Questions wait until you sign in or add a key again.":
     "दोबारा साइन इन करने या key जोड़ने तक प्रश्न प्रतीक्षा करेंगे।",
   "Sign in again": "दोबारा साइन इन करें",
-  "Your firm's address": "आपकी फ़र्म का पता",
-  "Your IT team gives you this. Questions go through your firm's own account, on its terms.":
-    "यह आपकी IT टीम देती है। प्रश्न आपकी फ़र्म के अपने खाते से, उसकी शर्तों पर जाते हैं।",
-  Connect: "कनेक्ट करें",
-  "Remove address": "पता हटाएँ",
   // what a search for the CLI's login found, once the host says (stage D's FoundLogin none_found and reuse_off)
   "No {app} sign-in on this computer.": "इस कंप्यूटर पर {app} का कोई साइन इन नहीं।",
   "Clauseo isn't using {app}'s sign-in here.": "Clauseo यहाँ {app} का साइन इन इस्तेमाल नहीं कर रहा।",

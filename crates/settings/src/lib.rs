@@ -10,7 +10,9 @@
 //! of a [`PrivacyPatch`]; and the policy
 //! layer a firm's IT pushes: the Windows registry, macOS managed preferences and a
 //! `policy.json`. Decision record `docs/decisions/0009-policy-layer.md` fixes the policy
-//! sources, paths, formats and the merge rule.
+//! sources, paths, formats and the merge rule. It also reads one value of Chrome's, Edge's
+//! and Chromium's own policy, `RemoteDebuggingAllowed` ([`chromium_policy`]), for the host's
+//! browser.
 //!
 //! # Interface
 //!
@@ -112,6 +114,7 @@
 //! `effective.rs` (`Effective::load`), then `leaf.rs` (how a key's value is typed), then
 //! `policy.rs`.
 
+pub mod chromium_policy;
 mod dirs;
 mod effective;
 mod error;
@@ -145,20 +148,24 @@ pub use locations::{
     SETTINGS_FILE,
 };
 pub use lock_reason::{LockCause, LockReason, SourceKind};
-pub use plans::{PLAN_ENV_NAMES, PLAN_PROXY_NAMES, SECRET_WORDS, secret_shaped, web_address_ok};
+pub use plans::{
+    PLAN_ENV_NAMES, PLAN_PROXY_NAMES, SECRET_WORDS, launch_is_clauseos, secret_shaped,
+    web_address_ok,
+};
 pub use policy::{
     FilePolicy, PolicyRead, PolicySource, PolicyStatus, PolicyValues, SourceError,
     system_policy_sources,
 };
 pub use privacy::PrivacyPatch;
 pub use schema::{
-    AgentLaunch, Density, FontSize, InstallSettings, Language, Lite, MattersSettings,
-    McpServerLaunch, McpSettings, Motion, NetworkSettings, Plan, PlanProvider, PrivacySettings,
-    SandboxSettings, Settings, SkillsExtra, SkillsSettings, Theme, ToolsSettings, UiSettings,
-    UpdateMode, UpdateSettings, json_schema,
+    AgentLaunch, BrowserSettings, Density, FontSize, InstallSettings, Language, Lite,
+    MattersSettings, McpServerLaunch, McpSettings, Motion, NetworkSettings, Plan, PlanProvider,
+    PrivacySettings, SandboxSettings, Settings, SkillsExtra, SkillsSettings, Theme, ToolsSettings,
+    UiSettings, UpdateMode, UpdateSettings, json_schema,
 };
 pub use system::{SystemDirs, SystemEnv};
 pub use tools::ToolsPatch;
 pub use ui::UiPatch;
 pub use update::UpdateChoice;
+pub use user::user_sets;
 pub use warning::{Origin, Position, Warning, WarningKind};

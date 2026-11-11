@@ -257,7 +257,8 @@ fn a_prerelease_sorts_below_its_release() {
 #[test]
 fn an_exe_for_another_cpu_never_replaces_this_copy() {
     let key = key();
-    // A validly signed arm64 exe, newer, on an x64 copy: kept out.
+    // A validly signed arm64 exe, newer, on an x64 copy on an x64 machine: kept out (the one
+    // move to ARM64, on an ARM64 machine, is `machine/tests.rs`'s).
     let arm64 = image_for(pe_version::MACHINE_ARM64, [1, 4, 0, 0], b"arm64");
     let mut fake = Fake::new(&old(), &arm64, &key, &good_for(&arm64));
     let exit = run_on(&mut fake, &key.public(), pe_version::MACHINE_X64);
@@ -423,7 +424,7 @@ fn exit_codes_are_distinct_and_clear_of_the_set_up_codes() {
         .collect();
     // PR 2's set-up codes, as the installer's hooks read them, and the refresh's from 32: the
     // one exe exits with either, and only 0 (done) means the same in both.
-    assert_eq!(setup, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
+    assert_eq!(setup, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
     for code in &codes[1..] {
         assert!(!setup.contains(code), "{code} is a set-up code too");
     }
@@ -439,12 +440,18 @@ fn the_descriptors_say_what_the_module_says() {
     );
     // Read back with the flags SetSecurityInfo adds, the staging DACL still matches; any other
     // entry, owner or a lost protection doesn't.
-    assert!(sddl_matches("O:SYD:PAI(A;OICI;FA;;;SY)", STAGING_SDDL));
-    assert!(sddl_matches("O:SYD:P(A;OICI;FA;;;SY)", STAGING_SDDL));
+    assert_eq!(STAGING_SDDL, "O:SYD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)");
+    assert!(sddl_matches(
+        "O:SYD:PAI(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)",
+        STAGING_SDDL
+    ));
+    assert!(sddl_matches(STAGING_SDDL, STAGING_SDDL));
     for wrong in [
-        "O:SYD:AI(A;OICI;FA;;;SY)",
-        "O:BAD:PAI(A;OICI;FA;;;SY)",
-        "O:SYD:PAI(A;OICI;FA;;;SY)(A;OICI;FA;;;BU)",
+        "O:SYD:AI(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)",
+        "O:BAD:PAI(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)",
+        "O:SYD:PAI(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;FA;;;BU)",
+        // The old SYSTEM-only DACL: a folder an older refresh made is set again.
+        "O:SYD:PAI(A;OICI;FA;;;SY)",
         "O:SYD:PAI(A;OICI;FA;;;BA)",
         "O:SY",
     ] {

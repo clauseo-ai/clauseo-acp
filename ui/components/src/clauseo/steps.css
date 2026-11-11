@@ -188,6 +188,12 @@
   .step-row-result[data-error] .step-row-result-text {
     color: var(--primary);
   }
+  /* a failed step's one line of why, under its words, muted, its own words wrapped anywhere */
+  .step-row-why {
+    display: block;
+    color: var(--muted);
+    overflow-wrap: anywhere;
+  }
   .step-row-result-note {
     display: block;
     color: var(--muted);

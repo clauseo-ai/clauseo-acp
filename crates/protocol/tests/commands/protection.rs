@@ -26,10 +26,11 @@ fn the_query_is_a_plain_string_and_its_answer_names_each_field() {
         unprotected_auto_allowed: true,
         in_progress: None,
         retry_asks_admin: true,
+        data_fence_names_only: false,
     });
     assert_eq!(
         serde_json::to_string(&answer).unwrap(),
-        r#"{"protection":{"tier":"c","computer":{"not_protected":{"cause":"needs_set_up"}},"required":false,"unprotected_auto_allowed":true,"retry_asks_admin":true}}"#
+        r#"{"protection":{"tier":"c","computer":{"not_protected":{"cause":"needs_set_up"}},"required":false,"unprotected_auto_allowed":true,"retry_asks_admin":true,"data_fence_names_only":false}}"#
     );
     round_trips(&answer);
 }
@@ -77,6 +78,32 @@ fn the_view_writes_in_progress_only_when_work_runs_and_reads_an_older_view() {
             .starts_with(r#"{"protection_view_changed":{"view":{"tier":"c""#)
     );
     round_trips(&event);
+}
+
+/// #766: `data_fence_names_only` is written as set, and an older host's view, without it,
+/// reads as false (the data fence compares by identity).
+#[test]
+fn the_view_carries_the_data_fence_names_only_flag_and_reads_an_older_view() {
+    let mut view = ProtectionView::new(
+        Protection::Protected {
+            tier: ProtectionTier::A,
+        },
+        false,
+        false,
+    );
+    assert!(!view.data_fence_names_only);
+    view.data_fence_names_only = true;
+    assert_eq!(
+        serde_json::to_string(&view).unwrap(),
+        r#"{"tier":"a","computer":{"protected":{"tier":"a"}},"required":false,"unprotected_auto_allowed":false,"retry_asks_admin":false,"data_fence_names_only":true}"#
+    );
+    round_trips(&view);
+    let older: ProtectionView = serde_json::from_str(
+        r#"{"tier":"a","computer":{"protected":{"tier":"a"}},"required":false,"unprotected_auto_allowed":false,"retry_asks_admin":false}"#,
+    )
+    .unwrap();
+    assert!(!older.data_fence_names_only);
+    round_trips(&HostEvent::ProtectionViewChanged { view });
 }
 
 #[test]

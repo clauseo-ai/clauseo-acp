@@ -5,6 +5,12 @@
 
 use std::collections::HashMap;
 
+mod files;
+mod str_cpy;
+
+/// The named variables `Machine::expand` reads (the others it knows are `$R0`..`$R9`, `$0`..`$9`).
+const NAMED: [&str; 1] = ["$INSTDIR"];
+
 /// A record value as `ReadRegStr` reads it: text, or a value it can't read (another type).
 #[derive(Clone, Copy)]
 pub(super) enum Value {
@@ -221,9 +227,11 @@ pub(super) fn lines(nodes: &[Node]) -> Vec<&str> {
 
 /// The machine: the defines, variables, error flag and stack, the record under
 /// `HKLM\SOFTWARE\Clauseo\Sandbox` and the lawyer's key under `HKCU\Software\Clauseo`, whether
-/// the run is silent, the user's SID for `CLAUSEO_OWN_SID`, the macros it runs inline (and the
-/// record each leaves), what it said (`DetailPrint`, `MessageBox`, `SetErrorLevel`), and which
-/// stubbed macros it reached.
+/// the run is silent, the user's SID for `CLAUSEO_OWN_SID`, the files `${FileExists}` finds, the
+/// names `FindFirst` and `FindNext` return and the files `Delete` can't delete, the macros it
+/// runs inline (and the record each leaves), what it said (`DetailPrint`, `MessageBox`,
+/// `SetErrorLevel`, `ExecWait`, `Quit`, `Abort`, `Delete`, `RMDir`), whether it aborted, and
+/// which stubbed macros it reached.
 pub(super) struct Machine {
     pub(super) defines: HashMap<String, String>,
     pub(super) vars: HashMap<String, String>,
@@ -232,12 +240,31 @@ pub(super) struct Machine {
     pub(super) record: Record,
     /// The lawyer's key, `HKCU\Software\Clauseo`, where the app writes `UiLanguage`.
     pub(super) user: Record,
+    /// Any other key a step reads, as `ROOT\key`, `None` for no key; one not listed fails.
+    pub(super) keys: HashMap<String, Record>,
+    /// The exit code every `ExecWait` leaves.
+    pub(super) exit_code: &'static str,
     pub(super) silent: bool,
     pub(super) own_sid: &'static str,
+    /// The paths that exist, as `${FileExists}` is given them once expanded.
+    pub(super) files: Vec<String>,
+    /// The names one `FindFirst`, then each `FindNext`, returns, in order; then "".
+    pub(super) found: Vec<String>,
+    /// The paths, once expanded, whose `Delete` fails (a file in use).
+    pub(super) locked: Vec<String>,
+    /// An `Abort` ran: nothing after it does, as the section it ends.
+    pub(super) aborted: bool,
     pub(super) inline: HashMap<String, Vec<Node>>,
     /// The record an inlined macro leaves behind it, as a refresh landing while it runs would.
     pub(super) after: HashMap<String, Record>,
     pub(super) said: Vec<String>,
+    /// Each `WriteRegStr` as `ROOT: key, name = value`, expanded, in order.
+    pub(super) written: Vec<String>,
+    /// What the fake `LangDLL::LangDialog` answers, which `Pop` then gets: a language id, or
+    /// "cancel".
+    pub(super) answer: String,
+    /// The (name, id) pairs a `LangDialog` read from the stack, in the order it read them.
+    pub(super) asked: Vec<(String, String)>,
     pub(super) reached: Vec<String>,
 }
 
@@ -250,17 +277,26 @@ impl Machine {
             stack: Vec::new(),
             record,
             user: None,
+            keys: HashMap::new(),
+            exit_code: "0",
             silent: false,
             own_sid: "",
+            files: Vec::new(),
+            found: Vec::new(),
+            locked: Vec::new(),
+            aborted: false,
             inline: HashMap::new(),
             after: HashMap::new(),
             said: Vec::new(),
+            written: Vec::new(),
+            answer: String::new(),
+            asked: Vec::new(),
             reached: Vec::new(),
         }
     }
 
-    /// `${NAME}` from the defines, `$R0`..`$R9` and `$0`..`$9` from the variables; `$(name)`, a
-    /// language string, stays as it is.
+    /// `${NAME}` from the defines, `$R0`..`$R9`, `$0`..`$9` and the named ones in `NAMED` from
+    /// the variables; `$(name)`, a language string, stays as it is.
     fn expand(&self, word: &str) -> String {
         let mut out = String::new();
         let mut rest = word;
@@ -279,8 +315,21 @@ impl Machine {
                 let end = rest.find(')').expect("an unclosed $(") + 1;
                 out.push_str(&rest[..end]);
                 rest = &rest[end..];
+            } else if let Some(name) = NAMED.iter().find(|name| rest.starts_with(**name)) {
+                out.push_str(self.vars.get(*name).map_or("", String::as_str));
+                rest = &rest[name.len()..];
             } else {
-                let len = if rest[1..].starts_with('R') { 3 } else { 2 };
+                // $R0..$R9 and $0..$9 are two or three characters; $LANGUAGE and the like are a
+                // run of letters.
+                let len = if rest[1..].starts_with('R') {
+                    3
+                } else if rest[1..].starts_with(|c: char| c.is_ascii_alphabetic()) {
+                    1 + rest[1..]
+                        .find(|c: char| !c.is_ascii_alphabetic())
+                        .unwrap_or(rest.len() - 1)
+                } else {
+                    2
+                };
                 let name = &rest[..len];
                 out.push_str(self.vars.get(name).map_or("", String::as_str));
                 rest = &rest[len..];
@@ -308,7 +357,12 @@ impl Machine {
         match cond {
             "${Errors}" => return self.error,
             "${Silent}" => return self.silent,
+            "${RunningX64}" => return true,
             _ => {}
+        }
+        if let Some(path) = cond.strip_prefix("${FileExists} ") {
+            let [path]: [String; 1] = words(path).try_into().expect("one path for ${FileExists}");
+            return self.files.contains(&self.expand(&path));
         }
         let parts = words(cond);
         let [a, op, b] = parts.as_slice() else {
@@ -323,6 +377,8 @@ impl Machine {
             "S!=" => a != b,
             "=" => number(&a) == number(&b),
             "<>" => number(&a) != number(&b),
+            ">=" => number(&a) >= number(&b),
+            "<=" => number(&a) <= number(&b),
             _ => panic!("an operator this interpreter doesn't know: {cond}"),
         }
     }
@@ -331,7 +387,11 @@ impl Machine {
         match (root, self.expand(key).as_str()) {
             ("HKLM", "SOFTWARE\\Clauseo\\Sandbox") => self.record.as_ref(),
             ("HKCU", "Software\\Clauseo") => self.user.as_ref(),
-            (root, key) => panic!("a key this interpreter doesn't know: {root}\\{key}"),
+            (root, key) => self
+                .keys
+                .get(&format!("{root}\\{key}"))
+                .unwrap_or_else(|| panic!("a key this interpreter doesn't know: {root}\\{key}"))
+                .as_ref(),
         }
     }
 
@@ -344,17 +404,68 @@ impl Machine {
         self.vars.insert(var.to_owned(), value);
     }
 
+    /// `WordFunc`'s `${VersionCompare}`: 0 for equal versions, 1 when the first is newer, 2
+    /// when the second is.
+    fn version_compare(&mut self, a: &str, b: &str, var: &str) {
+        let parse = |text: String| -> Vec<u64> {
+            text.split('.').map(|part| part.parse().unwrap()).collect()
+        };
+        let (a, b) = (parse(self.expand(a)), parse(self.expand(b)));
+        let order = match a.cmp(&b) {
+            std::cmp::Ordering::Equal => "0",
+            std::cmp::Ordering::Greater => "1",
+            std::cmp::Ordering::Less => "2",
+        };
+        self.set(var, order.to_owned());
+    }
+
+    /// The plug-in's dialog, which reads its arguments from the stack as the example in NSIS's
+    /// docs pushes them: "A" on top, then each language's name and id, down to the "" pushed
+    /// first. It answers by pushing `answer` for the script's Pop.
+    fn lang_dialog(&mut self, title: &str) {
+        let flag = self.stack.pop().expect("a LangDialog with no stack");
+        assert_eq!(flag, "A", "a LangDialog flag this interpreter doesn't know");
+        self.asked.clear();
+        loop {
+            let name = self.stack.pop().expect("a LangDialog past its \"\"");
+            if name.is_empty() {
+                break;
+            }
+            let id = self.stack.pop().expect("a LangDialog name with no id");
+            self.asked.push((name, id));
+        }
+        self.said.push(format!("LangDialog {title}"));
+        self.stack.push(self.answer.clone());
+    }
+
     fn line(&mut self, line: &str) {
+        // A command in backquotes, then the variable for its exit code.
+        if let Some(rest) = line.strip_prefix("ExecWait `") {
+            let (command, var) = rest
+                .split_once("` ")
+                .expect("an ExecWait without its variable");
+            let command = self.expand(command);
+            self.said.push(format!("ExecWait {command}"));
+            self.set(var, self.exit_code.to_owned());
+            return;
+        }
         let parts = words(line);
         let parts: Vec<&str> = parts.iter().map(String::as_str).collect();
+        if files::file_line(self, &parts) {
+            return;
+        }
         match parts.as_slice() {
             ["StrCpy", var, value] => self.set(var, self.expand(value)),
+            ["StrCpy", var, value, len] => self.set(var, str_cpy::str_cpy(self, value, len, "")),
+            ["StrCpy", var, value, len, offset] => {
+                self.set(var, str_cpy::str_cpy(self, value, len, offset));
+            }
             ["ClearErrors"] => self.error = false,
             ["StrLen", var, text] => {
                 let len = self.expand(text).chars().count();
                 self.set(var, len.to_string());
             }
-            ["SetRegView", "64" | "lastused"] => {}
+            ["SetRegView", "64" | "lastused"] | ["FindClose", _] => {}
             ["Push", value] => self.stack.push(self.expand(value)),
             ["Pop", var] => {
                 let value = self.stack.pop().expect("a Pop on an empty stack");
@@ -391,6 +502,11 @@ impl Machine {
                 let b: i64 = self.expand(b).parse().unwrap();
                 self.set(var, (a + b).to_string());
             }
+            ["IntOp", var, a, "-", b] => {
+                let a: i64 = self.expand(a).parse().unwrap();
+                let b: i64 = self.expand(b).parse().unwrap();
+                self.set(var, (a - b).to_string());
+            }
             ["DetailPrint", text] => {
                 let text = self.expand(text);
                 self.said.push(format!("DetailPrint {text}"));
@@ -399,6 +515,30 @@ impl Machine {
                 let text = self.expand(text);
                 self.said.push(format!("MessageBox {text}"));
             }
+            ["${VersionCompare}", a, b, var] => self.version_compare(a, b, var),
+            ["Quit"] => self.said.push("Quit".to_owned()),
+            // With /SD a silent run shows no box and takes the default answer.
+            ["MessageBox", _, text, "/SD", _] => {
+                if !self.silent {
+                    let text = self.expand(text);
+                    self.said.push(format!("MessageBox {text}"));
+                }
+            }
+            // Abort, with or without a message, ends the run as NSIS ends the section.
+            ["Abort", ..] => {
+                self.said.push(line.to_owned());
+                self.aborted = true;
+            }
+            ["WriteRegStr", root, key, name, value] => {
+                let line = format!(
+                    "{root}: {}, {} = {}",
+                    self.expand(key),
+                    self.expand(name),
+                    self.expand(value)
+                );
+                self.written.push(line);
+            }
+            ["LangDLL::LangDialog", title, _text] => self.lang_dialog(title),
             ["SetErrorLevel", code] => {
                 let code = self.expand(code);
                 self.said.push(format!("SetErrorLevel {code}"));
@@ -425,8 +565,13 @@ impl Machine {
     /// Runs `nodes`; true when an `${ExitDo}` leaves them.
     pub(super) fn run(&mut self, nodes: &[Node]) -> bool {
         for node in nodes {
+            if self.aborted {
+                return false;
+            }
             match node {
                 Node::Line(line) if line == "${ExitDo}" => return true,
+                // An Abort stops the run at the next node (the check above), and tells no caller
+                // it left a ${Do}.
                 Node::Line(line) => self.line(line),
                 Node::If(arms, otherwise) => {
                     let chosen = arms
@@ -440,7 +585,7 @@ impl Machine {
                 }
                 Node::Do(body) => {
                     let mut turns = 0;
-                    while !self.run(body) {
+                    while !self.run(body) && !self.aborted {
                         turns += 1;
                         assert!(turns < 100, "a ${{Do}} that doesn't end");
                     }

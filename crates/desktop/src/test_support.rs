@@ -235,7 +235,7 @@ impl Scratch {
     }
 
     /// Marks the file `rel` under the scratch folder as a program (mode 0755).
-    #[cfg(all(unix, not(target_os = "macos")))]
+    #[cfg(unix)]
     #[expect(
         clippy::disallowed_methods,
         reason = "test set-up writes its scratch folder; the desktop crate has no write module"
@@ -382,6 +382,7 @@ impl Running {
         let outcome = self.run(HostCommand::CreateThread {
             matter: self.scratch(),
             agent: AgentId::new(AGENT).unwrap(),
+            config: None,
         });
         let CommandOutcome::ThreadCreated { thread } = outcome else {
             panic!("not created: {outcome:?}");

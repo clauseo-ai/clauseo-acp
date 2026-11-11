@@ -14,23 +14,24 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::MatterPath;
 use crate::{
-    AgentChoiceId, AgentId, AgentKind, AllowScope, BlockedSiteId, CheckpointId, ClientName,
-    CommandId, Date, Delivery, ElicitationId, ElicitationResponse, FieldChange, FileDecision,
-    FolderRefId, MatterId, PackId, PackList, PermissionRequestId, PrivacyPatch, PromptBlock,
-    RestoreScope, ThreadId, Timestamp, Title, ToolsPatch, TurnId, UiPatch,
+    AgentChoiceId, AgentId, AgentKind, AgentPrefs, AllowScope, BlockedSiteId, CheckpointId,
+    ClientName, CommandId, ConfigPicks, Date, DecideRevisions, Delivery, ElicitationId,
+    ElicitationResponse, FieldChange, FileDecision, FolderRefId, InstallWhen, MatterId, PackId,
+    PackList, PermissionRequestId, PrivacyPatch, PromptBlock, ThreadId, Timestamp, Title,
+    ToolsPatch, TurnId, UiPatch, UpdateMode,
 };
 #[cfg(doc)]
-use crate::{FileChoice, RawPayload};
-use crate::{InstallWhen, UpdateMode};
+use crate::{FileChoice, MatterPath, RawPayload};
 
 mod connectors;
 mod outcome;
+mod requests;
 mod validate;
 
 pub use connectors::{ConnectorCommand, MAX_CONNECTOR_ID_BYTES};
 pub use outcome::CommandOutcome;
+pub use requests::{DeliveryRequest, RestoreRequest};
 pub use validate::{
     MAX_ALLOWED_HOST_BYTES, MAX_ELICITATION_VALUES_BYTES, MAX_FILE_LIST, MAX_MATTER_NAME_BYTES,
     MAX_PATH_LIST_BYTES, MAX_PROMPT_BLOCKS, MAX_PROMPT_FILES, MAX_PROMPT_TEXT_BYTES,
@@ -99,58 +100,6 @@ pub enum MatterSource {
     DefaultLocation,
 }
 
-/// What a restore puts back, as a command asks for it: the strict, closed twin of the logged
-/// [`RestoreScope`], with the same wire form. Unknown fields and kinds are refused, as in every
-/// command; the host turns it into the scope it logs with `From`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case", deny_unknown_fields)]
-#[cfg_attr(feature = "specta", derive(specta::Type))]
-pub enum RestoreRequest {
-    /// The whole matter.
-    Matter,
-    /// These files only. JSON: `{"files": {"paths": [..]}}`.
-    Files {
-        /// The files, relative to the matter folder.
-        paths: Vec<MatterPath>,
-    },
-}
-
-impl From<RestoreRequest> for RestoreScope {
-    fn from(request: RestoreRequest) -> Self {
-        match request {
-            RestoreRequest::Matter => Self::Matter,
-            RestoreRequest::Files { paths } => Self::Files { paths },
-        }
-    }
-}
-
-/// How to deliver a prompt while a turn runs, as a command asks for it: the strict, closed twin
-/// of the logged [`Delivery`], with the same wire form, so a mode from a newer client is refused
-/// when the command decodes, never run as another mode. The host turns it into the delivery it
-/// logs with `From`.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case", deny_unknown_fields)]
-#[cfg_attr(feature = "specta", derive(specta::Type))]
-pub enum DeliveryRequest {
-    /// Wait in the thread's queue; also what a missing field means.
-    #[default]
-    Queue,
-    /// Cancel the running turn, then send this prompt next.
-    SendNow,
-    /// Add it to the running turn where the agent can, else send it now.
-    Steer,
-}
-
-impl From<DeliveryRequest> for Delivery {
-    fn from(request: DeliveryRequest) -> Self {
-        match request {
-            DeliveryRequest::Queue => Self::Queue,
-            DeliveryRequest::SendNow => Self::SendNow,
-            DeliveryRequest::Steer => Self::Steer,
-        }
-    }
-}
-
 /// Why account limits are refreshed, as `RefreshLimits` asks for it: a window got focus, or a
 /// meter or the settings page opened (`Shown`), or the lawyer pressed "Try again" (`TryAgain`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -195,10 +144,9 @@ pub enum HostCommand {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         next_date: Option<Date>,
     },
-    /// Change a matter's details. Each field: missing leaves it, `null` clears it (`client`,
-    /// `next_date`, `skill_packs`: back to the global `skills.enabled`), a value sets it (`[]`
-    /// for `skill_packs` means no pack for the matter). A command that changes nothing answers
-    /// `Done` too.
+    /// Change a matter's details. Each field: missing leaves it, `null` clears it (`skill_packs`:
+    /// back to the global `skills.enabled`), a value sets it (`[]` for `skill_packs`: no pack
+    /// for the matter). A command that changes nothing answers `Done` too.
     UpdateMatter {
         /// The matter.
         matter: MatterId,
@@ -217,6 +165,10 @@ pub enum HostCommand {
         /// Whether it is pinned to the top of the rail.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         pinned: Option<bool>,
+        /// The picks a new conversation starts with, per agent kind (`CreateThread::config`).
+        #[serde(default, skip_serializing_if = "FieldChange::is_keep")]
+        #[cfg_attr(feature = "specta", specta(type = Option<Option<AgentPrefs>>))]
+        agent_prefs: FieldChange<AgentPrefs>,
     },
     /// The lawyer opened a matter: its `last_opened` becomes now, which orders "Recent".
     OpenMatter {
@@ -291,6 +243,11 @@ pub enum HostCommand {
         matter: MatterId,
         /// The agent's registry id.
         agent: AgentId,
+        /// Model and effort to start with, set after the session starts and before the first
+        /// prompt (`model`, `thought_level` options; one the agent refuses is dropped). Missing:
+        /// the matter's `agent_prefs` for the agent's kind, else its defaults; `{}` sets none.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        config: Option<ConfigPicks>,
     },
     /// Send a prompt. Never refused because a turn is running: it is queued, sent now or steered.
     SendPrompt {
@@ -366,7 +323,8 @@ pub enum HostCommand {
         /// keys) of at most [`MAX_ELICITATION_VALUES_BYTES`].
         response: ElicitationResponse,
     },
-    /// Set one of the agent's config options.
+    /// Set one of the agent's config options: only a select option of category `model` or
+    /// `thought_level` (else `command.invalid`); a success keeps the pick in `agent_prefs`.
     SetConfigOption {
         /// The thread.
         thread: ThreadId,
@@ -419,6 +377,12 @@ pub enum HostCommand {
         /// What to put back. A `Files` scope names at least one file; a kind or field this
         /// version does not know is refused when the command decodes.
         scope: RestoreRequest,
+        /// The `restore` checkpoint this restore takes back: the files it added go too.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        undoes: Option<CheckpointId>,
+        /// The conversation it was asked from, of this matter: its stream records the restore.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        thread: Option<ThreadId>,
     },
     /// Change the display settings; answers `Done`, and every app subscriber gets
     /// `HostEvent::SettingsChanged`. A patch naming a key the firm's policy sets is refused
@@ -512,6 +476,14 @@ pub enum HostCommand {
     /// leaves no folder. With none running it does nothing. Answers `Done`, with no receipt.
     /// JSON: `{"cancel_browser_install": {}}`.
     CancelBrowserInstall {},
+    /// Read the firm's browser policy again now, after the lawyer's "Try again" on a browser
+    /// whose policy could not be read (`BrowserPolicyUnreadable`). Answers `Done` at once and
+    /// logs nothing; every app subscriber gets `HostEvent::BrowserPolicy` with `Checking`, then
+    /// what the read found. One read at a time: while one runs it answers `Done` and the running
+    /// read's event answers both. No session restarts: the next session started reads the policy
+    /// again, as every launch does. Only the main window sends it. JSON:
+    /// `{"recheck_browser_policy": {}}`.
+    RecheckBrowserPolicy {},
     /// Check for a newer version now, from `idle` or `failed` (decision record 0037). Answers
     /// `Done`; the state reaches app subscribers as `HostEvent::UpdateChanged`. In a state that
     /// does not take it, `command.invalid`. JSON: `{"check_for_update": {}}`, an object like every
@@ -575,5 +547,16 @@ pub enum HostCommand {
         /// The allow's matter, for `Matter`; left out for `Always`.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         matter: Option<MatterId>,
+    },
+    /// Accept or reject tracked changes of a matter's Word file (`revisions.rs`); refused
+    /// while a turn runs in the matter. Answers `RevisionsDecided`; undo it with
+    /// `RestoreVersion` of its `before` for its one file. JSON: `{"decide_revisions": {..}}`.
+    DecideRevisions(DecideRevisions),
+    /// The window's network signal (D-050): `false` at the webview's `offline` event, `true` at
+    /// `online`, sent on change only. While offline, a running turn whose agent sends nothing for
+    /// 30 s ends `agent.offline`. Answers `Done`, no receipt; only the main window sends it.
+    SetNetwork {
+        /// Whether the window's `navigator.onLine` says the computer is online.
+        online: bool,
     },
 }

@@ -1,18 +1,39 @@
 //! The unclean-session marker: `<data_dir>\sandbox\run\<id>.session`, where `<id>` is the launch
-//! file's 16 hex. The outer writes it as soon as it has read the launch, before anything runs as
-//! the pool user ([`marked`]: a marker that can't be written refuses the launch), and removes it
-//! only at a clean end: the inner exited (no failure, and no cancel whose agent outlived its
-//! grace), reported the agent's exit, the end sweeper exited 0, and no sweep found an escapee
-//! (`end::EndSweep::clean`). A crash, a cancel whose agent outlived its
-//! grace, a failure or an escapee leaves it, and
-//! [`unclean_sessions`] lists what was left, so Clauseo can make sure no process of that pool
-//! user lives on (0049; the `\Clauseo\SandboxStop` task, B's PR 3, is its caller).
+//! file's 16 hex. The outer writes it open ([`MarkerState::Open`]) as soon as it has read the
+//! launch, before anything runs as the pool user ([`marked`]: a marker that can't be written
+//! refuses the launch). At its end it never waits for a task's run; it writes what the marker
+//! waits for instead (`end::SessionEnd::finish`):
+//!
+//! - [`MarkerState::AwaitingSweep`] `{ sweep: M }`: every end without an escapee, `M` the
+//!   `SweepNext` read once the job ended. Clean once `SweepSequence >= M`: a sweep reserved its
+//!   number after the session could launch nothing more, and completed.
+//! - [`MarkerState::AwaitingStop`] `{ stop }`: a session a sweep found an escapee in, `stop`
+//!   the `StopNext` read then. Never clean itself: once `StopSequence >= stop`, whoever reads
+//!   it reads `SweepNext` (`M`) only then, requests the sweep and makes it
+//!   [`MarkerState::AwaitingSweepBeforeStop`] `{ sweep: M }` (`unclean.rs`). A sweep number
+//!   read before the escapee was dead could belong to a sweep it watched complete before it
+//!   registered a task.
+//! - [`MarkerState::AwaitingSweepBeforeStop`] `{ sweep: M }`: never clean itself either. Once
+//!   `SweepSequence >= M`, `StopNext` (`s`) is read only then and the marker becomes
+//!   [`MarkerState::AwaitingFinalStop`] `{ stop: s }`, clean once `StopSequence >= s`. Until the
+//!   sweep deleted the pool's tasks and cancelled its BITS jobs, a trigger or a notify command
+//!   could start a process of the pool user's after the first stop's snapshot; the sweep stops
+//!   only task instances, so the final stop, reserved after the sweep completed, ends the rest.
+//! - [`MarkerState::Open`] left standing: the outer died (the host's job end after its
+//!   `stdin_grace`, a crash) or couldn't read a number. The pool user's next logon or the
+//!   desktop's start makes it `AwaitingStop`, reading `StopNext` then (`unclean.rs`).
+//!
+//! An absent `…Sequence` counts as 0. A clean marker is removed by whoever finds it clean. The
+//! numbers are read without the set-up lock, which only an administrator can take; why that is
+//! sound is in `setup::pool_steps::sequence`. [`unclean_sessions`] lists the markers.
 //!
 //! It lives in the run folder, which only the desktop user, `SYSTEM` and `Administrators` may
 //! open (`write::make_sandbox_dir`): the pool user can neither write nor remove it, and gets no
 //! say in whether a session counts as clean. It is written as the launch file is (atomically,
 //! then given the folder's three entries as its own protected DACL and the desktop user as its
-//! owner) and holds the pool user's SID, nothing else.
+//! owner) and holds the pool user's SID and the install id it was written under (the record's
+//! `InstallId`, none for an install from before it): a marker of another install is stale, its
+//! numbers another install's counters (`unclean.rs`).
 //!
 //! The names, the paths and the listing hold no Windows call, so their tests run on every OS.
 
@@ -35,18 +56,172 @@ const MARKER_CAP: u64 = 4096;
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Marker {
-    /// The session's pool user.
-    pool_user: Sid,
+    /// The session's pool user; `None` only in a marker the desktop's start wrote in place of
+    /// one it couldn't read, which counts for every pool user.
+    pool_user: Option<Sid>,
+    /// What it waits for; absent in a marker written before the states, which reads as open.
+    #[serde(default)]
+    state: MarkerState,
+    /// The record's `InstallId` when it was written; absent under an install without one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    install: Option<String>,
 }
 
-/// A session whose outer left its marker: it crashed, was cancelled or failed, or a sweep found
-/// an escapee.
+/// What a marker waits for before it is clean.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(from = "WireState", into = "WireState")]
+pub enum MarkerState {
+    /// Written at the session's start; standing once its outer is gone, it is never clean.
+    #[default]
+    Open,
+    /// The session ended with no escapee: a sweep that reserved `sweep` or later must complete.
+    AwaitingSweep {
+        /// `SweepNext` as read once the session could launch nothing more.
+        sweep: u64,
+    },
+    /// An escapee, or an outer that died: a stop must complete, after which the marker awaits a
+    /// sweep whose number is read then ([`MarkerState::AwaitingSweepBeforeStop`]).
+    AwaitingStop {
+        /// `StopNext` as read once the session could launch nothing more.
+        stop: u64,
+    },
+    /// Its stop completed: a sweep that reserved `sweep` or later must complete, after which
+    /// the marker awaits a final stop whose number is read then
+    /// ([`MarkerState::AwaitingFinalStop`]).
+    AwaitingSweepBeforeStop {
+        /// `SweepNext` as read once `StopSequence` showed the stop completed.
+        sweep: u64,
+    },
+    /// Its stop, then its sweep, completed: a stop that reserved `stop` or later must complete.
+    AwaitingFinalStop {
+        /// `StopNext` as read once `SweepSequence` showed the sweep completed.
+        stop: u64,
+    },
+}
+
+/// [`MarkerState`] as a marker holds it.
+#[derive(Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+enum WireState {
+    Open,
+    AwaitingSweep {
+        sweep: u64,
+    },
+    AwaitingStop {
+        stop: u64,
+        /// The `SweepNext` a marker written before the re-mark held: read, and ignored.
+        #[serde(default, rename = "sweep", skip_serializing)]
+        _sweep: Option<u64>,
+    },
+    AwaitingSweepBeforeStop {
+        sweep: u64,
+    },
+    AwaitingFinalStop {
+        stop: u64,
+    },
+}
+
+impl From<WireState> for MarkerState {
+    fn from(wire: WireState) -> MarkerState {
+        match wire {
+            WireState::Open => MarkerState::Open,
+            WireState::AwaitingSweep { sweep } => MarkerState::AwaitingSweep { sweep },
+            WireState::AwaitingStop { stop, .. } => MarkerState::AwaitingStop { stop },
+            WireState::AwaitingSweepBeforeStop { sweep } => {
+                MarkerState::AwaitingSweepBeforeStop { sweep }
+            }
+            WireState::AwaitingFinalStop { stop } => MarkerState::AwaitingFinalStop { stop },
+        }
+    }
+}
+
+impl From<MarkerState> for WireState {
+    fn from(state: MarkerState) -> WireState {
+        match state {
+            MarkerState::Open => WireState::Open,
+            MarkerState::AwaitingSweep { sweep } => WireState::AwaitingSweep { sweep },
+            MarkerState::AwaitingStop { stop } => WireState::AwaitingStop { stop, _sweep: None },
+            MarkerState::AwaitingSweepBeforeStop { sweep } => {
+                WireState::AwaitingSweepBeforeStop { sweep }
+            }
+            MarkerState::AwaitingFinalStop { stop } => WireState::AwaitingFinalStop { stop },
+        }
+    }
+}
+
+/// The pool tasks' completed sequences, as read now: `StopSequence` and `SweepSequence`, each 0
+/// when absent.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Sequences {
+    /// `StopSequence`.
+    pub stop: u64,
+    /// `SweepSequence`.
+    pub sweep: u64,
+}
+
+impl MarkerState {
+    /// The stop this marker waits for, the first or the final, if any.
+    pub fn stop(self) -> Option<u64> {
+        match self {
+            MarkerState::AwaitingStop { stop } | MarkerState::AwaitingFinalStop { stop } => {
+                Some(stop)
+            }
+            MarkerState::Open
+            | MarkerState::AwaitingSweep { .. }
+            | MarkerState::AwaitingSweepBeforeStop { .. } => None,
+        }
+    }
+
+    /// The sweep this marker waits for, if any.
+    pub fn sweep(self) -> Option<u64> {
+        match self {
+            MarkerState::AwaitingSweep { sweep }
+            | MarkerState::AwaitingSweepBeforeStop { sweep } => Some(sweep),
+            MarkerState::Open
+            | MarkerState::AwaitingStop { .. }
+            | MarkerState::AwaitingFinalStop { .. } => None,
+        }
+    }
+
+    /// Whether `done` meets what this marker waits for last: the sweep of one awaiting a sweep,
+    /// the final stop of one awaiting that. Never when open, awaiting its first stop or the
+    /// sweep before its final stop: each is re-marked first ([`MarkerState::stopped`],
+    /// [`MarkerState::swept`]).
+    pub fn clean(self, done: Sequences) -> bool {
+        match self {
+            MarkerState::AwaitingSweep { sweep } => done.sweep >= sweep,
+            MarkerState::AwaitingFinalStop { stop } => done.stop >= stop,
+            MarkerState::Open
+            | MarkerState::AwaitingStop { .. }
+            | MarkerState::AwaitingSweepBeforeStop { .. } => false,
+        }
+    }
+
+    /// Whether this marker awaits a first stop that `done` shows completed: it is due its
+    /// re-mark to a sweep.
+    pub fn stopped(self, done: Sequences) -> bool {
+        matches!(self, MarkerState::AwaitingStop { stop } if done.stop >= stop)
+    }
+
+    /// Whether this marker awaits a sweep before its final stop that `done` shows completed:
+    /// it is due its re-mark to the final stop.
+    pub fn swept(self, done: Sequences) -> bool {
+        matches!(self, MarkerState::AwaitingSweepBeforeStop { sweep } if done.sweep >= sweep)
+    }
+}
+
+/// A session whose marker is left: one still running, or one waiting for a task's run.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UncleanSession {
     /// The launch's id, 16 lowercase hex.
     pub id: String,
-    /// Its pool user; `None` when the marker can't be read, or isn't the desktop user's alone.
+    /// Its pool user; `None` when the marker can't be read, isn't the desktop user's alone, or
+    /// names none (it counts for every pool user then).
     pub pool_user: Option<Sid>,
+    /// What it waits for; `None` when it can't be read.
+    pub state: Option<MarkerState>,
+    /// The install id it was written under; `None` when it has none or can't be read.
+    pub install: Option<String>,
 }
 
 /// The marker's path for the launch `id`: `<data_dir>\sandbox\run\<id>.session`.
@@ -71,38 +246,60 @@ pub fn launch_id(path: &Path) -> Option<&str> {
         .filter(|hex| is_id(hex))
 }
 
-/// Writes the marker for the launch `id` and its pool user, in the run folder (which must
-/// exist: the launch file came from it); its path.
-pub fn write_marker(data_dir: &Path, id: &str, pool_user: &Sid) -> io::Result<PathBuf> {
-    if !is_id(id) {
+/// Writes the open marker for the launch `id`, its pool user and the install id `install`, in
+/// the run folder (which must exist: the launch file came from it); its path.
+pub fn write_marker(
+    data_dir: &Path,
+    id: &str,
+    pool_user: &Sid,
+    install: Option<&str>,
+) -> io::Result<PathBuf> {
+    let path = marker_path(data_dir, id);
+    write_marker_at(&path, Some(pool_user), install, MarkerState::Open)?;
+    Ok(path)
+}
+
+/// Writes the marker at `path` (`<16 hex>.session` in the run folder) as `state`, for
+/// `pool_user` under the install id `install`, in place of what it held.
+pub fn write_marker_at(
+    path: &Path,
+    pool_user: Option<&Sid>,
+    install: Option<&str>,
+    state: MarkerState,
+) -> io::Result<()> {
+    let named = path.file_name().and_then(|name| name.to_str());
+    if named.and_then(marker_id).is_none() {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
             "a marker's id is 16 lowercase hex",
         ));
     }
     let marker = Marker {
-        pool_user: pool_user.clone(),
+        pool_user: pool_user.cloned(),
+        state,
+        install: install.map(str::to_owned),
     };
     let bytes = serde_json::to_vec(&marker).map_err(io::Error::other)?;
-    let path = marker_path(data_dir, id);
-    write::write_atomic(&path, &bytes)?;
+    write::write_atomic(path, &bytes)?;
     // As the launch file: the folder's three entries as its own protected DACL, and the desktop
     // user its owner.
-    write::check_owned_file(&path)?;
+    write::check_owned_file(path)?;
     #[cfg(windows)]
-    crate::windows::private_dir::own_file(&path)?;
-    Ok(path)
+    crate::windows::private_dir::own_file(path)?;
+    Ok(())
 }
 
 /// The outer's order once it read the launch `launch_file`: writes the session's marker for
-/// `pool_user` in `data_dir`, then runs `session` (everything that runs as the pool user) with
-/// its path. A marker that can't be written, or a launch file whose name gives no id, refuses the
+/// `pool_user`, under the install id `install`, in `data_dir`, then runs `session` (everything
+/// that runs as the pool user) with its path. A marker that can't be written, or a launch file
+/// whose name gives no id, refuses the
 /// launch: `session` never runs, and the error comes back. No session runs unmarked, so none can
 /// leave a process of the pool user that no marker names.
 pub(crate) fn marked<T>(
     data_dir: &Path,
     launch_file: &Path,
     pool_user: &Sid,
+    install: Option<&str>,
     session: impl FnOnce(PathBuf) -> T,
 ) -> io::Result<T> {
     let id = launch_id(launch_file).ok_or_else(|| {
@@ -111,7 +308,7 @@ pub(crate) fn marked<T>(
             "the launch file's name gives no id",
         )
     })?;
-    let marker = write_marker(data_dir, id, pool_user)?;
+    let marker = write_marker(data_dir, id, pool_user, install)?;
     Ok(session(marker))
 }
 
@@ -137,14 +334,15 @@ pub fn unclean_sessions(data_dir: &Path) -> io::Result<Vec<UncleanSession>> {
         let Some(id) = name.to_str().and_then(marker_id) else {
             continue;
         };
-        let pool_user = write::read_owned_file_unchanged(&entry.path(), MARKER_CAP)
+        let marker = write::read_owned_file_unchanged(&entry.path(), MARKER_CAP)
             .ok()
             .flatten()
-            .and_then(|bytes| serde_json::from_slice::<Marker>(&bytes).ok())
-            .map(|marker| marker.pool_user);
+            .and_then(|bytes| serde_json::from_slice::<Marker>(&bytes).ok());
         sessions.push(UncleanSession {
             id: id.to_owned(),
-            pool_user,
+            pool_user: marker.as_ref().and_then(|marker| marker.pool_user.clone()),
+            install: marker.as_ref().and_then(|marker| marker.install.clone()),
+            state: marker.map(|marker| marker.state),
         });
     }
     sessions.sort_by(|a, b| a.id.cmp(&b.id));

@@ -6,7 +6,8 @@
 //! the host:
 //!
 //! - modes: only [`ASK_MODES`] may be set (`SetMode` refuses any other with `command.invalid`),
-//!   and a mode the agent moves to itself is switched back to `default`;
+//!   a session starts in `default` ([`ASK_MODE`], not the `auto` every other Claude
+//!   session starts in), and a mode the agent moves to itself is switched back to it;
 //! - options: a permission request loses every option that would stop later asks
 //!   ([`keep_option`]), so no "always" rule reaches the adapter;
 //! - no `allowedTools` in the session's `_meta` (`agent/loads.rs`), and [`ASK_RULES`] as
@@ -43,7 +44,12 @@ pub(crate) fn applies(answer: Answer) -> bool {
 
 /// The Claude Code permission modes that never approve a change by themselves: `default` asks
 /// before each change, `plan` makes none.
-pub(crate) const ASK_MODES: [&str; 2] = ["default", "plan"];
+pub(crate) const ASK_MODES: [&str; 2] = [ASK_MODE, "plan"];
+
+/// The mode a forced-ask session starts in and is switched back to: `default`, which asks before
+/// each change. Outside forced ask Claude starts in `auto` (`agent/loads.rs`
+/// `CLAUDE_MODE`).
+pub(crate) const ASK_MODE: &str = "default";
 
 /// The ids of the plan exit's (`ExitPlanMode`) options that switch the session to a mode that
 /// approves changes without asking: claude-agent-acp 0.89.1, `permissions/options/shared.js`

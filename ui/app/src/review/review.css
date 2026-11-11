@@ -195,9 +195,43 @@
 }
 .review-confirm p {
   margin: 0;
+  white-space: pre-line;
+  overflow-wrap: anywhere;
 }
 .review-confirm-buttons {
   display: flex;
   justify-content: flex-end;
   gap: var(--s2);
+}
+/* the Mac's menu bar, one menu opened under its title (registry-mn.tsx) */
+.review-menu {
+  min-width: 260px;
+  padding: var(--s2);
+  border-radius: var(--r-card);
+  background: var(--surface);
+  color: var(--primary);
+  box-shadow: var(--e-hand);
+}
+.review-menu-title {
+  margin: 0 0 var(--s1);
+  padding: 0 var(--s2);
+}
+.review-menu ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.review-menu li[role="menuitem"] {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--s4);
+  padding: var(--s0-5) var(--s2);
+}
+.review-menu li[role="separator"] {
+  margin: var(--s1) var(--s2);
+  border-top: var(--hairline) solid var(--outline-lite);
+}
+.review-menu kbd {
+  font: inherit;
+  color: var(--muted);
 }

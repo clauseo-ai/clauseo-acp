@@ -2,7 +2,9 @@
 //! reads.
 
 use clauseo_acp::{AgentInfo, PromptEnd, SessionStart};
-use clauseo_protocol::{AgentChoiceId, ConfigOption, Envelope, QueryResult, ThreadId, TurnId};
+use clauseo_protocol::{
+    AgentChoiceId, ConfigOption, ConfigValue, Envelope, QueryResult, ThreadId, TurnId,
+};
 
 use super::super::commands::CommandCtx;
 use super::super::input::Reply;
@@ -38,6 +40,12 @@ pub(crate) enum TurnInput {
     },
     /// A check for papers an undo removed that came back is due (`came_back.rs`).
     CameBack(super::came_back::Check),
+    /// The host's probe of the agent's service for `thread`'s `turn` answered (`offline.rs`).
+    OfflineProbe {
+        thread: ThreadId,
+        turn: TurnId,
+        reached: bool,
+    },
 }
 
 /// An agent call's result.
@@ -50,10 +58,14 @@ pub(crate) enum AgentReply {
         loaded: bool,
         result: Result<SessionStart, clauseo_acp::Error>,
     },
-    /// A Codex session's checks before its attach (the ask mode, the guard's trust) ended.
+    /// A session's work before its attach (Codex's ask mode and guard's trust, Claude's mode,
+    /// the picks) ended; `picked` says what the picks did.
     Prepared {
         loaded: bool,
         result: Result<SessionStart, crate::error::Error>,
+        picked: super::picks::Picked,
+        /// A Claude switch to `auto` was refused and fell back to `acceptEdits`.
+        fell_back: bool,
     },
     Prompt {
         turn: TurnId,
@@ -66,8 +78,10 @@ pub(crate) enum AgentReply {
     },
     /// A Codex session call's `.codex` re-check refused it before it was sent.
     Refused(crate::error::Error),
+    /// A `SetConfigOption` of `pick` answered.
     Config {
         ctx: CommandCtx,
+        pick: (AgentChoiceId, ConfigValue),
         result: Result<Vec<ConfigOption>, clauseo_acp::Error>,
     },
     Mode {
@@ -75,9 +89,9 @@ pub(crate) enum AgentReply {
         mode: AgentChoiceId,
         result: Result<(), clauseo_acp::Error>,
     },
-    /// The switch back to `default` after a forced-ask agent moved itself to another mode
-    /// (`updates.rs`) answered.
-    ModeReset(Result<(), clauseo_acp::Error>),
+    /// The switch back after a Claude agent moved itself to a mode Clauseo doesn't run it in
+    /// (`forced_mode.rs`) answered: the mode it was switched to, and the answer.
+    ModeReset(&'static str, Result<(), clauseo_acp::Error>),
     /// A steer into the running turn answered (`queue/steer.rs`).
     Steer(Box<super::queue::Steered>),
 }

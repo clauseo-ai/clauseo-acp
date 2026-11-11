@@ -42,7 +42,7 @@ pub use egress::{DEFAULT_TREE_WAIT, EgressProxy};
 mod session;
 pub use session::SessionKey;
 mod wiring;
-pub(crate) use wiring::{LaunchWiring, PackReadHook};
+pub(crate) use wiring::{LaunchWiring, PackReadHook, Stetdoc};
 
 pub use crate::actor::turn::PackRequest;
 
@@ -131,7 +131,7 @@ impl HostConfig {
         self
     }
 
-    /// The updater (default: [`NoUpdater`], managed by a package, so nothing is checked).
+    /// The updater (default: [`NoUpdater`], updates unavailable, so nothing is checked).
     /// The host checks and downloads through it on its own pool (decision record 0037).
     pub fn with_updater(mut self, updater: Arc<dyn Updater>) -> Self {
         self.update.updater = updater;
@@ -285,6 +285,18 @@ impl HostConfig {
     #[cfg(feature = "test-support")]
     pub fn with_browser_install_tools(mut self, tools: Arc<dyn InstallTools>) -> Self {
         self.wiring.install_tools = Some(tools);
+        self
+    }
+
+    /// What the firm's Chrome, Edge and Chromium `RemoteDebuggingAllowed` says, for tests that
+    /// pass a fake (default under `test-support`: nothing set; in production, this machine's
+    /// registry, managed preferences or policy folders).
+    #[cfg(feature = "test-support")]
+    pub fn with_remote_debugging_policy(
+        mut self,
+        policy: Arc<dyn clauseo_settings::chromium_policy::RemoteDebuggingPolicy>,
+    ) -> Self {
+        self.wiring.rd_policy = Arc::new(crate::browser::rd_policy::RdPolicy::new(policy));
         self
     }
 

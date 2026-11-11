@@ -39,7 +39,7 @@ test("a snoozed conversation doesn't count towards Needs you, and its matter say
   const asking = thread(1, A, { status: "needs_you", snoozed_until: LATER });
   const t = run([A, B], [[A, [asking, thread(2, A)]]]);
   expect(t.needs).toEqual([]);
-  expect(t.group.get(A.matter)).toBe("date");
+  expect(t.group.get(A.matter)).toBe("rest");
   expect(t.rows.get(A.matter)?.status).toBeUndefined();
 });
 

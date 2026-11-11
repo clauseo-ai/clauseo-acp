@@ -102,6 +102,33 @@
   .working:has(> .working-acts > .fl-install > .fl-bar) {
     padding-inline-end: calc(var(--s4) + var(--s1-5));
   }
+  /* both plans, one row each and equal: the lead over them, then Claude's, then ChatGPT's working line */
+  .fl-plans-lead {
+    @apply text-small-row text-primary;
+    padding: 0 0 var(--s1) var(--s4);
+  }
+  /* a muted line under a plan's row, at the row's own padding (Claude's browser sign-in note) */
+  .fl-plan-note {
+    @apply text-small text-muted;
+    padding: 0 var(--s4) var(--s2);
+  }
+  .fl-plan + .fl-plan {
+    margin-top: var(--s1);
+  }
+  /* the document tools, one quiet line under the plans: secondary words, the plan rows' meter, a quiet Try again */
+  .fl-tools {
+    @apply text-small-row text-muted;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--s1) var(--s3);
+    min-height: var(--size-control-small);
+    padding: var(--s1) 0 0 var(--s4);
+  }
+  .fl-tools-words {
+    flex: 1 1 var(--working-text-min);
+    min-width: 0;
+  }
   .fl-ready {
     @apply text-small-row text-muted;
     min-height: var(--size-control);
@@ -172,6 +199,15 @@
   }
   .fl-gate-cancel {
     order: 3;
+  }
+  /* both plans' Sign in, side by side and equal where Ask will stand; under the words where they don't fit */
+  .fl-gate-plans {
+    order: 2;
+    display: inline-flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: var(--s1) var(--s2);
+    max-width: 100%;
   }
   /* in the device state the act stands three lines tall, so Cancel sits on the code's line: centred on its line box
      (the code's own line height less the button's, halved, plus the words' 8 px top) */

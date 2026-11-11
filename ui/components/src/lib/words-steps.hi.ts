@@ -17,8 +17,15 @@ export const HI = {
   "Read {name} online.": "{name} ऑनलाइन पढ़ा गया।",
   "Looked online.": "ऑनलाइन देखा गया।",
   "Ran a task.": "एक काम चलाया गया।",
+  // a task named by the program it ran and the paper it ran on, where the agent gave no words of its own (D-017)
+  "Ran {program} on {name}.": "{name} पर {program} चलाया गया।",
+  "Ran {program}.": "{program} चलाया गया।",
+  // a web search limited to one site, the site said apart from the words searched for (D-028)
+  "Searched {site} for '{query}'.": "{site} पर '{query}' खोजा गया।",
   "Thought it through.": "विचार किया गया।",
   "Did one other thing.": "एक अन्य काम किया गया।",
+  // a step named only by the sandbox's permission for the internet (UC-166; provisional)
+  "Let a task reach the internet.": "एक काम को इंटरनेट तक पहुँचने दिया गया।",
   // a step that failed or was stopped: what it set out to do, in the past, never as if it were still going; the row's
   // mark (Failed, Stopped) says how it ended
   "Tried to read {name}.": "{name} पढ़ने की कोशिश की गई।",
@@ -35,8 +42,13 @@ export const HI = {
   "Tried to read {name} online.": "{name} ऑनलाइन पढ़ने की कोशिश की गई।",
   "Tried to look online.": "ऑनलाइन देखने की कोशिश की गई।",
   "Tried to run a task.": "एक काम चलाने की कोशिश की गई।",
+  "Tried to run {program} on {name}.": "{name} पर {program} चलाने की कोशिश की गई।",
+  "Tried to run {program}.": "{program} चलाने की कोशिश की गई।",
+  "Tried to search {site} for '{query}'.": "{site} पर '{query}' खोजने की कोशिश की गई।",
   "Tried to think it through.": "विचार करने की कोशिश की गई।",
   "Tried one other thing.": "एक अन्य काम करने की कोशिश की गई।",
+  // UC-167; provisional
+  "Tried to let a task reach the internet.": "एक काम को इंटरनेट तक पहुँचने देने की कोशिश की गई।",
   // a step named only by the agent's own words (its title or a task's description), tried and not done: those words
   // after the attempt, so the agent's imperative is never told as done; the words stay as the agent sent them
   "Tried: {title}.": "कोशिश की गई: {title}।",

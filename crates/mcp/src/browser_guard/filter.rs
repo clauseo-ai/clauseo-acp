@@ -11,11 +11,16 @@
 //! 2. An array (a batch): `-32600`, nothing forwarded. A scalar: `-32600`, nothing forwarded.
 //! 3. Any message whose `id` is [`RESERVED_ID`], the guard's own close request's: `-32600`
 //!    with that id, nothing forwarded.
-//! 4. An object whose `method` is exactly `tools/call`, with `params.arguments` an object:
+//! 4. An object whose `method` is exactly `tools/call` naming a tool outside [`ALLOWED_TOOLS`]
+//!    (a missing or non-string name included): a live view of [`LIVE_VIEW_TOOLS`] gets
+//!    [`UNAVAILABLE`], any other [`UNKNOWN_TOOL`]; nothing forwarded. `agent_browser_batch` is
+//!    not on the list.
+//! 5. An object whose `method` is exactly `tools/call`, with `params.arguments` an object:
 //!    a. any key of [`REFUSED_KEYS`];
 //!    b. a key of [`MUST_BE_FALSE`] whose value is anything but `false`;
 //!    c. a `timeoutMs` that is not a whole number up to [`MAX_TIMEOUT_MS`];
 //!    d. on `agent_browser_screenshot`, a `selector` agent-browser would take for a file path;
+//!    on `agent_browser_read`, any key of [`READ_FETCH_KEYS`];
 //!    e. a `url` that is not a string, names a scheme other than http, https or
 //!    `about:blank`, or names a local or private host (`host.rs`);
 //!    f. an `extraArgs` that is not an array of strings each in [`EXTRA_ARGS_ALLOWED`];
@@ -75,6 +80,18 @@ pub(crate) const RESERVED_ID: &str = "clauseo-guard-close";
 const TOOL_SCREENSHOT: &str = "agent_browser_screenshot";
 /// The tool whose `script` goes to agent-browser on stdin, never into argv.
 const TOOL_EVAL: &str = "agent_browser_eval";
+const TOOL_READ: &str = "agent_browser_read";
+
+/// The keys on `agent_browser_read` that make agent-browser's daemon fetch over HTTP itself
+/// rather than read the open tab's page through Chrome (v0.41.1 `native/actions.rs:5964-5978`:
+/// `url` fetches that URL; `llms` and `requireMd` re-fetch the active tab's URL and its
+/// `llms.txt` files, following redirects, `read.rs:198-215`). agent-browser marks `read`
+/// read-only (`mcp.rs:2180-2186`), so Codex runs it with no prompt: refused, `read` reads only
+/// the page already open, through `handle_content` (`actions.rs:5980-5994`).
+pub(crate) const READ_FETCH_KEYS: &[&str] = &["url", "llms", "requireMd"];
+/// The refusal of a [`READ_FETCH_KEYS`] key.
+pub(crate) const READ_FETCH: &str =
+    "agent_browser_read fetching a page itself (open the page, then read it)";
 /// The refusal's name for a screenshot selector that reads as a path.
 pub(crate) const SCREENSHOT_PATH: &str = "a file path as the screenshot selector";
 /// The refusal's name for a `timeoutMs` out of range.
@@ -86,6 +103,65 @@ pub(crate) const EXTRA_ARGS_ALLOWED: &[&str] =
 
 /// The text of a refused batch.
 pub(crate) const BATCH_MESSAGE: &str = "Clauseo does not allow batched requests in the browser.";
+
+/// The only tools that reach agent-browser: exactly agent-browser v0.41.1's `core` profile
+/// (`CORE_PROFILE_TOOLS`, `cli/src/mcp.rs:340-370` at tag v0.41.1), the profile the host starts
+/// it with (`mcp --tools core`, `crates/profile/src/servers.rs:81`). An agent that starts the
+/// guard itself with `--tools all` gains nothing: every other tool, a new or renamed one
+/// included, is refused here. `agent_browser_tools_profiles` only prints the profiles
+/// (`call_tools_profiles`, `mcp.rs:2539-2560`); it changes none.
+pub(crate) const ALLOWED_TOOLS: &[&str] = &[
+    "agent_browser_tools_profiles",
+    "agent_browser_open",
+    "agent_browser_read",
+    "agent_browser_snapshot",
+    "agent_browser_back",
+    "agent_browser_forward",
+    "agent_browser_reload",
+    "agent_browser_click",
+    "agent_browser_fill",
+    "agent_browser_type",
+    "agent_browser_press",
+    "agent_browser_check",
+    "agent_browser_uncheck",
+    "agent_browser_select",
+    "agent_browser_scroll",
+    "agent_browser_wait_ms",
+    "agent_browser_wait_for_selector",
+    "agent_browser_wait_for_text",
+    "agent_browser_wait_for_load",
+    "agent_browser_screenshot",
+    "agent_browser_get_text",
+    "agent_browser_get_url",
+    "agent_browser_get_title",
+    "agent_browser_tab_new",
+    "agent_browser_tab_list",
+    "agent_browser_tab_switch",
+    "agent_browser_tab_close",
+    "agent_browser_eval",
+    "agent_browser_close",
+];
+
+/// agent-browser's live views, none of them on [`ALLOWED_TOOLS`], named only so their refusal
+/// reads as a feature Clauseo leaves out: each serves the browser on a loopback port, the stream
+/// server (`stream_enable`, `actions.rs:9772-9785` at v0.41.1, with its `disable` and
+/// `status`), the dashboard that shows its streams, and the developer tools page of `inspect`
+/// (`native/inspect_server.rs`). In the plain client the guard runs outside any sandbox, so this
+/// refusal is what keeps them off.
+pub(crate) const LIVE_VIEW_TOOLS: &[&str] = &[
+    "agent_browser_stream_enable",
+    "agent_browser_stream_disable",
+    "agent_browser_stream_status",
+    "agent_browser_dashboard_start",
+    "agent_browser_dashboard_stop",
+    "agent_browser_inspect",
+];
+
+/// What a live-view request gets: no path, no port.
+pub(crate) const UNAVAILABLE: &str = "That browser feature isn't available in Clauseo.";
+
+/// What a call to any other tool off [`ALLOWED_TOOLS`] gets, its name not repeated.
+pub(crate) const UNKNOWN_TOOL: &str = "That browser tool isn't one Clauseo offers.";
 
 /// The longest name a refusal repeats; a longer one is cut and ends in `...`.
 const NAME_MAX_CHARS: usize = 64;
@@ -121,9 +197,9 @@ pub(crate) fn check(line: &[u8]) -> Verdict {
         let text = format!("Clauseo reserves the id {RESERVED_ID} for itself.");
         return Verdict::Answer(error_line(id, -32600, &text));
     }
-    if let Err(name) = check_object(object) {
+    if let Err(text) = check_object(object) {
         return match object.get("id") {
-            Some(id) => Verdict::Answer(refusal_line(id, &name)),
+            Some(id) => Verdict::Answer(refusal_line(id, &text)),
             None => Verdict::Drop,
         };
     }
@@ -138,25 +214,33 @@ pub(crate) fn parse_error() -> Verdict {
     Verdict::Answer(error_line(&Value::Null, -32700, "Parse error"))
 }
 
-/// `Err` with the name a refusal shows.
+/// `Err` with the text of the refusal, whole.
 fn check_object(object: &Map<String, Value>) -> Result<(), String> {
     if object.get("method").and_then(Value::as_str) != Some("tools/call") {
         return Ok(());
     }
+    let params = object.get("params");
+    let tool = params
+        .and_then(|params| params.get("name"))
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    if !ALLOWED_TOOLS.contains(&tool) {
+        let text = if LIVE_VIEW_TOOLS.contains(&tool) {
+            UNAVAILABLE
+        } else {
+            UNKNOWN_TOOL
+        };
+        return Err(text.to_owned());
+    }
     // Not an object (or absent): agent-browser refuses it before running anything
     // (`validate_arguments_object`, mcp.rs:3967-3975, reached from every tool's argument reads).
-    let params = object.get("params");
     let Some(arguments) = params
         .and_then(|params| params.get("arguments"))
         .and_then(Value::as_object)
     else {
         return Ok(());
     };
-    let tool = params
-        .and_then(|params| params.get("name"))
-        .and_then(Value::as_str)
-        .unwrap_or_default();
-    check_arguments(tool, arguments)
+    check_arguments(tool, arguments).map_err(|name| refusal_text(&name))
 }
 
 fn check_arguments(tool: &str, arguments: &Map<String, Value>) -> Result<(), String> {
@@ -183,6 +267,13 @@ fn check_arguments(tool: &str, arguments: &Map<String, Value>) -> Result<(), Str
         && reads_as_path(selector)
     {
         return Err(SCREENSHOT_PATH.to_owned());
+    }
+    if tool == TOOL_READ
+        && READ_FETCH_KEYS
+            .iter()
+            .any(|key| arguments.contains_key(*key))
+    {
+        return Err(READ_FETCH.to_owned());
     }
     if let Some(url) = arguments.get("url") {
         check_url(url)?;
@@ -298,12 +389,12 @@ pub(crate) fn refusal_text(name: &str) -> String {
     format!("Clauseo does not allow {name} in the browser.")
 }
 
-fn refusal_line(id: &Value, name: &str) -> String {
+fn refusal_line(id: &Value, text: &str) -> String {
     json!({
         "jsonrpc": "2.0",
         "id": id,
         "result": {
-            "content": [{"type": "text", "text": refusal_text(name)}],
+            "content": [{"type": "text", "text": text}],
             "isError": true,
         },
     })

@@ -5,10 +5,11 @@ use std::ffi::OsStr;
 use std::path::PathBuf;
 use std::process::Stdio;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use async_process::ChildStdout;
 
-use crate::handle::Handle;
+use crate::handle::{Handle, STDIN_GRACE};
 use crate::live::Live;
 use crate::stderr::{Redactor, Ring, StderrPump};
 use crate::stdin::{AgentStdin, StdinSlot};
@@ -64,6 +65,7 @@ pub struct SpawnOptions {
     pub(crate) creation_flags: u32,
     #[cfg(target_os = "linux")]
     pub(crate) end_with_parent: bool,
+    pub(crate) stdin_grace: Option<Duration>,
 }
 
 impl SpawnOptions {
@@ -107,6 +109,14 @@ impl SpawnOptions {
     #[cfg(windows)]
     pub fn creation_flags(mut self, flags: u32) -> SpawnOptions {
         self.creation_flags = flags;
+        self
+    }
+
+    /// How long shutdown waits after closing the agent's stdin before it escalates, for this
+    /// launch. 2 s when not set, as the ladder always had. A launch whose agent needs longer to
+    /// exit on stdin close sets its own.
+    pub fn stdin_grace(mut self, grace: Duration) -> SpawnOptions {
+        self.stdin_grace = Some(grace);
         self
     }
 }
@@ -168,6 +178,14 @@ pub fn spawn_in_tree(spec: &LaunchSpec, opts: &SpawnOptions) -> Result<Launched,
         });
     };
     let tree = os::Tree::adopt(&mut child)?;
+    #[cfg(windows)]
+    let tree = {
+        let mut tree = tree;
+        if spec.spares_browsers() {
+            tree.spare_browsers(child.id());
+        }
+        tree
+    };
     // Read now, while the agent is this process's unreaped child, so its pid is still its own.
     let root = os::Root::of(&tree, child.id());
     let ring = Arc::new(Mutex::new(Ring::new()));
@@ -177,10 +195,11 @@ pub fn spawn_in_tree(spec: &LaunchSpec, opts: &SpawnOptions) -> Result<Launched,
         spec.redacted(),
     ));
     let stdin = StdinSlot::new(stdin);
+    let stdin_grace = opts.stdin_grace.unwrap_or(STDIN_GRACE);
     Ok(Launched {
         stdin: AgentStdin::new(stdin.clone()),
         stdout,
         stderr: StderrPump::new(stderr, Arc::clone(&ring)),
-        handle: Handle::new(child, tree, root, stdin, ring, redactor, live),
+        handle: Handle::new(child, tree, root, stdin, ring, redactor, stdin_grace, live),
     })
 }

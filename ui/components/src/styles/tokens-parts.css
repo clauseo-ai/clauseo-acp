@@ -240,6 +240,12 @@
   --rail-w: clamp(240px, 18vw, 264px); /* the rail */
   --pane-w: clamp(352px, 28vw, 416px); /* the wall */
   --pane-w-mid: 400px; /* the wall at 1000 to 1199 px */
+  --pane-w-wide: clamp(
+    416px,
+    34vw,
+    760px
+  ); /* the wall from 1600 px: four columns of tiles at 1600, five at 1920 */
+  --tile-min-w: 104px; /* the least tile on a wide wall, about a 3-column tile's width at 1280 */
   --thread-pad-mid: 36px; /* the work's sides at 1000 to 1199 px */
   --window-min-h: 600px; /* the least height the room lays out for; it scrolls below it */
   --lead-h: 52px; /* the toolbar's lead: the corner lights sit in its top 52 px */
@@ -248,6 +254,7 @@
      Measured, since the system draws them (crates/desktop/src/window_frame/geometry.rs) */
   --lights-native-w: 59px;
   --lead-w-mid: 196px; /* the toolbar's lead with the rail folded behind Matters */
+  --size-lockup-rail: 96px; /* Clauseo's lockup at the rail's head: the lockup's least width (design/logo) */
   --rail-panel-top: 60px; /* the folded rail opens just under Matters */
   --rail-panel-w: 260px; /* the folded rail, open */
   --pill-clear: 52px; /* the wall's foot keeps clear of the presentation pill */
@@ -260,7 +267,7 @@
   --ref-offset: 5px; /* a reference's underline clears Devanagari's descenders */
   --ref-touch-pad: 7px; /* a reference grows to a 32 px target, narrow, without moving its line */
   --otherside-pad-end: 18px; /* the other side's plane: 16 above, 20 at the sides, 18 below */
-  --pin-pad-y: 11px; /* the pinned question: two loose lines in a 66 px band */
+  --pin-pad-y: 11px; /* the pinned question: one loose line in a 44 px band */
   --pin-pad-y-narrow: 10px;
   --pin-space: calc(
     4.5rem + 2 * var(--pin-pad-y-narrow) + env(safe-area-inset-top)
@@ -427,8 +434,4 @@
   --set-task-w: 520px; /* Windows' task dialog */
   --set-icon-task: 32px; /* the task dialog's own icon */
   --set-icon-title: 16px; /* a dialog's icon in its title bar */
-  /* First launch and settings */
-  --form-pair-min: calc(
-    200px * var(--k)
-  ); /* the new matter's client and next date stand side by side above this */
 }

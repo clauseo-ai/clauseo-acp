@@ -16,10 +16,10 @@ test.use({ scenario: "claude-prompt-stream" });
 
 /** 30 code points: its own title. */
 const FIRST = "Summarise the indemnity clause";
-/** 83 code points: over 48, so the title is its first 6 words. */
+/** 83 code points: over 48, so the title is cut at the last word that fits, with "…" (D-070). */
 const SECOND =
   "Check whether the arbitration clause survives termination of the services agreement";
-const SECOND_TITLE = "Check whether the arbitration clause survives";
+const SECOND_TITLE = "Check whether the arbitration clause survives…";
 const ANSWER = "The clause caps liability at the fees paid in the last twelve months.";
 
 /** Asks `question` and waits for prompt-stream's answer and end_turn. */
@@ -56,7 +56,7 @@ test("two conversations in a matter, the second titled from its first message", 
   await ask(w, SECOND);
   const second = w.conversationRow(SECOND_TITLE);
   await expect(second).toHaveAttribute("aria-current", "true");
-  // Exactly the 6 words: the title text holds nothing of the seventh word on.
+  // Cut at a word: the title holds nothing of the next word on, and ends with "…".
   await expect(w.conversationTitle(second)).toHaveText(SECOND_TITLE);
   await expect(w.conversationRow("New conversation")).toHaveCount(0);
   await expect(w.conversations).toHaveCount(2);

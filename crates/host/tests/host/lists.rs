@@ -6,7 +6,7 @@
 
 use clauseo_protocol::{
     CommandOutcome, ErrorCode, FieldChange, HostCommand, HostEvent, MatterId, MatterKind,
-    MatterStatus, MattersChanged, StopReason, StreamId, ThreadId, ThreadsChanged,
+    MatterStatus, MattersChanged, Principal, StopReason, StreamId, ThreadId, ThreadsChanged,
 };
 
 use crate::settings::{ready, subscribe_app};
@@ -136,24 +136,12 @@ fn each_matter_command_sends_its_row_and_a_forget_its_removal() {
 
     let matter = host.create_matter("m", &folder);
     assert_eq!(after(&host, &mut sub), [row_of(&host, matter)], "a create");
-    host.ok(HostCommand::UpdateMatter {
-        matter,
-        client: FieldChange::Keep,
-        next_date: FieldChange::Keep,
-        skill_packs: FieldChange::Keep,
-        pinned: Some(true),
-    });
+    host.ok(pin(matter, true));
     let sent = after(&host, &mut sub);
     assert_eq!(sent, [row_of(&host, matter)], "an update");
     assert!(matters_changed(&sent)[0].matters[0].pinned);
     // The same update again changes nothing, so it sends nothing.
-    host.ok(HostCommand::UpdateMatter {
-        matter,
-        client: FieldChange::Keep,
-        next_date: FieldChange::Keep,
-        skill_packs: FieldChange::Keep,
-        pinned: Some(true),
-    });
+    host.ok(pin(matter, true));
     assert_eq!(after(&host, &mut sub), [], "no change");
     host.ok(HostCommand::OpenMatter { matter });
     let sent = after(&host, &mut sub);
@@ -291,13 +279,7 @@ fn a_lagged_subscriber_gets_the_whole_lists_then_partial_rows() {
     // Five changes: four fill the channel, the fifth finds it full.
     let pins = [true, false, true, false, true];
     for pinned in pins {
-        host.ok(HostCommand::UpdateMatter {
-            matter,
-            client: FieldChange::Keep,
-            next_date: FieldChange::Keep,
-            skill_packs: FieldChange::Keep,
-            pinned: Some(pinned),
-        });
+        host.ok(pin(matter, pinned));
     }
     host.settle();
     let partials = ready(&mut sub);
@@ -336,13 +318,7 @@ fn a_lagged_subscriber_gets_the_whole_lists_then_partial_rows() {
             .any(|row| row.matter == matter && row.pinned)
     );
     // Then partial rows resume.
-    host.ok(HostCommand::UpdateMatter {
-        matter,
-        client: FieldChange::Keep,
-        next_date: FieldChange::Keep,
-        skill_packs: FieldChange::Keep,
-        pinned: Some(false),
-    });
+    host.ok(pin(matter, false));
     assert_eq!(after(&host, &mut sub), [row_of(&host, matter)]);
     host.shutdown();
 }
@@ -386,20 +362,13 @@ fn the_whole_state_arrives_whole_when_it_has_more_frames_than_the_channel_has_pl
         ]
     ));
     // Then partial rows, through the channel.
-    let pin = |pinned| HostCommand::UpdateMatter {
-        matter,
-        client: FieldChange::Keep,
-        next_date: FieldChange::Keep,
-        skill_packs: FieldChange::Keep,
-        pinned: Some(pinned),
-    };
-    host.ok(pin(true));
+    host.ok(pin(matter, true));
     assert_eq!(after(&host, &mut sub), [row_of(&host, matter)]);
 
     // A lag: three changes fill the channel, the fourth finds it full. Once drained, the whole
     // state (four frames again) arrives whole, and partial rows resume after it.
     for pinned in [false, true, false, true] {
-        host.ok(pin(pinned));
+        host.ok(pin(matter, pinned));
     }
     host.settle();
     assert_eq!(take(&mut sub, TINY_CAPACITY).len(), TINY_CAPACITY);
@@ -415,7 +384,7 @@ fn the_whole_state_arrives_whole_when_it_has_more_frames_than_the_channel_has_pl
     };
     assert!(list.all && one.all && two.all);
     assert_eq!(list.matters, host.matters());
-    host.ok(pin(false));
+    host.ok(pin(matter, false));
     assert_eq!(after(&host, &mut sub), [row_of(&host, matter)]);
     host.settle();
     assert_eq!(ready(&mut sub), [], "nothing more");
@@ -434,19 +403,12 @@ fn rows_sent_while_the_first_frames_are_unread_come_after_them() {
     let (matter, _, _) = matter_with_thread(&dir, &host, "m", &[("a.txt", "x\n")], FAKE);
     let mut sub = crate::support::wait(
         "subscribe_app",
-        host.handle
-            .subscribe_app(clauseo_protocol::Principal::LocalDesktop),
+        host.handle.subscribe_app(Principal::LocalDesktop),
     )
     .unwrap();
     // Two changes before the window reads anything: they queue behind the four frames.
     for pinned in [true, false] {
-        host.ok(HostCommand::UpdateMatter {
-            matter,
-            client: FieldChange::Keep,
-            next_date: FieldChange::Keep,
-            skill_packs: FieldChange::Keep,
-            pinned: Some(pinned),
-        });
+        host.ok(pin(matter, pinned));
     }
     host.settle();
     let events = ready(&mut sub);
@@ -485,6 +447,7 @@ fn pin(matter: MatterId, pinned: bool) -> HostCommand {
         next_date: FieldChange::Keep,
         skill_packs: FieldChange::Keep,
         pinned: Some(pinned),
+        agent_prefs: FieldChange::Keep,
     }
 }
 
@@ -492,8 +455,7 @@ fn pin(matter: MatterId, pinned: bool) -> HostCommand {
 fn unread(host: &Running) -> clauseo_host::AppSubscription {
     crate::support::wait(
         "subscribe_app",
-        host.handle
-            .subscribe_app(clauseo_protocol::Principal::LocalDesktop),
+        host.handle.subscribe_app(Principal::LocalDesktop),
     )
     .unwrap()
 }
@@ -514,9 +476,11 @@ fn whole(event: &HostEvent) -> bool {
         | HostEvent::AccountLimitsChanged(_)
         | HostEvent::LimitsViewChanged(_)
         | HostEvent::BrowserInstall { .. }
+        | HostEvent::BrowserPolicy { .. }
         | HostEvent::CaseLawHint { .. }
         | HostEvent::ProtectionChanged { .. }
         | HostEvent::ProtectionViewChanged { .. }
+        | HostEvent::PapersChanged { .. }
         | HostEvent::SiteBlocked { .. } => false,
     }
 }

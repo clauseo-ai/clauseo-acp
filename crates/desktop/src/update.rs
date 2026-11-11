@@ -1,13 +1,14 @@
 //! The updater in desktop (decision record 0037): the host's `Updater` over
 //! `tauri-plugin-updater`, and the install once the host has stopped.
 //!
-//! - **Which updater** ([`with_updater`]). A build with no endpoint gives the host none, so it
-//!   keeps `NoUpdater` and shows `managed` by `package`: Linux always (it updates through its
-//!   package manager), debug builds, and release builds while `plugins.updater.endpoints` in
-//!   `tauri.conf.json` is empty (until R23 PR 6). The plugin's own `build` would fail with
-//!   `EmptyEndpoints` there, so it is never called. The `e2e` build alone takes an endpoint from
-//!   `E2E_UPDATE_ENDPOINT` and trusts the throwaway test key with it, or offers a fake update
-//!   from `E2E_FAKE_UPDATE` (`choice.rs`).
+//! - **Which updater** ([`with_updater`]). Linux always gives the host `PackageManaged`
+//!   (`package.rs`), shown as `managed` by `package`: it updates through its package manager.
+//!   Elsewhere a build with no endpoint gives the host none, so it keeps `NoUpdater` and shows
+//!   `managed` by `unavailable`: debug builds, and release builds while
+//!   `plugins.updater.endpoints` in `tauri.conf.json` is empty (until R23 PR 6). The plugin's
+//!   own `build` would fail with `EmptyEndpoints` there, so it is never called. The `e2e` build
+//!   alone takes an endpoint from `E2E_UPDATE_ENDPOINT` and trusts the throwaway test key with
+//!   it, or offers a fake update from `E2E_FAKE_UPDATE` (`choice.rs`).
 //! - **The adapter** (`plugin.rs`): `check` and `download` run on Tauri's runtime and hand the
 //!   host a future over a oneshot; dropping it aborts the task. The download (which the plugin
 //!   verifies) is saved as the one file of `updates/<version>/`.
@@ -23,13 +24,21 @@
 //! Nothing here logs a URL or a path (0047): a failure is logged by its kind.
 
 #[cfg(any(test, not(target_os = "linux")))]
+mod arch;
+#[cfg(any(test, not(target_os = "linux")))]
+mod cached;
+#[cfg(any(test, not(target_os = "linux")))]
 mod choice;
 #[cfg(all(feature = "e2e", any(test, not(target_os = "linux"))))]
 mod fake;
 #[cfg(any(test, not(target_os = "linux")))]
+mod file_binding;
+#[cfg(any(test, not(target_os = "linux")))]
 pub(crate) mod install;
 #[cfg(any(test, not(target_os = "linux")))]
 mod install_kind;
+#[cfg(any(test, target_os = "linux"))]
+mod package;
 #[cfg(any(test, not(target_os = "linux")))]
 mod plugin;
 #[cfg(test)]
@@ -41,8 +50,9 @@ use clauseo_settings::Locations;
 use tauri::{AppHandle, Runtime};
 
 /// `config` with the app's version (`tauri.conf.json`'s, which the plugin compares too) and
-/// this build's updater, saving its downloads under `locations`' `updates/`, or none: the
-/// host's default `NoUpdater` (see the module's notes).
+/// this build's updater, saving its downloads under `locations`' `updates/`: on Linux
+/// `PackageManaged`, elsewhere the plugin, or none, the host's default `NoUpdater` (see the
+/// module's notes).
 pub(crate) fn with_updater<R: Runtime>(
     app: &AppHandle<R>,
     config: HostConfig,
@@ -53,9 +63,12 @@ pub(crate) fn with_updater<R: Runtime>(
     if let Some(updater) = choice::updater(app, locations.updates_dir()) {
         return config.with_updater(updater);
     }
-    // Linux gives the host no updater, so nothing is saved under updates/.
+    // Linux updates through its package manager: nothing is checked or saved under updates/.
     #[cfg(target_os = "linux")]
-    let _ = locations;
+    let config = {
+        let _ = locations;
+        config.with_updater(std::sync::Arc::new(package::PackageManaged))
+    };
     config
 }
 
@@ -106,7 +119,7 @@ pub(crate) fn after_host<R: Runtime>(
         before_restart,
         || app.restart(),
     );
-    // Linux never installs: its host has `NoUpdater`, which never offers one.
+    // Linux never installs: its host has `PackageManaged`, which never offers one.
     #[cfg(target_os = "linux")]
     drop((app, ended, agents_stopped, before_restart));
 }

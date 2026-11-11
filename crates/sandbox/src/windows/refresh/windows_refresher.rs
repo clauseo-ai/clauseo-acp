@@ -26,16 +26,17 @@ use windows::core::{HSTRING, PCWSTR, w};
 use super::source::{Handle, read_capped};
 use super::{
     EXE_CAP, Failed, OWN_MACHINE, RefreshExit, RefreshRecord, Refresher, STAGING_SDDL, SourceError,
-    SourceFile, Sources, Trust, UPDATER_KEY, refresh, staging, walk,
+    SourceFile, Sources, Trust, UPDATER_KEY, pe_version, refresh, staging, walk,
 };
-use crate::windows::admin_copy::{self, Found, LOCKED_FILE_SDDL, level_safe, os};
+use crate::windows::admin_copy::{self, Found, level_safe, locked_file_sddl, os};
 pub(crate) use crate::windows::admin_copy::{SETUP_EXE as EXE_NAME, SETUP_SIG as SIG_NAME};
+use crate::windows::detect::native_machine;
 use crate::windows::record::read_string;
 use crate::windows::setup::adopt::windows_adopter::own_profile;
 use crate::windows::setup::lock::{Held, SETUP_MUTEX, try_lock};
 use crate::windows::setup::owner::this_process;
 use crate::windows::setup::record_values::{
-    ADMIN_COPY_OWNER, ADMIN_COPY_SHA256, ADMIN_COPY_VERSION, USER_INSTALL_DIR,
+    ADMIN_COPY_OWNER, ADMIN_COPY_SHA256, ADMIN_COPY_VERSION, GROUP_SID, USER_INSTALL_DIR,
 };
 use crate::windows::sids::Sid;
 
@@ -161,6 +162,7 @@ impl Refresher for WindowsRefresher {
             user_install_dir: read(USER_INSTALL_DIR)?,
             admin_copy_sha256: read(ADMIN_COPY_SHA256)?,
             admin_copy_version: read(ADMIN_COPY_VERSION)?,
+            group_sid: read(GROUP_SID)?,
         })
     }
 
@@ -201,10 +203,29 @@ impl Refresher for WindowsRefresher {
         }
     }
 
-    /// The descriptor `--adopt` gives the admin copy, so a refresh changes no access and the
-    /// launcher's exact check (`admin_copy::locked`) still passes.
-    fn secure_staged(&mut self) -> Result<(), Failed> {
-        staging::secure_file(&self.staged(STAGED_NAME)?, LOCKED_FILE_SDDL)
+    fn admin_copy_machine(&mut self) -> Result<Option<u16>, Failed> {
+        match read_capped(&self.at(EXE_NAME)?, EXE_CAP) {
+            Ok(bytes) => Ok(pe_version::plain_machine(&bytes)),
+            Err(SourceError::Missing) => Ok(None),
+            Err(error) => Err(format!("the admin copy: {error}")),
+        }
+    }
+
+    fn native_machine(&mut self) -> Result<u16, Failed> {
+        native_machine()
+            .map(|machine| machine.0)
+            .map_err(|error| format!("IsWow64Process2 failed ({})", error.code().0))
+    }
+
+    /// The descriptor `--adopt` gives the admin copy, the record's group denied, so a refresh
+    /// changes no access and the launcher's deny check (`admin_copy::group_denied`) still passes.
+    fn secure_staged(&mut self, group: Option<&Sid>) -> Result<(), Failed> {
+        staging::secure_file(&self.staged(STAGED_NAME)?, &locked_file_sddl(group))
+    }
+
+    fn deny_group(&mut self, group: &Sid) -> Result<bool, Failed> {
+        admin_copy::heal_os::heal_deny(&os::WindowsAdminCopy, group)
+            .map_err(|error| format!("the admin folder's deny: {error}"))
     }
 
     fn hold_admin_folder(&mut self) -> Result<(), Failed> {
@@ -240,6 +261,27 @@ impl Refresher for WindowsRefresher {
     fn discard_staged(&mut self) {
         if let Ok(staged) = self.staged(STAGED_NAME) {
             let _left_for_the_next_run = staging::delete(&staged);
+        }
+    }
+
+    /// After a swap the set-aside copy is this running image: deleted if Windows allows it,
+    /// else scheduled for deletion at restart, and the folder after it the same way.
+    fn leave_staging(&mut self, swapped: bool) {
+        let Ok(dir) = self.staging() else {
+            return;
+        };
+        let left = if swapped {
+            let old = dir.join(SET_ASIDE_NAME);
+            staging::delete(&old)
+                .or_else(|_running| staging::delete_at_restart(&old))
+                .and_then(|()| {
+                    staging::remove_dir(&dir).or_else(|_held| staging::delete_at_restart(&dir))
+                })
+        } else {
+            staging::remove_dir(&dir)
+        };
+        if let Err(why) = left {
+            event_log(true, &format!("the refresh's staging folder stays: {why}"));
         }
     }
 

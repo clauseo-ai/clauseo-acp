@@ -3,7 +3,11 @@
 // the Hindi words in at once, as the app has them once its lazy chunk lands: each ref reads its Hindi when made
 import "@clauseo/components/lib/words-hi.ts";
 import type { Lang } from "@clauseo/components/lib/display.ts";
-import { errorSentence, type ErrorKey } from "@clauseo/components/lib/words-errors.ts";
+import {
+  errorSentence,
+  type ErrorKey,
+  type MARK_KEYS,
+} from "@clauseo/components/lib/words-errors.ts";
 import { errorHindi } from "@clauseo/components/lib/words-errors.hi.ts";
 import { fw, type FindKey } from "@clauseo/components/lib/words-find.ts";
 import { fr, type FolderKey } from "@clauseo/components/lib/words-folder.ts";
@@ -142,8 +146,11 @@ export const planCardWords = (key: PlanCardKey): WordsRef => ({
 });
 
 /** An error sentence of words-errors.ts. The one sentence it shares with words-thread.ts is that file's, and is
- * registered through threadWords. */
-export const errorWords = (key: Exclude<ErrorKey, ThreadKey>): WordsRef => ({
+ * registered through threadWords; the Word blackline's are words-versions.ts's (MARK_KEYS), registered through
+ * versionWords. */
+export const errorWords = (
+  key: Exclude<ErrorKey, ThreadKey | (typeof MARK_KEYS)[number]>,
+): WordsRef => ({
   file: "lib/words-errors.ts",
   key,
   text: (lang) => errorSentence(lang, key),

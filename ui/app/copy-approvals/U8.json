@@ -186,5 +186,137 @@
     "at": "2026-11-02",
     "by": "Rohan",
     "note": "Rohan, 2026-11-02, approved as written"
+  },
+  "U8-25": {
+    "en": "Undo the restore at {time}?",
+    "hi": "{time} बजे का पुनर्स्थापन पूर्ववत करें?",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-10",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-10",
+    "by": "app track (provisional; Rohan batch review)",
+    "note": "D-033: Undo on a restore asks to undo that restore, in the shape of U8's undo titles"
+  },
+  "U8-26": {
+    "en": "'{papers}', added by the restore, will be removed.",
+    "hi": "पुनर्स्थापन से जोड़ा गया '{papers}' हटा दिया जाएगा।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-10",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-10",
+    "by": "app track (provisional; Rohan batch review)",
+    "note": "D-033: undoing a restore removes the file it added; shaped like U8-22's added-since line"
+  },
+  "U8-27": {
+    "en": "{papers}, added by the restore, will be removed.",
+    "hi": "पुनर्स्थापन से जोड़े गए {papers} हटा दिए जाएँगे।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-10",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-10",
+    "by": "app track (provisional; Rohan batch review)",
+    "note": "D-033: the same for several files"
+  },
+  "U8-28": {
+    "en": "You restored an earlier version of the matter.",
+    "hi": "आपने मामले का एक पहले का संस्करण पुनर्स्थापित किया।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-10",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-10",
+    "by": "app track (provisional; Rohan batch review)",
+    "note": "D-036: the conversation records a restore made from Versions while it was open"
+  },
+  "U8-29": {
+    "en": "You undid the restore.",
+    "hi": "आपने पुनर्स्थापन पूर्ववत किया।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-10",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-10",
+    "by": "app track (provisional; Rohan batch review)",
+    "note": "D-036: the same for the undo of a restore"
+  },
+  "U8-30": {
+    "en": "Added since {time} on {date}",
+    "hi": "{date} को {time} बजे के बाद जोड़ा गया",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-10",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-10",
+    "by": "app track (provisional; Rohan batch review)",
+    "note": "D-032: Compare with now for a file added or removed since the version, shaped like U8-07/08"
+  },
+  "U8-31": {
+    "en": "Added since {time} today",
+    "hi": "आज {time} बजे के बाद जोड़ा गया",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-10",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-10",
+    "by": "app track (provisional; Rohan batch review)",
+    "note": "D-032: Compare with now for a file added or removed since the version, shaped like U8-07/08"
+  },
+  "U8-32": {
+    "en": "Removed since {time} on {date}",
+    "hi": "{date} को {time} बजे के बाद हटाया गया",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-10",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-10",
+    "by": "app track (provisional; Rohan batch review)",
+    "note": "D-032: Compare with now for a file added or removed since the version, shaped like U8-07/08"
+  },
+  "U8-33": {
+    "en": "Removed since {time} today",
+    "hi": "आज {time} बजे के बाद हटाया गया",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-10",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-10",
+    "by": "app track (provisional; Rohan batch review)",
+    "note": "D-032: Compare with now for a file added or removed since the version, shaped like U8-07/08"
+  },
+  "U8-34": {
+    "en": "This paper wasn't in the matter then.",
+    "hi": "यह दस्तावेज़ तब मामले में नहीं था।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-10",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-10",
+    "by": "app track (provisional; Rohan batch review)",
+    "note": "D-032: the then side of a file added since the version"
+  },
+  "U8-35": {
+    "en": "This paper isn't in the matter now.",
+    "hi": "यह दस्तावेज़ अब मामले में नहीं है।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-10",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-10",
+    "by": "app track (provisional; Rohan batch review)",
+    "note": "D-032: the now side of a file removed since the version"
+  },
+  "U8-36": {
+    "en": "You can undo this.",
+    "hi": "आप इसे पूर्ववत कर सकते हैं।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-10",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-10",
+    "by": "app track (provisional; Rohan batch review)",
+    "note": "D-033 review: the undo-a-restore dialog whose body is the removals alone; the closing sentence of U8's restore bodies"
   }
 }

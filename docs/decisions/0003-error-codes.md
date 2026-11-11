@@ -75,7 +75,7 @@ as `yes` or `no`. The meaning is also each variant's doc comment in `error_code.
 | `matter.folder_is_drive` | The folder may not be a matter: it is the root of a drive or a mounted volume. | no | host (from matters' refusal; decision record 0022) |
 | `matter.folder_is_home` | The folder may not be a matter: it is the home folder, or holds it. | no | host (0022) |
 | `matter.folder_is_system` | The folder may not be a matter: it is a system folder or a folder of app data or keys, or holds one. | no | host (0022) |
-| `matter.folder_unreadable` | Clauseo may not read the folder, or its `.clauseo/matter.json` does not read, so it may belong to a matter. | no | host (0022) |
+| `matter.folder_unreadable` | Clauseo may not read the folder (a `.clauseo/matter.json` that does not read is set aside, not refused, since 2026-11-11). | no | host (0022) |
 | `matter.folder_is_matter` | The folder is a matter's folder, or sits inside one or holds one; the error's `matter` names that matter when it is on Clauseo's list. | no | host (0022) |
 | `matter.folder_in_matters_root` | The folder is or holds Clauseo's data folder, or is, holds or sits inside the matters' history folder in it. | no | host (0022) |
 | `matter.folder_network` | The matter folder is on a network drive, where Codex's sandbox can neither read nor write, so Codex is not started there. | no | host (a Codex agent's launch on Windows, `agent/folder_support.rs`) |
@@ -118,6 +118,17 @@ as `yes` or `no`. The meaning is also each variant's doc comment in `error_code.
 | `blocklist.notice_expired` | The blocked-site notice an allow names is one the host no longer keeps (too old, or from before a restart), so nothing was allowed: allow the site from a new notice. | no | host (`AllowBlockedSite` naming a `block_id` it no longer keeps, decision record 0053); not retryable because the same `block_id` stays unknown, and only a new notice can be allowed |
 | `blocklist.allow_not_saved` | The allow applies until Clauseo closes, but Clauseo couldn't save it (the OS secret store or the data folder failed), so the site is blocked again after a restart. | no | host (`AllowBlockedSite`, decision record 0053); not retryable because the run keeps changes in memory only from then on |
 | `blocklist.revoke_not_saved` | The site is blocked again until Clauseo closes, but Clauseo couldn't save that or void the saved allows, so the site may be allowed again after a restart. | no | host (`RevokeAllowedSite`, decision record 0053); not retryable because the run keeps changes in memory only from then on |
+| `sandbox.cleaning_up` | An earlier Safe workspace session's clean-up (its unclean-session marker's stop or sweep) wasn't finished after Clauseo waited for it, so no agent was started; trying again in a moment can succeed. | yes | sandbox (`Error::UncleanSession`: tier B's launch check found an earlier session's unclean-session marker whose stop or sweep didn't complete within 15 s, decision record 0049); retryable because a later launch checks again once the clean-up is done |
+| `agent.install_setup_failed` | The agent's files all downloaded and checked, but setting them up on this computer failed after three tries (unpacking, `npm ci`, the move into place or its receipt), often because security software held the fresh files. Trying again may work. | yes | agents (`FailureKind::SetupFailed` on `Failed`), desktop (0048) |
+| `blackline.no_word_tool` | The Word blackline needs stetdoc, Clauseo's Word tool, and this Clauseo has none, so nothing was compared. | no | host (`HostQuery::WordBlackline`, the Word blackline); new area |
+| `blackline.not_word` | The file is not a Word document (.docx), so it has no Word blackline. | no | host (`HostQuery::WordBlackline`) |
+| `blackline.failed` | The Word blackline failed: the compare or its view failed, took too long, or printed what Clauseo could not read; nothing is shown and nothing was written in the matter. Trying again can succeed. | yes | host (`HostQuery::WordBlackline`); retryable because a run that timed out or failed can work the next time |
+| `word.stetdoc_missing` | Clauseo has no stetdoc program to read or edit Word files with, or could not start it. | no | host (`ListRevisions`, `DecideRevisions`: no stetdoc program configured, or it could not be started) |
+| `word.revisions_stale` | The Word file changed since its tracked changes were listed, or a change named is no longer in it, so nothing was written: list them again. | no | host and matters (`DecideRevisions`: the file's bytes differ from the list's `version`, or stetdoc answers `not_found` or a `stale_*` code) |
+| `word.not_docx` | The file is not a Word document (.docx) that stetdoc can read. | no | host (`ListRevisions`, `DecideRevisions`: the path does not end in `.docx`, or stetdoc cannot read the file) |
+| `word.edit_failed` | stetdoc failed or did not finish in time while reading or editing the Word file, or the file is not on this computer or is too large to version, so nothing was written. | yes | host (`ListRevisions`, `DecideRevisions`: stetdoc timed out, exited with another error, or printed output that does not read; the file is cloud-only or over the checkpoint size cap); retryable because a passing failure (a slow disk, a busy machine) can clear |
+| `matter.folder_permission` | The computer's privacy settings keep Clauseo, or the agent it starts, from opening the matter's folder (on macOS, Files and Folders in Privacy & Security), so no agent works in it: allow Clauseo there, then ask again. | no | host (a launch's folder check on macOS: the host's own open of the matter folder is refused, EPERM or EACCES, or is still unanswered after two minutes, the prompt macOS shows left up or a volume that hangs; and on every OS an agent's `session/new` answered with JSON-RPC -32602 saying its `cwd` does not exist, after the host found the folder there) |
+| `agent.offline` | The agent lost its connection while answering: it could not reach its service (connection refused, no network, no name resolution, connect timed out). The answer so far is kept; asking again can work once the computer is back online. | yes | host (a turn whose prompt failed with a connection-class error, or whose agent said its connection failed and then went quiet; `actor/turn/offline.rs`) |
 | `unknown` | A code from a newer Clauseo that this version does not know. Never produced here. | no | decoding only |
 
 Judgement calls on retryable: `agent.launch_failed` and `agent.exited` are retryable because a new
@@ -138,6 +149,24 @@ matter (a relink that could not repair it included) came back as `matter.folder_
 meaning ("the matter's folder is gone") never covered it. Those cases now have their own code, not
 retryable: the lawyer has to locate the right folder. `matter.folder_missing` keeps its meaning and
 now comes only for a folder that is not there or does not answer.
+
+`agent.install_setup_failed` was added on 2026-11-07, at the orchestrator's request (the install
+resume PR, after the Windows VM pass of #683 on #664): a Claude install with Defender on downloaded
+every file, then failed all three tries at the rename into place with `Access is denied`, and said
+the agent "couldn't be downloaded". A failure after every file is fetched and checked now has its own
+code, so the words can say the download worked. It is retryable, as `agent.install_failed` is: the
+antivirus that holds the fresh files lets go, and the next try's set-up may work. `agent.install_failed`
+keeps its meaning, now only for failures before the files are all fetched.
+
+`matter.folder_permission` was added on 2026-11-10, at the orchestrator's request (a launch
+blocker on a Mac: a matter under `~/Documents`, where every Claude conversation failed as
+`agent.protocol_error`). macOS privacy protection (TCC) keeps an app without the lawyer's consent
+out of Documents, Desktop, Downloads, removable and network volumes and iCloud Drive, and the
+agents Clauseo starts inherit Clauseo's consent. Claude's adapter answers `session/new` in such a
+folder with -32602 "`cwd` does not exist", which said nothing the lawyer could act on. The host
+now opens the folder itself before a launch on macOS and refuses with this code, and maps that one
+agent answer to it too. The open waits while macOS asks the lawyer, for up to two minutes; one
+unanswered by then is this code too, never `matter.folder_missing`. Not retryable: the lawyer changes a privacy setting first, then asks again.
 
 ## Consequences
 

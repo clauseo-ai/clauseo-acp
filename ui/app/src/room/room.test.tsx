@@ -282,7 +282,7 @@ for (const lang of ["en", "hi"] as const) {
       const text = host?.textContent ?? "";
       const workspace = rt(
         lang,
-        "Safe workspace. Clauseo works inside this matter's folder and asks before going beyond it.",
+        "Safe workspace. Clauseo works only in this matter's folder. It can't open your other files unless you allow it.",
       );
       expect(text).not.toContain(workspace.slice(0, 12));
       expect(text).not.toContain(vt(lang, "Not protected"));
@@ -438,6 +438,8 @@ async function resizeTwice() {
 
 test("on the Mac the room asks the window nothing: its own lights need no window commands", async () => {
   vi.stubGlobal("navigator", { platform: "MacIntel", userAgent: "Macintosh" });
+  // a window smaller than its screen: happy-dom's window fills it, which reads as macOS's full screen (no lights)
+  const screen = vi.spyOn(window.screen, "height", "get").mockReturnValue(window.innerHeight + 100);
   try {
     const controls = countingControls();
     await mount(fake([NEWER], undefined, "mac"), {}, controls);
@@ -447,6 +449,7 @@ test("on the Mac the room asks the window nothing: its own lights need no window
     expect(host?.querySelector(".room-caption")).toBeNull();
   } finally {
     vi.unstubAllGlobals();
+    screen.mockRestore();
   }
 });
 

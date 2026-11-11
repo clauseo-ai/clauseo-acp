@@ -20,8 +20,9 @@ use clauseo_protocol::{ClauseoTool, ToolState, ToolsUnavailableReason};
 use serde_json::{Value, json};
 
 use crate::profile_rig::{
-    CLAUDE, CODEX, Hook, Seen, Wired, agent_lines, agents, browser_server, codex_lines,
-    filled_browser, first_frame_tools, settings, sidecar, template, tool, turn,
+    CLAUDE, CODEX, Hook, Seen, Wired, agent_lines, agents, browser_server, claude_servers,
+    codex_lines, codex_servers, filled_browser, first_frame_tools, settings, sidecar, template,
+    tool, turn,
 };
 use crate::support::Dir;
 
@@ -102,7 +103,9 @@ fn case_law_server() -> McpServer {
 }
 
 /// The entry `session/new` carries once filled: the port differs per run, so it matches any
-/// value; the token file is the session's own. On Windows it also carries `SystemRoot`.
+/// value; the token file is the session's own. On Windows it also carries `SystemRoot` and
+/// `windir`, then `TEMP`, `TMP` and `PATHEXT` when this process has them (the host runs in it,
+/// so it reads the same environment; `windows_env`).
 fn filled_case_law() -> Value {
     let mut env = vec![
         json!({"name": "CLAUSEO_RELAY", "value": "{{any}}"}),
@@ -111,6 +114,12 @@ fn filled_case_law() -> Value {
     ];
     if cfg!(windows) {
         env.push(json!({"name": "SystemRoot", "value": "{{any}}"}));
+        env.push(json!({"name": "windir", "value": "{{any}}"}));
+        for name in ["TEMP", "TMP", "PATHEXT"] {
+            if std::env::var(name).is_ok() {
+                env.push(json!({"name": name, "value": "{{any}}"}));
+            }
+        }
     }
     json!({"name": "case-law", "command": "{{any}}", "args": ["connector", "case-law"],
         "env": env})
@@ -159,7 +168,7 @@ fn claude_params(servers: &[Value], with_case_law: bool) -> Value {
     } else {
         Vec::new()
     };
-    json!({"mcpServers": servers, "_meta": {
+    json!({"mcpServers": claude_servers(servers), "_meta": {
         "systemPrompt": {"append": instructions(with_case_law)},
         "claudeCode": {"options": {"allowedTools": allowed}}}})
 }
@@ -199,7 +208,7 @@ fn both_agents_get_case_law_after_the_other_servers() {
     let codex = template(
         &dir,
         "cl-codex",
-        &codex_lines("cl-codex", &json!({"mcpServers": servers})),
+        &codex_lines("cl-codex", &json!({"mcpServers": codex_servers(&servers)})),
     );
     settings(
         &dir,
@@ -214,14 +223,14 @@ fn both_agents_get_case_law_after_the_other_servers() {
     let thread = host.create_thread(matter, CLAUDE);
     turn(&host, thread);
     turn(&host, host.create_thread(matter, CODEX));
-    assert_eq!(
-        first_frame_tools(&host, thread),
-        [
-            tool(ClauseoTool::WebSearch, Some(ToolsUnavailableReason::Off)),
-            tool(ClauseoTool::Browser, None),
-            case_law(None),
-        ]
-    );
+    // Claude has the browser on Windows alone (`servers::no_browser`).
+    let browser = cfg!(windows).then(|| tool(ClauseoTool::Browser, None));
+    let web_search = tool(ClauseoTool::WebSearch, Some(ToolsUnavailableReason::Off));
+    let expected: Vec<ToolState> = [Some(web_search), browser, Some(case_law(None))]
+        .into_iter()
+        .flatten()
+        .collect();
+    assert_eq!(first_frame_tools(&host, thread), expected);
     let seen = launcher.seen();
     let tokens: Vec<String> = seen.iter().filter_map(token_of).collect();
     assert_eq!(tokens.len(), 2, "one token file per session");
@@ -257,7 +266,7 @@ fn both_agents_get_case_law_after_the_other_servers() {
         &agent_lines(
             "cl-load",
             "session/load",
-            &json!({"sessionId": "sess-1", "mcpServers": servers,
+            &json!({"sessionId": "sess-1", "mcpServers": claude_servers(&servers),
                 "_meta": claude_params(&servers, true)["_meta"]}),
             &[],
         ),

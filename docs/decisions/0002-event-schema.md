@@ -121,7 +121,7 @@ An unknown kind has no row and no answer (`None`): its envelope's `stream` decid
 | `config_options_replaced` | options | acp | yes | T |
 | `commands_available` | commands | acp | yes | T |
 | `usage_updated` | context_used?, context_size?, cost? | acp | yes | T |
-| `notice` | level, text, kind? (`NoticeKind`: `context_not_restored`, `files_came_back` with files (at most five) and more, `skill_pack_not_loaded` with pack and reason (`PackSkipReason`); host notices only; `text` is the fallback) | acp, host | yes | T |
+| `notice` | level, text, kind? (`NoticeKind`: `context_not_restored`, `files_came_back` with files (at most five) and more, `auto_mode_unavailable`, `skill_pack_not_loaded` with pack and reason (`PackSkipReason`); host notices only; `text` is the fallback) | acp, host | yes | T |
 | `compaction_changed` | status, summary? | acp | yes | T |
 | `files_changed` | turn, files, skipped | matters, through the host | yes | T |
 | `turn_failed` | turn, code, detail? (never shown) | host, acp | yes | T |
@@ -131,7 +131,7 @@ An unknown kind has no row and no answer (`None`): its envelope's `stream` decid
 | `matter_created` | name, kind, import? | host | yes | M |
 | `checkpoint_recorded` | checkpoint, kind, thread?, turn? | matters, through the host | yes | M |
 | `outside_edits` | checkpoint, files | matters, through the host | yes | M |
-| `version_restored` | from, checkpoint, scope | host, matters | yes | M |
+| `version_restored` | from, checkpoint, scope, undoes? | host, matters | yes | M |
 | `matter_relocated` | folder | host, matters | yes | M |
 | `patches` (`HostEvent`) | `PatchBatch`: stream, epoch, patches | host | no | the subscribed stream |
 | `events` (`HostEvent`) | envelopes, replayed then live | host | no | the subscribed stream |
@@ -142,6 +142,7 @@ An unknown kind has no row and no answer (`None`): its envelope's `stream` decid
 | `case_law_hint` (`HostEvent`) | matter, thread, turn; an offer, once per matter (R24) | host | no | none; app subscribers only |
 | `protection_changed` (`HostEvent`) | matter, protection (`Protection`); a matter's sandbox state after a change (0051) | host | no | none; app subscribers only, no catch-up (`ListMatters` has it) |
 | `protection_view_changed` (`HostEvent`) | `ProtectionView`, the whole view after a change (0051, R17 PR-B1) | host | no | none; app subscribers only, no catch-up (`HostQuery::Protection` has it) |
+| `papers_changed` (`HostEvent`) | matter; what the matter's papers hold changed since `ListPapers` answered (the background tracked-changes scan found marks), so the app lists them again; carries no list | host | no | none; app subscribers only, no catch-up |
 | `site_blocked` (`HostEvent`) | block_id, matter, thread?, turn?, host, tag (`SiteTag`), list_generated, override_allowed, count; the egress proxy refused a listed site (0053), re-sent with the same block_id and a higher count when the same site is refused again in the turn | host | no | none; app subscribers only, no catch-up |
 
 - Exactly one `turn_ended` per turn, including errors, cancels and a queued turn cancelled before it
@@ -475,6 +476,8 @@ reads back as `Unknown`.
   command, which refuses them. `HostCommand::RestoreVersion` names its scope with
   `RestoreRequest`, a closed twin of the logged `RestoreScope` with the same wire form and
   `deny_unknown_fields`; the host converts it with `From` before logging `version_restored`.
+  That event, a matter event, is also logged in the stream of the conversation the restore was
+  asked from (`RestoreVersion { thread }`), where the thread's fold makes the same marker.
   `HostCommand::SendPrompt` names its delivery the same way, with `DeliveryRequest`, the closed
   twin of `Delivery`, so a newer mode fails to decode as `command.invalid`. Queue has one wire
   form in the command, `UserMessage` and `UserMessageEntry`: a missing `delivery`, which is how

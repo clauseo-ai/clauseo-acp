@@ -5,12 +5,16 @@
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::time::Duration;
 
 use clauseo_process::Timer;
 use clauseo_protocol::AgentId;
 
-use super::{Ticket, Worker};
-use crate::cancel::Cancel;
+use super::stop::{JobEnd, SigninEnd, Stopped};
+use super::switch::{self, OwnLogin, Switch};
+use super::thread::Worker;
+use super::{Ticket, Ticks};
+use crate::cancel::{Cancel, Stop};
 use crate::config::AgentsConfig;
 use crate::signin::env::Vendor;
 use crate::signin::job::{self, SigninJob, Task};
@@ -18,6 +22,9 @@ use crate::signin::{
     Found, Method, PasteCode, SigninCode, SigninError, SigninNote, SigninState, Source, vendor_of,
 };
 use crate::state::{AgentsEvent, Installed};
+use trace::End;
+
+mod trace;
 
 /// Every agent's sign-in: what the handle, the worker and the sign-in jobs share.
 #[derive(Debug)]
@@ -32,6 +39,8 @@ pub(crate) struct SigninHub {
     /// replaced either finished (and undid) its link before that job's guard looks, or sees it
     /// was replaced and links nothing; and no link is made while a replaced login still runs.
     codex_files: futures::lock::Mutex<()>,
+    /// Where Clauseo keeps each agent's `login-source` record.
+    data_dir: PathBuf,
 }
 
 /// An agent the snapshot has and Clauseo signs in to.
@@ -49,6 +58,8 @@ struct Inner {
     /// Each agent's running job.
     jobs: BTreeMap<AgentId, Slot>,
     next_job: u64,
+    /// The clock of the jobs' log lines.
+    ticks: Ticks,
 }
 
 /// An agent's running job: its ticket, its task, where pasted codes go, and, for a task that
@@ -56,15 +67,23 @@ struct Inner {
 #[derive(Debug)]
 struct Slot {
     ticket: Ticket,
+    /// Set when the job's thread ends.
+    ended: Arc<JobEnd>,
     task: Task,
     paste: Option<async_channel::Sender<PasteCode>>,
     kick: Option<async_channel::Sender<()>>,
+    /// When the job's slot was taken ([`Ticks::now`]), for its log's `took_ms`.
+    began: Duration,
 }
+
+/// How long the lawyer's Cancel lets a sign-in's runs end gracefully before they are killed.
+pub(crate) const CANCEL_GRACE: Duration = Duration::from_secs(2);
 
 /// A reserved job, for the worker to start.
 #[derive(Debug)]
 pub(crate) struct SigninStart {
     ticket: Ticket,
+    ended: Arc<JobEnd>,
     task: Task,
     vendor: Vendor,
     /// The install when the call was made; a task that queues reads it again before it starts.
@@ -91,10 +110,30 @@ impl SigninHub {
             .collect();
         SigninHub {
             agents,
-            inner: Mutex::new(Inner::default()),
+            inner: Mutex::new(Inner {
+                ticks: Ticks::new(&config.clock),
+                ..Inner::default()
+            }),
             events,
             codex_files: futures::lock::Mutex::new(()),
+            data_dir: config.data_dir.clone(),
         }
+    }
+
+    /// [`switch::own_login`] for `agent`.
+    pub(super) fn own_login(&self, agent: &AgentId) -> Option<OwnLogin> {
+        let known = self.agents.get(agent)?;
+        switch::own_login(&self.data_dir, agent, known.vendor, known.home.as_deref())
+    }
+
+    /// Whether a Codex login for `agent` now would replace Clauseo's own ([`Self::own_login`]).
+    pub(super) fn replaces_own_login(&self, agent: &AgentId) -> bool {
+        self.own_login(agent).is_some()
+    }
+
+    /// Refuses a Codex login over Clauseo's own login unless `switch` is the lawyer's yes.
+    fn guard_switch(&self, agent: &AgentId, switch: Switch) -> Result<(), SigninError> {
+        switch::guard(switch, self.replaces_own_login(agent), agent)
     }
 
     fn lock(&self) -> MutexGuard<'_, Inner> {
@@ -107,6 +146,7 @@ impl SigninHub {
         agent: &AgentId,
         method: Method,
         installed: Option<Installed>,
+        switch: Switch,
     ) -> Result<Option<SigninStart>, SigninError> {
         let vendor = self.vendor(agent)?;
         let fits = matches!(
@@ -120,6 +160,7 @@ impl SigninHub {
                 method,
             });
         }
+        self.guard_switch(agent, switch)?;
         self.reserve(agent, vendor, Task::SignIn(method), installed)
     }
 
@@ -150,6 +191,7 @@ impl SigninHub {
                 method: Method::Browser,
             });
         }
+        self.guard_switch(agent, Switch::Refuse)?;
         self.reserve(agent, vendor, Task::TryAgain, installed)
     }
 
@@ -192,11 +234,13 @@ impl SigninHub {
         &self,
         agent: &AgentId,
         installed: Option<Installed>,
+        switch: Switch,
     ) -> Result<Option<SigninStart>, SigninError> {
         let vendor = self.vendor(agent)?;
         if self.source(agent) == Some(Source::Reused) {
             return Err(SigninError::Reused(agent.clone()));
         }
+        self.guard_switch(agent, switch)?;
         self.reserve(agent, vendor, Task::UseDifferent, installed)
     }
 
@@ -214,12 +258,14 @@ impl SigninHub {
         self.reserve(agent, vendor, Task::StopUsing(why), installed)
     }
 
-    /// Cancels `agent`'s sign-in run; its job reports `Failed { code: Cancelled }`.
+    /// Cancels `agent`'s sign-in run gracefully ([`Stop::Lawyer`] with [`CANCEL_GRACE`]): each
+    /// run ends as its kind allows and is killed past the grace; its job reports what a status
+    /// check then says (`Failed { code: Cancelled }` while signed out).
     pub(super) fn cancel(&self, agent: &AgentId) -> Result<(), SigninError> {
         let inner = self.lock();
         match inner.jobs.get(agent) {
             Some(slot) if slot.task.signs_in() => {
-                slot.ticket.cancel.cancel();
+                slot.ticket.cancel.stop(Stop::Lawyer(CANCEL_GRACE));
                 Ok(())
             }
             _ => Err(SigninError::NotRunning(agent.clone())),
@@ -298,6 +344,7 @@ impl SigninHub {
                 return Ok(None);
             }
             running.ticket.cancel.cancel();
+            trace::ended(&inner.ticks, agent, running, End::Superseded);
         }
         inner.next_job += 1;
         let ticket = Ticket {
@@ -317,17 +364,23 @@ impl SigninHub {
         } else {
             (None, None)
         };
+        let ended = Arc::new(JobEnd::default());
+        let began = inner.ticks.now();
         inner.jobs.insert(
             agent.clone(),
             Slot {
                 ticket: ticket.clone(),
+                ended: Arc::clone(&ended),
                 task,
                 paste: sender,
                 kick,
+                began,
             },
         );
+        trace::started(agent, task);
         Ok(Some(SigninStart {
             ticket,
+            ended,
             task,
             vendor,
             installed,
@@ -375,8 +428,8 @@ impl SigninHub {
         if !is_current(&inner, ticket) {
             return false;
         }
-        if ends {
-            inner.jobs.remove(&ticket.agent);
+        if ends && let Some(slot) = inner.jobs.remove(&ticket.agent) {
+            trace::ended(&inner.ticks, &ticket.agent, &slot, End::State(&state));
         }
         inner.states.insert(ticket.agent.clone(), state.clone());
         // Fails only when every receiver is gone; nobody is listening then.
@@ -391,8 +444,10 @@ impl SigninHub {
     /// (`AgentsEvent::SigninUnchanged`); nothing once the job is superseded.
     pub(crate) fn end_job(&self, ticket: &Ticket) {
         let mut inner = self.lock();
-        if is_current(&inner, ticket) {
-            inner.jobs.remove(&ticket.agent);
+        if is_current(&inner, ticket)
+            && let Some(slot) = inner.jobs.remove(&ticket.agent)
+        {
+            trace::ended(&inner.ticks, &ticket.agent, &slot, End::Unchanged);
             // Fails only when every receiver is gone; nobody is listening then.
             drop(self.events.try_send(AgentsEvent::SigninUnchanged {
                 agent: ticket.agent.clone(),
@@ -431,12 +486,29 @@ impl SigninHub {
         }
     }
 
-    /// Stops every job: the handle is gone.
+    /// Stops every job at once: the handle is gone.
     pub(super) fn stop_all(&self) {
-        let jobs = std::mem::take(&mut self.lock().jobs);
-        for slot in jobs.into_values() {
+        let mut inner = self.lock();
+        for (agent, slot) in std::mem::take(&mut inner.jobs) {
             slot.ticket.cancel.cancel();
+            trace::ended(&inner.ticks, &agent, &slot, End::Stopped);
         }
+    }
+
+    /// Stops every job gracefully for the quit ([`Stop::Quit`]): each run ends as its kind
+    /// allows, and nothing a job sends from now on reaches anyone. Gives each job's stop, for
+    /// the quit to wait on and to kill at its bound ([`Stopped::wait_or_kill`]).
+    pub(super) fn stop_all_gracefully(&self) -> Vec<Stopped> {
+        let mut inner = self.lock();
+        let ticks = inner.ticks.clone();
+        std::mem::take(&mut inner.jobs)
+            .into_iter()
+            .map(|(agent, slot)| {
+                slot.ticket.cancel.stop(Stop::Quit);
+                trace::ended(&ticks, &agent, &slot, End::Stopped);
+                Stopped::new(slot.ticket.cancel, slot.ended)
+            })
+            .collect()
     }
 }
 
@@ -453,6 +525,7 @@ fn is_current(inner: &Inner, ticket: &Ticket) -> bool {
 pub(super) fn start_job<T: Timer + Send + Sync + 'static>(worker: &Worker<T>, start: SigninStart) {
     let SigninStart {
         ticket,
+        ended,
         task,
         vendor,
         installed,
@@ -462,9 +535,11 @@ pub(super) fn start_job<T: Timer + Send + Sync + 'static>(worker: &Worker<T>, st
     } = start;
     let hub = &worker.shared.signin;
     if !hub.is_job(&ticket) {
+        ended.mark();
         return;
     }
     let fail = |ticket: &Ticket| {
+        ended.mark();
         let state = SigninState::Failed {
             code: SigninCode::Failed,
             at: worker.config.clock.now(),
@@ -478,7 +553,7 @@ pub(super) fn start_job<T: Timer + Send + Sync + 'static>(worker: &Worker<T>, st
     let needs_shim =
         matches!(task, Task::SignIn(_) | Task::UseDifferent) && vendor == Vendor::Claude;
     let browser = if needs_shim {
-        let Ok(browser) = shim_script(&worker.config) else {
+        let Ok(browser) = crate::signin::shim::script(&worker.config) else {
             fail(&ticket);
             return;
         };
@@ -498,30 +573,23 @@ pub(super) fn start_job<T: Timer + Send + Sync + 'static>(worker: &Worker<T>, st
         timer: Arc::clone(&worker.timer),
         shared: Arc::clone(&worker.shared),
         paste,
+        status_limit: std::sync::Mutex::new(None),
     };
     let spawned = worker
         .shared
-        .spawn_job(format!("clauseo-signin-{}", ticket.agent), move || {
-            job::run(job, kick);
+        .spawn_job(format!("clauseo-signin-{}", ticket.agent), {
+            let end = SigninEnd {
+                shared: Arc::clone(&worker.shared),
+                ticket: ticket.clone(),
+                ended: Arc::clone(&ended),
+                clock: Arc::clone(&worker.config.clock),
+            };
+            move || {
+                let _end = end;
+                job::run(job, kick);
+            }
         });
     if spawned.is_err() {
         fail(&ticket);
     }
-}
-
-/// The shim on macOS and Linux.
-#[cfg(unix)]
-fn shim_script(config: &AgentsConfig) -> std::io::Result<Option<PathBuf>> {
-    crate::signin::shim::install(&config.data_dir).map(Some)
-}
-
-/// None on Windows, where Claude opens its own tab.
-#[cfg(not(unix))]
-#[expect(
-    clippy::unnecessary_wraps,
-    reason = "the Unix version's signature, which can fail; one call site serves both"
-)]
-fn shim_script(config: &AgentsConfig) -> std::io::Result<Option<PathBuf>> {
-    let _ = config;
-    Ok(None)
 }

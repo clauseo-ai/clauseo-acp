@@ -9,6 +9,7 @@ mod auth_held;
 mod counts;
 mod endpoint;
 mod fakes;
+mod install_busy;
 mod key_marker;
 mod key_reads;
 mod key_state;
@@ -17,13 +18,18 @@ mod keys_loading;
 mod leave;
 mod network;
 mod once;
+mod one_sign_in;
 mod pending;
+mod pending_switch;
+mod python;
 mod quit;
 mod races;
 mod refusals;
+mod reinstall;
 mod retry;
 mod reused;
 mod signin;
+mod switch_account;
 mod switching;
 mod takeover;
 mod timing;
@@ -198,6 +204,17 @@ fn ready_writes_the_entry_with_the_install_and_the_home_then_checks_status() {
     };
     assert_eq!(rig.host.calls(), [HostCall::SetAgentLaunch(claude(), want)]);
     assert_eq!(rig.calls(), [("check_status", claude())]);
+    // The host's first read of the new plan waits, held, until the readers have the entry.
+    assert_eq!(
+        rig.journal(),
+        [
+            "readers.hold",
+            "host.set_agent_launch",
+            "readers.set_entry",
+            "readers.release",
+            "agents.check_status",
+        ]
+    );
 }
 
 #[test]
@@ -250,6 +267,7 @@ fn a_new_follower_gets_setup_info_then_each_agent_s_install_then_sign_in() {
     let rig = rig(true);
     rig.events.publish(SetupEvent::SetupInfo {
         keys_available: true,
+        python: None,
     });
     block_on(rig.backend.pump(futures::stream::iter([
         missing(claude()),
@@ -263,12 +281,14 @@ fn a_new_follower_gets_setup_info_then_each_agent_s_install_then_sign_in() {
         setup_events(&mut feed),
         [
             SetupEvent::SetupInfo {
-                keys_available: true
+                keys_available: true,
+                python: None,
             },
             SetupEvent::AgentInstallProgress {
                 agent: claude(),
                 state: InstallProgress::Missing {
-                    download_bytes: clauseo_protocol::Count::clamped(1_000)
+                    download_bytes: clauseo_protocol::Count::clamped(1_000),
+                    installed_before: false,
                 },
             },
             SetupEvent::SignInChanged {

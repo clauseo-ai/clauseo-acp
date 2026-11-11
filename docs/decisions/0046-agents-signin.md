@@ -44,7 +44,8 @@ No `protocol` change: R20 maps the states and codes to the wire.
   `SignedIn { email, plan, source, at }` and `Failed { code, at }`. It is a separate enum from
   `InstallState`, which already has its own `Waiting`.
 - `Found`: `ClaudeSettings`, `ClaudeWindowsSandbox`, `CodexKeyring`, `ReusedFailed`,
-  `ReusedSignedOut`, `ReusedChanged` and `CodexLinkSplit`.
+  `ReusedSignedOut` and `CodexLinkSplit` (`ReusedChanged` was removed on 2026-11-09, see
+  "Detection").
 - `LoginFrom`: `ClaudeCode` and `Codex`. `Source`: `Reused` and `Own`.
 - `SigninCode::code()` gives `signin.cancelled`, `signin.link_expired`, `signin.no_plan`,
   `signin.device_code_off`, `signin.port_busy` or `signin.failed`.
@@ -69,19 +70,19 @@ environment (`signin/env.rs`):
 - It removes every `SSH_*` name, `NO_BROWSER`, `CLAUDE_CODE_REMOTE`, `CLAUDE_CONFIG_DIR`,
   `CLAUDE_SECURESTORAGE_CONFIG_DIR`, `CODEX_HOME` and `CLAUSEO_SIGNIN_URL_FILE`. Names match
   without regard to ASCII case. The home variables are always removed, so an inherited one never
-  survives a run that does not set it (detection).
+  survives a run that does not set it.
 - Then it adds the run's own variables:
   - Claude: `ANTHROPIC_API_KEY=""` on every run. Own login: `CLAUDE_CONFIG_DIR=<home>`. Reused
     (the session's view, for the run-time fallback): the same plus
     `CLAUDE_SECURESTORAGE_CONFIG_DIR=""`. `HOME` is never changed.
-  - Codex: `CODEX_API_KEY=""` on every run. Every run but detection gets `CODEX_HOME=<home>`,
+  - Codex: `CODEX_API_KEY=""` on every run. Every run gets `CODEX_HOME=<home>`,
     and on macOS and Linux also `HOME=<home>`, so the lawyer's `~/.agents/skills` does not
-    load. Every run but detection gets the arguments `-c cli_auth_credentials_store="file"`.
+    load. Every run gets the arguments `-c cli_auth_credentials_store="file"`.
   - Both: `HTTPS_PROXY` from the proxy, and the agent's `network.ca_certs` file as
     `NODE_EXTRA_CA_CERTS` (Claude) or `SSL_CERT_FILE` (Codex).
   - Claude's login runs on macOS and Linux: `BROWSER` (the shim) and `CLAUSEO_SIGNIN_URL_FILE`.
     An inherited `BROWSER` stays where there is no shim (Codex, Windows).
-- Detection runs get no home variable, no `HOME` change and no store override.
+- Detection starts no run for either agent (see "Detection"), so it has no environment.
 
 **The caller's launcher must clear the environment.** The child gets only the built map
 because the caller gives `Agents::start` a launcher made with
@@ -385,7 +386,7 @@ to the other.
 
 `use_found_login` and `use_different_account` are cancellable and take pasted codes like
 `sign_in`, since they may run a login; `use_different_account` queues as `sign_in` does.
-Cancelling "Use it" during its detection ends it with `signin.cancelled`.
+Cancelling "Use it" during its status or confirmation ends it with `signin.cancelled`.
 `AgentsEvent::SigninNote` carries `claude_reuse_fallback` and `codex_link_failed`.
 
 **The markers** (`signin/marker.rs`) are Clauseo's own files in `<data_dir>/agents/<id>/`,
@@ -402,8 +403,9 @@ written atomically:
 at start and when a window shows Plans. It runs:
 1. A recorded reuse first. For Codex, a missing `login-source` with a login file in the home
    also counts, per the brief.
-   - Claude: detection must still find a `claude.ai` login with the accepted email. Another
-     email gives `ReusedChanged`, signed out gives `ReusedSignedOut`. Then status under the
+   - Claude: detection must still find a login (a stat, see "Detection"). It reports no email,
+     and a login file still there holds whatever account it is now (`ReusedChanged` is no longer
+     produced); no login file gives `ReusedSignedOut`. Then status under the
      session's environment (`CLAUDE_CONFIG_DIR` the home, `CLAUDE_SECURESTORAGE_CONFIG_DIR=""`)
      must say signed in, giving `SignedIn { Reused }`. Otherwise the run-time fallback below.
    - Codex: `codex_link_holds` must say `Holds`, giving `SignedIn { Reused }` with
@@ -415,7 +417,7 @@ at start and when a window shows Plans. It runs:
 
 A run that cannot tell leaves the state unchanged. The job creates the agent's home before
 any run. Without it, a status check before the first sign-in could not start, since every run
-but detection has the home as its working folder.
+has the home as its working folder.
 
 **Folders.** Every folder sign-in makes goes through one helper,
 `write::create_private_dirs_under(data_dir, folder)`, which follows host's `make_home`
@@ -424,37 +426,60 @@ link, junction or other reparse point (`symlink_metadata`, which follows none); 
 one is made, 0700 on Unix; another thread making one first is fine; a link or a file in the way,
 or a folder outside the data folder, is refused, and nothing is made where a link points. The
 data folder itself may be a link. It makes the agent's home (the job, Claude's and Codex's
-login, Codex's link), `agents/<id>` for the markers, `agents/signin` for the shim and URL
-files, and detection's `agents/signin/detect`. A real folder already there below the data folder
+login, Codex's link), `agents/<id>` for the markers, and `agents/signin` for the shim and URL
+files. A real folder already there below the data folder
 is set to 0700 as well, as `make_home` does. `agents` itself does not depend on host.
 
-**Detection** (`signin/detect.rs`) runs with `RunKind::Detect`: no `CLAUDE_CONFIG_DIR`,
-`CLAUDE_SECURESTORAGE_CONFIG_DIR` or `CODEX_HOME`, the lawyer's `HOME`, no
-`cli_auth_credentials_store`. Its working folder is the empty `<data_dir>/agents/signin/detect`.
-- Claude: `--cli auth status --json`, read by `status::claude_detection`.
-- Codex: `login status`, exit 0 with its signed-in line. That is followed by a `symlink_metadata` of the
-  lawyer's `~/.codex` login file: present is `LoginFound` (with `account/read`, same
-  environment, same folder), absent is `CodexKeyring`. An `account/read` that gets no answer
-  (cut short by Cancel or its 20 s limit, or an error reply) is "could not tell", never "no
-  email": the status check leaves the state unchanged, and "Use it" ends. `LoginFound { email:
-  None }` comes only from a `ChatGPT` account whose email Codex does not know. A login whose
-  account is not a `ChatGPT` one (an API key, say) is not offered: `SignedOut { found: None }`.
+**Detection** (`signin/detect.rs`) is a stat of each agent's login file where its CLI keeps it
+by default, never an open, and starts no CLI: no write into the lawyer's config and no network
+(2026-11-09, #857). `signin/reuse.rs` is the one file that names the login files.
+- Claude: `~/.claude/.credentials.json` (`%USERPROFILE%\.claude\.credentials.json` on Windows)
+  a regular file is `LoginFound { from: ClaudeCode, email: None }`; anything else (missing, a
+  symbolic link or other reparse point, a folder) is `SignedOut { found: NoLogin }`. macOS keeps
+  the login in the Keychain, so nothing is found there. With `CLAUDE_CONFIG_DIR` set in the
+  lawyer's environment nothing is found: their Claude Code keeps its login under that folder,
+  and "Use it" reads the default store only. `ClaudeSettings` is no longer reported.
+- Codex: `~/.codex/auth.json` a regular file is `LoginFound { from: Codex, email: None }`, else
+  `SignedOut { found: NoLogin }`. With `CODEX_HOME` set in the lawyer's environment nothing is
+  found: "Use it", the split check and the guard address `~/.codex` only. `CodexKeyring` is no
+  longer reported. An API-key login file is offered and turned down by "Use it"'s confirmation.
+- **Why no CLI.** Each vendor's status command writes into the lawyer's folders:
+  - Claude Code 2.1.293's `auth status`, with the lawyer's default config, rewrites
+    `~/.claude.json` and writes `~/.claude/backups/.claude.json.backup.<ms>` the first time a
+    version meets the home. Run with a throwaway `CLAUDE_CONFIG_DIR` instead, it still refreshes
+    an expired token against the lawyer's store, and nothing turns that off for a first-party
+    login. Even offline each refresh attempt takes and removes its locks in the lawyer's folders
+    within about 50 ms (strace, 2026-11-09): `mkdir ~/.claude/.oauth_refresh.lock`,
+    `mkdir ~/.claude.lock` (in the home), `~/.claude/.oauth_refresh.lock.owner.tmp.<hex>` written
+    and renamed to `~/.claude/.oauth_refresh.lock.owner`, then `unlink` and both `rmdir`s. Online
+    the refresh rewrites `~/.claude/.credentials.json`. And the email, account and organisation
+    it prints come from the global config, which a throwaway folder does not have.
+  - Codex 0.162.1's `login status` writes `~/.codex/tmp/arg0/codex-arg0<random>/` (a `.lock` and
+    its helper links) even when signed out, and `app-server` more.
+- No email, plan or account comes from detection. "Use it" confirms through the agent's own
+  status under the reused environment (Claude: `CLAUDE_CONFIG_DIR` Clauseo's home and
+  `CLAUDE_SECURESTORAGE_CONFIG_DIR=""`; Codex: through the new link). That run is the lawyer's
+  explicit choice, so a token refresh it writes into their store is legitimate. Nothing ties
+  "Use it", or a reuse later, to the account the lawyer saw: the agent runs as the lawyer, and
+  switching accounts is their own doing (2026-11-09). `ReusedChanged` is no longer produced.
 
 The lawyer's home folder is `SigninConfig::lawyer_home()` (new, public): the base environment's
 `HOME`, or `USERPROFILE` on Windows.
 
-**"Use it"** runs detection again first. It goes on only when detection's email is the one
-`LoginFound` showed, `None` equal to `None`: a ChatGPT login with no email is shown and can be
-used, since a read that got no answer is "could not tell", never `None`.
-Otherwise (`Some` shown and `None` found, `None` and `Some`, or two emails) nothing is linked
-or recorded, and the new detection is the state: `LoginFound` with the new email, or what was
-seen. Detection that cannot tell
+**"Use it"** runs detection again first. It goes on while detection still finds a login and its
+email equals the one `LoginFound` showed. Detection is a stat and gives no email for either
+vendor, so this compares `None` with `None` and does not tie "Use it" to the account the lawyer
+saw (see "Detection"). A login gone in between is not reused: the
+new detection is the state. Detection that cannot tell
 ends the job: `signin.cancelled` when it was cancelled or replaced, else `signin.failed`.
 - Claude: status under the session's environment must say signed in. Then, if the job is still
   the agent's and not cancelled, `login-source` is written, and the state is
   `SignedIn { Reused }`.
-- Codex: `link_reused_login` makes the hard link, then `login-source` is written, then
-  `SignedIn { Reused }`, with the plan from detection's `account/read`. The link is refused
+- Codex: `link_reused_login` makes the hard link, then Codex's own confirmation through it
+  (`RunKind::Reused`) must name a `ChatGPT` account, then `login-source` is written (with the
+  confirmed email), then `SignedIn { Reused }` with the confirmed email and plan. A definite
+  "signed out" removes the link and gives `ReusedSignedOut`; no answer removes it and gives
+  `signin.failed`. The link is refused
   when the lawyer's name is not a plain file, and checked with `same_file` afterwards. If it
   fails (another volume, a name already taken, any error), the `codex_link_failed` note goes
   out, then Clauseo's own browser sign-in runs. If `login-source` cannot be written, the link

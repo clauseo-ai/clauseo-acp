@@ -10,9 +10,11 @@ use clauseo_protocol::MatterId;
 use super::{Matter, exists, json, matter_home};
 use crate::{Error, write};
 
-/// What a create or import made besides the history and `matter.json`, which it always writes.
+/// What a create or import made besides the history, which it always writes.
 #[derive(Debug, Clone, Copy)]
 pub(super) struct Fresh {
+    /// `matter.json` is this run's: false when an import adopted the one there.
+    pub(super) marker: bool,
     /// `.clauseo` was not there before.
     pub(super) marker_dir: bool,
     /// The folder itself (a create).
@@ -20,18 +22,31 @@ pub(super) struct Fresh {
 }
 
 impl Fresh {
-    /// A create: it makes the folder, so `.clauseo` too.
+    /// A create: it makes the folder, so `.clauseo` and `matter.json` too.
     pub(super) const CREATED: Self = Self {
+        marker: true,
         marker_dir: true,
         folder: true,
     };
 
-    /// An import into `folder`, before it writes anything.
-    pub(super) fn imported(folder: &Path) -> Result<Self, Error> {
+    /// An import into `folder`, before it writes anything; `adopted` when it keeps the
+    /// `matter.json` there, which names the matter already.
+    pub(super) fn imported(folder: &Path, adopted: bool) -> Result<Self, Error> {
         Ok(Self {
+            marker: !adopted,
             marker_dir: !exists(&folder.join(json::DIR))?,
             folder: false,
         })
+    }
+
+    /// Removes this run's `matter.json`, with `.clauseo` when it made that too; an adopted
+    /// marker stays byte for byte.
+    fn remove_marker(self, folder: &Path) -> Result<(), Error> {
+        if self.marker {
+            json::remove(folder, self.marker_dir)
+        } else {
+            Ok(())
+        }
     }
 }
 
@@ -39,8 +54,8 @@ impl Fresh {
 /// that could not record the matter it made: removes the matter's history
 /// (`<matters root>/<matter id>`) and `.clauseo/matter.json`, then `.clauseo` when the create or
 /// import made it and it is empty, and the folder when `create` made it and it is empty. A file
-/// put there since stays, and so does its folder. Afterwards the folder imports as a new matter
-/// again.
+/// put there since stays, and so does its folder; so does a `matter.json` the import adopted,
+/// byte for byte. Afterwards the folder imports again as it did.
 ///
 /// Refused with `Error::History` for a matter that was opened, not made by this run: its
 /// history holds versions the lawyer has. The first removal that fails is returned; the
@@ -66,7 +81,7 @@ pub(super) fn discard(matter: Matter) -> Result<(), Error> {
         Err(err) if err.kind() != io::ErrorKind::NotFound => Err(Error::io("remove", &home, err)),
         _ => Ok(()),
     };
-    let marker = json::remove(&folder, fresh.marker_dir);
+    let marker = fresh.remove_marker(&folder);
     if fresh.folder
         && let Err(err) = write::remove_dir(&folder)
         && err.kind() != io::ErrorKind::NotFound
@@ -77,15 +92,16 @@ pub(super) fn discard(matter: Matter) -> Result<(), Error> {
 }
 
 /// Removes what `Matter::make` wrote: the matter's folder under the matters root, and
-/// `matter.json` (with `.clauseo` when `fresh` says the create or import made it). Failures
-/// are logged; the caller's result stands.
+/// `matter.json` when it wrote one (with `.clauseo` when `fresh` says the create or import made
+/// it); an adopted `matter.json` stays as it was. Failures are logged; the caller's result
+/// stands.
 pub(super) fn undo_make(home: &Path, folder: &Path, fresh: Fresh) {
     if let Err(err) = write::remove_dir_all(home)
         && err.kind() != io::ErrorKind::NotFound
     {
         tracing::warn!(kind = ?err.kind(), stage = "history", "history folder left behind");
     }
-    if let Err(err) = json::remove(folder, fresh.marker_dir) {
+    if let Err(err) = fresh.remove_marker(folder) {
         tracing::warn!(code = %err.code(), stage = "marker", "matter.json left behind");
     }
 }

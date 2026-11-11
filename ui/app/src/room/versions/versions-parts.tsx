@@ -1,6 +1,7 @@
 // Versions in the room, from its own chunk: the timeline in the rail's place (VersionsRail), and the band over the
 // work with the restore dialog (VersionsCentre). Both read one VersionsController (controller.ts) and compose the parts
-// of ui/components: VersionPanel, VersionWhere, VersionBand, CompareBar, PdfSheet and RestoreDialog.
+// of ui/components: VersionPanel, VersionWhere, VersionBand, CompareBar, PdfSheet and RestoreDialog; a Word document
+// compared with now is marked up by the host's Word tool (blackline-sheet.tsx).
 import { useEffect, useId, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { RestoreDialog } from "@clauseo/components/clauseo/restore-dialog.tsx";
 import { keyIsMine, useRoom } from "@clauseo/components/clauseo/room-scope.ts";
@@ -24,10 +25,12 @@ import { IconUndo } from "@clauseo/components/icons/icons.tsx";
 import { Button } from "@clauseo/components/ui/button.tsx";
 import type { Lang, Platform } from "@clauseo/components/lib/display.ts";
 import { useVersionWords, vt } from "@clauseo/components/lib/words-versions.ts";
-import type { FileRefId } from "../../transport/protocol.ts";
+import type { FileChange, FileRefId } from "../../transport/protocol.ts";
 import { locatable, useLocateFolder } from "../act-refusals.ts";
 import { LocateButton } from "../locate-button.tsx";
-import { refusalOf } from "../open.ts";
+import { PAPER_GONE, refusalOf } from "../open.ts";
+import { markable, markAskOf, type Blacklines } from "./blackline.ts";
+import { MarkedDesk } from "./blackline-sheet.tsx";
 import type { VersionsController } from "./controller.ts";
 import { restoreOf, type Snapshot } from "./state.ts";
 import type { StandIns } from "./stand-ins.ts";
@@ -45,6 +48,8 @@ import {
 
 /** A file's handle in the matter's papers (H8), for H11's open_file; null when the room has none for it. */
 export type FileRefOf = (path: string) => FileRefId | null;
+/** A file's handle from a fresh list of the matter's papers: null when the folder no longer holds it. */
+export type FreshRefOf = (path: string) => Promise<FileRefId | null>;
 
 function useVersions(
   c: VersionsController,
@@ -158,15 +163,20 @@ const takesBack = (s: Snapshot, v: Version): boolean => {
 /** The band over the work, the comparison under it, and the restore dialog. */
 export function VersionsCentre({
   controller: c,
+  blacklines,
   standIns,
   fileRef,
+  freshRef,
   onLeave,
   onPanel,
   onAway,
 }: {
   controller: VersionsController;
+  /** The Word documents' marked-up changes, kept while Versions is open. */
+  blacklines: Blacklines;
   standIns: StandIns;
   fileRef: FileRefOf;
+  freshRef: FreshRefOf;
   /** Closes Versions: Cancel in a dialog the toolbar's Undo opened along with Versions. */
   onLeave: () => void;
   /** With the panel put away on a mid window: brings it back, from the band's Versions. */
@@ -268,6 +278,33 @@ export function VersionsCentre({
   const changes = s.compare?.changes ?? null;
   const inView = changes?.find((f) => f.path === doc) ?? changes?.[0];
   const ask = askOf(lang, cal, s, s.ask);
+  // the sheet that says only that the file in view changed, with the two times: a Word document's marked-up sheet
+  // stands in its place, and falls back to it when the marking up fails
+  const thenHead =
+    shown === undefined
+      ? ""
+      : shown.day === cal.today
+        ? vt(lang, "As it was at {time} today", { time: w.clock(shown.at) })
+        : vt(lang, "As it was at {time} on {date}", {
+            time: w.clock(shown.at),
+            date: cal.words(lang, shown.day, "date"),
+          });
+  const nowHead = vt(lang, "As it is now");
+  const changedSheet =
+    inView === undefined || shown === undefined ? null : (
+      <PdfSheet
+        title={fileName(inView.path)}
+        changed
+        state={sinceOf(lang, inView, shown.day === cal.today, {
+          time: w.clock(shown.at),
+          date: cal.words(lang, shown.day, "date"),
+        })}
+        then={{ head: thenHead, facts: inView.change === "added" ? NOT_THEN(lang) : "", saved: "" }}
+        now={{ head: nowHead, facts: inView.change === "deleted" ? NOT_NOW(lang) : "", saved: "" }}
+        pdf={/\.pdf$/i.test(inView.path)}
+        {...openNow(standIns, inView, fileRef(inView.path), c, freshRef)}
+      />
+    );
   const held =
     s.ask?.act === "undo" &&
     s.ask.stage === "confirm" &&
@@ -330,32 +367,18 @@ export function VersionsCentre({
           />
           {inView !== undefined && (
             <Desk label={fileName(inView.path)} scrollRef={desk}>
-              <PdfSheet
-                title={fileName(inView.path)}
-                changed
-                state={
-                  shown.day === cal.today
-                    ? vt(lang, "Changed since {time} today", { time: w.clock(shown.at) })
-                    : vt(lang, "Changed since {time} on {date}", {
-                        time: w.clock(shown.at),
-                        date: cal.words(lang, shown.day, "date"),
-                      })
-                }
-                then={{
-                  head:
-                    shown.day === cal.today
-                      ? vt(lang, "As it was at {time} today", { time: w.clock(shown.at) })
-                      : vt(lang, "As it was at {time} on {date}", {
-                          time: w.clock(shown.at),
-                          date: cal.words(lang, shown.day, "date"),
-                        }),
-                  facts: "",
-                  saved: "",
-                }}
-                now={{ head: vt(lang, "As it is now"), facts: "", saved: "" }}
-                pdf={/\.pdf$/i.test(inView.path)}
-                {...openNow(standIns, fileRef(inView.path), c)}
-              />
+              {markable(inView) ? (
+                <MarkedDesk
+                  blacklines={blacklines}
+                  ask={markAskOf(inView, shown.id)}
+                  title={fileName(inView.path)}
+                  then={thenHead}
+                  now={nowHead}
+                  fallback={changedSheet}
+                />
+              ) : (
+                changedSheet
+              )}
             </Desk>
           )}
         </>
@@ -374,15 +397,50 @@ export function VersionsCentre({
   );
 }
 
-/** "Open now", through H11's open_file, where the host has it and the room has the file's handle. The file as it was
- * has no handle until the matter as it stood can be read (H12), so it has no way to open. */
-function openNow(standIns: StandIns, file: FileRefId | null, c: VersionsController) {
+/** What became of a compared file since the version: added, removed, or changed (a rename too). */
+function sinceOf(
+  lang: Lang,
+  f: FileChange,
+  today: boolean,
+  at: { time: string; date: string },
+): string {
+  if (f.change === "added")
+    return today
+      ? vt(lang, "Added since {time} today", at)
+      : vt(lang, "Added since {time} on {date}", at);
+  if (f.change === "deleted")
+    return today
+      ? vt(lang, "Removed since {time} today", at)
+      : vt(lang, "Removed since {time} on {date}", at);
+  return today
+    ? vt(lang, "Changed since {time} today", at)
+    : vt(lang, "Changed since {time} on {date}", at);
+}
+const NOT_THEN = (lang: Lang) => vt(lang, "This paper wasn't in the matter then.");
+const NOT_NOW = (lang: Lang) => vt(lang, "This paper isn't in the matter now.");
+
+/** "Open now", through H11's open_file, where the host has it and the room has the file's handle; a file added since
+ * the version, whose handle the room's list may not hold yet, is looked for in a fresh list, and one in neither says
+ * it is no longer in the folder. A removed file has nothing to open now. The file as it was has no handle until the
+ * matter as it stood can be read (H12), so it has no way to open. */
+function openNow(
+  standIns: StandIns,
+  f: FileChange,
+  file: FileRefId | null,
+  c: VersionsController,
+  fresh: FreshRefOf,
+) {
   const { openFile } = standIns;
-  if (openFile === undefined || file === null) return {};
+  if (openFile === undefined || f.change === "deleted") return {};
+  if (file === null && f.change !== "added") return {};
+  const open = (ref: FileRefId | null) =>
+    ref === null ? c.refuse(PAPER_GONE) : tried(c, "open_file", openFile(ref));
   return {
     openable: "now" as const,
     onOpen: (which: "then" | "now") => {
-      if (which === "now") tried(c, "open_file", openFile(file));
+      if (which !== "now") return;
+      if (file !== null) open(file);
+      else void fresh(f.path).then(open, () => open(null));
     },
   };
 }

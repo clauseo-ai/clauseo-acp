@@ -40,7 +40,15 @@ fn the_embedded_snapshot_builds() {
     let entry = built.agent(&claude()).unwrap();
     assert_eq!(entry.display_name, "Claude");
     assert_eq!(entry.bin, "dist/index.js");
-    assert_eq!(entry.install_hosts, ["nodejs.org", "registry.npmjs.org"]);
+    assert_eq!(
+        entry.install_hosts,
+        [
+            "nodejs.org",
+            "registry.npmjs.org",
+            "github.com",
+            "release-assets.githubusercontent.com",
+        ]
+    );
     assert_eq!(
         built.agent(&codex()).unwrap().signin_hosts,
         ["auth.openai.com", "chatgpt.com"]
@@ -251,12 +259,12 @@ fn sizes_follow_the_records_formula() {
     );
     let base: u64 = 2 * 112_272_099 + 284_447_720;
     assert_eq!(
-        snapshot.need_bytes(&claude(), mac, false),
+        snapshot.need_bytes(&claude(), mac, false, false),
         Some(base + base.div_ceil(10))
     );
     let with_node = base + 53_049_576 + 197_365_224;
     assert_eq!(
-        snapshot.need_bytes(&claude(), mac, true),
+        snapshot.need_bytes(&claude(), mac, true, false),
         Some(with_node + with_node.div_ceil(10))
     );
     let musl = Platform {
@@ -292,7 +300,7 @@ fn a_fixture_with_no_sizes_row_counts_only_node() {
         fixture.download_bytes(&id("x"), linux(), true),
         Some(58_256_361)
     );
-    assert_eq!(fixture.need_bytes(&id("x"), linux(), false), Some(0));
+    assert_eq!(fixture.need_bytes(&id("x"), linux(), false, false), Some(0));
 }
 
 #[test]
@@ -314,4 +322,119 @@ fn every_platform_has_its_node_archive() {
         linux_archive.sha256_hex(),
         "28ea0a438de9a13bd7891fd758eee6c7819ee8af5442dfd8d45bd65e56d4228c"
     );
+}
+
+fn fake_python(os: Os, arch: Arch, size: u64, unpacked: u64) -> PythonArchive {
+    let name = format!("clauseo-python-3.13.18-c1-{os:?}-{arch:?}.tar.gz").to_lowercase();
+    let url = format!("https://example.test/{name}");
+    PythonArchive::new(os, arch, &name, &url, size, unpacked, &"ab".repeat(32)).unwrap()
+}
+
+#[test]
+fn the_python_table_is_empty_until_published_and_then_complete() {
+    use super::embedded::{PYTHON_ARCHIVES, PYTHON_ARCHIVES_PUBLISHED};
+    assert_eq!(PYTHON_ARCHIVES_PUBLISHED, !PYTHON_ARCHIVES.is_empty());
+    let snapshot = Snapshot::embedded();
+    assert_eq!(snapshot.python().version(), "3.13.18");
+    // Every row builds, and each platform has at most one.
+    assert_eq!(snapshot.python().archives().len(), PYTHON_ARCHIVES.len());
+    let mut seen = BTreeSet::new();
+    for archive in snapshot.python().archives() {
+        assert!(seen.insert(format!("{:?}-{:?}", archive.os(), archive.arch())));
+        assert_ne!(archive.os(), Os::Linux, "Linux has no Python");
+        let rest = archive
+            .name()
+            .strip_prefix("clauseo-python-3.13.18-c")
+            .unwrap();
+        let build: String = rest.chars().take_while(char::is_ascii_digit).collect();
+        assert!(!build.is_empty(), "{}", archive.name());
+        assert!(
+            archive
+                .url()
+                .starts_with("https://github.com/clauseo-ai/clauseo-acp/releases/download/")
+        );
+        assert!(archive.url().ends_with(archive.name()));
+        assert!(archive.size() > 0 && archive.unpacked_bytes() > archive.size());
+        // The streaming check reads at most this; a runaway table row would show here.
+        assert!(archive.size() < 150_000_000, "{}", archive.name());
+    }
+    if PYTHON_ARCHIVES_PUBLISHED {
+        let wanted = [
+            (Os::Darwin, Arch::Arm64),
+            (Os::Darwin, Arch::X64),
+            (Os::Win32, Arch::X64),
+            (Os::Win32, Arch::Arm64),
+        ];
+        for (os, arch) in wanted {
+            assert!(snapshot.python_archive(Platform::new(os, arch)).is_some());
+        }
+    } else {
+        for platform in Platform::ALL {
+            assert_eq!(snapshot.python_archive(platform), None);
+        }
+    }
+}
+
+#[test]
+fn a_python_archive_needs_a_plain_tar_gz_name_and_a_sha256() {
+    let sha = "ab".repeat(32);
+    let new = |name: &str, sha: &str| {
+        PythonArchive::new(Os::Darwin, Arch::Arm64, name, "https://x.test/a", 1, 2, sha)
+    };
+    let archive = new("clauseo-python-3.13.18-c1-macos-arm64.tar.gz", &sha).unwrap();
+    assert_eq!(archive.stem(), "clauseo-python-3.13.18-c1-macos-arm64");
+    assert_eq!(archive.sha256_hex(), sha);
+    for bad in [
+        "python.zip",
+        ".tar.gz",
+        ".hidden.tar.gz",
+        "a/b.tar.gz",
+        "a\\b.tar.gz",
+        "..x.tar.gz",
+        "c:x.tar.gz",
+    ] {
+        assert_eq!(new(bad, &sha), None, "{bad}");
+    }
+    assert_eq!(new("ok.tar.gz", "zz"), None);
+}
+
+#[test]
+fn the_disk_need_adds_python_and_the_agent_s_download_leaves_it_out() {
+    let mac = Platform::new(Os::Darwin, Arch::Arm64);
+    let python = PythonEntry::new(
+        "3.13.18",
+        vec![fake_python(
+            Os::Darwin,
+            Arch::Arm64,
+            70_000_000,
+            220_000_000,
+        )],
+    );
+    let snapshot = Snapshot::embedded().with_python(python);
+    // The agent's download leaves Python out: its own Missing carries it.
+    assert_eq!(
+        snapshot.download_bytes(&claude(), mac, false),
+        Some(112_272_099)
+    );
+    let base: u64 = 2 * 112_272_099 + 284_447_720 + 70_000_000 + 220_000_000;
+    assert_eq!(
+        snapshot.need_bytes(&claude(), mac, false, true),
+        Some(base + base.div_ceil(10))
+    );
+    // No archive for Linux: nothing added.
+    assert_eq!(
+        snapshot.need_bytes(&codex(), linux(), false, true),
+        snapshot.need_bytes(&codex(), linux(), false, false)
+    );
+    // The fixture's `new` has none.
+    let embedded = Snapshot::embedded();
+    let fixture = Snapshot::new(
+        PINS_PACKAGE_JSON,
+        PINS_LOCK,
+        NPM_REGISTRY,
+        embedded.node().clone(),
+        Vec::new(),
+    )
+    .unwrap();
+    assert_eq!(fixture.python_archive(mac), None);
 }

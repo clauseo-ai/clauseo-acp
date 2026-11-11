@@ -1,8 +1,8 @@
-//! The stop's real [`Stopper`]: the record in `HKLM\SOFTWARE\Clauseo\Sandbox` (64-bit view), the
-//! admin copy's path under `FOLDERID_ProgramFiles`, a Toolhelp process snapshot with each
+//! The stop's real [`Stopper`]: the gate's reads (`pool_steps::windows_gate`), BITS
+//! (`pool_steps::windows_bits`), a Toolhelp process snapshot with each
 //! process's user from the kernel's process list (`WTSEnumerateProcessesExW`), its token and its
 //! owner, `NtSuspendProcess` and `TerminateProcess` through the handle that user was read
-//! through, the set-up lock, and the Event Log.
+//! through, the record's lock and values (`pool_steps::windows_record`), and the Event Log.
 #![expect(
     unsafe_code,
     reason = "FFI to the Toolhelp snapshot, the WTS process list, OpenProcess and TerminateProcess"
@@ -25,7 +25,7 @@ use windows::Win32::System::RemoteDesktop::{
     WTS_CURRENT_SERVER_HANDLE, WTS_PROCESS_INFO_EXW, WTSEnumerateProcessesExW, WTSFreeMemoryExW,
     WTSTypeProcessInfoLevel1,
 };
-use windows::Win32::System::SystemInformation::{GetSystemTimeAsFileTime, GetTickCount64};
+use windows::Win32::System::SystemInformation::GetTickCount64;
 use windows::Win32::System::Threading::{
     GetCurrentProcessId, OpenProcess, PROCESS_ACCESS_RIGHTS, PROCESS_NAME_WIN32,
     PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SUSPEND_RESUME, PROCESS_SYNCHRONIZE,
@@ -33,18 +33,14 @@ use windows::Win32::System::Threading::{
 };
 use windows::core::PWSTR;
 
-use windows::Win32::Networking::BackgroundIntelligentTransferService::IBackgroundCopyJob;
-
-use super::windows_bits::{self, Com};
 use super::{Failed, Image, Pool, Process, StopExit, Stopper, stop};
 use crate::windows::acl::object::Handle;
-use crate::windows::admin_copy::{self, os};
 use crate::windows::refresh::event_log;
-use crate::windows::setup::lock::{Held, SETUP_MUTEX, SetupMutex};
-use crate::windows::setup::machine::MachineError;
-use crate::windows::setup::owner::this_process;
+use crate::windows::setup::pool_steps::windows_bits::WindowsBits;
+use crate::windows::setup::pool_steps::windows_record::{self, RecordLock};
+use crate::windows::setup::pool_steps::{Bits, Gate, Record, windows_gate};
 use crate::windows::setup::preflight::sid_text;
-use crate::windows::setup::processes::{DebugPrivilege, check_pool, owner_of, user_of};
+use crate::windows::setup::processes::{DebugPrivilege, owner_of, user_of};
 use crate::windows::setup::record_write::{self, RECORD_KEY};
 use crate::windows::sids::Sid;
 
@@ -58,9 +54,6 @@ const ANY_SESSION: u32 = 0xFFFF_FFFE;
 const INFO_LEVEL_1: u32 = 1;
 
 windows::core::link!("ntdll.dll" "system" fn NtSuspendProcess(process: HANDLE) -> NTSTATUS);
-/// How long the stop waits for the set-up lock (to reserve its number, mark the users, or write
-/// its completion), in milliseconds: well inside the task's 2-minute limit.
-const LOCK_WAIT_MS: u32 = 30_000;
 
 /// `--stop`: [`stop`] over a [`WindowsStopper`].
 pub(crate) fn run() -> StopExit {
@@ -74,13 +67,11 @@ pub(crate) struct WindowsStopper {
     /// The last snapshot's processes that could be opened to be terminated, by pid.
     handles: Opened,
     /// The set-up lock, while held.
-    held: Option<Held>,
+    lock: RecordLock,
     /// `GetTickCount64` when the stop began.
     began_ms: u64,
-    /// The last BITS list's jobs, for [`Stopper::cancel_job`]; dropped before [`Self::com`].
-    jobs: Vec<IBackgroundCopyJob>,
-    /// COM on this thread, once the BITS jobs are listed.
-    com: Option<Com>,
+    /// BITS, for [`Bits`].
+    bits: WindowsBits,
 }
 
 impl WindowsStopper {
@@ -88,51 +79,47 @@ impl WindowsStopper {
         WindowsStopper {
             _debug: DebugPrivilege::enable(),
             handles: Vec::new(),
-            held: None,
+            lock: RecordLock::default(),
             // SAFETY: GetTickCount64 only reads the tick count.
             began_ms: unsafe { GetTickCount64() },
-            jobs: Vec::new(),
-            com: None,
+            bits: WindowsBits::default(),
         }
     }
 }
 
-impl Stopper for WindowsStopper {
+impl Gate for WindowsStopper {
     fn is_system(&mut self) -> Result<bool, Failed> {
-        this_process()
-            .map(|(_elevated, system)| system)
-            .map_err(|error| error.to_string())
+        windows_gate::is_system()
     }
 
     fn current_exe(&mut self) -> Result<PathBuf, Failed> {
-        os::running_image().map_err(|error| error.to_string())
+        windows_gate::current_exe()
     }
 
     fn admin_copy(&mut self) -> Result<PathBuf, Failed> {
-        let program_files = os::program_files().map_err(|error| error.to_string())?;
-        Ok(admin_copy::admin_exe(&program_files))
+        windows_gate::admin_copy()
     }
 
     fn pool(&mut self) -> Result<Option<Pool>, Failed> {
-        let record = record_write::read(RECORD_KEY).map_err(|error| error.to_string())?;
-        Ok(record.map(|record| Pool {
-            owner: record.owner,
-            users: record.pool,
-        }))
+        windows_gate::pool()
     }
 
     fn check_pool(&mut self, pool: &Pool) -> Result<(), Failed> {
-        // The check's own refusal names the SID; the Application log is readable by every
-        // local user, so the line says only that one failed.
-        check_pool(&pool.users, &pool.owner).map_err(|error| match error {
-            MachineError::Other(_) => "a SID PoolSids lists failed the pool-user check".to_owned(),
-            error @ (MachineError::Os { .. }
-            | MachineError::LockHeld
-            | MachineError::Unsupported(_)
-            | MachineError::ProfileChanged(_)) => error.to_string(),
-        })
+        windows_gate::check_pool(pool)
+    }
+}
+
+impl Bits for WindowsStopper {
+    fn bits_jobs(&mut self) -> Result<Vec<Option<Sid>>, Failed> {
+        self.bits.bits_jobs()
     }
 
+    fn cancel_job(&mut self, at: usize) -> Result<(), Failed> {
+        self.bits.cancel_job(at)
+    }
+}
+
+impl Stopper for WindowsStopper {
     fn snapshot(&mut self) -> Result<Vec<Process>, Failed> {
         self.handles.clear();
         let (seen, handles) = processes()?;
@@ -186,55 +173,46 @@ impl Stopper for WindowsStopper {
         unsafe { Sleep(PAUSE_MS) };
     }
 
-    fn bits_jobs(&mut self) -> Result<Vec<Option<Sid>>, Failed> {
-        self.jobs.clear();
-        self.com.get_or_insert_with(Com::new);
-        let (jobs, owners) = windows_bits::jobs()?.into_iter().unzip();
-        self.jobs = jobs;
-        Ok(owners)
-    }
-
-    fn cancel_job(&mut self, at: usize) -> Result<(), Failed> {
-        let job = self.jobs.get(at).ok_or_else(|| "no such job".to_owned())?;
-        windows_bits::cancel(job)
-    }
-
-    fn lock(&mut self) -> Result<bool, Failed> {
-        let mutex = SetupMutex::open(SETUP_MUTEX).map_err(|error| error.to_string())?;
-        match mutex.acquire(LOCK_WAIT_MS) {
-            Ok((held, _acquired)) => {
-                self.held = Some(held);
-                Ok(true)
-            }
-            Err(MachineError::LockHeld) => Ok(false),
-            Err(error) => Err(error.to_string()),
-        }
-    }
-
-    fn unlock(&mut self) {
-        self.held = None;
-    }
-
     fn mark_for_reset(&mut self, users: &[Sid]) -> Result<(), Failed> {
         record_write::add_reset_sids(RECORD_KEY, users).map_err(|error| error.to_string())
     }
 
-    fn now(&mut self) -> u64 {
-        // SAFETY: GetSystemTimeAsFileTime only reads the clock.
-        let now = unsafe { GetSystemTimeAsFileTime() };
-        u64::from(now.dwHighDateTime) << 32 | u64::from(now.dwLowDateTime)
+    fn read_owed(&mut self) -> Result<Vec<Sid>, Failed> {
+        record_write::read_reset_owed(RECORD_KEY).map_err(|error| error.to_string())
     }
 
-    fn read_stop_value(&mut self, name: &'static str) -> Result<Option<u64>, Failed> {
-        record_write::read_stop_value(RECORD_KEY, name).map_err(|error| error.to_string())
+    fn write_owed(&mut self, users: &[Sid]) -> Result<(), Failed> {
+        record_write::write_reset_owed(RECORD_KEY, users).map_err(|error| error.to_string())
     }
 
-    fn write_stop_value(&mut self, name: &'static str, value: u64) -> Result<(), Failed> {
-        record_write::write_stop_value(RECORD_KEY, name, value).map_err(|error| error.to_string())
+    fn request_sweep(&mut self) -> Result<(), Failed> {
+        crate::windows::refresh::request_pool_sweep().map_err(|error| error.to_string())
     }
 
     fn log(&mut self, error: bool, line: &str) {
         event_log(error, line);
+    }
+}
+
+impl Record for WindowsStopper {
+    fn lock(&mut self) -> Result<bool, Failed> {
+        self.lock.lock()
+    }
+
+    fn unlock(&mut self) {
+        self.lock.unlock();
+    }
+
+    fn read_value(&mut self, name: &'static str) -> Result<Option<u64>, Failed> {
+        windows_record::read_value(name)
+    }
+
+    fn write_value(&mut self, name: &'static str, value: u64) -> Result<(), Failed> {
+        windows_record::write_value(name, value)
+    }
+
+    fn now(&mut self) -> u64 {
+        windows_record::now()
     }
 }
 

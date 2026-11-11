@@ -4,6 +4,7 @@
 use serde_json::json;
 
 use super::{Fixture, deny, guard_json, guard_with};
+use crate::clock::{Clock, SystemClock};
 use crate::write;
 
 /// Refused, with the matter as `cwd` and as Claude Code's `--matter` too.
@@ -207,37 +208,65 @@ fn redirections_continuations_and_ansi_c_quotes_name_a_held_file() {
     }
 }
 
+/// The six guard calls on huge paths, with `n` repeats of each path's long part, timed on the
+/// host clock. The guard must answer each call as the other tests in this file do.
+fn six_huge_calls(test: &str, n: usize) -> std::time::Duration {
+    let fx = Fixture::new(test);
+    let start = SystemClock.now().mono;
+    let deep = format!("{}Contract.docx", "Drafts/".repeat(n));
+    let back = format!("{}Contract.docx", "sub/../".repeat(n));
+    // Still long once `..` is resolved by its text: the review's slow case.
+    let up = format!("{}../Contract.docx", "Drafts/".repeat(n));
+    for path in [&up, &deep] {
+        assert_eq!(
+            guard_json(&fx.hook("Write", &json!({"file_path": path}))),
+            ""
+        );
+        // The name backstop sees `Contract.docx` in the text.
+        assert_refused(&fx, "Bash", &bash(&format!("echo hi > {path}")));
+    }
+    assert_refused(&fx, "Write", &json!({"file_path": back}));
+    assert_refused(&fx, "Bash", &bash(&format!("echo hi > {back}")));
+    SystemClock.now().mono.saturating_sub(start)
+}
+
 /// Review round 1: a huge word, or a Write with a huge path, is read in time proportional to its
-/// length. The six calls take 3.3–3.7 s in a debug build here; the quadratic resolution this
-/// guards against took 17.5–28 s. The 12 s bound leaves over 3× for a slow, shared runner and
-/// still fails the quadratic case.
+/// length. The quadratic resolution this guards against is the one thing a wall-clock bound cannot
+/// tell from a loaded machine, so the test checks the scaling instead of the time: the six calls
+/// run at `N` = `25_000` and at `2N` = `50_000` repeats, three rounds each, interleaved, and the
+/// ratio of the two minimum times must stay at or under 3.4. Linear work gives about 2 (up to 2.8
+/// seen under heavy load) and quadratic work about 4, so 3.4 sits between them. Load slows both
+/// sizes alike, so it cancels out of the ratio. Taking the minimum of three rounds drops the rounds
+/// a scheduling spike hit: on a machine at load 19 on 8 cores, single rounds at `75_000` and
+/// `150_000` once gave ratios of 3.1 and 3.2. `N` is chosen so that the smaller size takes about
+/// 1 s on a debug build on this loaded machine, far above the 50 ms where a ratio is only noise.
+/// The whole test does about 1.5 times the work of the old single `150_000` run. The 120 s bound
+/// on the whole run is only a backstop, so a hang still fails.
 #[test]
 fn a_huge_word_or_path_is_read_quickly() {
+    const ROUNDS: usize = 3;
     let (done, finished) = std::sync::mpsc::channel();
     let worker = std::thread::spawn(move || {
-        let fx = Fixture::new("gap-huge");
-        let deep = format!("{}Contract.docx", "Drafts/".repeat(150_000));
-        let back = format!("{}Contract.docx", "sub/../".repeat(150_000));
-        // Still long once `..` is resolved by its text: the review's slow case.
-        let up = format!("{}../Contract.docx", "Drafts/".repeat(150_000));
-        for path in [&up, &deep] {
-            assert_eq!(
-                guard_json(&fx.hook("Write", &json!({"file_path": path}))),
-                ""
-            );
-            // The name backstop sees `Contract.docx` in the text.
-            assert_refused(&fx, "Bash", &bash(&format!("echo hi > {path}")));
+        let mut small = std::time::Duration::MAX;
+        let mut large = std::time::Duration::MAX;
+        for round in 0..ROUNDS {
+            small = small.min(six_huge_calls(&format!("gap-huge-s{round}"), 25_000));
+            large = large.min(six_huge_calls(&format!("gap-huge-l{round}"), 50_000));
         }
-        assert_refused(&fx, "Write", &json!({"file_path": back}));
-        assert_refused(&fx, "Bash", &bash(&format!("echo hi > {back}")));
-        done.send(()).unwrap();
+        done.send((small, large)).unwrap();
     });
-    let outcome = finished.recv_timeout(std::time::Duration::from_secs(12));
+    let outcome = finished.recv_timeout(std::time::Duration::from_secs(120));
     if outcome.is_ok() || outcome == Err(std::sync::mpsc::RecvTimeoutError::Disconnected) {
         // Done, or a failed assertion: joining passes the panic on.
         worker.join().unwrap();
     }
-    assert_eq!(outcome, Ok(()), "the guard took over 12 s");
+    let (small, large) = outcome.expect("the guard took over 120 s on the six calls");
+    let ratio = large.as_secs_f64() / small.as_secs_f64();
+    assert!(
+        ratio <= 3.4,
+        "the time grew {ratio:.2}x for twice the input ({small:?}, then {large:?}): \
+         linear is about 2x, quadratic about 4x"
+    );
 }
 
 /// Review round 1: a symlink in the matter pointing deeper into it. The OS reads `l/..` as the

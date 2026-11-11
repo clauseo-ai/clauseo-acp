@@ -84,7 +84,7 @@ impl Inner for Calls {
 
     fn clean(&mut self) {
         let mut lines = Vec::new();
-        let mut calls = OsLeftovers::new(&self.token, self.me.clone());
+        let mut calls = OsLeftovers::new(&self.token);
         remove_all(&mut calls, &Kind::LOCAL, "before launch", &mut |line| {
             lines.push(line.to_owned());
         });

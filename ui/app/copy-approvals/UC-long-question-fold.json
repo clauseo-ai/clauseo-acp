@@ -1,0 +1,24 @@
+{
+  "UC-142": {
+    "en": "Show all",
+    "hi": "सभी दिखाएँ",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-11",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-11",
+    "by": "app track (orchestrator to approve)",
+    "note": "under a question past eight lines in the thread, folded; opens it whole (long question). Same key and Hindi as the tool result's Show all (U17-05): one key, one translation"
+  },
+  "UC-143": {
+    "en": "Show less",
+    "hi": "कम दिखाएँ",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-11",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-11",
+    "by": "app track (orchestrator to approve)",
+    "note": "under the same question once open; folds it to eight lines again and keeps it in view (long question)"
+  }
+}

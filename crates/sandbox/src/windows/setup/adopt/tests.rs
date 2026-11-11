@@ -5,7 +5,12 @@ use std::path::{Path, PathBuf};
 
 use super::*;
 use crate::windows::admin_copy::fake::{descriptor, locked_dacl};
+use crate::windows::setup::explain::Code;
 use crate::windows::setup::record_values::{AdminValues, CopyOwner};
+
+mod cpu_type;
+mod deny;
+mod reports;
 
 const LAWYER: &str = "S-1-5-21-1-2-3-1001";
 const OTHER: &str = "S-1-5-21-1-2-3-1002";
@@ -25,6 +30,8 @@ struct Fake {
     owner: Option<Sid>,
     copy_owner: Option<CopyOwner>,
     version: Option<String>,
+    /// The record's `GroupSid`.
+    group: Option<Sid>,
     found: Vec<(PathBuf, Found)>,
     security: Vec<u8>,
     changes: Vec<String>,
@@ -37,6 +44,10 @@ struct Fake {
     /// This task's registration fails.
     failing_task: Option<SystemTask>,
     set_up_exit: SetupExit,
+    /// This step's call fails, with Win32 error 5.
+    fail: Option<AdoptStep>,
+    /// Every failure reported, in order.
+    reports: Vec<AdoptFailure>,
 }
 
 impl Fake {
@@ -49,6 +60,7 @@ impl Fake {
             owner: None,
             copy_owner: None,
             version: None,
+            group: None,
             found: vec![
                 folder(r"C:\Program Files"),
                 folder(r"C:\Program Files\Clauseo"),
@@ -66,6 +78,16 @@ impl Fake {
             held: false,
             failing_task: None,
             set_up_exit: SetupExit::Done,
+            fail: None,
+            reports: Vec::new(),
+        }
+    }
+
+    /// `Err` with Win32 error 5 when `step` is the one set to fail.
+    fn failing(&self, step: AdoptStep) -> Result<(), Cause> {
+        match self.fail {
+            Some(failing) if failing == step => Err(Cause::with("denied", Code::Win32(5))),
+            _ => Ok(()),
         }
     }
 
@@ -80,35 +102,41 @@ fn lawyer() -> Sid {
 }
 
 impl Adopter for Fake {
-    fn program_files(&mut self) -> Result<PathBuf, String> {
+    fn program_files(&mut self) -> Result<PathBuf, Cause> {
+        self.failing(AdoptStep::ProgramFiles)?;
         Ok(PathBuf::from(r"C:\Program Files"))
     }
 
-    fn running_image(&mut self) -> Result<PathBuf, String> {
+    fn running_image(&mut self) -> Result<PathBuf, Cause> {
+        self.failing(AdoptStep::RunningImage)?;
         Ok(self.image.clone())
     }
 
-    fn token(&mut self) -> Result<(bool, bool), String> {
+    fn token(&mut self) -> Result<(bool, bool), Cause> {
+        self.failing(AdoptStep::Token)?;
         Ok(self.token)
     }
 
-    fn installing_user(&mut self, claimed: &Sid) -> Result<Sid, String> {
+    fn installing_user(&mut self, claimed: &Sid) -> Result<Sid, Cause> {
         match &self.outer_user {
             Some(user) if user == claimed => Ok(user.clone()),
-            Some(_) => Err("the outer installer's user isn't the one it named".to_owned()),
-            None => Err("the outer installer can't be resolved".to_owned()),
+            Some(_) => Err("the outer installer's user isn't the one it named".into()),
+            None => Err("the outer installer can't be resolved".into()),
         }
     }
 
-    fn records(&mut self) -> Result<Records, String> {
+    fn records(&mut self) -> Result<Records, Cause> {
+        self.failing(AdoptStep::Record)?;
         Ok(Records {
             pool_owner: self.owner.clone(),
             copy_owner: self.copy_owner.clone(),
             version: self.version.clone(),
+            group: self.group.clone(),
         })
     }
 
-    fn profile_of(&mut self, sid: &Sid) -> Result<Option<PathBuf>, String> {
+    fn profile_of(&mut self, sid: &Sid) -> Result<Option<PathBuf>, Cause> {
+        self.failing(AdoptStep::Profile)?;
         let profile = match sid.as_str() {
             LAWYER => r"C:\Users\lawyer",
             OTHER => r"C:\Users\other",
@@ -124,12 +152,13 @@ impl Adopter for Fake {
             .map_or(Found::Missing, |(_, found)| *found)
     }
 
-    fn security(&mut self, _path: &Path) -> Result<Vec<u8>, String> {
+    fn security(&mut self, _path: &Path) -> Result<Vec<u8>, Cause> {
         Ok(self.security.clone())
     }
 
-    fn lock(&mut self) -> Result<bool, String> {
+    fn lock(&mut self) -> Result<bool, Cause> {
         assert!(!self.held, "taken once");
+        self.failing(AdoptStep::Lock)?;
         self.held = !self.lock_busy;
         Ok(self.held)
     }
@@ -138,24 +167,28 @@ impl Adopter for Fake {
         self.held = false;
     }
 
-    fn lock_down(&mut self, dir: &Path, exe: &Path) -> Result<(), String> {
+    fn lock_down(&mut self, dir: &Path, exe: &Path, group: Option<&Sid>) -> Result<(), Cause> {
         assert!(
             self.held,
             "the admin folder changes only under the set-up lock"
         );
         assert!(same_path(exe, Path::new(ADMIN_EXE)), "{}", exe.display());
-        self.changes.push(format!("lock {}", dir.display()));
+        self.failing(AdoptStep::LockDown)?;
+        let deny = group.map_or_else(String::new, |group| format!(" deny {group}"));
+        self.changes.push(format!("lock {}{deny}", dir.display()));
         Ok(())
     }
 
-    fn sha256(&mut self, exe: &Path) -> Result<String, String> {
+    fn sha256(&mut self, exe: &Path) -> Result<String, Cause> {
         assert!(self.held, "hashed under the set-up lock");
         assert!(same_path(exe, Path::new(ADMIN_EXE)), "{}", exe.display());
+        self.failing(AdoptStep::Hash)?;
         Ok(HASH.to_owned())
     }
 
-    fn write_values(&mut self, values: &AdminValues) -> Result<(), String> {
+    fn write_values(&mut self, values: &AdminValues) -> Result<(), Cause> {
         assert!(self.held, "written under the lock the hash was read under");
+        self.failing(AdoptStep::Values)?;
         self.changes.push(format!(
             "record {} {} {} {}",
             values.sha256,
@@ -167,10 +200,13 @@ impl Adopter for Fake {
         Ok(())
     }
 
-    fn register_task(&mut self, task: SystemTask, owner: &Sid) -> Result<(), String> {
+    fn register_task(&mut self, task: SystemTask, owner: &Sid) -> Result<(), Cause> {
         assert!(self.held, "registered under the set-up lock");
         if self.failing_task == Some(task) {
-            return Err("the Task Scheduler refused".to_owned());
+            return Err(Cause::with(
+                "the Task Scheduler refused",
+                Code::Hresult(0x8004_1318),
+            ));
         }
         self.changes.push(format!("task {} {owner}", task.name()));
         Ok(())
@@ -180,6 +216,10 @@ impl Adopter for Fake {
         assert!(!self.held, "given back before the set-up takes it");
         self.changes.push(format!("set-up {}", data_dir.display()));
         self.set_up_exit
+    }
+
+    fn report(&mut self, failure: &AdoptFailure) {
+        self.reports.push(failure.clone());
     }
 }
 
@@ -200,27 +240,33 @@ fn refused(fake: &mut Fake, install: &str, target: &Target, exit: SetupExit, cas
 }
 
 #[test]
-fn a_per_user_adopt_locks_registers_both_tasks_records_then_sets_up_in_that_order() {
+fn a_per_user_adopt_locks_registers_every_task_records_then_sets_up_in_that_order() {
     let mut fake = Fake::new();
     assert_eq!(
         adopt(&mut fake, Path::new(INSTALL), &user()),
         SetupExit::Done
     );
-    assert_eq!(fake.changes.len(), 5, "{:?}", fake.changes);
+    assert_eq!(fake.changes.len(), 6, "{:?}", fake.changes);
     assert!(fake.changes[0].starts_with("lock "), "{:?}", fake.changes);
     let version = admin_copy::APP_VERSION;
     assert_eq!(fake.changes[1], format!("task SandboxRefresh {LAWYER}"));
     assert_eq!(fake.changes[2], format!("task SandboxStop {LAWYER}"));
+    assert_eq!(fake.changes[3], format!("task SandboxSweep {LAWYER}"));
     assert_eq!(
-        fake.changes[3],
+        fake.changes[4],
         format!("record {HASH} {INSTALL} {version} {LAWYER}")
     );
-    assert_eq!(fake.changes[4], format!("set-up {DATA}"));
+    assert_eq!(fake.changes[5], format!("set-up {DATA}"));
 }
 
 #[test]
 fn a_task_that_cant_be_registered_leaves_no_record_so_the_check_fails() {
-    for (failing, before) in [(SystemTask::Refresh, 1), (SystemTask::Stop, 2)] {
+    let tasks = [
+        (SystemTask::Refresh, 1),
+        (SystemTask::Stop, 2),
+        (SystemTask::Sweep, 3),
+    ];
+    for (failing, before) in tasks {
         let mut fake = Fake::new();
         fake.failing_task = Some(failing);
         assert_eq!(
@@ -228,7 +274,7 @@ fn a_task_that_cant_be_registered_leaves_no_record_so_the_check_fails() {
             SetupExit::Failed,
             "{failing:?}"
         );
-        // The lock, and the refresh task when the stop task is the one refused; no record.
+        // The lock, and each task registered before the one refused; no record.
         assert_eq!(fake.changes.len(), before, "{:?}", fake.changes);
         assert!(fake.changes[0].starts_with("lock "), "{:?}", fake.changes);
         assert!(fake.recorded.is_none(), "{failing:?}");

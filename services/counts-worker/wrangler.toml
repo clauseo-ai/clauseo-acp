@@ -1,0 +1,37 @@
+# The counts Worker on t.clauseo.chat (docs/counts-worker.md). scripts/check-deploy.mjs refuses
+# any departure from what is here: a key not listed in it, logs or traces on, a workers.dev or
+# preview URL, a Tail Worker, Logpush, a var, or another route or binding. The deploy job builds
+# the Worker with no token present, then writes a copy (wrangler.deploy.toml) with the real
+# database_id and without [build], so wrangler deploys the built output and never builds with the
+# token; check-deploy.mjs --deployed checks that copy.
+name = "clauseo-counts"
+main = "build/worker/shim.mjs"
+compatibility_date = "2026-11-01"
+workers_dev = false
+preview_urls = false
+# A custom domain: Cloudflare makes its DNS record and certificate when the Worker deploys.
+routes = [{ pattern = "t.clauseo.chat", custom_domain = true }]
+
+[build]
+command = "worker-build --release"
+
+# Cloudflare turns Workers Logs on for a new Worker unless this says otherwise.
+[observability]
+enabled = false
+
+[observability.logs]
+enabled = false
+invocation_logs = false
+
+[observability.traces]
+enabled = false
+
+[[d1_databases]]
+binding = "DB"
+database_name = "clauseo-counts"
+database_id = "00000000-0000-0000-0000-000000000000"
+migrations_dir = "migrations"
+
+# Every day at 03:00 UTC: the retention deletes (src/retention.rs).
+[triggers]
+crons = ["0 3 * * *"]

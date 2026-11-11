@@ -4,7 +4,11 @@
 // their own (chunk.ts, list.tsx), started as Work mounts; the session opens the thread only once it is in, so the
 // rows never wait for it. The composer and the transcript's box are here, for the first paint.
 import { lazy, Suspense, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import type { ComposerHandle, PlanChoice } from "@clauseo/components/clauseo/composer.tsx";
+import type {
+  ComposerHandle,
+  ConfigMenu,
+  PlanChoice,
+} from "@clauseo/components/clauseo/composer.tsx";
 import { late } from "@clauseo/components/lib/late.ts";
 import { errorWords } from "@clauseo/components/lib/words-errors.ts";
 import { useWords } from "@clauseo/components/lib/words.ts";
@@ -38,10 +42,11 @@ import { paperMentions } from "./paper-mentions.ts";
 import { WorkComposer } from "./work-composer.tsx";
 import { ArchivedLine } from "../archived.tsx";
 import { useToolsSegment } from "../tool-line-load.ts";
-import { FolderSupportContext, notedFolder } from "../folder-support.ts";
+import { FolderSupportContext, MatterFolderContext, notedFolder } from "../folder-support.ts";
 import { locatable, useLocateFolder } from "../act-refusals.ts";
 import { LocateButton } from "../locate-button.tsx";
 import { hasSetup } from "../first-run/hold.ts";
+import { useThreadMenus } from "../config-menus.ts";
 
 /** Folder rights' notice, loaded only for a matter whose folder Clauseo can't fence. */
 const FolderNotice = lazy(() =>
@@ -88,6 +93,7 @@ export function Work({
   draftKey,
   conversation,
   choice,
+  menus: draftMenus,
   plan = "",
   focus = null,
   onThread,
@@ -106,6 +112,8 @@ export function Work({
   conversation: ConversationLink;
   /** A new conversation's plan choice, before its first question. */
   choice?: PlanChoice | undefined;
+  /** A new conversation's model and effort menus, before its first question (config-menus.ts). */
+  menus?: readonly ConfigMenu[] | undefined;
   /** The status line's plan words ("Uses your Claude plan"), "" for none. */
   plan?: string;
   /** A request for the field's focus (New conversation, or a conversation pressed): each new number takes it. */
@@ -149,6 +157,9 @@ export function Work({
   // the tool line on the status line, from the open thread's header: none for a draft, or a header without tools
   // (tool-line-load.ts: its chunk loads once a header has tools, and until then the line has no tool segment)
   const tools = useToolsSegment(store, stream, lang);
+  // the model and effort: the draft's until there is a thread, then the thread's own, from its header
+  const threadMenus = useThreadMenus(transport, store, stream, session.thread, lang);
+  const menus = session.thread === null ? draftMenus : threadMenus;
   // what the running step is doing, for the working line in place of "Answering."
   const pickDoing = useMemo(() => doingPick(lang), [lang]);
   const doing = useStreamPart(store, stream, pickDoing);
@@ -251,7 +262,14 @@ export function Work({
             <Suspense fallback={null}>
               <KeyedRequestContext value={keyed}>
                 <FolderSupportContext value={matter?.folder_support}>
-                  <LazyThreadList transport={transport} stream={stream} busy={busy} />
+                  <MatterFolderContext value={matter?.folder_display || null}>
+                    <LazyThreadList
+                      transport={transport}
+                      stream={stream}
+                      busy={busy}
+                      sent={session.sentTurn}
+                    />
+                  </MatterFolderContext>
                 </FolderSupportContext>
               </KeyedRequestContext>
             </Suspense>
@@ -266,6 +284,7 @@ export function Work({
           drafts={drafts}
           draftKey={draftKey}
           choice={choice}
+          menus={menus}
           plan={plan}
           tools={tools}
           commands={commands}

@@ -45,9 +45,19 @@
 //! 5. `DeviceSync`'s deny;
 //! 6. the ledger's entries (`ledger_work.rs`), read from the record's `DataDir`, which the owner
 //!    can influence, so it is checked as `--data-dir` is and used only as `ledger_work.rs` says;
-//! 7. the group, when it is the record's and has no members left;
-//! 8. on a per-machine install, the stop task set-up registered for the owner, then the record
-//!    key.
+//! 7. the group, when it is the record's and has no members left, its "Deny log on through
+//!    Remote Desktop Services" right taken off first (a right is keyed by SID and would be left
+//!    on a SID nothing has);
+//! 8. as the owner only, the unclean-session markers in the checked data folder
+//!    (`<data_dir>\sandbox\run\*.session`), so none outlives its set-up; an administrator's
+//!    removal leaves them (it deletes nothing in the owner's folders, K1), and the next set-up's
+//!    readers drop each as stale, since it names a pool SID the record no longer lists
+//!    (`runner::unclean`);
+//! 9. on a per-machine install, the stop and sweep tasks set-up registered for the owner, then
+//!    the record key, which takes the set-up's values with it (`SETUP_VALUES`: the stop's and
+//!    the sweep's `…Next`, `…Sequence` and `…Completed` among them);
+//! 10. for the uninstaller only, the admin copy's teardown (`admin_remove.rs`, run through
+//!     [`remove_then`]), with the lock still held, so a refresh skips instead of racing it.
 //!
 //! The first failure stops the run there: [`SetupExit::RemovedPartly`], the record kept with
 //! `Removing = 1` and every pool SID (so a later run still trusts the ledger's entries), and the
@@ -70,11 +80,13 @@ use crate::windows::sids::Sid;
 use crate::windows::writer::AclWriter;
 
 mod ledger_work;
+pub mod owners;
 mod seam;
 #[cfg(windows)]
 mod windows_removal;
 
 pub use ledger_work::LedgerWork;
+pub use owners::FolderOwner;
 pub use seam::Removal;
 #[cfg(windows)]
 pub use windows_removal::WindowsRemoval;
@@ -138,8 +150,12 @@ pub enum RemoveStep {
     Record,
     /// Removing the network filters and firewall rules (S15 PR7).
     Network,
-    /// A per-machine install's stop task, deleted before the record.
+    /// A per-machine install's stop and sweep tasks, deleted before the record.
     StopTask,
+    /// Taking the group's "Deny log on through Remote Desktop Services" off, before the group.
+    RemoteLogon,
+    /// Removing the owner's unclean-session markers, as the owner, before the record.
+    Markers,
 }
 
 impl std::fmt::Display for RemoveStep {
@@ -158,7 +174,9 @@ impl std::fmt::Display for RemoveStep {
             RemoveStep::Group => "deleting the sandbox group",
             RemoveStep::Record => "deleting the machine's record",
             RemoveStep::Network => "removing the network filters",
-            RemoveStep::StopTask => "deleting the sandbox's stop task",
+            RemoveStep::StopTask => "deleting the sandbox's stop and sweep tasks",
+            RemoveStep::RemoteLogon => "taking the sandbox group's Remote Desktop deny off",
+            RemoveStep::Markers => "removing the sandbox's unclean-session markers",
         })
     }
 }
@@ -200,13 +218,28 @@ pub fn remove(
     acl: &mut impl AclWriter,
     per_machine: bool,
 ) -> Result<Removed, RemoveFailure> {
+    remove_then(machine, acl, per_machine, &mut |_| {})
+}
+
+/// [`remove`], then `while_locked` with the set-up lock still held, given what was removed: the
+/// uninstaller's admin-copy teardown (`exe::run_remove`), so a refresh, which takes the same
+/// lock without waiting, skips rather than race the staging folder's removal. `while_locked`
+/// runs on every success but a per-user one by someone else decided before the lock
+/// ([`Removed::NotOwner`]): the pool has an owner then, so the copy isn't this removal's.
+pub fn remove_then(
+    machine: &mut impl Removal,
+    acl: &mut impl AclWriter,
+    per_machine: bool,
+    while_locked: &mut dyn FnMut(&Removed),
+) -> Result<Removed, RemoveFailure> {
     // Read once before the lock, so a machine with nothing set up, or a per-user uninstall by
     // someone else, ends at once and never waits for a set-up's lock.
     let before = read(machine)?;
     if before.is_none() {
         // No record, unless a set-up holding the lock is about to write it.
         lock(machine, 0)?;
-        machine.unlock();
+        let _locked = Locked(machine);
+        while_locked(&Removed::NothingSetUp);
         return Ok(Removed::NothingSetUp);
     }
     if let Decision::Stop(removed) = decide(machine, before.as_ref(), per_machine)? {
@@ -217,19 +250,25 @@ pub fn remove(
     let machine = &mut *locked.0;
     let record = read(machine)?;
     let acting = match decide(machine, record.as_ref(), per_machine)? {
-        Decision::Stop(removed) => return Ok(removed),
+        Decision::Stop(removed) => {
+            while_locked(&removed);
+            return Ok(removed);
+        }
         Decision::Act(acting) => acting,
     };
     let Some(record) = record else {
+        while_locked(&Removed::NothingSetUp);
         return Ok(Removed::NothingSetUp);
     };
-    steps(machine, acl, &record, acting)
+    let removed = steps(machine, acl, &record, acting)
         .map(Removed::All)
         .map_err(|(step, cause)| RemoveFailure {
             step,
             cause,
             exit: SetupExit::RemovedPartly,
-        })
+        })?;
+    while_locked(&removed);
+    Ok(removed)
 }
 
 /// The set-up lock, waited for up to `wait_ms`; held still is [`SetupExit::LockHeld`].
@@ -319,7 +358,7 @@ fn decide(
     }
 }
 
-/// Steps 2 to 8.
+/// Steps 2 to 9.
 fn steps(
     machine: &mut impl Removal,
     acl: &mut impl AclWriter,
@@ -373,6 +412,9 @@ fn steps(
     })?;
     report.ledger = ledger_work::run(machine, acl, record, acting)?;
     report.group = remove_group(machine, record)?;
+    if acting == Acting::Owner {
+        clear_markers(machine)?;
+    }
     remove_stop_task(machine)?;
     machine
         .delete_record()
@@ -453,10 +495,16 @@ fn remove_denies(acl: &mut impl AclWriter, group: &Sid, targets: &[PathBuf]) -> 
 }
 
 /// The group, when it is the record's and empty; whether it was deleted. Gone already is
-/// `false`; another group under the name, or one with members, stops the run.
+/// `false`; another group under the name, or one with members, stops the run. Its Remote
+/// Desktop deny comes off just before the delete ([`RemoveStep::RemoteLogon`] when it won't):
+/// a user right is keyed by SID, and would outlive the group. With the group gone already,
+/// the deny still comes off by the record's `GroupSid`, as an earlier run may have left it.
 fn remove_group(machine: &mut impl Removal, record: &MachineRecord) -> Result<bool, Failed> {
     let failed = |e: MachineError| (RemoveStep::Group, cause_of(&e));
     let Some(group) = machine.group().map_err(failed)? else {
+        machine
+            .remove_remote_logon_deny(&record.group)
+            .map_err(|e| (RemoveStep::RemoteLogon, cause_of(&e)))?;
         return Ok(false);
     };
     if group != record.group {
@@ -467,7 +515,12 @@ fn remove_group(machine: &mut impl Removal, record: &MachineRecord) -> Result<bo
         ));
     }
     match machine.group_members(&group).map_err(failed)? {
-        0 => machine.delete_group(&group).map_err(failed).map(|()| true),
+        0 => {
+            machine
+                .remove_remote_logon_deny(&group)
+                .map_err(|e| (RemoveStep::RemoteLogon, cause_of(&e)))?;
+            machine.delete_group(&group).map_err(failed).map(|()| true)
+        }
         members => Err((
             RemoveStep::Group,
             format!("the group ClauseoSandboxUsers still has {members} members"),
@@ -475,10 +528,19 @@ fn remove_group(machine: &mut impl Removal, record: &MachineRecord) -> Result<bo
     }
 }
 
+/// Step 8, as the owner: the unclean-session markers in the data folder `owners_ledger` checked.
+fn clear_markers(machine: &mut impl Removal) -> Result<(), Failed> {
+    match machine.as_owner(Removal::clear_markers) {
+        Ok(Ok(_cleared)) => Ok(()),
+        Ok(Err(error)) | Err(error) => Err((RemoveStep::Markers, cause_of(&error))),
+    }
+}
+
 /// Step 8, before the record goes: on a per-machine install (`AdminCopyOwner` is `machine`),
-/// the task `\Clauseo\SandboxStop` set-up registered for the record's owner is deleted, so
-/// the owner keeps no start right once their pool is gone. A per-user install's task stays
-/// (`--adopt` registered it; `--remove --uninstall` deletes it with the admin copy).
+/// the tasks `\Clauseo\SandboxStop` and `\Clauseo\SandboxSweep` set-up registered for the
+/// record's owner are deleted, so the owner keeps no start right once their pool is gone. A
+/// per-user install's tasks stay (`--adopt` registered them; `--remove --uninstall` deletes
+/// them with the admin copy).
 fn remove_stop_task(machine: &mut impl Removal) -> Result<(), Failed> {
     let failed = |e: MachineError| (RemoveStep::StopTask, cause_of(&e));
     match machine.copy_owner().map_err(failed)? {

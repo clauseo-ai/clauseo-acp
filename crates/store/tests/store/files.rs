@@ -40,6 +40,7 @@ fn decision_record_quotes_the_migration() {
         include_str!("../../src/migrations/0003_thread_seen.sql"),
         include_str!("../../src/migrations/0004_thread_title_source.sql"),
         include_str!("../../src/migrations/0005_matter_skill_packs.sql"),
+        include_str!("../../src/migrations/0006_matter_agent_prefs.sql"),
     ];
     let mut rest = record;
     for migration in migrations {
@@ -205,6 +206,57 @@ fn torn_wal_tail_drops_last_commit() {
     let read = block_on(store.read_after(thread(1), None, 10)).unwrap();
     assert_eq!(seqs(&read), vec![1, 2]);
     block_on(store.close()).unwrap();
+}
+
+/// Under WAL with 16 KiB pages: commits spanning many pages, a copy with the WAL still hot,
+/// `close`'s checkpoint, and reopens of both. Guards the bundled SQLite's `-wal` handling
+/// (RUSTSEC-2026-0459 was a `-wal` page-size bug).
+#[test]
+fn wal_checkpoint_and_reopen_keep_every_commit() {
+    let dir = TestDir::new("wal_checkpoint_and_reopen_keep_every_commit");
+    let store = dir.open();
+    block_on(store.commit(texts(thread(1), 1, 200))).unwrap();
+    block_on(store.commit(texts(thread(1), 201, 300))).unwrap();
+    // More WAL than one page: the frames really span pages.
+    assert!(std::fs::metadata(wal(dir.path())).unwrap().len() > 4 * 16384);
+    let hot = dir.sub("hot");
+    copy_db(dir.path(), &hot);
+    block_on(store.close()).unwrap();
+    assert_eq!(
+        std::fs::metadata(wal(dir.path())).map_or(0, |meta| meta.len()),
+        0
+    );
+
+    let all: Vec<u64> = (1..=300).collect();
+    for path in [dir.path(), hot.as_path()] {
+        let store = open_at(path).unwrap();
+        let read = block_on(store.read_after(thread(1), None, 1000)).unwrap();
+        assert_eq!(seqs(&read), all);
+        block_on(store.commit(texts(thread(1), 301, 310))).unwrap();
+        block_on(store.close()).unwrap();
+
+        let conn = Connection::open(db(path)).unwrap();
+        let page_size: i64 = conn
+            .query_row("PRAGMA page_size", [], |row| row.get(0))
+            .unwrap();
+        let mode: String = conn
+            .query_row("PRAGMA journal_mode", [], |row| row.get(0))
+            .unwrap();
+        let check: String = conn
+            .query_row("PRAGMA integrity_check", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(
+            (page_size, mode.as_str(), check.as_str()),
+            (16384, "wal", "ok")
+        );
+        assert_eq!(user_version(&conn), i64::from(SCHEMA));
+        drop(conn);
+
+        let store = open_at(path).unwrap();
+        let read = block_on(store.read_after(thread(1), None, 1000)).unwrap();
+        assert_eq!(read.len(), 310);
+        block_on(store.close()).unwrap();
+    }
 }
 
 /// `len` bytes from a fixed xorshift sequence: no SQLite header, no structure.

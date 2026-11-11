@@ -65,11 +65,14 @@ fn count_files(dir: &Path) -> usize {
 fn restore_matter_and_single_file_forward_only() {
     let (fx, mut matter) = versioned("restore-forward");
 
-    let preview = matter.preview_restore(cid(1), RestoreFiles::All).unwrap();
+    let preview = matter
+        .preview_restore(cid(1), RestoreFiles::All, None)
+        .unwrap();
     assert_eq!(
         preview,
         RestorePlan {
             writes: vec![modified("a.txt", b"two", b"one"), added("b.txt", b"bee")],
+            removes: Vec::new(),
             added_since: paths(&["d.txt"]),
             kept: Vec::new(),
             locked: Vec::new(),
@@ -133,7 +136,9 @@ fn restore_refuses_locked_file_before_writing() {
     fx.write("~$a.txt", "owner file: open in Word");
     fx.write("d.txt", "an outside edit");
 
-    let preview = matter.preview_restore(cid(1), RestoreFiles::All).unwrap();
+    let preview = matter
+        .preview_restore(cid(1), RestoreFiles::All, None)
+        .unwrap();
     assert_eq!(preview.locked, paths(&["a.txt"]));
 
     let err = matter
@@ -241,7 +246,9 @@ fn restore_keeps_files_added_since_and_renamed() {
 #[test]
 fn restore_of_current_version_reuses() {
     let (fx, mut matter) = versioned("restore-reuse");
-    let preview = matter.preview_restore(cid(3), RestoreFiles::All).unwrap();
+    let preview = matter
+        .preview_restore(cid(3), RestoreFiles::All, None)
+        .unwrap();
     assert_none(&preview.writes);
 
     let restored = matter
@@ -372,7 +379,7 @@ fn restore_leaves_cloud_only_and_over_cap_files() {
     // Chosen by name, they are kept too.
     let chosen = paths(&["big.txt"]);
     let preview = matter
-        .preview_restore(cid(1), RestoreFiles::Only(&chosen))
+        .preview_restore(cid(1), RestoreFiles::Only(&chosen), None)
         .unwrap();
     assert_eq!(preview.kept, chosen);
     assert_none(&preview.writes);
@@ -546,7 +553,9 @@ fn preview_matches_restore_and_writes_nothing() {
     let objects = count_files(&fx.git_dir().join("objects"));
     let index = std::fs::read(fx.git_dir().join("index")).unwrap();
 
-    let preview = matter.preview_restore(cid(1), RestoreFiles::All).unwrap();
+    let preview = matter
+        .preview_restore(cid(1), RestoreFiles::All, None)
+        .unwrap();
     assert_eq!(count_files(&fx.git_dir().join("objects")), objects);
     assert_eq!(std::fs::read(fx.git_dir().join("index")).unwrap(), index);
     assert_eq!(matter.timeline().len(), 2);

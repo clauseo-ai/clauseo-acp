@@ -23,6 +23,13 @@ use crate::write;
 pub(crate) const CLAUDE: &str = "claude-acp";
 pub(crate) const CODEX: &str = "codex-acp";
 
+/// The agent the browser entry's own tests launch (slots, policy, egress): one with no kind
+/// (`AgentKind::of` gives none), so it may have the browser on every OS. [`Hook`] offers its
+/// servers, the `browser` entry among them, to every agent, where the real profile offers the
+/// entry to Codex alone (`servers::browser_mcp`); and Claude has no browser on macOS and Linux,
+/// Codex none on Windows (`servers::no_browser`).
+pub(crate) const BROWSING: &str = "browsing-agent";
+
 /// One launch as [`Wired`] saw it: its session folder (`<data>/run/<session id>`, none for a
 /// launch whose prep made none), its environment, and the files its pack plugin
 /// (`<run>/skill-packs`) held, by path under it with `/`, sorted.
@@ -98,10 +105,13 @@ impl Launcher for Wired {
             let template = PathBuf::from(format!("{scenario}.tmpl"));
             if let Ok(text) = std::fs::read_to_string(&template) {
                 let session = run.file_name().unwrap().to_str().unwrap();
+                // The guard's `--cwd`: `<data>/browser/run/<session>`, outside the run folder.
+                let data = run.parent().and_then(Path::parent).unwrap();
+                let browser = data.join("browser").join("run").join(session);
                 let text = text
                     .replace("@RUN@", &escaped(&path_text(run)))
                     .replace("@WORK@", &escaped(&path_text(&run.join("work"))))
-                    .replace("@BROWSER@", &escaped(&path_text(&run.join("browser"))))
+                    .replace("@BROWSER@", &escaped(&path_text(&browser)))
                     .replace("@SESSION@", &escaped(session))
                     .replace("@PACKS@", &escaped(&path_text(&run.join("skill-packs"))));
                 write::write(Path::new(scenario.as_ref()), text.as_bytes());
@@ -181,7 +191,8 @@ pub(crate) fn notes(dir: &Dir, matter: MatterId) -> PathBuf {
 
 /// A profile hook: `meta` for a Claude agent, `codex` keys for a Codex agent (or, with
 /// `profile`, that profile's keys for the launch's skills token), `servers` and `skills` for
-/// every agent. `tokens` records the token each Codex launch's keys were built from.
+/// every agent, `codex_servers` for a Codex agent only. `tokens` records the token each Codex
+/// launch's keys were built from.
 #[derive(Clone, Default)]
 pub(crate) struct Hook {
     pub(crate) meta: Value,
@@ -190,6 +201,13 @@ pub(crate) struct Hook {
     pub(crate) skills: Vec<SkillWrite>,
     pub(crate) profile: Option<Arc<ClauseoProfile>>,
     pub(crate) tokens: Arc<Mutex<Vec<Option<SkillsWritten>>>>,
+    /// The shell browser's folder (`ProfileHook::browser_tool`).
+    pub(crate) browser_tool: Option<PathBuf>,
+    /// The servers a Codex agent gets after `servers`, as the launch profile gives Codex alone
+    /// the `browser` entry (`clauseo_profile::servers::browser_mcp`).
+    pub(crate) codex_servers: Vec<McpServer>,
+    /// Every agent's session `PATH` folders (`ProfileHook::agent_path`).
+    pub(crate) agent_path: Vec<PathBuf>,
 }
 
 impl ProfileHook for Hook {
@@ -207,12 +225,24 @@ impl ProfileHook for Hook {
         BTreeMap::new()
     }
 
-    fn mcp_servers(&self, _agent: &AgentId) -> Vec<McpServer> {
-        self.servers.clone()
+    fn mcp_servers(&self, agent: &AgentId) -> Vec<McpServer> {
+        let mut servers = self.servers.clone();
+        if agent.as_str() == CODEX {
+            servers.extend(self.codex_servers.iter().cloned());
+        }
+        servers
     }
 
     fn launch_writes(&self, _agent: &AgentId) -> Vec<SkillWrite> {
         self.skills.clone()
+    }
+
+    fn browser_tool(&self) -> Option<PathBuf> {
+        self.browser_tool.clone()
+    }
+
+    fn agent_path(&self, _agent: &AgentId) -> Vec<PathBuf> {
+        self.agent_path.clone()
     }
 
     fn codex_config(
@@ -310,16 +340,51 @@ pub(crate) fn filled_browser() -> Value {
     ]})
 }
 
+/// `servers` as a Codex `session/new` carries them on this OS: without the `browser` entry
+/// where Codex has no browser at all (Windows, `clauseo_profile::servers::no_browser`), else
+/// all of them. Claude's keep it everywhere.
+pub(crate) fn codex_servers(servers: &[Value]) -> Vec<Value> {
+    let none_here = clauseo_profile::servers::no_browser(Some(AgentKind::Codex));
+    servers
+        .iter()
+        .filter(|server| !(none_here && server["name"] == "browser"))
+        .cloned()
+        .collect()
+}
+
+/// `servers` as a Claude `session/new` carries them on this OS: without the `browser` entry
+/// where Claude has no browser at all (macOS and Linux, `clauseo_profile::servers::no_browser`),
+/// else all of them.
+pub(crate) fn claude_servers(servers: &[Value]) -> Vec<Value> {
+    let none_here = clauseo_profile::servers::no_browser(Some(AgentKind::Claude));
+    servers
+        .iter()
+        .filter(|server| !(none_here && server["name"] == "browser"))
+        .cloned()
+        .collect()
+}
+
+/// A Claude session's header tools with web search on: web search, then `browser` (`browser`
+/// its reason) where Claude may have the browser (Windows alone, `servers::no_browser`).
+pub(crate) fn claude_tools(browser: Option<ToolsUnavailableReason>) -> Vec<ToolState> {
+    let browser = cfg!(windows).then(|| tool(ClauseoTool::Browser, browser));
+    [Some(tool(ClauseoTool::WebSearch, None)), browser]
+        .into_iter()
+        .flatten()
+        .collect()
+}
+
 /// A generic agent's scenario: `initialize`, `method` (`session/new` or `session/load` of
 /// `sess-1`) matching `params` with `off` off, one prompt. The answer carries claude-agent-acp
-/// 0.89.1's modes, in `default`, as a Claude agent's launch requires (`claude-handshake`).
+/// 0.89.1's modes, in `auto`, as a Claude agent's launch outside forced ask requires
+/// (`claude-handshake`).
 pub(crate) fn agent_lines(name: &str, method: &str, params: &Value, off: &[&str]) -> String {
     let label = if method == "session/new" {
         "new"
     } else {
         "load"
     };
-    let modes = json!({"currentModeId": "default", "availableModes": [
+    let modes = json!({"currentModeId": "auto", "availableModes": [
         {"id": "default", "name": "Manual"}, {"id": "acceptEdits", "name": "Accept edits"},
         {"id": "plan", "name": "Plan"}, {"id": "auto", "name": "Auto"}]});
     let respond = if method == "session/new" {

@@ -338,6 +338,11 @@ the core (protocol, host, desktop bridge and proxy, below); its UI comes after.
 
 proposed
 
+Off in the plain build (Rohan, 2026-11-10): only a session's egress proxy reads the list, and a
+proxy opens only for the guarded browser entry (`BROWSER_MCP`, parked) or the Safe workspace
+(parked, 0051). With neither, the host starts no `clauseo-blocklist` thread: no load, no fetch at
+start and none every 6 hours (`blocklist::needed`). The code stays; either one turns it back on.
+
 ## Date
 
 2026-11-07

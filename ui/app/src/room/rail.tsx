@@ -1,15 +1,28 @@
 // The room's rail: the parts' Rail with a MatterRow for every matter the host lists (matters.ts), the scratch matter
-// only at its foot. With the NextHost's matters part, the date groups (when.ts), Pinned, Recent (the five opened last),
-// finding by name and client, and each row's menu (Pin, Locate folder, Show in Finder, Remove from the list); without it,
-// one group, "No date yet", newest first, finding by name only, and a menu of Show in Finder alone. What each row says it's doing comes from matters.ts's status,
+// only at its foot. The matters stand in Needs you (triage.ts: a permission or a question waiting, then an answer
+// ready and unseen, then a failure unseen), then Working (answering now), then Pinned, then the rest, Working and the
+// rest each by their latest activity; the rest is headed "Other matters" under any group above it, "Matters" alone. With the
+// NextHost's matters part, Pinned, Recent (the five opened last), finding by name and client, and each row's menu (Pin,
+// Locate folder, Show in Finder, Remove from the list, which asks first), and Locate folder beside a refused Show in
+// Finder's words on the row; without it, finding by name only, and a menu of Show in Finder
+// alone. What each row says it's doing comes from matters.ts's status,
 // its moments put in the lawyer's clock as the rail renders, so nothing ticks at rest; the open matter's row says
 // nothing, since the lawyer is looking at it. Until the list arrives, and if it can't be read, the rail draws no list
-// and no scratch row. Under the open matter's row stand its conversations (conversations.ts), with New conversation:
-// a draft, or a thread with no title yet, says "New conversation"; a row not open says what it's doing. Snooze and Done
+// and no scratch row. Under the open matter's row stand its conversations (conversations.ts), with New conversation,
+// in rail-order.ts's order (what needs the lawyer, then what's answering, then the rest): a draft, or a thread with no
+// title yet, says "New conversation"; a row not open says what it's doing. Snooze and Done
 // (U16b) are rail-snooze.tsx's: a row's buttons and menus, its line, the done fold and the Snoozed shelf; the morning
 // sweep is sweep.ts's. Snoozes are compared with the newest of the views' times and the moment the pointer came or went,
 // or the window came back, so a snooze whose time has come ends at the next render with no timer.
-import { Suspense, useEffect, useRef, useState, useSyncExternalStore, type Ref } from "react";
+import {
+  Suspense,
+  useEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type ReactNode,
+  type Ref,
+} from "react";
 import {
   Rail,
   type FindSearch,
@@ -31,15 +44,17 @@ import type { AllThreads } from "./all-threads.ts";
 import type { MatterInfo, MatterStatus } from "./host-next.ts";
 import { openConversation } from "./open-conversation.ts";
 import { locatable } from "./act-refusals.ts";
+import { LocateButton } from "./locate-button.tsx";
 import { railView, recentDays } from "./rail-lists.ts";
 import { RailTriage } from "./rail-triage.ts";
-import type { TriageStatus } from "./triage.ts";
+import { activityOrder, type TriageStatus } from "./triage.ts";
+import { ConversationOrder } from "./rail-order.ts";
 import { planName } from "./agent.ts";
 import { rowWords } from "./conversation-status.ts";
 import type { ConversationRow, Conversations, ConversationsView } from "./conversations.ts";
 import type { Matters, MattersView } from "./matters.ts";
 import { LazyFindResults, preloadFind } from "./find-load.ts";
-import { clockOf, dayOf, groupMatters } from "./when.ts";
+import { clockOf } from "./when.ts";
 import { matterSnooze, snoozedShelf, splitConversations, useSnooze } from "./rail-snooze.tsx";
 import { preloadSnooze } from "./snooze-load.ts";
 import { useRailClock } from "./sweep.ts";
@@ -107,10 +122,6 @@ function conversationRows(
 /** How many matters Recent shows: the five opened last. */
 const RECENT = 5;
 
-/** The newest first, by id: v7 ids sort by creation. */
-const newestFirst = (a: MatterInfo, b: MatterInfo) =>
-  a.matter < b.matter ? 1 : a.matter > b.matter ? -1 : 0;
-
 export function RoomRail({
   transport,
   matters,
@@ -127,6 +138,7 @@ export function RoomRail({
   newMatterRef,
   onEscape,
   onSettings,
+  notice,
 }: {
   /** For Find's search inside the matters, and opening a paper it finds. */
   transport: HostTransport;
@@ -156,6 +168,8 @@ export function RoomRail({
   /** Settings at the rail's foot, pressed; left out where there is no settings window to open (outside the desktop
    * app), and the rail draws no Settings. */
   onSettings?: (() => void) | undefined;
+  /** Optional: what the room says about Clauseo itself (R23's update notice), at the rail's foot above Scratch matter. */
+  notice?: ReactNode;
 }) {
   const w = useWords();
   const every = useSyncExternalStore(threads.subscribe, threads.view, threads.view);
@@ -184,16 +198,18 @@ export function RoomRail({
   const sc = { snooze, now, zone, lang: w.lang };
   const detailed = view.detailed;
   const [triager] = useState(() => new RailTriage());
+  const [ordering] = useState(() => new ConversationOrder());
   // whether the pointer is over the rail: rows hold their groups while it is
   const [over, setOver] = useState(false);
   const [list, setList] = useState(railView.get);
+  // rows hold their groups under the pointer, with the focus in the rail, and while a line stands in a row's place
+  const holding = over || focused || snooze.lines.size > 0;
   const placed = triager.of({
     matters: view.matters,
     status: view.status,
     lists: every.lists,
     open: view.open?.matter ?? null,
-    // rows hold their groups under the pointer, with the focus in the rail, and while a line stands in a row's place
-    over: over || focused || snooze.lines.size > 0,
+    over: holding,
     now,
   });
   const room = { matters, conversations };
@@ -204,19 +220,37 @@ export function RoomRail({
     // a row that needs the lawyer names the conversation behind it, and a press opens that conversation
     const behind =
       current || triaged === undefined || triaged.need === null ? null : triaged.thread;
-    const split =
+    const ordered =
       current && talks.matter === m.matter && talks.phase !== "loading"
-        ? splitConversations(
-            sc,
-            talks.rows,
-            conversationRows(talks, conversations, onConversation, now, zone, w.lang, m.status),
-            m.next_date,
-          )
+        ? { ...talks, rows: ordering.of(talks.rows, now, holding) }
         : null;
+    const split =
+      ordered === null
+        ? null
+        : splitConversations(
+            sc,
+            ordered.rows,
+            conversationRows(ordered, conversations, onConversation, now, zone, w.lang, m.status),
+          );
     // a refused Show in Finder says why on the row's note line until the next try (act-refusals.ts)
     const said = refused.get(m.matter);
     const revealed = said?.act === "reveal" ? said.code : null;
     const findFolder = m.folder_state === "missing" || locatable(revealed);
+    const snoozing = matterSnooze(sc, m, every.lists.get(m.matter), placed.group.get(m.matter));
+    // the refusal's words have Locate folder beside them, as the menu has it, where the matters part can relocate
+    const locate =
+      detailed && locatable(revealed) ? (
+        <LocateButton onLocate={() => void matters.locate(m.matter)} />
+      ) : null;
+    const below =
+      locate === null ? (
+        snoozing.below
+      ) : (
+        <>
+          {locate}
+          {snoozing.below}
+        </>
+      );
     return {
       id: m.matter,
       name: m.name,
@@ -234,7 +268,8 @@ export function RoomRail({
       // UC: Not protected, as the row has it now (matters.ts takes protection_changed onto it)
       unprotected: notProtected(m.protection),
       // the open matter's conversations, once its list is in
-      ...matterSnooze(sc, m, every.lists.get(m.matter), placed.group.get(m.matter)),
+      ...snoozing,
+      ...(below === undefined ? {} : { below }),
       ...(split !== null
         ? {
             conversations: split.rows,
@@ -275,19 +310,25 @@ export function RoomRail({
   const folders = view.matters.filter((m) => m.kind !== "scratch");
   const scratch = view.matters.find((m) => m.kind === "scratch");
   const pinned = folders.filter((m) => placed.group.get(m.matter) === "pinned");
-  const dated = folders.filter((m) => placed.group.get(m.matter) === "date");
+  const of = (g: "working" | "rest") =>
+    folders.filter((m) => placed.group.get(m.matter) === g).sort(activityOrder);
   const byId = new Map(folders.map((m) => [m.matter, m]));
   const needs = placed.needs.flatMap((id) => byId.get(id) ?? []);
+  const working = of("working");
+  const rest = of("rest");
+  const above = pinned.length + needs.length + working.length > 0;
   const groups: RailGroup[] = [
     ...(needs.length === 0
       ? []
       : [{ when: frame(w.lang, "Needs you"), matters: needs.map(row), testId: "rail-needs-you" }]),
-    ...(detailed
-      ? groupMatters(dated, dayOf(now, zone)).map((g) => ({
-          when: frame(w.lang, g.when),
-          matters: g.matters.map(row),
-        }))
-      : [{ when: frame(w.lang, "No date yet"), matters: [...dated].sort(newestFirst).map(row) }]),
+    ...(working.length === 0
+      ? []
+      : [{ when: frame(w.lang, "Working"), matters: working.map(row), testId: "rail-working" }]),
+    {
+      when: above ? frame(w.lang, "Other matters") : w.t("Matters"),
+      matters: rest.map(row),
+      testId: "rail-rest",
+    },
   ];
   const recent = detailed
     ? folders
@@ -299,7 +340,6 @@ export function RoomRail({
   const all = folders.map((m) => ({
     ...row(m),
     client: detailed ? (m.client ?? "") : "",
-    caseNo: "",
   }));
   // Find searches inside the matters (find-results.tsx, loaded as the field is hovered or focused)
   const results = (search: FindSearch) => (
@@ -330,6 +370,7 @@ export function RoomRail({
       onNewMatter={onNewMatter}
       {...(onNewMatterPreload === undefined ? {} : { onNewMatterPreload })}
       newMatterRef={newMatterRef}
+      brand
       // nothing to find on an empty rail
       {...(folders.length === 0
         ? {}
@@ -418,6 +459,7 @@ export function RoomRail({
       }}
       onEscape={onEscape}
       {...(onSettings === undefined ? {} : { onSettings })}
+      {...(notice === undefined ? {} : { notice })}
       testIds={{ newMatter: "new-matter", find: "find", settings: "open-settings" }}
     />
   );

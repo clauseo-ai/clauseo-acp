@@ -7,7 +7,7 @@ import { describe, expect, test } from "vitest";
 import { agentText, header, toolCall } from "../../testing/stream-script.ts";
 import type { EntryId, ToolCallEntry, ToolCallStatus, ToolKind } from "../../transport/protocol.ts";
 import type { StreamView } from "../../store/view.ts";
-import { doingOf, doingPick, placeOf, splitPath, titleOf } from "./step-names.ts";
+import { doingOf, doingPick, internalOf, placeOf, splitPath, titleOf } from "./step-names.ts";
 import {
   doneOf,
   doneSoFar,
@@ -160,13 +160,19 @@ describe("the folded line", () => {
         call("read", "failed", lease),
         ...Array.from({ length: 4 }, () => call("edit", "cancelled")),
       ]).trouble,
-    ).toBe(
-      "Tried to read Lease deed.pdf. Tried to change a paper. Tried to change a paper. And 2 more.",
-    );
+    ).toBe("Tried to read Lease deed.pdf. Tried to change a paper. And 3 more.");
     for (const lang of ["en", "hi"] as const) {
       const one = restOf(lang, [call("fetch", "failed")]);
       expect(one.trouble).not.toContain(troubleOf(lang, [call("fetch", "failed")]));
     }
+  });
+
+  test("the same tried words are said once, the repeat counted in the more (D-077)", () => {
+    const task = () => call("execute", "failed");
+    expect(restOf("en", [task(), task()]).trouble).toBe("Tried to run a task. And 1 more.");
+    expect(
+      restOf("hi", [task(), task()]).trouble.split("एक काम चलाने की कोशिश की गई।"),
+    ).toHaveLength(2);
   });
 
   test("a failure stays on the line, one of many; a stop too", () => {
@@ -300,18 +306,18 @@ describe("friendly names", () => {
     expect(doneOf("en", call("read", "failed", lease))).toBe("Tried to read Lease.pdf.");
     expect(doneOf("hi", call("read", "failed", lease))).toBe("Lease.pdf पढ़ने की कोशिश की गई।");
     expect(restOf("en", [call("read", "failed", lease)]).trouble).toBe("Tried to read Lease.pdf.");
-    expect(doneOf("en", call("other", "cancelled", { title: "Check the cause list" }))).toBe(
-      "Tried: Check the cause list.",
+    expect(doneOf("en", call("other", "cancelled", { title: "Check the share register" }))).toBe(
+      "Tried: Check the share register.",
     );
-    expect(doneOf("hi", call("other", "cancelled", { title: "Check the cause list." }))).toBe(
-      "कोशिश की गई: Check the cause list।",
+    expect(doneOf("hi", call("other", "cancelled", { title: "Check the share register." }))).toBe(
+      "कोशिश की गई: Check the share register।",
     );
     const count = raw({ command: "x", description: "Count the pages" });
     expect(doneOf("en", call("execute", "failed", count))).toBe("Tried: Count the pages.");
     // done, the agent's own words as they are
     expect(doneOf("en", call("execute", "completed", count))).toBe("Count the pages.");
-    expect(doneOf("en", call("other", "completed", { title: "Check the cause list" }))).toBe(
-      "Check the cause list.",
+    expect(doneOf("en", call("other", "completed", { title: "Check the share register" }))).toBe(
+      "Check the share register.",
     );
   });
 
@@ -322,14 +328,14 @@ describe("friendly names", () => {
     const unknown = call("read", "unknown", lease);
     const words = [
       doneOf("en", unknown),
-      doneOf("en", call("other", "unknown", { title: "Check the cause list" })),
+      doneOf("en", call("other", "unknown", { title: "Check the share register" })),
       doneOf("en", call("search", "unknown", raw({ pattern: "notice period" }))),
       doneOf("en", call("execute", "unknown")),
       restOf("en", [unknown]).line,
     ];
     expect(words).toEqual([
       "Lease.pdf.",
-      "Check the cause list.",
+      "Check the share register.",
       "'notice period'.",
       "State not known.",
       "State not known.",
@@ -426,5 +432,53 @@ describe("doingPick: the working line's words", () => {
       pick(view("running", [{ id: "tool_call:a", e: { tool_call: call("read") } }])),
     ).toBeNull();
     expect(pick(view("idle", [{ id: "tool_call:a", e: { tool_call: reading } }]))).toBeNull();
+  });
+});
+
+describe("the agent's own notes (D-044)", () => {
+  const brief = "/Users/x/Library/Application Support/Clauseo/agent-state/m1/notes/matter-brief.md";
+  const notes = "C:\\Users\\x\\AppData\\Roaming\\Clauseo\\agent-state\\m1\\notes\\matter-brief.md";
+  const outside = (display: string) =>
+    ({ locations: [{ outside: { display } }] }) as Partial<ToolCallEntry>;
+
+  test("a step that touches only the notes, by location, input or title, is internal; a paper's step is not", () => {
+    expect(internalOf(call("edit", "completed", outside(brief)))).toBe(true);
+    expect(internalOf(call("read", "failed", raw({ file_path: brief })))).toBe(true);
+    expect(internalOf(call("execute", "completed", { title: `Get-Content ${notes}` }))).toBe(true);
+    expect(
+      internalOf(call("read", "completed", raw({ file_path: "/Users/x/Matters/Lease.pdf" }))),
+    ).toBe(false);
+    expect(
+      internalOf(call("read", "completed", { title: `diff ${brief} /Users/x/Matters/Lease.pdf` })),
+    ).toBe(false);
+    expect(internalOf(call("search"))).toBe(false);
+  });
+
+  test("the folded line neither counts the brief as a paper changed nor its failed read as failed", () => {
+    const rows = [
+      call("read", "failed", raw({ file_path: brief })),
+      call("edit", "completed", outside(brief)),
+      call("read", "completed", raw({ file_path: "/Users/x/Matters/Lease.pdf" })),
+    ].map((c) => ({ tool_call: c }));
+    const line = lineOf("en", rows, false);
+    expect(line.line).toBe("1 paper read.");
+    expect(line.trouble).toBe("");
+    const running = { tool_call: call("search", "in_progress") };
+    const live = lineOf("en", [...rows, running], true);
+    expect(live.more).toBe(steps("en", "1 done so far."));
+    expect(live.trouble).toBe("");
+  });
+
+  test("a group of nothing but the notes says the work was planned, with no count and no break", () => {
+    const rows = [
+      call("read", "failed", raw({ file_path: brief })),
+      call("edit", "completed", outside(brief)),
+    ].map((c) => ({ tool_call: c }));
+    expect(lineOf("en", rows, false)).toEqual({
+      kinds: ["think"],
+      line: steps("en", "Planned the work."),
+      trouble: "",
+      more: "",
+    });
   });
 });

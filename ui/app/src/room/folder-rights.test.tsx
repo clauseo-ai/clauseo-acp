@@ -47,7 +47,7 @@ test("a folder whose permissions can't change: Clauseo asks before each edit, wh
   expect(info()).toBe(
     fr(
       "en",
-      "You can change files here, but not this folder's permissions. Clauseo needs them to keep Claude and Codex inside the matter. Some edits won't go through.",
+      "You can change files here, but not this folder's permissions. Clauseo needs them to keep Claude and ChatGPT inside the matter. Some edits won't go through.",
     ),
   );
   expect(h.one("folder-it")?.textContent).toBe(fr("en", "What to tell IT"));
@@ -61,7 +61,7 @@ test("What to tell IT opens the text for IT with the matter's folder in it, and 
   expect(h.one("folder-it")?.getAttribute("aria-expanded")).toBe("true");
   const it = h.one("folder-it-text")?.textContent ?? "";
   expect(it).toContain(`on this folder: \u2068${FOLDER}\u2069.`);
-  expect(it).toContain("so Claude and Codex, which it runs, can write only inside it.");
+  expect(it).toContain("so Claude and ChatGPT, which it runs, can write only inside it.");
   expect(it).toContain(fr("en", "Copy"));
 });
 
@@ -91,17 +91,17 @@ test("Close shuts the notice for that matter only, and it stays shut when the ma
   expect(notice()).toBeNull();
 });
 
-test("a network drive: Not protected, and its notice says Claude asks and Codex can't work here", async () => {
+test("a network drive: Not protected, and its notice says Claude asks and ChatGPT can't work here", async () => {
   h = await mountRoom({ matters: [matter("network")] });
   expect(notice()?.getAttribute("aria-label")).toBe(
     fr("en", "This matter's folder is on a network drive"),
   );
   expect(text()).toContain(fr("en", "On a network drive."));
-  expect(text()).toContain(fr("en", "Claude asks before every change. Codex can't work here."));
+  expect(text()).toContain(fr("en", "Claude asks before every change. ChatGPT can't work here."));
   expect(info()).toBe(
     fr(
       "en",
-      "Clauseo can't keep Claude and Codex inside this folder. To work in the Safe workspace, move the matter to a folder on this computer.",
+      "Move the matter to a folder on this computer to use ChatGPT here and let Claude work without asking before every change. Clauseo can't keep them inside a folder on a network drive.",
     ),
   );
   expect(h.one("folder-it")).toBeNull();
@@ -114,8 +114,8 @@ test("a drive without file permissions: Not protected, and its notice", async ()
     fr("en", "This matter's folder is on a drive that doesn't keep file permissions"),
   );
   expect(text()).toContain(fr("en", "No file permissions."));
-  expect(text()).toContain(fr("en", "Claude asks before every change. Codex can't work here."));
-  expect(info()).toContain("USB drives often don't keep permissions.");
+  expect(text()).toContain(fr("en", "Claude asks before every change. ChatGPT can't work here."));
+  expect(info()).toContain("USB drives often don't keep file permissions.");
   expect(unprotected()?.textContent).toBe(tbt("en", "Not protected"));
 });
 

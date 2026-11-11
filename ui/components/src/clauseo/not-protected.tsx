@@ -14,16 +14,18 @@ export function NotProtectedMark({
   meaning,
   onPress,
 }: {
-  short?: boolean;
   /** Optional: a press explains it (UC's note, from the toolbar); the mark is then a button. */
   onPress?: (() => void) | undefined;
-  /** What Not protected means where it isn't protection switched off. When the workspace couldn't
-   * be set up, or Windows was told no, Clauseo can read any file the lawyer can open and asks before changing anything
-   * outside the matter's folder, and the caller says so in its own words: "Clauseo can read any file you can open on
-   * this computer, and asks before changing anything outside the matter's folder." Without it, the sentence about
-   * protection switched off stands. */
-  meaning?: string;
-}) {
+} & (
+  | { short: true; meaning?: undefined }
+  | {
+      short?: false;
+      /** What Not protected means, in the caller's words, true for the plan it runs: Claude changes files in this matter without asking and asks before changing files outside it;
+       * ChatGPT reads any file the lawyer can open and asks before changing anything outside the matter's folder.
+       * Protection switched off says the same, since the host runs each plan there as it does without protection. */
+      meaning: string;
+    }
+)) {
   const w = useToolbarWords();
   const Tag = onPress === undefined ? "span" : "button";
   return (
@@ -45,9 +47,7 @@ export function NotProtectedMark({
         {!short && (
           <>
             {" "}
-            <Say>
-              {meaning ?? w.v("Clauseo can reach beyond this matter's folder without asking.")}
-            </Say>
+            <Say>{meaning ?? ""}</Say>
           </>
         )}
       </span>

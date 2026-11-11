@@ -59,6 +59,10 @@ export interface HostTransport {
   /** Quits Clauseo the way Cmd+Q does: the agents' installs and sign-ins stop, then the host, and
    * the app ends. Resolves once the host has the request; the window is gone after it. */
   quitApp(): Promise<void>;
+  /** Opens macOS's Files and Folders privacy pane in System Settings, and nothing else: the desktop's
+   * `open_privacy_settings`, which takes no arguments. Off macOS it rejects with `command.invalid`; the room offers it
+   * on the Mac only, under `matter.folder_permission` (room/thread/privacy-settings.tsx). */
+  openPrivacySettings(): Promise<void>;
   /** Opens a matter document with its default app; `protected_view` says Word opened it in Protected View (a Word
    * document whose path is too long for Word, opened by its folders' short names on Windows). */
   openFile(file: FileRefId): Promise<OpenedFile>;
@@ -140,6 +144,7 @@ export class NullTransport implements HostTransport {
   displayInfo = nothing;
   openExternal = nothing;
   quitApp = nothing;
+  openPrivacySettings = nothing;
   openFile = nothing;
   reveal = nothing;
   subscribe(): () => void {

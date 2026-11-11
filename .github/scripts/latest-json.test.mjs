@@ -17,9 +17,11 @@
 // sidecars.mjs (third-party build scripts) with a secret in it or in any step before it.
 // release.yml's own test also holds every `tauri build` and `tauri bundle` of the shipped legs
 // to passing the generated sidecar overlay last, and checks the sandbox tool's path: its one name
-// (SANDBOX_EXE), its updater signature before NSIS, its .sig in both installers, assemble's checks
-// of the published exe and .sig against both installers and the updater key, and the build env
-// its build.rs reads; and every job that passes release.conf.json to passing blocklist.conf.json
+// (SANDBOX_EXE), the Safe workspace switch (SAFE_WORKSPACE, "false" for launch) every step of that
+// path is behind, its updater signature before NSIS, its .sig in both installers, assemble's checks
+// of the published exe and .sig against both installers and the updater key, assemble's check
+// that with the switch off neither installer holds a sandbox file, and the build env its build.rs
+// reads; and every job that passes release.conf.json to passing blocklist.conf.json
 // with it, needing `blocklist` and downloading blocklist-snapshot before it builds or bundles.
 
 import assert from "node:assert/strict";
@@ -40,6 +42,7 @@ import {
   sandboxAsset,
   signatureCheck,
   signedVersion,
+  tier1Platforms,
   versionString,
 } from "./latest-json.mjs";
 
@@ -110,12 +113,30 @@ test("a full release gives the plugin's static format, Windows under both keys",
 
 test("a missing tier 2 asset is named, and its platform left out", () => {
   const { manifest, missing, problems } = build("1.2.3", {
-    leave: ["Clauseo_1.2.3_arm64-setup.exe", "Clauseo_1.2.3_amd64.deb"],
+    leave: ["Clauseo_1.2.3_x64.app.tar.gz", "Clauseo_1.2.3_amd64.deb"],
   });
   assert.deepEqual(problems, []);
-  assert.deepEqual(missing, ["Clauseo_1.2.3_arm64-setup.exe", "Clauseo_1.2.3_amd64.deb"]);
-  assert.equal("windows-aarch64" in manifest.platforms, false);
-  assert.equal("windows-aarch64-nsis" in manifest.platforms, false);
+  assert.deepEqual(missing, ["Clauseo_1.2.3_x64.app.tar.gz", "Clauseo_1.2.3_amd64.deb"]);
+  assert.equal("darwin-x86_64-app" in manifest.platforms, false);
+});
+
+test("Windows ARM64 is tier 1: a missing arm64 installer, or its keys in latest.json, is refused", () => {
+  assert.deepEqual(build("1.2.3", { leave: ["Clauseo_1.2.3_arm64-setup.exe"] }).problems, [
+    "Clauseo_1.2.3_arm64-setup.exe is missing (tier 1)",
+  ]);
+  assert.deepEqual(build("1.2.3", { leave: ["Clauseo_1.2.3_arm64-machine-setup.exe"] }).problems, [
+    "Clauseo_1.2.3_arm64-machine-setup.exe is missing (tier 1)",
+  ]);
+  assert.ok(tier1Platforms("1.2.3").includes("windows-aarch64"));
+  assert.ok(tier1Platforms("1.2.3").includes("windows-aarch64-nsis"));
+  const { manifest } = build("1.2.3");
+  const broken = structuredClone(manifest);
+  delete broken.platforms["windows-aarch64"];
+  delete broken.platforms["windows-aarch64-nsis"];
+  assert.deepEqual(manifestProblems(broken, "1.2.3"), [
+    "platforms has no windows-aarch64-nsis (tier 1)",
+    "platforms has no windows-aarch64 (tier 1)",
+  ]);
 });
 
 test("a missing tier 1 asset or signature is refused", () => {
@@ -138,6 +159,28 @@ test("a signature for another version, or for none, is refused", () => {
   assert.ok(other.includes("Clauseo_1.2.3_x64-setup.exe.sig: the signature is for version 1.2.2, not 1.2.3"), other);
   const none = build("1.2.3", { comment: "timestamp:1793641889\tfile:x" }).problems;
   assert.ok(none.includes("Clauseo_1.2.3_x64-setup.exe.sig: the signature's trusted comment holds no version:<v>"), none);
+});
+
+test("an updater asset signed under another name, as the bundler's Clauseo.app.tar.gz, is refused", () => {
+  const dir = release("1.2.3");
+  try {
+    for (const arch of ["aarch64", "x64"]) {
+      writeFileSync(join(dir, `Clauseo_1.2.3_${arch}.app.tar.gz.sig`), fakeSig("timestamp:1794112225\tfile:Clauseo.app.tar.gz\tversion:1.2.3"));
+    }
+    assert.deepEqual(buildManifest(dir, "1.2.3", BASE, DATE).problems, [
+      "Clauseo_1.2.3_aarch64.app.tar.gz.sig: the signature's trusted comment holds no file:Clauseo_1.2.3_aarch64.app.tar.gz",
+      "Clauseo_1.2.3_x64.app.tar.gz.sig: the signature's trusted comment holds no file:Clauseo_1.2.3_x64.app.tar.gz",
+    ]);
+    // The other arch's name is no better: the name binds the arch.
+    writeFileSync(join(dir, "Clauseo_1.2.3_aarch64.app.tar.gz.sig"), fakeSig("timestamp:1\tfile:Clauseo_1.2.3_x64.app.tar.gz\tversion:1.2.3"));
+    rmSync(join(dir, "Clauseo_1.2.3_x64.app.tar.gz"));
+    rmSync(join(dir, "Clauseo_1.2.3_x64.app.tar.gz.sig"));
+    assert.deepEqual(buildManifest(dir, "1.2.3", BASE, DATE).problems, [
+      "Clauseo_1.2.3_aarch64.app.tar.gz.sig: the signature's trusted comment holds no file:Clauseo_1.2.3_aarch64.app.tar.gz",
+    ]);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test("a version that is not plain X.Y.Z is refused", () => {
@@ -323,9 +366,26 @@ test("release.yml keeps the workflow rules", () => {
   }
 });
 
+test("release.yml's arm64 install smoke runs after sign-windows on windows-11-arm, and blocks the release", () => {
+  const text = readFileSync(RELEASE_YML, "utf8");
+  const smoke = jobCommands(text, "arm64-install-smoke");
+  assert.ok(smoke.includes("needs: [check, sign-windows]"), smoke.join("\n"));
+  assert.ok(smoke.includes("runs-on: windows-11-arm"));
+  // Blocking: it may not fail (no continue-on-error), and assemble, so the release, needs it.
+  assert.ok(!smoke.some((line) => line.startsWith("continue-on-error:")), smoke.join("\n"));
+  assert.ok(jobCommands(text, "assemble").includes("needs: [check, build, sign-windows, arm64-install-smoke]"));
+  const needers = text.split("\n").filter((line) => /^\s+needs:.*\barm64-install-smoke\b/.test(stripComment(line)));
+  assert.deepEqual(needers, ["    needs: [check, build, sign-windows, arm64-install-smoke]"]);
+  // x64 first, then arm64 over it, then the registered silent uninstall; ARM64 is checked.
+  const script = smoke.join("\n");
+  const order = ["_x64-machine-setup.exe", "_arm64-machine-setup.exe", "0xAA64", "QuietUninstallString"];
+  const at = order.map((part) => script.indexOf(part));
+  assert.ok(at.every((i, n) => i !== -1 && (n === 0 || at[n - 1] < i)), JSON.stringify(at));
+});
+
 /** A job's lines without comments, each `\`-continued command joined into one line. */
 function jobCommands(text, job) {
-  const body = text.split(/^  ([a-z-]+):\s*$/m);
+  const body = text.split(/^  ([a-z0-9-]+):\s*$/m);
   const at = body.indexOf(job);
   assert.notEqual(at, -1, job);
   return body[at + 1]
@@ -383,7 +443,7 @@ test("release.yml names the sandbox tool once, and latest-json.mjs publishes it 
   const rows = assets("1.2.3", exe).filter((asset) => asset.signed);
   assert.deepEqual(rows, [
     { name: `${base}-x64.exe`, tier: 1, signed: true },
-    { name: `${base}-arm64.exe`, tier: 2, signed: true },
+    { name: `${base}-arm64.exe`, tier: 1, signed: true },
   ]);
   assert.equal(sandboxAsset(exe, "x64"), `${base}-x64.exe`);
   // No two assets (or their .sig) share a name.
@@ -394,8 +454,15 @@ test("release.yml names the sandbox tool once, and latest-json.mjs publishes it 
   const dir = release("1.2.3");
   try {
     const sig = fakeSig("timestamp:1793641889\tfile:x\tversion:1.2.3");
+    // Both architectures are tier 1.
+    assert.deepEqual(buildManifest(dir, "1.2.3", BASE, DATE, exe).problems, [
+      `${base}-x64.exe is missing (tier 1)`,
+      `${base}-arm64.exe is missing (tier 1)`,
+    ]);
+    writeFileSync(join(dir, `${base}-arm64.exe`), "exe");
+    writeFileSync(join(dir, `${base}-arm64.exe.sig`), sig);
     writeFileSync(join(dir, `${base}-x64.exe`), "exe");
-    // The x64 exe is tier 1 and needs its .sig; arm64 is tier 2.
+    // Each needs its .sig.
     assert.deepEqual(buildManifest(dir, "1.2.3", BASE, DATE, exe).problems, [`${base}-x64.exe.sig is missing`]);
     writeFileSync(join(dir, `${base}-x64.exe.sig`), fakeSig("timestamp:1793641889\tfile:x\tversion:1.2.2"));
     assert.deepEqual(buildManifest(dir, "1.2.3", BASE, DATE, exe).problems, [
@@ -404,11 +471,14 @@ test("release.yml names the sandbox tool once, and latest-json.mjs publishes it 
     writeFileSync(join(dir, `${base}-x64.exe.sig`), sig);
     const { manifest, missing, problems } = buildManifest(dir, "1.2.3", BASE, DATE, exe);
     assert.deepEqual(problems, []);
-    assert.deepEqual(missing, [`${base}-arm64.exe`]);
+    assert.deepEqual(missing, []);
     // The updater never sees it.
     assert.deepEqual(manifest, buildManifest(dir, "1.2.3", BASE, DATE).manifest);
     rmSync(join(dir, `${base}-x64.exe`));
     assert.deepEqual(buildManifest(dir, "1.2.3", BASE, DATE, exe).problems, [`${base}-x64.exe is missing (tier 1)`]);
+    writeFileSync(join(dir, `${base}-x64.exe`), "exe");
+    rmSync(join(dir, `${base}-arm64.exe`));
+    assert.deepEqual(buildManifest(dir, "1.2.3", BASE, DATE, exe).problems, [`${base}-arm64.exe is missing (tier 1)`]);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -607,13 +677,81 @@ test("--key-id passes a matching UpdaterKeyId, fails another and exits 3 on none
   }
 });
 
+/** release.yml's top-level SAFE_WORKSPACE, the Safe workspace switch. */
+function safeWorkspace(text) {
+  const match = text.match(/^env:\n(?:  .*\n)*?  SAFE_WORKSPACE: "(\S+)"$/m);
+  assert.ok(match, "release.yml's top-level env sets SAFE_WORKSPACE, quoted");
+  return match[1];
+}
+
+/** The index of the exact command <line> in <commands>; fails when it is not there. */
+function commandAt(commands, line) {
+  const index = commands.indexOf(line);
+  assert.notEqual(index, -1, line);
+  return index;
+}
+
+/** Whether <commands>[<index>] is inside an `if [ "$SAFE_WORKSPACE" = true ]; then` block. */
+function underSwitchOn(commands, index) {
+  let depth = 0;
+  for (let i = index - 1; i >= 0; i -= 1) {
+    const line = commands[i];
+    if (line === "fi") depth += 1;
+    else if (/^if .*; then$/.test(line)) {
+      if (depth === 0) return line === 'if [ "$SAFE_WORKSPACE" = true ]; then';
+      depth -= 1;
+    }
+  }
+  return false;
+}
+
+test("release.yml's Safe workspace switch is off for launch and every sandbox tool step is behind it", () => {
+  const text = readFileSync(RELEASE_YML, "utf8");
+  assert.equal(safeWorkspace(text), "false");
+  // The seam passes the switch to sidecars.mjs, which builds the sandbox tool only for "true".
+  const build = jobCommands(text, "build");
+  commandAt(build, 'node .github/scripts/sidecars.mjs --safe-workspace="$SAFE_WORKSPACE" "$TARGET"');
+  assert.deepEqual(
+    build.filter((line) => line.startsWith("node .github/scripts/sidecars.mjs") && line !== 'node .github/scripts/sidecars.mjs --check "$TARGET"'),
+    ['node .github/scripts/sidecars.mjs --safe-workspace="$SAFE_WORKSPACE" "$TARGET"'],
+  );
+  const sign = jobCommands(text, "sign-windows");
+  // The signing step runs only with the switch on.
+  const step = sign.indexOf("- name: Sign the sandbox tool for the updater");
+  assert.notEqual(step, -1);
+  assert.equal(sign[step + 1], "if: env.SAFE_WORKSPACE == 'true'");
+  // The bundle overlay with the .sig and hooks_safe_workspace.nsh only with it on; off, empty.
+  const hooks = sign.findIndex((line) => line.includes("windows/hooks_safe_workspace.nsh"));
+  assert.ok(hooks !== -1 && underSwitchOn(sign, hooks), "hooks_safe_workspace.nsh only with the switch on");
+  const empty = commandAt(sign, `echo '{}' > "$RUNNER_TEMP/safe-workspace.conf.json"`);
+  assert.equal(sign[empty - 1], "else");
+  assert.ok(underSwitchOn(sign, commandAt(sign, 'cp "crates/desktop/$sig" "$OUT/$asset.sig"')));
+  // Assemble: the sandbox tool's rows, signature, key ID, installer contents and notes with it on.
+  const assemble = jobCommands(text, "assemble");
+  const manifest = assemble.filter((line) => line.startsWith("node .github/scripts/latest-json.mjs dist "));
+  assert.equal(manifest.length, 2, manifest.join("\n"));
+  const withExe = assemble.findIndex((line) => line.endsWith('"$SANDBOX_EXE" > missing.txt'));
+  assert.ok(underSwitchOn(assemble, withExe));
+  const without = commandAt(assemble, 'node .github/scripts/latest-json.mjs dist "$VERSION" "$base" "$pub_date" > missing.txt');
+  assert.equal(assemble[without - 1], "else");
+  assert.ok(underSwitchOn(assemble, commandAt(assemble, 'echo "## Inside the Windows installers"')));
+  // Off: neither installer may hold a file named like the sandbox's (clauseo-sandbox), then the
+  // loop moves on before any check of the sandbox tool.
+  const off = commandAt(assemble, 'if [ "$SAFE_WORKSPACE" != true ]; then');
+  const refused = commandAt(assemble, '! grep -qiF "${SANDBOX_EXE%-*}" <<< "$listing" ||');
+  const next = assemble.indexOf("continue", refused);
+  const installerSig = commandAt(
+    assemble,
+    'node .github/scripts/latest-json.mjs --verify "${files[0]}" "$pub" "$(basename "${files[0]}")" "$VERSION" ||',
+  );
+  const exeSig = commandAt(assemble, 'node .github/scripts/latest-json.mjs --verify "$exe" "$pub" "$SANDBOX_EXE" "$VERSION" ||');
+  assert.ok(installerSig < off && off < refused && refused < next && next < exeSig, "the installer's .sig either way");
+  assert.equal(sandboxExe(text).replace(/-[^-]*$/, ""), "clauseo-sandbox");
+});
+
 test("release.yml signs the sandbox tool, ships its .sig in both installers and checks both in assemble", () => {
   const text = readFileSync(RELEASE_YML, "utf8");
-  const at = (commands, line) => {
-    const index = commands.indexOf(line);
-    assert.notEqual(index, -1, line);
-    return index;
-  };
+  const at = commandAt;
   const sign = jobCommands(text, "sign-windows");
   // Signed as SANDBOX_EXE (the trusted comment's file:), its .sig moved where the overlay reads it.
   const signed = at(sign, 'pnpm -C ui tauri signer sign --app-version "$VERSION" "$dir/$SANDBOX_EXE"');
@@ -621,7 +759,11 @@ test("release.yml signs the sandbox tool, ships its .sig in both installers and 
   assert.ok(signed < at(sign, 'mv "$dir/$SANDBOX_EXE.sig" "$exe.sig"'));
   const bundled = sign.findIndex((line) => /\btauri bundle\b/.test(line));
   assert.ok(signed < bundled, "the sandbox tool is signed before NSIS takes it");
-  assert.ok(sign[bundled].includes('--config "$RUNNER_TEMP/sandbox-sig.conf.json" --config release/sidecars.generated.json'));
+  assert.ok(sign[bundled].includes('--config "$RUNNER_TEMP/safe-workspace.conf.json" --config release/sidecars.generated.json'));
+  // The overlay names the .sig as a resource and hooks_safe_workspace.nsh as the hooks.
+  const overlay = sign.find((line) => line.includes("windows/hooks_safe_workspace.nsh"));
+  assert.ok(overlay.includes('"$RUNNER_TEMP/safe-workspace.conf.json" "$sig" "$SANDBOX_EXE.sig"'), overlay);
+  assert.ok(overlay.includes("installerHooks: process.argv[4]"), overlay);
   at(sign, 'cp "crates/desktop/$sig" "$OUT/$asset.sig"');
   const assemble = jobCommands(text, "assemble");
   const verified = at(assemble, 'node .github/scripts/latest-json.mjs --verify "$exe" "$pub" "$SANDBOX_EXE" "$VERSION" ||');
@@ -641,10 +783,44 @@ test("release.yml signs the sandbox tool, ships its .sig in both installers and 
   at(assemble, "printf '%s\\n' \"${inside[@]}\"");
   assert.ok(verified < listed && listed < same && same < notes);
   assert.ok(assemble.some((line) => line.includes('"$SANDBOX_EXE" > missing.txt')), "latest-json.mjs gets SANDBOX_EXE");
+  // assets() gets the switch's exe name, or null with it off.
+  assert.ok(assemble.some((line) => line.includes("assets(process.argv[1], process.argv[2] || null)")));
+  assert.ok(assemble.includes('" "$VERSION" "$sandbox_exe")'));
   // apt-get in assemble and blocklist (minisign) only.
   for (const job of ["check", "ui", "build", "sign-windows", "publish", "measure-builds"]) {
     assert.deepEqual(jobCommands(text, job).filter((line) => /\bapt-get\b/.test(line)), [], job);
   }
+});
+
+test("release.yml signs each macOS archive under its arch name in the build and checks it in assemble", () => {
+  const text = readFileSync(RELEASE_YML, "utf8");
+  const at = (commands, line, from = 0) => {
+    const index = commands.indexOf(line, from);
+    assert.notEqual(index, -1, line);
+    return index;
+  };
+  const build = jobCommands(text, "build");
+  const bundled = build.findIndex((line) => /\btauri bundle\b.*--bundles app,dmg/.test(line));
+  assert.notEqual(bundled, -1, "the macOS tauri bundle");
+  // In the bundle's step (the one that holds the key), after the bundle: rename, drop the
+  // bundler's .sig (file:Clauseo.app.tar.gz), sign again; then collect the re-signed pair.
+  const named = at(build, "tarball=Clauseo_${VERSION}_${{ matrix.arch }}.app.tar.gz", bundled);
+  const moved = at(build, 'mv "$macos/Clauseo.app.tar.gz" "$macos/$tarball"', named);
+  const dropped = at(build, 'rm "$macos/Clauseo.app.tar.gz.sig"', moved);
+  // By its absolute path: pnpm -C ui runs the signer in ui/, where "$macos/..." doesn't resolve.
+  const signed = at(build, 'pnpm -C ui tauri signer sign --app-version "$VERSION" "$PWD/$macos/$tarball"', dropped);
+  const guard = build.lastIndexOf('[ -n "$TAURI_SIGNING_PRIVATE_KEY" ] || { echo "::error::no updater key for a $MODE run"; exit 1; }', bundled);
+  assert.ok(guard !== -1 && build.slice(guard, signed).every((line) => !line.startsWith("- name:")), "the key guard is in the signing step");
+  const collected = at(build, 'cp "$bundle/macos/$tarball" "$bundle/macos/$tarball.sig" "$OUT/"', signed);
+  assert.ok(build.slice(signed, collected).some((line) => line.startsWith("- name: Collect")));
+  assert.ok(!build.some((line) => line.includes('cp "$bundle/macos/Clauseo.app.tar.gz')), "no bundler-named archive is collected");
+  // A dry run's macOS legs publish their throwaway public key for assemble.
+  assert.ok(build.includes("name: dry-updater-pub-${{ matrix.target }}"));
+  const assemble = jobCommands(text, "assemble");
+  assert.ok(!assemble.some((line) => /^mv .*Clauseo\.app\.tar\.gz/.test(line)), "assemble renames no archive");
+  at(assemble, "for old in Clauseo.app.tar.gz Clauseo.app.tar.gz.sig; do");
+  at(assemble, 'node .github/scripts/latest-json.mjs --verify "$tarball" "$pub" "$(basename "$tarball")" "$VERSION" ||');
+  at(assemble, "tarball=dist/Clauseo_${VERSION}_${arch}.app.tar.gz");
 });
 
 test("release.yml's build tells the sandbox's build.rs the mode and, for release and test, the updater key", () => {
@@ -715,6 +891,42 @@ test("release.yml's builds with release.conf.json take the verified block-list s
   assert.deepEqual(broken(/( {6}# The same verified snapshot)[^]*?path: crates\/desktop\/blocklist\n/, ""), [
     "sign-windows: no blocklist-snapshot download before its first tauri build or bundle",
   ]);
+});
+
+test("sign-windows runs without the macOS and Linux legs; assemble and publish need every job", () => {
+  const text = readFileSync(RELEASE_YML, "utf8");
+  // The job's own keys: its lines up to `runs-on:`, comments dropped.
+  const head = (job) => {
+    const lines = jobCommands(text, job);
+    return lines.slice(0, lines.findIndex((line) => line.startsWith("runs-on:")));
+  };
+  const sign = head("sign-windows");
+  assert.ok(sign.includes("needs: [check, build, blocklist]"), sign.join("\n"));
+  assert.ok(
+    sign.includes(
+      "if: ${{ !cancelled() && needs.check.result == 'success' && needs.blocklist.result == 'success' }}",
+    ),
+    sign.join("\n"),
+  );
+  // No always(), no !cancelled() and no failure() in assemble or publish: the default success()
+  // keeps a release, or dist-assets, from going out with a leg missing.
+  for (const job of ["assemble", "publish"]) {
+    const ifs = jobCommands(text, job).filter((line) => /^if:/.test(line));
+    assert.deepEqual(ifs.filter((line) => /always\(\)|cancelled\(\)|failure\(\)/.test(line)), [], job);
+  }
+});
+
+test("a dry run's About shows its version with dev.<short sha>; a tag's shows the version alone", () => {
+  const text = readFileSync(RELEASE_YML, "utf8");
+  const check = jobCommands(text, "check");
+  assert.ok(check.includes("version_suffix: ${{ steps.mode.outputs.version_suffix }}"), "the check job's output");
+  assert.ok(
+    check.includes('if [ "$mode" = dry ]; then echo "version_suffix=dev.${GITHUB_SHA:0:9}"; else echo "version_suffix="; fi'),
+    "dry only",
+  );
+  // The ui job's vite build reads it (ui/app/vite.config.ts, appVersion).
+  const ui = jobCommands(text, "ui");
+  assert.ok(ui.includes("CLAUSEO_VERSION_SUFFIX: ${{ needs.check.outputs.version_suffix }}"), "the ui build's env");
 });
 
 test("the workflow lint fails each broken rule", () => {
@@ -825,6 +1037,29 @@ test("the release's latest.json is right and every platforms URL downloads", { s
     assert.equal(createHash("sha256").update(body).digest("hex"), sums.get(name), `${name} against SHA256SUMS.txt`);
     const sig = (await get(`${entry.url}.sig`)).toString("utf8").trim();
     assert.equal(sig, entry.signature, `${name}.sig against latest.json`);
+  }
+});
+
+test("the CLI writes latest.json with the sandbox tool's rows only when given its name", () => {
+  const dir = release("1.2.3");
+  try {
+    const cli = (...args) =>
+      spawnSync(process.execPath, [join(here, "latest-json.mjs"), dir, "1.2.3", BASE, DATE, ...args], { encoding: "utf8" });
+    // The Safe workspace off: no sandbox exe in the release, and none asked for.
+    const off = cli();
+    assert.equal(off.status, 0, off.stderr);
+    assert.equal(off.stdout, "");
+    const manifest = readFileSync(join(dir, "latest.json"), "utf8");
+    assert.doesNotMatch(manifest, /sandbox/);
+    // On: the tier 1 exe is required.
+    const on = cli("clauseo-sandbox-setup.exe");
+    assert.equal(on.status, 1);
+    assert.match(on.stderr, /clauseo-sandbox-setup-x64\.exe is missing \(tier 1\)/);
+    // A bad name, or an option where the folder goes, is a usage error.
+    assert.equal(cli("Setup.EXE").status, 2);
+    assert.equal(spawnSync(process.execPath, [join(here, "latest-json.mjs"), "--verify", "a", "b", "c"]).status, 2);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
   }
 });
 

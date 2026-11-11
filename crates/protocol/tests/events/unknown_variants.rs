@@ -114,7 +114,8 @@ fn permission_about() {
 #[test]
 fn stop_reason() {
     use StopReason::{
-        AtLimit, Cancelled, EndTurn, Failed, MaxTokens, MaxTurnRequests, NotAllowed, Refusal,
+        AtLimit, Cancelled, EndTurn, Failed, MaxTokens, MaxTurnRequests, NotAllowed, OutsideMatter,
+        Refusal,
     };
     let cases = [
         (EndTurn, "end_turn"),
@@ -123,6 +124,7 @@ fn stop_reason() {
         (Refusal, "refusal"),
         (Cancelled, "cancelled"),
         (NotAllowed, "not_allowed"),
+        (OutsideMatter, "outside_matter"),
         (AtLimit, "at_limit"),
         (Failed, "failed"),
     ];
@@ -160,6 +162,10 @@ fn pack_skip_reason() {
 #[test]
 fn notice_kind() {
     decodes_in_both(r#""context_not_restored""#, &NoticeKind::ContextNotRestored);
+    decodes_in_both(
+        r#""auto_mode_unavailable""#,
+        &NoticeKind::AutoModeUnavailable,
+    );
     let pack = PackId::new("nda-kit").unwrap();
     let skipped = NoticeKind::SkillPackNotLoaded {
         pack,
@@ -202,7 +208,7 @@ fn deliverable() {
 
 #[test]
 fn checkpoint_kind() {
-    use CheckpointKind::{AfterTurn, BeforeTurn, Import, OutsideEdits, Restore, Undo};
+    use CheckpointKind::{AfterTurn, BeforeTurn, Import, OutsideEdits, Restore, Revisions, Undo};
     let cases = [
         (Import, "import"),
         (BeforeTurn, "before_turn"),
@@ -210,6 +216,7 @@ fn checkpoint_kind() {
         (OutsideEdits, "outside_edits"),
         (Undo, "undo"),
         (Restore, "restore"),
+        (Revisions, "revisions"),
     ];
     unit_enum(&CheckpointKind::ALL, &cases, CheckpointKind::Unknown);
 }

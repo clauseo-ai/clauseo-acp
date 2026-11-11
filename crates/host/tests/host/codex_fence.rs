@@ -1,7 +1,8 @@
 //! The data-folder fence in a Codex launch's `CODEX_CONFIG` (`agent::codex_fence`, decision
 //! record 0030), checked from `codex.rs`'s launch test: denies scoped under the data folder,
-//! `run` and `agent-state` whole (the own folders reopen as `write` entries, checked in
-//! `profile.rs`), never Codex's home. Windows gets none.
+//! the siblings of the own run folder and notes as the launch listed them, never `run` or
+//! `agent-state` whole, so an escalated command reaches the own folders too (they are `write`
+//! entries as well, checked in `profile.rs`), never Codex's home. Windows gets none.
 
 use std::path::Path;
 
@@ -32,17 +33,19 @@ pub(crate) fn checked_keys(
         "state.sqlite",
         "skill-packs",
         "run.old-*",
-        "run",
-        "agent-state",
         "agents/claude-acp",
+        "agents/signin",
         "agents/codex-acp/home/auth.json",
         "agents/codex-acp/home/history.jsonl",
     ] {
         assert_eq!(scoped.get(subpath), Some(&json!("deny")), "{subpath}");
     }
+    for whole in ["run", "agent-state"] {
+        assert_eq!(scoped.get(whole), None, "{whole}");
+    }
     let notes = crate::profile_rig::notes(dir, matter);
     for (subpath, mode) in scoped {
-        if mode == &json!("write") || ["run", "agent-state"].contains(&subpath.as_str()) {
+        if mode == &json!("write") {
             continue;
         }
         assert_eq!(mode, &json!("deny"), "{subpath}");

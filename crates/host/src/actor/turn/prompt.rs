@@ -9,6 +9,7 @@ use super::agents::Stage;
 use super::key_retry;
 use super::{AgentReply, BeforePrompt, End, TurnInput, TurnPhase, current, end, spawn, state};
 use crate::agent::{codex, leftovers};
+use crate::log_file::LIFECYCLE;
 use crate::undo_note::{self, NoteInput};
 
 /// Step 5: the prompt, with the undo note first.
@@ -47,8 +48,11 @@ pub(super) fn prompt(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
     };
     current.phase = TurnPhase::Prompting;
     let stopped = std::rc::Rc::clone(&current.stopped);
-    // The prompt goes out: the case-law relay's turn caps start again (R24).
+    super::state::prompt_sent(actor, thread);
+    // The prompt goes out: the case-law relay's turn caps start again (R24), and while the
+    // window says the computer is offline, the turn is watched (`offline.rs`).
     super::launch_checks::relay::turn_started(actor, thread);
+    super::offline::turn_started(actor, thread);
     let Some(current) = super::current(actor, thread) else {
         return;
     };
@@ -80,6 +84,7 @@ pub(super) fn prompt(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
             if let Err(error) = checked {
                 return AgentReply::PromptRefused { turn, error };
             }
+            tracing::info!(target: LIFECYCLE, %thread, %turn, "prompt sent");
             let result = retry
                 .run(&client, || client.prompt(&session, turn, content.clone()))
                 .await;

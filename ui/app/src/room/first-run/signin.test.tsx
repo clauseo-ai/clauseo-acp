@@ -37,22 +37,63 @@ const at = (state: SignIn, more: Parameters<typeof info>[0] = true) =>
   mountFirstRun({ first: [info(more), install(CLAUDE, READY), signIn(CLAUDE, state)] });
 
 const gateState = () => byId("signin-state")?.dataset["state"];
+/** The gate's Sign in button: the act's, where Ask will stand. */
+const signButton = () => byId<HTMLButtonElement>("signin")?.querySelector("button") ?? null;
 const field = () => byId<HTMLTextAreaElement>("composer");
 
-test("plan: the composer says Sign in to Claude, and Sign in sends StartSignIn; never a model's name", async () => {
+test("plan: the composer offers Claude and ChatGPT, and Sign in to Claude sends StartSignIn; never a model's name", async () => {
   const t = await at({ signed_out: {} });
   expect(byId("signin")?.dataset["agent"]).toBe("claude");
   expect(gateState()).toBe("signed-out");
-  expect(text()).toContain("Sign in to Claude to ask about this matter");
+  expect(text()).toContain("Sign in to Claude or ChatGPT to ask about this matter");
+  // both offered, nothing chosen, neither signed in: the gate's foot names both plans (UD1-93)
   expect(text()).toContain(
-    "Your papers stay on this computer. Claude sees what each question sends it.",
+    "Your papers stay on this computer. Claude or ChatGPT sees the parts it reads to answer you.",
   );
+  expect(text()).not.toContain("Claude sees the parts");
   expect(text()).not.toMatch(/Opus|Sonnet|Haiku|GPT-\d|o\d-/);
   // the gate names the plan; the status line above it says nothing of one
   expect(text()).not.toContain("Uses your");
   expect(byId("signin")?.querySelector("img, svg[aria-label]")).toBeNull();
-  await press("Sign in");
+  // both plans, equal: Claude's then ChatGPT's own Sign in, the same kind of button
+  const plans = [...(byId("signin")?.querySelectorAll<HTMLButtonElement>(".fl-gate-plan") ?? [])];
+  expect(plans.map((b) => b.textContent)).toEqual(["Sign in to Claude", "Sign in to ChatGPT"]);
+  expect(plans[0]?.className).toBe(plans[1]?.className);
+  expect(button("Use ChatGPT instead")).toBeNull();
+  await press("Sign in to Claude");
   expect(setups(t)).toEqual([{ start_sign_in: { agent: CLAUDE } }]);
+});
+
+test("checking: while the sign-in status check runs the composer says it is checking, and Sign in is busy; Sign in once it ends signed out", async () => {
+  const t = await at("checking");
+  expect(gateState()).toBe("checking");
+  expect(text()).toContain("Checking whether you're signed in to Claude…");
+  expect(text()).not.toContain("Sign in to Claude or ChatGPT to ask about this matter");
+  expect(signButton()?.disabled).toBe(true);
+  expect(signButton()?.getAttribute("aria-busy")).toBe("true");
+  await play(t, signIn(CLAUDE, { signed_out: {} }));
+  expect(gateState()).toBe("signed-out");
+  expect(text()).not.toContain("Checking whether");
+  expect(text()).toContain("Sign in to Claude or ChatGPT to ask about this matter");
+  expect(button("Sign in to Claude")).not.toBeNull();
+});
+
+test("a Sign in press shows the checking line and a busy button until the check answers", async () => {
+  const t = await at({ signed_out: {} });
+  expect(signButton()?.disabled).toBe(false);
+  await press("Sign in to Claude");
+  expect(setups(t)).toEqual([{ start_sign_in: { agent: CLAUDE } }]);
+  // the quick status check runs first: the line says so, and Sign in waits, busy
+  await play(t, signIn(CLAUDE, "checking"));
+  expect(gateState()).toBe("checking");
+  expect(text()).toContain("Checking whether you're signed in to Claude…");
+  expect(signButton()?.disabled).toBe(true);
+  expect(signButton()?.getAttribute("aria-busy")).toBe("true");
+  // it answers signed out: the sign-in goes on, and an enabled Sign in is back
+  await play(t, signIn(CLAUDE, { signed_out: {} }));
+  expect(text()).not.toContain("Checking whether");
+  expect(signButton()?.disabled).toBe(false);
+  expect(signButton()?.hasAttribute("aria-busy")).toBe(false);
 });
 
 test("plan-early, plan-queued: Sign in works before the install is ready, and the queued line says the browser opens when Claude is ready (offline: when you reconnect)", async () => {
@@ -62,7 +103,7 @@ test("plan-early, plan-queued: Sign in works before the install is ready, and th
       signIn(CLAUDE, { signed_out: {} }),
     ],
   });
-  await press("Sign in");
+  await press("Sign in to Claude");
   expect(setups(t)).toEqual([{ start_sign_in: { agent: CLAUDE } }]);
   await play(t, signIn(CLAUDE, "queued"));
   expect(gateState()).toBe("queued");
@@ -74,29 +115,28 @@ test("plan-early, plan-queued: Sign in works before the install is ready, and th
   expect(setups(t).at(-1)).toEqual({ cancel_sign_in: { agent: CLAUDE } });
 });
 
-test("plan-chatgpt: Use ChatGPT instead sends InstallAgent for codex-acp, and Use Claude instead sends it for claude-acp", async () => {
+test("plan-chatgpt: Sign in to ChatGPT with neither plan busy sends StartSignIn for codex-acp, and the gate moves to ChatGPT", async () => {
   const t = await mountFirstRun({
     first: [
-      install(CLAUDE, { downloading: { received: 1, total: 2 } }),
+      install(CLAUDE, READY),
       signIn(CLAUDE, { signed_out: {} }),
+      install(CODEX, { missing: { download_bytes: 139_000_000 } }),
       signIn(CODEX, { signed_out: {} }),
     ],
   });
-  await press("Use ChatGPT instead");
-  expect(setups(t)).toEqual([{ install_agent: { agent: CODEX } }]);
-  await press("Use Claude instead");
-  expect(setups(t)).toEqual([
-    { install_agent: { agent: CODEX } },
-    { install_agent: { agent: CLAUDE } },
-  ]);
+  await press("Sign in to ChatGPT");
+  expect(setups(t)).toEqual([{ start_sign_in: { agent: CODEX } }]);
+  expect(byId("signin")?.dataset["agent"]).toBe("chatgpt");
+  expect(setups(t).some((c) => c.install_agent !== undefined)).toBe(false);
 });
 
 test("plan-key: the key field is a password field, Use this key sends SetAgentKey and clears it; the Keychain line on the Mac; Console signs in with console", async () => {
   const t = await at({ signed_out: {} });
-  await press("Use an API key or my firm's account");
+  await press("Use an API key instead");
   expect(gateState()).toBe("key");
   const key = byId<HTMLInputElement>("signin-key");
   expect(key?.type).toBe("password");
+  expect(key?.getAttribute("aria-label")).toBe("Anthropic API key");
   expect(text()).toContain("Kept in this Mac's Keychain.");
   await typeInto(key as HTMLInputElement, "sk-test-secret");
   await press("Use this key");
@@ -109,18 +149,38 @@ test("plan-key: the key field is a password field, Use this key sends SetAgentKe
   expect(setups(t).at(-1)).toEqual({ start_sign_in: { agent: CLAUDE, console: true } });
 });
 
+test("plan-key with ChatGPT the plan to ask with: the field reads OpenAI API key, and Use this key sends SetAgentKey for ChatGPT", async () => {
+  const t = await mountFirstRun({
+    first: [
+      info(true),
+      install(CLAUDE, READY),
+      signIn(CLAUDE, { signed_out: {} }),
+      install(CODEX, READY),
+      signIn(CODEX, { signed_out: {} }),
+    ],
+  });
+  // the composer's "Plan to ask with" switch, at ChatGPT
+  await press("ChatGPT");
+  await press("Use an API key instead");
+  const key = byId<HTMLInputElement>("signin-key");
+  expect(key?.getAttribute("aria-label")).toBe("OpenAI API key");
+  await typeInto(key as HTMLInputElement, "sk-proj-test");
+  await press("Use this key");
+  expect(setups(t)).toEqual([{ set_agent_key: { agent: CODEX, key: "sk-proj-test" } }]);
+});
+
 test("plan-key: Windows keeps the key in Credential Manager", async () => {
   await mountFirstRun({
     platform: "windows",
     first: [info(true), install(CLAUDE, READY), signIn(CLAUDE, { signed_out: {} })],
   });
-  await press("Use an API key or my firm's account");
+  await press("Use an API key instead");
   expect(text()).toContain("Kept in Windows Credential Manager.");
 });
 
 test("plan-key: with keys_available false there is no key field, and the screen says there is no keyring", async () => {
   await at({ signed_out: {} }, false);
-  await press("Use an API key or my firm's account");
+  await press("Use an API key instead");
   expect(byId("signin-key")).toBeNull();
   expect(document.querySelector('input[type="password"]')).toBeNull();
   expect(text()).toContain("This computer has no keyring to keep an API key in.");
@@ -178,7 +238,7 @@ test("signin-nudge (ChatGPT): Codex has no paste route; Use a code instead sends
       signIn(CODEX, { waiting: { since: AT, nudge: true } }),
     ],
   });
-  await press("Use ChatGPT instead");
+  await press("Sign in to ChatGPT");
   expect(byId("signin")?.dataset["agent"]).toBe("chatgpt");
   expect(byId("signin-paste")).toBeNull();
   await press("Use a code instead");
@@ -200,7 +260,7 @@ test("signin-device: the code large, Open page sends OpenSignInPage, Copy copies
       }),
     ],
   });
-  await press("Use ChatGPT instead");
+  await press("Sign in to ChatGPT");
   expect(byId("signin-device-code")?.textContent).toBe("ABCD-1234");
   expect(text()).toContain("Sign in to ChatGPT on that page and enter this code.");
   expect(text()).toContain("The code works until 11:02 am.");
@@ -218,7 +278,7 @@ test("signin-device-off: the refusal says how to turn it on, Try again sends Use
       signIn(CODEX, { failed: { code: "signin.device_code_off", at: AT } }),
     ],
   });
-  await press("Use ChatGPT instead");
+  await press("Sign in to ChatGPT");
   expect(gateState()).toBe("signin.device_code_off");
   expect(text()).toContain("Sign-in with a code is turned off for this ChatGPT account.");
   expect(text()).toContain("Enable device code sign-in for Codex, Excel, PowerPoint, and Word");
@@ -236,7 +296,7 @@ test("signin-device is never the first offer: the plan and the waiting screen of
       signIn(CODEX, { signed_out: {} }),
     ],
   });
-  await press("Use ChatGPT instead");
+  await press("Sign in to ChatGPT");
   expect(text()).not.toContain("Use a code instead");
 });
 
@@ -278,8 +338,12 @@ test("signin-noplan: no plan, what Clauseo works with, See Claude's plans, Use a
   expect(t.only("open_external").map((c) => c.url)).toEqual(["https://claude.com/pricing"]);
   await press("Use another account");
   expect(setups(t).at(-1)).toEqual({ start_sign_in: { agent: CLAUDE } });
+  // "Use … instead" is ChatGPT's own Sign in, through the queue: no install sent around it (Claude's new sign-in
+  // ended first, so ChatGPT's needn't wait for it)
+  await play(t, signIn(CLAUDE, { failed: { code: "signin.no_plan", at: AT } }));
   await press("Use ChatGPT instead");
-  expect(setups(t).at(-1)).toEqual({ install_agent: { agent: CODEX } });
+  expect(setups(t).at(-1)).toEqual({ start_sign_in: { agent: CODEX } });
+  expect(setups(t).some((c) => c.install_agent !== undefined)).toBe(false);
 });
 
 test("signin-port-busy: Try again sends StartSignIn and Use a code instead UseDeviceCode", async () => {
@@ -290,7 +354,7 @@ test("signin-port-busy: Try again sends StartSignIn and Use a code instead UseDe
       signIn(CODEX, { failed: { code: "signin.port_busy", at: AT } }),
     ],
   });
-  await press("Use ChatGPT instead");
+  await press("Sign in to ChatGPT");
   expect(text()).toContain("Another program on this computer is using ChatGPT's sign-in.");
   await press("Try again");
   expect(setups(t).at(-1)).toEqual({ start_sign_in: { agent: CODEX } });
@@ -305,7 +369,7 @@ test("signin-failed: Sign-in didn't finish, with Try again", async () => {
   expect(setups(t)).toEqual([{ start_sign_in: { agent: CLAUDE } }]);
 });
 
-test("signin-policy: the firm's settings can't be read, Ask your IT team, and no button", async () => {
+test("signin-policy: the firm's settings can't be read, the firm manages them, and no button", async () => {
   await at({ failed: { code: "signin.policy_unreadable", at: AT } });
   expect(text()).toContain(
     "Clauseo can't read your firm's settings for Claude, so it won't sign in until they can be read.",
@@ -363,7 +427,7 @@ test("login-found (ChatGPT, no email): the line without the email, from Codex", 
       signIn(CODEX, { login_found: { from: "codex" } }),
     ],
   });
-  await press("Use ChatGPT instead");
+  await press("Sign in to ChatGPT");
   expect(byId("login-found")?.textContent).toBe(
     "Clauseo found your ChatGPT account from Codex and will use it here.",
   );
@@ -413,19 +477,19 @@ test.each<FoundLogin>(["none_found", "reuse_off"])(
   async (found) => {
     const t = await at({ signed_out: { found } });
     for (const [, line] of FOUND) expect(text()).not.toContain(line);
-    await press("Sign in");
+    await press("Sign in to Claude");
     expect(setups(t)).toEqual([{ start_sign_in: { agent: CLAUDE } }]);
   },
 );
 
 test.each(FOUND)(
-  "plan-found (%s): its line, Sign in sending StartSignIn, and the key or firm's account for Claude",
+  "plan-found (%s): its line, Sign in sending StartSignIn, and the key for Claude",
   async (found, line) => {
     const t = await at({ signed_out: { found } });
     expect(text()).toContain(line);
     await press("Sign in");
     expect(setups(t)).toEqual([{ start_sign_in: { agent: CLAUDE } }]);
-    await press("Use an API key or my firm's account");
+    await press("Use an API key instead");
     expect(byId("signin-key")).not.toBeNull();
   },
 );
@@ -445,22 +509,22 @@ test.each<[FoundLogin, string]>([
       signIn(CODEX, { signed_out: { found } }),
     ],
   });
-  await press("Use ChatGPT instead");
+  await press("Sign in to ChatGPT");
   expect(text()).toContain(line);
-  expect(text()).not.toContain("Use an API key or my firm's account");
+  expect(text()).not.toContain("Use an API key instead");
   await press("Sign in");
   expect(setups(t).at(-1)).toEqual({ start_sign_in: { agent: CODEX } });
 });
 
 test("plan-key: opening the key panel puts the focus in the API key field, and Cancel gives it back to the button that opened it", async () => {
   await at({ signed_out: {} });
-  const opener = button("Use an API key or my firm's account") as HTMLButtonElement;
+  const opener = button("Use an API key instead") as HTMLButtonElement;
   opener.focus();
   await press(opener);
   expect(document.activeElement).toBe(byId("signin-key"));
   await press(byId("signin")?.querySelector<HTMLButtonElement>(".fl-gate-cancel") ?? null);
   expect(byId("signin-key")).toBeNull();
-  expect(document.activeElement?.textContent).toBe("Use an API key or my firm's account");
+  expect(document.activeElement?.textContent).toBe("Use an API key instead");
 });
 
 test("signin-nudge: Paste it puts the focus in the code field, and Cancel gives it back to Paste it", async () => {
@@ -471,4 +535,25 @@ test("signin-nudge: Paste it puts the focus in the code field, and Cancel gives 
   await press(byId("signin-cancel"));
   expect(byId("signin-code")).toBeNull();
   expect(document.activeElement).toBe(byId("signin-paste"));
+});
+
+test("papers line: the gate's foot names one plan only once it is in play (picked here), and both before", async () => {
+  await mountFirstRun({
+    first: [
+      info(),
+      install(CLAUDE, READY),
+      signIn(CLAUDE, { signed_out: {} }),
+      install(CODEX, READY),
+      signIn(CODEX, { signed_out: {} }),
+    ],
+  });
+  expect(text()).toContain(
+    "Your papers stay on this computer. Claude or ChatGPT sees the parts it reads to answer you.",
+  );
+  await press("Sign in to ChatGPT");
+  expect(byId("signin")?.dataset["agent"]).toBe("chatgpt");
+  expect(text()).toContain(
+    "Your papers stay on this computer. ChatGPT sees the parts it reads to answer you.",
+  );
+  expect(text()).not.toContain("Claude or ChatGPT sees");
 });

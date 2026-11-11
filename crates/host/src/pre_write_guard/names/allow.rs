@@ -6,6 +6,7 @@ mod programs;
 use std::path::Path;
 
 use super::{Held, MAX_READ_WORDS, Named, Stetdoc, names_word, program_name, stetdoc};
+use crate::pre_write_guard::Reach;
 use crate::pre_write_guard::shell::command_words;
 use crate::pre_write_guard::words::{Escape, Segment, Segments, shell_segments};
 use programs::{cp_reads, pandoc_reads, textutil_outputs, unzip_reads};
@@ -49,8 +50,15 @@ pub(in crate::pre_write_guard) fn read_only(
     held: &[Held],
     hits: &[String],
     folder: &Path,
+    reach: &Reach,
 ) -> bool {
-    Check { held, hits, folder }.command(command, escape, 1)
+    Check {
+        held,
+        hits,
+        folder,
+        reach,
+    }
+    .command(command, escape, 1)
 }
 
 /// The held file a `textutil` segment `words` writes by its default output (an input's name
@@ -75,6 +83,8 @@ struct Check<'a> {
     hits: &'a [String],
     /// The matter folder.
     folder: &'a Path,
+    /// What may be looked at on the disk.
+    reach: &'a Reach,
 }
 
 impl Check<'_> {
@@ -85,14 +95,18 @@ impl Check<'_> {
     }
 
     /// Whether `target` is an existing folder outside the matter, where no held file can be:
-    /// literal, absolute, naming no held file, a folder now, and a child of it resolves outside
-    /// the matter.
+    /// literal, absolute, naming no held file, not a network location (never looked at), a folder
+    /// now, and a child of it resolves outside the matter.
     fn outside(&self, target: &str) -> bool {
         let path = Path::new(target);
         self.writable(target)
             && path.is_absolute()
-            && path.is_dir()
-            && clauseo_matters::matter_path_in(self.folder, &path.join("x")).is_none()
+            && self.reach.walked(path).is_some_and(|walked| {
+                // The walked path, its links followed: not followed or resolved again.
+                std::fs::symlink_metadata(&walked).is_ok_and(|meta| meta.is_dir())
+                    && clauseo_matters::matter_path_of_resolved(self.folder, &walked.join("x"))
+                        .is_none()
+            })
     }
 
     /// Whether `target`, written to, writes no held file: a literal path naming none.

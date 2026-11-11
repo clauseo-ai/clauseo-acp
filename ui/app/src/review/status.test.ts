@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 import { wordsOver } from "@clauseo/components/lib/words-core.ts";
-import { ERROR_WORDS } from "@clauseo/components/lib/words-errors.ts";
+import { ERROR_WORDS, MARK_KEYS } from "@clauseo/components/lib/words-errors.ts";
 import { currentOf, type Entry } from "./entry.ts";
 import { REGISTRY } from "./registry.tsx";
 import {
@@ -104,11 +104,13 @@ test("registry ids are unique and typeable", () => {
   ).toEqual(["U3-err-", "U3-err-Store.full", "U3-err-a..b"]);
 });
 
-test("U3's ids are written as they are: one per error code but U3-07's, and the limit row's own Reset not given.", () => {
+test("U3's ids are written as they are: one per error code but U3-07's and Versions' own, and the limit row's own Reset not given.", () => {
   const ids = REGISTRY.map((e) => e.id).filter((id) => id.startsWith("U3-"));
   const codes = (Object.entries(ERROR_WORDS) as [string, string][])
     .filter(
-      ([, key]) => key !== "The answer stopped. Your question and the answer so far are kept.",
+      ([, key]) =>
+        key !== "The answer stopped. Your question and the answer so far are kept." &&
+        !(MARK_KEYS as readonly string[]).includes(key),
     )
     .map(([code]) => `U3-err-${code}`);
   expect(ids.filter((id) => id.startsWith("U3-err-"))).toEqual(codes);
@@ -120,6 +122,8 @@ test("U3's ids are written as they are: one per error code but U3-07's, and the 
     "U3-49",
     "U3-50",
     "U3-51",
+    "U3-52",
+    "U3-53",
   ]);
   expect(REGISTRY.find((e) => e.id === "U3-48")?.words.key).toBe("Reset not given.");
 });

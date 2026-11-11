@@ -13,6 +13,19 @@
 //! - A cancel during the run ends it `Failed { signin.cancelled }`; a status check, a search
 //!   (`FindLogin`) or a sign-out ends any run and says `SignedOut` (`none_found` for the first
 //!   two); "Use it" finds nothing; "a different account" plays the sign-in.
+//! - The status check of an agent `E2E_FAKE_INSTALLED` names (`fake_install.rs`: installed, no
+//!   install run) answers by `E2E_FAKE_STATUS`, scripted or not; its sign-in calls go to the
+//!   script `E2E_FAKE_SIGNIN` gives it, so name it there too (`claude-acp=ok`) for a press:
+//!   - `signed_out` (the default: unset, empty or any other value): `SignedOut` at once, the
+//!     plain Sign in;
+//!   - `slow`: `Checking` ("Checking whether you're signed in to …"), then `SignedOut` after
+//!     1.5 × the limit: an answer past the first run's limit, inside its retry's (20 s);
+//!   - `hang`: `Checking`, then `SignedOut` after 7 × the limit, past both of S18's start-up
+//!     runs (15 s, then 20 s), so Sign in shows.
+//!
+//!   The limit is `E2E_FAKE_STATUS_LIMIT_MS` (default 15000, S18's first start-up limit); a spec
+//!   sets it low (`200`) to watch `Checking` turn into Sign in quickly. A sign-in pressed meanwhile
+//!   replaces the check, whose end then never comes.
 //! - Its states reach the pump as S18's do, on a second channel merged with S18's, which ends
 //!   when S18's does ([`wrap`]).
 //!
@@ -20,7 +33,7 @@
 //! `start.rs` calls [`wrap`] under it, through `fake_install::scripted`), so no release reads
 //! the variables or holds a script.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -46,6 +59,12 @@ const QUEUED_FOR: Duration = Duration::from_millis(200);
 const HOLD: Duration = Duration::from_millis(1500);
 /// The account an `ok` sign-in ends with.
 pub(crate) const EMAIL: &str = "e2e@example.invalid";
+/// The status answer of the agents `E2E_FAKE_INSTALLED` names.
+const STATUS_VAR: &str = "E2E_FAKE_STATUS";
+/// The status check's first run's limit, in ms, that `slow` and `hang` count from.
+const STATUS_LIMIT_VAR: &str = "E2E_FAKE_STATUS_LIMIT_MS";
+/// S18's first start-up status limit (`found::FIRST_LIMIT`).
+const STATUS_LIMIT: Duration = Duration::from_secs(15);
 /// The page the script "opens": logged only.
 pub(crate) const TEST_URL: &str = "https://example.invalid/e2e-signin";
 
@@ -56,6 +75,26 @@ pub(crate) enum Script {
     Ok,
     /// `Failed { signin.failed }`.
     Fail,
+}
+
+/// How a scripted status check answers (`E2E_FAKE_STATUS`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Status {
+    /// `signed_out`: `SignedOut` at once.
+    SignedOut,
+    /// `slow`: `Checking`, then `SignedOut` after 1.5 × the limit (answered by the retry).
+    Slow,
+    /// `hang`: `Checking`, then `SignedOut` after 7 × the limit (past the retry too).
+    Hang,
+}
+
+/// `E2E_FAKE_STATUS`'s answer from its `value`: `slow`, `hang`, else `signed_out`.
+pub(crate) fn status_from(value: Option<&str>) -> Status {
+    match value.unwrap_or_default().trim() {
+        "slow" => Status::Slow,
+        "hang" => Status::Hang,
+        _ => Status::SignedOut,
+    }
 }
 
 /// The scripts in `value` (`E2E_FAKE_SIGNIN`'s form); an entry that is no `<agent>=ok|fail`
@@ -100,7 +139,12 @@ pub(crate) fn wrap(
     clock: Arc<dyn Clock>,
 ) -> (Arc<dyn SetupAgents>, BoxStream<'static, AgentsEvent>) {
     let scripts = scripts_from(std::env::var(SCRIPTS_VAR).ok().as_deref());
-    if scripts.is_empty() {
+    let installed = super::fake_install::agents_from(
+        std::env::var(super::fake_install::INSTALLED_VAR)
+            .ok()
+            .as_deref(),
+    );
+    if scripts.is_empty() && installed.is_empty() {
         return (real, source.boxed());
     }
     tracing::info!(
@@ -111,7 +155,18 @@ pub(crate) fn wrap(
         queued_for: QUEUED_FOR,
         hold: hold_from(std::env::var(HOLD_VAR).ok().as_deref()),
     };
+    let status = status_from(std::env::var(STATUS_VAR).ok().as_deref());
+    let limit = std::env::var(STATUS_LIMIT_VAR)
+        .ok()
+        .and_then(|value| value.trim().parse::<u64>().ok())
+        .map_or(STATUS_LIMIT, Duration::from_millis);
+    tracing::info!(
+        agents = installed.len(),
+        ?status,
+        "e2e: scripted status answers"
+    );
     let (fake, events) = FakeSignin::new(real, scripts, clock, steps);
+    let fake = fake.with_status(installed, status, limit);
     (Arc::new(fake), merged(source, events))
 }
 
@@ -219,6 +274,11 @@ pub(crate) struct FakeSignin {
     scripts: BTreeMap<AgentId, Script>,
     shared: Arc<Shared>,
     steps: Steps,
+    /// The agents whose status check answers by `status`.
+    status_agents: BTreeSet<AgentId>,
+    status: Status,
+    /// The limit `slow` and `hang` count from.
+    status_limit: Duration,
 }
 
 impl FakeSignin {
@@ -240,8 +300,61 @@ impl FakeSignin {
             scripts,
             shared,
             steps,
+            status_agents: BTreeSet::new(),
+            status: Status::SignedOut,
+            status_limit: STATUS_LIMIT,
         };
         (fake, receiver)
+    }
+
+    /// The same seam, with `agents`' status checks answering by `status`, counted from `limit`.
+    pub(crate) fn with_status(
+        self,
+        agents: BTreeSet<AgentId>,
+        status: Status,
+        limit: Duration,
+    ) -> Self {
+        Self {
+            status_agents: agents,
+            status,
+            status_limit: limit,
+            ..self
+        }
+    }
+
+    /// Whether the seam answers for `agent`: a script, or a scripted status.
+    fn fakes(&self, agent: &AgentId) -> bool {
+        self.script(agent).is_some() || self.status_agents.contains(agent)
+    }
+
+    /// A scripted status check of `agent`: `SignedOut` at once, or `Checking` and then
+    /// `SignedOut` on a thread of its own, unless a newer run begins.
+    fn check(&self, agent: &AgentId) {
+        let signed_out = SigninState::SignedOut { found: None };
+        let wait = match self.status {
+            Status::SignedOut => {
+                self.shared.end_with(agent, signed_out);
+                return;
+            }
+            Status::Slow => self.status_limit * 3 / 2,
+            Status::Hang => self.status_limit * 7,
+        };
+        let generation = self.shared.begin(agent);
+        self.shared
+            .say(agent, generation, SigninState::Checking, false);
+        let shared = Arc::clone(&self.shared);
+        let who = agent.clone();
+        let answer = signed_out.clone();
+        let spawned = std::thread::Builder::new()
+            .name("clauseo-e2e-status".to_owned())
+            .spawn(move || {
+                futures::executor::block_on(async_io::Timer::after(wait));
+                shared.say(&who, generation, answer, false);
+            });
+        if let Err(err) = spawned {
+            tracing::warn!(%err, "e2e: the scripted status check did not start");
+            self.shared.say(agent, generation, signed_out, false);
+        }
     }
 
     /// `agent`'s script, when it has one.
@@ -292,6 +405,18 @@ impl SetupAgents for FakeSignin {
             None => self.real.sign_in(agent, method),
         }
     }
+    fn sign_in_switching(&self, agent: &AgentId, method: Method) -> Result<(), SigninError> {
+        match self.script(agent) {
+            Some(_) => self.sign_in(agent, method),
+            None => self.real.sign_in_switching(agent, method),
+        }
+    }
+    fn own_login(&self, agent: &AgentId) -> Option<clauseo_agents::OwnLogin> {
+        self.script(agent)
+            .is_none()
+            .then(|| self.real.own_login(agent))
+            .flatten()
+    }
     fn cancel_sign_in(&self, agent: &AgentId) -> Result<(), SigninError> {
         if self.script(agent).is_none() {
             return self.real.cancel_sign_in(agent);
@@ -318,6 +443,10 @@ impl SetupAgents for FakeSignin {
         Ok(())
     }
     fn check_status(&self, agent: &AgentId) -> Result<(), SigninError> {
+        if self.status_agents.contains(agent) {
+            self.check(agent);
+            return Ok(());
+        }
         if self.script(agent).is_none() {
             return self.real.check_status(agent);
         }
@@ -328,7 +457,7 @@ impl SetupAgents for FakeSignin {
         Ok(())
     }
     fn find_login(&self, agent: &AgentId) -> Result<(), SigninError> {
-        if self.script(agent).is_none() {
+        if !self.fakes(agent) {
             return self.real.find_login(agent);
         }
         self.check_status(agent)
@@ -348,8 +477,14 @@ impl SetupAgents for FakeSignin {
             None => self.real.use_different_account(agent),
         }
     }
+    fn use_different_account_switching(&self, agent: &AgentId) -> Result<(), SigninError> {
+        match self.script(agent) {
+            Some(_) => self.use_different_account(agent),
+            None => self.real.use_different_account_switching(agent),
+        }
+    }
     fn signin_state(&self, agent: &AgentId) -> Option<SigninState> {
-        if self.script(agent).is_none() {
+        if !self.fakes(agent) {
             return self.real.signin_state(agent);
         }
         lock(&self.shared.runs)
@@ -357,7 +492,7 @@ impl SetupAgents for FakeSignin {
             .and_then(|run| run.state.clone())
     }
     fn sign_in_going(&self, agent: &AgentId) -> bool {
-        if self.script(agent).is_none() {
+        if !self.fakes(agent) {
             return self.real.sign_in_going(agent);
         }
         lock(&self.shared.runs)

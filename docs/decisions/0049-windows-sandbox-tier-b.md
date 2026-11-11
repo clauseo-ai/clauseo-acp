@@ -33,10 +33,13 @@ build 26100):
 
 - **D9: one pool user per matter.** Set-up makes a pool of local standard users (`ClauseoSbNN`,
   in `Users`) and the local group `ClauseoSandboxUsers`, which holds them all; growing the pool
-  needs another admin prompt. Each matter is assigned one pool user. The runner logs on as that
-  user with `CreateProcessWithLogonW`, which needs the Secondary Logon service: without it the
-  logon fails with error 1058, and set-up reports `SetUpFailed` with that cause. The agent runs
-  under a restricted token, not write-restricted, so reads are checked too:
+  needs another admin prompt. The pool users are hidden from the sign-in screen, and the group
+  holds "Deny log on through Remote Desktop Services" (`SeDenyRemoteInteractiveLogonRight`),
+  granted by every set-up and taken off by the removal before the group goes, so no pool user
+  signs in over Remote Desktop either. Each matter is assigned one pool user. The runner logs on
+  as that user with `CreateProcessWithLogonW`, which needs the Secondary Logon service: without
+  it the logon fails with error 1058, and set-up reports `SetUpFailed` with that cause. The
+  agent runs under a restricted token, not write-restricted, so reads are checked too:
   - restricting SIDs: the pool user, `RESTRICTED`, `Users` and `Everyone` (D11), and the
     matter's SID only when a launch asks for it (off by default; spike B found it adds nothing);
   - the logon SID deny-only, and not restricting;
@@ -511,12 +514,20 @@ started elevated, by the app or by the uninstall hook.
   install placed. Either exits 2 (`Blocked::OtherAccount`), changing nothing; a second user's
   launch and set-up meet the same cause. `AdminCopyVersion` (the app's version) newer than the
   running copy's own exits 9: no downgrade (`admin_copy::version_not_older`, which the refresh
-  task uses too). Then `--adopt` deletes everything in `Sandbox` but the copy, its `.sig` and
-  `staging\`, gives the folder and everything left owner Administrators and a protected DACL
-  (SYSTEM and Administrators full, Users read and run), reads each back exactly, records
+  task uses too). Then `--adopt` deletes everything in `Sandbox` but the copy and its `.sig`,
+  `staging\` included (taken back first if it shuts Administrators out; "The staging folder's
+  DACL" below), gives the folder and everything left owner Administrators and a protected DACL
+  (SYSTEM and Administrators full, Users read and run, and, once the record names the pool's
+  group, that group denied everything, first: "The pool's group is denied the copy" below),
+  reads each back exactly, records
   `AdminCopySha256`, `UserInstallDir`, `AdminCopyVersion` and `AdminCopyOwner`, and, per
   user, runs the normal set-up in-process. Exits: 0 done, 1 usage, 2 another account, 3 failed,
   5 lock held, 6 data folder not the user's, 7 not elevated, 8 not the admin copy, 9 downgrade.
+  Every exit 3 before the set-up writes one Event Log line (source `Clauseo Sandbox`):
+  `--adopt failed (exit 3) at step <name>: <Win32 error N | HRESULT 0x... | no Windows error
+  code>`, naming no path or SID; once the lawyer is confirmed, also `setup-result.json`, with
+  the step, the cause, `code`, `kind` (`win32` or `hresult`) and `at` (when it was written,
+  so an earlier run's result isn't read as this one's).
 - **`UserInstallDir` is untrusted.** It is checked as text and its last folder for a link, but
   the lawyer can re-point any folder on the way through a junction at any time. Anything SYSTEM
   does with it (the refresh task reading a new exe from it) must open every component without
@@ -531,9 +542,60 @@ started elevated, by the app or by the uninstall hook.
   one; the volume root the same, but only delete-child, `WRITE_DAC`, `WRITE_OWNER` and the
   generic rights that hold them count there, since every Windows install lets Authenticated Users
   add a folder at the root; `Sandbox` must hold nothing but the copy, its `.sig` and `staging\`
-  (else `AdminCopyUnsafe`; deny entries are ignored); and its SHA-256 must be the recorded one
+  (else `AdminCopyUnsafe`; deny entries are ignored); once the record holds `GroupSid`,
+  `Sandbox` and the copy must each deny that group everything, before any allow entry (else
+  `AdminCopyUnsafe`; a `GroupSid` that can't be read is `AdminCopyMissing`); and its SHA-256
+  must be the recorded one
   (else `AdminCopyChanged`). Each is `sandbox.blocked`, not retryable, with words for IT. A
   tier-B launch hashes the copy each time.
+- **The pool's group is denied the copy.** Users may read the copy, so any process could open
+  it sharing nothing, and while that handle is open every SYSTEM task that runs it (the stop,
+  the refresh) fails to start. A pool process could do that to keep a running session from
+  being stopped (a launch fails closed; a running session didn't). So `Sandbox`, and everything
+  locked in it, carries a deny of everything (`FA`) for `ClauseoSandboxUsers`, first in the
+  DACL: `(D;OICI;FA;;;<GroupSid>)` on the folder, `(D;;FA;;;<GroupSid>)` on the copy
+  (`admin_copy::locked_folder_sddl`, `locked_file_sddl`). Users' read and run stay: the
+  lawyer's unelevated runner and the UAC start read the copy. The SID is the machine's own,
+  read from the record's `GroupSid`, never looked up by name.
+  - **Order.** A first install's `--adopt` locks before set-up has made the group, so with no
+    `GroupSid` it locks with no deny. The set-up, right after it makes or adopts the group and
+    the record names it, locks the folder again the way `--adopt` does, with the deny, on any
+    machine whose record names an `AdminCopyOwner` (`late_steps::admin_lock`, failing at
+    `Step::AdminLock`, rolled back; the deny itself stays, and a deny for a group that is gone
+    opens nothing). Every later `--adopt` and every refresh (the staged copy's DACL) deny the
+    recorded group. The exact read-backs (`admin_copy::locked`) require the deny when there is
+    a group and refuse it when there is none.
+  - **Upgrades heal with no prompt.** Two upgrades leave the folder and the copy locked exactly
+    as before, with no deny: a machine set up before the deny existed, and a per-user update
+    (`/UPDATE` runs no `--adopt`), whose refresh runs from the old copy and secures the new
+    one with the old DACL. A per-machine update runs `--adopt`, which denies the recorded
+    group before anything checks. For the rest (`admin_copy/heal.rs`):
+    - every refresh run of this build, with the set-up lock held and the record read, before
+      anything it may refuse on, locks the folder and the copy again with the deny when each
+      is exactly the locked form, with or without the deny, and one lacks it
+      (`admin_copy::owed`; `refresh/deny.rs`). It first requires every level from the volume
+      root to the copy to pass the check's chain rule, then opens the folder and the copy once
+      each as themselves, refuses a reparse point at either, and reads and writes each through
+      that one handle (`admin_copy/heal_os.rs`). A failed heal is logged and the run goes on;
+    - before the launch check, the elevated start's check and the state the app shows, a copy
+      that passes every rule but the deny, its folder and copy each in one of those two forms,
+      asks the refresh task to run (the lawyer may start it) and looks again every 0.5 s, for
+      at most 20 s, asking again every 3 s: the first run may be the old copy's, which swaps
+      this build in but can't heal, and the task never runs twice at once. Then the check
+      decides. A full wait that didn't heal starts a 10-minute back-off, in memory: state
+      queries then neither start the task nor wait, and a launch or set-up asks once and looks
+      once. The app's first detection can take those seconds once after such an update.
+  - **Drift.** Anything else (another group's deny, an extra entry, the deny on one and drift on
+    the other) is `AdminCopyUnsafe`, repaired as any other drift: the installer's repair runs
+    `--adopt`, which locks with the deny. A re-run of set-up locks again too.
+  - **Every pool token holds the group.** Set-up puts every pool user it makes or resets in
+    `ClauseoSandboxUsers`, and every runner logs on afresh (`CreateProcessWithLogonW`), so the
+    inner runner's and the sweeper's tokens hold the group enabled. The agent's token is
+    `CreateRestrictedToken` over the inner's: that can only make a SID deny-only, never drop it,
+    and only the logon SID is made deny-only. A deny entry matches an enabled or a deny-only SID,
+    so the deny covers every pool process, and any token a pool process derives from its own.
+    Nothing a pool process runs, loads or starts in lives in `Sandbox`: the runner exe sits in
+    the install folder, the inner runner starts in `System32` and the agent in its matter.
 - **The elevated start holds what it hashed.** `UserSetup` hashes the copy through a handle that
   shares read only (no write, no delete) and keeps it open until `ShellExecuteExW` has returned
   (`admin_copy::launch_checked`), so the file started is the file hashed. The start looks its
@@ -564,17 +626,25 @@ started elevated, by the app or by the uninstall hook.
   between calls; the launch and the elevated start hash it every time.
 - **Two removals.** The app's in-app removal runs plain `--remove`: the pool, its entries and the
   rest go, and the set-up's record values with them (`OwnerSid`, `GroupSid`, `PoolSids`,
-  `DataDir`, `Removing`, `ResetSids`, `StopCompleted`, `StopSequence`, `StopNext`), but the copy, its four values and the SYSTEM tasks
-  (refresh and stop) stay, so a later
+  `DataDir`, `Removing`, `ResetSids`, `StopCompleted`, `StopSequence`, `StopNext`, `SweepCompleted`,
+  `SweepSequence`, `SweepNext`) and, as the owner, the unclean-session markers, but the copy, its
+  four values and the SYSTEM tasks
+  (refresh, stop and sweep) stay, so a later
   in-app set-up elevates the verified copy with no installer. `AdminCopyOwner` staying keeps the
   one-owner rule: the same lawyer sets up again, another user is `OtherAccount`. The
   uninstaller's hook runs `--remove --uninstall`: all that, then, once the pool has no owner and
   only for the install that placed the copy (a per-machine removal for `machine`, the lawyer's
-  own for theirs), the four values, the refresh and stop tasks (`unregister_task`), staging
-  (`remove_staging`), everything in the folder, then the folder; the key goes once empty. The
-  running copy is renamed in place to a name nothing starts and scheduled for deletion at
-  restart (`MOVEFILE_DELAY_UNTIL_REBOOT`), with the folder after it; a reinstall before the
-  restart keeps its new copy.
+  own for theirs), the four values, the refresh, stop and sweep tasks (`unregister_task`), staging
+  (`remove_staging`, taken back if need be), everything in the folder, then the folder; the key
+  goes once empty, and `HKLM\SOFTWARE\Clauseo` after it once that has no value and no subkey
+  left (`record_key.rs`; a per-machine install's `SOFTWARE\Clauseo\Clauseo` keeps it, and
+  `SOFTWARE\Policies\Clauseo` is never touched). The running copy is renamed in place to a name
+  nothing starts and scheduled for deletion at restart (`MOVEFILE_DELAY_UNTIL_REBOOT`), with the
+  folder after it. A reinstall before the restart keeps its new copy. If the rename fails, the
+  copy stays and the step fails (exit 10): the canonical `clauseo-sandbox-setup.exe` is never
+  scheduled, since a reinstall before the restart would lose its new copy at boot.
+  A step that fails writes an Event Log line naming it and its error code and exits 10
+  (`AdminCopyLeft`); the protection itself is gone, so the hook counts 10 as removed, as 0.
 - **The copy beside the app stays.** A per-user install still ships
   `clauseo-sandbox-setup.exe` beside `Clauseo.exe`, with its `requireAdministrator` manifest: it
   is the installer's payload and the refresh task's source, and nothing starts it.
@@ -605,12 +675,20 @@ started elevated, by the app or by the uninstall hook.
   (`safe_temp.nsh`, `CLAUSEO_SAFE_PLUGINSDIR`): the per-machine installer at the top of `.onInit`
   (template block `admin-section`, before `SetContext`'s `${RunningX64}`, the language picker and
   `SemverCompare`), and the per-user elevated step once it has its switch, though it loads no
-  plug-in. It makes a folder named by `GetTempFileName` under
-  `%ProgramFiles%\Clauseo\installer-temp` (`$PROGRAMFILES64`, from HKLM), sets owner
+  plug-in. It makes a folder named by `GetTempFileName` directly in `%ProgramFiles%\Clauseo`
+  (`$PROGRAMFILES64`, from HKLM; no parent of its own), sets owner
   Administrators and a protected DACL (Administrators and SYSTEM full) with `icacls`, checking
   both exit codes, then sets `$PLUGINSDIR` and `$TEMP` to it. NSIS skips its own plug-in folder
-  when `$PLUGINSDIR` is set (makensis `build.cpp:3806-3807`) and deletes `$PLUGINSDIR`, and only
-  it, at exit (`Main.c:470-489`). The per-machine installer also points the environment's `TEMP`
+  when `$PLUGINSDIR` is set (makensis `build.cpp:3806-3807`) and tries to delete `$PLUGINSDIR`,
+  and only it, at exit (`Main.c:470-489`). That leaves the folder with its `System.dll` (the ARM64
+  install smoke finds one per per-machine run, not queued for a restart; why isn't proven), so
+  each per-machine run first removes earlier runs' folders: only folders directly in
+  `%ProgramFiles%\Clauseo` named as NSIS names them (`ns`, a letter, 1-4 hex digits, `.tmp`), never
+  its own or `$INSTDIR`, and only one whose `System.dll` it could delete, which a run still going
+  holds loaded; then `RMDir /r`. The per-machine uninstaller removes its own once it has exited
+  (below). A recursive delete there is safe for the same reason the folder is ours: only
+  administrators can create anything there. Earlier builds used a parent `installer-temp`, which stayed
+  empty after every run; each run now removes it first, only when empty. The per-machine installer also points the environment's `TEMP`
   and `TMP` there, so what it starts elevated (the WebView2 bootstrapper, `--adopt`, the old
   uninstaller its reinstall page runs in place) uses it too. The folder can't be checked as ours
   without a plug-in; it is ours because only administrators can create anything under Program
@@ -642,14 +720,16 @@ started elevated, by the app or by the uninstall hook.
   the end of the section (`uninstall_in_place.nsh`, block `uninstall-self-delete`) it starts,
   once (from `un.onGUIEnd` when it has a window, from the section under `/S`; in `$SYSDIR`), a
   hidden `"$SYSDIR\cmd.exe" /d /v:off /c` that waits about 3 s on `$SYSDIR\PING.EXE`, deletes
-  `uninstall.exe` only if the main exe isn't there, and removes `installer-temp` and the install
-  folder only if empty. An install writes the main exe before `WriteUninstaller`, so the guard
+  `uninstall.exe` only if the main exe isn't there, removes its own plug-in folder (`rmdir /s /q` on
+  that exact `$PLUGINSDIR`, once more about 5 s later if it is still there; only a folder directly
+  in `%ProgramFiles%\Clauseo` with an NSIS temp name, and no line at all if NSIS cut it at its
+  string limit), and removes the install folder only if empty. An install writes the main exe before `WriteUninstaller`, so the guard
   keeps a new install's `uninstall.exe` unless both land in the instant between `if` and `del`.
   `/d` keeps out HKCU's `AutoRun`, which an elevated cmd would otherwise run from the user's
   hive. It builds no line, and leaves the file, when the paths hold one of `% ^ & | < > " !`.
   The reinstall page runs the old uninstaller this way too, never with `/UPDATE`; its own
   `_?=` comes last on the line, which NSIS takes, and the self-delete can only remove the old
-  `uninstall.exe` and empty folders, so it isn't skipped there. **Residual:** an install
+  `uninstall.exe`, its own plug-in folder and empty folders, so it isn't skipped there. **Residual:** an install
   registered by an older version keeps its old `UninstallString` (no `_?=`), and so the `%TEMP%`
   copy, until it's reinstalled. `uninstall.exe` started by hand without `_?=` still copies itself
   before any script runs; the copy then refuses with 26, but by then it is already running
@@ -687,9 +767,13 @@ takes the user who asked from its recorded parent (D-B2), never from an argument
   no record, the lock is still tried without waiting, and a set-up holding it is exit 5):
   `Removing = 1`; every process running as a pool SID stopped (D-B13); per pool user, its
   `LocalLow` denies (planned again from the record, D-B11), its profile, then its account and
-  sign-in screen value; `DeviceSync`'s deny; the ledger's entries; the group; the record. The
-  first failure stops the run: exit 4, the record kept with `Removing` and every pool SID (so a
-  later run still trusts the ledger), the ledger kept. A re-run skips what is gone.
+  sign-in screen value; `DeviceSync`'s deny; the ledger's entries; the group's Remote Desktop
+  deny, then the group; as the owner only, the unclean-session markers in the checked data
+  folder (`RemoveStep::Markers`; an administrator's removal leaves them, K1, and the readers
+  drop them as stale); the record, with the stop's and the sweep's values (its key, and an empty
+  `SOFTWARE\Clauseo` above it, once nothing is left in them). The first failure stops the run:
+  exit 4, the record kept with `Removing` and every pool SID (so a later run still trusts the
+  ledger), the ledger kept. A re-run skips what is gone.
 - **The ledger, as the owner** (the parent is the owner): `DataDir`, which the owner can
   influence, is checked as `--data-dir` is and used only while acting as the owner; every matter
   is forgotten (`forget_matter`) acting as the owner, with a standard user's token: an elevated
@@ -698,14 +782,18 @@ takes the user who asked from its recorded parent (D-B2), never from an argument
   the administrator's path below; a per-user run exits 3, nothing touched. Anything left keeps
   the record.
 - **The ledger, as an administrator for an absent owner** (per-machine; no impersonation): the
-  ledger is read from a `DataDir` the owner owns, opened relative to its checked `sandbox`
+  ledger is read from a `DataDir` owned as below, opened relative to its checked `sandbox`
   folder's handle, and never written. The only change is removing one access entry, for an entry
   that names a recorded pool SID or the group, is no label, records no file by ID, lies in a
   matter folder the ledger records (not a drive's root), and whose folder, checked right before,
-  has no junction or link on the way, is the owner's, and passes the gate's folder check; and
+  has no junction or link on the way, is owned as below, and passes the gate's folder check; and
   taking the recorded Low label off each such matter folder's root (removing a label only
-  tightens). So a crafted ledger can't steer an administrator onto anything the owner couldn't
-  change themselves (K1). No walk, label written, hand-back, add or delete.
+  tightens). A crafted ledger can name a folder the owner doesn't own (Administrators' or
+  SYSTEM's, below), so there it can make an administrator remove only the pool's entries, which
+  name our SIDs alone. The Low label comes off such a folder only when the record's owner is in
+  Administrators (`NetUserGetLocalGroups`, indirect included; unreadable is no), who could take
+  it off anyway. Otherwise it stays, logged, so no other program's Low processes lose a folder
+  they write to (K1). No walk, label written, hand-back, add or delete.
 - **Exits.** 0 (`SetupExit::Removed`) is the only one the hook reads as removed; only then may
   the app delete `sandbox\` when the box is ticked. The hook reads it only after an ended wait
   (`WAIT_OBJECT_0`) and a successful `GetExitCodeProcess`; a timeout, `WAIT_FAILED` or a failed
@@ -715,6 +803,30 @@ takes the user who asked from its recorded parent (D-B2), never from an argument
   writing there; that is accepted, since the tool keeps its records consistent at every step and
   reinstalling then uninstalling recovers.
 - **Recovery** from a partial removal: reinstall Clauseo, then uninstall it again.
+- **The data folder's owner.** On both paths `sandbox\` must be owned by the record's owner,
+  Administrators or SYSTEM: the rule `sandbox\` is made and repaired by
+  (`sids::owner_allowed`). `DataDir` itself is held to set-up's rule (below): the owner, or
+  Administrators only when the record's owner is in Administrators (`NetUserGetLocalGroups`),
+  never SYSTEM. An elevated process makes Administrators the owner of what it
+  creates (the built-in Administrator, or any admin with UAC off), and requiring the owner alone
+  failed those removals with exit 4, the record, the group and the folder left (GitHub run
+  42464948955). Any other owner (a pool user, another account, Everyone) still refuses. The
+  administrator's path holds each matter folder to the same rule, since such a lawyer's matter
+  folders are Administrators' too. On one that passes, it only takes off what we wrote: the
+  ledger's allows and denies for a recorded pool SID or the group, and the Low label the ledger
+  records on the matter's root, that label on an Administrators- or SYSTEM-owned folder only for
+  an owner in Administrators (above). Nothing is added and no other entry is touched.
+- **The data folder at set-up** (`exe::owners_data_dir`: `--set-up`, `--adopt`, `--reclaim`,
+  the set-up task) is stricter. The requesting user must own it, or Administrators may own it
+  when that user is a member of Administrators: enabled or deny-only in the token set-up acts
+  with (the verified parent's, the unelevated installer's, or the session's), read as
+  `TokenGroups`, a failed read refusing. Such a user can elevate anyway, and as the built-in
+  Administrator, or with UAC off, the app makes `data\` Administrators' from the start. SYSTEM
+  never, nor Administrators for a standard user, so no one aims an elevated set-up at a folder
+  such as `C:\ProgramData`: `DataDirNotOwned`.
+- **VM rows.** With UAC off, and as the built-in Administrator: set-up, a forced re-set-up
+  (`NeedsReSetUp`), a launch, then the uninstall exits 0 and leaves no record, no
+  `ClauseoSandboxUsers` group, no pool account and no `sandbox\` when the box is ticked.
 
 **Accepted residual.** A per-machine removal someone other than the owner runs deletes the record
 even when the ledger lists entries it may not touch, as ruled. Those entries name dead SIDs, which
@@ -1053,18 +1165,17 @@ leaves that profile, both naming the part.
     its DLL search, sets its error mode and shuts its own token, and the only token anyone could
     have opened in the gap is the inner's own, as the pool user it already is. A process that
     opened the inner in the gap, or one this logon set off, is dead before the launch is read.
-  - **Cleanup.** Right after the first-act sweep, still before the launch, the inner removes
-    what the pool user could have left to start at a logon or to run in a later runner: its
-    per-user COM classes (`HKCU\Software\Classes\{CLSID,Interface,AppID,TypeLib}` and their
-    `Wow6432Node` twins, deleted whole: a sandbox account has none of its own, and one registered
-    for a class a runner makes would run in that runner with the lawyer's logon SID); every value
-    of its `HKCU\...\CurrentVersion\Run` and `RunOnce`; and every entry of its Startup folder.
-    The inner makes no COM call. The end sweeper removes the same three, then, over COM (MTA) and
-    only when no class key is left, scheduled tasks whose principal or author is the pool user,
-    in every folder it can read. It gets Task Scheduler's class object straight from System32's
-    `taskschd.dll` (`DllGetClassObject`), so that creation looks up no class at all. It makes no
-    BITS call (below). The Startup folder must lie in the
-    pool user's profile. It is reached one name at a time relative
+  - **Cleanup.** The first act cleans the pool user's per-user leftovers before any agent code
+    runs; `SYSTEM` deletes the pool users' scheduled tasks and cancels their BITS jobs
+    (`\Clauseo\SandboxSweep`, "Sweeping the pool's tasks and BITS jobs"). Right after the
+    first-act sweep, still before the launch, the inner removes what the pool user could have left
+    to start at a logon or to run in a later runner: its per-user COM classes
+    (`HKCU\Software\Classes\{CLSID,Interface,AppID,TypeLib}` and their `Wow6432Node` twins,
+    deleted whole: a sandbox account has none of its own, and one registered for a class a runner
+    makes would run in that runner with the lawyer's logon SID); every value of its
+    `HKCU\...\CurrentVersion\Run` and `RunOnce`; and every entry of its Startup folder. The
+    inner makes no COM call, and nothing else removes these three. The Startup folder must lie in
+    the pool user's profile. It is reached one name at a time relative
     to each folder's handle, with no reparse point followed, and each entry is deleted as itself,
     so a link is deleted and never what it names. Each kind is logged by count alone, with no
     names or contents. A kind that fails is logged and the rest still run; the launch goes on.
@@ -1087,251 +1198,282 @@ leaves that profile, both naming the part.
     at any point, the first act's included: a console host (`conhost.exe`) of the pool user's
     refuses `TerminateProcess` with 5 and exits once its last client is gone, which the round
     may just have killed (the harness's `sweep-before-logon` row failed the first act so). No
-    image name is special. At both, and in
-    the end sweeper, a process that can't be opened, checked or ended is logged and the sweep
-    goes on with the rest; the sweep's next round and the next tick try it again. One that can't
-    be opened or ended is also an escapee (below).
-  - **The end sweeper.** At every session's end the outer ends its job (`TerminateJobObject`)
+    image name is special. At both, a process that can't be opened, checked or ended is logged
+    and the sweep goes on with the rest; the sweep's next round and the next tick try it again.
+    One that can't be opened or ended is also an escapee (below).
+  - **The session's end.** At every session's end the outer ends its job (`TerminateJobObject`)
     and waits until no process is left in it (`ActiveProcesses` of
-    `JobObjectBasicAccountingInformation` at 0, looked at every 25 ms for up to 400 ms), and only
-    then starts the end sweeper: never while anything in the job is alive. When the inner exits,
-    the agent's output first has up to 2 s per stream to drain, then the job ends, then the output
-    gets 2 s again for what a descendant held. When the host's stdin ends (the host's cancel
-    ladder closes it, then gives the outer 2 s before it ends the outer's job), the outer closes
-    the agent's stdin, so the agent reads the end of its input, and gives it 1 s from the stdin
-    end. The outer reads its stdin on a thread of its own and hands the pieces, over a bounded
-    channel (256 pieces of up to 64 KiB), to the thread that writes the agent's stdin, so it
-    sees the end, and the deadline starts, when the host's stdin ends, even while that write is
-    blocked on an agent that isn't reading. The writer closes the agent's stdin once it has handed
-    over what came before the end. A write still blocked when the 1 s runs out fails once the job's
-    end takes its pipe's other end. Only past 16 MiB that the agent hasn't read does the reader
-    wait too, and then it sees the end late. An agent that closed its own stdin ends nothing; the
-    host's stdin end is still seen. If the inner
-    exits meanwhile, its code and output are kept and the order is the inner exit's; if not, the
-    job ends then, and the 400 ms emptying wait follows. On either order, once the stdin ended
-    the sweeper's logon starts only while at least 500 ms of the host's 2 s is left
-    (`end::SWEEPER_BUDGET`), so the 1 s, the 400 ms and the 500 ms fit with 100 ms to spare (the
-    residual cases, below, say what a skip leaves). (The
-    harness's `whoami` row, whose stdin closes at once, was killed mid-output by a sweeper started
-    at the stdin end.) On a failure once the launch is read the job ends at once. A guard does this
-    once a session, and a second path waits until the first one's start is over. The sweeper's logon opens the
-    same gap as the inner's: until the outer's shut, its process, thread and Medium token carry
-    the logon's default DACL. With the job empty first, neither the agent nor anything it started
-    in the job is alive in that gap. A job still holding a process after 400 ms starts no sweeper,
-    since that process could take a handle in the gap; the outer logs it, and the next launch's
-    first act is the backstop. The sweeper is `clauseo-sandbox-run
-    --sweep`, started as the pool user with `CreateProcessWithLogonW` and the password the outer
-    reads again from `secrets.bin` (wiped after). Its process and thread are shut as the inner's
-    are, and then it is resumed. Its first act, like the inner's, is to shut its own primary token
-    to `SYSTEM` alone. Then it gives its default DACL and every thread it has `SYSTEM` full and
-    `OWNER RIGHTS` held to `READ_CONTROL`, nothing else, so a thread the system or COM starts in
-    it later is shut too. Unlike the inner's, these name no lawyer: the sweeper takes nothing but
-    `--sweep`, and the lawyer's SID on its command line would buy only `SYNCHRONIZE` on its
-    threads, which the outer doesn't use (it waits on the sweeper's process handle). It is never
-    assigned to the outer's job. The Secondary Logon
-    service starts it as its own child, outside the caller's jobs, in a job of the service's own,
-    so the host ending the outer's job leaves it running. The sweeper takes no input. It kills
-    every process of the pool user but itself that was created before it was (`GetProcessTimes`
-    against its own start), or that a process it killed started, with no job exemption because
-    the session is ending. It makes that sweep twice, both passes before the cleanup, and then
-    makes the same cleanup, all on its own 60 s limit. The order is shut, sweep, widen, classes,
-    COM (`runner/sweeper_flow.rs`). Its token stays shut to `SYSTEM` while anything of the pool
-    user could be alive to open it, through both passes. COM can't work with it shut: Task
-    Scheduler and BITS (which it called then) both failed with `E_OUTOFMEMORY` (14) on every
-    session's end in the harness, as the inner's did when it still made COM calls after its own
-    token's shut (before its threads' and default DACL's). So only once both passes went with no
-    failure, which leaves nothing of the pool user that the sweep could end, does the sweeper
-    widen its own token's DACL for the COM step: its user gets `TOKEN_QUERY`, `TOKEN_DUPLICATE`
-    and `TOKEN_IMPERSONATE` (`token::SWEEPER_COM_TOKEN_RIGHTS`), the rights the calls that read,
-    copy and take on a token document, and nothing that adjusts it, assigns it to a process or
-    changes its DACL or owner. Then it removes the per-user classes (before any COM, so no class
-    registered there runs in it), the `Run` and `RunOnce` values and the Startup entries, then
-    the scheduled tasks over COM. A sweep that failed, or a widening that did, leaves the token
-    shut and skips COM: the tasks wait for a later end sweeper.
-    **BITS.** The end sweeper makes no BITS call and creates no BITS object. A pool user's BITS
-    jobs are cancelled only by the `SYSTEM` `\Clauseo\SandboxStop` task (PR #668: it enumerates
-    with `BG_JOB_ENUM_ALL_USERS`, as `SYSTEM`, from a clean profile), whenever that task runs.
+    `JobObjectBasicAccountingInformation` at 0, looked at every 25 ms for up to 400 ms,
+    `end::EMPTY_WAIT`). When the inner exits, the agent's output first has up to 2 s per stream
+    to drain, then the job ends, then the output gets 2 s again for what a descendant held. When
+    the host's stdin ends (the host's cancel ladder closes it, then gives the outer 2 s before it
+    ends the outer's job), the outer closes the agent's stdin, so the agent reads the end of its
+    input, and gives it 1 s from the stdin end (`end::GRACE`). The outer reads its stdin on a
+    thread of its own and hands the pieces, over a bounded channel (256 pieces of up to 64 KiB),
+    to the thread that writes the agent's stdin, so it sees the end, and the deadline starts,
+    when the host's stdin ends, even while that write is blocked on an agent that isn't reading.
+    The writer closes the agent's stdin once it has handed over what came before the end. A write
+    still blocked when the 1 s runs out fails once the job's end takes its pipe's other end. Only
+    past 16 MiB that the agent hasn't read does the reader wait too, and then it sees the end
+    late. An agent that closed its own stdin ends nothing; the host's stdin end is still seen. If
+    the inner exits meanwhile, its code and output are kept and the order is the inner exit's; if
+    not, the job ends then, and the 400 ms emptying wait follows. On a failure once the launch is
+    read the job ends at once. `end::SessionEnd::trigger` ends the session once, whichever path
+    comes first, and a path that comes while the end is still going waits until it is over.
+    The session can launch nothing more from here. The outer reads the record's `SweepNext`
+    (`M`, as the lawyer: the record grants Users read), then asks the Task Scheduler to run
+    `\Clauseo\SandboxSweep` ("Sweeping the pool's tasks and BITS jobs";
+    `end::EndSteps::request_sweep`, `refresh::request_pool_sweep`: `IRegisteredTask::Run` as the
+    lawyer, through the owner's `FRFX` entry), also when the job didn't empty, which is logged.
+    Read before the request, `M` is a number the queued run or a later one takes. The request is
+    best effort: one that fails is logged as a warning (the call and its code, never a path or a
+    SID) and changes no exit code. A run asked for while one runs is queued after it. Once queued
+    the run is the Task Scheduler's, so the host ending the outer's job leaves it running. **The
+    outer never waits for a run.** After a cancel the host gives it its `stdin_grace`, 5 s on
+    tier B, and its end fits in 3 s (`end::OUTER_END`, which the cancel tests pin: the agent's
+    1 s `GRACE`, a full 400 ms wait for the job to empty, the escapee snapshot, two record reads,
+    the requests and the marker's write). At its end (`end::SessionEnd::finish`) it writes the
+    session's marker as awaiting a sweep `>= M` (below). When a sweep of the session found an
+    escapee it instead reads `StopNext`, requests `\Clauseo\SandboxStop` (`request_pool_stop`)
+    and writes the marker as awaiting that stop alone; its sweep number is read once the stop
+    completed (below). A number that can't be read leaves the marker
+    open.
+    The outer starts no process as the pool user at the end, so the end opens no logon gap. A
+    process of the pool user's outside the job is killed by the next inner's first act, which also
+    removes the per-user classes, `Run` values and Startup entries (above), or by
+    `\Clauseo\SandboxStop`.
+    **BITS.** No runner makes a BITS call or creates a BITS object. A pool user's BITS jobs are
+    cancelled by the `SYSTEM` tasks alone, `\Clauseo\SandboxSweep` at each session's end and
+    `\Clauseo\SandboxStop`, both enumerating with `BG_JOB_ENUM_ALL_USERS` from a clean profile.
     Until then such a job is inert: BITS runs a job with its owner's logon token and holds none
     for a pool user, who logs on only through `CreateProcessWithLogonW`, so it refuses
     `AddFile` and `Resume` for a pool user with `ERROR_NOT_LOGGED_ON` (0x800704dd, shown by the
     harness's `end-cleanup` row). The job holds no file, so it can't transfer or set off its
-    notify command, whose marker never appears. An earlier version cancelled the jobs from the
-    sweeper; `Cancel` failed with 1245 even with the proxy set to impersonate, so that step only
-    signalled `RunExit::PoolStop` (`0xE0C15010`, now reserved and no longer produced), and it
-    left two windows to a Medium pool-user process that the creation-time cutoff spares: a
-    per-user `LocalServer32` or `AppID` entry written between the classes' removal and
-    `CoCreateInstance`, and proxy/stub lookups for `IEnumBackgroundCopyJobs` and
-    `IBackgroundCopyJob` under `HKCU\Software\Classes\Interface`, which load a DLL into the
-    sweeper. With no BITS COM call, no per-user class, `AppID` or proxy/stub registration can
-    load into the sweeper.
-    What the sweep spares, a next session's runners and agent started after the sweeper, may be
-    alive while the token is widened. Its runners are trusted code of ours, and its agent is Low,
-    so a Medium token it opens can't be impersonated past identification, and its token lacks
-    `SeAssignPrimaryTokenPrivilege` and `SeImpersonatePrivilege` to start a process with one.
-    It logs to its stderr, which
-    the outer relays while it lives; on a cancel nobody reads it. Its exit code says whether
-    everything went, and the outer logs a failure if it is still alive to see it. It writes no
-    result file. The run folder admits only the lawyer, `SYSTEM` and Administrators, and a file
-    the pool user could write there would be writable by its other processes too.
-  - **The end sweeper and a next session.** The sweeper may still run when a next launch for the
-    same pool user starts. Its creation-time cutoff leaves the next session's inner and agent
-    alone, since they start later, from the next outer and inner. The cutoff alone would also
-    spare a child that a process the sweeper killed started after the sweeper did, so a process
-    created after the sweeper is still killed when the snapshot's parent pid names a process
-    this sweep killed and it was created after that one. Each killed process stays open until
-    the sweep is over, so its pid isn't reused meanwhile, and a process that had the pid earlier
-    was created before it. Each pass already lists again after any round that killed something;
-    the second pass, which keeps what the first killed, takes what got past the first pass's last
-    listing. A process an escaped one starts after the sweeper started, or one a service starts
-    for it, is killed by the next session's first act or tick. The other way round, the next inner's first
-    act kills a sweeper still running, a pool-user process outside its job. Nothing is lost: that
-    inner makes the same cleanup itself. For either to open the other, the runners' process DACL
-    (the inner's and the sweeper's, not their threads or token) grants the lawyer's logon SID
-    `SYNCHRONIZE`, `PROCESS_QUERY_LIMITED_INFORMATION` and `PROCESS_TERMINATE`.
-    `CreateProcessWithLogonW` gives both runners that SID, enabled. The agent holds it deny-only,
-    so an allow entry never matches it; the pool user itself is one of the agent's restricting
-    SIDs, so an entry naming the pool user would have reached the agent. A pool-user process a
-    service started outside the job runs in the pool user's own logon session and doesn't hold
-    the SID. Other matters' runners started from the same logon do, and can open these, but
-    their sweeps only kill their own pool user's processes. Accepted: a sweeper from before the
-    lawyer signed out and in again holds the old logon SID, so a launch during its up to 60 s
-    can't open it and fails `RunExit::Escapee`, and a retry once it exited works.
-  - **The exit code on a cancel.** The guard keeps the signal that started the sweeper. The
-    outer's job end gives the inner and the agent the sweeper's kill code (`RUN_EXIT_BASE +
+    notify command, whose marker never appears. An earlier version cancelled the jobs as the pool
+    user at the session's end; `Cancel` failed with 1245 even with the proxy set to impersonate,
+    so that step only signalled `RunExit::PoolStop` (`0xE0C15010`, now reserved and no longer
+    produced).
+  - **A next session's first act.** The next inner's first act kills an inner of an earlier
+    session still alive, a pool-user process outside its job. For it to open one, the inner's
+    process DACL (not its threads' or token's) grants the lawyer's logon SID `SYNCHRONIZE`,
+    `PROCESS_QUERY_LIMITED_INFORMATION` and `PROCESS_TERMINATE`. `CreateProcessWithLogonW`
+    gives the inner that SID, enabled. The agent holds it deny-only, so an allow entry never
+    matches it; the pool user itself is one of the agent's restricting SIDs, so an entry naming
+    the pool user would have reached the agent. A pool-user process a service started outside the
+    job runs in the pool user's own logon session and doesn't hold the SID. Other matters' runners
+    started from the same logon do, and can open these, but their sweeps only kill their own pool
+    user's processes.
+  - **The exit code on a cancel.** The guard keeps the signal that began the end. The outer's job
+    end gives the inner and the agent the sweeps' kill code (`sweep::SWEPT`, `RUN_EXIT_BASE +
     0xff`, which would come back as `AgentReserved`). When the end began at the host's stdin
     (the agent's 1 s ran out) and the inner's exit code is that code, the outer exits as it
     would have without the job's end: with the agent's own code when the inner reported the
     agent's exit first, else with `0xC1A0`, the code the host's job end gives (`TERMINATED` in
     the process crate). An agent that finished within its 1 s exits with its own code, as on
     any inner exit. The host's shutdown outcome is timed, not read from the code. The job's one
-    handle is the outer's: no process of ours is given one (not the inner, not the end sweeper,
-    which `CreateProcessWithLogonW` starts with no inherited handles but its output pipe, and
-    not the agent, which inherits its three pipes alone), so an outer ended any way at all,
-    `TerminateProcess` or the host's job end, closes it, and the inner and the agent end with
-    it. On a cancel the outer ends the job itself 1 s after the stdin end, before the host's
-    job end can kill it.
+    handle is the outer's: no process of ours is given one (not the inner, and not the agent,
+    which inherits its three pipes alone), so an outer ended any way at all, `TerminateProcess`
+    or the host's job end, closes it, and the inner and the agent end with it. On a cancel the
+    outer ends the job itself 1 s after the stdin end, before the host's job end can kill it.
   - **Escapees.** A process of the pool user's that a sweep can't open, even after the owner's
     `WRITE_DAC` reopen, or can't end is an escapee: it lives outside every job, and no sweep of
     the pool user's own can end it. The inner reports it on `ctl` (`InnerReport::Escapee`: the
     sweep point, the count, and at most eight image names, never a path; the first act's report
     is held until `ctl` opens, like its log lines). The first act exits `RunExit::Escapee`
-    (appended after `DllSearch`), and so does the end sweeper. The outer exits
-    `RunExit::Escapee` whenever any sweep of its session found one: the first act's, a tick's or
-    the end's (from `ctl`), or the end sweeper's (its exit code, when the outer still waits for
-    it, up to 20 s). That code wins over the agent's own, even 0, and over a cancel's: the run's
+    (appended after `DllSearch`). The outer exits `RunExit::Escapee` whenever any sweep of its
+    session found one: the first act's, a tick's or the end's (from `ctl`). `SandboxSweep` kills
+    nothing, and its result never changes the exit code. That code wins over the agent's own, even
+    0, and over a cancel's: the run's
     output came through, but the host must learn that the pool user has a live process no sweep of
     its own can end, and the exit code is the one thing the host reads. The code the run would
     have had is said on stderr. A process that only can't be checked (its job, its start time) and
     a sweep that still found new processes after eight rounds stay `RunExit::Sweep`.
   - **Escapees until `\Clauseo\SandboxStop` (interim).** An escapee that shut its own DACL and
-    survives a sweep is alive in the next logon gap, the next inner's or an end sweeper's, and
+    survives a sweep is alive in the next inner's logon gap, and
     can open that runner's process, thread or Medium token before the outer's shut. The job's end
     doesn't reach it (it is outside the job), and no sweep of the pool user's can end it. B's PR 3
     adds the `SYSTEM`-side scheduled task `\Clauseo\SandboxStop`, which kills every process of a
     pool user's SID whatever its DACL; the outer starts it on an `Escapee` report, and Clauseo
-    starts it at its own start after an unclean session (`unclean_sessions`). Until then the
-    first act refuses every launch for that pool user (`RunExit::Escapee`, no agent), so that
-    pool user's matter is blocked until the escapee is gone (a restart ends it). The refusal
-    keeps the agent from starting; it doesn't close the gap itself, which stays open to the
-    escapee until PR 3. PR 3 lands before PR 6, which first sends lawyers' agents through tier B.
+    starts it at its own start after an unclean session (`runner::start_up_requests`). The
+    outer then refuses that pool user's logons until the stop completed (F4, below), so no logon
+    gap opens to the escapee. The first act still refuses a launch whose sweep finds one
+    (`RunExit::Escapee`, no agent).
   - **The unclean-session marker.** Once it has read the launch, before anything runs as the
     pool user, the outer writes `<data_dir>\sandbox\run\<launch id>.session`, holding the pool
-    user's SID, as the launch file is written: atomically, with the run folder's three entries
+    user's SID and the install id it is written under (below), as the launch file is written: atomically, with the run folder's three entries
     (the lawyer, `SYSTEM`, Administrators) as its own protected DACL and the lawyer its owner, so
     the pool user can neither write nor remove it. A marker that can't be written refuses the
     launch before anything runs as the pool user (`runner::marker::marked`): the outer exits
     `RunExit::MarkerUnwritable` (`0xE0C15011`), a code of its own, with "the session marker
-    failed (<code>)" on stderr, and no logon follows, so no session runs that no marker names. It
-    removes it only at a clean end: the inner
-    exited (no failure, and no cancel whose agent outlived its 1 s), reported the agent's exit, the end sweeper started and exited
-    0 while the outer waited, and no sweep found an escapee. A crash, a cancel, a failure, a job
-    that didn't empty or an escapee leaves it. `runner::unclean_sessions` lists the sessions
-    whose marker is left, with their pool users; nothing calls it yet.
+    failed (<code>)" on stderr, and no logon follows, so no session runs that no marker names.
+    The marker is written open (`marker::MarkerState::Open`). At its end the outer writes what it
+    waits for, and never removes it itself:
+    - `AwaitingSweep { sweep: M }` at every end without an escapee: a clean one, a failure, a
+      cancel whose agent outlived its grace, a job that didn't empty. The next inner's first act
+      kills what is left of the pool user's and reports an escapee, so only the pool user's tasks
+      and BITS jobs are owed. Clean once `SweepSequence >= M`.
+    - `AwaitingStop { stop }` after an escapee: `stop` is `StopNext` read once the job ended,
+      before the stop is requested. It holds no sweep number: one read while the escapee lives
+      proves nothing, since the escapee can watch that sweep complete, register a task, and only
+      then be killed by the stop. It is never clean itself. Once `StopSequence >= stop`, whoever
+      reads it (F4, a launch, the desktop's start) re-marks it: reads `SweepNext` (`M`) only
+      then, requests the sweep, and writes `AwaitingSweepBeforeStop { sweep: M }`. A marker
+      written before this rule as `AwaitingStop { stop, sweep }` reads as
+      `AwaitingStop { stop }`, its `sweep` ignored.
+    - `AwaitingSweepBeforeStop { sweep: M }` (appended): never clean itself either. Once
+      `SweepSequence >= M`, F4 or the desktop's start re-marks it: reads `StopNext` (`s`) only
+      then, requests the stop, and writes `AwaitingFinalStop { stop: s }` (appended), clean once
+      `StopSequence >= s`. So a session with an escapee is clean only after stop, sweep, stop.
+      Why: from the first stop's snapshot until the sweep deletes a pool task (or cancels a BITS
+      job), the task's trigger (or the job's notify command) can start a new process of the pool
+      user's, and the sweep ends no process but a task's running instance, never its children.
+      The final stop reserved its number after the sweep completed, so its observation began
+      with no pool task or job left to start one. What it doesn't close: such a process may
+      register a new task before the final stop kills it, and that task stays until the next
+      session's end sweep; its trigger can start a process in the next logon gap, which the
+      first-act sweep kills (the known gap under "Sweeping the pool's tasks and BITS jobs", and
+      the same pre-logon check closes it). An older build reads either new state as unreadable,
+      which awaits a stop for every pool user: closed, not open.
+    - `Open` left standing: the outer died (the host's job end after `stdin_grace`, a crash) or
+      couldn't read a number.
+
+    What these states leave open, besides the gap above:
+    - Without an escapee (`AwaitingSweep`, then clean) no stop follows the sweep, so a pool
+      process a trigger started before the sweep deleted its task can live until the next
+      session's first act kills it. That is by design: stop, sweep, stop narrows only the
+      escapee path.
+    - A BITS job a pool process creates after the sweep listed the jobs isn't cancelled by that
+      sweep.
+    - A running instance can register its own task again between the walk's delete and the
+      instance stop: the run ends 0 with that task left, until the next sweep.
+    - A time trigger can fire mid-session; the inner's periodic check catches what it starts.
+    - A pool process that locked down its own access list isn't killed by the first act, which
+      can't open it; the launch then fails closed.
+    - Upgrade: an escapee marker an older build already moved to `AwaitingSweep` reads as a
+      plain one, so its final stop is skipped. Only markers in flight during the upgrade are
+      affected.
+
+    An absent `…Sequence` counts as 0, an absent `…Next` as 1. The numbers are read as the lawyer
+    **without the set-up lock**, which only an administrator's token can open (a mutex in a
+    private namespace whose boundary needs Administrators enabled). That is sound: `…Next` is one
+    `REG_QWORD` that only goes up, and a task's run writes `n + 1` before it observes anything.
+    A marker that read `M` read it before the run that takes `M` wrote `M + 1`, so that run's
+    observation began after the marker's read, which comes only after the session's last launch
+    path closed (its job ended). `--remove` deletes each `…Sequence` before its `…Next`
+    (`SETUP_VALUES`), so a read during a removal can only keep a marker longer. Whoever finds a
+    marker clean removes it (`runner::unclean`):
+    - **The pool user's logon (F4).** Before writing its own marker, the outer refuses the
+      launch (`RunExit::AwaitingStop`, `0xE0C15012`, appended) while a marker of this pool
+      user's, or one naming none or unreadable, awaits a stop with `StopSequence` below its
+      number, and requests the stop. An `Open` marker of this pool user's is a dead outer's (one
+      live session per pool user, and this outer hasn't written its own): it becomes
+      `AwaitingStop` with `StopNext` read then, after its session's last launch path closed,
+      and the logon is refused. One whose stop completed is re-marked; one that couldn't be
+      (`SweepNext` unreadable, the write failed) refuses the logon, as it refuses a launch,
+      without requesting a stop, which has completed (`RunExit::AwaitingSweep`, `0xE0C15013`,
+      appended). A marker of this pool
+      user's awaiting a sweep, re-marked now or earlier, is then waited for as a launch waits
+      (the sweep requested unless the re-mark just did, `SweepSequence` read every 100 ms for up
+      to 15 s): until that sweep ran, a task the escapee registered is live. One still short
+      refuses the logon (`RunExit::AwaitingSweep`) without requesting a stop, which would end
+      every session. One awaiting the sweep before its final stop whose sweep completed, now or
+      earlier, is re-marked to `AwaitingFinalStop`, the stop is requested and the logon refused
+      (`RunExit::AwaitingStop`); one that couldn't be re-marked (`StopNext` unreadable, the
+      write failed) refuses it with `RunExit::AwaitingSweep`, no stop requested. One awaiting a
+      final stop refuses the logon and requests the stop, as one awaiting its first stop does,
+      until `StopSequence` reaches its number; then it is clean. A marker naming no pool user
+      (an unreadable one, replaced) awaits a stop for every pool user: while every stop ends 48 (a process it can't kill or can't
+      place, a BITS job it can't cancel, a cut list), `StopSequence` never moves and every pool
+      user's logon is refused. That is the fail-closed answer, since the escapee may be any of
+      theirs. It clears once the 48's cause is gone and a stop completes (an administrator running
+      `\Clauseo\SandboxStop`, or the next F4 refusal or Clauseo's start, requests one), or with `--remove`.
+      No narrower scope is safe: such a marker no longer says whose session it was. An
+      unreadable or corrupt marker, or an `Open` one naming no pool user, would otherwise
+      refuse every logon for good: it is replaced by `AwaitingStop` with `StopNext` read then,
+      naming no pool user (so it counts for all), the stop is requested and the logon refused,
+      and it heals once that stop completes. Escapees of other pool users don't count: one can't
+      open this pool user's runner. Once slot groups land (two pool users share a slot's grants
+      on a matter), the scope becomes the pool user's slot, since an escapee of one still holds
+      the slot group's grants.
+    - **A launch.** `clean_close::check_launch`, once the admin copy passes and before the
+      clean-close record is touched, finds every marker awaiting a sweep clean, or requests the
+      sweep and reads `SweepSequence` every 100 ms for up to 15 s (inside the host's 180 s); one
+      still short refuses the launch with `Error::UncleanSession` (appended,
+      `sandbox.cleaning_up`, retryable). A marker whose stop completed is re-marked first, and
+      the launch then waits for its sweep; one that couldn't be re-marked (`SweepNext`
+      unreadable, the write failed) refuses the launch the same way. A marker still awaiting its
+      stop, first or final, is F4's and doesn't hold the launch, and so is one whose sweep before
+      its final stop completed: the launch doesn't re-mark it, since a stop it requested would
+      end the session it is launching. A final stop that completed makes a marker clean here
+      too. `Open` markers are left there: they may be live sessions'.
+    - **The desktop's start** (`runner::start_up_requests(data_dir)`, once, before any launch,
+      off the UI thread): every outer of the last run is gone, so each `Open` or unreadable
+      marker becomes `AwaitingStop` with `StopNext` read then (an unreadable one naming no pool
+      user, so it counts for all); one whose stop completed is re-marked, and one whose sweep
+      before its final stop completed too; the clean ones go; the stop and sweep tasks are
+      requested for what is still awaited. It never waits.
+    - **Not done: disabling the pool account between the stops.** Disabling a pool user
+      (`NetUserSetInfo`, `UF_ACCOUNTDISABLE`) from the first stop to the final one would stop
+      any task or BITS job from starting a process as it, and close the window above. It was
+      left out. The stop and the sweep take no argument and never read the markers (the record
+      is all they trust), so neither knows whether it is a first or a final stop, or whose
+      session it serves: the disable would need new state in the record saying who re-enables,
+      and when. The stop acts on every pool user, so every other matter's next logon would fail
+      (`ERROR_ACCOUNT_DISABLED`, 1331), a new failure for the launch to handle. A stop the
+      lawyer ended (execute access ends a task) or a final stop never requested would leave the
+      account disabled with nothing to notice, and a reset's `NetUserSetInfo` must then keep
+      the flag. The final stop covers the same window without any of this, for one more stop.
+
+    A marker naming a pool SID the record no longer lists is stale and removed: a removal stopped
+    every process of that SID before it deleted the account. **The install id.** The set-up
+    writes `InstallId` (`REG_SZ`, 32 lowercase hex: 128 bits from `getrandom`) with the first
+    record of an install, when the key holds neither `OwnerSid` nor `InstallId`, and never
+    again (`record_write::write`); it is a set-up value, so a rollback of that first set-up and
+    `--remove` delete it. The outer reads it (as the lawyer) and writes it into its marker, and
+    refuses the launch with `RunExit::MarkerUnwritable` when it can't be read; every rewrite of
+    a marker keeps it. A readable marker whose id isn't the record's (another id, or none while
+    the record has one, or one while the record has none) belongs to a removed install: its
+    numbers count against counters `--remove` deleted, so after a reinstall it would refuse
+    logons until the new `StopSequence` caught up. It is stale and removed. A marker with no id
+    while the record has none either (an install from before the id, which a later set-up
+    doesn't give one, so its live markers aren't dropped) keeps the rules above. An id that
+    can't be read makes no marker stale, and while it can't be, an unreadable marker isn't
+    written again (F4 still refuses and requests the stop): written without the id, it would
+    read as another install's and be removed. `--remove` clears the markers as
+    the owner; an administrator's removal leaves them to that rule.
   - **Why "just after resume" holds.** Nothing the pool user left behind can start at its next
-    logon: the end sweeper removed it, and if it didn't run, the first act removes the classes,
-    `Run` values and Startup entries before the launch is read. A task stays until an end
-    sweeper runs, and a BITS job until the `SYSTEM` stop (above; it starts nothing meanwhile),
-    and each process it starts lives only until a sweep.
-    The residual cases are a job that doesn't empty within 400 ms, and a session end too late
-    after the host's stdin end. From the stdin end, the outer starts the sweeper's logon only
-    while at least 500 ms of the host's 2 s is left (`end::sweeper_fits`); with less, it skips
-    the sweeper, logs a warning that it did so for time, and goes on as when the job didn't empty.
-    The session isn't clean, so its marker stays. With a 1.5 s grace and the 400 ms wait, about
-    100 ms was left for the logon, shut and resume, and a host kill between the sweeper's creation
-    and its shut could leave it suspended and unshut: Medium, holding the lawyer's logon SID, with
-    a default DACL that grants the pool user `GA`. With a 1 s grace the logon starts at most
-    1.5 s after the stdin end, and 500 ms is more than the harness has measured for a whole
-    session start through the agent's first line, the outer's logon of the inner included (123
-    to 409 ms), so in the normal timing the host's kill comes after the resume. The outer logs
-    the sweeper's own time from its logon's start to its resume (`clauseo-sandbox-run: end
-    sweeper: logon to resume <n> ms`), which the `cancel` row records. The harness's
-    `cancel` row checks that no suspended `clauseo-sandbox-run` of the pool user is left. A machine
-    slow enough to overrun the 500 ms can still leave one. So can a host kill outside the 2 s
-    cancel ladder, which the budget doesn't cover: a crash of the host, or the outer's process
-    killed from Task Manager, can land between any sweeper's logon and its resume, on the inner
-    exit's path as on the stdin's. For either, the backstop is the unclean-session marker, which
-    stays, and the next launch's first act: it kills a leftover sweeper as any process of the
-    pool user outside its job, or refuses the launch (`RunExit::Escapee`) if it can't, until the
-    `SYSTEM` stop task (PR #668) runs for the marked session. What a suspended sweeper exposes
-    meanwhile is the next point. When the sweeper is skipped, no end sweeper runs, and the
-    cleanup waits for the next launch's first act. Only an end sweeper that widened its token
-    removes scheduled tasks, so a skipped one leaves them for the next session's end sweeper. A
-    task that the next logon sets off then starts a process
-    that lives only until the first-act sweep. That sweep comes before any code of the launch's
-    runs and before the agent exists, and the outer has shut the inner's process and thread by
-    then.
-  - **A suspended sweeper hands over the lawyer's session.** A suspended sweeper runs none of its
-    own code, but until the outer's shut its process, thread and token carry the logon's default
-    DACL, which grants the pool user `GA`. A Medium pool-user process that the job's end didn't
-    reach (one outside the job, M2) can open it and inject code. The sweeper runs as the pool
-    user, but its token also holds the lawyer's logon SID, and that SID means control of the
-    lawyer's desktop and read access to the lawyer's processes:
-    - `WinSta0` and its `Default` desktop are secured to it. A Medium process holding it can
-      attach to the lawyer's desktop and set global hooks, which load its code into the lawyer's
-      processes; send keystrokes and mouse input; read the clipboard; and capture the screen.
-    - An interactive token's default DACL grants the logon SID read and execute, so every process
-      of the lawyer's, Clauseo included, can be opened for `PROCESS_VM_READ` and its memory read.
-
-    The precondition is the one the inner's logon gap has (above): a live pool-user process
-    outside the job. The exposure is longer. The inner's gap lasts milliseconds; a sweeper left
-    suspended by a kill mid-logon, outside the cancel ladder, waits indefinitely. Two things end
-    it today:
-    - The next session's first act: the inner, once resumed, kills every process of the pool user
-      but itself (`runner::inner_flow::run`, `Point::Start` in `runner/sweep.rs`) before it
-      reads the launch. The unit tests `the_first_act_sweeps_and_cleans_before_the_launch_and_the_agent`
-      (`runner/inner_flow/tests.rs`) and `the_first_act_and_the_end_sweeper_keep_only_their_own_pid`
-      (`runner/sweep/tests.rs`) check it, and the harness rows `sweep-before-logon` (a pool-user
-      process started outside any job before the session is gone by the agent's first line) and
-      `pool-processes-at-start` (every pool-user process is in the job by then) show it on Windows.
-    - The unclean-session marker the sweeper's session leaves, which the next Clauseo start finds
-      (`runner::unclean_sessions`). The follow-up, PR #668, wires it to `\Clauseo\SandboxStop`,
-      which kills every process of the marked pool user; until then nothing calls it.
-
-    If the lawyer doesn't launch again, the sweeper stays until one of those runs. Running the end
-    sweep as the `SYSTEM` task instead of a Secondary Logon start would remove the target: no
-    logon, so no lawyer's logon SID and no suspended window. That is a proposal for after #668.
-    Dropping the SID inside the sweeper wouldn't help, since its token carries the SID from
-    creation, before any of its code runs.
+    logon before the first act. The first act removes the classes, `Run` values and Startup
+    entries before the launch is read. A scheduled task stays until a `\Clauseo\SandboxSweep`
+    run deletes it, normally the one the previous session's end requested, and a BITS job until a
+    sweep or stop run cancels it (above; it starts nothing meanwhile). A task that a logon sets off
+    before then starts a process that lives only until the first-act sweep. That sweep comes
+    before any code of the launch's runs and before the agent exists, and the outer has shut the
+    inner's process and thread by then. The unit tests
+    `the_first_act_sweeps_and_cleans_before_the_launch_and_the_agent` (`runner/inner_flow/tests.rs`)
+    and `the_first_act_keeps_only_its_own_pid` (`runner/sweep/tests.rs`) check it, and the
+    harness rows `sweep-before-logon` (a pool-user process started outside any job before the
+    session is gone by the agent's first line) and `pool-processes-at-start` (every pool-user
+    process is in the job by then) show it on Windows. The next launch waits, up to 15 s, for the
+    sweep the previous session's marker awaits.
 
   The experiment that would lower a duplicated token to Low and impersonate it from the agent
-  was dropped. With one live session per pool user, the first-act sweep and the end sweeper
-  started only once the job is empty, no other process of the pool user is alive to use a handle
-  it took in the gap: the inner's gap comes before its first-act sweep kills every other process
-  of the pool user, and the sweeper's after the job's end killed every process in the job. A
-  process outside the job, one a service started (M2), is alive in the sweeper's gap if no
-  sweep could kill it.
+  was dropped. With one live session per pool user, no other process of the pool user is alive to
+  use a handle it took in the inner's gap: that gap comes before the first-act sweep kills every
+  other process of the pool user. Nothing logs on as the pool user at the session's end, so the
+  inner's is the only gap.
 - **Processes a service starts outside the job (M2).** An agent can ask a Windows service to
   start a process as its pool user, and that process may land outside the job: Secondary Logon
   (`CreateProcessWithLogonW` with `LOGON_NETCREDENTIALS_ONLY`), WMI (`Win32_Process.Create`),
   Task Scheduler or BITS. Tier B bounds such a process; it doesn't prevent it. The inner's tick
-  kills it within about 30 s, and the end sweeper at session end. The pool user can open such a
+  kills it within about 30 s, and its end sweep when the agent exits; one started after that lives
+  until the next session's first act or a `\Clauseo\SandboxStop` run. The pool user can open such a
   process because its default DACL grants its user, and that holds in session 0 too. A process
   that shuts its own DACL to its user, with an `OWNER RIGHTS` entry that takes away the owner's
   implied rights, can't be opened or ended by the pool user, but `WTSEnumerateProcessesW` still
   names it as the pool user's. At the first act it fails the launch closed (`RunExit::Escapee`,
   no agent); at the tick and the end it is logged, reported, and tried again, and the run exits
   `RunExit::Escapee`. While it lives, every launch for
-  that pool user fails closed, and it is alive in each logon gap (see "Escapees until
+  that pool user fails closed, and it is alive in each inner's logon gap (see "Escapees until
   `\Clauseo\SandboxStop`"). The agent can make one of its own processes so (a process sets its
   own DACL through its pseudo-handle), and so can a child it starts with a descriptor of its own,
   or one a service starts; only one outside the job outlives the session. The agent's own token
@@ -1608,7 +1750,8 @@ folder of it through a junction at any time, or re-run `--adopt` with another fo
    set-up lock (the named mutex the set-up, `--remove` and `--adopt` take) without waiting, and
    holds it to the end of the run; held elsewhere, it exits 44 having read nothing. `--adopt`
    holds the same lock from its record checks through its hash and record write, so a refresh
-   never swaps the copy between the two;
+   never swaps the copy between the two. With the record read, a `GroupSid` gives the folder
+   and the copy its deny when they lack only that ("The pool's group is denied the copy");
 3. refuses an install folder that isn't inside the copy owner's profile (`ProfileList`'s
    `ProfileImagePath` for `AdminCopyOwner`; a temporary profile counts as none). For a
    `machine` owner, the folder must instead be one only SYSTEM, Administrators or
@@ -1623,10 +1766,11 @@ folder of it through a junction at any time, or re-run `--adopt` with another fo
    and refuses a reparse point, anything but a regular file, a second hard link, or more than
    16 MiB (exe) or 4 KiB (`.sig`). Every open is for reading:
    SYSTEM never writes or deletes anything in the folder;
-5. copies the exe into `Sandbox\staging\` (owner SYSTEM, protected SYSTEM-only DACL, read back),
+5. copies the exe into `Sandbox\staging\` (owner SYSTEM, protected DACL for SYSTEM and
+   Administrators alone, read back; "The staging folder's DACL" below),
    and verifies the staged bytes, never the user's file, so a swap after the check changes nothing;
 6. requires the staged image's CPU type (its PE `Machine`) to be the running copy's, so a signed
-   exe for another CPU never replaces it;
+   exe for another CPU never replaces it, save one move ("The one move across CPU types");
 7. checks the versions ("Versions" below), so an older signed exe can't roll the copy back;
 8. stops when the staged SHA-256 is already recorded;
 9. otherwise opens `Sandbox\` for adding a file (`FILE_WRITE_DATA | FILE_ADD_FILE`), sharing
@@ -1634,10 +1778,31 @@ folder of it through a junction at any time, or re-run `--adopt` with another fo
    and a handle that shares read only would fail a rename into it, so one already open stops the
    run (exit 43) before anything moves, and none can be opened while it is held. It then renames
    the running copy into staging, which Windows allows for a running exe, and moves the staged
-   file into place with the admin copy's DACL. Only then does it write the new
+   file into place with the admin copy's DACL, the recorded group denied. Only then does it
+   write the new
    `AdminCopyVersion` (the signed version, as signed), then the new hash. The set-aside copy
-   stays in staging until the next run deletes it. That run starts from the new copy, which shows
-   the new copy runs.
+   (`staging\clauseo-sandbox-setup.exe.old`) is the task's own running image, which Windows
+   won't delete: it and `staging\` are scheduled for deletion at restart
+   (`MOVEFILE_DELAY_UNTIL_REBOOT`), and the next run, which starts from the new copy and so
+   shows it runs, deletes them sooner;
+10. every run that got as far as clearing staging ends by leaving no staging folder: the staged
+    file is deleted and the folder removed, or, after a swap, both scheduled as step 9 says.
+
+**The staging folder's DACL** (VM reinstall finding, 2026-11-08). `STAGING_SDDL` was SYSTEM
+alone. After any refresh, an elevated `--adopt` (a repair, a reinstall after a per-user
+uninstall) was denied `staging\` (read attributes, then read control, write DAC and write owner),
+and exited 3 in its lock-down; `--remove --uninstall`'s teardown was denied it the same way, so
+the admin copy stayed. It is now `O:SYD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)`. This doesn't weaken
+#668's "verified as read back, no TOCTOU": the folder is SYSTEM-only so that the lawyer and the
+pool users, who aren't administrators, can't swap the staged exe between the signature check and
+the replace. Administrators are already inside that boundary: they can write
+`Program Files\Clauseo\Sandbox` and the admin copy directly, and change or replace the SYSTEM
+tasks. Granting them the staging folder adds no capability they lack. A staging folder made
+under the old DACL (or left by a refresh killed midway) is taken back by `--adopt` and
+`--remove` (`admin_copy::take_back`): `SeTakeOwnershipPrivilege`, `SeRestorePrivilege` and
+`SeBackupPrivilege` enabled for the call, every open with backup semantics and never through a
+reparse point, Administrators made the owner and the locked DACL set, then deleted. `--adopt`
+always deletes `staging\` (the refresh makes it again) and never fails on it.
 
 **Crash safety.** The record never names a hash the admin path doesn't hold: until the last step
 it holds the old hash. A crash after both renames leaves the new file under the old hash, which
@@ -1673,6 +1838,19 @@ checked.
 - A leading `v` is dropped. A record's `X.Y.Z.0` reads as the release `X.Y.Z`. Anything
   unreadable, a non-zero fourth part included, refuses the run.
 
+**The one move across CPU types.** Windows ARM64 is tier 1, so an x64 install on an ARM64 machine
+moves to the native build through the normal update, and nobody is told to reinstall. Step 6
+allows that one move and no other (`refresh/machine.rs`). The running copy must be x64, and so
+must the copy on disk it replaces, its PE `Machine` read by handle as its hash is. The staged
+image must be plain ARM64, not ARM64EC or ARM64X (a load config naming CHPE metadata marks a
+hybrid). The machine must be natively ARM64 (`IsWow64Process2`'s native machine, which
+detection reads). The signed version must be strictly newer than `AdminCopyVersion`: the equal
+version a same-CPU run repairs with never moves the copy. The signature, its `file:`, the
+`FILEVERSION` binding, the hash record, the set-up lock and staging apply as before. Anything
+else across CPU types exits 42, ARM64 to x64 included: it would put a native copy back under
+emulation, a downgrade of the platform match. `--adopt` checks no CPU type, so the per-machine
+installer already moves an x64 copy to ARM64 on the version rule alone.
+
 **The key.** `crates/sandbox/build.rs` builds the key in: `CLAUSEO_UPDATER_PUBKEY`, else
 `plugins.updater.pubkey` from `tauri.conf.json`, else the placeholder `AC986E7C6BA67AB9`. The
 placeholder has an all-zero key and is refused by its id. A release build
@@ -1698,30 +1876,32 @@ The runner's sweeps (#649) stop a matter's processes as its pool user. A process
 own DACL survives them and can stay alive into the next logon. SYSTEM, with `SeDebugPrivilege`,
 can stop it whatever its DACL says.
 
-**The task.** `--adopt` registers `\Clauseo\SandboxStop` right after `\Clauseo\SandboxRefresh`
-(`register_task`, `SystemTask::Stop`), the same way: LOCAL SYSTEM, the same descriptor (the
-owner may read and execute it, which starts and ends it), one instance at a time. Its action is the admin copy with
-`--stop` and no other argument. It runs only on demand and stops after 2 minutes. A failed
-registration fails `--adopt` before the record's admin-copy values are written, as for the
-refresh task. `--remove --uninstall` deletes both tasks, after the values and before the admin
-folder (`refresh::TEARDOWN`). The folder rule above has two accepted outcomes. A user-made
-`\Clauseo` holding a task administrators can't delete fails the delete, and so the registration,
-with that error: a user who could make the folder can block the install, but not take it over.
-A folder an administrator made, owned by that administrator's own SID rather than
-Administrators, is deleted and made again, which loses nothing.
+**The task.** `--adopt` registers `\Clauseo\SandboxStop` and `\Clauseo\SandboxSweep` ("Sweeping
+the pool's tasks and BITS jobs") right after `\Clauseo\SandboxRefresh` (`register_task` for
+each of `refresh::TASKS`), the same way: LOCAL SYSTEM, the same descriptor (the owner may read
+and execute it, which starts and ends it), one instance at a time (the sweep queues the next).
+The stop's action is the admin copy with `--stop` and no other argument. It runs only on demand
+and stops after 2 minutes. A failed registration fails `--adopt` before the record's admin-copy
+values are written, as for the refresh task. `--remove --uninstall` deletes all three tasks,
+after the values and before the admin folder (`refresh::TEARDOWN`). The folder rule above has
+two accepted outcomes. A user-made `\Clauseo` holding a task administrators can't delete fails
+the delete, and so the registration, with that error: a user who could make the folder can block
+the install, but not take it over. A folder an administrator made, owned by that administrator's
+own SID rather than Administrators, is deleted and made again, which loses nothing.
 
 **Per machine.** A per-machine `--adopt` has no owner to name in the descriptor, so it registers
-neither task. The refresh task stays per-user only: IT updates a per-machine install. The stop
-task is registered by the elevated set-up instead, once it has written the record with the
-owner as `OwnerSid`, when the record's `AdminCopyOwner` is `machine` (`late_steps::stop_task`).
-It is the same registration as `--adopt`'s: same principal, argument, limits and descriptor,
-with `OwnerSid` as the owner who may read and execute, and so start and end, it. Every set-up of the owner registers it
-again, replacing the one there. A new owner's set-up, after a removal, replaces the previous
-owner's task, so only the new owner can start it. A failed registration fails the set-up at
-the step "registering the sandbox's stop task", rolled back like any other step. `--remove`
-deletes the task just before the record (`RemoveStep::StopTask`); a failed deletion is a partial
-removal, with the record kept for the next run. `--remove --uninstall` also deletes it with the
-admin copy.
+none of the three. The refresh task stays per-user only: IT updates a per-machine install. The
+stop and sweep tasks (`refresh::POOL_TASKS`) are registered by the elevated set-up instead, once
+it has written the record with the owner as `OwnerSid`, when the record's `AdminCopyOwner` is
+`machine` (`late_steps::stop_task`). It is the same registration as `--adopt`'s: same
+principal, arguments, limits and descriptor, with `OwnerSid` as the owner who may read and
+execute, and so start and end, them. Every set-up of the owner registers them again, replacing
+the ones there. A new owner's set-up, after a removal, replaces the previous owner's tasks, so
+only the new owner can start them. A failed registration fails the set-up at the step
+"registering the sandbox's stop and sweep tasks", rolled back like any other step. `--remove`
+deletes both just before the record (`RemoveStep::StopTask`); a failed deletion is a partial
+removal, with the record kept for the next run. `--remove --uninstall` also deletes them with
+the admin copy.
 
 **The run.** `--stop` (`setup/stop.rs`):
 
@@ -1734,10 +1914,15 @@ admin copy.
    `ClauseoSbNN`. One that fails stops nothing;
 3a. reserves this run's number before its first process snapshot: under the set-up lock (the
    same 30 s wait), it checks the record still holds the pool, reads `StopNext` (`REG_QWORD`, 1
-   when absent), keeps it as `n` and writes it one higher, then gives the lock back. A lock that
-   stays held, a record gone or changed, or a write that fails is 50; a read that fails is 46.
-   Either way nothing is stopped. The task runs one instance at a time, so no two reservations
-   overlap. A run that later ends non-zero, or is ended, has still used its number;
+   when absent), keeps it as `n` and writes it one higher, then gives the lock back. A record
+   gone or changed, or a write that fails, is 50 and a read that fails 46, with nothing stopped.
+   A lock that stays held doesn't stop the kill: a set-up holding the lock must not keep an
+   escapee alive. The run goes on with no number and writes nothing to the record under the
+   lock (no `ResetSids`, no `StopCompleted` or `StopSequence`, and no second lock wait). It
+   still records every pool user it finds, owed a reset in `ResetOwed` without the lock
+   (step 6), and ends 50 at best (48 wins). The steps the pool's shared sequence takes are `pool_steps::sequence`'s,
+   which `--sweep-tasks` takes too. The task runs one instance at a time, so no two
+   reservations overlap. A run that later ends non-zero, or is ended, has still used its number;
 4. passes over the processes until one pass finds none of the pool's. Each pass takes a Toolhelp
    snapshot and opens each process with `PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_TERMINATE` (and
    `PROCESS_SUSPEND_RESUME | READ_CONTROL` where it can). Once every handle is open it reads the
@@ -1780,20 +1965,33 @@ admin copy.
    and the waits stop 15 s after the passes' 60 s, so the run ends inside the task's 2 minutes
    with the lock's 30 s wait. What the pass after 60 s still finds is left (48), its users
    marked: so a pool user's process the list names but SYSTEM can't terminate (a PPL) never
-   ends a run at 0;
+   ends a run at 0. Once the passes stop, whatever they found, the run requests
+   `\Clauseo\SandboxSweep` (`request_pool_sweep`): what a killed escapee left (a task, a BITS
+   job) is the sweep's. The request is logged in the run's line and changes no exit code; a
+   marker that awaited this stop re-marks to a sweep whose number is read after it completed,
+   and then to a final stop whose number is read after that sweep completed;
 5. cancels every BITS job a pool user owns (`EnumJobs(BG_JOB_ENUM_ALL_USERS)`, each job's
-   `GetOwner`), at the impersonate level on the manager, the enumerator and each job, as the
-   runner's end sweeper does. A pool user's BITS job can't run (the runner's test shows it, #649)
-   but stays queued; the user's own sweeper can't cancel it once the user is logged off
-   (`ERROR_NOT_LOGGED_ON`, 1245), which is what `request_pool_stop` is called for. This step
-   runs even when no process was found. Other users' jobs are left alone;
+   `GetOwner`), at the impersonate level on the manager, the enumerator and each job
+   (`pool_steps::cancel_pool_jobs`, which `--sweep-tasks` shares). A pool user's BITS job can't
+   run (the runner's test shows it, #649) but stays queued; the user itself can't cancel it once
+   logged off (`ERROR_NOT_LOGGED_ON`, 1245), which is what `request_pool_stop` is called for.
+   This step runs even when no process was found. Other users' jobs are left alone;
 6. adds each pool user it found running, or owning a job, to the record's `ResetSids`
    (`REG_MULTI_SZ`, a value appended to the set-up's, deleted with them by `--remove`), under
-   the set-up lock with a 30 s wait. Each user is added as soon as a pass or the BITS step finds
+   the set-up lock with a 30 s wait, once the record, read again under the lock, still holds the
+   pool the run works from (a set-up may have changed it since the gate; if not, nothing is
+   marked, 49). Each user is added as soon as a pass or the BITS step finds
    it, so a run the task's limit kills has still marked every user it saw. A pass that finds a
    process of unknown user marks every pool user at once, since it may be any of theirs (the
-   run still ends at 48). Once the lock stays
-   held or a write fails, no more users are tried (49), so the wait comes once at most.
+   run still ends at 48). Once the lock stays held, at a mark or at step 3a, this mark and
+   every later one of the run go to `ResetOwed` instead (`REG_MULTI_SZ` of SIDs, a set-up
+   value `--remove` deletes, written only by the stop as SYSTEM; `stop/owed.rs`), without the
+   lock: read it, merge the users in, write it, read it back, up to 3 tries. So the wait comes
+   once at most, and a stop that killed without the lock still records the reset its kill
+   owes. Before, such a stop marked nothing, and the next stop found nothing, wrote
+   `StopSequence` and cleared the marker with no reset listed. A run whose marks went to
+   `ResetOwed` doesn't try its completion and ends 49 (or 50). A write that fails, a record
+   that no longer holds the pool, or `ResetOwed` not written in 3 tries stops the marks (49).
    Marking first means a held set-up lock can delay the first kill by up to 30 s, once per run;
 7. only on a run that will end 0 (every pool user's process gone, every pool BITS job cancelled,
    `ResetSids` written), under the set-up lock, re-reads `PoolSids` and checks it is still the set
@@ -1802,7 +2000,11 @@ admin copy.
    the BITS step's enumeration, so a pool process started after it isn't claimed covered), and
    only then `StopSequence = n` (`REG_QWORD`), the number step 3a reserved. A later stop's larger
    `n` overwrites it; it is never lowered. `StopNext`, `StopSequence` and `StopCompleted` are
-   set-up values outside the record proper, deleted with the record by `--remove`. Every write the
+   set-up values outside the record proper, deleted with the record by `--remove`. Under the
+   same hold of the lock, once the record and the sequence are checked and before either value
+   is written, it folds `ResetOwed` (this run's or an earlier one's) into `ResetSids` and
+   deletes it (`owed::fold`, `sequence::completed_after`): no `StopSequence` clears a marker
+   while a reset is owed only there. A fold that fails is 49, with nothing written after it. Every write the
    stop makes opens the record's key without making it, so a stop still running after `--remove`
    can't bring the key back. A run that is ended, interrupted by the task's limit, or exits
    non-zero never writes the pair and leaves an earlier one as it is. A record gone or changed, a
@@ -1811,18 +2013,23 @@ admin copy.
 
 **Only `StopSequence` counts.** The owner holds execute access on the task, which Run needs
 (CI run 42416074600) and which also ends a task, so code running as the lawyer can end a stop
-mid-pass. An ended stop can't pass for a finished one. The rule: the follow-up's unclean-session
-marker records `StopNext` as it reads it when it is written (M). It must read `StopNext` under
-the set-up lock, so it can't interleave with a reservation's read-then-write and record a stale
-M. The F4 refusal and the marker clear only when `StopSequence >= M`: a stop reserved its
-number after the marker existed and then completed, so its observation began after the marker.
-Reserving before observing closes the race where a stop between its clean pass and its write
-would clear a marker made in between. Nothing clears on the task's end or its exit code, and
-nothing trusts the clock; `StopCompleted` is the last clean pass's time, for diagnostics.
-`--remove` deletes `StopNext`, `StopSequence` and `StopCompleted` with the record, and should
-clear the markers too, so no marker outlives its set-up. That wiring lands in the follow-up PR with the runner (#649); this
-PR writes the values. Ending a stop is denial of service only: the pool users stay refused until a
-stop completes.
+mid-pass. An ended stop can't pass for a finished one. The rule: an unclean-session marker
+awaiting a stop records `StopNext` as it reads it (M), and only after its session's last launch
+path has closed (the session's job ended, or its outer is dead). The F4 refusal lifts, and the
+marker moves on to await a sweep read then (and, after that sweep, a final stop read then), only when `StopSequence >= M`: a stop reserved its number after the marker read it and
+then completed, so its observation began after the session could launch nothing more. The
+marker reads `StopNext` as the lawyer, **without the set-up lock**, which only an
+administrator's token can open (an earlier version of this rule asked for the lock). The read
+can't record a stale M all the same: `StopNext` is one `REG_QWORD` that only goes up, and a
+reservation writes `n + 1` before the run observes. A marker that read M read it before the
+run that takes M wrote M + 1, so even a read between that run's read and its write is followed
+by that run's whole observation. Reserving before observing closes the race where a stop
+between its clean pass and its write would clear a marker made in between. Nothing clears on
+the task's end or its exit code, and nothing trusts the clock; `StopCompleted` is the last clean
+pass's time, for diagnostics. `--remove` deletes `StopSequence` before `StopNext` (and
+`StopCompleted`) with the record, so a marker read during a removal can only wait longer, and
+clears the markers as the owner ("The runner", "The unclean-session marker"). Ending a stop is
+denial of service only: the pool user stays refused until a stop completes.
 
 It logs one Event Log line with counts only (processes stopped, passes, left, unknown, jobs
 cancelled and not), and says so when a pass couldn't read the process list. Its exit codes follow the refresh's (`StopExit`):
@@ -1834,8 +2041,8 @@ cancelled and not), and says so when a pass couldn't read the process list. Its 
 | 46 | the record can't be read, or its `PoolSids`, `OwnerSid` or `StopNext` is malformed; nothing stopped |
 | 47 | a SID in `PoolSids` isn't a pool user; nothing stopped |
 | 48 | a pool user's process or job was left, a user or owner couldn't be read, or a list failed |
-| 49 | the processes were stopped, but their users couldn't be added to `ResetSids`, or `StopCompleted` and `StopSequence` couldn't be written (lock held, write failed, record gone or pool changed, sequence past `n`) |
-| 50 | `StopNext` couldn't be reserved (lock held, record gone or pool changed, write failed); nothing stopped |
+| 49 | the processes were stopped, but their users couldn't be added to `ResetSids` (write failed, record gone or pool changed) nor owed in `ResetOwed`, or the lock stayed held at a mark (the users owed in `ResetOwed`), or `ResetOwed` couldn't be folded, or `StopCompleted` and `StopSequence` couldn't be written (lock held, write failed, record gone or pool changed, sequence past `n`) |
+| 50 | `StopNext` couldn't be reserved: the record was gone or its pool changed, or the write failed (nothing stopped), or the lock stayed held (the processes were still stopped, the jobs cancelled and the users owed in `ResetOwed`, nothing else written to the record) |
 
 **The reset.** The stop doesn't reset the profiles itself. A reset sets a new password, which
 only the owner's `secrets.bin` may hold (DPAPI, as the owner). Its open-session check and its
@@ -1853,11 +2060,216 @@ The same entry lets that code end a running stop or refresh (execute access ends
 writes `StopSequence`, so it can't pass for a finished one.
 
 **Speed.** The launch path doesn't change. The task runs only when a sweep saw a pool user's
-process it couldn't stop, or once at Clauseo's start after an unclean session
-(`request_pool_stop`, which returns whether the run was queued). Both callers land with #649.
+process it couldn't stop (the outer, on `Escapee`), when F4 refuses a logon, or once at
+Clauseo's start for an unclean marker (`runner::start_up_requests`). Each calls
+`request_pool_stop`, which returns whether the run was queued.
 
 **What the app shows.** After a run that stopped something: "Clauseo stopped an agent that
 tried to leave the Safe workspace". The app thread owns the final copy and its Hindi.
+
+### Sweeping the pool's tasks and BITS jobs
+
+A pool user can leave a scheduled task (M2) or a BITS job that runs something after its session:
+a task at its trigger, a job once its owner logs on again. Removing them as the pool user took a
+logon of its own at every session's end (the runner's end sweeper, now gone), and `Cancel`
+refused a logged-off pool user's BITS job anyway. `SYSTEM` deletes them instead.
+
+**The task.** `\Clauseo\SandboxSweep` is registered and removed alongside
+`\Clauseo\SandboxStop` (above): `--adopt` registers all three of `refresh::TASKS`, a
+per-machine set-up registers `refresh::POOL_TASKS` (stop and sweep, `late_steps::stop_task`),
+and `--remove` and `--remove --uninstall` delete it. It has the same folder, principal (LOCAL
+SYSTEM) and descriptor (`refresh::task_sddl`, the owner with `FRFX`). Its action is the admin
+copy with `--sweep-tasks` and no other argument. It runs only on demand and stops after 2
+minutes. Unlike the stop, it queues: a run asked for while one runs begins after it, so the run a
+session's end asked for begins after that end.
+
+**The run.** `--sweep-tasks` (`setup/sweep.rs`) passes the gate `--stop` passes
+(`pool_steps::gate`): it refuses unless it runs as LOCAL SYSTEM from the admin copy's path,
+reads `PoolSids` and `OwnerSid` from the record and from nowhere else, and holds every SID to
+the pool-user check. No record, or an empty pool, is nothing to sweep. Then it:
+
+0. reserves its number before it observes anything, as the stop does (`pool_steps::sequence`):
+   under the set-up lock it checks the record still holds the pool, reads `SweepNext`
+   (`REG_QWORD`, 1 when absent), keeps it as `n` and writes it one higher. A record gone or
+   changed, or a write that fails, is 58 with nothing touched; a read that fails is 54. A lock
+   that stays held still lets it sweep, but it then records nothing and ends 58 at best;
+1. walks every Task Scheduler folder from `\`, subfolders included, with no depth limit but at
+   most 10 000 folders (`FOLDERS_CAP`), and reads every task, hidden ones included
+   (`TASK_ENUM_HIDDEN`), with its definition's principal: `UserId`, else `GroupId`;
+2. resolves that name (`sweep::resolve`, once a run per name): a SID's text, in any form
+   `ConvertStringSidToSidW` takes (`s-`, a hex authority, leading zeros), is that SID
+   (`sweep::canonical_sid`); `LocalSystem`, `LocalService` and `NetworkService` (any case)
+   are S-1-5-18, -19 and -20; any other name is looked up (`LookupAccountNameW`, which finds a
+   local account on this machine). A pool principal is always a local account (`ClauseoSbNN`)
+   or a SID's text, and both resolve locally. So a name that resolves to no SID is the pool's
+   when its account part is a pool user's name, without case, with no prefix or one of `.\`,
+   this computer's NetBIOS name or its DNS host name (`sweep::Names::is_pool_name`). Such a
+   name under another domain's prefix (`sweep::Names::is_foreign`: one prefix that is neither
+   empty, `.` nor this computer's name; a domain account with no domain controller reachable)
+   is skipped: counted in the log line, never named, and not 56. Any other such name (a
+   deleted account, an empty prefix, a name with no prefix) is 56, and so is every prefix while
+   this computer's names can't be read: it may be the pool's;
+3. deletes the task when that SID equals one of the pool's, never on a prefix or a domain, when
+   step 2 found it a pool user's name, or when the owner its security descriptor names
+   (`IRegisteredTask::GetSecurityDescriptor`, `sweep::sddl_owner`) is a pool SID, whatever
+   its principal. A task with neither a user nor a group is 56 unless its owner is the pool's;
+   a task whose principal or owner can't be read is unreadable, never deleted, and 56. A task
+   whose definition or principal the Task Scheduler won't give (its descriptor shuts SYSTEM
+   out, say) is first held to the owner its own security descriptor names: a pool SID makes it
+   the pool's, deleted; an owner that can't be read is 56. Only then is it read from its file, `%SystemRoot%\System32\Tasks\<folder>\<name>`
+   (`sweep::task_file`, `sweep/windows_task_file.rs`): every part of the path a plain name (no
+   `..`, `:` or separator; the Task Scheduler's names aren't trusted), the system folder from
+   `SHGetKnownFolderPath`, `Tasks` and each folder below it opened by handle relative to the
+   one above with `OBJ_DONT_REPARSE` and refused if a reparse point, the file refused unless a
+   plain file with one name, `SeBackupPrivilege` enabled for the opens alone and put back
+   after; the folders are opened without write rights, and the file's owner and DACL are read
+   through the same handle (`sweep::file_trust`). The file is opened sharing reads alone, so a
+   write handle a pool user opened before its DACL changed can't write it during the read; while
+   one is open the read fails with a sharing violation, and the task is 56. The file counts only when its owner isn't a
+   pool SID, it has a DACL, and no allow gives write, append, extended-attribute, attribute,
+   delete, `WRITE_DAC`, `WRITE_OWNER`, generic-write or generic-all access to anyone but
+   SYSTEM, Administrators, the service accounts, a service SID, CREATOR OWNER, OWNER RIGHTS or
+   another domain's accounts and groups, Entra ID accounts and groups (`S-1-12-1-…`; pool users are
+   always local accounts): a pool user may be able to rewrite its own task's file,
+   and with `WRITE_DAC` move its grant to any group it is in, so an allowlist, not a short
+   list of broad groups. Otherwise the task stays unreadable, 56. A hidden task whose file
+   grants write to another local account (the lawyer's, say) is 56 too. What it leaves: a pool
+   user holding `WRITE_DAC` through its own entry can edit the file and then drop that entry;
+   only the descriptor-owner check above catches that, when the owner is the pool user. Its XML is read narrowly: at most 64 KiB, no DTD, no entity but the predefined ones,
+   only `Task/Principals/Principal/UserId` and `GroupId`. When that principal resolves to a
+   SID that isn't the pool's, or is another domain's name, the task is skipped and counted;
+   when it is the pool's, resolves to nothing else, or the file can't be read or is
+   malformed, the task stays unreadable and 56. No failure stops the walk. A pool task is
+   deleted as soon as it is found, so its trigger starts nothing more.
+   **The cross-check** (`sweep::unlisted`). The Task Scheduler's `GetTasks` may list only the
+   tasks its caller may read, so a pool task whose descriptor shuts SYSTEM out could be missing
+   from the walk, and the run end 0 with it left. Once the walk is done (and wasn't capped), it
+   reads two more listings: every task file below `%SystemRoot%\System32\Tasks`, walked as the
+   fallback opens (`sweep/windows_listing.rs`: by handle, never through a link, a name that is
+   a reparse point or isn't UTF-16 text failing the walk, `SeBackupPrivilege` for the walk
+   alone), and every task in the Task Scheduler's cache,
+   `HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Schedule\TaskCache\Tree` (a key holding
+   an `Id` value; a folder's holds none), opened read-only in the 64-bit view, each key from
+   `HKLM` by its whole path. Each is capped at 100 000 entries (`LISTED_CAP`) and 10 000
+   folders. A task either holds that the walk didn't list, compared exactly and then as
+   Windows compares names (below), is hidden and 56, unless the owner of the security
+   descriptor its cache key holds (the task's `TaskCache\Tree\<path>` key, its `SD` value,
+   `REG_BINARY`, read-only in the 64-bit view) isn't a pool SID, as the fallback asks of a
+   task's own descriptor, and its task file, under the fallback's trust rules above, names a
+   principal that resolves to a SID that isn't the pool's or is another domain's name: then it
+   is skipped, counted with the tasks skipped by their file. A pool owner, or an `SD` that is
+   missing or can't be read, keeps it 56. A hidden task is never deleted: with no task object,
+   nothing is deleted through a file or the registry, and the run fails closed. A listing that
+   can't be read is 56 too. The log line counts hidden tasks ("not listed (in a task file or
+   the cache only)");
+4. cancels every BITS job a pool user owns with the stop's BITS step
+   (`pool_steps::cancel_pool_jobs`), whatever the walk found. Only then, with no pool task
+   left to trigger and no job left to notify, it stops the running instances of the pool's
+   tasks the walk found, deleted or not, since deleting a task ends none (`sweep::running`):
+   the running instances are listed once (`ITaskService::GetRunningTasks(TASK_ENUM_HIDDEN)`)
+   and each whose path (`IRunningTask::Path`) is one of theirs is stopped
+   (`IRunningTask::Stop`). Paths are compared as Windows compares names
+   (`CompareStringOrdinal`, case ignored), never by Unicode's full lowercase: under that the
+   Kelvin sign (U+212A) is `k`, so a pool task named `Tas\u{212A}` would have made SYSTEM stop
+   the instances of `Task` in the same folder, the lawyer's or an updater's. Stopping them
+   before the delete, as an earlier version did, left an instance its trigger started in
+   between. A stop that fails, an instance whose path can't be read or compared (it may be
+   theirs), a list that can't be read, or a pool task whose folder's path can't be read is
+   56. An instance's children may outlive it: the final stop a marker past its first stop
+   waits for ends them ("The unclean-session marker");
+5. only on a run that will end 0, under the set-up lock, checks the record still holds the pool
+   and writes `SweepCompleted` (`REG_QWORD`, a `FILETIME`: when the walk began) and then
+   `SweepSequence = n` (`REG_QWORD`, never lowered). A record gone or changed, a sequence
+   already past `n`, a write that fails or a lock that stays held is 59. A run that is ended or
+   ends non-zero never writes them. The three values are set-up values outside the record
+   proper (`SETUP_VALUES`, each sequence before its next), deleted with the record by
+   `--remove`, and every write opens the key without making it.
+
+It kills nothing itself: stopping processes is `--stop`'s, and its `Sweeper` trait has no
+process call; a pool task's running instance is stopped by the Task Scheduler. It logs one
+Event Log line with counts only (pool users, folders and tasks read, the pool's tasks deleted,
+unreadable, skipped and not deleted, running instances stopped and not, BITS jobs cancelled
+and not), with
+no path, task name or SID, since every local user can read the Application log. A refusal
+that comes from a value that isn't a SID (a record value, a `REG_MULTI_SZ` of SIDs) says so in
+fixed words (`sids::NOT_A_SID`, "the list holds a string that isn't a SID", "the list holds
+a SID twice"), never the value: the stop's and the gate's lines take those messages as they
+are. Its
+exit codes (`SweepExit`) start after the stop's 50 and the WSL deny task's 51 and 52
+(`WslDenyExit`):
+
+| Code | Meaning |
+|---|---|
+| 0 | every pool user's task found was deleted and every pool user's BITS job cancelled, or no pool is recorded |
+| 53 | not LOCAL SYSTEM, or not run from the admin copy; nothing touched |
+| 54 | the record can't be read, or its `PoolSids` or `OwnerSid` is malformed; nothing touched |
+| 55 | a SID in `PoolSids` isn't a pool user; nothing touched |
+| 56 | a task was unreadable or not deleted (a hidden task whose owner can't be read, or whose task file a pool user could have changed, among them), a task file or the Task Scheduler's cache holds a task the listing didn't give and its file doesn't show it isn't the pool's, a pool task's running instance wasn't stopped (or the instances couldn't be read), a folder, the task files or the cache couldn't be listed, or there were more than 10 000 folders; the BITS step still ran |
+| 57 | every task was read and the pool's deleted, but a pool user's BITS job wasn't cancelled, a job's owner or the list couldn't be read, or the list reached its cap |
+| 58 | `SweepNext` couldn't be reserved: the record was gone or its pool changed, or the write failed (nothing touched), or the lock stayed held (swept, nothing recorded); 56 and 57 win |
+| 59 | the run would have ended 0, but `SweepCompleted` and `SweepSequence` couldn't be written |
+
+56 wins over 57. Only a run that ends 0 writes `SweepSequence`, and only `SweepSequence` clears
+a marker awaiting a sweep ("The runner", "The unclean-session marker"): nothing reads the task's
+result.
+
+**Misuse.** As with the stop, any code running as the lawyer can start the task or end a run.
+A run deletes only the pool users' tasks and BITS jobs. An ended run never writes
+`SweepSequence`, so the marker stays and the next launch asks for another run.
+
+**Risks.**
+- **Denial of service: a pool user can keep every sweep at 56.** It takes a task of its own the
+  sweep can't read or delete (through the Task Scheduler or its file, step 3, or one only the
+  task files or the cache show, the cross-check), a flood of tasks or Task Scheduler folders
+  (more than 10 000 folders, or 100 000 task files or cache keys, or one folder whose
+  descriptor shuts SYSTEM out), a task file it keeps a write handle open on, or, if it can
+  create them, a stray file or a junction it plants under `System32\Tasks` (a file the cache
+  holds no task for has no `SD` to read, and a reparse point fails the file walk). No
+  `SweepSequence` is then written, so no marker awaiting a sweep clears: every launch waits
+  15 s and is refused with `sandbox.cleaning_up`, and that pool user's logons are refused by
+  F4. This fails closed: it stops the sandbox working, never lets a pool task through, and
+  gives the pool user nothing beyond that. It clears once the cause is gone and a sweep ends
+  0: an administrator deletes the task (or the folders, or the stray file or junction), after
+  which the next launch's sweep completes, or runs `--remove` (with no pool recorded there is
+  nothing to sweep). The Application log's sweep line says which count is non-zero (unreadable,
+  not listed, folders not listed), never which task. A task the file shows isn't the pool's no
+  longer blocks.
+- Any other task whose principal or owner can't be read, that names no one, or whose name
+  resolves to no SID and isn't another domain's, ends every run at 56 the same way. Another domain's name that can't be resolved doesn't (step 2).
+  `elevated_this_machines_tasks_all_have_a_principal_that_resolves` checks CI's machine only.
+- **Known gap: a task that deletes itself.** A pool task can start a process (X) and then
+  delete itself (or be deleted by X). The sweep's walk never sees it, and its instance stop only
+  covers instances of the tasks it finds, so X can live on into the next logon gap: it runs as
+  the pool user outside every job, possibly in session 0. The next inner's first-act sweep finds
+  and ends it (its snapshot sees every session, and the pool user can open its own session-0
+  processes), but only once that logon happened: X is alive during the logon gap, before the
+  first act's sweep kills it, and the unelevated outer can't list another user's processes in
+  session 0, so nothing checks for it before the logon. The fix belongs in the
+  kernel-process-list PR, next in the order: a `SYSTEM`-side pre-logon check that no process
+  whose user is the pool SID exists between sessions, which refuses the launch with
+  `UncleanSession` and requests `\Clauseo\SandboxStop`. That check closes the gap.
+- VM row (not run): as a pool user, register a task whose descriptor shuts SYSTEM out, edit
+  its file's principal to SYSTEM, run `--sweep-tasks`, and check whether the task still runs
+  after the edit. Expect 56, or the task deleted when its descriptor's owner is the pool user,
+  never 0 with the task left.
+- VM row (not run): does `IRunningTask::Stop` also end the processes the instance started, or
+  only the action's own process? If only the latter, a child of a stopped instance survives
+  like X above, and the pre-logon check is what catches it.
+- VM row (not run): after the sweep deletes a task, does `GetRunningTasks` still list that
+  task's running instance, and does `IRunningTask::Stop` still stop it? Step 4 relies on both.
+  If not, the instance step finds nothing and the instance runs on, like X above.
+- Elevated test (not run yet):
+  `elevated_a_task_whose_descriptor_shuts_system_out_is_deleted_or_56_never_left_at_0`: a
+  standard test user registers, from XML, a task whose descriptor denies SYSTEM and
+  Administrators all access; the walk and the cross-check, run as CI's elevated administrator
+  standing in for SYSTEM, must delete it or count 56, never neither. If Windows refuses such a
+  descriptor from a standard user, the gap can't arise and the test says so.
+  `elevated_this_machines_tasks_all_have_a_principal_that_resolves` now also checks that every
+  task on file and in the cache of CI's machine is listed or skipped by its file, so the
+  cross-check doesn't end a clean machine's runs at 56.
+- The harness rows for this end (`cancel`, `stdin-unread-cancel`, `end-cleanup`) haven't
+  run on a VM yet, nor have the elevated tests in `setup/sweep/windows_tests.rs`; the Windows
+  code is only built and checked by clippy.
 
 ### The launcher (PR6 interface)
 
@@ -1904,7 +2316,8 @@ pub struct Progress { pub walked: u64, pub done: bool, pub failed: Option<Arc<Er
 ```
 
 - **What `launch` does**, in order:
-  1. the launch check (the admin copy, the WSL deny, the clean-close record);
+  1. the launch check (the admin copy, the WSL deny, an earlier session's marker awaiting a
+     sweep, the clean-close record);
   2. marks the session open;
   3. assigns the pool user;
   4. the gate and the plan;
@@ -1926,20 +2339,33 @@ pub struct Progress { pub walked: u64, pub done: bool, pub failed: Option<Arc<Er
   denials.
 - **Errors:** `Error` with `code()` and `cause()`. Appended: `PoolFull` (the host shows
   `NotProtectedCause::PoolFull`), `NotPrepared` (retryable: the host goes back to `prepare`) and
-  `Cancelled`. There is no "matter busy" error: a matter's second concurrent session gets a pool
-  user of its own (the extra-user-per-matter PR).
+  `Cancelled`. `UncleanSession` (`sandbox.cleaning_up`, retryable) is the launch check's, for a
+  marker whose sweep didn't complete within 15 s; a later launch checks again. There is no "matter
+  busy" error: a matter's second concurrent session gets a pool user of its own (the
+  extra-user-per-matter PR).
 - **The exit:** the host decodes the child's exit status with `RunOutcome::from_exit` (`Agent`,
   `Runner(RunExit)`, `HostEnded`, `Unknown`) or `RunExit::from_code`. `RunExit::Escapee` becomes
   the host's "left the Safe workspace" stop (R17 PR-E). The outer asks the stop task itself.
+  `RunExit::AwaitingStop` is F4's refusal: an earlier session of the pool user awaits a stop,
+  its first or the final one after its sweep; the outer asked for it, and a later launch goes
+  ahead once it completed.
+  `RunExit::AwaitingSweep` is F4's other refusal, with no stop awaited: a marker of the pool
+  user's awaits a sweep that didn't complete within 15 s, or its completed stop (or sweep)
+  couldn't be re-marked; a later launch checks again.
+- **The desktop's start:** once, before any launch and off the UI thread,
+  `runner::start_up_requests(data_dir)` settles the markers the last run left and requests the
+  stop and sweep tasks for what they still await. It never waits.
 - **The host's side:**
   - `launch_bound` is 180 s on Windows tier B;
   - a launch on an unprepared matter calls `prepare` and polls `progress()` with no cap, showing
     "preparing this matter";
   - the lawyer's Stop ends the wait, not the walk;
   - `cancel()` runs on matter close or app quit;
-  - `SpawnOptions::stdin_grace` is 5 s on Windows tier B. The outer's end fits well inside it:
-    the agent's 1 s `GRACE`, ending its job, and the escapee snapshot (at most 230 ms measured)
-    come to about 1.5 s. The cancel tests pin the outer finishing within 3 s.
+  - `SpawnOptions::stdin_grace` is 5 s on Windows tier B (the process crate's default is 2 s).
+    The outer's end fits well inside it: the agent's 1 s `GRACE`, ending its job (400 ms at
+    most to empty), and the escapee snapshot (at most 230 ms measured) come to about 1.6 s, and
+    the record reads, the task requests and the marker's write add little; the outer waits for
+    no task's run. The cancel tests pin the outer finishing within 3 s.
 - **Measured cost of the first walk** (Server 2025 copy, optimised build): 17 s at 20k files,
   30 s at 50k. Later launches use the clean-close record and take 20-70 ms.
 - **Open, for the extra-user-per-matter PR:** grants name the pool user today, so a matter's

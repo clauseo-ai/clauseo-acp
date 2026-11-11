@@ -5,6 +5,7 @@
 
 mod allow;
 mod patterns;
+mod spelling;
 mod stetdoc;
 
 use std::cell::{Cell, OnceCell};
@@ -19,6 +20,8 @@ use super::words::{Escape, Segments, ansi_c_char, candidates, shell_segments};
 use super::{MAX_WORDS, Refusal, timings};
 
 pub(super) use allow::{read_only, textutil_writes};
+use spelling::as_listed;
+pub(super) use spelling::listed_spelling;
 pub(super) use stetdoc::{Stetdoc, stetdoc};
 
 /// The most folder entries [`held_files`] reads; a larger matter is read in part, shallow folders
@@ -491,6 +494,7 @@ pub(super) fn shell_refusal(
     folder: &Path,
     found: Option<MatterPath>,
     hits: &[String],
+    reach: &super::Reach,
 ) -> Option<Refusal> {
     let held = held_files(folder);
     super::timings::mark("walk");
@@ -509,12 +513,17 @@ pub(super) fn shell_refusal(
         }
     }
     let path = found.or_else(|| named_in(text, escape, &held).map(|file| file.path.clone()))?;
+    let shown = as_listed(path.clone(), &held);
     let mut names_held = held;
-    match names_held.iter().find(|file| file.path == path) {
-        Some(file) => file.state.set(State::Held),
-        None => names_held.push(Held::new(path.clone())),
+    // The file as found and as listed both count as held: the list read-only checks against
+    // only grows.
+    for path in [&path, &shown] {
+        match names_held.iter().find(|file| file.path == *path) {
+            Some(file) => file.state.set(State::Held),
+            None => names_held.push(Held::new(path.clone())),
+        }
     }
-    (!read_only(line, escape, &names_held, hits, folder)).then_some(Refusal::HeldOpen(path))
+    (!read_only(line, escape, &names_held, hits, folder, reach)).then_some(Refusal::HeldOpen(shown))
 }
 
 /// A program word's name: its last path part, lower case, without `.exe`.

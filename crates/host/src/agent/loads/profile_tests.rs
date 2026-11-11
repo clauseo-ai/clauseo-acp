@@ -31,8 +31,8 @@ const LOCKED_OFF: Switch = Switch {
     locked: true,
 };
 
-/// The `browser` entry exactly as `clauseo_profile::servers::browser` builds it.
-fn browser_server() -> McpServer {
+/// A `browser` entry asking for the proxy (`{proxy_port}`), as the Safe workspace's would.
+pub(super) fn browser_server() -> McpServer {
     McpServer::Stdio {
         name: "browser".to_owned(),
         command: PathBuf::from("/app/clauseo-mcp"),
@@ -81,7 +81,7 @@ fn browser_server() -> McpServer {
 }
 
 /// A session's claims as the tests fill them: macOS and Linux's, with no daemon port.
-fn claims() -> Claims<'static> {
+pub(super) fn claims() -> Claims<'static> {
     Claims {
         name: "t-1",
         cdp_port: 61_101,
@@ -100,20 +100,21 @@ fn other_server() -> McpServer {
     }
 }
 
-fn inputs<'a>(browser_dir: &'a Path, chrome: Option<&'a Path>) -> BrowserInputs<'a> {
+pub(super) fn inputs<'a>(browser_dir: &'a Path, chrome: Option<&'a Path>) -> BrowserInputs<'a> {
     BrowserInputs {
         switch: ON,
         control: McpControl::Clauseo,
         slot_free: true,
         proxy_set: true,
         port: Some(8123),
+        blocked_by_policy: None,
         executable: chrome,
         browser_dir,
         claims: Some(claims()),
     }
 }
 
-fn reason(state: Option<ToolState>) -> Option<ToolsUnavailableReason> {
+pub(super) fn reason(state: Option<ToolState>) -> Option<ToolsUnavailableReason> {
     match state?.availability {
         ToolAvailability::Unavailable { reason } => Some(reason),
         ToolAvailability::Available | ToolAvailability::Unknown { .. } => None,
@@ -166,7 +167,7 @@ fn a_folder_named_like_a_token_stays_literal() {
     let folders = Folders {
         work: "/w/{matter_notes}",
         notes: "/n/{work_folder}",
-        connectors: "",
+        ..folders()
     };
     assert_eq!(
         fill_instructions("{work_folder} and {matter_notes}", folders).unwrap(),
@@ -219,6 +220,26 @@ fn each_reason_drops_the_browser_in_order() {
                 ..base
             },
             ToolsUnavailableReason::NoProxy,
+        ),
+        (
+            BrowserInputs {
+                blocked_by_policy: Some(ToolsUnavailableReason::BrowserBlockedByPolicy),
+                port: None,
+                executable: None,
+                claims: None,
+                ..base
+            },
+            ToolsUnavailableReason::BrowserBlockedByPolicy,
+        ),
+        (
+            BrowserInputs {
+                blocked_by_policy: Some(ToolsUnavailableReason::BrowserPolicyUnreadable),
+                port: None,
+                executable: None,
+                claims: None,
+                ..base
+            },
+            ToolsUnavailableReason::BrowserPolicyUnreadable,
         ),
         (
             BrowserInputs {
@@ -341,10 +362,10 @@ fn folders() -> Folders<'static> {
         work: "/data/run/t-1/work",
         notes: "/data/agent-state/m/notes",
         connectors: "",
+        browser: "",
     }
 }
-
-/// No data folder deny rules: these tests are about the other keys.
+/// No data folder deny rules (nor a matter): these tests are about the other keys.
 static NO_DENY: crate::agent::data_fence::LaunchDeny = crate::agent::data_fence::LaunchDeny {
     spellings: Vec::new(),
     targets: Vec::new(),
@@ -359,6 +380,9 @@ fn keys(web_search: Switch, login: Login) -> ClaudeKeys<'static> {
         forced_ask: false,
         data: &NO_DENY,
         case_law: false,
+        browser: false,
+        sandbox: None,
+        matter: None,
     }
 }
 
@@ -375,7 +399,7 @@ fn strings(value: &Value) -> Vec<&str> {
         .unwrap_or_default()
 }
 
-/// R21's "Permissions": the profile's allow list, then `WebSearch`, then one rule per seed site.
+/// R21's "Permissions": the profile's allow list, `WebSearch`, bare `WebFetch`, the seed sites.
 #[test]
 fn the_allow_list_is_exactly_the_permissions_list() {
     let hook = json!({"allowedTools": [
@@ -395,6 +419,7 @@ fn the_allow_list_is_exactly_the_permissions_list() {
         "Bash(stetdoc lookup:*)".to_owned(),
         "Bash(stetdoc capabilities:*)".to_owned(),
         "WebSearch".to_owned(),
+        "WebFetch".to_owned(),
     ];
     expected.extend(
         SEED_SITES
@@ -402,7 +427,6 @@ fn the_allow_list_is_exactly_the_permissions_list() {
             .map(|site| format!("WebFetch(domain:{site})")),
     );
     assert_eq!(strings(&options["allowedTools"]), expected);
-    assert!(strings(&options["allowedTools"]).contains(&"WebFetch(domain:sci.gov.in)"));
     assert_eq!(options.get("disallowedTools"), None);
 }
 
@@ -425,7 +449,7 @@ fn a_bedrock_login_keeps_webfetch_and_skips_the_preflight() {
     let options = options(&json!({}), &keys(ON, Login::Bedrock));
     let allowed = strings(&options["allowedTools"]);
     assert!(!allowed.contains(&"WebSearch"));
-    assert!(allowed.contains(&"WebFetch(domain:indiacode.nic.in)"));
+    assert!(allowed.contains(&"WebFetch") && allowed.contains(&"WebFetch(domain:sci.gov.in)"));
     assert_eq!(options["settings"]["skipWebFetchPreflight"], json!(true));
     assert_eq!(options.get("disallowedTools"), None);
     let other = self::options(&json!({}), &keys(ON, Login::OtherCloud));
@@ -457,8 +481,7 @@ fn skill_shell_is_off_and_the_folders_come_after_the_hooks() {
     );
 }
 
-/// The guard's entry and `disableAllHooks: false` survive beside the profile's settings, and
-/// the forced MCP keys stay.
+/// The guard's entry, `disableAllHooks: false` and the forced MCP keys survive the profile's keys.
 #[test]
 fn the_guard_and_the_forced_keys_survive_the_profile_keys() {
     let hook = json!({"claudeCode": {"options": {
@@ -519,8 +542,7 @@ fn the_instructions_are_filled_and_escaped_for_json() {
         .unwrap();
     let odd = Folders {
         work: "/data/run/a \"b\"\n\\c/work",
-        notes: "/data/agent-state/m/notes",
-        connectors: "",
+        ..folders()
     };
     fill_meta(&mut meta, odd).unwrap();
     let text = Value::Object(meta).to_string();

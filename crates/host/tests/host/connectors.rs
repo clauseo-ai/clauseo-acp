@@ -103,7 +103,7 @@ fn the_tool_switches_mirror_the_settings_crate() {
     );
     let wire_tools = serde_json::to_value(ToolsSettingsView {
         web_search: true,
-        browser: cfg!(target_os = "macos"),
+        browser: cfg!(any(target_os = "macos", windows)),
     })
     .unwrap();
     assert_eq!(settings_tools, wire_tools);

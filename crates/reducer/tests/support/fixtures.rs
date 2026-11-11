@@ -475,6 +475,7 @@ pub fn matter_versions() -> Fx<Vec<Envelope>> {
         None,
     )?)?;
     log.push(VersionRestored {
+        undoes: None,
         from: before,
         checkpoint: restore,
         scope: RestoreScope::Files {

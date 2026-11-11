@@ -4,7 +4,9 @@
 //! - The window opens at [`WINDOW_SIZE`], 1280 by 800 logical px, which the room needs for its
 //!   three columns; below 1000 px the room scrolls the page itself. The e2e and marks builds
 //!   open at it unfitted, so the speed scoreboard is the same everywhere. The release build
-//!   fits it to the primary monitor's work area ([`fitted`]) and centres it.
+//!   fits it to the primary monitor's work area ([`fitted`]) and centres it. It never goes
+//!   under [`MIN_WINDOW_SIZE`], 760 by 520, the least the room lays out for without a sideways
+//!   scroll (D-061).
 //! - The `settings` window opens at [`SETTINGS_SIZE`], 960 by 700, fitted and centred the same
 //!   way (`settings_window.rs`, 0028).
 //! - window-state restores the lawyer's own size of `main` on later launches, in the release
@@ -18,7 +20,9 @@
 //!   (`windows_theme.rs`), never the lawyer's Settings choice, which only the host knows later;
 //!   the page's own first paint (`ui/app/index.html`) follows the OS too until the display is
 //!   set. Elsewhere the window takes the ground once built ([`paint_first_frame`]), which Windows
-//!   does as well, a no-op when the theme agrees.
+//!   does as well, a no-op when the theme agrees. `WebView2` also takes the ground from
+//!   [`WEBVIEW2_BACKGROUND_ENV`] ([`ground_in_env`], first in `main`): on a fresh profile in
+//!   the dark theme, the builder's colour alone left `WebView2`'s #121212 for 0.5 to 0.75 s.
 
 use tauri::{AppHandle, Manager, Runtime, Theme, WebviewWindow, WebviewWindowBuilder};
 
@@ -32,6 +36,21 @@ mod tests;
 /// builds open at it always, and the release build opens at it when the work area allows
 /// ([`fitted`]).
 pub(crate) const WINDOW_SIZE: (f64, f64) = (1280.0, 800.0);
+
+/// The `main` window's least inner size in logical px: under it the room's title is cut and the
+/// page scrolls sideways (D-061). The window manager keeps the lawyer's own sizing above it.
+pub(crate) const MIN_WINDOW_SIZE: (f64, f64) = (760.0, 520.0);
+
+/// `builder` opening at `size` (logical px), never made smaller than [`MIN_WINDOW_SIZE`]: the
+/// `main` window's size (`open_main_window` in `lib.rs`).
+pub(crate) fn with_size<R: Runtime, M: Manager<R>>(
+    builder: WebviewWindowBuilder<'_, R, M>,
+    (width, height): (f64, f64),
+) -> WebviewWindowBuilder<'_, R, M> {
+    builder
+        .inner_size(width, height)
+        .min_inner_size(MIN_WINDOW_SIZE.0, MIN_WINDOW_SIZE.1)
+}
 
 /// The `settings` window's size in logical px: the design's settings window.
 pub(crate) const SETTINGS_SIZE: (f64, f64) = (960.0, 700.0);
@@ -131,6 +150,43 @@ pub(crate) fn with_ground<R: Runtime, M: Manager<R>>(
     #[cfg(windows)]
     let builder = builder.background_color(colour(ground(windows_theme::apps_dark())));
     builder
+}
+
+/// The variable through which `WebView2` takes its default background before its controller
+/// exists (Microsoft's `DefaultBackgroundColor` docs: the property alone can leave a first frame
+/// in `WebView2`'s own colour).
+#[cfg(any(windows, test))]
+pub(crate) const WEBVIEW2_BACKGROUND_ENV: &str = "WEBVIEW2_DEFAULT_BACKGROUND_COLOR";
+
+/// [`WEBVIEW2_BACKGROUND_ENV`]'s value for the ground of a `dark` theme or not: opaque ARGB in
+/// hex, `FFE5E2DC` by day, `FF1B1A18` by night.
+#[cfg(any(windows, test))]
+pub(crate) fn webview2_background(dark: bool) -> String {
+    let (r, g, b) = ground(dark);
+    format!("FF{r:02X}{g:02X}{b:02X}")
+}
+
+/// Sets [`WEBVIEW2_BACKGROUND_ENV`] to the ground of Windows' app theme, the colour
+/// [`with_ground`] and the native mark (`native_mark.rs`) take, so a fresh profile's dark
+/// runs show the ground between the native mark and the page's, not `WebView2`'s #121212.
+/// `main` calls it before any thread starts.
+#[cfg(windows)]
+#[expect(
+    unsafe_code,
+    reason = "set_var, which is unsafe once other threads may read the environment"
+)]
+pub fn ground_in_env() {
+    let value = webview2_background(windows_theme::apps_dark());
+    // SAFETY: `main` calls this before any thread starts and before Tauri, logging or a runtime
+    // reads the environment, right after `keep_no_dns_in_env`.
+    unsafe { std::env::set_var(WEBVIEW2_BACKGROUND_ENV, value) };
+}
+
+/// Whether Windows' app theme is dark (`windows_theme.rs`): the native mark's colours
+/// (`native_mark.rs`).
+#[cfg(windows)]
+pub(crate) fn apps_dark() -> bool {
+    windows_theme::apps_dark()
 }
 
 /// Paints the window's background in the ground of the OS theme, so the first frame is not

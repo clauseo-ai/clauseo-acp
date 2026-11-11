@@ -14,10 +14,10 @@
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    AccountLimits, BlockedSiteId, BrowserInstallState, ConnectorsState, Cursor, EntryId, Envelope,
-    FolderScanned, HeaderEntry, LimitsView, MatterHeaderEntry, MatterId, MattersChanged, MessageId,
-    Protection, ProtectionView, Seq, SettingsView, SiteTag, StreamId, ThreadId, ThreadsChanged,
-    Timestamp, TurnId, UpdateView, ViewEntry, ViewEpoch,
+    AccountLimits, BlockedSiteId, BrowserInstallState, BrowserPolicyState, ConnectorsState, Cursor,
+    EntryId, Envelope, FolderScanned, HeaderEntry, LimitsView, MatterHeaderEntry, MatterId,
+    MattersChanged, MessageId, Protection, ProtectionView, Seq, SettingsView, SiteTag, StreamId,
+    ThreadId, ThreadsChanged, Timestamp, TurnId, UpdateView, ViewEntry, ViewEpoch,
 };
 
 /// One change to a stream's view, at its cursor.
@@ -152,6 +152,14 @@ pub enum HostEvent {
         /// Where it stands.
         state: BrowserInstallState,
     },
+    /// What the re-read of the firm's browser policy that `HostCommand::RecheckBrowserPolicy`
+    /// asked for found: `Checking` as it starts, then its end. App-wide, never logged and in no
+    /// stream: it reaches app subscribers only. Every app catch-up carries the latest one; once
+    /// there is one, a session launch's read of the policy keeps it current.
+    BrowserPolicy {
+        /// What the read found.
+        state: BrowserPolicyState,
+    },
     /// Rows of the matter list changed, came or went; or, with `all`, the whole list. App-wide:
     /// it reaches app subscribers only.
     MattersChanged(MattersChanged),
@@ -190,6 +198,14 @@ pub enum HostEvent {
         matter: MatterId,
         /// Its protection now.
         protection: Protection,
+    },
+    /// What a matter's papers hold changed since `HostQuery::ListPapers` last answered: the
+    /// background scan found tracked changes in a `.docx` the listing showed without them, or
+    /// the files changed. The app lists the papers again. App-wide, never logged and in no
+    /// stream: it reaches app subscribers only, carries no list, and a catch-up carries none.
+    PapersChanged {
+        /// The matter.
+        matter: MatterId,
     },
     /// This computer's protection view changed (decision record 0051): the sandbox's detection,
     /// the set-up work in progress, `retry_asks_admin`, or either protection setting. The whole

@@ -1,6 +1,6 @@
 use super::{
-    DAY_GROUND, NIGHT_GROUND, SETTINGS_SIZE, WINDOW_SIZE, fit, fitted, ground, state_denylist,
-    state_flags,
+    DAY_GROUND, MIN_WINDOW_SIZE, NIGHT_GROUND, SETTINGS_SIZE, WEBVIEW2_BACKGROUND_ENV, WINDOW_SIZE,
+    fit, fitted, ground, state_denylist, state_flags, webview2_background,
 };
 use std::path::Path;
 use tauri_plugin_window_state::StateFlags;
@@ -14,6 +14,18 @@ fn close(actual: (f64, f64), expected: (f64, f64)) -> bool {
 fn no_monitor_opens_at_the_room_size() {
     assert_eq!(fitted(None), (1280.0, 800.0));
     assert_eq!(WINDOW_SIZE, (1280.0, 800.0));
+}
+
+#[test]
+fn the_main_window_keeps_at_least_760_by_520() {
+    assert_eq!(MIN_WINDOW_SIZE, (760.0, 520.0));
+    // the size it opens at is above the least, so the minimum never shrinks a first window
+    assert!(WINDOW_SIZE.0 >= MIN_WINDOW_SIZE.0 && WINDOW_SIZE.1 >= MIN_WINDOW_SIZE.1);
+    // the main window's builder sets it (lib.rs, open_main_window)
+    let lib = include_str!("../lib.rs");
+    assert!(lib.contains("window_size::with_size(builder, (width, height))"));
+    let own = include_str!("../window_size.rs");
+    assert!(own.contains(".min_inner_size(MIN_WINDOW_SIZE.0, MIN_WINDOW_SIZE.1)"));
 }
 
 #[test]
@@ -116,4 +128,20 @@ fn window_state_is_in_the_local_data_folder_not_the_roaming_one() {
     );
     let keys: Vec<&str> = over.keys().map(String::as_str).collect();
     assert_eq!(keys, ["config"], "only the config folder is overridden");
+}
+
+/// `WebView2` takes its first frame's colour from the variable as opaque ARGB hex: the ground of
+/// the theme, the same `ground` the builder and the native mark take.
+#[test]
+fn webview2_s_first_background_is_the_ground_of_the_theme() {
+    assert_eq!(WEBVIEW2_BACKGROUND_ENV, "WEBVIEW2_DEFAULT_BACKGROUND_COLOR");
+    assert_eq!(webview2_background(false), "FFE5E2DC");
+    assert_eq!(webview2_background(true), "FF1B1A18");
+    for dark in [false, true] {
+        let (r, g, b) = ground(dark);
+        assert_eq!(
+            webview2_background(dark),
+            format!("FF{r:02X}{g:02X}{b:02X}")
+        );
+    }
 }

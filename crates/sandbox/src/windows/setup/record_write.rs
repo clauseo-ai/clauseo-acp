@@ -22,10 +22,12 @@ use windows::core::{HSTRING, PCWSTR};
 
 use super::MachineError;
 use super::lock::Descriptor;
+use super::record_key::{self, Counts, Keys};
 use super::record_values::{
     self, ADMIN_COPY_OWNER, ADMIN_COPY_SHA256, ADMIN_COPY_VERSION, ADMIN_VALUES, AdminValues,
-    CopyOwner, DATA_DIR, GROUP_SID, OWNER_SID, POOL_SIDS, RECORD_SDDL, REMOVING, RESET_SIDS,
-    RawRecord, RegValue, SETUP_VALUES, USER_INSTALL_DIR, resets_with, resets_without, sids_value,
+    CopyOwner, DATA_DIR, GROUP_SID, INSTALL_ID, OWNER_SID, POOL_SIDS, RECORD_SDDL, REMOVING,
+    RESET_OWED, RESET_SIDS, RawRecord, RegValue, SETUP_VALUES, USER_INSTALL_DIR, resets_with,
+    resets_without, sids_value,
 };
 use crate::windows::pool::{MachineRecord, pool_sids_from_multi_sz};
 use crate::windows::record::{RecordError, read_dword, read_qword, read_string, read_units};
@@ -62,15 +64,40 @@ pub(super) fn read(key: &str) -> Result<Option<MachineRecord>, MachineError> {
 
 /// Writes `record` as `HKLM\<key>`'s values, making the key when it is missing, and sets the
 /// key's owner to Administrators and its DACL to [`RECORD_SDDL`]. A record whose pool holds its
-/// owner is refused before any write.
+/// owner is refused before any write. The first record of an install (no `OwnerSid` or
+/// `InstallId` before) gets a new `InstallId` too ([`record_values::INSTALL_ID`]); a record
+/// written over one, or an install from before the id, keeps what it has.
 pub(super) fn write(key: &str, record: &MachineRecord) -> Result<(), MachineError> {
     let values =
         record_values::encode(record).map_err(|error| MachineError::Other(error.to_string()))?;
+    let first = read_texts(key, &[OWNER_SID, INSTALL_ID])?
+        .iter()
+        .all(Option::is_none);
     let opened = open_secured(key)?;
     for (name, value) in &values {
         set_value(&opened, name, value)?;
     }
+    if first {
+        let mut random = [0u8; 16];
+        getrandom::fill(&mut random)
+            .map_err(|error| MachineError::Other(format!("the install id: {error}")))?;
+        let id = record_values::new_install_id(random);
+        set_value(&opened, INSTALL_ID, &RegValue::Sz(record_values::sz(&id)))?;
+    }
     Ok(())
+}
+
+/// The machine record's `InstallId`, as the lawyer reads it (the record grants Users read):
+/// `None` when it, or the key, is missing; one that isn't 32 lowercase hex is an error.
+pub(crate) fn read_record_install_id() -> Result<Option<String>, MachineError> {
+    let texts = read_texts(RECORD_KEY, &[INSTALL_ID])?;
+    match texts.into_iter().next().flatten() {
+        Some(id) if record_values::is_install_id(&id) => Ok(Some(id)),
+        Some(_) => Err(MachineError::Other(
+            "the record's InstallId is malformed".to_owned(),
+        )),
+        None => Ok(None),
+    }
 }
 
 /// Writes `--adopt`'s values ([`ADMIN_VALUES`]) into `HKLM\<key>`, made and secured as
@@ -128,8 +155,30 @@ pub(crate) fn read_texts(key: &str, names: &[&str]) -> Result<Vec<Option<String>
 /// The record's `ResetSids` (`record_values::RESET_SIDS`): empty when the key or the value is
 /// missing; a malformed list is an error, never a shorter list.
 pub(crate) fn read_reset_sids(key: &str) -> Result<Vec<Sid>, MachineError> {
+    read_sids(key, RESET_SIDS)
+}
+
+/// The record's `ResetOwed` (`record_values::RESET_OWED`), as [`read_reset_sids`] reads
+/// `ResetSids`.
+pub(crate) fn read_reset_owed(key: &str) -> Result<Vec<Sid>, MachineError> {
+    read_sids(key, RESET_OWED)
+}
+
+/// Writes the record's `ResetOwed` as `users`, deleting it when there are none, in the key as
+/// it is: never made ([`open_existing`]). The stop task calls it as SYSTEM, without the lock
+/// to add users (`stop/owed.rs`) and under it to clear the value once folded.
+pub(crate) fn write_reset_owed(key: &str, users: &[Sid]) -> Result<(), MachineError> {
+    if users.is_empty() {
+        return delete_values(key, &[RESET_OWED]);
+    }
+    set_value(&open_existing(key)?, RESET_OWED, &sids_value(users))
+}
+
+/// The record's `REG_MULTI_SZ` list of SIDs `value`: empty when the key or the value is
+/// missing; a malformed list is an error, never a shorter list.
+fn read_sids(key: &str, value: &str) -> Result<Vec<Sid>, MachineError> {
     let subkey = HSTRING::from(key);
-    let name = HSTRING::from(RESET_SIDS);
+    let name = HSTRING::from(value);
     let units = read_units(
         PCWSTR(subkey.as_ptr()),
         PCWSTR(name.as_ptr()),
@@ -140,7 +189,7 @@ pub(crate) fn read_reset_sids(key: &str) -> Result<Vec<Sid>, MachineError> {
         return Ok(Vec::new());
     };
     pool_sids_from_multi_sz(&units)
-        .map_err(|error| MachineError::Other(format!("the record's ResetSids: {error}")))
+        .map_err(|error| MachineError::Other(format!("the record's {value}: {error}")))
 }
 
 /// Adds `users` to the record's `ResetSids`, keeping what it lists, in the key as it is: never
@@ -154,18 +203,26 @@ pub(crate) fn add_reset_sids(key: &str, users: &[Sid]) -> Result<(), MachineErro
     set_value(&open_existing(key)?, RESET_SIDS, &sids_value(&all))
 }
 
-/// The stop's `REG_QWORD` value `name` of `HKLM\<key>` (`StopNext`, `StopSequence`):
-/// `None` when it, or the key, is missing; one of another type is an error.
-pub(crate) fn read_stop_value(key: &str, name: &str) -> Result<Option<u64>, MachineError> {
+/// A pool task's `REG_QWORD` value `name` of `HKLM\<key>` (`StopNext`, `SweepSequence`, …):
+/// `None` when it, or the key, is missing; one of another type is an error. Read by the tasks
+/// as SYSTEM, and by the runner and the desktop as the lawyer (the record grants Users read).
+pub(crate) fn read_pool_value(key: &str, name: &str) -> Result<Option<u64>, MachineError> {
     let subkey = HSTRING::from(key);
     let name = HSTRING::from(name);
     read_qword(PCWSTR(subkey.as_ptr()), PCWSTR(name.as_ptr())).map_err(reading)
 }
 
-/// Sets the stop's `REG_QWORD` value `name` (`StopNext`, `StopCompleted`, `StopSequence`)
-/// in `HKLM\<key>` as it is: never made, so a stop still running after `--remove` can't bring
-/// the key back ([`open_existing`]). The stop task calls it as SYSTEM, under the set-up lock.
-pub(crate) fn write_stop_value(key: &str, name: &str, value: u64) -> Result<(), MachineError> {
+/// [`read_pool_value`] of the machine's record, `HKLM\SOFTWARE\Clauseo\Sandbox`: what the
+/// outer runner and the desktop read, as the lawyer and without the set-up lock, for the
+/// unclean-session markers (`StopNext`, `SweepSequence`, …).
+pub(crate) fn read_record_value(name: &str) -> Result<Option<u64>, MachineError> {
+    read_pool_value(RECORD_KEY, name)
+}
+
+/// Sets a pool task's `REG_QWORD` value `name` (`StopNext`, `SweepCompleted`, …) in
+/// `HKLM\<key>` as it is: never made, so a task still running after `--remove` can't bring
+/// the key back ([`open_existing`]). The tasks call it as SYSTEM, under the set-up lock.
+pub(crate) fn write_pool_value(key: &str, name: &str, value: u64) -> Result<(), MachineError> {
     set_value(&open_existing(key)?, name, &RegValue::Qword(value))
 }
 
@@ -271,7 +328,8 @@ pub(crate) fn delete_admin_values(key: &str) -> Result<(), MachineError> {
     delete_values(key, &ADMIN_VALUES)
 }
 
-/// Deletes `names` from `HKLM\<key>`, then the key when nothing is left in it.
+/// Deletes `names` from `HKLM\<key>`, then the key when nothing is left in it, and the
+/// vendor key above it when that is left empty too ([`record_key::delete_emptied`]).
 fn delete_values(key: &str, names: &[&str]) -> Result<(), MachineError> {
     let subkey = HSTRING::from(key);
     let mut opened = HKEY::default();
@@ -286,7 +344,7 @@ fn delete_values(key: &str, names: &[&str]) -> Result<(), MachineError> {
         )
     };
     if open == ERROR_FILE_NOT_FOUND {
-        return Ok(());
+        return record_key::delete_emptied(&mut Hklm, key);
     }
     check("RegOpenKeyExW", open)?;
     let opened = Key(opened);
@@ -298,37 +356,65 @@ fn delete_values(key: &str, names: &[&str]) -> Result<(), MachineError> {
             check("RegDeleteValueW", deleted)?;
         }
     }
-    let (mut subkeys, mut values) = (0u32, 0u32);
-    // SAFETY: the key is open with KEY_QUERY_VALUE; the two counts are live out-pointers and
-    // every other out-pointer is left null.
-    let queried = unsafe {
-        RegQueryInfoKeyW(
-            opened.0,
-            None,
-            None,
-            None,
-            Some(&raw mut subkeys),
-            None,
-            None,
-            Some(&raw mut values),
-            None,
-            None,
-            None,
-            None,
-        )
-    };
-    check("RegQueryInfoKeyW", queried)?;
     drop(opened);
-    if subkeys > 0 || values > 0 {
-        return Ok(());
+    record_key::delete_emptied(&mut Hklm, key)
+}
+
+/// `HKLM` in the 64-bit view, as [`record_key`] reads and deletes its keys.
+struct Hklm;
+
+impl Keys for Hklm {
+    fn counts(&mut self, key: &str) -> Result<Option<Counts>, MachineError> {
+        let subkey = HSTRING::from(key);
+        let mut opened = HKEY::default();
+        // SAFETY: the subkey is NUL-terminated; `opened` is a live out-pointer, closed by `Key`.
+        let open = unsafe {
+            RegOpenKeyExW(
+                HKEY_LOCAL_MACHINE,
+                &subkey,
+                None,
+                KEY_QUERY_VALUE | KEY_WOW64_64KEY,
+                &raw mut opened,
+            )
+        };
+        if open == ERROR_FILE_NOT_FOUND {
+            return Ok(None);
+        }
+        check("RegOpenKeyExW", open)?;
+        let opened = Key(opened);
+        let (mut subkeys, mut values) = (0u32, 0u32);
+        // SAFETY: the key is open with KEY_QUERY_VALUE; the two counts are live out-pointers
+        // and every other out-pointer is left null.
+        let queried = unsafe {
+            RegQueryInfoKeyW(
+                opened.0,
+                None,
+                None,
+                None,
+                Some(&raw mut subkeys),
+                None,
+                None,
+                Some(&raw mut values),
+                None,
+                None,
+                None,
+                None,
+            )
+        };
+        check("RegQueryInfoKeyW", queried)?;
+        Ok(Some(Counts { subkeys, values }))
     }
-    // SAFETY: the subkey is a NUL-terminated HSTRING that lives for the call.
-    // SAFETY: the subkey is a NUL-terminated HSTRING that lives for the call.
-    let deleted = unsafe { RegDeleteKeyExW(HKEY_LOCAL_MACHINE, &subkey, KEY_WOW64_64KEY.0, None) };
-    if deleted == ERROR_FILE_NOT_FOUND {
-        return Ok(());
+
+    fn delete(&mut self, key: &str) -> Result<(), MachineError> {
+        let subkey = HSTRING::from(key);
+        // SAFETY: the subkey is a NUL-terminated HSTRING that lives for the call.
+        let deleted =
+            unsafe { RegDeleteKeyExW(HKEY_LOCAL_MACHINE, &subkey, KEY_WOW64_64KEY.0, None) };
+        if deleted == ERROR_FILE_NOT_FOUND {
+            return Ok(());
+        }
+        check("RegDeleteKeyExW", deleted)
     }
-    check("RegDeleteKeyExW", deleted)
 }
 
 /// Sets `name` on the open key `opened` to `value`.

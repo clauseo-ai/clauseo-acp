@@ -92,7 +92,12 @@ function PaperRow({ paper, onOpen }: { paper: FoundPaper; onOpen: () => void }) 
   const { lang } = useDisplay();
   return (
     <li>
-      <button type="button" className="room-matter-row" data-testid="find-paper" onClick={onOpen}>
+      <button
+        type="button"
+        className="room-matter-row room-find-row"
+        data-testid="find-paper"
+        onClick={onOpen}
+      >
         <span className="room-matter-name">
           <Own text={paper.name} />
         </span>
@@ -117,7 +122,7 @@ function ConversationRow({ found, onOpen }: { found: FoundConversation; onOpen: 
   const row = (
     <button
       type="button"
-      className="room-matter-row"
+      className="room-matter-row room-find-row"
       data-testid="find-conversation"
       data-order={found.order}
       onClick={onOpen}
@@ -189,7 +194,7 @@ export function FindResults({
   }, [search, state.next, state.hits]);
   const openTalk = (found: FoundConversation) => () => {
     // asked before it opens, so the thread's first rows already page back to the entry
-    if (found.order !== undefined) jumpTo(streamOf(found.thread), found.order);
+    if (found.order !== undefined) jumpTo(streamOf(found.thread), found.order, found.parts);
     else clearJump();
     const known = found.archived
       ? archivedSummary(every, found.matter, found.thread, talks.agent)
@@ -267,18 +272,24 @@ export function FindResults({
         </section>
       )}
       {shown.nothing && (
+        // what Find covers, said in words under it: an info icon alone here meant nothing (D-071)
         <div className="room-find-none" role="status">
           <p className="text-ui font-chip text-primary">
             <Say>{fw(lang, 'Nothing found for "{words}".', { words: field.query.trim() })}</Say>
           </p>
+          <p className="text-small text-muted">
+            <Say>{scope}</Say>
+          </p>
         </div>
       )}
       <p ref={foot} className="room-find-foot">
-        <Tooltip content={scope}>
-          <button type="button" className="room-find-scope" aria-label={scope}>
-            <IconAbout size={14} />
-          </button>
-        </Tooltip>
+        {!shown.nothing && (
+          <Tooltip content={scope}>
+            <button type="button" className="room-find-scope" aria-label={scope}>
+              <IconAbout size={14} />
+            </button>
+          </Tooltip>
+        )}
       </p>
     </>
   );

@@ -90,3 +90,69 @@ fn a_symlink_is_never_the_same_file() {
         "a reparse point is never the same file"
     );
 }
+
+/// Whether `error` (from [`super::win32_io_error`]) reads as a missing file or folder: only Win32
+/// `ERROR_FILE_NOT_FOUND` (2) and `ERROR_PATH_NOT_FOUND` (3). The code decides, not `kind()`,
+/// because std's kind also reads `ERROR_INVALID_DRIVE` (15), `ERROR_BAD_NETPATH` (53) and
+/// `ERROR_BAD_NET_NAME` (67) as `NotFound`; access denied, a sharing violation and a reparse
+/// refusal are never missing either. The rule a caller must use; no production caller reads a
+/// `same_file` error as missing yet, so it lives here, pinned by the tests below.
+#[cfg(windows)]
+fn is_missing(error: &std::io::Error) -> bool {
+    use windows::Win32::Foundation::{ERROR_FILE_NOT_FOUND, ERROR_PATH_NOT_FOUND};
+    error.raw_os_error().is_some_and(|code| {
+        code == ERROR_FILE_NOT_FOUND.0.cast_signed() || code == ERROR_PATH_NOT_FOUND.0.cast_signed()
+    })
+}
+
+/// On Windows only `ERROR_FILE_NOT_FOUND` (2) and `ERROR_PATH_NOT_FOUND` (3) read as missing.
+/// Access denied (5), a sharing violation (32), a reparse refusal (`ERROR_CANT_ACCESS_FILE`,
+/// 1920) and the codes std also reads as `NotFound` (15, 53, 67) keep their Win32 code and are
+/// not missing, so a caller that takes "missing" from it never mistakes them for an absent file.
+#[cfg(windows)]
+#[test]
+fn only_a_missing_file_or_path_reads_as_not_found_on_windows() {
+    use windows::Win32::Foundation::WIN32_ERROR;
+    let io_error = |code: u32| {
+        let error = windows::core::Error::from(WIN32_ERROR(code).to_hresult());
+        super::win32_io_error(error)
+    };
+    for code in [2_u32, 3, 15, 53, 67, 5, 32, 1920] {
+        let error = io_error(code);
+        assert_eq!(
+            error.raw_os_error(),
+            Some(code.cast_signed()),
+            "code {code} keeps its Win32 code"
+        );
+        assert_eq!(
+            is_missing(&error),
+            matches!(code, 2 | 3),
+            "code {code} is missing only for 2 and 3"
+        );
+    }
+    let not_win32 =
+        windows::core::Error::from(windows::core::HRESULT(0x8000_4005_u32.cast_signed()));
+    let error = super::win32_io_error(not_win32);
+    assert_eq!(error.raw_os_error(), Some(0x8000_4005_u32.cast_signed()));
+    assert!(
+        !is_missing(&error),
+        "an error that is no Win32 error is not missing"
+    );
+}
+
+/// On Windows a missing file and a missing folder on the path are both missing, by their Win32
+/// codes (2 and 3), from `same_file`'s own open.
+#[cfg(windows)]
+#[test]
+fn a_missing_file_or_folder_is_missing_by_its_win32_code_on_windows() {
+    let dir = TestDir::new("fileid-win32-missing");
+    let one = dir.file("one", b"x");
+    let gone = dir.0.join("gone");
+    let error = same_file(&one, &gone).unwrap_err();
+    assert_eq!(error.raw_os_error(), Some(2));
+    assert!(is_missing(&error));
+    let under_nothing = dir.0.join("no-such-folder").join("gone");
+    let error = same_file(&one, &under_nothing).unwrap_err();
+    assert_eq!(error.raw_os_error(), Some(3));
+    assert!(is_missing(&error));
+}

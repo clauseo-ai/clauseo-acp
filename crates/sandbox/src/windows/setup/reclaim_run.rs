@@ -141,6 +141,9 @@ pub(super) fn result_of(done: Reclaimed) -> SetupResult {
             cause: (!notes.is_empty()).then(|| notes.join("; ")),
             blocked: None,
             taken: None,
+            code: None,
+            kind: None,
+            at: None,
         }
     };
     result.taken = Some(done.taken);

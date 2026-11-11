@@ -5,7 +5,8 @@
 import { INSTALLER_CLOSE, pw } from "@clauseo/components/lib/words-protection.ts";
 import { afterEach, expect, test, vi } from "vitest";
 import { causeOf } from "./causes.ts";
-import { blockLine, blockOf, firmInstall, needsInstaller } from "./blocked.ts";
+import { blockLine, blockOf, firmInstall, needsInstaller, setUpFixes } from "./blocked.ts";
+import { canRetry } from "./view.ts";
 import { PROT, view } from "./fixtures.ts";
 import { installerPage, openInstallerPage, repairPage } from "./installer.ts";
 import { FakeTransport } from "../../transport/fake-transport.ts";
@@ -57,24 +58,24 @@ const cause = (c: unknown) => causeOf(c as NotProtectedCause);
 test.each([
   [
     "logon_right",
-    "Windows policy on this computer doesn't let the Safe workspace's accounts sign in. Ask your IT team to add them to the Allow log on locally policy.",
+    "Windows isn't letting the Safe workspace's accounts sign in. Setting up the Safe workspace again usually fixes this.",
   ],
   [
     "policy",
-    "A Windows policy on this computer blocks the program that sets up the Safe workspace. Ask your IT team to allow it.",
+    "A Windows policy on this computer blocks the program that sets up the Safe workspace. Your firm manages this policy on this computer.",
   ],
   [
     "tool_missing",
-    "The program that sets up the Safe workspace is missing, or security software blocked it. Ask your IT team to look into it.",
+    "The program that sets up the Safe workspace is missing, or security software blocked it. Your firm manages the security software on this computer.",
   ],
   ["admin_copy_missing", "The Safe workspace wasn't set up when Clauseo was installed."],
   [
     "admin_copy_changed",
-    "The program that sets up the Safe workspace has changed since Clauseo was installed. Ask your IT team, or install Clauseo again.",
+    "The program that sets up the Safe workspace has changed since Clauseo was installed. Install Clauseo again to restore it.",
   ],
   [
     "admin_copy_unsafe",
-    "The folder that holds the Safe workspace's set-up program isn't limited to administrators, or holds files it shouldn't. Ask your IT team to look into it.",
+    "The folder that holds the Safe workspace's set-up program isn't limited to administrators, or holds files it shouldn't. Your firm manages this folder on this computer.",
   ],
 ] as const)("blocked { reason: %s } has its own line", (reason, line) => {
   const c = cause({ blocked: { reason } });
@@ -87,11 +88,16 @@ test("other_account has its own line; an unknown reason, or none, asks IT", () =
   expect(blockLine("en", cause("other_account"))).toBe(
     pw(
       "en",
-      "The Safe workspace on this computer belongs to another Windows account. Ask your IT team.",
+      "The Safe workspace on this computer belongs to another Windows account. Your firm manages this computer's Windows accounts.",
     ),
   );
   for (const c of [{ blocked: { reason: "something_new" } }, { blocked: {} }, "blocked"])
-    expect(blockLine("en", cause(c))).toBe(pw("en", "Ask your IT team to look into it."));
+    expect(blockLine("en", cause(c))).toBe(
+      pw(
+        "en",
+        "Something on this computer stops the Safe workspace. Your firm manages this computer's settings.",
+      ),
+    );
   expect(blockLine("en", cause("needs_set_up"))).toBeNull();
 });
 
@@ -104,6 +110,24 @@ test("the repair is the installer only for a missing admin copy; set-up causes k
     { blocked: { reason: "policy" } },
   ])
     expect(needsInstaller(cause(c))).toBe(false);
+});
+
+test("setting up again is offered for logon_right only; every other block keeps no retry", () => {
+  expect(setUpFixes(cause({ blocked: { reason: "logon_right" } }))).toBe(true);
+  expect(canRetry(cause({ blocked: { reason: "logon_right" } }))).toBe(true);
+  for (const reason of [
+    "policy",
+    "tool_missing",
+    "admin_copy_missing",
+    "admin_copy_changed",
+    "admin_copy_unsafe",
+    "something_new",
+  ]) {
+    expect(setUpFixes(cause({ blocked: { reason } }))).toBe(false);
+    expect(canRetry(cause({ blocked: { reason } }))).toBe(false);
+  }
+  expect(setUpFixes(cause("other_account"))).toBe(false);
+  expect(setUpFixes(cause("set_up_failed"))).toBe(false);
 });
 
 test("a firm install: per machine, or the firm's policy as a hint; a per-user install isn't", () => {

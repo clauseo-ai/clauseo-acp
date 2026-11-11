@@ -112,9 +112,9 @@ test("reused login: the through line, no Sign out, and Stop using it here, which
   expect(t.setups().some((c) => "sign_out" in c)).toBe(false);
 });
 
-test("signed out: Sign in again sends start_sign_in, and Look for my Claude Code sign-in sends find_login, each for its own plan", async () => {
+test("signed out, never signed in here: Sign in sends start_sign_in, and Look for my Claude Code sign-in sends find_login, each for its own plan", async () => {
   const t = await at({ signed_out: {} });
-  await press(button("Sign in again", block("claude")!));
+  await press(button("Sign in", block("claude")!));
   await press(block("chatgpt")!.querySelector('[data-testid="plans-find-login"]'));
   expect(words("chatgpt")).toContain("Look for my Codex sign-in");
   await press(block("claude")!.querySelector('[data-testid="plans-find-login"]'));
@@ -253,17 +253,42 @@ test("a declined install confirm leaves Add ChatGPT as it was, and says nothing 
   expect(t.setups().filter((c) => "start_sign_in" in c)).toEqual([]);
 });
 
+/** Opens a plan's key panel from its quiet "Use an API key instead"; its field. */
+const openKey = async (plan: "claude" | "chatgpt" = "claude") => {
+  await press(button("Use an API key instead", block(plan)!));
+  return block(plan)!.querySelector<HTMLInputElement>('[data-testid="plans-key"]');
+};
+
+test("the key is one quiet Use an API key instead under each plan, closed: it opens the field named by the key's maker, and Cancel closes it again, focus back on the button", async () => {
+  await at({ signed_out: {} });
+  for (const [plan, label] of [
+    ["claude", "Anthropic API key"],
+    ["chatgpt", "OpenAI API key"],
+  ] as const) {
+    expect(block(plan)!.querySelector('[data-testid="plans-key"]')).toBeNull();
+    expect(words(plan)).not.toContain("Kept in this Mac's Keychain.");
+    expect(words(plan)).not.toContain("Other ways in");
+    const field = await openKey(plan);
+    expect(field?.getAttribute("aria-label") ?? field?.placeholder).toBe(label);
+    expect(document.activeElement).toBe(field);
+    expect(words(plan)).toContain("Kept in this Mac's Keychain.");
+    await press(button("Cancel", block(plan)!));
+    expect(block(plan)!.querySelector('[data-testid="plans-key"]')).toBeNull();
+    expect(document.activeElement).toBe(button("Use an API key instead", block(plan)!));
+  }
+});
+
 test("the key: Use this key sends set_agent_key with the typed text; the field is empty after, and the key is in no store and not on the page", async () => {
   const t = await at({ signed_out: {} });
-  expect(words()).toContain("Other ways in");
-  expect(words()).toContain("Kept in this Mac's Keychain.");
-  const field = block("claude")!.querySelector<HTMLInputElement>('[data-testid="plans-key"]')!;
+  const field = (await openKey())!;
   expect(field.type).toBe("password");
   expect(field.autocomplete).toBe("off");
   await typeInto(field, "sk-ant-api03-secret");
   await press(button("Use this key", block("claude")!));
   expect(t.setups()).toEqual([{ set_agent_key: { agent: CLAUDE, key: "sk-ant-api03-secret" } }]);
-  expect(field.value).toBe("");
+  // the panel closes once desktop took the key: its field is gone from the page
+  expect(block("claude")!.querySelector('[data-testid="plans-key"]')).toBeNull();
+  expect(field.isConnected).toBe(false);
   const store = setupStoreOf(t as HostTransport & SetupSource);
   expect(JSON.stringify(store.state())).not.toContain("sk-ant");
   expect(document.body.textContent).not.toContain("sk-ant");
@@ -293,39 +318,25 @@ test("API key in use: UD1's line, no Sign in again, Change key with the same pan
   NO_HOST_COMMANDS(t);
 });
 
-test("no keyring: no key panel, and UD1's line", async () => {
+test("no keyring: no key panel, and UD1's line once the key is asked for", async () => {
   await at({ signed_out: {} }, { keys: false });
-  expect(block("claude")!.querySelector('[data-testid="plans-key"]')).toBeNull();
+  expect(await openKey()).toBeNull();
   expect(words()).toContain("This computer has no keyring to keep an API key in.");
 });
 
-test("firm's address, Claude only: Connect sends set_firm_endpoint with the url, Remove address sends it with none; a refused address keeps what was typed", async () => {
-  let refuse = false;
+test("the firm's address has no field in Plans: with one in use, the method line and the key's quiet button, no address field, and nothing sends set_firm_endpoint", async () => {
   const t = await at(
     { signed_in: { method: "firm", source: "own", at: AT } },
-    {
-      plans: { [CLAUDE]: { endpoint: "https://ai.mehrachambers.in" } },
-      command: () => {
-        if (refuse) throw { code: "settings.refused", message: "bad", retryable: false };
-      },
-    },
+    { plans: { [CLAUDE]: { endpoint: "https://ai.mehrachambers.in" } } },
   );
   expect(words()).toContain("Using your firm's account");
-  expect(block("chatgpt")!.querySelector('[data-testid="plans-endpoint"]')).toBeNull();
-  const field = block("claude")!.querySelector<HTMLInputElement>(
-    '[data-testid="plans-endpoint"] input',
-  )!;
-  expect(field.value).toBe("https://ai.mehrachambers.in");
-  await press(button("Remove address", block("claude")!));
-  refuse = true;
-  await typeInto(field, "http://not-https");
-  await press(button("Connect", block("claude")!));
-  expect(t.setups()).toEqual([
-    { set_firm_endpoint: { agent: CLAUDE } },
-    { set_firm_endpoint: { agent: CLAUDE, url: "http://not-https" } },
-  ]);
-  expect(field.value).toBe("http://not-https");
-  expect(block("claude")!.querySelector('[data-testid="plans-refused"]')).not.toBeNull();
+  expect(document.body.textContent).not.toMatch(/firm's address|Remove address/);
+  expect(
+    document.querySelector('[data-testid="plans-endpoint"], input[placeholder="https://"]'),
+  ).toBeNull();
+  await openKey();
+  expect(document.querySelectorAll('[data-testid="plans-row"] input')).toHaveLength(1);
+  expect(t.setups().filter((c) => "set_firm_endpoint" in c)).toEqual([]);
 });
 
 test.each([["plans.claude-acp"], ["plans."]])(
@@ -347,6 +358,8 @@ test.each([["plans.claude-acp"], ["plans."]])(
       "Managed by firm",
     );
     expect(claude.textContent).toContain("Signed in as r.mehra@mehrachambers.in · Claude Max");
+    // the address the firm's policy set stays on the managed line, with no field
+    expect(claude.textContent).toContain("https://ai.mehrachambers.in");
     expect(claude.querySelectorAll("button, input")).toHaveLength(0);
     expect(document.body.textContent).not.toMatch(/SECRET_ENV_NAME|bedrock/);
     expect(block("chatgpt")!.dataset["state"]).toBe(lock === "plans." ? "locked" : "signed-out");
@@ -372,7 +385,7 @@ test.each([
       },
     },
   );
-  await press(button("Sign in again", block("claude")!));
+  await press(button("Sign in", block("claude")!));
   expect(block("claude")!.querySelector('[data-testid="plans-refused"]')?.textContent).toBe(
     errorWords("en", code),
   );
@@ -387,7 +400,7 @@ test("a command.conflict while switching says Clauseo is still switching account
       },
     },
   );
-  const field = block("claude")!.querySelector<HTMLInputElement>('[data-testid="plans-key"]')!;
+  const field = (await openKey())!;
   await typeInto(field, "sk-ant-api03-kept");
   await press(button("Use this key", block("claude")!));
   expect(words()).toContain("Clauseo is still switching accounts. Try again in a moment.");
@@ -395,11 +408,11 @@ test("a command.conflict while switching says Clauseo is still switching account
   expect(t.setups()).toHaveLength(1);
 });
 
-test("agent.key_unreadable shows as failed, in words-errors' words, with Sign in again and the key panel", async () => {
+test("agent.key_unreadable shows as failed, in words-errors' words, with Sign in again and the key's quiet button", async () => {
   const t = await at({ failed: { code: "agent.key_unreadable", at: AT } });
   expect(block("claude")!.dataset["state"]).toBe("failed");
   expect(words()).toContain("Clauseo couldn't check for a saved API key in time.");
-  expect(block("claude")!.querySelector('[data-testid="plans-key"]')).not.toBeNull();
+  expect(button("Use an API key instead", block("claude")!)).not.toBeNull();
   await press(button("Sign in again", block("claude")!));
   expect(t.setups()).toEqual([{ start_sign_in: { agent: CLAUDE } }]);
 });
@@ -422,17 +435,4 @@ test("keys: Sign out's confirm starts on Cancel, and Escape sends nothing and gi
   expect(document.body.textContent).not.toContain("Sign out of Claude?");
   expect(t.setups()).toEqual([]);
   expect(document.activeElement).toBe(opener);
-});
-
-test("keys: Enter in the firm's address connects, once", async () => {
-  const t = await at({ signed_in: { method: "firm", source: "own", at: AT } });
-  const field = block("claude")!.querySelector<HTMLInputElement>(
-    '[data-testid="plans-endpoint"] input',
-  )!;
-  await typeInto(field, "https://ai.mehrachambers.in");
-  await act(async () => field.form?.requestSubmit());
-  await settle();
-  expect(t.setups()).toEqual([
-    { set_firm_endpoint: { agent: CLAUDE, url: "https://ai.mehrachambers.in" } },
-  ]);
 });

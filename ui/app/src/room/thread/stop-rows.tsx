@@ -4,7 +4,8 @@
 // Word document the wall lists offers "Open in Word" while its changes stand (word/open-in-word.ts), and says why in
 // its error line when the open fails, with Show in folder beside it for a path too long for Word, or in a quiet line
 // under the note when Word opened the file in Protected View (until the next open or Undo). Focus follows the lock: to Try again when the lines come, back to Undo (or the
-// note) when they go.
+// note) when they go. A stop macOS kept out of the matter's folder offers Open Privacy settings on the Mac
+// (privacy-settings.tsx).
 import { lazy, Suspense, useLayoutEffect, useRef, useState } from "react";
 import { late } from "@clauseo/components/lib/late.ts";
 import { ChangeNote } from "@clauseo/components/clauseo/change-note.tsx";
@@ -35,6 +36,7 @@ import { isoOf, whenOf } from "./clock.ts";
 import { planNameOf, stopTimeOf } from "./limit-words.ts";
 import { windowLine } from "./stop-words.ts";
 import { useBusy } from "./live.ts";
+import { PrivacySettings } from "./privacy-settings.tsx";
 import { SentNowLine } from "./steer-rows.tsx";
 import { useThreadActions } from "./session.ts";
 import { resetPassed, stopLine } from "./stops.ts";
@@ -208,8 +210,8 @@ export function StepRow({
   sentNow?: boolean | undefined;
 }) {
   const w = useWords();
-  const line = sentNow ? null : stopLine(entry);
   const plan = useAgentPlan();
+  const line = sentNow ? null : stopLine(entry, plan);
   return (
     <div
       data-testid="turn-stopped"
@@ -223,10 +225,13 @@ export function StepRow({
       {line !== null && !takesMark(entry) && (
         <p className={QUIET} data-code={line.code}>
           <Say>
-            {line.kind === "error" ? errorWords(w.lang, line.code, plan) : th(w.lang, line.key)}
+            {line.kind === "error"
+              ? errorWords(w.lang, line.code, plan)
+              : th(w.lang, line.key, line.slots)}
           </Say>
         </p>
       )}
+      {line?.kind === "error" && <PrivacySettings code={line.code} />}
       {entry.files.length > 0 && <Changed entry={entry} />}
     </div>
   );

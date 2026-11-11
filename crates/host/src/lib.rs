@@ -24,9 +24,15 @@
 //!   channel with `try_send` and never waits for; a full channel makes it catch up from its
 //!   per-stream watermarks. A forgotten matter's rows are deleted; its import indexes it again.
 //! - The Scratch matter: a first start creates it.
+//! - Tracked changes in a matter's Word file (`revisions.rs`, `actor/revisions.rs`):
+//!   `ListRevisions` and `DecideRevisions` run stetdoc (`HostConfig::with_stetdoc`) on
+//!   the matter's thread against private copies in `<data folder>/revisions/<matter id>/`, never
+//!   in the folder; a decision holds the writer and writes the file as a restore does, between
+//!   an `outside-edits` and a `revisions` checkpoint.
 //! - The block list's updates (`blocklist.rs`, decision record 0053), with
-//!   [`BlockListSeams::apply`] only: a `clauseo-blocklist` thread, started once the host
-//!   serves and stopped when it ends, loads the newer verified one of the stored pair
+//!   [`BlockListSeams::apply`] and something enforcing the list only (the guarded browser or
+//!   the Safe workspace; neither in the plain build): a `clauseo-blocklist` thread, started
+//!   once the host serves and stopped when it ends, loads the newer verified one of the stored pair
 //!   (`<data folder>/blocklist/`) and the bundled snapshot into the shared
 //!   `clauseo_blocklist::Current`, then fetches the published pair every interval, verifies it,
 //!   applies the rollback rule, stores it and swaps it in; any failure keeps the list in use.
@@ -62,9 +68,10 @@
 //!   off. When Claude Code's enterprise `managed-mcp.json` is present, none of its servers and
 //!   no strict config go: the firm controls MCP there. Every session's `_meta` also turns
 //!   bypass off (`allowDangerouslySkipPermissions: false`), and a Claude session that starts in
-//!   another mode than `default` (the user's `permissions.defaultMode`, a resumed transcript's
-//!   mode) gets `session/set_mode default` before its first prompt; a failed switch fails the
-//!   launch.
+//!   another mode than Clauseo's (`auto`, or `default` in forced ask; the user's
+//!   `permissions.defaultMode` or a resumed transcript's mode may differ) gets
+//!   `session/set_mode` to it before its first prompt; when auto is not available it runs in
+//!   `acceptEdits` with one notice, and any other failed switch fails the launch.
 //! - What a Codex agent is launched with (`agent/codex.rs`): its ask mode
 //!   (`INITIAL_AGENT_MODE=workspace-write`), its home under the data folder as `CODEX_HOME` with a
 //!   `config.toml` of the same switches for app-server's start-up, a
@@ -137,7 +144,7 @@
 //! - The updater's seam (decision record 0037): [`Updater`] (`install_kind`, `check` and
 //!   `download`; never `install`, which desktop runs after the host has stopped), the values
 //!   that cross it ([`Offer`], [`Downloaded`], [`Opaque`], [`ProgressSink`], [`UpdaterError`]),
-//!   `update.json`'s [`UpdateMarker`], and [`NoUpdater`], managed by a package so nothing is
+//!   `update.json`'s [`UpdateMarker`], and [`NoUpdater`], updates unavailable so nothing is
 //!   ever checked. [`read_update_marker`] reads `update.json` as the last run left it.
 //! - The updater in the actor (`actor/update.rs`): `HostConfig::with_updater`, its jitter seed
 //!   and the app's version start the pure machine (`update/machine.rs`) once the host serves.
@@ -247,10 +254,12 @@ mod ids;
 pub mod log_file;
 mod matter_marker;
 mod matter_worker;
+mod network_paths;
 mod pipeline;
 pub mod pre_write_guard;
 mod principal;
 mod rate;
+mod revisions;
 mod search;
 mod sent;
 mod snapshot;
@@ -267,6 +276,8 @@ pub use agent::login_link::{
 };
 pub use agent::login_splits::LoginSplits;
 pub use agent::session_folder;
+#[cfg(feature = "test-support")]
+pub use agent::shell_path::path_helper_folders;
 pub use blocklist::{AllowedSites, BlockListSeams, BlockListUpdate, block_list_is_stale};
 pub use clauseo_acp::McpServer;
 #[cfg(feature = "test-support")]

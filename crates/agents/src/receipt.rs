@@ -3,8 +3,9 @@
 //! An install lives in `<data_dir>/agents/<id>/install/<hash>/` and is complete only once its
 //! `clauseo-receipt.json` is there: written atomically as the install's last step, and read
 //! back against the agent, the `<hash>` and the platform. At start everything else under
-//! `install/` goes: folders with no valid receipt, `.tmp-*` folders and other `<hash>`
-//! folders (old pins), since nothing runs from them then.
+//! `install/` goes: folders with no valid receipt, `.tmp-*` folders (but a finished one kept
+//! for this `<hash>`'s rename) and other `<hash>` folders (old pins), since nothing runs from
+//! them then.
 
 use std::io;
 use std::path::{Path, PathBuf};
@@ -139,12 +140,13 @@ pub(crate) struct Scan {
     pub(crate) remove: Vec<PathBuf>,
 }
 
-/// Sorts `<data_dir>/agents/<id>/install/`: the `hash` folder with a valid receipt is kept;
-/// every other entry (that folder without a valid receipt, `.tmp-*`, other hashes, strays) is
-/// to remove. A missing `install/` is an empty scan. A link (symbolic link, junction or other
-/// reparse point) or a file at `agents`, `agents/<id>` or `install` fails with `InvalidInput`
-/// and nothing is listed: `read_dir` would follow it, and the removal would empty a folder
-/// outside the data folder.
+/// Sorts `<data_dir>/agents/<id>/install/`: the `hash` folder with a valid receipt is kept,
+/// and so is a `.tmp-<hash>-*` folder marked finished for this `hash` (a set-up kept for its
+/// rename, `install::kept`); every other entry (that folder without a valid receipt, other
+/// `.tmp-*`, other hashes, strays) is to remove. A missing `install/` is an empty scan. A link
+/// (symbolic link, junction or other reparse point) or a file at `agents`, `agents/<id>` or
+/// `install` fails with `InvalidInput` and nothing is listed: `read_dir` would follow it, and
+/// the removal would empty a folder outside the data folder.
 pub(crate) fn scan(
     data_dir: &Path,
     agent: &AgentId,
@@ -170,12 +172,20 @@ pub(crate) fn scan(
             && let Some(receipt) = read_receipt(&path, agent, hash, platform)
         {
             found.keep = Some((path, receipt));
-        } else {
+        } else if !(is_dir && kept_tree(&path, agent, hash)) {
             found.remove.push(path);
         }
     }
     found.remove.sort();
     Ok(found)
+}
+
+/// Whether `path` is a `.tmp-<hash>-*` folder marked finished for `hash`: a set-up kept for its
+/// rename, which the next try checks in full.
+fn kept_tree(path: &Path, agent: &AgentId, hash: &str) -> bool {
+    path.file_name()
+        .is_some_and(|name| name.to_string_lossy().starts_with(&format!(".tmp-{hash}-")))
+        && crate::install::marked_for(path, agent, hash)
 }
 
 /// Removes everything `scan` marked: folders with what is in them, files and links themselves.

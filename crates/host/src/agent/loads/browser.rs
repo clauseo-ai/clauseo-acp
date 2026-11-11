@@ -1,5 +1,7 @@
 //! The profile hook's MCP servers for one session, and above all its `browser` entry (S27's
-//! agent-browser behind `clauseo-mcp browser-guard`, decision record 0030).
+//! agent-browser behind `clauseo-mcp browser-guard`, decision record 0030), which the profile
+//! offers Codex alone (`clauseo_profile::servers::browser_mcp`); Claude has the browser as a
+//! shell tool ([`shell_env`], [`shell_state`]).
 //!
 //! The hook sees only the agent's id, so the entry comes with tokens
 //! (`clauseo_profile::placeholders::IN_SERVERS`). The host fills them here, once per session,
@@ -9,19 +11,27 @@
 //! 2. The firm's `managed-mcp.json` ([`McpControl::Managed`]): no Clauseo server at all goes,
 //!    so `ManagedByFirm`.
 //! 3. No free browser slot: `TooManyBrowsers`.
-//! 4. No proxy set: `NoProxy`.
-//! 5. No Chrome picked, a sidecar (`clauseo-mcp` or agent-browser) missing, or the session's
+//! 4. An entry that asks for the session's proxy (it holds `{proxy_port}`: the parked Safe
+//!    workspace's, never the plain client's Codex entry) with no proxy set: `NoProxy`.
+//! 5. The firm's Chrome or Edge policy turns remote debugging off and its Clauseo policy does
+//!    not allow Clauseo's browser anyway (`browser::rd_policy`): `BrowserBlockedByPolicy`; or,
+//!    with no false, a place of that policy could not be read: `BrowserPolicyUnreadable`.
+//! 6. No Chrome picked, a sidecar (`clauseo-mcp` or agent-browser) missing, or the session's
 //!    ports or socket folder not claimed (`browser::session`): `BrowserNotInstalled`.
-//! 6. The session's proxy did not open, so it has no port: `NoProxy`. The proxy opens only
-//!    after 5 found everything (`actor/turn/launch_checks/egress.rs`).
+//! 7. For an entry that asks for it, the session's proxy did not open, so it has no port:
+//!    `NoProxy`. The proxy opens only after 6 found everything, and only for such an entry
+//!    (`actor/turn/launch_checks/egress.rs`).
 //!
 //! Each value is filled into one decoded string (one argument, one variable's value) in one
 //! pass, so a folder whose name holds a token stays literal; MCP arguments go as a list with no
 //! shell, so nothing more is escaped.
 
+use std::collections::BTreeMap;
+use std::ffi::{OsStr, OsString};
 use std::path::Path;
 
 use clauseo_acp::McpServer;
+use clauseo_profile::instructions::BrowserPart;
 use clauseo_profile::placeholders::{
     self, BROWSER_DIR, BROWSER_EXECUTABLE, CDP_PORT, DAEMON_PORT, IN_SERVERS, PROXY_PORT,
     SESSION_ID, SOCKET_DIR, STREAM_PORT,
@@ -64,6 +74,8 @@ pub(crate) struct BrowserInputs<'a> {
     pub(crate) proxy_set: bool,
     /// The port of this session's proxy, if it opened.
     pub(crate) port: Option<u16>,
+    /// Why the firm's browser policy left the browser out, if it did (`browser::rd_policy`).
+    pub(crate) blocked_by_policy: Option<ToolsUnavailableReason>,
     /// The Chrome picked for this session, if any.
     pub(crate) executable: Option<&'a Path>,
     /// The session's browser state folder, `<data>/run/<session id>/browser`.
@@ -154,8 +166,12 @@ fn browser_entry(
     if !inputs.slot_free {
         return Err(ToolsUnavailableReason::TooManyBrowsers);
     }
-    if !inputs.proxy_set {
+    let wants_proxy = asks_for_proxy(&server);
+    if wants_proxy && !inputs.proxy_set {
         return Err(ToolsUnavailableReason::NoProxy);
+    }
+    if let Some(reason) = inputs.blocked_by_policy {
+        return Err(reason);
     }
     let executable = inputs
         .executable
@@ -163,10 +179,12 @@ fn browser_entry(
     let claims = inputs
         .claims
         .ok_or(ToolsUnavailableReason::BrowserNotInstalled)?;
-    let port = inputs
-        .port
-        .ok_or(ToolsUnavailableReason::NoProxy)?
-        .to_string();
+    let port = if wants_proxy {
+        let port = inputs.port.ok_or(ToolsUnavailableReason::NoProxy)?;
+        Some(port.to_string())
+    } else {
+        None
+    };
     let (Some(executable), Some(browser_dir)) = (
         executable.to_str(),
         dunce::simplified(inputs.browser_dir).to_str(),
@@ -191,12 +209,12 @@ fn browser_entry(
     // Windows) is unfillable if the entry holds it, which leaves the browser out below.
     let mut values = vec![
         (BROWSER_DIR, browser_dir),
-        (PROXY_PORT, port.as_str()),
         (SESSION_ID, claims.name),
         (BROWSER_EXECUTABLE, executable),
         (CDP_PORT, cdp_port.as_str()),
         (STREAM_PORT, stream_port.as_str()),
     ];
+    values.extend(port.as_deref().map(|port| (PROXY_PORT, port)));
     values.extend(daemon_port.as_deref().map(|port| (DAEMON_PORT, port)));
     values.extend(socket_dir.map(|dir| (SOCKET_DIR, dir)));
     let fill = |text: &str| placeholders::fill(text, &IN_SERVERS, &values);
@@ -223,3 +241,181 @@ fn browser_entry(
         ToolsUnavailableReason::BrowserNotInstalled
     })
 }
+
+/// The `{browser}` part of a session the profile offers the `browser` entry (Codex), from the
+/// entry's header state ([`hook_servers`]): on when the entry goes; the not-installed sentence
+/// when it was left out for want of a Chrome (`chrome_found` false); the no-browser sentence for
+/// any other reason (off, the firm's policy or `managed-mcp.json`, no slot, no proxy, no claims).
+pub(crate) fn entry_part(state: &ToolState, chrome_found: bool) -> BrowserPart {
+    match state.availability {
+        ToolAvailability::Available => BrowserPart::On,
+        ToolAvailability::Unavailable {
+            reason: ToolsUnavailableReason::BrowserNotInstalled,
+        } if !chrome_found => BrowserPart::NotInstalled,
+        ToolAvailability::Unavailable { .. } | ToolAvailability::Unknown { .. } => BrowserPart::Off,
+    }
+}
+
+/// Whether an agent of `kind` gets no browser at all on this OS (`windows`): Codex on Windows,
+/// and Claude on macOS and Linux, whether or not its sandbox ends up on
+/// (`clauseo_profile::servers::no_browser_on`, decision record 0030). Such a session gets no
+/// entry, no shell tool (no `agent-browser` on `PATH`, no `AGENT_BROWSER_*` variables, no
+/// browser rules), no browser in its header (the app then offers no browser action: no install
+/// advice, no switch) and the part [`absent_part`] names.
+pub(crate) fn no_browser(kind: Option<clauseo_protocol::AgentKind>, windows: bool) -> bool {
+    clauseo_profile::servers::no_browser_on(kind, windows)
+}
+
+/// The part a session of `kind` with no browser on this OS gets ([`no_browser`]): Codex (on
+/// Windows) the Claude-only line (`BrowserPart::ClaudeOnly`), since Claude has its shell browser
+/// there; Claude (on macOS and Linux) the plain no-browser sentence (`BrowserPart::Off`).
+pub(crate) fn absent_part(kind: Option<clauseo_protocol::AgentKind>) -> BrowserPart {
+    if kind == Some(clauseo_protocol::AgentKind::Codex) {
+        BrowserPart::ClaudeOnly
+    } else {
+        BrowserPart::Off
+    }
+}
+
+/// The hook's servers for a session, without the `browser` entry when the agent has no browser
+/// here (`none_here`, [`no_browser`]), whatever the hook offers: then [`hook_servers`] gives no
+/// header state for the browser.
+pub(crate) fn offered(mut servers: Vec<McpServer>, none_here: bool) -> Vec<McpServer> {
+    if none_here {
+        servers.retain(|server| {
+            let McpServer::Stdio { name, .. } = server;
+            name != BROWSER
+        });
+    }
+    servers
+}
+
+/// Whether `server` asks for the session's egress proxy: an argument or a variable holds
+/// `{proxy_port}`. The plain client's Codex entry does not (Chrome goes direct, as Claude's shell
+/// browser does); the parked Safe workspace's would.
+pub(crate) fn asks_for_proxy(server: &McpServer) -> bool {
+    let McpServer::Stdio { args, env, .. } = server;
+    args.iter()
+        .chain(env.iter().map(|(_, value)| value))
+        .any(|text| text.contains(PROXY_PORT))
+}
+
+/// agent-browser's variables for a session with the browser as a shell tool, which the host
+/// forces into the agent's environment (the hook is session-blind): the session's name
+/// (`AGENT_BROWSER_SESSION`, the session's id), the session's config file (`AGENT_BROWSER_CONFIG`,
+/// `{}`, so the lawyer's `~/.agent-browser/config.json` is never read), the session's own
+/// downloads folder and Chrome profile (`AGENT_BROWSER_DOWNLOAD_PATH`, `AGENT_BROWSER_PROFILE`,
+/// so never the lawyer's own profile), all three in its run folder's `agent-browser` folder,
+/// the one place the data fences open to this session's agent-browser and to no other session's
+/// (`agent::codex_fence`, `agent::data_fence`), and the Chrome the launch prep
+/// found (`AGENT_BROWSER_EXECUTABLE_PATH`), and [`IDLE_TIMEOUT_MS`]. No proxy, stream port or
+/// socket folder: the shell tool has none of the guard's claims.
+pub(crate) fn shell_env(inputs: &ShellInputs<'_>) -> BTreeMap<OsString, OsString> {
+    [
+        ("AGENT_BROWSER_IDLE_TIMEOUT_MS", OsStr::new(IDLE_TIMEOUT_MS)),
+        ("AGENT_BROWSER_SESSION", OsStr::new(inputs.session)),
+        ("AGENT_BROWSER_CONFIG", inputs.config.as_os_str()),
+        ("AGENT_BROWSER_DOWNLOAD_PATH", inputs.downloads.as_os_str()),
+        ("AGENT_BROWSER_PROFILE", inputs.profile.as_os_str()),
+        (
+            "AGENT_BROWSER_EXECUTABLE_PATH",
+            inputs.executable.as_os_str(),
+        ),
+    ]
+    .into_iter()
+    .map(|(name, value)| (OsString::from(name), value.to_owned()))
+    .collect()
+}
+
+/// `AGENT_BROWSER_IDLE_TIMEOUT_MS`, in milliseconds: 10 minutes. agent-browser's daemon leaves
+/// the agent's process tree and outlives the session; with no value it closes its Chrome after
+/// an hour idle (`DEFAULT_IDLE_TIMEOUT_MS`, `cli/src/native/daemon.rs:165-173` at v0.41.1). An
+/// explicit value is read as whole milliseconds (`resolve_idle_timeout`, :184-203), and it also
+/// closes a headed browser, which the instructions forbid anyway. The host runs no
+/// `agent-browser close` at the session's end: the timeout is the backstop, and the
+/// instructions ask the agent to close the browser when done.
+pub(crate) const IDLE_TIMEOUT_MS: &str = "600000";
+
+/// What [`shell_env`] fills: plain values, so it is tested without a launch.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct ShellInputs<'a> {
+    /// The session's id (`SessionKey::id`).
+    pub(crate) session: &'a str,
+    /// `<data>/run/<session id>/agent-browser/config.json` (`browser::write_session_config`).
+    pub(crate) config: &'a Path,
+    /// `<data>/run/<session id>/agent-browser/downloads`.
+    pub(crate) downloads: &'a Path,
+    /// `<data>/run/<session id>/agent-browser/profile`.
+    pub(crate) profile: &'a Path,
+    /// The Chrome the launch prep found.
+    pub(crate) executable: &'a Path,
+}
+
+/// What a session with the shell tool wired (`ProfileHook::browser_tool`) shows in its
+/// header and is told in `{browser}`: available once its Chrome was found; else turned off
+/// (`tools.browser`), left out by the firm's browser policy, or not installed.
+pub(crate) fn shell_state(
+    switch: Switch,
+    blocked: Option<ToolsUnavailableReason>,
+    found: bool,
+) -> (ToolState, BrowserPart) {
+    let (availability, part) = if found {
+        (ToolAvailability::Available, BrowserPart::On)
+    } else if !switch.on {
+        let reason = switch.off_reason();
+        (ToolAvailability::Unavailable { reason }, BrowserPart::Off)
+    } else if let Some(reason) = blocked {
+        (ToolAvailability::Unavailable { reason }, BrowserPart::Off)
+    } else {
+        let reason = ToolsUnavailableReason::BrowserNotInstalled;
+        (
+            ToolAvailability::Unavailable { reason },
+            BrowserPart::NotInstalled,
+        )
+    };
+    let state = ToolState {
+        tool: ClauseoTool::Browser,
+        availability,
+    };
+    (state, part)
+}
+
+/// The Chrome file names a support line may show (`browser::chrome`'s candidates); any other
+/// reads `other`, since a Chrome set in the settings could be named anything.
+const KNOWN_CHROMES: [&str; 7] = [
+    "chrome.exe",
+    "msedge.exe",
+    "Google Chrome",
+    "Google Chrome for Testing",
+    "google-chrome",
+    "chromium",
+    "chrome",
+];
+
+/// What the support line for a session's `{browser}` shows (`profile_loads::session_loads`):
+/// the part's word (`on`, `off`, `not_installed`) and the Chrome's file name, only when it
+/// is one of [`KNOWN_CHROMES`] (`other` for any other, `none` without one). Never a path:
+/// one holds the user's name.
+pub(crate) fn part_log(
+    part: BrowserPart,
+    executable: Option<&Path>,
+) -> (&'static str, &'static str) {
+    let word = match part {
+        BrowserPart::On => "on",
+        BrowserPart::Off => "off",
+        BrowserPart::NotInstalled => "not_installed",
+        BrowserPart::ClaudeOnly => "claude_only",
+    };
+    let name = executable.map_or("none", |path| {
+        let file = path.file_name().and_then(OsStr::to_str).unwrap_or_default();
+        KNOWN_CHROMES
+            .into_iter()
+            .find(|known| *known == file)
+            .unwrap_or("other")
+    });
+    (word, name)
+}
+
+#[cfg(test)]
+#[path = "browser/shell_tests.rs"]
+mod shell_tests;

@@ -290,11 +290,12 @@ impl Rig {
         self.run_until("no commit in flight", |actor| actor.work.commits == 0);
     }
 
-    /// Dispatches `command` as command `n` and handles inputs until it is answered.
-    pub(super) fn dispatch(
+    /// Dispatches `command` as command `n`; inputs `hold` picks wait in `held` until answered.
+    pub(super) fn dispatch_holding(
         &mut self,
         n: u128,
         command: HostCommand,
+        mut hold: impl FnMut(&Actor, &Input) -> bool,
     ) -> Result<CommandOutcome, Error> {
         let (reply, mut answer) = oneshot::channel();
         let command = CommandEnvelope {
@@ -303,13 +304,22 @@ impl Rig {
         };
         self.actor.on_request(Request::Dispatch { command, reply });
         let mut got = None;
-        self.run_until("the command's answer", |_| {
+        self.run_holding("the command's answer", &mut hold, |_| {
             if let Ok(Some(result)) = answer.try_recv() {
                 got = Some(result);
             }
             got.is_some()
         });
         got.unwrap()
+    }
+
+    /// Dispatches `command` as command `n` and handles inputs until it is answered.
+    pub(super) fn dispatch(
+        &mut self,
+        n: u128,
+        command: HostCommand,
+    ) -> Result<CommandOutcome, Error> {
+        self.dispatch_holding(n, command, |_, _| false)
     }
 
     /// A new thread of the Scratch matter, made by command [`STORED`].
@@ -322,6 +332,7 @@ impl Rig {
         let command = HostCommand::CreateThread {
             matter: self.matter(),
             agent: AgentId::new("fake-agent").unwrap(),
+            config: None,
         };
         let created = self.dispatch(n, command).unwrap();
         let CommandOutcome::ThreadCreated { thread } = created else {

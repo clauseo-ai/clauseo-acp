@@ -40,6 +40,14 @@ mod undo_case;
 mod restore;
 
 #[cfg(test)]
+#[path = "matters/undo_restore.rs"]
+mod undo_restore;
+
+#[cfg(test)]
+#[path = "matters/replace.rs"]
+mod replace;
+
+#[cfg(test)]
 #[path = "matters/compare.rs"]
 mod compare;
 
@@ -65,6 +73,10 @@ mod errors;
 #[cfg(test)]
 #[path = "matters/refuse.rs"]
 mod refuse;
+
+#[cfg(test)]
+#[path = "matters/adopt.rs"]
+mod adopt;
 
 #[cfg(test)]
 #[path = "matters/undo_corrupt_object.rs"]

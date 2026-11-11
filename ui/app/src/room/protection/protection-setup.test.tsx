@@ -96,7 +96,7 @@ test.each([
     expect(confirm?.textContent).toContain(
       pw(
         "en",
-        "Windows will ask to let Clauseo set up the Safe workspace. It will say the publisher is unknown, because this early version of Clauseo isn't signed yet. Choose Yes. If Windows asks for an administrator's password, whoever looks after this computer can enter it.",
+        "Windows will ask to let Clauseo set up the Safe workspace. It will say the publisher is unknown. That's expected for Clauseo. Choose Yes. If Windows asks for an administrator's password, whoever looks after this computer can enter it.",
       ),
     );
     expect(sentRetries()).toEqual([]);
@@ -133,14 +133,23 @@ test.each([
   [
     "tool_missing",
     { not_protected: { cause: { blocked: { reason: "tool_missing" } } } } as Protection,
-    "The program that sets up the Safe workspace is missing, or security software blocked it. Ask your IT team to look into it.",
+    "The program that sets up the Safe workspace is missing, or security software blocked it. Your firm manages the security software on this computer.",
   ],
   [
     "other_account",
     PROT.otherAccount,
-    "The Safe workspace on this computer belongs to another Windows account. Ask your IT team.",
+    "The Safe workspace on this computer belongs to another Windows account. Your firm manages this computer's Windows accounts.",
   ],
-  ["a reason from a newer Clauseo", PROT.blockedNewer, "Ask your IT team to look into it."],
+  [
+    "policy",
+    PROT.policy,
+    "A Windows policy on this computer blocks the program that sets up the Safe workspace. Your firm manages this policy on this computer.",
+  ],
+  [
+    "a reason from a newer Clauseo",
+    PROT.blockedNewer,
+    "Something on this computer stops the Safe workspace. Your firm manages this computer's settings.",
+  ],
 ] as const)(
   "a block, %s: the note says what stops it and its line, with no retry",
   async (_c, p, line) => {
@@ -161,6 +170,37 @@ test.each([
   },
 );
 
+test.each([
+  ["Windows' prompt follows: the set-up's confirm first, then", true],
+  ["no prompt: at once", false],
+] as const)(
+  "logon_right: the note says setting up again usually fixes it and offers the set-up; %s retry_protection",
+  async (_c, asks) => {
+    await mount(PROT.logon, PROT.logon, { retry_asks_admin: asks } as Partial<ProtectionView>);
+    await h!.click(h!.one("workspace-line"));
+    await settle();
+    const note = inBody("np-note");
+    expect(note?.dataset["cause"]).toBe("blocked");
+    expect(note?.textContent).toContain(
+      pw(
+        "en",
+        "Windows isn't letting the Safe workspace's accounts sign in. Setting up the Safe workspace again usually fixes this.",
+      ),
+    );
+    expect(inBody("protection-installer")).toBeNull();
+    expect(inBody("protection-setup")?.textContent).toBe(pw("en", "Set up the Safe workspace"));
+    await h!.click(inBody("protection-setup"));
+    await settle();
+    if (asks) {
+      expect(inBody("protection-confirm")?.dataset["act"]).toBe("setup");
+      expect(sentRetries()).toEqual([]);
+      await h!.click(inBody("protection-confirm-ok"));
+      await settle();
+    } else expect(inBody("protection-confirm")).toBeNull();
+    expect(sentRetries()).toEqual(["retry_protection"]);
+  },
+);
+
 test("Add room: its confirm first; confirming sends one retry_protection, and a second press while it runs sends nothing", async () => {
   const answers = await mount(PROT.pool, PROT.b);
   await pressRetry();
@@ -170,7 +210,7 @@ test("Add room: its confirm first; confirming sends one retry_protection, and a 
   expect(confirm?.textContent).toContain(
     pw(
       "en",
-      "Windows will ask to let Clauseo add room to the Safe workspace. It will say the publisher is unknown, because this early version of Clauseo isn't signed yet. Choose Yes. If Windows asks for an administrator's password, whoever looks after this computer can enter it.",
+      "Windows will ask to let Clauseo add room to the Safe workspace. It will say the publisher is unknown. That's expected for Clauseo. Choose Yes. If Windows asks for an administrator's password, whoever looks after this computer can enter it.",
     ),
   );
   expect(sentRetries()).toEqual([]);
@@ -367,7 +407,7 @@ test("the notice's Set up the Safe workspace, with no prompt, sends at once", as
 test("the notice behind the prompt asks IT to install Clauseo again (a firm install), with no button", async () => {
   await mount(PROT.missing, PROT.missing, { required: true });
   expect(h!.one("protection-repair")?.textContent).toBe(
-    pw("en", "Ask your IT team to install Clauseo again."),
+    pw("en", "Your firm manages how Clauseo is installed on this computer."),
   );
   expect(h!.one("protection-setup")).toBeNull();
   expect(h!.one("protection-installer")).toBeNull();

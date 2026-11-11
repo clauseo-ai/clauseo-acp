@@ -17,10 +17,16 @@
 //!   an agent's install is `Ready`; an agent not installed shows `SignedOut`. A queue newly held
 //!   for an agent's sign-in (`agent.auth_required`) checks its status again
 //!   (`recheck_sign_in`), one at a time per agent.
+//! - **One sign-in at a time.** Installs run side by side, one per agent, each published as it
+//!   goes; sign-ins do not. A sign-in press (`StartSignIn`, `UseDeviceCode`,
+//!   `UseDifferentAccount`) while another agent's sign-in is going is kept as a pending press,
+//!   shown `Queued` (`pending.rs`), and the pump starts it once that sign-in ends, with no new
+//!   command. Status checks, sign-outs and searches never wait.
 //! - **Confirms.** `SetFirmEndpoint` asks the lawyer first; a decline runs nothing and answers
-//!   `transport.unauthorized`. `RetryAgentInstall` is `command.invalid` unless the install is
-//!   `Failed`, `Waiting` or `Paused`: a missing agent is installed only through `InstallAgent`
-//!   or a pending sign-in. `OpenSignInPage` opens the `DeviceCode`
+//!   `transport.unauthorized`. So does a Codex sign-in over Clauseo's own login (`switch.rs`),
+//!   whose decline answers `Done`. `RetryAgentInstall` is `command.invalid` unless the install
+//!   is `Failed`, `Waiting` or `Paused`: a missing agent is installed only through
+//!   `InstallAgent` or a pending sign-in. `OpenSignInPage` opens the `DeviceCode`
 //!   state's page and does nothing in any other state. `SignOut` on a `Reused` login answers
 //!   `command.invalid` and runs no logout.
 //! - **Leaving a reused login** (piece B, `leave.rs`): `StopUsingLogin`, `UseDifferentAccount`,
@@ -53,10 +59,11 @@ use crate::open::{Opener, open_url_unconfirmed};
 
 pub(crate) use self::count::SetupCounts;
 use self::count::Tally;
+use self::entry::log_published;
 pub(crate) use self::entry::{launch, progress};
 pub(crate) use self::parts::signin_error;
 use self::parts::{checked_endpoint, invalid, network_first, plan_method, retry};
-use self::pending::Press;
+use self::pending::{Kept, Press};
 pub(crate) use self::seam::SetupAgents;
 use self::write::write_entry;
 pub(crate) use self::write::write_entry_as;
@@ -96,7 +103,7 @@ pub(crate) struct AgentsBackend {
     pub(crate) rechecks: Mutex<BTreeSet<AgentId>>,
     /// The sign-ins pressed before their agent was installed, one per agent (`pending.rs`):
     /// memory only, so none outlives a quit.
-    pub(crate) pending: Mutex<BTreeMap<AgentId, Press>>,
+    pub(crate) pending: Mutex<BTreeMap<AgentId, Kept>>,
     /// Piece B's: the limits readers, the reused logins, the waiters and the settings read.
     pub(crate) wiring: Wiring,
     /// Where the pump's usage counts go (`count.rs`).
@@ -158,6 +165,9 @@ impl AgentsBackend {
                 use_system_proxy, ..
             } => retry(self, &agent, use_system_proxy)?,
             SetupCommand::StartSignIn { console, .. } => {
+                let Some(switch) = switch::switch_first(self, &agent, &info.name).await else {
+                    return Ok(());
+                };
                 let _gate = lock(&self.signin_gate);
                 self.refuse_reused(&agent)?;
                 self.refuse_start(&agent)?;
@@ -166,13 +176,7 @@ impl AgentsBackend {
                     tracing::info!(%agent, "sign-in joined: the kept press started meanwhile");
                     return Ok(());
                 }
-                if !pending::keep_press(self, &agent, Press::SignIn(method)) {
-                    agents
-                        .sign_in(&agent, method)
-                        .map_err(|error| signin_error(&error))?;
-                    tracing::info!(%agent, method = ?method, "sign-in started");
-                    self.replaced(&agent);
-                }
+                pending::keep_or_start(self, &agent, Press::SignIn(method), switch)?;
             }
             SetupCommand::CancelSignIn { .. } => {
                 self.compose.cancelling(&agent);
@@ -192,46 +196,35 @@ impl AgentsBackend {
                     .map_err(|error| signin_error(&error))?;
             }
             SetupCommand::UseDeviceCode { .. } => {
+                let Some(switch) = switch::switch_first(self, &agent, &info.name).await else {
+                    return Ok(());
+                };
                 let _gate = lock(&self.signin_gate);
                 self.refuse_reused(&agent)?;
                 self.refuse_start(&agent)?;
-                if !pending::keep_press(self, &agent, Press::SignIn(Method::DeviceCode)) {
-                    agents
-                        .sign_in(&agent, Method::DeviceCode)
-                        .map_err(|error| signin_error(&error))?;
-                    tracing::info!(%agent, method = ?Method::DeviceCode, "sign-in started");
-                    self.replaced(&agent);
-                }
+                pending::keep_or_start(self, &agent, Press::SignIn(Method::DeviceCode), switch)?;
             }
             SetupCommand::OpenSignInPage { .. } => {
                 if let Some(SigninState::DeviceCode { url, .. }) = agents.signin_state(&agent) {
                     open_url_unconfirmed(&*self.opener, &url)?;
                 }
             }
-            SetupCommand::SignOut { .. } => {
-                self.refuse_reused(&agent)?;
-                agents
-                    .sign_out(&agent)
-                    .map_err(|error| signin_error(&error))?;
-                self.replaced(&agent);
-            }
+            SetupCommand::SignOut { .. } => pending::sign_out(self, &agent)?,
             SetupCommand::UseFoundLogin { .. } => {
                 let hold = leave::hold_reads(self, &agent).await;
                 self.use_found(&agent, hold)?;
             }
             SetupCommand::UseDifferentAccount { .. } => {
                 self.refuse_start(&agent)?;
+                let Some(switch) = switch::switch_first(self, &agent, &info.name).await else {
+                    return Ok(());
+                };
                 if self.reused(&agent) {
                     leave::leave_first(self, &agent, leave::After::Rule).await?;
                 }
                 let _gate = lock(&self.signin_gate);
                 self.refuse_start(&agent)?;
-                if !pending::keep_press(self, &agent, Press::DifferentAccount) {
-                    agents
-                        .use_different_account(&agent)
-                        .map_err(|error| signin_error(&error))?;
-                    self.replaced(&agent);
-                }
+                pending::keep_or_start(self, &agent, Press::DifferentAccount, switch)?;
             }
             SetupCommand::StopUsingLogin { .. } => {
                 if !self.reused(&agent) {
@@ -496,7 +489,8 @@ impl AgentsBackend {
     }
 
     /// Follows `Agents`' events until they end: installs out as `AgentInstallProgress` (and the
-    /// entry written on `Ready`), sign-ins through [`Compose`], `OpenUrl` opened, notes logged.
+    /// entry written on `Ready`), sign-ins through [`Compose`] (then `pending::run_next`),
+    /// `OpenUrl` opened, notes logged.
     pub(crate) async fn pump(&self, source: impl Stream<Item = AgentsEvent>) {
         let mut source = std::pin::pin!(source);
         let mut checked = BTreeSet::new();
@@ -514,6 +508,7 @@ impl AgentsBackend {
                     lock(&self.rechecks).remove(&agent);
                     tally.signin(&*self.counts, &self.compose, &agent, &state);
                     leave::signin_event(self, &agent, state).await;
+                    pending::run_next(self);
                 }
                 AgentsEvent::OpenUrl { agent, url } => {
                     if let Err(error) = open_url_unconfirmed(&*self.opener, &url) {
@@ -521,10 +516,12 @@ impl AgentsBackend {
                     }
                 }
                 AgentsEvent::SigninNote { agent, note } => events::note(&agent, note),
+                AgentsEvent::Python { state } => entry::python_event(self, &state),
                 // A job that ended with no state (a status check that could not tell): an
                 // `auth_required` re-check of it is over, so the next hold may ask again.
                 AgentsEvent::SigninUnchanged { agent } => {
                     lock(&self.rechecks).remove(&agent);
+                    pending::run_next(self);
                 }
                 _ => {}
             }
@@ -532,8 +529,8 @@ impl AgentsBackend {
     }
 
     /// One install state: sent to the windows; on `Ready` the entry written, then a pending
-    /// sign-in run (`pending.rs`) or else the status checked (once per agent); an agent with no
-    /// sign-in state yet shown signed out.
+    /// sign-in run (`pending.rs`) or else the status checked (once per agent; not over a press
+    /// still waiting for another sign-in); an agent with no sign-in state yet shown signed out.
     async fn install_event(
         &self,
         agent: &AgentId,
@@ -543,16 +540,19 @@ impl AgentsBackend {
         let Some(info) = self.known.get(agent) else {
             return;
         };
-        if let Some(progress) = progress(state, &info.hosts) {
+        let before = lock(&self.wiring.applied).installed.contains(agent);
+        if let Some(progress) = progress(state, &info.hosts, before) {
             self.events.publish(SetupEvent::AgentInstallProgress {
                 agent: agent.clone(),
                 state: progress,
             });
+            log_published(agent, state);
         }
         if matches!(state, InstallState::Ready { .. }) {
             write_entry(self, agent).await;
-            let started = pending::run_press(self, agent);
-            if checked.insert(agent.clone()) && !started {
+            let ran = pending::run_press(self, agent);
+            let fresh = ran != pending::Ran::Waits && checked.insert(agent.clone());
+            if fresh && ran == pending::Ran::Nothing {
                 super::status_timing::asked(agent, "installed");
                 if let Err(error) = self.agents.check_status(agent) {
                     tracing::warn!(%agent, %error, "no status check");
@@ -593,6 +593,7 @@ mod entry;
 mod parts;
 mod pending;
 mod seam;
+mod switch;
 #[cfg(test)]
 mod tests;
 mod write;

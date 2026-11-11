@@ -260,14 +260,15 @@ fn the_hooks_launch_variables_and_the_connector_switch_reach_the_agent() {
 
 /// R21's done-when "Hook servers": the lawyer's enabled servers first, in name order, then the
 /// hook's `browser` with its per-session values, on `session/new` and then `session/load`, for a
-/// `claude-acp` and a `codex-acp` agent (both `fake_agent`). The new session plays the
+/// kind-less agent (`BROWSING`: Claude has no browser on macOS and Linux) and a `codex-acp` agent
+/// (both `fake_agent`). The new session plays the
 /// checked-in `tools-mcp-servers`; the load and the Codex session check the filled folder and
 /// session id exactly.
 #[test]
 fn hook_servers_follow_the_lawyers_with_their_per_session_values() {
     use crate::profile_rig::{
-        CLAUDE, CODEX, Hook, Wired, agent_lines, agents, browser_server, codex_lines,
-        filled_browser, settings, template, turn,
+        BROWSING, CODEX, Hook, Wired, agent_lines, agents, browser_server, codex_lines,
+        codex_servers, filled_browser, settings, template, turn,
     };
     let dir = Dir::new("mcp_hook_servers", &[]);
     let bin = dir.folder("bin", &[]);
@@ -287,12 +288,12 @@ fn hook_servers_follow_the_lawyers_with_their_per_session_values() {
     let codex = template(
         &dir,
         "hs-codex",
-        &codex_lines("hs-codex", &json!({"mcpServers": servers})),
+        &codex_lines("hs-codex", &json!({"mcpServers": codex_servers(&servers)})),
     );
     let claude = crate::support::Scenario::Local("tools-mcp-servers");
     settings(
         &dir,
-        agents(&[(CLAUDE, &claude, json!({})), (CODEX, &codex, json!({}))]),
+        agents(&[(BROWSING, &claude, json!({})), (CODEX, &codex, json!({}))]),
         mcp.clone(),
     );
     let hook = Hook {
@@ -311,7 +312,7 @@ fn hook_servers_follow_the_lawyers_with_their_per_session_values() {
         wire(config, first)
     });
     let matter = host.create_matter("m", &dir.folder("m", &[]));
-    let thread = host.create_thread(matter, CLAUDE);
+    let thread = host.create_thread(matter, BROWSING);
     turn(&host, thread);
     turn(&host, host.create_thread(matter, CODEX));
     host.shutdown();
@@ -326,7 +327,7 @@ fn hook_servers_follow_the_lawyers_with_their_per_session_values() {
             &[],
         ),
     );
-    settings(&dir, agents(&[(CLAUDE, &load, json!({}))]), mcp);
+    settings(&dir, agents(&[(BROWSING, &load, json!({}))]), mcp);
     let host = dir.start_launching(1, launcher, |config| wire(config, hook));
     turn(&host, thread);
     host.shutdown();

@@ -16,6 +16,8 @@ use crate::support::{Events, Fixture, POLL, REMOTE_HINTS, Seen, codex, eventuall
 const PORT_POLL: Duration = Duration::from_secs(2);
 const CODE_LIFETIME: Duration = Duration::from_mins(15);
 const STORE: [&str; 2] = ["-c", "cli_auth_credentials_store=\"file\""];
+/// How long the lawyer's Cancel lets a run end by itself before it is killed.
+pub(crate) const CANCEL_GRACE: Duration = Duration::from_secs(2);
 
 fn signed_in() -> SigninState {
     SigninState::SignedIn {
@@ -77,7 +79,11 @@ fn a_codex_sign_in_completes_with_the_account_and_plan_from_account_read() {
     agents.sign_in(&codex(), Method::Browser).unwrap();
     let (seen, last) = events.until_end();
     assert_eq!(last, signed_in());
-    assert_eq!(states(&seen), [waiting(), signed_in()]);
+    // the quick status check a sign-in makes first shows `Checking`
+    assert_eq!(
+        states(&seen),
+        [SigninState::Checking, waiting(), signed_in()]
+    );
     assert_eq!(agents.signin_state(&codex()), Some(signed_in()));
     let logins = fx.codex_runs(&["login"]);
     assert_eq!(logins.len(), 1);
@@ -111,7 +117,21 @@ fn codex_never_produces_open_url() {
         eventually("the poll ran", || {
             !fx.codex_runs(&["login", "status"]).is_empty()
         });
+        // The poll ended (the next one is armed), so the only run Cancel waits for is the login.
+        eventually("the next poll is armed", || {
+            fx.timer
+                .armed()
+                .iter()
+                .filter(|wait| **wait == POLL)
+                .count()
+                >= 2
+        });
         agents.cancel_sign_in(&codex()).unwrap();
+        if method == Method::Browser {
+            // The test's callback port is 0, which no login owns: no `/cancel`, so the run is
+            // killed when the lawyer's grace passes.
+            fx.timer.fire(CANCEL_GRACE);
+        }
         let (seen, last) = events.until_end();
         assert_eq!(last, failed(SigninCode::Cancelled));
         assert_no_open_url(&seen, &events);
@@ -126,9 +146,18 @@ fn port_1455_taken_gives_port_busy_and_try_again_waits_for_it() {
     let (agents, events) = start(&fx);
     agents.sign_in(&codex(), Method::Browser).unwrap();
     let (seen, last) = events.until_end();
-    assert_eq!(states(&seen), [failed(SigninCode::PortBusy)]);
+    assert_eq!(
+        states(&seen),
+        [SigninState::Checking, failed(SigninCode::PortBusy)]
+    );
     assert_eq!(last, failed(SigninCode::PortBusy));
-    assert_eq!(fx.launches(), [], "no run starts while the port is taken");
+    // Only the quick status check before the sign-in ran: no login while the port is taken.
+    assert_eq!(
+        fx.codex_runs(&["login"]),
+        [],
+        "no login starts while the port is taken"
+    );
+    assert_eq!(fx.launches().len(), 1);
     agents.try_again(&codex()).unwrap();
     let polls = || {
         fx.timer
@@ -140,7 +169,7 @@ fn port_1455_taken_gives_port_busy_and_try_again_waits_for_it() {
     eventually("the first probe failed", || polls() == 1);
     fx.timer.fire(PORT_POLL);
     eventually("the second probe failed", || polls() == 2);
-    assert_eq!(fx.launches(), []);
+    assert_eq!(fx.launches().len(), 1);
     assert_eq!(agents.signin_state(&codex()), Some(last));
     drop(listener);
     fx.timer.fire(PORT_POLL);
@@ -184,7 +213,10 @@ fn device_code_gives_the_url_code_and_expiry_and_expires_at_15_minutes() {
         expires_at: now() + CODE_LIFETIME,
     };
     let seen = events.until(|state| matches!(state, SigninState::DeviceCode { .. }));
-    assert_eq!(states(&seen), [waiting(), device.clone()]);
+    assert_eq!(
+        states(&seen),
+        [SigninState::Checking, waiting(), device.clone()]
+    );
     assert_eq!(agents.signin_state(&codex()), Some(device));
     let logins = fx.codex_runs(&["login", "--device-auth"]);
     assert_eq!(logins.len(), 1);
@@ -205,7 +237,11 @@ fn device_off_gives_device_code_off() {
     let (seen, last) = events.until_end();
     assert_eq!(
         states(&seen),
-        [waiting(), failed(SigninCode::DeviceCodeOff)]
+        [
+            SigninState::Checking,
+            waiting(),
+            failed(SigninCode::DeviceCodeOff)
+        ]
     );
     assert_eq!(last, failed(SigninCode::DeviceCodeOff));
 }
@@ -261,21 +297,44 @@ fn codex_runs_get_their_home_the_file_store_and_ssl_cert_file() {
     );
 }
 
+/// The lawyer's Cancel before Codex's browser login listens on its callback port (on Windows the
+/// bind can come well after the start, behind Winsock's): no listener is the login's, so no
+/// `/cancel` goes, not even once the login binds a moment later, and the run and its tree are
+/// killed when the grace passes. The fake holds its bind until the test opens its gate, so the
+/// order is the same on every OS. The `/cancel` to a login that listens is in `graceful`.
 #[test]
 fn cancel_kills_the_codex_run_and_its_tree() {
-    let fx = Fixture::new("codex-cancel", "never");
+    let mut fx = Fixture::new("codex-cancel", "never");
+    fx.listen_for_cancel();
+    let gate = fx.data.path().join("bind-gate");
+    fx.set_env("FAKE_CODEX_BIND_GATE", gate.to_str().unwrap());
     let (agents, events) = start(&fx);
     agents.sign_in(&codex(), Method::Browser).unwrap();
     assert_eq!(
         states(&events.until(|state| *state == waiting())),
-        [waiting()]
+        [SigninState::Checking, waiting()]
     );
     eventually("the login started", || {
         !fx.codex_runs(&["login"]).is_empty()
     });
     let login = fx.codex_runs(&["login"]).remove(0);
     agents.cancel_sign_in(&codex()).unwrap();
+    // The grace is armed once the owner check is done: it found no listener.
+    eventually("the grace is armed", || {
+        fx.timer.live().contains(&CANCEL_GRACE)
+    });
+    // The login binds only now, after the check.
+    write_file(&gate, b"").unwrap();
+    let home = crate::codex_cli::home(&fx);
+    eventually("the login listens", || {
+        home.join("fake-login-listening").is_file()
+    });
+    fx.timer.fire(CANCEL_GRACE);
     assert_eq!(events.until_end().1, failed(SigninCode::Cancelled));
+    assert!(
+        !home.join("fake-login-cancelled").exists(),
+        "a /cancel came"
+    );
     #[cfg(target_os = "linux")]
     assert!(
         crate::support::gone(login.pid),
@@ -284,7 +343,9 @@ fn cancel_kills_the_codex_run_and_its_tree() {
     );
     let _ = login;
     assert_eq!(fx.timer.live(), Vec::<Duration>::new());
-    assert_eq!(fx.codex_runs(&["login", "status"]), []);
+    // Two status runs: the quick check before the login, which said signed out; and, the
+    // login having been killed, one check after it, which said signed out again.
+    assert_eq!(fx.codex_runs(&["login", "status"]).len(), 2);
     assert_eq!(fx.codex_runs(&["app-server"]), []);
 }
 
@@ -306,15 +367,17 @@ fn a_codex_run_that_exits_before_sign_in_fails_or_is_cancelled() {
 #[test]
 fn no_status_runs_once_a_poll_confirms_the_codex_sign_in() {
     let fx = Fixture::new("codex-confirmed", "never");
-    plant(&fx);
     let (agents, events) = start(&fx);
     agents.sign_in(&codex(), Method::Browser).unwrap();
     events.until(|state| *state == waiting());
+    // The login is made after the quick check before the login said signed out.
+    plant(&fx);
     fx.timer.fire(POLL);
     assert_eq!(events.until_end().1, signed_in());
     assert_eq!(fx.timer.live(), Vec::<Duration>::new());
     let runs = fx.launches().len();
-    assert_eq!(fx.codex_runs(&["login", "status"]).len(), 1);
+    // The quick check's, then the poll's.
+    assert_eq!(fx.codex_runs(&["login", "status"]).len(), 2);
     #[cfg(target_os = "linux")]
     assert!(crate::support::gone(fx.codex_runs(&["login"])[0].pid));
     #[cfg(target_os = "linux")]
@@ -371,7 +434,7 @@ fn paste_code_to_codex_is_refused() {
     agents.sign_in(&codex(), Method::Browser).unwrap();
     assert_eq!(
         states(&events.until(|state| *state == waiting())),
-        [waiting()]
+        [SigninState::Checking, waiting()]
     );
     assert_eq!(
         agents.paste_code(&codex(), clauseo_agents::PasteCode::from("x".to_owned())),
@@ -380,7 +443,12 @@ fn paste_code_to_codex_is_refused() {
             method: Method::ClaudeAi,
         })
     );
+    // The grace is armed only by a login that started: one cancelled before it starts never runs.
+    eventually("the login started", || {
+        !fx.codex_runs(&["login"]).is_empty()
+    });
     agents.cancel_sign_in(&codex()).unwrap();
+    fx.timer.fire(CANCEL_GRACE);
     assert_eq!(events.until_end().1, failed(SigninCode::Cancelled));
 }
 

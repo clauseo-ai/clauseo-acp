@@ -54,14 +54,13 @@ async function within(asked: Promise<Answer>): Promise<Answer> {
   }
 }
 
-/** The folder the form picked, an existing folder by Change or a parent by Create's picker, and its check. */
+/** The folder the form picked by Choose folder…, and its check. */
 export function usePickedFolder(matters: Matters, lang: Lang) {
   const [existing, setExisting] = useState<Picked | null>(null);
-  const [parent, setParent] = useState<Picked | null>(null);
   // undefined while the check runs
   const [answer, setAnswer] = useState<Answer | undefined>(null);
   const scan = useScan(matters);
-  // the picker's line while a pick is slow: Change and Create's picker both wait on it
+  // the picker's line while a pick is slow
   const wait = usePickWait();
   // bumped as Stop drops the pick, so the form drops the folder Change showed (matter-form.tsx's unpick)
   const [unpick, setUnpick] = useState(0);
@@ -77,7 +76,6 @@ export function usePickedFolder(matters: Matters, lang: Lang) {
   };
   const forget = () => {
     asked.current = null;
-    setParent(null);
     setAnswer(null);
   };
   const reset = () => {
@@ -90,50 +88,32 @@ export function usePickedFolder(matters: Matters, lang: Lang) {
     reset();
     setUnpick((n) => n + 1);
   };
-  /** Change: an existing folder, its display for the form, or null when the lawyer cancelled. */
+  /** Choose folder…: an existing folder, its display for the form, or null when the lawyer cancelled. */
   const pickExisting = async () => {
     const picked = await wait.track(() => matters.pickFolder());
     if (picked === null) return null;
     setExisting(picked);
-    setParent(null);
     check({ existing_folder: { folder: picked.folder } });
     scan.start(picked.folder);
     return picked.display;
   };
-  const pickParent = async () => {
-    const picked = await wait.track(() => matters.pickFolder());
-    if (picked === null) return null;
-    setParent(picked);
-    check({ new_folder: { folder: picked.folder } });
-    return picked;
-  };
-  /** Where Create goes, once the check has answered: the default location when `useDefault` and nothing is picked;
-   * a parent folder picked now when none was. Null stops the create: a cancelled picker, a refused existing folder
-   * (its line shows), a warning that shows only now, or a new pick meanwhile. A parent's refusal comes back with it,
-   * for the caller's line, and the parent is forgotten. */
+  /** Where Create goes, once the check has answered: the existing folder picked, else the default location when
+   * `useDefault`. Null stops the create: no folder chosen, a refused existing folder (its line shows), a warning that
+   * shows only now, or a new pick meanwhile. Every folder comes through the picker: none is asked for here. */
   const where = async (useDefault: boolean): Promise<(Where & { refused?: HostError }) | null> => {
     const shown = answer;
-    let found: Where;
-    if (existing !== null) {
-      found = { source: { existing_folder: { folder: existing.folder } }, path: existing.display };
-    } else if (useDefault) {
-      return { source: "default_location" };
-    } else {
-      const folder = parent ?? (await pickParent());
-      if (folder === null) return null;
-      found = { source: { new_folder: { folder: folder.folder } }, path: folder.display };
-    }
+    if (existing === null) return useDefault ? { source: "default_location" } : null;
+    const found: Where = {
+      source: { existing_folder: { folder: existing.folder } },
+      path: existing.display,
+    };
     const now = asked.current;
     const said = now === null ? null : await within(now);
     if (asked.current !== now) return null;
-    if (said !== null && "refused" in said) {
-      if (existing !== null) return null;
-      forget();
-      return { ...found, refused: said.refused };
-    }
+    if (said !== null && "refused" in said) return null;
     if (said !== null && "warn" in said && !(shown != null && "warn" in shown)) return null;
     // the scan's first event says where the folder lives: a synced one waits for "Got it"
-    if (existing !== null && !(await scan.settle())) return null;
+    if (!(await scan.settle())) return null;
     return found;
   };
   const warned = answer != null && "warn" in answer ? answer.warn : null;
@@ -141,7 +121,6 @@ export function usePickedFolder(matters: Matters, lang: Lang) {
   const scanned = existing !== null && scan.scan?.folder === existing.folder ? scan.scan : null;
   return {
     existing,
-    parent,
     /** Create's refusal of the existing folder picked, said at once; Create waits on another pick. */
     refused: existing === null ? null : (checkRefused ?? scanned?.refused ?? null),
     /** The scan's lines under the folder line, for the existing folder picked. */
@@ -158,8 +137,6 @@ export function usePickedFolder(matters: Matters, lang: Lang) {
             note: <FolderWarning kind={warned} />,
             choose: fr(lang, "Choose another folder"),
             anyway: fr(lang, "Create anyway"),
-            // a parent picked by Create: another parent, as Create's picker gives it
-            ...(existing === null ? { onChoose: () => void pickParent() } : {}),
           },
     pickExisting,
     where,

@@ -38,6 +38,12 @@ crates/desktop/src/open/mac_app.rs - unsafe_code
 crates/desktop/src/ui_language/windows.rs - unsafe_code
 # One RegGetValueW of HKCU's AppsUseLightTheme before the main window exists (the first frame's colour).
 crates/desktop/src/window_size/windows_theme.rs - unsafe_code
+# WEBVIEW2_DEFAULT_BACKGROUND_COLOR set to the ground in main, before any thread: set_var.
+crates/desktop/src/window_size.rs ground_in_env unsafe_code
+# The main window's mark through WebView2's start: a CBT hook for the build, a subclass to the page's load, GDI and GDI+.
+crates/desktop/src/native_mark/windows.rs - unsafe_code
+# One RegGetValueW of HKLM's Smart App Control state, off the UI thread (the page's one-time note).
+crates/desktop/src/smart_app_control/windows.rs - unsafe_code
 crates/desktop/src/ui_language.rs KEY dead_code
 crates/desktop/src/chooser/windows.rs - unsafe_code
 # WebView2's argument variable keeps the no-DNS rule: set_var, first thing in main.
@@ -45,6 +51,8 @@ crates/desktop/src/navigation/browser_args.rs keep_no_dns_in_env unsafe_code
 # The WebView2 AdditionalBrowserArguments policy check: RegGetValueW.
 crates/desktop/src/navigation/browser_args.rs policy_set unsafe_code
 crates/desktop/src/open/word_path.rs short_folder unsafe_code
+# Key-marker tests: a released read writes its marker on a thread the injected clock cannot see; a real pause lets it land before the scratch goes.
+crates/desktop/src/setup/backend/tests/key_marker.rs Late::drop clippy::disallowed_methods
 # R20 P5b piece B: test set-up writing fake installs and fake login files (mode 0000).
 crates/desktop/src/setup/backend/tests/leave.rs a_split_found_in_temp_homes_runs_the_leave_order_with_its_reason clippy::disallowed_methods
 crates/desktop/src/setup/login_check/tests.rs unix clippy::disallowed_methods
@@ -60,6 +68,7 @@ crates/desktop/src/lib.rs context clippy::disallowed_methods
 crates/desktop/src/update/plugin.rs save_download clippy::disallowed_methods
 crates/desktop/src/update/install_kind.rs writable unsafe_code
 crates/desktop/src/update/install_kind/windows.rs - unsafe_code
+crates/desktop/src/update/arch.rs native_is_arm64 unsafe_code
 crates/desktop/src/profile.rs first_on_path clippy::disallowed_methods
 crates/desktop/src/window_events.rs raise_main_window clippy::let_underscore_must_use
 crates/desktop/src/lib.rs stop_host_then_exit clippy::exit
@@ -73,6 +82,9 @@ crates/desktop/src/connectors/local_day.rs offset unsafe_code
 # The usage counts' clock (src/counts.rs, 0036, S21): SystemTime::now, read there alone, since
 # clauseo-counts takes time as an input.
 crates/desktop/src/counts.rs now clippy::disallowed_methods
+# setup-result.json's stamp (result_file.rs, 0049): SystemTime::now, read there alone, so a
+# result an earlier run left isn't read as this run's.
+crates/sandbox/src/windows/setup/result_file.rs now_secs clippy::disallowed_methods
 # The usage counts' canary test (tests/canary.rs, S21): its scratch folder and the papers planted in
 # it, the one end-to-end session, kept in one function so each step's canary reads in order, and
 # the child process of its own binary that runs that session in an environment holding the canary.
@@ -131,6 +143,9 @@ xtask/src/process.rs first_on_path clippy::disallowed_methods
 # never constructed, only described.
 crates/protocol/src/envelope.rs Envelope clippy::partial_pub_fields
 crates/protocol/src/error_code.rs HostError::invalid_command clippy::needless_pass_by_value
+# `ProtectionView` carries four independent flags on a query view (#766 adds
+# `data_fence_names_only`); an enum would merge unrelated settings. Approved by the protocol owner.
+crates/protocol/src/protection.rs ProtectionView clippy::struct_excessive_bools
 crates/protocol/src/event.rs domain_events dead_code
 crates/protocol/src/event.rs domain_events dead_code
 crates/protocol/src/raw.rs JsonValue dead_code
@@ -146,6 +161,8 @@ crates/fake_agent/tests/stdio/harness.rs kill_pid clippy::disallowed_methods
 
 # Added by S18: the sign-in fake's Claude login, which runs the BROWSER command it is given.
 crates/fake_agent/src/signin.rs open_browser clippy::disallowed_methods
+# Added by S18: a sign-in fake whose parent died ends from its watch thread.
+crates/fake_agent/src/signin/parent.rs orphaned clippy::exit
 
 # Added by R7: store's write module (the lock file and the private database file), the one
 # BlobRef::new that cannot fail, the test-support fixture's fixed values, the tests' write
@@ -175,6 +192,10 @@ crates/sandbox/src/windows/refresh/windows_refresher.rs - unsafe_code
 crates/sandbox/src/windows/refresh/test_signer.rs compress clippy::many_single_char_names
 crates/sandbox/src/windows/refresh/test_signer.rs g clippy::many_single_char_names
 crates/sandbox/examples/run_sandboxed/env.rs remove_secret clippy::disallowed_methods
+# The host's stand-in for stetdoc (tracked changes in Word files): its -o file and call log.
+crates/host/examples/stetdoc_fake.rs write clippy::disallowed_methods
+# The real-stetdoc test looks for the stetdoc the machine has on PATH, as a debug app does.
+crates/host/tests/host/revisions_real.rs stetdoc_on_path clippy::disallowed_methods
 crates/sandbox/examples/run_sandboxed.rs jail::catch_termination unsafe_code
 # Added by S16: the upstream lookup's FFI to CFNetwork (macOS) and WinHTTP (Windows).
 crates/sandbox/src/proxy/upstream/macos.rs - unsafe_code
@@ -213,6 +234,7 @@ crates/sandbox/src/windows/acl/tests.rs a_subfolder_swapped_for_a_junction_after
 crates/sandbox/src/windows/acl/tests.rs a_subfolder_moved_after_its_check_refuses_the_walk clippy::disallowed_methods
 crates/sandbox/src/windows/acl/tests.rs presence_through_a_swapped_name_is_an_error clippy::disallowed_methods
 crates/sandbox/src/windows/acl/tests.rs a_subfolder_moved_after_its_own_listing_refuses_the_walk clippy::disallowed_methods
+crates/sandbox/src/windows/acl/tests/read_child.rs a_secured_read_refuses_a_file_held_open_for_writing clippy::disallowed_methods
 # The elevated clean-up (S15 PR4i): its privilege guard, the tests reading the token back and a
 # path's short name, the strip that only the Windows hand-back calls, and the VM harness's FFI.
 crates/sandbox/src/windows/acl/privilege.rs - unsafe_code
@@ -248,6 +270,8 @@ crates/matters/src/fsync.rs barrier clippy::unnecessary_wraps
 crates/matters/src/fsync.rs full_flush clippy::unnecessary_wraps
 # Added by R8 relink: SetFileAttributesW, to hide `.clauseo` on Windows (#100).
 crates/matters/src/write/windows.rs - unsafe_code
+# The gix_store guard: its test points git's config at temp files, with set_var (edition 2024).
+crates/matters/src/history/tests/repo.rs point_git_config_at unsafe_code
 # matters' macOS tests: their folder setup.
 crates/matters/tests/matters_macos.rs - clippy::disallowed_methods
 # matters' Windows tests: their folder setup, and files held open without sharing.
@@ -307,6 +331,12 @@ crates/matters/src/no_download/macos.rs - unsafe_code
 crates/matters/src/place/windows.rs - unsafe_code
 
 # clauseo-host: the one clock read, the one place that creates folders, and the unit tests' folders.
+crates/host/examples/stetdoc_compare_fake.rs - clippy::disallowed_methods
+crates/host/src/config/wiring/stetdoc.rs HostConfig clippy::multiple_inherent_impl
+crates/host/src/actor/query.rs query clippy::too_many_lines
+# One match arm per matter job, as actor/query.rs's query has one arm per query; splitting handle into helpers is on the after-launch list.
+crates/host/src/matter_worker.rs handle clippy::too_many_lines
+crates/host/tests/host/blackline.rs stetdoc_on_path clippy::disallowed_methods
 crates/host/src/clock.rs SystemClock::now clippy::disallowed_methods
 crates/host/src/write.rs - clippy::disallowed_methods
 # R23 PR 4 (#456): `sync_dir` is Ok on every OS but Unix, where only the folder sync can fail.
@@ -441,16 +471,23 @@ crates/matters/src/history/durable/windows_tests.rs hold clippy::disallowed_meth
 crates/agents/src/write.rs - clippy::disallowed_methods
 crates/agents/tests/install/write.rs - clippy::disallowed_methods
 crates/agents/tests/install/quit.rs - clippy::disallowed_methods
+crates/agents/tests/install/resume.rs - clippy::disallowed_methods
+crates/agents/tests/install/kept.rs - clippy::disallowed_methods
 crates/agents/src/config.rs SystemClock::now clippy::disallowed_methods
 crates/agents/src/config.rs SystemClock::monotonic clippy::disallowed_methods
 crates/agents/src/write/extract.rs - clippy::disallowed_methods
 crates/agents/src/write/extract.rs set_exec clippy::unnecessary_wraps
 crates/agents/src/write.rs make_private clippy::unnecessary_wraps
 crates/agents/src/signin/claude.rs url_file clippy::unnecessary_wraps
-crates/agents/src/worker/signin.rs shim_script clippy::unnecessary_wraps
+crates/agents/src/signin/shim.rs script clippy::unnecessary_wraps
 crates/agents/src/node.rs candidates clippy::disallowed_methods
 crates/agents/src/disk.rs free_at unsafe_code
 crates/agents/src/sysproxy/windows.rs - unsafe_code
+crates/agents/src/signin/stopping/owner/windows.rs - unsafe_code
+crates/agents/src/sac/windows.rs - unsafe_code
+crates/agents/src/lib.rs sac dead_code
+crates/agents/src/vcruntime/windows.rs - unsafe_code
+crates/agents/src/lib.rs vcruntime dead_code
 crates/agents/src/sysproxy.rs system_proxy clippy::unused_async
 crates/agents/src/sysproxy.rs system_proxy clippy::unused_async
 crates/agents/src/testing/trace.rs trace clippy::disallowed_methods
@@ -465,7 +502,11 @@ crates/agents/src/fileid.rs file_id unsafe_code
 crates/agents/src/config.rs SigninConfig::callback_port clippy::unused_self
 # The Chrome for Testing download's Win32 calls: System32's folder, free space, Authenticode.
 crates/host/src/browser/install/windows.rs - unsafe_code
+# The case-law connector's env: GetWindowsDirectoryW, the fallback for SystemRoot and windir.
+crates/host/src/agent/loads/case_law.rs windows_directory unsafe_code
 crates/sandbox/src/windows/setup/accounts.rs - unsafe_code
+# The record's owner in Administrators, by SID (NetUserGetLocalGroups), for the removal.
+crates/sandbox/src/windows/setup/admin_member.rs - unsafe_code
 crates/sandbox/src/windows/setup/account_list.rs - unsafe_code
 crates/sandbox/src/windows/setup/lock.rs - unsafe_code
 crates/sandbox/src/windows/setup/lock.rs back_off clippy::disallowed_methods
@@ -505,9 +546,21 @@ crates/sandbox/src/windows/setup/profile.rs wait clippy::disallowed_methods
 # TerminateProcess; the BITS jobs it cancels; its Windows test's token DACL and the benign process
 # it starts.
 crates/sandbox/src/windows/setup/stop/windows_stopper.rs - unsafe_code
-crates/sandbox/src/windows/setup/stop/windows_bits.rs - unsafe_code
+crates/sandbox/src/windows/setup/pool_steps/windows_bits.rs - unsafe_code
+# S15 W2: the pool tasks' wall clock (GetSystemTimeAsFileTime), shared by the stop and the sweep.
+crates/sandbox/src/windows/setup/pool_steps/windows_record.rs - unsafe_code
+# S15 W2: a launch's bounded wait (15 s, 100 ms at a time) for a sweep an unclean-session marker
+# awaits.
+crates/sandbox/src/windows/runner/unclean/os.rs OsMarkers::pause clippy::disallowed_methods
 crates/sandbox/src/windows/setup/stop/windows_tests.rs - unsafe_code
 crates/sandbox/src/windows/setup/stop/windows_tests.rs elevated_a_process_whose_token_shuts_out_system_is_named_by_its_owner_and_picked clippy::disallowed_methods
+# S15 W1: --sweep-tasks's Task Scheduler COM calls and LookupAccountNameW; its Windows test's
+# schtasks, which makes the lawyer's own task and deletes the test's tasks.
+crates/sandbox/src/windows/setup/sweep/windows_listing.rs - unsafe_code
+crates/sandbox/src/windows/setup/sweep/windows_sweeper.rs - unsafe_code
+crates/sandbox/src/windows/setup/sweep/windows_tests.rs Made::drop clippy::disallowed_methods
+crates/sandbox/src/windows/setup/sweep/windows_tests.rs elevated_the_sweep_deletes_a_pool_users_task_and_leaves_the_lawyers clippy::disallowed_methods
+crates/sandbox/src/windows/setup/sweep/windows_tests.rs elevated_a_task_whose_descriptor_shuts_system_out_is_deleted_or_56_never_left_at_0 clippy::disallowed_methods
 # S15 PR4h: UserSetup's ShellExecuteExW and process handle, the setup exe's one line off Windows,
 # and the wall clock of a set-aside's folder and of a forget's release.
 crates/sandbox/src/windows/user_setup.rs - unsafe_code
@@ -515,9 +568,14 @@ crates/sandbox/src/windows/user_setup.rs - unsafe_code
 # open, and --remove's deletion of the admin folder (MoveFileExW for the running copy).
 crates/sandbox/src/windows/admin_copy/os.rs - unsafe_code
 crates/sandbox/src/windows/admin_copy/mark_os.rs - unsafe_code
+# The admin folder's lock-down walked through handles: a link's delete on its own handle.
+crates/sandbox/src/windows/admin_copy/lock_tree_os.rs - unsafe_code
 crates/sandbox/src/windows/admin_copy/os.rs open_shared clippy::disallowed_methods
-crates/sandbox/src/windows/admin_copy/os.rs lock_down_tree clippy::disallowed_methods
-crates/sandbox/src/windows/admin_copy/os.rs lock_tree clippy::disallowed_methods
+crates/sandbox/src/windows/admin_copy/heal_os.rs - unsafe_code
+crates/sandbox/src/windows/admin_copy/heal_os.rs wait clippy::disallowed_methods
+crates/sandbox/src/windows/admin_copy/heal_os.rs clock clippy::disallowed_methods
+# --adopt's and --remove's take-back deletes in the admin folder (0049, the staging folder's DACL).
+crates/sandbox/src/windows/admin_copy/take_back_os.rs NtfsLockDown::remove clippy::disallowed_methods
 crates/sandbox/src/windows/admin_copy/ntfs_tests.rs a_held_hash_keeps_the_file_from_changing_until_it_drops clippy::disallowed_methods
 crates/sandbox/src/windows/setup/admin_remove.rs - unsafe_code
 crates/sandbox/src/windows/setup/admin_remove.rs - clippy::disallowed_methods
@@ -544,7 +602,6 @@ crates/sandbox/src/windows/runner/desktop.rs - unsafe_code
 crates/sandbox/src/windows/runner/outer.rs exit_now clippy::exit
 crates/sandbox/src/windows/runner/sweep/os.rs - unsafe_code
 crates/sandbox/src/windows/runner/leftovers/os.rs - unsafe_code
-crates/sandbox/src/windows/runner/leftovers/os/com.rs - unsafe_code
 crates/sandbox/src/windows/runner/leftovers/os/tests.rs - unsafe_code
 crates/sandbox/src/windows/runner/outer/end.rs pause clippy::disallowed_methods
 crates/sandbox/src/windows/runner/outer/end.rs clock clippy::disallowed_methods
@@ -555,7 +612,7 @@ crates/sandbox/src/windows/ca_bundle/store.rs - unsafe_code
 crates/sandbox/src/windows/ca_bundle/store.rs timed clippy::disallowed_methods
 crates/sandbox/src/windows/ca_bundle/ntfs_tests.rs - unsafe_code
 crates/sandbox/src/windows/test_pool.rs - unsafe_code
-crates/sandbox/src/windows/test_pool.rs run_powershell clippy::disallowed_methods
+crates/sandbox/src/windows/test_pool.rs clock clippy::disallowed_methods
 crates/sandbox/src/windows/token/ntfs_tests.rs - unsafe_code
 crates/sandbox/src/windows/pipe/ntfs_tests.rs - unsafe_code
 # S15 PR5: the VM and CI harness for tier B's runner (examples/s15_launch_vm).
@@ -582,3 +639,8 @@ crates/sandbox/examples/s15_launch_vm/win_switch.rs - unsafe_code
 crates/sandbox/examples/s15_launch_vm/win_pool.rs - unsafe_code
 # The cancel row's thread states: NtQuerySystemInformation against ntdll, and a pid's token user.
 crates/sandbox/examples/s15_launch_vm/win_suspend.rs - unsafe_code
+# A network path is decided from the drive's root and the mount list, never the path.
+crates/host/src/network_paths/mac.rs - unsafe_code
+crates/host/src/network_paths/windows.rs - unsafe_code
+# Vendored from clauseo_sandbox (stage C, #735) with its exported names; stage E's #764 calls it.
+crates/host/src/network_paths/ascii_fold.rs refused_in_other_matter dead_code

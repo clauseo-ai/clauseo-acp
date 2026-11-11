@@ -1,7 +1,7 @@
 //! Set-up's steps around the denies and the matters: the owners of the folders the shared-write
 //! denies protect (`PR4h`), reading the owner's registered matters after the lock (`PR4h`), step
 //! 8's fence of them against the grown pool, step 9's change journals, and the per-machine
-//! stop task once the owner is recorded.
+//! stop and sweep tasks once the owner is recorded.
 
 use std::io;
 use std::path::{Path, PathBuf};
@@ -28,19 +28,46 @@ const SYSTEM: &str = "S-1-5-18";
 const ADMINISTRATORS: &str = "S-1-5-32-544";
 
 /// After step 5, once the record names `owner` as `OwnerSid`: on a per-machine install (the
-/// record's `AdminCopyOwner` is `machine`), the SYSTEM task `\Clauseo\SandboxStop` is
-/// registered for `owner`, or replaced when it is there, by the same registration `--adopt`
-/// makes per user (`refresh::register_task`). Its descriptor then names `owner` alone, so a
-/// previous owner's start right goes with the replaced one. A per-user install's task is
-/// `--adopt`'s, and an install with no admin copy has no task, so neither is touched here. A
-/// record that can't be read or a registration that fails is [`Step::StopTask`], rolled back.
+/// record's `AdminCopyOwner` is `machine`), the SYSTEM tasks `\Clauseo\SandboxStop` and
+/// `\Clauseo\SandboxSweep` are registered for `owner`, or replaced when they are there, by the
+/// same registration `--adopt` makes per user (`refresh::register_task`). Their descriptor then
+/// names `owner` alone, so a previous owner's start right goes with the replaced ones. A
+/// per-user install's tasks are `--adopt`'s, and an install with no admin copy has none, so
+/// neither is touched here. A record that can't be read or a registration that fails is
+/// [`Step::StopTask`], rolled back.
 pub(super) fn stop_task(machine: &mut impl Machine, owner: &Sid) -> Result<(), Failed> {
-    let failed = |why: String| (Step::StopTask, format!("the task SandboxStop: {why}"));
+    let failed = |why: String| {
+        (
+            Step::StopTask,
+            format!("the tasks SandboxStop and SandboxSweep: {why}"),
+        )
+    };
     match machine.copy_owner() {
         Ok(Some(CopyOwner::Machine)) => machine
             .register_stop_task(owner)
             .map_err(|error| failed(cause_of(&error))),
         Ok(Some(CopyOwner::User(_)) | None) => Ok(()),
+        Err(error) => Err(failed(format!(
+            "the record's AdminCopyOwner can't be read ({})",
+            cause_of(&error)
+        ))),
+    }
+}
+
+/// Right after step 5 records the group: on a machine with an admin copy (the record names its
+/// `AdminCopyOwner`), its folder and everything in it are locked again, the group denied
+/// (`admin_copy::locked`), so no pool process can hold the copy against the SYSTEM tasks that
+/// run it. A first install's `--adopt` locked before there was a group; a re-run locks again
+/// all the same, which also mends a deny that went missing. An install with no admin copy has
+/// nothing to lock. A record that can't be read or a lock that fails is [`Step::AdminLock`],
+/// rolled back; the deny itself isn't, and a deny for a group that is gone opens nothing.
+pub(super) fn admin_lock(machine: &mut impl Machine, group: &Sid) -> Result<(), Failed> {
+    let failed = |why: String| (Step::AdminLock, format!("the admin copy's lock: {why}"));
+    match machine.copy_owner() {
+        Ok(Some(_)) => machine
+            .lock_admin_copy(group)
+            .map_err(|error| failed(cause_of(&error))),
+        Ok(None) => Ok(()),
         Err(error) => Err(failed(format!(
             "the record's AdminCopyOwner can't be read ({})",
             cause_of(&error)

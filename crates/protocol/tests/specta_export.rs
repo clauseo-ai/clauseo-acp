@@ -88,6 +88,9 @@ fn assert_exported(types: &Types, ts: &str) {
         "Secret",
         "InstallProgress",
         "InstallLog",
+        "PythonProgress",
+        "PythonBlockedBy",
+        "PythonFailureCause",
         "SignIn",
         "FoundLogin",
         "LoginFrom",
@@ -205,7 +208,8 @@ fn assert_optional(ts: &str) {
             || line.starts_with("export type RawPayload = null | ")
             || line.trim() == "client?: ClientName | null,"
             || line.trim() == "next_date?: Date | null,"
-            || line.trim() == "skill_packs?: PackList | null,";
+            || line.trim() == "skill_packs?: PackList | null,"
+            || line.trim() == "agent_prefs?: AgentPrefs | null,";
         assert!(allowed, "unexpected `null` in: {line}");
     }
 }

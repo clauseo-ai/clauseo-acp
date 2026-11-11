@@ -1,0 +1,48 @@
+# The stetdoc the desktop bundles in release builds, in its own folder (the private task row U13):
+# `<resources>\stetdoc\stetdoc.exe` on Windows, `Clauseo.app/Contents/Helpers/stetdoc/stetdoc` on
+# macOS, `<resources>/stetdoc/stetdoc` on Linux. Only that folder goes first on the agents' PATH.
+#
+# Read by two things, both of which must agree with it:
+#   - crates/desktop/sidecars/stetdoc.mjs, `fetchStetdoc(triple, destPath)`, which the release
+#     script (.github/scripts/sidecars.mjs) calls once per target. It reads this file with its own
+#     small parser, so keep to the format below.
+#   - the `stetdoc_pin` test in crates/desktop (crates/desktop/src/stetdoc_pin.rs), which parses
+#     it with the toml crate and checks every release target has a table.
+#
+# Format: `version` is the release's tag without the `v`. Each other table is one Rust target
+# triple, with exactly two keys: `url` (the release asset's download URL, which must start with
+# https://github.com/clauseo-ai/stetdoc/releases/download/v<version>/stetdoc-<triple>) and
+# `sha256` (the asset's SHA-256, 64 lowercase hex characters). A triple whose asset is not usable
+# yet holds `pending = "<why>"` instead: the fetch then FAILS for that triple, loudly, so no
+# release of it can be built until the pin is filled. It is never skipped. Values are double
+# quoted strings; no other syntax (no inline tables, arrays or multi-line strings).
+#
+# Each asset is an archive (.tar.gz, or .zip on Windows) holding one folder with the program
+# (`stetdoc`, `stetdoc.exe` on Windows) and its licence files; only the program is bundled. The
+# hashes match the digests GitHub lists for the release assets (`gh release view v0.9.3 -R
+# clauseo-ai/stetdoc --json assets`) and were checked against a download of each.
+#
+# v0.9.3 is built with `-C target-feature=+crt-static`, so the Windows program imports no
+# VCRUNTIME, and it has a Windows arm64 (aarch64-pc-windows-msvc) asset.
+
+version = "0.9.3"
+
+[aarch64-apple-darwin]
+url = "https://github.com/clauseo-ai/stetdoc/releases/download/v0.9.3/stetdoc-aarch64-apple-darwin.tar.gz"
+sha256 = "6be5d4edb66fe23316f102a98a948b3e5f50e485cfb7a95afa15bb99b842ff5a"
+
+[x86_64-apple-darwin]
+url = "https://github.com/clauseo-ai/stetdoc/releases/download/v0.9.3/stetdoc-x86_64-apple-darwin.tar.gz"
+sha256 = "159b664120ec537df224f5ad716dcd63d11b84759ad307f4331b28937b38dc5c"
+
+[x86_64-unknown-linux-gnu]
+url = "https://github.com/clauseo-ai/stetdoc/releases/download/v0.9.3/stetdoc-x86_64-unknown-linux-gnu.tar.gz"
+sha256 = "76ec891e2028b842191220a1175af0a6f672277467c01fb4b9712018a562dfe2"
+
+[x86_64-pc-windows-msvc]
+url = "https://github.com/clauseo-ai/stetdoc/releases/download/v0.9.3/stetdoc-x86_64-pc-windows-msvc.zip"
+sha256 = "2885fa3da7b7539f1d9d62a6e13f75e774dfbda7e3fc78f145b640cf8f924fe9"
+
+[aarch64-pc-windows-msvc]
+url = "https://github.com/clauseo-ai/stetdoc/releases/download/v0.9.3/stetdoc-aarch64-pc-windows-msvc.zip"
+sha256 = "1a916baa7708e0712c916dbd556de727b40c2a8a35d03d53225aa76f85fce1cb"

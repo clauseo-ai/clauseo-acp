@@ -7,10 +7,15 @@
 //! The record's `DataDir` is a path the owner can influence. Before any use it is held to the
 //! plain drive path `--data-dir` is held to (`args::data_dir_of`), then resolved one component
 //! at a time with no junction or link (`private_dir::resolve_folder`), and only its final path
-//! is used. As the owner, the folder must be the owner's own (as `--data-dir`'s is); for an
-//! administrator acting for an absent owner, the folder and its `sandbox` folder must be owned
-//! by the record's owner, and the ledger is only read. Causes name the kind of a failure, never
-//! the path.
+//! is used. Either way the folders are held to `remove::owners`: the folder to set-up's rule
+//! (the owner, or Administrators for an owner in Administrators, read by
+//! `admin_member::in_administrators`), its `sandbox` folder to the rest of the sandbox's (the
+//! owner, Administrators or SYSTEM), since an elevated process makes Administrators the owner
+//! of what it creates (the built-in Administrator, or UAC off). For an administrator acting for
+//! an absent owner, the ledger is only read, and a matter folder is held to the `sandbox`
+//! folder's rule (`admin_target`): all the removal does there is take our own pool and group
+//! entries off, and our Low label (`ledger_work` says when). Causes name the kind of a failure,
+//! never the path.
 //!
 //! The owner is acted as only with a standard user's token (`remove::acting_token`): the
 //! parent's own, or a copy lowered to Administrators deny-only and Medium integrity when the
@@ -29,14 +34,16 @@ use std::rc::Rc;
 use clauseo_protocol::MatterId;
 
 use super::super::accounts::{self, Kind};
+use super::super::answers::DENY_REMOTE_INTERACTIVE_RIGHT;
 use super::super::around::Around;
 use super::super::lock::{Acquired, Held, SetupMutex};
 use super::super::machine::{MachineError, ProfileDir};
+use super::super::outcome::cause_of;
 use super::super::owner::Owner;
 use super::super::record_values::CopyOwner;
 use super::super::windows_machine::{Acting, Names};
-use super::super::{args, ffi, processes, profile, record_write};
-use super::{Removal, acting_token};
+use super::super::{admin_member, args, ffi, preflight, processes, profile, record_write};
+use super::{FolderOwner, Removal, acting_token, owners};
 use crate::windows::acl::object::Object;
 use crate::windows::acl_plan::in_folder;
 use crate::windows::apply::Surroundings;
@@ -44,7 +51,7 @@ use crate::windows::ledger::{self, LEDGER_FILE, Ledger, ledger_path};
 use crate::windows::matters::SANDBOX_DIR;
 use crate::windows::pool::MachineRecord;
 use crate::windows::private_dir::resolve_folder;
-use crate::windows::refresh::{self, SystemTask};
+use crate::windows::refresh;
 use crate::windows::set_aside::forget_bookkeeping;
 use crate::windows::sids::{Reserved, Sid};
 use crate::windows::wfp;
@@ -113,7 +120,7 @@ fn kind_of(what: &str, error: &io::Error) -> MachineError {
 }
 
 /// The record's `data_dir`, checked as the module says, its owner (and its `sandbox` folder's)
-/// required to be `owner`: its final path; `None` when the folder or `sandbox` is missing.
+/// held to [`owners`]' rules: its final path; `None` when the folder or `sandbox` is missing.
 fn checked_data_dir(data_dir: &Path, owner: &Sid) -> Result<Option<PathBuf>, MachineError> {
     // The usage error quotes the path, which no cause here carries.
     let Ok(plain) = args::data_dir_of(Some(data_dir.as_os_str().to_owned())) else {
@@ -129,16 +136,14 @@ fn checked_data_dir(data_dir: &Path, owner: &Sid) -> Result<Option<PathBuf>, Mac
     let Some((folder, folder_owner)) = resolve(&plain, "the record's data folder")? else {
         return Ok(None);
     };
-    let not_owned =
-        || MachineError::Other("the record's data folder isn't its owner's own".to_owned());
-    if folder_owner != *owner {
-        return Err(not_owned());
-    }
+    let in_admins = || admin_member::in_administrators(owner).unwrap_or(false);
+    owners::data_folder(&folder_owner, owner, in_admins)?;
     let sandbox = folder.join(SANDBOX_DIR);
     match resolve(&sandbox, "the data folder's sandbox folder")? {
         None => Ok(None),
-        Some((_, sandbox_owner)) if sandbox_owner != *owner => Err(not_owned()),
-        Some(_) => Ok(Some(folder)),
+        Some((_, sandbox_owner)) => {
+            owners::sandbox_folder(&sandbox_owner, owner).map(|()| Some(folder))
+        }
     }
 }
 
@@ -216,8 +221,11 @@ impl Removal for WindowsRemoval {
     }
 
     fn unregister_stop_task(&mut self) -> Result<(), MachineError> {
-        refresh::unregister_task(SystemTask::Stop)
-            .map_err(|error| MachineError::Other(error.to_string()))
+        for task in refresh::POOL_TASKS {
+            refresh::unregister_task(task)
+                .map_err(|error| MachineError::Other(format!("{}: {error}", task.name())))?;
+        }
+        Ok(())
     }
 
     fn invoker(&self) -> Option<&Sid> {
@@ -301,6 +309,14 @@ impl Removal for WindowsRemoval {
         accounts::delete_group(&self.group_name(group)?)
     }
 
+    fn remove_remote_logon_deny(&mut self, group: &Sid) -> Result<(), MachineError> {
+        // A group under the name must be the record's; with none, the deny goes by its SID.
+        if accounts::sid_of(&self.names.group, Kind::Group)?.is_some() {
+            self.group_name(group)?;
+        }
+        preflight::remove_right(group, DENY_REMOTE_INTERACTIVE_RIGHT)
+    }
+
     fn as_owner<T>(&mut self, f: impl FnOnce(&mut Self) -> T) -> Result<T, MachineError> {
         if self.acting.get() {
             return Ok(f(self));
@@ -354,6 +370,18 @@ impl Removal for WindowsRemoval {
             })
     }
 
+    fn clear_markers(&mut self) -> Result<usize, MachineError> {
+        if !self.acting.get() {
+            return Err(MachineError::Other(
+                "the unclean-session markers are removed only as their owner".to_owned(),
+            ));
+        }
+        let Some(folder) = &self.checked else {
+            return Ok(0);
+        };
+        clear_markers_in(folder)
+    }
+
     fn admins_ledger(
         &mut self,
         data_dir: &Path,
@@ -366,7 +394,14 @@ impl Removal for WindowsRemoval {
         }
     }
 
-    fn admin_target(&mut self, path: &Path, owner: &Sid) -> Result<(), MachineError> {
+    fn owner_in_administrators(&mut self, owner: &Sid) -> bool {
+        admin_member::in_administrators(owner).unwrap_or_else(|error| {
+            tracing::warn!(cause = %cause_of(&error), "the owner's groups can't be read");
+            false
+        })
+    }
+
+    fn admin_target(&mut self, path: &Path, owner: &Sid) -> Result<FolderOwner, MachineError> {
         let (folder, folder_owner) =
             resolve_folder(path).map_err(|error| kind_of("a matter's folder", &error))?;
         if !(in_folder(&folder, path) && in_folder(path, &folder)) {
@@ -374,17 +409,29 @@ impl Removal for WindowsRemoval {
                 "a matter's folder isn't where the ledger says".to_owned(),
             ));
         }
-        if folder_owner != *owner {
-            return Err(MachineError::Other(
-                "a matter's folder isn't its owner's own".to_owned(),
-            ));
-        }
+        // The owner, Administrators or SYSTEM, as for the data folder: all that is done on a
+        // folder that passes is taking our own pool and group entries, and our Low label, off.
+        let found = owners::matter_folder(&folder_owner, owner)?;
         match folder_support(&folder) {
-            Ok(FolderSupport::Ok) => Ok(()),
+            Ok(FolderSupport::Ok) => Ok(found),
             Ok(other) => Err(MachineError::Other(format!(
                 "a matter's folder fails the folder check ({other:?})"
             ))),
             Err(error) => Err(kind_of("a matter's folder check", &error)),
         }
     }
+}
+
+/// Removes every unclean-session marker in `folder`'s run folder, as whoever this thread acts
+/// as; how many. A run folder that is missing holds none.
+fn clear_markers_in(folder: &Path) -> Result<usize, MachineError> {
+    use crate::windows::runner::marker::{marker_path, remove_marker, unclean_sessions};
+    let other = |error: std::io::Error| {
+        MachineError::Other(format!("the unclean-session markers ({})", error.kind()))
+    };
+    let sessions = unclean_sessions(folder).map_err(other)?;
+    for session in &sessions {
+        remove_marker(&marker_path(folder, &session.id)).map_err(other)?;
+    }
+    Ok(sessions.len())
 }

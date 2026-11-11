@@ -2,8 +2,8 @@
 //! own kind, and a state gives the thread's or the matter's state only for its own kind.
 
 use clauseo_protocol::{
-    CheckpointKind, CheckpointRecorded, DomainEvent, MarkerKind, MatterCreated, MatterKind,
-    MatterRelocated, OutsideEdits, RestoreScope, VersionRestored, ViewEntry,
+    CheckpointKind, CheckpointRecorded, DomainEvent, MarkerEntry, MarkerKind, MatterCreated,
+    MatterKind, MatterRelocated, OutsideEdits, RestoreScope, VersionRestored, ViewEntry,
 };
 use clauseo_reducer::{Anomaly, ViewChange, apply};
 
@@ -44,8 +44,8 @@ fn matter_event_on_a_thread_stream_is_reported_by_its_kind() {
     let mut log = Log::thread(21).unwrap();
     log.push(thread_created().unwrap()).unwrap();
     let mut state = fold(log.events());
-    let (checkpoint, from) = (log.fresh().unwrap(), log.fresh().unwrap());
-    let events: [(DomainEvent, &str); 5] = [
+    let checkpoint = log.fresh().unwrap();
+    let events: [(DomainEvent, &str); 4] = [
         (
             MatterCreated::new("Smith v Jones", MatterKind::Scratch, None)
                 .unwrap()
@@ -67,15 +67,6 @@ fn matter_event_on_a_thread_stream_is_reported_by_its_kind() {
             "outside_edits",
         ),
         (
-            VersionRestored {
-                from,
-                checkpoint,
-                scope: RestoreScope::Matter,
-            }
-            .into(),
-            "version_restored",
-        ),
-        (
             MatterRelocated {
                 folder: "/work/Smith v Jones".to_owned(),
             }
@@ -93,6 +84,45 @@ fn matter_event_on_a_thread_stream_is_reported_by_its_kind() {
         );
         assert_eq!(state.entries(), before.entries());
     }
+}
+
+/// A restore asked from a conversation is in its stream too, as the matter's marker.
+#[test]
+fn version_restored_on_a_thread_stream_folds_to_its_marker() {
+    let mut log = Log::thread(21).unwrap();
+    log.push(thread_created().unwrap()).unwrap();
+    let mut state = fold(log.events());
+    let (checkpoint, from, undone) = (
+        log.fresh().unwrap(),
+        log.fresh().unwrap(),
+        log.fresh().unwrap(),
+    );
+    let envelope = log
+        .push(VersionRestored {
+            from,
+            checkpoint,
+            scope: RestoreScope::Matter,
+            undoes: Some(undone),
+        })
+        .unwrap();
+    let out = apply(&mut state, &envelope).unwrap();
+    assert!(out.anomalies.is_empty(), "{:?}", out.anomalies);
+    let marker = ViewEntry::Marker(MarkerEntry {
+        order: envelope.seq,
+        event: envelope.event_id,
+        kind: MarkerKind::VersionRestored {
+            from,
+            checkpoint,
+            scope: RestoreScope::Matter,
+            undoes: Some(undone),
+        },
+        ts: envelope.ts,
+    });
+    assert_eq!(
+        out.changes,
+        vec![ViewChange::Upsert(Box::new(marker.clone()))]
+    );
+    assert_eq!(state.entries().get(&envelope.seq), Some(&marker));
 }
 
 #[test]

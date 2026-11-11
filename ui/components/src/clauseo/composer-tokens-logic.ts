@@ -11,6 +11,8 @@
 //   commands (`/review`) and the papers picked in this field (`@Notice.pdf`);
 // - a command the agent no longer lists is plain text, not a token.
 
+import { sharedEnd, sharedStart } from "./composer-diff.ts";
+
 const WS = /\s/u;
 
 /** A token: its text in the field (`/review`), from `start` to `end` (exclusive). */
@@ -24,12 +26,12 @@ const standsAlone = (value: string, start: number, end: number) =>
 
 /** Moves the tokens across the edit that turned `prev` into `next`; a token the edit cut into is dropped. */
 export function shiftTokens(prev: string, next: string, tokens: readonly Token[]): Token[] {
+  // no tokens, as in nearly every question: nothing to move, and no diff of a field that can hold 6 MiB
+  if (tokens.length === 0) return [];
   if (prev === next) return [...tokens];
   const max = Math.min(prev.length, next.length);
-  let p = 0;
-  while (p < max && prev[p] === next[p]) p += 1;
-  let s = 0;
-  while (s < max - p && prev[prev.length - 1 - s] === next[next.length - 1 - s]) s += 1;
+  const p = sharedStart(prev, next, max);
+  const s = sharedEnd(prev, next, max - p);
   const oldEnd = prev.length - s;
   const delta = next.length - prev.length;
   const out: Token[] = [];

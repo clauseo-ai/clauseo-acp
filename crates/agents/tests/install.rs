@@ -2,7 +2,8 @@
 //! tiny tarballs, the local test registry under `registry.test`, the real Node and npm from
 //! `PATH` (a test fails, rather than skips, when there is none), a `ManualTimer` the test
 //! fires, and a clock that moves 250 ms per reading. No test reaches the network, and none sleeps
-//! but `quit.rs`'s, which poll real processes for their pids and their end.
+//! but `quit.rs`'s and `resume.rs`'s, which poll real processes for their pids and their end,
+//! and `kept.rs`'s, which polls for a job's first back-off.
 //!
 //! A test crate root resolves modules beside itself, so each submodule names its path. Each
 //! carries `#[cfg(test)]` so clippy treats its helpers as test code.
@@ -14,6 +15,16 @@ mod write;
 #[cfg(test)]
 #[path = "install/support.rs"]
 mod support;
+
+#[cfg(test)]
+#[path = "install/events.rs"]
+mod events;
+
+// A fake runtime's `bin/python3` is a shell script.
+#[cfg(test)]
+#[cfg(unix)]
+#[path = "install/python.rs"]
+mod python;
 
 #[cfg(test)]
 #[path = "install/downloads.rs"]
@@ -40,5 +51,17 @@ mod npm_file;
 mod quit;
 
 #[cfg(test)]
+#[path = "install/kept.rs"]
+mod kept;
+
+#[cfg(test)]
 #[path = "install/node_env.rs"]
 mod node_env;
+
+#[cfg(test)]
+#[path = "install/resume.rs"]
+mod resume;
+
+#[cfg(test)]
+#[path = "install/sac.rs"]
+mod sac;

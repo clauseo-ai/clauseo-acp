@@ -64,10 +64,11 @@ export const restoreOf = (s: Snapshot, done: Done): string | null =>
     ? done.outcome.checkpoint
     : null;
 
-/** Whether two previews would write the same: the same files, each changed the same way. */
+/** Whether two previews would write the same: the same files, each changed the same way, and the same files removed. */
 export const sameChanges = (a: RestorePreview, b: RestorePreview): boolean =>
   a.changes.length === b.changes.length &&
-  a.changes.every((c, i) => c.path === b.changes[i]?.path && c.change === b.changes[i]?.change);
+  a.changes.every((c, i) => c.path === b.changes[i]?.path && c.change === b.changes[i]?.change) &&
+  (a.removes ?? []).join("\n") === (b.removes ?? []).join("\n");
 
 /** A turn whose change couldn't be kept as a version: its conversation, its first file and when it ended. */
 export type Unsaved = { thread: ThreadId; paper: string; ts: Timestamp };

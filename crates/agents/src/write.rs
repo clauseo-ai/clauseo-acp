@@ -15,9 +15,13 @@ use std::fs::{File, OpenOptions};
 use std::io::{self, Write as _};
 use std::path::Path;
 
+use clauseo_protocol::AgentId;
+
 pub(crate) mod extract;
 
-pub(crate) use extract::{ArchiveKind, ExtractError, extract};
+pub(crate) use extract::{
+    ArchiveKind, ExtractError, ManifestEntry, extract, extract_tar_gz_read_only,
+};
 
 /// `fs::create_dir_all`.
 pub(crate) fn create_dir_all(path: &Path) -> io::Result<()> {
@@ -198,17 +202,61 @@ fn open_no_follow(options: &mut OpenOptions, path: &Path) -> io::Result<File> {
     options.open(path)
 }
 
-/// Takes the exclusive lock on `<data_dir>/agents/.lock` (made if missing) without waiting:
-/// `Ok(None)` when another process holds it, i.e. another Clauseo is installing. The lock lasts
-/// as long as the file it gives.
-pub(crate) fn try_lock_agents(data_dir: &Path) -> io::Result<Option<File>> {
+/// One of the lock files in `<data_dir>/agents` (decision 0033, "Two installs at once").
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum AgentsLock<'a> {
+    /// `.lock`: every install job holds it shared, so an older Clauseo, which takes it
+    /// exclusive, never installs beside this one; an exclusive hold is the whole folder's.
+    All,
+    /// `.lock-<id>`: held exclusive by the one job installing that agent, with its install
+    /// folder, its downloads, its npm cache and its npmrc files.
+    Agent(&'a AgentId),
+    /// `.lock-node`: the downloaded Node runtime and its archive. Exclusive to fetch, unpack or
+    /// remove them; shared while an npm runs from the runtime.
+    Node,
+    /// `.lock-python`: the Python runtime and its archive, exclusive while one job installs it.
+    Python,
+}
+
+impl AgentsLock<'_> {
+    /// The lock file's name in `agents`.
+    fn file_name(self) -> String {
+        match self {
+            AgentsLock::All => ".lock".to_owned(),
+            AgentsLock::Agent(agent) => format!(".lock-{agent}"),
+            AgentsLock::Node => ".lock-node".to_owned(),
+            AgentsLock::Python => ".lock-python".to_owned(),
+        }
+    }
+}
+
+/// How a lock is held: one holder, or any number of shared ones.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Mode {
+    Exclusive,
+    Shared,
+}
+
+/// Takes `lock` in `mode` without waiting (the file made if missing, a link refused): `Ok(None)`
+/// while another holder's lock conflicts, in this process or another. Every open is its own
+/// holder (`flock` on Unix, `LockFileEx` on Windows), so two jobs of one process exclude each
+/// other as two processes do. The lock lasts as long as the file it gives.
+pub(crate) fn try_lock(
+    data_dir: &Path,
+    lock: AgentsLock<'_>,
+    mode: Mode,
+) -> io::Result<Option<File>> {
     let agents = data_dir.join("agents");
     create_dir_all(&agents)?;
     let file = open_no_follow(
         OpenOptions::new().create(true).write(true).truncate(false),
-        &agents.join(".lock"),
+        &agents.join(lock.file_name()),
     )?;
-    match file.try_lock() {
+    let taken = match mode {
+        Mode::Exclusive => file.try_lock(),
+        Mode::Shared => file.try_lock_shared(),
+    };
+    match taken {
         Ok(()) => Ok(Some(file)),
         Err(std::fs::TryLockError::WouldBlock) => Ok(None),
         Err(std::fs::TryLockError::Error(err)) => Err(err),
@@ -242,9 +290,31 @@ pub(crate) fn sync_file(path: &Path) -> io::Result<()> {
     open_no_follow(OpenOptions::new().write(true), path)?.sync_all()
 }
 
+/// Flushes the read-only file `path`'s bytes to the disk: Python's interpreter, unpacked
+/// `0o555`. On Unix through a read-only handle (`fsync` needs no write access); on Windows,
+/// where no unpack sets a read-only attribute, as [`sync_file`].
+pub(crate) fn sync_read_only(path: &Path) -> io::Result<()> {
+    if cfg!(unix) {
+        open_read(path)?.sync_all()
+    } else {
+        sync_file(path)
+    }
+}
+
 /// `fs::rename`: `from` replaces `to` (a file), or moves a folder to a free name.
 pub(crate) fn rename(from: &Path, to: &Path) -> io::Result<()> {
     std::fs::rename(from, to)
+}
+
+/// Copies the file `from` to `to`: a new file with the same bytes, never a link to `from`,
+/// synced before this returns. Neither path is followed through a link, and `to` is replaced
+/// when it exists. Codex's VC++ runtime DLL beside its `rg.exe` (`vcruntime`).
+pub(crate) fn copy_file(from: &Path, to: &Path) -> io::Result<u64> {
+    let mut source = open_read(from)?;
+    let mut target = open_truncate(to)?;
+    let copied = io::copy(&mut source, &mut target)?;
+    target.sync_all()?;
+    Ok(copied)
 }
 
 /// Removes the file at `path`; a missing file is fine.
@@ -255,13 +325,80 @@ pub(crate) fn remove_file(path: &Path) -> io::Result<()> {
     }
 }
 
+/// Removes the folder at `path` when it is empty; anything else (a file left in it, no folder,
+/// a link) leaves it as it is.
+pub(crate) fn remove_empty_dir(path: &Path) {
+    drop(std::fs::remove_dir(path));
+}
+
 /// Removes the folder at `path` and everything in it, never following a link out of it; a
-/// missing folder is fine.
+/// missing folder is fine. A folder that refuses (Python's read-only runtime, `0o555` folders
+/// on Unix) is made writable through no link ([`make_writable`]) and removed again: every
+/// removal (a temp folder, a failed try's tree, a stale runtime, a reinstall) goes through here.
 pub(crate) fn remove_dir_all(path: &Path) -> io::Result<()> {
     match std::fs::remove_dir_all(path) {
         Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(()),
+        Err(err) if cfg!(unix) && err.kind() == io::ErrorKind::PermissionDenied => {
+            make_writable(path)?;
+            match std::fs::remove_dir_all(path) {
+                Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(()),
+                other => other,
+            }
+        }
         other => other,
     }
+}
+
+/// Gives the owner full access (`0o700` added, on Unix) to the real folder `path` and every
+/// real folder under it, so what is in them can be removed. Read with `symlink_metadata`: a
+/// link is never followed, and a file is left as it is (unlinking it needs only its folder
+/// writable). Windows has no mode to change; the walk then only reads.
+pub(crate) fn make_writable(path: &Path) -> io::Result<()> {
+    let meta = match std::fs::symlink_metadata(path) {
+        Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(()),
+        meta => meta?,
+    };
+    if !meta.is_dir() || is_reparse_point(&meta) {
+        return Ok(());
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        let mode = meta.permissions().mode();
+        if mode & 0o700 != 0o700 {
+            std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode | 0o700))?;
+        }
+    }
+    for entry in std::fs::read_dir(path)? {
+        let entry = entry?;
+        if entry.file_type()?.is_dir() {
+            make_writable(&entry.path())?;
+        }
+    }
+    Ok(())
+}
+
+/// Sets every real folder under `dir` (not `dir` itself) to `0o555` on Unix, deepest first, so
+/// nothing can be added, renamed or removed below it. Links are never followed. Windows has no
+/// mode to set (the sandbox's ACLs keep the runtime read-only for the agent); the walk then
+/// only reads.
+pub(crate) fn seal_below(dir: &Path) -> io::Result<()> {
+    for entry in std::fs::read_dir(dir)? {
+        let entry = entry?;
+        if entry.file_type()?.is_dir() {
+            seal_below(&entry.path())?;
+            #[cfg(unix)]
+            make_read_only(&entry.path())?;
+        }
+    }
+    Ok(())
+}
+
+/// Sets the one folder `dir` to `0o555`: Python's runtime folder, once its receipt is in.
+#[cfg(unix)]
+pub(crate) fn make_read_only(dir: &Path) -> io::Result<()> {
+    use std::os::unix::fs::PermissionsExt as _;
+    std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o555))
 }
 
 /// Writes `bytes` to `path` atomically: into `.<name>.tmp` beside it, synced, then renamed
@@ -340,7 +477,7 @@ pub(crate) fn remove_any(path: &Path) -> io::Result<()> {
 }
 
 /// Tests only: sets `path`'s Unix mode.
-#[cfg(all(test, unix))]
+#[cfg(all(unix, any(test, feature = "test-support")))]
 pub(crate) fn set_mode(path: &Path, mode: u32) -> io::Result<()> {
     use std::os::unix::fs::PermissionsExt as _;
     std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode))
@@ -354,7 +491,8 @@ pub(crate) fn symlink(target: &Path, link: &Path) -> io::Result<()> {
 
 /// Makes a hard link at `link` to `original`: one file under two names, `std::fs::hard_link`,
 /// which opens neither (`link(2)` on Unix, `CreateHardLinkW` on Windows). An existing `link`
-/// is an error, never replaced. Codex's reused login (`signin/reuse.rs`), and tests.
+/// is an error, never replaced. Codex's reused login (`signin/reuse.rs`), the VC++ runtime DLL
+/// moved into place beside Codex's `rg.exe` with no replace (`vcruntime`), and tests.
 pub(crate) fn hard_link(original: &Path, link: &Path) -> io::Result<()> {
     std::fs::hard_link(original, link)
 }

@@ -7,6 +7,7 @@
 
 use super::admin_copy::admin_code;
 use super::nsis_run::{Machine, Node, Record, Value, chain, defines, lines, parse_all, preprocess};
+use super::safe_workspace_off::SAFE_WORKSPACE;
 use super::sources::{hook_code, line_with, preuninstall, read};
 
 #[test]
@@ -340,6 +341,8 @@ fn refusal(mode: &str, verified: &str, record: Record, silent: bool) -> Vec<Stri
     let mut defines = defines(&code);
     defines.insert("INSTALLMODE".to_owned(), mode.to_owned());
     defines.insert("NSIS_PTR_SIZE".to_owned(), "4".to_owned());
+    // The removal is the Safe workspace's: compiled only with its define.
+    defines.insert(SAFE_WORKSPACE.to_owned(), String::new());
     let body = preprocess(preuninstall(&code), &defines);
     let nodes = parse_all(&body);
     let Some(Node::If(arms, _)) = chain(&nodes, "If $R4 <> 1") else {
@@ -417,8 +420,9 @@ fn the_refusal_says_the_accounts_stay_only_to_their_owner() {
                  Safe workspace, because it couldn't confirm that the program that sets it up, in \
                  Program Files, is the one Clauseo installed and that only administrators can \
                  change it. The Safe workspace's hidden Windows accounts are still on this \
-                 computer. Whoever looks after this computer can remove them. Clauseo's notes for \
-                 IT explain how.\"";
+                 computer. Run Clauseo's installer again to restore that program, then uninstall \
+                 Clauseo again. If that doesn't work, Clauseo's notes on GitHub explain how to \
+                 remove them.\"";
     assert!(english.lines().any(|line| line == words), "{words}");
     let approvals: serde_json::Value =
         serde_json::from_str(&read("../../ui/app/doc-approvals.json")).unwrap();

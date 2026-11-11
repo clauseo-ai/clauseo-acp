@@ -12,8 +12,9 @@ pub(crate) fn is_excluded(name: &str, is_folder: bool) -> bool {
 }
 
 /// Whether the walk skips the file at `path` (`/`-separated, relative to the matter folder):
-/// a folder on the way or the file itself is excluded by [`is_excluded`].
-pub(crate) fn is_excluded_path(path: &str) -> bool {
+/// a folder on the way or the file itself is excluded by [`is_excluded`]. The host's watch of an
+/// open matter's folder passes over a change to such a file: the listing never shows it.
+pub fn is_excluded_path(path: &str) -> bool {
     let mut parts = path.split('/').peekable();
     while let Some(part) = parts.next() {
         if is_excluded(part, parts.peek().is_some()) {

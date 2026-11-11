@@ -1,7 +1,8 @@
 //! A sign-in pressed before its agent is installed (`pending.rs`): it starts the install, is
 //! kept as a pending press (`Queued`), and runs at the install's `Ready` through the direct
-//! press's checks, taken then; `Waiting` keeps it, `Failed`, `Paused`, `Managed` and
-//! `CancelSignIn` drop it, a second press replaces it; and no policy or managed path installs.
+//! press's checks, taken then; `Waiting` and `Failed` keep it (a retry's `Ready` signs in),
+//! `Paused`, `Managed` and `CancelSignIn` drop it, a second press replaces it; and no policy
+//! or managed path installs.
 
 use clauseo_agents::testing::failed;
 use clauseo_agents::{AgentsEvent, FailureKind, InstallLog, InstallState, Method};
@@ -10,7 +11,7 @@ use serde_json::json;
 
 use super::super::pending::Press;
 use super::fakes::{Rig, command, rig, setup_events};
-use super::{MAIN, claude, codex, missing};
+use super::{MAIN, SETTINGS, claude, codex, missing};
 use crate::bridge::lock;
 use crate::setup::refresh::{SettingsRead, apply_settings};
 use crate::setup::{KeyWrite, SetupBackend};
@@ -23,14 +24,14 @@ fn install(agent: &AgentId, state: InstallState) -> AgentsEvent {
     }
 }
 
-fn ready() -> InstallState {
+pub(super) fn ready() -> InstallState {
     InstallState::Ready {
         version: "1.0.0".to_owned(),
     }
 }
 
 /// `agent` is not installed: `Missing`, as S18 says at start.
-fn not_installed(rig: &Rig, agent: &AgentId) {
+pub(super) fn not_installed(rig: &Rig, agent: &AgentId) {
     lock(&rig.agents.states).insert(
         agent.clone(),
         InstallState::Missing {
@@ -47,7 +48,7 @@ fn press(rig: &Rig, name: &str, agent: &AgentId, fields: &serde_json::Value) {
 
 /// The pump takes `states` for `agent`, in order; the install is `Ready` from the first
 /// `Ready` on.
-fn pump(rig: &Rig, agent: &AgentId, states: Vec<InstallState>) {
+pub(super) fn pump(rig: &Rig, agent: &AgentId, states: Vec<InstallState>) {
     if states
         .iter()
         .any(|state| matches!(state, InstallState::Ready { .. }))
@@ -61,12 +62,12 @@ fn pump(rig: &Rig, agent: &AgentId, states: Vec<InstallState>) {
     block_on(rig.backend.pump(futures::stream::iter(events)));
 }
 
-fn pending(rig: &Rig, agent: &AgentId) -> Option<Press> {
-    lock(&rig.backend.pending).get(agent).copied()
+pub(super) fn pending(rig: &Rig, agent: &AgentId) -> Option<Press> {
+    lock(&rig.backend.pending).get(agent).map(|kept| kept.press)
 }
 
 /// The sign-in states sent for `agent` on `events`.
-fn sign_ins(events: Vec<SetupEvent>, agent: &AgentId) -> Vec<SignIn> {
+pub(super) fn sign_ins(events: Vec<SetupEvent>, agent: &AgentId) -> Vec<SignIn> {
     events
         .into_iter()
         .filter_map(|event| match event {
@@ -202,7 +203,7 @@ fn a_key_set_while_pending_drops_the_press() {
 }
 
 #[test]
-fn waiting_keeps_the_press_and_failed_drops_it() {
+fn waiting_and_failed_keep_the_press_and_a_retry_s_ready_signs_in() {
     let rig = rig(true);
     not_installed(&rig, &codex());
     press(&rig, "start_sign_in", &codex(), &json!({}));
@@ -226,21 +227,86 @@ fn waiting_keeps_the_press_and_failed_drops_it() {
         Some(Press::SignIn(Method::Browser)),
         "kept while offline"
     );
-    let mut feed = rig.events.follow();
-    pump(&rig, &codex(), vec![failed(&codex(), FailureKind::Offline)]);
-    assert_eq!(pending(&rig, &codex()), None, "dropped on Failed");
-    let shown = sign_ins(setup_events(&mut feed), &codex());
-    // A new follower gets the latest state first (`Queued`), then the change.
-    assert!(
-        matches!(shown.as_slice(), [SignIn::Queued, SignIn::SignedOut { .. }]),
-        "{shown:?}"
+    pump(
+        &rig,
+        &codex(),
+        vec![failed(&codex(), FailureKind::SetupFailed)],
     );
-    // A `Ready` later (a retry) signs nothing in: a fresh press is needed.
-    pump(&rig, &codex(), vec![ready()]);
+    lock(&rig.agents.states).insert(codex(), failed(&codex(), FailureKind::SetupFailed));
+    assert_eq!(
+        pending(&rig, &codex()),
+        Some(Press::SignIn(Method::Browser)),
+        "kept through Failed: the lawyer's Retry carries on to the sign-in"
+    );
+    press(
+        &rig,
+        "retry_agent_install",
+        &codex(),
+        &json!({ "use_system_proxy": false }),
+    );
+    pump(&rig, &codex(), vec![InstallState::Installing, ready()]);
+    assert_eq!(pending(&rig, &codex()), None, "run at Ready");
     assert_eq!(
         rig.calls(),
-        [("install", codex()), ("check_status", codex())]
+        [
+            ("install", codex()),
+            ("retry", codex()),
+            ("sign_in", codex())
+        ],
+        "the retry's Ready runs the kept press"
     );
+}
+
+/// `CancelSignIn` after a failed install still drops the press: a retry's `Ready` then signs
+/// nothing in.
+#[test]
+fn cancel_after_a_failed_install_drops_the_press() {
+    let rig = rig(true);
+    not_installed(&rig, &codex());
+    press(&rig, "start_sign_in", &codex(), &json!({}));
+    pump(&rig, &codex(), vec![failed(&codex(), FailureKind::Failed)]);
+    press(&rig, "cancel_sign_in", &codex(), &json!({}));
+    assert_eq!(pending(&rig, &codex()), None, "dropped on CancelSignIn");
+    pump(&rig, &codex(), vec![ready()]);
+    assert!(
+        !rig.calls().contains(&("sign_in", codex())),
+        "{:?}",
+        rig.calls()
+    );
+}
+
+/// `SignOut` after a failed install drops the kept press: a later Retry's `Ready` starts no
+/// stale sign-in.
+#[test]
+fn sign_out_after_a_failed_install_drops_the_press() {
+    let rig = rig(true);
+    not_installed(&rig, &codex());
+    press(&rig, "start_sign_in", &codex(), &json!({}));
+    pump(
+        &rig,
+        &codex(),
+        vec![failed(&codex(), FailureKind::SetupFailed)],
+    );
+    lock(&rig.agents.states).insert(codex(), failed(&codex(), FailureKind::SetupFailed));
+    assert_eq!(
+        pending(&rig, &codex()),
+        Some(Press::SignIn(Method::Browser))
+    );
+    // SignOut comes from the settings window.
+    let answer = block_on(
+        rig.setup()
+            .run(SETTINGS, command("sign_out", &codex(), &json!({}))),
+    );
+    assert_eq!(answer, Ok(CommandOutcome::Done), "sign_out");
+    assert_eq!(pending(&rig, &codex()), None, "dropped on SignOut");
+    press(
+        &rig,
+        "retry_agent_install",
+        &codex(),
+        &json!({ "use_system_proxy": false }),
+    );
+    pump(&rig, &codex(), vec![InstallState::Installing, ready()]);
+    assert_eq!(sign_ins_started(&rig), 0, "{:?}", rig.calls());
 }
 
 #[test]

@@ -25,8 +25,18 @@ export const HI = {
   "Getting {name} ready…": "{name} तैयार हो रहा है…",
   "{name} is ready": "{name} तैयार है",
   "Use the system proxy": "सिस्टम की प्रॉक्सी इस्तेमाल करें",
-  "Ask your IT team": "अपनी IT टीम से कहें",
+  "Copy details for IT": "IT के लिए विवरण कॉपी करें",
   "Message copied": "संदेश कॉपी हो गया",
+  // the facts in a note for IT (words-first-launch.ts's itNote), each "key: value" (new,
+  // provisional)
+  "Code: {code}": "कोड: {code}",
+  "Reason: {reason}": "कारण: {reason}",
+  "Site: {site}": "वेबसाइट: {site}",
+  "Addresses: {list}": "पते: {list}",
+  "Program: {path}": "प्रोग्राम: {path}",
+  "Program hash: {hash}": "प्रोग्राम का हैश: {hash}",
+  "Clauseo version: {version}": "Clauseo संस्करण: {version}",
+  "Clauseo for firm IT: {url}": "फ़र्म IT के लिए Clauseo: {url}",
   "Clauseo needs to download {name} to work. Please allow these addresses on the firm's network: {list}.":
     "काम करने के लिए Clauseo को {name} डाउनलोड करना है। कृपया फ़र्म के नेटवर्क पर ये पते अनुमत करें: {list}।",
   "{name} needs {need} MB free on this computer, and {free} MB is free.":
@@ -40,22 +50,32 @@ export const HI = {
   "Setting up {name}…": "{name} सेट अप हो रहा है…",
 
   // the fine print, up front (design)
-  "Your papers stay on this computer. {name} sees what each question sends it.":
-    "आपके दस्तावेज़ इसी कंप्यूटर पर रहते हैं। हर प्रश्न के साथ जो भेजा जाता है, वही {name} देखता है।",
+  "Your papers stay on this computer. {name} sees the parts it reads to answer you.":
+    "आपके दस्तावेज़ इसी कंप्यूटर पर रहते हैं। {name} उतना ही देखता है, जितना वह आपको जवाब देने के लिए पढ़ता है।",
 
   // the plan, in the composer (design)
-  "Sign in to {name} to ask about this matter": "इस मामले के बारे में पूछने के लिए {name} में साइन इन करें",
+  "Sign in to Claude or ChatGPT to ask about this matter":
+    "इस मामले के बारे में पूछने के लिए Claude या ChatGPT में साइन इन करें",
   "Sign in": "साइन इन करें",
   "Use {name} instead": "इसके बजाय {name} इस्तेमाल करें",
-  "Use an API key or my firm's account": "API key या अपनी फ़र्म का खाता इस्तेमाल करें",
+  // UC-141: the quiet way to the key panel, in Connectors' Hindi (U15-09)
+  "Use an API key instead": "इसके बजाय API key इस्तेमाल करें",
   "Your browser opens when you reconnect.": "दोबारा कनेक्ट होते ही आपका ब्राउज़र खुलेगा।",
-  "API key": "API key",
+  // UC-139 and UC-140: the field names the key by its maker; "API key" stays in Latin script (D-069)
+  "Anthropic API key": "Anthropic API key",
+  "OpenAI API key": "OpenAI API key",
   "Use this key": "यह key इस्तेमाल करें",
   "A key from Claude or ChatGPT, or one from your firm's IT team. Billed to the key's own account.":
     "Claude या ChatGPT की key, या आपकी फ़र्म की IT टीम से मिली key। शुल्क उसी key के खाते पर लगता है।",
   "Using an API key, billed to its own account": "API key से, उसी के खाते पर शुल्क",
   // Sign in pressed before the install is ready, in place of the design's "Sign in at {time}" (new)
   "Your browser opens when {name} is ready.": "{name} तैयार होते ही आपका ब्राउज़र खुलेगा।",
+  // the plan ready while the other plan's sign-in is under way: sign-ins go one at a time (new, UC-153)
+  "Your browser opens for {name} after {other}'s sign-in.":
+    "{other} का साइन इन पूरा होते ही {name} के लिए आपका ब्राउज़र खुलेगा।",
+  // a waiting sign-in cancelled while its plan downloads: the download carries on (new, UC-230)
+  "Sign-in cancelled. {name} is still downloading; sign in when it's ready.":
+    "साइन-इन रद्द हुआ। {name} अभी डाउनलोड हो रहा है; तैयार होने पर साइन इन करें।",
   // where the key is kept, by display_info's platform, and a computer with no keyring (new)
   "Kept in this Mac's Keychain.": "इस Mac के Keychain में रखी है।",
   "Kept in Windows Credential Manager.": "Windows Credential Manager में रखी है।",
@@ -129,7 +149,18 @@ export const HI = {
   "Sign-in didn't finish.": "साइन इन पूरा नहीं हुआ।",
   "Clauseo can't read your firm's settings for {name}, so it won't sign in until they can be read.":
     "Clauseo {name} के लिए आपकी फ़र्म की सेटिंग्स नहीं पढ़ पा रहा, इसलिए उनके पढ़े जाने तक साइन इन नहीं करेगा।",
-  "Ask your IT team.": "अपनी IT टीम से कहें।",
+  "Your firm manages these settings.": "ये सेटिंग्स आपकी फ़र्म प्रबंधित करती है।",
+  // the running page's signin-expired card, a firm's account that refused the question
+  "Your firm manages this account.": "यह खाता आपकी फ़र्म प्रबंधित करती है।",
+
+  // the sign-in status check still running, at start and through its retries (new; provisional)
+  "Checking whether you're signed in to {name}…":
+    "जाँच हो रही है कि आपने {name} में साइन इन किया है या नहीं…",
+
+  // the chosen plan's install went missing after Clauseo installed it (#859), and its one press, which installs it
+  // the normal way; {plan} is the plan's name, Claude or ChatGPT (new; provisional)
+  "{plan} isn't installed on this computer any more.": "{plan} अब इस कंप्यूटर पर इंस्टॉल नहीं है।",
+  "Install {plan}": "{plan} इंस्टॉल करें",
 
   // switching accounts: Clauseo still stopping a login it may no longer use (new, 0048)
   "Switching accounts.": "खाता बदला जा रहा है।",
@@ -146,6 +177,29 @@ export const HI = {
     "सुरक्षित कार्यक्षेत्र तैयार करने के लिए Windows एक बार अनुमति माँगता है।",
   "Not now": "अभी नहीं",
   Settings: "सेटिंग्स",
+
+  // both plans side by side on the first screen and in the matter's sign-in box (new; provisional)
+  "Sign in with the plan you pay for: Claude, ChatGPT or both.":
+    "जिस प्लान का भुगतान आप करते हैं, उससे साइन इन करें: Claude, ChatGPT या दोनों।",
+  "Your papers stay on this computer. Claude or ChatGPT sees the parts it reads to answer you.":
+    "आपके दस्तावेज़ इसी कंप्यूटर पर रहते हैं। Claude या ChatGPT उतना ही देखता है, जितना वह आपको जवाब देने के लिए पढ़ता है।",
+  "Sign in to {name}": "{name} में साइन इन करें",
+  // the plan chosen for a conversation, not set up on this computer (PK): its one act, in the composer
+  "{name} isn't set up on this computer.": "{name} इस कंप्यूटर पर सेट अप नहीं है।",
+  "Set up {name}": "{name} सेट अप करें",
+  // a plan's row on the first screen, after its name and " · "
+  "needs a download of about {mb} MB": "लगभग {mb} MB का डाउनलोड ज़रूरी है",
+  // UD1-97: under Claude's "Finish signing in with your browser.": claude.ai's own sign-in page opens every time
+  "Claude may ask you to sign in again in your browser. Use your Claude account.":
+    "Claude आपके ब्राउज़र में आपसे दोबारा साइन इन करने को कह सकता है। अपने Claude खाते का उपयोग करें।",
+
+  // Clauseo's document tools, one line under the plans (new; provisional). Never named by what they're made of
+  "Also downloads Clauseo's document tools ({size}).":
+    "Clauseo के दस्तावेज़ टूल भी डाउनलोड होते हैं ({size})।",
+  "Downloading document tools… {done} of {size}": "दस्तावेज़ टूल डाउनलोड हो रहे हैं… {size} में से {done}",
+  "Clauseo couldn't download its document tools.": "Clauseo अपने दस्तावेज़ टूल डाउनलोड नहीं कर सका।",
+  "Windows blocked Clauseo's document tools on this computer.":
+    "Windows ने इस कंप्यूटर पर Clauseo के दस्तावेज़ टूल रोक दिए।",
 } satisfies Hindi<string>;
 
 /** Every string, English and Hindi (null: hi: later), for the tests that hold the voice and the copy review. */

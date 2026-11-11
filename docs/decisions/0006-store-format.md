@@ -130,6 +130,23 @@ copy too); decision record 0040 gives the reasons:
 ALTER TABLE matters ADD COLUMN skill_packs TEXT /* JSON array of pack ids, at most 32, none twice; NULL = the global skills.enabled list */;
 ```
 
+### Schema version 6
+
+`crates/store/src/migrations/0006_matter_agent_prefs.sql`, verbatim (the same test checks this
+copy too). A matter remembers the model and effort its conversations start with, per agent kind
+(`UpdateMatter::agent_prefs`, and the host's write after a successful `SetConfigOption`): JSON
+text such as `{"claude":{"model":"opus","effort":"high"}}`, the shape of protocol's
+`AgentPrefs`. NULL, as on every matter before it, leaves each agent at its own defaults. A row,
+not an event: like the other matter details, the reducer's view does not show it.
+
+```sql
+-- Schema version 6: a matter's model and effort picks per agent kind (UpdateMatter's agent_prefs).
+-- docs/decisions/0006-store-format.md gives the reason for the column and what NULL means.
+-- Frozen: a later change is a new numbered file in this folder, never an edit here.
+
+ALTER TABLE matters ADD COLUMN agent_prefs TEXT /* JSON object: agent kind -> {option id: value id}; NULL = none, each agent's own defaults */;
+```
+
 In the table columns, ids are stored as lowercase hyphenated UUID text and times as milliseconds
 since the Unix epoch. Inside `events.envelope`, the envelope's own encoding applies: ids are
 16-byte MessagePack bin, as `docs/decisions/0002-event-schema.md` says, and `stream` is its text.
@@ -250,7 +267,12 @@ since the Unix epoch. Inside `events.envelope`, the envelope's own encoding appl
   agent title; a placeholder fills in only a thread with no title. The host checks it in one
   function (`title_may_change`, `crates/host/src/actor/title_source.rs`) before it writes the row,
   and a rename it refuses makes no event and no row write, so a fast agent title is not undone by
-  the app's later first-words rename.
+  the app's later first-words rename. The name settles after the first turn that produced answer
+  text ends: an agent's title is taken for 60 s after that end (`TITLE_GRACE`, since the adapters
+  title in the background after `end_turn`), and never once the next prompt has gone out or after
+  a session load of a thread whose answered turn is in its history (D-070). A turn with no answer
+  text settles nothing. A cancel marks the session's updates late; a title that comes late still
+  counts while the window is open, and no other late update does.
 - A commit's matter and thread rows insert or replace the row with that id.
 - `checkpoints` keeps only the id, the matter, the shadow repository's commit id and the `seq` of
   its `CheckpointRecorded` in the matter stream. The event already carries the rest; the commit id

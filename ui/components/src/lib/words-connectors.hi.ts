@@ -80,7 +80,8 @@ export const HI = {
     "वह भुगतान पेज समाप्त हो गया। फिर से प्रयास करने के लिए क्रेडिट जोड़ें।",
   "The payment was cancelled.": "भुगतान रद्द हो गया।",
   // the API key
-  "API key": "API key",
+  // the field's own word, in Hindi: "API key" stays the term, as everywhere in the Hindi (D-069)
+  "API key": "API key डालें",
   "Your firm's key for Clauseo's case-law service. Kept on this computer.":
     "Clauseo की निर्णय-खोज सेवा के लिए आपकी फ़र्म की key। इसी कंप्यूटर पर रखी है।",
   "Add key": "key जोड़ें",

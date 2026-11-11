@@ -73,17 +73,43 @@ unreadable `matter.json` and Clauseo's own data folder alike.
   folder a `DefaultLocation` create makes `<this>/<name>` in, shown by the same rule, for the
   form's folder line before a pick (H20). Display only; no path crosses the wire.
 - **A code per refusal.** `CreateMatter` answers `matter.folder_is_drive`, `matter.folder_is_home`,
-  `matter.folder_is_system`, `matter.folder_unreadable` (a folder the host may not read, or a
-  `matter.json` that does not read), `matter.folder_is_matter` and
+  `matter.folder_is_system`, `matter.folder_unreadable` (a folder the host may not read),
+  `matter.folder_is_matter` and
   `matter.folder_in_matters_root` instead of `matter.folder_refused`, which keeps its meaning for
   older peers. `matters` already returns the reason (`Refusal`); the host tells the home folder
   and its data folder from the other refused folders by the entry the refusal names.
-  `matter.folder_is_matter` covers a folder that is, holds or sits inside a listed, forgotten or
-  being-made matter's folder, and a marker naming a matter this install does not list (copied
-  from another computer or data folder). `HostError.matter` names the matter only when it is on
-  the list, so the form never offers to open a matter it cannot: for a forgotten one, one being
-  made or an unknown marker it is left out, and the code stays `folder_is_matter` (the folder
-  does belong to a matter, just not one this list holds). For an import the registry check runs on the matter's
+  `matter.folder_is_matter` covers a folder that holds or sits inside a listed, forgotten or
+  being-made matter's folder. `HostError.matter` names the matter only when it is on the list,
+  so the form never offers to open a matter it cannot: for a forgotten one or one being made it
+  is left out.
+- **A folder's marker is the lawyer's (2026-11-11).** An import never refuses a folder for its
+  `.clauseo/matter.json` alone:
+  - a marker naming a matter this install has no record of (its data was wiped, or the folder is
+    a colleague's, synced) is adopted: the folder is imported under that id and the marker kept
+    byte for byte. A failed or cancelled adopting import leaves it as it was. When a history of
+    that id is here with no row, the marker is set aside instead and a new matter made;
+  - a marker that does not read is set aside as `.clauseo/matter.old-<UTC stamp>.json` (`-2`,
+    `-3`... when that name is taken), never deleted, and a new one written;
+  - the folder of a listed matter, by any spelling, is answered with that matter
+    (`MatterCreated` naming it): nothing is made, as for a forgotten matter's folder;
+  - a folder a create or import in flight is making: the second command joins the first and gets
+    its answer, so two "New matter"s of one folder make one matter;
+  - a marker naming a matter this install lists or has forgotten, recorded at another path, is a
+    copy or a move. A move is only a recorded folder whose parent is there, as a folder, and
+    which is not found: that matter at the new path, a listed one relinked there as "Locate
+    folder" relinks it (the import answers with it), a forgotten one brought back there. Anything
+    else is a copy: the recorded folder still there, its parent missing (an unmounted share, an
+    unplugged drive, an unmapped drive letter or an unreachable server all read as not found),
+    or any error reading either. A copy becomes a new matter: the copy's marker is set aside as
+    above and the folder imported with a new id and a fresh history, and the matter it was copied
+    from keeps its folder, conversations and marker, showing its folder as not found until
+    located. A matter is never taken over on doubt;
+  - a create or import that joins another drops its own client and next date: the answer is the
+    first command's.
+
+  `ScanFolder` reads no marker for a refusal: an unknown, unreadable, copied or moved marker
+  passes. A listed matter's own folder, by any spelling of its path, is
+  `matter.folder_is_matter` naming it, so the form offers to open it. For an import the registry check runs on the matter's
   worker after `matters::check_place` (drive root, refused list), so a refused place is named for
   what it is even when a matter sits below it; for a new folder it runs on the host, since only
   the parent exists.

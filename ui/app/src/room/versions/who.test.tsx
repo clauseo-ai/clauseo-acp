@@ -1,13 +1,14 @@
 // @vitest-environment happy-dom
 // Who made each version, read from its kind as the timeline's rows say it; how a run of one conversation's versions
 // folds behind its newest and the All / By Clauseo / By you switch; the row for a file too large to keep versions;
-// and the row and band line for a change that couldn't be kept as a version.
+// and the row and band line for a change that couldn't be kept as a version; and a Word file's tracked changes decided.
 import { clock } from "@clauseo/components/lib/words.ts";
 import { mt } from "@clauseo/components/lib/words-matters.ts";
+import { vt } from "@clauseo/components/lib/words-versions.ts";
 import { act } from "react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { loadVersions } from "./use-versions.ts";
-import { THREAD, TURN, uuid } from "../../testing/stream-script.ts";
+import { header, reset, STREAM, THREAD, TURN, uuid } from "../../testing/stream-script.ts";
 import type { CheckpointKind, ViewEntry } from "../../transport/protocol.ts";
 import { clockOf, localZone } from "../when.ts";
 import {
@@ -105,6 +106,52 @@ test("each kind of version says who made it, and a before_turn version shows onl
   expect(rowOf(h, "cp10")?.textContent).toContain("memo.docx");
   expect(rowOf(h, "cp9")).toBeUndefined();
 }, 30_000);
+
+test("a revisions version says the lawyer accepted or rejected tracked changes in its file, in either language", async () => {
+  for (const language of ["en", "hi"] as const) {
+    h = await mountVersions(
+      [
+        version(1, "import"),
+        version(2, "revisions", { files: [file("drafts/Reply to the bank.docx")] }),
+        // a revisions version naming no file shows its time alone, as an unknown kind does
+        version(3, "revisions"),
+      ],
+      [],
+      { display: { language } },
+    );
+    await h.openVersions();
+    const row = rowOf(h, "cp2");
+    expect(row?.dataset["kind"]).toBe("revisions");
+    expect(whoText(row)).toBe(
+      vt(language, "You accepted or rejected tracked changes in {file}", {
+        file: "\u2068Reply to the bank.docx\u2069",
+      }),
+    );
+    expect(rowOf(h, "cp3")).toBeDefined();
+    expect(whoText(rowOf(h, "cp3"))).toBe("");
+    await h.unmount();
+    h = null;
+  }
+});
+
+test("a conversation is named as the rail names it: its header's title over list_threads' older one", async () => {
+  h = await mountVersions(
+    [version(1, "import"), version(2, "after_turn", { thread: THREAD, turn: turn(10) })],
+    [],
+    // list_threads still has the title the first read gave; the conversation's header has its newer one
+    { threads: [thread(THREAD, "First read")] },
+  );
+  const titled = (title: string): ViewEntry => ({ header: { ...header().header!, title } });
+  await h.deliver(STREAM, [reset([], titled("Reply to the bank"))]);
+  await h.openVersions();
+  expect(whoText(rowOf(h, "cp2"))).toBe("Clauseo, in Reply to the bank");
+  // renamed while Versions is open: the row follows the header, with no list_threads asked
+  const listed = h.queried("list_threads").length;
+  await h.deliver(STREAM, [reset([], titled("Notice to the bank"))]);
+  expect(whoText(rowOf(h, "cp2"))).toBe("Clauseo, in Notice to the bank");
+  expect(h.queried("list_threads")).toHaveLength(listed);
+  expect(document.body.textContent).not.toContain("First read");
+});
 
 test("a version made in a conversation without a title names a new conversation, in either language", async () => {
   const { title: _, ...untitled } = thread(THREAD);

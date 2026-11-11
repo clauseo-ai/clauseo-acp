@@ -65,10 +65,14 @@ export const HI = {
     "इस मामले के फ़ोल्डर तक पहुँचा नहीं जा सकता। हो सकता है वह कहीं और ले जाया गया हो, या उसकी ड्राइव या नेटवर्क जुड़ा न हो।",
   "This folder doesn't hold this matter's Clauseo file. Locate the matter's folder to carry on.":
     "इस फ़ोल्डर में इस मामले की Clauseo फ़ाइल नहीं है। आगे बढ़ने के लिए मामले का फ़ोल्डर ढूँढें।",
+  "Clauseo needs permission to open this folder.": "Clauseo को यह फ़ोल्डर खोलने की अनुमति चाहिए।",
+  // provisional, as above: the Open Privacy settings button under it on the Mac, and its line (PRIVACY_KEYS)
+  "Open Privacy settings": "गोपनीयता सेटिंग्स खोलें",
+  "Turn on access for Clauseo, then ask again.": "Clauseo के लिए एक्सेस चालू करें, फिर दोबारा पूछें।",
   "A whole drive, your home folder or a system folder can't be a matter.":
     "पूरी ड्राइव, आपका होम फ़ोल्डर या कोई सिस्टम फ़ोल्डर मामला नहीं बन सकता।",
-  "This matter's folder holds a .codex folder. Rename or remove it to use Codex here.":
-    "इस मामले के फ़ोल्डर में एक .codex फ़ोल्डर है। यहाँ Codex का उपयोग करने के लिए उसका नाम बदलें या उसे हटाएँ।",
+  "This matter's folder holds a .codex folder. Rename or remove it to use ChatGPT here.":
+    "इस मामले के फ़ोल्डर में एक .codex फ़ोल्डर है। यहाँ ChatGPT का उपयोग करने के लिए उसका नाम बदलें या उसे हटाएँ।",
   "A paper is open in another program. Close it, then try again.":
     "कोई दस्तावेज़ किसी दूसरे प्रोग्राम में खुला है। उसे बंद करें, फिर दोबारा प्रयास करें।",
   "Wait for the answer to finish first.": "पहले उत्तर पूरा होने दें।",
@@ -112,10 +116,10 @@ export const HI = {
   "Sign-in didn't finish. Try again.": "साइन इन पूरा नहीं हुआ। फिर से प्रयास करें।",
   "Clauseo can't read your firm's sign-in settings, so it won't sign in until they can be read.":
     "Clauseo आपकी फ़र्म की साइन इन सेटिंग्स नहीं पढ़ पा रहा, इसलिए उनके पढ़े जाने तक साइन इन नहीं करेगा।",
-  "Codex can't work on a network drive. Move the matter to this computer.":
-    "Codex नेटवर्क ड्राइव पर काम नहीं कर सकता। मामले को इस कंप्यूटर पर ले जाएँ।",
-  "Codex can't work on a drive without file permissions. Move the matter to this computer.":
-    "Codex बिना फ़ाइल अनुमतियों वाली ड्राइव पर काम नहीं कर सकता। मामले को इस कंप्यूटर पर ले जाएँ।",
+  "ChatGPT can't work on a network drive. Move the matter to this computer.":
+    "ChatGPT नेटवर्क ड्राइव पर काम नहीं कर सकता। मामले को इस कंप्यूटर पर ले जाएँ।",
+  "ChatGPT can't work on a drive without file permissions. Move the matter to this computer.":
+    "ChatGPT बिना फ़ाइल अनुमतियों वाली ड्राइव पर काम नहीं कर सकता। मामले को इस कंप्यूटर पर ले जाएँ।",
   "This matter's folder is too deep inside other folders for Clauseo to work in it on Windows. Move it nearer the top of its drive.":
     "इस मामले का फ़ोल्डर दूसरे फ़ोल्डरों के बहुत भीतर है, इसलिए Windows पर Clauseo उसमें काम नहीं कर सकता। उसे ड्राइव के ऊपरी स्तर के पास ले जाएँ।",
   "The update didn't install. Try again.": "अपडेट इंस्टॉल नहीं हुआ। फिर से प्रयास करें।",
@@ -131,22 +135,46 @@ export const HI = {
     "इस मामले के फ़ोल्डर में एक फ़ाइल शॉर्टकट है। Clauseo शॉर्टकट को संरक्षित नहीं कर सकता, इसलिए उसके हटने तक इस मामले में उत्तर नहीं देगा। उसे कहीं और ले जाएँ या हटाएँ, फिर दोबारा पूछें।",
   "Windows didn't get permission for the change Clauseo asked it to approve, so nothing changed. Try again, and choose Yes when Windows asks.":
     "Clauseo ने Windows से जिस बदलाव की स्वीकृति माँगी थी, उसकी अनुमति नहीं मिली, इसलिए कुछ नहीं बदला। फिर से कोशिश करें, और Windows के पूछने पर Yes चुनें।",
-  "The Safe workspace couldn't be set up on this computer. Try again. If it keeps failing, ask whoever looks after this computer to look into it.":
-    "इस कंप्यूटर पर सुरक्षित कार्यक्षेत्र तैयार नहीं हो सका। फिर से कोशिश करें। अगर यह बार-बार विफल हो, तो इस कंप्यूटर की देखरेख करने वाले व्यक्ति से इसकी जाँच करने को कहें।",
+  "The Safe workspace couldn't be set up on this computer. Try again.":
+    "इस कंप्यूटर पर सुरक्षित कार्यक्षेत्र तैयार नहीं हो सका। फिर से कोशिश करें।",
   "Clauseo can't answer here until the Safe workspace is set up on this computer. Your question is kept.":
     "जब तक इस कंप्यूटर पर सुरक्षित कार्यक्षेत्र तैयार नहीं होता, Clauseo यहाँ उत्तर नहीं दे सकता। आपका प्रश्न रखा गया है।",
-  "Your firm requires the Safe workspace, and this computer can't provide it, so Clauseo can't answer here. Ask whoever looks after this computer.":
-    "आपकी फ़र्म सुरक्षित कार्यक्षेत्र ज़रूरी मानती है, और यह कंप्यूटर इसे नहीं दे सकता, इसलिए Clauseo यहाँ उत्तर नहीं दे सकता। इस कंप्यूटर की देखरेख करने वाले व्यक्ति से पूछें।",
+  "Your firm requires the Safe workspace, and this computer can't provide it, so Clauseo can't answer here.":
+    "आपकी फ़र्म सुरक्षित कार्यक्षेत्र ज़रूरी मानती है, और यह कंप्यूटर इसे नहीं दे सकता, इसलिए Clauseo यहाँ उत्तर नहीं दे सकता।",
   "Clauseo can't use the Safe workspace on this computer: a Windows setting or security software is blocking it, so nothing was started. Settings › Safe workspace says what to do.":
     "Clauseo इस कंप्यूटर पर सुरक्षित कार्यक्षेत्र का इस्तेमाल नहीं कर सकता: कोई Windows सेटिंग या सुरक्षा सॉफ़्टवेयर इसे रोक रहा है, इसलिए कुछ भी शुरू नहीं हुआ। क्या करना है, यह सेटिंग्स › सुरक्षित कार्यक्षेत्र में बताया गया है।",
-  "Your firm has turned off allowing sites on Clauseo's unsafe-site list, so this site stays blocked. Ask your IT team if you need it.":
-    "आपकी फ़र्म ने Clauseo की असुरक्षित वेबसाइटों की सूची में से किसी वेबसाइट को अनुमति देना बंद कर रखा है, इसलिए यह वेबसाइट अवरुद्ध रहेगी। अगर आपको इसकी ज़रूरत है, तो अपनी IT टीम से पूछें।",
+  "Your firm has turned off allowing sites on Clauseo's unsafe-site list, so this site stays blocked.":
+    "आपकी फ़र्म ने Clauseo की असुरक्षित वेबसाइटों की सूची में से किसी वेबसाइट को अनुमति देना बंद कर रखा है, इसलिए यह वेबसाइट अवरुद्ध रहेगी।",
   "This notice has expired. Open the site again, then allow it from the new notice.":
     "यह सूचना अब पुरानी हो चुकी है। वेबसाइट फिर से खोलें, फिर नई सूचना से उसे अनुमति दें।",
   "This site is allowed until Clauseo closes. Clauseo couldn't save the change, so it will be blocked again next time Clauseo opens.":
     "Clauseo के बंद होने तक इस वेबसाइट को अनुमति है। Clauseo यह बदलाव सहेज नहीं सका, इसलिए अगली बार Clauseo खुलने पर यह फिर से अवरुद्ध होगी।",
   "This site is blocked again until Clauseo closes. Clauseo couldn't save the change, so it may be allowed again next time Clauseo opens.":
     "Clauseo के बंद होने तक यह वेबसाइट फिर से अवरुद्ध है। Clauseo यह बदलाव सहेज नहीं सका, इसलिए अगली बार Clauseo खुलने पर इसे फिर से अनुमति मिल सकती है।",
+  "Clauseo is still tidying up the Safe workspace after it last closed. Try again in a moment. Your question is kept.":
+    "Clauseo पिछली बार बंद होने के बाद अभी भी सुरक्षित कार्यक्षेत्र को व्यवस्थित कर रहा है। थोड़ी देर में फिर से प्रयास करें। आपका प्रश्न रखा गया है।",
+  "Claude was downloaded, but setting it up didn't finish. Try again.":
+    "Claude डाउनलोड हो गया, लेकिन उसका सेटअप पूरा नहीं हुआ। फिर से प्रयास करें।",
+  "Codex was downloaded, but setting it up didn't finish. Try again.":
+    "Codex डाउनलोड हो गया, लेकिन उसका सेटअप पूरा नहीं हुआ। फिर से प्रयास करें।",
+  "{name} was downloaded, but setting it up didn't finish. Try again.":
+    "{name} डाउनलोड हो गया, लेकिन उसका सेटअप पूरा नहीं हुआ। फिर से प्रयास करें।",
+  "The AI was downloaded, but setting it up didn't finish. Try again.":
+    "AI डाउनलोड हो गया, लेकिन उसका सेटअप पूरा नहीं हुआ। फिर से प्रयास करें।",
+  // the app's own: an answer's link to a paper the matter's folder no longer holds (provisional Hindi)
+  "This paper is no longer in the matter's folder.": "यह दस्तावेज़ अब मामले के फ़ोल्डर में नहीं है।",
+  // a Word file's tracked changes (provisional Hindi)
+  "Clauseo's Word tool is missing. Reinstall Clauseo to accept or reject changes.":
+    "Clauseo का Word टूल मौजूद नहीं है। बदलाव स्वीकार या अस्वीकार करने के लिए Clauseo फिर से इंस्टॉल करें।",
+  "This file changed after the list was made, so nothing was accepted or rejected. The list now shows its current changes.":
+    "सूची बनने के बाद यह फ़ाइल बदल गई, इसलिए कुछ भी स्वीकार या अस्वीकार नहीं किया गया। सूची अब इसके मौजूदा बदलाव दिखाती है।",
+  "Clauseo can't read the tracked changes in this file. It may be damaged, or it may not be a Word document.":
+    "Clauseo इस फ़ाइल के ट्रैक किए गए बदलाव नहीं पढ़ सकता। हो सकता है कि यह क्षतिग्रस्त हो, या यह Word दस्तावेज़ न हो।",
+  "Clauseo couldn't save your decision. The file is as it was.":
+    "Clauseo आपका निर्णय सहेज नहीं सका। फ़ाइल पहले जैसी ही है।",
+  // the connection dropped mid-answer (provisional Hindi)
+  "You're offline, so the answer stopped. The answer so far is kept. Try again when you're back online.":
+    "आप ऑफ़लाइन हैं, इसलिए उत्तर रुक गया। अब तक का उत्तर रखा गया है। ऑनलाइन होने पर फिर से प्रयास करें।",
 } as const;
 
 /** The sentences' Hindi, for the copy review to tell hi: later from Hindi. */

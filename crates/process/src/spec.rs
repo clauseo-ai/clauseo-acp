@@ -20,6 +20,7 @@ pub struct LaunchSpec {
     env: BTreeMap<OsString, OsString>,
     cwd: PathBuf,
     redacted: Redacted,
+    spare_browsers: bool,
 }
 
 /// Secrets the stderr tail hides beyond the env's: `Debug` prints only how many.
@@ -67,6 +68,7 @@ impl LaunchSpec {
             env,
             cwd,
             redacted: Redacted::default(),
+            spare_browsers: false,
         })
     }
 
@@ -78,6 +80,25 @@ impl LaunchSpec {
     pub fn with_redacted(mut self, secrets: impl IntoIterator<Item = String>) -> LaunchSpec {
         self.redacted.0.extend(secrets);
         self
+    }
+
+    /// The same spec, whose tree's stop and kill spare a web browser it starts, with that
+    /// browser's own children: the lawyer's browser a sign-in's login opened (Codex's opens it as
+    /// its own child on Windows), with every tab in it. Everything else in the tree ends as
+    /// before. It acts on Windows (`os/windows/spare.rs`) and nowhere else. On macOS a browser
+    /// a sign-in opens is no child of the tree (Claude's `BROWSER` shim, or `open`'s hand-off to
+    /// launchd). On Linux a browser that `xdg-open` starts fresh does sit in the tree's group and
+    /// ends with it; Linux is no launch platform, so that is left as it is. A launcher that
+    /// builds a new spec carries the flag over.
+    #[must_use]
+    pub fn spare_browsers(mut self) -> LaunchSpec {
+        self.spare_browsers = true;
+        self
+    }
+
+    /// Whether [`Self::spare_browsers`] was asked.
+    pub fn spares_browsers(&self) -> bool {
+        self.spare_browsers
     }
 
     /// The secrets [`Self::with_redacted`] added.
@@ -115,6 +136,7 @@ impl std::fmt::Debug for LaunchSpec {
             .field("env", &RedactedEnv(&self.env))
             .field("cwd", &self.cwd)
             .field("redacted", &self.redacted)
+            .field("spare_browsers", &self.spare_browsers)
             .finish()
     }
 }

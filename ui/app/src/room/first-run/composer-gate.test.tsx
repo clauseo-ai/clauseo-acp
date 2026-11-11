@@ -138,7 +138,7 @@ test("the gate checks the plan the send uses: ChatGPT picked in the switch while
   expect(sent(t, "create_thread").map((c) => c.agent)).toEqual([CLAUDE]);
 });
 
-test("Use ChatGPT instead takes the new conversation to ChatGPT once; the lawyer's later pick of Claude stands", async () => {
+test("with only ChatGPT signed in the new conversation starts on it, with no gate; the lawyer's later pick of Claude stands", async () => {
   const t = await mountFirstRun({
     first: [
       install(CLAUDE, READY),
@@ -147,9 +147,10 @@ test("Use ChatGPT instead takes the new conversation to ChatGPT once; the lawyer
       signIn(CODEX, SIGNED_IN),
     ],
   });
-  await press("Use ChatGPT instead");
+  // D-014: never a default plan that isn't signed in while another is, so no "Use ChatGPT instead" to press
   expect(planButton("ChatGPT")?.getAttribute("aria-pressed")).toBe("true");
   expect(byId("signin")).toBeNull();
+  expect(button("Use ChatGPT instead")).toBeNull();
   await press(planButton("Claude"));
   await settle();
   expect(planButton("Claude")?.getAttribute("aria-pressed")).toBe("true");
@@ -161,7 +162,7 @@ test.each<[string, string[]]>([
   ["no plan listed yet", []],
   ["only Claude listed", [CLAUDE]],
 ])(
-  "on a first run (%s), Use ChatGPT instead switches the gate and the send to codex-acp at once",
+  "on a first run (%s), Sign in to ChatGPT switches the gate and the send to codex-acp at once, its sign-in going beside Claude's download",
   async (_, agents) => {
     const t = await mountFirstRun({
       agents,
@@ -171,11 +172,14 @@ test.each<[string, string[]]>([
         signIn(CODEX, { signed_out: {} }),
       ],
     });
-    await press("Use ChatGPT instead");
-    expect(t.setups()).toEqual([{ install_agent: { agent: CODEX } }]);
+    await press("Sign in to ChatGPT");
+    // downloads side by side: ChatGPT's sign-in goes at once, and desktop downloads it beside Claude's
+    expect(t.setups()).toEqual([{ start_sign_in: { agent: CODEX } }]);
     expect(byId("signin")?.dataset["agent"]).toBe("chatgpt");
-    expect(button("Use Claude instead")).not.toBeNull();
-    expect(button("Use ChatGPT instead")).toBeNull();
+    await play(t, signIn(CODEX, "queued"));
+    expect(byId("signin-state")?.dataset["state"]).toBe("queued");
+    await play(t, install(CLAUDE, READY));
+    expect(t.setups()).toEqual([{ start_sign_in: { agent: CODEX } }]);
     await play(t, install(CODEX, READY), signIn(CODEX, SIGNED_IN));
     expect(byId("signin")).toBeNull();
     await typeInto(field(), QUESTION);

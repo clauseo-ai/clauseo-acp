@@ -1,5 +1,6 @@
 //! The `case-law` entry's fill: the relay's port and token file, the reasons it is left out, its
-//! place after the other servers, `SystemRoot` on Windows, and Claude's pre-allow rule names.
+//! place after the other servers, the Windows variables on Windows, and Claude's pre-allow rule
+//! names.
 
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
@@ -7,7 +8,7 @@ use std::path::{Path, PathBuf};
 use clauseo_acp::McpServer;
 use clauseo_protocol::{ClauseoTool, ToolAvailability, ToolState, ToolsUnavailableReason};
 
-use super::{CaseLawInputs, Relay, hook_servers, is_case_law_rule, system_root};
+use super::{CaseLawInputs, Relay, hook_servers, is_case_law_rule, windows_env};
 use crate::agent::loads::McpControl;
 
 fn server(name: &str, args: &[&str], env: &[(&str, &str)]) -> McpServer {
@@ -48,7 +49,7 @@ fn inputs(relay: Relay<'_>) -> CaseLawInputs<'_> {
     CaseLawInputs {
         relay,
         control: McpControl::Clauseo,
-        system_root: None,
+        windows_env: &[],
     }
 }
 
@@ -131,42 +132,188 @@ fn a_token_the_host_cannot_fill_leaves_case_law_out() {
     assert_eq!(shown, Some(state(Some(ToolsUnavailableReason::NoRelay))));
 }
 
+/// A fake host environment: the lookup `windows_env` reads, names matched in any case.
+fn host_env(pairs: &[(&str, &str)]) -> impl Fn(&str) -> Option<OsString> + use<> {
+    let pairs: Vec<(String, OsString)> = pairs
+        .iter()
+        .map(|(name, value)| ((*name).to_owned(), OsString::from(value)))
+        .collect();
+    move |name| {
+        pairs
+            .iter()
+            .find(|(key, _)| key.eq_ignore_ascii_case(name))
+            .map(|(_, value)| value.clone())
+    }
+}
+
+fn pair(name: &str, value: &str) -> (String, String) {
+    (name.to_owned(), value.to_owned())
+}
+
 /// Winsock needs `SystemRoot`: on Windows the entry carries the host's, so the connector's
 /// launch keeps it whatever the agent's MCP client passes on.
 #[test]
-fn on_windows_the_entry_keeps_system_root() {
-    let inherited = || {
-        vec![
-            (
-                OsString::from("PATH"),
-                OsString::from(r"C:\Windows\system32"),
-            ),
-            (OsString::from("SYSTEMROOT"), OsString::from(r"D:\Win")),
+fn on_windows_the_entry_keeps_system_root_and_the_other_host_variables() {
+    let env = windows_env(
+        true,
+        host_env(&[
+            ("PATH", r"C:\Windows\system32"),
+            ("SYSTEMROOT", r"D:\Win"),
+            ("windir", r"D:\Win"),
+            ("TEMP", r"C:\Temp"),
+            ("TMP", r"C:\Tmp"),
+            ("PATHEXT", ".COM;.EXE"),
+        ]),
+        || panic!("the Windows directory is only a fallback"),
+    );
+    assert_eq!(
+        env,
+        [
+            pair("SystemRoot", r"D:\Win"),
+            pair("windir", r"D:\Win"),
+            pair("TEMP", r"C:\Temp"),
+            pair("TMP", r"C:\Tmp"),
+            pair("PATHEXT", ".COM;.EXE"),
         ]
-    };
-    assert_eq!(system_root(true, inherited()).as_deref(), Some(r"D:\Win"));
-    assert_eq!(system_root(false, inherited()), None);
-    assert_eq!(system_root(true, Vec::new()), None);
+    );
+    assert_eq!(
+        windows_env(false, host_env(&[("SystemRoot", r"D:\Win")]), || Some(
+            OsString::from(r"D:\Windows")
+        )),
+        []
+    );
     let file = token_file();
     let windows = CaseLawInputs {
-        system_root: Some(r"D:\Win"),
+        windows_env: &env,
         ..inputs(open(&file))
     };
     let (_, entry, _) = hook_servers(hook(), &windows);
     let Some(McpServer::Stdio { env, .. }) = entry else {
         panic!("no entry");
     };
-    assert_eq!(
-        env.last(),
-        Some(&("SystemRoot".to_owned(), r"D:\Win".to_owned()))
-    );
-    // An entry that names it already keeps its own.
+    assert_eq!(env.len(), 2 + 5);
+    assert_eq!(env[2], pair("SystemRoot", r"D:\Win"));
+    // An entry that names one already keeps its own.
     let own = vec![server("case-law", &[], &[("systemroot", r"E:\Own")])];
     let (_, entry, _) = hook_servers(own, &windows);
     let Some(McpServer::Stdio { env, .. }) = entry else {
         panic!("no entry");
     };
-    assert_eq!(env, [("systemroot".to_owned(), r"E:\Own".to_owned())]);
+    assert_eq!(env[0], pair("systemroot", r"E:\Own"));
+    assert_eq!(env.len(), 1 + 4);
+}
+
+#[test]
+fn all_five_pass_through_when_set() {
+    let env = windows_env(
+        true,
+        host_env(&[
+            ("SystemRoot", r"D:\Win"),
+            ("windir", r"D:\Win2"),
+            ("TEMP", r"C:\Temp"),
+            ("TMP", r"C:\Tmp"),
+            ("PATHEXT", ".EXE"),
+        ]),
+        || panic!("nothing is missing, so the Windows directory is not read"),
+    );
+    assert_eq!(
+        env,
+        [
+            pair("SystemRoot", r"D:\Win"),
+            pair("windir", r"D:\Win2"),
+            pair("TEMP", r"C:\Temp"),
+            pair("TMP", r"C:\Tmp"),
+            pair("PATHEXT", ".EXE"),
+        ]
+    );
+}
+
+#[test]
+fn system_root_and_windir_fall_back_to_the_windows_directory_when_unset() {
+    let env = windows_env(true, host_env(&[]), || Some(OsString::from(r"D:\Windows")));
+    assert_eq!(
+        env,
+        [
+            pair("SystemRoot", r"D:\Windows"),
+            pair("windir", r"D:\Windows")
+        ]
+    );
+    // Each one falls back on its own, the name matched in any case.
+    let env = windows_env(true, host_env(&[("systemroot", r"E:\Win")]), || {
+        Some(OsString::from(r"D:\Windows"))
+    });
+    assert_eq!(
+        env,
+        [pair("SystemRoot", r"E:\Win"), pair("windir", r"D:\Windows")]
+    );
+    // No directory at all: the two are left out, the optional ones still pass.
+    let env = windows_env(true, host_env(&[("TMP", r"C:\Tmp")]), || None);
+    assert_eq!(env, [pair("TMP", r"C:\Tmp")]);
+}
+
+#[test]
+fn the_optional_ones_are_absent_when_unset() {
+    let env = windows_env(
+        true,
+        host_env(&[("SystemRoot", r"D:\Win"), ("windir", r"D:\Win")]),
+        || Some(OsString::from(r"D:\Windows")),
+    );
+    assert_eq!(
+        env,
+        [pair("SystemRoot", r"D:\Win"), pair("windir", r"D:\Win")]
+    );
+}
+
+/// A value the entry cannot carry (not UTF-8) counts as unset.
+#[cfg(unix)]
+#[test]
+fn a_value_that_is_not_utf8_is_left_out() {
+    use std::os::unix::ffi::OsStringExt;
+
+    let bad = |name: &str| (name == "TEMP").then(|| OsString::from_vec(vec![0xff, b'T']));
+    let env = windows_env(true, bad, || Some(OsString::from(r"D:\Windows")));
+    assert_eq!(
+        env,
+        [
+            pair("SystemRoot", r"D:\Windows"),
+            pair("windir", r"D:\Windows")
+        ]
+    );
+}
+
+#[test]
+fn off_windows_the_entry_is_unchanged() {
+    let env = windows_env(
+        false,
+        host_env(&[
+            ("SystemRoot", r"D:\Win"),
+            ("windir", r"D:\Win"),
+            ("TEMP", r"C:\Temp"),
+            ("TMP", r"C:\Tmp"),
+            ("PATHEXT", ".EXE"),
+        ]),
+        || Some(OsString::from(r"D:\Windows")),
+    );
+    assert_eq!(env, []);
+    let file = token_file();
+    let (_, entry, _) = hook_servers(
+        hook(),
+        &CaseLawInputs {
+            windows_env: &env,
+            ..inputs(open(&file))
+        },
+    );
+    let path = dunce::simplified(&file).to_str().unwrap().to_owned();
+    let Some(McpServer::Stdio { env, .. }) = entry else {
+        panic!("no entry");
+    };
+    assert_eq!(
+        env,
+        [
+            ("CLAUSEO_RELAY".to_owned(), "127.0.0.1:61234".to_owned()),
+            ("CLAUSEO_RELAY_TOKEN_FILE".to_owned(), path),
+        ]
+    );
 }
 
 #[test]
@@ -215,11 +362,15 @@ fn claude_pre_allows_case_law_only_with_our_entry() {
                 work: "/w",
                 notes: "/n",
                 connectors: "",
+                browser: "",
             },
             seed_sites: &[],
             forced_ask,
             data: &crate::agent::data_fence::LaunchDeny::default(),
             case_law,
+            browser: false,
+            sandbox: None,
+            matter: None,
         };
         claude_options(&mut options, &keys);
         options.get("allowedTools").cloned()

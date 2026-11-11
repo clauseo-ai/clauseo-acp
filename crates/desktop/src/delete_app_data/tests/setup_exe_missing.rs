@@ -100,9 +100,9 @@ fn the_per_user_copy_and_the_attempt_flag_are_gone() {
 fn a_declined_or_failed_elevation_or_97_says_nothing_of_removal() {
     let code = admin_code();
     let ask = macro_body(&code, ASK);
-    // 1223 is outcome 4 (declined), 97 outcome 6, any other failure (no elevated instance, 99,
-    // NSIS's 1 or 2) outcome 1 through -1 and ${CaseElse}. Only outcome 8 says it, and only 95
-    // makes outcome 8.
+    // 1223 is outcome 4 (declined), 1260 and 5 outcome 9 (blocked), 97 outcome 6, any other
+    // failure (no elevated instance, 99, NSIS's 1 or 2) outcome 1 through -1 and ${CaseElse}.
+    // Only outcome 8 says it, and only 95 makes outcome 8.
     assert_run(ask, &["${ElseIf} $R9 = 1223", "StrCpy $R6 4"]);
     assert_run(
         ask,
@@ -183,7 +183,7 @@ fn a_copy_written_then_removed_says_so_and_exits_20() {
         &[
             "${ElseIf} $R6 = 8",
             REMOVED_LINE,
-            "MessageBox MB_OK|MB_ICONEXCLAMATION \"$(setupExeRemoved)\"",
+            "MessageBox MB_OK|MB_ICONEXCLAMATION|MB_SETFOREGROUND|MB_TOPMOST \"$(setupExeRemoved)\"",
             SET_20,
         ],
     );
@@ -251,7 +251,7 @@ fn a_passive_install_writes_a_details_line_and_shows_no_box_or_code() {
         "${IfNot} ${Silent}",
         "${AndIf} $PassiveMode <> 1",
         "${AndIf} $UpdateMode <> 1",
-        "MessageBox MB_OK|MB_ICONEXCLAMATION \"$(setupExeRemoved)\"",
+        "MessageBox MB_OK|MB_ICONEXCLAMATION|MB_SETFOREGROUND|MB_TOPMOST \"$(setupExeRemoved)\"",
         "${EndIf}",
     ];
     assert_run(says, &expected);
@@ -280,8 +280,14 @@ fn exe_missing(body: &[String]) -> &[String] {
         ],
         "{body:?}"
     );
-    assert_eq!(body[deletion - 1], "${EndIf}", "{body:?}");
-    &body[check..deletion]
+    // The check's own end, then the end of the Safe workspace's `!ifdef CLAUSEO_SAFE_WORKSPACE`,
+    // which holds the removal and this check (safe_workspace_off.rs).
+    assert_eq!(
+        body[deletion - 2..deletion],
+        ["${EndIf}", "!endif"],
+        "{body:?}"
+    );
+    &body[check..deletion - 1]
 }
 
 /// The message lines, gated on a non-empty `$R3` (the owner's SID, cleared when it isn't said).
@@ -291,7 +297,7 @@ const SAYS_MISSING: [&str; 9] = [
     "${If} ${Silent}",
     "SetErrorLevel ${CLAUSEO_EXIT_REMOVE_EXE_MISSING}",
     "${Else}",
-    "MessageBox MB_OK|MB_ICONEXCLAMATION \"$(removeExeMissing)\"",
+    "MessageBox MB_OK|MB_ICONEXCLAMATION|MB_SETFOREGROUND|MB_TOPMOST \"$(removeExeMissing)\"",
     "${EndIf}",
     "${EndIf}",
     "${EndIf}",
@@ -347,9 +353,14 @@ fn the_uninstaller_says_nothing_when_the_key_names_no_owner() {
         values.contains("pub const OWNER_SID: &str = \"OwnerSid\";"),
         "record_values.rs"
     );
-    // OwnerSid comes first among the set-up's values, which a removal deletes.
+    // OwnerSid comes first among the set-up's values, which a removal deletes, however many
+    // values the list holds (the stop's `ResetOwed` and the install's `InstallId` among them).
+    let list = values
+        .split_once("pub const SETUP_VALUES: [&str; ")
+        .and_then(|(_, rest)| rest.split_once(']'))
+        .map(|(count, rest)| (count.parse::<usize>(), rest));
     assert!(
-        values.contains("pub const SETUP_VALUES: [&str; 9] = [\n    OWNER_SID,"),
+        matches!(list, Some((Ok(_), rest)) if rest.starts_with(" = [\n    OWNER_SID,")),
         "record_values.rs"
     );
 }
@@ -428,12 +439,14 @@ fn a_per_machine_uninstall_with_an_owner_says_so() {
 fn the_two_messages_are_the_drafts_and_name_no_path() {
     let removed = "\"Windows security removed part of Clauseo while it was installing: the \
                    program that sets up the Safe workspace. Until it's restored, Clauseo won't \
-                   start Claude or ChatGPT in the Safe workspace. Whoever looks after this \
-                   computer can restore it. Clauseo's notes for IT explain how.\"";
+                   start Claude or ChatGPT in the Safe workspace. Run this installer again to \
+                   restore it. If Windows security removes it again, open Windows Security, choose \
+                   Protection history, allow Clauseo, then run this installer again.\"";
     let missing = "\"Clauseo couldn't remove the Safe workspace, because Windows security removed \
                    the program that sets it up. The Safe workspace's hidden Windows accounts are \
-                   still on this computer. Whoever looks after this computer can remove them. \
-                   Clauseo's notes for IT explain how.\"";
+                   still on this computer. Run Clauseo's installer again to restore that program, \
+                   then uninstall Clauseo again. If that doesn't work, Clauseo's notes on GitHub \
+                   explain how to remove them.\"";
     assert_eq!(english("setupExeRemoved"), removed);
     assert_eq!(english("removeExeMissing"), missing);
     for text in [removed, missing] {
@@ -468,8 +481,8 @@ fn the_silent_exit_codes_are_distinct_unused_and_listed_for_firm_it() {
             "{code}"
         );
     }
-    // In hooks.nsh only the uninstaller's two set one (21 and 27); admin_copy.nsh sets 20 (the
-    // tests above).
+    // In hooks.nsh only the uninstaller's two set one (21 and 27), and the installers' Clauseo.exe
+    // check 28 (app_exe_missing.rs); admin_copy.nsh sets 20 (the tests above).
     let sets: Vec<&String> = code
         .iter()
         .filter(|line| line.contains("SetErrorLevel"))
@@ -479,6 +492,7 @@ fn the_silent_exit_codes_are_distinct_unused_and_listed_for_firm_it() {
         [
             "SetErrorLevel ${CLAUSEO_EXIT_ADMIN_COPY_REFUSED}",
             "SetErrorLevel ${CLAUSEO_EXIT_REMOVE_EXE_MISSING}",
+            "SetErrorLevel ${CLAUSEO_EXIT_APP_EXE_REMOVED}",
         ],
         "{code:?}"
     );

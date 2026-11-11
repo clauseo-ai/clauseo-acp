@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 
 use clauseo_protocol::MatterId;
 
-use super::fake::OTHER_OWNER;
+use super::fake::{OTHER_OWNER, OWNER};
 use super::remove::{assert_all_gone, pool};
 use super::remove_fake::Remover;
 use super::*;
@@ -221,7 +221,7 @@ fn as_an_administrator_no_set_aside_bookkeeping_is_ever_deleted() {
         let (mut machine, mut acl) = pool("remove-ledger-set-aside-admin", invoker);
         let data_dir = machine.m.data_dir();
         let m1 = owners_matter(&machine);
-        machine.admin_owned = vec![m1];
+        machine.admin_owned = vec![(m1, owner())];
         let one = bookkeeping(&data_dir, matter_one());
         let removed = remove(&mut machine, &mut acl, true).unwrap();
         assert!(matches!(removed, Removed::All(_)), "{removed:?}");
@@ -373,7 +373,7 @@ fn as_an_administrator_a_crafted_ledger_is_refused_outside_the_recorded_matters(
             g(&root, &pool_sid(1004), Rights::Modify, PathKind::Matter),
         ];
         record(&data_dir, matter_two(), two, None);
-        machine.admin_owned = vec![m1.clone(), m1.join(".git")];
+        machine.admin_owned = vec![(m1.clone(), owner()), (m1.join(".git"), owner())];
         let bytes = std::fs::read(ledger_path(&data_dir)).unwrap();
 
         let removed = remove(&mut machine, &mut acl, true).unwrap();
@@ -446,4 +446,145 @@ fn as_an_administrator_a_data_folder_that_isnt_the_owners_is_never_read() {
     );
     assert!(!machine.lines().iter().any(|l| l.contains("matters/")));
     assert_eq!(machine.m.state.record, None);
+}
+
+/// What an administrator's removal takes off a matter folder `found` owns, holding our allow
+/// and our Low label, for an owner in Administrators or not: the lines on the matter.
+fn off_elevated_folder(found: &str, owner_admin: bool) -> (LedgerWork, Vec<String>) {
+    let (mut machine, mut acl) = pool("remove-ledger-admin-owned", None);
+    let data_dir = machine.m.data_dir();
+    let m1 = matters(&machine).join("m1");
+    let low = Sid::parse(LOW_LABEL_SID).unwrap();
+    let g = |sid: &Sid, rights| grant(&m1, sid, rights, Inherit::Tree, PathKind::Matter);
+    let grants = vec![
+        g(&pool_sid(1001), Rights::Modify),
+        g(&low, Rights::LowLabel),
+    ];
+    record(&data_dir, matter_one(), grants, None);
+    machine.admin_owned = vec![(m1.clone(), Sid::parse(found).unwrap())];
+    if owner_admin {
+        machine.admins.push(owner());
+    }
+    let removed = remove(&mut machine, &mut acl, true).unwrap();
+    let Removed::All(report) = removed else {
+        panic!("{removed:?}");
+    };
+    let lines = machine.lines();
+    for kind in ["add ", "restore_label ", "reclaim ", "remove_recorded "] {
+        assert!(!lines.iter().any(|l| l.starts_with(kind)), "{lines:?}");
+    }
+    let on_matter = lines
+        .into_iter()
+        .filter(|l| l.contains("matters/") && !l.starts_with("admin_target "))
+        .collect();
+    (report.ledger, on_matter)
+}
+
+#[test]
+fn as_an_administrator_an_elevated_matter_folder_keeps_its_low_label_for_a_standard_owner() {
+    // A crafted ledger may name another program's folder, Administrators' or SYSTEM's: the
+    // pool's entries come off (they name only our SIDs), its Low label stays (K1).
+    for found in ["S-1-5-32-544", "S-1-5-18"] {
+        let (work, on_matter) = off_elevated_folder(found, false);
+        let kept = LedgerWork::AsAdmin {
+            removed: 1,
+            left: 1,
+        };
+        assert_eq!(work, kept, "{found}");
+        assert_eq!(on_matter, ["remove matters/m1 1001"], "{found}");
+    }
+}
+
+#[test]
+fn as_an_administrator_an_elevated_matter_folder_loses_our_entries_for_an_admin_owner() {
+    // The built-in Administrator, or UAC off: the lawyer's matter folders are Administrators',
+    // and the lawyer could take the label off anyway.
+    for found in ["S-1-5-32-544", "S-1-5-18"] {
+        let (work, on_matter) = off_elevated_folder(found, true);
+        let all = LedgerWork::AsAdmin {
+            removed: 2,
+            left: 0,
+        };
+        assert_eq!(work, all, "{found}");
+        assert_eq!(
+            on_matter,
+            ["remove matters/m1 1001", "remove matters/m1 4096"],
+            "{found}: our allow, then our Low label; nothing else"
+        );
+    }
+}
+
+#[test]
+fn as_an_administrator_a_matter_folder_another_user_or_a_pool_user_owns_is_refused() {
+    let other_user = "S-1-5-21-2000000001-2000000002-2000000003-1001".to_owned();
+    for found in [other_user, pool_sid(1001).as_str().to_owned()] {
+        let (mut machine, mut acl) = pool("remove-ledger-other-owned", None);
+        let m1 = owners_matter(&machine);
+        machine.admin_owned = vec![(m1, Sid::parse(&found).unwrap())];
+        let removed = remove(&mut machine, &mut acl, true).unwrap();
+        let Removed::All(report) = removed else {
+            panic!("{removed:?}");
+        };
+        let work = LedgerWork::AsAdmin {
+            removed: 0,
+            left: 2,
+        };
+        assert_eq!(report.ledger, work, "{found}");
+        let lines = machine.lines();
+        assert!(
+            !lines.iter().any(|l| l.starts_with("remove matters/")),
+            "{found}: {lines:?}"
+        );
+    }
+}
+
+/// The removal's ledger work as an administrator for an absent owner, in Administrators when
+/// `owner_admin`, with the data folder and its `sandbox` folder owned by `found`, and the
+/// matter folder by the owner.
+fn admins_ledger_work(test: &str, found: [&str; 2], owner_admin: bool) -> LedgerWork {
+    let (mut machine, mut acl) = pool(test, None);
+    if owner_admin {
+        machine.admins.push(owner());
+    }
+    let m1 = owners_matter(&machine);
+    machine.admin_owned = vec![(m1, owner())];
+    machine.data_dir_owners = found.map(|sid| Sid::parse(sid).unwrap());
+    let removed = remove(&mut machine, &mut acl, true).unwrap();
+    let Removed::All(report) = removed else {
+        panic!("{removed:?}");
+    };
+    report.ledger
+}
+
+#[test]
+fn as_an_administrator_a_data_folder_administrators_owns_is_read_for_an_admin_owner() {
+    // The built-in Administrator, or UAC off: the app made both folders Administrators'.
+    let admins = "S-1-5-32-544";
+    let work = admins_ledger_work("remove-ledger-admins-data", [admins, admins], true);
+    // The matter's allow comes off; its `.git` deny's folder fails the fake's path check.
+    let read = LedgerWork::AsAdmin {
+        removed: 1,
+        left: 1,
+    };
+    assert_eq!(work, read);
+}
+
+#[test]
+fn as_an_administrator_a_data_folder_administrators_or_system_owns_is_never_read_otherwise() {
+    // A standard owner's data folder Administrators owns, or anyone's SYSTEM owns: not theirs.
+    let admins = "S-1-5-32-544";
+    let work = admins_ledger_work("remove-ledger-admins-std", [admins, OWNER], false);
+    assert!(matches!(work, LedgerWork::Skipped(_)), "{work:?}");
+    let work = admins_ledger_work("remove-ledger-system-data", ["S-1-5-18", OWNER], true);
+    assert!(matches!(work, LedgerWork::Skipped(_)), "{work:?}");
+    // Its `sandbox` folder may be Administrators' for a standard owner (an elevated set-up's).
+    let work = admins_ledger_work("remove-ledger-admins-sandbox", [OWNER, admins], false);
+    assert!(matches!(work, LedgerWork::AsAdmin { .. }), "{work:?}");
+}
+
+#[test]
+fn as_an_administrator_a_sandbox_folder_a_pool_user_owns_is_never_read() {
+    let pool_user = pool_sid(1001);
+    let work = admins_ledger_work("remove-ledger-pool-data", [OWNER, pool_user.as_str()], true);
+    assert!(matches!(work, LedgerWork::Skipped(_)), "{work:?}");
 }

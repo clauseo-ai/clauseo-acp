@@ -11,8 +11,8 @@ export const commands = {
 	 *  `CreateMatter` whose folder ref this run's `pick_folder` did not issue; from the settings
 	 *  window, everything but `SetUiSettings`, `SetToolSettings`, `SetPrivacySettings`,
 	 *  `SetSkillPack`, `RefreshLimits`, `SetUpdateMode`, `CheckForUpdate` and the connector
-	 *  commands but `DismissCaseLawHint`; from `main`, `SetMode`, `SetConfigOption`,
-	 *  `SetToolSettings`, `SetPrivacySettings`, `SetUpdateMode`, `SetSkillPack` and every
+	 *  commands but `DismissCaseLawHint`; from `main`, `SetMode`, a `SetConfigOption` that is not
+	 *  a choice, `SetToolSettings`, `SetPrivacySettings`, `SetUpdateMode`, `SetSkillPack` and every
 	 *  connector command but `DismissCaseLawHint` and `RefreshBalance` (`OpenPayLink` among them;
 	 *  `src/bridge/admit.rs`).
 	 */
@@ -139,7 +139,8 @@ export const commands = {
 	/**
 	 *  Opens the settings window, or brings it forward when it is open (`settings_window.rs`), at
 	 *  `section` when one is named (`"connectors"`: the room's case-law hint and banner;
-	 *  `"protection"`: UC's first-run button, R17). An
+	 *  `"protection"`: UC's first-run button, R17; `"usage"`: the toolbar's plan card, U12;
+	 *  `"privacy"`: the first screen's "What's sent", UD1). An
 	 *  unknown section is refused as the arguments decode. Granted to `main` only.
 	 */
 	openSettings: (section: 
@@ -149,7 +150,11 @@ export const commands = {
  *  The Protection section: the sandbox's state, its set-up and removal (decision record
  *  0051). The page is the app's.
  */
-"protection" | null) => typedError<null, HostError>(__TAURI_INVOKE("open_settings", { section })),
+"protection" | 
+/**  Plan and usage: each agent's plan and its limits. */
+"usage" | 
+/**  The Privacy section: the anonymous counts and what they include. */
+"privacy" | null) => typedError<null, HostError>(__TAURI_INVOKE("open_settings", { section })),
 	/**
 	 *  Counts one of the events only the webview sees (`counts/ui.rs`, 0036). Granted to `main`
 	 *  alone, by its own capability (`capabilities/counts.json`). The counts open before the host
@@ -171,6 +176,13 @@ export const commands = {
 	 *  page opened (`ui/app/src/room/protection/installer.ts`).
 	 */
 	quitApp: () => typedError<null, HostError>(__TAURI_INVOKE("quit_app")),
+	/**
+	 *  Opens macOS's Files and Folders privacy pane (`open::PRIVACY_FILES_AND_FOLDERS`), for the
+	 *  Open Privacy settings button under `matter.folder_permission`. No arguments: the URL is fixed
+	 *  here, so the page opens nothing else with it. `command.invalid` off macOS. Granted to
+	 *  `main` only.
+	 */
+	openPrivacySettings: () => typedError<null, HostError>(__TAURI_INVOKE("open_privacy_settings")),
 	/**
 	 *  The page's start-up marks (`ui/app/src/start-marks.ts`), sent once after the welcome's
 	 *  primary button mounts, logged on the desktop's clock (`startup::log_page`): the first call of
@@ -312,6 +324,13 @@ export type AgentNamed = {
 	agent_name: string,
 };
 
+/**
+ *  A matter's remembered picks, per agent kind: a new conversation in the matter that names no
+ *  `CreateThread::config` starts with its agent kind's picks. Serialised as a JSON object keyed
+ *  by kind, `{"claude": {"model": "opus"}}`.
+ */
+export type AgentPrefs = Partial<{ [key in AgentKind]: ConfigPicks }>;
+
 /**  An agent session started or was loaded for the thread. */
 export type AgentSessionAttached = {
 	/**  ACP's session id, a foreign attribute. */
@@ -344,6 +363,12 @@ export type AgentSummary = {
 	 *  `fake-agent`. Left out of the JSON when `None`.
 	 */
 	kind?: AgentKind,
+	/**
+	 *  Its config options as its latest session reported them (the host keeps them across
+	 *  restarts), so a new conversation can offer the model and effort before any session;
+	 *  empty, and left out of the JSON, until its first conversation started.
+	 */
+	config_options?: ConfigOption[],
 };
 
 /**  An answer or a thought, as one text. Entry id `agent_text:<message>`. */
@@ -480,6 +505,25 @@ export type BillingProvider =
 /**  Anyone else. */
 "other";
 
+/**  One paragraph of a blackline. */
+export type BlacklineParagraph = {
+	/**  How the paragraph changed as a whole. */
+	change: ParagraphChange,
+	/**
+	 *  Its text as runs, in order; two runs next to each other never have the same kind, and
+	 *  no run is empty. An empty paragraph has none.
+	 */
+	runs: BlacklineRun[],
+};
+
+/**  A stretch of a paragraph's text with one kind. */
+export type BlacklineRun = {
+	/**  Kept, inserted or deleted. */
+	kind: RunKind,
+	/**  The text, as the document has it: a tab is `\t` and a line break `\n`. */
+	text: string,
+};
+
 /**
  *  A 32-byte BLAKE3 digest naming a blob. A human-readable format (JSON) writes its text form, 64
  *  lowercase hex characters, and every other format (`MessagePack`) its 32 bytes, so the stored
@@ -594,6 +638,28 @@ export type BrowserInstallState =
 	message: string,
 } }) & { downloading?: never };
 
+/**
+ *  What the last read of the firm's browser policy (Chrome's, Edge's and Chromium's
+ *  `RemoteDebuggingAllowed`) found, once a lawyer asked for one. Sessions already running keep
+ *  the browser they started with: after `Clear` the next session started gets the browser, as
+ *  after a Chrome download's `Done`. Closed: the host and the app ship together.
+ */
+export type BrowserPolicyState = 
+/**  A read is under way. */
+"checking" | 
+/**
+ *  A place of the policy still could not be read, and none says false: the browser stays
+ *  off (`ToolsUnavailableReason::BrowserPolicyUnreadable`).
+ */
+"unreadable" | 
+/**
+ *  The policy turns remote debugging off: the browser stays off, and every header that
+ *  showed `BrowserPolicyUnreadable` now shows `BrowserBlockedByPolicy`.
+ */
+"blocked" | 
+/**  The policy does not keep the browser off: the next session started may have it. */
+"clear";
+
 /**  What happened to a file. */
 export type ChangeKind = 
 /**  Created. */
@@ -634,6 +700,8 @@ export type CheckpointKind =
 "undo" | 
 /**  A restore of an earlier version. */
 "restore" | 
+/**  Tracked changes of a Word file accepted or rejected (`HostCommand::DecideRevisions`). */
+"revisions" | 
 /**  A value from a newer Clauseo that this version does not know. */
 "unknown";
 
@@ -649,8 +717,8 @@ export type CheckpointRecorded = {
 	/**  Why it was taken. */
 	kind: CheckpointKind,
 	/**
-	 *  The thread whose turn or undo took it; `None` for an import or a restore, which no thread
-	 *  takes.
+	 *  The thread whose turn or undo took it; `None` for an import, a restore or a revisions
+	 *  decision, which no thread takes.
 	 */
 	thread?: ThreadId,
 	/**  The turn it was taken around, or the step an undo reverted. */
@@ -710,9 +778,9 @@ export type CommandId = string;
  *  outcome. The queue commands, `RestartAgent`, `SetUiSettings`, `SetToolSettings`,
  *  `SetPrivacySettings`, `FirstAct`, `UpdateMatter`, `OpenMatter`, `ForgetMatter`, `RefreshLimits`,
  *  `MarkSeen`, `ScanFolder`, `CancelScan`, `SnoozeThread`, `MarkThreadDone`, `SweepDone`,
- *  `InstallBrowser`, `CancelBrowserInstall`, the four update commands, the connector commands and
- *  the two allowed-site commands answer `Done`; the last two kinds store no receipt, as the two
- *  browser commands do not.
+ *  `InstallBrowser`, `CancelBrowserInstall`, `RecheckBrowserPolicy`, the four update commands, the
+ *  connector commands, the two allowed-site commands and `SetNetwork` answer `Done`; the last three
+ *  kinds store no receipt, as the three browser commands do not.
  */
 export type CommandOutcome = 
 /**  Done; nothing new to name. */
@@ -721,29 +789,44 @@ export type CommandOutcome =
 ({ matter_created: {
 	/**  The new matter. */
 	matter: MatterId,
-} }) & { prompt_accepted?: never; step_undone?: never; thread_created?: never; version_restored?: never } | 
+} }) & { prompt_accepted?: never; revisions_decided?: never; step_undone?: never; thread_created?: never; version_restored?: never } | 
 /**  The thread was made. */
 ({ thread_created: {
 	/**  The new thread. */
 	thread: ThreadId,
-} }) & { matter_created?: never; prompt_accepted?: never; step_undone?: never; version_restored?: never } | 
+} }) & { matter_created?: never; prompt_accepted?: never; revisions_decided?: never; step_undone?: never; version_restored?: never } | 
 /**  The prompt was taken (queued, sent now or steered). */
 ({ prompt_accepted: {
 	/**  The turn that answers it (for a steer, until a `SteerResolved` says otherwise). */
 	turn: TurnId,
 	/**  The prompt's message. */
 	message: MessageId,
-} }) & { matter_created?: never; step_undone?: never; thread_created?: never; version_restored?: never } | 
+} }) & { matter_created?: never; revisions_decided?: never; step_undone?: never; thread_created?: never; version_restored?: never } | 
 /**  The step was undone. */
 ({ step_undone: {
 	/**  The checkpoint the undo wrote. */
 	checkpoint: CheckpointId,
-} }) & { matter_created?: never; prompt_accepted?: never; thread_created?: never; version_restored?: never } | 
+} }) & { matter_created?: never; prompt_accepted?: never; revisions_decided?: never; thread_created?: never; version_restored?: never } | 
 /**  The version was restored. */
 ({ version_restored: {
 	/**  The checkpoint the restore wrote. */
 	checkpoint: CheckpointId,
-} }) & { matter_created?: never; prompt_accepted?: never; step_undone?: never; thread_created?: never };
+} }) & { matter_created?: never; prompt_accepted?: never; revisions_decided?: never; step_undone?: never; thread_created?: never } | 
+/**  The tracked changes were accepted or rejected and the file written. */
+({ revisions_decided: {
+	/**
+	 *  A checkpoint holding the file as it was just before: the `outside-edits` one taken
+	 *  first, or the last one when the folder had not changed. `RestoreVersion` of it, with
+	 *  [`RestoreRequest::Files`] naming the file, undoes the decision
+	 *  ([`HostCommand::RestoreVersion`]).
+	 */
+	before: CheckpointId,
+	/**
+	 *  The `revisions` checkpoint taken after writing; missing when the checkpoint after the
+	 *  write could not be taken. The next checkpoint records the change.
+	 */
+	checkpoint?: CheckpointId,
+} }) & { matter_created?: never; prompt_accepted?: never; step_undone?: never; thread_created?: never; version_restored?: never };
 
 /**  The agent's slash commands, replaced whole. */
 export type CommandsAvailable = {
@@ -832,6 +915,14 @@ export type ConfigOptionsReplaced = {
 	/**  The options. */
 	options: ConfigOption[],
 };
+
+/**
+ *  Values for an agent's config options: under each option's id (`ConfigOption::id`), the id
+ *  of the value to set (`ConfigChoice::value`). Select options only. At most
+ *  [`MAX_CONFIG_PICKS`] entries; [`ConfigPicks::new`] and `Deserialize` check it. Serialised as
+ *  a JSON object, `{"model": "opus", "effort": "high"}`.
+ */
+export type ConfigPicks = { [key in AgentChoiceId]: AgentChoiceId };
 
 /**  A config option's new value, matching the option's kind. */
 export type ConfigValue = 
@@ -1176,6 +1267,27 @@ export type DaySpendView = {
 	paise?: number,
 };
 
+/**
+ *  `HostCommand::DecideRevisions`: accept or reject tracked changes of one Word file. JSON:
+ *  `{"decide_revisions": {"matter": "…", "path": "a.docx", "version": "…", "ids": [1, 2],
+ *  "decision": "accept"}}`; unknown fields are refused.
+ */
+export type DecideRevisions = {
+	/**  The matter. */
+	matter: MatterId,
+	/**  The Word file, which must end in `.docx` (any case): otherwise `word.not_docx`. */
+	path: MatterPath,
+	/**
+	 *  The version `ListRevisions` answered; a file whose bytes differ now is
+	 *  `word.revisions_stale`, and nothing is written.
+	 */
+	version: DocVersion,
+	/**  The change ids to decide: 1 to [`MAX_REVISIONS`], none twice. */
+	ids: number[],
+	/**  Accept or reject them all. */
+	decision: RevisionDecision,
+};
+
 /**  Where new matters go, for `GetDefaultLocation`. */
 export type DefaultLocation = {
 	/**
@@ -1262,7 +1374,18 @@ export type DisplayInfo = {
 	 *  shows no button.
 	 */
 	release_mode: ReleaseMode,
+	/**
+	 *  Windows' Smart App Control state, read once per run (`smart_app_control.rs`): the page
+	 *  shows a one-time note in `evaluation`. `None` on macOS and Linux, or when unreadable.
+	 */
+	smart_app_control: SmartAppControl | null,
 };
+
+/**
+ *  The lowercase hex SHA-256 of the exact `.docx` bytes a revision list was read from. JSON: a
+ *  string of 64 lowercase hex characters, which is all it decodes.
+ */
+export type DocVersion = string;
 
 /**
  *  One event of a stream's log. Each known variant holds the payload struct of the
@@ -1618,7 +1741,7 @@ export type ErrorCode =
 "matter.folder_is_home" | 
 /** The folder may not be a matter: it is a system folder or a folder of app data or keys, or holds one. */
 "matter.folder_is_system" | 
-/** Clauseo may not read the folder, or its `.clauseo/matter.json` does not read, so it may belong to a matter. */
+/** Clauseo may not read the folder (a `.clauseo/matter.json` that does not read is set aside, not refused, since 2026-11-11). */
 "matter.folder_unreadable" | 
 /** The folder is a matter's folder, or sits inside one or holds one; the error's `matter` names that matter when it is on Clauseo's list. */
 "matter.folder_is_matter" | 
@@ -1704,6 +1827,28 @@ export type ErrorCode =
 "blocklist.allow_not_saved" | 
 /** The site is blocked again until Clauseo closes, but Clauseo couldn't save that or void the saved allows, so the site may be allowed again after a restart. */
 "blocklist.revoke_not_saved" | 
+/** An earlier Safe workspace session's clean-up (its unclean-session marker's stop or sweep) wasn't finished after Clauseo waited for it, so no agent was started; trying again in a moment can succeed. */
+"sandbox.cleaning_up" | 
+/** The agent's files all downloaded and checked, but setting them up on this computer failed after three tries (unpacking, `npm ci`, the move into place or its receipt), often because security software held the fresh files. Trying again may work. */
+"agent.install_setup_failed" | 
+/** The Word blackline needs stetdoc, Clauseo's Word tool, and this Clauseo has none, so nothing was compared. */
+"blackline.no_word_tool" | 
+/** The file is not a Word document (.docx), so it has no Word blackline. */
+"blackline.not_word" | 
+/** The Word blackline failed: the compare or its view failed, took too long, or printed what Clauseo could not read; nothing is shown and nothing was written in the matter. Trying again can succeed. */
+"blackline.failed" | 
+/** Clauseo has no stetdoc program to read or edit Word files with, or could not start it. */
+"word.stetdoc_missing" | 
+/** The Word file changed since its tracked changes were listed, or a change named is no longer in it, so nothing was written: list them again. */
+"word.revisions_stale" | 
+/** The file is not a Word document (.docx) that stetdoc can read. */
+"word.not_docx" | 
+/** stetdoc failed or did not finish in time while reading or editing the Word file, or the file is not on this computer or is too large to version, so nothing was written. */
+"word.edit_failed" | 
+/** The computer's privacy settings keep Clauseo, or the agent it starts, from opening the matter's folder (on macOS, Files and Folders in Privacy & Security), so no agent works in it: allow Clauseo there, then ask again. */
+"matter.folder_permission" | 
+/** The agent lost its connection while answering: it could not reach its service (connection refused, no network, no name resolution, connect timed out). The answer so far is kept; asking again can work once the computer is back online. */
+"agent.offline" | 
 /** A code from a newer Clauseo that this version does not know. Never produced here. */
 "unknown";
 
@@ -2066,12 +2211,11 @@ export type HostCommand =
 	client?: ClientName,
 	/**  Its next date, such as a hearing; missing means none. */
 	next_date?: Date,
-} }) & { allow_blocked_site?: never; answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; cancel_browser_install?: never; cancel_scan?: never; cancel_scheduled_update?: never; check_for_update?: never; connector?: never; create_thread?: never; edit_queued_prompt?: never; first_act?: never; forget_matter?: never; install_browser?: never; install_update?: never; mark_seen?: never; mark_thread_done?: never; open_matter?: never; refresh_limits?: never; relocate_matter?: never; remove_queued_prompt?: never; remove_sandbox_setup?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; retry_protection?: never; revoke_allowed_site?: never; scan_folder?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_privacy_settings?: never; set_skill_pack?: never; set_tool_settings?: never; set_ui_settings?: never; set_update_mode?: never; snooze_thread?: never; sweep_done?: never; undo_step?: never; update_matter?: never } | 
+} }) & { allow_blocked_site?: never; answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; cancel_browser_install?: never; cancel_scan?: never; cancel_scheduled_update?: never; check_for_update?: never; connector?: never; create_thread?: never; decide_revisions?: never; edit_queued_prompt?: never; first_act?: never; forget_matter?: never; install_browser?: never; install_update?: never; mark_seen?: never; mark_thread_done?: never; open_matter?: never; recheck_browser_policy?: never; refresh_limits?: never; relocate_matter?: never; remove_queued_prompt?: never; remove_sandbox_setup?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; retry_protection?: never; revoke_allowed_site?: never; scan_folder?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_network?: never; set_privacy_settings?: never; set_skill_pack?: never; set_tool_settings?: never; set_ui_settings?: never; set_update_mode?: never; snooze_thread?: never; sweep_done?: never; undo_step?: never; update_matter?: never } | 
 /**
- *  Change a matter's details. Each field: missing leaves it, `null` clears it (`client`,
- *  `next_date`, `skill_packs`: back to the global `skills.enabled`), a value sets it (`[]`
- *  for `skill_packs` means no pack for the matter). A command that changes nothing answers
- *  `Done` too.
+ *  Change a matter's details. Each field: missing leaves it, `null` clears it (`skill_packs`:
+ *  back to the global `skills.enabled`), a value sets it (`[]` for `skill_packs`: no pack
+ *  for the matter). A command that changes nothing answers `Done` too.
  */
 ({ update_matter: {
 	/**  The matter. */
@@ -2084,12 +2228,14 @@ export type HostCommand =
 	skill_packs?: PackList | null,
 	/**  Whether it is pinned to the top of the rail. */
 	pinned?: boolean,
-} }) & { allow_blocked_site?: never; answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; cancel_browser_install?: never; cancel_scan?: never; cancel_scheduled_update?: never; check_for_update?: never; connector?: never; create_matter?: never; create_thread?: never; edit_queued_prompt?: never; first_act?: never; forget_matter?: never; install_browser?: never; install_update?: never; mark_seen?: never; mark_thread_done?: never; open_matter?: never; refresh_limits?: never; relocate_matter?: never; remove_queued_prompt?: never; remove_sandbox_setup?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; retry_protection?: never; revoke_allowed_site?: never; scan_folder?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_privacy_settings?: never; set_skill_pack?: never; set_tool_settings?: never; set_ui_settings?: never; set_update_mode?: never; snooze_thread?: never; sweep_done?: never; undo_step?: never } | 
+	/**  The picks a new conversation starts with, per agent kind (`CreateThread::config`). */
+	agent_prefs?: AgentPrefs | null,
+} }) & { allow_blocked_site?: never; answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; cancel_browser_install?: never; cancel_scan?: never; cancel_scheduled_update?: never; check_for_update?: never; connector?: never; create_matter?: never; create_thread?: never; decide_revisions?: never; edit_queued_prompt?: never; first_act?: never; forget_matter?: never; install_browser?: never; install_update?: never; mark_seen?: never; mark_thread_done?: never; open_matter?: never; recheck_browser_policy?: never; refresh_limits?: never; relocate_matter?: never; remove_queued_prompt?: never; remove_sandbox_setup?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; retry_protection?: never; revoke_allowed_site?: never; scan_folder?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_network?: never; set_privacy_settings?: never; set_skill_pack?: never; set_tool_settings?: never; set_ui_settings?: never; set_update_mode?: never; snooze_thread?: never; sweep_done?: never; undo_step?: never } | 
 /**  The lawyer opened a matter: its `last_opened` becomes now, which orders "Recent". */
 ({ open_matter: {
 	/**  The matter. */
 	matter: MatterId,
-} }) & { allow_blocked_site?: never; answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; cancel_browser_install?: never; cancel_scan?: never; cancel_scheduled_update?: never; check_for_update?: never; connector?: never; create_matter?: never; create_thread?: never; edit_queued_prompt?: never; first_act?: never; forget_matter?: never; install_browser?: never; install_update?: never; mark_seen?: never; mark_thread_done?: never; refresh_limits?: never; relocate_matter?: never; remove_queued_prompt?: never; remove_sandbox_setup?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; retry_protection?: never; revoke_allowed_site?: never; scan_folder?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_privacy_settings?: never; set_skill_pack?: never; set_tool_settings?: never; set_ui_settings?: never; set_update_mode?: never; snooze_thread?: never; sweep_done?: never; undo_step?: never; update_matter?: never } | 
+} }) & { allow_blocked_site?: never; answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; cancel_browser_install?: never; cancel_scan?: never; cancel_scheduled_update?: never; check_for_update?: never; connector?: never; create_matter?: never; create_thread?: never; decide_revisions?: never; edit_queued_prompt?: never; first_act?: never; forget_matter?: never; install_browser?: never; install_update?: never; mark_seen?: never; mark_thread_done?: never; recheck_browser_policy?: never; refresh_limits?: never; relocate_matter?: never; remove_queued_prompt?: never; remove_sandbox_setup?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; retry_protection?: never; revoke_allowed_site?: never; scan_folder?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_network?: never; set_privacy_settings?: never; set_skill_pack?: never; set_tool_settings?: never; set_ui_settings?: never; set_update_mode?: never; snooze_thread?: never; sweep_done?: never; undo_step?: never; update_matter?: never } | 
 /**
  *  Take a matter off Clauseo's list and stop its threads' agents; refused with
  *  `matter.turn_running` while a turn, undo or restore runs in it or turns wait. The
@@ -2099,7 +2245,7 @@ export type HostCommand =
 ({ forget_matter: {
 	/**  The matter. */
 	matter: MatterId,
-} }) & { allow_blocked_site?: never; answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; cancel_browser_install?: never; cancel_scan?: never; cancel_scheduled_update?: never; check_for_update?: never; connector?: never; create_matter?: never; create_thread?: never; edit_queued_prompt?: never; first_act?: never; install_browser?: never; install_update?: never; mark_seen?: never; mark_thread_done?: never; open_matter?: never; refresh_limits?: never; relocate_matter?: never; remove_queued_prompt?: never; remove_sandbox_setup?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; retry_protection?: never; revoke_allowed_site?: never; scan_folder?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_privacy_settings?: never; set_skill_pack?: never; set_tool_settings?: never; set_ui_settings?: never; set_update_mode?: never; snooze_thread?: never; sweep_done?: never; undo_step?: never; update_matter?: never } | 
+} }) & { allow_blocked_site?: never; answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; cancel_browser_install?: never; cancel_scan?: never; cancel_scheduled_update?: never; check_for_update?: never; connector?: never; create_matter?: never; create_thread?: never; decide_revisions?: never; edit_queued_prompt?: never; first_act?: never; install_browser?: never; install_update?: never; mark_seen?: never; mark_thread_done?: never; open_matter?: never; recheck_browser_policy?: never; refresh_limits?: never; relocate_matter?: never; remove_queued_prompt?: never; remove_sandbox_setup?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; retry_protection?: never; revoke_allowed_site?: never; scan_folder?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_network?: never; set_privacy_settings?: never; set_skill_pack?: never; set_tool_settings?: never; set_ui_settings?: never; set_update_mode?: never; snooze_thread?: never; sweep_done?: never; undo_step?: never; update_matter?: never } | 
 /**
  *  "Locate folder": the matter's folder moved, and the lawyer picked where it is now. The
  *  host accepts the folder only when its `.clauseo/matter.json` names this matter, then
@@ -2115,7 +2261,7 @@ export type HostCommand =
 	matter: MatterId,
 	/**  The folder the lawyer picked. */
 	folder: FolderRefId,
-} }) & { allow_blocked_site?: never; answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; cancel_browser_install?: never; cancel_scan?: never; cancel_scheduled_update?: never; check_for_update?: never; connector?: never; create_matter?: never; create_thread?: never; edit_queued_prompt?: never; first_act?: never; forget_matter?: never; install_browser?: never; install_update?: never; mark_seen?: never; mark_thread_done?: never; open_matter?: never; refresh_limits?: never; remove_queued_prompt?: never; remove_sandbox_setup?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; retry_protection?: never; revoke_allowed_site?: never; scan_folder?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_privacy_settings?: never; set_skill_pack?: never; set_tool_settings?: never; set_ui_settings?: never; set_update_mode?: never; snooze_thread?: never; sweep_done?: never; undo_step?: never; update_matter?: never } | 
+} }) & { allow_blocked_site?: never; answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; cancel_browser_install?: never; cancel_scan?: never; cancel_scheduled_update?: never; check_for_update?: never; connector?: never; create_matter?: never; create_thread?: never; decide_revisions?: never; edit_queued_prompt?: never; first_act?: never; forget_matter?: never; install_browser?: never; install_update?: never; mark_seen?: never; mark_thread_done?: never; open_matter?: never; recheck_browser_policy?: never; refresh_limits?: never; remove_queued_prompt?: never; remove_sandbox_setup?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; retry_protection?: never; revoke_allowed_site?: never; scan_folder?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_network?: never; set_privacy_settings?: never; set_skill_pack?: never; set_tool_settings?: never; set_ui_settings?: never; set_update_mode?: never; snooze_thread?: never; sweep_done?: never; undo_step?: never; update_matter?: never } | 
 /**
  *  The lawyer has seen a thread up to now: the host keeps the thread's last `seq` as its seen
  *  mark, so `ThreadSummary::seen` is true until a turn ends after it, and a `ready` or
@@ -2125,7 +2271,7 @@ export type HostCommand =
 ({ mark_seen: {
 	/**  The thread. */
 	thread: ThreadId,
-} }) & { allow_blocked_site?: never; answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; cancel_browser_install?: never; cancel_scan?: never; cancel_scheduled_update?: never; check_for_update?: never; connector?: never; create_matter?: never; create_thread?: never; edit_queued_prompt?: never; first_act?: never; forget_matter?: never; install_browser?: never; install_update?: never; mark_thread_done?: never; open_matter?: never; refresh_limits?: never; relocate_matter?: never; remove_queued_prompt?: never; remove_sandbox_setup?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; retry_protection?: never; revoke_allowed_site?: never; scan_folder?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_privacy_settings?: never; set_skill_pack?: never; set_tool_settings?: never; set_ui_settings?: never; set_update_mode?: never; snooze_thread?: never; sweep_done?: never; undo_step?: never; update_matter?: never } | 
+} }) & { allow_blocked_site?: never; answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; cancel_browser_install?: never; cancel_scan?: never; cancel_scheduled_update?: never; check_for_update?: never; connector?: never; create_matter?: never; create_thread?: never; decide_revisions?: never; edit_queued_prompt?: never; first_act?: never; forget_matter?: never; install_browser?: never; install_update?: never; mark_thread_done?: never; open_matter?: never; recheck_browser_policy?: never; refresh_limits?: never; relocate_matter?: never; remove_queued_prompt?: never; remove_sandbox_setup?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; retry_protection?: never; revoke_allowed_site?: never; scan_folder?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_network?: never; set_privacy_settings?: never; set_skill_pack?: never; set_tool_settings?: never; set_ui_settings?: never; set_update_mode?: never; snooze_thread?: never; sweep_done?: never; undo_step?: never; update_matter?: never } | 
 /**
  *  Snooze a thread until `until`, or clear its snooze by hand (`until` left out): logs
  *  `thread_snoozed` and answers `Done`, archived threads included. The host refuses an
@@ -2137,7 +2283,7 @@ export type HostCommand =
 	thread: ThreadId,
 	/**  When the snooze ends; left out to clear it. */
 	until?: Timestamp,
-} }) & { allow_blocked_site?: never; answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; cancel_browser_install?: never; cancel_scan?: never; cancel_scheduled_update?: never; check_for_update?: never; connector?: never; create_matter?: never; create_thread?: never; edit_queued_prompt?: never; first_act?: never; forget_matter?: never; install_browser?: never; install_update?: never; mark_seen?: never; mark_thread_done?: never; open_matter?: never; refresh_limits?: never; relocate_matter?: never; remove_queued_prompt?: never; remove_sandbox_setup?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; retry_protection?: never; revoke_allowed_site?: never; scan_folder?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_privacy_settings?: never; set_skill_pack?: never; set_tool_settings?: never; set_ui_settings?: never; set_update_mode?: never; sweep_done?: never; undo_step?: never; update_matter?: never } | 
+} }) & { allow_blocked_site?: never; answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; cancel_browser_install?: never; cancel_scan?: never; cancel_scheduled_update?: never; check_for_update?: never; connector?: never; create_matter?: never; create_thread?: never; decide_revisions?: never; edit_queued_prompt?: never; first_act?: never; forget_matter?: never; install_browser?: never; install_update?: never; mark_seen?: never; mark_thread_done?: never; open_matter?: never; recheck_browser_policy?: never; refresh_limits?: never; relocate_matter?: never; remove_queued_prompt?: never; remove_sandbox_setup?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; retry_protection?: never; revoke_allowed_site?: never; scan_folder?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_network?: never; set_privacy_settings?: never; set_skill_pack?: never; set_tool_settings?: never; set_ui_settings?: never; set_update_mode?: never; sweep_done?: never; undo_step?: never; update_matter?: never } | 
 /**
  *  Mark a thread done or not done by the lawyer: logs `thread_done` with `by: lawyer` and
  *  answers `Done`, archived threads included.
@@ -2147,7 +2293,7 @@ export type HostCommand =
 	thread: ThreadId,
 	/**  Done, or no longer done. */
 	done: boolean,
-} }) & { allow_blocked_site?: never; answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; cancel_browser_install?: never; cancel_scan?: never; cancel_scheduled_update?: never; check_for_update?: never; connector?: never; create_matter?: never; create_thread?: never; edit_queued_prompt?: never; first_act?: never; forget_matter?: never; install_browser?: never; install_update?: never; mark_seen?: never; open_matter?: never; refresh_limits?: never; relocate_matter?: never; remove_queued_prompt?: never; remove_sandbox_setup?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; retry_protection?: never; revoke_allowed_site?: never; scan_folder?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_privacy_settings?: never; set_skill_pack?: never; set_tool_settings?: never; set_ui_settings?: never; set_update_mode?: never; snooze_thread?: never; sweep_done?: never; undo_step?: never; update_matter?: never } | 
+} }) & { allow_blocked_site?: never; answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; cancel_browser_install?: never; cancel_scan?: never; cancel_scheduled_update?: never; check_for_update?: never; connector?: never; create_matter?: never; create_thread?: never; decide_revisions?: never; edit_queued_prompt?: never; first_act?: never; forget_matter?: never; install_browser?: never; install_update?: never; mark_seen?: never; open_matter?: never; recheck_browser_policy?: never; refresh_limits?: never; relocate_matter?: never; remove_queued_prompt?: never; remove_sandbox_setup?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; retry_protection?: never; revoke_allowed_site?: never; scan_folder?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_network?: never; set_privacy_settings?: never; set_skill_pack?: never; set_tool_settings?: never; set_ui_settings?: never; set_update_mode?: never; snooze_thread?: never; sweep_done?: never; undo_step?: never; update_matter?: never } | 
 /**
  *  The morning sweep. The host knows no time zone, so the app sends this at its first moment
  *  after 05:00 local each day (and at launch, when after 05:00), with `day_start` the local
@@ -2162,14 +2308,20 @@ export type HostCommand =
 ({ sweep_done: {
 	/**  Today's local midnight. */
 	day_start: Timestamp,
-} }) & { allow_blocked_site?: never; answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; cancel_browser_install?: never; cancel_scan?: never; cancel_scheduled_update?: never; check_for_update?: never; connector?: never; create_matter?: never; create_thread?: never; edit_queued_prompt?: never; first_act?: never; forget_matter?: never; install_browser?: never; install_update?: never; mark_seen?: never; mark_thread_done?: never; open_matter?: never; refresh_limits?: never; relocate_matter?: never; remove_queued_prompt?: never; remove_sandbox_setup?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; retry_protection?: never; revoke_allowed_site?: never; scan_folder?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_privacy_settings?: never; set_skill_pack?: never; set_tool_settings?: never; set_ui_settings?: never; set_update_mode?: never; snooze_thread?: never; undo_step?: never; update_matter?: never } | 
+} }) & { allow_blocked_site?: never; answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; cancel_browser_install?: never; cancel_scan?: never; cancel_scheduled_update?: never; check_for_update?: never; connector?: never; create_matter?: never; create_thread?: never; decide_revisions?: never; edit_queued_prompt?: never; first_act?: never; forget_matter?: never; install_browser?: never; install_update?: never; mark_seen?: never; mark_thread_done?: never; open_matter?: never; recheck_browser_policy?: never; refresh_limits?: never; relocate_matter?: never; remove_queued_prompt?: never; remove_sandbox_setup?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; retry_protection?: never; revoke_allowed_site?: never; scan_folder?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_network?: never; set_privacy_settings?: never; set_skill_pack?: never; set_tool_settings?: never; set_ui_settings?: never; set_update_mode?: never; snooze_thread?: never; undo_step?: never; update_matter?: never } | 
 /**  Start a thread in a matter with an agent. */
 ({ create_thread: {
 	/**  The matter. */
 	matter: MatterId,
 	/**  The agent's registry id. */
 	agent: AgentId,
-} }) & { allow_blocked_site?: never; answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; cancel_browser_install?: never; cancel_scan?: never; cancel_scheduled_update?: never; check_for_update?: never; connector?: never; create_matter?: never; edit_queued_prompt?: never; first_act?: never; forget_matter?: never; install_browser?: never; install_update?: never; mark_seen?: never; mark_thread_done?: never; open_matter?: never; refresh_limits?: never; relocate_matter?: never; remove_queued_prompt?: never; remove_sandbox_setup?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; retry_protection?: never; revoke_allowed_site?: never; scan_folder?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_privacy_settings?: never; set_skill_pack?: never; set_tool_settings?: never; set_ui_settings?: never; set_update_mode?: never; snooze_thread?: never; sweep_done?: never; undo_step?: never; update_matter?: never } | 
+	/**
+	 *  Model and effort to start with, set after the session starts and before the first
+	 *  prompt (`model`, `thought_level` options; one the agent refuses is dropped). Missing:
+	 *  the matter's `agent_prefs` for the agent's kind, else its defaults; `{}` sets none.
+	 */
+	config?: ConfigPicks,
+} }) & { allow_blocked_site?: never; answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; cancel_browser_install?: never; cancel_scan?: never; cancel_scheduled_update?: never; check_for_update?: never; connector?: never; create_matter?: never; decide_revisions?: never; edit_queued_prompt?: never; first_act?: never; forget_matter?: never; install_browser?: never; install_update?: never; mark_seen?: never; mark_thread_done?: never; open_matter?: never; recheck_browser_policy?: never; refresh_limits?: never; relocate_matter?: never; remove_queued_prompt?: never; remove_sandbox_setup?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; retry_protection?: never; revoke_allowed_site?: never; scan_folder?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_network?: never; set_privacy_settings?: never; set_skill_pack?: never; set_tool_settings?: never; set_ui_settings?: never; set_update_mode?: never; snooze_thread?: never; sweep_done?: never; undo_step?: never; update_matter?: never } | 
 /**  Send a prompt. Never refused because a turn is running: it is queued, sent now or steered. */
 ({ send_prompt: {
 	/**  The thread. */
@@ -2186,7 +2338,7 @@ export type HostCommand =
 	 *  missing field. A mode this version does not know is refused when the command decodes.
 	 */
 	delivery?: DeliveryRequest,
-} }) & { allow_blocked_site?: never; answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; cancel_browser_install?: never; cancel_scan?: never; cancel_scheduled_update?: never; check_for_update?: never; connector?: never; create_matter?: never; create_thread?: never; edit_queued_prompt?: never; first_act?: never; forget_matter?: never; install_browser?: never; install_update?: never; mark_seen?: never; mark_thread_done?: never; open_matter?: never; refresh_limits?: never; relocate_matter?: never; remove_queued_prompt?: never; remove_sandbox_setup?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; retry_protection?: never; revoke_allowed_site?: never; scan_folder?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_privacy_settings?: never; set_skill_pack?: never; set_tool_settings?: never; set_ui_settings?: never; set_update_mode?: never; snooze_thread?: never; sweep_done?: never; undo_step?: never; update_matter?: never } | 
+} }) & { allow_blocked_site?: never; answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; cancel_browser_install?: never; cancel_scan?: never; cancel_scheduled_update?: never; check_for_update?: never; connector?: never; create_matter?: never; create_thread?: never; decide_revisions?: never; edit_queued_prompt?: never; first_act?: never; forget_matter?: never; install_browser?: never; install_update?: never; mark_seen?: never; mark_thread_done?: never; open_matter?: never; recheck_browser_policy?: never; refresh_limits?: never; relocate_matter?: never; remove_queued_prompt?: never; remove_sandbox_setup?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; retry_protection?: never; revoke_allowed_site?: never; scan_folder?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_network?: never; set_privacy_settings?: never; set_skill_pack?: never; set_tool_settings?: never; set_ui_settings?: never; set_update_mode?: never; snooze_thread?: never; sweep_done?: never; undo_step?: never; update_matter?: never } | 
 /**  Replace a queued prompt's text; the turn keeps its id, its place and its file blocks. */
 ({ edit_queued_prompt: {
 	/**  The thread. */
@@ -2200,36 +2352,36 @@ export type HostCommand =
 	 *  refuses it for a prompt without one (`command.invalid`).
 	 */
 	text: string,
-} }) & { allow_blocked_site?: never; answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; cancel_browser_install?: never; cancel_scan?: never; cancel_scheduled_update?: never; check_for_update?: never; connector?: never; create_matter?: never; create_thread?: never; first_act?: never; forget_matter?: never; install_browser?: never; install_update?: never; mark_seen?: never; mark_thread_done?: never; open_matter?: never; refresh_limits?: never; relocate_matter?: never; remove_queued_prompt?: never; remove_sandbox_setup?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; retry_protection?: never; revoke_allowed_site?: never; scan_folder?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_privacy_settings?: never; set_skill_pack?: never; set_tool_settings?: never; set_ui_settings?: never; set_update_mode?: never; snooze_thread?: never; sweep_done?: never; undo_step?: never; update_matter?: never } | 
+} }) & { allow_blocked_site?: never; answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; cancel_browser_install?: never; cancel_scan?: never; cancel_scheduled_update?: never; check_for_update?: never; connector?: never; create_matter?: never; create_thread?: never; decide_revisions?: never; first_act?: never; forget_matter?: never; install_browser?: never; install_update?: never; mark_seen?: never; mark_thread_done?: never; open_matter?: never; recheck_browser_policy?: never; refresh_limits?: never; relocate_matter?: never; remove_queued_prompt?: never; remove_sandbox_setup?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; retry_protection?: never; revoke_allowed_site?: never; scan_folder?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_network?: never; set_privacy_settings?: never; set_skill_pack?: never; set_tool_settings?: never; set_ui_settings?: never; set_update_mode?: never; snooze_thread?: never; sweep_done?: never; undo_step?: never; update_matter?: never } | 
 /**  Remove a queued prompt; its turn ends cancelled without starting. */
 ({ remove_queued_prompt: {
 	/**  The thread. */
 	thread: ThreadId,
 	/**  The queued turn. */
 	turn: TurnId,
-} }) & { allow_blocked_site?: never; answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; cancel_browser_install?: never; cancel_scan?: never; cancel_scheduled_update?: never; check_for_update?: never; connector?: never; create_matter?: never; create_thread?: never; edit_queued_prompt?: never; first_act?: never; forget_matter?: never; install_browser?: never; install_update?: never; mark_seen?: never; mark_thread_done?: never; open_matter?: never; refresh_limits?: never; relocate_matter?: never; remove_sandbox_setup?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; retry_protection?: never; revoke_allowed_site?: never; scan_folder?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_privacy_settings?: never; set_skill_pack?: never; set_tool_settings?: never; set_ui_settings?: never; set_update_mode?: never; snooze_thread?: never; sweep_done?: never; undo_step?: never; update_matter?: never } | 
+} }) & { allow_blocked_site?: never; answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; cancel_browser_install?: never; cancel_scan?: never; cancel_scheduled_update?: never; check_for_update?: never; connector?: never; create_matter?: never; create_thread?: never; decide_revisions?: never; edit_queued_prompt?: never; first_act?: never; forget_matter?: never; install_browser?: never; install_update?: never; mark_seen?: never; mark_thread_done?: never; open_matter?: never; recheck_browser_policy?: never; refresh_limits?: never; relocate_matter?: never; remove_sandbox_setup?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; retry_protection?: never; revoke_allowed_site?: never; scan_folder?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_network?: never; set_privacy_settings?: never; set_skill_pack?: never; set_tool_settings?: never; set_ui_settings?: never; set_update_mode?: never; snooze_thread?: never; sweep_done?: never; undo_step?: never; update_matter?: never } | 
 /**  Cancel the running turn and start this queued turn next. */
 ({ send_queued_now: {
 	/**  The thread. */
 	thread: ThreadId,
 	/**  The queued turn. */
 	turn: TurnId,
-} }) & { allow_blocked_site?: never; answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; cancel_browser_install?: never; cancel_scan?: never; cancel_scheduled_update?: never; check_for_update?: never; connector?: never; create_matter?: never; create_thread?: never; edit_queued_prompt?: never; first_act?: never; forget_matter?: never; install_browser?: never; install_update?: never; mark_seen?: never; mark_thread_done?: never; open_matter?: never; refresh_limits?: never; relocate_matter?: never; remove_queued_prompt?: never; remove_sandbox_setup?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; retry_protection?: never; revoke_allowed_site?: never; scan_folder?: never; send_prompt?: never; set_config_option?: never; set_mode?: never; set_privacy_settings?: never; set_skill_pack?: never; set_tool_settings?: never; set_ui_settings?: never; set_update_mode?: never; snooze_thread?: never; sweep_done?: never; undo_step?: never; update_matter?: never } | 
+} }) & { allow_blocked_site?: never; answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; cancel_browser_install?: never; cancel_scan?: never; cancel_scheduled_update?: never; check_for_update?: never; connector?: never; create_matter?: never; create_thread?: never; decide_revisions?: never; edit_queued_prompt?: never; first_act?: never; forget_matter?: never; install_browser?: never; install_update?: never; mark_seen?: never; mark_thread_done?: never; open_matter?: never; recheck_browser_policy?: never; refresh_limits?: never; relocate_matter?: never; remove_queued_prompt?: never; remove_sandbox_setup?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; retry_protection?: never; revoke_allowed_site?: never; scan_folder?: never; send_prompt?: never; set_config_option?: never; set_mode?: never; set_network?: never; set_privacy_settings?: never; set_skill_pack?: never; set_tool_settings?: never; set_ui_settings?: never; set_update_mode?: never; snooze_thread?: never; sweep_done?: never; undo_step?: never; update_matter?: never } | 
 /**  Start the head of a held queue. */
 ({ resume_queue: {
 	/**  The thread. */
 	thread: ThreadId,
-} }) & { allow_blocked_site?: never; answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; cancel_browser_install?: never; cancel_scan?: never; cancel_scheduled_update?: never; check_for_update?: never; connector?: never; create_matter?: never; create_thread?: never; edit_queued_prompt?: never; first_act?: never; forget_matter?: never; install_browser?: never; install_update?: never; mark_seen?: never; mark_thread_done?: never; open_matter?: never; refresh_limits?: never; relocate_matter?: never; remove_queued_prompt?: never; remove_sandbox_setup?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; retry_protection?: never; revoke_allowed_site?: never; scan_folder?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_privacy_settings?: never; set_skill_pack?: never; set_tool_settings?: never; set_ui_settings?: never; set_update_mode?: never; snooze_thread?: never; sweep_done?: never; undo_step?: never; update_matter?: never } | 
+} }) & { allow_blocked_site?: never; answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; cancel_browser_install?: never; cancel_scan?: never; cancel_scheduled_update?: never; check_for_update?: never; connector?: never; create_matter?: never; create_thread?: never; decide_revisions?: never; edit_queued_prompt?: never; first_act?: never; forget_matter?: never; install_browser?: never; install_update?: never; mark_seen?: never; mark_thread_done?: never; open_matter?: never; recheck_browser_policy?: never; refresh_limits?: never; relocate_matter?: never; remove_queued_prompt?: never; remove_sandbox_setup?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; retry_protection?: never; revoke_allowed_site?: never; scan_folder?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_network?: never; set_privacy_settings?: never; set_skill_pack?: never; set_tool_settings?: never; set_ui_settings?: never; set_update_mode?: never; snooze_thread?: never; sweep_done?: never; undo_step?: never; update_matter?: never } | 
 /**  Stop the thread's current turn; its queued turns stay, held. */
 ({ cancel: {
 	/**  The thread. */
 	thread: ThreadId,
-} }) & { allow_blocked_site?: never; answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel_browser_install?: never; cancel_scan?: never; cancel_scheduled_update?: never; check_for_update?: never; connector?: never; create_matter?: never; create_thread?: never; edit_queued_prompt?: never; first_act?: never; forget_matter?: never; install_browser?: never; install_update?: never; mark_seen?: never; mark_thread_done?: never; open_matter?: never; refresh_limits?: never; relocate_matter?: never; remove_queued_prompt?: never; remove_sandbox_setup?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; retry_protection?: never; revoke_allowed_site?: never; scan_folder?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_privacy_settings?: never; set_skill_pack?: never; set_tool_settings?: never; set_ui_settings?: never; set_update_mode?: never; snooze_thread?: never; sweep_done?: never; undo_step?: never; update_matter?: never } | 
+} }) & { allow_blocked_site?: never; answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel_browser_install?: never; cancel_scan?: never; cancel_scheduled_update?: never; check_for_update?: never; connector?: never; create_matter?: never; create_thread?: never; decide_revisions?: never; edit_queued_prompt?: never; first_act?: never; forget_matter?: never; install_browser?: never; install_update?: never; mark_seen?: never; mark_thread_done?: never; open_matter?: never; recheck_browser_policy?: never; refresh_limits?: never; relocate_matter?: never; remove_queued_prompt?: never; remove_sandbox_setup?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; retry_protection?: never; revoke_allowed_site?: never; scan_folder?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_network?: never; set_privacy_settings?: never; set_skill_pack?: never; set_tool_settings?: never; set_ui_settings?: never; set_update_mode?: never; snooze_thread?: never; sweep_done?: never; undo_step?: never; update_matter?: never } | 
 /**  Start the thread's agent again; refused while a turn runs. */
 ({ restart_agent: {
 	/**  The thread. */
 	thread: ThreadId,
-} }) & { allow_blocked_site?: never; answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; cancel_browser_install?: never; cancel_scan?: never; cancel_scheduled_update?: never; check_for_update?: never; connector?: never; create_matter?: never; create_thread?: never; edit_queued_prompt?: never; first_act?: never; forget_matter?: never; install_browser?: never; install_update?: never; mark_seen?: never; mark_thread_done?: never; open_matter?: never; refresh_limits?: never; relocate_matter?: never; remove_queued_prompt?: never; remove_sandbox_setup?: never; rename_thread?: never; restore_version?: never; resume_queue?: never; retry_protection?: never; revoke_allowed_site?: never; scan_folder?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_privacy_settings?: never; set_skill_pack?: never; set_tool_settings?: never; set_ui_settings?: never; set_update_mode?: never; snooze_thread?: never; sweep_done?: never; undo_step?: never; update_matter?: never } | 
+} }) & { allow_blocked_site?: never; answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; cancel_browser_install?: never; cancel_scan?: never; cancel_scheduled_update?: never; check_for_update?: never; connector?: never; create_matter?: never; create_thread?: never; decide_revisions?: never; edit_queued_prompt?: never; first_act?: never; forget_matter?: never; install_browser?: never; install_update?: never; mark_seen?: never; mark_thread_done?: never; open_matter?: never; recheck_browser_policy?: never; refresh_limits?: never; relocate_matter?: never; remove_queued_prompt?: never; remove_sandbox_setup?: never; rename_thread?: never; restore_version?: never; resume_queue?: never; retry_protection?: never; revoke_allowed_site?: never; scan_folder?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_network?: never; set_privacy_settings?: never; set_skill_pack?: never; set_tool_settings?: never; set_ui_settings?: never; set_update_mode?: never; snooze_thread?: never; sweep_done?: never; undo_step?: never; update_matter?: never } | 
 /**  Answer a permission request; the first valid answer wins. */
 ({ answer_permission: {
 	/**  The thread. */
@@ -2238,7 +2390,7 @@ export type HostCommand =
 	request: PermissionRequestId,
 	/**  One of the offered options' ids. */
 	option_id: AgentChoiceId,
-} }) & { allow_blocked_site?: never; answer_elicitation?: never; archive_thread?: never; cancel?: never; cancel_browser_install?: never; cancel_scan?: never; cancel_scheduled_update?: never; check_for_update?: never; connector?: never; create_matter?: never; create_thread?: never; edit_queued_prompt?: never; first_act?: never; forget_matter?: never; install_browser?: never; install_update?: never; mark_seen?: never; mark_thread_done?: never; open_matter?: never; refresh_limits?: never; relocate_matter?: never; remove_queued_prompt?: never; remove_sandbox_setup?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; retry_protection?: never; revoke_allowed_site?: never; scan_folder?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_privacy_settings?: never; set_skill_pack?: never; set_tool_settings?: never; set_ui_settings?: never; set_update_mode?: never; snooze_thread?: never; sweep_done?: never; undo_step?: never; update_matter?: never } | 
+} }) & { allow_blocked_site?: never; answer_elicitation?: never; archive_thread?: never; cancel?: never; cancel_browser_install?: never; cancel_scan?: never; cancel_scheduled_update?: never; check_for_update?: never; connector?: never; create_matter?: never; create_thread?: never; decide_revisions?: never; edit_queued_prompt?: never; first_act?: never; forget_matter?: never; install_browser?: never; install_update?: never; mark_seen?: never; mark_thread_done?: never; open_matter?: never; recheck_browser_policy?: never; refresh_limits?: never; relocate_matter?: never; remove_queued_prompt?: never; remove_sandbox_setup?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; retry_protection?: never; revoke_allowed_site?: never; scan_folder?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_network?: never; set_privacy_settings?: never; set_skill_pack?: never; set_tool_settings?: never; set_ui_settings?: never; set_update_mode?: never; snooze_thread?: never; sweep_done?: never; undo_step?: never; update_matter?: never } | 
 /**  Answer an elicitation. */
 ({ answer_elicitation: {
 	/**  The thread. */
@@ -2250,8 +2402,11 @@ export type HostCommand =
 	 *  keys) of at most [`MAX_ELICITATION_VALUES_BYTES`].
 	 */
 	response: ElicitationResponse,
-} }) & { allow_blocked_site?: never; answer_permission?: never; archive_thread?: never; cancel?: never; cancel_browser_install?: never; cancel_scan?: never; cancel_scheduled_update?: never; check_for_update?: never; connector?: never; create_matter?: never; create_thread?: never; edit_queued_prompt?: never; first_act?: never; forget_matter?: never; install_browser?: never; install_update?: never; mark_seen?: never; mark_thread_done?: never; open_matter?: never; refresh_limits?: never; relocate_matter?: never; remove_queued_prompt?: never; remove_sandbox_setup?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; retry_protection?: never; revoke_allowed_site?: never; scan_folder?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_privacy_settings?: never; set_skill_pack?: never; set_tool_settings?: never; set_ui_settings?: never; set_update_mode?: never; snooze_thread?: never; sweep_done?: never; undo_step?: never; update_matter?: never } | 
-/**  Set one of the agent's config options. */
+} }) & { allow_blocked_site?: never; answer_permission?: never; archive_thread?: never; cancel?: never; cancel_browser_install?: never; cancel_scan?: never; cancel_scheduled_update?: never; check_for_update?: never; connector?: never; create_matter?: never; create_thread?: never; decide_revisions?: never; edit_queued_prompt?: never; first_act?: never; forget_matter?: never; install_browser?: never; install_update?: never; mark_seen?: never; mark_thread_done?: never; open_matter?: never; recheck_browser_policy?: never; refresh_limits?: never; relocate_matter?: never; remove_queued_prompt?: never; remove_sandbox_setup?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; retry_protection?: never; revoke_allowed_site?: never; scan_folder?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_network?: never; set_privacy_settings?: never; set_skill_pack?: never; set_tool_settings?: never; set_ui_settings?: never; set_update_mode?: never; snooze_thread?: never; sweep_done?: never; undo_step?: never; update_matter?: never } | 
+/**
+ *  Set one of the agent's config options: only a select option of category `model` or
+ *  `thought_level` (else `command.invalid`); a success keeps the pick in `agent_prefs`.
+ */
 ({ set_config_option: {
 	/**  The thread. */
 	thread: ThreadId,
@@ -2259,14 +2414,14 @@ export type HostCommand =
 	option_id: AgentChoiceId,
 	/**  The new value. */
 	value: ConfigValue,
-} }) & { allow_blocked_site?: never; answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; cancel_browser_install?: never; cancel_scan?: never; cancel_scheduled_update?: never; check_for_update?: never; connector?: never; create_matter?: never; create_thread?: never; edit_queued_prompt?: never; first_act?: never; forget_matter?: never; install_browser?: never; install_update?: never; mark_seen?: never; mark_thread_done?: never; open_matter?: never; refresh_limits?: never; relocate_matter?: never; remove_queued_prompt?: never; remove_sandbox_setup?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; retry_protection?: never; revoke_allowed_site?: never; scan_folder?: never; send_prompt?: never; send_queued_now?: never; set_mode?: never; set_privacy_settings?: never; set_skill_pack?: never; set_tool_settings?: never; set_ui_settings?: never; set_update_mode?: never; snooze_thread?: never; sweep_done?: never; undo_step?: never; update_matter?: never } | 
+} }) & { allow_blocked_site?: never; answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; cancel_browser_install?: never; cancel_scan?: never; cancel_scheduled_update?: never; check_for_update?: never; connector?: never; create_matter?: never; create_thread?: never; decide_revisions?: never; edit_queued_prompt?: never; first_act?: never; forget_matter?: never; install_browser?: never; install_update?: never; mark_seen?: never; mark_thread_done?: never; open_matter?: never; recheck_browser_policy?: never; refresh_limits?: never; relocate_matter?: never; remove_queued_prompt?: never; remove_sandbox_setup?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; retry_protection?: never; revoke_allowed_site?: never; scan_folder?: never; send_prompt?: never; send_queued_now?: never; set_mode?: never; set_network?: never; set_privacy_settings?: never; set_skill_pack?: never; set_tool_settings?: never; set_ui_settings?: never; set_update_mode?: never; snooze_thread?: never; sweep_done?: never; undo_step?: never; update_matter?: never } | 
 /**  Set the agent's mode, when it has no mode config option. */
 ({ set_mode: {
 	/**  The thread. */
 	thread: ThreadId,
 	/**  The mode's id. */
 	mode_id: AgentChoiceId,
-} }) & { allow_blocked_site?: never; answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; cancel_browser_install?: never; cancel_scan?: never; cancel_scheduled_update?: never; check_for_update?: never; connector?: never; create_matter?: never; create_thread?: never; edit_queued_prompt?: never; first_act?: never; forget_matter?: never; install_browser?: never; install_update?: never; mark_seen?: never; mark_thread_done?: never; open_matter?: never; refresh_limits?: never; relocate_matter?: never; remove_queued_prompt?: never; remove_sandbox_setup?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; retry_protection?: never; revoke_allowed_site?: never; scan_folder?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_privacy_settings?: never; set_skill_pack?: never; set_tool_settings?: never; set_ui_settings?: never; set_update_mode?: never; snooze_thread?: never; sweep_done?: never; undo_step?: never; update_matter?: never } | 
+} }) & { allow_blocked_site?: never; answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; cancel_browser_install?: never; cancel_scan?: never; cancel_scheduled_update?: never; check_for_update?: never; connector?: never; create_matter?: never; create_thread?: never; decide_revisions?: never; edit_queued_prompt?: never; first_act?: never; forget_matter?: never; install_browser?: never; install_update?: never; mark_seen?: never; mark_thread_done?: never; open_matter?: never; recheck_browser_policy?: never; refresh_limits?: never; relocate_matter?: never; remove_queued_prompt?: never; remove_sandbox_setup?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; retry_protection?: never; revoke_allowed_site?: never; scan_folder?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_network?: never; set_privacy_settings?: never; set_skill_pack?: never; set_tool_settings?: never; set_ui_settings?: never; set_update_mode?: never; snooze_thread?: never; sweep_done?: never; undo_step?: never; update_matter?: never } | 
 /**  Rename a thread. */
 ({ rename_thread: {
 	/**  The thread. */
@@ -2278,12 +2433,12 @@ export type HostCommand =
 	 *  replaces; `false` for one the lawyer typed. Missing means `false`.
 	 */
 	placeholder?: boolean,
-} }) & { allow_blocked_site?: never; answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; cancel_browser_install?: never; cancel_scan?: never; cancel_scheduled_update?: never; check_for_update?: never; connector?: never; create_matter?: never; create_thread?: never; edit_queued_prompt?: never; first_act?: never; forget_matter?: never; install_browser?: never; install_update?: never; mark_seen?: never; mark_thread_done?: never; open_matter?: never; refresh_limits?: never; relocate_matter?: never; remove_queued_prompt?: never; remove_sandbox_setup?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; retry_protection?: never; revoke_allowed_site?: never; scan_folder?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_privacy_settings?: never; set_skill_pack?: never; set_tool_settings?: never; set_ui_settings?: never; set_update_mode?: never; snooze_thread?: never; sweep_done?: never; undo_step?: never; update_matter?: never } | 
+} }) & { allow_blocked_site?: never; answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; cancel_browser_install?: never; cancel_scan?: never; cancel_scheduled_update?: never; check_for_update?: never; connector?: never; create_matter?: never; create_thread?: never; decide_revisions?: never; edit_queued_prompt?: never; first_act?: never; forget_matter?: never; install_browser?: never; install_update?: never; mark_seen?: never; mark_thread_done?: never; open_matter?: never; recheck_browser_policy?: never; refresh_limits?: never; relocate_matter?: never; remove_queued_prompt?: never; remove_sandbox_setup?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; retry_protection?: never; revoke_allowed_site?: never; scan_folder?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_network?: never; set_privacy_settings?: never; set_skill_pack?: never; set_tool_settings?: never; set_ui_settings?: never; set_update_mode?: never; snooze_thread?: never; sweep_done?: never; undo_step?: never; update_matter?: never } | 
 /**  Archive a thread; refused while a turn runs. */
 ({ archive_thread: {
 	/**  The thread. */
 	thread: ThreadId,
-} }) & { allow_blocked_site?: never; answer_elicitation?: never; answer_permission?: never; cancel?: never; cancel_browser_install?: never; cancel_scan?: never; cancel_scheduled_update?: never; check_for_update?: never; connector?: never; create_matter?: never; create_thread?: never; edit_queued_prompt?: never; first_act?: never; forget_matter?: never; install_browser?: never; install_update?: never; mark_seen?: never; mark_thread_done?: never; open_matter?: never; refresh_limits?: never; relocate_matter?: never; remove_queued_prompt?: never; remove_sandbox_setup?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; retry_protection?: never; revoke_allowed_site?: never; scan_folder?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_privacy_settings?: never; set_skill_pack?: never; set_tool_settings?: never; set_ui_settings?: never; set_update_mode?: never; snooze_thread?: never; sweep_done?: never; undo_step?: never; update_matter?: never } | 
+} }) & { allow_blocked_site?: never; answer_elicitation?: never; answer_permission?: never; cancel?: never; cancel_browser_install?: never; cancel_scan?: never; cancel_scheduled_update?: never; check_for_update?: never; connector?: never; create_matter?: never; create_thread?: never; decide_revisions?: never; edit_queued_prompt?: never; first_act?: never; forget_matter?: never; install_browser?: never; install_update?: never; mark_seen?: never; mark_thread_done?: never; open_matter?: never; recheck_browser_policy?: never; refresh_limits?: never; relocate_matter?: never; remove_queued_prompt?: never; remove_sandbox_setup?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; retry_protection?: never; revoke_allowed_site?: never; scan_folder?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_network?: never; set_privacy_settings?: never; set_skill_pack?: never; set_tool_settings?: never; set_ui_settings?: never; set_update_mode?: never; snooze_thread?: never; sweep_done?: never; undo_step?: never; update_matter?: never } | 
 /**  Undo a step, file by file; refused while a turn runs in the matter. */
 ({ undo_step: {
 	/**  The thread. */
@@ -2297,7 +2452,7 @@ export type HostCommand =
 	 *  that is not in the step's `FilesChanged`.
 	 */
 	files: FileDecision[],
-} }) & { allow_blocked_site?: never; answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; cancel_browser_install?: never; cancel_scan?: never; cancel_scheduled_update?: never; check_for_update?: never; connector?: never; create_matter?: never; create_thread?: never; edit_queued_prompt?: never; first_act?: never; forget_matter?: never; install_browser?: never; install_update?: never; mark_seen?: never; mark_thread_done?: never; open_matter?: never; refresh_limits?: never; relocate_matter?: never; remove_queued_prompt?: never; remove_sandbox_setup?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; retry_protection?: never; revoke_allowed_site?: never; scan_folder?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_privacy_settings?: never; set_skill_pack?: never; set_tool_settings?: never; set_ui_settings?: never; set_update_mode?: never; snooze_thread?: never; sweep_done?: never; update_matter?: never } | 
+} }) & { allow_blocked_site?: never; answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; cancel_browser_install?: never; cancel_scan?: never; cancel_scheduled_update?: never; check_for_update?: never; connector?: never; create_matter?: never; create_thread?: never; decide_revisions?: never; edit_queued_prompt?: never; first_act?: never; forget_matter?: never; install_browser?: never; install_update?: never; mark_seen?: never; mark_thread_done?: never; open_matter?: never; recheck_browser_policy?: never; refresh_limits?: never; relocate_matter?: never; remove_queued_prompt?: never; remove_sandbox_setup?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; retry_protection?: never; revoke_allowed_site?: never; scan_folder?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_network?: never; set_privacy_settings?: never; set_skill_pack?: never; set_tool_settings?: never; set_ui_settings?: never; set_update_mode?: never; snooze_thread?: never; sweep_done?: never; update_matter?: never } | 
 /**  Restore an earlier version; refused while a turn runs in the matter. */
 ({ restore_version: {
 	/**  The matter. */
@@ -2309,7 +2464,11 @@ export type HostCommand =
 	 *  version does not know is refused when the command decodes.
 	 */
 	scope: RestoreRequest,
-} }) & { allow_blocked_site?: never; answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; cancel_browser_install?: never; cancel_scan?: never; cancel_scheduled_update?: never; check_for_update?: never; connector?: never; create_matter?: never; create_thread?: never; edit_queued_prompt?: never; first_act?: never; forget_matter?: never; install_browser?: never; install_update?: never; mark_seen?: never; mark_thread_done?: never; open_matter?: never; refresh_limits?: never; relocate_matter?: never; remove_queued_prompt?: never; remove_sandbox_setup?: never; rename_thread?: never; restart_agent?: never; resume_queue?: never; retry_protection?: never; revoke_allowed_site?: never; scan_folder?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_privacy_settings?: never; set_skill_pack?: never; set_tool_settings?: never; set_ui_settings?: never; set_update_mode?: never; snooze_thread?: never; sweep_done?: never; undo_step?: never; update_matter?: never } | 
+	/**  The `restore` checkpoint this restore takes back: the files it added go too. */
+	undoes?: CheckpointId,
+	/**  The conversation it was asked from, of this matter: its stream records the restore. */
+	thread?: ThreadId,
+} }) & { allow_blocked_site?: never; answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; cancel_browser_install?: never; cancel_scan?: never; cancel_scheduled_update?: never; check_for_update?: never; connector?: never; create_matter?: never; create_thread?: never; decide_revisions?: never; edit_queued_prompt?: never; first_act?: never; forget_matter?: never; install_browser?: never; install_update?: never; mark_seen?: never; mark_thread_done?: never; open_matter?: never; recheck_browser_policy?: never; refresh_limits?: never; relocate_matter?: never; remove_queued_prompt?: never; remove_sandbox_setup?: never; rename_thread?: never; restart_agent?: never; resume_queue?: never; retry_protection?: never; revoke_allowed_site?: never; scan_folder?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_network?: never; set_privacy_settings?: never; set_skill_pack?: never; set_tool_settings?: never; set_ui_settings?: never; set_update_mode?: never; snooze_thread?: never; sweep_done?: never; undo_step?: never; update_matter?: never } | 
 /**
  *  Change the display settings; answers `Done`, and every app subscriber gets
  *  `HostEvent::SettingsChanged`. A patch naming a key the firm's policy sets is refused
@@ -2319,7 +2478,7 @@ export type HostCommand =
 ({ set_ui_settings: {
 	/**  The fields to change. */
 	patch: UiPatch,
-} }) & { allow_blocked_site?: never; answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; cancel_browser_install?: never; cancel_scan?: never; cancel_scheduled_update?: never; check_for_update?: never; connector?: never; create_matter?: never; create_thread?: never; edit_queued_prompt?: never; first_act?: never; forget_matter?: never; install_browser?: never; install_update?: never; mark_seen?: never; mark_thread_done?: never; open_matter?: never; refresh_limits?: never; relocate_matter?: never; remove_queued_prompt?: never; remove_sandbox_setup?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; retry_protection?: never; revoke_allowed_site?: never; scan_folder?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_privacy_settings?: never; set_skill_pack?: never; set_tool_settings?: never; set_update_mode?: never; snooze_thread?: never; sweep_done?: never; undo_step?: never; update_matter?: never } | 
+} }) & { allow_blocked_site?: never; answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; cancel_browser_install?: never; cancel_scan?: never; cancel_scheduled_update?: never; check_for_update?: never; connector?: never; create_matter?: never; create_thread?: never; decide_revisions?: never; edit_queued_prompt?: never; first_act?: never; forget_matter?: never; install_browser?: never; install_update?: never; mark_seen?: never; mark_thread_done?: never; open_matter?: never; recheck_browser_policy?: never; refresh_limits?: never; relocate_matter?: never; remove_queued_prompt?: never; remove_sandbox_setup?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; retry_protection?: never; revoke_allowed_site?: never; scan_folder?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_network?: never; set_privacy_settings?: never; set_skill_pack?: never; set_tool_settings?: never; set_update_mode?: never; snooze_thread?: never; sweep_done?: never; undo_step?: never; update_matter?: never } | 
 /**
  *  Change the tool switches (`tools.web_search`, `tools.browser`); answers `Done`, and every
  *  app subscriber gets `HostEvent::SettingsChanged`. A patch naming a key the firm's policy
@@ -2330,7 +2489,7 @@ export type HostCommand =
 ({ set_tool_settings: {
 	/**  The switches to change. */
 	patch: ToolsPatch,
-} }) & { allow_blocked_site?: never; answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; cancel_browser_install?: never; cancel_scan?: never; cancel_scheduled_update?: never; check_for_update?: never; connector?: never; create_matter?: never; create_thread?: never; edit_queued_prompt?: never; first_act?: never; forget_matter?: never; install_browser?: never; install_update?: never; mark_seen?: never; mark_thread_done?: never; open_matter?: never; refresh_limits?: never; relocate_matter?: never; remove_queued_prompt?: never; remove_sandbox_setup?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; retry_protection?: never; revoke_allowed_site?: never; scan_folder?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_privacy_settings?: never; set_skill_pack?: never; set_ui_settings?: never; set_update_mode?: never; snooze_thread?: never; sweep_done?: never; undo_step?: never; update_matter?: never } | 
+} }) & { allow_blocked_site?: never; answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; cancel_browser_install?: never; cancel_scan?: never; cancel_scheduled_update?: never; check_for_update?: never; connector?: never; create_matter?: never; create_thread?: never; decide_revisions?: never; edit_queued_prompt?: never; first_act?: never; forget_matter?: never; install_browser?: never; install_update?: never; mark_seen?: never; mark_thread_done?: never; open_matter?: never; recheck_browser_policy?: never; refresh_limits?: never; relocate_matter?: never; remove_queued_prompt?: never; remove_sandbox_setup?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; retry_protection?: never; revoke_allowed_site?: never; scan_folder?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_network?: never; set_privacy_settings?: never; set_skill_pack?: never; set_ui_settings?: never; set_update_mode?: never; snooze_thread?: never; sweep_done?: never; undo_step?: never; update_matter?: never } | 
 /**
  *  Turn the skill pack `id` on or off (decision record 0040); answers `Done`, and every
  *  app subscriber gets `HostEvent::SettingsChanged` when `skills.enabled` changed. On:
@@ -2348,7 +2507,7 @@ export type HostCommand =
 	id: PackId,
 	/**  Whether to turn it on. */
 	on: boolean,
-} }) & { allow_blocked_site?: never; answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; cancel_browser_install?: never; cancel_scan?: never; cancel_scheduled_update?: never; check_for_update?: never; connector?: never; create_matter?: never; create_thread?: never; edit_queued_prompt?: never; first_act?: never; forget_matter?: never; install_browser?: never; install_update?: never; mark_seen?: never; mark_thread_done?: never; open_matter?: never; refresh_limits?: never; relocate_matter?: never; remove_queued_prompt?: never; remove_sandbox_setup?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; retry_protection?: never; revoke_allowed_site?: never; scan_folder?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_privacy_settings?: never; set_tool_settings?: never; set_ui_settings?: never; set_update_mode?: never; snooze_thread?: never; sweep_done?: never; undo_step?: never; update_matter?: never } | 
+} }) & { allow_blocked_site?: never; answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; cancel_browser_install?: never; cancel_scan?: never; cancel_scheduled_update?: never; check_for_update?: never; connector?: never; create_matter?: never; create_thread?: never; decide_revisions?: never; edit_queued_prompt?: never; first_act?: never; forget_matter?: never; install_browser?: never; install_update?: never; mark_seen?: never; mark_thread_done?: never; open_matter?: never; recheck_browser_policy?: never; refresh_limits?: never; relocate_matter?: never; remove_queued_prompt?: never; remove_sandbox_setup?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; retry_protection?: never; revoke_allowed_site?: never; scan_folder?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_network?: never; set_privacy_settings?: never; set_tool_settings?: never; set_ui_settings?: never; set_update_mode?: never; snooze_thread?: never; sweep_done?: never; undo_step?: never; update_matter?: never } | 
 /**
  *  Change the privacy switches (`privacy.counts`, `privacy.crash_reports`); answers `Done`,
  *  and every app subscriber gets `HostEvent::SettingsChanged`. A patch naming a key the
@@ -2360,7 +2519,7 @@ export type HostCommand =
 ({ set_privacy_settings: {
 	/**  The switches to change. */
 	patch: PrivacyPatch,
-} }) & { allow_blocked_site?: never; answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; cancel_browser_install?: never; cancel_scan?: never; cancel_scheduled_update?: never; check_for_update?: never; connector?: never; create_matter?: never; create_thread?: never; edit_queued_prompt?: never; first_act?: never; forget_matter?: never; install_browser?: never; install_update?: never; mark_seen?: never; mark_thread_done?: never; open_matter?: never; refresh_limits?: never; relocate_matter?: never; remove_queued_prompt?: never; remove_sandbox_setup?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; retry_protection?: never; revoke_allowed_site?: never; scan_folder?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_skill_pack?: never; set_tool_settings?: never; set_ui_settings?: never; set_update_mode?: never; snooze_thread?: never; sweep_done?: never; undo_step?: never; update_matter?: never } | 
+} }) & { allow_blocked_site?: never; answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; cancel_browser_install?: never; cancel_scan?: never; cancel_scheduled_update?: never; check_for_update?: never; connector?: never; create_matter?: never; create_thread?: never; decide_revisions?: never; edit_queued_prompt?: never; first_act?: never; forget_matter?: never; install_browser?: never; install_update?: never; mark_seen?: never; mark_thread_done?: never; open_matter?: never; recheck_browser_policy?: never; refresh_limits?: never; relocate_matter?: never; remove_queued_prompt?: never; remove_sandbox_setup?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; retry_protection?: never; revoke_allowed_site?: never; scan_folder?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_network?: never; set_skill_pack?: never; set_tool_settings?: never; set_ui_settings?: never; set_update_mode?: never; snooze_thread?: never; sweep_done?: never; undo_step?: never; update_matter?: never } | 
 /**
  *  The lawyer's first act (the welcome's button): from now on the usage counts are saved and
  *  sent, unless `counts` is `false`, which turns them off. Answers `Done`, and every app
@@ -2371,7 +2530,7 @@ export type HostCommand =
 ({ first_act: {
 	/**  The switch as the lawyer left it. */
 	counts: boolean,
-} }) & { allow_blocked_site?: never; answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; cancel_browser_install?: never; cancel_scan?: never; cancel_scheduled_update?: never; check_for_update?: never; connector?: never; create_matter?: never; create_thread?: never; edit_queued_prompt?: never; forget_matter?: never; install_browser?: never; install_update?: never; mark_seen?: never; mark_thread_done?: never; open_matter?: never; refresh_limits?: never; relocate_matter?: never; remove_queued_prompt?: never; remove_sandbox_setup?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; retry_protection?: never; revoke_allowed_site?: never; scan_folder?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_privacy_settings?: never; set_skill_pack?: never; set_tool_settings?: never; set_ui_settings?: never; set_update_mode?: never; snooze_thread?: never; sweep_done?: never; undo_step?: never; update_matter?: never } | 
+} }) & { allow_blocked_site?: never; answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; cancel_browser_install?: never; cancel_scan?: never; cancel_scheduled_update?: never; check_for_update?: never; connector?: never; create_matter?: never; create_thread?: never; decide_revisions?: never; edit_queued_prompt?: never; forget_matter?: never; install_browser?: never; install_update?: never; mark_seen?: never; mark_thread_done?: never; open_matter?: never; recheck_browser_policy?: never; refresh_limits?: never; relocate_matter?: never; remove_queued_prompt?: never; remove_sandbox_setup?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; retry_protection?: never; revoke_allowed_site?: never; scan_folder?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_network?: never; set_privacy_settings?: never; set_skill_pack?: never; set_tool_settings?: never; set_ui_settings?: never; set_update_mode?: never; snooze_thread?: never; sweep_done?: never; undo_step?: never; update_matter?: never } | 
 /**
  *  Refresh account limits. Answers `Done` and logs nothing. `Shown` reads only data older
  *  than 5 minutes; `TryAgain` reads now unless a read is in flight or the last read started
@@ -2385,7 +2544,7 @@ export type HostCommand =
 	agent?: AgentKind,
 	/**  What asked for the refresh. */
 	why: RefreshWhy,
-} }) & { allow_blocked_site?: never; answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; cancel_browser_install?: never; cancel_scan?: never; cancel_scheduled_update?: never; check_for_update?: never; connector?: never; create_matter?: never; create_thread?: never; edit_queued_prompt?: never; first_act?: never; forget_matter?: never; install_browser?: never; install_update?: never; mark_seen?: never; mark_thread_done?: never; open_matter?: never; relocate_matter?: never; remove_queued_prompt?: never; remove_sandbox_setup?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; retry_protection?: never; revoke_allowed_site?: never; scan_folder?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_privacy_settings?: never; set_skill_pack?: never; set_tool_settings?: never; set_ui_settings?: never; set_update_mode?: never; snooze_thread?: never; sweep_done?: never; undo_step?: never; update_matter?: never } | 
+} }) & { allow_blocked_site?: never; answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; cancel_browser_install?: never; cancel_scan?: never; cancel_scheduled_update?: never; check_for_update?: never; connector?: never; create_matter?: never; create_thread?: never; decide_revisions?: never; edit_queued_prompt?: never; first_act?: never; forget_matter?: never; install_browser?: never; install_update?: never; mark_seen?: never; mark_thread_done?: never; open_matter?: never; recheck_browser_policy?: never; relocate_matter?: never; remove_queued_prompt?: never; remove_sandbox_setup?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; retry_protection?: never; revoke_allowed_site?: never; scan_folder?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_network?: never; set_privacy_settings?: never; set_skill_pack?: never; set_tool_settings?: never; set_ui_settings?: never; set_update_mode?: never; snooze_thread?: never; sweep_done?: never; undo_step?: never; update_matter?: never } | 
 /**
  *  Scan a folder before it becomes a matter: count its files and bytes as an import would,
  *  count its cloud-only files without reading them, and tell where it lives. Progress
@@ -2397,7 +2556,7 @@ export type HostCommand =
 ({ scan_folder: {
 	/**  The folder. */
 	folder: FolderRefId,
-} }) & { allow_blocked_site?: never; answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; cancel_browser_install?: never; cancel_scan?: never; cancel_scheduled_update?: never; check_for_update?: never; connector?: never; create_matter?: never; create_thread?: never; edit_queued_prompt?: never; first_act?: never; forget_matter?: never; install_browser?: never; install_update?: never; mark_seen?: never; mark_thread_done?: never; open_matter?: never; refresh_limits?: never; relocate_matter?: never; remove_queued_prompt?: never; remove_sandbox_setup?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; retry_protection?: never; revoke_allowed_site?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_privacy_settings?: never; set_skill_pack?: never; set_tool_settings?: never; set_ui_settings?: never; set_update_mode?: never; snooze_thread?: never; sweep_done?: never; undo_step?: never; update_matter?: never } | 
+} }) & { allow_blocked_site?: never; answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; cancel_browser_install?: never; cancel_scan?: never; cancel_scheduled_update?: never; check_for_update?: never; connector?: never; create_matter?: never; create_thread?: never; decide_revisions?: never; edit_queued_prompt?: never; first_act?: never; forget_matter?: never; install_browser?: never; install_update?: never; mark_seen?: never; mark_thread_done?: never; open_matter?: never; recheck_browser_policy?: never; refresh_limits?: never; relocate_matter?: never; remove_queued_prompt?: never; remove_sandbox_setup?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; retry_protection?: never; revoke_allowed_site?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_network?: never; set_privacy_settings?: never; set_skill_pack?: never; set_tool_settings?: never; set_ui_settings?: never; set_update_mode?: never; snooze_thread?: never; sweep_done?: never; undo_step?: never; update_matter?: never } | 
 /**
  *  Cancel the scan of `folder`; its last `FolderScanned` says `cancelled`. Answers
  *  `Done`, also when no scan of it runs.
@@ -2405,7 +2564,7 @@ export type HostCommand =
 ({ cancel_scan: {
 	/**  The folder. */
 	folder: FolderRefId,
-} }) & { allow_blocked_site?: never; answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; cancel_browser_install?: never; cancel_scheduled_update?: never; check_for_update?: never; connector?: never; create_matter?: never; create_thread?: never; edit_queued_prompt?: never; first_act?: never; forget_matter?: never; install_browser?: never; install_update?: never; mark_seen?: never; mark_thread_done?: never; open_matter?: never; refresh_limits?: never; relocate_matter?: never; remove_queued_prompt?: never; remove_sandbox_setup?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; retry_protection?: never; revoke_allowed_site?: never; scan_folder?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_privacy_settings?: never; set_skill_pack?: never; set_tool_settings?: never; set_ui_settings?: never; set_update_mode?: never; snooze_thread?: never; sweep_done?: never; undo_step?: never; update_matter?: never } | 
+} }) & { allow_blocked_site?: never; answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; cancel_browser_install?: never; cancel_scheduled_update?: never; check_for_update?: never; connector?: never; create_matter?: never; create_thread?: never; decide_revisions?: never; edit_queued_prompt?: never; first_act?: never; forget_matter?: never; install_browser?: never; install_update?: never; mark_seen?: never; mark_thread_done?: never; open_matter?: never; recheck_browser_policy?: never; refresh_limits?: never; relocate_matter?: never; remove_queued_prompt?: never; remove_sandbox_setup?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; retry_protection?: never; revoke_allowed_site?: never; scan_folder?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_network?: never; set_privacy_settings?: never; set_skill_pack?: never; set_tool_settings?: never; set_ui_settings?: never; set_update_mode?: never; snooze_thread?: never; sweep_done?: never; undo_step?: never; update_matter?: never } | 
 /**
  *  Download Chrome for Testing into the app data folder, after the lawyer agreed. Answers
  *  `Done` once the download has started, with no receipt (a repeated id starts it again
@@ -2414,20 +2573,30 @@ export type HostCommand =
  *  running download's events already say one is under way. Only the main window sends it,
  *  from its consent dialog. JSON: `{"install_browser": {}}`.
  */
-({ install_browser: Record<string, never> }) & { allow_blocked_site?: never; answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; cancel_browser_install?: never; cancel_scan?: never; cancel_scheduled_update?: never; check_for_update?: never; connector?: never; create_matter?: never; create_thread?: never; edit_queued_prompt?: never; first_act?: never; forget_matter?: never; install_update?: never; mark_seen?: never; mark_thread_done?: never; open_matter?: never; refresh_limits?: never; relocate_matter?: never; remove_queued_prompt?: never; remove_sandbox_setup?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; retry_protection?: never; revoke_allowed_site?: never; scan_folder?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_privacy_settings?: never; set_skill_pack?: never; set_tool_settings?: never; set_ui_settings?: never; set_update_mode?: never; snooze_thread?: never; sweep_done?: never; undo_step?: never; update_matter?: never } | 
+({ install_browser: Record<string, never> }) & { allow_blocked_site?: never; answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; cancel_browser_install?: never; cancel_scan?: never; cancel_scheduled_update?: never; check_for_update?: never; connector?: never; create_matter?: never; create_thread?: never; decide_revisions?: never; edit_queued_prompt?: never; first_act?: never; forget_matter?: never; install_update?: never; mark_seen?: never; mark_thread_done?: never; open_matter?: never; recheck_browser_policy?: never; refresh_limits?: never; relocate_matter?: never; remove_queued_prompt?: never; remove_sandbox_setup?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; retry_protection?: never; revoke_allowed_site?: never; scan_folder?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_network?: never; set_privacy_settings?: never; set_skill_pack?: never; set_tool_settings?: never; set_ui_settings?: never; set_update_mode?: never; snooze_thread?: never; sweep_done?: never; undo_step?: never; update_matter?: never } | 
 /**
  *  Stop the running Chrome for Testing download: it ends `Failed` with `cancelled` and
  *  leaves no folder. With none running it does nothing. Answers `Done`, with no receipt.
  *  JSON: `{"cancel_browser_install": {}}`.
  */
-({ cancel_browser_install: Record<string, never> }) & { allow_blocked_site?: never; answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; cancel_scan?: never; cancel_scheduled_update?: never; check_for_update?: never; connector?: never; create_matter?: never; create_thread?: never; edit_queued_prompt?: never; first_act?: never; forget_matter?: never; install_browser?: never; install_update?: never; mark_seen?: never; mark_thread_done?: never; open_matter?: never; refresh_limits?: never; relocate_matter?: never; remove_queued_prompt?: never; remove_sandbox_setup?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; retry_protection?: never; revoke_allowed_site?: never; scan_folder?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_privacy_settings?: never; set_skill_pack?: never; set_tool_settings?: never; set_ui_settings?: never; set_update_mode?: never; snooze_thread?: never; sweep_done?: never; undo_step?: never; update_matter?: never } | 
+({ cancel_browser_install: Record<string, never> }) & { allow_blocked_site?: never; answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; cancel_scan?: never; cancel_scheduled_update?: never; check_for_update?: never; connector?: never; create_matter?: never; create_thread?: never; decide_revisions?: never; edit_queued_prompt?: never; first_act?: never; forget_matter?: never; install_browser?: never; install_update?: never; mark_seen?: never; mark_thread_done?: never; open_matter?: never; recheck_browser_policy?: never; refresh_limits?: never; relocate_matter?: never; remove_queued_prompt?: never; remove_sandbox_setup?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; retry_protection?: never; revoke_allowed_site?: never; scan_folder?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_network?: never; set_privacy_settings?: never; set_skill_pack?: never; set_tool_settings?: never; set_ui_settings?: never; set_update_mode?: never; snooze_thread?: never; sweep_done?: never; undo_step?: never; update_matter?: never } | 
+/**
+ *  Read the firm's browser policy again now, after the lawyer's "Try again" on a browser
+ *  whose policy could not be read (`BrowserPolicyUnreadable`). Answers `Done` at once and
+ *  logs nothing; every app subscriber gets `HostEvent::BrowserPolicy` with `Checking`, then
+ *  what the read found. One read at a time: while one runs it answers `Done` and the running
+ *  read's event answers both. No session restarts: the next session started reads the policy
+ *  again, as every launch does. Only the main window sends it. JSON:
+ *  `{"recheck_browser_policy": {}}`.
+ */
+({ recheck_browser_policy: Record<string, never> }) & { allow_blocked_site?: never; answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; cancel_browser_install?: never; cancel_scan?: never; cancel_scheduled_update?: never; check_for_update?: never; connector?: never; create_matter?: never; create_thread?: never; decide_revisions?: never; edit_queued_prompt?: never; first_act?: never; forget_matter?: never; install_browser?: never; install_update?: never; mark_seen?: never; mark_thread_done?: never; open_matter?: never; refresh_limits?: never; relocate_matter?: never; remove_queued_prompt?: never; remove_sandbox_setup?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; retry_protection?: never; revoke_allowed_site?: never; scan_folder?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_network?: never; set_privacy_settings?: never; set_skill_pack?: never; set_tool_settings?: never; set_ui_settings?: never; set_update_mode?: never; snooze_thread?: never; sweep_done?: never; undo_step?: never; update_matter?: never } | 
 /**
  *  Check for a newer version now, from `idle` or `failed` (decision record 0037). Answers
  *  `Done`; the state reaches app subscribers as `HostEvent::UpdateChanged`. In a state that
  *  does not take it, `command.invalid`. JSON: `{"check_for_update": {}}`, an object like every
  *  command's, so a window can test a command's kind with `in`.
  */
-({ check_for_update: Record<string, never> }) & { allow_blocked_site?: never; answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; cancel_browser_install?: never; cancel_scan?: never; cancel_scheduled_update?: never; connector?: never; create_matter?: never; create_thread?: never; edit_queued_prompt?: never; first_act?: never; forget_matter?: never; install_browser?: never; install_update?: never; mark_seen?: never; mark_thread_done?: never; open_matter?: never; refresh_limits?: never; relocate_matter?: never; remove_queued_prompt?: never; remove_sandbox_setup?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; retry_protection?: never; revoke_allowed_site?: never; scan_folder?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_privacy_settings?: never; set_skill_pack?: never; set_tool_settings?: never; set_ui_settings?: never; set_update_mode?: never; snooze_thread?: never; sweep_done?: never; undo_step?: never; update_matter?: never } | 
+({ check_for_update: Record<string, never> }) & { allow_blocked_site?: never; answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; cancel_browser_install?: never; cancel_scan?: never; cancel_scheduled_update?: never; connector?: never; create_matter?: never; create_thread?: never; decide_revisions?: never; edit_queued_prompt?: never; first_act?: never; forget_matter?: never; install_browser?: never; install_update?: never; mark_seen?: never; mark_thread_done?: never; open_matter?: never; recheck_browser_policy?: never; refresh_limits?: never; relocate_matter?: never; remove_queued_prompt?: never; remove_sandbox_setup?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; retry_protection?: never; revoke_allowed_site?: never; scan_folder?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_network?: never; set_privacy_settings?: never; set_skill_pack?: never; set_tool_settings?: never; set_ui_settings?: never; set_update_mode?: never; snooze_thread?: never; sweep_done?: never; undo_step?: never; update_matter?: never } | 
 /**
  *  Install the `ready` version: `now` stops running turns first, `after_turn` waits until
  *  no thread has one (`scheduled`). Answers `Done` before the host starts to stop. In a
@@ -2436,12 +2605,12 @@ export type HostCommand =
 ({ install_update: {
 	/**  When to install. */
 	when: InstallWhen,
-} }) & { allow_blocked_site?: never; answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; cancel_browser_install?: never; cancel_scan?: never; cancel_scheduled_update?: never; check_for_update?: never; connector?: never; create_matter?: never; create_thread?: never; edit_queued_prompt?: never; first_act?: never; forget_matter?: never; install_browser?: never; mark_seen?: never; mark_thread_done?: never; open_matter?: never; refresh_limits?: never; relocate_matter?: never; remove_queued_prompt?: never; remove_sandbox_setup?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; retry_protection?: never; revoke_allowed_site?: never; scan_folder?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_privacy_settings?: never; set_skill_pack?: never; set_tool_settings?: never; set_ui_settings?: never; set_update_mode?: never; snooze_thread?: never; sweep_done?: never; undo_step?: never; update_matter?: never } | 
+} }) & { allow_blocked_site?: never; answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; cancel_browser_install?: never; cancel_scan?: never; cancel_scheduled_update?: never; check_for_update?: never; connector?: never; create_matter?: never; create_thread?: never; decide_revisions?: never; edit_queued_prompt?: never; first_act?: never; forget_matter?: never; install_browser?: never; mark_seen?: never; mark_thread_done?: never; open_matter?: never; recheck_browser_policy?: never; refresh_limits?: never; relocate_matter?: never; remove_queued_prompt?: never; remove_sandbox_setup?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; retry_protection?: never; revoke_allowed_site?: never; scan_folder?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_network?: never; set_privacy_settings?: never; set_skill_pack?: never; set_tool_settings?: never; set_ui_settings?: never; set_update_mode?: never; snooze_thread?: never; sweep_done?: never; undo_step?: never; update_matter?: never } | 
 /**
  *  Take a `scheduled` install back to `ready`. Answers `Done`; in another state,
  *  `command.invalid`. Only the main window sends it. JSON: `{"cancel_scheduled_update": {}}`.
  */
-({ cancel_scheduled_update: Record<string, never> }) & { allow_blocked_site?: never; answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; cancel_browser_install?: never; cancel_scan?: never; check_for_update?: never; connector?: never; create_matter?: never; create_thread?: never; edit_queued_prompt?: never; first_act?: never; forget_matter?: never; install_browser?: never; install_update?: never; mark_seen?: never; mark_thread_done?: never; open_matter?: never; refresh_limits?: never; relocate_matter?: never; remove_queued_prompt?: never; remove_sandbox_setup?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; retry_protection?: never; revoke_allowed_site?: never; scan_folder?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_privacy_settings?: never; set_skill_pack?: never; set_tool_settings?: never; set_ui_settings?: never; set_update_mode?: never; snooze_thread?: never; sweep_done?: never; undo_step?: never; update_matter?: never } | 
+({ cancel_scheduled_update: Record<string, never> }) & { allow_blocked_site?: never; answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; cancel_browser_install?: never; cancel_scan?: never; check_for_update?: never; connector?: never; create_matter?: never; create_thread?: never; decide_revisions?: never; edit_queued_prompt?: never; first_act?: never; forget_matter?: never; install_browser?: never; install_update?: never; mark_seen?: never; mark_thread_done?: never; open_matter?: never; recheck_browser_policy?: never; refresh_limits?: never; relocate_matter?: never; remove_queued_prompt?: never; remove_sandbox_setup?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; retry_protection?: never; revoke_allowed_site?: never; scan_folder?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_network?: never; set_privacy_settings?: never; set_skill_pack?: never; set_tool_settings?: never; set_ui_settings?: never; set_update_mode?: never; snooze_thread?: never; sweep_done?: never; undo_step?: never; update_matter?: never } | 
 /**
  *  Change `update.mode` to `auto` or `notify`; `none` is refused as `command.invalid`,
  *  since it comes only from policy. A policy-locked key gives `settings.locked`. Answers
@@ -2450,13 +2619,13 @@ export type HostCommand =
 ({ set_update_mode: {
 	/**  The new mode. */
 	mode: UpdateMode,
-} }) & { allow_blocked_site?: never; answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; cancel_browser_install?: never; cancel_scan?: never; cancel_scheduled_update?: never; check_for_update?: never; connector?: never; create_matter?: never; create_thread?: never; edit_queued_prompt?: never; first_act?: never; forget_matter?: never; install_browser?: never; install_update?: never; mark_seen?: never; mark_thread_done?: never; open_matter?: never; refresh_limits?: never; relocate_matter?: never; remove_queued_prompt?: never; remove_sandbox_setup?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; retry_protection?: never; revoke_allowed_site?: never; scan_folder?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_privacy_settings?: never; set_skill_pack?: never; set_tool_settings?: never; set_ui_settings?: never; snooze_thread?: never; sweep_done?: never; undo_step?: never; update_matter?: never } | 
+} }) & { allow_blocked_site?: never; answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; cancel_browser_install?: never; cancel_scan?: never; cancel_scheduled_update?: never; check_for_update?: never; connector?: never; create_matter?: never; create_thread?: never; decide_revisions?: never; edit_queued_prompt?: never; first_act?: never; forget_matter?: never; install_browser?: never; install_update?: never; mark_seen?: never; mark_thread_done?: never; open_matter?: never; recheck_browser_policy?: never; refresh_limits?: never; relocate_matter?: never; remove_queued_prompt?: never; remove_sandbox_setup?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; retry_protection?: never; revoke_allowed_site?: never; scan_folder?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_network?: never; set_privacy_settings?: never; set_skill_pack?: never; set_tool_settings?: never; set_ui_settings?: never; snooze_thread?: never; sweep_done?: never; undo_step?: never; update_matter?: never } | 
 /**
  *  The data connectors and the case-law hint (R24, `command/connectors.rs`). None stores a
  *  receipt; each answers `Done`, and the state reaches app subscribers as
  *  `HostEvent::ConnectorsChanged`. JSON: `{"connector": {"add": {"id": "case-law"}}}`.
  */
-({ connector: ConnectorCommand }) & { allow_blocked_site?: never; answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; cancel_browser_install?: never; cancel_scan?: never; cancel_scheduled_update?: never; check_for_update?: never; create_matter?: never; create_thread?: never; edit_queued_prompt?: never; first_act?: never; forget_matter?: never; install_browser?: never; install_update?: never; mark_seen?: never; mark_thread_done?: never; open_matter?: never; refresh_limits?: never; relocate_matter?: never; remove_queued_prompt?: never; remove_sandbox_setup?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; retry_protection?: never; revoke_allowed_site?: never; scan_folder?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_privacy_settings?: never; set_skill_pack?: never; set_tool_settings?: never; set_ui_settings?: never; set_update_mode?: never; snooze_thread?: never; sweep_done?: never; undo_step?: never; update_matter?: never } | 
+({ connector: ConnectorCommand }) & { allow_blocked_site?: never; answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; cancel_browser_install?: never; cancel_scan?: never; cancel_scheduled_update?: never; check_for_update?: never; create_matter?: never; create_thread?: never; decide_revisions?: never; edit_queued_prompt?: never; first_act?: never; forget_matter?: never; install_browser?: never; install_update?: never; mark_seen?: never; mark_thread_done?: never; open_matter?: never; recheck_browser_policy?: never; refresh_limits?: never; relocate_matter?: never; remove_queued_prompt?: never; remove_sandbox_setup?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; retry_protection?: never; revoke_allowed_site?: never; scan_folder?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_network?: never; set_privacy_settings?: never; set_skill_pack?: never; set_tool_settings?: never; set_ui_settings?: never; set_update_mode?: never; snooze_thread?: never; sweep_done?: never; undo_step?: never; update_matter?: never } | 
 /**
  *  Try the sandbox's set-up or check again (decision record 0051): the set-up, with its
  *  administrator prompt, when `ProtectionView::retry_asks_admin`, else a check. Answered
@@ -2465,14 +2634,14 @@ export type HostCommand =
  *  `HostEvent::ProtectionChanged`. No receipt. `command.invalid` with no sandbox, or while a
  *  removal runs. JSON: `{"retry_protection": {}}`.
  */
-({ retry_protection: Record<string, never> }) & { allow_blocked_site?: never; answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; cancel_browser_install?: never; cancel_scan?: never; cancel_scheduled_update?: never; check_for_update?: never; connector?: never; create_matter?: never; create_thread?: never; edit_queued_prompt?: never; first_act?: never; forget_matter?: never; install_browser?: never; install_update?: never; mark_seen?: never; mark_thread_done?: never; open_matter?: never; refresh_limits?: never; relocate_matter?: never; remove_queued_prompt?: never; remove_sandbox_setup?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; revoke_allowed_site?: never; scan_folder?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_privacy_settings?: never; set_skill_pack?: never; set_tool_settings?: never; set_ui_settings?: never; set_update_mode?: never; snooze_thread?: never; sweep_done?: never; undo_step?: never; update_matter?: never } | 
+({ retry_protection: Record<string, never> }) & { allow_blocked_site?: never; answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; cancel_browser_install?: never; cancel_scan?: never; cancel_scheduled_update?: never; check_for_update?: never; connector?: never; create_matter?: never; create_thread?: never; decide_revisions?: never; edit_queued_prompt?: never; first_act?: never; forget_matter?: never; install_browser?: never; install_update?: never; mark_seen?: never; mark_thread_done?: never; open_matter?: never; recheck_browser_policy?: never; refresh_limits?: never; relocate_matter?: never; remove_queued_prompt?: never; remove_sandbox_setup?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; revoke_allowed_site?: never; scan_folder?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_network?: never; set_privacy_settings?: never; set_skill_pack?: never; set_tool_settings?: never; set_ui_settings?: never; set_update_mode?: never; snooze_thread?: never; sweep_done?: never; undo_step?: never; update_matter?: never } | 
 /**
  *  Remove the sandbox's set-up from this computer, after one administrator prompt (decision
  *  record 0051); each matter then gets `HostEvent::ProtectionChanged`. Answered as
  *  `RetryProtection` is. No receipt. `command.invalid` with no set-up, or while a set-up
  *  runs. JSON: `{"remove_sandbox_setup": {}}`.
  */
-({ remove_sandbox_setup: Record<string, never> }) & { allow_blocked_site?: never; answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; cancel_browser_install?: never; cancel_scan?: never; cancel_scheduled_update?: never; check_for_update?: never; connector?: never; create_matter?: never; create_thread?: never; edit_queued_prompt?: never; first_act?: never; forget_matter?: never; install_browser?: never; install_update?: never; mark_seen?: never; mark_thread_done?: never; open_matter?: never; refresh_limits?: never; relocate_matter?: never; remove_queued_prompt?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; retry_protection?: never; revoke_allowed_site?: never; scan_folder?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_privacy_settings?: never; set_skill_pack?: never; set_tool_settings?: never; set_ui_settings?: never; set_update_mode?: never; snooze_thread?: never; sweep_done?: never; undo_step?: never; update_matter?: never } | 
+({ remove_sandbox_setup: Record<string, never> }) & { allow_blocked_site?: never; answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; cancel_browser_install?: never; cancel_scan?: never; cancel_scheduled_update?: never; check_for_update?: never; connector?: never; create_matter?: never; create_thread?: never; decide_revisions?: never; edit_queued_prompt?: never; first_act?: never; forget_matter?: never; install_browser?: never; install_update?: never; mark_seen?: never; mark_thread_done?: never; open_matter?: never; recheck_browser_policy?: never; refresh_limits?: never; relocate_matter?: never; remove_queued_prompt?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; retry_protection?: never; revoke_allowed_site?: never; scan_folder?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_network?: never; set_privacy_settings?: never; set_skill_pack?: never; set_tool_settings?: never; set_ui_settings?: never; set_update_mode?: never; snooze_thread?: never; sweep_done?: never; undo_step?: never; update_matter?: never } | 
 /**
  *  Allow the site a `HostEvent::SiteBlocked` notice named, although the unsafe-site block
  *  list names it (decision record 0053, PR 2): the exact host the notice named, for the
@@ -2487,7 +2656,7 @@ export type HostCommand =
 	block_id: BlockedSiteId,
 	/**  How far the allow reaches. */
 	scope: AllowScope,
-} }) & { answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; cancel_browser_install?: never; cancel_scan?: never; cancel_scheduled_update?: never; check_for_update?: never; connector?: never; create_matter?: never; create_thread?: never; edit_queued_prompt?: never; first_act?: never; forget_matter?: never; install_browser?: never; install_update?: never; mark_seen?: never; mark_thread_done?: never; open_matter?: never; refresh_limits?: never; relocate_matter?: never; remove_queued_prompt?: never; remove_sandbox_setup?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; retry_protection?: never; revoke_allowed_site?: never; scan_folder?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_privacy_settings?: never; set_skill_pack?: never; set_tool_settings?: never; set_ui_settings?: never; set_update_mode?: never; snooze_thread?: never; sweep_done?: never; undo_step?: never; update_matter?: never } | 
+} }) & { answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; cancel_browser_install?: never; cancel_scan?: never; cancel_scheduled_update?: never; check_for_update?: never; connector?: never; create_matter?: never; create_thread?: never; decide_revisions?: never; edit_queued_prompt?: never; first_act?: never; forget_matter?: never; install_browser?: never; install_update?: never; mark_seen?: never; mark_thread_done?: never; open_matter?: never; recheck_browser_policy?: never; refresh_limits?: never; relocate_matter?: never; remove_queued_prompt?: never; remove_sandbox_setup?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; retry_protection?: never; revoke_allowed_site?: never; scan_folder?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_network?: never; set_privacy_settings?: never; set_skill_pack?: never; set_tool_settings?: never; set_ui_settings?: never; set_update_mode?: never; snooze_thread?: never; sweep_done?: never; undo_step?: never; update_matter?: never } | 
 /**
  *  Take an allow back: the block list refuses `host` again at the next request. `matter`
  *  names the matter of a `Matter` allow and is left out for `Always`. Taking back an allow
@@ -2501,7 +2670,22 @@ export type HostCommand =
 	scope: AllowScope,
 	/**  The allow's matter, for `Matter`; left out for `Always`. */
 	matter?: MatterId,
-} }) & { allow_blocked_site?: never; answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; cancel_browser_install?: never; cancel_scan?: never; cancel_scheduled_update?: never; check_for_update?: never; connector?: never; create_matter?: never; create_thread?: never; edit_queued_prompt?: never; first_act?: never; forget_matter?: never; install_browser?: never; install_update?: never; mark_seen?: never; mark_thread_done?: never; open_matter?: never; refresh_limits?: never; relocate_matter?: never; remove_queued_prompt?: never; remove_sandbox_setup?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; retry_protection?: never; scan_folder?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_privacy_settings?: never; set_skill_pack?: never; set_tool_settings?: never; set_ui_settings?: never; set_update_mode?: never; snooze_thread?: never; sweep_done?: never; undo_step?: never; update_matter?: never };
+} }) & { allow_blocked_site?: never; answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; cancel_browser_install?: never; cancel_scan?: never; cancel_scheduled_update?: never; check_for_update?: never; connector?: never; create_matter?: never; create_thread?: never; decide_revisions?: never; edit_queued_prompt?: never; first_act?: never; forget_matter?: never; install_browser?: never; install_update?: never; mark_seen?: never; mark_thread_done?: never; open_matter?: never; recheck_browser_policy?: never; refresh_limits?: never; relocate_matter?: never; remove_queued_prompt?: never; remove_sandbox_setup?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; retry_protection?: never; scan_folder?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_network?: never; set_privacy_settings?: never; set_skill_pack?: never; set_tool_settings?: never; set_ui_settings?: never; set_update_mode?: never; snooze_thread?: never; sweep_done?: never; undo_step?: never; update_matter?: never } | 
+/**
+ *  Accept or reject tracked changes of a matter's Word file (`revisions.rs`); refused
+ *  while a turn runs in the matter. Answers `RevisionsDecided`; undo it with
+ *  `RestoreVersion` of its `before` for its one file. JSON: `{"decide_revisions": {..}}`.
+ */
+({ decide_revisions: DecideRevisions }) & { allow_blocked_site?: never; answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; cancel_browser_install?: never; cancel_scan?: never; cancel_scheduled_update?: never; check_for_update?: never; connector?: never; create_matter?: never; create_thread?: never; edit_queued_prompt?: never; first_act?: never; forget_matter?: never; install_browser?: never; install_update?: never; mark_seen?: never; mark_thread_done?: never; open_matter?: never; recheck_browser_policy?: never; refresh_limits?: never; relocate_matter?: never; remove_queued_prompt?: never; remove_sandbox_setup?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; retry_protection?: never; revoke_allowed_site?: never; scan_folder?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_network?: never; set_privacy_settings?: never; set_skill_pack?: never; set_tool_settings?: never; set_ui_settings?: never; set_update_mode?: never; snooze_thread?: never; sweep_done?: never; undo_step?: never; update_matter?: never } | 
+/**
+ *  The window's network signal (D-050): `false` at the webview's `offline` event, `true` at
+ *  `online`, sent on change only. While offline, a running turn whose agent sends nothing for
+ *  30 s ends `agent.offline`. Answers `Done`, no receipt; only the main window sends it.
+ */
+({ set_network: {
+	/**  Whether the window's `navigator.onLine` says the computer is online. */
+	online: boolean,
+} }) & { allow_blocked_site?: never; answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; cancel_browser_install?: never; cancel_scan?: never; cancel_scheduled_update?: never; check_for_update?: never; connector?: never; create_matter?: never; create_thread?: never; decide_revisions?: never; edit_queued_prompt?: never; first_act?: never; forget_matter?: never; install_browser?: never; install_update?: never; mark_seen?: never; mark_thread_done?: never; open_matter?: never; recheck_browser_policy?: never; refresh_limits?: never; relocate_matter?: never; remove_queued_prompt?: never; remove_sandbox_setup?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; retry_protection?: never; revoke_allowed_site?: never; scan_folder?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_privacy_settings?: never; set_skill_pack?: never; set_tool_settings?: never; set_ui_settings?: never; set_update_mode?: never; snooze_thread?: never; sweep_done?: never; undo_step?: never; update_matter?: never };
 
 /**
  *  What every host call returns on failure.
@@ -2539,9 +2723,9 @@ export type HostError = {
 /**  What a subscriber receives. Never logged (the log holds only `DomainEvent`s). */
 export type HostEvent = 
 /**  View patches, for a view subscription. */
-({ patches: PatchBatch }) & { account_limits_changed?: never; browser_install?: never; case_law_hint?: never; caught_up?: never; connectors_changed?: never; events?: never; folder_scanned?: never; limits_view_changed?: never; matters_changed?: never; protection_changed?: never; protection_view_changed?: never; settings_changed?: never; site_blocked?: never; threads_changed?: never; update_changed?: never } | 
+({ patches: PatchBatch }) & { account_limits_changed?: never; browser_install?: never; browser_policy?: never; case_law_hint?: never; caught_up?: never; connectors_changed?: never; events?: never; folder_scanned?: never; limits_view_changed?: never; matters_changed?: never; papers_changed?: never; protection_changed?: never; protection_view_changed?: never; settings_changed?: never; site_blocked?: never; threads_changed?: never; update_changed?: never } | 
 /**  Envelopes in `seq` order with no gap or duplicate, for an event subscription. */
-({ events: Envelope[] }) & { account_limits_changed?: never; browser_install?: never; case_law_hint?: never; caught_up?: never; connectors_changed?: never; folder_scanned?: never; limits_view_changed?: never; matters_changed?: never; patches?: never; protection_changed?: never; protection_view_changed?: never; settings_changed?: never; site_blocked?: never; threads_changed?: never; update_changed?: never } | 
+({ events: Envelope[] }) & { account_limits_changed?: never; browser_install?: never; browser_policy?: never; case_law_hint?: never; caught_up?: never; connectors_changed?: never; folder_scanned?: never; limits_view_changed?: never; matters_changed?: never; papers_changed?: never; patches?: never; protection_changed?: never; protection_view_changed?: never; settings_changed?: never; site_blocked?: never; threads_changed?: never; update_changed?: never } | 
 /**  Once per event subscription, between the replayed envelopes and the live ones. */
 ({ caught_up: {
 	/**  The stream. */
@@ -2551,19 +2735,19 @@ export type HostEvent =
 	 *  creation event, so it is at least 1.
 	 */
 	last_seq: Seq,
-} }) & { account_limits_changed?: never; browser_install?: never; case_law_hint?: never; connectors_changed?: never; events?: never; folder_scanned?: never; limits_view_changed?: never; matters_changed?: never; patches?: never; protection_changed?: never; protection_view_changed?: never; settings_changed?: never; site_blocked?: never; threads_changed?: never; update_changed?: never } | 
+} }) & { account_limits_changed?: never; browser_install?: never; browser_policy?: never; case_law_hint?: never; connectors_changed?: never; events?: never; folder_scanned?: never; limits_view_changed?: never; matters_changed?: never; papers_changed?: never; patches?: never; protection_changed?: never; protection_view_changed?: never; settings_changed?: never; site_blocked?: never; threads_changed?: never; update_changed?: never } | 
 /**  An account's limits changed (not part of any stream). */
-({ account_limits_changed: AccountLimits }) & { browser_install?: never; case_law_hint?: never; caught_up?: never; connectors_changed?: never; events?: never; folder_scanned?: never; limits_view_changed?: never; matters_changed?: never; patches?: never; protection_changed?: never; protection_view_changed?: never; settings_changed?: never; site_blocked?: never; threads_changed?: never; update_changed?: never } | 
+({ account_limits_changed: AccountLimits }) & { browser_install?: never; browser_policy?: never; case_law_hint?: never; caught_up?: never; connectors_changed?: never; events?: never; folder_scanned?: never; limits_view_changed?: never; matters_changed?: never; papers_changed?: never; patches?: never; protection_changed?: never; protection_view_changed?: never; settings_changed?: never; site_blocked?: never; threads_changed?: never; update_changed?: never } | 
 /**
  *  The whole limits view after a change. Never logged and in no stream: it reaches
  *  `subscribe_limits` subscribers only (R16).
  */
-({ limits_view_changed: LimitsView }) & { account_limits_changed?: never; browser_install?: never; case_law_hint?: never; caught_up?: never; connectors_changed?: never; events?: never; folder_scanned?: never; matters_changed?: never; patches?: never; protection_changed?: never; protection_view_changed?: never; settings_changed?: never; site_blocked?: never; threads_changed?: never; update_changed?: never } | 
+({ limits_view_changed: LimitsView }) & { account_limits_changed?: never; browser_install?: never; browser_policy?: never; case_law_hint?: never; caught_up?: never; connectors_changed?: never; events?: never; folder_scanned?: never; matters_changed?: never; papers_changed?: never; patches?: never; protection_changed?: never; protection_view_changed?: never; settings_changed?: never; site_blocked?: never; threads_changed?: never; update_changed?: never } | 
 /**
  *  The display settings changed: the whole view after the change. App-wide, never part of
  *  a stream: it reaches app subscribers only.
  */
-({ settings_changed: SettingsView }) & { account_limits_changed?: never; browser_install?: never; case_law_hint?: never; caught_up?: never; connectors_changed?: never; events?: never; folder_scanned?: never; limits_view_changed?: never; matters_changed?: never; patches?: never; protection_changed?: never; protection_view_changed?: never; site_blocked?: never; threads_changed?: never; update_changed?: never } | 
+({ settings_changed: SettingsView }) & { account_limits_changed?: never; browser_install?: never; browser_policy?: never; case_law_hint?: never; caught_up?: never; connectors_changed?: never; events?: never; folder_scanned?: never; limits_view_changed?: never; matters_changed?: never; papers_changed?: never; patches?: never; protection_changed?: never; protection_view_changed?: never; site_blocked?: never; threads_changed?: never; update_changed?: never } | 
 /**
  *  Where the Chrome for Testing download that `HostCommand::InstallBrowser` started stands.
  *  App-wide, never logged and in no stream: it reaches app subscribers only, as each state
@@ -2573,34 +2757,44 @@ export type HostEvent =
 ({ browser_install: {
 	/**  Where it stands. */
 	state: BrowserInstallState,
-} }) & { account_limits_changed?: never; case_law_hint?: never; caught_up?: never; connectors_changed?: never; events?: never; folder_scanned?: never; limits_view_changed?: never; matters_changed?: never; patches?: never; protection_changed?: never; protection_view_changed?: never; settings_changed?: never; site_blocked?: never; threads_changed?: never; update_changed?: never } | 
+} }) & { account_limits_changed?: never; browser_policy?: never; case_law_hint?: never; caught_up?: never; connectors_changed?: never; events?: never; folder_scanned?: never; limits_view_changed?: never; matters_changed?: never; papers_changed?: never; patches?: never; protection_changed?: never; protection_view_changed?: never; settings_changed?: never; site_blocked?: never; threads_changed?: never; update_changed?: never } | 
+/**
+ *  What the re-read of the firm's browser policy that `HostCommand::RecheckBrowserPolicy`
+ *  asked for found: `Checking` as it starts, then its end. App-wide, never logged and in no
+ *  stream: it reaches app subscribers only. Every app catch-up carries the latest one; once
+ *  there is one, a session launch's read of the policy keeps it current.
+ */
+({ browser_policy: {
+	/**  What the read found. */
+	state: BrowserPolicyState,
+} }) & { account_limits_changed?: never; browser_install?: never; case_law_hint?: never; caught_up?: never; connectors_changed?: never; events?: never; folder_scanned?: never; limits_view_changed?: never; matters_changed?: never; papers_changed?: never; patches?: never; protection_changed?: never; protection_view_changed?: never; settings_changed?: never; site_blocked?: never; threads_changed?: never; update_changed?: never } | 
 /**
  *  Rows of the matter list changed, came or went; or, with `all`, the whole list. App-wide:
  *  it reaches app subscribers only.
  */
-({ matters_changed: MattersChanged }) & { account_limits_changed?: never; browser_install?: never; case_law_hint?: never; caught_up?: never; connectors_changed?: never; events?: never; folder_scanned?: never; limits_view_changed?: never; patches?: never; protection_changed?: never; protection_view_changed?: never; settings_changed?: never; site_blocked?: never; threads_changed?: never; update_changed?: never } | 
+({ matters_changed: MattersChanged }) & { account_limits_changed?: never; browser_install?: never; browser_policy?: never; case_law_hint?: never; caught_up?: never; connectors_changed?: never; events?: never; folder_scanned?: never; limits_view_changed?: never; papers_changed?: never; patches?: never; protection_changed?: never; protection_view_changed?: never; settings_changed?: never; site_blocked?: never; threads_changed?: never; update_changed?: never } | 
 /**
  *  Rows of one matter's thread list changed or came; or, with `all`, the matter's whole
  *  list. App-wide: it reaches app subscribers only, each of which drops the rows of threads
  *  it has open.
  */
-({ threads_changed: ThreadsChanged }) & { account_limits_changed?: never; browser_install?: never; case_law_hint?: never; caught_up?: never; connectors_changed?: never; events?: never; folder_scanned?: never; limits_view_changed?: never; matters_changed?: never; patches?: never; protection_changed?: never; protection_view_changed?: never; settings_changed?: never; site_blocked?: never; update_changed?: never } | 
+({ threads_changed: ThreadsChanged }) & { account_limits_changed?: never; browser_install?: never; browser_policy?: never; case_law_hint?: never; caught_up?: never; connectors_changed?: never; events?: never; folder_scanned?: never; limits_view_changed?: never; matters_changed?: never; papers_changed?: never; patches?: never; protection_changed?: never; protection_view_changed?: never; settings_changed?: never; site_blocked?: never; update_changed?: never } | 
 /**
  *  How far a folder scan has got (`HostCommand::ScanFolder`). App-wide, never part of a
  *  stream: it reaches app subscribers only.
  */
-({ folder_scanned: FolderScanned }) & { account_limits_changed?: never; browser_install?: never; case_law_hint?: never; caught_up?: never; connectors_changed?: never; events?: never; limits_view_changed?: never; matters_changed?: never; patches?: never; protection_changed?: never; protection_view_changed?: never; settings_changed?: never; site_blocked?: never; threads_changed?: never; update_changed?: never } | 
+({ folder_scanned: FolderScanned }) & { account_limits_changed?: never; browser_install?: never; browser_policy?: never; case_law_hint?: never; caught_up?: never; connectors_changed?: never; events?: never; limits_view_changed?: never; matters_changed?: never; papers_changed?: never; patches?: never; protection_changed?: never; protection_view_changed?: never; settings_changed?: never; site_blocked?: never; threads_changed?: never; update_changed?: never } | 
 /**
  *  The updater's state changed: the whole view after the change (decision record 0037).
  *  App-wide, never part of a stream: it reaches app subscribers only.
  */
-({ update_changed: UpdateView }) & { account_limits_changed?: never; browser_install?: never; case_law_hint?: never; caught_up?: never; connectors_changed?: never; events?: never; folder_scanned?: never; limits_view_changed?: never; matters_changed?: never; patches?: never; protection_changed?: never; protection_view_changed?: never; settings_changed?: never; site_blocked?: never; threads_changed?: never } | 
+({ update_changed: UpdateView }) & { account_limits_changed?: never; browser_install?: never; browser_policy?: never; case_law_hint?: never; caught_up?: never; connectors_changed?: never; events?: never; folder_scanned?: never; limits_view_changed?: never; matters_changed?: never; papers_changed?: never; patches?: never; protection_changed?: never; protection_view_changed?: never; settings_changed?: never; site_blocked?: never; threads_changed?: never } | 
 /**
  *  The connectors' state changed: the whole state after the change (R24). App-wide, never
  *  logged and in no stream: it reaches app subscribers only, and every app catch-up carries
  *  the latest one, as for `SettingsChanged`.
  */
-({ connectors_changed: ConnectorsState }) & { account_limits_changed?: never; browser_install?: never; case_law_hint?: never; caught_up?: never; events?: never; folder_scanned?: never; limits_view_changed?: never; matters_changed?: never; patches?: never; protection_changed?: never; protection_view_changed?: never; settings_changed?: never; site_blocked?: never; threads_changed?: never; update_changed?: never } | 
+({ connectors_changed: ConnectorsState }) & { account_limits_changed?: never; browser_install?: never; browser_policy?: never; case_law_hint?: never; caught_up?: never; events?: never; folder_scanned?: never; limits_view_changed?: never; matters_changed?: never; papers_changed?: never; patches?: never; protection_changed?: never; protection_view_changed?: never; settings_changed?: never; site_blocked?: never; threads_changed?: never; update_changed?: never } | 
 /**
  *  A turn's web searches looked like Indian case law and the case-law connector is live but
  *  not added (R24): the app offers it under the answer. Once per matter, never after the
@@ -2614,7 +2808,7 @@ export type HostEvent =
 	thread: ThreadId,
 	/**  The turn whose searches fired it. */
 	turn: TurnId,
-} }) & { account_limits_changed?: never; browser_install?: never; caught_up?: never; connectors_changed?: never; events?: never; folder_scanned?: never; limits_view_changed?: never; matters_changed?: never; patches?: never; protection_changed?: never; protection_view_changed?: never; settings_changed?: never; site_blocked?: never; threads_changed?: never; update_changed?: never } | 
+} }) & { account_limits_changed?: never; browser_install?: never; browser_policy?: never; caught_up?: never; connectors_changed?: never; events?: never; folder_scanned?: never; limits_view_changed?: never; matters_changed?: never; papers_changed?: never; patches?: never; protection_changed?: never; protection_view_changed?: never; settings_changed?: never; site_blocked?: never; threads_changed?: never; update_changed?: never } | 
 /**
  *  A matter's protection changed (decision record 0051): the sandbox came or went, or why it
  *  is off changed. App-wide, never logged and in no stream: it reaches app subscribers
@@ -2626,7 +2820,17 @@ export type HostEvent =
 	matter: MatterId,
 	/**  Its protection now. */
 	protection: Protection,
-} }) & { account_limits_changed?: never; browser_install?: never; case_law_hint?: never; caught_up?: never; connectors_changed?: never; events?: never; folder_scanned?: never; limits_view_changed?: never; matters_changed?: never; patches?: never; protection_view_changed?: never; settings_changed?: never; site_blocked?: never; threads_changed?: never; update_changed?: never } | 
+} }) & { account_limits_changed?: never; browser_install?: never; browser_policy?: never; case_law_hint?: never; caught_up?: never; connectors_changed?: never; events?: never; folder_scanned?: never; limits_view_changed?: never; matters_changed?: never; papers_changed?: never; patches?: never; protection_view_changed?: never; settings_changed?: never; site_blocked?: never; threads_changed?: never; update_changed?: never } | 
+/**
+ *  What a matter's papers hold changed since `HostQuery::ListPapers` last answered: the
+ *  background scan found tracked changes in a `.docx` the listing showed without them, or
+ *  the files changed. The app lists the papers again. App-wide, never logged and in no
+ *  stream: it reaches app subscribers only, carries no list, and a catch-up carries none.
+ */
+({ papers_changed: {
+	/**  The matter. */
+	matter: MatterId,
+} }) & { account_limits_changed?: never; browser_install?: never; browser_policy?: never; case_law_hint?: never; caught_up?: never; connectors_changed?: never; events?: never; folder_scanned?: never; limits_view_changed?: never; matters_changed?: never; patches?: never; protection_changed?: never; protection_view_changed?: never; settings_changed?: never; site_blocked?: never; threads_changed?: never; update_changed?: never } | 
 /**
  *  This computer's protection view changed (decision record 0051): the sandbox's detection,
  *  the set-up work in progress, `retry_asks_admin`, or either protection setting. The whole
@@ -2637,7 +2841,7 @@ export type HostEvent =
 ({ protection_view_changed: {
 	/**  The view now. */
 	view: ProtectionView,
-} }) & { account_limits_changed?: never; browser_install?: never; case_law_hint?: never; caught_up?: never; connectors_changed?: never; events?: never; folder_scanned?: never; limits_view_changed?: never; matters_changed?: never; patches?: never; protection_changed?: never; settings_changed?: never; site_blocked?: never; threads_changed?: never; update_changed?: never } | 
+} }) & { account_limits_changed?: never; browser_install?: never; browser_policy?: never; case_law_hint?: never; caught_up?: never; connectors_changed?: never; events?: never; folder_scanned?: never; limits_view_changed?: never; matters_changed?: never; papers_changed?: never; patches?: never; protection_changed?: never; settings_changed?: never; site_blocked?: never; threads_changed?: never; update_changed?: never } | 
 /**
  *  The egress proxy refused a site the block list names (decision record 0053): the app
  *  tells the lawyer. App-wide, never logged and in no stream: it reaches app subscribers
@@ -2663,7 +2867,7 @@ export type HostEvent =
 	override_allowed: boolean,
 	/**  How many times the site was refused in this turn, at least 1. */
 	count: number,
-} }) & { account_limits_changed?: never; browser_install?: never; case_law_hint?: never; caught_up?: never; connectors_changed?: never; events?: never; folder_scanned?: never; limits_view_changed?: never; matters_changed?: never; patches?: never; protection_changed?: never; protection_view_changed?: never; settings_changed?: never; threads_changed?: never; update_changed?: never };
+} }) & { account_limits_changed?: never; browser_install?: never; browser_policy?: never; case_law_hint?: never; caught_up?: never; connectors_changed?: never; events?: never; folder_scanned?: never; limits_view_changed?: never; matters_changed?: never; papers_changed?: never; patches?: never; protection_changed?: never; protection_view_changed?: never; settings_changed?: never; threads_changed?: never; update_changed?: never };
 
 /**  A read. JSON: `"list_matters"` or `{"list_threads": {...}}`; unknown fields are refused. */
 export type HostQuery = 
@@ -2673,7 +2877,7 @@ export type HostQuery =
 ({ list_threads: {
 	/**  The matter. */
 	matter: MatterId,
-} }) & { compare_versions?: never; folder_support?: never; list_papers?: never; page_entries?: never; preview_restore?: never; preview_undo?: never; read_blob?: never; search?: never } | 
+} }) & { compare_versions?: never; folder_support?: never; list_papers?: never; list_revisions?: never; page_entries?: never; preview_restore?: never; preview_undo?: never; read_blob?: never; search?: never; word_blackline?: never } | 
 /**
  *  Older entries of a stream's view, for scrolling back: up to `limit` entries with an
  *  `order` below `before_order`, newest last.
@@ -2685,7 +2889,7 @@ export type HostQuery =
 	before_order?: Seq,
 	/**  How many. */
 	limit: PageLimit,
-} }) & { compare_versions?: never; folder_support?: never; list_papers?: never; list_threads?: never; preview_restore?: never; preview_undo?: never; read_blob?: never; search?: never } | 
+} }) & { compare_versions?: never; folder_support?: never; list_papers?: never; list_revisions?: never; list_threads?: never; preview_restore?: never; preview_undo?: never; read_blob?: never; search?: never; word_blackline?: never } | 
 /**
  *  The files that differ between two versions of a matter, or between a version and the
  *  matter's folder as it is now when `to` is `None` (nothing is stored).
@@ -2697,7 +2901,7 @@ export type HostQuery =
 	from: CheckpointId,
 	/**  The newer version; `None` (missing or `null` in JSON) is the folder now. */
 	to?: CheckpointId,
-} }) & { folder_support?: never; list_papers?: never; list_threads?: never; page_entries?: never; preview_restore?: never; preview_undo?: never; read_blob?: never; search?: never } | 
+} }) & { folder_support?: never; list_papers?: never; list_revisions?: never; list_threads?: never; page_entries?: never; preview_restore?: never; preview_undo?: never; read_blob?: never; search?: never; word_blackline?: never } | 
 /**  What restoring a version would do now, file by file. Writes nothing. */
 ({ preview_restore: {
 	/**  The matter. */
@@ -2706,7 +2910,9 @@ export type HostQuery =
 	checkpoint: CheckpointId,
 	/**  The whole matter or chosen files, as `RestoreVersion` takes it. */
 	scope: RestoreRequest,
-} }) & { compare_versions?: never; folder_support?: never; list_papers?: never; list_threads?: never; page_entries?: never; preview_undo?: never; read_blob?: never; search?: never } | 
+	/**  The `restore` checkpoint it would take back, as `RestoreVersion` takes it. */
+	undoes?: CheckpointId,
+} }) & { compare_versions?: never; folder_support?: never; list_papers?: never; list_revisions?: never; list_threads?: never; page_entries?: never; preview_undo?: never; read_blob?: never; search?: never; word_blackline?: never } | 
 /**
  *  What undoing a turn's step would meet now: the step's files whose content in the folder
  *  differs from the step's after-turn checkpoint (edited since). Writes nothing and logs
@@ -2718,7 +2924,7 @@ export type HostQuery =
 	thread: ThreadId,
 	/**  The step's turn. */
 	turn: TurnId,
-} }) & { compare_versions?: never; folder_support?: never; list_papers?: never; list_threads?: never; page_entries?: never; preview_restore?: never; read_blob?: never; search?: never } | 
+} }) & { compare_versions?: never; folder_support?: never; list_papers?: never; list_revisions?: never; list_threads?: never; page_entries?: never; preview_restore?: never; read_blob?: never; search?: never; word_blackline?: never } | 
 /**  Part of a blob's text. */
 ({ read_blob: {
 	/**  The blob. */
@@ -2727,14 +2933,14 @@ export type HostQuery =
 	offset: Count,
 	/**  How many bytes. */
 	len: ReadLen,
-} }) & { compare_versions?: never; folder_support?: never; list_papers?: never; list_threads?: never; page_entries?: never; preview_restore?: never; preview_undo?: never; search?: never } | 
+} }) & { compare_versions?: never; folder_support?: never; list_papers?: never; list_revisions?: never; list_threads?: never; page_entries?: never; preview_restore?: never; preview_undo?: never; search?: never; word_blackline?: never } | 
 /**  The display settings in force, and the keys the firm's policy locks. */
 "get_settings" | 
 /**  The files of a matter's folder as it is now, for its file list (`QueryResult::Papers`). */
 ({ list_papers: {
 	/**  The matter. */
 	matter: MatterId,
-} }) & { compare_versions?: never; folder_support?: never; list_threads?: never; page_entries?: never; preview_restore?: never; preview_undo?: never; read_blob?: never; search?: never } | 
+} }) & { compare_versions?: never; folder_support?: never; list_revisions?: never; list_threads?: never; page_entries?: never; preview_restore?: never; preview_undo?: never; read_blob?: never; search?: never; word_blackline?: never } | 
 /**  The agents in the settings, for a new thread's choice of agent. */
 "list_agents" | 
 /**
@@ -2749,7 +2955,7 @@ export type HostQuery =
  *  Search inside matters and conversations (decision 0043). Answered
  *  `QueryResult::Search`.
  */
-({ search: SearchRequest }) & { compare_versions?: never; folder_support?: never; list_papers?: never; list_threads?: never; page_entries?: never; preview_restore?: never; preview_undo?: never; read_blob?: never } | 
+({ search: SearchRequest }) & { compare_versions?: never; folder_support?: never; list_papers?: never; list_revisions?: never; list_threads?: never; page_entries?: never; preview_restore?: never; preview_undo?: never; read_blob?: never; word_blackline?: never } | 
 /**
  *  The Windows folder check of the place a `CreateMatter` with `source` would use, before
  *  the matter exists: the New matter dialog's warning. Send the same `source` the create
@@ -2765,7 +2971,7 @@ export type HostQuery =
 ({ folder_support: {
 	/**  Where the matter would be made, as `CreateMatter` names it. */
 	source: MatterSource,
-} }) & { compare_versions?: never; list_papers?: never; list_threads?: never; page_entries?: never; preview_restore?: never; preview_undo?: never; read_blob?: never; search?: never } | 
+} }) & { compare_versions?: never; list_papers?: never; list_revisions?: never; list_threads?: never; page_entries?: never; preview_restore?: never; preview_undo?: never; read_blob?: never; search?: never; word_blackline?: never } | 
 /**
  *  Where the updater stands (decision record 0037), read after subscribing to the app
  *  stream as `GetSettings` is. Answered `QueryResult::Update`. JSON: `"get_update"`.
@@ -2790,7 +2996,37 @@ export type HostQuery =
  *  `SettingsView::locked` says so. Answered `QueryResult::AllowedSites`.
  *  JSON: `"allowed_sites"`.
  */
-"allowed_sites";
+"allowed_sites" | 
+/**
+ *  The Word blackline of one `.docx` between a version and another version, or the
+ *  matter's folder as it is now when `to` is `None`, as `CompareVersions` takes them. The
+ *  host runs stetdoc on copies outside the matter and writes nothing in it. Answered
+ *  `QueryResult::WordBlackline`; refused with `blackline.not_word` for a path that does
+ *  not end in `.docx`, `blackline.no_word_tool` when this Clauseo has no stetdoc, and
+ *  `blackline.failed` when stetdoc fails, takes too long or prints what the host can't
+ *  read. JSON: `{"word_blackline": {"matter": "...", "path": "...", "from": "..."}}`.
+ */
+({ word_blackline: {
+	/**  The matter. */
+	matter: MatterId,
+	/**  The document, relative to the matter folder. */
+	path: MatterPath,
+	/**  The older version. */
+	from: CheckpointId,
+	/**  The newer version; `None` (missing or `null` in JSON) is the folder now. */
+	to?: CheckpointId,
+} }) & { compare_versions?: never; folder_support?: never; list_papers?: never; list_revisions?: never; list_threads?: never; page_entries?: never; preview_restore?: never; preview_undo?: never; read_blob?: never; search?: never } | 
+/**
+ *  The tracked changes of one Word file of a matter, read with stetdoc from a private copy
+ *  (`revisions.rs`). Answered `QueryResult::Revisions`. Writes nothing. A file that is not
+ *  a `.docx` or does not read as one is `word.not_docx`; no stetdoc, `word.stetdoc_missing`.
+ */
+({ list_revisions: {
+	/**  The matter. */
+	matter: MatterId,
+	/**  The Word file. */
+	path: MatterPath,
+} }) & { compare_versions?: never; folder_support?: never; list_papers?: never; list_threads?: never; page_entries?: never; preview_restore?: never; preview_undo?: never; read_blob?: never; search?: never; word_blackline?: never };
 
 /**
  *  What the first checkpoint of a folder matter found. Counts are at most `u32::MAX`; `bytes`
@@ -2819,9 +3055,18 @@ export type InstallProgress =
 ({ missing: {
 	/**
 	 *  Bytes an install would download here, Node's archive included when Node would be
-	 *  downloaded ("About {size} MB").
+	 *  downloaded ("About {size} MB"). Python's archive is never in it: it is in
+	 *  [`PythonProgress::Missing`], once for the computer, so a window adds that once to
+	 *  the missing agents' sizes.
 	 */
 	download_bytes: Count,
+	/**
+	 *  Clauseo installed it here before: the settings still hold the `agents.<id>` entry
+	 *  an earlier install's `Ready` wrote, and its install folder is gone. The card offers
+	 *  "Install {plan}" (#859). False is written as a missing field, and a missing field
+	 *  reads as false.
+	 */
+	installed_before?: boolean,
 } }) & { downloading?: never; failed?: never; ready?: never; waiting?: never } | 
 /**  Offline: the install waits and tries again by itself. */
 ({ waiting: {
@@ -2848,7 +3093,10 @@ export type InstallProgress =
 } }) & { downloading?: never; failed?: never; missing?: never; waiting?: never } | 
 /**  Stopped with a failure; [`crate::SetupCommand::RetryAgentInstall`] starts again. */
 ({ failed: {
-	/**  Why: `agent.install_blocked`, `agent.install_disk_full` or `agent.install_failed`. */
+	/**
+	 *  Why: `agent.install_blocked`, `agent.install_disk_full`, `agent.install_failed` or
+	 *  `agent.install_setup_failed`.
+	 */
 	code: ErrorCode,
 	/**  For `agent.install_disk_full`: the space needed, in MB (10^6 bytes). */
 	need_mb?: Count,
@@ -3181,8 +3429,10 @@ export type ManagedBy =
  *  administrator.
  */
 "read_only_location" | 
-/**  A package manager updates it (Linux), or this build has no updater. */
-"package";
+/**  A package manager updates it (Linux). */
+"package" | 
+/**  This build has no updater: a new version is installed over it. */
+"unavailable";
 
 /**  An undo, a restore, a located folder or a compaction. Entry id `marker:<event>`. */
 export type MarkerEntry = {
@@ -3209,7 +3459,10 @@ export type MarkerKind =
 	/**  Files kept as they were. */
 	kept: MatterPath[],
 } }) & { compaction?: never; matter_relocated?: never; version_restored?: never } | 
-/**  A version was restored (matter stream). */
+/**
+ *  A version was restored (matter stream, and the stream of the conversation it was asked
+ *  from).
+ */
 ({ version_restored: {
 	/**  The checkpoint restored from. */
 	from: CheckpointId,
@@ -3217,6 +3470,8 @@ export type MarkerKind =
 	checkpoint: CheckpointId,
 	/**  What was put back. */
 	scope: RestoreScope,
+	/**  The `restore` checkpoint it took back, if it did. */
+	undoes?: CheckpointId,
 } }) & { compaction?: never; matter_relocated?: never; step_undone?: never } | 
 /**  The matter's folder was located after it moved (matter stream): "Found at {folder}". */
 ({ matter_relocated: {
@@ -3394,6 +3649,11 @@ export type MatterSummary = {
 	 *  `skills.enabled` list, and `[]` means no pack for this matter.
 	 */
 	skill_packs?: PackList,
+	/**
+	 *  The model and effort a new conversation in it starts with, per agent kind, once set
+	 *  (`UpdateMatter::agent_prefs`, or a successful `SetConfigOption` in one of its threads).
+	 */
+	agent_prefs?: AgentPrefs,
 	/**  Whether it is pinned to the top of the rail; missing reads as `false`. */
 	pinned?: boolean,
 	/**  When the lawyer last opened it (`OpenMatter`), once they have. */
@@ -3599,6 +3859,12 @@ export type NoticeKind =
 	/**  Why the launch left it out. */
 	reason: PackSkipReason,
 } }) & { files_came_back?: never } | 
+/**
+ *  Claude Code's `auto` permission mode is not available for this session (the account,
+ *  the model or the agent ruled it out), so Claude runs in `acceptEdits` and asks before
+ *  running commands.
+ */
+"auto_mode_unavailable" | 
 /**  A kind from a newer Clauseo; written back as the plain string `kind`. */
 string;
 
@@ -3851,7 +4117,25 @@ export type PaperSummary = {
 	size: Count,
 	/**  When it was last modified. */
 	modified: Timestamp,
+	/**
+	 *  A `.docx` that holds tracked changes or comments, as the host found them in its XML:
+	 *  what its tile's Tracked changes press waits for. False is left out of the JSON.
+	 */
+	tracked?: boolean,
 };
+
+/**  How a paragraph changed between the two versions. */
+export type ParagraphChange = 
+/**  The same in both: every run is `same`. */
+"same" | 
+/**  In both, with text inserted or deleted. */
+"changed" | 
+/**  Only in the newer version: the whole paragraph was inserted. */
+"added" | 
+/**  Only in the older version: the whole paragraph was deleted. */
+"removed" | 
+/**  A value from a newer Clauseo that this version does not know. */
+"unknown";
 
 /**  Patches of one stream, sent together. The stream and the epoch come once per batch. */
 export type PatchBatch = {
@@ -4245,6 +4529,13 @@ export type ProtectionView = {
 	 *  user owns it). Missing from an older host: `false`.
 	 */
 	retry_asks_admin?: boolean,
+	/**
+	 *  The data folder's identity can't be read, so the data fence compares by names only
+	 *  (decision record 0030); false from an older host. Also true while one of the folders
+	 *  above the data folder can't be read (a search from it is then compared by name). The
+	 *  host retries at each permission request and sends the view again when this flips.
+	 */
+	data_fence_names_only?: boolean,
 };
 
 /**
@@ -4264,26 +4555,138 @@ export type ProtectionWork =
 /**  A value from a newer Clauseo that this version does not know. */
 "unknown";
 
+/**
+ *  What refused to start Python, for [`PythonFailureCause::RunBlocked`]: read only from the
+ *  error code the failed start returned, with no further probing.
+ */
+export type PythonBlockedBy = 
+/**
+ *  App Control for Business (WDAC) or Smart App Control: Windows error 4551
+ *  (`ERROR_SYSTEM_INTEGRITY_POLICY_VIOLATION`) or its NT status `0xC0E90002`.
+ */
+"app_control" | 
+/**
+ *  `AppLocker` or Software Restriction Policies: Windows error 1260
+ *  (`ERROR_ACCESS_DISABLED_BY_POLICY`).
+ */
+"applocker" | 
+/**  Any other refusal: access denied, or `STATUS_INVALID_IMAGE_HASH` (`0xC0000428`). */
+"unknown";
+
+/**  Why the Python runtime's install stopped. */
+export type PythonFailureCause = 
+/**  A proxy or TLS refused the download. */
+"blocked" | 
+/**  Too little free space. */
+"disk_full" | 
+/**  The download, the offline bundle's copy or the unpack failed after its tries. */
+"failed" | 
+/**
+ *  This computer refused to start Python or load its libraries (a policy, or access
+ *  denied).
+ */
+"run_blocked" | 
+/**  Python started but its check failed or did not answer. */
+"run_failed";
+
+/**
+ *  Where the Python runtime the agents use is: `agents`' `PythonState`. One for the computer,
+ *  installed after an agent's install in the same job; its failure never changes an agent's
+ *  [`InstallProgress`]. Rides on [`crate::SetupEvent::SetupInfo`]'s optional `python`.
+ * 
+ *  Its retry: [`crate::SetupCommand::RetryAgentInstall`] for **any** ready agent retries
+ *  Python (one for the computer); the window may send any ready plan's id. That agent's own
+ *  install is left as it is: it stays `Ready`, and nothing of it is fetched or installed again.
+ *  While another agent's install runs, the retry starts nothing and pauses nothing: that install
+ *  fetches Python as its own second step.
+ */
+export type PythonProgress = 
+/**  This build has no Python for this computer: nothing is fetched. */
+"unavailable" | 
+/**  Not installed, and no install of it running. */
+({ missing: {
+	/**
+	 *  Bytes its install would download. No agent's [`InstallProgress::Missing`] counts
+	 *  them, so the size to show is the missing agents' sum plus this, once.
+	 */
+	download_bytes: Count,
+} }) & { downloading?: never; failed?: never; ready?: never; waiting?: never } | 
+/**  Offline: its install waits and tries again by itself. */
+({ waiting: {
+	/**
+	 *  Why it waits, as an agent's `Waiting`: `agent.install_offline`. Missing from an
+	 *  older host.
+	 */
+	code?: ErrorCode,
+	/**
+	 *  The hosts Python's download contacts, for "Ask your IT team"; empty (left out) from
+	 *  an older host.
+	 */
+	hosts?: string[],
+	/**  The log so far, for "Details". */
+	log: InstallLog,
+} }) & { downloading?: never; failed?: never; missing?: never; ready?: never } | 
+/**  Downloading. */
+({ downloading: {
+	/**  Bytes received so far. */
+	received: Count,
+	/**  Bytes in all. */
+	total: Count,
+} }) & { failed?: never; missing?: never; ready?: never; waiting?: never } | 
+/**  Unpacking and checking that it runs. */
+"installing" | 
+/**  Installed. */
+({ ready: {
+	/**  Python's version. */
+	version: string,
+} }) & { downloading?: never; failed?: never; missing?: never; waiting?: never } | 
+/**
+ *  Stopped with a failure; [`crate::SetupCommand::RetryAgentInstall`] for any ready agent
+ *  tries again.
+ */
+({ failed: {
+	/**  Why. */
+	cause: PythonFailureCause,
+	/**
+	 *  For a download-side cause, the agent install's code for it: `agent.install_blocked`,
+	 *  `agent.install_disk_full` or `agent.install_failed`. Missing for `run_blocked` and
+	 *  `run_failed` (no code names them), and from an older host.
+	 */
+	code?: ErrorCode,
+	/**
+	 *  For [`PythonFailureCause::Blocked`]: the hosts Python's download contacts, for "Ask
+	 *  your IT team"; empty (left out) otherwise.
+	 */
+	hosts?: string[],
+	/**
+	 *  For [`PythonFailureCause::RunBlocked`]: which kind of policy refused the start, read
+	 *  from the error code alone. Missing for every other cause, and from an older host.
+	 */
+	blocked_by?: PythonBlockedBy,
+	/**  The log, for "Details". */
+	log: InstallLog,
+} }) & { downloading?: never; missing?: never; ready?: never; waiting?: never };
+
 /**  A query's answer. */
 export type QueryResult = 
 /**  For `ListMatters`. */
-({ matters: MatterSummary[] }) & { agents?: never; allowed_sites?: never; blob?: never; default_location?: never; entries?: never; file_changes?: never; folder_support?: never; papers?: never; protection?: never; restore_preview?: never; search?: never; settings?: never; skill_packs?: never; threads?: never; undo_preview?: never; update?: never } | 
+({ matters: MatterSummary[] }) & { agents?: never; allowed_sites?: never; blob?: never; default_location?: never; entries?: never; file_changes?: never; folder_support?: never; papers?: never; protection?: never; restore_preview?: never; revisions?: never; search?: never; settings?: never; skill_packs?: never; threads?: never; undo_preview?: never; update?: never; word_blackline?: never } | 
 /**  For `ListThreads`. */
-({ threads: ThreadSummary[] }) & { agents?: never; allowed_sites?: never; blob?: never; default_location?: never; entries?: never; file_changes?: never; folder_support?: never; matters?: never; papers?: never; protection?: never; restore_preview?: never; search?: never; settings?: never; skill_packs?: never; undo_preview?: never; update?: never } | 
+({ threads: ThreadSummary[] }) & { agents?: never; allowed_sites?: never; blob?: never; default_location?: never; entries?: never; file_changes?: never; folder_support?: never; matters?: never; papers?: never; protection?: never; restore_preview?: never; revisions?: never; search?: never; settings?: never; skill_packs?: never; undo_preview?: never; update?: never; word_blackline?: never } | 
 /**  For `PageEntries`, newest last; fewer than `limit` means none older is left. */
-({ entries: ViewEntry[] }) & { agents?: never; allowed_sites?: never; blob?: never; default_location?: never; file_changes?: never; folder_support?: never; matters?: never; papers?: never; protection?: never; restore_preview?: never; search?: never; settings?: never; skill_packs?: never; threads?: never; undo_preview?: never; update?: never } | 
+({ entries: ViewEntry[] }) & { agents?: never; allowed_sites?: never; blob?: never; default_location?: never; file_changes?: never; folder_support?: never; matters?: never; papers?: never; protection?: never; restore_preview?: never; revisions?: never; search?: never; settings?: never; skill_packs?: never; threads?: never; undo_preview?: never; update?: never; word_blackline?: never } | 
 /**  For `CompareVersions`. */
-({ file_changes: FileChange[] }) & { agents?: never; allowed_sites?: never; blob?: never; default_location?: never; entries?: never; folder_support?: never; matters?: never; papers?: never; protection?: never; restore_preview?: never; search?: never; settings?: never; skill_packs?: never; threads?: never; undo_preview?: never; update?: never } | 
+({ file_changes: FileChange[] }) & { agents?: never; allowed_sites?: never; blob?: never; default_location?: never; entries?: never; folder_support?: never; matters?: never; papers?: never; protection?: never; restore_preview?: never; revisions?: never; search?: never; settings?: never; skill_packs?: never; threads?: never; undo_preview?: never; update?: never; word_blackline?: never } | 
 /**  For `PreviewRestore`. */
-({ restore_preview: RestorePreview }) & { agents?: never; allowed_sites?: never; blob?: never; default_location?: never; entries?: never; file_changes?: never; folder_support?: never; matters?: never; papers?: never; protection?: never; search?: never; settings?: never; skill_packs?: never; threads?: never; undo_preview?: never; update?: never } | 
+({ restore_preview: RestorePreview }) & { agents?: never; allowed_sites?: never; blob?: never; default_location?: never; entries?: never; file_changes?: never; folder_support?: never; matters?: never; papers?: never; protection?: never; revisions?: never; search?: never; settings?: never; skill_packs?: never; threads?: never; undo_preview?: never; update?: never; word_blackline?: never } | 
 /**  For `PreviewUndo`. */
-({ undo_preview: UndoPreview }) & { agents?: never; allowed_sites?: never; blob?: never; default_location?: never; entries?: never; file_changes?: never; folder_support?: never; matters?: never; papers?: never; protection?: never; restore_preview?: never; search?: never; settings?: never; skill_packs?: never; threads?: never; update?: never } | 
+({ undo_preview: UndoPreview }) & { agents?: never; allowed_sites?: never; blob?: never; default_location?: never; entries?: never; file_changes?: never; folder_support?: never; matters?: never; papers?: never; protection?: never; restore_preview?: never; revisions?: never; search?: never; settings?: never; skill_packs?: never; threads?: never; update?: never; word_blackline?: never } | 
 /**  For `ReadBlob`. */
-({ blob: BlobRange }) & { agents?: never; allowed_sites?: never; default_location?: never; entries?: never; file_changes?: never; folder_support?: never; matters?: never; papers?: never; protection?: never; restore_preview?: never; search?: never; settings?: never; skill_packs?: never; threads?: never; undo_preview?: never; update?: never } | 
+({ blob: BlobRange }) & { agents?: never; allowed_sites?: never; default_location?: never; entries?: never; file_changes?: never; folder_support?: never; matters?: never; papers?: never; protection?: never; restore_preview?: never; revisions?: never; search?: never; settings?: never; skill_packs?: never; threads?: never; undo_preview?: never; update?: never; word_blackline?: never } | 
 /**  For `GetSettings`. */
-({ settings: SettingsView }) & { agents?: never; allowed_sites?: never; blob?: never; default_location?: never; entries?: never; file_changes?: never; folder_support?: never; matters?: never; papers?: never; protection?: never; restore_preview?: never; search?: never; skill_packs?: never; threads?: never; undo_preview?: never; update?: never } | 
+({ settings: SettingsView }) & { agents?: never; allowed_sites?: never; blob?: never; default_location?: never; entries?: never; file_changes?: never; folder_support?: never; matters?: never; papers?: never; protection?: never; restore_preview?: never; revisions?: never; search?: never; skill_packs?: never; threads?: never; undo_preview?: never; update?: never; word_blackline?: never } | 
 /**  For `GetUpdate`. */
-({ update: UpdateView }) & { agents?: never; allowed_sites?: never; blob?: never; default_location?: never; entries?: never; file_changes?: never; folder_support?: never; matters?: never; papers?: never; protection?: never; restore_preview?: never; search?: never; settings?: never; skill_packs?: never; threads?: never; undo_preview?: never } | 
+({ update: UpdateView }) & { agents?: never; allowed_sites?: never; blob?: never; default_location?: never; entries?: never; file_changes?: never; folder_support?: never; matters?: never; papers?: never; protection?: never; restore_preview?: never; revisions?: never; search?: never; settings?: never; skill_packs?: never; threads?: never; undo_preview?: never; word_blackline?: never } | 
 /**
  *  For `ListPapers`: the matter's folder as it is now, by the rules a checkpoint versions
  *  it by (the same excluded names, size cap and cloud-only files).
@@ -4308,27 +4711,37 @@ export type QueryResult =
 	 *  where `<folder>/` sorts).
 	 */
 	truncated: boolean,
-} }) & { agents?: never; allowed_sites?: never; blob?: never; default_location?: never; entries?: never; file_changes?: never; folder_support?: never; matters?: never; protection?: never; restore_preview?: never; search?: never; settings?: never; skill_packs?: never; threads?: never; undo_preview?: never; update?: never } | 
+	/**
+	 *  Where the matter's folder lives, as `FolderScanned`'s `place` says it: for the
+	 *  words of a cloud-only file in `skipped`. Asked of the OS on each listing; reads no
+	 *  file.
+	 */
+	place: FolderPlace,
+} }) & { agents?: never; allowed_sites?: never; blob?: never; default_location?: never; entries?: never; file_changes?: never; folder_support?: never; matters?: never; protection?: never; restore_preview?: never; revisions?: never; search?: never; settings?: never; skill_packs?: never; threads?: never; undo_preview?: never; update?: never; word_blackline?: never } | 
 /**  For `ListAgents`: one per settings agent whose id is a valid [`AgentId`], sorted by id. */
-({ agents: AgentSummary[] }) & { allowed_sites?: never; blob?: never; default_location?: never; entries?: never; file_changes?: never; folder_support?: never; matters?: never; papers?: never; protection?: never; restore_preview?: never; search?: never; settings?: never; skill_packs?: never; threads?: never; undo_preview?: never; update?: never } | 
+({ agents: AgentSummary[] }) & { allowed_sites?: never; blob?: never; default_location?: never; entries?: never; file_changes?: never; folder_support?: never; matters?: never; papers?: never; protection?: never; restore_preview?: never; revisions?: never; search?: never; settings?: never; skill_packs?: never; threads?: never; undo_preview?: never; update?: never; word_blackline?: never } | 
 /**  For `GetDefaultLocation`. JSON: `{"default_location": {"display": "..."}}`. */
-({ default_location: DefaultLocation }) & { agents?: never; allowed_sites?: never; blob?: never; entries?: never; file_changes?: never; folder_support?: never; matters?: never; papers?: never; protection?: never; restore_preview?: never; search?: never; settings?: never; skill_packs?: never; threads?: never; undo_preview?: never; update?: never } | 
+({ default_location: DefaultLocation }) & { agents?: never; allowed_sites?: never; blob?: never; entries?: never; file_changes?: never; folder_support?: never; matters?: never; papers?: never; protection?: never; restore_preview?: never; revisions?: never; search?: never; settings?: never; skill_packs?: never; threads?: never; undo_preview?: never; update?: never; word_blackline?: never } | 
 /**
  *  For `Search`: a page of hits, or `Cancelled` when a newer search from the same window
  *  came first.
  */
-({ search: SearchAnswer }) & { agents?: never; allowed_sites?: never; blob?: never; default_location?: never; entries?: never; file_changes?: never; folder_support?: never; matters?: never; papers?: never; protection?: never; restore_preview?: never; settings?: never; skill_packs?: never; threads?: never; undo_preview?: never; update?: never } | 
+({ search: SearchAnswer }) & { agents?: never; allowed_sites?: never; blob?: never; default_location?: never; entries?: never; file_changes?: never; folder_support?: never; matters?: never; papers?: never; protection?: never; restore_preview?: never; revisions?: never; settings?: never; skill_packs?: never; threads?: never; undo_preview?: never; update?: never; word_blackline?: never } | 
 /**
  *  For `FolderSupport`. JSON: `{"folder_support": {"support": "network"}}`, or
  *  `{"folder_support": {}}` for a fine folder.
  */
-({ folder_support: PickedFolderSupport }) & { agents?: never; allowed_sites?: never; blob?: never; default_location?: never; entries?: never; file_changes?: never; matters?: never; papers?: never; protection?: never; restore_preview?: never; search?: never; settings?: never; skill_packs?: never; threads?: never; undo_preview?: never; update?: never } | 
+({ folder_support: PickedFolderSupport }) & { agents?: never; allowed_sites?: never; blob?: never; default_location?: never; entries?: never; file_changes?: never; matters?: never; papers?: never; protection?: never; restore_preview?: never; revisions?: never; search?: never; settings?: never; skill_packs?: never; threads?: never; undo_preview?: never; update?: never; word_blackline?: never } | 
 /**  For `ListSkillPacks`. */
-({ skill_packs: PackStatus[] }) & { agents?: never; allowed_sites?: never; blob?: never; default_location?: never; entries?: never; file_changes?: never; folder_support?: never; matters?: never; papers?: never; protection?: never; restore_preview?: never; search?: never; settings?: never; threads?: never; undo_preview?: never; update?: never } | 
+({ skill_packs: PackStatus[] }) & { agents?: never; allowed_sites?: never; blob?: never; default_location?: never; entries?: never; file_changes?: never; folder_support?: never; matters?: never; papers?: never; protection?: never; restore_preview?: never; revisions?: never; search?: never; settings?: never; threads?: never; undo_preview?: never; update?: never; word_blackline?: never } | 
 /**  For `Protection`. */
-({ protection: ProtectionView }) & { agents?: never; allowed_sites?: never; blob?: never; default_location?: never; entries?: never; file_changes?: never; folder_support?: never; matters?: never; papers?: never; restore_preview?: never; search?: never; settings?: never; skill_packs?: never; threads?: never; undo_preview?: never; update?: never } | 
+({ protection: ProtectionView }) & { agents?: never; allowed_sites?: never; blob?: never; default_location?: never; entries?: never; file_changes?: never; folder_support?: never; matters?: never; papers?: never; restore_preview?: never; revisions?: never; search?: never; settings?: never; skill_packs?: never; threads?: never; undo_preview?: never; update?: never; word_blackline?: never } | 
 /**  For `AllowedSites`. */
-({ allowed_sites: AllowedSite[] }) & { agents?: never; blob?: never; default_location?: never; entries?: never; file_changes?: never; folder_support?: never; matters?: never; papers?: never; protection?: never; restore_preview?: never; search?: never; settings?: never; skill_packs?: never; threads?: never; undo_preview?: never; update?: never };
+({ allowed_sites: AllowedSite[] }) & { agents?: never; blob?: never; default_location?: never; entries?: never; file_changes?: never; folder_support?: never; matters?: never; papers?: never; protection?: never; restore_preview?: never; revisions?: never; search?: never; settings?: never; skill_packs?: never; threads?: never; undo_preview?: never; update?: never; word_blackline?: never } | 
+/**  For `WordBlackline`. */
+({ word_blackline: WordBlackline }) & { agents?: never; allowed_sites?: never; blob?: never; default_location?: never; entries?: never; file_changes?: never; folder_support?: never; matters?: never; papers?: never; protection?: never; restore_preview?: never; revisions?: never; search?: never; settings?: never; skill_packs?: never; threads?: never; undo_preview?: never; update?: never } | 
+/**  For `ListRevisions`. */
+({ revisions: RevisionList }) & { agents?: never; allowed_sites?: never; blob?: never; default_location?: never; entries?: never; file_changes?: never; folder_support?: never; matters?: never; papers?: never; protection?: never; restore_preview?: never; search?: never; settings?: never; skill_packs?: never; threads?: never; undo_preview?: never; update?: never; word_blackline?: never };
 
 /**
  *  Why a thread's queued turns wait, the most specific reason that applies. Set only while
@@ -4516,6 +4929,11 @@ export type RestorePreview = {
 	 *  stands as the version.
 	 */
 	changes: FileChange[],
+	/**
+	 *  Files the undone restore added that still hold what it wrote: the restore deletes them.
+	 *  Empty unless it undoes a restore; missing from an older host's answer.
+	 */
+	removes?: MatterPath[],
 	/**  Files in the folder now that the version does not have: the restore leaves them. */
 	added_since: MatterPath[],
 	/**
@@ -4562,6 +4980,77 @@ export type RevealTarget =
 { matter: MatterId } | 
 /**  Clauseo's app data folder: the event store, the version store and the settings. */
 "app_data";
+
+/**
+ *  One tracked change, as `ListRevisions` lists it. A struct, so later fields are additive; it
+ *  accepts fields it does not know.
+ */
+export type Revision = {
+	/**  Word's change ids this entry covers, ascending; `DecideRevisions` names them. */
+	ids: number[],
+	/**  What it does. */
+	kind: RevisionKind,
+	/**  Who made it, as Word recorded it, at most [`MAX_REVISION_TEXT_CHARS`] characters. */
+	author: string,
+	/**  When, as Word recorded it; missing when the file records no date. */
+	at?: Timestamp,
+	/**  The paragraph it is in, as stetdoc names blocks (`p3` is the third paragraph). */
+	block: string,
+	/**
+	 *  The text inserted, deleted or moved, at most [`MAX_REVISION_TEXT_CHARS`] characters;
+	 *  missing for a change with no text (formatting).
+	 */
+	text?: string,
+};
+
+/**  Accept or reject. */
+export type RevisionDecision = 
+/**  Keep the change: an insertion stays as plain text, a deletion is gone. */
+"accept" | 
+/**  Undo the change: an insertion is gone, a deletion comes back. */
+"reject";
+
+/**  What a tracked change does. */
+export type RevisionKind = 
+/**  Text or a paragraph inserted. */
+"insert" | 
+/**  Text or a paragraph deleted. */
+"delete" | 
+/**  Text moved from one place to another. */
+"move" | 
+/**  Formatting, a style or a property changed; no text changed. */
+"format" | 
+/**  A value from a newer Clauseo that this version does not know. */
+"unknown";
+
+/**
+ *  The tracked changes of one Word file, for `ListRevisions`. A struct, so later fields are
+ *  additive; it accepts fields it does not know.
+ */
+export type RevisionList = {
+	/**  The file. */
+	path: MatterPath,
+	/**  The bytes the list was read from: `DecideRevisions` sends it back. */
+	version: DocVersion,
+	/**  The changes in document order (by paragraph, then id). Empty when the file has none. */
+	revisions: Revision[],
+	/**
+	 *  Whether the file holds more than [`MAX_REVISIONS`] changes: `revisions` is then its
+	 *  first [`MAX_REVISIONS`].
+	 */
+	truncated: boolean,
+};
+
+/**  What a run of a blackline paragraph is. */
+export type RunKind = 
+/**  Text in both versions. */
+"same" | 
+/**  Text only in the newer version. */
+"ins" | 
+/**  Text only in the older version. */
+"del" | 
+/**  A value from a newer Clauseo that this version does not know. */
+"unknown";
 
 /**  A search's answer. */
 export type SearchAnswer = 
@@ -4717,7 +5206,9 @@ export type SessionCapabilities = {
 
 /**
  *  A part of the settings window `open_settings` can open it at (R24: the room's case-law hint
- *  and banner open Connectors; R17: UC's first-run button opens Protection). Closed, as the app
+ *  and banner open Connectors; R17: UC's first-run button opens Protection; U12: the toolbar's
+ *  plan card opens Plan and usage; UD1: the first screen's "What's sent" opens Privacy). Closed,
+ *  as the app
  *  asked: a value the build does not know is refused when the command's arguments decode, never
  *  ignored, and a new section is added here together with the page that shows it (ADR 0002's
  *  rule for commands, which a webview sends).
@@ -4729,7 +5220,11 @@ export type SettingsSection =
  *  The Protection section: the sandbox's state, its set-up and removal (decision record
  *  0051). The page is the app's.
  */
-"protection";
+"protection" | 
+/**  Plan and usage: each agent's plan and its limits. */
+"usage" | 
+/**  The Privacy section: the anonymous counts and what they include. */
+"privacy";
 
 /**  What `GetSettings` answers and `SettingsChanged` carries. */
 export type SettingsView = {
@@ -4772,7 +5267,14 @@ export type SetupCommand =
 	/**  The agent. */
 	agent: AgentId,
 } }) & { cancel_sign_in?: never; clear_agent_key?: never; find_login?: never; open_sign_in_page?: never; paste_sign_in_code?: never; retry_agent_install?: never; set_agent_key?: never; set_firm_endpoint?: never; sign_out?: never; start_sign_in?: never; stop_using_login?: never; use_device_code?: never; use_different_account?: never; use_found_login?: never } | 
-/**  Start a failed or paused install again. */
+/**
+ *  Start a failed or paused install again. On a ready agent it retries the Python runtime
+ *  instead (when Python is missing, waiting or failed): Python is one for the computer, so
+ *  retrying any ready agent's install retries it, and the window may send any ready plan's
+ *  id. The ready agent's own install is left alone: it stays ready and nothing of it is
+ *  fetched or installed again. While another agent's install runs, it starts nothing and
+ *  pauses nothing: that install fetches Python as its own second step.
+ */
 ({ retry_agent_install: {
 	/**  The agent. */
 	agent: AgentId,
@@ -4881,6 +5383,11 @@ export type SetupEvent =
 	 *  Service, and the key screens are hidden.
 	 */
 	keys_available: boolean,
+	/**
+	 *  The Python runtime's state, sent again with each change; missing from older hosts
+	 *  and before it is known.
+	 */
+	python?: PythonProgress,
 } }) & { agent_install_progress?: never; sign_in_changed?: never } | 
 /**  An agent's install state changed, or its download made progress. */
 ({ agent_install_progress: {
@@ -4913,6 +5420,12 @@ export type SignIn =
 	 */
 	found?: FoundLogin,
 } }) & { device_code?: never; failed?: never; login_found?: never; signed_in?: never; switching?: never; waiting?: never } | 
+/**
+ *  The sign-in status check is running and nothing was shown before it (at start, and
+ *  through its retries after a check that timed out): the card says it is checking. Ends
+ *  in the check's state, or `SignedOut` once its retries time out too.
+ */
+"checking" | 
 /**
  *  Waiting for the install to finish or the network to return; the sign-in then starts by
  *  itself.
@@ -5027,6 +5540,15 @@ export type SkippedFileReason =
 "cloud_only" | 
 /**  A value from a newer Clauseo that this version does not know. */
 "unknown";
+
+/**  Smart App Control's state, as `display_info` reports it; `None` there when unknown. */
+export type SmartAppControl = 
+/**  On: it blocks apps it doesn't trust, unsigned Clauseo among them. */
+"on" | 
+/**  Evaluation: it blocks nothing yet, and later turns itself On or Off. */
+"evaluation" | 
+/**  Off. */
+"off";
 
 /**  A run of a hit's snippet. */
 export type SnippetPart = {
@@ -5167,8 +5689,8 @@ export type StepUndone = {
 };
 
 /**
- *  Why a turn stopped: ACP v1's stop reasons plus Clauseo's `NotAllowed`, `AtLimit` and
- *  `Failed`.
+ *  Why a turn stopped: ACP v1's stop reasons plus Clauseo's `NotAllowed`, `OutsideMatter`,
+ *  `AtLimit` and `Failed`.
  */
 export type StopReason = 
 /**  The agent finished. Only this ending moves the thread's queue on. */
@@ -5188,6 +5710,13 @@ export type StopReason =
  *  started.
  */
 "not_allowed" | 
+/**
+ *  The agent cancelled it right after the host refused, unasked, a permission request
+ *  into Clauseo's data folder (another matter's or Clauseo's own files); no Stop came
+ *  after that refusal. Every rule treats it as `Cancelled` (the queue holds); only the
+ *  words differ. Never on a turn that had not started.
+ */
+"outside_matter" | 
 /**  The account's usage limit stopped it; a `TurnStoppedAtLimit` explains it. */
 "at_limit" | 
 /**  It failed; a `TurnFailed` before it says why. */
@@ -5822,6 +6351,20 @@ export type ToolsUnavailableReason =
 "too_many_browsers" | 
 /**  Case law only: the host could not open the session's loopback relay. */
 "no_relay" | 
+/**
+ *  The browser only: the firm turned off Chrome's or Edge's remote debugging
+ *  (`RemoteDebuggingAllowed` false), which Clauseo's browser needs, and its Clauseo
+ *  policy does not allow Clauseo's browser anyway
+ *  (`browser.allow_when_remote_debugging_disabled`).
+ */
+"browser_blocked_by_policy" | 
+/**
+ *  The browser only: a place the firm's Chrome, Edge or Chromium `RemoteDebuggingAllowed`
+ *  can be set could not be read (not missing: denied or failed), so Clauseo does not know
+ *  whether remote debugging is allowed; none says false, and the firm's Clauseo policy does
+ *  not allow Clauseo's browser anyway. Checked again at the next launch.
+ */
+"browser_policy_unreadable" | 
 /**  A value from a newer Clauseo that this version does not know. */
 "unknown";
 
@@ -6293,6 +6836,8 @@ export type VersionRestored = {
 	checkpoint: CheckpointId,
 	/**  What was put back. */
 	scope: RestoreScope,
+	/**  The `restore` checkpoint this one took back, if it did. Missing from older logs. */
+	undoes?: CheckpointId,
 };
 
 /**
@@ -6471,6 +7016,21 @@ export type WindowKind =
 "model" | 
 /**  A window `limits` does not classify; its label says what it is. */
 "other";
+
+/**
+ *  A Word document's blackline, for `WordBlackline`: its body's paragraphs in document order,
+ *  each table cell a paragraph of its own. A struct, so later fields are additive; it accepts
+ *  fields it does not know.
+ */
+export type WordBlackline = {
+	/**  The paragraphs, first to last. */
+	paragraphs: BlacklineParagraph[],
+	/**
+	 *  Whether stetdoc said its view stops before the end of the document: `paragraphs` are
+	 *  then the first part of it only.
+	 */
+	truncated: boolean,
+};
 
 /* Tauri Specta runtime */
 async function typedError<T, E>(result: Promise<T>): Promise<{ status: "ok"; data: T } | { status: "error"; error: E }> {

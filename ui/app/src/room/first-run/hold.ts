@@ -7,7 +7,21 @@ import { useSyncExternalStore, type ReactNode } from "react";
 import type { WorkingState } from "@clauseo/components/clauseo/working-line.tsx";
 import type { NoticeCard } from "@clauseo/components/clauseo/limit-note.tsx";
 
-export type Hold = { gate?: ReactNode; working?: WorkingState | null; line?: ReactNode };
+/** `also`: the other plan's working line, compact under `working`, while both plans have something to say (both
+ * downloading, or one waiting on the other's sign-in). */
+export type Hold = {
+  gate?: ReactNode;
+  working?: WorkingState | null;
+  also?: WorkingState | null;
+  line?: ReactNode;
+};
+
+/** The hold's working line for the composer, the other plan's line carried under it as its `also`; null without one. */
+export function holdLine(hold: Hold | null | undefined): WorkingState | null {
+  const working = hold?.working ?? null;
+  const also = hold?.also ?? null;
+  return working === null || also === null ? working : { ...working, also };
+}
 
 /** `read` gives the hold for the setup store's state now (the first run sets it, null before); `heard` hears each change,
  * the store's own emits forwarded, so the composer renders in the same commit as the first run. */
@@ -73,3 +87,34 @@ const hearCard = (heard: () => void) => {
 /** The card, once the first run's chunk is in. */
 export const useExpiredCard = (): ExpiredCardOf | null =>
   useSyncExternalStore(hearCard, readCard, readCard);
+
+/** D-015: the first read's offer, which the first run gives and the room places under its new-conversation line, as
+ * the action after that sentence; null with none. One per transport. */
+type OfferSlot = { node: ReactNode; heard: Set<() => void> };
+const offers = new WeakMap<object, OfferSlot>();
+const offerOf = (transport: object): OfferSlot => {
+  let slot = offers.get(transport);
+  if (slot === undefined) offers.set(transport, (slot = { node: null, heard: new Set() }));
+  return slot;
+};
+
+export function provideOffer(transport: object, node: ReactNode): void {
+  const slot = offerOf(transport);
+  slot.node = node;
+  for (const heard of slot.heard) heard();
+}
+
+/** The offer, under the room's new-conversation line. */
+export function OfferSlot({ transport }: { transport: object }): ReactNode {
+  "use no memo";
+  const slot = offerOf(transport);
+  const read = () => slot.node;
+  return useSyncExternalStore(
+    (heard) => {
+      slot.heard.add(heard);
+      return () => slot.heard.delete(heard);
+    },
+    read,
+    read,
+  );
+}

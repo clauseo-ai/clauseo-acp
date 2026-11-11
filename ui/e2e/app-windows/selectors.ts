@@ -11,11 +11,16 @@ export const ids = {
   matterName: "matter-name",
   /** The rail's New matter, which opens the form. */
   newMatter: "new-matter",
-  /** In the form: Change, pick_folder for an existing folder (`existing_folder`). */
+  /** In the form: Choose folder…, pick_folder for an existing folder (`existing_folder`). */
   matterExisting: "matter-existing",
   /**
-   * In the form: Create the matter. With a folder picked by Change, that folder; without,
-   * pick_folder for the parent and the host makes `<parent>/<name>` (`new_folder`).
+   * In the form: Use a new folder in the host's default location (`default_location`), shown
+   * where the host has one; the host makes `<location>/<name>`.
+   */
+  matterMade: "matter-made",
+  /**
+   * In the form: Create matter, enabled once there is a name and a folder: the one Choose folder…
+   * picked, or the new one Use a new folder chose.
    */
   createMatter: "create-matter",
   /**
@@ -79,6 +84,11 @@ export const ids = {
    * open, with `data-state`: reading, read or stopped.
    */
   firstRead: "first-read",
+  /**
+   * "Read the papers" (UD2, D-015): the button under the new conversation's line in a matter added during the first
+   * run with papers. Pressing it sends the first read; nothing sends it by itself.
+   */
+  firstReadOffer: "first-read-offer",
   /**
    * The first run's sign-in card, which stands in the composer's place while the conversation's
    * plan is signed out, with `data-agent`.
@@ -224,6 +234,7 @@ export function window(page: Page) {
     matterName: id(ids.matterName),
     newMatter: id(ids.newMatter),
     matterExisting: id(ids.matterExisting),
+    matterMade: id(ids.matterMade),
     /**
      * The New matter form's folder line: the path it names, once there is one (the matter form's
      * `.matter-form-path`; a part's class, not a test id, as ui/app/src/perf/autoplay.ts reads it).
@@ -320,6 +331,7 @@ export function window(page: Page) {
       card.getByTestId(permissionButton(kind)),
     turnStopped: id(ids.turnStopped),
     firstRead: id(ids.firstRead),
+    firstReadOffer: id(ids.firstReadOffer),
     signIn: id(ids.signIn),
     agentStopped: id(ids.agentStopped),
     restart: id(ids.restart),

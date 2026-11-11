@@ -21,7 +21,7 @@ use super::protection::work::{Asked as ProtectionAsked, command as protection};
 use super::settings::{
     first_act, set_privacy_settings, set_skill_pack, set_tool_settings, set_ui_settings,
 };
-use super::update::Asked;
+use super::update::{Asked, command as update};
 use super::{Actor, MatterEntry, Tag, ThreadEntry, title_source, triage, turn};
 use crate::error::Error;
 use crate::pipeline::{Draft, Failure};
@@ -31,7 +31,7 @@ use crate::principal::{Access, authorize};
 pub(crate) struct PendingCommand {
     pub(super) hash: [u8; 32],
     /// Everyone waiting for the answer: the first caller and its duplicates.
-    waiters: Vec<Reply<CommandOutcome>>,
+    pub(super) waiters: Vec<Reply<CommandOutcome>>,
     /// The command, until it runs.
     command: Option<ValidatedCommand>,
     /// A matter being created or imported for it.
@@ -230,23 +230,12 @@ fn run_command(actor: &mut Actor, ctx: &CommandCtx, command: HostCommand) {
         } => {
             super::matters::create_matter(actor, ctx, &name, source, (client, next_date));
         }
-        HostCommand::UpdateMatter {
-            matter,
-            client,
-            next_date,
-            skill_packs,
-            pinned,
-        } => {
-            let update = super::matter_details::Update {
-                client,
-                next_date,
-                skill_packs,
-                pinned,
-            };
-            super::matter_details::update_matter(actor, ctx, matter, update);
+        command @ HostCommand::UpdateMatter { .. } => {
+            super::matter_details::update_matter(actor, ctx, command);
         }
         HostCommand::OpenMatter { matter } => {
             super::matter_details::open_matter(actor, ctx, matter);
+            super::papers::follow::opened(actor, matter);
         }
         HostCommand::ForgetMatter { matter } => {
             super::matter_details::forget_matter(actor, ctx, matter);
@@ -258,8 +247,12 @@ fn run_command(actor: &mut Actor, ctx: &CommandCtx, command: HostCommand) {
         HostCommand::SnoozeThread { thread, until } => triage::snooze(actor, ctx, thread, until),
         HostCommand::MarkThreadDone { thread, done } => triage::mark_done(actor, ctx, thread, done),
         HostCommand::SweepDone { day_start } => triage::sweep_done(actor, ctx, day_start),
-        HostCommand::CreateThread { matter, agent } => {
-            if let Err(error) = create_thread(actor, ctx, matter, agent) {
+        HostCommand::CreateThread {
+            matter,
+            agent,
+            config,
+        } => {
+            if let Err(error) = create_thread(actor, ctx, (matter, agent), config) {
                 actor.finish_command(ctx.id, Err(error));
             }
         }
@@ -278,11 +271,7 @@ fn run_command(actor: &mut Actor, ctx: &CommandCtx, command: HostCommand) {
         | HostCommand::RemoveQueuedPrompt { .. }
         | HostCommand::SendQueuedNow { .. }
         | HostCommand::ResumeQueue { .. }) => to_turn::run_turn_command(actor, ctx, command),
-        HostCommand::RestoreVersion {
-            matter,
-            checkpoint,
-            scope,
-        } => turn::restore_version(actor, *ctx, matter, checkpoint, scope),
+        restore @ HostCommand::RestoreVersion { .. } => turn::restore_version(actor, *ctx, restore),
         HostCommand::SetUiSettings { patch } => set_ui_settings(actor, ctx, &patch),
         HostCommand::SetToolSettings { patch } => set_tool_settings(actor, ctx, &patch),
         HostCommand::SetSkillPack { id, on } => set_skill_pack(actor, ctx, &id, on),
@@ -301,13 +290,10 @@ fn run_command(actor: &mut Actor, ctx: &CommandCtx, command: HostCommand) {
         HostCommand::RestartAgent { .. } => not_built(actor, ctx),
         HostCommand::InstallBrowser {} => super::browser_install::install(actor, ctx),
         HostCommand::CancelBrowserInstall {} => super::browser_install::cancel(actor, ctx),
-        HostCommand::CheckForUpdate {} => super::update::command(actor, ctx, Asked::Check),
-        HostCommand::InstallUpdate { when } => {
-            super::update::command(actor, ctx, Asked::Install(when));
-        }
-        HostCommand::CancelScheduledUpdate {} => {
-            super::update::command(actor, ctx, Asked::CancelScheduled);
-        }
+        HostCommand::RecheckBrowserPolicy {} => super::browser_policy::recheck(actor, ctx),
+        HostCommand::CheckForUpdate {} => update(actor, ctx, Asked::Check),
+        HostCommand::InstallUpdate { when } => update(actor, ctx, Asked::Install(when)),
+        HostCommand::CancelScheduledUpdate {} => update(actor, ctx, Asked::CancelScheduled),
         HostCommand::SetUpdateMode { mode } => super::update::set_mode(actor, ctx, mode),
         // Decision record 0051: held until the work ends, with no receipt.
         HostCommand::RetryProtection {} => protection(actor, ctx, ProtectionAsked::Retry),
@@ -322,6 +308,8 @@ fn run_command(actor: &mut Actor, ctx: &CommandCtx, command: HostCommand) {
         } => {
             super::allowed::revoke(actor, ctx, &host, scope, matter);
         }
+        HostCommand::DecideRevisions(decide) => super::revisions::decide(actor, *ctx, decide),
+        HostCommand::SetNetwork { online } => turn::set_network(actor, ctx, online),
     }
 }
 
@@ -421,12 +409,12 @@ pub(crate) fn check_matter(actor: &Actor, matter: MatterId) -> Result<&MatterEnt
 }
 
 /// `CreateThread`: the agent must be in the settings; `ThreadCreated` and the row. No
-/// launch.
+/// launch: the config waits on the entry for the session's start.
 fn create_thread(
     actor: &mut Actor,
     ctx: &CommandCtx,
-    matter: MatterId,
-    agent: clauseo_protocol::AgentId,
+    (matter, agent): (MatterId, clauseo_protocol::AgentId),
+    config: Option<clauseo_protocol::ConfigPicks>,
 ) -> Result<(), Error> {
     actor.check_matter(matter)?;
     if actor.effective.agent(agent.as_str()).is_none() {
@@ -477,6 +465,7 @@ fn create_thread(
         last_stop: None,
         turn: turn::TurnState::default(),
         came_back: turn::CameBackWatches::default(),
+        picks: config,
     };
     let tag = Tag::Command {
         id: ctx.id,

@@ -4,7 +4,7 @@
 
 use std::path::{Path, PathBuf};
 
-use super::{clear, parked_name};
+use super::{Restart, clear, clear_old_installer_temp, parked_name};
 use crate::test_support::TempDir;
 use crate::windows::admin_copy::{Found, os};
 
@@ -32,7 +32,12 @@ fn a_copy_not_running_goes_with_its_folder_and_a_link_is_not_followed() {
         Ok(())
     };
     let app = dir.path().join(r"pf\Clauseo");
-    clear(&sandbox, &exe, false, &app, &mut schedule).unwrap();
+    let mut rename = |from: &Path, to: &Path| std::fs::rename(from, to);
+    let mut fs = Restart {
+        rename: &mut rename,
+        schedule: &mut schedule,
+    };
+    clear(&sandbox, &exe, false, &app, &mut fs).unwrap();
     assert_eq!(os::found(&sandbox).unwrap(), Found::Missing);
     assert!(scheduled.is_empty(), "{scheduled:?}");
     assert_eq!(std::fs::read_to_string(outside).unwrap(), "the lawyer's");
@@ -49,7 +54,12 @@ fn the_running_copy_is_parked_and_scheduled_with_the_folders_in_order() {
         Ok(())
     };
     let app = dir.path().join(r"pf\Clauseo");
-    clear(&sandbox, &exe, true, &app, &mut schedule).unwrap();
+    let mut rename = |from: &Path, to: &Path| std::fs::rename(from, to);
+    let mut fs = Restart {
+        rename: &mut rename,
+        schedule: &mut schedule,
+    };
+    clear(&sandbox, &exe, true, &app, &mut fs).unwrap();
     let parked = parked_name(&exe, std::process::id());
     assert_eq!(scheduled, [parked.clone(), sandbox.clone(), app]);
     assert_eq!(os::found(&exe).unwrap(), Found::Missing);
@@ -59,5 +69,64 @@ fn the_running_copy_is_parked_and_scheduled_with_the_folders_in_order() {
         .map(|entry| entry.unwrap().path())
         .collect();
     assert_eq!(left, [parked], "only the parked copy stays");
+    assert_eq!(std::fs::read_to_string(outside).unwrap(), "the lawyer's");
+}
+
+#[test]
+fn a_running_copy_that_cant_be_renamed_is_left_and_nothing_is_scheduled() {
+    let dir = TempDir::new("admin-remove-unrenamed");
+    let (sandbox, exe, _outside) = sandbox(&dir);
+    let mut scheduled = Vec::new();
+    let mut schedule = |path: &Path| {
+        scheduled.push(path.to_path_buf());
+        Ok(())
+    };
+    let mut rename =
+        |_: &Path, _: &Path| -> std::io::Result<()> { Err(std::io::Error::from_raw_os_error(5)) };
+    let mut fs = Restart {
+        rename: &mut rename,
+        schedule: &mut schedule,
+    };
+    let app = dir.path().join(r"pf\Clauseo");
+    let error = clear(&sandbox, &exe, true, &app, &mut fs).unwrap_err();
+    assert_eq!(
+        error.raw_os_error(),
+        Some(5),
+        "the rename's error, for the step's line"
+    );
+    assert!(
+        scheduled.is_empty(),
+        "the canonical name is never scheduled: {scheduled:?}"
+    );
+    assert_eq!(
+        std::fs::read_to_string(&exe).unwrap(),
+        "MZ",
+        "left in place"
+    );
+}
+
+#[test]
+fn an_old_installer_temp_goes_only_when_empty_and_a_link_there_without_its_target() {
+    let dir = TempDir::new("admin-remove-installer-temp");
+    let app = dir.path().join(r"pf\Clauseo");
+    std::fs::create_dir_all(app.join("installer-temp")).unwrap();
+    clear_old_installer_temp(&app);
+    assert_eq!(
+        os::found(&app.join("installer-temp")).unwrap(),
+        Found::Missing
+    );
+    let held = dir.file(r"pf\Clauseo\installer-temp\nsis123\plugin.dll", "in use");
+    clear_old_installer_temp(&app);
+    assert_eq!(
+        std::fs::read_to_string(&held).unwrap(),
+        "in use",
+        "a folder in use stays"
+    );
+    std::fs::remove_dir_all(app.join("installer-temp")).unwrap();
+    let outside = dir.file(r"outside\keep.txt", "the lawyer's");
+    let link = app.join("installer-temp");
+    crate::windows::test_junction::junction(&link, outside.parent().unwrap()).unwrap();
+    clear_old_installer_temp(&app);
+    assert_eq!(os::found(&link).unwrap(), Found::Missing);
     assert_eq!(std::fs::read_to_string(outside).unwrap(), "the lawyer's");
 }

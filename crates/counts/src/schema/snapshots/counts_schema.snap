@@ -1516,7 +1516,18 @@ expression: counts_schema()
         "blocklist.override_off",
         "blocklist.notice_expired",
         "blocklist.allow_not_saved",
-        "blocklist.revoke_not_saved"
+        "blocklist.revoke_not_saved",
+        "sandbox.cleaning_up",
+        "agent.install_setup_failed",
+        "blackline.no_word_tool",
+        "blackline.not_word",
+        "blackline.failed",
+        "word.stetdoc_missing",
+        "word.revisions_stale",
+        "word.not_docx",
+        "word.edit_failed",
+        "matter.folder_permission",
+        "agent.offline"
       ],
       "type": "string"
     },

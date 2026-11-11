@@ -9,6 +9,15 @@ mod write;
 #[path = "skills/builtin.rs"]
 mod builtin;
 
+#[path = "skills/tools.rs"]
+mod tools;
+
+#[path = "skills/stetdoc.rs"]
+mod stetdoc_cli;
+
+#[path = "skills/stetdoc_start.rs"]
+mod stetdoc_start;
+
 use std::path::{Path, PathBuf};
 
 use clauseo_process::{AsyncIoTimer, PassthroughLauncher, SpawnOptions};
@@ -402,7 +411,10 @@ fn a_builtin_skill_is_rendered_with_name_and_description_alone() {
     assert!(SkillSource::builtin("other-name", vec![file("SKILL.md", source)]).is_err());
 }
 
-/// The stub copied into `dir` with what it prints.
+/// The stub linked into `dir` with what it prints. A hard link to cargo's build, not a copy: a
+/// copy's write handle leaks into any child another test thread forks meanwhile, and Linux then
+/// refuses to start the copy (`ETXTBSY`, "Text file busy") until that child's exec closes it.
+/// `CARGO_TARGET_TMPDIR` is in the target folder, on the same disk as the build.
 #[cfg(test)]
 fn stub(dir: &Path, version: &str, skill: &str) -> PathBuf {
     let exe = std::env::current_exe().unwrap();
@@ -410,7 +422,7 @@ fn stub(dir: &Path, version: &str, skill: &str) -> PathBuf {
     let name = format!("stetdoc_stub{}", std::env::consts::EXE_SUFFIX);
     let target = dir.join(&name);
     if !target.exists() {
-        write::copy(&examples.join(&name), &target).unwrap();
+        write::hard_link(&examples.join(&name), &target).unwrap();
     }
     write::write(&dir.join("stub-version.txt"), version.as_bytes()).unwrap();
     write::write(&dir.join("stub-skill.md"), skill.as_bytes()).unwrap();
@@ -501,8 +513,12 @@ fn a_bad_stetdoc_text_fails_its_skill_alone() {
         .map(clauseo_profile::RenderedSkill::name)
         .collect();
     assert_eq!(names, ["alpha"]);
-    // No description at all: an error from the load, for stetdoc alone.
-    stub(&root, "stetdoc 0.9.1\n", "# no frontmatter\n");
+    // A frontmatter with no description: an error from the load, for stetdoc alone.
+    stub(
+        &root,
+        "stetdoc 0.9.1\n",
+        "---\nname: stetdoc\n---\n# no description\n",
+    );
     assert!(
         block_on(load_skill(
             &launcher,

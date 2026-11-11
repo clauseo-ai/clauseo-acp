@@ -65,6 +65,15 @@ nix = { workspace = true, features = ["fs"] }
 
 [target.'cfg(windows)'.dependencies]
 windows = { workspace = true, features = [
+  # signin/stopping/owner: the listeners on Codex's callback port and their owners.
+  "Win32_NetworkManagement_IpHelper",
+  # vcruntime: the signer of the VC++ runtime DLL placed beside Codex's ARM64 rg.exe
+  # (WinVerifyTrust, its provider data, the signer's certificate and chain policy).
+  "Win32_Security_Cryptography",
+  "Win32_Security_Cryptography_Catalog",
+  "Win32_Security_Cryptography_Sip",
+  "Win32_Security_WinTrust",
+  # disk, fileid; vcruntime: the DLL's version resource (GetFileVersionInfoW).
   "Win32_Storage_FileSystem",
   # sysproxy: Internet Settings' ProxyEnable and ProxyServer.
   "Win32_System_Registry",
@@ -78,6 +87,8 @@ clauseo-process = { path = "../process", features = ["test-support"] }
 clauseo-settings = { path = "../settings" }
 # The sign-in tests run its Claude and Codex CLI modes as the adapters.
 clauseo-fake_agent = { path = "../fake_agent" }
+# The in-place retry's log line, read back in its unit test.
+tracing-subscriber = { workspace = true, features = ["fmt"] }
 
 [lints]
 workspace = true

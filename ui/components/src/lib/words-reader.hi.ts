@@ -111,6 +111,11 @@ export const HI = {
     "खुली रहने तक फ़ाइल Word के पास रहती है। अभी कुछ नहीं बदला है।",
   "Try again": "फिर से प्रयास करें",
   "Change by {who}, {when}": "{who} का बदलाव, {when}",
+  // a Word document's own tracked changes, from its tile on the wall (provisional Hindi)
+  "Tracked changes": "ट्रैक किए गए बदलाव",
+  "No tracked changes in this file.": "इस फ़ाइल में कोई ट्रैक किया गया बदलाव नहीं है।",
+  "Formatting changed": "फ़ॉर्मैटिंग बदली गई",
+  Moved: "जगह बदली गई",
 
   // the citations checked
   "Checked {n} citations at {time}.": "{time} बजे {n} उद्धरण जाँचे गए।",

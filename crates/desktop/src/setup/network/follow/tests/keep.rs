@@ -6,7 +6,7 @@
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, Condvar, Mutex, OnceLock, PoisonError};
 use std::time::Duration;
 
 use clauseo_agents::{Clock as _, SystemClock};
@@ -15,9 +15,11 @@ use clauseo_sandbox::{FailKind, Route, UpstreamAnswer};
 use url::Url;
 
 use super::super::super::{
-    Answered, KEEP_FOR, Known, NetworkFacts, NetworkSlot, OsAnswer, Probed, ProxyEnv, os_answer,
+    Answered, KEEP_FOR, Known, LookupTime, NetworkFacts, NetworkSlot, OsAnswer, Probed, ProxyEnv,
+    os_answer,
 };
 use super::super::{Follower, NetworkFollow, follow};
+use super::virtual_time::Virtual;
 use super::{OS_PROXY, claude, codex, facts, hook_env, since};
 use crate::bridge::lock;
 use crate::setup::SetupHook;
@@ -25,49 +27,59 @@ use crate::test_support::block_on;
 
 const NEW_PROXY: &str = "http://vpn-proxy.firm.example:3128";
 
-/// An OS whose answer, and how long it takes, the test sets.
+/// An OS whose answer the test sets; while it is held, a lookup does not end until released.
 #[derive(Clone)]
 struct Os {
     answer: Arc<Mutex<OsAnswer>>,
-    delay: Arc<Mutex<Duration>>,
+    held: Arc<(Mutex<bool>, Condvar)>,
 }
 
 impl Os {
     fn new(answer: OsAnswer) -> Self {
         Self {
             answer: Arc::new(Mutex::new(answer)),
-            delay: Arc::default(),
+            held: Arc::default(),
         }
     }
 
-    fn set(&self, answer: OsAnswer, delay: Duration) {
+    fn set(&self, answer: OsAnswer) {
         *lock(&self.answer) = answer;
-        *lock(&self.delay) = delay;
+    }
+
+    /// Holds the lookups (they hang), or releases them.
+    fn hold(&self, held: bool) {
+        *lock(&self.held.0) = held;
+        self.held.1.notify_all();
     }
 
     fn lookup(&self) -> impl Fn(&Url) -> OsAnswer + Send + Sync + 'static {
         let os = self.clone();
         move |_target: &Url| {
-            let delay = *lock(&os.delay);
-            if !delay.is_zero() {
-                futures::executor::block_on(AsyncIoTimer.after(delay));
+            let answer = lock(&os.answer).clone();
+            let (held, released) = &*os.held;
+            let mut held = lock(held);
+            while *held {
+                held = released.wait(held).unwrap_or_else(PoisonError::into_inner);
             }
-            lock(&os.answer).clone()
+            answer
         }
     }
 }
 
 /// A route resolved on the caller's thread, stale at once (each refresh resolves again), with a
-/// 200 ms budget; its launch hook.
-fn inline(os: &Os) -> (NetworkFollow, SetupHook) {
+/// 200 ms budget kept in virtual time, so only a held lookup runs past it, however loaded the
+/// machine; its launch hook and its time.
+fn inline(os: &Os) -> (NetworkFollow, SetupHook, Arc<Virtual>) {
     let slot = NetworkSlot::default();
+    let time = Arc::new(Virtual::default());
     let follower = Follower::unbound(Arc::clone(&slot), ProxyEnv::default, os.lookup(), true)
         .reach(|_proxy| true)
+        .lookup_time(Arc::clone(&time) as Arc<dyn LookupTime>)
         .fresh_for(Duration::ZERO)
         .lookup_budget(Duration::from_millis(200));
     let network = NetworkFollow::inline(follower);
     let hook = SetupHook::new(Arc::new(OnceLock::new()), Arc::default(), slot);
-    (network, hook)
+    (network, hook, time)
 }
 
 fn proxy_of(hook: &SetupHook) -> Option<String> {
@@ -99,28 +111,30 @@ fn other_hosts() -> NetworkFacts {
 #[test]
 fn a_refresh_keeps_the_previous_proxy_when_a_lookup_fails_or_is_late() {
     let os = Os::new(OsAnswer::Proxy(OS_PROXY.to_owned()));
-    let (network, hook) = inline(&os);
+    let (network, hook, time) = inline(&os);
     let refresh = network.refresher();
     network.update(facts());
     assert_eq!(proxy_of(&hook).as_deref(), Some(OS_PROXY));
-    os.set(OsAnswer::Unknown, Duration::ZERO);
+    os.set(OsAnswer::Unknown);
     assert_eq!(refresh().and_then(|n| n.proxy).as_deref(), Some(OS_PROXY));
     assert_eq!(
         proxy_of(&hook).as_deref(),
         Some(OS_PROXY),
         "a failed lookup"
     );
-    os.set(
-        OsAnswer::Proxy(NEW_PROXY.to_owned()),
-        Duration::from_millis(700),
-    );
+    os.set(OsAnswer::Proxy(NEW_PROXY.to_owned()));
+    os.hold(true);
+    time.hang(true);
     refresh();
     assert_eq!(
         proxy_of(&hook).as_deref(),
         Some(OS_PROXY),
         "a lookup past the budget"
     );
-    os.set(OsAnswer::Direct, Duration::ZERO);
+    // The held lookups end now, their resolve over: their answers go nowhere.
+    time.hang(false);
+    os.hold(false);
+    os.set(OsAnswer::Direct);
     refresh();
     assert_eq!(
         proxy_of(&hook).as_deref(),
@@ -176,14 +190,14 @@ fn a_failure_keeps_a_cached_direct_or_proxy_for_the_same_hosts() {
     );
     // Through the follower: a cached DIRECT, then a failure on a refresh, stays direct.
     let os = Os::new(OsAnswer::Direct);
-    let (network, hook) = inline(&os);
+    let (network, hook, _time) = inline(&os);
     let refresh = network.refresher();
     network.update(facts());
     assert_eq!(proxy_of(&hook), None);
-    os.set(OsAnswer::Unknown, Duration::ZERO);
+    os.set(OsAnswer::Unknown);
     refresh();
     assert_eq!(proxy_of(&hook), None, "a failure after DIRECT");
-    os.set(OsAnswer::Proxy(OS_PROXY.to_owned()), Duration::ZERO);
+    os.set(OsAnswer::Proxy(OS_PROXY.to_owned()));
     refresh();
     assert_eq!(proxy_of(&hook).as_deref(), Some(OS_PROXY));
 }
@@ -193,13 +207,13 @@ fn a_failure_keeps_a_cached_direct_or_proxy_for_the_same_hosts() {
 #[test]
 fn a_first_route_or_other_hosts_with_no_answer_go_direct() {
     let os = Os::new(OsAnswer::Unknown);
-    let (network, hook) = inline(&os);
+    let (network, hook, _time) = inline(&os);
     network.update(facts());
     assert_eq!(proxy_of(&hook), None, "a first route");
-    os.set(OsAnswer::Proxy(OS_PROXY.to_owned()), Duration::ZERO);
+    os.set(OsAnswer::Proxy(OS_PROXY.to_owned()));
     network.update(facts());
     assert_eq!(proxy_of(&hook).as_deref(), Some(OS_PROXY));
-    os.set(OsAnswer::Unknown, Duration::ZERO);
+    os.set(OsAnswer::Unknown);
     network.update(other_hosts());
     assert_eq!(proxy_of(&hook), None, "another API host");
 }
@@ -209,10 +223,10 @@ fn a_first_route_or_other_hosts_with_no_answer_go_direct() {
 #[test]
 fn an_entry_env_or_ca_changed_with_the_same_hosts_keeps_the_proxy_over_a_failure() {
     let os = Os::new(OsAnswer::Proxy(OS_PROXY.to_owned()));
-    let (network, hook) = inline(&os);
+    let (network, hook, _time) = inline(&os);
     network.update(facts());
     assert_eq!(proxy_of(&hook).as_deref(), Some(OS_PROXY));
-    os.set(OsAnswer::Unknown, Duration::ZERO);
+    os.set(OsAnswer::Unknown);
     let mut entry_env = facts();
     entry_env
         .own_vars
@@ -350,13 +364,13 @@ fn a_kept_proxy_expires_ten_minutes_after_a_real_lookup_last_gave_it() {
     let hook = SetupHook::new(Arc::new(OnceLock::new()), Arc::default(), slot);
     let refresh = network.refresher();
     network.update(facts());
-    os.set(OsAnswer::Unknown, Duration::ZERO);
+    os.set(OsAnswer::Unknown);
     clock.advance(Duration::from_mins(9));
     refresh();
     assert_eq!(proxy_of(&hook).as_deref(), Some(OS_PROXY), "at 9 min: kept");
-    os.set(OsAnswer::Proxy(OS_PROXY.to_owned()), Duration::ZERO);
+    os.set(OsAnswer::Proxy(OS_PROXY.to_owned()));
     refresh();
-    os.set(OsAnswer::Unknown, Duration::ZERO);
+    os.set(OsAnswer::Unknown);
     clock.advance(Duration::from_mins(9));
     refresh();
     assert_eq!(

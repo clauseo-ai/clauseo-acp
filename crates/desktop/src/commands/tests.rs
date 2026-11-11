@@ -12,9 +12,10 @@ use tauri::{Manager as _, WebviewWindow, WebviewWindowBuilder};
 use uuid::Uuid;
 
 use super::*;
-use crate::settings_window::{HashesSet, SETTINGS_WINDOW};
 use crate::test_support::{Scratch, envelope};
 
+mod open_settings;
+mod privacy;
 mod release_mode;
 
 /// An app on the mock runtime with every command, the app's own context (so its capabilities)
@@ -46,6 +47,7 @@ fn app(bridge: Bridge) -> (tauri::App<MockRuntime>, WebviewWindow<MockRuntime>) 
             count_ui,
             setup,
             quit_app,
+            open_privacy_settings,
             page_marks,
             #[cfg(feature = "e2e")]
             crate::e2e::perf_channel_bytes,
@@ -167,6 +169,12 @@ fn a_tauri_rejection_is_a_string_and_a_refusal_is_a_host_error() {
     } else {
         "release"
     };
+    // Smart App Control's state is the test machine's on Windows, and unknown everywhere else.
+    let sac = if cfg!(windows) {
+        info["smart_app_control"].clone()
+    } else {
+        Value::Null
+    };
     assert_eq!(
         info,
         json!({
@@ -174,6 +182,7 @@ fn a_tauri_rejection_is_a_string_and_a_refusal_is_a_host_error() {
             "release_date": null,
             "test_build": cfg!(feature = "e2e"),
             "release_mode": mode,
+            "smart_app_control": sac,
         })
     );
 
@@ -301,24 +310,30 @@ fn open_and_reveal_are_granted_to_main_only() {
 }
 
 /// The opener with no confirm (`open::open_url_unconfirmed`, for Rust's own callers) is no
-/// command: no list of commands, no capability, no handler and no binding names it.
+/// command: no list of commands, no capability, no handler and no binding names it, while the
+/// bindings do name `open_external`, so an empty or truncated bindings.ts can't pass.
 #[test]
 fn the_unconfirmed_opener_is_not_reachable_from_the_webview() {
     let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
     let name = "open_url_unconfirmed";
     assert!(!COMMANDS.contains(&name));
     assert!(!E2E_COMMANDS.contains(&name) && !MARKS_COMMANDS.contains(&name));
-    for file in [
-        "build.rs",
-        "capabilities/main.json",
-        "capabilities/frame.json",
-        "capabilities/e2e.json",
-        "capabilities/marks.json",
-        "capabilities/settings.json",
-        "src/lib.rs",
-        "../../ui/app/src/transport/bindings.ts",
+    for (file, expected) in [
+        ("build.rs", ""),
+        ("capabilities/main.json", ""),
+        ("capabilities/frame.json", ""),
+        ("capabilities/e2e.json", ""),
+        ("capabilities/marks.json", ""),
+        ("capabilities/settings.json", ""),
+        ("src/lib.rs", ""),
+        (
+            "../../ui/app/src/transport/bindings.ts",
+            "__TAURI_INVOKE(\"open_external\"",
+        ),
     ] {
         let text = std::fs::read_to_string(dir.join(file)).unwrap();
+        assert!(!text.trim().is_empty(), "{file} is empty");
+        assert!(text.contains(expected), "{file} lacks {expected}");
         assert!(!text.contains(name), "{file} names {name}");
         assert!(!text.contains("open-url-unconfirmed"), "{file} grants it");
     }
@@ -461,6 +476,7 @@ fn every_list_of_commands_agrees() {
 
     let bindings =
         std::fs::read_to_string(dir.join("../../ui/app/src/transport/bindings.ts")).unwrap();
+    assert!(!bindings.trim().is_empty(), "bindings.ts is empty");
     let invoked: BTreeSet<&str> = bindings
         .split("__TAURI_INVOKE(\"")
         .skip(1)
@@ -481,63 +497,6 @@ const SETTINGS_COMMANDS: [&str; 8] = [
     "setup",
     "quit_app",
 ];
-
-/// `open_settings` takes an optional, closed `section` (R24: the room's case-law hint and
-/// banner open Connectors; R17's first run opens Protection): none, `"connectors"` and
-/// `"protection"` open the window; a value the build does not
-/// know, or one of another type, is refused as the arguments decode and opens nothing.
-#[test]
-fn open_settings_takes_a_known_section_or_none_and_refuses_others() {
-    let scratch = Scratch::new("settings-section", &[]);
-    let host = scratch.start(Vec::new());
-    let (app, main) = app(host.bridge());
-    for refused in [
-        json!({"section": "billing"}),
-        json!({"section": "Connectors"}),
-        json!({"section": "Protection"}),
-        json!({"section": 1}),
-    ] {
-        let answer = invoke(&main, "open_settings", refused.clone());
-        assert!(answer.is_err() && !denied(&answer), "{refused}: {answer:?}");
-        assert_eq!(app.webview_windows().len(), 1, "{refused} opened a window");
-    }
-    app.manage(HashesSet::default());
-    let at = invoke(&main, "open_settings", json!({"section": "connectors"}));
-    assert_eq!(at, Ok(Value::Null));
-    assert_eq!(app.webview_windows().len(), 2);
-    let settings = app.get_webview_window(SETTINGS_WINDOW).unwrap();
-    let url = settings.url().unwrap();
-    assert_eq!(url.fragment(), Some("connectors"), "{url}");
-    assert!(url.path().ends_with("/settings.html"), "{url}");
-    // Built at the fragment, so no hash set on it.
-    assert_eq!(hashes(&app), Vec::<&str>::new());
-    // Open already: brought forward at the section, still one settings window.
-    assert_eq!(
-        invoke(&main, "open_settings", json!({"section": "connectors"})),
-        Ok(Value::Null)
-    );
-    assert_eq!(hashes(&app), ["connectors"]);
-    assert_eq!(invoke(&main, "open_settings", json!({})), Ok(Value::Null));
-    assert_eq!(
-        invoke(&main, "open_settings", json!({"section": null})),
-        Ok(Value::Null)
-    );
-    // No section: brought forward where it was, with no hash set.
-    assert_eq!(hashes(&app), ["connectors"]);
-    assert_eq!(app.webview_windows().len(), 2);
-    // R17: UC's first-run button opens Protection.
-    assert_eq!(
-        invoke(&main, "open_settings", json!({"section": "protection"})),
-        Ok(Value::Null)
-    );
-    assert_eq!(hashes(&app), ["connectors", "protection"]);
-    assert_eq!(app.webview_windows().len(), 2);
-}
-
-/// The fragments `open_settings` set on the open settings window.
-fn hashes(app: &tauri::App<MockRuntime>) -> Vec<&'static str> {
-    app.state::<HashesSet>().0.lock().unwrap().clone()
-}
 
 /// Whether Tauri refused `answer` before any command ran.
 fn denied(answer: &Result<Value, Value>) -> bool {

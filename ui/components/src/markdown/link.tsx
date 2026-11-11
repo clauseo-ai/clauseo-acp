@@ -1,7 +1,12 @@
 import { useContext } from "react";
 import type { KeyboardEvent, MouseEvent, ReactNode } from "react";
 import { useWords } from "../lib/words.ts";
-import { AnswerScopeContext, InertLinksContext, MarkdownHostContext } from "./host.ts";
+import {
+  AnswerScopeContext,
+  InertLinksContext,
+  MarkdownHostContext,
+  PaperLinksContext,
+} from "./host.ts";
 import { CLOBBER_PREFIX, LINK_PREFIXES, referenceOf } from "./schema.ts";
 import { headingId } from "./slugs.ts";
 
@@ -95,8 +100,9 @@ function spoofedHost(text: string, href: string | undefined): string | undefined
 /**
  * Every link in an answer. It renders a real <a href> for display and copy, but a click or middle click
  * never navigates: it is cancelled, and the URL goes to the host's open_external. A fragment scrolls to its
- * target. Relative and other links render without an href, inert, and so does every link in the streaming
- * last block. Of the sanitised attributes it keeps the id and the reference's aria-describedby; a
+ * target. A file link that names a paper on the wall (PaperLinksContext) renders without an href, as a link the
+ * keyboard reaches, and goes to the host's openPath, which opens it as the wall does; any other link is its text
+ * alone, never a link that does nothing. Every link in the streaming last block renders without an href, inert. Of the sanitised attributes it keeps the id and the reference's aria-describedby; a
  * footnote back-reference gets its label in the page's language.
  */
 export function Link({ href, id, children, text, ...rest }: LinkProps) {
@@ -105,9 +111,19 @@ export function Link({ href, id, children, text, ...rest }: LinkProps) {
   const host = useContext(MarkdownHostContext);
   const scope = useContext(AnswerScopeContext);
   const inert = useContext(InertLinksContext);
+  const paperOf = useContext(PaperLinksContext);
   const url = inert ? undefined : allowed(href, scope);
+  // a file link that names a paper on the wall: the host opens it, or says it is no longer in the folder
+  const path = inert || url !== undefined || href === undefined ? undefined : paperOf(href);
+  // anything else (a file elsewhere, a scheme with no action) is its text alone
+  if (!inert && url === undefined && path === undefined)
+    return <span data-clauseo="link-text">{children}</span>;
   const open = (event: MouseEvent<HTMLAnchorElement>) => {
     event.preventDefault();
+    if (path !== undefined) {
+      host.openPath(path);
+      return;
+    }
     if (!url) return;
     if (url.startsWith("#")) {
       document.getElementById(fragmentId(url.slice(1)))?.scrollIntoView();
@@ -129,6 +145,17 @@ export function Link({ href, id, children, text, ...rest }: LinkProps) {
       rel="noreferrer noopener"
       onClick={open}
       onAuxClick={open}
+      {...(path === undefined
+        ? {}
+        : {
+            role: "link",
+            tabIndex: 0,
+            onKeyDown: (event: KeyboardEvent<HTMLAnchorElement>) => {
+              if (event.key !== "Enter") return;
+              event.preventDefault();
+              host.openPath(path);
+            },
+          })}
     >
       {children}
       {realHost ? <span data-clauseo="link-host"> ({realHost})</span> : null}

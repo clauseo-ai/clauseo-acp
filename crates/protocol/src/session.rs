@@ -308,6 +308,10 @@ open_data_enum! {
             /// Why the launch left it out.
             reason: PackSkipReason,
         },
+        /// Claude Code's `auto` permission mode is not available for this session (the account,
+        /// the model or the agent ruled it out), so Claude runs in `acceptEdits` and asks before
+        /// running commands.
+        AutoModeUnavailable = "auto_mode_unavailable",
         _ =>
         /// A kind from a newer Clauseo; written back as the plain string `kind`.
         Unknown,
@@ -322,6 +326,7 @@ open_data_enum! {
             pack: PackId::new("nda-kit").unwrap(),
             reason: PackSkipReason::Changed,
         },
+        NoticeKind::AutoModeUnavailable,
     ];
 }
 

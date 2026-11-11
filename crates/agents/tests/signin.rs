@@ -28,6 +28,26 @@ mod codex_cli;
 mod codex_status;
 
 #[cfg(test)]
+#[path = "signin/status_retry.rs"]
+mod status_retry;
+
+#[cfg(test)]
+#[path = "signin/graceful.rs"]
+mod graceful;
+
+#[cfg(test)]
+#[path = "signin/cancel_before_spawn.rs"]
+mod cancel_before_spawn;
+
+#[cfg(test)]
+#[path = "signin/kept_login.rs"]
+mod kept_login;
+
+#[cfg(test)]
+#[path = "signin/switch_guard.rs"]
+mod switch_guard;
+
+#[cfg(test)]
 #[path = "signin/queued.rs"]
 mod queued;
 
@@ -40,8 +60,20 @@ mod reuse_claude;
 mod reuse_codex;
 
 #[cfg(test)]
+#[path = "signin/found_at_press.rs"]
+mod found_at_press;
+
+#[cfg(test)]
+#[path = "signin/detect_nowrite.rs"]
+mod detect_nowrite;
+
+#[cfg(test)]
 #[path = "signin/shim.rs"]
 mod shim;
+
+#[cfg(test)]
+#[path = "signin/lifecycle_log.rs"]
+mod lifecycle_log;
 
 use std::collections::BTreeMap;
 use std::ffi::OsString;

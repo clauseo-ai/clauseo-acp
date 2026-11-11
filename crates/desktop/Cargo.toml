@@ -123,9 +123,11 @@ rustls = { workspace = true, features = ["ring", "std", "tls12"] }
 [target.'cfg(windows)'.dependencies]
 windows = { workspace = true, features = [
   "Win32_Foundation",
+  "Win32_Globalization",
   "Win32_Security",
   "Win32_Security_Authorization",
   "Win32_Graphics_Gdi",
+  "Win32_Graphics_GdiPlus",
   "Win32_NetworkManagement_WNet",
   "Win32_System_Com",
   "Win32_System_LibraryLoader",
@@ -166,6 +168,11 @@ libc = { workspace = true }
 # tests only, through the dev-dependency below.
 [target.'cfg(not(target_os = "linux"))'.dependencies]
 tauri-plugin-updater.workspace = true
+# The updater's file binding (src/update/file_binding.rs): the update's signature verified again,
+# global signature included, to read the file and version its trusted comment names. Both are
+# already in the tree through tauri-plugin-updater, at these versions.
+minisign-verify = { workspace = true }
+base64 = { workspace = true }
 
 [dev-dependencies]
 # The NSIS template's pin (delete_app_data/tests/template.rs): SHA-256 of upstream's text.
@@ -198,16 +205,22 @@ tracing-subscriber = { workspace = true, features = ["fmt"] }
 # The canary test (tests/canary.rs) unzips each counts body it captured to search it.
 flate2 = { workspace = true }
 # The updater's adapter and its latest.json fixtures (src/update/tests.rs) on every OS, Linux
-# included, where the app itself leaves the plugin out.
+# included, where the app itself leaves the plugin out; the file binding's checks, which sign with
+# an Ed25519 key they make (ring, already in the tree through rustls).
 tauri-plugin-updater.workspace = true
+minisign-verify = { workspace = true }
+base64 = { workspace = true }
+ring = { workspace = true }
+# Scratch files, removed when dropped (already in the tree, through tauri): the bindings test's
+# render beside bindings.ts, renamed over it on drift (src/commands/bindings.rs), and the
+# quit-on-signal test's scratch folder (tests/quit_on_signal.rs).
+tempfile = "3"
 
-# The quit-on-signal test (tests/quit_on_signal.rs) sends the signals, drives the ladder with
-# clauseo-process's ManualTimer, and keeps its scratch folder in a tempfile folder (already in the
-# tree, through tauri), removed when the test ends.
+# The quit-on-signal test (tests/quit_on_signal.rs) sends the signals and drives the ladder with
+# clauseo-process's ManualTimer.
 [target.'cfg(unix)'.dev-dependencies]
 nix = { workspace = true }
 clauseo-process = { path = "../process", features = ["test-support"] }
-tempfile = "3"
 
 # The deletion's Windows tests (src/delete_app_data/tests/make.rs) set a reparse point that is no
 # link with DeviceIoControl (System_IO), to see it kept.

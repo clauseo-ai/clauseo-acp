@@ -9,6 +9,14 @@
   --gutter: max(var(--thread-pad), calc((var(--work-w) - var(--measure)) / 2));
 }
 
+/* a dialog's scrim (z-30) covers the window but not its caption buttons, which answer the first press while a dialog is
+   open: in the room (responsive.css lets the toolbar go relative for it) and in the settings window. Outside the
+   layers, as responsive.css's frame rules are. */
+:root:has([data-dialog-plane]) .room-caption {
+  position: relative;
+  z-index: 31;
+}
+
 @layer components {
   .room-window {
     width: 100%;
@@ -22,6 +30,10 @@
     grid-template-areas: "top top top" "rail centre pane";
     overflow: hidden;
     background: var(--ground);
+  }
+  /* the first screen not yet known (the app's deciding.ts): laid out, unseen, under the page's mark */
+  .room-window[data-deciding] {
+    visibility: hidden;
   }
 
   /* ---------- toolbar: the matter as the header, then search, History and Undo, the plan ---------- */
@@ -157,7 +169,7 @@
     }
   }
 
-  /* ---------- the rail: matters by their next date, on the bare ground ---------- */
+  /* ---------- the rail: matters by what needs the lawyer, then what's answering, then the rest, on the bare ground ---------- */
   .room-rail {
     grid-area: rail;
     display: flex;
@@ -284,18 +296,36 @@
   .room-centre[data-turn="page"] .room-thread {
     visibility: hidden;
   }
+  /* lite casts no shadow, so the edges the thread passes under are a hairline each (D-073): the composer's,
+     while the thread runs on below it (its border always there, so showing it moves nothing), and the
+     pinned question's */
+  :root[data-render="lite"] .room-thread {
+    border-bottom: var(--hairline) solid transparent;
+  }
+  :root[data-render="lite"] .room-centre[data-more] .room-thread {
+    border-bottom-color: var(--divide-mid);
+  }
+  :root[data-render="lite"] .room-pin {
+    border-bottom: var(--hairline) solid var(--divide-mid);
+  }
+  /* a row a Find result jumps to lands clear of the pinned question's band (its one line and its padding), so no cut
+     line of it shows under the pin (D-071; jump-entry.ts) */
+  .room-thread [data-entry-id] {
+    scroll-margin-top: calc(var(--lh-ui-loose) * var(--k) + 2 * var(--pin-pad-y) + var(--s2));
+  }
   .room-centre:is([data-turn="page"], [data-turn="opening"]) .room-pin {
     visibility: hidden;
   }
 
   /* ---------- Settings, at the rail's foot ---------- */
+  /* the gear before the words, as the scratch matter's icon stands before its name; it takes the words' colour */
   .room-settings {
     @apply text-ui text-muted;
     flex: none;
     display: flex;
     align-items: center;
-    justify-content: space-between;
-    gap: var(--s2);
+    justify-content: flex-start;
+    gap: var(--s3);
     min-height: var(--size-control);
     padding: 0 var(--s3);
     border-radius: var(--r-tile);

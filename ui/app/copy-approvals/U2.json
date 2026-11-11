@@ -6,41 +6,6 @@
     "at": "2026-11-02",
     "note": "Rohan, on the review page"
   },
-  "U2-02": {
-    "en": "Tomorrow",
-    "hi": "कल",
-    "status": "approved",
-    "at": "2026-11-02",
-    "note": "Rohan, on the review page"
-  },
-  "U2-03": {
-    "en": "This week",
-    "hi": "इस सप्ताह",
-    "status": "approved",
-    "at": "2026-11-02",
-    "note": "Rohan, on the review page"
-  },
-  "U2-04": {
-    "en": "Next week",
-    "hi": "अगले सप्ताह",
-    "status": "approved",
-    "at": "2026-11-02",
-    "note": "Rohan, on the review page"
-  },
-  "U2-05": {
-    "en": "Later",
-    "hi": "बाद में",
-    "status": "approved",
-    "at": "2026-11-02",
-    "note": "Rohan, on the review page"
-  },
-  "U2-06": {
-    "en": "No date yet",
-    "hi": "अभी कोई तारीख नहीं",
-    "status": "approved",
-    "at": "2026-11-02",
-    "note": "Rohan, on the review page"
-  },
   "U2-07": {
     "en": "Limit reached until {time}",
     "hi": "{time} बजे तक सीमा पूरी",
@@ -56,11 +21,12 @@
     "note": "Rohan, on the review page"
   },
   "U2-09": {
-    "en": "Limit reached. Reset not given.",
-    "hi": "सीमा पूरी। रीसेट का समय नहीं बताया गया।",
-    "status": "approved",
-    "at": "2026-11-02",
-    "note": "Rohan, on the review page"
+    "en": "Limit reached",
+    "hi": "सीमा पूरी",
+    "status": "provisional",
+    "at": "2026-11-10",
+    "by": "orchestrator (decided 2026-11-10)",
+    "note": "trimmed from \"Limit reached. Reset not given.\" (approved 2026-11-02, Rohan)"
   },
   "U2-10": {
     "en": "{path} is a whole drive.",
@@ -128,13 +94,6 @@
   "U2-19": {
     "en": "Clauseo couldn't create the matter. Try again, or choose another folder.",
     "hi": "Clauseo मामला नहीं बना सका। फिर से प्रयास करें, या दूसरा फ़ोल्डर चुनें।",
-    "status": "approved",
-    "at": "2026-11-02",
-    "note": "Rohan, on the review page"
-  },
-  "U2-20": {
-    "en": "Write the date as 30 October 2026.",
-    "hi": "तारीख इस तरह लिखें: 30 अक्टूबर 2026।",
     "status": "approved",
     "at": "2026-11-02",
     "note": "Rohan, on the review page"
@@ -226,13 +185,6 @@
   "U2-33": {
     "en": "Stopped on {day} at {time}",
     "hi": "{day} को {time} बजे रोका गया",
-    "status": "approved",
-    "at": "2026-11-02",
-    "note": "Rohan, on the review page"
-  },
-  "U2-34": {
-    "en": "The matter's folder",
-    "hi": "मामले का फ़ोल्डर",
     "status": "approved",
     "at": "2026-11-02",
     "note": "Rohan, on the review page"

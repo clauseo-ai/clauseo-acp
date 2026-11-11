@@ -7,8 +7,8 @@ use serde_json::{Map, Value, json};
 
 use super::{
     ALLOW_BYPASS_OPTION, CLAUDE_AI_MCP_VAR, CLAUDE_MANAGED_SETTING_SOURCES, CLAUDE_MODE,
-    CLAUDE_SETTING_SOURCES, GUARD_MATCHER, GuardHook, McpControl, guard_entry, launch_env,
-    mcp_control, mcp_servers, session_meta,
+    CLAUDE_SETTING_SOURCES, GUARD_MATCHER, GuardHook, McpControl, claude_mode, guard_entry,
+    launch_env, mcp_control, mcp_servers, session_meta,
 };
 use crate::write;
 
@@ -117,7 +117,21 @@ fn bypass_stays_off_and_the_hooks_mode_flags_are_taken_out() {
             "{control:?}"
         );
     }
-    assert_eq!(CLAUDE_MODE, "default");
+    assert_eq!(CLAUDE_MODE, "auto");
+}
+
+/// A Claude session starts in `auto` outside forced ask (`acceptEdits` its fallback) and in
+/// `default` in it (decision 3 of 2026-11-04 stands), and never in bypass.
+#[test]
+fn claude_starts_in_auto_and_forced_ask_in_default() {
+    assert_eq!(claude_mode(false), "auto");
+    assert_eq!(super::CLAUDE_FALLBACK_MODE, "acceptEdits");
+    assert_eq!(claude_mode(true), "default");
+    assert!(crate::agent::forced_ask::mode_allowed(claude_mode(true)));
+    assert!(!crate::agent::forced_ask::mode_allowed(claude_mode(false)));
+    for forced_ask in [false, true] {
+        assert_ne!(claude_mode(forced_ask), "bypassPermissions");
+    }
 }
 
 /// The guard's entry: the exec form with `--matter <folder>`, the matcher and the timeout,

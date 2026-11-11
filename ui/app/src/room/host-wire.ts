@@ -1,6 +1,6 @@
 // H7, H8, R15 and H3 to H6 over the desktop host: the room's SettingsHost (host-next.ts, the tool switches included) from the transport's `query`,
 // `dispatch` and app feed (`onAppEvent`), its PapersHost from `query`'s `list_papers`, its AgentsHost from `query`'s
-// `list_agents`, its MattersHost from `list_matters`, `list_threads` and the matters' commands, and its AppHost from
+// `list_agents`, its LocationHost from `get_default_location`, its MattersHost from `list_matters`, `list_threads` and the matters' commands, and its AppHost from
 // the app feed's `matters_changed` and `threads_changed`. The room keeps its own spellings; this file is the one place
 // they meet the wire's: lite's "full" and "lite" are the wire's "off" and "on", motion's "reduced" is "reduce", the text
 // size is a number on the wire, and a matter's details the wire leaves out read as its binding says (`roomMatterOf`).
@@ -25,6 +25,7 @@ import type {
   AgentsHost,
   AppEvent,
   AppHost,
+  LocationHost,
   MatterInfo,
   MattersCommand,
   MattersHost,
@@ -66,6 +67,7 @@ export function roomSettingsOf(view: SettingsView): Settings {
       motion: MOTION_BACK[ui.motion],
     },
     tools: view.tools,
+    privacy: view.privacy,
     locked: view.locked,
     ...(view.plans === undefined ? {} : { plans: view.plans }),
   };
@@ -122,6 +124,12 @@ export function wireSettingsHost(source: WireSettingsSource): SettingsHost {
         command: { set_tool_settings: { patch } },
       });
     },
+    async setPrivacySettings(patch) {
+      await source.dispatch({
+        command_id: crypto.randomUUID(),
+        command: { set_privacy_settings: { patch } },
+      });
+    },
     onSettingsChanged(listener) {
       listeners.add(listener);
       openFeed();
@@ -155,6 +163,19 @@ export function wireAgentsHost(source: Pick<HostTransport, "query">): AgentsHost
       if (!("agents" in answer) || answer.agents === undefined)
         throw internalError("list_agents answered something else");
       return answer.agents;
+    },
+  };
+}
+
+/** The room's LocationHost over the desktop host (H20): `"get_default_location"`, answered with `default_location`,
+ * its display. A host with no default location refuses it, and the form offers no new folder. */
+export function wireLocationHost(source: Pick<HostTransport, "query">): LocationHost {
+  return {
+    async getDefaultLocation() {
+      const answer = await source.query("get_default_location");
+      if (!("default_location" in answer) || answer.default_location === undefined)
+        throw internalError("get_default_location answered something else");
+      return answer.default_location.display;
     },
   };
 }
@@ -216,11 +237,14 @@ function appEventOf(event: HostEvent): AppEvent | null {
   }
   if (event.threads_changed !== undefined) return { threads_changed: event.threads_changed };
   if (event.browser_install !== undefined) return { browser_install: event.browser_install };
+  if (event.browser_policy !== undefined) return { browser_policy: event.browser_policy };
   if (event.connectors_changed !== undefined)
     return { connectors_changed: event.connectors_changed };
   if (event.case_law_hint !== undefined) return { case_law_hint: event.case_law_hint };
   if (event.folder_scanned !== undefined) return { folder_scanned: event.folder_scanned };
   if (event.site_blocked !== undefined) return { site_blocked: event.site_blocked };
+  if (event.papers_changed !== undefined) return { papers_changed: event.papers_changed };
+  if (event.update_changed !== undefined) return { update_changed: event.update_changed };
   // UC: as they came; protection_view_changed is R17 PR-B's, not in HostEvent yet
   if (event.protection_changed !== undefined || "protection_view_changed" in event)
     return event as AppEvent;

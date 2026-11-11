@@ -16,8 +16,13 @@ export const HI = {
   "Reading {name} online.": "{name} ऑनलाइन पढ़ा जा रहा है।",
   "Looking online.": "ऑनलाइन देखा जा रहा है।",
   "Running a task.": "एक काम चल रहा है।",
+  "Running {program} on {name}.": "{name} पर {program} चल रहा है।",
+  "Running {program}.": "{program} चल रहा है।",
+  "Searching {site} for '{query}'.": "{site} पर '{query}' खोजा जा रहा है।",
   "Thinking it through.": "विचार किया जा रहा है।",
   "Working on it.": "काम चल रहा है।",
+  // a step named only by the sandbox's permission for the internet (UC-168; provisional)
+  "Letting a task reach the internet.": "एक काम को इंटरनेट तक पहुँचने दिया जा रहा है।",
 } as const;
 
 /** Every key, for the banned-words screen in the tests. */

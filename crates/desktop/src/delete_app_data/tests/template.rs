@@ -1,14 +1,18 @@
 //! The repo's NSIS template (`windows/nsis/installer.nsi`, `bundle.windows.nsis.template`) is
 //! tauri-cli 2.12.2's own plus a known list of named blocks: `no-solid` (no /SOLID, so nothing is
-//! unpacked into %TEMP%), `finish-show` and `finish-show-function` (the finish page hides "Run
-//! Clauseo" after a wait that timed out) and `admin-section` (first in `.onInit`), which runs the
-//! elevated branch of `admin_elevated.nsh` and the per-machine installer's start
+//! unpacked into %TEMP%), `version-info` (the installer's full VERSIONINFO, tested in
+//! `installer_version_info.rs`), `finish-show` and `finish-show-function` (the finish page hides
+//! "Run Clauseo" after a wait that timed out) and `admin-section` (first in `.onInit`), which runs
+//! the elevated branch of `admin_elevated.nsh` and the per-machine installer's start
 //! (`safe_temp.nsh`, tested in `safe_temp.rs`); that branch loads no plug-in, calls no function
 //! and reads nothing the lawyer can write before it extracts. Clauseo's main window class is the
 //! one the branch looks for. `ui-language`, later in `.onInit`, sets the installer's language
 //! from the app's (`hooks.nsh`, tested in `installer_language.rs`). The per-machine
 //! uninstaller's blocks (`uninstall-string`, `un-admin-section`, `uninstall-self-delete` and
-//! `un-gui-end`) are tested in `uninstall_in_place.rs`.
+//! `un-gui-end`) are tested in `uninstall_in_place.rs`. `webview2-no-elevation` keeps a per-user
+//! install from asking for an administrator over an old `WebView2` (`webview2_floor.rs`);
+//! `unable-to-uninstall-front` and `silent-downgrades-front` bring Tauri's own boxes to the front
+//! (`message_front.rs`).
 
 use std::collections::BTreeSet;
 use std::fmt::Write as _;
@@ -17,6 +21,7 @@ use sha2::{Digest, Sha256};
 
 use super::admin_copy::{admin_code, assert_run, macro_body};
 use super::sources::{line_with, read};
+use super::webview2_floor::UPSTREAM_UPDATE;
 
 /// The Tauri CLI whose template the copy follows: `ui/package.json` pins the CLI that bundles.
 /// Cargo.lock has no tauri-cli or tauri-bundler, so the npm pin is what moves on an upgrade.
@@ -31,58 +36,85 @@ const UPSTREAM_SHA256: &str = "166f9677d42e81c7f712a1bf80d9d8c089c21d2967d839847
 struct Block {
     name: &'static str,
     after: &'static str,
-    replaces: Option<&'static str>,
+    replaces: &'static [&'static str],
 }
 
 /// The blocks, in the template's order. A new block is one more row here (and its lines in the
 /// template).
-const BLOCKS: [Block; 9] = [
+const BLOCKS: [Block; 13] = [
     Block {
         name: "no-solid",
         after: "  ; Set the compression algorithm. We default to LZMA.",
-        replaces: Some("  SetCompressor /SOLID \"{{compression}}\""),
+        replaces: &["  SetCompressor /SOLID \"{{compression}}\""],
+    },
+    Block {
+        name: "version-info",
+        after: "",
+        replaces: &[
+            "VIProductVersion \"${VERSIONWITHBUILD}\"",
+            "VIAddVersionKey \"ProductName\" \"${PRODUCTNAME}\"",
+            "VIAddVersionKey \"FileDescription\" \"${PRODUCTNAME}\"",
+            "VIAddVersionKey \"LegalCopyright\" \"${COPYRIGHT}\"",
+            "VIAddVersionKey \"FileVersion\" \"${VERSION}\"",
+            "VIAddVersionKey \"ProductVersion\" \"${VERSION}\"",
+        ],
+    },
+    Block {
+        name: "unable-to-uninstall-front",
+        after: "      ; Other errors? show generic error message and return to select un/reinstall page",
+        replaces: &["      MessageBox MB_ICONEXCLAMATION \"$(unableToUninstall)\""],
     },
     Block {
         name: "finish-show",
         after: "!define MUI_FINISHPAGE_RUN_FUNCTION RunMainBinary",
-        replaces: None,
+        replaces: &[],
     },
     Block {
         name: "finish-show-function",
         after: "!insertmacro MUI_PAGE_FINISH",
-        replaces: None,
+        replaces: &[],
     },
     Block {
         name: "admin-section",
         after: "Function .onInit",
-        replaces: None,
+        replaces: &[],
     },
     Block {
         name: "ui-language",
         after: "  ${EndIf}",
-        replaces: None,
+        replaces: &[],
+    },
+    Block {
+        name: "silent-downgrades-front",
+        after: "      ${Else}",
+        replaces: &["        MessageBox MB_ICONSTOP \"$(silentDowngrades)\""],
+    },
+    Block {
+        name: "webview2-no-elevation",
+        after: "      ${If} $R0 = 1",
+        replaces: &UPSTREAM_UPDATE,
     },
     Block {
         name: "uninstall-string",
         after: "  WriteRegStr SHCTX \"${UNINSTKEY}\" \"InstallLocation\" \"$\\\"$INSTDIR$\\\"\"",
-        replaces: Some(
+        replaces: &[
             "  WriteRegStr SHCTX \"${UNINSTKEY}\" \"UninstallString\" \"$\\\"$INSTDIR\\uninstall.exe$\\\"\"",
-        ),
+        ],
     },
     Block {
         name: "un-admin-section",
         after: "Function un.onInit",
-        replaces: None,
+        replaces: &[],
     },
     Block {
         name: "uninstall-self-delete",
         after: "  !endif",
-        replaces: None,
+        replaces: &[],
     },
     Block {
         name: "un-gui-end",
         after: "SectionEnd",
-        replaces: None,
+        replaces: &[],
     },
 ];
 
@@ -158,8 +190,8 @@ fn the_template_is_tauri_cli_2_12_2s_plus_the_named_blocks() {
             "{} follows the wrong line",
             block.name
         );
-        if let Some(line) = block.replaces {
-            upstream.insert(found.at, line.to_owned());
+        for (offset, line) in block.replaces.iter().enumerate() {
+            upstream.insert(found.at + offset, (*line).to_owned());
         }
         // A line ending in a backslash would join the next one in NSIS.
         for line in &found.lines {
@@ -487,6 +519,15 @@ fn the_main_window_class_is_clauseos_own_and_the_installer_looks_for_it() {
             crate::MAIN_WINDOW_CLASS
         )],
     );
+    // With the Safe workspace off, hooks.nsh defines it instead, for repair mode's wait.
+    let off = read("windows/hooks.nsh");
+    assert!(
+        off.contains(&format!(
+            "!define CLAUSEO_MAIN_WINDOW_CLASS \"{}\"",
+            crate::MAIN_WINDOW_CLASS
+        )),
+        "hooks.nsh"
+    );
     // Set where the main window is built.
     let lib = read("src/lib.rs");
     assert!(
@@ -511,7 +552,7 @@ fn the_main_window_class_is_clauseos_own_and_the_installer_looks_for_it() {
         &[
             "${ElseIf} $R6 = 6",
             "DetailPrint \"$(adminCopyAppRunning)\"",
-            "MessageBox MB_OK|MB_ICONEXCLAMATION \"$(adminCopyAppRunning)\"",
+            "MessageBox MB_OK|MB_ICONEXCLAMATION|MB_SETFOREGROUND|MB_TOPMOST \"$(adminCopyAppRunning)\"",
             "SetErrorLevel ${CLAUSEO_EXIT_APP_RUNNING}",
         ],
     );

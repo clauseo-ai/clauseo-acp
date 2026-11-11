@@ -55,7 +55,8 @@
 //!
 //! `protocol`, `agent-client-protocol` with the features its `Cargo.toml` line names (never
 //! `unstable_subagents`), `futures`, `async-channel`, `serde`, `serde_json`, `memchr`,
-//! `thiserror`. Never `tauri`, `tokio` or `process`: the host hands over the pipes.
+//! `thiserror`, `tracing` (WARN lines naming a method and an error's shape, `diagnose.rs`).
+//! Never `tauri`, `tokio` or `process`: the host hands over the pipes.
 //!
 //! # Start reading
 //!
@@ -74,6 +75,7 @@
 )]
 
 mod client;
+mod diagnose;
 mod driver;
 mod error;
 mod event;
@@ -108,6 +110,25 @@ pub use types::{
 /// How many events the channel holds before the driver stops reading the agent.
 pub const EVENT_CAPACITY: usize = 1024;
 
+/// The command channel, held by the [`Driver`] so that a call the command loop never read is
+/// answered [`Error::Closed`] when the driver ends or is dropped. The SDK can end the
+/// connection on its side (an actor's error, such as a write to a closed stdin) in a poll that
+/// does not poll the command loop again, so a call sent just before stays queued; while any
+/// [`AcpClient`] lives, the channel and that call's reply would live on unanswered, and the
+/// caller would wait for good.
+struct Unread(async_channel::Receiver<client::Command>);
+
+impl Drop for Unread {
+    fn drop(&mut self) {
+        // Closed first, so no call is queued after the drain: each later one fails at once.
+        self.0.close();
+        while let Ok(command) = self.0.try_recv() {
+            // Its reply drops with it: the caller sees `Closed`.
+            drop(command);
+        }
+    }
+}
+
 /// Starts a connection over the agent's stdin (`writer`) and stdout (`reader`). Nothing happens
 /// until the host spawns the [`Driver`]; calls made before then wait for it.
 pub fn connect<W, R>(
@@ -121,6 +142,7 @@ where
 {
     let (events, receiver) = async_channel::bounded(EVENT_CAPACITY);
     let (commands, command_receiver) = async_channel::unbounded();
+    let unread = Unread(command_receiver.clone());
     let (stop, stop_receiver) = async_channel::bounded(1);
     let frames_dropped = Arc::new(AtomicU64::new(0));
     let shared = Arc::new(state::Shared::new(
@@ -149,6 +171,8 @@ where
             driver::run(cx, command_receiver, stop_receiver, looping).await
         });
     let driver = Driver(Box::pin(async move {
+        // Answers what the loop never read once the connection is over, however it ends.
+        let _unread = unread;
         match connection.await {
             Ok(()) => Ok(()),
             Err(_) => Err(shared.fatal().unwrap_or(Error::Closed)),

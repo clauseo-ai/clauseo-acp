@@ -28,10 +28,22 @@ const MATTER_RID_MIN: u32 = 1000;
 #[serde(try_from = "String", into = "String")]
 pub struct Sid(String);
 
-/// A string that is not a SID in [`Sid`]'s form.
-#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-#[error("not a SID: {0:?}")]
+/// A string that is not a SID in [`Sid`]'s form: the string, at most 200 characters, for a
+/// caller to compare. Neither its message nor its `Debug` shows the string, which may be a
+/// SID's text (in another form, say) and can reach the Application log, which every local user
+/// reads: both say only [`NOT_A_SID`].
+#[derive(Clone, PartialEq, Eq, thiserror::Error)]
+#[error("{NOT_A_SID}")]
 pub struct NotASid(pub String);
+
+/// What a [`NotASid`] says, whatever the string.
+pub const NOT_A_SID: &str = "a value that should be a SID isn't one in its canonical form";
+
+impl std::fmt::Debug for NotASid {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("NotASid(..)")
+    }
+}
 
 impl Sid {
     /// Checks `text` against [`Sid`]'s form.
@@ -67,6 +79,21 @@ impl Sid {
         self.0.starts_with("S-1-5-21-")
             && subs.len() == 5
             && rid.is_some_and(|rid| rid >= MATTER_RID_MIN)
+    }
+
+    /// Whether this can be a person's own account, the user of an interactive logon: a machine's
+    /// or an AD domain's account (`S-1-5-21-<a>-<b>-<c>-<rid>`, which a local account linked to
+    /// a Microsoft account is too) or an Entra ID user (`S-1-12-1-<a>-<b>-<c>-<d>`). Every
+    /// well-known SID (`S-1-5-18`, `S-1-1-0`), builtin group (`S-1-5-32-…`), service
+    /// (`S-1-5-80-…`), virtual account (`S-1-5-83-…`, `S-1-5-90-…`, `S-1-5-96-…`), logon SID,
+    /// `AppContainer` and capability (`S-1-15-…`) is refused. [`Sid::parse`] already held the
+    /// text to canonical decimals, so the authority is compared exactly. The RID is not checked:
+    /// RID 500 (the built-in Administrator, a real interactive user when UAC is off) is taken.
+    /// A group RID such as 512 under `S-1-5-21` is taken too, since no rule here can tell it from
+    /// a user; a group can't be a token's user, so no launch carries one.
+    pub fn is_user_account(&self) -> bool {
+        let parts: Vec<&str> = self.0.split('-').collect();
+        parts.len() == 8 && matches!(parts.get(2..4), Some(["5", "21"] | ["12", "1"]))
     }
 
     /// The account domain of a SID under `S-1-5-21` (a machine's or a domain's): the three
@@ -166,9 +193,115 @@ impl Reserved {
     }
 }
 
+/// Whether `owner` may own the sandbox folder, or a file in it, of the desktop user `user`: the
+/// user, `SYSTEM` or `Administrators` (what an elevated process makes the owner of what it
+/// creates). The removal holds the data folder and the matter folders to it too.
+#[cfg(any(windows, test))]
+pub(crate) fn owner_allowed(owner: &Sid, user: &Sid) -> bool {
+    owner == user || ["S-1-5-18", "S-1-5-32-544"].contains(&owner.as_str())
+}
+
+/// Whether `found` may own the data folder `requester` names for an elevated set-up (`--set-up`,
+/// `--adopt`, `--reclaim`, the set-up task): the requester, or Administrators when the requester
+/// is itself a member (`in_admins`, asked only then; an error refuses). Such a user can elevate
+/// anyway, and as the built-in Administrator, or with UAC off, the app makes its data folder
+/// Administrators'. SYSTEM, and anyone else, never: a standard user can't aim an elevated
+/// set-up at a folder such as `C:\ProgramData`.
+#[cfg(any(windows, test))]
+pub(crate) fn data_dir_owner_allowed<E>(
+    found: &Sid,
+    requester: &Sid,
+    in_admins: impl FnOnce() -> Result<bool, E>,
+) -> bool {
+    found == requester || (found.as_str() == "S-1-5-32-544" && in_admins().unwrap_or(false))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The data folder's owner check for `requester`, an administrator or not.
+    fn data_dir_ok(found: &str, admin: bool) -> bool {
+        let lawyer = Sid::parse("S-1-5-21-7-8-9-1001").unwrap();
+        let found = if found == "lawyer" {
+            lawyer.clone()
+        } else {
+            Sid::parse(found).unwrap()
+        };
+        data_dir_owner_allowed(&found, &lawyer, || Ok::<_, ()>(admin))
+    }
+
+    #[test]
+    fn the_lawyers_own_data_folder_passes_for_an_administrator_and_a_standard_user() {
+        assert!(data_dir_ok("lawyer", true));
+        assert!(data_dir_ok("lawyer", false));
+    }
+
+    #[test]
+    fn an_administrators_data_folder_passes_only_for_a_member_of_administrators() {
+        assert!(data_dir_ok("S-1-5-32-544", true));
+        assert!(!data_dir_ok("S-1-5-32-544", false));
+        let lawyer = Sid::parse("S-1-5-21-7-8-9-1001").unwrap();
+        let admins = Sid::parse("S-1-5-32-544").unwrap();
+        assert!(!data_dir_owner_allowed(&admins, &lawyer, || Err("unknown")));
+    }
+
+    #[test]
+    fn a_system_or_another_users_data_folder_is_refused_for_everyone() {
+        for found in ["S-1-5-18", "S-1-5-21-7-8-9-1002", "S-1-1-0"] {
+            assert!(!data_dir_ok(found, true), "{found}");
+            assert!(!data_dir_ok(found, false), "{found}");
+        }
+    }
+
+    #[test]
+    fn a_user_account_is_a_machine_domain_or_entra_account_and_nothing_else() {
+        for user in [
+            "S-1-5-21-7-8-9-1001",
+            "S-1-5-21-1004336348-1177238915-682003330-500",
+            "S-1-12-1-3263492174-1177263218-2391161522-1513380577",
+        ] {
+            assert!(Sid::parse(user).unwrap().is_user_account(), "{user}");
+        }
+        for not_user in [
+            "S-1-5-18",
+            "S-1-5-19",
+            "S-1-5-20",
+            "S-1-1-0",
+            "S-1-5-4",
+            "S-1-5-32-544",
+            "S-1-5-5-0-123456",
+            "S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464",
+            "S-1-5-83-1-1-2-3-4",
+            "S-1-5-82-3876422241-1344743576-1731187256-2652481255-2240555440",
+            "S-1-5-7",
+            "S-1-5-90-0-1",
+            "S-1-5-96-0-1",
+            "S-1-15-2-1-2-3-4-5-6-7",
+            "S-1-15-3-1024-1-2-3-4-5-6-7",
+            "S-1-11-96-3623454863-58364-18864-2661722203-1597581903",
+            "S-1-5-21-7-8-9",
+            "S-1-5-21-7-8-9-1001-2",
+            "S-1-12-1-1-2-3",
+            "S-1-12-1-1-2-3-4-5",
+            "S-1-12-2-1-2-3-4",
+            "S-1-16-12288",
+        ] {
+            assert!(
+                !Sid::parse(not_user).unwrap().is_user_account(),
+                "{not_user}"
+            );
+        }
+    }
+
+    #[test]
+    fn not_a_sid_says_a_fixed_description_and_never_the_string() {
+        // A SID's text in a form the parser refuses: the string is kept, but not shown.
+        let refused = Sid::parse("s-1-5-21-7-8-9-1001").unwrap_err();
+        assert_eq!(refused.0, "s-1-5-21-7-8-9-1001");
+        assert_eq!(refused.to_string(), NOT_A_SID);
+        assert_eq!(format!("{refused:?}"), "NotASid(..)");
+    }
 
     #[test]
     fn the_account_domain_is_the_three_parts_after_21() {

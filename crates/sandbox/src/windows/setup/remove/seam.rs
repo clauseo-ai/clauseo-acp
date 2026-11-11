@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 
 use clauseo_protocol::MatterId;
 
+use super::FolderOwner;
 use crate::windows::apply::Surroundings;
 use crate::windows::ledger::Ledger;
 use crate::windows::pool::MachineRecord;
@@ -30,8 +31,8 @@ pub trait Removal {
     fn delete_record(&mut self) -> Result<(), MachineError>;
     /// The record's `AdminCopyOwner`: who placed the admin copy, `None` when there is none.
     fn copy_owner(&mut self) -> Result<Option<CopyOwner>, MachineError>;
-    /// Deletes the SYSTEM task `\Clauseo\SandboxStop` (`refresh::unregister_task`); one
-    /// already gone is `Ok`.
+    /// Deletes the SYSTEM tasks `\Clauseo\SandboxStop` and `\Clauseo\SandboxSweep`
+    /// (`refresh::POOL_TASKS`, `refresh::unregister_task`); one already gone is `Ok`.
     fn unregister_stop_task(&mut self) -> Result<(), MachineError>;
     /// The user who asked: the token user of the parent Windows recorded for this process,
     /// checked against ID reuse (`Owner::of_parent`, D-B2). `None` when it can't be found.
@@ -71,6 +72,9 @@ pub trait Removal {
     fn group_members(&mut self, group: &Sid) -> Result<usize, MachineError>;
     /// Deletes the group `group`.
     fn delete_group(&mut self, group: &Sid) -> Result<(), MachineError>;
+    /// Takes "Deny log on through Remote Desktop Services" (`SeDenyRemoteInteractiveLogonRight`)
+    /// off the group `group` (`LsaRemoveAccountRights`, this right only); not held is `Ok`.
+    fn remove_remote_logon_deny(&mut self, group: &Sid) -> Result<(), MachineError>;
     /// Runs `f` with the calling thread acting as [`Removal::invoker`] (`Owner::run_as`), with
     /// the token [`Removal::can_act_as_owner`] names, then as itself again; called again inside
     /// `f`, runs `f` as it is. No invoker, or a failed impersonation, is the `Err`, and `f`
@@ -81,7 +85,7 @@ pub trait Removal {
         Self: Sized;
     /// As the owner (it takes [`Removal::as_owner`] itself when called outside it): the
     /// record's `data_dir` checked as `--data-dir` is (a plain drive path; resolved with no
-    /// junction or link on the way; a folder the owner owns), then the ledger in its final
+    /// junction or link on the way; owned as `remove::owners` allows), then the ledger in its final
     /// path, trusting `trusted`. `None` when the folder or the ledger is missing: nothing to
     /// take back. Sets [`Removal::surroundings`] to that folder.
     fn owners_ledger(
@@ -98,10 +102,15 @@ pub trait Removal {
     /// refused with nothing touched. The administrator's path never calls it: an administrator
     /// deletes nothing in the owner's folders (K1). Nothing checked yet is `Ok`, nothing touched.
     fn forget_set_aside(&mut self, matter: &MatterId) -> Result<(), MachineError>;
+    /// As the owner, inside [`Removal::as_owner`] and only there: every unclean-session marker
+    /// (`runner::marker`) in the run folder of the folder [`Removal::owners_ledger`] checked
+    /// removed; how many. Nothing checked yet is `Ok(0)`. Called outside it, refused with nothing
+    /// touched: an administrator deletes nothing in the owner's folders (K1).
+    fn clear_markers(&mut self) -> Result<usize, MachineError>;
     /// As this process, for a per-machine removal the owner didn't ask for: the record's
-    /// `data_dir` checked as [`Removal::owners_ledger`] checks it, except that the folder and
-    /// its `sandbox` folder must be owned by `owner` (the record's), then the ledger read, and
-    /// never written. `None` when the folder or the ledger is missing.
+    /// `data_dir` checked as [`Removal::owners_ledger`] checks it, with the folder and its
+    /// `sandbox` folder owned as `remove::owners` allows for `owner` (the record's), then the
+    /// ledger read, and never written. `None` when the folder or the ledger is missing.
     fn admins_ledger(
         &mut self,
         data_dir: &Path,
@@ -109,9 +118,12 @@ pub trait Removal {
         trusted: &[Sid],
     ) -> Result<Option<Ledger>, MachineError>;
     /// As this process: whether the ledger's `path` may have an entry removed by a removal the
-    /// owner didn't ask for. `Ok` only for a folder reached with no junction or link on the
-    /// way whose final path is `path`, owned by `owner` (the record's), and passing the gate's
-    /// folder check (a local volume that keeps permissions). So nothing an administrator does
-    /// for an absent owner lands on an object the owner couldn't change themselves.
-    fn admin_target(&mut self, path: &Path, owner: &Sid) -> Result<(), MachineError>;
+    /// owner didn't ask for, and who owns it. `Ok` only for a folder reached with no junction
+    /// or link on the way whose final path is `path`, owned as `owners::matter_folder` allows
+    /// (`owner`, the record's, or Administrators or SYSTEM), and passing the gate's folder check
+    /// (a local volume that keeps permissions).
+    fn admin_target(&mut self, path: &Path, owner: &Sid) -> Result<FolderOwner, MachineError>;
+    /// Whether the record's `owner` is in Administrators, directly or through a group; `false`
+    /// when that can't be read.
+    fn owner_in_administrators(&mut self, owner: &Sid) -> bool;
 }

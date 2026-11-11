@@ -2,7 +2,8 @@
 // for one, it asks inline, in the thread, never in a modal: what it wants to do, that every change is kept, and the
 // answers the agent offers, in ACP's kind order. Enter allows once, Cmd or Ctrl with Enter allows for this matter,
 // Escape declines; the keys act from the empty composer, from the page or from inside the prompt, without taking the
-// composer's focus. Once answered, the prompt folds to one line that says what was decided.
+// composer's focus. On a focused answer button, Enter is that button's answer, and Cmd or Ctrl with Enter gives that
+// same answer, never a broader one. Once answered, the prompt folds to one line that says what was decided.
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, type ReactNode } from "react";
 import { Button } from "../ui/button.tsx";
 import { Kbd } from "../ui/kbd.tsx";
@@ -38,6 +39,7 @@ export function PermissionPrompt({
   offered = OFFERED,
   question,
   title,
+  details,
   reason,
   kept = true,
   done,
@@ -60,6 +62,8 @@ export function PermissionPrompt({
   question?: string;
   /** The agent's own words for what it wants to do, beneath the question. */
   title?: string | null;
+  /** What the title folds away, after it on its line: a task's command behind its press (D-016); none, nothing. */
+  details?: ReactNode;
   /** Why it asks, in a few words, under the title: a matter folder Clauseo can't fence (the app's folder rights). */
   reason?: ReactNode;
   /** Whether "Every change is kept." shows. */
@@ -128,8 +132,19 @@ export function PermissionPrompt({
       let fieldEmpty = false;
       const roomField = room.nodes.get("field");
       if (target instanceof Node && rootRef.current?.contains(target)) {
-        // a focused answer keeps its own plain Enter: its click answers
-        if (a === "once" && target instanceof HTMLButtonElement) return;
+        if (target instanceof HTMLButtonElement) {
+          // a focused answer keeps its own plain Enter: its click answers
+          if (a === "once") return;
+          // and a focused button never grants more than it says (D-065): Cmd or Ctrl with Enter on Always for this
+          // matter answers it; on any other answer, the key gives that answer, as its click would, and never Always.
+          // macOS WebKit does nothing with Cmd+Enter on a button, so the key is handled here, not left to the button
+          if (a === "always" && target.dataset["permAnswer"] !== "always") {
+            e.preventDefault();
+            e.stopPropagation();
+            target.click();
+            return;
+          }
+        }
         where = "prompt";
       } else if (fromComposer(room, target)) {
         if (target instanceof HTMLTextAreaElement) {
@@ -227,6 +242,7 @@ export function PermissionPrompt({
       {title ? (
         <p className={`perm-title text-small text-quiet mt-(--s0-5)${indent}`} id={`${id}-title`}>
           <bdi>{title}</bdi>
+          {details}
         </p>
       ) : null}
       {reason ? (
@@ -251,6 +267,7 @@ export function PermissionPrompt({
               size="small"
               aria-keyshortcuts={withKey && keysOn ? shortcut(a) : undefined}
               data-testid={testIds?.answer(a)}
+              data-perm-answer={a}
               aria-disabled={busy || confirming ? true : undefined}
               onClick={() => answer(a)}
             >

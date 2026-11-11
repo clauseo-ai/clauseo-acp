@@ -16,7 +16,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
 
-pub use pack::{npm_tarball, sha512_integrity};
+pub use pack::{npm_tarball, runtime_tar_gz, sha512_integrity};
 pub use trace::{instant, millis_since, trace};
 
 use crate::TestResolver;
@@ -538,6 +538,20 @@ pub fn failed(agent: &clauseo_protocol::AgentId, kind: crate::FailureKind) -> cr
     })
 }
 
+/// A `Failed` Python install of `kind` for tests, refused by `blocked_by`, with `agent`'s
+/// empty log.
+pub fn python_failed(
+    agent: &clauseo_protocol::AgentId,
+    kind: crate::PythonFailureKind,
+    blocked_by: Option<crate::PythonBlocker>,
+) -> crate::PythonState {
+    crate::PythonState::Failed(crate::PythonFailure {
+        kind,
+        blocked_by,
+        log: crate::InstallLog::new(agent),
+    })
+}
+
 /// Writes `bytes` to `path`, making its folder, replacing any file there.
 pub fn write_file(path: &Path, bytes: &[u8]) -> io::Result<()> {
     if let Some(parent) = path.parent() {
@@ -556,6 +570,12 @@ pub fn remove_file(path: &Path) -> io::Result<()> {
 /// Makes a hard link at `link` to `original`: one file under two names.
 pub fn hard_link(original: &Path, link: &Path) -> io::Result<()> {
     crate::write::hard_link(original, link)
+}
+
+/// Sets `path`'s mode bits (Unix): a test's unreadable file.
+#[cfg(unix)]
+pub fn set_mode(path: &Path, mode: u32) -> io::Result<()> {
+    crate::write::set_mode(path, mode)
 }
 
 /// Makes a symbolic link at `link` to `target` (Unix).

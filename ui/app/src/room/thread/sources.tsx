@@ -1,7 +1,8 @@
 // The web sources at the end of an answer (sources.ts has where they come from), icons first (DESIGN.md §Icons). Folded,
 // one quiet line: up to three of its sites' tiles (the search glyph for a search that lists no pages), the count and a
-// chevron. Open, one row for each search or page in the order they ran, each led by its icon: a search's glyph and its
-// query in quotes, its results nested under it as tile, title and site; a page's tile, title and site, with the browser
+// chevron; a turn whose searches list no page at all draws nothing, its step group's rows say them (D-028). Open,
+// one row for each search or page in the order they ran, each led by its icon: a search's glyph and its query in
+// quotes, its results nested under it as tile, title and site; a page's tile, title and site, with the browser
 // glyph in the tile's place for a page the browser opened and an info tip for one Codex opened on OpenAI's side. A turn
 // with none draws nothing. Links open through the host's open_external (its
 // own confirm names the site); none navigates the webview. Tiles are letters, never favicons: nothing here makes a
@@ -166,7 +167,7 @@ function SearchRow({
             <Lead>
               <IconInfo size={14} />
             </Lead>
-            <span>{w.src("{name} doesn't list its pages", { name })}</span>
+            <span>{w.src("{name} didn't say which pages it found", { name })}</span>
           </p>
         ) : results.length === 0 ? (
           <p className="mt-(--s0-5)" data-testid="web-source-note">
@@ -284,9 +285,11 @@ function SourcesOf({ webs, agent }: { webs: readonly ToolWeb[]; agent: AgentId |
   // each answer's own, while it is mounted; shut at first
   const [open, setOpen] = useState(use(SourcesOpenAtFirst));
   const items = itemsOf(webs);
-  if (items.length === 0) return null;
-  const codex = agent !== undefined && kindOf(agent, []) === "codex";
   const pages = pagesCount(items);
+  // searches that list no page are told by the step group's own row ("Searched indiacode.nic.in for …"): a second
+  // control for the same thing would only say again what that row says (D-028)
+  if (items.length === 0 || pages === 0) return null;
+  const codex = agent !== undefined && kindOf(agent, []) === "codex";
   // the thread's plan names it
   const name = agent === undefined ? planName("codex-acp") : planName(agent);
   return (
@@ -299,8 +302,6 @@ function SourcesOf({ webs, agent }: { webs: readonly ToolWeb[]; agent: AgentId |
           className="work-done"
           data-testid="web-sources-toggle"
           aria-expanded={open}
-          // searches that list no page: no count to say, so the button is named for what it opens to
-          aria-label={pages === 0 ? w.src("Searches") : undefined}
           data-panel-open={open ? "" : undefined}
           onClick={() => setOpen((o) => !o)}
         >

@@ -7,15 +7,24 @@
 # generated: its chunks cut words at random, and its prose is checked where it is written,
 # crates/fake_agent/tests/stdio/scoreboard_prose.rs. The fuzz seeds are inputs libFuzzer mutated:
 # their words are cut and changed on purpose. The block list's keys and test signatures are base64.
+# The Python runtime's notices are third-party licence texts, written by `cargo xtask
+# python-runtime bump` word for word.
+# The ik-*.json case-law fixtures are the live server's replies byte for byte, its quoted judgment
+# text included, misspellings and all; so are the real adapter transcripts under
+# crates/acp/src/tests/fixtures/.
 extend-exclude = [
   "Cargo.lock",
   "ui/pnpm-lock.yaml",
+  "services/counts-worker/pnpm-lock.yaml",
   "*.msgpack",
   "crates/fake_agent/scenarios/scoreboard.jsonl",
   "fuzz/seeds/",
   "crates/blocklist/keys/*.pub",
   "crates/blocklist/tests/data/*.pub",
   "crates/blocklist/tests/data/*.minisig",
+  "python-runtime/THIRD-PARTY-NOTICES.txt",
+  "crates/connectors/fixtures/mcp/ik-*.json",
+  "crates/acp/src/tests/fixtures/*.jsonl",
 ]
 
 [default]

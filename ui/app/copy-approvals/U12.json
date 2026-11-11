@@ -314,6 +314,28 @@
     "note": "Rohan, via the orchestrator (#236)"
   },
   "U12-45": {
+    "en": "Checking what's left…",
+    "hi": "कितना बाकी है, इसकी जाँच हो रही है…",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-10",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-10",
+    "by": "app track (provisional; orchestrator approved the words 2026-11-10, copy review pending)",
+    "note": "Settings' Plan and usage while a plan's first read runs (usage.tsx), so the page is never blank"
+  },
+  "U12-46": {
+    "en": "Set up Claude or ChatGPT to see what each plan has left.",
+    "hi": "हर प्लान में कितना बाकी है, यह देखने के लिए Claude या ChatGPT सेट अप करें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-10",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-10",
+    "by": "app track (provisional; orchestrator approved the words 2026-11-10, copy review pending)",
+    "note": "Settings' Plan and usage with no plan set up (usage.tsx), so the page is never blank"
+  },
+  "U12-47": {
     "en": "{model} 5-hour limit",
     "hi": "{model} की 5 घंटे की सीमा",
     "hi_status": "provisional",

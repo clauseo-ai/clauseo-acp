@@ -1,10 +1,13 @@
 {
   "UC-01": {
-    "en": "Safe workspace. Clauseo works inside this matter's folder and asks before going beyond it.",
-    "hi": "सुरक्षित कार्यक्षेत्र। Clauseo इस मामले के फ़ोल्डर के भीतर काम करता है और उससे बाहर जाने से पहले पूछता है।",
-    "status": "approved",
-    "at": "2026-11-06",
-    "by": "design"
+    "en": "Safe workspace. Clauseo works only in this matter's folder. It can't open your other files unless you allow it.",
+    "hi": "सुरक्षित कार्यक्षेत्र। Clauseo सिर्फ़ इस मामले के फ़ोल्डर में काम करता है। आपकी अनुमति के बिना वह आपकी दूसरी फ़ाइलें नहीं खोल सकता।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-09",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-09",
+    "by": "app track (asking-truth; Rohan batch review)"
   },
   "UC-02": {
     "en": "Not protected.",
@@ -14,28 +17,24 @@
     "by": "design"
   },
   "UC-03": {
-    "en": "Clauseo asks before each change in this matter.",
-    "hi": "Clauseo इस मामले में हर बदलाव से पहले पूछता है।",
-    "status": "approved",
-    "at": "2026-11-06",
-    "by": "design"
-  },
-  "UC-04": {
-    "en": "Clauseo can change files in this matter without asking. It asks before going beyond it.",
-    "hi": "Clauseo इस मामले में बिना पूछे फ़ाइलें बदल सकता है। इससे बाहर जाने से पहले यह पूछता है।",
+    "en": "Clauseo changes files in this matter without asking, and asks before changing files outside it.",
+    "hi": "Clauseo इस मामले की फ़ाइलें बिना पूछे बदलता है, और इसके बाहर की फ़ाइलें बदलने से पहले पूछता है।",
     "hi_status": "provisional",
-    "hi_at": "2026-11-06",
-    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "hi_at": "2026-11-10",
+    "hi_by": "app track (provisional; orchestrator approved the words 2026-11-10 for Claude acceptEdits, copy review pending)",
     "status": "provisional",
     "at": "2026-11-06",
-    "by": "app track (provisional; Rohan batch review)"
+    "by": "app track (provisional; orchestrator approved the words 2026-11-10 for Claude acceptEdits, copy review pending)"
   },
-  "UC-05": {
-    "en": "Clauseo can reach beyond this matter's folder without asking.",
-    "hi": "Clauseo बिना पूछे इस मामले के फ़ोल्डर से बाहर पहुँच सकता है।",
-    "status": "approved",
-    "at": "2026-11-06",
-    "by": "design"
+  "UC-04": {
+    "en": "Clauseo can read any file you can open, and changes files in this matter without asking. It asks before changing files outside it.",
+    "hi": "Clauseo हर वह फ़ाइल पढ़ सकता है जिसे आप खोल सकते हैं, और इस मामले की फ़ाइलें बिना पूछे बदलता है। इसके बाहर की फ़ाइलें बदलने से पहले यह पूछता है।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-09",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-09",
+    "by": "app track (asking-truth; Rohan batch review)"
   },
   "UC-06": {
     "en": "Not protected",
@@ -55,14 +54,14 @@
     "by": "app track (provisional; Rohan batch review; design B, safe-workspace-installer-setup)"
   },
   "UC-11": {
-    "en": "Windows will ask to let Clauseo set up the Safe workspace. It will say the publisher is unknown, because this early version of Clauseo isn't signed yet. Choose Yes. If Windows asks for an administrator's password, whoever looks after this computer can enter it.",
-    "hi": "Windows, Clauseo को सुरक्षित कार्यक्षेत्र तैयार करने देने के लिए पूछेगा। वह प्रकाशक को अज्ञात बताएगा, क्योंकि Clauseo के इस शुरुआती संस्करण पर अभी डिजिटल हस्ताक्षर नहीं है। Yes चुनें। अगर Windows किसी व्यवस्थापक का पासवर्ड माँगे, तो इस कंप्यूटर की देखरेख करने वाले व्यक्ति उसे दर्ज कर सकते हैं।",
+    "en": "Windows will ask to let Clauseo set up the Safe workspace. It will say the publisher is unknown. That's expected for Clauseo. Choose Yes. If Windows asks for an administrator's password, whoever looks after this computer can enter it.",
+    "hi": "Windows, Clauseo को सुरक्षित कार्यक्षेत्र तैयार करने देने के लिए पूछेगा। वह प्रकाशक को अज्ञात बताएगा। Clauseo के लिए यह सामान्य है। Yes चुनें। अगर Windows किसी व्यवस्थापक का पासवर्ड माँगे, तो इस कंप्यूटर की देखरेख करने वाले व्यक्ति उसे दर्ज कर सकते हैं।",
     "hi_status": "provisional",
-    "hi_at": "2026-11-07",
+    "hi_at": "2026-11-08",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
     "status": "provisional",
-    "at": "2026-11-07",
-    "by": "app track (provisional; Rohan batch review; design B, safe-workspace-installer-setup)"
+    "at": "2026-11-08",
+    "by": "app track (provisional; Rohan batch review; required-words)"
   },
   "UC-12": {
     "en": "Set up the Safe workspace",
@@ -110,14 +109,14 @@
     "by": "design"
   },
   "UC-21": {
-    "en": "The Safe workspace is off for {matter}. Clauseo can read and change files anywhere on this computer while it works here, without asking first.",
-    "hi": "{matter} के लिए सुरक्षित कार्यक्षेत्र बंद है। यहाँ काम करते समय Clauseo बिना पहले पूछे इस कंप्यूटर पर कहीं भी फ़ाइलें पढ़ और बदल सकता है।",
+    "en": "The Safe workspace is off for {matter}. Claude changes files in this matter without asking, and asks before changing files outside it. ChatGPT can read any file you can open, and asks before changing files outside this matter's folder.",
+    "hi": "{matter} के लिए सुरक्षित कार्यक्षेत्र बंद है। Claude इस मामले की फ़ाइलें बिना पूछे बदलता है, और इसके बाहर की फ़ाइलें बदलने से पहले पूछता है। ChatGPT हर वह फ़ाइल पढ़ सकता है जिसे आप खोल सकते हैं, और इस मामले के फ़ोल्डर के बाहर की फ़ाइलें बदलने से पहले पूछता है।",
     "hi_status": "provisional",
-    "hi_at": "2026-11-07",
+    "hi_at": "2026-11-09",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
     "status": "provisional",
-    "at": "2026-11-07",
-    "by": "app track (provisional; Rohan batch review; design B, safe-workspace-installer-setup)"
+    "at": "2026-11-09",
+    "by": "app track (provisional; orchestrator approved the words 2026-11-10 for Claude acceptEdits, copy review pending)"
   },
   "UC-22": {
     "en": "The Safe workspace isn't set up on this computer yet. Until it is, Clauseo can read any file you can open on this computer, and asks before changing anything outside this matter's folder.",
@@ -227,14 +226,14 @@
     "by": "app track (provisional; Rohan batch review)"
   },
   "UC-33": {
-    "en": "Windows policy on this computer doesn't let the Safe workspace's accounts sign in. Ask your IT team to add them to the Allow log on locally policy.",
-    "hi": "इस कंप्यूटर की Windows नीति सुरक्षित कार्यक्षेत्र के खातों को साइन इन नहीं करने देती। अपनी IT टीम से उन्हें Allow log on locally नीति में जोड़ने को कहें।",
+    "en": "Windows isn't letting the Safe workspace's accounts sign in. Setting up the Safe workspace again usually fixes this.",
+    "hi": "Windows सुरक्षित कार्यक्षेत्र के खातों को साइन इन नहीं करने दे रहा है। सुरक्षित कार्यक्षेत्र को फिर से तैयार करने से आमतौर पर यह ठीक हो जाता है।",
     "hi_status": "provisional",
-    "hi_at": "2026-11-07",
-    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "hi_at": "2026-11-08",
+    "hi_by": "app track (no IT endings)",
     "status": "provisional",
-    "at": "2026-11-07",
-    "by": "app track (provisional; Rohan batch review; design B, safe-workspace-installer-setup)"
+    "at": "2026-11-08",
+    "by": "app track (no IT endings)"
   },
   "UC-34": {
     "en": "Clauseo can add room for 4 more. Windows asks for permission first.",
@@ -307,14 +306,14 @@
     "by": "app track (provisional; Rohan batch review; design B, safe-workspace-installer-setup)"
   },
   "UC-42": {
-    "en": "Windows will ask to let Clauseo remove the Safe workspace. It will say the publisher is unknown, because this early version of Clauseo isn't signed yet. Choose Yes. If Windows asks for an administrator's password, whoever looks after this computer can enter it.",
-    "hi": "Windows, Clauseo को सुरक्षित कार्यक्षेत्र हटाने देने के लिए पूछेगा। वह प्रकाशक को अज्ञात बताएगा, क्योंकि Clauseo के इस शुरुआती संस्करण पर अभी डिजिटल हस्ताक्षर नहीं है। Yes चुनें। अगर Windows किसी व्यवस्थापक का पासवर्ड माँगे, तो इस कंप्यूटर की देखरेख करने वाले व्यक्ति उसे दर्ज कर सकते हैं।",
+    "en": "Windows will ask to let Clauseo remove the Safe workspace. It will say the publisher is unknown. That's expected for Clauseo. Choose Yes. If Windows asks for an administrator's password, whoever looks after this computer can enter it.",
+    "hi": "Windows, Clauseo को सुरक्षित कार्यक्षेत्र हटाने देने के लिए पूछेगा। वह प्रकाशक को अज्ञात बताएगा। Clauseo के लिए यह सामान्य है। Yes चुनें। अगर Windows किसी व्यवस्थापक का पासवर्ड माँगे, तो इस कंप्यूटर की देखरेख करने वाले व्यक्ति उसे दर्ज कर सकते हैं।",
     "hi_status": "provisional",
-    "hi_at": "2026-11-07",
+    "hi_at": "2026-11-08",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
     "status": "provisional",
-    "at": "2026-11-07",
-    "by": "app track (provisional; Rohan batch review; design B, safe-workspace-installer-setup)"
+    "at": "2026-11-08",
+    "by": "app track (provisional; Rohan batch review; required-words)"
   },
   "UC-43": {
     "en": "Afterwards, Clauseo works on this computer without the Safe workspace until it's set up again.",
@@ -336,6 +335,16 @@
     "at": "2026-11-06",
     "by": "app track (provisional; Rohan batch review)"
   },
+  "UC-45": {
+    "en": "Your firm requires the Safe workspace, so afterwards Clauseo won't answer on this computer until it's set up again.",
+    "hi": "आपकी फ़र्म सुरक्षित कार्यक्षेत्र ज़रूरी मानती है, इसलिए इसके बाद, जब तक यह फिर से तैयार नहीं होता, Clauseo इस कंप्यूटर पर उत्तर नहीं देगा।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-08",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-08",
+    "by": "app track (provisional; Rohan batch review; required-words)"
+  },
   "UC-50": {
     "en": "Your firm requires the Safe workspace on this computer. Set it up once, then ask here.",
     "hi": "आपकी फ़र्म इस कंप्यूटर पर सुरक्षित कार्यक्षेत्र ज़रूरी मानती है। इसे एक बार तैयार करें, फिर यहाँ पूछें।",
@@ -355,6 +364,26 @@
     "status": "provisional",
     "at": "2026-11-07",
     "by": "app track (provisional; Rohan batch review; design B, safe-workspace-installer-setup)"
+  },
+  "UC-52": {
+    "en": "Your firm requires the Safe workspace, and all its places on this computer are in use, so Clauseo can't answer here yet. End a conversation in another matter to free one.",
+    "hi": "आपकी फ़र्म सुरक्षित कार्यक्षेत्र ज़रूरी मानती है, और इस कंप्यूटर पर उसकी सभी जगहें उपयोग में हैं, इसलिए Clauseo अभी यहाँ उत्तर नहीं दे सकता। एक जगह खाली करने के लिए किसी दूसरे मामले में बातचीत समाप्त करें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-08",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-08",
+    "by": "app track (provisional; Rohan batch review; required-words)"
+  },
+  "UC-53": {
+    "en": "Your firm requires the Safe workspace on this computer. Set it up once, then ask here.",
+    "hi": "आपकी फ़र्म इस कंप्यूटर पर सुरक्षित कार्यक्षेत्र ज़रूरी मानती है। इसे एक बार तैयार करें, फिर यहाँ पूछें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-08",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-08",
+    "by": "app track (provisional; Rohan batch review; required-words)"
   },
   "UC-60": {
     "en": "Safe workspace",
@@ -532,24 +561,24 @@
     "by": "app track (provisional; Rohan batch review; design B, safe-workspace-installer-setup)"
   },
   "UC-82": {
-    "en": "A Windows policy on this computer blocks the program that sets up the Safe workspace. Ask your IT team to allow it.",
-    "hi": "इस कंप्यूटर की एक Windows नीति सुरक्षित कार्यक्षेत्र तैयार करने वाले प्रोग्राम को रोकती है। अपनी IT टीम से इसकी अनुमति देने को कहें।",
+    "en": "A Windows policy on this computer blocks the program that sets up the Safe workspace. Your firm manages this policy on this computer.",
+    "hi": "इस कंप्यूटर की एक Windows नीति सुरक्षित कार्यक्षेत्र तैयार करने वाले प्रोग्राम को रोकती है। इस कंप्यूटर पर यह नीति आपकी फ़र्म प्रबंधित करती है।",
     "hi_status": "provisional",
-    "hi_at": "2026-11-07",
-    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "hi_at": "2026-11-08",
+    "hi_by": "app track (no IT endings)",
     "status": "provisional",
-    "at": "2026-11-07",
-    "by": "app track (provisional; Rohan batch review; design B, safe-workspace-installer-setup)"
+    "at": "2026-11-08",
+    "by": "app track (no IT endings)"
   },
   "UC-83": {
-    "en": "The program that sets up the Safe workspace is missing, or security software blocked it. Ask your IT team to look into it.",
-    "hi": "सुरक्षित कार्यक्षेत्र तैयार करने वाला प्रोग्राम नहीं मिला, या किसी सुरक्षा सॉफ़्टवेयर ने उसे रोक दिया। अपनी IT टीम से इसकी जाँच करने को कहें।",
+    "en": "The program that sets up the Safe workspace is missing, or security software blocked it. Your firm manages the security software on this computer.",
+    "hi": "सुरक्षित कार्यक्षेत्र तैयार करने वाला प्रोग्राम नहीं मिला, या किसी सुरक्षा सॉफ़्टवेयर ने उसे रोक दिया। इस कंप्यूटर पर सुरक्षा सॉफ़्टवेयर आपकी फ़र्म प्रबंधित करती है।",
     "hi_status": "provisional",
-    "hi_at": "2026-11-07",
-    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "hi_at": "2026-11-08",
+    "hi_by": "app track (no IT endings)",
     "status": "provisional",
-    "at": "2026-11-07",
-    "by": "app track (provisional; Rohan batch review; design B, safe-workspace-installer-setup)"
+    "at": "2026-11-08",
+    "by": "app track (no IT endings)"
   },
   "UC-84": {
     "en": "The Safe workspace wasn't set up when Clauseo was installed.",
@@ -582,54 +611,54 @@
     "by": "app track (provisional; Rohan batch review; design B, safe-workspace-installer-setup)"
   },
   "UC-87": {
-    "en": "Ask your IT team to install Clauseo again.",
-    "hi": "अपनी IT टीम से Clauseo फिर से इंस्टॉल करने को कहें।",
+    "en": "Your firm manages how Clauseo is installed on this computer.",
+    "hi": "इस कंप्यूटर पर Clauseo का इंस्टॉलेशन आपकी फ़र्म प्रबंधित करती है।",
     "hi_status": "provisional",
-    "hi_at": "2026-11-07",
-    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "hi_at": "2026-11-08",
+    "hi_by": "app track (no IT endings)",
     "status": "provisional",
-    "at": "2026-11-07",
-    "by": "app track (provisional; Rohan batch review; design B, safe-workspace-installer-setup)"
+    "at": "2026-11-08",
+    "by": "app track (no IT endings)"
   },
   "UC-88": {
-    "en": "The program that sets up the Safe workspace has changed since Clauseo was installed. Ask your IT team, or install Clauseo again.",
-    "hi": "Clauseo इंस्टॉल होने के बाद से सुरक्षित कार्यक्षेत्र तैयार करने वाला प्रोग्राम बदल गया है। अपनी IT टीम से पूछें, या Clauseo फिर से इंस्टॉल करें।",
+    "en": "The program that sets up the Safe workspace has changed since Clauseo was installed. Install Clauseo again to restore it.",
+    "hi": "Clauseo इंस्टॉल होने के बाद से सुरक्षित कार्यक्षेत्र तैयार करने वाला प्रोग्राम बदल गया है। उसे वापस लाने के लिए Clauseo फिर से इंस्टॉल करें।",
     "hi_status": "provisional",
-    "hi_at": "2026-11-07",
-    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "hi_at": "2026-11-08",
+    "hi_by": "app track (no IT endings)",
     "status": "provisional",
-    "at": "2026-11-07",
-    "by": "app track (provisional; Rohan batch review; design B, safe-workspace-installer-setup)"
+    "at": "2026-11-08",
+    "by": "app track (no IT endings)"
   },
   "UC-89": {
-    "en": "The folder that holds the Safe workspace's set-up program isn't limited to administrators, or holds files it shouldn't. Ask your IT team to look into it.",
-    "hi": "सुरक्षित कार्यक्षेत्र का सेटअप प्रोग्राम जिस फ़ोल्डर में है, वह केवल व्यवस्थापकों तक सीमित नहीं है, या उसमें ऐसी फ़ाइलें हैं जो नहीं होनी चाहिए। अपनी IT टीम से इसकी जाँच करने को कहें।",
+    "en": "The folder that holds the Safe workspace's set-up program isn't limited to administrators, or holds files it shouldn't. Your firm manages this folder on this computer.",
+    "hi": "सुरक्षित कार्यक्षेत्र का सेटअप प्रोग्राम जिस फ़ोल्डर में है, वह केवल व्यवस्थापकों तक सीमित नहीं है, या उसमें ऐसी फ़ाइलें हैं जो नहीं होनी चाहिए। इस कंप्यूटर पर यह फ़ोल्डर आपकी फ़र्म प्रबंधित करती है।",
     "hi_status": "provisional",
-    "hi_at": "2026-11-07",
-    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "hi_at": "2026-11-08",
+    "hi_by": "app track (no IT endings)",
     "status": "provisional",
-    "at": "2026-11-07",
-    "by": "app track (provisional; Rohan batch review; design B, safe-workspace-installer-setup)"
+    "at": "2026-11-08",
+    "by": "app track (no IT endings)"
   },
   "UC-90": {
-    "en": "The Safe workspace on this computer belongs to another Windows account. Ask your IT team.",
-    "hi": "इस कंप्यूटर का सुरक्षित कार्यक्षेत्र किसी दूसरे Windows खाते का है। अपनी IT टीम से पूछें।",
+    "en": "The Safe workspace on this computer belongs to another Windows account. Your firm manages this computer's Windows accounts.",
+    "hi": "इस कंप्यूटर का सुरक्षित कार्यक्षेत्र किसी दूसरे Windows खाते का है। इस कंप्यूटर के Windows खाते आपकी फ़र्म प्रबंधित करती है।",
     "hi_status": "provisional",
-    "hi_at": "2026-11-07",
-    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "hi_at": "2026-11-08",
+    "hi_by": "app track (no IT endings)",
     "status": "provisional",
-    "at": "2026-11-07",
-    "by": "app track (provisional; Rohan batch review; design B, safe-workspace-installer-setup)"
+    "at": "2026-11-08",
+    "by": "app track (no IT endings)"
   },
   "UC-91": {
-    "en": "Ask your IT team to look into it.",
-    "hi": "अपनी IT टीम से इसकी जाँच करने को कहें।",
+    "en": "Something on this computer stops the Safe workspace. Your firm manages this computer's settings.",
+    "hi": "इस कंप्यूटर पर कोई चीज़ सुरक्षित कार्यक्षेत्र को रोक रही है। इस कंप्यूटर की सेटिंग्स आपकी फ़र्म प्रबंधित करती है।",
     "hi_status": "provisional",
-    "hi_at": "2026-11-07",
-    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "hi_at": "2026-11-08",
+    "hi_by": "app track (no IT endings)",
     "status": "provisional",
-    "at": "2026-11-07",
-    "by": "app track (provisional; Rohan batch review; design B, safe-workspace-installer-setup)"
+    "at": "2026-11-08",
+    "by": "app track (no IT endings)"
   },
   "UC-92": {
     "en": "Your firm requires the Safe workspace on this computer, so Clauseo can't answer here until it's set up.",
@@ -642,14 +671,14 @@
     "by": "app track (provisional; Rohan batch review; design B, safe-workspace-installer-setup)"
   },
   "UC-93": {
-    "en": "Something on this computer stops the Safe workspace, so Clauseo can't answer here. Ask your IT team to look into it.",
-    "hi": "इस कंप्यूटर पर कोई चीज़ सुरक्षित कार्यक्षेत्र को रोक रही है, इसलिए Clauseo यहाँ उत्तर नहीं दे सकता। अपनी IT टीम से इसकी जाँच करने को कहें।",
+    "en": "Something on this computer stops the Safe workspace, so Clauseo can't answer here. Your firm manages this computer's settings.",
+    "hi": "इस कंप्यूटर पर कोई चीज़ सुरक्षित कार्यक्षेत्र को रोक रही है, इसलिए Clauseo यहाँ उत्तर नहीं दे सकता। इस कंप्यूटर की सेटिंग्स आपकी फ़र्म प्रबंधित करती है।",
     "hi_status": "provisional",
-    "hi_at": "2026-11-07",
-    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "hi_at": "2026-11-08",
+    "hi_by": "app track (no IT endings)",
     "status": "provisional",
-    "at": "2026-11-07",
-    "by": "app track (provisional; Rohan batch review; design B, safe-workspace-installer-setup)"
+    "at": "2026-11-08",
+    "by": "app track (no IT endings)"
   },
   "UC-94": {
     "en": "Add room for 4 more?",
@@ -662,14 +691,14 @@
     "by": "app track (provisional; Rohan batch review; design B, safe-workspace-installer-setup)"
   },
   "UC-95": {
-    "en": "Windows will ask to let Clauseo add room to the Safe workspace. It will say the publisher is unknown, because this early version of Clauseo isn't signed yet. Choose Yes. If Windows asks for an administrator's password, whoever looks after this computer can enter it.",
-    "hi": "Windows, Clauseo को सुरक्षित कार्यक्षेत्र में जगह जोड़ने देने के लिए पूछेगा। वह प्रकाशक को अज्ञात बताएगा, क्योंकि Clauseo के इस शुरुआती संस्करण पर अभी डिजिटल हस्ताक्षर नहीं है। Yes चुनें। अगर Windows किसी व्यवस्थापक का पासवर्ड माँगे, तो इस कंप्यूटर की देखरेख करने वाले व्यक्ति उसे दर्ज कर सकते हैं।",
+    "en": "Windows will ask to let Clauseo add room to the Safe workspace. It will say the publisher is unknown. That's expected for Clauseo. Choose Yes. If Windows asks for an administrator's password, whoever looks after this computer can enter it.",
+    "hi": "Windows, Clauseo को सुरक्षित कार्यक्षेत्र में जगह जोड़ने देने के लिए पूछेगा। वह प्रकाशक को अज्ञात बताएगा। Clauseo के लिए यह सामान्य है। Yes चुनें। अगर Windows किसी व्यवस्थापक का पासवर्ड माँगे, तो इस कंप्यूटर की देखरेख करने वाले व्यक्ति उसे दर्ज कर सकते हैं।",
     "hi_status": "provisional",
-    "hi_at": "2026-11-07",
+    "hi_at": "2026-11-08",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
     "status": "provisional",
-    "at": "2026-11-07",
-    "by": "app track (provisional; Rohan batch review; design B, safe-workspace-installer-setup)"
+    "at": "2026-11-08",
+    "by": "app track (provisional; Rohan batch review; required-words)"
   },
   "UC-96": {
     "en": "Clauseo will close so the installer can set up the Safe workspace. Run the installer you download, then open Clauseo again.",
@@ -690,5 +719,264 @@
     "status": "provisional",
     "at": "2026-11-07",
     "by": "app track (provisional; Rohan batch review)"
+  },
+  "UC-106": {
+    "en": "Safe workspace. Clauseo changes files in this matter without asking. It can't open your other files unless you allow it.",
+    "hi": "सुरक्षित कार्यक्षेत्र। Clauseo बिना पूछे इस मामले की फ़ाइलें बदलता है। आपकी अनुमति के बिना वह आपकी दूसरी फ़ाइलें नहीं खोल सकता।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-09",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-09",
+    "by": "app track (asking-truth; Rohan batch review)"
+  },
+  "UC-113": {
+    "en": "Marking up the changes…",
+    "hi": "बदलाव चिह्नित किए जा रहे हैं…",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-09",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-09",
+    "by": "app track (provisional; Rohan batch review; word blackline)"
+  },
+  "UC-114": {
+    "en": "Clauseo's Word tool is missing. Reinstall Clauseo to see the marked-up changes.",
+    "hi": "Clauseo का Word टूल मौजूद नहीं है। चिह्नित बदलाव देखने के लिए Clauseo दोबारा इंस्टॉल करें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-09",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-09",
+    "by": "app track (provisional; Rohan batch review; word blackline)"
+  },
+  "UC-115": {
+    "en": "The changes in this document couldn't be marked up.",
+    "hi": "इस दस्तावेज़ के बदलाव चिह्नित नहीं किए जा सके।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-09",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-09",
+    "by": "app track (provisional; Rohan batch review; word blackline)"
+  },
+  "UC-116": {
+    "en": "This document is very long, so only part of it is shown.",
+    "hi": "यह दस्तावेज़ बहुत लंबा है, इसलिए इसका केवल एक हिस्सा दिखाया गया है।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-09",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-09",
+    "by": "app track (provisional; Rohan batch review; word blackline)"
+  },
+  "UC-120": {
+    "en": "Tracked changes",
+    "hi": "ट्रैक किए गए बदलाव",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-09",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-09",
+    "by": "orchestrator (settled en)",
+    "note": "Accept and reject of a Word file's tracked changes (word-accept-reject)"
+  },
+  "UC-121": {
+    "en": "No tracked changes in this file.",
+    "hi": "इस फ़ाइल में कोई ट्रैक किया गया बदलाव नहीं है।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-09",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-09",
+    "by": "orchestrator (settled en)",
+    "note": "Accept and reject of a Word file's tracked changes (word-accept-reject)"
+  },
+  "UC-122": {
+    "en": "Formatting changed",
+    "hi": "फ़ॉर्मैटिंग बदली गई",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-09",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-09",
+    "by": "orchestrator (settled en)",
+    "note": "Accept and reject of a Word file's tracked changes (word-accept-reject)"
+  },
+  "UC-123": {
+    "en": "Moved",
+    "hi": "जगह बदली गई",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-09",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-09",
+    "by": "orchestrator (settled en)",
+    "note": "Accept and reject of a Word file's tracked changes (word-accept-reject)"
+  },
+  "UC-124": {
+    "en": "This file changed after the list was made, so nothing was accepted or rejected. The list now shows its current changes.",
+    "hi": "सूची बनने के बाद यह फ़ाइल बदल गई, इसलिए कुछ भी स्वीकार या अस्वीकार नहीं किया गया। सूची अब इसके मौजूदा बदलाव दिखाती है।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-09",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-09",
+    "by": "orchestrator (settled en)",
+    "note": "Accept and reject of a Word file's tracked changes (word-accept-reject)"
+  },
+  "UC-125": {
+    "en": "Clauseo can't read the tracked changes in this file. It may be damaged, or it may not be a Word document.",
+    "hi": "Clauseo इस फ़ाइल के ट्रैक किए गए बदलाव नहीं पढ़ सकता। हो सकता है कि यह क्षतिग्रस्त हो, या यह Word दस्तावेज़ न हो।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-09",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-09",
+    "by": "orchestrator (settled en)",
+    "note": "Accept and reject of a Word file's tracked changes (word-accept-reject)"
+  },
+  "UC-126": {
+    "en": "Clauseo's Word tool is missing. Reinstall Clauseo to accept or reject changes.",
+    "hi": "Clauseo का Word टूल मौजूद नहीं है। बदलाव स्वीकार या अस्वीकार करने के लिए Clauseo फिर से इंस्टॉल करें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-09",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-09",
+    "by": "orchestrator (settled en)",
+    "note": "Accept and reject of a Word file's tracked changes (word-accept-reject)"
+  },
+  "UC-127": {
+    "en": "Clauseo couldn't save your decision. The file is as it was.",
+    "hi": "Clauseo आपका निर्णय सहेज नहीं सका। फ़ाइल पहले जैसी ही है।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-09",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-09",
+    "by": "orchestrator (settled en)",
+    "note": "Accept and reject of a Word file's tracked changes (word-accept-reject)"
+  },
+  "UC-128": {
+    "en": "You accepted or rejected tracked changes in {file}",
+    "hi": "आपने {file} में ट्रैक किए गए बदलाव स्वीकार या अस्वीकार किए",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-09",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-09",
+    "by": "orchestrator (settled en)",
+    "note": "Accept and reject of a Word file's tracked changes (word-accept-reject)"
+  },
+  "UC-129": {
+    "en": "Mark all conversations done",
+    "hi": "सभी बातचीत पूरी चिह्नित करें",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-10",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-10",
+    "by": "app track (provisional; orchestrator to approve)",
+    "note": "a matter's menu, under Snooze until; was RO-15's \"Mark all done\", which never said all of what (rail triage, D-051)"
+  },
+  "UC-130": {
+    "en": "All conversations marked as done / Undo",
+    "hi": "सभी बातचीत पूरी चिह्नित की गईं / पूर्ववत करें",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-10",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-10",
+    "by": "app track (provisional; orchestrator to approve)",
+    "note": "beneath a matter's row, which stays, for 8 seconds after Mark all conversations done; Undo is words.ts's own (rail triage, D-051)"
+  },
+  "UC-131": {
+    "en": "Remove {name} from the list?",
+    "hi": "{name} को सूची से हटाएँ?",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-10",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-10",
+    "by": "app track (provisional; orchestrator to approve)",
+    "note": "the confirm before Remove from the list; {name} is the matter's name as filed (rail triage, D-054)"
+  },
+  "UC-132": {
+    "en": "The matter and its conversations leave the list and Recent. Its folder and papers stay where they are.",
+    "hi": "यह मामला और इसकी बातचीत सूची और ‘हाल के’ से हट जाएँगी। इसका फ़ोल्डर और दस्तावेज़ अपनी जगह पर रहेंगे।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-10",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-10",
+    "by": "app track (provisional; orchestrator to approve)",
+    "note": "the confirm's body; Cancel and Remove from the list are the existing words (rail triage, D-054)"
+  },
+  "UC-135": {
+    "en": "{n} files, {kb} KB",
+    "hi": "{n} फ़ाइलें, {kb} KB",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-10",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-10",
+    "by": "orchestrator (decision: KB under 1 MB; an empty folder says so)",
+    "note": "New matter's folder line, a folder under 1 MB (D-072; was a rounded-up {mb} MB)"
+  },
+  "UC-136": {
+    "en": "1 file, {kb} KB",
+    "hi": "1 फ़ाइल, {kb} KB",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-10",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-10",
+    "by": "orchestrator (decision: KB under 1 MB; an empty folder says so)",
+    "note": "New matter's folder line, one file under 1 MB (D-072)"
+  },
+  "UC-137": {
+    "en": "The folder is empty.",
+    "hi": "फ़ोल्डर खाली है।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-10",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-10",
+    "by": "orchestrator (decision: KB under 1 MB; an empty folder says so)",
+    "note": "New matter's folder line, the scan done with no file (D-072; was 0 files, 0 MB)"
+  },
+  "UC-139": {
+    "en": "Anthropic API key",
+    "hi": "Anthropic API key",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-11",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "approved",
+    "at": "2026-11-11",
+    "by": "Rohan (via the orchestrator)",
+    "note": "the key field's label under Claude, on the first screen's key panel and in Settings, Plans; was UD1-30's \"API key\" (other ways in)"
+  },
+  "UC-140": {
+    "en": "OpenAI API key",
+    "hi": "OpenAI API key",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-11",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "approved",
+    "at": "2026-11-11",
+    "by": "Rohan (via the orchestrator)",
+    "note": "the key field's label under ChatGPT, on the first screen's key panel and in Settings, Plans; was UD1-30's \"API key\" (other ways in)"
+  },
+  "UC-141": {
+    "en": "Use an API key instead",
+    "hi": "इसके बजाय API key इस्तेमाल करें",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-11",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "approved",
+    "at": "2026-11-11",
+    "by": "Rohan (via the orchestrator)",
+    "note": "the quiet way to the key panel, on the first screen and under each plan in Settings, Plans; was UD1-27's \"Use an API key or my firm's account\" and UD2-45's \"Other ways in\"; the words and Hindi of Connectors' U15-09 (other ways in)"
   }
 }

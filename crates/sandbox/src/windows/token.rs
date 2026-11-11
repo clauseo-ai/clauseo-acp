@@ -96,7 +96,12 @@ impl TokenSpec {
         matter: Option<&Sid>,
     ) -> Result<TokenSpec, TokenSpecError> {
         account("the pool user", pool_user)?;
-        account("the desktop user", desktop_user)?;
+        if !desktop_user.is_user_account() {
+            return Err(TokenSpecError::NotAnAccount {
+                role: "the desktop user",
+                sid: desktop_user.clone(),
+            });
+        }
         if let Some(matter) = matter {
             account("the matter SID", matter)?;
         }
@@ -171,22 +176,20 @@ pub fn agent_token_sddl(pool_user: &Sid, desktop_user: &Sid) -> String {
 /// (`0x8`) and `TOKEN_ASSIGN_PRIMARY` (`0x1`).
 pub const AGENT_TOKEN_POOL_RIGHTS: u32 = 0x0002_0009;
 
-/// The runners' process DACL, the inner's and the end sweeper's (set by the outer while each is
-/// suspended, and by the inner itself): `SYSTEM` full, the desktop user and the desktop user's
-/// logon SID wait, query and end, `OWNER RIGHTS` held to `READ_CONTROL`, and no pool user, so
-/// the agent (the same user) opens nothing of it.
+/// The inner runner's process DACL (set by the outer while it is suspended, and by the inner
+/// itself): `SYSTEM` full, the desktop user and the desktop user's logon SID wait, query and end,
+/// `OWNER RIGHTS` held to `READ_CONTROL`, and no pool user, so the agent (the same user) opens
+/// nothing of it.
 ///
 /// The logon SID's entry is for the pool user's sweeps (`runner/sweep.rs`):
-/// `CreateProcessWithLogonW` gives the inner and the end sweeper the desktop user's logon SID,
-/// enabled, so a next inner's first act can end a sweeper still running and a sweeper can end an
-/// inner still alive. The agent holds that SID deny-only (`TokenSpec::deny_only`), so an allow
-/// entry never matches it.
+/// `CreateProcessWithLogonW` gives the inner runner the desktop user's logon SID, enabled, so a
+/// next inner's first act can end an inner of an earlier session still alive. The agent holds
+/// that SID deny-only (`TokenSpec::deny_only`), so an allow entry never matches it.
 /// A pool-user process a service started outside the job runs in the pool user's own logon
 /// session and doesn't hold it. Other matters' runners started from the same logon do, and can
-/// open this one, but their sweeps only end their own pool user's processes. A sweeper from
-/// before the desktop user signed out and in again holds the old logon SID, so a launch during
-/// its 60 s can't open it and fails `RunExit::Escapee`, and a retry once it exited works
-/// (accepted).
+/// open this one, but their sweeps only end their own pool user's processes. An inner never
+/// outlives its outer's kill-on-close job, so none from an earlier logon of the desktop user's is
+/// left for a later one's sweep to meet.
 pub fn runner_process_sddl(desktop_user: &Sid, logon: &Sid) -> String {
     format!(
         "D:P(A;;GA;;;SY)(A;;0x{DESKTOP_USER_RIGHTS:x};;;{desktop_user})\
@@ -219,36 +222,6 @@ pub fn runner_default_dacl(desktop_user: &Sid) -> String {
 /// adds the desktop user's `TOKEN_QUERY` once the launch names them.
 pub const RUNNER_TOKEN_FIRST_SDDL: &str = "D:P(A;;GA;;;SY)(A;;RC;;;OW)";
 
-/// The end sweeper's threads' DACL (`runner/sweeper.rs`): `SYSTEM` full and `OWNER RIGHTS` held
-/// to `READ_CONTROL`, nobody else. Unlike the inner's ([`runner_thread_sddl`]) it names no
-/// desktop user: the sweeper takes nothing but `--sweep`, so it doesn't know that user, and the
-/// outer needs nothing of its threads (it waits on the sweeper's process handle, which it holds
-/// from the logon).
-pub const SWEEPER_THREAD_SDDL: &str = "D:P(A;;GA;;;SY)(A;;RC;;;OW)";
-
-/// The end sweeper's default DACL once shut: [`SWEEPER_THREAD_SDDL`]'s entries, so a thread the
-/// system starts in it later (COM's and RPC's, for the scheduled tasks) is shut
-/// too, and the pool user, its owner, keeps no implied `WRITE_DAC`.
-pub const SWEEPER_DEFAULT_DACL: &str = "D:(A;;GA;;;SY)(A;;RC;;;OW)";
-
-/// What the end sweeper's own user may do to its primary token for the COM step, once its sweep
-/// left no process of that user: `TOKEN_QUERY` (`0x8`), `TOKEN_DUPLICATE` (`0x2`) and
-/// `TOKEN_IMPERSONATE` (`0x4`), the rights the calls that read, copy and take on a token document
-/// (`GetTokenInformation`: `TOKEN_QUERY`; `DuplicateTokenEx`: `TOKEN_DUPLICATE`;
-/// `ImpersonateLoggedOnUser`: `TOKEN_QUERY` with `TOKEN_DUPLICATE` on a primary token,
-/// `TOKEN_IMPERSONATE` on an impersonation one), which COM and RPC make on the caller's own token
-/// to give a call its identity. With the token shut to `SYSTEM`, Task Scheduler and BITS (which
-/// the sweeper no longer calls) both failed with `E_OUTOFMEMORY` (14), as the inner's did when
-/// it still made COM calls after its own token's shut, before its threads' and default DACL's.
-/// No `TOKEN_ADJUST_*`, `TOKEN_ASSIGN_PRIMARY`, `WRITE_DAC` or `WRITE_OWNER`.
-pub const SWEEPER_COM_TOKEN_RIGHTS: u32 = 0x0000_000e;
-
-/// The end sweeper's primary token's DACL for the COM step: [`RUNNER_TOKEN_FIRST_SDDL`]'s
-/// entries and the pool user's [`SWEEPER_COM_TOKEN_RIGHTS`] (`runner/sweeper_flow.rs`).
-pub fn sweeper_com_token_sddl(pool_user: &Sid) -> String {
-    format!("D:P(A;;GA;;;SY)(A;;0x{SWEEPER_COM_TOKEN_RIGHTS:x};;;{pool_user})(A;;RC;;;OW)")
-}
-
 /// The private desktop's descriptor: `SYSTEM` and the pool user full (and the matter SID when
 /// the launch restricts with one), labelled Low so the Low agent may draw on it; no logon SID and
 /// no desktop user, so neither the lawyer's processes nor another runner's agent can open it
@@ -272,8 +245,9 @@ pub fn is_logon_sid(sid: &Sid) -> bool {
     parts.len() == 6 && parts.get(..4) == Some(&["S", "1", "5", "5"][..])
 }
 
-/// Refuses a SID that can't be one account: anything outside `S-1-5-21-…` (a machine or domain
-/// account), which leaves out every well-known group and service SID.
+/// Refuses a SID that can't be a pool user or a matter: anything outside `S-1-5-21-…` (a machine
+/// or domain account), which leaves out every well-known group and service SID. The desktop
+/// user is held to [`Sid::is_user_account`] instead, which takes an Entra ID user too.
 fn account(role: &'static str, sid: &Sid) -> Result<(), TokenSpecError> {
     let parts: Vec<&str> = sid.as_str().split('-').collect();
     // S-1-5-21-a-b-c-rid: an account of a machine or a domain.

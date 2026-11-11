@@ -28,9 +28,9 @@ pub(crate) fn write(path: &Path, contents: &[u8]) -> io::Result<()> {
     fs::write(path, contents)
 }
 
-/// `fs::copy`.
-pub(crate) fn copy(from: &Path, to: &Path) -> io::Result<()> {
-    fs::copy(from, to).map(|_| ())
+/// `fs::hard_link`.
+pub(crate) fn hard_link(original: &Path, link: &Path) -> io::Result<()> {
+    fs::hard_link(original, link)
 }
 
 /// `fs::remove_file`.

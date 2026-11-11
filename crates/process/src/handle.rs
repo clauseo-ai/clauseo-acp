@@ -20,13 +20,21 @@ use crate::os::{Root, Tree};
 use crate::stderr::{self, Redactor, SharedRing};
 use crate::stdin::StdinSlot;
 
-/// How long shutdown waits after closing stdin (ACP agents exit when stdin ends).
-const STDIN_GRACE: Duration = Duration::from_secs(2);
+/// How long shutdown waits after closing stdin, unless the spawn says otherwise
+/// (`SpawnOptions::stdin_grace`). ACP agents exit when stdin ends.
+pub(crate) const STDIN_GRACE: Duration = Duration::from_secs(2);
 /// How long shutdown waits after SIGTERM, before SIGKILL.
 #[cfg(unix)]
 const TERM_GRACE: Duration = Duration::from_secs(3);
 /// How long shutdown waits for the exit after the kill, before it reports the agent unresponsive.
 const KILL_GRACE: Duration = Duration::from_secs(2);
+/// How often [`Handle::exited_draining`] asks whether the tree is gone once the agent exited.
+#[cfg(windows)]
+const GONE_POLL: Duration = Duration::from_millis(20);
+/// How long [`Handle::exited_draining`] still reads, once only spared browsers are left, for
+/// what the tree wrote before it ended: every read returns at once then.
+#[cfg(windows)]
+const DRAIN: Duration = Duration::from_millis(200);
 
 /// An agent's process and its tree. Dropping it kills the tree at once, without waiting.
 #[derive(Debug)]
@@ -44,6 +52,8 @@ pub struct Handle {
     /// Whether the tree has been sent its kill, so `Drop` sends none: on Unix a group id can be
     /// reused once the group is gone.
     tree_killed: bool,
+    /// How long the shutdown waits after closing stdin (`SpawnOptions::stdin_grace`).
+    stdin_grace: Duration,
     /// The start's count (`live.rs`), given back when the handle drops, after the tree's kill.
     _live: Live,
 }
@@ -56,6 +66,7 @@ impl Handle {
         stdin: StdinSlot,
         ring: SharedRing,
         redactor: Arc<Redactor>,
+        stdin_grace: Duration,
         live: Live,
     ) -> Handle {
         Handle {
@@ -67,6 +78,7 @@ impl Handle {
             stdin,
             stderr: StderrSource { ring, redactor },
             tree_killed: false,
+            stdin_grace,
             _live: live,
         }
     }
@@ -93,17 +105,48 @@ impl Handle {
         self.finish(&status)
     }
 
-    /// Stops the agent by the ladder: close its stdin and wait 2 s, then (Unix) SIGTERM to its
-    /// group and wait 3 s, then SIGKILL to the group, or on Windows end its job, and wait 2 s
-    /// more for the exit. Whichever way it exits, what is left of its tree is killed: on Unix the
-    /// group, then every process of `listed` that still runs with its listed start (a command
-    /// in a session of its own has left the group). Take `listed` from
-    /// [`Handle::descendants`] just before, where a blocking listing may run; `None` (a listing
-    /// that failed or was not taken) kills the group only. Windows ends the whole job and does
-    /// not read it. The outcome names the step that ended it, or says the agent never exited.
+    /// [`Handle::exited`], with `pipes` (the reads of the agent's stdout and stderr to their
+    /// end) driven beside it until both are done. Returns the report and whether the pipes
+    /// reached their end.
+    ///
+    /// On Windows a browser the tree's kill spared (`LaunchSpec::spare_browsers`) can hold those
+    /// pipes open for as long as it runs: it inherits every inheritable handle of the process
+    /// that starts it (Codex's `webbrowser` starts it by `CreateProcessW` with inheritance on),
+    /// the agent's stdout and stderr among them. So once the agent has exited and the rest of
+    /// its tree is gone, the spared browsers and their children aside ([`TreeWatch::gone`]),
+    /// the reads get 200 ms more for what is already in the pipes, then are dropped.
+    /// Elsewhere, and while any other process of the tree runs, it waits for the pipes' end.
+    pub async fn exited_draining<T: Timer>(
+        &mut self,
+        timer: &T,
+        pipes: impl Future<Output = ()>,
+    ) -> (ExitReport, bool) {
+        let mut pipes = pin!(pipes);
+        let report = {
+            let exited = pin!(self.exited());
+            match select(pipes.as_mut(), exited).await {
+                Either::Left(((), exited)) => return (exited.await, true),
+                Either::Right((report, _)) => report,
+            }
+        };
+        let watch = self.tree_watch();
+        let settled = pin!(settled(&watch, timer));
+        let ended = matches!(select(pipes, settled).await, Either::Left(_));
+        (report, ended)
+    }
+
+    /// Stops the agent by the ladder: close its stdin and wait the stdin grace (2 s unless
+    /// `SpawnOptions::stdin_grace` set another), then (Unix) SIGTERM to its group and wait 3 s,
+    /// then SIGKILL to the group, or on Windows end its job, and wait 2 s more for the exit.
+    /// Whichever way it exits, what is left of its tree is killed: on Unix the group, then every
+    /// process of `listed` that still runs with its listed start (a command in a session of its
+    /// own has left the group). Take `listed` from [`Handle::descendants`] just before, where a
+    /// blocking listing may run; `None` (a listing that failed or was not taken) kills the group
+    /// only. Windows ends the whole job and does not read it. The outcome names the step that
+    /// ended it, or says the agent never exited.
     ///
     /// Keep reading the agent's stdout, or drop it, while this runs: an agent blocked writing to
-    /// a full stdout pipe never sees its stdin close, and costs the whole 2 s and the SIGTERM.
+    /// a full stdout pipe never sees its stdin close, and costs the whole grace and the SIGTERM.
     pub async fn shutdown<T: Timer>(
         mut self,
         timer: &T,
@@ -117,7 +160,7 @@ impl Handle {
         drop(listed);
         self.stdin.close();
         let exit = pin!(self.child.status());
-        let ended = ladder(exit, timer, |step| self.step(step)).await;
+        let ended = ladder(exit, timer, self.stdin_grace, |step| self.step(step)).await;
         match ended {
             Ended::StdinClosed(status) => ShutdownOutcome::StdinClosed(self.finish(&status)),
             #[cfg(unix)]
@@ -178,8 +221,10 @@ impl Handle {
 }
 
 impl Drop for Handle {
-    /// Kills the group or the job, without waiting and without listing (a listing blocks):
-    /// a descendant outside the group outlives a handle dropped without a shutdown.
+    /// Kills the group or the job, without listing (a listing blocks): a descendant outside the
+    /// group outlives a handle dropped without a shutdown. A Windows tree that spares a browser
+    /// (`LaunchSpec::spare_browsers`) is the exception: its kill looks up the default browser in
+    /// the registry, lists the job and waits up to 1.5 s for the processes it ends.
     fn drop(&mut self) {
         self.kill_tree();
     }
@@ -221,14 +266,15 @@ enum Ended<S> {
     Unresponsive,
 }
 
-/// The ladder's waits, once stdin is closed: `exit` against each grace period, with `act`
-/// taking the step that follows a wait that ran out.
+/// The ladder's waits, once stdin is closed: `exit` against each grace period (`stdin_grace` for
+/// the first), with `act` taking the step that follows a wait that ran out.
 async fn ladder<S, T: Timer>(
     mut exit: Pin<&mut impl Future<Output = S>>,
     timer: &T,
+    stdin_grace: Duration,
     mut act: impl FnMut(Step),
 ) -> Ended<S> {
-    if let Some(status) = within(exit.as_mut(), timer.after(STDIN_GRACE)).await {
+    if let Some(status) = within(exit.as_mut(), timer.after(stdin_grace)).await {
         return Ended::StdinClosed(status);
     }
     #[cfg(unix)]
@@ -243,6 +289,22 @@ async fn ladder<S, T: Timer>(
         Some(status) => Ended::Killed(status),
         None => Ended::Unresponsive,
     }
+}
+
+/// Ends once the tree is gone, spared browsers and their children aside, and [`DRAIN`] more
+/// has passed: asked every [`GONE_POLL`].
+#[cfg(windows)]
+async fn settled<T: Timer>(watch: &TreeWatch, timer: &T) {
+    while !watch.gone() {
+        timer.after(GONE_POLL).await;
+    }
+    timer.after(DRAIN).await;
+}
+
+/// Never ends: no Unix stop spares a process, so the pipes' end is awaited as it always was.
+#[cfg(unix)]
+async fn settled<T: Timer>(_watch: &TreeWatch, _timer: &T) {
+    futures::future::pending::<()>().await;
 }
 
 /// `exit`'s output if it ends before `deadline`.
@@ -326,7 +388,8 @@ impl ExitReport {
 /// steps are fixed, and a new one should make every match on it fail to build.
 #[derive(Debug, Clone)]
 pub enum ShutdownOutcome {
-    /// It exited within 2 s of its stdin closing.
+    /// It exited within the stdin grace (2 s unless `SpawnOptions::stdin_grace` set another) of
+    /// its stdin closing.
     StdinClosed(ExitReport),
     /// It exited within 3 s of SIGTERM (Unix only).
     Terminated(ExitReport),

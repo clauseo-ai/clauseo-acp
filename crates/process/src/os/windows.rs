@@ -8,7 +8,7 @@
 //! listed: every process it started is in it, an orphaned one too, and so is that conhost, which
 //! every snapshot holds, so no sweep ends it. A console command the agent starts without a
 //! console gets a conhost of its own, its child and new in the job, which a sweep ends with it.
-//! Every Win32 call of the crate is in this file.
+//! Every Win32 call of the crate is in this file and its children (`job`, `watch`).
 #![expect(
     unsafe_code,
     reason = "FFI to the Win32 Job Object, process and thread APIs"
@@ -21,32 +21,36 @@ use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};
 use std::os::windows::process::CommandExt;
 use std::path::PathBuf;
 use std::process::Command;
-use std::sync::{Arc, Weak};
+use std::sync::{Arc, Mutex, Weak};
 use std::time::{Duration, SystemTime};
 
 use async_process::Child;
-use windows::Win32::Foundation::{CloseHandle, ERROR_MORE_DATA, FILETIME, HANDLE, WAIT_TIMEOUT};
+use windows::Win32::Foundation::{CloseHandle, FILETIME, HANDLE};
 use windows::Win32::System::Diagnostics::ToolHelp::{
     CreateToolhelp32Snapshot, PROCESSENTRY32W, Process32FirstW, Process32NextW, TH32CS_SNAPPROCESS,
     TH32CS_SNAPTHREAD, THREADENTRY32, Thread32First, Thread32Next,
 };
 use windows::Win32::System::JobObjects::{
-    AssignProcessToJobObject, CreateJobObjectW, IsProcessInJob, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
-    JOBOBJECT_BASIC_PROCESS_ID_LIST, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
-    JobObjectBasicProcessIdList, JobObjectExtendedLimitInformation, QueryInformationJobObject,
-    SetInformationJobObject, TerminateJobObject,
+    AssignProcessToJobObject, CreateJobObjectW, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+    TerminateJobObject,
 };
 use windows::Win32::System::SystemInformation::GetSystemTimeAsFileTime;
 use windows::Win32::System::Threading::{
     CREATE_NO_WINDOW, CREATE_SUSPENDED, GetProcessTimes, OpenProcess, OpenThread,
-    PROCESS_ACCESS_RIGHTS, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION,
-    PROCESS_SET_QUOTA, PROCESS_SYNCHRONIZE, PROCESS_TERMINATE, QueryFullProcessImageNameW,
-    ResumeThread, THREAD_SUSPEND_RESUME, TerminateProcess, WaitForSingleObject,
+    PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SET_QUOTA, PROCESS_SYNCHRONIZE,
+    PROCESS_TERMINATE, QueryFullProcessImageNameW, ResumeThread, THREAD_SUSPEND_RESUME,
+    TerminateProcess,
 };
 use windows::core::{PCWSTR, PWSTR};
 
 use crate::descendants::Proc;
 use crate::{Error, SpawnOptions};
+use job::{Held, accounting, alive, hold_in_job, hold_listed, in_job, job_pids, open, set_limits};
+
+/// Every process the job has held, from its accounting; `None` when the query fails.
+fn total(job: &OwnedHandle) -> Option<u32> {
+    accounting(job).map(|(_, total)| total)
+}
 
 /// The exit code `TerminateJobObject` gives the processes it ends, and `terminate` the listed
 /// processes it ends one by one: one nothing else uses (std's `Child::kill` gives 1), so a test
@@ -64,6 +68,16 @@ pub(crate) fn prepare(command: &mut Command, opts: &SpawnOptions) {
 #[derive(Debug)]
 pub(crate) struct Tree {
     job: Arc<OwnedHandle>,
+    /// The job's processes as last listed, each by a handle that waits for its exit: shared with
+    /// every [`watch::Watch`], which reads the tree as gone only once each has exited.
+    held: Held,
+    /// Whether the kill spares a browser and its children (`LaunchSpec::spare_browsers`).
+    spare: bool,
+    /// The run's own process, which is never spared.
+    root: u32,
+    /// The processes the kill spared, left running in a job that no longer kills on close:
+    /// shared with every [`watch::Watch`], which does not wait for them or their children.
+    spared: Arc<Mutex<Vec<crate::browser::Key>>>,
 }
 
 impl Tree {
@@ -91,9 +105,30 @@ impl Tree {
     }
 
     /// Ends every process in the job. Returns whether Windows took the call.
+    ///
+    /// The job's processes are held first ([`hold_listed`]): `TerminateJobObject` sets the job's
+    /// count of running processes to 0 at once, while each process is still ending and holds its
+    /// handles (its working folder, its sockets), and only a handle to it says when it has exited.
+    /// A process that joins between the listing and the terminate moves the job's total, and is
+    /// then held from the system's process list ([`hold_in_job`]): the job's own list, read again
+    /// after the terminate, may already leave it out.
+    ///
+    /// A tree that spares a browser ([`Tree::spare_browsers`]) ends every other process one by
+    /// one instead ([`spare::kill_sparing`]) when it holds a browser; with none it ends as above.
     pub(crate) fn kill(&self) -> bool {
+        let before = total(&self.job);
+        hold_listed(&self.job, &self.held);
+        if self.spare
+            && let Some(ended) = spare::kill_sparing(self)
+        {
+            return ended;
+        }
         // SAFETY: `self.job()` is the job handle `self` owns, open until `self` drops.
-        unsafe { TerminateJobObject(self.job(), TERMINATED) }.is_ok()
+        let ended = unsafe { TerminateJobObject(self.job(), TERMINATED) }.is_ok();
+        if before.is_none() || total(&self.job) != before {
+            hold_in_job(&self.job, &self.held);
+        }
+        ended
     }
 
     /// A tree whose kill Windows refuses: a new, empty job's handle with no access rights, so
@@ -122,7 +157,20 @@ impl Tree {
         // SAFETY: `bare` is the open handle DuplicateHandle just returned, which nothing else
         // owns; the `OwnedHandle` closes it once, on drop.
         let job = Arc::new(unsafe { OwnedHandle::from_raw_handle(bare.0) });
-        Tree { job }
+        Tree {
+            job,
+            held: Held::default(),
+            spare: false,
+            root: 0,
+            spared: Arc::default(),
+        }
+    }
+
+    /// From now on the tree's kill, and so its handle's drop, spares a browser it holds and that
+    /// browser's children (`LaunchSpec::spare_browsers`); never `root`, the run's own process.
+    pub(crate) fn spare_browsers(&mut self, root: u32) {
+        self.spare = true;
+        self.root = root;
     }
 
     /// The job handle, borrowed for a Win32 call.
@@ -139,35 +187,21 @@ impl Tree {
         // SAFETY: `job` is the open handle CreateJobObjectW just returned, which nothing else owns
         // or closes; the `OwnedHandle` closes it once, on drop.
         let job = Arc::new(unsafe { OwnedHandle::from_raw_handle(job.0) });
-        let tree = Tree { job };
-        let mut limits = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
-        limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
-        let size =
-            u32::try_from(size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>()).map_err(|source| {
-                Error::Os {
-                    what: "the job limit struct is too large",
-                    source: io::Error::other(source),
-                }
-            })?;
-        // SAFETY: `limits` is a live JOBOBJECT_EXTENDED_LIMIT_INFORMATION of `size` bytes, the
-        // struct this information class takes, and `tree.job()` is the job handle `tree` owns.
-        unsafe {
-            SetInformationJobObject(
-                tree.job(),
-                JobObjectExtendedLimitInformation,
-                (&raw const limits).cast(),
-                size,
-            )
-        }
-        .map_err(|error| os_error("could not set the job to kill on close", error))?;
+        let tree = Tree {
+            job,
+            held: Held::default(),
+            spare: false,
+            root: 0,
+            spared: Arc::default(),
+        };
+        set_limits(&tree.job, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE).map_err(|source| Error::Os {
+            what: "could not set the job to kill on close",
+            source,
+        })?;
         Ok(tree)
     }
 }
 
-/// The first job query's room, in pids; a short answer retries with more, up to [`MAX_JOB_PIDS`].
-const FIRST_JOB_PIDS: usize = 64;
-/// The most processes of one job the listing reads.
-const MAX_JOB_PIDS: usize = 65_536;
 /// The room, in UTF-16 units, for an executable path: a first try and the longest Windows path.
 const IMAGE_ROOMS: [usize; 2] = [1_024, 32_768];
 
@@ -333,11 +367,11 @@ fn each_process(mut visit: impl FnMut(&PROCESSENTRY32W)) -> bool {
 /// with. The handle opened for the check is the one the kill goes through, so a reused pid is
 /// never ended. Returns that handle when it is the listed process's, ended or not: while it is
 /// open, Windows gives the pid to no other process, so a process listed later with it as parent
-/// was started by the listed one.
+/// was started by the listed one. The handle can also wait for the end (`spare.rs`).
 pub(crate) fn terminate(process: &Proc) -> Option<OwnedHandle> {
     let handle = open(
         process.pid,
-        PROCESS_TERMINATE | PROCESS_QUERY_LIMITED_INFORMATION,
+        PROCESS_TERMINATE | PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_SYNCHRONIZE,
     )?;
     if created(&handle) != Some(process.start) {
         return None;
@@ -348,29 +382,10 @@ pub(crate) fn terminate(process: &Proc) -> Option<OwnedHandle> {
     Some(handle)
 }
 
-/// Whether `process` is in `job`; `false` when Windows does not say.
-fn in_job(process: &OwnedHandle, job: &OwnedHandle) -> bool {
-    let mut inside = windows::core::BOOL(0);
-    // SAFETY: `process` is a live handle with PROCESS_QUERY_LIMITED_INFORMATION, `job` the live
-    // job handle, and `inside` a live BOOL the call writes.
-    let asked = unsafe { IsProcessInJob(raw(process), Some(raw(job)), &raw mut inside) };
-    asked.is_ok() && inside.as_bool()
-}
-
 /// Whether process `pid` is still running, for tests: see [`alive`].
 #[cfg(feature = "test-support")]
 pub(crate) fn running(pid: u32) -> bool {
     open(pid, PROCESS_SYNCHRONIZE).is_some_and(|handle| alive(&handle))
-}
-
-/// Whether `process` still runs: a process handle is signalled once the process exits, so a
-/// wait of 0 ms that times out means it has not. Unlike an exit code of `STILL_ACTIVE`, which a
-/// process can also exit with, this cannot mistake an ended process for a running one.
-fn alive(process: &OwnedHandle) -> bool {
-    // SAFETY: `process` is a live process handle opened with PROCESS_SYNCHRONIZE, which a wait
-    // needs; a 0 ms wait only reads its state.
-    let waited = unsafe { WaitForSingleObject(raw(process), 0) };
-    waited == WAIT_TIMEOUT
 }
 
 /// Ends `pid`, for a test that cleans up after a failed assert.
@@ -380,72 +395,6 @@ pub(crate) fn kill_pid(pid: u32) {
         // SAFETY: `handle` is a live process handle opened with PROCESS_TERMINATE.
         unsafe { TerminateProcess(raw(&handle), TERMINATED) }.unwrap_or_default();
     }
-}
-
-/// The ids of the processes in `job`, from `JobObjectBasicProcessIdList`; `None` when the
-/// query fails, or the job holds more than [`MAX_JOB_PIDS`].
-fn job_pids(job: &OwnedHandle) -> Option<Vec<u32>> {
-    // The list's header (two u32 counts) in `usize` slots: the ids start at this slot.
-    let header =
-        std::mem::offset_of!(JOBOBJECT_BASIC_PROCESS_ID_LIST, ProcessIdList) / size_of::<usize>();
-    let mut room = FIRST_JOB_PIDS;
-    loop {
-        // `usize` slots, so the buffer has the struct's alignment; zeroed, so it is all
-        // initialised whatever the call writes.
-        let mut buffer: Vec<usize> = vec![0; header + room];
-        let bytes = u32::try_from(buffer.len() * size_of::<usize>()).ok()?;
-        // SAFETY: `buffer` is live, aligned for JOBOBJECT_BASIC_PROCESS_ID_LIST and `bytes`
-        // bytes long, which is at least the struct's size (`room` >= 1); the call writes the
-        // two counts and at most the ids that fit in `bytes`. `job` is the live job handle.
-        let queried = unsafe {
-            QueryInformationJobObject(
-                Some(raw(job)),
-                JobObjectBasicProcessIdList,
-                buffer.as_mut_ptr().cast(),
-                bytes,
-                None,
-            )
-        };
-        if let Err(error) = &queried
-            && error.code() != ERROR_MORE_DATA.to_hresult()
-        {
-            return None;
-        }
-        // SAFETY: the buffer starts with the struct's two u32 counts (repr(C), at offset 0),
-        // initialised either by the call or by the zeroing above.
-        let (assigned, listed) = unsafe {
-            let list = buffer.as_ptr().cast::<JOBOBJECT_BASIC_PROCESS_ID_LIST>();
-            (
-                (*list).NumberOfAssignedProcesses,
-                (*list).NumberOfProcessIdsInList,
-            )
-        };
-        let (assigned, listed) = (
-            usize::try_from(assigned).ok()?,
-            usize::try_from(listed).ok()?,
-        );
-        if queried.is_ok() && listed >= assigned {
-            let ids = buffer.get(header..header + listed.min(room))?;
-            return Some(
-                ids.iter()
-                    .filter_map(|&id| u32::try_from(id).ok())
-                    .collect(),
-            );
-        }
-        if room >= MAX_JOB_PIDS {
-            return None;
-        }
-        room = (room * 2).max(assigned + 8).min(MAX_JOB_PIDS);
-    }
-}
-
-/// Opens process `pid` with `access`; `None` when it is gone or refuses.
-fn open(pid: u32, access: PROCESS_ACCESS_RIGHTS) -> Option<OwnedHandle> {
-    // SAFETY: opening a process by id takes no pointer.
-    let handle = unsafe { OpenProcess(access, false, pid) }.ok()?;
-    // SAFETY: `handle` is the open handle OpenProcess just returned, which nothing else owns;
-    // the `OwnedHandle` closes it once, on drop.
-    Some(unsafe { OwnedHandle::from_raw_handle(handle.0) })
 }
 
 /// A handle borrowed for a Win32 call.
@@ -589,12 +538,14 @@ fn resume_thread(id: u32) -> Resume {
     }
 }
 
-/// An [`Error::Os`] saying `what` failed, with the Win32 error.
+/// An [`Error::Os`] saying `what` failed, its source the Win32 error (see `win32_io_error`).
 fn os_error(what: &'static str, error: windows::core::Error) -> Error {
     Error::Os {
         what,
-        source: io::Error::from(error),
+        source: super::win32::win32_io_error(error),
     }
 }
 
+mod job;
+mod spare;
 pub(crate) mod watch;

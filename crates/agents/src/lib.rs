@@ -15,6 +15,13 @@
 //!   `clauseo-receipt.json`), `downloads/` (files named by digest), `npm-cache/`, `npmrc`,
 //!   `npmrc-global` and `.lock`. `<id>/home/` and `signin/` are S18's. `limits` writes
 //!   `clauseo-claude-usage.mjs` into Claude's install folder; nothing here touches it.
+//! - The pinned Python runtime (`python.rs`): Clauseo's archive for this platform (none on
+//!   Linux, and none anywhere until the archives are published), checked by SHA-256 and
+//!   unpacked read-only on Unix under `runtime/<archive stem>/` with a manifest and a receipt,
+//!   run once before its receipt, as the second step of an agent's install job. Its own
+//!   [`PythonState`]; a failure never blocks the agent's `Ready`. [`python_command_dir`] is the
+//!   folder for the agent's `PATH`; [`python_path_dirs`] the folders an agent session's `PATH`
+//!   takes (all three on Windows: pandoc's, the interpreter's and pip's).
 //! - Node: the user's when it is a regular file, reports v22 or later and has `npm-cli.js`
 //!   beside it; otherwise the pinned download, checked by SHA-256.
 //! - Downloads (Rust's): each tarball the derived lock lists for this platform, with `Range`
@@ -36,10 +43,12 @@
 //!   macOS and Linux (`signin/shim.rs`); Codex's flow (`signin/codex.rs`: the port 1455 probe
 //!   and "Try again", hidden `login` or `login --device-auth` with the device code read
 //!   strictly from its output, `login status` polled, the account from `app-server`'s
-//!   `account/read`, sign-out); detection of the lawyer's own login (`signin/detect.rs`), the
+//!   `account/read`, sign-out); detection of the lawyer's own login (`signin/detect.rs`, a stat
+//!   of each agent's login file that starts no CLI and never writes the lawyer's), the
 //!   status check and the lawyer's choices about it (`signin/found.rs`), Clauseo's `login-source`
 //!   and `no-reuse` markers (`signin/marker.rs`), and Codex's hard link, guard and split check
-//!   (`signin/reuse.rs`, the one file that may name Codex's login file, and never opens it).
+//!   (`signin/reuse.rs`, the one file that may name the agents' login files, and never opens
+//!   them).
 //!
 //! # Interface
 //!
@@ -55,7 +64,9 @@
 //!   [`Agents::set_network`] with a [`Network`] (the proxies and CA files, for the next job), and
 //!   [`ca_cert_var`], the CA variable of each agent's CLI.
 //! - [`InstallState`], [`Failure`], [`FailureKind`] (with its error code), [`InstallLog`] and
-//!   [`Installed`].
+//!   [`Installed`]; [`PythonState`] ([`AgentsEvent::Python`], [`Agents::python_state`]),
+//!   [`PythonFailure`], [`PythonFailureKind`], [`PythonBlocker`], [`python_command_dir`] and
+//!   [`python_path_dirs`].
 //! - [`SigninState`], [`Found`], [`LoginFrom`], [`Source`], [`SigninCode`] (with its error
 //!   code), [`Method`], [`SigninError`], [`PasteCode`] and [`SigninConfig`];
 //!   [`SigninNote`]; [`AgentsEvent::Signin`], [`AgentsEvent::OpenUrl`] and
@@ -67,10 +78,11 @@
 //!
 //! # Invariants
 //!
-//! - Only `nodejs.org` and `registry.npmjs.org` are contacted, over https alone, or the firm's
-//!   https mirror for tarballs; an IT runtime and an offline bundle contact nothing. Sign-in's
-//!   own network use is one name lookup before a login run (the agent's first sign-in host, or
-//!   the proxy's); the vendors' CLIs make the sign-in's connections themselves.
+//! - Only `nodejs.org`, `registry.npmjs.org` and, for Python's release asset, `github.com` and
+//!   its redirect (`release-assets.githubusercontent.com`) are contacted, over https alone, or
+//!   the firm's https mirror for tarballs; an IT runtime and an offline bundle contact nothing.
+//!   Sign-in's own network use is one name lookup before a login run (the agent's first sign-in
+//!   host, or the proxy's); the vendors' CLIs make the sign-in's connections themselves.
 //! - Every downloaded byte is checked: SHA-512 from the lock, SHA-256 from the snapshot. A
 //!   mismatch deletes the file. A mirror cannot change a byte.
 //! - No install script runs, and no install folder holds a symbolic link or junction.
@@ -83,8 +95,9 @@
 //!   Installs run one after another, and a paused install sends nothing after its `Paused`.
 //! - Nothing runs while the app is idle once installs are done.
 //! - An API key lives only in the OS keychain: never in a file, a log, a `Debug` or an error.
-//! - Clauseo never opens or reads an agent's credential, and no file under `src` names one
-//!   outside a comment (`tests/credential_names.rs`). Emails and plans come only from the
+//! - Clauseo never opens or reads an agent's credential, and no file under `src` but
+//!   `signin/reuse.rs` (detection's stats) names one outside a comment
+//!   (`tests/credential_names.rs`). Emails and plans come only from the
 //!   vendors' own status output. A pasted code is zeroed once written and never logged.
 //! - No `auth logout` or `codex logout` runs while the source is `Reused`, and no Codex `login`
 //!   or `logout` while the home's login file is the lawyer's (same file id). Reuse starts only
@@ -107,8 +120,10 @@
 //! `flate2`, `tar`, `zip`, `thiserror`, `dunce`, `zeroize` (the pasted code and the API
 //! keys); `keyring` on macOS and Windows only (the keychain; none
 //! on Linux); `nix` on Unix and `windows` on Windows (free disk space, the Windows proxy setting,
-//! file ids); `rcgen` with `test-support` only. Never `sandbox`, `tauri` or `tokio`; `settings`
-//! only in tests and the example (the caller passes the data folder and the agent homes in).
+//! file ids, and the signer and version of the VC++ runtime DLL placed beside Codex's ARM64
+//! `rg.exe`: `vcruntime.rs`); `rcgen` with `test-support` only. Never `sandbox`, `tauri` or
+//! `tokio`; `settings` only in tests and the example (the caller passes the data folder and the
+//! agent homes in).
 //!
 //! # Start reading
 //!
@@ -128,12 +143,26 @@ mod log;
 mod node;
 mod pins;
 mod platform;
+mod python;
 mod receipt;
+#[cfg_attr(
+    not(any(windows, test, feature = "test-support")),
+    expect(dead_code, reason = "only Windows and tests settle Codex's rg.exe")
+)]
+mod sac;
 mod signin;
 mod snapshot;
 mod state;
 mod status;
 mod sysproxy;
+#[cfg_attr(
+    not(any(windows, test)),
+    expect(
+        dead_code,
+        reason = "only Windows reads a DLL's signer and version; elsewhere nothing is placed"
+    )
+)]
+mod vcruntime;
 mod worker;
 mod write;
 
@@ -144,22 +173,32 @@ pub mod testing;
 pub use config::{
     AgentsConfig, Clock, InstallConfig, Network, NodeSearch, RefreshFn, SigninConfig, SystemClock,
 };
+#[cfg(feature = "test-support")]
+pub use config::{FreeBytes, RenameFault};
 pub use fileid::same_file;
 pub use log::InstallLog;
 pub use pins::{AgentPins, PinsError};
 pub use platform::{Arch, Libc, Os, Platform};
+pub use python::{python_command_dir, python_contents_match, python_path_dirs};
 pub use receipt::{install_folder, install_root, script_path};
+#[cfg(feature = "test-support")]
+pub use sac::SacForTests;
+pub use sac::SacState;
 pub use signin::reuse::{CodexLink, codex_link_holds, codex_login_shared, unlink_reused_login};
 pub use signin::{
     Found, LoginFrom, Method, PasteCode, SigninCode, SigninError, SigninNote, SigninState, Source,
     Unconfirmed,
 };
 pub use snapshot::{
-    AgentEntry, AgentSizes, NPM_REGISTRY, NodeArchive, NodeEntry, Snapshot, SnapshotError,
+    AgentEntry, AgentSizes, NPM_REGISTRY, NodeArchive, NodeEntry, PythonArchive, PythonEntry,
+    Snapshot, SnapshotError,
 };
-pub use state::{AgentsEvent, Failure, FailureKind, InstallState, Installed};
+pub use state::{
+    AgentsEvent, Failure, FailureKind, InstallState, Installed, PythonBlocker, PythonFailure,
+    PythonFailureKind, PythonState,
+};
 pub use status::is_sign_in_again;
-pub use worker::Agents;
+pub use worker::{Agents, OwnLogin};
 
 /// The variable `agent`'s CLI reads an extra CA file (`network.ca_certs`) from:
 /// `NODE_EXTRA_CA_CERTS` for Claude, `CODEX_CA_CERTIFICATE` for Codex; `None` for an agent with

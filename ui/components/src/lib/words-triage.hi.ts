@@ -12,6 +12,8 @@ export const HI = {
   "Snoozed until {when}": "{when} तक टाला गया",
   // RO-14 (with Undo) in a row's place after marking it done
   "Marked as done": "पूरा चिह्नित किया गया",
+  // UC-130 (with Undo) under a matter's row, briefly, after its menu's Mark all conversations done (new; provisional)
+  "All conversations marked as done": "सभी बातचीत पूरी चिह्नित की गईं",
   // RO-33: a time tomorrow, inside the lines above and RO-05
   "tomorrow {time}": "कल {time}",
 } as const;

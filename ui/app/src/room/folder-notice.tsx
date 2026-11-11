@@ -2,7 +2,7 @@
 // matter until Close. A folder whose permissions the lawyer can't change says Clauseo asks before each edit (FR1),
 // why behind its info icon (FR2), and What to tell IT (FR3), which opens the text to send IT, selected, with Copy
 // (FR5). A network drive (FR12) and a drive without file permissions (FR15) say that Claude asks before every
-// change and Codex can't work there, how to get full protection behind the info icon. A folder the host couldn't
+// change and ChatGPT can't work there, how to get full protection behind the info icon. A folder the host couldn't
 // check says Claude asks before every change, in one line. Loaded only for such a matter (work.tsx), with its words
 // (words-folder.ts).
 import "./folder-notice.css";
@@ -33,19 +33,19 @@ const SAYS: Readonly<
     name: "Clauseo asks before each edit in this folder",
     head: "Clauseo asks before each edit",
     rest: null,
-    info: "You can change files here, but not this folder's permissions. Clauseo needs them to keep Claude and Codex inside the matter. Some edits won't go through.",
+    info: "You can change files here, but not this folder's permissions. Clauseo needs them to keep Claude and ChatGPT inside the matter. Some edits won't go through.",
   },
   network: {
     name: "This matter's folder is on a network drive",
     head: "On a network drive.",
-    rest: "Claude asks before every change. Codex can't work here.",
-    info: "Clauseo can't keep Claude and Codex inside this folder. To work in the Safe workspace, move the matter to a folder on this computer.",
+    rest: "Claude asks before every change. ChatGPT can't work here.",
+    info: "Move the matter to a folder on this computer to use ChatGPT here and let Claude work without asking before every change. Clauseo can't keep them inside a folder on a network drive.",
   },
   no_permissions: {
     name: "This matter's folder is on a drive that doesn't keep file permissions",
     head: "No file permissions.",
-    rest: "Claude asks before every change. Codex can't work here.",
-    info: "Clauseo can't keep Claude and Codex inside this folder. USB drives often don't keep permissions. To work in the Safe workspace, move the matter to a folder on this computer.",
+    rest: "Claude asks before every change. ChatGPT can't work here.",
+    info: "Move the matter to a folder on this computer to use ChatGPT here and let Claude work without asking before every change. Clauseo can't keep them inside this folder, and USB drives often don't keep file permissions.",
   },
   check_failed: {
     name: "Clauseo couldn't check this folder, so Claude asks before every change.",
@@ -56,7 +56,7 @@ const SAYS: Readonly<
 };
 
 const IT_TEXT: FolderKey =
-  'Please give my account "Change permissions" on this folder: {path}. Clauseo, the app I use for this matter, adds one entry to the folder\'s permissions so Claude and Codex, which it runs, can write only inside it.';
+  'Please give my account "Change permissions" on this folder: {path}. Clauseo, the app I use for this matter, adds one entry to the folder\'s permissions so Claude and ChatGPT, which it runs, can write only inside it.';
 
 /** An explanation behind an info icon, named with its words, which also show under the pointer and on focus (as the
  * card's, folder-reason.tsx, kept apart so the two chunks share nothing). Below the icon: above, it would cover the

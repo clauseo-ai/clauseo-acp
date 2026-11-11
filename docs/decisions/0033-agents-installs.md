@@ -67,7 +67,8 @@ Node is 24.22.0, with each archive's file name, size, unpacked size and SHA-256 
 darwin-x64, win-x64, win-arm64, linux-x64 and linux-arm64. These are copied from `SHASUMS256.txt`
 after its signature checked out with the Node release keys (signed by Richard Lau,
 `C82F A3AE 1CBE DC6B E46B 9360 C43C EC45 C17A B93C`). There is no live ACP registry fetch. The
-snapshot refuses an agent id named `runtime`, `downloads`, `npm-cache` or `signin`.
+snapshot refuses an agent id named `runtime`, `downloads`, `npm-cache`, `signin`, `node` or
+`python` (the last two would name the shared lock files).
 
 **The layout** under `Locations::data_dir`:
 - `agents/runtime/node-v24.22.0-<os>-<arch>/`: a downloaded Node.
@@ -75,8 +76,12 @@ snapshot refuses an agent id named `runtime`, `downloads`, `npm-cache` or `signi
   `clauseo-receipt.json`. `<hash>` is the first 16 hex digits of the SHA-256 over the agent id,
   its derived lock's bytes and the platform, each prefixed by its length. `limits` writes
   `clauseo-claude-usage.mjs` here too, and nothing here touches it.
-- `agents/downloads/` (`<sha512 hex>.tgz`, `.part` while partial), `agents/npm-cache/`,
-  `agents/npmrc` and `agents/npmrc-global` (empty), and `agents/.lock`.
+- `agents/downloads/` (Node's and Python's archives; each agent's packages in
+  `agents/downloads/<id>/<sha512 hex>.tgz`, `.part` while partial), each agent's
+  `agents/npm-cache/<id>/`, `agents/npmrc-<id>` and `agents/npmrc-global-<id>` (empty), and
+  the lock files `agents/.lock`, `agents/.lock-<id>`, `agents/.lock-node` and
+  `agents/.lock-python` (see "Two installs at once"). All stay under the data fence's names
+  `agents/downloads/**`, `agents/npm-cache/**` and `agents/npmrc*`.
   `agents/<id>/home/` and `agents/signin/` are S18's.
 - No links: npm runs with `--no-bin-links`, archives are extracted without their links, and
   each adapter runs as `node <script>`. After `npm ci`, the temp folder is walked, and a link or
@@ -134,7 +139,7 @@ try (npm would skip a missing optional one and still succeed), as a failure no r
 On Windows a data folder on a share (`\\server\share\…`) is refused before any download, with
 no retry: npm reads its tarballs' `file:` URLs from the wrong path (see firm IT mode). The run
 gets `--cache
-<npm-cache> --userconfig <agents/npmrc> --globalconfig <agents/npmrc-global>
+<agents/npm-cache/<id>> --userconfig <agents/npmrc-<id>> --globalconfig <agents/npmrc-global-<id>>
 --update-notifier=false --logs-max=0`, both files empty (npm refuses one file for both), so no
 npmrc of the user's or the machine's applies. `ci` adds `--offline --ignore-scripts
 --no-bin-links --no-audit --no-fund --allow-file=all`, so it makes no network call;
@@ -153,7 +158,7 @@ a pause and a 10-minute timeout. Only npm's `npm error code X` line reaches the 
 `ENOSPC` code is `DiskFull`. The temp folder is renamed to `<hash>`, and the receipt is written
 last. npm runs as `node npm-cli.js`, never `npm.cmd`, which `LaunchSpec::new` refuses. Every child
 starts through the `process::Launcher` the crate is given. Just before `Ready` is sent, the
-install's tarballs, the Node archive and the npm cache are removed.
+install's tarballs, its npm cache and (only with `.lock-node` free) the Node archive are removed.
 
 **The receipt** (`clauseo-receipt.json`) records schema 1, the agent id, the adapter version,
 the lock hash, the Node path and version, the platform, and `installed_at` in Unix seconds. A
@@ -201,14 +206,58 @@ details. No npm output goes in raw. User names and passwords are stripped from e
 data folder shows as `<data>`, and any other absolute path as `<path>`.
 
 **The disk need** is twice the download (downloads plus the npm cache) plus the unpacked size,
-plus Node's archive and unpacked size when Node is downloaded, plus 10 %.
+plus Node's archive and unpacked size when Node is downloaded, plus Python's archive and unpacked
+size when Python is missing, plus 10 %. Another install in flight in this process counts too: a
+try's check adds every other running try's remaining need: what that try's check counted, less
+the bytes of its own files on the disk now (its package downloads, its npm cache, its install
+trees, and Node's archive and runtime when it fetches them), in whatever phase it is (download,
+Node's unpack, `npm ci`), so a byte already written, which the free space read now has lost, is
+never counted again in the other's need. Its agent part drops to 0 at its `Ready`; its Python
+part is less the bytes of Python downloaded. Python counts only once, in whichever try counted it
+first. The check and the recording of the try's own need
+happen under one lock, so two tries starting together never both count on the same free bytes.
+When the space is short for both, the later try fails `DiskFull` (`agent.install_disk_full`,
+its need the bytes for both) and the one in flight goes on. Another process's install is not
+counted.
 
-**One download at a time.** `install` for one agent pauses any other agent's running install
-where it is (`Paused`, which keeps its partial files). It resumes on its own `install`. A second
-`install` of an agent already installing starts nothing. Jobs run one after another: a new job
-starts its work only after a paused one has stopped. There is one worker thread plus a thread per
-install, and a job lock makes the jobs run one after another. Every job event is sent under the
-lock `pause` takes, and dropped once the job is paused or superseded.
+**Two installs at once** (Rohan's decision, 2026-11-11; it replaces "One download at a time").
+Each agent has its own job slot. `install` for one agent never stops, pauses or delays another
+agent's install, and `pause` stops only its own agent's. A second `install` of an agent already
+installing starts nothing, and a retry of an agent's own job supersedes it quietly, as before.
+There is one worker thread plus a thread per job, and each agent has a turn lock: a new job of an
+agent starts its work only after that agent's superseded job has stopped. Every job event is sent
+under the lock `pause` takes, and dropped once the job is paused or superseded. Each agent's
+progress is its own stream of `Install` events, published as it comes, so both rows move
+together. What the two installs share is kept safe so:
+- **Node's runtime** is fetched and unpacked once. A try that finds `agents/.lock-node` free takes
+  it exclusive, checks the runtime under it, and when it is not usable keeps the lock through
+  Node's fetch and unpack alone: Node's archive is the try's first file, unpacked as soon as it is
+  checked (the state still `Downloading`; a failed unpack is a set-up failure), and the lock is
+  given up before the agent's own packages. A try that finds the lock held (another try fetching
+  Node, or an npm running from it, or an antivirus scanning the file on Windows) fetches no Node
+  and counts none in its need: it downloads its own packages, then waits for `.lock-node` shared
+  before `Installing`, so its row shows its finished download meanwhile. The wait polls every
+  150 ms, raced against its pause, for as long as a job of this process is fetching Node (a slow
+  line may take long), and at most 15 minutes while another process holds the lock. Every npm run from the runtime holds `.lock-node` shared, so nothing replaces or
+  removes the runtime under it: removing a runtime npm could not start from takes the lock
+  exclusive, and is skipped while another holds it. A runtime the other try failed to fetch is
+  this try's error, and its next try fetches Node itself. Node's archive is removed only with
+  the lock free. A kept set-up's rename waits for the runtime too, since its receipt names it.
+- **A job whose thread panics** (a dev or test build; a release build aborts) frees its slot in a
+  drop guard: an install ends `Failed` ("the install stopped unexpectedly"), a sign-in `Failed`,
+  so neither the agent nor the other agent's waiting press is held.
+- **npm**: a cache per agent (`agents/npm-cache/<id>`) and npmrc files per agent, rather than one
+  cache and a lock around its writes. It is the simpler correct choice: every try empties its
+  cache at its start, and every `Ready` empties it again, so one shared cache would need every
+  emptying to wait for the other install's `npm ci`; per agent, nothing waits, and no npm writes
+  a file another npm reads. The cost is a second copy of a package both agents use, removed at
+  `Ready`. Packages are downloaded per agent too (`agents/downloads/<id>/`): both locks may
+  share a tarball, and one shared file would race on its `.part` and be removed by the first
+  `Ready` while the other's `npm ci` still reads it.
+- **Python** is installed by one job at a time: the first job past its agent's `Ready` that
+  claims it, holding `agents/.lock-python`. A job reaching `Ready` while another installs Python
+  ends there; a retry of Python while another agent is still installing starts nothing.
+- **Between processes**, the lock files below.
 
 **Quitting** (#386). `npm ci` leads its own process group, and a pause, a cancel or the drop of
 its handle kills that group; so does the end of the job's thread once it sees a cancel. Every job
@@ -226,11 +275,20 @@ app dies without either:
   running until it finishes or fails by itself; its temp folder goes at the next start's
   clean-up. Accepted as a residual risk.
 
-Between processes, each job holds an exclusive lock on `agents/.lock` (`File::try_lock`) from
-its start until just before its last event. A lock another process holds means another Clauseo
-is installing: the job fails at once with a log line saying so, and a retry works once that one
-is done (the simpler choice; the single-instance plugin makes it rare). The start-up clean-up of
-stale install folders runs only with the lock held, and is skipped without it. The data folder
+Between processes, each job holds `agents/.lock` shared and its agent's `agents/.lock-<id>`
+exclusive (`File::try_lock_shared`, `File::try_lock`) from its start until just before its last
+event; `.lock-node` and `.lock-python` as above. Each is a file lock on its own open of the file
+(`flock` on Unix, `LockFileEx` on Windows), so it excludes a second job of this process as it
+excludes another process, and the OS gives it up when the file closes (a crash included). Lock
+files are never removed. An older Clauseo, which takes `agents/.lock` exclusive, and this one
+never install beside each other. A lock another process holds means another Clauseo is installing
+(any agent for `.lock`, that agent for `.lock-<id>`): the job fails at once with a log line
+saying so, and a retry works once that one is done (the simpler choice; the single-instance
+plugin makes it rare). Only `.lock-node` is ever waited for, and its holder waits on nothing, so
+no two jobs wait on each other. The start-up clean-up runs each part only with its lock: an
+agent's stale install folders and npm cache under its `.lock-<id>`, stale Python runtimes under
+`.lock-python`, and what an older Clauseo left in the shared npm cache and `agents/downloads/`
+under `.lock`; a part whose lock is held is skipped. The data folder
 and the bundle must be absolute paths; a relative one fails the install with a line naming the
 setting, and start-up neither cleans nor reads anything under a relative data folder.
 
@@ -245,13 +303,27 @@ fetches nothing. Desktop starts an install from three presses only, and nothing 
    It starts or joins the install and is kept as a pending press (the agent, the method and
    Claude's console flag), shown `Queued`; the command answers `Done`. At the install's
    `Ready` it runs through the same gate and checks as a direct press, checked then, so a key,
-   an endpoint or a policy set meanwhile refuses it as usual. `Waiting` keeps it; `Failed`,
-   `Paused` or `Managed` drops it (a fresh press is needed), as does `CancelSignIn`, which
-   leaves the install running, and a key or an endpoint taking over. A second press replaces
+   an endpoint or a policy set meanwhile refuses it as usual. `Waiting` and `Failed` keep it
+   (a retry's `Ready` runs it); its own install's `Paused` or `Managed` drops it (a fresh press
+   is needed), as does `CancelSignIn`, which leaves the install running, and a key or an
+   endpoint taking over. Nothing the other agent's install does drops or delays it: it waits
+   for its own install alone. A second press replaces
    the first. It is memory only: nothing of it outlives a quit. S18's own queue (a sign-in
    waits `Queued` until the install is `Ready`) still serves the sign-in host's wait; desktop
    hands S18 no sign-in for an agent not installed, since S18 would keep it through a failure
    and run it with no new check.
+
+   **One sign-in at a time** (2026-11-11). Installs run side by side; sign-ins do not, since two
+   browser sign-ins at once is a separate decision. A sign-in press while another agent's
+   sign-in is going (S18's `sign_in_going`: a sign-in job running or queued) is kept the same
+   way, shown `Queued`, and starts no install of an agent already installed. When that sign-in
+   ends (signed in, cancelled, failed, a login found, or ended unchanged), desktop's pump starts
+   the first kept press whose install is `Ready` or `Managed`, through the same checks, with no
+   new press. Status checks, sign-outs and searches never wait. A press kept at its install's
+   `Ready` owes the agent the status check that `Ready` skipped: when the press is cancelled or
+   refused instead of starting, the check runs then, so a login already there shows at once.
+   A sign-in abandoned in the browser holds the queue until it times out (10 to 20 minutes) or
+   is cancelled; accepted for launch.
 
 A policy that pre-selects or requires agents, a policy reload, a settings change, a managed
 agent and an update start no install either: the agent waits for first use. A firm's bundle or
@@ -272,7 +344,9 @@ mirror install works as before, from the same first use.
    its fetcher then reads that as `C:\server\share\a.tgz` (checked by running npm's own
    npm-package-arg and arborist code as win32). So each such tarball is copied into
    `agents/downloads/` as it is hashed, as Node's archive is, and npm reads the copy. Making a
-   bundle is S25's.
+   bundle is S25's. Once Clauseo's Python runtime ships (stage D), a bundle also holds
+   `python/<Python's archive name>`, copied and hashed into `agents/downloads/` exactly as
+   Node's archive is; a missing file fails Python's install alone, never the agent's.
 3. A firm npm mirror (`install.registry`, R20's setting): `mirror_url` replaces each `resolved`
    URL's snapshot registry base (`https://registry.npmjs.org/` in the build) with the mirror's
    base. A URL off that base is refused. The integrity check is unchanged.
@@ -377,6 +451,12 @@ mirror install works as before, from the same first use.
   once every agent had its first state with none installed or managed) is gone, and so is
   `InstallAgent`'s native confirm; a sign-in pressed before the install starts it and waits
   for its `Ready` (see "When an install starts").
+
+- 2026-11-11: two installs at once (Rohan's decision). Starting the second agent's install no
+  longer pauses the first, and no longer drops the first plan's queued sign-in. See "Two installs
+  at once" for the per-agent slots and locks, the shared Node runtime, the npm caches per agent
+  and the disk check counting both, and "When an install starts" for the one-sign-in-at-a-time
+  rule. No protocol change.
 
 ## Status
 

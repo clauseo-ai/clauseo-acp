@@ -26,8 +26,8 @@
 ; %TEMP%), page or section of the template's. It refuses too while Clauseo's main window is there
 ; (exit 97, the same outcome).
 ;
-; The outer instance then says set up (a details line), or shows one box: declined, another
-; account, or failed. The install has succeeded either way, with tier C. /S and /P can't ask: a
+; The outer instance then says set up (a details line), or shows one box: declined, blocked
+; (this computer's settings refused the elevation), another account, or failed. The install has succeeded either way, with tier C. /S and /P can't ask: a
 ; details line, and exit code 22 for /S. /UPDATE (Tauri's updater) skips it without a word; S15
 ; PR 3's task refreshes the copy. Running the installer again by hand runs it again (--adopt is
 ; idempotent; `File` overwrites the copy, whose locked DACL gives Administrators and SYSTEM full
@@ -347,7 +347,8 @@ Var ClauseoAdminTimedOut
 
 ; The per-user installer asks for the admin section (header), at the end of a successful install.
 ; $R6 is the outcome: 0 set up (a details line), 1 failed, 2 another Windows account has it, 4
-; the prompt declined (each a box and a details line), 5 a newer copy kept (a details line), 6
+; the prompt declined, 9 the elevation refused by this computer's settings (each a box and a
+; details line), 5 a newer copy kept (a details line), 6
 ; Clauseo running (a box, a details line and exit code 24, interactive only), 7 still running
 ; after 10 minutes (a details line; the finish page hides "Run Clauseo"), 8 the elevated instance
 ; wrote the copy and Windows security removed it (CLAUSEO_ADMIN_REMOVED: setupExeRemoved, a box,
@@ -387,14 +388,17 @@ Var ClauseoAdminTimedOut
       StrCpy $R2 ""
     ${EndIf}
     ${If} $R2 != ""
-      MessageBox MB_OK|MB_ICONINFORMATION "$(adminCopyAsk)"
+      MessageBox MB_OK|MB_ICONINFORMATION|MB_SETFOREGROUND|MB_TOPMOST "$(adminCopyAsk)"
       ; ShellExecuteExW "runas" on this installer, as the uninstall hook starts --remove:
       ; SEE_MASK_NOCLOSEPROCESS (0x40) for the exit code, SEE_MASK_FLAG_NO_UI (0x400) for no
       ; error box of Windows' own (the consent prompt still shows), SEE_MASK_NOZONECHECKS
       ; (0x800000) so a downloaded installer the person already ran is not warned about again.
       ; /D= goes last (NSIS reads the rest of the line as the folder). A declined prompt fails the
-      ; call with 1223 (?e); any other failure (1260, a blocked program) is a failure. The
-      ; working folder is $SYSDIR, nothing the lawyer writes.
+      ; call with 1223 (?e), a person's No: outcome 4. Elevation this computer's settings refuse,
+      ; 1260 (ERROR_ACCESS_DISABLED_BY_POLICY) or 5 (ERROR_ACCESS_DENIED, under some UAC
+      ; settings), is outcome 9 (adminCopyBlocked). Any other failure is a failure. Every failure
+      ; but 1223 also puts its code in a details line. The working folder is $SYSDIR, nothing the
+      ; lawyer writes.
       !if ${NSIS_PTR_SIZE} > 4
         !error "hooks.nsh lays out SHELLEXECUTEINFOW for a 32-bit installer; lay it out again"
       !endif
@@ -422,6 +426,16 @@ Var ClauseoAdminTimedOut
         ${EndIf}
       ${ElseIf} $R9 = 1223
         StrCpy $R6 4
+      ${Else}
+        ; Any other failure names its code in the details list, so a support screenshot shows it.
+        ; 1260 is what the VM measured for a policy-refused elevation (a standard user with
+        ; ConsentPromptBehaviorUser 0: ShellExecuteExW failed, last error 1260); 5 comes under
+        ; other UAC settings. Both are outcome 9; anything else stays outcome 1.
+        DetailPrint "Windows refused the elevation (error $R9)"
+        ${If} $R9 = 1260
+        ${OrIf} $R9 = 5
+          StrCpy $R6 9
+        ${EndIf}
       ${EndIf}
       System::Free $R5
     ${EndIf}
@@ -440,6 +454,7 @@ Var ClauseoAdminTimedOut
     ${AndIf} $R6 <> 6
     ${AndIf} $R6 <> 7
     ${AndIf} $R6 <> 8
+    ${AndIf} $R6 <> 9
       ; --adopt's own code from the instance's 100 + code; -1 when --adopt never ran (99, or
       ; NSIS's own 1 or 2). Every code is named: done, another account, and the rest failed.
       StrCpy $R9 -1
@@ -466,25 +481,29 @@ Var ClauseoAdminTimedOut
       DetailPrint "$(adminCopyDone)"
     ${ElseIf} $R6 = 1
       DetailPrint "$(adminCopyFailed)"
-      MessageBox MB_OK|MB_ICONEXCLAMATION "$(adminCopyFailed)"
+      MessageBox MB_OK|MB_ICONEXCLAMATION|MB_SETFOREGROUND|MB_TOPMOST "$(adminCopyFailed)"
     ${ElseIf} $R6 = 2
       DetailPrint "$(adminCopyOtherAccount)"
-      MessageBox MB_OK|MB_ICONEXCLAMATION "$(adminCopyOtherAccount)"
+      MessageBox MB_OK|MB_ICONEXCLAMATION|MB_SETFOREGROUND|MB_TOPMOST "$(adminCopyOtherAccount)"
     ${ElseIf} $R6 = 4
       DetailPrint "$(adminCopyDeclined)"
-      MessageBox MB_OK|MB_ICONEXCLAMATION "$(adminCopyDeclined)"
+      MessageBox MB_OK|MB_ICONEXCLAMATION|MB_SETFOREGROUND|MB_TOPMOST "$(adminCopyDeclined)"
     ${ElseIf} $R6 = 5
       DetailPrint "$(adminCopyNewerKept)"
     ${ElseIf} $R6 = 6
       DetailPrint "$(adminCopyAppRunning)"
-      MessageBox MB_OK|MB_ICONEXCLAMATION "$(adminCopyAppRunning)"
+      MessageBox MB_OK|MB_ICONEXCLAMATION|MB_SETFOREGROUND|MB_TOPMOST "$(adminCopyAppRunning)"
       SetErrorLevel ${CLAUSEO_EXIT_APP_RUNNING}
     ${ElseIf} $R6 = 7
       DetailPrint "$(adminCopyStillRunning)"
     ${ElseIf} $R6 = 8
       DetailPrint "$(setupExeRemoved)"
-      MessageBox MB_OK|MB_ICONEXCLAMATION "$(setupExeRemoved)"
+      MessageBox MB_OK|MB_ICONEXCLAMATION|MB_SETFOREGROUND|MB_TOPMOST "$(setupExeRemoved)"
       SetErrorLevel ${CLAUSEO_EXIT_SETUP_EXE_REMOVED}
+    ${ElseIf} $R6 = 9
+      ; Only reached interactively: /S and /P skip the prompt above (adminCopySkippedSilent, 22).
+      DetailPrint "$(adminCopyBlocked)"
+      MessageBox MB_OK|MB_ICONEXCLAMATION|MB_SETFOREGROUND|MB_TOPMOST "$(adminCopyBlocked)"
     ${EndIf}
   ${EndIf}
   Pop $R9
@@ -521,7 +540,7 @@ Var ClauseoAdminTimedOut
     ${IfNot} ${Silent}
     ${AndIf} $PassiveMode <> 1
     ${AndIf} $UpdateMode <> 1
-      MessageBox MB_OK|MB_ICONEXCLAMATION "$(adminCopyAppRunning)"
+      MessageBox MB_OK|MB_ICONEXCLAMATION|MB_SETFOREGROUND|MB_TOPMOST "$(adminCopyAppRunning)"
     ${EndIf}
   ${Else}
     !insertmacro CLAUSEO_RECORD_CHECK ""
@@ -573,7 +592,7 @@ Var ClauseoAdminTimedOut
     ${IfNot} ${Silent}
     ${AndIf} $PassiveMode <> 1
     ${AndIf} $UpdateMode <> 1
-      MessageBox MB_OK|MB_ICONEXCLAMATION "$(setupExeRemoved)"
+      MessageBox MB_OK|MB_ICONEXCLAMATION|MB_SETFOREGROUND|MB_TOPMOST "$(setupExeRemoved)"
     ${EndIf}
   ${Else}
     DetailPrint "$(adminCopyMachineFailed)"
@@ -581,7 +600,7 @@ Var ClauseoAdminTimedOut
       SetErrorLevel ${CLAUSEO_EXIT_ADMIN_COPY_FAILED}
     ${ElseIf} $PassiveMode <> 1
     ${AndIf} $UpdateMode <> 1
-      MessageBox MB_OK|MB_ICONEXCLAMATION "$(adminCopyMachineFailed)"
+      MessageBox MB_OK|MB_ICONEXCLAMATION|MB_SETFOREGROUND|MB_TOPMOST "$(adminCopyMachineFailed)"
     ${EndIf}
   ${EndIf}
 !macroend

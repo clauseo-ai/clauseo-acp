@@ -183,6 +183,21 @@ impl Limits {
         )
     }
 
+    /// A plan set up after [`Limits::new`]: `agent` joins, loading, after the agents it has,
+    /// with its read to start and the view to publish again. An agent it already has changes
+    /// nothing and returns no action.
+    pub fn add_agent(&mut self, agent: AgentKind, now: Timestamp) -> Vec<Action> {
+        if self.state(agent).is_some() {
+            return Vec::new();
+        }
+        let mut state = AgentState::loading(agent);
+        let mut actions = Vec::new();
+        request_read(&mut state, now, &mut actions);
+        self.agents.push(state);
+        actions.push(Action::ViewChanged);
+        actions
+    }
+
     /// Takes one input at `now`.
     pub fn input(&mut self, input: Input, now: Timestamp) -> Vec<Action> {
         let mut actions = Vec::new();

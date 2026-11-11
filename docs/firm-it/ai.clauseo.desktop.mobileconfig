@@ -99,6 +99,8 @@
       </dict>
       <key>update.mode</key>
       <string>none</string>
+      <key>browser.allow_when_remote_debugging_disabled</key>
+      <false/>
     </dict>
   </array>
   <key>PayloadType</key>

@@ -4,18 +4,25 @@
 //! account exists; "Allow log on locally" is tested by the logon itself (step 6), where
 //! `ERROR_LOGON_TYPE_NOT_GRANTED` (1385) gets its named cause (D-B4). Also this machine's
 //! account domain, which the process stop and the profile delete check pool SIDs against.
+//!
+//! The LSA user-right calls live here too (S15 W1): who holds a right
+//! (`LsaEnumerateAccountsWithUserRight`), and a right granted to an account
+//! (`LsaAddAccountRights`) or taken off it (`LsaRemoveAccountRights`), with which set-up denies
+//! the pool group "log on through Remote Desktop Services" and `--remove` lifts it. Each needs
+//! an administrator.
 #![expect(unsafe_code, reason = "FFI to the service manager and the LSA policy")]
 
 use std::ffi::c_void;
 
 use windows::Win32::Foundation::{
     ERROR_INSUFFICIENT_BUFFER, ERROR_NONE_MAPPED, ERROR_SERVICE_DOES_NOT_EXIST, HLOCAL, LocalFree,
-    NTSTATUS, STATUS_NO_MORE_ENTRIES,
+    NTSTATUS, STATUS_NO_MORE_ENTRIES, STATUS_OBJECT_NAME_NOT_FOUND,
 };
 use windows::Win32::Security::Authentication::Identity::{
-    LSA_ENUMERATION_INFORMATION, LSA_HANDLE, LSA_OBJECT_ATTRIBUTES, LSA_UNICODE_STRING, LsaClose,
-    LsaEnumerateAccountsWithUserRight, LsaFreeMemory, LsaNtStatusToWinError, LsaOpenPolicy,
-    LsaQueryInformationPolicy, POLICY_ACCOUNT_DOMAIN_INFO, POLICY_LOOKUP_NAMES,
+    LSA_ENUMERATION_INFORMATION, LSA_HANDLE, LSA_OBJECT_ATTRIBUTES, LSA_UNICODE_STRING,
+    LsaAddAccountRights, LsaClose, LsaEnumerateAccountsWithUserRight, LsaFreeMemory,
+    LsaNtStatusToWinError, LsaOpenPolicy, LsaQueryInformationPolicy, LsaRemoveAccountRights,
+    POLICY_ACCOUNT_DOMAIN_INFO, POLICY_CREATE_ACCOUNT, POLICY_LOOKUP_NAMES,
     POLICY_VIEW_LOCAL_INFORMATION, PolicyAccountDomainInformation,
 };
 use windows::Win32::Security::Authorization::{ConvertSidToStringSidW, ConvertStringSidToSidW};
@@ -28,6 +35,7 @@ use windows::Win32::System::Services::{
 };
 use windows::core::{PCWSTR, PWSTR, w};
 
+use super::accounts::LocalSid as ParsedSid;
 use super::answers::{DENY_INTERACTIVE_RIGHT, logon_right_of, service_start};
 use super::ffi::{os, wide};
 use super::machine::{LogonRight, MachineError, ServiceStart};
@@ -85,18 +93,19 @@ pub fn seclogon() -> Result<ServiceStart, MachineError> {
 /// pool group's SID when the group exists. Needs an administrator: the right's holders are
 /// not readable by a standard user.
 pub fn logon_right() -> Result<LogonRight, MachineError> {
-    let access = POLICY_LOOKUP_NAMES | POLICY_VIEW_LOCAL_INFORMATION;
-    let policy = open_policy(access)?;
-    let mut right: Vec<u16> = DENY_INTERACTIVE_RIGHT.encode_utf16().collect();
-    let length = u16::try_from(size_of_val(right.as_slice())).unwrap_or(0);
-    let name = LSA_UNICODE_STRING {
-        Length: length,
-        MaximumLength: length,
-        Buffer: PWSTR(right.as_mut_ptr()),
-    };
+    let denied = holders(DENY_INTERACTIVE_RIGHT)?;
+    Ok(logon_right_of(&denied, group_sid()?.as_ref()))
+}
+
+/// The accounts holding `right` (a name such as `SeDenyInteractiveLogonRight`), each SID in
+/// [`Sid`]'s form; one whose text isn't canonical is left out. None holding it is empty.
+pub(super) fn holders(right: &str) -> Result<Vec<Sid>, MachineError> {
+    let policy = open_policy(POLICY_LOOKUP_NAMES | POLICY_VIEW_LOCAL_INFORMATION)?;
+    let mut text: Vec<u16> = right.encode_utf16().collect();
+    let name = lsa_string(&mut text);
     let mut buffer: *mut c_void = std::ptr::null_mut();
     let mut count = 0u32;
-    // SAFETY: `policy` is open; `name` points into `right`, which outlives the call; `buffer`
+    // SAFETY: `policy` is open; `name` points into `text`, which outlives the call; `buffer`
     // and `count` are live out-pointers, and the buffer is freed by `LsaBuffer`.
     let status = unsafe {
         LsaEnumerateAccountsWithUserRight(
@@ -107,7 +116,7 @@ pub fn logon_right() -> Result<LogonRight, MachineError> {
         )
     };
     if status == STATUS_NO_MORE_ENTRIES {
-        return Ok(LogonRight::Allowed);
+        return Ok(Vec::new());
     }
     lsa_check("LsaEnumerateAccountsWithUserRight", status)?;
     let buffer = LsaBuffer(buffer);
@@ -123,16 +132,55 @@ pub fn logon_right() -> Result<LogonRight, MachineError> {
             )
         }
     };
-    let mut denied = Vec::with_capacity(entries.len());
+    let mut holders = Vec::with_capacity(entries.len());
     for entry in entries {
         // SAFETY: `entry.Sid` is a valid SID inside the live buffer.
         if let Some(sid) = unsafe { sid_text(entry.Sid) }? {
-            denied.push(sid);
+            holders.push(sid);
         }
     }
     drop(buffer);
     drop(policy);
-    Ok(logon_right_of(&denied, group_sid()?.as_ref()))
+    Ok(holders)
+}
+
+/// Grants `account` the user right `right`. A right it holds already is `Ok`.
+pub(super) fn add_right(account: &Sid, right: &str) -> Result<(), MachineError> {
+    let policy = open_policy(POLICY_CREATE_ACCOUNT | POLICY_LOOKUP_NAMES)?;
+    let sid = ParsedSid::parse(account)?;
+    let mut text: Vec<u16> = right.encode_utf16().collect();
+    let name = lsa_string(&mut text);
+    // SAFETY: `policy` is open; `sid` is a valid SID and `name` points into `text`, both live
+    // for the call.
+    let status = unsafe { LsaAddAccountRights(policy.0, sid.0, &[name]) };
+    lsa_check("LsaAddAccountRights", status)
+}
+
+/// Takes the user right `right` off `account`, and no other right. An account that holds no
+/// right at all (`STATUS_OBJECT_NAME_NOT_FOUND`) is `Ok`, as is one that holds others only.
+pub(super) fn remove_right(account: &Sid, right: &str) -> Result<(), MachineError> {
+    let policy = open_policy(POLICY_LOOKUP_NAMES)?;
+    let sid = ParsedSid::parse(account)?;
+    let mut text: Vec<u16> = right.encode_utf16().collect();
+    let name = lsa_string(&mut text);
+    // SAFETY: `policy` is open; `sid` is a valid SID and `name` points into `text`, both live
+    // for the call. `AllRights` is false, so only the right named goes.
+    let status = unsafe { LsaRemoveAccountRights(policy.0, sid.0, false, Some(&[name])) };
+    if status == STATUS_OBJECT_NAME_NOT_FOUND {
+        return Ok(());
+    }
+    lsa_check("LsaRemoveAccountRights", status)
+}
+
+/// `text` (UTF-16, no NUL) as the LSA's counted string, pointing into it: `text` must outlive
+/// every use of the result.
+fn lsa_string(text: &mut [u16]) -> LSA_UNICODE_STRING {
+    let length = u16::try_from(size_of_val(text)).unwrap_or(0);
+    LSA_UNICODE_STRING {
+        Length: length,
+        MaximumLength: length,
+        Buffer: PWSTR(text.as_mut_ptr()),
+    }
 }
 
 /// This machine's account domain: the three parts after `S-1-5-21` that every local account's
@@ -339,7 +387,8 @@ impl Drop for LsaBuffer {
         if self.0.is_null() {
             return;
         }
-        // SAFETY: the buffer came from LsaEnumerateAccountsWithUserRight and is freed once.
+        // SAFETY: the buffer came from an LSA call that allocates its output, and is freed
+        // once.
         let status = unsafe { LsaFreeMemory(Some(self.0.cast_const())) };
         if status.0 < 0 {
             tracing::debug!(status = status.0, "LsaFreeMemory failed");

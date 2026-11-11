@@ -4,17 +4,23 @@ import type { Hindi } from "./words-core.ts";
 
 export const HI = {
   "A new matter": "नया मामला",
-  "Name, as it stands on the cause list": "नाम, जैसा वाद सूची में दर्ज है",
-  "Client, if any": "मुवक्किल, यदि कोई हो",
-  "Next date, if fixed": "अगली तारीख, यदि तय हो",
-  "30 October 2026": "30 अक्टूबर 2026",
-  "Folder:": "फ़ोल्डर:",
-  Change: "बदलें",
-  // what Change changes, for a screen reader, where no folder line says it
-  "The matter's folder": "मामले का फ़ोल्डर",
-  "Clauseo makes this folder. Add papers to it any time.":
-    "Clauseo यह फ़ोल्डर बनाता है। इसमें कभी भी दस्तावेज़ जोड़ें।",
-  "Create the matter": "मामला बनाएँ",
+  "Matter name": "मामले का नाम",
+  "Client (optional)": "मुवक्किल (वैकल्पिक)",
+  Folder: "फ़ोल्डर",
+  // the folder row before a folder is chosen
+  "No folder chosen": "कोई फ़ोल्डर नहीं चुना गया",
+  // opens the computer's own folder picker at once
+  "Choose folder…": "फ़ोल्डर चुनें…",
+  // {folder}: where Clauseo keeps new matters, "~/Documents/Clauseo"
+  "Use a new folder in {folder}": "{folder} में नया फ़ोल्डर इस्तेमाल करें",
+  // under the folder row, once the new folder is chosen
+  "Clauseo creates this folder. Add papers to it any time.":
+    "Clauseo यह फ़ोल्डर बना देगा। इसमें कभी भी दस्तावेज़ जोड़ें।",
+  // under the name, when Create is tried without one
+  "Name the matter.": "मामले का नाम लिखें।",
+  // under the folder row, when Create is tried without a folder
+  "Choose a folder for the matter.": "मामले के लिए फ़ोल्डर चुनें।",
+  "Create matter": "मामला बनाएँ",
   Back: "वापस",
   Cancel: "रद्द करें",
 } as const;

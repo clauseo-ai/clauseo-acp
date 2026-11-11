@@ -33,6 +33,10 @@ use crate::test_support::Scratch;
 #[cfg(feature = "e2e")]
 use crate::test_support::block_on;
 
+mod admin_copy_gate;
+mod arm64;
+mod download_binding;
+mod file_binding;
 mod plugin;
 mod test_key;
 mod watchdog;
@@ -272,6 +276,17 @@ fn a_mac_app_the_user_cannot_move_out_of_its_folder_is_a_read_only_location() {
 #[test]
 fn linux_is_always_a_package() {
     assert_eq!(super::install_kind::detect(), InstallKind::Package);
+}
+
+/// Linux's updater (`with_updater` there) says a package manager updates it and offers nothing;
+/// a build elsewhere with no updater keeps the host's `NoUpdater`, which says it has none.
+#[test]
+fn linux_is_package_managed_and_a_build_with_no_updater_is_unavailable() {
+    use clauseo_host::{NoUpdater, Updater as _};
+    let linux = super::package::PackageManaged;
+    assert_eq!(linux.install_kind(), InstallKind::Package);
+    assert_eq!(futures::executor::block_on(linux.check()), Ok(None));
+    assert_eq!(NoUpdater.install_kind(), InstallKind::Unavailable);
 }
 
 /// The install's steps, recorded.

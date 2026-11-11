@@ -12,6 +12,7 @@ fn create_thread(matter: u64) -> HostCommand {
             .parse::<MatterId>()
             .unwrap(),
         agent: AgentId::new("claude-acp").unwrap(),
+        config: None,
     }
 }
 

@@ -214,6 +214,7 @@ fn no_command_with_a_secret_shows_it() {
 fn every_sign_in() -> Vec<SignIn> {
     let mut states = vec![
         SignIn::SignedOut { found: None },
+        SignIn::Checking,
         SignIn::Queued,
         SignIn::Waiting {
             since: at(1_700_000_000_000),
@@ -281,6 +282,11 @@ fn every_install() -> Vec<InstallProgress> {
     vec![
         InstallProgress::Missing {
             download_bytes: Count::from(61_000_000_u32),
+            installed_before: false,
+        },
+        InstallProgress::Missing {
+            download_bytes: Count::from(61_000_000_u32),
+            installed_before: true,
         },
         InstallProgress::Waiting {
             code: ErrorCode::AgentInstallOffline,
@@ -316,8 +322,15 @@ fn every_install() -> Vec<InstallProgress> {
 
 #[test]
 fn every_setup_event_round_trips() {
+    for python in crate::python::every_python() {
+        round_trips(&SetupEvent::SetupInfo {
+            keys_available: true,
+            python: Some(python),
+        });
+    }
     round_trips(&SetupEvent::SetupInfo {
         keys_available: false,
+        python: None,
     });
     for state in every_install() {
         round_trips(&SetupEvent::AgentInstallProgress {
@@ -339,6 +352,7 @@ fn setup_events_have_their_json_form() {
         (
             SetupEvent::SetupInfo {
                 keys_available: true,
+                python: None,
             },
             r#"{"setup_info":{"keys_available":true}}"#,
         ),
@@ -348,6 +362,13 @@ fn setup_events_have_their_json_form() {
                 state: SignIn::Queued,
             },
             r#"{"sign_in_changed":{"agent":"claude-acp","state":"queued"}}"#,
+        ),
+        (
+            SetupEvent::SignInChanged {
+                agent: claude(),
+                state: SignIn::Checking,
+            },
+            r#"{"sign_in_changed":{"agent":"claude-acp","state":"checking"}}"#,
         ),
         (
             SetupEvent::SignInChanged {
@@ -401,9 +422,20 @@ fn setup_events_have_their_json_form() {
                 agent: claude(),
                 state: InstallProgress::Missing {
                     download_bytes: Count::from(5_u32),
+                    installed_before: false,
                 },
             },
             r#"{"agent_install_progress":{"agent":"claude-acp","state":{"missing":{"download_bytes":5}}}}"#,
+        ),
+        (
+            SetupEvent::AgentInstallProgress {
+                agent: claude(),
+                state: InstallProgress::Missing {
+                    download_bytes: Count::from(5_u32),
+                    installed_before: true,
+                },
+            },
+            r#"{"agent_install_progress":{"agent":"claude-acp","state":{"missing":{"download_bytes":5,"installed_before":true}}}}"#,
         ),
     ];
     for (event, json) in cases {

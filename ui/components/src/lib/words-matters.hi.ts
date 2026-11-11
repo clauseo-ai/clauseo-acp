@@ -7,11 +7,9 @@ export const HI = {
   "Find a matter": "मामला खोजें",
   // RO-20: Find's placeholder and name once it searches inside (U16a)
   Find: "खोजें",
-  "Find a matter by its name, client or case number": "नाम, मुवक्किल या केस नंबर से मामला खोजें",
   Recent: "हाल के",
   "Matching matters": "मेल खाते मामले",
   "No matter matches '{q}'.": "कोई मामला '{q}' से मेल नहीं खाता।",
-  "Search covers names, clients and case numbers.": "खोज में नाम, मुवक्किल और केस नंबर शामिल हैं।",
   // where the host gives no client (today's), find searches names only; with clients, names and clients
   "Find a matter by its name": "नाम से मामला खोजें",
   "Find a matter by its name or client": "नाम या मुवक्किल से मामला खोजें",
@@ -22,7 +20,7 @@ export const HI = {
   "Client, {client}": "मुवक्किल, {client}",
   "Folder moved": "फ़ोल्डर कहीं और ले जाया गया",
   "A matter waits for you": "एक मामला आपकी प्रतीक्षा में है",
-  /* ---------- a new matter: a folder the host refused, a create that failed, a next date that doesn't read ---------- */
+  /* ---------- a new matter: a folder the host refused, a create that failed ---------- */
   // matter.folder_refused, which doesn't say why: true of a folder already a matter, an unreadable matter file, the
   // matters' own folder, a drive, the home folder and a system folder alike
   "Clauseo can't make a matter of this folder. Choose another folder.":
@@ -42,7 +40,6 @@ export const HI = {
     "हो सकता है वह लॉक हो, या ऐसी ड्राइव पर हो जो अब जुड़ी नहीं है।",
   "Clauseo couldn't create the matter. Try again, or choose another folder.":
     "Clauseo मामला नहीं बना सका। फिर से प्रयास करें, या दूसरा फ़ोल्डर चुनें।",
-  "Write the date as 30 October 2026.": "तारीख इस तरह लिखें: 30 अक्टूबर 2026।",
   // matter.folder_is_matter: the folder is already a matter, by any spelling or nested with one; the matter's name when
   // the list has it, and Open it beside the line
   "This folder is already a matter: {name}.": "यह फ़ोल्डर पहले से एक मामला है: {name}।",
@@ -103,6 +100,27 @@ export const HI = {
   // the same with one paper, which the design's line has no form for (U6's draft, QU.8)
   "A new conversation. It reads this matter's one paper.":
     "एक नई बातचीत। यह इस मामले का एक दस्तावेज़ पढ़ती है।",
+  // after it, the papers it can't read because they are only online (the wall's dimmed tiles), by the service that
+  // syncs the folder where it has a name; never with no paper to read. Hindi provisional (stage D, 2026-11-11)
+  "{n} more are only in {service}.": "{n} और दस्तावेज़ केवल {service} में हैं।",
+  "1 more is only in {service}.": "1 और दस्तावेज़ केवल {service} में है।",
+  "{n} more are only online.": "{n} और दस्तावेज़ केवल ऑनलाइन हैं।",
+  "1 more is only online.": "1 और दस्तावेज़ केवल ऑनलाइन है।",
+  // in its place with no paper to read, when the matter's papers are all only online (folders not opened aren't
+  // counted). Hindi provisional (stage D, 2026-11-11)
+  "A new conversation. This matter's {n} papers are only in {service}.":
+    "एक नई बातचीत। इस मामले के {n} दस्तावेज़ केवल {service} में हैं।",
+  "A new conversation. This matter's one paper is only in {service}.":
+    "एक नई बातचीत। इस मामले का एक दस्तावेज़ केवल {service} में है।",
+  "A new conversation. This matter's {n} papers are only online.":
+    "एक नई बातचीत। इस मामले के {n} दस्तावेज़ केवल ऑनलाइन हैं।",
+  "A new conversation. This matter's one paper is only online.":
+    "एक नई बातचीत। इस मामले का एक दस्तावेज़ केवल ऑनलाइन है।",
+  // with no paper and no file only online, only folders Clauseo couldn't open: one key each, the same Hindi
+  "A new conversation. Clauseo couldn't open this matter's folders.":
+    "एक नई बातचीत। Clauseo इस मामले के फ़ोल्डर नहीं खोल सका।",
+  "A new conversation. Clauseo couldn't open this matter's folder.":
+    "एक नई बातचीत। Clauseo इस मामले के फ़ोल्डर नहीं खोल सका।",
   // H13: Retry from here on one of the lawyer's questions, the line a retried conversation opens with, and its way
   // back to the first
   "Retry from here": "यहाँ से फिर पूछें",

@@ -29,6 +29,11 @@ export const ICON_NAMES = [
       "Wake now, on the Snoozed shelf: back up into the list (cut for Send, not used for it yet)",
   },
   {
+    component: "IconArrowDown",
+    source: "arrowUp",
+    meaning: "Latest, over the composer: down to the thread's end",
+  },
+  {
     component: "IconSend",
     source: "send",
     meaning: "Send, the paper plane, not used in the room yet",
@@ -216,6 +221,16 @@ export const ICON_NAMES = [
     meaning: "A Word document (.docx, .doc): the page with W on its tab",
   },
   {
+    component: "IconFileExcel",
+    source: "fileExcel",
+    meaning: "An Excel workbook or a CSV table (.xlsx, .xls, .csv): the page with X on its tab",
+  },
+  {
+    component: "IconFilePowerPoint",
+    source: "filePowerPoint",
+    meaning: "A PowerPoint deck (.pptx, .ppt): the page with P on its tab",
+  },
+  {
     component: "IconFilePdf",
     source: "filePdf",
     meaning: "A PDF: the page with PDF on its tab",
@@ -241,5 +256,11 @@ export const ICON_NAMES = [
     meaning: "Browser: Clauseo's own browser, on this computer",
   },
   { component: "IconDownload", source: "download", meaning: "Download Chrome" },
+  {
+    component: "IconCopy",
+    source: "copy",
+    meaning: "Copy: an answer's or a code block's words to the clipboard",
+  },
   { component: "IconInfo", source: "info", meaning: "More about it: an info tip" },
+  { component: "IconSettings", source: "settings", meaning: "Settings, at the rail's foot" },
 ] as const;

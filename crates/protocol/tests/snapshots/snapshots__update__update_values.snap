@@ -13,7 +13,8 @@ expression: values
     "policy",
     "per_machine",
     "read_only_location",
-    "package"
+    "package",
+    "unavailable"
   ],
   [
     "auto",

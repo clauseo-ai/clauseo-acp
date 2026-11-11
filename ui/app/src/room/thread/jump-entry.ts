@@ -9,9 +9,11 @@ import { useEffect, useLayoutEffect, useSyncExternalStore } from "react";
 import { useStreamPart } from "../../store/hooks.ts";
 import type { ViewStore } from "../../store/store.ts";
 import { entryIdOf, orderOf, streamOf, type StreamView } from "../../store/view.ts";
-import type { StreamId, ThreadId, ViewEntry } from "../../transport/protocol.ts";
+import type { SnippetPart, StreamId, ThreadId, ViewEntry } from "../../transport/protocol.ts";
+import { bandOf, hitIn, nudge, scrollThreadBy } from "./jump-hit.ts";
 
-type Jump = { stream: StreamId; order: number };
+/** The entry asked for, and the snippet the host found in it: the jump lands on its found words (jump-hit.ts). */
+type Jump = { stream: StreamId; order: number; parts?: readonly SnippetPart[] };
 
 let asked: Jump | null = null;
 const listeners = new Set<() => void>();
@@ -26,9 +28,10 @@ const subscribe = (listener: () => void) => {
   return () => void listeners.delete(listener);
 };
 
-/** Asks the thread `stream`, once it is open, to show its entry `order`. A later ask replaces it. */
-export function jumpTo(stream: StreamId, order: number): void {
-  put({ stream, order });
+/** Asks the thread `stream`, once it is open, to show its entry `order`, at the words found in it (`parts`, the
+ * result's snippet) where the row shows them. A later ask replaces it. */
+export function jumpTo(stream: StreamId, order: number, parts?: readonly SnippetPart[]): void {
+  put(parts === undefined ? { stream, order } : { stream, order, parts });
 }
 
 /** Lets the ask go, if there is one: a Find result found by its title opens its conversation where it rests. */
@@ -59,9 +62,18 @@ export function useJumpOrder(stream: StreamId | null): number | null {
 
 const pickIds = (v: StreamView | undefined) => v?.ids;
 
+/** Where a found row lands (D-071): centred when it fits with its clearance (its scroll-margin-top, the pinned
+ * question's band) above and below it, else its top just under the pinned question, so a long answer never starts
+ * under the pin with a cut line showing at its edge. */
+export function landing(height: number, clearance: number, visible: number): "center" | "start" {
+  return height + 2 * clearance <= visible ? "center" : "start";
+}
+
 /**
  * Once the entry `order` of `stream` is among the rows (the older pages or the live window), scrolls its row (or the
- * nearest row before it) into view and lets the ask go. Fonts settling can move the thread back to its resting place
+ * nearest row before it) into view and lets the ask go. Found words deep in a long row that its landing leaves out of
+ * view (a table's cell far down an answer) are then brought to the middle of the band between the pin and the
+ * composer. Fonts settling can move the thread back to its resting place
  * (thread.tsx), so the row is brought into view again then. Paged back to the thread's start (`start`) with no entry at
  * or before it, the ask goes with nothing scrolled.
  */
@@ -90,7 +102,18 @@ export function useJumpLanding(
       .map((e) => root.querySelector(`[data-entry-id="${CSS.escape(entryIdOf(e))}"]`))
       .find((el) => el !== null);
     if (row === undefined) return;
-    const show = () => row.scrollIntoView({ block: "center" });
+    const parts = mine ? asked?.parts : undefined;
+    const show = () => {
+      const box = scroller();
+      const clearance = Number.parseFloat(getComputedStyle(row).scrollMarginTop) || 0;
+      const height = row.getBoundingClientRect().height;
+      const block = box === null ? "center" : landing(height, clearance, box.clientHeight);
+      row.scrollIntoView({ block });
+      // instant, as the row's landing: nothing here moves with motion to reduce
+      const hit = parts === undefined ? null : hitIn(row, parts);
+      if (hit !== null)
+        scrollThreadBy(box, nudge(hit.getBoundingClientRect(), bandOf(box, clearance)));
+    };
     show();
     void document.fonts?.ready.then(show);
     if (mine) put(null);

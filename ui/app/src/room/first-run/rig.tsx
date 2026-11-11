@@ -11,6 +11,7 @@ import { FakeTransport, type FakeHost } from "../../transport/fake-transport.ts"
 import type {
   AgentId,
   CommandOutcome,
+  ConfigOption,
   HostCommand,
   InstallProgress,
   MatterSummary,
@@ -18,6 +19,7 @@ import type {
   SetupCommand,
   SetupEvent,
   SignIn,
+  ThreadSummary,
   UiCount,
 } from "../../transport/protocol.ts";
 import { fakeNext } from "../fake-next.ts";
@@ -95,12 +97,20 @@ export type RigOptions = {
   settings?: SettingsView;
   platform?: "mac" | "windows" | "linux";
   language?: Lang;
-  /** The agents the host lists (R15's list_agents): both plans unless a test says otherwise. */
+  /** The agents the host lists (R15's list_agents), read on each list_agents: both plans unless a test says otherwise. */
   agents?: AgentId[];
+  /** The NextHost's settings part too, whose settings_changed the room hears (FakeTransport.settingsChanged). */
+  settingsPart?: boolean;
   /** Answers each setup command; throwing refuses it. */
   command?: (command: SetupCommand) => void | Promise<void>;
+  /** The host has the settings window (open_settings). */
+  openSettings?: boolean;
   /** The folder the picker gives; null: cancelled. */
   picked?: { folder: string; display: string } | null;
+  /** The open matter's threads (list_threads); none by default. */
+  threads?: ThreadSummary[];
+  /** The options each listed agent last reported (AgentSummary.config_options); none by default. */
+  options?: ConfigOption[];
 };
 
 /** The room over a fake host with the setup wire. */
@@ -108,10 +118,11 @@ export async function mountFirstRun(o: RigOptions = {}) {
   let matters = o.matters ?? [A];
   const fake: FakeHost = {
     platform: o.platform ?? "mac",
+    ...(o.openSettings === true ? { openSettings: () => {} } : {}),
     query: async (query) => {
       if (query === "list_matters") return { matters };
       if (query === "get_settings") return { settings: o.settings ?? settingsView() };
-      if (typeof query === "object" && "list_threads" in query) return { threads: [] };
+      if (typeof query === "object" && "list_threads" in query) return { threads: o.threads ?? [] };
       throw new Error(`not scripted: ${JSON.stringify(query)}`);
     },
     dispatch: (envelope): CommandOutcome => {
@@ -133,15 +144,17 @@ export async function mountFirstRun(o: RigOptions = {}) {
     },
     next: fakeNext({
       matters: () => [],
-      agents: (o.agents ?? [CLAUDE, CODEX]).map((id) => ({
-        id,
-        ...(id === CLAUDE
-          ? { kind: "claude" as const }
-          : id === CODEX
-            ? { kind: "codex" as const }
-            : {}),
-      })),
-      parts: ["agents"],
+      agents: () =>
+        (o.agents ?? [CLAUDE, CODEX]).map((id) => ({
+          id,
+          ...(o.options === undefined ? {} : { config_options: o.options }),
+          ...(id === CLAUDE
+            ? { kind: "claude" as const }
+            : id === CODEX
+              ? { kind: "codex" as const }
+              : {}),
+        })),
+      parts: o.settingsPart === true ? ["agents", "settings"] : ["agents"],
     }),
   };
   const transport = new FakeTransport(fake);

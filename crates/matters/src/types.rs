@@ -1,6 +1,6 @@
 //! The public input and output types: what the host passes in and what it gets back.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use clauseo_protocol::{
@@ -63,7 +63,7 @@ impl Limits {
 
     /// The cap every walk, read and undo applies: [`Limits::file_cap_bytes`], at most
     /// `u32::MAX` bytes. The one place the clamp is written.
-    pub(crate) fn effective_cap(&self) -> u64 {
+    pub fn effective_cap(&self) -> u64 {
         self.file_cap_bytes.min(u64::from(u32::MAX))
     }
 }
@@ -282,6 +282,11 @@ pub struct Restore<'a> {
     pub checkpoint: CheckpointId,
     /// The commit time of both.
     pub at: Timestamp,
+    /// The `restore` checkpoint this restore takes back, if it does: the files that restore
+    /// added go too, each only while it holds what that restore wrote. `from` is then the
+    /// checkpoint just before it, or one with the same files. `UnknownCheckpoint` for one that
+    /// is not a restore, or for a `from` with other files.
+    pub undoes: Option<CheckpointId>,
 }
 
 /// What a restore of a version would do, file by file: what [`Matter::preview_restore`]
@@ -292,6 +297,9 @@ pub struct RestorePlan {
     /// (`Modified`, or `Added` for a file brought back), sorted by path. Empty when the folder
     /// already stands as the version.
     pub writes: Vec<FileChange>,
+    /// The files the undone restore added that still hold what it wrote, sorted: deleted.
+    /// Empty unless the restore undoes another ([`Restore::undoes`]).
+    pub removes: Vec<MatterPath>,
     /// Files in the folder now that the version does not have, sorted: they stay. For
     /// [`RestoreFiles::Only`], only the chosen ones.
     pub added_since: Vec<MatterPath>,
@@ -321,10 +329,54 @@ pub struct Restored {
     pub checkpoint: Checkpoint,
     /// The files written, sorted.
     pub written: Vec<MatterPath>,
+    /// The files deleted, as [`RestorePlan::removes`].
+    pub removed: Vec<MatterPath>,
     /// As [`RestorePlan::added_since`]: left in place.
     pub added_since: Vec<MatterPath>,
     /// As [`RestorePlan::kept`].
     pub kept: Vec<MatterPath>,
+}
+
+/// A replace of one file with content made outside the folder ([`crate::Matter::replace_file`]):
+/// a Word file whose tracked changes were accepted or rejected on a private copy.
+///
+/// The two checkpoint ids are single-use and must differ, and neither may be on the timeline
+/// already (`command.invalid`, `DuplicateCheckpoint`, before anything is written). A replace
+/// that failed after its `outside-edits` checkpoint has put that id on the timeline; retry
+/// with fresh ids.
+#[derive(Debug, Clone, Copy)]
+pub struct ReplaceFile<'a> {
+    /// The file, which must be in the folder now.
+    pub path: &'a MatterPath,
+    /// A copy, outside the folder, of the bytes `new` was made from: the file's content in the
+    /// folder must be exactly these, or nothing is written.
+    pub expected: &'a Path,
+    /// The new content, outside the folder.
+    pub new: &'a Path,
+    /// The id of the `outside-edits` checkpoint, used only if the folder changed since the last
+    /// checkpoint.
+    pub outside_edits: CheckpointId,
+    /// The id of the `revisions` checkpoint.
+    pub checkpoint: CheckpointId,
+    /// The commit time of both.
+    pub at: Timestamp,
+}
+
+/// What a replace did.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Replaced {
+    /// The checkpoint of unrecorded edits taken before writing, if the folder had changed.
+    pub outside_edits: Option<Checkpoint>,
+    /// A checkpoint holding the file as it was before the write: the `outside-edits` one, or
+    /// the last one when the folder had not changed. A restore of it, for the file alone,
+    /// undoes the replace.
+    pub before: CheckpointId,
+    /// The commit of `before`.
+    pub before_commit: CommitId,
+    /// The `revisions` checkpoint; `Reused` only when the new content equals the old. `None`
+    /// when the file was written but what came after failed (a folder sync, or the walk meeting
+    /// a file another program holds): the next checkpoint records the change.
+    pub checkpoint: Option<Checkpoint>,
 }
 
 /// One side of a comparison.

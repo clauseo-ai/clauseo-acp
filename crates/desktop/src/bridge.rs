@@ -249,6 +249,9 @@ impl Bridge {
             | HostQuery::ListThreads { .. }
             | HostQuery::PageEntries { .. }
             | HostQuery::CompareVersions { .. }
+            // The Word blackline: copies a matter document's two sides outside the matter and
+            // runs stetdoc on them; writes nothing in the matter.
+            | HostQuery::WordBlackline { .. }
             | HostQuery::PreviewRestore { .. }
             // Undo's "changed after Clauseo's edit" ask (#360): reads the folder, writes nothing.
             | HostQuery::PreviewUndo { .. }
@@ -265,7 +268,10 @@ impl Bridge {
             // The sandbox's view (0051): the host's cache, read only. Both windows show it.
             | HostQuery::Protection
             // The sites allowed despite the block list (0053, PR 2): stored state, no paths.
-            | HostQuery::AllowedSites => {}
+            | HostQuery::AllowedSites
+            // The room's tracked changes in a Word file: the host reads a private copy with
+            // stetdoc and writes nothing.
+            | HostQuery::ListRevisions { .. } => {}
             HostQuery::Search(request) => return search::page(self, label, request.clone()).await,
             // The New matter dialog's folder warning: only a ref this run's picker issued, as
             // for `CreateMatter`.

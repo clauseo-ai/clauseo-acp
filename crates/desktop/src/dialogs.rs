@@ -2,13 +2,15 @@
 //! confirms, "always allow" and the link's (rfd, called directly: see [`confirm`]). Each sits
 //! behind a trait, so tests answer without a window, and the `e2e` build answers the picker and
 //! "always allow" from its variables (`e2e.rs`). The webview has no permission for the dialog
-//! plugin.
+//! plugin. The confirms speak the app's language: the link's from `open/words.rs`, the others
+//! from [`words`].
 
 use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use std::sync::{Mutex, PoisonError};
 
+use clauseo_protocol::Language;
 use futures::channel::oneshot;
 use rfd::{MessageButtons, MessageDialogResult, MessageLevel};
 use tauri::{AppHandle, Manager as _, Runtime};
@@ -29,11 +31,15 @@ pub(crate) trait Confirm: Send + Sync {
     fn confirm(&self) -> BoxFuture<'_, bool>;
 }
 
-/// The confirm's words. Fixed text: nothing the agent wrote reaches the dialog.
-const CONFIRM_TITLE: &str = "Always allow?";
-const CONFIRM_MESSAGE: &str = "The agent will do actions like this one without asking you again.";
-const CONFIRM_OK: &str = "Always allow";
-const CONFIRM_CANCEL: &str = "Cancel";
+pub(crate) mod words;
+
+use words::{ConfirmWords, Key};
+
+/// "Always allow"'s words in `language`. Fixed text: nothing the agent wrote reaches the dialog.
+pub(crate) fn always_allow_words(language: Language) -> ConfirmWords {
+    let keys = [Key::AlwaysTitle, Key::AlwaysMessage, Key::AlwaysOk];
+    ConfirmWords::new(language, keys, &[])
+}
 
 /// The buttons of a confirm: `cancel` first, so it is the default and focused button (Return
 /// and Enter on both OSes, Space on Windows) and a stray key never accepts. `ok` second.
@@ -161,32 +167,31 @@ impl<R: Runtime> Picker for NativePicker<'_, R> {
     }
 }
 
-/// The native confirm dialog, drawn by Rust.
-pub(crate) struct NativeConfirm<R: Runtime> {
+/// The native "always allow" confirm, drawn by Rust in the app's language.
+pub(crate) struct NativeConfirm<'a, R: Runtime> {
     app: AppHandle<R>,
+    bridge: &'a crate::bridge::Bridge,
 }
 
-impl<R: Runtime> NativeConfirm<R> {
-    /// A confirm drawing on `app`.
-    pub(crate) fn new(app: AppHandle<R>) -> Self {
-        Self { app }
+impl<'a, R: Runtime> NativeConfirm<'a, R> {
+    /// A confirm drawing on `app`, in the language `bridge` reads when it is asked.
+    pub(crate) fn new(app: AppHandle<R>, bridge: &'a crate::bridge::Bridge) -> Self {
+        Self { app, bridge }
     }
 }
 
-impl<R: Runtime> Confirm for NativeConfirm<R> {
+impl<R: Runtime> Confirm for NativeConfirm<'_, R> {
     fn confirm(&self) -> BoxFuture<'_, bool> {
         #[cfg(feature = "e2e")]
         if let Some(answer) = crate::e2e::confirm_always() {
             return Box::pin(async move { answer });
         }
-        confirm(
-            &self.app,
-            MessageLevel::Warning,
-            CONFIRM_TITLE.to_owned(),
-            CONFIRM_MESSAGE.to_owned(),
-            CONFIRM_OK.to_owned(),
-            CONFIRM_CANCEL,
-        )
+        Box::pin(async move {
+            let words = always_allow_words(self.bridge.language().await);
+            let level = MessageLevel::Warning;
+            let (title, message, ok) = (words.title, words.message, words.ok);
+            confirm(&self.app, level, title, message, ok, &words.cancel).await
+        })
     }
 }
 

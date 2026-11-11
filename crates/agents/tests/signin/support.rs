@@ -102,8 +102,10 @@ pub(crate) fn pause() {
     drop(Condvar::new().wait_timeout(guard, Duration::from_millis(10)));
 }
 
-/// How many [`pause`]s a wait for another thread may take before the test fails: 30 s.
-const PATIENCE: u32 = 3000;
+/// How many [`pause`]s a wait for another thread may take before the test fails: 30 s. On
+/// Windows a pause takes a timer tick (about 15.6 ms), so 1200 of them (about 19 s) keep a wait
+/// that never ends failing with its own message before nextest's 30 s timeout.
+const PATIENCE: u32 = if cfg!(windows) { 1200 } else { 3000 };
 
 /// One wait the code under test armed.
 struct Wait {
@@ -215,13 +217,15 @@ struct Recording {
     inner: PassthroughLauncher,
     launches: Arc<Mutex<Vec<Launch>>>,
     stall: Arc<Mutex<Option<String>>>,
+    panic_on: Arc<Mutex<Option<String>>>,
 }
 
 impl Launcher for Recording {
     fn launch(&self, spec: &LaunchSpec) -> Result<Launched, clauseo_process::Error> {
-        let stalled = lock(&self.stall)
-            .as_ref()
-            .is_some_and(|word| spec.args().iter().any(|arg| arg == word.as_str()));
+        let holds = |word: &str| spec.args().iter().any(|arg| arg == word);
+        let armed = lock(&self.panic_on).take_if(|word| holds(word));
+        assert!(armed.is_none(), "a test's panic in the job: {armed:?}");
+        let stalled = lock(&self.stall).as_deref().is_some_and(holds);
         let launched = if stalled {
             let sleep = LaunchSpec::new(
                 PathBuf::from("/bin/sleep"),
@@ -272,6 +276,7 @@ pub(crate) struct Fixture {
     pub(crate) timer: KeyedTimer,
     launches: Arc<Mutex<Vec<Launch>>>,
     stall: Arc<Mutex<Option<String>>>,
+    panic_on: Arc<Mutex<Option<String>>>,
     online: Arc<AtomicBool>,
     lookups: Arc<Mutex<Vec<String>>>,
 }
@@ -328,6 +333,13 @@ impl Fixture {
         if let Some(path) = std::env::var_os("PATH") {
             base.insert("PATH".into(), path);
         }
+        // Windows: the launcher clears the environment, and a child without `SystemRoot` cannot
+        // start Winsock, so the fake's login could not bind its callback port. The app's own
+        // base environment (`SigninConfig::base_env`, all of its variables) always has it.
+        #[cfg(windows)]
+        if let Some(root) = std::env::var_os("SystemRoot") {
+            base.insert("SystemRoot".into(), root);
+        }
         config.signin.base_env = base;
         let online = Arc::new(AtomicBool::new(true));
         let lookups: Arc<Mutex<Vec<String>>> = Arc::default();
@@ -346,6 +358,7 @@ impl Fixture {
             timer: KeyedTimer::default(),
             launches: Arc::default(),
             stall: Arc::default(),
+            panic_on: Arc::default(),
             online,
             lookups,
         }
@@ -355,6 +368,27 @@ impl Fixture {
     /// install [`Agents::finish_install_for_tests`] can make `Ready` later.
     pub(crate) fn not_installed(&mut self, agent: &AgentId) -> Installed {
         self.config.ready_for_tests.remove(agent).unwrap()
+    }
+
+    /// Codex's browser login listens on a free port of the test's own, as Codex listens on
+    /// 1455, and ends on `GET /cancel` there (the fake's `FAKE_CODEX_PORT`). Returns the port.
+    pub(crate) fn listen_for_cancel(&mut self) -> u16 {
+        let port = std::net::TcpListener::bind(("127.0.0.1", 0))
+            .unwrap()
+            .local_addr()
+            .unwrap()
+            .port();
+        self.config.signin.callback_port = Some(port);
+        self.set_env("FAKE_CODEX_PORT", &port.to_string());
+        port
+    }
+
+    /// Sets `name` to `value` in every run's base environment.
+    pub(crate) fn set_env(&mut self, name: &str, value: &str) {
+        self.config
+            .signin
+            .base_env
+            .insert(OsString::from(name), OsString::from(value));
     }
 
     /// Whether the resolver answers (online) or fails every lookup (offline).
@@ -416,7 +450,13 @@ impl Fixture {
             inner: PassthroughLauncher::new(SpawnOptions::new().clear_env()),
             launches: Arc::clone(&self.launches),
             stall: Arc::clone(&self.stall),
+            panic_on: Arc::clone(&self.panic_on),
         })
+    }
+
+    /// The next run whose arguments hold `word` panics in its job's thread instead of starting.
+    pub(crate) fn panic_on(&self, word: &str) {
+        *lock(&self.panic_on) = Some(word.to_owned());
     }
 
     fn events(agent: AgentId, events: async_channel::Receiver<AgentsEvent>) -> Events {
@@ -488,6 +528,44 @@ impl Fixture {
             .filter(|path| path.file_name().is_some_and(|name| name != "browser"))
             .collect()
     }
+}
+
+/// Linux: kills each run the test started that still runs and waits until it is gone, so a test
+/// that failed or panicked mid-run leaves no fake behind; the folder goes after (`TempDir`). A
+/// run counts while it is still this process's child or its command line names the fixture's
+/// folder, so a pid reused by another process is never hit.
+impl Drop for Fixture {
+    fn drop(&mut self) {
+        #[cfg(target_os = "linux")]
+        for launch in self.launches() {
+            if ours(launch.pid, self.data.path()) {
+                clauseo_process::kill(launch.pid);
+                gone(launch.pid);
+            }
+        }
+    }
+}
+
+/// Whether process `pid` runs as this process's child or with `folder` in its command line.
+#[cfg(target_os = "linux")]
+fn ours(pid: u32, folder: &Path) -> bool {
+    let Ok(stat) = std::fs::read_to_string(format!("/proc/{pid}/stat")) else {
+        return false;
+    };
+    // After the command name's closing parenthesis: the state, then the parent's pid.
+    let mut fields = stat
+        .rsplit(')')
+        .next()
+        .unwrap_or_default()
+        .split_whitespace();
+    let state = fields.next().unwrap_or_default();
+    if state.starts_with(['Z', 'X']) {
+        return false;
+    }
+    let parent = fields.next().and_then(|field| field.parse::<u32>().ok());
+    let cmdline = std::fs::read(format!("/proc/{pid}/cmdline")).unwrap_or_default();
+    let folder = folder.to_string_lossy();
+    parent == Some(std::process::id()) || String::from_utf8_lossy(&cmdline).contains(&*folder)
 }
 
 /// Whether the process `pid` is gone (or a zombie no one has reaped), after a short wait.

@@ -39,6 +39,18 @@ pub struct SetupResult {
     /// what was taken even when the clean-up failed partway.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub taken: Option<u64>,
+    /// The failure's Windows error code, when it had one (`--adopt`'s, `explain::Code`).
+    /// Appended: older readers ignore it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub code: Option<u32>,
+    /// What [`SetupResult::code`] is: `win32` or `hresult`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<String>,
+    /// When it was written, in seconds since 1970 ([`write`] stamps it), so a result an
+    /// earlier run left isn't read as this run's ([`of_run`]). None in a file an older exe
+    /// wrote.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub at: Option<u64>,
 }
 
 impl SetupResult {
@@ -51,6 +63,9 @@ impl SetupResult {
                 cause: None,
                 blocked: None,
                 taken: None,
+                code: None,
+                kind: None,
+                at: None,
             },
             Err(failure) => SetupResult {
                 exit: failure.exit.as_code(),
@@ -58,6 +73,9 @@ impl SetupResult {
                 cause: Some(failure.cause.clone()),
                 blocked: failure.blocked(),
                 taken: None,
+                code: None,
+                kind: None,
+                at: None,
             },
         }
     }
@@ -70,6 +88,9 @@ impl SetupResult {
             cause: Some(cause.into()),
             blocked: None,
             taken: None,
+            code: None,
+            kind: None,
+            at: None,
         }
     }
 }
@@ -79,12 +100,27 @@ pub fn path(data_dir: &Path) -> PathBuf {
     data_dir.join(SANDBOX_DIR).join(RESULT_FILE)
 }
 
-/// Writes `result` atomically, as `marker::write` writes `setup.json`: the folder made if
-/// missing, the old file checked first and the new one after (`write::check_owned_file`). The
-/// exe calls it acting as the owner.
+/// Seconds since 1970 now; 0 if the clock is before it.
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the result file's stamp is the wall clock's, read once per write or run"
+)]
+pub fn now_secs() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |since| since.as_secs())
+}
+
+/// Writes `result`, stamped with the time ([`SetupResult::at`]), atomically, as `marker::write`
+/// writes `setup.json`: the folder made if missing, the old file checked first and the new one
+/// after (`write::check_owned_file`). The exe calls it acting as the owner.
 pub fn write(data_dir: &Path, result: &SetupResult) -> io::Result<()> {
     let file = path(data_dir);
-    let mut bytes = serde_json::to_vec_pretty(result).map_err(io::Error::other)?;
+    let stamped = SetupResult {
+        at: Some(now_secs()),
+        ..result.clone()
+    };
+    let mut bytes = serde_json::to_vec_pretty(&stamped).map_err(io::Error::other)?;
     bytes.push(b'\n');
     if let Some(folder) = file.parent() {
         write::make_sandbox_dir(folder)?;
@@ -109,6 +145,16 @@ pub fn read(data_dir: &Path) -> Result<Option<SetupResult>, String> {
         Ok(None) => Ok(None),
         Err(error) => Err(error.to_string()),
     }
+}
+
+/// `read`, as [`read`] gave it, kept only when it can be this run's: one stamped before the
+/// run started (`started`, [`now_secs`] then) is an earlier run's, read as none. One with no
+/// stamp, from an older exe, is kept: the app removes the file before each run anyway.
+pub fn of_run(
+    read: Result<Option<SetupResult>, String>,
+    started: u64,
+) -> Result<Option<SetupResult>, String> {
+    read.map(|result| result.filter(|result| result.at.is_none_or(|at| at >= started)))
 }
 
 /// Removes the file, so a run that writes none isn't read as the last one's. Missing is fine.
@@ -169,7 +215,8 @@ pub fn outcome(
             | SetupExit::Done
             | SetupExit::NotElevated
             | SetupExit::NotAdminCopy
-            | SetupExit::Downgrade,
+            | SetupExit::Downgrade
+            | SetupExit::AdminCopyLeft,
         )
         | None => {
             format!("Clauseo's set-up program failed (exit {code})")

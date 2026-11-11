@@ -74,6 +74,10 @@ pub enum SetupExit {
     /// 9: `--adopt` found a newer admin copy recorded (`AdminCopyVersion`) than its own
     /// version, and left it as it was.
     Downgrade,
+    /// 10: `--remove --uninstall` removed the protection, but the admin copy, or part of it
+    /// (its values, a task, its folder), stays; the step and code are in the Event Log. The
+    /// uninstall hook counts it as removed, as only administrators can change what is left.
+    AdminCopyLeft,
 }
 
 impl SetupExit {
@@ -88,7 +92,7 @@ impl SetupExit {
     pub const Removed: SetupExit = SetupExit::Done;
 
     /// Every exit, in code order.
-    pub const ALL: [SetupExit; 10] = [
+    pub const ALL: [SetupExit; 11] = [
         SetupExit::Done,
         SetupExit::Usage,
         SetupExit::OtherOwner,
@@ -99,6 +103,7 @@ impl SetupExit {
         SetupExit::NotElevated,
         SetupExit::NotAdminCopy,
         SetupExit::Downgrade,
+        SetupExit::AdminCopyLeft,
     ];
 
     /// The process exit code.
@@ -114,6 +119,7 @@ impl SetupExit {
             SetupExit::NotElevated => 7,
             SetupExit::NotAdminCopy => 8,
             SetupExit::Downgrade => 9,
+            SetupExit::AdminCopyLeft => 10,
         }
     }
 
@@ -208,9 +214,15 @@ pub enum Step {
     ResetProfile,
     /// 8a: the network filters, the owner's grants on them and the firewall rules (S15 PR7).
     Network,
-    /// 5: on a per-machine install, registering the SYSTEM task `\Clauseo\SandboxStop` for the
-    /// owner just recorded (`late_steps::stop_task`).
+    /// 5: on a per-machine install, registering the SYSTEM tasks `\Clauseo\SandboxStop` and
+    /// `\Clauseo\SandboxSweep` for the owner just recorded (`late_steps::stop_task`).
     StopTask,
+    /// 3: denying the group "log on through Remote Desktop Services"
+    /// (`SeDenyRemoteInteractiveLogonRight`).
+    RemoteLogon,
+    /// 5a: once the record names the group, locking the admin copy's folder and file again with
+    /// the group denied (`late_steps::admin_lock`), after step 5.
+    AdminLock,
 }
 
 impl fmt::Display for Step {
@@ -239,7 +251,9 @@ impl fmt::Display for Step {
             Step::Owners => "making sure no sandbox user owns a protected folder",
             Step::ResetProfile => "resetting a sandbox user's profile",
             Step::Network => "setting up the network filters",
-            Step::StopTask => "registering the sandbox's stop task",
+            Step::StopTask => "registering the sandbox's stop and sweep tasks",
+            Step::RemoteLogon => "denying the sandbox users Remote Desktop logon",
+            Step::AdminLock => "locking the set-up program's admin copy",
         })
     }
 }

@@ -141,7 +141,16 @@ fn fold_event(state: &mut ThreadState, envelope: &Envelope, out: &mut Applied) {
         DomainEvent::MatterCreated(_) => wrong_stream(out, "matter_created"),
         DomainEvent::CheckpointRecorded(_) => wrong_stream(out, "checkpoint_recorded"),
         DomainEvent::OutsideEdits(_) => wrong_stream(out, "outside_edits"),
-        DomainEvent::VersionRestored(_) => wrong_stream(out, "version_restored"),
+        // A restore asked from this conversation: its marker, as the matter's stream has it.
+        DomainEvent::VersionRestored(event) => {
+            let kind = MarkerKind::VersionRestored {
+                from: event.from,
+                checkpoint: event.checkpoint,
+                scope: event.scope.clone(),
+                undoes: event.undoes,
+            };
+            insert_marker(state, seq, event_id, ts, kind, out);
+        }
         DomainEvent::MatterRelocated(_) => wrong_stream(out, "matter_relocated"),
     }
 }

@@ -31,18 +31,18 @@ use windows::Win32::Storage::FileSystem::{
     BY_HANDLE_FILE_INFORMATION, CreateFileW, FILE_FLAG_BACKUP_SEMANTICS,
     FILE_FLAG_OPEN_REPARSE_POINT, FILE_NAME_NORMALIZED, FILE_READ_ATTRIBUTES, FILE_SHARE_DELETE,
     FILE_SHARE_READ, FILE_SHARE_WRITE, GETFINALPATHNAMEBYHANDLE_FLAGS, GetFileInformationByHandle,
-    GetFinalPathNameByHandleW, OPEN_EXISTING, READ_CONTROL, VOLUME_NAME_DOS, WRITE_DAC,
-    WRITE_OWNER,
+    GetFinalPathNameByHandleW, OPEN_EXISTING, READ_CONTROL, VOLUME_NAME_DOS,
 };
 use windows::Win32::System::Com::CoTaskMemFree;
 use windows::Win32::UI::Shell::{FOLDERID_ProgramFiles, KF_FLAG_DEFAULT, SHGetKnownFolderPath};
 use windows::core::{BOOL, PCWSTR, PWSTR};
 
-use super::{AdminCopyFs, Found, Held, LOCKED_FILE_SDDL, LOCKED_FOLDER_SDDL, locked};
+use super::{AdminCopyFs, Found, Held, locked, locked_file_sddl, locked_folder_sddl};
 use crate::windows::record::{
-    admin_copy_owner, admin_copy_sha256, current_user_sid, sandbox_owner_sid,
+    admin_copy_owner, admin_copy_sha256, current_user_sid, sandbox_group_sid, sandbox_owner_sid,
 };
 use crate::windows::setup::record_values::MACHINE_OWNER;
+use crate::windows::sids::Sid;
 
 /// `FILE_ATTRIBUTE_REPARSE_POINT`.
 const REPARSE_POINT: u32 = 0x400;
@@ -75,6 +75,10 @@ impl AdminCopyFs for WindowsAdminCopy {
         admin_copy_sha256().map_err(io::Error::other)
     }
 
+    fn recorded_group(&self) -> io::Result<Option<Sid>> {
+        recorded_group()
+    }
+
     fn security_blocked(&self) -> io::Result<bool> {
         super::mark_os::read()
     }
@@ -100,67 +104,37 @@ impl AdminCopyFs for WindowsAdminCopy {
             .map(|entry| Ok(entry?.file_name().to_string_lossy().into_owned()))
             .collect()
     }
+
+    fn request_refresh(&self) -> io::Result<()> {
+        crate::windows::refresh::request_admin_refresh().map_err(io::Error::other)
+    }
+
+    fn pause(&self, pause: std::time::Duration) {
+        super::heal_os::wait(pause);
+    }
+
+    fn clock(&self) -> std::time::Duration {
+        super::heal_os::clock()
+    }
 }
 
-/// `--adopt`'s lock-down of the admin folder `dir`, whose copy is `exe`: every entry but the
-/// expected ones (`expected_entry`, each of its own kind) deleted, a link deleted as itself and
-/// never followed; then `dir` and everything left in it given the locked owner and DACL, read
-/// back exactly ([`lock_down`]), so no older file keeps its own entries or owner.
-#[expect(
-    clippy::disallowed_methods,
-    reason = "deletes what the admin folder, only administrators' to change, mustn't hold"
-)]
-pub(crate) fn lock_down_tree(dir: &Path, exe: &Path) -> io::Result<()> {
-    if found(dir)? != Found::Folder || found(exe)? != Found::File {
-        return Err(io::Error::other(
-            "the admin folder or copy isn't a plain folder and file",
-        ));
-    }
-    for entry in std::fs::read_dir(dir)? {
-        let entry = entry?;
-        let name = entry.file_name().to_string_lossy().into_owned();
-        let path = entry.path();
-        let kind = found(&path)?;
-        let wanted = if name.eq_ignore_ascii_case(super::STAGING) {
-            Found::Folder
-        } else {
-            Found::File
-        };
-        if super::expected_entry(&name) && kind == wanted {
-            continue;
-        }
-        match kind {
-            Found::Folder => std::fs::remove_dir_all(&path)?,
-            Found::File => std::fs::remove_file(&path)?,
-            // A link to a folder goes with `remove_dir`, any other with `remove_file`.
-            Found::Link => {
-                std::fs::remove_file(&path).or_else(|_file| std::fs::remove_dir(&path))?;
-            }
-            Found::Missing => {}
-        }
-    }
-    lock_tree(dir)
+/// The record's `GroupSid` (`HKLM`, written by the elevated set-up), checked as a SID.
+pub(crate) fn recorded_group() -> io::Result<Option<Sid>> {
+    let Some(text) = sandbox_group_sid().map_err(io::Error::other)? else {
+        return Ok(None);
+    };
+    Sid::parse(&text).map(Some).map_err(io::Error::other)
 }
 
-/// [`lock_down`] on `dir` and, below it, on every folder and file; a link below is deleted.
-#[expect(
-    clippy::disallowed_methods,
-    reason = "deletes a link in the staging folder, only administrators' to change"
-)]
-fn lock_tree(dir: &Path) -> io::Result<()> {
-    lock_down(dir, true)?;
-    for entry in std::fs::read_dir(dir)? {
-        let path = entry?.path();
-        match found(&path)? {
-            Found::Folder => lock_tree(&path)?,
-            Found::File => lock_down(&path, false)?,
-            Found::Link => {
-                std::fs::remove_file(&path).or_else(|_file| std::fs::remove_dir(&path))?;
-            }
-            Found::Missing => {}
-        }
-    }
-    Ok(())
+/// `--adopt`'s lock-down of the admin folder `dir`, whose copy is `exe`
+/// (`take_back::lock_down_with`): `staging\` deleted, every entry but the copy and its signature
+/// deleted, a link deleted as itself and never followed, anything that shuts Administrators out
+/// taken back first; then `dir` and everything left in it given the locked owner and DACL for
+/// `group` (the record's `GroupSid`), read back exactly ([`lock_down`]), so no older file keeps
+/// its own entries or owner. The set-up runs it again once it has recorded the group.
+pub(crate) fn lock_down_tree(dir: &Path, exe: &Path, group: Option<&Sid>) -> io::Result<()> {
+    let mut fs = super::take_back_os::NtfsLockDown::new(group.cloned());
+    super::take_back::lock_down_with(&mut fs, dir, exe)
 }
 
 /// [`WindowsAdminCopy`] for `UserSetup::state`, which the app asks at every tier query: the
@@ -194,6 +168,10 @@ impl AdminCopyFs for StateAdminCopy {
         WindowsAdminCopy.recorded_sha256()
     }
 
+    fn recorded_group(&self) -> io::Result<Option<Sid>> {
+        recorded_group()
+    }
+
     fn entries(&self, dir: &Path) -> io::Result<Vec<String>> {
         WindowsAdminCopy.entries(dir)
     }
@@ -208,6 +186,18 @@ impl AdminCopyFs for StateAdminCopy {
 
     fn set_security_blocked(&self, blocked: bool) -> io::Result<()> {
         WindowsAdminCopy.set_security_blocked(blocked)
+    }
+
+    fn request_refresh(&self) -> io::Result<()> {
+        WindowsAdminCopy.request_refresh()
+    }
+
+    fn pause(&self, pause: std::time::Duration) {
+        super::heal_os::wait(pause);
+    }
+
+    fn clock(&self) -> std::time::Duration {
+        super::heal_os::clock()
     }
 }
 
@@ -335,24 +325,46 @@ fn hash_file(file: &mut File) -> io::Result<String> {
     Ok(super::hex(&hasher.finalize()))
 }
 
-/// Gives `path` (a folder when `folder`, else the admin copy) [`LOCKED_FOLDER_SDDL`]'s or
-/// [`LOCKED_FILE_SDDL`]'s owner and protected DACL, then reads it back and refuses unless it is
-/// exactly that ([`locked`]). Needs an elevated or SYSTEM token, which may assign
-/// Administrators as owner.
-pub(crate) fn lock_down(path: &Path, folder: bool) -> io::Result<()> {
+/// Gives `path` (a folder when `folder`, else the admin copy) [`locked_folder_sddl`]'s or
+/// [`locked_file_sddl`]'s owner and protected DACL for `group`, then reads it back and refuses
+/// unless it is exactly that ([`locked`]). Needs an elevated or SYSTEM token, which may assign
+/// Administrators as owner. Opened as itself, then [`lock_handle`]. The tests' lock-down:
+/// the set-up's walks lock through handles of their own (`lock_tree_os`).
+#[cfg(test)]
+pub(crate) fn lock_down(path: &Path, folder: bool, group: Option<&Sid>) -> io::Result<()> {
+    use windows::Win32::Storage::FileSystem::{WRITE_DAC, WRITE_OWNER};
+    let access = READ_CONTROL.0 | WRITE_DAC.0 | WRITE_OWNER.0 | FILE_READ_ATTRIBUTES.0;
+    lock_handle(Handle::open(path, access)?.0, folder, group)
+}
+
+/// `lock_down` on what `handle` is open on (with `READ_CONTROL`, `WRITE_DAC`, `WRITE_OWNER`
+/// and `FILE_READ_ATTRIBUTES`). A file with more than one name (a hard link, whose other name
+/// may be anywhere on the volume and would get the same owner and DACL) is refused, never
+/// locked: the lock-down then fails, and a removal leaves the admin copy (exit 10).
+pub(super) fn lock_handle(handle: HANDLE, folder: bool, group: Option<&Sid>) -> io::Result<()> {
+    if !folder {
+        let mut info = BY_HANDLE_FILE_INFORMATION::default();
+        // SAFETY: the handle is open for the call; `info` is a live, writable struct.
+        unsafe { GetFileInformationByHandle(handle, &raw mut info) }
+            .map_err(|error| io::Error::from_raw_os_error(error.code().0 & 0xFFFF))?;
+        if info.nNumberOfLinks != 1 {
+            return Err(io::Error::other(
+                "a file in the admin folder has more than one name; it is left as it is",
+            ));
+        }
+    }
     let sddl = if folder {
-        LOCKED_FOLDER_SDDL
+        locked_folder_sddl(group)
     } else {
-        LOCKED_FILE_SDDL
+        locked_file_sddl(group)
     };
-    let descriptor = Descriptor::from_sddl(sddl)?;
+    let descriptor = Descriptor::from_sddl(&sddl)?;
     let (owner, dacl) = descriptor.owner_and_dacl()?;
-    let handle = Handle::open(path, READ_CONTROL.0 | WRITE_DAC.0 | WRITE_OWNER.0)?;
     // SAFETY: the handle is open with WRITE_DAC and WRITE_OWNER; the owner and DACL point into
     // `descriptor`, alive for the call. A folder's inheritable entries reach what is inside.
     let set = unsafe {
         SetSecurityInfo(
-            handle.0,
+            handle,
             SE_FILE_OBJECT,
             OWNER_SECURITY_INFORMATION
                 | DACL_SECURITY_INFORMATION
@@ -368,8 +380,8 @@ pub(crate) fn lock_down(path: &Path, folder: bool) -> io::Result<()> {
             i32::try_from(set.0).unwrap_or(i32::MAX),
         ));
     }
-    let back = handle.security()?;
-    if !locked(&back, folder) {
+    let back = security_of(handle)?;
+    if !locked(&back, folder, group) {
         return Err(io::Error::other(
             "the admin folder's permissions didn't read back as set",
         ));
@@ -421,7 +433,7 @@ pub(crate) fn running_image() -> io::Result<PathBuf> {
 
 /// `path`'s owner and DACL as a self-relative descriptor, read from the name itself.
 pub(crate) fn security(path: &Path) -> io::Result<Vec<u8>> {
-    Handle::open(path, READ_CONTROL.0)?.security()
+    security_of(Handle::open(path, READ_CONTROL.0)?.0)
 }
 
 /// A string `SHGetKnownFolderPath` allocated, freed with `CoTaskMemFree` on drop.
@@ -436,11 +448,11 @@ impl Drop for TaskString {
 }
 
 /// A file or folder opened as itself; closed on drop.
-struct Handle(HANDLE);
+pub(super) struct Handle(pub(super) HANDLE);
 
 impl Handle {
     /// Opens `path` itself (`FILE_FLAG_OPEN_REPARSE_POINT`), a folder too, asking for `access`.
-    fn open(path: &Path, access: u32) -> io::Result<Handle> {
+    pub(super) fn open(path: &Path, access: u32) -> io::Result<Handle> {
         let target: Vec<u16> = path.as_os_str().encode_wide().chain(once(0)).collect();
         // SAFETY: `target` is NUL-terminated and outlives the call; no security attributes or
         // template are passed, and the handle is owned by `Handle` from here.
@@ -458,39 +470,40 @@ impl Handle {
         .map(Handle)
         .map_err(|error| io::Error::from_raw_os_error(error.code().0 & 0xFFFF))
     }
+}
 
-    /// Its owner and DACL, self-relative (`GetKernelObjectSecurity`).
-    fn security(&self) -> io::Result<Vec<u8>> {
-        let info = (OWNER_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION).0;
-        let mut size = 256_u32;
-        for _ in 0..4 {
-            let mut buffer = vec![0_u64; usize::try_from(size).unwrap_or(0).div_ceil(8)];
-            let mut needed = 0_u32;
-            // SAFETY: the handle is open; `buffer` is writable for `size` bytes or more, and
-            // `needed` is a live out-pointer.
-            let read = unsafe {
-                GetKernelObjectSecurity(
-                    self.0,
-                    info,
-                    Some(PSECURITY_DESCRIPTOR(buffer.as_mut_ptr().cast())),
-                    size,
-                    &raw mut needed,
-                )
-            };
-            match read {
-                Ok(()) => {
-                    let mut bytes: Vec<u8> = buffer.iter().flat_map(|w| w.to_ne_bytes()).collect();
-                    bytes.truncate(usize::try_from(size).unwrap_or(0));
-                    return Ok(bytes);
-                }
-                Err(e) if e.code() == ERROR_INSUFFICIENT_BUFFER.to_hresult() => size = needed,
-                Err(e) => return Err(io::Error::from_raw_os_error(e.code().0 & 0xFFFF)),
+/// The owner and DACL of what `handle` is open on (with `READ_CONTROL`), self-relative
+/// (`GetKernelObjectSecurity`).
+pub(super) fn security_of(handle: HANDLE) -> io::Result<Vec<u8>> {
+    let info = (OWNER_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION).0;
+    let mut size = 256_u32;
+    for _ in 0..4 {
+        let mut buffer = vec![0_u64; usize::try_from(size).unwrap_or(0).div_ceil(8)];
+        let mut needed = 0_u32;
+        // SAFETY: the handle is open; `buffer` is writable for `size` bytes or more, and
+        // `needed` is a live out-pointer.
+        let read = unsafe {
+            GetKernelObjectSecurity(
+                handle,
+                info,
+                Some(PSECURITY_DESCRIPTOR(buffer.as_mut_ptr().cast())),
+                size,
+                &raw mut needed,
+            )
+        };
+        match read {
+            Ok(()) => {
+                let mut bytes: Vec<u8> = buffer.iter().flat_map(|w| w.to_ne_bytes()).collect();
+                bytes.truncate(usize::try_from(size).unwrap_or(0));
+                return Ok(bytes);
             }
+            Err(e) if e.code() == ERROR_INSUFFICIENT_BUFFER.to_hresult() => size = needed,
+            Err(e) => return Err(io::Error::from_raw_os_error(e.code().0 & 0xFFFF)),
         }
-        Err(io::Error::other(
-            "a security descriptor kept growing while it was read",
-        ))
     }
+    Err(io::Error::other(
+        "a security descriptor kept growing while it was read",
+    ))
 }
 
 impl Drop for Handle {

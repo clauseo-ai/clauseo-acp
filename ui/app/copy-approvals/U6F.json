@@ -127,5 +127,38 @@
     "at": "2026-11-05",
     "by": "Rohan",
     "note": "Rohan, running-page batch 2026-11-05 (written by stage C)"
+  },
+  "U6F-16": {
+    "en": "Codex was downloaded, but setting it up didn't finish. Try again.",
+    "hi": "Codex डाउनलोड हो गया, लेकिन उसका सेटअप पूरा नहीं हुआ। फिर से प्रयास करें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-08",
+    "hi_by": "orchestrator (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-08",
+    "by": "orchestrator (provisional; app copy review; Rohan's rule: no line ends by telling the lawyer to ask IT)",
+    "note": "agent.install_setup_failed for an agent that is not Claude (U3-err-agent.install_setup_failed is Claude's)"
+  },
+  "U6F-17": {
+    "en": "{name} was downloaded, but setting it up didn't finish. Try again.",
+    "hi": "{name} डाउनलोड हो गया, लेकिन उसका सेटअप पूरा नहीं हुआ। फिर से प्रयास करें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-08",
+    "hi_by": "orchestrator (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-08",
+    "by": "orchestrator (provisional; app copy review; Rohan's rule: no line ends by telling the lawyer to ask IT)",
+    "note": "agent.install_setup_failed for an agent that is not Claude (U3-err-agent.install_setup_failed is Claude's)"
+  },
+  "U6F-18": {
+    "en": "The AI was downloaded, but setting it up didn't finish. Try again.",
+    "hi": "AI डाउनलोड हो गया, लेकिन उसका सेटअप पूरा नहीं हुआ। फिर से प्रयास करें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-08",
+    "hi_by": "orchestrator (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-08",
+    "by": "orchestrator (provisional; app copy review; Rohan's rule: no line ends by telling the lawyer to ask IT)",
+    "note": "agent.install_setup_failed for an agent that is not Claude (U3-err-agent.install_setup_failed is Claude's)"
   }
 }

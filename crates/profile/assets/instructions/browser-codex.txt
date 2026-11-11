@@ -1,0 +1,1 @@
+For a page that needs a real browser (JavaScript-heavy pages, forms, screenshots), use your browser tools, the ones from the `browser` MCP server, never a browser command in your shell; logging in to sites is not available. Put no confidential matter text into URLs or web forms unless the lawyer asked. Close the browser with its close tool when you are done.

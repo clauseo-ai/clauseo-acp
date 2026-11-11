@@ -16,6 +16,8 @@ import type {
   ToolCallEntry,
 } from "../transport/protocol.ts";
 import { isolated } from "./thread/content.ts";
+import { inMatter, taskOf, type Task } from "./thread/task-words.ts";
+import { toolNameOf, type ToolAs } from "./thread/tool-names.ts";
 
 /** The options that change the session's mode on leaving plan mode. The window can't send one (the bridge refuses
  * it, crates/desktop/src/bridge.rs MODE_OPTIONS; a test holds the two lists equal), so the prompt never offers it. */
@@ -56,6 +58,17 @@ export type Offer = { answer: PermissionAnswer; kind: KnownKind; option: string 
 export const PLAN_NOTE_LINE: ThreadKey =
   "Claude wants to save its plan as a note in its own folder, not in this matter.";
 
+/** The line beneath "Clauseo asks before going on." in place of a title that is a known tool's or permission's name
+ * (tool-names.ts): what Clauseo asks to do, never the name. Any other name shows no line, the ask alone. */
+export const TOOL_ASK: Record<ToolAs, ThreadKey> = {
+  network: "Clauseo asks to let a command reach the internet.",
+  execute: "Clauseo asks to run a task.",
+  read: "Clauseo asks to read a paper.",
+  edit: "Clauseo asks to change a paper.",
+  search: "Clauseo asks to search the papers.",
+  fetch: "Clauseo asks to look online.",
+};
+
 export type PermissionModel = {
   offers: readonly Offer[];
   /** The paper the request saves a new version of, isolated; null when it isn't one paper of the matter. */
@@ -65,6 +78,9 @@ export type PermissionModel = {
   /** The words key the prompt shows beneath the ask instead of the title; null when the title is shown. */
   label: ThreadKey | null;
   title: string | null;
+  /** A task's parts for plain words, and its command for the fold (D-016); null for any other call, and for one
+   * whose label stands. */
+  task: Task | null;
   kept: boolean;
   done: boolean;
   state: PromptState;
@@ -148,20 +164,34 @@ function stateOf(
   return { state: "gone", dataState: "expired", dataAnswer: undefined };
 }
 
-/** The prompt's props from the entry and its tool call (undefined when there is none, or on an older page). */
+/** The prompt's props from the entry and its tool call (undefined when there is none, or on an older page). `folder`:
+ * the matter's folder as the host shows it, so a path inside the matter reads from the matter (D-046). */
 export function permissionModel(
   entry: PermissionEntry,
   call: ToolCallEntry | undefined,
+  folder: string | null = null,
 ): PermissionModel {
   const paper = paperOf(call);
   // a plan note is Claude's own file, outside the matter: the line stands where the raw path would show
-  const label = paper === null && entry.about === "agent_plan" ? PLAN_NOTE_LINE : null;
+  const plan = paper === null && entry.about === "agent_plan" ? PLAN_NOTE_LINE : null;
+  const task =
+    paper === null && call?.kind === "execute" && plan === null ? taskOf(call, folder) : null;
+  // a title that is a tool's or a permission's name (tool-names.ts) is never shown: a known one is told in words, unless
+  // it only says a task runs and the task's own words (or its program) say more; any other leaves the ask alone
+  const tool = paper === null && call !== undefined ? toolNameOf(call.title) : undefined;
+  const told = task !== null && (task.own !== null || task.program !== null);
+  const named = tool?.as == null || (tool.as === "execute" && told) ? null : TOOL_ASK[tool.as];
+  const label = plan ?? named;
   return {
     offers: offersOf(entry.options),
     paper,
     asks: paper === null,
     label,
-    title: paper === null && call !== undefined && label === null ? isolated(call.title) : null,
+    title:
+      paper === null && call !== undefined && label === null && tool === undefined
+        ? isolated(inMatter(call.title, folder))
+        : null,
+    task: plan === null ? task : null,
     kept: keptOf(call),
     done: call?.status === "completed",
     ...stateOf(entry),

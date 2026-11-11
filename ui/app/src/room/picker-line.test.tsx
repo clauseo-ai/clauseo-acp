@@ -1,4 +1,4 @@
-// The folder picker's line (picker-wait.ts) at New matter's Create and at Change, over FakeTransport with a held pick:
+// The folder picker's line (picker-wait.ts) at New matter's Choose folder…, over FakeTransport with a held pick:
 // under 300 ms no line; from 300 ms a polite status line; gone the moment the pick resolves, picked, cancelled or
 // errored. A pick answered inside 300 ms never shows it.
 // @vitest-environment happy-dom
@@ -126,41 +126,20 @@ async function expectLineThrough(end: () => Promise<void>) {
   expect(line()).toBeNull();
 }
 
-test("Create with no folder chosen: the picker's line shows from 300 ms, and goes when the pick is cancelled", async () => {
+test("Create waits for a folder: with none chosen it is held back, and no picker opens behind it", async () => {
   const picker = heldPicker();
   const transport = await mount({ ...today(), pickFolder: picker.pick });
   await openForm();
+  expect(byId<HTMLButtonElement>("create-matter")?.disabled).toBe(true);
   await press("create-matter");
-  expect(transport.only("pick_folder")).toHaveLength(1);
-  await expectLineThrough(async () => picker.answer(null));
+  await advance(500);
+  expect(transport.only("pick_folder")).toEqual([]);
+  expect(line()).toBeNull();
   expect(created(transport)).toEqual([]);
   expect(dialog()).not.toBeNull();
 });
 
-test("Create's picker picks a parent: the line goes and the matter is made in it", async () => {
-  const picker = heldPicker();
-  const transport = await mount({ ...today(), pickFolder: picker.pick });
-  await openForm();
-  await press("create-matter");
-  await expectLineThrough(async () =>
-    picker.answer({ folder: "ref-parent", display: "Documents" }),
-  );
-  expect(created(transport)).toEqual([
-    { create_matter: { name: NAME, source: { new_folder: { folder: "ref-parent" } } } },
-  ]);
-});
-
-test("Create's picker that fails: the line goes, and Create is free to press again", async () => {
-  const picker = heldPicker();
-  const transport = await mount({ ...today(), pickFolder: picker.pick });
-  await openForm();
-  await press("create-matter");
-  await expectLineThrough(async () => picker.refuse(new Error("picker failed")));
-  expect(created(transport)).toEqual([]);
-  expect(byId<HTMLButtonElement>("create-matter")?.disabled).toBe(false);
-});
-
-test("Change: the line shows from 300 ms, and goes when the pick is picked", async () => {
+test("Choose folder…: the line shows from 300 ms, and goes when the pick is picked", async () => {
   const picker = heldPicker();
   await mount({ ...today(), pickFolder: picker.pick });
   await openForm();
@@ -171,7 +150,7 @@ test("Change: the line shows from 300 ms, and goes when the pick is picked", asy
   expect(dialog()?.textContent).toContain("Documents/Mehta");
 });
 
-test("Change: the line goes when the pick is cancelled", async () => {
+test("Choose folder…: the line goes when the pick is cancelled", async () => {
   const picker = heldPicker();
   await mount({ ...today(), pickFolder: picker.pick });
   await openForm();
@@ -180,7 +159,7 @@ test("Change: the line goes when the pick is cancelled", async () => {
   expect(dialog()?.textContent).not.toContain("Documents");
 });
 
-test("Change: the line goes when the picker fails", async () => {
+test("Choose folder…: the line goes when the picker fails", async () => {
   const picker = heldPicker();
   await mount({ ...today(), pickFolder: picker.pick });
   await openForm();
@@ -189,7 +168,7 @@ test("Change: the line goes when the picker fails", async () => {
   expect(byId<HTMLButtonElement>("matter-existing")?.disabled).toBe(false);
 });
 
-test("Change: a pick answered inside 300 ms never shows the line, even once 300 ms have passed", async () => {
+test("Choose folder…: a pick answered inside 300 ms never shows the line, even once 300 ms have passed", async () => {
   const picker = heldPicker();
   await mount({ ...today(), pickFolder: picker.pick });
   await openForm();

@@ -50,6 +50,13 @@ fn inputs<'a>(
     }
 }
 
+/// A run in Clauseo's own home, for the tests about what every run gets.
+fn own() -> RunKind<'static> {
+    RunKind::Own {
+        home: Path::new("/data/agents/x/home"),
+    }
+}
+
 fn get<'a>(env: &'a BTreeMap<OsString, OsString>, name: &str) -> Option<&'a str> {
     env.get(&OsString::from(name))
         .and_then(|value| value.to_str())
@@ -85,36 +92,10 @@ fn every_run_strips_the_remote_hints() {
     let base = base();
     let home = Path::new("/data/agents/x/home");
     for vendor in [Vendor::Claude, Vendor::Codex] {
-        for kind in [
-            RunKind::Detect,
-            RunKind::Own { home },
-            RunKind::Reused { home },
-        ] {
+        for kind in [RunKind::Own { home }, RunKind::Reused { home }] {
             assert_stripped(&run_env(&inputs(&base, vendor, kind)));
         }
     }
-}
-
-#[test]
-fn detection_runs_have_no_home_variables() {
-    let base = base();
-    for vendor in [Vendor::Claude, Vendor::Codex] {
-        let env = run_env(&inputs(&base, vendor, RunKind::Detect));
-        for name in [
-            "CLAUDE_CONFIG_DIR",
-            "CLAUDE_SECURESTORAGE_CONFIG_DIR",
-            "CODEX_HOME",
-            "CLAUSEO_SIGNIN_URL_FILE",
-        ] {
-            assert_eq!(
-                get(&env, name),
-                None,
-                "{name} in a {vendor:?} detection run"
-            );
-        }
-        assert_eq!(get(&env, "HOME"), Some("/home/lawyer"), "HOME moved");
-    }
-    assert_eq!(codex_store_args(RunKind::Detect), Vec::<OsString>::new());
 }
 
 #[test]
@@ -168,14 +149,14 @@ fn codex_runs_but_detection_get_their_home_and_the_file_store() {
             "HOME moved on Windows"
         );
         assert_eq!(
-            codex_store_args(kind),
+            codex_store_args(),
             [
                 OsString::from("-c"),
                 OsString::from("cli_auth_credentials_store=\"file\"")
             ]
         );
     }
-    let detect = run_env(&inputs(&base, Vendor::Codex, RunKind::Detect));
+    let detect = run_env(&inputs(&base, Vendor::Codex, own()));
     assert_eq!(get(&detect, "CODEX_API_KEY"), Some(""));
 }
 
@@ -187,7 +168,7 @@ fn proxy_and_ca_go_to_each_vendor_s_own_variable() {
         run_env(&EnvInputs {
             proxy: Some("http://proxy.firm:8080"),
             ca_file: Some(ca),
-            ..inputs(&base, vendor, RunKind::Detect)
+            ..inputs(&base, vendor, own())
         })
     };
     let claude = with(Vendor::Claude);
@@ -203,7 +184,7 @@ fn proxy_and_ca_go_to_each_vendor_s_own_variable() {
     );
     assert_eq!(get(&codex, "NODE_EXTRA_CA_CERTS"), None);
     assert_eq!(get(&codex, "HTTPS_PROXY"), Some("http://proxy.firm:8080"));
-    let none = run_env(&inputs(&base, Vendor::Codex, RunKind::Detect));
+    let none = run_env(&inputs(&base, Vendor::Codex, own()));
     assert_eq!(get(&none, "CODEX_CA_CERTIFICATE"), None);
     assert_eq!(get(&none, "HTTPS_PROXY"), None);
     assert_eq!(get(&none, "NO_PROXY"), None);
@@ -220,7 +201,7 @@ fn a_proxied_run_keeps_loopback_off_the_proxy() {
     );
     let env = run_env(&EnvInputs {
         proxy: Some("http://proxy.firm:8080"),
-        ..inputs(&base, Vendor::Claude, RunKind::Detect)
+        ..inputs(&base, Vendor::Claude, own())
     });
     assert_eq!(
         get(&env, "NO_PROXY"),
@@ -267,7 +248,7 @@ fn env_inputs_debug_prints_names_never_values() {
         OsString::from("HTTPS_PROXY"),
         OsString::from("http://user:hunter2-env@proxy.example:3128"),
     );
-    let mut inputs = inputs(&base, Vendor::Codex, RunKind::Detect);
+    let mut inputs = inputs(&base, Vendor::Codex, own());
     inputs.proxy = Some("http://user:hunter2-set@proxy.example:3128");
     let printed = format!("{inputs:?}");
     for secret in ["hunter2-env", "hunter2-set", "sk-stray", "/home/lawyer"] {
@@ -282,7 +263,7 @@ fn env_inputs_debug_prints_names_never_values() {
 #[test]
 fn every_run_uses_the_system_ca_and_keeps_an_inherited_ssl_cert_file() {
     for vendor in [Vendor::Claude, Vendor::Codex] {
-        let env = run_env(&inputs(&base(), vendor, RunKind::Detect));
+        let env = run_env(&inputs(&base(), vendor, own()));
         assert_eq!(get(&env, "NODE_USE_SYSTEM_CA"), Some("1"), "{vendor:?}");
     }
     let mut base = base();
@@ -293,7 +274,7 @@ fn every_run_uses_the_system_ca_and_keeps_an_inherited_ssl_cert_file() {
     );
     let env = run_env(&EnvInputs {
         ca_file: Some(Path::new("/firm/ca.pem")),
-        ..inputs(&base, Vendor::Codex, RunKind::Detect)
+        ..inputs(&base, Vendor::Codex, own())
     });
     assert_eq!(
         get(&env, "node_use_system_ca"),

@@ -52,15 +52,18 @@ export function ScanLines({
       : sc(lang, "Reading the folder. Now {title}.", { title: fileName(s.now_reading) });
   const cloud = cloudOnlyLine(lang, s);
   const service = serviceOf(s);
+  const counts = countsLine(lang, s);
   return (
     <div className="scan text-small" data-testid="scan" data-done={s.done ? "" : undefined}>
       <p className="scan-line" role="status">
-        <span className="scan-counts">
-          <Say>{countsLine(lang, s)}</Say>
-        </span>
+        {counts !== null && (
+          <span className="scan-counts">
+            <Say>{counts}</Say>
+          </span>
+        )}
         {reading !== null && (
           <>
-            {" "}
+            {counts === null ? null : " "}
             <span className="scan-reading">
               <Say>{reading}</Say>
             </span>

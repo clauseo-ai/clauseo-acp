@@ -242,8 +242,8 @@ pub(crate) fn receipt(conn: &Connection, command: CommandId) -> Result<Option<Re
 pub(crate) fn matters(conn: &Connection) -> Result<Vec<MatterRow>, Error> {
     let mut statement = conn.prepare_cached(
         "SELECT id, name, kind, folder_path, folder_locator, shadow_repo_path, created_ms, \
-         client, next_date, pinned, last_opened_ms, forgotten_ms, skill_packs \
-         FROM matters ORDER BY created_ms, id",
+         client, next_date, pinned, last_opened_ms, forgotten_ms, skill_packs, \
+         agent_prefs FROM matters ORDER BY created_ms, id",
     )?;
     let mut rows = statement.query([])?;
     let mut out = Vec::new();
@@ -273,6 +273,11 @@ pub(crate) fn matters(conn: &Connection) -> Result<Vec<MatterRow>, Error> {
                 .get_ref(12)?
                 .as_str_or_null()?
                 .map(codec::skill_packs)
+                .transpose()?,
+            agent_prefs: row
+                .get_ref(13)?
+                .as_str_or_null()?
+                .map(codec::agent_prefs)
                 .transpose()?,
         });
     }

@@ -77,11 +77,56 @@
   .tile:not([data-state="uncited"]) .tile-glyph {
     color: inherit;
   }
+  /* a file's type in its colour (file-type.ts's tones): the glyph's tab only, so the page's outline keeps the wall's
+     quiet ink and the colour sits where each app puts its own. On a lit tile the glyph takes the tile's ink, as its
+     words do. A dimmed tile's tab dims with it, to the token's -away twin: colours, never opacity */
+  .tile[data-file="word"] {
+    --file-ink: var(--file-word);
+  }
+  .tile[data-file="pdf"] {
+    --file-ink: var(--file-pdf);
+  }
+  .tile[data-file="excel"] {
+    --file-ink: var(--file-excel);
+  }
+  .tile[data-file="powerpoint"] {
+    --file-ink: var(--file-powerpoint);
+  }
+  .tile[data-away][data-file="word"] {
+    --file-ink: var(--file-word-away);
+  }
+  .tile[data-away][data-file="pdf"] {
+    --file-ink: var(--file-pdf-away);
+  }
+  .tile[data-away][data-file="excel"] {
+    --file-ink: var(--file-excel-away);
+  }
+  .tile[data-away][data-file="powerpoint"] {
+    --file-ink: var(--file-powerpoint-away);
+  }
+  .tile[data-state="uncited"][data-file] .tile-glyph .file-badge {
+    fill: var(--file-ink);
+  }
   .tile {
     position: relative;
   }
   .tile[data-hand] {
     z-index: 3;
+  }
+  /* a tile with a second press (a Word document's Tracked changes): the face over it, the press quiet under it, the
+     tile's row taller by its height */
+  .tile[data-act] {
+    display: flex;
+    flex-direction: column;
+    gap: var(--s0-5);
+  }
+  .tile[data-act] > .tile-face {
+    flex: 1 1 auto;
+    height: auto;
+  }
+  .tile-act {
+    width: 100%;
+    justify-content: center;
   }
   /* uncited: flat on the wall, no shadow, no highlight */
   .tile-face {
@@ -175,6 +220,31 @@
   }
   .tile:not([data-state="uncited"]) .tile-title {
     color: currentColor;
+  }
+  /* a file's name in two lines at most: past them it loses letters from its middle, never its extension
+     (middle-cut.ts fits the words; the tooltip shows the name whole) */
+  .tile-name-text {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    overflow: hidden;
+    overflow-wrap: anywhere;
+  }
+  /* a file or folder Clauseo doesn't read (only online, or a folder it couldn't open): no fill, a dashed edge, the
+     quiet ink; colours, never opacity, so its words keep their contrast. It lifts on no hover and moves on no press */
+  .tile[data-away] .tile-face,
+  .tile[data-away] .tile-face:hover {
+    background: transparent;
+    border: var(--hairline) dashed var(--scrollbar-hover);
+  }
+  .tile[data-away] .tile-face:active {
+    transform: none;
+  }
+  /* what a press of the face does, under the name */
+  .tile-cue {
+    @apply text-small text-quiet;
+    margin-top: var(--s0-5);
   }
   /* a Devanagari name in the English interface takes Hindi's taller tile line on its own element: the facade's
      --title-h resolves on the facade, in the page's language */

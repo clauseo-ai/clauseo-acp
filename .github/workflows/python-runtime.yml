@@ -1,0 +1,350 @@
+# Clauseo's pinned Python runtime: the archives `cargo xtask python-runtime build` makes from
+# python-runtime/lock.toml (python-runtime/README.md says what each file is).
+#
+# Per event:
+# - pull_request and push to main, when the runtime's files change: `check` runs the offline lock
+#   check, and `build` builds and smoke-tests every target's archive on a runner of that target and
+#   uploads it as the artifact python-runtime-<target>. Nothing is attested or published.
+# - workflow_dispatch from main with `publish`: the same check and builds, then `attest` signs the
+#   archives' build provenance and `publish` makes the release python-runtime-<python>-c<build>
+#   (from the lock) with the four archives and SHA256SUMS. A release is never replaced: when the
+#   tag or the release is already there, `publish` fails and changes nothing.
+# - schedule (nightly): `audit` re-checks every pinned hash against PyPI, PBS and pandoc's GitHub
+#   release, asks OSV for advisories, and `report` opens an issue (once per title) when anything
+#   is found.
+#
+# Security:
+# - Every job's token has only what that job needs (the default is none, below); no job but
+#   `publish` can write to the repository, and only `report` can write issues.
+# - `build` runs the pull request's code, so it has a read-only token, no secret, and no OIDC
+#   token. The token (github.token, contents: read) only lets gh read PBS's public attestation
+#   and pandoc's public release attestation.
+# - `build` checks each input before it reads it: PBS's SHA256SUMS must give the asset the lock's
+#   sha256, every download must have the lock's sha256 and size, and `gh attestation verify` must
+#   prove PBS's own release workflow built the asset; pandoc's archive must have the lock's sha256
+#   and size, and `gh release verify-asset` must find it in jgm/pandoc's immutable release (pandoc
+#   publishes no build provenance; see xtask's python_runtime/pandoc.rs); any failure stops the
+#   build (fail closed).
+#   pip installs the wheels offline with --require-hashes.
+# - `attest` runs no repository code: it only downloads the artifacts and attests them, so the OIDC
+#   token that signs never meets the build's code.
+# - `publish` runs only on main, in the environment python-runtime-publish (a repository admin
+#   creates it, limited to main, with required reviewers). It checks each archive's attestation
+#   was made by this workflow on refs/heads/main before it uploads, creates the tag through the
+#   API (which refuses a tag that exists), and never passes --clobber.
+# - Actions are pinned by full commit SHA; checkout keeps no credentials.
+#
+# Not covered: a change to the lock is gated by this workflow's checks only, not by
+# `cargo xtask check --quick` (the xtask test real_lock_passes runs in `cargo xtask check`'s
+# nextest, the full lane). OSV knows the PyPI packages only, not CPython or PBS's libraries.
+# The Intel macOS runner (macos-15-intel) is GitHub's last x86_64 macOS image, until August 2027.
+
+name: python runtime
+
+on:
+  pull_request:
+    paths:
+      - python-runtime/**
+      - xtask/src/python_runtime.rs
+      - xtask/src/python_runtime/**
+      - .github/workflows/python-runtime.yml
+  push:
+    branches: [main]
+    paths:
+      - python-runtime/**
+      - xtask/src/python_runtime.rs
+      - xtask/src/python_runtime/**
+      - .github/workflows/python-runtime.yml
+  schedule:
+    - cron: "41 3 * * *"
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: Publish the lock's build as a release (main only; refused if it exists)
+        type: boolean
+        default: false
+
+permissions: {}
+
+concurrency:
+  group: python-runtime-${{ github.ref }}-${{ github.event_name }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  check:
+    name: check
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read # checkout
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install the Rust toolchain from rust-toolchain.toml
+        run: rustup toolchain install
+
+      - name: Check the lock and the notices
+        run: cargo xtask python-runtime check
+
+  build:
+    needs: check
+    name: build (${{ matrix.target }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    permissions:
+      contents: read # checkout; gh reads PBS's and pandoc's public attestations with this token
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { target: aarch64-apple-darwin, runner: macos-15 }
+          - { target: x86_64-apple-darwin, runner: macos-15-intel }
+          - { target: x86_64-pc-windows-msvc, runner: windows-2025 }
+          - { target: aarch64-pc-windows-msvc, runner: windows-11-arm }
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install the Rust toolchain from rust-toolchain.toml
+        run: rustup toolchain install
+
+      # Checks PBS's SHA256SUMS, every sha256 and size, PBS's build attestation and pandoc's
+      # release attestation (gh) before anything is unpacked; then assembles, smoke-tests and
+      # packs the archive.
+      - name: Build the runtime
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TARGET: ${{ matrix.target }}
+        run: cargo xtask python-runtime build --target "$TARGET" --out "$RUNNER_TEMP/python-runtime"
+
+      # A clean Windows has no VC++ Redistributable, so every VC++ DLL the runtime's files import
+      # must be one it ships (CPython's vcruntime140 beside python.exe, the wheels' msvcp140 in
+      # <pkg>.libs/). The header of .github/scripts/pe-crt-imports.mjs says how that is decided.
+      # stage/python is the tree pack.py packs, so it is the archive's contents.
+      - name: Check the runtime's VC++ imports resolve to DLLs it ships
+        if: runner.os == 'Windows'
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          runtime="$RUNNER_TEMP/python-runtime/stage/python"
+          app_local=("--app-local-ok=$runtime")
+          for libs in "$runtime"/Lib/site-packages/*.libs; do
+            app_local+=("--app-local-ok=$libs")
+          done
+          node .github/scripts/pe-crt-imports.mjs "${app_local[@]}" "$runtime"
+
+      - name: Show the archive
+        run: cat "$RUNNER_TEMP/python-runtime/build.json" >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: python-runtime-${{ matrix.target }}
+          path: |
+            ${{ runner.temp }}/python-runtime/clauseo-python-*.tar.gz
+            ${{ runner.temp }}/python-runtime/build.json
+          if-no-files-found: error
+          retention-days: 14
+
+  attest:
+    name: attest
+    needs: build
+    if: >-
+      github.event_name == 'workflow_dispatch' && inputs.publish && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      id-token: write # the Sigstore signing certificate of the attestation
+      attestations: write # stores the attestation on the repository
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: python-runtime-*
+          path: dist
+
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: dist/*/clauseo-python-*.tar.gz
+
+  publish:
+    name: publish
+    needs: attest
+    if: >-
+      github.event_name == 'workflow_dispatch' && inputs.publish && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    environment: python-runtime-publish
+    concurrency:
+      group: python-runtime-publish
+      cancel-in-progress: false
+    permissions:
+      contents: write # creates the tag and the release
+      attestations: read # gh attestation verify reads the archives' attestations
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: python-runtime/lock.toml
+          sparse-checkout-cone-mode: false
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: python-runtime-*
+          path: artifacts
+
+      # The tag, and the four archive names, come from the lock at this commit.
+      - name: Name the release from the lock
+        id: names
+        run: |
+          set -euo pipefail
+          python3 - <<'EOF' >> "$GITHUB_OUTPUT"
+          import tomllib
+          with open("python-runtime/lock.toml", "rb") as f:
+              runtime = tomllib.load(f)["runtime"]
+          stem = f"python-{runtime['python']}-c{runtime['build']}"
+          print(f"tag=python-runtime-{runtime['python']}-c{runtime['build']}")
+          names = [f"clauseo-{stem}-{p}.tar.gz" for p in
+                   ("macos-arm64", "macos-x64", "windows-arm64", "windows-x64")]
+          print("archives=" + " ".join(names))
+          EOF
+
+      - name: Check the archives and their attestations
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ARCHIVES: ${{ steps.names.outputs.archives }}
+        run: |
+          set -euo pipefail
+          mkdir dist
+          for name in $ARCHIVES; do
+            found=(artifacts/*/"$name")
+            [ -f "${found[0]}" ] || { echo "::error::$name was not built"; exit 1; }
+            want=$(jq -r --arg n "$name" 'select(.archive == $n) | .sha256' artifacts/*/build.json)
+            got=$(sha256sum "${found[0]}" | cut -d' ' -f1)
+            [ -n "$want" ] && [ "$want" = "$got" ] || {
+              echo "::error::$name has sha256 $got, but its build.json says '$want'"; exit 1; }
+            gh attestation verify "${found[0]}" --repo "$GITHUB_REPOSITORY" \
+              --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/python-runtime.yml" \
+              --source-ref refs/heads/main
+            cp "${found[0]}" dist/
+          done
+          (cd dist && sha256sum -- *.tar.gz > SHA256SUMS)
+          cat dist/SHA256SUMS
+
+      # Immutable: refuse when the release or the tag exists. Creating the tag through the API is
+      # the guard against a race, since GitHub refuses a ref that exists (422); a tag left by a
+      # failed run makes the next run refuse too, until an admin removes it.
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.names.outputs.tag }}
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            echo "::error::The release $TAG exists; a published build is never replaced. Bump the build number in python-runtime/lock.toml."
+            exit 1
+          fi
+          if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG" > /dev/null 2>&1; then
+            echo "::error::The tag $TAG exists; a published build is never replaced. Bump the build number in python-runtime/lock.toml."
+            exit 1
+          fi
+          gh api "repos/$GITHUB_REPOSITORY/git/refs" -f "ref=refs/tags/$TAG" -f "sha=$GITHUB_SHA" > /dev/null
+          {
+            echo "Clauseo's Python runtime, built from python-runtime/lock.toml at $GITHUB_SHA."
+            echo
+            echo "Each archive's build provenance is attested: \`gh attestation verify <archive> --repo $GITHUB_REPOSITORY\`."
+            echo
+            echo '```'
+            cat dist/SHA256SUMS
+            echo '```'
+          } > notes.md
+          gh release create "$TAG" dist/*.tar.gz dist/SHA256SUMS --repo "$GITHUB_REPOSITORY" \
+            --verify-tag --title "$TAG" --notes-file notes.md
+
+  audit:
+    name: audit
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read # checkout
+    outputs:
+      status: ${{ steps.audit.outputs.status }}
+      advisories: ${{ steps.audit.outputs.advisories }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install the Rust toolchain from rust-toolchain.toml
+        run: rustup toolchain install
+
+      - name: Re-check the hashes and ask OSV for advisories
+        id: audit
+        run: |
+          set -uo pipefail
+          cargo xtask python-runtime check --online --advisories "$RUNNER_TEMP/advisories.json" \
+            2>&1 | tee "$RUNNER_TEMP/audit.log"
+          code=${PIPESTATUS[0]}
+          [ -f "$RUNNER_TEMP/advisories.json" ] || echo '[]' > "$RUNNER_TEMP/advisories.json"
+          if [ "$code" = 0 ]; then echo status=ok; else echo status=failed; fi >> "$GITHUB_OUTPUT"
+          echo "advisories=$(jq length "$RUNNER_TEMP/advisories.json")" >> "$GITHUB_OUTPUT"
+          exit "$code"
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: python-runtime-audit
+          path: |
+            ${{ runner.temp }}/advisories.json
+            ${{ runner.temp }}/audit.log
+          if-no-files-found: ignore
+
+  report:
+    name: report
+    needs: audit
+    if: >-
+      always() && needs.audit.result != 'skipped' &&
+      (needs.audit.outputs.status != 'ok' || needs.audit.outputs.advisories != '0')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      issues: write # lists and opens issues
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: python-runtime-audit
+          path: audit
+
+      - name: Open an issue unless one is open
+        env:
+          GH_TOKEN: ${{ github.token }}
+          STATUS: ${{ needs.audit.outputs.status }}
+          RUN: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          if [ "$STATUS" = ok ]; then
+            ids=$(jq -r '[.[].id] | unique | join(", ")' audit/advisories.json)
+            title="Python runtime: advisories for pinned packages ($ids)"
+          else
+            title="Python runtime: the nightly audit failed"
+          fi
+          open=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --search "in:title \"$title\"" \
+            --json title --jq "map(select(.title == \"$title\")) | length")
+          if [ "$open" != 0 ]; then echo "An open issue has this title: $title"; exit 0; fi
+          {
+            echo "The nightly audit of python-runtime/lock.toml found something: $RUN"
+            echo
+            echo '```'
+            tail -n 60 audit/audit.log 2>/dev/null || echo "(no log)"
+            echo '```'
+            echo
+            echo "A changed hash: do not build until it is understood. An advisory: review it and"
+            echo "run \`cargo xtask python-runtime bump\` once a fixed version is out."
+          } > body.md
+          gh issue create --repo "$GITHUB_REPOSITORY" --title "$title" --body-file body.md

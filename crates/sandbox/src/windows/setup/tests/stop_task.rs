@@ -1,7 +1,8 @@
-//! The per-machine stop task (`late_steps::stop_task`, `remove::remove_stop_task`): on a
-//! per-machine install the set-up registers `\Clauseo\SandboxStop` for the owner it records,
-//! a new owner's set-up replaces a previous owner's, the removal deletes it before the record,
-//! and a failed registration fails the set-up closed. A per-user install is left to `--adopt`.
+//! The per-machine stop and sweep tasks (`late_steps::stop_task`, `remove::remove_stop_task`): on
+//! a per-machine install the set-up registers `\Clauseo\SandboxStop` and `\Clauseo\SandboxSweep`
+//! for the owner it records (one `Machine` call, `refresh::POOL_TASKS` on Windows), a new
+//! owner's set-up replaces a previous owner's, the removal deletes them before the record, and a
+//! failed registration fails the set-up closed. A per-user install is left to `--adopt`.
 
 use super::fake::{FakeAcl, FakeMachine, OTHER_OWNER, rid};
 use super::remove_fake::Remover;
@@ -33,7 +34,9 @@ fn per_machine_set_up_registers_the_stop_task_for_the_recorded_owner() {
     let last_write = calls.iter().rposition(|c| c.starts_with("write_record"));
     assert!(last_write.is_some_and(|write| write < at), "{calls:?}");
     let mut expected = fresh_calls();
-    expected.insert(at, "register_stop_task 1001".to_owned());
+    expected.insert(at - 1, "register_stop_task 1001".to_owned());
+    // The admin copy's lock (`admin_lock.rs`) comes just before it.
+    expected.insert(at - 1, "lock_admin_copy 1000".to_owned());
     assert_eq!(calls, expected);
     // A re-run registers it again, over the one there.
     let from = machine.calls.len();
@@ -82,10 +85,18 @@ fn per_user_and_copyless_set_ups_register_nothing() {
         ("setup-stop-task-user", owner_copy),
         ("setup-stop-task-none", None),
     ] {
+        let locked = copy.is_some();
         let mut machine = installed(test, copy);
         let mut acl = FakeAcl::default();
         set_up_fresh(&mut machine, &mut acl);
-        assert_eq!(machine.calls, fresh_calls(), "{test}");
+        // A per-user copy is locked again (`admin_lock.rs`); nothing registers the task.
+        let calls: Vec<String> = machine
+            .calls
+            .iter()
+            .filter(|call| !(locked && *call == "lock_admin_copy 1000"))
+            .cloned()
+            .collect();
+        assert_eq!(calls, fresh_calls(), "{test}");
         assert_eq!(machine.state.stop_task, None, "{test}");
     }
 }

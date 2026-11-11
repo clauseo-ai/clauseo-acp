@@ -142,8 +142,8 @@ error_codes! {
     MatterFolderIsSystem = "matter.folder_is_system", retryable: false, meaning: "The folder may \
         not be a matter: it is a system folder or a folder of app data or keys, or holds one.";
     MatterFolderUnreadable = "matter.folder_unreadable", retryable: false, meaning: "Clauseo may \
-        not read the folder, or its `.clauseo/matter.json` does not read, so it may belong to a \
-        matter.";
+        not read the folder (a `.clauseo/matter.json` that does not read is set aside, not \
+        refused, since 2026-11-11).";
     MatterFolderIsMatter = "matter.folder_is_matter", retryable: false, meaning: "The folder is \
         a matter's folder, or sits inside one or holds one; the error's `matter` names that \
         matter when it is on Clauseo's list.";
@@ -261,6 +261,41 @@ error_codes! {
     BlocklistRevokeNotSaved = "blocklist.revoke_not_saved", retryable: false, meaning: "The \
         site is blocked again until Clauseo closes, but Clauseo couldn't save that or void the \
         saved allows, so the site may be allowed again after a restart.";
+    SandboxCleaningUp = "sandbox.cleaning_up", retryable: true, meaning: "An earlier Safe \
+        workspace session's clean-up (its unclean-session marker's stop or sweep) wasn't finished \
+        after Clauseo waited for it, so no agent was started; trying again in a moment can \
+        succeed.";
+    AgentInstallSetupFailed = "agent.install_setup_failed", retryable: true, meaning: "The \
+        agent's files all downloaded and checked, but setting them up on this computer failed \
+        after three tries (unpacking, `npm ci`, the move into place or its receipt), often \
+        because security software held the fresh files. Trying again may work.";
+    BlacklineNoWordTool = "blackline.no_word_tool", retryable: false, meaning: "The Word \
+        blackline needs stetdoc, Clauseo's Word tool, and this Clauseo has none, so nothing was \
+        compared.";
+    BlacklineNotWord = "blackline.not_word", retryable: false, meaning: "The file is not a \
+        Word document (.docx), so it has no Word blackline.";
+    BlacklineFailed = "blackline.failed", retryable: true, meaning: "The Word blackline \
+        failed: the compare or its view failed, took too long, or printed what Clauseo could not \
+        read; nothing is shown and nothing was written in the matter. Trying again can \
+        succeed.";
+    WordStetdocMissing = "word.stetdoc_missing", retryable: false, meaning: "Clauseo has no \
+        stetdoc program to read or edit Word files with, or could not start it.";
+    WordRevisionsStale = "word.revisions_stale", retryable: false, meaning: "The Word file \
+        changed since its tracked changes were listed, or a change named is no longer in it, so \
+        nothing was written: list them again.";
+    WordNotDocx = "word.not_docx", retryable: false, meaning: "The file is not a Word document \
+        (.docx) that stetdoc can read.";
+    WordEditFailed = "word.edit_failed", retryable: true, meaning: "stetdoc failed or did not \
+        finish in time while reading or editing the Word file, or the file is not on this computer \
+        or is too large to version, so nothing was written.";
+    MatterFolderPermission = "matter.folder_permission", retryable: false, meaning: "The \
+        computer's privacy settings keep Clauseo, or the agent it starts, from opening the \
+        matter's folder (on macOS, Files and Folders in Privacy & Security), so no agent works \
+        in it: allow Clauseo there, then ask again.";
+    AgentOffline = "agent.offline", retryable: true, meaning: "The agent lost its connection \
+        while answering: it could not reach its service (connection refused, no network, no \
+        name resolution, connect timed out). The answer so far is kept; asking again can work \
+        once the computer is back online.";
     Unknown = "unknown", retryable: false, meaning: "A code from a newer Clauseo that this \
         version does not know. Never produced here.";
 }

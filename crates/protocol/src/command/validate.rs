@@ -153,10 +153,14 @@ impl HostCommand {
                 matter: _,
                 checkpoint: _,
                 scope,
+                undoes: _,
+                thread: _,
             } => scope.check("RestoreVersion"),
+            // The picks are checked by their types as they decode.
             Self::CreateThread {
                 matter: _,
                 agent: _,
+                config: _,
             }
             | Self::RelocateMatter {
                 matter: _,
@@ -203,6 +207,7 @@ impl HostCommand {
                 next_date: _,
                 skill_packs: _,
                 pinned: _,
+                agent_prefs: _,
             }
             | Self::OpenMatter { matter: _ }
             | Self::ForgetMatter { matter: _ }
@@ -221,18 +226,24 @@ impl HostCommand {
             // No fields; a second download while one runs is the host's refusal (state).
             | Self::InstallBrowser {}
             | Self::CancelBrowserInstall {}
+            // No fields; a read in flight is joined by the host.
+            | Self::RecheckBrowserPolicy {}
             // Whether the updater's state takes them is the host's check.
             | Self::CheckForUpdate {}
             | Self::InstallUpdate { when: _ }
             | Self::CancelScheduledUpdate {}
             // No fields; whether this computer has a set-up to retry or remove is state.
-            | Self::RetryProtection {} | Self::RemoveSandboxSetup {} => Ok(()),
+            | Self::RetryProtection {} | Self::RemoveSandboxSetup {}
+            // A flag; the host keeps the last one.
+            | Self::SetNetwork { online: _ } => Ok(()),
             Self::AllowBlockedSite { .. } | Self::RevokeAllowedSite { .. } => {
                 validate_allowed_sites(self)
             }
             Self::SetUpdateMode { mode } => check_update_mode(*mode),
             // Ids by shape; whether the connector or pack is known, live or added is state.
             Self::Connector(command) => command.check(),
+            // The ids' count and repeats; the `.docx` name and the ids' existence are state.
+            Self::DecideRevisions(decide) => decide.check(),
         }
     }
 }

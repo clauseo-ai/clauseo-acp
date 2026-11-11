@@ -1,0 +1,156 @@
+{
+  "IT-01": {
+    "en": "Copy details for IT",
+    "hi": "IT के लिए विवरण कॉपी करें",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-08",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-08",
+    "by": "app track (provisional; Rohan batch review)",
+    "note": "UD1-15's and UD1-16's words on a firm-only line's Copy details for IT (orchestrator ruling)"
+  },
+  "IT-02": {
+    "en": "Copy details for IT",
+    "hi": "IT के लिए विवरण कॉपी करें",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-08",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-08",
+    "by": "app track (provisional; Rohan batch review)",
+    "note": "UD1-15's and UD1-16's words on a firm-only line's Copy details for IT (orchestrator ruling)"
+  },
+  "IT-03": {
+    "en": "Copy details for IT",
+    "hi": "IT के लिए विवरण कॉपी करें",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-08",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-08",
+    "by": "app track (provisional; Rohan batch review)",
+    "note": "UD1-15's and UD1-16's words on a firm-only line's Copy details for IT (orchestrator ruling)"
+  },
+  "IT-04": {
+    "en": "Copy details for IT",
+    "hi": "IT के लिए विवरण कॉपी करें",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-08",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-08",
+    "by": "app track (provisional; Rohan batch review)",
+    "note": "UD1-15's and UD1-16's words on a firm-only line's Copy details for IT (orchestrator ruling)"
+  },
+  "IT-05": {
+    "en": "Copy details for IT",
+    "hi": "IT के लिए विवरण कॉपी करें",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-08",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-08",
+    "by": "app track (provisional; Rohan batch review)",
+    "note": "UD1-15's and UD1-16's words on a firm-only line's Copy details for IT (orchestrator ruling)"
+  },
+  "IT-06": {
+    "en": "Message copied",
+    "hi": "संदेश कॉपी हो गया",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-08",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-08",
+    "by": "app track (provisional; Rohan batch review)",
+    "note": "UD1-15's and UD1-16's words on a firm-only line's Copy details for IT (orchestrator ruling)"
+  },
+  "IT-07": {
+    "en": "Clauseo's Safe workspace is blocked on this computer.",
+    "hi": "इस कंप्यूटर पर Clauseo का सुरक्षित कार्यक्षेत्र अवरुद्ध है।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-08",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-08",
+    "by": "app track (provisional; Rohan batch review)",
+    "note": "The note Copy details for IT copies: plain text for the firm's IT, non-secret facts only"
+  },
+  "IT-08": {
+    "en": "The firm requires Clauseo's Safe workspace, and this computer can't provide it.",
+    "hi": "फ़र्म Clauseo का सुरक्षित कार्यक्षेत्र ज़रूरी मानती है, और यह कंप्यूटर इसे नहीं दे सकता।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-08",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-08",
+    "by": "app track (provisional; Rohan batch review)",
+    "note": "The note Copy details for IT copies: plain text for the firm's IT, non-secret facts only"
+  },
+  "IT-09": {
+    "en": "Clauseo blocked a site on its unsafe-site list, and the firm's policy has turned off allowing it.",
+    "hi": "Clauseo ने अपनी असुरक्षित वेबसाइटों की सूची की एक वेबसाइट अवरुद्ध की, और फ़र्म की नीति ने उसे अनुमति देना बंद कर रखा है।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-08",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-08",
+    "by": "app track (provisional; Rohan batch review)",
+    "note": "The note Copy details for IT copies: plain text for the firm's IT, non-secret facts only"
+  },
+  "IT-10": {
+    "en": "Code: {code}",
+    "hi": "कोड: {code}",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-08",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-08",
+    "by": "app track (provisional; Rohan batch review)",
+    "note": "The note Copy details for IT copies: plain text for the firm's IT, non-secret facts only"
+  },
+  "IT-11": {
+    "en": "Reason: {reason}",
+    "hi": "कारण: {reason}",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-08",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-08",
+    "by": "app track (provisional; Rohan batch review)",
+    "note": "The note Copy details for IT copies: plain text for the firm's IT, non-secret facts only"
+  },
+  "IT-12": {
+    "en": "Site: {site}",
+    "hi": "वेबसाइट: {site}",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-08",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-08",
+    "by": "app track (provisional; Rohan batch review)",
+    "note": "The note Copy details for IT copies: plain text for the firm's IT, non-secret facts only"
+  },
+  "IT-13": {
+    "en": "Clauseo version: {version}",
+    "hi": "Clauseo संस्करण: {version}",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-08",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-08",
+    "by": "app track (provisional; Rohan batch review)",
+    "note": "The note Copy details for IT copies: plain text for the firm's IT, non-secret facts only"
+  },
+  "IT-14": {
+    "en": "Clauseo for firm IT: {url}",
+    "hi": "फ़र्म IT के लिए Clauseo: {url}",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-08",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-08",
+    "by": "app track (provisional; Rohan batch review)",
+    "note": "The note Copy details for IT copies: plain text for the firm's IT, non-secret facts only"
+  }
+}

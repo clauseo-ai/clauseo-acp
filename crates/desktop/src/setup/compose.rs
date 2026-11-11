@@ -108,6 +108,7 @@ pub(crate) fn compose(agent: &AgentId, s18: Option<&SigninState>, facts: Facts) 
 fn state_word(state: &SignIn) -> &'static str {
     match state {
         SignIn::SignedOut { .. } => "signed_out",
+        SignIn::Checking => "checking",
         SignIn::Queued => "queued",
         SignIn::Waiting { .. } => "waiting",
         SignIn::DeviceCode { .. } => "device_code",
@@ -155,6 +156,7 @@ pub(crate) fn wire(agent: &AgentId, state: &SigninState) -> Option<SignIn> {
         SigninState::SignedOut { found } => SignIn::SignedOut {
             found: found.and_then(found_login),
         },
+        SigninState::Checking => SignIn::Checking,
         SigninState::Queued => SignIn::Queued,
         SigninState::Waiting { since, nudge } => SignIn::Waiting {
             since: timestamp(*since),
@@ -210,7 +212,6 @@ fn found_login(found: Found) -> Option<FoundLogin> {
         Found::CodexKeyring => FoundLogin::CodexKeyring,
         Found::ReusedFailed => FoundLogin::ReusedFailed,
         Found::ReusedSignedOut => FoundLogin::ReusedSignedOut,
-        Found::ReusedChanged => FoundLogin::ReusedChanged,
         Found::CodexLinkSplit => FoundLogin::CodexLinkSplit,
         Found::NoLogin => FoundLogin::NoneFound,
         Found::ReuseOff => FoundLogin::ReuseOff,

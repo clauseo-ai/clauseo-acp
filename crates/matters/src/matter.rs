@@ -2,10 +2,12 @@
 //! `checkpoint.rs` and `undo.rs`; this file checks inputs and keeps the folder and history in
 //! step.
 
+mod aside;
+pub use aside::set_aside_marker;
 mod discard;
 pub use discard::remove_marker_of;
 pub(crate) mod json;
-pub use json::check_marker;
+pub use json::{check_marker, read_marker};
 
 use discard::Fresh;
 
@@ -22,11 +24,11 @@ use crate::checkpoint::{Core, Spec};
 use crate::history::{GixStore, HistoryStore, recorded_worktree};
 use crate::stat::EntryState;
 use crate::types::{
-    Checkpoint, CommitId, CompareSide, Imported, Marker, NewMatter, Progress, Restore,
-    RestoreFiles, RestorePlan, Restored, Settings, TimelineEntry, TurnMeta, UndoRequest, Undone,
-    VersionFile,
+    Checkpoint, CommitId, CompareSide, Imported, Marker, NewMatter, Progress, ReplaceFile,
+    Replaced, Restore, RestoreFiles, RestorePlan, Restored, Settings, TimelineEntry, TurnMeta,
+    UndoRequest, Undone, VersionFile,
 };
-use crate::{Error, MissingReason, compare, papers, refuse, restore, scan, undo, write};
+use crate::{Error, MissingReason, compare, papers, refuse, replace, restore, scan, undo, write};
 
 /// The git dir's name inside `<matters root>/<matter id>/`.
 const GIT_DIR: &str = "history.git";
@@ -80,10 +82,21 @@ impl Matter {
     }
 
     /// Imports the existing folder `new.folder` as a matter: refuses a drive root, a listed
-    /// folder (or an ancestor of one), the matters root and a refused tree, writes
-    /// `matter.json` and the git dir, and takes the root `import` checkpoint. `progress` gets
-    /// files and bytes read; when `cancel` is set the git dir and `matter.json` are removed and
-    /// the result is [`Imported::Cancelled`]. A failed import removes them too.
+    /// folder (or an ancestor of one), the matters root, a refused tree and a folder whose
+    /// `matter.json` names another matter (`Refusal::AlreadyMatter`), writes `matter.json` and
+    /// the git dir, and takes the root `import` checkpoint. `progress` gets files and bytes
+    /// read; when `cancel` is set the git dir and `matter.json` are removed and the result is
+    /// [`Imported::Cancelled`]. A failed import removes them too.
+    ///
+    /// A `matter.json` already there is not always refused:
+    ///
+    /// - one naming `new.id` is adopted: kept byte for byte, never rewritten, and left as it was
+    ///   when the import fails, is cancelled or is discarded. The host imports a folder whose
+    ///   marker names a matter it has no record of under that matter's id, so a synced folder
+    ///   keeps its identity across installs;
+    /// - one that does not read is set aside ([`set_aside_marker`], stamped `new.created_at`)
+    ///   once nothing else refuses the folder, and a new one written. It is not put back when the
+    ///   import fails. One that cannot be read at all (permissions) is an [`Error::Io`].
     pub fn import(
         settings: Settings,
         new: NewMatter,
@@ -93,13 +106,16 @@ impl Matter {
     ) -> Result<Imported, Error> {
         refuse_marker(new.marker)?;
         refuse::check_folder(&new.folder, refused)?;
-        refuse::check_new_matter(&new.folder, &settings)?;
+        let existing = refuse::check_new_matter(&new.folder, new.id, &settings)?;
         let home = matter_home(&settings, new.id);
         if exists(&home)? {
             return Err(Error::HistoryExists { git_dir: home });
         }
+        if existing == refuse::Existing::Unreadable {
+            set_aside_marker(&new.folder, new.created_at)?;
+        }
         let folder = new.folder.clone();
-        let fresh = Fresh::imported(&folder)?;
+        let fresh = Fresh::imported(&folder, existing == refuse::Existing::Same)?;
         match Self::make(settings, new, fresh, Some(cancel), progress) {
             Ok(Made::Done(matter, summary)) => {
                 let warnings =
@@ -121,7 +137,8 @@ impl Matter {
         }
     }
 
-    /// Writes `matter.json` and the git dir, then the root checkpoint.
+    /// Writes `matter.json` (unless `fresh` says the one there is adopted) and the git dir, then
+    /// the root checkpoint.
     fn make(
         settings: Settings,
         new: NewMatter,
@@ -131,7 +148,11 @@ impl Matter {
     ) -> Result<Made, Error> {
         let git_dir = matter_home(&settings, new.id).join(GIT_DIR);
         let history = GixStore::create(&git_dir, &new.folder)?;
-        json::write(&new.folder, new.id, new.created_at)?;
+        if fresh.marker {
+            json::write(&new.folder, new.id, new.created_at)?;
+        } else {
+            json::hide(&new.folder);
+        }
         let mut core = Core::load(history)?;
         let Some(walked) = core.scan_folder(&new.folder, &settings, cancel, progress)? else {
             return Ok(Made::Cancelled);
@@ -398,23 +419,52 @@ impl Matter {
     /// checkpoint if the folder changed since the last checkpoint; writes each file through a
     /// synced temp file, checks that no target changed since that checkpoint, renames them into
     /// place, and takes a `restore` checkpoint (no thread, no turn). Files added since stay, and
-    /// nothing is deleted. Cloud-only, over-cap and excluded files are never read or written. See
-    /// [`Restore`] for the ids and retrying, [`RestorePlan`] for what is kept.
+    /// nothing is deleted, but the files a restore it undoes added ([`Restore::undoes`]).
+    /// Cloud-only, over-cap and excluded files are never read or written. See [`Restore`] for
+    /// the ids and retrying, [`RestorePlan`] for what is kept.
     pub fn restore(&mut self, request: &Restore<'_>) -> Result<Restored, Error> {
         json::check(&self.folder, self.id)?;
         restore::restore(&mut self.core, &self.folder, &self.settings, request)
     }
 
-    /// What [`Matter::restore`] of `from` would do now, from the same plan, with the files a
-    /// program holds in `locked` instead of failing. Writes nothing: no object, no stat cache,
-    /// no checkpoint.
+    /// Replaces the file `request.path` with `request.new`, made outside the folder from the
+    /// bytes in `request.expected` (a Word file whose tracked changes were accepted or rejected
+    /// on a private copy). Refuses before writing anything when the file is open in another
+    /// program (`matter.file_locked`) or its content is not those bytes (`ChangedSince`); takes
+    /// an `outside-edits` checkpoint if the folder changed since the last checkpoint; writes the
+    /// file through a synced temp file, checking that it did not change since that checkpoint;
+    /// and takes a `revisions` checkpoint (no thread, no turn). See [`ReplaceFile`].
+    pub fn replace_file(&mut self, request: &ReplaceFile<'_>) -> Result<Replaced, Error> {
+        json::check(&self.folder, self.id)?;
+        replace::replace(&mut self.core, &self.folder, &self.settings, request)
+    }
+
+    /// The bytes of the file `path` in the folder, read with downloads off: a file a checkpoint
+    /// would not read (cloud-only by the settings' probe, or over the size cap) is
+    /// [`Error::NotVersioned`] and is never opened. A missing file is an [`Error::Io`] of kind
+    /// `NotFound`. Links are followed: the caller checks where `path` leads.
+    pub fn read_local(&self, path: &MatterPath) -> Result<Vec<u8>, Error> {
+        replace::read_local(&self.folder, &self.settings, path)
+    }
+
+    /// What [`Matter::restore`] of `from` (taking back the restore `undoes`) would do now,
+    /// from the same plan, with the files a program holds in `locked` instead of failing.
+    /// Writes nothing: no object, no stat cache, no checkpoint.
     pub fn preview_restore(
         &self,
         from: CheckpointId,
         files: RestoreFiles<'_>,
+        undoes: Option<CheckpointId>,
     ) -> Result<RestorePlan, Error> {
         json::check(&self.folder, self.id)?;
-        restore::preview(&self.core, &self.folder, &self.settings, from, files)
+        restore::preview(
+            &self.core,
+            &self.folder,
+            &self.settings,
+            from,
+            files,
+            undoes,
+        )
     }
 
     /// The files that differ from `from` to `to`, sorted by path, unflagged.
@@ -502,6 +552,13 @@ fn refuse_marker(marker: Marker) -> Result<(), Error> {
         Marker::None => Ok(()),
         Marker::EmptyRepository => Err(Error::MarkerNotBuilt),
     }
+}
+
+/// Whether matter `id` has a history under the matters root (`<matters root>/<id>`, whatever it
+/// holds): an import under that id is refused with [`Error::HistoryExists`]. For the host, which
+/// adopts a marker naming a matter it does not list only when this says no.
+pub fn history_exists(settings: &Settings, id: MatterId) -> Result<bool, Error> {
+    exists(&matter_home(settings, id))
 }
 
 /// `<matters root>/<matter id>`.

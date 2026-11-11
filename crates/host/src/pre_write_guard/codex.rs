@@ -1,16 +1,19 @@
 //! The Codex side of the guard: a patch's targets, and the matter's `.codex` folder
 //! (clauseo-acp-private#184).
 
+use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 
-use super::{existing_resolved, lexical};
+use super::{Reach, lexical};
+use crate::network_paths::name_folds_to;
 
 /// Whether `path`, taken from `base`, is `<folder>/.codex` or lies under it, resolved
-/// canonically or lexically.
-pub(super) fn in_codex_folder(folder: &Path, base: &Path, path: &Path) -> bool {
+/// by the network-safe walk (never when it is or leads to a network location, [`Reach::walked`],
+/// its walked path used as it is) or lexically.
+pub(super) fn in_codex_folder(folder: &Path, base: &Path, path: &Path, reach: &Reach) -> bool {
     let absolute = base.join(path);
-    let root = dunce::canonicalize(folder).unwrap_or_else(|_| folder.to_path_buf());
-    if let Some(inside) = clauseo_matters::matter_path_in(&root, &existing_resolved(&absolute))
+    if let Some(walked) = reach.walked(&absolute)
+        && let Some(inside) = clauseo_matters::matter_path_of_resolved(folder, &walked)
         && inside.as_str().split('/').next().is_some_and(is_codex)
     {
         return true;
@@ -22,10 +25,10 @@ pub(super) fn in_codex_folder(folder: &Path, base: &Path, path: &Path) -> bool {
         .is_some_and(|first| first.as_os_str().to_str().is_some_and(is_codex))
 }
 
-/// Whether `name` is `.codex`, ignoring ASCII case and trailing dots and spaces.
+/// Whether `name` is `.codex`, ignoring trailing dots and spaces and case, folded as a
+/// case-insensitive volume folds names ([`name_folds_to`]: a refusal, so over-matching is safe).
 fn is_codex(name: &str) -> bool {
-    name.trim_end_matches(['.', ' '])
-        .eq_ignore_ascii_case(".codex")
+    name_folds_to(OsStr::new(name.trim_end_matches(['.', ' '])), ".codex")
 }
 
 /// Whether any part of `path`, split at `/` and `\\`, is `.codex` ([`is_codex`]).
@@ -58,4 +61,17 @@ pub(super) fn patch_targets(patch: &str) -> Vec<PathBuf> {
                 .map(PathBuf::from)
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    /// `.codex` is refused in every case and with trailing dots and spaces (it has no `s` or
+    /// `k` for the long s or the Kelvin sign to stand for).
+    #[test]
+    fn a_codex_folder_is_found_in_any_folded_spelling() {
+        for name in [".codex", ".CODEX", ".CoDeX", ".codex. "] {
+            assert!(super::is_codex(name), "{name}");
+        }
+        assert!(!super::is_codex(".codexx"));
+    }
 }

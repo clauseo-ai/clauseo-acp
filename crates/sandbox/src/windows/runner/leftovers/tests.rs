@@ -1,11 +1,9 @@
 //! The removal through a fake: each kind listed and deleted, one failing kind leaving the rest,
-//! and counts alone in the log.
+//! counts alone in the log, and no kind reached over COM or naming tasks or BITS.
 
 use std::collections::{BTreeMap, BTreeSet};
 
 use super::*;
-
-const POOL: &str = "S-1-5-21-1111111111-2222222222-3333333333-1001";
 
 /// Items by kind, each a name the log must never carry.
 #[derive(Default)]
@@ -23,7 +21,6 @@ struct Fake {
 fn key(kind: Kind) -> &'static str {
     match kind {
         Kind::Classes => "classes",
-        Kind::Tasks => "tasks",
         Kind::RunKeys => "run",
         Kind::Startup => "startup",
     }
@@ -59,8 +56,6 @@ fn full() -> Fake {
     fake.items
         .insert("classes", vec!["CLSID", "Wow6432Node\\CLSID"]);
     fake.items
-        .insert("tasks", vec!["\\Evil\\AtLogon", "\\Updater"]);
-    fake.items
         .insert("run", vec!["Run\\backdoor", "RunOnce\\once"]);
     fake.items
         .insert("startup", vec!["evil.lnk", "subdir", "x.bat"]);
@@ -68,7 +63,7 @@ fn full() -> Fake {
 }
 
 fn run(fake: &mut Fake) -> (bool, Vec<String>) {
-    run_kinds(fake, &Kind::ALL)
+    run_kinds(fake, &Kind::LOCAL)
 }
 
 fn run_kinds(fake: &mut Fake, kinds: &[Kind]) -> (bool, Vec<String>) {
@@ -94,8 +89,6 @@ fn each_kind_is_listed_and_every_item_deleted() {
             "evil.lnk",
             "subdir",
             "x.bat",
-            "\\Evil\\AtLogon",
-            "\\Updater",
         ]
     );
     assert_eq!(
@@ -104,7 +97,6 @@ fn each_kind_is_listed_and_every_item_deleted() {
             "clauseo-sandbox-run: cleanup (before launch): removed 2 per-user COM class keys",
             "clauseo-sandbox-run: cleanup (before launch): removed 2 Run and RunOnce values",
             "clauseo-sandbox-run: cleanup (before launch): removed 3 Startup folder entries",
-            "clauseo-sandbox-run: cleanup (before launch): removed 2 scheduled tasks",
         ]
     );
 }
@@ -118,120 +110,62 @@ fn nothing_left_is_clean_and_silent() {
 #[test]
 fn one_kind_failing_leaves_the_others_and_the_log_names_no_item() {
     let mut fake = full();
-    fake.deny_list.insert("tasks");
+    fake.deny_list.insert("run");
     fake.deny_delete.insert("evil.lnk");
     let (clean, lines) = run(&mut fake);
     assert!(!clean);
-    // The classes, the Run values and the other Startup entries are still deleted.
+    // The classes and the other Startup entries are still deleted.
     assert_eq!(
         fake.deleted,
-        [
-            "CLSID",
-            "Wow6432Node\\CLSID",
-            "Run\\backdoor",
-            "RunOnce\\once",
-            "subdir",
-            "x.bat",
-        ]
+        ["CLSID", "Wow6432Node\\CLSID", "subdir", "x.bat"]
     );
     assert_eq!(
         lines,
         [
             "clauseo-sandbox-run: cleanup (before launch): removed 2 per-user COM class keys",
-            "clauseo-sandbox-run: cleanup (before launch): removed 2 Run and RunOnce values",
+            "clauseo-sandbox-run: cleanup (before launch): the Run and RunOnce values can't be \
+             listed (1058)",
             "clauseo-sandbox-run: cleanup (before launch): removed 2 Startup folder entries, 1 \
              couldn't be (5)",
-            "clauseo-sandbox-run: cleanup (before launch): the scheduled tasks can't be listed \
-             (1058)",
         ]
     );
     for line in &lines {
-        for name in [
-            "Evil", "Updater", "backdoor", "once", "evil", "subdir", "x.bat",
-        ] {
+        for name in ["CLSID", "backdoor", "once", "evil", "subdir", "x.bat"] {
             assert!(!line.contains(name), "{line} names {name}");
         }
     }
 }
 
 #[test]
-fn the_inner_lists_nothing_over_com() {
-    let mut fake = full();
-    let (clean, lines) = run_kinds(&mut fake, &Kind::LOCAL);
-    assert!(clean);
-    assert!(Kind::LOCAL.iter().all(|kind| !kind.over_com()));
-    assert_eq!(lines.len(), 3, "{lines:?}");
-    assert!(!fake.deleted.contains(&"\\Updater"), "{:?}", fake.deleted);
-}
-
-#[test]
-fn the_classes_go_first_and_com_waits_for_them() {
-    assert_eq!(Kind::ALL.first(), Some(&Kind::Classes));
+fn the_classes_go_first_and_a_failed_class_removal_leaves_the_rest() {
     assert_eq!(Kind::LOCAL.first(), Some(&Kind::Classes));
-    // A class key that can't be deleted keeps the end sweeper off COM.
     let mut fake = full();
     fake.deny_delete.insert("CLSID");
-    let (clean, lines) = run(&mut fake);
+    let (clean, _) = run(&mut fake);
     assert!(!clean);
-    assert!(!fake.deleted.contains(&"\\Updater"));
+    assert!(
+        fake.deleted.contains(&"Run\\backdoor"),
+        "the rest still run"
+    );
     assert!(fake.deleted.contains(&"x.bat"), "the rest still run");
-    let skipped = lines
-        .iter()
-        .filter(|l| l.contains("weren't listed"))
-        .count();
-    assert_eq!(skipped, 1, "{lines:?}");
-    // So does a class list that fails.
     let mut fake = full();
     fake.deny_list.insert("classes");
     let (clean, _) = run(&mut fake);
     assert!(!clean);
-    assert!(!fake.deleted.contains(&"\\Updater"));
+    assert!(fake.deleted.contains(&"x.bat"));
 }
 
 #[test]
-fn the_classes_are_listed_once_and_no_bits_job_is_a_kind() {
-    // No BITS step: no second class list right before it, and no kind reached over COM but the
-    // tasks, whose class object comes from System32's module with no lookup.
+fn the_classes_are_listed_once_and_no_task_or_bits_job_is_a_kind() {
+    // The pool user's tasks and BITS jobs are the SYSTEM sweep task's: no kind here names them.
     let mut fake = full();
     assert!(run(&mut fake).0);
     assert_eq!(fake.class_lists, 1);
-    assert_eq!(Kind::ALL.last(), Some(&Kind::Tasks));
-    let over_com: Vec<Kind> = Kind::ALL
-        .into_iter()
-        .filter(|kind| kind.over_com())
-        .collect();
-    assert_eq!(over_com, [Kind::Tasks]);
-    assert!(
-        Kind::ALL
-            .iter()
-            .all(|kind| !kind.to_string().contains("BITS"))
-    );
-}
-
-#[test]
-fn a_task_names_the_pool_user_by_sid_or_account() {
-    let sid = Sid::parse(POOL).unwrap();
-    for named in [
-        POOL,
-        "ClauseoSb03",
-        "clauseosb03",
-        "DESKTOP-1\\ClauseoSb03",
-        ".\\ClauseoSb03",
-        " ClauseoSb03 ",
-    ] {
-        assert!(names_user(named, &sid, "ClauseoSb03"), "{named}");
+    assert_eq!(Kind::LOCAL, [Kind::Classes, Kind::RunKeys, Kind::Startup]);
+    for kind in Kind::LOCAL {
+        let name = kind.to_string();
+        assert!(!name.contains("BITS") && !name.contains("task"), "{name}");
     }
-    for named in [
-        "",
-        "ClauseoSb04",
-        "DESKTOP-1\\Lawyer",
-        "S-1-5-18",
-        "SYSTEM",
-        "ClauseoSb03x",
-    ] {
-        assert!(!names_user(named, &sid, "ClauseoSb03"), "{named}");
-    }
-    assert!(!names_user("", &sid, ""));
 }
 
 #[test]

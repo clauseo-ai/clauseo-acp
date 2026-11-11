@@ -122,8 +122,9 @@ Amended by H9 (2026-11-02), the brief's "Later" list. The code is `actor/turn/qu
   turn stays queued, held.
 
 The undo note (QR11.1) is not logged. Its words: "Note from Clauseo: since your last turn, the
-lawyer put these files back to an earlier version: notes/a.txt, brief.txt. Read them again before
-relying on what you remember about them." The paths are the undo and restore checkpoints' files
+lawyer put these files back to an earlier version, and removed those it did not have: notes/a.txt,
+brief.txt. Read them again before relying on what you remember about them." The removed files are
+those an undo deleted (its turn made them) and those a restore that undoes another deleted. The paths are the undo and restore checkpoints' files
 since the thread's last `TurnStarted`. An undo keeps the writer and leaves the note unchanged
 until `StepUndone` is durable; a failed undo commit is retried once, as a turn's end is.
 
@@ -151,6 +152,11 @@ until `StepUndone` is durable; a failed undo commit is retried once, as a turn's
   nothing to write logs only the outside edits (and the reused id, if the log lacks it) and
   answers `VersionRestored` with the reused id, as `UndoStep` does: the missing
   `VersionRestored` event, not the outcome, tells the client nothing was written.
+- `RestoreVersion { undoes }` takes back an earlier restore: the files that restore added (in
+  its tree, not the checkpoint before it) are deleted too, each only while it holds what the
+  restore wrote; `PreviewRestore { undoes }` lists them in `removes`. `RestoreVersion { thread }`
+  names the conversation it was asked from (one of the matter's, else `command.invalid`): the
+  same commit logs `VersionRestored` in that thread's stream, where it folds to the same marker.
 - The files a restore wrote join the note of every thread of the matter once its commit is
   durable. `VersionRestored` does not list them, so this part of the note is held in memory and
   lost if the host restarts before that thread's next prompt (clauseo-acp-private#183 makes it

@@ -9,8 +9,9 @@
 //! [`stop`] ends both as the guard's exit does: on Windows the job; on Unix agent-browser's
 //! process group, the run's daemon (`reaper::kill_daemon`) and Chrome's group, each reaped here
 //! and told to the reaper. The profile stays until the guard exits. The relay stops the browser
-//! after [`IDLE_STOP`] with no tool call in flight or completed, when Chrome dies the first time
-//! (the next call starts it again), and when the guard ends.
+//! after [`IDLE_STOP`] with no tool call in flight or completed, once the agent's
+//! `agent_browser_close` is answered, when Chrome dies the first time (the next call starts it
+//! again), and when the guard ends.
 //!
 //! Each start and each stop moves the generation on. What an incarnation's threads report
 //! carries its generation, and the relay ignores what an ended one reports, so a child the guard
@@ -40,7 +41,8 @@ use super::{Child, ChildStdin, PARENT_GONE, env, note, now, pause};
 
 /// How long the browser runs with no tool call in flight or completed before the guard stops
 /// it: agent-browser's own idle timeout, `AGENT_BROWSER_IDLE_TIMEOUT_MS` (`env::FIXED`), so the
-/// daemon's end and the guard's stop come together rather than one undoing the other.
+/// daemon's end and the guard's stop come together rather than one undoing the other. An agent
+/// that closes the browser (`agent_browser_close`, `relay.rs`) stops it sooner.
 pub(crate) const IDLE_STOP: Duration = Duration::from_secs(600);
 /// Tests only (the `test-support` feature, never in a shipped build): the idle stop in
 /// milliseconds, read from the guard's own environment.
@@ -87,8 +89,8 @@ pub(crate) struct Launcher {
     pub(crate) run: String,
     pub(crate) profile: PathBuf,
     pub(crate) cdp_port: u16,
-    /// `AGENT_BROWSER_PROXY`.
-    pub(crate) proxy: OsString,
+    /// `AGENT_BROWSER_PROXY`, if the host gave one.
+    pub(crate) proxy: Option<OsString>,
     /// [`env::chrome_env`].
     pub(crate) chrome_env: BTreeMap<String, OsString>,
     /// agent-browser's file and arguments.
@@ -121,7 +123,7 @@ impl Launcher {
             run: "1-0000abcd".to_owned(),
             profile: dir.join("chrome-profile-1-0000abcd"),
             cdp_port: 61_101,
-            proxy: OsString::from("http://127.0.0.1:9"),
+            proxy: Some(OsString::from("http://127.0.0.1:9")),
             chrome_env: BTreeMap::new(),
             program: dir.join("agent-browser"),
             args: Vec::new(),
@@ -159,6 +161,7 @@ impl Shared {
                 generation: 0,
                 live: None,
                 in_flight: Vec::new(),
+                sent: 0,
                 idle_since: now(),
                 restarted: false,
                 closing: false,
@@ -178,9 +181,12 @@ pub(crate) struct State {
     pub(crate) generation: u64,
     /// Chrome and agent-browser, while they run.
     pub(crate) live: Option<Live>,
-    /// The requests sent to the running agent-browser and not yet answered: each id, and
-    /// whether it is a tool call.
-    in_flight: Vec<(Value, bool)>,
+    /// The requests sent to the running agent-browser and not yet answered: each id, and what
+    /// it is.
+    in_flight: Vec<(Value, Request)>,
+    /// How many requests have gone to agent-browser in the guard's life: a close's stop is
+    /// skipped once another has gone since its reply was taken (`relay.rs`).
+    sent: u64,
     /// When the browser started or last answered a tool call.
     idle_since: Instant,
     /// Whether Chrome has died once already; a second death ends the guard.
@@ -190,6 +196,24 @@ pub(crate) struct State {
     /// Set by the relay's end, under this lock, before its final [`stop`]: from then on no
     /// request starts the browser or a one-shot agent-browser; each gets an error instead.
     pub(crate) ended: bool,
+}
+
+/// What a request sent to the running agent-browser is.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Request {
+    /// A tool call but `agent_browser_close`.
+    Call,
+    /// An `agent_browser_close` call: its reply stops the browser (`relay.rs`).
+    Close,
+    /// Any other request (`tools/list`, `ping`).
+    Other,
+}
+
+impl Request {
+    /// Whether it is a tool call, whose reply restarts the idle time.
+    pub(crate) fn is_call(self) -> bool {
+        self != Request::Other
+    }
 }
 
 /// The running Chrome and agent-browser.
@@ -209,21 +233,38 @@ pub(crate) struct Stopped {
 
 impl State {
     /// Notes request `id` sent to the running agent-browser.
-    pub(crate) fn sent(&mut self, id: Value, call: bool) {
-        self.in_flight.push((id, call));
+    pub(crate) fn sent(&mut self, id: Value, request: Request) {
+        self.in_flight.push((id, request));
+        self.sent += 1;
     }
 
-    /// Takes the reply to `id` off the list, and returns whether it answers a tool call. A tool
-    /// call's reply restarts the idle time.
-    pub(crate) fn answered(&mut self, id: &Value) -> bool {
-        let Some(at) = self.in_flight.iter().position(|(sent, _)| sent == id) else {
-            return false;
-        };
-        let (_, call) = self.in_flight.remove(at);
-        if call {
+    /// How many requests have gone to agent-browser so far.
+    pub(crate) fn sent_count(&self) -> u64 {
+        self.sent
+    }
+
+    /// Takes the reply to `id` off the list, and returns what it answers (`None` for no request
+    /// in flight). A tool call's reply restarts the idle time.
+    pub(crate) fn answered(&mut self, id: &Value) -> Option<Request> {
+        let at = self.in_flight.iter().position(|(sent, _)| sent == id)?;
+        let (_, request) = self.in_flight.remove(at);
+        if request.is_call() {
             self.idle_since = now();
         }
-        call
+        Some(request)
+    }
+
+    /// Whether the browser runs with nothing in flight and the agent still there.
+    pub(crate) fn quiet(&self) -> bool {
+        self.live.is_some() && self.in_flight.is_empty() && !self.closing
+    }
+
+    /// Whether the stop after an `agent_browser_close` reply may run (`relay.rs`): the browser
+    /// is [`State::quiet`] and no request has gone to agent-browser since the close's reply was
+    /// taken, when [`State::sent_count`] read `sent`. A call sent and answered in between would
+    /// leave the browser quiet, and the stop would end the Chrome that call just used.
+    pub(crate) fn close_may_stop(&self, sent: u64) -> bool {
+        self.quiet() && self.sent == sent
     }
 
     /// The ids still unanswered, which the guard now answers itself.
@@ -234,7 +275,7 @@ impl State {
     /// How long until the browser has idled for `idle`: `None` unless it runs with nothing in
     /// flight and the agent is still there.
     pub(crate) fn idle_left(&self, idle: Duration) -> Option<Duration> {
-        (self.live.is_some() && self.in_flight.is_empty() && !self.closing)
+        self.quiet()
             .then(|| idle.saturating_sub(self.idle_since.elapsed()))
     }
 }
@@ -270,7 +311,7 @@ fn start_both(
         cwd: &launcher.cwd,
         profile: &launcher.profile,
         cdp_port: launcher.cdp_port,
-        proxy: &launcher.proxy,
+        proxy: launcher.proxy.as_deref(),
         env: &launcher.chrome_env,
     };
     record::write_state(&launcher.cwd, &launcher.run, &ChromeState::Starting);
@@ -408,4 +449,29 @@ fn wait_for_port(port: u16, parent: &Parent) -> Result<(), String> {
         "the claimed debugging port {port} stayed taken for {} s",
         PORT_WAIT.as_secs()
     ))
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use serde_json::json;
+
+    use super::{Request, Shared};
+
+    /// A call sent and answered after a close's reply was taken leaves nothing in flight, but
+    /// moves the count on, so the close's stop is skipped (`relay.rs`'s `stop_after_close`):
+    /// without the count the stop would end the Chrome that call had just used.
+    #[test]
+    fn a_call_answered_after_the_close_moves_the_count_on() {
+        let dir = std::env::temp_dir();
+        let shared = Shared::new(super::Launcher::for_tests(&dir, Vec::new()));
+        let mut state = shared.state.lock().unwrap();
+        state.sent(json!("close"), Request::Close);
+        assert_eq!(state.answered(&json!("close")), Some(Request::Close));
+        let at_close = state.sent_count();
+        assert_eq!(state.in_flight.len(), 0);
+        state.sent(json!("open"), Request::Call);
+        assert_eq!(state.answered(&json!("open")), Some(Request::Call));
+        assert_eq!(state.in_flight.len(), 0, "the open is answered");
+        assert_ne!(state.sent_count(), at_close, "the open went unnoticed");
+    }
 }

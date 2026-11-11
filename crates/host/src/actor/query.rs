@@ -7,6 +7,8 @@
 //! (`turn/undo_preview.rs`). `FolderSupport` checks a picked folder off the actor
 //! (`query/folder_support.rs`), and `ListSkillPacks` reads the skill packs off it
 //! (`query/skill_packs.rs`). `Protection` answers from the cached detection (`protection.rs`).
+//! `WordBlackline` copies a document's two sides on the matter's worker and runs stetdoc on a
+//! thread of its own (`query/blackline.rs`).
 
 use clauseo_matters::CompareSide;
 use clauseo_protocol::{
@@ -28,7 +30,9 @@ use crate::error::Error;
 use crate::log_file::Cause;
 use crate::matter_worker::{MatterJob, MatterReply};
 use crate::principal::{Access, authorize};
+use crate::revisions::RevisionsDone;
 
+pub(super) mod blackline;
 mod folder_support;
 mod skill_packs;
 
@@ -52,6 +56,10 @@ fn default_location(actor: &Actor, reply: Reply<QueryResult>) {
 }
 
 /// Answers one query.
+#[expect(
+    clippy::too_many_lines,
+    reason = "one arm per query, each calling out; a split would only scatter the match"
+)]
 pub(super) fn query(
     actor: &mut Actor,
     principal: &Principal,
@@ -116,6 +124,7 @@ pub(super) fn query(
             matter,
             checkpoint,
             ref scope,
+            undoes,
         } => {
             if let Err(invalid) = scope.check("PreviewRestore") {
                 let _gone = reply.send(Err(Error::Invalid(invalid)));
@@ -124,8 +133,10 @@ pub(super) fn query(
             let job = MatterJob::Preview {
                 from: checkpoint,
                 scope: scope.clone(),
+                undoes,
             };
-            matter_query(actor, matter, vec![checkpoint], job, reply);
+            let versions = std::iter::once(checkpoint).chain(undoes).collect();
+            matter_query(actor, matter, versions, job, reply);
         }
         HostQuery::PreviewUndo { thread, turn } => {
             super::turn::undo_preview::preview_undo(actor, thread, turn, reply);
@@ -153,6 +164,10 @@ pub(super) fn query(
             let _gone = reply.send(Ok(QueryResult::Protection(view)));
         }
         HostQuery::AllowedSites => super::allowed::list(actor, reply),
+        HostQuery::WordBlackline { .. } => blackline::word_blackline(actor, query, reply),
+        HostQuery::ListRevisions { matter, ref path } => {
+            super::revisions::list(actor, matter, path.clone(), reply);
+        }
         HostQuery::ListPapers { matter } => {
             if let Err(error) = actor.check_matter(matter) {
                 let _gone = reply.send(Err(error));
@@ -161,7 +176,8 @@ pub(super) fn query(
             super::papers::list(actor, matter, reply);
         }
         HostQuery::ListAgents => {
-            let agents = list_agents(&actor.effective.settings().agents);
+            let ids: Vec<String> = actor.effective.settings().agents.keys().cloned().collect();
+            let agents = list_agents(ids, &mut actor.agent_options);
             let _gone = reply.send(Ok(QueryResult::Agents(agents)));
         }
         HostQuery::ReadBlob { hash, offset, len } => {
@@ -182,14 +198,18 @@ pub(super) fn query(
     }
 }
 
-/// One summary per settings agent whose id is a valid `AgentId`, sorted by id (the map's
-/// order), with its kind. An id `AgentId` refuses could never name a thread, so it is left out.
-fn list_agents<T>(agents: &std::collections::BTreeMap<String, T>) -> Vec<AgentSummary> {
-    agents
-        .keys()
+/// One summary per settings agent (`ids`, sorted) whose id is a valid `AgentId`, with its kind
+/// and its kept config options. An id `AgentId` refuses could never name a thread, so it is left
+/// out.
+fn list_agents(
+    ids: Vec<String>,
+    options: &mut super::agent_options::AgentOptions,
+) -> Vec<AgentSummary> {
+    ids.into_iter()
         .filter_map(|id| AgentId::new(id.as_str()).ok())
         .map(|id| AgentSummary {
             kind: AgentKind::of(&id),
+            config_options: options.of(id.as_str()).to_vec(),
             id,
         })
         .collect()
@@ -243,6 +263,7 @@ pub(super) fn matter_answer(reply: MatterReply) -> Result<QueryResult, Error> {
             let plan = *plan;
             QueryResult::RestorePreview(RestorePreview {
                 changes: plan.writes,
+                removes: plan.removes,
                 added_since: plan.added_since,
                 kept: plan.kept,
                 locked: plan.locked,
@@ -251,6 +272,12 @@ pub(super) fn matter_answer(reply: MatterReply) -> Result<QueryResult, Error> {
         MatterReply::EditedSince(result) => {
             result.map(|edited_since| QueryResult::UndoPreview(UndoPreview { edited_since }))
         }
+        MatterReply::Revisions(done) => match *done {
+            RevisionsDone::Listed(result) => result.map(QueryResult::Revisions),
+            RevisionsDone::Decided(_) => Err(Error::Internal(
+                "a tracked-changes list got a decision's reply".to_owned(),
+            )),
+        },
         other @ (MatterReply::Created(_)
         | MatterReply::Imported(_)
         | MatterReply::Opened(_)
@@ -262,6 +289,7 @@ pub(super) fn matter_answer(reply: MatterReply) -> Result<QueryResult, Error> {
         | MatterReply::HeldOpen(_)
         | MatterReply::StillGone(_)
         | MatterReply::Papers(_)
+        | MatterReply::SidesWritten(_)
         | MatterReply::Discarded(_)) => Err(Error::Internal(format!(
             "a query answered with another job's reply: {other:?}"
         ))),

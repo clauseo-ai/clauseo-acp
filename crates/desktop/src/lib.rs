@@ -5,9 +5,9 @@
 //! Contract:
 //! - Two windows, both built in code (`tauri.conf.json` has none): `main` at setup, and
 //!   `settings` on `open_settings` or, on the Mac, the app menu's "Settings…" on Cmd+,
-//!   (`settings_window.rs`, `docs/decisions/0028-settings-window.md`). `settings` is made on
-//!   open and destroyed on close; a window's destruction drops its stream, and `main`'s
-//!   destroys `settings`, so closing `main` still ends the app.
+//!   (`menu.rs`, `settings_window.rs`, `docs/decisions/0028-settings-window.md`).
+//!   `settings` is made on open and destroyed on close; a window's destruction drops its stream,
+//!   and `main`'s destroys `settings`, so closing `main` still ends the app.
 //! - Setup opens the window first, then starts the host on a thread of its own
 //!   (`host_start.rs`), so the webview never waits for the store; a command sent before the host
 //!   is ready waits for it, and after a failed start gets that start's error. That thread starts
@@ -98,8 +98,9 @@
 //! - The TypeScript bindings in `ui/app/src/transport/bindings.ts` are written by a unit test
 //!   (`src/commands/bindings.rs`); tauri-specta and specta are dev-dependencies only.
 
-// The admin copy's refresh at start-up runs on Windows; its decision is tested everywhere.
-#[cfg(any(windows, test))]
+// The admin copy's refresh at start-up runs on Windows; its decision is tested everywhere, and
+// the updater's arm64 gate (update/arch.rs) reads it wherever the updater is built.
+#[cfg(any(test, not(target_os = "linux")))]
 mod admin_refresh;
 #[cfg(test)]
 mod agent_browser_pin;
@@ -123,6 +124,9 @@ mod jailed;
 mod machine_memory;
 #[cfg(feature = "marks")]
 mod marks;
+#[cfg(any(test, target_os = "macos"))]
+mod menu;
+mod native_mark;
 mod navigation;
 mod open;
 mod picked;
@@ -134,7 +138,10 @@ mod quit_signals;
 mod rust_only;
 mod settings_window;
 mod setup;
+mod smart_app_control;
 mod startup;
+#[cfg(test)]
+mod stetdoc_pin;
 #[cfg(test)]
 mod test_support;
 #[cfg(test)]
@@ -166,7 +173,9 @@ use quit::{Exit, SetupStop};
 use rust_only::PluginRustOnly;
 use tauri::webview::PageLoadEvent;
 use tauri::{App, AppHandle, Manager, RunEvent, Runtime, WebviewUrl, WebviewWindowBuilder};
-pub(crate) use window_events::{follows_limits, on_window_event, raise_main_window};
+pub(crate) use window_events::{follows_limits, on_any_window_event, raise_main_window};
+#[cfg(windows)]
+pub use window_size::ground_in_env;
 
 /// Bumped by `cargo xtask buildtime` to time an edit to this crate. Nothing reads it.
 pub const BUILDTIME_MARKER: u64 = 0;
@@ -219,12 +228,10 @@ pub fn run() -> tauri::Result<()> {
     // Where the quit stands (quit.rs), read by the run loop and the second start's callback.
     let exit = Arc::new(Exit::default());
     let launch_exit = Arc::clone(&exit);
-    // The Mac's app menu, with "Settings…" (settings_window.rs). Windows and Linux get none: a
-    // menu would be a bar on the undecorated window.
+    // The Mac's menu bar (menu.rs). Windows and Linux get none: a menu would be a bar on the
+    // undecorated window.
     #[cfg(target_os = "macos")]
-    let builder = builder
-        .menu(settings_window::app_menu)
-        .on_menu_event(|app, event| settings_window::on_menu_event(app, event.id().as_ref()));
+    let builder = menu::on_builder(builder);
     let builder = builder
         // First, so a second launch ends before any other plugin starts.
         .plugin_rust_only(tauri_plugin_single_instance::init(
@@ -281,6 +288,7 @@ pub fn run() -> tauri::Result<()> {
             commands::count_ui,
             commands::setup,
             commands::quit_app,
+            commands::open_privacy_settings,
             commands::page_marks,
             #[cfg(feature = "e2e")]
             e2e::perf_channel_bytes,
@@ -289,11 +297,7 @@ pub fn run() -> tauri::Result<()> {
             #[cfg(feature = "marks")]
             marks::marks_finish,
         ]))
-        // The task is short and bounded (one host command), like the bridge's others.
-        .on_window_event(|window, event| {
-            counts::on_window_event(window, event);
-            drop(on_window_event(window, event));
-        })
+        .on_window_event(on_any_window_event)
         .setup(|app| {
             // A quit signal from here on stops the agents as the normal quit does.
             #[cfg(unix)]
@@ -328,6 +332,8 @@ pub fn run() -> tauri::Result<()> {
             app.manage(dialogs::LastPick::default());
             app.manage(chooser::Chooser::started());
             open_main_window(app)?;
+            #[cfg(target_os = "macos")]
+            menu::follow_language(app.handle().clone());
             start_host(app.handle().clone(), start, locations, parts, egress::manage(app))?;
             Ok(())
         })
@@ -373,6 +379,8 @@ fn start_host<R: Runtime>(
     setup_parts: setup::SetupParts,
     proxies: Arc<egress::DesktopProxies>,
 ) -> std::io::Result<()> {
+    // Tauri's resource folder, where a Windows or Linux release bundles stetdoc (profile.rs).
+    let resource_dir = app.path().resource_dir().ok();
     let started = host_start::start_on_thread(start, move || {
         let began = open::now();
         // Off this thread: the host starts without Documents and takes it when it answers.
@@ -380,11 +388,13 @@ fn start_host<R: Runtime>(
             at.with_documents(&SystemDirs, &SystemEnv)
         });
         chooser::trace::mark("host start: Documents lookup started", began, "");
-        let profile = DesktopProfile::build(&locations)
+        let profile = DesktopProfile::build(&locations, resource_dir.as_deref())
             .map_err(|err| tracing::warn!(%err, "no launch profile: agents start without it"))
             .ok();
         chooser::trace::mark("host start: launch profile built", began, "");
-        let effective = load_effective(&locations);
+        let mut effective = load_effective(&locations);
+        // Before the host and the registry's follower see it: a first run takes the installer's.
+        ui_language::seed_from_registry(&mut effective);
         let setup_read = setup::SetupStart::read(&effective, &locations);
         // The host starts refusing launches until the keys load, and those policy blocks.
         let refusals = setup_read.launch_refusals();
@@ -394,6 +404,7 @@ fn start_host<R: Runtime>(
         let plans = Arc::new(std::sync::RwLock::new(setup::plans_of(&effective)));
         let network: setup::NetworkSlot =
             Arc::new(std::sync::RwLock::new(setup_read.network_at_start()));
+        let python = setup::PythonSlot::default();
         let readers = Arc::new(
             setup::SwappableReaders::new(
                 &effective,
@@ -412,6 +423,7 @@ fn start_host<R: Runtime>(
             reused: reused.clone(),
             plans: Arc::clone(&plans),
             network: Arc::clone(&network),
+            python: Arc::clone(&python),
             reread: Box::new(move || load_effective(&reread_at)),
             notes: key_notes,
         };
@@ -448,7 +460,7 @@ fn start_host<R: Runtime>(
             machine_memory::total_bytes,
             HostConfig::with_machine_memory,
         );
-        let hook = setup::SetupHook::new(keys, plans, network);
+        let hook = setup::SetupHook::new(keys, plans, network).with_python(python);
         // The updater, and a watch on the host that exits the app to install (update.rs).
         let config = egress::with_proxies(update::with_updater(&app, config, &locations), &proxies);
         update::start_host(&app, with_profile(config, profile, hook))
@@ -544,27 +556,35 @@ fn open_main_window(app: &App) -> tauri::Result<()> {
     let builder = WebviewWindowBuilder::new(app, MAIN_WINDOW, WebviewUrl::App("index.html".into()))
         .title(title)
         .window_classname(MAIN_WINDOW_CLASS)
-        .use_https_scheme(true)
-        .inner_size(width, height)
-        .center();
+        .use_https_scheme(true);
+    let builder = window_size::with_size(builder, (width, height)).center();
     // The ground from the first frame on Windows, before WebView2 starts (window_size.rs).
     let builder = window_size::with_ground(window_frame::with_frame(builder));
     // Tauri sends the CSP with the page only; the scripts, the colouring worker's among them,
     // get the same policy here (csp.rs). It goes nowhere but the app's pages (navigation.rs).
     let builder = navigation::guard(csp::on_scripts(builder, app), app);
+    // The app's language, before any page script: the first paint is in it (ui_language.rs).
+    let builder = match ui_language::first_paint_script() {
+        Some(script) => builder.initialization_script(script),
+        None => builder,
+    };
     // The page's perf globals, before any page script.
     #[cfg(feature = "e2e")]
     let builder = builder.initialization_script(e2e::init_script());
-    // The page's load, for the start-up's marks (startup.rs).
-    let builder = builder.on_page_load(|_window, payload| match payload.event() {
+    // The page's load, for the start-up's marks (startup.rs); the native mark goes with the first.
+    let builder = builder.on_page_load(|window, payload| match payload.event() {
         PageLoadEvent::Started => startup::mark("main window page load started"),
-        PageLoadEvent::Finished => startup::mark("main window page load finished"),
+        PageLoadEvent::Finished => {
+            startup::mark("main window page load finished");
+            native_mark::remove(&window);
+        }
     });
     let built = settings_window::number_build(app);
     // On Windows the build waits for WebView2's environment and controller (wry's
-    // `wait_with_pump`): the two marks around it time that.
+    // `wait_with_pump`): the two marks around it time that. The window shows the quiet mark
+    // through it on Windows (native_mark.rs).
     startup::mark("main window build started");
-    let window = builder.build()?;
+    let window = native_mark::through_build(|| builder.build())?;
     startup::mark("main window built");
     window_size::paint_first_frame(&window);
     window_frame::after_build(&window);

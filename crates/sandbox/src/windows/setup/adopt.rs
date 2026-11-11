@@ -26,14 +26,17 @@
 //!    `TrustedInstaller` can change (`admin_copy::level_safe`). Else `Usage`;
 //! 5. the admin folder holds only the copy, its signature and `staging\` (anything else is
 //!    deleted), and it and everything in it get the locked owner and DACL, read back exactly
-//!    (`admin_copy::locked`), else `Failed`;
+//!    (`admin_copy::locked`), else `Failed`. Once the record names the pool's group
+//!    (`GroupSid`), that DACL denies it everything; a first install's has no group yet, and its
+//!    set-up locks again once it records one;
 //! 6. per user, the SYSTEM tasks (`refresh::register_task`, PR 3) are registered for the
-//!    lawyer, in `refresh::TASKS`' order: `\Clauseo\SandboxRefresh`, then `\Clauseo\SandboxStop`.
-//!    Either failing is `Failed` with no value written, so the launcher's check finds the copy
-//!    missing rather than running it with no task to refresh it or to stop the pool's processes
-//!    (a refresh before the values exist exits 33, changing nothing). A per-machine install
-//!    doesn't update itself and has no owner yet, so it gets neither here; its set-up registers
-//!    the stop task for the owner it records (`late_steps::stop_task`);
+//!    lawyer, in `refresh::TASKS`' order: `\Clauseo\SandboxRefresh`, `\Clauseo\SandboxStop`,
+//!    then `\Clauseo\SandboxSweep`. Any failing is `Failed` with no value written, so the
+//!    launcher's check finds the copy missing rather than running it with no task to refresh
+//!    it, to stop the pool's processes or to sweep its tasks (a refresh before the values exist
+//!    exits 33, changing nothing). A per-machine install doesn't update itself and has no owner
+//!    yet, so it gets none here; its set-up registers the stop and sweep tasks for the owner it
+//!    records (`late_steps::stop_task`);
 //! 7. the copy's SHA-256, read from its file in the admin folder (a reparse point refused), the
 //!    install folder, this build's version and the owner (the SID, or `machine`) are written as
 //!    the record's `AdminCopySha256`, `UserInstallDir`, `AdminCopyVersion` and
@@ -48,6 +51,7 @@
 
 use std::path::{Path, PathBuf};
 
+use super::explain::{AdoptFailure, AdoptStep, Cause};
 use super::outcome::SetupExit;
 use super::record_values::{AdminValues, CopyOwner};
 use crate::Blocked;
@@ -74,41 +78,45 @@ pub enum Target {
     Machine,
 }
 
-/// What `--adopt` reads and changes. Errors are causes for the log, never shown to anyone.
+/// What `--adopt` reads and changes. Errors are causes for the log and the result file, never
+/// shown to anyone.
 pub trait Adopter {
     /// `%ProgramFiles%`, from `FOLDERID_ProgramFiles`.
-    fn program_files(&mut self) -> Result<PathBuf, String>;
+    fn program_files(&mut self) -> Result<PathBuf, Cause>;
     /// The final path of the running image, every link on the way resolved.
-    fn running_image(&mut self) -> Result<PathBuf, String>;
+    fn running_image(&mut self) -> Result<PathBuf, Cause>;
     /// This process's token: elevated, and LOCAL SYSTEM.
-    fn token(&mut self) -> Result<(bool, bool), String>;
+    fn token(&mut self) -> Result<(bool, bool), Cause>;
     /// The lawyer, once the unelevated installer's token user is `claimed` (`Owner::of_installer`).
-    fn installing_user(&mut self, claimed: &Sid) -> Result<Sid, String>;
+    fn installing_user(&mut self, claimed: &Sid) -> Result<Sid, Cause>;
     /// The record's pool owner (`OwnerSid`), admin copy owner (`AdminCopyOwner`) and version
     /// (`AdminCopyVersion`), each `None` when missing.
-    fn records(&mut self) -> Result<Records, String>;
+    fn records(&mut self) -> Result<Records, Cause>;
     /// `sid`'s profile folder (`ProfileList`), when it has one that isn't temporary.
-    fn profile_of(&mut self, sid: &Sid) -> Result<Option<PathBuf>, String>;
+    fn profile_of(&mut self, sid: &Sid) -> Result<Option<PathBuf>, Cause>;
     /// What is at `path`, never following a link.
     fn found(&mut self, path: &Path) -> Found;
     /// `path`'s owner and DACL, self-relative, read from the name itself.
-    fn security(&mut self, path: &Path) -> Result<Vec<u8>, String>;
+    fn security(&mut self, path: &Path) -> Result<Vec<u8>, Cause>;
     /// Deletes what the folder `dir` mustn't hold, then gives it, the copy `exe` and the rest
-    /// of what is in it their locked owner and DACL, read back.
-    fn lock_down(&mut self, dir: &Path, exe: &Path) -> Result<(), String>;
+    /// of what is in it their locked owner and DACL, read back, denying `group` when given.
+    fn lock_down(&mut self, dir: &Path, exe: &Path, group: Option<&Sid>) -> Result<(), Cause>;
     /// The SHA-256 of `exe`, 64 lowercase hex digits; a reparse point refused.
-    fn sha256(&mut self, exe: &Path) -> Result<String, String>;
+    fn sha256(&mut self, exe: &Path) -> Result<String, Cause>;
     /// Tries the set-up lock without waiting: `Ok(false)` while another holds it.
-    fn lock(&mut self) -> Result<bool, String>;
+    fn lock(&mut self) -> Result<bool, Cause>;
     /// Gives the set-up lock back.
     fn unlock(&mut self);
     /// Writes the record's admin-copy values.
-    fn write_values(&mut self, values: &AdminValues) -> Result<(), String>;
+    fn write_values(&mut self, values: &AdminValues) -> Result<(), Cause>;
     /// Registers (or updates) the SYSTEM task `task` for the record owner `owner`
     /// (`refresh::register_task`, S15 tier B PR 3).
-    fn register_task(&mut self, task: SystemTask, owner: &Sid) -> Result<(), String>;
+    fn register_task(&mut self, task: SystemTask, owner: &Sid) -> Result<(), Cause>;
     /// The normal `--set-up` for the lawyer found and `data_dir`, in this process.
     fn set_up(&mut self, data_dir: &Path) -> SetupExit;
+    /// Records a step that failed (`explain.rs`): the Event Log's line, and, once the lawyer is
+    /// confirmed, `setup-result.json` written as them.
+    fn report(&mut self, failure: &AdoptFailure);
 }
 
 /// What [`Adopter::records`] reads.
@@ -120,6 +128,8 @@ pub struct Records {
     pub copy_owner: Option<CopyOwner>,
     /// `AdminCopyVersion`.
     pub version: Option<String>,
+    /// `GroupSid`: the pool's group, which the lock denies.
+    pub group: Option<Sid>,
 }
 
 /// Runs `--adopt` as the module says, for `target` with the install folder `install_dir`.
@@ -131,11 +141,11 @@ pub fn adopt(machine: &mut dyn Adopter, install_dir: &Path, target: &Target) -> 
             tracing::error!("--adopt needs an elevated token");
             return SetupExit::NotElevated;
         }
-        Err(error) => return failed("this process's token can't be read", &error),
+        Err(error) => return failed(machine, AdoptStep::Token, "this process's token", error),
     }
     let program_files = match machine.program_files() {
         Ok(path) => path,
-        Err(error) => return failed("Windows gave no Program Files folder", &error),
+        Err(error) => return failed(machine, AdoptStep::ProgramFiles, "Program Files", error),
     };
     let exe = admin_copy::admin_exe(&program_files);
     if let Err(exit) = check_place(machine, &program_files, &exe) {
@@ -149,10 +159,10 @@ pub fn adopt(machine: &mut dyn Adopter, install_dir: &Path, target: &Target) -> 
         && let Err(error) = machine.installing_user(owner_sid).and_then(|user| {
             (user == *owner_sid)
                 .then_some(())
-                .ok_or_else(|| "another user was found".to_owned())
+                .ok_or_else(|| Cause::from("another user was found"))
         })
     {
-        return failed("the lawyer can't be confirmed", &error);
+        return failed(machine, AdoptStep::Lawyer, "the lawyer", error);
     }
     match machine.lock() {
         Ok(true) => {}
@@ -160,7 +170,7 @@ pub fn adopt(machine: &mut dyn Adopter, install_dir: &Path, target: &Target) -> 
             tracing::error!("--adopt: a set-up, removal or refresh holds the set-up lock");
             return SetupExit::LockHeld;
         }
-        Err(error) => return failed("the set-up lock can't be taken", &error),
+        Err(error) => return failed(machine, AdoptStep::Lock, "the set-up lock", error),
     }
     let placed = place(machine, install_dir, target, &program_files, &exe, owner);
     machine.unlock();
@@ -182,7 +192,7 @@ fn place(
     exe: &Path,
     owner: CopyOwner,
 ) -> Result<(), SetupExit> {
-    check_records(machine, &owner)?;
+    let records = check_records(machine, &owner)?;
     let allowed = match target {
         Target::User {
             owner_sid,
@@ -208,19 +218,31 @@ fn place(
         return Err(SetupExit::Usage);
     }
     let dir = admin_copy::admin_dir(program_files);
-    if let Err(error) = machine.lock_down(&dir, exe) {
-        return Err(failed("the admin folder couldn't be locked down", &error));
+    if let Err(error) = machine.lock_down(&dir, exe, records.group.as_ref()) {
+        return Err(failed(
+            machine,
+            AdoptStep::LockDown,
+            "the admin folder",
+            error,
+        ));
     }
     let sha256 = match machine.sha256(exe) {
         Ok(sha256) if admin_copy::is_sha256_hex(&sha256) => sha256,
-        Ok(_) => return Err(failed("the admin copy's hash", "not a SHA-256")),
-        Err(error) => return Err(failed("the admin copy can't be hashed", &error)),
+        Ok(_) => {
+            let error = Cause::from("not a SHA-256");
+            return Err(failed(
+                machine,
+                AdoptStep::Hash,
+                "the admin copy's hash",
+                error,
+            ));
+        }
+        Err(error) => return Err(failed(machine, AdoptStep::Hash, "the admin copy", error)),
     };
     if let Target::User { owner_sid, .. } = target {
         for task in TASKS {
             if let Err(error) = machine.register_task(task, owner_sid) {
-                let what = format!("the task {} couldn't be registered", task.name());
-                return Err(failed(&what, &error));
+                return Err(failed(machine, AdoptStep::Task(task), task.name(), error));
             }
         }
     }
@@ -232,16 +254,20 @@ fn place(
     };
     if let Err(error) = machine.write_values(&values) {
         return Err(failed(
-            "the record's admin-copy values couldn't be written",
-            &error,
+            machine,
+            AdoptStep::Values,
+            "the admin values",
+            error,
         ));
     }
     Ok(())
 }
 
-/// Logs `what` and `error`, and gives [`SetupExit::Failed`].
-fn failed(what: &str, error: &str) -> SetupExit {
-    tracing::error!(%error, "--adopt: {what}");
+/// Logs `error` at `step` (`what` failed), reports it ([`Adopter::report`]), and gives
+/// [`SetupExit::Failed`].
+fn failed(machine: &mut dyn Adopter, step: AdoptStep, what: &str, error: Cause) -> SetupExit {
+    tracing::error!(error = %error.text, step = step.name(), "--adopt: {what} failed");
+    machine.report(&AdoptFailure { step, cause: error });
     SetupExit::Failed
 }
 
@@ -269,15 +295,21 @@ fn check_place(
             );
             Err(SetupExit::NotAdminCopy)
         }
-        Err(error) => Err(failed("the running image's final path is unknown", &error)),
+        Err(error) => Err(failed(
+            machine,
+            AdoptStep::RunningImage,
+            "the image's path",
+            error,
+        )),
     }
 }
 
-/// Step 3: one owner, of one kind, and no downgrade.
-fn check_records(machine: &mut dyn Adopter, owner: &CopyOwner) -> Result<(), SetupExit> {
-    let records = machine
-        .records()
-        .map_err(|error| failed("the machine's record can't be read", &error))?;
+/// Step 3: one owner, of one kind, and no downgrade; the records read.
+fn check_records(machine: &mut dyn Adopter, owner: &CopyOwner) -> Result<Records, SetupExit> {
+    let records = match machine.records() {
+        Ok(records) => records,
+        Err(error) => return Err(failed(machine, AdoptStep::Record, "the record", error)),
+    };
     let other_pool = match owner {
         CopyOwner::User(sid) => records.pool_owner.as_ref().is_some_and(|pool| pool != sid),
         CopyOwner::Machine => false,
@@ -296,7 +328,7 @@ fn check_records(machine: &mut dyn Adopter, owner: &CopyOwner) -> Result<(), Set
         tracing::error!("--adopt won't replace a newer admin copy; nothing changed");
         return Err(SetupExit::Downgrade);
     }
-    Ok(())
+    Ok(records)
 }
 
 /// The lawyer's profile (`ProfileList`); otherwise the exit.
@@ -307,6 +339,6 @@ fn user_profile(machine: &mut dyn Adopter, user: &Sid) -> Result<PathBuf, SetupE
             tracing::error!("--adopt: the lawyer has no profile");
             Err(SetupExit::Usage)
         }
-        Err(error) => Err(failed("the lawyer's profile can't be read", &error)),
+        Err(error) => Err(failed(machine, AdoptStep::Profile, "the profile", error)),
     }
 }

@@ -11,6 +11,10 @@ fn main() -> tauri::Result<()> {
     // (`navigation/browser_args.rs`).
     #[cfg(windows)]
     clauseo_desktop::keep_no_dns_in_env();
+    // Then WEBVIEW2_DEFAULT_BACKGROUND_COLOR: the webview's ground from its first frame, in the
+    // OS theme's colour (`window_size.rs`).
+    #[cfg(windows)]
+    clauseo_desktop::ground_in_env();
     // First: the pre-write guard, else the agent sandbox check, before Tauri, logging or
     // settings (`jailed.rs`).
     let args: Vec<std::ffi::OsString> = std::env::args_os().skip(1).collect();

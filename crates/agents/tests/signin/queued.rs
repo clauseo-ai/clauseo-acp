@@ -30,6 +30,11 @@ fn waiting() -> SigninState {
     }
 }
 
+/// The quick status check a sign-in makes once the install is ready shows `Checking` first.
+fn checking() -> SigninState {
+    SigninState::Checking
+}
+
 fn states(seen: &[Seen]) -> Vec<SigninState> {
     seen.iter()
         .filter_map(|seen| match seen {
@@ -80,7 +85,7 @@ fn a_sign_in_before_the_install_is_ready_queues_then_starts_by_itself() {
     agents.finish_install_for_tests(&claude(), Some(install));
     let (seen, last) = events.until_end();
     assert_eq!(last, signed_in());
-    assert_eq!(states(&seen), [waiting(), signed_in()]);
+    assert_eq!(states(&seen), [checking(), waiting(), signed_in()]);
     assert_eq!(fx.runs_of("login").len(), 1);
     assert_eq!(fx.lookups(), [HOST]);
 }
@@ -106,7 +111,7 @@ fn a_sign_in_while_offline_queues_retries_at_30_s_and_starts_once_the_host_resol
     fx.timer.fire(OFFLINE_WAIT);
     let (seen, last) = events.until_end();
     assert_eq!(last, signed_in());
-    assert_eq!(states(&seen), [waiting(), signed_in()]);
+    assert_eq!(states(&seen), [checking(), waiting(), signed_in()]);
     assert_eq!(fx.lookups(), [HOST, HOST, HOST]);
     assert_eq!(fx.runs_of("login").len(), 1);
 }
@@ -131,8 +136,9 @@ fn not_installed_and_offline_stays_queued_until_both_hold() {
     fx.timer.fire(OFFLINE_WAIT);
     let (seen, last) = events.until_end();
     assert_eq!(last, signed_in());
-    // `Queued` was sent once, before the wait for the network too.
-    assert_eq!(states(&seen), [waiting(), signed_in()]);
+    // `Queued` was sent once, before the wait for the network too; the quick check shows
+    // `Checking`.
+    assert_eq!(states(&seen), [checking(), waiting(), signed_in()]);
 }
 
 #[test]
@@ -204,7 +210,7 @@ fn a_failed_install_keeps_the_sign_in_queued_until_one_succeeds() {
     agents.finish_install_for_tests(&claude(), Some(install));
     let (seen, last) = events.until_end();
     assert_eq!(last, signed_in());
-    assert_eq!(states(&seen), [waiting(), signed_in()]);
+    assert_eq!(states(&seen), [checking(), waiting(), signed_in()]);
 }
 
 #[test]
@@ -219,8 +225,8 @@ fn a_new_sign_in_replaces_the_queued_one() {
     agents.finish_install_for_tests(&claude(), Some(install));
     let (seen, last) = events.until_end();
     assert!(matches!(last, SigninState::SignedIn { .. }), "{last:?}");
-    // The first job ended silently: one run, the second's.
-    assert_eq!(states(&seen).len(), 2, "{seen:?}");
+    // The first job ended silently: the second's `Checking` and `Waiting`, then `SignedIn`.
+    assert_eq!(states(&seen).len(), 3, "{seen:?}");
     let logins = fx.runs_of("login");
     assert_eq!(logins.len(), 1);
     assert!(logins[0].args.ends_with(&["--console".to_owned()]));

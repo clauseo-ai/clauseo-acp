@@ -296,3 +296,45 @@ fn off_macos_and_windows_an_owner_file_is_never_stale() {
         Some(HeldOpen::OwnerFile("~$nvoice.docx".to_owned()))
     );
 }
+
+/// A path the caller already resolved is compared as it is, never canonicalised again: a
+/// spelling the file system would resolve to the matter (here through `..`; a link swapped in
+/// after the caller's walk alike) is not resolved, while `matter_path_in`, which resolves the
+/// text, takes it.
+#[test]
+fn a_resolved_path_is_compared_as_it_is_never_resolved_again() {
+    use std::path::Path;
+
+    use super::{held_open_resolved, matter_path_in, matter_path_of_resolved};
+
+    let dir = TestDir::new("locks-resolved");
+    let matter = dir.path().join("m");
+    write::create_dir_all(&matter.join("sub")).unwrap();
+    for name in ["Brief.docx", "~$rief.docx"] {
+        drop(write::create_new(&matter.join(name)).unwrap());
+    }
+    let respelled = dir
+        .path()
+        .join("m")
+        .join("sub")
+        .join("..")
+        .join("..")
+        .join("m");
+    let through = respelled.join("Brief.docx");
+    assert_eq!(matter_path_in(&matter, &through), Some(path("Brief.docx")));
+    assert_eq!(matter_path_of_resolved(&matter, &through), None);
+    assert_eq!(held_open_resolved(&matter, &through), None);
+    let direct = matter.join("Brief.docx");
+    assert_eq!(
+        matter_path_of_resolved(&matter, &direct),
+        Some(path("Brief.docx"))
+    );
+    assert_eq!(
+        held_open_resolved(&matter, &direct).map(|(inside, _)| inside),
+        Some(path("Brief.docx"))
+    );
+    assert_eq!(
+        matter_path_of_resolved(&matter, Path::new("Brief.docx")),
+        None
+    );
+}

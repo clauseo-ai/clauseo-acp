@@ -1,19 +1,8 @@
 // The tool line's pure reading: which tools a header's list speaks for, each glyph's state and the line's name for every
-// pair of states, and each popover row's words for every ToolState and every Chrome download state.
+// pair of states, and each popover row's words for every ToolState, on a Mac and on Windows.
 import { expect, test } from "vitest";
-import type {
-  BrowserInstallFailure,
-  BrowserInstallState,
-  ToolState,
-} from "../transport/protocol.ts";
-import { FakeTransport } from "../transport/fake-transport.ts";
-import {
-  BrowserInstallStore,
-  failCodeOf,
-  type BrowserInstall,
-  type InstallFailCode,
-} from "./browser-install.ts";
-import { FAILED as FAILED_KEYS, toolRow, type ToolRowRoom } from "./tool-rows.ts";
+import type { ToolState } from "../transport/protocol.ts";
+import { toolRow, type ToolRowRoom } from "./tool-rows.ts";
 import {
   glyphState,
   knownTools,
@@ -29,10 +18,9 @@ const BROWSER: BrowserState[] = [
   "available",
   "off",
   "locked_off",
-  "managed_by_firm",
-  "no_proxy",
-  "too_many_browsers",
   "browser_not_installed",
+  "browser_blocked_by_policy",
+  "browser_policy_unreadable",
 ];
 const avail = (state: string): ToolState["availability"] =>
   state === "available" ? "available" : ({ unavailable: { reason: state } } as never);
@@ -42,13 +30,13 @@ test("knownTools keeps the tools and states it has words for, web search first, 
   expect(knownTools([])).toEqual([]);
   expect(
     knownTools([
-      { tool: "browser", availability: avail("no_proxy") },
+      { tool: "browser", availability: avail("browser_not_installed") },
       { tool: "web_search", availability: "available" },
       { tool: "web_search", availability: avail("off") },
     ]),
   ).toEqual([
     { tool: "web_search", state: "available" },
-    { tool: "browser", state: "no_proxy" },
+    { tool: "browser", state: "browser_not_installed" },
   ]);
   for (const w of WEB)
     expect(knownTools([{ tool: "web_search", availability: avail(w) }])).toEqual([
@@ -61,6 +49,9 @@ test("knownTools keeps the tools and states it has words for, web search first, 
 });
 
 test("a tool, an availability or a reason it doesn't know, or a reason with no words on that tool, says nothing", () => {
+  // the guarded browser's reasons never come for #870's shell browser, so they have no words
+  for (const gone of ["managed_by_firm", "no_proxy", "too_many_browsers"])
+    expect(knownTools([{ tool: "browser", availability: avail(gone) }])).toEqual([]);
   expect(
     knownTools([
       { tool: "unknown", availability: "available" },
@@ -78,10 +69,10 @@ const label = (web: WebState | null, browser: BrowserState | null) => {
   const tools: KnownTool[] = [];
   if (web !== null) tools.push({ tool: "web_search", state: web });
   if (browser !== null) tools.push({ tool: "browser", state: browser });
-  return toolsLabel("en", tools);
+  return toolsLabel("en", "mac", tools);
 };
 
-test("each glyph's state: on as drawn, the firm's lock for locked off and managed by firm, every other off slashed", () => {
+test("each glyph's state: on as drawn, the firm's lock for locked off and its policy, every other off slashed", () => {
   const web: Record<WebState, string> = {
     available: "on",
     off: "off",
@@ -92,10 +83,10 @@ test("each glyph's state: on as drawn, the firm's lock for locked off and manage
     available: "on",
     off: "off",
     locked_off: "locked",
-    managed_by_firm: "locked",
-    no_proxy: "off",
-    too_many_browsers: "off",
     browser_not_installed: "off",
+    browser_blocked_by_policy: "locked",
+    // not read is no firm's lock
+    browser_policy_unreadable: "off",
   };
   for (const w of WEB) expect(glyphState({ tool: "web_search", state: w })).toBe(web[w]);
   for (const b of BROWSER) expect(glyphState({ tool: "browser", state: b })).toBe(browser[b]);
@@ -104,29 +95,48 @@ test("each glyph's state: on as drawn, the firm's lock for locked off and manage
 test("the line's name and tooltip: one sentence per tool, web search first, its reason when off", () => {
   expect(label(null, null)).toBeNull();
   expect(label("available", "browser_not_installed")).toBe(
-    "Web search: on. Browser: off, needs Chrome.",
+    "Web search: on. Browser: off, install Chrome.",
   );
+  expect(
+    toolsLabel("en", "windows", [
+      { tool: "web_search", state: "available" },
+      { tool: "browser", state: "browser_not_installed" },
+    ]),
+  ).toBe("Web search: on. Browser: off, install Chrome or Edge.");
   expect(label("available", "available")).toBe("Web search: on. Browser: on.");
   expect(label("off", null)).toBe("Web search: off, in Settings.");
   expect(label(null, "off")).toBe("Browser: off, in Settings.");
-  expect(label("locked_off", "managed_by_firm")).toBe(
+  expect(label("locked_off", "locked_off")).toBe(
     "Web search: off, managed by firm. Browser: off, managed by firm.",
   );
-  expect(label("no_search_on_this_login", "no_proxy")).toBe(
-    "Web search: off, can't search on this login. Browser: off, not available yet.",
+  expect(label("no_search_on_this_login", null)).toBe(
+    "Web search: off, can't search on this login.",
   );
-  expect(label(null, "too_many_browsers")).toBe("Browser: off, too many browsers open.");
   expect(label(null, "locked_off")).toBe("Browser: off, managed by firm.");
+  expect(label("available", "browser_blocked_by_policy")).toBe(
+    "Web search: on. Browser: off, blocked by your firm.",
+  );
+  expect(label(null, "browser_policy_unreadable")).toBe(
+    "Browser: off, couldn't check browser settings.",
+  );
 });
 
 test("sameTools reads two lists the same only when every tool and state match", () => {
   const a: KnownTool[] = [{ tool: "browser", state: "off" }];
   expect(sameTools(a, [{ tool: "browser", state: "off" }])).toBe(true);
-  expect(sameTools(a, [{ tool: "browser", state: "no_proxy" }])).toBe(false);
+  expect(sameTools(a, [{ tool: "browser", state: "locked_off" }])).toBe(false);
   expect(sameTools(a, [])).toBe(false);
 });
 
-const ROOM: ToolRowRoom = { settings: true, install: null };
+const POLICY =
+  "Your firm doesn't allow apps to control a browser on this computer, so Clauseo can't use one for you.";
+const UNREADABLE =
+  "Clauseo couldn't check this computer's browser settings, so it won't use a browser for now. " +
+  "It checks again the next time it needs one.";
+const INSTALL_MAC = "Install Google Chrome, then start a new conversation.";
+const INSTALL_WINDOWS = "Install Google Chrome or Microsoft Edge, then start a new conversation.";
+
+const ROOM: ToolRowRoom = { settings: true, platform: "mac" };
 const words = (tool: KnownTool, room: Partial<ToolRowRoom> = {}) =>
   toolRow("en", tool, { ...ROOM, ...room });
 
@@ -135,11 +145,15 @@ test("each row: its glyph, name, an On or Off chip, and the reason in a few word
     available: null,
     off: "In Settings",
     locked_off: "Managed by firm",
-    managed_by_firm: "Managed by firm",
     no_search_on_this_login: "Can't search on this login",
-    no_proxy: "Not available yet",
-    too_many_browsers: "Too many browsers open",
-    browser_not_installed: "Needs Chrome",
+    browser_not_installed: "Install Chrome",
+    browser_blocked_by_policy: "Blocked by your firm",
+    browser_policy_unreadable: "Couldn't check browser settings",
+  };
+  const notes: Record<string, string> = {
+    browser_not_installed: INSTALL_MAC,
+    browser_blocked_by_policy: POLICY,
+    browser_policy_unreadable: UNREADABLE,
   };
   const rows: KnownTool[] = [
     ...WEB.map((state): KnownTool => ({ tool: "web_search", state })),
@@ -158,8 +172,11 @@ test("each row: its glyph, name, an On or Off chip, and the reason in a few word
       // In Settings sits in the chip's row
       beside: tool.state === "off",
       reasonTip: null,
+      // what to install, the firm's policy, or a policy not read, says it in full
+      note: notes[tool.state] ?? null,
       settings: tool.state === "off",
-      download: null,
+      // without the app feed, no Try again
+      recheck: null,
     });
   }
 });
@@ -168,233 +185,59 @@ test("Open Settings is offered only for Off in Settings, with the settings windo
   expect(words({ tool: "web_search", state: "off" }).settings).toBe(true);
   expect(words({ tool: "web_search", state: "off" }, { settings: false }).settings).toBe(false);
   expect(words({ tool: "browser", state: "locked_off" }).settings).toBe(false);
-  expect(words({ tool: "browser", state: "no_proxy" }).settings).toBe(false);
+  expect(words({ tool: "browser", state: "browser_not_installed" }).settings).toBe(false);
 });
 
-const DL = (bytes: number, total: number): BrowserInstallState => ({
-  downloading: { bytes, total },
-});
-const FAIL = (code: string): BrowserInstallState => ({
-  failed: { code: code as BrowserInstallFailure, message: "curl: (56) Recv failure" },
-});
-const missing = (install: BrowserInstall | null) =>
-  words({ tool: "browser", state: "browser_not_installed" }, { install });
-const offer = { progress: null };
-
-const NB = "\u00a0";
-
-test("no Chrome: the offer until a state says otherwise, and a reason in every one", () => {
-  expect(missing(null)).toMatchObject({ reason: "Needs Chrome", download: null });
-  expect(missing(offer)).toMatchObject({
-    reason: "Needs Chrome",
-    download: {
-      kind: "offer",
-      button: "Download Chrome",
-      size: `200${NB}MB`,
-      tip: `From Google, once. Needs 1${NB}GB free.`,
-    },
+test("no browser on the computer: what to install, by the OS, and that a new conversation then finds it", () => {
+  const missing: KnownTool = { tool: "browser", state: "browser_not_installed" };
+  expect(words(missing)).toMatchObject({
+    glyph: "off",
+    reason: "Install Chrome",
+    reasonTip: null,
+    note: INSTALL_MAC,
+    settings: false,
+    recheck: null,
   });
-  expect(
-    missing({ progress: { downloading: { bytes: 64_400_000, total: 200_000_000 } } }),
-  ).toMatchObject({
-    reason: "Needs Chrome",
-    download: {
-      kind: "progress",
-      value: 64_400_000,
-      max: 200_000_000,
-      text: `64 of 200${NB}MB`,
-      name: "Download Chrome",
-    },
+  expect(words(missing, { platform: "windows" })).toMatchObject({
+    reason: "Install Chrome or Edge",
+    note: INSTALL_WINDOWS,
   });
-  // the first Downloading has not brought the total yet: an empty bar, no words
-  expect(missing({ progress: { downloading: { bytes: 0, total: 0 } } }).download).toMatchObject({
-    kind: "progress",
-    value: 0,
-    max: 1,
-    text: "",
+  // Linux is for development only: Chrome, as on a Mac
+  expect(words(missing, { platform: "linux" })).toMatchObject({
+    reason: "Install Chrome",
+    note: INSTALL_MAC,
   });
-  // no bar while unpacking: DESIGN's bars are determinate only
-  expect(missing({ progress: "unpacking" }).download).toEqual({
-    kind: "unpacking",
-    text: "Unpacking",
-  });
-  // done keeps a reason: what Chrome is ready for, its tooltip saying when
-  expect(missing({ progress: "done" })).toMatchObject({
-    reason: "Ready for new conversations",
-    reasonTip: "The browser comes with your next conversation.",
-    beside: false,
-    chip: "Off",
-    download: { kind: "done" },
-  });
+  // a policy read has nothing to say to it
+  expect(words(missing, { policy: { state: "clear" } }).reason).toBe("Install Chrome");
 });
 
-const FAILED: Record<InstallFailCode, string> = {
-  network: "Connection dropped",
-  size_mismatch: "File didn't match",
-  signature: "File didn't match",
-  disk_space: `Needs 1${NB}GB free`,
-  host_refused: "Network blocked it",
-  unpack: "Couldn't unpack",
-  unsupported: "Install Chrome to use it",
-  cancelled: "Download stopped",
-  unknown: "Download failed",
-};
-
-test("a failed download's cause by its code, Try again for all but unsupported, never the host's message", () => {
-  expect(new Set(Object.keys(FAILED_KEYS))).toEqual(
-    new Set(Object.keys(FAILED).filter((c) => c !== "unsupported" && c !== "cancelled")),
-  );
-  for (const code of Object.keys(FAILED) as InstallFailCode[]) {
-    // a cancel is no failure: the store turns it into the offer (see the store tests), so no row gets it
-    if (code === "cancelled") continue;
-    const row = missing({
-      progress: { failed: { code, message: "curl: (56) Recv failure" } },
-    } as never);
-    expect(row.reason).toBe("Needs Chrome");
-    if (code === "unsupported") {
-      // this computer can't download it: a muted line, no Try again
-      expect(row.download).toEqual({ kind: "none", line: "Install Chrome to use it" });
-    } else {
-      expect(row.download).toEqual({ kind: "failed", cause: FAILED[code] });
-    }
-    expect(JSON.stringify(row)).not.toContain("curl");
-  }
+test("the firm's browser policy blocks every browser, on either OS", () => {
+  const blocked: KnownTool = { tool: "browser", state: "browser_blocked_by_policy" };
+  for (const platform of ["mac", "windows"] as const)
+    expect(words(blocked, { platform })).toMatchObject({
+      glyph: "locked",
+      reason: "Blocked by your firm",
+      reasonTip: null,
+      note: POLICY,
+      settings: false,
+    });
 });
 
-test("the host's failure code is an open enum: a value this version doesn't know is unknown", () => {
-  for (const code of Object.keys(FAILED)) expect(failCodeOf(code)).toBe(code);
-  expect(failCodeOf("disk")).toBe("unknown");
-  expect(failCodeOf("a_newer_code")).toBe("unknown");
-  expect(failCodeOf(undefined)).toBe("unknown");
-  expect(failCodeOf(7)).toBe("unknown");
-});
-
-test("every number before MB or GB in the download's words is held to its unit by a non-breaking space", () => {
-  const all = [
-    missing(offer),
-    missing({ progress: { downloading: { bytes: 1e6, total: 200_000_000 } } }),
-    missing({ progress: { failed: { code: "disk_space", message: "" } } }),
-  ].map((r) => JSON.stringify(r.download));
-  const joined = all.join(" ");
-  expect(joined).toMatch(/\d\u00a0(MB|GB)/);
-  expect(joined).not.toMatch(/\d[ \t\n](MB|GB)/);
-});
-
-/** A store over FakeTransport with the app feed. `first` is the catch-up the host sends a new subscriber; `refuse`
- * makes every install command fail, as a host refuses one. */
-function storeOver(options: { first?: BrowserInstallState[]; refuse?: boolean } = {}) {
-  const transport = new FakeTransport({
-    query: () => {
-      throw new Error("no query");
-    },
-    next: {
-      parts: ["app"],
-      query: () => Promise.reject(new Error("not scripted")),
-      first: () => (options.first ?? []).map((state) => ({ browser_install: { state } })),
-    },
-    dispatch: () => (options.refuse ? Promise.reject(new Error("the host refused it")) : "done"),
-  });
-  return { transport, store: new BrowserInstallStore(transport) };
-}
-const settle = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
-const installs = (transport: FakeTransport) =>
-  transport
-    .only("dispatch")
-    .map((c) => c.command.command)
-    .filter((c) => "install_browser" in c);
-
-test("a new store hears the catch-up: the latest state, or the offer when the host has none", async () => {
-  const none = storeOver();
-  await settle();
-  expect(none.store.get()).toEqual({ progress: null });
-  const running = storeOver({ first: [DL(50e6, 201e6)] });
-  await settle();
-  expect(running.store.get()).toEqual({ progress: { downloading: { bytes: 50e6, total: 201e6 } } });
-  // the last download's end, until the next one starts: a cancel is the offer again
-  const cancelled = storeOver({ first: [DL(1e6, 201e6), FAIL("cancelled")] });
-  await settle();
-  expect(cancelled.store.get()).toEqual({ progress: null });
-});
-
-test("Install sends install_browser once through dispatch, and the bar waits for the host's total", async () => {
-  const { transport, store } = storeOver();
-  await settle();
-  store.install();
-  expect(installs(transport)).toEqual([{ install_browser: {} }]);
-  expect(store.get().progress).toEqual({ downloading: { bytes: 0, total: 0 } });
-  transport.appEvent({ browser_install: { state: DL(64e6, 200e6) } });
-  expect(store.get().progress).toEqual({ downloading: { bytes: 64e6, total: 200e6 } });
-});
-
-test("a second Install while one runs sends nothing and shows no reset", async () => {
-  const { transport, store } = storeOver({ first: [DL(50e6, 201e6)] });
-  await settle();
-  store.install();
-  store.install();
-  expect(installs(transport)).toEqual([]);
-  expect(store.get().progress).toEqual({ downloading: { bytes: 50e6, total: 201e6 } });
-  transport.appEvent({ browser_install: { state: "unpacking" } });
-  store.install();
-  expect(installs(transport)).toEqual([]);
-  expect(store.get().progress).toBe("unpacking");
-});
-
-test("Try again after a failure sends Install again", async () => {
-  const { transport, store } = storeOver({ first: [FAIL("network")] });
-  await settle();
-  expect(store.get().progress).toEqual({
-    failed: { code: "network", message: "curl: (56) Recv failure" },
-  });
-  store.install();
-  expect(installs(transport)).toHaveLength(1);
-});
-
-test("a refused Install is no failure: the row goes back to where it stood before the press", async () => {
-  const { store } = storeOver({ refuse: true });
-  await settle();
-  store.install();
-  expect(store.get().progress).toEqual({ downloading: { bytes: 0, total: 0 } });
-  await settle();
-  expect(store.get()).toEqual({ progress: null });
-  // after a failure, a refused Try again goes back to that failure, not to a new one
-  const failed = storeOver({ first: [FAIL("network")], refuse: true });
-  await settle();
-  failed.store.install();
-  await settle();
-  expect(failed.store.get().progress).toEqual({
-    failed: { code: "network", message: "curl: (56) Recv failure" },
-  });
-});
-
-test("a refused Install leaves alone what the host's events said since the press", async () => {
-  const { transport, store } = storeOver({ refuse: true });
-  await settle();
-  store.install();
-  transport.appEvent({ browser_install: { state: DL(50e6, 201e6) } });
-  await settle();
-  expect(store.get().progress).toEqual({ downloading: { bytes: 50e6, total: 201e6 } });
-});
-
-test("a cancelled download goes back to the offer with no failure", async () => {
-  const { transport, store } = storeOver({ first: [DL(1e6, 201e6)] });
-  await settle();
-  transport.appEvent({ browser_install: { state: FAIL("cancelled") } });
-  expect(store.get()).toEqual({ progress: null });
-});
-
-test("a failure's code is read and its message kept for the log", () => {
-  const { transport, store } = storeOver();
-  transport.appEvent({ browser_install: { state: FAIL("what_is_this") } });
-  expect(store.get().progress).toEqual({
-    failed: { code: "unknown", message: "curl: (56) Recv failure" },
-  });
-});
-
-test("the download's words leave the other browser states alone", () => {
-  const install: BrowserInstall = { progress: "done" };
-  expect(words({ tool: "browser", state: "no_proxy" }, { install })).toMatchObject({
-    reason: "Not available yet",
-    download: null,
+test("a browser policy Clauseo couldn't check says it checks again", () => {
+  const unread: KnownTool = { tool: "browser", state: "browser_policy_unreadable" };
+  for (const platform of ["mac", "windows"] as const)
+    expect(words(unread, { platform })).toMatchObject({
+      glyph: "off",
+      reason: "Couldn't check browser settings",
+      reasonTip: null,
+      note: UNREADABLE,
+      settings: false,
+    });
+  expect(toolRow("hi", unread, ROOM)).toMatchObject({
+    reason: "ब्राउज़र सेटिंग्स की जाँच नहीं हो सकी",
+    note:
+      "Clauseo इस कंप्यूटर की ब्राउज़र सेटिंग्स की जाँच नहीं कर सका, इसलिए वह अभी ब्राउज़र का उपयोग नहीं करेगा। " +
+      "अगली बार ब्राउज़र की ज़रूरत होने पर वह फिर से जाँच करेगा।",
   });
 });
 
@@ -403,7 +246,48 @@ test("in Hindi, the tools' words say their Hindi, and a reason keeps its brand n
   expect(toolRow("hi", { tool: "browser", state: "locked_off" }, ROOM).reason).toBe(
     "फ़र्म द्वारा प्रबंधित",
   );
-  expect(toolsLabel("hi", [{ tool: "browser", state: "browser_not_installed" }])).toBe(
-    "ब्राउज़र: बंद, Chrome चाहिए।",
+  expect(toolsLabel("hi", "mac", [{ tool: "browser", state: "browser_not_installed" }])).toBe(
+    "ब्राउज़र: बंद, Chrome इंस्टॉल करें।",
   );
+  expect(toolsLabel("hi", "windows", [{ tool: "browser", state: "browser_not_installed" }])).toBe(
+    "ब्राउज़र: बंद, Chrome या Edge इंस्टॉल करें।",
+  );
+  expect(toolRow("hi", { tool: "browser", state: "browser_not_installed" }, ROOM).note).toBe(
+    "Google Chrome इंस्टॉल करें, फिर एक नई बातचीत शुरू करें।",
+  );
+  // provisional Hindi, until the app thread writes it
+  expect(toolsLabel("hi", "mac", [{ tool: "browser", state: "browser_blocked_by_policy" }])).toBe(
+    "ब्राउज़र: बंद, आपकी फ़र्म ने रोका है।",
+  );
+});
+
+test("Try again sits only under the browser whose policy Clauseo couldn't check, waiting while the read runs", () => {
+  const unread: KnownTool = { tool: "browser", state: "browser_policy_unreadable" };
+  expect(words(unread, { policy: { state: null } }).recheck).toEqual({
+    button: "Try again",
+    waiting: false,
+  });
+  expect(words(unread, { policy: { state: "unreadable" } }).recheck?.waiting).toBe(false);
+  expect(words(unread, { policy: { state: "checking" } }).recheck).toEqual({
+    button: "Try again",
+    waiting: true,
+  });
+  expect(toolRow("hi", unread, { ...ROOM, policy: { state: null } }).recheck?.button).toBe(
+    "फिर से प्रयास करें",
+  );
+  // no app feed to hear the read on: nothing to press
+  expect(words(unread).recheck).toBeNull();
+  // the firm's block, and every other state, gets none
+  for (const state of BROWSER.filter((s) => s !== "browser_policy_unreadable"))
+    expect(words({ tool: "browser", state }, { policy: { state: null } }).recheck).toBeNull();
+});
+
+test("a read that found the policy clear says the browser is ready for new conversations", () => {
+  const unread: KnownTool = { tool: "browser", state: "browser_policy_unreadable" };
+  expect(words(unread, { policy: { state: "clear" } })).toMatchObject({
+    reason: "Ready for new conversations",
+    reasonTip: "The browser comes with your next conversation.",
+    note: null,
+    recheck: null,
+  });
 });

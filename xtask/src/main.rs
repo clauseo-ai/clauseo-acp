@@ -1,6 +1,7 @@
-//! Workspace automation: `cargo xtask check [--quick] [--skip-ui] [--no-tests]`,
+//! Workspace automation: `cargo xtask check [--quick [--no-dependents]] [--skip-ui] [--no-tests]`,
 //! `cargo xtask setup [--binaries] [--only <tool>]... | --list`,
-//! `cargo xtask buildtime [rust|web|all|worktree] [--runs N] [--json]` and `cargo xtask mutants`.
+//! `cargo xtask buildtime [rust|web|all|worktree] [--runs N] [--json]`, `cargo xtask mutants` and
+//! `cargo xtask python-runtime {check,bump,build}`.
 //!
 //! For people and agents:
 //! - Add an external step: one `ToolStep` in `steps/plan.rs`, or `steps/policy.rs` for a
@@ -33,7 +34,15 @@
 //!   and CI never passes; and `--quick` adding clauseo-fake_agent when a selected package's
 //!   tests run it (`changes::built_for_tests`). A third, approved by Rohan 2026-11-04:
 //!   `check --no-tests`, which `.github/scripts/pre-push.sh` always passes so that a push runs
-//!   the format, lint, typecheck and build steps only, and CI never passes.
+//!   the format, lint, typecheck and build steps only, and CI never passes. A fourth, approved
+//!   by Rohan 2026-11-09: `check --quick --no-dependents`, which `.github/scripts/pre-push.sh`
+//!   always passes so that a push lints the changed packages and not their dependents, and CI
+//!   never passes. A fifth, approved by the orchestrator 2026-11-11: the local merge train's fast
+//!   lane runs `check --quick` on Linux for a batch whose diff is ui-only (no path a Rust test
+//!   reads); every other CI run is a full `check`.
+//! - `python-runtime` checks, bumps and builds Clauseo's pinned Python runtime from
+//!   `python-runtime/lock.toml` (`python_runtime.rs` says how). It is not a check of
+//!   `cargo xtask check`: its offline lock check runs there as the xtask test `real_lock_passes`.
 //! - `mutants` runs cargo-mutants on the diff against origin/main and reads its `outcomes.json`
 //!   (`mutants/outcomes.rs`); exclusions live in `.cargo/mutants.toml`, each with its reason.
 
@@ -48,6 +57,7 @@ mod mutants;
 mod output;
 mod parse;
 mod process;
+mod python_runtime;
 #[cfg(test)]
 mod scratch;
 mod setup;
@@ -87,6 +97,10 @@ enum Commands {
         /// steps still run. `.github/scripts/pre-push.sh` always passes it; CI never does.
         #[arg(long)]
         no_tests: bool,
+        /// With `--quick`: only the changed packages, without their dependents; the summary says
+        /// so. Needs `--quick`. `.github/scripts/pre-push.sh` always passes it; CI never does.
+        #[arg(long, requires = "quick")]
+        no_dependents: bool,
     },
     /// Install the pinned cargo tools (`cargo install --locked <tool> --version <version>`), print
     /// how to install gitleaks and lefthook, and check their versions against the pins. `--only`
@@ -113,9 +127,11 @@ enum Commands {
         /// `os` and `arch` are as in Rust's `std::env::consts`, `sha256` is lowercase hex, and
         /// `url` is the asset's download URL, whose last part is its file name.
         ///
-        /// `--list=json` prints one JSON object: `{"tools": [{"name", "version"}, ...],
-        /// "binaries": [{"name", "version", "os", "arch", "sha256", "asset", "url"}, ...]}`, the
-        /// same pins in the same order, with `asset` the file name.
+        /// `--list=json` prints one JSON object: `{"tools": [{"name", "version", "bin_sha256":
+        /// [{"os", "arch", "sha256"}, ...]}, ...], "binaries": [{"name", "version", "os", "arch",
+        /// "sha256", "asset", "url"}, ...]}`, the same pins in the same order, with `asset` the
+        /// file name. A tool's `bin_sha256` holds the sha256 of the prebuilt binary
+        /// taiki-e/install-action installs, per OS and arch; the text leaves it out.
         ///
         /// Scripts read `--list=json`: its keys are only ever added, never renamed, moved or
         /// removed, so a reader ignores keys it does not know. The text is for people and may
@@ -148,6 +164,11 @@ enum Commands {
     /// (settings in `.cargo/mutants.toml`). Each missed mutant fails as `path:line: what` and
     /// `fix:`. A run is capped at 20 minutes.
     Mutants,
+    /// Check, bump or build Clauseo's pinned Python runtime (python-runtime/lock.toml).
+    PythonRuntime {
+        #[command(subcommand)]
+        action: python_runtime::Action,
+    },
     /// The leader `process.rs` starts on Unix: stops the process groups it is told about when
     /// its stdin closes.
     #[cfg(unix)]
@@ -167,6 +188,7 @@ fn main() -> ExitCode {
             quick,
             skip_ui,
             no_tests,
+            no_dependents,
         } => {
             let root = workspace::workspace_root();
             let ctx = workspace::Context {
@@ -179,7 +201,7 @@ fn main() -> ExitCode {
                 process::capture(cmd, &root, on_output)
             };
             let flags = check::Flags {
-                quick,
+                quick: check::Quick::from_flags(quick, no_dependents),
                 skip_ui,
                 no_tests,
             };
@@ -202,8 +224,41 @@ fn main() -> ExitCode {
             buildtime::run(&workspace::workspace_root(), part, runs, json)
         }
         Commands::Mutants => mutants::run(&workspace::workspace_root()),
+        Commands::PythonRuntime { action } => {
+            python_runtime::run(&workspace::workspace_root(), action)
+        }
         #[cfg(unix)]
         Commands::ProcessLeader => process::lead(),
         Commands::ProcessTest { output, script } => process::test_mode(output, &script),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn no_dependents_needs_quick() {
+        let Err(error) = Cli::try_parse_from(["xtask", "check", "--no-dependents"]) else {
+            panic!("--no-dependents without --quick parsed");
+        };
+        assert_eq!(
+            error.kind(),
+            clap::error::ErrorKind::MissingRequiredArgument
+        );
+        assert!(error.to_string().contains("--quick"), "{error}");
+    }
+
+    #[test]
+    fn no_dependents_parses_with_quick() {
+        let cli = Cli::try_parse_from(["xtask", "check", "--quick", "--no-dependents"]);
+        assert!(matches!(
+            cli.map(|cli| cli.command),
+            Ok(Commands::Check {
+                quick: true,
+                no_dependents: true,
+                ..
+            })
+        ));
     }
 }

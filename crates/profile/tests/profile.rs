@@ -1,13 +1,18 @@
 //! The profile alone: the instructions, Claude's `_meta` fragment, Codex's keys, the `browser`
 //! entry, the launch variables and the placeholder contract. No file is read or written.
 
+#[path = "profile/browser.rs"]
+mod browser;
+#[path = "profile/browser_rules.rs"]
+mod browser_rules;
+
 use std::path::{Path, PathBuf};
 
 use clauseo_profile::claude::{OPTION_KEYS, SETTINGS_KEYS};
 use clauseo_profile::instructions::{TOOLS, word_count};
 use clauseo_profile::placeholders::{
-    self, BROWSER_DIR, BROWSER_EXECUTABLE, CDP_PORT, DAEMON_PORT, IN_INSTRUCTIONS, IN_SERVERS,
-    MATTER_NOTES, PROXY_PORT, SESSION_ID, SOCKET_DIR, STREAM_PORT, WORK_FOLDER,
+    self, BROWSER, BROWSER_DIR, BROWSER_EXECUTABLE, CDP_PORT, DAEMON_PORT, IN_INSTRUCTIONS,
+    IN_SERVERS, MATTER_NOTES, PROXY_PORT, SESSION_ID, SOCKET_DIR, STREAM_PORT, WORK_FOLDER,
 };
 use clauseo_profile::{
     BrowserSidecars, ClauseoProfile, CodexConfig, Instructions, ProfileError, ProfilePaths,
@@ -63,6 +68,8 @@ fn the_instructions_are_the_tools_part_under_300_words() {
     assert!(text.contains("--author \"Clauseo\""));
     assert!(text.contains("{work_folder}"));
     assert!(!text.contains("{author}"));
+    // Both agents, every OS: a long PDF is read through pypdf (Claude's Read needs poppler).
+    assert!(text.contains("PDFs over 10 pages with `python3` pypdf (`python` on Windows)"));
     insta::assert_snapshot!(text);
 }
 
@@ -115,7 +122,18 @@ fn the_author_keeps_letters_marks_digits_and_four_marks_of_punctuation_only() {
 
 #[test]
 fn the_claude_fragment_holds_only_the_profiles_keys() {
-    let meta = profile().session_meta(Some(AgentKind::Claude)).unwrap();
+    let mut meta = profile().session_meta(Some(AgentKind::Claude)).unwrap();
+    // One snapshot for every OS: macOS's Claude line (legal.rs checks it) is taken off first.
+    if let Some(line) = clauseo_profile::instructions::claude_shell(cfg!(target_os = "macos")) {
+        let append = &mut meta["systemPrompt"]["append"];
+        let alone = append
+            .as_str()
+            .unwrap()
+            .strip_suffix(&format!("\n\n{line}"))
+            .unwrap()
+            .to_owned();
+        *append = Value::String(alone);
+    }
     let options = meta["claudeCode"]["options"].as_object().unwrap();
     assert!(
         options
@@ -157,11 +175,10 @@ fn a_settings_key_outside_the_list_never_reaches_the_fragment() {
 }
 
 #[test]
-fn the_allow_list_is_the_browser_and_stetdocs_read_only_commands() {
+fn the_allow_list_is_stetdocs_read_only_commands() {
     assert_eq!(
         profile().claude_options().allowed_tools(),
         [
-            "mcp__browser",
             "Bash(stetdoc view:*)",
             "Bash(stetdoc inspect:*)",
             "Bash(stetdoc check:*)",
@@ -186,7 +203,16 @@ fn every_claude_session_turns_skill_shell_execution_off() {
 
 #[test]
 fn the_codex_fragment_is_the_instructions_alone() {
-    let keys = profile().codex_keys_without_index(Some(AgentKind::Codex));
+    let mut keys = profile().codex_keys_without_index(Some(AgentKind::Codex));
+    // One snapshot for every OS: macOS's Codex line (legal.rs checks it) is taken off first.
+    if let Some(line) = clauseo_profile::instructions::codex_shell(cfg!(target_os = "macos")) {
+        let text = keys["developer_instructions"].as_str().unwrap();
+        let alone = text
+            .strip_suffix(&format!("\n\n{line}"))
+            .unwrap()
+            .to_owned();
+        keys.insert("developer_instructions".to_owned(), Value::String(alone));
+    }
     insta::assert_snapshot!(pretty(&Value::Object(keys)));
 }
 
@@ -236,18 +262,33 @@ fn kind_specific_parts_go_only_to_their_kind() {
     );
     assert!(profile.codex_keys_without_index(None).is_empty());
     assert!(profile.skill_files(None).is_none());
-    for kind in [None, Some(AgentKind::Claude), Some(AgentKind::Codex)] {
+    // `browser` goes to Codex alone (`servers::browser_mcp`), and not on Windows: Claude keeps
+    // the shell command.
+    let codex = if cfg!(windows) {
+        vec!["case-law"]
+    } else {
+        vec!["browser", "case-law"]
+    };
+    for (kind, want) in [
+        (None, vec!["case-law"]),
+        (Some(AgentKind::Claude), vec!["case-law"]),
+        (Some(AgentKind::Codex), codex),
+    ] {
         let names: Vec<String> = profile.servers(kind).into_iter().map(|s| s.name).collect();
-        assert_eq!(names, ["browser", "case-law"]);
+        assert_eq!(names, want, "{kind:?}");
+    }
+    if !cfg!(windows) {
+        assert_eq!(
+            profile.servers(Some(AgentKind::Codex))[0],
+            clauseo_profile::servers::browser(profile.paths())
+        );
     }
 }
 
 #[test]
 fn the_browser_entry_runs_the_guard_with_its_ports_and_variables() {
-    let [browser, _case_law] = profile()
-        .servers(Some(AgentKind::Claude))
-        .try_into()
-        .unwrap();
+    // Codex's entry (`servers::browser_mcp`), as it goes out before the host fills it.
+    let browser = clauseo_profile::servers::browser(profile().paths());
     assert_eq!(browser.command, abs("/app/clauseo-mcp"));
     let agent_browser = abs("/app/agent-browser").to_string_lossy().into_owned();
     let mut args = vec![
@@ -278,10 +319,6 @@ fn the_browser_entry_runs_the_guard_with_its_ports_and_variables() {
             "AGENT_BROWSER_EXECUTABLE_PATH",
             "{browser_executable}".to_owned(),
         ),
-        (
-            "AGENT_BROWSER_PROXY",
-            "http://127.0.0.1:{proxy_port}".to_owned(),
-        ),
         ("AGENT_BROWSER_SESSION", "{session_id}".to_owned()),
     ];
     if cfg!(unix) {
@@ -296,7 +333,7 @@ fn every_token_the_profile_sends_is_one_the_host_is_told_to_fill() {
     let profile = profile();
     let mut texts = vec![profile.instructions()];
     let tokens: Vec<&str> = IN_INSTRUCTIONS.iter().chain(&IN_SERVERS).copied().collect();
-    for server in profile.servers(None) {
+    for server in profile.servers(Some(AgentKind::Codex)) {
         texts.extend(server.args);
         texts.extend(server.env.into_values());
     }
@@ -346,6 +383,7 @@ fn a_folder_named_like_a_token_stays_literal_and_json_escapes_it() {
         &[
             (WORK_FOLDER, "/run/{matter_notes}/work"),
             (MATTER_NOTES, "/notes"),
+            (BROWSER, ""),
         ],
     )
     .unwrap();
@@ -357,7 +395,7 @@ fn an_unfillable_instruction_token_is_an_error_the_host_fails_the_launch_on() {
     let error = placeholders::fill(
         &profile().instructions(),
         &IN_INSTRUCTIONS,
-        &[(MATTER_NOTES, "/notes")],
+        &[(MATTER_NOTES, "/notes"), (BROWSER, "")],
     )
     .unwrap_err();
     assert_eq!(
@@ -446,5 +484,29 @@ fn a_windows_stetdoc_folder_matches_a_sidecar_folder_in_any_case_and_separator()
     assert_eq!(
         own.path_prepend(),
         Some(Path::new(r"C:\Program Files\Clauseo\stetdoc"))
+    );
+}
+
+/// A verbatim stetdoc path (Tauri's resource folder, from a canonicalized exe) goes on the
+/// agents' `PATH` in its plain form, which cmd.exe takes too.
+#[cfg(windows)]
+#[test]
+fn a_verbatim_windows_stetdoc_path_goes_on_path_plain() {
+    let paths = ProfilePaths::new(
+        &Locations::under_root(Path::new(r"C:\data")),
+        PathBuf::from(r"C:\Clauseo\clauseo.exe"),
+        PathBuf::from(r"\\?\C:\Clauseo\stetdoc\stetdoc.exe"),
+        BrowserSidecars {
+            clauseo_mcp: PathBuf::from(r"C:\Clauseo\clauseo-mcp.exe"),
+            agent_browser: PathBuf::from(r"C:\Clauseo\agent-browser.exe"),
+        },
+    )
+    .unwrap();
+    let folder = paths.path_prepend().unwrap();
+    assert!(!folder.to_string_lossy().starts_with(r"\\?\"), "{folder:?}");
+    assert_eq!(folder, Path::new(r"C:\Clauseo\stetdoc"));
+    assert_eq!(
+        paths.stetdoc(),
+        Path::new(r"C:\Clauseo\stetdoc\stetdoc.exe")
     );
 }

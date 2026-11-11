@@ -110,6 +110,8 @@ const MANY: Call[] = [
 // chip's counts; they are retired, not reused. Round 3 (icons first) retired the rows' sentences: WEB-08 and WEB-15
 // ("Read '{page}' online.", "Read {page} online.") and WEB-14 ("Opened {page} in the browser."), whose rows are now a
 // tile, a link and a site, with no words; WEB-05, 06, 07, 09, 10 and 11 keep their ids for their lines' new words.
+// WEB-16 ("Searches", the folded list's name for searches that list no page) is retired: such a turn shows no list,
+// its step group's row says the search (D-028).
 export const WEB_SOURCES: Entry[] = [
   {
     id: "WEB-05",
@@ -125,13 +127,21 @@ export const WEB_SOURCES: Entry[] = [
     id: "WEB-06",
     words: sourcesWords("No results"),
     screen: SCREEN,
-    render: opened([searched(1, "rent control notice Karol Bagh 1987")]),
+    // a search with none beside a page read: a turn whose searches list no page at all shows no list (D-028)
+    render: opened([searched(1, "rent control notice Karol Bagh 1987"), visited(2, DHC)]),
   },
   {
     id: "WEB-07",
-    words: sourcesWords("{name} doesn't list its pages"),
+    words: sourcesWords("{name} didn't say which pages it found"),
     screen: SCREEN,
-    render: opened([searched(1, "Delhi Rent Control Act notice period", [])], "codex-acp"),
+    // Codex's search beside a page it opened: alone, the search is its step group's row and no list shows (D-028)
+    render: opened(
+      [
+        searched(1, "Delhi Rent Control Act notice period", []),
+        visited(2, ACT, { title: RESULTS[0]!.title, via: "codex_open_page" }),
+      ],
+      "codex-acp",
+    ),
   },
   {
     id: "WEB-09",
@@ -180,12 +190,5 @@ export const WEB_SOURCES: Entry[] = [
     screen: SCREEN,
     // folded: one page, its one tile
     render: shut([visited(1, ACT, { title: RESULTS[0]!.title })]),
-  },
-  {
-    id: "WEB-16",
-    words: sourcesWords("Searches"),
-    screen: SCREEN,
-    // folded: a search that lists no page, so no count; the search glyph and the chevron, the button named Searches
-    render: shut([searched(1, "Delhi Rent Control Act notice period", [])], "codex-acp"),
   },
 ];

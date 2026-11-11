@@ -108,6 +108,35 @@ pub(crate) fn locked_dacl(folder: bool) -> Vec<u8> {
     )
 }
 
+/// The admin folder or copy as `--adopt` and the set-up lock it once the record names
+/// `group`: [`locked_dacl`]'s entries after a deny of everything for `group`.
+pub(crate) fn locked_dacl_denying(folder: bool, group: &str) -> Vec<u8> {
+    let inherit = if folder { 0x3 } else { 0 };
+    descriptor(
+        super::ADMINISTRATORS,
+        Some(&[
+            (1, inherit, FULL_ACCESS, group),
+            (0, inherit, FULL_ACCESS, super::SYSTEM),
+            (0, inherit, FULL_ACCESS, super::ADMINISTRATORS),
+            (0, inherit, READ_EXECUTE, super::USERS),
+        ]),
+        true,
+    )
+}
+
+/// `bytes` (a descriptor [`descriptor`] made) with its DACL's
+/// first entry moved to the end: a deny placed after the allows, which Windows reads last.
+pub(crate) fn deny_last(bytes: &[u8]) -> Vec<u8> {
+    let at = usize::try_from(u32::from_le_bytes(bytes[16..20].try_into().unwrap())).unwrap();
+    let first = at + 8;
+    let size = usize::from(u16::from_le_bytes([bytes[first + 2], bytes[first + 3]]));
+    let acl_size = usize::from(u16::from_le_bytes([bytes[at + 2], bytes[at + 3]]));
+    let mut out = bytes[..first].to_vec();
+    out.extend(&bytes[first + size..at + acl_size]);
+    out.extend(&bytes[first..first + size]);
+    out
+}
+
 /// The recorded hash every [`Fake::ready`] copy has.
 pub(crate) const HASH: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 
@@ -121,6 +150,9 @@ pub(crate) struct Fake {
     pub(crate) another: bool,
     /// Whether the record's owners can't be read.
     pub(crate) owner_unreadable: bool,
+    /// The record's `GroupSid`, and whether it can't be read.
+    pub(crate) group: Option<Sid>,
+    pub(crate) group_unreadable: bool,
     /// This user's `SecurityBlockedAt` mark: whether it is there.
     pub(crate) security_mark: std::cell::Cell<bool>,
     /// Every path asked about, in order.
@@ -128,6 +160,25 @@ pub(crate) struct Fake {
     /// What a launch did, in order: `held` when the copy is hashed through a held handle,
     /// `released` when that handle closes (the tests add what they start).
     pub(crate) events: Rc<RefCell<Vec<&'static str>>>,
+    /// The refresh task: what asking it does, how often it was asked, and whether its run has
+    /// given the folder and the copy the group's deny (`heal.rs`).
+    pub(crate) task: Task,
+    pub(crate) refreshes: std::cell::Cell<u32>,
+    pub(crate) healed: std::cell::Cell<bool>,
+    /// How many pauses the heal's wait took, and the clock, which each pause moves on.
+    pub(crate) pauses: std::cell::Cell<u32>,
+    pub(crate) clock: std::cell::Cell<std::time::Duration>,
+}
+
+/// What asking the fake's refresh task does.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Task {
+    /// It can't be started (not registered, say).
+    Fails,
+    /// It runs, and never heals.
+    NeverHeals,
+    /// The run this ask starts (counting from 1) heals; earlier ones don't.
+    HealsAt(u32),
 }
 
 /// A held handle: says `released` when it drops.
@@ -150,9 +201,16 @@ impl Fake {
             recorded: Some(HASH.to_owned()),
             another: false,
             owner_unreadable: false,
+            group: None,
+            group_unreadable: false,
             security_mark: std::cell::Cell::new(false),
             asked: RefCell::new(Vec::new()),
             events: Rc::new(RefCell::new(Vec::new())),
+            task: Task::NeverHeals,
+            refreshes: std::cell::Cell::new(0),
+            healed: std::cell::Cell::new(false),
+            pauses: std::cell::Cell::new(0),
+            clock: std::cell::Cell::new(std::time::Duration::ZERO),
         };
         fake.set(Path::new(r"C:\"), Found::Folder, volume_root_dacl());
         fake.set(&program_files, Found::Folder, program_files_dacl());
@@ -191,6 +249,13 @@ impl AdminCopyFs for Fake {
     }
 
     fn security(&self, path: &Path) -> io::Result<Vec<u8>> {
+        let dir = super::admin_dir(&self.program_files);
+        let healed = self.group.as_ref().filter(|_| self.healed.get());
+        if let Some(group) = healed
+            && (key(path) == key(&dir) || key(path) == key(&dir.join(SETUP_EXE)))
+        {
+            return Ok(locked_dacl_denying(key(path) == key(&dir), group.as_str()));
+        }
         self.get(path)
             .map(|(_, security)| security.clone())
             .ok_or_else(|| io::Error::from(io::ErrorKind::NotFound))
@@ -213,6 +278,13 @@ impl AdminCopyFs for Fake {
         Ok(self.recorded.clone())
     }
 
+    fn recorded_group(&self) -> io::Result<Option<Sid>> {
+        if self.group_unreadable {
+            return Err(io::Error::other("the record can't be read"));
+        }
+        Ok(self.group.clone())
+    }
+
     fn another_owner(&self) -> io::Result<bool> {
         if self.owner_unreadable {
             return Err(io::Error::other("the record can't be read"));
@@ -227,6 +299,26 @@ impl AdminCopyFs for Fake {
     fn set_security_blocked(&self, blocked: bool) -> io::Result<()> {
         self.security_mark.set(blocked);
         Ok(())
+    }
+
+    fn request_refresh(&self) -> io::Result<()> {
+        if self.task == Task::Fails {
+            return Err(io::Error::other("the task isn't registered"));
+        }
+        self.refreshes.set(self.refreshes.get() + 1);
+        if self.task == Task::HealsAt(self.refreshes.get()) {
+            self.healed.set(true);
+        }
+        Ok(())
+    }
+
+    fn pause(&self, pause: std::time::Duration) {
+        self.pauses.set(self.pauses.get() + 1);
+        self.clock.set(self.clock.get() + pause);
+    }
+
+    fn clock(&self) -> std::time::Duration {
+        self.clock.get()
     }
 
     fn entries(&self, dir: &Path) -> io::Result<Vec<String>> {

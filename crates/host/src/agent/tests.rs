@@ -23,6 +23,7 @@ use crate::clock::ManualClock;
 mod env;
 #[cfg(target_os = "linux")]
 mod held_pipe;
+mod path;
 
 /// A 20-character fake GitHub token, as the test's "inherited" environment holds it.
 const FAKE_GITHUB_TOKEN: &str = "ghp_fakeToken0123456";
@@ -69,7 +70,7 @@ fn run_agent(
         &[],
         inherited.into_iter(),
         std::env::temp_dir(),
-        None,
+        &[],
     )
     .unwrap();
     let pool = LocalPool::new();
@@ -132,7 +133,7 @@ fn launch_spec_layers_inherited_then_agent_then_hook() {
         &[],
         inherited.into_iter(),
         std::env::temp_dir(),
-        None,
+        &[],
     )
     .unwrap();
     let env: Vec<_> = spec
@@ -153,7 +154,7 @@ fn launch_spec_layers_inherited_then_agent_then_hook() {
             &[],
             std::iter::empty(),
             std::env::temp_dir(),
-            None,
+            &[],
         )
         .is_err()
     );
@@ -199,7 +200,7 @@ fn launch_spec_drops_inherited_git_and_forced_wins() {
         &[],
         inherited.into_iter(),
         std::env::temp_dir(),
-        None,
+        &[],
     )
     .unwrap();
     let env: Vec<_> = spec
@@ -247,7 +248,7 @@ fn launch_spec_leaves_out_dropped_names_from_every_source() {
         &crate::agent::codex::DROPPED_VARS,
         inherited.into_iter(),
         std::env::temp_dir(),
-        None,
+        &[],
     )
     .unwrap();
     let names: Vec<_> = spec.env().keys().map(|k| k.to_str().unwrap()).collect();
@@ -280,7 +281,7 @@ fn launch_spec_keeps_one_variable_per_name_ignoring_case() {
         &[],
         inherited.into_iter(),
         std::env::temp_dir(),
-        None,
+        &[],
     )
     .unwrap();
     let env: Vec<_> = spec
@@ -552,7 +553,7 @@ fn the_path_prepend_goes_first_on_the_merged_path() {
                 .into_iter()
                 .map(|(name, value)| (OsString::from(name), OsString::from(value))),
             std::env::temp_dir(),
-            Some(folder),
+            &[folder.to_path_buf()],
         )
         .unwrap();
         spec.env()

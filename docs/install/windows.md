@@ -108,9 +108,10 @@ installs for everyone on the computer, so Windows asks the same question.
 It shows "Publisher: Unknown". Click **Yes**. If you aren't an administrator, Windows asks for
 one's name and password; someone who is can type theirs.
 
-If you click **No**, Clauseo still installs and works, but without the Safe workspace: it asks
-before changing anything outside a matter's folder. To set the Safe workspace up later, run the
-Clauseo installer again. On the usual installer, Clauseo's Settings, under Safe workspace, has a
+If you click **No**, Clauseo still installs and works, but without the Safe workspace: Claude and ChatGPT change files in the matter's folder without asking, and ask
+before changing files outside it. Undo takes back each answer's changes. In a matter on a network drive, on a drive
+without permissions, or in a folder Clauseo couldn't check, Clauseo asks before every change. To
+set the Safe workspace up later, run the Clauseo installer again. On the usual installer, Clauseo's Settings, under Safe workspace, has a
 button that opens the download page for your version; on the per-machine one, ask your IT team.
 
 Check on the laptop pass: the prompt's wording.
@@ -127,24 +128,53 @@ The Clauseo installer opens. Click through its pages.
 On a work computer, your firm's IT team may have switched it off. Send them this page and
 [Clauseo for firm IT](../firm-it.md).
 
-## If Smart App Control blocks Clauseo
+## Smart App Control
 
 Some Windows 11 computers have Smart App Control on, often a new computer set up from scratch. It
-blocks any app that isn't signed and that Microsoft doesn't already know. Clauseo is both, so
-Smart App Control blocks it outright.
+blocks any app that isn't signed and that Microsoft doesn't already know. Clauseo isn't signed, and
+Microsoft doesn't know it yet, so Smart App Control blocks it outright.
 
 You can tell it apart from "Windows protected your PC": its message names Smart App Control, and
-there is no **More info** and no **Run anyway**. It can't let one app through.
+there is no **More info** and no **Run anyway**. It has no way to allow just one app.
 
 Check on the laptop pass: the exact wording of Smart App Control's message.
 
-Clauseo can't be installed or run while Smart App Control is on. The setting is in Windows
-Security, under App & browser control, then Smart App Control settings. Turning it off lowers
-protection for every app on the computer, not only Clauseo. An up-to-date Windows 11 can usually
-turn it back on later in the same place, while older versions, or a computer with Windows'
-optional diagnostic data off, need a reset or reinstall of Windows to turn it back on.
+If **Smart App Control settings** shows **Evaluation**, it isn't blocking anything yet. Leave it as
+it is. Turn it off only if it blocks Clauseo.
 
-Ask your IT team, or wait for a signed version.
+Check on the laptop pass: that the setting's label reads **Evaluation**.
+
+Clauseo can't be installed or run while Smart App Control is on. You can turn it off yourself:
+
+1. Open the Start menu, type **Windows Security** and open it.
+2. Click **App & browser control**, then **Smart App Control settings**.
+3. Choose **Off**. If Windows asks for an administrator's password, whoever looks after this
+   computer can enter it.
+
+Check on the laptop pass: the settings' wording, that **Off** asks you to confirm, and whether it
+asks for an administrator's password.
+
+Turning it off lowers protection for every app on the computer, not only Clauseo. On an up-to-date
+Windows 11, with updates from March 2026 or later, you can turn it back on later in the same place.
+On older versions of Windows 11, or if Windows' optional diagnostic data is off, you can only turn
+it back on by resetting or reinstalling Windows.
+
+On a work computer, your firm's IT team may have locked this setting. Send them this page and
+[Clauseo for firm IT](../firm-it.md).
+
+## If Windows says it only runs Microsoft-verified apps
+
+Your computer is in S mode. Some new laptops come with this setting, and it runs only apps from the
+Microsoft Store. Windows shows this message:
+
+> For security and performance, this mode of Windows only runs Microsoft-verified apps.
+
+It doesn't name [Smart App Control](#smart-app-control). It isn't the blue "Windows protected your
+PC" box either, so there is no **Run anyway**.
+
+You can switch S mode off yourself in Settings. It's free and takes a few minutes, but it can't be
+undone. Because it can't be undone, on a work computer ask your firm's IT team first.
+[Switching out of S mode](windows-s-mode.md) shows each click.
 
 ## After install
 

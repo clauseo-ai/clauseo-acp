@@ -6,8 +6,12 @@
 #   Node) on a ui change, and on a Rust change Windows x64 clippy only (PR_LINT_ONLY below), so
 #   Windows-only lint errors show on the pull request and not as merge-queue ejections. The other
 #   build entries take the quick skip on an ubuntu runner and report their required checks green.
-# - merge_group: the full OS matrix runs once, here (Linux, Windows x64, macOS ARM64), on what
-#   changes.sh says the queued changes need.
+# - merge_group: the full OS matrix runs once, here (Linux, Windows x64, Windows ARM64, macOS
+#   ARM64), on what changes.sh says the queued changes need. Windows ARM64 (windows-11-arm) runs
+#   Windows x64's tests, elevated tests included, without clippy and the keychain smoke test
+#   (`test_only`: x64's clippy lints the cfg(windows) code, and the nightly run lints ARM64 and
+#   runs its keychain smoke). It is not a required check yet (stage 1 of its return to tier 1),
+#   so a red ARM64 job shows in the queue without ejecting anything.
 # - push to main: nothing (Rohan's CI decision, 2026-11-04). The merge queue already tested the
 #   code. (macOS ARM64 ran on push from 17:20Z to 20:52Z that day, while a GitHub runner shortage
 #   kept it out of the merge-queue requirement.) The `github.event_name != 'push'` guards below are
@@ -32,15 +36,17 @@
 #   The nightly run and a run on demand run the same steps (so main's Rust cache holds what merge
 #   groups build) and then the release app, full LTO, uploaded as clauseo-desktop-<target>.
 # - Tier 1 (macOS Apple silicon, Windows x64) and Linux build and test in the merge queue when the
-#   queued changes touch Rust. Tier 2 (Intel macOS, Windows ARM64) runs nightly and on demand only:
-#   on a pull request and in a merge group the matrix leaves it out, and jobs skipped by `if` report
-#   its checks without taking a runner (Intel macOS's below, Windows ARM64's in tier2-pr.yml). The
-#   Apple silicon job checks on each run that the workspace still compiles for Intel macOS.
+#   queued changes touch Rust, and so does Windows ARM64, not yet required (2026-11-08). Tier 2
+#   (Intel macOS) runs nightly and on demand only. On a pull request the matrix leaves Intel macOS
+#   and Windows ARM64 out, and jobs skipped by `if` report their checks without taking a runner
+#   (Intel macOS's below, Windows ARM64's in tier2-pr.yml). A pull request runs nothing on ARM64
+#   unless it carries the label `ci:arm64`: then arm64-pr.yml runs this ARM64 entry's tests on it.
+#   The Apple silicon job checks on each run that the workspace still compiles for Intel macOS.
 # - Rust caches are saved on main only (`save-if`), which with no push run but the macOS one means
 #   the nightly run; pull requests and merge groups restore main's and save nothing,
-#   so they never evict main's entries from the 10 GB Actions cache. Tier 2 saves none: Intel macOS
-#   restores the Apple silicon entry (same host, so its build scripts and proc macros are reused),
-#   Windows ARM64 builds cold.
+#   so they never evict main's entries from the 10 GB Actions cache. Intel macOS saves none: it
+#   restores the Apple silicon entry (same host, so its build scripts and proc macros are reused).
+#   Windows ARM64 keeps no cache and builds cold, in the merge group too.
 # - The mutants job has no matrix, so it is skipped as a whole on pull requests, merge groups and
 #   pushes, where it still reports its check as "mutants". It only reports: a missed mutant never fails the run.
 # - The Linux job runs the tests with the network cut off, so a test that reaches the network fails.
@@ -176,8 +182,13 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: ui/package.json
-          cache: pnpm
-          cache-dependency-path: ui/pnpm-lock.yaml
+          package-manager-cache: false
+
+      # The pnpm store from main's cache, under setup-node's old key; saved at the end of the
+      # job, from main only.
+      - name: Restore the pnpm store
+        id: pnpm-store
+        uses: ./.github/actions/pnpm-store
 
       - name: Show the pnpm and Node versions against ui/package.json
         run: |
@@ -185,10 +196,11 @@ jobs:
           echo "node $(node -v), ui/package.json wants $(node -p 'require("./ui/package.json").engines.node')"
 
       # release.yml runs only on tags and on demand, so its rules (pull request triggers, pinned
-      # actions, permissions, secrets on steps, the sidecar seam), latest.json's writer and the
-      # sidecar script are tested here, in plain Node, without the network or cargo.
+      # actions, permissions, secrets on steps, the sidecar seam), latest.json's writer, the
+      # sidecar script and the VC++ runtime import check are tested here, in plain Node, without
+      # the network or cargo.
       - name: Test the release scripts and release.yml's rules
-        run: node --test .github/scripts/latest-json.test.mjs .github/scripts/sidecars.test.mjs
+        run: node --test .github/scripts/latest-json.test.mjs .github/scripts/sidecars.test.mjs .github/scripts/pe-crt-imports.test.mjs
 
       # Saved on main only, as every Rust cache here. The key names the image: rust-cache's own key
       # holds only the OS, and build scripts compiled on 24.04 would not run on 22.04's older glibc.
@@ -216,6 +228,22 @@ jobs:
       - name: Test the pre-push hook
         run: bash .github/scripts/pre-push-test.sh
 
+      # No job that a pull request, review or merge group runs holds actions: write while it checks
+      # out that event's code, and only the listed cancel jobs hold it, with no uses: step
+      # (workflow-token-test.rb, with its own planted cases).
+      - name: Test the workflows' token rule
+        run: ruby .github/scripts/workflow-token-test.rb
+
+      # The cache scripts: prune on main's real cache list of 2026-11-08; install-pinned-tools'
+      # cache with a fake folder, bad checksums included; every key the workflows save has a family
+      # in cache-families.txt; no job a pull request or merge group runs holds actions: write but
+      # the two cancel jobs the token rule above lists.
+      - name: Test the cache scripts and the workflows' cache rules
+        run: |
+          bash .github/scripts/cache-entries-test.sh
+          bash .github/scripts/tool-cache-test.sh
+          ruby .github/scripts/cache-keys-test.rb
+
       # launch-xvfb.sh against a fake xvfb-run: the app's own status decides, not xvfb-run's
       # clean-up (#479's group, 2026-11-05).
       - name: Test launch-xvfb.sh
@@ -225,6 +253,11 @@ jobs:
       # panic and a TMT are named, a FLAKY test is not.
       - name: Test windows-pr-failures.sh
         run: bash .github/scripts/windows-pr-failures-test.sh
+
+      # gate-prior.sh, and the mode steps of windows-pr-tests.yml and e2e-windows.yml that call it,
+      # against a fake gh: a wait stop is not a result, a real failure is (#732).
+      - name: Test the gates' reading of a commit's last result
+        run: bash .github/scripts/gate-prior-test.sh
 
       # How reducer-bench reads the label bench-ok at run time, against a fake gh.
       - name: Test reducer-bench's bench-ok read
@@ -250,35 +283,127 @@ jobs:
       # guard's crate, the agent-browser pin or this file: #549 (2026-11-06) added such a test that
       # failed first in the merge group, because the pull request's run had skipped it. The tests
       # run one at a time (nextest's real-chrome group) and the runner's Google Chrome is preinstalled.
-      - name: Fetch agent-browser for the guard's real-Chrome tests, if the guard changed
-        if: github.event_name == 'pull_request'
+      #
+      # The binary comes from main's Actions cache, keyed by its pinned sha256, and is checked
+      # against that sha256 after the restore as after a download. On a miss it is downloaded with
+      # `gh release download`, authenticated with the job's read-only token: GitHub sheds anonymous
+      # release downloads first under load (2026-11-09: hours of 504s), and github.com's release
+      # URLs ignore an Authorization header, so only the API path is authenticated. main's
+      # scheduled and on-demand runs fetch it only to fill the cache (need=fill): they set none of
+      # the test variables, so their xtask check runs as before.
+      - name: Does this run need agent-browser? Its cache key
+        id: agent-browser-key
+        if: >-
+          github.event_name == 'pull_request' || (github.ref == 'refs/heads/main'
+          && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'))
+        shell: bash
         env:
+          EVENT: ${{ github.event_name }}
           TARGET: x86_64-unknown-linux-gnu
         run: |
           set -euo pipefail
+          need=false
+          if [ "$EVENT" != pull_request ]; then
+            need="fill"
           # The merge commit's first parent is main; the second, the pull request's head.
-          if ! git diff --quiet HEAD^1 HEAD -- crates/mcp crates/desktop/agent-browser.toml .github/workflows/ci.yml; then
-            pin=crates/desktop/agent-browser.toml
-            value() {
-              awk -v table="[$TARGET]" -v key="$1" '
-                $0 == table { inside = 1; next }
-                /^\[/ { inside = 0 }
-                inside && $1 == key { gsub(/"/, "", $3); print $3 }' "$pin"
-            }
-            url=$(value url)
-            sum=$(value sha256)
-            test -n "$url" && test -n "$sum"
-            curl --fail --silent --show-error --location --retry 3 \
-              --output "$RUNNER_TEMP/agent-browser" "$url"
-            echo "$sum  $RUNNER_TEMP/agent-browser" | sha256sum --check
-            chmod +x "$RUNNER_TEMP/agent-browser"
-            test -x /usr/bin/google-chrome
-            echo "CLAUSEO_TEST_AGENT_BROWSER=$RUNNER_TEMP/agent-browser" >> "$GITHUB_ENV"
-            echo "CLAUSEO_TEST_CHROME=/usr/bin/google-chrome" >> "$GITHUB_ENV"
-            echo "The browser guard changed: the real-Chrome tests run in xtask check's nextest."
+          elif ! git diff --quiet HEAD^1 HEAD -- crates/mcp crates/desktop/agent-browser.toml .github/workflows/ci.yml; then
+            need="test"
           else
             echo "The browser guard is unchanged: its real-Chrome tests skip here and run in the merge group."
           fi
+          echo "need=$need" >> "$GITHUB_OUTPUT"
+          [ "$need" != false ] || exit 0
+          pin=crates/desktop/agent-browser.toml
+          value() {
+            awk -v table="[$TARGET]" -v key="$1" '
+              $0 == table { inside = 1; next }
+              /^\[/ { inside = 0 }
+              inside && $1 == key { gsub(/"/, "", $3); print $3 }' "$pin"
+          }
+          url=$(value url)
+          sha256=$(value sha256)
+          release='^https://github\.com/vercel-labs/agent-browser/releases/download/(v[0-9][0-9A-Za-z.+-]*)/([A-Za-z0-9._-]+)$'
+          # The tag and asset are taken from BASH_REMATCH before the sha256 test, whose own =~
+          # replaces BASH_REMATCH (with set -u, a later ${BASH_REMATCH[1]} is then unbound).
+          tag='' asset=''
+          if [[ "$url" =~ $release ]]; then
+            tag=${BASH_REMATCH[1]}
+            asset=${BASH_REMATCH[2]}
+          fi
+          if [ -z "$tag" ] || ! [[ "$sha256" =~ ^[0-9a-f]{64}$ ]]; then
+            echo "::error::$pin's [$TARGET] needs a url under https://github.com/vercel-labs/agent-browser/releases/download/v<version>/ and a sha256 of 64 lowercase hex digits"
+            exit 1
+          fi
+          {
+            echo "url=$url"
+            echo "tag=$tag"
+            echo "asset=$asset"
+            echo "sha256=$sha256"
+            echo "dir=$RUNNER_TEMP/agent-browser-cache"
+          } >> "$GITHUB_OUTPUT"
+          echo "key=agent-browser-$TARGET-$sha256" >> "$GITHUB_OUTPUT"
+
+      - name: Restore agent-browser from main's cache
+        id: agent-browser-cache
+        if: steps.agent-browser-key.outputs.need == 'test' || steps.agent-browser-key.outputs.need == 'fill'
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ steps.agent-browser-key.outputs.dir }}
+          key: ${{ steps.agent-browser-key.outputs.key }}
+
+      - name: Fetch agent-browser for the guard's real-Chrome tests, if the guard changed
+        if: steps.agent-browser-key.outputs.need == 'test' || steps.agent-browser-key.outputs.need == 'fill'
+        env:
+          NEED: ${{ steps.agent-browser-key.outputs.need }}
+          URL: ${{ steps.agent-browser-key.outputs.url }}
+          TAG: ${{ steps.agent-browser-key.outputs.tag }}
+          ASSET: ${{ steps.agent-browser-key.outputs.asset }}
+          SUM: ${{ steps.agent-browser-key.outputs.sha256 }}
+          DIR: ${{ steps.agent-browser-key.outputs.dir }}
+          HIT: ${{ steps.agent-browser-cache.outputs.cache-hit }}
+          # gh reads it from its environment; it is in no argument and never printed.
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          sum=$SUM
+          file=$DIR/agent-browser
+          if [ "$HIT" = true ] && echo "$sum  $file" | sha256sum --check; then
+            echo "agent-browser from main's cache: its sha256 matches the pin."
+          else
+            [ "$HIT" != true ] || echo "::warning::agent-browser from main's cache is not the pinned file; downloading it instead"
+            rm -rf "$DIR"
+            mkdir -p "$DIR"
+            # gh has no retry of its own: 3 attempts, 10 s and then 30 s apart.
+            for attempt in 1 2 3; do
+              if gh release download "$TAG" --repo vercel-labs/agent-browser --pattern "$ASSET" --output "$file" --clobber; then
+                break
+              elif [ "$attempt" -eq 3 ]; then
+                echo "::error::could not download $URL through gh after 3 attempts"
+                exit 1
+              fi
+              echo "downloading $URL through gh (attempt $attempt of 3) failed; trying again in $((attempt * 20 - 10)) s"
+              sleep $((attempt * 20 - 10))
+            done
+            echo "$sum  $file" | sha256sum --check
+          fi
+          chmod +x "$file"
+          if [ "$NEED" = fill ]; then
+            echo "main's run: agent-browser is fetched for the cache only; the real-Chrome tests run in the merge group and on pull requests that touch the guard."
+            exit 0
+          fi
+          test -x /usr/bin/google-chrome
+          echo "CLAUSEO_TEST_AGENT_BROWSER=$file" >> "$GITHUB_ENV"
+          echo "CLAUSEO_TEST_CHROME=/usr/bin/google-chrome" >> "$GITHUB_ENV"
+          echo "The browser guard changed: the real-Chrome tests run in xtask check's nextest."
+
+      # Saved on main's scheduled and on-demand runs only, after a miss; the nightly prune deletes
+      # the older entries (cache-families.txt, agent-browser).
+      - name: Save agent-browser (main, after a miss)
+        if: steps.agent-browser-key.outputs.need == 'fill' && steps.agent-browser-cache.outputs.cache-hit != 'true'
+        uses: ./.github/actions/cache-save-main
+        with:
+          path: ${{ steps.agent-browser-key.outputs.dir }}
+          key: ${{ steps.agent-browser-key.outputs.key }}
 
       - name: cargo xtask check
         run: CI=1 cargo xtask check
@@ -297,6 +422,14 @@ jobs:
             echo "::error title=clippy without test targets failed::Run cargo clippy --workspace -- -D warnings. Code that only tests or test-support use goes behind cfg(test) or cfg(feature = \"test-support\")."
             exit 1
           fi
+
+      # The pnpm store, saved from main's scheduled and on-demand runs only, after a miss.
+      - name: Save the pnpm store (main)
+        if: success() && steps.pnpm-store.outputs.hit != 'true'
+        uses: ./.github/actions/cache-save-main
+        with:
+          path: ${{ steps.pnpm-store.outputs.path }}
+          key: ${{ steps.pnpm-store.outputs.key }}
 
   # vitest on the newest Node release that "engines.node" allows; see the note at the top.
   vitest-newest-node:
@@ -322,8 +455,13 @@ jobs:
         with:
           node-version-file: ui/package.json
           check-latest: true
-          cache: pnpm
-          cache-dependency-path: ui/pnpm-lock.yaml
+          package-manager-cache: false
+
+      # The pnpm store from main's cache, under setup-node's old key; saved at the end of the
+      # job, from main only.
+      - name: Restore the pnpm store
+        id: pnpm-store
+        uses: ./.github/actions/pnpm-store
 
       - name: Show the Node version against ui/package.json
         run: echo "node $(node -v), the newest release ui/package.json's engines.node $(node -p 'require("./ui/package.json").engines.node') allows"
@@ -333,6 +471,14 @@ jobs:
 
       - name: vitest
         run: pnpm -C ui/app run test
+
+      # The pnpm store, saved from main's scheduled and on-demand runs only, after a miss.
+      - name: Save the pnpm store (main)
+        if: success() && steps.pnpm-store.outputs.hit != 'true'
+        uses: ./.github/actions/cache-save-main
+        with:
+          path: ${{ steps.pnpm-store.outputs.path }}
+          key: ${{ steps.pnpm-store.outputs.key }}
 
   build:
     name: build (${{ matrix.target }})
@@ -352,13 +498,20 @@ jobs:
       # One JSON list per event, as in e2e-windows.yml's smoke (Rohan's CI decision, 2026-11-04):
       # - pull_request: the three required checks; Linux and macOS skip on ubuntu, Windows x64
       #   lints only (PR_LINT_ONLY below).
-      # - merge_group: tier 1 and Linux in full. Windows ARM64 left the merge-group requirement
-      #   (2026-11-04) for the nightly run; a break there goes to its owner.
-      # - schedule and workflow_dispatch: everything, tier 2 (Intel macOS, Windows ARM64) included.
-      #   The job tier2-x86_64-apple-darwin below and tier2-pr.yml report tier 2's checks elsewhere.
+      # - merge_group: tier 1 and Linux in full, and Windows ARM64's tests. Windows ARM64 left the
+      #   merge group on 2026-11-04 for the nightly run and is back since 2026-11-08, on
+      #   windows-11-arm (free for a public repository), with Windows x64's tests, elevated tests included, but not clippy
+      #   or the keychain smoke test (`test_only`, about 4.3 min a run; the nightly run does both);
+      #   `build (aarch64-pc-windows-msvc)` is not a required check until its stage 2. In a merge
+      #   group without a Rust change it skips on ubuntu, as the other entries do, so the check
+      #   still reports.
+      # - schedule and workflow_dispatch: everything, Intel macOS included. The job
+      #   tier2-x86_64-apple-darwin below and tier2-pr.yml report the checks the pull request
+      #   matrix leaves out.
       # `native`: built on its own OS, so linted and tested; Intel macOS is cross-compiled on the
-      # arm64 runner, so it is built but not linted or tested. Linux is the oldest glibc we
-      # support; release packages are built there later.
+      # arm64 runner, so it is built but not linted or tested. `test_only`: tested, but no clippy
+      # step and no keychain smoke test runs (Windows ARM64 in a merge group). Linux is the oldest
+      # glibc we support; release packages are built there later.
       matrix:
         include: >-
           ${{ fromJSON(github.event_name == 'pull_request'
@@ -368,7 +521,8 @@ jobs:
             || github.event_name == 'merge_group'
             && '[{"target": "aarch64-apple-darwin", "runner": "macos-15", "native": true},
                  {"target": "x86_64-unknown-linux-gnu", "runner": "ubuntu-22.04", "native": true},
-                 {"target": "x86_64-pc-windows-msvc", "runner": "windows-2025", "native": true}]'
+                 {"target": "x86_64-pc-windows-msvc", "runner": "windows-2025", "native": true},
+                 {"target": "aarch64-pc-windows-msvc", "runner": "windows-11-arm", "native": true, "test_only": true}]'
             || '[{"target": "aarch64-apple-darwin", "runner": "macos-15", "native": true},
                  {"target": "x86_64-apple-darwin", "runner": "macos-15", "native": false},
                  {"target": "x86_64-unknown-linux-gnu", "runner": "ubuntu-22.04", "native": true},
@@ -444,8 +598,14 @@ jobs:
         if: env.BUILD == 'true' && env.UI == 'true'
         with:
           node-version-file: ui/package.json
-          cache: pnpm
-          cache-dependency-path: ui/pnpm-lock.yaml
+          package-manager-cache: false
+
+      # The pnpm store from main's cache, under setup-node's old key; saved at the end of the
+      # job, from main only.
+      - name: Restore the pnpm store
+        id: pnpm-store
+        if: env.BUILD == 'true' && env.UI == 'true'
+        uses: ./.github/actions/pnpm-store
 
       - name: Install the ui workspace
         if: env.BUILD == 'true' && env.UI == 'true'
@@ -479,7 +639,7 @@ jobs:
       # async-channel's std), which hid a macOS compile error in its install example (#258). The
       # example is what the by-hand installs on the Mac mini and clauseo-win-01 run.
       - name: clippy the agents crate on its own features, its example included
-        if: env.BUILD == 'true' && matrix.native
+        if: env.BUILD == 'true' && matrix.native && !matrix.test_only
         run: cargo clippy -p clauseo-agents --all-targets --target "$TARGET" -- -D warnings
 
       # The marks build's macOS code (src/marks.rs), which the speed scoreboard plays; that job
@@ -510,11 +670,13 @@ jobs:
           CLAUSEO_ELEVATED_TESTS: "1"
         run: |
           set -o pipefail
-          cargo nextest run --workspace --profile ci --run-ignored only -E "test(/(^|::)elevated_/)" --test-threads 1 --no-tests=fail
+          filter='test(/(^|::)elevated_/)'
+          cargo nextest run --workspace --profile ci --run-ignored only -E "$filter" --test-threads 1 --no-tests=fail
 
       # The OS keychain for real: clauseo-connectors' ignored keychain_smoke test writes, reads and
       # deletes a 2,000-byte item (Keychain Services on macOS, Credential Manager on Windows) under
-      # a fresh account name, on every native macOS and Windows entry, Windows ARM64 included.
+      # a fresh account name, on every native macOS and Windows entry, Windows ARM64 included
+      # (nightly and on demand; its merge-group entry is test_only and skips this).
       # Linux has no keychain store in the crate (not a product target).
       - name: Keychain smoke test (clauseo-connectors)
         if: env.BUILD == 'true' && matrix.native && runner.os != 'Linux' && !matrix.test_only && env.PR_LINT_ONLY != 'true'
@@ -634,13 +796,23 @@ jobs:
           APP: target/${{ env.TARGET }}/release/${{ env.EXE }}
         run: .github/scripts/launch-xvfb.sh "$APP"
 
+      # The pnpm store, saved from main's scheduled and on-demand runs only, after a miss.
+      - name: Save the pnpm store (main)
+        if: success() && env.BUILD == 'true' && env.UI == 'true' && steps.pnpm-store.outputs.hit != 'true'
+        uses: ./.github/actions/cache-save-main
+        with:
+          path: ${{ steps.pnpm-store.outputs.path }}
+          key: ${{ steps.pnpm-store.outputs.key }}
+
   # Tier 2 runs nightly and on demand. On a pull request and in a merge group the build matrix leaves Intel
   # macOS out, and this job reports its required check instead: skipped by `if`, it takes no runner
   # (the org shares 20 concurrent jobs, 5 of them macOS) and reports as skipped, which satisfies a
   # required check. It never runs: on every other event the matrix builds the target under the same
   # check name. Not in the matrix, so it reports its real name; a skipped matrix job would report
   # "build (${{ matrix.target }})" instead. Windows ARM64's stand-in is in tier2-pr.yml, which runs
-  # on pull requests only, so that in a merge group the real ARM64 job alone reports its check.
+  # on pull requests only (where this matrix leaves ARM64 out), so that in a merge group the real
+  # ARM64 job alone reports its check. Once that check is required, the stand-in's skip passes it on
+  # a pull request and the merge group's real job gates the queue; the two never run together.
   tier2-x86_64-apple-darwin:
     name: build (x86_64-apple-darwin)
     # Never true (no event is named never); actionlint rejects a constant `false`.
@@ -648,7 +820,6 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - run: echo "Intel macOS is tier 2; it builds nightly and on demand."
-
 
   # cargo-mutants on main's changes of the last 24 hours, nightly and on demand. It only reports:
   # a missed mutant, or a run that reaches `MUTANTS_TIMEOUT` in xtask/src/mutants.rs, shows in the
@@ -955,3 +1126,31 @@ jobs:
 
       - name: The quarantined tests
         run: cargo nextest run --workspace --profile quarantine --no-tests=pass
+
+  # Main's Actions cache, after the nightly saves: deletes every entry not on main, every main entry
+  # no family in .github/scripts/cache-families.txt matches, and each family's entries but the
+  # newest, logging each with its size (.github/scripts/cache-entries.sh prune; .deb entries and
+  # unknown ones only once unused for 3 days). It never deletes a family's newest entry, the one runs
+  # restore, so a save never leaves merge groups cold. Main's scheduled and on-demand runs only: the
+  # one job in this workflow with actions: write, and no pull request or merge group runs it.
+  cache-prune:
+    name: cache prune
+    needs: [fast-lane, vitest-newest-node, build, mutants, reducer-bench, quarantine]
+    if: >-
+      ${{ always() && github.ref == 'refs/heads/main'
+      && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: .github/scripts
+
+      - name: Prune the Actions cache
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash .github/scripts/cache-entries.sh prune

@@ -37,3 +37,24 @@ test("with dragRegion, the meter's four elements drag the window", async () => {
   await mount(<PlanMeter name="Plan" value={30} valueText="30%" status="Plenty left" dragRegion />);
   expect(dragged().length).toBe(4);
 });
+
+// inside the toolbar's plan button the meter takes role="none", which may carry no value (axe's aria-allowed-attr), and
+// the button named by its words has its visible text, words apart, inside its name (label-content-name-mismatch)
+test("inside a button, the meter carries no value attributes and its name and line stand words apart", async () => {
+  await mount(
+    <PlanMeter name="ChatGPT plan" value={98} valueText="98%" status="Plenty left" inButton />,
+  );
+  const none = host?.querySelector('[role="none"]');
+  expect(none).not.toBeNull();
+  for (const name of ["aria-valuenow", "aria-valuemin", "aria-valuemax", "aria-valuetext"])
+    expect(none?.hasAttribute(name), name).toBe(false);
+  expect(host?.textContent).toBe("ChatGPT plan Plenty left");
+});
+
+test("standing alone, the meter keeps its value for assistive technology", async () => {
+  await mount(<PlanMeter name="Plan" value={30} valueText="30%" status="" />);
+  const meter = host?.querySelector('[role="meter"]');
+  expect(meter?.getAttribute("aria-valuenow")).toBe("30");
+  expect(meter?.getAttribute("aria-valuetext")).toBe("30%");
+  expect(host?.textContent?.replace(/x$/, "")).toBe("Plan");
+});

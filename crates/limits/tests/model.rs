@@ -50,5 +50,8 @@ mod unread_email;
 mod login_changed;
 
 #[cfg(test)]
+#[path = "model/add_agent.rs"]
+mod add_agent;
+#[cfg(test)]
 #[path = "model/model_rows.rs"]
 mod model_rows;

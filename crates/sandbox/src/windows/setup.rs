@@ -10,7 +10,9 @@
 //! 2. preflight: the Secondary Logon service is not disabled, and local policy doesn't refuse
 //!    `Users` the interactive logon right; either fails with a named cause before any account
 //!    exists;
-//! 3. the group `ClauseoSandboxUsers`: made, or adopted only when its SID is the record's;
+//! 3. the group `ClauseoSandboxUsers`: made, or adopted only when its SID is the record's; then,
+//!    every run, granted "Deny log on through Remote Desktop Services", so no pool user can sign
+//!    in over Remote Desktop (a rollback that deletes the group takes the right off first);
 //! 4. per new user: a free name (an account outside the record with a pool name is skipped,
 //!    never adopted, D-B5), a random password, the account, its groups, hidden from the sign-in
 //!    screen;
@@ -60,12 +62,14 @@ use crate::windows::writer::AclWriter;
 
 #[cfg(test)]
 #[cfg(windows)]
-mod account_list;
+pub(crate) mod account_list;
 #[cfg(windows)]
-mod accounts;
+pub(crate) mod accounts;
 #[cfg(test)]
 #[cfg(windows)]
 mod accounts_tests;
+#[cfg(windows)]
+mod admin_member;
 #[cfg(test)]
 #[cfg(windows)]
 mod admin_record_tests;
@@ -79,7 +83,11 @@ pub mod args;
 pub mod around;
 mod create;
 #[cfg(windows)]
+mod event_trace;
+#[cfg(windows)]
 pub mod exe;
+#[cfg(any(windows, test))]
+pub mod explain;
 #[cfg(windows)]
 mod ffi;
 #[cfg(test)]
@@ -101,6 +109,8 @@ mod outcome;
 #[cfg(any(windows, test))]
 pub mod owner;
 pub mod password;
+#[cfg(any(windows, test))]
+pub mod pool_steps;
 #[cfg(windows)]
 pub mod preflight;
 #[cfg(windows)]
@@ -112,19 +122,28 @@ mod reclaim_run;
 #[cfg(test)]
 #[cfg(windows)]
 mod reclaim_tests;
+#[cfg(any(windows, test))]
+mod record_key;
 pub mod record_values;
 #[cfg(windows)]
 mod record_write;
+#[cfg(windows)]
+pub(crate) use record_write::{read_record_install_id, read_record_value};
 pub mod registered;
 pub mod remove;
 mod resets;
 pub mod result_file;
+#[cfg(test)]
+#[cfg(windows)]
+mod rights_tests;
 mod rollback;
 #[cfg(any(windows, test))]
 mod shared;
 #[cfg(any(windows, test))]
 pub mod stop;
 pub mod strays;
+#[cfg(any(windows, test))]
+pub mod sweep;
 #[cfg(any(windows, test))]
 pub mod taken_file;
 mod top_up;
@@ -142,6 +161,7 @@ pub use outcome::{
 // import of both would make their shared method names ambiguous in the set-up's tests.
 pub use remove::{
     LedgerWork, REMOVE_LOCK_WAIT_MS, RemoveFailure, RemoveReport, RemoveStep, Removed, remove,
+    remove_then,
 };
 #[cfg(windows)]
 pub use windows_machine::{Names, WindowsMachine};

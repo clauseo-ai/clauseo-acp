@@ -177,9 +177,12 @@ export function WorkspaceOff({
           plan === "chatgpt"
             ? tbt(
                 lang,
-                "Clauseo can change files in this matter without asking. It asks before going beyond it.",
+                "Clauseo can read any file you can open, and changes files in this matter without asking. It asks before changing files outside it.",
               )
-            : tbt(lang, "Clauseo asks before each change in this matter.")
+            : tbt(
+                lang,
+                "Clauseo changes files in this matter without asking, and asks before changing files outside it.",
+              )
         }
       />
       {failed !== null && (

@@ -317,6 +317,14 @@
     "by": "app track (provisional; Rohan batch review)",
     "note": "Split from matter.folder_missing: the folder is there but its .clauseo/matter.json is missing, unreadable or another matter's"
   },
+  "U3-err-matter.folder_permission": {
+    "en": "Clauseo needs permission to open this folder.",
+    "hi": "Clauseo को यह फ़ोल्डर खोलने की अनुमति चाहिए।",
+    "status": "approved",
+    "at": "2026-11-10",
+    "by": "orchestrator (English and Hindi settled for the macOS folder permission launch fix)",
+    "note": "macOS privacy settings (Files and Folders) keep Clauseo out of the matter's folder; the app adds the Open Privacy settings button and its line"
+  },
   "U3-err-matter.folder_refused": {
     "en": "A whole drive, your home folder or a system folder can't be a matter.",
     "hi": "पूरी ड्राइव, आपका होम फ़ोल्डर या कोई सिस्टम फ़ोल्डर मामला नहीं बन सकता।",
@@ -374,14 +382,14 @@
     "note": "Rohan, on the review page (H5-matters-rail, #148 5c3ad943)"
   },
   "U3-err-matter.folder_network": {
-    "en": "Codex can't work on a network drive. Move the matter to this computer.",
-    "hi": "Codex नेटवर्क ड्राइव पर काम नहीं कर सकता। मामले को इस कंप्यूटर पर ले जाएँ।",
+    "en": "ChatGPT can't work on a network drive. Move the matter to this computer.",
+    "hi": "ChatGPT नेटवर्क ड्राइव पर काम नहीं कर सकता। मामले को इस कंप्यूटर पर ले जाएँ।",
     "hi_status": "provisional",
-    "hi_at": "2026-11-06",
+    "hi_at": "2026-11-09",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "approved",
-    "at": "2026-11-04",
-    "by": "Rohan",
+    "status": "provisional",
+    "at": "2026-11-09",
+    "by": "app track (codex-to-chatgpt: Codex → ChatGPT; Rohan batch review)",
     "note": "Rohan, on the review page (folder-rights FR18)"
   },
   "U3-err-matter.folder_too_deep": {
@@ -395,23 +403,26 @@
     "by": "app track (provisional; Rohan batch review)"
   },
   "U3-err-matter.folder_no_permissions": {
-    "en": "Codex can't work on a drive without file permissions. Move the matter to this computer.",
-    "hi": "Codex बिना फ़ाइल अनुमतियों वाली ड्राइव पर काम नहीं कर सकता। मामले को इस कंप्यूटर पर ले जाएँ।",
+    "en": "ChatGPT can't work on a drive without file permissions. Move the matter to this computer.",
+    "hi": "ChatGPT बिना फ़ाइल अनुमतियों वाली ड्राइव पर काम नहीं कर सकता। मामले को इस कंप्यूटर पर ले जाएँ।",
     "hi_status": "provisional",
-    "hi_at": "2026-11-06",
+    "hi_at": "2026-11-09",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "approved",
-    "at": "2026-11-04",
-    "by": "Rohan",
+    "status": "provisional",
+    "at": "2026-11-09",
+    "by": "app track (codex-to-chatgpt: Codex → ChatGPT; Rohan batch review)",
     "note": "Rohan, on the review page (folder-rights FR19)"
   },
   "U3-err-matter.codex_folder": {
-    "en": "This matter's folder holds a .codex folder. Rename or remove it to use Codex here.",
-    "hi": "इस मामले के फ़ोल्डर में एक .codex फ़ोल्डर है। यहाँ Codex का उपयोग करने के लिए उसका नाम बदलें या उसे हटाएँ।",
-    "status": "approved",
-    "at": "2026-11-02",
-    "by": "Rohan",
-    "note": "Rohan, on the review page (built from R15-codex c921f277), 2026-11-02 15:35"
+    "en": "This matter's folder holds a .codex folder. Rename or remove it to use ChatGPT here.",
+    "hi": "इस मामले के फ़ोल्डर में एक .codex फ़ोल्डर है। यहाँ ChatGPT का उपयोग करने के लिए उसका नाम बदलें या उसे हटाएँ।",
+    "status": "provisional",
+    "at": "2026-11-09",
+    "by": "app track (codex-to-chatgpt: Codex → ChatGPT; Rohan batch review)",
+    "note": "Rohan, on the review page (built from R15-codex c921f277), 2026-11-02 15:35",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-09",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)"
   },
   "U3-err-agent.guard_missing": {
     "en": "Clauseo can't start Claude safely here. Reinstall Clauseo.",
@@ -665,6 +676,22 @@
     "by": "Rohan",
     "note": "Rohan, running-page batch 2026-11-05 (written by app track)"
   },
+  "U3-52": {
+    "en": "Clauseo stopped the answer: {name} tried to open files outside this matter. The answer so far is kept.",
+    "hi": "Clauseo ने उत्तर रोक दिया: {name} ने इस मामले के बाहर की फ़ाइलें खोलने की कोशिश की। अब तक का उत्तर रखा गया है।",
+    "status": "approved",
+    "at": "2026-11-11",
+    "by": "orchestrator (English and Hindi settled for the outside-matter stop)",
+    "note": "A turn ended StopReason::OutsideMatter: Clauseo refused, unasked, a request into its data folder and the agent stopped (stops.ts); {name} is the agent as the error words name it (Claude, ChatGPT, or its own name); the partial answer is kept as after a Stop. Reworded 2026-11-10: it named no one"
+  },
+  "U3-53": {
+    "en": "Clauseo stopped the answer: the AI tried to open files outside this matter. The answer so far is kept.",
+    "hi": "Clauseo ने उत्तर रोक दिया: AI ने इस मामले के बाहर की फ़ाइलें खोलने की कोशिश की। अब तक का उत्तर रखा गया है।",
+    "status": "approved",
+    "at": "2026-11-11",
+    "by": "orchestrator (English and Hindi settled for the outside-matter stop)",
+    "note": "U3-52 where the room knows no agent name (stops.ts), as U6F-09's The AI; rendered alone"
+  },
   "U3-err-settings.refused": {
     "en": "Clauseo couldn't save that setting. Your settings are as they were.",
     "hi": "Clauseo वह सेटिंग सहेज नहीं सका। आपकी सेटिंग्स पहले जैसी हैं।",
@@ -777,14 +804,14 @@
     "by": "app track (provisional; Rohan batch review; design B, safe-workspace-installer-setup)"
   },
   "U3-err-sandbox.setup_failed": {
-    "en": "The Safe workspace couldn't be set up on this computer. Try again. If it keeps failing, ask whoever looks after this computer to look into it.",
-    "hi": "इस कंप्यूटर पर सुरक्षित कार्यक्षेत्र तैयार नहीं हो सका। फिर से कोशिश करें। अगर यह बार-बार विफल हो, तो इस कंप्यूटर की देखरेख करने वाले व्यक्ति से इसकी जाँच करने को कहें।",
+    "en": "The Safe workspace couldn't be set up on this computer. Try again.",
+    "hi": "इस कंप्यूटर पर सुरक्षित कार्यक्षेत्र तैयार नहीं हो सका। फिर से कोशिश करें।",
     "hi_status": "provisional",
-    "hi_at": "2026-11-07",
-    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "hi_at": "2026-11-08",
+    "hi_by": "app track (no IT endings)",
     "status": "provisional",
-    "at": "2026-11-07",
-    "by": "app track (provisional; Rohan batch review; design B, safe-workspace-installer-setup)"
+    "at": "2026-11-08",
+    "by": "app track (no IT endings)"
   },
   "U3-err-sandbox.setup_required": {
     "en": "Clauseo can't answer here until the Safe workspace is set up on this computer. Your question is kept.",
@@ -797,14 +824,14 @@
     "by": "app track (provisional; Rohan batch review; design B, safe-workspace-installer-setup)"
   },
   "U3-err-sandbox.required": {
-    "en": "Your firm requires the Safe workspace, and this computer can't provide it, so Clauseo can't answer here. Ask whoever looks after this computer.",
-    "hi": "आपकी फ़र्म सुरक्षित कार्यक्षेत्र ज़रूरी मानती है, और यह कंप्यूटर इसे नहीं दे सकता, इसलिए Clauseo यहाँ उत्तर नहीं दे सकता। इस कंप्यूटर की देखरेख करने वाले व्यक्ति से पूछें।",
+    "en": "Your firm requires the Safe workspace, and this computer can't provide it, so Clauseo can't answer here.",
+    "hi": "आपकी फ़र्म सुरक्षित कार्यक्षेत्र ज़रूरी मानती है, और यह कंप्यूटर इसे नहीं दे सकता, इसलिए Clauseo यहाँ उत्तर नहीं दे सकता।",
     "hi_status": "provisional",
-    "hi_at": "2026-11-07",
-    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "hi_at": "2026-11-08",
+    "hi_by": "app track (no IT endings)",
     "status": "provisional",
-    "at": "2026-11-07",
-    "by": "app track (provisional; Rohan batch review; design B, safe-workspace-installer-setup)"
+    "at": "2026-11-08",
+    "by": "app track (no IT endings)"
   },
   "U3-err-sandbox.blocked": {
     "en": "Clauseo can't use the Safe workspace on this computer: a Windows setting or security software is blocking it, so nothing was started. Settings › Safe workspace says what to do.",
@@ -817,14 +844,14 @@
     "by": "app track (provisional; Rohan batch review; design B, safe-workspace-installer-setup)"
   },
   "U3-err-blocklist.override_off": {
-    "en": "Your firm has turned off allowing sites on Clauseo's unsafe-site list, so this site stays blocked. Ask your IT team if you need it.",
-    "hi": "आपकी फ़र्म ने Clauseo की असुरक्षित वेबसाइटों की सूची में से किसी वेबसाइट को अनुमति देना बंद कर रखा है, इसलिए यह वेबसाइट अवरुद्ध रहेगी। अगर आपको इसकी ज़रूरत है, तो अपनी IT टीम से पूछें।",
+    "en": "Your firm has turned off allowing sites on Clauseo's unsafe-site list, so this site stays blocked.",
+    "hi": "आपकी फ़र्म ने Clauseo की असुरक्षित वेबसाइटों की सूची में से किसी वेबसाइट को अनुमति देना बंद कर रखा है, इसलिए यह वेबसाइट अवरुद्ध रहेगी।",
     "hi_status": "provisional",
-    "hi_at": "2026-11-07",
-    "hi_by": "stage E (provisional; Hindi-speaking lawyer to review)",
+    "hi_at": "2026-11-08",
+    "hi_by": "app track (no IT endings)",
     "status": "provisional",
-    "at": "2026-11-07",
-    "by": "stage E (provisional; Rohan batch review)",
+    "at": "2026-11-08",
+    "by": "app track (no IT endings)",
     "note": "The \"Allow this site\" refusal when the firm's policy forbids overriding the unsafe-site list (ADR 0053)"
   },
   "U3-err-blocklist.notice_expired": {
@@ -859,5 +886,82 @@
     "at": "2026-11-08",
     "by": "app track (provisional; Rohan batch review)",
     "note": "The removal of an allow that lasts until Clauseo closes, because Clauseo couldn't save it (ADR 0053)"
+  },
+  "U3-err-sandbox.cleaning_up": {
+    "en": "Clauseo is still tidying up the Safe workspace after it last closed. Try again in a moment. Your question is kept.",
+    "hi": "Clauseo पिछली बार बंद होने के बाद अभी भी सुरक्षित कार्यक्षेत्र को व्यवस्थित कर रहा है। थोड़ी देर में फिर से प्रयास करें। आपका प्रश्न रखा गया है।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-08",
+    "hi_by": "sandbox track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-08",
+    "by": "sandbox track (provisional; the app thread owns the words)",
+    "note": "A send refused while the Safe workspace's clean-up after an earlier session is still running; retryable (ADR 0049)"
+  },
+  "U3-err-agent.install_setup_failed": {
+    "en": "Claude was downloaded, but setting it up didn't finish. Try again.",
+    "hi": "Claude डाउनलोड हो गया, लेकिन उसका सेटअप पूरा नहीं हुआ। फिर से प्रयास करें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-08",
+    "hi_by": "orchestrator (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-08",
+    "by": "orchestrator (provisional; app copy review; Rohan's rule: no line ends by telling the lawyer to ask IT)",
+    "note": "Failed after every file downloaded: npm set-up, the rename into place or the receipt (Windows VM, Defender/folder walkers)"
+  },
+  "U3-err-word.revisions_stale": {
+    "en": "This file changed after the list was made, so nothing was accepted or rejected. The list now shows its current changes.",
+    "hi": "सूची बनने के बाद यह फ़ाइल बदल गई, इसलिए कुछ भी स्वीकार या अस्वीकार नहीं किया गया। सूची अब इसके मौजूदा बदलाव दिखाती है।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-09",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-09",
+    "by": "orchestrator (settled en)",
+    "note": "The send-refusal entry every error code gets (registry.tsx's ERRORS); the panel's own state is UC-124 to UC-127"
+  },
+  "U3-err-word.not_docx": {
+    "en": "Clauseo can't read the tracked changes in this file. It may be damaged, or it may not be a Word document.",
+    "hi": "Clauseo इस फ़ाइल के ट्रैक किए गए बदलाव नहीं पढ़ सकता। हो सकता है कि यह क्षतिग्रस्त हो, या यह Word दस्तावेज़ न हो।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-09",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-09",
+    "by": "orchestrator (settled en)",
+    "note": "The send-refusal entry every error code gets (registry.tsx's ERRORS); the panel's own state is UC-124 to UC-127"
+  },
+  "U3-err-word.stetdoc_missing": {
+    "en": "Clauseo's Word tool is missing. Reinstall Clauseo to accept or reject changes.",
+    "hi": "Clauseo का Word टूल मौजूद नहीं है। बदलाव स्वीकार या अस्वीकार करने के लिए Clauseo फिर से इंस्टॉल करें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-09",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-09",
+    "by": "orchestrator (settled en)",
+    "note": "The send-refusal entry every error code gets (registry.tsx's ERRORS); the panel's own state is UC-124 to UC-127"
+  },
+  "U3-err-word.edit_failed": {
+    "en": "Clauseo couldn't save your decision. The file is as it was.",
+    "hi": "Clauseo आपका निर्णय सहेज नहीं सका। फ़ाइल पहले जैसी ही है।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-09",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-09",
+    "by": "orchestrator (settled en)",
+    "note": "The send-refusal entry every error code gets (registry.tsx's ERRORS); the panel's own state is UC-124 to UC-127"
+  },
+  "U3-err-agent.offline": {
+    "en": "You're offline, so the answer stopped. The answer so far is kept. Try again when you're back online.",
+    "hi": "आप ऑफ़लाइन हैं, इसलिए उत्तर रुक गया। अब तक का उत्तर रखा गया है। ऑनलाइन होने पर फिर से प्रयास करें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-10",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-10",
+    "by": "app track (provisional; Rohan batch review)",
+    "note": "D-050: an answer the lost connection stopped (agent.offline), on the stop line under the answer, with Try again beside Copy; reuses U3-err-agent.install_offline's \"You're offline\" and U3-04's \"The answer so far is kept.\""
   }
 }

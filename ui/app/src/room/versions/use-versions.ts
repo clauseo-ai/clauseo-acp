@@ -15,8 +15,9 @@ import type { Platform } from "@clauseo/components/lib/display.ts";
 import { late } from "@clauseo/components/lib/late.ts";
 import type { ViewStore } from "../../store/store.ts";
 import type { HostTransport } from "../../transport/host-transport.ts";
-import type { MatterId } from "../../transport/protocol.ts";
-import type { Papers } from "../host-next.ts";
+import type { MatterId, ThreadId } from "../../transport/protocol.ts";
+import type { Papers, PapersHost } from "../host-next.ts";
+import type { Blacklines } from "./blackline.ts";
 import type { VersionsController } from "./controller.ts";
 import { NO_STAND_INS, type StandIns } from "./stand-ins.ts";
 
@@ -70,14 +71,20 @@ export function useVersions({
   transport,
   store,
   matter,
+  thread = null,
   papers,
+  lister = null,
   platform,
   standIns = NO_STAND_INS,
 }: {
   transport: HostTransport;
   store: ViewStore;
   matter: MatterId | null;
+  /** Optional: the matter's open conversation, which records a restore made from Versions; null for a draft. */
+  thread?: ThreadId | null;
   papers: Papers | null;
+  /** Optional: H8's list_papers, for a file Versions opens that the room's list doesn't hold yet. */
+  lister?: PapersHost | null;
   platform: Platform;
   /** Optional, for tests and the review page: the host changes still to land. None by default. */
   standIns?: StandIns;
@@ -87,11 +94,13 @@ export function useVersions({
     matter: MatterId;
     mod: Chunk;
     controller: VersionsController;
+    blacklines: Blacklines;
   } | null>(null);
   // Versions belongs to the matter it opened on: opening another closes it, and coming back finds it closed
   if (session !== null && session.matter !== matter) setSession(null);
   const live = session !== null && session.matter === matter ? session : null;
   useEffect(() => live?.controller.start(), [live]);
+  useEffect(() => live?.controller.setThread(thread), [live, thread]);
   const watch = useCallback(
     (fn: () => void) => live?.controller.subscribe(fn) ?? (() => undefined),
     [live],
@@ -139,7 +148,7 @@ export function useVersions({
         // Undo opened Versions: Cancel in its dialog closes it again
         if (undo) controller.undoNewest(true);
         putPanel(false);
-        setSession({ matter, mod, controller });
+        setSession({ matter, mod, controller, blacklines: new mod.Blacklines(transport, matter) });
       },
       (error: unknown) => console.warn(`Versions' chunk did not load: ${String(error)}`),
     );
@@ -166,6 +175,10 @@ export function useVersions({
   };
   const undoWaits = useSyncExternalStore(watch, nothing, nothing);
   const fileRef = (path: string) => papers?.papers.find((p) => p.path === path)?.file ?? null;
+  const freshRef = async (path: string) =>
+    matter === null || lister === null
+      ? null
+      : ((await lister.listPapers(matter)).papers.find((p) => p.path === path)?.file ?? null);
   if (live === null)
     return {
       open: false,
@@ -180,7 +193,7 @@ export function useVersions({
       canLeave: true,
       close,
     };
-  const { mod, controller } = live;
+  const { mod, controller, blacklines } = live;
   const onPicked = () => putPanel(isMid());
   const onPanel = () => {
     setAway(false);
@@ -202,8 +215,10 @@ export function useVersions({
       : null,
     centre: createElement(mod.VersionsCentre, {
       controller,
+      blacklines,
       standIns,
       fileRef,
+      freshRef,
       onLeave: close,
       onPanel: panel ? null : onPanel,
       onAway: panel ? putAway : null,

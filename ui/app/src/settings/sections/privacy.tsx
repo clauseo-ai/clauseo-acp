@@ -1,13 +1,18 @@
 // Settings, Privacy: what leaves this computer, and who sees it (design/03-system/src/pages/settings/sections-c.tsx,
 // Privacy), holding only what is true now, icons first and in the fewest words (DESIGN.md §Icons). The group's note
-// says once what goes to a plan; then one row per plan the window knows, naming where; for Claude, the provider
-// Anthropic lists for its web search behind an info icon. Then a row for the websites Clauseo visits, its explanation behind an info
-// icon, unless the host's switches have both tools off. Then the tools' switches, web search and the browser, each led
-// by its glyph with the state on it, one helper line each, each flip one patch. A locked switch shows the host's value,
-// its glyph locked, and the room's lock reason, "Managed by firm", in its helper's place. While the Browser switch is on and the app has no
-// website check, the room's reason, "Not available yet", stands in its helper's place.
-// Left out until something stands behind them: a case-law source's row, the row for Clauseo's anonymous counts, and the
-// anonymous counts and crash report switches.
+// says once what goes to a plan; then one row per plan the window knows, naming where. Then a row for the websites Clauseo visits, its explanation behind an info
+// icon, unless the host's switches have both tools off. Under the rows, one line on what Clauseo fetches by itself
+// when it starts (D-064): each plan's limits. Then the tools' switches, web search and the browser, each led
+// by its glyph with the state on it, one helper line each, each flip one patch. Web search's row carries, behind an
+// info icon opening below it, the service Claude's web searches go through (Brave Search; D-068). A locked switch shows the host's value,
+// its glyph locked, and the room's lock reason, "Managed by firm", in its helper's place. Whether a conversation gets the
+// browser once it's on (a Chrome, or Edge on Windows, on the computer; the firm's browser policy) is the tool line's to
+// say, per conversation.
+// Then the anonymous counts' switch (D-052), in the first run's words (UD1's "Send anonymous counts" and what they
+// hold), the same `privacy.counts` the first run writes: SettingsView.privacy, a flip one SetPrivacySettings patch,
+// settings_changed to both windows. A firm's lock shows it off and disabled, with "Managed by firm" under its line.
+// Left out until something stands behind them: a case-law source's row, the row for Clauseo's anonymous counts, and
+// the crash report switch.
 //
 // Last, the sites allowed past the unsafe-site list, each with Remove (allowed-sites.tsx, 0053).
 //
@@ -16,6 +21,8 @@
 // names a locked key, then settings_changed. Only the settings window sends it (the main window's host refuses it),
 // and this pane is the only place that does. A change applies from the next conversation's start; one already open
 // keeps its tools. `locked` may list `tools.web_search` and `tools.browser`.
+import { fl } from "@clauseo/components/lib/words-first-launch.ts";
+import type { ReactNode } from "react";
 import { useSettingsWords } from "@clauseo/components/lib/words-settings.ts";
 import { ToolGlyph } from "@clauseo/components/icons/tool-glyph.tsx";
 import { tw } from "@clauseo/components/lib/words-tools.ts";
@@ -42,19 +49,10 @@ function Dest({ kind }: { kind: AgentKind }) {
     <div className="set-dest set-dest-alone" data-testid={`dest-${kind}`}>
       <p className="set-dest-to">
         <span>{w.say(w.s("To {name}, on your plan", { name }))}</span>
-        {kind === "claude" && (
-          <InfoTip label={w.s("More about Brave Search")}>
-            {w.say(w.s("Anthropic lists Brave Search as its web search subprocessor."))}
-          </InfoTip>
-        )}
       </p>
     </div>
   );
 }
-
-/** Whether the app can check each website the browser opens. Nothing can yet, so every conversation's browser is off
- * (the room's no_proxy). Stage C's proxy flips it. */
-const websiteCheck = false;
 
 /** The websites Clauseo visits: the pages it reads, and those its browser opens, go to them from this computer. */
 function WebsitesDest() {
@@ -77,15 +75,14 @@ function ToolRow({
   tool,
   label,
   note,
-  reason,
+  info,
 }: {
   ctx: SectionContext;
   tools: ToolsSettingsView;
   tool: keyof ToolsSettingsView;
   label: string;
   note: string;
-  /** Optional: why the tool can't run yet, in the helper's place (one line at most). */
-  reason?: string | undefined;
+  info?: ReactNode;
 }) {
   const w = useSettingsWords();
   const locked = ctx.toolLocked(tool);
@@ -103,12 +100,39 @@ function ToolRow({
           />
         }
         label={label}
-        note={locked ? toolsLine(w.lang, "Managed by firm") : (reason ?? note)}
+        info={info}
+        note={locked ? toolsLine(w.lang, "Managed by firm") : note}
         checked={on}
         disabled={locked}
         onCheckedChange={(next) => ctx.chooseTool(tool, next)}
       />
     </PlateRow>
+  );
+}
+
+/** The anonymous counts' switch, as the first run's: on unless the lawyer or the firm turned it off. */
+function CountsRow({ ctx }: { ctx: SectionContext }) {
+  const w = useSettingsWords();
+  const locked = ctx.countsLocked();
+  const on = !locked && ctx.settings.privacy?.counts === true;
+  return (
+    <Group>
+      <PlateRow disabled={locked}>
+        <SettingRow
+          className="py-0"
+          control="switch"
+          label={fl(w.lang, "Send anonymous counts")}
+          note={fl(
+            w.lang,
+            "How many questions, which features, how long answers take. Never your papers, your questions or the answers.",
+          )}
+          managed={locked ? w.s("Managed by firm") : undefined}
+          checked={on}
+          disabled={locked}
+          onCheckedChange={(next) => ctx.chooseCounts(next)}
+        />
+      </PlateRow>
+    </Group>
   );
 }
 
@@ -122,6 +146,9 @@ export function Privacy({ ctx }: { ctx: SectionContext }) {
       <Group
         title={w.s("What leaves this computer")}
         note={w.s("Questions, the papers' parts they need, web searches.")}
+        foot={w.s(
+          "When it starts, Clauseo asks Claude or ChatGPT how much of your plan is left. No papers or questions go with it.",
+        )}
       >
         {plansOf(ctx).map((kind) => (
           <Dest key={kind} kind={kind} />
@@ -136,6 +163,15 @@ export function Privacy({ ctx }: { ctx: SectionContext }) {
             tool="web_search"
             label={w.s("Web search")}
             note={w.s("Search the web and read pages.")}
+            info={
+              <InfoTip label={w.s("More about Brave Search")} side="bottom">
+                {w.say(
+                  w.s(
+                    "Claude's web searches go through Brave Search, a service Anthropic uses to run web searches.",
+                  ),
+                )}
+              </InfoTip>
+            }
           />
           <ToolRow
             ctx={ctx}
@@ -143,12 +179,10 @@ export function Privacy({ ctx }: { ctx: SectionContext }) {
             tool="browser"
             label={w.s("Browser")}
             note={w.s("Runs on this computer.")}
-            reason={
-              tools.browser && !websiteCheck ? toolsLine(w.lang, "Not available yet") : undefined
-            }
           />
         </Group>
       )}
+      {ctx.settings.privacy !== undefined && <CountsRow ctx={ctx} />}
       <AllowedSites transport={ctx.transport} />
     </>
   );

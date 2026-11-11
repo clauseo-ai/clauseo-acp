@@ -59,11 +59,17 @@ export type Script = {
   next?: FakeHost["next"];
   /** The settings window's open (FakeHost's openSettings): with it the room has Settings. */
   openSettings?: FakeHost["openSettings"];
+  /** Answers the Files and Folders pane's open (FakeHost's openPrivacySettings); it opens when left out. */
+  openPrivacySettings?: FakeHost["openPrivacySettings"];
   /** UC's protection wire (FakeHost's protection): with it the room reads the computer's protection. */
   protection?: FakeHost["protection"];
   /** The setup wire (FakeHost's setup): with it the room loads the first run, and the
    * header's plan hears each sign-in. */
   setup?: FakeHost["setup"];
+  /** Windows' Smart App Control state display_info reports (FakeHost's smartAppControl); unknown when left out. */
+  smartAppControl?: FakeHost["smartAppControl"];
+  /** The OS display_info reports (FakeHost's platform); Linux when left out. */
+  platform?: FakeHost["platform"];
 };
 
 export const defaultOutcome = (command: HostCommand): CommandOutcome => {
@@ -130,8 +136,13 @@ export async function mountRoom(script: Script = {}): Promise<Harness> {
     dispatch: (envelope) => (script.dispatch ?? defaultOutcome)(envelope.command),
     ...(script.next === undefined ? {} : { next: script.next }),
     ...(script.openSettings === undefined ? {} : { openSettings: script.openSettings }),
+    ...(script.openPrivacySettings === undefined
+      ? {}
+      : { openPrivacySettings: script.openPrivacySettings }),
     ...(script.protection === undefined ? {} : { protection: script.protection }),
     ...(script.setup === undefined ? {} : { setup: script.setup }),
+    ...(script.smartAppControl === undefined ? {} : { smartAppControl: script.smartAppControl }),
+    ...(script.platform === undefined ? {} : { platform: script.platform }),
   });
   connectRoom(transport, script.display ?? {});
   const manual = manualBatch();

@@ -34,6 +34,14 @@ pub(crate) fn on_window_event<R: Runtime>(
     }))
 }
 
+/// Every window's event as Tauri hands it over: the counts' focus (`counts::on_window_event`),
+/// then [`on_window_event`], whose task is short and bounded (one host command), like the
+/// bridge's others.
+pub(crate) fn on_any_window_event<R: Runtime>(window: &tauri::Window<R>, event: &WindowEvent) {
+    crate::counts::on_window_event(window, event);
+    drop(on_window_event(window, event));
+}
+
 /// Brings the first instance's window forward when the app is launched again.
 pub(crate) fn raise_main_window<R: Runtime>(app: &AppHandle<R>) {
     if let Some(window) = app.get_webview_window(MAIN_WINDOW) {

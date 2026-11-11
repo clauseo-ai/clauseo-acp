@@ -454,7 +454,7 @@ pub(super) fn answer(actor: &Actor, reply: Reply<QueryResult>) {
         || UpdateView {
             current: actor.update.current.clone(),
             state: UpdateState::Managed {
-                by: ManagedBy::Package,
+                by: ManagedBy::Unavailable,
             },
             mode: mode_in_force(actor).mode,
             checked_at: None,

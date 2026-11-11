@@ -277,6 +277,30 @@ impl Dir {
 
 impl Drop for Dir {
     fn drop(&mut self) {
+        // A Claude session's short temp folder in `/tmp` (`agent::claude_tmp`), named in a run
+        // folder the host kept at its stop: the next start's sweep would take it, a test's never
+        // comes.
+        let runs = std::fs::read_dir(&self.data)
+            .into_iter()
+            .flatten()
+            .flatten();
+        for run in runs.filter(|entry| entry.file_name().to_string_lossy().starts_with("run")) {
+            for session in std::fs::read_dir(run.path())
+                .into_iter()
+                .flatten()
+                .flatten()
+            {
+                let Ok(short) = std::fs::read_to_string(session.path().join("claude-tmp")) else {
+                    continue;
+                };
+                if short.starts_with("/tmp/clsb-")
+                    && !short.contains("..")
+                    && let Err(error) = write::remove_dir_all(Path::new(&short))
+                {
+                    eprintln!("could not remove {short}: {error}");
+                }
+            }
+        }
         for folder in [&self.root, &self.work] {
             if let Err(error) = write::remove_dir_all(folder) {
                 eprintln!("could not remove {}: {error}", folder.display());

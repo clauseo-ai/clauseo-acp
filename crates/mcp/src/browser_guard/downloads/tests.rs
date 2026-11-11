@@ -70,6 +70,36 @@ fn a_file_that_appears_at_the_target_is_not_replaced() {
     write::remove_dir_all(&dir).unwrap();
 }
 
+/// A downloads folder swapped for a link after the start-up check (here, between the look and
+/// the move) is refused: the file stays where it was and nothing lands where the link points.
+#[cfg(unix)]
+#[test]
+fn a_downloads_folder_swapped_for_a_link_is_refused() {
+    let dir = std::env::temp_dir().join(format!("clauseo-mcp-link-{}", std::process::id()));
+    if dir.exists() {
+        write::remove_dir_all(&dir).unwrap();
+    }
+    let (staging, downloads, elsewhere) = (
+        dir.join("staging"),
+        dir.join("downloads"),
+        dir.join("elsewhere"),
+    );
+    for folder in [&staging, &downloads, &elsewhere] {
+        write::create_dir_all(folder).unwrap();
+    }
+    let from = staging.join("evil.plist");
+    write::write(&from, "download").unwrap();
+    let placed = place(&from, &downloads, "evil.plist", |_: &Path| {
+        write::remove_dir(&downloads).unwrap();
+        write::symlink(&elsewhere, &downloads).unwrap();
+    });
+    assert!(placed.is_err(), "{placed:?}");
+    assert!(from.exists());
+    assert!(!elsewhere.join("evil.plist").exists());
+    write::remove_file(&downloads).unwrap();
+    write::remove_dir_all(&dir).unwrap();
+}
+
 #[test]
 fn protected_names_are_renamed_in_any_case() {
     for (name, safe) in [

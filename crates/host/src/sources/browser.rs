@@ -109,6 +109,103 @@ impl Opens {
     }
 }
 
+/// The most unfinished Codex `browser` calls a thread keeps for [`CodexTools`]; past it they
+/// are dropped, as [`MAX_OPENS`].
+const MAX_CODEX_TOOLS: usize = 64;
+
+/// A thread's Codex calls of the guarded `browser` server's tools that have not finished: the
+/// tool each names, by the agent's tool call id, so a permission request that names only the
+/// call (`actor/turn/asks.rs`) can be told apart. Only a call whose title is exactly
+/// `mcp.browser.<tool>` as codex-acp 2.2.2 builds it (`dist/index.js:29492-29503`) is kept;
+/// a final status drops it.
+#[derive(Debug, Default)]
+pub(crate) struct CodexTools(BTreeMap<CompactString, CompactString>);
+
+impl CodexTools {
+    /// A Codex tool call started: one of the `browser` server's is kept until it ends.
+    pub(crate) fn started(&mut self, call: &ToolCall) {
+        let Some(tool) = codex_browser_tool(&call.title) else {
+            return;
+        };
+        match call.status {
+            ToolCallStatus::Completed | ToolCallStatus::Failed | ToolCallStatus::Cancelled => {}
+            ToolCallStatus::Pending | ToolCallStatus::InProgress | ToolCallStatus::Unknown => {
+                if self.0.len() >= MAX_CODEX_TOOLS {
+                    self.0.clear();
+                }
+                self.0
+                    .insert(call.acp_id.clone(), CompactString::from(tool));
+            }
+        }
+    }
+
+    /// An update of the call the agent knows as `acp_id`: a final status forgets it.
+    pub(crate) fn updated(&mut self, acp_id: &str, patch: &ToolCallPatch) {
+        if matches!(
+            patch.status,
+            Some(ToolCallStatus::Completed | ToolCallStatus::Failed | ToolCallStatus::Cancelled)
+        ) {
+            self.0.remove(acp_id);
+        }
+    }
+
+    /// The `browser` tool the unfinished call `acp_id` runs, if it is one.
+    pub(crate) fn tool(&self, acp_id: &str) -> Option<&str> {
+        self.0.get(acp_id).map(CompactString::as_str)
+    }
+}
+
+/// The tool of a Codex call titled exactly `mcp.browser.<tool>` (codex-acp 2.2.2 titles an MCP
+/// call `` `mcp.${server}.${tool}` ``, `dist/index.js:29492-29503`), `browser` being
+/// [`clauseo_profile::servers::BROWSER`], a reserved name no settings entry may take.
+pub(crate) fn codex_browser_tool(title: &str) -> Option<&str> {
+    let tool = title
+        .strip_prefix("mcp.")?
+        .strip_prefix(clauseo_profile::servers::BROWSER)?
+        .strip_prefix('.')?;
+    (!tool.is_empty()).then_some(tool)
+}
+
+/// The tool a Codex standalone MCP approval names for the `browser` server: codex-acp 2.2.2
+/// sends one with no earlier tool call as toolCallId `elicitation:<session>:<server>:<seq>` and
+/// `rawInput` `{serverName, description: <message>, ...}` (`dist/index.js:32611-32626`); the
+/// message is Codex's fallback `Allow the <server> MCP server to run tool "<tool>"?` (codex
+/// rust-v0.162.1 `core/src/mcp_tool_call.rs:1956-1972`). A rendered template can replace that
+/// message, and any text that is not exactly it names no tool.
+pub(crate) fn codex_standalone_browser_tool<'a>(
+    acp_tool_call_id: &str,
+    raw_input: Option<&'a Value>,
+) -> Option<&'a str> {
+    let server = clauseo_profile::servers::BROWSER;
+    let input = raw_input?;
+    if !acp_tool_call_id.starts_with("elicitation:") || input.get("serverName")?.as_str()? != server
+    {
+        return None;
+    }
+    let message = input.get("description")?.as_str()?;
+    let tool = message
+        .strip_prefix("Allow the ")?
+        .strip_prefix(server)?
+        .strip_prefix(" MCP server to run tool \"")?
+        .strip_suffix("\"?")?;
+    (!tool.is_empty() && !tool.contains('"')).then_some(tool)
+}
+
+/// Whether the host answers a Codex approval of the `browser` server's `tool` itself: an
+/// `agent_browser_*` name (ASCII lowercase, digits and `_`) other than `agent_browser_eval`,
+/// which runs page JavaScript and is the route to Chrome's debugging port, so the lawyer is asked.
+/// The guard refuses every tool off agent-browser's 29 core tools whatever the answer
+/// (`clauseo_mcp`'s `browser_guard/filter.rs` `ALLOWED_TOOLS`), and checks each call's
+/// arguments.
+pub(crate) fn auto_allowed_browser_tool(tool: &str) -> bool {
+    tool.strip_prefix("agent_browser_").is_some_and(|rest| {
+        !rest.is_empty()
+            && rest
+                .bytes()
+                .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_')
+    }) && tool != "agent_browser_eval"
+}
+
 /// Whether a tool call is the browser's open, by its name or, failing that, its title.
 fn is_open(title: &str, tool_name: Option<&str>) -> bool {
     [Some(title), tool_name]

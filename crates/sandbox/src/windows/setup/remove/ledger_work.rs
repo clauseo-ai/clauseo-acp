@@ -19,10 +19,13 @@
 //! the run, so the record stays and the ledger keeps trusting its entries.
 //!
 //! **As an administrator** (per-machine, the owner didn't ask; LOCAL SYSTEM under Intune): no
-//! impersonation is possible, and the ledger and `DataDir` are files the owner can write, so
-//! nothing here may let a crafted ledger steer an administrator (K1). The ledger is read from a
-//! `DataDir` the owner owns (`Removal::admins_ledger`, opened relative to the checked `sandbox`
-//! folder's handle) and is never written, and the only change ever made is
+//! impersonation is possible, and the ledger and `DataDir` are files the owner can write, so a
+//! crafted ledger may steer an administrator onto nothing but taking our own entries off
+//! (K1). The folders it may name include ones the owner doesn't own (Administrators' or
+//! SYSTEM's, `remove::owners`), where it can remove only the pool's entries, which name our
+//! SIDs alone, and a Low label only for an owner who is an administrator. The ledger is read
+//! from a `DataDir` checked as `Removal::admins_ledger` says (opened relative to the checked
+//! `sandbox` folder's handle) and is never written, and the only change ever made is
 //! [`AclWriter::remove`] of one explicit access entry, on an entry that:
 //!
 //! - names one of the record's pool SIDs or its group (from `HKLM`, which only administrators
@@ -33,12 +36,18 @@
 //! - lies in a matter folder the ledger records ([`PathKind::Matter`], an allow to the whole tree
 //!   for a pool SID), not a drive's root;
 //! - and whose path, checked right before, is a folder reached with no junction or link, owned by
-//!   the record's owner, on a local volume that keeps permissions (`Removal::admin_target`).
+//!   the record's owner, Administrators or SYSTEM (`owners::matter_folder`: an elevated process
+//!   makes Administrators the owner of the folders it creates), on a local volume that keeps
+//!   permissions (`Removal::admin_target`).
 //!
 //! Besides, each recorded matter folder that passes that check has the Low label the ledger
 //! records on it taken off, through the same [`AclWriter::remove`] (the label alone, the folder
 //! re-opened without following a link, its final path checked, no walk): removing a label only
-//! tightens, and no label is ever written or put back. The inherited copies below stay.
+//! tightens, and no label is ever written or put back. The inherited copies below stay. On a
+//! folder the owner doesn't own, the label comes off only when the owner is in Administrators
+//! (`owners::label_off`, `Removal::owner_in_administrators`): otherwise a crafted ledger could
+//! strip another program's Low label (say, a `ProgramData` folder its Low processes write to).
+//! It stays, with a log line, and counts as left.
 //!
 //! No walk, no label written, no hand-back, no ownership change, no add, no delete. Whatever
 //! else the ledger lists stays, counted in [`LedgerWork::AsAdmin`]: an entry naming a dead SID
@@ -48,7 +57,8 @@ use std::path::Path;
 
 use clauseo_protocol::MatterId;
 
-use super::{Acting, Failed, Removal, RemoveStep};
+use super::owners::label_off;
+use super::{Acting, Failed, FolderOwner, Removal, RemoveStep};
 use crate::windows::acl_plan::{Inherit, in_folder};
 use crate::windows::admit::PathKind;
 use crate::windows::apply::forget_matter;
@@ -208,21 +218,37 @@ fn as_admin(
         return LedgerWork::Nothing;
     }
     // Each path checked once, right before its first removal.
-    let mut checked: Vec<(&Path, bool)> = Vec::new();
+    let mut checked: Vec<(&Path, Option<FolderOwner>)> = Vec::new();
     let owner = &record.owner;
     let mut removed = 0;
     for entry in admin_targets(&all, trusted) {
         let path = entry.path.as_path();
-        if passes(machine, &mut checked, path, owner) && acl.remove(&entry.grant()).is_ok() {
+        if passes(machine, &mut checked, path, owner).is_some()
+            && acl.remove(&entry.grant()).is_ok()
+        {
             removed += 1;
         }
     }
+    // Asked once, and only for a root that isn't the owner's.
+    let mut in_admins = None;
     for root in matter_roots(&all, trusted) {
         let labels: Vec<&&Entry> = all
             .iter()
             .filter(|e| e.rights.is_label() && e.file.is_none() && same_path(&e.path, root))
             .collect();
-        if labels.is_empty() || !passes(machine, &mut checked, root, owner) {
+        if labels.is_empty() {
+            continue;
+        }
+        let Some(folder) = passes(machine, &mut checked, root, owner) else {
+            continue;
+        };
+        let owner_in_admins =
+            || *in_admins.get_or_insert_with(|| machine.owner_in_administrators(owner));
+        if !label_off(folder, owner_in_admins) {
+            tracing::warn!(
+                "a matter folder's Low label stays: Administrators or SYSTEM owns the folder, \
+                 and the record's owner isn't an administrator"
+            );
             continue;
         }
         for label in labels {
@@ -237,19 +263,20 @@ fn as_admin(
     }
 }
 
-/// Whether `path` passes `Removal::admin_target` against `owner`, asked once per path.
+/// Who owns `path` when it passes `Removal::admin_target` against `owner`; `None` when it
+/// doesn't. Asked once per path.
 fn passes<'p>(
     machine: &mut impl Removal,
-    checked: &mut Vec<(&'p Path, bool)>,
+    checked: &mut Vec<(&'p Path, Option<FolderOwner>)>,
     path: &'p Path,
     owner: &Sid,
-) -> bool {
-    if let Some((_, ok)) = checked.iter().find(|(seen, _)| *seen == path) {
-        return *ok;
+) -> Option<FolderOwner> {
+    if let Some((_, found)) = checked.iter().find(|(seen, _)| *seen == path) {
+        return *found;
     }
-    let ok = machine.admin_target(path, owner).is_ok();
-    checked.push((path, ok));
-    ok
+    let found = machine.admin_target(path, owner).ok();
+    checked.push((path, found));
+    found
 }
 
 /// The matter folders `entries` record for one of `trusted`: each path with a trusted

@@ -46,8 +46,11 @@ pub(super) async fn open(
     )?;
     #[cfg(unix)]
     crate::browser::session::sweep_stale(parts.wiring.browser_socket_root.as_deref());
+    // Once the store is open this host is the data folder's only one.
+    super::query::blackline::sweep_leftovers(parts.effective.data_dir(), parts.clock.now().wall);
     let heads = store.heads().await?;
     let allowed = Box::new(super::allowed::AllowState::new(parts.effective.data_dir()));
+    let agent_options = super::agent_options::AgentOptions::new(parts.effective.data_dir());
     let tails = store.tail_times().await?.into_iter().collect();
     let Registry {
         matters,
@@ -92,6 +95,7 @@ pub(super) async fn open(
         update,
         count_on_commit: BTreeMap::new(),
         browser_install,
+        browser_policy: super::browser_policy::PolicyCheck::default(),
         header_tools: super::header_tools::HeaderTools::default(),
         pack_generations: BTreeMap::new(),
         turn_path: super::turn::wide::TurnPath::new(parts.idle),
@@ -113,6 +117,7 @@ pub(super) async fn open(
         app_subs: Vec::new(),
         blocked: Box::default(),
         allowed,
+        agent_options,
         blocklist: None,
         limits: super::limits::LimitsHost::new(limits_reader),
         triage: super::triage::Triage::new(),
@@ -126,6 +131,9 @@ pub(super) async fn open(
         scan_walk: parts.scan_walk,
         stats_running: std::sync::Arc::default(),
         files: super::papers::FileRefs::default(),
+        paper_scans: super::papers::scan::PaperScans::default(),
+        papers_follow: None,
+        papers_live: super::papers::follow::live_watch(),
         next_sub: 0,
         work: Work::default(),
         phase: HostPhase::Starting(ready),
@@ -165,8 +173,10 @@ fn start_writers(
 }
 
 /// Starts what `open` leaves running: the agents' hold bound, the limits model with its
-/// `cached` limits, the browser install and the lock causes; then logs the start.
+/// `cached` limits, the browser install and the lock causes; sweeps the tracked-changes copies
+/// a crash left; then logs the start.
 fn start_services(actor: &mut Actor, cached: Vec<AccountLimits>) {
+    super::revisions::sweep_leftovers(actor);
     // `agent.keys_loading`'s bound starts with the host (`agent/launch_refusals.rs`).
     let now = actor.clock.now().mono;
     actor.wiring.sign_in.refused.start_load_bound(now);
@@ -251,6 +261,7 @@ async fn registry(store: &Store) -> Result<Registry, Error> {
                     last_stop: None,
                     turn: turn::TurnState::default(),
                     came_back: turn::CameBackWatches::default(),
+                    picks: None,
                 },
             );
         }

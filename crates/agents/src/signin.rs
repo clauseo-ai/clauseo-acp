@@ -21,8 +21,9 @@
 //! - reads status output with the parsers in `crate::status`;
 //! - compares `auth.json` names with [`crate::same_file`], never by opening either.
 //!
-//! Clauseo never opens or reads a credential, and nothing here names a credential file: the
-//! test `tests/credential_names.rs` fails if any file under `src` does outside a comment.
+//! Clauseo never opens or reads a credential, and only `reuse.rs` names a credential file, to
+//! stat it: the test `tests/credential_names.rs` fails if any other file under `src` does
+//! outside a comment.
 
 use std::time::SystemTime;
 
@@ -42,6 +43,7 @@ pub(crate) mod queue;
 pub(crate) mod reuse;
 pub(crate) mod run;
 pub(crate) mod shim;
+pub(crate) mod stopping;
 
 /// How to sign in. Each agent takes its own two: Claude `ClaudeAi` and `Console`, Codex
 /// `Browser` and `DeviceCode`.
@@ -94,6 +96,10 @@ pub enum SigninError {
     /// `stop_using_login` on Clauseo's own login, which `sign_out` signs out.
     #[error("{0}'s login is Clauseo's own, not a reused one")]
     NotReused(AgentId),
+    /// A Codex login would replace Clauseo's own login (`codex login` signs it out first), and
+    /// the caller did not pass the lawyer's confirmed switch (`Agents::sign_in_switching`).
+    #[error("{0} is signed in with Clauseo's own login; a new sign-in needs the lawyer's yes")]
+    OwnLoginPresent(AgentId),
 }
 
 /// Something the sign-in did that R20 writes to its log: `AgentsEvent::SigninNote`. No email,
@@ -213,6 +219,10 @@ pub enum SigninState {
         /// What was found, if anything.
         found: Option<Found>,
     },
+    /// The status check is running and no state was shown before it (at start, and through its
+    /// retries after a run killed at its limit): the card says "Checking sign-in…", never
+    /// nothing.
+    Checking,
     /// Sign-in was pressed before the install was ready, or while offline: the run starts by
     /// itself once both hold.
     Queued,
@@ -277,8 +287,6 @@ pub enum Found {
     ReusedFailed,
     /// Reuse stopped: the CLI's own status is signed out (for Codex, its file is gone).
     ReusedSignedOut,
-    /// Reuse stopped: Claude's status names another email than the accepted one.
-    ReusedChanged,
     /// Reuse stopped: the two names of Codex's login are no longer one file.
     CodexLinkSplit,
     /// Detection ran and found no login of the lawyer's. Never a reason reuse stopped.

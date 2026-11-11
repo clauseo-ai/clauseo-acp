@@ -88,9 +88,12 @@ export type TauriOptions = {
 
 export class TauriTransport implements HostTransport, AppFeedSource, LimitsSource {
   readonly kind = "tauri";
-  /** UC: the desktop carries the protection wire (settings/sections/workspace-shown.ts); before R17 PR-B its host
-   * answers `command.invalid`, which hides or quiets every protection line. */
-  readonly protectionWire = true;
+  /** UC: whether the desktop carries the protection wire (settings/sections/workspace-shown.ts). Off: the Safe
+   * workspace is parked for launch (Rohan, 2026-11-09), so Settings › Safe workspace and the first-run step stay
+   * hidden; it returns when desktop wires `with_sandbox`. The updater keeps its own flag (`updateWire`). */
+  readonly protectionWire = false;
+  /** R23: the desktop carries the updater (store/update.ts): `get_update`, `update_changed` and its commands. */
+  readonly updateWire = true;
   readonly #reader: ChannelReader;
   readonly #subs: Subscriptions;
   readonly #warn: (message: string) => void;
@@ -175,11 +178,14 @@ export class TauriTransport implements HostTransport, AppFeedSource, LimitsSourc
           ("matters_changed" in event && event.matters_changed !== undefined) ||
           ("threads_changed" in event && event.threads_changed !== undefined) ||
           ("browser_install" in event && event.browser_install !== undefined) ||
+          ("browser_policy" in event && event.browser_policy !== undefined) ||
           ("connectors_changed" in event && event.connectors_changed !== undefined) ||
           ("case_law_hint" in event && event.case_law_hint !== undefined) ||
           ("folder_scanned" in event && event.folder_scanned !== undefined) ||
           ("protection_changed" in event && event.protection_changed !== undefined) ||
           ("site_blocked" in event && event.site_blocked !== undefined) ||
+          ("papers_changed" in event && event.papers_changed !== undefined) ||
+          ("update_changed" in event && event.update_changed !== undefined) ||
           // UC: R17 PR-B's whole ProtectionView, not in bindings.ts yet (store/protection.ts reads it loosely)
           Object.hasOwn(event, "protection_view_changed")
         ) {
@@ -255,8 +261,9 @@ export class TauriTransport implements HostTransport, AppFeedSource, LimitsSourc
   }
 
   /** Hears each app-wide event (`settings_changed`, `matters_changed`, `threads_changed`,
-   * `browser_install`, `connectors_changed`, `case_law_hint`, `folder_scanned`,
-   * `protection_changed`, `site_blocked`). The first listener subscribes the window's channel to
+   * `browser_install`, `browser_policy`, `connectors_changed`, `case_law_hint`,
+   * `folder_scanned`, `protection_changed`, `site_blocked`, `update_changed`). The first listener
+   * subscribes the window's channel to
    * them; read the current state with `query` after `ready`, so no change falls between. */
   onAppEvent(listener: (event: HostEvent) => void): AppFeed {
     this.#appListeners.add(listener);
@@ -383,6 +390,9 @@ export class TauriTransport implements HostTransport, AppFeedSource, LimitsSourc
   }
   async quitApp(): Promise<void> {
     await call(commands.quitApp());
+  }
+  async openPrivacySettings(): Promise<void> {
+    await call(commands.openPrivacySettings());
   }
   async openFile(file: FileRefId): Promise<OpenedFile> {
     return call(commands.openFile(file));

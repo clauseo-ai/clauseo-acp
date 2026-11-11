@@ -1,20 +1,23 @@
 // The updater's manifest, latest.json, and the table of a release's assets. release.yml's
 // `assemble` job runs this file; latest-json.test.mjs tests it and lints release.yml.
 //
-//   node .github/scripts/latest-json.mjs <dir> <version> <base-url> <pub-date> <sandbox-exe>
+//   node .github/scripts/latest-json.mjs <dir> <version> <base-url> <pub-date> [<sandbox-exe>]
 //   node .github/scripts/latest-json.mjs --verify <file> <public-key-file> [<signed-name> <version>]
 //   node .github/scripts/latest-json.mjs --key-id <exe> <mode>
 //
-// <dir> holds the release's assets with their final names (the Mac archives already renamed to
-// Clauseo_<version>_<arch>.app.tar.gz). <base-url> is where the release serves them,
+// <dir> holds the release's assets with their final names, each updater asset signed under that
+// name (the Mac archives as Clauseo_<version>_<arch>.app.tar.gz). <base-url> is where the release serves them,
 // https://github.com/<owner>/<repo>/releases/download/<tag>; <pub-date> is RFC 3339.
-// It checks that every tier 1 asset and every `.sig` an updater asset needs is there, and that
-// each `.sig`'s trusted comment holds `version:<version>` (tauri-plugin-updater refuses a
+// It checks that every tier 1 asset and every `.sig` an updater asset needs is there, that each
+// latest.json asset's `.sig` has `file:<its name>` in its trusted comment (the app's updater binds
+// an update to the name, which carries the arch: #728), and that each `.sig`'s trusted comment
+// holds `version:<version>` (tauri-plugin-updater refuses a
 // signature without it when `requireSignedVersion` is on), then writes <dir>/latest.json and
 // prints one line per missing tier 2 asset, `missing <name>`, for the release notes.
 // <sandbox-exe> is release.yml's SANDBOX_EXE, the name S15's set-up tool has in the install folder;
 // it is published per architecture as <name>-<arch>.exe with its updater-key `.sig`, so that IT can
-// check a copy against the release. Exit status: 0 when latest.json is written, 1 when an asset or
+// check a copy against the release. It is given only with release.yml's SAFE_WORKSPACE switch on;
+// the Safe workspace is off for launch, so without it the release has no sandbox tool rows. Exit status: 0 when latest.json is written, 1 when an asset or
 // a signature is wrong, 2 on a usage error.
 // --verify checks <file>.sig (tauri signer's format: base64 of minisign's text) against <file>
 // and the base64 public key in <public-key-file>, trusted comment included, and with <signed-name>
@@ -266,7 +269,7 @@ export function assets(version, sandboxExe = null) {
       ? []
       : [
           { name: sandboxAsset(sandboxExe, "x64"), tier: 1, signed: true },
-          { name: sandboxAsset(sandboxExe, "arm64"), tier: 2, signed: true },
+          { name: sandboxAsset(sandboxExe, "arm64"), tier: 1, signed: true },
         ];
   return [
     { name: `Clauseo_${v}_aarch64.dmg`, tier: 1 },
@@ -275,8 +278,8 @@ export function assets(version, sandboxExe = null) {
     { name: `Clauseo_${v}_x64.app.tar.gz`, tier: 2, platforms: ["darwin-x86_64-app"] },
     { name: `Clauseo_${v}_x64-setup.exe`, tier: 1, platforms: ["windows-x86_64-nsis", "windows-x86_64"] },
     { name: `Clauseo_${v}_x64-machine-setup.exe`, tier: 1 },
-    { name: `Clauseo_${v}_arm64-setup.exe`, tier: 2, platforms: ["windows-aarch64-nsis", "windows-aarch64"] },
-    { name: `Clauseo_${v}_arm64-machine-setup.exe`, tier: 2 },
+    { name: `Clauseo_${v}_arm64-setup.exe`, tier: 1, platforms: ["windows-aarch64-nsis", "windows-aarch64"] },
+    { name: `Clauseo_${v}_arm64-machine-setup.exe`, tier: 1 },
     { name: `Clauseo_${v}_amd64.deb`, tier: 2 },
     { name: `Clauseo-${v}-1.x86_64.rpm`, tier: 2 },
     ...sandbox,
@@ -349,16 +352,15 @@ export function tier1Platforms(version) {
  * tab-separated fields. null when there is no trusted comment or no `version:` field.
  */
 export function signedVersion(signature) {
+  const field = signedFields(signature).find((f) => f.startsWith("version:"));
+  return field === undefined ? null : field.slice("version:".length).trim();
+}
+
+/** The tab-separated fields of a `.sig`'s trusted comment; empty when it has none. */
+function signedFields(signature) {
   const text = Buffer.from(signature.trim(), "base64").toString("utf8");
   const line = text.split("\n").find((l) => l.startsWith("trusted comment: "));
-  if (line === undefined) {
-    return null;
-  }
-  const field = line
-    .slice("trusted comment: ".length)
-    .split("\t")
-    .find((f) => f.startsWith("version:"));
-  return field === undefined ? null : field.slice("version:".length).trim();
+  return line === undefined ? [] : line.slice("trusted comment: ".length).split("\t").map((f) => f.trim());
 }
 
 /** The problems with signature <signature> for <name>, which must be signed for <version>. */
@@ -469,6 +471,11 @@ export function buildManifest(dir, version, baseUrl, pubDate, sandboxExe = null)
     }
     const signature = readFileSync(sigPath, "utf8").trim();
     const wrong = signatureProblems(`${asset.name}.sig`, signature, version);
+    // An updater asset is signed under its published name; the sandbox tool under SANDBOX_EXE,
+    // which assemble checks with --verify.
+    if (asset.platforms !== undefined && !signedFields(signature).includes(`file:${asset.name}`)) {
+      wrong.push(`${asset.name}.sig: the signature's trusted comment holds no file:${asset.name}`);
+    }
     if (wrong.length > 0) {
       problems.push(...wrong);
       continue;
@@ -523,15 +530,19 @@ function main(argv) {
     }
     return problems.length === 0 ? 0 : 1;
   }
-  if (argv.length !== 5 || !SANDBOX_EXE.test(argv[4])) {
+  if (
+    argv[0]?.startsWith("--") ||
+    (argv.length !== 4 && argv.length !== 5) ||
+    (argv.length === 5 && !SANDBOX_EXE.test(argv[4]))
+  ) {
     process.stderr.write(
-      "usage: node latest-json.mjs <dir> <version> <base-url> <pub-date> <sandbox-exe>\n" +
+      "usage: node latest-json.mjs <dir> <version> <base-url> <pub-date> [<sandbox-exe>]\n" +
         "       node latest-json.mjs --verify <file> <public-key-file> [<signed-name> <version>]\n" +
         "       node latest-json.mjs --key-id <exe> <mode>\n",
     );
     return 2;
   }
-  const [dir, version, baseUrl, pubDate, sandboxExe] = argv;
+  const [dir, version, baseUrl, pubDate, sandboxExe = null] = argv;
   const { manifest, missing, problems } = buildManifest(dir, version, baseUrl, pubDate, sandboxExe);
   if (problems.length > 0) {
     for (const problem of problems) {

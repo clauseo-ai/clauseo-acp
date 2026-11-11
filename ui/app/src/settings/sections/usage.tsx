@@ -4,12 +4,15 @@
 // filled with what's left, and the reset. The figures come from the room's own logic (room/limits/plan-model.ts,
 // plan-windows.ts): a window whose reset passed shows no share and no meter, only when it reset, muted; from the
 // toolbar's close band on, a tile's words take primary, never amber, never red. Stale: the figures muted. Loading: the
-// plan's name alone. No figures: the card's message and Try again (`refresh_limits`, `try_again`). Billed by use: who
-// bills, no figure. An agent whose state waits on its words (missing_scope, live_only) has no entry, and an agent of no
-// kind is never in the view. Opening the section asks the host for a read (`shown`), which reads only figures older
+// plan's name and "Checking what's left…". No figures: the card's message and Try again (`refresh_limits`,
+// `try_again`), and so for a state the toolbar hides while it waits on its words (missing_scope, live_only, or one from
+// a newer Clauseo). Billed by use: who bills, no figure. An agent of no kind is never in the view. The page is never
+// blank: the host gives every plan set up an entry, loading at least, so with none the one line asks to set one up.
+// Opening the section asks the host for a read (`shown`), which reads only figures older
 // than 5 minutes. No timers: times are said against the clock at each render, and the host sends a new view at each
 // shown reset. Not here until the host gives them: Manage plan and Manage billing (H11), the month's figure, the retry
-// lines and what the plan does at its limit (H16), and preparing ahead (later).
+// lines and what the plan does at its limit (H16), and preparing ahead (later). A plan the setup wire says isn't
+// signed in shows nothing, though the host reads it as billed by use (no subscription and no limits; D-060).
 import { IconTryAgain } from "@clauseo/components/icons/icons.tsx";
 import { lim } from "@clauseo/components/lib/words-limits.ts";
 import { pc } from "@clauseo/components/lib/words-plan-card.ts";
@@ -22,6 +25,7 @@ import { windowOf, type WindowFigures } from "../../room/limits/plan-windows.ts"
 import { stamp } from "../../room/thread/clock.ts";
 import { useLimitsStore, useLimitsView, useNow } from "../../store/limits.ts";
 import type { AgentKind, AgentLimitsView } from "../../transport/protocol.ts";
+import type { SectionContext } from "../sections.tsx";
 import { Group, PlateRow } from "./parts.tsx";
 import { KINDS } from "./usage-note.ts";
 
@@ -97,7 +101,7 @@ function AgentUsage({ kind, entry }: { kind: AgentKind; entry: AgentLimitsView }
         </PlateRow>
       </Group>
     );
-  if (look === "none")
+  if (look === "none" || look === "hidden")
     return (
       <Group title={plan}>
         <PlateRow className="set-choice">
@@ -128,11 +132,13 @@ function AgentUsage({ kind, entry }: { kind: AgentKind; entry: AgentLimitsView }
         </PlateRow>
       </Group>
     );
-  // loading: the plan's name alone, no figures
+  // loading: the plan's name and the checking line, no figures
   if (look === "loading")
     return (
       <Group title={plan} plate={false}>
-        <div data-testid={testId} data-look="loading" />
+        <p className="set-note" data-testid={testId} data-look="loading" role="status">
+          {w.say(w.s("Checking what's left…"))}
+        </p>
       </Group>
     );
   const stale = look === "stale";
@@ -157,7 +163,8 @@ function AgentUsage({ kind, entry }: { kind: AgentKind; entry: AgentLimitsView }
   );
 }
 
-export function Usage() {
+export function Usage({ ctx }: { ctx: SectionContext }) {
+  const w = useSettingsWords();
   const store = useLimitsStore();
   const view = useLimitsView();
   // once per opening, for every agent; the ref holds through StrictMode's second run of the effect
@@ -167,13 +174,23 @@ export function Usage() {
     asked.current = true;
     store.refresh(undefined, "shown");
   }, [store]);
+  // a plan with no sign-in and no key reads as billed by use: it isn't set up, so it shows nothing (D-060)
+  const kinds = KINDS.filter((kind) => {
+    const entry = view[kind];
+    return entry !== undefined && !(lookOf(entry) === "payg" && ctx.notSetUp(kind));
+  });
   return (
     <div className="set-usage" data-testid="usage-section">
-      {KINDS.map((kind) => {
-        const entry = view[kind];
-        if (entry === undefined || lookOf(entry) === "hidden") return null;
-        return <AgentUsage key={kind} kind={kind} entry={entry} />;
-      })}
+      {kinds.length === 0 ? (
+        <p className="set-note" data-testid="usage-none">
+          {w.say(w.s("Set up Claude or ChatGPT to see what each plan has left."))}
+        </p>
+      ) : (
+        kinds.map((kind) => {
+          const entry = view[kind];
+          return entry === undefined ? null : <AgentUsage key={kind} kind={kind} entry={entry} />;
+        })
+      )}
     </div>
   );
 }

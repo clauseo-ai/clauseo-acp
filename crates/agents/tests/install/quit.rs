@@ -108,7 +108,7 @@ fn start(fx: &Fixture) -> (Agents, Events, PathBuf, Arc<Gate>) {
         gate: Arc::clone(&gate),
     });
     let (agents, events) = Agents::start(fx.config.clone(), launcher, fx.timer.clone());
-    let events = Events(events);
+    let events = Events::new(events);
     events.first_states();
     (agents, events, pids, gate)
 }

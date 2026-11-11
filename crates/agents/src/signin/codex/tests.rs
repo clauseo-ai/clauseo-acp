@@ -1,10 +1,8 @@
 use std::net::{Ipv4Addr, TcpListener};
-use std::path::Path;
 
 use super::device::{DEVICE_URL, DeviceLines, is_code, is_device_code_off, is_port_busy};
 use super::identity::app_server_args;
 use super::port_free;
-use crate::signin::env::RunKind;
 
 fn hosts() -> Vec<String> {
     vec!["auth.openai.com".to_owned(), "chatgpt.com".to_owned()]
@@ -115,9 +113,7 @@ fn a_held_port_is_not_free_and_a_released_one_is() {
 
 #[test]
 fn the_app_server_runs_with_the_file_store_and_the_overrides() {
-    let args = app_server_args(RunKind::Own {
-        home: Path::new("/data/agents/codex-acp/home"),
-    });
+    let args = app_server_args();
     let args: Vec<&str> = args.iter().map(|arg| arg.to_str().unwrap()).collect();
     assert_eq!(args[..2], ["-c", "cli_auth_credentials_store=\"file\""]);
     assert!(args.contains(&"features.plugins=false"));

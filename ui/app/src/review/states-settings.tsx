@@ -6,6 +6,7 @@ import { nextHostOf, type MatterInfo } from "../room/host-next.ts";
 import type { SectionId } from "../settings/sections.tsx";
 import { SettingsApp } from "../settings/settings-app.tsx";
 import type { FakeBlocklistHost } from "../transport/fake-blocklist.ts";
+import type { FakeUpdateHost } from "../transport/fake-update.ts";
 import { FakeTransport, type FakeProtectionHost } from "../transport/fake-transport.ts";
 import type {
   ConnectorsState,
@@ -13,6 +14,7 @@ import type {
   SettingsView,
   SetupCommand,
   SetupEvent,
+  PrivacySettings,
   ToolsSettingsView,
 } from "../transport/protocol.ts";
 
@@ -34,11 +36,13 @@ export function SettingsOver({
   limits,
   releaseDate = null,
   tools,
+  privacy,
   connectors,
   setup,
   plans,
   protection,
   blocklist,
+  update,
   matters = [],
 }: {
   section: SectionId;
@@ -48,6 +52,8 @@ export function SettingsOver({
   releaseDate?: string | null;
   /** The tools' switches the host sends (SettingsView.tools, Privacy's switches); none when left out. */
   tools?: ToolsSettingsView;
+  /** The privacy switches the host sends (SettingsView.privacy, Privacy's counts switch); none when left out. */
+  privacy?: PrivacySettings;
   /** The connectors' state the app feed's catch-up carries (U15); none when left out. */
   connectors?: ConnectorsState;
   /** The setup wire (UD2's Plans); none when left out, and Plans doesn't show. */
@@ -58,6 +64,8 @@ export function SettingsOver({
   protection?: FakeProtectionHost;
   /** The unsafe-site list's host (0053), Privacy's allowed sites; none listed when left out. */
   blocklist?: FakeBlocklistHost;
+  /** R23's updater (fake-update.ts), Settings' Updates; none when left out, and Updates doesn't show. */
+  update?: FakeUpdateHost;
   /** The matters the app feed's first frames list, for the allowed sites' matter names. */
   matters?: MatterInfo[];
 }) {
@@ -72,6 +80,7 @@ export function SettingsOver({
                 ui: { ...DEFAULT_UI, language: lang },
                 locked,
                 ...(tools === undefined ? {} : { tools }),
+                ...(privacy === undefined ? {} : { privacy }),
                 ...(plans === undefined ? {} : { plans }),
               },
             };
@@ -86,6 +95,7 @@ export function SettingsOver({
       },
       ...(protection === undefined ? {} : { protection }),
       ...(blocklist === undefined ? {} : { blocklist }),
+      ...(update === undefined ? {} : { update }),
       ...(setup === undefined
         ? {}
         : {

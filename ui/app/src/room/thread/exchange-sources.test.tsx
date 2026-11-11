@@ -7,6 +7,9 @@ import { agentText, reset, step, userMessage } from "../../testing/stream-script
 import { headerOf, searchOf, webCall, webOf } from "../../testing/web-sources.ts";
 import { mountRoom, type Harness } from "./harness.ts";
 
+/** A page the search listed: a turn whose searches list no page shows no sources (D-028). */
+const RESULT = { title: "Notice period", url: "https://indiankanoon.org/doc/1/" };
+
 const spies = vi.hoisted(() => ({
   sources: 0,
   picks: 0,
@@ -69,7 +72,7 @@ test("an exchange with tool calls still shows its sources, the picker given tool
     reset(
       [
         userMessage(5, 1, "What is the notice period?"),
-        webCall(10, "call-0", webOf({ search: searchOf("notice period") })),
+        webCall(10, "call-0", webOf({ search: searchOf("notice period", [RESULT]) })),
         agentText(40, 1, "Thirty days."),
         step(50),
       ],

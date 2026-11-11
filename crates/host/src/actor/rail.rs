@@ -273,6 +273,7 @@ fn matter_row(
         client: row.client.clone(),
         next_date: row.next_date,
         skill_packs: row.skill_packs.clone(),
+        agent_prefs: row.agent_prefs.clone(),
         pinned: row.pinned,
         last_opened: row.last_opened,
         status: matter_status(facts),
@@ -288,8 +289,12 @@ fn matter_row(
         // (`agent/folder_support.rs`): read from memory, never checked here.
         folder_support: actor.folder_supports.get(&row.id).copied(),
         // The computer's, from the cache (decision record 0051): per-matter causes come later
-        // (R18's switch, PR-E's pool).
-        protection: Some(actor.protection.computer().clone()),
+        // (R18's switch, PR-E's pool). Safe workspace parked for launch: none until desktop
+        // wires `with_sandbox`.
+        protection: actor
+            .protection
+            .sandbox_wired()
+            .then(|| actor.protection.computer().clone()),
     }
 }
 
@@ -351,6 +356,9 @@ pub(crate) fn note_commit(actor: &mut Actor, envelopes: &[Envelope]) {
         };
         actor.lists.touch_thread(thread);
         actor.triage.committed(&envelope.event);
+        if let DomainEvent::ConfigOptionsReplaced(replaced) = &envelope.event {
+            super::agent_options::note(actor, thread, &replaced.options);
+        }
         if let DomainEvent::TurnEnded(ended) = &envelope.event
             && let Some(entry) = actor.threads.get_mut(&thread)
         {

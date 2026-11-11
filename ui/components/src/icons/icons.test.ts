@@ -15,25 +15,27 @@ test("Clauseo's own glyphs live in glyphs.tsx, outside the Lucide file's licence
   expect(sorted(Object.keys(glyphs))).toEqual([
     "IconAccept",
     "IconFileEmail",
+    "IconFileExcel",
     "IconFileGeneric",
     "IconFileMarkdown",
     "IconFilePdf",
+    "IconFilePowerPoint",
     "IconFileWord",
     "IconPageTurn",
     "IconPaperBookPage",
     "IconSafeWorkspace",
   ]);
   const lucide = new Set(Object.keys(icons).filter((name) => !(name in glyphs)));
-  expect(lucide.size).toBe(ICON_NAMES.length - 9);
+  expect(lucide.size).toBe(ICON_NAMES.length - 11);
 });
 
 /** Each vertical line's x in an icon's paths: the x of every "M{x} {y}v…" or "…V…" segment that starts one. */
 const verticals = (markup: string) =>
   [...markup.matchAll(/d="M([\d.]+)[ ,][\d.]+[vV]/g)].map((m) => Number(m[1]));
 
-test("the browser's ticks and the download's shaft and tray sides land on the pixel grid at 1x", () => {
+test("the browser's ticks, the download's shaft and tray sides, and Copy's sheets land on the pixel grid at 1x", () => {
   // a 1.5 px stroke centred at x.75 covers whole pixels from x, as the outlines' 2.75 do
-  for (const icon of [icons.IconBrowser, icons.IconDownload]) {
+  for (const icon of [icons.IconBrowser, icons.IconDownload, icons.IconCopy]) {
     const xs = verticals(renderToStaticMarkup(createElement(icon, { size: 20 })));
     expect(xs.length).toBeGreaterThan(0);
     for (const x of xs) expect(x % 1, `${icon.name} at ${x}`).toBe(0.75);

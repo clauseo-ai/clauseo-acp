@@ -1,13 +1,13 @@
 // @vitest-environment happy-dom
 // The tool line over FakeTransport: the open thread's header's tools as glyphs on the status line, named in words, the
 // popover's row for each tool (glyph, name, On or Off, the reason only when off), Open Settings at the foot, the
-// tools and reasons this version doesn't know left out, and the Chrome download (FakeTransport's `browser_install`
-// app events, and the install_browser commands it is dispatched), from consent to each end.
+// tools and reasons this version doesn't know left out, what to install with no browser on the computer, by its OS,
+// and the firm's browser policy re-read (FakeTransport's `browser_policy` app events) with its Try again.
 import { act } from "react";
 import { settled } from "@clauseo/components/lib/late.ts";
 import { afterEach, expect, test } from "vitest";
 import { header, reset } from "../../testing/stream-script.ts";
-import type { BrowserInstallState, ToolState } from "../../transport/protocol.ts";
+import type { BrowserPolicyState, ToolState } from "../../transport/protocol.ts";
 import { mountRoom, type Harness } from "./harness.ts";
 
 let h: Harness | null = null;
@@ -28,11 +28,17 @@ const browser = (availability: ToolState["availability"]): ToolState => ({
 });
 const off = (reason: string) => ({ unavailable: { reason } }) as ToolState["availability"];
 
-/** The room with Settings and the app feed, the thread's view arriving with these tools on its header. */
-async function open(tools: ToolState[] | undefined, settings = true): Promise<Harness> {
+/** The room with Settings and the app feed, the thread's view arriving with these tools on its header; on Linux, as
+ * the fake host says, unless `platform` names another OS. */
+async function open(
+  tools: ToolState[] | undefined,
+  settings = true,
+  platform?: "mac" | "windows",
+): Promise<Harness> {
   const harness = await mountRoom({
     next: { parts: ["app"], query: () => Promise.reject(new Error("not scripted")) },
     ...(settings ? { openSettings: () => {} } : {}),
+    ...(platform === undefined ? {} : { platform }),
   });
   const head = header();
   if (tools !== undefined) head.header!.tools = tools;
@@ -53,12 +59,12 @@ const row = (tool: string) =>
 const inRow = (tool: string, id: string) =>
   row(tool)?.querySelector<HTMLElement>(`[data-testid="${id}"]`) ?? null;
 const said = (tool: string, id: string) => inRow(tool, id)?.textContent ?? null;
-const play = async (state: BrowserInstallState) => {
-  await act(async () => h!.transport.appEvent({ browser_install: { state } }));
+const play = async (state: BrowserPolicyState) => {
+  await act(async () => h!.transport.appEvent({ browser_policy: { state } }));
 };
-/** The install_browser commands dispatched so far. */
-const installs = () =>
-  h!.transport.only("dispatch").filter((c) => "install_browser" in c.command.command);
+/** The recheck_browser_policy commands dispatched so far. */
+const rechecks = () =>
+  h!.transport.only("dispatch").filter((c) => "recheck_browser_policy" in c.command.command);
 const openPopover = async () => {
   await h!.click(line());
   await act(() => settled());
@@ -68,7 +74,7 @@ const described = (el: HTMLElement | null) =>
 
 test("a header with tools shows their glyphs after the plan, parted by a dot, named in words and no visible words", async () => {
   h = await open([web("available"), browser(off("browser_not_installed"))]);
-  expect(line()?.getAttribute("aria-label")).toBe("Web search: on. Browser: off, needs Chrome.");
+  expect(line()?.getAttribute("aria-label")).toBe("Web search: on. Browser: off, install Chrome.");
   expect(line()?.textContent).toBe("");
   expect(line()?.querySelectorAll("[data-tool] > svg")).toHaveLength(2);
   for (const svg of line()?.querySelectorAll("[data-tool] > svg") ?? [])
@@ -98,7 +104,7 @@ test.each([
     "Web search: off, can't search on this login.",
   ],
   [
-    [web(off("locked_off")), browser(off("managed_by_firm"))],
+    [web(off("locked_off")), browser(off("locked_off"))],
     [
       ["web_search", "locked"],
       ["browser", "locked"],
@@ -106,12 +112,7 @@ test.each([
     "Web search: off, managed by firm. Browser: off, managed by firm.",
   ],
   [[browser(off("locked_off"))], [["browser", "locked"]], "Browser: off, managed by firm."],
-  [[browser(off("no_proxy"))], [["browser", "off"]], "Browser: off, not available yet."],
-  [
-    [browser(off("too_many_browsers"))],
-    [["browser", "off"]],
-    "Browser: off, too many browsers open.",
-  ],
+  [[browser(off("browser_not_installed"))], [["browser", "off"]], "Browser: off, install Chrome."],
 ] as [ToolState[], string[][], string][])(
   "each state on its glyph, and in the line's name: %o",
   async (tools, states, name) => {
@@ -135,7 +136,7 @@ test("focused from the keyboard, the tool line's tooltip says the same words as 
   });
   await h.settle();
   const tips = [...document.body.querySelectorAll<HTMLElement>("[data-open]")].filter(
-    (el) => el.textContent === "Web search: on. Browser: off, needs Chrome.",
+    (el) => el.textContent === "Web search: on. Browser: off, install Chrome.",
   );
   expect(tips.length).toBeGreaterThan(0);
   // raised over the thread and the popover's plane: the shared tooltip stacks in the page's layer, under both
@@ -161,6 +162,10 @@ test("a tool, an availability or a reason this version doesn't know shows no gly
     { tool: "unknown", availability: "available" },
     web("sideways"),
     browser(off("unknown")),
+    // the guarded browser's reasons never come for #870's shell browser: no words, no glyph
+    browser(off("no_proxy")),
+    browser(off("too_many_browsers")),
+    browser(off("managed_by_firm")),
   ]);
   expect(line()).toBeNull();
   await h.unmount();
@@ -183,10 +188,9 @@ const ROWS: [ToolState, string | null][] = [
   [browser("available"), null],
   [browser(off("off")), "In Settings"],
   [browser(off("locked_off")), "Managed by firm"],
-  [browser(off("managed_by_firm")), "Managed by firm"],
-  [browser(off("no_proxy")), "Not available yet"],
-  [browser(off("too_many_browsers")), "Too many browsers open"],
-  [browser(off("browser_not_installed")), "Needs Chrome"],
+  [browser(off("browser_not_installed")), "Install Chrome"],
+  [browser(off("browser_blocked_by_policy")), "Blocked by your firm"],
+  [browser(off("browser_policy_unreadable")), "Couldn't check browser settings"],
 ];
 
 test.each(ROWS)(
@@ -210,12 +214,19 @@ test.each(ROWS)(
       expect(reasonEl.parentElement === inRow(tool.tool, "tool-row-chip")?.parentElement).toBe(
         tool.availability !== "available" && reason === "In Settings",
       );
-    // nothing else in words: the name, the chip and the reason; with no Chrome, the offer's words under it (the
-    // button, its hidden tooltip and the size)
+    // nothing else in words: the name, the chip and the reason; with no Chrome, what to install in full; blocked by
+    // the firm's policy, or a policy Clauseo couldn't check, the reason in full (that one, Try again)
     const offer =
-      reason === "Needs Chrome"
-        ? "Download Chrome" + "From Google, once. Needs 1\u00a0GB free." + "200\u00a0MB"
-        : "";
+      reason === "Install Chrome"
+        ? "Install Google Chrome, then start a new conversation."
+        : reason === "Blocked by your firm"
+          ? "Your firm doesn't allow apps to control a browser on this computer, so Clauseo can't use " +
+            "one for you."
+          : reason === "Couldn't check browser settings"
+            ? "Clauseo couldn't check this computer's browser settings, so it won't use a browser for " +
+              "now. It checks again the next time it needs one." +
+              "Try again"
+            : "";
     expect(r.textContent).toBe(
       (tool.tool === "web_search" ? "Web search" : "Browser") +
         (reason === null ? "On" : "Off") +
@@ -254,7 +265,7 @@ test("one tool off in Settings: the same foot, once", async () => {
 });
 
 test("no tool off in Settings, or no settings window: no Open Settings and no foot", async () => {
-  h = await open([web(off("locked_off")), browser(off("no_proxy"))]);
+  h = await open([web(off("locked_off")), browser(off("browser_not_installed"))]);
   await openPopover();
   expect(settingsButtons()).toEqual([]);
   expect(foot()).toBeNull();
@@ -267,53 +278,57 @@ test("no tool off in Settings, or no settings window: no Open Settings and no fo
   expect(document.body.textContent).not.toContain("Changes apply to new conversations.");
 });
 
-test("no Chrome and no download yet: the reason, and the offer to download it", async () => {
-  h = await open([browser(off("browser_not_installed"))]);
-  await openPopover();
-  expect(said("browser", "tool-row-reason")).toBe("Needs Chrome");
-  expect(inRow("browser", "tool-download")?.textContent).toBe("Download Chrome");
-  expect(installs()).toEqual([]);
-});
+test.each([
+  [
+    undefined,
+    "Install Chrome",
+    "Install Google Chrome, then start a new conversation.",
+    "install Chrome",
+  ],
+  [
+    "mac",
+    "Install Chrome",
+    "Install Google Chrome, then start a new conversation.",
+    "install Chrome",
+  ],
+  [
+    "windows",
+    "Install Chrome or Edge",
+    "Install Google Chrome or Microsoft Edge, then start a new conversation.",
+    "install Chrome or Edge",
+  ],
+] as const)(
+  "no browser on the computer (%s): what to install, in a few words and in full, and nothing to press",
+  async (platform, reason, full, inLine) => {
+    h = await open([browser(off("browser_not_installed"))], true, platform);
+    await openPopover();
+    expect(said("browser", "tool-row-reason")).toBe(reason);
+    expect(said("browser", "tool-row-full")).toBe(full);
+    expect(row("browser")?.querySelector("button")).toBeNull();
+    expect(row("browser")?.querySelector('[role="progressbar"]')).toBeNull();
+    expect(line()?.getAttribute("aria-label")).toBe(`Browser: off, ${inLine}.`);
+  },
+);
 
-test("Download Chrome is the consent: it sends install_browser once and goes, then the bar, Unpacking, and Ready for new conversations", async () => {
-  h = await open([browser(off("browser_not_installed"))]);
+test("Try again asks for the policy once and waits; a read that finds it clear says Ready for new conversations", async () => {
+  h = await open([browser(off("browser_policy_unreadable"))]);
   await openPopover();
-  const download = inRow("browser", "tool-download");
-  expect(download?.textContent).toBe("Download Chrome");
-  expect(download?.querySelector("svg")).not.toBeNull();
-  expect(said("browser", "tool-download-size")).toBe("200\u00a0MB");
-  expect(described(download)).toBe("From Google, once. Needs 1\u00a0GB free.");
-  await h.click(download);
-  // a second press can't happen: the button is gone
-  expect(inRow("browser", "tool-download")).toBeNull();
-  download?.click();
-  expect(installs()).toHaveLength(1);
-  // the host's first Downloading brings the total: until then the bar has no words
-  expect(row("browser")?.querySelector('[role="progressbar"]')).not.toBeNull();
-  await play({ downloading: { bytes: 64_400_000, total: 200_000_000 } });
-  const bar = row("browser")?.querySelector('[role="progressbar"]');
-  expect(bar?.getAttribute("aria-valuetext")).toBe("64 of 200\u00a0MB");
-  expect(bar?.getAttribute("aria-label")).toBe("Download Chrome");
-  expect(bar?.querySelector("svg")).not.toBeNull();
-  expect(said("browser", "tool-progress-text")).toBe("64 of 200\u00a0MB");
-  expect(said("browser", "tool-row-reason")).toBe("Needs Chrome");
-  expect(row("browser")?.querySelector("button")).toBeNull();
-  await play("unpacking");
-  // no bar while unpacking (determinate bars only, nothing spins): the download glyph and the word
-  expect(row("browser")?.querySelector('[role="progressbar"]')).toBeNull();
-  expect(said("browser", "tool-progress-text")).toBe("Unpacking");
-  expect(inRow("browser", "tool-progress-text")?.querySelector("svg")).not.toBeNull();
-  await play("done");
-  // done keeps a reason, with a tick and a tooltip on when the browser comes
+  const again = inRow("browser", "tool-recheck");
+  expect(again?.textContent).toBe("Try again");
+  await h.click(again);
+  expect(rechecks()).toHaveLength(1);
+  expect(inRow("browser", "tool-recheck")?.getAttribute("aria-busy")).toBe("true");
+  await play("clear");
+  // a reason kept, with a tick and a tooltip on when the browser comes
   expect(said("browser", "tool-row-reason")).toBe("Ready for new conversations");
   const ready = inRow("browser", "tool-row-reason")!;
   expect(ready.querySelector("svg")).not.toBeNull();
   expect(ready.getAttribute("tabindex")).toBe("0");
   expect(described(ready)).toBe("The browser comes with your next conversation.");
-  expect(inRow("browser", "tool-row-note")).toBeNull();
-  expect(row("browser")?.querySelector('[role="progressbar"]')).toBeNull();
-  // the line never changes for the download: the header still says no Chrome
-  expect(line()?.getAttribute("aria-label")).toBe("Browser: off, needs Chrome.");
+  expect(inRow("browser", "tool-row-full")).toBeNull();
+  expect(inRow("browser", "tool-recheck")).toBeNull();
+  // the line never changes for the read: the header still says it couldn't check
+  expect(line()?.getAttribute("aria-label")).toBe("Browser: off, couldn't check browser settings.");
 });
 
 /** Enter on the focused element, as a browser takes it: keydown, and on a button its click. */
@@ -341,8 +356,8 @@ test("opened by a press, the popup itself takes the focus, named by the tool lin
   expect(settingsButtons()).toHaveLength(1);
 });
 
-test("opened by a key, the popup takes the focus too, and an Enter right after opening starts no download", async () => {
-  h = await open([browser(off("browser_not_installed"))]);
+test("opened by a key, the popup takes the focus too, and an Enter right after opening asks for nothing", async () => {
+  h = await open([browser(off("browser_policy_unreadable"))]);
   line()!.focus();
   await act(async () => {
     line()!.dispatchEvent(
@@ -353,122 +368,19 @@ test("opened by a key, the popup takes the focus too, and an Enter right after o
   await act(() => settled());
   await h.settle();
   expect(document.activeElement).toBe(popup());
-  expect(inRow("browser", "tool-download")).not.toBeNull();
+  expect(inRow("browser", "tool-recheck")).not.toBeNull();
   await pressEnter();
-  expect(installs()).toEqual([]);
-  expect(inRow("browser", "tool-download")).not.toBeNull();
+  expect(rechecks()).toEqual([]);
+  expect(inRow("browser", "tool-recheck")).not.toBeNull();
 });
 
-const MESSAGE = "curl: (56) Recv failure: Connection reset by peer";
-
-test.each([
-  ["network", "Connection dropped"],
-  ["size_mismatch", "File didn't match"],
-  ["signature", "File didn't match"],
-  ["disk_space", "Needs 1\u00a0GB free"],
-  ["host_refused", "Network blocked it"],
-  ["unpack", "Couldn't unpack"],
-  ["a_newer_code", "Download failed"],
-] as const)(
-  "a failed download (%s) says its cause by the break glyph, with a Try again icon button, never the host's message",
-  async (code, cause) => {
-    h = await open([browser(off("browser_not_installed"))]);
-    await play({ failed: { code: code as never, message: MESSAGE } });
-    await openPopover();
-    expect(said("browser", "tool-row-reason")).toBe("Needs Chrome");
-    expect(said("browser", "tool-row-note")).toBe(cause);
-    expect(inRow("browser", "tool-row-note")?.parentElement?.querySelector("svg")).not.toBeNull();
-    expect(document.body.textContent).not.toContain(MESSAGE);
-    expect(document.body.innerHTML).not.toContain("Recv failure");
-    const retry = inRow("browser", "tool-retry");
-    expect(retry?.getAttribute("aria-label")).toBe("Try again");
-    expect(retry?.textContent).toBe("");
-    expect(retry?.querySelector("svg")).not.toBeNull();
-    await h.click(retry);
-    expect(installs()).toHaveLength(1);
-    expect(inRow("browser", "tool-retry")).toBeNull();
-  },
-);
-
-test("a computer that can't download Chrome says to install it, with no Try again", async () => {
-  h = await open([browser(off("browser_not_installed"))]);
-  await play({ failed: { code: "unsupported", message: MESSAGE } });
-  await openPopover();
-  expect(said("browser", "tool-row-reason")).toBe("Needs Chrome");
-  expect(said("browser", "tool-row-note")).toBe("Install Chrome to use it");
-  expect(row("browser")?.querySelector("button")).toBeNull();
-  expect(document.body.textContent).not.toContain(MESSAGE);
-});
-
-test("a cancelled download shows the offer again, with no line and no Try again", async () => {
-  h = await open([browser(off("browser_not_installed"))]);
-  await play({ downloading: { bytes: 64_400_000, total: 200_000_000 } });
-  await play({ failed: { code: "cancelled", message: MESSAGE } });
-  await openPopover();
-  expect(inRow("browser", "tool-download")?.textContent).toBe("Download Chrome");
-  expect(inRow("browser", "tool-row-note")).toBeNull();
-  expect(inRow("browser", "tool-retry")).toBeNull();
-});
-
-test("while a download runs the row has no Install to press: the bar shows the host's latest bytes", async () => {
-  h = await open([browser(off("browser_not_installed"))]);
-  await play({ downloading: { bytes: 64_400_000, total: 200_000_000 } });
-  await play({ downloading: { bytes: 80_000_000, total: 200_000_000 } });
-  await openPopover();
-  expect(inRow("browser", "tool-download")).toBeNull();
-  expect(installs()).toEqual([]);
-  expect(
-    row("browser")?.querySelector('[role="progressbar"]')?.getAttribute("aria-valuetext"),
-  ).toBe("80 of 200\u00a0MB");
-});
-
-test("a catch-up's latest state shows when the window opens: the bar, not the offer", async () => {
-  h = await open([browser(off("browser_not_installed"))]);
-  await play("unpacking");
-  await openPopover();
-  expect(inRow("browser", "tool-download")).toBeNull();
-  expect(said("browser", "tool-progress-text")).toBe("Unpacking");
-});
-
-test("a refused Install shows no failure: the offer stands again as it stood before the press", async () => {
-  h = await open([browser(off("browser_not_installed"))]);
-  h.transport.host.dispatch = () => Promise.reject(new Error("the host refused it"));
-  await openPopover();
-  await h.click(inRow("browser", "tool-download"));
-  await h.settle();
-  expect(inRow("browser", "tool-download")).not.toBeNull();
-  expect(said("browser", "tool-download-size")).toBe("200\u00a0MB");
-  expect(inRow("browser", "tool-retry")).toBeNull();
-  expect(inRow("browser", "tool-row-note")).toBeNull();
-  expect(row("browser")?.querySelector('[role="progressbar"]')).toBeNull();
-});
-
-test("the rendered download words hold every number to its unit with a non-breaking space", async () => {
-  h = await open([browser(off("browser_not_installed"))]);
-  await openPopover();
-  const all = () => row("browser")?.textContent ?? "";
-  const texts = [all()];
-  await play({ downloading: { bytes: 64_400_000, total: 200_000_000 } });
-  texts.push(all());
-  await play({ failed: { code: "disk_space", message: "" } });
-  texts.push(all());
-  for (const text of texts) {
-    expect(text).toMatch(/\d\u00a0(MB|GB)/);
-    expect(text).not.toMatch(/\d\s(?<!\u00a0)(MB|GB)/u);
-  }
-});
-
-test("the popover keeps one width through every download state", async () => {
-  h = await open([browser(off("browser_not_installed"))]);
+test("the popover keeps one width through the policy read's states", async () => {
+  h = await open([browser(off("browser_policy_unreadable"))]);
   await openPopover();
   const classes = [popup()?.className];
-  await play({ downloading: { bytes: 64_400_000, total: 200_000_000 } });
+  await play("checking");
   classes.push(popup()?.className);
-  await play("unpacking");
-  classes.push(popup()?.className);
-  await play("done");
-  classes.push(popup()?.className);
-  await play({ failed: { code: "network", message: "" } });
+  await play("clear");
   classes.push(popup()?.className);
   expect(classes[0]?.split(" ")).toContain("w-card-tile");
   expect(new Set(classes).size).toBe(1);

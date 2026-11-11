@@ -10,7 +10,8 @@
 //! - Creating and importing a matter (the scan, refused folders, warnings, cancel), opening one
 //!   again, locating a moved folder and repairing a deleted `matter.json`, `before-turn` and
 //!   `after-turn` checkpoints with their diff, undoing a step, restoring a version (the whole
-//!   matter or chosen files), and comparing and reading versions.
+//!   matter or chosen files), replacing one file with content made outside the folder, and
+//!   comparing and reading versions.
 //! - The document rules: excluded names, the per-file size cap, cloud-only placeholders (never
 //!   read), racily clean files.
 //!
@@ -31,13 +32,17 @@
 //!   and [`Matter::still_gone`] says which files it deleted are back;
 //!   [`Matter::timeline`] lists the checkpoints, rebuilt from the trailers on open;
 //!   [`Matter::restore`] restores a version ([`Restore`], [`RestoreFiles`], [`Restored`]) and
-//!   [`Matter::preview_restore`] says what it would do ([`RestorePlan`]); [`Matter::compare`]
-//!   ([`CompareSide`]), [`Matter::files_at`] ([`VersionFile`]) and [`Matter::read_file`] read
-//!   versions and take `&self`; [`Matter::papers`] lists the folder as it is now ([`PaperList`],
-//!   [`Paper`]) by the checkpoint walk's rules.
+//!   [`Matter::preview_restore`] says what it would do ([`RestorePlan`]);
+//!   [`Matter::replace_file`] writes one file's new content made outside the folder, between an
+//!   `outside-edits` and a `revisions` checkpoint ([`ReplaceFile`], [`Replaced`]);
+//!   [`Matter::compare`] ([`CompareSide`]), [`Matter::files_at`] ([`VersionFile`]) and
+//!   [`Matter::read_file`] read versions and take `&self`; [`Matter::papers`] lists the folder
+//!   as it is now ([`PaperList`], [`Paper`]) by the checkpoint walk's rules;
+//!   [`is_excluded_path`] says whether that walk passes a path over.
 //! - [`held_open`]: whether Word (or, on Windows, any program) has a file of the folder open
 //!   ([`HeldOpen`]), by the rule undo and restore refuse with; [`held_open_at`] takes a path
-//!   as an agent names it, resolved into the folder by [`matter_path_in`];
+//!   as an agent names it, resolved into the folder by [`matter_path_in`], and
+//!   [`held_open_resolved`] and [`matter_path_of_resolved`] one a caller already resolved;
 //!   [`held_open_beside`] takes the parent folder's owner files from a caller that listed it,
 //!   and [`OwnersBeside`] tells it, with no file-system call, which names to ask about.
 //!   The host asks them before letting an agent write a file. An owner file a crashed Word left
@@ -81,7 +86,8 @@
 //!   other change is the hidden attribute of `.clauseo` on Windows. Undo and
 //!   restore check every target and lock before writing any, and never write or delete a file
 //!   whose name the folder holds only spelled otherwise (another case or normalisation). A
-//!   restore never deletes. One exception to names matching byte for byte: a folder on the way
+//!   restore never deletes, but for the files an earlier restore it undoes added
+//!   (`Restore::undoes`). One exception to names matching byte for byte: a folder on the way
 //!   that the folder spells otherwise (`sub/` for the history's `Sub/c.txt`) is written into
 //!   as the file system finds it, so the next checkpoint records `sub/c.txt`; no file is
 //!   replaced.
@@ -136,6 +142,7 @@ mod papers;
 mod place;
 mod probe;
 mod refuse;
+mod replace;
 mod restore;
 mod rules;
 mod scan;
@@ -154,17 +161,22 @@ mod writeback;
 pub use error::{Error, MissingReason, Refusal};
 pub use folder_scan::{FolderScan, FolderTotals, ScanProgress, scan_folder};
 pub use locks::{
-    HeldOpen, OwnersBeside, held_open, held_open_at, held_open_beside, matter_path_in,
+    HeldOpen, OwnersBeside, held_open, held_open_at, held_open_beside, held_open_resolved,
+    matter_path_in, matter_path_of_resolved,
 };
-pub use matter::{Matter, check_marker, remove_marker_of};
+pub use matter::{
+    Matter, check_marker, history_exists, read_marker, remove_marker_of, set_aside_marker,
+};
 pub use papers::{Paper, PaperList};
 pub use place::{Place, SyncService, place};
 pub use probe::{OsProbe, PlaceholderProbe};
 pub use refuse::{WINDOWS_FOLDER_LIMIT, check_place, check_protected, is_too_deep, same_or_nested};
+pub use rules::is_excluded_path;
 pub use scan::scan;
 pub use types::{
     Checkpoint, CheckpointOutcome, CommitId, CompareSide, DEFAULT_MARKER, FILE_CAP_BYTES,
     IMPORT_WARN_BYTES, ImportWarning, Imported, LARGEST_FILES, LargeFile, Limits, Marker,
-    NewMatter, Progress, Restore, RestoreFiles, RestorePlan, Restored, Retention, ScanReport,
-    Scanned, Settings, TimelineEntry, TurnMeta, UndoRequest, Undone, VersionFile,
+    NewMatter, Progress, ReplaceFile, Replaced, Restore, RestoreFiles, RestorePlan, Restored,
+    Retention, ScanReport, Scanned, Settings, TimelineEntry, TurnMeta, UndoRequest, Undone,
+    VersionFile,
 };

@@ -1,5 +1,6 @@
-//! The launch prep's browser part: which sessions get one, the sidecar check, the Chrome search
-//! and the session's claims (`browser::session`). See `launch_checks.rs` and decision record
+//! The launch prep's browser part: which sessions get one, the firm's browser policy
+//! (`browser::rd_policy`), the sidecar check, the Chrome search and the session's claims
+//! (`browser::session`). See `launch_checks.rs` and decision record
 //! 0029.
 
 use std::path::{Path, PathBuf};
@@ -8,8 +9,10 @@ use std::time::Duration;
 
 use super::super::super::Actor;
 use crate::browser::chrome::ChromeRoots;
+use crate::browser::rd_policy::RdPolicy;
 use crate::browser::session::BrowserSession;
 use crate::config::SessionKey;
+use clauseo_protocol::ToolsUnavailableReason;
 
 /// How the launch prep picks the session's Chrome.
 enum ChromeSearch {
@@ -60,17 +63,38 @@ pub(super) struct BrowserPrep {
     /// `--agent-browser` argument), as the profile hook gave them.
     sidecars: Vec<PathBuf>,
     chrome: ChromeSearch,
+    /// Reads the firm's Chrome, Edge and Chromium `RemoteDebuggingAllowed` (the wiring's).
+    rd_policy: Arc<RdPolicy>,
+    /// The firm's `browser.allow_when_remote_debugging_disabled`.
+    allowed_anyway: bool,
     /// Where the socket folder goes; `None` is `/tmp`.
     #[cfg(unix)]
     socket_root: Option<PathBuf>,
+    /// The browser as a shell tool (`ProfileHook::browser_tool`): no MCP entry, no proxy,
+    /// no slot and no claims; the Chrome found is the session's `AGENT_BROWSER_EXECUTABLE_PATH`.
+    shell: bool,
+    /// Whether the entry asks for the session's egress proxy (it holds `{proxy_port}`): the
+    /// parked Safe workspace's. The plain client's Codex entry does not, so its session opens no
+    /// proxy and waits for no block list (`egress::egress_prep`).
+    proxy: bool,
 }
 
 impl BrowserPrep {
     /// Whether the launch prep looks for the session's browser at all: `tools.browser` on, a
-    /// proxy set, a slot free and a `browser` entry from the hook. The session's egress proxy
-    /// opens only then.
+    /// proxy set, a slot free and a `browser` entry from the hook; or, for the shell tool,
+    /// `tools.browser` on. The session's egress proxy opens only for the entry, once claimed.
     pub(super) fn wanted(&self) -> bool {
         !matches!(self.chrome, ChromeSearch::Skip)
+    }
+
+    /// Whether this is the shell tool's prep (`ProfileHook::browser_tool`).
+    pub(super) fn shell(&self) -> bool {
+        self.shell
+    }
+
+    /// Whether the entry asks for the session's egress proxy (`{proxy_port}`).
+    pub(super) fn proxy(&self) -> bool {
+        self.proxy
     }
 
     /// The prep with no browser: a launch whose slot wait ended with every slot held
@@ -82,25 +106,47 @@ impl BrowserPrep {
         self
     }
 
-    /// The Chrome found and the session's claims. A missing sidecar leaves both out, with a
-    /// warning (a development build has no agent-browser); a failed claim leaves the claims
-    /// out. Either way the entry drops with `BrowserNotInstalled`. File system and socket
-    /// calls: off the actor.
-    pub(super) fn prepare(
-        self,
-        data: &Path,
-        session_id: &str,
-    ) -> (Option<PathBuf>, Option<Arc<BrowserSession>>) {
+    /// The Chrome found and the session's claims. The firm's browser policy comes first,
+    /// before any Chrome is picked, forced or found (`browser::rd_policy`), read again at each
+    /// launch: when it blocks, both are left out and the entry drops with
+    /// `BrowserBlockedByPolicy` or `BrowserPolicyUnreadable`. A missing sidecar
+    /// leaves both out, with a warning (a development build has no agent-browser); a failed
+    /// claim leaves the claims out. Either way the entry drops with `BrowserNotInstalled`.
+    /// Registry, file system and socket calls: off the actor.
+    pub(super) fn prepare(self, data: &Path, session_id: &str) -> Prepared {
         if matches!(self.chrome, ChromeSearch::Skip) {
-            return (None, None);
+            return Prepared::default();
+        }
+        let policy_block = self.rd_policy.check(self.allowed_anyway);
+        let read = Prepared {
+            policy_read: true,
+            policy_block,
+            ..Prepared::default()
+        };
+        if policy_block.is_some() {
+            return read;
         }
         if self.sidecars.iter().any(|sidecar| !sidecar.is_file()) {
             tracing::warn!("a browser sidecar is missing; the session has no browser");
-            return (None, None);
+            return read;
         }
-        let Some(chrome) = self.chrome.find_with_config(data) else {
-            return (None, None);
+        // The shell tool's config is the session's own (`launch_checks::shell_folders`); the
+        // app-wide one under `<data>/browser` is the parked MCP entry's.
+        let found = if self.shell {
+            self.chrome.find(data)
+        } else {
+            self.chrome.find_with_config(data)
         };
+        let Some(chrome) = found else {
+            return read;
+        };
+        if self.shell {
+            // agent-browser starts its own Chrome: nothing to claim.
+            return Prepared {
+                chrome: Some(chrome),
+                ..read
+            };
+        }
         let claimed = BrowserSession::claim(
             session_id,
             #[cfg(unix)]
@@ -113,17 +159,37 @@ impl BrowserPrep {
                     ports = ?session.ports.loopback(),
                     "claimed the browser's loopback ports"
                 );
-                (Some(chrome), Some(Arc::new(session)))
+                Prepared {
+                    chrome: Some(chrome),
+                    session: Some(Arc::new(session)),
+                    ..read
+                }
             }
             Err(error) => {
                 tracing::warn!(
                     error = %crate::log_file::Cause(&error),
                     "the session has no browser"
                 );
-                (Some(chrome), None)
+                Prepared {
+                    chrome: Some(chrome),
+                    ..read
+                }
             }
         }
     }
+}
+
+/// What [`BrowserPrep::prepare`] found for the session.
+#[derive(Debug, Default)]
+pub(super) struct Prepared {
+    /// The Chrome picked, if any.
+    pub(super) chrome: Option<PathBuf>,
+    /// The session's claims, if made.
+    pub(super) session: Option<Arc<BrowserSession>>,
+    /// Why the firm's browser policy left the browser out, if it did (`browser::rd_policy`).
+    pub(super) policy_block: Option<ToolsUnavailableReason>,
+    /// Whether the firm's browser policy was read for this launch (`actor/browser_policy.rs`).
+    pub(super) policy_read: bool,
 }
 
 /// How long a launch prep waits for a browser slot that a running removal may free
@@ -163,6 +229,22 @@ pub(super) fn slot_wait(
     })
 }
 
+/// Whether a slot is there for the browser after a wait (without one, it is); then the block
+/// list's first load, before the proxy opens (`blocklist/first_load.rs`).
+pub(super) async fn slot_then_block_list(
+    slot_wait: Option<impl std::future::Future<Output = bool>>,
+    block_list_wait: Option<impl std::future::Future<Output = ()>>,
+) -> bool {
+    let slot = match slot_wait {
+        Some(slot_wait) => slot_wait.await,
+        None => true,
+    };
+    if let Some(block_list_wait) = block_list_wait {
+        block_list_wait.await;
+    }
+    slot
+}
+
 /// Warns, once per launch (`on_prepared`), when `run`'s prep waited for a slot
 /// ([`slot_wait`]) and every slot is still held: the launch goes on without the browser
 /// (`TooManyBrowsers`). A launch that found no slot and nothing releasing does not wait and
@@ -179,33 +261,67 @@ pub(super) fn warn_if_still_full(actor: &Actor, run: &super::RunFolders) {
     }
 }
 
-/// What the launch prep does for `agent`'s session `key`, from the actor's state: nothing when
-/// no browser can go to it (`tools.browser` off, no proxy, no `browser` entry from the profile
-/// hook, or no slot and none coming free).
+/// What the launch prep does for `agent`'s session `key`, from the actor's state. When the
+/// profile hook offers this agent a `browser` entry (Codex:
+/// `clauseo_profile::servers::browser_mcp`), the guarded entry: nothing when no browser can go
+/// to it (`tools.browser` off, a proxy asked for and none set, or no slot and none coming
+/// free), else its sidecars, a Chrome search and the claims. Otherwise, with the shell tool
+/// wired (`ProfileHook::browser_tool`, Claude on Windows): its `agent-browser` command and a
+/// Chrome search when `tools.browser` is on, else nothing. Nothing for an agent with no browser
+/// on this OS.
 pub(super) fn browser_prep(
     actor: &Actor,
     agent: &clauseo_protocol::AgentId,
     key: SessionKey,
 ) -> BrowserPrep {
+    let settings = actor.effective.settings();
     let skip = BrowserPrep {
         sidecars: Vec::new(),
         chrome: ChromeSearch::Skip,
+        rd_policy: Arc::clone(&actor.wiring.rd_policy),
+        allowed_anyway: settings.browser.allow_when_remote_debugging_disabled,
         #[cfg(unix)]
         socket_root: None,
+        shell: false,
+        proxy: false,
     };
-    if !actor.effective.settings().tools.browser
-        || actor.wiring.proxy.is_none()
-        || !(actor.wiring.browser_slots.free_for(key) || actor.wiring.browser_slots.releasing(key))
-    {
+    // Codex on Windows, and Claude on macOS and Linux, have no browser at all
+    // (`agent::loads::browser::no_browser`).
+    let kind = clauseo_protocol::AgentKind::of(agent);
+    if crate::agent::loads::browser::no_browser(kind, cfg!(windows)) {
         return skip;
     }
     let entry = actor.profile.mcp_servers(agent).into_iter().find(|server| {
         let clauseo_acp::McpServer::Stdio { name, .. } = server;
         name == clauseo_profile::servers::BROWSER
     });
-    let Some(clauseo_acp::McpServer::Stdio { command, args, .. }) = entry else {
+    if let (None, Some(tools)) = (&entry, actor.profile.browser_tool()) {
+        if !settings.tools.browser {
+            return skip;
+        }
+        let command = tools.join(format!(
+            "{}{}",
+            clauseo_profile::paths::AGENT_BROWSER_COMMAND,
+            std::env::consts::EXE_SUFFIX
+        ));
+        return BrowserPrep {
+            sidecars: vec![command],
+            chrome: chrome_search(actor),
+            shell: true,
+            ..skip
+        };
+    }
+    let Some(entry) = entry else {
         return skip;
     };
+    let proxy = crate::agent::loads::browser::asks_for_proxy(&entry);
+    let clauseo_acp::McpServer::Stdio { command, args, .. } = entry;
+    if !settings.tools.browser
+        || (proxy && actor.wiring.proxy.is_none())
+        || !(actor.wiring.browser_slots.free_for(key) || actor.wiring.browser_slots.releasing(key))
+    {
+        return skip;
+    }
     let mut sidecars = vec![command];
     sidecars.extend(
         args.iter()
@@ -213,14 +329,53 @@ pub(super) fn browser_prep(
             .and_then(|at| args.get(at + 1))
             .map(PathBuf::from),
     );
-    let chrome = match &actor.wiring.browser_executable {
-        Some(chrome) => ChromeSearch::Forced(chrome.clone()),
-        None => ChromeSearch::Roots(actor.wiring.chrome_roots.clone()),
-    };
     BrowserPrep {
         sidecars,
-        chrome,
+        chrome: chrome_search(actor),
         #[cfg(unix)]
         socket_root: actor.wiring.browser_socket_root.clone(),
+        proxy,
+        ..skip
+    }
+}
+
+/// How the session's Chrome is picked: the one the tests forced, else a search of the wiring's
+/// roots (this machine's when none).
+fn chrome_search(actor: &Actor) -> ChromeSearch {
+    match &actor.wiring.browser_executable {
+        Some(chrome) => ChromeSearch::Forced(chrome.clone()),
+        None => ChromeSearch::Roots(actor.wiring.chrome_roots.clone()),
+    }
+}
+
+/// Makes the guard's `--cwd` for a session the `browser` entry goes to (Codex):
+/// `<data>/browser/run/<session id>` (`RunFolders::browser`), through no link below `data`.
+/// One that cannot be made leaves the session without the browser, with a warning.
+pub(super) fn entry_folder(run: &mut super::RunFolders, data: &Path) {
+    if let Err(error) = crate::write::create_private_dirs_under(data, &run.browser) {
+        tracing::warn!(
+            error = %crate::log_file::Cause(&error),
+            "the browser's folder was not made; the session has no browser"
+        );
+        run.chrome = None;
+    }
+}
+
+/// Makes the shell tool's downloads and profile folders and writes its `{}` config file, all in
+/// the launch's own `agent-browser` folder, so the profile starts empty (no earlier launch's
+/// cookies) and the lawyer's `~/.agent-browser/config.json` is never read. One that cannot be
+/// made leaves the session without the browser (`BrowserNotInstalled`), with a warning; the
+/// launch goes on.
+pub(super) fn shell_folders(run: &mut super::RunFolders, data: &Path) {
+    let made = [&run.agent_browser, &run.downloads, &run.browser_profile]
+        .into_iter()
+        .try_for_each(|folder| crate::write::create_private_dirs_under(data, folder))
+        .and_then(|()| crate::browser::write_session_config(&run.browser_config));
+    if let Err(error) = made {
+        tracing::warn!(
+            error = %crate::log_file::Cause(&error),
+            "a browser folder or its config was not made; the session has no browser"
+        );
+        run.chrome = None;
     }
 }

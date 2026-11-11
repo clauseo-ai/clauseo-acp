@@ -39,27 +39,39 @@ fn phases(line: &str) -> Vec<String> {
         .collect()
 }
 
+/// A file tool's refusal (`Write`, `Edit`, a patch) has its reason, then the timings, and lists
+/// nothing of the matter: its name is shown without the walk ([`super::super::names`]).
 #[test]
 fn a_refused_write_has_its_reason_then_the_timings() {
     let fx = Fixture::new("timings-write");
-    let hook = fx.hook(
-        "Write",
-        &json!({"file_path": "Contract.docx", "content": "new"}),
-    );
-    let (code, lines) = timed(&hook, true);
-    assert_eq!(code, DENY);
-    assert_eq!(lines.len(), 2, "{lines:?}");
-    assert_eq!(format!("{}\n", lines[0]), deny("Contract.docx"));
-    assert_eq!(
-        phases(&lines[1]),
-        ["read", "parse", "targets", "resolve", "decide", "total"]
-    );
-    // A file tool lists nothing.
-    assert!(
-        lines[1].ends_with(" | entries=0 folders=0 owner_folders=0 checked=0 probed=0"),
-        "{}",
-        lines[1]
-    );
+    let patch = "*** Begin Patch\n*** Update File: Contract.docx\n@@\n-a\n+b\n*** End Patch\n";
+    for (tool, input) in [
+        (
+            "Write",
+            json!({"file_path": "Contract.docx", "content": "new"}),
+        ),
+        (
+            "Edit",
+            json!({"file_path": "Contract.docx", "old_string": "a", "new_string": "b"}),
+        ),
+        ("apply_patch", json!({"command": patch})),
+    ] {
+        let (code, lines) = timed(&fx.hook(tool, &input), true);
+        assert_eq!(code, DENY, "{tool}");
+        assert_eq!(lines.len(), 2, "{tool}: {lines:?}");
+        assert_eq!(format!("{}\n", lines[0]), deny("Contract.docx"), "{tool}");
+        assert_eq!(
+            phases(&lines[1]),
+            ["read", "parse", "targets", "resolve", "decide", "total"],
+            "{tool}"
+        );
+        // A file tool lists nothing.
+        assert!(
+            lines[1].ends_with(" | entries=0 folders=0 owner_folders=0 checked=0 probed=0"),
+            "{tool}: {}",
+            lines[1]
+        );
+    }
 }
 
 /// The fixture's matter holds `Contract.docx`, its owner file, `Free.docx` and `sub/Note.txt`:

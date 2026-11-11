@@ -30,7 +30,7 @@ fn reads_back_as(found: &str, expected: &str) -> bool {
 fn an_sddl_is_written_back_as_windows_writes_it() {
     // A well-known SID by its number comes back as its alias; an alias stays as it is.
     assert_eq!(
-        as_read_back("O:S-1-5-18D:P(A;OICI;FA;;;S-1-5-18)").unwrap(),
+        as_read_back("O:S-1-5-18D:P(A;OICI;FA;;;S-1-5-18)(A;OICI;FA;;;S-1-5-32-544)").unwrap(),
         STAGING_SDDL
     );
     assert_eq!(as_read_back(STAGING_SDDL).unwrap(), STAGING_SDDL);

@@ -15,9 +15,11 @@ use crate::windows::acl_plan::{Grant, Sid};
 use crate::windows::apply::Surroundings;
 use crate::windows::ledger::{Ledger, RecordedFile, ledger_path};
 use crate::windows::pool::MachineRecord;
+use crate::windows::runner::marker::{marker_path, remove_marker, unclean_sessions};
 use crate::windows::set_aside::forget_bookkeeping;
 use crate::windows::setup::record_values::CopyOwner;
 use crate::windows::setup::remove::Removal;
+use crate::windows::setup::remove::{FolderOwner, owners};
 use crate::windows::setup::{Machine, MachineError, ProfileDir};
 use crate::windows::shared_writes::OWNER_RIGHTS_SID;
 use crate::windows::sids::Reserved;
@@ -81,8 +83,14 @@ pub(super) struct Remover {
     pub(super) lock_held: bool,
     /// The record's data folder fails its check.
     pub(super) data_dir_bad: bool,
-    /// The folders an administrator's path check passes: the owner's, with no link.
-    pub(super) admin_owned: Vec<PathBuf>,
+    /// The owners of the record's data folder and of its `sandbox` folder, held to the real
+    /// rules (`remove::owners`).
+    pub(super) data_dir_owners: [Sid; 2],
+    /// The accounts in Administrators.
+    pub(super) admins: Vec<Sid>,
+    /// The folders with no link on the way, and each one's owner, which an administrator's
+    /// path check holds to `owner_allowed`, as the real one does.
+    pub(super) admin_owned: Vec<(PathBuf, Sid)>,
     /// Whether anything ran acting as the owner.
     pub(super) acted: bool,
     /// The parent's token, as `remove::acting_token` left it.
@@ -109,6 +117,8 @@ impl Remover {
             invoker,
             lock_held: false,
             data_dir_bad: false,
+            data_dir_owners: [Sid::parse(OWNER).unwrap(), Sid::parse(OWNER).unwrap()],
+            admins: Vec::new(),
             admin_owned: Vec::new(),
             acted: false,
             token: ParentToken::Standard,
@@ -146,13 +156,18 @@ impl Remover {
         Ok(())
     }
 
-    /// The record's data folder, checked as the real machine checks it, in the fake's terms.
+    /// The record's data folder, checked as the real machine checks it, in the fake's terms:
+    /// its owners by the real rules (`remove::owners`).
     fn check_data_dir(&self, data_dir: &Path) -> Result<Option<PathBuf>, MachineError> {
         if self.data_dir_bad || data_dir != self.m.data_dir() {
             return Err(MachineError::Other(
                 "the record's data folder isn't its owner's own".to_owned(),
             ));
         }
+        let owner = Sid::parse(OWNER).unwrap();
+        let [folder, sandbox] = &self.data_dir_owners;
+        owners::data_folder(folder, &owner, || self.admins.contains(&owner))?;
+        owners::sandbox_folder(sandbox, &owner)?;
         let path = ledger_path(data_dir);
         Ok(path.exists().then_some(path))
     }
@@ -278,6 +293,11 @@ impl Removal for Remover {
         Machine::delete_group(&mut self.m, group)
     }
 
+    fn remove_remote_logon_deny(&mut self, group: &Sid) -> Result<(), MachineError> {
+        self.call(format!("remove_remote_logon_deny {}", rid(group)))?;
+        Machine::remove_remote_logon_deny(&mut self.m, group)
+    }
+
     fn as_owner<T>(&mut self, f: impl FnOnce(&mut Self) -> T) -> Result<T, MachineError> {
         if !self.can_act_as_owner() {
             return Err(MachineError::Other(
@@ -327,6 +347,21 @@ impl Removal for Remover {
             .map_err(|failure| MachineError::Other(failure.to_string()))
     }
 
+    fn clear_markers(&mut self) -> Result<usize, MachineError> {
+        self.call("clear_markers")?;
+        assert!(
+            self.m.acting.get(),
+            "the markers are removed only as the owner"
+        );
+        let data = self.m.data_dir();
+        let sessions = unclean_sessions(&data).map_err(|e| MachineError::Other(e.to_string()))?;
+        for session in &sessions {
+            remove_marker(&marker_path(&data, &session.id))
+                .map_err(|e| MachineError::Other(e.to_string()))?;
+        }
+        Ok(sessions.len())
+    }
+
     fn admins_ledger(
         &mut self,
         data_dir: &Path,
@@ -345,16 +380,22 @@ impl Removal for Remover {
             .map_err(|error| MachineError::Other(error.to_string()))
     }
 
-    fn admin_target(&mut self, path: &Path, owner: &Sid) -> Result<(), MachineError> {
+    fn owner_in_administrators(&mut self, owner: &Sid) -> bool {
+        assert_eq!(owner.as_str(), OWNER);
+        self.admins.contains(owner)
+    }
+
+    fn admin_target(&mut self, path: &Path, owner: &Sid) -> Result<FolderOwner, MachineError> {
         assert!(!self.m.acting.get(), "an administrator acts as itself");
         assert_eq!(owner.as_str(), OWNER);
         self.call(format!("admin_target {}", rel(&self.base, path)))?;
-        if self.admin_owned.iter().any(|owned| owned == path) {
-            Ok(())
-        } else {
-            Err(MachineError::Other(
-                "a matter's folder isn't its owner's own".to_owned(),
-            ))
+        // A folder not listed fails the path check (a link on the way, say); a listed one is
+        // held to the real owner rule.
+        match self.admin_owned.iter().find(|(folder, _)| folder == path) {
+            Some((_, found)) => owners::matter_folder(found, owner),
+            None => Err(MachineError::Other(
+                "a matter's folder isn't where the ledger says".to_owned(),
+            )),
         }
     }
 }

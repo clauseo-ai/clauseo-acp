@@ -23,8 +23,13 @@ impl Os {
 
 /// The config file Clauseo owns; an explicit file replaces agent-browser's config discovery.
 pub(crate) const CONFIG: &str = "AGENT_BROWSER_CONFIG";
-/// The session's egress proxy, `http://127.0.0.1:<port>`.
+/// The session's egress proxy, `http://127.0.0.1:<port>`. Optional: the plain client's Codex
+/// entry has none, and Chrome then goes direct, as Claude's shell browser does; when it is set
+/// it must be valid, and everything the proxy brings (Chrome's `--proxy-server`, the bypass,
+/// the `*_PROXY` variables) follows it.
 pub(crate) const PROXY: &str = "AGENT_BROWSER_PROXY";
+/// agent-browser's proxy bypass, one of [`FIXED`]: set only with [`PROXY`].
+const PROXY_BYPASS: &str = "AGENT_BROWSER_PROXY_BYPASS";
 /// The Chrome the host chose.
 pub(crate) const EXECUTABLE_PATH: &str = "AGENT_BROWSER_EXECUTABLE_PATH";
 /// The Clauseo session id. `AGENT_BROWSER_NAMESPACE` is never set: it would put the socket at
@@ -67,17 +72,16 @@ const PROXY_VARS_LOWER: &[&str] = &["http_proxy", "https_proxy", "all_proxy"];
 
 /// Unix `PATH`.
 const UNIX_PATH: &str = "/usr/bin:/bin:/usr/sbin:/sbin";
-/// Windows `SystemRoot` when the guard's environment has none.
-const DEFAULT_SYSTEM_ROOT: &str = r"C:\Windows";
+/// Windows folder when the Windows directory cannot be read (see [`WindowsDirs`]).
+const DEFAULT_WINDOWS_DIR: &str = r"C:\Windows";
+/// Windows `PATHEXT` when the guard's environment has none: Windows' own default.
+const DEFAULT_PATHEXT: &str = ".COM;.EXE;.BAT;.CMD";
 
-/// Passed through from the guard's environment, only when present.
+/// Passed through from the guard's environment, only when present. Windows' `SystemRoot`,
+/// `windir`, `ComSpec` and `PATHEXT` are not here: [`build`] always sets them.
 const PASS_UNIX: &[&str] = &["LANG"];
 const PASS_WINDOWS: &[&str] = &[
-    "SystemRoot",
-    "windir",
     "SystemDrive",
-    "ComSpec",
-    "PATHEXT",
     "ProgramFiles",
     "ProgramFiles(x86)",
     "ProgramW6432",
@@ -119,6 +123,17 @@ fn folder_table(os: Os) -> &'static [(&'static str, &'static [&'static str])] {
         Os::Unix => FOLDERS_UNIX,
         Os::Windows => FOLDERS_WINDOWS,
     }
+}
+
+/// The Windows folders the child's defaults come from. The caller reads them from Windows
+/// (`job/spawn.rs`) and passes them in, so [`build`] stays pure and runs on every OS. `None`
+/// where the read failed or off Windows; the defaults then are `C:\Windows` and its `System32`.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(crate) struct WindowsDirs {
+    /// The Windows directory (`GetWindowsDirectoryW`): the default `SystemRoot` and `windir`.
+    pub(crate) windows: Option<PathBuf>,
+    /// The system directory (`GetSystemDirectoryW`): where `ComSpec`'s `cmd.exe` is.
+    pub(crate) system: Option<PathBuf>,
 }
 
 /// The guard's own environment, in the order the OS gave it.
@@ -199,22 +214,29 @@ impl fmt::Display for EnvError {
 }
 
 /// The child's whole environment but [`CDP`], which [`set_cdp`] adds once Chrome is up. Fails
-/// on the first required variable that is missing or invalid, in the order config, proxy,
-/// executable path, session, socket folder (Unix only), stream port; never falls back. The Unix
+/// on the first required variable that is missing or invalid, in the order config, proxy (only
+/// when set: with none, no proxy variable reaches the child), executable path, session, socket
+/// folder (Unix only), stream port; never falls back. The Unix
 /// socket folder is checked here only for being absolute; `socket.rs` checks the folder itself.
+/// On Windows, `dirs` supplies the defaults [`windows_defaults`] gives the variables the guard's
+/// environment lacks.
 pub(crate) fn build(
     source: &Source,
     os: Os,
     cwd: &Path,
+    dirs: &WindowsDirs,
 ) -> Result<BTreeMap<String, OsString>, EnvError> {
     let config = required(source, os, CONFIG, is_local_file, Problem::NotFile)?;
-    let proxy = required(
-        source,
-        os,
-        PROXY,
-        |v, _| is_loopback_proxy(v),
-        Problem::NotProxy,
-    )?;
+    let proxy = match source.get(os, PROXY) {
+        Some(_) => Some(required(
+            source,
+            os,
+            PROXY,
+            |v, _| is_loopback_proxy(v),
+            Problem::NotProxy,
+        )?),
+        None => None,
+    };
     let executable = required(source, os, EXECUTABLE_PATH, is_local_file, Problem::NotFile)?;
     let session = required(
         source,
@@ -247,21 +269,27 @@ pub(crate) fn build(
         env.insert(name.to_owned(), value.to_owned());
     };
     set(CONFIG, config);
-    set(PROXY, proxy);
+    if let Some(proxy) = proxy {
+        set(PROXY, proxy);
+    }
     set(EXECUTABLE_PATH, executable);
     set(SESSION, session);
     set(SOCKET_DIR, &socket_dir);
     set(STREAM_PORT, stream_port);
     set(ARGS, OsStr::new(WEBRTC_ARG));
     for (name, value) in FIXED {
-        set(name, OsStr::new(value));
+        if *name != PROXY_BYPASS || proxy.is_some() {
+            set(name, OsStr::new(value));
+        }
     }
-    for name in PROXY_VARS_UPPER {
-        set(name, proxy);
-    }
-    if os == Os::Unix {
-        for name in PROXY_VARS_LOWER {
+    if let Some(proxy) = proxy {
+        for name in PROXY_VARS_UPPER {
             set(name, proxy);
+        }
+        if os == Os::Unix {
+            for name in PROXY_VARS_LOWER {
+                set(name, proxy);
+            }
         }
     }
     for (folder, names) in folder_table(os) {
@@ -282,18 +310,62 @@ pub(crate) fn build(
     match os {
         Os::Unix => set("PATH", OsStr::new(UNIX_PATH)),
         Os::Windows => {
-            let root = source
-                .get(os, "SystemRoot")
-                .unwrap_or(OsStr::new(DEFAULT_SYSTEM_ROOT));
-            // Windows networking needs SystemRoot; set it when the guard's own lacks it.
-            set("SystemRoot", root);
-            let mut path = root.to_owned();
-            path.push(r"\System32;");
-            path.push(root);
-            set("PATH", &path);
+            for (name, value) in windows_defaults(source, dirs) {
+                set(name, &value);
+            }
         }
     }
     Ok(env)
+}
+
+/// Windows' `SystemRoot`, `windir`, `ComSpec`, `PATHEXT` and `PATH`. The first four are the
+/// guard's own value when it has one (matched without case, first match wins); otherwise a
+/// default: `SystemRoot` the Windows directory from `dirs`, `windir` the resolved `SystemRoot`,
+/// `ComSpec` `cmd.exe` in the system directory from `dirs` (else `<SystemRoot>\System32`),
+/// `PATHEXT` Windows' own. `PATH` is that system directory, then `<SystemRoot>`. Winsock needs
+/// `SystemRoot`; agent-browser, Chrome and the relay need `windir` and `ComSpec` to run a shell,
+/// and `PATHEXT` to find `.cmd` and `.exe` programs.
+fn windows_defaults(source: &Source, dirs: &WindowsDirs) -> Vec<(&'static str, OsString)> {
+    let os = Os::Windows;
+    let windows = dirs
+        .windows
+        .clone()
+        .unwrap_or_else(|| PathBuf::from(DEFAULT_WINDOWS_DIR))
+        .into_os_string();
+    let root = source
+        .get(os, "SystemRoot")
+        .map_or(windows, OsStr::to_owned);
+    let windir = source
+        .get(os, "windir")
+        .map_or_else(|| root.clone(), OsStr::to_owned);
+    let system = dirs
+        .system
+        .clone()
+        .map_or_else(|| windows_join(&root, "System32"), PathBuf::into_os_string);
+    let comspec = source
+        .get(os, "ComSpec")
+        .map_or_else(|| windows_join(&system, "cmd.exe"), OsStr::to_owned);
+    let pathext = source
+        .get(os, "PATHEXT")
+        .map_or_else(|| OsString::from(DEFAULT_PATHEXT), OsStr::to_owned);
+    let mut path = system;
+    path.push(";");
+    path.push(&root);
+    vec![
+        ("SystemRoot", root),
+        ("windir", windir),
+        ("ComSpec", comspec),
+        ("PATHEXT", pathext),
+        ("PATH", path),
+    ]
+}
+
+/// `dir\name`: a Windows path, joined with a backslash whatever OS builds it.
+fn windows_join(dir: &OsStr, name: &str) -> OsString {
+    let mut joined = dir.to_owned();
+    joined.push(r"\");
+    joined.push(name);
+    joined
 }
 
 /// Adds [`CDP`]: the browser endpoint `chrome.rs` read and checked.

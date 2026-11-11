@@ -5,18 +5,10 @@
 // the Hindi words in at once, as review/words.ts has them: each ref reads its Hindi when made
 import "@clauseo/components/lib/words-hi.ts";
 import { fl, type FirstLaunchKey } from "@clauseo/components/lib/words-first-launch.ts";
-import { FakeTransport } from "../transport/fake-transport.ts";
-import type {
-  AgentId,
-  InstallProgress,
-  SettingsView,
-  SetupEvent,
-  SignIn,
-} from "../transport/protocol.ts";
+import type { AgentId, InstallProgress, SetupEvent, SignIn } from "../transport/protocol.ts";
 import type { Entry } from "./entry.ts";
-import { MATTER } from "./hosts.ts";
-import { RoomDriven, type DrivenStep } from "./registry-ud1-switching.tsx";
-import { RoomClicking, RoomOver } from "./states.tsx";
+import { render, type Scene } from "./registry-ud1-scene.tsx";
+import * as T from "./registry-ud1-tools.ts";
 import { errorWords, type WordsRef } from "./words.ts";
 
 const CLAUDE: AgentId = "claude-acp";
@@ -47,63 +39,11 @@ const READY = install(CLAUDE, { ready: { version: "0.1.0" } });
 const DOWNLOADING = install(CLAUDE, { downloading: { received: 61_000_000, total: 182_000_000 } });
 const SIGNED_OUT = signIn(CLAUDE, { signed_out: {} });
 
-type Scene = {
-  /** No matter: the first screen. */
-  first?: boolean;
-  events: SetupEvent[];
-  platform?: "mac" | "windows" | "linux";
-  keys?: boolean;
-  locked?: boolean;
-  /** Controls to press, in order (CSS selectors). */
-  clicks?: string[];
-  /** The code desktop refuses each setup command with, and the steps that send one (RoomDriven). */
-  refuse?: string;
-  steps?: DrivenStep[];
+/** The first screen with Claude downloading, beside ChatGPT's row with its size. */
+const WELCOME: Scene = {
+  first: true,
+  events: [DOWNLOADING, SIGNED_OUT, install(CODEX, { missing: { download_bytes: 139_000_000 } })],
 };
-
-/** The room over a fake host with the setup wire, in the scene. */
-function host(s: Scene): () => FakeTransport {
-  return () =>
-    new FakeTransport({
-      platform: s.platform ?? "mac",
-      openSettings: () => {},
-      query: (query) => {
-        if (query === "list_matters") return { matters: s.first === true ? [] : [MATTER] };
-        if (query === "get_settings")
-          return {
-            settings: {
-              ui: {
-                theme: "system",
-                font_size: 16,
-                language: "en",
-                lite: "automatic",
-                motion: "system",
-              },
-              privacy: { counts: true, crash_reports: false, counts_started: false },
-              locked: s.locked === true ? ["privacy.counts"] : [],
-            } as unknown as SettingsView,
-          };
-        if (typeof query === "object" && "list_threads" in query) return { threads: [] };
-        throw new Error(`not scripted: ${JSON.stringify(query)}`);
-      },
-      setup: {
-        first: () => [{ setup_info: { keys_available: s.keys ?? true } }, ...s.events],
-        command: () => {
-          if (s.refuse !== undefined)
-            throw { code: s.refuse, message: "refused", retryable: true } as const;
-        },
-      },
-    });
-}
-
-const render = (s: Scene) =>
-  s.steps !== undefined
-    ? () => <RoomDriven host={host(s)} steps={s.steps ?? []} />
-    : s.clicks === undefined
-      ? () => <RoomOver host={host(s)} />
-      : () => <RoomClicking host={host(s)} clicks={s.clicks ?? []} />;
-
-const WELCOME: Scene = { first: true, events: [DOWNLOADING, SIGNED_OUT] };
 const GATE: Scene = { events: [READY, SIGNED_OUT] };
 const KEY: Scene = { events: [READY, SIGNED_OUT], clicks: [".fl-way-quiet"] };
 const chatgpt = (state: SignIn, clicks: string[] = []): Scene => ({
@@ -113,7 +53,7 @@ const chatgpt = (state: SignIn, clicks: string[] = []): Scene => ({
     install(CODEX, { ready: { version: "0.1.0" } }),
     signIn(CODEX, state),
   ],
-  clicks: [".fl-gate-ways .fl-way", ...clicks],
+  clicks: ['.fl-gate-plan[data-plan="chatgpt"]', ...clicks],
 });
 const failed = (code: string): SetupEvent =>
   signIn(CLAUDE, { failed: { code: code as never, at: AT } });
@@ -133,6 +73,12 @@ const found = (
 });
 const SWITCHING: Scene = {
   events: [READY, signIn(CLAUDE, { switching: { since: AT, stuck: false } })],
+};
+const CHECKING: Scene = { events: [READY, signIn(CLAUDE, "checking")] };
+/** Claude's install went missing after Clauseo installed it (#859), on the first screen. */
+const REINSTALL: Scene = {
+  first: true,
+  events: [install(CLAUDE, { missing: { download_bytes: 182_400_000, installed_before: true } })],
 };
 const STUCK: Scene = { events: [READY, signIn(CLAUDE, { switching: { since: AT, stuck: true } })] };
 /** The key panel open while signed out, the switch begun, then a key sent and refused with command.conflict. */
@@ -195,10 +141,16 @@ const SCENES: ([FirstLaunchKey, Scene, string] | null)[] = [
     { first: true, events: [install(CLAUDE, { missing: { download_bytes: 182_400_000 } })] },
     "welcome",
   ],
-  ["{name} is ready", { first: true, events: [install(CLAUDE, "installing"), READY] }, "welcome"],
+  // installed but signed out: the words on the foot's line, with the plan's Sign in (once signed in, the same words
+  // stand alone, for an install that finished in this window)
+  [
+    "{name} is ready",
+    { first: true, events: [install(CLAUDE, "installing"), READY, SIGNED_OUT] },
+    "welcome",
+  ],
   ["Setting up {name}…", { first: true, events: [install(CLAUDE, "installing")] }, "welcome"],
   ["Use the system proxy", { first: true, events: [blocked] }, "dl-blocked"],
-  ["Ask your IT team", { first: true, events: [blocked] }, "dl-blocked"],
+  ["Copy details for IT", { first: true, events: [blocked] }, "dl-blocked"],
   [
     "Message copied",
     { first: true, events: [blocked], clicks: ['[data-testid="install-ask-it"]'] },
@@ -239,12 +191,19 @@ const SCENES: ([FirstLaunchKey, Scene, string] | null)[] = [
   ],
   ["Try again", { first: true, events: [failedInstall] }, "dl-error"],
   ["Details", { first: true, events: [failedInstall] }, "dl-error"],
-  ["Your papers stay on this computer. {name} sees what each question sends it.", GATE, "plan"],
+  [
+    "Your papers stay on this computer. {name} sees the parts it reads to answer you.",
+    GATE,
+    "plan",
+  ],
   // the plan, in the composer
-  ["Sign in to {name} to ask about this matter", GATE, "plan"],
-  ["Sign in", GATE, "plan"],
-  ["Use {name} instead", GATE, "plan-chatgpt"],
-  ["Use an API key or my firm's account", GATE, "plan-key"],
+  // UD1-24, retired: the matter's sign-in box names both plans now (UD1-95)
+  null,
+  ["Sign in", { events: [READY, failed("signin.cancelled")] }, "signin-cancelled"],
+  // signed out, the box offers both plans' own Sign in; "Use … instead" stays where a sign-in stopped
+  ["Use {name} instead", { events: [READY, failed("signin.cancelled")] }, "plan-chatgpt"],
+  // UD1-27, retired: the quiet way to the key is "Use an API key instead" (UC-141); the firm's address is its policy's
+  null,
   [
     "Your browser opens when {name} is ready.",
     { events: [DOWNLOADING, signIn(CLAUDE, "queued")] },
@@ -260,7 +219,8 @@ const SCENES: ([FirstLaunchKey, Scene, string] | null)[] = [
     },
     "plan-queued",
   ],
-  ["API key", KEY, "plan-key"],
+  // UD1-30, retired: the key's field names its maker (UC-139, UC-140)
+  null,
   ["Use this key", KEY, "plan-key"],
   [
     "A key from Claude or ChatGPT, or one from your firm's IT team. Billed to the key's own account.",
@@ -488,7 +448,11 @@ const SCENES: ([FirstLaunchKey, Scene, string] | null)[] = [
     { events: [READY, failed("signin.policy_unreadable")] },
     "signin-policy",
   ],
-  ["Ask your IT team.", { events: [READY, failed("signin.policy_unreadable")] }, "signin-policy"],
+  [
+    "Your firm manages these settings.",
+    { events: [READY, failed("signin.policy_unreadable")] },
+    "signin-policy",
+  ],
   // switching accounts (0048, #493), and a refusal meanwhile
   ["Switching accounts.", SWITCHING, "signin-switching"],
   [
@@ -512,6 +476,35 @@ const SCENES: ([FirstLaunchKey, Scene, string] | null)[] = [
   // UD1-88: the download's line, its bytes in whole MB. The live region hears only the state,
   // Getting {name} ready…, never these bytes
   ["Getting {name} ready… {done} MB of {total} MB", WELCOME, "welcome"],
+  // UD1-89: the sign-in status check still running, at start and through its silent retries
+  ["Checking whether you're signed in to {name}…", CHECKING, "signin-checking"],
+  // UD1-90 and UD1-91: the chosen plan's install went missing after Clauseo installed it (#859), and its Install
+  ["{plan} isn't installed on this computer any more.", REINSTALL, "reinstall"],
+  ["Install {plan}", REINSTALL, "reinstall"],
+  // UD1-92 to UD1-95: both plans side by side, on the first screen and in the matter's sign-in box
+  ["Sign in with the plan you pay for: Claude, ChatGPT or both.", T.BOTH, "welcome-both"],
+  [
+    "Your papers stay on this computer. Claude or ChatGPT sees the parts it reads to answer you.",
+    T.BOTH,
+    "welcome-both",
+  ],
+  ["Sign in to {name}", T.BOTH, "welcome-both"],
+  ["Sign in to Claude or ChatGPT to ask about this matter", GATE, "plan"],
+  // UD1-96: a plan's row on the first screen, after its name and " · "
+  ["needs a download of about {mb} MB", T.BOTH, "welcome-both"],
+  // UD1-97: Claude's browser sign-in note, under its first-screen row (also in the matter's gate and Plans' card)
+  [
+    "Claude may ask you to sign in again in your browser. Use your Claude account.",
+    { first: true, events: [READY, signIn(CLAUDE, { waiting: { since: AT, nudge: false } })] },
+    "welcome-browser-note",
+  ],
+  // UD1-98 to UD1-101: the document tools
+  ["Also downloads Clauseo's document tools ({size}).", T.TOOLS_MISSING, "tools-missing"],
+  ["Downloading document tools… {done} of {size}", T.TOOLS_DOWNLOADING, "tools-downloading"],
+  ["Clauseo couldn't download its document tools.", T.TOOLS_FAILED, "tools-failed"],
+  ["Windows blocked Clauseo's document tools on this computer.", T.TOOLS_BLOCKED, "tools-blocked"],
+  // UD1-102: the document tools offline, in the plans' own offline words (TOOLS_OFFLINE, below)
+  null,
 ];
 
 /** The gate's refusal line for any other code: its code's own sentence, here a sign-in refused while a key is in use.
@@ -523,6 +516,65 @@ const REFUSAL: Entry = {
   ),
   screen: "first-launch/signin-refused",
   render: render(KEY_IN_USE),
+};
+
+/** The document tools offline: the plans' own offline sentence, in the null SCENES keeps for it. */
+const TOOLS_OFFLINE: Entry = {
+  id: "UD1-102",
+  words: errorWords("You're offline. Setting up waits for the connection."),
+  screen: "first-launch/tools-waiting",
+  render: render(T.TOOLS_WAITING),
+};
+
+/** The key's words named by its maker, and the quiet way to it (UC-139 and UC-141; UC-140, ChatGPT's, is shown in
+ * Plans, registry-ud2-plans.tsx). */
+const UC_KEY: Entry[] = (
+  [
+    { id: "UC-139", key: "Anthropic API key", scene: KEY },
+    { id: "UC-141", key: "Use an API key instead", scene: GATE },
+  ] satisfies { id: string; key: FirstLaunchKey; scene: Scene }[]
+).map(({ id, key, scene }) => ({
+  id,
+  words: firstLaunchWords(key),
+  screen: "first-launch/plan-key",
+  render: render(scene),
+}));
+
+/** UC-153: ChatGPT ready while Claude's sign-in is under way, on the first screen: sign-ins go one at a time, so its
+ * row says its browser opens after Claude's (the parallel installs; UC's id, this file's scene). */
+const AFTER_SIGN_IN: Entry = {
+  id: "UC-153",
+  words: firstLaunchWords("Your browser opens for {name} after {other}'s sign-in."),
+  screen: "first-launch/plan-after",
+  render: render({
+    first: true,
+    events: [
+      READY,
+      signIn(CLAUDE, { waiting: { since: AT, nudge: false } }),
+      install(CODEX, { ready: { version: "0.1.0" } }),
+      signIn(CODEX, "queued"),
+    ],
+  }),
+};
+
+/** UC-230: ChatGPT's waiting sign-in cancelled while it downloads, beside Claude's download: desktop drops only the
+ * sign-in, so its row says the download carries on (the parallel installs; UC's id, this file's scene). */
+const STILL_DOWNLOADING: Entry = {
+  id: "UC-230",
+  words: firstLaunchWords(
+    "Sign-in cancelled. {name} is still downloading; sign in when it's ready.",
+  ),
+  screen: "first-launch/plan-cancel-downloading",
+  render: render({
+    first: true,
+    events: [
+      install(CLAUDE, { downloading: { received: 13_000_000, total: 165_000_000 } }),
+      signIn(CLAUDE, "queued"),
+      install(CODEX, { downloading: { received: 90_000_000, total: 139_000_000 } }),
+      signIn(CODEX, "queued"),
+    ],
+    clicks: ['[data-testid="plan-row"][data-agent="codex-acp"] [data-testid="signin-foot-cancel"]'],
+  }),
 };
 
 export const UD1: readonly Entry[] = [
@@ -539,4 +591,8 @@ export const UD1: readonly Entry[] = [
         ],
   ),
   REFUSAL,
+  TOOLS_OFFLINE,
+  ...UC_KEY,
+  AFTER_SIGN_IN,
+  STILL_DOWNLOADING,
 ];

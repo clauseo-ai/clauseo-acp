@@ -16,6 +16,11 @@ pub(crate) struct TurnPath {
     /// The launch preps waiting for a browser slot to come free (`launch_checks::browser`).
     /// Each hears whether a slot is free once a holder's removal ends.
     pub(super) slot_waits: Vec<futures::channel::oneshot::Sender<bool>>,
+    /// The window's last `SetNetwork` said the computer is offline (`offline.rs`).
+    pub(super) offline: bool,
+    /// Whether the agent's service answers, asked before a watch only the window armed ends
+    /// a turn (`offline/probe.rs`); tests set a fixed answer.
+    pub(super) probe: super::offline::probe::ReachProbe,
 }
 
 impl TurnPath {

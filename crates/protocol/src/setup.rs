@@ -16,6 +16,7 @@ use serde::{Deserialize, Serialize};
 
 pub use self::install::{
     InstallLog, InstallProgress, MAX_INSTALL_LOG_LINE_BYTES, MAX_INSTALL_LOG_LINES,
+    PythonBlockedBy, PythonFailureCause, PythonProgress,
 };
 pub use self::secret::{MAX_SECRET_BYTES, Secret};
 use crate::{AgentId, ErrorCode, PlanLabel, Timestamp};
@@ -35,7 +36,12 @@ pub enum SetupCommand {
         /// The agent.
         agent: AgentId,
     },
-    /// Start a failed or paused install again.
+    /// Start a failed or paused install again. On a ready agent it retries the Python runtime
+    /// instead (when Python is missing, waiting or failed): Python is one for the computer, so
+    /// retrying any ready agent's install retries it, and the window may send any ready plan's
+    /// id. The ready agent's own install is left alone: it stays ready and nothing of it is
+    /// fetched or installed again. While another agent's install runs, it starts nothing and
+    /// pauses nothing: that install fetches Python as its own second step.
     RetryAgentInstall {
         /// The agent.
         agent: AgentId,
@@ -240,6 +246,10 @@ pub enum SetupEvent {
         /// Whether the OS keychain can hold an API key: false where Linux has no Secret
         /// Service, and the key screens are hidden.
         keys_available: bool,
+        /// The Python runtime's state, sent again with each change; missing from older hosts
+        /// and before it is known.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        python: Option<PythonProgress>,
     },
     /// An agent's install state changed, or its download made progress.
     AgentInstallProgress {
@@ -270,6 +280,10 @@ pub enum SignIn {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         found: Option<FoundLogin>,
     },
+    /// The sign-in status check is running and nothing was shown before it (at start, and
+    /// through its retries after a check that timed out): the card says it is checking. Ends
+    /// in the check's state, or `SignedOut` once its retries time out too.
+    Checking,
     /// Waiting for the install to finish or the network to return; the sign-in then starts by
     /// itself.
     Queued,

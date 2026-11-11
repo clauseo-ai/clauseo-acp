@@ -282,6 +282,11 @@ The orchestrator's conditions, which the later pull requests must meet:
 
 proposed
 
+Parked for launch (Rohan, 2026-11-09): Clauseo launches as a plain ACP client. Desktop never calls
+`HostConfig::with_sandbox`, and with no sandbox wired the host gives every matter row no
+protection, refuses nothing under `sandbox.*` (it logs once that a set key is ignored), and the
+desktop transport hides Settings › Safe workspace. All of it returns when desktop wires a sandbox.
+
 ## Date
 
 2026-11-06

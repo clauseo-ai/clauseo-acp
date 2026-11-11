@@ -30,7 +30,8 @@ use super::close::{Expiries, TurnClose};
 use super::out::Out;
 use super::{
     End, Holder, JobKind, LimitMark, Then, TimerKind, TurnJob, TurnPhase, TurnTimer, asks, cancel,
-    current, failure, host_stopping, known, matter_of, queue, sign_in, state, steps, updates,
+    current, failure, host_stopping, known, matter_of, offline, queue, sign_in, state, steps,
+    updates,
 };
 use crate::error::Error;
 use crate::log_file::Cause;
@@ -72,7 +73,13 @@ pub(super) fn on_prompt_done(
     updates::flush_rate(actor, thread);
     // A turn whose commit already failed ends `Failed` whatever the read says.
     let store_failed = current(actor, thread).is_some_and(|current| current.store_failed.is_some());
+    // A prompt that failed offline skips the limits read: it needs the network too.
+    let went_offline = match &result {
+        Err(error) => offline::prompt_failed_offline(actor, thread, error),
+        Ok(_) => None,
+    };
     let fallback = matches!(result, Err(clauseo_acp::Error::Rpc { .. }))
+        && went_offline.is_none()
         && !host_stopping(actor)
         && !store_failed
         && limits::reads_for(actor, thread) == Some(AgentKind::Codex);
@@ -86,11 +93,11 @@ pub(super) fn on_prompt_done(
             if current.limit.is_none() {
                 current.limit = answer.limit.as_ref().and_then(asks::limit_mark);
             }
-            // The agent cancelled the turn on the lawyer's refusal, not on a Stop.
-            let stop = if answer.stop == StopReason::Cancelled && current.refused {
-                StopReason::NotAllowed
-            } else {
-                answer.stop
+            // The agent cancelled the turn on a refusal (the lawyer's, or the host's data-folder
+            // one), not on a Stop.
+            let stop = match current.refused {
+                Some(refused) if answer.stop == StopReason::Cancelled => refused,
+                _ => answer.stop,
             };
             End {
                 stop,
@@ -104,11 +111,9 @@ pub(super) fn on_prompt_done(
                 current.limit_read = Some(LimitRead::default());
             }
             let text = error.to_string();
-            End::failed(
-                sign_in::code_of(actor, error.code(), &text),
-                Some(text),
-                None,
-            )
+            let code = went_offline
+                .unwrap_or_else(|| sign_in::code_of(actor, error.code(), &text, error.rpc_data()));
+            End::failed(code, Some(text), None)
         }
     };
     end_turn(actor, thread, end);
@@ -144,6 +149,9 @@ pub(super) fn on_prompt_refused(actor: &mut Actor, thread: ThreadId, turn: TurnI
 /// Steps 6 and 7: the held text and the expiries in one commit, then the after-turn
 /// checkpoint, whose answer logs the end.
 pub(super) fn end_turn(actor: &mut Actor, thread: ThreadId, mut end: End) {
+    // Claude's suspected connection line goes back into the answer unless the turn ends
+    // offline: a cancel (one the agent never answered too) or any other end.
+    offline::turn_ending(actor, thread, end.failure.as_ref().map(|(code, _)| *code));
     cancel::sweep_leftovers(actor, thread, end.stop);
     let Some(current) = current(actor, thread) else {
         return;
@@ -152,8 +160,13 @@ pub(super) fn end_turn(actor: &mut Actor, thread: ThreadId, mut end: End) {
         return;
     }
     current.phase = TurnPhase::Ending;
+    let answered = current.first_words.is_some();
     if let Some(call) = current.prompt_call.take() {
         call.abort();
+    }
+    if answered {
+        let now = actor.now().mono;
+        super::state::answered_end(actor, thread, now);
     }
     // Case-law calls from now on count against the between-turns bucket (R24).
     super::launch_checks::relay::turn_ended(actor, thread);
@@ -462,6 +475,7 @@ pub(super) fn finish(actor: &mut Actor, thread: ThreadId) {
     }
     if let Ok(matter) = matter_of(actor, thread) {
         release_writer(actor, matter, thread);
+        super::super::papers::follow::on_turn_ended(actor, matter);
     }
     if host_stopping(actor) {
         agents::stop(actor, thread);

@@ -15,6 +15,12 @@ publish.workspace = true
 test-support = []
 
 [dependencies]
+# Whether a listed .docx holds tracked changes or comments (revisions/marks.rs): its zip parts.
+zip = { version = "9.2.2", default-features = false, features = [
+  "deflate-flate2",
+] }
+# The tracked-changes check's one pass over a .docx part (revisions/marks.rs).
+memchr = { workspace = true }
 clauseo-protocol = { path = "../protocol" }
 clauseo-reducer = { path = "../reducer" }
 clauseo-store = { path = "../store" }
@@ -70,11 +76,21 @@ rustix = { workspace = true, features = ["fs"] }
 # user database.
 nix = { workspace = true, features = ["user"] }
 
+# The open matter's folder watch (src/actor/papers/watch.rs, decision record 0055); none on
+# Windows, where its handle would stop the lawyer renaming or moving the folder around the matter.
+[target.'cfg(not(windows))'.dependencies]
+notify = { workspace = true }
+
+# The network path checks' remote mount list (network_paths/mac.rs): getfsstat.
+[target.'cfg(target_os = "macos")'.dependencies]
+libc = { workspace = true }
+
 # The Chrome for Testing download's Win32 calls (browser/install/windows.rs): System32's folder
 # (SystemInformation), the free disk space (Storage_FileSystem), and Authenticode on chrome.exe
 # (Security_WinTrust, whose WINTRUST_DATA needs Security_Cryptography).
 [target.'cfg(windows)'.dependencies]
 windows = { workspace = true, features = [
+  "Win32_Foundation",
   "Win32_Security_Cryptography",
   "Win32_Security_WinTrust",
   "Win32_Storage_FileSystem",
@@ -82,6 +98,9 @@ windows = { workspace = true, features = [
 ] }
 
 [dev-dependencies]
+# The vendored ASCII fold's cross-check against every code point's full case fold
+# (src/network_paths/ascii_fold/tests.rs), as stage C's copy in clauseo-sandbox has it.
+caseless = { workspace = true }
 # Directory junctions for the data folder fence's Windows test (`agent/data_fence/tests.rs`).
 clauseo-sandbox = { path = "../sandbox", features = ["test-support"] }
 # Itself with test-support, so its tests reach ManualClock and SequentialIds with no flag.
@@ -118,6 +137,8 @@ nix = { workspace = true, features = ["process"] }
 clauseo-sandbox = { path = "../sandbox", features = ["test-support"] }
 # The case-law relay's exclusive-bind test binds its port again with SO_REUSEADDR.
 socket2 = { workspace = true }
+# The papers scan's test that its reparse tags are Windows' own (`revisions/marks/reparse.rs`).
+windows = { workspace = true, features = ["Win32_System_SystemServices"] }
 
 [[bench]]
 name = "reopen"

@@ -50,20 +50,25 @@ The host thread set the conditions the profile must keep: Claude keeps `settingS
     splits each on `.`, and `config_manager.rs:438` reads `bypass_hook_trust` straight from
     the request. The host merges the keys after the overrides and before `hooks`, adding only
     where no key is, and treats a dotted key as a clash with its first part.
-  - `servers(kind)`: `browser` for every kind, an agent with no kind included. `env()`:
+  - `servers(kind)`: `browser` for Codex alone (`servers::browser_mcp`; Claude drives
+    agent-browser as a shell tool, its rules and skill unchanged, on Windows alone for launch:
+    "No browser for Claude on macOS and Linux"), then `case-law`. `env()`:
     `STETDOC_AUTHOR`. `path_prepend()`: `Option`, stetdoc's parent folder, or none (with a
     warning) when that folder also holds a browser sidecar or the app's own executable, or is a
     root. Folders compare without regard to case or separator.
   - An agent with no kind (`fake-agent`) gets the servers and nothing kind-specific.
 - **The `browser` entry.** Command `clauseo-mcp`; arguments `browser-guard --agent-browser
   <agent-browser> --cwd {browser_dir} --cdp-port {cdp_port} -- mcp --tools core`, with
-  `--daemon-port {daemon_port}` after `--cdp-port` on Windows; five variables:
-  `AGENT_BROWSER_CONFIG` (static), `AGENT_BROWSER_PROXY=http://127.0.0.1:{proxy_port}`,
-  `AGENT_BROWSER_SESSION={session_id}`, `AGENT_BROWSER_EXECUTABLE_PATH={browser_executable}` and
-  `AGENT_BROWSER_STREAM_PORT={stream_port}`, and on macOS and Linux a sixth,
+  `--daemon-port {daemon_port}` after `--cdp-port` on Windows; four variables:
+  `AGENT_BROWSER_CONFIG` (static), `AGENT_BROWSER_SESSION={session_id}`,
+  `AGENT_BROWSER_EXECUTABLE_PATH={browser_executable}` and
+  `AGENT_BROWSER_STREAM_PORT={stream_port}`, and on macOS and Linux a fifth,
   `AGENT_BROWSER_SOCKET_DIR={socket_dir}` (S27's ports-and-socket PR, 0029). S27's guard derives
-  the download, screenshot, `HOME`, `TMPDIR` or `TEMP`, Windows socket and proxy variables from
-  `--cwd` and the proxy value, so the entry carries none of them. The guard's
+  the download, screenshot, `HOME`, `TMPDIR` or `TEMP` and Windows socket variables from
+  `--cwd`, so the entry carries none of them. No `AGENT_BROWSER_PROXY`: in the plain client
+  Chrome goes direct, as Claude's shell browser does, and the host opens no egress proxy for the
+  entry; it opens one, and fills `{proxy_port}`, only for an entry that holds that token (the
+  parked Safe workspace's). The guard's
   `--cwd` is the session's browser state folder, never the matter folder.
 - **Placeholders, and the host's contract** (`placeholders.rs`, the one home of the token
   strings and of `fill`, both public, documented API). The host depends on `profile` and calls
@@ -186,7 +191,8 @@ The host thread set the conditions the profile must keep: Claude keeps `settingS
     use `TestProxy`. Production passes none, so production has no browser until stage C.
 - **Per-session folders** (`actor/turn/launch_checks.rs`). The launch-prep thread makes them
   after the data-folder and `.codex` refusals, and before any `session/*` call:
-  - `run/<session id>/{work,browser}`. The session id is `<thread>-<launch>`, two opaque ids
+  - `run/<session id>/work` and `browser/run/<session id>` (the guard's `--cwd`, outside the
+    run folder Codex's shell may write; see below). The session id is `<thread>-<launch>`, two opaque ids
     and never user text. `launch` is the launch prep's id, from the agent ids' counter (a
     deviation: R17 names `Agent::id`).
   - `agent-state/<matter id>/notes`.
@@ -346,25 +352,44 @@ two dependencies, `profile` and `tracing`.
 - **Start-up.** The profile is built once, on the host-start thread (`host_start.rs`), before
   `Host::start`. The window never waits on it, but the host starts after it, and every bridge
   command waits for the host. So loading stetdoc's skill is bounded: both of stetdoc's runs
-  together get `STETDOC_START_LIMIT`, 3 s. Past it, the load is dropped, which kills
-  stetdoc's process tree, and stetdoc is treated as absent (no skill, no prepend, a warning).
+  together get `start::FIRST_LIMIT`, 3 s. Past it, the load is dropped, which kills
+  stetdoc's process tree. A `--version` that fails treats stetdoc as absent (no skill, no
+  prepend, a warning). A skill that fails or runs past it after a working `--version` leaves
+  only the skill out (2026-11-10): stetdoc stays on the agents' `PATH` and in the app
+  (`HostConfig::with_stetdoc`).
+  A `--version` that only runs past the limit (a new program's first run while the OS scans
+  it, after an install or an update) keeps stetdoc on, with the skill a previous run cached
+  when one loads, and the same two runs go again once on a thread of their own within 30 s
+  (`clauseo_profile::skills::stetdoc::start`, 2026-11-11). Their answer goes into the
+  profile the hook reads at each call, so the next agent start gets it: the skill, or after a
+  real failure no stetdoc line and no skill. The `PATH` entry and the blackline's program
+  were given to the host at its start and stay until the app restarts.
+  stetdoc 0.9.3 prints its skill's body with no frontmatter: Clauseo writes one, its
+  description stetdoc's first `# ` heading, the body unchanged (2026-11-11).
   The rest of the build is file reads and rendering. The build finds the
   app's executable, runs stetdoc for its skill (`load_skill`, cached in the plugin's
   `skills/` folder), and renders R22's built-ins. The hook's methods then only map what it
   holds. The browser's sidecars are named beside the executable, where Tauri's `externalBin`
-  puts them (S27 bundles them). The author is `None`, so tracked changes carry `Clauseo`.
+  puts them (S27 bundles them), except agent-browser on macOS, in `Contents/Helpers` (0029,
+  "Where it lives on macOS"; `profile.rs`'s `agent_browser_path` resolves it). The author is
+  `None`, so tracked changes carry `Clauseo`.
 - **Failure.** A stetdoc skill that fails, or a refused built-in, is left out with a warning,
   and the profile is built without it. If the profile itself cannot be built (no executable
   path, or `ProfilePaths::new` refuses a path), the app logs a warning and starts with no
   hook (`NoProfile`), as before PR-C. The desktop installs no tracing subscriber yet, so
   these warnings go nowhere until it has a log.
-- **stetdoc.** U13's sidecar is not bundled on this base. A debug build takes the first
-  `stetdoc` (with the OS's suffix) in an absolute folder of `PATH`. A release build treats
-  stetdoc as absent. The lookup matches `which`: a file that is not a program (no execute bit
+- **stetdoc.** A release bundles the pinned stetdoc (`crates/desktop/stetdoc.toml`) in a
+  folder of its own (2026-11-09, U13): `Clauseo.app/Contents/Helpers/stetdoc/stetdoc` on macOS,
+  `<resource folder>/stetdoc/stetdoc[.exe]` elsewhere (on Windows the install folder). Both builds
+  run that copy when it is there. A release build without it treats stetdoc as absent, with a
+  warning; a debug build then takes the first
+  `stetdoc` (with the OS's suffix) in an absolute folder of `PATH`. The lookup matches `which`: a file that is not a program (no execute bit
   on Unix) is skipped and the walk goes on, and on Windows only `stetdoc.exe` counts, since
-  stetdoc starts with no shell. When stetdoc is absent, `ProfilePaths` names U13's future path
+  stetdoc starts with no shell. When stetdoc is absent, `ProfilePaths` names a placeholder
   (`<exe folder>/stetdoc/stetdoc`), which is neither run nor put on `PATH`. When stetdoc is
-  found and its skill loaded, `with_agent_path_prepend` takes `ClauseoProfile::path_prepend()`,
+  found and its `--version` works, with its skill or without, the instructions get the stetdoc
+  line (`{stetdoc}`, filled by the profile: `instructions::STETDOC_CLI`, which points the agent
+  at `stetdoc --help`), and `with_agent_path_prepend` takes `ClauseoProfile::path_prepend()`,
   but only when stetdoc is the only program in its folder. A folder found on `PATH` that holds
   others (`~/.cargo/bin`, `/usr/local/bin`) is not put first (a warning says so), since it would
   shadow the system's programs; the agent still finds stetdoc on the `PATH` it inherits.
@@ -417,6 +442,125 @@ change from the settings window as `ui` does. R24 (PR5) adds a third to the patc
   running keeps its tools: its header keeps what it held (`actor/header_tools.rs`), and nothing
   re-reads the switches mid-session.
 
+### Claude's permission mode
+
+- **2026-11-11 (Rohan): `auto`, so a first read of a matter's papers never asks.** Outside
+  forced ask a Claude session now starts in Claude Code's `auto` (`agent/loads.rs`
+  `CLAUDE_MODE`), switched to with `session/set_mode auto` on `session/new`, `session/load`
+  and `session/resume`. In `acceptEdits` Claude Code 2.1.293 asked for a `for … do … done`
+  loop ("A variable in this command can't be checked before it runs") and for `f=a; cat "$f"`
+  (stage C, headless); in `auto` its classifier ran them. When auto is not available the
+  session runs in `acceptEdits` (`CLAUDE_FALLBACK_MODE`) with one notice per thread
+  (`NoticeKind::AutoModeUnavailable`, TN-10): the session lists no `auto`; `set_mode auto`
+  answers an error (the CLI refuses auto for the plan, the settings or fast mode, and
+  claude-agent-acp 0.89.1 passes the error back); or the agent moves off `auto` among the
+  updates held before the attach (0.89.1 moves a model without auto to `acceptEdits` and
+  says so). A CLI that drops to `default` on its own (its remote kill switch) is not relayed
+  by 0.89.1, so the host can't see it. `auto`, `acceptEdits` and `plan` are kept when
+  Claude moves there; any other mode goes back to `auto` (or `acceptEdits` in the fallback).
+  The plan exit's "use auto mode" lands in `auto` and stays. Forced ask is unchanged. The
+  bullets below record the 2026-11-10 `acceptEdits` decision this replaces, and still describe
+  the fallback.
+- **2026-11-11: Windows stays in `auto`, with shell deny rules.** Claude has no browser on
+  Windows and no sandbox there, so a command in no rule goes to `auto`'s classifier alone.
+  Beside the data folder's `Read` and `Edit` denies, a Windows session's flag settings get
+  `Bash(*<form>*)` and `PowerShell(*<form>*)` deny rules for each way a command may name the
+  data folder (`agent/data_fence/shell_deny.rs`): its path with `\`, `/` and `\\`, Git Bash's
+  `/c/…`, `%LOCALAPPDATA%`, `$env:LOCALAPPDATA`, `$LOCALAPPDATA` and `${LOCALAPPDATA}` (and
+  the same for `APPDATA`) followed by the rest of the path, and the folder's own name
+  `ai.clauseo.desktop` when it has it. Claude Code matches `*` anywhere in a Bash or
+  PowerShell rule, a leading one too; PowerShell rules in any case, Bash rules as written.
+  The PowerShell rules also keep the PowerShell tool on, which a Bash deny rule alone turns
+  off. **Residual risk:** classifier-only on Windows; a determined injection could read
+  Clauseo's own data through a script (a path built at run time, a variable, a `cd` first, other
+  letter cases in Bash), which no deny rule sees.
+- **2026-11-10 (Rohan).** Claude should be as frictionless as Codex. Outside forced ask a
+  Claude session starts in Claude Code's `acceptEdits`, not `default`
+  (`agent/loads.rs` `CLAUDE_MODE`). claude-agent-acp 0.89.1 picks its own starting mode (the
+  user's `permissions.defaultMode`, a resumed transcript's) and `_meta` cannot set it, so
+  `actor/turn/session.rs` `claude_start` sends `session/set_mode acceptEdits` before the
+  first prompt whenever the session reports another, on `session/new` and `session/load`.
+  An answer with no modes or no `acceptEdits` fails the launch, as before.
+- **What `acceptEdits` approves (Claude Code 2.1.293).** Read from its docs
+  (code.claude.com/docs/en/permission-modes, "Auto-approve file edits with acceptEdits mode")
+  and from the 2.1.293 binary:
+  - `Edit`, `Write` and `NotebookEdit` on a path inside the working directory (the matter
+    folder) or an `additionalDirectories` folder. The edit check takes a matching deny rule
+    first, then protected paths and the safety checks, then ask rules, and only then
+    `mode === "acceptEdits"` with the path in the working folders.
+  - The Bash commands `mkdir`, `touch`, `rm`, `rmdir`, `mv`, `cp` and `sed` (the binary's list,
+    checked by the base command), with the same path scope: the path check runs first, so a
+    path outside asks. The docs add that safe environment prefixes (`LANG=C`) and wrappers
+    (`timeout`, `nice`, `nohup`) are accepted for all but `touch`. With the PowerShell tool on,
+    `Set-Content`, `Add-Content`, `Clear-Content` and `Remove-Item` on in-scope paths.
+  - Still asking: any path outside those folders, a write to a protected path (`.git`,
+    `.claude`, …), a recognised critical-path `rm`, every other Bash command but the
+    read-only set, `WebFetch`, `WebSearch` outside the host's allow rules, MCP tools.
+- **The auto-edit scope.** The matter folder, plus `additionalDirectories`: the session's work
+  folder (`<data>/run/<session>/work`) and the matter's notes (`<data>/agent-state/<matter>/notes`),
+  after any entries the profile hook gives (Clauseo's own profile gives none). These are
+  exactly Codex's writable roots. Edits in the two `<data>` folders aren't in the turn's
+  checkpoints, so Undo doesn't restore them; they are the agent's scratch and memory, and
+  neither is a deny target.
+- **What still guards.** Deny rules win in every mode, so the data folder's (`Read(//…)`,
+  `Edit(//…)` in the flag settings, "The data folder fence") still refuse, and the host's
+  auto-deny still answers every request Claude does make. The requests it no longer sees are
+  only in-scope edits, all inside the matter folder or the two own folders. The pre-write
+  guard's `PreToolUse` hook runs before each file tool and shell command in every mode; in
+  `acceptEdits` it is the only stop for a write to a document Word holds open (ADR 0021).
+  Bypass stays impossible (`allowDangerouslySkipPermissions: false`, the mode flags taken out
+  of `extraArgs`).
+- **The way back is Undo per turn**, as for Codex (decision record 0025): the matter folder's
+  checkpoints before and after each turn cover every write in it, whichever tool made it.
+- **A mode change inside a session.** What claude-agent-acp 0.89.1's plan exit offers
+  (`permissions/options/tools.js` `buildExitPlanModePermissionOptions`) depends on the modes
+  the session lists. 0.89.1 always lists `auto` (`session-mode.js` `buildAvailableModes`:
+  `default`, `acceptEdits`, `plan`, `auto`, and `bypassPermissions` only with bypass
+  allowed, which Clauseo never does). So its plan exit sends, in order:
+  - with plan text, "Yes, clear context and use auto mode" (`exit-plan-clear-auto`);
+  - "Yes, and use auto mode" (`exit-plan-auto`);
+  - "Yes, manually approve edits" (`exit-plan-default`);
+  - "No, keep planning" (`reject`).
+
+  "Yes, auto-accept edits" (`exit-plan-accept-edits`, and its clear-context form) comes only
+  when the session lists neither `auto` nor bypass. That is the branch
+  `tests/scenarios/claude-plan-exit.jsonl` plays (its modes are `default`, `acceptEdits`,
+  `plan`), not what 0.89.1 sends.
+
+  **What the lawyer sees.** The app shows its own buttons, by option kind, never the adapter's
+  labels (`ui/components/src/clauseo/permission.tsx` `LABEL`). It leaves the auto and bypass
+  options out (`ui/app/src/room/permission-model.ts` `PLAN_EXIT_OPTIONS`), and the desktop
+  bridge refuses an answer naming one (`crates/desktop/src/bridge.rs` `MODE_OPTIONS`). So a
+  0.89.1 plan exit shows two buttons: **Allow once**, which sends `exit-plan-default` ("Yes,
+  manually approve edits"), and **Don't allow**, which sends `reject` ("No, keep planning").
+  In the no-`auto` branch, a third button, **Always for this matter**, sends
+  `exit-plan-accept-edits`.
+
+  **Where each lands (2026-11-10, Rohan): approving a plan means "go ahead" in the matter's
+  mode.** The host keeps a Claude session outside forced ask in `acceptEdits` or `plan`
+  (`actor/turn/forced_mode.rs` `NORMAL_MODES`) and switches any other mode it moves to back to
+  `acceptEdits` with `session/set_mode`. Both moves are logged.
+
+  | Choice | Outside forced ask | Forced ask |
+  | --- | --- | --- |
+  | Allow once (`exit-plan-default`) | `default`, switched to `auto` (2026-11-11) | `default` |
+  | Don't allow (`reject`) | stays in `plan` | stays in `plan` |
+  | Always for this matter (`exit-plan-accept-edits`, no-`auto` branch) | `acceptEdits` | not offered |
+  | `exit-plan-auto`, `exit-plan-clear-auto` | `auto`, kept (2026-11-11) | not offered |
+
+  Claude Code's `auto` would let a classifier approve commands, network calls and writes
+  outside the matter, which would break "writes outside the matter still ask". So it never
+  stayed (superseded 2026-11-11: `auto` is now the session's mode). Between the adapter's move and the host's `set_mode` there is a window of one round
+  trip. `bypassPermissions`, `dontAsk` and unknown modes go back to `acceptEdits` too.
+  In forced ask, every option but `exit-plan-default` and `reject` is dropped, and any mode
+  but `default` and `plan` goes back to `default`.
+- **Forced ask is unchanged.** Decision 3 of 2026-11-04 stands: a forced-ask session starts in
+  `default` (`forced_ask::ASK_MODE`, `loads::claude_mode`) and is switched back to it
+  (`actor/turn/forced_mode.rs`). `acceptEdits` applies only outside forced ask.
+- **Words that become untrue.** The app's copy that says Claude asks before each change in an
+  unprotected matter that isn't forced ask is now wrong. It changes in a separate copy PR; the
+  forced-ask copy stays true.
+
 ### Forced ask in an unprotected matter
 
 - **2026-11-04 (Rohan; private `folder-rights.md`, decision 3).** A Claude session in a matter
@@ -429,7 +573,9 @@ change from the settings window as `ui` does. R24 (PR5) adds a third to the patc
   (`agent/forced_ask.rs`):
   - **Modes:** `SetMode` takes only `default` and `plan` (any other id is `command.invalid`),
     and so does `SetConfigOption` for claude-agent-acp's `mode` option, which sets the mode
-    too; a mode the agent moves to itself is switched back to `default`.
+    too; the session starts in `default`, never in the `acceptEdits` of every other Claude
+    session ("Claude's permission mode"), and a mode the agent moves to itself is switched
+    back to `default`.
   - **Options:** a permission request loses its `allow_always` options and the plan exit's
     options that switch to a skipping mode (`exit-plan-auto`, `exit-plan-accept-edits` and the
     rest, claude-agent-acp 0.89.1 `permissions/options/shared.js`); an answer naming one is
@@ -496,7 +642,9 @@ Clauseo's internals: other conversations (every matter's prompts and answers in 
 index, `search.sqlite`), other sessions' run folders and copies, other matters' notes, the
 store and the agents' credentials. It is not a wall between matters. Its residual: a run
 folder, a matter's notes or another matter's Claude project made after a Claude session
-launched is in none of that session's deny rules (its transcripts are). The host's auto-deny
+launched is in none of that session's deny rules (its transcripts are), and a matter registered
+after a Claude session launched is in none of its sandbox's read denies ("Claude's sandbox
+(macOS)"). The host's auto-deny
 refuses a request for one when Claude asks. Per Claude Code's docs, rules apply in the order
 deny, ask, allow, and an allow can't carve out a deny; Read, Glob and Grep outside the working
 folders ask in the default, `acceptEdits` and `plan` modes, so there the auto-deny refuses
@@ -510,7 +658,7 @@ ask, could close even those: a later option, not this change.
   `counts`, `limits`, `logs`, `matters`, `sandbox`, `skill-packs`, `updates`, each `/**`),
   files (`settings.json`, `update.json`, `first_act_done`, `state.sqlite*`,
   `search.sqlite*`) and, under
-  `agents`, Codex's home, the installs, runtime, npm and sign-in folders, and in Claude's own
+  `agents`, Codex's home, the installs, Node and half-unpacked runtime folders, npm and sign-in folders, and in Claude's own
   home its login, settings, skills and plugins, every project's transcripts, subagent
   transcripts and memory (`projects/*/*.jsonl`, `projects/*/*/subagents/**`,
   `projects/*/memory/**`), and what it keeps across sessions, so across matters:
@@ -547,6 +695,15 @@ ask, could close even those: a later option, not this change.
   of `<data>`, Read only and nothing wider. A guard test checks that every data folder entry `Locations` names, the
   store's database and the search index is in `DENIED` or on an allow list with its reason
   (`agents`: it holds the plans folder; `profile`: the built-in plugin).
+  Two folders every session may read and run but never edit (`READ_ONLY` in the module):
+  `<data>/tools` (the agents' commands, agent-browser's copy) and each Python build
+  (`agents/runtime/clauseo-python-*`, a real folder only; Node and `.tmp-*` stay denied). Each
+  gets `Edit(//<data>/<x>/**)` denied and `Read(//<data>/<x>/**)` allowed, and the launch's
+  enumeration leaves them out. In every run folder, the own one too, the shell browser's
+  config (`run/*/agent-browser/config.json`) is denied like the relay token: agent-browser reads
+  it itself, and an edit could set what the `agent-browser` deny rules refuse as flags. These
+  rules bind Claude's tools only: a subprocess (`agent-browser`, `python3`) reads what it needs
+  whatever they say.
 - **The host's auto-deny.** Before a permission request is shown, the matter thread reads the
   paths it touches: its locations and diffs, `rawInput`'s `file_path`, `notebook_path`,
   `path`, `paths` and `cwd`, every other string anywhere in `rawInput` shaped like a path
@@ -555,7 +712,10 @@ ask, could close even those: a later option, not this change.
   `description`, `plan`, `pattern`, `glob`), the words of `rawInput.command` (a string, or each string of an array) that start with `~` or
   `$HOME`, hold a separator, or are `..`, the targets of an `ln` in it taken from the link's
   own folder (and as written), and any path that starts, inside a command word, where the data
-  folder's text does (its configured and canonical paths and their `~/` form, so
+  folder's text does (its configured and canonical paths, their `~/`, `~\`, `$HOME` and
+  `%USERPROFILE%` forms, on Windows its 8.3 short name and its `%APPDATA%`, `$env:APPDATA`,
+  `${env:APPDATA}` and `$APPDATA` forms (or `LOCALAPPDATA`'s), matched folded and with a run
+  of separators read as one, so
   `python3 -c "open('<data>/…')"`, `grep -f<data>/…` and `curl file://<data>/…` are read).
   It also reads the folders a request may search the whole of: a Glob's or Grep's `path` (the
   matter folder without one), each folder a Glob's `pattern` or a Grep's `glob` may start in
@@ -598,6 +758,22 @@ ask, could close even those: a later option, not this change.
   Claude sessions, so another matter's plan notes stay reachable through it. The comparison
   ignores case on Windows and macOS. The agent's
   `agent ended` log line carries `denied_data_folder=<n>`, with no path.
+- **Network locations (PR #766).** The auto-deny never touches a network location an agent
+  names: a path that is one, or leads to one through a link, is walked name by name
+  (`network_paths::resolve::walk`, `..` taken by its text on Windows as Win32 does) and counts as
+  inside `<data>`, so it is refused untouched; a local path is also matched to `<data>` by
+  identity. A data folder that is itself on the network (app data redirected to a share) is
+  never touched for its identity: a path that resolves locally can't lie in it, and every
+  network path, a link to one included, is refused anyway, so the fence neither captures its
+  identity nor blocks every request. A local data folder whose own identity, or a parent's,
+  can't be read is compared by names only (the walk still resolves links, junctions and 8.3
+  names to their long text), never by blocking every request; only those folders can bring
+  this, and an unreadable identity a request leads to refuses that request. The host reads the
+  failing identity again at each check, logs once when names-only starts and once when it
+  clears (no path), and sets `ProtectionView::data_fence_names_only` for the app to show.
+  Callers that go on to touch a path (the held-open check,
+  the after-turn tool paths, the pre-write guard) use the walked path, never the agent's text
+  again.
 - **The reason the agent sees.** ACP's answer to `session/request_permission` carries an
   outcome and no message, and the adapters tell the model only that the user refused. For the
   subtrees the deny rules name, Claude Code refuses first with its own message naming the rule.
@@ -679,12 +855,35 @@ of the data folder only Clauseo uses (`agent::codex_fence::rules`), scoped under
 as a literal path. That covers the logs, settings, updates, the store's and the search index's
 databases (`search.sqlite*` holds every matter's prompts and answers), skill pack sources, Claude's
 whole folder, and in Codex's home its login, `sessions/`, `history.jsonl` and its databases
-(`state_5.sqlite*` and its siblings). It denies `run`, `agent-state` and `run.old-*` whole, so
-a session or matter made after the launch is denied too. The paths come from `Locations` where it
-names them, and a guard test checks each `Locations` path is denied or allowed for a stated reason.
+(`state_5.sqlite*` and its siblings), the sign-in shim, the agents' downloads and npm cache and
+settings; each of these is named whether or not it exists, so no credential waits for a launch.
+The paths come from `Locations` where it names them, and a guard test checks each `Locations`
+path is denied or allowed for a stated reason.
 
-The session's own run folder and the matter's notes are reopened two ways, both deeper than the
-`run` and `agent-state` denies. The profile names them `write`: once a profile is chosen, Codex
+Beside those, the launch prep lists what it denies entry by entry (`codex_fence::list`): every
+other session's run folder, every other matter's `agent-state` folder and the own matter's
+entries beside its notes, the `run.old-*` folders (the `run.old-*` glob stays too), the entries
+of `agents` but Codex's own folder and the runtime folder, and those of the runtime folder but
+Clauseo's Python builds (`clauseo-python-*`, real folders only). A folder it can't list (a link,
+a failed list, a name that isn't UTF-8) is denied whole, as before. Nothing the agent needs sits
+under a deny, because an approved escalated command keeps only the profile's denies: it runs
+under `for_approved_command` (`codex-rs/core/src/tools/orchestrator.rs:234-258`), which is
+`:root` writable plus the profile's `deny` entries (`codex-rs/protocol/src/permissions/target.rs:
+48-110`, `codex-rs/protocol/src/permissions.rs:735-766`); every `write` and `read` entry drops.
+Stage C saw it: every escalated `agent-browser` command failed while `run` and `browser` were
+denied whole. So:
+
+- The residual Claude's rules accept (data-folder fence section) now applies to Codex too: a
+  session's run folder or a matter's state made after the launch is in no deny until the next
+  launch, readable to the shell and writable to an escalated command.
+- An escalated command may write in Clauseo's Python runtime, which no deny names; ordinary
+  commands only read and run it. That is Codex's escalation, which the lawyer approved.
+- The shell browser's config, Chrome profile and downloads sit in the session's own
+  `<run>/agent-browser`; `<data>/browser` (the parked MCP entry's config) stays denied.
+  `<data>/tools` (the agents' commands) is in no rule.
+
+The session's own run folder and the matter's notes are also opened two ways for ordinary
+commands. The profile names them `write`: once a profile is chosen, Codex
 no longer takes `CODEX_CONFIG`'s `sandbox_workspace_write.writable_roots` (stage B, live, macOS).
 And the host sends them as ACP `additionalDirectories` on `session/new`, `session/load` and
 `session/resume` (`profile_loads::codex_directories`). codex-acp 2.2.2 makes each turn's
@@ -702,7 +901,9 @@ writable whole, so the agent can write this session's pack plugin (`<run>/skill-
 - codex-acp's per-turn policy passed through (`codex-rs/app-server/src/request_processors/turn_processor.rs:846, 893, 918`)
   and rebuilt keeping the profile's deny entries: `codex-rs/core/src/session/session.rs:491-507`,
   `codex-rs/protocol/src/permissions.rs:709-731`;
-- the deepest rule winning, deny winning a tie: `codex-rs/protocol/src/permissions.rs:1043-1048`;
+- the deepest rule winning, deny winning a tie: `codex-rs/protocol/src/permissions.rs:1043-1047`;
+- an escalated command keeping only the denies: `codex-rs/protocol/src/permissions/target.rs:48-110`,
+  `codex-rs/protocol/src/permissions.rs:735-766`, `codex-rs/core/src/tools/orchestrator.rs:234-258`;
 - Seatbelt and bubblewrap enforcing it on every sandboxed command:
   `codex-rs/sandboxing/src/seatbelt.rs:899-900, 1045-1046`, `codex-rs/linux-sandbox/src/bwrap.rs:490-511, 1353-1362`;
   bubblewrap binding a writable root over a masked denied folder (`bwrap.rs:615-659, 1370-1398`);
@@ -719,13 +920,218 @@ itself keeps cross-matter records: one Codex home per agent holds every matter's
 databases. The deny binds only sandboxed processes, not Codex's own process
 (`codex-rs/state/src/sqlite.rs:34-39, 61-63`). A home per matter is a later design question.
 
-Gaps: a data folder whose path holds a glob character loses the `run.old-*` deny, since a scoped
-glob reads its base as glob text. The other rules are literal. A data folder that isn't UTF-8
+Gaps: a data folder whose path holds a glob character loses the `run.old-*` glob, since a scoped
+glob reads its base as glob text; the listed `run.old-*` folders are literal. Seatbelt's regex
+for a glob names only the matching path, not what is under it
+(`codex-rs/sandboxing/src/seatbelt.rs:719-830`), which is why they are listed. The other rules are literal. A data folder that isn't UTF-8
 already fails the launch (`Folders::of`). Windows gets no profile: Clauseo runs Codex there in the
 unelevated sandbox, which refuses to run any sandboxed command when a profile denies reads
 (`codex-rs/sandboxing/src/windows.rs:111-131`), until the elevated sandbox (S15). For what the
 fence is and isn't (tier C has no wall between matters), see the data-folder fence section of
 this record and firm-it §8.
+
+### Codex's browser entry in the plain client: the boundary and what is accepted
+
+- **The boundary.** In the plain client Claude's shell and Claude's Chrome are unfenced, so the
+  boundary that matters is between Codex's sandboxed shell (Seatbelt on macOS, bubblewrap and
+  seccomp on Linux) and the guard and Chrome, which Codex starts unfenced. No path lets the shell
+  steer them without the lawyer:
+  - **The guard's folder** (B1). Its `--cwd`, and with it the downloads, screenshots, `HOME`,
+    temporary folder and Chrome's profile, is `<data>/browser/run/<session id>`
+    (`RunFolders::browser`), outside the run folder the shell may write. Codex's fence denies
+    `<data>/browser` whole, read and write (`agent/codex_fence.rs` `DATA_DENIED`), so the shell
+    cannot plant a link the guard would write through. The folder goes with the run folder at the
+    session's end (`RunFolders::remove`) and `<data>/browser/run` is set aside and deleted at
+    the first launch after a start, as `<data>/run` is (`sweep.rs`). The downloads mover also
+    refuses a downloads folder that is no longer a real folder right before each move.
+  - **The daemon socket and the debugging port** (B2). The host makes the socket folder
+    (`/tmp/clauseo-ab-<16 random>`, 0700) at the claim and adds it to the session's Codex fence
+    as a `deny` by exact path. The shell's own sandbox already refuses the connection:
+    Seatbelt's `(deny default)` (`codex-rs/sandboxing/src/seatbelt_base_policy.sbpl:8`) with no
+    network rule when network is off and no Unix socket is allowed (`seatbelt.rs:318-322,
+    381-382`); on Linux seccomp denies `connect` in the restricted mode
+    (`codex-rs/linux-sandbox/src/landlock.rs:201-203`) and bubblewrap unshares the network
+    (`bwrap.rs:304-306`), so loopback TCP is closed too.
+  - **`read`** (H1). agent-browser marks `agent_browser_read` read-only, so Codex runs it with
+    no prompt; the guard refuses its `url`, `llms` and `requireMd` keys, so it reads only the
+    page already open, through Chrome (agent-browser v0.41.1 `native/actions.rs:5964-5994`).
+- **No browser for Codex on Windows.** Clauseo gives Codex's shell the unelevated
+  restricted-token sandbox there (`windows.sandbox = "unelevated"`), whose only network block is
+  proxy variables that leave loopback out (codex 0.162.1 `windows-sandbox-rs/src/env.rs:126-170`,
+  applied at `spawn_prep.rs:141-143`); the firewall rules exist only in the elevated setup. Its
+  reads are not restricted, so the guard's port file and Chrome's command line are readable.
+  agent-browser's daemon and Chrome's debugging port take no password, so with the entry a shell
+  command Codex runs without a prompt could drive the unfenced browser past the filter and write
+  outside Codex's writable roots. So on Windows Codex gets neither the entry nor the shell tool
+  (`servers::no_browser`), no browser in its header (the app offers no browser action), and a
+  line telling the lawyer a Claude conversation can open web pages. The way back is the elevated
+  sandbox (its firewall) or an authenticated daemon. Claude on Windows keeps its shell tool.
+- **No browser for Claude on macOS and Linux, for launch** (2026-11-11, security review of
+  #940). Claude's shell `agent-browser` would have to run outside Claude Code's sandbox
+  (`excludedCommands`), and Claude Code 2.1.293's exclusion check reworks a command before it
+  matches: it strips `env` and rewrites `VAR=` prefixes, so `PATH=$CLAUDE_CODE_TMPDIR
+  agent-browser …` would run a program Claude wrote, unsandboxed, and quoting (`-q "upload"`,
+  `e"v"al`, a tab) would run unsandboxed and slip past the ask rules. So on macOS and Linux a
+  Claude session gets no browser, whether or not its sandbox ends up on (`servers::no_browser` is
+  true for Claude there): no entry, no `agent-browser` on its `PATH`, no `AGENT_BROWSER_*`
+  variables, no browser in its header (the app offers no browser action), and the no-browser
+  sentence ("You have no browser in this session."), so it reads pages with web fetch and `curl`.
+  The app copies no `agent-browser` into `<data>/tools` there, so no session gets that folder or
+  the browser's skill (`servers::shell_browser`): Codex's entry runs the bundled sidecar itself.
+  The agent-browser ask and allow rules stay in the code, with no session to apply to. Codex
+  keeps its guarded entry on macOS and Linux, and Windows is unchanged: Claude's shell browser is
+  Windows-only for launch, and the Claude-only line Codex gets there stays true. The way back is
+  a Clauseo-owned shim, after launch ("Claude's sandbox" below).
+- **Accepted at Claude parity** (H2, M1, and no prompts). With no proxy, nothing stops Chrome
+  reaching loopback or private addresses after a redirect or a page's own navigation; the guard
+  checks only the address it is given. A page on `127.0.0.1:<debugging port>` could ask Chrome's
+  `/json/new?file:///…` for a `file://` tab and read it. Codex's "allow for this session" is per
+  tool, not per argument, and the host now answers the browser server's approvals itself
+  (`actor/turn/asks.rs`), as Claude's allow rules do for its shell browser, so prompt injection
+  could make either agent open a URL carrying text from the conversation. All of this is what
+  Claude's unfenced shell browser can do in the plain client, and it is accepted for launch.
+  `eval` keeps asking in both agents (Codex: the host never answers `agent_browser_eval`; Claude:
+  no allow rule, and `wait --fn` asks), which narrows H2 to redirects: the script route needs the
+  lawyer's approval. The after-launch fix, for both agents' browsers, is a guard-local proxy with
+  an open allowlist that refuses private and loopback addresses after the DNS lookup, with
+  Chrome's `--proxy-bypass-list=<-loopback>` so loopback goes through it too.
+
+### Claude's sandbox (macOS)
+
+- **2026-11-10 (orchestrator).** A Claude session on macOS runs its Bash commands in Claude
+  Code's own sandbox, and a sandboxed command runs without asking. Linux gets the same object,
+  for development. The host puts a `sandbox` object in the flag settings, after the data
+  folder's rules and before forced ask (`agent/loads/sandbox.rs`, `profile::claude_options`). It
+  replaces any `sandbox` the hook sent.
+  - **Claude's short temp folder** (2026-11-10, security review). Claude Code 2.1.293 uses
+    `<CLAUDE_CODE_TMPDIR>/claude-<uid>` for sandboxed commands only when that path is at most 44
+    bytes. Otherwise it falls back to `/tmp/claude-<uid>`, which every session shares and
+    every sandboxed command may write; `<run>/tmp` is always longer. So each Claude session gets
+    `/tmp/clsb-<8 random>` (`agent/claude_tmp.rs`) as `CLAUDE_CODE_TMPDIR`. It fits 44 bytes
+    for any 10-digit uid, also as `/private/tmp`. The folder is 0700, made on the launch-prep
+    thread, named in `<run>/claude-tmp`, and removed with the run folder, or at the next start
+    with the earlier run's folders after a crash or a stop. It is in `allowWrite` and
+    `allowRead`. Sandboxed commands' `TMPDIR` is made under it. The agent's own `TMPDIR`
+    stays `<run>/tmp` (#930), which Claude Code itself uses.
+    A folder that can't be made gives the session no sandbox, and it runs in `acceptEdits`,
+    not `auto` (2026-11-11, `Off::holds_auto_back`).
+  - **Glob characters** (2026-11-11, security review). Claude Code 2.1.293 reads a sandbox
+    path holding `*`, `?`, `[` or `]` as a pattern (`W4t`): unescaped, `Smith [2024]` would
+    open `Smith 2` and not itself. A `[` is escaped as `[[]`, a class holding only `[` (a
+    lone `]` is literal), so the sandbox stays on. A glob deny covers all under it, a glob
+    allow only what it names, so each escaped allowed folder also goes in with `/**`. Every
+    list reads globs on macOS; on Linux only `denyRead` and `allowRead` (it skips a glob write
+    path), so the write lists stay as written there. `*` and `?` have no escape (`W4t`
+    rewrites them even inside a class): a path holding one gives the session **no sandbox,
+    and it runs in `acceptEdits`, not `auto`**, with no notice, so no command runs on the
+    classifier alone where the sandbox was meant to be (`Auto::NoSandbox`). A path to deny
+    that is not UTF-8 also gives no sandbox (one info line, no path), and `acceptEdits` too
+    since 2026-11-11 (`Off::holds_auto_back`). Not checked live on a Mac.
+  - **On:** `enabled` and `autoAllowBashIfSandboxed`. Forced ask still sends
+    `autoAllowBashIfSandboxed: false` after it, so a forced-ask session asks for every command,
+    sandboxed or not.
+  - **No break-outs:** `allowUnsandboxedCommands: false`. Claude Code 2.1.293 then ignores the
+    model's `dangerouslyDisableSandbox`, asked or not (`shouldUseSandbox`: the parameter counts
+    only while unsandboxed commands are allowed).
+  - **`failIfUnavailable: true`** (2026-11-11, security review of #940; it was `false`). A
+    sandbox that fails at run time fails the command instead of running it unsandboxed, and a
+    Mac (or a Linux machine without bubblewrap) where the sandbox can't start at all ends Claude
+    at start-up, so the session fails to launch instead of running with no sandbox: the
+    setting's own description. The host's own checks still come first and still fall back
+    before the launch to no sandbox and `acceptEdits` (`Auto::NoSandbox`): no short temp
+    folder, a path to deny that is not UTF-8, or a `*` or `?` in a path ("Glob
+    characters"). Not checked live on a Mac where Seatbelt can't start.
+  - **Files:** `denyRead` holds:
+    - the home (`~/`): other clients' files and `~/.ssh`;
+    - each spelling of `<data>`, which `CLAUSEO_DATA_DIR` may put outside the home;
+    - every other matter folder the host knows at the launch;
+    - `/Volumes` and `/Users/Shared`, where matters may be kept.
+
+    The data fence's `Read(…)` deny rules become read denies too. **Residual:** a matter
+    registered after this launch is in none of its lists, the same as the data fence's residual
+    for run folders and notes. `allowWrite` holds the matter folder, `<run>/work`,
+    `<run>/tmp`, the matter's notes and the short temp folder. `denyWrite` holds the matter's
+    `.clauseo`: its `matter.json` finds a moved matter folder again, and Claude's `Edit` is
+    denied it too, on every OS. `allowRead`, which Claude Code ranks over `denyRead` (a
+    narrower deny inside it still applies), re-opens those, plus
+    `<run>/agent-browser/downloads`, `<run>/skill-packs`, the built-in skills, stetdoc's
+    folder and Clauseo's Python runtime folder (`<rt>`, where pandoc also lives): the folders
+    the launch puts first on its shells' `PATH` (decision record 0048). The runtime is found
+    from its `PATH` folder `<rt>/bin`. The file `<run>/clauseo-env.sh` that puts them
+    first in each Bash command is opened alone. The whole run folder is not opened: it holds
+    the relay's token and a browser's profile (the visited sites' cookies). Of Claude's own
+    project folder only `<home>/projects/<key>/*/tool-results` (and `/**` under it) opens,
+    the key Claude Code's own (`claude_project_key`, cut and hashed past 200 characters):
+    `WebFetch` keeps the files it fetches there. The transcripts and the memory beside them
+    stay denied.
+  - **Network:** `allowedDomains: ["*"]` (2026-11-11), so a sandboxed command (`curl` of a
+    court PDF) never asks for a host; stage C downloaded a real judgment PDF that way in auto
+    mode. `deniedDomains` holds `localhost`, `127.0.0.1`, `::1`, `[::1]`, `0.0.0.0` and
+    `[::]`: the browser's debugging port and agent-browser's daemon listen on loopback, and
+    Claude Code's proxy, which runs outside the sandbox, would otherwise reach them for a
+    sandboxed command. The any-address forms land on loopback too. A direct loopback connect is
+    refused by the sandbox already (stage C).
+  - **Trust roots** (2026-11-11, stage C's "self signed certificate"). Inside the sandbox
+    `curl` and Python can't reach the macOS trust store and fall back to `/etc/ssl/cert.pem`,
+    which lacks newer roots such as GlobalSign Root R46 (`sci.gov.in`). So the launch prep of
+    a Claude session on macOS with its short temp folder writes `<data>/tls/roots.pem`, every
+    launch: `/usr/bin/security find-certificate -a -p` of the System Roots keychain, then of
+    `/Library/Keychains/System.keychain` (an admin's roots, a firm's TLS-inspection root among
+    them), each under a 10 s limit (`agent/loads/tls_roots.rs`). `SSL_CERT_FILE`,
+    `CURL_CA_BUNDLE` and `REQUESTS_CA_BUNDLE` name it in the session's environment and again in
+    `<run>/clauseo-env.sh`, so each Bash command has them after its snapshot. `allowRead` opens
+    that one file. If the System Roots don't export, nothing is set (one warning) and `curl`
+    behaves as before. A session whose sandbox is later turned off for a path (`*`, `?`, not
+    UTF-8) still gets the variables: the same roots as the keychain. Linux and Windows are
+    unchanged. The data fence denies `<data>/tls/**` to Claude's `Read` and `Edit`
+    (`DENIED`, 2026-11-11, security review of #940), so its `Write` and `Edit` tools can't put
+    a root of their own in the file that later sessions' `curl` and Python trust; sandboxed
+    commands can't write it either (it is outside every `allowWrite`). **After launch:** keep
+    a System keychain certificate only when it is a CA (basicConstraints `CA:TRUE`), so a
+    self-signed leaf certificate there doesn't become a root, and honour the admin trust
+    settings (`security dump-trust-settings -d`), so a certificate marked Never Trust doesn't
+    either; a CA filter alone would still let a Never Trust CA through. Deferred because the
+    only X.509 parser in `Cargo.lock`, `x509-parser`, is there as `rcgen`'s optional
+    dependency and compiled by no build (`cargo tree -i x509-parser --target all -e all
+    --all-features` prints nothing), so using it would add a new dependency to the shipped app.
+  - **No `excludedCommands`** (2026-11-11, security review of #940): every command runs
+    sandboxed. It held `agent-browser:*` in a session with the browser, since agent-browser
+    needs its daemon, Chrome and the session's sockets. The review found that Claude Code's
+    exclusion check reworks a command before it matches: it strips `env` and rewrites `VAR=`
+    prefixes, so `PATH=$CLAUDE_CODE_TMPDIR agent-browser …` ran a fake `agent-browser` Claude
+    had written there, outside the sandbox, and quoting (`-q "upload"`, `e"v"al`, a tab) also
+    ran unsandboxed and dodged the ask rules, which match the command's text. So Claude has no
+    browser on macOS and Linux for launch ("No browser for Claude on macOS and Linux" above),
+    and the key and `EXCLUDED_COMMANDS` are gone from `agent/loads/sandbox.rs`.
+    **After launch, the shim:** Clauseo's own `agent-browser` in a folder the agent can't write
+    (outside every `allowWrite` and denied to `Edit` and `Write`). It parses the real argv,
+    not the command's text, and refuses `eval`, `pdf`, `download`, `upload`, `state`,
+    `wait --fn`, a `file://` URL, and the CDP and page-JavaScript options. It starts the real
+    agent-browser with a clean environment (only the session's own `AGENT_BROWSER_*` values,
+    never the inherited `PATH` or variables the command set), and `excludedCommands` names only
+    the shim's absolute path, never a bare name a `PATH=` prefix could redirect.
+  - **The shell snapshot:** each command starts with
+    `source <home>/shell-snapshots/<file> 2>/dev/null || true`. The data fence denies that
+    folder, so the read fails quietly, and only the lawyer's shell functions and aliases are
+    lost. The snapshot's `PATH` is the launch's own: Claude Code writes `process.env.PATH`
+    there, and asks a login shell only on Windows. `ignoreViolations` leaves those reports out,
+    so the model is not told of a violation on every command.
+- **The accepted breakages.** `allowAppleEvents: false`, and the sandbox's Mach list has no
+  Spotlight or Quick Look service. So `open`, `osascript` driving another app, `mdls`,
+  `mdfind` and `qlmanage` fail, as they do for Codex (D-045). Claude on macOS gets one sentence
+  after the instructions that names them and points to `stetdoc`, `textutil` and `python3`
+  (`clauseo_profile::instructions::claude_shell`). Claude elsewhere and Codex never get it.
+- **Windows has no sandbox.** No `sandbox` key goes there. Claude Code 2.1.293 never auto-allows
+  on Windows: `autoAllowBashIfSandboxed` reads `false` there (`isAutoAllowSupported`). Its
+  Windows sandbox needs a one-time admin install and Git Bash, and sits behind a feature gate.
+  Sending nothing also keeps the session's behaviour the same if that gate opens. A `sandbox`
+  object the profile hook sends passes through on Windows untouched. That is accepted:
+  auto-allow is forced off there, whatever it says. A Windows session still runs in `auto`,
+  so its commands go to the classifier, behind the shell deny rules for the data folder
+  ("2026-11-11: Windows stays in `auto`, with shell deny rules" above).
+- The citations are offsets in the 2.1.293 binary's strings. Stage C's live checks on a Mac are
+  listed in the PR. Clauseo's own macOS jail (parked) would nest Claude's sandbox inside it,
+  where it can't start, and with `failIfUnavailable: true` Claude would fail at start-up.
 
 ## Consequences
 

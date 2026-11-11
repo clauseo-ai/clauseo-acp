@@ -47,14 +47,17 @@ test("the install line's buttons may narrow and wrap inside the well", () => {
 
 test("the gate's quiet buttons wrap their words: the button's nowrap gives way", async () => {
   await mountFirstRun({ first: [install(CLAUDE, READY), signIn(CLAUDE, { signed_out: {} })] });
-  expect(wraps(button("Use ChatGPT instead"))).toBe(true);
-  expect(wraps(button("Use an API key or my firm's account"))).toBe(true);
+  expect(wraps(button("Use an API key instead"))).toBe(true);
+  // both plans' Sign in wrap their words too, and their row wraps under the words where they don't fit
+  expect(wraps(button("Sign in to Claude"))).toBe(true);
+  expect(wraps(button("Sign in to ChatGPT"))).toBe(true);
+  expect(rule(".fl-gate-plans")).toContain("flex-wrap: wrap");
+  expect(rule(".fl-gate-plans")).toContain("max-width: 100%");
 });
 
 test("the link rows take the message's inset as a utility, which the small button's px-s3 can't beat", async () => {
   await mountFirstRun({ first: [install(CLAUDE, READY), signIn(CLAUDE, { signed_out: {} })] });
-  expect(button("Use ChatGPT instead")?.className.split(/\s+/)).toContain("px-s2");
-  expect(button("Use an API key or my firm's account")?.className.split(/\s+/)).toContain("px-s2");
+  expect(button("Use an API key instead")?.className.split(/\s+/)).toContain("px-s2");
   expect(rule(".fl-way")).not.toContain("padding");
 });
 

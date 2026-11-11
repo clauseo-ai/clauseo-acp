@@ -1,39 +1,42 @@
-//! The `end-cleanup` row: what the runner's end-of-session sweeper (`clauseo-sandbox-run
-//! --sweep`, run as the pool user after every session) leaves of the pool user's own objects.
+//! The `end-cleanup` row: what is left of the pool user's own objects after a session. The items
+//! are planted before the session, so for them it is the next session: its inner runner's first
+//! act removes the HKCU `Run` and `RunOnce` values and the Startup entries, and at its end the
+//! outer asks for the `SYSTEM` task `\Clauseo\SandboxSweep`, which deletes the pool user's
+//! scheduled tasks and cancels its BITS jobs.
 //! Before the session, the harness, logged on as A's pool user (`win_logon.rs`), plants benign
 //! items with `probe items plant` (`probe_items.rs`): HKCU `Run` and `RunOnce` values, a
 //! Startup-folder `.cmd` and a scheduled task (2099, never run), each running the probe's
 //! `wait`, and a resumed BITS job copying a local file, whose notify command writes a marker.
-//! After the session ends it waits until that user has no process left (the sweeper has ended,
-//! up to `checks_pool::SETTLE`), then checks, as that user again, until [`SWEEP_GRACE`] after
-//! the session's end has passed. The sweeper makes no BITS call (only the `SYSTEM` stop task,
-//! PR #668, cancels a pool user's job), so when the BITS job is still there the row runs a second
-//! short session of the same pool user and checks again: the job must still be inert, its marker
-//! never written and its state never transferred. At the row's end it removes whatever is left
-//! and notes it. Each `probe items` run waits that way first. The verdict is in
+//! After the session ends (the outer, living on, has polled the sweep task's result for up to
+//! 20 s) it checks, as that user again, until every item is gone or [`SWEEP_GRACE`] after the
+//! session's end has passed. At the row's end it removes whatever is left and notes it. Each
+//! `probe items` run first waits for that user to have no process left. The verdict is in
 //! `cleanup_verdict.rs`.
 
 use std::time::Duration;
 
 use super::checks::started;
-use super::checks_pool::{end_session, judge, logon_parts, settle};
+use super::checks_pool::{judge, logon_parts, settle};
 use super::checks_ui::random;
-use super::cleanup_verdict::{self, KINDS, bits_left, settled};
-use super::launch::{deadline, pool_of};
+use super::cleanup_verdict::{self, KINDS, settled};
+use super::launch::{deadline, pool_of, summary};
 use super::manifest::Pool;
 use super::rows::Ctx;
 use super::sys::{now, sleep};
 use super::win_logon;
 
-/// How long after the session's end the sweeper gets.
+/// How long after the session's end the checks are retried: the outer has polled the sweep
+/// task's result for up to 20 s before it ended, and 30 s more covers a task still running then,
+/// within the row's 120 s limit (the task's own limit, `PT2M`, doesn't fit in it).
 const SWEEP_GRACE: Duration = Duration::from_secs(30);
 /// How long one `probe items` run as the pool user may take.
 const ITEMS_LIMIT: Duration = Duration::from_secs(30);
 
 /// Runs `probe items <step> <tag>` as `pool` (`CreateProcessWithLogonW`, outside any job of
 /// ours, on a control station of its own); its lines, noted. The call that failed otherwise.
-/// It waits for that user to have no process left first (`checks_pool::settle`): after the
-/// session, that is its end sweeper's end, which would otherwise end the check.
+/// It waits for that user to have no process left first (`checks_pool::settle`): the session's
+/// processes may still be ending, and a process of that user outside the job is what a session's
+/// sweep ends.
 fn items(ctx: &Ctx<'_>, pool: &Pool, step: &str, tag: &str) -> Result<Vec<String>, String> {
     settle(ctx, pool)?;
     let (held, desktop, password) = logon_parts(ctx, pool)?;
@@ -58,16 +61,20 @@ fn items(ctx: &Ctx<'_>, pool: &Pool, step: &str, tag: &str) -> Result<Vec<String
     Ok(ran.lines)
 }
 
-/// A short session of A, ended at once; whether it ran.
-fn short_session(ctx: &Ctx<'_>, until: std::time::Instant) -> Result<(), String> {
-    started(ctx, "A", &["hold"]).and_then(|(a, agent)| {
-        ctx.note(&format!("the session's agent {agent}; ending the session"));
-        end_session(ctx, a, until)
-    })
+/// A short session of A, ended at once: the outer's stderr lines, or why it didn't run.
+fn short_session(ctx: &Ctx<'_>, until: std::time::Instant) -> Result<Vec<String>, String> {
+    let (a, agent) = started(ctx, "A", &["hold"])?;
+    ctx.note(&format!("the session's agent {agent}; ending the session"));
+    let done = a.end(until)?;
+    ctx.note(&format!("A: probe hold: {}", summary(&done)));
+    for line in &done.stderr {
+        ctx.note(&format!("A stderr: {line}"));
+    }
+    Ok(done.stderr)
 }
 
 /// The `end-cleanup` row: every item planted as A's pool user before the session is gone
-/// within [`SWEEP_GRACE`] of its end, but for the BITS job, which may be left inert.
+/// within [`SWEEP_GRACE`] of its end, or the BITS job was refused (`cleanup_verdict`).
 pub(crate) fn end_cleanup(ctx: &Ctx<'_>) -> Result<String, String> {
     let pool = pool_of(ctx.manifest, "A")?;
     let tag = random()?;
@@ -77,8 +84,8 @@ pub(crate) fn end_cleanup(ctx: &Ctx<'_>) -> Result<String, String> {
     let ended = now();
     let mut after = Vec::new();
     while session.is_ok() {
-        // Each check waits for the sweeper's end first; a check that fails anyway is tried again
-        // until the grace is over.
+        // A check that fails is tried again until the grace is over: the sweep task may still
+        // run after the outer stopped polling its result.
         after = items(ctx, pool, "check", &tag).unwrap_or_else(|why| {
             ctx.note(&format!("the check didn't run: {why}"));
             Vec::new()
@@ -89,17 +96,6 @@ pub(crate) fn end_cleanup(ctx: &Ctx<'_>) -> Result<String, String> {
         sleep(Duration::from_secs(3));
     }
     let waited = ended.elapsed().as_millis();
-    // A BITS job still there must stay inert through the next session of the same pool user.
-    let mut again = None;
-    if session.is_ok() && bits_left(&after) {
-        ctx.note("the BITS job is still there: a second session, then a check again");
-        match short_session(ctx, until).and_then(|()| items(ctx, pool, "check", &tag)) {
-            Ok(lines) => again = Some(lines),
-            Err(why) => ctx.note(&format!(
-                "the second session or its check didn't run: {why}"
-            )),
-        }
-    }
     match items(ctx, pool, "remove", &tag) {
         Ok(lines) => {
             let removed: Vec<&str> = KINDS
@@ -108,7 +104,7 @@ pub(crate) fn end_cleanup(ctx: &Ctx<'_>) -> Result<String, String> {
                 .collect();
             if lines.iter().any(|l| l.starts_with("item bits error")) {
                 ctx.note(
-                    "the harness couldn't cancel the BITS job: it is left for the system stop",
+                    "the harness couldn't cancel the BITS job: it is left for the next sweep task",
                 );
             }
             if !removed.is_empty() {
@@ -120,7 +116,7 @@ pub(crate) fn end_cleanup(ctx: &Ctx<'_>) -> Result<String, String> {
         }
         Err(why) => ctx.note(&format!("the harness's removal didn't run: {why}")),
     }
-    session?;
-    let verdict = cleanup_verdict::end_cleanup(&planted, &after, again.as_deref(), waited);
+    let stderr = session?;
+    let verdict = cleanup_verdict::end_cleanup(&planted, &after, &stderr, waited);
     judge(ctx, verdict)
 }

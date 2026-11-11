@@ -20,6 +20,9 @@ mod support;
 mod write;
 
 #[cfg(test)]
+#[path = "host/adopt.rs"]
+mod adopt;
+#[cfg(test)]
 #[path = "host/agent_homes.rs"]
 mod agent_homes;
 #[cfg(test)]
@@ -29,14 +32,26 @@ mod agent_name;
 #[path = "host/ask_user_question.rs"]
 mod ask_user_question;
 #[cfg(test)]
+#[path = "host/blackline.rs"]
+mod blackline;
+#[cfg(test)]
 #[path = "host/blobs.rs"]
 mod blobs;
 #[cfg(test)]
 #[path = "host/browser.rs"]
 mod browser;
 #[cfg(test)]
+#[path = "host/browser_codex.rs"]
+mod browser_codex;
+#[cfg(test)]
 #[path = "host/browser_install.rs"]
 mod browser_install;
+#[cfg(test)]
+#[path = "host/browser_policy.rs"]
+mod browser_policy;
+#[cfg(test)]
+#[path = "host/browser_shell.rs"]
+mod browser_shell;
 #[cfg(test)]
 #[path = "host/came_back.rs"]
 mod came_back;
@@ -53,8 +68,17 @@ mod cancel_leftovers;
 #[path = "host/claude_mode.rs"]
 mod claude_mode;
 #[cfg(test)]
+#[path = "host/claude_sandbox.rs"]
+mod claude_sandbox;
+#[cfg(test)]
 #[path = "host/clear_env.rs"]
 mod clear_env;
+#[cfg(test)]
+#[path = "host/copied_folder.rs"]
+mod copied_folder;
+#[cfg(test)]
+#[path = "host/start_refused_log.rs"]
+mod start_refused_log;
 #[cfg(test)]
 #[path = "host/web_sources.rs"]
 mod web_sources;
@@ -146,6 +170,12 @@ mod e2e_scenarios;
 #[path = "host/egress.rs"]
 mod egress;
 #[cfg(test)]
+#[path = "host/egress_allow.rs"]
+mod egress_allow;
+#[cfg(test)]
+#[path = "host/egress_block.rs"]
+mod egress_block;
+#[cfg(test)]
 #[path = "host/egress_wait.rs"]
 mod egress_wait;
 #[cfg(test)]
@@ -214,6 +244,9 @@ mod limits_login;
 #[path = "host/limits_pending.rs"]
 mod limits_pending;
 #[cfg(test)]
+#[path = "host/limits_plan_added.rs"]
+mod limits_plan_added;
+#[cfg(test)]
 #[path = "host/limits_sandbox.rs"]
 mod limits_sandbox;
 #[cfg(test)]
@@ -252,6 +285,9 @@ mod mcp;
 #[cfg(test)]
 #[path = "host/not_allowed.rs"]
 mod not_allowed;
+#[cfg(all(test, unix))]
+#[path = "host/outside_matter.rs"]
+mod outside_matter;
 #[cfg(test)]
 #[path = "host/own_logout.rs"]
 mod own_logout;
@@ -267,9 +303,18 @@ mod packs_timing;
 #[cfg(test)]
 #[path = "host/papers.rs"]
 mod papers;
+// Every test here waits for a live folder watch, which Windows does not have (decision record
+// 0055); the turn rig's `papers` tests cover Windows' re-list at an answer's end on every OS.
+#[cfg(not(windows))]
+#[cfg(test)]
+#[path = "host/papers_live.rs"]
+mod papers_live;
 #[cfg(test)]
 #[path = "host/permissions.rs"]
 mod permissions;
+#[cfg(test)]
+#[path = "host/pickers.rs"]
+mod pickers;
 #[cfg(test)]
 #[path = "host/plan_note.rs"]
 mod plan_note;
@@ -289,8 +334,14 @@ mod protection;
 #[path = "host/protection_edges.rs"]
 mod protection_edges;
 #[cfg(test)]
+#[path = "host/protection_parked.rs"]
+mod protection_parked;
+#[cfg(test)]
 #[path = "host/protection_rig.rs"]
 mod protection_rig;
+#[cfg(test)]
+#[path = "host/python_path.rs"]
+mod python_path;
 #[cfg(test)]
 #[path = "host/queue.rs"]
 mod queue;
@@ -315,6 +366,12 @@ mod relocate;
 #[cfg(test)]
 #[path = "host/restart.rs"]
 mod restart;
+#[cfg(test)]
+#[path = "host/revisions.rs"]
+mod revisions;
+#[cfg(test)]
+#[path = "host/revisions_real.rs"]
+mod revisions_real;
 #[cfg(test)]
 #[path = "host/search.rs"]
 mod search;
@@ -367,6 +424,9 @@ mod tools;
 #[cfg(test)]
 #[path = "host/titles.rs"]
 mod titles;
+#[cfg(test)]
+#[path = "host/titles_restart.rs"]
+mod titles_restart;
 #[cfg(test)]
 #[path = "host/triage.rs"]
 mod triage;

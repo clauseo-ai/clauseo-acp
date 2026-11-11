@@ -14,6 +14,7 @@ use crate::test_support::Scratch;
 
 mod bounded;
 mod links;
+mod privacy;
 mod word;
 
 /// What the fake OS was asked to do, in order.

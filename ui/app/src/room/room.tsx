@@ -2,15 +2,15 @@
 // with Base UI's CSP mode inside, then the window: the toolbar, the rail, the work and the wall, laid out by shell.css
 // and responsive.css. Three columns from 1200 px, the rail folded behind Matters as a floating panel from 1000 px, one
 // column below. The rail is U2's (rail.tsx over matters.ts); the work is the live thread (thread/work.tsx). The window
-// draws its own frame
-// (H19): the toolbar is the title bar, with the caption buttons wired to the window off the Mac and macOS's own traffic
+// draws its own frame (H19): the toolbar is the title bar, with the caption buttons wired to the window off the Mac and macOS's own traffic
 // lights over the corner lights' place on it, inside the desktop app; elsewhere (tests, the probe, a browser) the
 // buttons log their presses and the lights are painted. The plan is the open conversation's agent's (limits/live-plan.tsx, U12); until a host query no search, and
 // until H5 nothing under a matter's title (the scratch matter's line stands). The wall
 // lists H8's papers (host-next.ts's papers part, which the desktop gives through host-wire.ts). Folded, the rail closes
 // on Escape and on opening a matter or making one, and focus goes back to Matters; opening a conversation or starting
 // one closes it too, and the field takes the focus. Matters carries the court-yellow dot while another matter waits on
-// the lawyer. Cmd+N on the Mac, Ctrl+N elsewhere, starts a new conversation in the open matter; until its first
+// the lawyer. Cmd+N on the Mac, Ctrl+N elsewhere, starts a new conversation in the open matter, and Shift with it opens
+// New matter, as the Mac's native menu does too (room-commands.ts); until its first
 // question, the reading column's top says what it reads, once the matter's papers are counted. A link or paper in an
 // answer opens through the host (open.ts, H11), and so does a matter row's Show in Finder; a Word document's tile, and a
 // change note naming one, open it in Word (word/open-in-word.ts; the tiles are paper-wall.tsx). A
@@ -39,9 +39,12 @@ import { useDisplay } from "@clauseo/components/lib/display.ts";
 import { frame } from "@clauseo/components/lib/words-frame.ts";
 import { mt } from "@clauseo/components/lib/words-matters.ts";
 import { th } from "@clauseo/components/lib/words-thread.ts";
-import { Say } from "@clauseo/components/clauseo/say.tsx";
 import { useWords } from "@clauseo/components/lib/words.ts";
-import { MarkdownHostContext, type MarkdownHost } from "@clauseo/components/markdown/host.ts";
+import {
+  MarkdownHostContext,
+  PaperLinksContext,
+  type MarkdownHost,
+} from "@clauseo/components/markdown/host.ts";
 import { PartsRoot } from "@clauseo/components/ui/root.tsx";
 import { frameBatch } from "../store/batch.ts";
 import { blockedSitesOf } from "../store/blocked-sites.ts";
@@ -51,30 +54,38 @@ import { LimitsContext, limitsStoreOf } from "../store/limits.ts";
 import { createViewStore } from "../store/store.ts";
 import type { HostTransport } from "../transport/host-transport.ts";
 import type { MatterId } from "../transport/protocol.ts";
-import type { Papers, PapersHost } from "./host-next.ts";
 import type { AgentName } from "@clauseo/components/lib/words-errors.ts";
 import { kindOf, knownPlan } from "./agent.ts";
 import { AgentPlanContext, useThreadAgentName } from "./thread/agent-plan.ts";
 import { Conversations } from "./conversations.ts";
 import { AllThreads } from "./all-threads.ts";
+import { useRailShown } from "@clauseo/components/clauseo/rail-shown.ts";
+import { UpdateNotice } from "./update-notice.tsx";
 import { handWaits } from "./triage.ts";
 import { LivePlan } from "./limits/live-plan.tsx";
 import { Matters, type MattersView } from "./matters.ts";
+import type { PapersHost } from "./host-next.ts";
 import { AnswerHost, quietly, type ListedPapers } from "./open.ts";
+import { usePaperLinks } from "./paper-links.ts";
+import { useMatterMoves, usePapers } from "./use-papers.ts";
 import { LocateFolderContext, type ActRefusals } from "./act-refusals.ts";
 import { LocateGate, MovedFolder } from "./moved.tsx";
 import { usePickWait } from "./picker-wait.ts";
+import { useDraftMenus } from "./config-menus.ts";
 import { FolderChooserHost } from "./folder-chooser-host.tsx";
 import { PickerLine } from "@clauseo/components/clauseo/picker-line.tsx";
 import { unprotectedFolder } from "./folder-support.ts";
 import { RoomRail } from "./rail.tsx";
 import { useSettingsKey } from "./settings-key.ts";
-import { useFindKey } from "./find-key.ts";
+import { focusFind, useFindKey } from "./find-key.ts";
+import { useRoomCommands } from "./room-commands.ts";
 import { ScratchLine } from "./scratch-line.tsx";
 import type { StandIns } from "./versions/stand-ins.ts";
 import { useVersions } from "./versions/use-versions.ts";
 import { useWordOpeners, WordOpenContext } from "./word/open-in-word.ts";
 import { PaperWall } from "./paper-wall.tsx";
+import { NewConversationLine } from "./new-conversation-line.tsx";
+import { hasLine, wallEmpty } from "./wall-away.ts";
 import { clockOf } from "./when.ts";
 import { useJumpFollows } from "./thread/jump-entry.ts";
 import type { Drafts } from "./thread/session.ts";
@@ -82,39 +93,28 @@ import { Work } from "./thread/work.tsx";
 import { tauriWindowControls, type WindowControls } from "../transport/window-controls.ts";
 import { useWindowFrame } from "../window/use-window-frame.ts";
 import { ToolLineContext } from "./tool-line-context.ts";
-import { hasSetup } from "./first-run/hold.ts";
+import { hasSetup, OfferSlot } from "./first-run/hold.ts";
 import { FirstRun } from "./first-run/first-run.tsx";
+import { useDeciding } from "./deciding.ts";
+import { FirstMark } from "./first-mark.tsx";
 import { ProtectionContext } from "./protection/context.ts";
 import { useRoomProtection } from "./protection/use-room-protection.tsx";
+import { useSacNote } from "./sac/use-sac-note.ts";
 
 /** H13's line atop a retried conversation, loaded only when one opens. */
 const RetriedLine = lazy(() =>
   late(import("./retried-line.tsx")).then((m) => ({ default: m.RetriedLine })),
 );
 
+/** The one-time Smart App Control note on Windows (sac/), loaded only when it shows. */
+const SacNote = lazy(() =>
+  late(import("./sac/sac-note.tsx")).then((m) => ({ default: m.SacNote })),
+);
+
 /** New matter's dialog, loaded the first time it opens, or before that when its button is hovered or focused. */
 const loadNewMatter = () => late(import("./new-matter.tsx"));
 const NewMatter = lazy(() => loadNewMatter().then((m) => ({ default: m.NewMatter })));
 const preloadNewMatter = () => void loadNewMatter();
-
-/** The matter's papers from H8, or null: before they arrive, without H8, or when the read fails. */
-function usePapers(next: PapersHost | null, matter: MatterId | null): ListedPapers {
-  const [listed, setListed] = useState<{ matter: MatterId; papers: Papers } | null>(null);
-  useEffect(() => {
-    if (next === null || matter === null) return;
-    let live = true;
-    next.listPapers(matter).then(
-      (papers) => {
-        if (live) setListed({ matter, papers });
-      },
-      (error: unknown) => console.warn(`list_papers failed: ${JSON.stringify(error)}`),
-    );
-    return () => {
-      live = false;
-    };
-  }, [next, matter]);
-  return listed !== null && listed.matter === matter ? listed : null;
-}
 
 /** The answers' MarkdownHost (open.ts): one object per transport and matter, so a new papers list or a streaming row
  * never makes a new one; the wall's papers reach it as they arrive. */
@@ -123,10 +123,11 @@ function useAnswerHost(
   matter: MatterId | null,
   listed: ListedPapers,
   refusals: ActRefusals,
+  papers: PapersHost | null,
 ): MarkdownHost {
   const host = useMemo(
-    () => new AnswerHost(transport, matter, refusals),
-    [transport, matter, refusals],
+    () => new AnswerHost(transport, matter, refusals, papers),
+    [transport, matter, refusals, papers],
   );
   useEffect(() => host.show(listed), [host, listed]);
   return host;
@@ -244,7 +245,7 @@ function RoomFrame({
     [talks.thread, talks.refused, talks.canRetry, conversations],
   );
   const retried = talks.retried;
-  // a new conversation's plan, offered where the host lists more than one, until its first question fixes it
+  // a new conversation's plan (both where the room sets one up), until its first question fixes it
   const choice = useMemo(
     () =>
       talks.drafting && talks.options.length > 1
@@ -258,15 +259,26 @@ function RoomFrame({
     [talks.drafting, talks.options, talks.agent, conversations],
   );
   const open = view.open;
+  const draftMenus = useDraftMenus(talks, conversations, open, w.lang);
   const setup = hasSetup(transport);
   const welcome =
     setup &&
     view.phase === "ready" &&
     open === null &&
     view.matters.every((m) => m.kind === "scratch");
-  const listed = usePapers(matters.next.papers, open?.matter ?? null);
+  // until the list says welcome or room, the room is unseen and the page's mark stands (deciding.ts)
+  const deciding = useDeciding(setup, view.phase);
+  const moved = useMatterMoves(store, matters.next.papers, open?.matter ?? null);
+  const listed = usePapers(matters.next.papers, matters.next.app, open?.matter ?? null, moved);
   const papers = listed?.papers ?? null;
-  const answers = useAnswerHost(transport, open?.matter ?? null, listed, matters.refusals);
+  const answers = useAnswerHost(
+    transport,
+    open?.matter ?? null,
+    listed,
+    matters.refusals,
+    matters.next.papers,
+  );
+  const paperLinks = usePaperLinks(open?.matter ?? null, listed, open?.folder_display || null);
   // the open matter's refused open (an answer's paper, Find's), on the composer's line; Locate
   // folder for its folder
   const { refusals } = matters;
@@ -275,13 +287,16 @@ function RoomFrame({
   const locate = open === null ? null : () => void matters.locate(open.matter, locating.track);
   const word = useWordOpeners(transport, listed, w.lang);
   const ownStandIns = useTransportStandIns(transport);
+  const sac = useSacNote(transport);
   const { platform } = useDisplay();
   // Versions, for the open matter: the timeline in the rail's place while open, the band over the work
   const versions = useVersions({
     transport,
     store,
     matter: open?.matter ?? null,
+    thread: open !== null && talks.matter === open.matter ? talks.thread : null,
     papers,
+    lister: matters.next.papers,
     platform,
     standIns: standIns ?? ownStandIns,
   });
@@ -296,8 +311,7 @@ function RoomFrame({
     madeFolded.current = railOpen;
     setRailOpen(false);
   };
-  // New conversation's key, while a matter's conversations are in and no dialog holds the keys; an input method's
-  // composing key is its own
+  // New conversation's key, while a matter's conversations are in and no dialog holds the keys
   const mac = platform === "mac";
   const endVersions = versions.close;
   const canStart =
@@ -309,24 +323,18 @@ function RoomFrame({
     // Versions' dialog, or a restore or undo still running, keeps the key: the dialog holds the focus, yet the key
     // still reaches the document, and ending Versions would drop the dialog or the act's result line
     versions.canLeave;
-  useEffect(() => {
-    if (!canStart) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.isComposing || e.keyCode === 229 || e.altKey || e.shiftKey) return;
-      // the letter the layout gives (Dvorak's N is N, its Ctrl+B is not); the key's place only where the layout gives no
-      // Latin letter (Devanagari, Cyrillic)
-      const key = e.key.toLowerCase();
-      if (/^[a-z]$/.test(key) ? key !== "n" : e.code !== "KeyN") return;
-      if (mac ? !e.metaKey || e.ctrlKey : !e.ctrlKey || e.metaKey) return;
-      e.preventDefault();
-      // a new conversation is now's: Versions ends first, through its controller, and the rail comes back
-      if (!endVersions()) return;
-      conversations.startNew();
-      setRailOpen(false);
-    };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [canStart, mac, conversations, endVersions]);
+  // a new conversation is now's: Versions ends first, through its controller, and the rail comes back
+  const startNew = () => {
+    if (!endVersions()) return;
+    conversations.startNew();
+    setRailOpen(false);
+  };
+  // New matter, from its key or the native menu, as the rail's button does, wherever the rail stands
+  const openNewMatter = () => {
+    madeFolded.current = false;
+    setNewMounted(true);
+    setNewOpen(true);
+  };
   // Settings, in a window of its own, from the rail's foot and on its key: only where the host has that window. A
   // refusal goes to the console, as an open or show does (open.ts)
   const [openSettings] = useState(() => {
@@ -345,6 +353,13 @@ function RoomFrame({
   const [findField] = useState(() => () => document.getElementById(room.id("find")));
   const [openRail] = useState(() => () => setRailOpen(true));
   useFindKey(findField, openRail, mac);
+  // ⌘N, ⇧⌘N and the native menu's New conversation, New matter and Find (room-commands.ts)
+  const newMatterNow = versions.rail == null && !newOpen ? openNewMatter : null;
+  const find = () => void focusFind(findField, openRail);
+  useRoomCommands(
+    { newConversation: canStart ? startNew : null, newMatter: newMatterNow, find },
+    mac,
+  );
   // the plan the open conversation uses, on the status line: its thread's, or the one a draft would run
   // nothing while the matter's list loads (its agent isn't known yet), or for an agent of no kind
   const openRow = talks.rows.find((r) => r.key === talks.open);
@@ -363,8 +378,8 @@ function RoomFrame({
   const plan = planOfOpen === null ? "" : th(w.lang, "Uses your {name} plan", { name: planOfOpen });
   // UC: the open matter's protection: the composer's line and hold, the toolbar's mark, and the note
   const shield = useRoomProtection(transport, open, kindOf(openAgent, talks.agents));
-  // the tool line's room: the plan's name its words use, Settings, and the transport whose Chrome download it offers
-  // (browser-install.ts, made by the line's chunk once it is in)
+  // the tool line's room: the plan's name its words use, Settings, and the transport whose browser policy re-read it
+  // offers (browser-policy.ts, made by the line's chunk once it is in)
   const toolRoom = useMemo(
     () => ({ plan: planOfOpen ?? "", openSettings, transport }),
     [planOfOpen, openSettings, transport],
@@ -380,10 +395,12 @@ function RoomFrame({
         ? tauriWindowControls()
         : null,
   );
-  // the caption buttons' commands, off the Mac: its own lights need none, and capabilities/frame.json grants none
-  // there, so asking whether the window is maximised would only be refused, on every resize
+  // the caption buttons' commands, off the Mac: frame.json grants the Mac none, so asking would be refused each resize
   const wired = useMemo(() => (platform === "mac" ? null : controls), [platform, controls]);
   const caption = useWindowFrame(wired);
+  // R23's update notice: at the rail's foot where the rail stands beside the work, else at the head of the wall
+  const atRail = useRailShown() && versions.rail == null;
+  const notice = <UpdateNotice transport={transport} threads={threads} />;
   const title =
     open !== null
       ? scratch
@@ -397,12 +414,16 @@ function RoomFrame({
     <div
       className="room-window"
       data-panel={versions.open ? "" : undefined}
+      data-deciding={deciding ? "" : undefined}
       ref={nodes.slot("window")}
     >
+      {/* index.html's own #first-mark style keeps it seen in the unseen window: visibility: visible, fixed */}
+      {deciding && <FirstMark />}
       <RoomToolbar
         chrome="own"
         caption={caption}
         nativeLights={controls !== null}
+        brand
         search={false}
         unprotected={unprotectedFolder(open?.folder_support) || shield.explain !== undefined}
         onUnprotected={shield.explain}
@@ -420,9 +441,6 @@ function RoomFrame({
         titleLang={open !== null && !scratch ? (langOfText(title) ?? "en") : w.lang}
         titleHint=""
         subtitle={scratch ? mt(w.lang, "Quick questions, kept like any matter") : ""}
-        nextDate=""
-        caseNo=""
-        court=""
         history={[]}
         canUndo={false}
         railOpen={railOpen}
@@ -446,11 +464,7 @@ function RoomFrame({
           talks={talks}
           threads={threads}
           open={railOpen}
-          onNewMatter={() => {
-            madeFolded.current = false;
-            setNewMounted(true);
-            setNewOpen(true);
-          }}
+          onNewMatter={openNewMatter}
           onNewMatterPreload={preloadNewMatter}
           onMoved={fold}
           onConversation={() => setRailOpen(false)}
@@ -458,6 +472,7 @@ function RoomFrame({
           onEscape={fold}
           newMatterRef={newMatter}
           onSettings={openSettings}
+          {...(atRail ? { notice } : {})}
         />
       )}
       {newMounted && (
@@ -501,6 +516,11 @@ function RoomFrame({
           ) : (
             <StoreContext value={store}>
               {versions.centre}
+              {sac.show && (
+                <Suspense fallback={null}>
+                  <SacNote transport={transport} onGotIt={sac.dismiss} />
+                </Suspense>
+              )}
               {scratch && <ScratchLine />}
               {retried !== null && (
                 <Suspense fallback={null}>
@@ -511,58 +531,52 @@ function RoomFrame({
                   />
                 </Suspense>
               )}
-              {/* a new conversation, before its first question: what it reads, once the papers are counted. A
-                matter with no conversation yet shows the same line: the design's FirstQuestion (empty.tsx:
-                "Clauseo has read this matter's {n} papers.", and that each answer cites its page) goes here once
-                stage D reads the papers ahead and answers carry citations; until then those are promises the room
-                can't keep */}
-              {talks.drafting && !scratch && papers !== null && papers.papers.length > 0 && (
-                <p
-                  className="mx-auto box-content max-w-measure px-thread-pad pt-s7 pb-s4 text-center text-reply text-primary"
-                  data-testid="new-conversation-line"
-                >
-                  <Say>
-                    {papers.papers.length === 1
-                      ? mt(w.lang, "A new conversation. It reads this matter's one paper.")
-                      : mt(w.lang, "A new conversation. It reads this matter's {n} papers.", {
-                          n: papers.papers.length,
-                        })}
-                  </Say>
-                </p>
+              {/* a new conversation, before its first question: what it reads, once the papers are counted (a matter
+                with no conversation yet too, or one with nothing to read: wall-away.ts), then the first read's offer
+                (D-015), with a paper to read. Not yet the design's FirstQuestion */}
+              {talks.drafting && !scratch && papers !== null && hasLine(papers) && (
+                <>
+                  <NewConversationLine papers={papers} />
+                  {papers.papers.length > 0 && <OfferSlot transport={transport} />}
+                </>
               )}
               {/* one thread's state per conversation: each starts its own; with no matter open, the composer waits */}
               <MarkdownHostContext value={answers}>
-                <WordOpenContext value={word}>
-                  <AgentPlanContext value={agentPlan}>
-                    <ToolLineContext value={toolRoom}>
-                      <ProtectionContext value={shield.composer}>
-                        <Work
-                          key={talks.open ?? open?.matter ?? "none"}
-                          transport={transport}
-                          matter={open}
-                          drafts={drafts}
-                          draftKey={talks.open}
-                          conversation={link}
-                          choice={choice}
-                          plan={plan}
-                          focus={talks.focus?.n ?? null}
-                          archived={talks.archived}
-                          onThread={matters.onThread}
-                          conversations={conversations}
-                          folderShut={folderShut}
-                          openRefused={opened?.act === "open" ? opened.code : null}
-                        />
-                      </ProtectionContext>
-                    </ToolLineContext>
-                  </AgentPlanContext>
-                </WordOpenContext>
+                <PaperLinksContext value={paperLinks}>
+                  <WordOpenContext value={word}>
+                    <AgentPlanContext value={agentPlan}>
+                      <ToolLineContext value={toolRoom}>
+                        <ProtectionContext value={shield.composer}>
+                          <Work
+                            key={talks.open ?? open?.matter ?? "none"}
+                            transport={transport}
+                            matter={open}
+                            drafts={drafts}
+                            draftKey={talks.open}
+                            conversation={link}
+                            choice={choice}
+                            menus={draftMenus}
+                            plan={plan}
+                            focus={talks.focus?.n ?? null}
+                            archived={talks.archived}
+                            onThread={matters.onThread}
+                            conversations={conversations}
+                            folderShut={folderShut}
+                            openRefused={opened?.act === "open" ? opened.code : null}
+                          />
+                        </ProtectionContext>
+                      </ToolLineContext>
+                    </AgentPlanContext>
+                  </WordOpenContext>
+                </PaperLinksContext>
               </MarkdownHostContext>
             </StoreContext>
           )}
         </main>
         <aside className="room-pane" ref={nodes.slot("pane")}>
+          {!atRail && notice}
           {papers !== null &&
-            (papers.papers.length === 0 ? (
+            (wallEmpty(papers) ? (
               <EmptyPapers body={false} />
             ) : (
               <PaperWall key={listed?.matter} papers={papers} word={word} />

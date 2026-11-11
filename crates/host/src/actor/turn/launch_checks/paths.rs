@@ -4,6 +4,7 @@
 //! nothing is made here.
 
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use clauseo_profile::SkillWrite;
 use clauseo_protocol::{AgentKind, ThreadId};
@@ -14,6 +15,9 @@ use super::egress::{EgressPrep, egress_prep};
 use super::packs::{PackPrep, pack_prep};
 use super::relay::{self, CaseLawPrep};
 use crate::actor::Actor;
+use crate::agent::loads::tls_roots;
+use crate::agent::shell_path::{self, SessionPath};
+use crate::clock::Clock;
 use crate::config::SessionKey;
 use crate::error::Error;
 
@@ -48,6 +52,44 @@ pub(super) struct Claims {
     pub(super) egress: EgressPrep,
     /// Where the run's parts go when it drops without a completed wait.
     pub(super) held: super::straggler::HeldRuns,
+    /// The session's `PATH` folders, found once the browser claims are known.
+    pub(super) path: PathPrep,
+}
+
+/// The parts of a session's `PATH` read on the actor; the launch-prep thread adds the shell
+/// browser's tools once it knows whether the session has them ([`Self::resolve`]).
+pub(super) struct PathPrep {
+    /// Stetdoc's folder (`HostConfig::with_agent_path_prepend`).
+    prepend: Option<PathBuf>,
+    /// The shell browser's tools folder (`ProfileHook::browser_tool`), when the profile has it.
+    browser_tool: Option<PathBuf>,
+    /// For a Claude session on macOS: the data folder the trust roots file goes in, and the
+    /// clock its `security` runs' time limit runs on.
+    tls_roots: Option<(PathBuf, Arc<dyn Clock>)>,
+    /// The profile hook's absolute folders (`agent::session_path`), and whether there are any.
+    hook: (Vec<PathBuf>, bool),
+    /// The agent's kind.
+    kind: Option<AgentKind>,
+}
+
+impl PathPrep {
+    /// The session's folders, in order: stetdoc's, then the tools for a session that has the
+    /// browser as a shell tool with its Chrome (so no `agent-browser` in the Python runtime's
+    /// folders shadows Clauseo's), then the hook's; and what its shells get
+    /// (`agent::shell_path::prepare`). On the launch-prep thread, after the claims.
+    pub(super) fn resolve(self, run: &RunFolders) -> SessionPath {
+        let shell = run.browser_shell && run.chrome.is_some();
+        let tools = self.browser_tool.filter(|_| shell);
+        let (hook, hook_path) = self.hook;
+        let dirs = self.prepend.into_iter().chain(tools).chain(hook).collect();
+        // The trust roots for a sandbox that will be on: a Claude session on macOS with its
+        // short temp folder (`agent::loads::tls_roots`).
+        let roots = self
+            .tls_roots
+            .filter(|_| run.claude_tmp.is_some())
+            .and_then(|(data, clock)| tls_roots::write_roots(&data, &tls_roots::security(clock)));
+        shell_path::prepare(dirs, hook_path, self.kind, &run.root, roots.as_deref())
+    }
 }
 
 /// Reads [`LaunchPaths`] for `thread`'s launch `id`, or the error of the thread or its matter.
@@ -63,7 +105,11 @@ pub(super) fn launch_paths(actor: &Actor, thread: ThreadId, id: u64) -> Result<L
         thread,
         launch: id,
     };
-    let run = RunFolders::new(locations.data_dir(), key);
+    let mut run = RunFolders::new(locations.data_dir(), key);
+    // Claude's sandbox's short temp folder (`agent::claude_tmp`), made by the launch prep.
+    if kind == Some(AgentKind::Claude) && !cfg!(windows) {
+        run.claude_tmp = crate::agent::claude_tmp::claude_tmp_dir();
+    }
     let skills = match kind {
         Some(_) => actor.profile.launch_writes(&row.agent),
         None => Vec::new(),
@@ -74,6 +120,14 @@ pub(super) fn launch_paths(actor: &Actor, thread: ThreadId, id: u64) -> Result<L
         browser,
         case_law: relay::case_law_prep(actor, &row.agent),
         held: actor.wiring.held.clone(),
+        path: PathPrep {
+            prepend: actor.wiring.path_prepend.clone(),
+            browser_tool: actor.profile.browser_tool(),
+            tls_roots: (kind == Some(AgentKind::Claude) && cfg!(target_os = "macos"))
+                .then(|| (locations.data_dir().to_owned(), Arc::clone(&actor.clock))),
+            hook: crate::agent::session_path(None, actor.profile.agent_path(&row.agent)),
+            kind,
+        },
     };
     let matter = actor.check_matter(row.matter)?.row.skill_packs.as_ref();
     let packs = pack_prep(actor, &row.agent, matter);

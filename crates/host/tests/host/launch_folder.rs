@@ -1,6 +1,7 @@
-//! A turn whose matter folder is gone, or is there without its marker: the turn fails with
-//! `matter.folder_missing` or `matter.folder_not_a_matter`, not `agent.launch_failed`, and no
-//! path is in the failure's detail.
+//! A turn whose matter folder is gone, is there without its marker, or is one the agent may not
+//! open: the turn fails with `matter.folder_missing`, `matter.folder_not_a_matter` or
+//! `matter.folder_permission`, not `agent.launch_failed` or `agent.protocol_error`, and no path is
+//! in the failure's detail.
 
 use clauseo_protocol::{ErrorCode, StopReason, StreamId, TurnFailed};
 
@@ -52,6 +53,44 @@ fn a_folder_without_its_marker_fails_the_turn_as_not_a_matter_with_no_path() {
     write::remove_file(&folder.join(".clauseo/matter.json"));
     let failed = failed_turn(&host, thread);
     assert_eq!(failed.code, ErrorCode::MatterFolderNotAMatter, "{failed:?}");
+    assert_no_path(&dir, &failed);
+    host.shutdown();
+}
+
+/// Claude's adapter answers `session/new` in a folder macOS keeps it out of with -32602 "`cwd`
+/// does not exist" (a real 0.89.1 answer; its path is the agent's, not the test's): the turn fails
+/// as `matter.folder_permission`, and neither that path nor the test's is in the detail.
+#[test]
+fn claudes_cwd_answer_fails_the_turn_as_folder_permission_with_no_path() {
+    let dir = Dir::new(
+        "launch_folder_cwd_refused",
+        &[(FAKE, Scenario::Local("claude-new-refused-cwd"))],
+    );
+    let host = dir.start(0);
+    let (_, thread, _) = matter_with_thread(&dir, &host, "m", &[("brief.txt", "x\n")], FAKE);
+    let failed = failed_turn(&host, thread);
+    assert_eq!(failed.code, ErrorCode::MatterFolderPermission, "{failed:?}");
+    assert_no_path(&dir, &failed);
+    let detail = failed.detail.unwrap_or_default();
+    assert!(!detail.contains("Quarrington"), "{detail}");
+    host.shutdown();
+}
+
+/// macOS: a matter folder the host may not open (here its mode is 000, which refuses the open as
+/// TCC does) fails the turn as `matter.folder_permission` before the agent starts, with no path.
+#[cfg(target_os = "macos")]
+#[test]
+fn a_folder_the_host_may_not_open_fails_the_turn_as_folder_permission() {
+    let dir = Dir::new(
+        "launch_folder_no_access",
+        &[(FAKE, Scenario::Bundled("prompt-stream"))],
+    );
+    let host = dir.start(0);
+    let (_, thread, folder) = matter_with_thread(&dir, &host, "m", &[("brief.txt", "x\n")], FAKE);
+    write::set_mode(&folder, 0o000);
+    let failed = failed_turn(&host, thread);
+    write::set_mode(&folder, 0o755);
+    assert_eq!(failed.code, ErrorCode::MatterFolderPermission, "{failed:?}");
     assert_no_path(&dir, &failed);
     host.shutdown();
 }

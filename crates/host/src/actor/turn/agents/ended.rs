@@ -89,6 +89,8 @@ pub(in super::super) fn hold_stop(actor: &mut Actor, thread: ThreadId) {
 pub(in super::super) fn on_ended(actor: &mut Actor, thread: ThreadId, ended: Ended) {
     // Updates the rate cap holds came before the exit, while the turn is still live.
     updates::flush_rate(actor, thread);
+    // Claude's held line goes back while the agent is still there to log it.
+    super::super::offline::turn_ending(actor, thread, None);
     let Some(agent) = state(actor, thread).and_then(|state| state.agent.take()) else {
         return;
     };
@@ -102,6 +104,8 @@ pub(in super::super) fn on_ended(actor: &mut Actor, thread: ThreadId, ended: End
         after_stop,
         stop_cause,
         denied_data_folder,
+        start_failure,
+        matter_spellings,
         ..
     } = *agent;
     let unresponsive = matches!(
@@ -111,6 +115,30 @@ pub(in super::super) fn on_ended(actor: &mut Actor, thread: ThreadId, ended: End
             ..
         }
     );
+    // Before its session was ready, after a failed launch or on its own: its start's stderr.
+    if session.is_none() {
+        match &ended {
+            Ended::Exited(report) => {
+                super::start_failure::log_start_tail(
+                    thread,
+                    start_failure,
+                    report,
+                    &matter_spellings,
+                );
+            }
+            Ended::Stopped { report, .. }
+                if start_failure.is_some() || stop_cause == StopCause::Closed =>
+            {
+                super::start_failure::log_start_tail(
+                    thread,
+                    start_failure,
+                    report,
+                    &matter_spellings,
+                );
+            }
+            Ended::Stopped { .. } => {}
+        }
+    }
     let reason = match ended {
         Ended::Exited(reason) => reason,
         Ended::Stopped { step, report } => {

@@ -19,10 +19,11 @@ const MIGRATIONS: &[&str] = &[
     include_str!("migrations/0003_thread_seen.sql"),
     include_str!("migrations/0004_thread_title_source.sql"),
     include_str!("migrations/0005_matter_skill_packs.sql"),
+    include_str!("migrations/0006_matter_agent_prefs.sql"),
 ];
 
 /// The schema version this build writes, the number of the last migration.
-pub const SCHEMA: u32 = 5;
+pub const SCHEMA: u32 = 6;
 
 /// Statements each connection keeps prepared; the writer uses about twenty.
 const STATEMENT_CACHE: usize = 32;

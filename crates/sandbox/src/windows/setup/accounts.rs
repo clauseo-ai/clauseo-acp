@@ -32,7 +32,9 @@ use windows::Win32::System::Registry::{
     HKEY, HKEY_LOCAL_MACHINE, KEY_SET_VALUE, KEY_WOW64_64KEY, REG_OPTION_NON_VOLATILE,
     RegCreateKeyExW, RegDeleteValueW, RegOpenKeyExW,
 };
-use windows::Win32::System::SystemInformation::{ComputerNameNetBIOS, GetComputerNameExW};
+use windows::Win32::System::SystemInformation::{
+    COMPUTER_NAME_FORMAT, ComputerNameDnsHostname, ComputerNameNetBIOS, GetComputerNameExW,
+};
 use windows::core::{HRESULT, HSTRING, PCWSTR, PWSTR};
 use zeroize::Zeroizing;
 
@@ -55,7 +57,7 @@ const NAME_MAX: usize = 20;
 
 /// Which kind of account a lookup wants.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum Kind {
+pub(crate) enum Kind {
     /// A user account (`SidTypeUser`).
     User,
     /// A local group (`SidTypeAlias`).
@@ -136,7 +138,7 @@ pub(super) fn name_of(sid: &Sid, kind: Kind) -> Result<Option<String>, MachineEr
 /// `UF_SCRIPT | UF_DONT_EXPIRE_PASSWD | UF_PASSWD_CANT_CHANGE`. An account by that name is
 /// `NERR_UserExists` (2224), never adopted (D-B5). Its SID; when the SID can't be read the
 /// account is deleted again, so a failure leaves none behind.
-pub(super) fn create_user(name: &str, password: &str) -> Result<Sid, MachineError> {
+pub(crate) fn create_user(name: &str, password: &str) -> Result<Sid, MachineError> {
     checked_name(name)?;
     checked_password(password)?;
     let mut name_units = wide(name);
@@ -193,7 +195,7 @@ pub(super) fn set_password(name: &str, password: &str) -> Result<(), MachineErro
 
 /// Deletes the local account `name` (`NetUserDel`) and its sign-in screen value. An account
 /// or value already gone is `Ok`.
-pub(super) fn delete_user(name: &str) -> Result<(), MachineError> {
+pub(crate) fn delete_user(name: &str) -> Result<(), MachineError> {
     checked_name(name)?;
     let account = HSTRING::from(name);
     // SAFETY: the name is a NUL-terminated HSTRING that lives for the call.
@@ -257,7 +259,7 @@ pub(super) fn group_members(name: &str) -> Result<usize, MachineError> {
 
 /// Puts the account `member` in the local group `group` (`NetLocalGroupAddMembers` level 0,
 /// by SID). A membership already there (`ERROR_MEMBER_IN_ALIAS`) is `Ok`.
-pub(super) fn add_member(group: &str, member: &Sid) -> Result<(), MachineError> {
+pub(crate) fn add_member(group: &str, member: &Sid) -> Result<(), MachineError> {
     checked_name(group)?;
     let sid = LocalSid::parse(member)?;
     let info = LOCALGROUP_MEMBERS_INFO_0 { lgrmi0_sid: sid.0 };
@@ -272,7 +274,7 @@ pub(super) fn add_member(group: &str, member: &Sid) -> Result<(), MachineError> 
 }
 
 /// The built-in `Users` group's name in this Windows' language.
-pub(super) fn users_group() -> Result<String, MachineError> {
+pub(crate) fn users_group() -> Result<String, MachineError> {
     let users = Sid::parse(USERS).map_err(|error| MachineError::Other(error.to_string()))?;
     lookup_sid(&users)?
         .map(|(name, _, _)| name)
@@ -343,7 +345,9 @@ pub(crate) fn hidden(name: &str) -> Result<bool, MachineError> {
 }
 
 /// The account `sid` names, as (name, domain, use); `None` when it names none.
-fn lookup_sid(sid: &Sid) -> Result<Option<(String, String, SID_NAME_USE)>, MachineError> {
+pub(super) fn lookup_sid(
+    sid: &Sid,
+) -> Result<Option<(String, String, SID_NAME_USE)>, MachineError> {
     let parsed = LocalSid::parse(sid)?;
     let (mut name_len, mut domain_len) = (0u32, 0u32);
     let mut used = SID_NAME_USE::default();
@@ -386,21 +390,35 @@ fn lookup_sid(sid: &Sid) -> Result<Option<(String, String, SID_NAME_USE)>, Machi
 
 /// This computer's `NetBIOS` name, the domain of its local accounts.
 fn computer_name() -> Result<String, MachineError> {
+    computer_name_as(ComputerNameNetBIOS)
+}
+
+/// This computer's names: its `NetBIOS` name and its DNS host name, those that can be read,
+/// each once. The sweep accepts either as a local account's prefix (`sweep::Names`).
+pub(super) fn computer_names() -> Vec<String> {
+    let mut names = Vec::new();
+    for format in [ComputerNameNetBIOS, ComputerNameDnsHostname] {
+        if let Ok(name) = computer_name_as(format)
+            && !name.is_empty()
+            && !names.iter().any(|known: &String| same_name(known, &name))
+        {
+            names.push(name);
+        }
+    }
+    names
+}
+
+/// This computer's name in `format`.
+fn computer_name_as(format: COMPUTER_NAME_FORMAT) -> Result<String, MachineError> {
     let mut size = 0u32;
     // SAFETY: no buffer asks only for the size, written to `size`; the expected failure is
     // ERROR_MORE_DATA.
-    drop(unsafe { GetComputerNameExW(ComputerNameNetBIOS, None, &raw mut size) });
+    drop(unsafe { GetComputerNameExW(format, None, &raw mut size) });
     let mut buffer = vec![0u16; usize::try_from(size).unwrap_or(0).max(16)];
     let mut len = u32::try_from(buffer.len()).unwrap_or(u32::MAX);
     // SAFETY: `buffer` is live and writable for `len` units.
-    unsafe {
-        GetComputerNameExW(
-            ComputerNameNetBIOS,
-            Some(PWSTR(buffer.as_mut_ptr())),
-            &raw mut len,
-        )
-    }
-    .map_err(|error| os("GetComputerNameExW", &error))?;
+    unsafe { GetComputerNameExW(format, Some(PWSTR(buffer.as_mut_ptr())), &raw mut len) }
+        .map_err(|error| os("GetComputerNameExW", &error))?;
     Ok(text_of(&buffer))
 }
 
@@ -458,7 +476,7 @@ fn text_of(units: &[u16]) -> String {
 }
 
 /// A `NET_API_STATUS` as `Ok`, or [`MachineError::Os`] naming `call`.
-fn net(call: &'static str, status: u32) -> Result<(), MachineError> {
+pub(super) fn net(call: &'static str, status: u32) -> Result<(), MachineError> {
     if status == NERR_Success {
         Ok(())
     } else {

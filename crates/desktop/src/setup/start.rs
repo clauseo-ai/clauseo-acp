@@ -60,6 +60,7 @@ use super::network::FIRST_ROUTE_WAIT;
 use super::network::{
     Follower, NetworkRoute, NetworkSlot, OS_FALLBACK, ProxyEnv, follow, os_lookup, resolve,
 };
+use super::python_path::{PythonPath, PythonSlot};
 use super::readers::LeaveReaders;
 use super::refresh::SettingsRead;
 use super::refusal::{follow_keys, lift_at_start, settle_after_load};
@@ -194,6 +195,8 @@ pub(crate) struct SetupStart {
     settings: SettingsRead,
     registry: Option<String>,
     bundle: Option<PathBuf>,
+    /// The hosts the Python runtime's download contacts (none while this build has none).
+    python_hosts: Vec<String>,
 }
 
 impl SetupStart {
@@ -202,6 +205,14 @@ impl SetupStart {
     /// keys have loaded.
     pub(crate) fn launch_refusals(&self) -> Vec<(AgentId, ErrorCode)> {
         refusals_at_start(self.known.keys(), &self.settings.blocked)
+    }
+
+    /// Each known agent's home, for its sign-in.
+    fn homes(&self) -> BTreeMap<AgentId, PathBuf> {
+        let homes = self.known.iter();
+        homes
+            .map(|(agent, info)| (agent.clone(), info.home.clone()))
+            .collect()
     }
 
     /// The agents an unreadable policy blocks, as read at start: the limits readers' first.
@@ -259,6 +270,7 @@ impl SetupStart {
             settings,
             registry: install.registry.clone(),
             bundle: install.bundle.clone(),
+            python_hosts: snapshot.python().hosts().to_vec(),
         }
     }
 }
@@ -304,6 +316,9 @@ pub(crate) struct HostSide {
     /// The launch hook's and the readers' network route, from [`SetupStart::network_at_start`]
     /// until the setup's network thread replaces it.
     pub(crate) network: NetworkSlot,
+    /// The launch hook's Python folders for Claude's and Codex's sessions: filled on this
+    /// thread at start and on each Python state (`setup/python_path.rs`).
+    pub(crate) python: PythonSlot,
     /// Reads the effective settings again, on each `SettingsChanged`.
     pub(crate) reread: Box<dyn Fn() -> Effective + Send>,
     /// The keys' notes; the host was given its retry hook.
@@ -352,12 +367,9 @@ fn run(read: SetupStart, parts: SetupParts, side: HostSide) {
     let clock: Arc<dyn Clock> = Arc::new(SystemClock);
     // The settings' and the environment's route; the OS's follows from the network thread.
     let at_start = read.network_at_start().agents_network();
+    let homes = read.homes();
     let mut config = AgentsConfig::new(read.data_dir, platform);
-    config.signin.homes = read
-        .known
-        .iter()
-        .map(|(agent, info)| (agent.clone(), info.home.clone()))
-        .collect();
+    config.signin.homes = homes;
     config.managed = read.managed;
     config.install.registry = read.registry;
     config.install.bundle = read.bundle;
@@ -367,6 +379,7 @@ fn run(read: SetupStart, parts: SetupParts, side: HostSide) {
     // Each install try asks for a fresh route first (one past 60 s is resolved again).
     config.install.refresh = Some(Arc::new(network.refresher()));
     config.clock = Arc::clone(&clock);
+    let python = python_path(&config, side.python);
     // The quit may close the cell first: then `Agents` never starts (`BackendStart::start_with`).
     let started = parts.start.start_with(|| {
         let (install, signin) = launchers(parts.home, |options| {
@@ -380,6 +393,7 @@ fn run(read: SetupStart, parts: SetupParts, side: HostSide) {
         let (agents, source) = super::fake_install::scripted(agents, source, Arc::clone(&clock));
         parts.events.publish(SetupEvent::SetupInfo {
             keys_available: keys.available(),
+            python: None,
         });
         let compose = Arc::new(Compose::new(Arc::clone(&parts.events), clock));
         let facts = &read.settings;
@@ -397,7 +411,9 @@ fn run(read: SetupStart, parts: SetupParts, side: HostSide) {
             read.settings,
             refused_at_start,
         )
-        .with_network(network);
+        .with_network(network)
+        .with_python_hosts(read.python_hosts)
+        .with_python_path(python);
         let backend = Arc::new(AgentsBackend {
             agents,
             keys: Arc::clone(&keys),
@@ -452,6 +468,21 @@ fn run(read: SetupStart, parts: SetupParts, side: HostSide) {
         futures::executor::block_on(lift_at_start(&backend, FIRST_ROUTE_WAIT));
     }
     futures::executor::block_on(backend.pump(source));
+}
+
+/// The sessions' Python folders in `slot`, filled now from `config` and later on each Python
+/// state: looked up on this thread (it reads the disk), never from the launch hook.
+fn python_path(config: &AgentsConfig, slot: PythonSlot) -> PythonPath {
+    let mut config = config.clone();
+    // Only the data folder, the snapshot and the platform are read; the route's refresher is
+    // not held.
+    config.install.refresh = None;
+    let python = PythonPath::new(
+        slot,
+        Arc::new(move || clauseo_agents::python_path_dirs(&config)),
+    );
+    python.fill();
+    python
 }
 
 /// Waits for the keys' first load, at most [`KEYS_LOAD_BOUND`], and logs how long it took and

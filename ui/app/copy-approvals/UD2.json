@@ -429,16 +429,6 @@
     "at": "2026-11-07",
     "by": "app track (provisional; Rohan batch review)"
   },
-  "UD2-45": {
-    "en": "Other ways in",
-    "hi": "जुड़ने के दूसरे तरीके",
-    "hi_status": "provisional",
-    "hi_at": "2026-11-06",
-    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "approved",
-    "at": "2026-11-06",
-    "by": "design"
-  },
   "UD2-46": {
     "en": "Change key",
     "hi": "key बदलें",
@@ -489,46 +479,6 @@
     "at": "2026-11-06",
     "by": "design"
   },
-  "UD2-51": {
-    "en": "Your firm's address",
-    "hi": "आपकी फ़र्म का पता",
-    "hi_status": "provisional",
-    "hi_at": "2026-11-06",
-    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "approved",
-    "at": "2026-11-06",
-    "by": "design"
-  },
-  "UD2-52": {
-    "en": "Your IT team gives you this. Questions go through your firm's own account, on its terms.",
-    "hi": "यह आपकी IT टीम देती है। प्रश्न आपकी फ़र्म के अपने खाते से, उसकी शर्तों पर जाते हैं।",
-    "hi_status": "provisional",
-    "hi_at": "2026-11-06",
-    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "approved",
-    "at": "2026-11-06",
-    "by": "design"
-  },
-  "UD2-53": {
-    "en": "Connect",
-    "hi": "कनेक्ट करें",
-    "hi_status": "provisional",
-    "hi_at": "2026-11-06",
-    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "approved",
-    "at": "2026-11-06",
-    "by": "design"
-  },
-  "UD2-54": {
-    "en": "Remove address",
-    "hi": "पता हटाएँ",
-    "hi_status": "provisional",
-    "hi_at": "2026-11-06",
-    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-06",
-    "by": "app track (provisional; Rohan batch review)"
-  },
   "UD2-55": {
     "en": "No {app} sign-in on this computer.",
     "hi": "इस कंप्यूटर पर {app} का कोई साइन इन नहीं।",
@@ -578,5 +528,55 @@
     "status": "provisional",
     "at": "2026-11-07",
     "by": "app track (provisional; Rohan batch review)"
+  },
+  "UD2-60": {
+    "en": "Uses your Claude plan.",
+    "hi": "आपके Claude प्लान का उपयोग करता है।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-10",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-10",
+    "by": "app track (provisional; orchestrator approved the words 2026-11-10, copy review pending)"
+  },
+  "UD2-61": {
+    "en": "Add Claude",
+    "hi": "Claude जोड़ें",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-10",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-10",
+    "by": "app track (provisional; orchestrator approved the words 2026-11-10, copy review pending)"
+  },
+  "UD2-62": {
+    "en": "Needs a download of about {mb} MB. Signing in happens in your browser.",
+    "hi": "लगभग {mb} MB का डाउनलोड ज़रूरी है। साइन इन आपके ब्राउज़र में होता है।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-10",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-10",
+    "by": "app track (provisional; orchestrator approved the words 2026-11-10, copy review pending)"
+  },
+  "UD2-63": {
+    "en": "A key from {name}, yours or your firm's. Billed to that key's account.",
+    "hi": "{name} की key, आपकी या आपकी फ़र्म की। शुल्क उसी key के खाते पर लगता है।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-10",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-10",
+    "by": "app track (provisional; orchestrator approved the reworded words 2026-11-10, copy review pending)"
+  },
+  "UD2-65": {
+    "en": "Read the papers",
+    "hi": "दस्तावेज़ पढ़ें",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-10",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-10",
+    "by": "app track (provisional; words pending orchestrator 2026-11-10)"
   }
 }

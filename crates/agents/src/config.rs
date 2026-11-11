@@ -40,6 +40,10 @@ pub struct AgentsConfig {
     /// the field does not exist.
     #[cfg(feature = "test-support")]
     pub ready_for_tests: BTreeMap<AgentId, crate::state::Installed>,
+    /// Tests only: Smart App Control's state and Codex's layouts, used instead of the registry
+    /// and the pinned layouts, on any OS (`sac`). Outside `test-support` the field does not exist.
+    #[cfg(feature = "test-support")]
+    pub sac_for_tests: Option<crate::sac::SacForTests>,
 }
 
 impl AgentsConfig {
@@ -58,6 +62,8 @@ impl AgentsConfig {
             clock: Arc::new(SystemClock),
             #[cfg(feature = "test-support")]
             ready_for_tests: BTreeMap::new(),
+            #[cfg(feature = "test-support")]
+            sac_for_tests: None,
         }
     }
 }
@@ -111,7 +117,24 @@ pub struct InstallConfig {
     /// registry. Outside `test-support` the field does not exist, so every download is https.
     #[cfg(feature = "test-support")]
     pub allow_http_for_tests: bool,
+    /// Tests only: called before each rename of an install into place; an error it returns is
+    /// taken as the rename's, judged as Windows would judge it (raw 5, 32 and 33 are a held
+    /// file), so a test on any OS stands in for an antivirus holding the fresh files.
+    #[cfg(feature = "test-support")]
+    pub rename_fault: Option<Arc<RenameFault>>,
+    /// Tests only: the free bytes the disk checks read instead of the data folder's, so a test
+    /// stands in for a disk too small for two installs. `None` from it: not readable.
+    #[cfg(feature = "test-support")]
+    pub free_bytes: Option<Arc<FreeBytes>>,
 }
+
+/// Tests only: [`InstallConfig::rename_fault`].
+#[cfg(feature = "test-support")]
+pub type RenameFault = dyn Fn() -> Option<std::io::Error> + Send + Sync;
+
+/// Tests only: [`InstallConfig::free_bytes`].
+#[cfg(feature = "test-support")]
+pub type FreeBytes = dyn Fn() -> Option<u64> + Send + Sync;
 
 impl InstallConfig {
     /// `agent`'s sign-in proxy: its [`InstallConfig::signin_proxy`] entry, else

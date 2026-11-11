@@ -101,11 +101,12 @@ entries page in on scroll through `HostQuery::PageEntries`, which returns `Query
 | Notice from the agent | `ViewEntry::Notice` with no `kind` | text, the agent's own words |
 | Host notice: the agent no longer remembers the earlier turns | `NoticeKind::ContextNotRestored` | none; the app's own words (the host's English `text` until it renders the kind) |
 | Host notice: papers an undo removed came back (a sync client put them back) and stay | `NoticeKind::FilesCameBack` | files (at most five, sorted by path), more (how many beyond them); the app's own words (the host's English `text`, a count only, until it renders the kind) |
+| Host notice: Claude's auto mode isn't available, so the session runs in `acceptEdits` | `NoticeKind::AutoModeUnavailable` | none; the app's own words (TN-10) |
 | Host notice of a kind from a newer Clauseo | `NoticeKind::Unknown` | text, the host's English fallback |
 | Host notice: a skill pack the launch left out | `NoticeKind::SkillPackNotLoaded`, with `pack` (the pack's id) and `reason` (`PackSkipReason`) | the pack and the reason in the app's own words (the host's English `text` until the app renders the kind) |
 | Compaction started and completed | `ViewEntry::Marker` with `MarkerKind::Compaction`: `CompactionStatus::Started`, `CompactionStatus::Completed` | summary (inline or blob) when completed |
 | Undo marker | `ViewEntry::Marker` with `MarkerKind::StepUndone` | the step's turn, the new checkpoint, restored paths, kept paths |
-| Restore marker | `ViewEntry::Marker` with `MarkerKind::VersionRestored` | the version restored from, the new checkpoint, scope |
+| Restore marker (the matter's stream, and the conversation it was asked from) | `ViewEntry::Marker` with `MarkerKind::VersionRestored` | the version restored from, the new checkpoint, scope, the restore it undid (`undoes`) |
 | Located folder marker ("Found at ...") | `ViewEntry::Marker` with `MarkerKind::MatterRelocated` | the folder's path |
 
 ## 3. Step card
@@ -125,6 +126,7 @@ reported it.
 | Agent refused | `StopReason::Refusal` | as above |
 | Cancelled (by the lawyer or by send now) | `StopReason::Cancelled` | as above; a queued prompt removed before it started gets no step card, only `UserMessageStatus::Removed` |
 | Ended by a refusal: the agent cancelled the turn right after the lawyer's Don't allow (Codex), with no Stop after it | `StopReason::NotAllowed` | as cancelled; the words say the lawyer did not allow it and the answer ended there |
+| Ended by Clauseo's own refusal: the agent cancelled the turn right after the host refused, unasked, a request into Clauseo's data folder (Codex), with no Stop after it | `StopReason::OutsideMatter` | as cancelled; the words say Clauseo stopped the answer because the agent, named as the error words name it (else "the AI"), tried to open files outside the matter, and the answer so far is kept |
 | Stopped at the usage limit | `StopReason::AtLimit` | as above; the `ViewEntry::LimitStop` card in section 8 |
 | Failed | `StopReason::Failed` | `failure`: the error code (section 9); the event's detail is never shown |
 | Stop reason from a newer Clauseo | `StopReason::Unknown` | as failed, without a code |
@@ -199,6 +201,8 @@ reported it.
 | Edit, remove or send now refused: the turn already started | `ErrorCode::ThreadTurnNotQueued` | the turn's current state |
 | Close to the limit: `used_percent` at 95% or more, or the window's `warning` | `AgentLimitsView.meter` (`LimitMeter`, tone `MeterTone::Near`) | tone (`MeterTone::Near` starts at 75%, not at this 95%), used percent, window label, reset time; section 8 |
 | Context usage | `HeaderEntry.usage` (`ContextUsage`) | context used, context size, cost |
+| Browser off: the firm's browser policy couldn't be read | `HeaderEntry.tools`, the browser `ToolAvailability::Unavailable` with `ToolsUnavailableReason::BrowserPolicyUnreadable` | the reason and its note (UET-46, UET-47), and Try again (UET-31): `HostCommand::RecheckBrowserPolicy`, from the main window only; it answers `Done` and logs nothing, and a second one while a read runs joins it; a read still running after 10 s ends as `Unreadable` |
+| The policy re-read, app-wide | `HostEvent::BrowserPolicy` with `BrowserPolicyState::Checking`, `Unreadable`, `Blocked` or `Clear`; the latest in every app catch-up | `Checking`: Try again waits (disabled, busy); `Unreadable`: as before; `Blocked`: the host re-words those headers to `BrowserBlockedByPolicy` (UET-44, UET-45, no button); `Clear`: "Ready for new conversations" with "The browser comes with your next conversation." (as after a Chrome download); a running session's header and tools stay as they are |
 | Cost line, pay as you go only | `AgentLimitsView.billing` is `BillingKind::PayAsYouGo`; `ContextUsage.cost` | amount and currency, an estimate; hidden for `BillingKind::Plan` |
 
 ## 6. Versions
@@ -218,6 +222,7 @@ its step card, and compare (below) lists the files between any two versions.
 | Edits made outside Clauseo | `CheckpointKind::OutsideEdits` | time, `files` (the lawyer, outside Clauseo) |
 | Undo of a step | `CheckpointKind::Undo` | time, thread and turn when recorded; restored and kept paths are on the undo marker (`MarkerKind::StepUndone`) |
 | Restore of a version | `CheckpointKind::Restore` | time; the version restored from and the scope are on the restore marker (`MarkerKind::VersionRestored`) |
+| Tracked changes of a Word file accepted or rejected | `CheckpointKind::Revisions` | time; the file is the one `HostCommand::DecideRevisions` named |
 | Checkpoint of a kind from a newer Clauseo | `CheckpointKind::Unknown` | time only |
 | Compare two versions | `HostQuery::CompareVersions` with `to` a checkpoint returns `QueryResult::FileChanges` | per file: change kind, sizes, may include the lawyer's edits |
 | Compare a version with the folder now | `HostQuery::CompareVersions` with `to` missing or `null` returns `QueryResult::FileChanges` | the same per file fields; nothing is stored |
@@ -228,6 +233,7 @@ its step card, and compare (below) lists the files between any two versions.
 | Restore refused: a turn runs in the matter | `ErrorCode::MatterTurnRunning` | retryable |
 | Folder missing (the locate-folder flow) | `ErrorCode::MatterFolderMissing` | the matter's name |
 | Folder there without its `.clauseo/matter.json`, or with another matter's (the locate-folder flow) | `ErrorCode::MatterFolderNotAMatter` | the matter's name |
+| The privacy settings keep Clauseo out of the folder (macOS Files and Folders; the app's Privacy settings button) | `ErrorCode::MatterFolderPermission` | the turn is refused before the agent starts, or as its session opens |
 | Checkpoint failed | `ErrorCode::MatterCheckpointFailed` | the turn is refused before it starts |
 
 ## 7. Matter
@@ -242,7 +248,7 @@ its step card, and compare (below) lists the files between any two versions.
 | Picked folder's support for Codex's sandbox (Windows), before the matter exists | `HostQuery::FolderSupport { source }` (the `CreateMatter` source) returns `QueryResult::FolderSupport`; `check_failed` when the check doesn't answer in 5 s; an existing folder create refuses gets create's `matter.folder_*` code | `support`: `network`, `no_permissions`, `cant_change_permissions`, `check_failed`, or missing |
 | Folder refused, one code per reason (`matter.folder_refused` before decision record 0022) | `ErrorCode::MatterFolderIsDrive`, `ErrorCode::MatterFolderIsHome`, `ErrorCode::MatterFolderIsSystem`, `ErrorCode::MatterFolderUnreadable`, `ErrorCode::MatterFolderInMattersRoot` | choose another folder |
 | Folder is already a matter's, or nested with one | `ErrorCode::MatterFolderIsMatter` | `HostError.matter`, the matter to name and offer to open |
-| Matter list | `HostQuery::ListMatters` returns `QueryResult::Matters` | name, kind, client, next date, pinned, last opened, last activity, folder display, status and protection per matter |
+| Matter list | `HostQuery::ListMatters` returns `QueryResult::Matters` | name, kind, client, pinned, last opened, last activity, folder display, status and protection per matter (the store's `next_date` stays in the summary, unshown: the rail orders by need, then activity) |
 | Matter protected (0051) | `Protection::Protected` with `ProtectionTier::A` or `ProtectionTier::B` | `tier`; `MatterSummary::protection`, `HostEvent::ProtectionChanged` |
 | Matter Not protected (0051) | `Protection::NotProtected` (tier `ProtectionTier::C`) | `cause`, below; missing `protection` means not known yet |
 | Not protected: no sandbox on this computer | `NotProtectedCause::Unsupported` | Linux, Windows on ARM, a build without it |
@@ -330,6 +336,7 @@ retried as they are; the others need the lawyer or a fix first. Meanings are in 
 | Transport | `ErrorCode::TransportUnauthorized`, `ErrorCode::TransportTooLarge` | no |
 | Settings | `ErrorCode::SettingsLocked`, `ErrorCode::SettingsRefused`, `ErrorCode::SettingsKeyStored` | no |
 | Agent install (0048) | `ErrorCode::AgentInstallOffline`, `ErrorCode::AgentInstallDiskFull`, `ErrorCode::AgentInstallFailed` | yes |
+| Agent install: every file downloaded, the set-up failed (install resume PR) | `ErrorCode::AgentInstallSetupFailed` | yes |
 | Agent install (0048) | `ErrorCode::AgentInstallBlocked` | no |
 | Sign-in (0048) | `ErrorCode::SigninLinkExpired`, `ErrorCode::SigninPortBusy`, `ErrorCode::SigninFailed` | yes |
 | Sign-in (0048) | `ErrorCode::SigninCancelled`, `ErrorCode::SigninNoPlan`, `ErrorCode::SigninDeviceCodeOff`, `ErrorCode::SigninPolicyUnreadable`, `ErrorCode::SigninLoginShared`, `ErrorCode::SigninFirmManaged`, `ErrorCode::SigninKeyInUse`, `ErrorCode::SigninEndpointInUse` | no |
@@ -342,11 +349,18 @@ retried as they are; the others need the lawyer or a fix first. Meanings are in 
 | Sandbox set-up refused or failed (0051) | `ErrorCode::SandboxSetupRefused`, `ErrorCode::SandboxSetupFailed` | yes |
 | Sandbox set-up needed, or required by the firm and not available (0051) | `ErrorCode::SandboxSetupRequired`, `ErrorCode::SandboxRequired` | no |
 | The matter's folder is there without its Clauseo file (the locate-folder flow) | `ErrorCode::MatterFolderNotAMatter` | no |
+| The computer's privacy settings keep Clauseo out of the matter's folder (macOS Files and Folders) | `ErrorCode::MatterFolderPermission` | no |
 | Sandbox blocked by a Windows setting or security tool, such as its set-up program missing (S15) | `ErrorCode::SandboxBlocked` | no |
 | "Allow this site" is turned off, by the firm's policy or in settings (0053) | `ErrorCode::BlocklistOverrideOff` | no |
 | "Allow this site" from a notice the host no longer keeps (0053) | `ErrorCode::BlocklistNoticeExpired` | no |
 | "Allow this site" that lasts until Clauseo closes, because Clauseo couldn't save it (0053) | `ErrorCode::BlocklistAllowNotSaved` | no |
 | Removing an allowed site that is blocked again until Clauseo closes, because Clauseo couldn't save that (0053) | `ErrorCode::BlocklistRevokeNotSaved` | no |
+| Safe workspace still cleaning up after an earlier session, its stop or sweep not done after 15 s (S15) | `ErrorCode::SandboxCleaningUp` | yes |
+| Word blackline: no Word tool, or not a Word document | `ErrorCode::BlacklineNoWordTool`, `ErrorCode::BlacklineNotWord` | no |
+| Word blackline failed (the compare or its view) | `ErrorCode::BlacklineFailed` | yes |
+| Tracked changes: no stetdoc, a file that is not a Word document, or a list that went stale | `ErrorCode::WordStetdocMissing`, `ErrorCode::WordNotDocx`, `ErrorCode::WordRevisionsStale` | no |
+| Tracked changes: stetdoc failed or timed out | `ErrorCode::WordEditFailed` | yes |
+| Offline mid-answer (D-050): the agent couldn't reach its service, or the window said offline (`HostCommand::SetNetwork`) and the agent then sent nothing for 30 s; the answer so far stays, the stop line says so and offers Try again | `ErrorCode::AgentOffline` | yes |
 | A code from a newer Clauseo | `ErrorCode::Unknown` | no |
 
 A failed turn shows its code from `turn_failed` on the step card (section 3).

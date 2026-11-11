@@ -1,5 +1,5 @@
 //! Automatic leaves on the recording fakes, the waits driven by hand (`timing.rs`): S18 ending a
-//! reuse by itself (`ReusedChanged`), a split whose stop times out (the hold kept, `Switching`
+//! reuse by itself (`ReusedFailed`), a split whose stop times out (the hold kept, `Switching`
 //! shown across two tries again, then, with nothing usable, the try that finishes keeping it and
 //! showing signed out; `after.rs` has the restarts), `stuck` at
 //! 2 minutes, another agent unaffected, a new sign-in ending the tries, and a lawyer's leave told
@@ -81,7 +81,7 @@ fn reused_changed_rewrites_the_entry_at_once_then_an_automatic_leave_stops_the_a
     let rig = rig(true);
     reuse(&rig, &claude());
     let changed = SigninState::SignedOut {
-        found: Some(Found::ReusedChanged),
+        found: Some(Found::ReusedFailed),
     };
     lock(&rig.agents.answers).insert("stop_using_login", changed.clone());
     rig.pumped_with_leaves(async {
@@ -117,7 +117,7 @@ fn reused_changed_rewrites_the_entry_at_once_then_an_automatic_leave_stops_the_a
     }
     assert_eq!(count(&rig, &HostCall::RestartAgents(claude())), 0, "held");
     assert!(!rig.backend.wiring.reused.get(&claude()));
-    let found = Some(clauseo_protocol::FoundLogin::ReusedChanged);
+    let found = Some(clauseo_protocol::FoundLogin::ReusedFailed);
     assert_eq!(shown(&rig, &claude()), Some(SignIn::SignedOut { found }));
 }
 

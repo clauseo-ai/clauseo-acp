@@ -2,8 +2,8 @@
 //! part). Claude gets the text through `_meta.systemPrompt.append`, Codex through
 //! `developer_instructions`.
 
-/// R21's tools part. It holds `{author}`, which [`Instructions::compose`] fills, and
-/// `{work_folder}`, which the host fills per session.
+/// R21's tools part. It holds `{author}` and `{stetdoc}`, which [`Instructions::compose_for`]
+/// fills, and `{work_folder}` and `{browser}`, which the host fills per session.
 pub const TOOLS: &str = include_str!("../assets/instructions/tools.txt");
 
 /// R22's legal part, appended after the tools part. It holds `{work_folder}` and
@@ -30,6 +30,124 @@ pub fn connectors_part(with_case_law: bool) -> &'static str {
     static WITHOUT: std::sync::LazyLock<String> =
         std::sync::LazyLock::new(|| format!("\n\n{}", CONNECTORS_NONE.trim()));
     if with_case_law { &WITH } else { &WITHOUT }
+}
+
+/// The browser part (the `agent-browser` shell command): what a session whose launch put the
+/// command on the agent's `PATH` is told. The host puts it in place of `{browser}` through
+/// [`browser_part`].
+pub const BROWSER: &str = include_str!("../assets/instructions/browser.txt");
+
+/// What a session without the browser is told when the lawyer or the firm turned it off, the
+/// firm's browser policy left it out, or it is a Claude session on macOS or Linux, where Claude
+/// has no browser for launch (`servers::no_browser`): Claude then reads pages with its web fetch
+/// tool and `curl`.
+pub const BROWSER_OFF: &str = include_str!("../assets/instructions/browser-off.txt");
+
+/// What a session without the browser is told when no supported browser is installed: one plain
+/// line the agent can pass on to the lawyer.
+pub const BROWSER_NONE: &str = include_str!("../assets/instructions/browser-none.txt");
+
+/// What a Codex session with the browser gets instead of [`BROWSER`]: Codex has no shell browser
+/// (its sandbox blocks it, approved or not), only the `browser` MCP entry's tools
+/// (`servers::browser_mcp`), so the part names those tools and never `agent-browser`.
+pub const BROWSER_CODEX: &str = include_str!("../assets/instructions/browser-codex.txt");
+
+/// The line a Codex session on macOS gets after the instructions (D-045): Codex runs an approved
+/// ("escalated") command under Seatbelt too, whose base policy blocks the mach-lookup of system
+/// services and Apple events (codex 0.162.1 `seatbelt_base_policy.sbpl`). Measured on a Mac:
+/// `mdls` is denied (`com.apple.metadata.mds`), `mdfind` finds nothing, `open -R` opens no
+/// window, `qlmanage` fails to start, and `osascript` runs but cannot drive another app, while
+/// `textutil` and `sips` work. Claude gets its own line ([`CLAUDE_SHELL_MACOS`]).
+pub const CODEX_SHELL_MACOS: &str = include_str!("../assets/instructions/codex-shell-macos.txt");
+
+/// The line a Codex session gets after the instructions on macOS (`macos`), and none elsewhere:
+/// the commands it names are macOS's own.
+pub fn codex_shell(macos: bool) -> Option<&'static str> {
+    macos.then(|| CODEX_SHELL_MACOS.trim())
+}
+
+/// The line a Claude session on macOS gets after the instructions: Claude Code's own sandbox
+/// (the host's `agent::loads::sandbox`) runs every command under Seatbelt with Apple events off
+/// and no way out (`allowUnsandboxedCommands: false`), and its Mach list has no Spotlight or
+/// Quick Look service, so `mdls`, `mdfind`, `open`, `qlmanage` and `osascript` driving
+/// another app fail as they do for Codex ([`CODEX_SHELL_MACOS`]).
+pub const CLAUDE_SHELL_MACOS: &str = include_str!("../assets/instructions/claude-shell-macos.txt");
+
+/// The line a Claude session gets after the instructions on macOS (`macos`), and none
+/// elsewhere: Windows has no sandbox for Claude, and the commands it names are macOS's own.
+pub fn claude_shell(macos: bool) -> Option<&'static str> {
+    macos.then(|| CLAUDE_SHELL_MACOS.trim())
+}
+
+/// What a Codex session on Windows is told, which has no browser for this agent there
+/// (`servers::no_browser`): one plain line pointing the lawyer to a Claude conversation, which
+/// has its shell browser on Windows. Never a macOS or Linux session's, where Claude has none.
+pub const BROWSER_CLAUDE_ONLY: &str =
+    include_str!("../assets/instructions/browser-claude-only.txt");
+
+/// Which browser part a session gets in place of `{browser}`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BrowserPart {
+    /// The session has the browser: Claude the `agent-browser` command ([`BROWSER`]), Codex the
+    /// `browser` MCP entry's tools ([`BROWSER_CODEX`]).
+    On,
+    /// Turned off, left out by policy, or Claude on macOS or Linux (`servers::no_browser`):
+    /// [`BROWSER_OFF`].
+    Off,
+    /// No supported browser on this computer: [`BROWSER_NONE`].
+    NotInstalled,
+    /// No browser for this agent on this computer (Codex on Windows, `servers::no_browser`):
+    /// [`BROWSER_CLAUDE_ONLY`].
+    ClaudeOnly,
+}
+
+/// What the host fills `{browser}` with: a space and the part `part` names. Only this part names
+/// `agent-browser`, so a session without the browser never reads the command's name.
+pub fn browser_part(part: BrowserPart) -> &'static str {
+    static ON: std::sync::LazyLock<String> =
+        std::sync::LazyLock::new(|| format!(" {}", BROWSER.trim()));
+    static OFF: std::sync::LazyLock<String> =
+        std::sync::LazyLock::new(|| format!(" {}", BROWSER_OFF.trim()));
+    static NONE: std::sync::LazyLock<String> =
+        std::sync::LazyLock::new(|| format!(" {}", BROWSER_NONE.trim()));
+    static CLAUDE_ONLY: std::sync::LazyLock<String> =
+        std::sync::LazyLock::new(|| format!(" {}", BROWSER_CLAUDE_ONLY.trim()));
+    match part {
+        BrowserPart::On => &ON,
+        BrowserPart::Off => &OFF,
+        BrowserPart::NotInstalled => &NONE,
+        BrowserPart::ClaudeOnly => &CLAUDE_ONLY,
+    }
+}
+
+/// [`browser_part`], with [`BROWSER_CODEX`] in place of the shell rules for a session that has
+/// the browser through the `browser` MCP entry (`mcp`: Codex's, `servers::browser_mcp`). A
+/// session with the shell tool (Claude's) gets the shell rules, never the entry's line.
+pub fn browser_part_for(part: BrowserPart, mcp: bool) -> &'static str {
+    static ON_CODEX: std::sync::LazyLock<String> =
+        std::sync::LazyLock::new(|| format!(" {}", BROWSER_CODEX.trim()));
+    if mcp && part == BrowserPart::On {
+        &ON_CODEX
+    } else {
+        browser_part(part)
+    }
+}
+
+/// The stetdoc line: what the agents are told when the app found a stetdoc whose `--version`
+/// works, whether or not its skill loaded. The profile puts it in place of `{stetdoc}` through
+/// [`stetdoc_part`].
+pub const STETDOC_CLI: &str = include_str!("../assets/instructions/stetdoc.txt");
+
+/// The token the profile fills with [`stetdoc_part`]. It is not the host's: the profile knows
+/// whether stetdoc works when it is built.
+pub const STETDOC: &str = "{stetdoc}";
+
+/// What the profile fills `{stetdoc}` with: a space and [`STETDOC_CLI`] when the app found a
+/// working stetdoc (`found`), else nothing.
+pub fn stetdoc_part(found: bool) -> &'static str {
+    static ON: std::sync::LazyLock<String> =
+        std::sync::LazyLock::new(|| format!(" {}", STETDOC_CLI.trim()));
+    if found { &ON } else { "" }
 }
 
 /// The token the profile fills with the author's name.
@@ -74,10 +192,16 @@ impl Instructions {
         self
     }
 
-    /// The parts, each trimmed, joined by one blank line (`{connectors}` by none), with
-    /// `{author}` filled by [`author_name`]`(author)`. `{work_folder}`, `{matter_notes}` and
-    /// `{connectors}` stay for the host.
+    /// [`Self::compose_for`] with no working stetdoc found: `{stetdoc}` filled with nothing.
     pub fn compose(&self, author: &str) -> String {
+        self.compose_for(author, false)
+    }
+
+    /// The parts, each trimmed, joined by one blank line (`{connectors}` by none), with
+    /// `{author}` filled by [`author_name`]`(author)` and `{stetdoc}` by
+    /// [`stetdoc_part`]`(stetdoc)`. `{work_folder}`, `{matter_notes}` and `{connectors}` stay
+    /// for the host.
+    pub fn compose_for(&self, author: &str, stetdoc: bool) -> String {
         let mut text = String::new();
         for part in &self.parts {
             let part = part.trim();
@@ -87,7 +211,8 @@ impl Instructions {
             text.push_str(part);
         }
         let author = author_name(author);
-        crate::placeholders::fill(&text, &[AUTHOR], &[(AUTHOR, &author)]).unwrap_or(text)
+        let values = [(AUTHOR, author.as_str()), (STETDOC, stetdoc_part(stetdoc))];
+        crate::placeholders::fill(&text, &[AUTHOR, STETDOC], &values).unwrap_or(text)
     }
 }
 

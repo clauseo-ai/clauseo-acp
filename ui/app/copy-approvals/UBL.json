@@ -286,25 +286,25 @@
     "note": "The unsafe-site list's notice, its Allow confirm, and Settings' allowed sites (ADR 0053)"
   },
   "UBL-28": {
-    "en": "Your firm has turned off allowing sites on Clauseo's unsafe-site list, so this site stays blocked. Ask your IT team if you need it.",
-    "hi": "आपकी फ़र्म ने Clauseo की असुरक्षित वेबसाइटों की सूची में से किसी वेबसाइट को अनुमति देना बंद कर रखा है, इसलिए यह वेबसाइट अवरुद्ध रहेगी। अगर आपको इसकी ज़रूरत है, तो अपनी IT टीम से पूछें।",
+    "en": "Your firm has turned off allowing sites on Clauseo's unsafe-site list, so this site stays blocked.",
+    "hi": "आपकी फ़र्म ने Clauseo की असुरक्षित वेबसाइटों की सूची में से किसी वेबसाइट को अनुमति देना बंद कर रखा है, इसलिए यह वेबसाइट अवरुद्ध रहेगी।",
     "hi_status": "provisional",
     "hi_at": "2026-11-08",
-    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "hi_by": "app track (no IT endings)",
     "status": "provisional",
     "at": "2026-11-08",
-    "by": "app track (provisional; Rohan batch review)",
+    "by": "app track (no IT endings)",
     "note": "The notice where the firm forbids overriding the unsafe-site list: U3-err-blocklist.override_off's words (ADR 0053)"
   },
   "UBL-29": {
-    "en": "Your firm has turned off allowing sites on Clauseo's unsafe-site list, so this site stays blocked. Ask your IT team if you need it.",
-    "hi": "आपकी फ़र्म ने Clauseo की असुरक्षित वेबसाइटों की सूची में से किसी वेबसाइट को अनुमति देना बंद कर रखा है, इसलिए यह वेबसाइट अवरुद्ध रहेगी। अगर आपको इसकी ज़रूरत है, तो अपनी IT टीम से पूछें।",
+    "en": "Your firm has turned off allowing sites on Clauseo's unsafe-site list, so this site stays blocked.",
+    "hi": "आपकी फ़र्म ने Clauseo की असुरक्षित वेबसाइटों की सूची में से किसी वेबसाइट को अनुमति देना बंद कर रखा है, इसलिए यह वेबसाइट अवरुद्ध रहेगी।",
     "hi_status": "provisional",
     "hi_at": "2026-11-08",
-    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "hi_by": "app track (no IT endings)",
     "status": "provisional",
     "at": "2026-11-08",
-    "by": "app track (provisional; Rohan batch review)",
+    "by": "app track (no IT endings)",
     "note": "The notice after an allow refused with blocklist.override_off: U3-err-blocklist.override_off's words (ADR 0053)"
   },
   "UBL-30": {

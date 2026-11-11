@@ -124,6 +124,24 @@ fn the_scan_keeps_the_current_install_and_removes_the_rest() {
 }
 
 #[test]
+fn the_scan_keeps_a_set_up_marked_for_this_hash_and_removes_another_s() {
+    let data = TestDir::new("scan-kept");
+    let marker = |hash: &str| {
+        format!(r#"{{"agent":"claude-acp","version":"1","lock_hash":"{hash}","manifest":"x"}}"#)
+    };
+    let kept = folder(&data, &format!(".tmp-{HASH}-2"), None);
+    write::write_atomic(&kept.join(crate::install::MARKER), marker(HASH).as_bytes()).unwrap();
+    let other = "aaaaaaaaaaaaaaaa";
+    let old = folder(&data, &format!(".tmp-{other}-1"), None);
+    write::write_atomic(&old.join(crate::install::MARKER), marker(other).as_bytes()).unwrap();
+    let unmarked = folder(&data, &format!(".tmp-{HASH}-1"), None);
+    let found = scan(&data.0, &agent(), HASH, linux()).unwrap();
+    let mut want = vec![old, unmarked];
+    want.sort();
+    assert_eq!(found.remove, want, "the marked tree for this hash is kept");
+}
+
+#[test]
 fn the_current_hash_without_a_valid_receipt_is_removed() {
     let data = TestDir::new("scan-incomplete");
     let incomplete = folder(&data, HASH, None);

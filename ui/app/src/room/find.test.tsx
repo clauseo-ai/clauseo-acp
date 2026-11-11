@@ -209,6 +209,15 @@ test("the found words are spans in primary at chip weight; markup inside a snipp
   ]);
   expect(results()?.textContent).toContain("Conversations");
   expect(row?.textContent).toContain("Sharma v. State of Delhi, today");
+  // the row wraps its words inside the rail
+  expect(row?.classList.contains("room-find-row")).toBe(true);
+});
+
+test("the field asks for no autocorrect, spell check or capitals: typed words are search words", async () => {
+  await room(() => page([]));
+  expect(field()?.getAttribute("autocorrect")).toBe("off");
+  expect(field()?.getAttribute("autocapitalize")).toBe("off");
+  expect(field()?.getAttribute("spellcheck")).toBe("false");
 });
 
 test("RO-27 shows while the index builds, and clears on a page without it", async () => {
@@ -295,11 +304,21 @@ test("a conversation's day reads as Recent's: today, else its weekday and date, 
   ]);
 });
 
-test("nothing found says so, with the scope behind the info icon", async () => {
+test("nothing found says so, and what Find covers in words, with no lone info icon (D-071)", async () => {
   await room(() => page([]));
   await find("zzz");
-  expect(results()?.textContent).toContain('Nothing found for "zzz".');
-  const scope = results()?.querySelector(".room-find-scope");
+  const none = results()?.querySelector(".room-find-none");
+  expect([...(none?.querySelectorAll("p") ?? [])].map((p) => p.textContent)).toEqual([
+    'Nothing found for "zzz".',
+    "Searches titles, paper names and conversations.",
+  ]);
+  expect(results()?.querySelector(".room-find-scope")).toBeNull();
+});
+
+test("with results, what Find covers stays behind the info icon at their foot", async () => {
+  await room(() => page([said()]));
+  await find("s");
+  const scope = results()?.querySelector(".room-find-foot .room-find-scope");
   expect(scope?.getAttribute("aria-label")).toBe("Searches titles, paper names and conversations.");
 });
 

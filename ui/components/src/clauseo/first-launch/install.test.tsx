@@ -3,9 +3,10 @@
 // live words hear the state alone, so the download's words, which change every 250 ms, are never
 // what the region says.
 import { isValidElement, type ReactElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 import { expect, test } from "vitest";
 import { loadHindi } from "../../lib/words-core.ts";
-import { installLine, type InstallActs, type InstallView } from "./install.tsx";
+import { checkingLine, installLine, type InstallActs, type InstallView } from "./install.tsx";
 
 const ACTS: InstallActs = {
   retry: () => {},
@@ -88,4 +89,69 @@ test("install lines: missing offers Sign in only where the caller gives the pres
   expect(button.props.children).toBe("Sign in");
   button.props.onClick();
   expect(pressed).toBe(1);
+});
+
+test("install lines: a failed set-up says the download worked and has its own code; a failed download keeps its words", async () => {
+  await loadHindi();
+  const log = ["result: setup_failed after 3 tries"];
+  const setup = installLine("en", { kind: "failed", log, setup: true }, "Claude", ACTS);
+  if (setup === null || setup.kind !== "wait") throw new Error("no wait line");
+  expect(setup.words).toBe("Claude was downloaded, but setting it up didn't finish. Try again.");
+  expect(setup.code).toBe("agent.install_setup_failed");
+  expect(linesOf("hi", { kind: "failed", log, setup: true }).words).toBe(
+    "Claude डाउनलोड हो गया, लेकिन उसका सेटअप पूरा नहीं हुआ। फिर से प्रयास करें।",
+  );
+  const codex = installLine("en", { kind: "failed", log, setup: true }, "Codex", ACTS);
+  if (codex === null || codex.kind !== "wait") throw new Error("no wait line");
+  expect(codex.words).toMatch(/^Codex was downloaded, but setting it up didn't finish/);
+  const download = installLine("en", { kind: "failed", log }, "Claude", ACTS);
+  if (download === null || download.kind !== "wait") throw new Error("no wait line");
+  expect(download.words).toBe("Claude couldn't be downloaded.");
+  expect(download.code).toBe("agent.install_failed");
+});
+
+test("install lines: a failed set-up offers Try again and Details, not the system proxy; a failed download keeps it", () => {
+  const actions = (setup: boolean) => {
+    const line = installLine("en", { kind: "failed", log: ["x"], setup }, "Claude", ACTS);
+    if (line === null || line.kind !== "wait") throw new Error("no wait line");
+    return renderToStaticMarkup(<>{line.actions}</>);
+  };
+  const setup = actions(true);
+  expect(setup).toContain("Try again");
+  expect(setup).toContain("Details");
+  expect(setup).not.toContain("Use the system proxy");
+  // the proxy button alone goes: the card's other buttons stay (it had no Ask-IT button), and the
+  // words end on Try again, never on asking IT
+  expect(setup.match(/<button/g)?.length).toBe(2);
+  const words = installLine("en", { kind: "failed", log: ["x"], setup: true }, "Claude", ACTS);
+  if (words === null || words.kind !== "wait") throw new Error("no wait line");
+  expect(words.words).toMatch(/Try again\.$/);
+  expect(words.words).not.toMatch(/\bIT\b/);
+  const download = actions(false);
+  expect(download).toContain("Use the system proxy");
+  expect(download.match(/<button/g)?.length).toBe(3);
+});
+
+test("install lines: where both plans stand side by side, Sign in names its plan, in English and Hindi; elsewhere it stays Sign in", async () => {
+  await loadHindi();
+  const markup = (lang: "en" | "hi", named: boolean, name = "ChatGPT") => {
+    const line = installLine(
+      lang,
+      { kind: "missing", mb: 140 },
+      name,
+      { ...ACTS, signIn: () => {}, named },
+      { signIn: "sign" },
+    );
+    if (line === null || line.kind !== "wait" || !isValidElement(line.actions))
+      throw new Error("no actions");
+    return renderToStaticMarkup(line.actions as ReactElement);
+  };
+  expect(markup("en", true)).toContain(">Sign in to ChatGPT<");
+  expect(markup("hi", true)).toContain(">ChatGPT में साइन इन करें<");
+  expect(markup("en", true, "Claude")).toContain(">Sign in to Claude<");
+  expect(markup("en", false)).toContain(">Sign in<");
+  // the status check's busy button names it the same way
+  const checking = checkingLine("en", "ChatGPT", { signIn: "sign" }, true);
+  if (checking.kind !== "wait") throw new Error("no wait line");
+  expect(renderToStaticMarkup(checking.actions as ReactElement)).toContain(">Sign in to ChatGPT<");
 });

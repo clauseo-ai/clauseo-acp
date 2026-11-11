@@ -191,6 +191,7 @@ fn matter_row(n: u64, created: i64) -> MatterRow {
         last_opened: None,
         forgotten: None,
         skill_packs: None,
+        agent_prefs: None,
     }
 }
 

@@ -1,7 +1,6 @@
 //! The removal's calls on Windows, made as the pool user: the per-user COM class keys and the
 //! `Run` and `RunOnce` values of its own `HKEY_CURRENT_USER` (its hive, loaded by
-//! `LOGON_WITH_PROFILE`), its Startup folder, and Task Scheduler (`com.rs`). COM is initialised
-//! only when a kind reached over it is listed, which the inner runner never does.
+//! `LOGON_WITH_PROFILE`), and its Startup folder. No COM.
 //!
 //! The Startup folder is `FOLDERID_Startup` for this token, which must lie in the token's profile
 //! folder: the known folder's path comes from the user's own registry, which a process of the
@@ -20,7 +19,6 @@ use std::path::Path;
 use windows::Win32::Foundation::{
     ERROR_FILE_NOT_FOUND, ERROR_NO_MORE_ITEMS, ERROR_SUCCESS, WIN32_ERROR,
 };
-use windows::Win32::Security::{LookupAccountSidW, SID_NAME_USE};
 use windows::Win32::Storage::FileSystem::{
     DELETE, FILE_DISPOSITION_FLAG_DELETE, FILE_DISPOSITION_FLAG_IGNORE_READONLY_ATTRIBUTE,
     FILE_DISPOSITION_FLAG_POSIX_SEMANTICS, FILE_DISPOSITION_INFO_EX,
@@ -32,16 +30,12 @@ use windows::Win32::System::Registry::{
     HKEY, HKEY_CURRENT_USER, KEY_QUERY_VALUE, KEY_SET_VALUE, REG_SAM_FLAGS, RegCloseKey,
     RegDeleteTreeW, RegDeleteValueW, RegEnumValueW, RegOpenKeyExW,
 };
-use windows::Win32::System::TaskScheduler::ITaskFolder;
 use windows::Win32::UI::Shell::{FOLDERID_Startup, KF_FLAG_DONT_VERIFY, SHGetKnownFolderPath};
-use windows::core::{BSTR, PCWSTR, PWSTR, w};
+use windows::core::{PCWSTR, PWSTR, w};
 
 use super::{Kind, Leftovers, below};
 use crate::windows::acl::object::{Handle, Object, open_at, os_error};
-use crate::windows::sids::Sid;
-use crate::windows::token::os::{LocalSid, profile_folder};
-
-mod com;
+use crate::windows::token::os::profile_folder;
 
 /// The `Run` and `RunOnce` keys under `HKEY_CURRENT_USER`.
 const RUN_KEYS: [PCWSTR; 2] = [
@@ -70,8 +64,6 @@ const CLASS_KEYS: [&str; 8] = [
 pub(in crate::windows::runner) enum Item {
     /// A class key, by its path under the classes' root.
     Class(Vec<u16>),
-    /// A scheduled task, by its folder and name.
-    Task { folder: ITaskFolder, name: BSTR },
     /// A value of `RUN_KEYS[key]`.
     Value { key: usize, name: Vec<u16> },
     /// An entry of the Startup folder, as its listing gave it.
@@ -82,35 +74,24 @@ pub(in crate::windows::runner) enum Item {
     },
 }
 
-/// The calls, as this token's user. Fields drop in order: COM, then Task Scheduler's module, last.
+/// The calls, as this token's user.
 pub(in crate::windows::runner) struct OsLeftovers<'a> {
+    /// This process's own token, for its profile and Startup folders.
     token: &'a Handle,
-    me: Sid,
-    /// Its account name, for tasks that name it so; empty when it can't be read.
-    account: String,
     /// The classes' root under `HKEY_CURRENT_USER`: [`CLASSES`] but in the tests.
     classes: String,
     /// The Startup folder, open while its entries are deleted.
     startup: Option<Object>,
-    /// COM for this thread, once a kind reached over it is listed.
-    com: Option<com::Com>,
-    /// Task Scheduler's module, once tasks are listed. Declared after `com`, so it is freed
-    /// after COM is uninitialised.
-    library: Option<com::Library>,
 }
 
 impl<'a> OsLeftovers<'a> {
     /// The calls for `token` (this process's own, opened with `TOKEN_QUERY` and
-    /// `TOKEN_IMPERSONATE` at least), whose user is `me`. Nothing is read yet.
-    pub(in crate::windows::runner) fn new(token: &'a Handle, me: Sid) -> OsLeftovers<'a> {
+    /// `TOKEN_IMPERSONATE` at least). Nothing is read yet.
+    pub(in crate::windows::runner) fn new(token: &'a Handle) -> OsLeftovers<'a> {
         OsLeftovers {
             token,
-            account: account(&me).unwrap_or_default(),
-            me,
             classes: CLASSES.to_owned(),
             startup: None,
-            com: None,
-            library: None,
         }
     }
 
@@ -124,13 +105,6 @@ impl<'a> OsLeftovers<'a> {
             }
         }
         Ok(items)
-    }
-
-    /// Initialises COM for this thread, once.
-    fn com(&mut self) {
-        if self.com.is_none() {
-            self.com = Some(com::Com::new());
-        }
     }
 
     /// The Startup folder's entries; the folder stays open in `self.startup`. Its path is read
@@ -175,21 +149,8 @@ impl Leftovers for OsLeftovers<'_> {
     type Item = Item;
 
     fn list(&mut self, kind: Kind) -> io::Result<Vec<Item>> {
-        if kind.over_com() {
-            self.com();
-        }
         match kind {
             Kind::Classes => self.classes(),
-            Kind::Tasks => {
-                if self.library.is_none() {
-                    self.library = Some(com::Library::load()?);
-                }
-                let library = self
-                    .library
-                    .as_ref()
-                    .ok_or_else(|| io::Error::other("taskschd.dll isn't loaded"))?;
-                com::tasks(&self.me, &self.account, library)
-            }
             Kind::RunKeys => run_values(),
             Kind::Startup => self.startup(),
         }
@@ -198,7 +159,6 @@ impl Leftovers for OsLeftovers<'_> {
     fn delete(&mut self, _: Kind, item: &Item) -> io::Result<()> {
         match item {
             Item::Class(path) => delete_tree(path),
-            Item::Task { folder, name } => com::delete_task(folder, name),
             Item::Value { key, name } => delete_value(*key, name),
             Item::Entry {
                 name,
@@ -377,31 +337,6 @@ fn startup_path(token: &Handle) -> io::Result<String> {
     // SAFETY: allocated by SHGetKnownFolderPath, freed once, here.
     unsafe { CoTaskMemFree(Some(path.0.cast_const().cast())) };
     text
-}
-
-/// `me`'s account name (`LookupAccountSidW`), without its domain.
-fn account(me: &Sid) -> io::Result<String> {
-    let sid = LocalSid::new(me)?;
-    let mut name = vec![0u16; 256];
-    let mut domain = vec![0u16; 256];
-    let mut name_len = u32::try_from(name.len()).map_err(io::Error::other)?;
-    let mut domain_len = u32::try_from(domain.len()).map_err(io::Error::other)?;
-    let mut usage = SID_NAME_USE::default();
-    // SAFETY: the SID is live; each buffer is writable for its length; the out-pointers are live.
-    unsafe {
-        LookupAccountSidW(
-            PCWSTR::null(),
-            sid.as_psid(),
-            Some(PWSTR(name.as_mut_ptr())),
-            &raw mut name_len,
-            Some(PWSTR(domain.as_mut_ptr())),
-            &raw mut domain_len,
-            &raw mut usage,
-        )
-    }
-    .map_err(|e| os_error(&e))?;
-    let len = usize::try_from(name_len).map_err(io::Error::other)?;
-    String::from_utf16(name.get(..len).unwrap_or_default()).map_err(io::Error::other)
 }
 
 fn win32(code: WIN32_ERROR) -> io::Error {

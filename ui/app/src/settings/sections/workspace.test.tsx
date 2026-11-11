@@ -186,10 +186,11 @@ test.each([
   },
 );
 
-test("set_up_failed with R17 PR-E's 1385 cause adds the line for IT", async () => {
+test("set_up_failed with R17 PR-E's 1385 cause adds the set-up-again line", async () => {
   await mount({ view: () => view(np({ set_up_failed: { why: "logon_right_denied_1385" } })) });
   expect(block()?.dataset["state"]).toBe("set_up_failed");
-  expect(text()).toContain("Allow log on locally");
+  expect(text()).toContain("Setting up the Safe workspace again usually fixes this.");
+  expect(text()).not.toContain("looks after this computer");
 });
 
 test.each([
@@ -238,9 +239,10 @@ test("required while protected: Managed by firm, no firm line", async () => {
   expect(one("protection-required")).toBeNull();
 });
 
-test("Not protected where the firm allows no unprotected auto mode says so; allowed says nothing", async () => {
+test("the firm's no-auto line stays hidden until the host enforces it (UC-76), whatever the policy says", async () => {
   await mount({ view: () => view(PROT.refused, { unprotected_auto_allowed: false }) });
-  expect(one("protection-no-auto")?.textContent).toBe(
+  expect(one("protection-no-auto")).toBeNull();
+  expect(document.body.textContent).not.toContain(
     st("en", "Your firm doesn't allow Clauseo to work without asking on this computer."),
   );
   await act(async () => root?.unmount());
@@ -277,6 +279,19 @@ test("Remove set-up always confirms first: Cancel sends nothing, confirming send
   await settle();
   expect(t.only("query").filter((c) => c.query === "protection")).toHaveLength(reads + 1);
   expect(block()?.dataset["state"]).toBe("needs_set_up");
+});
+
+test("required: Remove set-up still shows, and its confirm says Clauseo won't answer afterwards", async () => {
+  await mount(held(PROT.b, { required: true }).host);
+  await press(one("protection-remove"));
+  const said = one("protection-confirm")?.textContent ?? "";
+  expect(said).toContain(
+    pw(
+      "en",
+      "Your firm requires the Safe workspace, so afterwards Clauseo won't answer on this computer until it's set up again.",
+    ),
+  );
+  expect(said).not.toContain("works on this computer without");
 });
 
 test("Set up again with no Windows prompt sends at once, with no confirm, and a refusal says its words", async () => {
@@ -335,7 +350,7 @@ test("after a finished in-app Remove, the app offers Set up, with the announce l
   expect(confirm?.textContent).toContain(
     pw(
       "en",
-      "Windows will ask to let Clauseo set up the Safe workspace. It will say the publisher is unknown, because this early version of Clauseo isn't signed yet. Choose Yes. If Windows asks for an administrator's password, whoever looks after this computer can enter it.",
+      "Windows will ask to let Clauseo set up the Safe workspace. It will say the publisher is unknown. That's expected for Clauseo. Choose Yes. If Windows asks for an administrator's password, whoever looks after this computer can enter it.",
     ),
   );
   await press(one("protection-confirm-ok"));
@@ -385,12 +400,12 @@ test.each([
   ["required", { required: true }, null],
   ["no unprotected auto mode", { unprotected_auto_allowed: false }, null],
 ] as const)(
-  "admin_copy_missing on a firm install (%s): ask IT, with no button",
+  "admin_copy_missing on a firm install (%s): the firm manages the install, with no button",
   async (_c, over, by) => {
     if (by !== null) update = { current: "0.1.0", mode: "auto", state: { managed: { by } } };
     const t = await mount({ view: () => view(PROT.missing, over) });
     expect(one("protection-repair")?.textContent).toBe(
-      pw("en", "Ask your IT team to install Clauseo again."),
+      pw("en", "Your firm manages how Clauseo is installed on this computer."),
     );
     expect(one("protection-installer")).toBeNull();
     expect(one("protection-close-line")).toBeNull();
@@ -403,14 +418,18 @@ test.each([
   [
     "policy",
     PROT.policy,
-    "A Windows policy on this computer blocks the program that sets up the Safe workspace. Ask your IT team to allow it.",
+    "A Windows policy on this computer blocks the program that sets up the Safe workspace. Your firm manages this policy on this computer.",
   ],
   [
     "other_account",
     PROT.otherAccount,
-    "The Safe workspace on this computer belongs to another Windows account. Ask your IT team.",
+    "The Safe workspace on this computer belongs to another Windows account. Your firm manages this computer's Windows accounts.",
   ],
-  ["a reason from a newer Clauseo", PROT.blockedNewer, "Ask your IT team to look into it."],
+  [
+    "a reason from a newer Clauseo",
+    PROT.blockedNewer,
+    "Something on this computer stops the Safe workspace. Your firm manages this computer's settings.",
+  ],
 ] as const)("a block, %s: what stops it, its line, and no act", async (_c, p, line) => {
   await mount({ view: () => view(p) });
   expect(block()?.dataset["state"]).toBe("blocked");
@@ -421,9 +440,59 @@ test.each([
     ),
   );
   expect(one("protection-block")?.textContent).toBe(line);
+  expect(one("protection-it")?.textContent).toBe("Copy details for IT");
   expect(one("protection-repair")).toBeNull();
   expect(one("protection-installer")).toBeNull();
   expect(one("protection-setup")).toBeNull();
+});
+
+test.each([
+  ["Windows' prompt follows: the set-up's confirm first, then", true],
+  ["no prompt: at once", false],
+] as const)(
+  "a block, logon_right: setting up again usually fixes it, and the set-up is offered; %s retry_protection",
+  async (_c, asks) => {
+    const t = await mount(
+      held(PROT.logon, { retry_asks_admin: asks } as Partial<ProtectionView>).host,
+    );
+    expect(block()?.dataset["state"]).toBe("blocked");
+    expect(one("protection-block")?.textContent).toBe(
+      pw(
+        "en",
+        "Windows isn't letting the Safe workspace's accounts sign in. Setting up the Safe workspace again usually fixes this.",
+      ),
+    );
+    expect(one("protection-installer")).toBeNull();
+    expect(one("protection-setup")?.textContent).toBe(pw("en", "Set up the Safe workspace"));
+    await press(one("protection-setup"));
+    if (asks) {
+      expect(one("protection-confirm")?.dataset["act"]).toBe("setup");
+      expect(t.protectionCommands()).toEqual([]);
+      await press(one("protection-confirm-ok"));
+    } else expect(one("protection-confirm")).toBeNull();
+    expect(t.protectionCommands()).toEqual(["retry_protection"]);
+  },
+);
+
+test("a firm-only block offers Copy details for IT: its reason and version, never a matter's path; stage C's don't", async () => {
+  const path = "C:\\Users\\asha\\Matters\\Sharma v. State of Delhi";
+  const writeText = vi.fn(async (_text: string) => {});
+  Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+  await mount({ view: () => view(np({ blocked: { reason: "policy", path } })) });
+  await press(one("protection-it"));
+  expect(writeText).toHaveBeenCalledWith(
+    `Clauseo's Safe workspace is blocked on this computer.\nReason: policy\nClauseo version: ${APP_VERSION}\nClauseo for firm IT: https://github.com/clauseo-ai/clauseo-acp/blob/main/docs/firm-it.md#sandbox-policy`,
+  );
+  expect(writeText.mock.calls[0]![0]).not.toContain(path);
+  expect(one("protection-it")?.textContent).toBe("Message copied");
+  Reflect.deleteProperty(navigator, "clipboard");
+  for (const reason of ["tool_missing", "admin_copy_changed", "admin_copy_unsafe"]) {
+    await act(async () => root?.unmount());
+    store?.dispose();
+    document.body.replaceChildren();
+    await mount({ view: () => view(np({ blocked: { reason } })) });
+    expect(one("protection-it")).toBeNull();
+  }
 });
 
 test("#protection opens the Safe workspace, the name the wire gives it", async () => {

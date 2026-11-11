@@ -13,6 +13,9 @@
 # Manual only (`gh workflow run setup-exe-repro.yml --ref <branch>`): two cold LTO builds per
 # target are too slow for every pull request, and the exe changes rarely. Run it when the
 # sandbox crate, its build script, the release profile or the toolchain changes.
+# The Safe workspace is off for launch (release.yml's SAFE_WORKSPACE "false"), so no release
+# ships this exe; --setup-exe builds it whatever the switch, so this check stays ready for when it
+# is turned back on.
 # Every action is pinned by commit SHA, with its tag in a comment, copied from release.yml.
 
 name: setup-exe-repro
@@ -28,7 +31,9 @@ env:
   # release.yml's.
   CARGO_PROFILE_RELEASE_DEBUG: line-tables-only
   CARGO_PROFILE_RELEASE_SPLIT_DEBUGINFO: packed
-  RUSTFLAGS: "-C force-frame-pointers=yes"
+  # release.yml's Windows rows' rustflags, byte for byte and in order: cargo hashes rustflags into
+  # symbol names. pe-crt-imports.test.mjs fails when the two differ.
+  RUSTFLAGS: "-C force-frame-pointers=yes -C target-feature=+crt-static"
 
 jobs:
   repro:

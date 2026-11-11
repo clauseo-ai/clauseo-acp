@@ -8,16 +8,18 @@ use std::time::Duration;
 
 use clauseo_agents::keys::Keychain;
 use clauseo_agents::{
-    AgentsEvent, Found, InstallState, Installed, Method, PasteCode, SigninError, SigninState,
+    AgentsEvent, Found, InstallState, Installed, Method, OwnLogin, PasteCode, SigninError,
+    SigninState, Source,
 };
 use clauseo_counts::schema::Event;
 use clauseo_host::{AgentsStopped, LoginSplits};
-use clauseo_protocol::{AgentId, AgentKind, ErrorCode, HostError};
+use clauseo_protocol::{AgentId, ErrorCode, HostError};
 use clauseo_settings::{AgentLaunch, EntryWrite};
 use futures::channel::mpsc::{UnboundedSender, unbounded};
 use futures::stream::BoxStream;
 
 use super::super::{AgentInfo, AgentsBackend, SetupAgents, SetupCounts};
+use super::install_busy::{LaunchGate, held_write};
 use super::timing::{FakeTimer, Stepping};
 use super::{claude, codex};
 use crate::bridge::lock;
@@ -29,14 +31,19 @@ use crate::setup::host_calls::SetupHost;
 use crate::setup::keys::{KeyCache, KeysLoaded};
 use crate::setup::leave::LeaveTimer;
 use crate::setup::login_check::ReusedLogins;
-use crate::setup::readers::{LeaveReaders, ReadHold};
+use crate::setup::python_path::{PythonPath, PythonSlot};
+use crate::setup::readers::LeaveReaders;
 use crate::setup::refresh::SettingsRead;
 use crate::setup::wiring::Wiring;
 use crate::setup::{Setup, SetupBackend, SetupEvents};
 use crate::test_support::block_on;
 
+mod host_call;
+mod readers;
 mod ui;
 
+pub(super) use self::host_call::HostCall;
+pub(super) use self::readers::FakeReaders;
 pub(super) use self::ui::{FakeConfirm, FakeOpener};
 pub(super) use super::wire::{command, setup_events};
 
@@ -71,6 +78,7 @@ pub(super) struct FakeAgents {
     pub(super) tries: Mutex<BTreeMap<AgentId, u32>>,
     /// Each `set_network`, in order.
     pub(crate) networks: Mutex<Vec<clauseo_agents::Network>>,
+    pub(super) own_login: std::sync::atomic::AtomicU64,
 }
 
 impl FakeAgents {
@@ -135,6 +143,26 @@ impl SetupAgents for FakeAgents {
         };
         self.reserve(name, agent, true)
     }
+    fn sign_in_switching(&self, agent: &AgentId, method: Method) -> Result<(), SigninError> {
+        let name = match method {
+            Method::DeviceCode => "sign_in_device_code_switching",
+            _ => "sign_in_switching",
+        };
+        self.reserve(name, agent, true)
+    }
+    /// S18's rule, by the state the test set: Codex signed in with Clauseo's own login, the
+    /// one numbered `own_login` (a test bumps it to replace that login).
+    fn own_login(&self, agent: &AgentId) -> Option<OwnLogin> {
+        let own = matches!(
+            lock(&self.signin).get(agent),
+            Some(SigninState::SignedIn {
+                source: Source::Own,
+                ..
+            })
+        );
+        let n = self.own_login.load(std::sync::atomic::Ordering::SeqCst);
+        (agent.as_str() == "codex-acp" && own).then(|| OwnLogin::for_tests(n))
+    }
     /// S18's: `NotRunning` unless a sign-in job is reserved or its state is a running one.
     fn cancel_sign_in(&self, agent: &AgentId) -> Result<(), SigninError> {
         self.answer("cancel_sign_in", agent)?;
@@ -162,6 +190,9 @@ impl SetupAgents for FakeAgents {
     }
     fn use_different_account(&self, agent: &AgentId) -> Result<(), SigninError> {
         self.reserve("use_different_account", agent, true)
+    }
+    fn use_different_account_switching(&self, agent: &AgentId) -> Result<(), SigninError> {
+        self.reserve("use_different_account_switching", agent, true)
     }
     fn signin_state(&self, agent: &AgentId) -> Option<SigninState> {
         lock(&self.signin).get(agent).cloned()
@@ -194,70 +225,6 @@ impl SetupCounts for FakeCounts {
     }
 }
 
-/// The limits readers' hold and entries, journaled.
-pub(super) struct FakeReaders {
-    pub(super) journal: Journal,
-    pub(super) entries: Mutex<Vec<(AgentKind, Option<AgentLaunch>)>>,
-    /// The agents last told blocked, not journaled.
-    pub(super) blocked: Mutex<Option<BTreeSet<AgentId>>>,
-}
-
-/// A fake hold: journals its release.
-struct FakeHold(Journal);
-
-impl Drop for FakeHold {
-    fn drop(&mut self) {
-        lock(&self.0).push("readers.release".to_owned());
-    }
-}
-
-impl LeaveReaders for FakeReaders {
-    fn hold(&self, _agent: AgentKind) -> BoxFuture<'static, ReadHold> {
-        lock(&self.journal).push("readers.hold".to_owned());
-        let hold = ReadHold::new(FakeHold(Arc::clone(&self.journal)));
-        Box::pin(std::future::ready(hold))
-    }
-    fn set_entry(&self, agent: AgentKind, launch: Option<AgentLaunch>) {
-        lock(&self.journal).push("readers.set_entry".to_owned());
-        lock(&self.entries).push((agent, launch));
-    }
-    fn set_blocked(&self, blocked: BTreeSet<AgentId>) {
-        *lock(&self.blocked) = Some(blocked);
-    }
-}
-
-/// One host call as `RecordingHost` saw it.
-#[derive(Clone, PartialEq, Eq)]
-pub(super) enum HostCall {
-    SetAgentLaunch(AgentId, AgentLaunch),
-    SetEndpoint(AgentId, Option<String>),
-    RestartAgents(AgentId),
-    StopAgents(AgentId),
-    SetReusedLogin(AgentId, bool),
-    RemoveLoginLinks(AgentId),
-    LoginChanged(AgentId),
-    SetLaunchRefused(AgentId, Option<ErrorCode>),
-}
-
-impl std::fmt::Debug for HostCall {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::SetAgentLaunch(agent, launch) => {
-                write!(f, "set_agent_launch({agent}, {launch:?})")
-            }
-            Self::SetEndpoint(agent, url) => write!(f, "set_endpoint({agent}, {url:?})"),
-            Self::RestartAgents(agent) => write!(f, "restart_agents({agent})"),
-            Self::StopAgents(agent) => write!(f, "stop_agents({agent})"),
-            Self::SetReusedLogin(agent, reused) => write!(f, "set_reused_login({agent}, {reused})"),
-            Self::RemoveLoginLinks(agent) => write!(f, "remove_login_links({agent})"),
-            Self::LoginChanged(agent) => write!(f, "login_changed({agent})"),
-            Self::SetLaunchRefused(agent, code) => {
-                write!(f, "set_launch_refused({agent}, {code:?})")
-            }
-        }
-    }
-}
-
 /// The host's Rust-only calls, recorded in order, each answered `Ok`; `stop_agents` answers
 /// `stopped` (`Exited` unless a test sets `TimedOut`), and the next `restart_fails`
 /// `restart_agents` calls answer `internal`.
@@ -276,6 +243,8 @@ pub(super) struct RecordingHost {
     pub(super) restarted: Mutex<Option<std::sync::mpsc::Sender<()>>>,
     /// What `sign_in_holds` answers, once a test sets it.
     pub(super) holds: Mutex<Option<BoxStream<'static, AgentId>>>,
+    /// The next `set_agent_launch` tells the sender, then answers once the receiver opens.
+    pub(super) launch_gate: Mutex<Option<LaunchGate>>,
 }
 
 impl RecordingHost {
@@ -290,6 +259,7 @@ impl RecordingHost {
             changes: Mutex::new(None),
             restarted: Mutex::new(None),
             holds: Mutex::new(None),
+            launch_gate: Mutex::new(None),
         }
     }
 
@@ -317,7 +287,7 @@ impl SetupHost for RecordingHost {
         launch: AgentLaunch,
     ) -> BoxFuture<'_, Result<EntryWrite, HostError>> {
         self.push(HostCall::SetAgentLaunch(agent, launch));
-        Box::pin(std::future::ready(Ok(EntryWrite::Written)))
+        Box::pin(held_write(lock(&self.launch_gate).take()))
     }
     fn set_endpoint(
         &self,
@@ -412,7 +382,12 @@ pub(super) struct Rig {
     pub(super) counts: Arc<FakeCounts>,
     /// The network route each settings read resolves into (`network::inline`).
     pub(super) network: crate::setup::NetworkSlot,
+    /// The launch hook's Python folders, whose lookup finds [`RIG_PYTHON_DIR`].
+    pub(super) python: PythonSlot,
 }
+
+/// The one folder the rig's Python lookup finds (it reads no disk).
+pub(super) const RIG_PYTHON_DIR: &str = "/data/agents/runtime/clauseo-python/bin";
 
 pub(super) fn home(agent: &AgentId) -> PathBuf {
     PathBuf::from(format!("/data/agents/{agent}/home"))
@@ -467,7 +442,7 @@ pub(super) fn rig_with(
         blocked: Mutex::default(),
     });
     let confirm = Arc::new(FakeConfirm {
-        answer: accept,
+        answer: accept.into(),
         asked: Mutex::default(),
     });
     let opener = Arc::new(FakeOpener::default());
@@ -489,6 +464,11 @@ pub(super) fn rig_with(
         })
         .collect();
     let (network, follow) = super::network::inline(Arc::clone(&agents) as Arc<dyn SetupAgents>);
+    let python = PythonSlot::default();
+    let lookup = PythonPath::new(
+        Arc::clone(&python),
+        Arc::new(|| vec![PathBuf::from(RIG_PYTHON_DIR)]),
+    );
     let backend = Arc::new(AgentsBackend {
         agents: Arc::clone(&agents) as Arc<dyn SetupAgents>,
         keys: Arc::new(keys),
@@ -509,7 +489,8 @@ pub(super) fn rig_with(
             Vec::new(),
         )
         .with_timer(Arc::clone(&timer) as Arc<dyn LeaveTimer>)
-        .with_network(follow),
+        .with_network(follow)
+        .with_python_path(lookup),
         counts: Arc::clone(&counts) as Arc<dyn SetupCounts>,
         keys_loaded: loaded,
     });
@@ -532,6 +513,7 @@ pub(super) fn rig_with(
         timer,
         counts,
         network,
+        python,
     }
 }
 

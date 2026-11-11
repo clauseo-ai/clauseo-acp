@@ -76,7 +76,9 @@ fn matters(host: &HostHandle) -> Vec<(MatterId, MatterKind)> {
         | QueryResult::SkillPacks(_)
         | QueryResult::Update(_)
         | QueryResult::Protection(_)
-        | QueryResult::AllowedSites(_)) => panic!("not matters: {other:?}"),
+        | QueryResult::AllowedSites(_)
+        | QueryResult::WordBlackline(_)
+        | QueryResult::Revisions(_)) => panic!("not matters: {other:?}"),
     }
 }
 
@@ -92,6 +94,7 @@ fn create_thread(host: &HostHandle, n: u128, matter: MatterId) -> ThreadId {
     let command = HostCommand::CreateThread {
         matter,
         agent: AgentId::new("fake-agent").unwrap(),
+        config: None,
     };
     match block_on(host.dispatch(envelope(n, command))).unwrap() {
         CommandOutcome::ThreadCreated { thread } => thread,
@@ -99,7 +102,8 @@ fn create_thread(host: &HostHandle, n: u128, matter: MatterId) -> ThreadId {
         | CommandOutcome::MatterCreated { .. }
         | CommandOutcome::PromptAccepted { .. }
         | CommandOutcome::StepUndone { .. }
-        | CommandOutcome::VersionRestored { .. }) => panic!("not a thread: {other:?}"),
+        | CommandOutcome::VersionRestored { .. }
+        | CommandOutcome::RevisionsDecided { .. }) => panic!("not a thread: {other:?}"),
     }
 }
 
@@ -124,11 +128,13 @@ fn replay(events: &mut EventSubscription) -> (Vec<&'static str>, Vec<u64>, Seq) 
             | HostEvent::ThreadsChanged(_)
             | HostEvent::FolderScanned(_)
             | HostEvent::BrowserInstall { .. }
+            | HostEvent::BrowserPolicy { .. }
             | HostEvent::UpdateChanged(_)
             | HostEvent::ConnectorsChanged(_)
             | HostEvent::CaseLawHint { .. }
             | HostEvent::ProtectionChanged { .. }
             | HostEvent::ProtectionViewChanged { .. }
+            | HostEvent::PapersChanged { .. }
             | HostEvent::SiteBlocked { .. }) => panic!("unexpected {other:?}"),
         }
     }
@@ -238,6 +244,7 @@ fn start_command_subscribe_shutdown_restart() {
     let unknown = HostCommand::CreateThread {
         matter: MatterId::new(Uuid::now_v7()).unwrap(),
         agent: AgentId::new("fake-agent").unwrap(),
+        config: None,
     };
     let refused = block_on(host.dispatch(envelope(4, unknown))).unwrap_err();
     assert_eq!(refused.code(), ErrorCode::CommandUnknownMatter);
@@ -271,6 +278,7 @@ fn concurrent_duplicates_share_the_first_answer() {
     let command = || HostCommand::CreateThread {
         matter,
         agent: AgentId::new("fake-agent").unwrap(),
+        config: None,
     };
     let (a, b) = block_on(futures::future::join(
         host.dispatch(envelope(7, command())),

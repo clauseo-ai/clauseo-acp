@@ -19,7 +19,8 @@ import { clockOf } from "../when.ts";
 import { changedSince, type Ask, type Done, type Snapshot, type Unsaved } from "./state.ts";
 import { fileName, namesOf } from "@clauseo/components/lib/words-core.ts";
 
-/** A conversation's name as list_threads gives it; one without a title is a new conversation. */
+/** A conversation's name as the rail gives it (conversations.ts's titleOf); one without a title is a new
+ * conversation. */
 export const conversationOf = (lang: Lang, s: Snapshot, thread: ThreadId): string =>
   s.titles.get(thread) || mt(lang, "New conversation");
 
@@ -61,7 +62,9 @@ export function askOf(lang: Lang, cal: Calendar, s: Snapshot, ask: Ask | null): 
   const failed = ask.failed === null ? null : errorWords(lang, ask.failed);
   if (ask.act === "restore") {
     const { changes, added_since, kept } = ask.preview;
-    const name = namesOf([...changes.map((c) => c.path), ...added_since, ...kept]);
+    // undoing a restore: the files it added go (an older host's answer names none)
+    const removes = ask.undoes === null ? [] : (ask.preview.removes ?? []);
+    const name = namesOf([...changes.map((c) => c.path), ...added_since, ...kept, ...removes]);
     const changed = changes.map((c) => name(c.path));
     const papers = listOf(lang, changed);
     // one name stands in the line's own quotes; several are each quoted, and "and" joins them outside the quotes
@@ -70,7 +73,18 @@ export function askOf(lang: Lang, cal: Calendar, s: Snapshot, ask: Ask | null): 
         lang,
         paths.map((p) => `'${name(p)}'`),
       );
+    const removed =
+      removes.length === 0
+        ? null
+        : removes.length === 1
+          ? vt(lang, "'{papers}', added by the restore, will be removed.", {
+              papers: name(removes[0] ?? ""),
+            })
+          : vt(lang, "{papers}, added by the restore, will be removed.", {
+              papers: quoted(removes),
+            });
     const stays = [
+      changed.length === 0 ? null : removed,
       added_since.length === 0
         ? null
         : added_since.length === 1
@@ -86,19 +100,28 @@ export function askOf(lang: Lang, cal: Calendar, s: Snapshot, ask: Ask | null): 
               papers: quoted(kept),
             }),
     ].filter((x) => x !== null);
+    // undoing a restore names the restore it takes back, by when it was made
+    const undone = ask.undoes === null ? undefined : versionOf(s, ask.undoes);
     return {
       kind: "confirm",
       act: "restore",
       title:
-        v.day === cal.today
-          ? vt(lang, "Restore the matter to how it was at {time} today?", { time: timeOf(lang, v) })
-          : vt(lang, "Restore the matter to how it was at {time} on {date}?", {
-              time: timeOf(lang, v),
-              date: cal.words(lang, v.day, "date"),
-            }),
+        undone !== undefined
+          ? vt(lang, "Undo the restore at {time}?", { time: whenOf(lang, cal, undone) })
+          : v.day === cal.today
+            ? vt(lang, "Restore the matter to how it was at {time} today?", {
+                time: timeOf(lang, v),
+              })
+            : vt(lang, "Restore the matter to how it was at {time} on {date}?", {
+                time: timeOf(lang, v),
+                date: cal.words(lang, v.day, "date"),
+              }),
       body:
         changed.length === 0
-          ? vt(lang, "Nothing will change. The matter already stands as it did then.")
+          ? removed === null
+            ? vt(lang, "Nothing will change. The matter already stands as it did then.")
+            : // the removals alone: the dialog still says the act can be undone
+              `${removed} ${vt(lang, "You can undo this.")}`
           : changed.length === 1
             ? vt(lang, "1 document will change: {papers}. You can undo this.", { papers })
             : vt(lang, "{n} documents will change: {papers}. You can undo this.", {
@@ -109,6 +132,7 @@ export function askOf(lang: Lang, cal: Calendar, s: Snapshot, ask: Ask | null): 
       edited: [],
       editedHead: null,
       failed,
+      ...(undone === undefined ? {} : { confirm: vt(lang, "Undo the restore") }),
     };
   }
   const meta = s.timeline.meta.get(ask.id);
@@ -220,6 +244,12 @@ export const failedLine = (lang: Lang, code: string): BandNotice => ({
   tone: "failed",
   text: errorWords(lang, code),
 });
+
+/** Why a Word document's changes couldn't be marked up, by the code (words-errors.ts's sentence): the Word tool
+ * missing says to reinstall; any other failure, the host's or the transport's, says only that it couldn't be done
+ * (the sheet that says the file changed stands under it). */
+export const markFailedLine = (lang: Lang, code: string): string =>
+  errorWords(lang, code === "blackline.no_word_tool" ? code : "blackline.failed");
 
 /** The not-saved line: which paper Clauseo changed and when, that the change couldn't be kept as a version, and that
  * the paper stands as Clauseo left it. A change on another day says its day. */

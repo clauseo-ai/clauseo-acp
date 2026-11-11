@@ -9,6 +9,7 @@ use std::io;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use clauseo_agents::keys::Keychain;
 use clauseo_protocol::{ErrorCode, Secret};
@@ -25,6 +26,35 @@ use crate::setup::keys::marker::{self, Marked};
 use crate::setup::keys::{KEYS_LOAD_BOUND, KeyCache, KeyMarker, KeyNote, KeyNotes};
 use crate::setup::refusal::settle_after_load;
 use crate::test_support::{Scratch, block_on};
+
+/// A [`Scratch`] for a test that releases a hung read: that read writes the marker on its own
+/// thread, and the write can land after the scratch's removal and leave its temporary file
+/// behind. Its drop pauses first, so the write lands before the scratch removes the folder.
+struct Late(Scratch);
+
+impl Late {
+    fn folder(test: &str, dirs: &[&str]) -> Self {
+        Self(Scratch::folder(test, dirs))
+    }
+}
+
+impl std::ops::Deref for Late {
+    type Target = Scratch;
+
+    fn deref(&self) -> &Scratch {
+        &self.0
+    }
+}
+
+impl Drop for Late {
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "the write runs on a thread the injected clock cannot see, so only a real pause lets it land"
+    )]
+    fn drop(&mut self) {
+        std::thread::sleep(Duration::from_millis(50));
+    }
+}
 
 /// The real file system, its writes failing while `fail` is set; each write records whether
 /// the keychain held Claude's key when it was made.
@@ -102,7 +132,7 @@ fn secret(text: &str) -> Secret {
 
 #[test]
 fn a_silent_keychain_refuses_the_marked_agent_and_launches_the_unmarked_one_without_a_key() {
-    let scratch = Scratch::folder("key-marker-silent", &[]);
+    let scratch = Late::folder("key-marker-silent", &[]);
     let marker = KeyMarker::new(scratch.path(), [&claude(), &codex()]);
     marker.set(&claude()).unwrap();
     let keychain = stored();
@@ -125,7 +155,7 @@ fn a_silent_keychain_refuses_the_marked_agent_and_launches_the_unmarked_one_with
 
 #[test]
 fn a_silent_keychain_with_no_marker_file_refuses_no_agent() {
-    let scratch = Scratch::folder("key-marker-fresh", &[]);
+    let scratch = Late::folder("key-marker-fresh", &[]);
     let keychain = Keychain::memory();
     keychain.hang_reads(true);
     let keys = load(
@@ -145,7 +175,7 @@ fn a_silent_keychain_with_no_marker_file_refuses_no_agent() {
 
 #[test]
 fn a_silent_keychain_with_a_corrupt_marker_refuses_every_agent() {
-    let scratch = Scratch::folder("key-marker-corrupt-load", &["agents"]);
+    let scratch = Late::folder("key-marker-corrupt-load", &["agents"]);
     scratch.file("agents/key-stored.json", b"[\"claude-acp\"");
     let keychain = Keychain::memory();
     keychain.hang_reads(true);
@@ -272,7 +302,7 @@ fn a_read_that_answers_sets_a_missing_marker_and_clears_a_stale_one() {
 
 #[test]
 fn a_late_read_that_answers_a_key_marks_an_unmarked_agent() {
-    let scratch = Scratch::folder("key-marker-late-key", &[]);
+    let scratch = Late::folder("key-marker-late-key", &[]);
     // Codex's key is stored, but no marker marks Codex: its read is silent at the bound.
     let keychain = Keychain::memory();
     keychain.store(&codex(), KEY).unwrap();

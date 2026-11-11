@@ -25,7 +25,9 @@ mod key_retry;
 mod known;
 mod launch_checks;
 mod logout;
+mod offline;
 mod out;
+mod picks;
 mod profile_loads;
 mod prompt;
 mod queue;
@@ -33,7 +35,7 @@ mod reconcile;
 mod restore;
 mod route;
 mod session;
-mod sign_in;
+pub(super) mod sign_in;
 mod state;
 mod steps;
 mod text;
@@ -48,7 +50,7 @@ use std::collections::VecDeque;
 
 use clauseo_protocol::{
     AgentChoiceId, ContentBlock, DetachReason, ElicitationResponse, ErrorCode, LimitStopReason,
-    MatterId, MatterPath, StreamId, ThreadId, Timestamp, TurnId,
+    MatterId, MatterPath, StopReason, StreamId, ThreadId, Timestamp, TurnId,
 };
 use futures::future::AbortHandle;
 
@@ -58,6 +60,7 @@ use crate::coalesce::ThreadText;
 use crate::error::Error;
 use crate::matter_worker::MatterReply;
 use crate::pipeline::Failure;
+use state::BeforePrompt;
 
 pub(crate) use asks::asks_pending;
 pub(crate) use came_back::{
@@ -70,14 +73,17 @@ pub(crate) use idle::{on_due as idle_due, relay_call as idle_relay_call, tick as
 pub(crate) use inputs::{AgentReply, LogFor, TurnInput};
 pub(crate) use launch_checks::HeldRuns;
 pub use launch_checks::PackRequest;
+pub(crate) use offline::set_network;
 pub(crate) use out::flush_text;
 pub(crate) use queue::{any_active, any_running, cancel_all, queue_hold, release, sync_all_held};
 pub(crate) use restore::{
-    RestoreAsk, committed as restore_committed, on_restored, restore_version,
+    RestoreAsk, RevisionsAsk, committed as restore_committed, decide_revisions, on_decided,
+    on_restored, restore_version,
 };
 pub(crate) use route::{TurnCommand, command};
 pub(crate) use sign_in::on_request as sign_in_request;
-pub(crate) use state::busy;
+pub(crate) use state::history_settles;
+pub(crate) use state::{busy, keeps_loaded, keeps_matter_loaded, running_turn, turn_running};
 pub(crate) use writer::{
     hold_for_relocate, matter_busy, release_relocate, stop_agents, writer_busy,
 };
@@ -97,6 +103,9 @@ pub(crate) struct TurnState {
     run: Option<launch_checks::RunFolders>,
     /// The skill packs its launches skipped, each pack and reason told once for the host's run.
     packs: launch_checks::PackNotices,
+    /// The thread was told Claude's auto mode is not available (`session/claude_mode.rs`), once
+    /// for the host's run.
+    auto_told: bool,
     /// The thread's current turn: accepted and not ended.
     current: Option<Box<Current>>,
     /// The thread's sources in progress: the browser's opens and the agents' web calls that have
@@ -124,6 +133,8 @@ pub(crate) struct TurnState {
     /// The turn `HostHandle::stop_agents` cancelled: unless it ends `EndTurn`, it goes back
     /// to the queue held for the sign-in (`sign_in.rs`).
     stopped_for_sign_in: Option<TurnId>,
+    /// Where the thread's name stands for the agent's titles (D-070), in this run.
+    title: state::TitleWindow,
 }
 
 /// A turn whose `TurnEnded` is sent but not durable yet.
@@ -176,10 +187,10 @@ struct Current {
     cancelled: bool,
     /// The same Stop, for the prompt's API-key retry off the actor (`key_retry.rs`).
     stopped: key_retry::Stopped,
-    /// The lawyer's last permission answer in the turn was a reject kind and no Stop came
-    /// after it: the agent's own `Cancelled` then ends the turn `NotAllowed` (Codex's only
-    /// reject option ends the turn). Another answer or a Stop clears it.
-    refused: bool,
+    /// The stop the agent's own `Cancelled` becomes after the turn's last permission answer
+    /// was a refusal with no Stop since (Codex's only reject ends the turn): `NotAllowed` for
+    /// the lawyer's, `OutsideMatter` for the host's data folder. An answer or a Stop clears it.
+    refused: Option<StopReason>,
     /// The first limit signal of the turn.
     limit: Option<LimitMark>,
     /// The places the turn's tool calls named, for the after-turn checkpoint.
@@ -200,6 +211,9 @@ struct Current {
     end: Option<End>,
     /// The turn failed on the host's side; it ends `Failed` with this `TurnFailed`.
     failure: Option<(ErrorCode, Option<String>)>,
+    /// The agent said its connection failed, or the window said offline, and the agent has sent
+    /// nothing since (`offline.rs`).
+    offline: Option<offline::Watch>,
     /// The failure asks to stop the prompt once the commit being built is sent.
     abort: bool,
     /// An agent-driven commit of the turn failed with this code.
@@ -213,14 +227,12 @@ struct Current {
     started: std::time::Duration,
     /// When its first answer text came, on the same clock: `answer_ended.first_words`.
     first_words: Option<std::time::Duration>,
+    /// When its first live agent update came, on the same clock (`state::first_update`).
+    first_update: Option<std::time::Duration>,
     /// Elicitation values withheld from the turn's tool output (`withheld.rs`), zeroized when
     /// the turn ends.
     withheld: withheld::Withheld,
 }
-
-/// Where the prompt's task leaves the listing of the agent's descendants; `None` until it is
-/// taken, and when it failed.
-type BeforePrompt = std::rc::Rc<std::cell::RefCell<Option<clauseo_process::Snapshot>>>;
 
 /// Where a current turn is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -317,6 +329,8 @@ enum TimerKind {
     Rate,
     Cancel(TurnId),
     LimitRead(TurnId),
+    /// The wait after a connection failure ran out (`offline.rs`).
+    Offline(TurnId),
     /// A steer's answer did not come in time (`queue/steer.rs`).
     Steer(clauseo_protocol::MessageId),
     /// A `stop_agents` wait ran out (`sign_in/stops.rs`), for any thread of its agent.
@@ -373,6 +387,11 @@ pub(crate) fn turn_input(actor: &mut Actor, input: TurnInput) {
         }
         TurnInput::RunRemoved { key, freed } => launch_checks::on_run_removed(actor, key, freed),
         TurnInput::CameBack(check) => came_back::on_due(actor, check),
+        TurnInput::OfflineProbe {
+            thread,
+            turn,
+            reached,
+        } => offline::on_probed(actor, thread, turn, reached),
         TurnInput::Log {
             thread,
             why,
@@ -397,6 +416,7 @@ pub(crate) fn timer(actor: &mut Actor, timer: TurnTimer) {
         TimerKind::Rate => updates::on_rate_timer(actor, thread),
         TimerKind::Cancel(turn) => cancel::on_cancel_timer(actor, thread, turn),
         TimerKind::LimitRead(turn) => end::on_limit_read_timer(actor, thread, turn),
+        TimerKind::Offline(turn) => offline::on_timer(actor, thread, turn),
         TimerKind::Steer(message) => queue::on_steer_timer(actor, thread, message),
         TimerKind::StopWait(id) => sign_in::stop_timer(actor, id),
     }
@@ -519,46 +539,6 @@ pub(crate) fn shutdown(actor: &mut Actor) {
     came_back::shutdown(actor);
     cancel::shutdown(actor);
     super::limits::decide_stops_now(actor);
-}
-
-/// Whether `thread` has a current turn, a last turn whose end is not durable yet, or queued
-/// turns (`thread.turn_running` for `ArchiveThread`).
-pub(crate) fn turn_running(actor: &Actor, thread: ThreadId) -> bool {
-    actor.threads.get(&thread).is_some_and(|entry| {
-        let state = &entry.turn;
-        state.current.is_some() || state.closing.is_some() || !state.queue.is_empty()
-    })
-}
-
-/// The turn running on `thread` now, if any (`blocked.rs` attributes a blocked site to it).
-pub(crate) fn running_turn(actor: &Actor, thread: ThreadId) -> Option<TurnId> {
-    let current = actor.threads.get(&thread)?.turn.current.as_deref()?;
-    Some(current.turn)
-}
-
-/// Whether `thread`'s stream stays loaded: an agent, open turn, repair, retriable end, limit stop.
-pub(crate) fn keeps_loaded(actor: &Actor, thread: ThreadId) -> bool {
-    actor.threads.get(&thread).is_some_and(|entry| {
-        let state = &entry.turn;
-        state.agent.is_some()
-            || state.preparing.is_some()
-            || state.current.is_some()
-            || state.reconciling
-            || state
-                .closing
-                .as_ref()
-                .is_some_and(|closing| !closing.retried)
-    }) || super::limits::holds_stop(actor, thread)
-}
-
-/// Whether `matter`'s stream, once loaded to check a reused checkpoint, stays loaded: while a
-/// turn, an undo or a restore holds its writer, so the turn's next checkpoint reads it without
-/// a reload.
-pub(crate) fn keeps_matter_loaded(actor: &Actor, matter: MatterId) -> bool {
-    actor
-        .matters
-        .get(&matter)
-        .is_some_and(|entry| entry.turns.holder.is_some())
 }
 
 /// Whether the host is shutting down.
