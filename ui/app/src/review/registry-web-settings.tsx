@@ -70,7 +70,8 @@ const entry = (id: string, words: WordsRef, state: State = {}): Entry => ({
  * round 3 (icons first): UEP-05, UEP-09, UEP-11, UEP-12; UEP-17 (each plan's own what-line, now UEP-23's one note);
  * UEP-02 (the pane's lead, which repeated its first heading); UEP-16 (Not available yet under the Browser switch,
  * wrong once #870's browser runs without a website check); UEP-06 (Brave Search as Anthropic's "subprocessor", on
- * Claude's row; UEP-28 on Web search's row says it plainly, D-068). */
+ * Claude's row; UEP-28 on Web search's row says it plainly, D-068); UEP-19 (the browser's note, now UC-213 with ChatGPT in
+ * it). */
 export const WEB_SETTINGS: Entry[] = [
   entry("UEP-01", settingsWords("Privacy")),
   entry("UEP-03", settingsWords("What leaves this computer")),
@@ -107,7 +108,7 @@ export const WEB_SETTINGS: Entry[] = [
   entry("UEP-18", settingsWords("Search the web and read pages."), { tools: ON }),
   // the browser off: its window slashed, its helper shown (the no-check reason stands only while it is on)
   entry("UEP-10", settingsWords("Browser"), { tools: { ...ON, browser: false } }),
-  entry("UEP-19", settingsWords("Runs on this computer."), {
+  entry("UC-213", settingsWords("ChatGPT uses it. Runs on this computer."), {
     tools: { ...ON, browser: false },
   }),
   // the group's note, the room's words (UET's popover tooltip says them too)
