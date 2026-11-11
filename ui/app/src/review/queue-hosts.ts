@@ -241,6 +241,21 @@ export const waitingScene = (lang: Lang): QueueScene => ({
   joins: true,
 });
 
+/** matters/steer-claude, the answer stopped before Claude took the words: they stand where they were sent, not sent. */
+export const notSentScene = (lang: Lang): QueueScene => ({
+  title: say(lang, SAY.summoning),
+  entries: [
+    ...asked(lang),
+    ask(3, 2, say(lang, SAY.steerClaude), T1, pm(31), {
+      delivery: "steer",
+      steer: { not_sent: { turn: T1 } } as unknown as NonNullable<UserMessageEntry["steer"]>,
+    }),
+    ended(4, T1, pm(32), { stop: "cancelled" }),
+  ],
+  status: "idle",
+  joins: true,
+});
+
 /** matters/steer-claude, after Enter, once Claude took the words in: they stand in the running answer, at 4:31 pm. */
 export const steerMarkScene = (lang: Lang): QueueScene => ({
   title: say(lang, SAY.summoning),

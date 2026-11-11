@@ -17,7 +17,8 @@
 // with a thread (queue-slot.tsx), under the wait for another conversation (queue.tsx). After the hint's Send now or Queue
 // the focus goes back to the field, so the emptied words can be undone. An edit the strip couldn't make because its
 // message had already gone comes back into the field (after the words there, a blank line between); when it was the
-// last queued, the working line says so until the next send or the drained turn starts (else the strip does).
+// last queued, the working line says so until the next send or the drained turn starts (else the strip does). A steer
+// the host never sent comes back the same way, as it turns not sent, each once (steer-restore.ts).
 // Escape, and ⌘. on the Mac or Ctrl+. elsewhere, stop a running answer as Stop does (stop-key.ts).
 import {
   use,
@@ -60,6 +61,7 @@ import { useAgentPlan } from "./agent-plan.ts";
 import { useNow } from "../../store/limits.ts";
 import { pausedLine, type Paused } from "./limit-words.ts";
 import { joinsIn, pickFull, queueFullLine } from "./composer-queue.ts";
+import { useNotSentRestore } from "./steer-restore.ts";
 import { ComposerSteer } from "./composer-steer.tsx";
 import { asksWords } from "./step-names.ts";
 import { holdLine, useHold } from "../first-run/hold.ts";
@@ -302,6 +304,18 @@ export function WorkComposer({
     },
     [lost, store, stream],
   );
+  // a steer never sent: its words back into the field, after the words there on a new line; with no field, the draft
+  useNotSentRestore(store, stream, (text) => {
+    const f = field.current;
+    if (f !== null) {
+      const there = f.text();
+      if (there === "") f.fill(text);
+      else f.setText(`${there}\n${text}`);
+    } else if (draftKey !== null) {
+      const there = drafts.get(draftKey) ?? "";
+      drafts.set(draftKey, there === "" ? text : `${there}\n${text}`);
+    }
+  });
   const sendNowField = () =>
     send(field.current?.text() ?? "", { behind: true, delivery: "send_now" });
   // the stopped question, once per break, and only into an empty field: words typed since keep their place, and fill

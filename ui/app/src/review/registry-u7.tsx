@@ -28,6 +28,7 @@ import {
   sentNowScene,
   steerMarkScene,
   steerWords,
+  notSentScene,
   waitingScene,
   type QueueScene,
 } from "./queue-hosts.ts";
@@ -336,5 +337,11 @@ export const U7: Entry[] = [
     words: matterWords("Sends when {name} finishes"),
     screen: "matters/steer-claude",
     render: (lang) => over(waitingScene(lang)),
+  },
+  {
+    id: "U7-34",
+    words: matterWords("Not sent, because you stopped the answer."),
+    screen: "matters/steer-claude",
+    render: (lang) => over(notSentScene(lang)),
   },
 ];

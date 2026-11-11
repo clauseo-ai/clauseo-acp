@@ -2,7 +2,8 @@
 // memoized on its id, so a flush renders only the rows whose part changed. A paged row (older entries, page_entries)
 // shows the entry it was given. Permissions and elicitations are permission-row.tsx's; a restore made from Versions
 // while the conversation was open shows as a quiet line; other markers, versions and compaction show nothing yet. A queued or removed message shows nothing (the queue's strip holds it), a steer taken into the
-// answer shows as its mark, and a steer not yet resolved as its words waiting, with Send now (steer.ts, steer-rows.tsx).
+// answer shows as its mark, a steer not yet resolved as its words waiting, with Send now, and a steer never sent as its
+// words and that they were not sent (steer.ts, steer-rows.tsx).
 import { memo, useState, useSyncExternalStore } from "react";
 import { QuestionLine, Who } from "@clauseo/components/clauseo/answer.tsx";
 import { FoldedQuestion } from "@clauseo/components/clauseo/question-fold.tsx";
@@ -35,9 +36,11 @@ import { questionText, useQuestionText, useStreaming } from "./live.ts";
 import { askedAs, backgroundOf, outcomeOf } from "./steer.ts";
 import {
   LiveSteerMark,
+  LiveSteerNotSent,
   LiveSteerWaiting,
   RequeuedLine,
   SteerMarkRow,
+  SteerNotSentRow,
   SteerWaitingRow,
 } from "./steer-rows.tsx";
 import { LimitStopRow, StepRow } from "./stop-rows.tsx";
@@ -137,6 +140,7 @@ function LiveUserMessage({
   if (as === "hidden") return null;
   if (as === "mark") return <LiveSteerMark id={id} stream={stream} entry={entry} />;
   if (as === "waiting") return <LiveSteerWaiting id={id} stream={stream} entry={entry} />;
+  if (as === "not_sent") return <LiveSteerNotSent id={id} stream={stream} entry={entry} />;
   return <LiveQuestion id={id} stream={stream} entry={entry} />;
 }
 
@@ -334,6 +338,7 @@ export const PagedRow = memo(function PagedRow({
     const text = questionText(id, m, undefined);
     if (as === "mark") return <SteerMarkRow id={id} entry={m} text={text} />;
     if (as === "waiting") return <SteerWaitingRow id={id} entry={m} text={text} />;
+    if (as === "not_sent") return <SteerNotSentRow id={id} text={text} />;
     return (
       <>
         <Question id={id} entry={m} text={text} slots={false} />

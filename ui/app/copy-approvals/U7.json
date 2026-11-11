@@ -255,5 +255,16 @@
     "status": "provisional",
     "at": "2026-11-11",
     "by": "app track (provisional; Rohan batch review)"
+  },
+  "U7-34": {
+    "en": "Not sent, because you stopped the answer.",
+    "hi": "नहीं भेजा गया, क्योंकि आपने उत्तर रोक दिया।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-11",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "approved",
+    "at": "2026-11-11",
+    "by": "Rohan",
+    "note": "Rohan, via the orchestrator (steer made honest)"
   }
 }

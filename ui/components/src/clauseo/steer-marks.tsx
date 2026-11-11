@@ -86,10 +86,10 @@ export function SteerMark({
   );
 }
 
-/** The lawyer's words sent while the answer ran that the agent hasn't taken in yet: no mark, since nothing says they
- * joined the answer, but a slip like a queued message's, where the mark would stand: the words at the lawyer's weight,
- * then when they go (`when`) and Send now (none without `onSendNow`). A refused Send now's words stand under
- * `when`. */
+/** The lawyer's words sent while the answer ran that the agent hasn't taken in, yet or at all: no mark, since nothing
+ * says they joined the answer, but a slip like a queued message's, where the mark would stand: the words at the
+ * lawyer's weight, then a quiet line (`when`: when they go, or that they were not sent) and Send now (none without
+ * `onSendNow`). A refused Send now's words stand under `when`. */
 export function SteerWaiting({
   text,
   when,
