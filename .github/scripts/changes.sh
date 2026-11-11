@@ -92,6 +92,8 @@ classify() {
     .gitignore | .gitattributes | */.gitignore | */.gitattributes) ;;
     # Nightly fuzzing only (fuzz.yml); no pull request job builds fuzz/.
     fuzz/*) ;;
+    # The counts Worker: its own workspace, built and tested by counts-worker.yml alone.
+    services/counts-worker/*) ;;
     # What every Rust build reads.
     Cargo.toml | Cargo.lock | clippy.toml) rust=true app=true ;;
     # The toolchain and cargo config change the binaries, so the scoreboards run too.

@@ -40,6 +40,7 @@ check "$F $F $F $F" rustfmt.toml taplo.toml _typos.toml deny.toml .gitleaks.toml
 check "$F $F $F $F" .gitignore .gitattributes
 check "$F $F $F $T" ui/.gitignore
 check "$F $F $F $F" fuzz/fuzz_targets/acp.rs fuzz/nightly.sh
+check "$F $F $F $F" services/counts-worker/src/lib.rs services/counts-worker/pnpm-lock.yaml
 
 # ui-only: smoke runs, the Rust build matrix does not.
 check "$F $T $T $T" ui/app/src/App.tsx
