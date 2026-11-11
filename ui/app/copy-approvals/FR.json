@@ -11,26 +11,15 @@
     "note": "Rohan, on the folder-rights copy page"
   },
   "FR-02": {
-    "en": "You can change files here, but not this folder's permissions. Clauseo needs them to keep Claude and ChatGPT inside the matter. Some edits won't go through.",
-    "hi": "आप यहाँ फ़ाइलें बदल सकते हैं, पर इस फ़ोल्डर की अनुमतियाँ नहीं। Claude और ChatGPT को मामले के भीतर रखने के लिए Clauseo को इनकी ज़रूरत है। कुछ संपादन नहीं हो पाएँगे।",
+    "en": "Clauseo can't add its protection to this folder, so it asks before each edit. In a folder you made yourself on this computer, such as one in Documents, it doesn't need to ask.",
+    "hi": "Clauseo इस फ़ोल्डर में अपनी सुरक्षा नहीं जोड़ सकता, इसलिए हर संपादन से पहले पूछता है। इस कंप्यूटर पर आपके खुद बनाए फ़ोल्डर में, जैसे Documents के किसी फ़ोल्डर में, उसे पूछने की ज़रूरत नहीं होती।",
     "hi_status": "provisional",
-    "hi_at": "2026-11-09",
-    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-09",
-    "by": "app track (codex-to-chatgpt: Codex → ChatGPT; Rohan batch review)",
-    "note": "Rohan's approved line with 'the agent' replaced by 'Claude and ChatGPT' (word list: no 'agent'); Rohan, running-page batch 2026-11-05 (written by app track)"
-  },
-  "FR-03": {
-    "en": "What to tell IT",
-    "hi": "IT को क्या बताएँ",
-    "hi_status": "provisional",
-    "hi_at": "2026-11-06",
+    "hi_at": "2026-11-11",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
     "status": "approved",
-    "at": "2026-11-04",
-    "by": "Rohan",
-    "note": "Rohan, on the folder-rights copy page"
+    "at": "2026-11-11",
+    "by": "orchestrator (IT sweep, 2026-11-11)",
+    "note": "why the bar asks, and where it needn't; was \"You can change files here, but not this folder's permissions…\" (IT sweep: What to tell IT, FR-03 and FR-05, retired)"
   },
   "FR-04": {
     "en": "Close",
@@ -39,17 +28,6 @@
     "at": "2026-11-04",
     "by": "Rohan",
     "note": "Rohan, on the folder-rights copy page"
-  },
-  "FR-05": {
-    "en": "Please give my account \"Change permissions\" on this folder: {path}. Clauseo, the app I use for this matter, adds one entry to the folder's permissions so Claude and ChatGPT, which it runs, can write only inside it. / Copy",
-    "hi": "कृपया इस फ़ोल्डर पर मेरे खाते को \"Change permissions\" दें: {path}। इस मामले के लिए मेरा ऐप Clauseo फ़ोल्डर की अनुमतियों में एक प्रविष्टि जोड़ता है, ताकि वह जिन Claude और ChatGPT को चलाता है, वे केवल इसी फ़ोल्डर के भीतर लिख सकें। / कॉपी करें",
-    "hi_status": "provisional",
-    "hi_at": "2026-11-09",
-    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-09",
-    "by": "app track (codex-to-chatgpt: Codex → ChatGPT; Rohan batch review)",
-    "note": "Rohan's approved line with 'the agent' replaced by 'Claude and ChatGPT' (word list: no 'agent'); Rohan, running-page batch 2026-11-05 (written by app track)"
   },
   "FR-06": {
     "en": "Can't set folder permissions / Clauseo can't change this folder's permissions, so it asks before each edit.",

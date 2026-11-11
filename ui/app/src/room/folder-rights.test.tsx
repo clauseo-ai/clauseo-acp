@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 // Folder rights in the room (folder-notice.tsx, folder-reason.tsx), over FakeTransport: the host's folder_support
-// gives each matter its notice once until Close, What to tell IT names the folder, a network drive or a drive without
+// gives each matter its notice once until Close with no IT button, a network drive or a drive without
 // permissions marks the matter Not protected, and a pending file edit's card in a folder whose permissions can't
 // change says why it asks. A folder the host couldn't check says Claude asks before every change, unless the folder
 // is missing. "unknown", a newer Clauseo's reading, and no reading show nothing.
@@ -38,7 +38,7 @@ const text = () => notice()?.textContent ?? "";
 const info = () => notice()?.querySelector(".room-info")?.getAttribute("aria-label") ?? null;
 const unprotected = () => h!.host.querySelector(".np-mark");
 
-test("a folder whose permissions can't change: Clauseo asks before each edit, why behind the info icon, no Not protected", async () => {
+test("a folder whose permissions can't change: Clauseo asks before each edit, why behind the info icon, nothing for IT, no Not protected", async () => {
   h = await mountRoom({ matters: [matter("cant_change_permissions")] });
   expect(notice()?.getAttribute("aria-label")).toBe(
     fr("en", "Clauseo asks before each edit in this folder"),
@@ -47,22 +47,13 @@ test("a folder whose permissions can't change: Clauseo asks before each edit, wh
   expect(info()).toBe(
     fr(
       "en",
-      "You can change files here, but not this folder's permissions. Clauseo needs them to keep Claude and ChatGPT inside the matter. Some edits won't go through.",
+      "Clauseo can't add its protection to this folder, so it asks before each edit. In a folder you made yourself on this computer, such as one in Documents, it doesn't need to ask.",
     ),
   );
-  expect(h.one("folder-it")?.textContent).toBe(fr("en", "What to tell IT"));
+  expect(h.one("folder-it")).toBeNull();
+  expect(notice()?.querySelectorAll("button")).toHaveLength(2);
+  expect(notice()?.textContent).not.toMatch(/\bIT\b/);
   expect(unprotected()).toBeNull();
-});
-
-test("What to tell IT opens the text for IT with the matter's folder in it, and Copy", async () => {
-  h = await mountRoom({ matters: [matter("cant_change_permissions")] });
-  expect(h.one("folder-it-text")).toBeNull();
-  await h.click(h.one("folder-it"));
-  expect(h.one("folder-it")?.getAttribute("aria-expanded")).toBe("true");
-  const it = h.one("folder-it-text")?.textContent ?? "";
-  expect(it).toContain(`on this folder: \u2068${FOLDER}\u2069.`);
-  expect(it).toContain("so Claude and ChatGPT, which it runs, can write only inside it.");
-  expect(it).toContain(fr("en", "Copy"));
 });
 
 test("Close shuts the notice for that matter only, and it stays shut when the matter opens again", async () => {

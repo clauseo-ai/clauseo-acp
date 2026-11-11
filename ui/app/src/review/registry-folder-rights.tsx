@@ -13,7 +13,7 @@ import { FakeTransport } from "../transport/fake-transport.ts";
 import type { FolderSupportKind, ViewEntry } from "../transport/protocol.ts";
 import type { Entry } from "./entry.ts";
 import { MATTER, NEW_MATTER, roomHost, threadHost, type Step } from "./hosts.ts";
-import { RoomAfter, RoomFocusing, RoomOver, RoomPressing } from "./states.tsx";
+import { RoomAfter, RoomFocusing, RoomOver } from "./states.tsx";
 import {
   errorWords,
   folderCardWords,
@@ -119,30 +119,20 @@ export const FOLDER_RIGHTS: Entry[] = [
     joined([w("Clauseo asks before each edit"), w("Clauseo asks before each edit in this folder")]),
     () => <RoomOver host={room("cant_change_permissions")} />,
   ),
-  // behind its info icon
+  // behind its info icon: why it asks, and where it needn't (IT sweep)
   entry(
     "FR-02",
     w(
-      "You can change files here, but not this folder's permissions. Clauseo needs them to keep Claude and ChatGPT inside the matter. Some edits won't go through.",
+      "Clauseo can't add its protection to this folder, so it asks before each edit. In a folder you made yourself on this computer, such as one in Documents, it doesn't need to ask.",
     ),
     () => <RoomFocusing host={room("cant_change_permissions")} focus={INFO} />,
   ),
-  entry("FR-03", w("What to tell IT"), () => <RoomOver host={room("cant_change_permissions")} />),
+  // FR-03, retired: What to tell IT left the notice (IT sweep)
   // Close, the cross's tooltip and name: the existing word
   entry("FR-04", uiWords("Close"), () => (
     <RoomFocusing host={room("cant_change_permissions")} focus='[data-testid="folder-close"]' />
   )),
-  // What to tell IT open: the text for IT, the matter's folder in it, selected, and Copy
-  entry(
-    "FR-05",
-    joined([
-      w(
-        'Please give my account "Change permissions" on this folder: {path}. Clauseo, the app I use for this matter, adds one entry to the folder\'s permissions so Claude and ChatGPT, which it runs, can write only inside it.',
-      ),
-      w("Copy"),
-    ]),
-    () => <RoomPressing host={room("cant_change_permissions")} press="folder-it" />,
-  ),
+  // FR-05, retired: the text for IT and its Copy left with FR-03 (IT sweep)
   // the reason under "Editing files" on the card, and behind its info icon
   entry(
     "FR-06",
