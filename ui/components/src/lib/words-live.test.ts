@@ -178,8 +178,8 @@ const PLANNED_LINES = [
     "पहले Codex में ChatGPT से साइन इन करें। आपका प्रश्न रखा गया है।",
     "Sign in with gemini first. Your question is kept.",
     "पहले gemini से साइन इन करें। आपका प्रश्न रखा गया है।",
-    "Sign in to the AI first. Your question is kept.",
-    "पहले AI में साइन इन करें। आपका प्रश्न रखा गया है।",
+    "Sign in first. Your question is kept.",
+    "पहले साइन इन करें। आपका प्रश्न रखा गया है।",
   ],
   [
     "agent.unsupported_version",

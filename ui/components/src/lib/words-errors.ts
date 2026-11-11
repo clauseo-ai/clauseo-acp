@@ -300,7 +300,7 @@ const PLANNED: Partial<
   "agent.auth_required": {
     chatgpt: "Sign in with ChatGPT in Codex first. Your question is kept.",
     named: "Sign in with {name} first. Your question is kept.",
-    nameless: "Sign in to the AI first. Your question is kept.",
+    nameless: "Sign in first. Your question is kept.",
   },
   "agent.unsupported_version": {
     chatgpt: "This version of Codex doesn't work with Clauseo.",

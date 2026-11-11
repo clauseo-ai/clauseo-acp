@@ -83,12 +83,15 @@
     "note": "Rohan, via the orchestrator (U6-followup page)"
   },
   "U6F-11": {
-    "en": "Sign in to the AI first. Your question is kept.",
-    "hi": "पहले AI में साइन इन करें। आपका प्रश्न रखा गया है।",
+    "en": "Sign in first. Your question is kept.",
+    "hi": "पहले साइन इन करें। आपका प्रश्न रखा गया है।",
     "status": "approved",
-    "at": "2026-11-02",
-    "by": "Rohan",
-    "note": "Rohan, via the orchestrator (U6-followup page)"
+    "at": "2026-11-11",
+    "by": "Rohan (via the orchestrator)",
+    "note": "Rohan, via the orchestrator (U6-followup page)",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-11",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)"
   },
   "U6F-12": {
     "en": "This version of the AI doesn't work with Clauseo.",
