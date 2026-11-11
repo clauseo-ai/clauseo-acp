@@ -115,3 +115,24 @@ describe("a link to a file anywhere else names nothing", () => {
     expect(at(`${MATTER}/${REPLY}`, FOLDER, [])).toBeUndefined();
   });
 });
+
+describe("a line suffix", () => {
+  const wall = ["app.py", "My Project/My Report.md", "notes:12.md"];
+  const folder = "Documents/tmatter";
+  const root = "/Users/rohan/Documents/tmatter";
+  test("a trailing :N or :N:M is dropped when the path with it names nothing", () => {
+    expect(paperLinkOf(`${root}/app.py:12`, wall, folder)).toBe("app.py");
+    expect(paperLinkOf(`${root}/My Project/My Report.md:3:5`, wall, folder)).toBe(
+      "My Project/My Report.md",
+    );
+    expect(paperLinkOf("app.py:12", wall, folder)).toBe("app.py");
+    expect(paperLinkOf(`${root}/notes:12.md`, wall, folder)).toBe("notes:12.md");
+  });
+  test("never a drive, a colon inside a name, or a path outside the matter", () => {
+    expect(paperLinkOf("C:12", ["C"], folder)).toBeUndefined();
+    expect(paperLinkOf(`${root}/notes:12`, ["notes"], folder)).toBe("notes");
+    expect(paperLinkOf(`${root}/notes:x.md`, ["notes"], folder)).toBeUndefined();
+    expect(paperLinkOf("/Users/rohan/code/app.py:12", wall, folder)).toBeUndefined();
+    expect(paperLinkOf(`${root}/Reply notes.md:12`, wall, folder)).toBeUndefined();
+  });
+});

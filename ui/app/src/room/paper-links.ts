@@ -50,7 +50,10 @@ function targetOf(href: string): Target | null {
   const bare = (href.split(/[?#]/)[0] ?? "").trim();
   let kind: Target["kind"] = "relative";
   let rest = bare;
-  const scheme = SCHEME.exec(bare)?.[1]?.toLowerCase();
+  // `Reply.md:12` is a name and a line, not a scheme
+  const scheme = /^[^:/]+(?::\d+){1,2}$/.test(bare)
+    ? undefined
+    : SCHEME.exec(bare)?.[1]?.toLowerCase();
   if (scheme === "file") {
     // file:///Users/…, file://localhost/Users/…, file:///C:/…
     rest = bare.slice("file:".length).replace(/^\/\/(?:localhost)?(?=\/)/i, "");
@@ -103,6 +106,7 @@ function only(paths: readonly string[], same: (path: string) => boolean): string
  * matter-relative paths, `folder` the matter's `folder_display` ("" or null when the host gives none). In order:
  * (a) an absolute path (or `file://` URL) exactly inside the matter's folder, at a paper's path; (b) a relative path
  * that is exactly a paper's path; (c) for a relative bare name or a `sandbox:` link, the one paper with that file name.
+ * A trailing line suffix (`:12`, `:12:5`) is dropped when the path with it names nothing; a fragment (`#L12`) always is.
  * A path that climbs out of the matter, a name two papers share, a path outside the matter and a file the wall doesn't
  * show all give undefined.
  */
@@ -116,6 +120,24 @@ export function paperLinkOf(
   const papers = paths.map((p) => p.replaceAll("\\", "/"));
   const back = (found: string | undefined) =>
     found === undefined ? undefined : paths[papers.indexOf(found)];
+  const found = matched(target, papers, folder);
+  if (found !== undefined) return back(found);
+  // a line suffix, as agents cite code (`app.py:12`, `My Report.md:3:5`): the paper without it
+  const bare = target.path.replace(LINE, "");
+  return bare === target.path || bare === "" || /^[a-z]$/i.test(nameOf(bare))
+    ? undefined
+    : back(matched({ ...target, path: bare }, papers, folder));
+}
+
+/** A trailing line, or line and column, after the last colon: `:12`, `:12:5`. */
+const LINE = /(?::\d+){1,2}$/;
+
+/** The paper path among `papers` (`/` separators) a target names, by (a), (b) and (c), or undefined. */
+function matched(
+  target: Target,
+  papers: readonly string[],
+  folder: string | null,
+): string | undefined {
   const { kind, path } = target;
   if (kind !== "relative" && (path.startsWith("/") || DRIVE.test(path) || path.startsWith("~/"))) {
     const inside = folder ? insideFolder(path, folder) : null;
@@ -124,17 +146,17 @@ export function paperLinkOf(
       const found = windows
         ? only(papers, (p) => p.toLowerCase() === rest.toLowerCase())
         : papers.find((p) => p === rest);
-      if (found !== undefined) return back(found);
+      if (found !== undefined) return found;
     }
     // an absolute path elsewhere names nothing on the wall; ChatGPT's sandbox paths are its own, not the matter's
     if (kind === "absolute") return undefined;
   } else {
     const exact = papers.find((p) => p === path);
-    if (exact !== undefined) return back(exact);
+    if (exact !== undefined) return exact;
     if (kind === "relative" && path.includes("/")) return undefined;
   }
   const name = nameOf(path);
-  return back(only(papers, (p) => nameOf(p) === name));
+  return only(papers, (p) => nameOf(p) === name);
 }
 
 /** Which paper on the wall a file link in an answer names (paperLinkOf): the open matter's listed papers, in its
