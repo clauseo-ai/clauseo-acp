@@ -289,6 +289,7 @@ fn a_wildcard_in_any_path_sends_no_sandbox() {
 /// macOS, only the read lists on Linux, whose write lists take no glob. Each escaped allowed
 /// folder also goes in with `/**`, since a glob allow names only itself.
 #[test]
+#[cfg_attr(windows, ignore = "Claude's sandbox is macOS and Linux only")]
 fn a_bracket_is_escaped_and_the_sandbox_stays_on() {
     let mut session = Session::new("s-1");
     session.matter = PathBuf::from("/Users/l/Clients/Smith [2024]");
@@ -505,6 +506,7 @@ fn the_matter_marker_is_denied_to_claudes_edit() {
 
 /// The trust roots file opens alone, never its folder or `<data>`; without one nothing opens.
 #[test]
+#[cfg_attr(windows, ignore = "Claude's sandbox is macOS and Linux only")]
 fn only_the_trust_roots_file_opens() {
     let mut session = Session::new("s-1");
     let sandbox = mac(&session.paths()).unwrap();
