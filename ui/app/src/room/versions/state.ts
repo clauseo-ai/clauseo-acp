@@ -5,6 +5,7 @@ import type {
   FileChange,
   FileChoice,
   RestorePreview,
+  SkippedFile,
   StepEntry,
   ThreadId,
   ThreadStatus,
@@ -53,7 +54,14 @@ export function inRowOrder(t: Timeline, id: string, paths: readonly string[]): s
 export type Done =
   | { kind: "restored"; to: string; n: number; outcome: Outcome }
   | { kind: "undidRestore"; at: Timestamp }
-  | { kind: "undidChange"; of: Timestamp; papers: readonly string[] };
+  | {
+      kind: "undidChange";
+      of: Timestamp;
+      papers: readonly string[];
+      /**  The files the lawyer chose to undo that stay as they are: Clauseo had no earlier copy of
+       * them. */
+      kept?: readonly SkippedFile[];
+    };
 
 /** The restore a restored line's Undo takes back: only one the host wrote and marked on the matter's stream. A restore
  * that found nothing to write answers with a version that was already there, and has no marker. */

@@ -15,6 +15,7 @@ import type {
   ViewEntry,
 } from "../../transport/protocol.ts";
 import { orderOf, pageBefore } from "../matter-stream.ts";
+import { stepUndoneOf } from "../undone-marker.ts";
 import { lockedFiles, wordLocks } from "../word/lock.ts";
 import { inRowOrder, type Ask, type Done, type Unsaved } from "./state.ts";
 import type { Timeline } from "./timeline.ts";
@@ -110,28 +111,14 @@ export function movedPast(view: StreamView, base: ReadonlySet<string>, own: Own)
   return false;
 }
 
-/** The files the host put back for a turn's undo, as the step_undone marker on its conversation's stream says; null
- * until the marker comes. */
-export function restoredOf(
-  store: ViewStore,
-  thread: ThreadId,
-  turn: TurnId,
-): readonly string[] | null {
-  const view = store.view(streamOf(thread));
-  let restored: readonly string[] | null = null;
-  for (const id of view?.ids ?? []) {
-    const undone = view?.entries.get(id)?.marker?.kind.step_undone;
-    if (undone?.turn === turn) restored = undone.restored;
-  }
-  return restored;
-}
-
 /** The undo a line says was done: the turn's conversation, the turn, and the version it took back. */
 export type Undid = { thread: ThreadId; turn: TurnId; id: string };
 
-/** The line for the room's last act: it stands until the matter's stream gains an entry not the act's own, and an
- * undo's names the files the host put back once the marker on the conversation's stream says which: a file the host
- * couldn't write stays as it is, whatever the lawyer chose. */
+/** The line for the room's last act: it stands until the matter's stream gains an entry not the
+ * act's own, and an undo's names the files the host put back once the step_undone marker on the
+ * conversation's stream says which: a file the host couldn't write stays as it is, whatever the
+ * lawyer chose. The marker's unversioned files, which Clauseo had no earlier copy of, are the
+ * line's kept: never named as gone back. */
 export class DoneWatch {
   /** The matter's entries as the act was sent. */
   #base: ReadonlySet<string> = new Set();
@@ -159,11 +146,25 @@ export class DoneWatch {
     }
     if (done.kind !== "undidChange" || by.undid === null) return done;
     const { thread, turn, id } = by.undid;
-    const restored = restoredOf(store, thread, turn);
-    // none put back says nothing the line could name: it keeps the lawyer's choices
-    if (restored === null || restored.length === 0) return done;
-    const papers = inRowOrder(timeline, id, restored);
-    return papers.join("\n") === done.papers.join("\n") ? done : { ...done, papers };
+    const undone = stepUndoneOf(store.view(streamOf(thread)), turn);
+    if (undone === null) return done;
+    const kept = undone.unversioned;
+    const keptPaths = new Set(kept.map((f) => f.path));
+    // none put back says nothing the line could name: it keeps the lawyer's choices, less those
+    // Clauseo had no earlier copy of
+    const papers =
+      undone.restored.length === 0
+        ? done.papers.filter((p) => !keptPaths.has(p))
+        : inRowOrder(
+            timeline,
+            id,
+            undone.restored.filter((p) => !keptPaths.has(p)),
+          );
+    const same =
+      papers.join("\n") === done.papers.join("\n") &&
+      kept.map((f) => `${f.path}:${f.reason}`).join("\n") ===
+        (done.kept ?? []).map((f) => `${f.path}:${f.reason}`).join("\n");
+    return same ? done : { ...done, papers, kept };
   }
 }
 

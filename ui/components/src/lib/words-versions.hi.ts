@@ -168,6 +168,14 @@ const OWN = {
   "Choose for each document.": "हर दस्तावेज़ के लिए चुनें।",
   "Undid the change at {time}. {papers} went back, and the undo is a version of its own.":
     "{time} बजे का बदलाव पूर्ववत किया गया। {papers} पहले जैसे हो गए, और यह पूर्ववत करना एक अलग संस्करण है।",
+  // after an undo, a file it kept because Clauseo had no earlier copy (Hindi provisional,
+  // 2026-11-11)
+  "Clauseo can't undo the change to {file}. It was only in {service} before, so there's no earlier copy here. {service}'s version history has the earlier one.":
+    "Clauseo {file} में हुआ बदलाव पूर्ववत नहीं कर सकता। यह पहले केवल {service} में था, इसलिए इसकी कोई पुरानी प्रति यहाँ नहीं है। पुरानी प्रति {service} के पुराने संस्करणों में है।",
+  "Clauseo can't undo the change to {file}. It was only online before, so there's no earlier copy here. Your cloud service's version history may have the earlier one.":
+    "Clauseo {file} में हुआ बदलाव पूर्ववत नहीं कर सकता। यह पहले केवल ऑनलाइन था, इसलिए इसकी कोई पुरानी प्रति यहाँ नहीं है। पुरानी प्रति शायद आपकी क्लाउड सेवा के पुराने संस्करणों में हो।",
+  "Clauseo can't undo the change to {file}. It didn't keep a copy of it before, so there's no earlier copy to bring back.":
+    "Clauseo {file} में हुआ बदलाव पूर्ववत नहीं कर सकता। इसकी कोई प्रति पहले नहीं रखी गई थी, इसलिए वापस लाने के लिए कोई पुरानी प्रति नहीं है।",
   // a version that couldn't be saved
   "Clauseo changed {paper} at {time}, and the change couldn't be kept as a version. {paper} stands as Clauseo left it.":
     "Clauseo ने {time} बजे {paper} बदला, पर यह बदलाव संस्करण के रूप में नहीं रखा जा सका। {paper} वैसा ही है जैसा Clauseo ने छोड़ा।",

@@ -7,6 +7,7 @@ import {
   header,
   MATTER,
   reset,
+  STREAM,
   THREAD,
   TURN,
   upsert,
@@ -17,9 +18,11 @@ import type {
   BlacklineParagraph,
   CheckpointKind,
   FileChange,
+  FolderPlace,
   MatterSummary,
   QueryResult,
   RestorePreview,
+  SkippedFile,
   StepEntry,
   ViewEntry,
   ViewPatchBody,
@@ -143,6 +146,12 @@ export type Matter = {
   removes?: string[];
   /** The conversation's stream records a restore made from Versions while it was open, or the undo of one. */
   recorded?: "restore" | "undo";
+  /**  Undoing the turn three days ago keeps these: Clauseo had no earlier copy of them (the
+   * step_undone marker's unversioned); the rest of its files go back. */
+  unversioned?: SkippedFile[];
+  /**  Where list_papers says the folder lives (local by default): its sync service names the
+   * cloud-only lines. */
+  place?: FolderPlace;
 };
 
 /** The host's Word tool's marking up of the notice: a word out and a word in, and a paragraph added. */
@@ -236,8 +245,15 @@ export function versionsHost(m: Matter): FakeTransport {
     modified: today(0),
   }));
   const transport: FakeTransport = new FakeTransport({
-    ...(m.openable === true
-      ? { next: fakeNext({ matters: () => [detailed(THE_MATTER)], papers, parts: ["papers"] }) }
+    ...(m.openable === true || m.place !== undefined
+      ? {
+          next: fakeNext({
+            matters: () => [detailed(THE_MATTER)],
+            papers,
+            parts: ["papers"],
+            listing: { place: m.place ?? "local" },
+          }),
+        }
       : {}),
     query: (query) => {
       if (query === "list_matters") return { matters: [THE_MATTER] };
@@ -261,6 +277,7 @@ export function versionsHost(m: Matter): FakeTransport {
       throw new Error(`not scripted: ${JSON.stringify(query)}`);
     },
     dispatch: (envelope) => {
+      if (envelope.command.undo_step !== undefined) return undid(transport, m, files);
       const to = envelope.command.restore_version?.checkpoint;
       if (to === undefined) return "done";
       if ((m.locked?.length ?? 0) > 0)
@@ -292,6 +309,36 @@ export function versionsHost(m: Matter): FakeTransport {
       ),
   });
   return transport;
+}
+
+/**  The host's undo of the turn three days ago: its undo version, the step undone, and its marker,
+ * which names the files it put back and those `m` says it had no earlier copy of. */
+function undid(transport: FakeTransport, m: Matter, files: FileChange[]) {
+  const unversioned = m.unversioned ?? [];
+  const kept = unversioned.map((f) => f.path);
+  const marker: ViewEntry = {
+    marker: {
+      order: 40,
+      event: uuid(40, 9),
+      ts: Date.now(),
+      kind: {
+        step_undone: {
+          turn: TURN,
+          checkpoint: "cp5",
+          restored: files.map((f) => f.path).filter((p) => !kept.includes(p)),
+          kept,
+          ...(unversioned.length === 0 ? {} : { unversioned }),
+        },
+      },
+    },
+  };
+  queueMicrotask(() => {
+    const undo = version(5, "undo", Date.now(), files, TURN);
+    transport.deliver(event(batch(2, [upsert(undo)], undefined, MATTER_STREAM)));
+    const step = stepEntry(9, { files, checkpoint_after: "cp2", undone: true });
+    transport.deliver(event(batch(2, [upsert(step), upsert(marker)], undefined, STREAM)));
+  });
+  return { step_undone: { checkpoint: "cp5" } };
 }
 
 /** Versions open, from the toolbar's pair. */
@@ -339,6 +386,10 @@ const SHEET = [file("Notes for counsel.txt")];
 const PDF_SHEET = [file("Annexure 3.pdf")];
 /** H11's open_file, standing in on the review page: it opens nothing. */
 const OPENS: StandIns = { openFile: async () => ({ protected_view: false }) };
+
+/** Versions after the lawyer undid the turn three days ago with every file, over `m`'s host. */
+export const undoneTurn = (id: string, words: WordsRef, m: Matter): Entry =>
+  state(id, words, m, [OPEN, EARLIER, UNDO, CONFIRM]);
 
 /** U8's entries, each id written as it is: an id never moves when an entry is added or taken out. */
 export const U8: Entry[] = [
