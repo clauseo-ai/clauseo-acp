@@ -27,8 +27,10 @@ pub(super) fn on_delta(actor: &mut Actor, thread: ThreadId, delta: TextIn) -> Re
     }
     let now = actor.now().mono;
     let state = state(actor, thread).ok_or_else(|| lost("a thread"))?;
-    // The usage counts' `answer_ended.first_words`: the first answer text of the turn.
+    // The usage counts' `answer_ended.first_words` and the title window's answered turn: the
+    // first non-empty answer text of the turn.
     if delta.kind == TextKind::Answer
+        && !delta.text.is_empty()
         && let Some(current) = state
             .current
             .as_mut()

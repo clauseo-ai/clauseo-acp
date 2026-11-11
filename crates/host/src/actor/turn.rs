@@ -82,6 +82,7 @@ pub(crate) use restore::{
 };
 pub(crate) use route::{TurnCommand, command};
 pub(crate) use sign_in::on_request as sign_in_request;
+pub(crate) use state::history_settles;
 pub(crate) use state::{busy, keeps_loaded, keeps_matter_loaded, running_turn, turn_running};
 pub(crate) use writer::{
     hold_for_relocate, matter_busy, release_relocate, stop_agents, writer_busy,
@@ -132,6 +133,8 @@ pub(crate) struct TurnState {
     /// The turn `HostHandle::stop_agents` cancelled: unless it ends `EndTurn`, it goes back
     /// to the queue held for the sign-in (`sign_in.rs`).
     stopped_for_sign_in: Option<TurnId>,
+    /// Where the thread's name stands for the agent's titles (D-070), in this run.
+    title: state::TitleWindow,
 }
 
 /// A turn whose `TurnEnded` is sent but not durable yet.
