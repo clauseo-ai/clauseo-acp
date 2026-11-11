@@ -154,7 +154,7 @@ export const SECTIONS: readonly SectionEntry[] = [
     lead: (lang) =>
       mw(
         lang,
-        "A tool runs on this computer. It can reach anything your account here can: your files, your programs and the internet.",
+        "Tools run on this computer with the same access you have: your files, your programs and the internet. Add only tools you trust.",
       ),
     shown: (ctx) => toolsCommandsOf(ctx.transport) !== null,
     Body: ToolsSection,

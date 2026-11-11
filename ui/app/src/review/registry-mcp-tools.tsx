@@ -1,4 +1,4 @@
-// Settings › Tools' copy review entries (UC-169 to UC-189): each new string in the real settings window over the fake
+// Settings › Tools' copy review entries (UC-169 to UC-196, UC-205): each new string in the real settings window over the fake
 // host, open at Tools in the scene that shows it (settings/sections/tools-probe.tsx, the probe's scenes), at the
 // window's size. The address form's strings show with its preview on, as REMOTE_TOOLS keeps it hidden until remote
 // tools land. Hindi provisional.
@@ -31,7 +31,7 @@ export const MCP_TOOLS: Entry[] = [
   entry("UC-169", "Tools", "list"),
   entry(
     "UC-170",
-    "A tool runs on this computer. It can reach anything your account here can: your files, your programs and the internet.",
+    "Tools run on this computer with the same access you have: your files, your programs and the internet. Add only tools you trust.",
     "list",
   ),
   entry("UC-171", "Not used in the Safe workspace.", "list"),
@@ -41,7 +41,7 @@ export const MCP_TOOLS: Entry[] = [
   entry("UC-175", "Your firm manages tools on this computer.", "firm-managed"),
   entry("UC-176", "Name", "add-error"),
   entry("UC-177", "Command", "add-error"),
-  entry("UC-178", "Use the program's full path, such as {example}.", "add-error"),
+  entry("UC-178", "A program name such as npx, or its full path.", "edit-saved"),
   entry("UC-179", "Arguments, one per line", "add-error"),
   entry("UC-180", "Environment values", "edit-saved"),
   entry("UC-181", "Saved", "edit-saved"),
@@ -53,4 +53,13 @@ export const MCP_TOOLS: Entry[] = [
   entry("UC-187", "Use a full address, such as {example}.", "url-invalid"),
   entry("UC-188", "Address", "remote"),
   entry("UC-189", "Headers", "remote"),
+  // plan.md's changes after the first look: Import leads, and the host finds a bare program name itself
+  entry("UC-190", "Import {count} tools from {source}", "empty-import"),
+  entry("UC-191", "Import 1 tool from {source}", "empty-import"),
+  entry("UC-192", "Imported {count} tools.", "list-import"),
+  entry("UC-193", "Imported 1 tool.", "imported-one"),
+  entry("UC-194", "{count} couldn't be imported: {names}.", "list-import"),
+  entry("UC-195", "Clauseo couldn't find {program} on this computer.", "add-error"),
+  entry("UC-196", "Use a program name or its full path.", "command-invalid"),
+  entry("UC-205", "Use letters, numbers and _ only.", "env-invalid"),
 ];

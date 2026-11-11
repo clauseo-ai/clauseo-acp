@@ -1048,15 +1048,15 @@
     "note": "Settings › Tools: the section's name, on the side and as the pane's head"
   },
   "UC-170": {
-    "en": "A tool runs on this computer. It can reach anything your account here can: your files, your programs and the internet.",
-    "hi": "टूल इसी कंप्यूटर पर चलता है। यहाँ आपका खाता जिस भी चीज़ तक पहुँच सकता है, टूल भी पहुँच सकता है: आपकी फ़ाइलें, आपके प्रोग्राम और इंटरनेट।",
+    "en": "Tools run on this computer with the same access you have: your files, your programs and the internet. Add only tools you trust.",
+    "hi": "टूल इसी कंप्यूटर पर उसी पहुँच के साथ चलते हैं जो आपके पास है: आपकी फ़ाइलें, आपके प्रोग्राम और इंटरनेट। केवल उन्हीं टूल को जोड़ें जिन पर आपको भरोसा है।",
     "hi_status": "provisional",
     "hi_at": "2026-11-11",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
     "status": "provisional",
     "at": "2026-11-11",
-    "by": "app track (provisional; orchestrator to approve through the shots)",
-    "note": "Settings › Tools: the pane's lead, the plain line on what a lawyer-added MCP server can reach (plan.md: one plain line, honest, no IT wording)"
+    "by": "app track (provisional; orchestrator's changes after the first look, 2026-11-11)",
+    "note": "Settings › Tools: the pane's lead, the plain line (plan.md, changes after the first look 4)"
   },
   "UC-171": {
     "en": "Not used in the Safe workspace.",
@@ -1136,15 +1136,15 @@
     "note": "Settings › Tools form: the program field (and, with remote tools, the kind switch's local side)"
   },
   "UC-178": {
-    "en": "Use the program's full path, such as {example}.",
-    "hi": "प्रोग्राम का पूरा पाथ लिखें, जैसे {example}।",
+    "en": "A program name such as npx, or its full path.",
+    "hi": "प्रोग्राम का नाम, जैसे npx, या उसका पूरा पाथ।",
     "hi_status": "provisional",
     "hi_at": "2026-11-11",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
     "status": "provisional",
     "at": "2026-11-11",
-    "by": "app track (provisional; orchestrator to approve through the shots)",
-    "note": "Settings › Tools form: the Command field's line, and its refusal for a bare name (commandNotAbsolute); {example} is a full path for this computer's system, e.g. /opt/homebrew/bin/npx"
+    "by": "app track (provisional; orchestrator's changes after the first look, 2026-11-11)",
+    "note": "Settings › Tools form: the Command field's optional help; the host resolves a bare name itself (changes after the first look 2)"
   },
   "UC-179": {
     "en": "Arguments, one per line",
@@ -1231,8 +1231,8 @@
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
     "status": "provisional",
     "at": "2026-11-11",
-    "by": "app track (provisional; orchestrator to approve through the shots)",
-    "note": "Settings › Tools form: refusals nameInvalid, envNameInvalid and headerNameInvalid"
+    "by": "app track (provisional; orchestrator's changes after the first look, 2026-11-11)",
+    "note": "Settings › Tools form: refusals nameInvalid and headerNameInvalid (env names have UC-205)"
   },
   "UC-187": {
     "en": "Use a full address, such as {example}.",
@@ -1242,8 +1242,8 @@
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
     "status": "provisional",
     "at": "2026-11-11",
-    "by": "app track (provisional; orchestrator to approve through the shots)",
-    "note": "Settings › Tools remote form (behind REMOTE_TOOLS): the Address field's line and its refusal urlInvalid; {example} is https://example.com/mcp"
+    "by": "app track (provisional; orchestrator's changes after the first look, 2026-11-11)",
+    "note": "Settings › Tools remote form (behind REMOTE_TOOLS): the Address field's line and its refusal urlInvalid; {example} is https://tools.example.com/mcp"
   },
   "UC-188": {
     "en": "Address",
@@ -1266,5 +1266,93 @@
     "at": "2026-11-11",
     "by": "app track (provisional; orchestrator to approve through the shots)",
     "note": "Settings › Tools remote form (behind REMOTE_TOOLS): the headers' rows"
+  },
+  "UC-190": {
+    "en": "Import {count} tools from {source}",
+    "hi": "{source} से {count} टूल इम्पोर्ट करें",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-11",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-11",
+    "by": "app track (provisional; orchestrator's changes after the first look, 2026-11-11)",
+    "note": "Settings › Tools: one Import button per app found, leading the empty state and the list; {source} is Claude Desktop, Claude Code or Codex (the app's own name); {count} 2 or more"
+  },
+  "UC-191": {
+    "en": "Import 1 tool from {source}",
+    "hi": "{source} से 1 टूल इम्पोर्ट करें",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-11",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-11",
+    "by": "app track (provisional; orchestrator's changes after the first look, 2026-11-11)",
+    "note": "Settings › Tools: UC-190 for one tool"
+  },
+  "UC-192": {
+    "en": "Imported {count} tools.",
+    "hi": "{count} टूल इम्पोर्ट हुए।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-11",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-11",
+    "by": "app track (provisional; orchestrator's changes after the first look, 2026-11-11)",
+    "note": "Settings › Tools: the one line after an import, 2 or more imported"
+  },
+  "UC-193": {
+    "en": "Imported 1 tool.",
+    "hi": "1 टूल इम्पोर्ट हुआ।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-11",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-11",
+    "by": "app track (provisional; orchestrator's changes after the first look, 2026-11-11)",
+    "note": "Settings › Tools: UC-192 for one"
+  },
+  "UC-194": {
+    "en": "{count} couldn't be imported: {names}.",
+    "hi": "{count} इम्पोर्ट नहीं हो सके: {names}।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-11",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-11",
+    "by": "app track (provisional; orchestrator's changes after the first look, 2026-11-11)",
+    "note": "Settings › Tools: after UC-192/193 (or alone), the servers an import left out by name, no reasons"
+  },
+  "UC-195": {
+    "en": "Clauseo couldn't find {program} on this computer.",
+    "hi": "Clauseo को इस कंप्यूटर पर {program} नहीं मिला।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-11",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-11",
+    "by": "app track (provisional; orchestrator's changes after the first look, 2026-11-11)",
+    "note": "Settings › Tools form: refusal commandNotFound { program }, under Command; {program} as typed"
+  },
+  "UC-196": {
+    "en": "Use a program name or its full path.",
+    "hi": "प्रोग्राम का नाम या उसका पूरा पाथ लिखें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-11",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-11",
+    "by": "app track (provisional; orchestrator's changes after the first look, 2026-11-11)",
+    "note": "Settings › Tools form: refusal commandInvalid (a relative path such as bin/x), under Command"
+  },
+  "UC-205": {
+    "en": "Use letters, numbers and _ only.",
+    "hi": "केवल अक्षर, अंक और _ इस्तेमाल करें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-11",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-11",
+    "by": "app track (provisional; orchestrator's changes after the first look, 2026-11-11)",
+    "note": "Settings › Tools form: refusal envNameInvalid, under Environment values ('-' isn't valid in an environment variable's name)"
   }
 }

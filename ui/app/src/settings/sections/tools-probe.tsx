@@ -48,7 +48,11 @@ async function run(steps: readonly ToolsStep[]) {
 export function ToolsSceneOver({ page, lang }: { page: ToolsPage; lang: Lang }) {
   const scene: ToolsScene = TOOLS_SCENES[page];
   const [tools] = useState(
-    () => new FakeTools(scene.view, { previewRemote: scene.previewRemote ?? false }),
+    () =>
+      new FakeTools(scene.view, {
+        previewRemote: scene.previewRemote ?? false,
+        imports: scene.imports ?? {},
+      }),
   );
   const ran = useRef(false);
   useEffect(() => {

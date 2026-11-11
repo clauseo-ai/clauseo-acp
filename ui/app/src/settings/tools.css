@@ -21,6 +21,21 @@
   .set-tools-row[data-disabled] .set-tools-icon {
     @apply text-faint;
   }
+  /* a refusal: the attention glyph and primary words at the chip's weight (never red, as fieldError has it), and its
+     field ringed in primary, so it never reads as the quiet hint it stands in for */
+  .set-tools-error {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--s1-5);
+    @apply text-small-row font-chip text-primary;
+  }
+  .set-tools-error-icon {
+    @apply flex flex-none items-center;
+    height: 1lh;
+  }
+  .set-tools-form :is(input, textarea)[aria-invalid="true"] {
+    box-shadow: inset 0 0 0 1px var(--primary);
+  }
   .set-tools-form {
     display: grid;
     gap: var(--s5);
