@@ -156,6 +156,22 @@ fn a_misshapen_command_quotes_nothing() {
             .to_string();
         assert!(!error.contains(TOKEN), "{error}");
     }
+    // A value `RedactedString` itself refuses (empty, or over `MAX_SECRET_BYTES`) quotes nothing
+    // either: the one fixed message.
+    let long = TOKEN.repeat(clauseo_protocol::MAX_SECRET_BYTES / TOKEN.len() + 1);
+    for value in [String::new(), long] {
+        let text = format!(
+            r#"{{"mcp": {{"save_server": {{"server": {{"name": "x", "kind": "local", "env": [{{"name": "A", "value": {{"set": "{value}"}}}}], "enabled": true}}}}}}}}"#
+        );
+        let error = serde_json::from_str::<HostCommand>(&text)
+            .unwrap_err()
+            .to_string();
+        assert!(!error.contains(TOKEN), "{error}");
+        assert!(
+            error.contains("an MCP server command that could not be read"),
+            "{error}"
+        );
+    }
 }
 
 /// Each kind's fields only, the bounds, and the placeholder are refused as shape errors.

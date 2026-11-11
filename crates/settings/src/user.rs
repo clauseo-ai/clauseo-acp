@@ -240,6 +240,30 @@ pub(crate) fn write_mcp_server(
     save_document(locations, files, &document)
 }
 
+/// Sets `enabled` in the entry `name` of `mcp.servers` in the user's `settings.json`, and
+/// nothing else: every other key of the entry stays as the file has it, a key this version does
+/// not read included. Answers `Ok(false)`, with nothing written, when the file has no such entry
+/// as an object. It checks nothing: [`crate::Effective::set_mcp_server_enabled`] does.
+pub(crate) fn write_mcp_enabled(
+    locations: &Locations,
+    files: &dyn Files,
+    name: &str,
+    enabled: bool,
+) -> Result<bool, Error> {
+    let mut document = read_document(locations, files)?;
+    let entry = document
+        .get_mut("mcp")
+        .and_then(|mcp| mcp.get_mut("servers"))
+        .and_then(|servers| servers.get_mut(name))
+        .and_then(Value::as_object_mut);
+    let Some(entry) = entry else {
+        return Ok(false);
+    };
+    entry.insert("enabled".to_owned(), Value::Bool(enabled));
+    save_document(locations, files, &document)?;
+    Ok(true)
+}
+
 /// The user's `settings.json` as one object: empty when the file is missing; an error, with
 /// the file left alone, when it does not parse.
 fn read_document(locations: &Locations, files: &dyn Files) -> Result<Map<String, Value>, Error> {

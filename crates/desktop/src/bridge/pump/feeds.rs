@@ -9,8 +9,9 @@
 //!   `matters_changed` and `threads_changed` (not merged) go through as they come; when they
 //!   land, the restart also needs their current lists, unless the host makes a subscription's
 //!   first frame `all: true`. The settings window gets `settings_changed`, `connectors_changed`
-//!   (its Connectors section, R24), `update_changed`, `protection_changed` and
-//!   `protection_view_changed` (its protection section, 0051) of it, and any other label none
+//!   (its Connectors section, R24), `update_changed`, `protection_changed`,
+//!   `protection_view_changed` (its protection section, 0051) and `mcp_tools_changed` (its Tools
+//!   section) of it, and any other label none
 //!   ([`AppEvents`], 0028, 0037). The host's own catch-up after a subscribe carries the whole
 //!   connector state, so a restart reads nothing for it.
 //!   Desktop adds one message of its own to it: `window_full_screen`, whether `main` is in the
@@ -47,8 +48,8 @@ use crate::window_events::FullScreen;
 
 /// Which feed events a window's channel carries: an allow-list keyed on its label (0028).
 /// `main` carries them all. The settings window carries the limits (U12) and, of the app feed,
-/// `settings_changed`, `connectors_changed` (R24), `update_changed` (0037), `protection_changed`
-/// and `protection_view_changed` (0051), so it never gets
+/// `settings_changed`, `connectors_changed` (R24), `update_changed` (0037), `protection_changed`,
+/// `protection_view_changed` (0051) and `mcp_tools_changed` (Settings › Tools), so it never gets
 /// the matter and thread lists (0023) or an app event the host adds later. Any other label
 /// carries neither, whatever it follows.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -56,8 +57,8 @@ pub(crate) enum AppEvents {
     /// Every app and limits event: `main`.
     All,
     /// The app feed's `settings_changed`, `connectors_changed`, `update_changed`,
-    /// `protection_changed` and `protection_view_changed` only, and the limits: the settings
-    /// window.
+    /// `protection_changed`, `protection_view_changed` and `mcp_tools_changed` only, and the
+    /// limits: the settings window.
     SettingsAndLimits,
     /// No app or limits event: any other label.
     Nothing,
@@ -85,6 +86,7 @@ impl AppEvents {
                     || json.starts_with(r#"{"update_changed":"#)
                     || json.starts_with(r#"{"protection_changed":"#)
                     || json.starts_with(r#"{"protection_view_changed":"#)
+                    || json.starts_with(r#"{"mcp_tools_changed":"#)
             }
             (_, Self::Nothing) => false,
         }

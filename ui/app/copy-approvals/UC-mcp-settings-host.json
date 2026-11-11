@@ -1,0 +1,200 @@
+{
+  "UC-214": {
+    "en": "Let Clauseo run this program?",
+    "hi": "Clauseo को यह प्रोग्राम चलाने दें?",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-11",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-11",
+    "by": "orchestrator (PR A1: native confirm before an MCP server starts)",
+    "note": "MCP confirm, local server: title"
+  },
+  "UC-215": {
+    "en": "“{program}” will start when you work in a matter. Only allow programs you trust.",
+    "hi": "जब आप किसी मामले में काम करेंगे, तब “{program}” शुरू होगा। केवल उन्हीं प्रोग्राम को अनुमति दें जिन पर आपको भरोसा है।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-11",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-11",
+    "by": "orchestrator (PR A1: native confirm before an MCP server starts)",
+    "note": "MCP confirm, local server: message; {program} is the command and its arguments"
+  },
+  "UC-216": {
+    "en": "Allow",
+    "hi": "अनुमति दें",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-11",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-11",
+    "by": "orchestrator (PR A1: native confirm before an MCP server starts)",
+    "note": "MCP confirm: the accepting button"
+  },
+  "UC-217": {
+    "en": "Cancel",
+    "hi": "रद्द करें",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-11",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-11",
+    "by": "orchestrator (PR A1: native confirm before an MCP server starts)",
+    "note": "MCP confirm: Cancel, first and default"
+  },
+  "UC-218": {
+    "en": "Let Clauseo connect to this tool?",
+    "hi": "Clauseo को इस टूल से जुड़ने दें?",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-11",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-11",
+    "by": "orchestrator (PR A1: native confirm before an MCP server starts)",
+    "note": "MCP confirm, remote server: title"
+  },
+  "UC-219": {
+    "en": "Clauseo will connect to “{address}” when you work in a matter. Only allow tools you trust.",
+    "hi": "जब आप किसी मामले में काम करेंगे, तब Clauseo “{address}” से जुड़ेगा। केवल उन्हीं टूल को अनुमति दें जिन पर आपको भरोसा है।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-11",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-11",
+    "by": "orchestrator (PR A1: native confirm before an MCP server starts)",
+    "note": "MCP confirm, remote server: message; {address} is the URL"
+  },
+  "U3-err-mcp.save_declined": {
+    "en": "You chose Cancel, so nothing was saved.",
+    "hi": "आपने रद्द करें चुना, इसलिए कुछ भी सहेजा नहीं गया।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-11",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-11",
+    "by": "orchestrator (PR A1: native confirm before an MCP server starts)",
+    "note": "mcp.save_declined: the lawyer chose Cancel in the MCP confirm"
+  },
+  "U3-err-mcp.name_empty": {
+    "en": "Clauseo couldn't save that setting. Your settings are as they were.",
+    "hi": "Clauseo वह सेटिंग सहेज नहीं सका। आपकी सेटिंग्स पहले जैसी हैं।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-11",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-11",
+    "by": "orchestrator (PR A1: native confirm before an MCP server starts)",
+    "note": "mcp.name_empty: the settings window's failure line (Settings › Tools)"
+  },
+  "U3-err-mcp.name_taken": {
+    "en": "Clauseo couldn't save that setting. Your settings are as they were.",
+    "hi": "Clauseo वह सेटिंग सहेज नहीं सका। आपकी सेटिंग्स पहले जैसी हैं।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-11",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-11",
+    "by": "orchestrator (PR A1: native confirm before an MCP server starts)",
+    "note": "mcp.name_taken: the settings window's failure line (Settings › Tools)"
+  },
+  "U3-err-mcp.name_reserved": {
+    "en": "Clauseo couldn't save that setting. Your settings are as they were.",
+    "hi": "Clauseo वह सेटिंग सहेज नहीं सका। आपकी सेटिंग्स पहले जैसी हैं।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-11",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-11",
+    "by": "orchestrator (PR A1: native confirm before an MCP server starts)",
+    "note": "mcp.name_reserved: the settings window's failure line (Settings › Tools)"
+  },
+  "U3-err-mcp.name_invalid": {
+    "en": "Clauseo couldn't save that setting. Your settings are as they were.",
+    "hi": "Clauseo वह सेटिंग सहेज नहीं सका। आपकी सेटिंग्स पहले जैसी हैं।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-11",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-11",
+    "by": "orchestrator (PR A1: native confirm before an MCP server starts)",
+    "note": "mcp.name_invalid: the settings window's failure line (Settings › Tools)"
+  },
+  "U3-err-mcp.command_invalid": {
+    "en": "Clauseo couldn't save that setting. Your settings are as they were.",
+    "hi": "Clauseo वह सेटिंग सहेज नहीं सका। आपकी सेटिंग्स पहले जैसी हैं।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-11",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-11",
+    "by": "orchestrator (PR A1: native confirm before an MCP server starts)",
+    "note": "mcp.command_invalid: the settings window's failure line (Settings › Tools)"
+  },
+  "U3-err-mcp.command_not_found": {
+    "en": "Clauseo couldn't save that setting. Your settings are as they were.",
+    "hi": "Clauseo वह सेटिंग सहेज नहीं सका। आपकी सेटिंग्स पहले जैसी हैं।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-11",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-11",
+    "by": "orchestrator (PR A1: native confirm before an MCP server starts)",
+    "note": "mcp.command_not_found: the settings window's failure line (Settings › Tools)"
+  },
+  "U3-err-mcp.url_invalid": {
+    "en": "Clauseo couldn't save that setting. Your settings are as they were.",
+    "hi": "Clauseo वह सेटिंग सहेज नहीं सका। आपकी सेटिंग्स पहले जैसी हैं।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-11",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-11",
+    "by": "orchestrator (PR A1: native confirm before an MCP server starts)",
+    "note": "mcp.url_invalid: the settings window's failure line (Settings › Tools)"
+  },
+  "U3-err-mcp.header_name_invalid": {
+    "en": "Clauseo couldn't save that setting. Your settings are as they were.",
+    "hi": "Clauseo वह सेटिंग सहेज नहीं सका। आपकी सेटिंग्स पहले जैसी हैं।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-11",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-11",
+    "by": "orchestrator (PR A1: native confirm before an MCP server starts)",
+    "note": "mcp.header_name_invalid: the settings window's failure line (Settings › Tools)"
+  },
+  "U3-err-mcp.env_name_invalid": {
+    "en": "Clauseo couldn't save that setting. Your settings are as they were.",
+    "hi": "Clauseo वह सेटिंग सहेज नहीं सका। आपकी सेटिंग्स पहले जैसी हैं।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-11",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-11",
+    "by": "orchestrator (PR A1: native confirm before an MCP server starts)",
+    "note": "mcp.env_name_invalid: the settings window's failure line (Settings › Tools)"
+  },
+  "U3-err-mcp.secret_store_failed": {
+    "en": "Clauseo couldn't save that setting. Your settings are as they were.",
+    "hi": "Clauseo वह सेटिंग सहेज नहीं सका। आपकी सेटिंग्स पहले जैसी हैं।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-11",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-11",
+    "by": "orchestrator (PR A1: native confirm before an MCP server starts)",
+    "note": "mcp.secret_store_failed: the settings window's failure line (Settings › Tools)"
+  },
+  "U3-err-mcp.server_unknown": {
+    "en": "Clauseo couldn't save that setting. Your settings are as they were.",
+    "hi": "Clauseo वह सेटिंग सहेज नहीं सका। आपकी सेटिंग्स पहले जैसी हैं।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-11",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-11",
+    "by": "orchestrator (PR A1: native confirm before an MCP server starts)",
+    "note": "mcp.server_unknown: the settings window's failure line (Settings › Tools)"
+  }
+}

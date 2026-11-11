@@ -33,21 +33,21 @@ use crate::write;
 
 /// The value the store holds for `github/env/TOKEN`: plain words, so no scanner takes it for a
 /// real credential, and distinctive enough that finding it in a log means a leak.
-const HELD: &str = "marmalade-heron-quayside-lantern";
+pub(crate) const HELD: &str = "marmalade-heron-quayside-lantern";
 
 /// The MCP resolver seam's type.
-type Resolver = Arc<dyn Fn(&str) -> Option<PathBuf> + Send + Sync>;
+pub(crate) type Resolver = Arc<dyn Fn(&str) -> Option<PathBuf> + Send + Sync>;
 
 /// The `PATH` the host is given on unix.
 const INHERITED_PATH: &str = "/usr/bin:/bin";
 
 /// The keychain account of `server`'s variable `name`.
-fn account(server: &str, name: &str) -> String {
+pub(crate) fn account(server: &str, name: &str) -> String {
     format!("{server}/env/{name}")
 }
 
 /// A store holding `items`.
-fn store(items: &[(&str, &str)]) -> Arc<MemoryStore> {
+pub(crate) fn store(items: &[(&str, &str)]) -> Arc<MemoryStore> {
     let store = Arc::new(MemoryStore::new());
     for (account, value) in items {
         store.put(account, value.as_bytes());
@@ -56,13 +56,17 @@ fn store(items: &[(&str, &str)]) -> Arc<MemoryStore> {
 }
 
 /// A resolver that finds `npx` at `npx` and nothing else.
-fn finds_npx(npx: &Path) -> Resolver {
+pub(crate) fn finds_npx(npx: &Path) -> Resolver {
     let npx = npx.to_owned();
     Arc::new(move |typed: &str| (typed == "npx").then(|| npx.clone()))
 }
 
 /// The config with `store`, `resolver` and, on unix, the inherited `PATH` fixed.
-fn wired(config: HostConfig, store: &Arc<MemoryStore>, resolver: Resolver) -> HostConfig {
+pub(crate) fn wired(
+    config: HostConfig,
+    store: &Arc<MemoryStore>,
+    resolver: Resolver,
+) -> HostConfig {
     let config = config
         .with_mcp_secrets(Arc::<MemoryStore>::clone(store))
         .with_mcp_resolver(resolver);
@@ -77,7 +81,7 @@ fn wired(config: HostConfig, store: &Arc<MemoryStore>, resolver: Resolver) -> Ho
 }
 
 /// `<work>/bin/npx`, made as an empty file; nothing launches it.
-fn npx(dir: &Dir) -> PathBuf {
+pub(crate) fn npx(dir: &Dir) -> PathBuf {
     dir.folder("bin", &[("npx", "")]).join("npx")
 }
 
@@ -131,7 +135,7 @@ fn settings_file(dir: &Dir) -> Value {
 }
 
 /// A variable set to `value`.
-fn set(name: &str, value: &str) -> McpSecretEdit {
+pub(crate) fn set(name: &str, value: &str) -> McpSecretEdit {
     McpSecretEdit {
         name: name.to_owned(),
         value: McpSecretValue::Set(RedactedString::new(Zeroizing::new(value.to_owned())).unwrap()),
@@ -139,7 +143,7 @@ fn set(name: &str, value: &str) -> McpSecretEdit {
 }
 
 /// A variable keeping its held value.
-fn keep(name: &str) -> McpSecretEdit {
+pub(crate) fn keep(name: &str) -> McpSecretEdit {
     McpSecretEdit {
         name: name.to_owned(),
         value: McpSecretValue::Keep {},
@@ -147,7 +151,7 @@ fn keep(name: &str) -> McpSecretEdit {
 }
 
 /// A local server running `command` with `env`, enabled.
-fn local(name: &str, command: &str, env: Vec<McpSecretEdit>) -> McpServerEdit {
+pub(crate) fn local(name: &str, command: &str, env: Vec<McpSecretEdit>) -> McpServerEdit {
     McpServerEdit {
         name: name.to_owned(),
         kind: McpServerKind::Local,
@@ -174,7 +178,7 @@ fn remote(name: &str, url: &str) -> McpServerEdit {
     }
 }
 
-fn save(previous: Option<&str>, server: McpServerEdit) -> HostCommand {
+pub(crate) fn save(previous: Option<&str>, server: McpServerEdit) -> HostCommand {
     HostCommand::Mcp(McpCommand::SaveServer {
         previous_name: previous.map(str::to_owned),
         server,
@@ -195,7 +199,7 @@ fn set_enabled(name: &str, enabled: bool) -> HostCommand {
 }
 
 /// The log files under `dir`, oldest first.
-fn read_logs(dir: &Path) -> String {
+pub(crate) fn read_logs(dir: &Path) -> String {
     let mut text = String::new();
     for name in ["host.2.log", "host.1.log", "host.log"] {
         text.push_str(&std::fs::read_to_string(dir.join(name)).unwrap_or_default());
@@ -470,6 +474,8 @@ fn mcp_tools_commands_are_locked_by_the_firm() {
     host.refused(set_enabled("mine", false), ErrorCode::SettingsLocked);
     assert_eq!(dir.settings_json(), before);
     assert_eq!(store.peek(&account("github", "TOKEN")), None);
+    // The lock is checked before the keychain is touched: not one read, write or delete.
+    assert_eq!((store.reads(), store.writes(), store.deletes()), (0, 0, 0));
     host.shutdown();
 }
 

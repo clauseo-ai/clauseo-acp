@@ -5,7 +5,9 @@
 //! - `SaveServer`: the server is built from the edit and the entry it replaces
 //!   (`keychain::plan`), checked by the settings crate (`Effective::check_mcp_server`), then on
 //!   a thread of their own a local server's program is found (`mcp.command_not_found` when it is
-//!   not, with nothing written; the settings keep it as typed) and its values are written to the
+//!   not, with nothing written; the settings keep it as typed), the lawyer's native confirm is
+//!   asked when the save adds a server or changes what starts (`launch_changed`;
+//!   `mcp.save_declined` when declined, with nothing written), and its values are written to the
 //!   keychain, then the settings on the actor
 //!   (`Effective::save_mcp_server`). A keychain failure is `mcp.secret_store_failed` with the
 //!   keychain put back and the settings unchanged; a settings write that fails puts the keychain
@@ -176,6 +178,8 @@ fn save(
     actor
         .effective
         .check_mcp_server(previous.as_deref(), &edit.name, &server)?;
+    let ask = launch_changed(held.as_ref().map(|(_, held)| held), &server)
+        .then(|| launch_ask(&edit.name, &server));
     let save = Box::new(Save {
         previous,
         name: edit.name.clone(),
@@ -183,7 +187,7 @@ fn save(
         after: plan.after,
     });
     let command = save.server.command().map(str::to_owned);
-    if command.is_none() && plan.steps.is_empty() {
+    if command.is_none() && plan.steps.is_empty() && ask.is_none() {
         return write_settings(actor, ctx, *save, keychain::Undo::default());
     }
     let store = actor.wiring.mcp_secrets.clone();
@@ -191,19 +195,73 @@ fn save(
         return Err(store_failed());
     }
     let resolve = std::sync::Arc::clone(&actor.wiring.mcp_resolve);
+    let confirm = actor.wiring.mcp_confirm.clone();
     let steps = plan.steps;
     off_actor(actor, Some(ctx), move || {
-        // The program first, as a launch finds it: one not found writes nothing anywhere.
+        // The program first, as a launch finds it: one not found writes nothing anywhere, and
+        // asks nothing. Then the lawyer's confirm, then the keychain.
         let found = command
             .as_deref()
             .is_none_or(|command| resolve(command).is_some());
-        let result = match (found, store) {
-            (false, _) => Err(Failed::NotFound),
-            (true, Some(store)) => keychain::run(store.as_ref(), steps).map_err(Failed::Store),
-            (true, None) => Ok(keychain::Undo::default()),
+        let allowed = || match (&ask, &confirm) {
+            (None, _) => true,
+            (Some(ask), Some(confirm)) => confirm.confirm(ask),
+            // No confirm wired: a program nobody saw is never added.
+            (Some(_), None) => false,
+        };
+        let result = if !found {
+            Err(Failed::NotFound)
+        } else if !allowed() {
+            Err(Failed::Declined)
+        } else {
+            match store {
+                Some(store) => keychain::run(store.as_ref(), steps).map_err(Failed::Store),
+                None => Ok(keychain::Undo::default()),
+            }
         };
         McpInput::Written { ctx, save, result }
     })
+}
+
+/// Whether a save of `new` over `old` (`None` for an add) asks the lawyer first: an add, or a
+/// change of what starts or where it goes: the kind, the command, the arguments, the variables'
+/// names or the URL. A rename, a turn on or off, or new values alone ask nothing.
+fn launch_changed(old: Option<&McpServerLaunch>, new: &McpServerLaunch) -> bool {
+    use clauseo_settings::McpTransport::{Local, Remote};
+    let Some(old) = old else {
+        return true;
+    };
+    match (&old.transport, &new.transport) {
+        (
+            Local { command, args, env },
+            Local {
+                command: new_command,
+                args: new_args,
+                env: new_env,
+            },
+        ) => command != new_command || args != new_args || !env.keys().eq(new_env.keys()),
+        (Remote { url, .. }, Remote { url: new_url, .. }) => url != new_url,
+        _ => true,
+    }
+}
+
+/// What the confirm shows for `server`: its program and arguments verbatim, or its URL.
+fn launch_ask(name: &str, server: &McpServerLaunch) -> crate::config::mcp::McpLaunchAsk {
+    use clauseo_settings::McpTransport::{Local, Remote};
+    let (program, url) = match &server.transport {
+        Local { command, args, .. } => (
+            std::iter::once(command.clone())
+                .chain(args.iter().cloned())
+                .collect(),
+            None,
+        ),
+        Remote { url, .. } => (Vec::new(), Some(url.clone())),
+    };
+    crate::config::mcp::McpLaunchAsk {
+        server: name.to_owned(),
+        program,
+        url,
+    }
 }
 
 /// Why a save's work off the actor wrote nothing.
@@ -212,6 +270,8 @@ pub(crate) enum Failed {
     NotFound,
     /// The keychain failed; it was put back.
     Store(StoreError),
+    /// The lawyer declined the confirm (or none is wired).
+    Declined,
 }
 
 /// The settings write of a save whose keychain steps ran: on success the view, the receipt,
@@ -297,6 +357,10 @@ pub(super) fn on_input(actor: &mut Actor, input: McpInput) {
                     tracing::warn!(%error, "an MCP server's keychain values were not saved");
                     Err(store_failed())
                 }
+                Err(Failed::Declined) => Err(Error::refused(
+                    ErrorCode::McpSaveDeclined,
+                    "the lawyer did not allow the program",
+                )),
                 Err(Failed::NotFound) => Err(Error::Settings(clauseo_settings::Error::Mcp {
                     key: format!("mcp.servers.{}", save.name),
                     refusal: clauseo_settings::McpRefusal::CommandNotFound,

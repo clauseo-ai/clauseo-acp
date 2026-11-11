@@ -321,6 +321,7 @@ crates/settings/src/system/tests.rs windows_local_app_data_unchecked clippy::dis
 crates/settings/src/system/tests.rs windows_documents_on_a_dead_share clippy::disallowed_methods
 crates/settings/src/system/tests.rs windows_documents_on_a_dead_share_child clippy::disallowed_methods
 crates/settings/src/system/bounded/tests.rs timed clippy::disallowed_methods
+crates/settings/src/effective/mcp_write.rs Effective clippy::multiple_inherent_impl
 # Host's re-check of #450: reruns its own test binary with USER=nobody to show the managed file
 # follows the real user id.
 crates/settings/src/effective/policy_gaps_tests.rs the_login_user_comes_from_the_real_user_id_not_user clippy::disallowed_methods
@@ -334,7 +335,7 @@ crates/matters/src/place/windows.rs - unsafe_code
 crates/host/examples/stetdoc_compare_fake.rs - clippy::disallowed_methods
 crates/host/src/config/wiring/stetdoc.rs HostConfig clippy::multiple_inherent_impl
 crates/host/src/config/mcp.rs HostConfig clippy::multiple_inherent_impl
-crates/settings/src/effective/mcp_write.rs Effective clippy::multiple_inherent_impl
+crates/host/src/agent/loads/lawyer.rs server_path clippy::disallowed_methods
 crates/host/src/actor/query.rs query clippy::too_many_lines
 crates/host/src/actor/startup.rs open clippy::too_many_lines
 # One match arm per matter job, as actor/query.rs's query has one arm per query; splitting handle into helpers is on the after-launch list.

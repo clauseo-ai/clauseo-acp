@@ -9,7 +9,8 @@
 //!
 //! The refusals (each an [`ErrorCode`](crate::ErrorCode)): `mcp.name_empty`,
 //! `mcp.name_taken`, `mcp.name_reserved`, `mcp.name_invalid`, `mcp.command_invalid`,
-//! `mcp.command_not_found`,
+//! `mcp.command_not_found`, `mcp.save_declined` (the lawyer's native confirm, before a save that
+//! adds a server or changes its program, arguments, variable names or URL, answered Cancel),
 //! `mcp.url_invalid`, `mcp.header_name_invalid`, `mcp.env_name_invalid`,
 //! `mcp.secret_store_failed`, `mcp.server_unknown`, and `settings.locked` while the firm decides
 //! the list (`McpControl::FirmList` or `FirmManaged`). A shape this module refuses (a field of

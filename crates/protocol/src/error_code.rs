@@ -321,8 +321,8 @@ error_codes! {
     McpNameInvalid = "mcp.name_invalid", retryable: false, meaning: "The MCP server name is not \
         1 to 64 letters, digits, `_` or `-`, or holds `__`, or ends in `_`.";
     McpCommandInvalid = "mcp.command_invalid", retryable: false, meaning: "The local MCP \
-        server's program is neither a bare name (`npx`) nor an absolute path: a relative path, or \
-        empty.";
+        server's program is neither a bare name (`npx`) nor an absolute path on this computer: a \
+        relative path, a network path, or empty.";
     McpCommandNotFound = "mcp.command_not_found", retryable: false, meaning: "The local MCP \
         server's program is not on this computer: a bare name found on no search path, or an \
         absolute path with no file. The program is the one the command named.";
@@ -337,6 +337,9 @@ error_codes! {
         keychain refused or failed to save a value, so the MCP server was not changed.";
     McpServerUnknown = "mcp.server_unknown", retryable: false, meaning: "The lawyer has no MCP \
         server of that name.";
+    McpSaveDeclined = "mcp.save_declined", retryable: false, meaning: "The lawyer declined the \
+        native confirm before an MCP server was added or its program, arguments, variable names \
+        or URL changed, so nothing was saved.";
     Unknown = "unknown", retryable: false, meaning: "A code from a newer Clauseo that this \
         version does not know. Never produced here.";
 }

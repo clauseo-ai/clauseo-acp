@@ -78,6 +78,14 @@ impl McpSecrets {
         self.values.get(account).map(|value| value.as_str())
     }
 
+    /// The same, with `accounts` read and found missing or unreadable (tests).
+    #[cfg(test)]
+    pub(crate) fn with_unreadable(mut self, accounts: &[&str]) -> Self {
+        self.unreadable
+            .extend(accounts.iter().map(|account| (*account).to_owned()));
+        self
+    }
+
     /// Values and resolved commands in memory, as `read` would make them (tests).
     #[cfg(test)]
     pub(crate) fn of(values: &[(&str, &str)], commands: &[(&str, &str)]) -> Self {
@@ -255,7 +263,7 @@ pub(crate) fn servers(
                     env,
                 });
             }
-            Err(var) => {
+            Err(Unfilled::Missing(var)) => {
                 tracing::warn!(
                     server = name,
                     variable = var.as_str(),
@@ -264,25 +272,45 @@ pub(crate) fn servers(
                 );
                 left_out.push((name.to_owned(), var));
             }
+            Err(Unfilled::Unread(var)) => tracing::warn!(
+                server = name,
+                variable = var.as_str(),
+                "an MCP server changed while this session started; it is left out of this session"
+            ),
         }
     }
     (sent, left_out)
 }
 
+/// Why a server's keychain value is not there to fill.
+enum Unfilled {
+    /// The prep read its item and found it missing or unreadable.
+    Missing(String),
+    /// The prep never read it: the settings changed after the prep (a rename, a new variable),
+    /// so the item is neither known missing nor known present.
+    Unread(String),
+}
+
 /// `env` with each keychain value filled, in name order; or the first variable whose value
-/// `secrets` does not hold.
+/// `secrets` does not hold, and why.
 fn filled(
     server: &str,
     env: &BTreeMap<String, McpValue>,
     secrets: &McpSecrets,
-) -> Result<Vec<(String, String)>, String> {
+) -> Result<Vec<(String, String)>, Unfilled> {
     env.iter()
         .map(|(var, value)| match value {
             McpValue::Plain(text) => Ok((var.clone(), text.clone())),
-            McpValue::Keychain(_) => secrets
-                .get(&keychain_account(server, McpValueKind::Env, var))
-                .map(|text| (var.clone(), text.to_owned()))
-                .ok_or_else(|| var.clone()),
+            McpValue::Keychain(_) => {
+                let account = keychain_account(server, McpValueKind::Env, var);
+                match secrets.get(&account) {
+                    Some(text) => Ok((var.clone(), text.to_owned())),
+                    None if secrets.unreadable.contains(&account) => {
+                        Err(Unfilled::Missing(var.clone()))
+                    }
+                    None => Err(Unfilled::Unread(var.clone())),
+                }
+            }
         })
         .collect()
 }
@@ -305,22 +333,55 @@ fn add_host_env(env: &mut Vec<(String, String)>, command: &Path, host: HostEnv<'
     }
 }
 
-/// The server's `PATH`: `command`'s folder, then the host's `PATH`, under the host's name for
-/// it; `None` when neither gives a folder or the result is not UTF-8 (logged).
+/// The server's `PATH`: `command`'s folder, then the absolute folders of the host's `PATH`,
+/// under the host's name for it; `None` when there is no folder or the result is not UTF-8
+/// (logged). A relative or empty entry of the host's `PATH` is left out: it would resolve
+/// against the server's working folder, the matter folder, which the agent can write. Nothing
+/// else is added: no working folder, no matter folder.
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the host's PATH is split once to keep its absolute folders; nothing is looked up on it"
+)]
 fn server_path(command: &Path, host: Option<(&str, &OsString)>) -> Option<(String, String)> {
     let folder = command.parent().filter(|folder| folder.is_absolute())?;
     let name = host.map_or("PATH", |(name, _)| name);
-    let mut env = BTreeMap::from([(
-        OsString::from(name),
-        host.map(|(_, value)| value.clone()).unwrap_or_default(),
-    )]);
-    crate::agent::spec::prepend_path(&mut env, &[folder.to_owned()]);
-    let value = env.remove(&OsString::from(name))?;
-    let Ok(value) = value.into_string() else {
-        tracing::warn!("an MCP server's PATH is not UTF-8; it gets the agent's own");
+    let rest: Vec<PathBuf> = host
+        .map(|(_, value)| std::env::split_paths(value).collect())
+        .unwrap_or_default();
+    let folders = std::iter::once(folder.to_owned())
+        .chain(rest.into_iter().filter(|part| part.is_absolute()));
+    let Some(value) = std::env::join_paths(folders)
+        .ok()
+        .and_then(|value| value.into_string().ok())
+    else {
+        tracing::warn!("an MCP server's PATH cannot be joined as text; it gets the agent's own");
         return None;
     };
     Some((name.to_owned(), value))
+}
+
+/// What the agent's stderr redactor hides for the session's lawyer servers, beyond its own
+/// environment's secrets: every value `secrets` read from the keychain, and every plain variable
+/// value of an enabled local server. An agent that dies before its session is ready has its last
+/// stderr line logged (`start_failure`), and `session/new` held these then. Values under 8 bytes
+/// stay as they are, as for every redacted secret (`clauseo_process`'s `MIN_SECRET`). PR B adds
+/// a remote server's header values and URL parts in the loop.
+pub(crate) fn redacted(effective: &Effective, secrets: &McpSecrets) -> Vec<String> {
+    let mut hidden: Vec<String> = secrets
+        .values
+        .values()
+        .map(|value| value.as_str().to_owned())
+        .collect();
+    for (_, server) in effective.enabled_mcp_servers() {
+        let McpTransport::Local { env, .. } = &server.transport else {
+            continue;
+        };
+        hidden.extend(env.values().filter_map(|value| match value {
+            McpValue::Plain(text) => Some(text.clone()),
+            McpValue::Keychain(_) => None,
+        }));
+    }
+    hidden
 }
 
 /// The search a save and a launch make: the settings crate's resolver over this process's

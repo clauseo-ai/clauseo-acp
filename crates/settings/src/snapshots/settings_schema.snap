@@ -156,7 +156,6 @@ source: crates/settings/src/schema/tests.rs
           "description": "A program on this computer, speaking MCP on stdio.",
           "properties": {
             "args": {
-              "default": [],
               "description": "Its arguments.",
               "items": {
                 "type": "string"
@@ -171,7 +170,6 @@ source: crates/settings/src/schema/tests.rs
               "additionalProperties": {
                 "$ref": "#/$defs/McpValue"
               },
-              "default": {},
               "description": "Variables added to its environment, by name. A value is `{\"keychain\": true}`: it\nis in the OS keychain (service `ai.clauseo.desktop.mcp`, account\n`<server>/env/<name>`), where Settings › Tools puts every value the lawyer types.\nA plain string also works, for a firm's policy or a hand-edited file, but it is\nstored as it is in that file and sent to the agent in `session/new`: keep tokens in\nthe keychain.",
               "type": "object"
             }
@@ -188,7 +186,6 @@ source: crates/settings/src/schema/tests.rs
               "additionalProperties": {
                 "$ref": "#/$defs/McpValue"
               },
-              "default": {},
               "description": "Headers sent with each request, by name: `{\"keychain\": true}` (account\n`<server>/header/<name>`) or a plain string, as for `env`.",
               "type": "object"
             },

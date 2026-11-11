@@ -295,6 +295,12 @@ mod mcp;
 #[path = "host/mcp_tools.rs"]
 mod mcp_tools;
 #[cfg(test)]
+#[path = "host/mcp_tools_confirm.rs"]
+mod mcp_tools_confirm;
+#[cfg(test)]
+#[path = "host/mcp_tools_failures.rs"]
+mod mcp_tools_failures;
+#[cfg(test)]
 #[path = "host/mcp_trust.rs"]
 mod mcp_trust;
 #[cfg(test)]

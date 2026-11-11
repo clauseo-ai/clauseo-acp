@@ -7,7 +7,8 @@
 //!   after `mcp__`), and not a reserved name ([`crate::RESERVED_MCP_SERVERS`]) in any case.
 //! - A local server's `command` is what the lawyer typed: a bare program name (`npx`, no path
 //!   separator), which the host finds on this computer's search paths at each save and launch,
-//!   or an absolute path. A relative path with a separator, or an empty one, is refused.
+//!   or an absolute path. A relative path with a separator, an empty one, or a network path (a UNC
+//!   share, which the program search refuses) is refused.
 //! - A remote server's `url` is ASCII, `https://` with a host, or `http://` with the host
 //!   `localhost` or `127.0.0.1` only; a port of at most 65535 if any; no user name or password
 //!   (`@`), fragment (`#`), backslash, space or control character. A path and a query may
@@ -18,9 +19,10 @@
 //!   A name the lawyer types appears once per server in any case (Windows' variables, HTTP's
 //!   headers and Credential Manager's accounts are case-blind); a file's headers too.
 //! - A value the lawyer types goes to the keychain under [`MCP_KEYCHAIN_SERVICE`], account
-//!   [`keychain_account`]: `<server>/env/<name>` or `<server>/header/<name>`. No server, variable
-//!   or header name holds `/`, so no two accounts collide. `settings.json` holds
-//!   `{"keychain": true}` in the value's place.
+//!   [`keychain_account`]: `<server>/env/<name>` or `<server>/header/<name>`. No server name, and
+//!   no variable or header name the lawyer types, holds `/`, so their accounts never collide; a
+//!   hand-edited file's variable name may hold one, and its account is still that file's own.
+//!   `settings.json` holds `{"keychain": true}` in the value's place.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
@@ -143,11 +145,21 @@ pub(crate) fn name_shaped(name: &str) -> bool {
 }
 
 /// Whether `command` is a bare program name (no `/`, nor `\` on any OS, so a Windows path
-/// typed on a Mac is no bare name) or an absolute path.
+/// typed on a Mac is no bare name) or an absolute path on this computer: a network path (a UNC
+/// share such as `\\server\share\tool.exe`, `//server/share`, or a `\\?\` device path) is
+/// refused, as the program search refuses it (`mcp_import::resolve_command`), so a firm's server
+/// on a share is left out with a warning at load, never silently at launch.
 pub fn command_ok(command: &str) -> bool {
     !command.is_empty()
+        && !command_on_network(command)
         && (Path::new(command).is_absolute() || !command.contains(['/', '\\']))
         && !command.contains('\0')
+}
+
+/// Whether `command` is a network or device path: it starts with two slashes of either kind.
+pub(crate) fn command_on_network(command: &str) -> bool {
+    let mut start = command.chars().take(2);
+    start.all(|c| c == '/' || c == '\\') && command.len() >= 2
 }
 
 /// Whether `name` is a variable name the lawyer may type: a C identifier of at most

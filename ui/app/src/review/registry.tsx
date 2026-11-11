@@ -74,6 +74,7 @@ import { TN } from "./registry-notices.tsx";
 import { UBL } from "./registry-blocklist.tsx";
 import { R23 } from "./registry-update.tsx";
 import { IT_ENTRIES } from "./registry-it.tsx";
+import { UC_MCP_CONFIRM } from "./registry-uc-mcp-confirm.tsx";
 
 /* ---------- U3: the live thread's states ---------- */
 
@@ -401,6 +402,7 @@ export const REGISTRY: readonly Entry[] = [
   ...UC_ALL,
   ...UC_TOOLNAMES,
   ...UC_TOOL_ROWS,
+  ...UC_MCP_CONFIRM,
   ...SAC,
   {
     id: "U2-01",

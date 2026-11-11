@@ -185,6 +185,8 @@ export const HI = {
   // prompt.too_long: a question over the host's cap on a prompt's text, kept in the field (provisional Hindi)
   "This question is too long to send. Save the text as a file in the matter's folder, then ask about it. Your words are kept.":
     "यह प्रश्न भेजने के लिए बहुत लंबा है। पाठ को मामले के फ़ोल्डर में एक फ़ाइल के रूप में सहेजें, फिर उसके बारे में पूछें। आपके शब्द रखे गए हैं।",
+  // Cancel in the native confirm before an MCP server is saved (provisional Hindi)
+  "You chose Cancel, so nothing was saved.": "आपने रद्द करें चुना, इसलिए कुछ भी सहेजा नहीं गया।",
 } as const;
 
 /** The sentences' Hindi, for the copy review to tell hi: later from Hindi. */

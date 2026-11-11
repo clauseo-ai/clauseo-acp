@@ -93,6 +93,14 @@ get no menu: it would be a bar on the undecorated window.
   which holds no token or key); U12 and U15 widen it when their sections read more. XSS there
   can add a connector, paste a key or open a pay link's recharge (each through the host's own
   checks, the pay link only through the native confirm); the main window cannot.
+- Amended 2026-11-11 (Settings › Tools, PR A1): the settings window also gets `mcp_tools_changed`
+  (the lawyer's MCP servers: names, never values) and sends the `mcp` commands, which only it may
+  send. That widens what XSS in the settings page can do: it could add a server, a program the
+  host then starts as the lawyer in each session. So a save that adds a server or changes what
+  starts (its command, arguments, variable names or URL) waits for a native confirm drawn in
+  Rust, as the pay link's is, naming the program and its arguments; Cancel answers
+  `mcp.save_declined` and changes nothing. A rename, a turn on or off, or new values alone ask
+  nothing: they start no program the lawyer has not allowed.
 - Main-only behaviour stays keyed on `MAIN_WINDOW`: the scoreboard's capabilities, the limits
   subscription `open_stream` starts (`Bridge::open_stream` follows the limits for `main` alone)
   and the focus refresh (`on_window_event` in `lib.rs` dispatches `Shown` for `main` alone).

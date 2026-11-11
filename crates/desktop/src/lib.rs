@@ -449,7 +449,7 @@ fn start_host<R: Runtime>(
         let secrets = connectors::secret_store();
         let config = connectors::with_connectors(config, app.clone(), &data_dir, secrets);
         let config = blocklist::with_blocklist(&app, config, secrets);
-        let config = mcp::with_mcp_secrets(config, secrets);
+        let config = mcp::with_mcp_confirm(mcp::with_mcp_secrets(config, secrets), app.clone());
         let config = match counts {
             Some(counts) => {
                 start_counts(&app, counts.clone());

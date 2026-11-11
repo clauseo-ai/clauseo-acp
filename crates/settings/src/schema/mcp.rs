@@ -30,7 +30,7 @@ pub enum McpTransport {
         /// computer's search paths at each launch, or an absolute path.
         command: String,
         /// Its arguments.
-        #[serde(default)]
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
         args: Vec<String>,
         /// Variables added to its environment, by name. A value is `{"keychain": true}`: it
         /// is in the OS keychain (service `ai.clauseo.desktop.mcp`, account
@@ -38,7 +38,7 @@ pub enum McpTransport {
         /// A plain string also works, for a firm's policy or a hand-edited file, but it is
         /// stored as it is in that file and sent to the agent in `session/new`: keep tokens in
         /// the keychain.
-        #[serde(default)]
+        #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
         env: BTreeMap<String, McpValue>,
     },
     /// A server at an `https` URL (`http` only for `localhost` or `127.0.0.1`). Stored and
@@ -48,7 +48,7 @@ pub enum McpTransport {
         url: String,
         /// Headers sent with each request, by name: `{"keychain": true}` (account
         /// `<server>/header/<name>`) or a plain string, as for `env`.
-        #[serde(default)]
+        #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
         headers: BTreeMap<String, McpValue>,
     },
 }

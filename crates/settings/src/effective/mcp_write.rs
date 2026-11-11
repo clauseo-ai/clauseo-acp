@@ -113,8 +113,8 @@ impl Effective {
         Ok(self.settings.mcp.servers.remove(name))
     }
 
-    /// Turns the server `name` on or off. A server that is not there is refused; one already
-    /// as asked writes nothing.
+    /// Turns the server `name` on or off, changing only its `enabled` in the file. A server that
+    /// is not there is refused; one already as asked writes nothing.
     pub fn set_mcp_server_enabled(
         &mut self,
         files: &dyn Files,
@@ -132,8 +132,12 @@ impl Effective {
         }
         let mut server = held.clone();
         server.enabled = enabled;
-        let entry = self.mcp_entry(&server)?;
-        user::write_mcp_server(&self.locations, files, None, name, Some(entry))?;
+        // Only the flag changes in the file: the entry's other keys stay byte for byte. An entry
+        // the file lacks (the list loaded, then the file changed) is written whole.
+        if !user::write_mcp_enabled(&self.locations, files, name, enabled)? {
+            let entry = self.mcp_entry(&server)?;
+            user::write_mcp_server(&self.locations, files, None, name, Some(entry))?;
+        }
         self.settings.mcp.servers.insert(name.to_owned(), server);
         Ok(())
     }

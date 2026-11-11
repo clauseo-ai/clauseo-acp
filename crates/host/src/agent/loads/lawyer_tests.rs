@@ -108,7 +108,8 @@ fn a_server_without_its_value_is_left_out_and_named() {
             ("/opt/homebrew/bin/npx", "/opt/homebrew/bin/npx"),
             ("plain", "/opt/homebrew/bin/plain"),
         ],
-    );
+    )
+    .with_unreadable(&["github/env/TOKEN"]);
     let (servers, left_out) = lawyer::servers(&effective, CLAUSEO, &secrets, host);
     let names: Vec<&str> = servers.iter().map(McpServer::name).collect();
     assert_eq!(names, ["plain"]);
@@ -190,5 +191,77 @@ fn reads_keep_only_usable_values() {
     assert_eq!(
         format!("{none:?}"),
         "McpSecrets { values: 0, unreadable: 4, commands: 1 }"
+    );
+}
+
+/// Every value an enabled local server carries is hidden in the agent's stderr tail: the
+/// keychain values read and each plain variable value; a disabled server's are not needed.
+#[test]
+fn every_value_of_an_enabled_server_is_redacted() {
+    let effective = effective(
+        "redacted",
+        &json!({
+            "github": {"command": "/opt/homebrew/bin/npx", "enabled": true,
+                "env": {"TOKEN": {"keychain": true}, "PLAIN": "plain-value-0042"}},
+            "remote": {"url": "https://x.example/mcp", "enabled": true,
+                "headers": {"X-Key": "header-value-0042"}},
+            "off": {"command": "/opt/off", "env": {"OFF": "off-value-0042"}},
+        }),
+    );
+    let secrets = McpSecrets::of(&[("github/env/TOKEN", "keychain-value-0042")], &[]);
+    let mut redacted = lawyer::redacted(&effective, &secrets);
+    redacted.sort();
+    // A remote server's values are PR B's to add.
+    assert_eq!(redacted, ["keychain-value-0042", "plain-value-0042"]);
+}
+
+/// A server renamed after the launch prep read its values is left out of that session, but not
+/// marked missing: its new account was never read, so nothing is known about it.
+#[test]
+fn a_server_renamed_during_a_launch_is_left_out_but_not_marked_missing() {
+    let effective = effective(
+        "renamed",
+        &json!({"github": {"command": "/opt/homebrew/bin/npx", "enabled": true,
+            "env": {"TOKEN": {"keychain": true}}}}),
+    );
+    // The prep read the old name's item.
+    let secrets = McpSecrets::of(
+        &[("gh/env/TOKEN", "t0ken-value")],
+        &[("/opt/homebrew/bin/npx", "/opt/homebrew/bin/npx")],
+    );
+    let host = HostEnv {
+        path: None,
+        windows_env: &[],
+    };
+    let (servers, left_out) = lawyer::servers(&effective, CLAUSEO, &secrets, host);
+    assert_eq!(servers, Vec::new());
+    assert_eq!(left_out, Vec::new());
+}
+
+/// The server's `PATH` holds its program's folder and the host's absolute folders only: a
+/// relative or empty entry, which would resolve against the matter folder, is left out.
+#[cfg(unix)]
+#[test]
+fn the_path_holds_no_relative_folder() {
+    let effective = effective(
+        "relative",
+        &json!({"plain": {"command": "/opt/homebrew/bin/plain", "enabled": true}}),
+    );
+    let secrets = McpSecrets::of(
+        &[],
+        &[("/opt/homebrew/bin/plain", "/opt/homebrew/bin/plain")],
+    );
+    let host_path = OsString::from("/usr/bin:.:bin::/bin");
+    let host = HostEnv {
+        path: Some(("PATH", &host_path)),
+        windows_env: &[],
+    };
+    let (servers, _) = lawyer::servers(&effective, CLAUSEO, &secrets, host);
+    assert_eq!(
+        env_of(&servers[0]),
+        [(
+            "PATH".to_owned(),
+            "/opt/homebrew/bin:/usr/bin:/bin".to_owned()
+        )]
     );
 }

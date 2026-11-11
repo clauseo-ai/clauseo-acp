@@ -162,6 +162,9 @@ impl Dir {
             // Every lawyer's MCP server's program is found where it says, on any machine; the
             // tests of the search set their own.
             .with_mcp_resolver(Arc::new(|typed: &str| Some(std::path::PathBuf::from(typed))))
+            // And every confirm before a server is added or changed is allowed; the confirm's
+            // tests set their own.
+            .with_mcp_confirm(Arc::new(AllowAll))
     }
 
     /// The clock of run `run`.
@@ -309,5 +312,14 @@ impl Drop for Dir {
                 eprintln!("could not remove {}: {error}", folder.display());
             }
         }
+    }
+}
+
+/// An MCP confirm that allows every save (`HostConfig::with_mcp_confirm`).
+struct AllowAll;
+
+impl clauseo_host::McpLaunchConfirm for AllowAll {
+    fn confirm(&self, _ask: &clauseo_host::McpLaunchAsk) -> bool {
+        true
     }
 }

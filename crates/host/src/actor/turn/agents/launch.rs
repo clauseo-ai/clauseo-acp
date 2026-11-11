@@ -48,8 +48,13 @@ pub(super) fn launch(
             format!("no agent {} in the settings", row.agent),
         )
     })?;
-    // The relay token reaches the agent in a file; its stderr tail hides it all the same.
-    let redacted = super::super::launch_checks::relay::redacted(&prepared.run);
+    // The relay token reaches the agent in a file; its stderr tail hides it all the same. So
+    // are the lawyer's MCP values, which reach it in `session/new`.
+    let mut redacted = super::super::launch_checks::relay::redacted(&prepared.run);
+    redacted.extend(agent::loads::lawyer::redacted(
+        &actor.effective,
+        &prepared.run.mcp_secrets,
+    ));
     let folder = prepared.stored;
     let claude_home = prepared.claude_home.clone();
     let (mut forced, codex) = if let Some(prepared) = prepared.codex {

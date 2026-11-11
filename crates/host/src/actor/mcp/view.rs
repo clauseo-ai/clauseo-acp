@@ -89,10 +89,9 @@ pub(crate) fn publish(actor: &mut Actor) {
     super::super::app::publish(actor, &HostEvent::McpToolsChanged(view));
 }
 
-/// The app catch-up's part: the whole view, unless it is the lawyer's empty list, which is what
-/// a window starts with (`McpToolsView::EMPTY`). It leaves the one sent as it was, so a change
-/// the other subscribers have not heard still goes to them.
-pub(crate) fn current(actor: &Actor) -> Option<HostEvent> {
-    let view = view(actor);
-    (view != McpToolsView::EMPTY).then_some(HostEvent::McpToolsChanged(view))
+/// The app catch-up's part: the whole view, always (a lagged window may hold a list since
+/// emptied). It leaves the one sent as it was, so a change the other subscribers have not heard
+/// still goes to them.
+pub(crate) fn current(actor: &Actor) -> HostEvent {
+    HostEvent::McpToolsChanged(view(actor))
 }

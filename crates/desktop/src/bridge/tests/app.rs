@@ -20,7 +20,8 @@ fn set_theme(theme: Theme) -> CommandEnvelope {
 }
 
 /// The host's first frames of an app subscription (0023): the settings, the whole matter list,
-/// and the whole thread list of its one matter (Scratch). Returns the settings.
+/// the whole thread list of its one matter (Scratch) and the MCP tools view. Returns the
+/// settings.
 fn first_frames(messages: &Messages) -> SettingsView {
     let current = settings(messages.next_event());
     let event = messages.next_event();
@@ -33,7 +34,26 @@ fn first_frames(messages: &Messages) -> SettingsView {
         matches!(&event, HostEvent::ThreadsChanged(changed) if changed.all),
         "{event:?}"
     );
+    mcp_tools(messages);
     current
+}
+
+/// The settings window's first frames of an app subscription, all it carries of the host's: the
+/// settings and the MCP tools view. Returns the settings.
+fn settings_first_frames(messages: &Messages) -> SettingsView {
+    let current = settings(messages.next_event());
+    mcp_tools(messages);
+    current
+}
+
+/// The next event, the MCP tools view, whole and empty: no lawyer server is set up.
+fn mcp_tools(messages: &Messages) {
+    let event = messages.next_event();
+    assert_eq!(
+        event,
+        HostEvent::McpToolsChanged(clauseo_protocol::McpToolsView::EMPTY),
+        "{event:?}"
+    );
 }
 
 /// A build of the window `label` that worked: numbered, then recorded.
@@ -221,7 +241,7 @@ fn a_tool_switch_from_the_settings_window_reaches_both_windows() {
     block_on(bridge.subscribe_app(MAIN)).unwrap();
     block_on(bridge.subscribe_app(SETTINGS)).unwrap();
     first_frames(&main);
-    let before = settings(settings_page.next_event()).tools;
+    let before = settings_first_frames(&settings_page).tools;
 
     let patch = ToolsPatch {
         web_search: Some(!before.web_search),
@@ -239,9 +259,10 @@ fn a_tool_switch_from_the_settings_window_reaches_both_windows() {
 }
 
 /// `main` and `settings` each follow the app feed on their own channel, and a change the
-/// settings window makes reaches both. `main` gets every app event: the three first frames and
-/// the thread list's changes. The settings window gets `settings_changed` alone of the app feed
-/// (0028): the first frame's settings and each change, never a matter or thread list. Both get
+/// settings window makes reaches both. `main` gets every app event: the four first frames and
+/// the thread list's changes. The settings window gets `settings_changed` and
+/// `mcp_tools_changed` of the app feed (0028): the first frames' settings and tools view and each
+/// change, never a matter or thread list. Both get
 /// the limits (U12), and the settings window's acks count its settings and limits messages.
 #[test]
 fn both_windows_get_the_settings_change_and_the_limits_and_only_main_the_lists() {
@@ -255,7 +276,10 @@ fn both_windows_get_the_settings_change_and_the_limits_and_only_main_the_lists()
     block_on(bridge.subscribe_app(MAIN)).unwrap();
     block_on(bridge.subscribe_app(SETTINGS)).unwrap();
     assert_eq!(first_frames(&main).ui.theme, Theme::System);
-    assert_eq!(settings(settings_page.next_event()).ui.theme, Theme::System);
+    assert_eq!(
+        settings_first_frames(&settings_page).ui.theme,
+        Theme::System
+    );
 
     // A new thread changes the lists: main hears of it, the settings window does not.
     let _thread = host.thread();
@@ -281,18 +305,18 @@ fn both_windows_get_the_settings_change_and_the_limits_and_only_main_the_lists()
             "{label}: {view:?}"
         );
     }
-    // Three messages sent: the first frame, the change and the limits view.
+    // Four messages sent: the two first frames, the change and the limits view.
     assert_eq!(settings_page.limits_received(), 1);
-    let refusal = block_on(bridge.ack(SETTINGS, Vec::new(), 4)).unwrap_err();
+    let refusal = block_on(bridge.ack(SETTINGS, Vec::new(), 5)).unwrap_err();
     assert_eq!(refusal.code(), ErrorCode::CommandInvalid, "{refusal:?}");
-    block_on(bridge.ack(SETTINGS, Vec::new(), 3)).unwrap();
+    block_on(bridge.ack(SETTINGS, Vec::new(), 4)).unwrap();
     let window = bridge.window(SETTINGS).unwrap();
     assert_eq!(lock(&window).state().unacked_bytes(), 0);
 }
 
 /// What each label's channel carries (`AppEvents`, 0028, U12, 0037): `main` every app and
 /// limits event, the settings window `settings_changed`, `connectors_changed`, `update_changed`,
-/// `protection_changed`, `protection_view_changed` and the limits, and any
+/// `protection_changed`, `protection_view_changed`, `mcp_tools_changed` and the limits, and any
 /// other label neither.
 /// So a window of another label that follows the app feed gets nothing of it, while the
 /// settings window gets each settings change.
@@ -314,6 +338,8 @@ fn main_carries_every_feed_event_settings_its_own_and_the_limits_another_label_n
     let site_blocked = r#"{"site_blocked":{}}"#;
     // The papers wall re-lists on it, in `main` only.
     let papers_changed = r#"{"papers_changed":{}}"#;
+    // Settings › Tools reads the lawyer's MCP servers.
+    let mcp_tools_changed = r#"{"mcp_tools_changed":{}}"#;
     let carries = |label: &str, feed, json| pump::AppEvents::of(label).carries(feed, json);
     for (feed, json) in [
         (Feed::App, settings_changed),
@@ -326,6 +352,7 @@ fn main_carries_every_feed_event_settings_its_own_and_the_limits_another_label_n
         (Feed::App, protection_view_changed),
         (Feed::App, site_blocked),
         (Feed::App, papers_changed),
+        (Feed::App, mcp_tools_changed),
         (Feed::Limits, limits),
     ] {
         assert!(carries(MAIN, feed, json), "main: {json}");
@@ -339,6 +366,7 @@ fn main_carries_every_feed_event_settings_its_own_and_the_limits_another_label_n
     assert!(carries(SETTINGS, Feed::App, update_changed));
     assert!(carries(SETTINGS, Feed::App, protection_changed));
     assert!(carries(SETTINGS, Feed::App, protection_view_changed));
+    assert!(carries(SETTINGS, Feed::App, mcp_tools_changed));
     assert!(!carries(SETTINGS, Feed::App, threads_changed));
     assert!(!carries(SETTINGS, Feed::App, folder_scanned));
     assert!(carries(SETTINGS, Feed::Limits, limits));
@@ -352,7 +380,10 @@ fn main_carries_every_feed_event_settings_its_own_and_the_limits_another_label_n
     block_on(bridge.open_stream("other", other_channel)).unwrap();
     block_on(bridge.subscribe_app("other")).unwrap();
     block_on(bridge.subscribe_app(SETTINGS)).unwrap();
-    assert_eq!(settings(settings_page.next_event()).ui.theme, Theme::System);
+    assert_eq!(
+        settings_first_frames(&settings_page).ui.theme,
+        Theme::System
+    );
     block_on(bridge.dispatch(SETTINGS, set_theme(Theme::Dark))).unwrap();
     assert_eq!(settings(settings_page.next_event()).ui.theme, Theme::Dark);
     // Subscribed first, the other window's pump has had the change at least as long; the table
@@ -401,8 +432,8 @@ fn closing_a_window_drops_its_channel_app_pump_and_watchdog() {
     let (channel, page) = collector();
     block_on(bridge.open_stream(SETTINGS, channel)).unwrap();
     block_on(bridge.subscribe_app(SETTINGS)).unwrap();
-    // Its one first frame: the settings.
-    let _current = settings(page.next_event());
+    // Its two first frames: the settings and the MCP tools view.
+    let _current = settings_first_frames(&page);
     let window = bridge.window(SETTINGS).unwrap();
     let dropped = pump::feed_dropped(&window, Feed::App).unwrap();
     let gone = Arc::downgrade(&window);
@@ -482,7 +513,7 @@ fn a_late_close_of_an_old_window_leaves_the_newer_one() {
     // The old window's close again, later still: the newer page keeps its stream.
     bridge.close_window(SETTINGS, first_build);
     block_on(bridge.subscribe_app(SETTINGS)).unwrap();
-    assert_eq!(settings(new.next_event()).ui.theme, Theme::System);
+    assert_eq!(settings_first_frames(&new).ui.theme, Theme::System);
     block_on(bridge.dispatch(SETTINGS, set_theme(Theme::Dark))).unwrap();
     assert_eq!(settings(new.next_event()).ui.theme, Theme::Dark);
 
@@ -536,7 +567,10 @@ fn main_s_app_feed_starts_with_the_full_screen_value_and_carries_each_change_onc
             break;
         }
     }
-    assert_eq!(settings(settings_page.next_event()).ui.theme, Theme::System);
+    assert_eq!(
+        settings_first_frames(&settings_page).ui.theme,
+        Theme::System
+    );
     assert_eq!(settings(settings_page.next_event()).ui.theme, Theme::Dark);
     assert_eq!(settings_page.drain(), Vec::<String>::new());
 }
