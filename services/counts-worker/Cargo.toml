@@ -1,0 +1,67 @@
+[package]
+name = "clauseo-counts-worker"
+version = "0.1.0"
+description = "The Cloudflare Worker behind t.clauseo.chat: takes the anonymous day reports and weekly tallies, checks them with clauseo-counts' own schema, and keeps them in D1."
+edition = "2024"
+rust-version = "1.99"
+license = "GPL-3.0-or-later"
+publish = false
+
+# Its own workspace, so the repo's root workspace never builds or resolves this crate (like fuzz/).
+[workspace]
+
+[lib]
+# cdylib for worker-build's wasm; rlib so `cargo test` runs the request rules natively.
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+# The schema module alone: no files, no clock, no random source, no network.
+clauseo-counts = { path = "../../crates/counts", default-features = false }
+worker = { version = "0.8.7", features = ["d1"] }
+serde = "1"
+serde_json = "1.0.154"
+# The pure-Rust inflater (miniz_oxide), which builds for wasm32.
+flate2 = { version = "1.1.10", default-features = false, features = [
+  "rust_backend",
+] }
+futures-util = { version = "0.3", default-features = false }
+
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+
+# The root workspace's lints, copied: this crate is not a member, so it cannot inherit them.
+[lints.rust]
+unsafe_code = "deny"
+missing_docs = "warn"
+unreachable_pub = "warn"
+elided_lifetimes_in_paths = "warn"
+
+[lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+module_name_repetitions = "allow"
+must_use_candidate = "allow"
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+redundant_clone = "warn"
+needless_collect = "warn"
+allow_attributes = "deny"
+allow_attributes_without_reason = "deny"
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+dbg_macro = "deny"
+print_stdout = "deny"
+print_stderr = "deny"
+exit = "deny"
+mem_forget = "deny"
+let_underscore_must_use = "deny"
+unused_result_ok = "deny"
+map_err_ignore = "deny"
+mod_module_files = "deny"
+str_to_string = "warn"
+get_unwrap = "deny"
+undocumented_unsafe_blocks = "deny"
