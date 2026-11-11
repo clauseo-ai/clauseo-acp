@@ -121,8 +121,8 @@ impl BlockListSeams {
     }
 
     /// These seams with the updater started as if something enforced the list ([`needed`]):
-    /// for tests of the guarded browser's proxy, which their profile hook offers while
-    /// `BROWSER_MCP` is off.
+    /// for tests of the guarded browser's proxy, which their profile hook offers though no
+    /// shipped entry has one.
     #[cfg(feature = "test-support")]
     #[must_use]
     pub fn enforced(mut self) -> Self {
@@ -250,13 +250,12 @@ pub(crate) fn allowed_sites(
 }
 
 /// Whether the host fetches the list: only when something enforces it. Only a session's egress
-/// proxy reads it, and a proxy opens only for the guarded browser entry
-/// (`clauseo_profile::servers::BROWSER_MCP`, parked) or, once it returns, the Safe workspace
-/// (`HostConfig::with_sandbox`). The plain build has neither: no fetch at start and none
-/// every interval (stage E, 2026-11-10). The fetch code stays for when either returns.
+/// proxy reads it, and a proxy opens only for the Safe workspace (`HostConfig::with_sandbox`),
+/// once it returns: Codex's guarded browser entry (`clauseo_profile::servers::browser_mcp`)
+/// runs with no proxy. The plain build has none: no fetch at start and none every interval
+/// (stage E, 2026-11-10). The fetch code stays for when a proxy returns.
 pub(crate) fn needed(config: &crate::HostConfig) -> bool {
-    clauseo_profile::servers::BROWSER_MCP
-        || config.sandbox().is_some()
+    config.sandbox().is_some()
         || config
             .wiring
             .blocklist
