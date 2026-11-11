@@ -223,7 +223,16 @@ fn claude_gets_agent_browser_rules_only_with_the_browser() {
             assert!(allowed.contains(&"Bash(agent-browser read:*)".to_owned()));
             let want: Vec<String> = clauseo_profile::claude::agent_browser_denied().collect();
             assert_eq!(denied, want);
-            // A wait running page JavaScript asks though `wait` is allowed, and so does eval.
+            // eval, pdf and download are refused (a deny rule wins over allow and ask), bare and
+            // behind `--json`.
+            for sub in ["eval", "pdf", "download"] {
+                for prefix in ["agent-browser", "agent-browser --json"] {
+                    let rule = format!("Bash({prefix} {sub}*)");
+                    assert!(denied.contains(&rule), "{rule}");
+                    assert!(!asked.contains(&rule), "{rule}");
+                }
+            }
+            // A wait running page JavaScript asks though `wait` is allowed.
             let want: Vec<String> = clauseo_profile::claude::agent_browser_ask().collect();
             assert_eq!(asked, want);
             assert_eq!(
@@ -231,7 +240,7 @@ fn claude_gets_agent_browser_rules_only_with_the_browser() {
                 [
                     "Bash(agent-browser wait*-f*)",
                     "Bash(agent-browser get*cdp-url*)",
-                    "Bash(agent-browser eval*)"
+                    "Bash(agent-browser upload*)"
                 ]
             );
         } else {

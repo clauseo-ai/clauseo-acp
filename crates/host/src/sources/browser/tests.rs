@@ -424,18 +424,18 @@ fn a_standalone_approval_names_a_tool_only_in_codexs_exact_form() {
     }
 }
 
-/// Every `agent_browser_*` tool is answered by the host but eval, which asks.
+/// Every `agent_browser_*` tool is answered by the host, eval included: the guard refuses it.
 #[test]
-fn every_agent_browser_tool_but_eval_is_auto_allowed() {
+fn every_agent_browser_tool_is_auto_allowed() {
     for tool in [
         "agent_browser_click",
+        "agent_browser_eval",
         "agent_browser_open",
         "agent_browser_get_text",
     ] {
         assert!(auto_allowed_browser_tool(tool), "{tool}");
     }
     for tool in [
-        "agent_browser_eval",
         "agent_browser_",
         "agent_browser_Click",
         "agent_browser_click.x",

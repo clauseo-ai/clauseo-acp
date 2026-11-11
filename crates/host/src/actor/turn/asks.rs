@@ -4,8 +4,8 @@
 //! permission request that names a file of the matter a program holds open (Word, say) is
 //! answered for the lawyer, rejected, in the commit that logs it. One that touches Clauseo's own
 //! data folder (`agent/data_fence.rs`) is rejected with nothing logged: the lawyer never sees it.
-//! A Codex approval of one of the guarded `browser` server's tools other than eval is allowed for
-//! the session with nothing logged ([`browser_tool_to_allow`]).
+//! A Codex approval of one of the guarded `browser` server's tools is allowed for the session
+//! with nothing logged ([`browser_tool_to_allow`]).
 
 use std::path::PathBuf;
 
@@ -54,8 +54,8 @@ pub(super) struct HeldOpenCheck {
 /// otherwise, or when the check cannot be sent, it is logged `Live` for the lawyer at once. In
 /// forced ask it first loses the options `agent::forced_ask::keep_option` drops. A Claude request
 /// naming only its own plan note is marked `about: agent_plan` (`agent/plan_note.rs`), a label that
-/// changes nothing else. In the live turn, a Codex approval of a `browser` tool other than eval is
-/// answered `allow_session` at once, unseen ([`browser_tool_to_allow`]).
+/// changes nothing else. In the live turn, a Codex approval of a `browser` tool is answered
+/// `allow_session` at once, unseen ([`browser_tool_to_allow`]).
 pub(super) fn on_permission(actor: &mut Actor, thread: ThreadId, event: AcpEvent) {
     let AcpEvent::PermissionRequested {
         session,
@@ -139,13 +139,14 @@ const ALLOW_SESSION: &str = "allow_session";
 
 /// The `browser` tool and the `allow_session` option, when the host answers this request itself:
 /// the thread's agent is Codex, not in forced ask; the request offers `allow_session`; and it
-/// names one of the guarded `browser` server's tools other than eval
-/// (`sources::browser::auto_allowed_browser_tool`). The tool comes only from fields Codex and
-/// codex-acp build, never from model-written text: the title `mcp.browser.<tool>` of the
-/// earlier tool call the request's toolCallId names, which the thread's sources keep
-/// (`sources::browser::CodexTools`), or a standalone request's `serverName` and exact message
-/// (`sources::browser::codex_standalone_browser_tool`). Everything else (shell commands, file
-/// writes, other servers such as `case-law`, eval) goes to the lawyer as before.
+/// names one of the guarded `browser` server's tools
+/// (`sources::browser::auto_allowed_browser_tool`; the guard refuses eval). The tool comes only
+/// from fields Codex and codex-acp build, never from model-written text: the title
+/// `mcp.browser.<tool>` of the earlier tool call the request's toolCallId names, which the
+/// thread's sources keep (`sources::browser::CodexTools`), or a standalone request's
+/// `serverName` and exact message (`sources::browser::codex_standalone_browser_tool`).
+/// Everything else (shell commands, file writes, other servers such as `case-law`) goes to the
+/// lawyer as before.
 ///
 /// Codex's own per-server `default_tools_approval_mode` would do this, but codex-acp replaces the
 /// whole `mcp_servers` table with ACP's servers (`dist/index.js:35482`), dropping that value.

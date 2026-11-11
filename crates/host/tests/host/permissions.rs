@@ -178,12 +178,12 @@ fn requested_tools(events: &Events) -> Vec<Option<String>> {
         .collect()
 }
 
-/// Codex's approvals of the guarded browser server: a click (correlated with its tool call) and
-/// a snapshot (standalone) are answered `allow_session` by the host with nothing logged; eval in
-/// both forms, a case-law search and a shell command reach the lawyer. The scenario checks each
-/// answer the agent gets.
+/// Codex's approvals of the guarded browser server: a click and an eval (correlated with their
+/// tool calls) and a snapshot and an eval (standalone) are answered `allow_session` by the host
+/// with nothing logged, the guard refusing eval itself; a case-law search and a shell command
+/// reach the lawyer. The scenario checks each answer the agent gets.
 #[test]
-fn codex_browser_tools_are_allowed_unseen_but_eval() {
+fn codex_browser_tools_are_allowed_unseen() {
     const CODEX: &str = "codex-acp";
     let dir = Dir::new(
         "codex_browser_approvals",
@@ -193,25 +193,18 @@ fn codex_browser_tools_are_allowed_unseen_but_eval() {
     let (_, thread, _) = matter_with_thread(&dir, &host, "m", &[], CODEX);
     let mut events = host.events(StreamId::Thread(thread));
     let (turn, _) = host.prompt(thread, "Find the judgment.");
-    answer_from(
-        &host,
-        &mut events,
-        thread,
-        0,
-        &["allow_once", "allow_once", "allow_once", "approved"],
-    );
+    answer_from(&host, &mut events, thread, 0, &["allow_once", "approved"]);
     let ended = events.until_turn_ended(turn);
     events.assert_no_mismatch();
     assert_eq!(ended.stop, StopReason::EndTurn, "{}", events.dump());
     let seen = requested_tools(&events);
-    assert_eq!(seen.len(), 4, "{}", events.dump());
-    assert_eq!(seen[0].as_deref(), Some("tc-eval"));
-    assert_eq!(seen[2].as_deref(), Some("tc-law"));
-    assert_eq!(seen[3].as_deref(), Some("tc-shell"));
+    assert_eq!(seen.len(), 2, "{}", events.dump());
+    assert_eq!(seen[0].as_deref(), Some("tc-law"));
+    assert_eq!(seen[1].as_deref(), Some("tc-shell"));
     assert!(
         !seen
             .iter()
-            .any(|tool| matches!(tool.as_deref(), Some("tc-click"))),
+            .any(|tool| matches!(tool.as_deref(), Some("tc-click" | "tc-eval"))),
         "{}",
         events.dump()
     );
