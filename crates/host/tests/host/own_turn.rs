@@ -2,8 +2,8 @@
 //! finishes): its tool call and text are never dropped. The host opens a turn for them with no
 //! message of the lawyer's, shows and keeps it across a restart, gives it an Undo step, ends it
 //! on the agent's cost-bearing usage update or after a quiet spell; a prompt queued meanwhile
-//! waits behind it, and Send now cancels it; a permission request with no turn opens one too and
-//! is asked, never cancelled.
+//! waits behind it, and Send now cancels it (the prompt waiting out the late window); a
+//! permission request with no turn opens one too and is asked, never cancelled.
 
 use std::time::Duration;
 
@@ -18,6 +18,8 @@ use crate::support::{Dir, FAKE, Running, Scenario, matter_with_thread, text};
 
 /// How long an agent-started turn with nothing open waits for an update.
 const QUIET: Duration = Duration::from_secs(60);
+/// How long a cancelled agent-started turn's late window waits for the agent to go quiet.
+const LATE_QUIET: Duration = Duration::from_secs(3);
 /// The agent-started turn's text in every scenario.
 const OWN_TEXT: &str = "The build finished: 3 warnings.";
 
@@ -147,6 +149,10 @@ fn send_now_cancels_an_agent_started_turn() {
         DeliveryRequest::SendNow,
     );
     assert_eq!(events.until_turn_ended(own).stop, StopReason::Cancelled);
+    // The agent sends no stop signal: the prompt sent now waits out the late window's quiet.
+    host.wait_armed(LATE_QUIET);
+    assert_eq!(starts(&events, next), 0, "{}", events.dump());
+    host.clock.advance(LATE_QUIET);
     assert_eq!(events.until_turn_ended(next).stop, StopReason::EndTurn);
     settle(&host, &mut events);
     assert_eq!(events.turn_text(next), "Clause 9 says.");

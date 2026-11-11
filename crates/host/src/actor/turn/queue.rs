@@ -255,6 +255,11 @@ fn route(
         // Nothing may start: the prompt queues held, whatever holds it (`hold.rs`).
         return hold::hold_prompt(actor, ctx, thread, blocks, delivery, holds);
     }
+    if running.is_none() && super::own_turn::holds_starts(actor, thread) {
+        refuse_full(actor, thread)?;
+        let ahead = turn_ahead(actor, thread);
+        return queued::wait_late(actor, ctx, thread, ahead, blocks, delivery);
+    }
     let queued = queue(actor, thread).is_some_and(|queue| !queue.is_empty());
     match (delivery, running) {
         (DeliveryRequest::Queue, None) if !queued => {
@@ -490,7 +495,8 @@ pub(super) fn move_on(actor: &mut Actor, thread: ThreadId) {
         .turns
         .front()
         .is_some_and(|head| head.forced || !queue.held);
-    if idle && starts && !own_undo(actor, thread) {
+    let late = super::own_turn::holds_starts(actor, thread);
+    if idle && starts && !late && !own_undo(actor, thread) {
         start_head(actor, thread);
     }
 }

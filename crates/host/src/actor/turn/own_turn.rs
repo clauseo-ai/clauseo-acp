@@ -12,16 +12,20 @@
 //! live (and while another turn of the thread starts or ends) these wait here in order, then are
 //! logged as the turn's own: the agent-started turn's once it starts, or the
 //! turn a prompt starts meanwhile, which they then come first in. Queued prompts wait behind it
-//! as behind any turn, and a cancel (Stop, Send now) sends `session/cancel` and ends it
-//! `Cancelled` at once, as no prompt answers it.
+//! as behind any turn. A cancel (Stop, Send now), in any phase, sends `session/cancel`, drops
+//! the output waiting for it and ends it `Cancelled` (at once once live, as no prompt answers
+//! it), and opens its late window (`late.rs`): what the agent sends until it has stopped is
+//! dropped, no agent-started turn opens meanwhile, and a prompt sent now waits for it.
 //!
 //! Its end: the agent's turn ends in the SDK's `result`, which claude-agent-acp sends as a
 //! `usage_update` with a cost (a prompted turn's last update, just before its response), so a
 //! `Usage` with a cost ends it `EndTurn`. Should that never come, [`QUIET`] with no update ends
 //! it, unless a tool call of the turn or a request is open, which it waits for up to [`OPEN_CAP`]
 //! of silence: it never runs forever. Agent output while a turn is cancelled, waiting when it
-//! ends, or within [`CANCEL_WAIT`] of its end is that turn's tail and is dropped, as
-//! `Origin::Late` is.
+//! ends, within [`CANCEL_WAIT`] of its end, or in an agent-started turn's late window is that
+//! turn's tail and is dropped, as `Origin::Late` is.
+
+mod late;
 
 use std::time::Duration;
 
@@ -53,6 +57,23 @@ pub(crate) struct Held {
     updates: Vec<AcpEvent>,
     /// When the thread's last cancelled turn ended, on the monotonic clock.
     cancelled_at: Option<Duration>,
+    /// The late window of a cancelled agent-started turn, while it is open.
+    late: Option<late::Late>,
+}
+
+#[cfg(test)]
+pub(super) use late::{QUIET as LATE_QUIET, dropped as late_dropped};
+pub(super) use late::{holds_starts, on_timer as on_late_timer};
+
+/// How many updates and requests of `thread` wait for a turn.
+#[cfg(test)]
+pub(super) fn waiting(actor: &mut Actor, thread: ThreadId) -> usize {
+    state(actor, thread).map_or(0, |state| state.own_held.updates.len())
+}
+
+/// Whether an `Idle` update of `thread` is dropped by the open late window (`late.rs`).
+pub(super) fn late_drops(actor: &mut Actor, thread: ThreadId, update: &AgentUpdate) -> bool {
+    late::drops(actor, thread, update)
 }
 
 /// What an agent-started current turn keeps.
@@ -141,21 +162,25 @@ pub(super) fn hold_ask(actor: &mut Actor, thread: ThreadId, event: AcpEvent) -> 
     let own_live =
         current(actor, thread).is_some_and(|current| current.live() && current.own.is_some());
     if !idle || own_live || tail(actor, thread) {
+        if idle {
+            late::note(actor, thread);
+        }
         return Some(event);
     }
     hold_event(actor, thread, event);
     None
 }
 
-/// Whether agent output now is a cancelled turn's tail: the current turn is cancelled, or the
-/// last one ended cancelled within [`CANCEL_WAIT`].
+/// Whether agent output now is a cancelled turn's tail: the current turn is cancelled, the last
+/// one ended cancelled within [`CANCEL_WAIT`], or an agent-started turn's late window is open.
 fn tail(actor: &mut Actor, thread: ThreadId) -> bool {
     let now = actor.now().mono;
     state(actor, thread).is_some_and(|state| {
-        state
-            .current
-            .as_ref()
-            .is_some_and(|current| current.cancelled)
+        state.own_held.late.is_some()
+            || state
+                .current
+                .as_ref()
+                .is_some_and(|current| current.cancelled)
             || state
                 .own_held
                 .cancelled_at
@@ -182,10 +207,11 @@ fn hold_event(actor: &mut Actor, thread: ThreadId, event: AcpEvent) -> bool {
 }
 
 /// Opens an agent-started turn for the waiting updates when the thread has no turn (none
-/// current, none closing) and its agent is attached: step 3 (the writer) at once, as its agent
-/// runs. Nothing opens while the host stops; the updates then go with the agent.
+/// current, none closing), no late window is open and its agent is attached: step 3 (the
+/// writer) at once, as its agent runs. Nothing opens while the host stops; the updates then go
+/// with the agent.
 pub(super) fn open_if_idle(actor: &mut Actor, thread: ThreadId) {
-    if host_stopping(actor) {
+    if host_stopping(actor) || late::is_open(actor, thread) {
         return;
     }
     let Some(state) = state(actor, thread) else {
@@ -369,22 +395,39 @@ pub(super) fn on_quiet(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
     end_now(actor, thread);
 }
 
-/// A cancel of the agent-started current turn, its `session/cancel` sent: it ends `Cancelled`
-/// now, as no prompt answers it. Says whether the turn was one.
+/// A cancel of the agent-started current turn, its `session/cancel` sent: its late window
+/// opens, and it ends `Cancelled` now, as no prompt answers it. Says whether the turn was one.
 pub(super) fn cancelled(actor: &mut Actor, thread: ThreadId) -> bool {
     if !is_own(actor, thread) {
         return false;
     }
+    late::open(actor, thread);
     disarm(actor, thread);
     end::end_turn(actor, thread, End::cancelled(None));
     true
 }
 
-/// `session/cancel` for an agent-started current turn not live yet (the agent runs it already).
+/// A cancel of an agent-started current turn not live yet (launching, waiting for the writer,
+/// checkpointing or starting; the agent runs it already): its late window opens, dropping the
+/// output waiting for it, and the agent gets `session/cancel`. Any other turn is left to the
+/// caller.
 pub(super) fn cancel_agent(actor: &mut Actor, thread: ThreadId, why: &'static str) {
-    if !is_own(actor, thread) {
+    let starting = current(actor, thread)
+        .filter(|current| current.own.is_some() && !current.cancelled)
+        .is_some_and(|current| {
+            matches!(
+                current.phase,
+                TurnPhase::Accepting
+                    | TurnPhase::Launching
+                    | TurnPhase::Queued
+                    | TurnPhase::Checkpointing
+                    | TurnPhase::Starting
+            )
+        });
+    if !starting {
         return;
     }
+    late::open(actor, thread);
     let agent = state(actor, thread)
         .and_then(|state| state.agent.as_deref())
         .filter(|agent| agent.stage == Stage::Attached)
