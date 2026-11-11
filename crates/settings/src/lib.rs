@@ -12,7 +12,8 @@
 //! `policy.json`. Decision record `docs/decisions/0009-policy-layer.md` fixes the policy
 //! sources, paths, formats and the merge rule. It also reads one value of Chrome's, Edge's
 //! and Chromium's own policy, `RemoteDebuggingAllowed` ([`chromium_policy`]), for the host's
-//! browser.
+//! browser. It finds the MCP servers a lawyer already set up in Claude Desktop, Claude Code and
+//! Codex, as import candidates ([`mcp_import`]); nothing it finds is written.
 //!
 //! # Interface
 //!
@@ -123,6 +124,7 @@ mod json;
 mod leaf;
 mod locations;
 mod lock_reason;
+pub mod mcp_import;
 mod network;
 mod plans;
 pub mod policy;

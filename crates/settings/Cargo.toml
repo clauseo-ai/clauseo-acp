@@ -21,6 +21,8 @@ tracing = { workspace = true }
 unicode-normalization = { workspace = true }
 # The key names in macOS managed preferences files; plain Rust, so tested on every OS.
 plist = { workspace = true }
+# The Codex config.toml the MCP import reads (the same toml crate desktop uses).
+toml = "1"
 
 # The registry and the known folders; the owner, DACL and link count of policy.json and its
 # folder (Security, Security_Authorization, Storage_FileSystem).

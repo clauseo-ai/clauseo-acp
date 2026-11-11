@@ -1,0 +1,259 @@
+//! Names, merges, problems and what Debug prints.
+
+use super::*;
+
+#[test]
+fn names_are_cleaned_to_the_mcp_rules() {
+    let long = "x".repeat(70);
+    let config = format!(
+        r#"{{"mcpServers": {{
+            "a__b": {{"command": "/bin/x"}},
+            "my server": {{"command": "/bin/x"}},
+            "trail_": {{"command": "/bin/x"}},
+            "___": {{"command": "/bin/x"}},
+            "browser": {{"command": "/bin/x"}},
+            "Case-Law": {{"command": "/bin/x"}},
+            "héllo": {{"command": "/bin/x"}},
+            "{long}": {{"command": "/bin/x"}},
+            "ok_name-1": {{"command": "/bin/x"}}
+        }}}}"#
+    );
+    let fs = FakeFs::default()
+        .file("/Users/ana/.claude.json", &config)
+        .program("/bin/x");
+    let found = run(Os::Mac, "/Users/ana", &[], &fs, &[]);
+    let expected = [
+        "Case-Law-imported",
+        "a_b",
+        "browser-imported",
+        "h-llo",
+        "my-server",
+        "ok_name-1",
+        "server",
+        "trail",
+        &long[..64],
+    ];
+    assert_eq!(names(&found), expected);
+
+    for candidate in &found {
+        assert!(
+            candidate.name.len() <= 64
+                && !candidate.name.contains("__")
+                && !candidate.name.ends_with('_')
+                && candidate
+                    .name
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-'),
+            "{}",
+            candidate.name
+        );
+        assert!(
+            crate::reserved_mcp_server(&candidate.name).is_none(),
+            "{}",
+            candidate.name
+        );
+    }
+    assert_eq!(
+        by_name(&found, "a_b").problems,
+        [Problem::NameChanged {
+            from: "a__b".to_owned()
+        }]
+    );
+    assert_eq!(
+        by_name(&found, "browser-imported").problems,
+        [Problem::NameChanged {
+            from: "browser".to_owned()
+        }]
+    );
+    assert_eq!(
+        by_name(&found, "Case-Law-imported").problems,
+        [Problem::NameChanged {
+            from: "Case-Law".to_owned()
+        }]
+    );
+    assert_eq!(by_name(&found, "ok_name-1").problems.len(), 0);
+}
+
+#[test]
+fn same_config_in_several_sources_is_one_candidate() {
+    let fs = FakeFs::default()
+        .file(
+            DESKTOP_MAC,
+            r#"{"mcpServers": {"dup": {"command": "/bin/x", "args": ["a"],
+                                       "env": {"A": "1", "B": "2"}}}}"#,
+        )
+        .file(
+            "/Users/ana/.claude.json",
+            r#"{"mcpServers": {"dup": {"command": "/bin/x", "args": ["a"],
+                                       "env": {"B": "2", "A": "1"}}}}"#,
+        )
+        .program("/bin/x");
+    let found = run(Os::Mac, "/Users/ana", &[], &fs, &[]);
+    assert_eq!(names(&found), ["dup"]);
+    assert_eq!(
+        found[0].sources,
+        [Source::ClaudeDesktop, Source::ClaudeCodeUser]
+    );
+    assert_eq!(found[0].problems.len(), 0);
+}
+
+#[test]
+fn a_different_config_under_the_same_name_gets_a_suffix() {
+    let fs = FakeFs::default()
+        .file(
+            DESKTOP_MAC,
+            r#"{"mcpServers": {"dup": {"command": "/bin/x", "args": ["a"]}}}"#,
+        )
+        .file(
+            "/Users/ana/.claude.json",
+            r#"{"mcpServers": {"dup": {"command": "/bin/x", "args": ["b"]}}}"#,
+        )
+        .file(
+            "/Users/ana/.codex/config.toml",
+            "[mcp_servers.dup]\ncommand = \"/bin/x\"\nargs = [\"c\"]\n",
+        )
+        .program("/bin/x");
+    let found = run(Os::Mac, "/Users/ana", &[], &fs, &[]);
+    assert_eq!(names(&found), ["dup", "dup-2", "dup-3"]);
+    assert_eq!(found[0].sources, [Source::ClaudeDesktop]);
+    assert_eq!(found[1].sources, [Source::ClaudeCodeUser]);
+    assert_eq!(found[2].sources, [Source::Codex]);
+    for renamed in &found[1..] {
+        assert_eq!(
+            renamed.problems,
+            [Problem::NameChanged {
+                from: "dup".to_owned()
+            }]
+        );
+    }
+}
+
+#[test]
+fn suffixes_skip_names_taken_by_clauseo_or_by_other_servers() {
+    let fs = FakeFs::default()
+        .file(
+            "/Users/ana/.claude.json",
+            r#"{"mcpServers": {
+                "a": {"command": "/bin/x", "args": ["1"]},
+                "a-2": {"command": "/bin/x", "args": ["3"]}
+            }}"#,
+        )
+        .file(
+            "/Users/ana/.codex/config.toml",
+            "[mcp_servers.a]\ncommand = \"/bin/x\"\nargs = [\"2\"]\n",
+        )
+        .program("/bin/x");
+    let found = run(Os::Mac, "/Users/ana", &[], &fs, &[]);
+    assert_eq!(names(&found), ["a", "a-2", "a-3"]);
+
+    let fs = FakeFs::default()
+        .file(
+            "/Users/ana/.claude.json",
+            r#"{"mcpServers": {"dup": {"command": "/bin/x", "args": ["1"]}}}"#,
+        )
+        .file(
+            "/Users/ana/.codex/config.toml",
+            "[mcp_servers.dup]\ncommand = \"/bin/x\"\nargs = [\"2\"]\n",
+        )
+        .program("/bin/x");
+    let found = run(Os::Mac, "/Users/ana", &[], &fs, &["dup-2"]);
+    assert_eq!(names(&found), ["dup", "dup-3"]);
+}
+
+#[test]
+fn names_already_in_clauseo_are_marked_added() {
+    let fs = FakeFs::default()
+        .file(
+            "/Users/ana/.claude.json",
+            r#"{"mcpServers": {"files": {"command": "/bin/x"}, "web": {"command": "/bin/x"}}}"#,
+        )
+        .program("/bin/x");
+    let found = run(Os::Mac, "/Users/ana", &[], &fs, &["files"]);
+    assert_eq!(by_name(&found, "files").problems, [Problem::AlreadyAdded]);
+    assert_eq!(by_name(&found, "web").problems.len(), 0);
+
+    let found = run(Os::Mac, "/Users/ana", &[], &fs, &["web"]);
+    assert_eq!(by_name(&found, "web").problems, [Problem::AlreadyAdded]);
+}
+
+#[test]
+fn unreadable_parts_are_left_out_and_flagged() {
+    let fs = FakeFs::default()
+        .file(
+            "/Users/ana/.claude.json",
+            r#"{"mcpServers": {"odd": {"command": "/bin/x", "args": "not-a-list",
+                                       "env": {"GOOD": "1", "BAD": 5}}}}"#,
+        )
+        .program("/bin/x");
+    let found = run(Os::Mac, "/Users/ana", &[], &fs, &[]);
+    let odd = by_name(&found, "odd");
+    assert_eq!(odd.kind, local("/bin/x", &[], &[("GOOD", "1")]));
+    assert_eq!(odd.problems, [Problem::Unreadable]);
+}
+
+#[test]
+fn unreadable_files_give_no_candidates_and_never_panic() {
+    let cases = [
+        "{ not json",
+        "[1, 2, 3]",
+        r#"{"mcpServers": [1]}"#,
+        r#"{"projects": 4}"#,
+        "",
+    ];
+    for text in cases {
+        let fs = FakeFs::default()
+            .file("/Users/ana/.claude.json", text)
+            .file(DESKTOP_MAC, text)
+            .file("/Users/ana/.codex/config.toml", text);
+        assert_eq!(run(Os::Mac, "/Users/ana", &[], &fs, &[]).len(), 0, "{text}");
+    }
+    let bad_toml = FakeFs::default().file(
+        "/Users/ana/.codex/config.toml",
+        "[mcp_servers.x\ncommand = ",
+    );
+    assert_eq!(run(Os::Mac, "/Users/ana", &[], &bad_toml, &[]).len(), 0);
+    let not_a_table = FakeFs::default().file("/Users/ana/.codex/config.toml", "mcp_servers = 3\n");
+    assert_eq!(run(Os::Mac, "/Users/ana", &[], &not_a_table, &[]).len(), 0);
+    assert_eq!(
+        run(Os::Mac, "/Users/ana", &[], &FakeFs::default(), &[]).len(),
+        0
+    );
+}
+
+#[test]
+fn output_is_sorted_by_name() {
+    let fs = FakeFs::default()
+        .file(
+            "/Users/ana/.claude.json",
+            r#"{"mcpServers": {"zeta": {"command": "/bin/x"}, "alpha": {"command": "/bin/x"}, "Mid": {"command": "/bin/x"}}}"#,
+        )
+        .program("/bin/x");
+    let found = run(Os::Mac, "/Users/ana", &[], &fs, &[]);
+    assert_eq!(names(&found), ["Mid", "alpha", "zeta"]);
+}
+
+#[test]
+fn debug_prints_names_never_values() {
+    let fs = FakeFs::default()
+        .file(
+            DESKTOP_MAC,
+            r#"{"mcpServers": {
+                "local": {"command": "/bin/x", "env": {"API_KEY": "SECRET-env-value"}},
+                "remote": {"url": "https://r.example.com/mcp?token=SECRET-query",
+                           "headers": {"Authorization": "SECRET-header-value"}}
+            }}"#,
+        )
+        .program("/bin/x");
+    let found = run(Os::Mac, "/Users/ana", &[], &fs, &[]);
+    assert_eq!(found.len(), 2);
+    let printed = format!("{found:?}");
+    assert!(!printed.contains("SECRET"), "{printed}");
+    assert!(printed.contains("API_KEY"), "{printed}");
+    assert!(printed.contains("Authorization"), "{printed}");
+    assert!(
+        printed.contains("https://r.example.com/mcp?<query omitted>"),
+        "{printed}"
+    );
+    let kind = format!("{:?}", found[1].kind);
+    assert!(!kind.contains("SECRET"), "{kind}");
+}
