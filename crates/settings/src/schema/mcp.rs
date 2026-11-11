@@ -41,8 +41,8 @@ pub enum McpTransport {
         #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
         env: BTreeMap<String, McpValue>,
     },
-    /// A server at an `https` URL (`http` only for `localhost` or `127.0.0.1`). Stored and
-    /// shown; this version sends it to no agent.
+    /// A server at an `https` URL (`http` only for `localhost` or `127.0.0.1`). Sent to an
+    /// agent that takes remote MCP servers (ACP's `mcpCapabilities.http`), which reaches it.
     Remote {
         /// The URL.
         url: String,

@@ -422,16 +422,19 @@ fn session_start(
 }
 
 /// The servers as ACP has them, for `session/new`, `session/load` and `session/resume`. An
-/// http server goes only to an agent whose `initialize` said `mcpCapabilities.http`; to any
-/// other it is left out with a warning that names it and nothing else (its URL and header
-/// values can hold secrets).
+/// http server goes only to an agent whose `initialize` said `mcpCapabilities.http` (before
+/// `initialize` answers, none goes); to any other it is left out, with a warning once per
+/// server on this connection that names it and nothing else (its URL and header values can hold
+/// secrets; the name is the lawyer's label for it, and a launch logs it already when a value is
+/// missing).
 fn mcp_servers(shared: &Shared, servers: Vec<McpServer>) -> Vec<acp::McpServer> {
-    let http = shared.state().mcp_http;
-    servers
+    let mut state = shared.state();
+    let http = state.mcp_http;
+    let sent = servers
         .into_iter()
         .filter(|server| {
             let sent = http || !matches!(server, McpServer::Http { .. });
-            if !sent {
+            if !sent && state.mcp_http_left_out.insert(server.name().to_owned()) {
                 tracing::warn!(
                     server = server.name(),
                     "left out an http MCP server: the agent did not advertise mcpCapabilities.http"
@@ -439,8 +442,9 @@ fn mcp_servers(shared: &Shared, servers: Vec<McpServer>) -> Vec<acp::McpServer> 
             }
             sent
         })
-        .map(mcp_server)
-        .collect()
+        .collect::<Vec<_>>();
+    drop(state);
+    sent.into_iter().map(mcp_server).collect()
 }
 
 fn mcp_server(server: McpServer) -> acp::McpServer {

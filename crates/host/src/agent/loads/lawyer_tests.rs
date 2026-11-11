@@ -1,6 +1,6 @@
 //! The lawyer's servers in one session (`lawyer.rs`): keychain values filled, a server with a
 //! value missing left out, the `PATH` and the Windows variables, the Safe workspace, the firm's
-//! `managed-mcp.json`, remote servers kept back, and the keychain reads.
+//! `managed-mcp.json`, remote servers with their headers, and the keychain reads.
 
 #[cfg(unix)]
 use std::ffi::OsString;
@@ -42,10 +42,15 @@ const CLAUSEO: Lawyer = Lawyer {
 #[cfg(unix)]
 fn env_of(server: &McpServer) -> Vec<(String, String)> {
     let McpServer::Stdio { env, .. } = server else {
-        panic!("a lawyer server goes as stdio: {server:?}");
+        panic!("expected a stdio server: {server:?}");
     };
     env.clone()
 }
+
+const NO_HOST: HostEnv<'static> = HostEnv {
+    path: None,
+    windows_env: &[],
+};
 
 #[cfg(unix)]
 #[test]
@@ -74,7 +79,15 @@ fn values_are_filled_and_the_path_starts_with_the_commands_folder() {
     };
     let (servers, left_out) = lawyer::servers(&effective, CLAUSEO, &secrets, host);
     assert_eq!(left_out, Vec::new());
-    assert_eq!(servers.len(), 2, "{servers:?}");
+    assert_eq!(servers.len(), 3, "{servers:?}");
+    assert_eq!(
+        servers[2],
+        McpServer::Http {
+            name: "remote".to_owned(),
+            url: "https://x.example/mcp".to_owned(),
+            headers: Vec::new(),
+        }
+    );
     assert_eq!(
         env_of(&servers[0]),
         [
@@ -121,7 +134,7 @@ fn a_server_without_its_value_is_left_out_and_named() {
     let names: Vec<&str> = servers.iter().map(McpServer::name).collect();
     assert_eq!(names, ["plain"]);
     let McpServer::Stdio { command, env, .. } = &servers[0] else {
-        panic!("a lawyer server goes as stdio: {:?}", servers[0]);
+        panic!("expected a stdio server");
     };
     assert_eq!(command, std::path::Path::new(&plain));
     // The resolved program's folder leads its PATH.
@@ -274,4 +287,141 @@ fn the_path_holds_no_relative_folder() {
             "/opt/homebrew/bin:/usr/bin:/bin".to_owned()
         )]
     );
+}
+
+/// A remote server's headers: a keychain value read through the store (A1's in-memory double),
+/// a plain one as it is, in name order. One whose keychain value is missing, or holds a CR or
+/// LF, is left out and named; a server with none goes with no headers.
+#[test]
+fn a_remote_server_goes_with_its_headers_filled_from_the_keychain() {
+    let effective = effective(
+        "remote",
+        &json!({
+            "docs": {"url": "https://mcp.example.com/mcp", "enabled": true, "headers": {
+                "X-Tenant": "firm-7", "Authorization": {"keychain": true}}},
+            "gone": {"url": "https://gone.example.com/mcp", "enabled": true, "headers": {
+                "Authorization": {"keychain": true}}},
+            "split": {"url": "https://split.example.com/mcp", "enabled": true, "headers": {
+                "Authorization": {"keychain": true}}},
+            "open": {"url": "http://localhost:8080/mcp", "enabled": true},
+            "off": {"url": "https://off.example.com/mcp", "headers": {
+                "Authorization": {"keychain": true}}},
+        }),
+    );
+    let wanted = lawyer::wanted(&effective, false);
+    assert_eq!(
+        wanted.accounts,
+        [
+            "docs/header/Authorization",
+            "gone/header/Authorization",
+            "split/header/Authorization",
+        ]
+    );
+    assert_eq!(wanted.commands, Vec::<String>::new());
+    let store = MemoryStore::new();
+    store.put("docs/header/Authorization", b"Bearer s3cret-header");
+    store.put("split/header/Authorization", b"Bearer x\r\nX-Evil: 1");
+    let resolve: lawyer::Resolve = std::sync::Arc::new(|_: &str| None);
+    let secrets = lawyer::read(Some(&store as &dyn SecretStore), &resolve, wanted);
+    let (servers, left_out) = lawyer::servers(&effective, CLAUSEO, &secrets, NO_HOST);
+    assert_eq!(
+        servers,
+        [
+            McpServer::Http {
+                name: "docs".to_owned(),
+                url: "https://mcp.example.com/mcp".to_owned(),
+                headers: vec![
+                    (
+                        "Authorization".to_owned(),
+                        "Bearer s3cret-header".to_owned()
+                    ),
+                    ("X-Tenant".to_owned(), "firm-7".to_owned()),
+                ],
+            },
+            McpServer::Http {
+                name: "open".to_owned(),
+                url: "http://localhost:8080/mcp".to_owned(),
+                headers: Vec::new(),
+            },
+        ]
+    );
+    assert_eq!(
+        left_out,
+        [
+            ("gone".to_owned(), "Authorization".to_owned()),
+            ("split".to_owned(), "Authorization".to_owned()),
+        ]
+    );
+}
+
+/// No remote server goes in the Safe workspace or under the firm's `managed-mcp.json`, and
+/// nothing is read for one in the Safe workspace.
+#[test]
+fn no_remote_server_goes_in_the_safe_workspace_or_under_managed_mcp() {
+    let effective = effective(
+        "remote-fenced",
+        &json!({"docs": {"url": "https://mcp.example.com/mcp", "enabled": true,
+            "headers": {"Authorization": {"keychain": true}}}}),
+    );
+    let secrets = McpSecrets::of(&[("docs/header/Authorization", "Bearer t0ken-value")], &[]);
+    for lawyer in [
+        Lawyer {
+            control: McpControl::Clauseo,
+            safe_workspace: true,
+        },
+        Lawyer {
+            control: McpControl::Managed,
+            safe_workspace: false,
+        },
+    ] {
+        assert_eq!(
+            lawyer::servers(&effective, lawyer, &secrets, NO_HOST),
+            (Vec::new(), Vec::new())
+        );
+    }
+    assert_eq!(lawyer::wanted(&effective, true), lawyer::Wanted::default());
+}
+
+/// What the stderr redactor gets: each keychain value, each plain header value, and the URL
+/// whole, its path with its query, its query and each query value.
+#[test]
+fn the_redacted_list_holds_values_urls_and_their_tokens() {
+    let effective = effective(
+        "redacted",
+        &json!({
+            "docs": {"url": "https://mcp.example.com/v1/p4th/mcp?key=q7token&empty=", "enabled": true,
+                "headers": {"Authorization": {"keychain": true}, "X-Tenant": "firm-tenant-7"}},
+            "local": {"command": "/tools/srv", "enabled": true, "env": {"TOKEN": {"keychain": true}}},
+        }),
+    );
+    let secrets = McpSecrets::of(
+        &[
+            ("docs/header/Authorization", "Bearer s3cret-header"),
+            ("local/env/TOKEN", "env-t0ken-value"),
+        ],
+        &[],
+    );
+    let mut redacted = lawyer::redacted(&effective, &secrets);
+    redacted.sort();
+    assert_eq!(
+        redacted,
+        [
+            "/v1/p4th/mcp?key=q7token&empty=",
+            "Bearer s3cret-header",
+            "env-t0ken-value",
+            "firm-tenant-7",
+            "https://mcp.example.com/v1/p4th/mcp?key=q7token&empty=",
+            "key=q7token&empty=",
+            "q7token",
+        ]
+    );
+}
+
+#[test]
+fn a_header_value_holds_no_control_character_but_tab() {
+    assert!(lawyer::header_value_ok("Bearer abc\tdef"));
+    assert!(lawyer::header_value_ok("r\u{e9}sum\u{e9}"));
+    for bad in ["a\rb", "a\nb", "a\0b", "a\u{7f}b"] {
+        assert!(!lawyer::header_value_ok(bad), "{bad:?}");
+    }
 }

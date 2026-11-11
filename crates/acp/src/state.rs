@@ -1,7 +1,7 @@
 //! The state the driver's handlers and its command loop share, behind one mutex that is never
 //! held across an `.await`.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
@@ -118,6 +118,9 @@ pub(crate) struct State {
     pub(crate) auth_methods: Vec<AuthMethod>,
     /// From `initialize`: `mcpCapabilities.http`, whether an http MCP server may be sent.
     pub(crate) mcp_http: bool,
+    /// The http MCP servers already logged as left out on this connection, so each is logged
+    /// once however many sessions it was meant for.
+    pub(crate) mcp_http_left_out: BTreeSet<String>,
 }
 
 impl State {

@@ -4,18 +4,26 @@
 //! - Only under [`McpControl::Clauseo`], and never in the Safe workspace (the orchestrator's
 //!   call, 2026-11-11: a lawyer's server is a child of the agent, and the fence is not shown to
 //!   cover it). The built-ins (`browser`, `case-law`) are not decided here.
-//! - Only the enabled local servers go, in name order, as stdio servers. A remote one is kept
-//!   and shown but not sent: this version's ACP client has no HTTP server (see [`servers`]).
+//! - The enabled servers go in name order: a local one as a stdio server, a remote one as ACP's
+//!   http server (`McpServer::Http`) with its headers. `clauseo-acp` sends a remote one only to
+//!   an agent whose `initialize` said `mcpCapabilities.http` (claude-agent-acp 0.89.1 and
+//!   codex-acp 2.2.2 both do) and leaves it out, logged by name, for any other.
 //! - A server's `command` is what the lawyer typed, a bare name (`npx`) or an absolute path; the
 //!   launch-prep thread resolves it ([`Resolve`], the same search a save makes) and the session
 //!   gets the resolved path. A command not found leaves its server out, with its name logged.
-//! - A variable whose value is `{"keychain": true}` takes the keychain item
-//!   `clauseo_settings::keychain_account(server, Env, name)`. [`wanted`] lists those accounts on
-//!   the actor, [`read`] reads them on the launch-prep thread (each read is a blocking keychain
-//!   call), and the values ride the run's folders ([`McpSecrets`]) to the session calls. A
-//!   server with a value missing or unreadable (not UTF-8, holding NUL, or a keychain error) is
-//!   left out of the session, with a log line naming the server and the variable, never a value.
-//!   A plain value (a firm's policy, a hand-edited file) goes as it is.
+//! - A variable or header whose value is `{"keychain": true}` takes the keychain item
+//!   `clauseo_settings::keychain_account(server, Env | Header, name)`. [`wanted`] lists those
+//!   accounts on the actor, [`read`] reads them on the launch-prep thread (each read is a
+//!   blocking keychain call), and the values ride the run's folders ([`McpSecrets`]) to the
+//!   session calls. A server with a value missing or unreadable (not UTF-8, holding NUL, or a
+//!   keychain error) is left out of the session, with a log line naming the server and the
+//!   variable or header, never a value.
+//!   A plain value (a firm's policy, a hand-edited file) goes as it is. A header value that an
+//!   HTTP header cannot hold (a control character other than tab: a CR or LF would split the
+//!   request) leaves its server out the same way.
+//! - Every value a session's servers carry, and each remote server's URL with its path and query
+//!   parts, go to the agent's stderr redactor ([`redacted`]): an agent that dies before its
+//!   session is ready has its last stderr line logged, and that is when `session/new` held them.
 //! - `PATH`: unless the server's own variables set it, the server's `PATH` is its resolved
 //!   command's folder, then the `PATH` Clauseo was started with. Each agent starts a stdio
 //!   server with its own `PATH` and the entry's variables over it; on macOS an app started from
@@ -119,8 +127,8 @@ fn allowed(lawyer: Lawyer) -> bool {
     lawyer.control == McpControl::Clauseo && !lawyer.safe_workspace
 }
 
-/// What the session's servers need: every `{"keychain": true}` variable's account and every
-/// command of each enabled local server; nothing in the Safe workspace. On the actor; no
+/// What the session's servers need: every `{"keychain": true}` variable's or header's account
+/// and every command of each enabled local server; nothing in the Safe workspace. On the actor; no
 /// keychain or file system call. The firm's `managed-mcp.json` is checked at the session call
 /// ([`servers`]), not here.
 pub(crate) fn wanted(effective: &Effective, safe_workspace: bool) -> Wanted {
@@ -129,14 +137,18 @@ pub(crate) fn wanted(effective: &Effective, safe_workspace: bool) -> Wanted {
         return wanted;
     }
     for (name, server) in effective.enabled_mcp_servers() {
-        let McpTransport::Local { command, env, .. } = &server.transport else {
-            continue;
+        let (values, kind) = match &server.transport {
+            McpTransport::Local { command, env, .. } => {
+                wanted.commands.push(command.clone());
+                (env, McpValueKind::Env)
+            }
+            McpTransport::Remote { headers, .. } => (headers, McpValueKind::Header),
         };
-        wanted.commands.push(command.clone());
         wanted.accounts.extend(
-            env.iter()
+            values
+                .iter()
                 .filter(|(_, value)| matches!(value, McpValue::Keychain(_)))
-                .map(|(var, _)| keychain_account(name, McpValueKind::Env, var)),
+                .map(|(var, _)| keychain_account(name, kind, var)),
         );
     }
     wanted
@@ -222,7 +234,7 @@ pub(crate) struct HostEnv<'a> {
 }
 
 /// A server left out because a value it needs is missing or unreadable: the server and the
-/// variable.
+/// variable or header.
 pub(crate) type LeftOut = (String, String);
 
 /// The session's lawyer servers, in name order, and those left out for a missing value.
@@ -240,10 +252,31 @@ pub(crate) fn servers(
     for (name, server) in effective.enabled_mcp_servers() {
         let (typed, args, env) = match &server.transport {
             McpTransport::Local { command, args, env } => (command, args, env),
-            // PR B plugs in here: a remote server goes as ACP's HTTP server, its headers filled
-            // from the keychain as `env` is below, when the agent's `mcpCapabilities.http` says
-            // it takes one.
-            McpTransport::Remote { .. } => continue,
+            McpTransport::Remote { url, headers } => {
+                match filled(name, McpValueKind::Header, headers, secrets) {
+                    Ok(headers) => sent.push(McpServer::Http {
+                        name: name.to_owned(),
+                        url: url.clone(),
+                        headers,
+                    }),
+                    Err(Unfilled::Missing(header)) => {
+                        tracing::warn!(
+                            server = name,
+                            header = header.as_str(),
+                            "an MCP server's header value is missing, unreadable or not one an \
+                             HTTP header can hold; the server is left out of this session"
+                        );
+                        left_out.push((name.to_owned(), header));
+                    }
+                    Err(Unfilled::Unread(header)) => tracing::warn!(
+                        server = name,
+                        header = header.as_str(),
+                        "an MCP server changed while this session started; it is left out of this \
+                         session"
+                    ),
+                }
+                continue;
+            }
         };
         let Some(command) = secrets.commands.get(typed) else {
             tracing::warn!(
@@ -253,7 +286,7 @@ pub(crate) fn servers(
             );
             continue;
         };
-        match filled(name, env, secrets) {
+        match filled(name, McpValueKind::Env, env, secrets) {
             Ok(mut env) => {
                 add_host_env(&mut env, command, host);
                 sent.push(McpServer::Stdio {
@@ -282,37 +315,113 @@ pub(crate) fn servers(
     (sent, left_out)
 }
 
-/// Why a server's keychain value is not there to fill.
+/// Why a server's value is not there to fill.
 enum Unfilled {
-    /// The prep read its item and found it missing or unreadable.
+    /// The prep read its item and found it missing or unreadable, or (a header) its value is not
+    /// one an HTTP header can hold.
     Missing(String),
     /// The prep never read it: the settings changed after the prep (a rename, a new variable),
     /// so the item is neither known missing nor known present.
     Unread(String),
 }
 
-/// `env` with each keychain value filled, in name order; or the first variable whose value
-/// `secrets` does not hold, and why.
+/// `values` (a local server's variables or a remote one's headers, as `kind` says) with each
+/// keychain value filled, in name order; or the first name whose value `secrets` does not
+/// hold, or, for a header, whose value an HTTP header cannot hold ([`header_value_ok`]), and why.
 fn filled(
     server: &str,
-    env: &BTreeMap<String, McpValue>,
+    kind: McpValueKind,
+    values: &BTreeMap<String, McpValue>,
     secrets: &McpSecrets,
 ) -> Result<Vec<(String, String)>, Unfilled> {
-    env.iter()
-        .map(|(var, value)| match value {
-            McpValue::Plain(text) => Ok((var.clone(), text.clone())),
-            McpValue::Keychain(_) => {
-                let account = keychain_account(server, McpValueKind::Env, var);
-                match secrets.get(&account) {
-                    Some(text) => Ok((var.clone(), text.to_owned())),
-                    None if secrets.unreadable.contains(&account) => {
-                        Err(Unfilled::Missing(var.clone()))
+    values
+        .iter()
+        .map(|(var, value)| {
+            let text = match value {
+                McpValue::Plain(text) => text.as_str(),
+                McpValue::Keychain(_) => {
+                    let account = keychain_account(server, kind, var);
+                    match secrets.get(&account) {
+                        Some(text) => text,
+                        None if secrets.unreadable.contains(&account) => {
+                            return Err(Unfilled::Missing(var.clone()));
+                        }
+                        None => return Err(Unfilled::Unread(var.clone())),
                     }
-                    None => Err(Unfilled::Unread(var.clone())),
                 }
+            };
+            if kind == McpValueKind::Header && !header_value_ok(text) {
+                return Err(Unfilled::Missing(var.clone()));
             }
+            Ok((var.clone(), text.to_owned()))
         })
         .collect()
+}
+
+/// Whether an HTTP header can carry `value`: no control character but tab (RFC 9110 §5.5; a
+/// CR or LF would end the header and start another).
+pub(crate) fn header_value_ok(value: &str) -> bool {
+    !value.chars().any(|c| c.is_control() && c != '\t')
+}
+
+/// What the agent's stderr redactor hides for the session's lawyer servers, beyond its own
+/// environment's secrets: every value `secrets` read from the keychain (variables and headers),
+/// every plain variable value of an enabled local server and every plain header value of a
+/// remote one, and each enabled remote server's URL whole, its path with its query, and each
+/// query value. An agent that dies before its session is ready has its last stderr line logged
+/// (`start_failure`), and `session/new` held these then. A remote server's URL can carry a token in its path or query;
+/// the redactor already hides a URL's user name and password. Values under 8 bytes stay as they
+/// are, as for every redacted secret (`clauseo_process`'s `MIN_SECRET`).
+pub(crate) fn redacted(effective: &Effective, secrets: &McpSecrets) -> Vec<String> {
+    let mut hidden: Vec<String> = secrets
+        .values
+        .values()
+        .map(|value| value.as_str().to_owned())
+        .collect();
+    let plain = |values: &BTreeMap<String, McpValue>| {
+        values
+            .values()
+            .filter_map(|value| match value {
+                McpValue::Plain(text) => Some(text.clone()),
+                McpValue::Keychain(_) => None,
+            })
+            .collect::<Vec<_>>()
+    };
+    for (_, server) in effective.enabled_mcp_servers() {
+        match &server.transport {
+            McpTransport::Local { env, .. } => hidden.extend(plain(env)),
+            McpTransport::Remote { url, headers } => {
+                hidden.push(url.clone());
+                hidden.extend(url_parts(url));
+                hidden.extend(plain(headers));
+            }
+        }
+    }
+    hidden
+}
+
+/// `url`'s path with its query (from the first `/` or `?` after `scheme://host`), its query
+/// alone, and each query parameter's value; whatever of them `url` has.
+fn url_parts(url: &str) -> Vec<String> {
+    let after_scheme = url.split_once("://").map_or(url, |(_, rest)| rest);
+    let Some(tail) = after_scheme
+        .find(['/', '?'])
+        .and_then(|start| after_scheme.get(start..))
+    else {
+        return Vec::new();
+    };
+    let mut parts = vec![tail.to_owned()];
+    if let Some((_, query)) = tail.split_once('?') {
+        parts.push(query.to_owned());
+        parts.extend(
+            query
+                .split('&')
+                .filter_map(|pair| pair.split_once('=').map(|(_, value)| value))
+                .filter(|value| !value.is_empty())
+                .map(str::to_owned),
+        );
+    }
+    parts
 }
 
 /// Adds the `PATH` (the command's folder first) and the Windows variables to `env`, each only
@@ -358,30 +467,6 @@ fn server_path(command: &Path, host: Option<(&str, &OsString)>) -> Option<(Strin
         return None;
     };
     Some((name.to_owned(), value))
-}
-
-/// What the agent's stderr redactor hides for the session's lawyer servers, beyond its own
-/// environment's secrets: every value `secrets` read from the keychain, and every plain variable
-/// value of an enabled local server. An agent that dies before its session is ready has its last
-/// stderr line logged (`start_failure`), and `session/new` held these then. Values under 8 bytes
-/// stay as they are, as for every redacted secret (`clauseo_process`'s `MIN_SECRET`). PR B adds
-/// a remote server's header values and URL parts in the loop.
-pub(crate) fn redacted(effective: &Effective, secrets: &McpSecrets) -> Vec<String> {
-    let mut hidden: Vec<String> = secrets
-        .values
-        .values()
-        .map(|value| value.as_str().to_owned())
-        .collect();
-    for (_, server) in effective.enabled_mcp_servers() {
-        let McpTransport::Local { env, .. } = &server.transport else {
-            continue;
-        };
-        hidden.extend(env.values().filter_map(|value| match value {
-            McpValue::Plain(text) => Some(text.clone()),
-            McpValue::Keychain(_) => None,
-        }));
-    }
-    hidden
 }
 
 /// The search a save and a launch make: the settings crate's resolver over this process's

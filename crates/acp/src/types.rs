@@ -30,6 +30,9 @@ pub struct AgentInfo {
     pub capabilities: AgentCapabilities,
     /// How it signs in, in its order.
     pub auth_methods: Vec<AuthMethod>,
+    /// `agentCapabilities.mcpCapabilities.http`: whether it takes an http MCP server. To one
+    /// that does not, [`McpServer::Http`] is left out of every session call.
+    pub mcp_http: bool,
 }
 
 /// One way the agent signs in. Stays an `acp` type until a host command needs it.
@@ -97,7 +100,9 @@ pub struct LoadSession {
 /// any other it is left out and its name logged. There is no sse variant: codex-acp 2.2.2 has
 /// none.
 ///
-/// `Debug` prints names only: env and header values are secrets and never reach a log.
+/// `Debug` leaves out env and header values and the URL, which can hold secrets, and prints
+/// their names. A stdio server's command and args are printed as they are: put a secret in its
+/// env, not its args.
 #[derive(Clone, PartialEq, Eq)]
 pub enum McpServer {
     /// Over stdio, the transport every agent must support.

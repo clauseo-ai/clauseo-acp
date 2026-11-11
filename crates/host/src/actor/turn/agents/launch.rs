@@ -49,7 +49,7 @@ pub(super) fn launch(
         )
     })?;
     // The relay token reaches the agent in a file; its stderr tail hides it all the same. So
-    // are the lawyer's MCP values, which reach it in `session/new`.
+    // are the lawyer's MCP values and remote URLs, which reach it in `session/new`.
     let mut redacted = super::super::launch_checks::relay::redacted(&prepared.run);
     redacted.extend(agent::loads::lawyer::redacted(
         &actor.effective,
