@@ -55,6 +55,7 @@ import { longCommandEntries } from "../testing/long-command.ts";
 import { SHAPING_ANSWER, SHAPING_QUESTION } from "../testing/shaping-answer.ts";
 import { firstReadProbe } from "./first-read/probe-state.ts";
 import { installsProbe } from "./first-run/probe-installs.ts";
+import { fakeFullScreen } from "./probe-full-screen.ts";
 import {
   batch,
   chosen,
@@ -499,6 +500,8 @@ if (longKind !== null) window.__clauseoLongText = longQuestion;
 // the page's query over the settings, before the first render, so night never starts as day; and the hooks the
 // by-hand checks use, so the WebKit probe can run window.__clauseoAxe() as it would run in the app
 installDevHooks(connectRoom(transport, queryPatch(location.search)));
+
+fakeFullScreen(page.get("fullscreen"));
 
 const container = document.getElementById("root");
 if (container === null) throw new Error("index.html has no #root element");

@@ -94,6 +94,9 @@ export type RoomToolbarProps = {
   /** Optional: macOS draws its own traffic lights over the corner lights' place (with chrome "own", on the Mac), so the
    * lights keep their box and paint nothing. */
   nativeLights?: boolean;
+  /** Optional: whether the window is in macOS's full screen, where the host says so; left out, the window's size against
+   * the screen's tells (useFullScreen). Read only with nativeLights, on the Mac. */
+  fullScreen?: boolean;
   /** Optional: Clauseo's lockup in the lead, on a wide Mac window (rail-brand.tsx); the rail draws it elsewhere. */
   brand?: boolean;
   /** Optional, true by default: false leaves the search field out. */
@@ -132,7 +135,10 @@ export function RoomToolbar(p: RoomToolbarProps) {
   const display = useDisplay();
   const platform = p.platform ?? display.platform;
   const own = p.chrome !== "os";
-  const fullScreen = useFullScreen(own && platform === "mac" && p.nativeLights === true);
+  const fullScreen = useFullScreen(
+    own && platform === "mac" && p.nativeLights === true,
+    p.fullScreen,
+  );
   // Windows and Linux: the caption buttons at the top right, and no corner lights
   const captions = own && platform !== "mac";
   const search = p.search !== false;
@@ -183,6 +189,8 @@ export function RoomToolbar(p: RoomToolbarProps) {
       ref={top}
       className={cn("room-top", captions && "mid:pr-0")}
       data-platform={platform}
+      // macOS's full screen: no lights, and the lead starts at the rail's own left (shell.css)
+      data-full-screen={fullScreen ? "" : undefined}
       data-tauri-drag-region
     >
       <div className="room-lead" data-tauri-drag-region>
