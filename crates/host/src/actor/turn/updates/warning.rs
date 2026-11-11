@@ -4,8 +4,20 @@
 use clauseo_acp::ProtocolWarning as W;
 use clauseo_protocol::{AgentSessionId, ThreadId};
 
-/// The longest category or severity the log takes as it is.
-const WORD_MAX: usize = 32;
+/// The `sessionFailure` categories the log takes as they are: codex-acp 2.2.2's
+/// (`SESSION_FAILURE_POLICY`, and `unknown` for its notices).
+const CATEGORIES: [&str; 7] = [
+    "limit",
+    "context",
+    "access",
+    "service",
+    "request",
+    "connection",
+    "unknown",
+];
+
+/// The `sessionFailure` severities the log takes as they are.
+const SEVERITIES: [&str; 3] = ["error", "warning", "info"];
 
 /// Logs `warning` from `thread`'s agent about `session`.
 pub(super) fn log(thread: ThreadId, session: Option<&AgentSessionId>, warning: &W) {
@@ -14,7 +26,8 @@ pub(super) fn log(thread: ThreadId, session: Option<&AgentSessionId>, warning: &
         category, severity, ..
     } = warning
     {
-        let (category, severity) = (word(category.as_deref()), word(severity.as_deref()));
+        let category = word(&CATEGORIES, category.as_deref());
+        let severity = word(&SEVERITIES, severity.as_deref());
         tracing::warn!(
             %thread,
             ?session,
@@ -40,35 +53,34 @@ const fn kind(warning: &W) -> &'static str {
 }
 
 /// A protocol word the agent sent (a `category`, a `severity`) for the log: as it is when it
-/// is lowercase ASCII letters, digits and `_`, up to [`WORD_MAX`] bytes; else `other`, or
-/// `none` when it is missing.
-fn word(value: Option<&str>) -> &str {
+/// is one of `known`; else `other`, or `none` when it is missing.
+fn word(known: &[&'static str], value: Option<&str>) -> &'static str {
     match value {
         None => "none",
-        Some(value)
-            if !value.is_empty()
-                && value.len() <= WORD_MAX
-                && value
-                    .bytes()
-                    .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_') =>
-        {
-            value
-        }
-        Some(_) => "other",
+        Some(value) => known
+            .iter()
+            .copied()
+            .find(|known| *known == value)
+            .unwrap_or("other"),
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::word;
+    use super::{CATEGORIES, SEVERITIES, word};
 
     #[test]
-    fn only_protocol_words_reach_the_log() {
-        assert_eq!(word(Some("connection")), "connection");
-        assert_eq!(word(Some("budget_exhausted")), "budget_exhausted");
-        assert_eq!(word(None), "none");
-        assert_eq!(word(Some("")), "other");
-        assert_eq!(word(Some("Connection refused (os error 61)")), "other");
-        assert_eq!(word(Some(&"a".repeat(33))), "other");
+    fn only_known_protocol_words_reach_the_log() {
+        assert_eq!(word(&CATEGORIES, Some("connection")), "connection");
+        assert_eq!(word(&CATEGORIES, Some("limit")), "limit");
+        assert_eq!(word(&SEVERITIES, Some("warning")), "warning");
+        assert_eq!(word(&CATEGORIES, None), "none");
+        assert_eq!(word(&CATEGORIES, Some("")), "other");
+        assert_eq!(word(&CATEGORIES, Some("budget_exhausted")), "other");
+        assert_eq!(word(&SEVERITIES, Some("connection")), "other");
+        assert_eq!(
+            word(&CATEGORIES, Some("Connection refused (os error 61)")),
+            "other"
+        );
     }
 }

@@ -14,8 +14,8 @@ use super::offline::{answer, ended, prompting};
 use super::rig::{Rig, kind};
 use crate::actor::input::Input;
 use crate::actor::turn::TurnInput;
-use crate::actor::turn::offline::OFFLINE_WAIT;
 use crate::actor::turn::offline::probe::ReachProbe;
+use crate::actor::turn::offline::{OFFLINE_WAIT, Watch};
 use crate::agent::AgentInput;
 
 /// Codex's warning that its WebSocket failed, as stage C's transcript showed it (macOS).
@@ -77,6 +77,17 @@ fn script(lines: &[String]) -> String {
     let mut script = lines.join("\n");
     script.push('\n');
     script
+}
+
+/// Whether `input` is an event from the agent's connection: a retry, a chunk.
+fn agent_event(input: &Input) -> bool {
+    matches!(
+        input,
+        Input::Agent {
+            input: AgentInput::Event(_),
+            ..
+        }
+    )
 }
 
 /// The note `thread`'s watch holds, if one stands.
@@ -221,9 +232,10 @@ fn codex_giving_up_on_its_connection_ends_the_turn_offline() {
 }
 
 /// codex-acp's own failure when Codex's app-server exits names no connection failure, and no
-/// retry came before it: the turn ends as the agent said.
+/// retry came before it: not offline, but the turn fails as the same error over JSON-RPC
+/// would, so the cut-off answer is never shown as complete.
 #[test]
-fn codex_s_app_server_lost_is_not_offline() {
+fn codex_s_app_server_lost_is_not_offline_but_fails() {
     let lines = [
         PROMPT.to_owned(),
         chunk("Clause five says"),
@@ -234,14 +246,17 @@ fn codex_s_app_server_lost_is_not_offline() {
     until_ended(&mut rig, thread);
     assert_eq!(
         ended(&rig.log(thread), turn),
-        (Some(StopReason::EndTurn), None)
+        (
+            Some(StopReason::Failed),
+            Some(ErrorCode::AgentProtocolError)
+        )
     );
     rig.finish();
 }
 
-/// A server's answer in the title is never offline, retry or not.
+/// A server's answer in the title is never offline, retry or not; the turn still fails.
 #[test]
-fn codex_giving_up_on_a_server_s_answer_is_not_offline() {
+fn codex_giving_up_on_a_server_s_answer_is_not_offline_but_fails() {
     let lines = [
         PROMPT.to_owned(),
         chunk("Clause five says"),
@@ -253,7 +268,118 @@ fn codex_giving_up_on_a_server_s_answer_is_not_offline() {
     until_ended(&mut rig, thread);
     assert_eq!(
         ended(&rig.log(thread), turn),
-        (Some(StopReason::EndTurn), None)
+        (
+            Some(StopReason::Failed),
+            Some(ErrorCode::AgentProtocolError)
+        )
     );
+    rig.finish();
+}
+
+/// Retries less than 30 s apart never put the probe off: the wait runs from the first one.
+#[test]
+fn codex_s_retries_10_s_apart_end_the_turn_offline_30_s_after_the_first() {
+    let lines = [
+        PROMPT.to_owned(),
+        retry("Reconnecting... waiting for network"),
+        retry("Reconnecting... waiting for network"),
+        retry("Reconnecting... waiting for network"),
+        retry("Reconnecting... waiting for network"),
+        CANCELLED.to_owned(),
+    ];
+    let mut rig = Rig::start("codex-offline-retries", &script(&lines));
+    let (thread, turn) = prompting(&mut rig);
+    let count = std::cell::Cell::new(0);
+    let hold = |_: &crate::actor::Actor, input: &Input| {
+        let event = agent_event(input);
+        if event {
+            count.set(count.get() + 1);
+        }
+        event
+    };
+    rig.run_holding("the four retries", hold, |_| count.get() == 4);
+    let mut retries = std::mem::take(&mut rig.held).into_iter();
+    // One retry now and one every 10 s: the third comes 20 s after the first.
+    for _ in 0..3 {
+        rig.actor.on_input(retries.next().unwrap());
+        rig.drain();
+        rig.clock.advance(OFFLINE_WAIT / 3);
+        rig.drain();
+    }
+    // 30 s after the first: the wait ran out, and the unit tests' probe never gets through.
+    until_ended(&mut rig, thread);
+    assert_eq!(
+        ended(&rig.log(thread), turn),
+        (Some(StopReason::Failed), Some(ErrorCode::AgentOffline))
+    );
+    for late in retries {
+        rig.actor.on_input(late);
+    }
+    rig.finish();
+}
+
+/// The host's probe got through, so the computer is online: Codex giving up then is the
+/// service's failure, never "You're offline".
+#[test]
+fn codex_giving_up_after_a_probe_that_got_through_is_not_offline() {
+    let lines = [
+        PROMPT.to_owned(),
+        chunk("Clause five says"),
+        retry("Reconnecting... waiting for network"),
+        gave_up(REFUSED),
+    ];
+    let mut rig = Rig::start("codex-offline-outage", &script(&lines));
+    rig.actor.turn_path.probe = ReachProbe::fixed(true);
+    let (thread, turn) = prompting(&mut rig);
+    // The prompt's answer waits until the probe has answered.
+    let hold = |_: &crate::actor::Actor, input: &Input| {
+        matches!(input, Input::Turn(TurnInput::Agent { .. }))
+    };
+    rig.run_holding("the retry's watch", hold, |actor| {
+        let current = actor.threads[&thread].turn.current.as_ref();
+        current.is_some_and(|current| current.offline.is_some())
+    });
+    rig.clock.advance(OFFLINE_WAIT);
+    rig.run_holding("the probe's answer", hold, |actor| {
+        let current = actor.threads[&thread].turn.current.as_ref();
+        current
+            .and_then(|current| current.offline.as_ref())
+            .is_some_and(Watch::reached)
+    });
+    rig.release_held();
+    until_ended(&mut rig, thread);
+    let log = rig.log(thread);
+    assert_eq!(
+        ended(&log, turn),
+        (
+            Some(StopReason::Failed),
+            Some(ErrorCode::AgentProtocolError)
+        )
+    );
+    assert_eq!(answer(&log, turn), "Clause five says");
+    rig.finish();
+}
+
+/// A turn the model refused as too long never ends offline, even when Codex then gave up on a
+/// connection it had retried (decision 0057's `TooLong` wins over the offline watch).
+#[test]
+fn a_too_long_refusal_wins_over_codex_giving_up_on_its_connection() {
+    let too_long = json!({"jetbrains": {"air": {"version": 1, "sessionFailure": {
+        "id": "turn-1:too-long", "revision": 1, "category": "service", "severity": "error",
+        "title": "Prompt is too long", "actions": ["retry"],
+    }}}});
+    let lines = [
+        PROMPT.to_owned(),
+        chunk("Clause five says"),
+        retry("Reconnecting... 5/5"),
+        update(&json!({"sessionUpdate": "session_info_update", "_meta": too_long})),
+        gave_up(REFUSED),
+    ];
+    let mut rig = Rig::start("codex-offline-too-long", &script(&lines));
+    let (thread, turn) = prompting(&mut rig);
+    until_ended(&mut rig, thread);
+    let log = rig.log(thread);
+    assert_eq!(ended(&log, turn), (Some(StopReason::TooLong), None));
+    assert_eq!(answer(&log, turn), "Clause five says");
     rig.finish();
 }

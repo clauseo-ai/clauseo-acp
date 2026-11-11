@@ -35,8 +35,9 @@
 //! model may stay silent past the wait. A probe that gets through makes it wait again. A prompt
 //! that fails with a connection-class error, or while an agent's note armed the watch, ends
 //! `agent.offline` too, unless its error says a server answered or asks for a sign-in; so does
-//! one that ends carrying a `connection` failure. The log gets fixed fields only, never the
-//! agent's text (decision 0047).
+//! one that ends on a `connection` failure the agent gave up on, unless the host's last probe
+//! got through (then it fails `agent.protocol_error`). The log gets fixed fields only, never
+//! the agent's text (decision 0047).
 
 use std::time::Duration;
 
@@ -81,6 +82,10 @@ pub(super) struct Watch {
     held: Vec<(AgentSessionId, AgentUpdate)>,
     /// The host's probe runs for it (a watch the window armed, whose wait ran out).
     probing: bool,
+    /// The host's last probe for it got through: the agent's service (or its proxy) takes
+    /// connections, so a prompt that then ends on a lost connection is not offline. The next
+    /// probe overwrites it; the watch's end drops it.
+    reached: bool,
 }
 
 #[cfg(test)]
@@ -98,6 +103,11 @@ impl Watch {
     /// The agent's note that armed it last.
     pub(super) fn note(&self) -> Option<&str> {
         self.note.as_deref()
+    }
+
+    /// Whether the host's last probe for it got through.
+    pub(super) const fn reached(&self) -> bool {
+        self.reached
     }
 }
 
@@ -117,12 +127,14 @@ fn note_text(update: &AgentUpdate) -> Option<&str> {
     }
 }
 
-/// Whether an update outside a turn is Codex's note about its connection, which never reaches
-/// the transcript, turn or not.
+/// Whether an update outside a turn (idle, or replayed) is Codex's note about its connection
+/// in a notice, which never reaches the transcript, turn or not. Answer text outside a turn is
+/// never touched: a replay sends whole messages, and one may start with the note's words.
 pub(super) fn outside_note(thread: ThreadId, update: &AgentUpdate) -> bool {
-    let sure = note_text(update)
-        .and_then(classify::transport_note)
-        .is_some_and(|note| note.sure);
+    let AgentUpdate::Notice { text, .. } = update else {
+        return false;
+    };
+    let sure = classify::transport_note(text).is_some_and(|note| note.sure);
     if sure {
         tracing::info!(%thread, "the agent's note about its connection, outside a turn");
     }
@@ -188,7 +200,10 @@ pub(super) fn on_connection_lost(
     }
 }
 
-/// Arms (or arms again) the watch of `thread`'s `turn` on an agent's note, holding `held`.
+/// Arms the watch of `thread`'s `turn` on an agent's note, holding `held`. A watch that already
+/// has a note only takes the new one: its wait runs from the first note, so retries less than
+/// 30 s apart (Codex's) never put the probe off. A watch only the window armed waits from the
+/// note.
 fn arm_note(
     actor: &mut Actor,
     thread: ThreadId,
@@ -197,7 +212,9 @@ fn arm_note(
     held: Option<(AgentSessionId, AgentUpdate)>,
 ) {
     let now = actor.now().mono;
-    let Some(current) = current(actor, thread).filter(|current| current.turn == turn) else {
+    let Some(current) =
+        current(actor, thread).filter(|current| current.turn == turn && current.failure.is_none())
+    else {
         return;
     };
     let watch = current.offline.get_or_insert_with(|| Watch {
@@ -206,11 +223,14 @@ fn arm_note(
         note: None,
         held: Vec::new(),
         probing: false,
+        reached: false,
     });
-    watch.since = now;
-    watch.note = Some(note);
+    let noted = watch.note.replace(note).is_some();
     watch.held.extend(held);
-    arm_timer(actor, thread, turn);
+    if !noted {
+        watch.since = now;
+        arm_timer(actor, thread, turn);
+    }
 }
 
 /// The agent of `turn` is at work (an answer, a tool call, a permission request, a limit): the
@@ -315,6 +335,7 @@ fn network_watch(actor: &mut Actor, thread: ThreadId) {
         note: None,
         held: Vec::new(),
         probing: false,
+        reached: false,
     });
     let turn = current.turn;
     arm_timer(actor, thread, turn);
@@ -364,6 +385,7 @@ pub(super) fn on_probed(actor: &mut Actor, thread: ThreadId, turn: TurnId, reach
         return;
     };
     watch.probing = false;
+    watch.reached = reached;
     let noted = watch.note.is_some();
     tracing::info!(%thread, reached, noted, "the host's probe of the agent's service");
     if reached {
@@ -427,29 +449,43 @@ pub(super) fn prompt_failed_offline(
     (!server && (noted || connection)).then_some(ErrorCode::AgentOffline)
 }
 
-/// The code a prompt of `thread` that ended carrying a `connection` failure (codex-acp's, once
-/// Codex's retries ran out) ends with: `agent.offline`, unless its title says a server answered,
-/// when an agent's note armed the watch or the title names a connection failure. Else the
-/// turn ends as the agent said (codex-acp's own "Connection to Codex was lost." when its
-/// app-server exits names none).
+/// The code a prompt of `thread` that ended on a `connection` failure the agent gave up on
+/// (codex-acp's, once Codex's retries ran out) ends with, when it is offline: `agent.offline`
+/// when an agent's note armed the watch or the title names a connection failure, unless the
+/// title says a server answered or the host's last probe got through (an outage of the service,
+/// not of the computer). Else `None`, and the turn fails with the agent's error
+/// ([`gave_up_code`]): codex-acp's own "Connection to Codex was lost." when its app-server
+/// exits names none. A failure the agent did not give up on is never offline here.
 pub(super) fn connection_ended_offline(
     actor: &mut Actor,
     thread: ThreadId,
     lost: &ConnectionLost,
 ) -> Option<ErrorCode> {
+    if !lost.gave_up {
+        return None;
+    }
     let title = lost.title.as_deref().unwrap_or_default();
-    let noted = current(actor, thread)
-        .and_then(|current| current.offline.as_ref())
-        .is_some_and(|watch| watch.note.is_some());
-    let offline = !classify::says_server(title) && (noted || classify::says_connection(title));
-    tracing::info!(%thread, offline, noted, "the prompt ended on a lost connection");
+    let watch = current(actor, thread).and_then(|current| current.offline.as_ref());
+    let noted = watch.is_some_and(|watch| watch.note.is_some());
+    let reached = watch.is_some_and(|watch| watch.reached);
+    let offline =
+        !reached && !classify::says_server(title) && (noted || classify::says_connection(title));
+    tracing::info!(%thread, offline, noted, reached, "the prompt ended on a lost connection");
     offline.then_some(ErrorCode::AgentOffline)
+}
+
+/// The code a prompt that ended on a `connection` failure the agent gave up on, and that is not
+/// offline, fails with: the one the same failure as a JSON-RPC error gets
+/// (`agent.protocol_error`), so the cut-off answer is never shown as complete and Try again
+/// stands. Not `agent.exited`: the adapter is still there.
+pub(super) fn gave_up_code(lost: &ConnectionLost) -> Option<ErrorCode> {
+    lost.gave_up.then_some(ErrorCode::AgentProtocolError)
 }
 
 /// How a prompt of `thread` that ended `result` fails for its connection: `(offline, lost)`. An
 /// error is offline by [`prompt_failed_offline`]. An answer that carried a `connection` failure
-/// fails offline by [`connection_ended_offline`], its title the detail. A turn that ends
-/// `TooLong` (`too_long`) does neither.
+/// fails offline by [`connection_ended_offline`], else once the agent gave up by
+/// [`gave_up_code`], its title the detail. A turn that ends `TooLong` (`too_long`) does neither.
 pub(super) fn prompt_ended(
     actor: &mut Actor,
     thread: ThreadId,
@@ -463,7 +499,7 @@ pub(super) fn prompt_ended(
             connection: Some(lost),
             ..
         }) => {
-            let code = connection_ended_offline(actor, thread, lost);
+            let code = connection_ended_offline(actor, thread, lost).or_else(|| gave_up_code(lost));
             (None, code.map(|code| (code, lost.title.clone())))
         }
         Ok(_) => (None, None),
