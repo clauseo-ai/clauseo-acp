@@ -21,6 +21,8 @@ export const HI = {
   "Searching {site} for '{query}'.": "{site} पर '{query}' खोजा जा रहा है।",
   "Thinking it through.": "विचार किया जा रहा है।",
   "Working on it.": "काम चल रहा है।",
+  // a step named only by the sandbox's permission for the internet (UC-168; provisional)
+  "Letting a task reach the internet.": "एक काम को इंटरनेट तक पहुँचने दिया जा रहा है।",
 } as const;
 
 /** Every key, for the banned-words screen in the tests. */

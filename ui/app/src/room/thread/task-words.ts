@@ -4,6 +4,7 @@
 // under the row or the prompt; and for a task that failed, the last line of what went wrong. Pure: the matter's
 // folder comes in as the host shows it (`folder_display`, below the home folder), and is only ever matched as text.
 import type { ToolCallEntry } from "../../transport/protocol.ts";
+import { toolNameOf } from "./tool-names.ts";
 
 export type Task = {
   /** The agent's own short words for the task, or null. */
@@ -150,8 +151,11 @@ export function taskOf(entry: ToolCallEntry, folder: string | null = null): Task
   const given = commandLine(raw?.["command"] ?? raw?.["cmd"]);
   const titled = entry.title.trim().replace(/^`+|`+$/g, "");
   // a title is taken for a command only when it reads as one, its first word a program's ("python3", "/bin/ls"):
-  // an agent's own sentence ("Run ls papers") stays the title
-  const looks = entry.kind === "execute" && /^[a-z0-9_.~/\\-]+(?:\s|$)/.test(titled);
+  // an agent's own sentence ("Run ls papers") stays the title, and a tool's name ("exec_command") is no command
+  const looks =
+    entry.kind === "execute" &&
+    /^[a-z0-9_.~/\\-]+(?:\s|$)/.test(titled) &&
+    toolNameOf(titled) === undefined;
   const command = given ?? (looks ? titled : null);
   const cwd = text(raw?.["cwd"]) ?? text(raw?.["workdir"]);
   return {

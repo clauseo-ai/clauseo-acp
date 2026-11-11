@@ -22,6 +22,8 @@ import {
   unsettled,
 } from "./step-names.ts";
 import { taskOf } from "./task-words.ts";
+import { toolNameOf } from "./tool-names.ts";
+import { toolDone } from "./tool-words.ts";
 
 /** One part of an answer: a row on its own, or a group of rows folded into one line. */
 export type Segment =
@@ -99,7 +101,8 @@ const unknownState = (c: ToolCallEntry) => c.status === "unknown";
 function namedOf(lang: Lang, entry: ToolCallEntry): string {
   const p = placeOf(entry);
   const own = p.name ?? (p.query === null ? null : `'${p.query}'`) ?? p.what;
-  const title = titleOf(entry.title);
+  // a tool's name is no words to show (tool-names.ts)
+  const title = toolNameOf(entry.title) === undefined ? titleOf(entry.title) : "";
   if (own !== null) return sentenceOf(own);
   return title === "" ? steps(lang, "State not known.") : sentenceOf(title);
 }
@@ -233,7 +236,10 @@ export function doneOf(lang: Lang, entry: ToolCallEntry): string {
   const p = placeOf(entry);
   const name = p.name;
   // the agent's own words where nothing else names it: as they are once done, after the attempt once not
+  // a title that is a tool's name is never shown: a known one says what it did, any other reads as the kind's line
+  const tool = toolNameOf(entry.title);
   const titled = (plain: string) => {
+    if (tool !== undefined) return tool.as === null ? plain : toolDone(lang, tool.as, tried);
     const own = titleOf(entry.title);
     return own === "" ? plain : agentWords(own);
   };
@@ -281,7 +287,10 @@ export function doneOf(lang: Lang, entry: ToolCallEntry): string {
       // the agent's own words for the task, else the program and the paper it ran on (D-017)
       const t = taskOf(entry);
       if (t.own !== null) return agentWords(t.own);
-      if (t.program === null) return say("Ran a task.", "Tried to run a task.");
+      if (t.program === null)
+        return tool?.as == null
+          ? say("Ran a task.", "Tried to run a task.")
+          : toolDone(lang, tool.as, tried);
       return t.paper === null
         ? say("Ran {program}.", "Tried to run {program}.", { program: t.program })
         : say("Ran {program} on {name}.", "Tried to run {program} on {name}.", {

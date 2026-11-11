@@ -10,6 +10,7 @@ import { mt } from "@clauseo/components/lib/words-matters.ts";
 import { langOfText } from "@clauseo/components/lib/script.ts";
 import { useThreadWords } from "@clauseo/components/lib/words-thread.ts";
 import { frd } from "@clauseo/components/lib/words-first-read.ts";
+import { stepLive } from "@clauseo/components/lib/words-steps-live.ts";
 import { Image } from "@clauseo/components/markdown/image.tsx";
 import { Markdown } from "@clauseo/components/markdown/markdown.tsx";
 import { useEntry, useStreamPart, useText, useViewStore } from "../../store/hooks.ts";
@@ -34,7 +35,9 @@ import { questionText, useQuestionText, useStreaming } from "./live.ts";
 import { askedAs, backgroundOf, outcomeOf, runningIn } from "./steer.ts";
 import { LiveSteerMark, RequeuedLine, SteerMarkRow } from "./steer-rows.tsx";
 import { LimitStopRow, StepRow } from "./stop-rows.tsx";
-import { plainOf, thoughtText } from "./step-names.ts";
+import { plainOf, thoughtText, titled, unsettled } from "./step-names.ts";
+import { toolNameOf } from "./tool-names.ts";
+import { overTitle } from "./tool-words.ts";
 
 const QUIET = "text-small text-quiet";
 /** The space above a row under another in its section, on the spacing tokens; first in its section, the thread's own
@@ -235,7 +238,13 @@ function ToolCall({ id, entry }: { id: EntryId; entry: ToolCallEntry }) {
       data-background={backgroundOf(entry) === undefined ? undefined : true}
       className={`${ROW} ${QUIET}`}
     >
-      <bdi>{plainOf(entry.title)}</bdi>
+      <bdi>
+        {toolNameOf(entry.title) === undefined
+          ? plainOf(entry.title)
+          : unsettled(entry)
+            ? titled(entry, stepLive(w.lang, "Working on it."), w.lang)
+            : overTitle(w.lang, entry.title, entry.status !== "completed")}
+      </bdi>
       {mark !== null && (
         <>
           {" · "}

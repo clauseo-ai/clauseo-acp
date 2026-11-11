@@ -72,6 +72,15 @@ export const HI = {
   // the paper it would run it on (D-016); the command itself folds under "Show the command"
   "Run {program} on {name}.": "{name} पर {program} चलाना।",
   "Run {program}.": "{program} चलाना।",
+  // what Clauseo asks to do, under the ask, where the agent named the request only by a tool's or a permission's
+  // name (UC-160 to UC-165; provisional): the name itself is never shown
+  "Clauseo asks to let a command reach the internet.":
+    "Clauseo एक कमांड को इंटरनेट तक पहुँचने देने की अनुमति माँगता है।",
+  "Clauseo asks to run a task.": "Clauseo एक काम चलाने की अनुमति माँगता है।",
+  "Clauseo asks to read a paper.": "Clauseo एक दस्तावेज़ पढ़ने की अनुमति माँगता है।",
+  "Clauseo asks to change a paper.": "Clauseo एक दस्तावेज़ बदलने की अनुमति माँगता है।",
+  "Clauseo asks to search the papers.": "Clauseo दस्तावेज़ों में खोजने की अनुमति माँगता है।",
+  "Clauseo asks to look online.": "Clauseo ऑनलाइन देखने की अनुमति माँगता है।",
   "No longer waiting for an answer.": "अब उत्तर की प्रतीक्षा नहीं है।",
   "Allowed once.": "एक बार अनुमति दी गई।",
   "Allowed for this matter.": "इस मामले के लिए अनुमति दी गई।",
