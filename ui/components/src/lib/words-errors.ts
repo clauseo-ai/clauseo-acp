@@ -52,6 +52,9 @@ export type ErrorCode =
   | "matter.folder_network"
   | "matter.folder_no_permissions"
   | "matter.folder_too_deep"
+  | "matter.folder_in_clauseo_data"
+  | "matter.folder_inside_matter"
+  | "matter.folder_holds_matter"
   | "transport.unauthorized"
   | "transport.too_large"
   | "settings.locked"
@@ -168,16 +171,26 @@ export const ERROR_WORDS: Record<WordedCode, ErrorKey> = {
     "This matter's folder holds a .codex folder. Rename or remove it to use ChatGPT here.",
   "matter.file_locked": "A paper is open in another program. Close it, then try again.",
   "matter.turn_running": "Wait for the answer to finish first.",
-  "matter.folder_is_drive": "A whole drive can't be a matter.",
-  "matter.folder_is_home": "Your home folder can't be a matter.",
-  "matter.folder_is_system": "A system folder can't be a matter.",
+  // folder PR 2 (approved 2026-11-11): each folder refusal says its reason; a folder nested with a matter, here where
+  // no name is at hand, and the rare folder_is_matter take the line of a folder Clauseo can't make a matter of
+  "matter.folder_is_drive": "This is the top of a drive. Choose a folder on it.",
+  "matter.folder_is_home": "This is your home folder. Choose a folder inside it.",
+  "matter.folder_is_system": "This is a system folder. Choose another folder.",
   "matter.folder_unreadable": "Clauseo can't read that folder.",
-  "matter.folder_is_matter": "That folder is already a matter's, or inside one.",
-  "matter.folder_in_matters_root": "That folder holds Clauseo's own data.",
+  "matter.folder_is_matter": "Clauseo can't make a matter of this folder. Choose another folder.",
+  "matter.folder_in_matters_root":
+    "That folder is where Clauseo keeps matters. Choose the folder for one matter.",
+  "matter.folder_in_clauseo_data":
+    "This folder is part of Clauseo's own data. Choose another folder.",
+  "matter.folder_inside_matter":
+    "Clauseo can't make a matter of this folder. Choose another folder.",
+  "matter.folder_holds_matter":
+    "Clauseo can't make a matter of this folder. Choose another folder.",
   "matter.folder_network":
     "ChatGPT can't work on a network drive. Move the matter to this computer.",
   "matter.folder_no_permissions":
     "ChatGPT can't work on a drive without file permissions. Move the matter to this computer.",
+  // also a turn refused in an open matter, so not folder PR 2's choose-another line (that is matter-form-check.ts's)
   "matter.folder_too_deep":
     "This matter's folder is too deep inside other folders for Clauseo to work in it on Windows. Move it nearer the top of its drive.",
   "transport.unauthorized": "That wasn't allowed, so nothing changed.",

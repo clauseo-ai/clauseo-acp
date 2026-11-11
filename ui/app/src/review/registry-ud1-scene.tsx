@@ -18,6 +18,11 @@ export type Scene = {
   /** The code desktop refuses each setup command with, and the steps that send one (RoomDriven). */
   refuse?: string;
   steps?: DrivenStep[];
+  /** The host's folder picker and command answers, where the scene presses Open the folder. */
+  open?: Pick<
+    NonNullable<ConstructorParameters<typeof FakeTransport>[0]>,
+    "pickFolder" | "dispatch"
+  >;
 };
 
 /** The room over a fake host with the setup wire, in the scene. */
@@ -26,6 +31,7 @@ function host(s: Scene): () => FakeTransport {
     new FakeTransport({
       platform: s.platform ?? "mac",
       openSettings: () => {},
+      ...s.open,
       query: (query) => {
         if (query === "list_matters") return { matters: s.first === true ? [] : [MATTER] };
         if (query === "get_settings")

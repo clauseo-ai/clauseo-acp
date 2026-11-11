@@ -21,35 +21,39 @@ export const HI = {
   "Folder moved": "फ़ोल्डर कहीं और ले जाया गया",
   "A matter waits for you": "एक मामला आपकी प्रतीक्षा में है",
   /* ---------- a new matter: a folder the host refused, a create that failed ---------- */
-  // matter.folder_refused, which doesn't say why: true of a folder already a matter, an unreadable matter file, the
-  // matters' own folder, a drive, the home folder and a system folder alike
+  // matter.folder_refused, which doesn't say why; also the line for a folder inside or holding a matter the list
+  // doesn't have (one being made or forgotten), and for matter.folder_is_matter, with no Open
   "Clauseo can't make a matter of this folder. Choose another folder.":
     "Clauseo इस फ़ोल्डर से मामला नहीं बना सकता। दूसरा फ़ोल्डर चुनें।",
-  "{path} is a whole drive.": "{path} पूरी ड्राइव है।",
-  "A matter is one folder of papers. Choose the folder for one matter.":
-    "एक मामला दस्तावेज़ों का एक फ़ोल्डर होता है। किसी एक मामले का फ़ोल्डर चुनें।",
-  "{path} is your home folder.": "{path} आपका होम फ़ोल्डर है।",
-  "It holds far more than one matter. Choose the folder for one matter.":
-    "इसमें एक मामले से कहीं अधिक है। किसी एक मामले का फ़ोल्डर चुनें।",
-  "{path} is a folder the computer keeps for itself.":
-    "{path} वह फ़ोल्डर है जिसे कंप्यूटर अपने लिए रखता है।",
-  "Choose the folder that holds the matter's papers.": "वह फ़ोल्डर चुनें जिसमें मामले के दस्तावेज़ हैं।",
+  // folder PR 2: each refusal says its reason (matter-form-check.ts)
+  "This is the top of a drive. Choose a folder on it.":
+    "यह किसी ड्राइव का सबसे ऊपरी स्तर है। उस पर कोई फ़ोल्डर चुनें।",
+  "This is your home folder. Choose a folder inside it.":
+    "यह आपका होम फ़ोल्डर है। उसके भीतर कोई फ़ोल्डर चुनें।",
+  "This is a system folder. Choose another folder.": "यह एक सिस्टम फ़ोल्डर है। दूसरा फ़ोल्डर चुनें।",
+  "This folder is part of Clauseo's own data. Choose another folder.":
+    "यह फ़ोल्डर Clauseo के अपने डेटा का हिस्सा है। दूसरा फ़ोल्डर चुनें।",
+  "This folder is too deeply nested for Windows. Choose a shorter path.":
+    "यह फ़ोल्डर Windows के लिए दूसरे फ़ोल्डरों के बहुत भीतर है। छोटा पथ चुनें।",
   "Clauseo can't read {path}.": "Clauseo {path} नहीं पढ़ पा रहा।",
   "Clauseo can't read that folder.": "Clauseo वह फ़ोल्डर नहीं पढ़ पा रहा।",
   "It may be locked, or on a drive that's no longer connected.":
     "हो सकता है वह लॉक हो, या ऐसी ड्राइव पर हो जो अब जुड़ी नहीं है।",
   "Clauseo couldn't create the matter. Try again, or choose another folder.":
     "Clauseo मामला नहीं बना सका। फिर से प्रयास करें, या दूसरा फ़ोल्डर चुनें।",
-  // matter.folder_is_matter: the folder is already a matter, by any spelling or nested with one; the matter's name when
-  // the list has it, and Open it beside the line
-  "This folder is already a matter: {name}.": "यह फ़ोल्डर पहले से एक मामला है: {name}।",
-  "This folder is already a matter.": "यह फ़ोल्डर पहले से एक मामला है।",
+  // matter.folder_inside_matter, matter.folder_holds_matter: the matter on the list whose folder it is nested with,
+  // and Open {name} beside the line
+  "This folder is inside the folder of {name}.": "यह फ़ोल्डर {name} के फ़ोल्डर के भीतर है।",
+  "This folder holds the folder of {name}.": "इस फ़ोल्डर में {name} का फ़ोल्डर है।",
+  "Open {name}": "{name} खोलें",
   // matter.folder_in_matters_root: the folder Clauseo keeps matters in, a choose-another refusal
   "{path} is the folder Clauseo keeps matters in.": "{path} वह फ़ोल्डर है जिसमें Clauseo मामले रखता है।",
   "That folder is where Clauseo keeps matters.": "उस फ़ोल्डर में Clauseo मामले रखता है।",
   "Choose the folder for one matter.": "एक मामले का फ़ोल्डर चुनें।",
   /* ---------- the folder picker's line, while a pick is slow (New matter, the first screen, Locate) ---------- */
   "Opening the folder picker…": "फ़ोल्डर चुनने की विंडो खुल रही है…",
+  // the first screen, while the folder picked is made a matter (matters.create)
+  "Opening the folder…": "फ़ोल्डर खुल रहा है…",
   /* ---------- Clauseo's own folder chooser, where Windows' folder window would stall (folder-chooser.tsx) ---------- */
   "Choose the matter's folder": "मामले का फ़ोल्डर चुनें",
   "Windows' folder window is slow to open on this computer, so Clauseo shows its own.":

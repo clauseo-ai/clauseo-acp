@@ -337,28 +337,37 @@
     "note": "Rohan, on the review page (built from U3 53b4ca5d, approved as U3-42)"
   },
   "U3-err-matter.folder_is_drive": {
-    "en": "A whole drive can't be a matter.",
-    "hi": "पूरी ड्राइव मामला नहीं बन सकती।",
+    "en": "This is the top of a drive. Choose a folder on it.",
+    "hi": "यह किसी ड्राइव का सबसे ऊपरी स्तर है। उस पर कोई फ़ोल्डर चुनें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-11",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
     "status": "approved",
-    "at": "2026-11-02",
+    "at": "2026-11-11",
     "by": "Rohan",
-    "note": "Rohan, on the review page (H5-matters-rail, #148 5c3ad943)"
+    "note": "Rohan, approved words for folder PR 2 (each folder refusal says its reason)"
   },
   "U3-err-matter.folder_is_home": {
-    "en": "Your home folder can't be a matter.",
-    "hi": "आपका होम फ़ोल्डर मामला नहीं बन सकता।",
+    "en": "This is your home folder. Choose a folder inside it.",
+    "hi": "यह आपका होम फ़ोल्डर है। उसके भीतर कोई फ़ोल्डर चुनें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-11",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
     "status": "approved",
-    "at": "2026-11-02",
+    "at": "2026-11-11",
     "by": "Rohan",
-    "note": "Rohan, on the review page (H5-matters-rail, #148 5c3ad943)"
+    "note": "Rohan, approved words for folder PR 2 (each folder refusal says its reason)"
   },
   "U3-err-matter.folder_is_system": {
-    "en": "A system folder can't be a matter.",
-    "hi": "कोई सिस्टम फ़ोल्डर मामला नहीं बन सकता।",
+    "en": "This is a system folder. Choose another folder.",
+    "hi": "यह एक सिस्टम फ़ोल्डर है। दूसरा फ़ोल्डर चुनें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-11",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
     "status": "approved",
-    "at": "2026-11-02",
+    "at": "2026-11-11",
     "by": "Rohan",
-    "note": "Rohan, on the review page (H5-matters-rail, #148 5c3ad943)"
+    "note": "Rohan, approved words for folder PR 2 (each folder refusal says its reason)"
   },
   "U3-err-matter.folder_unreadable": {
     "en": "Clauseo can't read that folder.",
@@ -369,20 +378,26 @@
     "note": "Rohan, on the review page (H5-matters-rail, #148 5c3ad943)"
   },
   "U3-err-matter.folder_is_matter": {
-    "en": "That folder is already a matter's, or inside one.",
-    "hi": "वह फ़ोल्डर पहले से किसी मामले का है, या किसी मामले के भीतर है।",
+    "en": "Clauseo can't make a matter of this folder. Choose another folder.",
+    "hi": "Clauseo इस फ़ोल्डर से मामला नहीं बना सकता। दूसरा फ़ोल्डर चुनें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-11",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
     "status": "approved",
-    "at": "2026-11-02",
+    "at": "2026-11-11",
     "by": "Rohan",
-    "note": "Rohan, on the review page (H5-matters-rail, #148 5c3ad943)"
+    "note": "Rohan, folder PR 2: a rare same-folder case; U2-31's approved line, no name"
   },
   "U3-err-matter.folder_in_matters_root": {
-    "en": "That folder holds Clauseo's own data.",
-    "hi": "उस फ़ोल्डर में Clauseo का अपना डेटा है।",
+    "en": "That folder is where Clauseo keeps matters. Choose the folder for one matter.",
+    "hi": "उस फ़ोल्डर में Clauseo मामले रखता है। एक मामले का फ़ोल्डर चुनें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-11",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
     "status": "approved",
-    "at": "2026-11-02",
+    "at": "2026-11-11",
     "by": "Rohan",
-    "note": "Rohan, on the review page (H5-matters-rail, #148 5c3ad943)"
+    "note": "Rohan, folder PR 2: the matters root only now; ME-04 and ME-05's approved lines, joined"
   },
   "U3-err-matter.folder_network": {
     "en": "ChatGPT can't work on a network drive. Move the matter to this computer.",
@@ -959,5 +974,38 @@
     "at": "2026-11-10",
     "by": "app track (provisional; Rohan batch review)",
     "note": "D-050: an answer the lost connection stopped (agent.offline), on the stop line under the answer, with Try again beside Copy; reuses U3-err-agent.install_offline's \"You're offline\" and U3-04's \"The answer so far is kept.\""
+  },
+  "U3-err-matter.folder_in_clauseo_data": {
+    "en": "This folder is part of Clauseo's own data. Choose another folder.",
+    "hi": "यह फ़ोल्डर Clauseo के अपने डेटा का हिस्सा है। दूसरा फ़ोल्डर चुनें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-11",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "approved",
+    "at": "2026-11-11",
+    "by": "Rohan",
+    "note": "Rohan, approved words for folder PR 2 (each folder refusal says its reason)"
+  },
+  "U3-err-matter.folder_inside_matter": {
+    "en": "Clauseo can't make a matter of this folder. Choose another folder.",
+    "hi": "Clauseo इस फ़ोल्डर से मामला नहीं बना सकता। दूसरा फ़ोल्डर चुनें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-11",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "approved",
+    "at": "2026-11-11",
+    "by": "Rohan",
+    "note": "Rohan, folder PR 2: where no name is at hand; U2-31's approved line (the form names a listed matter, ME-11)"
+  },
+  "U3-err-matter.folder_holds_matter": {
+    "en": "Clauseo can't make a matter of this folder. Choose another folder.",
+    "hi": "Clauseo इस फ़ोल्डर से मामला नहीं बना सकता। दूसरा फ़ोल्डर चुनें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-11",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "approved",
+    "at": "2026-11-11",
+    "by": "Rohan",
+    "note": "Rohan, folder PR 2: where no name is at hand; U2-31's approved line (the form names a listed matter, ME-12)"
   }
 }
