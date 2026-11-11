@@ -60,6 +60,10 @@ pub(crate) enum Press {
 pub(crate) struct Kept {
     pub(crate) press: Press,
     pub(crate) switch: Option<OwnLogin>,
+    /// Its agent's status check is owed: the press waited at its install's `Ready` for another
+    /// sign-in, so no check ran then. A press dropped or refused later runs it
+    /// ([`settle_owed`]); one that starts owes none (its sign-in says how it stands).
+    pub(crate) owes_check: bool,
 }
 
 /// Whether an agent in install `state` can sign in now: installed, or the firm's runtime.
@@ -101,9 +105,16 @@ pub(super) fn keep_press(
     if !kept && installed && !waits {
         return false;
     }
-    let replaced = lock(&backend.pending)
-        .insert(agent.clone(), Kept { press, switch })
-        .is_some();
+    let mut pending = lock(&backend.pending);
+    // A press replacing one that waited at `Ready` takes over its owed check.
+    let owes_check = pending.get(agent).is_some_and(|kept| kept.owes_check);
+    let kept = Kept {
+        press,
+        switch,
+        owes_check,
+    };
+    let replaced = pending.insert(agent.clone(), kept).is_some();
+    drop(pending);
     let switch = switch.is_some();
     if installed {
         tracing::info!(%agent, method = ?press, switch, replaced, waits, "sign-in pending: installed");
@@ -145,11 +156,12 @@ pub(super) fn joins_started(backend: &AgentsBackend, agent: &AgentId) -> bool {
 /// Drops `agent`'s pending press, if any, for `why` (logged), with the gate held: the
 /// sign-in state goes back to S18's. Whether one was dropped.
 pub(super) fn drop_press(backend: &AgentsBackend, agent: &AgentId, why: &'static str) -> bool {
-    let Some(Kept { press, .. }) = lock(&backend.pending).remove(agent) else {
+    let Some(kept) = lock(&backend.pending).remove(agent) else {
         return false;
     };
-    tracing::info!(%agent, method = ?press, why, "pending sign-in dropped");
+    tracing::info!(%agent, method = ?kept.press, why, "pending sign-in dropped");
     show_s18(backend, agent);
+    settle_owed(backend, agent, kept);
     true
 }
 
@@ -199,6 +211,9 @@ pub(super) fn run_press(backend: &AgentsBackend, agent: &AgentId) -> Ran {
     let _gate = lock(&backend.signin_gate);
     if lock(&backend.pending).contains_key(agent) && other_going(backend, agent) {
         tracing::info!(%agent, "pending sign-in kept at Ready: another sign-in is going");
+        if let Some(kept) = lock(&backend.pending).get_mut(agent) {
+            kept.owes_check = true;
+        }
         return Ran::Waits;
     }
     start_kept(backend, agent)
@@ -242,8 +257,21 @@ fn start_kept(backend: &AgentsBackend, agent: &AgentId) -> Ran {
                 "a kept sign-in press was refused when it came to run"
             );
             show_s18(backend, agent);
+            settle_owed(backend, agent, kept);
             Ran::Nothing
         }
+    }
+}
+
+/// The status check `kept`, now dropped or refused, owed its agent ([`Kept::owes_check`]): run
+/// now, so a login already there shows without waiting for a restart.
+fn settle_owed(backend: &AgentsBackend, agent: &AgentId, kept: Kept) {
+    if !kept.owes_check {
+        return;
+    }
+    super::super::status_timing::asked(agent, "installed");
+    if let Err(error) = backend.agents.check_status(agent) {
+        tracing::warn!(%agent, %error, "no status check");
     }
 }
 

@@ -214,3 +214,47 @@ fn only_a_sign_in_makes_a_press_wait() {
     assert_eq!(asked(&rig, "sign_in", &codex()), 1, "{:?}", rig.calls());
     assert_eq!(pending(&rig, &codex()), None);
 }
+
+/// A press that waited at its install's `Ready` (no status check ran then) and is cancelled
+/// afterwards owes its agent that check, run at the cancel, so a login already there shows
+/// without a restart; one that starts once the other sign-in ends owes none.
+#[test]
+fn a_press_that_waited_at_ready_gets_its_status_check_when_it_never_runs() {
+    let rig = rig(true);
+    not_installed(&rig, &codex());
+    press(&rig, "start_sign_in", &claude());
+    press(&rig, "start_sign_in", &codex());
+    pump(&rig, &codex(), vec![InstallState::Installing, ready()]);
+    assert_eq!(
+        asked(&rig, "check_status", &codex()),
+        0,
+        "none while it waits"
+    );
+    press(&rig, "cancel_sign_in", &codex());
+    assert_eq!(pending(&rig, &codex()), None);
+    assert_eq!(
+        asked(&rig, "check_status", &codex()),
+        1,
+        "{:?}",
+        rig.calls()
+    );
+    assert_eq!(asked(&rig, "sign_in", &codex()), 0);
+
+    let rig = super::fakes::rig(true);
+    not_installed(&rig, &codex());
+    press(&rig, "start_sign_in", &claude());
+    press(&rig, "start_sign_in", &codex());
+    pump(&rig, &codex(), vec![InstallState::Installing, ready()]);
+    sign_in_ends(
+        &rig,
+        &claude(),
+        Some(SigninState::SignedOut { found: None }),
+    );
+    assert_eq!(asked(&rig, "sign_in", &codex()), 1);
+    assert_eq!(
+        asked(&rig, "check_status", &codex()),
+        0,
+        "{:?}",
+        rig.calls()
+    );
+}
