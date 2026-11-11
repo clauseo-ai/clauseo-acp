@@ -12,8 +12,8 @@ pub const TOOLS: &str = include_str!("../assets/instructions/tools.txt");
 pub const LEGAL: &str = include_str!("../assets/instructions/legal.md");
 
 /// The token the profile fills with [`plan_name`] of the agent the text is for, in the identity
-/// rule (decision record 0058): the assistant is Clauseo, working through the lawyer's Claude or
-/// ChatGPT account. It is not the host's: the profile knows the agent when it builds Claude's
+/// rule (decision record 0058): the assistant is Clauseo, working through the lawyer's `Claude`
+/// or `ChatGPT` account. It is not the host's: the profile knows the agent when it builds Claude's
 /// options and Codex's keys (`ClauseoProfile::instructions_for`).
 pub const PLAN: &str = "{plan}";
 
