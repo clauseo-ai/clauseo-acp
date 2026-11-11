@@ -1,6 +1,6 @@
 use std::sync::mpsc;
 
-use clauseo_matters::{CheckpointOutcome, DEFAULT_MARKER, NewMatter, TurnMeta};
+use clauseo_matters::{CheckpointOutcome, DEFAULT_MARKER, NewMatter, Place, TurnMeta};
 use clauseo_protocol::{CheckpointId, MatterId, ThreadId, Timestamp, TurnId};
 use uuid::Uuid;
 
@@ -126,6 +126,53 @@ fn create_then_checkpoints_on_the_matter_thread() {
     let paths: Vec<_> = reused.changes.iter().map(|c| c.path().as_str()).collect();
     assert_eq!(paths, ["notes.txt"]);
 
+    worker.stop().unwrap();
+}
+
+#[test]
+fn a_listing_says_where_the_folder_lives_from_the_matter_thread() {
+    let dir = TempDir::new("papers-place");
+    let root = dir.path();
+    let folder = root.join("matter");
+    let brief = folder.join("brief.txt");
+    let (tx, rx) = mpsc::channel::<(MatterReply, Option<String>)>();
+    let worker = MatterWorker::<u32>::start(
+        matter_settings(&root.join("data")),
+        Box::new(move |_tag, reply| {
+            let name = std::thread::current().name().map(str::to_owned);
+            tx.send((reply, name)).unwrap();
+        }),
+    )
+    .unwrap();
+    let create = MatterJob::Create {
+        new: NewMatter {
+            id: MatterId::new(v7(2)).unwrap(),
+            folder,
+            created_at: Timestamp::new(1_790_000_000_000).unwrap(),
+            marker: DEFAULT_MARKER,
+            checkpoint: CheckpointId::new(v7(1)).unwrap(),
+        },
+        check: CheckSource::Windows,
+    };
+    worker.send(create, 1).unwrap();
+    let (created, _) = rx.recv().unwrap();
+    assert!(
+        matches!(created, MatterReply::Created(Ok(_))),
+        "{created:?}"
+    );
+    // Saved after the import, so the listing finds it in the folder as it is now.
+    write::write_file(&brief, b"Clause 4\n").unwrap();
+    worker.send(MatterJob::ListPapers { limit: 10 }, 2).unwrap();
+    // The place is asked beside the listing, on the matter's thread (it stats the folder, so
+    // never on the actor): a temp folder no cloud service syncs is local.
+    let (listed, name) = rx.recv().unwrap();
+    assert_eq!(name.as_deref(), Some("clauseo-matter"));
+    let MatterReply::Papers(Ok((papers, place))) = listed else {
+        panic!("{listed:?}")
+    };
+    assert_eq!(place, Place::Local);
+    let paths: Vec<&str> = papers.papers.iter().map(|p| p.path.as_str()).collect();
+    assert_eq!(paths, ["brief.txt"]);
     worker.stop().unwrap();
 }
 

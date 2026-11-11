@@ -12,7 +12,7 @@ use std::thread::{self, JoinHandle};
 
 use clauseo_matters::{
     Checkpoint, CheckpointOutcome, CommitId, CompareSide, ImportWarning, Limits, Matter,
-    MissingReason, NewMatter, OsProbe, PaperList, Restore, RestorePlan, Restored, Retention,
+    MissingReason, NewMatter, OsProbe, PaperList, Place, Restore, RestorePlan, Restored, Retention,
     Settings, TimelineEntry, TurnMeta, UndoRequest, Undone, matter_path_of_resolved,
 };
 use clauseo_protocol::{
@@ -245,7 +245,9 @@ pub(crate) enum MatterReply {
     Previewed(Result<Box<RestorePlan>, Error>),
     /// The first path held open, with what shows it.
     HeldOpen(PathsChecked),
-    Papers(Result<PaperList, Error>),
+    /// The folder's listing, with where the folder lives (`clauseo_matters::place`), asked
+    /// here beside the listing: it stats the folder, so never on the actor.
+    Papers(Result<(PaperList, Place), Error>),
     EditedSince(Result<Vec<MatterPath>, Error>),
     /// The paths in the folder again.
     StillGone(Result<Vec<MatterPath>, Error>),
@@ -512,7 +514,10 @@ fn handle(settings: &Settings, slot: &mut Slot, job: MatterJob) -> MatterReply {
             fence,
         } => MatterReply::HeldOpen(check_paths(&folder, paths, fence.as_deref())),
         MatterJob::ListPapers { limit } => {
-            MatterReply::Papers(open(settings, slot).and_then(|matter| Ok(matter.papers(limit)?)))
+            MatterReply::Papers(open(settings, slot).and_then(|matter| {
+                let papers = matter.papers(limit)?;
+                Ok((papers, clauseo_matters::place(matter.folder())))
+            }))
         }
         MatterJob::EditedSince { before, after } => MatterReply::EditedSince(
             open(settings, slot).and_then(|matter| Ok(matter.edited_since(before, after)?)),
