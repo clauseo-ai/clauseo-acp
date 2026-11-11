@@ -1,4 +1,4 @@
-# 0058: The assistant says it is Clauseo, names the files it saves, and makes new documents clean
+# 0058: The assistant says it is Clauseo, answers in the chat, names the files it saves, and makes new documents clean
 
 ## Context
 
@@ -19,6 +19,9 @@ command that creates a document (`pack --no-track` and `edit --no-track` both ne
 checked on Linux, with the pinned pandoc and stetdoc, that `pandoc -f markdown -o` gives real Heading and numbering styles and no `w:ins` or
 `w:del`. Windows PowerShell 5.1 pipes text to a native program as ASCII, which turns ₹, Hindi and
 curly quotes into "?", so pandoc reads a file, never a pipe.
+
+Stage C's ChatGPT baseline, asked for a 1,200-word memo in plain prose, wrote the whole memo to
+`Acme options memorandum.md` in the matter and gave the chat only a link to it and two sentences.
 
 The first two rules need about 86 words, and 0031's budgets had 7 words left in `legal.md` (1,193 of 1,200)
 and about 19 in Codex's whole text with a long data folder (about 1,481 of 1,500).
@@ -48,21 +51,25 @@ and about 19 in Codex's whole text with a long data folder (about 1,481 of 1,500
   The Word guidance stays in one place, so the rule goes only where stetdoc was found; pandoc
   itself comes with the Python runtime, which the profile does not see. The saved-file rule then
   names the new file.
-- 0031's budgets are amended by what the three rules need plus about 10 words: `legal.md` at
-  most 1,290 words, and the whole instructions at most 1,650, which also caps Codex's text with
+- "Conduct"'s bullet on the reply gains one sentence, in the legal part so it holds with or
+  without stetdoc: "Answer in the chat, however long; make a file only when the lawyer asks for
+  one, as a `.docx` unless another format is named, and never leave Markdown or scratch files
+  in the matter."
+- 0031's budgets are amended by what the four rules need plus about 10 words: `legal.md` at
+  most 1,330 words, and the whole instructions at most 1,680, which also caps Codex's text with
   the skills index (`the_budgets_hold_for_a_long_macos_path_with_the_folders_filled`). The
   whole now counts the stetdoc line as the app launches with it; before, the budget tests
   measured a profile without it, so its 17 words were never counted. At this change: `legal.md`
-  1,279 words, the stetdoc line 65, the whole 1,534 with a data folder at `/data`, and Codex's
-  whole about 1,636 with the long macOS folder. The tools part with the stetdoc line is 255
+  1,313 words, the stetdoc line 65, the whole 1,568 with a data folder at `/data`, and Codex's
+  whole about 1,670 with the long macOS folder. The tools part with the stetdoc line is 255
   words, under R21's 300.
 
 ## Consequences
 
-- Each agent's instructions grow by about 190 tokens.
+- Each agent's instructions grow by about 240 tokens.
 - A later per-agent difference in the instructions follows the same path: a profile token filled
   in `instructions_for`, never a second copy of `legal.md`.
-- `legal.md` has about 11 words of headroom left; the next rule that needs more makes room or
+- `legal.md` has about 17 words of headroom left; the next rule that needs more makes room or
   amends the budget again.
 
 ## Status
