@@ -218,8 +218,10 @@ pub(crate) fn pump_child(
             if state.generation != generation {
                 continue;
             }
-            reply_id(&line).and_then(|id| state.answered(&id))
+            let answered = reply_id(&line).and_then(|id| state.answered(&id));
+            (answered, state.sent_count())
         };
+        let (answered, sent) = answered;
         let call = answered.is_some_and(Request::is_call);
         // A tool call's result carries the note on held downloads (`downloads/held.rs`).
         if call && let Some(noted) = shared.held.note_into(&line) {
@@ -231,7 +233,7 @@ pub(crate) fn pump_child(
         }
         // After the reply is out: the relay's thread stops the browser (`relay.rs`).
         if answered == Some(Request::Close) {
-            send(events, Event::Closed(generation));
+            send(events, Event::Closed(generation, sent));
         }
         if let Some(reason) = refusal(&shared.launcher.port_checks) {
             return Event::PortRefused(generation, reason);

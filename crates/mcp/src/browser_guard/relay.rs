@@ -25,12 +25,12 @@
 //! When the agent closes stdin, the guard asks a running agent-browser to close its browser (one
 //! `agent_browser_close` call, [`CLOSE_REQUEST`], whose reply is not relayed and stops nothing
 //! itself: the final stop follows), waits up to [`CLOSE_WAIT`] for that reply, closes the child's
-//! stdin and waits up to [`EXIT_WAIT`] for its stdout to end, then kills it. When agent-browser ends by itself
-//! the guard exits with its code (1 if Chrome had died too). When the guard's parent goes
-//! (`parent.rs`), the guard exits 1. Whatever ends the relay, the browser is stopped (`stop`), a
-//! running one-shot killed, and every request still in flight answered with an error. From that
-//! final stop on, the agent pump answers each request with an error itself: no browser or
-//! one-shot starts after it, so none outlives the guard.
+//! stdin and waits up to [`EXIT_WAIT`] for its stdout to end, then kills it. When agent-browser
+//! ends by itself the guard exits with its code (1 if Chrome had died too). When the guard's
+//! parent goes (`parent.rs`), the guard exits 1. Whatever ends the relay, the browser is stopped
+//! (`stop`), a running one-shot killed, and every request still in flight answered with an
+//! error. From that final stop on, the agent pump answers each request with an error itself: no
+//! browser or one-shot starts after it, so none outlives the guard.
 //!
 //! The child's lines are capped at [`CHILD_MAX_LINE_BYTES`]: a longer one kills the child and
 //! the guard exits 1 (fail closed). A last line cut off by the child's end is dropped, with a
@@ -129,8 +129,9 @@ pub(crate) enum Event {
     PortRefused(u64, String),
     /// The guard's Chrome exited.
     ChromeExited(u64),
-    /// agent-browser's reply to an `agent_browser_close` call went to the agent.
-    Closed(u64),
+    /// agent-browser's reply to an `agent_browser_close` call went to the agent; with
+    /// `State::sent_count` as the reply was taken.
+    Closed(u64, u64),
     /// The agent's stdin reached EOF (and the close request went out to a running child).
     AgentEnded,
     /// The reply to the close request arrived.
@@ -292,9 +293,9 @@ fn wait_for_end(shared: &Shared, inbox: &mpsc::Receiver<Event>) -> End {
                     return End::ChromeExited;
                 }
             }
-            Event::Closed(of) if current(of) => stop_after_close(shared),
+            Event::Closed(of, sent) if current(of) => stop_after_close(shared, sent),
             // From a start the guard has stopped already.
-            Event::Closed(_)
+            Event::Closed(..)
             | Event::ChildEnded(_)
             | Event::ChildOversize(_)
             | Event::PortRefused(..)
@@ -349,11 +350,14 @@ fn stop_if_idle(shared: &Shared) {
 /// The agent's `agent_browser_close` was answered: stops the browser as the idle stop does,
 /// keeping the profile, so Chrome's debugging port lives only while the agent uses the browser.
 /// Runs on this thread after the reply is out, so the stop (with its wait for Chrome's group,
-/// `chrome.rs`) never delays the reply. Not when a request went to agent-browser since (the agent
-/// browses again; the idle stop covers it) or the agent has gone (the final stop follows).
-fn stop_after_close(shared: &Shared) {
+/// `chrome.rs`) never delays the reply. Not when a request went to agent-browser since the reply
+/// was taken (`sent`, `State::close_may_stop`), even one already answered: the agent browses
+/// again and the idle stop covers it; nor once the agent has gone (the final stop follows). It
+/// holds the state lock through the stop as the idle stop does, so a call waits for it, then
+/// starts the browser again.
+fn stop_after_close(shared: &Shared, sent: u64) {
     let mut state = lock(&shared.state);
-    if state.quiet() {
+    if state.close_may_stop(sent) {
         drop(session::stop(&shared.launcher, &mut state));
         drop(state);
         note(
