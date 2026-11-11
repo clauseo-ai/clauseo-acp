@@ -307,8 +307,11 @@ error_codes! {
         Clauseo's list.";
     PromptTooLong = "prompt.too_long", retryable: false, meaning: "The prompt's text is over \
         `MAX_PROMPT_TEXT_BYTES` (6 MiB, counted as JSON-escaped bytes), in a `SendPrompt` or an \
-        `EditQueuedPrompt`, so nothing was sent; the draft is kept. Only the prompt's text gets \
-        this code: every other size limit stays `command.invalid`.";
+        `EditQueuedPrompt`, so nothing was sent; the draft is kept. A `ChatGPT` prompt over Codex's \
+        own input limit (1,048,576 characters, as the host counts them) gets it too: refused the \
+        same way when sent or edited, or, when the undo note added as it goes out takes it over, \
+        its turn fails with this code before anything is sent, the queue held. Only the prompt's \
+        text gets this code: every other size limit stays `command.invalid`.";
     Unknown = "unknown", retryable: false, meaning: "A code from a newer Clauseo that this \
         version does not know. Never produced here.";
 }

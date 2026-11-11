@@ -57,18 +57,22 @@ it was."). The research behind this record is the private `measurements/long-que
   "internal error" is not read as too long: the wire cannot tell it from a real internal error.
 - **Which agent.** The host ends a turn `TooLong` for `PromptTooLong` from any agent, and for
   `ContextExhausted` only from codex-acp: claude-agent-acp sends that shape for its configured
-  turn or output limit, which shortening the question does not fix; there it is logged by kind. It is never a `LimitSignal`: it reaches the host as
-  `PromptEnd::too_long` or `Error::prompt_too_long`, so it never reaches the limits store nor the
-  Codex limits read. A too-long `sessionFailure` on a `session_info_update` is its own event,
-  `AcpEvent::TooLong`, which the host ORs into the turn's end, so a failure sent only on the
-  update is not lost; it is never logged as a warning.
+  turn or output limit, which shortening the question does not fix; there it is logged by kind.
+  It is never a `LimitSignal`: it reaches the host as `PromptEnd::too_long` or
+  `Error::prompt_too_long`, so it never reaches the limits store nor the Codex limits read. A
+  too-long `sessionFailure` on a `session_info_update` is its own event, `AcpEvent::TooLong`,
+  which the host ORs into the turn's end, so a failure sent only on the update is not lost; it is
+  never logged as a warning.
 - **Codex's own cap, checked by the host.** Codex refuses a turn whose text items hold more than
   `MAX_USER_INPUT_TEXT_CHARS` (`1 << 20`) Unicode scalar values together, and codex-acp 2.2.2
   passes that refusal on only as "Codex encountered an internal error.". So the host refuses a
   question to a Codex thread over that cap with `prompt.too_long`, the same words as Clauseo's own
   cap, before anything is queued or sent: on `SendPrompt` (start now, queue, send now, steer) and
-  `EditQueuedPrompt`. A thread's agent is fixed when it is created, so a queued turn needs no
-  second check when it starts. Claude is not checked; its own refusal ends `TooLong`.
+  `EditQueuedPrompt`. A thread's agent is fixed when it is created, but the undo note (the files
+  put back since the last turn, no length cap) is added only when the turn's prompt goes out, so
+  the host checks the text again there, note in: over the cap, the turn fails with
+  `prompt.too_long` before anything is sent, the queue holds, and the note waits for the next
+  prompt. A steer carries no note. Claude is not checked; its own refusal ends `TooLong`.
   - How the limit was found: in codex-rs at `rust-v0.162.1` (the Codex codex-acp 2.2.2 bundles),
     `protocol/src/user_input.rs:9-10` sets the cap; `app-server/src/request_processors/
     turn_processor.rs:552-556` (`turn/start`) and `:515-516` (`turn/steer`) sum
@@ -90,7 +94,8 @@ it was."). The research behind this record is the private `measurements/long-que
     must be re-checked on every codex-acp bump. `codex-input-too-long` keeps the recorded refusal
     as evidence of what the lawyer would otherwise get.
   - The UI does not check Codex's cap: the composer would need the thread's agent and the file
-    links' text, which only the host has. A host refusal shows the same words, the draft kept.
+    links' text, which only the host has. A host refusal shows the same words, the draft kept;
+    one when the prompt goes out shows them on the failed turn, the question kept in the thread.
 - **Error data.** The driver keeps only a few allowlisted fields of a JSON-RPC error's `data`
   (`errorKind`, `terminal_reason`, `codex_error_info`), each only when it is a short token of
   at most 64 ASCII letters, digits, `_`, `-` and `.`; the raw data, which may echo the
