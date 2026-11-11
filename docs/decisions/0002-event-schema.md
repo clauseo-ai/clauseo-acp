@@ -139,6 +139,7 @@ An unknown kind has no row and no answer (`None`): its envelope's `stream` decid
 | `account_limits_changed` (`HostEvent`) | `AccountLimits` | limits, through the host | no | none |
 | `limits_view_changed` (`HostEvent`) | `LimitsView`, the whole view after a change | limits, through the host | no | none; `subscribe_limits` subscribers only |
 | `connectors_changed` (`HostEvent`) | `ConnectorsState`, the whole state after a change (R24) | host | no | none; app subscribers, and every app catch-up |
+| `mcp_tools_changed` (`HostEvent`) | `McpToolsView`, the lawyer's MCP servers (names, never values) and who decides them, whole, after a change (Settings › Tools) | host | no | none; app subscribers, and every app catch-up |
 | `case_law_hint` (`HostEvent`) | matter, thread, turn; an offer, once per matter (R24) | host | no | none; app subscribers only |
 | `protection_changed` (`HostEvent`) | matter, protection (`Protection`); a matter's sandbox state after a change (0051) | host | no | none; app subscribers only, no catch-up (`ListMatters` has it) |
 | `protection_view_changed` (`HostEvent`) | `ProtectionView`, the whole view after a change (0051, R17 PR-B1) | host | no | none; app subscribers only, no catch-up (`HostQuery::Protection` has it) |

@@ -6,7 +6,8 @@
 
 use clauseo_protocol::{
     CommandOutcome, ErrorCode, FieldChange, HostCommand, HostEvent, MatterId, MatterKind,
-    MatterStatus, MattersChanged, Principal, StopReason, StreamId, ThreadId, ThreadsChanged,
+    MatterStatus, MattersChanged, McpToolsView, Principal, StopReason, StreamId, ThreadId,
+    ThreadsChanged,
 };
 
 use crate::settings::{ready, subscribe_app};
@@ -63,6 +64,10 @@ fn thread_row_of(host: &Running, matter: MatterId, thread: ThreadId) -> HostEven
     })
 }
 
+/// The frames of the whole state with two matters and no lawyer MCP servers: the settings, the
+/// matter list, a thread list per matter and the MCP tools view.
+const FRAMES: usize = 5;
+
 /// The changes a command sent to `sub`, after it is answered.
 fn after(host: &Running, sub: &mut clauseo_host::AppSubscription) -> Vec<HostEvent> {
     host.settle();
@@ -89,10 +94,12 @@ fn the_first_frames_are_the_settings_and_every_list_whole() {
         HostEvent::MattersChanged(list),
         HostEvent::ThreadsChanged(scratch_threads),
         HostEvent::ThreadsChanged(matter_threads),
+        HostEvent::McpToolsChanged(tools),
     ] = first.as_slice()
     else {
-        panic!("not the four first frames: {first:?}");
+        panic!("not the five first frames: {first:?}");
     };
+    assert_eq!(*tools, McpToolsView::EMPTY, "no lawyer MCP server");
     assert_eq!(
         *list,
         MattersChanged {
@@ -273,9 +280,10 @@ fn a_lagged_subscriber_gets_the_whole_lists_then_partial_rows() {
         config.with_app_subscription_capacity(SMALL_CAPACITY)
     });
     let (matter, _, _) = matter_with_thread(&dir, &host, "m", &[("a.txt", "x\n")], FAKE);
-    // The first frames (settings, matters, two thread lists) come whole, through the front queue.
+    // The first frames (settings, matters, two thread lists, MCP tools) come whole, through the
+    // front queue.
     let (mut sub, first) = subscribe_app(&host);
-    assert_eq!(first.len(), SMALL_CAPACITY);
+    assert_eq!(first.len(), FRAMES, "{first:?}");
     // Five changes: four fill the channel, the fifth finds it full.
     let pins = [true, false, true, false, true];
     for pinned in pins {
@@ -295,7 +303,7 @@ fn a_lagged_subscriber_gets_the_whole_lists_then_partial_rows() {
     let caught = crate::support::wait("the catch-up", async {
         use futures::StreamExt as _;
         let mut caught = Vec::new();
-        while caught.len() < SMALL_CAPACITY {
+        while caught.len() < FRAMES {
             let item = sub.next().await.expect("the app stream ended");
             caught.push(crate::settings::decode(&item));
         }
@@ -306,6 +314,7 @@ fn a_lagged_subscriber_gets_the_whole_lists_then_partial_rows() {
         HostEvent::MattersChanged(list),
         HostEvent::ThreadsChanged(one),
         HostEvent::ThreadsChanged(two),
+        HostEvent::McpToolsChanged(_),
     ] = caught.as_slice()
     else {
         panic!("not the whole state: {caught:?}");
@@ -349,9 +358,9 @@ fn the_whole_state_arrives_whole_when_it_has_more_frames_than_the_channel_has_pl
         config.with_app_subscription_capacity(TINY_CAPACITY)
     });
     let (matter, _, _) = matter_with_thread(&dir, &host, "m", &[("a.txt", "x\n")], FAKE);
-    // Two matters: four frames for three places. They all come, in order, with no lag.
+    // Two matters: five frames for three places. They all come, in order, with no lag.
     let (mut sub, first) = subscribe_app(&host);
-    assert_eq!(first.len(), TINY_CAPACITY + 1, "{first:?}");
+    assert_eq!(first.len(), FRAMES, "{first:?}");
     assert!(matches!(
         first.as_slice(),
         [
@@ -359,6 +368,7 @@ fn the_whole_state_arrives_whole_when_it_has_more_frames_than_the_channel_has_pl
             HostEvent::MattersChanged(MattersChanged { all: true, .. }),
             HostEvent::ThreadsChanged(ThreadsChanged { all: true, .. }),
             HostEvent::ThreadsChanged(ThreadsChanged { all: true, .. }),
+            HostEvent::McpToolsChanged(_),
         ]
     ));
     // Then partial rows, through the channel.
@@ -366,18 +376,19 @@ fn the_whole_state_arrives_whole_when_it_has_more_frames_than_the_channel_has_pl
     assert_eq!(after(&host, &mut sub), [row_of(&host, matter)]);
 
     // A lag: three changes fill the channel, the fourth finds it full. Once drained, the whole
-    // state (four frames again) arrives whole, and partial rows resume after it.
+    // state (five frames again) arrives whole, and partial rows resume after it.
     for pinned in [false, true, false, true] {
         host.ok(pin(matter, pinned));
     }
     host.settle();
     assert_eq!(take(&mut sub, TINY_CAPACITY).len(), TINY_CAPACITY);
-    let caught = take(&mut sub, TINY_CAPACITY + 1);
+    let caught = take(&mut sub, FRAMES);
     let [
         HostEvent::SettingsChanged(_),
         HostEvent::MattersChanged(list),
         HostEvent::ThreadsChanged(one),
         HostEvent::ThreadsChanged(two),
+        HostEvent::McpToolsChanged(_),
     ] = caught.as_slice()
     else {
         panic!("not the whole state: {caught:?}");
@@ -406,7 +417,7 @@ fn rows_sent_while_the_first_frames_are_unread_come_after_them() {
         host.handle.subscribe_app(Principal::LocalDesktop),
     )
     .unwrap();
-    // Two changes before the window reads anything: they queue behind the four frames.
+    // Two changes before the window reads anything: they queue behind the five frames.
     for pinned in [true, false] {
         host.ok(pin(matter, pinned));
     }
@@ -435,7 +446,7 @@ fn rows_sent_while_the_first_frames_are_unread_come_after_them() {
         ],
         "{events:?}"
     );
-    assert_eq!(events.len(), TINY_CAPACITY + 1 + 2);
+    assert_eq!(events.len(), FRAMES + 2, "{events:?}");
     host.shutdown();
 }
 
@@ -497,16 +508,15 @@ fn rows_past_what_the_front_queue_holds_lag_it_and_a_whole_catch_up_follows() {
     });
     let (matter, _, _) = matter_with_thread(&dir, &host, "m", &[("a.txt", "x\n")], FAKE);
     let mut sub = unread(&host);
-    // The queue holds the four frames plus three rows; the fourth row finds it full and the
+    // The queue holds the five frames plus three rows; the fourth row finds it full and the
     // subscriber lags, so the fifth goes nowhere either.
     let pins = [true, false, true, false, true];
     for pinned in pins {
         host.ok(pin(matter, pinned));
     }
     host.settle();
-    let frames = TINY_CAPACITY + 1;
-    let read = take(&mut sub, frames + TINY_CAPACITY + frames);
-    let (first, rest) = read.split_at(frames);
+    let read = take(&mut sub, FRAMES + TINY_CAPACITY + FRAMES);
+    let (first, rest) = read.split_at(FRAMES);
     let (rows, caught) = rest.split_at(TINY_CAPACITY);
     assert!(first.iter().all(whole), "{first:?}");
     let queued: Vec<bool> = matters_changed(rows)
@@ -546,7 +556,7 @@ fn a_row_sent_while_the_queue_is_part_read_comes_after_what_is_left() {
     let (matter, _, _) = matter_with_thread(&dir, &host, "m", &[("a.txt", "x\n")], FAKE);
     let mut sub = unread(&host);
     host.settle();
-    // Two of the four frames read, then a row: it queues behind the other two.
+    // Two of the five frames read, then a row: it queues behind the other three.
     let read = take(&mut sub, 2);
     assert!(read.iter().all(whole), "{read:?}");
     host.ok(pin(matter, true));
@@ -555,6 +565,7 @@ fn a_row_sent_while_the_queue_is_part_read_comes_after_what_is_left() {
     let [
         HostEvent::ThreadsChanged(ThreadsChanged { all: true, .. }),
         HostEvent::ThreadsChanged(ThreadsChanged { all: true, .. }),
+        HostEvent::McpToolsChanged(_),
         HostEvent::MattersChanged(row),
     ] = rest.as_slice()
     else {

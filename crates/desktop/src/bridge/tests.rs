@@ -482,5 +482,6 @@ mod allowed_sites;
 mod app;
 mod connectors;
 mod limits;
+mod mcp;
 mod permission;
 mod update;

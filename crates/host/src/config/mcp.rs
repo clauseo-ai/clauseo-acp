@@ -7,6 +7,29 @@ use clauseo_connectors::SecretStore;
 
 use super::HostConfig;
 
+/// What the confirm before a lawyer's MCP server is added, or its launch changed, shows
+/// (`HostConfig::with_mcp_confirm`): the program and its arguments as the lawyer typed them, or
+/// a remote server's URL. Never a value.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct McpLaunchAsk {
+    /// The server's name.
+    pub server: String,
+    /// What starts, verbatim: a local server's command as typed, then each argument; empty for a
+    /// remote server.
+    pub program: Vec<String>,
+    /// A remote server's URL; `None` for a local one.
+    pub url: Option<String>,
+}
+
+/// The native confirm before a lawyer's MCP server is added or its launch changes (its command,
+/// arguments, variable names or URL): `true` when the lawyer allows it. It blocks: the host
+/// calls it off the actor, on its keychain thread, one at a time, after the program is found
+/// and before anything is written. Desktop draws it in Rust, as the pay link's.
+pub trait McpLaunchConfirm: Send + Sync {
+    /// Asks about `ask`; `true` allows the save.
+    fn confirm(&self, ask: &McpLaunchAsk) -> bool;
+}
+
 /// Finds a lawyer's MCP server's program: the command as typed (a bare name or an absolute path)
 /// to the program's path, or `None` when there is none (`HostConfig::with_mcp_resolver`).
 pub type McpResolver = Arc<dyn Fn(&str) -> Option<std::path::PathBuf> + Send + Sync>;
@@ -24,6 +47,17 @@ impl HostConfig {
     #[must_use]
     pub fn with_mcp_secrets(mut self, secrets: Arc<dyn SecretStore>) -> Self {
         self.wiring.mcp_secrets = Some(secrets);
+        self
+    }
+
+    /// The confirm a `SaveServer` that adds a server, or changes its command, arguments,
+    /// variable names or URL, must pass (`McpLaunchConfirm`): declined, the save answers
+    /// `mcp.save_declined` with nothing written. A rename, a turn on or off, or new values alone
+    /// ask nothing. Unset, every such save is declined: no settings-window script adds a program
+    /// unseen.
+    #[must_use]
+    pub fn with_mcp_confirm(mut self, confirm: Arc<dyn McpLaunchConfirm>) -> Self {
+        self.wiring.mcp_confirm = Some(confirm);
         self
     }
 

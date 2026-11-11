@@ -126,4 +126,11 @@ pub(crate) const ADDED_AFTER_V1_2: &[Corpus] = &[
         (355, 0xa6de_7124_a2b6_5cc4),
         (257, 0x2d3f_8cb9_08a6_543d),
     ),
+    (
+        "added/turn_failed-McpSaveDeclined",
+        include_bytes!("added/turn_failed-McpSaveDeclined.jsonl"),
+        include_bytes!("added/turn_failed-McpSaveDeclined.msgpack"),
+        (352, 0xa23f_fba7_cfb1_cc1f),
+        (254, 0x2b8c_20f0_3600_4c75),
+    ),
 ];

@@ -1,6 +1,5 @@
 //! The lawyer's own MCP servers as Settings › Tools shows them: [`McpToolsView`] rides
-//! `HostEvent::McpToolsChanged` (in every app catch-up but for [`McpToolsView::EMPTY`], what a
-//! window starts with), and `HostCommand::Mcp`
+//! `HostEvent::McpToolsChanged` (in every app catch-up), and `HostCommand::Mcp`
 //! (`command/mcp.rs`) changes the list.
 //!
 //! No secret value is ever in a view: an env variable or a header names only whether a value is
@@ -28,8 +27,7 @@ pub enum McpControl {
 }
 
 impl McpToolsView {
-    /// The lawyer's list with no server: what a window holds before any `McpToolsChanged`. An
-    /// app catch-up leaves the event out when the view is this.
+    /// The lawyer's list with no server.
     pub const EMPTY: Self = Self {
         control: McpControl::Lawyer,
         servers: Vec::new(),

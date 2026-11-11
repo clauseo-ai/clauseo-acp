@@ -338,3 +338,24 @@ fn an_unreadable_source_after_a_list_leaves_the_stronger_list() {
     assert!(effective.mcp_servers().is_empty());
     assert!(effective.is_locked("mcp.servers"));
 }
+
+/// A firm's server on a network share is left out with a warning that says why, and the rest of
+/// the firm's list loads.
+#[test]
+fn a_policy_server_on_a_network_share_is_left_out_with_a_warning() {
+    let text = format!(
+        r#"{{"mcp": {{"servers": {{
+            "share": {{"command": "\\\\server\\share\\tool.exe", "enabled": true}},
+            "firm": {{"command": "{f}", "enabled": true}}
+        }}}}}}"#,
+        f = abs_json("bin/firm"),
+    );
+    let firm = policy("firm", text);
+    let effective = Effective::load(&locations(), &MemFiles::default(), &[&firm]);
+    assert_eq!(enabled(&effective), ["firm"]);
+    let warned = effective.warnings().iter().any(|warning| {
+        matches!(&warning.kind, WarningKind::InvalidValue { key, message }
+            if key == "mcp.servers.share" && message.contains("network share"))
+    });
+    assert!(warned, "{:?}", effective.warnings());
+}

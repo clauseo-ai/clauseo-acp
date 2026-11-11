@@ -291,3 +291,53 @@ fn a_failed_write_leaves_memory_as_it_was() {
         &BTreeMap::from([("github".to_owned(), local("github"))])
     );
 }
+
+/// The file's `mcp.servers.<name>` entry, as JSON.
+fn entry(files: &MemFiles, name: &str) -> serde_json::Value {
+    let text = file_text(files).unwrap();
+    let file: serde_json::Value = serde_json::from_str(&text).unwrap();
+    file["mcp"]["servers"][name].clone()
+}
+
+/// Turning a server on changes only its `enabled` in the file: a stray `url` beside its
+/// `command`, a key this version does not read and a plain variable stay as they were. Saving
+/// another server leaves this entry as it was too, and neither write moves another key.
+#[test]
+fn writes_leave_every_other_key_as_the_file_has_it() {
+    let odd = serde_json::json!({
+        "command": abs_str("bin/odd"),
+        "url": "https://stray.example/mcp",
+        "future_key": {"kept": [1, 2]},
+        "env": {"PLAIN": "value"},
+    });
+    let text = serde_json::json!({
+        "ui": {"theme": "dark"},
+        "mcp": {"servers": {"odd": &odd}, "future_section_key": true},
+    })
+    .to_string();
+    let files = user(&text);
+    let mut effective = Effective::load(&locations(), &files, &[]);
+    assert!(effective.mcp_servers().contains_key("odd"));
+    effective
+        .set_mcp_server_enabled(&files, "odd", true)
+        .unwrap();
+    let mut on = odd;
+    on["enabled"] = serde_json::json!(true);
+    assert_eq!(entry(&files, "odd"), on);
+    effective
+        .save_mcp_server(&files, None, "github", &local("github"))
+        .unwrap();
+    assert_eq!(entry(&files, "odd"), on);
+    let file: serde_json::Value = serde_json::from_str(&file_text(&files).unwrap()).unwrap();
+    assert_eq!(file["ui"], serde_json::json!({"theme": "dark"}));
+    assert_eq!(file["mcp"]["future_section_key"], serde_json::json!(true));
+    // A minimal entry the lawyer saves is written minimal: no empty lists.
+    let bare = McpServerLaunch::local(abs_str("bin/bare"), Vec::new(), BTreeMap::new(), false);
+    effective
+        .save_mcp_server(&files, None, "bare", &bare)
+        .unwrap();
+    assert_eq!(
+        entry(&files, "bare"),
+        serde_json::json!({"command": abs_str("bin/bare"), "enabled": false})
+    );
+}

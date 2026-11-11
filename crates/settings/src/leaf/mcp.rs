@@ -1,7 +1,9 @@
 //! The `mcp.servers` list, typed entry by entry.
 
 use super::{reserved_mcp_server, typed_value};
-use crate::mcp::{MCP_NAME_MAX, command_ok, env_name_loads, headers_ok, name_shaped, url_ok};
+use crate::mcp::{
+    MCP_NAME_MAX, command_ok, command_on_network, env_name_loads, headers_ok, name_shaped, url_ok,
+};
 use crate::schema::{McpServerLaunch, McpTransport};
 use crate::warning::WarningKind;
 use serde_json::{Map, Value};
@@ -119,6 +121,9 @@ fn known_fields(
 /// header's or a variable's place.
 fn server_rule(server: &McpServerLaunch) -> Option<String> {
     match &server.transport {
+        McpTransport::Local { command, .. } if command_on_network(command) => Some(format!(
+            "{command} is on a network share; Clauseo starts programs from this computer only"
+        )),
         McpTransport::Local { command, .. } if !command_ok(command) => Some(format!(
             "{command} is neither a program name nor an absolute path"
         )),

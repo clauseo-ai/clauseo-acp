@@ -168,6 +168,10 @@ fn mcp_failures() -> Vec<DomainEvent> {
             "the keychain refused the write",
         ),
         failed(ErrorCode::McpServerUnknown, "no server of that name"),
+        failed(
+            ErrorCode::McpSaveDeclined,
+            "the lawyer did not allow the program",
+        ),
     ]
 }
 

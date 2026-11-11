@@ -180,9 +180,8 @@ pub enum HostEvent {
     ConnectorsChanged(ConnectorsState),
     /// The lawyer's MCP servers, or who decides them, changed: the whole view after the change
     /// (Settings › Tools). App-wide, never logged and in no stream: it reaches app subscribers
-    /// only, and every app catch-up carries the latest one unless it is `McpToolsView::EMPTY`
-    /// (the lawyer's list with no server), which a window holds until it hears otherwise. It
-    /// names variables and headers, never a value.
+    /// only, and every app catch-up carries the latest one, as for `SettingsChanged`. It names
+    /// variables and headers, never a value.
     McpToolsChanged(McpToolsView),
     /// A turn's web searches looked like Indian case law and the case-law connector is live but
     /// not added (R24): the app offers it under the answer. Once per matter, never after the

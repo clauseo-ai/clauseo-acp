@@ -380,3 +380,46 @@ fn an_old_entry_loads_and_writes_back_unchanged() {
     let (servers, _) = load(json!({ "r": &remote }));
     assert_eq!(serde_json::to_value(&servers["r"]).unwrap(), remote);
 }
+
+/// A variable's value: an empty string is a plain value; `null`, a number, `{"keychain":
+/// false}` or a ref with another key leaves the entry out with a warning.
+#[test]
+fn mcp_value_edge_cases() {
+    let command = abs_str("bin/s");
+    let (servers, warnings) = load(json!({
+        "empty": {"command": command, "env": {"A": ""}},
+        "null": {"command": command, "env": {"A": null}},
+        "number": {"command": command, "env": {"A": 7}},
+        "keychain-false": {"command": command, "env": {"A": {"keychain": false}}},
+        "keychain-string": {"command": command, "env": {"A": {"keychain": "true"}}},
+    }));
+    assert_eq!(servers.keys().collect::<Vec<_>>(), ["empty"]);
+    assert_eq!(
+        servers["empty"].values().get("A"),
+        Some(&McpValue::Plain(String::new()))
+    );
+    assert_eq!(
+        warnings,
+        ["keychain-false", "keychain-string", "null", "number"]
+            .map(|name| format!("mcp.servers.{name}"))
+    );
+}
+
+/// A program on a network share, which the program search refuses, is left out at load with a
+/// warning naming why, not dropped silently at launch; a policy's too.
+#[test]
+fn a_network_command_is_left_out_with_a_warning() {
+    let (servers, warnings) = load(json!({
+        "unc": {"command": "\\\\server\\share\\tool.exe", "enabled": true},
+        "slashes": {"command": "//server/share/tool", "enabled": true},
+        "device": {"command": "\\\\?\\C:\\tool.exe", "enabled": true},
+        "local": {"command": abs_str("bin/tool"), "enabled": true},
+    }));
+    assert_eq!(servers.keys().collect::<Vec<_>>(), ["local"]);
+    assert_eq!(
+        warnings,
+        ["device", "slashes", "unc"].map(|name| format!("mcp.servers.{name}"))
+    );
+    assert!(!crate::mcp::command_ok("\\\\server\\share\\tool.exe"));
+    assert!(crate::mcp::command_ok("npx"));
+}

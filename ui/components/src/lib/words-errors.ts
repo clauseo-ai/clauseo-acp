@@ -113,6 +113,7 @@ export type ErrorCode =
   | "mcp.env_name_invalid"
   | "mcp.secret_store_failed"
   | "mcp.server_unknown"
+  | "mcp.save_declined"
   | "unknown";
 
 /** The thread's own sentence for an answer cut short: its Hindi lives in words-thread.ts, once. */
@@ -309,6 +310,8 @@ export const ERROR_WORDS: Record<WordedCode, ErrorKey> = {
   "mcp.env_name_invalid": "Clauseo couldn't save that setting. Your settings are as they were.",
   "mcp.secret_store_failed": "Clauseo couldn't save that setting. Your settings are as they were.",
   "mcp.server_unknown": "Clauseo couldn't save that setting. Your settings are as they were.",
+  // Cancel in the native confirm before a server is added or what it starts changes
+  "mcp.save_declined": "You chose Cancel, so nothing was saved.",
   // a code from a newer Clauseo: as internal reads, since this version can say nothing truer
   unknown: "Something went wrong inside Clauseo.",
 };
