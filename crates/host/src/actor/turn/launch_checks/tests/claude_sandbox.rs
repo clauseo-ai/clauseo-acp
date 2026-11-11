@@ -10,7 +10,7 @@ use super::folders;
 #[test]
 #[cfg_attr(windows, ignore = "Claude's sandbox is macOS and Linux only")]
 fn claudes_sandbox_opens_no_secret_of_the_real_run_folder() {
-    use crate::agent::loads::sandbox::{ClaudeSandbox, SandboxPaths};
+    use crate::agent::loads::sandbox::{ClaudeSandbox, SandboxOs, SandboxPaths};
     let data = PathBuf::from("/Users/l/Library/Application Support/Clauseo");
     let run = folders(&data, 1);
     let tmp = crate::agent::temp::temp_dir(&run.root);
@@ -32,7 +32,7 @@ fn claudes_sandbox_opens_no_secret_of_the_real_run_folder() {
         other_matters: &[],
         browser: true,
     };
-    let sandbox = ClaudeSandbox::of(&paths).unwrap();
+    let sandbox = ClaudeSandbox::for_os(SandboxOs::Mac, &paths).unwrap();
     let text = |path: &Path| path.to_str().unwrap().to_owned();
     for secret in [
         &run.root,

@@ -18,7 +18,7 @@ use crate::agent::loads;
 use crate::agent::loads::browser::{self, BrowserInputs, Claims, Switch};
 use crate::agent::loads::case_law::{self, CaseLawInputs, Relay};
 use crate::agent::loads::profile::{self, ClaudeKeys, Folders, Login};
-use crate::agent::loads::sandbox::{ClaudeSandbox, SandboxPaths};
+use crate::agent::loads::sandbox::{ClaudeSandbox, Off, SandboxOs, SandboxPaths};
 use crate::browser::seed_sites::SEED_SITES;
 use crate::error::Error;
 use crate::log_file::LIFECYCLE;
@@ -154,8 +154,12 @@ pub(super) fn session_loads(
         .as_ref()
         .is_some_and(|(_, part)| *part == BrowserPart::On);
     let sandbox = (kind == Some(AgentKind::Claude))
-        .then(|| claude_sandbox(actor, &agent_id, &run, matter, browser_on))
-        .flatten();
+        .then(|| claude_sandbox(actor, &agent_id, &run, matter, browser_on));
+    if let Some(Err(Off::Wildcard)) = sandbox {
+        // A path the sandbox cannot name: no command may run on the classifier alone.
+        super::session::hold_auto_back(actor, thread);
+    }
+    let sandbox = sandbox.and_then(Result::ok);
     let claude = (kind == Some(AgentKind::Claude)).then_some(ClaudeKeys {
         web_search,
         login,
@@ -231,14 +235,15 @@ pub(super) fn session_loads(
 }
 
 /// Claude Code's own sandbox for a Claude session of `agent_id` in `run`, whose matter folder
-/// is `matter` (`agent::loads::sandbox`): none on Windows. Path joins only.
+/// is `matter` (`agent::loads::sandbox`), or why there is none (on Windows, among others).
+/// Path joins only.
 fn claude_sandbox(
     actor: &Actor,
     agent_id: &clauseo_protocol::AgentId,
     run: &RunFolders,
     matter: &Path,
     browser: bool,
-) -> Option<ClaudeSandbox> {
+) -> Result<ClaudeSandbox, Off> {
     let tmp = crate::agent::temp::temp_dir(&run.root);
     let skills: Vec<PathBuf> = run
         .data_deny
@@ -274,7 +279,7 @@ fn claude_sandbox(
         other_matters: &other_matters,
         browser,
     };
-    ClaudeSandbox::for_os(cfg!(windows), &paths)
+    ClaudeSandbox::for_os(SandboxOs::CURRENT, &paths)
 }
 
 /// The hook's servers without `case-law`, the `case-law` entry `run`'s session gets (after

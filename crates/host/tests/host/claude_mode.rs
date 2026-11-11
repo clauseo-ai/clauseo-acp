@@ -5,7 +5,8 @@
 //! scenarios check both), and `SetMode` still works after the start. When auto is not available
 //! (not offered, the switch refused, or the agent moving off it at once) the session runs in
 //! `acceptEdits`, with one notice. An answer with no modes, one offering neither mode, and a
-//! refused fallback each fail the launch before any prompt. Forced ask starts in `default`
+//! refused fallback each fail the launch before any prompt. A matter whose folder Claude's
+//! sandbox cannot name runs in `acceptEdits` with no notice. Forced ask starts in `default`
 //! instead (`forced_ask.rs`).
 
 use clauseo_protocol::{
@@ -225,6 +226,30 @@ fn a_session_that_moves_to_bypass_or_dont_ask_goes_back_to_auto() {
     let mut events = turn(&host, thread, "And clause 6?");
     events.until("ModeChanged acceptEdits", |e| modes(e).len() == 6);
     assert_eq!(modes(&events)[5..], ["acceptEdits"], "{}", events.dump());
+    assert_eq!(auto_notices(&events), 0, "{}", events.dump());
+    host.shutdown();
+}
+
+/// A matter folder whose name holds a `*` cannot be named in Claude's sandbox, so the session
+/// gets none and runs in `acceptEdits` though `auto` is offered, with no notice (the account
+/// has auto); a move to `bypassPermissions` goes back to `acceptEdits`, not `auto`.
+#[cfg(unix)]
+#[test]
+fn a_matter_the_sandbox_cannot_name_runs_in_accept_edits() {
+    let dir = Dir::new(
+        "claude_mode_no_sandbox",
+        &[(CLAUDE, Scenario::Local("claude-mode-no-sandbox"))],
+    );
+    let host = dir.start(0);
+    let (_, thread, _) = matter_with_thread(&dir, &host, "A*", &[("brief.txt", "x\n")], CLAUDE);
+    let mut events = turn(&host, thread, "Summarise clause 4.");
+    events.until("ModeChanged acceptEdits back", |e| modes(e).len() == 3);
+    assert_eq!(
+        modes(&events),
+        ["acceptEdits", "bypassPermissions", "acceptEdits"],
+        "{}",
+        events.dump()
+    );
     assert_eq!(auto_notices(&events), 0, "{}", events.dump());
     host.shutdown();
 }

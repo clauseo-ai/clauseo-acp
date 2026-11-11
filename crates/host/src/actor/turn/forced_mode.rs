@@ -60,7 +60,7 @@ pub(super) fn reset_if_refused(actor: &mut Actor, thread: ThreadId, mode: &str) 
     if !claude && !agent.forced_ask {
         return;
     }
-    let unavailable = agent.auto == super::session::Auto::Unavailable;
+    let unavailable = agent.auto.off();
     let Some(target) = reset_to(agent.forced_ask, unavailable, mode) else {
         return;
     };

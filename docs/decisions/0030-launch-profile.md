@@ -997,10 +997,17 @@ this record and firm-it §8.
     `allowRead`. Sandboxed commands' `TMPDIR` is made under it. The agent's own `TMPDIR`
     stays `<run>/tmp` (#930), which Claude Code and unsandboxed commands (agent-browser) use.
     A folder that can't be made gives the session no sandbox, and its commands ask.
-  - **No sandbox, so commands ask,** when a path in its lists holds `*`, `?`, `[` or `]`
-    (one info line, no path). Claude Code reads sandbox paths as patterns and does not escape
-    them: `Smith [2024]` would open `Smith 2` and not itself. The same applies when a path to
-    deny is not UTF-8.
+  - **Glob characters** (2026-11-11, security review). Claude Code 2.1.293 reads a sandbox
+    path holding `*`, `?`, `[` or `]` as a pattern (`W4t`): unescaped, `Smith [2024]` would
+    open `Smith 2` and not itself. A `[` is escaped as `[[]`, a class holding only `[` (a
+    lone `]` is literal), so the sandbox stays on. A glob deny covers all under it, a glob
+    allow only what it names, so each escaped allowed folder also goes in with `/**`. Every
+    list reads globs on macOS; on Linux only `denyRead` and `allowRead` (it skips a glob write
+    path), so the write lists stay as written there. `*` and `?` have no escape (`W4t`
+    rewrites them even inside a class): a path holding one gives the session **no sandbox,
+    and it runs in `acceptEdits`, not `auto`**, with no notice, so no command runs on the
+    classifier alone where the sandbox was meant to be (`Auto::NoSandbox`). A path to deny
+    that is not UTF-8 also gives no sandbox (one info line, no path). Not checked live on a Mac.
   - **On:** `enabled` and `autoAllowBashIfSandboxed`. Forced ask still sends
     `autoAllowBashIfSandboxed: false` after it, so a forced-ask session asks for every command,
     sandboxed or not.
@@ -1029,11 +1036,19 @@ this record and firm-it §8.
     session that has it) and Clauseo's Python runtime folder (`<rt>`, where pandoc also lives):
     the folders the launch puts first on its shells' `PATH` (decision record 0048). The runtime
     is found from its `PATH` folder `<rt>/bin`. The file `<run>/clauseo-env.sh` that puts them
-    first in each Bash command is opened alone. The whole run folder is not opened: it holds the relay's token and the browser's profile (the visited sites'
-    cookies).
-  - **Network:** `allowedDomains: []`. A sandboxed command that reaches a new host asks. The
-    seeded `WebFetch(domain:…)` sites probably ask too, which fails safe: Claude Code builds the
-    list from trusted settings only, and they come in through `allowedTools`.
+    first in each Bash command is opened alone. The whole run folder is not opened: it holds
+    the relay's token and the browser's profile (the visited sites' cookies). Of Claude's own
+    project folder only `<home>/projects/<key>/*/tool-results` (and `/**` under it) opens,
+    the key Claude Code's own (`claude_project_key`, cut and hashed past 200 characters):
+    `WebFetch` keeps the files it fetches there. The transcripts and the memory beside them
+    stay denied.
+  - **Network:** `allowedDomains: ["*"]` (2026-11-11), so a sandboxed command (`curl` of a
+    court PDF) never asks for a host; stage C downloaded a real judgment PDF that way in auto
+    mode. `deniedDomains` holds `localhost`, `127.0.0.1`, `::1`, `[::1]`, `0.0.0.0` and
+    `[::]`: the browser's debugging port and agent-browser's daemon listen on loopback, and
+    Claude Code's proxy, which runs outside the sandbox, would otherwise reach them for a
+    sandboxed command. The any-address forms land on loopback too. A direct loopback connect is
+    refused by the sandbox already (stage C).
   - **agent-browser:** `excludedCommands: ["agent-browser:*"]`, in a session with the browser
     only. It needs its daemon, Chrome and the session's sockets. The exclusion holds up when
     commands are chained. Claude Code 2.1.293's `containsExcludedCommand` splits the command
@@ -1053,12 +1068,14 @@ this record and firm-it §8.
   `mdfind` and `qlmanage` fail, as they do for Codex (D-045). Claude on macOS gets one sentence
   after the instructions that names them and points to `stetdoc`, `textutil` and `python3`
   (`clauseo_profile::instructions::claude_shell`). Claude elsewhere and Codex never get it.
-- **Windows keeps asking.** No `sandbox` key goes there. Claude Code 2.1.293 never auto-allows on
-  Windows: `autoAllowBashIfSandboxed` reads `false` there (`isAutoAllowSupported`). Its Windows
-  sandbox needs a one-time admin install and Git Bash, and sits behind a feature gate. Sending
-  nothing also keeps the session's behaviour the same if that gate opens. A `sandbox` object the
-  profile hook sends passes through on Windows untouched. That is accepted: auto-allow is
-  forced off there, whatever it says.
+- **Windows has no sandbox.** No `sandbox` key goes there. Claude Code 2.1.293 never auto-allows
+  on Windows: `autoAllowBashIfSandboxed` reads `false` there (`isAutoAllowSupported`). Its
+  Windows sandbox needs a one-time admin install and Git Bash, and sits behind a feature gate.
+  Sending nothing also keeps the session's behaviour the same if that gate opens. A `sandbox`
+  object the profile hook sends passes through on Windows untouched. That is accepted:
+  auto-allow is forced off there, whatever it says. A Windows session still runs in `auto`,
+  so its commands go to the classifier, behind the shell deny rules for the data folder
+  ("2026-11-11: Windows stays in `auto`, with shell deny rules" above).
 - The citations are offsets in the 2.1.293 binary's strings. Stage C's live checks on a Mac are
   listed in the PR. Clauseo's own macOS jail (parked) would nest Claude's sandbox inside it,
   where it can't start, and commands would go back to asking.
