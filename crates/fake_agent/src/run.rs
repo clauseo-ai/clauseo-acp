@@ -2,6 +2,7 @@
 
 mod client;
 pub(crate) mod effects;
+mod transcript;
 
 use std::collections::HashMap;
 use std::io::{BufRead, Write};
@@ -169,6 +170,7 @@ impl<R: BufRead, W: Write> Runner<'_, R, W> {
                     .ok_or_else(|| Stop::Fail(at.clone(), NO_CWD.to_owned()))?;
                 effects::file_step(cwd, op).map_err(|m| Stop::Fail(at.clone(), m))?;
             }
+            StepKind::TranscriptUser(text) => self.transcript_user(at, text)?,
             StepKind::Stderr { line, repeat } => effects::stderr_step(line, *repeat)
                 .map_err(|e| Stop::Fail(at.clone(), format!("write to stderr failed: {e}")))?,
             StepKind::SpawnChild {
@@ -186,6 +188,19 @@ impl<R: BufRead, W: Write> Runner<'_, R, W> {
             }
         }
         Ok(())
+    }
+
+    /// Appends Claude Code's `user` line holding `text` to the current session's transcript,
+    /// under `CLAUDE_CONFIG_DIR` and the session cwd's project key (`transcript.rs`).
+    fn transcript_user(&self, at: &Loc, text: &str) -> Result<(), Stop> {
+        let fail = |message: String| Stop::Fail(at.clone(), message);
+        let cwd = self.cwd.as_deref().ok_or_else(|| fail(NO_CWD.to_owned()))?;
+        let session = self
+            .session
+            .as_deref()
+            .ok_or_else(|| fail("transcript_user: no current session".to_owned()))?;
+        let home = std::env::var_os(transcript::HOME_VAR).unwrap_or_default();
+        transcript::append_user(std::path::Path::new(&home), cwd, session, text).map_err(fail)
     }
 
     /// Reads until every message in `waits` has arrived, in any order.

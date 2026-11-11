@@ -109,6 +109,8 @@ pub(crate) enum StepKind {
     },
     SendLine(String),
     File(FileOp),
+    /// `transcript_user`: Claude Code's transcript line for words it took in, this text.
+    TranscriptUser(String),
     Stderr {
         line: String,
         repeat: u32,

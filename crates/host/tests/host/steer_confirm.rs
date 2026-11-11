@@ -6,7 +6,8 @@
 //! line from before its send or a tool's output that holds its text; never shown, it is
 //! `NotSent` once the turn is stopped, and it is never sent again on its own; Send now on it
 //! cancels the turn and sends it as the next one. After `end_turn` it is checked on for a while
-//! (`steer_grace.rs`).
+//! (`steer_grace.rs`). The window specs' `claude-steer-injected` writes the line itself, as Claude
+//! Code would, where the host reads it: its steer is `Injected` with no help from the test.
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -245,5 +246,38 @@ fn an_accepted_steer_sent_now_cancels_the_turn_and_goes_next() {
         events.dump()
     );
     assert_eq!(events.turn_text(next), "Focusing on clause 4.");
+    host.shutdown();
+}
+
+/// `claude-steer-injected`, which room-steer.spec.ts plays, writes its own transcript line
+/// (`fake_agent`'s `transcript_user`) at the path the host derives from the Claude home it gives
+/// the agent: the steer is `Injected`, by the check at the turn's end at the latest.
+#[test]
+fn the_window_specs_steer_scenario_confirms_its_own_steer() {
+    let test = "the_window_specs_steer_scenario_confirms_its_own_steer";
+    let dir = Dir::new(
+        test,
+        &[(CLAUDE, Scenario::Bundled("claude-steer-injected"))],
+    );
+    let host = dir.start(0);
+    let (_, thread, _) = matter_with_thread(&dir, &host, "m", &[("brief.txt", "x\n")], CLAUDE);
+    let mut events = host.events(StreamId::Thread(thread));
+    let (first, _) = host.prompt(thread, "Summarise the clause.");
+    host.wait_armed(DURABLE);
+    let (turn, message) = send(&host, thread, text(STEER), DeliveryRequest::Steer);
+    assert_eq!(turn, first, "a joining steer answers with the running turn");
+    assert_eq!(events.until_turn_ended(first).stop, StopReason::EndTurn);
+    events.until("SteerResolved", |e| !outcomes(e, message).is_empty());
+    settle(&host, &mut events);
+    assert_eq!(
+        outcomes(&events, message),
+        [SteerOutcome::Injected { turn: first }],
+        "{}",
+        events.dump()
+    );
+    assert_eq!(
+        events.turn_text(first),
+        "The clause caps liability at the fees paid."
+    );
     host.shutdown();
 }
