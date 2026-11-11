@@ -86,6 +86,7 @@ fn by(method: SignInMethod) -> SignIn {
         method,
         source: SignInSource::Own,
         at: timestamp(at(T)),
+        refused: None,
     }
 }
 
@@ -151,6 +152,7 @@ fn s18_states_map_to_the_wire_with_the_plan_in_words() {
             method: SignInMethod::Plan,
             source: SignInSource::Reused,
             at: timestamp(at(T)),
+            refused: None,
         })
     );
     let codex_plus = SigninState::SignedIn {
@@ -261,6 +263,7 @@ fn compose_sends_each_change_once_in_order_and_a_key_over_a_running_sign_in_wait
                 method: SignInMethod::Plan,
                 source: SignInSource::Own,
                 at: timestamp(at(T)),
+                refused: None,
             },
         ]
     );
@@ -372,6 +375,47 @@ fn a_saved_key_clears_a_failure_but_a_running_sign_in_still_shows() {
             },
             by(SignInMethod::ApiKey),
             SignIn::Queued,
+        ]
+    );
+}
+
+/// A refused key: the key's line carries `refused` until a key is saved or removed; an
+/// endpoint's or a plan's line never does.
+#[test]
+fn a_refused_key_shows_on_its_line_until_a_key_is_saved_or_removed() {
+    let events = Arc::new(SetupEvents::default());
+    let mut feed = events.follow();
+    let compose = Compose::new(Arc::clone(&events), Arc::new(Fixed));
+    compose.signin(&claude(), SigninState::SignedOut { found: None });
+    compose.key_refused(&claude());
+    compose.set_key(&claude(), true);
+    compose.key_refused(&claude());
+    compose.key_saved(&claude());
+    compose.key_refused(&claude());
+    compose.set_key(&claude(), false);
+    compose.set_firm(&codex(), true);
+    compose.set_key(&codex(), true);
+    compose.key_refused(&codex());
+    compose.set_firm(&codex(), false);
+    let refused = SignIn::SignedIn {
+        email: None,
+        plan: None,
+        method: SignInMethod::ApiKey,
+        source: SignInSource::Own,
+        at: timestamp(at(T)),
+        refused: Some(timestamp(at(T))),
+    };
+    assert_eq!(
+        sent(&mut feed),
+        [
+            SignIn::SignedOut { found: None },
+            by(SignInMethod::ApiKey),
+            refused.clone(),
+            by(SignInMethod::ApiKey),
+            refused,
+            SignIn::SignedOut { found: None },
+            by(SignInMethod::Firm),
+            by(SignInMethod::ApiKey),
         ]
     );
 }

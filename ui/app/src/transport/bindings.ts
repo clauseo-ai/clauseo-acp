@@ -5461,6 +5461,12 @@ export type SignIn =
 	source: SignInSource,
 	/**  When the sign-in was confirmed. */
 	at: Timestamp,
+	/**
+	 *  When the agent last refused this sign-in's API key (the provider answered that the
+	 *  key is not valid); only with `method: ApiKey`; cleared when a key is saved or
+	 *  removed.
+	 */
+	refused?: Timestamp,
 } }) & { device_code?: never; failed?: never; login_found?: never; signed_out?: never; switching?: never; waiting?: never } | 
 /**
  *  The sign-in stopped: a `signin.*` code, `agent.auth_required`, or

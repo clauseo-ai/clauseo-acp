@@ -569,9 +569,18 @@ impl AgentsBackend {
     /// `agent.auth_required` (`start::follow_sign_in_holds`), so a login that is gone shows as
     /// gone. At most one at a time per agent: none while a sign-in of it is going (its own end
     /// says how it stands) or while the last one asked for has sent no state yet; and S18 runs
-    /// one job per agent, so a check asked while another job runs starts none.
+    /// one job per agent, so a check asked while another job runs starts none. With a key in
+    /// memory, the provider refused that key: the key's line says so (`refused`), since the
+    /// status check reads only the plan login and the key's line would stand unchanged.
     pub(crate) fn recheck_sign_in(&self, agent: &AgentId) {
-        if !self.known.contains_key(agent) || self.agents.sign_in_going(agent) {
+        if !self.known.contains_key(agent) {
+            return;
+        }
+        if self.keys.in_memory(agent) {
+            tracing::info!(%agent, "auth required: the key in memory was refused");
+            self.compose.key_refused(agent);
+        }
+        if self.agents.sign_in_going(agent) {
             return;
         }
         if !lock(&self.rechecks).insert(agent.clone()) {
