@@ -20,8 +20,9 @@ use clauseo_protocol::{ClauseoTool, ToolState, ToolsUnavailableReason};
 use serde_json::{Value, json};
 
 use crate::profile_rig::{
-    CLAUDE, CODEX, Hook, Seen, Wired, agent_lines, agents, browser_server, codex_lines,
-    codex_servers, filled_browser, first_frame_tools, settings, sidecar, template, tool, turn,
+    CLAUDE, CODEX, Hook, Seen, Wired, agent_lines, agents, browser_server, claude_servers,
+    codex_lines, codex_servers, filled_browser, first_frame_tools, settings, sidecar, template,
+    tool, turn,
 };
 use crate::support::Dir;
 
@@ -167,7 +168,7 @@ fn claude_params(servers: &[Value], with_case_law: bool) -> Value {
     } else {
         Vec::new()
     };
-    json!({"mcpServers": servers, "_meta": {
+    json!({"mcpServers": claude_servers(servers), "_meta": {
         "systemPrompt": {"append": instructions(with_case_law)},
         "claudeCode": {"options": {"allowedTools": allowed}}}})
 }
@@ -222,14 +223,14 @@ fn both_agents_get_case_law_after_the_other_servers() {
     let thread = host.create_thread(matter, CLAUDE);
     turn(&host, thread);
     turn(&host, host.create_thread(matter, CODEX));
-    assert_eq!(
-        first_frame_tools(&host, thread),
-        [
-            tool(ClauseoTool::WebSearch, Some(ToolsUnavailableReason::Off)),
-            tool(ClauseoTool::Browser, None),
-            case_law(None),
-        ]
-    );
+    // Claude has the browser on Windows alone (`servers::no_browser`).
+    let browser = cfg!(windows).then(|| tool(ClauseoTool::Browser, None));
+    let web_search = tool(ClauseoTool::WebSearch, Some(ToolsUnavailableReason::Off));
+    let expected: Vec<ToolState> = [Some(web_search), browser, Some(case_law(None))]
+        .into_iter()
+        .flatten()
+        .collect();
+    assert_eq!(first_frame_tools(&host, thread), expected);
     let seen = launcher.seen();
     let tokens: Vec<String> = seen.iter().filter_map(token_of).collect();
     assert_eq!(tokens.len(), 2, "one token file per session");
@@ -265,7 +266,7 @@ fn both_agents_get_case_law_after_the_other_servers() {
         &agent_lines(
             "cl-load",
             "session/load",
-            &json!({"sessionId": "sess-1", "mcpServers": servers,
+            &json!({"sessionId": "sess-1", "mcpServers": claude_servers(&servers),
                 "_meta": claude_params(&servers, true)["_meta"]}),
             &[],
         ),

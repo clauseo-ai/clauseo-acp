@@ -97,6 +97,7 @@ impl DesktopProfile {
             exe,
             macos: cfg!(target_os = "macos"),
             resource_dir,
+            shell_browser: clauseo_profile::servers::shell_browser(),
         };
         Self::build_in(locations, &layout, path)
     }
@@ -127,7 +128,7 @@ impl DesktopProfile {
             .as_ref()
             .map_or(State::Off, |start| start.state.clone());
         let prepend = state.is_on() && found.as_deref().is_some_and(alone_in_its_folder);
-        let browser_tool = install_browser(&paths, path);
+        let browser_tool = install_browser(&paths, path, layout.shell_browser);
         // The browser's skill comes with the copy alone. Whether a session has a browser (its
         // Chrome found, `tools.browser` on, the firm's policy allowing it) is decided at each
         // launch and told in `{browser}`, so a Chrome installed later counts from the next
@@ -206,12 +207,22 @@ impl DesktopProfile {
 /// `agent-browser` on `path`, copied into `<data>/tools` (`clauseo_profile::tools`, only when its
 /// SHA-256 changed). Returns the folder, or none, with a log line, when there is no program to
 /// copy or the copy failed: then no session gets the browser, its skill or its instructions, and
-/// the app runs on.
+/// the app runs on. None, with nothing copied, when no agent gets the shell command on this OS
+/// (`shell` false: macOS and Linux, where Claude has no browser for launch and Codex's entry runs
+/// the bundled sidecar itself, `clauseo_profile::servers::shell_browser`).
 ///
 /// Each outcome is one line on [`LIFECYCLE`], for support: `copied`, `up_to_date`,
-/// `copied_running_copy_set_aside` (Windows), `no_sidecar`, or a warning with the error's
-/// [`ProfileError::log_text`]; never a path.
-fn install_browser(paths: &ProfilePaths, path: Option<&OsStr>) -> Option<PathBuf> {
+/// `copied_running_copy_set_aside` (Windows), `no_sidecar`, `off_on_this_os`, or a warning
+/// with the error's [`ProfileError::log_text`]; never a path.
+fn install_browser(paths: &ProfilePaths, path: Option<&OsStr>, shell: bool) -> Option<PathBuf> {
+    if !shell {
+        tracing::info!(
+            target: LIFECYCLE,
+            outcome = "off_on_this_os",
+            "agent-browser left out: no agent gets it as a shell command on this OS"
+        );
+        return None;
+    }
     let Some(source) = browser_program(paths, path) else {
         tracing::info!(
             target: LIFECYCLE,
@@ -265,6 +276,9 @@ pub(crate) struct Layout<'a> {
     pub(crate) macos: bool,
     /// Tauri's resource folder, when it is known.
     pub(crate) resource_dir: Option<&'a Path>,
+    /// Whether an agent gets `agent-browser` as a shell command on this OS, so it is copied
+    /// (`clauseo_profile::servers::shell_browser`, [`install_browser`]).
+    pub(crate) shell_browser: bool,
 }
 
 /// Whether `program` is the only program in its folder. A folder found on `PATH` that holds

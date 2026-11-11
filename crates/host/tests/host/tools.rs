@@ -14,8 +14,8 @@ use clauseo_settings::Locations;
 use serde_json::{Value, json};
 
 use crate::profile_rig::{
-    CLAUDE, CODEX, Hook, Wired, agent_lines, agents, browser_server, codex_lines, filled_browser,
-    first_frame_tools, settings, template, tool, turn,
+    CLAUDE, CODEX, Hook, Wired, agent_lines, agents, browser_server, claude_tools, codex_lines,
+    filled_browser, first_frame_tools, settings, template, tool, turn,
 };
 use crate::support::{Dir, FAKE};
 use crate::write;
@@ -257,14 +257,7 @@ fn the_browser_switch_removes_the_browser() {
             |config| with_browser(config, browser_hook()),
         );
         assert_eq!(config["web_search"], json!("live"));
-        assert_eq!(
-            tools,
-            [
-                tool(ClauseoTool::WebSearch, None),
-                tool(ClauseoTool::Browser, Some(reason)),
-            ],
-            "{test}"
-        );
+        assert_eq!(tools, claude_tools(Some(reason)), "{test}");
     }
 }
 
@@ -286,16 +279,8 @@ fn under_managed_mcp_no_agent_gets_any_server() {
         |config| with_browser(config, browser_hook()),
     );
     assert_eq!(config["web_search"], json!("live"));
-    assert_eq!(
-        tools,
-        [
-            tool(ClauseoTool::WebSearch, None),
-            tool(
-                ClauseoTool::Browser,
-                Some(ToolsUnavailableReason::ManagedByFirm)
-            ),
-        ]
-    );
+    let managed = Some(ToolsUnavailableReason::ManagedByFirm);
+    assert_eq!(tools, claude_tools(managed));
 }
 
 /// With no proxy the browser is left out for both agents (`NoProxy`); web search is unaffected.
@@ -315,13 +300,7 @@ fn no_proxy_no_browser() {
         },
     );
     assert_eq!(config["web_search"], json!("live"));
-    assert_eq!(
-        tools,
-        [
-            tool(ClauseoTool::WebSearch, None),
-            tool(ClauseoTool::Browser, Some(ToolsUnavailableReason::NoProxy)),
-        ]
-    );
+    assert_eq!(tools, claude_tools(Some(ToolsUnavailableReason::NoProxy)));
 }
 
 /// A profile whose one skill is a small stetdoc stand-in, its folders under `root`.

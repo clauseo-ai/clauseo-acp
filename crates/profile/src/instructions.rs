@@ -37,8 +37,10 @@ pub fn connectors_part(with_case_law: bool) -> &'static str {
 /// [`browser_part`].
 pub const BROWSER: &str = include_str!("../assets/instructions/browser.txt");
 
-/// What a session without the browser is told when the lawyer or the firm turned it off, or the
-/// firm's browser policy left it out.
+/// What a session without the browser is told when the lawyer or the firm turned it off, the
+/// firm's browser policy left it out, or it is a Claude session on macOS or Linux, where Claude
+/// has no browser for launch (`servers::no_browser`): Claude then reads pages with its web fetch
+/// tool and `curl`.
 pub const BROWSER_OFF: &str = include_str!("../assets/instructions/browser-off.txt");
 
 /// What a session without the browser is told when no supported browser is installed: one plain
@@ -78,7 +80,8 @@ pub fn claude_shell(macos: bool) -> Option<&'static str> {
 }
 
 /// What a Codex session on Windows is told, which has no browser for this agent there
-/// (`servers::no_browser`): one plain line pointing the lawyer to a Claude conversation.
+/// (`servers::no_browser`): one plain line pointing the lawyer to a Claude conversation, which
+/// has its shell browser on Windows. Never a macOS or Linux session's, where Claude has none.
 pub const BROWSER_CLAUDE_ONLY: &str =
     include_str!("../assets/instructions/browser-claude-only.txt");
 
@@ -88,7 +91,8 @@ pub enum BrowserPart {
     /// The session has the browser: Claude the `agent-browser` command ([`BROWSER`]), Codex the
     /// `browser` MCP entry's tools ([`BROWSER_CODEX`]).
     On,
-    /// Turned off, or left out by policy: [`BROWSER_OFF`].
+    /// Turned off, left out by policy, or Claude on macOS or Linux (`servers::no_browser`):
+    /// [`BROWSER_OFF`].
     Off,
     /// No supported browser on this computer: [`BROWSER_NONE`].
     NotInstalled,

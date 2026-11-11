@@ -1,7 +1,8 @@
 //! Codex's browser is the `browser` MCP entry, Claude's the shell tool, on one host wired
 //! with both (as the app is): the Codex session gets the entry filled with no proxy, no
 //! `AGENT_BROWSER_*` variable, no tools folder on its `PATH` and the entry's line in its
-//! instructions; the Claude session gets no entry and the shell tool. Neither opens an egress
+//! instructions; the Claude session gets no entry, and the shell tool on Windows alone (no
+//! browser at all on macOS and Linux, `servers::no_browser`). Neither opens an egress
 //! proxy: the plain client's entry asks for none (it holds no `{proxy_port}`).
 
 use std::ffi::OsString;
@@ -77,7 +78,7 @@ fn path_parts(env: &std::collections::BTreeMap<OsString, OsString>) -> Vec<PathB
 }
 
 #[test]
-fn codex_gets_the_entry_with_no_proxy_and_claude_the_shell_tool() {
+fn codex_gets_the_entry_with_no_proxy_and_claude_the_shell_tool_on_windows_alone() {
     let dir = Dir::new("browser_codex", &[]);
     let session = if cfg!(windows) {
         "{{any}}"
@@ -151,6 +152,7 @@ fn codex_gets_the_entry_with_no_proxy_and_claude_the_shell_tool() {
 
     let claude_thread = host.create_thread(matter, CLAUDE);
     turn(&host, claude_thread);
+    let claude_header = first_frame_tools(&host, claude_thread);
     host.shutdown();
     // Neither session opened a proxy (the recording logs each open and close).
     assert_eq!(calls(&log), Vec::<String>::new());
@@ -181,10 +183,30 @@ fn codex_gets_the_entry_with_no_proxy_and_claude_the_shell_tool() {
         !instructions.contains("require_escalated"),
         "{instructions}"
     );
-    // Claude: the shell tool, no entry (its `session/new` carried none).
-    for name in ["AGENT_BROWSER_SESSION", "AGENT_BROWSER_EXECUTABLE_PATH"] {
-        assert!(var(&claude_seen.env, name), "{name}");
+    // Claude never gets the entry (its `session/new` carried none).
+    let claude_browser = claude_header
+        .iter()
+        .find(|state| state.tool == ClauseoTool::Browser);
+    if cfg!(windows) {
+        // On Windows, the shell tool.
+        for name in ["AGENT_BROWSER_SESSION", "AGENT_BROWSER_EXECUTABLE_PATH"] {
+            assert!(var(&claude_seen.env, name), "{name}");
+        }
+        assert!(!var(&claude_seen.env, "AGENT_BROWSER_PROXY"));
+        assert!(path_parts(&claude_seen.env).contains(&tools));
+        assert!(claude_browser.is_some());
+    } else {
+        // On macOS and Linux, no browser at all (`servers::no_browser`): no `AGENT_BROWSER_*`
+        // variable, no `agent-browser` on its `PATH`, and no browser in its header.
+        assert!(
+            claude_seen
+                .env
+                .keys()
+                .all(|name| !name.to_string_lossy().starts_with("AGENT_BROWSER_")),
+            "{:?}",
+            claude_seen.env.keys().collect::<Vec<_>>()
+        );
+        assert!(!path_parts(&claude_seen.env).contains(&tools));
+        assert_eq!(claude_browser, None);
     }
-    assert!(!var(&claude_seen.env, "AGENT_BROWSER_PROXY"));
-    assert!(path_parts(&claude_seen.env).contains(&tools));
 }

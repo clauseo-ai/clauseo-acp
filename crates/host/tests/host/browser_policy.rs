@@ -18,7 +18,7 @@ use clauseo_settings::chromium_policy::{
 use serde_json::json;
 
 use crate::profile_rig::{
-    CLAUDE, Hook, Wired, agent_lines, agents, browser_server, first_frame_tools, settings,
+    BROWSING, Hook, Wired, agent_lines, agents, browser_server, first_frame_tools, settings,
     template, turn,
 };
 use crate::support::{Dir, Running};
@@ -69,7 +69,7 @@ pub(super) enum Chrome {
     ForTesting,
 }
 
-/// The browser state one `CLAUDE` session shows under `says`, with the firm's Clauseo
+/// The browser state one `BROWSING` session shows under `says`, with the firm's Clauseo
 /// `policy` (a `policy.json`'s text) if any.
 fn reason(
     test: &str,
@@ -82,7 +82,7 @@ fn reason(
         .expect("one launch")
 }
 
-/// A host whose `CLAUDE` sessions may have the browser, under `rd_policy` and the firm's
+/// A host whose `BROWSING` sessions may have the browser, under `rd_policy` and the firm's
 /// Clauseo `policy` (a `policy.json`'s text) if any, with one matter for its threads.
 pub(super) struct Rig {
     pub(super) host: Running,
@@ -106,7 +106,7 @@ impl Rig {
         );
         settings(
             &dir,
-            agents(&[(CLAUDE, &claude, json!({}))]),
+            agents(&[(BROWSING, &claude, json!({}))]),
             json!({"tools": {"browser": true, "web_search": false}}),
         );
         if let Some(policy) = policy {
@@ -151,7 +151,7 @@ impl Rig {
     /// One more session, in a thread of its own, after a turn: the thread and the browser state
     /// its header shows.
     pub(super) fn launch(&self) -> (ThreadId, Option<ToolsUnavailableReason>) {
-        let thread = self.host.create_thread(self.matter, CLAUDE);
+        let thread = self.host.create_thread(self.matter, BROWSING);
         turn(&self.host, thread);
         (thread, self.browser(thread))
     }
@@ -175,7 +175,7 @@ impl Rig {
     }
 }
 
-/// The browser state each of `launches` `CLAUDE` sessions shows, one after the other, each in
+/// The browser state each of `launches` `BROWSING` sessions shows, one after the other, each in
 /// a thread of its own, under `rd_policy` and the firm's Clauseo `policy` if any.
 fn reasons(
     test: &str,

@@ -23,6 +23,13 @@ use crate::write;
 pub(crate) const CLAUDE: &str = "claude-acp";
 pub(crate) const CODEX: &str = "codex-acp";
 
+/// The agent the browser entry's own tests launch (slots, policy, egress): one with no kind
+/// (`AgentKind::of` gives none), so it may have the browser on every OS. [`Hook`] offers its
+/// servers, the `browser` entry among them, to every agent, where the real profile offers the
+/// entry to Codex alone (`servers::browser_mcp`); and Claude has no browser on macOS and Linux,
+/// Codex none on Windows (`servers::no_browser`).
+pub(crate) const BROWSING: &str = "browsing-agent";
+
 /// One launch as [`Wired`] saw it: its session folder (`<data>/run/<session id>`, none for a
 /// launch whose prep made none), its environment, and the files its pack plugin
 /// (`<run>/skill-packs`) held, by path under it with `/`, sorted.
@@ -342,6 +349,28 @@ pub(crate) fn codex_servers(servers: &[Value]) -> Vec<Value> {
         .iter()
         .filter(|server| !(none_here && server["name"] == "browser"))
         .cloned()
+        .collect()
+}
+
+/// `servers` as a Claude `session/new` carries them on this OS: without the `browser` entry
+/// where Claude has no browser at all (macOS and Linux, `clauseo_profile::servers::no_browser`),
+/// else all of them.
+pub(crate) fn claude_servers(servers: &[Value]) -> Vec<Value> {
+    let none_here = clauseo_profile::servers::no_browser(Some(AgentKind::Claude));
+    servers
+        .iter()
+        .filter(|server| !(none_here && server["name"] == "browser"))
+        .cloned()
+        .collect()
+}
+
+/// A Claude session's header tools with web search on: web search, then `browser` (`browser`
+/// its reason) where Claude may have the browser (Windows alone, `servers::no_browser`).
+pub(crate) fn claude_tools(browser: Option<ToolsUnavailableReason>) -> Vec<ToolState> {
+    let browser = cfg!(windows).then(|| tool(ClauseoTool::Browser, browser));
+    [Some(tool(ClauseoTool::WebSearch, None)), browser]
+        .into_iter()
+        .flatten()
         .collect()
 }
 

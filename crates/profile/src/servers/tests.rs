@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 
 use clauseo_settings::Locations;
 
-use super::{CASE_LAW, browser_for, browser_mcp_on, case_law, no_browser_on};
+use super::{CASE_LAW, browser_for, browser_mcp_on, case_law, no_browser_on, shell_browser_on};
 use crate::{BrowserSidecars, ProfilePaths};
 
 fn paths() -> ProfilePaths {
@@ -100,17 +100,22 @@ fn the_case_law_entry_names_the_relay_and_the_token_file_only() {
 }
 
 /// Codex gets the entry on macOS and Linux and no browser at all on Windows, where its part points
-/// the lawyer to a Claude conversation with no install advice and no tool named; Claude never gets
-/// the entry and always may have its shell command.
+/// the lawyer to a Claude conversation with no install advice and no tool named. Claude never gets
+/// the entry, and has its shell command on Windows alone (the exclusion hijack elsewhere), so the
+/// command is copied only there. An agent with no kind (a test's) is left as it was.
 #[test]
-fn codex_has_the_entry_off_windows_and_no_browser_on_windows() {
+fn codex_has_the_entry_off_windows_and_claude_a_browser_on_windows_alone() {
     use crate::instructions::{BrowserPart, browser_part};
     use clauseo_protocol::AgentKind;
     for windows in [false, true] {
         assert!(!browser_mcp_on(Some(AgentKind::Claude), windows));
-        assert!(!no_browser_on(Some(AgentKind::Claude), windows));
         assert!(!browser_mcp_on(None, windows));
+        assert!(!no_browser_on(None, windows));
     }
+    assert!(no_browser_on(Some(AgentKind::Claude), false));
+    assert!(!no_browser_on(Some(AgentKind::Claude), true));
+    assert!(!shell_browser_on(false));
+    assert!(shell_browser_on(true));
     assert!(browser_mcp_on(Some(AgentKind::Codex), false));
     assert!(!no_browser_on(Some(AgentKind::Codex), false));
     assert!(!browser_mcp_on(Some(AgentKind::Codex), true));

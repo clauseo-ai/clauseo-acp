@@ -39,12 +39,13 @@
 //!   the Spotlight and Quick Look services outside the sandbox's Mach list, `mdls`, `mdfind` and
 //!   `qlmanage` fail too: the accepted breakages, which Claude is told of on macOS
 //!   (`clauseo_profile::instructions::claude_shell`).
-//! - `excludedCommands: ["agent-browser:*"]`, only in a session with the browser: agent-browser
-//!   needs its daemon, Chrome and the session's sockets. Claude Code 2.1.293 runs a command
-//!   outside the sandbox only when every part of it matches (`commands.every(...)`), and a
-//!   command it can't split into plain parts (a substitution, a redirect to a file, a backtick,
-//!   a parse error) stays sandboxed, so `agent-browser snapshot && touch ~/x` runs sandboxed. An
-//!   excluded command still goes through the permission rules.
+//! - No `excludedCommands`: every command runs sandboxed. Claude has no browser on macOS and
+//!   Linux for launch (`clauseo_profile::servers::no_browser`): agent-browser would have to run
+//!   outside the sandbox, and Claude Code's exclusion check strips `env` and reworks `VAR=`
+//!   prefixes before it matches, so `PATH=$CLAUDE_CODE_TMPDIR agent-browser …` would run a
+//!   program Claude wrote unsandboxed, and quoting (`-q "upload"`, `e"v"al`, a tab) would run
+//!   unsandboxed past the ask rules. Clauseo's own shim, named by its absolute path, is the
+//!   after-launch way back (decision record 0030).
 //! - `network.allowedDomains: ["*"]`: every host, so a sandboxed command (`curl` of a court PDF)
 //!   never asks for a domain; Claude Code 2.1.293 accepts it (stage C, 2026-11-11: a real
 //!   judgment PDF downloaded with no prompt and no certificate error in auto mode).
@@ -65,10 +66,9 @@
 //! - `filesystem.allowRead` ([`ClaudeSandbox::allow_read`]): re-opens, within those denies,
 //!   what a sandboxed command needs, with the `PATH` file Claude Code reads into each command
 //!   (`<run>/clauseo-env.sh`, `agent::shell_path`), the trust roots file on macOS
-//!   (`<data>/tls/roots.pem`, [`super::tls_roots`], the file alone) and the shell browser's
-//!   tools folder. Not
-//!   the whole run folder: it holds the case-law relay's
-//!   token and the browser's profile (the visited sites' cookies). Of Claude's own project
+//!   (`<data>/tls/roots.pem`, [`super::tls_roots`], the file alone) and each folder first on
+//!   `PATH`. Not the whole run folder: it holds the case-law relay's token and a browser's
+//!   profile (the visited sites' cookies). Of Claude's own project
 //!   folder only `<home>/projects/<key>/*/tool-results`, where `WebFetch` keeps the files it
 //!   fetches (a PDF among them): never the transcripts or the memory beside them.
 //! - `ignoreViolations`: Claude Code's shell snapshot folder in its home, which the data fence
@@ -90,9 +90,6 @@ use serde_json::{Map, Value, json};
 /// decimal forms and `[::ffff:127.0.0.1]` come out as `127.0.0.1` once the proxy reads them.
 pub(crate) const DENIED_DOMAINS: [&str; 6] =
     ["localhost", "127.0.0.1", "::1", "[::1]", "0.0.0.0", "[::]"];
-
-/// The command patterns that run outside the sandbox in a session with the browser.
-pub(crate) const EXCLUDED_COMMANDS: [&str; 1] = ["agent-browser:*"];
 
 /// What sandboxed commands may not read beside `<data>` and the other matters: the home, as
 /// Claude Code expands it, and macOS's shared places where matters may be kept.
@@ -155,8 +152,6 @@ pub(crate) struct ClaudeSandbox {
     pub(crate) allow_read: Vec<String>,
     /// The paths whose violations go unreported, for every command.
     pub(crate) quiet: Vec<String>,
-    /// The session has the browser: `excludedCommands` holds [`EXCLUDED_COMMANDS`].
-    pub(crate) browser: bool,
 }
 
 /// The session's paths the sandbox names.
@@ -180,8 +175,9 @@ pub(crate) struct SandboxPaths<'a> {
     /// of `<data>`.
     pub(crate) skills: &'a [PathBuf],
     /// The folders first on the agent's `PATH` and its shells' (`agent::shell_path`):
-    /// stetdoc's, the shell browser's tools (`<data>/tools`) in a session that has them, then
-    /// the profile hook's (Clauseo's Python runtime, `<rt>/bin`, where pandoc is too).
+    /// stetdoc's (the shell browser's tools never: Claude has no browser where it has a
+    /// sandbox), then the profile hook's (Clauseo's Python runtime, `<rt>/bin`, where pandoc
+    /// is too).
     pub(crate) path: &'a [PathBuf],
     /// The file that puts those folders first in each Bash command (`<run>/clauseo-env.sh`,
     /// `agent::shell_path::ENV_FILE`), if it was written: the file alone, never its folder.
@@ -194,8 +190,6 @@ pub(crate) struct SandboxPaths<'a> {
     pub(crate) data: &'a [PathBuf],
     /// Every other matter's folder the host knows.
     pub(crate) other_matters: &'a [PathBuf],
-    /// The session has the browser as a shell tool.
-    pub(crate) browser: bool,
 }
 
 /// The prefix of the Python runtime's folder name (`agents::python`).
@@ -226,7 +220,6 @@ impl ClaudeSandbox {
             deny_read,
             allow_read: Self::allow_read(paths, claude_tmp),
             quiet: texts([paths.claude_home.join(SNAPSHOTS).as_path()]),
-            browser: paths.browser,
         };
         if sandbox.has_wildcard() {
             tracing::info!("Claude's sandbox is off: a sandbox path holds * or ?; acceptEdits");
@@ -259,7 +252,6 @@ impl ClaudeSandbox {
             deny_read: denied(self.deny_read),
             allow_read: allowed(self.allow_read),
             quiet: denied(self.quiet),
-            browser: self.browser,
         }
     }
 
@@ -279,7 +271,7 @@ impl ClaudeSandbox {
 
     /// `filesystem.allowRead`: the writable folders, the browser's downloads, the skill packs,
     /// the built-in skills, the shells' `PATH` file, the trust roots file, and each folder first
-    /// on `PATH` (stetdoc's, the shell browser's tools), except that a folder in Clauseo's
+    /// on `PATH` (stetdoc's), except that a folder in Clauseo's
     /// Python runtime (`<rt>/bin`) opens the whole runtime, whose interpreter reads
     /// its standard library and site-packages beside it. Never a `PATH` folder's parent
     /// otherwise: it could be the home itself.
@@ -330,13 +322,10 @@ impl ClaudeSandbox {
                 "allowRead": self.allow_read,
             },
         });
-        if let Some(object) = sandbox.as_object_mut() {
-            if self.browser {
-                object.insert("excludedCommands".to_owned(), json!(EXCLUDED_COMMANDS));
-            }
-            if !self.quiet.is_empty() {
-                object.insert("ignoreViolations".to_owned(), json!({"*": self.quiet}));
-            }
+        if let Some(object) = sandbox.as_object_mut()
+            && !self.quiet.is_empty()
+        {
+            object.insert("ignoreViolations".to_owned(), json!({"*": self.quiet}));
         }
         sandbox
     }
