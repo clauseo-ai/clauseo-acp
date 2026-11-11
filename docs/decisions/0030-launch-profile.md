@@ -51,7 +51,8 @@ The host thread set the conditions the profile must keep: Claude keeps `settingS
     the request. The host merges the keys after the overrides and before `hooks`, adding only
     where no key is, and treats a dotted key as a clash with its first part.
   - `servers(kind)`: `browser` for Codex alone (`servers::browser_mcp`; Claude drives
-    agent-browser as a shell tool, its rules and skill unchanged), then `case-law`. `env()`:
+    agent-browser as a shell tool, its rules and skill unchanged, on Windows alone for launch:
+    "No browser for Claude on macOS and Linux"), then `case-law`. `env()`:
     `STETDOC_AUTHOR`. `path_prepend()`: `Option`, stetdoc's parent folder, or none (with a
     warning) when that folder also holds a browser sidecar or the app's own executable, or is a
     root. Folders compare without regard to case or separator.
@@ -965,6 +966,22 @@ this record and firm-it §8.
   (`servers::no_browser`), no browser in its header (the app offers no browser action), and a
   line telling the lawyer a Claude conversation can open web pages. The way back is the elevated
   sandbox (its firewall) or an authenticated daemon. Claude on Windows keeps its shell tool.
+- **No browser for Claude on macOS and Linux, for launch** (2026-11-11, security review of
+  #940). Claude's shell `agent-browser` would have to run outside Claude Code's sandbox
+  (`excludedCommands`), and Claude Code 2.1.293's exclusion check reworks a command before it
+  matches: it strips `env` and rewrites `VAR=` prefixes, so `PATH=$CLAUDE_CODE_TMPDIR
+  agent-browser …` would run a program Claude wrote, unsandboxed, and quoting (`-q "upload"`,
+  `e"v"al`, a tab) would run unsandboxed and slip past the ask rules. So on macOS and Linux a
+  Claude session gets no browser, whether or not its sandbox ends up on (`servers::no_browser` is
+  true for Claude there): no entry, no `agent-browser` on its `PATH`, no `AGENT_BROWSER_*`
+  variables, no browser in its header (the app offers no browser action), and the no-browser
+  sentence ("You have no browser in this session."), so it reads pages with web fetch and `curl`.
+  The app copies no `agent-browser` into `<data>/tools` there, so no session gets that folder or
+  the browser's skill (`servers::shell_browser`): Codex's entry runs the bundled sidecar itself.
+  The agent-browser ask and allow rules stay in the code, with no session to apply to. Codex
+  keeps its guarded entry on macOS and Linux, and Windows is unchanged: Claude's shell browser is
+  Windows-only for launch, and the Claude-only line Codex gets there stays true. The way back is
+  a Clauseo-owned shim, after launch ("Claude's sandbox" below).
 - **Accepted at Claude parity** (H2, M1, and no prompts). With no proxy, nothing stops Chrome
   reaching loopback or private addresses after a redirect or a page's own navigation; the guard
   checks only the address it is given. A page on `127.0.0.1:<debugging port>` could ask Chrome's
@@ -995,8 +1012,9 @@ this record and firm-it §8.
     thread, named in `<run>/claude-tmp`, and removed with the run folder, or at the next start
     with the earlier run's folders after a crash or a stop. It is in `allowWrite` and
     `allowRead`. Sandboxed commands' `TMPDIR` is made under it. The agent's own `TMPDIR`
-    stays `<run>/tmp` (#930), which Claude Code and unsandboxed commands (agent-browser) use.
-    A folder that can't be made gives the session no sandbox, and its commands ask.
+    stays `<run>/tmp` (#930), which Claude Code itself uses.
+    A folder that can't be made gives the session no sandbox, and it runs in `acceptEdits`,
+    not `auto` (2026-11-11, `Off::holds_auto_back`).
   - **Glob characters** (2026-11-11, security review). Claude Code 2.1.293 reads a sandbox
     path holding `*`, `?`, `[` or `]` as a pattern (`W4t`): unescaped, `Smith [2024]` would
     open `Smith 2` and not itself. A `[` is escaped as `[[]`, a class holding only `[` (a
@@ -1007,17 +1025,22 @@ this record and firm-it §8.
     rewrites them even inside a class): a path holding one gives the session **no sandbox,
     and it runs in `acceptEdits`, not `auto`**, with no notice, so no command runs on the
     classifier alone where the sandbox was meant to be (`Auto::NoSandbox`). A path to deny
-    that is not UTF-8 also gives no sandbox (one info line, no path). Not checked live on a Mac.
+    that is not UTF-8 also gives no sandbox (one info line, no path), and `acceptEdits` too
+    since 2026-11-11 (`Off::holds_auto_back`). Not checked live on a Mac.
   - **On:** `enabled` and `autoAllowBashIfSandboxed`. Forced ask still sends
     `autoAllowBashIfSandboxed: false` after it, so a forced-ask session asks for every command,
     sandboxed or not.
   - **No break-outs:** `allowUnsandboxedCommands: false`. Claude Code 2.1.293 then ignores the
     model's `dangerouslyDisableSandbox`, asked or not (`shouldUseSandbox`: the parameter counts
     only while unsandboxed commands are allowed).
-  - **`failIfUnavailable: false`:** a Mac where the sandbox can't start still runs the session,
-    and its commands ask. Claude Code auto-allows a command only while `isSandboxingEnabled()`
-    holds. A sandbox that fails to start refuses that command and stays off for the rest of the
-    session (`sandboxDisabledThisSession`). `true` would end Claude at start-up instead.
+  - **`failIfUnavailable: true`** (2026-11-11, security review of #940; it was `false`). A
+    sandbox that fails at run time fails the command instead of running it unsandboxed, and a
+    Mac (or a Linux machine without bubblewrap) where the sandbox can't start at all ends Claude
+    at start-up, so the session fails to launch instead of running with no sandbox: the
+    setting's own description. The host's own checks still come first and still fall back
+    before the launch to no sandbox and `acceptEdits` (`Auto::NoSandbox`): no short temp
+    folder, a path to deny that is not UTF-8, or a `*` or `?` in a path ("Glob
+    characters"). Not checked live on a Mac where Seatbelt can't start.
   - **Files:** `denyRead` holds:
     - the home (`~/`): other clients' files and `~/.ssh`;
     - each spelling of `<data>`, which `CLAUSEO_DATA_DIR` may put outside the home;
@@ -1031,13 +1054,12 @@ this record and firm-it §8.
     `.clauseo`: its `matter.json` finds a moved matter folder again, and Claude's `Edit` is
     denied it too, on every OS. `allowRead`, which Claude Code ranks over `denyRead` (a
     narrower deny inside it still applies), re-opens those, plus
-    `<run>/agent-browser/downloads`, `<run>/skill-packs`, the
-    built-in skills, stetdoc's folder, the shell browser's tools folder (`<data>/tools`, in a
-    session that has it) and Clauseo's Python runtime folder (`<rt>`, where pandoc also lives):
-    the folders the launch puts first on its shells' `PATH` (decision record 0048). The runtime
-    is found from its `PATH` folder `<rt>/bin`. The file `<run>/clauseo-env.sh` that puts them
+    `<run>/agent-browser/downloads`, `<run>/skill-packs`, the built-in skills, stetdoc's
+    folder and Clauseo's Python runtime folder (`<rt>`, where pandoc also lives): the folders
+    the launch puts first on its shells' `PATH` (decision record 0048). The runtime is found
+    from its `PATH` folder `<rt>/bin`. The file `<run>/clauseo-env.sh` that puts them
     first in each Bash command is opened alone. The whole run folder is not opened: it holds
-    the relay's token and the browser's profile (the visited sites' cookies). Of Claude's own
+    the relay's token and a browser's profile (the visited sites' cookies). Of Claude's own
     project folder only `<home>/projects/<key>/*/tool-results` (and `/**` under it) opens,
     the key Claude Code's own (`claude_project_key`, cut and hashed past 200 characters):
     `WebFetch` keeps the files it fetches there. The transcripts and the memory beside them
@@ -1061,15 +1083,33 @@ this record and firm-it §8.
     that one file. If the System Roots don't export, nothing is set (one warning) and `curl`
     behaves as before. A session whose sandbox is later turned off for a path (`*`, `?`, not
     UTF-8) still gets the variables: the same roots as the keychain. Linux and Windows are
-    unchanged.
-  - **agent-browser:** `excludedCommands: ["agent-browser:*"]`, in a session with the browser
-    only. It needs its daemon, Chrome and the session's sockets. The exclusion holds up when
-    commands are chained. Claude Code 2.1.293's `containsExcludedCommand` splits the command
-    with tree-sitter and runs it outside the sandbox only when every part matches
-    (`parts.every(...)`). A command it can't split into plain parts stays sandboxed:
-    `$(…)`, `<(…)`, a backtick, a redirect to a file, or a parse error. So
-    `agent-browser snapshot && touch ~/x` (and the `;`, `|` and newline forms) runs sandboxed.
-    An excluded command still goes through the permission rules.
+    unchanged. The data fence denies `<data>/tls/**` to Claude's `Read` and `Edit`
+    (`DENIED`, 2026-11-11, security review of #940), so its `Write` and `Edit` tools can't put
+    a root of their own in the file that later sessions' `curl` and Python trust; sandboxed
+    commands can't write it either (it is outside every `allowWrite`). **After launch:** keep
+    a System keychain certificate only when it is a CA (basicConstraints `CA:TRUE`), so a
+    self-signed leaf certificate there doesn't become a root, and honour the admin trust
+    settings (`security dump-trust-settings -d`), so a certificate marked Never Trust doesn't
+    either; a CA filter alone would still let a Never Trust CA through. Deferred because the
+    only X.509 parser in `Cargo.lock`, `x509-parser`, is there as `rcgen`'s optional
+    dependency and compiled by no build (`cargo tree -i x509-parser --target all -e all
+    --all-features` prints nothing), so using it would add a new dependency to the shipped app.
+  - **No `excludedCommands`** (2026-11-11, security review of #940): every command runs
+    sandboxed. It held `agent-browser:*` in a session with the browser, since agent-browser
+    needs its daemon, Chrome and the session's sockets. The review found that Claude Code's
+    exclusion check reworks a command before it matches: it strips `env` and rewrites `VAR=`
+    prefixes, so `PATH=$CLAUDE_CODE_TMPDIR agent-browser …` ran a fake `agent-browser` Claude
+    had written there, outside the sandbox, and quoting (`-q "upload"`, `e"v"al`, a tab) also
+    ran unsandboxed and dodged the ask rules, which match the command's text. So Claude has no
+    browser on macOS and Linux for launch ("No browser for Claude on macOS and Linux" above),
+    and the key and `EXCLUDED_COMMANDS` are gone from `agent/loads/sandbox.rs`.
+    **After launch, the shim:** Clauseo's own `agent-browser` in a folder the agent can't write
+    (outside every `allowWrite` and denied to `Edit` and `Write`). It parses the real argv,
+    not the command's text, and refuses `eval`, `pdf`, `download`, `upload`, `state`,
+    `wait --fn`, a `file://` URL, and the CDP and page-JavaScript options. It starts the real
+    agent-browser with a clean environment (only the session's own `AGENT_BROWSER_*` values,
+    never the inherited `PATH` or variables the command set), and `excludedCommands` names only
+    the shim's absolute path, never a bare name a `PATH=` prefix could redirect.
   - **The shell snapshot:** each command starts with
     `source <home>/shell-snapshots/<file> 2>/dev/null || true`. The data fence denies that
     folder, so the read fails quietly, and only the lawyer's shell functions and aliases are
@@ -1091,7 +1131,7 @@ this record and firm-it §8.
   ("2026-11-11: Windows stays in `auto`, with shell deny rules" above).
 - The citations are offsets in the 2.1.293 binary's strings. Stage C's live checks on a Mac are
   listed in the PR. Clauseo's own macOS jail (parked) would nest Claude's sandbox inside it,
-  where it can't start, and commands would go back to asking.
+  where it can't start, and with `failIfUnavailable: true` Claude would fail at start-up.
 
 ## Consequences
 
