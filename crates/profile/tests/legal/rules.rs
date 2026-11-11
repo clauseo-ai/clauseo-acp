@@ -1,6 +1,6 @@
 //! The rules the legal part gives both agents (decision record 0058), read in each agent's
 //! rendered text: the tokens left for the host, who the assistant says it is, how it names a file
-//! it saved, that it answers in the chat, and how it makes a new document.
+//! it saved, where its drafts and answers go, and how it makes a new document.
 
 use std::path::Path;
 
@@ -98,14 +98,16 @@ fn each_agent_names_a_saved_file_with_no_download_link() {
     }
 }
 
-/// The chat rule (decision record 0058): both agents answer in the chat, make a file only when
-/// the lawyer asks for one, and leave no Markdown or scratch file in the matter. It is in the
+/// The deliverable rule (decision record 0058): both agents put a memo, letter, reply or other
+/// draft in a clean `.docx` in the matter and name it in the chat with a short summary, answer
+/// everything else in the chat, and leave no Markdown or scratch file in the matter. It is in the
 /// legal part, so it holds with or without stetdoc.
 #[test]
-fn each_agent_answers_in_the_chat_and_leaves_no_scratch_file() {
+fn each_agent_puts_a_draft_in_word_and_answers_in_the_chat() {
     const RULE: &str = "The text after your last tool call is the reply. Every caveat and \
-        limitation goes there. Answer in the chat, however long; make a file only when the lawyer \
-        asks for one, as a `.docx` unless another format is named, and never leave Markdown or \
+        limitation goes there. A memo, letter, reply or other draft is a clean `.docx` in the \
+        matter, unless the lawyer names another format: name it in the chat with a short summary. \
+        Answers, explanations and analysis go in the chat, however long. Never leave Markdown or \
         scratch files in the matter.";
     assert_eq!(LEGAL.matches(RULE).count(), 1);
     for stetdoc in [false, true] {

@@ -56,10 +56,13 @@ and about 19 in Codex's whole text with a long data folder (about 1,481 of 1,500
   The Word guidance stays in one place, so the rule goes only where stetdoc was found; pandoc
   itself comes with the Python runtime, which the profile does not see. The saved-file rule then
   names the new file.
-- "Conduct"'s bullet on the reply gains one sentence, in the legal part so it holds with or
-  without stetdoc: "Answer in the chat, however long; make a file only when the lawyer asks for
-  one, as a `.docx` unless another format is named, and never leave Markdown or scratch files
-  in the matter."
+- "Conduct"'s bullet on the reply gains the deliverable rule, in the legal part so it holds with
+  or without stetdoc: "A memo, letter, reply or other draft is a clean `.docx` in the matter,
+  unless the lawyer names another format: name it in the chat with a short summary. Answers,
+  explanations and analysis go in the chat, however long. Never leave Markdown or scratch files
+  in the matter." Lawyers send memos, letters and drafts on, so a deliverable belongs in Word
+  (the orchestrator's ruling after the laptop test of 2026-11-11, where "write a memo" was read
+  both ways); a first wording, "make a file only when the lawyer asks for one", left that open.
 - 0031's budgets are amended once, to fit these rules, stage E's browser lines that follow
   (2-4 lines) and about 40 words of headroom, so they need not move with every new line:
   `legal.md` at most 1,360 words, and the whole instructions at most 1,800, which also caps
