@@ -7,8 +7,9 @@ use serde_json::Value;
 
 use super::profile;
 
-/// agent-browser's rules for Claude: the page subcommands allowed, the options that reach the
-/// lawyer's own browser or swap Clauseo's settings denied, everything else asking. The profile
+/// agent-browser's rules for Claude: the page subcommands allowed; the options that reach the
+/// lawyer's own browser or swap Clauseo's settings, and the commands that read or write a local
+/// file or run page JavaScript, denied; a few options asking. The profile
 /// never sends them, with the browser or without: the host adds them per session.
 #[test]
 fn agent_browser_rules_are_the_hosts_per_session() {
@@ -25,25 +26,21 @@ fn agent_browser_rules_are_the_hosts_per_session() {
     ] {
         assert!(allowed.iter().any(|a| a == rule), "{rule}");
     }
-    // eval runs page JavaScript, and pdf and download write to a path the agent names: each asks.
+    // eval runs page JavaScript, and pdf and download write to a path the agent names: none is
+    // allowed, each is refused.
     let rules = ["eval", "pdf", "download"].map(|sub| format!("Bash(agent-browser {sub}:*)"));
     let none = rules.iter().all(|rule| !allowed.contains(rule));
     assert!(none, "{rules:?}");
     let ask: Vec<String> = clauseo_profile::claude::agent_browser_ask().collect();
-    assert_eq!(ask.len(), 2 * 6 + 12);
-    for rule in [
-        "Bash(agent-browser wait*-f*)",
-        "Bash(agent-browser get*cdp-url*)",
-        "Bash(agent-browser eval*)",
-        "Bash(agent-browser --json eval*)",
-        "Bash(agent-browser pdf*)",
-        "Bash(agent-browser download*)",
-        "Bash(agent-browser *file://*)",
-        "Bash(agent-browser * upload*)",
-        "Bash(agent-browser * state load*)",
-    ] {
-        assert!(ask.iter().any(|a| a == rule), "{rule}");
-    }
+    assert_eq!(
+        ask,
+        [
+            "Bash(agent-browser *--init-script*)",
+            "Bash(agent-browser *--enable*)",
+            "Bash(agent-browser *-p *)",
+            "Bash(agent-browser *file://*)",
+        ]
+    );
     for asks in [
         "upload", "eval", "state", "cookies", "storage", "network", "set", "install",
     ] {
@@ -53,7 +50,7 @@ fn agent_browser_rules_are_the_hosts_per_session() {
         );
     }
     let denied: Vec<String> = agent_browser_denied().collect();
-    assert_eq!(denied.len(), AGENT_BROWSER_DENIED.len() + 2 * 2);
+    assert_eq!(denied.len(), AGENT_BROWSER_DENIED.len() + 2 * 2 + 2 * 6 + 8);
     for rule in [
         "Bash(agent-browser *--profile*)",
         "Bash(agent-browser *--auto-connect*)",
@@ -67,6 +64,23 @@ fn agent_browser_rules_are_the_hosts_per_session() {
         "Bash(agent-browser state*)",
         "Bash(agent-browser connect*)",
         "Bash(agent-browser --json state*)",
+        "Bash(agent-browser wait*-f*)",
+        "Bash(agent-browser get*cdp-url*)",
+        "Bash(agent-browser eval*)",
+        "Bash(agent-browser --json eval*)",
+        "Bash(agent-browser pdf*)",
+        "Bash(agent-browser --json pdf*)",
+        "Bash(agent-browser download*)",
+        "Bash(agent-browser --json download*)",
+        "Bash(agent-browser upload*)",
+        "Bash(agent-browser * eval*)",
+        "Bash(agent-browser * pdf*)",
+        "Bash(agent-browser * download*)",
+        "Bash(agent-browser * upload*)",
+        "Bash(agent-browser * state load*)",
+        "Bash(agent-browser * state save*)",
+        "Bash(agent-browser * wait *-f*)",
+        "Bash(agent-browser *cdp-url*)",
         "Bash(agent-browser *--args*)",
     ] {
         assert!(denied.iter().any(|d| d == rule), "{rule}");

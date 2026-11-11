@@ -177,10 +177,11 @@ pub(crate) struct ClaudeKeys<'a> {
     /// (decision D7). Without it, any hook rule for a `case-law` server is dropped.
     pub(crate) case_law: bool,
     /// The session has the browser as a shell tool: `allowedTools` gains agent-browser's page
-    /// subcommands, `disallowedTools` its denied flags and subcommands, and `permissions.ask`
-    /// the allowed commands that still ask (`clauseo_profile::claude::agent_browser_allowed`,
-    /// `agent_browser_denied`, `agent_browser_ask`). Without it,
-    /// any hook rule naming agent-browser is dropped, so a session without the browser has none.
+    /// subcommands, `disallowedTools` its denied flags, subcommands and file or JavaScript
+    /// commands, and `permissions.ask` the options that still ask
+    /// (`clauseo_profile::claude::agent_browser_allowed`, `agent_browser_denied`,
+    /// `agent_browser_ask`). Without it, any hook rule naming agent-browser is dropped, so a
+    /// session without the browser has none.
     pub(crate) browser: bool,
     /// Claude Code's own sandbox (`agent::loads::sandbox`), on macOS and Linux; none on
     /// Windows, where commands keep asking.
@@ -287,9 +288,9 @@ fn deny_data_folder(
 }
 
 /// `permissions.ask` gains agent-browser's allowed commands that still ask
-/// (`clauseo_profile::claude::agent_browser_ask`: `eval`, `pdf`, `download`, `upload`,
-/// `state load` and `state save` behind another option, a `wait --fn`, a `file://` URL, an
-/// option that loads page JavaScript), after any the hook put there. A hook value at
+/// (`clauseo_profile::claude::agent_browser_ask`: a `file://` URL, an option that loads page
+/// JavaScript, `-p`), after any the hook put there; the commands that read or write a local file
+/// or run page JavaScript are denied instead (`agent_browser_denied`). A hook value at
 /// `permissions` or `ask` of another type is replaced.
 fn browser_ask_settings(settings: &mut Map<String, Value>) {
     let mut permissions = take_object(settings, "permissions");

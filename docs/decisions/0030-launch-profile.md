@@ -991,7 +991,7 @@ this record and firm-it §8.
   could make either agent open a URL carrying text from the conversation. All of this is what
   Claude's unfenced shell browser can do in the plain client, and it is accepted for launch.
   `eval` is off in both agents (Codex: the guard refuses `agent_browser_eval`; Claude: a deny
-  rule, and `wait --fn` asks), which narrows H2 to redirects: the script route is closed, and no
+  rule, as for `wait --fn`), which narrows H2 to redirects: the script route is closed, and no
   lawyer is asked. The after-launch fix, for both agents' browsers, is a guard-local proxy with
   an open allowlist that refuses private and loopback addresses after the DNS lookup, with
   Chrome's `--proxy-bypass-list=<-loopback>` so loopback goes through it too.

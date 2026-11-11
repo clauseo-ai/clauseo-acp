@@ -84,10 +84,7 @@ agent-browser select @e4 "option-value"   # select by value or visible label
 agent-browser select @e4 "a" "b"          # select multiple
 agent-browser scroll down 500             # scroll page (up/down/left/right)
 agent-browser scrollintoview @e1          # scroll element into view
-agent-browser upload @e5 file1.pdf        # upload file(s)
 ```
-
-`upload` sends a file to the website: use it only for files the lawyer named in this conversation.
 
 When refs don't work, use semantic locators, which need no snapshot:
 
@@ -126,7 +123,7 @@ agent-browser get text @e5                     # targeted, with refs
 agent-browser get attr @e10 href
 ```
 
-`eval`, `pdf` and `download` are off in Clauseo: read a page with `snapshot`, `get text` or `read`, and save a file into the matter with `curl`.
+`eval`, `pdf`, `download` and `upload` are off in Clauseo: read a page with `snapshot`, `get text` or `read`, and save a file into the matter with `curl`.
 
 ## Screenshots
 

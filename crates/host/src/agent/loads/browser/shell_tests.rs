@@ -223,26 +223,23 @@ fn claude_gets_agent_browser_rules_only_with_the_browser() {
             assert!(allowed.contains(&"Bash(agent-browser read:*)".to_owned()));
             let want: Vec<String> = clauseo_profile::claude::agent_browser_denied().collect();
             assert_eq!(denied, want);
-            // eval, pdf and download are refused (a deny rule wins over allow and ask), bare and
-            // behind `--json`.
-            for sub in ["eval", "pdf", "download"] {
-                for prefix in ["agent-browser", "agent-browser --json"] {
-                    let rule = format!("Bash({prefix} {sub}*)");
+            // eval, pdf, download and upload are refused (a deny rule wins over allow and ask),
+            // bare, behind `--json` and behind any option; none of them asks.
+            for sub in ["eval", "pdf", "download", "upload"] {
+                for rule in [
+                    format!("Bash(agent-browser {sub}*)"),
+                    format!("Bash(agent-browser --json {sub}*)"),
+                    format!("Bash(agent-browser * {sub}*)"),
+                ] {
                     assert!(denied.contains(&rule), "{rule}");
-                    assert!(!asked.contains(&rule), "{rule}");
                 }
+                assert!(!asked.iter().any(|rule| rule.contains(sub)), "{sub}");
             }
-            // A wait running page JavaScript asks though `wait` is allowed.
+            // A wait running page JavaScript is refused though `wait` is allowed.
+            assert!(denied.contains(&"Bash(agent-browser wait*-f*)".to_owned()));
             let want: Vec<String> = clauseo_profile::claude::agent_browser_ask().collect();
             assert_eq!(asked, want);
-            assert_eq!(
-                asked[..3],
-                [
-                    "Bash(agent-browser wait*-f*)",
-                    "Bash(agent-browser get*cdp-url*)",
-                    "Bash(agent-browser upload*)"
-                ]
-            );
+            assert_eq!(asked[0], "Bash(agent-browser *--init-script*)");
         } else {
             assert_eq!(
                 (allowed, denied, asked),
