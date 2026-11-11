@@ -108,6 +108,46 @@ const jumped = () => {
     />
   );
 };
+/** A long answer whose table, far down it, holds the words a Find result found: clause 21's row of 24. */
+const TABLED = [
+  LONG,
+  ["| Clause | What it says |", "| --- | --- |"]
+    .concat(
+      Array.from({ length: 24 }, (_, i) =>
+        i === 20
+          ? "| 21 | Forfeiture on a second default, after written notice |"
+          : `| ${i + 1} | Terms of clause ${i + 1}, as filed with the deed |`,
+      ),
+    )
+    .join("\n"),
+  "Each clause reads with the schedule of payments annexed to the deed.",
+].join("\n\n");
+/** A Find result's jump to words deep in a long answer, in its table's 21st row (D-071): the row lands mid-way between
+ * the pinned question and the composer, not the answer's first line. */
+const jumpedDeep = () => {
+  jumpTo(streamOf(THREAD), 6, [
+    { text: "| 21 | ", hit: false },
+    { text: "Forfeiture", hit: true },
+    { text: " on a second default, after written notice |", hit: false },
+  ]);
+  return (
+    <RoomOver
+      host={() =>
+        threadHost({
+          agent: "codex-acp",
+          entries: [
+            userMessage(5, 1, ASKED_LONG),
+            agentText(6, 1, TABLED),
+            step(7),
+            userMessage(8, 2, "And what if the bank doesn't cure in time?"),
+            agentText(9, 2, "Then the lessor may end the lease by a second written notice."),
+            step(10),
+          ],
+        })
+      }
+    />
+  );
+};
 /** The same with one paper in the matter. */
 const freshOne = () => <RoomOver host={() => roomHost([MATTER], PAPERS.slice(0, 1))} />;
 
@@ -171,6 +211,12 @@ export const U6: Entry[] = [
     words: threadWords("Uses your {name} plan"),
     screen: "matters/find-jump",
     render: jumped,
+  },
+  {
+    id: "U6-10",
+    words: threadWords("Uses your {name} plan"),
+    screen: "matters/find-jump-deep",
+    render: jumpedDeep,
   },
   // The wall following the open matter's folder (0055): PL-01 to PL-03.
   ...PAPERS_LIVE,

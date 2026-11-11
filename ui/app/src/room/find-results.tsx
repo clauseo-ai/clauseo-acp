@@ -194,7 +194,7 @@ export function FindResults({
   }, [search, state.next, state.hits]);
   const openTalk = (found: FoundConversation) => () => {
     // asked before it opens, so the thread's first rows already page back to the entry
-    if (found.order !== undefined) jumpTo(streamOf(found.thread), found.order);
+    if (found.order !== undefined) jumpTo(streamOf(found.thread), found.order, found.parts);
     else clearJump();
     const known = found.archived
       ? archivedSummary(every, found.matter, found.thread, talks.agent)
