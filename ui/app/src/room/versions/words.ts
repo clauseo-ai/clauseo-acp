@@ -146,11 +146,14 @@ export function askOf(lang: Lang, cal: Calendar, s: Snapshot, ask: Ask | null): 
   const name = namesOf(files.map((f) => f.path));
   const back = files.filter((f) => ask.choices.get(f.path) === "undo").map((f) => name(f.path));
   const since = changedSince(s.timeline, ask.id);
-  // the rows: each file kept by default, a file changed again since saying by whom and when, one that may hold the
-  // lawyer's own edits saying so
-  const rows = files.filter((f) => f.may_include_lawyer_edits || since.has(f.path));
-  const sinceOnly = rows.every((f) => since.has(f.path));
-  const mayOnly = rows.every((f) => !since.has(f.path));
+  // edited: the host says the folder's copy differs from the version's now, though no newer version shows it
+  const edited = ask.edited ?? new Set<string>();
+  const later = (path: string) => since.has(path) || edited.has(path);
+  // the rows: each file kept by default, a file changed again since saying by whom and when (or since when, where only
+  // the host saw it), one that may hold the lawyer's own edits saying so
+  const rows = files.filter((f) => f.may_include_lawyer_edits || later(f.path));
+  const sinceOnly = rows.every((f) => later(f.path));
+  const mayOnly = rows.every((f) => !later(f.path));
   const n = rows.length;
   const papers = listOf(lang, back);
   return {
@@ -191,17 +194,24 @@ export function askOf(lang: Lang, cal: Calendar, s: Snapshot, ask: Ask | null): 
             : vt(lang, "Choose for each document."),
     edited: rows.map((f) => {
       const by = since.get(f.path);
-      const later = by === undefined ? undefined : versionOf(s, by);
+      const newer = by === undefined ? undefined : versionOf(s, by);
       return {
         id: f.path,
         title: name(f.path),
         at:
-          later === undefined
-            ? vt(lang, "Changed during the answer, though Clauseo didn't say it was changing it.")
-            : later.who.kind === "clauseo"
-              ? vt(lang, "Changed by Clauseo at {time}", { time: timeOf(lang, later) })
+          newer === undefined
+            ? edited.has(f.path)
+              ? v.day === cal.today
+                ? vt(lang, "Changed since {time} today", { time: timeOf(lang, v) })
+                : vt(lang, "Changed since {time} on {date}", {
+                    time: timeOf(lang, v),
+                    date: cal.words(lang, v.day, "date"),
+                  })
+              : vt(lang, "Changed during the answer, though Clauseo didn't say it was changing it.")
+            : newer.who.kind === "clauseo"
+              ? vt(lang, "Changed by Clauseo at {time}", { time: timeOf(lang, newer) })
               : vt(lang, "Changed by you, outside Clauseo, at {time}", {
-                  time: timeOf(lang, later),
+                  time: timeOf(lang, newer),
                 }),
         choice: ask.choices.get(f.path) ?? "keep",
       };

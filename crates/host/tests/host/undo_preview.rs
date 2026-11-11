@@ -8,7 +8,7 @@ use clauseo_protocol::{
     StopReason, StreamId, ThreadId, TurnId,
 };
 
-use crate::support::{Dir, FAKE, Running, Scenario, foreign_uuid, matter_with_thread};
+use crate::support::{Dir, FAKE, Running, START_MS, Scenario, foreign_uuid, matter_with_thread};
 use crate::write;
 
 /// A host whose fake agent ran `undo-preview`'s one turn: `notes.txt` written by a shell
@@ -117,5 +117,66 @@ fn a_turn_with_no_step_is_refused() {
         .unwrap_err();
     assert_eq!(refusal.code(), ErrorCode::CommandInvalid, "{refusal}");
     assert!(refusal.to_string().contains("no step to undo"), "{refusal}");
+    host.shutdown();
+}
+
+/// D-sweep: the agent's own new file (moved from a scratch file the walk never lists, so absent at
+/// the turn's start, its mtime set before the turn's end, no tool call naming it) is not flagged,
+/// and nothing is edited since. Edited by the lawyer after the turn, it is: the thread's Undo and
+/// Versions' undo both ask this. Put back as the turn left it, Undo deletes it.
+#[test]
+fn the_agents_own_file_is_unflagged_and_edited_since_only_once_edited() {
+    let dir = Dir::new(
+        "preview_undo_agents_own_file",
+        &[(FAKE, Scenario::Local("undo-preview-own"))],
+    );
+    let host = dir.start(0);
+    let reply = b"the agent's reply\n";
+    let (_, thread, folder) = matter_with_thread(
+        &dir,
+        &host,
+        "m",
+        &[
+            ("brief.txt", "Clause 4 draft\n"),
+            ("draft.tmp", "the agent's reply\n"),
+        ],
+        FAKE,
+    );
+    // The test clock runs behind the real one: the scratch file is dated before the turn's end.
+    let before_end = std::time::UNIX_EPOCH
+        + std::time::Duration::from_millis(u64::try_from(START_MS - 60_000).unwrap());
+    write::set_mtime(&folder.join("draft.tmp"), before_end);
+    let mut events = host.events(StreamId::Thread(thread));
+    let (turn, _) = host.prompt(thread, "Write the reply.");
+    let ended = events.until_turn_ended(turn);
+    assert_eq!(ended.stop, StopReason::EndTurn, "{}", events.dump());
+    let changed = events
+        .files_changed(turn)
+        .unwrap_or_else(|| panic!("no FilesChanged: {}", events.dump()));
+    let flags: Vec<(&str, bool)> = changed
+        .files
+        .iter()
+        .map(|file| (file.path().as_str(), file.may_include_lawyer_edits()))
+        .collect();
+    assert_eq!(flags, [("reply.docx", false)]);
+    assert_eq!(edited_since(&host, thread, turn), Vec::<String>::new());
+
+    write::write(&folder.join("reply.docx"), b"the lawyer's reply\n");
+    assert_eq!(edited_since(&host, thread, turn), ["reply.docx"]);
+
+    write::write(&folder.join("reply.docx"), reply);
+    assert_eq!(edited_since(&host, thread, turn), Vec::<String>::new());
+    host.ok(HostCommand::UndoStep {
+        thread,
+        turn,
+        files: vec![FileDecision {
+            path: MatterPath::new("reply.docx").unwrap(),
+            choice: FileChoice::Undo,
+        }],
+    });
+    assert!(
+        !folder.join("reply.docx").exists(),
+        "the undo left the reply"
+    );
     host.shutdown();
 }

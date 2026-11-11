@@ -23,6 +23,7 @@ import { lockedFiles, wordLocks } from "../word/lock.ts";
 import { Conversations } from "./conversations.ts";
 import {
   DoneWatch,
+  editedSince,
   lockedRestore,
   pageBack,
   previewRestore,
@@ -37,6 +38,7 @@ import {
   freshSnapshot,
   inRowOrder,
   keepChangedSince,
+  keepEdited,
   outcomeOf,
   sameChanges,
   staleNewest,
@@ -316,6 +318,11 @@ export class VersionsController {
     const choices = defaultChoices(m.step, new Set(since.keys()));
     this.#chosen = new Set();
     this.#set({ ask: { act: "undo", id, choices, stage: "confirm", failed: null }, failed: null });
+    // what the lawyer changed since, as the thread's Undo asks it: a file the turn added goes with any edit made after
+    void editedSince(this.#transport, m.thread, m.step.turn).then((edited) => {
+      const ask = keepEdited(this.#snap.ask, id, edited, this.#chosen);
+      if (ask !== null) this.#set({ ask });
+    });
   }
 
   /** The toolbar's Undo: looks at the newest turn's version whose change can be undone, paging steps in as it goes,
@@ -585,14 +592,8 @@ export class VersionsController {
       return;
     }
     if (asked !== this.#asked || preview === null) return;
-    const next: RestoreAsk = {
-      act: "restore",
-      id: ask.id,
-      preview,
-      undoes: ask.undoes,
-      stage: "confirm",
-      failed: null,
-    };
+    const { act, id, undoes } = ask;
+    const next: RestoreAsk = { act, id, preview, undoes, stage: "confirm", failed: null };
     if (sameChanges(ask.preview, preview)) await this.#restore(next);
     else this.#set({ ask: next, failed: null });
   }

@@ -1,6 +1,7 @@
 // What Versions' controller (controller.ts) reads beyond the matter's timeline: every older page of a stream, the
 // newest change that couldn't be kept as a version, whether the matter's stream has gained an entry that isn't the
-// room's last act's own (which ends the line saying what the act did), and which file a refused restore was held on.
+// room's last act's own (which ends the line saying what the act did), which file a refused restore was held on, and
+// which files of a step changed since its version.
 import type { ViewStore } from "../../store/store.ts";
 import { streamOf, type StreamView } from "../../store/view.ts";
 import type { HostTransport } from "../../transport/host-transport.ts";
@@ -254,4 +255,21 @@ export async function refusedPreview(
     previewOf,
   );
   return ask.stage === "word" || (ask.act === "restore" && ask.preview !== none) ? ask : null;
+}
+
+/** The files of a turn's step changed since its after-turn version, as the thread's Undo asks the host
+ * (preview_undo): null where the host refuses or answers another shape (an older host has none), and the dialog keeps
+ * to what the versions say. */
+export async function editedSince(
+  transport: Pick<HostTransport, "query">,
+  thread: ThreadId | undefined,
+  turn: TurnId,
+): Promise<readonly string[] | null> {
+  if (thread === undefined) return null;
+  try {
+    const r = await transport.query({ preview_undo: { thread, turn } });
+    return "undo_preview" in r && r.undo_preview !== undefined ? r.undo_preview.edited_since : null;
+  } catch {
+    return null;
+  }
 }
