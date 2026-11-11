@@ -78,7 +78,7 @@ impl Current {
             cancelled: false,
             stopped: key_retry::Stopped::default(),
             refused: None,
-            offline_told: false,
+            told: Told::default(),
             limit: None,
             too_long: None,
             tool_paths: crate::sent::TurnPaths::default(),
@@ -288,4 +288,13 @@ pub(crate) fn keeps_matter_loaded(actor: &Actor, matter: MatterId) -> bool {
         .matters
         .get(&matter)
         .is_some_and(|entry| entry.turns.holder.is_some())
+}
+
+/// The once-a-turn notes a turn has given, each at most once.
+#[derive(Debug, Default)]
+pub(super) struct Told {
+    /// The agent was told its shell stays offline this turn (`shell_network.rs`).
+    pub(super) offline: bool,
+    /// A data-fence refusal of the turn was told to the lawyer and the agent (`outside.rs`).
+    pub(super) outside: bool,
 }

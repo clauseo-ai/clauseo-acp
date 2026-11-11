@@ -300,6 +300,9 @@ mod not_allowed;
 #[cfg(all(test, unix))]
 #[path = "host/outside_matter.rs"]
 mod outside_matter;
+#[cfg(all(test, unix))]
+#[path = "host/outside_told.rs"]
+mod outside_told;
 #[cfg(test)]
 #[path = "host/own_logout.rs"]
 mod own_logout;

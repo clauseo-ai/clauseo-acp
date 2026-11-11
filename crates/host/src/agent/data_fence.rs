@@ -347,6 +347,7 @@ impl FenceCheck {
         };
         // An agent's text with a name Windows reads as another place is refused untouched.
         let agent = |path: &PathBuf| {
+            let path = &variables::file_of_variables(path, disk.net.windows);
             if refused_windows_name(path, disk.net) {
                 vec![Found::Refused]
             } else {
@@ -505,6 +506,8 @@ mod network_forms_tests;
 mod network_tests;
 #[cfg(test)]
 mod no_file_ids_tests;
+#[cfg(test)]
+mod powershell_env_tests;
 mod resolve;
 mod search;
 #[cfg(test)]
@@ -512,6 +515,7 @@ mod search_tests;
 mod shell_deny;
 #[cfg(test)]
 mod tests;
+mod variables;
 #[cfg(test)]
 #[cfg(windows)]
 mod windows_names_only_tests;

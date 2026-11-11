@@ -42,4 +42,11 @@ pub(crate) const ADDED_AFTER_V1_2: &[Corpus] = &[
         (352, 0x3b96_01ab_d792_59bb),
         (234, 0x9e7a_7ca8_dbba_7255),
     ),
+    (
+        "added/notice-OutsideMatterBlocked",
+        include_bytes!("added/notice-OutsideMatterBlocked.jsonl"),
+        include_bytes!("added/notice-OutsideMatterBlocked.msgpack"),
+        (344, 0xf088_4dac_1e30_eab3),
+        (265, 0x5a5c_03cc_1880_7737),
+    ),
 ];

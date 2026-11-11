@@ -312,12 +312,16 @@ open_data_enum! {
         /// the model or the agent ruled it out), so Claude runs in `acceptEdits` and asks before
         /// running commands.
         AutoModeUnavailable = "auto_mode_unavailable",
+        /// Clauseo's data fence refused a request of the agent's without asking the lawyer: it
+        /// reached outside this matter (Clauseo's own data folder, another matter). Once a turn.
+        OutsideMatterBlocked = "outside_matter_blocked",
         _ =>
         /// A kind from a newer Clauseo; written back as the plain string `kind`.
         Unknown,
     }
     test mod notice_kind with [
         NoticeKind::ContextNotRestored,
+        NoticeKind::OutsideMatterBlocked,
         NoticeKind::FilesCameBack {
             files: vec![MatterPath::new("Drafts/memo.docx").unwrap()],
             more: 2,

@@ -28,6 +28,7 @@ mod launch_checks;
 mod logout;
 mod offline;
 mod out;
+mod outside;
 mod own_turn;
 mod picks;
 mod profile_loads;
@@ -196,8 +197,8 @@ struct Current {
     /// was a refusal with no Stop since (Codex's only reject ends the turn): `NotAllowed` for
     /// the lawyer's, `OutsideMatter` for the host's data folder. An answer or a Stop clears it.
     refused: Option<StopReason>,
-    /// The agent was told its shell stays offline this turn (`shell_network.rs`).
-    offline_told: bool,
+    /// The once-a-turn notes the turn has given.
+    told: state::Told,
     /// The first limit signal of the turn.
     limit: Option<LimitMark>,
     /// The first too-long `sessionFailure` of the turn sent on an update (`AcpEvent::TooLong`).

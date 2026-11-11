@@ -10,6 +10,7 @@ import { th } from "@clauseo/components/lib/words-thread.ts";
 import { stepKindOf, type StepKind } from "@clauseo/components/clauseo/tool-kinds.ts";
 import type { StreamView } from "../../store/view.ts";
 import type { EntryId, Timestamp, ToolCallEntry, ViewEntry } from "../../transport/protocol.ts";
+import { toolCallIdOf } from "../permission-model.ts";
 import { sameIds } from "./ids.ts";
 import {
   asksWords,
@@ -36,6 +37,7 @@ export type Part = "tool" | "thought" | "alone";
 
 const TOOL = "tool_call:";
 const TEXT = "agent_text:";
+const PERMISSION = "permission:";
 
 /** The answer's rows, in order, with every run of tool calls and thoughts holding a tool call as one group. */
 export function segmentsOf(ids: readonly EntryId[], partOf: (id: EntryId) => Part): Segment[] {
@@ -62,6 +64,29 @@ export function segmentsOf(ids: readonly EntryId[], partOf: (id: EntryId) => Par
   return out;
 }
 
+/** `segments` with each prompt whose own tool call is in an earlier group, another group between them, moved back
+ * to stand after that group and the prompts already there: an answered prompt reads only "Allowed once.", so it
+ * must follow the step it answered, never the next one the agent began before asking (`callOf`: a prompt row's
+ * tool call). */
+export function promptsAtTheirCalls(
+  segments: readonly Segment[],
+  callOf: (row: EntryId) => EntryId | null,
+): Segment[] {
+  const out: Segment[] = [];
+  for (const s of segments) {
+    const call = s.row === undefined ? null : callOf(s.row);
+    const at = call === null ? -1 : out.findIndex((o) => o.group?.includes(call) === true);
+    if (at < 0 || !out.slice(at + 1).some((o) => o.group !== undefined)) {
+      out.push(s);
+      continue;
+    }
+    let to = at + 1;
+    while (to < out.length && out[to]?.row !== undefined && callOf(out[to]!.row!) !== null) to += 1;
+    out.splice(to, 0, s);
+  }
+  return out;
+}
+
 /** A row's part from its entry. */
 export function partOfEntry(entry: ViewEntry | undefined): Part {
   if (entry?.tool_call !== undefined) return "tool";
@@ -82,13 +107,14 @@ export function segmentsPick(
     if (ready && seen !== null && sameIds(seen, ids)) return last;
     seen = ids;
     // a row not in yet reads as alone; it comes in with the ids, so this is only a window still filling
-    last = segmentsOf(ids, (id) =>
-      id.startsWith(TOOL)
-        ? "tool"
-        : id.startsWith(TEXT)
-          ? partOfEntry(paged.get(id) ?? v?.entries.get(id))
-          : "alone",
+    const entry = (id: EntryId) => paged.get(id) ?? v?.entries.get(id);
+    const grouped = segmentsOf(ids, (id) =>
+      id.startsWith(TOOL) ? "tool" : id.startsWith(TEXT) ? partOfEntry(entry(id)) : "alone",
     );
+    last = promptsAtTheirCalls(grouped, (row) => {
+      const asked = row.startsWith(PERMISSION) ? entry(row)?.permission : undefined;
+      return asked === undefined ? null : toolCallIdOf(asked);
+    });
     ready = v !== undefined;
     return last;
   };

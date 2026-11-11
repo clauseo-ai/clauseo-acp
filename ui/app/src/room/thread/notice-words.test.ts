@@ -32,6 +32,15 @@ test("Claude's auto mode unavailable gives the app's line, in English and Hindi"
   );
 });
 
+test("Clauseo's data-fence refusal gives its own line, never a permission's", () => {
+  expect(noticeLine("outside_matter_blocked", en)).toBe(
+    "Clauseo blocked a request: it reaches outside this matter.",
+  );
+  expect(noticeLine("outside_matter_blocked", words("hi"))).toBe(
+    "Clauseo ने एक अनुरोध रोक दिया: वह इस मामले के बाहर तक पहुँचता है।",
+  );
+});
+
 test("no kind (an agent's notice) gives null, so the row shows its own text", () => {
   expect(noticeLine(undefined, en)).toBeNull();
 });

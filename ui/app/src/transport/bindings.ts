@@ -3883,6 +3883,11 @@ export type NoticeKind =
  *  running commands.
  */
 "auto_mode_unavailable" | 
+/**
+ *  Clauseo's data fence refused a request of the agent's without asking the lawyer: it
+ *  reached outside this matter (Clauseo's own data folder, another matter). Once a turn.
+ */
+"outside_matter_blocked" | 
 /**  A kind from a newer Clauseo; written back as the plain string `kind`. */
 string;
 

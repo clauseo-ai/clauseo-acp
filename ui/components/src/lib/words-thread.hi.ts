@@ -160,6 +160,9 @@ export const HI = {
   // Claude's auto mode isn't available, so the session runs in acceptEdits (en settled, hi provisional, TN-10)
   "Claude's automatic mode isn't available for this account, so Claude asks before running commands.":
     "इस खाते के लिए Claude का स्वचालित मोड उपलब्ध नहीं है, इसलिए Claude कमांड चलाने से पहले पूछता है।",
+  // Clauseo's data fence refused, unasked, a request of the agent's that reached outside the matter (provisional, TN-11)
+  "Clauseo blocked a request: it reaches outside this matter.":
+    "Clauseo ने एक अनुरोध रोक दिया: वह इस मामले के बाहर तक पहुँचता है।",
   // the composer
   // in the composer's place while the open conversation is archived (U16a's Find opens one): it takes no question
   "Archived. Read only.": "संग्रहीत। केवल पढ़ने के लिए।",
