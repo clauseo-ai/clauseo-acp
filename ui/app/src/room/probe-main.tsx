@@ -86,6 +86,7 @@ import type { MatterInfo, PaperSummary } from "./host-next.ts";
 import { planProbe } from "./limits/probe-plan.ts";
 import { pickersProbe } from "./probe-pickers.ts";
 import { probeThreads } from "./probe-threads.ts";
+import { RAW_TOOL_PERMISSIONS, rawTools } from "./probe-toolnames.ts";
 import { connectRoom } from "./start.ts";
 import { versionsHost, versionsPageOf } from "./versions/probe-states.tsx";
 import { LOCKED, wordFiles, wordHost, wordPageOf } from "./word/probe-states.ts";
@@ -276,7 +277,7 @@ function stream(): HostEvent[] {
                     header("needs_you"),
                   ),
                   ...turn.slice(0, -1),
-                  ...PERMISSIONS,
+                  ...(rawTools(page) ? RAW_TOOL_PERMISSIONS : PERMISSIONS),
                 ]
               : questioning
                 ? [

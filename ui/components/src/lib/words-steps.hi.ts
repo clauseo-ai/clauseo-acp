@@ -24,6 +24,8 @@ export const HI = {
   "Searched {site} for '{query}'.": "{site} पर '{query}' खोजा गया।",
   "Thought it through.": "विचार किया गया।",
   "Did one other thing.": "एक अन्य काम किया गया।",
+  // a step named only by the sandbox's permission for the internet (UC-166; provisional)
+  "Let a task reach the internet.": "एक काम को इंटरनेट तक पहुँचने दिया गया।",
   // a step that failed or was stopped: what it set out to do, in the past, never as if it were still going; the row's
   // mark (Failed, Stopped) says how it ended
   "Tried to read {name}.": "{name} पढ़ने की कोशिश की गई।",
@@ -45,6 +47,8 @@ export const HI = {
   "Tried to search {site} for '{query}'.": "{site} पर '{query}' खोजने की कोशिश की गई।",
   "Tried to think it through.": "विचार करने की कोशिश की गई।",
   "Tried one other thing.": "एक अन्य काम करने की कोशिश की गई।",
+  // UC-167; provisional
+  "Tried to let a task reach the internet.": "एक काम को इंटरनेट तक पहुँचने देने की कोशिश की गई।",
   // a step named only by the agent's own words (its title or a task's description), tried and not done: those words
   // after the attempt, so the agent's imperative is never told as done; the words stay as the agent sent them
   "Tried: {title}.": "कोशिश की गई: {title}।",

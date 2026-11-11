@@ -19,6 +19,7 @@ import type {
 import { stamp } from "./clock.ts";
 import { useQuestionText } from "./live.ts";
 import { steerEntry, steerNotes, type SteerNoteData } from "./steer.ts";
+import { overTitle } from "./tool-words.ts";
 
 const QUIET = "text-small text-quiet";
 const ROW = "not-first:mt-(--s3)";
@@ -98,7 +99,11 @@ export function SteerNotes({ notes }: { notes: readonly SteerNoteData[] }) {
           "Your words at {time} came in before some work had finished. It went on in the background and finished at {done}. The answer uses what it found.",
           { time: stamp(w.lang, n.at, now), done: stamp(w.lang, n.done, now) },
         )}
-        found={n.found.map((f) => ({ at: stamp(w.lang, f.at, now), what: f.what }))}
+        found={n.found.map((f) => ({
+          at: stamp(w.lang, f.at, now),
+          // a call titled with a tool's name says what it did instead (tool-names.ts)
+          what: overTitle(w.lang, f.what, false),
+        }))}
       />
     </div>
   ));
