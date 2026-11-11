@@ -56,7 +56,8 @@ pub const AGENT_BROWSER_ALLOWED: [&str; 27] = [
 /// How a command starts in a rule: bare, and with `--json` before the subcommand
 /// (`agent-browser --json snapshot`), the one global option that changes nothing but the output
 /// format. Behind any other global option (`-q`, `--max-output 5`) a command is in no allow
-/// rule, so the mode decides. A full path (`/…/agent-browser open`) or `npx agent-browser` is in
+/// rule, so the mode decides, unless an ask or deny rule matched anywhere catches it
+/// ([`AGENT_BROWSER_ASK_ANYWHERE`], [`AGENT_BROWSER_DENIED`]). A full path (`/…/agent-browser open`) or `npx agent-browser` is in
 /// no rule either: Clauseo puts `agent-browser` on the `PATH` and names it so, and `npx` would
 /// fetch another build from npm.
 pub const AGENT_BROWSER_PREFIXES: [&str; 2] = ["agent-browser", "agent-browser --json"];
@@ -77,6 +78,9 @@ pub const AGENT_BROWSER_PREFIXES: [&str; 2] = ["agent-browser", "agent-browser -
 /// Checked at the tag and found to take no JavaScript: `get` :2970, `is`
 /// :3043, `find` :3079, `frame` :1717, `dialog` :1730, `tab` :1650, `scroll` :660, `select`
 /// :552, `open` :399, `read` :2365.
+///
+/// These match only right after a prefix; [`AGENT_BROWSER_ASK_ANYWHERE`] catches each behind
+/// any other global option.
 pub const AGENT_BROWSER_ASK: [&str; 6] = [
     "wait*-f*",
     "get*cdp-url*",
@@ -88,12 +92,33 @@ pub const AGENT_BROWSER_ASK: [&str; 6] = [
 
 /// agent-browser text that asks wherever it sits in the command (`Bash(agent-browser *<text>)`):
 /// agent-browser reads its global options anywhere in the arguments (`cli/src/flags.rs`
-/// `parse_flags` :569 at v0.41.1), so an allowed `open` can carry them.
+/// `parse_flags` :569 at v0.41.1), so an allowed `open` can carry them, and a subcommand can
+/// stand behind any of them (`agent-browser -q upload @f <path>`).
+/// - Every subcommand that reads or writes a local file or runs page JavaScript, as a word after
+///   a space: `eval`, `pdf`, `download`, `upload`, `state load`, `state save`, a `wait`
+///   with `-f` after it, and `cdp-url`. Bare or behind `--json` they also match
+///   [`AGENT_BROWSER_ASK`]; bare `state` is denied ([`AGENT_BROWSER_DENIED_SUBCOMMANDS`]).
+///   The leading space keeps `medieval` or `--download` out, but page text that holds one of
+///   the words after a space (`fill @e1 "upload the deed"`) asks too: the price of catching a
+///   subcommand behind an option Clauseo cannot list. A word written with quotes or escapes
+///   (`e"v"al`) matches no rule; the mode decides it.
 /// - `--init-script <path>` and `--enable <feature>` load page JavaScript, as `eval` does.
 /// - `-p <provider>` (`--provider` is denied) hands the browser to a cloud provider.
 /// - `file://` opens a local file in a browser that no sandbox fences, so any file it names.
-pub const AGENT_BROWSER_ASK_ANYWHERE: [&str; 4] =
-    ["--init-script*", "--enable*", "-p *", "file://*"];
+pub const AGENT_BROWSER_ASK_ANYWHERE: [&str; 12] = [
+    " eval*",
+    " pdf*",
+    " download*",
+    " upload*",
+    " state load*",
+    " state save*",
+    " wait *-f*",
+    "cdp-url*",
+    "--init-script*",
+    "--enable*",
+    "-p *",
+    "file://*",
+];
 
 /// agent-browser's options and subcommands Claude may never run, whatever the lawyer answers:
 /// each attaches the browser to the lawyer's own Chrome or profile, shows a window, swaps
@@ -129,7 +154,7 @@ pub const AGENT_BROWSER_DENIED: [&str; 16] = [
 /// [`AGENT_BROWSER_PREFIXES`] (`Bash(agent-browser state*)`): loading or saving browser state,
 /// and attaching to a running browser. Not matched anywhere, so a page's text that holds the word
 /// (`fill @e1 "state bank"`) is not refused; behind another global option (`agent-browser -q
-/// state load`) the command is in no rule, so the mode decides.
+/// state load`) `state load` and `state save` ask ([`AGENT_BROWSER_ASK_ANYWHERE`]).
 pub const AGENT_BROWSER_DENIED_SUBCOMMANDS: [&str; 2] = ["state", "connect"];
 
 /// `Bash(<prefix> <rest><suffix>)` for each of [`AGENT_BROWSER_PREFIXES`] and each of `rests`.
