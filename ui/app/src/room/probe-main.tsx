@@ -68,6 +68,14 @@ import {
   userMessage,
 } from "../testing/stream-script.ts";
 import { installDevHooks, queryPatch } from "./dev-hooks.ts";
+import {
+  CHUNK,
+  LONG_ANSWER,
+  longQuestion,
+  longQuestionOf,
+  longQuestionText,
+  SIX_MIB,
+} from "./long-question-fixtures.ts";
 import { askEntry, ONE_QUESTION, TWO_QUESTIONS } from "./elicitation-fixtures.ts";
 import { detailed, fakeNext, railStates } from "./fake-next.ts";
 import { scanProbe } from "./scan/probe-scan.ts";
@@ -151,8 +159,11 @@ const shapingThread = page.get("thread") === "shaping";
 const firstReading = page.get("thread") === "first-read";
 /** ?thread=long-command: an idle thread, a finished turn with one command line wider than the thread. */
 const longCommand = page.get("thread") === "long-command";
+/** ?question=2page, 50page or 2page-hi: an idle thread whose question is a long pasted text (long-question-fixtures.ts),
+ * about 1,000 words, about 25,000 words (160 KB) or two pages of Hindi, and a short answer. */
+const longKind = longQuestionOf(page.get("question"));
 /** The pages whose matter lists one idle thread, which the room opens and subscribes to. */
-const idleThread = commanding || hindiThread || shapingThread || longCommand;
+const idleThread = commanding || hindiThread || shapingThread || longCommand || longKind !== null;
 
 /** The agent's commands on ?thread=commands, in the order the composer's `/` menu lists them: the first six are the
  * spike's fixture (spike/src/mentions/fixtures.json), the last two match a name typed in Devanagari or Tamil. */
@@ -174,6 +185,54 @@ const PERMISSIONS: ViewPatchBody[] = [
   upsert(editCall(102, 302, "completed")),
   upsert(permission(103, 302, chosen("allow_once"))),
 ];
+
+/** ?question=6mib: as the host sends a 6 MiB question each time the conversation opens: a Reset with the header, the
+ * question's Upsert holding its first 4 KiB, its AppendText patches of 4 KiB each, then the answer's Upsert. */
+function sixMibBodies(): ViewPatchBody[] {
+  const text = longQuestionText("6mib");
+  const bodies: ViewPatchBody[] = [
+    reset([], header("idle")),
+    upsert(userMessage(2, 1, text.slice(0, CHUNK))),
+  ];
+  for (let at = CHUNK; at < text.length; at += CHUNK)
+    bodies.push({
+      append_text: {
+        message_id: uuid(1, 5),
+        target: { user_block: 0 },
+        from_len: at,
+        text: text.slice(at, at + CHUNK),
+      },
+    });
+  bodies.push(upsert(agentText(3, 100, LONG_ANSWER)));
+  return bodies;
+}
+
+declare global {
+  interface Window {
+    /** ?question=…: when the thread's first patches were delivered, the first frame the question showed, and the
+     * first frame it showed whole (performance.now() times), for the probe to read. */
+    __clauseoLongOpen?: { delivered: number; firstPaint?: number; whole?: number; length: number };
+  }
+}
+
+/** ?question=…: times the question's arrival, from the first patch delivered to the frames it shows in. */
+function timeOpen(length: number) {
+  const open: NonNullable<Window["__clauseoLongOpen"]> = { delivered: performance.now(), length };
+  window.__clauseoLongOpen = open;
+  const frame = () => {
+    const asked = document.querySelector('[data-testid="message-user"] .asked');
+    if (asked !== null) {
+      // after this frame's paint
+      open.firstPaint ??= performance.now();
+      if ((asked.textContent ?? "").length >= length) {
+        open.whole = performance.now();
+        return;
+      }
+    }
+    requestAnimationFrame(frame);
+  };
+  requestAnimationFrame(frame);
+}
 
 /** The scripted turn after the prompt, in batches of 25 bodies, as the bridge would deliver them. */
 function stream(): HostEvent[] {
@@ -226,7 +285,19 @@ function stream(): HostEvent[] {
                       header("needs_you"),
                     ),
                   ]
-                : [reset([userMessage(2, 1, "When did the bank reply?")]), ...turn];
+                : longKind === "6mib"
+                  ? sixMibBodies()
+                  : longKind !== null
+                    ? [
+                        reset(
+                          [
+                            userMessage(2, 1, longQuestionText(longKind)),
+                            agentText(3, 100, LONG_ANSWER),
+                          ],
+                          header("idle"),
+                        ),
+                      ]
+                    : [reset([userMessage(2, 1, "When did the bank reply?")]), ...turn];
   const events: HostEvent[] = [];
   for (let at = 0; at < bodies.length; at += 25) {
     events.push(event(batch(at + 1, bodies.slice(at, at + 25))));
@@ -351,7 +422,10 @@ const transport = new FakeTransport({
         for (const message of staged.subscribe(streamId)) transport.deliver(message);
         return;
       }
-      for (const message of stream()) transport.deliver(message);
+      const events = stream();
+      if (longKind !== null)
+        timeOpen(longKind === "6mib" ? SIX_MIB : longQuestionText(longKind).length);
+      for (const message of events) transport.deliver(message);
     });
   },
   // the thread a matter lists: the host's next_query answers list_threads (the `query` above answers only the legacy
@@ -392,10 +466,14 @@ declare global {
   interface Window {
     /** ?thread=commands: the calls the fake transport has had (sends among them), for the probe to read. */
     __clauseoProbeCalls?: FakeCall[];
+    /** ?question=…: a long fake legal text of about this many words (long-question-fixtures.ts). */
+    __clauseoLongText?: (words: number) => string;
   }
 }
 // the fake's calls, for the probe to read what the composer sent: only on ?thread=commands, so no other page has them
-if (commanding) window.__clauseoProbeCalls = transport.calls;
+if (commanding || longKind !== null) window.__clauseoProbeCalls = transport.calls;
+// ?question=…: the fixture's builder, so a page can paste a long text of any length into the composer
+if (longKind !== null) window.__clauseoLongText = longQuestion;
 
 // the page's query over the settings, before the first render, so night never starts as day; and the hooks the
 // by-hand checks use, so the WebKit probe can run window.__clauseoAxe() as it would run in the app
