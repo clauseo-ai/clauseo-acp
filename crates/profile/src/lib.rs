@@ -112,6 +112,19 @@ impl ClauseoProfile {
         self
     }
 
+    /// The same profile with stetdoc as `state` says ([`skills::stetdoc::start`]): the stetdoc
+    /// line when it is on, its skill when one loaded, and the other skills as
+    /// [`Self::with_tool_skills`] renders them. Renders in memory: no I/O.
+    #[must_use]
+    pub fn with_stetdoc(
+        self,
+        state: &skills::stetdoc::start::State,
+        agent_browser: bool,
+    ) -> (Self, Vec<ProfileError>) {
+        self.with_stetdoc_cli(state.is_on())
+            .with_tool_skills(state.skill().cloned(), agent_browser)
+    }
+
     /// The same profile with `skills` rendered once, here, for every later
     /// [`Self::skill_files`]: stetdoc's from [`skills::stetdoc::load_skill`] (run before, off
     /// the host thread), and R22's built-ins. A skill the renderer refuses is left out with a

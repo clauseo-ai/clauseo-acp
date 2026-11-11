@@ -471,3 +471,27 @@ fn a_windows_stetdoc_folder_matches_a_sidecar_folder_in_any_case_and_separator()
         Some(Path::new(r"C:\Program Files\Clauseo\stetdoc"))
     );
 }
+
+/// A verbatim stetdoc path (Tauri's resource folder, from a canonicalized exe) goes on the
+/// agents' `PATH` in its plain form, which cmd.exe takes too.
+#[cfg(windows)]
+#[test]
+fn a_verbatim_windows_stetdoc_path_goes_on_path_plain() {
+    let paths = ProfilePaths::new(
+        &Locations::under_root(Path::new(r"C:\data")),
+        PathBuf::from(r"C:\Clauseo\clauseo.exe"),
+        PathBuf::from(r"\\?\C:\Clauseo\stetdoc\stetdoc.exe"),
+        BrowserSidecars {
+            clauseo_mcp: PathBuf::from(r"C:\Clauseo\clauseo-mcp.exe"),
+            agent_browser: PathBuf::from(r"C:\Clauseo\agent-browser.exe"),
+        },
+    )
+    .unwrap();
+    let folder = paths.path_prepend().unwrap();
+    assert!(!folder.to_string_lossy().starts_with(r"\\?\"), "{folder:?}");
+    assert_eq!(folder, Path::new(r"C:\Clauseo\stetdoc"));
+    assert_eq!(
+        paths.stetdoc(),
+        Path::new(r"C:\Clauseo\stetdoc\stetdoc.exe")
+    );
+}

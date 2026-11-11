@@ -351,12 +351,20 @@ two dependencies, `profile` and `tracing`.
 - **Start-up.** The profile is built once, on the host-start thread (`host_start.rs`), before
   `Host::start`. The window never waits on it, but the host starts after it, and every bridge
   command waits for the host. So loading stetdoc's skill is bounded: both of stetdoc's runs
-  together get `STETDOC_START_LIMIT`, 3 s. Past it, the load is dropped, which kills
-  stetdoc's process tree. A `--version` that fails or runs past it treats stetdoc as absent
-  (no skill, no prepend, a warning). A skill that fails or runs past it after a working
-  `--version` (stetdoc 0.9.3 prints its skill's body with no frontmatter) leaves only the
-  skill out (2026-11-10): stetdoc stays on the agents' `PATH` and in the app
+  together get `start::FIRST_LIMIT`, 3 s. Past it, the load is dropped, which kills
+  stetdoc's process tree. A `--version` that fails treats stetdoc as absent (no skill, no
+  prepend, a warning). A skill that fails or runs past it after a working `--version` leaves
+  only the skill out (2026-11-10): stetdoc stays on the agents' `PATH` and in the app
   (`HostConfig::with_stetdoc`).
+  A `--version` that only runs past the limit (a new program's first run while the OS scans
+  it, after an install or an update) keeps stetdoc on, with the skill a previous run cached
+  when one loads, and the same two runs go again once on a thread of their own within 30 s
+  (`clauseo_profile::skills::stetdoc::start`, 2026-11-11). Their answer goes into the
+  profile the hook reads at each call, so the next agent start gets it: the skill, or after a
+  real failure no stetdoc line and no skill. The `PATH` entry and the blackline's program
+  were given to the host at its start and stay until the app restarts.
+  stetdoc 0.9.3 prints its skill's body with no frontmatter: Clauseo writes one, its
+  description stetdoc's first `# ` heading, the body unchanged (2026-11-11).
   The rest of the build is file reads and rendering. The build finds the
   app's executable, runs stetdoc for its skill (`load_skill`, cached in the plugin's
   `skills/` folder), and renders R22's built-ins. The hook's methods then only map what it

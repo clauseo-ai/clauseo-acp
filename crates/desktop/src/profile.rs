@@ -3,29 +3,31 @@
 //!
 //! [`DesktopProfile::build`] does every file and process call once, on the host-start thread
 //! (`host_start.rs`), before the host starts: it finds the bundled programs, runs stetdoc for
-//! its skill, and renders the skills. The hook's methods then only map what it holds, as the
-//! trait requires: they read no file, start nothing and keep nothing between calls.
+//! its skill, and renders the skills. When stetdoc's first `--version` only passed its limit,
+//! one more check runs on a thread of its own and puts the profile it renders in place for the
+//! next agent start (`profile/stetdoc.rs`). The hook's methods then only map what it holds, as
+//! the trait requires: they read no file, start nothing and keep nothing between calls.
 
 use std::collections::BTreeMap;
 use std::ffi::{OsStr, OsString};
 use std::fmt;
 use std::path::{Path, PathBuf};
-use std::time::Duration;
-
-use futures::future::Either;
+use std::sync::Arc;
 
 use clauseo_host::{HostConfig, McpServer, PackRequest, ProfileHook};
-use clauseo_process::{AsyncIoTimer, PassthroughLauncher, SpawnOptions, Timer as _};
-use clauseo_profile::skills::stetdoc;
+use clauseo_profile::skills::stetdoc::start::State;
 use clauseo_profile::{
     BrowserSidecars, ClauseoProfile, PackWrite, PacksWritten, ProfileError, ProfilePaths,
-    ProfileServer, SkillSource, SkillWrite, SkillsWritten,
+    ProfileServer, SkillWrite, SkillsWritten,
 };
 use clauseo_protocol::{AgentId, AgentKind};
 use clauseo_settings::Locations;
 use serde_json::{Map, Value};
 
 use crate::setup::SetupHook;
+use stetdoc::Live;
+
+mod stetdoc;
 
 /// The target of the profile's support lines: host.log keeps info only from `clauseo_*::lifecycle`
 /// targets (`clauseo_host::log_file`).
@@ -52,17 +54,14 @@ impl fmt::Display for BuildError {
     }
 }
 
-/// How long loading stetdoc's skill may take at start-up, both runs together (`--version`, then
-/// `skills get core` when the cached skill is stale). The host starts after it, and every
-/// command waits for the host, so this bounds how long a slow stetdoc delays the app.
-pub(crate) const STETDOC_START_LIMIT: Duration = Duration::from_secs(3);
-
-/// The launch profile as the host's hook: the profile, built once, and whether stetdoc's folder
-/// goes on the agents' `PATH` (stetdoc was found and ran, and its folder holds no other
-/// program; a skill text it refused does not matter here).
+/// The launch profile as the host's hook: the profile, built at the start and rendered again
+/// once if stetdoc's background check changes it, and whether stetdoc's folder goes on the
+/// agents' `PATH` (stetdoc was found and ran or only passed the limit, and its folder holds no
+/// other program; a skill text it refused does not matter here).
 #[derive(Debug, Clone)]
 pub(crate) struct DesktopProfile {
-    profile: ClauseoProfile,
+    /// Read at each hook call, so an agent start gets the profile as it is then.
+    profile: Live,
     prepend_stetdoc: bool,
     /// `<data>/tools`, holding the `agent-browser` command, when its copy is there
     /// ([`install_browser`]): the host's `ProfileHook::browser_tool`.
@@ -114,34 +113,43 @@ impl DesktopProfile {
         let bundled = bundled_stetdoc(layout.macos, exe_dir, layout.resource_dir);
         let found = stetdoc_program(bundled.as_deref(), path, !cfg!(debug_assertions));
         let paths = paths_for(locations, exe, found.clone())?;
-        let loaded = found
+        let cached = paths.claude_skills();
+        // The program in its plain form (`ProfilePaths::new`: no `\\?\` prefix on Windows), for
+        // the checks and the Word blackline.
+        let program = found.as_ref().map(|_| paths.stetdoc().to_path_buf());
+        let start = program
             .as_deref()
-            .map(|program| load_stetdoc_skill(program, &paths.claude_skills()));
-        // stetdoc stays on when its skill fails: only a stetdoc whose `--version` fails (or that
-        // passes the deadline) is treated as absent, with no PATH entry and no stetdoc line.
-        let ran = loaded
+            .map(|program| stetdoc::first(program, &cached));
+        // stetdoc stays on when its skill fails or its `--version` only passed the limit: only a
+        // stetdoc whose `--version` fails for real is treated as absent, with no PATH entry and
+        // no stetdoc line.
+        let state = start
             .as_ref()
-            .is_some_and(|load| !matches!(load, StetdocLoad::Broken));
-        let prepend = ran && found.as_deref().is_some_and(alone_in_its_folder);
-        let skill = match loaded {
-            Some(StetdocLoad::Skill(skill)) => Some(skill),
-            _ => None,
-        };
+            .map_or(State::Off, |start| start.state.clone());
+        let prepend = state.is_on() && found.as_deref().is_some_and(alone_in_its_folder);
         let browser_tool = install_browser(&paths, path);
         // The browser's skill comes with the copy alone. Whether a session has a browser (its
         // Chrome found, `tools.browser` on, the firm's policy allowing it) is decided at each
         // launch and told in `{browser}`, so a Chrome installed later counts from the next
         // conversation, with no restart.
         let with_browser = browser_tool.is_some();
-        let (profile, refused) = ClauseoProfile::new(paths, None)
-            .with_stetdoc_cli(ran)
-            .with_tool_skills(skill, with_browser);
-        for err in refused {
-            tracing::warn!(%err, "a skill is left out of the profile");
+        let base = ClauseoProfile::new(paths, None);
+        let live = Live::new(stetdoc::render(base.clone(), &state, with_browser));
+        if let (Some(program), Some(start)) = (&program, &start)
+            && start.recheck
+        {
+            let recheck = stetdoc::Recheck {
+                program: program.clone(),
+                cached,
+                state,
+                base,
+                browser: with_browser,
+            };
+            stetdoc::recheck_later(recheck, live.clone());
         }
         Ok(Self {
-            stetdoc: found,
-            ..Self::new(profile, prepend)
+            stetdoc: program,
+            ..Self::over(live, prepend)
         }
         .with_browser_tool(browser_tool))
     }
@@ -154,7 +162,13 @@ impl DesktopProfile {
 
     /// The hook over `profile`, built and rendered already; `prepend_stetdoc` says whether
     /// stetdoc's folder may go on the agents' `PATH`.
+    #[cfg(test)]
     pub(crate) fn new(profile: ClauseoProfile, prepend_stetdoc: bool) -> Self {
+        Self::over(Live::new(profile), prepend_stetdoc)
+    }
+
+    /// The hook over `profile`, read at each call; `prepend_stetdoc` as for `Self::new`.
+    fn over(profile: Live, prepend_stetdoc: bool) -> Self {
         Self {
             profile,
             prepend_stetdoc,
@@ -165,7 +179,7 @@ impl DesktopProfile {
 
     /// The stetdoc found when the profile was built (`stetdoc_program`), for
     /// `HostConfig::with_stetdoc`: the Word blackline runs it. `None` when none was found, and
-    /// for a profile made with [`Self::new`].
+    /// for a profile made with `Self::new` (tests).
     pub(crate) fn stetdoc(&self) -> Option<&Path> {
         self.stetdoc.as_deref()
     }
@@ -176,7 +190,13 @@ impl DesktopProfile {
         if !self.prepend_stetdoc {
             return None;
         }
-        self.profile.path_prepend().map(Path::to_path_buf)
+        self.profile().path_prepend().map(Path::to_path_buf)
+    }
+
+    /// The profile as it is now: the one built at the start, or the one stetdoc's background
+    /// check rendered since.
+    pub(crate) fn profile(&self) -> Arc<ClauseoProfile> {
+        self.profile.get()
     }
 }
 
@@ -245,74 +265,6 @@ pub(crate) struct Layout<'a> {
     pub(crate) macos: bool,
     /// Tauri's resource folder, when it is known.
     pub(crate) resource_dir: Option<&'a Path>,
-}
-
-/// What [`load_stetdoc_skill`] found.
-#[derive(Debug)]
-enum StetdocLoad {
-    /// stetdoc's `--version` works and its skill loaded.
-    Skill(SkillSource),
-    /// stetdoc's `--version` works but its skill was not loaded (`skills get core` failed or
-    /// took too long, or its text was refused: stetdoc 0.9.3 prints no frontmatter). The skill
-    /// is left out; stetdoc stays on, for the agents and the app.
-    NoSkill,
-    /// stetdoc's `--version` did not work (it did not start, exited with an error, printed no
-    /// version), or the deadline passed: it is treated as absent.
-    Broken,
-}
-
-/// stetdoc's skill from `program`, both runs within [`STETDOC_START_LIMIT`] together: first
-/// `--version`, then the skill in what is left of the limit. On the deadline the run is
-/// dropped, and with it its process handle, which kills stetdoc's tree. A `--version` that
-/// fails or passes the deadline is [`StetdocLoad::Broken`]: stetdoc is treated as absent. A
-/// skill that fails or passes the deadline after a working `--version` leaves only the skill
-/// out. Both are logged as warnings.
-fn load_stetdoc_skill(program: &Path, cached: &Path) -> StetdocLoad {
-    let launcher = PassthroughLauncher::new(SpawnOptions::new());
-    // Set once `--version` worked, so a deadline tells which run it stopped.
-    let version_worked = std::cell::Cell::new(false);
-    let work = async {
-        let version = stetdoc::version(&launcher, &AsyncIoTimer, program).await?;
-        version_worked.set(true);
-        Ok::<_, ProfileError>(
-            stetdoc::load_skill_at(&launcher, &AsyncIoTimer, program, &version, cached).await,
-        )
-    };
-    match async_io::block_on(within(STETDOC_START_LIMIT, work)) {
-        Some(Ok(Ok(skill))) => StetdocLoad::Skill(skill),
-        Some(Ok(Err(err))) => {
-            tracing::warn!(%err, "stetdoc's skill text is left out; stetdoc itself stays on");
-            StetdocLoad::NoSkill
-        }
-        Some(Err(err)) => {
-            tracing::warn!(%err, "stetdoc --version failed; stetdoc is treated as absent");
-            StetdocLoad::Broken
-        }
-        None if version_worked.get() => {
-            tracing::warn!(
-                limit_secs = STETDOC_START_LIMIT.as_secs(),
-                "stetdoc's skill text took too long and is left out; stetdoc itself stays on"
-            );
-            StetdocLoad::NoSkill
-        }
-        None => {
-            tracing::warn!(
-                limit_secs = STETDOC_START_LIMIT.as_secs(),
-                "stetdoc took too long and was stopped; it is treated as absent"
-            );
-            StetdocLoad::Broken
-        }
-    }
-}
-
-/// `work`'s output, or `None` once `limit` passed; `work` is then dropped.
-async fn within<F: std::future::Future>(limit: Duration, work: F) -> Option<F::Output> {
-    let work = std::pin::pin!(work);
-    let deadline = std::pin::pin!(AsyncIoTimer.after(limit));
-    match futures::future::select(work, deadline).await {
-        Either::Left((done, _)) => Some(done),
-        Either::Right(((), _)) => None,
-    }
 }
 
 /// Whether `program` is the only program in its folder. A folder found on `PATH` that holds
@@ -479,7 +431,7 @@ impl ProfileHook for DesktopProfile {
         agent: &AgentId,
         packs: Option<&PacksWritten>,
     ) -> Option<Map<String, Value>> {
-        self.profile
+        self.profile()
             .session_meta_with_packs(AgentKind::of(agent), packs)
     }
 
@@ -487,7 +439,7 @@ impl ProfileHook for DesktopProfile {
         if AgentKind::of(agent).is_none() {
             return BTreeMap::new();
         }
-        self.profile
+        self.profile()
             .env()
             .0
             .into_iter()
@@ -499,7 +451,7 @@ impl ProfileHook for DesktopProfile {
         let Some(kind) = AgentKind::of(agent) else {
             return Vec::new();
         };
-        self.profile
+        self.profile()
             .servers(Some(kind))
             .into_iter()
             .map(stdio)
@@ -512,16 +464,16 @@ impl ProfileHook for DesktopProfile {
         written: Option<&SkillsWritten>,
         packs: Option<&PacksWritten>,
     ) -> Map<String, Value> {
-        self.profile
+        self.profile()
             .codex_keys_with_packs(AgentKind::of(agent), written, packs)
     }
 
     fn launch_writes(&self, agent: &AgentId) -> Vec<SkillWrite> {
-        self.profile.launch_writes(AgentKind::of(agent))
+        self.profile().launch_writes(AgentKind::of(agent))
     }
 
     fn pack_write(&self, agent: &AgentId, request: &PackRequest) -> Option<PackWrite> {
-        self.profile.pack_write(
+        self.profile().pack_write(
             AgentKind::of(agent),
             request.entries().to_vec(),
             request.allow_scripts(),
@@ -555,7 +507,7 @@ pub(crate) fn with_profile(
     // name, or "Clauseo"); with none found, the host refuses it (`blackline.no_word_tool`).
     let config = match profile.stetdoc() {
         Some(program) => {
-            config.with_stetdoc(program.to_path_buf(), profile.profile.author().to_owned())
+            config.with_stetdoc(program.to_path_buf(), profile.profile().author().to_owned())
         }
         None => config,
     };

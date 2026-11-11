@@ -64,6 +64,15 @@ impl ProfilePaths {
                 ));
             }
         }
+        // Tauri's resource folder comes from a canonicalized exe, so on Windows stetdoc's path
+        // may be verbatim (`\\?\C:\…`); its folder goes on the agents' `PATH`, where cmd.exe
+        // and other tools do not take that form.
+        let verbatim = dunce::simplified(&stetdoc) != stetdoc.as_path();
+        let stetdoc = if verbatim {
+            dunce::simplified(&stetdoc).to_path_buf()
+        } else {
+            stetdoc
+        };
         let data = locations.data_dir();
         Ok(Self {
             claude_plugin: data.join("profile").join("claude-plugin"),
