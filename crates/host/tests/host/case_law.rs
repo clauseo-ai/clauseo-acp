@@ -160,14 +160,19 @@ fn lawyer(dir: &Dir, extra: &Value) -> (Value, Value) {
     (settings, entry)
 }
 
-/// Claude's `session/new` or `session/load` params with `servers` and, when it got case law,
-/// the pre-allow and the paragraph.
+/// Claude's `session/new` or `session/load` params with `servers`, the allow rule of each of the
+/// lawyer's servers among them (`agent/mcp_trust.rs`) and, when it got case law, the pre-allow
+/// and the paragraph.
 fn claude_params(servers: &[Value], with_case_law: bool) -> Value {
-    let allowed: Vec<&str> = if with_case_law {
-        vec!["mcp__case-law"]
-    } else {
-        Vec::new()
-    };
+    let mut allowed: Vec<String> = servers
+        .iter()
+        .filter_map(|server| server["name"].as_str())
+        .filter(|name| !["browser", "case-law"].contains(name))
+        .map(|name| format!("mcp__{name}"))
+        .collect();
+    if with_case_law {
+        allowed.push("mcp__case-law".to_owned());
+    }
     json!({"mcpServers": claude_servers(servers), "_meta": {
         "systemPrompt": {"append": instructions(with_case_law)},
         "claudeCode": {"options": {"allowedTools": allowed}}}})

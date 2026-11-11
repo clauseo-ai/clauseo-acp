@@ -286,6 +286,9 @@ mod matters;
 #[path = "host/mcp.rs"]
 mod mcp;
 #[cfg(test)]
+#[path = "host/mcp_trust.rs"]
+mod mcp_trust;
+#[cfg(test)]
 #[path = "host/not_allowed.rs"]
 mod not_allowed;
 #[cfg(all(test, unix))]

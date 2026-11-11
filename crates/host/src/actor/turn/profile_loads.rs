@@ -167,6 +167,10 @@ pub(super) fn session_loads(
         super::session::hold_auto_back(actor, thread);
     }
     let sandbox = sandbox.and_then(Result::ok);
+    // The lawyer's servers that run without asking (`agent/mcp_trust.rs`): the ones this
+    // session gets from the settings, less the reserved names.
+    let trusted =
+        crate::agent::mcp_trust::trusted_servers(&actor.effective.settings().mcp.servers, control);
     let claude = (kind == Some(AgentKind::Claude)).then_some(ClaudeKeys {
         web_search,
         login,
@@ -178,6 +182,7 @@ pub(super) fn session_loads(
         browser: browser_on,
         sandbox: sandbox.as_ref(),
         matter: Some(matter),
+        trusted_servers: &trusted,
     });
     let guard = actor
         .pre_write_guard

@@ -40,6 +40,7 @@ fn keys(web_search: Switch, login: Login) -> ClaudeKeys<'static> {
         browser: false,
         sandbox: None,
         matter: None,
+        trusted_servers: &[],
     }
 }
 

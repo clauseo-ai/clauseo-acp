@@ -5,11 +5,12 @@
 //!   when `tools.web_search` is off, whatever the hook sent; when it is on, `allowedTools` gains
 //!   `WebSearch` (not on a Bedrock login, which has none), a bare `WebFetch` (every page fetched
 //!   unasked) and one `WebFetch(domain:…)` per seed site, and `mcp__case-law` only in a
-//!   session that got the `case-law` entry (any hook rule for that server is dropped otherwise);
-//!   in forced ask (`agent/forced_ask.rs`) there is no `allowedTools` at all, the hook's
-//!   included. `additionalDirectories` gains the work folder and the matter notes folder, after
-//!   any hook entries. `settings` gains `disableSkillShellExecution: true` always, and
-//!   `skipWebFetchPreflight: true` on a Bedrock,
+//!   session that got the `case-law` entry (any hook rule for that server is dropped otherwise),
+//!   and before it `mcp__<name>` for each of the lawyer's servers that runs without asking
+//!   (`agent/mcp_trust.rs`); in forced ask (`agent/forced_ask.rs`) there is no `allowedTools`
+//!   at all, the hook's included. `additionalDirectories` gains the work folder and the matter
+//!   notes folder, after any hook entries. `settings` gains `disableSkillShellExecution: true`
+//!   always, and `skipWebFetchPreflight: true` on a Bedrock,
 //!   Vertex or Foundry login, and always `permissions.deny` gains the data folder's rules
 //!   (`agent/data_fence.rs`), after any the hook put there; in forced ask it also gains the
 //!   `permissions.ask` rules and `sandbox.autoAllowBashIfSandboxed: false`, over Claude Code's
@@ -189,6 +190,10 @@ pub(crate) struct ClaudeKeys<'a> {
     /// The matter folder: Claude's `Edit` is denied its `.clauseo` folder (`matter.json`, the
     /// marker that finds a moved matter folder again). None in a test that is about other keys.
     pub(crate) matter: Option<&'a Path>,
+    /// The lawyer's servers whose tools run without asking (`agent/mcp_trust.rs`):
+    /// `allowedTools` gains `mcp__<name>` for each, before case law's. None go in forced ask,
+    /// where there is no `allowedTools` at all.
+    pub(crate) trusted_servers: &'a [String],
 }
 
 /// Adds [`ClaudeKeys`] to `claudeCode.options` (see the module doc).
@@ -210,6 +215,9 @@ pub(crate) fn claude_options(options: &mut Map<String, Value>, keys: &ClaudeKeys
         allowed.retain(|rule| !rule.as_str().is_some_and(is_web_rule));
     }
     allowed.retain(|rule| !rule.as_str().is_some_and(super::case_law::is_case_law_rule));
+    for server in keys.trusted_servers {
+        push_new(&mut allowed, &crate::agent::mcp_trust::claude_rule(server));
+    }
     if keys.case_law {
         push_new(&mut allowed, super::case_law::CLAUDE_ALLOW);
     }

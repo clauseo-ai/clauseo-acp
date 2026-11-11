@@ -31,6 +31,7 @@ pub(crate) mod leftovers;
 pub(crate) mod loads;
 pub(crate) mod login_link;
 pub(crate) mod login_splits;
+pub(crate) mod mcp_trust;
 pub(crate) mod plan_note;
 pub(crate) mod shell_path;
 mod spec;

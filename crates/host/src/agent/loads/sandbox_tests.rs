@@ -120,6 +120,7 @@ fn settings(
         browser,
         sandbox,
         matter: None,
+        trusted_servers: &[],
     };
     let mut options = hook.as_object().cloned().unwrap_or_default();
     claude_options(&mut options, &keys);
@@ -490,6 +491,7 @@ fn the_matter_marker_is_denied_to_claudes_edit() {
         browser: false,
         sandbox: None,
         matter: Some(&session.matter),
+        trusted_servers: &[],
     };
     let mut options = serde_json::Map::new();
     claude_options(&mut options, &keys);

@@ -45,6 +45,9 @@ pub(crate) struct Sources {
     /// A Codex agent's unfinished calls of the `browser` server's tools, for its permission
     /// requests (`actor/turn/asks.rs`); no record comes of them.
     codex_browser: browser::CodexTools,
+    /// A Codex agent's unfinished MCP tool calls of any server, for its permission requests
+    /// (`actor/turn/asks.rs`, `agent/mcp_trust.rs`); no record comes of them.
+    codex_mcp: crate::agent::mcp_trust::CodexCalls,
     calls: calls::Calls,
     /// The case-law calls and the relay's results waiting for them. The host asks it first
     /// (`actor/turn/updates.rs`); a call it claims is not offered to the others.
@@ -63,6 +66,7 @@ impl Sources {
     ) -> Option<DomainEvent> {
         if is_codex(agent) {
             self.codex_browser.started(call);
+            self.codex_mcp.started(call);
         }
         let page = self
             .browser
@@ -82,6 +86,7 @@ impl Sources {
         patch: &ToolCallPatch,
     ) -> Option<DomainEvent> {
         self.codex_browser.updated(acp_id, patch);
+        self.codex_mcp.updated(acp_id, patch);
         let page = self
             .browser
             .updated(turn, acp_id, patch)
@@ -94,6 +99,12 @@ impl Sources {
     /// finished, runs (`browser::CodexTools`).
     pub(crate) fn codex_browser_tool(&self, acp_id: &str) -> Option<&str> {
         self.codex_browser.tool(acp_id)
+    }
+
+    /// The MCP server that the Codex call `acp_id`, started in a live turn and not finished,
+    /// belongs to (`agent::mcp_trust::CodexCalls`).
+    pub(crate) fn codex_mcp_server(&self, acp_id: &str) -> Option<&str> {
+        self.codex_mcp.server(acp_id)
     }
 }
 
