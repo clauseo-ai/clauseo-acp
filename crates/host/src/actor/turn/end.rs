@@ -549,6 +549,6 @@ pub(super) fn check_abort(actor: &mut Actor, thread: ThreadId) {
     };
     current.abort = false;
     if current.live() {
-        cancel::cancel_running(actor, thread, None);
+        cancel::cancel_running(actor, thread, None, cancel::why::FAILURE);
     }
 }

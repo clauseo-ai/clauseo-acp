@@ -2,7 +2,9 @@
 //! prompts whose turn neither started nor ended, in the order they joined the queue (a prompt's
 //! `UserMessage`, a requeued steer's `SteerResolved`), with their edits applied. A steer saved
 //! and never answered (the host stopped first) moves to a new queued turn, so it is not lost; it
-//! keeps its message's place in the log, behind any prompt queued before it. The turns put back
+//! keeps its message's place in the log, behind any prompt queued before it, and so does a steer
+//! the agent took into a turn that then ended `Cancelled` or `Failed`, or never ended (the
+//! repair ends it `Failed`), had the host stopped before it went next (`steer.rs`). The turns put back
 //! at the head live keep that place across a restart: a requeued steer (`steer.rs`) and a turn
 //! put back for its agent's sign-in (`sign_in.rs`) both have their `TurnQueued` marked
 //! `at_head`, so they come back first, the latest put back first, as the live queue has them.
@@ -14,7 +16,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use clauseo_protocol::{
     ContentBlock, Delivery, DomainEvent, Envelope, MessageId, SteerOutcome, SteerResolved,
-    ThreadId, TurnId, TurnQueued,
+    StopReason, ThreadId, TurnId, TurnQueued,
 };
 
 use super::super::super::Actor;
@@ -32,6 +34,8 @@ struct Prompt {
     content: Vec<ContentBlock>,
     /// A steer with no `SteerResolved` yet.
     unanswered: bool,
+    /// The turn a steer was last answered `Injected` into.
+    injected: Option<TurnId>,
 }
 
 /// The queued turns of a log, in queue order, and the turn put back for the sign-in, if any.
@@ -107,6 +111,9 @@ fn queued_turns(log: &[Envelope]) -> QueuedTurns {
     let mut done: BTreeSet<TurnId> = BTreeSet::new();
     let mut heads: BTreeSet<TurnId> = BTreeSet::new();
     let mut steered: BTreeSet<TurnId> = BTreeSet::new();
+    // Turns that ended, and those of them that ended `Cancelled` or `Failed`.
+    let mut ended: BTreeSet<TurnId> = BTreeSet::new();
+    let mut stopped: BTreeSet<TurnId> = BTreeSet::new();
     for (at, envelope) in log.iter().enumerate() {
         let event = &envelope.event;
         if let DomainEvent::UserMessage(message) = event {
@@ -115,6 +122,7 @@ fn queued_turns(log: &[Envelope]) -> QueuedTurns {
                 turn: message.turn,
                 content: message.content.clone(),
                 unanswered: message.delivery == Delivery::Steer,
+                injected: None,
             };
             prompts.insert(message.message, prompt);
         } else if let DomainEvent::QueuedPromptEdited(edited) = event
@@ -125,6 +133,12 @@ fn queued_turns(log: &[Envelope]) -> QueuedTurns {
             && let Some(prompt) = prompts.get_mut(&resolved.message)
         {
             prompt.unanswered = false;
+            prompt.injected = match &resolved.outcome {
+                SteerOutcome::Injected { turn } => Some(*turn),
+                SteerOutcome::Requeued { .. }
+                | SteerOutcome::SentNow { .. }
+                | SteerOutcome::Unknown { .. } => None,
+            };
             if let SteerOutcome::Requeued { turn } | SteerOutcome::SentNow { turn } =
                 &resolved.outcome
             {
@@ -140,14 +154,21 @@ fn queued_turns(log: &[Envelope]) -> QueuedTurns {
             heads.insert(queued.turn());
         } else if let DomainEvent::TurnStarted(started) = event {
             done.insert(started.turn);
-        } else if let DomainEvent::TurnEnded(ended) = event {
-            done.insert(ended.turn);
+        } else if let DomainEvent::TurnEnded(end) = event {
+            done.insert(end.turn);
+            ended.insert(end.turn);
+            if matches!(end.stop, StopReason::Cancelled | StopReason::Failed) {
+                stopped.insert(end.turn);
+            }
         }
     }
     let mut queued: Vec<(Place, Restored, MessageId, Vec<ContentBlock>)> = prompts
         .into_iter()
         .filter_map(|(message, prompt)| {
-            let (restored, head) = if prompt.unanswered {
+            let lost = prompt
+                .injected
+                .is_some_and(|into| stopped.contains(&into) || !ended.contains(&into));
+            let (restored, head) = if prompt.unanswered || lost {
                 (Restored::Unanswered(prompt.turn), false)
             } else if done.contains(&prompt.turn) {
                 return None;

@@ -9,7 +9,7 @@ use super::super::super::commands::{AfterCommand, CommandCtx};
 use super::super::super::{Actor, Tag};
 use super::super::out::Out;
 use super::super::{TurnPhase, cancel, lost, state};
-use super::{After, command_tag, move_on, queue, sync_held, with_stream};
+use super::{After, command_tag, move_on, queue, steer, sync_held, with_stream};
 use crate::build;
 use crate::error::Error;
 
@@ -264,7 +264,9 @@ fn held_by_stop(actor: &Actor, thread: ThreadId) -> bool {
 
 /// `SendQueuedNow`: the turn moves to the head and starts once the current turn, cancelled
 /// now, has ended; with no current turn it starts now. The move logs nothing but the receipt.
-/// Under `stop_agents`' hold nothing moves (`held_by_stop`).
+/// Naming the turn a steer not settled yet was sent into, it sends that steer now instead
+/// (`steer.rs`): the turn is cancelled if it still runs, and the steer goes next. Under
+/// `stop_agents`' hold nothing moves (`held_by_stop`).
 pub(in super::super) fn send_now(
     actor: &mut Actor,
     ctx: CommandCtx,
@@ -282,6 +284,15 @@ fn send_now_loaded(
     thread: ThreadId,
     turn: TurnId,
 ) -> Result<(), Error> {
+    if steer::unsettled(actor, thread, turn) {
+        receipt_only(actor, ctx, thread)?;
+        if !held_by_stop(actor, thread) {
+            steer::send_now(actor, thread, turn);
+            move_on(actor, thread);
+            sync_held(actor, thread);
+        }
+        return Ok(());
+    }
     if find(actor, thread, turn)? {
         // Already the turn being started.
         return receipt_only(actor, ctx, thread);
@@ -298,7 +309,7 @@ fn send_now_loaded(
         queue.turns.push_front(queued);
         queue.held = false;
     }
-    cancel::cancel_current(actor, thread);
+    cancel::cancel_current(actor, thread, cancel::why::SEND_NOW);
     move_on(actor, thread);
     sync_held(actor, thread);
     Ok(())
