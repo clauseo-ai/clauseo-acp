@@ -178,21 +178,38 @@ fn browsing_and_reading_run_unasked() {
     );
 }
 
-/// `eval`, `pdf`, `download`, `upload`, a JavaScript wait, `cdp-url`, a local file and an
-/// option that loads page JavaScript ask, bare, behind `--json` or chained.
+/// `eval`, `pdf` and `download` are refused, bare, behind `--json` or chained: a deny rule
+/// wins over every allow and ask rule.
 #[test]
-fn page_javascript_and_files_ask() {
+fn eval_pdf_and_download_are_refused() {
     assert_all(
-        Verdict::Ask,
+        Verdict::Deny,
         &[
             "agent-browser eval \"document.title\"",
             "agent-browser eval --stdin",
             "echo 1 | agent-browser eval --stdin",
             "agent-browser --json eval 1",
             "agent-browser open https://a.in && agent-browser eval 1",
+            "agent-browser snapshot; agent-browser --json eval 1",
             "agent-browser pdf page.pdf",
+            "agent-browser --json pdf page.pdf",
+            "agent-browser open https://a.in && agent-browser pdf a.pdf",
             "agent-browser download @e1 /tmp/x.pdf",
+            "agent-browser --json download @e1 x.pdf",
+            "agent-browser click @e1 && agent-browser download @e2 x.pdf",
+        ],
+    );
+}
+
+/// `upload`, a JavaScript wait, `cdp-url`, a local file and an option that loads page
+/// JavaScript ask, bare, behind `--json` or chained.
+#[test]
+fn page_javascript_and_files_ask() {
+    assert_all(
+        Verdict::Ask,
+        &[
             "agent-browser upload @e5 a.pdf",
+            "agent-browser --json upload @e5 a.pdf",
             "agent-browser wait --fn \"window.ok\"",
             "agent-browser wait -f x",
             "agent-browser --json wait --fn x",
