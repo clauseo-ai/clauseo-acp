@@ -2,17 +2,21 @@
 //! claude-agent-acp answers `injected` once the steer is in its own queue, and drops it unread
 //! on a cancel. The fake agent plays Claude (`claude-acp`, with its home in the data folder) and
 //! the test writes the transcript line Claude Code would. Shown taken in while the turn runs,
-//! the steer is logged `Injected`; never shown, it is `NotSent` once the turn ends, whether it
-//! ended `end_turn` or was stopped, and it is never sent again on its own; Send now on it cancels
-//! the turn and sends it as the next one.
+//! the steer is logged `Injected`, however much Claude wrote around its line, but never for a
+//! line from before its send or a tool's output that holds its text; never shown, it is
+//! `NotSent` once the turn is stopped, and it is never sent again on its own; Send now on it
+//! cancels the turn and sends it as the next one. After `end_turn` it is checked on for a while
+//! (`steer_grace.rs`).
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use clauseo_protocol::{
     CommandOutcome, DeliveryRequest, DomainEvent, HostCommand, MessageId, SteerOutcome, StopReason,
     StreamId, ThreadId,
 };
+
+use serde_json::{Value, json};
 
 use crate::observe::Events;
 use crate::permissions::until_first_request;
@@ -22,12 +26,12 @@ use crate::support::{Dir, Running, Scenario, matter_with_thread, text};
 /// The agent id that makes a fake agent a Claude agent.
 const CLAUDE: &str = "claude-acp";
 /// The steered text the scenarios expect.
-const STEER: &str = "Focus on clause 4";
-/// How often the host reads the transcript while the steer's turn runs.
-const EVERY: Duration = Duration::from_secs(2);
+pub(crate) const STEER: &str = "Focus on clause 4";
+/// How often the host reads the transcript while a steer waits.
+pub(crate) const EVERY: Duration = Duration::from_secs(2);
 
 /// The outcomes of `message`'s `SteerResolved`s, in order.
-fn outcomes(events: &Events, message: MessageId) -> Vec<SteerOutcome> {
+pub(crate) fn outcomes(events: &Events, message: MessageId) -> Vec<SteerOutcome> {
     events
         .events()
         .filter_map(|event| match event {
@@ -40,7 +44,7 @@ fn outcomes(events: &Events, message: MessageId) -> Vec<SteerOutcome> {
 }
 
 /// A Claude thread playing `scenario`, its events, and the matter folder.
-fn claude(
+pub(crate) fn claude(
     test: &str,
     scenario: &'static str,
 ) -> (Dir, Running, ThreadId, Events, std::path::PathBuf) {
@@ -51,24 +55,35 @@ fn claude(
     (dir, host, thread, events, folder)
 }
 
-/// Writes the transcript Claude Code keeps for the scenarios' session `sess-1`, with a `user`
-/// line holding the steer. Stamped far ahead, so it is never earlier than the steer's send on
-/// the test clock.
-fn write_taken_in(dir: &Dir, folder: &Path) {
+/// The transcript Claude Code keeps for the scenarios' session `sess-1`.
+fn transcript(dir: &Dir, folder: &Path) -> PathBuf {
     let home = dir.data().join("agents").join(CLAUDE).join("home");
-    let path = clauseo_host::claude_transcript(&home, folder, "sess-1");
-    let lines = [
-        serde_json::json!({"type": "queue-operation", "operation": "enqueue",
-            "timestamp": "2999-01-01T00:00:00.000Z", "content": STEER}),
-        serde_json::json!({"type": "user", "timestamp": "2999-01-01T00:00:00.000Z",
-            "message": {"role": "user", "content": [{"type": "text", "text": STEER}]}}),
-    ];
-    let mut text = String::new();
-    for line in &lines {
+    clauseo_host::claude_transcript(&home, folder, "sess-1")
+}
+
+/// Appends `lines` to the transcript, one per line.
+fn append(dir: &Dir, folder: &Path, lines: &[Value]) {
+    let path = transcript(dir, folder);
+    let mut text = std::fs::read_to_string(&path).unwrap_or_default();
+    for line in lines {
         text.push_str(&line.to_string());
         text.push('\n');
     }
     crate::write::write(&path, text.as_bytes());
+}
+
+/// A `user` line holding the steer, as Claude Code writes the lawyer's message. Stamped far
+/// ahead, so it is never earlier than the steer's send on the test clock.
+fn steer_line() -> Value {
+    json!({"type": "user", "timestamp": "2999-01-01T00:00:00.000Z",
+        "message": {"role": "user", "content": [{"type": "text", "text": STEER}]}})
+}
+
+/// Writes the transcript with the steer queued, then its `user` line.
+pub(crate) fn write_taken_in(dir: &Dir, folder: &Path) {
+    let enqueue = json!({"type": "queue-operation", "operation": "enqueue",
+        "timestamp": "2999-01-01T00:00:00.000Z", "content": STEER});
+    append(dir, folder, &[enqueue, steer_line()]);
 }
 
 #[test]
@@ -108,28 +123,49 @@ fn a_steer_the_transcript_shows_taken_in_is_injected() {
 }
 
 #[test]
-fn a_steer_the_transcript_never_shows_is_not_sent_once_the_turn_ends() {
-    let (_dir, host, thread, mut events, _) = claude(
-        "a_steer_the_transcript_never_shows_is_not_sent_once_the_turn_ends",
-        "claude-steer-unconfirmed",
-    );
+fn a_steer_is_found_past_a_large_tool_result_but_never_in_one() {
+    let test = "a_steer_is_found_past_a_large_tool_result_but_never_in_one";
+    let (dir, host, thread, mut events, folder) = claude(test, "claude-steer-confirmed");
+    // The transcript holds the steer's text before it goes out: that line is never read.
+    append(&dir, &folder, &[steer_line()]);
     let (first, _) = host.prompt(thread, "Summarise the clause.");
     host.wait_armed(DURABLE);
     let (_, message) = send(&host, thread, text(STEER), DeliveryRequest::Steer);
-    assert_eq!(events.until_turn_ended(first).stop, StopReason::EndTurn);
-    events.until("SteerResolved { NotSent }", |e| {
+    // The permission comes after the steer went out, marked at the transcript's end.
+    until_first_request(&mut events);
+    // A tool's output that holds the steer's text does not show it taken in.
+    let output = json!({"type": "user", "timestamp": "2999-01-01T00:00:00.000Z",
+        "toolUseResult": STEER, "message": {"role": "user", "content": [
+            {"type": "tool_result", "tool_use_id": "t1", "content": STEER}]}});
+    append(&dir, &folder, &[output]);
+    host.wait_armed(EVERY);
+    host.clock.advance(EVERY);
+    // The next check armed: the one before answered.
+    host.wait_armed(EVERY);
+    settle(&host, &mut events);
+    assert!(outcomes(&events, message).is_empty(), "{}", events.dump());
+
+    // Claude reads large files while it takes the steer in: more than 256 KiB of tool output
+    // on each side of the steer's line.
+    let large = |id: &str| {
+        json!({"type": "user", "timestamp": "2999-01-01T00:00:00.000Z", "message": {
+            "role": "user", "content": [{"type": "tool_result", "tool_use_id": id,
+                "content": "x".repeat(400 * 1024)}]}})
+    };
+    append(&dir, &folder, &[large("t2"), steer_line(), large("t3")]);
+    host.clock.advance(EVERY);
+    events.until("SteerResolved { Injected }", |e| {
         !outcomes(e, message).is_empty()
     });
-    // `settle` checks the agent saw no second prompt.
+    allow(&host, &mut events, thread);
+    assert_eq!(events.until_turn_ended(first).stop, StopReason::EndTurn);
     settle(&host, &mut events);
     assert_eq!(
         outcomes(&events, message),
-        [SteerOutcome::NotSent { turn: first }],
+        [SteerOutcome::Injected { turn: first }],
         "{}",
         events.dump()
     );
-    let turns = events.count(|e| matches!(e, DomainEvent::TurnStarted(_)));
-    assert_eq!(turns, 1, "{}", events.dump());
     host.shutdown();
 }
 

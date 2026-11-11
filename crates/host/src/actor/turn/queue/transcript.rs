@@ -3,13 +3,18 @@
 //! the model reads it, and drops it unread on a cancel; Claude Code, though, writes each message
 //! it takes to `<claude home>/projects/<project key>/<session id>.jsonl`. A steer counts as taken
 //! in when a line written no earlier than [`SKEW`] before its send holds one of its text blocks,
-//! both trimmed, exactly: a `user` line, a `queued_command` attachment, or a queue operation
-//! `remove` the turn absorbed (`absorbed_mid_turn`). An `enqueue` alone is still waiting, and a
-//! `dequeue` before an interrupt was dropped, so neither counts.
+//! both trimmed, exactly, where the lawyer's own words go: a `user` line's message content (a
+//! string, or its `text` blocks; never a `tool_result`, whose content is a tool's output), a
+//! `queued_command` attachment's prompt, or the content of a queue operation `remove` the turn
+//! absorbed (`absorbed_mid_turn`). An `enqueue` alone is still waiting, and a `dequeue` before an
+//! interrupt was dropped, so neither counts.
 //!
-//! Read only, off the actor, and bounded: the last [`TAIL`] bytes of each file, whose first,
-//! partial line is skipped. A file missing, unreadable or not JSON lines shows nothing: a steer
-//! is never taken as in on doubt. Nothing read here is logged.
+//! Read only, off the actor, and bounded: each file is marked with its length when the steer
+//! goes out ([`mark`]), and each check reads on from where the last one stopped, at most
+//! [`CAP`] bytes, up to the last whole line; a line cut by the cap or still being written is read
+//! again by the next check, and one longer than the cap is skipped. A file missing, unreadable or
+//! not JSON lines shows nothing: a steer is never taken as in on doubt. Nothing read here is
+//! logged.
 
 use std::collections::BTreeMap;
 use std::io::{Read as _, Seek as _, SeekFrom};
@@ -19,8 +24,9 @@ use std::time::Duration;
 use clauseo_protocol::{AgentSessionId, Timestamp};
 use serde_json::Value;
 
-/// The most bytes read from the end of one transcript.
-const TAIL: u64 = 256 * 1024;
+/// The most bytes one check reads from one transcript: eight times the longest prompt text
+/// (`MAX_PROMPT_TEXT_BYTES`), so a steer's own line fits whole, JSON escapes and all.
+const CAP: u64 = 2 * 1024 * 1024;
 /// How much earlier than the steer's send a line may be stamped, for the two clocks.
 const SKEW: Duration = Duration::from_secs(2);
 
@@ -76,92 +82,210 @@ impl Session {
     }
 }
 
-/// For each of `asks`, whether its session's transcript shows it taken in. Each file is read
-/// once, however many steers look in it.
-pub(super) fn taken(asks: &[(Session, Wanted)]) -> Vec<bool> {
-    let mut lines: BTreeMap<PathBuf, Vec<Value>> = BTreeMap::new();
-    asks.iter()
-        .map(|(session, wanted)| {
-            session.transcripts().into_iter().any(|path| {
-                lines
-                    .entry(path)
-                    .or_insert_with_key(|path| read_lines(path))
-                    .iter()
-                    .any(|line| shows(line, wanted))
-            })
+/// Where the next read of a transcript starts: a byte offset, at the start of a line unless
+/// `inside` a line longer than [`CAP`], which is skipped to its end.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord)]
+pub(super) struct Resume {
+    at: u64,
+    inside: bool,
+}
+
+/// One transcript file and where its next read starts.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct Place {
+    path: PathBuf,
+    resume: Resume,
+}
+
+/// `session`'s transcripts, each marked at its length now, just before a steer goes out, so
+/// what Claude writes for the steer comes after the mark. A file not there yet is marked at its
+/// start. One `stat` per file, in the host's own data folder; nothing is read.
+pub(super) fn mark(session: &Session) -> Vec<Place> {
+    session
+        .transcripts()
+        .into_iter()
+        .map(|path| {
+            let at = std::fs::metadata(&path).map_or(0, |meta| meta.len());
+            Place {
+                path,
+                resume: Resume { at, inside: false },
+            }
         })
         .collect()
 }
 
-/// The JSON lines of the last [`TAIL`] bytes of `path`; none when it cannot be read.
-pub(super) fn read_lines(path: &Path) -> Vec<Value> {
-    let Ok(bytes) = read_tail(path) else {
-        return Vec::new();
-    };
-    String::from_utf8_lossy(&bytes)
-        .lines()
-        .filter_map(|line| serde_json::from_str(line).ok())
+/// What one check saw for one steer: whether it was taken in, where each of its transcripts is
+/// read on from, and whether a read stopped at the cap with more to read.
+#[derive(Debug, Clone)]
+pub(super) struct Seen {
+    pub(super) found: bool,
+    pub(super) places: Vec<Place>,
+    pub(super) behind: bool,
+}
+
+/// What one read of a file from one place gave.
+#[derive(Debug, Default)]
+struct Read {
+    lines: Vec<Value>,
+    next: Resume,
+    behind: bool,
+}
+
+/// For each of `asks`, its places and what it looks for, what its transcripts show. A file is
+/// read once per place, however many steers read it from there.
+pub(super) fn taken(asks: Vec<(Vec<Place>, Wanted)>) -> Vec<Seen> {
+    let mut reads: BTreeMap<(PathBuf, Resume), Read> = BTreeMap::new();
+    asks.into_iter()
+        .map(|(places, wanted)| {
+            let mut seen = Seen {
+                found: false,
+                places: Vec::with_capacity(places.len()),
+                behind: false,
+            };
+            for Place { path, resume } in places {
+                let read = reads.entry((path.clone(), resume)).or_insert_with(|| {
+                    read_on(&path, resume, CAP).unwrap_or_else(|_| Read::unread(resume))
+                });
+                seen.found |= read.lines.iter().any(|line| shows(line, &wanted));
+                seen.behind |= read.behind;
+                seen.places.push(Place {
+                    path,
+                    resume: read.next,
+                });
+            }
+            seen
+        })
         .collect()
 }
 
-/// The last [`TAIL`] bytes of `path`, from the first line that starts in them.
-fn read_tail(path: &Path) -> std::io::Result<Vec<u8>> {
-    let mut file = std::fs::File::open(path)?;
-    let start = file.metadata()?.len().saturating_sub(TAIL);
-    file.seek(SeekFrom::Start(start))?;
-    let mut bytes = Vec::new();
-    file.take(TAIL).read_to_end(&mut bytes)?;
-    if start > 0 {
-        let first = bytes
-            .iter()
-            .position(|byte| *byte == b'\n')
-            .map_or(bytes.len(), |at| at + 1);
-        bytes.drain(..first);
+impl Read {
+    /// A file that could not be read: nothing, read again from the same place next time.
+    fn unread(resume: Resume) -> Self {
+        Self {
+            lines: Vec::new(),
+            next: resume,
+            behind: false,
+        }
     }
-    Ok(bytes)
+}
+
+/// The JSON lines of `path` from `resume`, at most `cap` bytes, up to the last whole line, and
+/// where the next read starts. A line cut at the end is read again next time, from its start; a
+/// line with no end within `cap` bytes is skipped to its end. A file shorter than its mark was
+/// replaced: it is read from its start.
+fn read_on(path: &Path, resume: Resume, cap: u64) -> std::io::Result<Read> {
+    let mut file = std::fs::File::open(path)?;
+    let resume = if file.metadata()?.len() < resume.at {
+        Resume::default()
+    } else {
+        resume
+    };
+    file.seek(SeekFrom::Start(resume.at))?;
+    let mut bytes = Vec::new();
+    file.take(cap).read_to_end(&mut bytes)?;
+    let read = u64::try_from(bytes.len()).unwrap_or(u64::MAX);
+    let full = read >= cap;
+    let newline = |bytes: &[u8]| bytes.iter().position(|byte| *byte == b'\n');
+    // Inside a line too long to read, the read starts after its end, if that is in these bytes.
+    let skipped = if resume.inside {
+        newline(&bytes).map(|at| at + 1)
+    } else {
+        Some(0)
+    };
+    let Some(start) = skipped else {
+        let next = Resume {
+            at: resume.at.saturating_add(read),
+            inside: true,
+        };
+        return Ok(Read {
+            lines: Vec::new(),
+            next,
+            behind: full,
+        });
+    };
+    let body = bytes.get(start..).unwrap_or_default();
+    let whole = body
+        .iter()
+        .rposition(|byte| *byte == b'\n')
+        .map_or(0, |at| at + 1);
+    let next = if whole == 0 && start == 0 && full {
+        // One line longer than the cap: never a steer's own, skipped to its end.
+        Resume {
+            at: resume.at.saturating_add(read),
+            inside: true,
+        }
+    } else {
+        let done = u64::try_from(start + whole).unwrap_or(u64::MAX);
+        Resume {
+            at: resume.at.saturating_add(done),
+            inside: false,
+        }
+    };
+    let lines = String::from_utf8_lossy(body.get(..whole).unwrap_or_default())
+        .lines()
+        .filter_map(|line| serde_json::from_str(line).ok())
+        .collect();
+    Ok(Read {
+        lines,
+        next,
+        behind: full,
+    })
 }
 
 /// Whether `line` shows `wanted` taken in: a line of a kind that means taken, stamped no earlier
-/// than the steer allows, holding one of its texts.
+/// than the steer allows, whose words hold one of its texts.
 pub(super) fn shows(line: &Value, wanted: &Wanted) -> bool {
     let stamped = line
         .get("timestamp")
         .and_then(Value::as_str)
         .and_then(clauseo_limits::parse_rfc3339)
         .is_some_and(|at| at.as_millis() >= wanted.since);
-    stamped && means_taken(line) && holds(line, &wanted.texts)
+    stamped
+        && words(line).is_some_and(|words| {
+            texts(words).any(|text| wanted.texts.iter().any(|want| want == text.trim()))
+        })
 }
 
-/// A `user` line, a `queued_command` attachment, or a queue operation `remove` the turn
-/// absorbed.
-fn means_taken(line: &Value) -> bool {
-    let field =
-        |value: &Value, key: &str| value.get(key).and_then(Value::as_str).map(str::to_owned);
-    match field(line, "type").as_deref() {
-        Some("user") => true,
-        Some("attachment") => line.get("attachment").is_some_and(|attachment| {
-            field(attachment, "type").as_deref() == Some("queued_command")
-        }),
-        Some("queue-operation") => {
+/// Where a line that means taken keeps the lawyer's words: a `user` line's message content, a
+/// `queued_command` attachment's prompt, or the content of a queue operation `remove` the turn
+/// absorbed. None for any other line.
+fn words(line: &Value) -> Option<&Value> {
+    fn field<'a>(value: &'a Value, key: &str) -> Option<&'a str> {
+        value.get(key).and_then(Value::as_str)
+    }
+    match field(line, "type")? {
+        "user" => line.get("message")?.get("content"),
+        "attachment" => {
+            let attachment = line.get("attachment")?;
+            (field(attachment, "type")? == "queued_command")
+                .then(|| attachment.get("prompt"))
+                .flatten()
+        }
+        "queue-operation" => {
             let absorbed = line.as_object().is_some_and(|fields| {
                 fields
                     .values()
                     .any(|value| value.as_str() == Some("absorbed_mid_turn"))
             });
-            field(line, "operation").as_deref() == Some("remove") && absorbed
+            (field(line, "operation")? == "remove" && absorbed)
+                .then(|| line.get("content"))
+                .flatten()
         }
-        _ => false,
+        _ => None,
     }
 }
 
-/// Whether a string anywhere in `value`, trimmed, is one of `texts`.
-fn holds(value: &Value, texts: &[String]) -> bool {
-    match value {
-        Value::String(text) => texts.iter().any(|wanted| wanted == text.trim()),
-        Value::Array(values) => values.iter().any(|value| holds(value, texts)),
-        Value::Object(fields) => fields.values().any(|value| holds(value, texts)),
-        Value::Null | Value::Bool(_) | Value::Number(_) => false,
-    }
+/// The texts of a message's content: the string itself, or each of its `text` blocks' text.
+/// Every other block (a `tool_result`, an image) holds none of the lawyer's words.
+fn texts(content: &Value) -> impl Iterator<Item = &str> {
+    let blocks = content.as_array().map(Vec::as_slice).unwrap_or_default();
+    let blocks = blocks.iter().filter_map(|block| {
+        let text = block.get("text").and_then(Value::as_str);
+        (block.get("type").and_then(Value::as_str) == Some("text"))
+            .then_some(text)
+            .flatten()
+    });
+    content.as_str().into_iter().chain(blocks)
 }
 
 #[cfg(test)]
