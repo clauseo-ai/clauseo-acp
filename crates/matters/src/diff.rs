@@ -35,19 +35,25 @@ impl DiffFile for SizedFile {
 /// The changes from `old` to `new` (both sorted by path), sorted by path. A path that left the
 /// tree because it is now over the cap (in `over_cap`) is not a deletion. A deletion and an
 /// addition with the same blob are a rename; several are paired in path order.
+#[cfg(test)]
 pub(crate) fn diff(
     old: &[SizedFile],
     new: &[SizedFile],
     over_cap: &BTreeSet<&str>,
 ) -> Result<Vec<FileChange>, Error> {
-    diff_by(old, new, over_cap, &mut |file| Ok(file.size))
+    diff_by(old, new, over_cap, &BTreeSet::new(), &mut |file| {
+        Ok(file.size)
+    })
 }
 
 /// [`diff`] over any files, asking `size` for the size of only the files a change reports.
+/// An addition at a path of `not_renamed` (a file that was in the folder before, never
+/// versioned: `first_read.rs`) is never paired as a rename's new name.
 pub(crate) fn diff_by<F: DiffFile>(
     old: &[F],
     new: &[F],
     over_cap: &BTreeSet<&str>,
+    not_renamed: &BTreeSet<&str>,
     size_of: &mut dyn FnMut(&F) -> Result<u64, Error>,
 ) -> Result<Vec<FileChange>, Error> {
     let mut added: Vec<&F> = Vec::new();
@@ -89,6 +95,7 @@ pub(crate) fn diff_by<F: DiffFile>(
     for file in added {
         let from = by_blob
             .get_mut(&file.blob())
+            .filter(|_| !not_renamed.contains(file.path().as_str()))
             .and_then(|candidates| (!candidates.is_empty()).then(|| candidates.remove(0)));
         let blob = content_id(file.blob())?;
         let bytes = size(size_of(file)?);

@@ -6,7 +6,7 @@ use clauseo_matters::{CheckpointOutcome, Limits};
 use clauseo_protocol::{SkippedFile, SkippedFileReason};
 
 use crate::fixture::{
-    Fixture, added, assert_none, cid, created, meta, modified, path, tools, undo,
+    Fixture, assert_none, cid, created, meta, modified, path, read_at, tools, undo,
 };
 #[cfg(unix)]
 use crate::support;
@@ -107,11 +107,11 @@ fn cloud_only_file_skipped() {
     let checkpoint = matter.before_turn(&meta(3)).unwrap();
     assert_none(&checkpoint.skipped);
 
-    // Downloaded: now it is versioned, as a new file.
+    // Downloaded unchanged: now it is versioned, as the baseline it was, not as a new file.
     let_in(&fx, "cloud2.docx");
     fx.probe.unmark(fx.file("cloud2.docx"));
-    let changes = created(matter.before_turn(&meta(4)).unwrap(), 4);
-    assert_eq!(changes, [added("cloud2.docx", b"also in the cloud")]);
+    assert_none(&created(matter.before_turn(&meta(4)).unwrap(), 4));
+    assert_eq!(read_at(&matter, 4, "cloud2.docx"), b"also in the cloud");
 }
 
 #[test]
@@ -179,20 +179,16 @@ fn changed_cloud_only_file_never_read() {
         [modified("other.txt", b"other v2", b"other v1")]
     );
 
-    // Downloaded again: the change is from the old content id, and the new file is added.
+    // Downloaded again: the change is from the old content id, and the new file, there
+    // unchanged since the step saw it skipped, is a baseline, not an added file.
     for rel in ["doc.docx", "new.docx"] {
         let_in(&fx, rel);
         fx.probe.unmark(fx.file(rel));
     }
     assert_eq!(fx.read("doc.docx"), b"v2 from the cloud");
     let changes = created(matter.before_turn(&meta(6)).unwrap(), 6);
-    assert_eq!(
-        changes,
-        [
-            modified("doc.docx", b"v1", b"v2 from the cloud"),
-            added("new.docx", b"never versioned"),
-        ]
-    );
+    assert_eq!(changes, [modified("doc.docx", b"v1", b"v2 from the cloud")]);
+    assert_eq!(read_at(&matter, 6, "new.docx"), b"never versioned");
 }
 
 /// A subfolder that does not read is skipped with a warning and its files stay in the tree as

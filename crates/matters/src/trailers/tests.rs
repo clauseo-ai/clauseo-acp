@@ -1,8 +1,11 @@
 use std::str::FromStr;
 
-use clauseo_protocol::{CheckpointId, CheckpointKind, ThreadId, TurnId};
+use clauseo_protocol::{
+    CheckpointId, CheckpointKind, MatterPath, SkippedFile, SkippedFileReason, ThreadId, TurnId,
+};
 
-use super::{message, parse};
+use super::{first_reads, message, parse};
+use crate::first_read::FirstReads;
 use crate::types::TimelineEntry;
 
 const ID: &str = "0190a6c8-6f8e-7c3a-8b1e-2f4d5a6b7c8d";
@@ -20,7 +23,11 @@ fn entry(kind: CheckpointKind, with_turn: bool) -> TimelineEntry {
 
 #[test]
 fn an_after_turn_message_is_a_summary_then_four_trailers_in_order() {
-    let text = message(&entry(CheckpointKind::AfterTurn, true), 3);
+    let text = message(
+        &entry(CheckpointKind::AfterTurn, true),
+        3,
+        &FirstReads::default(),
+    );
     let expected = format!(
         "After turn: 3 files changed\n\nClauseo-Checkpoint: {ID}\nClauseo-Kind: after-turn\n\
          Clauseo-Thread: {THREAD}\nClauseo-Turn: {TURN}\n"
@@ -30,7 +37,11 @@ fn an_after_turn_message_is_a_summary_then_four_trailers_in_order() {
 
 #[test]
 fn an_import_message_counts_files_and_has_no_thread_or_turn() {
-    let text = message(&entry(CheckpointKind::Import, false), 1);
+    let text = message(
+        &entry(CheckpointKind::Import, false),
+        1,
+        &FirstReads::default(),
+    );
     assert_eq!(
         text,
         format!("Import: 1 file\n\nClauseo-Checkpoint: {ID}\nClauseo-Kind: import\n")
@@ -50,7 +61,11 @@ fn every_kind_round_trips_through_its_message() {
     ] {
         for with_turn in [false, true] {
             let written = entry(kind, with_turn);
-            assert_eq!(parse(&message(&written, 2)), Some(written), "{kind:?}");
+            assert_eq!(
+                parse(&message(&written, 2, &FirstReads::default())),
+                Some(written),
+                "{kind:?}"
+            );
         }
     }
 }
@@ -75,4 +90,59 @@ fn a_message_without_a_valid_checkpoint_id_is_not_a_checkpoint() {
     // The id must be in the last paragraph.
     let earlier = format!("x\n\nClauseo-Checkpoint: {ID}\n\nSigned-off-by: someone\n");
     assert_eq!(parse(&earlier), None);
+}
+
+fn skipped(path: &str, reason: SkippedFileReason) -> SkippedFile {
+    SkippedFile {
+        path: MatterPath::new(path).unwrap(),
+        reason,
+    }
+}
+
+#[test]
+fn files_read_for_the_first_time_follow_the_turn_and_round_trip() {
+    let reads = FirstReads {
+        baseline: vec![
+            skipped("notes.txt", SkippedFileReason::CloudOnly),
+            skipped("Exhibits/scan 2.pdf ", SkippedFileReason::OverSizeCap),
+        ],
+        changed: vec![skipped("brief: v2.docx", SkippedFileReason::CloudOnly)],
+    };
+    let text = message(&entry(CheckpointKind::AfterTurn, true), 1, &reads);
+    let expected = format!(
+        "After turn: 1 file changed\n\nClauseo-Checkpoint: {ID}\nClauseo-Kind: after-turn\n\
+         Clauseo-Thread: {THREAD}\nClauseo-Turn: {TURN}\n\
+         Clauseo-Baseline: cloud-only notes.txt\n\
+         Clauseo-Baseline: over-size-cap Exhibits/scan 2.pdf \n\
+         Clauseo-Was-Skipped: cloud-only brief: v2.docx\n"
+    );
+    assert_eq!(text, expected);
+    // A path's spaces, even a last one, and a `: ` in it are kept.
+    assert_eq!(first_reads(&text), reads);
+    // Older readers see the same checkpoint: the new keys are unknown to them.
+    assert_eq!(parse(&text), Some(entry(CheckpointKind::AfterTurn, true)));
+    assert_eq!(
+        first_reads(&message(
+            &entry(CheckpointKind::Undo, false),
+            0,
+            &FirstReads::default()
+        )),
+        FirstReads::default()
+    );
+}
+
+#[test]
+fn a_reason_from_a_newer_clauseo_reads_as_unknown_and_a_bad_value_is_left_out() {
+    let text = format!(
+        "Before turn: 0 files changed\n\nClauseo-Checkpoint: {ID}\n\
+         Clauseo-Was-Skipped: too-deep a/b.txt\nClauseo-Baseline: no-path\n\
+         Clauseo-Baseline: cloud-only /rooted\n"
+    );
+    assert_eq!(
+        first_reads(&text),
+        FirstReads {
+            baseline: Vec::new(),
+            changed: vec![skipped("a/b.txt", SkippedFileReason::Unknown)],
+        }
+    );
 }

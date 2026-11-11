@@ -1,0 +1,142 @@
+//! A file the last checkpoint skipped (cloud-only, or over the cap) that a turn reads for the
+//! first time: it was in the folder before, so it is never an added paper and undo never
+//! deletes it. Read unchanged it is a baseline (no change, a `Clauseo-Baseline` trailer).
+
+use std::path::Path;
+
+use clauseo_matters::{Error, Limits};
+
+use crate::fixture::{
+    Fixture, assert_none, cid, created, meta, modified, path, read_at, tools, undo, undo_all,
+    undo_request,
+};
+
+/// The message of the commit the timeline's ref (`refs/clauseo/timeline`) names.
+fn tip_message(git_dir: &Path) -> String {
+    use gix::objs::Find as _;
+    let hex = std::fs::read_to_string(git_dir.join("refs/clauseo/timeline")).unwrap();
+    let id = gix::ObjectId::from_hex(hex.trim().as_bytes()).unwrap();
+    let odb = gix::odb::at(git_dir.join("objects"), gix::hash::Kind::Sha1).unwrap();
+    let mut buffer = Vec::new();
+    let data = odb.try_find(&id, &mut buffer).unwrap().unwrap();
+    let commit = gix::objs::CommitRef::from_bytes(data.data, gix::hash::Kind::Sha1).unwrap();
+    String::from_utf8(commit.message.to_vec()).unwrap()
+}
+
+/// The `Clauseo-Baseline` and `Clauseo-Was-Skipped` lines of the tip's message.
+fn first_read_lines(fx: &Fixture) -> Vec<String> {
+    tip_message(&fx.git_dir())
+        .lines()
+        .filter(|line| line.starts_with("Clauseo-Baseline: ") || line.starts_with("Clauseo-Was-"))
+        .map(str::to_owned)
+        .collect()
+}
+
+/// `rel` written and marked cloud-only, so the import skips it.
+fn cloud_only(fx: &Fixture, rel: &str, bytes: &[u8]) {
+    fx.write(rel, bytes);
+    fx.probe.mark(fx.file(rel));
+}
+
+/// The `OneDrive` case: `notes.txt` is a placeholder Clauseo never read; the agent reads it, so
+/// the OS downloads it (same bytes, same mtime), and edits another file. Only the edit is a
+/// change; Undo puts it back and leaves `notes.txt` as it is.
+#[test]
+fn a_cloud_only_file_the_agent_only_read_is_a_baseline_and_undo_leaves_it() {
+    let fx = Fixture::new("first-read-baseline");
+    fx.write("brief.txt", "draft");
+    cloud_only(&fx, "notes.txt", b"the lawyer's notes");
+    let mut matter = fx.import();
+    matter.before_turn(&meta(2)).unwrap();
+
+    fx.probe.unmark(fx.file("notes.txt"));
+    fx.write("brief.txt", "final");
+    let checkpoint = matter
+        .after_turn(&meta(3), &tools(&["notes.txt", "brief.txt"]))
+        .unwrap();
+    assert_none(&checkpoint.skipped);
+    assert_eq!(
+        created(checkpoint, 3),
+        [modified("brief.txt", b"draft", b"final")]
+    );
+    assert_eq!(
+        first_read_lines(&fx),
+        ["Clauseo-Baseline: cloud-only notes.txt"]
+    );
+    assert_eq!(read_at(&matter, 3, "notes.txt"), b"the lawyer's notes");
+    assert_eq!(
+        matter.changes_between(cid(1), cid(3)).unwrap(),
+        [modified("brief.txt", b"draft", b"final")]
+    );
+    assert_none(&matter.edited_since(cid(1), cid(3)).unwrap());
+
+    // A decision for the baseline is refused: it is not part of the step.
+    let decisions = undo_all(&["brief.txt", "notes.txt"]);
+    let refused = matter.undo(&undo_request(1, 3, &decisions, 4, 5));
+    assert!(
+        matches!(&refused, Err(Error::UnexpectedDecision { path: at }) if *at == path("notes.txt")),
+        "{refused:?}"
+    );
+    let undone = undo(&mut matter, (1, 3), &["brief.txt"], (6, 7)).unwrap();
+    assert_eq!(undone.restored, [path("brief.txt")]);
+    assert_none(&undone.deleted);
+    assert_eq!(fx.read("brief.txt"), b"draft");
+    assert_eq!(fx.read("notes.txt"), b"the lawyer's notes");
+
+    // Opened again, the history alone still says so.
+    drop(matter);
+    let matter = fx.open(&fx.folder).unwrap();
+    assert_eq!(
+        matter.changes_between(cid(1), cid(3)).unwrap(),
+        [modified("brief.txt", b"draft", b"final")]
+    );
+}
+
+/// A turn whose only "change" is a placeholder read is a checkpoint with no change: the
+/// content is versioned from then on, and there is nothing to undo.
+#[test]
+fn a_turn_that_only_read_a_cloud_only_file_changed_nothing() {
+    let fx = Fixture::new("first-read-only");
+    fx.write("brief.txt", "draft");
+    cloud_only(&fx, "notes.txt", b"the lawyer's notes");
+    let mut matter = fx.import();
+    matter.before_turn(&meta(2)).unwrap();
+    fx.probe.unmark(fx.file("notes.txt"));
+    let checkpoint = matter.after_turn(&meta(3), &tools(&["notes.txt"])).unwrap();
+    assert_none(&created(checkpoint, 3));
+    assert!(tip_message(&fx.git_dir()).starts_with("After turn: 0 files changed\n"));
+    assert_none(&matter.changes_between(cid(1), cid(3)).unwrap());
+    let undone = undo(&mut matter, (1, 3), &[], (4, 5)).unwrap();
+    assert_none(&undone.restored);
+    assert_none(&undone.deleted);
+    assert_eq!(fx.read("notes.txt"), b"the lawyer's notes");
+}
+
+/// A file over the cap, read once the cap is raised, unchanged: a baseline too.
+#[test]
+fn an_over_cap_file_read_after_the_cap_is_raised_is_a_baseline() {
+    let mut fx = Fixture::new("first-read-over-cap");
+    fx.limits = Limits {
+        file_cap_bytes: 10,
+        import_warn_bytes: 1_000_000,
+    };
+    fx.write("small.txt", "small");
+    fx.write("big.bin", [7; 20]);
+    let mut matter = fx.import();
+    matter.before_turn(&meta(2)).unwrap();
+    drop(matter);
+    fx.limits.file_cap_bytes = 100;
+    let mut matter = fx.open(&fx.folder).unwrap();
+    let checkpoint = matter.after_turn(&meta(3), &tools(&[])).unwrap();
+    assert_none(&created(checkpoint, 3));
+    // Opened again, the cache no longer says why it was skipped: by the new cap, not for its
+    // size. The reason only picks the words of a "not undone" line.
+    assert_eq!(
+        first_read_lines(&fx),
+        ["Clauseo-Baseline: cloud-only big.bin"]
+    );
+    assert_eq!(read_at(&matter, 3, "big.bin"), [7; 20]);
+    let undone = undo(&mut matter, (1, 3), &[], (4, 5)).unwrap();
+    assert_none(&undone.deleted);
+    assert_eq!(fx.read("big.bin"), [7; 20]);
+}

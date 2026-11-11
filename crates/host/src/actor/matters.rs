@@ -67,11 +67,19 @@ pub(super) fn start_worker(
 ) -> Result<MatterWorker<MatterTag>, Error> {
     let post = actor.post.clone();
     MatterWorker::start(
-        matter_settings(actor.effective.data_dir()),
+        settings_of(actor),
         Box::new(move |tag, reply| {
             let _gone = post.try_send(Input::Matter { matter, tag, reply });
         }),
     )
+}
+
+/// The matters' settings of this host: [`matter_settings`], with the host's placeholder probe.
+pub(crate) fn settings_of(actor: &Actor) -> clauseo_matters::Settings {
+    clauseo_matters::Settings {
+        probe: Arc::clone(&actor.folder_probes.placeholder),
+        ..matter_settings(actor.effective.data_dir())
+    }
 }
 
 /// The worker of a known matter, started and sent its open on first use.
