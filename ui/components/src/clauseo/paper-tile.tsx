@@ -64,6 +64,10 @@ export type PaperTileProps = {
   fileName?: boolean;
   /** Optional: what a press of the face does, in words on the face, under the title: Open in Word. */
   cue?: string;
+  /** Optional: a file or folder the room lists but Clauseo doesn't read (only online, or a folder it couldn't open),
+   * dimmed, with why in these words on the face under the title, in the cue's place. Its face does nothing and says
+   * so (aria-disabled) yet keeps the focus, so its tip still shows; give it no `onTurn`, `card` or `action`. */
+  away?: string;
 };
 
 /** A file's name on its tile, in two lines at most, cut in its middle past them (middle-cut.ts). A cut name is for
@@ -107,6 +111,7 @@ export function PaperTile({
   action,
   fileName = false,
   cue,
+  away,
 }: PaperTileProps) {
   const w = useWords();
   const wide = useWide();
@@ -133,6 +138,7 @@ export function PaperTile({
       hand.focusOn(e.currentTarget, target, "tile");
   };
   const onClick = (e: MouseEvent<HTMLButtonElement>) => {
+    if (away !== undefined) return;
     if (onTurn !== undefined) onTurn();
     else if (card) hand.press(e.currentTarget, target, "tile", e.detail === 0);
   };
@@ -151,6 +157,7 @@ export function PaperTile({
       data-carded={carded ? "" : undefined}
       data-era={era}
       data-act={action === undefined ? undefined : ""}
+      data-away={away === undefined ? undefined : ""}
       inert={era === "gone" ? true : undefined}
       aria-hidden={era === "gone" ? true : undefined}
     >
@@ -162,6 +169,7 @@ export function PaperTile({
           ref={nodes.keep("face", id, card)}
           className={card ? "tile-face card-trigger" : "tile-face"}
           aria-describedby={label === undefined ? undefined : room.id(`paper-${id}-more`)}
+          aria-disabled={away === undefined ? undefined : true}
           title={tip === undefined ? hint : undefined}
           data-card={card ? `paper:${id}` : undefined}
           onPointerEnter={onPointerEnter}
@@ -203,9 +211,9 @@ export function PaperTile({
               {latin ? title : <Say>{title}</Say>}
             </span>
           )}
-          {cue !== undefined && (
+          {(away ?? cue) !== undefined && (
             <span className="tile-cue">
-              <Say>{cue}</Say>
+              <Say>{away ?? cue ?? ""}</Say>
             </span>
           )}
           {state !== "uncited" && (

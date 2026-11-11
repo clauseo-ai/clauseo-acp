@@ -100,6 +100,12 @@ export const HI = {
   // the same with one paper, which the design's line has no form for (U6's draft, QU.8)
   "A new conversation. It reads this matter's one paper.":
     "एक नई बातचीत। यह इस मामले का एक दस्तावेज़ पढ़ती है।",
+  // after it, the papers it can't read because they are only online (the wall's dimmed tiles), by the service that
+  // syncs the folder where it has a name; never with no paper to read. Hindi provisional (stage D, 2026-11-11)
+  "{n} more are only in {service}.": "{n} और दस्तावेज़ केवल {service} में हैं।",
+  "1 more is only in {service}.": "1 और दस्तावेज़ केवल {service} में है।",
+  "{n} more are only online.": "{n} और दस्तावेज़ केवल ऑनलाइन हैं।",
+  "1 more is only online.": "1 और दस्तावेज़ केवल ऑनलाइन है।",
   // H13: Retry from here on one of the lawyer's questions, the line a retried conversation opens with, and its way
   // back to the first
   "Retry from here": "यहाँ से फिर पूछें",

@@ -7,14 +7,18 @@
 // tracked changes or comments in has a second, quiet press under its face, Tracked changes, which
 // puts the file's tracked changes in the wall's place (word/changes-pane.tsx, its own chunk, loaded
 // on that press), with Back to the tiles. The room keys the wall by its matter, so another matter's
-// wall starts with nothing under it.
+// wall starts with nothing under it. Among the tiles, by path, a dimmed tile for each file only online and each
+// folder Clauseo couldn't open (wall-away.ts), which opens nothing, with why on it and how to keep it in its tip.
 import { fileTypeIcon } from "@clauseo/components/icons/file-type.ts";
+import { IconFolder } from "@clauseo/components/icons/icons.tsx";
+import { useDisplay } from "@clauseo/components/lib/display.ts";
 import { PaperTile } from "@clauseo/components/clauseo/paper-tile.tsx";
 import { useRoom } from "@clauseo/components/clauseo/room-scope.ts";
 import { late } from "@clauseo/components/lib/late.ts";
 import { LayerProvider } from "@clauseo/components/ui/layer.tsx";
 import { lazy, Suspense, useRef, useState } from "react";
 import type { Papers } from "./host-next.ts";
+import { awayWords, wallItems } from "./wall-away.ts";
 import type { WordOpen, WordOpened } from "./word/open-in-word.ts";
 
 const WallSaid = lazy(() =>
@@ -46,6 +50,7 @@ const fileName = (path: string) => path.split(/[\\/]/).pop() ?? path;
 export function PaperWall({ papers, word }: { papers: Papers; word: WordOpen }) {
   "use no memo";
   const { id } = useRoom();
+  const { lang, platform } = useDisplay();
   // the last tile's open, and of which paper
   const [said, setSaid] = useState<{ path: string; opened: WordOpened } | null>(null);
   // the .docx whose tracked changes stand in the tiles' place, with their panel once its chunk is in
@@ -87,7 +92,25 @@ export function PaperWall({ papers, word }: { papers: Papers; word: WordOpen }) 
             ?.focus();
         }}
       >
-        {papers.papers.map(({ file, path }) => {
+        {wallItems(papers).map((item) => {
+          if (item.kind === "away") {
+            const name = fileName(item.path);
+            const words = awayWords(lang, platform, papers.place, item.folder);
+            return (
+              <PaperTile
+                key={`${item.folder ? "folder" : "file"}:${item.path}`}
+                id={item.id}
+                state="uncited"
+                title={name}
+                fileName
+                tip={words.tip}
+                label={words.tip}
+                fileIcon={item.folder ? IconFolder : fileTypeIcon(item.path)}
+                away={words.line}
+              />
+            );
+          }
+          const { file, path } = item.paper;
           const opener = word.wallOpenerFor(path);
           const tracked = opener?.changes;
           const name = fileName(path);

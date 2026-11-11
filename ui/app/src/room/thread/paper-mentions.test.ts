@@ -57,6 +57,21 @@ test("a paper is a mention: its FileRefId, its file name, its folder and its pat
   expect(papersToMentions({ ...PAPERS, truncated: true }).partial).toBe(true);
 });
 
+test("a file only online, over the cap, or a folder not opened is no mention: it has no file to send", () => {
+  const away: Papers = {
+    ...PAPERS,
+    skipped: [
+      { path: "Lease deed.pdf", reason: "cloud_only" },
+      { path: "Hearing.mp4", reason: "over_size_cap" },
+    ],
+    unread: ["Annexures"],
+  };
+  expect(papersToMentions(away).items.map((m) => m.text)).toEqual([
+    "Notice.pdf",
+    "Pleadings/Reply/Board minutes.pdf",
+  ]);
+});
+
 test("no matter, or a host without list_papers: no mentions, so @ stays a character", () => {
   expect(paperMentions(host().transport, null)).toBeUndefined();
   expect(paperMentions(new FakeTransport({}), MATTER)).toBeUndefined();

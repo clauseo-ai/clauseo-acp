@@ -108,3 +108,28 @@ test("a tile's label carries the full Devanagari name for assistive technology",
   const more = host?.querySelector(`#${face?.getAttribute("aria-describedby") ?? "none"}`);
   expect(more?.textContent).toBe(NUKTA_HI);
 });
+
+test("a tile away from this computer says why on its face, does nothing, and says so to assistive technology", async () => {
+  let turned = 0;
+  await mount({
+    id: "away-0",
+    state: "uncited",
+    title: "Lease deed.pdf",
+    fileName: true,
+    tip: "Not on this computer.",
+    label: "Not on this computer.",
+    away: "Only in OneDrive",
+    onTurn: () => void turned++,
+  });
+  const tile = host?.querySelector("li.tile");
+  expect(tile?.hasAttribute("data-away")).toBe(true);
+  const face = host?.querySelector<HTMLButtonElement>(".tile-face");
+  expect(face?.getAttribute("aria-disabled")).toBe("true");
+  expect(face?.querySelector(".tile-cue")?.textContent).toBe("Only in OneDrive");
+  const described = face?.getAttribute("aria-describedby") ?? "";
+  expect(document.getElementById(described)?.textContent).toBe("Not on this computer.");
+  // a DOM-safe id, never the path
+  expect(tile?.id).toMatch(/paper-away-0$/);
+  await act(async () => face?.click());
+  expect(turned).toBe(0);
+});
