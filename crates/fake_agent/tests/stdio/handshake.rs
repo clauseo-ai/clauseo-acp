@@ -15,7 +15,7 @@ fn clauseo_initialize() -> Value {
             "elicitation": {"form": {}, "url": {}},
             "session": {"notices": {}, "compaction": {}, "configOptions": {"boolean": {}}},
             "plan": {},
-            "_meta": {"jetbrains": {"air": {"version": 1, "capabilities": ["sessionFailure"]}}}}})
+            "_meta": {"jetbrains": {"air": {"version": 1, "capabilities": ["sessionFailure", "recommendedValue"]}}}}})
 }
 
 #[test]
@@ -95,7 +95,7 @@ fn initialize_caps_refuses_other_capabilities() {
         (
             "/clientCapabilities/_meta/jetbrains/air/capabilities",
             json!([]),
-            "/clientCapabilities/_meta/jetbrains/air/capabilities: expected 1 items, got 0"
+            "/clientCapabilities/_meta/jetbrains/air/capabilities: expected 2 items, got 0"
                 .to_owned(),
         ),
     ];

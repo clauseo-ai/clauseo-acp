@@ -234,12 +234,24 @@ fn initialize(cx: &ConnectionTo<Agent>, shared: &Arc<Shared>, reply: Reply<crate
 
 /// What Clauseo advertises: no `fs`, no `terminal`, no `subagents`; terminal sign-in, form and
 /// URL elicitation, notices, compaction, boolean config options, `plan`, and the AIR
-/// `sessionFailure` capability in `clientCapabilities._meta`.
+/// `sessionFailure` and `recommendedValue` capabilities in `clientCapabilities._meta`.
+///
+/// `recommendedValue` (claude-agent-acp 0.89.1, `clientSupportsRecommendedConfigValue`,
+/// `acp-agent.js:8203`): the model and effort options lose their "Default" rows and show real
+/// values. The effort's `currentValue` is the adapter's recommendation ("medium" when the model
+/// offers it, `session-effort.js:68-90`), which the adapter also applies to the SDK
+/// (`acp-agent.js:7625`). The model's "Default" row goes only when it resolves to a listed
+/// model, which then becomes the `currentValue` (`session-model.js:163-190`). codex-acp 2.2.2
+/// only adds `_meta.jetbrains.air.recommendedValue` to its options, whose values were already
+/// concrete (`dist/index.js:44000-44020`).
 pub(crate) fn client_capabilities() -> acp::ClientCapabilities {
     let mut air = serde_json::Map::new();
     air.insert(
         "jetbrains".to_owned(),
-        serde_json::json!({"air": {"version": 1, "capabilities": ["sessionFailure"]}}),
+        serde_json::json!({"air": {
+            "version": 1,
+            "capabilities": ["sessionFailure", "recommendedValue"],
+        }}),
     );
     acp::ClientCapabilities::new()
         .auth(acp::AuthCapabilities::new().terminal(true))

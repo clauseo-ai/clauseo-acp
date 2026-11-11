@@ -6,7 +6,8 @@
 //! options are settable, before the first session too; a pick the agent does not take is
 //! dropped and the prompt still runs, while one the agent fails otherwise, or one of an option
 //! the session does not report, is kept; a pick of a mode is never sent and is dropped; a
-//! reloaded session gets the thread's own values back.
+//! reloaded session gets the thread's own values back; options with real values and no Default
+//! rows (the AIR `recommendedValue` capability) need nothing more.
 
 use std::collections::BTreeMap;
 
@@ -348,5 +349,47 @@ fn a_pick_waits_for_a_session_with_its_option() {
     assert_eq!(current(&options, "model").as_deref(), Some("opus"));
     assert_eq!(current(&options, "effort").as_deref(), Some("high"));
     assert_eq!(summary(&host, matter).agent_prefs, Some(prefs));
+    host.shutdown();
+}
+
+/// (j) Under the AIR `recommendedValue` capability Claude reports real values and no Default
+/// rows (`pickers-recommended`, from claude-agent-acp 0.89.1 source): the kept options and the
+/// thread's are "opus" and "medium", a stored pick of `default` is not offered so it is never
+/// sent and leaves the matter's prefs, and a model change brings the effort back at "medium".
+#[test]
+fn recommended_values_need_no_default_row() {
+    let dir = Dir::new(
+        "pickers_recommended",
+        &[(CLAUDE, Scenario::Bundled("pickers-recommended"))],
+    );
+    let host = dir.start(0);
+    let folder = dir.folder("m", &[("brief.txt", "x\n")]);
+    let matter = host.create_matter("m", &folder);
+    let legacy = claude_prefs(&[("model", "default"), ("effort", "default")]);
+    set_prefs(&host, matter, FieldChange::Set(legacy));
+    let thread = create_thread(&host, matter, None);
+    let mut events = turn(&host, thread, "Summarise clause 4.");
+    let options = logged(&events);
+    assert_eq!(current(&options, "model").as_deref(), Some("opus"));
+    assert_eq!(current(&options, "effort").as_deref(), Some("medium"));
+    assert_eq!(summary(&host, matter).agent_prefs, None);
+    let kept = agent_options(&host);
+    assert_eq!(values(&kept, "model"), ["opus", "haiku"]);
+    assert_eq!(values(&kept, "effort"), ["low", "medium", "high", "max"]);
+    assert_eq!(current(&kept, "effort").as_deref(), Some("medium"));
+
+    assert_eq!(host.ok(set(thread, "model", "haiku")), CommandOutcome::Done);
+    events.until("model haiku", |e| {
+        current(&logged(e), "model").as_deref() == Some("haiku")
+    });
+    assert_eq!(
+        current(&logged(&events), "effort").as_deref(),
+        Some("medium")
+    );
+    events.assert_no_mismatch();
+    assert_eq!(
+        summary(&host, matter).agent_prefs,
+        Some(claude_prefs(&[("model", "haiku")]))
+    );
     host.shutdown();
 }

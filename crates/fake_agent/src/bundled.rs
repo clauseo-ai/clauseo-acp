@@ -99,6 +99,7 @@ bundled! {
         "pickers-first",
         "pickers-load",
         "pickers-picked",
+        "pickers-recommended",
         "pickers-stale",
         "plan",
         "prompt-child-in-group",
