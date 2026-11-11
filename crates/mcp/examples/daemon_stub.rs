@@ -15,9 +15,9 @@
 //! `late.pid` in the socket folder, waits until a file `late-go` appears there, then serves as
 //! the daemon does. An `agent_browser_wait_for_text` call for the text `stub_hold` is never
 //! answered (a call in flight; a core tool, so the guard's allowlist passes it); a request whose
-//! id is a string starting `stub-error` gets a JSON-RPC error instead of a result. An `open` of a
-//! `.pdf` URL gets agent-browser's own answer ([`chrome_part::stand_in`]). Cargo builds it for
-//! the tests; it is never shipped.
+//! id is a string starting `stub-error` gets a JSON-RPC error instead of a result. Two calls get
+//! agent-browser's own answers ([`chrome_part::stand_in`]): an `open` of a `.pdf` URL, and the
+//! profiles. Cargo builds it for the tests; it is never shipped.
 
 use std::io::{BufRead, Write};
 
@@ -204,14 +204,20 @@ fn main() -> std::io::Result<()> {
 mod chrome_part {
     use serde_json::{Value, json};
 
-    /// agent-browser's answer, with Chrome's part, to one call: an `agent_browser_open` of a URL
+    /// agent-browser v0.41.1's core profile description (`cli/src/mcp.rs:257`).
+    const CORE_PROFILE: &str = "Everyday browser automation with navigation, snapshots, \
+        common interaction, waits, screenshots, basic reads, tab basics, JavaScript eval, close, \
+        and profile discovery.";
+
+    /// agent-browser's answer, with Chrome's part, to two calls. An `agent_browser_open` of a URL
     /// ending in `.pdf` plays Chrome saving the file (`plugins.always_open_pdf_externally`):
     /// `<name>.crdownload` appears in the run's staging folder at once, with the OS mark Chrome
     /// gives it, and is renamed to `<name>` 300 ms later, while the call fails with
-    /// `net::ERR_ABORTED`, as the navigation turned into a download.
+    /// `net::ERR_ABORTED`, as the navigation turned into a download. An
+    /// `agent_browser_tools_profiles` call gets the core profile's description.
     pub(super) fn stand_in(message: &Value) -> Option<Value> {
         let id = message.get("id")?;
-        match message.pointer("/params/name").and_then(Value::as_str)? {
+        let text = match message.pointer("/params/name").and_then(Value::as_str)? {
             "agent_browser_open" => {
                 let url = message.pointer("/params/arguments/url")?.as_str()?;
                 let name = url.rsplit('/').next().filter(|name| {
@@ -229,11 +235,16 @@ mod chrome_part {
                     drop(std::fs::rename(&partial, &done));
                 }));
                 let text = format!("Navigation failed: net::ERR_ABORTED at {url}");
-                Some(json!({"jsonrpc": "2.0", "id": id,
-                    "result": {"content": [{"type": "text", "text": text}], "isError": true}}))
+                return Some(json!({"jsonrpc": "2.0", "id": id,
+                    "result": {"content": [{"type": "text", "text": text}], "isError": true}}));
             }
-            _ => None,
-        }
+            "agent_browser_tools_profiles" => json!([{"name": "core", "description": CORE_PROFILE,
+                "toolCount": 29, "usage": "agent-browser mcp --tools core"}])
+            .to_string(),
+            _ => return None,
+        };
+        Some(json!({"jsonrpc": "2.0", "id": id,
+            "result": {"content": [{"type": "text", "text": text}]}}))
     }
 
     /// The run's staging folder: `<cwd>/chrome-profile-<id>/downloads-staging`, the guard having

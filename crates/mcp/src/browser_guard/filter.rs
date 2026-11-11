@@ -161,6 +161,44 @@ pub(crate) fn only_allowed_tools(line: &[u8]) -> Option<Vec<u8>> {
     serde_json::to_vec(&reply).ok()
 }
 
+/// The words in agent-browser's `core` profile description (`ToolProfile::description`,
+/// `cli/src/mcp.rs:257` at v0.41.1) that name the eval tool the guard refuses.
+const EVAL_WORDS: &str = "JavaScript eval, ";
+
+/// A reply to `agent_browser_tools_profiles` (`line`, without its newline) with
+/// [`EVAL_WORDS`] taken out of every string in it, the text content and any structured content
+/// alike, so the agent is never told its tools include JavaScript eval. `None` when nothing
+/// changes: the line then goes on as read.
+pub(crate) fn without_eval(line: &[u8]) -> Option<Vec<u8>> {
+    fn strip(value: &mut Value) -> bool {
+        match value {
+            Value::String(text) if text.contains(EVAL_WORDS) => {
+                *text = text.replace(EVAL_WORDS, "");
+                true
+            }
+            // Every item, not up to the first change.
+            Value::Array(items) => {
+                items
+                    .iter_mut()
+                    .map(strip)
+                    .filter(|changed| *changed)
+                    .count()
+                    > 0
+            }
+            Value::Object(map) => {
+                map.values_mut()
+                    .map(strip)
+                    .filter(|changed| *changed)
+                    .count()
+                    > 0
+            }
+            _ => false,
+        }
+    }
+    let mut reply: Value = serde_json::from_slice(line).ok()?;
+    strip(reply.get_mut("result")?).then(|| serde_json::to_vec(&reply).ok())?
+}
+
 /// agent-browser's live views, none of them on [`ALLOWED_TOOLS`], named only so their refusal
 /// reads as a feature Clauseo leaves out: each serves the browser on a loopback port, the stream
 /// server (`stream_enable`, `actions.rs:9772-9785` at v0.41.1, with its `disable` and

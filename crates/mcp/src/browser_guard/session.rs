@@ -213,6 +213,9 @@ pub(crate) enum Request {
     /// An `agent_browser_open` call: its reply, when the URL turned into a download, says the
     /// file was saved (`downloads/saved.rs`).
     Open,
+    /// An `agent_browser_tools_profiles` call: its reply loses the mention of JavaScript eval
+    /// (`filter::without_eval`).
+    Profiles,
     /// An `agent_browser_close` call: its reply stops the browser (`relay.rs`).
     Close,
     /// `tools/list`: its reply loses the tools the guard refuses (`filter::only_allowed_tools`).
@@ -224,7 +227,10 @@ pub(crate) enum Request {
 impl Request {
     /// Whether it is a tool call, whose reply restarts the idle time.
     pub(crate) fn is_call(self) -> bool {
-        matches!(self, Request::Call | Request::Close | Request::Open)
+        matches!(
+            self,
+            Request::Call | Request::Close | Request::Open | Request::Profiles
+        )
     }
 }
 

@@ -2,7 +2,9 @@
 
 use serde_json::{Value, json};
 
-use super::super::{ALLOWED_TOOLS, LIVE_VIEW_TOOLS, UNAVAILABLE, UNKNOWN_TOOL, only_allowed_tools};
+use super::super::{
+    ALLOWED_TOOLS, LIVE_VIEW_TOOLS, UNAVAILABLE, UNKNOWN_TOOL, only_allowed_tools, without_eval,
+};
 use super::{Verdict, call_tool, refused_on, verdict};
 
 /// A refused call's text, after checking it is an `isError` result with the call's id.
@@ -203,4 +205,25 @@ fn the_tool_list_keeps_only_allowed_tools() {
         assert_eq!(only_allowed_tools(other.to_string().as_bytes()), None);
     }
     assert_eq!(only_allowed_tools(b"not json"), None);
+}
+
+/// The profiles' reply loses "JavaScript eval, " wherever it sits, text or structured content;
+/// a reply without it goes on as read.
+#[test]
+fn the_profiles_reply_never_mentions_javascript_eval() {
+    let core = "Everyday browser automation with navigation, snapshots, common interaction, \
+        waits, screenshots, basic reads, tab basics, JavaScript eval, close, and profile discovery.";
+    let summary = json!([{"name": "core", "description": core}]).to_string();
+    let reply = json!({"jsonrpc": "2.0", "id": 3, "result": {
+        "content": [{"type": "text", "text": summary}],
+        "structuredContent": {"profiles": [{"name": "core", "description": core}]}}});
+    let changed = without_eval(reply.to_string().as_bytes()).unwrap();
+    let text = String::from_utf8(changed).unwrap();
+    assert!(!text.contains("eval"), "{text}");
+    assert!(
+        text.contains("tab basics, close, and profile discovery."),
+        "{text}"
+    );
+    let plain = br#"{"jsonrpc":"2.0","id":4,"result":{"content":[{"type":"text","text":"ok"}]}}"#;
+    assert_eq!(without_eval(plain), None);
 }

@@ -20,8 +20,8 @@ use super::super::port_file::{Expected, Status};
 use super::super::session::{self, Request, Shared};
 use super::lines::{Line, Overflow, answer_all, emit, lock, read_line, write_child};
 use super::{
-    CHILD_MAX_LINE_BYTES, CLOSE_REQUEST, CLOSE_TOOL, ENDED, Event, OPEN_TOOL, closed_reply,
-    oneshot, send,
+    CHILD_MAX_LINE_BYTES, CLOSE_REQUEST, CLOSE_TOOL, ENDED, Event, OPEN_TOOL, PROFILES_TOOL,
+    closed_reply, oneshot, send,
 };
 use crate::browser_guard::note;
 use crate::connector::head;
@@ -133,6 +133,7 @@ fn route(shared: &Arc<Shared>, parent: &Parent, events: &mpsc::Sender<Event>, te
     let request = match (call, message["params"]["name"].as_str()) {
         (true, Some(CLOSE_TOOL)) => Request::Close,
         (true, Some(OPEN_TOOL)) => Request::Open,
+        (true, Some(PROFILES_TOOL)) => Request::Profiles,
         (true, _) => Request::Call,
         (false, _) if method == Some("tools/list") => Request::List,
         (false, _) => Request::Other,
@@ -187,8 +188,9 @@ fn route(shared: &Arc<Shared>, parent: &Parent, events: &mpsc::Sender<Event>, te
 
 /// Child to agent, for the start of agent-browser numbered `generation`: each whole line as
 /// read (a tool call's result with the download notes added, `downloads/held.rs` and
-/// `downloads/saved.rs`; an `open` that became a download answered as saved; and the tool
-/// list without the tools the guard refuses, `filter::only_allowed_tools`), but the
+/// `downloads/saved.rs`; an `open` that became a download answered as saved; the profiles
+/// without JavaScript eval, `filter::without_eval`; and the tool list without the tools the
+/// guard refuses, `filter::only_allowed_tools`), but the
 /// reply to the close request, and nothing once the guard has ended this start
 /// (it answered what was in flight itself). After each line, every one of the port checks.
 /// Returns the event that ends it: [`Event::ChildEnded`], [`Event::ChildOversize`] or
@@ -229,14 +231,15 @@ pub(crate) fn pump_child(
             (answered, state.sent_count())
         };
         let (answered, sent) = answered;
-        // An `open` that turned into a download waits for the file (`downloads/saved.rs`); a
-        // tool call's result carries the download notes; the tool list loses the tools the
-        // guard refuses.
+        // An `open` that turned into a download waits for the file (`downloads/saved.rs`); the
+        // profiles lose eval; a tool call's result carries the download notes; the tool list
+        // loses the tools the guard refuses.
         let first = match answered {
             Some(Request::Open) => {
                 let staging = shared.launcher.profile.join(STAGING);
                 downloads::open_reply(&line, &shared.saved, &staging, OPEN_WAIT)
             }
+            Some(Request::Profiles) => filter::without_eval(&line),
             Some(Request::List) => filter::only_allowed_tools(&line),
             Some(Request::Call | Request::Close | Request::Other) | None => None,
         };
