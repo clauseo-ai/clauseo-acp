@@ -101,7 +101,7 @@
   },
   "TN-11": {
     "en": "Clauseo stopped a step: {name} tried to reach outside this matter.",
-    "hi": "Clauseo ने एक चरण रोक दिया: {name} ने इस मामले के बाहर पहुँचने की कोशिश की।",
+    "hi": "Clauseo ने एक काम रोक दिया: {name} ने इस मामले के बाहर पहुँचने की कोशिश की।",
     "hi_status": "provisional",
     "hi_at": "2026-11-11",
     "hi_by": "fence-after-allow (provisional; Hindi-speaking lawyer to review)",
@@ -112,7 +112,7 @@
   },
   "TN-12": {
     "en": "Clauseo stopped a step: the AI tried to reach outside this matter.",
-    "hi": "Clauseo ने एक चरण रोक दिया: AI ने इस मामले के बाहर पहुँचने की कोशिश की।",
+    "hi": "Clauseo ने एक काम रोक दिया: AI ने इस मामले के बाहर पहुँचने की कोशिश की।",
     "hi_status": "provisional",
     "hi_at": "2026-11-11",
     "hi_by": "fence-after-allow (provisional; Hindi-speaking lawyer to review)",
