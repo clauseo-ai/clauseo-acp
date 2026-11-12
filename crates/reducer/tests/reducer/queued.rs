@@ -7,7 +7,9 @@ use clauseo_protocol::{
     AgentSessionDetached, DetachReason, DomainEvent, MessageId, ThreadId, ThreadStatus, TurnId,
     TurnQueued, TurnStarted, UserMessageStatus, ViewEntry,
 };
-use clauseo_reducer::{Applied, StreamState, ViewChange, apply};
+use clauseo_reducer::{
+    Applied, Error, REDUCER_SCHEMA_VERSION, Snapshot, SnapshotRef, StreamState, ViewChange, apply,
+};
 
 use crate::fixtures::{
     Log, permission_requested, permission_resolved, start_turn, thread_created, thread_id,
@@ -423,4 +425,37 @@ fn a_prompt_queued_behind_a_turn_waiting_for_the_writer_keeps_queued() {
     let out = start(&mut log, &mut state, first);
     assert_eq!(header_statuses(&out), [ThreadStatus::Running]);
     assert_eq!(state, fold(log.events()));
+}
+
+/// Schema 12 folds an agent-started turn's open, and a wait behind a turn on its way, to
+/// `Starting`: a snapshot schema 11 wrote (a build that settled both to `Idle`) is refused, so
+/// the stream is refolded from its log and shows the turn on its way.
+#[test]
+fn a_schema_11_snapshot_is_refolded() {
+    assert_eq!(REDUCER_SCHEMA_VERSION, 12);
+    let (mut log, mut state, thread) = created();
+    let own = log.fresh().unwrap();
+    push(&mut log, &mut state, queued(thread, own, thread, None));
+    let (second, _) = prompt(&mut log, &mut state, "Then clause 3.");
+    push(
+        &mut log,
+        &mut state,
+        queued(thread, second, thread, Some(own)),
+    );
+    let old = SnapshotRef {
+        reducer_schema: 11,
+        state: &state,
+    };
+    let read = Snapshot::from_bytes(&old.to_bytes().unwrap());
+    assert!(
+        matches!(
+            read,
+            Err(Error::SchemaMismatch {
+                found: 11,
+                expected: 12
+            })
+        ),
+        "{read:?}"
+    );
+    assert_eq!(status(&fold(log.events())), ThreadStatus::Starting);
 }
