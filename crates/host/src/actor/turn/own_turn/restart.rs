@@ -3,7 +3,9 @@
 //! durable, but no `TurnStarted` or `TurnEnded` is, so the view would show it `Starting` (or
 //! `Queued`) forever. It has no prompt to queue again, and the agent that ran it is gone, so
 //! start-up reconciliation (`reconcile.rs`) ends it `Cancelled` before it started: no step, and
-//! the status settles. A turn with a prompt is not one: it stays queued (`queue::restore`).
+//! the status settles. A turn with a prompt is not one: it stays queued (`queue::restore`). Nor
+//! is a requeued steer's turn, whose `UserMessage` names the turn it was sent into: only its
+//! `SteerResolved` names its own. So a turn `queue::restore` puts back is never ended here.
 
 use std::collections::BTreeSet;
 
@@ -25,9 +27,10 @@ pub(in crate::actor::turn) fn may_wait(state: &ThreadState) -> bool {
 }
 
 /// The agent-started turns of `log` that wait with no start or end, in the order they opened:
-/// each turn with a `TurnQueued` and no `UserMessage`, `TurnStarted` or `TurnEnded`. Every one
-/// counts, not only the last wait: a prompt queued behind such a turn logs a `TurnQueued` of its
-/// own after it. There is at most one, but none is assumed.
+/// each turn with a `TurnQueued` and no `UserMessage`, `TurnStarted` or `TurnEnded`, and that
+/// `queue::restore` does not put back (a requeued or sent-now steer's turn). Every one counts,
+/// not only the last wait: a prompt queued behind such a turn logs a `TurnQueued` of its own
+/// after it. There is at most one, but none is assumed.
 fn unstarted(log: &[Envelope]) -> Vec<TurnId> {
     let mut waiting: Vec<TurnId> = Vec::new();
     let mut settled: BTreeSet<TurnId> = BTreeSet::new();
@@ -45,7 +48,8 @@ fn unstarted(log: &[Envelope]) -> Vec<TurnId> {
             settled.insert(ended.turn);
         }
     }
-    waiting.retain(|turn| !settled.contains(turn));
+    let restored = super::super::queue::restores(log);
+    waiting.retain(|turn| !settled.contains(turn) && !restored.contains(turn));
     waiting
 }
 
