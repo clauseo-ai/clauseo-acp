@@ -67,7 +67,7 @@ fn declares_module(after: &[TokenTree]) -> bool {
 /// The repo-relative file that `value`, a `path` attribute's value in `file`, names: resolved
 /// against `file`'s folder one component at a time. `None` when `value` is empty, absolute, holds
 /// a `\` or a `:`, or leaves `dir` at any step.
-pub(super) fn resolve(value: &str, file: &str, dir: &str) -> Option<String> {
+pub(in crate::checks) fn resolve(value: &str, file: &str, dir: &str) -> Option<String> {
     if value.is_empty() || value.starts_with('/') || value.contains(['\\', ':']) {
         return None;
     }
