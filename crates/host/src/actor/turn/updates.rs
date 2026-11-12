@@ -23,11 +23,10 @@ use crate::error::Error;
 use crate::log_file::Cause;
 use crate::rate::{Admitted, RatedUpdate};
 
+pub(super) mod gave_up;
 mod title;
 mod tools;
 mod warning;
-
-pub(super) use warning::category as category_word;
 
 pub(super) use tools::known_tool;
 use tools::{tool_call, tool_update};

@@ -34,8 +34,8 @@ use super::close::{Expiries, TurnClose};
 use super::out::Out;
 use super::{
     End, Holder, JobKind, LimitMark, Then, TimerKind, TurnJob, TurnPhase, TurnTimer, asks, cancel,
-    current, failure, gave_up, host_stopping, known, matter_of, offline, queue, sign_in, state,
-    steps, updates,
+    current, failure, host_stopping, known, matter_of, offline, queue, sign_in, state, steps,
+    updates,
 };
 use crate::error::Error;
 use crate::log_file::Cause;
@@ -90,7 +90,7 @@ pub(super) fn on_prompt_done(
     // Offline skips the limits read: it needs the network too. `TooLong` wins over offline.
     let ends_too_long = too_long || (result.is_ok() && said_too_long);
     let (went_offline, lost) = offline::prompt_ended(actor, thread, &result, ends_too_long);
-    let gave_up = lost.or_else(|| gave_up::failed(thread, &result, ends_too_long));
+    let gave_up = lost.or_else(|| updates::gave_up::failed(thread, &result, ends_too_long));
     let fallback = matches!(result, Err(clauseo_acp::Error::Rpc { .. }))
         && !too_long
         && went_offline.is_none()

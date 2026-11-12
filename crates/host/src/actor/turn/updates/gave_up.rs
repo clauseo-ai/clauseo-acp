@@ -9,11 +9,11 @@
 use clauseo_acp::PromptEnd;
 use clauseo_protocol::{ErrorCode, ThreadId};
 
-use super::updates;
+use super::warning;
 
 /// The code and detail `thread`'s prompt that ended `result` fails with when the agent gave up
 /// on it; none for a turn that ends `TooLong` (`too_long`), which wins.
-pub(super) fn failed(
+pub(in crate::actor::turn) fn failed(
     thread: ThreadId,
     result: &Result<PromptEnd, clauseo_acp::Error>,
     too_long: bool,
@@ -24,7 +24,7 @@ pub(super) fn failed(
         .failed
         .as_ref()
         .filter(|_| !too_long)?;
-    let category = updates::category_word(failed.category.as_deref());
+    let category = warning::category(failed.category.as_deref());
     tracing::info!(%thread, category, "the agent gave up on the turn");
     let detail = format!("the agent gave up on the turn (sessionFailure {category})");
     Some((ErrorCode::AgentServiceError, Some(detail)))

@@ -1,7 +1,7 @@
-//! A turn whose answer carries a failure the agent gave up on (`gave_up.rs`): codex-acp 2.2.2's
-//! `internal_error` on its `end_turn`. The turn fails `agent.service_error` with the answer so
-//! far kept, and the agent's title reaches no event, the failure's detail included. A too-long
-//! refusal before it wins.
+//! A turn whose answer carries a failure the agent gave up on (`updates/gave_up.rs`): codex-acp
+//! 2.2.2's `internal_error` on its `end_turn`. The turn fails `agent.service_error` with the
+//! answer so far kept, and the agent's title reaches no event, the failure's detail included. A
+//! too-long refusal before it wins.
 
 use clauseo_protocol::{ErrorCode, StopReason};
 use serde_json::{Value, json};

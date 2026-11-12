@@ -53,7 +53,7 @@ pub(super) fn log(thread: ThreadId, session: Option<&AgentSessionId>, warning: &
 }
 
 /// A `sessionFailure`'s category, for the log: one of [`CATEGORIES`], `none` or `other`.
-pub(in crate::actor::turn) fn category(value: Option<&str>) -> &'static str {
+pub(super) fn category(value: Option<&str>) -> &'static str {
     word(&CATEGORIES, value)
 }
 
