@@ -4,9 +4,11 @@
 // true, and clears the field once accepted; a queued prompt never holds the composer busy past the running turn; the
 // hint over the field offers Send now (delivery send_now) and Queue, says what Enter does by the header's
 // steer_joins_turn and names the agent, and hides while the conversation waits behind another;
-// at the cap Queue is disabled and Enter keeps the words; a send refused as thread.queue_full says the cap; and with a
-// permission waiting, Enter answers it only with the field empty (QU.9 a).
+// at the cap Queue is disabled and Enter keeps the words; a send refused as thread.queue_full says the cap; a steer or
+// a Send now refused as prompt.too_long, or over the cap, keeps the words; and with a permission waiting, Enter answers
+// it only with the field empty (QU.9 a).
 import { act } from "react";
+import { errorWords } from "@clauseo/components/lib/words-errors.ts";
 import { afterEach, expect, test } from "vitest";
 import {
   header,
@@ -28,6 +30,7 @@ import type {
   ViewEntry,
 } from "../../transport/protocol.ts";
 import { defaultOutcome, mountRoom, summary, type Harness } from "./harness.ts";
+import { MAX_PROMPT_TEXT_BYTES } from "./prompt-cost.ts";
 
 let h: Harness | null = null;
 afterEach(async () => {
@@ -262,6 +265,59 @@ test("a send refused as thread.queue_full says the cap on the working line, neve
   expect(h.one("error")?.textContent).toBe("The queue holds 10.");
   expect(h.host.textContent).not.toContain("raw host text");
   expect(field().value).toBe(QUESTION);
+});
+
+/** A host that refuses every send_prompt as prompt.too_long, as its check of Codex's own cap does. */
+const refuseTooLong = (c: HostCommand): CommandOutcome => {
+  if (c.send_prompt !== undefined)
+    throw { code: "prompt.too_long", message: "raw host text", retryable: false };
+  return defaultOutcome(c);
+};
+
+/** The send went, was refused as prompt.too_long, says its words, and the field keeps the question. */
+const keptAfterTooLong = async (delivery: "steer" | "send_now") => {
+  await act(async () => h!.store.flush());
+  expect(h!.sent("send_prompt")).toEqual([
+    { thread: THREAD, content: [{ text: { text: QUESTION } }], delivery },
+  ]);
+  expect(h!.one("error")?.dataset["code"]).toBe("prompt.too_long");
+  expect(h!.one("error")?.textContent).toBe(errorWords("en", "prompt.too_long"));
+  expect(h!.host.textContent).not.toContain("raw host text");
+  expect(field().value).toBe(QUESTION);
+};
+
+test("a steer (Enter into Claude's answer) refused as prompt.too_long keeps the words and says prompt.too_long's words", async () => {
+  h = await mountRoom({ dispatch: refuseTooLong });
+  h.deliver([reset([userMessage(1, 1, "Q")], running(true))]);
+  await h.type(QUESTION);
+  await enter();
+  await keptAfterTooLong("steer");
+});
+
+test.each([
+  ["Claude", true, "claude-acp"],
+  ["ChatGPT", false, "codex-acp"],
+] as const)(
+  "the hint's Send now refused as prompt.too_long keeps the words and says prompt.too_long's words: %s",
+  async (_, joins, agent) => {
+    h = await mountRoom({ threads: [{ ...summary(), agent }], dispatch: refuseTooLong });
+    h.deliver([reset([userMessage(1, 1, "Q")], running(joins, agent))]);
+    await h.type(QUESTION);
+    await h.click(h.one("steer-send-now"));
+    await keptAfterTooLong("send_now");
+  },
+);
+
+test("a Send now over the cap sends nothing and keeps the words", async () => {
+  h = await mountRoom({ dispatch: acceptQueued });
+  h.deliver([reset([userMessage(1, 1, "Q")], running(true))]);
+  // one byte over: a newline costs 2 as the host counts it
+  const over = "a".repeat(MAX_PROMPT_TEXT_BYTES - 1) + "\n";
+  await h.type(over);
+  await h.click(h.one("steer-send-now"));
+  expect(h.sent("send_prompt")).toEqual([]);
+  expect(h.one("error")?.dataset["code"]).toBe("prompt.too_long");
+  expect(field().value).toBe(over);
 });
 
 test("with a permission waiting, Enter sends the field's words (Claude's steer, which the host queues at the head) and answers nothing; with the field empty it answers", async () => {
