@@ -74,9 +74,26 @@ pub(crate) fn set_mtime(path: &Path, mtime: std::time::SystemTime) {
         .unwrap();
 }
 
-/// `fs::rename`: the lawyer moving a folder.
+/// `fs::rename`: the lawyer moving a folder. Windows refuses to move a folder while a file in
+/// it is open (`Access is denied`, os error 5), and the host may still be reading it (a first
+/// read, a checkpoint) or an antivirus scanning it, so there a refusal is tried again every
+/// 100 ms for up to 10 s, as Explorer's "Try Again" would.
 pub(crate) fn rename(from: &Path, to: &Path) {
-    std::fs::rename(from, to).unwrap();
+    let mut tries = 0;
+    loop {
+        match std::fs::rename(from, to) {
+            Ok(()) => return,
+            Err(error)
+                if cfg!(windows)
+                    && error.kind() == std::io::ErrorKind::PermissionDenied
+                    && tries < 100 =>
+            {
+                tries += 1;
+                std::thread::sleep(std::time::Duration::from_millis(100));
+            }
+            Err(error) => panic!("the rename failed after {tries} retries: {error}"),
+        }
+    }
 }
 
 /// `fs::remove_file`.
