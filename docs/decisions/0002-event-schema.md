@@ -270,7 +270,13 @@ before: a prompt waiting behind its own thread (`turn_queued` with `behind` its 
 `UserMessageStatus::Queued` until its `turn_started` (or a writer wait behind another thread)
 makes it `Sent`; one with no prompt and no turn ahead (`behind_turn` absent), while no turn of
 the thread runs, is an agent-started turn opening (added 2026-11-12): the thread is `Starting`
-(`NeedsYou` while the lawyer is asked) until its `turn_started` or its `turn_ended`; `queued_prompt_edited` replaces its content and sets `edited`;
+(`NeedsYou` while the lawyer is asked) until its `turn_started` or its `turn_ended`. A prompt
+queued behind a turn still on its way (`behind_turn` that turn, `Starting` or `Queued`, not
+started; added 2026-11-12) leaves the status, as one behind a running turn does: the turn ahead
+stays the thread's last, so its `turn_started` gives `Running` and its `turn_ended` before it
+starts settles the status (before, the wait settled it to `Idle`, which hid Stop while the turn
+ahead was still starting). No `REDUCER_SCHEMA_VERSION` bump: a snapshot folded under the old
+rule shows `Idle` until the turn ahead starts or ends, and then agrees; `queued_prompt_edited` replaces its content and sets `edited`;
 `steer_resolved` sets the entry's `steer` and moves it to the outcome's turn (`not_sent`, added
 2026-11-11 for a steer a turn's end left unsent, moves nothing), and marks each tool
 call in `aside` with `ToolCallEntry.background` (`BackgroundMark`, its `finished_at` from the
