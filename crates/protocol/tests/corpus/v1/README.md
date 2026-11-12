@@ -28,7 +28,21 @@ them fails that test.
 ## Adding a kind or a variant after v1
 
 v1 cannot grow, so whatever is added later brings its own frozen entries in a folder `added/`
-beside `v1/`, decoded and pinned the same way:
+beside `v1/`, decoded and pinned the same way. Each name there has exactly three files, and no
+Rust file lists them: the test finds them in the folder.
+
+- `<name>.jsonl` and `<name>.msgpack`, the entries, as in v1.
+- `<name>.pin`, their pins: exactly two lines, each ending in LF (`corpus/.gitattributes` keeps
+  them so on Windows), the byte length in decimal and the FNV-1a 64 hash in 16 lowercase hex
+  digits:
+
+  ```text
+  jsonl 339 0x49bd0daf8ff8f75b
+  msgpack 240 0x12c16072ca6be315
+  ```
+
+The test fails, listing every problem at once, on a name missing one of the three, on any other
+file or a folder in `added/`, and on a malformed pin. To add a kind or a variant:
 
 1. Give the new kind or variant an example in `crates/protocol/tests/support/examples.rs`, with
    every optional field filled (the snapshots need it anyway).
@@ -42,13 +56,14 @@ beside `v1/`, decoded and pinned the same way:
    its pair into `target/tmp/corpus-added/`, never into this folder: `<kind>.jsonl` (one entry per
    line, `serde_json::to_string`) and `<kind>.msgpack` (one array, `rmp_serde::to_vec_named`)
    for a new kind, with every example of it; `<kind>-<Variant>` for a new variant, with the first
-   example that holds it, `<kind>` being that example's event. The files are insta binary
-   snapshots, the crate's one way to write a file from a test. For each pair it prints the two
-   `mv` commands that put the files in `corpus/added/` and the pair's `ADDED_AFTER_V1` row, with
-   each file's byte length and FNV-1a hash.
-3. Run the printed `mv` commands and paste the row into `ADDED_AFTER_V1_2` in
-   `crates/protocol/tests/corpus/added_rows_2.rs`. A row whose pins are still `(0, 0)` fails with
-   the pin to set.
+   example that holds it, `<kind>` being that example's event. Beside them it writes the pair's
+   `<name>.pin`. The files are insta binary snapshots, the crate's one way to write a file from a
+   test. For each pair it prints the three `mv` commands that put the files in `corpus/added/`,
+   then one `touch crates/protocol/tests/corpus.rs`.
+3. Run the printed commands. That is all: no Rust file to edit. The test embeds `added/` when its
+   target is built, so a file added since the last build shows up only once the target rebuilds;
+   the `touch` sees to that. A pin line written by hand as `jsonl 0 0x0000000000000000` fails
+   with the line to put there instead.
 
 The test fails until this is done: the known kinds must be exactly v1's plus those of the added
 files, and every variant must appear somewhere in v1 or the added files. The added files are as

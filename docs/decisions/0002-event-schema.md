@@ -656,7 +656,8 @@ as the room left by the blocks before it allows, so a block past the limit comes
   was frozen, and no test repeats it, since a field added later is rightly absent. The files are
   never edited or regenerated, and insta never touches them: the test pins each file's length
   and FNV-1a hash. A kind, or a variant of an open enum, added without a `schema_version` bump
-  brings its own frozen entries in `corpus/added/`, listed in the test's `ADDED_AFTER_V1`; the
+  brings its own frozen entries in `corpus/added/`, with a `.pin` beside them that pins their
+  lengths and hashes, and the test finds them there; the
   known kinds must be v1's plus the added ones, so a removed kind fails and an added one without
   its entry fails too. A unit value counts for every enum its string decodes as, so a new unit
   variant spelled like a value of another enum that the corpus holds passes unseen. A later
@@ -689,10 +690,10 @@ A new kind:
    accepted (`cargo insta test -p clauseo-protocol --accept`).
 5. Its row in the kind table under Kinds above, Logged `yes` and Stream `T` or `M`, in `KINDS`
    order: `kind_table_matches_record` (tests/events/rules.rs).
-6. Its frozen entries: the pair `<kind>.jsonl` and `<kind>.msgpack` in `tests/corpus/added/` and
-   its row in `ADDED_AFTER_V1` in `tests/corpus/added_rows.rs`. The ignored
-   `write_the_added_pairs` writes the pair from step 3's example into `target/tmp/corpus-added/`
-   and prints the `mv` commands and the row; `tests/corpus/v1/README.md` (Adding a kind or a
+6. Its frozen entries: the pair `<kind>.jsonl` and `<kind>.msgpack` in `tests/corpus/added/`
+   and its `<kind>.pin` beside them; no Rust file lists them. The ignored
+   `write_the_added_pairs` writes the three files from step 3's example into
+   `target/tmp/corpus-added/` and prints the `mv` commands; `tests/corpus/v1/README.md` (Adding a kind or a
    variant after v1) gives the command: `the_known_kinds_are_v1_and_the_added_ones`.
 
 A new variant of an open enum:
@@ -709,7 +710,7 @@ A new variant of an open enum:
    holds for a new variant of a closed enum on that list.
 4. If the enum is logged, an example in `tests/support/examples.rs` that holds the variant, and
    its frozen entries: the pair `<kind>-<Variant>.jsonl` and `.msgpack` in `tests/corpus/added/`
-   and its `ADDED_AFTER_V1` row, which `write_the_added_pairs` writes from that example as in
+   and its `.pin`, which `write_the_added_pairs` writes from that example as in
    step 6 of a new kind: `the_corpus_holds_every_variant_of_every_open_enum` (tests/corpus.rs).
    A unit value spelled like one the corpus holds for another enum passes that test unseen, so
    the pair is still added by hand.
