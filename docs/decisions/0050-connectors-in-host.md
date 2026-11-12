@@ -222,6 +222,11 @@ that server is dropped. `recharge` opens a payment and is not pre-allowed, so it
 PR C; ChatGPT gets the same list through the host's auto-answer, `agent/mcp_trust.rs`, only in
 a session our entry went to). The servers in `mcp.servers`, the lawyer's or a firm policy's, run
 unasked the same way: adding a server is the trust (`agent/mcp_trust.rs`).
+Because those calls are pre-allowed, the host's own checks on a tool call never see them, so the
+auto-deny that keeps an agent out of Clauseo's data folder in acceptEdits does not apply: a server
+the lawyer adds that reads files (a filesystem server, say) can read Clauseo's data folder. That is
+part of the lawyer's choice when adding the server; the server runs as the lawyer, with the lawyer's
+own file access.
 `case-law` is a reserved server name (`settings/src/leaf.rs`, `RESERVED_MCP_SERVERS`): a firm's or
 the lawyer's `mcp.servers.case-law` is dropped with a visible warning ("the server name case-law
 is reserved for Clauseo's case-law connector"). No server name may hold `__` or end in `_`, since
