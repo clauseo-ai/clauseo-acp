@@ -184,8 +184,17 @@ fn a_grandchild_left_running_is_stopped_when_the_command_exits() {
 /// It prints the group's id once its handler is set, so the stop at the exit, which comes only
 /// once `finish` runs, finds it set. One process, not a shell with a `sleep`: a SIGTERM that
 /// lands while a shell forks its `sleep` can leave the `sleep` running.
-const LEFTOVER_REPORTS_SIGTERM: &str = r#"perl -e '$SIG{TERM} = sub { print "term\n"; exit 0 };
-$| = 1; print getpgrp(), "\n"; sleep 300' &"#;
+///
+/// It holds SIGTERM blocked and waits in `sigsuspend`, never in `sleep`. Perl runs a handler only
+/// between ops ("safe signals"), so a SIGTERM that lands after the print, before `sleep` blocks,
+/// is held until the sleep ends: the run then kills it after the grace and nothing prints `term`
+/// (Linux CI, issue #516: 5.1 s, `left: ""`). The stop is sent as soon as the test reads the
+/// line, so that window is hit under load. `sigsuspend` unblocks and waits in one call, and the
+/// loop runs the handler once it returns.
+pub(in crate::process) const LEFTOVER_REPORTS_SIGTERM: &str = r#"perl -MPOSIX -e '
+sigprocmask(SIG_BLOCK, POSIX::SigSet->new(SIGTERM)) or die "sigprocmask: $!";
+$SIG{TERM} = sub { print "term\n"; exit 0 };
+$| = 1; print getpgrp(), "\n"; sigsuspend(POSIX::SigSet->new) while 1' &"#;
 
 /// Leaves one process in its group, a perl that ignores SIGTERM, and prints the group's id once
 /// it does.
