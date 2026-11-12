@@ -22,6 +22,7 @@ use super::paths;
 use super::run::{Line, Ran, first_line, run};
 use super::tap::{StdoutTap, tapped};
 use super::time::parse_rfc3339;
+use super::{MAX_LABEL, MAX_WINDOWS};
 use crate::model::kind_rank;
 use crate::words::{self, CLAUDE_WINDOWS};
 use crate::{AccountRead, ReadFailure, ReadOutcome, write};
@@ -32,10 +33,6 @@ pub(crate) const HELPER: &str = include_str!("../../helper/claude-usage.mjs");
 const CLAUDE_CONFIG_DIR: &str = "CLAUDE_CONFIG_DIR";
 /// How long a read may take before its tree is killed.
 pub(crate) const LIMIT: Duration = Duration::from_secs(25);
-/// The most windows one read keeps.
-const MAX_WINDOWS: usize = 16;
-/// The most chars a label keeps.
-const MAX_LABEL: usize = 64;
 
 /// The account ref of a pay-as-you-go account with no usable email: any API key provider.
 const REF_API_KEY: &str = "api-key";

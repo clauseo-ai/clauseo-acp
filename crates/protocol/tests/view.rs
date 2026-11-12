@@ -541,7 +541,7 @@ fn append_text_names_its_target() {
 }
 
 #[test]
-fn a_limit_window_and_its_row_leave_out_model_when_none() {
+fn a_limit_window_and_its_row_leave_out_model_and_duration_when_none() {
     let mut window = LimitWindow {
         id: "model_scoped:0".to_owned(),
         kind: WindowKind::Model,
@@ -567,12 +567,23 @@ fn a_limit_window_and_its_row_leave_out_model_when_none() {
         kind: WindowKind::Model,
         label: "Fable weekly limit".to_owned(),
         model: Some("Fable".to_owned()),
+        duration_mins: Some(10_080),
         used_percent: Some(Finite::new(12.0).unwrap()),
         tone: MeterTone::Neutral,
         resets_at: None,
         freshness: WindowFreshness::Fresh,
     };
     round_trips(&row);
+    let unknown = LimitWindowView {
+        duration_mins: None,
+        ..row.clone()
+    };
+    assert!(
+        serde_json::to_value(&unknown)
+            .unwrap()
+            .get("duration_mins")
+            .is_none()
+    );
     // A window or row written before the field reads back with none.
     let mut old = serde_json::to_value(&window).unwrap();
     old.as_object_mut().unwrap().remove("model");
@@ -582,10 +593,7 @@ fn a_limit_window_and_its_row_leave_out_model_when_none() {
     );
     let mut old = serde_json::to_value(&row).unwrap();
     old.as_object_mut().unwrap().remove("model");
-    assert_eq!(
-        serde_json::from_value::<LimitWindowView>(old)
-            .unwrap()
-            .model,
-        None
-    );
+    old.as_object_mut().unwrap().remove("duration_mins");
+    let old = serde_json::from_value::<LimitWindowView>(old).unwrap();
+    assert_eq!((old.model, old.duration_mins), (None, None));
 }

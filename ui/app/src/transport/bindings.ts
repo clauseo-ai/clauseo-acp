@@ -3417,6 +3417,11 @@ export type LimitWindowView = {
 	/**  The model a per-model window counts, matching [`LimitWindow::model`]. */
 	model?: string,
 	/**
+	 *  Its length in minutes when known, matching [`LimitWindow::duration_mins`], so a
+	 *  per-model window's label can name its length in any language.
+	 */
+	duration_mins?: number,
+	/**
 	 *  How much is used, 0 to 100; `None` while loading or once its reset time passed, so an
 	 *  old percentage is never shown as current.
 	 */

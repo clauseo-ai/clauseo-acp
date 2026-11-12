@@ -238,6 +238,7 @@ fn finite_fields_refuse_nan_and_infinities() {
         kind: WindowKind::Session,
         label: "5-hour".to_owned(),
         model: None,
+        duration_mins: None,
         used_percent: Some(used_percent),
         tone: MeterTone::Neutral,
         resets_at: None,

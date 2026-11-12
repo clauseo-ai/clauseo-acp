@@ -8,6 +8,8 @@ export const HI = {
   "Weekly limit": "साप्ताहिक सीमा",
   // a per-model window, {model} as the host names it, never written here (#236)
   "{model} weekly limit": "{model} की साप्ताहिक सीमा",
+  // a per-model 5-hour window: a Codex model's own limit, such as Spark's
+  "{model} 5-hour limit": "{model} की 5 घंटे की सीमा",
   "Weekly limit for connected apps": "जुड़े हुए ऐप्स की साप्ताहिक सीमा",
   "Monthly limit": "मासिक सीमा",
   "Usage limit": "उपयोग की सीमा",

@@ -11,7 +11,8 @@ use clauseo_protocol::{
 
 use super::Answers;
 use crate::model::kind_rank;
-use crate::readers::claude::looks_like_email;
+use crate::readers::claude::{clean, looks_like_email};
+use crate::readers::{MAX_LABEL, MAX_WINDOWS};
 use crate::words;
 use crate::{AccountRead, ReadFailure, ReadOutcome};
 
@@ -85,7 +86,9 @@ fn chatgpt(
         })
         .filter_map(|(id, window)| limit_window(id, window.as_ref()?, plan_type))
         .collect();
+    windows.extend(model_windows(limits, plan_type));
     windows.sort_by_key(|window| kind_rank(window.kind));
+    windows.truncate(MAX_WINDOWS);
     let at_limit = snapshot
         .and_then(|snapshot| snapshot.credits.as_ref())
         .map_or(AtLimitBehaviour::Pauses, |credits| {
@@ -127,6 +130,47 @@ fn pay_as_you_go(via: BillingProvider, account: &str) -> ReadOutcome {
         reached: None,
         account_read: AccountRead::Read,
     }
+}
+
+/// The windows of each limit in `rateLimitsByLimitId` other than Codex's own (a model's
+/// bucket), in `limitId` order: each of its two windows as a `Model` row named by the limit's
+/// `limitName`, with the id `<limitId>:primary` or `<limitId>:secondary`, labelled by the model
+/// and the window's length. A limit with no usable name is left out, as Claude's reader leaves
+/// out a `model_scoped` entry with none.
+fn model_windows(
+    limits: Option<&GetAccountRateLimitsResponse>,
+    plan_type: &PlanType,
+) -> Vec<LimitWindow> {
+    let Some(by_id) = limits.and_then(|limits| limits.rate_limits_by_limit_id.as_ref()) else {
+        return Vec::new();
+    };
+    by_id
+        .iter()
+        .filter(|(id, _)| id.as_str() != CODEX_LIMIT)
+        .filter_map(|(id, snapshot)| {
+            let name: String = clean(snapshot.limit_name.as_deref()?)
+                .chars()
+                .take(MAX_LABEL)
+                .collect();
+            (!name.is_empty()).then_some((id, snapshot, name))
+        })
+        .flat_map(|(id, snapshot, name)| {
+            [
+                ("primary", &snapshot.primary),
+                ("secondary", &snapshot.secondary),
+            ]
+            .into_iter()
+            .filter_map(move |(position, window)| {
+                let id = format!("{id}:{position}");
+                let mut row = limit_window(&id, window.as_ref()?, plan_type)?;
+                let label = words::codex_model_label(&name, &row.label);
+                row.label = label.chars().take(MAX_LABEL).collect();
+                row.kind = WindowKind::Model;
+                row.model = Some(name.clone());
+                Some(row)
+            })
+        })
+        .collect()
 }
 
 /// One window at position `id` (`primary` or `secondary`). Its length, not its position, gives

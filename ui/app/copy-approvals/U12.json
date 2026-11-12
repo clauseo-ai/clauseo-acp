@@ -334,5 +334,16 @@
     "at": "2026-11-10",
     "by": "app track (provisional; orchestrator approved the words 2026-11-10, copy review pending)",
     "note": "Settings' Plan and usage with no plan set up (usage.tsx), so the page is never blank"
+  },
+  "U12-47": {
+    "en": "{model} 5-hour limit",
+    "hi": "{model} की 5 घंटे की सीमा",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-08",
+    "hi_by": "Shamil's track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-08",
+    "by": "Shamil's track (provisional; Rohan batch review)",
+    "note": "A per-model 5-hour window, such as a ChatGPT plan's Spark bucket; U12-44's form with U12-12's length"
   }
 }

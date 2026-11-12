@@ -47,6 +47,7 @@ pub fn limits_view() -> LimitsView {
             kind: WindowKind::Session,
             label: "5-hour".to_owned(),
             model: None,
+            duration_mins: None,
             used_percent: Some(finite(82.5)),
             tone: MeterTone::Near,
             resets_at: Some(Timestamp::new(1_760_000_000_000).unwrap()),

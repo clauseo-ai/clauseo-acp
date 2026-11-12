@@ -170,7 +170,12 @@ the install's. No account is `SignedOut`. An API key is `PayAsYouGo { via: OpenA
 `api-key`, and Bedrock is `PayAsYouGo { via: Bedrock }` with ref `bedrock`, both
 `NotApplicable`. For ChatGPT, only the snapshot whose `limitId` is `codex` (from
 `rateLimitsByLimitId`, else `rateLimits` when its `limitId` is `codex` or absent) sets the
-windows, so a model bucket never overwrites them; other buckets are ignored for now. `primary`
+windows, so a model bucket never overwrites them. Each other bucket in `rateLimitsByLimitId`
+(a model's, such as Spark) adds its windows after them as `Model` rows with ids
+`<limitId>:primary` and `<limitId>:secondary`, `model` its `limitName` (a bucket with none is left
+out) and the label its name and length ("Spark 5-hour limit"), at most 16 rows a read. Such a row
+never stops Codex and never sets the toolbar's meter: it limits one model while Codex goes on
+with its own, so `at_limit` and the meter read Codex's own rows only. `primary`
 and `secondary` are positions and keep those ids. `windowDurationMins` gives the kind: 300 is the
 session, 10080 the week, 28 to 31 days "Monthly limit", and Free or Go with no duration one
 monthly window. Credits give `Credits { has_credits }`. `rateLimitReachedType` gives `reached`:
