@@ -55,6 +55,12 @@ it was."). The research behind this record is the private `measurements/long-que
   kind. No free text is matched anywhere else: Codex's "Input exceeds the maximum length of"
   never reaches the wire (recorded), so its prefix match was removed. Codex's recorded
   "internal error" is not read as too long: the wire cannot tell it from a real internal error.
+  It is a failure the agent gave up on (amended, codex-service-error): any `sessionFailure` of
+  severity `error` with `retry` or `new_session` in its actions, in a category no earlier rule
+  reads (not `limit` nor `connection`, and not too long), is `PromptEnd::failed`, read after
+  limit, too long and connection. The host ends that turn `Failed { agent.protocol_error }`, the
+  code the same failure gets over JSON-RPC: a failure line and Try again, the queue held, the
+  agent's title in no event and no log line. A turn that ends `TooLong` never ends so.
 - **Which agent.** The host ends a turn `TooLong` for `PromptTooLong` from any agent, and for
   `ContextExhausted` only from codex-acp: claude-agent-acp sends that shape for its configured
   turn or output limit, which shortening the question does not fix; there it is logged by kind.

@@ -8,7 +8,7 @@ use serde_json::json;
 
 use super::content::MAX_TEXT_CHUNK_BYTES;
 use super::*;
-use crate::event::{ConnectionLost, LimitSignal, LimitStatus};
+use crate::event::{AgentFailed, ConnectionLost, LimitSignal, LimitStatus};
 
 fn session() -> AgentSessionId {
     AgentSessionId::new("s-1").unwrap()
@@ -296,13 +296,9 @@ fn session_failure_categories() {
         ),
         ("request", "warning", json!([]), "Prompt is too long"),
         ("service", "warning", json!(["retry"]), "Prompt is too long"),
-        // Codex's recorded refusal of an over-long input: indistinguishable from an internal error.
-        (
-            "service",
-            "error",
-            json!(["retry", "new_session"]),
-            "Codex encountered an internal error.",
-        ),
+        // Without severity `error`, a give-up shape is only a warning.
+        ("service", "warning", json!(["retry", "new_session"]), "T"),
+        ("service", "info", json!(["retry"]), "T"),
     ] {
         assert_eq!(
             failure_titled(category, severity, actions, title),
@@ -314,6 +310,68 @@ fn session_failure_categories() {
             "{category} {severity} {title}"
         );
     }
+}
+
+/// Severity `error` with `retry` or `new_session`, in a category no earlier rule reads: the agent
+/// gave up on the turn. codex-acp 2.2.2's `internal_error` (also Codex's recorded refusal of an
+/// over-long input, indistinguishable from it), `provider_error` and `overloaded`. Limit, too
+/// long and connection are read first (`session_failure_categories`, and the connection test).
+#[test]
+fn a_failure_the_agent_gave_up_on_ends_the_turn_failed() {
+    let failure = |category: &str, actions: Value, title: &str| {
+        let meta = json!({"jetbrains": {"air": {"sessionFailure": {
+            "category": category, "severity": "error", "title": title, "actions": actions,
+        }}}});
+        session_failure(meta.as_object().unwrap()).unwrap()
+    };
+    for (category, actions, title) in [
+        (
+            "service",
+            json!(["retry", "new_session"]),
+            "Codex encountered an internal error.",
+        ),
+        ("service", json!(["retry"]), "T"),
+        ("request", json!(["new_session"]), "T"),
+        ("unknown", json!(["retry"]), "T"),
+    ] {
+        assert_eq!(
+            failure(category, actions, title),
+            Failure::Failed(AgentFailed {
+                category: Some(category.to_owned()),
+                title: Some(title.to_owned()),
+            }),
+            "{category} {title}"
+        );
+    }
+    // Earlier rules win: a limit, Claude's too-long title, a lost connection.
+    assert!(matches!(
+        failure("limit", json!(["retry"]), "T"),
+        Failure::Limit(_)
+    ));
+    assert!(matches!(
+        failure("limit", json!(["retry", "new_session"]), "T"),
+        Failure::Warning(_)
+    ));
+    assert!(matches!(
+        failure("service", json!(["retry"]), "Prompt is too long"),
+        Failure::TooLong(crate::TooLong::PromptTooLong)
+    ));
+    assert!(matches!(
+        failure("connection", json!(["retry", "new_session"]), "T"),
+        Failure::Connection(_)
+    ));
+    // On an update it ends no turn (codex-acp sends it so only for another turn): a warning.
+    let meta = json!({"jetbrains": {"air": {"sessionFailure": {
+        "category": "service", "severity": "error", "title": "T", "actions": ["retry"],
+    }}}});
+    let update = json!({"sessionUpdate": "session_info_update", "_meta": meta});
+    assert!(matches!(
+        &map_update(update, None)[..],
+        [AcpEvent::Warning {
+            warning: ProtocolWarning::SessionFailure { .. },
+            ..
+        }]
+    ));
 }
 
 /// A too-long `sessionFailure` on a `session_info_update` is its own event, so a failure sent only

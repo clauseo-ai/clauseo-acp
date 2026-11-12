@@ -52,6 +52,11 @@ pub(super) fn log(thread: ThreadId, session: Option<&AgentSessionId>, warning: &
     }
 }
 
+/// A `sessionFailure`'s category, for the log: one of [`CATEGORIES`], `none` or `other`.
+pub(in crate::actor::turn) fn category(value: Option<&str>) -> &'static str {
+    word(&CATEGORIES, value)
+}
+
 /// A warning's kind, for the log: its fields hold what the agent sent.
 const fn kind(warning: &W) -> &'static str {
     match warning {

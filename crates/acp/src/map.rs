@@ -367,6 +367,16 @@ fn failure_event(session: AgentSessionId, origin: Origin, failure: Failure) -> A
             origin,
             lost,
         },
+        // codex-acp sends one on an update only for a turn other than the running one, or after
+        // the prompt's answer: it ends no turn, so it stays a warning, as it was.
+        Failure::Failed(failed) => warning_event(
+            Some(session),
+            ProtocolWarning::SessionFailure {
+                category: failed.category,
+                severity: Some("error".to_owned()),
+                title: failed.title,
+            },
+        ),
         Failure::Warning(warning) => warning_event(Some(session), warning),
     }
 }

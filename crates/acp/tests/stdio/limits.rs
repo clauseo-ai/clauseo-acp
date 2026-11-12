@@ -180,6 +180,7 @@ fn session_failure_typed() {
                 limit: Some(stopped.clone()),
                 too_long: None,
                 connection: None,
+                failed: None,
             }
         );
         // The session_info_update carries only the failure: no title event.

@@ -130,6 +130,7 @@ fn prompt_stream_text_events() {
                 limit: None,
                 too_long: None,
                 connection: None,
+                failed: None,
             }
         );
         let t1 = Origin::Turn(turn(1));

@@ -6,7 +6,7 @@ use clauseo_protocol::{
     AgentCapabilities, AgentSessionId, CompactString, ConfigOption, StopReason,
 };
 
-use crate::event::{ConnectionLost, LimitSignal, RawFrame};
+use crate::event::{AgentFailed, ConnectionLost, LimitSignal, RawFrame};
 
 /// Options for [`connect`](crate::connect).
 #[derive(Debug, Clone, Default)]
@@ -206,6 +206,10 @@ pub struct PromptEnd {
     /// A lost connection the response carried (an AIR `sessionFailure` of category
     /// `connection` in its `_meta`): codex-acp ends a turn whose retries ran out so.
     pub connection: Option<ConnectionLost>,
+    /// A failure the agent gave up on the turn for (an AIR `sessionFailure` of severity `error`
+    /// with `retry` or `new_session` in its `_meta`, in no category another field reads):
+    /// codex-acp ends a turn so on Codex's internal error.
+    pub failed: Option<AgentFailed>,
 }
 
 /// How an AIR `sessionFailure` said a turn was too long to read. The driver does not know the
