@@ -164,9 +164,9 @@ export const HI = {
   // matter; {name} is the agent as the outside-matter stop names it (provisional, TN-11), and
   // the AI where none is known (provisional, TN-12)
   "Clauseo stopped a step: {name} tried to reach outside this matter.":
-    "Clauseo ने एक चरण रोक दिया: {name} ने इस मामले के बाहर पहुँचने की कोशिश की।",
+    "Clauseo ने एक काम रोक दिया: {name} ने इस मामले के बाहर पहुँचने की कोशिश की।",
   "Clauseo stopped a step: the AI tried to reach outside this matter.":
-    "Clauseo ने एक चरण रोक दिया: AI ने इस मामले के बाहर पहुँचने की कोशिश की।",
+    "Clauseo ने एक काम रोक दिया: AI ने इस मामले के बाहर पहुँचने की कोशिश की।",
   // the composer
   // in the composer's place while the open conversation is archived (U16a's Find opens one): it takes no question
   "Archived. Read only.": "संग्रहीत। केवल पढ़ने के लिए।",
