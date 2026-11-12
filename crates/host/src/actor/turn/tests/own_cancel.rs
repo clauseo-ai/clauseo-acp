@@ -5,12 +5,13 @@
 //!
 //! An agent-started turn never waits in `Launching` itself: its agent being attached keeps the
 //! thread's stream loaded, so step 3 follows at once. Before its checkpoint it waits only for the
-//! matter's writer (`Queued`), which takes the same cancel path as `Launching`.
+//! matter's writer (`Queued`), which takes the same cancel path as `Launching`. In each phase the
+//! view shows the turn as on its way (`assert_shown`), so the app's Stop is there to press.
 
 use clauseo_acp::{AcpEvent, Origin};
 use clauseo_protocol::{
     CommandEnvelope, CommandOutcome, DeliveryRequest, DomainEvent, HostCommand, PromptBlock,
-    StopReason, ThreadId, TurnId,
+    StopReason, StreamId, ThreadId, ThreadStatus, TurnId,
 };
 
 use super::agents::send_prompt;
@@ -216,10 +217,33 @@ fn press_stop(rig: &mut Rig, thread: ThreadId) -> Answer {
     answer
 }
 
+/// The thread's status as its loaded view has it.
+fn view_status(rig: &Rig, thread: ThreadId) -> ThreadStatus {
+    let loaded = rig.actor.loaded(StreamId::Thread(thread)).unwrap();
+    loaded.state.as_thread().unwrap().status()
+}
+
+/// The view shows the agent-started turn as on its way in every phase (so the app shows Stop):
+/// `Queued` behind the writer's holder, `Starting` from its open (its `TurnQueued` behind its own
+/// thread, logged before its checkpoint) and `Running` once live.
+fn assert_shown(rig: &mut Rig, thread: ThreadId, at: At) {
+    if at == At::Checkpointing {
+        rig.settle_commits();
+    }
+    let status = view_status(rig, thread);
+    let shown = match at {
+        At::Writer => matches!(status, ThreadStatus::Queued { behind } if behind != thread),
+        At::Checkpointing | At::Starting => status == ThreadStatus::Starting,
+        At::Prompting => status == ThreadStatus::Running,
+    };
+    assert!(shown, "{at:?}: {status:?}");
+}
+
 fn stop_at(test: &str, at: At) {
     let mut rig = Rig::start(test, OWN_THEN_LATE);
     let thread = rig.thread();
     let waiting = own_turn_at(&mut rig, thread, at);
+    assert_shown(&mut rig, thread, at);
     let mut answer = press_stop(&mut rig, thread);
     rig.release_held();
     // The late text comes only once the agent heard `session/cancel`; it opens no turn.

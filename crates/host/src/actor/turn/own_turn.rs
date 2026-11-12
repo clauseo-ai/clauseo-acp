@@ -3,7 +3,9 @@
 //! Code background the command and end the prompt). Its updates come with no prompt in flight
 //! (`Origin::Idle`), and agent output outside a turn is never dropped: text and tool calls name a
 //! turn, so the host opens one for them on the same thread. It has no `UserMessage`; otherwise it
-//! is a turn like any other: the matter's writer, the before checkpoint (with the outside edits
+//! is a turn like any other: the matter's writer (taken at once, it logs a `TurnQueued` behind
+//! its own thread, which the view folds to `Starting`: Stop shows from its open, as a prompt's
+//! `UserMessage` does for a prompted turn), the before checkpoint (with the outside edits
 //! since the last turn, as for a prompt), `TurnStarted`, live updates, and steps 6 to 8 with the
 //! after checkpoint, so the view shows it as an exchange with no question and Undo has its step.
 //!
@@ -30,14 +32,17 @@ mod late;
 use std::time::Duration;
 
 use clauseo_acp::{AcpEvent, AgentUpdate, Origin};
-use clauseo_protocol::{AgentSessionId, ExpiryReason, StopReason, StreamId, ThreadId, TurnId};
+use clauseo_protocol::{
+    AgentSessionId, ExpiryReason, StopReason, StreamId, ThreadId, TurnId, TurnQueued,
+};
 use futures::future::AbortHandle;
 
 use super::super::Actor;
 use super::agents::Stage;
+use super::out::Out;
 use super::{
-    CANCEL_WAIT, Current, End, TimerKind, TurnPhase, TurnTimer, current, end, host_stopping, state,
-    steps, updates,
+    CANCEL_WAIT, Current, End, Then, TimerKind, TurnPhase, TurnTimer, current, end, host_stopping,
+    state, steps, updates,
 };
 use crate::error::Error;
 use crate::log_file::{Cause, LIFECYCLE};
@@ -271,6 +276,28 @@ fn open(actor: &mut Actor, thread: ThreadId) -> Result<(), Error> {
 /// Whether `thread`'s current turn is agent-started.
 pub(super) fn is_own(actor: &mut Actor, thread: ThreadId) -> bool {
     current(actor, thread).is_some_and(|current| current.own.is_some())
+}
+
+/// Step 3 gave the agent-started turn `turn` its writer at once: its `TurnQueued` behind its own
+/// thread is logged now, before its checkpoint, so the view has it from its open (`Starting`,
+/// and Stop) rather than from its `TurnStarted`. A turn that waits for another thread's writer
+/// logs `TurnQueued` behind that thread instead (`steps.rs`). A prompted turn is left alone: its
+/// `UserMessage` did this.
+pub(super) fn log_opened(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
+    if !current(actor, thread).is_some_and(|current| current.turn == turn && current.own.is_some())
+    {
+        return;
+    }
+    let logged = (|| -> Result<(), Error> {
+        let opened = TurnQueued::new(thread, turn, thread, None)
+            .map_err(|error| Error::Internal(error.to_string()))?;
+        let mut out = Out::new(actor, thread, None)?;
+        out.push(actor, opened)?;
+        out.send(actor, Then::Nothing)
+    })();
+    if let Err(error) = logged {
+        tracing::warn!(%thread, error = %Cause(&error), "an agent-started turn's open was not logged");
+    }
 }
 
 /// The `TurnStarted` of an agent-started turn is durable: it is live, the waiting updates are

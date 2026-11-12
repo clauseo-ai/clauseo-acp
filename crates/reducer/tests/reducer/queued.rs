@@ -1,7 +1,7 @@
 //! `TurnQueued`: a turn waiting behind another thread's writer shows `Queued { behind }`; one
 //! waiting behind its own thread keeps a running turn's status and, with no turn running, settles
-//! the status (`Idle` unless the lawyer is asked). A queued turn cancelled before
-//! it starts settles the status.
+//! the status (`Idle` unless the lawyer is asked), but for an agent-started turn's (no prompt),
+//! which gives `Starting`. A queued turn cancelled before it starts settles the status.
 
 use clauseo_protocol::{
     DomainEvent, MessageId, ThreadId, ThreadStatus, TurnId, TurnQueued, TurnStarted,
@@ -282,5 +282,46 @@ fn cancel_queued_turn_ends_once() {
     );
     assert!(!has_step(&state, third));
     assert!(has_step(&state, second));
+    assert_eq!(state, fold(log.events()));
+}
+
+#[test]
+fn own_turn_wait_gives_starting() {
+    // An agent-started turn has no prompt: its `TurnQueued` behind its own thread, logged as it
+    // opens, gives `Starting` (so Stop shows) until its `TurnStarted`; one cancelled before it
+    // starts settles to `Idle`, with no step.
+    let (mut log, mut state, thread) = created();
+    let own = log.fresh().unwrap();
+    let out = push(&mut log, &mut state, queued(thread, own, thread, None));
+    assert_eq!(header_statuses(&out), [ThreadStatus::Starting]);
+    assert_eq!(round_trip(&state), state);
+    let out = start(&mut log, &mut state, own);
+    assert_eq!(header_statuses(&out), [ThreadStatus::Running]);
+    end(&mut log, &mut state, own);
+    assert_eq!(status(&state), ThreadStatus::Idle);
+
+    let stopped = log.fresh().unwrap();
+    push(&mut log, &mut state, queued(thread, stopped, thread, None));
+    assert_eq!(status(&state), ThreadStatus::Starting);
+    let out = cancel(&mut log, &mut state, stopped);
+    assert!(out.anomalies.is_empty(), "{:?}", out.anomalies);
+    assert_eq!(status(&state), ThreadStatus::Idle);
+    assert!(!has_step(&state, stopped));
+    assert_eq!(state, fold(log.events()));
+}
+
+#[test]
+fn own_turn_wait_while_asked_gives_needs_you() {
+    // A request that waits as the agent-started turn opens keeps `NeedsYou` (Stop shows); its
+    // answer settles the status as for any turn not started yet.
+    let (mut log, mut state, thread) = created();
+    let request = log.fresh().unwrap();
+    push(&mut log, &mut state, permission_requested(request, None));
+    let own = log.fresh().unwrap();
+    let out = push(&mut log, &mut state, queued(thread, own, thread, None));
+    assert_eq!(header_statuses(&out), []);
+    assert_eq!(status(&state), ThreadStatus::NeedsYou);
+    push(&mut log, &mut state, permission_resolved(request));
+    assert_eq!(status(&state), ThreadStatus::Idle);
     assert_eq!(state, fold(log.events()));
 }
