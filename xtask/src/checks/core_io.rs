@@ -70,7 +70,8 @@
 mod fix;
 pub(crate) use fix::Fix;
 
-mod cfgs;
+/// The lexer and `path` resolution, which `unix_paths` reuses.
+pub(super) mod cfgs;
 mod clippy_toml;
 mod lints;
 mod report;
