@@ -32,14 +32,9 @@ const PLAIN_HEADER: &str = "firm\"tenant/0042";
 /// A local server's plain env value, as a firm's policy sets it.
 const POLICY_ENV: &str = "ghp_plainPolicyToken1";
 
-/// The local server's program: an absolute path on every OS, since settings refuses any other
-/// path (`/tools/github-mcp` is not absolute on Windows).
-fn github_command() -> &'static str {
-    if cfg!(windows) {
-        r"C:\tools\github-mcp"
-    } else {
-        "/tools/github-mcp"
-    }
+/// The local server's program, absolute on every OS (`crate::testing::abs`).
+fn github_command() -> String {
+    crate::testing::abs("/tools/github-mcp")
 }
 
 /// Settings with one remote server: a token in its URL's path and query and a key-like path
@@ -66,9 +61,10 @@ fn effective() -> Effective {
 
 #[test]
 fn a_remote_servers_url_and_header_values_are_redacted_from_the_stderr_tail() {
+    let github = github_command();
     let secrets = McpSecrets::of(
         &[("docs/header/Authorization", BASIC)],
-        &[(github_command(), github_command())],
+        &[(github.as_str(), github.as_str())],
     );
     let lawyer = Lawyer {
         control: McpControl::Clauseo,

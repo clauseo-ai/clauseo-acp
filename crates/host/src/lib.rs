@@ -266,6 +266,8 @@ mod sent;
 mod shell_writes;
 mod snapshot;
 mod sources;
+#[cfg(test)]
+mod testing;
 mod undo_note;
 mod update;
 mod view;

@@ -7,13 +7,14 @@ use clauseo_protocol::{McpImportSource, McpSkipReason};
 use clauseo_settings::mcp_import::{CandidateKind, ImportCandidate, Problem, Source};
 
 use super::{pick, program_name, skip_of, source_of};
+use crate::testing::abs;
 
 fn candidate(name: &str, source: Source, problems: Vec<Problem>) -> ImportCandidate {
     ImportCandidate {
         name: name.to_owned(),
         sources: vec![source],
         kind: CandidateKind::Local {
-            command: PathBuf::from("/opt/homebrew/bin/npx"),
+            command: PathBuf::from(abs("/opt/homebrew/bin/npx")),
             args: Vec::new(),
             env: Vec::new(),
         },
