@@ -181,9 +181,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-12",
     "hi_by": "app track (provisional; derived from the approved ChatGPT sentence; Hindi-speaking lawyer to review)",
-    "status": "provisional",
+    "status": "approved",
     "at": "2026-11-12",
-    "by": "app track (provisional; derived from the approved ChatGPT sentence)",
+    "by": "orchestrator",
     "note": "agent.service_error (#1030): a failure the agent gave up on, on its side; Try again, no Restart; an agent of no kind by its name, as U6F-04"
   },
   "U6F-21": {
@@ -192,9 +192,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-12",
     "hi_by": "app track (provisional; derived from the approved ChatGPT sentence; Hindi-speaking lawyer to review)",
-    "status": "provisional",
+    "status": "approved",
     "at": "2026-11-12",
-    "by": "app track (provisional; derived from the approved ChatGPT sentence)",
+    "by": "orchestrator",
     "note": "agent.service_error (#1030): a failure the agent gave up on, on its side; Try again, no Restart; no name at all, as U6F-10"
   }
 }
