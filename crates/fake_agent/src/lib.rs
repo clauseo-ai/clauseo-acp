@@ -1,4 +1,5 @@
-//! `fake_agent`: a scripted ACP v1 agent over stdio, for other crates' tests.
+//! `fake_agent`: a scripted ACP v1 agent over stdio, for other crates' tests. A scenario whose
+//! header says `"protocol": "app-server"` plays a Codex app-server instead.
 //!
 //! # Owns
 //!
@@ -31,14 +32,16 @@
 //! # Invariants
 //!
 //! - In scenario mode, stdout carries only JSON-RPC lines (and `send_line` text), each flushed.
-//!   Diagnostics go to stderr. A sign-in mode writes its own lines (`signin.rs`).
+//!   Diagnostics go to stderr. A sign-in mode writes its own lines (`signin.rs`). An ACP
+//!   scenario's lines carry `"jsonrpc": "2.0"` both ways; an app-server scenario's lines carry
+//!   none, and its client's lines may leave it out.
 //! - The agent waits only for the next client line: no timers, sleeps, randomness or clock.
 //!   The exceptions are `--pace-ms`, which sleeps between consecutive updates for the speed
 //!   scoreboard (R13) and never touches a scenario, and `FAKE_SIGNIN=ok-after:<ms>`, which waits
 //!   before a sign-in writes its marker. A sign-in mode never reads a scenario.
-//! - Every sent message without `"raw": true` survives the SDK's v1 schema for its method at load
-//!   (`validate.rs`): deserialised, serialised again, and every value the scenario wrote is still
-//!   there. A method the SDK does not know must be marked raw.
+//! - In an ACP scenario, every sent message without `"raw": true` survives the SDK's v1 schema
+//!   for its method at load (`validate.rs`): deserialised, serialised again, and every value the
+//!   scenario wrote is still there. A method the SDK does not know must be marked raw.
 //! - `write_file`, `delete_file` and `move_file` change files only under the current session's
 //!   `cwd`, with relative paths and no `..`. `spawn_child` writes its `pid_file` relative to the
 //!   process folder (the agent's working directory), not the session `cwd`, also with no `..`.
