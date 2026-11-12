@@ -8,12 +8,9 @@ use std::ffi::{OsStr, OsString};
 use clauseo_settings::AgentLaunch;
 
 use crate::readers::claude::prepare;
+use crate::readers::paths::tests::{CLAUDE_SCRIPT, sdk};
 use crate::write::scratch::Scratch;
 
-const CLAUDE_SCRIPT: &str =
-    "install/node_modules/@agentclientprotocol/claude-agent-acp/dist/index.js";
-const CLAUDE_SDK: &str = "install/node_modules/@anthropic-ai/claude-agent-sdk/package.json";
-const SDK_PACKAGE: &str = r#"{"name":"@anthropic-ai/claude-agent-sdk","version":"0.3.293"}"#;
 /// A project settings file that would move the account or provider Claude Code reads.
 const VERTEX_SETTINGS: &str = r#"{"env":{"CLAUDE_CODE_USE_VERTEX":"1","ANTHROPIC_VERTEX_PROJECT_ID":"clauseo-g16-not-a-project","CLOUD_ML_REGION":"us-east5"}}"#;
 
@@ -29,7 +26,7 @@ fn node() -> String {
 fn the_helper_runs_in_the_made_run_folder_not_the_process_folder() {
     let scratch = Scratch::new("claude-prepare-cwd");
     let script = scratch.file(CLAUDE_SCRIPT, "");
-    scratch.file(CLAUDE_SDK, SDK_PACKAGE);
+    sdk(&scratch);
     let launch = AgentLaunch {
         command: node(),
         args: vec![script.to_string_lossy().into_owned()],
