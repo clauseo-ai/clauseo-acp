@@ -2,7 +2,8 @@
 //! ending it) gets one commit. Pending requests expire `HostRestarted`; a started turn gets an
 //! after-turn checkpoint and ends `TurnFailed { thread.interrupted }` (a checkpoint R8 made
 //! whose record the log lost is recorded with the turn's changes, `known.rs`); every turn that
-//! never started stays queued, held behind its own thread (`queue::restore`); an attached
+//! never started stays queued, held behind its own thread (`queue::restore`), but an
+//! agent-started one, with no prompt, ends `Cancelled` (`own_turn/restart.rs`); an attached
 //! session is detached. A turn with a `TurnEnded` is never touched, so each repair happens once,
 //! with one exception: every step of the thread that stopped `AtLimit` with no
 //! `TurnStoppedAtLimit` for its turn (the read that was to give its reset time was lost with a
@@ -124,7 +125,10 @@ pub(super) fn reconcile(actor: &mut Actor, thread: ThreadId) {
         .loaded(stream)
         .and_then(|loaded| loaded.state.as_thread())
         .is_some_and(|state| {
-            open_turn(state).is_some() || has_pending(state) || steer_unresolved(state)
+            open_turn(state).is_some()
+                || has_pending(state)
+                || steer_unresolved(state)
+                || super::own_turn::may_wait_at_start(state)
         });
     if !needs {
         looked_at(actor, thread);
@@ -260,6 +264,7 @@ pub(super) fn on_log(
                 let mut out = Out::new(actor, thread, None)?;
                 pending.expiries().push_into(actor, &mut out)?;
                 queue::restore(actor, thread, &log, &mut out)?;
+                super::own_turn::end_unstarted_at_start(actor, &mut out, &log)?;
                 detach(actor, &mut out, &pending)?;
                 out.send(actor, Then::Nothing)
             })();
@@ -274,6 +279,8 @@ pub(super) fn on_log(
                 pending.expiries().push_into(actor, &mut out)?;
                 // A steer never answered still comes back, held.
                 queue::restore(actor, thread, &log, &mut out)?;
+                // An agent-started turn left waiting ends (`own_turn/restart.rs`).
+                super::own_turn::end_unstarted_at_start(actor, &mut out, &log)?;
                 detach(actor, &mut out, &pending)?;
                 out.send(actor, Then::Nothing)
             })();

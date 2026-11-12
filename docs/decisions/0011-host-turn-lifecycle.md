@@ -40,7 +40,9 @@ Each step is one commit on the thread stream unless it names the matter stream.
    stored session id when the agent offers it, else `session/new` (with a "context not restored"
    `Notice` when the thread has turns). `AgentSessionAttached`. A failure ends the turn with
    `TurnFailed` and `TurnEnded { Failed }`, no `TurnStarted`.
-3. The matter's writer held by another thread: `TurnQueued`, first in first out per matter.
+3. The matter's writer held by another thread: `TurnQueued`, first in first out per matter. An
+   agent-started turn that takes a free writer logs `TurnQueued` behind its own thread instead,
+   as it has no `UserMessage` to show it on its way.
 4. Before-turn checkpoint, then `TurnStarted`. A checkpoint failure ends the turn with
    `TurnFailed` carrying the matter error's code, and nothing goes to the agent.
 5. Once `TurnStarted` is durable, `session/prompt`, the undo note first. It ends on a stop
@@ -74,7 +76,10 @@ request is asked once the turn is live, never cancelled as outside a turn. It ha
 `TurnStarted`), its updates logged live, steps 6 to 8 with the after checkpoint, so the view shows
 an exchange with no question and Undo has its step. No protocol change: `TurnStarted` needs no
 prompt, the reducer's step needs only the turn, and the UI already draws an exchange with no
-question. Until it is live, and while another turn of the thread starts or ends, the updates
+question. With no `UserMessage`, its `TurnQueued` shows it from its open (2026-11-12): behind the
+holder when another thread has the writer, else behind its own thread as it takes the writer,
+before its checkpoint, which the reducer folds to `Starting` (a wait with no prompt and no turn
+ahead), so Stop shows from the moment it opens. Until it is live, and while another turn of the thread starts or ends, the updates
 wait in memory in order; they are logged in the agent-started turn once it starts, or in a turn
 a prompt starts meanwhile, which they then come first in. It ends `EndTurn` on the agent's
 `usage_update` with a cost (claude-agent-acp sends it from the SDK's `result` at the end of every
@@ -94,7 +99,9 @@ turn's before checkpoint and its Undo takes back only its own. The window closes
 within 5 s of its end is that turn's tail and is dropped too. `acp`'s `Origin::Late` now ends at
 the cancelled prompt's response, so output after it can open such a turn. A host restart repairs
 an agent-started turn left open as it repairs any (`Failed`, `thread.interrupted`), keeping what
-it logged. codex-acp
+it logged; one that never started (its `TurnQueued` durable, no `TurnStarted` or `TurnEnded`) has
+no prompt to queue again, so it ends `TurnEnded { Cancelled }` with no step, the session's detach
+after it (`own_turn/restart.rs`), and the thread is `Idle`. codex-acp
 does not start turns of its own for a client without AIR's async tasks (its background terminals
 are AIR-only), so this applies to Claude; were it to, the same path would take it, ended by the
 quiet period, as Codex sends no cost-bearing usage at a turn's end.
@@ -231,7 +238,8 @@ until `StepUndone` is durable; a failed undo commit is retried once, as a turn's
 - `RestoreVersion` holds the matter's writer for the whole restore, and is refused with
   `matter.turn_running` while a turn or an undo holds it or turns wait. A turn reaching step 3
   meanwhile logs `TurnQueued` behind its own thread, the form start-up reconciliation uses; the
-  reducer folds that to `Idle` while no turn of the thread runs, so the thread shows Idle, not
+  reducer folds that to `Idle` while no turn of the thread runs (an agent-started turn's, with no
+  prompt, to `Starting`), so the thread shows Idle, not
   Queued, for the few moments the restore holds the writer. The
   version must be the matter's (`command.invalid`). One commit of the matter's stream logs the
   outside-edits checkpoint, `CheckpointRecorded { Restore }` and `VersionRestored`; a failed one

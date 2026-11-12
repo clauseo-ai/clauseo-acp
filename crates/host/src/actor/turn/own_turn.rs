@@ -28,6 +28,7 @@
 //! turn's tail and is dropped, as `Origin::Late` is.
 
 mod late;
+mod restart;
 
 use std::time::Duration;
 
@@ -69,6 +70,7 @@ pub(crate) struct Held {
 #[cfg(test)]
 pub(super) use late::{QUIET as LATE_QUIET, dropped as late_dropped};
 pub(super) use late::{holds_starts, on_timer as on_late_timer};
+pub(super) use restart::{end_unstarted as end_unstarted_at_start, may_wait as may_wait_at_start};
 
 /// How many updates and requests of `thread` wait for a turn.
 #[cfg(test)]

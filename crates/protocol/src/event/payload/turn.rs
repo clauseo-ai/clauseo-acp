@@ -39,8 +39,9 @@ pub struct UserMessage {
 pub struct TurnQueued {
     /// The waiting turn.
     turn: TurnId,
-    /// The thread it waits for: this thread when `behind_turn` is set, or when start-up
-    /// reconciliation holds a first turn.
+    /// The thread it waits for: this thread when `behind_turn` is set, when start-up
+    /// reconciliation holds a first turn, or for a turn the agent started on its own (no
+    /// `UserMessage`), logged as it takes the matter's writer, before its checkpoint.
     behind: ThreadId,
     /// The same thread's turn it waits for.
     #[serde(skip_serializing_if = "Option::is_none", default)]

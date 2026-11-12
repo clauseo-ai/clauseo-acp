@@ -125,7 +125,7 @@ impl Rig {
 
     /// The host on the data folder `dir`, started and serving, with the start-up read
     /// `failing` names failing.
-    fn open(dir: TempDir, run: u16, failing: Option<Failing>) -> Self {
+    pub(super) fn open(dir: TempDir, run: u16, failing: Option<Failing>) -> Self {
         // The idle stop is off unless a test turns it on (`Rig::start_idle`).
         Self::open_with(dir, run, failing, |config| {
             config
@@ -526,7 +526,7 @@ impl Rig {
     }
 
     /// Shuts the host down, closes the store and hands back the data folder.
-    fn close(mut self) -> TempDir {
+    pub(super) fn close(mut self) -> TempDir {
         shutdown::begin_shutdown(&mut self.actor, None);
         // A cancelled turn with no agent to answer ends at its fallback.
         self.clock.advance(super::super::CANCEL_WAIT);
