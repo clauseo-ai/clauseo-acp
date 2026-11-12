@@ -130,7 +130,9 @@ pub(super) fn user_message(
 /// `TurnEnded` before it starts (a cancel) settles the status; its prompt has left the thread's
 /// queue (`Sent`). Behind its own thread its prompt shows `Queued` (and `at_head` when the turn
 /// was put back at the head, `queued_order.rs`), and it leaves the status
-/// while a turn runs; when none runs, it settles (to `Idle` unless the lawyer is asked).
+/// while a turn runs; when none runs, it settles (to `Idle` unless the lawyer is asked), but for
+/// an agent-started turn's, which has no prompt: it is `Starting` (`NeedsYou` while asked) and
+/// the thread's last turn, so its `TurnStarted` or its `TurnEnded` before it starts settles it.
 pub(super) fn turn_queued(state: &mut ThreadState, event: &TurnQueued, out: &mut Applied) {
     let behind = event.behind();
     let status = if behind == state.thread {
@@ -151,9 +153,27 @@ pub(super) fn turn_queued(state: &mut ThreadState, event: &TurnQueued, out: &mut
         return;
     }
     if state.running.is_none() {
-        let status = settled_status(state);
+        let status = if opens_own_turn(state, event) {
+            // An agent-started turn: it has no prompt to say it is on its way, so this wait
+            // does, and Stop shows from the moment it opens.
+            state.turn = Some(event.turn());
+            state.after_turn = None;
+            if state.index.waiting > 0 {
+                ThreadStatus::NeedsYou
+            } else {
+                ThreadStatus::Starting
+            }
+        } else {
+            settled_status(state)
+        };
         set_status(state, "turn_queued", out, status);
     }
+}
+
+/// Whether `event`, a wait behind the turn's own thread with no turn running, is an
+/// agent-started turn's: it waits behind no turn and has no prompt of the lawyer's.
+fn opens_own_turn(state: &ThreadState, event: &TurnQueued) -> bool {
+    event.behind_turn().is_none() && state.index.unstarted(event.turn()).is_none()
 }
 
 pub(super) fn turn_started(state: &mut ThreadState, turn: TurnId, out: &mut Applied) {

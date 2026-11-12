@@ -209,6 +209,8 @@ pub(super) fn on_launched(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
         let holder = match turns.holder {
             None => {
                 turns.holder = Some(Holder::Thread(thread));
+                // An agent-started turn shows from now: it has no prompt that would.
+                super::own_turn::log_opened(actor, thread, turn);
                 before_turn(actor, thread, turn);
                 return Ok(());
             }
