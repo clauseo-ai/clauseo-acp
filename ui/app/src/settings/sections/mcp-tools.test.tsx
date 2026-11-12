@@ -48,6 +48,11 @@ test("the Safe workspace's line shows where the build has the Safe workspace", a
   );
 });
 
+test("the lawyer's list says when a change applies: UEP-20's line, as the section's note", async () => {
+  rig = await mount(new FakeTools(THREE));
+  expect(rig.text()).toContain("Changes apply to new conversations.");
+});
+
 test("empty: one line and Add a tool", async () => {
   rig = await mount(new FakeTools({ control: "lawyer", servers: [] }));
   expect(rig.q('[data-testid="tools-empty"]')?.textContent).toBe("No tools yet.");
@@ -286,6 +291,7 @@ test("Escape and Cancel leave the form without saving, focus back where it was",
 test("firm_list: the list read-only with the lock's treatment, and the firm's line", async () => {
   rig = await mount(new FakeTools({ ...THREE, control: "firm_list" }));
   expect(rig.text()).toContain("Your firm set these tools.");
+  expect(rig.text()).not.toContain("Changes apply to new conversations.");
   expect(rig.rows().length).toBe(3);
   expect(rig.has("Edit")).toBe(false);
   expect(rig.has("Remove")).toBe(false);
