@@ -30,7 +30,7 @@ type Answer = futures::channel::oneshot::Receiver<Result<CommandOutcome, Error>>
 
 /// Prompt 1 ends; the agent starts a turn of its own (a tool call, then text) and, once it has
 /// heard `session/cancel`, sends late text.
-const OWN_THEN_LATE: &str = r#"{"expect":{"method":"session/prompt","as":"p1","params":{"sessionId":"sess-1"}}}
+pub(super) const OWN_THEN_LATE: &str = r#"{"expect":{"method":"session/prompt","as":"p1","params":{"sessionId":"sess-1"}}}
 {"respond":{"to":"p1","result":{"stopReason":"end_turn"}}}
 {"update":{"update":{"sessionUpdate":"tool_call","toolCallId":"tc-own-1","title":"Read build.log","kind":"read","status":"completed"}}}
 {"update":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-own-1","content":{"type":"text","text":"The build finished."}}}}
@@ -53,7 +53,7 @@ const OWN_LATE_THEN_TWO: &str = r#"{"expect":{"method":"session/prompt","as":"p1
 
 /// Where the agent-started turn is when the lawyer presses Stop.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum At {
+pub(super) enum At {
     /// Waiting for the matter's writer, before its checkpoint.
     Writer,
     /// Its before-turn checkpoint is being made.
@@ -173,7 +173,7 @@ fn assert_ended(rig: &mut Rig, thread: ThreadId, at: At) -> Vec<DomainEvent> {
 
 /// Runs prompt 1 of `thread` and puts the agent-started turn after it where `at` says; how many
 /// of its updates wait for the turn then.
-fn own_turn_at(rig: &mut Rig, thread: ThreadId, at: At) -> usize {
+pub(super) fn own_turn_at(rig: &mut Rig, thread: ThreadId, at: At) -> usize {
     let other = rig.thread_by(2);
     send_prompt(rig, 10, thread);
     // The agent's own output waits until prompt 1 has ended.
@@ -218,7 +218,7 @@ fn press_stop(rig: &mut Rig, thread: ThreadId) -> Answer {
 }
 
 /// The thread's status as its loaded view has it.
-fn view_status(rig: &Rig, thread: ThreadId) -> ThreadStatus {
+pub(super) fn view_status(rig: &Rig, thread: ThreadId) -> ThreadStatus {
     let loaded = rig.actor.loaded(StreamId::Thread(thread)).unwrap();
     loaded.state.as_thread().unwrap().status()
 }

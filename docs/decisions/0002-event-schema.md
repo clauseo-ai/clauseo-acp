@@ -150,6 +150,8 @@ An unknown kind has no row and no answer (`None`): its envelope's `stream` decid
   `turn_stopped_at_limit` may follow its turn's `turn_ended`, at most once. `files_changed`, when a
   turn changed files, comes before `turn_ended`.
 - `user_message` comes before `turn_queued` or `turn_started`, so a queued turn shows its prompt.
+  An agent-started turn (0011) has no `user_message`: its `turn_queued` behind its own thread,
+  logged as it takes the matter's writer, is its first event.
 - A `tool_call_updated` patch leaves a field `None` when it did not change, so no patch takes a
   field back to absent: a call that has a `tool_name`, `raw_input` or `raw_output` keeps one. A
   new tool-call field touches `ToolCallStarted`, `ToolCallPatch` and the view's `ToolCallEntry`,
@@ -266,7 +268,9 @@ reopen, as for 0018's bump (that note gives the cost: on iris-vm about 31 ms ins
 The queue and steer (H9, 0011's "Queue, send now and steer") fold what was logged but not folded
 before: a prompt waiting behind its own thread (`turn_queued` with `behind` its own thread) is
 `UserMessageStatus::Queued` until its `turn_started` (or a writer wait behind another thread)
-makes it `Sent`; `queued_prompt_edited` replaces its content and sets `edited`;
+makes it `Sent`; one with no prompt and no turn ahead (`behind_turn` absent), while no turn of
+the thread runs, is an agent-started turn opening (added 2026-11-12): the thread is `Starting`
+(`NeedsYou` while the lawyer is asked) until its `turn_started` or its `turn_ended`; `queued_prompt_edited` replaces its content and sets `edited`;
 `steer_resolved` sets the entry's `steer` and moves it to the outcome's turn (`not_sent`, added
 2026-11-11 for a steer a turn's end left unsent, moves nothing), and marks each tool
 call in `aside` with `ToolCallEntry.background` (`BackgroundMark`, its `finished_at` from the

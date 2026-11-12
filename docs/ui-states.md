@@ -24,6 +24,7 @@ Shown as the sidebar dot (`ThreadSummary.status`) and in the thread header (`Hea
 |---|---|---|
 | Idle, ready for a prompt | `ThreadStatus::Idle` | title, agent, mode, config options, commands, plan, context usage (`ContextUsage`) |
 | Agent starting | `ThreadStatus::Starting` | as idle; the agent has no session yet |
+| A turn the agent started on its own, opening | `ThreadStatus::Starting` | as idle; no question in the transcript. Stop stands in Ask's place, as for any turn on its way |
 | Turn running | `ThreadStatus::Running` | as idle; also while prompts of the same thread wait in its queue |
 | Needs you: a permission or elicitation is pending | `ThreadStatus::NeedsYou` | the pending `ViewEntry::Permission` or `ViewEntry::Elicitation` |
 | Waiting for another thread in the matter to finish | `ThreadStatus::Queued` | `behind`: the thread holding the matter; its title from `ThreadSummary` |

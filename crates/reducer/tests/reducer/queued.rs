@@ -4,8 +4,8 @@
 //! which gives `Starting`. A queued turn cancelled before it starts settles the status.
 
 use clauseo_protocol::{
-    DomainEvent, MessageId, ThreadId, ThreadStatus, TurnId, TurnQueued, TurnStarted,
-    UserMessageStatus, ViewEntry,
+    AgentSessionDetached, DetachReason, DomainEvent, MessageId, ThreadId, ThreadStatus, TurnId,
+    TurnQueued, TurnStarted, UserMessageStatus, ViewEntry,
 };
 use clauseo_reducer::{Applied, StreamState, ViewChange, apply};
 
@@ -324,4 +324,32 @@ fn own_turn_wait_while_asked_gives_needs_you() {
     push(&mut log, &mut state, permission_resolved(request));
     assert_eq!(status(&state), ThreadStatus::Idle);
     assert_eq!(state, fold(log.events()));
+}
+
+#[test]
+fn own_turn_wait_left_by_a_crash_settles_at_the_restart_repair() {
+    // The host stopped while an agent-started turn waited (as it opened, or for another thread's
+    // writer): start-up logs its `TurnEnded { Cancelled }` and the session's detach
+    // (`own_turn/restart.rs`), and the thread is `Idle`, with no step, never `Starting` again.
+    let writer = thread_id(77).unwrap();
+    for behind in [None, Some(writer)] {
+        let (mut log, mut state, thread) = created();
+        let own = log.fresh().unwrap();
+        push(
+            &mut log,
+            &mut state,
+            queued(thread, own, behind.unwrap_or(thread), None),
+        );
+        assert_ne!(status(&state), ThreadStatus::Idle);
+        let out = cancel(&mut log, &mut state, own);
+        assert!(out.anomalies.is_empty(), "{:?}", out.anomalies);
+        let detached = AgentSessionDetached {
+            reason: DetachReason::Closed,
+        };
+        push(&mut log, &mut state, detached);
+        assert_eq!(status(&state), ThreadStatus::Idle, "{behind:?}");
+        assert!(!has_step(&state, own));
+        assert_eq!(state, fold(log.events()));
+        assert_eq!(round_trip(&state), state);
+    }
 }
