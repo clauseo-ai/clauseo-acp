@@ -435,7 +435,7 @@ fn mcp_tools_commands_add_rename_toggle_and_remove() {
 fn mcp_tools_commands_are_locked_by_the_firm() {
     // Policy sets `mcp.servers`.
     let dir = Dir::new("mcp_tools_firm_list", &[]);
-    dir.set_policy(&json!({"mcp": {"servers": {"firm": {"command": "/opt/firm"}}}}).to_string());
+    dir.set_policy(&json!({"mcp": {"servers": {"firm": {"command": "firm-tool"}}}}).to_string());
     let store = store(&[]);
     let host = dir.start_with(0, |config| {
         config.with_mcp_secrets(Arc::<MemoryStore>::clone(&store))
@@ -455,7 +455,7 @@ fn mcp_tools_commands_are_locked_by_the_firm() {
     let dir = Dir::new("mcp_tools_firm_managed", &[]);
     dir.set_settings(
         &[],
-        json!({"mcp": {"servers": {"mine": {"command": "/opt/mine", "enabled": true}}}}),
+        json!({"mcp": {"servers": {"mine": {"command": "mine-tool", "enabled": true}}}}),
     );
     dir.set_managed_mcp();
     let before = dir.settings_json();

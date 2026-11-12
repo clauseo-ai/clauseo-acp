@@ -1531,7 +1531,19 @@ expression: counts_schema()
         "matter.folder_in_clauseo_data",
         "matter.folder_inside_matter",
         "matter.folder_holds_matter",
-        "prompt.too_long"
+        "prompt.too_long",
+        "mcp.name_empty",
+        "mcp.name_taken",
+        "mcp.name_reserved",
+        "mcp.name_invalid",
+        "mcp.command_invalid",
+        "mcp.command_not_found",
+        "mcp.url_invalid",
+        "mcp.header_name_invalid",
+        "mcp.env_name_invalid",
+        "mcp.secret_store_failed",
+        "mcp.server_unknown",
+        "mcp.save_declined"
       ],
       "type": "string"
     },

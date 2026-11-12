@@ -25,6 +25,15 @@ fn effective(test: &str, servers: &serde_json::Value) -> Effective {
     effective
 }
 
+/// `path`, written `/a/b`, as an absolute path on this OS: `C:\a\b` on Windows.
+fn abs(path: &str) -> String {
+    if cfg!(windows) {
+        format!("C:{}", path.replace('/', "\\"))
+    } else {
+        path.to_owned()
+    }
+}
+
 const CLAUSEO: Lawyer = Lawyer {
     control: McpControl::Clauseo,
     safe_workspace: false,
@@ -89,10 +98,11 @@ fn values_are_filled_and_the_path_starts_with_the_commands_folder() {
 
 #[test]
 fn a_server_without_its_value_is_left_out_and_named() {
+    let (npx, plain) = (abs("/opt/homebrew/bin/npx"), abs("/opt/homebrew/bin/plain"));
     let effective = effective(
         "missing",
         &json!({
-            "github": {"command": "/opt/homebrew/bin/npx", "enabled": true,
+            "github": {"command": npx, "enabled": true,
                 "env": {"TOKEN": {"keychain": true}}},
             "plain": {"command": "plain", "enabled": true},
             "gone": {"command": "not-here", "enabled": true},
@@ -104,10 +114,7 @@ fn a_server_without_its_value_is_left_out_and_named() {
     };
     let secrets = McpSecrets::of(
         &[],
-        &[
-            ("/opt/homebrew/bin/npx", "/opt/homebrew/bin/npx"),
-            ("plain", "/opt/homebrew/bin/plain"),
-        ],
+        &[(npx.as_str(), npx.as_str()), ("plain", plain.as_str())],
     )
     .with_unreadable(&["github/env/TOKEN"]);
     let (servers, left_out) = lawyer::servers(&effective, CLAUSEO, &secrets, host);
@@ -116,20 +123,22 @@ fn a_server_without_its_value_is_left_out_and_named() {
     let McpServer::Stdio { command, env, .. } = &servers[0] else {
         panic!("a lawyer server goes as stdio: {:?}", servers[0]);
     };
-    assert_eq!(command, std::path::Path::new("/opt/homebrew/bin/plain"));
+    assert_eq!(command, std::path::Path::new(&plain));
     // The resolved program's folder leads its PATH.
+    let folder = abs("/opt/homebrew/bin");
     assert!(
         env.iter()
-            .any(|(name, value)| name == "PATH" && value.starts_with("/opt/homebrew/bin"))
+            .any(|(name, value)| name == "PATH" && value.starts_with(&folder))
     );
     assert_eq!(left_out, [("github".to_owned(), "TOKEN".to_owned())]);
 }
 
 #[test]
 fn none_go_in_the_safe_workspace_or_under_managed_mcp() {
+    let plain = abs("/opt/homebrew/bin/plain");
     let effective = effective(
         "fenced",
-        &json!({"plain": {"command": "/opt/homebrew/bin/plain", "enabled": true,
+        &json!({"plain": {"command": plain, "enabled": true,
             "env": {"TOKEN": {"keychain": true}}}}),
     );
     let host = HostEnv {
@@ -138,7 +147,7 @@ fn none_go_in_the_safe_workspace_or_under_managed_mcp() {
     };
     let secrets = McpSecrets::of(
         &[("plain/env/TOKEN", "t")],
-        &[("/opt/homebrew/bin/plain", "/opt/homebrew/bin/plain")],
+        &[(plain.as_str(), plain.as_str())],
     );
     for lawyer in [
         Lawyer {
@@ -160,7 +169,7 @@ fn none_go_in_the_safe_workspace_or_under_managed_mcp() {
         lawyer::wanted(&effective, false),
         lawyer::Wanted {
             accounts: vec!["plain/env/TOKEN".to_owned()],
-            commands: vec!["/opt/homebrew/bin/plain".to_owned()],
+            commands: vec![plain],
         }
     );
 }
@@ -201,11 +210,11 @@ fn every_value_of_an_enabled_server_is_redacted() {
     let effective = effective(
         "redacted",
         &json!({
-            "github": {"command": "/opt/homebrew/bin/npx", "enabled": true,
+            "github": {"command": abs("/opt/homebrew/bin/npx"), "enabled": true,
                 "env": {"TOKEN": {"keychain": true}, "PLAIN": "plain-value-0042"}},
             "remote": {"url": "https://x.example/mcp", "enabled": true,
                 "headers": {"X-Key": "header-value-0042"}},
-            "off": {"command": "/opt/off", "env": {"OFF": "off-value-0042"}},
+            "off": {"command": abs("/opt/off"), "env": {"OFF": "off-value-0042"}},
         }),
     );
     let secrets = McpSecrets::of(&[("github/env/TOKEN", "keychain-value-0042")], &[]);
@@ -219,15 +228,16 @@ fn every_value_of_an_enabled_server_is_redacted() {
 /// marked missing: its new account was never read, so nothing is known about it.
 #[test]
 fn a_server_renamed_during_a_launch_is_left_out_but_not_marked_missing() {
+    let npx = abs("/opt/homebrew/bin/npx");
     let effective = effective(
         "renamed",
-        &json!({"github": {"command": "/opt/homebrew/bin/npx", "enabled": true,
+        &json!({"github": {"command": npx, "enabled": true,
             "env": {"TOKEN": {"keychain": true}}}}),
     );
     // The prep read the old name's item.
     let secrets = McpSecrets::of(
         &[("gh/env/TOKEN", "t0ken-value")],
-        &[("/opt/homebrew/bin/npx", "/opt/homebrew/bin/npx")],
+        &[(npx.as_str(), npx.as_str())],
     );
     let host = HostEnv {
         path: None,
