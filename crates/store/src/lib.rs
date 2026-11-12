@@ -25,12 +25,14 @@
 //! [`Store::receipt`], [`Store::read_blob`], [`Store::matters`], [`Store::tail_times`] (each
 //! stream's last event time), [`Store::threads`], [`Store::checkpoint`] and
 //! [`Store::account_limits`]; [`Store::put_account_limits`] keeps the last
-//! [`AccountLimits`](clauseo_protocol::AccountLimits) per account. [`blob_ref`] and
-//! [`command_hash`] are the hashes the host puts in events and receipts. [`Error`] maps to
-//! [`ErrorCode`](clauseo_protocol::ErrorCode) with [`Error::code`]. [`Store::close`] checkpoints,
-//! closes the file and joins both threads; dropping the last clone does the same, unreported, and
-//! every call still queued then gets [`Error::Closed`]. The `test-support`
-//! feature exports `fixtures::reopen_20k`, the one generator of the 20k-event reopen fixture.
+//! [`AccountLimits`](clauseo_protocol::AccountLimits) per account, and
+//! [`Store::forget_account_limits`] deletes an agent's, all but one account's or all of them.
+//! [`blob_ref`] and [`command_hash`] are the hashes the host puts in events and receipts.
+//! [`Error`] maps to [`ErrorCode`](clauseo_protocol::ErrorCode) with [`Error::code`].
+//! [`Store::close`] checkpoints, closes the file and joins both threads; dropping the last clone
+//! does the same, unreported, and every call still queued then gets [`Error::Closed`]. The
+//! `test-support` feature exports `fixtures::reopen_20k`, the one generator of the 20k-event
+//! reopen fixture.
 //!
 //! # Invariants
 //!

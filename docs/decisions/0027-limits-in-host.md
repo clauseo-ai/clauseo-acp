@@ -103,7 +103,9 @@ user-facing words: U5 replaced R12's window, and U12 builds the limit screens.
 
 ## Consequences
 
-- Limit ticks never reach the log; `store` keeps the last `AccountLimits` per account.
+- Limit ticks never reach the log; `store` keeps the last `AccountLimits` per account. The
+  host carries out `Action::Forget` with `Store::forget_account_limits`, off the loop, so a
+  sign-out or another account removes the entries that would come back at start.
 - A stop whose turn's end never becomes durable (its retry failed too) is not logged in that run;
   the next start ends that turn, as 0011 says.
 - The agent list and the reader are fixed at start-up, so a `claude-acp` or `codex-acp` entry

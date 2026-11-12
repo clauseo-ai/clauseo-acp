@@ -11,12 +11,13 @@ use crate::policy::{Action, kind_rules};
 use crate::readers::{AccountRead, ReadFailure, ReadOutcome, looks_like_email};
 use crate::words::claude_live_window;
 
-/// Merges the outcome of a read of `state`'s agent, at `now`.
+/// Merges the outcome of a read of `state`'s agent, at `now`, and adds what to do to `actions`.
 pub(crate) fn apply_read(
     state: &mut AgentState,
     outcome: ReadOutcome,
     now: Timestamp,
-) -> Option<Action> {
+    actions: &mut Vec<Action>,
+) {
     match outcome {
         ReadOutcome::Usage {
             limits,
@@ -28,33 +29,61 @@ pub(crate) fn apply_read(
                     AccountRead::Read => limits,
                     AccountRead::NotRead => keep_email(state, limits),
                 };
-                Some(good_read(state, limits, reached, now))
+                let earlier = state.account.take();
+                let held = good_read(state, limits, reached, now);
+                let other = earlier.is_some_and(|earlier| earlier != held.account);
+                let keep = other.then(|| held.account.clone());
+                actions.push(Action::Changed(held));
+                if let Some(keep) = keep {
+                    actions.push(Action::Forget {
+                        agent: state.agent,
+                        keep: Some(keep),
+                    });
+                }
             } else {
                 tracing::warn!(
                     agent = ?state.agent,
                     read = ?limits.agent,
                     "a limits read answered for another agent; its figures are dropped"
                 );
-                failed_read(state).then(|| notice(state))
+                if failed_read(state) {
+                    actions.push(notice(state));
+                }
             }
         }
         ReadOutcome::MethodMissing => {
             let flipped = !state.method_missing;
             state.method_missing = true;
             let source_changed = failed_read(state);
-            (flipped || source_changed).then(|| notice(state))
+            if flipped || source_changed {
+                actions.push(notice(state));
+            }
         }
-        ReadOutcome::SignedOut => signed_out(state).then_some(Action::ViewChanged),
+        ReadOutcome::SignedOut => {
+            let held = state.account.is_some();
+            if signed_out(state) {
+                actions.push(if held {
+                    Action::Forget {
+                        agent: state.agent,
+                        keep: None,
+                    }
+                } else {
+                    Action::ViewChanged
+                });
+            }
+        }
         ReadOutcome::Failed(failure) => {
             log_failure(state.agent, &failure);
-            failed_read(state).then(|| notice(state))
+            if failed_read(state) {
+                actions.push(notice(state));
+            }
         }
     }
 }
 
 /// Forgets the account in memory: no account, no windows, the sign-in-again state
-/// (`Unavailable { MissingScope }`). Nothing is stored, so no `Changed` goes out, and an earlier
-/// account's stored entry stays as it is. Returns whether the view changed.
+/// (`Unavailable { MissingScope }`). The caller sends `Forget` when an account was held, so its
+/// stored entry goes too. Returns whether the view changed.
 fn signed_out(state: &mut AgentState) -> bool {
     let source = LimitSource::Unavailable {
         reason: UnavailableReason::MissingScope,
@@ -101,7 +130,7 @@ fn good_read(
     limits: AccountLimits,
     reached: Option<LimitStopReason>,
     now: Timestamp,
-) -> Action {
+) -> AccountLimits {
     let source = match limits.source {
         source @ (LimitSource::NotApplicable
         | LimitSource::Unavailable {
@@ -128,7 +157,7 @@ fn good_read(
     state.source = held.source.clone();
     state.method_missing = false;
     state.reached = reached;
-    Action::Changed(held)
+    held
 }
 
 /// Marks a failed read: the last good numbers stay as `Stale { ReadFailed }`, or the source is

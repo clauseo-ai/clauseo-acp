@@ -283,6 +283,9 @@ since the Unix epoch. Inside `events.envelope`, the envelope's own encoding appl
 
 - One row per agent and account holds the last `AccountLimits` as JSON. Limit ticks never enter
   the log. `agent` is the agent's serde name (`claude`, `codex`).
+- `Store::forget_account_limits(agent, keep)` deletes the agent's rows for every account but
+  `keep`, or all of them when `keep` is `None` (added 2026-11-11, for a sign-out or another
+  account).
 - The cache is disposable. A row that no longer decodes is skipped, and the host reads the limits
   again from their source.
 

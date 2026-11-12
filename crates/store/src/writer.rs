@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use std::fs::File;
 
 use async_channel::Receiver;
-use clauseo_protocol::{AccountLimits, Seq, StreamId};
+use clauseo_protocol::{AccountLimits, AccountRef, AgentKind, Seq, StreamId};
 use futures::channel::oneshot;
 use rusqlite::Connection;
 
@@ -25,6 +25,11 @@ pub(crate) enum WriteRequest {
     },
     PutAccountLimits {
         limits: Box<AccountLimits>,
+        reply: oneshot::Sender<Result<(), Error>>,
+    },
+    ForgetAccountLimits {
+        agent: AgentKind,
+        keep: Option<AccountRef>,
         reply: oneshot::Sender<Result<(), Error>>,
     },
     Close {
@@ -133,6 +138,12 @@ impl Writer {
                 WriteRequest::Heads { reply } => answer(reply, Ok(self.heads())),
                 WriteRequest::PutAccountLimits { limits, reply } => {
                     answer(reply, apply::put_account_limits(&self.conn, &limits));
+                }
+                WriteRequest::ForgetAccountLimits { agent, keep, reply } => {
+                    answer(
+                        reply,
+                        apply::forget_account_limits(&self.conn, agent, keep.as_ref()),
+                    );
                 }
                 #[cfg(feature = "test-support")]
                 WriteRequest::Hold { release, reply } => {

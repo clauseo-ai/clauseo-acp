@@ -9,7 +9,8 @@ use std::thread::JoinHandle;
 
 use async_channel::{Receiver, Sender};
 use clauseo_protocol::{
-    AccountLimits, BlobHash, CheckpointId, CommandId, Envelope, MatterId, Seq, StreamId, Timestamp,
+    AccountLimits, AccountRef, AgentKind, BlobHash, CheckpointId, CommandId, Envelope, MatterId,
+    Seq, StreamId, Timestamp,
 };
 use futures::channel::oneshot;
 use rusqlite::Connection;
@@ -296,6 +297,16 @@ impl Store {
             reply,
         })
         .await
+    }
+
+    /// Deletes `agent`'s limits for every account but `keep` (all of them when it is `None`).
+    pub async fn forget_account_limits(
+        &self,
+        agent: AgentKind,
+        keep: Option<AccountRef>,
+    ) -> Result<(), Error> {
+        self.write(|reply| WriteRequest::ForgetAccountLimits { agent, keep, reply })
+            .await
     }
 
     /// The last limits of every account (values that no longer decode are left out).

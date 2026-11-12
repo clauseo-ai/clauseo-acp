@@ -1,6 +1,6 @@
-//! Store behaviours at the edges of SQLite: account limits kept per agent, a write that waits
-//! out another connection's lock, a snapshot whose frame claims too much, and the WAL `close`
-//! truncates while another connection has the file open.
+//! Store behaviours at the edges of SQLite: account limits kept and forgotten per agent, a
+//! write that waits out another connection's lock, a snapshot whose frame claims too much, and
+//! the WAL `close` truncates while another connection has the file open.
 
 use clauseo_protocol::{
     AccountLimits, AccountRef, AgentKind, AtLimitBehaviour, Billing, LimitSource,
@@ -35,6 +35,33 @@ fn account_limits_of_two_agents_with_one_account_name_are_both_kept() {
     let read = block_on(store.account_limits()).unwrap();
     assert_eq!(read.len(), 2, "{read:?}");
     assert!(read.contains(&claude) && read.contains(&codex), "{read:?}");
+    block_on(store.close()).unwrap();
+}
+
+/// Forgetting an agent's account limits with one account to keep deletes that agent's other
+/// accounts; with none it deletes all of them. The other agent's entry under the same account
+/// name stays throughout.
+#[test]
+fn forgetting_account_limits_keeps_the_given_account_and_the_other_agent() {
+    let dir = TestDir::new("forgetting_account_limits_keeps_the_given_account_and_the_other_agent");
+    let store = dir.open();
+    let work = limits(AgentKind::Claude, "work");
+    let codex = limits(AgentKind::Codex, "work");
+    for put in [
+        limits(AgentKind::Claude, "home"),
+        work.clone(),
+        codex.clone(),
+    ] {
+        block_on(store.put_account_limits(put)).unwrap();
+    }
+    let keep = Some(AccountRef("work".to_owned()));
+    block_on(store.forget_account_limits(AgentKind::Claude, keep)).unwrap();
+    let mut read = block_on(store.account_limits()).unwrap();
+    read.sort_by_key(|limits| limits.agent);
+    assert_eq!(read, [work, codex.clone()]);
+
+    block_on(store.forget_account_limits(AgentKind::Claude, None)).unwrap();
+    assert_eq!(block_on(store.account_limits()).unwrap(), [codex]);
     block_on(store.close()).unwrap();
 }
 

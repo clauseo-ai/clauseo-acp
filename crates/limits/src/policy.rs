@@ -8,7 +8,7 @@ mod triggers;
 
 use std::collections::BTreeMap;
 
-use clauseo_protocol::{AccountLimits, AgentKind, LimitSource, LimitsView, Timestamp};
+use clauseo_protocol::{AccountLimits, AccountRef, AgentKind, LimitSource, LimitsView, Timestamp};
 
 use crate::model::{AgentState, LimitHit, LiveSignal, apply_live, apply_read};
 use crate::readers::ReadOutcome;
@@ -143,6 +143,18 @@ pub enum Action {
     Read(AgentKind),
     /// Persist these limits, publish them, and publish the view again.
     Changed(AccountLimits),
+    /// Delete this agent's stored limits, all but `keep`'s entry when `keep` is given, and
+    /// publish the view again. A sign-out sends it with no `keep`, so the earlier account does
+    /// not come back at the next start. A good read that names another account than the one
+    /// held sends it after its `Changed`, keeping that account, so an earlier account's entry
+    /// cannot outrank the new one at start (an entry with no checked time ranks below a timed
+    /// one).
+    Forget {
+        /// The agent whose entries go.
+        agent: AgentKind,
+        /// The account whose entry stays, if any.
+        keep: Option<AccountRef>,
+    },
     /// Only the view changed (a stale mark, `ResetPassed`, `Watching`): publish it again.
     ViewChanged,
 }
@@ -247,7 +259,7 @@ impl Limits {
                 {
                     let stale = state.reads.flight == triggers::Flight::ReadingStale;
                     state.reads.flight = triggers::Flight::Idle;
-                    actions.extend(apply_read(state, outcome, now));
+                    apply_read(state, outcome, now, &mut actions);
                     if stale {
                         request_read(state, now, &mut actions);
                     }

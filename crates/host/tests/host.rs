@@ -238,6 +238,9 @@ mod limits;
 #[path = "host/limits_asks.rs"]
 mod limits_asks;
 #[cfg(test)]
+#[path = "host/limits_forget.rs"]
+mod limits_forget;
+#[cfg(test)]
 #[path = "host/limits_host.rs"]
 mod limits_host;
 #[cfg(test)]
