@@ -100,6 +100,20 @@ pub(in super::super) fn restore(
     Ok(())
 }
 
+/// The turns [`restore`] puts back in the queue from `log`: each prompt's turn that neither
+/// started nor ended, a requeued or sent-now steer's at its new turn. Start-up's repair of
+/// agent-started turns ends none of them (`own_turn/restart.rs`).
+pub(in super::super) fn restores(log: &[Envelope]) -> BTreeSet<TurnId> {
+    queued_turns(log)
+        .turns
+        .into_iter()
+        .filter_map(|(restored, ..)| match restored {
+            Restored::Queued(turn) => Some(turn),
+            Restored::Unsettled(_) => None,
+        })
+        .collect()
+}
+
 /// The queued turns of `log` in queue order: turn, message, content as step 5 sends it. A turn
 /// whose `TurnQueued` is marked `at_head` (a requeued steer, or a turn put back for the
 /// sign-in) goes first, the latest put back first, as each took the head when it was put back;
