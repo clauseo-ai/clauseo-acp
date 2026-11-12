@@ -381,11 +381,12 @@ fn prompt(
             }
         }
         let response = result?;
-        let (mut limit, mut too_long, mut connection) = (None, None, None);
+        let (mut limit, mut too_long, mut connection, mut failed) = (None, None, None, None);
         match response.meta.as_ref().and_then(map::session_failure) {
             Some(map::Failure::Limit(signal)) => limit = Some(signal),
             Some(map::Failure::TooLong(kind)) => too_long = Some(kind),
             Some(map::Failure::Connection(lost)) => connection = Some(lost),
+            Some(map::Failure::Failed(gave_up)) => failed = Some(gave_up),
             Some(map::Failure::Warning(warning)) => {
                 let event = map::warning_event(Some(session), warning);
                 state.emit(event).await;
@@ -397,6 +398,7 @@ fn prompt(
             limit,
             too_long,
             connection,
+            failed,
         })
     };
     send_with(cx, shared, request, reply, on_answer);

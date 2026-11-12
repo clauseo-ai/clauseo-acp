@@ -7,7 +7,7 @@ use clauseo_protocol::{Finite, LimitStopReason, Timestamp};
 use serde_json::{Map, Value};
 
 use super::too_long::session_failure_says_too_long;
-use crate::event::{ConnectionLost, LimitSignal, LimitStatus, ProtocolWarning};
+use crate::event::{AgentFailed, ConnectionLost, LimitSignal, LimitStatus, ProtocolWarning};
 
 /// `_meta["_claude/rateLimit"]` of a `usage_update`, when present: the signal, or a warning for
 /// a `status` this crate does not know. A missing or unreadable field is `None`.
@@ -53,6 +53,8 @@ pub(crate) enum Failure {
     TooLong(crate::TooLong),
     /// The agent could not reach its service.
     Connection(ConnectionLost),
+    /// The agent gave up on the turn (`AgentFailed`).
+    Failed(AgentFailed),
     /// Any other failure, which the driver only reports.
     Warning(ProtocolWarning),
 }
@@ -65,8 +67,10 @@ pub(crate) enum Failure {
 /// `transport_lost` (Codex's `httpConnectionFailed`, `responseStreamConnectionFailed`,
 /// `responseStreamDisconnected`, `responseTooManyFailedAttempts`): severity `warning` with no
 /// actions while Codex retries, `error` with `["retry", "new_session"]` once it gave up. The
-/// order is limit, too long, connection, warning; too long reads only categories `limit`,
-/// `service` and `request`, so no failure is both too long and a lost connection.
+/// order is limit, too long, connection, failed, warning; too long reads only categories `limit`,
+/// `service` and `request`, so no failure is both too long and a lost connection. Severity
+/// `error` with `retry` or `new_session` in its actions, in any other category but `limit`, is
+/// [`Failure::Failed`]: the agent gave up on the turn. Any other failure is a warning.
 pub(crate) fn session_failure(meta: &Map<String, Value>) -> Option<Failure> {
     let failure = meta
         .get("jetbrains")?
@@ -98,6 +102,14 @@ pub(crate) fn session_failure(meta: &Map<String, Value>) -> Option<Failure> {
     if category.as_deref() == Some("connection") {
         let gave_up = severity.as_deref() == Some("error");
         return Some(Failure::Connection(ConnectionLost { gave_up, title }));
+    }
+    let gives_up = actions.as_deref().is_some_and(|actions| {
+        actions
+            .iter()
+            .any(|a| matches!(*a, "retry" | "new_session"))
+    });
+    if severity.as_deref() == Some("error") && category.as_deref() != Some("limit") && gives_up {
+        return Some(Failure::Failed(AgentFailed { category, title }));
     }
     Some(Failure::Warning(ProtocolWarning::SessionFailure {
         category,

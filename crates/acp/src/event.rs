@@ -277,6 +277,18 @@ pub struct ConnectionLost {
     pub title: Option<String>,
 }
 
+/// An AIR `sessionFailure` of severity `error` whose `actions` offer `retry` or `new_session`,
+/// in a category no other rule reads (not `limit` nor `connection`, and not too long): the
+/// agent gave up on the turn. codex-acp 2.2.2 sends it for `internal_error` (category `service`,
+/// "Codex encountered an internal error."), `provider_error` and `overloaded`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentFailed {
+    /// Its `category`, when it is a string: the agent's word, for an allowlisted log.
+    pub category: Option<String>,
+    /// Its `title`, the agent's own error text, when it is a string. Never shown or logged.
+    pub title: Option<String>,
+}
+
 /// The `status` of Claude's rate limit.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum LimitStatus {

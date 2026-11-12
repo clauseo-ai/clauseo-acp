@@ -3,9 +3,7 @@
 //! from codex-acp's source. A too-long `sessionFailure` on `end_turn` sets `PromptEnd::too_long`
 //! with no limit and no warning; Codex's recorded refusal reads as the internal error it says.
 
-use clauseo_acp::{
-    AcpEvent, AgentUpdate, MessageRole, Origin, PromptEnd, ProtocolWarning, TooLong,
-};
+use clauseo_acp::{AcpEvent, AgentFailed, AgentUpdate, MessageRole, Origin, PromptEnd, TooLong};
 use clauseo_protocol::{AgentChoiceId, StopReason};
 
 use crate::harness::{self, Ctx, chunk, sess1, text, turn, update_event};
@@ -34,6 +32,7 @@ fn too_long(kind: TooLong) -> PromptEnd {
         limit: None,
         too_long: Some(kind),
         connection: None,
+        failed: None,
     }
 }
 
@@ -100,8 +99,9 @@ fn claude_prompt_too_long_ends_too_long() {
 }
 
 /// The recorded refusal of a question over Codex's 1,048,576 characters says only "Codex
-/// encountered an internal error." (category `service`), which is not read as too long: the
-/// prompt ends `EndTurn` and the failure is a warning.
+/// encountered an internal error." (category `service`, severity `error`, actions `retry` and
+/// `new_session`), which is not read as too long: the prompt ends `EndTurn` carrying the failure
+/// the agent gave up on, and no warning.
 #[test]
 fn codex_input_too_long_reads_as_the_internal_error_it_says() {
     one_prompt("codex-input-too-long", true, |end, events| {
@@ -112,22 +112,17 @@ fn codex_input_too_long_reads_as_the_internal_error_it_says() {
                 limit: None,
                 too_long: None,
                 connection: None,
+                failed: Some(AgentFailed {
+                    category: Some("service".to_owned()),
+                    title: Some("Codex encountered an internal error.".to_owned()),
+                }),
             }
         );
-        let warnings: Vec<_> = events
-            .into_iter()
-            .filter_map(|event| match event {
-                AcpEvent::Warning { warning, .. } => Some(warning),
-                _ => None,
-            })
-            .collect();
-        assert_eq!(
-            warnings,
-            [ProtocolWarning::SessionFailure {
-                category: Some("service".to_owned()),
-                severity: Some("error".to_owned()),
-                title: Some("Codex encountered an internal error.".to_owned()),
-            }]
+        assert!(
+            !events
+                .iter()
+                .any(|event| matches!(event, AcpEvent::Warning { .. })),
+            "{events:?}"
         );
     });
 }

@@ -27,6 +27,8 @@ mod title;
 mod tools;
 mod warning;
 
+pub(super) use warning::category as category_word;
+
 pub(super) use tools::known_tool;
 use tools::{tool_call, tool_update};
 

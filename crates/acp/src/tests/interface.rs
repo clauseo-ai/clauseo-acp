@@ -34,7 +34,7 @@ fn session_failure_warning_names_its_session() {
     .unwrap();
     let failure = json!({"jetbrains": {"air": {"version": 1, "sessionFailure": {
         "id": "f", "revision": 1, "category": "context", "severity": "error",
-        "title": "The context is full.", "actions": ["new_session"],
+        "title": "The context is full.", "actions": [],
     }}}});
     let calls = async move {
         client.initialize().await.unwrap();

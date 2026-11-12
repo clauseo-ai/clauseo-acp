@@ -3,6 +3,7 @@
 mod agents;
 mod closed;
 mod failures;
+mod gave_up;
 mod idle;
 mod idle_busy;
 mod idle_cap;

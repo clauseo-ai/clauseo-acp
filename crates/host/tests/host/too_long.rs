@@ -7,7 +7,9 @@
 
 use std::sync::Arc;
 
-use clauseo_protocol::{AgentKind, ContentBlock, DomainEvent, StopReason, StreamId, TurnId};
+use clauseo_protocol::{
+    AgentKind, ContentBlock, DomainEvent, ErrorCode, StopReason, StreamId, TurnId,
+};
 use serde_json::json;
 
 use crate::codex::{CODEX, turn_failed};
@@ -105,8 +107,8 @@ fn claude_prompt_too_long_ends_too_long() {
 }
 
 /// The recorded `codex-input-too-long` with a permission request added before its refusal, which
-/// the test answers once a second question is queued, and an answer to that second question.
-/// Everything else is the bundled scenario's.
+/// the test answers once a second question is queued. The second question is never sent: the
+/// failure holds the queue. Everything else is the bundled scenario's.
 fn gated_input_too_long() -> String {
     let bundled =
         std::fs::read_to_string(format!("{SCENARIOS}/codex-input-too-long.jsonl")).unwrap();
@@ -117,10 +119,6 @@ fn gated_input_too_long() -> String {
             {"optionId": "allow_once", "name": "Yes, proceed", "kind": "allow_once"},
             {"optionId": "cancel", "name": "No", "kind": "reject_once"}]}}}),
         json!({"expect_response": {"id": "gate", "result": "{{any}}"}}),
-    ];
-    let second = [
-        json!({"expect": {"method": "session/prompt", "as": "p2", "params": {"sessionId": "sess-1"}}}),
-        json!({"respond": {"to": "p2", "result": {"stopReason": "end_turn"}}}),
     ];
     let mut out = String::new();
     for line in bundled.lines() {
@@ -133,27 +131,22 @@ fn gated_input_too_long() -> String {
         out.push_str(line);
         out.push('\n');
     }
-    for step in &second {
-        out.push_str(&step.to_string());
-        out.push('\n');
-    }
     assert_eq!(
         out.lines().count(),
-        bundled.lines().count() + 4,
-        "the gate and the second answer went in"
+        bundled.lines().count() + 2,
+        "the gate went in"
     );
     out
 }
 
-/// TODAY's behaviour with Codex's recorded refusal of a question over its 1,048,576 characters
-/// (decision 0057 leaves it open): the wire says only "Codex encountered an internal error."
-/// (category `service`), so the turn ends `EndTurn` with no answer text and no `TurnFailed`; the
-/// failure is only logged as a warning, and the queue moves on to the next question. The lawyer is
-/// told nothing. The host's own Codex check before sending is what keeps such a question back.
-/// It pins today's behaviour. Mapping Codex's generic `service` failure is a separate fix the
-/// orchestrator holds for before launch.
+/// Codex's recorded refusal of a question over its 1,048,576 characters (decision 0057 leaves
+/// the length reason unread): the wire says only "Codex encountered an internal error." (category
+/// `service`, severity `error`, actions `retry` and `new_session`), a failure Codex gave up on.
+/// The turn fails `agent.protocol_error`, so the lawyer sees a failure line and Try again, the
+/// queue holds, and Codex's text is in no event, not even the failure's detail. The host's own
+/// Codex check before sending is what keeps such a question back.
 #[test]
-fn codex_input_refusal_today_ends_end_turn_and_moves_the_queue_on() {
+fn codex_input_refusal_fails_and_holds_the_queue() {
     let dir = Dir::new("codex_input_too_long_holds_the_queue", &[]);
     // A scenario read from a path takes its includes from the `common/` folder beside it, and
     // its header names its file.
@@ -182,9 +175,20 @@ fn codex_input_refusal_today_ends_end_turn_and_moves_the_queue_on() {
     settle(&host, &mut events);
     events.assert_no_mismatch();
     let ended = events.turn_ended(first).expect("the turn ended");
-    assert_eq!(ended.stop, StopReason::EndTurn, "{}", events.dump());
-    assert_eq!(turn_failed(&events, first), None, "{}", events.dump());
+    assert_eq!(ended.stop, StopReason::Failed, "{}", events.dump());
+    let failed = turn_failed(&events, first).expect("a TurnFailed");
+    assert_eq!(
+        failed.code,
+        ErrorCode::AgentProtocolError,
+        "{}",
+        events.dump()
+    );
     assert_eq!(events.turn_text(first), "", "{}", events.dump());
+    assert!(
+        !events.dump().contains("internal error"),
+        "Codex's text reached an event: {}",
+        events.dump()
+    );
     let (_, asked) = user_message(&events, message);
     assert_eq!(
         asked.content,
@@ -192,10 +196,8 @@ fn codex_input_refusal_today_ends_end_turn_and_moves_the_queue_on() {
             text: QUESTION.to_owned()
         }]
     );
-    let next = events.until_turn_ended(second);
-    assert_eq!(next.stop, StopReason::EndTurn, "{}", events.dump());
-    assert!(!held(&host, matter, thread), "the queue held");
-    assert_eq!(starts(&events, second), 1, "{}", events.dump());
+    assert!(held(&host, matter, thread), "the queue moved on");
+    assert_eq!(starts(&events, second), 0, "{}", events.dump());
     host.shutdown();
 }
 
