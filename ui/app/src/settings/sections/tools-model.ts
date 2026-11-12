@@ -32,8 +32,11 @@ export type ImportSource = "claudeDesktop" | "claudeCode" | "codex";
 /** A source with servers to import, and how many. */
 export type Importable = { source: ImportSource; count: number };
 
-/** The section's view: the host's, and the sources found to import from (A3; only a fake sends them for now). */
-export type ToolsView = McpToolsView & { importable?: Importable[] };
+/** The section's view: the host's list, and the sources found to import from (only a fake sends them for now). The
+ * host's own `importable` and `last_import` wait for the Import wiring, so the host model leaves them out. */
+export type ToolsView = Omit<McpToolsView, "importable" | "last_import"> & {
+  importable?: Importable[];
+};
 
 /** Why an import left a server out; the section says it plainly, one line a server. notApproved: a Claude Code project's
  * server the lawyer hasn't approved there. */
@@ -122,7 +125,8 @@ function hostTools(transport: HostTransport): ToolsCommands | null {
   const listeners = new Set<(view: ToolsView) => void>();
   app.subscribeApp((event) => {
     if (!("mcp_tools_changed" in event)) return;
-    const next = event.mcp_tools_changed;
+    const { control, servers } = event.mcp_tools_changed;
+    const next: ToolsView = { control, servers };
     view = next;
     for (const listener of listeners) listener(next);
   });
