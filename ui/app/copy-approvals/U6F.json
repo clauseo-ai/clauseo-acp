@@ -166,5 +166,35 @@
     "at": "2026-11-08",
     "by": "orchestrator (provisional; app copy review; Rohan's rule: no line ends by telling the lawyer to ask IT)",
     "note": "agent.install_setup_failed for an agent that is not Claude (U3-err-agent.install_setup_failed is Claude's)"
+  },
+  "U6F-19": {
+    "en": "ChatGPT had a problem on its side. Try again.",
+    "hi": "ChatGPT की ओर से कोई समस्या आई। फिर से कोशिश करें।",
+    "status": "approved",
+    "at": "2026-11-12",
+    "by": "orchestrator",
+    "note": "agent.service_error (#1030): a failure the agent gave up on, on its side; Try again, no Restart"
+  },
+  "U6F-20": {
+    "en": "{name} had a problem on its side. Try again.",
+    "hi": "{name} की ओर से कोई समस्या आई। फिर से कोशिश करें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-12",
+    "hi_by": "app track (provisional; derived from the approved ChatGPT sentence; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-12",
+    "by": "app track (provisional; derived from the approved ChatGPT sentence)",
+    "note": "agent.service_error (#1030): a failure the agent gave up on, on its side; Try again, no Restart; an agent of no kind by its name, as U6F-04"
+  },
+  "U6F-21": {
+    "en": "The AI had a problem on its side. Try again.",
+    "hi": "AI की ओर से कोई समस्या आई। फिर से कोशिश करें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-12",
+    "hi_by": "app track (provisional; derived from the approved ChatGPT sentence; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-12",
+    "by": "app track (provisional; derived from the approved ChatGPT sentence)",
+    "note": "agent.service_error (#1030): a failure the agent gave up on, on its side; Try again, no Restart; no name at all, as U6F-10"
   }
 }

@@ -142,7 +142,7 @@ fn gated_input_too_long() -> String {
 /// Codex's recorded refusal of a question over its 1,048,576 characters (decision 0057 leaves
 /// the length reason unread): the wire says only "Codex encountered an internal error." (category
 /// `service`, severity `error`, actions `retry` and `new_session`), a failure Codex gave up on.
-/// The turn fails `agent.protocol_error`, so the lawyer sees a failure line and Try again, the
+/// The turn fails `agent.service_error`, so the lawyer sees a failure line and Try again, the
 /// queue holds, and Codex's text is in no event, not even the failure's detail. The host's own
 /// Codex check before sending is what keeps such a question back.
 #[test]
@@ -179,7 +179,7 @@ fn codex_input_refusal_fails_and_holds_the_queue() {
     let failed = turn_failed(&events, first).expect("a TurnFailed");
     assert_eq!(
         failed.code,
-        ErrorCode::AgentProtocolError,
+        ErrorCode::AgentServiceError,
         "{}",
         events.dump()
     );

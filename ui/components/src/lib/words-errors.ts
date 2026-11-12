@@ -114,6 +114,7 @@ export type ErrorCode =
   | "mcp.secret_store_failed"
   | "mcp.server_unknown"
   | "mcp.save_declined"
+  | "agent.service_error"
   | "unknown";
 
 /** The thread's own sentence for an answer cut short: its Hindi lives in words-thread.ts, once. */
@@ -312,6 +313,9 @@ export const ERROR_WORDS: Record<WordedCode, ErrorKey> = {
   "mcp.server_unknown": "Clauseo couldn't save that setting. Your settings are as they were.",
   // Cancel in the native confirm before a server is added or what it starts changes
   "mcp.save_declined": "You chose Cancel, so nothing was saved.",
+  // the agent's service had a problem on its side and the agent gave up on the turn (#1030): Try again under the
+  // answer, never Restart. ChatGPT's sentence approved (orchestrator, 2026-11-12); Claude's derived from it
+  "agent.service_error": "Claude had a problem on its side. Try again.",
   // a code from a newer Clauseo: as internal reads, since this version can say nothing truer
   unknown: "Something went wrong inside Clauseo.",
 };
@@ -368,6 +372,12 @@ const PLANNED: Partial<
     chatgpt: "Clauseo can't start ChatGPT safely here. Reinstall Clauseo.",
     named: "Clauseo can't start {name} safely here. Reinstall Clauseo.",
     nameless: "Clauseo can't start the AI safely here. Reinstall Clauseo.",
+  },
+  // ChatGPT's approved (orchestrator, 2026-11-12); {name}'s and the AI's derived from it (provisional)
+  "agent.service_error": {
+    chatgpt: "ChatGPT had a problem on its side. Try again.",
+    named: "{name} had a problem on its side. Try again.",
+    nameless: "The AI had a problem on its side. Try again.",
   },
 };
 

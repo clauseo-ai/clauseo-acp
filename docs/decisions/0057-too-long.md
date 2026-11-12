@@ -58,9 +58,10 @@ it was."). The research behind this record is the private `measurements/long-que
   It is a failure the agent gave up on (amended, codex-service-error): any `sessionFailure` of
   severity `error` with `retry` or `new_session` in its actions, in a category no earlier rule
   reads (not `limit` nor `connection`, and not too long), is `PromptEnd::failed`, read after
-  limit, too long and connection. The host ends that turn `Failed { agent.protocol_error }`, the
-  code the same failure gets over JSON-RPC: a failure line and Try again, the queue held, the
-  agent's title in no event and no log line. A turn that ends `TooLong` never ends so.
+  limit, too long and connection. The host ends that turn `Failed { agent.service_error }` (0003):
+  a failure line and Try again (never Restart), the queue held, the agent's title in no event and
+  no log line. A turn that ends `TooLong` never ends so. A JSON-RPC error keeps
+  `agent.protocol_error`: it cannot be told from a malformed reply.
 - **Which agent.** The host ends a turn `TooLong` for `PromptTooLong` from any agent, and for
   `ContextExhausted` only from codex-acp: claude-agent-acp sends that shape for its configured
   turn or output limit, which shortening the question does not fix; there it is logged by kind.

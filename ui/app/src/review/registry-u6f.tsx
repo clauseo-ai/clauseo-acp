@@ -5,7 +5,8 @@
 // room never has today (a thread always names its agent's id), so they render by themselves. U3-52 and U3-53, the
 // thread's line for a turn Clauseo stopped on the agent's request for files outside the matter, name the agent the same
 // way: Codex's turn as ChatGPT, and the AI alone. So do U3-54 and U3-55, the line for a turn the model refused as too
-// long to read (StopReason too_long).
+// long to read (StopReason too_long). U6F-19 to U6F-21 are agent.service_error's, never a send's refusal: the stop line
+// under the answer so far, with Try again.
 import type { Lang } from "@clauseo/components/lib/display.ts";
 import { th } from "@clauseo/components/lib/words-thread.ts";
 import { type AgentName, errorWords as sentence } from "@clauseo/components/lib/words-errors.ts";
@@ -26,6 +27,18 @@ const refused = (code: ErrorCode, agent: AgentId) => () => (
   <RoomAsking
     host={() => threadHost({ entries: [QUESTION, ANSWER, ENDED], agent, refuse: code })}
     question="And clause ten?"
+  />
+);
+
+/** A turn `agent` gave up on with agent.service_error: the stop line under the answer so far, with Try again. */
+const serviceFailed = (agent: AgentId) => () => (
+  <RoomOver
+    host={() =>
+      threadHost({
+        entries: [QUESTION, ANSWER, step(7, { stop: "failed", failure: "agent.service_error" })],
+        agent,
+      })
+    }
   />
 );
 
@@ -172,6 +185,24 @@ export const U6F: Entry[] = [
     words: errorWords("The AI was downloaded, but setting it up didn't finish. Try again."),
     screen: "room/first-run",
     render: setupFailed({ kind: undefined, name: null }),
+  },
+  {
+    id: "U6F-19",
+    words: errorWords("ChatGPT had a problem on its side. Try again."),
+    screen: "room/thread",
+    render: serviceFailed("codex-acp"),
+  },
+  {
+    id: "U6F-20",
+    words: errorWords("{name} had a problem on its side. Try again."),
+    screen: "room/thread",
+    render: serviceFailed("gemini"),
+  },
+  {
+    id: "U6F-21",
+    words: errorWords("The AI had a problem on its side. Try again."),
+    screen: "room/thread",
+    render: nameless("agent.service_error"),
   },
   {
     id: "U3-52",

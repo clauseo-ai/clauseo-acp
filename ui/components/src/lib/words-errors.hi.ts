@@ -187,6 +187,12 @@ export const HI = {
     "यह प्रश्न भेजने के लिए बहुत लंबा है। पाठ को मामले के फ़ोल्डर में एक फ़ाइल के रूप में सहेजें, फिर उसके बारे में पूछें। आपके शब्द रखे गए हैं।",
   // Cancel in the native confirm before an MCP server is saved (provisional Hindi)
   "You chose Cancel, so nothing was saved.": "आपने रद्द करें चुना, इसलिए कुछ भी सहेजा नहीं गया।",
+  // agent.service_error: the agent's service had a problem and it gave up on the turn (#1030). ChatGPT's approved
+  // (orchestrator, 2026-11-12); Claude's, {name}'s and the AI's derived from it (provisional Hindi)
+  "Claude had a problem on its side. Try again.": "Claude की ओर से कोई समस्या आई। फिर से कोशिश करें।",
+  "ChatGPT had a problem on its side. Try again.": "ChatGPT की ओर से कोई समस्या आई। फिर से कोशिश करें।",
+  "{name} had a problem on its side. Try again.": "{name} की ओर से कोई समस्या आई। फिर से कोशिश करें।",
+  "The AI had a problem on its side. Try again.": "AI की ओर से कोई समस्या आई। फिर से कोशिश करें।",
 } as const;
 
 /** The sentences' Hindi, for the copy review to tell hi: later from Hindi. */

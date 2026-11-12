@@ -199,6 +199,15 @@ const PLANNED_LINES = [
     "Clauseo can't start the AI safely here. Reinstall Clauseo.",
     "Clauseo यहाँ AI को सुरक्षित रूप से शुरू नहीं कर सकता। Clauseo फिर से इंस्टॉल करें।",
   ],
+  [
+    "agent.service_error",
+    "ChatGPT had a problem on its side. Try again.",
+    "ChatGPT की ओर से कोई समस्या आई। फिर से कोशिश करें।",
+    "gemini had a problem on its side. Try again.",
+    "gemini की ओर से कोई समस्या आई। फिर से कोशिश करें।",
+    "The AI had a problem on its side. Try again.",
+    "AI की ओर से कोई समस्या आई। फिर से कोशिश करें।",
+  ],
 ] as const;
 
 test.each(PLANNED_LINES)(

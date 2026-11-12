@@ -1,5 +1,5 @@
 //! A turn whose answer carries a failure the agent gave up on (`gave_up.rs`): codex-acp 2.2.2's
-//! `internal_error` on its `end_turn`. The turn fails `agent.protocol_error` with the answer so
+//! `internal_error` on its `end_turn`. The turn fails `agent.service_error` with the answer so
 //! far kept, and the agent's title reaches no event, the failure's detail included. A too-long
 //! refusal before it wins.
 
@@ -53,10 +53,7 @@ fn an_internal_error_the_agent_gave_up_on_fails_the_turn_and_shows_none_of_its_t
     let log = rig.log(thread);
     assert_eq!(
         ended(&log, turn),
-        (
-            Some(StopReason::Failed),
-            Some(ErrorCode::AgentProtocolError)
-        )
+        (Some(StopReason::Failed), Some(ErrorCode::AgentServiceError))
     );
     assert_eq!(answer(&log, turn), "Clause five says");
     let shown = format!("{log:?}");
