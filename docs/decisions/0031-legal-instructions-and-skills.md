@@ -47,7 +47,7 @@ Sources are in `crates/profile/assets/skills/<name>/`, each `SKILL.md` with flat
 
 **Departure from research 25:** research 25 puts a short views paragraph in the research skill (25:463). R22 leaves it out, because typed views are not in the launch scope.
 
-Skills name what to do, never which tool to call: "use your own file tools", "edit the lawyer's Word file with stetdoc", "search and read pages with your web tools and the browser". No v2 tool name appears in shipped text.
+Skills name what to do, never which tool to call: "use your own file tools", "edit the lawyer's Word file with stetdoc", "search and read pages with your web tools". No v2 tool name appears in shipped text.
 
 ### The matter brief and its folder
 
