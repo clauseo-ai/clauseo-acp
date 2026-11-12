@@ -360,9 +360,12 @@ fn stop_live(rig: &mut Rig, thread: ThreadId, before: bool) -> Option<TurnId> {
     let waiting = own_turn_at(rig, thread, At::Prompting);
     let queued = before.then(|| send(rig, 12, thread, DeliveryRequest::Queue));
     let _answer = press_stop(rig, thread);
-    rig.run_until("the turn's end and the late text", |actor| {
+    // The turn's end makes a snapshot due: the snapshot thread takes it in real time and its
+    // commit (no events) follows. Waited for too, so it never lands in the test's next command
+    // and counts there as a commit in flight.
+    rig.run_until("the turn's end, its snapshot and the late text", |actor| {
         let dropped = own_turn::late_dropped(actor, thread).unwrap_or(0);
-        no_turn(actor, thread) && dropped > waiting
+        no_turn(actor, thread) && actor.work.snapshots == 0 && dropped > waiting
     });
     assert!(own_turn::holds_starts(&mut rig.actor, thread));
     queued
