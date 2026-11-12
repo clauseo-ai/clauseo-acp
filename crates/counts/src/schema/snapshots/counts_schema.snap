@@ -1543,7 +1543,8 @@ expression: counts_schema()
         "mcp.env_name_invalid",
         "mcp.secret_store_failed",
         "mcp.server_unknown",
-        "mcp.save_declined"
+        "mcp.save_declined",
+        "agent.service_error"
       ],
       "type": "string"
     },

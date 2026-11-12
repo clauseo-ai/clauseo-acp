@@ -1040,5 +1040,16 @@
     "at": "2026-11-11",
     "by": "orchestrator (settled en)",
     "note": "prompt.too_long: a question over MAX_PROMPT_TEXT_BYTES, refused by the composer before it sends (prompt-cost.ts) or by the host, on the working line; on a queued message's edit, under the queue's head. The field keeps the words"
+  },
+  "U3-err-agent.service_error": {
+    "en": "Claude had a problem on its side. Try again.",
+    "hi": "Claude की ओर से कोई समस्या आई। फिर से कोशिश करें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-12",
+    "hi_by": "app track (provisional; derived from the approved ChatGPT sentence; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-12",
+    "by": "app track (provisional; derived from the approved ChatGPT sentence)",
+    "note": "agent.service_error (#1030): a failure the agent gave up on, on its side; Try again, no Restart; Claude's, as U3-err-agent.protocol_error names Claude; ChatGPT's is U6F-19"
   }
 }

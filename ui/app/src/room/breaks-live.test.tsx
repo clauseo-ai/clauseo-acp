@@ -220,6 +220,24 @@ test("with H10 faked: Restart for agent.exited, agent.launch_failed and thread.i
   }
 });
 
+// #1030: the agent's service gave up on the turn on its side. Try again under the answer, never Restart (even with H10
+// faked), no time mark, and the question stays out of the field: Try again asks it
+test("a Codex turn failed with agent.service_error: ChatGPT's line and Try again, no Restart, no time mark", async () => {
+  const agent = "codex-acp";
+  h = await asked({ threads: [{ ...summary(), agent }], next: H10 }, agent);
+  h.deliver(failed("agent.service_error", NOW, agent));
+  await h.settle();
+  const row = h.one("turn-stopped");
+  expect(row?.dataset["failure"]).toBe("agent.service_error");
+  expect(row?.textContent).toBe("ChatGPT had a problem on its side. Try again.");
+  expect(h.one("answer-try-again")).not.toBeNull();
+  expect(h.one("restart")).toBeNull();
+  expect(h.one("agent-stopped")).toBeNull();
+  expect(h.one("stopped-here")).toBeNull();
+  expect(field().value).toBe("");
+  expect(h.host.textContent).toContain("Clause nine requires notice");
+});
+
 test("with H10 faked: no Restart for a code a restart can't mend, and a refused Restart says its code", async () => {
   h = await asked({ next: H10 });
   h.deliver(failed("agent.protocol_error"));
@@ -334,6 +352,7 @@ test.each([
 test.each([
   ["agent.auth_required", "Sign in with ChatGPT in Codex first. Your question is kept."],
   ["agent.protocol_error", "ChatGPT sent something Clauseo can't read."],
+  ["agent.service_error", "ChatGPT had a problem on its side. Try again."],
 ] as const)("a Codex thread's %s names ChatGPT on the step's row", async (code, said) => {
   const agent = "codex-acp";
   h = await asked({ threads: [{ ...summary(), agent }], next: H10 }, agent);

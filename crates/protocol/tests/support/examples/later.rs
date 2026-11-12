@@ -127,6 +127,10 @@ pub(super) fn failures() -> Vec<DomainEvent> {
             ErrorCode::PromptTooLong,
             "SendPrompt: prompt text in JSON-escaped bytes is 6291457, over the limit of 6291456",
         ),
+        failed(
+            ErrorCode::AgentServiceError,
+            "the agent gave up on the turn (sessionFailure service)",
+        ),
     ]
     .into_iter()
     .chain(mcp_failures())

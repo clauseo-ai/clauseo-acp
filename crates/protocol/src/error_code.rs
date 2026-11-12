@@ -340,6 +340,11 @@ error_codes! {
     McpSaveDeclined = "mcp.save_declined", retryable: false, meaning: "The lawyer declined the \
         native confirm before an MCP server was added or its program, arguments, variable names \
         or URL changed, so nothing was saved.";
+    AgentServiceError = "agent.service_error", retryable: true, meaning: "The agent's service \
+        had a problem on its side and the agent gave up on the turn: an AIR `sessionFailure` of \
+        severity `error` offering `retry` or `new_session`, in a category no other code reads \
+        (codex-acp's `internal_error`, `provider_error`, `overloaded`). The answer so far is \
+        kept; asking again can work.";
     Unknown = "unknown", retryable: false, meaning: "A code from a newer Clauseo that this \
         version does not know. Never produced here.";
 }

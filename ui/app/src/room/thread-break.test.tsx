@@ -12,7 +12,7 @@ import { agentText, step, userMessage } from "../testing/stream-script.ts";
 import type { EntryId, ViewEntry } from "../transport/protocol.ts";
 import { entryIdOf, type StreamView } from "../store/view.ts";
 import { stoppedLine, streamFailedLine } from "./break-lines.ts";
-import { pickBreak, refillOf, RESTARTS, type Break } from "./thread-break.ts";
+import { pickBreak, refillOf, RESTARTS, takesMark, type Break } from "./thread-break.ts";
 import { clockTime } from "./thread/clock.ts";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -107,7 +107,7 @@ test("with H10 faked: Restart for agent.exited, agent.launch_failed and thread.i
   );
   expect(exitedHost.textContent).toContain("Details");
   // a restart can't mend these, so no line: the step row says them
-  for (const code of ["agent.protocol_error", "agent.unsupported_version"])
+  for (const code of ["agent.protocol_error", "agent.unsupported_version", "agent.service_error"])
     expect(stoppedLine("en", brk(code), 0, { onRestart: () => {}, refused: null })).toBeNull();
   // and before H10 only agent.exited takes the line
   expect(stoppedLine("en", brk("agent.launch_failed"), 0, null)).toBeNull();
@@ -147,6 +147,18 @@ test("the stopped question comes back only before H10, only for the codes asking
   expect(refillOf(brk("agent.exited"), false, null)).toBeNull();
   expect(refillOf(brk("agent.protocol_error"), true, null)).toBeNull();
   expect(refillOf(brk("agent.unsupported_version"), true, null)).toBeNull();
+  expect(refillOf(brk("agent.service_error"), true, null)).toBeNull();
+});
+
+test("agent.service_error (#1030): no Restart, no time mark, no working line, with H10 or without", () => {
+  const b = brk("agent.service_error");
+  expect(RESTARTS.has("agent.service_error")).toBe(false);
+  expect(takesMark(b.step)).toBe(false);
+  expect(stoppedLine("en", b, 0, null)).toBeNull();
+  expect(stoppedLine("en", b, 0, { onRestart: () => {}, refused: null })).toBeNull();
+  expect(errorWords("en", "agent.service_error", { kind: "codex", name: "codex-acp" })).toBe(
+    "ChatGPT had a problem on its side. Try again.",
+  );
 });
 
 test("a stream that failed: its line and code; Try again only for a retryable code, and it calls retry", () => {
