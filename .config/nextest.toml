@@ -121,6 +121,15 @@ threads-required = "num-cpus"
 filter = 'package(xtask) & (test(/^buildtime::(worktree|profile)::tests::/) | test(/^checks::core_io::tests::clippy::/))'
 slow-timeout = { period = "30s", terminate-after = 4 }
 
+# xtask's two checks tests that run every static check on the real repo: they read and parse its
+# whole source, 2.5 s each on an idle Mac mini since syn 3 and proc-macro2 build at opt-level 3
+# (Cargo.toml's [profile.dev.package."syn@3"]). Before that change they ran past 30 s on the first
+# try of every Windows gate from 870 to 1025, and passed in 14 to 20 s on the retry, once the
+# run's load had dropped. 120 s still ends a hung one.
+[[profile.default.overrides]]
+filter = 'package(xtask) & binary(xtask) & (test(=checks::tests::the_real_repo_passes_every_static_check) | test(=checks::tests::a_failed_metadata_load_stops_every_check_that_reads_members))'
+slow-timeout = { period = "30s", terminate-after = 4 }
+
 # The guard's real-Chrome tests (crates/mcp/tests/guard/real_chrome.rs; they run where
 # CLAUSEO_TEST_AGENT_BROWSER is set, CI's Linux job) each start Chrome, 11 or 12 processes. Run side
 # by side on the loaded runner, Chrome took more than 10 s to listen once its start was logged, and
