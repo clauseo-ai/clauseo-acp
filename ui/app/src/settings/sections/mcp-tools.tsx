@@ -14,6 +14,7 @@ import { IconCommand } from "@clauseo/components/icons/icons.tsx";
 import { useDisplay } from "@clauseo/components/lib/display.ts";
 import { mt } from "@clauseo/components/lib/words-matters.ts";
 import { mw } from "@clauseo/components/lib/words-mcp-tools.ts";
+import { tw } from "@clauseo/components/lib/words-tools.ts";
 import { say, ui } from "@clauseo/components/lib/words-ui.ts";
 import {
   AlertDialog,
@@ -193,7 +194,13 @@ function Tools({ commands, safe }: { commands: ToolsCommands; safe: boolean }) {
               ))}
             </div>
           )}
-          <Group {...(firm ? { note: mw(lang, "Your firm set these tools.") } : {})}>
+          <Group
+            note={
+              firm
+                ? mw(lang, "Your firm set these tools.")
+                : tw(lang, "Changes apply to new conversations.")
+            }
+          >
             {view.servers.length === 0 && (
               <PlateRow>
                 <p className={settingNote} data-testid="tools-empty">
