@@ -12,6 +12,7 @@ use serde_json::json;
 
 use super::McpControl;
 use super::lawyer::{self, HostEnv, Lawyer, McpSecrets};
+use crate::testing::abs;
 
 /// The settings `servers` make, loaded from a scratch folder.
 fn effective(test: &str, servers: &serde_json::Value) -> Effective {
@@ -23,15 +24,6 @@ fn effective(test: &str, servers: &serde_json::Value) -> Effective {
     crate::write::remove_dir_all(&root).unwrap();
     assert_eq!(effective.warnings(), []);
     effective
-}
-
-/// `path`, written `/a/b`, as an absolute path on this OS: `C:\a\b` on Windows.
-fn abs(path: &str) -> String {
-    if cfg!(windows) {
-        format!("C:{}", path.replace('/', "\\"))
-    } else {
-        path.to_owned()
-    }
 }
 
 const CLAUSEO: Lawyer = Lawyer {
