@@ -333,10 +333,10 @@ fn the_rendered_frontmatter_is_name_and_description_alone() {
         assert!(text.starts_with(&frontmatter::render(skill.name(), &front.description)));
         assert!(!text.contains("metadata:"));
         // R24 gave the research skill's case-law line conditional wording (version 2), then
-        // the brief's "and citations" (version 3). The matter brief's check before its read
-        // (D-044) is its version 2.
+        // the brief's "and citations" (version 3), then no browser in its tools (version 4).
+        // The matter brief's check before its read (D-044) is its version 2.
         let version = match skill.name() {
-            "legal-research" => "3",
+            "legal-research" => "4",
             "matter-brief" => "2",
             _ => "1",
         };
