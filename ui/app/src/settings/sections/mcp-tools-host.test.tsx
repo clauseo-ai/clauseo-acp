@@ -27,6 +27,7 @@ test("no event yet: the host leaves an empty list out of its catch-up, so Tools 
   expect(rig.q('[data-testid="tools-add"]')).not.toBeNull();
   const one: McpToolsView = {
     control: "lawyer",
+    importable: [],
     servers: [
       {
         name: "notes",
@@ -43,7 +44,9 @@ test("no event yet: the host leaves an empty list out of its catch-up, so Tools 
   expect(rig.rows()).toEqual(["notesuvx"]);
   // and back to empty, which the host does send as a change
   await act(async () =>
-    rig!.transport.appEvent({ mcp_tools_changed: { control: "lawyer", servers: [] } }),
+    rig!.transport.appEvent({
+      mcp_tools_changed: { control: "lawyer", servers: [], importable: [] },
+    }),
   );
   expect(rig.q('[data-testid="tools-empty"]')).not.toBeNull();
 });
@@ -53,6 +56,7 @@ test("over the host: the view from mcp_tools_changed, the commands as HostComman
   let refuse: string | null = null;
   const view: McpToolsView = {
     control: "lawyer",
+    importable: [],
     servers: [
       {
         name: "notes",
@@ -121,11 +125,13 @@ test("over the host: the view from mcp_tools_changed, the commands as HostComman
 
 test("an empty view after a full one: every removed tool goes, and the empty state shows", async () => {
   rig = await mount(null, {
-    first: [{ mcp_tools_changed: { control: "lawyer", servers: THREE.servers } }],
+    first: [{ mcp_tools_changed: { control: "lawyer", servers: THREE.servers, importable: [] } }],
   });
   expect(rig.rows().length).toBe(3);
   await act(async () =>
-    rig!.transport.appEvent({ mcp_tools_changed: { control: "lawyer", servers: [] } }),
+    rig!.transport.appEvent({
+      mcp_tools_changed: { control: "lawyer", servers: [], importable: [] },
+    }),
   );
   expect(rig.rows()).toEqual([]);
   expect(rig.q('[data-testid="tools-empty"]')?.textContent).toBe("No tools yet.");
