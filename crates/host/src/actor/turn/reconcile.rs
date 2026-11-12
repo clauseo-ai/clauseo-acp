@@ -263,8 +263,8 @@ pub(super) fn on_log(
             let logged = (|| -> Result<(), Error> {
                 let mut out = Out::new(actor, thread, None)?;
                 pending.expiries().push_into(actor, &mut out)?;
-                queue::restore(actor, thread, &log, &mut out)?;
                 super::own_turn::end_unstarted_at_start(actor, &mut out, &log)?;
+                queue::restore(actor, thread, &log, &mut out)?;
                 detach(actor, &mut out, &pending)?;
                 out.send(actor, Then::Nothing)
             })();
@@ -278,9 +278,9 @@ pub(super) fn on_log(
                 let mut out = Out::new(actor, thread, None)?;
                 pending.expiries().push_into(actor, &mut out)?;
                 // A steer never answered still comes back, held.
-                queue::restore(actor, thread, &log, &mut out)?;
                 // An agent-started turn left waiting ends (`own_turn/restart.rs`).
                 super::own_turn::end_unstarted_at_start(actor, &mut out, &log)?;
+                queue::restore(actor, thread, &log, &mut out)?;
                 detach(actor, &mut out, &pending)?;
                 out.send(actor, Then::Nothing)
             })();
