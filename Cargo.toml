@@ -261,6 +261,17 @@ debug = "line-tables-only"
 incremental = true         # CI turns this off; set CARGO_INCREMENTAL=1 where incremental matters
 [profile.dev.package."*"]
 debug = false
+# xtask's expect-allowlist check parses every .rs file in the repo with syn 3 (span-locations), in
+# `cargo xtask check` and in two of xtask's tests. Unoptimized that took 4.2 s on an M-series Mac
+# and ran past nextest's 30 s on every first Windows try of checks::tests' real-repo tests; at
+# opt-level 3 it takes about 0.9 s, and each of those tests 2.5 s, not 6 s. A package override
+# also applies to the proc macros built on these crates (serde_derive, thiserror-impl and the
+# other derives every workspace crate uses), so a clean build is slower (`cargo build -p xtask`:
+# 5.2 s to 9 to 10 s). Edits that rebuild only workspace crates keep their time.
+[profile.dev.package."syn@3"]
+opt-level = 3
+[profile.dev.package.proc-macro2]
+opt-level = 3
 
 [profile.release] # CI artifacts only
 codegen-units = 1
