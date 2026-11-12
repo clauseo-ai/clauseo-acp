@@ -271,7 +271,7 @@ fn a_prompt_sent_during_the_stop_stays_starting_and_resumes_from_the_detach() {
 
 #[test]
 fn a_schema_10_snapshot_is_refolded() {
-    assert_eq!(REDUCER_SCHEMA_VERSION, 11);
+    assert_eq!(REDUCER_SCHEMA_VERSION, 12);
     let (mut log, mut state) = created(59);
     idle_stop(&mut log, &mut state);
     send(&mut log, &mut state, "Go.");

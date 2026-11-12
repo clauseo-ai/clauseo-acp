@@ -275,8 +275,10 @@ queued behind a turn still on its way (`behind_turn` that turn, `Starting` or `Q
 started; added 2026-11-12) leaves the status, as one behind a running turn does: the turn ahead
 stays the thread's last, so its `turn_started` gives `Running` and its `turn_ended` before it
 starts settles the status (before, the wait settled it to `Idle`, which hid Stop while the turn
-ahead was still starting). No `REDUCER_SCHEMA_VERSION` bump: a snapshot folded under the old
-rule shows `Idle` until the turn ahead starts or ends, and then agrees; `queued_prompt_edited` replaces its content and sets `edited`;
+ahead was still starting). With the agent-started turn's open above, this
+changes how events fold, so `REDUCER_SCHEMA_VERSION` goes from 11 to 12: a snapshot folded under
+the old rules (which may show `Idle` where the turn is on its way) is passed over and the
+thread's log is folded once at its next reopen, as for the bumps above; `queued_prompt_edited` replaces its content and sets `edited`;
 `steer_resolved` sets the entry's `steer` and moves it to the outcome's turn (`not_sent`, added
 2026-11-11 for a steer a turn's end left unsent, moves nothing), and marks each tool
 call in `aside` with `ToolCallEntry.background` (`BackgroundMark`, its `finished_at` from the
