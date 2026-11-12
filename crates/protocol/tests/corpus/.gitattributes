@@ -1,3 +1,6 @@
 # Frozen bytes: git must never convert line endings in them.
 *.msgpack binary
 *.jsonl -text
+# Pins are text compared byte for byte: keep them LF on every checkout, Windows too, since the
+# test refuses a CR in a .pin.
+*.pin text eol=lf

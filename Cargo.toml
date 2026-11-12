@@ -113,6 +113,9 @@ specta-typescript = "=0.0.12"
 tauri-specta = "=2.0.0-rc.25"
 # xtask's docs check, and protocol's doc-table tests (test-only there).
 pulldown-cmark = { version = "0.13.5", default-features = false }
+# Test-only: protocol's corpus test embeds the files of tests/corpus/added/ at compile time
+# (its crate bans reading files at run time). No `nightly` feature: see corpus.rs on rebuilds.
+include_dir = { version = "0.7.4", default-features = false }
 # fake_agent validates its scenarios against the SDK's v1 schema (schema 1.11.0). No features here:
 # a crate that needs one turns it on in its own line.
 agent-client-protocol = { version = "=3.3.0", default-features = false }

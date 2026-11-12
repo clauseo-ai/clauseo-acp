@@ -22,6 +22,7 @@ specta = { workspace = true, optional = true, features = ["derive"] }
 specta-serde = { workspace = true, optional = true }
 
 [dev-dependencies]
+include_dir = { workspace = true }
 insta = { workspace = true, features = ["json"] }
 proptest = { workspace = true }
 pulldown-cmark = { workspace = true }
