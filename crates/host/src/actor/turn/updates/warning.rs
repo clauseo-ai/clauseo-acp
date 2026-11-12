@@ -19,6 +19,10 @@ const CATEGORIES: [&str; 7] = [
 /// The `sessionFailure` severities the log takes as they are.
 const SEVERITIES: [&str; 3] = ["error", "warning", "info"];
 
+/// The log target both lines keep: the module they were logged from before this file split,
+/// so a reader's filter on it still finds them.
+const TARGET: &str = "clauseo_host::actor::turn::updates";
+
 /// Logs `warning` from `thread`'s agent about `session`.
 pub(super) fn log(thread: ThreadId, session: Option<&AgentSessionId>, warning: &W) {
     let kind = kind(warning);
@@ -29,6 +33,7 @@ pub(super) fn log(thread: ThreadId, session: Option<&AgentSessionId>, warning: &
         let category = word(&CATEGORIES, category.as_deref());
         let severity = word(&SEVERITIES, severity.as_deref());
         tracing::warn!(
+            target: TARGET,
             %thread,
             ?session,
             warning = kind,
@@ -37,7 +42,13 @@ pub(super) fn log(thread: ThreadId, session: Option<&AgentSessionId>, warning: &
             "the agent reported a failure the host does not act on"
         );
     } else {
-        tracing::warn!(%thread, ?session, warning = kind, "the agent sent something unreadable");
+        tracing::warn!(
+            target: TARGET,
+            %thread,
+            ?session,
+            warning = kind,
+            "the agent sent something unreadable"
+        );
     }
 }
 
