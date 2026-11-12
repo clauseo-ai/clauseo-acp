@@ -109,7 +109,9 @@ pub(super) fn user_message(
         state.index.set_unstarted(event.turn, seq);
     }
     insert_entry(state, seq, ViewEntry::UserMessage(entry), out);
-    if state.running.is_none() {
+    // A prompt sent while a turn is on its way queues behind it (its `TurnQueued` follows): that
+    // turn stays the thread's last, and the status stays.
+    if state.running.is_none() && !on_its_way(state) {
         // A prompt that moves an idle-stopped thread to `Starting` begins a resume, timed by
         // this event. `after_turn` can hold a stop only while a turn runs, so it is not
         // reachable here, but it counts the same.
@@ -129,10 +131,12 @@ pub(super) fn user_message(
 /// second `TurnQueued`, and when no turn runs it becomes the thread's last turn, so its
 /// `TurnEnded` before it starts (a cancel) settles the status; its prompt has left the thread's
 /// queue (`Sent`). Behind its own thread its prompt shows `Queued` (and `at_head` when the turn
-/// was put back at the head, `queued_order.rs`), and it leaves the status
-/// while a turn runs; when none runs, it settles (to `Idle` unless the lawyer is asked), but for
-/// an agent-started turn's, which has no prompt: it is `Starting` (`NeedsYou` while asked) and
-/// the thread's last turn, so its `TurnStarted` or its `TurnEnded` before it starts settles it.
+/// was put back at the head, `queued_order.rs`), and it leaves the status while a turn runs, or
+/// while the turn it waits behind is on its way (`Starting` or `Queued`, not started), whose
+/// `TurnStarted` or `TurnEnded` then moves it; otherwise it settles (to `Idle` unless the lawyer
+/// is asked), but for an agent-started turn's, which has no prompt: it is `Starting` (`NeedsYou`
+/// while asked) and the thread's last turn, so its `TurnStarted` or its `TurnEnded` before it
+/// starts settles it.
 pub(super) fn turn_queued(state: &mut ThreadState, event: &TurnQueued, out: &mut Applied) {
     let behind = event.behind();
     let status = if behind == state.thread {
@@ -153,6 +157,10 @@ pub(super) fn turn_queued(state: &mut ThreadState, event: &TurnQueued, out: &mut
         return;
     }
     if state.running.is_none() {
+        if event.behind_turn().is_some() && event.behind_turn() == state.turn && on_its_way(state) {
+            // Behind the turn on its way: the status stays until that turn starts or ends.
+            return;
+        }
         let status = if opens_own_turn(state, event) {
             // An agent-started turn: it has no prompt to say it is on its way, so this wait
             // does, and Stop shows from the moment it opens.
@@ -168,6 +176,17 @@ pub(super) fn turn_queued(state: &mut ThreadState, event: &TurnQueued, out: &mut
         };
         set_status(state, "turn_queued", out, status);
     }
+}
+
+/// Whether the thread's last turn is on its way and not started: `Starting` (its prompt sent, or
+/// an agent-started turn's open), or `Queued` behind another thread's writer, with none running.
+fn on_its_way(state: &ThreadState) -> bool {
+    state.running.is_none()
+        && state.turn.is_some()
+        && matches!(
+            state.status(),
+            ThreadStatus::Starting | ThreadStatus::Queued { .. }
+        )
 }
 
 /// Whether `event`, a wait behind the turn's own thread with no turn running, is an

@@ -79,7 +79,8 @@ prompt, the reducer's step needs only the turn, and the UI already draws an exch
 question. With no `UserMessage`, its `TurnQueued` shows it from its open (2026-11-12): behind the
 holder when another thread has the writer, else behind its own thread as it takes the writer,
 before its checkpoint, which the reducer folds to `Starting` (a wait with no prompt and no turn
-ahead), so Stop shows from the moment it opens. Until it is live, and while another turn of the thread starts or ends, the updates
+ahead), so Stop shows from the moment it opens; a prompt queued behind it meanwhile leaves it
+`Starting`, as behind any turn still on its way (0002). Until it is live, and while another turn of the thread starts or ends, the updates
 wait in memory in order; they are logged in the agent-started turn once it starts, or in a turn
 a prompt starts meanwhile, which they then come first in. It ends `EndTurn` on the agent's
 `usage_update` with a cost (claude-agent-acp sends it from the SDK's `result` at the end of every

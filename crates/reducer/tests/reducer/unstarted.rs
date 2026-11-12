@@ -216,12 +216,12 @@ fn a_turn_failed_before_it_starts_leaves_a_running_turns_status() {
     assert_eq!(round_trip(&state), state);
 }
 
-/// Two prompts sent while no turn runs (the later one is the thread's last turn, `Starting`);
-/// the earlier one's turn fails before it starts: it gets its card and the later prompt keeps
-/// `Starting`. Without the guard the end would settle the thread to `Idle` under a waiting
-/// prompt. The host cannot produce this order today either.
+/// Two prompts sent while no turn runs; the earlier one's turn fails before it starts: it gets
+/// its card. The later prompt came while the earlier turn was on its way, so that turn stays the
+/// thread's last (the host queues the later one behind it) and its end settles the status. The
+/// host cannot produce this order (with no `TurnQueued`) today.
 #[test]
-fn a_turn_failed_before_it_starts_leaves_a_later_prompts_status() {
+fn a_turn_failed_before_it_starts_settles_under_a_later_prompt() {
     let mut log = Log::thread(34).unwrap();
     log.push(thread_created().unwrap()).unwrap();
     let (first, first_message): (TurnId, MessageId) = (log.fresh().unwrap(), log.fresh().unwrap());
@@ -232,7 +232,7 @@ fn a_turn_failed_before_it_starts_leaves_a_later_prompts_status() {
         .unwrap();
     fail(&mut log, first, ErrorCode::AgentExited);
     let state = fold(log.events());
-    assert_eq!(status(&state), ThreadStatus::Starting);
+    assert_eq!(status(&state), ThreadStatus::Idle);
     assert!(step(&state, first).is_some());
     assert!(step(&state, later).is_none());
     for message in [first_message, later_message] {

@@ -20,7 +20,7 @@ use crate::actor::Actor;
 use crate::actor::input::{Input, Request};
 use crate::actor::turn::agents::Stage;
 use crate::actor::turn::own_turn::{self, LATE_QUIET};
-use crate::actor::turn::{Holder, TurnPhase};
+use crate::actor::turn::{Holder, TurnPhase, queue};
 use crate::agent::AgentInput;
 use crate::error::Error;
 use crate::matter_worker::MatterReply;
@@ -295,6 +295,48 @@ fn stop_while_an_agent_started_turn_starts() {
 #[test]
 fn stop_of_a_live_agent_started_turn() {
     stop_at("own-stop-prompting", At::Prompting);
+}
+
+/// A prompt queued while the agent-started turn checkpoints leaves the view `Starting` (Stop
+/// still shows); Stop ends the turn `Cancelled` before it started, and the prompt stays queued,
+/// held, as after any Stop.
+#[test]
+fn stop_while_an_agent_started_turn_checkpoints_with_a_prompt_queued() {
+    let mut rig = Rig::start("own-stop-checkpointing-queued", OWN_THEN_LATE);
+    let thread = rig.thread();
+    own_turn_at(&mut rig, thread, At::Checkpointing);
+    let own = rig.actor.threads[&thread]
+        .turn
+        .current
+        .as_ref()
+        .unwrap()
+        .turn;
+    let queued = send_prompt(&mut rig, 12, thread);
+    rig.settle_commits();
+    assert_eq!(view_status(&rig, thread), ThreadStatus::Starting);
+    let _answer = press_stop(&mut rig, thread);
+    rig.release_held();
+    rig.run_until("the turn's end", |actor| {
+        no_turn(actor, thread) && queue::queue_held(actor, thread)
+    });
+    let log = rig.log(thread);
+    let ended = log.iter().find_map(|event| {
+        if let DomainEvent::TurnEnded(ended) = event
+            && ended.turn == own
+        {
+            Some(ended.stop)
+        } else {
+            None
+        }
+    });
+    assert_eq!(ended, Some(StopReason::Cancelled));
+    let started = log
+        .iter()
+        .any(|e| matches!(e, DomainEvent::TurnStarted(s) if s.turn == own));
+    assert!(!started);
+    assert_eq!(queue::queued_turns(&rig.actor, thread), [queued]);
+    assert_eq!(view_status(&rig, thread), ThreadStatus::Idle);
+    rig.finish();
 }
 
 /// Sends a prompt to `thread` as command `n`, delivered as `delivery`.

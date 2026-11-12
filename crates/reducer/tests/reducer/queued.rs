@@ -353,3 +353,74 @@ fn own_turn_wait_left_by_a_crash_settles_at_the_restart_repair() {
         assert_eq!(round_trip(&state), state);
     }
 }
+
+#[test]
+fn a_prompt_queued_behind_a_starting_turn_keeps_starting() {
+    // A prompt queued behind a turn on its way (its prompt sent, or an agent-started turn's
+    // open, not yet started) leaves the status: `Starting` until that turn starts (`Running`) or
+    // ends before it starts (it settles, and the queued prompt waits by the queue's rules).
+    for own in [false, true] {
+        for starts in [true, false] {
+            let (mut log, mut state, thread) = created();
+            let first = if own {
+                let turn = log.fresh().unwrap();
+                push(&mut log, &mut state, queued(thread, turn, thread, None));
+                turn
+            } else {
+                prompt(&mut log, &mut state, "Read the lease.").0
+            };
+            assert_eq!(status(&state), ThreadStatus::Starting);
+            let (second, message) = prompt(&mut log, &mut state, "Then clause 3.");
+            let out = push(
+                &mut log,
+                &mut state,
+                queued(thread, second, thread, Some(first)),
+            );
+            assert_eq!(header_statuses(&out), [], "own {own}");
+            assert_eq!(status(&state), ThreadStatus::Starting, "own {own}");
+            assert_eq!(
+                prompt_status(&state, message),
+                Some(UserMessageStatus::Queued)
+            );
+            assert_eq!(round_trip(&state), state);
+            if starts {
+                let out = start(&mut log, &mut state, first);
+                assert_eq!(header_statuses(&out), [ThreadStatus::Running]);
+                end(&mut log, &mut state, first);
+            } else {
+                let out = cancel(&mut log, &mut state, first);
+                assert!(out.anomalies.is_empty(), "{:?}", out.anomalies);
+                assert!(!has_step(&state, first));
+            }
+            assert_eq!(
+                status(&state),
+                ThreadStatus::Idle,
+                "own {own}, starts {starts}"
+            );
+            assert_eq!(
+                prompt_status(&state, message),
+                Some(UserMessageStatus::Queued)
+            );
+            assert_eq!(state, fold(log.events()));
+        }
+    }
+}
+
+#[test]
+fn a_prompt_queued_behind_a_turn_waiting_for_the_writer_keeps_queued() {
+    // The turn ahead waits for another thread's writer: the prompt behind it leaves `Queued`.
+    let (mut log, mut state, thread) = created();
+    let writer = thread_id(77).unwrap();
+    let (first, _) = prompt(&mut log, &mut state, "Read the lease.");
+    push(&mut log, &mut state, queued(thread, first, writer, None));
+    let (second, _) = prompt(&mut log, &mut state, "Then clause 3.");
+    push(
+        &mut log,
+        &mut state,
+        queued(thread, second, thread, Some(first)),
+    );
+    assert_eq!(status(&state), ThreadStatus::Queued { behind: writer });
+    let out = start(&mut log, &mut state, first);
+    assert_eq!(header_statuses(&out), [ThreadStatus::Running]);
+    assert_eq!(state, fold(log.events()));
+}
