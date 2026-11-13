@@ -252,3 +252,19 @@ fn windows_deny(deny: &LaunchDeny) -> Vec<String> {
     ));
     rules
 }
+
+/// Settings larger than Claude Code reads (2 MiB) fail the write, and no file is left: the launch
+/// fails rather than start Claude without its rules.
+#[test]
+fn settings_larger_than_claude_code_reads_fail_the_write() {
+    let dir = TempDir::new("launch-settings-too-large");
+    let data = dir.path().join("data");
+    let big = "x".repeat(2 * 1024 * 1024);
+    let mut meta =
+        json!({"claudeCode": {"options": {"settings": {"permissions": {"deny": [big]}}}}});
+    let written = target(&data).write(meta.as_object_mut().unwrap());
+    assert!(written.is_err());
+    let folder = super::folder(&data);
+    let left = std::fs::read_dir(&folder).map_or(0, Iterator::count);
+    assert_eq!(left, 0);
+}

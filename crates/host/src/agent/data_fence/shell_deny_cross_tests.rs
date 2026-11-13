@@ -8,6 +8,7 @@
 use std::ffi::OsString;
 use std::path::PathBuf;
 
+use super::tests::{Rule, prepare};
 use super::windows_shell_deny_rules;
 use crate::agent::data_fence::LaunchDeny;
 use crate::agent::data_fence::big_folder::{self, OWN_RUN, PREFIX_RUN, matter_id};
@@ -19,7 +20,7 @@ const DATA: &str = r"C:\Users\clauseo-lawyer\AppData\Local\ai.clauseo.desktop";
 /// A configured data folder (stage C's example).
 const CONFIGURED: &str = r"D:\FirmData\Clauseo";
 
-fn env(name: &str) -> Option<OsString> {
+pub(super) fn env(name: &str) -> Option<OsString> {
     match name {
         "LOCALAPPDATA" => Some(r"C:\Users\clauseo-lawyer\AppData\Local".into()),
         "APPDATA" => Some(r"C:\Users\clauseo-lawyer\AppData\Roaming".into()),
@@ -28,68 +29,32 @@ fn env(name: &str) -> Option<OsString> {
     }
 }
 
-/// Rules compiled once for [`Rules::denies`], as `matches` reads them (`shell_deny_tests.rs`).
-struct Rules {
-    bash: Vec<Vec<String>>,
-    powershell: Vec<Vec<String>>,
+/// Rules compiled once for [`Rules::denies`], as Claude Code reads them ([`super::tests::Rule`]).
+pub(super) struct Rules {
+    bash: Vec<Rule>,
+    powershell: Vec<Rule>,
 }
 
 impl Rules {
-    fn new(rules: &[String]) -> Self {
-        let mut bash = Vec::new();
-        let mut powershell = Vec::new();
-        for rule in rules {
-            let (tool, content) = rule.split_once('(').unwrap();
-            let content = content.strip_suffix(')').unwrap();
-            let mut parts = vec![String::new()];
-            let mut chars = content.chars().peekable();
-            while let Some(c) = chars.next() {
-                match c {
-                    '\\' if matches!(chars.peek(), Some('*' | '\\')) => {
-                        parts.last_mut().unwrap().push(chars.next().unwrap());
-                    }
-                    '*' => parts.push(String::new()),
-                    _ => parts.last_mut().unwrap().push(c),
-                }
-            }
-            if tool == "PowerShell" {
-                powershell.push(parts.iter().map(|part| part.to_lowercase()).collect());
-            } else {
-                bash.push(parts);
-            }
-        }
+    pub(super) fn new(rules: &[String]) -> Self {
+        let (powershell, bash): (Vec<Rule>, Vec<Rule>) = rules
+            .iter()
+            .map(|rule| Rule::new(rule))
+            .partition(|rule| rule.tool() == "PowerShell");
         Self { bash, powershell }
     }
 
     /// Whether a rule of `tool` matches `command` (PowerShell's in any case).
-    fn denies(&self, tool: &str, command: &str) -> bool {
-        let (rules, text) = if tool == "PowerShell" {
-            (&self.powershell, command.to_lowercase())
+    pub(super) fn denies(&self, tool: &str, command: &str) -> bool {
+        let powershell = tool == "PowerShell";
+        let rules = if powershell {
+            &self.powershell
         } else {
-            (&self.bash, command.to_owned())
+            &self.bash
         };
-        rules.iter().any(|parts| fits(parts, &text))
+        let text = prepare(command, powershell);
+        rules.iter().any(|rule| rule.hits_prepared(&text))
     }
-}
-
-/// Whether the parts of a rule (split at its `*`) match `text`, anchored at both ends.
-fn fits(parts: &[String], text: &str) -> bool {
-    let Some((first, rest)) = parts.split_first() else {
-        return false;
-    };
-    let Some(mut tail) = text.strip_prefix(first.as_str()) else {
-        return false;
-    };
-    let Some((last, middle)) = rest.split_last() else {
-        return tail.is_empty();
-    };
-    for part in middle {
-        let Some((_, after)) = tail.split_once(part.as_str()) else {
-            return false;
-        };
-        tail = after;
-    }
-    tail.ends_with(last.as_str())
 }
 
 /// A deterministic stream of numbers (a linear congruential generator).
@@ -120,7 +85,7 @@ const STREAMS: [&str; 3] = ["", "::$DATA", ":x"];
 /// The ways of writing the default data folder: each drive, share and device form, the
 /// variables in either case, the home forms, the bare name, and its name with a trailing dot
 /// or space (`trailing`).
-fn default_leads(trailing: bool) -> Vec<String> {
+pub(super) fn default_leads(trailing: bool) -> Vec<String> {
     let rest = r"Users\clauseo-lawyer\AppData\Local\ai.clauseo.desktop";
     let forward = rest.replace('\\', "/");
     let mut leads = vec![
@@ -226,16 +191,25 @@ fn commands(path: &str, n: usize) -> Vec<(&'static str, String)> {
 /// run used throughout, then `samples` with runs, steps, trailing dots and spaces and streams
 /// picked deterministically. With the tools each is checked in.
 fn generated(leads: &[String], samples: usize) -> Vec<(&'static str, String)> {
+    generated_over(leads, &protected(), samples)
+}
+
+/// [`generated`] for `places`.
+pub(super) fn generated_over(
+    leads: &[String],
+    places: &[Vec<String>],
+    samples: usize,
+) -> Vec<(&'static str, String)> {
     let mut lcg = Lcg(0x5eed);
     let mut out = Vec::new();
-    for names in protected() {
+    for names in places {
         for lead in leads {
             let mut paths: Vec<String> = RUNS
                 .iter()
-                .map(|run| spelled(lead, &names, &mut lcg, Some(run)))
+                .map(|run| spelled(lead, names, &mut lcg, Some(run)))
                 .collect();
             for _ in 0..samples {
-                paths.push(spelled(lead, &names, &mut lcg, None));
+                paths.push(spelled(lead, names, &mut lcg, None));
             }
             for path in paths {
                 let n = lcg.pick(12);
@@ -250,24 +224,53 @@ fn generated(leads: &[String], samples: usize) -> Vec<(&'static str, String)> {
 /// them: separator runs and `.\` steps between their names.
 fn own_commands(lead: &str, sep: &str, samples: usize) -> Vec<(&'static str, String)> {
     let key = super::super::claude_project_key(&big_folder::matter_folder(0));
-    let own: Vec<(String, Vec<&str>)> = vec![
-        (format!("run{sep}{OWN_RUN}"), vec!["work", "reply.md"]),
+    let own = own_folders(OWN_RUN, &matter_id(0), &key);
+    own_commands_over(lead, sep, samples, &own)
+}
+
+/// The own folders of a session with run folder `run`, matter `matter` and Claude project
+/// `key`: each as the names down to it and names inside it.
+pub(super) fn own_folders(run: &str, matter: &str, key: &str) -> Vec<(Vec<String>, Vec<String>)> {
+    let names = |list: &[&str]| {
+        list.iter()
+            .map(|name| (*name).to_owned())
+            .collect::<Vec<_>>()
+    };
+    vec![
+        (names(&["run", run]), names(&["work", "reply.md"])),
         (
-            format!("agent-state{sep}{}{sep}notes", matter_id(0)),
-            vec!["sub", "notes.md"],
+            names(&["agent-state", matter, "notes"]),
+            names(&["sub", "notes.md"]),
         ),
         (
-            ["agents", "claude-acp", "home", "plans"].join(sep),
-            vec!["plan.md"],
+            names(&["agents", "claude-acp", "home", "plans"]),
+            names(&["plan.md"]),
         ),
         (
-            format!("agents{sep}claude-acp{sep}home{sep}projects{sep}{key}{sep}0193-session"),
-            vec!["tool-results", "r.txt"],
+            names(&[
+                "agents",
+                "claude-acp",
+                "home",
+                "projects",
+                key,
+                "0193-session",
+            ]),
+            names(&["tool-results", "r.txt"]),
         ),
-    ];
+    ]
+}
+
+/// [`own_commands`] for `own` ([`own_folders`]).
+pub(super) fn own_commands_over(
+    lead: &str,
+    sep: &str,
+    samples: usize,
+    own: &[(Vec<String>, Vec<String>)],
+) -> Vec<(&'static str, String)> {
     let mut lcg = Lcg(0x0b5e);
     let mut out = Vec::new();
-    for (folder, inside) in &own {
+    for (above, inside) in own {
+        let folder = above.join(sep);
         for _ in 0..samples {
             let mut path = format!("{lead}{sep}{folder}");
             for name in inside {
@@ -287,7 +290,7 @@ fn own_commands(lead: &str, sep: &str, samples: usize) -> Vec<(&'static str, Str
 }
 
 /// The own separator of a lead: `/` for the forward forms, `\\` for the escaped one, else `\`.
-fn lead_sep(lead: &str) -> &'static str {
+pub(super) fn lead_sep(lead: &str) -> &'static str {
     if lead.starts_with(r"C:\\") {
         r"\\"
     } else if lead.contains('/') || lead.starts_with("$LOCALAPPDATA") {
@@ -397,6 +400,8 @@ fn a_configured_folders_spellings_are_denied_and_its_residuals_listed() {
         denied.push(("Bash", example.to_owned()));
         denied.push(("PowerShell", example.to_owned()));
     }
+    // Git Bash's `/d/…` is Bash's alone: PowerShell reads it as a folder of the current drive.
+    denied.retain(|(tool, command)| *tool == "Bash" || !command.to_lowercase().contains("/d/"));
     for (tool, command) in &denied {
         assert!(rules.denies(tool, command), "{tool} passes: {command:?}");
     }
