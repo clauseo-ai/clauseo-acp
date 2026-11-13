@@ -52,9 +52,7 @@ impl KeyRetry {
         let key = hook
             .get(OsStr::new(KEY_VAR))
             .is_some_and(|value| !value.is_empty());
-        let own = login.is_some_and(|checked| {
-            checked.link == Seen::Answered(LoginLink::Own) && !treated_as_shared(checked.shared)
-        });
+        let own = own_login(login);
         Self {
             left: (key && own).then(|| Rc::new(Cell::new(true))),
             stopped: None,
@@ -122,4 +120,14 @@ pub(super) fn for_call(actor: &mut Actor, thread: ThreadId) -> KeyRetry {
         .and_then(|agent| agent.codex.as_ref())
         .map(|codex| codex.key_retry.clone())
         .unwrap_or_default()
+}
+
+/// Whether a launch's sign-in check (`login`) answered that the home's login is Clauseo's own
+/// and is not the lawyer's file (the guard's `shared`, `Unknown` counting as shared): the key
+/// retry's rule, and the offline probe's for asking `chatgpt.com` alone
+/// (`offline/probe/service.rs`).
+pub(super) fn own_login(login: Option<Checked>) -> bool {
+    login.is_some_and(|checked| {
+        checked.link == Seen::Answered(LoginLink::Own) && !treated_as_shared(checked.shared)
+    })
 }

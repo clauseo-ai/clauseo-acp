@@ -104,6 +104,9 @@ pub(super) struct Agent {
     pub(super) preparing: bool,
     /// What a Codex agent's launch recorded; `None` for any other agent.
     pub(super) codex: Option<CodexAgent>,
+    /// The service and route the host's offline probe asks, from its launch's final environment
+    /// (`offline/probe/service.rs`); `None` for an agent of no known kind.
+    pub(super) probe: Option<super::offline::probe::Target>,
     /// The programs of the MCP servers its session was given: a cancelled turn's sweep leaves
     /// a process running one of them (`agent/leftovers.rs`).
     pub(super) mcp_commands: Vec<PathBuf>,
@@ -162,9 +165,6 @@ pub(super) struct CodexAgent {
     pub(super) guard: bool,
     /// Its one `authenticate` with its key (`key_retry.rs`).
     pub(super) key_retry: KeyRetry,
-    /// Its launch passed a key (`CODEX_API_KEY`, set and not empty): the host's offline probe
-    /// asks `api.openai.com` then, `chatgpt.com` (a `ChatGPT` login's) otherwise.
-    pub(super) api_key: bool,
 }
 
 /// Runs `waiting` once `thread`'s agent has a session, launching the agent first.
@@ -234,7 +234,7 @@ pub(super) fn launch_now(
         tracing::info!(%matter, forced_ask, "Claude runs in forced ask: the matter folder is unprotected");
     }
     let mut tree = None;
-    let (link, folder, codex, plan_notes, matter_spellings, claude_home, fence_vars) =
+    let (link, folder, codex, plan_notes, matter_spellings, claude_home, fence_vars, probe) =
         match launch(actor, thread, prepared, &mut tree) {
             Ok(launched) => launched,
             Err(error) => {
@@ -280,6 +280,7 @@ pub(super) fn launch_now(
         replayed: Vec::new(),
         preparing: false,
         codex,
+        probe,
         mcp_commands: Vec::new(),
         forced_ask,
         folder_check: prepared_folder,

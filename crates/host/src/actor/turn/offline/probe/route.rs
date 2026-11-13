@@ -1,5 +1,5 @@
-//! The probe's network side: one try at the agent's service within a cap, as the egress proxy
-//! would route it (decision 0039).
+//! The probe's network side: one try at the agent's service within a cap, by the route the
+//! agent's launch gave it (`service.rs`).
 //! - Through a proxy, to an `https` service: `CONNECT host:port` with `Host` and no credentials
 //!   (as the sandbox's `ask_upstream` sends it), then the answer's head within the cap. 200 goes
 //!   on to the client hello; 407 counts as reached; any other status, no head, garbage or a close
@@ -7,9 +7,9 @@
 //! - Straight to an `https` service: the TCP connection, then the client hello.
 //! - The client hello is rustls's own (SNI the service's name, an empty root store), written
 //!   once; the first 5 bytes back decide: a handshake record (`0x16`, version `0x03`) is
-//!   reached, anything else is not. The server's bytes are never fed to rustls and no
-//!   certificate is checked, so a firm's TLS-inspecting proxy counts as reached; nothing but the
-//!   hello is ever sent.
+//!   reached, anything else (a hello that could not be written included) is not. The server's
+//!   bytes are never fed to rustls and no certificate is checked, so a firm's TLS-inspecting
+//!   proxy counts as reached; nothing but the hello is ever sent.
 //! - A plain `http` service: the TCP connection only (to the proxy or the host).
 
 use std::io::{ErrorKind, Read as _, Write as _};
@@ -17,10 +17,10 @@ use std::net::{SocketAddr, TcpStream, ToSocketAddrs as _};
 use std::sync::Arc;
 use std::time::Duration;
 
-use clauseo_sandbox::proxy::{Route, Upstream, upstream_for};
+use clauseo_sandbox::proxy::Route;
 use url::{Host, Url};
 
-use super::{Reach, ReachClass, Via};
+use super::{Reach, ReachClass, Service, Via};
 use crate::clock::{Clock as _, SystemClock};
 
 /// The most of a `CONNECT` answer's head read.
@@ -29,9 +29,31 @@ const HEAD_MAX: usize = 8 * 1024;
 /// A TLS handshake record's content type.
 const HANDSHAKE: u8 = 0x16;
 
-/// The real probe of `url`: its route, then [`probe_route`].
-pub(super) fn probe(url: &Url, cap: Duration) -> Reach {
-    probe_route(upstream_for(&Upstream::System, url).ok(), url, cap)
+/// The real probe of a launch's `services`, each by its route, side by side within `cap`: the
+/// first that got through, else the first's miss.
+pub(super) fn probe_any(services: &[Service], cap: Duration) -> Reach {
+    let probe = |(url, route): &Service| probe_route(Some(route.clone()), url, cap);
+    let reaches: Vec<Reach> = match services {
+        [] => return Reach::of(ReachClass::NoService),
+        [one] => vec![probe(one)],
+        several => std::thread::scope(|scope| {
+            // Every try starts before the first is waited on.
+            let mut tries = Vec::with_capacity(several.len());
+            for service in several {
+                tries.push(scope.spawn(move || probe(service)));
+            }
+            tries
+                .into_iter()
+                .map(|try_| try_.join().unwrap_or(Reach::of(ReachClass::ConnectTimeout)))
+                .collect()
+        }),
+    };
+    let first = reaches.first().copied();
+    reaches
+        .into_iter()
+        .find(|reach| reach.reached())
+        .or(first)
+        .unwrap_or(Reach::of(ReachClass::NoService))
 }
 
 /// One try at `url` by `route` (`None`: no route could be read, so straight to the host), all
@@ -119,7 +141,9 @@ fn bare_host(url: &Url) -> Option<String> {
 }
 
 /// A TCP connection to `host:port` within the deadline. The name is resolved on a thread of
-/// its own, left to end there when it runs past the cap.
+/// its own, left to end there when it runs past the cap: the probe stops waiting at the cap, but
+/// the OS's lookup may run on in that thread a while longer (its own resolver timeout), holding
+/// nothing of the probe's; it ends by itself and its answer goes nowhere.
 fn connect(host: &str, port: u16, deadline: &Deadline) -> Result<TcpStream, ReachClass> {
     let left = deadline.left().ok_or(ReachClass::ConnectTimeout)?;
     let addrs = resolve(host, port, left)?;
@@ -192,8 +216,13 @@ fn hello(stream: &mut TcpStream, host: &str, deadline: &Deadline) -> ReachClass 
     let Some(hello) = client_hello(host) else {
         return ReachClass::TlsOther;
     };
-    if write_all(stream, &hello, deadline).is_none() {
+    if deadline.left().is_none() {
         return ReachClass::TlsSilent;
+    }
+    // A hello that could not be written (the peer closed or reset): something other than a
+    // handshake came back.
+    if write_all(stream, &hello, deadline).is_none() {
+        return ReachClass::TlsOther;
     }
     let mut header = [0_u8; 5];
     let mut got = 0;
@@ -213,6 +242,17 @@ fn hello(stream: &mut TcpStream, host: &str, deadline: &Deadline) -> ReachClass 
     } else {
         ReachClass::TlsOther
     }
+}
+
+/// [`hello`] on `stream` for `host` within `cap`.
+#[cfg(test)]
+pub(super) fn hello_within(stream: &mut TcpStream, host: &str, cap: Duration) -> ReachClass {
+    let clock = SystemClock;
+    let deadline = Deadline {
+        clock,
+        end: clock.now().mono.saturating_add(cap),
+    };
+    hello(stream, host, &deadline)
 }
 
 /// rustls's client hello for `host` (SNI for a name, none for an IP literal), as bytes.

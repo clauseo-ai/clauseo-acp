@@ -57,6 +57,19 @@ fn defaults_and_setters() {
     assert_eq!(parts.clock.now().wall, Timestamp::new(10).unwrap());
 }
 
+/// D-050: the quiet watch (the probe after 30 s of silence, the 5-minute backstop) is on in a
+/// host as desktop builds it; only the unit tests (`TurnPath::new`) and the host suite
+/// (`with_quiet_watch(false)`) turn it off.
+#[test]
+fn the_quiet_watch_is_on_unless_turned_off() {
+    let launcher = || Arc::new(PassthroughLauncher::new(SpawnOptions::new()));
+    let parts = ConfigParts::from(HostConfig::new(effective(), launcher()));
+    assert!(parts.idle.quiet_watch);
+    assert!(super::IdleStop::default().quiet_watch);
+    let off = ConfigParts::from(HostConfig::new(effective(), launcher()).with_quiet_watch(false));
+    assert!(!off.idle.quiet_watch);
+}
+
 #[test]
 fn config_moves_to_another_thread() {
     fn is_send<T: Send>() {}
