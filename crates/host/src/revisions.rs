@@ -69,7 +69,8 @@ pub(crate) enum Act {
     /// Accept or reject `ids` in the file whose bytes are `version`, and write it.
     Decide {
         version: DocVersion,
-        ids: Vec<u32>,
+        /// The ids, or [`Ids::All`].
+        ids: Ids,
         decision: RevisionDecision,
         /// The `outside-edits` checkpoint's id, used if the folder changed.
         outside_edits: CheckpointId,
@@ -77,6 +78,15 @@ pub(crate) enum Act {
         checkpoint: CheckpointId,
         at: Timestamp,
     },
+}
+
+/// Which changes a decision names.
+#[derive(Debug, Clone)]
+pub(crate) enum Ids {
+    /// These ids.
+    These(Vec<u32>),
+    /// Every change in the file, read from the copy once its version is checked.
+    All,
 }
 
 /// A [`RevisionsJob`]'s answer.
@@ -141,12 +151,13 @@ fn list(matter: &Matter, job: &RevisionsJob) -> Result<RevisionList, Error> {
         ],
         false,
     )?;
-    let (revisions, truncated) = parse::revisions(&check, &view)?;
+    let (revisions, truncated, total) = parse::revisions(&check, &view)?;
     Ok(RevisionList {
         path: job.path.clone(),
         version: copy.version,
         revisions,
         truncated,
+        total,
     })
 }
 
@@ -175,11 +186,32 @@ fn decide(matter: &mut Matter, job: &RevisionsJob) -> Result<Decided, Error> {
             paths: vec![job.path.clone()],
         }));
     }
+    let run = stetdoc::Runner::new(&job.stetdoc, &job.clock, &job.work);
+    let all;
+    let ids = match ids {
+        Ids::These(ids) => ids,
+        Ids::All => {
+            // The copy's bytes are `version`'s, so these are the changes that list was read from,
+            // past its cut too; stetdoc is still given each id, never its own `all`.
+            let check = run.json(
+                &["check".into(), "--json".into(), copy.read.clone().into()],
+                false,
+            )?;
+            all = parse::all_ids(&check)?;
+            if all.is_empty() {
+                return Err(Error::refused(
+                    ErrorCode::CommandInvalid,
+                    "the file has no tracked changes",
+                ));
+            }
+            &all
+        }
+    };
     let ops = job.work.join("ops.txt");
     write::replace_private_file(&ops, parse::batch(decision, ids).as_bytes())
         .map_err(|err| io_error("write the batch", &err))?;
     let out = job.work.join("out.docx");
-    stetdoc::Runner::new(&job.stetdoc, &job.clock, &job.work).json(
+    run.json(
         &[
             "edit".into(),
             copy.read.clone().into(),

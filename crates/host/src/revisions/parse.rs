@@ -60,17 +60,34 @@ struct View {
     text: String,
 }
 
+/// stetdoc's answer that did not read as expected: `word.edit_failed`.
+fn unreadable(err: &serde_json::Error) -> Error {
+    // The class only: serde's message can quote authors or text (ADR 0047).
+    tracing::warn!(class = ?err.classify(), "stetdoc's revisions did not read");
+    Error::refused(ErrorCode::WordEditFailed, "stetdoc's answer did not read")
+}
+
+/// Every change id `check` names, ascending, however many: what Accept all and Reject all
+/// decide.
+pub(super) fn all_ids(check: &serde_json::Value) -> Result<Vec<u32>, Error> {
+    let check = Check::deserialize(check).map_err(|err| unreadable(&err))?;
+    let mut ids: Vec<u32> = check
+        .existing
+        .into_iter()
+        .flat_map(|by| by.changes.into_iter().flat_map(|change| change.ids))
+        .collect();
+    ids.sort_unstable();
+    ids.dedup();
+    Ok(ids)
+}
+
 /// The revisions `check` and `view` describe, in document order (by block, then id), the first
-/// [`MAX_REVISIONS`], and whether there were more.
+/// [`MAX_REVISIONS`], whether there were more, and how many there are.
 pub(super) fn revisions(
     check: &serde_json::Value,
     view: &serde_json::Value,
-) -> Result<(Vec<Revision>, bool), Error> {
-    let unreadable = |err: serde_json::Error| {
-        // The class only: serde's message can quote authors or text (ADR 0047).
-        tracing::warn!(class = ?err.classify(), "stetdoc's revisions did not read");
-        Error::refused(ErrorCode::WordEditFailed, "stetdoc's answer did not read")
-    };
+) -> Result<(Vec<Revision>, bool, u32), Error> {
+    let unreadable = |err: serde_json::Error| unreadable(&err);
     let check = Check::deserialize(check).map_err(unreadable)?;
     let view = View::deserialize(view).map_err(unreadable)?;
     let texts = &ledger_texts(&view.text);
@@ -100,9 +117,10 @@ pub(super) fn revisions(
     revisions.sort_by(|a, b| {
         block_order(&a.block, &b.block).then_with(|| a.ids.first().cmp(&b.ids.first()))
     });
+    let total = u32::try_from(revisions.len()).unwrap_or(u32::MAX);
     let truncated = revisions.len() > MAX_REVISIONS;
     revisions.truncate(MAX_REVISIONS);
-    Ok((revisions, truncated))
+    Ok((revisions, truncated, total))
 }
 
 /// Each ledger line's text, by every id the line names.

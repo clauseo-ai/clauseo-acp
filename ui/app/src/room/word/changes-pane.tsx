@@ -67,6 +67,7 @@ export function ChangesPane({
       <WordChanges
         file={file}
         changes={s.list?.revisions.map((r) => rowOf(r, s.readAt, zone, lang)) ?? null}
+        total={s.list?.total ?? 0}
         sending={s.sending}
         decided={
           s.last === null
@@ -76,6 +77,7 @@ export function ChangesPane({
         line={line}
         onBack={onBack}
         onDecide={(ids, decision) => revisions.decide(ids, decision)}
+        onDecideAll={(decision) => revisions.decideAll(decision)}
         onUndo={() => void revisions.undo()}
         onRetry={() => revisions.again()}
       />

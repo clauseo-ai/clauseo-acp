@@ -53,7 +53,13 @@ let host: HTMLDivElement | null = null;
 let root: Root | null = null;
 
 type Props = Partial<Parameters<typeof WordChanges>[0]>;
-const on = { onBack: vi.fn(), onDecide: vi.fn(), onUndo: vi.fn(), onRetry: vi.fn() };
+const on = {
+  onBack: vi.fn(),
+  onDecide: vi.fn(),
+  onDecideAll: vi.fn(),
+  onUndo: vi.fn(),
+  onRetry: vi.fn(),
+};
 const panel = (p: Props = {}): ReactNode => (
   <WordChanges
     file="Reply to the bank.docx"
@@ -130,16 +136,17 @@ test("each change with its author, its time, its kind's label and its words; no 
   );
 });
 
-test("Accept and Reject hand the change's ids to the app, Accept all and Reject all every listed change's", async () => {
+test("Accept and Reject hand the change's ids to the app, Accept all and Reject all every change in the file", async () => {
   await mount(panel());
   await click(all(".rd-change")[1]?.querySelector(".rd-accept"));
   expect(on.onDecide).toHaveBeenLastCalledWith([2, 3], "accept");
   await click(all(".rd-change")[0]?.querySelector(".rd-reject"));
   expect(on.onDecide).toHaveBeenLastCalledWith([1], "reject");
   await click(one(".rd-accept-all"));
-  expect(on.onDecide).toHaveBeenLastCalledWith([1, 2, 3, 4, 5, 6], "accept");
+  expect(on.onDecideAll).toHaveBeenLastCalledWith("accept");
   await click(one(".rd-reject-all"));
-  expect(on.onDecide).toHaveBeenLastCalledWith([1, 2, 3, 4, 5, 6], "reject");
+  expect(on.onDecideAll).toHaveBeenLastCalledWith("reject");
+  expect(on.onDecide).toHaveBeenCalledTimes(2);
   await click(one('[data-testid="word-changes-back"]'));
   expect(on.onBack).toHaveBeenCalledTimes(1);
 });
@@ -149,7 +156,23 @@ test("while a decision is on its way every press is held", async () => {
   for (const b of all(".rd-accept, .rd-reject, .rd-accept-all, .rd-reject-all, .rd-undo"))
     await click(b);
   expect(on.onDecide).not.toHaveBeenCalled();
+  expect(on.onDecideAll).not.toHaveBeenCalled();
   expect(on.onUndo).not.toHaveBeenCalled();
+});
+
+test("a list that stops short counts every change and says Accept all and Reject all decide them all", async () => {
+  await mount(panel({ total: 600 }));
+  expect(one(".rd-review-head .rd-review-sub")?.textContent).toBe(
+    "600 changes, each with its author and time, as Word shows them.",
+  );
+  expect(one('[data-testid="word-changes-more"]')?.textContent).toBe(
+    "The first 5 are listed here. Accept all and Reject all decide all 600.",
+  );
+});
+
+test("a whole list says nothing of more", async () => {
+  await mount(panel({ total: 5 }));
+  expect(one('[data-testid="word-changes-more"]')).toBeNull();
 });
 
 test("the latest decision says its time beside Undo, in either language", async () => {

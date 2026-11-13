@@ -1277,7 +1277,8 @@ export type DaySpendView = {
 /**
  *  `HostCommand::DecideRevisions`: accept or reject tracked changes of one Word file. JSON:
  *  `{"decide_revisions": {"matter": "…", "path": "a.docx", "version": "…", "ids": [1, 2],
- *  "decision": "accept"}}`; unknown fields are refused.
+ *  "decision": "accept"}}`, or with `"ids": [], "all": true` for every change of that version
+ *  (Accept all, Reject all); unknown fields are refused.
  */
 export type DecideRevisions = {
 	/**  The matter. */
@@ -1289,10 +1290,16 @@ export type DecideRevisions = {
 	 *  `word.revisions_stale`, and nothing is written.
 	 */
 	version: DocVersion,
-	/**  The change ids to decide: 1 to [`MAX_REVISIONS`], none twice. */
+	/**  The change ids to decide: 1 to [`MAX_REVISIONS`], none twice; none when `all`. */
 	ids: number[],
 	/**  Accept or reject them all. */
 	decision: RevisionDecision,
+	/**
+	 *  Every change the file holds at `version`, past [`MAX_REVISIONS`] too: the host reads
+	 *  them from the same bytes it checked `version` against, so they are the changes that
+	 *  list was read from. `ids` is then empty. Left out when false.
+	 */
+	all?: boolean,
 };
 
 /**  Where new matters go, for `GetDefaultLocation`. */
@@ -5353,6 +5360,8 @@ export type RevisionList = {
 	 *  first [`MAX_REVISIONS`].
 	 */
 	truncated: boolean,
+	/**  How many changes the file holds, `revisions` and any past the cut. */
+	total: number,
 };
 
 /**  What a run of a blackline paragraph is. */

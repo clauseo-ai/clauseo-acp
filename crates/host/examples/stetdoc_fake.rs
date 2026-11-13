@@ -2,7 +2,8 @@
 //! (`tests/host/revisions.rs`). The host starts it with a clean environment, so it reads what to
 //! do from files beside itself, which each test writes into a folder of its own:
 //!
-//! - `check.json` and `view.json`: what `check` and `view` print.
+//! - `check.json` and `view.json`: what `check` and `view` print. `check-decided.json`, if
+//!   there: what `check` prints for a file an `edit` here wrote (it holds a batch).
 //! - `edit.txt`: how `edit` answers. Missing or `ok`: it writes `-o`'s file as the input's bytes
 //!   followed by the `--ops` batch, and prints `{}`. `huge`: as `ok`, with the file grown
 //!   (sparse) past the matters' size cap, so the host fails to store it. `hang`: it never ends.
@@ -30,7 +31,18 @@ fn main() -> ExitCode {
         return ExitCode::from(91);
     }
     match command {
-        "check" => print(&dir.join("check.json")),
+        "check" => {
+            let decided = dir.join("check-decided.json");
+            let written = args
+                .get(2)
+                .and_then(|input| std::fs::read(input).ok())
+                .is_some_and(|bytes| bytes.windows(4).any(|w| w == b"\nids"));
+            if written && decided.exists() {
+                print(&decided)
+            } else {
+                print(&dir.join("check.json"))
+            }
+        }
         "view" => print(&dir.join("view.json")),
         "edit" => edit(&dir, &args),
         _ => ExitCode::from(2),
