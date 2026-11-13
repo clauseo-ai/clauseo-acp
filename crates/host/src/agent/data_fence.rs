@@ -55,7 +55,7 @@ use crate::network_paths::{FOLD_CASE, NetEnv, fold_name, refused_windows_name, t
 pub(crate) use health::DataFenceHealth;
 pub(crate) use input::{candidates, candidates_roots, candidates_words, command_names};
 pub(crate) use launch::{LaunchDeny, claude_project_key, claude_projects, launch_deny};
-pub(crate) use shell_deny::windows_shell_deny_rules;
+pub(crate) use shell_deny::{windows_shell_deny_rules, windows_shell_deny_rules_without_variables};
 pub(crate) use variables::launch_vars;
 
 /// What of `<data>` only Clauseo uses, named whether or not it exists at the launch (the
@@ -83,7 +83,12 @@ pub(crate) use variables::launch_vars;
 /// runtime ([`READ_ONLY`]); the launch denies every other entry there that exists. And every
 /// session's Claude settings file (`agent::launch_settings`), its own too: Claude Code reads
 /// it itself at its start, so its tools never need it, and it holds every session's rules.
-pub(crate) const DENIED: [&str; 40] = [
+/// And what Claude Code 2.1.293 loads from its home into every later session, whether or not it
+/// exists yet: the user's `CLAUDE.md` and `rules`, its subagents, slash commands, output
+/// styles, workflows and mods (`dev-mods`, function hooks it runs), `loop.md`, its key bindings,
+/// its remote and global settings (`remote-settings.json`, `.config.json`) and the CA bundle it
+/// trusts (`ccr`). A name planted there would act in every matter.
+pub(crate) const DENIED: [&str; 53] = [
     "run/*/relay-token",
     "run/*/agent-browser/config.json",
     "skill-packs/**",
@@ -117,6 +122,19 @@ pub(crate) const DENIED: [&str; 40] = [
     "agents/claude-acp/home/file-history/**",
     "agents/claude-acp/home/todos/**",
     "agents/claude-acp/home/shell-snapshots/**",
+    "agents/claude-acp/home/CLAUDE.md",
+    "agents/claude-acp/home/rules/**",
+    "agents/claude-acp/home/agents/**",
+    "agents/claude-acp/home/commands/**",
+    "agents/claude-acp/home/output-styles/**",
+    "agents/claude-acp/home/workflows/**",
+    "agents/claude-acp/home/dev-mods/**",
+    "agents/claude-acp/home/loop.md",
+    "agents/claude-acp/home/keybindings.json",
+    "agents/claude-acp/home/remote-settings.json",
+    "agents/claude-acp/home/.config.json",
+    "agents/claude-acp/home/ccr/**",
+    "agents/claude-acp/home/memory/**",
     "agents/runtime/node-v*/**",
     "agents/runtime/.tmp-*/**",
     "agents/downloads/**",

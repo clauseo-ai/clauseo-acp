@@ -267,8 +267,14 @@ pub(crate) fn claude_options(options: &mut Map<String, Value>, keys: &ClaudeKeys
     options.insert("settings".to_owned(), Value::Object(settings));
 }
 
+/// The size past which a launch's settings shed the data folder's variable forms from its shell
+/// rules (`data_fence::windows_shell_deny_rules_without_variables`): about 1.8 MiB, under the
+/// 2 MiB settings file Claude Code reads (`agent::launch_settings`), which refuses a larger one.
+pub(crate) const SHED_AT: usize = 1_887_436;
+
 /// `permissions.deny` gains the data folder's rules (`agent/data_fence.rs`; on Windows also its
-/// `Bash` and `PowerShell` rules, `data_fence::windows_shell_deny_rules`), and
+/// `Bash` and `PowerShell` rules, `data_fence::windows_shell_deny_rules`, without the variable
+/// forms when all of them would take the settings past [`SHED_AT`]), and
 /// `permissions.allow` the Read of the built-in skills' folder, each after any the hook put
 /// there. A hook value at `permissions`, `deny` or `allow` of another type is replaced. With no
 /// spelling (a unit test's keys) nothing changes.
@@ -286,12 +292,24 @@ fn deny_data_folder(
     }
     if cfg!(windows) {
         let var = |name: &str| std::env::var_os(name);
+        let mut shell = crate::agent::data_fence::windows_shell_deny_rules(data, &var);
+        let spent = json_len(&*settings) + json_len(&deny) + json_len(&shell);
+        if spent > SHED_AT {
+            shell =
+                crate::agent::data_fence::windows_shell_deny_rules_without_variables(data, &var);
+            tracing::warn!(
+                settings_bytes = spent,
+                budget = SHED_AT,
+                shed = "vars",
+                "Claude's settings outgrew their budget; the data folder's variable forms are shed"
+            );
+        }
         // A set, not `push_new`: a busy data folder gives a few thousand of these.
         let mut known: std::collections::HashSet<String> = deny
             .iter()
             .filter_map(|rule| rule.as_str().map(str::to_owned))
             .collect();
-        for rule in crate::agent::data_fence::windows_shell_deny_rules(data, &var) {
+        for rule in shell {
             if known.insert(rule.clone()) {
                 deny.push(Value::String(rule));
             }
@@ -304,6 +322,11 @@ fn deny_data_folder(
     }
     permissions.insert("allow".to_owned(), Value::Array(allow));
     settings.insert("permissions".to_owned(), Value::Object(permissions));
+}
+
+/// `value`'s length as JSON (0 if it can't be written, which a map of JSON values never is).
+fn json_len(value: &impl serde::Serialize) -> usize {
+    serde_json::to_string(value).map_or(0, |text| text.len())
 }
 
 /// `permissions.ask` gains agent-browser's allowed commands that still ask

@@ -18,33 +18,146 @@ pub(super) fn env(name: &str) -> Option<OsString> {
     }
 }
 
-/// Whether `rule` matches `command` as Claude Code 2.1.293's `hQ` does: `\*` a literal `*`,
-/// `\\` a literal `\`, any other `*` any text; PowerShell rules in any case.
-pub(super) fn matches(rule: &str, command: &str) -> bool {
-    let (tool, content) = rule.split_once('(').unwrap();
-    let content = content.strip_suffix(')').unwrap();
-    let insensitive = tool == "PowerShell";
-    let mut parts: Vec<String> = vec![String::new()];
-    let mut chars = content.chars().peekable();
-    while let Some(c) = chars.next() {
-        match c {
-            '\\' if matches!(chars.peek(), Some('*' | '\\')) => {
-                parts.last_mut().unwrap().push(chars.next().unwrap());
+/// A Bash or PowerShell rule as Claude Code 2.1.293 reads it, ported from the pinned binary
+/// (`@anthropic-ai/claude-agent-sdk-linux-x64` 0.3.293, `package/claude`; `strings` shows the
+/// bundle's JS):
+/// - `lYe`: `Tool(content)` splits at the first `(` and the last `)`, which must end the rule;
+/// - `jn`: an empty content or `*` is the whole tool; otherwise
+///   `Lho(e) = Nho(e).replaceAll("\\\\", "\\")` with
+///   `Nho(e) = e.replaceAll("\\(", "(").replaceAll("\\)", ")")`: `\(`, `\)` are parentheses and
+///   every `\\` becomes `\`, before any matching;
+/// - `hQ(pattern, command, caseInsensitive, true)` (Bash through `GM`, case-sensitive; PowerShell
+///   through `yt`, in any case): the pattern trimmed, runs of spaces and tabs in both made one
+///   space; `\*` a literal `*`, `\\` a literal `\`, any other `\` itself, every other `*` any text
+///   (`.*`, newlines included); a `/**/` a globstar; a pattern ending in ` *` with no other `*`
+///   also matches without the ` …`; the whole command matched (`^…$`).
+///
+/// The pinned binary itself, driven through a local stand-in for the Messages API
+/// (`scripts/claude-rule-probe`), agreed with this port on every case it was given.
+pub(super) struct Rule {
+    tool: String,
+    insensitive: bool,
+    /// The literal text between the pattern's `*`s (folded when `insensitive`).
+    parts: Vec<String>,
+    /// The pattern ends in ` *` and has no other `*`.
+    optional_tail: bool,
+}
+
+impl Rule {
+    pub(super) fn new(rule: &str) -> Self {
+        // `lYe`.
+        let open = rule.find('(').unwrap();
+        let close = rule.rfind(')').unwrap();
+        assert_eq!(close, rule.len() - 1, "{rule}");
+        let tool = rule.get(..open).unwrap().to_owned();
+        let raw = rule.get(open + 1..close).unwrap();
+        assert!(!raw.is_empty() && raw != "*", "a whole-tool rule: {rule}");
+        // `Lho`.
+        let content = raw
+            .replace("\\(", "(")
+            .replace("\\)", ")")
+            .replace("\\\\", "\\");
+        assert!(!content.contains('\0'));
+        let insensitive = tool == "PowerShell";
+        let pattern = squeeze(content.trim());
+        let mut parts = vec![String::new()];
+        let mut wildcards = 0;
+        let mut chars = pattern.chars().peekable();
+        while let Some(c) = chars.next() {
+            match c {
+                '\\' if matches!(chars.peek(), Some('*' | '\\')) => {
+                    parts.last_mut().unwrap().push(chars.next().unwrap());
+                }
+                '*' => {
+                    wildcards += 1;
+                    parts.push(String::new());
+                }
+                _ => parts.last_mut().unwrap().push(c),
             }
-            '*' => parts.push(String::new()),
-            _ => parts.last_mut().unwrap().push(c),
+        }
+        // No rule here may hold a globstar, which `hQ` reads otherwise.
+        assert!(
+            !parts
+                .windows(3)
+                .any(|w| w[0].ends_with('/') && w[1].is_empty() && w[2].starts_with('/')),
+            "a globstar: {rule}"
+        );
+        let optional_tail = wildcards == 1
+            && parts.last().is_some_and(String::is_empty)
+            && parts.first().is_some_and(|first| first.ends_with(' '));
+        let parts = parts
+            .iter()
+            .map(|part| {
+                if insensitive {
+                    part.to_lowercase()
+                } else {
+                    part.clone()
+                }
+            })
+            .collect();
+        Self {
+            tool,
+            insensitive,
+            parts,
+            optional_tail,
         }
     }
-    let fold = |s: &str| {
-        if insensitive {
-            s.to_lowercase()
-        } else {
-            s.to_owned()
+
+    /// The tool the rule is for.
+    pub(super) fn tool(&self) -> &str {
+        &self.tool
+    }
+
+    /// Whether this rule matches `command` for `tool`.
+    pub(super) fn hits(&self, tool: &str, command: &str) -> bool {
+        self.tool == tool && self.hits_prepared(&prepare(command, self.insensitive))
+    }
+
+    /// Whether this rule matches a command already passed through [`prepare`] for it.
+    pub(super) fn hits_prepared(&self, text: &str) -> bool {
+        if self.optional_tail {
+            let head = self.parts[0].trim_end_matches(' ');
+            if text == head {
+                return true;
+            }
         }
+        fits(&self.parts, text)
+    }
+}
+
+/// `command` as `hQ` compares it: spaces squeezed ([`squeeze`]), folded when `insensitive`.
+pub(super) fn prepare(command: &str, insensitive: bool) -> String {
+    let command = squeeze(command);
+    if insensitive {
+        command.to_lowercase()
+    } else {
+        command
+    }
+}
+
+/// `text` with each run of spaces and tabs made one space, as `hQ` does to both sides.
+fn squeeze(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut blank = false;
+    for c in text.chars() {
+        if c == ' ' || c == '\t' {
+            if !blank {
+                out.push(' ');
+            }
+            blank = true;
+        } else {
+            out.push(c);
+            blank = false;
+        }
+    }
+    out
+}
+
+/// Whether `parts` (literal texts with any text between them) match all of `text`.
+pub(super) fn fits(parts: &[String], text: &str) -> bool {
+    let Some((first, rest)) = parts.split_first() else {
+        return false;
     };
-    let text = fold(command);
-    let parts: Vec<String> = parts.iter().map(|p| fold(p)).collect();
-    let (first, rest) = parts.split_first().unwrap();
     let Some(mut tail) = text.strip_prefix(first.as_str()) else {
         return false;
     };
@@ -58,6 +171,12 @@ pub(super) fn matches(rule: &str, command: &str) -> bool {
         tail = after;
     }
     tail.ends_with(last.as_str())
+}
+
+/// Whether `rule` matches `command` as Claude Code 2.1.293 reads it ([`Rule`]).
+pub(super) fn matches(rule: &str, command: &str) -> bool {
+    let compiled = Rule::new(rule);
+    compiled.hits(compiled.tool(), command)
 }
 
 /// Whether any of `rules` for `tool` matches `command`.
@@ -147,32 +266,42 @@ fn a_configured_folder_gets_its_paths_and_the_variable_it_sits_under() {
         r#"cat "${APPDATA}/Firm Data/clauseo/settings.json""#,
         r#"ls "$APPDATA/Firm Data/clauseo""#,
     ] {
-        let both = ["Bash", "PowerShell"];
         // The escaped form's space is `\ `, a form no rule spells: that one is the residual.
         if command.contains(r"Firm\ Data") {
             assert!(!denied_by(&rules, "Bash", command), "{command}");
             continue;
         }
-        for tool in both {
+        // Each form is in the rules of the shells that can write it: Git Bash's `/c/…` and
+        // `$VAR` Bash's, `$env:VAR` PowerShell's.
+        let tools: &[&str] = if command.contains("$env:") {
+            &["PowerShell"]
+        } else if command.contains("/c/") || command.contains("$APPDATA") || command.contains("${")
+        {
+            &["Bash"]
+        } else {
+            &["Bash", "PowerShell"]
+        };
+        for tool in tools {
             assert!(denied_by(&rules, tool, command), "{tool}: {command}");
         }
     }
     assert!(!rules.iter().any(|r| r.contains("ai.clauseo.desktop")));
     assert!(!rules.iter().any(|r| r.contains("LOCALAPPDATA")));
-    assert_eq!(rules.len() % 2, 0, "each rule once per shell: {rules:#?}");
 }
 
 #[test]
 fn a_share_path_and_a_star_are_escaped() {
     let fixed = |path: &str| LaunchDeny::fixed(vec![PathBuf::from(path)]);
+    // Written for Claude Code's parser and matcher: a `\` before a letter as itself, a run of k
+    // backslashes the matcher reads as 2k − 1 (`render`).
     let rules = windows_shell_deny_rules(&fixed(r"\\?\C:\d"), &|_| None);
     assert!(
-        rules.contains(&r"Bash(*C:\\d\\settings.json*)".to_owned()),
+        rules.contains(&r"Bash(*C:\d\settings.json*)".to_owned()),
         "{rules:#?}"
     );
     let rules = windows_shell_deny_rules(&fixed(r"\\srv\share\d"), &|_| None);
     assert!(
-        rules.contains(&r"Bash(*\\\\srv\\share\\d\\settings.json*)".to_owned()),
+        rules.contains(&r"Bash(*\\\\\srv\share\d\settings.json*)".to_owned()),
         "{rules:#?}"
     );
     assert!(denied_by(
@@ -180,27 +309,71 @@ fn a_share_path_and_a_star_are_escaped() {
         "Bash",
         r"type \\srv\share\d\settings.json"
     ));
+    assert!(!denied_by(
+        &rules,
+        "Bash",
+        r"type \srv\share\d\settings.json"
+    ));
     // A target's pattern `*` stays Claude's `*`; a name's escaped one is a literal `\*`.
     let mut deny = fixed(r"C:\d");
     deny.targets = vec![r"made\*later.txt".to_owned()];
     let rules = windows_shell_deny_rules(&deny, &|_| None);
     assert!(
-        rules.contains(&r"Bash(*C:\\d\\made\*later.txt*)".to_owned()),
+        rules.contains(&r"Bash(*C:\d\made\*later.txt*)".to_owned()),
         "{rules:#?}"
     );
+    assert!(denied_by(&rules, "Bash", r"type C:\d\made*later.txt"));
+    assert!(!denied_by(&rules, "Bash", r"type C:\d\made-or-later.txt"));
     let deny = fixed(r"C:\d");
     let rules = windows_shell_deny_rules(&deny, &|_| None);
     assert!(
-        rules.contains(&r"Bash(*C:\\d\\state.sqlite*)".to_owned()),
+        rules.contains(&r"Bash(*C:\d\state.sqlite*)".to_owned()),
         "{rules:#?}"
     );
     assert!(
-        rules.contains(&r"Bash(*C:\\d\\run*\\relay-token*)".to_owned()),
+        rules.contains(&r"Bash(*C:\d\run*\relay-token*)".to_owned()),
         "{rules:#?}"
     );
+    assert!(!denied_by(
+        &rules,
+        "Bash",
+        r"type C:\d\run\own\work\reply.md"
+    ));
     // No rule holds a globstar (`/**/`), which Claude Code reads otherwise.
     assert!(
         !rules.iter().any(|rule| rule.contains("/**/")),
         "{rules:#?}"
     );
+}
+
+/// The port of Claude Code's reading (`Rule`) on the cases checked against the pinned binary
+/// (`scripts/claude-rule-probe`, PR #1035): the settings rule as written, the command, denied.
+#[test]
+fn the_port_reads_rules_as_the_binary_does() {
+    for (rule, command, denied) in [
+        // A `\` before a letter is itself.
+        (r"Bash(*C:\Users*)", r"cat C:\Users\x", true),
+        (r"Bash(*C:\Users*)", "cat C:Users", false),
+        // `\\` is one `\` to the parser: `\\*` reads as a literal `*`.
+        (r"Bash(*abc\\*)", r"cat abc\x", false),
+        (r"Bash(*ghi\\jkl*)", r"cat ghi\jkl", true),
+        // `\*` is a literal `*`.
+        (r"Bash(*mno\**)", "cat mno*x", true),
+        (r"Bash(*mno\**)", r"cat mno\x", false),
+        // `\\\*` is `\\*` to the matcher: a backslash, then any text.
+        (r"Bash(*abc\\\*)", r"cat abc\x", true),
+        (r"Bash(*abc\\\*)", "cat abcx", false),
+        // `\\\**` (#1035's blanket bug) is a backslash, then any text.
+        (r"Bash(*def\\\**)", r"cat def\x", true),
+        // Five before a `*`: a backslash, then a literal `*`.
+        (r"Bash(*desktop\\\\\**)", r"cat desktop\*x", true),
+        (r"Bash(*desktop\\\\\**)", r"cat desktop\x", false),
+        (r"Bash(*pqr\\\\\stu*)", r"cat pqr\\stu", true),
+        (r"Bash(*pqr\\\\\stu*)", r"cat pqr\stu", false),
+        // PowerShell rules match in any case, Bash rules as written.
+        (r"PowerShell(*Desktop\x*)", r"Get-Content desktop\X", true),
+        (r"Bash(*Desktop\x*)", r"cat desktop\X", false),
+    ] {
+        assert_eq!(matches(rule, command), denied, "{rule} on {command}");
+    }
 }

@@ -1,0 +1,83 @@
+{
+ "settings": {
+  "permissions": {
+   "deny": [
+    "Bash(*C:\\Users*)",
+    "Bash(*abc\\\\*)",
+    "Bash(*mno\\**)",
+    "Bash(*pqr\\\\\\*)",
+    "Bash(*def\\\\\\**)",
+    "Bash(*desktop\\\\\\\\\\**)",
+    "PowerShell(*C:\\Users*)"
+   ]
+  }
+ },
+ "cases": [
+  {
+   "name": "a backslash before a letter is itself",
+   "tool": "Bash",
+   "command": "cat C:\\Users\\x",
+   "denied": true
+  },
+  {
+   "name": "... so it does not match without it",
+   "tool": "Bash",
+   "command": "cat C:Users",
+   "denied": false
+  },
+  {
+   "name": "\\\\ is one backslash to the parser: \\\\* is a literal star",
+   "tool": "Bash",
+   "command": "cat abc\\x",
+   "denied": false
+  },
+  {
+   "name": "\\* is a literal star",
+   "tool": "Bash",
+   "command": "cat mno*x",
+   "denied": true
+  },
+  {
+   "name": "... not any text",
+   "tool": "Bash",
+   "command": "cat mno\\x",
+   "denied": false
+  },
+  {
+   "name": "\\\\\\* is a backslash, then any text",
+   "tool": "Bash",
+   "command": "cat pqr\\x",
+   "denied": true
+  },
+  {
+   "name": "... and needs the backslash",
+   "tool": "Bash",
+   "command": "cat pqrx",
+   "denied": false
+  },
+  {
+   "name": "the first #1035 build's \\\\\\** is a backslash, then any text",
+   "tool": "Bash",
+   "command": "cat def\\anything",
+   "denied": true
+  },
+  {
+   "name": "five before * are a backslash and a literal star",
+   "tool": "Bash",
+   "command": "cat desktop\\*x",
+   "denied": true
+  },
+  {
+   "name": "... not a backslash and any text",
+   "tool": "Bash",
+   "command": "cat desktop\\x",
+   "denied": false
+  },
+  {
+   "name": "PowerShell in any case (no PowerShell tool off Windows)",
+   "tool": "PowerShell",
+   "command": "Get-Content C:\\USERS\\x",
+   "denied": true
+  }
+ ]
+}

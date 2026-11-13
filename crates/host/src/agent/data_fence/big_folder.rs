@@ -49,34 +49,7 @@ pub(crate) fn big(root: &Path) -> Big {
 /// `0..project_count`), at least one of each for the session's own.
 pub(crate) fn big_with(root: &Path, matters: usize, project_count: usize) -> Big {
     let data = root.join("data");
-    let mut files: Vec<String> = [
-        "settings.json",
-        "state.sqlite",
-        "state.sqlite-wal",
-        "search.sqlite",
-        "update.json",
-        "logs/host.log",
-        "counts/2026-11.json",
-        "tools/agent-browser/agent-browser",
-        "profile/claude-plugin/skills/legal-drafting/SKILL.md",
-        "agents/codex-acp/home/auth.json",
-        "agents/claude-acp/install/package.json",
-        "agents/claude-acp/login-source",
-        "agents/claude-acp/home/.credentials.json",
-        "agents/claude-acp/home/.claude.json",
-        "agents/claude-acp/home/settings.json",
-        "agents/claude-acp/home/history.jsonl",
-        "agents/claude-acp/home/plans/plan.md",
-        "agents/claude-acp/home/todos/t.json",
-        "agents/claude-acp/home/statsig/s",
-        "agents/runtime/node-v24.1.0/bin/node",
-        "agents/runtime/clauseo-python-3.13.18-c2-windows-x64/python.exe",
-        "agents/signin/shim.js",
-        "launch-settings/other-run.json",
-    ]
-    .iter()
-    .map(|path| (*path).to_owned())
-    .collect();
+    let mut files: Vec<String> = COMMON.iter().map(|path| (*path).to_owned()).collect();
     for n in [1, 2, 3, 4] {
         let name = if n == 1 {
             PREFIX_RUN.to_owned()
@@ -86,6 +59,38 @@ pub(crate) fn big_with(root: &Path, matters: usize, project_count: usize) -> Big
         files.push(format!("run/{name}/work/draft.md"));
         files.push(format!("run/{name}/relay-token"));
     }
+    big_rest(data, files, matters, project_count)
+}
+
+/// What every big folder holds besides its runs, matters and projects.
+const COMMON: [&str; 23] = [
+    "settings.json",
+    "state.sqlite",
+    "state.sqlite-wal",
+    "search.sqlite",
+    "update.json",
+    "logs/host.log",
+    "counts/2026-11.json",
+    "tools/agent-browser/agent-browser",
+    "profile/claude-plugin/skills/legal-drafting/SKILL.md",
+    "agents/codex-acp/home/auth.json",
+    "agents/claude-acp/install/package.json",
+    "agents/claude-acp/login-source",
+    "agents/claude-acp/home/.credentials.json",
+    "agents/claude-acp/home/.claude.json",
+    "agents/claude-acp/home/settings.json",
+    "agents/claude-acp/home/history.jsonl",
+    "agents/claude-acp/home/plans/plan.md",
+    "agents/claude-acp/home/todos/t.json",
+    "agents/claude-acp/home/statsig/s",
+    "agents/runtime/node-v24.1.0/bin/node",
+    "agents/runtime/clauseo-python-3.13.18-c2-windows-x64/python.exe",
+    "agents/signin/shim.js",
+    "launch-settings/other-run.json",
+];
+
+/// The rest of [`big_with`]: the own run, the matters and projects, written and enumerated.
+fn big_rest(data: PathBuf, mut files: Vec<String>, matters: usize, project_count: usize) -> Big {
     for own in [
         "work/reply.md",
         "relay-token",
@@ -128,4 +133,88 @@ pub(crate) fn big_with(root: &Path, matters: usize, project_count: usize) -> Big
         run,
         notes,
     }
+}
+
+/// The laptop's names (the Windows VM's 60-matter run): the own matter's `UUIDv7` id, its run
+/// folder `<v7>-<n>`, its Claude project for `C:\Users\<user>\Documents\Launch Matter`.
+pub(crate) const LAPTOP_MATTER: &str = "01a1d670-e53d-7665-ad1a-d33922e44a6f";
+pub(crate) const LAPTOP_RUN: &str = "01a1d673-4d5a-776d-9061-201035c7d75e-1";
+
+/// A data folder like the laptop's, under `root`, for the user `user`: the own matter, run and
+/// project (`LAPTOP_*`), `matters` seeded matters with random v4 ids (`[guid]::NewGuid()`,
+/// from `seed`) and a project each (`C--Users-<user>-Documents-Matters-Seeded-Matter-NN`),
+/// two other runs, and what every big folder holds. Returns the launch's rules, the own
+/// project's key and the seeded ids.
+pub(crate) fn laptop(
+    root: &Path,
+    seed: u64,
+    matters: usize,
+    user: &str,
+) -> (LaunchDeny, String, Vec<String>) {
+    let data = root.join("data");
+    let mut files: Vec<String> = COMMON.iter().map(|path| (*path).to_owned()).collect();
+    for run in [
+        "01a1d672-1c0e-7d3b-8e11-5a2b9c0d4e6f-2",
+        "01a1d673-4d5a-776d-9061-201035c7d75e-2",
+    ] {
+        files.push(format!("run/{run}/work/x.md"));
+    }
+    files.push(format!("run/{LAPTOP_RUN}/work/memo.md"));
+    files.push(format!("agent-state/{LAPTOP_MATTER}/notes/Notes.md"));
+    let mut state = seed;
+    let mut guid = || {
+        let mut bytes = [0u8; 16];
+        for byte in &mut bytes {
+            state = state
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1_442_695_040_888_963_407);
+            *byte = u8::try_from(state >> 56).unwrap();
+        }
+        bytes[6] = (bytes[6] & 0x0f) | 0x40;
+        bytes[8] = (bytes[8] & 0x3f) | 0x80;
+        let hex: String = bytes.iter().fold(String::new(), |mut hex, byte| {
+            use std::fmt::Write;
+            write!(hex, "{byte:02x}").unwrap();
+            hex
+        });
+        let part = |range: std::ops::Range<usize>| hex.get(range).unwrap().to_owned();
+        format!(
+            "{}-{}-{}-{}-{}",
+            part(0..8),
+            part(8..12),
+            part(12..16),
+            part(16..20),
+            part(20..32)
+        )
+    };
+    let ids: Vec<String> = (0..matters).map(|_| guid()).collect();
+    let home = data.join("agents/claude-acp/home");
+    let own_key = super::claude_project_key(&format!(r"C:\Users\{user}\Documents\Launch Matter"));
+    files.push(format!(
+        "agents/claude-acp/home/projects/{own_key}/f55bd5d8-b615-4538-ad99-18a52b223f0b.jsonl"
+    ));
+    for (n, id) in ids.iter().enumerate() {
+        files.push(format!("agent-state/{id}/notes/n.md"));
+        let key = super::claude_project_key(&format!(
+            r"C:\Users\{user}\Documents\Matters\Seeded Matter {:02}",
+            n + 1
+        ));
+        files.push(format!("agents/claude-acp/home/projects/{key}/s.jsonl"));
+    }
+    for file in &files {
+        let path = data.join(file);
+        write::create_dir_all(path.parent().unwrap()).unwrap();
+        write::write_file(&path, b"x").unwrap();
+    }
+    let own = [
+        data.join("run").join(LAPTOP_RUN),
+        data.join("agent-state").join(LAPTOP_MATTER).join("notes"),
+        home.join("plans"),
+    ];
+    let project = vec![home.join("projects").join(&own_key)];
+    (
+        launch_deny(vec![data.clone()], &data, &own, &project),
+        own_key,
+        ids,
+    )
 }

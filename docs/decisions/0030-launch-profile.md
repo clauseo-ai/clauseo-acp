@@ -502,11 +502,23 @@ change from the settings window as `ui` does. R24 (PR5) adds a third to the patc
     and spaces, streams, quoting, letter case and every way of writing the folder over every
     protected target, and checks that whatever #999's rules denied of what is not the
     session's own, these deny.
+  - **How Claude Code reads a rule** (2.1.293, read from the pinned binary and checked by
+    running it, `scripts/claude-rule-probe`): its parser turns every `\\` into `\` before
+    matching, then `\*` is a literal `*`, `\\` a literal `\`, any other `\` itself. The first
+    #1035 build wrote `<data>\\\**` for "the folder, a separator, a literal `*`", which the parser
+    made `<data>\\**`: the folder, a backslash, then anything. That denied every backslash path
+    under the data folder, the own ones included (the VM's 60-matter run). The rules are now
+    written for both steps, and the tests read them through a port of both.
   - **Size.** The siblings in `run`, `agent-state` and Claude's `projects` go in groups by the
     start no own name shares (`run/<start>*`), for the Read and Edit rules too, and what lies
     under Clauseo's own names (`agent-state`, `claude-acp`, `codex-acp`, a run folder named by an
-    id) is named by its tail in every spelling at once. A launch with 1,000 matters stays under
-    a quarter of the limit below. The flag settings go to Claude Code as a file,
+    id) is named by its tail in every spelling at once; a form only one shell writes
+    (`$env:VAR`, `$VAR`, `/c/…`) is in that shell's rules alone, and PowerShell's are deduplicated
+    in any case. The worst realistic launch (a long profile, a configured folder in two
+    spellings, 1,000 matters) stays under 1.8 MiB. Past that a launch sheds the configured
+    folder's variable forms (logged, fields only), and a launch whose settings would still pass
+    Claude Code's 2 MiB fails (`agent.launch_failed`) rather than start without its rules. The
+    flag settings go to Claude Code as a file,
     `<data>/launch-settings/<run id>.json` (`agent/launch_settings.rs`), not inline: the SDK
     puts inline settings on the command line, which Windows caps at 32,767 characters, and
     Claude Code reads a settings file of at most 2 MiB, else it exits at start-up. It reads the
@@ -521,13 +533,23 @@ change from the settings window as `ui` does. R24 (PR5) adds a third to the patc
     - a glob inside a name (`run\01a1*\work`);
     - a run folder, matter or project made after the launch whose name starts no group, and a
       name that starts with the own one's (`run\<own>x`);
+    - a name no rule knows that is made after the launch where no group or pattern covers it
+      (`…\ai.clauseo.desktop\evil.dll`, `agents\new\x`); what Claude Code loads from its home
+      (`CLAUDE.md`, `rules`, `agents`, `commands`, `output-styles`, `workflows`, `dev-mods`,
+      `loop.md`, `keybindings.json`, `remote-settings.json`, `.config.json`, `ccr`, `memory`) is
+      named whether or not it exists;
+    - a name spliced together by the shell (`…/to''ols/…`, `…/se""ttings.json`, `…/t\ools/…`,
+      `…/{tools,x}/x`); a `$`, `{` or backtick straight after a separator is denied;
     - for a configured folder (not `ai.clauseo.desktop`) only, its own path written other than
       whole: a `..` or `.\` step or a mixed separator inside it
       (`D:\FirmData\Other\..\Clauseo\settings.json`, `D:\FirmData\.\Clauseo`,
       `D:\FirmData/Clauseo`), a share path to it (`\\localhost\D$\FirmData\Clauseo`), or a
       variable other than `LOCALAPPDATA`, `APPDATA`, `USERPROFILE` and `HOME` naming part of it
-      (`%FIRMDATA%\Clauseo`). Not done for launch: matching that path loosely would grow every
-      configured launch's rules or deny folders beside it.
+      (`%FIRMDATA%\Clauseo`); `${env:APPDATA}\…` and `${env:USERPROFILE}\…` (no `${env:}` form),
+      `$HOME\…` and `~\…` (only the `/` forms), `$USERPROFILE/…`, `$HOME` or `~` when `HOME` is
+      unset, a doubled separator inside the path (`D:\FirmData\\Clauseo`), a drive-relative
+      `D:FirmData\Clauseo`, and `D:\FirmData.\Clauseo`. Not done for launch: matching that path
+      loosely would grow every configured launch's rules or deny folders beside it.
     - Denied beyond the data folder (accepted): any command naming `claude-acp` or `agent-state`
       alone (`npm ls claude-acp`, `echo agent-state`); in PowerShell, which ignores case, a path
       such as `…\Projects\Deal\` after `claude-acp` and `home` in the same command; and a folder

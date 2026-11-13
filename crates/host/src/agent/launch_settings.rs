@@ -38,6 +38,11 @@ use clauseo_protocol::{ErrorCode, MatterId};
 /// The folder under `<data>` that holds the settings files.
 pub(crate) const FOLDER: &str = "launch-settings";
 
+/// The largest settings file Claude Code 2.1.293 reads (`Zf`, 2 MiB); a larger one makes it exit
+/// at its start, so a launch whose settings would be larger fails before it (the shell rules
+/// shed their variable forms first, `agent::loads::profile::SHED_AT`).
+const MAX_FILE: usize = 2 * 1024 * 1024;
+
 /// The most names a run tries before its session call fails.
 const MAX_NAMES: u32 = 100;
 
@@ -93,6 +98,19 @@ impl Target {
             return Ok(None);
         };
         let bytes = serde_json::to_vec(settings)?;
+        if bytes.len() > MAX_FILE {
+            // Claude Code would exit at its start; the launch fails here instead, never without
+            // the rules.
+            tracing::warn!(
+                settings_bytes = bytes.len(),
+                budget = MAX_FILE,
+                "Claude's settings are larger than Claude Code reads; the launch fails"
+            );
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "Claude's settings are larger than Claude Code reads",
+            ));
+        }
         let folder = std::path::absolute(&self.folder)?;
         if let Some(base) = folder.parent() {
             crate::write::create_private_dirs_under(base, &folder)?;

@@ -13,15 +13,19 @@
 //! write there, into every matter. A rule has no exceptions, so a rule for the whole folder would
 //! deny the own folders with it.
 //!
-//! Claude Code 2.1.293 matches a rule (`hQ`) as an anchored regular expression: `*` is any text,
-//! spaces and separators included, a leading one too; `\*` is a literal `*` and `\\` a literal
-//! `\`; any other character stands for itself; runs of spaces and tabs count as one; and `/**/`
-//! is a globstar (no rule here holds one). A rule that does not end in `*` must reach the end of
-//! the command. Bash rules match case-sensitively, PowerShell rules in any case
-//! (`preparePermissionMatcher` passes `hQ` its case-insensitive flag) and against each command
-//! rebuilt from its name and arguments. A scoped PowerShell rule also keeps the PowerShell tool
-//! on beside the Bash deny rules, which would otherwise turn it off (code.claude.com/docs/en/
-//! tools-reference, "Bash deny rules also turn off the PowerShell tool").
+//! Claude Code 2.1.293 reads a rule in two steps (checked against the pinned binary through a
+//! stand-in for the Messages API, `scripts/claude-rule-probe`; ported in `shell_deny_tests.rs`).
+//! Its parser (`jn`) passes the content through `Lho`: `\(` and `\)` become parentheses and
+//! every `\\` becomes `\`. Its matcher (`hQ`) then reads the result as an anchored regular
+//! expression: `*` is any text, spaces and separators included, a leading one too; `\*` is a
+//! literal `*` and `\\` a literal `\`; any other `\` stands for itself; runs of spaces and tabs
+//! count as one; and `/**/` is a globstar (no rule here holds one). So a backslash in a rule is
+//! written once before a letter and as 2k − 1 for k the matcher must see ([`render`]). A rule
+//! that does not end in `*` must reach the end of the command. Bash rules match
+//! case-sensitively, PowerShell rules in any case (`yt` passes `hQ` its case-insensitive flag) and
+//! against each command rebuilt from its name and arguments. A scoped PowerShell rule also keeps
+//! the PowerShell tool on beside the Bash deny rules, which would otherwise turn it off
+//! (code.claude.com/docs/en/tools-reference, "Bash deny rules also turn off the PowerShell tool").
 //!
 //! The rules, for each way of writing `<data>` ([`forms`]), each separator after it
 //! ([`JUNCTIONS`]: `\`, `/`, `\\`), both tools, each once:
@@ -71,7 +75,7 @@
 //! a run folder, matter or project made after the launch whose name starts no group, and, for a
 //! configured data folder (not `ai.clauseo.desktop`) alone, its own path written other than
 //! whole: a `..` or `.\` step or a mixed separator inside it (`D:\FirmData\.\Clauseo`), a share or
-//! device path to it (`\\localhost\D$\…`) or a variable other than [`VARS`] naming part of
+//! device path to it (`\\localhost\D$\…`) or a variable other than `forms::VARS` naming part of
 //! it. Denied beyond the data folder (accepted): any command naming `claude-acp` or
 //! `agent-state` alone (`npm ls claude-acp`), and in PowerShell, which ignores case, a path such
 //! as `…\Projects\Deal\` after `claude-acp` and `home` in the same command.
@@ -80,29 +84,14 @@ use std::collections::HashSet;
 use std::ffi::OsString;
 
 use super::LaunchDeny;
+use forms::{Shells, forms};
 
-/// The variables a command may spell `<data>`'s parent with: `%LOCALAPPDATA%` holds the default
-/// data folder, `%APPDATA%` a configured one may sit under, and the lawyer's home
-/// (`%USERPROFILE%`, `$HOME`, `~`) holds both.
-const VARS: [&str; 4] = ["LOCALAPPDATA", "APPDATA", "USERPROFILE", "HOME"];
+#[path = "shell_deny_forms.rs"]
+mod forms;
 
 /// The separators a command may write between two names: `\`, `/`, and `\\` (Git Bash's escaped
 /// form, or a doubled `\`).
 const JUNCTIONS: [&str; 3] = ["\\", "/", "\\\\"];
-
-/// The separators after a form of `<data>` written with `/` (`C:/…`, `$HOME/…`): its own and
-/// `\`, which a command may go on with.
-const FORWARD: [&str; 2] = ["/", "\\"];
-
-/// The separators after a form written with `\` and no doubled one (`%APPDATA%\…`).
-const BACKWARD: [&str; 2] = ["\\", "/"];
-
-/// One way a command writes `<data>` ([`forms`]), and the separators that may follow it.
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct Form {
-    lead: String,
-    junctions: &'static [&'static str],
-}
 
 /// What may follow a name at a boundary, besides a separator or the end: a quote, a space or
 /// tab, a newline, what ends a command or starts a redirection, a list, a group or a command
@@ -115,16 +104,18 @@ const AFTER: [&str; 19] = [
 ];
 
 /// What may follow a separator after a folder named alone: a quote or a space (`dir "<data>\"`),
-/// another separator or a dot (`<data>\\.\tools`, `<data>//profile`, `<data>\/agents`). Not `\`
+/// a `$`, `{` or backtick, which a shell may splice a name with (`<data>\$'tools'`,
+/// `<data>/{tools,x}`), another separator or a dot (`<data>\\.\tools`, `<data>//profile`,
+/// `<data>\/agents`). Not `\`
 /// after `\`: `\\` is the escaped form's separator, which the rules name in its own right.
 /// A `strict` folder is one no own path is written past in the escaped form with a single `\`
 /// after it (a configured folder's path, `D:\FirmData\Clauseo\\x`): there `\` after `\` is a run.
 fn after_sep(end: &str, strict: bool) -> &'static [&'static str] {
     match end {
-        "\\" if strict => &["\"", "'", " ", "/", ".", "\\"],
-        "\\" => &["\"", "'", " ", "/", "."],
-        "/" => &["\"", "'", " ", "/", "\\", "."],
-        _ => &["\"", "'", " ", "\\", "/", "."],
+        "\\" if strict => &["\"", "'", " ", "/", ".", "$", "{", "`", "\\"],
+        "\\" => &["\"", "'", " ", "/", ".", "$", "{", "`"],
+        "/" => &["\"", "'", " ", "/", "\\", ".", "$", "{", "`"],
+        _ => &["\"", "'", " ", "\\", "/", ".", "$", "{", "`"],
     }
 }
 
@@ -142,12 +133,32 @@ enum Piece {
 }
 
 /// The rules (see the module doc) for `deny`'s spellings of `<data>` and targets, with `var`
-/// reading the variables of [`VARS`].
+/// reading the variables of `forms::VARS`.
 pub(crate) fn windows_shell_deny_rules(
     deny: &LaunchDeny,
     var: &dyn Fn(&str) -> Option<OsString>,
 ) -> Vec<String> {
-    let forms = forms(deny, var);
+    rules(deny, var, true)
+}
+
+/// [`windows_shell_deny_rules`] without the forms that write a configured data folder through a
+/// variable (`%APPDATA%`, `$env:USERPROFILE`, `~`, …): what a launch sheds when its settings would
+/// outgrow the file Claude Code reads (`agent::loads::profile`). The default folder loses
+/// nothing: its name alone stands for all of those.
+pub(crate) fn windows_shell_deny_rules_without_variables(
+    deny: &LaunchDeny,
+    var: &dyn Fn(&str) -> Option<OsString>,
+) -> Vec<String> {
+    rules(deny, var, false)
+}
+
+/// [`windows_shell_deny_rules`], with the variable forms when `variables`.
+fn rules(
+    deny: &LaunchDeny,
+    var: &dyn Fn(&str) -> Option<OsString>,
+    variables: bool,
+) -> Vec<String> {
+    let forms = forms(deny, var, variables);
     // The shared and read-only places are the shell's to run by name on its `PATH`, never to
     // name: a command that writes there would reach every matter.
     let shared: Vec<String> = super::SHARED
@@ -188,6 +199,12 @@ pub(crate) fn windows_shell_deny_rules(
             !above.is_empty() && parents.iter().any(|parent| parent.as_slice() == above)
         })
     };
+    // Each rule's pieces, whether it is for the end of the command, and its shells.
+    let mut tagged: Vec<(Vec<Piece>, bool, Shells)> = Vec::new();
+    let mut take = |contents: &mut Vec<Vec<Piece>>, ends: &mut Vec<Vec<Piece>>, shells: Shells| {
+        tagged.extend(contents.drain(..).map(|pieces| (pieces, false, shells)));
+        tagged.extend(ends.drain(..).map(|pieces| (pieces, true, shells)));
+    };
     let mut contents: Vec<Vec<Piece>> = Vec::new();
     let mut ends: Vec<Vec<Piece>> = Vec::new();
     for form in &forms {
@@ -207,6 +224,7 @@ pub(crate) fn windows_shell_deny_rules(
                 }
             }
         }
+        take(&mut contents, &mut ends, form.shells);
     }
     for parent in &parents {
         if let Some(tail) = tail(parent) {
@@ -215,6 +233,7 @@ pub(crate) fn windows_shell_deny_rules(
             }
         }
     }
+    take(&mut contents, &mut ends, Shells::Both);
     for target in &targets {
         let (names, _folder) = parse(target);
         let bounded = needs_boundary(&names, &kept);
@@ -223,6 +242,7 @@ pub(crate) fn windows_shell_deny_rules(
             for path in spread(tail, exact) {
                 named(&path, bounded, &mut contents, &mut ends);
             }
+            take(&mut contents, &mut ends, Shells::Both);
             continue;
         }
         for form in &forms {
@@ -237,19 +257,25 @@ pub(crate) fn windows_shell_deny_rules(
                     );
                 }
             }
+            take(&mut contents, &mut ends, form.shells);
         }
     }
-    let mut seen = HashSet::new();
+    // Each rule once per shell; PowerShell's in any case, as it matches them.
     let mut rules = Vec::new();
     for tool in ["Bash", "PowerShell"] {
-        let all = contents
-            .iter()
-            .map(|pieces| render(pieces, false))
-            .chain(ends.iter().map(|pieces| render(pieces, true)));
-        for content in all {
-            let rule = format!("{tool}({content})");
-            if seen.insert(rule.clone()) {
-                rules.push(rule);
+        let mut seen = HashSet::new();
+        for (pieces, end, shells) in &tagged {
+            if !shells.has(tool) {
+                continue;
+            }
+            let content = render(pieces, *end);
+            let key = if tool == "PowerShell" {
+                content.to_lowercase()
+            } else {
+                content.clone()
+            };
+            if seen.insert(key) {
+                rules.push(format!("{tool}({content})"));
             }
         }
     }
@@ -288,85 +314,6 @@ fn alone(path: &[Piece], strict: bool, contents: &mut Vec<Vec<Piece>>, ends: &mu
         contents.push(join(&[path, &text(after), &[Piece::Any]]));
     }
     ends.push(path.to_vec());
-}
-
-/// The ways a command writes each of `deny`'s spellings of `<data>`: when the folder has
-/// Clauseo's own name (`clauseo_settings::IDENTIFIER`), that name alone, which no other folder
-/// has and which every other way of writing it ends in; otherwise its path with `\`, with `/`,
-/// with `\\` and as Git Bash's `/c/…`, and under a folder one of [`VARS`] names (read with `var`,
-/// in any case), `%VAR%` (and `%var%`), `$env:VAR`, `$VAR` and `${VAR}`, and `~` for the home,
-/// followed by the rest. A spelling that is not UTF-8 gets none.
-fn forms(deny: &LaunchDeny, var: &dyn Fn(&str) -> Option<OsString>) -> Vec<Form> {
-    let mut forms: Vec<Form> = Vec::new();
-    let mut push = |lead: String, junctions: &'static [&'static str]| {
-        if !lead.is_empty() && !forms.iter().any(|form| form.lead == lead) {
-            forms.push(Form { lead, junctions });
-        }
-    };
-    for spelling in &deny.spellings {
-        let Some(text) = spelling.to_str() else {
-            continue;
-        };
-        let back = drive_form(text);
-        let back = back.trim_end_matches('\\');
-        // The last name, split by hand: a Windows path is one name to `Path` off Windows.
-        if back.rsplit('\\').next() == Some(clauseo_settings::IDENTIFIER) {
-            push(clauseo_settings::IDENTIFIER.to_owned(), &JUNCTIONS);
-            continue;
-        }
-        let forward = back.replace('\\', "/");
-        push(back.to_owned(), &JUNCTIONS);
-        push(forward.clone(), &FORWARD);
-        push(back.replace('\\', "\\\\"), &JUNCTIONS);
-        let mut chars = forward.chars();
-        if let (Some(drive), Some(':')) = (chars.next(), chars.next())
-            && drive.is_ascii_alphabetic()
-        {
-            let git = format!("/{}{}", drive.to_ascii_lowercase(), chars.as_str());
-            push(git, &FORWARD);
-        }
-        for name in VARS {
-            let Some(value) = var(name).and_then(|v| v.into_string().ok()) else {
-                continue;
-            };
-            let value = drive_form(&value);
-            let value = value.trim_end_matches('\\');
-            let Some(rest) = strip_prefix_folded(back, value).and_then(|r| r.strip_prefix('\\'))
-            else {
-                continue;
-            };
-            if value.is_empty() || rest.is_empty() {
-                continue;
-            }
-            let rest_forward = rest.replace('\\', "/");
-            let lower = name.to_ascii_lowercase();
-            // cmd's with `\`, PowerShell's with either, Bash's with `/`.
-            let backward = match name {
-                "HOME" => vec![],
-                _ => vec![
-                    format!("%{name}%"),
-                    format!("%{lower}%"),
-                    format!("$env:{name}"),
-                ],
-            };
-            let forward = match name {
-                "USERPROFILE" => vec![format!("$env:{name}")],
-                "HOME" => vec![format!("${name}"), format!("${{{name}}}"), "~".to_owned()],
-                _ => vec![
-                    format!("$env:{name}"),
-                    format!("${name}"),
-                    format!("${{{name}}}"),
-                ],
-            };
-            for lead in backward {
-                push(format!("{lead}\\{rest}"), &BACKWARD);
-            }
-            for lead in forward {
-                push(format!("{lead}/{rest_forward}"), &FORWARD);
-            }
-        }
-    }
-    forms
 }
 
 /// `target`, a pattern of `launch.rs`, as names of pieces: escapes undone, a pattern `*` as
@@ -513,50 +460,65 @@ fn join(parts: &[&[Piece]]) -> Vec<Piece> {
     parts.iter().flat_map(|part| part.iter().cloned()).collect()
 }
 
-/// A rule's content: a leading `*`, the pieces (text escaped, runs of `*` as one), and a
-/// trailing `*` unless the rule is for the end of the command (`end`).
+/// A rule's content: a leading `*`, the pieces, and a trailing `*` unless the rule is for the end
+/// of the command (`end`), written for Claude Code 2.1.293's two readings of it. Its rule
+/// parser (`jn`) first passes the content through `Lho`: `\(` and `\)` become `(` and `)`, then
+/// every `\\` becomes `\`. Its matcher (`hQ`) then reads `\*` as a literal `*`, `\\` as a literal
+/// `\`, any other `\` as itself, and `*` as any text. So the pattern for `hQ` writes a literal `\`
+/// as `\\` only before a `*` or a `\` (`run\\*`: a backslash, then any text) and as `\` elsewhere,
+/// a literal `*` as `\*`; and each run of k backslashes in it is written as 2k − 1 for `Lho`
+/// (`\\\\\` becomes `\\\`), or 2k before `(` or `)`, which `Lho` would otherwise take as an
+/// escaped parenthesis. Checked against the pinned binary (`shell_deny_tests.rs`).
 fn render(pieces: &[Piece], end: bool) -> String {
-    let mut out = String::from("*");
+    /// One character of the pattern: a literal, or Claude's `*`.
+    #[derive(Clone, Copy, PartialEq, Eq)]
+    enum Tok {
+        Lit(char),
+        Any,
+    }
+    let mut toks = vec![Tok::Any];
     for piece in pieces {
         match piece {
-            Piece::Text(text) => out.push_str(&escape(text)),
-            Piece::Any if ends_in_any(&out) => {}
-            Piece::Any => out.push('*'),
+            Piece::Text(text) => toks.extend(text.chars().map(Tok::Lit)),
+            Piece::Any if toks.last() == Some(&Tok::Any) => {}
+            Piece::Any => toks.push(Tok::Any),
         }
     }
-    if !end && !ends_in_any(&out) {
-        out.push('*');
+    if !end && toks.last() != Some(&Tok::Any) {
+        toks.push(Tok::Any);
     }
-    out
-}
-
-/// Whether a rule's content so far ends in Claude's `*`, not a literal `\*`.
-fn ends_in_any(content: &str) -> bool {
-    content.ends_with('*') && !content.ends_with("\\*")
-}
-
-/// `text` in its drive form (`\\?\C:\x` is `C:\x`), `/` read as `\`.
-fn drive_form(text: &str) -> String {
-    crate::network_paths::resolve::drive_form(text).unwrap_or_else(|| text.replace('/', "\\"))
-}
-
-/// `text` without `prefix`, compared in any ASCII case, as Windows compares names.
-fn strip_prefix_folded<'a>(text: &'a str, prefix: &str) -> Option<&'a str> {
-    let head = text.get(..prefix.len())?;
-    let rest = text.get(prefix.len()..)?;
-    head.eq_ignore_ascii_case(prefix).then_some(rest)
-}
-
-/// `text` in a Bash or PowerShell rule: `\` and `*` escaped by `\`.
-fn escape(text: &str) -> String {
-    let mut out = String::with_capacity(text.len());
-    for c in text.chars() {
-        if matches!(c, '*' | '\\') {
-            out.push('\\');
+    // The pattern `hQ` reads.
+    let mut pattern = String::new();
+    for (n, tok) in toks.iter().enumerate() {
+        match tok {
+            Tok::Any => pattern.push('*'),
+            Tok::Lit('*') => pattern.push_str("\\*"),
+            Tok::Lit('\\') => {
+                let next = toks.get(n + 1);
+                let doubled = matches!(next, Some(Tok::Any | Tok::Lit('*' | '\\')));
+                pattern.push_str(if doubled { "\\\\" } else { "\\" });
+            }
+            Tok::Lit(c) => pattern.push(*c),
         }
-        out.push(c);
     }
-    out
+    // The content that `Lho` turns into that pattern.
+    let mut content = String::with_capacity(pattern.len() * 2);
+    let mut chars = pattern.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c != '\\' {
+            content.push(c);
+            continue;
+        }
+        let mut run = 1;
+        while chars.peek() == Some(&'\\') {
+            chars.next();
+            run += 1;
+        }
+        let paren = matches!(chars.peek(), Some('(' | ')'));
+        let written = if paren { 2 * run } else { 2 * run - 1 };
+        content.extend(std::iter::repeat_n('\\', written));
+    }
+    content
 }
 
 #[cfg(test)]
@@ -565,6 +527,9 @@ mod cross_tests;
 #[cfg(test)]
 #[path = "shell_deny_launch_tests.rs"]
 mod launch_tests;
+#[cfg(test)]
+#[path = "shell_deny_real_tests.rs"]
+mod real_tests;
 #[cfg(test)]
 #[path = "shell_deny_tests.rs"]
 mod tests;
