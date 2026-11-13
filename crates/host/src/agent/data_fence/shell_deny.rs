@@ -522,6 +522,11 @@ fn render(pieces: &[Piece], end: bool) -> String {
         let written = if paren { 2 * run } else { 2 * run - 1 };
         content.extend(std::iter::repeat_n('\\', written));
     }
+    // A content ending in `:*` is Claude Code's legacy prefix rule (`cCe`, `^(.+):\*$`): the
+    // command must start with the rest, which no command does. `:**` is the same match.
+    if content.ends_with(":*") {
+        content.push('*');
+    }
     content
 }
 
@@ -534,6 +539,9 @@ mod launch_tests;
 #[cfg(test)]
 #[path = "shell_deny_real_tests.rs"]
 mod real_tests;
+#[cfg(test)]
+#[path = "shell_deny_shape_tests.rs"]
+mod shape_tests;
 #[cfg(test)]
 #[path = "shell_deny_tests.rs"]
 mod tests;

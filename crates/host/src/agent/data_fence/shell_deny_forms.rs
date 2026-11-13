@@ -132,8 +132,15 @@ pub(super) fn forms(
                     leads.push((format!("$HOME/{rest_forward}"), &FORWARD, Shells::Both));
                     leads.push((format!("${{HOME}}/{rest_forward}"), &FORWARD, Shells::Bash));
                     leads.push((format!("~/{rest_forward}"), &FORWARD, Shells::Both));
+                    // Claude Code puts its `HOME` in place of a Bash `$HOME` the shell would
+                    // expand before it matches (`$HOME/x` is `C:\Users\asha/x`), so the
+                    // literal `$HOME/…` matches only where the shell leaves it alone.
+                    leads.push((format!("{value}/{rest_forward}"), &FORWARD, Shells::Bash));
                 }
-                "USERPROFILE" => {}
+                // Its home folder, should Claude Code take it from there.
+                "USERPROFILE" => {
+                    leads.push((format!("{value}/{rest_forward}"), &FORWARD, Shells::Bash));
+                }
                 _ => {
                     leads.push((format!("${name}/{rest_forward}"), &FORWARD, Shells::Bash));
                     leads.push((

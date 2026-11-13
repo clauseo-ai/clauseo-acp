@@ -12,7 +12,8 @@ whether each command in a cases file is denied by them, with no login and no net
    sends back ("Permission to use Bash with command ... has been denied." when a rule denies
    it; the command's own output otherwise).
 
-Usage: probe.py <claude binary> <cases.json>
+Usage: probe.py <claude binary> <cases.json>   (PROBE_SKIP_RULES=1 skips the rules check;
+PROBE_HOME sets the HOME Claude Code expands $HOME to)
 cases.json: {"settings": {...Claude Code flag settings...},
              "expect_skipped": ["Bash(...)", ...],
              "cases": [{"name": "...", "tool": "Bash", "command": "...", "denied": true}, ...]}
@@ -20,7 +21,7 @@ Prints the rule counts and one line per case (DENIED or ran), and exits 1 on any
 disagreement. A case whose "denied" is null is reported, not checked. Only the Bash tool exists
 off Windows; a PowerShell case is reported as "no tool".
 """
-import json, os, shutil, subprocess, sys, tempfile, time
+import json, os, shutil, socket, subprocess, sys, tempfile, time
 
 binary, cases_file = sys.argv[1], sys.argv[2]
 spec = json.load(open(cases_file))
@@ -30,12 +31,16 @@ settings = os.path.join(work, "settings.json")
 json.dump(spec["settings"], open(settings, "w"))
 cmd_file = os.path.join(work, "cmd.json")
 out_file = os.path.join(work, "out.txt")
-port = 18900 + os.getpid() % 90
+with socket.socket() as probe_socket:
+    probe_socket.bind(("127.0.0.1", 0))
+    port = probe_socket.getsockname()[1]
 server = subprocess.Popen([sys.executable, os.path.join(here, "fakeapi.py"), cmd_file, out_file, str(port)])
 time.sleep(0.8)
 home = os.path.join(work, "home")
 os.makedirs(home)
-env = dict(os.environ, HOME=home, CLAUDE_CONFIG_DIR=home,
+# Claude Code puts its HOME in place of an expandable $HOME before it matches a Bash command;
+# PROBE_HOME sets that HOME (the laptop's, for the host's generated cases).
+env = dict(os.environ, HOME=os.environ.get("PROBE_HOME", home), CLAUDE_CONFIG_DIR=home,
            ANTHROPIC_BASE_URL=f"http://127.0.0.1:{port}", ANTHROPIC_API_KEY="sk-ant-probe",
            CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC="1", DISABLE_TELEMETRY="1")
 failed = 0
@@ -92,13 +97,14 @@ def doctor_warnings():
 
 try:
     permissions = spec["settings"].get("permissions", {})
+    check_rules = os.environ.get("PROBE_SKIP_RULES") != "1"
     emitted = [rule for key in ("deny", "allow", "ask") for rule in permissions.get(key, [])]
     skipped = set(spec.get("expect_skipped", []))
-    kept_list = kept_rules()
+    kept_list = kept_rules() if check_rules else emitted
     kept = {canon(rule) for rule in kept_list}
     missing = [rule for rule in emitted if canon(rule) not in kept and rule not in skipped]
     kept_skipped = [rule for rule in skipped if canon(rule) in kept]
-    warnings = doctor_warnings()
+    warnings = doctor_warnings() if check_rules else [None] * len(skipped)
     rules_ok = not missing and not kept_skipped and len(warnings) == len(skipped)
     failed += 0 if rules_ok else 1
     print(f"{'ok ' if rules_ok else 'BAD'} rules: {len(emitted)} in the file, {len(kept_list)} kept, "

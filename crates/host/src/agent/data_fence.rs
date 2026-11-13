@@ -68,27 +68,22 @@ pub(crate) use variables::launch_vars;
 /// settings file, the updater's marker, the counts' first-act marker, the host's store, the search
 /// index (every matter's prompts and answers). Not the built-in plugin ([`SHARED`]).
 /// Under `agents`: Codex's home, the installs, the runtime and npm folders, the sign-in shim and
-/// markers, and in Claude's own home its login, its settings, its transcripts (every project's,
-/// with its subagents' and its memory; not the whole of `projects`, which also holds the large
-/// tool results the model must Read back, `launch.rs`), its skills and
-/// plugins, and what it keeps across sessions, so across matters: the prompt history, the
-/// edited files' copies, the to-do lists and the shell snapshots. Not Claude's home whole:
-/// Claude Code writes its plan note to `plans` there with its own Edit tool, and a deny rule
-/// has no exceptions. And in every run folder, the own one too, the case-law relay's token file
-/// (R24): `clauseo-mcp` reads it itself, so Claude's tools never need it, and a token read
-/// through them would land in the transcript; and the shell browser's config file
+/// markers, and in Claude's own home its transcripts (every project's, with its subagents' and
+/// its memory; not the whole of `projects`, which also holds the large tool results the model
+/// must Read back, `launch.rs`); the rest of that home is [`claude_home::CLAUDE_HOME`]. Not
+/// Claude's home whole: Claude Code writes its plan note to `plans` there with its own Edit
+/// tool, and a deny rule has no exceptions. And in every run folder, the own one too, the
+/// case-law relay's token file (R24): `clauseo-mcp` reads it itself, so Claude's tools never
+/// need it, and a token read through them would land in the transcript; and the shell
+/// browser's config file
 /// (`browser::SESSION_CONFIG`), which agent-browser reads itself: an edit to it could set what
 /// the `agent-browser` deny rules refuse as flags (`--profile`, `--config`).
 /// Under `agents/runtime`, Node and the half-unpacked `.tmp-` folders, but not Clauseo's Python
 /// runtime ([`READ_ONLY`]); the launch denies every other entry there that exists. And every
 /// session's Claude settings file (`agent::launch_settings`), its own too: Claude Code reads
 /// it itself at its start, so its tools never need it, and it holds every session's rules.
-/// And what Claude Code 2.1.293 loads from its home into every later session, whether or not it
-/// exists yet: the user's `CLAUDE.md` and `rules`, its subagents, slash commands, output
-/// styles, workflows and mods (`dev-mods`, function hooks it runs), `loop.md`, its key bindings,
-/// its remote and global settings (`remote-settings.json`, `.config.json`) and the CA bundle it
-/// trusts (`ccr`). A name planted there would act in every matter.
-pub(crate) const DENIED: [&str; 53] = [
+/// And Claude's config folder's names (`claude_home::CLAUDE_HOME`, added by the launch).
+pub(crate) const DENIED: [&str; 31] = [
     "run/*/relay-token",
     "run/*/agent-browser/config.json",
     "skill-packs/**",
@@ -110,31 +105,9 @@ pub(crate) const DENIED: [&str; 53] = [
     "agents/claude-acp/install/**",
     "agents/claude-acp/login-source",
     "agents/claude-acp/no-reuse",
-    "agents/claude-acp/home/.credentials.json",
-    "agents/claude-acp/home/.claude.json*",
-    "agents/claude-acp/home/settings.json",
     "agents/claude-acp/home/projects/*/*.jsonl",
     "agents/claude-acp/home/projects/*/*/subagents/**",
     "agents/claude-acp/home/projects/*/memory/**",
-    "agents/claude-acp/home/skills/**",
-    "agents/claude-acp/home/plugins/**",
-    "agents/claude-acp/home/history.jsonl",
-    "agents/claude-acp/home/file-history/**",
-    "agents/claude-acp/home/todos/**",
-    "agents/claude-acp/home/shell-snapshots/**",
-    "agents/claude-acp/home/CLAUDE.md",
-    "agents/claude-acp/home/rules/**",
-    "agents/claude-acp/home/agents/**",
-    "agents/claude-acp/home/commands/**",
-    "agents/claude-acp/home/output-styles/**",
-    "agents/claude-acp/home/workflows/**",
-    "agents/claude-acp/home/dev-mods/**",
-    "agents/claude-acp/home/loop.md",
-    "agents/claude-acp/home/keybindings.json",
-    "agents/claude-acp/home/remote-settings.json",
-    "agents/claude-acp/home/.config.json",
-    "agents/claude-acp/home/ccr/**",
-    "agents/claude-acp/home/memory/**",
     "agents/runtime/node-v*/**",
     "agents/runtime/.tmp-*/**",
     "agents/downloads/**",
@@ -545,6 +518,7 @@ fn key(path: &Path, insensitive: bool) -> Vec<OsString> {
 pub(crate) mod big_folder;
 #[cfg(test)]
 mod bypass_tests;
+mod claude_home;
 mod command;
 #[cfg(test)]
 mod command_tests;

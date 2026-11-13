@@ -128,6 +128,8 @@ pub(super) fn parse(rule: &str) -> Result<(String, String), &'static str> {
 /// bundle's JS):
 /// - [`parse`]: the settings loader's checks, and `lYe`'s split at the first unescaped `(` and
 ///   the last unescaped `)`, which must end the rule; a rule it skips is no rule;
+/// - `cCe`: a content `^(.+):\*$` is a legacy prefix rule, matching a command that is the rest
+///   or starts with it and a space (also after `xargs `), its `*`s literal;
 /// - `jn`: an empty content or `*` is the whole tool; otherwise
 ///   `Lho(e) = Nho(e).replaceAll("\\\\", "\\")` with
 ///   `Nho(e) = e.replaceAll("\\(", "(").replaceAll("\\)", ")")`: `\(`, `\)` are parentheses and
@@ -147,6 +149,9 @@ pub(super) struct Rule {
     parts: Vec<String>,
     /// The pattern ends in ` *` and has no other `*`.
     optional_tail: bool,
+    /// A legacy prefix rule (`cCe`: a content `^(.+):\*$`): the command is this text or starts
+    /// with it and a space, also after `xargs ` (folded when `insensitive`).
+    prefix: Option<String>,
 }
 
 impl Rule {
@@ -155,6 +160,22 @@ impl Rule {
         let (tool, content) = parse(rule).ok()?;
         assert!(!content.contains('\0'));
         let insensitive = tool == "PowerShell";
+        let fold = |text: &str| {
+            if insensitive {
+                text.to_lowercase()
+            } else {
+                text.to_owned()
+            }
+        };
+        if let Some(prefix) = content.strip_suffix(":*").filter(|rest| !rest.is_empty()) {
+            return Some(Self {
+                tool,
+                insensitive,
+                parts: Vec::new(),
+                optional_tail: false,
+                prefix: Some(fold(&squeeze(prefix))),
+            });
+        }
         let pattern = squeeze(content.trim());
         let mut parts = vec![String::new()];
         let mut wildcards = 0;
@@ -196,12 +217,18 @@ impl Rule {
             insensitive,
             parts,
             optional_tail,
+            prefix: None,
         })
     }
 
     /// The tool the rule is for.
     pub(super) fn tool(&self) -> &str {
         &self.tool
+    }
+
+    /// The literal texts between the pattern's `*`s (none for a prefix rule).
+    pub(super) fn parts(&self) -> &[String] {
+        &self.parts
     }
 
     /// Whether this rule matches `command` for `tool`.
@@ -211,6 +238,12 @@ impl Rule {
 
     /// Whether this rule matches a command already passed through [`prepare`] for it.
     pub(super) fn hits_prepared(&self, text: &str) -> bool {
+        if let Some(prefix) = &self.prefix {
+            let xargs = format!("xargs {prefix}");
+            return [prefix.as_str(), xargs.as_str()]
+                .iter()
+                .any(|head| text == *head || text.starts_with(&format!("{head} ")));
+        }
         if self.optional_tail {
             let head = self.parts[0].trim_end_matches(' ');
             if text == head {
@@ -474,6 +507,13 @@ fn the_port_reads_rules_as_the_binary_does() {
         // Bash matches its parse of a command, which drops an unquoted trailing backslash.
         (r"PowerShell(*xyz\\)", r"Remove-Item xyz\", true),
         (r"PowerShell(*xyz\\)", r"Remove-Item xyz\a", false),
+        // A content ending in `:*` is a legacy prefix rule, which no command starts with; `:**`
+        // matches a `:` and anything.
+        (r"Bash(*yyy:*)", "cat yyy:1", false),
+        (r"Bash(*yyy:**)", "cat yyy:1", true),
+        (r"Bash(*yyy:**)", "cat yyy:", true),
+        (r"Bash(*yyy:**)", "cat yyyx", false),
+        (r"Bash(git:*)", "git status", true),
     ] {
         assert_eq!(matches(rule, command), denied, "{rule} on {command}");
     }
