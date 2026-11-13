@@ -87,7 +87,25 @@ impl Rig {
             version,
             ids,
             decision: RevisionDecision::Accept,
+            all: false,
         })
+    }
+
+    /// Accept all of `version`, with `ids` (which should be none).
+    fn decide_all(&self, version: DocVersion, ids: Vec<u32>) -> HostCommand {
+        let HostCommand::DecideRevisions(one) = self.decide(version, ids) else {
+            unreachable!("decide makes a DecideRevisions");
+        };
+        HostCommand::DecideRevisions(DecideRevisions { all: true, ..one })
+    }
+
+    /// The fake's calls, by their first argument.
+    fn calls(&self) -> Vec<String> {
+        std::fs::read_to_string(self.bin.join("calls.txt"))
+            .unwrap_or_default()
+            .lines()
+            .map(str::to_owned)
+            .collect()
     }
 
     fn lease_bytes(&self) -> Vec<u8> {
@@ -288,6 +306,85 @@ fn a_list_past_one_mib_reads_cut_to_its_caps() {
     assert_eq!(
         list.revisions[0].text.as_deref().unwrap().chars().count(),
         MAX_REVISION_TEXT_CHARS
+    );
+    rig.host.shutdown();
+}
+
+/// 600 changes, past the list's 500: Accept all decides every one in one edit and one
+/// `revisions` checkpoint, the list read after has none left, and one restore of `before`
+/// undoes them all.
+#[test]
+fn accept_all_decides_all_600_changes_and_one_undo_takes_them_back() {
+    let rig = Rig::new("revisions-accept-all", true);
+    let count = u32::try_from(MAX_REVISIONS).unwrap() + 100;
+    let changes: Vec<_> = (1..=count)
+        .map(|id| serde_json::json!({"block": format!("p{id}"), "ids": [id], "kind": "insertion"}))
+        .collect();
+    let check = serde_json::json!({"existing": [{"author": "Asha Rao", "changes": changes}]});
+    write::write(&rig.bin.join("check.json"), check.to_string().as_bytes());
+    write::write(&rig.bin.join("check-decided.json"), br#"{"existing": []}"#);
+    let list = rig.list("Lease.docx").unwrap();
+    assert!(list.truncated);
+    assert_eq!(list.revisions.len(), MAX_REVISIONS);
+    assert_eq!(list.total, count);
+
+    let outcome = rig.host.ok(rig.decide_all(list.version, Vec::new()));
+    let CommandOutcome::RevisionsDecided { before, checkpoint } = outcome else {
+        panic!("not decided: {outcome:?}");
+    };
+    assert!(checkpoint.is_some());
+    let ids: Vec<String> = (1..=count).map(|id| id.to_string()).collect();
+    let mut accepted = ORIGINAL.to_vec();
+    accepted.extend_from_slice(format!("@accept\nids: {}\n", ids.join(", ")).as_bytes());
+    assert_eq!(rig.lease_bytes(), accepted, "one edit names all 600 ids");
+    assert_eq!(rig.calls().iter().filter(|c| *c == "edit").count(), 1);
+    rig.host.settle();
+    assert_eq!(
+        matter_events(&rig.host, rig.matter).checkpoint(CheckpointKind::Revisions),
+        checkpoint
+    );
+    let after = rig.list("Lease.docx").unwrap();
+    assert_eq!((after.revisions.len(), after.total), (0, 0));
+    assert!(!after.truncated);
+
+    let undo = HostCommand::RestoreVersion {
+        thread: None,
+        undoes: None,
+        matter: rig.matter,
+        checkpoint: before,
+        scope: RestoreRequest::Files {
+            paths: vec![lease("Lease.docx")],
+        },
+    };
+    assert!(matches!(
+        rig.host.ok(undo),
+        CommandOutcome::VersionRestored { .. }
+    ));
+    assert_eq!(rig.lease_bytes(), ORIGINAL);
+    assert_eq!(rig.list("Lease.docx").unwrap().total, count);
+    rig.host.shutdown();
+}
+
+/// Accept all from a list of bytes the file no longer holds is stale, checked before stetdoc
+/// reads anything: nothing is written and no checkpoint taken. All with ids named is refused.
+#[test]
+fn accept_all_of_a_changed_file_is_stale_and_writes_nothing() {
+    let rig = Rig::new("revisions-accept-all-stale", true);
+    rig.host.refused(
+        rig.decide_all(version_of(b"what the list read"), Vec::new()),
+        ErrorCode::WordRevisionsStale,
+    );
+    assert!(rig.calls().is_empty(), "stetdoc ran: {:?}", rig.calls());
+    rig.host.refused(
+        rig.decide_all(version_of(ORIGINAL), vec![1]),
+        ErrorCode::CommandInvalid,
+    );
+    assert!(!rig.edited());
+    rig.assert_untouched();
+    rig.host.settle();
+    assert_eq!(
+        matter_events(&rig.host, rig.matter).checkpoint(CheckpointKind::Revisions),
+        None
     );
     rig.host.shutdown();
 }

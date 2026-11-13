@@ -80,6 +80,7 @@ const listOf = (revisions: Revision[], version = "v1"): RevisionList => ({
   version,
   revisions,
   truncated: false,
+  total: revisions.length,
 });
 const refusal = (code: string, files?: string[]) => ({
   code,
@@ -304,15 +305,39 @@ test("Undo goes once a read finds the file changed after the decision; a read of
   expect(h.one("word-changes-decided")).toBeNull();
 });
 
-test("Accept all and Reject all send every listed change's ids", async () => {
+test("Accept all and Reject all send all of the version in view, not the listed ids", async () => {
   h = await mount({ list: () => listOf(FIRST) });
   await openChanges();
   await press(panel()?.querySelector(".rd-accept-all"));
   await press(panel()?.querySelector(".rd-reject-all"));
   expect(decisionsSent().map((c) => c.command.command.decide_revisions)).toEqual([
-    { matter: MATTER, path: REPLY, version: "v1", ids: [1, 2, 3, 4, 5], decision: "accept" },
-    { matter: MATTER, path: REPLY, version: "v1", ids: [1, 2, 3, 4, 5], decision: "reject" },
+    { matter: MATTER, path: REPLY, version: "v1", ids: [], decision: "accept", all: true },
+    { matter: MATTER, path: REPLY, version: "v1", ids: [], decision: "reject", all: true },
   ]);
+});
+
+test("600 changes: the panel counts 600 and lists 500; one Accept all decides them all and none are left", async () => {
+  const shown = Array.from({ length: 500 }, (_, i) => rev([i + 1], "insert", "A. Mehta", "x"));
+  h = await mount({
+    list: (n) => (n === 1 ? { ...listOf(shown), truncated: true, total: 600 } : listOf([], "v2")),
+  });
+  await openChanges();
+  expect(rows()).toHaveLength(500);
+  expect(panel()?.querySelector(".rd-review-head .rd-review-sub")?.textContent).toBe(
+    "600 changes, each with its author and time, as Word shows them.",
+  );
+  expect(h.one("word-changes-more")?.textContent).toBe(
+    "The first 500 are listed here. Accept all and Reject all decide all 600.",
+  );
+  await press(panel()?.querySelector(".rd-accept-all"));
+  expect(decisionsSent().map((c) => c.command.command.decide_revisions)).toEqual([
+    { matter: MATTER, path: REPLY, version: "v1", ids: [], decision: "accept", all: true },
+  ]);
+  expect(rows()).toHaveLength(0);
+  expect(h.one("word-changes-empty")).not.toBeNull();
+  expect(h.one("word-changes-more")).toBeNull();
+  // one decision, one checkpoint before it: one Undo takes back all 600
+  expect(h.one("word-changes-undo")).not.toBeNull();
 });
 
 test("a file Word holds opens the lock's dialog; Try again sends the same decision as a new command, Cancel changes nothing else", async () => {

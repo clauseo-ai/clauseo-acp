@@ -11,7 +11,7 @@ use clauseo_protocol::{
 };
 use serde_json::json;
 
-use super::parse::{batch, is_docx, revisions, timestamp};
+use super::parse::{all_ids, batch, is_docx, revisions, timestamp};
 use super::stetdoc::{answer, env};
 
 fn code(result: Result<serde_json::Value, crate::error::Error>) -> ErrorCode {
@@ -46,8 +46,9 @@ fn check_and_view_join_into_revisions_in_document_order() {
         "#7 format C 2026-11-09 p9\n",
     );
     let view = json!({"text": ledger, "next": null});
-    let (list, truncated) = revisions(&check, &view).unwrap();
+    let (list, truncated, total) = revisions(&check, &view).unwrap();
     assert!(!truncated);
+    assert_eq!(usize::try_from(total).unwrap(), list.len());
     let shape: Vec<_> = list
         .iter()
         .map(|r| (r.block.as_str(), r.ids.clone(), r.kind, r.text.as_deref()))
@@ -81,8 +82,13 @@ fn a_long_list_is_cut_and_long_text_is_cut() {
         .collect();
     let check = json!({"existing": [{"author": long, "changes": changes}]});
     let view = json!({"text": format!("#0 insert X 2026-11-09 p1 \"{long}\"\n")});
-    let (list, truncated) = revisions(&check, &view).unwrap();
+    let (list, truncated, total) = revisions(&check, &view).unwrap();
     assert!(truncated);
+    assert_eq!(usize::try_from(total).unwrap(), MAX_REVISIONS + 1);
+    // Accept all names every one, past the cut.
+    let ids = all_ids(&check).unwrap();
+    assert_eq!(ids.len(), MAX_REVISIONS + 1);
+    assert_eq!(ids.first(), Some(&0));
     assert_eq!(list.len(), MAX_REVISIONS);
     assert_eq!(list[0].author.chars().count(), MAX_REVISION_TEXT_CHARS);
     assert_eq!(

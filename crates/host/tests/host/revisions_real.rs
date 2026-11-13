@@ -122,6 +122,7 @@ fn the_real_stetdoc_lists_and_accepts_a_tracked_change() {
         version: before.version,
         ids: insertion,
         decision: RevisionDecision::Accept,
+        all: false,
     }));
     assert!(
         matches!(outcome, CommandOutcome::RevisionsDecided { .. }),

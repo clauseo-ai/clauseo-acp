@@ -26,7 +26,7 @@ use crate::error::Error;
 use crate::log_file::Cause;
 use crate::matter_worker::{MatterJob, MatterReply};
 use crate::pipeline::MatterEvent;
-use crate::revisions::{Act, Decided, RevisionsDone, RevisionsJob};
+use crate::revisions::{Act, Decided, Ids, RevisionsDone, RevisionsJob};
 
 /// A decision between its checks and the matter thread's answer.
 #[derive(Debug)]
@@ -75,7 +75,11 @@ fn send(
         clock: Arc::clone(&actor.clock),
         act: Act::Decide {
             version: decide.version,
-            ids: decide.ids,
+            ids: if decide.all {
+                Ids::All
+            } else {
+                Ids::These(decide.ids)
+            },
             decision: decide.decision,
             outside_edits: actor.ids.mint(now)?,
             checkpoint: actor.ids.mint(now)?,

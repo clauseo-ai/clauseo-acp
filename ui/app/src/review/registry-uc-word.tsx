@@ -59,6 +59,7 @@ const LIST: RevisionList = {
     change(4, "format"),
   ],
   truncated: false,
+  total: 4,
 };
 
 /** The room over a matter whose wall lists one .docx; list_revisions gives `list`, or is refused with that code, and
@@ -174,6 +175,12 @@ export const UC_WORD: Entry[] = [
       />
     ),
   },
+  // a list that stops short: Accept all and Reject all decide every change, the listed ones and the rest
+  panel(
+    "UC-260",
+    readerWords("The first {shown} are listed here. Accept all and Reject all decide all {n}."),
+    wordHost({ ...LIST, truncated: true, total: 600 }),
+  ),
 ];
 
 /** registry-uc-blackline.tsx's UC_ALL (registry-uc.tsx's UC, then the Word blackline's scenes), then these. */

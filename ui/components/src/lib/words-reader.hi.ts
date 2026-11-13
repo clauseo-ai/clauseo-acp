@@ -116,6 +116,8 @@ export const HI = {
   "No tracked changes in this file.": "इस फ़ाइल में कोई ट्रैक किया गया बदलाव नहीं है।",
   "Formatting changed": "फ़ॉर्मैटिंग बदली गई",
   Moved: "जगह बदली गई",
+  "The first {shown} are listed here. Accept all and Reject all decide all {n}.":
+    "यहाँ पहले {shown} दिखाए गए हैं। सभी स्वीकार करें और सभी अस्वीकार करें सभी {n} बदलावों पर लागू होते हैं।",
 
   // the citations checked
   "Checked {n} citations at {time}.": "{time} बजे {n} उद्धरण जाँचे गए।",

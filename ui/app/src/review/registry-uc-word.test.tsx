@@ -38,6 +38,7 @@ const WHERE: Record<string, string> = {
   "UC-126": '[data-testid="word-changes-line"]',
   "UC-127": '[data-testid="word-changes-line"]',
   "UC-128": '[data-testid="version"][data-kind="revisions"] .ver-entry-who',
+  "UC-260": '[data-testid="word-changes-more"]',
 };
 
 const said = (selector: string) =>

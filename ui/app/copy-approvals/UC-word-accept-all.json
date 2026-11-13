@@ -1,0 +1,13 @@
+{
+  "UC-260": {
+    "en": "The first {shown} are listed here. Accept all and Reject all decide all {n}.",
+    "hi": "यहाँ पहले {shown} दिखाए गए हैं। सभी स्वीकार करें और सभी अस्वीकार करें सभी {n} बदलावों पर लागू होते हैं।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-13",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "approved",
+    "at": "2026-11-13",
+    "by": "orchestrator (word-accept-all: Accept all decides every tracked change)",
+    "note": "Tracked changes panel, under the count, only when the file holds more changes than the list shows (over 500); {shown} is how many are listed, {n} how many the file holds"
+  }
+}
