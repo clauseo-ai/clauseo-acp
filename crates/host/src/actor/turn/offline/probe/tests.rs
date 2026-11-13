@@ -282,12 +282,26 @@ fn a_closed_port_is_refused_and_a_closed_proxy_too() {
         .unwrap()
         .port();
     let url = Url::parse(&format!("https://127.0.0.1:{port}")).unwrap();
-    assert_eq!(
-        timed(Some(Route::Direct), &url).0.class,
-        ReachClass::Refused
-    );
+    let (reach, _) = timed(Some(Route::Direct), &url);
+    assert!(closed_miss(reach), "{reach:?}");
     let (reach, _) = timed(Some(proxy(port)), &service());
-    assert_eq!((reach.class, reach.via), (ReachClass::Refused, Via::Proxy));
+    assert!(closed_miss(reach), "{reach:?}");
+    assert_eq!(reach.via, Via::Proxy);
+}
+
+/// A closed local port's miss: `refused`, or on Windows `connect_timeout` when the cap is under
+/// the ~2 s Windows spends retrying the SYN before it reports the refusal. Both are misses alike;
+/// only the log's class differs.
+fn closed_miss(reach: Reach) -> bool {
+    let refused = if cfg!(windows) {
+        matches!(
+            reach.class,
+            ReachClass::Refused | ReachClass::ConnectTimeout
+        )
+    } else {
+        reach.class == ReachClass::Refused
+    };
+    refused && !reach.reached()
 }
 
 #[test]
@@ -345,7 +359,32 @@ fn a_login_of_unknown_kind_is_reached_when_either_service_answers() {
     fake.join().unwrap();
     // Neither: the first one's miss.
     let reach = probe_any(&[(refused, Route::Direct)], CAP);
-    assert_eq!((reach.class, reach.reached()), (ReachClass::Refused, false));
+    assert!(closed_miss(reach), "{reach:?}");
+}
+
+#[test]
+fn a_blackholed_first_host_never_hides_a_second_that_answers() {
+    // The first accepts, takes the hello and never answers; the tries run side by side, each
+    // within the one cap, so the second's answer stands and the whole stays within the cap.
+    let (silent, hole) = peer(Then::Tls(None));
+    let (port, fake) = peer(Then::Tls(Some(&SERVER_HELLO)));
+    let both = [
+        (
+            Url::parse(&format!("https://127.0.0.1:{silent}")).unwrap(),
+            Route::Direct,
+        ),
+        (
+            Url::parse(&format!("https://127.0.0.1:{port}")).unwrap(),
+            Route::Direct,
+        ),
+    ];
+    let started = SystemClock.now().mono;
+    let reach = probe_any(&both, CAP);
+    let took = SystemClock.now().mono.saturating_sub(started);
+    assert_eq!((reach.class, reach.reached()), (ReachClass::Answered, true));
+    assert!(took < CAP + Duration::from_millis(500), "{took:?}");
+    fake.join().unwrap();
+    hole.join().unwrap();
 }
 
 #[test]
