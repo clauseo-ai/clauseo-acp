@@ -24,9 +24,16 @@ use std::time::Duration;
 use clauseo_protocol::{AgentSessionId, Timestamp};
 use serde_json::Value;
 
-/// The most bytes one check reads from one transcript: eight times the longest prompt text
-/// (`MAX_PROMPT_TEXT_BYTES`), so a steer's own line fits whole, JSON escapes and all.
-const CAP: u64 = 2 * 1024 * 1024;
+/// The most bytes one check reads from one transcript: the longest prompt text plus 1 MiB (7 MiB),
+/// so a steer's own line fits whole. `MAX_PROMPT_TEXT_BYTES` already counts a text as JSON
+/// escapes it (`escaped_len`, serde's escaping), which is what JSON.stringify writes to the
+/// transcript: `"` `\` and \n \r \t \b \f two bytes each, other control characters six
+/// (`\u00XX`), anything else as its UTF-8. A steer's texts, escaped, are at most that limit, so
+/// no multiplier is needed; the 1 MiB is for the line's other fields (ids, folder, version,
+/// stamps), a few KiB. Memory follows what was appended since the last read, never the cap
+/// alone: each check reads on from where the last stopped, so a check holds this many bytes, and
+/// the lines parsed from them, only when Claude wrote that much (large tool results) in between.
+const CAP: u64 = clauseo_protocol::MAX_PROMPT_TEXT_BYTES as u64 + 1024 * 1024;
 /// How much earlier than the steer's send a line may be stamped, for the two clocks.
 const SKEW: Duration = Duration::from_secs(2);
 
@@ -175,13 +182,16 @@ impl Read {
 /// replaced: it is read from its start.
 fn read_on(path: &Path, resume: Resume, cap: u64) -> std::io::Result<Read> {
     let mut file = std::fs::File::open(path)?;
-    let resume = if file.metadata()?.len() < resume.at {
+    let len = file.metadata()?.len();
+    let resume = if len < resume.at {
         Resume::default()
     } else {
         resume
     };
     file.seek(SeekFrom::Start(resume.at))?;
-    let mut bytes = Vec::new();
+    // Sized to what is there, so a read near the cap does not grow to twice it.
+    let there = usize::try_from(len.saturating_sub(resume.at).min(cap)).unwrap_or(0);
+    let mut bytes = Vec::with_capacity(there);
     file.take(cap).read_to_end(&mut bytes)?;
     let read = u64::try_from(bytes.len()).unwrap_or(u64::MAX);
     let full = read >= cap;
