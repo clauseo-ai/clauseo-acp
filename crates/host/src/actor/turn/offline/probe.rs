@@ -22,6 +22,7 @@ use crate::log_file::{Cause, LIFECYCLE};
 
 mod route;
 mod service;
+pub(crate) mod settings;
 
 pub(crate) use service::{Service, Target};
 
@@ -247,6 +248,22 @@ impl fmt::Debug for ReachProbe {
 /// (or none running).
 pub(super) fn target(actor: &mut Actor, thread: ThreadId) -> Option<Target> {
     super::super::updates::agent(actor, thread).and_then(|agent| agent.probe.clone())
+}
+
+/// Clauseo's own `_meta` for `thread`'s session moves the agent's route or host
+/// (`settings::meta_moved`): the target its launch recorded becomes unknown.
+pub(in crate::actor::turn) fn session_meta(
+    actor: &mut Actor,
+    thread: ThreadId,
+    meta: &serde_json::Map<String, serde_json::Value>,
+) {
+    if !settings::meta_moved(meta) {
+        return;
+    }
+    if let Some(agent) = super::super::updates::agent(actor, thread) {
+        let moved = Some(settings::Moved::SettingsEnv);
+        agent.probe = agent.probe.take().map(|target| target.unless_moved(moved));
+    }
 }
 
 /// Starts the probe for `thread`'s `turn`: its answer comes back as

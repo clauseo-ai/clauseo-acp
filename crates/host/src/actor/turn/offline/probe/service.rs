@@ -18,8 +18,12 @@
 //!   `https_proxy`, `ALL_PROXY`, `all_proxy` and `NO_PROXY` else `no_proxy`. A proxy a `CONNECT`
 //!   cannot follow (`https://`, `socks5://`) is [`ReachClass::UnknownRoute`].
 //!
-//! Either unknown means no probe: it counts as reached, so a watch waits and the quiet backstop
-//! ends a silent turn at 5 min.
+//! - **The agent's own settings:** a settings file (or Clauseo's own `_meta`) whose `env`, or a
+//!   Codex `config.toml` whose provider or base URL, moves the route or host the environment
+//!   shows is [`ReachClass::UnknownService`] too ([`Target::unless_moved`], `settings.rs`).
+//!
+//! Either unknown means no probe: it counts as reached for a quiet or a note's watch (a miss for
+//! the window's, `offline.rs::on_probed`), and the quiet backstop ends a silent turn at 5 min.
 
 use std::collections::BTreeMap;
 use std::ffi::{OsStr, OsString};
@@ -104,6 +108,21 @@ impl Target {
             .map(|url| launch_route(proxy.as_deref(), no_proxy.as_deref(), &url).map(|r| (url, r)))
             .collect();
         routed.map_or(Self::Unknown(ReachClass::UnknownRoute), Self::Service)
+    }
+
+    /// This launch's target once the agent's own settings files are read (`settings.rs`): one
+    /// that `moved` its route or host is [`ReachClass::UnknownService`], logged with the reason's
+    /// class only.
+    pub(crate) fn unless_moved(self, moved: Option<super::settings::Moved>) -> Self {
+        let Some(moved) = moved else {
+            return self;
+        };
+        tracing::info!(
+            target: crate::log_file::LIFECYCLE,
+            reason = moved.as_str(),
+            "the agent's settings move its route or host; the host will not probe its service"
+        );
+        Self::Unknown(ReachClass::UnknownService)
     }
 }
 

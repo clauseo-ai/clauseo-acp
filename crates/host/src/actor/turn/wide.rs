@@ -24,6 +24,9 @@ pub(crate) struct TurnPath {
     /// Whether a live turn of a Claude or Codex agent is watched for silence
     /// (`offline/quiet.rs`): on, but off in unit tests unless a test turns it on.
     pub(super) quiet_watch: bool,
+    /// The `config.toml` files Codex reads beside its home's (`offline/probe/settings.rs`): the
+    /// OS's, none in unit tests unless a test sets them.
+    pub(super) codex_config_files: Vec<std::path::PathBuf>,
     /// The kind the unit tests' `fake-agent` plays for the offline probe and the quiet arm.
     #[cfg(test)]
     pub(super) kind_for_tests: Option<clauseo_protocol::AgentKind>,
@@ -36,6 +39,11 @@ impl TurnPath {
         Self {
             idle: IdleClock::new(idle),
             quiet_watch: idle.quiet_watch && !cfg!(test),
+            codex_config_files: if cfg!(test) {
+                Vec::new()
+            } else {
+                super::offline::probe::settings::codex_system_files()
+            },
             ..Self::default()
         }
     }

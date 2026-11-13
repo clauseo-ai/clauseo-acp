@@ -144,6 +144,22 @@ host added later reached the page without anyone deciding it should.
       `no_proxy` lists; Codex `HTTPS_PROXY`, `https_proxy`, `ALL_PROXY`, `all_proxy` and
       `NO_PROXY`. A proxy a `CONNECT` cannot follow (`https://`, `socks5://`) is
       `unknown_route`.
+    - *the agent's own settings* (security re-check, round 2): a Claude settings file or a
+      reused Codex config that changes the route or host → no probe; the backstop ends a
+      silent turn. The launch prep reads what Claude Code 2.1.293 copies into its environment
+      (the firm's `managed-settings.json` and `managed-settings.d/*.json` beside
+      `managed-mcp.json`, and in the agent's home `settings.json`, `cowork_settings.json`,
+      `remote-settings.json`, `.config.json` and `.claude.json`), and Clauseo's own
+      `_meta.claudeCode.options` `settings` and `env`: an `env` key `*_PROXY`,
+      `ANTHROPIC_*`, `CLAUDE_CODE_USE_*`, `AWS_*`, `GOOGLE_*` or `VERTEX_*` (any case) is
+      `unknown_service`. So are, for Codex (`rust-v0.162.1`), a `config.toml` (the system one,
+      the legacy `/etc/codex/managed_config.toml`, the home's) setting `model_provider` other
+      than `openai`, `openai_base_url`, `chatgpt_base_url`, a `[model_providers.*]` with a
+      `base_url`, or a `[profiles.*]` with any of them. A file there but unreadable, over
+      1 MiB or not parsing counts the same; an absent one changes nothing. The log names only
+      `reason=settings_env` or `codex_config` (`offline/probe/settings.rs`). Not read: Claude
+      Code's MDM and registry policy tiers and its WSL Windows-side managed folder (a project's
+      `.claude/settings*.json` never loads: `settingSources` is `["user"]`).
     Either unknown is not probed: for a quiet or a note's watch it counts as reached at once and
     its line says so, so the watch waits and only the backstop (or the agent's own end) ends a
     silent turn; for the window's watch it is a miss (stage D round 2: the OS says offline and
