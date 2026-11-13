@@ -321,7 +321,7 @@ export const ERROR_WORDS: Record<WordedCode, ErrorKey> = {
   // the agent sent nothing for 5 minutes while answering, with no tool running and no question waiting, so the host
   // ended the turn (D-050's backstop): Try again under the answer so far, never Restart. English approved (orchestrator,
   // 2026-11-13); the Hindi is provisional
-  "agent.quiet": "Claude stopped answering. The answer so far is kept. Try again.",
+  "agent.quiet": "Claude stopped answering. Try again.",
   // an import whose servers are too long to show whole in one confirm: nothing was added
   "mcp.import_too_large":
     "There are too many tools to import at once, so nothing was imported. Add them one at a time.",
@@ -391,9 +391,9 @@ const PLANNED: Partial<
   // the agent sent nothing for 5 minutes (D-050's backstop; see ERROR_WORDS): Try again, never Restart. English
   // approved (orchestrator, 2026-11-13); the Hindi is provisional
   "agent.quiet": {
-    chatgpt: "ChatGPT stopped answering. The answer so far is kept. Try again.",
-    named: "{name} stopped answering. The answer so far is kept. Try again.",
-    nameless: "The AI stopped answering. The answer so far is kept. Try again.",
+    chatgpt: "ChatGPT stopped answering. Try again.",
+    named: "{name} stopped answering. Try again.",
+    nameless: "The AI stopped answering. Try again.",
   },
 };
 

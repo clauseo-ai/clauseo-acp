@@ -1053,8 +1053,8 @@
     "note": "agent.service_error (#1030): a failure the agent gave up on, on its side; Try again, no Restart; Claude's, as U3-err-agent.protocol_error names Claude; ChatGPT's is U6F-19"
   },
   "U3-err-agent.quiet": {
-    "en": "Claude stopped answering. The answer so far is kept. Try again.",
-    "hi": "Claude ने उत्तर देना बंद कर दिया। अब तक का उत्तर रखा गया है। फिर से प्रयास करें।",
+    "en": "Claude stopped answering. Try again.",
+    "hi": "Claude ने उत्तर देना बंद कर दिया। फिर से प्रयास करें।",
     "hi_status": "provisional",
     "hi_at": "2026-11-13",
     "hi_by": "app track (provisional; derived from the approved ChatGPT sentence; Hindi-speaking lawyer to review)",

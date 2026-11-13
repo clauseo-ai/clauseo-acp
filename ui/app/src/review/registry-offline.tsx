@@ -70,7 +70,7 @@ const SERVICE: Entry[] = [
 const QUIET: Entry[] = [
   {
     id: "U3-err-agent.quiet",
-    words: errorWords("Claude stopped answering. The answer so far is kept. Try again."),
+    words: errorWords("Claude stopped answering. Try again."),
     screen: "room/thread",
     render: () => (
       <RoomOver

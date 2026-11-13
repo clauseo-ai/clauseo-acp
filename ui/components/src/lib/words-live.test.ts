@@ -210,12 +210,12 @@ const PLANNED_LINES = [
   ],
   [
     "agent.quiet",
-    "ChatGPT stopped answering. The answer so far is kept. Try again.",
-    "ChatGPT ने उत्तर देना बंद कर दिया। अब तक का उत्तर रखा गया है। फिर से प्रयास करें।",
-    "gemini stopped answering. The answer so far is kept. Try again.",
-    "gemini ने उत्तर देना बंद कर दिया। अब तक का उत्तर रखा गया है। फिर से प्रयास करें।",
-    "The AI stopped answering. The answer so far is kept. Try again.",
-    "AI ने उत्तर देना बंद कर दिया। अब तक का उत्तर रखा गया है। फिर से प्रयास करें।",
+    "ChatGPT stopped answering. Try again.",
+    "ChatGPT ने उत्तर देना बंद कर दिया। फिर से प्रयास करें।",
+    "gemini stopped answering. Try again.",
+    "gemini ने उत्तर देना बंद कर दिया। फिर से प्रयास करें।",
+    "The AI stopped answering. Try again.",
+    "AI ने उत्तर देना बंद कर दिया। फिर से प्रयास करें।",
   ],
 ] as const;
 
