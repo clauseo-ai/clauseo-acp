@@ -1,5 +1,5 @@
 //! What the turn path's own tasks post back to the actor: agent call results and whole-log
-//! reads.
+//! reads; and a matter job's name for the log.
 
 use clauseo_acp::{AgentInfo, PromptEnd, SessionStart};
 use clauseo_protocol::{
@@ -46,7 +46,7 @@ pub(crate) enum TurnInput {
     OfflineProbe {
         thread: ThreadId,
         turn: TurnId,
-        reached: bool,
+        reach: super::offline::probe::Reach,
     },
 }
 
@@ -110,4 +110,17 @@ pub(crate) enum LogFor {
         turn: TurnId,
         reply: Reply<QueryResult>,
     },
+}
+
+impl super::JobKind {
+    /// The variant's name, for the log: its fields can hold paths.
+    pub(super) const fn name(&self) -> &'static str {
+        match self {
+            Self::Before(_) => "Before",
+            Self::After(_) => "After",
+            Self::Reconcile(_) => "Reconcile",
+            Self::Undo(_) => "Undo",
+            Self::Permission(_) => "Permission",
+        }
+    }
 }

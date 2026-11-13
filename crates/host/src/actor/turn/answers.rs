@@ -63,6 +63,7 @@ pub(super) fn answer_permission(
         option: option_id,
     };
     limits::asking_changed(actor);
+    super::offline::ask_ended(actor, thread);
     let mut out = Out::new(actor, thread, Some(ctx.id))?;
     let resolved = PermissionResolved {
         request,
@@ -217,6 +218,7 @@ pub(super) fn answer_elicitation(
         response,
     };
     limits::asking_changed(actor);
+    super::offline::ask_ended(actor, thread);
     let mut out = Out::new(actor, thread, Some(ctx.id))?;
     let resolved = ElicitationResolved {
         elicitation,

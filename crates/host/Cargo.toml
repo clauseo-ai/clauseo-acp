@@ -42,6 +42,9 @@ clauseo-sandbox = { path = "../sandbox" }
 clauseo-connectors = { path = "../connectors" }
 # The unsafe-site block list (ADR 0053): the list in use, its load at start and its updates.
 clauseo-blocklist = { path = "../blocklist" }
+# The offline probe's TLS ClientHello (turn/offline/probe/route.rs, D-050): its bytes only, no
+# certificate check. Already in the lock (0.23.46) through clauseo-connectors and clauseo-agents.
+rustls = { workspace = true, features = ["ring", "std", "tls12"] }
 # The block list fetch's redirects: each `Location` resolved against the URL before it.
 url = { workspace = true }
 # Random agent-browser session names on Windows (`browser/session.rs`).

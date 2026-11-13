@@ -154,6 +154,7 @@ pub(super) fn handle(actor: &mut Actor, thread: ThreadId, event: AcpEvent) {
                 agent.url_elicitations.remove(&elicitation_id);
             }
             super::super::limits::asking_changed(actor);
+            offline::ask_ended(actor, thread);
         }
         AcpEvent::Limit {
             session,

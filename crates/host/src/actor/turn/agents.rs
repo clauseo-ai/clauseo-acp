@@ -162,6 +162,9 @@ pub(super) struct CodexAgent {
     pub(super) guard: bool,
     /// Its one `authenticate` with its key (`key_retry.rs`).
     pub(super) key_retry: KeyRetry,
+    /// Its launch passed a key (`CODEX_API_KEY`, set and not empty): the host's offline probe
+    /// asks `api.openai.com` then, `chatgpt.com` (a `ChatGPT` login's) otherwise.
+    pub(super) api_key: bool,
 }
 
 /// Runs `waiting` once `thread`'s agent has a session, launching the agent first.

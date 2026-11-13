@@ -155,6 +155,8 @@ impl Dir {
         let policy = FilePolicy::new(self.root.join("policy.json"), SystemFiles);
         let effective = Effective::load(locations, &SystemFiles, &[&policy]);
         crate::idle_stop::off(HostConfig::new(effective, launcher))
+            // A silent turn is never probed: no host test touches the network (D-050).
+            .with_quiet_watch(false)
             .with_limits_reader(Arc::new(NoReader))
             .with_clock(Arc::new(clock.clone()))
             .with_ids(Box::new(SequentialIds::with_run(run)))

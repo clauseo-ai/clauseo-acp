@@ -335,6 +335,7 @@ crates/matters/src/place/windows.rs - unsafe_code
 crates/host/examples/stetdoc_compare_fake.rs - clippy::disallowed_methods
 crates/host/src/config/wiring/stetdoc.rs HostConfig clippy::multiple_inherent_impl
 crates/host/src/config/mcp.rs HostConfig clippy::multiple_inherent_impl
+crates/host/src/config/idle.rs HostConfig clippy::multiple_inherent_impl
 crates/host/src/agent/loads/lawyer.rs server_path clippy::disallowed_methods
 crates/host/src/actor/query.rs query clippy::too_many_lines
 crates/host/src/actor/startup.rs open clippy::too_many_lines

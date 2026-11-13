@@ -33,6 +33,9 @@ pub(crate) struct IdleStop {
     /// The machine's total memory in bytes, when the desktop gave it
     /// (`HostConfig::with_machine_memory`).
     pub(crate) memory: Option<u64>,
+    /// Whether a live turn whose agent goes silent is watched (D-050, `turn/offline/quiet.rs`).
+    /// Here beside the idle stop's clocks, since `config.rs` is at its 600-line limit.
+    pub(crate) quiet_watch: bool,
 }
 
 impl Default for IdleStop {
@@ -42,6 +45,7 @@ impl Default for IdleStop {
             live_agents: LIVE_AGENTS,
             cap_min_idle: CAP_MIN_IDLE,
             memory: None,
+            quiet_watch: true,
         }
     }
 }
@@ -61,6 +65,21 @@ impl IdleStop {
             return None;
         }
         since.checked_add(self.limit)
+    }
+}
+
+#[expect(
+    clippy::multiple_inherent_impl,
+    reason = "config.rs is at its 600-line limit; the quiet watch's switch lives with the idle stop"
+)]
+impl crate::HostConfig {
+    /// Whether a live turn whose agent goes silent is watched (D-050, `turn/offline/quiet.rs`):
+    /// probed after 30 s with no output, ended `agent.quiet` after 5 min. Default on; host tests
+    /// turn it off, so none probes the network.
+    #[must_use]
+    pub fn with_quiet_watch(mut self, on: bool) -> Self {
+        self.idle.quiet_watch = on;
+        self
     }
 }
 
