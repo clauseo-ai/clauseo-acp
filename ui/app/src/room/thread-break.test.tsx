@@ -107,7 +107,12 @@ test("with H10 faked: Restart for agent.exited, agent.launch_failed and thread.i
   );
   expect(exitedHost.textContent).toContain("Details");
   // a restart can't mend these, so no line: the step row says them
-  for (const code of ["agent.protocol_error", "agent.unsupported_version", "agent.service_error"])
+  for (const code of [
+    "agent.protocol_error",
+    "agent.unsupported_version",
+    "agent.service_error",
+    "agent.quiet",
+  ])
     expect(stoppedLine("en", brk(code), 0, { onRestart: () => {}, refused: null })).toBeNull();
   // and before H10 only agent.exited takes the line
   expect(stoppedLine("en", brk("agent.launch_failed"), 0, null)).toBeNull();
@@ -148,6 +153,7 @@ test("the stopped question comes back only before H10, only for the codes asking
   expect(refillOf(brk("agent.protocol_error"), true, null)).toBeNull();
   expect(refillOf(brk("agent.unsupported_version"), true, null)).toBeNull();
   expect(refillOf(brk("agent.service_error"), true, null)).toBeNull();
+  expect(refillOf(brk("agent.quiet"), true, null)).toBeNull();
 });
 
 test("agent.service_error (#1030): no Restart, no time mark, no working line, with H10 or without", () => {
@@ -158,6 +164,20 @@ test("agent.service_error (#1030): no Restart, no time mark, no working line, wi
   expect(stoppedLine("en", b, 0, { onRestart: () => {}, refused: null })).toBeNull();
   expect(errorWords("en", "agent.service_error", { kind: "codex", name: "codex-acp" })).toBe(
     "ChatGPT had a problem on its side. Try again.",
+  );
+});
+
+test("agent.quiet (D-050's backstop): no Restart, no time mark, no working line, with H10 or without", () => {
+  const b = brk("agent.quiet");
+  expect(RESTARTS.has("agent.quiet")).toBe(false);
+  expect(takesMark(b.step)).toBe(false);
+  expect(stoppedLine("en", b, 0, null)).toBeNull();
+  expect(stoppedLine("en", b, 0, { onRestart: () => {}, refused: null })).toBeNull();
+  expect(errorWords("en", "agent.quiet", { kind: "codex", name: "codex-acp" })).toBe(
+    "ChatGPT stopped answering. The answer so far is kept. Try again.",
+  );
+  expect(errorWords("en", "agent.quiet", { kind: undefined, name: null })).toBe(
+    "The AI stopped answering. The answer so far is kept. Try again.",
   );
 });
 

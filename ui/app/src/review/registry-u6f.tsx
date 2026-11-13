@@ -5,8 +5,8 @@
 // room never has today (a thread always names its agent's id), so they render by themselves. U3-52 and U3-53, the
 // thread's line for a turn Clauseo stopped on the agent's request for files outside the matter, name the agent the same
 // way: Codex's turn as ChatGPT, and the AI alone. So do U3-54 and U3-55, the line for a turn the model refused as too
-// long to read (StopReason too_long). U6F-19 to U6F-21 are agent.service_error's, never a send's refusal: the stop line
-// under the answer so far, with Try again.
+// long to read (StopReason too_long). U6F-19 to U6F-21 are agent.service_error's, and U6F-22 to U6F-24 agent.quiet's,
+// never a send's refusal: the stop line under the answer so far, with Try again.
 import type { Lang } from "@clauseo/components/lib/display.ts";
 import { th } from "@clauseo/components/lib/words-thread.ts";
 import { type AgentName, errorWords as sentence } from "@clauseo/components/lib/words-errors.ts";
@@ -36,6 +36,18 @@ const serviceFailed = (agent: AgentId) => () => (
     host={() =>
       threadHost({
         entries: [QUESTION, ANSWER, step(7, { stop: "failed", failure: "agent.service_error" })],
+        agent,
+      })
+    }
+  />
+);
+
+/** A turn `agent` ended with agent.quiet (the agent sent nothing for 5 minutes): the stop line, with Try again. */
+const quietStopped = (agent: AgentId) => () => (
+  <RoomOver
+    host={() =>
+      threadHost({
+        entries: [QUESTION, ANSWER, step(7, { stop: "failed", failure: "agent.quiet" })],
         agent,
       })
     }
@@ -203,6 +215,24 @@ export const U6F: Entry[] = [
     words: errorWords("The AI had a problem on its side. Try again."),
     screen: "room/thread",
     render: nameless("agent.service_error"),
+  },
+  {
+    id: "U6F-22",
+    words: errorWords("ChatGPT stopped answering. The answer so far is kept. Try again."),
+    screen: "room/thread",
+    render: quietStopped("codex-acp"),
+  },
+  {
+    id: "U6F-23",
+    words: errorWords("{name} stopped answering. The answer so far is kept. Try again."),
+    screen: "room/thread",
+    render: quietStopped("gemini"),
+  },
+  {
+    id: "U6F-24",
+    words: errorWords("The AI stopped answering. The answer so far is kept. Try again."),
+    screen: "room/thread",
+    render: nameless("agent.quiet"),
   },
   {
     id: "U3-52",

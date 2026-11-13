@@ -196,5 +196,38 @@
     "at": "2026-11-12",
     "by": "orchestrator",
     "note": "agent.service_error (#1030): a failure the agent gave up on, on its side; Try again, no Restart; no name at all, as U6F-10"
+  },
+  "U6F-22": {
+    "en": "ChatGPT stopped answering. The answer so far is kept. Try again.",
+    "hi": "ChatGPT ने उत्तर देना बंद कर दिया। अब तक का उत्तर रखा गया है। फिर से प्रयास करें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-13",
+    "hi_by": "app track (provisional; derived from the approved ChatGPT sentence; Hindi-speaking lawyer to review)",
+    "status": "approved",
+    "at": "2026-11-13",
+    "by": "orchestrator",
+    "note": "agent.quiet (D-050's backstop): the agent sent nothing for 5 minutes with no tool running and no question waiting; Try again under the answer, never Restart"
+  },
+  "U6F-23": {
+    "en": "{name} stopped answering. The answer so far is kept. Try again.",
+    "hi": "{name} ने उत्तर देना बंद कर दिया। अब तक का उत्तर रखा गया है। फिर से प्रयास करें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-13",
+    "hi_by": "app track (provisional; derived from the approved ChatGPT sentence; Hindi-speaking lawyer to review)",
+    "status": "approved",
+    "at": "2026-11-13",
+    "by": "orchestrator",
+    "note": "agent.quiet (D-050's backstop): an agent of no kind by its name, as U6F-20; Try again under the answer, never Restart"
+  },
+  "U6F-24": {
+    "en": "The AI stopped answering. The answer so far is kept. Try again.",
+    "hi": "AI ने उत्तर देना बंद कर दिया। अब तक का उत्तर रखा गया है। फिर से प्रयास करें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-13",
+    "hi_by": "app track (provisional; derived from the approved ChatGPT sentence; Hindi-speaking lawyer to review)",
+    "status": "approved",
+    "at": "2026-11-13",
+    "by": "orchestrator",
+    "note": "agent.quiet (D-050's backstop): no name at all, as U6F-21; Try again under the answer, never Restart"
   }
 }

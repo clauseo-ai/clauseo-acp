@@ -1545,6 +1545,7 @@ expression: counts_schema()
         "mcp.server_unknown",
         "mcp.save_declined",
         "agent.service_error",
+        "agent.quiet",
         "mcp.import_too_large"
       ],
       "type": "string"

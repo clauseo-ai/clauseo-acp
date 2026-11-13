@@ -345,6 +345,11 @@ error_codes! {
         severity `error` offering `retry` or `new_session`, in a category no other code reads \
         (codex-acp's `internal_error`, `provider_error`, `overloaded`). The answer so far is \
         kept; asking again can work.";
+    AgentQuiet = "agent.quiet", retryable: true, meaning: "The agent sent nothing for 5 minutes \
+        while answering, with no tool running and no question waiting for the lawyer, so the \
+        host ended the turn (D-050's backstop: a blocked network the host's probe could not see, \
+        such as a proxy that asks for credentials or one that inspects TLS). The answer so far \
+        is kept; asking again can work.";
     McpImportTooLarge = "mcp.import_too_large", retryable: false, meaning: "The servers an \
         import would add, with their programs, arguments, URLs and variable or header names, \
         are too long to show whole in one confirm (over 2,000 characters), so nothing was \
