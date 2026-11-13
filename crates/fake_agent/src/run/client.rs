@@ -23,6 +23,47 @@ pub(super) enum Incoming {
     },
 }
 
+/// The session calls whose `_meta.claudeCode.options.settings` [`with_settings_file`] reads.
+const SESSION_CALLS: [&str; 3] = ["session/new", "session/load", "session/resume"];
+
+/// `incoming` with a session call's `_meta.claudeCode.options.settings`, when it is a string,
+/// replaced by the JSON of the file it names (a relative path taken from the call's `cwd`), as
+/// claude-agent-acp 0.89.1 reads a settings path (`dist/acp-agent.js:7287-7289`), so an
+/// `expect` matches the settings Claude Code gets either way. A file that cannot be read or
+/// parsed leaves a string saying so, which no settings pattern matches.
+pub(super) fn with_settings_file(mut incoming: Incoming) -> Incoming {
+    let Incoming::Request {
+        method,
+        params: Some(params),
+        ..
+    } = &mut incoming
+    else {
+        return incoming;
+    };
+    if !SESSION_CALLS.contains(&method.as_str()) {
+        return incoming;
+    }
+    let cwd = params.get("cwd").and_then(Value::as_str).map(str::to_owned);
+    let Some(settings) = params.pointer_mut("/_meta/claudeCode/options/settings") else {
+        return incoming;
+    };
+    let Value::String(path) = settings else {
+        return incoming;
+    };
+    let mut file = std::path::PathBuf::from(cwd.unwrap_or_default());
+    file.push(path.as_str());
+    let read = std::fs::read(&file)
+        .map_err(|error| error.to_string())
+        .and_then(|bytes| serde_json::from_slice(&bytes).map_err(|error| error.to_string()));
+    *settings = read.unwrap_or_else(|error| {
+        Value::String(format!(
+            "fake_agent: settings file {}: {error}",
+            file.display()
+        ))
+    });
+    incoming
+}
+
 /// Parses a client line. Anything that is not a JSON-RPC 2.0 request, notification or response
 /// is malformed, and a malformed line is a mismatch.
 pub(super) fn classify(line: &str) -> Result<Incoming, String> {
@@ -230,5 +271,41 @@ mod tests {
         ] {
             assert!(classify(bad).is_err(), "{bad}");
         }
+    }
+
+    /// A session call's settings path is read as claude-agent-acp reads it; an object, another
+    /// method and a file that is not there are left or said.
+    #[test]
+    fn a_settings_path_is_read_from_its_file() {
+        let dir = std::env::temp_dir();
+        let name = format!("fake-agent-settings-{}.json", std::process::id());
+        let file = dir.join(&name);
+        crate::write::write(&file, br#"{"permissions":{"deny":["Read(//x)"]}}"#).unwrap();
+        let call = |method: &str, settings: Value| {
+            let params = serde_json::json!({"cwd": dir.to_str().unwrap(),
+                "_meta": {"claudeCode": {"options": {"settings": settings}}}});
+            let line = serde_json::json!({"jsonrpc": "2.0", "id": 1, "method": method,
+                "params": params});
+            let Incoming::Request { params, .. } =
+                with_settings_file(classify(&line.to_string()).unwrap())
+            else {
+                panic!("not a request");
+            };
+            params.unwrap()["_meta"]["claudeCode"]["options"]["settings"].clone()
+        };
+        let read = serde_json::json!({"permissions": {"deny": ["Read(//x)"]}});
+        let absolute = Value::String(file.to_str().unwrap().to_owned());
+        assert_eq!(call("session/new", absolute.clone()), read);
+        assert_eq!(call("session/load", Value::from(name.as_str())), read);
+        assert_eq!(call("session/resume", read.clone()), read);
+        assert_eq!(call("session/prompt", absolute.clone()), absolute);
+        let missing = call("session/new", Value::from("none.json"));
+        assert!(
+            missing
+                .as_str()
+                .unwrap()
+                .starts_with("fake_agent: settings file")
+        );
+        crate::write::remove_file(&file).unwrap();
     }
 }

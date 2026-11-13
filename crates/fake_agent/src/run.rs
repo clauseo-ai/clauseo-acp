@@ -15,7 +15,7 @@ use crate::scenario::{Branch, Expect, Loc, OnStdinClose, Reply, Scenario, StepKi
 use crate::{EXIT_MISMATCH, EXIT_OK, diagnostic};
 use client::{
     Incoming, Miss, NO_CWD, classify, describe_expect, describe_wait, match_expect, match_wait,
-    placed,
+    placed, with_settings_file,
 };
 
 /// Why the script stopped before reaching its end.
@@ -351,7 +351,9 @@ impl<R: BufRead, W: Write> Runner<'_, R, W> {
                     ));
                 };
                 let line = line.strip_suffix('\r').unwrap_or(line);
-                classify(line).map_err(|m| Stop::Fail(at.clone(), m))
+                classify(line)
+                    .map(with_settings_file)
+                    .map_err(|m| Stop::Fail(at.clone(), m))
             }
             Err(error) => Err(Stop::Fail(
                 at.clone(),
