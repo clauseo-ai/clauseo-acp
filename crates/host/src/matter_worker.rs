@@ -25,23 +25,23 @@ use crate::error::Error;
 use crate::log_file::Cause;
 use crate::network_paths::resolve::Disk;
 use crate::network_paths::{self, NetEnv};
-use crate::sent::TurnPaths;
+use crate::sent::{Places, TurnPaths};
 use crate::shell_writes;
 
 pub(crate) use jobs::{RestoreJob, UndoJob};
 
-/// The matter paths a turn's tool calls named, in `folder`: those `acp` placed inside the
-/// session folder by text, and each `outside` path that the network-safe walk resolves into
-/// `folder` on the disk (a spelling through a symlink, or in another case where the file system
-/// ignores case). The rest lie outside the matter, and so does a path the network-safe walk
-/// does not vouch for, or one in a matter kept on a share, which is never resolved
-/// ([`network_paths::touchable`]; its walked path compared by [`matter_path_of_resolved`]).
-pub(crate) fn tool_paths(folder: &Path, paths: TurnPaths) -> BTreeSet<MatterPath> {
-    let TurnPaths {
+/// The matter paths a turn's tool calls wrote ([`TurnPaths::written`]), in `folder`: those
+/// `acp` placed inside the session folder by text, and each `outside` path that the network-safe
+/// walk resolves into `folder` on the disk (a spelling through a symlink, or in another case
+/// where the file system ignores case). The rest lie outside the matter, and so does a path the
+/// network-safe walk does not vouch for, or one in a matter kept on a share, which is never
+/// resolved ([`network_paths::touchable`]; its walked path compared by
+/// [`matter_path_of_resolved`]).
+pub(crate) fn tool_paths(folder: &Path, paths: &TurnPaths) -> BTreeSet<MatterPath> {
+    let Places {
         mut inside,
         outside,
-        ..
-    } = paths;
+    } = paths.written();
     let net = NetEnv::current();
     let disk = Disk::resolved(&net);
     for path in outside {
@@ -122,8 +122,8 @@ pub(crate) enum MatterJob {
     /// The before-turn checkpoint.
     BeforeTurn(TurnMeta),
     /// The after-turn checkpoint with the places the turn's tool calls named ([`tool_paths`]
-    /// resolves them), and the turn's before-turn checkpoint when the host knows it (for a
-    /// reused id's changes).
+    /// resolves those they wrote), and the turn's before-turn checkpoint when the host knows it
+    /// (for a reused id's changes).
     AfterTurn {
         meta: TurnMeta,
         tool_paths: TurnPaths,
@@ -414,7 +414,7 @@ fn handle(settings: &Settings, slot: &mut Slot, job: MatterJob) -> MatterReply {
             before,
         } => MatterReply::AfterTurn(open(settings, slot).and_then(|matter| {
             let commands = writes_in(matter.folder(), &tool_paths.writes);
-            let tool_paths = self::tool_paths(matter.folder(), tool_paths);
+            let tool_paths = self::tool_paths(matter.folder(), &tool_paths);
             let checkpoint = matter.after_turn_named(&meta, &tool_paths, &commands)?;
             turn_checkpoint(matter, checkpoint, before)
         })),
@@ -425,7 +425,7 @@ fn handle(settings: &Settings, slot: &mut Slot, job: MatterJob) -> MatterReply {
             last,
         } => MatterReply::AfterTurn(open(settings, slot).and_then(|matter| {
             let commands = writes_in(matter.folder(), &tool_paths.writes);
-            let named = (self::tool_paths(matter.folder(), tool_paths), commands);
+            let named = (self::tool_paths(matter.folder(), &tool_paths), commands);
             repair(matter, &meta, &named, before, last)
         })),
         MatterJob::Undo(job) => MatterReply::Undone(open(settings, slot).and_then(|matter| {

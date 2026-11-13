@@ -31,9 +31,8 @@ pub(super) fn tool_call(
     if let Some(current) = current(actor, thread) {
         // The turn's paths stay in memory, so they take the call as the agent sent it; what is
         // logged (the sources and the build) takes it with the withheld values scrubbed.
-        current.tool_paths.note(&call.locations, &call.content);
-        let text = crate::sent::CommandText::of_call(&call);
-        current.tool_paths.note_command(&call.acp_id, &text);
+        let fields = crate::sent::CallFields::of_call(&call);
+        current.tool_paths.note(&call.acp_id, &fields);
         current.withheld.scrub_call(&mut call);
     }
     let now = actor.clock.now();
@@ -112,11 +111,8 @@ pub(super) fn tool_update(
     // logged reads it: the sources, and `build.rs`'s inline or blob decision.
     if let Some(current) = current(actor, thread) {
         if matches!(context, Context::Live(_)) {
-            let locations = patch.locations.as_deref().unwrap_or_default();
-            let content = patch.content.as_deref().unwrap_or_default();
-            current.tool_paths.note(locations, content);
-            let text = crate::sent::CommandText::of_patch(&patch);
-            current.tool_paths.note_command(acp_id, &text);
+            let fields = crate::sent::CallFields::of_patch(&patch);
+            current.tool_paths.note(acp_id, &fields);
         }
         current.withheld.scrub_patch(acp_id, &mut patch);
     }

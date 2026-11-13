@@ -32,8 +32,9 @@ pub(crate) struct Core {
     pub(crate) timeline: Timeline,
 }
 
-/// What an after-turn checkpoint's turn named: the paths its tool calls named, and the paths
-/// its shell commands wrote (`crate::Matter::after_turn_named`).
+/// What an after-turn checkpoint's turn wrote: the paths its tool calls wrote
+/// ([`crate::names_a_write`]), and the paths its shell commands wrote
+/// (`crate::Matter::after_turn_named`).
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct Named<'a> {
     pub(crate) paths: &'a BTreeSet<MatterPath>,
@@ -41,11 +42,11 @@ pub(crate) struct Named<'a> {
 }
 
 /// What a checkpoint is for: its trailers and, after a turn, the paths the agent's tool calls
-/// named.
+/// wrote.
 pub(crate) struct Spec<'a> {
     pub(crate) entry: TimelineEntry,
     pub(crate) at: Timestamp,
-    /// `Some` for an `after-turn` checkpoint: a change to a path the turn did not name may
+    /// `Some` for an `after-turn` checkpoint: a change to a path the turn did not write may
     /// hold the lawyer's edits.
     pub(crate) tool_paths: Option<Named<'a>>,
 }

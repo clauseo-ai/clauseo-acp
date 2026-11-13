@@ -344,8 +344,10 @@ impl Matter {
     }
 
     /// The checkpoint after a turn. `tool_paths` are the paths the turn's agent tool calls
-    /// named (locations and diff paths); a changed file outside them is flagged
-    /// `may_include_lawyer_edits`. With no change, the `before-turn` checkpoint is reused.
+    /// wrote: the places they named for which [`crate::names_a_write`] holds (diff paths, and
+    /// the locations of edit, delete and move calls, never those of a read); a changed file
+    /// outside them is flagged `may_include_lawyer_edits`. With no change, the `before-turn`
+    /// checkpoint is reused.
     pub fn after_turn(
         &mut self,
         meta: &TurnMeta,
@@ -356,7 +358,7 @@ impl Matter {
 
     /// [`Matter::after_turn`], with the files the turn's shell commands wrote (`commands`: their
     /// paths in the matter, `out/Reply.docx` for pandoc's `-o out/Reply.docx`). A file the turn
-    /// added that no tool call named is the agent's own, and not flagged, only when its path is
+    /// added that no tool call wrote is the agent's own, and not flagged, only when its path is
     /// among them, the step's first skip record proves it absent then, and it was last modified
     /// by the turn's end: a file the lawyer saved meanwhile is written by no command, and stays
     /// flagged.

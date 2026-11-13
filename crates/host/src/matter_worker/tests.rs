@@ -315,6 +315,7 @@ fn the_first_open_spends_the_relink_whatever_it_finds() {
 #[test]
 fn tool_paths_resolve_outside_spellings_into_the_matter() {
     use super::tool_paths;
+    use crate::sent::Places;
     use clauseo_protocol::MatterPath;
     use std::path::PathBuf;
 
@@ -328,7 +329,7 @@ fn tool_paths_resolve_outside_spellings_into_the_matter() {
     write::symlink(&real, &link).unwrap();
     let matter = |path: &str| MatterPath::new(path).unwrap();
     let text = |path: PathBuf| path.display().to_string();
-    let paths = TurnPaths {
+    let paths = TurnPaths::edited(Places {
         inside: [matter("kept.txt")].into(),
         outside: [
             text(link.join("brief.txt")),
@@ -338,10 +339,9 @@ fn tool_paths_resolve_outside_spellings_into_the_matter() {
             text(root.join("gone").join("a.txt")),
         ]
         .into(),
-        ..TurnPaths::default()
-    };
+    });
     // The matter folder as the lawyer picked it, through the link.
-    let found = tool_paths(&link, paths);
+    let found = tool_paths(&link, &paths);
     assert_eq!(
         found,
         [

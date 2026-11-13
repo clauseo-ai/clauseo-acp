@@ -13,13 +13,13 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use clauseo_protocol::{
     AgentSessionId, CompactString, DomainEvent, ElicitationId, ElicitationRequest, Envelope,
-    MatterPath, MessageId, PermissionOption, PermissionRequestId, StreamId, TextOrBlob,
-    ToolCallContent, ToolCallId, ToolCallPatch, ToolCallStarted, ToolCallStatus, ToolKind,
-    ToolLocation, TurnId,
+    MatterPath, MessageId, PermissionOption, PermissionRequestId, StreamId, ToolCallContent,
+    ToolCallId, ToolCallStatus, ToolLocation, TurnId,
 };
 
 use crate::build::ToolFields;
-use crate::shell_writes;
+use paths::diffs;
+pub(crate) use paths::{CallFields, Places, TurnPaths};
 
 /// One tool call as last sent.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -53,96 +53,6 @@ pub(crate) fn note_paths(
             ToolLocation::Outside { .. } | ToolLocation::Unknown { .. } => {}
         }
     }
-}
-
-/// The places a turn's tool calls named, for the after-turn checkpoint: the matter paths, and
-/// the text of every location or diff `acp` placed outside the session folder. A spelling of a
-/// matter file that no text comparison with the folder places inside it (through a symlink, in
-/// another case) is among `outside`; the matter thread resolves those on the disk
-/// (`matter_worker`) before it decides which changes no tool call named.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub(crate) struct TurnPaths {
-    /// The matter paths ([`note_paths`]).
-    pub(crate) inside: BTreeSet<MatterPath>,
-    /// The `Outside` locations and diffs, as `acp` displays them (the path as the agent sent
-    /// it).
-    pub(crate) outside: BTreeSet<String>,
-    /// The files the turn's shell commands write ([`crate::shell_writes`]): paths relative to
-    /// the matter's folder, or absolute ones the matter thread places in it.
-    pub(crate) writes: BTreeSet<String>,
-    /// The shell calls among the turn's tool calls, by a key unique in the turn (ACP's id live,
-    /// the logged id when read back), so a later update of one is read too.
-    pub(crate) shells: BTreeSet<String>,
-}
-
-/// One tool call or update as [`TurnPaths::note_command`] reads it: its kind and input.
-pub(crate) struct CommandText<'a> {
-    pub(crate) kind: Option<ToolKind>,
-    pub(crate) raw_input: Option<&'a TextOrBlob>,
-}
-
-impl<'a> CommandText<'a> {
-    /// A patch's fields.
-    pub(crate) fn of_patch(patch: &'a ToolCallPatch) -> Self {
-        Self {
-            kind: patch.kind,
-            raw_input: patch.raw_input.as_ref(),
-        }
-    }
-
-    /// A live call's fields, as the agent sent them.
-    pub(crate) fn of_call(call: &'a clauseo_acp::ToolCall) -> Self {
-        Self {
-            kind: Some(call.kind),
-            raw_input: call.raw_input.as_ref(),
-        }
-    }
-
-    /// A logged start's fields.
-    pub(crate) fn of_started(started: &'a ToolCallStarted) -> Self {
-        Self {
-            kind: Some(started.kind),
-            raw_input: started.raw_input.as_ref(),
-        }
-    }
-}
-
-impl TurnPaths {
-    /// Adds the places one tool call or update names.
-    pub(crate) fn note(&mut self, locations: &[ToolLocation], content: &[ToolCallContent]) {
-        note_paths(&mut self.inside, locations, content);
-        for location in locations.iter().chain(diffs(content)) {
-            if let ToolLocation::Outside { display } = location
-                && !self.outside.contains(display)
-            {
-                self.outside.insert(display.clone());
-            }
-        }
-    }
-
-    /// Adds the files a shell call (`ToolKind::Execute`, its start or a later update of the call
-    /// `key`) writes, read from its command alone ([`crate::shell_writes`]): never its output,
-    /// which names files it only lists or reads. An input kept as a blob is not read.
-    pub(crate) fn note_command(&mut self, key: &str, call: &CommandText<'_>) {
-        if call.kind == Some(ToolKind::Execute) && !self.shells.contains(key) {
-            self.shells.insert(key.to_owned());
-        }
-        if self.shells.contains(key)
-            && let Some(TextOrBlob::Inline(input)) = call.raw_input
-        {
-            shell_writes::add_input(&mut self.writes, input);
-        }
-    }
-}
-
-/// The locations of the diffs among `content`.
-fn diffs(content: &[ToolCallContent]) -> impl Iterator<Item = &ToolLocation> {
-    content.iter().filter_map(|item| match item {
-        ToolCallContent::Diff { path, .. } => Some(path),
-        ToolCallContent::Text { .. }
-        | ToolCallContent::Content { .. }
-        | ToolCallContent::Unknown { .. } => None,
-    })
 }
 
 /// A permission request with no answer logged yet.
@@ -449,6 +359,8 @@ impl SentView {
         self.stream == other.stream && self.sent == other.sent
     }
 }
+
+mod paths;
 
 #[cfg(test)]
 mod tests;

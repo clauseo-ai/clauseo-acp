@@ -1,0 +1,20 @@
+{"scenario":"undo-lawyer-file-run","description":"The release dry run's read-only Claude turn, by its transcript's tool calls: a shell call Claude's settings denied (cd to the matter, find ., ls), a Glob of **/* at the matter folder itself, Reads of ordinary.txt and .clauseo/matter.json, stetdoc help, then stetdoc view of the two Word files (the first held on a permission while the test saves Lawyer note.txt, as the lawyer's scheduled task did 0.5 s before it), and Writes of notes outside the matter. Nothing names or writes the note: it stays flagged","on_stdin_close":"exit"}
+{"expect":{"method":"initialize","as":"init","params":{"protocolVersion":1}}}
+{"respond":{"to":"init","result":{"protocolVersion":1,"agentCapabilities":{"loadSession":true},"authMethods":[],"agentInfo":{"name":"fake_agent","version":"0.0.0"}}}}
+{"expect":{"method":"session/new","as":"new","params":{"cwd":"{{any}}"}}}
+{"respond":{"to":"new","result":{"sessionId":"sess-1"}}}
+{"expect":{"method":"session/prompt","as":"p1","params":{"sessionId":"sess-1"}}}
+{"update":{"update":{"sessionUpdate":"tool_call","toolCallId":"t1-bash","title":"find . -type f","kind":"execute","status":"pending","rawInput":{"command":"cd \"{{cwd}}\" && find . -type f | head -100; echo ---; ls -la \"{{cwd}}/../agent-state/notes\"; ls -la \"{{cwd}}/../run/work\""}}}}
+{"note":"Denied by Claude's own settings: no ask reaches the client, the call fails.","update":{"update":{"sessionUpdate":"tool_call_update","toolCallId":"t1-bash","status":"failed","content":[{"type":"content","content":{"type":"text","text":"Permission denied"}}]}}}
+{"update":{"update":{"sessionUpdate":"tool_call","toolCallId":"t2-glob","title":"Find **/*","kind":"search","status":"completed","locations":[{"path":"{{cwd}}"}],"rawInput":{"pattern":"**/*","path":"{{cwd}}"},"content":[{"type":"content","content":{"type":"text","text":"Notes.docx\nordinary.txt\n.clauseo/matter.json\nMain Agreement.docx"}}]}}}
+{"update":{"update":{"sessionUpdate":"tool_call","toolCallId":"t3-read","title":"Read ordinary.txt","kind":"read","status":"completed","locations":[{"path":"{{cwd}}/ordinary.txt","line":1}]}}}
+{"update":{"update":{"sessionUpdate":"tool_call","toolCallId":"t4-read","title":"Read .clauseo/matter.json","kind":"read","status":"completed","locations":[{"path":"{{cwd}}/.clauseo/matter.json","line":1}]}}}
+{"update":{"update":{"sessionUpdate":"tool_call","toolCallId":"t5-help","title":"stetdoc --help","kind":"execute","status":"completed","rawInput":{"command":"stetdoc --help; stetdoc skills get core"}}}}
+{"update":{"update":{"sessionUpdate":"tool_call","toolCallId":"t6-view","title":"stetdoc view","kind":"execute","status":"pending","rawInput":{"command":"stetdoc view \"Main Agreement.docx\""}}}}
+{"note":"Test-only hold: the test saves the lawyer's note while this ask waits.","request":{"id":"perm-1","method":"session/request_permission","params":{"sessionId":"sess-1","toolCall":{"toolCallId":"t6-view","title":"stetdoc view","kind":"execute","status":"pending"},"options":[{"optionId":"allow-once","name":"Allow once","kind":"allow_once"},{"optionId":"reject-once","name":"Reject","kind":"reject_once"}]}}}
+{"expect_response":{"id":"perm-1","result":{"outcome":{"outcome":"selected","optionId":"allow-once"}}}}
+{"update":{"update":{"sessionUpdate":"tool_call_update","toolCallId":"t6-view","status":"completed"}}}
+{"update":{"update":{"sessionUpdate":"tool_call","toolCallId":"t7-view","title":"stetdoc view","kind":"execute","status":"completed","rawInput":{"command":"stetdoc view \"Notes.docx\" --revisions --full; stetdoc view \"Notes.docx\" --comments"}}}}
+{"update":{"update":{"sessionUpdate":"tool_call","toolCallId":"t8-write","title":"Write notes.md","kind":"edit","status":"completed","locations":[{"path":"{{cwd}}/../run/work/notes.md"}],"content":[{"type":"diff","path":"{{cwd}}/../run/work/notes.md","newText":"notes\n"}]}}}
+{"update":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-answer-1","content":{"type":"text","text":"Here is the overview."}}}}
+{"respond":{"to":"p1","result":{"stopReason":"end_turn"}}}
