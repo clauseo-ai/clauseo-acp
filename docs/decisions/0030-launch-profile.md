@@ -485,13 +485,23 @@ change from the settings window as `ui` does. R24 (PR5) adds a third to the patc
     `stetdoc`, `python` and `agent-browser` by name on its `PATH`, and a command naming those
     folders could write into every matter. The own run folder, this matter's notes, Claude's
     plans folder and its project's tool results stay reachable by a command.
-  - **How.** Each target is written in every spelling of `<data>`, its names joined by Claude's
-    `*` so any mix of `\` and `/` matches, the last after a separator. A target whose name an
-    own one starts with (run `…-1` beside the own `…-10`) ends at a name boundary: a separator,
-    a quote, a space or tab, a newline, `; | & > < ( ) ,`, a backtick, `*`, `?`, `[`, or the end.
-    The data folder named alone and the folders walked into on the way to the own ones are
-    denied with the same boundaries and a following glob; so is a `..` anywhere after the data
-    folder's name, which costs a command that climbs inside an own folder.
+  - **How.** Each target is written after every way of writing `<data>` and each separator
+    after it (`\`, `/`, `\\`), its names joined by Claude's `*` so any run or mix of separators
+    and `.\` steps matches, the last after a separator. The default folder is written as its
+    name alone, `ai.clauseo.desktop`, which its drive, share, device, `%LOCALAPPDATA%` (any
+    case), `%USERPROFILE%`, `~` and `$HOME` forms all end in; a configured one by its path with
+    `\`, `/`, `\\` and as `/d/…`, and under `%LOCALAPPDATA%`, `%APPDATA%` or the home by those
+    variables. A target whose name an own one starts with (run `…-1` beside the own `…-10`) ends
+    at a name boundary: a separator, a quote, a space or tab, a newline, `; | & > < ( ) ,`, a
+    backtick, `*`, `?`, `[`, a dot, a colon, or the end. The data folder named alone and the
+    folders walked into on the way to the own ones are denied with the same boundaries (a
+    trailing dot or space, which Win32 drops, among them) and when a separator is followed by a
+    quote, a space, another separator, a dot or a glob; so is a `..` anywhere after the data
+    folder's name, which costs a command that climbs inside an own folder. A generated test
+    (`data_fence/shell_deny_cross_tests.rs`) crosses separator runs, `.\` steps, trailing dots
+    and spaces, streams, quoting, letter case and every way of writing the folder over every
+    protected target, and checks that whatever #999's rules denied of what is not the
+    session's own, these deny.
   - **Size.** The siblings in `run`, `agent-state` and Claude's `projects` go in groups by the
     start no own name shares (`run/<start>*`), for the Read and Edit rules too, and what lies
     under Clauseo's own names (`agent-state`, `claude-acp`, `codex-acp`, a run folder named by an
@@ -504,10 +514,26 @@ change from the settings window as `ui` does. R24 (PR5) adds a third to the patc
     with the run folder and swept at the host's first launch; `launch-settings` is denied to
     Claude's tools and Codex's shell, and must stay out of any tier-B grant (a swap before
     Claude Code reads it would change the session's rules; accepted).
-  - **Residual, beside the one above:** an 8.3 short name, other letter cases in Bash, a `cd` into
-    the own run folder then `cd ..` twice, a glob inside a name (`run\01a1*`), a separator other
-    than its own right after a configured folder's path, and a run folder, matter or project made
-    after the launch whose name starts no group.
+  - **Residual, beside the one above** (word matching, signed off for launch):
+    - other letter cases in Bash, whose rules match as written (`cat …/AI.CLAUSEO.DESKTOP/x`);
+    - an 8.3 short name (`C:\Users\CLAUSE~1\…`);
+    - a `cd` into the own run folder, then `cd ..` twice;
+    - a glob inside a name (`run\01a1*\work`);
+    - a run folder, matter or project made after the launch whose name starts no group, and a
+      name that starts with the own one's (`run\<own>x`);
+    - for a configured folder (not `ai.clauseo.desktop`) only, its own path written other than
+      whole: a `..` or `.\` step or a mixed separator inside it
+      (`D:\FirmData\Other\..\Clauseo\settings.json`, `D:\FirmData\.\Clauseo`,
+      `D:\FirmData/Clauseo`), a share path to it (`\\localhost\D$\FirmData\Clauseo`), or a
+      variable other than `LOCALAPPDATA`, `APPDATA`, `USERPROFILE` and `HOME` naming part of it
+      (`%FIRMDATA%\Clauseo`). Not done for launch: matching that path loosely would grow every
+      configured launch's rules or deny folders beside it.
+    - Denied beyond the data folder (accepted): any command naming `claude-acp` or `agent-state`
+      alone (`npm ls claude-acp`, `echo agent-state`); in PowerShell, which ignores case, a path
+      such as `…\Projects\Deal\` after `claude-acp` and `home` in the same command; and a folder
+      beside a configured one whose name starts with it and a space (`"D:\FirmData\Clauseo
+      Backup\x"`), since unquoted that is the data folder named alone and Win32 drops a trailing
+      space (`ClauseoBackup` is not denied).
 - **2026-11-10 (Rohan).** Claude should be as frictionless as Codex. Outside forced ask a
   Claude session starts in Claude Code's `acceptEdits`, not `default`
   (`agent/loads.rs` `CLAUDE_MODE`). claude-agent-acp 0.89.1 picks its own starting mode (the

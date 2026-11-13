@@ -23,50 +23,58 @@
 //! on beside the Bash deny rules, which would otherwise turn it off (code.claude.com/docs/en/
 //! tools-reference, "Bash deny rules also turn off the PowerShell tool").
 //!
-//! The rules, for each spelling of `<data>` ([`forms`]) and its separators, both tools, each once:
+//! The rules, for each way of writing `<data>` ([`forms`]), each separator after it
+//! ([`JUNCTIONS`]: `\`, `/`, `\\`), both tools, each once:
 //! - each target: the form, a separator, the target's path: its names with Claude's `*` between
-//!   them, so any mix of `\` and `/` matches, but the last after a separator (`\` or `/`, or
-//!   `\\` in the escaped form), so it still starts a name ([`spread`]). A sibling's name
-//!   may be a text prefix of an own one (run `…-1` beside the own `…-10`; a matter folder `X` and
-//!   another `X 2`, whose Claude projects are `…-X` and `…-X-2`). Where one of the launch's kept
-//!   places could start with the target's name ([`LaunchDeny::kept`]), the rule ends at a name
-//!   boundary: the name followed by `\` (`\\` in the escaped form), `/` or one of [`AFTER`]
-//!   (a quote, a space or tab, a newline, `;`, `|`, `&`, `>`, `<`, `(`, `)`, `,`, a backtick,
-//!   `*`, `?`, `[`), then anything, and the name at the end of the command. Claude's `*` takes
-//!   any text, so no fewer rules can say "one of these, or the end"; a PowerShell command loses
-//!   its quotes before it is matched, and Claude Code matches each part of a compound Bash
-//!   command on its own (`XK`), so the space and end rules carry most of it. Elsewhere one rule,
-//!   the name followed by anything.
+//!   them, so any run or mix of separators and `.\` steps matches, the last name after a
+//!   separator ([`spread`]). A sibling's name may be a text prefix of an own one (run `…-1`
+//!   beside the own `…-10`; a matter folder `X` and another `X 2`, whose Claude projects are
+//!   `…-X` and `…-X-2`). Where one of the launch's kept places could start with the target's
+//!   name ([`LaunchDeny::kept`]), the rule ends at a name boundary: the name followed by a
+//!   separator or one of [`AFTER`] (a quote, a space or tab, a newline, `;`, `|`, `&`, `>`,
+//!   `<`, `(`, `)`, `,`, a backtick, `*`, `?`, `[`, a dot, a colon), then anything, and the
+//!   name at the end of the command. Claude's `*` takes any text, so no fewer rules can say "one
+//!   of these, or the end"; a PowerShell command loses its quotes before it is matched, and
+//!   Claude Code matches each part of a compound Bash command on its own (`XK`), so the space
+//!   and end rules carry most of it. Elsewhere one rule, the name followed by anything.
 //! - the data folder named alone, and each folder the launch walked into (`run`, `agent-state`,
 //!   this matter's state, `agents` and Claude's folders above its plans and projects): the name
 //!   followed by one of [`AFTER`] or at the end (a recursive command there reaches every
-//!   sibling), and by a separator at the end, before a quote or a space, or before a glob
-//!   character (`*`, `?`, `[`).
+//!   sibling; Win32 drops a trailing dot or space, so `ai.clauseo.desktop.\tools` is the data
+//!   folder's), and by a separator at the end, or before a quote, a space, another separator, a
+//!   dot or a glob character ([`after_sep`]: `<data>\.\tools`, `<data>//profile`). The walked
+//!   folders' own rules are why a name right after one of them may start after a single
+//!   separator: a run or a `.\` step there is denied by them.
 //! - after the data folder, anything, then `\..` or `/..`: a `..` anywhere after it, with any
 //!   separators, which could climb out of an own folder into a sibling, whatever it costs a
 //!   command that climbs within an own one (`pandoc -o ..\..\x` there is denied too).
 //!
-//! A target is a pattern of `launch.rs`: its final `/**` is dropped, `/` becomes the form's
-//! separator, the gitignore escapes are undone, and a pattern `*` (`run/*/relay-token`,
-//! `state.sqlite*`, a group of siblings `run/<start>*`) stays Claude's `*`, which takes
-//! separators too (`run\<own>\work\relay-token.md` is denied with the token; the accepted
-//! cost). What lies under Clauseo's own names ([`OWN_WORDS`]: `agent-state`, `claude-acp`,
-//! `codex-acp`), and a run folder whose name (or group's start) is an id's, is named by its tail
-//! alone (`agent-state\<id>`, `claude-acp\home\projects\<key>`, `run\<id>`), with each separator
-//! and whatever spelling of `<data>` is before it: no folder of the lawyer's holds those names,
-//! and with `launch.rs` naming the siblings of a busy folder in groups, a launch's rules hardly
-//! grow with the matters (the settings file Claude Code reads is at most 2 MiB,
-//! `agent::launch_settings`). A spelling that ends in Clauseo's own folder name
-//! (`clauseo_settings::IDENTIFIER`) is left out beside that name alone: its rules would deny
-//! only commands the name's rules already deny.
+//! A target is a pattern of `launch.rs`: its final `/**` is dropped, the gitignore escapes are
+//! undone, and a pattern `*` (`run/*/relay-token`, `state.sqlite*`, a group of siblings
+//! `run/<start>*`) stays Claude's `*`, which takes separators too (`run\<own>\work\relay-token.md`
+//! is denied with the token; the accepted cost). A target's name is matched as a start, so a
+//! trailing dot or space and a stream (`settings.json::$DATA`) are denied with it. What lies
+//! under Clauseo's own names ([`OWN_WORDS`]: `agent-state`, `claude-acp`, `codex-acp`), and a
+//! run folder whose name (or group's start) is an id's, is named by its tail alone
+//! (`agent-state\<id>`, `claude-acp\home\projects\<key>`, `run\<id>`), whatever spelling of
+//! `<data>` is before it: no folder of the lawyer's holds those names, and with `launch.rs`
+//! naming the siblings of a busy folder in groups, a launch's rules hardly grow with the matters
+//! (the settings file Claude Code reads is at most 2 MiB, `agent::launch_settings`). The
+//! default data folder is written as Clauseo's own folder name alone
+//! (`clauseo_settings::IDENTIFIER`), which every other way of writing it (a drive, a share or
+//! device path, `%LOCALAPPDATA%` in any case, `~`, `$HOME`, …) ends in.
 //!
-//! A deny list is not a fence: a path built at run time, a variable of the agent's own, a `cd`
-//! first (a `cd` into the own run folder, then `cd ..` twice), a glob inside a name, other
-//! letter cases in Bash, an 8.3 short name, a separator other than its own right after a
-//! configured folder's path (Clauseo's own folder name covers the default one) or a script that
-//! opens the file are not caught, nor a run folder,
-//! matter or project made after the launch whose name starts no group. That is the accepted
-//! residual of `auto` on Windows (decision record 0030).
+//! A deny list is not a fence. Not caught, the accepted residual of `auto` on Windows (decision
+//! record 0030): a path built at run time, a variable of the agent's own, a `cd` first (a `cd`
+//! into the own run folder, then `cd ..` twice), a glob inside a name (`run\01a1*`), other
+//! letter cases in Bash (`AI.CLAUSEO.DESKTOP`), an 8.3 short name, a script that opens the file,
+//! a run folder, matter or project made after the launch whose name starts no group, and, for a
+//! configured data folder (not `ai.clauseo.desktop`) alone, its own path written other than
+//! whole: a `..` or `.\` step or a mixed separator inside it (`D:\FirmData\.\Clauseo`), a share or
+//! device path to it (`\\localhost\D$\…`) or a variable other than [`VARS`] naming part of
+//! it. Denied beyond the data folder (accepted): any command naming `claude-acp` or
+//! `agent-state` alone (`npm ls claude-acp`), and in PowerShell, which ignores case, a path such
+//! as `…\Projects\Deal\` after `claude-acp` and `home` in the same command.
 
 use std::collections::HashSet;
 use std::ffi::OsString;
@@ -74,44 +82,51 @@ use std::ffi::OsString;
 use super::LaunchDeny;
 
 /// The variables a command may spell `<data>`'s parent with: `%LOCALAPPDATA%` holds the default
-/// data folder, `%APPDATA%` a configured one may sit under.
-const VARS: [&str; 2] = ["LOCALAPPDATA", "APPDATA"];
+/// data folder, `%APPDATA%` a configured one may sit under, and the lawyer's home
+/// (`%USERPROFILE%`, `$HOME`, `~`) holds both.
+const VARS: [&str; 4] = ["LOCALAPPDATA", "APPDATA", "USERPROFILE", "HOME"];
 
-/// A separator as a command writes it: `\`, `/`, or `\\` (Git Bash's escaped form).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Sep {
-    Back,
-    Forward,
-    Escaped,
-}
+/// The separators a command may write between two names: `\`, `/`, and `\\` (Git Bash's escaped
+/// form, or a doubled `\`).
+const JUNCTIONS: [&str; 3] = ["\\", "/", "\\\\"];
 
-impl Sep {
-    const ALL: [Self; 3] = [Self::Back, Self::Forward, Self::Escaped];
+/// The separators after a form of `<data>` written with `/` (`C:/…`, `$HOME/…`): its own and
+/// `\`, which a command may go on with.
+const FORWARD: [&str; 2] = ["/", "\\"];
 
-    fn text(self) -> &'static str {
-        match self {
-            Self::Back => "\\",
-            Self::Forward => "/",
-            Self::Escaped => "\\\\",
-        }
-    }
+/// The separators after a form written with `\` and no doubled one (`%APPDATA%\…`).
+const BACKWARD: [&str; 2] = ["\\", "/"];
 
-    /// The separators that may end a name written with this one: itself and `/` (a command may
-    /// go on with `/` after a path written with `\`).
-    fn ends(self) -> [&'static str; 2] {
-        [self.text(), if self == Self::Forward { "\\" } else { "/" }]
-    }
+/// One way a command writes `<data>` ([`forms`]), and the separators that may follow it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Form {
+    lead: String,
+    junctions: &'static [&'static str],
 }
 
 /// What may follow a name at a boundary, besides a separator or the end: a quote, a space or
 /// tab, a newline, what ends a command or starts a redirection, a list, a group or a command
-/// substitution, and a glob character (`run\<sibling>*`).
-const AFTER: [&str; 17] = [
-    "\"", "'", " ", "\t", "\n", ";", "|", "&", ">", "<", "(", ")", ",", "`", "*", "?", "[",
+/// substitution, a glob character (`run\<sibling>*`), a dot (Win32 drops a name's trailing dots
+/// and spaces: `ai.clauseo.desktop.\tools` is the data folder's) and a colon (a stream,
+/// `settings.json::$DATA`).
+const AFTER: [&str; 19] = [
+    "\"", "'", " ", "\t", "\n", ";", "|", "&", ">", "<", "(", ")", ",", "`", "*", "?", "[", ".",
+    ":",
 ];
 
-/// What may follow a separator after a folder named alone (`dir "<data>\"`): a quote, a space.
-const AFTER_SEP: [&str; 3] = ["\"", "'", " "];
+/// What may follow a separator after a folder named alone: a quote or a space (`dir "<data>\"`),
+/// another separator or a dot (`<data>\\.\tools`, `<data>//profile`, `<data>\/agents`). Not `\`
+/// after `\`: `\\` is the escaped form's separator, which the rules name in its own right.
+/// A `strict` folder is one no own path is written past in the escaped form with a single `\`
+/// after it (a configured folder's path, `D:\FirmData\Clauseo\\x`): there `\` after `\` is a run.
+fn after_sep(end: &str, strict: bool) -> &'static [&'static str] {
+    match end {
+        "\\" if strict => &["\"", "'", " ", "/", ".", "\\"],
+        "\\" => &["\"", "'", " ", "/", "."],
+        "/" => &["\"", "'", " ", "/", "\\", "."],
+        _ => &["\"", "'", " ", "\\", "/", "."],
+    }
+}
 
 /// The separators a `..` may follow anywhere after the data folder's name (`\\..` holds `\..`).
 const DOTS: [&str; 2] = ["\\", "/"];
@@ -124,13 +139,6 @@ const GLOBS: [&str; 3] = ["*", "?", "["];
 enum Piece {
     Text(String),
     Any,
-}
-
-/// One way a command writes `<data>`, and the separators that may follow it.
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct Form {
-    lead: String,
-    seps: Vec<Sep>,
 }
 
 /// The rules (see the module doc) for `deny`'s spellings of `<data>` and targets, with `var`
@@ -172,6 +180,14 @@ pub(crate) fn windows_shell_deny_rules(
             }
         }
     }
+    // Whether the folder above `names`' last is one the launch walked into: its own rules
+    // then catch a doubled separator or a `.\` step after it, and the last name may start
+    // right after a separator ([`spread`]).
+    let walked = |names: &[Vec<Piece>]| {
+        names.split_last().is_some_and(|(_, above)| {
+            !above.is_empty() && parents.iter().any(|parent| parent.as_slice() == above)
+        })
+    };
     let mut contents: Vec<Vec<Piece>> = Vec::new();
     let mut ends: Vec<Vec<Piece>> = Vec::new();
     for form in &forms {
@@ -179,41 +195,42 @@ pub(crate) fn windows_shell_deny_rules(
         for dots in DOTS {
             contents.push(join(&[&lead, &[Piece::Any], &text(dots), &text("..")]));
         }
-        for &sep in &form.seps {
-            alone(&lead, sep, &mut contents, &mut ends);
-            let lead_sep = text(&format!("{}{}", form.lead, sep.text()));
+        // Clauseo's own folder name ends the escaped form too (`…\\ai.clauseo.desktop\\run`),
+        // and the escaped form is written with `\\` throughout.
+        let strict = form.lead != clauseo_settings::IDENTIFIER && !form.lead.contains("\\\\");
+        alone(&lead, strict, &mut contents, &mut ends);
+        for junction in form.junctions {
+            let lead_sep = text(&format!("{}{junction}", form.lead));
             for parent in parents.iter().filter(|parent| tail(parent).is_none()) {
-                for path in spread(parent, sep) {
-                    alone(&join(&[&lead_sep, &path]), sep, &mut contents, &mut ends);
+                for path in spread(parent, walked(parent)) {
+                    alone(&join(&[&lead_sep, &path]), strict, &mut contents, &mut ends);
                 }
             }
         }
     }
-    for tail in parents.iter().filter_map(|parent| tail(parent)) {
-        for sep in Sep::ALL {
-            for path in spread(tail, sep) {
-                alone(&path, sep, &mut contents, &mut ends);
+    for parent in &parents {
+        if let Some(tail) = tail(parent) {
+            for path in spread(tail, walked(parent)) {
+                alone(&path, false, &mut contents, &mut ends);
             }
         }
     }
     for target in &targets {
         let (names, _folder) = parse(target);
         let bounded = needs_boundary(&names, &kept);
+        let exact = walked(&names);
         if let Some(tail) = tail(&names) {
-            for sep in Sep::ALL {
-                for path in spread(tail, sep) {
-                    named(&path, sep, bounded, &mut contents, &mut ends);
-                }
+            for path in spread(tail, exact) {
+                named(&path, bounded, &mut contents, &mut ends);
             }
             continue;
         }
         for form in &forms {
-            for &sep in &form.seps {
-                let lead_sep = text(&format!("{}{}", form.lead, sep.text()));
-                for path in spread(&names, sep) {
+            for junction in form.junctions {
+                let lead_sep = text(&format!("{}{junction}", form.lead));
+                for path in spread(&names, exact) {
                     named(
                         &join(&[&lead_sep, &path]),
-                        sep,
                         bounded,
                         &mut contents,
                         &mut ends,
@@ -240,10 +257,9 @@ pub(crate) fn windows_shell_deny_rules(
 }
 
 /// The rules for a name (`path`) a target ends in: followed by anything, or when `bounded` at
-/// a name boundary only (a separator, a quote, a space, the end).
+/// a name boundary only (a separator, one of [`AFTER`], the end).
 fn named(
     path: &[Piece],
-    sep: Sep,
     bounded: bool,
     contents: &mut Vec<Vec<Piece>>,
     ends: &mut Vec<Vec<Piece>>,
@@ -252,26 +268,21 @@ fn named(
         contents.push(join(&[path, &[Piece::Any]]));
         return;
     }
-    for after in sep.ends().into_iter().chain(AFTER) {
+    for after in JUNCTIONS.into_iter().chain(AFTER) {
         contents.push(join(&[path, &text(after), &[Piece::Any]]));
     }
     ends.push(path.to_vec());
 }
 
-/// The rules for a folder (`path`) named alone: at a name boundary but a separator, and with
-/// a separator at the end or before a quote or a space, or a separator and a glob character.
-fn alone(path: &[Piece], sep: Sep, contents: &mut Vec<Vec<Piece>>, ends: &mut Vec<Vec<Piece>>) {
-    for end in sep.ends() {
-        let with = join(&[path, &text(end)]);
-        for after in AFTER_SEP {
+/// The rules for a folder (`path`) named alone: followed by one of [`AFTER`] or at the end, and
+/// by a separator at the end, or before one of [`after_sep`] or a glob character.
+fn alone(path: &[Piece], strict: bool, contents: &mut Vec<Vec<Piece>>, ends: &mut Vec<Vec<Piece>>) {
+    for junction in JUNCTIONS {
+        let with = join(&[path, &text(junction)]);
+        for after in after_sep(junction, strict).iter().chain(&GLOBS) {
             contents.push(join(&[&with, &text(after), &[Piece::Any]]));
         }
-        ends.push(with.clone());
-        if end == sep.text() {
-            for glob in GLOBS {
-                contents.push(join(&[&with, &text(glob), &[Piece::Any]]));
-            }
-        }
+        ends.push(with);
     }
     for after in AFTER {
         contents.push(join(&[path, &text(after), &[Piece::Any]]));
@@ -279,36 +290,40 @@ fn alone(path: &[Piece], sep: Sep, contents: &mut Vec<Vec<Piece>>, ends: &mut Ve
     ends.push(path.to_vec());
 }
 
-/// The ways a command writes each of `deny`'s spellings of `<data>`: its path with `\`, with
-/// `/`, with `\\` and as Git Bash's `/c/…`; under a folder one of [`VARS`] names (read with
-/// `var`, in any case), `%VAR%`, `$env:VAR`, `$VAR` and `${VAR}` followed by the rest; and, when
-/// the folder has Clauseo's own name (`clauseo_settings::IDENTIFIER`), that name alone, which no
-/// other folder has, followed by any separator. A form that ends in that name is then left out
-/// (the module doc). A spelling that is not UTF-8 gets none.
+/// The ways a command writes each of `deny`'s spellings of `<data>`: when the folder has
+/// Clauseo's own name (`clauseo_settings::IDENTIFIER`), that name alone, which no other folder
+/// has and which every other way of writing it ends in; otherwise its path with `\`, with `/`,
+/// with `\\` and as Git Bash's `/c/…`, and under a folder one of [`VARS`] names (read with `var`,
+/// in any case), `%VAR%` (and `%var%`), `$env:VAR`, `$VAR` and `${VAR}`, and `~` for the home,
+/// followed by the rest. A spelling that is not UTF-8 gets none.
 fn forms(deny: &LaunchDeny, var: &dyn Fn(&str) -> Option<OsString>) -> Vec<Form> {
     let mut forms: Vec<Form> = Vec::new();
-    let mut push = |lead: String, seps: Vec<Sep>| {
+    let mut push = |lead: String, junctions: &'static [&'static str]| {
         if !lead.is_empty() && !forms.iter().any(|form| form.lead == lead) {
-            forms.push(Form { lead, seps });
+            forms.push(Form { lead, junctions });
         }
     };
-    let mut named = false;
     for spelling in &deny.spellings {
         let Some(text) = spelling.to_str() else {
             continue;
         };
         let back = drive_form(text);
         let back = back.trim_end_matches('\\');
+        // The last name, split by hand: a Windows path is one name to `Path` off Windows.
+        if back.rsplit('\\').next() == Some(clauseo_settings::IDENTIFIER) {
+            push(clauseo_settings::IDENTIFIER.to_owned(), &JUNCTIONS);
+            continue;
+        }
         let forward = back.replace('\\', "/");
-        push(back.to_owned(), vec![Sep::Back]);
-        push(forward.clone(), vec![Sep::Forward]);
-        push(back.replace('\\', "\\\\"), vec![Sep::Escaped]);
+        push(back.to_owned(), &JUNCTIONS);
+        push(forward.clone(), &FORWARD);
+        push(back.replace('\\', "\\\\"), &JUNCTIONS);
         let mut chars = forward.chars();
         if let (Some(drive), Some(':')) = (chars.next(), chars.next())
             && drive.is_ascii_alphabetic()
         {
             let git = format!("/{}{}", drive.to_ascii_lowercase(), chars.as_str());
-            push(git, vec![Sep::Forward]);
+            push(git, &FORWARD);
         }
         for name in VARS {
             let Some(value) = var(name).and_then(|v| v.into_string().ok()) else {
@@ -324,33 +339,32 @@ fn forms(deny: &LaunchDeny, var: &dyn Fn(&str) -> Option<OsString>) -> Vec<Form>
                 continue;
             }
             let rest_forward = rest.replace('\\', "/");
-            for lead in [format!("%{name}%"), format!("$env:{name}")] {
-                push(format!("{lead}\\{rest}"), vec![Sep::Back]);
-                push(format!("{lead}/{rest_forward}"), vec![Sep::Forward]);
+            let lower = name.to_ascii_lowercase();
+            // cmd's with `\`, PowerShell's with either, Bash's with `/`.
+            let backward = match name {
+                "HOME" => vec![],
+                _ => vec![
+                    format!("%{name}%"),
+                    format!("%{lower}%"),
+                    format!("$env:{name}"),
+                ],
+            };
+            let forward = match name {
+                "USERPROFILE" => vec![format!("$env:{name}")],
+                "HOME" => vec![format!("${name}"), format!("${{{name}}}"), "~".to_owned()],
+                _ => vec![
+                    format!("$env:{name}"),
+                    format!("${name}"),
+                    format!("${{{name}}}"),
+                ],
+            };
+            for lead in backward {
+                push(format!("{lead}\\{rest}"), &BACKWARD);
             }
-            for lead in [format!("${name}"), format!("${{{name}}}")] {
-                push(format!("{lead}/{rest_forward}"), vec![Sep::Forward]);
+            for lead in forward {
+                push(format!("{lead}/{rest_forward}"), &FORWARD);
             }
         }
-        // The last name, split by hand: a Windows path is one name to `Path` off Windows.
-        named |= back.rsplit('\\').next() == Some(clauseo_settings::IDENTIFIER);
-    }
-    if named {
-        let id = clauseo_settings::IDENTIFIER;
-        forms.retain(|form| {
-            let before = form
-                .lead
-                .strip_suffix(id)
-                .and_then(|rest| rest.chars().last());
-            !matches!(before, Some('\\' | '/'))
-        });
-        forms.insert(
-            0,
-            Form {
-                lead: id.to_owned(),
-                seps: Sep::ALL.to_vec(),
-            },
-        );
     }
     forms
 }
@@ -458,11 +472,12 @@ fn lead_text(name: &[Piece]) -> Option<String> {
     }
 }
 
-/// `names` as a command may write them with `sep`: one after another, each but the last
-/// followed by Claude's `*` (any separator, `\` or `/` mixed in any way), the last after
-/// `sep` or `/` (`\` after `/`), so that it still starts a name: a group's start (`run\x*`)
-/// must not match inside an own name. Two variants for two or more names, one for one.
-fn spread(names: &[Vec<Piece>], sep: Sep) -> Vec<Vec<Piece>> {
+/// `names` as a command may write them: one after another, each but the last followed by
+/// Claude's `*` (any separators, `.\` steps among them). The last starts right after a
+/// separator of [`JUNCTIONS`] when the folder above it is `walked` (its own rules catch a
+/// doubled separator or a dot after it), so a group's start (`run\x*`) can't match inside an
+/// own name; otherwise after `*` and `\` or `/`, so a separator run before it matches too.
+fn spread(names: &[Vec<Piece>], walked: bool) -> Vec<Vec<Piece>> {
     let Some((last, above)) = names.split_last() else {
         return Vec::new();
     };
@@ -476,9 +491,15 @@ fn spread(names: &[Vec<Piece>], sep: Sep) -> Vec<Vec<Piece>> {
         }
         inner.extend(name.iter().cloned());
     }
-    sep.ends()
+    if walked {
+        return JUNCTIONS
+            .into_iter()
+            .map(|junction| join(&[&inner, &text(junction), last]))
+            .collect();
+    }
+    ["\\", "/"]
         .into_iter()
-        .map(|end| join(&[&inner, &text(end), last]))
+        .map(|end| join(&[&inner, &[Piece::Any], &text(end), last]))
         .collect()
 }
 
@@ -538,6 +559,9 @@ fn escape(text: &str) -> String {
     out
 }
 
+#[cfg(test)]
+#[path = "shell_deny_cross_tests.rs"]
+mod cross_tests;
 #[cfg(test)]
 #[path = "shell_deny_launch_tests.rs"]
 mod launch_tests;
