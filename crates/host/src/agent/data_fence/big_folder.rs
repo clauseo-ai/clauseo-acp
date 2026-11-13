@@ -42,6 +42,12 @@ pub(crate) struct Big {
 /// Makes the big folder under `root` and enumerates it for a launch of matter 0's session
 /// [`OWN_RUN`].
 pub(crate) fn big(root: &Path) -> Big {
+    big_with(root, MATTERS, MATTERS)
+}
+
+/// [`big`] with `matters` matters' notes and `project_count` Claude projects (one per matter folder
+/// `0..project_count`), at least one of each for the session's own.
+pub(crate) fn big_with(root: &Path, matters: usize, project_count: usize) -> Big {
     let data = root.join("data");
     let mut files: Vec<String> = [
         "settings.json",
@@ -93,8 +99,10 @@ pub(crate) fn big(root: &Path) -> Big {
         let key = super::claude_project_key(&matter_folder(n));
         format!("agents/claude-acp/home/projects/{key}")
     };
-    for n in 0..MATTERS {
+    for n in 0..matters.max(1) {
         files.push(format!("agent-state/{}/notes/notes.md", matter_id(n)));
+    }
+    for n in 0..project_count.max(1) {
         files.push(format!("{}/0193-session.jsonl", projects(n)));
     }
     files.push(format!("{}/0193-session/tool-results/r.txt", projects(0)));

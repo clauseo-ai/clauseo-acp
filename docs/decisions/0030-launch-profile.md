@@ -474,6 +474,40 @@ change from the settings window as `ui` does. R24 (PR5) adds a third to the patc
   off. **Residual risk:** classifier-only on Windows; a determined injection could read
   Clauseo's own data through a script (a path built at run time, a variable, a `cd` first, other
   letter cases in Bash), which no deny rule sees.
+- **2026-11-13: the shell rules name the launch's targets, not the whole folder (#1035).** The
+  rules above (#999) denied every command naming anything under `<data>`, the session's own run
+  folder and this matter's notes included: on the Windows VM Claude could not read its notes or
+  `pandoc` its own draft, with no card (a deny rule beats every allow). Now:
+  - **What they name.** The Bash and PowerShell rules name the same targets as the `Read` and
+    `Edit` rules (`DENIED` and every entry the launch found that is not the session's own,
+    `data_fence/launch.rs`), plus what every session shares (`profile`, `tools`, Clauseo's
+    Python runtime): Claude reads the built-in skills with its Read tool and runs `pandoc`,
+    `stetdoc`, `python` and `agent-browser` by name on its `PATH`, and a command naming those
+    folders could write into every matter. The own run folder, this matter's notes, Claude's
+    plans folder and its project's tool results stay reachable by a command.
+  - **How.** Each target is written in every spelling of `<data>`, its names joined by Claude's
+    `*` so any mix of `\` and `/` matches, the last after a separator. A target whose name an
+    own one starts with (run `…-1` beside the own `…-10`) ends at a name boundary: a separator,
+    a quote, a space or tab, a newline, `; | & > < ( ) ,`, a backtick, `*`, `?`, `[`, or the end.
+    The data folder named alone and the folders walked into on the way to the own ones are
+    denied with the same boundaries and a following glob; so is a `..` anywhere after the data
+    folder's name, which costs a command that climbs inside an own folder.
+  - **Size.** The siblings in `run`, `agent-state` and Claude's `projects` go in groups by the
+    start no own name shares (`run/<start>*`), for the Read and Edit rules too, and what lies
+    under Clauseo's own names (`agent-state`, `claude-acp`, `codex-acp`, a run folder named by an
+    id) is named by its tail in every spelling at once. A launch with 1,000 matters stays under
+    a quarter of the limit below. The flag settings go to Claude Code as a file,
+    `<data>/launch-settings/<run id>.json` (`agent/launch_settings.rs`), not inline: the SDK
+    puts inline settings on the command line, which Windows caps at 32,767 characters, and
+    Claude Code reads a settings file of at most 2 MiB, else it exits at start-up. It reads the
+    file itself once and pins what it read. The file is written atomically, 0600 on Unix, gone
+    with the run folder and swept at the host's first launch; `launch-settings` is denied to
+    Claude's tools and Codex's shell, and must stay out of any tier-B grant (a swap before
+    Claude Code reads it would change the session's rules; accepted).
+  - **Residual, beside the one above:** an 8.3 short name, other letter cases in Bash, a `cd` into
+    the own run folder then `cd ..` twice, a glob inside a name (`run\01a1*`), a separator other
+    than its own right after a configured folder's path, and a run folder, matter or project made
+    after the launch whose name starts no group.
 - **2026-11-10 (Rohan).** Claude should be as frictionless as Codex. Outside forced ask a
   Claude session starts in Claude Code's `acceptEdits`, not `default`
   (`agent/loads.rs` `CLAUDE_MODE`). claude-agent-acp 0.89.1 picks its own starting mode (the

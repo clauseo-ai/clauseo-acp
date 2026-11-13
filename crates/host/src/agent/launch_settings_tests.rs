@@ -218,14 +218,14 @@ fn a_sixty_matter_launch_carries_only_the_path() {
         assert!(deny.contains(&rule.as_str()), "{rule}");
     }
     assert!(file.len() < 2 * 1024 * 1024, "{}", file.len());
-    // The size the same launch on Windows would have sent inline, for the record.
+    // The size the same launch on Windows would have sent inline, with its shell rules.
     let windows = windows_deny(&big.deny);
     let mut windows_settings = inline.clone();
     windows_settings["permissions"]["deny"] = json!(windows);
     let windows_text = serde_json::to_string(&windows_settings).unwrap();
     eprintln!(
         "sixty matters: {} targets; {} Read/Edit rules; settings {} chars here, {} chars with \
-         Windows paths (32,767 is Windows' whole command line)",
+         Windows paths and the shell rules (32,767 is Windows' whole command line)",
         big.deny.targets.len(),
         rules.len(),
         inline_text.len(),
@@ -234,7 +234,8 @@ fn a_sixty_matter_launch_carries_only_the_path() {
     assert!(windows_text.len() > 32_767, "the case this file is for");
 }
 
-/// [`claude_deny_rules`] for the same targets with the data folder at Windows' default place.
+/// [`claude_deny_rules`] and the shell rules for the same targets with the data folder at
+/// Windows' default place.
 fn windows_deny(deny: &LaunchDeny) -> Vec<String> {
     let windows = LaunchDeny {
         spellings: vec![PathBuf::from(
@@ -242,5 +243,12 @@ fn windows_deny(deny: &LaunchDeny) -> Vec<String> {
         )],
         ..deny.clone()
     };
-    claude_deny_rules_on(&windows, true)
+    let var = |name: &str| -> Option<std::ffi::OsString> {
+        (name == "LOCALAPPDATA").then(|| r"C:\Users\clauseo-lawyer\AppData\Local".into())
+    };
+    let mut rules = claude_deny_rules_on(&windows, true);
+    rules.extend(crate::agent::data_fence::windows_shell_deny_rules(
+        &windows, &var,
+    ));
+    rules
 }

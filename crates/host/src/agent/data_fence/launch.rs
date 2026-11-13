@@ -207,13 +207,33 @@ fn names(place: &Path) -> Option<Vec<String>> {
         .collect()
 }
 
-/// [`existing_targets`] for the folder `dir`, at `at` (its names under `<data>`).
+/// The folders whose entries grow with the matters (run folders, matters' state, Claude's
+/// projects), whose other entries [`walk`] names in groups ([`group_prefix`]).
+const GROUPED: [&[&str]; 3] = [
+    &["run"],
+    &["agent-state"],
+    &["agents", "claude-acp", "home", "projects"],
+];
+
+/// [`existing_targets`] for the folder `dir`, at `at` (its names under `<data>`). In a
+/// [`GROUPED`] folder, each entry that is not kept and whose name no kept name there starts
+/// with is named by its group ([`group_prefix`]): `<prefix>*` and `<prefix>*/**`, once for
+/// all the entries that share it. Such a pattern names no kept entry, and a name made there
+/// after the launch with the same start too; a busy data folder's thousands of entries there
+/// become a few dozen patterns (the settings file Claude Code reads is at most 2 MiB,
+/// `agent::launch_settings`). An entry whose name a kept name starts with is named whole.
 fn walk(dir: &Path, at: &mut Vec<String>, places: &Places, out: &mut Vec<String>) {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return;
     };
     let mut entries: Vec<_> = entries.filter_map(Result::ok).collect();
     entries.sort_by_key(std::fs::DirEntry::file_name);
+    let kept_here = GROUPED
+        .iter()
+        .any(|folder| folder.iter().copied().eq(at.iter().map(String::as_str)))
+        .then(|| kept_names(places, at))
+        .flatten();
+    let mut groups = std::collections::BTreeSet::new();
     for entry in entries {
         let Some(name) = entry.file_name().to_str().map(str::to_owned) else {
             continue;
@@ -227,6 +247,11 @@ fn walk(dir: &Path, at: &mut Vec<String>, places: &Places, out: &mut Vec<String>
             // Every session's to read and run (`READ_ONLY`).
         } else if real_dir && places.own.iter().chain(&places.open).any(above) {
             walk(&entry.path(), at, places, out);
+        } else if let Some(group) = kept_here
+            .as_ref()
+            .and_then(|kept| group_prefix(at.last().map_or("", String::as_str), kept))
+        {
+            groups.insert(group);
         } else {
             let pattern = at.iter().map(|name| escape(name)).collect::<Vec<_>>();
             let pattern = pattern.join("/");
@@ -240,6 +265,51 @@ fn walk(dir: &Path, at: &mut Vec<String>, places: &Places, out: &mut Vec<String>
         }
         at.pop();
     }
+    let folder: Vec<String> = at.iter().map(|name| escape(name)).collect();
+    let folder = folder.join("/");
+    for group in groups {
+        let pattern = format!("{folder}/{}*", escape(&group));
+        out.push(pattern.clone());
+        out.push(format!("{pattern}/**"));
+    }
+}
+
+/// The names the kept places have in the folder `at`, or none when one of them is a pattern
+/// (any name there may be kept, so nothing is grouped).
+fn kept_names(places: &Places, at: &[String]) -> Option<Vec<String>> {
+    let mut kept = Vec::new();
+    for place in places.own.iter().chain(&places.open) {
+        let Some((name, above)) = place.get(..=at.len()).and_then(<[String]>::split_last) else {
+            continue;
+        };
+        if fits(above, at) {
+            if name.starts_with(ANY_NAME) {
+                return None;
+            }
+            kept.push(name.clone());
+        }
+    }
+    Some(kept)
+}
+
+/// The start of `name` that no name of `kept` starts with, compared in any case (as Windows
+/// names are): one character past the longest start it shares with one of them; none when a
+/// kept name starts with all of `name` (the run `…-1` beside the own `…-10`).
+fn group_prefix(name: &str, kept: &[String]) -> Option<String> {
+    let chars: Vec<char> = name.chars().collect();
+    let same = |a: &char, b: &char| a.to_lowercase().eq(b.to_lowercase());
+    let shared = kept
+        .iter()
+        .map(|kept| {
+            let kept: Vec<char> = kept.chars().collect();
+            kept.iter()
+                .zip(&chars)
+                .take_while(|(a, b)| same(a, b))
+                .count()
+        })
+        .max()
+        .unwrap_or(0);
+    chars.get(..=shared).map(|start| start.iter().collect())
 }
 
 /// Whether the own place `folder` names the place `at`: as long, each name equal, or
