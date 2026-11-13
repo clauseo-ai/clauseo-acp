@@ -90,6 +90,7 @@ impl Current {
             end: None,
             failure: None,
             offline: None,
+            last_output: started,
             abort: false,
             store_failed: None,
             detach: None,

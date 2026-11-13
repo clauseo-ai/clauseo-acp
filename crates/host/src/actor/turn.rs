@@ -224,6 +224,9 @@ struct Current {
     /// The agent said its connection failed, or the window said offline, and the agent has sent
     /// nothing since (`offline.rs`).
     offline: Option<offline::Watch>,
+    /// When the agent last sent model output, or an ask of it ended, on the host's monotonic
+    /// clock: the quiet arm runs from here (`offline/quiet.rs`).
+    last_output: std::time::Duration,
     /// The failure asks to stop the prompt once the commit being built is sent.
     abort: bool,
     /// An agent-driven commit of the turn failed with this code.
@@ -343,6 +346,8 @@ enum TimerKind {
     LimitRead(TurnId),
     /// The wait after a connection failure ran out (`offline.rs`).
     Offline(TurnId),
+    /// The quiet arm's check of a live turn (`offline/quiet.rs`).
+    Quiet(TurnId),
     /// A steer's answer did not come in time (`queue/steer.rs`).
     Steer(clauseo_protocol::MessageId),
     /// The next read of Claude's transcript for unconfirmed steers (`queue/confirm.rs`).
@@ -371,19 +376,6 @@ enum JobKind {
     Permission(Box<asks::HeldOpenCheck>),
 }
 
-impl JobKind {
-    /// The variant's name, for the log: its fields can hold paths.
-    const fn name(&self) -> &'static str {
-        match self {
-            Self::Before(_) => "Before",
-            Self::After(_) => "After",
-            Self::Reconcile(_) => "Reconcile",
-            Self::Undo(_) => "Undo",
-            Self::Permission(_) => "Permission",
-        }
-    }
-}
-
 /// An agent's event or its end, in the order its tasks posted them, for `thread`.
 pub(crate) fn agent_input(actor: &mut Actor, thread: ThreadId, input: AgentInput) {
     match input {
@@ -409,8 +401,8 @@ pub(crate) fn turn_input(actor: &mut Actor, input: TurnInput) {
         TurnInput::OfflineProbe {
             thread,
             turn,
-            reached,
-        } => offline::on_probed(actor, thread, turn, reached),
+            reach,
+        } => offline::on_probed(actor, thread, turn, reach),
         TurnInput::Log {
             thread,
             why,
@@ -436,6 +428,7 @@ pub(crate) fn timer(actor: &mut Actor, timer: TurnTimer) {
         TimerKind::Cancel(turn) => cancel::on_cancel_timer(actor, thread, turn),
         TimerKind::LimitRead(turn) => end::on_limit_read_timer(actor, thread, turn),
         TimerKind::Offline(turn) => offline::on_timer(actor, thread, turn),
+        TimerKind::Quiet(turn) => offline::quiet::on_timer(actor, thread, turn),
         TimerKind::Steer(message) => queue::on_steer_timer(actor, thread, message),
         TimerKind::SteerCheck => queue::on_steer_check_timer(actor, thread),
         TimerKind::StopWait(id) => sign_in::stop_timer(actor, id),

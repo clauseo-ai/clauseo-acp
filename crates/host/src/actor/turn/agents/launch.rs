@@ -62,6 +62,7 @@ pub(super) fn launch(
             folder: prepared.folder,
             guard,
             key_retry: KeyRetry::default(),
+            api_key: false,
         };
         (forced, Some((codex, prepared.login)))
     } else {
@@ -105,6 +106,11 @@ pub(super) fn launch(
         .then(|| agent::plan_note::plans_folder(spec.env(), cfg!(windows)))
         .flatten();
     let fence_vars = agent::data_fence::launch_vars(spec.env());
+    // Whether Codex got a key decides the host its offline probe asks (`offline/probe.rs`).
+    let codex = codex.map(|codex| CodexAgent {
+        api_key: key_passed(spec.env()),
+        ..codex
+    });
     let post = actor.post.clone();
     let post: Rc<dyn Fn(agent::AgentInput)> = Rc::new(move |input| {
         // The actor may be gone by then.
@@ -150,4 +156,13 @@ fn codex_hooks(actor: &Actor) -> Option<serde_json::Map<String, serde_json::Valu
         return None;
     };
     Some(hooks)
+}
+
+/// Whether a Codex launch's environment passes a key: `CODEX_API_KEY` set and not empty (the
+/// variable the profile hook launches a key in, `key_retry.rs`), its name in any case, as
+/// Windows reads it.
+fn key_passed(env: &std::collections::BTreeMap<std::ffi::OsString, std::ffi::OsString>) -> bool {
+    env.iter().any(|(name, value)| {
+        name.to_string_lossy().eq_ignore_ascii_case("CODEX_API_KEY") && !value.is_empty()
+    })
 }
