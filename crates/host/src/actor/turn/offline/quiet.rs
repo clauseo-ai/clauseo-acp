@@ -1,8 +1,12 @@
 //! The quiet arm (D-050): a turn behind a proxy whose upstream is blocked can go silent with no
 //! note at all (Claude retries out of sight; Codex retries without end and its notes may say a
-//! server answered). So every live turn of an agent with a known service keeps a clock of its
-//! last model output (answer and thought chunks, tool calls and their updates, plans, an ask),
-//! restarted when an ask ends, since the lawyer's time never counts.
+//! server answered). So every live turn of a Claude or Codex agent keeps a clock of its last
+//! model output (answer and thought chunks, tool calls and their updates, plans, compaction
+//! updates, an ask), restarted when an ask ends, since the lawyer's time never counts. Whether
+//! its service is known does not matter here: one that is not is never probed (it counts as
+//! reached, `probe/service.rs`), so only the backstop ends such a turn. A tool call left open
+//! keeps both off only while the agent sent something within [`WORKING_LIMIT`]; past it the
+//! silence counts as any other.
 //! - [`QUIET_WAIT`] with no output, no open tool call and no ask: a quiet watch arms and the host
 //!   probes the agent's service (`probe.rs`) at once. A probe that gets through waits again; two
 //!   misses in a row ([`QUIET_MISSES`]) end the turn `agent.offline`, as any watch does. Output
@@ -20,7 +24,7 @@ use clauseo_protocol::{ErrorCode, ThreadId, TurnId};
 
 use super::super::super::Actor;
 use super::super::{TimerKind, TurnTimer, cancel, current};
-use super::{Arm, OFFLINE_WAIT, Watch, at_work, probe};
+use super::{Arm, OFFLINE_WAIT, WORKING_LIMIT, Watch, at_work, probe};
 use crate::log_file::LIFECYCLE;
 
 /// How long a turn may go with no model output, no open tool call and no ask before the host
@@ -39,7 +43,7 @@ const LIMIT_DETAIL: &str =
     "the agent sent nothing for 5 min with no tool running and no question waiting";
 
 /// `thread`'s turn went live: its clock starts, and the quiet timer is armed when the switch is
-/// on and the agent has a known service.
+/// on and the agent is of a known kind (its launch recorded a probe target, known or not).
 pub(super) fn turn_started(actor: &mut Actor, thread: ThreadId) {
     let now = actor.now().mono;
     let Some(current) = current(actor, thread) else {
@@ -47,7 +51,7 @@ pub(super) fn turn_started(actor: &mut Actor, thread: ThreadId) {
     };
     current.last_output = now;
     let turn = current.turn;
-    if actor.turn_path.quiet_watch && probe::service(actor, thread).is_some() {
+    if actor.turn_path.quiet_watch && probe::target(actor, thread).is_some() {
         arm(actor, thread, turn, QUIET_WAIT);
     }
 }
@@ -88,13 +92,24 @@ pub(in crate::actor::turn) fn on_timer(actor: &mut Actor, thread: ThreadId, turn
     else {
         return;
     };
-    // Waiting on the lawyer or a tool is not quiet; the clock runs again from now.
-    if asking || working {
+    // Waiting on the lawyer is not quiet; the clock runs again from now.
+    if asking {
         current.last_output = now;
         arm(actor, thread, turn, QUIET_WAIT);
         return;
     }
     let quiet = now.saturating_sub(current.last_output);
+    // Nor is a tool call at work, while the agent sent something (its updates count) within
+    // [`WORKING_LIMIT`]: one left open past it no longer keeps the arm or the backstop off.
+    if working && quiet < WORKING_LIMIT {
+        arm(
+            actor,
+            thread,
+            turn,
+            QUIET_WAIT.min(WORKING_LIMIT.saturating_sub(quiet)),
+        );
+        return;
+    }
     if quiet >= QUIET_LIMIT {
         backstop(actor, thread, quiet);
         return;

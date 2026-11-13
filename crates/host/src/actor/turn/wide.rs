@@ -21,7 +21,7 @@ pub(crate) struct TurnPath {
     /// Whether the agent's service answers, asked before a watch only the window armed ends
     /// a turn (`offline/probe.rs`); tests set a fixed answer.
     pub(super) probe: super::offline::probe::ReachProbe,
-    /// Whether a live turn of an agent with a known service is watched for silence
+    /// Whether a live turn of a Claude or Codex agent is watched for silence
     /// (`offline/quiet.rs`): on, but off in unit tests unless a test turns it on.
     pub(super) quiet_watch: bool,
     /// The kind the unit tests' `fake-agent` plays for the offline probe and the quiet arm.

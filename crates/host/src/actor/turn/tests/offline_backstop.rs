@@ -7,12 +7,13 @@
 use std::time::Duration;
 
 use clauseo_protocol::{AgentKind, ErrorCode, StopReason};
+use serde_json::json;
 
 use super::agents::send_prompt;
 use super::offline::{answer, ended};
 use super::offline_quiet::{
     CANCELLED, END_TURN, PERMISSION, PROMPT, allow, cancel, chunk, finish_turn, going, hold,
-    probes, prompting_held, release_one, start, thought, tool, wait, wait_steps,
+    probes, prompting_held, release_one, start, thought, tool, update, wait, wait_steps,
 };
 use crate::actor::turn::offline::probe::ReachProbe;
 use crate::actor::turn::offline::quiet::QUIET_WAIT;
@@ -92,9 +93,88 @@ fn an_open_tool_call_never_trips_the_limit() {
     let turn = prompting_held(&mut rig, thread);
     hold(&mut rig, 1);
     release_one(&mut rig);
-    wait_steps(&mut rig, thread, 40, QUIET_WAIT);
+    // Short of the open tool's 10-minute cap.
+    wait_steps(&mut rig, thread, 19, QUIET_WAIT);
+    wait(&mut rig, thread, ALMOST);
     assert!(going(&rig, thread));
     cancel(&mut rig, thread, turn);
+    rig.finish();
+}
+
+/// Stage D's L1: a tool call left open keeps the arm and the backstop off only up to
+/// `WORKING_LIMIT` (10 min) with no word from the agent; a tool update moves that, and past it
+/// the silence counts: 5 min of it are long gone, so the backstop ends the turn at once.
+#[test]
+fn a_tool_call_open_with_no_word_for_ten_minutes_ends_the_turn_quiet() {
+    let update = update(
+        &json!({"sessionUpdate": "tool_call_update", "toolCallId": "t-9",
+        "status": "in_progress"}),
+    );
+    let lines = [PROMPT.to_owned(), tool(), update, CANCELLED.to_owned()];
+    let probe = ReachProbe::fixed(true);
+    let (mut rig, thread, count) =
+        start("backstop-tool-cap", Some(AgentKind::Claude), &lines, probe);
+    let turn = prompting_held(&mut rig, thread);
+    hold(&mut rig, 2);
+    release_one(&mut rig);
+    // A tool update at 9:00 moves the cap to 19:00.
+    wait_steps(&mut rig, thread, 18, QUIET_WAIT);
+    release_one(&mut rig);
+    wait_steps(&mut rig, thread, 19, QUIET_WAIT);
+    wait(&mut rig, thread, ALMOST);
+    assert!(going(&rig, thread));
+    assert_eq!(probes(&count), 0);
+    wait(&mut rig, thread, SECOND);
+    finish_turn(&mut rig, thread);
+    assert_eq!(
+        ended(&rig.log(thread), turn),
+        (Some(StopReason::Failed), Some(ErrorCode::AgentQuiet))
+    );
+    rig.finish();
+}
+
+/// Stage D's L2: claude-agent-acp 0.89.1 sends a compaction's start at once and streams its
+/// summary (`compaction_update`, `compaction_summary_chunk`), and each counts as output: a
+/// compaction whose summary comes in over 6 minutes is never probed and never trips the backstop.
+#[test]
+fn a_compaction_streaming_its_summary_never_trips_the_limit() {
+    let compaction = |status: &str| {
+        update(
+            &json!({"sessionUpdate": "compaction_update", "compactionId": "c-1",
+            "status": status}),
+        )
+    };
+    let summary = |n: usize| {
+        update(
+            &json!({"sessionUpdate": "compaction_summary_chunk", "compactionId": "c-1",
+            "content": {"type": "text", "text": format!("Clause {n} was reviewed. ")}}),
+        )
+    };
+    let mut lines = vec![PROMPT.to_owned(), compaction("in_progress")];
+    lines.extend((0..14).map(summary));
+    lines.push(compaction("completed"));
+    lines.push(END_TURN.to_owned());
+    let probe = ReachProbe::fixed(true);
+    let (mut rig, thread, count) = start(
+        "backstop-compaction",
+        Some(AgentKind::Claude),
+        &lines,
+        probe,
+    );
+    let turn = prompting_held(&mut rig, thread);
+    hold(&mut rig, 17);
+    // The start, then a summary block every 25 s: 6:15 in all.
+    for _ in 0..15 {
+        release_one(&mut rig);
+        wait(&mut rig, thread, Duration::from_secs(25));
+    }
+    assert!(going(&rig, thread));
+    assert_eq!(probes(&count), 0);
+    finish_turn(&mut rig, thread);
+    assert_eq!(
+        ended(&rig.log(thread), turn),
+        (Some(StopReason::EndTurn), None)
+    );
     rig.finish();
 }
 

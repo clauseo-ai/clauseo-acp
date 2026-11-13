@@ -174,6 +174,11 @@ impl Watch {
     pub(super) const fn reached(&self) -> bool {
         self.reached
     }
+
+    /// The class of the host's last probe for it.
+    pub(super) const fn class(&self) -> Option<ReachClass> {
+        self.class
+    }
 }
 
 /// The text of an update that may be the agent's note about its connection: answer text, or a

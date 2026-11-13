@@ -1,18 +1,19 @@
 //! The host's own word before an offline watch ends a turn: the webview's `offline` can be
 //! wrong or stuck, an agent's note can come before a retry that gets through, and a quiet agent
-//! may be thinking. So a thread of its own asks whether the one service the agent's login uses
+//! may be thinking. So a thread of its own asks whether the service the agent's login uses
 //! answers, within [`PROBE_CAP`] for the whole try, and posts back a [`Reach`]
-//! (`probe/route.rs`): behind a proxy (the firm's settings, the host's variables or the OS's, as
-//! the egress proxy routes, decision 0039) a `CONNECT` whose status counts, then a TLS
-//! client hello whose first answer record counts; straight to the host the same client hello. No
-//! certificate is checked and nothing but the hello is sent. The log gets fixed fields only.
+//! (`probe/route.rs`), by the service and route the agent's launch recorded (`probe/service.rs`,
+//! read from the launch's final environment, so no route is looked up here): behind the proxy
+//! the launch handed the agent a `CONNECT` whose status counts, then a TLS client hello whose
+//! first answer record counts; straight to the host the same client hello. No certificate is
+//! checked and nothing but the hello is sent. A launch whose service or route cannot be known is
+//! not probed: it counts as reached at once. The log gets fixed fields only.
 
 use std::fmt;
 use std::sync::Arc;
 use std::time::Duration;
 
-use clauseo_protocol::{AgentKind, ThreadId, TurnId};
-use url::Url;
+use clauseo_protocol::{ThreadId, TurnId};
 
 use super::super::super::Actor;
 use super::super::super::input::Input;
@@ -20,25 +21,19 @@ use super::super::TurnInput;
 use crate::log_file::{Cause, LIFECYCLE};
 
 mod route;
+mod service;
+
+pub(crate) use service::{Service, Target};
 
 #[cfg(test)]
 mod tests;
 
-/// The most the whole try may take: the lookup, the TCP connection, the `CONNECT` head and the
-/// first TLS record.
+/// The most the whole try may take: the name's lookup, the TCP connection, the `CONNECT` head
+/// and the first TLS record (each service of a login of unknown kind at once, side by side).
 pub(super) const PROBE_CAP: Duration = Duration::from_secs(8);
 
 /// The thread's name.
 const THREAD_NAME: &str = "clauseo-offline-probe";
-
-/// The service Codex uses with its own sign-in (`chatgpt.com`).
-const CHATGPT: &str = "https://chatgpt.com";
-
-/// The service Codex uses with an API key.
-const OPENAI_API: &str = "https://api.openai.com";
-
-/// Claude's service.
-const ANTHROPIC_API: &str = "https://api.anthropic.com";
 
 /// How a probe went, in fixed words only.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -64,8 +59,14 @@ pub(crate) enum ReachClass {
     TlsSilent,
     /// Something other than a TLS handshake record came back (an alert, HTTP text, a close).
     TlsOther,
-    /// The agent has no known service.
+    /// The agent has no known kind (a probe of nothing: a miss).
     NoService,
+    /// Not probed: the agent's service cannot be known (a cloud provider's login, a base URL
+    /// that names no one host). Counted as reached.
+    UnknownService,
+    /// Not probed: the launch hands the agent a proxy a `CONNECT` cannot follow (`https://`,
+    /// `socks5://`). Counted as reached.
+    UnknownRoute,
 }
 
 impl ReachClass {
@@ -83,15 +84,18 @@ impl ReachClass {
             Self::TlsSilent => "tls_silent",
             Self::TlsOther => "tls_other",
             Self::NoService => "no_service",
+            Self::UnknownService => "unknown_service",
+            Self::UnknownRoute => "unknown_route",
         }
     }
 }
 
-/// Whether the probe went through a proxy.
+/// Whether the probe went through a proxy (`None`: it tried nothing).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Via {
     Proxy,
     Direct,
+    None,
 }
 
 impl Via {
@@ -100,6 +104,7 @@ impl Via {
         match self {
             Self::Proxy => "proxy",
             Self::Direct => "direct",
+            Self::None => "none",
         }
     }
 }
@@ -119,7 +124,7 @@ impl Reach {
     pub(crate) const fn of(class: ReachClass) -> Self {
         Self {
             class,
-            via: Via::Direct,
+            via: Via::None,
             status: 0,
             ms: 0,
         }
@@ -129,18 +134,22 @@ impl Reach {
     pub(crate) const fn reached(self) -> bool {
         matches!(
             self.class,
-            ReachClass::Answered | ReachClass::ProxyAuth | ReachClass::Plain
+            ReachClass::Answered
+                | ReachClass::ProxyAuth
+                | ReachClass::Plain
+                | ReachClass::UnknownService
+                | ReachClass::UnknownRoute
         )
     }
 }
 
-/// Probes the agent's service (the URL, `None` for an agent of no known kind). Blocking; it
-/// runs on the probe's thread. Tests set fixed answers.
+/// Probes the agent's services (as its launch recorded them, `None` for an agent of no known
+/// kind). Blocking; it runs on the probe's thread. Tests set fixed answers.
 #[derive(Clone)]
 pub(crate) struct ReachProbe(Arc<Probe>);
 
 /// The probe's call.
-type Probe = dyn Fn(Option<&Url>) -> Reach + Send + Sync;
+type Probe = dyn Fn(Option<&[Service]>) -> Reach + Send + Sync;
 
 /// A fixed answer of a test probe.
 #[cfg(test)]
@@ -179,11 +188,35 @@ impl ReachProbe {
     pub(crate) fn counted(self) -> (Self, Arc<std::sync::atomic::AtomicUsize>) {
         let count = Arc::new(std::sync::atomic::AtomicUsize::new(0));
         let seen = Arc::clone(&count);
-        let probe = Self(Arc::new(move |url| {
+        let probe = Self(Arc::new(move |services| {
             seen.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-            (self.0)(url)
+            (self.0)(services)
         }));
         (probe, count)
+    }
+
+    /// This probe, keeping each call's services in the list it hands back.
+    pub(crate) fn recorded(self) -> (Self, Arc<std::sync::Mutex<Vec<Vec<Service>>>>) {
+        let calls = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let seen = Arc::clone(&calls);
+        let probe = Self(Arc::new(move |services: Option<&[Service]>| {
+            seen.lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .push(services.map(<[Service]>::to_vec).unwrap_or_default());
+            (self.0)(services)
+        }));
+        (probe, calls)
+    }
+}
+
+impl ReachProbe {
+    /// The real probe, the one a host outside the unit tests gets.
+    pub(crate) fn real() -> Self {
+        Self(Arc::new(|services| {
+            services.map_or(Reach::of(ReachClass::NoService), |services| {
+                route::probe_any(services, PROBE_CAP)
+            })
+        }))
     }
 }
 
@@ -193,11 +226,7 @@ impl Default for ReachProbe {
         if cfg!(test) {
             Self(Arc::new(|_| Reach::of(ReachClass::Refused)))
         } else {
-            Self(Arc::new(|url| {
-                url.map_or(Reach::of(ReachClass::NoService), |url| {
-                    route::probe(url, PROBE_CAP)
-                })
-            }))
+            Self::real()
         }
     }
 }
@@ -208,45 +237,30 @@ impl fmt::Debug for ReachProbe {
     }
 }
 
-/// The one service `thread`'s agent talks to: the base URL its variables set (the agent's
-/// settings, then the host's own); else the host its login uses: Codex's `api.openai.com` when
-/// its launch passed a key (`CODEX_API_KEY`, `agents/launch.rs`), its `chatgpt.com` otherwise,
-/// Claude's `api.anthropic.com`. A firm that blocks `chatgpt.com` but allows `api.openai.com`
-/// must not read as reached for a `chatgpt.com` login. `None` for an agent of no known kind.
-pub(super) fn service(actor: &mut Actor, thread: ThreadId) -> Option<Url> {
-    let agent = actor.threads.get(&thread)?.row.agent.clone();
-    let kind = AgentKind::of(&agent);
-    // The unit tests' `fake-agent` has no kind; a test names the one it plays.
-    #[cfg(test)]
-    let kind = kind.or(actor.turn_path.kind_for_tests);
-    let kind = kind?;
-    let key = super::super::updates::agent(actor, thread)
-        .and_then(|agent| agent.codex.as_ref())
-        .is_some_and(|codex| codex.api_key);
-    let (var, default) = match kind {
-        AgentKind::Codex if key => ("OPENAI_BASE_URL", OPENAI_API),
-        AgentKind::Codex => ("OPENAI_BASE_URL", CHATGPT),
-        AgentKind::Claude => ("ANTHROPIC_BASE_URL", ANTHROPIC_API),
-    };
-    let set = actor
-        .effective
-        .agent(agent.as_str())
-        .and_then(|launch| launch.env.get(var).cloned())
-        .or_else(|| std::env::var(var).ok());
-    set.and_then(|set| Url::parse(&set).ok())
-        .or_else(|| Url::parse(default).ok())
+/// What `thread`'s agent launch recorded for the probe: `None` for an agent of no known kind
+/// (or none running).
+pub(super) fn target(actor: &mut Actor, thread: ThreadId) -> Option<Target> {
+    super::super::updates::agent(actor, thread).and_then(|agent| agent.probe.clone())
 }
 
 /// Starts the probe for `thread`'s `turn`: its answer comes back as
-/// [`TurnInput::OfflineProbe`]. A thread that does not start answers "not reached" at once.
+/// [`TurnInput::OfflineProbe`]. A launch whose service or route cannot be known is not probed:
+/// its class (reached) is answered at once, as is "not reached" when the thread does not start.
 pub(super) fn start(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
-    let url = service(actor, thread);
+    let services = match target(actor, thread) {
+        Some(Target::Unknown(class)) => {
+            super::on_probed(actor, thread, turn, Reach::of(class));
+            return;
+        }
+        Some(Target::Service(services)) => Some(services),
+        None => None,
+    };
     let probe = actor.turn_path.probe.clone();
     let post = actor.post.clone();
     let spawned = std::thread::Builder::new()
         .name(THREAD_NAME.to_owned())
         .spawn(move || {
-            let reach = (probe.0)(url.as_ref());
+            let reach = (probe.0)(services.as_deref());
             let input = TurnInput::OfflineProbe {
                 thread,
                 turn,

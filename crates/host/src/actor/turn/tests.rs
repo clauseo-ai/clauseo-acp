@@ -20,6 +20,7 @@ mod offline_backstop;
 mod offline_codex;
 mod offline_network;
 mod offline_quiet;
+mod offline_target;
 mod order;
 mod own_cancel;
 mod own_restart;

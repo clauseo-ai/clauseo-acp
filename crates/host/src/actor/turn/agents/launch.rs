@@ -11,15 +11,17 @@ use clauseo_protocol::{AgentKind, ErrorCode, ThreadId};
 
 use super::super::super::Actor;
 use super::super::super::input::Input;
-use super::super::key_retry::KeyRetry;
+use super::super::key_retry::{KeyRetry, own_login};
 use super::super::launch_checks::Prepared;
+use super::super::offline::probe::Target;
 use super::{CodexAgent, path, start_failure};
 use crate::agent::{self, AgentLink};
 use crate::error::Error;
 
 /// What a launch gives: the link, the folder it runs in, what a Codex launch recorded, a
 /// Claude launch's plans folder, the matter folder's spellings for its stderr summary, a Claude
-/// launch's home, and the launch variables the data fence expands (`data_fence::launch_vars`).
+/// launch's home, the launch variables the data fence expands (`data_fence::launch_vars`), and
+/// what the offline probe asks (`offline/probe/service.rs`).
 pub(super) type Launched = (
     AgentLink,
     PathBuf,
@@ -28,6 +30,7 @@ pub(super) type Launched = (
     Vec<String>,
     Option<PathBuf>,
     Vec<(String, String)>,
+    Option<Target>,
 );
 
 /// The launch itself: the spec from the settings (inherited environment, the agent's
@@ -62,7 +65,6 @@ pub(super) fn launch(
             folder: prepared.folder,
             guard,
             key_retry: KeyRetry::default(),
-            api_key: false,
         };
         (forced, Some((codex, prepared.login)))
     } else {
@@ -80,6 +82,8 @@ pub(super) fn launch(
     let hook = agent::loads::launch_env(actor.profile.launch_env(&row.agent));
     let session_folder = agent::session_folder(&folder);
     let matter_spellings = start_failure::spellings_at_launch(actor, &folder, &session_folder);
+    // The offline probe asks only `chatgpt.com` for a login that is Clauseo's own.
+    let own = codex.as_ref().is_some_and(|(_, login)| own_login(*login));
     // The key retry is armed by the hook's key and the launch's sign-in check.
     let codex = codex.map(|(mut codex, login)| {
         codex.key_retry = KeyRetry::at_launch(&hook, login);
@@ -106,11 +110,12 @@ pub(super) fn launch(
         .then(|| agent::plan_note::plans_folder(spec.env(), cfg!(windows)))
         .flatten();
     let fence_vars = agent::data_fence::launch_vars(spec.env());
-    // Whether Codex got a key decides the host its offline probe asks (`offline/probe.rs`).
-    let codex = codex.map(|codex| CodexAgent {
-        api_key: key_passed(spec.env()),
-        ..codex
-    });
+    // The service and route the offline probe asks, from the env the agent gets.
+    let kind = AgentKind::of(&row.agent);
+    // The unit tests' `fake-agent` has no kind; a test names the one it plays.
+    #[cfg(test)]
+    let kind = kind.or(actor.turn_path.kind_for_tests);
+    let probe = kind.map(|kind| Target::at_launch(kind, spec.env(), own));
     let post = actor.post.clone();
     let post: Rc<dyn Fn(agent::AgentInput)> = Rc::new(move |input| {
         // The actor may be gone by then.
@@ -132,6 +137,7 @@ pub(super) fn launch(
         matter_spellings,
         claude_home,
         fence_vars,
+        probe,
     ))
 }
 
@@ -156,13 +162,4 @@ fn codex_hooks(actor: &Actor) -> Option<serde_json::Map<String, serde_json::Valu
         return None;
     };
     Some(hooks)
-}
-
-/// Whether a Codex launch's environment passes a key: `CODEX_API_KEY` set and not empty (the
-/// variable the profile hook launches a key in, `key_retry.rs`), its name in any case, as
-/// Windows reads it.
-fn key_passed(env: &std::collections::BTreeMap<std::ffi::OsString, std::ffi::OsString>) -> bool {
-    env.iter().any(|(name, value)| {
-        name.to_string_lossy().eq_ignore_ascii_case("CODEX_API_KEY") && !value.is_empty()
-    })
 }

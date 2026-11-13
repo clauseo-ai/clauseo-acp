@@ -11,7 +11,7 @@ use clauseo_protocol::ThreadId;
 use clauseo_sandbox::proxy::Route;
 use url::Url;
 
-use super::route::{client_hello, probe_route};
+use super::route::{client_hello, hello_within, probe_any, probe_route};
 use super::{Reach, ReachClass, Via};
 use crate::clock::{Clock as _, SystemClock};
 
@@ -327,6 +327,38 @@ fn the_probe_logs_no_host_or_proxy_text() {
     for leak in ["127.0.0.1", "chatgpt"] {
         assert!(!text.contains(leak), "{leak} in the log: {text}");
     }
+}
+
+#[test]
+fn a_login_of_unknown_kind_is_reached_when_either_service_answers() {
+    let closed = TcpListener::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port();
+    let refused = Url::parse(&format!("https://127.0.0.1:{closed}")).unwrap();
+    let (port, fake) = peer(Then::Tls(Some(&SERVER_HELLO)));
+    let answers = Url::parse(&format!("https://127.0.0.1:{port}")).unwrap();
+    let both = [(refused.clone(), Route::Direct), (answers, Route::Direct)];
+    let reach = probe_any(&both, CAP);
+    assert_eq!((reach.class, reach.reached()), (ReachClass::Answered, true));
+    fake.join().unwrap();
+    // Neither: the first one's miss.
+    let reach = probe_any(&[(refused, Route::Direct)], CAP);
+    assert_eq!((reach.class, reach.reached()), (ReachClass::Refused, false));
+}
+
+#[test]
+fn a_client_hello_that_cannot_be_written_is_tls_other() {
+    let (port, fake) = peer(Then::Silent);
+    let mut stream = TcpStream::connect(("127.0.0.1", port)).unwrap();
+    stream.shutdown(std::net::Shutdown::Write).unwrap();
+    assert_eq!(
+        hello_within(&mut stream, "chatgpt.com", CAP),
+        ReachClass::TlsOther
+    );
+    drop(stream);
+    assert!(fake.join().unwrap().is_empty(), "nothing went out");
 }
 
 /// A log capture: every line written, as text (the relay tests' pattern).
