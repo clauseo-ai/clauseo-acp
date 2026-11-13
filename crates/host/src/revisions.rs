@@ -4,7 +4,8 @@
 //!
 //! stetdoc only ever works on private copies in `<data>/revisions/<matter id>/`, never in the
 //! matter folder: the file is read once into `read.docx` (hashed: the [`DocVersion`]), stetdoc
-//! reads that copy and writes `out.docx` there, and `Matter::replace_file` writes the result into
+//! reads that copy and writes `out.docx` there (Accept all of a long list: in chunks, each on the
+//! one before's output), and `Matter::replace_file` writes the result into
 //! the folder between two checkpoints. The folder belongs to this matter's thread, which runs one
 //! job at a time: each job empties it first (a crash's leftovers go then) and removes it after,
 //! whatever happened.
@@ -22,7 +23,8 @@ use std::sync::Arc;
 
 use clauseo_matters::{CheckpointOutcome, Matter, ReplaceFile, Replaced, TimelineEntry};
 use clauseo_protocol::{
-    CheckpointId, DocVersion, ErrorCode, MatterPath, RevisionDecision, RevisionList, Timestamp,
+    CheckpointId, DocVersion, ErrorCode, MAX_REVISIONS, MatterPath, RevisionDecision, RevisionList,
+    Timestamp,
 };
 use sha2::{Digest as _, Sha256};
 
@@ -187,9 +189,8 @@ fn decide(matter: &mut Matter, job: &RevisionsJob) -> Result<Decided, Error> {
         }));
     }
     let run = stetdoc::Runner::new(&job.stetdoc, &job.clock, &job.work);
-    let all;
-    let ids = match ids {
-        Ids::These(ids) => ids,
+    let chunks = match ids {
+        Ids::These(ids) => vec![ids.clone()],
         Ids::All => {
             // The copy's bytes are `version`'s, so these are the changes that list was read from,
             // past its cut too; stetdoc is still given each id, never its own `all`.
@@ -197,34 +198,17 @@ fn decide(matter: &mut Matter, job: &RevisionsJob) -> Result<Decided, Error> {
                 &["check".into(), "--json".into(), copy.read.clone().into()],
                 false,
             )?;
-            all = parse::all_ids(&check)?;
-            if all.is_empty() {
+            let chunks = parse::all_chunks(&check, MAX_REVISIONS)?;
+            if chunks.is_empty() {
                 return Err(Error::refused(
                     ErrorCode::CommandInvalid,
                     "the file has no tracked changes",
                 ));
             }
-            &all
+            chunks
         }
     };
-    let ops = job.work.join("ops.txt");
-    write::replace_private_file(&ops, parse::batch(decision, ids).as_bytes())
-        .map_err(|err| io_error("write the batch", &err))?;
-    let out = job.work.join("out.docx");
-    run.json(
-        &[
-            "edit".into(),
-            copy.read.clone().into(),
-            "--ops".into(),
-            ops.into(),
-            "-o".into(),
-            out.clone().into(),
-            "--author".into(),
-            "Clauseo".into(),
-            "--json".into(),
-        ],
-        true,
-    )?;
+    let out = edit_in_chunks(&run, job, &copy.read, decision, &chunks)?;
     let request = ReplaceFile {
         path: &job.path,
         expected: &copy.read,
@@ -245,6 +229,51 @@ fn decide(matter: &mut Matter, job: &RevisionsJob) -> Result<Decided, Error> {
         before,
         reused,
     })
+}
+
+/// Runs stetdoc's `edit` once per chunk, each on the one before's output (the first on
+/// `read`), and answers the last output, `out.docx`. stetdoc's edit time grows faster than its
+/// batch (3,000 ids at once took 34 s and 1.5 GB), so Accept all of a long list goes in chunks of
+/// at most [`MAX_REVISIONS`] ids, each within its own [`stetdoc::EDIT_LIMIT`]. stetdoc keeps
+/// Word's change ids as they are when others are decided, so the ids read once from `read` name
+/// the same changes in every chunk's input. Only `ops.txt`, `in.docx` (the chunk before's output)
+/// and `out.docx` are written beside `read`; one chunk (a decision of named ids) is one edit of
+/// `read` into `out.docx`, as before.
+fn edit_in_chunks(
+    run: &stetdoc::Runner<'_>,
+    job: &RevisionsJob,
+    read: &Path,
+    decision: RevisionDecision,
+    chunks: &[Vec<u32>],
+) -> Result<PathBuf, Error> {
+    let ops = job.work.join("ops.txt");
+    let out = job.work.join("out.docx");
+    let between = job.work.join("in.docx");
+    let mut input = read.to_path_buf();
+    for (n, ids) in chunks.iter().enumerate() {
+        if n > 0 {
+            write::rename_file(&out, &between)
+                .map_err(|err| io_error("keep a chunk's output", &err))?;
+            input.clone_from(&between);
+        }
+        write::replace_private_file(&ops, parse::batch(decision, ids).as_bytes())
+            .map_err(|err| io_error("write the batch", &err))?;
+        run.json(
+            &[
+                "edit".into(),
+                input.clone().into(),
+                "--ops".into(),
+                ops.clone().into(),
+                "-o".into(),
+                out.clone().into(),
+                "--author".into(),
+                "Clauseo".into(),
+                "--json".into(),
+            ],
+            true,
+        )?;
+    }
+    Ok(out)
 }
 
 /// The file's bytes as read once, copied into the job's private folder, and their hash.

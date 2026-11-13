@@ -67,18 +67,38 @@ fn unreadable(err: &serde_json::Error) -> Error {
     Error::refused(ErrorCode::WordEditFailed, "stetdoc's answer did not read")
 }
 
-/// Every change id `check` names, ascending, however many: what Accept all and Reject all
-/// decide.
-pub(super) fn all_ids(check: &serde_json::Value) -> Result<Vec<u32>, Error> {
+/// Every change id `check` names, however many, in chunks of at most `max` ids for one edit
+/// each: what Accept all and Reject all decide. A change's ids stay in one chunk (a replacement
+/// is a deletion and an insertion); changes go by their first id, ascending. Empty when the file
+/// has none.
+pub(super) fn all_chunks(check: &serde_json::Value, max: usize) -> Result<Vec<Vec<u32>>, Error> {
     let check = Check::deserialize(check).map_err(|err| unreadable(&err))?;
-    let mut ids: Vec<u32> = check
+    let mut changes: Vec<Vec<u32>> = check
         .existing
         .into_iter()
-        .flat_map(|by| by.changes.into_iter().flat_map(|change| change.ids))
+        .flat_map(|by| by.changes.into_iter().map(|change| change.ids))
+        .map(|mut ids| {
+            ids.sort_unstable();
+            ids.dedup();
+            ids
+        })
+        .filter(|ids| !ids.is_empty())
         .collect();
-    ids.sort_unstable();
-    ids.dedup();
-    Ok(ids)
+    changes.sort_unstable();
+    let mut seen = std::collections::HashSet::new();
+    let mut chunks: Vec<Vec<u32>> = Vec::new();
+    for mut ids in changes {
+        // An id two changes name is decided once.
+        ids.retain(|id| seen.insert(*id));
+        if ids.is_empty() {
+            continue;
+        }
+        match chunks.last_mut() {
+            Some(chunk) if chunk.len() + ids.len() <= max => chunk.extend(ids),
+            _ => chunks.push(ids),
+        }
+    }
+    Ok(chunks)
 }
 
 /// The revisions `check` and `view` describe, in document order (by block, then id), the first

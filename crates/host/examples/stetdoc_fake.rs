@@ -10,7 +10,8 @@
 //!   `garbage`: it prints text that is not JSON. `<code> <exit>`: it prints stetdoc's JSON
 //!   refusal with `code` and exits with `exit`.
 //!
-//! Every run appends its first argument to `calls.txt`, so a test can tell whether `edit` ran.
+//! Every run appends its first argument to `calls.txt`, so a test can tell whether `edit` ran;
+//! each `edit` appends `<input> -> <output>` (the files' names) to `edits.txt`.
 
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
@@ -90,6 +91,16 @@ fn edit(dir: &Path, args: &[String]) -> ExitCode {
     let (Ok(mut bytes), Ok(batch)) = (std::fs::read(input), std::fs::read(ops)) else {
         return ExitCode::from(95);
     };
+    let name = |path: &Path| {
+        path.file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_default()
+    };
+    let mut edits = std::fs::read(dir.join("edits.txt")).unwrap_or_default();
+    edits.extend_from_slice(format!("{} -> {}\n", name(Path::new(input)), name(&out)).as_bytes());
+    if write(&dir.join("edits.txt"), &edits, None).is_err() {
+        return ExitCode::from(97);
+    }
     bytes.extend_from_slice(&batch);
     if write(&out, &bytes, len).is_err() {
         return ExitCode::from(96);
