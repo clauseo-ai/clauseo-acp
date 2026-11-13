@@ -266,7 +266,7 @@ pub(super) fn log_cancel(
         };
         out.push(actor, resolved)?;
     }
-    push_tool_cancels(actor, thread, turn, &mut out)?;
+    push_tool_settles(actor, thread, turn, ToolCallStatus::Cancelled, &mut out)?;
     match ctx {
         Some(ctx) => {
             let now = actor.now().wall;
@@ -281,11 +281,14 @@ pub(super) fn log_cancel(
     }
 }
 
-/// `Cancelled` for each tool call of `turn` whose status is not final, as sent.
-pub(super) fn push_tool_cancels(
+/// `status` (`Cancelled`, or `Completed` for a turn the agent ended well) for each tool call
+/// of `turn` whose status is not final, as sent. Only the status changes: a tool call completed
+/// so keeps the content it had, none when its output never came.
+pub(super) fn push_tool_settles(
     actor: &mut Actor,
     thread: ThreadId,
     turn: TurnId,
+    status: ToolCallStatus,
     out: &mut Out,
 ) -> Result<(), Error> {
     let tools: Vec<_> = actor
@@ -294,7 +297,7 @@ pub(super) fn push_tool_cancels(
         .unwrap_or_default();
     for tool_call in tools {
         let patch = ToolCallPatch {
-            status: Some(ToolCallStatus::Cancelled),
+            status: Some(status),
             ..ToolCallPatch::default()
         };
         out.push(actor, ToolCallUpdated { tool_call, patch })?;

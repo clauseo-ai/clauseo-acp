@@ -319,6 +319,9 @@ mod outside_matter;
 #[path = "host/outside_told.rs"]
 mod outside_told;
 #[cfg(test)]
+#[path = "host/oversize_live.rs"]
+mod oversize_live;
+#[cfg(test)]
 #[path = "host/own_logout.rs"]
 mod own_logout;
 #[cfg(test)]
