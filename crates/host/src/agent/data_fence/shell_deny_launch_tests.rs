@@ -181,7 +181,9 @@ fn spellings() -> Vec<(String, &'static str)> {
 }
 
 /// What a command reads, each spelling, a 60-matter folder: what is not the session's own is
-/// denied in both shells, quoted, bare or at the end; the own folders pass.
+/// denied in both shells, quoted, bare or at the end, with the spelling's separator or with
+/// `\` and `/` mixed (stage C's H1), what every session shares too (H2); the own folders pass,
+/// mixed or not.
 #[test]
 fn in_a_sixty_matter_folder_only_the_own_folders_pass() {
     let dir = TempDir::new("shell-deny-sixty");
@@ -189,6 +191,7 @@ fn in_a_sixty_matter_folder_only_the_own_folders_pass() {
     let deny = on_windows(big.deny, VM_DATA);
     let rules = windows_shell_deny_rules(&deny, &vm_env);
     let other_matter = matter_id(7);
+    let key7 = super::super::claude_project_key(&big_folder::matter_folder(7));
     let denied_places = [
         clauseo_settings::SETTINGS_FILE.to_owned(),
         "logs/host.log".to_owned(),
@@ -207,6 +210,13 @@ fn in_a_sixty_matter_folder_only_the_own_folders_pass() {
         "run".to_owned(),
         "agent-state".to_owned(),
         format!("agent-state/{}", matter_id(0)),
+        format!("agents/claude-acp/home/projects/{key7}/0193-session.jsonl"),
+        format!("agents/claude-acp/home/projects/{key7}"),
+        "tools/agent-browser/agent-browser".to_owned(),
+        "tools".to_owned(),
+        "agents/runtime/clauseo-python-3.13.18-c2-windows-x64/python.exe".to_owned(),
+        "profile/claude-plugin/skills/legal-drafting/SKILL.md".to_owned(),
+        "profile".to_owned(),
         String::new(),
     ];
     let own_places = [
@@ -215,23 +225,23 @@ fn in_a_sixty_matter_folder_only_the_own_folders_pass() {
         format!("agent-state/{}/notes", matter_id(0)),
         format!("agent-state/{}/notes/notes.md", matter_id(0)),
         "agents/claude-acp/home/plans/plan.md".to_owned(),
-        "tools/agent-browser/agent-browser".to_owned(),
-        "agents/runtime/clauseo-python-3.13.18-c2-windows-x64/python.exe".to_owned(),
-        "profile/claude-plugin/skills/legal-drafting/SKILL.md".to_owned(),
     ];
     let key = super::super::claude_project_key(&big_folder::matter_folder(0));
     let tool_results =
         format!("agents/claude-acp/home/projects/{key}/0193-session/tool-results/r.txt");
     for (data, sep) in spellings() {
-        let path = |place: &str| {
-            if place.is_empty() {
-                data.clone()
-            } else {
-                format!("{data}{sep}{}", place.replace('/', sep))
+        let other = if sep == "/" { "\\" } else { "/" };
+        // The place with the spelling's separator, or with it and `other` in turn.
+        let path = |place: &str, mixed: bool| {
+            let mut at = data.clone();
+            for (n, name) in place.split('/').filter(|name| !name.is_empty()).enumerate() {
+                at.push_str(if mixed && n % 2 == 1 { other } else { sep });
+                at.push_str(name);
             }
+            at
         };
-        for place in &denied_places {
-            let at = path(place);
+        let both = |place: &str| [path(place, false), path(place, true)];
+        for at in denied_places.iter().flat_map(|place| both(place)) {
             for command in [
                 format!(r#"type "{at}""#),
                 format!("cat {at}"),
@@ -243,8 +253,11 @@ fn in_a_sixty_matter_folder_only_the_own_folders_pass() {
                 }
             }
         }
-        for place in own_places.iter().chain([&tool_results]) {
-            let at = path(place);
+        for at in own_places
+            .iter()
+            .chain([&tool_results])
+            .flat_map(|place| both(place))
+        {
             for command in [
                 format!(r#"type "{at}""#),
                 format!("cat {at}"),
@@ -277,36 +290,188 @@ fn the_settings_files_are_denied_to_every_tool() {
     }
 }
 
-/// The size of a 60-matter launch's rules, with the default folder and with a configured one
-/// spelled two ways (no folder name to share): each well under Claude Code's 2 MiB settings file.
+/// The rules' size (Read and Edit with the shell rules, as JSON) for 60 and 1,000 matters, each
+/// with notes and a Claude project, with the default folder and with a configured one spelled
+/// two ways (no folder name to share): the siblings go in groups (`launch.rs`), so 1,000 matters
+/// stay under a quarter of Claude Code's 2 MiB settings file.
 #[test]
-fn a_sixty_matter_launch_stays_well_under_the_settings_file_cap() {
-    let dir = TempDir::new("shell-deny-size");
-    let big = big_folder::big(dir.path());
+fn a_thousand_matter_launch_stays_under_a_quarter_of_the_settings_file_cap() {
+    let configured = [
+        PathBuf::from(r"D:\Firm Data\Clauseo Store"),
+        PathBuf::from(r"C:\Users\clauseo-lawyer\AppData\Roaming\Clauseo Store"),
+    ];
     let size = |rules: &[String]| serde_json::to_string(rules).unwrap().len();
-    let default = on_windows(big.deny.clone(), VM_DATA);
-    let read_edit = claude_deny_rules_on(&default, true);
-    let shell = windows_shell_deny_rules(&default, &vm_env);
-    let configured = LaunchDeny {
-        spellings: vec![
-            PathBuf::from(r"D:\Firm Data\Clauseo Store"),
-            PathBuf::from(r"C:\Users\clauseo-lawyer\AppData\Roaming\Clauseo Store"),
-        ],
-        ..big.deny
+    let mut sizes = Vec::new();
+    for matters in [60, 1000] {
+        let dir = TempDir::new(&format!("shell-deny-size-{matters}"));
+        let big = big_folder::big_with(dir.path(), matters, matters);
+        for spellings in [vec![PathBuf::from(VM_DATA)], configured.to_vec()] {
+            let deny = LaunchDeny {
+                spellings,
+                ..big.deny.clone()
+            };
+            let read_edit = claude_deny_rules_on(&deny, true);
+            let shell = windows_shell_deny_rules(&deny, &vm_env);
+            eprintln!(
+                "{matters} matters, {} spelling(s): {} targets; Read/Edit {} rules {} bytes; \
+                 shell {} rules {} bytes",
+                deny.spellings.len(),
+                deny.targets.len(),
+                read_edit.len(),
+                size(&read_edit),
+                shell.len(),
+                size(&shell),
+            );
+            sizes.push(size(&read_edit) + size(&shell));
+        }
+    }
+    let [sixty_one, sixty_two, thousand_one, thousand_two] = sizes.as_slice() else {
+        panic!("{sizes:?}");
     };
-    let configured_shell = windows_shell_deny_rules(&configured, &vm_env);
-    eprintln!(
-        "sixty matters: {} targets, {} kept; Read/Edit {} rules {} bytes; shell (default \
-         folder) {} rules {} bytes; shell (configured, two spellings) {} rules {} bytes",
-        default.targets.len(),
-        default.kept.len(),
-        read_edit.len(),
-        size(&read_edit),
-        shell.len(),
-        size(&shell),
-        configured_shell.len(),
-        size(&configured_shell),
-    );
-    assert!(size(&read_edit) + size(&shell) < 512 * 1024);
-    assert!(size(&configured_shell) < 1024 * 1024);
+    assert!(*thousand_two < 512 * 1024, "{sizes:?}");
+    // At most a few dozen bytes a matter: the groups, not the matters.
+    assert!(thousand_one - sixty_one < 100 * 940, "{sizes:?}");
+    assert!(thousand_two - sixty_two < 100 * 940, "{sizes:?}");
+}
+
+/// A `..` after the data folder's name, with any separator, in every spelling and both shells,
+/// is denied: it could climb out of an own folder into a sibling. The own folders' commands
+/// without one still pass.
+#[test]
+fn a_dot_dot_after_the_data_folder_is_denied() {
+    let dir = TempDir::new("shell-deny-dots");
+    let big = big_folder::big(dir.path());
+    let rules = windows_shell_deny_rules(&on_windows(big.deny, VM_DATA), &vm_env);
+    let own = matter_id(0);
+    for (data, sep) in spellings() {
+        let at = |place: &str| format!("{data}{sep}{}", place.replace('/', sep));
+        for command in [
+            format!(
+                r#"type "{}""#,
+                at(&format!("run/{OWN_RUN}/../{PREFIX_RUN}/relay-token"))
+            ),
+            format!(
+                "cat {}",
+                at(&format!("agent-state/{own}/notes/../../x/notes/n.md"))
+            ),
+            format!(
+                "cat {}/../../settings.json",
+                at(&format!("run/{OWN_RUN}/work"))
+            ),
+            format!(
+                r"cat {}\..\..\settings.json",
+                at(&format!("run/{OWN_RUN}/work"))
+            ),
+            format!(
+                r"cat {}\\..\\..\\settings.json",
+                at(&format!("run/{OWN_RUN}/work"))
+            ),
+            format!("ls {}/..", at(&format!("run/{OWN_RUN}"))),
+            // Mixed: `/..` after a path written with `\`, and the other way round.
+            format!(
+                "cat {}/../../{}/notes/n.md",
+                at(&format!("agent-state/{own}/notes")),
+                matter_id(7)
+            ),
+            format!(
+                r"cat {}\..\{PREFIX_RUN}\relay-token",
+                at(&format!("run/{OWN_RUN}"))
+            ),
+        ] {
+            for tool in ["Bash", "PowerShell"] {
+                assert!(denied_by(&rules, tool, &command), "{tool}: {command}");
+            }
+        }
+        let work = at(&format!("run/{OWN_RUN}/work"));
+        let matter = r"C:\Users\clauseo-lawyer\CloudProxy\Matter 00";
+        for command in [
+            format!(r#"pandoc "{work}{sep}reply.md" -o "{matter}\x.docx""#),
+            format!(r#"pandoc "{work}/reply.md" -o "{work}{sep}x.docx""#),
+        ] {
+            for tool in ["Bash", "PowerShell"] {
+                assert!(!denied_by(&rules, tool, &command), "{tool}: {command}");
+            }
+        }
+    }
+}
+
+/// The run `…-1` beside the own `…-10`: followed by any boundary character it is denied, in
+/// every spelling and both shells; the own run followed by the same stays allowed.
+#[test]
+fn a_prefix_sibling_is_denied_before_every_boundary_and_the_own_name_is_not() {
+    let dir = TempDir::new("shell-deny-bounds");
+    let big = big_folder::big(dir.path());
+    let rules = windows_shell_deny_rules(&on_windows(big.deny, VM_DATA), &vm_env);
+    for (data, sep) in spellings() {
+        let marks = [
+            ";", "|", "&", ">", "<", "(", ")", ",", "\t", "\n", "*", "?", "\"", "'", " ", "/",
+        ];
+        for after in marks.into_iter().chain([sep]) {
+            let sibling = format!("ls {data}{sep}run{sep}{PREFIX_RUN}{after}x");
+            let own = format!("ls {data}{sep}run{sep}{OWN_RUN}{after}x");
+            for tool in ["Bash", "PowerShell"] {
+                assert!(denied_by(&rules, tool, &sibling), "{tool}: {sibling:?}");
+                assert!(!denied_by(&rules, tool, &own), "{tool}: {own:?}");
+            }
+        }
+        let at_end = format!("ls {data}{sep}run{sep}{PREFIX_RUN}");
+        assert!(denied_by(&rules, "Bash", &at_end), "{at_end}");
+    }
+}
+
+/// What every session shares (the built-in plugin, the agents' commands, the Python runtime) is
+/// denied to a command that names it, in every spelling, mixed separators too (stage C's H2): a
+/// write there would reach every matter. Claude still reads the built-in skills with its Read
+/// tool (the allow rules are unchanged) and runs the commands by name on its `PATH`.
+#[test]
+fn the_shared_places_are_denied_to_the_shell_and_still_readable() {
+    let dir = TempDir::new("shell-deny-shared");
+    let big = big_folder::big(dir.path());
+    let deny = on_windows(big.deny, VM_DATA);
+    let rules = windows_shell_deny_rules(&deny, &vm_env);
+    let python = r"agents\runtime\clauseo-python-3.13.18-c2-windows-x64\python.exe";
+    for (data, sep) in spellings() {
+        let at = |place: &str| format!("{data}{sep}{}", place.replace('\\', sep));
+        let mixed = |place: &str| {
+            let place = place.replacen('\\', "/", 1);
+            format!("{data}{sep}{}", place.replace('\\', sep))
+        };
+        for command in [
+            format!(
+                "echo x > {}",
+                at(r"profile\claude-plugin\skills\legal-drafting\SKILL.md")
+            ),
+            format!("copy y {}", at(r"tools\agent-browser\agent-browser.exe")),
+            format!(r#"{} -c "print(1)""#, at(python)),
+            format!(r#"{} -c "print(1)""#, mixed(python)),
+            format!("echo x > {}", mixed(r"profile\claude-plugin\skills\x.md")),
+            format!("copy y {}", mixed(r"tools\agent-browser\x")),
+        ] {
+            for tool in ["Bash", "PowerShell"] {
+                assert!(denied_by(&rules, tool, &command), "{tool}: {command}");
+            }
+        }
+    }
+    // The commands run by name stay allowed.
+    for command in [
+        r#"pandoc "reply.md" -o "x.docx""#,
+        "python -c \"print(1)\"",
+        "agent-browser open https://example.com",
+        "stetdoc skills get core",
+    ] {
+        for tool in ["Bash", "PowerShell"] {
+            assert!(!denied_by(&rules, tool, command), "{tool}: {command}");
+        }
+    }
+    // The Read allow rules for the built-in skills and the shared commands are as they were.
+    let base = super::super::rule_path(VM_DATA, cfg!(windows));
+    let allow = super::super::claude_allow_rules(&deny);
+    for place in [
+        "profile/claude-plugin/skills",
+        "tools",
+        "agents/runtime/clauseo-python-*",
+    ] {
+        let rule = format!("Read({base}/{place}/**)");
+        assert!(allow.contains(&rule), "{rule}: {allow:?}");
+    }
 }

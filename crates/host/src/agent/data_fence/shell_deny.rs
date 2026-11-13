@@ -4,10 +4,14 @@
 //! the classifier alone; these rules refuse the plain spellings first, beside the `Read` and
 //! `Edit` rules of [`super::claude_deny_rules`], and name the same targets (`LaunchDeny`,
 //! `launch.rs`): [`super::DENIED`] and every entry of `<data>` the launch found that is not the
-//! session's own. So the session's run folder, this matter's notes, Claude's plans folder, its
-//! project's `tool-results` and the read-only tools stay reachable by a command, and everything
-//! else under `<data>` is denied when a command names it, the data folder itself too. A rule has
-//! no exceptions, so a rule for the whole folder would deny the own folders with it.
+//! session's own. So the session's run folder, this matter's notes, Claude's plans folder and its
+//! project's `tool-results` stay reachable by a command, and everything else under `<data>` is
+//! denied when a command names it, the data folder itself too. That includes what every session
+//! shares ([`super::SHARED`], [`super::READ_ONLY`]: the built-in plugin, the agents' commands,
+//! Clauseo's Python runtime), which Claude reads with its Read tool and runs by name on its
+//! `PATH` (`pandoc`, `stetdoc`, `python`, `agent-browser`); a command that names them could
+//! write there, into every matter. A rule has no exceptions, so a rule for the whole folder would
+//! deny the own folders with it.
 //!
 //! Claude Code 2.1.293 matches a rule (`hQ`) as an anchored regular expression: `*` is any text,
 //! spaces and separators included, a leading one too; `\*` is a literal `*` and `\\` a literal
@@ -20,36 +24,49 @@
 //! tools-reference, "Bash deny rules also turn off the PowerShell tool").
 //!
 //! The rules, for each spelling of `<data>` ([`forms`]) and its separators, both tools, each once:
-//! - each target: the form, a separator, the target's path with that separator. A sibling's name
+//! - each target: the form, a separator, the target's path: its names with Claude's `*` between
+//!   them, so any mix of `\` and `/` matches, but the last after a separator (`\` or `/`, or
+//!   `\\` in the escaped form), so it still starts a name ([`spread`]). A sibling's name
 //!   may be a text prefix of an own one (run `…-1` beside the own `…-10`; a matter folder `X` and
 //!   another `X 2`, whose Claude projects are `…-X` and `…-X-2`). Where one of the launch's kept
 //!   places could start with the target's name ([`LaunchDeny::kept`]), the rule ends at a name
-//!   boundary, as six rules: the name followed by `\` (`\\` in the escaped form), `/`, `"`, `'`
-//!   or a space, then anything, and the name at the end of the command. Claude's `*` takes any
-//!   text, so no fewer rules can say "one of these, or the end"; a PowerShell command loses its
-//!   quotes before it is matched, so the space and end rules are the ones that hold there.
-//!   Elsewhere one rule, the name followed by anything, which the six would only split.
+//!   boundary: the name followed by `\` (`\\` in the escaped form), `/` or one of [`AFTER`]
+//!   (a quote, a space or tab, a newline, `;`, `|`, `&`, `>`, `<`, `(`, `)`, `,`, a backtick,
+//!   `*`, `?`, `[`), then anything, and the name at the end of the command. Claude's `*` takes
+//!   any text, so no fewer rules can say "one of these, or the end"; a PowerShell command loses
+//!   its quotes before it is matched, and Claude Code matches each part of a compound Bash
+//!   command on its own (`XK`), so the space and end rules carry most of it. Elsewhere one rule,
+//!   the name followed by anything.
 //! - the data folder named alone, and each folder the launch walked into (`run`, `agent-state`,
 //!   this matter's state, `agents` and Claude's folders above its plans and projects): the name
-//!   with the boundaries above but the separators (a recursive command there reaches every
-//!   sibling), and followed by a separator and a glob character (`*`, `?`, `[`).
-//! - after the data folder, a separator, anything, then a separator and `..`.
+//!   followed by one of [`AFTER`] or at the end (a recursive command there reaches every
+//!   sibling), and by a separator at the end, before a quote or a space, or before a glob
+//!   character (`*`, `?`, `[`).
+//! - after the data folder, anything, then `\..` or `/..`: a `..` anywhere after it, with any
+//!   separators, which could climb out of an own folder into a sibling, whatever it costs a
+//!   command that climbs within an own one (`pandoc -o ..\..\x` there is denied too).
 //!
 //! A target is a pattern of `launch.rs`: its final `/**` is dropped, `/` becomes the form's
 //! separator, the gitignore escapes are undone, and a pattern `*` (`run/*/relay-token`,
-//! `state.sqlite*`) stays Claude's `*`, which takes separators too (`run\<own>\work\relay-token.md`
-//! is denied with the token; the accepted cost). A run folder or matter state named by its id
-//! (`run/<uuid>-<n>`, `agent-state/<uuid>`) and a Claude project (`…/home/projects/<key>`) is
-//! named by its tail alone (`run\<id>`, `home\projects\<key>`), whatever spelling of `<data>` is
-//! before it: no folder of the lawyer's holds those names, and they are most of a busy data
-//! folder's targets. A spelling that ends in Clauseo's own folder name
+//! `state.sqlite*`, a group of siblings `run/<start>*`) stays Claude's `*`, which takes
+//! separators too (`run\<own>\work\relay-token.md` is denied with the token; the accepted
+//! cost). What lies under Clauseo's own names ([`OWN_WORDS`]: `agent-state`, `claude-acp`,
+//! `codex-acp`), and a run folder whose name (or group's start) is an id's, is named by its tail
+//! alone (`agent-state\<id>`, `claude-acp\home\projects\<key>`, `run\<id>`), with each separator
+//! and whatever spelling of `<data>` is before it: no folder of the lawyer's holds those names,
+//! and with `launch.rs` naming the siblings of a busy folder in groups, a launch's rules hardly
+//! grow with the matters (the settings file Claude Code reads is at most 2 MiB,
+//! `agent::launch_settings`). A spelling that ends in Clauseo's own folder name
 //! (`clauseo_settings::IDENTIFIER`) is left out beside that name alone: its rules would deny
 //! only commands the name's rules already deny.
 //!
 //! A deny list is not a fence: a path built at run time, a variable of the agent's own, a `cd`
-//! first, a glob inside a name, a `..` after mixed separators, other letter cases in Bash or a
-//! script that opens the file are not caught. That is the accepted residual of `auto` on
-//! Windows (decision record 0030).
+//! first (a `cd` into the own run folder, then `cd ..` twice), a glob inside a name, other
+//! letter cases in Bash, an 8.3 short name, a separator other than its own right after a
+//! configured folder's path (Clauseo's own folder name covers the default one) or a script that
+//! opens the file are not caught, nor a run folder,
+//! matter or project made after the launch whose name starts no group. That is the accepted
+//! residual of `auto` on Windows (decision record 0030).
 
 use std::collections::HashSet;
 use std::ffi::OsString;
@@ -86,8 +103,18 @@ impl Sep {
     }
 }
 
-/// What may follow a name at a boundary, besides a separator or the end.
-const AFTER: [&str; 3] = ["\"", "'", " "];
+/// What may follow a name at a boundary, besides a separator or the end: a quote, a space or
+/// tab, a newline, what ends a command or starts a redirection, a list, a group or a command
+/// substitution, and a glob character (`run\<sibling>*`).
+const AFTER: [&str; 17] = [
+    "\"", "'", " ", "\t", "\n", ";", "|", "&", ">", "<", "(", ")", ",", "`", "*", "?", "[",
+];
+
+/// What may follow a separator after a folder named alone (`dir "<data>\"`): a quote, a space.
+const AFTER_SEP: [&str; 3] = ["\"", "'", " "];
+
+/// The separators a `..` may follow anywhere after the data folder's name (`\\..` holds `\..`).
+const DOTS: [&str; 2] = ["\\", "/"];
 
 /// The glob characters that reach every entry of a folder.
 const GLOBS: [&str; 3] = ["*", "?", "["];
@@ -113,7 +140,26 @@ pub(crate) fn windows_shell_deny_rules(
     var: &dyn Fn(&str) -> Option<OsString>,
 ) -> Vec<String> {
     let forms = forms(deny, var);
-    let kept: Vec<Vec<Vec<Piece>>> = deny.kept.iter().map(|place| parse(place).0).collect();
+    // The shared and read-only places are the shell's to run by name on its `PATH`, never to
+    // name: a command that writes there would reach every matter.
+    let shared: Vec<String> = super::SHARED
+        .iter()
+        .map(|(place, _)| super::escape(place))
+        .chain(super::READ_ONLY.iter().map(|place| (*place).to_owned()))
+        .collect();
+    let kept: Vec<Vec<Vec<Piece>>> = deny
+        .kept
+        .iter()
+        .filter(|place| !shared.contains(place))
+        .map(|place| parse(place).0)
+        .collect();
+    let mut targets: Vec<String> = deny.targets.clone();
+    for place in &shared {
+        let target = format!("{place}/**");
+        if !targets.contains(&target) {
+            targets.push(target);
+        }
+    }
     let mut parents: Vec<Vec<Vec<Piece>>> = Vec::new();
     for place in &kept {
         for end in 1..place.len() {
@@ -129,39 +175,49 @@ pub(crate) fn windows_shell_deny_rules(
     let mut contents: Vec<Vec<Piece>> = Vec::new();
     let mut ends: Vec<Vec<Piece>> = Vec::new();
     for form in &forms {
+        let lead = text(&form.lead);
+        for dots in DOTS {
+            contents.push(join(&[&lead, &[Piece::Any], &text(dots), &text("..")]));
+        }
         for &sep in &form.seps {
-            let lead = vec![Piece::Text(form.lead.clone())];
             alone(&lead, sep, &mut contents, &mut ends);
-            let mut lead_sep = lead.clone();
-            lead_sep.push(Piece::Text(sep.text().to_owned()));
-            contents.push(join(&[
-                &lead_sep,
-                &[Piece::Any],
-                &text(sep.text()),
-                &text(".."),
-            ]));
-            for parent in &parents {
-                let path = join(&[&lead_sep, &path(parent, sep)]);
+            let lead_sep = text(&format!("{}{}", form.lead, sep.text()));
+            for parent in parents.iter().filter(|parent| tail(parent).is_none()) {
+                for path in spread(parent, sep) {
+                    alone(&join(&[&lead_sep, &path]), sep, &mut contents, &mut ends);
+                }
+            }
+        }
+    }
+    for tail in parents.iter().filter_map(|parent| tail(parent)) {
+        for sep in Sep::ALL {
+            for path in spread(tail, sep) {
                 alone(&path, sep, &mut contents, &mut ends);
             }
         }
     }
-    for target in &deny.targets {
+    for target in &targets {
         let (names, _folder) = parse(target);
         let bounded = needs_boundary(&names, &kept);
-        match tail(&names) {
-            Some(tail) => {
-                for sep in Sep::ALL {
-                    named(&path(tail, sep), sep, bounded, &mut contents, &mut ends);
+        if let Some(tail) = tail(&names) {
+            for sep in Sep::ALL {
+                for path in spread(tail, sep) {
+                    named(&path, sep, bounded, &mut contents, &mut ends);
                 }
             }
-            None => {
-                for form in &forms {
-                    for &sep in &form.seps {
-                        let lead = text(&format!("{}{}", form.lead, sep.text()));
-                        let full = join(&[&lead, &path(&names, sep)]);
-                        named(&full, sep, bounded, &mut contents, &mut ends);
-                    }
+            continue;
+        }
+        for form in &forms {
+            for &sep in &form.seps {
+                let lead_sep = text(&format!("{}{}", form.lead, sep.text()));
+                for path in spread(&names, sep) {
+                    named(
+                        &join(&[&lead_sep, &path]),
+                        sep,
+                        bounded,
+                        &mut contents,
+                        &mut ends,
+                    );
                 }
             }
         }
@@ -203,11 +259,11 @@ fn named(
 }
 
 /// The rules for a folder (`path`) named alone: at a name boundary but a separator, and with
-/// a separator at one, or a separator and a glob character.
+/// a separator at the end or before a quote or a space, or a separator and a glob character.
 fn alone(path: &[Piece], sep: Sep, contents: &mut Vec<Vec<Piece>>, ends: &mut Vec<Vec<Piece>>) {
     for end in sep.ends() {
         let with = join(&[path, &text(end)]);
-        for after in AFTER {
+        for after in AFTER_SEP {
             contents.push(join(&[&with, &text(after), &[Piece::Any]]));
         }
         ends.push(with.clone());
@@ -333,41 +389,37 @@ fn push_text(pieces: &mut Vec<Piece>, c: char) {
     }
 }
 
-/// The tail a target is named by alone (the module doc): `run/<id>`, `agent-state/<id>` or
-/// `home/projects/<key>`, when it is one.
+/// The names of Clauseo's own that no folder of the lawyer's holds: a target or folder under
+/// one is named from it on ([`tail`]).
+const OWN_WORDS: [&str; 3] = ["agent-state", "claude-acp", "codex-acp"];
+
+/// How long a run folder's name, or its group's start (`launch.rs`), must be to name it by its
+/// tail: an id's first twelve characters are no lawyer's folder name.
+const DISTINCT: usize = 12;
+
+/// The tail a target or a folder is named by alone (the module doc), whatever spelling of
+/// `<data>` is before it: from the first of [`OWN_WORDS`] on (`agent-state\<id>`,
+/// `claude-acp\home\projects\<key>`), or `run\<name>` when the name (or its group's start)
+/// has at least [`DISTINCT`] characters.
 fn tail(names: &[Vec<Piece>]) -> Option<&[Vec<Piece>]> {
-    fn literal(name: &[Piece]) -> Option<&str> {
-        match name {
-            [Piece::Text(text)] => Some(text.as_str()),
-            _ => None,
-        }
+    fn is(name: &[Piece], word: &str) -> bool {
+        matches!(name, [Piece::Text(text)] if text == word)
     }
-    let texts: Vec<&str> = names
+    if let Some(at) = names
         .iter()
-        .map(Vec::as_slice)
-        .map(literal)
-        .collect::<Option<_>>()?;
-    match texts.as_slice() {
-        ["run" | "agent-state", id] if is_id(id) => Some(names),
-        ["agents", "claude-acp", "home", "projects", key] if !key.is_empty() => names.get(2..),
+        .position(|name| OWN_WORDS.iter().any(|word| is(name, word)))
+    {
+        return names.get(at..);
+    }
+    match names {
+        [run, name] if is(run, "run") => {
+            let ([Piece::Text(start)] | [Piece::Text(start), Piece::Any]) = name.as_slice() else {
+                return None;
+            };
+            (start.chars().count() >= DISTINCT).then_some(names)
+        }
         _ => None,
     }
-}
-
-/// Whether `name` is a v7-style id (`8-4-4-4-12` hex digits), or one with `-<n>` after it as a
-/// run folder's name.
-fn is_id(name: &str) -> bool {
-    let (id, rest) = name.split_at_checked(36).unwrap_or((name, ""));
-    let groups: Vec<&str> = id.split('-').collect();
-    let shaped = groups.iter().map(|group| group.len()).eq([8, 4, 4, 4, 12])
-        && groups
-            .iter()
-            .all(|group| group.bytes().all(|b| b.is_ascii_hexdigit()));
-    let run = rest.is_empty()
-        || rest
-            .strip_prefix('-')
-            .is_some_and(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()));
-    shaped && run
 }
 
 /// Whether a kept place could have a name at `names`' last that starts with it and is longer:
@@ -406,16 +458,28 @@ fn lead_text(name: &[Piece]) -> Option<String> {
     }
 }
 
-/// `names` joined with `sep`.
-fn path(names: &[Vec<Piece>], sep: Sep) -> Vec<Piece> {
-    let mut out = Vec::new();
-    for (n, name) in names.iter().enumerate() {
-        if n > 0 {
-            out.push(Piece::Text(sep.text().to_owned()));
-        }
-        out.extend(name.iter().cloned());
+/// `names` as a command may write them with `sep`: one after another, each but the last
+/// followed by Claude's `*` (any separator, `\` or `/` mixed in any way), the last after
+/// `sep` or `/` (`\` after `/`), so that it still starts a name: a group's start (`run\x*`)
+/// must not match inside an own name. Two variants for two or more names, one for one.
+fn spread(names: &[Vec<Piece>], sep: Sep) -> Vec<Vec<Piece>> {
+    let Some((last, above)) = names.split_last() else {
+        return Vec::new();
+    };
+    if above.is_empty() {
+        return vec![last.clone()];
     }
-    out
+    let mut inner = Vec::new();
+    for (n, name) in above.iter().enumerate() {
+        if n > 0 {
+            inner.push(Piece::Any);
+        }
+        inner.extend(name.iter().cloned());
+    }
+    sep.ends()
+        .into_iter()
+        .map(|end| join(&[&inner, &text(end), last]))
+        .collect()
 }
 
 /// One text piece.

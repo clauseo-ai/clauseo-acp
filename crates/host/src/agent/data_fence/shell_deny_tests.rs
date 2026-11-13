@@ -99,6 +99,17 @@ fn every_spelling_of_the_data_folder_is_denied_in_both_shells() {
         "ls ~/AppData/Local/ai.clauseo.desktop",
         "cat ai.clauseo.desktop/*/x",
         r"type ai.clauseo.desktop\run\own\..\..\settings.json",
+        r"type ai.clauseo.desktop\run\own/../../settings.json",
+        // A pipe, a list or a redirection straight after the folder (stage C's `|head`).
+        r#"grep -r "" C:/Users/Asha/AppData/Local/ai.clauseo.desktop|head"#,
+        r"ls C:\Users\Asha\AppData\Local\ai.clauseo.desktop;echo",
+        r"dir C:\Users\Asha\AppData\Local\ai.clauseo.desktop>x.txt",
+        // Mixed separators inside a target's path (stage C's H1).
+        r"type %LOCALAPPDATA%\ai.clauseo.desktop\agents/claude-acp/home/.credentials.json",
+        r"type C:\Users\Asha\AppData\Local\ai.clauseo.desktop\agents/codex-acp\home\auth.json",
+        // What every session shares: the shell may not name it (stage C's H2).
+        r"type C:\Users\Asha\AppData\Local\ai.clauseo.desktop\tools\x.txt",
+        "ls C:/Users/Asha/AppData/Local/ai.clauseo.desktop/profile/claude-plugin/skills",
     ] {
         assert!(denied("Bash", command), "Bash: {command}");
         assert!(denied("PowerShell", command), "PowerShell: {command}");
@@ -114,8 +125,6 @@ fn every_spelling_of_the_data_folder_is_denied_in_both_shells() {
     for command in [
         "dir C:\\Users\\Asha\\Documents\\Clauseo",
         "ls ~/AppData/Local/Temp",
-        r"type C:\Users\Asha\AppData\Local\ai.clauseo.desktop\tools\x.txt",
-        "ls C:/Users/Asha/AppData/Local/ai.clauseo.desktop/profile/claude-plugin/skills",
     ] {
         assert!(!denied("Bash", command), "{command}");
         assert!(!denied("PowerShell", command), "{command}");
@@ -186,7 +195,7 @@ fn a_share_path_and_a_star_are_escaped() {
         "{rules:#?}"
     );
     assert!(
-        rules.contains(&r"Bash(*C:\\d\\run\\*\\relay-token*)".to_owned()),
+        rules.contains(&r"Bash(*C:\\d\\run*\\relay-token*)".to_owned()),
         "{rules:#?}"
     );
     // No rule holds a globstar (`/**/`), which Claude Code reads otherwise.
