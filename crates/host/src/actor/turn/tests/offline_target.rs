@@ -13,7 +13,9 @@ use std::thread::JoinHandle;
 use std::time::Duration;
 
 use clauseo_profile::PacksWritten;
-use clauseo_protocol::{AgentId, AgentKind, ErrorCode, StopReason, ThreadId, TurnId};
+use clauseo_protocol::{
+    AgentId, AgentKind, CommandOutcome, ErrorCode, HostCommand, StopReason, ThreadId, TurnId,
+};
 use clauseo_sandbox::proxy::Route;
 use serde_json::{Map, Value};
 
@@ -309,4 +311,40 @@ fn a_vertex_login_is_never_probed_and_ends_quiet_at_five_minutes() {
         "target-vertex",
         "CLAUDE_CODE_USE_VERTEX",
     );
+}
+
+/// Stage D round 2: the window says offline on a Bedrock launch, which has nothing to probe:
+/// its watch counts `unknown_service` a miss, so the turn ends `agent.offline` after the
+/// 30 s wait, as before, with no probe sent. (A quiet Bedrock turn, above, still waits for the
+/// backstop.)
+#[test]
+fn a_bedrock_launch_whose_window_goes_offline_ends_offline_after_the_wait() {
+    let (probe, count) = ReachProbe::fixed(true).counted();
+    let lines = [
+        PROMPT.to_owned(),
+        chunk("Clause five says"),
+        CANCELLED.to_owned(),
+    ];
+    let (mut rig, thread, _) = start(
+        "target-bedrock-window",
+        Some(AgentKind::Claude),
+        &lines,
+        probe,
+    );
+    let hook = EnvHook::default();
+    hook.set(&[("CLAUDE_CODE_USE_BEDROCK", "1".to_owned())]);
+    rig.actor.profile = Box::new(hook);
+    let turn = prompting_held(&mut rig, thread);
+    hold(&mut rig, 1);
+    release_one(&mut rig);
+    let offline = rig.dispatch(20, HostCommand::SetNetwork { online: false });
+    assert_eq!(offline.unwrap(), CommandOutcome::Done);
+    wait(&mut rig, thread, QUIET_WAIT);
+    assert_eq!(probes(&count), 0);
+    finish_turn(&mut rig, thread);
+    assert_eq!(
+        ended(&rig.log(thread), turn),
+        (Some(StopReason::Failed), Some(ErrorCode::AgentOffline))
+    );
+    rig.finish();
 }

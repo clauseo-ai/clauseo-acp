@@ -465,14 +465,16 @@ pub(super) fn at_work(actor: &mut Actor, thread: ThreadId, turn: TurnId) -> (boo
 /// The host's probe for `thread`'s `turn` answered: it `reached` the agent's service (or its
 /// proxy), so the window is wrong, the agent's retry (Codex's HTTPS after its WebSocket failed)
 /// can get through, or a quiet agent is thinking, and the watch waits again. Else the turn ends
-/// offline, a quiet watch only at its [`quiet::QUIET_MISSES`]th miss in a row. A watch that
-/// went ignores it. The line goes to host.log (the lifecycle target).
+/// offline, a quiet watch only at its [`quiet::QUIET_MISSES`]th miss in a row. A launch with
+/// nothing to probe (`unknown_service`, `unknown_route`) counts as reached for a quiet or a
+/// note's watch, but as a miss for the window's: the OS says offline and nothing says otherwise.
+/// A watch that went ignores it. The line goes to host.log (the lifecycle target).
 pub(super) fn on_probed(actor: &mut Actor, thread: ThreadId, turn: TurnId, reach: Reach) {
     let now = actor.now().mono;
     let Some(watch) = live_watch(actor, thread, turn).filter(|watch| watch.probing) else {
         return;
     };
-    let reached = reach.reached();
+    let reached = reach.reached() && !(watch.by == Arm::Window && reach.class.unknown());
     watch.probing = false;
     watch.reached = reached;
     watch.class = Some(reach.class);
@@ -482,7 +484,13 @@ pub(super) fn on_probed(actor: &mut Actor, thread: ThreadId, turn: TurnId, reach
         watch.misses.saturating_add(1)
     };
     let (by, misses) = (watch.by, watch.misses);
-    probe::log(thread, reach, by == Arm::Note, by.as_str(), misses);
+    probe::log(
+        thread,
+        (reach, reached),
+        by == Arm::Note,
+        by.as_str(),
+        misses,
+    );
     if reached || (by == Arm::Quiet && misses < quiet::QUIET_MISSES) {
         watch.since = now;
         arm_timer(actor, thread, turn);

@@ -308,7 +308,7 @@ fn the_probe_logs_no_host_or_proxy_text() {
         let reach = probe_route(Some(proxy(port)), &service(), CAP);
         super::log(
             ThreadId::new(uuid::Uuid::now_v7()).unwrap(),
-            reach,
+            (reach, reach.reached()),
             true,
             "note",
             1,

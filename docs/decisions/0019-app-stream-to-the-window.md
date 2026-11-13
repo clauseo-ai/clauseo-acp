@@ -144,8 +144,11 @@ host added later reached the page without anyone deciding it should.
       `no_proxy` lists; Codex `HTTPS_PROXY`, `https_proxy`, `ALL_PROXY`, `all_proxy` and
       `NO_PROXY`. A proxy a `CONNECT` cannot follow (`https://`, `socks5://`) is
       `unknown_route`.
-    Either unknown is not probed: it counts as reached at once and its line says so, so a watch
-    waits and only the backstop (or the agent's own end) ends a silent turn. Through a proxy it
+    Either unknown is not probed: for a quiet or a note's watch it counts as reached at once and
+    its line says so, so the watch waits and only the backstop (or the agent's own end) ends a
+    silent turn; for the window's watch it is a miss (stage D round 2: the OS says offline and
+    there is nothing to ask), so the turn ends `agent.offline` after the 30 s wait, as before.
+    Through a proxy it
     sends `CONNECT`
     with no credentials: 200 goes on, 407 counts as reached, any other status or no head within
     the cap is a miss. Then a TLS client hello (straight to the host when there is no proxy):
