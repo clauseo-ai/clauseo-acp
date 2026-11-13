@@ -468,7 +468,10 @@ fn join(parts: &[&[Piece]]) -> Vec<Piece> {
 /// as `\\` only before a `*` or a `\` (`run\\*`: a backslash, then any text) and as `\` elsewhere,
 /// a literal `*` as `\*`; and each run of k backslashes in it is written as 2k − 1 for `Lho`
 /// (`\\\\\` becomes `\\\`), or 2k before `(` or `)`, which `Lho` would otherwise take as an
-/// escaped parenthesis. Checked against the pinned binary (`shell_deny_tests.rs`).
+/// escaped parenthesis, and at the end: an odd run there would escape the rule's closing `)`,
+/// and Claude Code's loader would skip the rule as malformed (`lYe`; a folder named with a
+/// separator at its end, `…\ai.clauseo.desktop\`). Checked against the pinned binary
+/// (`shell_deny_tests.rs`, `scripts/claude-rule-probe`).
 fn render(pieces: &[Piece], end: bool) -> String {
     /// One character of the pattern: a literal, or Claude's `*`.
     #[derive(Clone, Copy, PartialEq, Eq)]
@@ -514,7 +517,8 @@ fn render(pieces: &[Piece], end: bool) -> String {
             chars.next();
             run += 1;
         }
-        let paren = matches!(chars.peek(), Some('(' | ')'));
+        // Before a parenthesis or at the end, before the rule's closing `)`: an even run.
+        let paren = matches!(chars.peek(), Some('(' | ')') | None);
         let written = if paren { 2 * run } else { 2 * run - 1 };
         content.extend(std::iter::repeat_n('\\', written));
     }
