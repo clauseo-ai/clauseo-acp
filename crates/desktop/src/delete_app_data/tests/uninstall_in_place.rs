@@ -230,6 +230,8 @@ fn the_line_is_checked_then_built_to_delete_the_image_only_while_no_main_exe_is_
         macro_body(&code, "CLAUSEO_UNINSTALL_SELF_DELETE")[1..],
         [
             r#"!if "${INSTALLMODE}" == "perMachine""#,
+            // The main exe's retry first (the test below), per machine only.
+            "!insertmacro CLAUSEO_UNINSTALL_RETRY_MAIN_EXE",
             "Push $0",
             "Push $1",
             r#"StrCpy $ClauseoSelfDelete """#,
@@ -279,6 +281,61 @@ fn the_line_is_checked_then_built_to_delete_the_image_only_while_no_main_exe_is_
     assert!(text.contains("; /d: an elevated cmd would otherwise run HKCU's Command Processor"));
     assert!(text.contains("in the instant between cmd's \"if\" and its \"del\""));
     assert!(text.contains("When the guard holds, the old file stays, which is harmless."));
+}
+
+#[test]
+fn a_held_main_exe_gets_ten_more_deletes_a_second_apart_never_under_update_nor_at_restart() {
+    let code = code();
+    // Per machine, not under /UPDATE: while the main exe is there, a second's wait and one more
+    // delete, at most CLAUSEO_MAIN_EXE_RETRIES times; nothing when the template's delete worked.
+    assert_eq!(
+        macro_body(&code, "CLAUSEO_UNINSTALL_RETRY_MAIN_EXE")[1..],
+        [
+            "${If} $UpdateMode <> 1",
+            "Push $0",
+            "${For} $0 1 ${CLAUSEO_MAIN_EXE_RETRIES}",
+            r#"${IfNot} ${FileExists} "$INSTDIR\${MAINBINARYNAME}.exe""#,
+            "${ExitFor}",
+            "${EndIf}",
+            "Sleep 1000",
+            r#"Delete "$INSTDIR\${MAINBINARYNAME}.exe""#,
+            "${Next}",
+            "Pop $0",
+            "${EndIf}",
+        ]
+    );
+    assert!(code.contains(&"!define CLAUSEO_MAIN_EXE_RETRIES 10".to_owned()));
+    // Its one use: first in the self-delete's per-machine block (the test above), which the
+    // template inserts last in Section Uninstall; so a per-user build has none of it.
+    let uses: Vec<&String> = code
+        .iter()
+        .filter(|line| line.contains("CLAUSEO_UNINSTALL_RETRY_MAIN_EXE"))
+        .collect();
+    assert_eq!(
+        uses,
+        [
+            "!macro CLAUSEO_UNINSTALL_RETRY_MAIN_EXE",
+            "!insertmacro CLAUSEO_UNINSTALL_RETRY_MAIN_EXE",
+        ]
+    );
+    // Nothing queued for a restart: a reinstall before it writes the same paths, and the
+    // restart would delete the new files.
+    for line in &code {
+        assert!(!line.contains("/REBOOTOK"), "{line}");
+    }
+    // $UpdateMode is the uninstaller's own /UPDATE, which an update always passes: the
+    // reinstall page appends it whenever the installer has it.
+    let text = read(TEMPLATE);
+    let un_init = span(&text, "Function un.onInit", "FunctionEnd");
+    line_with(
+        &un_init,
+        &[r#"${GetOptions} $CMDLINE "/UPDATE" $UpdateMode"#],
+    );
+    let leave = span(&text, "Function PageLeaveReinstall", "FunctionEnd");
+    line_with(
+        &leave,
+        &[r#"${IfThen} $UpdateMode = 1 ${|} StrCpy $R1 "$R1 /UPDATE" ${|} ; append /UPDATE"#],
+    );
 }
 
 #[test]
