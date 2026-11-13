@@ -90,10 +90,13 @@ export function clockMinutes(at: string): number {
 /** A paper's name, as its tile titles it, by id. */
 export type NameOf = (id: string) => string;
 
-export const timeOf = (lang: Lang, v: Version) => clock(lang, v.at);
-export const dateOf = (lang: Lang, cal: Calendar, v: Version) => dayWords(lang, cal, v.day, "date");
-export const isToday = (cal: Calendar, v: Version) => v.day === cal.today;
-const when = (lang: Lang, cal: Calendar, v: Version) => ({
+/** When a version was made: its day and clock time, all the words below read of it. */
+export type Moment = Pick<Version, "day" | "at">;
+
+export const timeOf = (lang: Lang, v: Moment) => clock(lang, v.at);
+export const dateOf = (lang: Lang, cal: Calendar, v: Moment) => dayWords(lang, cal, v.day, "date");
+export const isToday = (cal: Calendar, v: Moment) => v.day === cal.today;
+const when = (lang: Lang, cal: Calendar, v: Moment) => ({
   time: timeOf(lang, v),
   date: dateOf(lang, cal, v),
 });
@@ -106,7 +109,7 @@ export function asItStood(lang: Lang, cal: Calendar, v: Version): string {
 }
 
 /** "3:42 pm on 14 October", or "4:31 pm today". */
-export function whenOf(lang: Lang, cal: Calendar, v: Version): string {
+export function whenOf(lang: Lang, cal: Calendar, v: Moment): string {
   return isToday(cal, v)
     ? vt(lang, "{time} today", { time: timeOf(lang, v) })
     : vt(lang, "{time} on {date}", when(lang, cal, v));

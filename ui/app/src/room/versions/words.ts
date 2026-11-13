@@ -15,6 +15,8 @@ import { errorWords } from "@clauseo/components/lib/words-errors.ts";
 import { mt } from "@clauseo/components/lib/words-matters.ts";
 import { listOf, vt } from "@clauseo/components/lib/words-versions.ts";
 import type {
+  FileChange,
+  FileChoice,
   FolderPlace,
   SkippedFileReason,
   ThreadId,
@@ -141,13 +143,39 @@ export function askOf(lang: Lang, cal: Calendar, s: Snapshot, ask: Ask | null): 
       ...(undone === undefined ? {} : { confirm: vt(lang, "Undo the restore") }),
     };
   }
-  const meta = s.timeline.meta.get(ask.id);
-  const files = meta?.step?.files ?? [];
+  const since = new Map<string, Version | undefined>();
+  for (const [path, by] of changedSince(s.timeline, ask.id)) since.set(path, versionOf(s, by));
+  return undoAskOf(lang, cal, {
+    v,
+    files: s.timeline.meta.get(ask.id)?.step?.files ?? [],
+    choices: ask.choices,
+    since,
+    edited: ask.edited ?? new Set<string>(),
+    failed,
+  });
+}
+
+/** What an undo dialog asks about one turn's step: Versions' (askOf), and the thread's Undo for a step with a file
+ * that may hold the lawyer's own edits (thread-undo.tsx), so both say the same. */
+export type StepUndo = {
+  /** The version the step made: when, and who made it. */
+  v: Pick<Version, "day" | "at" | "who">;
+  files: readonly FileChange[];
+  choices: ReadonlyMap<string, FileChoice>;
+  /** Each file a newer version changed again, with that version where the timeline holds it. */
+  since: ReadonlyMap<string, Version | undefined>;
+  /** The files the host says the folder's copy differs from the version's now (PreviewUndo). */
+  edited: ReadonlySet<string>;
+  /** Why the act just failed, in words, when no file can be named. */
+  failed: string | null;
+};
+
+/** The undo dialog's words for a step. */
+export function undoAskOf(lang: Lang, cal: Calendar, u: StepUndo): RestoreAsk {
+  const { v, files, choices, since, edited, failed } = u;
   const name = namesOf(files.map((f) => f.path));
-  const back = files.filter((f) => ask.choices.get(f.path) === "undo").map((f) => name(f.path));
-  const since = changedSince(s.timeline, ask.id);
+  const back = files.filter((f) => choices.get(f.path) === "undo").map((f) => name(f.path));
   // edited: the host says the folder's copy differs from the version's now, though no newer version shows it
-  const edited = ask.edited ?? new Set<string>();
   const later = (path: string) => since.has(path) || edited.has(path);
   // the rows: each file kept by default, a file changed again since saying by whom and when (or since when, where only
   // the host saw it), one that may hold the lawyer's own edits saying so
@@ -193,8 +221,7 @@ export function askOf(lang: Lang, cal: Calendar, s: Snapshot, ask: Ask | null): 
               : vt(lang, "{n} documents may hold your own edits.", { n })
             : vt(lang, "Choose for each document."),
     edited: rows.map((f) => {
-      const by = since.get(f.path);
-      const newer = by === undefined ? undefined : versionOf(s, by);
+      const newer = since.get(f.path);
       return {
         id: f.path,
         title: name(f.path),
@@ -213,7 +240,7 @@ export function askOf(lang: Lang, cal: Calendar, s: Snapshot, ask: Ask | null): 
               : vt(lang, "Changed by you, outside Clauseo, at {time}", {
                   time: timeOf(lang, newer),
                 }),
-        choice: ask.choices.get(f.path) ?? "keep",
+        choice: choices.get(f.path) ?? "keep",
       };
     }),
     failed,

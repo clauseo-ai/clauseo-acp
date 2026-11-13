@@ -181,7 +181,7 @@ test("a paper edited since asks first: Keep current sends nothing, Undo anyway u
   h = await mountRoom(
     previewUndoScript(() => ({ undo_preview: { edited_since: ["Reply.docx"] } })),
   );
-  h.deliver([reset([changed({ files: [file("Notice.docx"), file("Reply.docx", true)] })])]);
+  h.deliver([reset([changed({ files: [file("Notice.docx"), file("Reply.docx")] })])]);
   const button = (name: string) =>
     [...document.querySelectorAll("button")].find((b) => b.textContent === name);
   // the dialog is its own chunk, loaded on the press (or on reaching Undo): in memory first, as on a real reach
