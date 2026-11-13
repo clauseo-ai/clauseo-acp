@@ -93,8 +93,8 @@ fn an_open_tool_call_never_trips_the_limit() {
     let turn = prompting_held(&mut rig, thread);
     hold(&mut rig, 1);
     release_one(&mut rig);
-    // Short of the open tool's 10-minute cap.
-    wait_steps(&mut rig, thread, 19, QUIET_WAIT);
+    // Short of the open tool's 11-minute cap (10:59).
+    wait_steps(&mut rig, thread, 21, QUIET_WAIT);
     wait(&mut rig, thread, ALMOST);
     assert!(going(&rig, thread));
     cancel(&mut rig, thread, turn);
@@ -102,10 +102,11 @@ fn an_open_tool_call_never_trips_the_limit() {
 }
 
 /// Stage D's L1: a tool call left open keeps the arm and the backstop off only up to
-/// `WORKING_LIMIT` (10 min) with no word from the agent; a tool update moves that, and past it
-/// the silence counts: 5 min of it are long gone, so the backstop ends the turn at once.
+/// `TOOL_LIMIT` (11 min, past Claude Bash's 10-minute timeout) with no word from the agent; a
+/// tool update moves that, and past it the silence counts: 5 min of it are long gone, so the
+/// backstop ends the turn at once.
 #[test]
-fn a_tool_call_open_with_no_word_for_ten_minutes_ends_the_turn_quiet() {
+fn a_tool_call_open_with_no_word_for_eleven_minutes_ends_the_turn_quiet() {
     let update = update(
         &json!({"sessionUpdate": "tool_call_update", "toolCallId": "t-9",
         "status": "in_progress"}),
@@ -117,10 +118,10 @@ fn a_tool_call_open_with_no_word_for_ten_minutes_ends_the_turn_quiet() {
     let turn = prompting_held(&mut rig, thread);
     hold(&mut rig, 2);
     release_one(&mut rig);
-    // A tool update at 9:00 moves the cap to 19:00.
+    // A tool update at 9:00 moves the cap to 20:00: going at 19:59, ended at 20:00.
     wait_steps(&mut rig, thread, 18, QUIET_WAIT);
     release_one(&mut rig);
-    wait_steps(&mut rig, thread, 19, QUIET_WAIT);
+    wait_steps(&mut rig, thread, 21, QUIET_WAIT);
     wait(&mut rig, thread, ALMOST);
     assert!(going(&rig, thread));
     assert_eq!(probes(&count), 0);

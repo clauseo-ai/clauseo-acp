@@ -5,7 +5,7 @@
 //! updates, an ask), restarted when an ask ends, since the lawyer's time never counts. Whether
 //! its service is known does not matter here: one that is not is never probed (it counts as
 //! reached, `probe/service.rs`), so only the backstop ends such a turn. A tool call left open
-//! keeps both off only while the agent sent something within [`WORKING_LIMIT`]; past it the
+//! keeps both off only while the agent sent something within [`TOOL_LIMIT`]; past it the
 //! silence counts as any other.
 //! - [`QUIET_WAIT`] with no output, no open tool call and no ask: a quiet watch arms and the host
 //!   probes the agent's service (`probe.rs`) at once. A probe that gets through waits again; two
@@ -24,7 +24,7 @@ use clauseo_protocol::{ErrorCode, ThreadId, TurnId};
 
 use super::super::super::Actor;
 use super::super::{TimerKind, TurnTimer, cancel, current};
-use super::{Arm, OFFLINE_WAIT, WORKING_LIMIT, Watch, at_work, probe};
+use super::{Arm, OFFLINE_WAIT, Watch, at_work, probe};
 use crate::log_file::LIFECYCLE;
 
 /// How long a turn may go with no model output, no open tool call and no ask before the host
@@ -37,6 +37,11 @@ pub(in crate::actor::turn) const QUIET_MISSES: u8 = 2;
 /// How long a turn may go with no model output, no open tool call and no ask at all: the
 /// backstop ends it `agent.quiet`.
 pub(in crate::actor::turn) const QUIET_LIMIT: Duration = Duration::from_secs(300);
+
+/// How long an open tool call keeps the arm and the backstop off with no word from the agent
+/// (its updates count): a minute past Claude Bash's own 600 s timeout, so a command that times
+/// out at 10:00 ends with Claude's report of it, not `agent.quiet` a moment before.
+pub(in crate::actor::turn) const TOOL_LIMIT: Duration = Duration::from_secs(660);
 
 /// The backstop's detail (the event log, never shown).
 const LIMIT_DETAIL: &str =
@@ -100,13 +105,13 @@ pub(in crate::actor::turn) fn on_timer(actor: &mut Actor, thread: ThreadId, turn
     }
     let quiet = now.saturating_sub(current.last_output);
     // Nor is a tool call at work, while the agent sent something (its updates count) within
-    // [`WORKING_LIMIT`]: one left open past it no longer keeps the arm or the backstop off.
-    if working && quiet < WORKING_LIMIT {
+    // [`TOOL_LIMIT`]: one left open past it no longer keeps the arm or the backstop off.
+    if working && quiet < TOOL_LIMIT {
         arm(
             actor,
             thread,
             turn,
-            QUIET_WAIT.min(WORKING_LIMIT.saturating_sub(quiet)),
+            QUIET_WAIT.min(TOOL_LIMIT.saturating_sub(quiet)),
         );
         return;
     }
