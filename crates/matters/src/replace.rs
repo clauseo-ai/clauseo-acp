@@ -89,7 +89,8 @@ pub(crate) fn replace(
     // 5. Store, stage, check again, rename.
     let blob = store(core, settings, request.new)?;
     let op = Op::Write(path.clone(), blob);
-    let checkpoint = match writeback::apply_or_partial(core, folder, &[&op]) {
+    let trash = settings.trash.as_ref();
+    let checkpoint = match writeback::apply_or_partial(core, folder, trash, &[&op]) {
         // 6. The revisions checkpoint.
         Ok(_deleted) => after_write(take_revisions(core, folder, settings, request)),
         // Written, then a sync failed: no checkpoint over a rename that may not last.

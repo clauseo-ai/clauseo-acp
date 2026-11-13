@@ -135,6 +135,9 @@ mod windows {
                 limits: Limits::DEFAULT,
                 retention: Retention::KeepAll,
                 probe: Arc::new(OsProbe),
+                trash: Arc::new(clauseo_matters::FolderTrash::new(
+                    self.dir.path().join("trash"),
+                )),
             }
         }
 

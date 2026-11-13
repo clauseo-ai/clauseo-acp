@@ -369,6 +369,10 @@ until `StepUndone` is durable; a failed undo commit is retried once, as a turn's
   `ConfigOptionsReplaced`, `UsageUpdated`, `Notice`, `ThreadRenamed { by: Agent }` and
   `CompactionChanged`.
 - An undo keeps every path of the step the command leaves out.
+- Undo's and restore's deletes go to the OS's trash first, as decision record 0007 says
+  (`clauseo_matters::Settings::trash`): the host passes `OsTrash`, its unit tests a folder in
+  the data folder, and its integration tests a folder of their own
+  (`HostConfig::with_matter_trash`).
 - The agent's launch spec carries the inherited environment, so `process` redacts every
   inherited secret from stderr tails. An inherited name an agent or hook variable also names,
   ignoring case, is left out: on Windows `Path` and `PATH` are one variable, and the inherited

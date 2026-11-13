@@ -69,8 +69,8 @@ fn writes_in(folder: &Path, writes: &BTreeSet<String>) -> BTreeSet<String> {
 const THREAD_NAME: &str = "clauseo-matter";
 
 /// R8's settings for the host: matters under `<data folder>/matters`, the data folder refused
-/// with everything inside it, the default limits, every checkpoint kept, and the OS's cloud-only
-/// probe.
+/// with everything inside it, the default limits, every checkpoint kept, the OS's cloud-only
+/// probe, and the OS's trash for undo's and restore's deletes ([`trash`]).
 pub(crate) fn matter_settings(data_dir: &Path) -> Settings {
     Settings {
         matters_root: data_dir.join("matters"),
@@ -78,6 +78,24 @@ pub(crate) fn matter_settings(data_dir: &Path) -> Settings {
         limits: Limits::DEFAULT,
         retention: Retention::KeepAll,
         probe: Arc::new(OsProbe),
+        trash: trash(data_dir),
+    }
+}
+
+/// The OS's trash (the Trash on macOS, the Recycle Bin on Windows). In this crate's unit tests,
+/// the folder `<data folder>/test-trash`, so no test run fills the machine's Trash; the
+/// integration tests set theirs (`HostConfig::with_matter_trash`).
+fn trash(data_dir: &Path) -> Arc<dyn clauseo_matters::Trash> {
+    #[cfg(test)]
+    {
+        Arc::new(clauseo_matters::FolderTrash::new(
+            data_dir.join("test-trash"),
+        ))
+    }
+    #[cfg(not(test))]
+    {
+        let _ = data_dir;
+        Arc::new(clauseo_matters::OsTrash)
     }
 }
 

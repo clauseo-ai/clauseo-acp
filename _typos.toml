@@ -50,3 +50,5 @@ nd = "nd"
 flate = "flate"
 # NSIS's StrCpy instruction (copy a string), in crates/desktop/windows/hooks.nsh.
 Cpy = "Cpy"
+# The shell's file operation flags (FOF_NO_UI, FOF_ALLOWUNDO), in crates/matters/src/trash/.
+FOF = "FOF"

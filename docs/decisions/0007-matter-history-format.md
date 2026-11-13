@@ -170,6 +170,18 @@ documents with 3 changed).
     `unread_folder`, or `unknown` (no record: a step from before this, whose added files are all
     kept, the agent's own included). Modified and deleted files have earlier blobs and are put
     back as ever.
+  - **Where a delete goes** (orchestrator, 2026-11-13, after the Windows dry run lost a lawyer's
+    file to Undo). Undo's deletes, and those of a restore that takes back a restore, go to the
+    OS's trash first, so the lawyer can take the file back from there: on macOS the Trash,
+    through `NSFileManager`'s `trashItemAtURL` only (never Finder, which asks for Automation
+    permission); on Windows the Recycle Bin, through `IFileOperation` with no UI, tried only on
+    a fixed drive and refused when the shell would delete for good. A file the trash cannot take
+    (a share, a removable drive, a failed move) is deleted, but only when the history holds it
+    as the folder has it: the save before the write-back (the `outside-edits` checkpoint, whose
+    failure fails the undo or restore before any delete) committed it, and the tip's tree has
+    that blob. Otherwise it stays and the undo fails. One warning per write-back gives the
+    count and the failure's kind, never a path. Linux keeps the plain delete. Tests set a folder
+    as the trash (`Settings::trash`), so no run fills the machine's Trash.
   - An older Clauseo reading a newer history ignores these keys and undoes as it did.
 - There is no `Clauseo-Seq` trailer: the commit is written before the host logs
   `CheckpointRecorded`, so the `seq` is not known yet, and the parent chain already orders the

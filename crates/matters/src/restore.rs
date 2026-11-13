@@ -457,7 +457,7 @@ pub(crate) fn restore(
     // 5. Stage, check again, rename.
     let ops = plan.ops();
     let ops: Vec<&Op> = ops.iter().collect();
-    writeback::apply(core, folder, &ops)?;
+    writeback::apply(core, folder, settings.trash.as_ref(), &ops)?;
     // 6. The restore checkpoint.
     let checkpoint = core.take(
         folder,

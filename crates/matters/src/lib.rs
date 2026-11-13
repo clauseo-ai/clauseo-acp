@@ -155,6 +155,7 @@ mod test_dir;
 #[cfg(feature = "test-support")]
 pub mod test_support;
 mod trailers;
+mod trash;
 mod types;
 mod undo;
 mod walk;
@@ -177,6 +178,7 @@ pub use probe::{OsProbe, PlaceholderProbe};
 pub use refuse::{WINDOWS_FOLDER_LIMIT, check_place, check_protected, is_too_deep, same_or_nested};
 pub use rules::is_excluded_path;
 pub use scan::scan;
+pub use trash::{FolderTrash, OsTrash, Removals, Trash, TrashError};
 pub use types::{
     Checkpoint, CheckpointOutcome, CommitId, CompareSide, DEFAULT_MARKER, FILE_CAP_BYTES,
     IMPORT_WARN_BYTES, ImportWarning, Imported, LARGEST_FILES, LargeFile, Limits, Marker,

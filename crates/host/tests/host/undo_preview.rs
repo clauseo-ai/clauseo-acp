@@ -179,6 +179,12 @@ fn the_agents_own_file_is_unflagged_and_edited_since_only_once_edited() {
         !folder.join("reply.docx").exists(),
         "the undo left the reply"
     );
+    // It went to the test's trash, byte for byte, never the machine's own.
+    let trashed: Vec<Vec<u8>> = std::fs::read_dir(dir.trash())
+        .unwrap()
+        .map(|entry| std::fs::read(entry.unwrap().path()).unwrap())
+        .collect();
+    assert_eq!(trashed, [reply.to_vec()]);
     host.shutdown();
 }
 

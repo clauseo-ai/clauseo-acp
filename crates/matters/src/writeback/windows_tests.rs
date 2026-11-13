@@ -30,6 +30,7 @@ fn settings(root: &Path) -> Settings {
         limits: Limits::DEFAULT,
         retention: Retention::KeepAll,
         probe: Arc::new(OsProbe),
+        trash: Arc::new(crate::FolderTrash::new(root.join("trash"))),
     }
 }
 
@@ -38,6 +39,7 @@ struct Matter {
     _dir: TestDir,
     folder: PathBuf,
     core: Core,
+    trash: crate::FolderTrash,
 }
 
 fn matter(name: &str) -> Matter {
@@ -46,10 +48,12 @@ fn matter(name: &str) -> Matter {
     write::create_dir_all(&folder).unwrap();
     let git_dir = dir.path().join("root").join("m").join("history.git");
     let core = Core::load(GixStore::create(&git_dir, &folder).unwrap()).unwrap();
+    let trash = crate::FolderTrash::new(dir.path().join("trash"));
     Matter {
         _dir: dir,
         folder,
         core,
+        trash,
     }
 }
 
@@ -127,7 +131,12 @@ fn a_delete_of_a_file_held_open_is_file_locked_and_keeps_the_file() {
         state: EntryState::Skipped,
     });
     let held = write::open_exclusive(&file).unwrap();
-    let result = apply(&matter.core, &matter.folder, &[&Op::Delete(target)]);
+    let result = apply(
+        &matter.core,
+        &matter.folder,
+        &matter.trash,
+        &[&Op::Delete(target)],
+    );
     drop(held);
     assert!(
         matches!(&result, Err(Error::FileLocked { paths }) if *paths == [path("x.txt")]),
@@ -205,6 +214,7 @@ fn a_restore_over_a_file_held_with_no_sharing_is_file_locked() {
     let result = apply(
         &matter.core,
         &matter.folder,
+        &matter.trash,
         &ops.iter().collect::<Vec<_>>(),
     );
     drop(held);
@@ -229,7 +239,7 @@ fn a_restore_over_a_file_word_holds_is_file_locked() {
     let then = blob(&mut matter, "brief then");
     let held = write::open_as_word(&held_file).unwrap();
     let op = Op::Write(path("Brief.docx"), then);
-    let result = apply(&matter.core, &matter.folder, &[&op]);
+    let result = apply(&matter.core, &matter.folder, &matter.trash, &[&op]);
     drop(held);
     assert!(
         matches!(&result, Err(Error::FileLocked { paths }) if *paths == [path("Brief.docx")]),
@@ -245,7 +255,7 @@ fn a_restore_over_a_file_word_holds_is_file_locked() {
 fn a_folder_that_cannot_be_made_fails_by_its_own_name() {
     let matter = matter("writeback-win-bad-folder");
     let op = Op::Write(path("a|b/c.txt"), Oid([0; 20]));
-    let result = apply(&matter.core, &matter.folder, &[&op]);
+    let result = apply(&matter.core, &matter.folder, &matter.trash, &[&op]);
     let bad = matter.folder.join("a|b");
     assert!(
         matches!(&result, Err(Error::Io { op: "create", path, .. }) if *path == bad),

@@ -376,7 +376,10 @@ pub(crate) fn undo(
         }
     }
     let ops: Vec<&Op> = acting.iter().flat_map(|step| &step.ops).collect();
-    let deleted = writeback::apply(core, folder, &ops)?;
+    let writeback::Deleted {
+        paths: deleted,
+        removals,
+    } = writeback::apply(core, folder, settings.trash.as_ref(), &ops)?;
     let (checkpoint, resurrected) = take_after_deletes(
         core,
         folder,
@@ -400,6 +403,7 @@ pub(crate) fn undo(
         edited_since,
         resurrected,
         deleted: sorted(deleted),
+        removals,
     })
 }
 

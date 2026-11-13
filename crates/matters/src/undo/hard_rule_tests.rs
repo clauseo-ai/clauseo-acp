@@ -43,6 +43,7 @@ fn settings(root: &Path, probe: &Arc<Probe>, cap: u64) -> Settings {
         },
         retention: Retention::KeepAll,
         probe: Arc::clone(probe) as Arc<dyn PlaceholderProbe + Send + Sync>,
+        trash: Arc::new(crate::FolderTrash::new(root.with_file_name("trash"))),
     }
 }
 

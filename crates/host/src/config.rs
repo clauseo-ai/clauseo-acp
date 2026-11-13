@@ -31,9 +31,9 @@ pub use idle::{CAP_MIN_IDLE, IDLE_LIMIT, LIVE_AGENTS};
 mod profile_hook;
 pub use profile_hook::{NoProfile, ProfileHook};
 mod parts;
-#[cfg(feature = "test-support")]
-pub use parts::WithPlaceholderProbe;
 pub(crate) use parts::{ConfigParts, UpdateSeams};
+#[cfg(feature = "test-support")]
+pub use parts::{WithMatterTrash, WithPlaceholderProbe};
 mod sandbox;
 pub use sandbox::{Detect, Sandbox};
 mod egress;

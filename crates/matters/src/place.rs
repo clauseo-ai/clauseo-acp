@@ -16,6 +16,8 @@ use crate::refuse;
 
 #[cfg(windows)]
 mod windows;
+#[cfg(windows)]
+pub(crate) use windows::drive_type;
 
 #[cfg(test)]
 mod tests;

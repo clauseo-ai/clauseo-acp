@@ -81,6 +81,7 @@ fn an_old_step_keeps_every_added_file_and_says_why_is_unknown() {
         limits: Limits::DEFAULT,
         retention: Retention::KeepAll,
         probe: Arc::clone(&probe) as Arc<dyn PlaceholderProbe + Send + Sync>,
+        trash: Arc::new(crate::FolderTrash::new(dir.path().join("trash"))),
     };
     let mut core = Core::load(GixStore::create(&git_dir, &folder).unwrap()).unwrap();
     put(&folder, "read.txt", b"read v1");
@@ -187,6 +188,7 @@ fn a_step_whose_start_record_does_not_read_keeps_every_added_file() {
         limits: Limits::DEFAULT,
         retention: Retention::KeepAll,
         probe: Arc::clone(&probe) as Arc<dyn PlaceholderProbe + Send + Sync>,
+        trash: Arc::new(crate::FolderTrash::new(dir.path().join("trash"))),
     };
     let mut core = Core::load(GixStore::create(&git_dir, &folder).unwrap()).unwrap();
     put(&folder, "read.txt", b"read v1");
