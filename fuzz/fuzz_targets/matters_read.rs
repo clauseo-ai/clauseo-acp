@@ -31,7 +31,9 @@
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
 
-use clauseo_matters::{Limits, Marker, Matter, NewMatter, OsProbe, Retention, Settings};
+use clauseo_matters::{
+    FolderTrash, Limits, Marker, Matter, NewMatter, OsProbe, Retention, Settings,
+};
 use clauseo_protocol::{CheckpointId, MatterId, Timestamp};
 use libfuzzer_sys::fuzz_target;
 use serde::Deserialize;
@@ -55,6 +57,8 @@ fn settings(root: &Path) -> Settings {
         limits: Limits::DEFAULT,
         retention: Retention::KeepAll,
         probe: Arc::new(OsProbe),
+        // A folder of the run's own: a fuzz run never touches the OS Trash.
+        trash: Arc::new(FolderTrash::new(root.join("trash"))),
     }
 }
 
