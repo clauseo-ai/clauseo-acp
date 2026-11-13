@@ -23,6 +23,7 @@
 mod answer;
 #[cfg(any(windows, test))]
 mod bounded;
+mod launch;
 #[cfg(target_os = "macos")]
 mod macos;
 mod os;
@@ -48,6 +49,7 @@ pub(crate) use answer::{Answer, Decided, Failure};
 #[cfg(any(target_os = "macos", windows, test))]
 pub(crate) use answer::{Configured, PacSetting};
 pub use answer::{FailKind, UpstreamAnswer, upstream_answer, upstream_for};
+pub use launch::{UnusableProxy, launch_route};
 use os::{os_intent, os_route};
 #[cfg(test)]
 use os::{settle, target_url};
