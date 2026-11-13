@@ -83,13 +83,27 @@ pub(crate) struct LaunchDeny {
     pub(crate) spellings: Vec<PathBuf>,
     /// Rule patterns under `<data>`, `/`-separated: [`DENIED`], then [`existing_targets`].
     pub(crate) targets: Vec<String>,
+    /// What the launch left out of [`Self::targets`], as patterns in the same form (a `*` is
+    /// any name, or any rest of one): the session's own folders, [`SHARED`], [`READ_ONLY`]
+    /// and the own project's `tool-results` folders. The shell rules
+    /// (`super::windows_shell_deny_rules`) end a target's name at a name boundary when one of
+    /// these could start with it.
+    pub(crate) kept: Vec<String>,
 }
 
 impl LaunchDeny {
     /// The rules for `spellings` of `<data>` before the launch prep enumerates it: [`DENIED`].
     pub(crate) fn fixed(spellings: Vec<PathBuf>) -> Self {
         let targets = DENIED.iter().map(|target| (*target).to_owned()).collect();
-        Self { spellings, targets }
+        let shared = SHARED.iter().map(|(place, _)| escape(place));
+        let kept = shared
+            .chain(READ_ONLY.iter().map(|place| (*place).to_owned()))
+            .collect();
+        Self {
+            spellings,
+            targets,
+            kept,
+        }
     }
 }
 
@@ -104,22 +118,47 @@ pub(crate) fn launch_deny(
     projects: &[PathBuf],
 ) -> LaunchDeny {
     let mut deny = LaunchDeny::fixed(spellings);
-    for target in existing_targets(data, own, projects) {
+    let places = places(data, own, projects);
+    for target in existing_targets(data, &places) {
         if !deny.targets.contains(&target) {
             deny.targets.push(target);
         }
     }
+    deny.kept = places
+        .own
+        .iter()
+        .chain(&places.open)
+        .map(|names| {
+            let names: Vec<String> = names
+                .iter()
+                .map(|name| match name.strip_prefix(ANY_NAME) {
+                    Some(start) => format!("{}*", escape(start)),
+                    None => escape(name),
+                })
+                .collect();
+            names.join("/")
+        })
+        .collect();
     deny
 }
 
-/// The patterns that deny every entry of `data` that exists now, except the `own` folders, the
-/// [`SHARED`] ones, each `<project>/<any name>/tool-results` of `projects`, each real folder
-/// that fits one of [`READ_ONLY`] (a link that fits is denied), and the folders above them,
+/// The patterns that deny every entry of `data` that exists now, except the `own` places of
+/// `places` ([`places`]: the session's own folders, the [`SHARED`] ones, each
+/// `<project>/<any name>/tool-results`), each real folder that fits one of its `open` places
+/// ([`READ_ONLY`]; a link that fits is denied), and the folders above them,
 /// which are walked into instead: a folder is `<name>/**`, a link both `<name>` and
 /// `<name>/**`, anything else `<name>`, names glob-escaped. A link is never walked into. A
 /// name that is not UTF-8 gets no pattern (no rule could name it); the auto-deny still covers
 /// it.
-pub(crate) fn existing_targets(data: &Path, own: &[PathBuf], projects: &[PathBuf]) -> Vec<String> {
+fn existing_targets(data: &Path, places: &Places) -> Vec<String> {
+    let mut out = Vec::new();
+    walk(data, &mut Vec::new(), places, &mut out);
+    out
+}
+
+/// The places [`existing_targets`] leaves out, as names under `data`: `own`, [`SHARED`], each
+/// `<project>/<any name>/tool-results` of `projects` and [`READ_ONLY`].
+fn places(data: &Path, own: &[PathBuf], projects: &[PathBuf]) -> Places {
     let place = |folder: &PathBuf| folder.strip_prefix(data).ok().and_then(names);
     let mut own: Vec<Vec<String>> = own
         .iter()
@@ -132,9 +171,7 @@ pub(crate) fn existing_targets(data: &Path, own: &[PathBuf], projects: &[PathBuf
         own.push(project);
     }
     let open: Vec<Vec<String>> = READ_ONLY.iter().map(|place| pattern_place(place)).collect();
-    let mut out = Vec::new();
-    walk(data, &mut Vec::new(), &Places { own, open }, &mut out);
-    out
+    Places { own, open }
 }
 
 /// The places [`walk`] leaves out: `own`, whatever kind of entry is there, and `open`, only

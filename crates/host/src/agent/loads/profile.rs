@@ -286,8 +286,15 @@ fn deny_data_folder(
     }
     if cfg!(windows) {
         let var = |name: &str| std::env::var_os(name);
-        for rule in crate::agent::data_fence::windows_shell_deny_rules(&data.spellings, &var) {
-            push_new(&mut deny, &rule);
+        // A set, not `push_new`: a busy data folder gives a few thousand of these.
+        let mut known: std::collections::HashSet<String> = deny
+            .iter()
+            .filter_map(|rule| rule.as_str().map(str::to_owned))
+            .collect();
+        for rule in crate::agent::data_fence::windows_shell_deny_rules(data, &var) {
+            if known.insert(rule.clone()) {
+                deny.push(Value::String(rule));
+            }
         }
     }
     permissions.insert("deny".to_owned(), Value::Array(deny));

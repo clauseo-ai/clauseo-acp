@@ -26,6 +26,7 @@ pub(super) fn folders() -> Folders<'static> {
 static NO_DENY: crate::agent::data_fence::LaunchDeny = crate::agent::data_fence::LaunchDeny {
     spellings: Vec::new(),
     targets: Vec::new(),
+    kept: Vec::new(),
 };
 
 fn keys(web_search: Switch, login: Login) -> ClaudeKeys<'static> {

@@ -240,7 +240,7 @@ fn windows_deny(deny: &LaunchDeny) -> Vec<String> {
         spellings: vec![PathBuf::from(
             r"C:\Users\clauseo-lawyer\AppData\Local\ai.clauseo.desktop",
         )],
-        targets: deny.targets.clone(),
+        ..deny.clone()
     };
     claude_deny_rules_on(&windows, true)
 }
