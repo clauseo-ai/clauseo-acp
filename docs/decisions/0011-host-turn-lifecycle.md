@@ -272,8 +272,15 @@ until `StepUndone` is durable; a failed undo commit is retried once, as a turn's
   undo), then answers `QueryResult::UndoPreview { edited_since }` from `Matter::edited_since` on
   the matter's thread: the step's files whose content differs from the after-turn checkpoint,
   by the stat cache and else a blob hash. It writes nothing, logs nothing and takes no writer.
-  It is what Undo's "changed after Clauseo's edit" ask reads; a `FileChange`'s
-  `may_include_lawyer_edits` (no agent tool call named the path during the turn) is not.
+  It is what Undo's "changed after Clauseo's edit" ask reads. A `FileChange`'s
+  `may_include_lawyer_edits` (no agent tool call wrote the path during the turn: a diff's path or
+  an edit, delete or move call's location, `clauseo_matters::names_a_write`; never a read's,
+  search's or shell call's location) is read too: a step with such a file asks in Versions' undo
+  dialog, from Versions or the thread, with Keep current chosen for it, whatever `edited_since`
+  says, since a file the lawyer saved during the turn is unchanged since its after-turn
+  checkpoint. #360 had the thread's Undo read `edited_since` alone, while every shell-made file
+  was flagged; #1023 unflagged those, and the release dry run lost a note the lawyer saved
+  mid-turn to that Undo.
 
 ### Cancel, reconciliation, shutdown
 

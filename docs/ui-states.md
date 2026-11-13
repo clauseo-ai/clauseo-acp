@@ -139,7 +139,7 @@ reported it.
 | File modified | `ChangeKind::Modified` | path, size, before and after content ids |
 | File deleted | `ChangeKind::Deleted` | path, size, before content id |
 | File renamed | `ChangeKind::Renamed` | old and new path |
-| File may include the lawyer's edits | `FileChange.may_include_lawyer_edits` | unticked by default in the undo choice |
+| File may include the lawyer's edits | `FileChange.may_include_lawyer_edits` (no agent tool call wrote the path: a read, a search or a shell call's location never counts) | Undo, in Versions or the thread, asks in Versions' undo dialog ("may hold your own edits") with Keep current chosen until the lawyer says otherwise |
 | File skipped: over the size cap | `SkippedFileReason::OverSizeCap` | path |
 | File skipped: cloud-only | `SkippedFileReason::CloudOnly` | path |
 | Undo kept a file in a folder that did not list at the turn's start | `SkippedFileReason::UnreadFolder` | path (undo only: the cloud line if the folder syncs, else the no-copy line) |
@@ -149,7 +149,7 @@ reported it.
 | Undo disabled while a turn runs in this thread | `HeaderEntry.status` is `ThreadStatus::Starting`, `ThreadStatus::Running`, `ThreadStatus::NeedsYou` or `ThreadStatus::Queued` (the derived undo stays as it is) | the step |
 | Undo refused: a turn runs in another thread of the matter | the host checks when the command arrives: `ErrorCode::MatterTurnRunning` | the code only (retryable) |
 | Undo with a choice per file | `HostCommand::UndoStep` with `FileChoice::Undo`, `FileChoice::Keep` | the step's files |
-| Undo asks first: a file changed after Clauseo's edit | `HostQuery::PreviewUndo` returns `QueryResult::UndoPreview` | `edited_since`: the step's files whose content now differs from its after-turn checkpoint; empty means Undo needs no ask |
+| Undo asks first: a file changed after Clauseo's edit | `HostQuery::PreviewUndo` returns `QueryResult::UndoPreview` | `edited_since`: the step's files whose content now differs from its after-turn checkpoint; empty, with no file that may include the lawyer's edits, means Undo needs no ask |
 
 ## 4. Approvals
 
