@@ -343,8 +343,8 @@ fn an_open_tool_call_is_never_probed() {
     let turn = prompting_held(&mut rig, thread);
     hold(&mut rig, 1);
     release_one(&mut rig);
-    // 9:30 with the tool call open and no word from it (its cap is 10 min, `offline_backstop`).
-    wait_steps(&mut rig, thread, 19, QUIET_WAIT);
+    // 10:30 with the tool call open and no word from it (its cap is 11 min, `offline_backstop`).
+    wait_steps(&mut rig, thread, 21, QUIET_WAIT);
     assert_eq!(probes(&count), 0);
     assert!(going(&rig, thread));
     cancel(&mut rig, thread, turn);

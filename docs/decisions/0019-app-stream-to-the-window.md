@@ -166,8 +166,11 @@ host added later reached the page without anyone deciding it should.
     `Failed { agent.quiet }` ("… stopped answering. Try again.", the answer so far kept, Try
     again, the queue held), whatever the probes said; a reached probe never moves it.
   - **An open tool call** keeps the quiet arm and the backstop off only while the agent sent
-    something (a tool update counts) within `WORKING_LIMIT` (10 min); past it the silence
-    counts, so a tool left open with no word for 10 min ends the turn `agent.quiet` then.
+    something (a tool update counts) within `TOOL_LIMIT` (11 min, stage D round 2: a minute
+    past Claude Bash's own 600 s timeout, so a command that times out at 10:00 ends with
+    Claude's report, not `agent.quiet` a moment before); past it the silence counts, so a tool
+    left open with no word for 11 min ends the turn `agent.quiet` then. A window-only watch
+    keeps its own `WORKING_LIMIT` (10 min).
   - **Gaps the backstop is what ends:** a proxy that asks for credentials (407, counted as reached
     so a proxy login never reads as offline) and a TLS-inspecting proxy that answers the
     handshake itself, both in front of a blocked upstream; a Claude on a cloud provider's login,
