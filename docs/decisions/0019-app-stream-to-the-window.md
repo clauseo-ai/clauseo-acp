@@ -118,6 +118,35 @@ host added later reached the page without anyone deciding it should.
   answered or the host's last probe got through (an outage of the service, not of the
   computer); else it fails `agent.protocol_error`, as the same failure over JSON-RPC does, so a
   cut-off answer never shows as complete.
+- **A blocked upstream behind a live proxy (2026-11-13, D-050 case 2):** stage C's proxy answered
+  every `CONNECT` with 502; Codex's fallback note named the status (not offline), its retries
+  came about a minute apart without end, and the probe, which only TCP-connected to the live
+  proxy, always got through, so the turn said "Answering." for good. Four changes
+  (`offline/probe.rs`, `offline/probe/route.rs`, `offline/quiet.rs`):
+  - **The probe asks the service, not the proxy.** It names the one host the agent's login uses
+    (a base URL the variables set; else Codex's `api.openai.com` when its launch passes a key,
+    `chatgpt.com` otherwise; Claude's `api.anthropic.com`). Through a proxy it sends `CONNECT`
+    with no credentials: 200 goes on, 407 counts as reached, any other status or no head within
+    the cap is a miss. Then a TLS client hello (straight to the host when there is no proxy):
+    a handshake record back is reached; an alert, other bytes, a close or silence is a miss.
+    No certificate is checked and nothing but the hello is sent, so a firm's TLS-inspecting proxy
+    counts as reached. The whole try has 8 s. A plain `http` base URL gets the TCP connection only.
+  - **The quiet arm.** Every live turn of Claude or Codex keeps the time of its last model output
+    (answer and thought chunks, tool calls and their updates, plans, an ask); an ask's end
+    restarts it, so the lawyer's time never counts. 30 s with no output, no open tool call and no
+    ask arms a quiet watch and probes at once; a probe that gets through waits again, and two
+    misses in a row end the turn `agent.offline`. An agent's note turns the watch into a note's,
+    which ends at its next miss; the window's `offline` makes it the window's, and `online`
+    leaves it. This is what covers Claude, whose retries reach the client as nothing at all.
+  - **The backstop:** 5 minutes with no output, no open tool call and no ask end the turn
+    `Failed { agent.quiet }` (the answer so far kept, Try again, the queue held), whatever the
+    probes said; a reached probe never moves it. It is what ends the known gaps: a proxy that asks
+    for credentials (407, counted as reached so a proxy login never reads as offline) and a
+    TLS-inspecting proxy that answers the handshake itself, both in front of a blocked upstream.
+  - **The probe's line reaches host.log**, at the lifecycle target, with fixed fields only:
+    `reached`, `noted`, `by` (note, window, quiet), `class`, `via`, `status`, `ms`, `misses`;
+    never a host, a proxy or bytes. Stage C's case 1 (proxy killed) had the probe run unseen:
+    host.log keeps INFO from the lifecycle targets only.
 
 ## Status
 
