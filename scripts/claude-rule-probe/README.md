@@ -45,3 +45,17 @@ a laptop-like data folder (Read and Edit, allow, and the shell rules of both she
 VM's commands, commands ending in a separator, and a sample of own and protected spellings.
 Run `CLAUSEO_RULE_PROBE_OUT=<file> cargo test -p clauseo-host --lib laptop_like`, then give that
 file to `probe.py`.
+
+They also write one probe per rule shape, so that a rule which loads but never matches shows
+up as a probe the binary lets through. The shapes cover how the data folder is written, what
+the rule names, and its separators and boundary characters. Run
+`CLAUSEO_RULE_SHAPES_OUT=<dir> cargo test -p clauseo-host --lib shape_tests`. It writes
+`default.json`, `configured.json` and `configured-powershell.json`; the last holds the
+PowerShell-only rules as Bash rules of the same content. Every case must come back denied.
+Thousands of probes take a while, so split a file into parts and run them side by side.
+`PROBE_SKIP_RULES=1` skips the rules check in all parts but one.
+
+Claude Code puts its own `HOME` in place of a Bash `$HOME` that the shell would expand
+(unquoted or in double quotes) before it matches. So a rule that writes `$HOME/…` literally
+matches only `'$HOME/…'`, and the launch also writes the home folder's value (`C:\Users\…/…`).
+For the host's generated cases, set `PROBE_HOME='C:\Users\clauseo-lawyer'`, the laptop's home.

@@ -10,7 +10,11 @@
     "Bash(*desktop\\\\\\\\\\**)",
     "PowerShell(*C:\\Users*)",
     "Bash(*xyz\\)",
-    "Bash(*uvw\\\\)"
+    "Bash(*uvw\\\\)",
+    "Bash(*yyy:*)",
+    "Bash(*zzz:**)",
+    "Bash(*$HOME/AppData/R*)",
+    "Bash(*/home/AppData/Q*)"
    ]
   }
  },
@@ -101,6 +105,48 @@
    "tool": "Bash",
    "command": "cat uvw\\a",
    "denied": false
+  },
+  {
+   "name": "a content ending in :* is a legacy prefix rule: it never matches",
+   "tool": "Bash",
+   "command": "cat yyy:1",
+   "denied": false
+  },
+  {
+   "name": ":** matches a colon and anything",
+   "tool": "Bash",
+   "command": "cat zzz:1",
+   "denied": true
+  },
+  {
+   "name": "... a colon at the end",
+   "tool": "Bash",
+   "command": "cat zzz:",
+   "denied": true
+  },
+  {
+   "name": "... and needs the colon",
+   "tool": "Bash",
+   "command": "cat zzzx",
+   "denied": false
+  },
+  {
+   "name": "Claude Code puts its HOME in place of a $HOME the shell expands: the literal rule misses",
+   "tool": "Bash",
+   "command": "cat \"$HOME/AppData/Rx\"",
+   "denied": false
+  },
+  {
+   "name": "... and matches where the shell leaves it alone",
+   "tool": "Bash",
+   "command": "cat '$HOME/AppData/Rx'",
+   "denied": true
+  },
+  {
+   "name": "... the expanded home matches (probe.py's HOME is <work>/home)",
+   "tool": "Bash",
+   "command": "cat \"$HOME/AppData/Qx\"",
+   "denied": true
   }
  ]
 }

@@ -84,11 +84,18 @@ fn vm_commands() -> Vec<(&'static str, String)> {
 
 /// Commands that name the data folder or a folder on the way to the own ones with a separator
 /// at the end, in both shells: a rule for them ends in a backslash, which must not escape its
-/// own closing `)` (Claude Code would skip it as malformed).
+/// own closing `)` (Claude Code would skip it as malformed). And ones that reach a folder
+/// through a stream (`::$INDEX_ALLOCATION`), whose rules end in `:**`: `:*` would be Claude
+/// Code's legacy prefix syntax, which never matches.
 fn ending_in_a_separator() -> Vec<(&'static str, String)> {
     let forward = DATA.replace('\\', "/");
     let escaped = DATA.replace('\\', r"\\");
     let commands = [
+        // Stage C's streams of a folder (`:**`, not the legacy prefix rule `:*`).
+        format!(r"cat '{DATA}::$INDEX_ALLOCATION\settings.json'"),
+        format!("cat {forward}::x/settings.json"),
+        format!(r"cat '{DATA}\run::$INDEX_ALLOCATION\01a1d672-1c0e-7d3b-8e11-5a2b9c0d4e6f-2\x'"),
+        format!(r"cat '{DATA}\agents\claude-acp\home::$INDEX_ALLOCATION\CLAUDE.md'"),
         format!(r"ls {DATA}\"),
         format!(r"Remove-Item -Recurse -Force {DATA}\"),
         format!(r"Remove-Item -Recurse -Force {DATA}\agent-state\"),
@@ -214,7 +221,7 @@ fn probe_cases(
         .filter(|(tool, _)| *tool == "Bash")
     {
         cases.push(
-            serde_json::json!({"name": "ending in a separator", "tool": "Bash",
+            serde_json::json!({"name": "ending in a separator or a stream", "tool": "Bash",
             "command": command, "denied": true}),
         );
     }
@@ -251,7 +258,8 @@ fn worst() -> LaunchDeny {
 
 /// Every rule a launch emits, Read and Edit, allow and shell (with the variable forms and
 /// without), parses as Claude Code 2.1.293's settings loader reads it ([`parse`]): none is
-/// skipped as malformed, ambiguous or empty. Over the laptop-like folder and the worst launch.
+/// skipped as malformed, ambiguous or empty, and none ends in `:*`, Claude Code's legacy prefix
+/// syntax, which would load and never match. Over the laptop-like folder and the worst launch.
 #[test]
 fn claude_code_accepts_every_rule_a_launch_emits() {
     let dir = TempDir::new("shell-deny-parse");
@@ -270,7 +278,11 @@ fn claude_code_accepts_every_rule_a_launch_emits() {
         every.extend(windows_shell_deny_rules_without_variables(&deny, var));
         assert!(every.len() > 1000, "{}", every.len());
         for rule in &every {
-            assert_eq!(parse(rule).err(), None, "skipped: {rule}");
+            let read = parse(rule);
+            assert_eq!(read.as_ref().err(), None, "skipped: {rule}");
+            // `…:*` would be a legacy prefix rule, which no command matches.
+            let ends_as_prefix = read.is_ok_and(|(_, content)| content.ends_with(":*"));
+            assert!(!ends_as_prefix, "a prefix rule: {rule}");
         }
     }
 }
@@ -297,4 +309,28 @@ fn the_worst_realistic_launch_fits_the_settings_file() {
     );
     assert!(read_edit + full < crate::agent::loads::profile::SHED_AT);
     assert!(shed < full);
+}
+
+/// The shed decision (`loads::profile::shell_rules_within`), driven off Windows: within its
+/// budget a launch keeps the variable forms; past it, it gets the rules without them.
+#[test]
+fn a_launch_past_its_budget_sheds_the_variable_forms() {
+    use crate::agent::loads::profile::shell_rules_within;
+    let deny = worst();
+    let full = windows_shell_deny_rules(&deny, &long_env);
+    let shed = windows_shell_deny_rules_without_variables(&deny, &long_env);
+    let size = serde_json::to_string(&full).unwrap().len();
+    assert_eq!(
+        shell_rules_within(&deny, &long_env, 1000, 1000 + size),
+        full
+    );
+    let past = shell_rules_within(&deny, &long_env, 1001, 1000 + size);
+    assert_eq!(past, shed);
+    let variable = |rule: &String| {
+        ["%APPDATA%", "$env:", "~/", "$HOME"]
+            .iter()
+            .any(|v| rule.contains(v))
+    };
+    assert!(full.iter().any(variable));
+    assert!(!past.iter().any(variable));
 }

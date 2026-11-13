@@ -292,18 +292,8 @@ fn deny_data_folder(
     }
     if cfg!(windows) {
         let var = |name: &str| std::env::var_os(name);
-        let mut shell = crate::agent::data_fence::windows_shell_deny_rules(data, &var);
-        let spent = json_len(&*settings) + json_len(&deny) + json_len(&shell);
-        if spent > SHED_AT {
-            shell =
-                crate::agent::data_fence::windows_shell_deny_rules_without_variables(data, &var);
-            tracing::warn!(
-                settings_bytes = spent,
-                budget = SHED_AT,
-                shed = "vars",
-                "Claude's settings outgrew their budget; the data folder's variable forms are shed"
-            );
-        }
+        let spent = json_len(&*settings) + json_len(&deny);
+        let shell = shell_rules_within(data, &var, spent, SHED_AT);
         // A set, not `push_new`: a busy data folder gives a few thousand of these.
         let mut known: std::collections::HashSet<String> = deny
             .iter()
@@ -322,6 +312,30 @@ fn deny_data_folder(
     }
     permissions.insert("allow".to_owned(), Value::Array(allow));
     settings.insert("permissions".to_owned(), Value::Object(permissions));
+}
+
+/// The data folder's Windows shell rules for a launch whose other settings take `spent` bytes as
+/// JSON: all of them, or without the variable forms
+/// (`data_fence::windows_shell_deny_rules_without_variables`) when all of them would take the
+/// settings past `budget` ([`SHED_AT`]), logged with fixed fields only.
+pub(crate) fn shell_rules_within(
+    data: &crate::agent::data_fence::LaunchDeny,
+    var: &dyn Fn(&str) -> Option<OsString>,
+    spent: usize,
+    budget: usize,
+) -> Vec<String> {
+    let shell = crate::agent::data_fence::windows_shell_deny_rules(data, var);
+    let total = spent + json_len(&shell);
+    if total <= budget {
+        return shell;
+    }
+    tracing::warn!(
+        settings_bytes = total,
+        budget,
+        shed = "vars",
+        "Claude's settings outgrew their budget; the data folder's variable forms are shed"
+    );
+    crate::agent::data_fence::windows_shell_deny_rules_without_variables(data, var)
 }
 
 /// `value`'s length as JSON (0 if it can't be written, which a map of JSON values never is).

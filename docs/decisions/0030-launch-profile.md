@@ -510,9 +510,16 @@ change from the settings window as `ui` does. R24 (PR5) adds a third to the patc
     under the data folder, the own ones included (the VM's 60-matter run). Its loader also skips
     a rule whose content ends in an odd run of backslashes, which escapes the closing `)`
     ("Invalid permission rule … was skipped"). That was every rule for a folder named with a
-    separator at its end, `Remove-Item -Recurse C:\…\ai.clauseo.desktop\`. The rules are now
-    written for these steps. The tests read them through a port of the loader, the parser and
-    the matcher, and the probe checks that the binary keeps every rule a launch emits.
+    separator at its end, `Remove-Item -Recurse C:\…\ai.clauseo.desktop\`. A content ending in
+    `:*` is its legacy prefix syntax (`cCe`, `^(.+):\*$`): the command must start with the rest,
+    which none does, so a folder reached through a stream (`<data>::$INDEX_ALLOCATION\…`) got
+    through. Those rules end in `:**`. Before matching a Bash command it also puts its `HOME` in
+    place of a `$HOME` the shell would expand, so a literal `$HOME/…` rule matches only
+    `'$HOME/…'`, and a configured folder under the home is also written with the home's value
+    (`C:\Users\asha/AppData/…`). The rules are now written for these steps. The tests
+    read them through a port of the loader, the parser and
+    the matcher, and the probe checks that the binary keeps every rule a launch emits and that
+    one command per rule shape is denied.
   - **Size.** The siblings in `run`, `agent-state` and Claude's `projects` go in groups by the
     start no own name shares (`run/<start>*`), for the Read and Edit rules too, and what lies
     under Clauseo's own names (`agent-state`, `claude-acp`, `codex-acp`, a run folder named by an
@@ -538,10 +545,12 @@ change from the settings window as `ui` does. R24 (PR5) adds a third to the patc
     - a run folder, matter or project made after the launch whose name starts no group, and a
       name that starts with the own one's (`run\<own>x`);
     - a name no rule knows that is made after the launch where no group or pattern covers it
-      (`…\ai.clauseo.desktop\evil.dll`, `agents\new\x`); what Claude Code loads from its home
-      (`CLAUDE.md`, `rules`, `agents`, `commands`, `output-styles`, `workflows`, `dev-mods`,
-      `loop.md`, `keybindings.json`, `remote-settings.json`, `.config.json`, `ccr`, `memory`) is
-      named whether or not it exists;
+      (`…\ai.clauseo.desktop\evil.dll`, `agents\new\x`). In Claude Code's config folder, every
+      name 2.1.293 joins onto it or its own sandbox write-protects there (`hooks`,
+      `session-env`, `agent-memory`, `routines`, `CLAUDE.md`, …,
+      `data_fence/claude_home.rs`) is in the Read, Edit and shell rules whether or not it exists.
+      Any other entry there that exists at the launch is named by the launch's walk. `plans`
+      and the own project's tool results stay reachable;
     - a name spliced together by the shell (`…/to''ols/…`, `…/se""ttings.json`, `…/t\ools/…`,
       `…/{tools,x}/x`); a `$`, `{` or backtick straight after a separator is denied;
     - for a configured folder (not `ai.clauseo.desktop`) only, its own path written other than
@@ -550,7 +559,9 @@ change from the settings window as `ui` does. R24 (PR5) adds a third to the patc
       `D:\FirmData/Clauseo`), a share path to it (`\\localhost\D$\FirmData\Clauseo`), or a
       variable other than `LOCALAPPDATA`, `APPDATA`, `USERPROFILE` and `HOME` naming part of it
       (`%FIRMDATA%\Clauseo`); `${env:APPDATA}\…` and `${env:USERPROFILE}\…` (no `${env:}` form),
-      `$HOME\…` and `~\…` (only the `/` forms), `$USERPROFILE/…`, `$HOME` or `~` when `HOME` is
+      `$HOME\…` and `~\…` (only the `/` forms), Bash's `"$APPDATA\…"` and `${APPDATA}\…` (a
+      backslash after a Bash variable; only the `/` forms), `$USERPROFILE/…`, `$HOME` or `~`
+      when `HOME` is
       unset, a doubled separator inside the path (`D:\FirmData\\Clauseo`), a drive-relative
       `D:FirmData\Clauseo`, and `D:\FirmData.\Clauseo`. Not done for launch: matching that path
       loosely would grow every configured launch's rules or deny folders beside it.
