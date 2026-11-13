@@ -10,6 +10,7 @@ use std::path::PathBuf;
 use super::cross_tests::{
     Rules, default_leads, generated_over, lead_sep, own_commands_over, own_folders,
 };
+use super::tests::parse;
 use super::{windows_shell_deny_rules, windows_shell_deny_rules_without_variables};
 use crate::agent::data_fence::big_folder::{LAPTOP_MATTER, LAPTOP_RUN, laptop};
 use crate::agent::data_fence::{LaunchDeny, claude_deny_rules_on};
@@ -81,6 +82,29 @@ fn vm_commands() -> Vec<(&'static str, String)> {
     ]
 }
 
+/// Commands that name the data folder or a folder on the way to the own ones with a separator
+/// at the end, in both shells: a rule for them ends in a backslash, which must not escape its
+/// own closing `)` (Claude Code would skip it as malformed).
+fn ending_in_a_separator() -> Vec<(&'static str, String)> {
+    let forward = DATA.replace('\\', "/");
+    let escaped = DATA.replace('\\', r"\\");
+    let commands = [
+        format!(r"ls {DATA}\"),
+        format!(r"Remove-Item -Recurse -Force {DATA}\"),
+        format!(r"Remove-Item -Recurse -Force {DATA}\agent-state\"),
+        format!(r"rm -rf {DATA}\run\"),
+        format!("rm -rf {forward}/"),
+        format!("rm -rf {forward}/agent-state/"),
+        format!(r"ls {escaped}\\"),
+        format!(r"ls {escaped}\\agent-state\\"),
+        r"Remove-Item -Recurse $env:LOCALAPPDATA\ai.clauseo.desktop\".to_owned(),
+    ];
+    commands
+        .into_iter()
+        .flat_map(|command| [("Bash", command.clone()), ("PowerShell", command)])
+        .collect()
+}
+
 /// For three seeds of 60 seeded matters: the VM's commands pass, the own folders written with
 /// every lead, separator run and `.\` step pass, and the protected places, a seeded matter's
 /// notes and another run among them, are denied.
@@ -120,7 +144,8 @@ fn a_laptop_like_folder_lets_the_own_folders_through_and_denies_the_rest() {
             names(clauseo_settings::SETTINGS_FILE),
             names(r"logs\host.log"),
         ];
-        let denied = generated_over(&default_leads(true), &protected, 2);
+        let mut denied = generated_over(&default_leads(true), &protected, 2);
+        denied.extend(ending_in_a_separator());
         for (tool, command) in &denied {
             assert!(
                 rules.denies(tool, command),
@@ -128,22 +153,28 @@ fn a_laptop_like_folder_lets_the_own_folders_through_and_denies_the_rest() {
             );
         }
         if seed == 1 {
-            probe_cases(&all, &passed, &denied);
+            probe_cases(&deny, &all, &passed, &denied);
         }
     }
 }
 
 /// With `CLAUSEO_RULE_PROBE_OUT` set, writes a cases file for `scripts/claude-rule-probe`: the
-/// Bash rules of a laptop launch, the VM's commands and a sample of the own and protected
+/// whole permission settings of a laptop launch (`deny`'s Read and Edit rules, its shell rules
+/// `rules`, its allow rules), every one of which the binary must accept; then the VM's
+/// commands, the commands ending in a separator and a sample of the own and protected
 /// spellings (Bash's), each with what the port says, so the pinned binary can be asked.
-fn probe_cases(rules: &[String], passed: &[(&str, String)], denied: &[(&str, String)]) {
+fn probe_cases(
+    deny: &LaunchDeny,
+    rules: &[String],
+    passed: &[(&str, String)],
+    denied: &[(&str, String)],
+) {
     let Some(out) = std::env::var_os("CLAUSEO_RULE_PROBE_OUT") else {
         return;
     };
-    let bash: Vec<&String> = rules
-        .iter()
-        .filter(|rule| rule.starts_with("Bash("))
-        .collect();
+    let mut every = claude_deny_rules_on(deny, true);
+    every.extend(rules.iter().cloned());
+    let allow = super::super::claude_allow_rules(deny);
     let mut cases = Vec::new();
     for (n, (_, command)) in vm_commands().iter().enumerate() {
         cases.push(
@@ -178,7 +209,17 @@ fn probe_cases(rules: &[String], passed: &[(&str, String)], denied: &[(&str, Str
     };
     sample(passed, false);
     sample(denied, true);
-    let spec = serde_json::json!({"settings": {"permissions": {"deny": bash}}, "cases": cases});
+    for (_, command) in ending_in_a_separator()
+        .iter()
+        .filter(|(tool, _)| *tool == "Bash")
+    {
+        cases.push(
+            serde_json::json!({"name": "ending in a separator", "tool": "Bash",
+            "command": command, "denied": true}),
+        );
+    }
+    let settings = serde_json::json!({"permissions": {"deny": every, "allow": allow}});
+    let spec = serde_json::json!({"settings": settings, "expect_skipped": [], "cases": cases});
     crate::write::write_file(std::path::Path::new(&out), spec.to_string().as_bytes()).unwrap();
 }
 
@@ -193,22 +234,54 @@ fn long_env(name: &str) -> Option<OsString> {
     }
 }
 
+/// The worst realistic launch's rules: a long profile, a configured data folder under it spelled
+/// two ways (one in lower case), 1,000 seeded matters.
+fn worst() -> LaunchDeny {
+    let dir = TempDir::new("shell-deny-worst");
+    let (deny, _, _) = laptop(dir.path(), 7, 1000, "alexandra.montgomery-smith");
+    let configured = r"C:\Users\alexandra.montgomery-smith\AppData\Roaming\Clauseo Data";
+    LaunchDeny {
+        spellings: vec![
+            PathBuf::from(configured),
+            PathBuf::from(configured.to_lowercase()),
+        ],
+        ..deny
+    }
+}
+
+/// Every rule a launch emits, Read and Edit, allow and shell (with the variable forms and
+/// without), parses as Claude Code 2.1.293's settings loader reads it ([`parse`]): none is
+/// skipped as malformed, ambiguous or empty. Over the laptop-like folder and the worst launch.
+#[test]
+fn claude_code_accepts_every_rule_a_launch_emits() {
+    let dir = TempDir::new("shell-deny-parse");
+    let (laptop_deny, _, _) = laptop(dir.path(), 1, 60, "clauseo-lawyer");
+    let laptop_deny = LaunchDeny {
+        spellings: vec![PathBuf::from(DATA)],
+        ..laptop_deny
+    };
+    let default_env: &dyn Fn(&str) -> Option<OsString> = &super::cross_tests::env;
+    let worst_env: &dyn Fn(&str) -> Option<OsString> = &long_env;
+    for (deny, var) in [(laptop_deny, default_env), (worst(), worst_env)] {
+        let mut every = claude_deny_rules_on(&deny, true);
+        every.extend(claude_deny_rules_on(&deny, false));
+        every.extend(super::super::claude_allow_rules(&deny));
+        every.extend(windows_shell_deny_rules(&deny, var));
+        every.extend(windows_shell_deny_rules_without_variables(&deny, var));
+        assert!(every.len() > 1000, "{}", every.len());
+        for rule in &every {
+            assert_eq!(parse(rule).err(), None, "skipped: {rule}");
+        }
+    }
+}
+
 /// The worst realistic launch: a long profile, a configured data folder under it spelled two
 /// ways (one in lower case), 1,000 seeded matters with random ids and realistic project keys.
 /// Its rules (Read and Edit with the shell rules, as JSON) stay under the size past which a
 /// launch sheds its variable forms (`agent::loads::profile::SHED_AT`, about 1.8 MiB).
 #[test]
 fn the_worst_realistic_launch_fits_the_settings_file() {
-    let dir = TempDir::new("shell-deny-worst");
-    let (deny, _, _) = laptop(dir.path(), 7, 1000, "alexandra.montgomery-smith");
-    let configured = r"C:\Users\alexandra.montgomery-smith\AppData\Roaming\Clauseo Data";
-    let deny = LaunchDeny {
-        spellings: vec![
-            PathBuf::from(configured),
-            PathBuf::from(configured.to_lowercase()),
-        ],
-        ..deny
-    };
+    let deny = worst();
     let size = |rules: &[String]| serde_json::to_string(rules).unwrap().len();
     let read_edit = size(&claude_deny_rules_on(&deny, true));
     let full = size(&windows_shell_deny_rules(&deny, &long_env));

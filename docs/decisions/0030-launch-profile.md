@@ -507,8 +507,12 @@ change from the settings window as `ui` does. R24 (PR5) adds a third to the patc
     matching, then `\*` is a literal `*`, `\\` a literal `\`, any other `\` itself. The first
     #1035 build wrote `<data>\\\**` for "the folder, a separator, a literal `*`", which the parser
     made `<data>\\**`: the folder, a backslash, then anything. That denied every backslash path
-    under the data folder, the own ones included (the VM's 60-matter run). The rules are now
-    written for both steps, and the tests read them through a port of both.
+    under the data folder, the own ones included (the VM's 60-matter run). Its loader also skips
+    a rule whose content ends in an odd run of backslashes, which escapes the closing `)`
+    ("Invalid permission rule … was skipped"). That was every rule for a folder named with a
+    separator at its end, `Remove-Item -Recurse C:\…\ai.clauseo.desktop\`. The rules are now
+    written for these steps. The tests read them through a port of the loader, the parser and
+    the matcher, and the probe checks that the binary keeps every rule a launch emits.
   - **Size.** The siblings in `run`, `agent-state` and Claude's `projects` go in groups by the
     start no own name shares (`run/<start>*`), for the Read and Edit rules too, and what lies
     under Clauseo's own names (`agent-state`, `claude-acp`, `codex-acp`, a run folder named by an

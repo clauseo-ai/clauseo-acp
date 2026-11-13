@@ -8,10 +8,15 @@
     "Bash(*pqr\\\\\\*)",
     "Bash(*def\\\\\\**)",
     "Bash(*desktop\\\\\\\\\\**)",
-    "PowerShell(*C:\\Users*)"
+    "PowerShell(*C:\\Users*)",
+    "Bash(*xyz\\)",
+    "Bash(*uvw\\\\)"
    ]
   }
  },
+ "expect_skipped": [
+  "Bash(*xyz\\)"
+ ],
  "cases": [
   {
    "name": "a backslash before a letter is itself",
@@ -78,6 +83,24 @@
    "tool": "PowerShell",
    "command": "Get-Content C:\\USERS\\x",
    "denied": true
+  },
+  {
+   "name": "a content ending in one backslash escapes its closing ): the rule is skipped",
+   "tool": "Bash",
+   "command": "cat xyz\\",
+   "denied": false
+  },
+  {
+   "name": "two: the ) closes it and the rule is kept; but Bash matches its parse, which drops an unquoted trailing backslash, so this end rule is PowerShell's",
+   "tool": "Bash",
+   "command": "cat uvw\\",
+   "denied": false
+  },
+  {
+   "name": "... at the end only",
+   "tool": "Bash",
+   "command": "cat uvw\\a",
+   "denied": false
   }
  ]
 }

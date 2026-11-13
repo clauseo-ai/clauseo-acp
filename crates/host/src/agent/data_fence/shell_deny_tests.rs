@@ -18,10 +18,116 @@ pub(super) fn env(name: &str) -> Option<OsString> {
     }
 }
 
+/// The first (or with `last` the last) `c` in `text` that is not escaped, as Claude Code 2.1.293's
+/// `p` and `m` beside `lYe` find it: one with an even run of backslashes before it.
+fn unescaped(text: &str, c: char, last: bool) -> Option<usize> {
+    let bytes = text.as_bytes();
+    let free = |at: usize| {
+        let run = bytes
+            .iter()
+            .take(at)
+            .rev()
+            .take_while(|b| **b == b'\\')
+            .count();
+        run % 2 == 0
+    };
+    let mut hits = text
+        .match_indices(c)
+        .map(|(at, _)| at)
+        .filter(|at| free(*at));
+    if last { hits.next_back() } else { hits.next() }
+}
+
+/// `rule` as Claude Code 2.1.293's settings loader reads it: its tool and its content after `Lho`,
+/// or why the loader skips it ("Invalid permission rule … was skipped", `h_`), ported from
+/// `dCe` for the tools these rules name:
+/// - empty or blank: skipped;
+/// - `lYe`: the first unescaped `(` ([`unescaped`]) ends the tool's name, which holds no `(` or
+///   `)`, and the last unescaped `)` must end the rule, else "Malformed Tool(content) rule" (a
+///   rule whose content ends in an odd run of backslashes escapes its own closing `)`);
+/// - empty parentheses, or a tool name that does not start upper case: skipped;
+/// - `om`: a `\(` or `\)` after a character other than `\` (`nm`) while the unescaped `(` and `)`
+///   differ in number (`ea`): skipped as ambiguous;
+/// - `jn`: a content of `*` is the whole tool, which this module never means (here an error);
+/// - `Bash` with a content of `:*`, or a file tool (`Read`, `Edit`, `Write`, …) whose content
+///   holds `:*`: skipped.
+pub(super) fn parse(rule: &str) -> Result<(String, String), &'static str> {
+    if rule.trim().is_empty() {
+        return Err("empty");
+    }
+    let open = unescaped(rule, '(', false);
+    let close = unescaped(rule, ')', true);
+    let (Some(open), Some(close)) = (open, close) else {
+        return Err(if open.is_none() && close.is_none() {
+            "a whole-tool rule"
+        } else {
+            "malformed"
+        });
+    };
+    let tool = rule.get(..open).unwrap();
+    if close <= open || close != rule.len() - 1 || tool.contains(['(', ')']) {
+        return Err("malformed");
+    }
+    let raw = rule.get(open + 1..close).unwrap();
+    if raw.is_empty() {
+        return Err("empty parentheses");
+    }
+    if !tool.contains('_') && !tool.starts_with(|c: char| c.is_ascii_uppercase()) {
+        return Err("a tool name not upper case");
+    }
+    let bytes = raw.as_bytes();
+    let lone_escape = (0..bytes.len().saturating_sub(1)).any(|at| {
+        let before = at.checked_sub(1).and_then(|b| bytes.get(b));
+        bytes.get(at) == Some(&b'\\')
+            && matches!(bytes.get(at + 1), Some(b'(' | b')'))
+            && before != Some(&b'\\')
+    });
+    let count = |c: char| {
+        raw.match_indices(c)
+            .filter(|(at, _)| {
+                bytes
+                    .iter()
+                    .take(*at)
+                    .rev()
+                    .take_while(|b| **b == b'\\')
+                    .count()
+                    % 2
+                    == 0
+            })
+            .count()
+    };
+    if lone_escape && count('(') != count(')') {
+        return Err("ambiguous");
+    }
+    if raw == "*" {
+        return Err("a whole-tool rule");
+    }
+    // `Lho`.
+    let content = raw
+        .replace("\\(", "(")
+        .replace("\\)", ")")
+        .replace("\\\\", "\\");
+    let file_tool = [
+        "Read",
+        "Write",
+        "Edit",
+        "Glob",
+        "NotebookRead",
+        "NotebookEdit",
+        "Cd",
+    ];
+    if (tool == "Bash" && content == ":*") || (file_tool.contains(&tool) && content.contains(":*"))
+    {
+        return Err("a :* the tool refuses");
+    }
+    Ok((tool.to_owned(), content))
+}
+
 /// A Bash or PowerShell rule as Claude Code 2.1.293 reads it, ported from the pinned binary
 /// (`@anthropic-ai/claude-agent-sdk-linux-x64` 0.3.293, `package/claude`; `strings` shows the
 /// bundle's JS):
-/// - `lYe`: `Tool(content)` splits at the first `(` and the last `)`, which must end the rule;
+/// - [`parse`]: the settings loader's checks, and `lYe`'s split at the first unescaped `(` and
+///   the last unescaped `)`, which must end the rule; a rule it skips is no rule;
 /// - `jn`: an empty content or `*` is the whole tool; otherwise
 ///   `Lho(e) = Nho(e).replaceAll("\\\\", "\\")` with
 ///   `Nho(e) = e.replaceAll("\\(", "(").replaceAll("\\)", ")")`: `\(`, `\)` are parentheses and
@@ -44,19 +150,9 @@ pub(super) struct Rule {
 }
 
 impl Rule {
-    pub(super) fn new(rule: &str) -> Self {
-        // `lYe`.
-        let open = rule.find('(').unwrap();
-        let close = rule.rfind(')').unwrap();
-        assert_eq!(close, rule.len() - 1, "{rule}");
-        let tool = rule.get(..open).unwrap().to_owned();
-        let raw = rule.get(open + 1..close).unwrap();
-        assert!(!raw.is_empty() && raw != "*", "a whole-tool rule: {rule}");
-        // `Lho`.
-        let content = raw
-            .replace("\\(", "(")
-            .replace("\\)", ")")
-            .replace("\\\\", "\\");
+    /// The rule, or `None` when Claude Code's loader would skip it ([`parse`]).
+    pub(super) fn new(rule: &str) -> Option<Self> {
+        let (tool, content) = parse(rule).ok()?;
         assert!(!content.contains('\0'));
         let insensitive = tool == "PowerShell";
         let pattern = squeeze(content.trim());
@@ -95,12 +191,12 @@ impl Rule {
                 }
             })
             .collect();
-        Self {
+        Some(Self {
             tool,
             insensitive,
             parts,
             optional_tail,
-        }
+        })
     }
 
     /// The tool the rule is for.
@@ -175,8 +271,7 @@ pub(super) fn fits(parts: &[String], text: &str) -> bool {
 
 /// Whether `rule` matches `command` as Claude Code 2.1.293 reads it ([`Rule`]).
 pub(super) fn matches(rule: &str, command: &str) -> bool {
-    let compiled = Rule::new(rule);
-    compiled.hits(compiled.tool(), command)
+    Rule::new(rule).is_some_and(|compiled| compiled.hits(compiled.tool(), command))
 }
 
 /// Whether any of `rules` for `tool` matches `command`.
@@ -373,7 +468,19 @@ fn the_port_reads_rules_as_the_binary_does() {
         // PowerShell rules match in any case, Bash rules as written.
         (r"PowerShell(*Desktop\x*)", r"Get-Content desktop\X", true),
         (r"Bash(*Desktop\x*)", r"cat desktop\X", false),
+        // A content ending in one backslash escapes the closing `)`: the loader skips the rule.
+        (r"Bash(*xyz\)", r"cat xyz\", false),
+        // Two: the `)` closes it, and the parser's one backslash ends the command. In PowerShell:
+        // Bash matches its parse of a command, which drops an unquoted trailing backslash.
+        (r"PowerShell(*xyz\\)", r"Remove-Item xyz\", true),
+        (r"PowerShell(*xyz\\)", r"Remove-Item xyz\a", false),
     ] {
         assert_eq!(matches(rule, command), denied, "{rule} on {command}");
     }
+    assert_eq!(parse(r"Bash(*xyz\)"), Err("malformed"));
+    assert_eq!(parse(r"Bash(*a\(b(*)"), Err("ambiguous"));
+    assert!(parse(r"Bash(*a\(b*)").is_ok());
+    assert!(parse(r"Bash(*a\\(b(*)").is_ok());
+    assert!(parse(r"Bash(*a(b*)").is_ok());
+    assert_eq!(parse("Read(//c/x:*)"), Err("a :* the tool refuses"));
 }

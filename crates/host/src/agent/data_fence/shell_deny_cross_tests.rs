@@ -39,7 +39,7 @@ impl Rules {
     pub(super) fn new(rules: &[String]) -> Self {
         let (powershell, bash): (Vec<Rule>, Vec<Rule>) = rules
             .iter()
-            .map(|rule| Rule::new(rule))
+            .filter_map(|rule| Rule::new(rule))
             .partition(|rule| rule.tool() == "PowerShell");
         Self { bash, powershell }
     }

@@ -1,10 +1,10 @@
 # claude-rule-probe
 
-Asks a real Claude Code binary which commands its Bash deny rules refuse. It drives the binary
-offline: a local stand-in for the Messages API (`fakeapi.py`) answers with one tool use
-carrying each command, and records the result Claude Code sends back. It needs no login and no
-network, and nothing in CI runs it. It exists to check `data_fence/shell_deny.rs`'s rule
-escaping against the pinned Claude Code (decision record 0030, #1035).
+Asks a real Claude Code binary which permission rules it accepts and which commands its Bash
+deny rules refuse. It drives the binary offline: a local stand-in for the Messages API
+(`fakeapi.py`) answers with one tool use carrying each command, and records the result Claude
+Code sends back. It needs no login and no network, and nothing in CI runs it. It exists to check
+`data_fence/shell_deny.rs`'s rules against the pinned Claude Code (decision record 0030, #1035).
 
 ```sh
 # The pinned binary: @anthropic-ai/claude-agent-sdk-linux-x64 (the version in the agents'
@@ -12,18 +12,36 @@ escaping against the pinned Claude Code (decision record 0030, #1035).
 python3 scripts/claude-rule-probe/probe.py <path to package/claude> scripts/claude-rule-probe/cases.json
 ```
 
-`cases.json` holds the hand-checked readings: a `\` before a letter, `\\`, `\*`, `\\\*`, and the
-first #1035 build's blanket rule. Each case says whether it must be denied, and the script exits
-1 on a disagreement. Only the Bash tool exists off Windows: a PowerShell case is reported as
-"no tool". PowerShell rules go through the same parser and matcher, in any case.
+It does two checks:
 
-The binary sometimes matches a command as its own shell parse reads it, not only as written.
-An unquoted `\` after a variable (`type $HOME/…\agent-state\…`) is dropped there, as Bash
-drops it, so a rule with that `\` may not match. That is harmless: Bash then runs a name that
-does not exist (`…desktopagent-state…`). The port in `shell_deny_tests.rs` reads the command
-as written only, so it denies more. A case whose `denied` is `null` is reported, not checked.
+- **Rules.** Claude Code loads the settings as its `--settings` file and lists the rules it
+  kept (the SDK's `list_permission_rules` control request). Every rule must be among them except
+  those in `expect_skipped`. Rules are compared as Claude Code reads them, because it lists them
+  in its own spelling. `claude doctor` then reads the same settings as a project's
+  `.claude/settings.json`. It must report exactly the expected
+  `Invalid permission rule "…" was skipped` warnings.
+- **Commands.** Each case's command goes to the Bash tool, and the result must match its
+  `denied`. A case whose `denied` is `null` is reported, not checked. Only the Bash tool exists
+  off Windows, so a PowerShell case is reported as "no tool". PowerShell rules go through the
+  same loader, parser and matcher, in any case.
 
-The host's tests can write a launch-sized cases file: the Bash rules of a laptop-like data
-folder, the Windows VM's commands, and a sample of own and protected spellings. Run
-`CLAUSEO_RULE_PROBE_OUT=<file> cargo test -p clauseo-host --lib laptop_like`, then give that
+`cases.json` holds the hand-checked readings:
+
+- a `\` before a letter;
+- `\\`, `\*` and `\\\*`;
+- the first #1035 build's blanket rule;
+- a rule whose content ends in one backslash, which escapes its own closing `)` and is skipped;
+- the same rule with two backslashes, which is kept.
+
+Claude Code matches a Bash command as its own shell parse reads it, not only as written. The
+parse drops an unquoted trailing `\`, and an unquoted `\` after a variable
+(`type $HOME/…\agent-state\…`), as Bash drops them. So a Bash rule that needs either may not
+match. That is harmless: Bash then runs a name without that `\`. The port in
+`shell_deny_tests.rs` reads the command as written only, so it denies more. A rule ending in a
+backslash is there for PowerShell, which keeps it.
+
+The host's tests can write a launch-sized cases file. It holds the whole permission settings of
+a laptop-like data folder (Read and Edit, allow, and the shell rules of both shells), the Windows
+VM's commands, commands ending in a separator, and a sample of own and protected spellings.
+Run `CLAUSEO_RULE_PROBE_OUT=<file> cargo test -p clauseo-host --lib laptop_like`, then give that
 file to `probe.py`.
