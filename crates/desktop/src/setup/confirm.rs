@@ -21,7 +21,7 @@ use rfd::MessageLevel;
 use tauri::{AppHandle, Runtime};
 
 use crate::dialogs::words::{ConfirmWords, Key};
-use crate::dialogs::{BoxFuture, confirm};
+use crate::dialogs::{BoxFuture, Owner, confirm};
 
 /// What a setup confirm asks.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -92,6 +92,7 @@ impl<R: Runtime> SetupConfirm for NativeSetupConfirm<R> {
         let (title, message, ok) = (words.title, words.message, words.ok);
         confirm(
             &self.app,
+            Owner::Main,
             MessageLevel::Info,
             title,
             message,

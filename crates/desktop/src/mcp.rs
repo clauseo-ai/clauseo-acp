@@ -23,7 +23,7 @@ use clauseo_protocol::Language;
 use tauri::{AppHandle, Manager as _, Runtime};
 
 use crate::bridge::{Bridge, lock};
-use crate::dialogs::BoxFuture;
+use crate::dialogs::{BoxFuture, Owner};
 
 use words::LaunchWords;
 
@@ -143,8 +143,9 @@ impl<D: LaunchDrawer> McpLaunchConfirm for LaunchConfirm<D> {
     }
 }
 
-/// The confirm drawn by Rust with `dialogs::confirm`: Cancel first and default, over the main
-/// window. The webview has no permission for the dialog plugin.
+/// The confirm drawn by Rust with `dialogs::confirm`: Cancel first and default, over the Settings
+/// window when it is open (the lawyer is asking from there), else the main window. The webview
+/// has no permission for the dialog plugin.
 pub(crate) struct NativeLaunchDrawer<R: Runtime> {
     app: AppHandle<R>,
 }
@@ -163,6 +164,7 @@ impl<R: Runtime> LaunchDrawer for NativeLaunchDrawer<R> {
     fn draw(&self, words: LaunchWords) -> BoxFuture<'_, bool> {
         crate::dialogs::confirm(
             &self.app,
+            Owner::SettingsOrMain,
             rfd::MessageLevel::Warning,
             words.title,
             words.message,
