@@ -10,6 +10,7 @@ import type {
   ElicitationId,
   ElicitationResponse,
   ErrorCode,
+  FileChoice,
   FileRefId,
   HostCommand,
   HostQuery,
@@ -88,8 +89,9 @@ export async function previewUndoOf(
 export type ThreadActions = {
   readonly stream: StreamId | null;
   readonly sentTurn: TurnId | null;
-  /** Undoes every file of a step; rejects with the HostError when the host refuses. */
-  undo: (step: StepEntry) => Promise<void>;
+  /** Undoes a step: each file as `files` chooses (the thread's ask for a file that may hold the lawyer's own edits),
+   * else every file; rejects with the HostError when the host refuses. */
+  undo: (step: StepEntry, files?: readonly { path: string; choice: FileChoice }[]) => Promise<void>;
   /** Asks the host which of a step's papers were edited since Clauseo's change (PreviewUndo); absent where the host
    * has no PreviewUndo. Rejects with the HostError when the host refuses. */
   previewUndo?: ((step: StepEntry) => Promise<string[]>) | undefined;
@@ -278,10 +280,13 @@ export function useThreadSession(
   }, [command, refuse]);
 
   const undo = useCallback(
-    async (step: StepEntry) => {
+    async (step: StepEntry, chosen?: readonly { path: string; choice: FileChoice }[]) => {
       const id = open.current;
       if (id === null) throw internalError("no thread is open");
-      const files = step.files.map((f) => ({ path: f.path, choice: "undo" as const }));
+      const files =
+        chosen === undefined
+          ? step.files.map((f) => ({ path: f.path, choice: "undo" as const }))
+          : [...chosen];
       try {
         await command({ undo_step: { thread: id, turn: step.turn, files } });
       } catch (e) {

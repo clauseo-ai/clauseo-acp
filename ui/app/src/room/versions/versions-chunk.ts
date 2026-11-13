@@ -12,6 +12,8 @@ export { VersionsCentre, VersionsRail } from "./versions-parts.tsx";
 export { WordLock } from "../word/word-lock.tsx";
 // and the lines after its undo for a file Clauseo had no earlier copy of
 export { CantUndo } from "./cant-undo.tsx";
+// and its Undo's dialog for a step with a file that may hold the lawyer's own edits
+export { ThreadUndo } from "./thread-undo.tsx";
 
 let loading: Promise<void> | null = null;
 
