@@ -123,26 +123,58 @@ host added later reached the page without anyone deciding it should.
   came about a minute apart without end, and the probe, which only TCP-connected to the live
   proxy, always got through, so the turn said "Answering." for good. Four changes
   (`offline/probe.rs`, `offline/probe/route.rs`, `offline/quiet.rs`):
-  - **The probe asks the service, not the proxy.** It names the one host the agent's login uses
-    (a base URL the variables set; else Codex's `api.openai.com` when its launch passes a key,
-    `chatgpt.com` otherwise; Claude's `api.anthropic.com`). Through a proxy it sends `CONNECT`
+  - **The probe asks the service, not the proxy, where the agent goes** (security review and
+    stage D review, round 1). At each launch the host records on the agent what the probe asks,
+    from the launch's final environment, the one the agent gets (`offline/probe/service.rs`),
+    so no route is looked up when it runs and the 8 s cover only the name's lookup, TCP,
+    `CONNECT` and the hello:
+    - *the service:* a base URL that environment sets (`ANTHROPIC_BASE_URL`, a firm plan's
+      endpoint included; `OPENAI_BASE_URL`); else Codex's `api.openai.com` when its launch
+      passes a key, `chatgpt.com` for Clauseo's own login (the key retry's `Own` rule), and
+      both for the lawyer's reused login, whose kind the host never reads (either answering
+      counts); Claude's `api.anthropic.com`. A Claude on Bedrock, Vertex or Foundry
+      (`CLAUDE_CODE_USE_*`) or a base URL that names no one `http`/`https` host is
+      `unknown_service`;
+    - *the route:* the proxy that environment hands the agent, with its `NO_PROXY`, through the
+      sandbox's `launch_route` (the egress proxy's own reading of a proxy URL and `NO_PROXY`).
+      Desktop's launch puts the route it resolved there (a firm's `network.upstream_proxy`
+      first, then `HTTPS_PROXY`/`ALL_PROXY`, then the OS's, `setup/network.rs`), and what a
+      plan, the agent's entry or the inherited environment set stays as the agent reads it:
+      Claude Code `https_proxy`, `HTTPS_PROXY`, `http_proxy`, `HTTP_PROXY` and both
+      `no_proxy` lists; Codex `HTTPS_PROXY`, `https_proxy`, `ALL_PROXY`, `all_proxy` and
+      `NO_PROXY`. A proxy a `CONNECT` cannot follow (`https://`, `socks5://`) is
+      `unknown_route`.
+    Either unknown is not probed: it counts as reached at once and its line says so, so a watch
+    waits and only the backstop (or the agent's own end) ends a silent turn. Through a proxy it
+    sends `CONNECT`
     with no credentials: 200 goes on, 407 counts as reached, any other status or no head within
     the cap is a miss. Then a TLS client hello (straight to the host when there is no proxy):
     a handshake record back is reached; an alert, other bytes, a close or silence is a miss.
     No certificate is checked and nothing but the hello is sent, so a firm's TLS-inspecting proxy
-    counts as reached. The whole try has 8 s. A plain `http` base URL gets the TCP connection only.
+    counts as reached; a hello that cannot be written is a miss (`tls_other`). The whole try
+    has 8 s (a reused Codex login's two hosts side by side). A plain `http` base URL gets the
+    TCP connection only.
   - **The quiet arm.** Every live turn of Claude or Codex keeps the time of its last model output
-    (answer and thought chunks, tool calls and their updates, plans, an ask); an ask's end
-    restarts it, so the lawyer's time never counts. 30 s with no output, no open tool call and no
-    ask arms a quiet watch and probes at once; a probe that gets through waits again, and two
+    (answer and thought chunks, tool calls and their updates, plans, compaction updates, an ask),
+    whether or not its service is known; an ask's end restarts it, so the lawyer's time never
+    counts. An agent of no known kind gets no quiet arm. 30 s with no output, no open tool call
+    and no ask arms a quiet watch and probes at once; a probe that gets through waits again, and two
     misses in a row end the turn `agent.offline`. An agent's note turns the watch into a note's,
     which ends at its next miss; the window's `offline` makes it the window's, and `online`
     leaves it. This is what covers Claude, whose retries reach the client as nothing at all.
   - **The backstop:** 5 minutes with no output, no open tool call and no ask end the turn
-    `Failed { agent.quiet }` (the answer so far kept, Try again, the queue held), whatever the
-    probes said; a reached probe never moves it. It is what ends the known gaps: a proxy that asks
-    for credentials (407, counted as reached so a proxy login never reads as offline) and a
-    TLS-inspecting proxy that answers the handshake itself, both in front of a blocked upstream.
+    `Failed { agent.quiet }` ("… stopped answering. Try again.", the answer so far kept, Try
+    again, the queue held), whatever the probes said; a reached probe never moves it.
+  - **An open tool call** keeps the quiet arm and the backstop off only while the agent sent
+    something (a tool update counts) within `WORKING_LIMIT` (10 min); past it the silence
+    counts, so a tool left open with no word for 10 min ends the turn `agent.quiet` then.
+  - **Gaps the backstop is what ends:** a proxy that asks for credentials (407, counted as reached
+    so a proxy login never reads as offline) and a TLS-inspecting proxy that answers the
+    handshake itself, both in front of a blocked upstream; a Claude on a cloud provider's login,
+    or behind an `https://` or SOCKS proxy (not probed); and a Claude compaction whose summary
+    sends nothing for 5 minutes after its start (claude-agent-acp 0.89.1 sends
+    `compaction_update` at the start and streams `compaction_summary_chunk`, each counted as
+    output, but nothing comes between them while the summary call waits for its first token).
   - **The probe's line reaches host.log**, at the lifecycle target, with fixed fields only:
     `reached`, `noted`, `by` (note, window, quiet), `class`, `via`, `status`, `ms`, `misses`;
     never a host, a proxy or bytes. Stage C's case 1 (proxy killed) had the probe run unseen:
