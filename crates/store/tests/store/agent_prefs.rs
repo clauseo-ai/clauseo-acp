@@ -1,11 +1,11 @@
 //! A matter's model and effort picks (schema 6, `UpdateMatter::agent_prefs`): a database from
 //! schema 5 opens with no prefs on its matters, prefs round-trip through a reopen, and stored
-//! prefs that do not parse are corrupt.
+//! prefs that do not parse read as no picks.
 
 use std::collections::BTreeMap;
 
-use clauseo_protocol::{AgentChoiceId, AgentKind, AgentPrefs, ConfigPicks, ErrorCode, MatterKind};
-use clauseo_store::{Commit, DB_FILE, Error, MatterRow, SCHEMA};
+use clauseo_protocol::{AgentChoiceId, AgentKind, AgentPrefs, ConfigPicks, MatterKind};
+use clauseo_store::{Commit, DB_FILE, MatterRow, SCHEMA};
 use futures::executor::block_on;
 use rusqlite::Connection;
 
@@ -65,7 +65,9 @@ fn agent_prefs_round_trip() {
 }
 
 #[test]
-fn stored_agent_prefs_that_do_not_parse_are_corrupt() {
+fn stored_agent_prefs_that_do_not_parse_read_as_no_picks() {
+    // Each value reads as no picks; the row keeps its other fields (the WARN is checked in
+    // unreadable_saved.rs).
     for (name, value) in [
         ("not_json", "{"),
         ("unknown_kind", r#"{"gemini":{"model":"x"}}"#),
@@ -84,9 +86,11 @@ fn stored_agent_prefs_that_do_not_parse_are_corrupt() {
             .unwrap();
         drop(conn);
         let store = dir.open();
-        let error = block_on(store.matters()).unwrap_err();
-        assert!(matches!(error, Error::Corrupt { .. }), "{name}: {error:?}");
-        assert_eq!(error.code(), ErrorCode::StoreCorrupt, "{name}");
+        assert_eq!(
+            block_on(store.matters()).unwrap(),
+            [matter_row(1, None)],
+            "{name}"
+        );
         block_on(store.close()).unwrap();
     }
 }

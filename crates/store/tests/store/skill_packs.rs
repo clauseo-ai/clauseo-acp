@@ -1,9 +1,9 @@
 //! A matter's skill packs (schema 5, decision record 0040): a database from schema 4 opens with
 //! no list on its matters, a list (empty included) round-trips through a reopen, and a stored
-//! list that does not parse, or breaks the list's rules, is corrupt.
+//! list that does not parse, or breaks the list's rules, reads as no packs.
 
-use clauseo_protocol::{ErrorCode, MatterKind, PackId, PackList};
-use clauseo_store::{Commit, DB_FILE, Error, MatterRow, SCHEMA};
+use clauseo_protocol::{MatterKind, PackId, PackList};
+use clauseo_store::{Commit, DB_FILE, MatterRow, SCHEMA};
 use futures::executor::block_on;
 use rusqlite::Connection;
 
@@ -85,7 +85,9 @@ fn skill_packs_round_trip_including_empty() {
 }
 
 #[test]
-fn a_stored_skill_packs_that_does_not_parse_is_corrupt() {
+fn a_stored_skill_packs_that_does_not_parse_reads_as_no_packs() {
+    // Each value reads as no packs; the row keeps its other fields (the WARN is checked in
+    // unreadable_saved.rs).
     let too_many = format!(
         "[{}]",
         (0..33)
@@ -114,12 +116,11 @@ fn a_stored_skill_packs_that_does_not_parse_is_corrupt() {
             .unwrap();
         drop(conn);
         let store = dir.open();
-        let error = block_on(store.matters()).unwrap_err();
-        assert!(
-            matches!(&error, Error::Corrupt { detail } if detail.contains("skill packs")),
-            "{name}: {error:?}"
+        assert_eq!(
+            block_on(store.matters()).unwrap(),
+            [matter_row(1, None)],
+            "{name}"
         );
-        assert_eq!(error.code(), ErrorCode::StoreCorrupt);
         block_on(store.close()).unwrap();
     }
 }

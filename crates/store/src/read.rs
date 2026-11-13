@@ -248,8 +248,9 @@ pub(crate) fn matters(conn: &Connection) -> Result<Vec<MatterRow>, Error> {
     let mut rows = statement.query([])?;
     let mut out = Vec::new();
     while let Some(row) = rows.next()? {
+        let id: MatterId = codec::parse(row.get_ref(0)?.as_str()?, "a matter id")?;
         out.push(MatterRow {
-            id: codec::parse(row.get_ref(0)?.as_str()?, "a matter id")?,
+            id,
             name: row.get(1)?,
             kind: codec::matter_kind(row.get_ref(2)?.as_str()?),
             folder_path: row.get(3)?,
@@ -269,19 +270,44 @@ pub(crate) fn matters(conn: &Connection) -> Result<Vec<MatterRow>, Error> {
             pinned: row.get(9)?,
             last_opened: optional_timestamp(row, 10)?,
             forgotten: optional_timestamp(row, 11)?,
-            skill_packs: row
-                .get_ref(12)?
-                .as_str_or_null()?
-                .map(codec::skill_packs)
-                .transpose()?,
-            agent_prefs: row
-                .get_ref(13)?
-                .as_str_or_null()?
-                .map(codec::agent_prefs)
-                .transpose()?,
+            skill_packs: saved_or_default(
+                id,
+                "skill_packs",
+                row.get_ref(12)?.as_str_or_null()?,
+                codec::skill_packs,
+            ),
+            agent_prefs: saved_or_default(
+                id,
+                "agent_prefs",
+                row.get_ref(13)?.as_str_or_null()?,
+                codec::agent_prefs,
+            ),
         });
     }
     Ok(out)
+}
+
+/// A matter's saved `agent_prefs` or `skill_packs` text, read back. Text that does not decode
+/// (a value a newer build wrote, or garbage) reads as `None`, the default: no saved picks, no
+/// packs. It logs one WARN naming the matter and the column, and the row is left as it is, as
+/// `codec::matter_kind` leaves an unknown kind. The decoder's message is not logged: it can
+/// quote the stored value. A later normal write of the matter's prefs replaces the value.
+fn saved_or_default<T>(
+    matter: MatterId,
+    column: &'static str,
+    text: Option<&str>,
+    decode: fn(&str) -> Result<T, Error>,
+) -> Option<T> {
+    let text = text?;
+    if let Ok(value) = decode(text) {
+        return Some(value);
+    }
+    tracing::warn!(
+        matter = %matter,
+        column,
+        "a matter's saved value does not decode; the default is used and the stored value is left as it is"
+    );
+    None
 }
 
 /// The time of the last event of every stream that has one, by one lookup of each stream's last

@@ -1,6 +1,8 @@
 //! Shared test helpers: each test's own folder, fixed ids and envelopes, and opening a store.
 
+use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use clauseo_protocol::{
     CommandId, CommandOutcome, DomainEvent, Envelope, EventId, MatterId, MessageId, Seq, StreamId,
@@ -181,4 +183,50 @@ pub(crate) fn assert_seq_gap(
         ),
         other => panic!("expected SeqGap in {stream} ({expected}, {got}), got {other:?}"),
     }
+}
+
+/// The events this test binary's subscriber has seen at WARN or above, one line each: every field
+/// as `name=value`, the message among them. A store reads on its own thread, so the subscriber is
+/// the binary's global one, set on the first call (a test calls this before it opens its store).
+/// Every test's lines land here; a test looks only at the lines of its own matters.
+pub(crate) fn captured_warnings() -> Arc<Mutex<Vec<String>>> {
+    static LINES: OnceLock<Arc<Mutex<Vec<String>>>> = OnceLock::new();
+    let lines = LINES.get_or_init(|| {
+        let lines = Arc::new(Mutex::new(Vec::new()));
+        tracing::subscriber::set_global_default(Capture(Arc::clone(&lines)))
+            .expect("the binary's one subscriber");
+        lines
+    });
+    Arc::clone(lines)
+}
+
+/// Keeps each WARN event as one line.
+struct Capture(Arc<Mutex<Vec<String>>>);
+
+/// One event's fields, written as one line.
+#[derive(Default)]
+struct Fields(String);
+
+impl tracing::field::Visit for Fields {
+    fn record_debug(&mut self, field: &tracing::field::Field, value: &dyn std::fmt::Debug) {
+        write!(self.0, "{}={value:?} ", field.name()).expect("a String takes the text");
+    }
+}
+
+impl tracing::Subscriber for Capture {
+    fn enabled(&self, metadata: &tracing::Metadata<'_>) -> bool {
+        *metadata.level() <= tracing::Level::WARN
+    }
+    fn new_span(&self, _: &tracing::span::Attributes<'_>) -> tracing::span::Id {
+        tracing::span::Id::from_u64(1)
+    }
+    fn record(&self, _: &tracing::span::Id, _: &tracing::span::Record<'_>) {}
+    fn record_follows_from(&self, _: &tracing::span::Id, _: &tracing::span::Id) {}
+    fn event(&self, event: &tracing::Event<'_>) {
+        let mut fields = Fields::default();
+        event.record(&mut fields);
+        self.0.lock().unwrap().push(fields.0);
+    }
+    fn enter(&self, _: &tracing::span::Id) {}
+    fn exit(&self, _: &tracing::span::Id) {}
 }
