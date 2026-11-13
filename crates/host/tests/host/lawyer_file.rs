@@ -163,9 +163,10 @@ fn an_old_file_the_lawyer_edited_while_the_agent_read_it_is_flagged_and_kept() {
 
 /// The dry run's own call sequence (its Claude transcript): a denied shell call `cd`-ing to the
 /// matter, a Glob at the matter folder itself, Reads of other files, `stetdoc view` of the Word
-/// files, Writes outside the matter; the lawyer's note lands mid-turn and nothing names it. The
-/// host flags it, before and after this fix: the dry run's silent delete was the thread's Undo
-/// ignoring the flag (`ui/app/src/room/thread/stop-rows.tsx`). This pins the flag.
+/// files, Writes outside the matter; the lawyer's note lands mid-turn, then a Grep at the matter
+/// root names it in its locations and output, and no write names it. The host flags it, before
+/// and after this fix, and the default choice keeps it: the dry run's silent delete was the
+/// thread's Undo ignoring the flag (`ui/app/src/room/thread/stop-rows.tsx`). This pins the flag.
 #[test]
 fn the_dry_runs_calls_leave_the_note_flagged() {
     let files = [
@@ -183,6 +184,15 @@ fn the_dry_runs_calls_leave_the_note_flagged() {
     );
     assert_eq!(flags, [flag(NOTE, true)]);
     assert_eq!(edited_since(&host, thread, turn), Vec::<String>::new());
+    // The agent globbed the root, the lawyer added the note, a folder-wide search named it and
+    // no write did: the Undo dialogs keep it by default.
+    assert_eq!(
+        default_choices(&flags),
+        [FileDecision {
+            path: MatterPath::new(NOTE).unwrap(),
+            choice: FileChoice::Keep,
+        }]
+    );
     host.shutdown();
 }
 
