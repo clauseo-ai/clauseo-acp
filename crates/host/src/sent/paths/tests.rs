@@ -33,6 +33,7 @@ fn fields<'a>(
         locations,
         content,
         raw_input: None,
+        tool_name: None,
     }
 }
 

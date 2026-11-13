@@ -212,6 +212,15 @@ impl TurnStart<'_> {
             },
         )
     }
+
+    /// Whether `change` modifies a file a shell command of the turn wrote (its whole path: a
+    /// `stetdoc … --in-place` edit, `echo x >> notes.md`): the agent's, though no tool call
+    /// named it. Undo of a modified file puts its content back and never deletes it, so none of
+    /// [`TurnStart::own`]'s checks for an added file apply.
+    fn rewritten(&self, change: &FileChange) -> bool {
+        matches!(change.change(), ChangeKind::Modified)
+            && self.commands.contains(change.path().as_str())
+    }
 }
 
 /// Whether a place a tool call names counts as one the agent wrote, so the after-turn
@@ -227,8 +236,9 @@ pub fn names_a_write(kind: ToolKind, status: ToolCallStatus, in_diff: bool) -> b
 }
 
 /// `change`, flagged as possibly holding the lawyer's edits when no tool call wrote its path
-/// ([`names_a_write`]; for a rename: neither path) and it is not a file the agent added that a
-/// shell command wrote (`start`: [`TurnStart::own`]).
+/// ([`names_a_write`]; for a rename: neither path) and no shell command of the turn wrote it,
+/// as a file the agent added (`start`: [`TurnStart::own`]) or modified
+/// ([`TurnStart::rewritten`]).
 pub(crate) fn flag(
     change: FileChange,
     tools: &BTreeSet<MatterPath>,
@@ -236,7 +246,7 @@ pub(crate) fn flag(
 ) -> FileChange {
     let named = tools.contains(change.path())
         || matches!(change.change(), ChangeKind::Renamed { from } if tools.contains(from));
-    if named || start.own(&change) {
+    if named || start.own(&change) || start.rewritten(&change) {
         change
     } else {
         change.with_lawyer_edits()

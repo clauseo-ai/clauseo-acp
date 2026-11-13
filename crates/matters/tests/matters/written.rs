@@ -116,11 +116,13 @@ fn a_failed_edit_does_not_clear_the_flag() {
     assert!(flagged("written-failed-edit", true, &[call], &[]));
 }
 
-/// A new file a shell command of the turn wrote is the agent's own (`after_turn_named`), even
-/// read as well; a file there before stays flagged, as that rule has it.
+/// A file a shell command of the turn wrote is the agent's own (`after_turn_named`), even read
+/// as well: a new one (`stetdoc edit`'s default `NAME.edited.docx`) and one there before, which
+/// it modified (`stetdoc edit --in-place`). Named by no command, the old one stays flagged.
 #[test]
-fn a_shell_write_clears_the_flag_of_a_new_file() {
+fn a_shell_write_clears_the_flag_of_a_new_or_modified_file() {
     let read = [(ToolKind::Read, DONE, false)];
     assert!(!flagged("written-shell-new", false, &read, &["note.txt"]));
-    assert!(flagged("written-shell-old", true, &read, &["note.txt"]));
+    assert!(!flagged("written-shell-old", true, &read, &["note.txt"]));
+    assert!(flagged("written-shell-other", true, &read, &["other.txt"]));
 }

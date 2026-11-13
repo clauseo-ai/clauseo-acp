@@ -266,6 +266,7 @@ mod sent;
 mod shell_writes;
 mod snapshot;
 mod sources;
+mod stetdoc_args;
 #[cfg(test)]
 mod testing;
 mod undo_note;

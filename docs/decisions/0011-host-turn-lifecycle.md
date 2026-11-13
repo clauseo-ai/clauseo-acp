@@ -275,7 +275,9 @@ until `StepUndone` is durable; a failed undo commit is retried once, as a turn's
   It is what Undo's "changed after Clauseo's edit" ask reads. A `FileChange`'s
   `may_include_lawyer_edits` (no agent tool call wrote the path during the turn: a diff's path or
   an edit, delete or move call's location, `clauseo_matters::names_a_write`; never a read's,
-  search's or shell call's location) is read too: a step with such a file asks in Versions' undo
+  search's or shell call's location; nor did a shell command of the turn, read from its text by
+  `shell_writes`, Bash's or PowerShell's: redirects, `-o`, `tee`, `cp`, and `stetdoc`'s forms,
+  its default `NAME.edited.docx` and `--in-place`; added or modified) is read too: a step with such a file asks in Versions' undo
   dialog, from Versions or the thread, with Keep current chosen for it, whatever `edited_since`
   says, since a file the lawyer saved during the turn is unchanged since its after-turn
   checkpoint. #360 had the thread's Undo read `edited_since` alone, while every shell-made file

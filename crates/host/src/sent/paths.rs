@@ -8,7 +8,8 @@
 //! [`clauseo_matters::names_a_write`] holds for it (a diff's path, an edit, delete or move
 //! call's location; never a read's, a search's or a shell call's location; nothing of a call
 //! that ended failed). A file the lawyer saves during a turn that reads it is so never taken for
-//! the agent's. A shell call's writes are read from its command ([`crate::shell_writes`]).
+//! the agent's. A shell call's writes are read from its command ([`crate::shell_writes`]), in
+//! PowerShell's syntax when its tool is named `PowerShell`.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -65,6 +66,8 @@ struct Call {
     status: Option<ToolCallStatus>,
     /// Whether it was ever a shell call (`ToolKind::Execute`): its input is then read for writes.
     shell: bool,
+    /// Its tool's name as last sent (ACP's `name`): `PowerShell` reads its command so.
+    tool_name: Option<String>,
     /// The places its locations named.
     located: Places,
     /// The places its diffs named.
@@ -89,6 +92,7 @@ pub(crate) struct CallFields<'a> {
     pub(crate) locations: &'a [ToolLocation],
     pub(crate) content: &'a [ToolCallContent],
     pub(crate) raw_input: Option<&'a TextOrBlob>,
+    pub(crate) tool_name: Option<&'a str>,
 }
 
 impl<'a> CallFields<'a> {
@@ -100,6 +104,7 @@ impl<'a> CallFields<'a> {
             locations: patch.locations.as_deref().unwrap_or_default(),
             content: patch.content.as_deref().unwrap_or_default(),
             raw_input: patch.raw_input.as_ref(),
+            tool_name: patch.tool_name.as_deref(),
         }
     }
 
@@ -111,6 +116,7 @@ impl<'a> CallFields<'a> {
             locations: &call.locations,
             content: &call.content,
             raw_input: call.raw_input.as_ref(),
+            tool_name: call.tool_name.as_deref(),
         }
     }
 
@@ -122,6 +128,7 @@ impl<'a> CallFields<'a> {
             locations: &started.locations,
             content: &started.content,
             raw_input: started.raw_input.as_ref(),
+            tool_name: started.tool_name.as_deref(),
         }
     }
 }
@@ -145,6 +152,9 @@ impl TurnPaths {
         if let Some(status) = fields.status {
             call.status = Some(status);
         }
+        if let Some(name) = fields.tool_name {
+            call.tool_name = Some(name.to_owned());
+        }
         for location in fields.locations {
             call.located.add(location);
         }
@@ -154,7 +164,8 @@ impl TurnPaths {
         if call.shell
             && let Some(TextOrBlob::Inline(input)) = fields.raw_input
         {
-            shell_writes::add_input(&mut self.writes, input);
+            let dialect = shell_writes::Dialect::of_tool(call.tool_name.as_deref());
+            shell_writes::add_input(&mut self.writes, input, dialect);
         }
     }
 

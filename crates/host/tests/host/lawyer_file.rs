@@ -13,7 +13,7 @@ use clauseo_protocol::{
     StopReason, StreamId, ThreadId, TurnId,
 };
 
-use crate::support::{Dir, FAKE, Running, Scenario, matter_with_thread};
+use crate::support::{Dir, FAKE, Running, START_MS, Scenario, matter_with_thread};
 use crate::write;
 
 const NOTE: &str = "Lawyer note.txt";
@@ -183,5 +183,52 @@ fn the_dry_runs_calls_leave_the_note_flagged() {
     );
     assert_eq!(flags, [flag(NOTE, true)]);
     assert_eq!(edited_since(&host, thread, turn), Vec::<String>::new());
+    host.shutdown();
+}
+
+/// Clauseo's own Word edits, `stetdoc` run through the agent's shell (Bash's default
+/// `NAME.edited.docx`, PowerShell's `--in-place`): no location names either file, but the host
+/// reads both writes from the commands (`shell_writes`, `stetdoc_args`), so neither change is
+/// flagged and the thread's Undo does not ask; the default Undo takes both back.
+#[test]
+fn stetdocs_own_writes_through_the_shell_are_unflagged() {
+    let files = [
+        ("Main Agreement.docx", "agreement\n"),
+        ("Notes.docx", "draft notes\n"),
+    ];
+    let (_dir, host, thread, turn, folder, flags) = run_turn(
+        "lawyer_file_stetdoc",
+        "undo-lawyer-file-stetdoc",
+        &files,
+        |folder| {
+            let edited = folder.join("Main Agreement.edited.docx");
+            write::write(&edited, b"agreement, with tracked changes\n");
+            // The test clock runs behind the real one: dated before the turn's end, as the
+            // agent's own new file is.
+            let before_end = std::time::UNIX_EPOCH
+                + std::time::Duration::from_millis(u64::try_from(START_MS - 60_000).unwrap());
+            write::set_mtime(&edited, before_end);
+            write::write(&folder.join("Notes.docx"), b"final notes\n");
+        },
+    );
+    assert_eq!(
+        flags,
+        [
+            flag("Main Agreement.edited.docx", false),
+            flag("Notes.docx", false)
+        ]
+    );
+    // No flagged file and nothing changed since: the thread's Undo undoes at once.
+    assert_eq!(edited_since(&host, thread, turn), Vec::<String>::new());
+    host.ok(HostCommand::UndoStep {
+        thread,
+        turn,
+        files: default_choices(&flags),
+    });
+    assert!(!folder.join("Main Agreement.edited.docx").exists());
+    assert_eq!(
+        std::fs::read(folder.join("Notes.docx")).unwrap(),
+        b"draft notes\n"
+    );
     host.shutdown();
 }
