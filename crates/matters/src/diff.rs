@@ -228,10 +228,14 @@ impl TurnStart<'_> {
 /// a path in the call's diff content (`in_diff`), whatever its kind, or a location of an `Edit`,
 /// `Delete` or `Move` call. A `Read`, `Search`, `Fetch`, `Think` or `Execute` call's location,
 /// and that of any other kind, is only a place it looked at or ran in: a file the lawyer saves
-/// during a turn that reads it stays flagged. A call that ended `Failed` wrote nothing it named.
-/// A shell call's writes are read from its command instead (`after_turn_named`'s `commands`).
+/// during a turn that reads it stays flagged. Only a call that ended `Completed` wrote what it
+/// named: one still `Pending` or `InProgress` at the checkpoint (an ask the lawyer never
+/// answered, a Stop meanwhile), or one that ended `Cancelled` or `Failed`, wrote nothing, so a
+/// file the lawyer edited meanwhile stays flagged (a false warning, at worst). A shell call's
+/// writes are read from its command instead (`after_turn_named`'s `commands`), under the same
+/// rule (the host's `TurnPaths::shell_writes`).
 pub fn names_a_write(kind: ToolKind, status: ToolCallStatus, in_diff: bool) -> bool {
-    status != ToolCallStatus::Failed
+    status == ToolCallStatus::Completed
         && (in_diff || matches!(kind, ToolKind::Edit | ToolKind::Delete | ToolKind::Move))
 }
 

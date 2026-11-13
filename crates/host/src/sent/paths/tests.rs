@@ -90,7 +90,7 @@ fn an_update_takes_the_kind_its_call_started_with() {
     paths.note("r", &fields(None, DONE, &[inside("read.txt")], &[]));
     paths.note("e", &fields(None, DONE, &[inside("edit.txt")], &[]));
     let diffed = [diff("diffed.txt")];
-    paths.note("u", &fields(None, None, &[inside("unseen.txt")], &diffed));
+    paths.note("u", &fields(None, DONE, &[inside("unseen.txt")], &diffed));
     assert_eq!(paths.written(), matter(&["diffed.txt", "edit.txt"]));
 }
 
@@ -127,8 +127,67 @@ fn a_shell_calls_command_is_read_for_writes() {
     read.raw_input = Some(&input);
     paths.note("r", &read);
     assert_eq!(
-        paths.writes,
+        paths.shell_writes(),
         ["later.txt".to_owned(), "out.txt".to_owned()].into()
     );
     assert_eq!(paths.written(), Places::default());
+}
+
+/// A shell call's targets count only once it ends `Completed`: a denied, failed or cancelled
+/// command, or one still running at the checkpoint, wrote nothing.
+#[test]
+fn only_a_completed_shell_call_writes() {
+    let mut paths = TurnPaths::default();
+    let statuses = [
+        ("done", Some(ToolCallStatus::Completed)),
+        ("failed", Some(ToolCallStatus::Failed)),
+        ("cancelled", Some(ToolCallStatus::Cancelled)),
+        ("pending", Some(ToolCallStatus::Pending)),
+        ("running", Some(ToolCallStatus::InProgress)),
+        ("unknown", None),
+    ];
+    let inputs: Vec<TextOrBlob> = statuses
+        .iter()
+        .map(|(key, _)| TextOrBlob::Inline(format!(r#"{{"command":"pandoc a.md -o {key}.docx"}}"#)))
+        .collect();
+    for ((key, status), input) in statuses.iter().zip(&inputs) {
+        let mut start = fields(
+            Some(ToolKind::Execute),
+            Some(ToolCallStatus::Pending),
+            &[],
+            &[],
+        );
+        start.raw_input = Some(input);
+        paths.note(key, &start);
+        paths.note(key, &fields(None, *status, &[], &[]));
+    }
+    assert_eq!(paths.shell_writes(), ["done.docx".to_owned()].into());
+    // A failure after a completion (a late update) takes the write back.
+    paths.note(
+        "done",
+        &fields(None, Some(ToolCallStatus::Failed), &[], &[]),
+    );
+    assert!(paths.shell_writes().is_empty());
+}
+
+/// An edit or a diff of a call that has not ended `Completed` (an ask still open at a Stop, a
+/// cancelled call) wrote nothing.
+#[test]
+fn only_a_completed_edit_writes() {
+    let memo = [inside("memo.docx")];
+    let diffed = [diff("memo.docx")];
+    for status in [
+        None,
+        Some(ToolCallStatus::Pending),
+        Some(ToolCallStatus::InProgress),
+        Some(ToolCallStatus::Cancelled),
+        Some(ToolCallStatus::Failed),
+    ] {
+        let mut paths = TurnPaths::default();
+        paths.note("e", &fields(Some(ToolKind::Edit), status, &memo, &diffed));
+        assert_eq!(paths.written(), Places::default(), "{status:?}");
+    }
+    let mut paths = TurnPaths::default();
+    paths.note("e", &fields(Some(ToolKind::Edit), DONE, &memo, &diffed));
+    assert_eq!(paths.written(), matter(&["memo.docx"]));
 }

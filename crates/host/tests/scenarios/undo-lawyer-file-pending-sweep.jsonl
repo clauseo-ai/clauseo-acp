@@ -1,0 +1,13 @@
+{"scenario":"undo-lawyer-file-pending-sweep","description":"An edit call naming memo.docx stays pending to the turn's end (#1038: the host's close then settles it Completed, after the checkpoint); while a read's ask waits the lawyer edits memo.docx. The edit never ended Completed by the checkpoint: memo.docx stays flagged","on_stdin_close":"exit"}
+{"expect":{"method":"initialize","as":"init","params":{"protocolVersion":1}}}
+{"respond":{"to":"init","result":{"protocolVersion":1,"agentCapabilities":{"loadSession":true},"authMethods":[],"agentInfo":{"name":"fake_agent","version":"0.0.0"}}}}
+{"expect":{"method":"session/new","as":"new","params":{"cwd":"{{any}}"}}}
+{"respond":{"to":"new","result":{"sessionId":"sess-1"}}}
+{"expect":{"method":"session/prompt","as":"p1","params":{"sessionId":"sess-1"}}}
+{"update":{"update":{"sessionUpdate":"tool_call","toolCallId":"t1-edit","name":"Edit","title":"Edit memo.docx","kind":"edit","status":"pending","locations":[{"path":"{{cwd}}/memo.docx"}],"content":[{"type":"diff","path":"{{cwd}}/memo.docx","oldText":"memo\n","newText":"the agent's memo\n"}]}}}
+{"update":{"update":{"sessionUpdate":"tool_call","toolCallId":"t2-read","name":"Read","title":"Read brief.txt","kind":"read","status":"pending","locations":[{"path":"{{cwd}}/brief.txt","line":1}]}}}
+{"note":"The test saves the lawyer's file while this ask waits.","request":{"id":"perm-1","method":"session/request_permission","params":{"sessionId":"sess-1","toolCall":{"toolCallId":"t2-read","title":"Read brief.txt","kind":"read","status":"pending"},"options":[{"optionId":"allow-once","name":"Allow once","kind":"allow_once"},{"optionId":"reject-once","name":"Reject","kind":"reject_once"}]}}}
+{"expect_response":{"id":"perm-1","result":{"outcome":{"outcome":"selected","optionId":"allow-once"}}}}
+{"update":{"update":{"sessionUpdate":"tool_call_update","toolCallId":"t2-read","status":"completed"}}}
+{"update":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-answer-1","content":{"type":"text","text":"Done."}}}}
+{"respond":{"to":"p1","result":{"stopReason":"end_turn"}}}
