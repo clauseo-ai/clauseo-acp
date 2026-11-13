@@ -52,11 +52,13 @@ use clauseo_protocol::{AgentId, AgentKind, ThreadId};
 use super::super::Actor;
 use super::super::input::Input;
 use super::agents::{self, Waiting};
+use super::offline::probe::settings::{Moved, Reads};
 use super::{TurnInput, host_stopping, state};
 
 use crate::agent::codex_fence::Listed;
 use crate::agent::data_fence::LaunchDeny;
 use crate::agent::folder_support::{Answer, FolderCheck};
+use crate::agent::loads::lawyer::Reads as McpReads;
 use crate::agent::login_link::{self, Checked, LoginCheck};
 use crate::agent::{claude_tmp, codex, data_folder};
 use crate::browser::session::BrowserSession;
@@ -93,6 +95,9 @@ pub(crate) struct Prepared {
     pub(super) skills_written: Option<SkillsWritten>,
     /// The skill packs this launch left out, by id, with the reason, for its notice.
     pub(super) packs_skipped: Vec<(String, PackSkip)>,
+    /// Why the agent's own settings files leave its route or host unknown to the offline probe,
+    /// read after Claude's home settings are written, as the agent will read them.
+    pub(super) moved: Option<Moved>,
 }
 
 /// The folders a session gets, all under the data folder, and its browser claims.
@@ -330,7 +335,7 @@ pub(super) fn prepare(
     let check_clock = std::sync::Arc::clone(&actor.clock);
     let block_list_wait = claims.egress.block_list_wait(Arc::clone(&actor.clock));
     let matter = run.key.matter;
-    let mcp = crate::agent::loads::lawyer::Reads::of(actor);
+    let (mcp, settings) = (McpReads::of(actor), Reads::of(actor, claude));
     actor.spawn_post(async move {
         if let Some(keys_wait) = keys_wait {
             keys_wait.await;
@@ -391,6 +396,7 @@ pub(super) fn prepare(
                 let packs_skipped;
                 (run.packs_written, packs_skipped) = packs.run(&run.skill_packs);
                 Ok(Prepared {
+                    moved: settings.moved(codex.as_ref(), claude_home.as_deref()),
                     stored,
                     codex,
                     claude_home,

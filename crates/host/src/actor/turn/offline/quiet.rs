@@ -41,7 +41,7 @@ pub(in crate::actor::turn) const QUIET_LIMIT: Duration = Duration::from_secs(300
 /// How long an open tool call keeps the arm and the backstop off with no word from the agent
 /// (its updates count): a minute past Claude Bash's own 600 s timeout, so a command that times
 /// out at 10:00 ends with Claude's report of it, not `agent.quiet` a moment before.
-pub(in crate::actor::turn) const TOOL_LIMIT: Duration = Duration::from_secs(660);
+pub(in crate::actor::turn) const TOOL_LIMIT: Duration = Duration::from_mins(11);
 
 /// The backstop's detail (the event log, never shown).
 const LIMIT_DETAIL: &str =

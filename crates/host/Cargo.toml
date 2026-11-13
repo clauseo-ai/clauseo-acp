@@ -72,6 +72,9 @@ unicode-normalization = { workspace = true }
 # Elicitation values withheld from a turn's tool output, wiped when the turn lets them go
 # (actor/turn/withheld.rs).
 zeroize = { workspace = true }
+# A Codex config.toml the offline probe checks for a provider or base URL
+# (actor/turn/offline/probe/settings.rs; xtask's and desktop's version).
+toml = "1"
 
 # The Chrome for Testing download's free-space check (browser/install/system.rs): statvfs, safe.
 [target.'cfg(unix)'.dependencies]

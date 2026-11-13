@@ -110,12 +110,14 @@ pub(super) fn launch(
         .then(|| agent::plan_note::plans_folder(spec.env(), cfg!(windows)))
         .flatten();
     let fence_vars = agent::data_fence::launch_vars(spec.env());
-    // The service and route the offline probe asks, from the env the agent gets.
+    // The service and route the offline probe asks, from the env the agent gets, unless the
+    // agent's own settings files move them (read by the prep).
     let kind = AgentKind::of(&row.agent);
     // The unit tests' `fake-agent` has no kind; a test names the one it plays.
     #[cfg(test)]
     let kind = kind.or(actor.turn_path.kind_for_tests);
-    let probe = kind.map(|kind| Target::at_launch(kind, spec.env(), own));
+    let moved = prepared.moved;
+    let probe = kind.map(|kind| Target::at_launch(kind, spec.env(), own).unless_moved(moved));
     let post = actor.post.clone();
     let post: Rc<dyn Fn(agent::AgentInput)> = Rc::new(move |input| {
         // The actor may be gone by then.

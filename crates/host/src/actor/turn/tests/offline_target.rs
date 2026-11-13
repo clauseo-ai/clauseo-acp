@@ -8,6 +8,7 @@ use std::collections::BTreeMap;
 use std::ffi::OsString;
 use std::io::{Read as _, Write as _};
 use std::net::{TcpListener, TcpStream};
+use std::sync::atomic::AtomicUsize;
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 use std::time::Duration;
@@ -141,6 +142,16 @@ fn closed_port() -> u16 {
 /// A Claude rig whose launch gets `vars` from the hook, with `probe`; its first answer chunk
 /// handled, then 30 s of silence: the first quiet probe has answered.
 fn quiet_claude(test: &str, vars: &[(&str, String)], probe: ReachProbe) -> (Rig, ThreadId) {
+    quiet_claude_with(test, vars, probe, |_| {})
+}
+
+/// [`quiet_claude`], with `before` done to the rig before the launch.
+fn quiet_claude_with(
+    test: &str,
+    vars: &[(&str, String)],
+    probe: ReachProbe,
+    before: impl FnOnce(&Rig),
+) -> (Rig, ThreadId) {
     let lines = [
         PROMPT.to_owned(),
         chunk("Clause five says"),
@@ -150,6 +161,7 @@ fn quiet_claude(test: &str, vars: &[(&str, String)], probe: ReachProbe) -> (Rig,
     let hook = EnvHook::default();
     hook.set(vars);
     rig.actor.profile = Box::new(hook);
+    before(&rig);
     let _turn = prompting_held(&mut rig, thread);
     hold(&mut rig, 1);
     release_one(&mut rig);
@@ -276,9 +288,15 @@ fn the_route_is_resolved_once_per_launch() {
 /// reads `unknown_service` (reached), and the backstop still ends the silent turn at 5:00.
 fn a_cloud_login_is_never_probed_and_ends_quiet_at_five_minutes(test: &str, var: &str) {
     let (probe, count) = ReachProbe::fixed(false).counted();
-    let (mut rig, thread) = quiet_claude(test, &[(var, "1".to_owned())], probe);
+    let (rig, thread) = quiet_claude(test, &[(var, "1".to_owned())], probe);
+    never_probed_and_quiet_at_five_minutes(rig, thread, &count);
+}
+
+/// `thread`'s quiet turn, 30 s in, is not probed (`unknown_service`, reached) and the backstop
+/// ends it at 5:00, its answer kept.
+fn never_probed_and_quiet_at_five_minutes(mut rig: Rig, thread: ThreadId, count: &AtomicUsize) {
     let turn = live_turn(&rig, thread);
-    assert_eq!(probes(&count), 0);
+    assert_eq!(probes(count), 0);
     assert_eq!(class(&rig, thread), Some(ReachClass::UnknownService));
     assert!(going(&rig, thread) && watch(&rig, thread).is_some_and(Watch::reached));
     // 4:59, still going; 5:00, the backstop.
@@ -286,7 +304,7 @@ fn a_cloud_login_is_never_probed_and_ends_quiet_at_five_minutes(test: &str, var:
     wait(&mut rig, thread, Duration::from_secs(29));
     assert!(going(&rig, thread));
     wait(&mut rig, thread, Duration::from_secs(1));
-    assert_eq!(probes(&count), 0);
+    assert_eq!(probes(count), 0);
     finish_turn(&mut rig, thread);
     let log = rig.log(thread);
     assert_eq!(
@@ -295,6 +313,23 @@ fn a_cloud_login_is_never_probed_and_ends_quiet_at_five_minutes(test: &str, var:
     );
     assert_eq!(answer(&log, turn), "Clause five says");
     rig.finish();
+}
+
+/// The security re-check, round 2: the firm's `managed-settings.json` (beside
+/// `managed-mcp.json`, the rig's own folder) puts Claude Code on Bedrock through its `env`,
+/// which the launch env never shows: not probed, and the backstop still ends the silent turn.
+#[test]
+fn a_managed_settings_env_on_bedrock_is_never_probed_and_ends_quiet_at_five_minutes() {
+    let (probe, count) = ReachProbe::fixed(false).counted();
+    let (rig, thread) = quiet_claude_with("target-managed", &[], probe, |rig| {
+        let managed = rig
+            .actor
+            .managed_mcp
+            .with_file_name("managed-settings.json");
+        let settings = br#"{"env": {"CLAUDE_CODE_USE_BEDROCK": "1"}}"#;
+        crate::write::write_file(&managed, settings).unwrap();
+    });
+    never_probed_and_quiet_at_five_minutes(rig, thread, &count);
 }
 
 #[test]
