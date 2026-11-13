@@ -31,6 +31,14 @@ const added = (path: string, flagged = false): FileChange => ({
   may_include_lawyer_edits: flagged,
 });
 
+/** A file the step modified, flagged: a file that was there before, edited by the lawyer during the answer. */
+const modifiedFlagged = (path: string): FileChange => ({
+  path,
+  change: "modified",
+  size_bytes: 10,
+  may_include_lawyer_edits: true,
+});
+
 const changed = (files: FileChange[]): ViewEntry =>
   step(9, { files, checkpoint_after: uuid(1, 9) });
 
@@ -67,6 +75,24 @@ test("a flagged file with nothing changed since: the dialog asks, keeps it, and 
   expect(h.sent("undo_step")).toHaveLength(1);
   expect(h.sent("undo_step")[0]?.files).toEqual([
     { path: NOTE, choice: "keep" },
+    { path: "agent.txt", choice: "undo" },
+  ]);
+});
+
+test("a flagged modified file with nothing changed since: the dialog asks, keeps it, and Undo sends keep for it", async () => {
+  h = await mountRoom(previewUndoScript(nothingSince));
+  h.deliver([reset([changed([modifiedFlagged("Brief.docx"), added("agent.txt")])])]);
+  await preload();
+  await h.click(h.one("undo"));
+  await h.settle();
+  // nothing went out on the press: the dialog asks first
+  expect(h.sent("undo_step")).toEqual([]);
+  expect(document.body.textContent).toContain(vt("en", "1 document may hold your own edits."));
+  expect(choice("Keep current")?.getAttribute("aria-pressed")).toBe("true");
+  await h.click(confirm());
+  await h.settle();
+  expect(h.sent("undo_step")[0]?.files).toEqual([
+    { path: "Brief.docx", choice: "keep" },
     { path: "agent.txt", choice: "undo" },
   ]);
 });
