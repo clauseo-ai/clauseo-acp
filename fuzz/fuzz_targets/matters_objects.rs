@@ -37,7 +37,8 @@ use std::sync::{Arc, OnceLock};
 use std::time::{Duration, SystemTime};
 
 use clauseo_matters::{
-    Limits, Marker, Matter, NewMatter, OsProbe, Retention, Settings, TurnMeta, UndoRequest,
+    FolderTrash, Limits, Marker, Matter, NewMatter, OsProbe, Retention, Settings, TurnMeta,
+    UndoRequest,
 };
 use clauseo_protocol::{
     CheckpointId, FileChoice, FileDecision, MatterId, MatterPath, ThreadId, Timestamp, TurnId,
@@ -76,6 +77,8 @@ fn settings(root: &Path) -> Settings {
         limits: Limits::DEFAULT,
         retention: Retention::KeepAll,
         probe: Arc::new(OsProbe),
+        // A folder of the run's own: a fuzz run never touches the OS Trash.
+        trash: Arc::new(FolderTrash::new(root.join("trash"))),
     }
 }
 
