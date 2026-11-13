@@ -479,6 +479,9 @@ mod tools;
 #[path = "host/lawyer_file.rs"]
 mod lawyer_file;
 #[cfg(test)]
+#[path = "host/lawyer_file_log.rs"]
+mod lawyer_file_log;
+#[cfg(test)]
 #[path = "host/titles.rs"]
 mod titles;
 #[cfg(test)]
