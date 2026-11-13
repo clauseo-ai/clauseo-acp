@@ -11,7 +11,7 @@ use clauseo_protocol::{
 };
 use serde_json::json;
 
-use super::parse::{all_ids, batch, is_docx, revisions, timestamp};
+use super::parse::{all_chunks, batch, is_docx, revisions, timestamp};
 use super::stetdoc::{answer, env};
 
 fn code(result: Result<serde_json::Value, crate::error::Error>) -> ErrorCode {
@@ -85,10 +85,12 @@ fn a_long_list_is_cut_and_long_text_is_cut() {
     let (list, truncated, total) = revisions(&check, &view).unwrap();
     assert!(truncated);
     assert_eq!(usize::try_from(total).unwrap(), MAX_REVISIONS + 1);
-    // Accept all names every one, past the cut.
-    let ids = all_ids(&check).unwrap();
-    assert_eq!(ids.len(), MAX_REVISIONS + 1);
-    assert_eq!(ids.first(), Some(&0));
+    // Accept all names every one, past the cut, in chunks of at most the cut.
+    let chunks = all_chunks(&check, MAX_REVISIONS).unwrap();
+    let lens: Vec<usize> = chunks.iter().map(Vec::len).collect();
+    assert_eq!(lens, [MAX_REVISIONS, 1]);
+    assert_eq!(chunks[0].first(), Some(&0));
+    assert_eq!(chunks[1], [u32::try_from(MAX_REVISIONS).unwrap()]);
     assert_eq!(list.len(), MAX_REVISIONS);
     assert_eq!(list[0].author.chars().count(), MAX_REVISION_TEXT_CHARS);
     assert_eq!(
@@ -98,6 +100,29 @@ fn a_long_list_is_cut_and_long_text_is_cut() {
     // An answer of another shape is a failed edit.
     let bad = revisions(&json!({"existing": "no"}), &view).map(|_| json!(null));
     assert_eq!(code(bad), ErrorCode::WordEditFailed);
+}
+
+#[test]
+fn a_change_s_ids_stay_in_one_chunk_and_an_id_is_named_once() {
+    let check = json!({"existing": [
+        {"author": "A", "changes": [
+            {"block": "p1", "ids": [1], "kind": "insertion"},
+            {"block": "p2", "ids": [3, 2], "kind": "deletion"},
+            {"block": "p3", "ids": [4], "kind": "insertion"},
+        ]},
+        {"author": "B", "changes": [
+            {"block": "p4", "ids": [5, 4], "kind": "deletion"},
+        ]},
+    ]});
+    assert_eq!(
+        all_chunks(&check, 2).unwrap(),
+        [vec![1], vec![2, 3], vec![4, 5]]
+    );
+    assert_eq!(all_chunks(&check, 5).unwrap(), [vec![1, 2, 3, 4, 5]]);
+    assert_eq!(
+        all_chunks(&json!({"existing": []}), 5).unwrap(),
+        Vec::<Vec<u32>>::new()
+    );
 }
 
 #[test]
