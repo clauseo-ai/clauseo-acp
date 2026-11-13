@@ -103,6 +103,14 @@ pub(crate) fn answered_turn(
     (dir, host, thread, turn, folder, flags)
 }
 
+/// Dates `file` a minute before the turn's end (the test clock runs behind the real one), as
+/// the agent's own new file is.
+fn before_end(file: &Path) {
+    let at = std::time::UNIX_EPOCH
+        + std::time::Duration::from_millis(u64::try_from(START_MS - 60_000).unwrap());
+    write::set_mtime(file, at);
+}
+
 pub(crate) fn flag(path: &str, flagged: bool) -> (String, bool) {
     (path.to_owned(), flagged)
 }
@@ -243,11 +251,7 @@ fn stetdocs_own_writes_through_the_shell_are_unflagged() {
         |folder| {
             let edited = folder.join("Main Agreement.edited.docx");
             write::write(&edited, b"agreement, with tracked changes\n");
-            // The test clock runs behind the real one: dated before the turn's end, as the
-            // agent's own new file is.
-            let before_end = std::time::UNIX_EPOCH
-                + std::time::Duration::from_millis(u64::try_from(START_MS - 60_000).unwrap());
-            write::set_mtime(&edited, before_end);
+            before_end(&edited);
             write::write(&folder.join("Notes.docx"), b"final notes\n");
         },
     );
@@ -270,5 +274,36 @@ fn stetdocs_own_writes_through_the_shell_are_unflagged() {
         std::fs::read(folder.join("Notes.docx")).unwrap(),
         b"draft notes\n"
     );
+    host.shutdown();
+}
+
+/// stetdoc's writes with the matter spelled through a symlink (macOS's `/var` for
+/// `/private/var`, a matter under a linked cloud folder): the default output after
+/// `cd "<link>"` and an absolute `-o "<link>/Reply.docx"` are resolved into the matter, so
+/// neither is flagged.
+#[cfg(unix)]
+#[test]
+fn stetdocs_writes_through_a_symlinked_spelling_are_unflagged() {
+    let files = [("Main Agreement.docx", "agreement\n")];
+    let (_dir, host, thread, turn, _folder, flags) = run_turn(
+        "lawyer_file_stetdoc_link",
+        "undo-lawyer-file-stetdoc-link",
+        &files,
+        |folder| {
+            write::symlink(folder, &folder.parent().unwrap().join("m-link"));
+            for name in ["Main Agreement.edited.docx", "Reply.docx"] {
+                write::write(&folder.join(name), b"the agent's edit\n");
+                before_end(&folder.join(name));
+            }
+        },
+    );
+    assert_eq!(
+        flags,
+        [
+            flag("Main Agreement.edited.docx", false),
+            flag("Reply.docx", false)
+        ]
+    );
+    assert_eq!(edited_since(&host, thread, turn), Vec::<String>::new());
     host.shutdown();
 }

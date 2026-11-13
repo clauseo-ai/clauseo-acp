@@ -64,9 +64,11 @@ fn a_turn_s_end_and_its_undo_log_counts_and_no_path() {
     for name in ["host.2.log", "host.1.log", "host.log"] {
         log.push_str(&std::fs::read_to_string(locations.log_dir().join(name)).unwrap_or_default());
     }
+    // Only this test's lines: under a single-process `cargo test` the log is shared.
+    let own = format!("thread={thread}");
     let line = |message: &str| {
         log.lines()
-            .find(|line| line.contains(message))
+            .find(|line| line.contains(message) && line.contains(&own))
             .unwrap_or_else(|| panic!("no {message:?} line: {log}"))
             .to_owned()
     };
