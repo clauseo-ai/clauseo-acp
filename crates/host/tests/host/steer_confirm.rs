@@ -170,6 +170,37 @@ fn a_steer_is_found_past_a_large_tool_result_but_never_in_one() {
     host.shutdown();
 }
 
+/// A steer of 3 MiB, half the longest prompt text, writes a transcript line longer than that:
+/// the line is read whole and the steer is `Injected`.
+#[test]
+fn a_steer_of_megabytes_is_found_in_its_own_long_line() {
+    let test = "a_steer_of_megabytes_is_found_in_its_own_long_line";
+    let (dir, host, thread, mut events, folder) = claude(test, "claude-steer-confirmed-large");
+    let (first, _) = host.prompt(thread, "Summarise the clause.");
+    host.wait_armed(DURABLE);
+    let steer = format!("{STEER} {}", "and clause 5 ".repeat(3 * 1024 * 1024 / 13));
+    let (_, message) = send(&host, thread, text(&steer), DeliveryRequest::Steer);
+    until_first_request(&mut events);
+    let line = json!({"type": "user", "timestamp": "2999-01-01T00:00:00.000Z",
+        "message": {"role": "user", "content": [{"type": "text", "text": steer}]}});
+    append(&dir, &folder, &[line]);
+    host.wait_armed(EVERY);
+    host.clock.advance(EVERY);
+    events.until("SteerResolved { Injected }", |e| {
+        !outcomes(e, message).is_empty()
+    });
+    allow(&host, &mut events, thread);
+    assert_eq!(events.until_turn_ended(first).stop, StopReason::EndTurn);
+    settle(&host, &mut events);
+    assert_eq!(
+        outcomes(&events, message),
+        [SteerOutcome::Injected { turn: first }],
+        "{}",
+        events.dump()
+    );
+    host.shutdown();
+}
+
 #[test]
 fn an_accepted_steer_whose_turn_is_stopped_is_not_sent() {
     let (_dir, host, thread, mut events, _) = claude(
