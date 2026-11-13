@@ -345,7 +345,8 @@ impl Matter {
 
     /// The checkpoint after a turn. `tool_paths` are the paths the turn's agent tool calls
     /// wrote: the places they named for which [`crate::names_a_write`] holds (diff paths, and
-    /// the locations of edit, delete and move calls, never those of a read); a changed file
+    /// the locations of edit, delete and move calls that ended `Completed`, never those of a
+    /// read); a changed file
     /// outside them is flagged `may_include_lawyer_edits`. With no change, the `before-turn`
     /// checkpoint is reused.
     pub fn after_turn(

@@ -1,0 +1,10 @@
+{"scenario":"undo-lawyer-file-stop-edit","description":"The agent asks to edit memo.docx (an edit call with its location and diff, pending); while the ask waits the lawyer edits memo.docx in Word, then presses Stop. The edit never ran: memo.docx stays flagged","on_stdin_close":"exit"}
+{"expect":{"method":"initialize","as":"init","params":{"protocolVersion":1}}}
+{"respond":{"to":"init","result":{"protocolVersion":1,"agentCapabilities":{"loadSession":true},"authMethods":[],"agentInfo":{"name":"fake_agent","version":"0.0.0"}}}}
+{"expect":{"method":"session/new","as":"new","params":{"cwd":"{{any}}"}}}
+{"respond":{"to":"new","result":{"sessionId":"sess-1"}}}
+{"expect":{"method":"session/prompt","as":"p1","params":{"sessionId":"sess-1"}}}
+{"update":{"update":{"sessionUpdate":"tool_call","toolCallId":"t1-edit","name":"Edit","title":"Edit memo.docx","kind":"edit","status":"pending","locations":[{"path":"{{cwd}}/memo.docx"}],"content":[{"type":"diff","path":"{{cwd}}/memo.docx","oldText":"memo\n","newText":"the agent's memo\n"}]}}}
+{"note":"The test saves the lawyer's file while this ask waits.","request":{"id":"perm-1","method":"session/request_permission","params":{"sessionId":"sess-1","toolCall":{"toolCallId":"t1-edit","title":"Edit memo.docx","kind":"edit","status":"pending"},"options":[{"optionId":"allow-once","name":"Allow once","kind":"allow_once"},{"optionId":"reject-once","name":"Reject","kind":"reject_once"}]}}}
+{"all":[{"expect":{"method":"session/cancel","params":{"sessionId":"sess-1"}}},{"expect_response":{"id":"perm-1","result":{"outcome":{"outcome":"cancelled"}}}}]}
+{"respond":{"to":"p1","result":{"stopReason":"cancelled"}}}

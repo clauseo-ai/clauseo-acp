@@ -126,3 +126,35 @@ fn a_shell_write_clears_the_flag_of_a_new_or_modified_file() {
     assert!(!flagged("written-shell-old", true, &read, &["note.txt"]));
     assert!(flagged("written-shell-other", true, &read, &["other.txt"]));
 }
+
+/// Only a call that ended `Completed` wrote what it named: one still `Pending` or `InProgress`
+/// at the checkpoint (an ask open at a Stop, a call the host's close settles only afterwards), or
+/// one that ended `Cancelled` or `Failed`, wrote nothing, its locations and diffs alike.
+#[test]
+fn only_a_completed_call_writes() {
+    for kind in [
+        ToolKind::Edit,
+        ToolKind::Delete,
+        ToolKind::Move,
+        ToolKind::Other,
+    ] {
+        for in_diff in [false, true] {
+            for status in [
+                ToolCallStatus::Pending,
+                ToolCallStatus::InProgress,
+                ToolCallStatus::Cancelled,
+                ToolCallStatus::Failed,
+            ] {
+                assert!(
+                    !names_a_write(kind, status, in_diff),
+                    "{kind:?} {status:?} (diff: {in_diff})"
+                );
+            }
+        }
+        assert!(names_a_write(kind, DONE, true), "{kind:?}");
+        assert_eq!(names_a_write(kind, DONE, false), kind != ToolKind::Other);
+    }
+    // A stopped edit of a file the lawyer edited meanwhile leaves it flagged.
+    let stopped = (ToolKind::Edit, ToolCallStatus::Cancelled, true);
+    assert!(flagged("written-stopped-edit", true, &[stopped], &[]));
+}

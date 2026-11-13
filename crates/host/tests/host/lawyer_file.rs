@@ -20,7 +20,18 @@ const NOTE: &str = "Lawyer note.txt";
 
 /// What a test's turn ran: the host, the thread, the turn, the folder and each changed file's
 /// path and flag.
-type Ran = (Dir, Running, ThreadId, TurnId, PathBuf, Vec<(String, bool)>);
+pub(crate) type Ran = (Dir, Running, ThreadId, TurnId, PathBuf, Vec<(String, bool)>);
+
+/// How the test answers the turn's one permission request.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Answer {
+    /// Allow once; the turn ends `EndTurn`.
+    Allow,
+    /// Reject; the turn ends `EndTurn`.
+    Reject,
+    /// Stop the turn with the ask open; it ends `Cancelled`.
+    Stop,
+}
 
 /// A host whose fake agent ran `undo-lawyer-file-read`'s turn, `save` run on the folder while
 /// the agent's read waits for its permission.
@@ -30,12 +41,23 @@ fn turn_with(test: &str, save: impl FnOnce(&Path)) -> Ran {
 }
 
 /// A host whose fake agent ran `scenario`'s turn in a matter holding `files`, `save` run on the
-/// folder while the agent's one permission request waits.
+/// folder while the agent's one permission request waits, then allowed.
 fn run_turn(
     test: &str,
     scenario: &'static str,
     files: &[(&str, &str)],
     save: impl FnOnce(&Path),
+) -> Ran {
+    answered_turn(test, scenario, files, save, Answer::Allow)
+}
+
+/// [`run_turn`], the permission request answered by `answer`.
+pub(crate) fn answered_turn(
+    test: &str,
+    scenario: &'static str,
+    files: &[(&str, &str)],
+    save: impl FnOnce(&Path),
+    answer: Answer,
 ) -> Ran {
     let dir = Dir::new(test, &[(FAKE, Scenario::Local(scenario))]);
     let host = dir.start(0);
@@ -50,13 +72,21 @@ fn run_turn(
     });
     // The lawyer's save lands while the turn runs, between its two checkpoints.
     save(&folder);
-    host.ok(HostCommand::AnswerPermission {
-        thread,
-        request: events.permission_requests()[0],
-        option_id: AgentChoiceId::new("allow-once").unwrap(),
-    });
+    let (option, stop) = match answer {
+        Answer::Allow => (Some("allow-once"), StopReason::EndTurn),
+        Answer::Reject => (Some("reject-once"), StopReason::EndTurn),
+        Answer::Stop => (None, StopReason::Cancelled),
+    };
+    match option {
+        Some(option) => host.ok(HostCommand::AnswerPermission {
+            thread,
+            request: events.permission_requests()[0],
+            option_id: AgentChoiceId::new(option).unwrap(),
+        }),
+        None => host.ok(HostCommand::Cancel { thread }),
+    };
     let ended = events.until_turn_ended(turn);
-    assert_eq!(ended.stop, StopReason::EndTurn, "{}", events.dump());
+    assert_eq!(ended.stop, stop, "{}", events.dump());
     let changed = events
         .files_changed(turn)
         .unwrap_or_else(|| panic!("no FilesChanged: {}", events.dump()));
@@ -73,11 +103,11 @@ fn run_turn(
     (dir, host, thread, turn, folder, flags)
 }
 
-fn flag(path: &str, flagged: bool) -> (String, bool) {
+pub(crate) fn flag(path: &str, flagged: bool) -> (String, bool) {
     (path.to_owned(), flagged)
 }
 
-fn edited_since(host: &Running, thread: ThreadId, turn: TurnId) -> Vec<String> {
+pub(crate) fn edited_since(host: &Running, thread: ThreadId, turn: TurnId) -> Vec<String> {
     let answer = host
         .query(HostQuery::PreviewUndo { thread, turn })
         .unwrap_or_else(|error| panic!("PreviewUndo refused: {error}"));

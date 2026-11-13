@@ -7,9 +7,12 @@
 //! at the turn's end ([`TurnPaths::written`]): a place counts when
 //! [`clauseo_matters::names_a_write`] holds for it (a diff's path, an edit, delete or move
 //! call's location; never a read's, a search's or a shell call's location; nothing of a call
-//! that ended failed). A file the lawyer saves during a turn that reads it is so never taken for
-//! the agent's. A shell call's writes are read from its command ([`crate::shell_writes`]), in
-//! PowerShell's syntax when its tool is named `PowerShell`.
+//! that had not ended `Completed` by then). A file the lawyer saves during a turn that reads it
+//! is so never taken for the agent's. A shell call's writes are read from its command
+//! ([`crate::shell_writes`]), in PowerShell's syntax when its tool is named `PowerShell`, and
+//! kept with the call: they count only if it ends `Completed` ([`TurnPaths::shell_writes`]). The
+//! restart repair rebuilds these from the log's starts and updates through the same
+//! [`TurnPaths::note`], so it applies the same rule to the logged statuses.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -72,6 +75,9 @@ struct Call {
     located: Places,
     /// The places its diffs named.
     diffed: Places,
+    /// The files its shell command writes ([`crate::shell_writes`]), counted only once the call
+    /// ends `Completed` ([`TurnPaths::shell_writes`]).
+    writes: BTreeSet<String>,
 }
 
 /// The places a turn's tool calls named, kept until the turn's end.
@@ -79,9 +85,6 @@ struct Call {
 pub(crate) struct TurnPaths {
     /// Each tool call, by its key.
     calls: BTreeMap<String, Call>,
-    /// The files the turn's shell commands write ([`crate::shell_writes`]): paths relative to
-    /// the matter's folder, or absolute ones the matter thread places in it.
-    pub(crate) writes: BTreeSet<String>,
 }
 
 /// One tool call's start or update as [`TurnPaths::note`] reads it: its kind, status, places
@@ -165,7 +168,7 @@ impl TurnPaths {
             && let Some(TextOrBlob::Inline(input)) = fields.raw_input
         {
             let dialect = shell_writes::Dialect::of_tool(call.tool_name.as_deref());
-            shell_writes::add_input(&mut self.writes, input, dialect);
+            shell_writes::add_input(&mut call.writes, input, dialect);
         }
     }
 
@@ -186,6 +189,18 @@ impl TurnPaths {
         written
     }
 
+    /// The files the turn's completed shell commands wrote ([`crate::shell_writes`]): paths
+    /// relative to the matter's folder, or absolute ones the matter thread places in it. A
+    /// command that failed, was cancelled or denied, or had not ended by the checkpoint wrote
+    /// nothing: a file of that name the lawyer saved during the turn stays flagged.
+    pub(crate) fn shell_writes(&self) -> BTreeSet<String> {
+        self.calls
+            .values()
+            .filter(|call| call.status == Some(ToolCallStatus::Completed))
+            .flat_map(|call| call.writes.iter().cloned())
+            .collect()
+    }
+
     /// Paths as one completed edit call named them, for the (Unix-only) test of what reads them.
     #[cfg(all(test, unix))]
     pub(crate) fn edited(places: Places) -> Self {
@@ -197,7 +212,6 @@ impl TurnPaths {
         };
         Self {
             calls: [("edit".to_owned(), call)].into(),
-            ..Self::default()
         }
     }
 }
