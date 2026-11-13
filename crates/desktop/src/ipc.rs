@@ -10,7 +10,8 @@
 //! - `outcome`: `ok`, `error` or `dropped` (the body never finished).
 //!
 //! Never an argument, a path or an error's text. Only the first [`LINE_CAP`] calls of a run are
-//! logged, and one line says when the rest are not.
+//! logged, and one line says when the rest are not. `ack` calls ([`UNLOGGED`]) are never logged
+//! and never count toward the cap.
 
 use std::future::Future;
 use std::sync::Mutex;
@@ -28,6 +29,11 @@ pub(crate) const TARGET: &str = "clauseo_desktop::ipc::lifecycle";
 
 /// How many calls a run logs: a launch and its first clicks, never a flood.
 pub(crate) const LINE_CAP: u32 = 300;
+
+/// The command whose calls are neither logged nor counted toward [`LINE_CAP`]: the page's
+/// acknowledgement of each batch of events it read, many a second while an answer streams, which
+/// filled the cap within a minute on the release dry run.
+pub(crate) const UNLOGGED: &str = "ack";
 
 /// How many hand-overs wait for their body at most; past it the oldest is forgotten.
 const STAMPS_KEPT: usize = 64;
@@ -73,14 +79,15 @@ impl Ledger {
         }
     }
 
-    /// Tauri handed over a call of `command`; nothing once the cap is reached.
+    /// Tauri handed over a call of `command`; nothing once the cap is reached, or for an
+    /// [`UNLOGGED`] call.
     pub(crate) fn received(&self, command: &str) {
         self.received_at(command, crate::open::now());
     }
 
     /// [`Ledger::received`] at `at`.
     fn received_at(&self, command: &str, at: Instant) {
-        if self.logged.load(Ordering::Relaxed) >= self.cap {
+        if command == UNLOGGED || self.logged.load(Ordering::Relaxed) >= self.cap {
             return;
         }
         let mut stamps = crate::bridge::lock(&self.stamps);
@@ -109,8 +116,12 @@ impl Ledger {
         answer
     }
 
-    /// Logs `call`'s line, or the line that says the cap is reached, or nothing past it.
+    /// Logs `call`'s line, or the line that says the cap is reached, or nothing past it; nothing
+    /// for an [`UNLOGGED`] call, which leaves the count as it was.
     fn log(&self, call: &Call<'_>) {
+        if call.command == UNLOGGED {
+            return;
+        }
         let number = self.logged.fetch_add(1, Ordering::Relaxed);
         if number < self.cap {
             tracing::info!(

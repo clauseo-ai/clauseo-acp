@@ -2,7 +2,7 @@ use std::sync::{Arc, Mutex};
 
 use futures::channel::oneshot;
 
-use super::{Ledger, TARGET};
+use super::{Ledger, TARGET, UNLOGGED};
 use crate::bridge::lock;
 
 /// What a test's subscriber wrote.
@@ -57,7 +57,7 @@ fn each_call_logs_one_line_up_to_the_cap() {
             assert!(refused.is_err());
             for _ in 0..4 {
                 ledger
-                    .timed("ack", async { Ok::<_, ()>(()) })
+                    .timed("subscribe", async { Ok::<_, ()>(()) })
                     .await
                     .unwrap();
             }
@@ -77,7 +77,7 @@ fn each_call_logs_one_line_up_to_the_cap() {
     }
     assert!(lines[0].contains("command=\"query\"") && lines[0].contains("outcome=\"ok\""));
     assert!(lines[1].contains("command=\"dispatch\"") && lines[1].contains("outcome=\"error\""));
-    assert!(lines[2].contains("command=\"ack\""));
+    assert!(lines[2].contains("command=\"subscribe\""));
     assert!(
         lines[3].contains("past the cap") && lines[3].contains("cap=3"),
         "{}",
@@ -137,11 +137,53 @@ fn a_dropped_call_logs_dropped() {
             assert!(futures::poll!(never.as_mut()).is_pending());
             drop(never);
             ledger
-                .timed("ack", async { Ok::<_, ()>(()) })
+                .timed("subscribe", async { Ok::<_, ()>(()) })
                 .await
                 .unwrap();
         });
     });
     assert!(lines[0].contains("outcome=\"dropped\""), "{}", lines[0]);
     assert!(lines[1].contains("running=1"), "{}", lines[1]);
+}
+
+/// `ack` calls, which the page sends for each batch of events, are never logged and never
+/// count toward the cap, nor do their hand-overs take a stamp; the other calls log as before, up
+/// to the cap and its one line.
+#[test]
+fn ack_calls_neither_log_nor_count_toward_the_cap() {
+    assert_eq!(UNLOGGED, "ack");
+    let ledger = Ledger::new(2);
+    let lines = captured(|| {
+        futures::executor::block_on(async {
+            for _ in 0..50 {
+                ledger.received("ack");
+                ledger
+                    .timed("ack", async { Ok::<_, ()>(()) })
+                    .await
+                    .unwrap();
+            }
+            for _ in 0..3 {
+                ledger
+                    .timed("query", async { Ok::<_, ()>(()) })
+                    .await
+                    .unwrap();
+            }
+            ledger
+                .timed("ack", async { Ok::<_, ()>(()) })
+                .await
+                .unwrap();
+        });
+    });
+    assert!(lock(&ledger.stamps).is_empty(), "no stamp for an ack");
+    assert_eq!(lines.len(), 3, "{lines:#?}");
+    assert!(
+        lines.iter().all(|line| !line.contains("\"ack\"")),
+        "{lines:#?}"
+    );
+    assert!(lines[0].contains("command=\"query\"") && lines[1].contains("command=\"query\""));
+    assert!(
+        lines[2].contains("past the cap") && lines[2].contains("cap=2"),
+        "{}",
+        lines[2]
+    );
 }
