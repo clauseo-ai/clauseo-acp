@@ -289,6 +289,9 @@ mod long_paths;
 #[path = "host/matters.rs"]
 mod matters;
 #[cfg(test)]
+#[path = "host/max_prompt_reopen.rs"]
+mod max_prompt_reopen;
+#[cfg(test)]
 #[path = "host/mcp.rs"]
 mod mcp;
 #[cfg(test)]
