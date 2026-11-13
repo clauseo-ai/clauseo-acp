@@ -33,6 +33,7 @@ use crate::event::FrameDirection;
 use crate::state::Shared;
 
 mod envelope;
+mod oversize;
 #[cfg(test)]
 mod tests;
 
@@ -230,20 +231,32 @@ impl<R> Drop for Watched<R> {
     }
 }
 
-/// Why [`LineSplitter::next_line`] stopped.
+/// Why [`LineSplitter::next_line`] gave no line.
 #[derive(Debug)]
 pub(crate) enum SplitError {
-    /// A line grew past [`MAX_LINE_BYTES`].
+    /// A line grew past [`MAX_LINE_BYTES`] and its start does not show a `session/update`
+    /// notification: the stream cannot go on.
     TooLong,
+    /// A `session/update` notification of `bytes` bytes, newline excluded, grew past
+    /// [`MAX_LINE_BYTES`] and was dropped up to its newline (or the end of the stream). Not
+    /// fatal: the next call reads the line after it.
+    Skipped { bytes: usize },
     /// Reading the pipe failed.
     Io(io::Error),
 }
 
 /// Splits a byte stream into lines with `memchr` over the read buffer.
+///
+/// It holds at most [`MAX_LINE_BYTES`] plus one read buffer of a line. A line over the cap is
+/// fatal ([`SplitError::TooLong`]) unless what it holds shows a `session/update` notification
+/// (`oversize.rs`); then that start is let go and the rest of the line is read and dropped up
+/// to its newline, buffer by buffer, keeping only a count ([`SplitError::Skipped`]).
 pub(crate) struct LineSplitter<R> {
     reader: BufReader<R>,
     /// The start of a line that did not end in the bytes read so far.
     partial: Vec<u8>,
+    /// The bytes of the oversize `session/update` being dropped, so far.
+    dropping: Option<usize>,
 }
 
 impl<R: AsyncRead + Unpin> LineSplitter<R> {
@@ -251,6 +264,7 @@ impl<R: AsyncRead + Unpin> LineSplitter<R> {
         Self {
             reader: BufReader::with_capacity(READ_BUFFER_BYTES, reader),
             partial: Vec::new(),
+            dropping: None,
         }
     }
 
@@ -263,6 +277,24 @@ impl<R: AsyncRead + Unpin> LineSplitter<R> {
                 Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
                 Err(error) => return Err(SplitError::Io(error)),
             };
+            if let Some(dropped) = self.dropping {
+                // The rest of an oversize `session/update`: counted, never kept.
+                let (read, done) = match memchr::memchr(b'\n', buffer) {
+                    Some(end) => (end + 1, Some(dropped + end)),
+                    // The stream ended inside the line.
+                    None if buffer.is_empty() => (0, Some(dropped)),
+                    None => (buffer.len(), None),
+                };
+                self.reader.consume_unpin(read);
+                match done {
+                    Some(bytes) => {
+                        self.dropping = None;
+                        return Err(SplitError::Skipped { bytes });
+                    }
+                    None => self.dropping = Some(dropped + read),
+                }
+                continue;
+            }
             if buffer.is_empty() {
                 return Ok((!self.partial.is_empty()).then(|| std::mem::take(&mut self.partial)));
             }
@@ -271,13 +303,18 @@ impl<R: AsyncRead + Unpin> LineSplitter<R> {
                 let line = if self.partial.is_empty() {
                     // The common case: the whole line is in the buffer. One exact allocation.
                     if head.len() > MAX_LINE_BYTES {
-                        return Err(SplitError::TooLong);
+                        let skip = Self::skippable(head, head.len());
+                        self.reader.consume_unpin(end + 1);
+                        return Err(skip);
                     }
                     head.to_vec()
                 } else {
                     self.partial.extend_from_slice(head);
                     if self.partial.len() > MAX_LINE_BYTES {
-                        return Err(SplitError::TooLong);
+                        let skip = Self::skippable(&self.partial, self.partial.len());
+                        self.partial = Vec::new();
+                        self.reader.consume_unpin(end + 1);
+                        return Err(skip);
                     }
                     std::mem::take(&mut self.partial)
                 };
@@ -288,9 +325,31 @@ impl<R: AsyncRead + Unpin> LineSplitter<R> {
             self.partial.extend_from_slice(buffer);
             self.reader.consume_unpin(read);
             if self.partial.len() > MAX_LINE_BYTES {
-                return Err(SplitError::TooLong);
+                if !oversize::is_update_notification(&self.partial) {
+                    return Err(SplitError::TooLong);
+                }
+                // Let the start go and drop the rest up to the newline.
+                self.dropping = Some(self.partial.len());
+                self.partial = Vec::new();
             }
         }
+    }
+
+    /// What a line over the cap of `bytes` bytes so far, starting with `head`, gives:
+    /// [`SplitError::Skipped`] when `head` shows a `session/update` notification, else
+    /// [`SplitError::TooLong`].
+    fn skippable(head: &[u8], bytes: usize) -> SplitError {
+        if oversize::is_update_notification(head) {
+            SplitError::Skipped { bytes }
+        } else {
+            SplitError::TooLong
+        }
+    }
+
+    /// The bytes allocated for the line the splitter holds, for tests of its memory.
+    #[cfg(test)]
+    fn held(&self) -> usize {
+        self.partial.capacity()
     }
 }
 
@@ -298,9 +357,12 @@ impl<R: AsyncRead + Unpin> LineSplitter<R> {
 /// message that the SDK's decode reads the same way passes as it is ([`Envelope::is_message`]).
 /// Blank lines are skipped; any other line, an agent's line naming [`MALFORMED_LINE_METHOD`]
 /// included, becomes a [`MALFORMED_LINE_METHOD`] notification, which the inbound handler turns
-/// into a [`ProtocolWarning::MalformedLine`](crate::ProtocolWarning::MalformedLine). A line
-/// over 8 MiB ends the stream with an error, which closes the connection (the driver reports
-/// `Error::Protocol`). Before each line it waits for the [`Gate`].
+/// into a [`ProtocolWarning::MalformedLine`](crate::ProtocolWarning::MalformedLine). A
+/// `session/update` notification over 8 MiB is dropped with one WARN line (its size and method,
+/// never its content) and the stream goes on: the update is lost, the connection is not. Any
+/// other line over 8 MiB ends the stream with an error, which closes the connection (the driver
+/// reports `Error::Protocol`): a response or a request dropped would leave its other side
+/// waiting forever. Before each line it waits for the [`Gate`].
 pub(crate) fn incoming<R>(
     reader: R,
     shared: Arc<Shared>,
@@ -320,6 +382,15 @@ where
             let bytes = match splitter.next_line().await {
                 Ok(Some(bytes)) => bytes,
                 Ok(None) => return None,
+                Err(SplitError::Skipped { bytes }) => {
+                    tracing::warn!(
+                        method = oversize::UPDATE_METHOD,
+                        bytes,
+                        max = MAX_LINE_BYTES,
+                        "skipped a message from the agent over the line cap"
+                    );
+                    continue;
+                }
                 Err(SplitError::TooLong) => {
                     shared.set_fatal(crate::Error::Protocol(format!(
                         "the agent sent a line over {MAX_LINE_BYTES} bytes"
