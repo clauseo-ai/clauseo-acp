@@ -1,0 +1,14 @@
+{"scenario":"undo-lawyer-file-stetdoc","description":"Clauseo's own Word writer run through the agent's shell, as Claude Code runs it: a Bash call `cd \"<matter>\" && stetdoc edit \"Main Agreement.docx\" --ops ops.json` (its default output Main Agreement.edited.docx beside the document) and a PowerShell call (claude-agent-acp 0.89.1: kind execute, name PowerShell, rawInput {command}) `stetdoc replace \"Notes.docx\" draft final --in-place`. No location names either file. While the client holds the Bash call's ask, the test writes what the two commands write; the host reads the writes from the commands, so neither change is flagged","on_stdin_close":"exit"}
+{"expect":{"method":"initialize","as":"init","params":{"protocolVersion":1}}}
+{"respond":{"to":"init","result":{"protocolVersion":1,"agentCapabilities":{"loadSession":true},"authMethods":[],"agentInfo":{"name":"fake_agent","version":"0.0.0"}}}}
+{"expect":{"method":"session/new","as":"new","params":{"cwd":"{{any}}"}}}
+{"respond":{"to":"new","result":{"sessionId":"sess-1"}}}
+{"expect":{"method":"session/prompt","as":"p1","params":{"sessionId":"sess-1"}}}
+{"update":{"update":{"sessionUpdate":"tool_call","toolCallId":"t1-bash","name":"Bash","title":"stetdoc edit","kind":"execute","status":"pending","rawInput":{"command":"cd \"{{cwd}}\" && stetdoc edit \"Main Agreement.docx\" --ops ops.json","description":"Track the agreement's edits"}}}}
+{"update":{"update":{"sessionUpdate":"tool_call","toolCallId":"t2-powershell","name":"PowerShell","title":"stetdoc replace","kind":"execute","status":"pending","rawInput":{"command":"stetdoc replace \"Notes.docx\" draft final --in-place","description":"Mark the notes final"}}}}
+{"note":"The test writes both commands' files while this ask waits, then allows it.","request":{"id":"perm-1","method":"session/request_permission","params":{"sessionId":"sess-1","toolCall":{"toolCallId":"t1-bash","title":"stetdoc edit","kind":"execute","status":"pending"},"options":[{"optionId":"allow-once","name":"Allow once","kind":"allow_once"},{"optionId":"reject-once","name":"Reject","kind":"reject_once"}]}}}
+{"expect_response":{"id":"perm-1","result":{"outcome":{"outcome":"selected","optionId":"allow-once"}}}}
+{"update":{"update":{"sessionUpdate":"tool_call_update","toolCallId":"t1-bash","status":"completed"}}}
+{"update":{"update":{"sessionUpdate":"tool_call_update","toolCallId":"t2-powershell","status":"completed"}}}
+{"update":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-answer-1","content":{"type":"text","text":"Both documents are tracked."}}}}
+{"respond":{"to":"p1","result":{"stopReason":"end_turn"}}}

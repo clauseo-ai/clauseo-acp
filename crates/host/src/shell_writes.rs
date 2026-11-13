@@ -1,23 +1,33 @@
 //! The files a turn's shell commands write, for the after-turn checkpoint to tell a file the
-//! agent made through a shell (pandoc's `-o "Reply.docx"`, `echo x > notes.md`, `cp a b`) from
-//! one the lawyer saved meanwhile: a new file is the agent's own only when a tool call names it
-//! or such a command writes it (`clauseo_matters::Matter::after_turn_named`).
+//! agent made or changed through a shell (pandoc's `-o "Reply.docx"`, `echo x > notes.md`,
+//! `cp a b`, `stetdoc edit "Main Agreement.docx"`) from one the lawyer saved meanwhile: a
+//! change is the agent's own only when a tool call names it or such a command writes it
+//! (`clauseo_matters::Matter::after_turn_named`), whether it adds the file or modifies it.
 //!
 //! Only the command text in a shell call's input is read, never its output: a listing or a
 //! `grep` names files it does not write. Only write targets count: `>` and `>>` redirects,
-//! `-o` and `--output` values, `tee`'s files, and the last argument of `cp` (a `mv` only moves
-//! a file, so it writes none). The command is split as a shell does (quotes kept together) into
-//! segments at `;`, `&&`, `||`, `|` and new lines, and a heredoc's body is no command at all;
-//! a leading `cd <dir>` segment sets the folder later ones run in. Each target is joined to that
-//! folder (the call's `cwd` when its input says, else the matter's folder) and normalised, so it
-//! compares with a file's whole path in the matter. Anything unclear (an expansion, a glob, a
-//! later `cd`, `pushd` or `popd`, a target ending in `/`) writes nothing. Kept in memory for
-//! the turn only, never logged.
+//! `-o` and `--output` values, `tee`'s files, the last argument of `cp` (a `mv` only moves
+//! a file, so it writes none), and what a `stetdoc` command writes, read with its real options
+//! by the parser the pre-write guard shares (`crate::stetdoc_args::written`): its output, else
+//! with `--in-place` the document, else `NAME.edited.docx` beside it; nothing for `--dry-run`,
+//! `view` and the other reading subcommands. The command is split as a shell does (quotes kept
+//! together) into segments at `;`, `&&`, `||`, `|` and new lines, and a heredoc's body is no
+//! command at all; a leading `cd <dir>` segment sets the folder later ones run in. Claude Code's
+//! `PowerShell` tool (an `execute` call named so) is split as PowerShell does ([`powershell`]:
+//! its quotes, `\` a separator, `Set-Location`, `sl` and `chdir` as `cd`). Each target is
+//! joined to that folder (the call's `cwd` when its input says, else the matter's folder) and
+//! normalised, so it compares with a file's whole path in the matter. Anything unclear (an
+//! expansion, a glob, a later `cd`, `pushd` or `popd`, a target ending in `/`) writes
+//! nothing. Kept in memory for the turn only, never logged.
 
 use std::collections::BTreeSet;
 use std::iter::Peekable;
 use std::path::Path;
 use std::str::Chars;
+
+use crate::stetdoc_args;
+
+mod powershell;
 
 /// The most targets one turn keeps.
 const MAX_TARGETS: usize = 1024;
@@ -27,10 +37,32 @@ const NOT_OUTPUT: [&str; 11] = [
     "grep", "egrep", "fgrep", "rg", "ls", "ps", "find", "test", "[", "ssh", "unzip",
 ];
 
+/// The shell a call's command is written for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Dialect {
+    /// A POSIX shell: Claude's and Codex's `Bash`, Git Bash on Windows.
+    Posix,
+    /// Claude Code's `PowerShell` tool on Windows (claude-agent-acp 0.89.1 sends it as an
+    /// `execute` call named `PowerShell`, its input `{"command": …}`): [`powershell`].
+    PowerShell,
+}
+
+impl Dialect {
+    /// The dialect of a shell call whose tool is named `tool_name` (ACP's `name`).
+    pub(crate) fn of_tool(tool_name: Option<&str>) -> Self {
+        if tool_name.is_some_and(|name| name.eq_ignore_ascii_case("PowerShell")) {
+            Self::PowerShell
+        } else {
+            Self::Posix
+        }
+    }
+}
+
 /// Adds the targets of the command in a shell call's input (its JSON text): a `command` string,
 /// or an argument list (`["bash", "-lc", "<script>"]`, or the program's own arguments), run in
-/// its `cwd` or `workdir` when the input gives one. Input that is not JSON adds nothing.
-pub(crate) fn add_input(targets: &mut BTreeSet<String>, raw_input: &str) {
+/// its `cwd` or `workdir` when the input gives one. A `command` string is read in `dialect`.
+/// Input that is not JSON adds nothing.
+pub(crate) fn add_input(targets: &mut BTreeSet<String>, raw_input: &str, dialect: Dialect) {
     let Ok(serde_json::Value::Object(input)) = serde_json::from_str(raw_input) else {
         return;
     };
@@ -39,7 +71,7 @@ pub(crate) fn add_input(targets: &mut BTreeSet<String>, raw_input: &str) {
         .find_map(|key| input.get(*key).and_then(serde_json::Value::as_str))
         .unwrap_or("");
     match input.get("command") {
-        Some(serde_json::Value::String(script)) => add_script(targets, cwd, script),
+        Some(serde_json::Value::String(script)) => add_script(targets, cwd, script, dialect),
         Some(serde_json::Value::Array(items)) => {
             let Some(argv) = items
                 .iter()
@@ -53,7 +85,7 @@ pub(crate) fn add_input(targets: &mut BTreeSet<String>, raw_input: &str) {
                     if ["-c", "-lc", "-ic"].contains(&flag.as_str())
                         && ["sh", "bash", "zsh", "dash"].contains(&base(shell)) =>
                 {
-                    add_script(targets, cwd, script);
+                    add_script(targets, cwd, script, Dialect::Posix);
                 }
                 _ => {
                     let words = argv.into_iter().map(Word::plain).collect();
@@ -72,17 +104,36 @@ pub(crate) fn add_input(targets: &mut BTreeSet<String>, raw_input: &str) {
     }
 }
 
-/// Adds the targets of the shell script `script`, run in `cwd` (`""`: the matter's folder).
-pub(crate) fn add_script(targets: &mut BTreeSet<String>, cwd: &str, script: &str) {
+/// Adds the targets of the shell script `script`, written in `dialect` and run in `cwd` (`""`:
+/// the matter's folder).
+pub(crate) fn add_script(
+    targets: &mut BTreeSet<String>,
+    cwd: &str,
+    script: &str,
+    dialect: Dialect,
+) {
     let mut cwd = cwd.to_owned();
     let mut leading = true;
-    for segment in segments(script) {
+    let segments = match dialect {
+        Dialect::Posix => segments(script),
+        Dialect::PowerShell => powershell::segments(script),
+    };
+    for segment in segments {
         let first = segment.words.first().map(|word| word.text.as_str());
-        if let Some(first @ ("cd" | "pushd" | "popd")) = first {
+        if let Some(change) = first.and_then(|first| folder_change(first, dialect)) {
             // A leading `cd` sets the folder of what follows; any other folder change (a later
             // `cd`, a `pushd` or a `popd`) leaves the folder unknown.
-            match (first, leading, segment.words.as_slice()) {
-                ("cd", true, [_, dir]) if dir.clear && segment.redirects.is_empty() => {
+            let words = match (dialect, segment.words.as_slice()) {
+                (Dialect::PowerShell, [first, flag, rest @ ..])
+                    if ["-path", "-literalpath"]
+                        .contains(&flag.text.to_ascii_lowercase().as_str()) =>
+                {
+                    std::iter::once(first).chain(rest).collect::<Vec<_>>()
+                }
+                (_, words) => words.iter().collect(),
+            };
+            match (change, leading, words.as_slice()) {
+                (Change::Cd, true, [_, dir]) if dir.clear && segment.redirects.is_empty() => {
                     let Some(joined) = join(&cwd, &dir.text) else {
                         return;
                     };
@@ -94,6 +145,31 @@ pub(crate) fn add_script(targets: &mut BTreeSet<String>, cwd: &str, script: &str
         }
         leading = false;
         add_segment(targets, &cwd, &segment);
+    }
+}
+
+/// A command that changes the folder.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Change {
+    /// `cd` (PowerShell's `Set-Location`, `sl` and `chdir` too).
+    Cd,
+    /// `pushd` or `popd` (PowerShell's `Push-Location` and `Pop-Location` too).
+    Stack,
+}
+
+/// Whether the program word `first` changes the folder, in `dialect` (PowerShell's names in
+/// any case).
+fn folder_change(first: &str, dialect: Dialect) -> Option<Change> {
+    let name = match dialect {
+        Dialect::Posix => first.to_owned(),
+        Dialect::PowerShell => first.to_ascii_lowercase(),
+    };
+    match (dialect, name.as_str()) {
+        (_, "cd") | (Dialect::PowerShell, "chdir" | "sl" | "set-location") => Some(Change::Cd),
+        (_, "pushd" | "popd") | (Dialect::PowerShell, "push-location" | "pop-location") => {
+            Some(Change::Stack)
+        }
+        _ => None,
     }
 }
 
@@ -141,7 +217,19 @@ fn add_segment(targets: &mut BTreeSet<String>, cwd: &str, segment: &Segment) {
         })
         .unwrap_or(words.len());
     let argv = words.get(start..).unwrap_or_default();
-    if let Some((program, args)) = argv.split_first() {
+    if let Some((program, args)) = argv.split_first()
+        && is_stetdoc(&program.text)
+    {
+        // stetdoc's own forms (`crate::stetdoc_args`): its default output and `--in-place`
+        // write files no option names, and `--dry-run` writes none. A word that is not plain
+        // text leaves what it writes unknown.
+        if program.clear && args.iter().all(|arg| arg.clear) {
+            let words: Vec<String> = args.iter().map(|arg| arg.text.clone()).collect();
+            for target in stetdoc_args::written(&words) {
+                add(targets, cwd, &target);
+            }
+        }
+    } else if let Some((program, args)) = argv.split_first() {
         let program = base(&program.text);
         if !NOT_OUTPUT.contains(&program) {
             for (i, arg) in args.iter().enumerate() {
@@ -242,6 +330,12 @@ fn drive_of(path: &str) -> Option<(char, &str)> {
 
 fn is_absolute(path: &str) -> bool {
     path.starts_with(['/', '\\']) || drive_of(path).is_some()
+}
+
+/// Whether `program` is stetdoc: its name without its folder, in any case, `.exe` or not.
+fn is_stetdoc(program: &str) -> bool {
+    let name = base(program).to_ascii_lowercase();
+    name.strip_suffix(".exe").unwrap_or(&name) == "stetdoc"
 }
 
 /// The program's name without its folder.
