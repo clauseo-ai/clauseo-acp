@@ -247,7 +247,7 @@ test("a Codex turn failed with agent.quiet: ChatGPT's line and Try again, no Res
   await h.settle();
   const row = h.one("turn-stopped");
   expect(row?.dataset["failure"]).toBe("agent.quiet");
-  expect(row?.textContent).toBe("ChatGPT stopped answering. The answer so far is kept. Try again.");
+  expect(row?.textContent).toBe("ChatGPT stopped answering. Try again.");
   expect(h.one("answer-try-again")).not.toBeNull();
   expect(h.one("restart")).toBeNull();
   expect(h.one("agent-stopped")).toBeNull();
@@ -371,7 +371,7 @@ test.each([
   ["agent.auth_required", "Sign in with ChatGPT in Codex first. Your question is kept."],
   ["agent.protocol_error", "ChatGPT sent something Clauseo can't read."],
   ["agent.service_error", "ChatGPT had a problem on its side. Try again."],
-  ["agent.quiet", "ChatGPT stopped answering. The answer so far is kept. Try again."],
+  ["agent.quiet", "ChatGPT stopped answering. Try again."],
 ] as const)("a Codex thread's %s names ChatGPT on the step's row", async (code, said) => {
   const agent = "codex-acp";
   h = await asked({ threads: [{ ...summary(), agent }], next: H10 }, agent);

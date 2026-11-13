@@ -218,19 +218,19 @@ export const U6F: Entry[] = [
   },
   {
     id: "U6F-22",
-    words: errorWords("ChatGPT stopped answering. The answer so far is kept. Try again."),
+    words: errorWords("ChatGPT stopped answering. Try again."),
     screen: "room/thread",
     render: quietStopped("codex-acp"),
   },
   {
     id: "U6F-23",
-    words: errorWords("{name} stopped answering. The answer so far is kept. Try again."),
+    words: errorWords("{name} stopped answering. Try again."),
     screen: "room/thread",
     render: quietStopped("gemini"),
   },
   {
     id: "U6F-24",
-    words: errorWords("The AI stopped answering. The answer so far is kept. Try again."),
+    words: errorWords("The AI stopped answering. Try again."),
     screen: "room/thread",
     render: nameless("agent.quiet"),
   },

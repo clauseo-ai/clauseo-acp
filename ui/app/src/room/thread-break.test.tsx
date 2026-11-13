@@ -174,10 +174,10 @@ test("agent.quiet (D-050's backstop): no Restart, no time mark, no working line,
   expect(stoppedLine("en", b, 0, null)).toBeNull();
   expect(stoppedLine("en", b, 0, { onRestart: () => {}, refused: null })).toBeNull();
   expect(errorWords("en", "agent.quiet", { kind: "codex", name: "codex-acp" })).toBe(
-    "ChatGPT stopped answering. The answer so far is kept. Try again.",
+    "ChatGPT stopped answering. Try again.",
   );
   expect(errorWords("en", "agent.quiet", { kind: undefined, name: null })).toBe(
-    "The AI stopped answering. The answer so far is kept. Try again.",
+    "The AI stopped answering. Try again.",
   );
 });
 
