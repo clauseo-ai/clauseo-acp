@@ -3861,7 +3861,7 @@ export type McpImportSource =
 "claude_desktop" | 
 /**  Claude Code: its user-wide servers and each project's, as one source. */
 "claude_code" | 
-/**  Codex's `config.toml` (the screen names it `ChatGPT`). */
+/**  Codex's `config.toml` (the screen names it `Codex`: the app that holds the settings). */
 "codex";
 
 /**  One app with servers to import, and how many would import. */

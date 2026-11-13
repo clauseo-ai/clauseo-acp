@@ -92,7 +92,7 @@ pub enum McpImportSource {
     ClaudeDesktop,
     /// Claude Code: its user-wide servers and each project's, as one source.
     ClaudeCode,
-    /// Codex's `config.toml` (the screen names it `ChatGPT`).
+    /// Codex's `config.toml` (the screen names it `Codex`: the app that holds the settings).
     Codex,
 }
 
