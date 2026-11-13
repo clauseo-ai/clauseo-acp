@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
-use clauseo_host::{Host, HostConfig, ManualClock, SequentialIds};
+use clauseo_host::{Host, HostConfig, ManualClock, SequentialIds, WithMatterTrash as _};
 use clauseo_process::{Launcher, PassthroughLauncher, SpawnOptions};
 use clauseo_protocol::{ErrorCode, Timestamp};
 use clauseo_settings::{Effective, FilePolicy, Locations, SystemFiles};
@@ -167,6 +167,13 @@ impl Dir {
             // And every confirm before a server is added or changed is allowed; the confirm's
             // tests set their own.
             .with_mcp_confirm(Arc::new(AllowAll))
+            // Undo's and restore's deletes go to the test's own trash, never the machine's.
+            .with_matter_trash(self.trash())
+    }
+
+    /// The folder undo's and restore's deletes go into (`with_matter_trash`).
+    pub(crate) fn trash(&self) -> PathBuf {
+        self.root.join("trash")
     }
 
     /// The clock of run `run`.

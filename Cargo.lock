@@ -1173,12 +1173,14 @@ dependencies = [
  "dunce",
  "gix",
  "nix",
+ "objc2-foundation",
  "serde",
  "serde_json",
  "thiserror 2.0.21",
  "tracing",
  "unicode-normalization",
  "windows",
+ "windows-core",
 ]
 
 [[package]]

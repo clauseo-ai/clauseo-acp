@@ -39,8 +39,20 @@ clauseo-process = { path = "../process" }
 
 # `SetFileAttributesW`, to hide `.clauseo` (write/windows.rs), and `GetVolumePathNameW` with
 # `GetDriveTypeW` for a network drive (place/windows.rs); the workspace's one `windows` line.
+# `Win32_UI_Shell` and `Win32_System_Com`: the Recycle Bin through `IFileOperation`
+# (trash/windows.rs), whose progress sink `windows-core`'s `implement` builds.
 [target.'cfg(windows)'.dependencies]
-windows = { workspace = true, features = ["Win32_Storage_FileSystem"] }
+windows = { workspace = true, features = [
+  "Win32_Storage_FileSystem",
+  "Win32_System_Com",
+  "Win32_UI_Shell",
+] }
+windows-core = { workspace = true }
+
+# The Trash through `NSFileManager`'s `trashItemAtURL` (trash/macos.rs), never Finder.
+[target.'cfg(target_os = "macos")'.dependencies.objc2-foundation]
+workspace = true
+features = ["std", "NSError", "NSFileManager", "NSString", "NSURL"]
 
 [dev-dependencies]
 # Itself with test-support, so its tests reach `test_support` with no flag.

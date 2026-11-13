@@ -43,6 +43,7 @@ impl Setup {
             limits: Limits::DEFAULT,
             retention: Retention::KeepAll,
             probe: Arc::new(OsProbe),
+            trash: Arc::new(crate::FolderTrash::new(dir.path().join("trash"))),
         };
         let git_dir = root.join("m").join("history.git");
         let core = Core::load(GixStore::create(&git_dir, &folder).unwrap()).unwrap();

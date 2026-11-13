@@ -13,6 +13,7 @@ use clauseo_protocol::MatterPath;
 use crate::checkpoint::Core;
 use crate::history::{HistoryStore, Oid};
 use crate::stat::Stat;
+use crate::trash::{Removals, Removing, Trash};
 use crate::types::Settings;
 use crate::walk::{self, FoundKind};
 use crate::{Error, fsync, locks, write};
@@ -225,7 +226,8 @@ pub(crate) fn writable(
 ///    just wrote, and checked again for a file spelled otherwise ([`respelled`]): one that
 ///    changed or appeared since fails with `matter.file_locked`, the temp files are removed,
 ///    and so are the folders step 1 made;
-/// 3. the deletions are made;
+/// 3. the deletions are made: each file into `trash`, or deleted for good when the trash cannot
+///    take it and the history holds it ([`Removing`]);
 /// 4. the temp files are renamed over their targets, then each folder that got one is synced
 ///    once (one sync per folder, not per file).
 ///
@@ -250,8 +252,22 @@ pub(crate) fn writable(
 /// Returns the paths of the deletions made (or found gone already), in `ops`' order: what the
 /// caller's next walk should find missing. A sync client may put one back at once (undo's
 /// `resurrected`).
-pub(crate) fn apply(core: &Core, folder: &Path, ops: &[&Op]) -> Result<Vec<MatterPath>, Error> {
-    apply_or_partial(core, folder, ops).map_err(|failed| failed.error)
+pub(crate) fn apply(
+    core: &Core,
+    folder: &Path,
+    trash: &dyn Trash,
+    ops: &[&Op],
+) -> Result<Deleted, Error> {
+    apply_or_partial(core, folder, trash, ops).map_err(|failed| failed.error)
+}
+
+/// What [`apply`] deleted.
+#[derive(Debug)]
+pub(crate) struct Deleted {
+    /// The paths, in `ops`' order, those found gone already included.
+    pub(crate) paths: Vec<MatterPath>,
+    /// How many went to the trash and how many were deleted for good.
+    pub(crate) removals: Removals,
 }
 
 /// Why [`apply_or_partial`] failed, and whether the folder had changed by then.
@@ -267,8 +283,9 @@ pub(crate) struct Failed {
 pub(crate) fn apply_or_partial(
     core: &Core,
     folder: &Path,
+    trash: &dyn Trash,
     ops: &[&Op],
-) -> Result<Vec<MatterPath>, Failed> {
+) -> Result<Deleted, Failed> {
     let unchanged = |error| Failed {
         error,
         changed: false,
@@ -291,12 +308,14 @@ pub(crate) fn apply_or_partial(
         }
     };
     let mut deleted = Vec::new();
+    let mut removing = Removing::new(trash);
     // A delete or a rename made: a failure from here on leaves the folder changed.
     let mut any_change = false;
     for op in ops {
         if let Op::Delete(path) = op {
+            // The path `moved_since` just checked, and nothing else.
             let abs = folder.join(path.as_str());
-            match write::remove_file(&abs) {
+            match removing.remove(core, &abs, path) {
                 Ok(()) => {
                     any_change = true;
                     deleted.push(path.clone());
@@ -351,7 +370,10 @@ pub(crate) fn apply_or_partial(
     // `F_FULLFSYNC` is on the matters root, which may be another drive. A share or an exFAT
     // drive without `F_FULLFSYNC` keeps the folder syncs.
     fsync::full_flush_dir(folder).map_err(|err| changed(Error::io("sync", folder, err)))?;
-    Ok(deleted)
+    Ok(Deleted {
+        paths: deleted,
+        removals: removing.removals,
+    })
 }
 
 /// Steps 1 and 2 of [`apply`]: the staged writes, or an error with every temp file removed;

@@ -74,11 +74,14 @@ pub(super) fn start_worker(
     )
 }
 
-/// The matters' settings of this host: [`matter_settings`], with the host's placeholder probe.
+/// The matters' settings of this host: [`matter_settings`], with the host's placeholder probe
+/// and, if a test set one, its trash.
 pub(crate) fn settings_of(actor: &Actor) -> clauseo_matters::Settings {
+    let base = matter_settings(actor.effective.data_dir());
     clauseo_matters::Settings {
         probe: Arc::clone(&actor.folder_probes.placeholder),
-        ..matter_settings(actor.effective.data_dir())
+        trash: actor.folder_probes.trash.clone().unwrap_or(base.trash),
+        ..base
     }
 }
 

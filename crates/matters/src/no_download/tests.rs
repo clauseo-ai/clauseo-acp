@@ -94,6 +94,7 @@ impl Fixture {
             limits: Limits::DEFAULT,
             retention: Retention::KeepAll,
             probe,
+            trash: Arc::new(crate::FolderTrash::new(dir.path().join("trash"))),
         };
         Self {
             _dir: dir,

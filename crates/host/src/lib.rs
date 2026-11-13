@@ -297,7 +297,7 @@ pub use config::{
     NoProfile, PackRequest, ProfileHook, Sandbox, SessionKey,
 };
 #[cfg(feature = "test-support")]
-pub use config::{TestProxy, WithPlaceholderProbe};
+pub use config::{TestProxy, WithMatterTrash, WithPlaceholderProbe};
 pub use encode::EncodedEvent;
 pub use error::Error;
 pub use handle::{

@@ -1,5 +1,5 @@
 //! What `HostConfig` taken apart (`ConfigParts::from`) hands the host thread (`ConfigParts`) and
-//! the updater's seams (`UpdateSeams`), and one test seam of `HostConfig` that `config.rs` has
+//! the updater's seams (`UpdateSeams`), and two test seams of `HostConfig` that `config.rs` has
 //! no room for. Kept apart from `config.rs`, whose `HostConfig` builds them.
 
 use std::path::PathBuf;
@@ -72,6 +72,26 @@ impl WithPlaceholderProbe for HostConfig {
         probe: Arc<dyn clauseo_matters::PlaceholderProbe + Send + Sync>,
     ) -> Self {
         self.folder_probes.placeholder = probe;
+        self
+    }
+}
+
+/// Tests: where the matter workers' undo and restore deletes go
+/// (`clauseo_matters::Settings::trash`; default the OS's trash), so a test run never fills the
+/// machine's Trash or Recycle Bin. A trait beside `HostConfig`'s own methods, as
+/// [`WithPlaceholderProbe`] is.
+#[cfg(feature = "test-support")]
+pub trait WithMatterTrash {
+    /// This config, its matter workers moving each file they delete into the folder `folder`
+    /// (`clauseo_matters::FolderTrash`).
+    #[must_use]
+    fn with_matter_trash(self, folder: PathBuf) -> Self;
+}
+
+#[cfg(feature = "test-support")]
+impl WithMatterTrash for HostConfig {
+    fn with_matter_trash(mut self, folder: PathBuf) -> Self {
+        self.folder_probes.trash = Some(Arc::new(clauseo_matters::FolderTrash::new(folder)));
         self
     }
 }

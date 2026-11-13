@@ -57,6 +57,7 @@ fn a_path_whose_stat_is_refused_is_an_error() {
         limits: Limits::DEFAULT,
         retention: Retention::KeepAll,
         probe: Arc::new(OsProbe),
+        trash: Arc::new(crate::FolderTrash::new(dir.path().join("trash"))),
     };
     let result = writable(dir.path(), &settings, &path("locked/a.txt"));
     write::set_permissions(&locked, Permissions::from_mode(0o755)).unwrap();

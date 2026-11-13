@@ -8,7 +8,7 @@ use clauseo_protocol::{
     RestoreRequest, SkippedFile, ThreadId, Timestamp, TurnId,
 };
 
-use crate::{Matter, PlaceholderProbe};
+use crate::{Matter, PlaceholderProbe, Removals, Trash};
 
 /// The per-file size cap: 512 MB. A larger file is skipped (`OverSizeCap`), never read.
 pub const FILE_CAP_BYTES: u64 = 512_000_000;
@@ -85,6 +85,9 @@ pub struct Settings {
     pub retention: Retention,
     /// Tells cloud-only placeholders apart; [`crate::OsProbe`] outside tests.
     pub probe: Arc<dyn PlaceholderProbe + Send + Sync>,
+    /// Where undo's and restore's deletes go first: [`crate::OsTrash`] in the app, a
+    /// [`crate::FolderTrash`] in tests, so no test run fills the machine's Trash.
+    pub trash: Arc<dyn Trash>,
 }
 
 impl std::fmt::Debug for Settings {
@@ -244,6 +247,9 @@ pub struct Undone {
     /// reversed), sorted by path bytes: what a sync client might put back later
     /// ([`crate::Matter::still_gone`]).
     pub deleted: Vec<MatterPath>,
+    /// How many of `deleted` went to the trash, and how many were deleted for good (the trash
+    /// could not take them, and the history holds them).
+    pub removals: Removals,
 }
 
 /// Which files a restore puts back.

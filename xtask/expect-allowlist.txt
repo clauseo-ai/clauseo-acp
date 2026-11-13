@@ -330,6 +330,12 @@ crates/settings/src/effective/policy_gaps_tests.rs the_login_user_comes_from_the
 crates/matters/src/no_download/macos.rs - unsafe_code
 # Added by R20a: matters' calls to GetVolumePathNameW and GetDriveTypeW (a folder on a network drive).
 crates/matters/src/place/windows.rs - unsafe_code
+# matters' Recycle Bin through IFileOperation (COM), its progress sink's implement macro, and the
+# Windows test that puts its thread in the multithreaded apartment first.
+crates/matters/src/trash/windows.rs - unsafe_code
+crates/matters/src/trash/windows/sink.rs - clippy::ref_as_ptr
+crates/matters/src/trash/windows/sink.rs - clippy::inline_always
+crates/matters/src/trash/windows_tests.rs - unsafe_code
 
 # clauseo-host: the one clock read, the one place that creates folders, and the unit tests' folders.
 crates/host/examples/stetdoc_compare_fake.rs - clippy::disallowed_methods

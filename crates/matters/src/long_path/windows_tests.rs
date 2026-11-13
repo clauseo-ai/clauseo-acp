@@ -98,6 +98,9 @@ fn a_matter_with_history_paths_past_260_units_checkpoints_undoes_and_restores() 
         limits: Limits::DEFAULT,
         retention: Retention::KeepAll,
         probe: Arc::new(OsProbe),
+        trash: Arc::new(crate::FolderTrash::new(
+            matters_root.with_file_name("trash"),
+        )),
     };
     let new = NewMatter {
         id,
