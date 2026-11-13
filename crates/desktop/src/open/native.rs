@@ -12,7 +12,7 @@ use tauri::{AppHandle, Runtime};
 use tauri_plugin_opener::OpenerExt as _;
 
 use super::{LinkConfirm, LinkWords, Locate, LocatedFile, Opener};
-use crate::dialogs::BoxFuture;
+use crate::dialogs::{BoxFuture, Owner};
 
 /// The link confirm, drawn by Rust.
 pub(crate) struct NativeLinkConfirm<R: Runtime> {
@@ -30,6 +30,7 @@ impl<R: Runtime> LinkConfirm for NativeLinkConfirm<R> {
     fn confirm_link(&self, words: LinkWords) -> BoxFuture<'_, bool> {
         crate::dialogs::confirm(
             &self.app,
+            Owner::Main,
             rfd::MessageLevel::Info,
             words.title,
             words.message,

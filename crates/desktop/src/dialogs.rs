@@ -16,8 +16,30 @@ use rfd::{MessageButtons, MessageDialogResult, MessageLevel};
 use tauri::{AppHandle, Manager as _, Runtime};
 use tauri_plugin_dialog::DialogExt as _;
 
+use crate::MAIN_WINDOW;
+use crate::settings_window::SETTINGS_WINDOW;
+
 /// A boxed future, so the traits stay object safe.
 pub(crate) type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
+
+/// The window a confirm sits over, so the OS brings it to the front where the lawyer is asking.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Owner {
+    /// The main window, always.
+    Main,
+    /// The Settings window when it is open (a Settings › Tools confirm, asked from there), else
+    /// the main window.
+    SettingsOrMain,
+}
+
+/// The label of the window a confirm sits over: [`Owner::SettingsOrMain`] takes Settings only
+/// when `settings_open`; everything else takes main.
+pub(crate) fn owner_label(owner: Owner, settings_open: bool) -> &'static str {
+    match owner {
+        Owner::SettingsOrMain if settings_open => SETTINGS_WINDOW,
+        Owner::Main | Owner::SettingsOrMain => MAIN_WINDOW,
+    }
+}
 
 /// Picks a folder: `None` when the lawyer cancelled.
 pub(crate) trait Picker: Send + Sync {
@@ -54,13 +76,15 @@ pub(crate) fn accepted(result: &MessageDialogResult, ok: &str) -> bool {
     matches!(result, MessageDialogResult::Custom(label) if label == ok)
 }
 
-/// Draws a native confirm on `app`, over the main window, with [`cancel_first`]'s buttons, and
-/// answers [`accepted`]. rfd is called directly, as the dialog plugin itself calls it (built on
-/// the main thread, awaited on a thread of its own), because the plugin turns rfd's plain
-/// `Cancel` into `Custom(<second label>)`, which with Cancel first is the accepting label. A
-/// dialog that never answers (the app closing, no main thread, no thread) counts as declined.
+/// Draws a native confirm on `app`, over `owner`'s window (see [`owner_label`]; main when that
+/// window is gone), with [`cancel_first`]'s buttons, and answers [`accepted`]. rfd is called
+/// directly, as the dialog plugin itself calls it (built on the main thread, awaited on a thread
+/// of its own), because the plugin turns rfd's plain `Cancel` into `Custom(<second label>)`,
+/// which with Cancel first is the accepting label. A dialog that never answers (the app closing,
+/// no main thread, no thread) counts as declined.
 pub(crate) fn confirm<R: Runtime>(
     app: &AppHandle<R>,
+    owner: Owner,
     level: MessageLevel,
     title: String,
     message: String,
@@ -68,7 +92,10 @@ pub(crate) fn confirm<R: Runtime>(
     cancel: &str,
 ) -> BoxFuture<'static, bool> {
     let (tx, rx) = oneshot::channel();
-    let main = app.get_webview_window(crate::MAIN_WINDOW);
+    let label = owner_label(owner, app.get_webview_window(SETTINGS_WINDOW).is_some());
+    let parent = app
+        .get_webview_window(label)
+        .or_else(|| app.get_webview_window(MAIN_WINDOW));
     let buttons = cancel_first(&ok, cancel);
     // Not posted (the event loop has gone): the closure and its sender drop, which declines.
     let _unposted = app.run_on_main_thread(move || {
@@ -77,8 +104,8 @@ pub(crate) fn confirm<R: Runtime>(
             .set_description(&message)
             .set_level(level)
             .set_buttons(buttons);
-        if let Some(main) = &main {
-            dialog = dialog.set_parent(main);
+        if let Some(parent) = &parent {
+            dialog = dialog.set_parent(parent);
         }
         let shown = dialog.show();
         // No thread: the sender drops with the closure, which declines.
@@ -190,7 +217,16 @@ impl<R: Runtime> Confirm for NativeConfirm<'_, R> {
             let words = always_allow_words(self.bridge.language().await);
             let level = MessageLevel::Warning;
             let (title, message, ok) = (words.title, words.message, words.ok);
-            confirm(&self.app, level, title, message, ok, &words.cancel).await
+            confirm(
+                &self.app,
+                Owner::Main,
+                level,
+                title,
+                message,
+                ok,
+                &words.cancel,
+            )
+            .await
         })
     }
 }

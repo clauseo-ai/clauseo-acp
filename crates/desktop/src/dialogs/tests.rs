@@ -167,3 +167,19 @@ fn the_picker_starts_beside_the_last_pick_or_at_home() {
     );
     assert_eq!(start_folder(None, None), None);
 }
+
+/// The MCP confirms (Settings › Tools, asked from Settings) sit over the Settings window when it
+/// is open, and over main when it is closed.
+#[test]
+fn an_mcp_confirm_sits_over_settings_when_it_is_open() {
+    assert_eq!(owner_label(Owner::SettingsOrMain, true), SETTINGS_WINDOW);
+    assert_eq!(owner_label(Owner::SettingsOrMain, false), MAIN_WINDOW);
+}
+
+/// Every other confirm sits over main, whether or not Settings is open.
+#[test]
+fn every_other_confirm_sits_over_main() {
+    for settings_open in [true, false] {
+        assert_eq!(owner_label(Owner::Main, settings_open), MAIN_WINDOW);
+    }
+}

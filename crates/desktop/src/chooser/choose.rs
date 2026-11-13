@@ -14,7 +14,7 @@ use super::listing::{LIST_WAIT, bounded};
 use super::{Chooser, PickAnswer};
 use crate::bridge::Bridge;
 use crate::dialogs::words::{ConfirmWords, Key};
-use crate::dialogs::{BoxFuture, LastPick, Picker};
+use crate::dialogs::{BoxFuture, LastPick, Owner, Picker};
 use crate::picked::PickedFolder;
 
 #[cfg(test)]
@@ -60,6 +60,7 @@ impl<R: Runtime> FolderConfirm for NativeFolderConfirm<'_, R> {
             let (title, message, ok) = (words.title, words.message, words.ok);
             crate::dialogs::confirm(
                 &self.app,
+                Owner::Main,
                 MessageLevel::Info,
                 title,
                 message,
