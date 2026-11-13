@@ -11,6 +11,8 @@ use super::{browser_run_dir, remove_tree, run_dir};
 /// `clauseo-run-sweep` thread then deletes every `run.old-*` folder. A `run` that is a link
 /// is left as it is, and the launches refuse it. `<data>/browser/run`, the sessions' browser
 /// folders (the guard's `--cwd`), is set aside and deleted the same way, within `<data>/browser`.
+/// The files in `<data>/launch-settings`, earlier runs' Claude settings
+/// (`agent::launch_settings`), are removed there and then, before any launch writes one.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct RunSweep(std::sync::Arc<std::sync::Mutex<Swept>>);
 
@@ -36,6 +38,7 @@ impl RunSweep {
         let parents = [data.to_owned(), data.join(crate::browser::CONFIG_DIR)];
         set_aside(&run_dir(data), &parents[0]);
         set_aside(&browser_run_dir(data), &parents[1]);
+        crate::agent::launch_settings::sweep(&crate::agent::launch_settings::folder(data));
         let started = std::thread::Builder::new()
             .name("clauseo-run-sweep".to_owned())
             .spawn(move || parents.iter().for_each(|parent| delete_set_aside(parent)));

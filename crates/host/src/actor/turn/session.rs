@@ -25,7 +25,7 @@ use super::key_retry;
 use super::out::Out;
 use super::picks::{Pick, Picked};
 use super::{AgentReply, LogFor, Then, TurnInput, lost, state, updates};
-use crate::agent::{self, codex};
+use crate::agent::{self, codex, launch_settings};
 use crate::error::Error;
 use crate::log_file::{Cause, LIFECYCLE};
 use crate::sent::SentView;
@@ -105,6 +105,7 @@ pub(super) fn on_replay_log(
     let clock = Arc::clone(&actor.clock);
     let matter = matter_of(actor, thread);
     let retry = key_retry::for_call(actor, thread);
+    let settings = settings_target(actor, thread);
     let Some(agent) = state(actor, thread).and_then(|state| state.agent.as_deref_mut()) else {
         return;
     };
@@ -120,14 +121,16 @@ pub(super) fn on_replay_log(
     agent.mcp_commands = commands(&mcp_servers);
     let (id, client, fence) = (agent.id, agent.link.client.clone(), agent.link.fence());
     let check = codex::prepare::recheck(
-        clock,
+        Arc::clone(&clock),
         matter,
         agent.codex.is_some().then(|| agent.folder.clone()),
     );
+    let ready = launch_settings::ready(check, clock, matter, settings, meta);
     call(actor, thread, id, async move {
-        if let Err(error) = check.await {
-            return AgentReply::Refused(error);
-        }
+        let meta = match ready.await {
+            Ok(meta) => meta,
+            Err(error) => return AgentReply::Refused(error),
+        };
         let request = LoadSession {
             session,
             cwd,
@@ -162,20 +165,23 @@ fn resume_session(actor: &mut Actor, thread: ThreadId) {
     let clock = Arc::clone(&actor.clock);
     let matter = matter_of(actor, thread);
     let retry = key_retry::for_call(actor, thread);
+    let settings = settings_target(actor, thread);
     let Some(agent) = state(actor, thread).and_then(|state| state.agent.as_deref_mut()) else {
         return;
     };
     agent.mcp_commands = commands(&mcp_servers);
     let (id, client, fence) = (agent.id, agent.link.client.clone(), agent.link.fence());
     let check = codex::prepare::recheck(
-        clock,
+        Arc::clone(&clock),
         matter,
         agent.codex.is_some().then(|| agent.folder.clone()),
     );
+    let ready = launch_settings::ready(check, clock, matter, settings, meta);
     call(actor, thread, id, async move {
-        if let Err(error) = check.await {
-            return AgentReply::Refused(error);
-        }
+        let meta = match ready.await {
+            Ok(meta) => meta,
+            Err(error) => return AgentReply::Refused(error),
+        };
         let request = LoadSession {
             session,
             cwd,
@@ -206,20 +212,23 @@ pub(super) fn new_session(actor: &mut Actor, thread: ThreadId) {
     let clock = Arc::clone(&actor.clock);
     let matter = matter_of(actor, thread);
     let retry = key_retry::for_call(actor, thread);
+    let settings = settings_target(actor, thread);
     let Some(agent) = state(actor, thread).and_then(|state| state.agent.as_deref_mut()) else {
         return;
     };
     agent.mcp_commands = commands(&mcp_servers);
     let (id, client, fence) = (agent.id, agent.link.client.clone(), agent.link.fence());
     let check = codex::prepare::recheck(
-        clock,
+        Arc::clone(&clock),
         matter,
         agent.codex.is_some().then(|| agent.folder.clone()),
     );
+    let ready = launch_settings::ready(check, clock, matter, settings, meta);
     call(actor, thread, id, async move {
-        if let Err(error) = check.await {
-            return AgentReply::Refused(error);
-        }
+        let meta = match ready.await {
+            Ok(meta) => meta,
+            Err(error) => return AgentReply::Refused(error),
+        };
         let request = NewSession {
             cwd,
             additional_directories,
@@ -235,6 +244,12 @@ pub(super) fn new_session(actor: &mut Actor, thread: ThreadId) {
             result,
         }
     });
+}
+
+/// Where `thread`'s run writes Claude's settings for its session calls.
+fn settings_target(actor: &Actor, thread: ThreadId) -> Option<launch_settings::Target> {
+    let run = actor.threads.get(&thread)?.turn.run.as_ref()?;
+    Some(run.launch_settings.clone())
 }
 
 /// `thread`'s matter, for the log of its `.codex` re-check.

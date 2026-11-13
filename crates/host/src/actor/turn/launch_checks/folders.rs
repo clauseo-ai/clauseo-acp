@@ -82,12 +82,14 @@ pub(super) fn remove_tree(folder: &Path) {
 
 /// Removes this launch's run folder and its browser folder and all they hold, each when it
 /// is a real folder, with Claude's short temp folder the run folder names
-/// (`agent::claude_tmp`); the notes folder stays. Only the folders the host made: the paths as
+/// (`agent::claude_tmp`) and the run's Claude settings files (`agent::launch_settings`); the
+/// notes folder stays. Only the folders the host made: the paths as
 /// built (`<data>/run/<session id>`, `<data>/browser/run/<session id>`), never
 /// canonicalized, removed with `remove_dir_all`, which removes a link inside and never
 /// follows it. Called once the agent's process has exited, or when it never started. File
 /// system calls: off the actor.
 pub(super) fn remove_folders(run: &RunFolders) {
+    crate::agent::launch_settings::remove(&run.launch_settings);
     let id = run.key.id();
     let named = |folder: &Path, parents: &[&str]| {
         let mut at = Some(folder);

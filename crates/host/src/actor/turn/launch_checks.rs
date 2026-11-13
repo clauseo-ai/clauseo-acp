@@ -199,6 +199,10 @@ pub(crate) struct RunFolders {
     /// The lawyer's servers of the run, made from those values at launch: what each session call
     /// sends and what the agent's stderr redactor hides (`agent::loads::lawyer::Sent`).
     pub(crate) lawyer: Arc<crate::agent::loads::lawyer::Sent>,
+    /// Where each Claude session call of the run writes its flag settings
+    /// (`agent::launch_settings`, `<data>/launch-settings/<run id>.json`); gone with the run
+    /// folder.
+    pub(crate) launch_settings: crate::agent::launch_settings::Target,
 }
 
 impl RunFolders {
@@ -234,6 +238,10 @@ impl RunFolders {
             claude_tmp: None,
             mcp_secrets: Arc::default(),
             lawyer: Arc::default(),
+            launch_settings: crate::agent::launch_settings::Target {
+                folder: crate::agent::launch_settings::folder(data),
+                run: key.id(),
+            },
         }
     }
 

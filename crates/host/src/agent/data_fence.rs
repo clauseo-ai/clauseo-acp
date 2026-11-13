@@ -74,8 +74,10 @@ pub(crate) use variables::launch_vars;
 /// (`browser::SESSION_CONFIG`), which agent-browser reads itself: an edit to it could set what
 /// the `agent-browser` deny rules refuse as flags (`--profile`, `--config`).
 /// Under `agents/runtime`, Node and the half-unpacked `.tmp-` folders, but not Clauseo's Python
-/// runtime ([`READ_ONLY`]); the launch denies every other entry there that exists.
-pub(crate) const DENIED: [&str; 39] = [
+/// runtime ([`READ_ONLY`]); the launch denies every other entry there that exists. And every
+/// session's Claude settings file (`agent::launch_settings`), its own too: Claude Code reads
+/// it itself at its start, so its tools never need it, and it holds every session's rules.
+pub(crate) const DENIED: [&str; 40] = [
     "run/*/relay-token",
     "run/*/agent-browser/config.json",
     "skill-packs/**",
@@ -115,6 +117,7 @@ pub(crate) const DENIED: [&str; 39] = [
     "agents/npm-cache/**",
     "agents/signin/**",
     "agents/npmrc*",
+    "launch-settings/**",
 ];
 
 /// What of `<data>` every session may read, with the reason: neither denied to Claude nor listed
@@ -153,6 +156,11 @@ pub(crate) fn is_python_runtime(name: &str) -> bool {
 /// `Read` and `Edit` for each of `deny.targets`, then `Edit` alone for each of [`READ_ONLY`]
 /// and all under it. A spelling that is not UTF-8 gets none (no rule could name it).
 pub(crate) fn claude_deny_rules(deny: &LaunchDeny) -> Vec<String> {
+    claude_deny_rules_on(deny, cfg!(windows))
+}
+
+/// [`claude_deny_rules`] with the paths in Windows' rule form when `windows` ([`rule_path`]).
+pub(crate) fn claude_deny_rules_on(deny: &LaunchDeny, windows: bool) -> Vec<String> {
     let mut rules = Vec::new();
     let mut push = |rule: String| {
         if !rules.contains(&rule) {
@@ -160,7 +168,7 @@ pub(crate) fn claude_deny_rules(deny: &LaunchDeny) -> Vec<String> {
         }
     };
     for spelling in &deny.spellings {
-        let Some(base) = spelling.to_str().map(|text| rule_path(text, cfg!(windows))) else {
+        let Some(base) = spelling.to_str().map(|text| rule_path(text, windows)) else {
             continue;
         };
         for target in &deny.targets {
@@ -509,6 +517,8 @@ fn key(path: &Path, insensitive: bool) -> Vec<OsString> {
         .collect()
 }
 
+#[cfg(test)]
+pub(crate) mod big_folder;
 #[cfg(test)]
 mod bypass_tests;
 mod command;
