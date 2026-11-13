@@ -88,6 +88,12 @@ impl ReachClass {
             Self::UnknownRoute => "unknown_route",
         }
     }
+
+    /// Whether it is a launch with nothing to probe: [`Self::UnknownService`] or
+    /// [`Self::UnknownRoute`].
+    pub(crate) const fn unknown(self) -> bool {
+        matches!(self, Self::UnknownService | Self::UnknownRoute)
+    }
 }
 
 /// Whether the probe went through a proxy (`None`: it tried nothing).
@@ -277,11 +283,13 @@ pub(super) fn start(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
 
 /// Logs a probe's answer for `thread`'s watch, armed `by`, at the lifecycle target (host.log
 /// keeps it): fixed fields only, never a host, a proxy, a URL or bytes.
-pub(super) fn log(thread: ThreadId, reach: Reach, noted: bool, by: &str, misses: u8) {
+/// `reached` is what the watch counted (`offline.rs::on_probed`).
+pub(super) fn log(thread: ThreadId, reach: (Reach, bool), noted: bool, by: &str, misses: u8) {
+    let (reach, reached) = reach;
     tracing::info!(
         target: LIFECYCLE,
         %thread,
-        reached = reach.reached(),
+        reached,
         noted,
         by,
         class = reach.class.as_str(),
