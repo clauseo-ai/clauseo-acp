@@ -22,7 +22,7 @@ use super::{
     matter_of, prompt, queue, state,
 };
 use crate::error::Error;
-use crate::log_file::Cause;
+use crate::log_file::{Cause, LIFECYCLE};
 use crate::matter_worker::{MatterJob, UndoJob};
 use crate::pipeline::MatterEvent;
 
@@ -224,10 +224,13 @@ pub(super) fn on_undone(
     result: Result<Undone, Error>,
 ) {
     match result {
-        Ok(undone) => match undo_log(thread, &ask, undone) {
-            Ok(log) => send_log(actor, thread, log),
-            Err(error) => give_up(actor, thread, &ask, error),
-        },
+        Ok(undone) => {
+            log_undone(thread, &undone);
+            match undo_log(thread, &ask, undone) {
+                Ok(log) => send_log(actor, thread, log),
+                Err(error) => give_up(actor, thread, &ask, error),
+            }
+        }
         Err(Error::Matters(clauseo_matters::Error::UnexpectedDecision { path }))
             if !ask.retried && ask.filled.contains(&path) =>
         {
@@ -239,6 +242,21 @@ pub(super) fn on_undone(
         }
         Err(error) => give_up(actor, thread, &ask, error),
     }
+}
+
+/// The lifecycle line of an undo R8 has done: the files undone and kept, and of its deletes how
+/// many went to the trash and how many were deleted for good (the trash could not take them;
+/// the history holds them). Counts only, never a path.
+fn log_undone(thread: ThreadId, undone: &Undone) {
+    tracing::info!(
+        target: LIFECYCLE,
+        %thread,
+        undone = undone.restored.len(),
+        kept = undone.kept.len(),
+        trashed = undone.removals.trashed,
+        deleted = undone.removals.deleted,
+        "an undo ran"
+    );
 }
 
 /// The commit that logs an undo R8 has done, kept until it is durable so it can be sent once

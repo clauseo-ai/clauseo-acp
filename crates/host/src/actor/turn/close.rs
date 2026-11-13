@@ -20,6 +20,7 @@ use super::super::Actor;
 use super::out::Out;
 use super::{LimitMark, cancel};
 use crate::error::Error;
+use crate::log_file::LIFECYCLE;
 use crate::pipeline::MatterEvent;
 
 /// The requests a close expires.
@@ -183,6 +184,28 @@ impl TurnClose {
             out.push(actor, AgentSessionDetached { reason })?;
         }
         Ok(())
+    }
+
+    /// The lifecycle line of the durable end: the stop, how many papers the turn changed and
+    /// how many of those may hold the lawyer's own edits. Counts only, never a path.
+    pub(super) fn log_end(&self, thread: ThreadId) {
+        let files = self
+            .files
+            .as_ref()
+            .map_or(&[][..], |changed| &changed.files[..]);
+        let flagged = files
+            .iter()
+            .filter(|file| file.may_include_lawyer_edits())
+            .count();
+        tracing::info!(
+            target: LIFECYCLE,
+            %thread,
+            turn = %self.turn,
+            stop = ?self.stop,
+            changed = files.len(),
+            flagged,
+            "a turn ended"
+        );
     }
 
     /// One commit holding the close, tagged `then`.
