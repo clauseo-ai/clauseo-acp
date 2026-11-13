@@ -119,6 +119,17 @@ pub(super) fn failures() -> Vec<DomainEvent> {
             ErrorCode::MatterFolderPermission,
             "the privacy settings keep Clauseo from opening the matter folder",
         ),
+    ]
+    .into_iter()
+    .chain(agent_failures())
+    .chain(mcp_failures())
+    .collect()
+}
+
+/// The later agent codes of a turn's end (D-050's offline and quiet, the too-long prompt, the
+/// service's own failure), in the order the corpus first saw them.
+fn agent_failures() -> Vec<DomainEvent> {
+    vec![
         failed(
             ErrorCode::AgentOffline,
             "the window said the computer is offline",
@@ -131,10 +142,11 @@ pub(super) fn failures() -> Vec<DomainEvent> {
             ErrorCode::AgentServiceError,
             "the agent gave up on the turn (sessionFailure service)",
         ),
+        failed(
+            ErrorCode::AgentQuiet,
+            "the agent sent nothing for 300 s with no tool running and no question waiting",
+        ),
     ]
-    .into_iter()
-    .chain(mcp_failures())
-    .collect()
 }
 
 /// The Settings › Tools codes (`mcp.*`): never a turn's failure in practice; here for the corpus.

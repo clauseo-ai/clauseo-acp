@@ -208,6 +208,15 @@ const PLANNED_LINES = [
     "The AI had a problem on its side. Try again.",
     "AI की ओर से कोई समस्या आई। फिर से कोशिश करें।",
   ],
+  [
+    "agent.quiet",
+    "ChatGPT stopped answering. The answer so far is kept. Try again.",
+    "ChatGPT ने उत्तर देना बंद कर दिया। अब तक का उत्तर रखा गया है। फिर से प्रयास करें।",
+    "gemini stopped answering. The answer so far is kept. Try again.",
+    "gemini ने उत्तर देना बंद कर दिया। अब तक का उत्तर रखा गया है। फिर से प्रयास करें।",
+    "The AI stopped answering. The answer so far is kept. Try again.",
+    "AI ने उत्तर देना बंद कर दिया। अब तक का उत्तर रखा गया है। फिर से प्रयास करें।",
+  ],
 ] as const;
 
 test.each(PLANNED_LINES)(

@@ -115,6 +115,7 @@ export type ErrorCode =
   | "mcp.server_unknown"
   | "mcp.save_declined"
   | "agent.service_error"
+  | "agent.quiet"
   | "mcp.import_too_large"
   | "unknown";
 
@@ -317,6 +318,10 @@ export const ERROR_WORDS: Record<WordedCode, ErrorKey> = {
   // the agent's service had a problem on its side and the agent gave up on the turn (#1030): Try again under the
   // answer, never Restart. ChatGPT's sentence approved (orchestrator, 2026-11-12); Claude's derived from it
   "agent.service_error": "Claude had a problem on its side. Try again.",
+  // the agent sent nothing for 5 minutes while answering, with no tool running and no question waiting, so the host
+  // ended the turn (D-050's backstop): Try again under the answer so far, never Restart. English approved (orchestrator,
+  // 2026-11-13); the Hindi is provisional
+  "agent.quiet": "Claude stopped answering. The answer so far is kept. Try again.",
   // an import whose servers are too long to show whole in one confirm: nothing was added
   "mcp.import_too_large":
     "There are too many tools to import at once, so nothing was imported. Add them one at a time.",
@@ -382,6 +387,13 @@ const PLANNED: Partial<
     chatgpt: "ChatGPT had a problem on its side. Try again.",
     named: "{name} had a problem on its side. Try again.",
     nameless: "The AI had a problem on its side. Try again.",
+  },
+  // the agent sent nothing for 5 minutes (D-050's backstop; see ERROR_WORDS): Try again, never Restart. English
+  // approved (orchestrator, 2026-11-13); the Hindi is provisional
+  "agent.quiet": {
+    chatgpt: "ChatGPT stopped answering. The answer so far is kept. Try again.",
+    named: "{name} stopped answering. The answer so far is kept. Try again.",
+    nameless: "The AI stopped answering. The answer so far is kept. Try again.",
   },
 };
 
