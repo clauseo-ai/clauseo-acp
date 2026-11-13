@@ -104,7 +104,7 @@ export function refusalCode(error: unknown): McpErrorCode {
     : "command.invalid";
 }
 
-/** The view before any `mcp_tools_changed`: the host sends none for the lawyer's empty list. */
+/** The view before the first `mcp_tools_changed`, the window's catch-up, which the host always sends. */
 export const NO_TOOLS: ToolsView = { control: "lawyer", servers: [], importable: [] };
 
 /** How long an import waits, after Done, for the view that says how it went: the host sends it with the change. */
@@ -116,8 +116,8 @@ export const IMPORT_HEARD_MS = 10_000;
 function hostTools(transport: HostTransport): ToolsCommands | null {
   const app = nextHostOf(transport).app;
   if (app === null) return null;
-  // a catch-up leaves mcp_tools_changed out while the list is the lawyer's and empty: start there, and take each
-  // view that comes, an empty one included
+  // start from the empty list until the catch-up's view comes (TauriTransport hands mcp_tools_changed on), then take
+  // each view that comes, an empty one included
   let view: ToolsView = NO_TOOLS;
   const listeners = new Set<(view: ToolsView) => void>();
   app.subscribeApp((event) => {
