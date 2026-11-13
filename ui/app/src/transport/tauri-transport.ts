@@ -195,6 +195,8 @@ export class TauriTransport
           ("site_blocked" in event && event.site_blocked !== undefined) ||
           ("papers_changed" in event && event.papers_changed !== undefined) ||
           ("update_changed" in event && event.update_changed !== undefined) ||
+          // Settings › Tools' view (tools-model.ts): the catch-up's and each change's
+          ("mcp_tools_changed" in event && event.mcp_tools_changed !== undefined) ||
           // UC: R17 PR-B's whole ProtectionView, not in bindings.ts yet (store/protection.ts reads it loosely)
           Object.hasOwn(event, "protection_view_changed")
         ) {
@@ -274,7 +276,7 @@ export class TauriTransport
 
   /** Hears each app-wide event (`settings_changed`, `matters_changed`, `threads_changed`,
    * `browser_install`, `browser_policy`, `connectors_changed`, `case_law_hint`,
-   * `folder_scanned`, `protection_changed`, `site_blocked`, `update_changed`). The first listener
+   * `folder_scanned`, `protection_changed`, `site_blocked`, `update_changed`, `mcp_tools_changed`). The first listener
    * subscribes the window's channel to
    * them; read the current state with `query` after `ready`, so no change falls between. */
   onAppEvent(listener: (event: HostEvent) => void): AppFeed {
