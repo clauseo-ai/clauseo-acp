@@ -1,0 +1,16 @@
+{"scenario":"undo-lawyer-file-read","description":"A read-only answer during which the lawyer saves files into the matter: the agent writes agent.txt with an edit tool call, then asks to read, and while the client holds the ask the test saves Lawyer note.txt (new) or edits brief.txt; the agent's Read tool calls then name both files, as claude-agent-acp 0.89.1's Read does (locations [{path: file_path}], dist/tool-calls/reporters/read.js:17). A read is no write: each file the lawyer saved stays flagged","on_stdin_close":"exit"}
+{"expect":{"method":"initialize","as":"init","params":{"protocolVersion":1}}}
+{"respond":{"to":"init","result":{"protocolVersion":1,"agentCapabilities":{"loadSession":true},"authMethods":[],"agentInfo":{"name":"fake_agent","version":"0.0.0"}}}}
+{"expect":{"method":"session/new","as":"new","params":{"cwd":"{{any}}"}}}
+{"respond":{"to":"new","result":{"sessionId":"sess-1"}}}
+{"expect":{"method":"session/prompt","as":"p1","params":{"sessionId":"sess-1"}}}
+{"update":{"update":{"sessionUpdate":"tool_call","toolCallId":"t1-edit","title":"Write agent.txt","kind":"edit","status":"in_progress","locations":[{"path":"{{cwd}}/agent.txt"}],"content":[{"type":"diff","path":"{{cwd}}/agent.txt","newText":"The agent's overview\n"}]}}}
+{"write_file":{"path":"agent.txt","content":"The agent's overview\n"}}
+{"update":{"update":{"sessionUpdate":"tool_call_update","toolCallId":"t1-edit","status":"completed"}}}
+{"update":{"update":{"sessionUpdate":"tool_call","toolCallId":"t2-read","title":"Read Lawyer note.txt","kind":"read","status":"pending","locations":[{"path":"{{cwd}}/Lawyer note.txt","line":1}]}}}
+{"note":"The test saves the lawyer's file while this ask waits, then allows it.","request":{"id":"perm-1","method":"session/request_permission","params":{"sessionId":"sess-1","toolCall":{"toolCallId":"t2-read","title":"Read Lawyer note.txt","kind":"read","status":"pending"},"options":[{"optionId":"allow-once","name":"Allow once","kind":"allow_once"},{"optionId":"reject-once","name":"Reject","kind":"reject_once"}]}}}
+{"expect_response":{"id":"perm-1","result":{"outcome":{"outcome":"selected","optionId":"allow-once"}}}}
+{"update":{"update":{"sessionUpdate":"tool_call_update","toolCallId":"t2-read","status":"completed"}}}
+{"update":{"update":{"sessionUpdate":"tool_call","toolCallId":"t3-read","title":"Read brief.txt","kind":"read","status":"completed","locations":[{"path":"{{cwd}}/brief.txt","line":1}]}}}
+{"update":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-answer-1","content":{"type":"text","text":"Here is the overview."}}}}
+{"respond":{"to":"p1","result":{"stopReason":"end_turn"}}}

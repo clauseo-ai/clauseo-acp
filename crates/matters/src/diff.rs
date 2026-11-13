@@ -3,7 +3,9 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use clauseo_protocol::{ChangeKind, ContentId, Count, FileChange, MatterPath, Timestamp};
+use clauseo_protocol::{
+    ChangeKind, ContentId, Count, FileChange, MatterPath, Timestamp, ToolCallStatus, ToolKind,
+};
 
 use crate::Error;
 use crate::checkpoint::SizedFile;
@@ -212,9 +214,21 @@ impl TurnStart<'_> {
     }
 }
 
-/// `change`, flagged as possibly holding the lawyer's edits when no tool call named its path
-/// (for a rename: neither path) and it is not a file the agent added that a shell command wrote
-/// (`start`: [`TurnStart::own`]).
+/// Whether a place a tool call names counts as one the agent wrote, so the after-turn
+/// checkpoint leaves a change there unflagged (`tool_paths` of [`crate::Matter::after_turn`]):
+/// a path in the call's diff content (`in_diff`), whatever its kind, or a location of an `Edit`,
+/// `Delete` or `Move` call. A `Read`, `Search`, `Fetch`, `Think` or `Execute` call's location,
+/// and that of any other kind, is only a place it looked at or ran in: a file the lawyer saves
+/// during a turn that reads it stays flagged. A call that ended `Failed` wrote nothing it named.
+/// A shell call's writes are read from its command instead (`after_turn_named`'s `commands`).
+pub fn names_a_write(kind: ToolKind, status: ToolCallStatus, in_diff: bool) -> bool {
+    status != ToolCallStatus::Failed
+        && (in_diff || matches!(kind, ToolKind::Edit | ToolKind::Delete | ToolKind::Move))
+}
+
+/// `change`, flagged as possibly holding the lawyer's edits when no tool call wrote its path
+/// ([`names_a_write`]; for a rename: neither path) and it is not a file the agent added that a
+/// shell command wrote (`start`: [`TurnStart::own`]).
 pub(crate) fn flag(
     change: FileChange,
     tools: &BTreeSet<MatterPath>,

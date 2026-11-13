@@ -476,6 +476,9 @@ mod tool_switches;
 mod tools;
 
 #[cfg(test)]
+#[path = "host/lawyer_file.rs"]
+mod lawyer_file;
+#[cfg(test)]
 #[path = "host/titles.rs"]
 mod titles;
 #[cfg(test)]

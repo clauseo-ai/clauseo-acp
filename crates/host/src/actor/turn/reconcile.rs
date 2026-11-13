@@ -49,7 +49,7 @@ use super::{JobKind, LogFor, Then, TurnInput, TurnJob, end, matter_of, queue, st
 use crate::error::Error;
 use crate::log_file::Cause;
 use crate::matter_worker::{MatterJob, TurnCheckpoint};
-use crate::sent::{CommandText, SentView, TurnPaths};
+use crate::sent::{CallFields, SentView, TurnPaths};
 
 /// A started turn's repair, while its after-turn checkpoint runs.
 #[derive(Debug)]
@@ -418,17 +418,13 @@ fn turn_paths(log: &[Envelope], turn: TurnId) -> TurnPaths {
             && started.turn == turn
         {
             tools.insert(started.tool_call);
-            paths.note(&started.locations, &started.content);
             let key = started.tool_call.to_string();
-            paths.note_command(&key, &CommandText::of_started(started));
+            paths.note(&key, &CallFields::of_started(started));
         } else if let DomainEvent::ToolCallUpdated(updated) = &envelope.event
             && tools.contains(&updated.tool_call)
         {
-            let locations = updated.patch.locations.as_deref().unwrap_or_default();
-            let content = updated.patch.content.as_deref().unwrap_or_default();
-            paths.note(locations, content);
             let key = updated.tool_call.to_string();
-            paths.note_command(&key, &CommandText::of_patch(&updated.patch));
+            paths.note(&key, &CallFields::of_patch(&updated.patch));
         }
     }
     paths
@@ -541,3 +537,6 @@ fn done(actor: &mut Actor, thread: ThreadId) {
     }
     actor.release(StreamId::Thread(thread));
 }
+
+#[cfg(test)]
+mod paths_tests;

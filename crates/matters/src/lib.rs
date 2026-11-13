@@ -27,7 +27,8 @@
 //!   [`check_protected`] its protected-tree check (matters root, refused trees, on Windows a
 //!   path too deep to start programs in, [`is_too_deep`]);
 //!   [`Matter::before_turn`] and [`Matter::after_turn`] take checkpoints ([`Checkpoint`], with
-//!   its [`CommitId`]; [`Matter::commit_of`] gives any checkpoint's, the root one's included);
+//!   its [`CommitId`]; [`Matter::commit_of`] gives any checkpoint's, the root one's included),
+//!   and [`names_a_write`] says which places a turn's tool call named count as written by it;
 //!   [`Matter::edited_since`] and [`Matter::undo`] undo a step ([`UndoRequest`], [`Undone`]),
 //!   and [`Matter::still_gone`] says which files it deleted are back;
 //!   [`Matter::timeline`] lists the checkpoints, rebuilt from the trailers on open;
@@ -160,6 +161,7 @@ mod walk;
 mod write;
 mod writeback;
 
+pub use diff::names_a_write;
 pub use error::{Error, MissingReason, Refusal};
 pub use folder_scan::{FolderScan, FolderTotals, ScanProgress, scan_folder};
 pub use locks::{

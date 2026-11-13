@@ -44,6 +44,10 @@ mod undo;
 mod own_file;
 
 #[cfg(test)]
+#[path = "matters/written.rs"]
+mod written;
+
+#[cfg(test)]
 #[path = "matters/undo_case.rs"]
 mod undo_case;
 
