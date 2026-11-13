@@ -14,6 +14,12 @@
 //!   and Claude's plans folder are left out by naming their siblings instead, and so are the
 //!   tool results Claude saves in its own project folder. Run folders, matters' notes and other
 //!   matters' Claude projects made after the launch are the accepted residual of these rules.
+//!   On Windows, where Claude has no sandbox, `Bash(…)` and `PowerShell(…)` rules name the same
+//!   targets in every spelling of `<data>` a command may use (`shell_deny.rs`): the own run
+//!   folder, this matter's notes, Claude's plans folder, its tool results and the read-only
+//!   tools stay reachable by a command, and everything else under `<data>`, the folder itself
+//!   too, is denied when a command names it. The rules go to Claude Code in a settings file
+//!   (`agent::launch_settings`), since a busy data folder's rules outgrow a command line.
 //! - The host's auto-deny ([`FenceCheck`]): a permission request whose paths ([`candidates`]:
 //!   the request's locations and diffs, `rawInput`'s path keys and every string in it shaped
 //!   like a path, the path words of a shell command and the targets of its `ln`, and any path

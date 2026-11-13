@@ -12,6 +12,7 @@ use crate::agent::data_fence::LaunchDeny;
 static NO_DENY: LaunchDeny = LaunchDeny {
     spellings: Vec::new(),
     targets: Vec::new(),
+    kept: Vec::new(),
 };
 
 /// The paths of session `id` of the matter at `/Users/l/Clients/A`, with `<data>` under the
