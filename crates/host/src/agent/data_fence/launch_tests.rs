@@ -254,10 +254,18 @@ fn the_sessions_own_tool_results_stay_readable_and_the_rest_of_projects_does_not
             "{file}: {deny:?}"
         );
     }
-    // Another project goes in its group: the start the own project's key does not share.
+    // Another project goes in its group: the shortest start of its key the own project's key
+    // does not share (`-o` beside a Unix `-tmp-…`, `-` beside a Windows `C--…`).
+    let other = "-other-matter";
+    let start = (1..=other.len())
+        .filter_map(|n| other.get(..n))
+        .find(|start| !own.starts_with(start))
+        .unwrap();
     assert!(
-        deny.targets.iter().any(|t| t == &place("-o*/**")),
-        "{deny:?}"
+        deny.targets
+            .iter()
+            .any(|t| t == &place(&format!("{start}*/**"))),
+        "{start}: {deny:?}"
     );
     let later = [
         place("-made-later/s-3.jsonl"),

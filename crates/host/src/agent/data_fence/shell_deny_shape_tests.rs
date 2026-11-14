@@ -18,6 +18,7 @@ use std::collections::BTreeMap;
 use std::ffi::OsString;
 use std::path::PathBuf;
 
+use super::index_tests::Rules;
 use super::tests::Rule;
 use super::windows_shell_deny_rules;
 use crate::agent::data_fence::big_folder::laptop;
@@ -193,33 +194,41 @@ fn candidates(rule: &Rule) -> Vec<String> {
     out
 }
 
-/// The probes of a launch's `rules` for `tool`: per shape, up to [`PER_SHAPE`] of its rules each
-/// with a command it denies (`name`, command, whether no other rule denies it).
-fn probes(rules: &[String], tool: &str, label: &str) -> Vec<(String, String, bool)> {
+/// The probes of a launch's `rules` for `tool`: per shape, up to `per_shape` of its rules, each
+/// with a command it denies (`name`, command, whether no other rule denies it). With `alone`,
+/// the command is one no other rule of the launch denies where one can be found (by the
+/// port); without, the first that the rule denies, and none is said to be alone.
+fn probes(
+    rules: &[String],
+    tool: &str,
+    label: &str,
+    per_shape: usize,
+    alone: bool,
+) -> Vec<(String, String, bool)> {
     let compiled: Vec<Rule> = rules.iter().filter_map(|rule| Rule::new(rule)).collect();
     assert_eq!(compiled.len(), rules.len());
+    let index = alone.then(|| Rules::new(rules));
     let mut shapes: BTreeMap<String, Vec<&Rule>> = BTreeMap::new();
     for rule in compiled.iter().filter(|rule| rule.tool() == tool) {
         shapes.entry(shape(rule)).or_default().push(rule);
     }
     let mut out = Vec::new();
     for (shape, members) in &shapes {
-        for rule in members.iter().take(PER_SHAPE) {
-            let hits: Vec<String> = candidates(rule)
+        for rule in members.iter().take(per_shape) {
+            let mut hits = candidates(rule)
                 .into_iter()
-                .filter(|command| rule.hits(tool, command))
-                .collect();
-            assert!(!hits.is_empty(), "{shape}: no command matches its rule");
-            let alone = |command: &String| {
-                compiled
-                    .iter()
-                    .filter(|other| other.hits(tool, command))
-                    .count()
-                    == 1
+                .filter(|command| rule.hits(tool, command));
+            let first = hits.next();
+            let Some(first) = first else {
+                panic!("{shape}: no command matches its rule");
             };
-            let unique = hits.iter().find(|command| alone(command));
-            let (command, unique) = unique.map_or((&hits[0], false), |command| (command, true));
-            out.push((format!("{label} | {shape}"), command.clone(), unique));
+            let unique = index.as_ref().and_then(|index| {
+                std::iter::once(first.clone())
+                    .chain(hits)
+                    .find(|command| index.count_up_to(tool, command, 2) == 1)
+            });
+            let (command, unique) = unique.map_or((first, false), |command| (command, true));
+            out.push((format!("{label} | {shape}"), command, unique));
         }
     }
     out
@@ -227,11 +236,31 @@ fn probes(rules: &[String], tool: &str, label: &str) -> Vec<(String, String, boo
 
 /// The launches probed: the default data folder and a configured one, each with its whole
 /// permission settings and its Bash rules' probes, and the PowerShell-only rules' probes.
+/// Every shape of the two launches has a rule that denies a command made from it, by the port:
+/// one rule per shape, which finds a rule that loads but never matches (a legacy prefix rule).
+/// The full sweep, with [`PER_SHAPE`] rules a shape, commands no other rule denies and the cases
+/// files for the pinned binary, is [`the_full_rule_shape_sweep`], run on demand.
 #[test]
 fn every_rule_shape_has_a_probe_its_rule_denies() {
+    sweep(1, false);
+}
+
+/// The full sweep (the module doc), for a Claude Code bump or a review: `cargo test -p
+/// clauseo-host --lib -- --ignored the_full_rule_shape_sweep --nocapture`, with
+/// `CLAUSEO_RULE_SHAPES_OUT=<dir>` to write the cases files `scripts/claude-rule-probe` runs.
+#[test]
+#[ignore = "the full sweep, minutes in a debug build: run on demand (its doc)"]
+fn the_full_rule_shape_sweep() {
+    sweep(PER_SHAPE, true);
+}
+
+/// The shapes' probes of the two launches, `per_shape` rules a shape, `alone` as [`probes`].
+fn sweep(per_shape: usize, alone: bool) {
     let dir = TempDir::new("shell-deny-shapes");
     let (deny, _, _) = laptop(dir.path(), 1, 60, "clauseo-lawyer");
-    let out = std::env::var_os("CLAUSEO_RULE_SHAPES_OUT").map(PathBuf::from);
+    let out = std::env::var_os("CLAUSEO_RULE_SHAPES_OUT")
+        .filter(|_| alone)
+        .map(PathBuf::from);
     let mut total = (0, 0);
     for (label, spelling) in [("default", DATA), ("configured", CONFIGURED)] {
         let deny = LaunchDeny {
@@ -242,7 +271,7 @@ fn every_rule_shape_has_a_probe_its_rule_denies() {
         let mut every = claude_deny_rules_on(&deny, true);
         every.extend(shell.iter().cloned());
         let allow = claude_allow_rules(&deny);
-        let bash = probes(&shell, "Bash", label);
+        let bash = probes(&shell, "Bash", label, per_shape, alone);
         // The PowerShell rules no Bash rule spells, as Bash rules of the same content.
         let bash_contents: std::collections::HashSet<&str> = shell
             .iter()
@@ -254,7 +283,13 @@ fn every_rule_shape_has_a_probe_its_rule_denies() {
             .filter(|content| !bash_contents.contains(content))
             .map(|content| format!("Bash({content}"))
             .collect();
-        let powershell = probes(&only, "Bash", &format!("{label} PowerShell-only"));
+        let powershell = probes(
+            &only,
+            "Bash",
+            &format!("{label} PowerShell-only"),
+            per_shape,
+            alone,
+        );
         let shapes = |probes: &[(String, String, bool)]| {
             probes
                 .iter()

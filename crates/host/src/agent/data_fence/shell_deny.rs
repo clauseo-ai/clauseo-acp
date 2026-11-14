@@ -534,6 +534,9 @@ fn render(pieces: &[Piece], end: bool) -> String {
 #[path = "shell_deny_cross_tests.rs"]
 mod cross_tests;
 #[cfg(test)]
+#[path = "shell_deny_index_tests.rs"]
+mod index_tests;
+#[cfg(test)]
 #[path = "shell_deny_launch_tests.rs"]
 mod launch_tests;
 #[cfg(test)]
