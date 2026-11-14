@@ -311,26 +311,96 @@ fn the_worst_realistic_launch_fits_the_settings_file() {
     assert!(shed < full);
 }
 
-/// The shed decision (`loads::profile::shell_rules_within`), driven off Windows: within its
-/// budget a launch keeps the variable forms; past it, it gets the rules without them.
+/// The shed decision (`loads::profile::shell_rules_within`), driven off Windows on stage C's
+/// case: 1,000 matters and a configured folder under both `Local` and `Roaming` (two spellings).
+/// At the real budget it sheds exactly when the rules with the variable forms would pass it;
+/// past a budget just under them, the launch logs the shed (fields only) and gets the rules
+/// without them, which still deny Claude's credentials in every spelling.
 #[test]
 fn a_launch_past_its_budget_sheds_the_variable_forms() {
-    use crate::agent::loads::profile::shell_rules_within;
-    let deny = worst();
-    let full = windows_shell_deny_rules(&deny, &long_env);
-    let shed = windows_shell_deny_rules_without_variables(&deny, &long_env);
-    let size = serde_json::to_string(&full).unwrap().len();
-    assert_eq!(
-        shell_rules_within(&deny, &long_env, 1000, 1000 + size),
-        full
-    );
-    let past = shell_rules_within(&deny, &long_env, 1001, 1000 + size);
-    assert_eq!(past, shed);
-    let variable = |rule: &String| {
-        ["%APPDATA%", "$env:", "~/", "$HOME"]
-            .iter()
-            .any(|v| rule.contains(v))
+    use crate::agent::loads::profile::{SHED_AT, shell_rules_within};
+    let dir = TempDir::new("shell-deny-shed");
+    let (deny, _, _) = laptop(dir.path(), 11, 1000, "alexandra.montgomery-smith");
+    let home = r"C:\Users\alexandra.montgomery-smith\AppData";
+    let spellings = [
+        format!(r"{home}\Local\Clauseo Data"),
+        format!(r"{home}\Roaming\Clauseo Data"),
+    ];
+    let deny = LaunchDeny {
+        spellings: spellings.iter().map(PathBuf::from).collect(),
+        ..deny
     };
-    assert!(full.iter().any(variable));
-    assert!(!past.iter().any(variable));
+    let size = |rules: &[String]| serde_json::to_string(rules).unwrap().len();
+    let spent = size(&claude_deny_rules_on(&deny, true));
+    let full = windows_shell_deny_rules(&deny, &long_env);
+    let log = Log::default();
+    let dispatch = log.dispatch();
+    let shed = windows_shell_deny_rules_without_variables(&deny, &long_env);
+    eprintln!(
+        "two spellings, 1,000 matters: {} B with the variable forms, {} B without (budget \
+         {SHED_AT})",
+        spent + size(&full),
+        spent + size(&shed),
+    );
+    let real = shell_rules_within(&deny, &long_env, spent, SHED_AT);
+    let over = spent + size(&full) > SHED_AT;
+    assert_eq!(&real, if over { &shed } else { &full });
+    assert!(spent + size(&real) < SHED_AT);
+    let budget = spent + size(&full) - 1;
+    let got = tracing::dispatcher::with_default(&dispatch, || {
+        shell_rules_within(&deny, &long_env, spent, budget)
+    });
+    assert_eq!(got, shed);
+    let logged = log.text();
+    assert!(
+        logged.contains("shed=\"vars\"") || logged.contains("shed=vars"),
+        "{logged}"
+    );
+    assert!(
+        logged.contains("budget=") && !logged.contains("Clauseo Data"),
+        "{logged}"
+    );
+    let rules = Rules::new(&got);
+    for spelling in &spellings {
+        let file = format!(r"{spelling}\agents\claude-acp\home\.credentials.json");
+        for tool in ["Bash", "PowerShell"] {
+            assert!(
+                rules.denies(tool, &format!(r#"type "{file}""#)),
+                "{tool}: {file}"
+            );
+        }
+    }
+    // Within its budget a launch keeps them.
+    let roomy = shell_rules_within(&deny, &long_env, 0, usize::MAX);
+    assert_eq!(roomy, full);
+}
+
+/// A log sink for one test's `tracing` output.
+#[derive(Clone, Default)]
+struct Log(std::sync::Arc<std::sync::Mutex<Vec<u8>>>);
+
+impl Log {
+    fn dispatch(&self) -> tracing::Dispatch {
+        let sink = self.clone();
+        let subscriber = tracing_subscriber::fmt()
+            .with_ansi(false)
+            .with_writer(move || sink.clone())
+            .finish();
+        tracing::Dispatch::new(subscriber)
+    }
+
+    fn text(&self) -> String {
+        String::from_utf8(self.0.lock().unwrap().clone()).unwrap()
+    }
+}
+
+impl std::io::Write for Log {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.0.lock().unwrap().extend_from_slice(buf);
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
 }

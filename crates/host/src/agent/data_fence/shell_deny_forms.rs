@@ -130,7 +130,8 @@ pub(super) fn forms(
             match *name {
                 "HOME" => {
                     leads.push((format!("$HOME/{rest_forward}"), &FORWARD, Shells::Both));
-                    leads.push((format!("${{HOME}}/{rest_forward}"), &FORWARD, Shells::Bash));
+                    // PowerShell reads `${HOME}` as its `$HOME`, braced.
+                    leads.push((format!("${{HOME}}/{rest_forward}"), &FORWARD, Shells::Both));
                     leads.push((format!("~/{rest_forward}"), &FORWARD, Shells::Both));
                     // Claude Code puts its `HOME` in place of a Bash `$HOME` the shell would
                     // expand before it matches (`$HOME/x` is `C:\Users\asha/x`), so the

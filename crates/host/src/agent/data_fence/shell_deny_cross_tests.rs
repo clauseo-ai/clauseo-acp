@@ -8,7 +8,7 @@
 use std::ffi::OsString;
 use std::path::PathBuf;
 
-use super::tests::{Rule, prepare};
+pub(super) use super::index_tests::Rules;
 use super::windows_shell_deny_rules;
 use crate::agent::data_fence::LaunchDeny;
 use crate::agent::data_fence::big_folder::{self, OWN_RUN, PREFIX_RUN, matter_id};
@@ -26,34 +26,6 @@ pub(super) fn env(name: &str) -> Option<OsString> {
         "APPDATA" => Some(r"C:\Users\clauseo-lawyer\AppData\Roaming".into()),
         "USERPROFILE" | "HOME" => Some(r"C:\Users\clauseo-lawyer".into()),
         _ => None,
-    }
-}
-
-/// Rules compiled once for [`Rules::denies`], as Claude Code reads them ([`super::tests::Rule`]).
-pub(super) struct Rules {
-    bash: Vec<Rule>,
-    powershell: Vec<Rule>,
-}
-
-impl Rules {
-    pub(super) fn new(rules: &[String]) -> Self {
-        let (powershell, bash): (Vec<Rule>, Vec<Rule>) = rules
-            .iter()
-            .filter_map(|rule| Rule::new(rule))
-            .partition(|rule| rule.tool() == "PowerShell");
-        Self { bash, powershell }
-    }
-
-    /// Whether a rule of `tool` matches `command` (PowerShell's in any case).
-    pub(super) fn denies(&self, tool: &str, command: &str) -> bool {
-        let powershell = tool == "PowerShell";
-        let rules = if powershell {
-            &self.powershell
-        } else {
-            &self.bash
-        };
-        let text = prepare(command, powershell);
-        rules.iter().any(|rule| rule.hits_prepared(&text))
     }
 }
 

@@ -8,7 +8,8 @@
 //! `hooks`, `skills`, `workflows`, `commands`, `agents`, `routines`, `rules`, `output-styles`,
 //! `scheduled_tasks.json`, `launch.json`, `CLAUDE.md`, `projects`, `daemon.json`,
 //! `policy-limits.json`, `backups`, `local`, `jobs`, `seed-admin`, `daemon`, `loop.md`,
-//! `cowork_plugins`) and its `userConfigDir` folders (`themes`, `uploads`,
+//! `cowork_plugins`, `todos`, `statsig`, `logs`, `access-audit`, `remote-settings-consent.json`,
+//! `remote-settings-helper-consent`) and its `userConfigDir` folders (`themes`, `uploads`,
 //! `mcp-skill-archives`, `usage-data`, `mcp-discovery-cache`). These load instructions,
 //! settings, hooks, memory, environment, plugins, jobs or code into every later session, so
 //! every matter, or are Claude Code's own state, which its tools never need.
@@ -19,7 +20,7 @@
 //! (`super::DENIED`): its tool results are large outputs the model must Read back.
 
 /// The names under Claude's config folder, as rule patterns under it (a folder as `name/**`).
-pub(crate) const CLAUDE_HOME: [&str; 68] = [
+pub(crate) const CLAUDE_HOME: [&str; 73] = [
     ".claude.json*",
     ".config.json",
     ".credentials.json",
@@ -29,6 +30,7 @@ pub(crate) const CLAUDE_HOME: [&str; 68] = [
     ".update.lock",
     "CLAUDE.md",
     "agent-memory/**",
+    "access-audit/**",
     "agents/**",
     "backups/**",
     "cache/**",
@@ -55,6 +57,7 @@ pub(crate) const CLAUDE_HOME: [&str; 68] = [
     "keybindings.json",
     "launch.json",
     "local/**",
+    "logs/**",
     "loop.md",
     "mcp-discovery-cache/**",
     "mcp-needs-auth-cache.json",
@@ -62,9 +65,13 @@ pub(crate) const CLAUDE_HOME: [&str; 68] = [
     "memory/**",
     "output-styles/**",
     "plugins/**",
-    "policy-limits.json",
+    // With its signature files (`policy-limits.json.signature.json`, …).
+    "policy-limits.json*",
     "remote-control/**",
     "remote-settings.json",
+    "remote-settings-consent.json",
+    "remote-settings-helper-consent",
+    "remote-settings-helper-consent/**",
     "routines/**",
     "rules/**",
     "scheduled_tasks.json",

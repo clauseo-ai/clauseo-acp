@@ -49,7 +49,9 @@ file to `probe.py`.
 They also write one probe per rule shape, so that a rule which loads but never matches shows
 up as a probe the binary lets through. The shapes cover how the data folder is written, what
 the rule names, and its separators and boundary characters. Run
-`CLAUSEO_RULE_SHAPES_OUT=<dir> cargo test -p clauseo-host --lib shape_tests`. It writes
+`CLAUSEO_RULE_SHAPES_OUT=<dir> cargo test -p clauseo-host --lib -- --ignored the_full_rule_shape_sweep`
+(the full sweep, ignored in normal runs; the normal test probes one rule a shape through the
+port only). It writes
 `default.json`, `configured.json` and `configured-powershell.json`; the last holds the
 PowerShell-only rules as Bash rules of the same content. Every case must come back denied.
 Thousands of probes take a while, so split a file into parts and run them side by side.

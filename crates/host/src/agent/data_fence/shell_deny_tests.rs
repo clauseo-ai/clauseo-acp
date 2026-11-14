@@ -226,6 +226,17 @@ impl Rule {
         &self.tool
     }
 
+    /// The longest literal text a command must hold to match, or `None` for a prefix rule.
+    pub(super) fn key(&self) -> Option<&str> {
+        if self.prefix.is_some() {
+            return None;
+        }
+        self.parts
+            .iter()
+            .max_by_key(|part| part.len())
+            .map(String::as_str)
+    }
+
     /// The literal texts between the pattern's `*`s (none for a prefix rule).
     pub(super) fn parts(&self) -> &[String] {
         &self.parts
@@ -309,10 +320,7 @@ pub(super) fn matches(rule: &str, command: &str) -> bool {
 
 /// Whether any of `rules` for `tool` matches `command`.
 pub(super) fn denied_by(rules: &[String], tool: &str, command: &str) -> bool {
-    rules
-        .iter()
-        .filter(|rule| rule.starts_with(&format!("{tool}(")))
-        .any(|rule| matches(rule, command))
+    super::index_tests::cached(rules).denies(tool, command)
 }
 
 fn denied(tool: &str, command: &str) -> bool {
