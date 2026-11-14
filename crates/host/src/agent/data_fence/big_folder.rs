@@ -143,8 +143,8 @@ pub(crate) const LAPTOP_RUN: &str = "01a1d673-4d5a-776d-9061-201035c7d75e-1";
 /// A data folder like the laptop's, under `root`, for the user `user`: the own matter, run and
 /// project (`LAPTOP_*`), `matters` seeded matters with random v4 ids (`[guid]::NewGuid()`,
 /// from `seed`) and a project each (`C--Users-<user>-Documents-Matters-Seeded-Matter-NN`),
-/// two other runs, and what every big folder holds. Returns the launch's rules, the own
-/// project's key and the seeded ids.
+/// two other runs, and what every big folder holds. Returns the launch's rules (with its own work
+/// and notes folders, `LaunchDeny::own_reads`), the own project's key and the seeded ids.
 pub(crate) fn laptop(
     root: &Path,
     seed: u64,
@@ -212,9 +212,8 @@ pub(crate) fn laptop(
         home.join("plans"),
     ];
     let project = vec![home.join("projects").join(&own_key)];
-    (
-        launch_deny(vec![data.clone()], &data, &own, &project),
-        own_key,
-        ids,
-    )
+    let mut deny = launch_deny(vec![data.clone()], &data, &own, &project);
+    let work = data.join("run").join(LAPTOP_RUN).join("work");
+    deny.own_reads = super::own_reads(&data, &[&work, &own[1]]);
+    (deny, own_key, ids)
 }

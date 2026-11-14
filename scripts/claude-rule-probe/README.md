@@ -61,3 +61,32 @@ Claude Code puts its own `HOME` in place of a Bash `$HOME` that the shell would 
 (unquoted or in double quotes) before it matches. So a rule that writes `$HOME/…` literally
 matches only `'$HOME/…'`, and the launch also writes the home folder's value (`C:\Users\…/…`).
 For the host's generated cases, set `PROBE_HOME='C:\Users\clauseo-lawyer'`, the laptop's home.
+
+## Auto mode and the classifiers
+
+A case may set `"mode": "auto"`. Auto mode needs no gate offline. In auto, Claude Code 2.1.293
+decides what no rule settles in one of two ways:
+
+- **The local classifier.** A command that asks goes to Claude Code's own classifier, a
+  separate Messages request. It has no tools, and its system prompt starts "You are a security
+  monitor for autonomous AI coding agents." `fakeapi.py` logs every request (`requests.jsonl` in
+  the probe's folder), spots this one, and answers "allow". With `CLASSIFIER_VERDICT=block` it
+  answers "block". A case's `"classifier": true|false` checks whether this request was sent.
+- **The server-side classifier.** A command allowed only because it is read-only (`ls`, `cat`
+  in a working folder), or because the sandbox wraps it, goes to the server instead
+  (`nTr`, `Hln`). Its verdict comes back with the reply that carried the tool use. A file's
+  `"server_verdict": "flagged"` (or `"not_flagged"`) makes the fake API send that verdict
+  (`SERVER_VERDICT`). Without one, Claude Code takes the server as not classifying for the rest
+  of the session.
+
+A command an allow rule matches skips both. A case's `"ran": true|false` checks the verdict:
+`DENIED` (a deny rule), `REFUSED` (a path check, a safety check, a classifier, or a prompt that
+`-p` refuses), or `ran`. `cases.json` ends with the own folders' allow: what a rule allows runs,
+and a sibling, a chained part or another command is refused or denied. To write a launch-sized
+pair of files, run
+`CLAUSEO_OWN_ALLOW_PROBE_OUT=<file> cargo test -p clauseo-host --lib probe_cases_for_the_pinned_binary`.
+It writes `<file>`, where the server flags every call, and `<file>.local`, where the server
+sends no verdict, so a command no rule allows asks the local classifier. Off Windows a `C:\…`
+path is a relative one, inside the working folder. Git Bash's `/c/…` is absolute there, so
+those cases are left out. An unquoted trailing `\` goes to a classifier: Claude Code reads its
+own parse, not the text.

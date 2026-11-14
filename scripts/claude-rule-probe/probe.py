@@ -17,6 +17,17 @@ PROBE_HOME sets the HOME Claude Code expands $HOME to)
 cases.json: {"settings": {...Claude Code flag settings...},
              "expect_skipped": ["Bash(...)", ...],
              "cases": [{"name": "...", "tool": "Bash", "command": "...", "denied": true}, ...]}
+A case may also set "mode" (a --permission-mode, default "default"; "auto" needs no gate offline:
+2.1.293 enables auto mode for the fake API's default model) and "classifier": true/false, checked
+against whether Claude Code sent the fake API an auto mode classifier request during the case
+(fakeapi.py logs every request to a file and answers the classifier "allow", or "block" with
+CLASSIFIER_VERDICT=block in the environment). Verdicts: DENIED (a deny rule; the only one
+"denied" checks), REFUSED (a path check, a classifier block, or a prompt -p mode refuses), ran.
+A case's "ran": true/false checks that verdict is (or is not) ran. A file's "server_verdict"
+("flagged" or "not_flagged") has the fake API send the server-side classifier's verdict with each
+tool use (fakeapi.py's SERVER_VERDICT): "flagged" refuses whatever Claude Code allowed only as
+read-only, and lets through what a rule allowed. PROBE_VERBOSE=1 prints the tool result of each case. A case may give "input" instead of
+"command" (any tool's input, e.g. {"tool": "Read", "input": {"file_path": "/x"}}).
 Prints the rule counts and one line per case (DENIED or ran), and exits 1 on any
 disagreement. A case whose "denied" is null is reported, not checked. Only the Bash tool exists
 off Windows; a PowerShell case is reported as "no tool".
@@ -31,10 +42,17 @@ settings = os.path.join(work, "settings.json")
 json.dump(spec["settings"], open(settings, "w"))
 cmd_file = os.path.join(work, "cmd.json")
 out_file = os.path.join(work, "out.txt")
+req_log = os.path.join(work, "requests.jsonl")
 with socket.socket() as probe_socket:
     probe_socket.bind(("127.0.0.1", 0))
     port = probe_socket.getsockname()[1]
-server = subprocess.Popen([sys.executable, os.path.join(here, "fakeapi.py"), cmd_file, out_file, str(port)])
+# "server_verdict" (flagged or not_flagged): the server-side classifier's verdict the fake API
+# sends with each tool use (fakeapi.py's SERVER_VERDICT), as the first-party API does in auto mode.
+server_env = dict(os.environ)
+if spec.get("server_verdict"):
+    server_env["SERVER_VERDICT"] = spec["server_verdict"]
+server = subprocess.Popen([sys.executable, os.path.join(here, "fakeapi.py"), cmd_file, out_file, str(port),
+                           req_log], env=server_env)
 time.sleep(0.8)
 home = os.path.join(work, "home")
 os.makedirs(home)
@@ -62,6 +80,18 @@ def canon(rule):
         return rule
     raw = rule[start + 1:end]
     return rule[:start], raw.replace("\\(", "(").replace("\\)", ")").replace("\\\\", "\\")
+
+
+def result_lines(result):
+    """The tool results fakeapi.py recorded (one JSON list per tool_result message)."""
+    lines = []
+    for raw in result.splitlines():
+        try:
+            parsed = json.loads(raw)
+        except ValueError:
+            continue
+        lines += [str(item) for item in parsed] if isinstance(parsed, list) else []
+    return lines
 
 
 def kept_rules():
@@ -117,21 +147,45 @@ try:
         print(f"    doctor: {line.strip()[:300]}")
     for case in spec["cases"]:
         json.dump(case, open(cmd_file, "w"))
-        if os.path.exists(out_file):
-            os.remove(out_file)
+        for stale in (out_file, req_log):
+            if os.path.exists(stale):
+                os.remove(stale)
+        mode = case.get("mode", "default")
         subprocess.run([binary, "-p", "go", "--settings", settings, "--max-turns", "2",
-                        "--permission-mode", "default"],
+                        "--permission-mode", mode],
                        env=env, cwd=work, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
                        stderr=subprocess.DEVNULL, timeout=120)
         result = open(out_file).read() if os.path.exists(out_file) else ""
         if "NO TOOL" in result:
             verdict = "no tool"
         else:
-            verdict = "DENIED" if "has been denied" in result else "ran"
+            # DENIED: a deny rule refused it ("denied" checks only this). REFUSED: anything else
+            # stopped it before the shell: a path check, an auto mode classifier block, or a
+            # permission prompt, which -p mode refuses.
+            # Every refusal is an is_error result; so is a command's own non-zero exit, which
+            # Claude Code reports as "Exit code N".
+            refused = any(line.startswith("ERROR: ") and not line.startswith("ERROR: Exit code")
+                          for line in result_lines(result))
+            verdict = "DENIED" if "has been denied" in result else "REFUSED" if refused else "ran"
         expected = case.get("denied")
         ok = expected is None or verdict == "no tool" or (verdict == "DENIED") == expected
+        requests = []
+        if os.path.exists(req_log):
+            requests = [json.loads(line) for line in open(req_log) if line.strip()]
+        classified = any(r.get("classifier") for r in requests)
+        want_classifier = case.get("classifier")
+        if want_classifier is not None and verdict != "no tool":
+            ok = ok and classified == want_classifier
+        want_ran = case.get("ran")
+        if want_ran is not None and verdict != "no tool":
+            ok = ok and (verdict == "ran") == want_ran
         failed += 0 if ok else 1
-        print(f"{'ok ' if ok else 'BAD'} {verdict:7} {case['tool']:10} {case.get('name', '')}: {case['command']}")
+        note = f" {mode}" if mode != "default" else ""
+        note += " classifier" if classified else ""
+        print(f"{'ok ' if ok else 'BAD'} {verdict:7} {case['tool']:10} {case.get('name', '')}: {case.get('command', case.get('input'))}"
+              f"{'  [' + note.strip() + ']' if note else ''}")
+        if os.environ.get("PROBE_VERBOSE") == "1":
+            print(f"    {result.strip()[:300]}")
 finally:
     server.terminate()
     server.wait()

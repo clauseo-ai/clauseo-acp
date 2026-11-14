@@ -89,6 +89,10 @@ pub(crate) struct LaunchDeny {
     /// (`super::windows_shell_deny_rules`) end a target's name at a name boundary when one of
     /// these could start with it.
     pub(crate) kept: Vec<String>,
+    /// The session's own work and notes folders, as patterns in the same form
+    /// ([`own_reads`]): what Claude may list and read with no question to the auto-mode
+    /// classifier (`super::own_allow_rules`). None before the launch prep has them.
+    pub(crate) own_reads: Vec<String>,
 }
 
 impl LaunchDeny {
@@ -111,6 +115,7 @@ impl LaunchDeny {
             spellings,
             targets,
             kept,
+            own_reads: Vec::new(),
         }
     }
 }
@@ -148,6 +153,24 @@ pub(crate) fn launch_deny(
         })
         .collect();
     deny
+}
+
+/// `folders` (the session's own work and notes folders) as patterns under `data`,
+/// `/`-separated and glob-escaped ([`LaunchDeny::own_reads`]); one that is not under `data`,
+/// is `data` itself or holds anything but names that are UTF-8 gets none.
+pub(crate) fn own_reads(data: &Path, folders: &[&Path]) -> Vec<String> {
+    let mut out = Vec::new();
+    for folder in folders {
+        let Some(names) = folder.strip_prefix(data).ok().and_then(names) else {
+            continue;
+        };
+        let pattern: Vec<String> = names.iter().map(|name| escape(name)).collect();
+        let pattern = pattern.join("/");
+        if !pattern.is_empty() && !out.contains(&pattern) {
+            out.push(pattern);
+        }
+    }
+    out
 }
 
 /// The patterns that deny every entry of `data` that exists now, except the `own` places of
