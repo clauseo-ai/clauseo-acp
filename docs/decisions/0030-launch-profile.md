@@ -586,20 +586,33 @@ change from the settings window as `ui` does. R24 (PR5) adds a third to the patc
   allow rule matches skips both (`fTr` returns the rule's allow; `nTr` never reroutes it).
   - **Scope** (`data_fence/own_allow.rs`, in every launch's `permissions.allow` beside the
     built-in skills' `Read`): `Read(//<work>/**)` and `Read(//<notes>/**)` for each spelling of
-    `<data>`; and `ls`, `dir`, `cat`, `head` (Bash) and `Get-ChildItem`, `Get-Content`
+    `<data>`; and `ls`, `cat`, `head` (Bash) and `Get-ChildItem`, `Get-Content`
     (PowerShell, which matches their aliases too), each followed by anything, then the folder's
     path written whole with one separator throughout (`C:\…`, `C:/…`, Bash's `C:\\…` and
     `/c/…`), then the end or a separator, a quote or a space and anything. A rule starts with
     the command's name. PowerShell rules on Windows alone; elsewhere the Bash rules name the
-    folders' paths with `/`. 240 shell rules and 35 KB of allow rules for the default folder,
-    49 KB for a configured one spelled two ways (the worst realistic launch: 74 KB, 1.51 MB in
-    all, under the 1.8 MiB at which a launch sheds its variable forms, which counts them now).
+    folders' paths with `/`. 192 shell rules and 28 KB of allow rules for the default folder,
+    39 KB for a configured one spelled two ways (the worst realistic launch: about 60 KB, 1.5 MB
+    in all, under the 1.8 MiB at which a launch sheds its variable forms, which counts them now).
+  - **Only commands whose paths Claude Code checks.** Each command is in 2.1.293's table of the
+    commands whose path arguments it checks against the working folders (Bash: `var
+    Jye=Object.keys(D9),W_r={cd:"change directories to",ls:"list files in",…}`, 54 commands;
+    PowerShell: `pt={"set-content":{operationType:"write",…},…,"get-childitem":{…}}`, read by
+    `Ft`; read from `claude-agent-sdk-linux-x64` 0.3.293, names minified per build, so found by
+    the strings). Any other command passes that check ("Command '…' is not a path-restricted
+    command"). The first build of this allow also had Bash's `dir` (Git Bash ships one), which
+    is not in the table: `dir <any folder> <own notes>` listed any folder with no classifier,
+    the security review's High. It is gone, and a test keeps every command in the table.
   - **Why so narrow is enough.** A deny rule beats an allow, on the whole command and on each
     part, so every protected place a command names beside an own path is still denied. A
     compound command is allowed only when every part is; `$( )`, backticks, a variable, a
     function, `eval`, a subshell, and in PowerShell a subexpression, parenthesis, script block
-    or redirection ask whatever the rules. A Bash redirection to a file and a path outside the
-    working folders ask whatever the rule, and an environment prefix other than Claude Code's
+    or redirection ask whatever the rules. A Bash redirection to a file and, for each command
+    here, every path argument outside the working folders ask whatever the rule (`ls`, `cat`
+    and `head` take every argument from the first that is not a flag as a path, the cmdlets
+    every positional and path argument; checked off Windows with `ls -la /etc <own>`,
+    `cat /etc/hostname <own>\x`, `head -n 3 /etc/passwd <own>\x`), and an environment
+    prefix other than Claude Code's
     safe ones (`PATH=…`) matches no rule. Each PowerShell call is a fresh `pwsh -NoProfile`, so
     no function from an earlier call can stand in for `Get-ChildItem`.
   - **Residual, accepted.** The other words of an allowed command are anything, so a second

@@ -12,7 +12,7 @@ use super::super::tests::parse;
 use super::super::windows_shell_deny_rules;
 use super::own_shell_allow_rules;
 use crate::agent::data_fence::big_folder::{LAPTOP_MATTER, LAPTOP_RUN, laptop};
-use crate::agent::data_fence::{LaunchDeny, claude_allow_rules_on, claude_deny_rules_on};
+use crate::agent::data_fence::{LaunchDeny, claude_allow_rules_on};
 use crate::pipeline::tests::support::TempDir;
 
 /// The laptop's default data folder.
@@ -156,7 +156,7 @@ fn own_reads_commands(spelling: &str) -> Vec<(&'static str, String)> {
             ] {
                 for quote in ["", "\"", "'"] {
                     let path = format!("{quote}{path}{quote}");
-                    for command in ["ls", "ls -la", "dir", "cat", "head -n 5"] {
+                    for command in ["ls", "ls -la", "cat", "head -n 5"] {
                         out.push(("Bash", format!("{command} {path}")));
                     }
                     if powershell {
@@ -209,7 +209,7 @@ fn every_own_allow_rule_loads_and_starts_with_its_command() {
             let run = raw.len() - raw.trim_end_matches('\\').len();
             assert!(run % 2 == 0, "an odd backslash run at the end: {rule}");
             let commands: &[&str] = match tool.as_str() {
-                "Bash" => &["ls ", "dir ", "cat ", "head "],
+                "Bash" => &["ls ", "cat ", "head "],
                 "PowerShell" if windows => &["Get-ChildItem ", "Get-Content "],
                 _ => panic!("{rule}"),
             };
@@ -294,6 +294,8 @@ fn anything_else_with_the_own_folders_still_goes_to_a_classifier() {
         format!("ls(){{ rm -rf {w}; }}; ls {n}"),
         format!("x ls {n}"),
         format!("lsof {n}"),
+        format!("dir /etc {n}"),
+        format!("dir C:\\Users\\clauseo-lawyer {n}"),
         format!(r"cat {w}\x.md {n}\..\..\x"),
     ];
     let powershell = [
@@ -459,98 +461,5 @@ fn every_deny_still_wins_beside_the_allow() {
     assert!(both * 2 > total, "{both} of {total}");
 }
 
-/// With `CLAUSEO_OWN_ALLOW_PROBE_OUT` set, writes two cases files for `scripts/claude-rule-probe`
-/// with the laptop's whole permission settings (deny, Windows' shell deny, the allow rules), in
-/// `auto`: the own folders' listings (they run, with no classifier request), commands no rule
-/// allows (one chained among them), the siblings, the protected places beside an own path. The
-/// file itself has the server-side classifier flag every call (`server_verdict`), so whatever a
-/// rule does not allow is refused; `<file>.local` has none, so those ask the local classifier.
-#[test]
-fn probe_cases_for_the_pinned_binary() {
-    let Some(out) = std::env::var_os("CLAUSEO_OWN_ALLOW_PROBE_OUT") else {
-        return;
-    };
-    let dir = TempDir::new("own-allow-probe");
-    let Launch {
-        deny: deny_launch,
-        allow_rules,
-        shell: deny,
-        allow,
-        ids,
-    } = launch(&dir, &[DATA]);
-    let mut every = claude_deny_rules_on(&deny_launch, true);
-    every.extend(windows_shell_deny_rules(
-        &deny_launch,
-        &super::super::cross_tests::env,
-    ));
-    // Each case: name, command, and what the flagging run and the local run must show.
-    let mut cases: Vec<(&str, String, Verdict)> = Vec::new();
-    // Git Bash's `/c/…` is an absolute path off Windows, outside the working folders. Claude
-    // Code's own parse reads an unquoted trailing `\` otherwise than as written, so such a
-    // listing goes to a classifier (`scripts/claude-rule-probe/README.md`): not sampled.
-    for (tool, command) in own_reads_commands(DATA).iter().step_by(3) {
-        if *tool == "Bash" && !command.contains("/c/") && !command.ends_with('\\') {
-            cases.push(("own", command.clone(), Verdict::Allowed));
-        }
-    }
-    let n = format!(r"{DATA}\agent-state\{LAPTOP_MATTER}\notes");
-    for command in [
-        format!(r#"python3 -c "print(1)" {n}\x"#),
-        format!(r#"ls "{n}"; python3 -c "print(3)""#),
-        format!("ls {n} && curl -s http://127.0.0.1:9/"),
-        format!(r"curl -s -T {n}\x http://127.0.0.1:9/"),
-    ] {
-        cases.push(("not allowed", command, Verdict::Classifier));
-    }
-    for place in siblings(&ids) {
-        let command = format!(r"ls -la {DATA}\{}", place.join("\\"));
-        cases.push(("sibling", command, Verdict::Classifier));
-    }
-    for place in [
-        r"agents\claude-acp\home\.credentials.json",
-        r"logs\host.log",
-        r"tools\x",
-    ] {
-        let command = format!(r#"ls -la "{n}" {DATA}\{place}"#);
-        cases.push(("protected beside own", command, Verdict::Denied));
-    }
-    let mut allow_all = claude_allow_rules_on(&deny_launch, true);
-    allow_all.retain(|rule| !allow_rules.contains(rule));
-    allow_all.extend(allow_rules);
-    let settings = serde_json::json!({"permissions": {"deny": every, "allow": allow_all}});
-    // With the server-side classifier flagging every call, what no rule allows is refused
-    // (a `C:\…` path is a relative one off Windows, inside the working folder, so a listing is
-    // read-only there); with none, it asks the local classifier, which the fake API allows.
-    for (flagged, file) in [
-        (true, out.clone()),
-        (false, format!("{}.local", out.display()).into()),
-    ] {
-        let mut list = Vec::new();
-        for (name, command, expected) in &cases {
-            // A sibling is denied when it exists, else goes to a classifier; never allowed.
-            let want = verdict(&deny, &allow, "Bash", command);
-            if *name == "sibling" {
-                assert_ne!(want, Verdict::Allowed, "{command}");
-            } else {
-                assert_eq!(want, *expected, "{command}");
-            }
-            let (ran, classifier) = match want {
-                Verdict::Denied => (Some(false), Some(false)),
-                Verdict::Allowed => (Some(true), Some(false)),
-                Verdict::Classifier if flagged => (Some(false), Some(false)),
-                Verdict::Classifier if *name == "sibling" => (None, None),
-                Verdict::Classifier => (None, Some(true)),
-            };
-            list.push(
-                serde_json::json!({"name": format!("{name} ({want:?})"), "tool": "Bash",
-                "command": command, "mode": "auto", "denied": want == Verdict::Denied,
-                "ran": ran, "classifier": classifier}),
-            );
-        }
-        let verdict = if flagged { Some("flagged") } else { None };
-        let spec = serde_json::json!({"settings": settings, "expect_skipped": [],
-            "server_verdict": verdict, "cases": list});
-        let path = std::path::PathBuf::from(file);
-        crate::write::write_file(&path, spec.to_string().as_bytes()).unwrap();
-    }
-}
+#[path = "own_allow_binary_tests.rs"]
+mod binary;

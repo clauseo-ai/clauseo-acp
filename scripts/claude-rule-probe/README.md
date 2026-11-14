@@ -82,7 +82,11 @@ decides what no rule settles in one of two ways:
 A command an allow rule matches skips both. A case's `"ran": true|false` checks the verdict:
 `DENIED` (a deny rule), `REFUSED` (a path check, a safety check, a classifier, or a prompt that
 `-p` refuses), or `ran`. `cases.json` ends with the own folders' allow: what a rule allows runs,
-and a sibling, a chained part or another command is refused or denied. To write a launch-sized
+and a sibling, a chained part or another command is refused or denied. So is a path outside the
+working folders beside the own one (`/etc`, absolute off Windows as `C:\…` is on it), since
+`ls`, `cat` and `head` are in Claude Code's table of path-checked commands. Its last case shows
+why only those may have a rule: `dir` is not in the table, so a `dir` rule lets `dir /etc <own>`
+through. To write a launch-sized
 pair of files, run
 `CLAUSEO_OWN_ALLOW_PROBE_OUT=<file> cargo test -p clauseo-host --lib probe_cases_for_the_pinned_binary`.
 It writes `<file>`, where the server flags every call, and `<file>.local`, where the server
