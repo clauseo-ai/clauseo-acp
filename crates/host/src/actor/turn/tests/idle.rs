@@ -194,7 +194,10 @@ fn an_idle_agent_stops_at_the_limit_on_stdin_close_and_shows_idle_stopped() {
 
     advance(&mut rig, IDLE_LIMIT.checked_sub(MS).unwrap());
     assert!(live(&rig.actor, thread), "stopped before the limit");
-    advance(&mut rig, MS);
+    // The clock alone moves: `held_step` handles the deadline and holds the agent's `Ended`.
+    // `advance` would drain the deadline's stop, and with the agent exiting before the drain
+    // ends (a slow host thread), handle the `Ended` too, and `held_step` would wait for good.
+    rig.clock.advance(MS);
     // The first step of the ladder ended it: the agent exits when its stdin closes.
     assert_eq!(held_step(&mut rig), StopStep::StdinClosed);
     rig.release_held();
