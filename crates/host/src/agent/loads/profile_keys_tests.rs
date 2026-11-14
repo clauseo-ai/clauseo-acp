@@ -11,7 +11,7 @@ use serde_json::{Value, json};
 use super::browser::Switch;
 use super::profile::{ClaudeKeys, Folders, Login, claude_options, fill_meta, web_search_state};
 use super::profile_tests::{LOCKED_OFF, OFF, ON, reason};
-use super::{GuardHook, McpControl, session_meta};
+use super::{CLAUDE_SHELL_FOLDER_VAR, GuardHook, McpControl, session_meta};
 use crate::browser::seed_sites::SEED_SITES;
 
 pub(super) fn folders() -> Folders<'static> {
@@ -256,4 +256,30 @@ fn the_web_search_state_per_kind_and_login() {
         Some(ToolsUnavailableReason::NoSearchOnThisLogin)
     );
     assert_eq!(state(AgentKind::Codex, ON, Login::Bedrock), None);
+}
+
+/// A Claude session's shell starts each call in the matter's folder: the variable is `1` in the
+/// env claude-agent-acp spawns Claude Code with and in the flag settings' `env`, over a hook's
+/// own value; the hook's other settings stay.
+#[test]
+fn claudes_shell_is_kept_in_the_matters_folder() {
+    let keys = keys(OFF, Login::FirstParty);
+    for hook in [
+        json!({}),
+        json!({"claudeCode": {"options": {
+            "env": {"CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR": "0"},
+            "settings": {"env": {"CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR": "0", "KEEP": "x"}},
+        }}}),
+        json!({"claudeCode": {"options": {"settings": "path.json"}}}),
+    ] {
+        let given = hook.as_object().cloned();
+        let meta = Value::Object(session_meta(given, McpControl::Clauseo, None, Some(&keys)));
+        let options = &meta["claudeCode"]["options"];
+        assert_eq!(options["env"][CLAUDE_SHELL_FOLDER_VAR], "1", "{hook}");
+        let settings_env = &options["settings"]["env"];
+        assert_eq!(settings_env[CLAUDE_SHELL_FOLDER_VAR], "1", "{hook}");
+        if hook.to_string().contains("KEEP") {
+            assert_eq!(settings_env["KEEP"], "x");
+        }
+    }
 }

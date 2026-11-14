@@ -191,3 +191,29 @@ fn only_a_completed_edit_writes() {
     paths.note("e", &fields(Some(ToolKind::Edit), DONE, &memo, &diffed));
     assert_eq!(paths.written(), matter(&["memo.docx"]));
 }
+
+/// Codex's exec runs each call in its own process, from its `cwd` (the turn's) else the
+/// matter's folder: one call's `cd` never moves where the next writes, nor does Claude's under
+/// `CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR` (`crate::agent::loads`).
+#[test]
+fn each_shell_call_starts_in_its_own_folder() {
+    let mut paths = TurnPaths::default();
+    for (key, command) in [("1", "cd Sub"), ("2", "pandoc a.md -o x.docx")] {
+        let input = TextOrBlob::Inline(
+            serde_json::json!({ "command": command, "cwd": "/matters/Deal" }).to_string(),
+        );
+        let mut call = fields(Some(ToolKind::Execute), DONE, &[], &[]);
+        call.raw_input = Some(&input);
+        paths.note(key, &call);
+    }
+    for (key, command) in [("3", "cd Sub"), ("4", "echo x > y.md")] {
+        let input = TextOrBlob::Inline(serde_json::json!({ "command": command }).to_string());
+        let mut call = fields(Some(ToolKind::Execute), DONE, &[], &[]);
+        call.raw_input = Some(&input);
+        paths.note(key, &call);
+    }
+    assert_eq!(
+        paths.shell_writes(),
+        ["/matters/Deal/x.docx".to_owned(), "y.md".to_owned()].into()
+    );
+}

@@ -18,7 +18,11 @@
 //! PowerShell does ([`powershell`]: its quotes, `\` a separator, `Set-Location`, `sl`,
 //! `chdir` and `Push-Location` as `cd`). Each relative target is joined to that folder (else
 //! the call's `cwd` when its input says, else the matter's folder) and normalised, so it
-//! compares with a file's whole path in the matter. A target that is unclear (an expansion, a
+//! compares with a file's whole path in the matter. Each call starts there, whatever an earlier
+//! call's `cd` did: Claude Code's shell goes back to the session's folder after every call,
+//! since Clauseo launches it with `CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR=1`
+//! (`crate::agent::loads`), and Codex's exec runs each call in its own process, from its
+//! `workdir` or the turn's folder. A target that is unclear (an expansion, a
 //! glob, one ending in `/`) writes nothing, and leaves the others as they are. Kept in memory
 //! for the turn only, never logged.
 

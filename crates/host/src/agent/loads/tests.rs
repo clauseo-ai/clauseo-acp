@@ -28,7 +28,10 @@ fn with_no_hook_the_meta_is_the_switches() {
             "strictMcpConfig": true,
             "settingSources": CLAUDE_SETTING_SOURCES,
             "allowDangerouslySkipPermissions": false,
-            "env": {"ENABLE_CLAUDEAI_MCP_SERVERS": "false"},
+            "env": {
+                "ENABLE_CLAUDEAI_MCP_SERVERS": "false",
+                "CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR": "1",
+            },
         }}})
     );
     assert_eq!(CLAUDE_SETTING_SOURCES, ["user"]);
@@ -62,7 +65,11 @@ fn the_switches_win_over_the_hook_and_every_other_hook_key_stays() {
                     "allowDangerouslySkipPermissions": false,
                     "model": "opus",
                     "settings": {"syncClaudeAiPlugins": false},
-                    "env": {"ENABLE_CLAUDEAI_MCP_SERVERS": "false", "FIRM": "1"},
+                    "env": {
+                        "ENABLE_CLAUDEAI_MCP_SERVERS": "false",
+                        "FIRM": "1",
+                        "CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR": "1",
+                    },
                 },
             },
         })
