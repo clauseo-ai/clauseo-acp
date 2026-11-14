@@ -27,6 +27,8 @@ use crate::error::Error;
 use crate::pipeline::tests::support::TempDir;
 use crate::{HostConfig, ManualClock, SequentialIds};
 
+mod watchdog;
+
 /// How long one wait for an input may take in real time before the test fails.
 const WATCHDOG: Duration = Duration::from_secs(20);
 
@@ -170,7 +172,7 @@ impl Rig {
             if matches!(rig.actor.phase, HostPhase::Serving) {
                 return rig;
             }
-            let mut input = rig.next();
+            let mut input = rig.next("start-up");
             if let Some(failing) = failing {
                 failing.apply(&mut input);
             }
@@ -189,8 +191,9 @@ impl Rig {
             .unwrap()
     }
 
-    /// The next input, under the watchdog.
-    fn next(&mut self) -> Input {
+    /// The next input, under the watchdog, for the step `what`. A wait that runs out fails
+    /// naming `what` with the host's state (`watchdog.rs`).
+    fn next(&mut self, what: &str) -> Input {
         let recv = self.internal.recv();
         let waited = self.pool.run_until(async {
             let recv = std::pin::pin!(recv);
@@ -199,7 +202,7 @@ impl Rig {
                 Either::Right(_) => None,
             }
         });
-        waited.unwrap_or_else(|| panic!("no input for {WATCHDOG:?}"))
+        waited.unwrap_or_else(|| panic!("{}", watchdog::report(self, what)))
     }
 
     /// Handles inputs until `done` holds, holding back those `hold` picks.
@@ -214,7 +217,7 @@ impl Rig {
             if done(&mut self.actor) {
                 return;
             }
-            let input = self.next();
+            let input = self.next(what);
             if hold(&self.actor, &input) {
                 self.held.push(input);
             } else {
@@ -246,7 +249,7 @@ impl Rig {
     pub(super) fn hold_next(&mut self, what: &str, mut hold: impl FnMut(&Actor, &Input) -> bool) {
         for _ in 0..100_000 {
             let _exit = self.actor.settle();
-            let input = self.next();
+            let input = self.next(what);
             if hold(&self.actor, &input) {
                 self.held.push(input);
                 return;
@@ -515,7 +518,7 @@ impl Rig {
             if self.actor.settle().is_some() {
                 return;
             }
-            let input = self.next();
+            let input = self.next("shutdown");
             self.actor.on_input(input);
         }
     }
@@ -534,7 +537,7 @@ impl Rig {
             if self.actor.settle().is_some() {
                 break;
             }
-            let input = self.next();
+            let input = self.next("shutdown");
             self.actor.on_input(input);
         }
         let Self {
