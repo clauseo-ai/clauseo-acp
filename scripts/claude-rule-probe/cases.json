@@ -14,7 +14,14 @@
     "Bash(*yyy:*)",
     "Bash(*zzz:**)",
     "Bash(*$HOME/AppData/R*)",
-    "Bash(*/home/AppData/Q*)"
+    "Bash(*/home/AppData/Q*)",
+    "Bash(*ai.clauseo.desktop\\agent-state\\02other*)"
+   ],
+   "allow": [
+    "Bash(ls *C:\\D\\ai.clauseo.desktop\\agent-state\\01own\\notes)",
+    "Bash(ls *C:\\D\\ai.clauseo.desktop\\agent-state\\01own\\notes\\\\\\*)",
+    "Bash(ls *C:\\D\\ai.clauseo.desktop\\agent-state\\01own\\notes\"*)",
+    "Bash(cat *C:\\D\\ai.clauseo.desktop\\agent-state\\01own\\notes\\\\\\*)"
    ]
   }
  },
@@ -147,6 +154,88 @@
    "tool": "Bash",
    "command": "cat \"$HOME/AppData/Qx\"",
    "denied": true
+  },
+  {
+   "name": "own folder allow (auto): a listing an allow rule matches runs, no classifier",
+   "tool": "Bash",
+   "command": "ls \"C:\\D\\ai.clauseo.desktop\\agent-state\\01own\\notes\"",
+   "mode": "auto",
+   "denied": false,
+   "ran": true,
+   "classifier": false
+  },
+  {
+   "name": "... with flags, unquoted",
+   "tool": "Bash",
+   "command": "ls -la C:\\D\\ai.clauseo.desktop\\agent-state\\01own\\notes",
+   "mode": "auto",
+   "denied": false,
+   "ran": true,
+   "classifier": false
+  },
+  {
+   "name": "... reading a file in it",
+   "tool": "Bash",
+   "command": "cat \"C:\\D\\ai.clauseo.desktop\\agent-state\\01own\\notes\\n.md\"",
+   "mode": "auto",
+   "denied": false,
+   "ran": true,
+   "classifier": false
+  },
+  {
+   "name": "... a listing no rule allows is refused by the (flagging) server-side classifier",
+   "tool": "Bash",
+   "command": "ls C:\\D\\ai.clauseo.desktop\\agent-state\\01own\\notesX",
+   "mode": "auto",
+   "denied": false,
+   "ran": false,
+   "classifier": false
+  },
+  {
+   "name": "... a name the own one starts is no own folder",
+   "tool": "Bash",
+   "command": "ls C:\\D\\ai.clauseo.desktop\\agent-state\\01ownX\\notes",
+   "mode": "auto",
+   "denied": false,
+   "ran": false,
+   "classifier": false
+  },
+  {
+   "name": "... a sibling a deny rule names is denied",
+   "tool": "Bash",
+   "command": "ls C:\\D\\ai.clauseo.desktop\\agent-state\\02other\\notes",
+   "mode": "auto",
+   "denied": true,
+   "ran": false,
+   "classifier": false
+  },
+  {
+   "name": "... and denied beside the own folder: deny beats allow",
+   "tool": "Bash",
+   "command": "ls \"C:\\D\\ai.clauseo.desktop\\agent-state\\01own\\notes\" C:\\D\\ai.clauseo.desktop\\agent-state\\02other\\notes",
+   "mode": "auto",
+   "denied": true,
+   "ran": false,
+   "classifier": false
+  },
+  {
+   "name": "... a chained part no rule allows sends the whole command to a classifier",
+   "tool": "Bash",
+   "command": "ls \"C:\\D\\ai.clauseo.desktop\\agent-state\\01own\\notes\"; python3 -c \"print(3)\"",
+   "mode": "auto",
+   "denied": false,
+   "ran": false,
+   "classifier": false
+  },
+  {
+   "name": "... any other command naming the own folder too",
+   "tool": "Bash",
+   "command": "python3 -c \"print(1)\" C:\\D\\ai.clauseo.desktop\\agent-state\\01own\\notes\\x",
+   "mode": "auto",
+   "denied": false,
+   "ran": false,
+   "classifier": false
   }
- ]
+ ],
+ "server_verdict": "flagged"
 }

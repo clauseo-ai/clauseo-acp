@@ -54,8 +54,10 @@ use crate::network_paths::resolve::Entry;
 use crate::network_paths::{FOLD_CASE, NetEnv, fold_name, refused_windows_name, touchable};
 pub(crate) use health::DataFenceHealth;
 pub(crate) use input::{candidates, candidates_roots, candidates_words, command_names};
-pub(crate) use launch::{LaunchDeny, claude_project_key, claude_projects, launch_deny};
-pub(crate) use shell_deny::{windows_shell_deny_rules, windows_shell_deny_rules_without_variables};
+pub(crate) use launch::{LaunchDeny, claude_project_key, claude_projects, launch_deny, own_reads};
+pub(crate) use shell_deny::{
+    own_shell_allow_rules, windows_shell_deny_rules, windows_shell_deny_rules_without_variables,
+};
 pub(crate) use variables::launch_vars;
 
 /// What of `<data>` only Clauseo uses, named whether or not it exists at the launch (the
@@ -187,18 +189,26 @@ pub(crate) const BUILT_IN_SKILLS: [&str; 3] = ["profile", "claude-plugin", "skil
 
 /// Claude's `permissions.allow` rules for a launch: `Read` of the built-in skills' folder
 /// ([`BUILT_IN_SKILLS`]) and all under it, so a built-in skill never asks the lawyer, then of
-/// each of [`READ_ONLY`] and all under it, for each spelling of `<data>`. Read only, and
-/// nothing wider; a deny rule (another session's, a link's) still beats each. A spelling that is
-/// not UTF-8 gets none.
+/// each of [`READ_ONLY`] and all under it, for each spelling of `<data>`; then the session's
+/// own work and notes folders' (`LaunchDeny::own_reads`): `Read` of each and all under it, and
+/// a command that lists or reads one ([`own_shell_allow_rules`]), so the auto-mode classifiers
+/// never see those. Nothing wider; a deny rule (another session's, a link's) still beats each.
+/// A spelling that is not UTF-8 gets none.
 pub(crate) fn claude_allow_rules(deny: &LaunchDeny) -> Vec<String> {
+    claude_allow_rules_on(deny, cfg!(windows))
+}
+
+/// [`claude_allow_rules`] with Windows' paths and shell rules when `windows`.
+pub(crate) fn claude_allow_rules_on(deny: &LaunchDeny, windows: bool) -> Vec<String> {
     let skills: Vec<String> = BUILT_IN_SKILLS.iter().map(|name| escape(name)).collect();
     let skills = skills.join("/");
     let mut rules = Vec::new();
     for spelling in &deny.spellings {
-        let Some(base) = spelling.to_str().map(|text| rule_path(text, cfg!(windows))) else {
+        let Some(base) = spelling.to_str().map(|text| rule_path(text, windows)) else {
             continue;
         };
-        let places = std::iter::once(skills.as_str()).chain(READ_ONLY);
+        let own = deny.own_reads.iter().map(String::as_str);
+        let places = std::iter::once(skills.as_str()).chain(READ_ONLY).chain(own);
         for place in places {
             let rule = format!("Read({base}/{place}/**)");
             if !rules.contains(&rule) {
@@ -206,6 +216,7 @@ pub(crate) fn claude_allow_rules(deny: &LaunchDeny) -> Vec<String> {
             }
         }
     }
+    rules.extend(own_shell_allow_rules(deny, windows));
     rules
 }
 

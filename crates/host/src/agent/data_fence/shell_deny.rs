@@ -85,9 +85,12 @@ use std::ffi::OsString;
 
 use super::LaunchDeny;
 use forms::{Shells, forms};
+pub(crate) use own_allow::own_shell_allow_rules;
 
 #[path = "shell_deny_forms.rs"]
 mod forms;
+#[path = "own_allow.rs"]
+mod own_allow;
 
 /// The separators a command may write between two names: `\`, `/`, and `\\` (Git Bash's escaped
 /// form, or a doubled `\`).
@@ -268,7 +271,7 @@ fn rules(
             if !shells.has(tool) {
                 continue;
             }
-            let content = render(pieces, *end);
+            let content = render(&join(&[&[Piece::Any], pieces]), *end);
             let key = if tool == "PowerShell" {
                 content.to_lowercase()
             } else {
@@ -460,11 +463,12 @@ fn join(parts: &[&[Piece]]) -> Vec<Piece> {
     parts.iter().flat_map(|part| part.iter().cloned()).collect()
 }
 
-/// A rule's content: a leading `*`, the pieces, and a trailing `*` unless the rule is for the end
-/// of the command (`end`), written for Claude Code 2.1.293's two readings of it. Its rule
-/// parser (`jn`) first passes the content through `Lho`: `\(` and `\)` become `(` and `)`, then
-/// every `\\` becomes `\`. Its matcher (`hQ`) then reads `\*` as a literal `*`, `\\` as a literal
-/// `\`, any other `\` as itself, and `*` as any text. So the pattern for `hQ` writes a literal `\`
+/// A rule's content: the pieces (a deny rule's start with Claude's `*`), and a trailing `*`
+/// unless the rule is for the end of the command (`end`), written for Claude Code 2.1.293's two
+/// readings of it. Its rule parser (`jn`) first passes the content through `Lho`: `\(` and `\)`
+/// become `(` and `)`, then every `\\` becomes `\`. Its matcher (`hQ`) then reads `\*` as a
+/// literal `*`, `\\` as a literal `\`, any other `\` as itself, and `*` as any text. So the
+/// pattern for `hQ` writes a literal `\`
 /// as `\\` only before a `*` or a `\` (`run\\*`: a backslash, then any text) and as `\` elsewhere,
 /// a literal `*` as `\*`; and each run of k backslashes in it is written as 2k − 1 for `Lho`
 /// (`\\\\\` becomes `\\\`), or 2k before `(` or `)`, which `Lho` would otherwise take as an
@@ -479,7 +483,7 @@ fn render(pieces: &[Piece], end: bool) -> String {
         Lit(char),
         Any,
     }
-    let mut toks = vec![Tok::Any];
+    let mut toks = Vec::new();
     for piece in pieces {
         match piece {
             Piece::Text(text) => toks.extend(text.chars().map(Tok::Lit)),

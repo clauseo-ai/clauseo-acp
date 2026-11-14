@@ -181,7 +181,7 @@ fn probe_cases(
     };
     let mut every = claude_deny_rules_on(deny, true);
     every.extend(rules.iter().cloned());
-    let allow = super::super::claude_allow_rules(deny);
+    let allow = super::super::claude_allow_rules_on(deny, true);
     let mut cases = Vec::new();
     for (n, (_, command)) in vm_commands().iter().enumerate() {
         cases.push(
@@ -273,7 +273,8 @@ fn claude_code_accepts_every_rule_a_launch_emits() {
     for (deny, var) in [(laptop_deny, default_env), (worst(), worst_env)] {
         let mut every = claude_deny_rules_on(&deny, true);
         every.extend(claude_deny_rules_on(&deny, false));
-        every.extend(super::super::claude_allow_rules(&deny));
+        every.extend(super::super::claude_allow_rules_on(&deny, true));
+        every.extend(super::super::claude_allow_rules_on(&deny, false));
         every.extend(windows_shell_deny_rules(&deny, var));
         every.extend(windows_shell_deny_rules_without_variables(&deny, var));
         assert!(every.len() > 1000, "{}", every.len());
@@ -289,20 +290,21 @@ fn claude_code_accepts_every_rule_a_launch_emits() {
 
 /// The worst realistic launch: a long profile, a configured data folder under it spelled two
 /// ways (one in lower case), 1,000 seeded matters with random ids and realistic project keys.
-/// Its rules (Read and Edit with the shell rules, as JSON) stay under the size past which a
-/// launch sheds its variable forms (`agent::loads::profile::SHED_AT`, about 1.8 MiB).
+/// Its rules (Read and Edit with the shell rules and the allow rules, as JSON) stay under the size
+/// past which a launch sheds its variable forms (`agent::loads::profile::SHED_AT`, about 1.8 MiB).
 #[test]
 fn the_worst_realistic_launch_fits_the_settings_file() {
     let deny = worst();
     let size = |rules: &[String]| serde_json::to_string(rules).unwrap().len();
-    let read_edit = size(&claude_deny_rules_on(&deny, true));
+    let allow = size(&super::super::claude_allow_rules_on(&deny, true));
+    let read_edit = size(&claude_deny_rules_on(&deny, true)) + allow;
     let full = size(&windows_shell_deny_rules(&deny, &long_env));
     let shed = size(&windows_shell_deny_rules_without_variables(
         &deny, &long_env,
     ));
     eprintln!(
-        "worst launch: {} targets; Read/Edit {read_edit} B; shell {full} B with the variable \
-         forms, {shed} B without; total {} B, or {} B shed",
+        "worst launch: {} targets; Read/Edit and allow {read_edit} B (allow {allow} B); shell \
+         {full} B with the variable forms, {shed} B without; total {} B, or {} B shed",
         deny.targets.len(),
         read_edit + full,
         read_edit + shed,

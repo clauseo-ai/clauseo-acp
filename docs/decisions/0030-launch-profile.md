@@ -574,6 +574,44 @@ change from the settings window as `ui` does. R24 (PR5) adds a third to the patc
       beside a configured one whose name starts with it and a space (`"D:\FirmData\Clauseo
       Backup\x"`), since unquoted that is the data folder named alone and Win32 drops a trailing
       space (`ClauseoBackup` is not denied).
+- **2026-11-14: an allow for listing and reading the own work and notes folders.** On the
+  Windows release candidate `auto` refused `ls` and `Get-ChildItem -Force` of the session's own
+  notes folder ("Undermining Oversight") in three turns. Read from the pinned binary and checked
+  by running it (`scripts/claude-rule-probe`, the fake API now logs every request and answers
+  the classifiers): Claude Code 2.1.293 allows such a command only as read-only inside a working
+  folder (`additionalDirectories` holds the work and notes folders), and in `auto` it hands
+  every read-only or sandbox allow to Anthropic's server-side classifier (`Hln`, `nTr`; on by
+  default against the first-party API), whose verdict comes back with the reply; a command that
+  asks goes to the local auto-mode classifier, a Messages request of its own. A command an
+  allow rule matches skips both (`fTr` returns the rule's allow; `nTr` never reroutes it).
+  - **Scope** (`data_fence/own_allow.rs`, in every launch's `permissions.allow` beside the
+    built-in skills' `Read`): `Read(//<work>/**)` and `Read(//<notes>/**)` for each spelling of
+    `<data>`; and `ls`, `dir`, `cat`, `head` (Bash) and `Get-ChildItem`, `Get-Content`
+    (PowerShell, which matches their aliases too), each followed by anything, then the folder's
+    path written whole with one separator throughout (`C:\…`, `C:/…`, Bash's `C:\\…` and
+    `/c/…`), then the end or a separator, a quote or a space and anything. A rule starts with
+    the command's name. PowerShell rules on Windows alone; elsewhere the Bash rules name the
+    folders' paths with `/`. 240 shell rules and 35 KB of allow rules for the default folder,
+    49 KB for a configured one spelled two ways (the worst realistic launch: 74 KB, 1.51 MB in
+    all, under the 1.8 MiB at which a launch sheds its variable forms, which counts them now).
+  - **Why so narrow is enough.** A deny rule beats an allow, on the whole command and on each
+    part, so every protected place a command names beside an own path is still denied. A
+    compound command is allowed only when every part is; `$( )`, backticks, a variable, a
+    function, `eval`, a subshell, and in PowerShell a subexpression, parenthesis, script block
+    or redirection ask whatever the rules. A Bash redirection to a file and a path outside the
+    working folders ask whatever the rule, and an environment prefix other than Claude Code's
+    safe ones (`PATH=…`) matches no rule. Each PowerShell call is a fresh `pwsh -NoProfile`, so
+    no function from an earlier call can stand in for `Get-ChildItem`.
+  - **Residual, accepted.** The other words of an allowed command are anything, so a second
+    path in it is listed or read without a classifier when Claude Code's working-folder check
+    passes it: the matter folder, the own folders, or a place a `Read` allow names (the
+    built-in skills, `tools`, Clauseo's Python runtime), all of which Claude may read anyway; a
+    folder in `<data>` made after the launch is outside the working folders and asks. That
+    check on Windows paths was read from the code, not run. A command one part of which no rule
+    allows (`ls "<notes>" | head -5`, `ls "<notes>"; ls`) still goes to the classifiers, and so
+    does an own path written another way (a variable, `~`, a mixed separator, a `.\` step, an
+    unquoted trailing `\` in Bash). The PowerShell side is read from the code (no Windows
+    host ran it); Bash's was run on Linux.
 - **2026-11-10 (Rohan).** Claude should be as frictionless as Codex. Outside forced ask a
   Claude session starts in Claude Code's `acceptEdits`, not `default`
   (`agent/loads.rs` `CLAUDE_MODE`). claude-agent-acp 0.89.1 picks its own starting mode (the

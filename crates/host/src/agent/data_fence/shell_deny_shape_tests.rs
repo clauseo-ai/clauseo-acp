@@ -22,7 +22,7 @@ use super::index_tests::Rules;
 use super::tests::Rule;
 use super::windows_shell_deny_rules;
 use crate::agent::data_fence::big_folder::laptop;
-use crate::agent::data_fence::{LaunchDeny, claude_allow_rules, claude_deny_rules_on};
+use crate::agent::data_fence::{LaunchDeny, claude_allow_rules_on, claude_deny_rules_on};
 use crate::pipeline::tests::support::TempDir;
 
 /// How many rules of each shape get a probe.
@@ -270,7 +270,7 @@ fn sweep(per_shape: usize, alone: bool) {
         let shell = windows_shell_deny_rules(&deny, &env);
         let mut every = claude_deny_rules_on(&deny, true);
         every.extend(shell.iter().cloned());
-        let allow = claude_allow_rules(&deny);
+        let allow = claude_allow_rules_on(&deny, true);
         let bash = probes(&shell, "Bash", label, per_shape, alone);
         // The PowerShell rules no Bash rule spells, as Bash rules of the same content.
         let bash_contents: std::collections::HashSet<&str> = shell

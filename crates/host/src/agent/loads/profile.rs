@@ -274,10 +274,11 @@ pub(crate) const SHED_AT: usize = 1_887_436;
 
 /// `permissions.deny` gains the data folder's rules (`agent/data_fence.rs`; on Windows also its
 /// `Bash` and `PowerShell` rules, `data_fence::windows_shell_deny_rules`, without the variable
-/// forms when all of them would take the settings past [`SHED_AT`]), and
-/// `permissions.allow` the Read of the built-in skills' folder, each after any the hook put
-/// there. A hook value at `permissions`, `deny` or `allow` of another type is replaced. With no
-/// spelling (a unit test's keys) nothing changes.
+/// forms when all of them would take the settings past [`SHED_AT`], counting the allow rules),
+/// and `permissions.allow` the Read of the built-in skills' folder and the own folders' listing
+/// and reading (`data_fence::claude_allow_rules`), each after any the hook put there. A hook
+/// value at `permissions`, `deny` or `allow` of another type is replaced. With no spelling (a
+/// unit test's keys) nothing changes.
 fn deny_data_folder(
     settings: &mut Map<String, Value>,
     data: &crate::agent::data_fence::LaunchDeny,
@@ -290,9 +291,13 @@ fn deny_data_folder(
     for rule in crate::agent::data_fence::claude_deny_rules(data) {
         push_new(&mut deny, &rule);
     }
+    let mut allow = take_array(&mut permissions, "allow");
+    for rule in crate::agent::data_fence::claude_allow_rules(data) {
+        push_new(&mut allow, &rule);
+    }
     if cfg!(windows) {
         let var = |name: &str| std::env::var_os(name);
-        let spent = json_len(&*settings) + json_len(&deny);
+        let spent = json_len(&*settings) + json_len(&deny) + json_len(&allow);
         let shell = shell_rules_within(data, &var, spent, SHED_AT);
         // A set, not `push_new`: a busy data folder gives a few thousand of these.
         let mut known: std::collections::HashSet<String> = deny
@@ -306,10 +311,6 @@ fn deny_data_folder(
         }
     }
     permissions.insert("deny".to_owned(), Value::Array(deny));
-    let mut allow = take_array(&mut permissions, "allow");
-    for rule in crate::agent::data_fence::claude_allow_rules(data) {
-        push_new(&mut allow, &rule);
-    }
     permissions.insert("allow".to_owned(), Value::Array(allow));
     settings.insert("permissions".to_owned(), Value::Object(permissions));
 }
