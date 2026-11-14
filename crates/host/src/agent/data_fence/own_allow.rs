@@ -11,10 +11,12 @@
 //!
 //! What a rule allows is one command that lists or reads, followed by anything, then an own
 //! folder's path in one of its literal spellings, then the end or a name boundary and anything:
-//! `ls *C:\…\agent-state\<id>\notes`, `… notes\*`, `… notes"*`. The commands: `ls`, `dir`,
-//! `cat` and `head` in Bash, `Get-ChildItem` and `Get-Content` in PowerShell, which Claude Code
-//! matches by their aliases too (`gci`, `dir`, `ls`, `gc`, `type`, `cat`: `yt` maps a command's
-//! and a rule's first word through `z_`). A rule starts with the command's name, never with `*`,
+//! `ls *C:\…\agent-state\<id>\notes`, `… notes\*`, `… notes"*`. The commands: `ls`, `cat` and
+//! `head` in Bash, `Get-ChildItem` and `Get-Content` in PowerShell, which Claude Code matches by
+//! their aliases too (`gci`, `dir`, `ls`, `gc`, `type`, `cat`: `yt` maps a command's and a
+//! rule's first word through `z_`). Only commands Claude Code checks the paths of may be here
+//! ([`BASH`], [`POWERSHELL`]): Bash's `dir` is not one, so `dir <any folder> <own notes>` would
+//! list any folder with no question. A rule starts with the command's name, never with `*`,
 //! so no other command can come first. Claude's `*` takes any text, so the other words of the
 //! same command are anything; what keeps that narrow is Claude Code's own checks, which a rule
 //! does not override:
@@ -26,9 +28,12 @@
 //!   `$( )`, backticks, `<( )`, a variable, a function, `eval` or `source`, a subshell or an
 //!   unquoted heredoc is too complex to match, and asks (`g4e`); PowerShell asks for a command
 //!   it can't parse, a subexpression or parenthesis, a script block or a file redirection (`Ht`);
-//! - a Bash redirection to a file asks whatever the rule (`a9`), and so does a path outside the
-//!   working folders (`additionalDirectories` holds the work and notes folders): `cat
-//!   <own>\x C:\secret` still goes to the classifier;
+//! - a Bash redirection to a file asks whatever the rule (`a9`); and for each command here, so
+//!   does every path argument outside the working folders (`additionalDirectories` holds the work
+//!   and notes folders): Claude Code takes each of `ls`, `cat` and `head`'s arguments from
+//!   the first that is not a flag on as a path, and each of `Get-ChildItem` and `Get-Content`'s
+//!   positional and path arguments (an unknown parameter asks), so `cat <own>\x C:\secret`
+//!   still goes to a classifier (checked off Windows with `/etc`, `scripts/claude-rule-probe`);
 //! - an environment prefix other than Claude Code's safe ones (`PATH=…`) is not stripped before
 //!   matching (`i_`, `S1`), so it matches no rule.
 //!
@@ -47,10 +52,22 @@
 use super::{Piece, join, parse, render, text};
 use crate::agent::data_fence::LaunchDeny;
 
-/// The commands that list or read, in Bash.
-const BASH: [&str; 4] = ["ls", "dir", "cat", "head"];
+/// The commands that list or read, in Bash: each in Claude Code's table of the commands whose
+/// paths it checks. In 2.1.293 (read from `claude-agent-sdk-linux-x64` 0.3.293's
+/// `package/claude`, sha256 `8968405e…`; names are minified per build, so find them by the
+/// strings): `var Jye=Object.keys(D9),W_r={cd:"change directories to",ls:"list files in",…,
+/// cat:"concatenate files from",head:"read the beginning of files from",…}` at byte 215488492,
+/// 54 commands, no `dir`; a command not in it passes the check (`Command '${z}' is not a
+/// path-restricted command`, byte 215502012). `D9`'s `ls`, `cat` and `head` take every
+/// argument from the first that is not a flag on.
+const BASH: [&str; 3] = ["ls", "cat", "head"];
 
-/// The commands that list or read, in PowerShell (their aliases match the same rules).
+/// The commands that list or read, in PowerShell (their aliases match the same rules): each in
+/// Claude Code's table of the cmdlets whose paths it checks, `var ut=5,pt={"set-content":
+/// {operationType:"write",…},…,"get-content":{operationType:"read",pathParams:["-path",…]},
+/// "get-childitem":{operationType:"read",…}}` (byte 227625901 of the same file), read by `Ft`
+/// (`function Ft(e){let n=z_(e.name),s=Aa(pt,n)`, byte 227644441): every positional argument
+/// and path parameter is a path, and an unknown parameter makes the path unvalidatable (asks).
 const POWERSHELL: [&str; 2] = ["Get-ChildItem", "Get-Content"];
 
 /// What may follow an own folder's path, besides the end: a separator, a quote, a space.

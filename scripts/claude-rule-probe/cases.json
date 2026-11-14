@@ -21,7 +21,9 @@
     "Bash(ls *C:\\D\\ai.clauseo.desktop\\agent-state\\01own\\notes)",
     "Bash(ls *C:\\D\\ai.clauseo.desktop\\agent-state\\01own\\notes\\\\\\*)",
     "Bash(ls *C:\\D\\ai.clauseo.desktop\\agent-state\\01own\\notes\"*)",
-    "Bash(cat *C:\\D\\ai.clauseo.desktop\\agent-state\\01own\\notes\\\\\\*)"
+    "Bash(cat *C:\\D\\ai.clauseo.desktop\\agent-state\\01own\\notes\\\\\\*)",
+    "Bash(head *C:\\D\\ai.clauseo.desktop\\agent-state\\01own\\notes\\\\\\*)",
+    "Bash(dir *C:\\D\\ai.clauseo.desktop\\agent-state\\01own\\notes)"
    ]
   }
  },
@@ -234,6 +236,42 @@
    "mode": "auto",
    "denied": false,
    "ran": false,
+   "classifier": false
+  },
+  {
+   "name": "... a path outside the working folders beside the own one: ls checks it and asks",
+   "tool": "Bash",
+   "command": "ls -la /etc \"C:\\D\\ai.clauseo.desktop\\agent-state\\01own\\notes\"",
+   "mode": "auto",
+   "denied": false,
+   "ran": false,
+   "classifier": false
+  },
+  {
+   "name": "... cat checks it too",
+   "tool": "Bash",
+   "command": "cat /etc/hostname C:\\D\\ai.clauseo.desktop\\agent-state\\01own\\notes\\x",
+   "mode": "auto",
+   "denied": false,
+   "ran": false,
+   "classifier": false
+  },
+  {
+   "name": "... head too",
+   "tool": "Bash",
+   "command": "head -n 3 /etc/passwd C:\\D\\ai.clauseo.desktop\\agent-state\\01own\\notes\\x",
+   "mode": "auto",
+   "denied": false,
+   "ran": false,
+   "classifier": false
+  },
+  {
+   "name": "... but dir is not a path-checked command (no D9 entry): a dir rule lists any folder (why the launch writes none)",
+   "tool": "Bash",
+   "command": "dir /etc C:\\D\\ai.clauseo.desktop\\agent-state\\01own\\notes",
+   "mode": "auto",
+   "denied": false,
+   "ran": true,
    "classifier": false
   }
  ],
