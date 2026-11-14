@@ -485,6 +485,9 @@ mod lawyer_file_log;
 #[path = "host/lawyer_status.rs"]
 mod lawyer_status;
 #[cfg(test)]
+#[path = "host/shell_folder.rs"]
+mod shell_folder;
+#[cfg(test)]
 #[path = "host/titles.rs"]
 mod titles;
 #[cfg(test)]

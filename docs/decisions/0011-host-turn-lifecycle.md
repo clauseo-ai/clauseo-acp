@@ -277,7 +277,10 @@ until `StepUndone` is durable; a failed undo commit is retried once, as a turn's
   an edit, delete or move call's location, `clauseo_matters::names_a_write`; never a read's,
   search's or shell call's location; nor did a shell command of the turn, read from its text by
   `shell_writes`, Bash's or PowerShell's: redirects, `-o`, `tee`, `cp`, and `stetdoc`'s forms,
-  its default `NAME.edited.docx` and `--in-place`; added or modified; only a call that ended
+  its default `NAME.edited.docx` and `--in-place`; relative targets join the call's own folder
+  only, since each call starts in the matter's folder (Claude runs under
+  `CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR=1`, Codex runs each exec in its own process);
+  added or modified; only a call that ended
   `Completed` by the checkpoint wrote anything, so a denied command, an edit whose ask was open
   at a Stop, or a call the close settles afterwards wrote nothing) is read too: a step with such
   a file asks in Versions' undo dialog, from Versions or the thread, with Keep current chosen for it, whatever `edited_since`

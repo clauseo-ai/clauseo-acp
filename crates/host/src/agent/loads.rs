@@ -115,6 +115,13 @@ pub(crate) fn claude_mode(forced_ask: bool) -> &'static str {
 /// The variable that, set to `false`, keeps claude.ai's connectors out of a Claude Code session.
 pub(crate) const CLAUDE_AI_MCP_VAR: &str = "ENABLE_CLAUDEAI_MCP_SERVERS";
 
+/// The Claude Code variable that, set, puts its `Bash` and `PowerShell` back in the session's
+/// folder after every call (Claude Code 2.1.293's `SBn()`, read from the process env on each
+/// call). Clauseo sets it to `1`, so every shell call starts in the matter's folder, which is
+/// where `crate::shell_writes` joins a call's relative targets: a `cd` in one call never moves
+/// where the next writes. Unset, the folder a call's `cd` reaches would carry to the next.
+pub(crate) const CLAUDE_SHELL_FOLDER_VAR: &str = "CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR";
+
 /// Who decides which MCP servers a session gets.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum McpControl {
@@ -158,6 +165,11 @@ pub(crate) fn mcp_control(managed: &Path) -> McpControl {
 /// value at `claudeCode`, `options` or `env` that is not an object is replaced.
 ///
 /// - `claudeCode.options.env.ENABLE_CLAUDEAI_MCP_SERVERS`: `"false"`.
+/// - [`CLAUDE_SHELL_FOLDER_VAR`] `"1"` in `claudeCode.options.env` (claude-agent-acp 0.89.1
+///   spreads it over its own env for the SDK's spawn of Claude Code, `acp-agent.js:7302-7304`)
+///   and, with `keys` (a Claude agent), in `claudeCode.options.settings.env` (flag settings,
+///   over a user's or project's). A hook value at `settings` or its `env` that is not an
+///   object is then replaced.
 /// - `claudeCode.options.allowDangerouslySkipPermissions`: `false`. claude-agent-acp 0.89.1 then
 ///   offers no bypass mode, nor the plan-exit options that switch to it, and never starts a
 ///   session in it: a settings `defaultMode` of `bypassPermissions` becomes `default`, and a
@@ -195,6 +207,7 @@ pub(crate) fn session_meta(
     let mut options = take_object(&mut claude, "options");
     let mut env = take_object(&mut options, "env");
     env.insert(CLAUDE_AI_MCP_VAR.to_owned(), Value::from("false"));
+    env.insert(CLAUDE_SHELL_FOLDER_VAR.to_owned(), Value::from("1"));
     options.insert("env".to_owned(), Value::Object(env));
     options.insert(ALLOW_BYPASS_OPTION.to_owned(), Value::Bool(false));
     let (strict, sources) = match control {
@@ -227,6 +240,15 @@ pub(crate) fn session_meta(
         hooks.insert("PreToolUse".to_owned(), Value::Array(pre_tool_use));
         settings.insert("hooks".to_owned(), Value::Object(hooks));
         settings.insert("disableAllHooks".to_owned(), Value::Bool(false));
+        options.insert("settings".to_owned(), Value::Object(settings));
+    }
+    if keys.is_some() {
+        // Claude Code applies a settings `env` over the process env, so the variable goes in
+        // the flag settings too: a user's or project's settings `env` cannot undo it.
+        let mut settings = take_object(&mut options, "settings");
+        let mut settings_env = take_object(&mut settings, "env");
+        settings_env.insert(CLAUDE_SHELL_FOLDER_VAR.to_owned(), Value::from("1"));
+        settings.insert("env".to_owned(), Value::Object(settings_env));
         options.insert("settings".to_owned(), Value::Object(settings));
     }
     claude.insert("options".to_owned(), Value::Object(options));
