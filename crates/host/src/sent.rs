@@ -19,7 +19,7 @@ use clauseo_protocol::{
 
 use crate::build::ToolFields;
 use paths::diffs;
-pub(crate) use paths::{CallFields, Places, TurnPaths};
+pub(crate) use paths::{CallFields, Places, ShellStart, TurnPaths};
 
 /// One tool call as last sent.
 #[derive(Debug, Clone, PartialEq, Eq)]

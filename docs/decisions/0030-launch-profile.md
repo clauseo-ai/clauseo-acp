@@ -15,7 +15,8 @@ production hook exists. R22 (the legal instructions and three skills) builds on 
 The host thread set the conditions the profile must keep: Claude keeps `settingSources:
 ["user"]`, strict MCP config, `ENABLE_CLAUDEAI_MCP_SERVERS=false`, `CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR=1` (in the
 session env and the flag settings' `env`, so every shell call starts in the matter folder,
-where `shell_writes` places its relative writes), the pre-write guard's
+where `shell_writes` places its relative writes; only policy settings outrank it, and a launch
+whose policy turns it off counts no relative shell write), the pre-write guard's
 `PreToolUse` entry and `settings.disableAllHooks: false`; Codex keeps the hooks seam (one
 `PreToolUse` group, the guard's) and `DISABLE_MCP_CONFIG_FILTERING=true`, and its home's
 `config.toml` never carries hooks or MCP entries; file work stays off the host thread.

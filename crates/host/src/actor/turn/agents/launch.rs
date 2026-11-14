@@ -116,7 +116,7 @@ pub(super) fn launch(
     // The unit tests' `fake-agent` has no kind; a test names the one it plays.
     #[cfg(test)]
     let kind = kind.or(actor.turn_path.kind_for_tests);
-    let moved = prepared.moved;
+    let moved = prepared.settings.moved;
     let probe = kind.map(|kind| Target::at_launch(kind, spec.env(), own).unless_moved(moved));
     let post = actor.post.clone();
     let post: Rc<dyn Fn(agent::AgentInput)> = Rc::new(move |input| {

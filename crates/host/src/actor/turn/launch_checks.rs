@@ -52,7 +52,7 @@ use clauseo_protocol::{AgentId, AgentKind, ThreadId};
 use super::super::Actor;
 use super::super::input::Input;
 use super::agents::{self, Waiting};
-use super::offline::probe::settings::{Moved, Reads};
+use super::offline::probe::settings::{Reads, SettingsRead};
 use super::{TurnInput, host_stopping, state};
 
 use crate::agent::codex_fence::Listed;
@@ -95,9 +95,9 @@ pub(crate) struct Prepared {
     pub(super) skills_written: Option<SkillsWritten>,
     /// The skill packs this launch left out, by id, with the reason, for its notice.
     pub(super) packs_skipped: Vec<(String, PackSkip)>,
-    /// Why the agent's own settings files leave its route or host unknown to the offline probe,
-    /// read after Claude's home settings are written, as the agent will read them.
-    pub(super) moved: Option<Moved>,
+    /// What the agent's own settings files say ([`SettingsRead`]), read after Claude's home
+    /// settings are written, as the agent will read them.
+    pub(super) settings: SettingsRead,
 }
 
 /// The folders a session gets, all under the data folder, and its browser claims.
@@ -403,7 +403,7 @@ pub(super) fn prepare(
                 let packs_skipped;
                 (run.packs_written, packs_skipped) = packs.run(&run.skill_packs);
                 Ok(Prepared {
-                    moved: settings.moved(codex.as_ref(), claude_home.as_deref()),
+                    settings: settings.read(codex.as_ref(), claude_home.as_deref()),
                     stored,
                     codex,
                     claude_home,

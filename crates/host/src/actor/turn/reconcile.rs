@@ -341,11 +341,16 @@ fn repairs(actor: &mut Actor, thread: ThreadId) -> Option<&mut Repairs> {
 /// A started turn's repair waits for the rest of its matter ([`looked_at`] sends it); one
 /// whose matter is not known is sent now, and fails as it would have.
 fn hold(actor: &mut Actor, thread: ThreadId, turn: TurnId, log: &[Envelope], pending: Pending) {
+    let mut tool_paths = turn_paths(log, turn);
+    // Where its shell calls started: the matter thread reads Claude Code's policy settings, as
+    // the session's launch did (`settings::claude_shell_carries`).
+    let managed = actor.managed_mcp.parent().map(std::path::Path::to_path_buf);
+    tool_paths.set_start(crate::sent::ShellStart::Policy(managed.unwrap_or_default()));
     let repair = Waiting {
         thread,
         turn,
         started: turn_started(log, turn),
-        tool_paths: turn_paths(log, turn),
+        tool_paths,
         before: checkpoint_before(log, turn),
         pending,
     };

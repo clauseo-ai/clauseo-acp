@@ -96,6 +96,19 @@ impl Reads {
         }
     }
 
+    /// What the launch's agent's settings files say ([`SettingsRead`]); on the prep's thread.
+    pub(crate) fn read(
+        &self,
+        codex: Option<&CodexPrepared>,
+        claude_home: Option<&Path>,
+    ) -> SettingsRead {
+        SettingsRead {
+            moved: self.moved(codex, claude_home),
+            // Every agent but Codex, whose exec runs each call in its own process.
+            shell_carries: codex.is_none() && claude_shell_carries(&self.managed),
+        }
+    }
+
     /// Whether the launch's agent reads a file that moves its route or host: a Codex agent
     /// (`codex`, its home made), or Claude Code with its config folder `claude_home`. On the
     /// prep's thread.
@@ -114,6 +127,16 @@ impl Reads {
         }
         claude_moved(&self.managed, claude_home)
     }
+}
+
+/// What a launch's settings files say.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) struct SettingsRead {
+    /// Why they leave its route or host unknown to the offline probe.
+    pub(crate) moved: Option<Moved>,
+    /// Claude Code's policy settings may keep its shell's folder from one call to the next
+    /// ([`claude_shell_carries`]): each shell call's starting folder is then unknown.
+    pub(crate) shell_carries: bool,
 }
 
 /// Why the agent's settings leave its route or host unknown: the one word the log gets.
@@ -139,11 +162,9 @@ impl Moved {
 /// Where Claude Code finds its files for this launch: the folder of `managed-settings.json`
 /// and the config folder the launch gives it (`CLAUDE_CONFIG_DIR`).
 pub(crate) fn claude_moved(managed: &Path, config: Option<&Path>) -> Option<Moved> {
-    let mut files = vec![managed.join("managed-settings.json")];
-    match drop_ins(&managed.join("managed-settings.d")) {
-        Ok(more) => files.extend(more),
-        Err(()) => return Some(Moved::SettingsEnv),
-    }
+    let Ok(mut files) = managed_files(managed) else {
+        return Some(Moved::SettingsEnv);
+    };
     if let Some(config) = config {
         files.extend(CLAUDE_CONFIG_FILES.iter().map(|name| config.join(name)));
     }
@@ -156,6 +177,54 @@ pub(crate) fn claude_moved(managed: &Path, config: Option<&Path>) -> Option<Move
             Err(()) => true,
         })
         .then_some(Moved::SettingsEnv)
+}
+
+/// Claude Code's policy files in `managed`: `managed-settings.json`, then the drop-ins;
+/// `Err` when the drop-ins cannot be listed.
+fn managed_files(managed: &Path) -> Result<Vec<PathBuf>, ()> {
+    let mut files = vec![managed.join("managed-settings.json")];
+    files.extend(drop_ins(&managed.join("managed-settings.d"))?);
+    Ok(files)
+}
+
+/// Whether Claude Code's policy settings in `managed` may turn off
+/// `agent::loads::CLAUDE_SHELL_FOLDER_VAR`, so its shell keeps the folder a call's `cd` reached
+/// for the next call (`crate::shell_writes`): a policy file's `env` sets it to anything Claude
+/// Code 2.1.293 does not read as true (its `De()`: `1`, `true`, `yes` or `on`, in any case
+/// and trimmed), its `env` is not an object, or a policy file cannot be read or parsed. Policy
+/// settings are the one source over Clauseo's flag settings (Claude Code's settings
+/// precedence: managed, then command line, then local, project and user), so no other is read.
+/// On the launch prep's thread, or the matter thread for a restart's repair.
+pub(crate) fn claude_shell_carries(managed: &Path) -> bool {
+    let Ok(files) = managed_files(managed) else {
+        return true;
+    };
+    files.iter().any(|file| match read(file) {
+        Ok(None) => false,
+        Ok(Some(bytes)) => {
+            serde_json::from_slice::<Value>(without_bom(&bytes)).map_or(true, |value| {
+                match value.get("env") {
+                    None | Some(Value::Null) => false,
+                    Some(Value::Object(env)) => env
+                        .get(crate::agent::loads::CLAUDE_SHELL_FOLDER_VAR)
+                        .is_some_and(|value| !reads_true(value)),
+                    Some(_) => true,
+                }
+            })
+        }
+        Err(()) => true,
+    })
+}
+
+/// Whether Claude Code 2.1.293's `De()` reads a settings `env` value as true: its text,
+/// lowercased and trimmed, is `1`, `true`, `yes` or `on`.
+fn reads_true(value: &Value) -> bool {
+    let text = match value {
+        Value::String(text) => text.clone(),
+        Value::Bool(_) | Value::Number(_) => value.to_string(),
+        Value::Null | Value::Array(_) | Value::Object(_) => return false,
+    };
+    ["1", "true", "yes", "on"].contains(&text.trim().to_lowercase().as_str())
 }
 
 /// The `.json` documents of a `managed-settings.d` folder, in name order (none when it is not

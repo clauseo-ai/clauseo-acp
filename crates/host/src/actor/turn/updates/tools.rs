@@ -28,7 +28,13 @@ pub(super) fn tool_call(
         tracing::debug!(%thread, acp_id = %call.acp_id, "a tool call started twice");
         return Ok(());
     }
+    // The session's launch read whether Claude Code's policy settings may keep its shell's
+    // folder across calls: then no shell call's starting folder is known.
+    let start = agent(actor, thread).map(|agent| agent.shell_start.clone());
     if let Some(current) = current(actor, thread) {
+        if let Some(start) = start {
+            current.tool_paths.set_start(start);
+        }
         // The turn's paths stay in memory, so they take the call as the agent sent it; what is
         // logged (the sources and the build) takes it with the withheld values scrubbed.
         let fields = crate::sent::CallFields::of_call(&call);

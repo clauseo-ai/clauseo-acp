@@ -1,0 +1,16 @@
+{"scenario":"shell-folder-background","description":"A run_in_background Bash call never moves Claude Code's session folder: a completed background `cd Sub`, then a completed `pandoc a.md -o x.docx`, which writes the matter's root x.docx. While the client holds a later read's ask, the test writes the root x.docx and the lawyer's edit of Sub/x.docx: the root x.docx is the agent's, Sub/x.docx stays flagged","on_stdin_close":"exit"}
+{"expect":{"method":"initialize","as":"init","params":{"protocolVersion":1}}}
+{"respond":{"to":"init","result":{"protocolVersion":1,"agentCapabilities":{"loadSession":true},"authMethods":[],"agentInfo":{"name":"fake_agent","version":"0.0.0"}}}}
+{"expect":{"method":"session/new","as":"new","params":{"cwd":"{{any}}"}}}
+{"respond":{"to":"new","result":{"sessionId":"sess-1"}}}
+{"expect":{"method":"session/prompt","as":"p1","params":{"sessionId":"sess-1"}}}
+{"update":{"update":{"sessionUpdate":"tool_call","toolCallId":"t1-cd","name":"Bash","title":"cd Sub","kind":"execute","status":"pending","rawInput":{"command":"cd Sub","description":"Go to Sub","run_in_background":true}}}}
+{"update":{"update":{"sessionUpdate":"tool_call_update","toolCallId":"t1-cd","status":"completed"}}}
+{"update":{"update":{"sessionUpdate":"tool_call","toolCallId":"t2-pandoc","name":"Bash","title":"pandoc a.md -o x.docx","kind":"execute","status":"pending","rawInput":{"command":"pandoc a.md -o x.docx","description":"Run it"}}}}
+{"update":{"update":{"sessionUpdate":"tool_call_update","toolCallId":"t2-pandoc","status":"completed"}}}
+{"update":{"update":{"sessionUpdate":"tool_call","toolCallId":"t3-read","title":"Read a.md","kind":"read","status":"pending","locations":[{"path":"{{cwd}}/a.md","line":1}]}}}
+{"note":"The test writes the files while this ask waits, then allows it.","request":{"id":"perm-1","method":"session/request_permission","params":{"sessionId":"sess-1","toolCall":{"toolCallId":"t3-read","title":"Read a.md","kind":"read","status":"pending"},"options":[{"optionId":"allow-once","name":"Allow once","kind":"allow_once"},{"optionId":"reject-once","name":"Reject","kind":"reject_once"}]}}}
+{"expect_response":{"id":"perm-1","result":{"outcome":{"outcome":"selected","optionId":"allow-once"}}}}
+{"update":{"update":{"sessionUpdate":"tool_call_update","toolCallId":"t3-read","status":"completed"}}}
+{"update":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-answer-1","content":{"type":"text","text":"The reply is drafted."}}}}
+{"respond":{"to":"p1","result":{"stopReason":"end_turn"}}}

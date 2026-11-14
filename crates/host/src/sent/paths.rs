@@ -78,6 +78,25 @@ struct Call {
     /// The files its shell command writes ([`crate::shell_writes`]), counted only once the call
     /// ends `Completed` ([`TurnPaths::shell_writes`]).
     writes: BTreeSet<String>,
+    /// The same, its shell started in a folder the host cannot know: only absolute targets and
+    /// those after an absolute `cd` ([`ShellStart::Unknown`]).
+    unanchored: BTreeSet<String>,
+}
+
+/// Where each shell call of the turn starts: the matter's folder, since Clauseo launches Claude
+/// with `agent::loads::CLAUDE_SHELL_FOLDER_VAR` and Codex runs each exec in its own process,
+/// unless Claude Code's policy settings may turn that variable off
+/// (`actor::turn::claude_shell_carries`). A call's input `cwd` comes first either way.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) enum ShellStart {
+    /// The matter's folder.
+    #[default]
+    Matter,
+    /// Unknown: the policy settings may keep a folder an earlier call's `cd` reached.
+    Unknown,
+    /// Not known yet: the restart repair reads the policy settings in this folder on the
+    /// matter thread ([`TurnPaths::resolve_start`]), as a launch's prep does.
+    Policy(std::path::PathBuf),
 }
 
 /// The places a turn's tool calls named, kept until the turn's end.
@@ -85,6 +104,8 @@ struct Call {
 pub(crate) struct TurnPaths {
     /// Each tool call, by its key.
     calls: BTreeMap<String, Call>,
+    /// Where its shell calls start.
+    start: ShellStart,
 }
 
 /// One tool call's start or update as [`TurnPaths::note`] reads it: its kind, status, places
@@ -168,7 +189,8 @@ impl TurnPaths {
             && let Some(TextOrBlob::Inline(input)) = fields.raw_input
         {
             let dialect = shell_writes::Dialect::of_tool(call.tool_name.as_deref());
-            shell_writes::add_input(&mut call.writes, input, dialect);
+            shell_writes::add_input(&mut call.writes, input, dialect, Some(""));
+            shell_writes::add_input(&mut call.unanchored, input, dialect, None);
         }
     }
 
@@ -193,12 +215,39 @@ impl TurnPaths {
     /// relative to the matter's folder, or absolute ones the matter thread places in it. A
     /// command that failed, was cancelled or denied, or had not ended by the checkpoint wrote
     /// nothing: a file of that name the lawyer saved during the turn stays flagged.
+    /// Each call's relative targets join the folder it started in ([`ShellStart`]); a start
+    /// still [`ShellStart::Policy`] counts as unknown.
     pub(crate) fn shell_writes(&self) -> BTreeSet<String> {
+        let anchored = self.start == ShellStart::Matter;
         self.calls
             .values()
             .filter(|call| call.status == Some(ToolCallStatus::Completed))
-            .flat_map(|call| call.writes.iter().cloned())
+            .flat_map(|call| {
+                if anchored {
+                    call.writes.iter().cloned()
+                } else {
+                    call.unanchored.iter().cloned()
+                }
+            })
             .collect()
+    }
+
+    /// Sets where the turn's shell calls start: by the session's launch (`Agent::shell_carries`)
+    /// live, [`ShellStart::Policy`] for the restart repair.
+    pub(crate) fn set_start(&mut self, start: ShellStart) {
+        self.start = start;
+    }
+
+    /// Reads the policy settings a [`ShellStart::Policy`] start names, as the launch's prep
+    /// reads them; off the actor.
+    pub(crate) fn resolve_start(&mut self) {
+        if let ShellStart::Policy(managed) = &self.start {
+            self.start = if crate::actor::turn::claude_shell_carries(managed) {
+                ShellStart::Unknown
+            } else {
+                ShellStart::Matter
+            };
+        }
     }
 
     /// Paths as one completed edit call named them, for the (Unix-only) test of what reads them.
@@ -212,6 +261,7 @@ impl TurnPaths {
         };
         Self {
             calls: [("edit".to_owned(), call)].into(),
+            start: ShellStart::Matter,
         }
     }
 }

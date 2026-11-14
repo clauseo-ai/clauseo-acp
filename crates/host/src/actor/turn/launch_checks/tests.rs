@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use clauseo_protocol::{ErrorCode, MatterId, ThreadId, Timestamp};
 
-use super::{RunFolders, RunSweep};
+use super::{RunFolders, RunSweep, SettingsRead};
 use crate::ManualClock;
 use crate::agent::codex::prepare::{Job, LAUNCH_WAIT, PREPARE_WAIT, off_actor_or_undo};
 use crate::config::SessionKey;
@@ -411,7 +411,7 @@ fn a_late_prep_frees_its_claims() {
         run,
         skills_written: None,
         packs_skipped: Vec::new(),
-        moved: None,
+        settings: SettingsRead::default(),
     });
     assert!(alive.upgrade().is_none(), "its claims were freed");
     assert_eq!(held.count(), 0, "nothing is held");

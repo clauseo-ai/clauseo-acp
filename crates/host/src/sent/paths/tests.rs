@@ -4,7 +4,7 @@ use clauseo_protocol::{
     MatterPath, TextOrBlob, ToolCallContent, ToolCallStatus, ToolKind, ToolLocation,
 };
 
-use super::{CallFields, Places, TurnPaths};
+use super::{CallFields, Places, ShellStart, TurnPaths};
 
 fn inside(path: &str) -> ToolLocation {
     ToolLocation::Inside {
@@ -216,4 +216,40 @@ fn each_shell_call_starts_in_its_own_folder() {
         paths.shell_writes(),
         ["/matters/Deal/x.docx".to_owned(), "y.md".to_owned()].into()
     );
+}
+
+/// Where the turn's shell calls start: a relative target counts only from the matter's folder;
+/// a repair's policy start is read from the policy settings in its folder.
+#[test]
+fn a_shell_call_from_an_unknown_start_counts_no_relative_target() {
+    let input = TextOrBlob::Inline(r#"{"command":"echo x > a.md > /m/b.md"}"#.to_owned());
+    let mut call = fields(Some(ToolKind::Execute), DONE, &[], &[]);
+    call.raw_input = Some(&input);
+    let mut paths = TurnPaths::default();
+    paths.note("s", &call);
+    assert_eq!(
+        paths.shell_writes(),
+        ["/m/b.md".to_owned(), "a.md".to_owned()].into()
+    );
+    paths.set_start(ShellStart::Unknown);
+    assert_eq!(paths.shell_writes(), ["/m/b.md".to_owned()].into());
+    let managed = std::env::temp_dir().join(format!("clauseo-paths-policy-{}", std::process::id()));
+    crate::write::remove_dir_all(&managed).unwrap();
+    paths.set_start(ShellStart::Policy(managed.clone()));
+    paths.resolve_start();
+    assert_eq!(
+        paths.shell_writes().len(),
+        2,
+        "no policy file: the matter's folder"
+    );
+    crate::write::create_dir_all(&managed).unwrap();
+    crate::write::write_file(
+        &managed.join("managed-settings.json"),
+        br#"{"env": {"CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR": "0"}}"#,
+    )
+    .unwrap();
+    paths.set_start(ShellStart::Policy(managed.clone()));
+    paths.resolve_start();
+    assert_eq!(paths.shell_writes(), ["/m/b.md".to_owned()].into());
+    crate::write::remove_dir_all(&managed).unwrap();
 }
