@@ -1,9 +1,10 @@
 // fake_agent `claude-exit-mid-turn`: one prompt, one answer chunk, then the agent's process exits 1
 // mid-turn. The chunk stays in the transcript, the turn ends failed with agent.exited, the
 // working line says the answer stopped (with no Restart until the host has it, H10), and the
-// question is back in the field, so asking again starts a new turn. fake_agent
-// `exit-mid-turn-then-load` plays the same first launch, and its relaunch takes session/load (which
-// replays the chunk) and answers the asked-again question, so the second test sees that turn end.
+// question is back in the field, so asking again starts a new turn, which fails in its turn.
+// fake_agent `exit-mid-turn-then-load` plays the same first launch, and its relaunch takes
+// session/load (which replays the chunk) and answers the asked-again question, so the second test
+// sees that turn end.
 
 import { expect } from "@playwright/test";
 import { test } from "./fixture.ts";
@@ -36,13 +37,19 @@ test.describe("on exit-mid-turn", () => {
     // asking again: send_prompt relaunches the agent and the host accepts the question as a new
     // turn. The scenario's second launch can't answer: the relaunch sends session/load for the
     // stored session, and exit-mid-turn's handshake expects session/new only, so that launch exits
-    // at once and the new turn fails too, putting the question back in the field. How soon is the
-    // runner's, so this checks only that the new turn starts; the field emptying, the stopped line
-    // going and the answer are the next test's, on exit-mid-turn-then-load.
+    // at once and the new turn fails too, putting the question back in the field. The field
+    // emptying, the stopped line going and the answer are the next test's, on
+    // exit-mid-turn-then-load.
     await w.send.click();
     await expect(w.userMessages).toHaveCount(2);
     await expect(w.userMessages.last()).toContainText(QUESTION);
     await expect(w.agentMessages.first()).toHaveText(CHUNK);
+    // The test ends only once the relaunch has exited and its turn has failed: ended earlier, the
+    // fixture's taskkill of the app's tree can meet the relaunch mid-exit, its conhost not yet
+    // gone, and fail (#1035's merge-train smoke). Bounded by the expect timeout.
+    await expect(w.turnStopped).toHaveCount(2);
+    await expectTurnEnded(w, "failed");
+    await expect(w.composer).toHaveValue(QUESTION);
   });
 });
 
