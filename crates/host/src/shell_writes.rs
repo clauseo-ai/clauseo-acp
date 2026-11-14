@@ -22,9 +22,11 @@
 //! call's `cd` did: Claude Code's shell goes back to the session's folder after every call,
 //! since Clauseo launches it with `CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR=1`
 //! (`crate::agent::loads`), and Codex's exec runs each call in its own process, from its
-//! `workdir` or the turn's folder. A target that is unclear (an expansion, a
-//! glob, one ending in `/`) writes nothing, and leaves the others as they are. Kept in memory
-//! for the turn only, never logged.
+//! `workdir` or the turn's folder, so nothing is tracked across calls. When Claude Code's policy
+//! settings may turn that variable off, the start is unknown instead (`sent::ShellStart`): only
+//! absolute targets, and those after an absolute `cd`, count. A target that is unclear (an
+//! expansion, a glob, one ending in `/`) writes nothing, and leaves the others as they are.
+//! Kept in memory for the turn only, never logged.
 
 use std::collections::BTreeSet;
 use std::iter::Peekable;
@@ -67,16 +69,22 @@ impl Dialect {
 
 /// Adds the targets of the command in a shell call's input (its JSON text): a `command` string,
 /// or an argument list (`["bash", "-lc", "<script>"]`, or the program's own arguments), run in
-/// its `cwd` or `workdir` when the input gives one. A `command` string is read in `dialect`.
-/// Input that is not JSON adds nothing.
-pub(crate) fn add_input(targets: &mut BTreeSet<String>, raw_input: &str, dialect: Dialect) {
+/// its `cwd` or `workdir` when the input gives one, else in `start` (`""`: the matter's folder,
+/// `None`: unknown, so only absolute targets and those after an absolute `cd` count). A
+/// `command` string is read in `dialect`. Input that is not JSON adds nothing.
+pub(crate) fn add_input(
+    targets: &mut BTreeSet<String>,
+    raw_input: &str,
+    dialect: Dialect,
+    start: Option<&str>,
+) {
     let Ok(serde_json::Value::Object(input)) = serde_json::from_str(raw_input) else {
         return;
     };
     let cwd = ["cwd", "workdir"]
         .iter()
         .find_map(|key| input.get(*key).and_then(serde_json::Value::as_str))
-        .unwrap_or("");
+        .or(start);
     match input.get("command") {
         Some(serde_json::Value::String(script)) => add_script(targets, cwd, script, dialect),
         Some(serde_json::Value::Array(items)) => {
@@ -96,7 +104,7 @@ pub(crate) fn add_input(targets: &mut BTreeSet<String>, raw_input: &str, dialect
                 }
                 _ => {
                     let words: Vec<Word> = argv.into_iter().map(Word::plain).collect();
-                    add_segment(targets, Some(cwd), &words, &[]);
+                    add_segment(targets, cwd, &words, &[]);
                 }
             }
         }
@@ -105,10 +113,10 @@ pub(crate) fn add_input(targets: &mut BTreeSet<String>, raw_input: &str, dialect
 }
 
 /// Adds the targets of the shell script `script`, written in `dialect` and run in `cwd` (`""`:
-/// the matter's folder).
+/// the matter's folder, `None` unknown).
 pub(crate) fn add_script(
     targets: &mut BTreeSet<String>,
-    cwd: &str,
+    cwd: Option<&str>,
     script: &str,
     dialect: Dialect,
 ) {

@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use clauseo_protocol::AgentKind;
 use serde_json::json;
 
-use super::{MAX_FILE, Moved, claude_moved, codex_moved, meta_moved, routes};
+use super::{MAX_FILE, Moved, claude_moved, claude_shell_carries, codex_moved, meta_moved, routes};
 use crate::actor::turn::offline::probe::{ReachClass, Target};
 use crate::write;
 
@@ -244,4 +244,44 @@ fn a_moved_codex_launch_is_not_probed() {
         target.unless_moved(Some(Moved::CodexConfig)),
         Target::Unknown(ReachClass::UnknownService)
     );
+}
+
+/// Claude Code's policy settings turn `CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR` off with any
+/// value its `De()` does not read as true (`1`, `true`, `yes`, `on`, in any case, trimmed);
+/// a policy file that cannot be parsed may too. Unset, or true, it stays on.
+#[test]
+fn a_policy_false_for_the_shell_folder_variable_keeps_the_folder_across_calls() {
+    let root = folder("shell_carries");
+    let managed = root.join("managed");
+    assert!(!claude_shell_carries(&managed));
+    let file = managed.join("managed-settings.json");
+    for (value, carries) in [
+        (json!("1"), false),
+        (json!(" TRUE "), false),
+        (json!("yes"), false),
+        (json!("On"), false),
+        (json!(true), false),
+        (json!(1), false),
+        (json!("0"), true),
+        (json!("false"), true),
+        (json!(""), true),
+        (json!(false), true),
+        (json!(null), true),
+    ] {
+        let env = json!({"env": {"CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR": value}});
+        put(&file, &env.to_string());
+        assert_eq!(claude_shell_carries(&managed), carries, "{value}");
+    }
+    put(&file, r#"{"env": {"OTHER": "0"}}"#);
+    assert!(!claude_shell_carries(&managed));
+    write::remove_file(&file).unwrap();
+    let drop_in = managed.join("managed-settings.d").join("50-shell.json");
+    put(
+        &drop_in,
+        r#"{"env": {"CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR": "no"}}"#,
+    );
+    assert!(claude_shell_carries(&managed));
+    put(&drop_in, "{ not json");
+    assert!(claude_shell_carries(&managed));
+    write::remove_dir_all(&root).unwrap();
 }

@@ -50,9 +50,9 @@ pub(super) struct Folder {
 
 impl Folder {
     /// The folder of a command run in `cwd` (`""`: the matter's folder).
-    pub(super) fn new(cwd: &str) -> Self {
+    pub(super) fn new(cwd: Option<&str>) -> Self {
         Self {
-            now: Some(cwd.to_owned()),
+            now: cwd.map(str::to_owned),
             conditional: false,
             before: Sep::Then,
             groups: 0,

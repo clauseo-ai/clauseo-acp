@@ -279,7 +279,9 @@ until `StepUndone` is durable; a failed undo commit is retried once, as a turn's
   `shell_writes`, Bash's or PowerShell's: redirects, `-o`, `tee`, `cp`, and `stetdoc`'s forms,
   its default `NAME.edited.docx` and `--in-place`; relative targets join the call's own folder
   only, since each call starts in the matter's folder (Claude runs under
-  `CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR=1`, Codex runs each exec in its own process);
+  `CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR=1`, Codex runs each exec in its own process), or
+  from an unknown folder when Claude Code's policy settings set that variable to a value it
+  reads as false (read at launch and again by the restart repair);
   added or modified; only a call that ended
   `Completed` by the checkpoint wrote anything, so a denied command, an edit whose ask was open
   at a Stop, or a call the close settles afterwards wrote nothing) is read too: a step with such

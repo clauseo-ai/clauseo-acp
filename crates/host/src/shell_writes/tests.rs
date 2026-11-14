@@ -5,7 +5,7 @@ use super::{Dialect, add_input, add_script, in_matter};
 
 fn targets(script: &str) -> Vec<String> {
     let mut out = BTreeSet::new();
-    add_script(&mut out, "", script, Dialect::Posix);
+    add_script(&mut out, Some(""), script, Dialect::Posix);
     out.into_iter().collect()
 }
 
@@ -101,18 +101,21 @@ fn input_gives_the_command_and_its_folder() {
         &mut out,
         r#"{"command":"pandoc in.md -o \"Reply.docx\"","description":"x"}"#,
         Dialect::Posix,
+        Some(""),
     );
     add_input(
         &mut out,
         r#"{"command":["bash","-lc","echo x > b.md"],"cwd":"/m/Sub"}"#,
         Dialect::Posix,
+        Some(""),
     );
     add_input(
         &mut out,
         r#"{"command":["cp","a.docx","c.docx"]}"#,
         Dialect::Posix,
+        Some(""),
     );
-    add_input(&mut out, "not json > d.md", Dialect::Posix);
+    add_input(&mut out, "not json > d.md", Dialect::Posix, Some(""));
     let out: Vec<&str> = out.iter().map(String::as_str).collect();
     assert_eq!(out, ["/m/Sub/b.md", "Reply.docx", "c.docx"]);
     assert_eq!(
@@ -129,7 +132,7 @@ fn input_gives_the_command_and_its_folder() {
 
 fn targets_ps(script: &str) -> Vec<String> {
     let mut out = BTreeSet::new();
-    add_script(&mut out, "", script, Dialect::PowerShell);
+    add_script(&mut out, Some(""), script, Dialect::PowerShell);
     out.into_iter().collect()
 }
 
@@ -142,7 +145,7 @@ fn stetdoc_writes_its_default_output_the_document_in_place_or_its_output() {
     let mut out = BTreeSet::new();
     add_script(
         &mut out,
-        "",
+        Some(""),
         r#"cd "/matters/Deal" && stetdoc edit "Main Agreement.docx" --ops ops.json"#,
         Dialect::Posix,
     );
@@ -203,7 +206,7 @@ fn stetdoc_in_powershell() {
     let folder = Path::new(r"C:\Matters\Deal");
     let in_deal = |script: &str| -> Vec<Option<String>> {
         let mut out = BTreeSet::new();
-        add_script(&mut out, "", script, Dialect::PowerShell);
+        add_script(&mut out, Some(""), script, Dialect::PowerShell);
         out.iter().map(|path| in_matter(folder, path)).collect()
     };
     let some = |path: &str| vec![Some(path.to_owned())];
@@ -263,7 +266,7 @@ fn a_powershell_input_is_read_as_powershell() {
     assert_eq!(Dialect::of_tool(None), Dialect::Posix);
     let input = r#"{"command":"cd \"C:\\Matters\\Deal\"; stetdoc edit \"Main Agreement.docx\" --ops ops.json","description":"x"}"#;
     let mut out = BTreeSet::new();
-    add_input(&mut out, input, Dialect::PowerShell);
+    add_input(&mut out, input, Dialect::PowerShell, Some(""));
     let out: Vec<&str> = out.iter().map(String::as_str).collect();
     assert_eq!(out, ["C:/Matters/Deal/Main Agreement.edited.docx"]);
 }
@@ -272,7 +275,7 @@ fn a_powershell_input_is_read_as_powershell() {
 /// outside it).
 fn in_deal(script: &str) -> Vec<Option<String>> {
     let mut out = BTreeSet::new();
-    add_script(&mut out, "", script, Dialect::Posix);
+    add_script(&mut out, Some(""), script, Dialect::Posix);
     out.iter()
         .map(|path| in_matter(Path::new("/matters/Deal"), path))
         .collect()
@@ -325,7 +328,7 @@ fn a_powershell_set_location_at_any_position_sets_the_folder() {
     let folder = Path::new(r"C:\Matters\Deal");
     let in_ps = |script: &str| -> Vec<Option<String>> {
         let mut out = BTreeSet::new();
-        add_script(&mut out, "", script, Dialect::PowerShell);
+        add_script(&mut out, Some(""), script, Dialect::PowerShell);
         out.iter().map(|path| in_matter(folder, path)).collect()
     };
     assert_eq!(
@@ -371,4 +374,33 @@ fn a_cd_outside_or_unclear_counts_no_relative_target() {
         some(&["abs.docx"])
     );
     assert_eq!(targets_ps("Pop-Location; pandoc a.md -o y.docx"), none());
+}
+
+/// A call whose starting folder is unknown (Claude Code's policy settings may keep an earlier
+/// call's `cd`): its relative targets count for nothing, but those after an absolute `cd`, and
+/// absolute ones, still count.
+#[test]
+fn an_unknown_start_counts_only_what_an_absolute_folder_places() {
+    let unknown = |script: &str| {
+        let mut out = BTreeSet::new();
+        add_script(&mut out, None, script, Dialect::Posix);
+        out.into_iter().collect::<Vec<String>>()
+    };
+    assert_eq!(unknown("pandoc a.md -o rel.docx"), none());
+    assert_eq!(
+        unknown("cd /matters/Deal && pandoc a.md -o rel.docx"),
+        ["/matters/Deal/rel.docx"]
+    );
+    assert_eq!(
+        unknown("echo x > /matters/Deal/a.md"),
+        ["/matters/Deal/a.md"]
+    );
+    let mut out = BTreeSet::new();
+    add_input(
+        &mut out,
+        r#"{"command":"echo x > b.md","cwd":"/m"}"#,
+        Dialect::Posix,
+        None,
+    );
+    assert_eq!(out.into_iter().collect::<Vec<_>>(), ["/m/b.md"]);
 }

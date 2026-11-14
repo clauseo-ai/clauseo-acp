@@ -27,6 +27,7 @@ mod known;
 mod launch_checks;
 mod logout;
 mod offline;
+pub(crate) use offline::probe::settings::claude_shell_carries;
 mod out;
 mod outside;
 mod own_turn;

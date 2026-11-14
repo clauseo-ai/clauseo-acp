@@ -449,10 +449,11 @@ fn handle(settings: &Settings, slot: &mut Slot, job: MatterJob) -> MatterReply {
         })),
         MatterJob::Repair {
             meta,
-            tool_paths,
+            mut tool_paths,
             before,
             last,
         } => MatterReply::AfterTurn(open(settings, slot).and_then(|matter| {
+            tool_paths.resolve_start();
             let commands = writes_in(matter.folder(), &tool_paths.shell_writes());
             let named = (self::tool_paths(matter.folder(), &tool_paths), commands);
             repair(matter, &meta, &named, before, last)

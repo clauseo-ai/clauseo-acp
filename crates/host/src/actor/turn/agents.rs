@@ -77,6 +77,9 @@ pub(super) struct Agent {
     pub(super) after_stop: Vec<Waiting>,
     /// The matter folder it was started in, its working directory.
     pub(super) folder: PathBuf,
+    /// Where its shell calls start: the matter's folder, or unknown when Claude Code's policy
+    /// settings may keep the folder from one call to the next (`SettingsRead::shell_carries`).
+    pub(super) shell_start: crate::sent::ShellStart,
     /// Why it is being stopped, which picks the detach a stop logs.
     stop_cause: StopCause,
     /// The attached session.
@@ -229,6 +232,11 @@ pub(super) fn launch_now(
     let unprotected = prepared.folder.is_some_and(agent::forced_ask::applies);
     let forced_ask = prepared.codex.is_none() && unprotected;
     let prepared_folder = prepared.folder;
+    let shell_start = if prepared.settings.shell_carries {
+        crate::sent::ShellStart::Unknown
+    } else {
+        crate::sent::ShellStart::Matter
+    };
     if forced_ask {
         let matter = prepared.run.key.matter;
         tracing::info!(%matter, forced_ask, "Claude runs in forced ask: the matter folder is unprotected");
@@ -266,6 +274,7 @@ pub(super) fn launch_now(
         waiting,
         after_stop: Vec::new(),
         folder,
+        shell_start,
         stop_cause: StopCause::Asked,
         session: None,
         rate: RateCap::new(),
