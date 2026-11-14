@@ -8,7 +8,7 @@
 //! or read another way leaves its word unclear, so it writes nothing: a `$`, a backtick, a
 //! glob (`*`, `?`, `[`), a brace, `@` (a splat, an array or a here-string) or a leading `~`.
 
-use super::{Reader, Segment};
+use super::{Reader, Segment, Sep, sep_of};
 
 /// The simple commands of `script`, as PowerShell splits them.
 pub(super) fn segments(script: &str) -> Vec<Segment> {
@@ -66,15 +66,13 @@ pub(super) fn segments(script: &str) -> Vec<Segment> {
                 }
             }
             ';' | '&' | '|' | '\n' | '(' | ')' | '<' => {
-                if matches!(c, '&' | '|') {
-                    chars.next_if_eq(&c);
-                }
-                r.end_segment();
+                let double = matches!(c, '&' | '|') && chars.next_if_eq(&c).is_some();
+                r.end_segment(sep_of(c, double));
             }
             c if c.is_whitespace() => r.end_word(),
             _ => r.push(c),
         }
     }
-    r.end_segment();
+    r.end_segment(Sep::End);
     r.out
 }

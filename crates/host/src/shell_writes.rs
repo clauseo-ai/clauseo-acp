@@ -12,13 +12,15 @@
 //! with `--in-place` the document, else `NAME.edited.docx` beside it; nothing for `--dry-run`,
 //! `view` and the other reading subcommands. The command is split as a shell does (quotes kept
 //! together) into segments at `;`, `&&`, `||`, `|` and new lines, and a heredoc's body is no
-//! command at all; a leading `cd <dir>` segment sets the folder later ones run in. Claude Code's
-//! `PowerShell` tool (an `execute` call named so) is split as PowerShell does ([`powershell`]:
-//! its quotes, `\` a separator, `Set-Location`, `sl` and `chdir` as `cd`). Each target is
-//! joined to that folder (the call's `cwd` when its input says, else the matter's folder) and
-//! normalised, so it compares with a file's whole path in the matter. Anything unclear (an
-//! expansion, a glob, a later `cd`, `pushd` or `popd`, a target ending in `/`) writes
-//! nothing. Kept in memory for the turn only, never logged.
+//! command at all. A `cd <dir>` at any position sets the folder the segments after it run in
+//! ([`folder`]: when it surely runs in this shell, else relative targets after it count for
+//! nothing). Claude Code's `PowerShell` tool (an `execute` call named so) is split as
+//! PowerShell does ([`powershell`]: its quotes, `\` a separator, `Set-Location`, `sl`,
+//! `chdir` and `Push-Location` as `cd`). Each relative target is joined to that folder (else
+//! the call's `cwd` when its input says, else the matter's folder) and normalised, so it
+//! compares with a file's whole path in the matter. A target that is unclear (an expansion, a
+//! glob, one ending in `/`) writes nothing, and leaves the others as they are. Kept in memory
+//! for the turn only, never logged.
 
 use std::collections::BTreeSet;
 use std::iter::Peekable;
@@ -27,6 +29,7 @@ use std::str::Chars;
 
 use crate::stetdoc_args;
 
+mod folder;
 mod powershell;
 
 /// The most targets one turn keeps.
@@ -88,15 +91,8 @@ pub(crate) fn add_input(targets: &mut BTreeSet<String>, raw_input: &str, dialect
                     add_script(targets, cwd, script, Dialect::Posix);
                 }
                 _ => {
-                    let words = argv.into_iter().map(Word::plain).collect();
-                    add_segment(
-                        targets,
-                        cwd,
-                        &Segment {
-                            words,
-                            redirects: Vec::new(),
-                        },
-                    );
+                    let words: Vec<Word> = argv.into_iter().map(Word::plain).collect();
+                    add_segment(targets, Some(cwd), &words, &[]);
                 }
             }
         }
@@ -112,64 +108,15 @@ pub(crate) fn add_script(
     script: &str,
     dialect: Dialect,
 ) {
-    let mut cwd = cwd.to_owned();
-    let mut leading = true;
     let segments = match dialect {
         Dialect::Posix => segments(script),
         Dialect::PowerShell => powershell::segments(script),
     };
-    for segment in segments {
-        let first = segment.words.first().map(|word| word.text.as_str());
-        if let Some(change) = first.and_then(|first| folder_change(first, dialect)) {
-            // A leading `cd` sets the folder of what follows; any other folder change (a later
-            // `cd`, a `pushd` or a `popd`) leaves the folder unknown.
-            let words = match (dialect, segment.words.as_slice()) {
-                (Dialect::PowerShell, [first, flag, rest @ ..])
-                    if ["-path", "-literalpath"]
-                        .contains(&flag.text.to_ascii_lowercase().as_str()) =>
-                {
-                    std::iter::once(first).chain(rest).collect::<Vec<_>>()
-                }
-                (_, words) => words.iter().collect(),
-            };
-            match (change, leading, words.as_slice()) {
-                (Change::Cd, true, [_, dir]) if dir.clear && segment.redirects.is_empty() => {
-                    let Some(joined) = join(&cwd, &dir.text) else {
-                        return;
-                    };
-                    cwd = joined;
-                    continue;
-                }
-                _ => return,
-            }
+    let mut folder = folder::Folder::new(cwd);
+    for segment in &segments {
+        if let Some((cwd, words)) = folder.read(segment, dialect) {
+            add_segment(targets, cwd.as_deref(), words, &segment.redirects);
         }
-        leading = false;
-        add_segment(targets, &cwd, &segment);
-    }
-}
-
-/// A command that changes the folder.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Change {
-    /// `cd` (PowerShell's `Set-Location`, `sl` and `chdir` too).
-    Cd,
-    /// `pushd` or `popd` (PowerShell's `Push-Location` and `Pop-Location` too).
-    Stack,
-}
-
-/// Whether the program word `first` changes the folder, in `dialect` (PowerShell's names in
-/// any case).
-fn folder_change(first: &str, dialect: Dialect) -> Option<Change> {
-    let name = match dialect {
-        Dialect::Posix => first.to_owned(),
-        Dialect::PowerShell => first.to_ascii_lowercase(),
-    };
-    match (dialect, name.as_str()) {
-        (_, "cd") | (Dialect::PowerShell, "chdir" | "sl" | "set-location") => Some(Change::Cd),
-        (_, "pushd" | "popd") | (Dialect::PowerShell, "push-location" | "pop-location") => {
-            Some(Change::Stack)
-        }
-        _ => None,
     }
 }
 
@@ -197,17 +144,47 @@ impl Word {
     }
 }
 
-/// One simple command: its words, and the targets of its `>` and `>>` redirects.
+/// What joins a simple command to the next.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+enum Sep {
+    /// `;` or a new line.
+    Then,
+    /// `&&`.
+    And,
+    /// `||`.
+    Or,
+    /// `|`.
+    Pipe,
+    /// `&` (in PowerShell a call operator too).
+    Background,
+    /// `(`.
+    Open,
+    /// `)`.
+    Close,
+    /// The end of the command.
+    #[default]
+    End,
+}
+
+/// One simple command: its words, the targets of its `>` and `>>` redirects, what joins it to
+/// the next, and whether it stands inside parentheses.
 #[derive(Debug, Default)]
 struct Segment {
     words: Vec<Word>,
     redirects: Vec<Word>,
+    ender: Sep,
+    nested: bool,
 }
 
-/// Adds one simple command's targets, run in `cwd`.
-fn add_segment(targets: &mut BTreeSet<String>, cwd: &str, segment: &Segment) {
-    let mut found: Vec<&Word> = segment.redirects.iter().collect();
-    let words = &segment.words;
+/// Adds one simple command's targets, run in `cwd` (`None`: unknown, so only absolute
+/// targets count).
+fn add_segment(
+    targets: &mut BTreeSet<String>,
+    cwd: Option<&str>,
+    words: &[Word],
+    redirects: &[Word],
+) {
+    let mut found: Vec<&Word> = redirects.iter().collect();
     // Leading assignments and wrappers that run the rest as the command.
     let start = words
         .iter()
@@ -269,10 +246,13 @@ fn add_segment(targets: &mut BTreeSet<String>, cwd: &str, segment: &Segment) {
     }
 }
 
-fn add(targets: &mut BTreeSet<String>, cwd: &str, target: &str) {
+fn add(targets: &mut BTreeSet<String>, cwd: Option<&str>, target: &str) {
     if targets.len() >= MAX_TARGETS || target.ends_with(['/', '\\']) {
         return;
     }
+    let Some(cwd) = cwd.or_else(|| is_absolute(target).then_some("")) else {
+        return;
+    };
     if let Some(path) = join(cwd, target)
         && !path.is_empty()
     {
@@ -364,6 +344,8 @@ struct Reader {
     unclear: bool,
     /// It is a redirect's target.
     redirect: bool,
+    /// How many parentheses are open.
+    depth: usize,
 }
 
 impl Reader {
@@ -389,12 +371,20 @@ impl Reader {
         self.unclear = false;
     }
 
-    fn end_segment(&mut self) {
+    /// Ends the segment being read at `sep` (`Sep::End` at the command's end).
+    fn end_segment(&mut self, sep: Sep) {
         self.end_word();
         self.redirect = false;
-        let segment = std::mem::take(&mut self.segment);
+        let mut segment = std::mem::take(&mut self.segment);
         if !segment.words.is_empty() || !segment.redirects.is_empty() {
+            segment.ender = sep;
+            segment.nested = self.depth > 0;
             self.out.push(segment);
+        }
+        match sep {
+            Sep::Open => self.depth += 1,
+            Sep::Close => self.depth = self.depth.saturating_sub(1),
+            Sep::Then | Sep::And | Sep::Or | Sep::Pipe | Sep::Background | Sep::End => {}
         }
     }
 }
@@ -483,10 +473,8 @@ fn segments(script: &str) -> Vec<Segment> {
                 }
             }
             ';' | '&' | '|' | '\n' | '(' | ')' => {
-                if matches!(c, '&' | '|') && chars.peek() == Some(&c) {
-                    chars.next();
-                }
-                r.end_segment();
+                let double = matches!(c, '&' | '|') && chars.next_if_eq(&c).is_some();
+                r.end_segment(sep_of(c, double));
                 if c == '\n' {
                     skip_heredoc_bodies(&mut chars, &mut heredocs);
                 }
@@ -495,8 +483,21 @@ fn segments(script: &str) -> Vec<Segment> {
             _ => r.push(c),
         }
     }
-    r.end_segment();
+    r.end_segment(Sep::End);
     r.out
+}
+
+/// The separator `c` (doubled: `&&`, `||`).
+fn sep_of(c: char, double: bool) -> Sep {
+    match (c, double) {
+        ('&', true) => Sep::And,
+        ('&', false) => Sep::Background,
+        ('|', true) => Sep::Or,
+        ('|', false) => Sep::Pipe,
+        ('(', _) => Sep::Open,
+        (')', _) => Sep::Close,
+        _ => Sep::Then,
+    }
 }
 
 /// A heredoc opened on a line: its delimiter word, and whether `<<-` strips leading tabs.
