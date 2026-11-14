@@ -307,3 +307,24 @@ fn stetdocs_writes_through_a_symlinked_spelling_are_unflagged() {
     assert_eq!(edited_since(&host, thread, turn), Vec::<String>::new());
     host.shutdown();
 }
+
+/// Claude's memo flow: one Bash call sets `W`, writes the memo's text into a work folder
+/// through a heredoc, then `cd "<matter>" && pandoc … -o "<reply>.docx"`. The `cd` after the
+/// assignment and the heredoc sets the folder pandoc writes in, so the reply is unflagged.
+#[test]
+fn a_memo_written_after_a_cd_later_in_the_command_is_unflagged() {
+    let files = [("Notice.docx", "the notice\n")];
+    let reply = "Reply to Kestrel legal notice - draft.docx";
+    let (_dir, host, thread, turn, _folder, flags) = run_turn(
+        "lawyer_file_memo",
+        "undo-lawyer-file-memo",
+        &files,
+        |folder| {
+            write::write(&folder.join(reply), b"the reply\n");
+            before_end(&folder.join(reply));
+        },
+    );
+    assert_eq!(flags, [flag(reply, false)]);
+    assert_eq!(edited_since(&host, thread, turn), Vec::<String>::new());
+    host.shutdown();
+}

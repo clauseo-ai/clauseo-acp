@@ -52,11 +52,6 @@ fn a_leading_cd_sets_the_folder_and_anything_unclear_writes_nothing() {
         ["Sub/Memo.docx"]
     );
     assert_eq!(targets("cd Sub; cd ../Out && echo x > a.md"), ["Out/a.md"]);
-    // a cd after another command: the folder is no longer known
-    assert_eq!(
-        targets("echo x > a.md && cd Sub && echo y > b.md"),
-        ["a.md"]
-    );
     assert_eq!(targets("echo x > $OUT"), none());
     assert_eq!(targets(r#"echo x > "$HOME/a.md""#), none());
     assert_eq!(targets("cp a.docx *.bak"), none());
@@ -84,8 +79,7 @@ fn a_heredoc_body_is_text_not_commands() {
 }
 
 #[test]
-fn pushd_and_popd_leave_the_folder_unknown() {
-    assert_eq!(targets("pushd Sub && pandoc in.md -o Memo.docx"), none());
+fn popd_leaves_the_folder_unknown() {
     assert_eq!(targets("echo x > a.md && popd && echo y > b.md"), ["a.md"]);
 }
 
@@ -256,15 +250,9 @@ fn stetdoc_in_powershell() {
         r#"stetdoc edit `"a.docx" --ops o.json"#,
         "stetdoc edit @args",
         "stetdoc edit *.docx --ops o.json",
-        "Push-Location Sub; stetdoc edit a.docx --ops o.json",
     ] {
         assert_eq!(targets_ps(script), none(), "{script}");
     }
-    // a later folder change leaves the folder unknown
-    assert_eq!(
-        targets_ps("stetdoc edit a.docx --ops o; Set-Location Sub; stetdoc edit b.docx --ops o"),
-        ["a.edited.docx"]
-    );
 }
 
 /// A PowerShell call's input is read as PowerShell; any other tool's as POSIX.
@@ -278,4 +266,109 @@ fn a_powershell_input_is_read_as_powershell() {
     add_input(&mut out, input, Dialect::PowerShell);
     let out: Vec<&str> = out.iter().map(String::as_str).collect();
     assert_eq!(out, ["C:/Matters/Deal/Main Agreement.edited.docx"]);
+}
+
+/// The targets of a POSIX script, each as its path in the matter `/matters/Deal` (`None`:
+/// outside it).
+fn in_deal(script: &str) -> Vec<Option<String>> {
+    let mut out = BTreeSet::new();
+    add_script(&mut out, "", script, Dialect::Posix);
+    out.iter()
+        .map(|path| in_matter(Path::new("/matters/Deal"), path))
+        .collect()
+}
+
+fn some(paths: &[&str]) -> Vec<Option<String>> {
+    paths.iter().map(|path| Some((*path).to_owned())).collect()
+}
+
+/// Claude's memo flow: an assignment, a heredoc into a work folder, then a `cd` into the
+/// matter before pandoc writes the reply there.
+#[test]
+fn a_cd_after_an_assignment_and_a_heredoc_sets_the_folder() {
+    let script = "W=\"/data/run/abc/work\"\n\
+        cat > \"$W/reply.md\" <<'EOF'\n# Reply\ncd /elsewhere && pandoc x -o y.docx\nEOF\n\
+        cd /matters/Deal && pandoc \"$W/reply.md\" -o \"Reply to Kestrel legal notice - draft.docx\" \
+        && rm \"$W/reply.md\" && python3 -I -c \"print(1)\"";
+    assert_eq!(
+        in_deal(script),
+        some(&["Reply to Kestrel legal notice - draft.docx"])
+    );
+}
+
+#[test]
+fn a_cd_at_any_position_sets_the_folder_of_what_follows() {
+    assert_eq!(
+        in_deal("cd /matters/Deal && pandoc a.md -o rel.docx"),
+        some(&["rel.docx"])
+    );
+    assert_eq!(
+        in_deal("cd /matters/Deal/sub && pandoc a.md -o ../x.docx"),
+        some(&["x.docx"])
+    );
+    assert_eq!(
+        in_deal("echo x > /matters/Deal/a.md; cd /matters/Deal/Sub\npandoc a.md -o b.docx"),
+        some(&["Sub/b.docx", "a.md"])
+    );
+    assert_eq!(
+        targets("echo x > a.md && cd Sub && echo y > b.md"),
+        ["Sub/b.md", "a.md"]
+    );
+    assert_eq!(
+        targets("pushd Sub && pandoc in.md -o Memo.docx"),
+        ["Sub/Memo.docx"]
+    );
+}
+
+#[test]
+fn a_powershell_set_location_at_any_position_sets_the_folder() {
+    let folder = Path::new(r"C:\Matters\Deal");
+    let in_ps = |script: &str| -> Vec<Option<String>> {
+        let mut out = BTreeSet::new();
+        add_script(&mut out, "", script, Dialect::PowerShell);
+        out.iter().map(|path| in_matter(folder, path)).collect()
+    };
+    assert_eq!(
+        in_ps(r"Set-Location 'C:\Matters\Deal'; stetdoc edit 'Main Agreement.docx' --ops o.json"),
+        some(&["Main Agreement.edited.docx"])
+    );
+    assert_eq!(
+        in_ps("$w = 'x'\nPush-Location 'C:\\Matters\\Deal'; pandoc a.md -o 'Re ply.docx'"),
+        some(&["Re ply.docx"])
+    );
+    assert_eq!(
+        targets_ps("stetdoc edit a.docx --ops o; Set-Location Sub; stetdoc edit b.docx --ops o"),
+        ["Sub/b.edited.docx", "a.edited.docx"]
+    );
+}
+
+/// A cd out of the matter, or one whose folder is unclear, counts no relative target after it;
+/// absolute ones still count.
+#[test]
+fn a_cd_outside_or_unclear_counts_no_relative_target() {
+    assert_eq!(
+        in_deal("cd /elsewhere && pandoc a.md -o rel.docx"),
+        vec![None]
+    );
+    assert_eq!(in_deal("cd .. && pandoc a.md -o rel.docx"), vec![]);
+    for script in [
+        r#"cd "$W" && pandoc a.md -o rel.docx"#,
+        "cd x || exit 1; pandoc a.md -o y.docx",
+        "ls | cd x && pandoc a.md -o y.docx",
+        "cd x | pandoc a.md -o y.docx",
+        "(cd x) && pandoc a.md -o y.docx",
+        "{ cd x; } && pandoc a.md -o y.docx",
+        "popd && pandoc a.md -o y.docx",
+        "cd && pandoc a.md -o y.docx",
+        "cd x & pandoc a.md -o y.docx",
+    ] {
+        assert_eq!(targets(script), none(), "{script}");
+    }
+    // a cd only part of an `&&` chain may not have run once the chain ends
+    assert_eq!(targets("test -d x && cd x; pandoc a.md -o y.docx"), none());
+    assert_eq!(
+        in_deal(r#"cd "$W" && pandoc a.md -o /matters/Deal/abs.docx -o rel.docx"#),
+        some(&["abs.docx"])
+    );
+    assert_eq!(targets_ps("Pop-Location; pandoc a.md -o y.docx"), none());
 }
