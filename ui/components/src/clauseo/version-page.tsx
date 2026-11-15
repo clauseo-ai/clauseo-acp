@@ -5,6 +5,7 @@ import type { ReactNode, RefObject } from "react";
 import { Button } from "../ui/button.tsx";
 import { IconOpen, IconPaperBookPage } from "../icons/icons.tsx";
 import { useVersionWords } from "../lib/words-versions.ts";
+import { rdt } from "../lib/words-reader.ts";
 import { Heading } from "./heading.tsx";
 import { keepIds } from "./matter.ts";
 import { useRoom } from "./room-scope.ts";
@@ -94,7 +95,9 @@ export function DraftSheet({
   );
 }
 
-/** A sheet's paragraphs, each in its place; marked: each that changed carries its bar. */
+/** A sheet's paragraphs, each in its place; marked: each that changed carries its bar, and a blackline's paragraph
+ * says above its words when only its formatting changed or it holds text Word hides; a place that couldn't be shown
+ * says so instead of words. */
 function Paras({
   diffs,
   marked,
@@ -104,6 +107,7 @@ function Paras({
   marked: boolean;
   differs?: ReadonlySet<number> | undefined;
 }) {
+  const w = useVersionWords();
   return (
     <div className="page-paras">
       {diffs.map((d) => (
@@ -111,10 +115,26 @@ function Paras({
           key={d.place}
           className="ver-place"
           data-place={d.place}
-          data-change={marked && d.kind !== "same" ? d.kind : undefined}
+          data-change={marked && d.kind !== "same" ? (d.note ?? d.kind) : undefined}
           data-differs={differs?.has(d.place) === true ? "" : undefined}
         >
-          <Runs runs={d.runs} />
+          {d.note === "formatted" && (
+            <span className="ver-para-note">
+              <Say>{rdt(w.lang, "Formatting changed")}</Say>
+            </span>
+          )}
+          {d.hidden === true && (
+            <span className="ver-para-note">
+              <Say>{w.v("Hidden in Word")}</Say>
+            </span>
+          )}
+          {d.note === "not_shown" ? (
+            <span className="ver-not-shown">
+              <Say>{w.v("This part couldn't be shown.")}</Say>
+            </span>
+          ) : (
+            <Runs runs={d.runs} />
+          )}
         </p>
       ))}
     </div>

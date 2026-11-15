@@ -180,6 +180,40 @@ test("a document shown in part, or with hidden text, says so, a line for each no
   expect(fallback()).toBeNull();
 });
 
+test("changes outside the main text say so over the sheet", async () => {
+  h = await comparing(() => ({
+    word_blackline: { ...MARKED.word_blackline!, notices: ["changes_outside_text"] },
+  }));
+  expect(lines()).toEqual([
+    "Some changes are outside the main text, such as in headers or footnotes. They aren't shown here.",
+  ]);
+});
+
+test("a place that couldn't be shown says so where it stood; a formatting change and hidden text are named over their words", async () => {
+  h = await comparing(() => ({
+    word_blackline: {
+      paragraphs: [
+        { change: "same", runs: [{ kind: "same", text: "The parties agree." }] },
+        { change: "not_shown", runs: [] },
+        {
+          change: "formatted",
+          runs: [{ kind: "same", text: "Rent is due monthly." }],
+          hidden: true,
+        },
+      ],
+      truncated: false,
+    },
+  }));
+  const paras = [...(page()?.querySelectorAll<HTMLElement>(".ver-place") ?? [])];
+  expect(paras.map((p) => p.dataset.change ?? null)).toEqual([null, "not_shown", "formatted"]);
+  expect(paras[1]?.textContent).toBe("This part couldn't be shown.");
+  expect(
+    [...(paras[2]?.querySelectorAll(".ver-para-note") ?? [])].map((n) => n.textContent),
+  ).toEqual(["Formatting changed", "Hidden in Word"]);
+  expect(paras[2]?.textContent).toContain("Rent is due monthly.");
+  expect(page()?.querySelectorAll(".ver-ins, .ver-del")).toHaveLength(0);
+});
+
 test.each([
   [
     "blackline.nested_table",

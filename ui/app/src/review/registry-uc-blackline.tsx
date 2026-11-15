@@ -1,5 +1,5 @@
 // UC's copy review entries for a Word document's marked-up changes in Versions (UC-113 to UC-116, and its notices and
-// the Word tool's own refusals, UC-307 to UC-315), apart from
+// the Word tool's own refusals, UC-307 to UC-315, UC-368 to UC-370), apart from
 // registry-uc.tsx to keep that file under the size limit: the notice compared with now, over registry-u8.tsx's host,
 // whose word_blackline runs, fails or cuts the document short as each entry asks. UC_ALL is registry-uc.tsx's UC
 // entries, then registry-uc-blocks.tsx's UC_BLOCKS, then these, so registry.tsx lists UC in one place.
@@ -9,7 +9,7 @@ import { UC_BLOCKS } from "./registry-uc-blocks.tsx";
 import { UC } from "./registry-uc.tsx";
 import { versionWords } from "./words.ts";
 import type { VersionKey } from "@clauseo/components/lib/words-versions.ts";
-import type { BlacklineNotice } from "../transport/protocol.ts";
+import type { BlacklineNotice, BlacklineParagraph } from "../transport/protocol.ts";
 
 const NOTICE = "Notice to the bank.docx";
 const COMPARED = {
@@ -23,7 +23,7 @@ const COMPARED = {
   ],
 };
 
-/** The host's notices over a marked-up document, each with its line (UC-307 to UC-310). */
+/** The host's notices over a marked-up document, each with its line (UC-307 to UC-310, UC-368). */
 const NOTICES: [string, BlacklineNotice, VersionKey][] = [
   ["UC-307", "part_not_shown", "Part of this document couldn't be marked up. The rest is below."],
   [
@@ -33,6 +33,23 @@ const NOTICES: [string, BlacklineNotice, VersionKey][] = [
   ],
   ["UC-309", "numbers_may_differ", "Some numbers here may not match the ones Word shows."],
   ["UC-310", "may_differ", "Some of this may look different in Word."],
+  [
+    "UC-368",
+    "changes_outside_text",
+    "Some changes are outside the main text, such as in headers or footnotes. They aren't shown here.",
+  ],
+];
+
+/** A marked-up notice whose second paragraph couldn't be shown, and whose third holds text Word hides, its formatting
+ * alone changed (UC-369, UC-370; "Formatting changed" is the tracked changes' UC-122). */
+const ODD_PARAGRAPHS: BlacklineParagraph[] = [
+  { change: "same", runs: [{ kind: "same", text: "To the Branch Manager, State Bank of India." }] },
+  { change: "not_shown", runs: [] },
+  {
+    change: "formatted",
+    runs: [{ kind: "same", text: "This notice is without prejudice." }],
+    hidden: true,
+  },
 ];
 
 /** The Word tool's own refusals, each with its line and no Try again (UC-311 to UC-315). */
@@ -82,6 +99,14 @@ export const UC_BLACKLINE: Entry[] = [
   ...NOTICES.map(([id, notice, words]) =>
     compared(id, versionWords(words), { ...COMPARED, mark: { notices: [notice] } }),
   ),
+  compared("UC-369", versionWords("This part couldn't be shown."), {
+    ...COMPARED,
+    mark: { paragraphs: ODD_PARAGRAPHS },
+  }),
+  compared("UC-370", versionWords("Hidden in Word"), {
+    ...COMPARED,
+    mark: { paragraphs: ODD_PARAGRAPHS },
+  }),
   ...REFUSALS.map(([id, code, words]) =>
     compared(id, versionWords(words), { ...COMPARED, mark: { refused: code, retryable: false } }),
   ),
@@ -89,6 +114,6 @@ export const UC_BLACKLINE: Entry[] = [
 
 /**
  * UC's entries: registry-uc.tsx's (UC-01 to UC-78), registry-uc-blocks.tsx's (UC-80 to UC-106), then
- * the Word blackline's (UC-113 to UC-116, UC-307 to UC-315).
+ * the Word blackline's (UC-113 to UC-116, UC-307 to UC-315, UC-368 to UC-370).
  */
 export const UC_ALL: Entry[] = [...UC, ...UC_BLOCKS, ...UC_BLACKLINE];

@@ -354,6 +354,11 @@ export function noticeLine(lang: Lang, notice: BlacklineNotice): string {
       return vt(lang, "This document has text that Word hides. It's shown here like the rest.");
     case "numbers_may_differ":
       return vt(lang, "Some numbers here may not match the ones Word shows.");
+    case "changes_outside_text":
+      return vt(
+        lang,
+        "Some changes are outside the main text, such as in headers or footnotes. They aren't shown here.",
+      );
     case "may_differ":
     case "unknown":
       return vt(lang, "Some of this may look different in Word.");

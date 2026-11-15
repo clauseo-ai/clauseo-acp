@@ -63,10 +63,12 @@ fn a_word_blackline_answer_on_the_wire() {
                     run(RunKind::Del, "000"),
                     run(RunKind::Ins, "200"),
                 ],
+                hidden: false,
             },
             BlacklineParagraph {
                 change: ParagraphChange::Same,
                 runs: Vec::new(),
+                hidden: false,
             },
         ],
         truncated: false,
@@ -130,6 +132,37 @@ fn a_word_blackline_answer_with_notices_on_the_wire() {
         panic!("not a word_blackline answer");
     };
     assert_eq!(none.notices, []);
+}
+
+/// A paragraph that holds hidden text says so, a format change and a place not shown have
+/// their own changes, and the outside-text notice its name; `hidden` false is left out.
+#[test]
+fn hidden_text_formatting_and_places_not_shown_on_the_wire() {
+    let answer = QueryResult::WordBlackline(WordBlackline {
+        paragraphs: vec![
+            BlacklineParagraph {
+                change: ParagraphChange::Formatted,
+                runs: vec![run(RunKind::Same, "x")],
+                hidden: true,
+            },
+            BlacklineParagraph {
+                change: ParagraphChange::NotShown,
+                runs: Vec::new(),
+                hidden: false,
+            },
+        ],
+        truncated: false,
+        notices: vec![BlacklineNotice::ChangesOutsideText],
+    });
+    round_trips(&answer);
+    assert_eq!(
+        serde_json::to_string(&answer).unwrap(),
+        concat!(
+            r#"{"word_blackline":{"paragraphs":[{"change":"formatted","runs":[{"kind":"same","#,
+            r#""text":"x"}],"hidden":true},{"change":"not_shown","runs":[]}],"truncated":false,"#,
+            r#""notices":["changes_outside_text"]}}"#
+        )
+    );
 }
 
 /// A run of `kind` with `text`.

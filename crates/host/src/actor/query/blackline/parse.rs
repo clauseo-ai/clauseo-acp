@@ -22,10 +22,16 @@
 //!   left out;
 //! - what each paragraph reads as (`line.rs`);
 //! - what is not shown: an `{opaque …}` line (content stetdoc collapses, such as a table of
-//!   contents) is left out.
+//!   contents) is left out; and when stetdoc's summary counts more tracked changes than the
+//!   body's lines name (`count.rs`), the others are in headers, footers, notes or comments,
+//!   which the view does not mark, so the blackline says so
+//!   ([`BlacklineNotice::ChangesOutsideText`]);
+//! - what a line of the view's own that the reader does not know means: nothing it can show, so
+//!   it is skipped with [`BlacklineNotice::MayDiffer`], as a table's format change is.
 //!
 //! A line that breaks a rule (any other `{…}` not escaped, any other escape, any other ref, a
-//! row or `{/table}` outside a table) is left out, never guessed at: the rest of the view is read
+//! row or `{/table}` outside a table) is left out, never guessed at: a paragraph `not_shown`
+//! stands in its place (one for lines left out one after another), the rest of the view is read,
 //! and the blackline says part of it is not shown ([`BlacklineNotice::PartNotShown`]). Only a
 //! view that is not a redline, or one with lines and none of them readable, gives no blackline
 //! ([`ViewFailure`]). A marker a newer stetdoc adds is left out with
@@ -35,12 +41,15 @@
 
 use std::fmt;
 
-use clauseo_protocol::{BlacklineNotice, BlacklineParagraph, WordBlackline};
+use std::collections::BTreeSet;
+
+use clauseo_protocol::{BlacklineNotice, BlacklineParagraph, ParagraphChange, WordBlackline};
 use serde::Deserialize;
 use serde::de::IgnoredAny;
 
 use line::{Seen, marker, paragraph};
 
+mod count;
 mod line;
 
 /// The deepest table the reader shows, counting a top-level table as 1. stetdoc reads no XML
@@ -149,7 +158,11 @@ pub(crate) fn read_view(json: &str) -> Result<Read, ViewFailure> {
         return Err(ViewFailure::FormatUnknown);
     }
     let text = read_text(&view.text);
-    if let (true, Some(first)) = (text.paragraphs.is_empty(), text.first_skip) {
+    let none_shown = text
+        .paragraphs
+        .iter()
+        .all(|p| p.change == ParagraphChange::NotShown);
+    if let (true, Some(first)) = (none_shown, text.first_skip) {
         return Err(ViewFailure::NothingRead {
             skipped: text.skipped,
             first,
@@ -165,13 +178,17 @@ pub(crate) fn read_view(json: &str) -> Result<Read, ViewFailure> {
     if text.seen.unknown {
         found.push(BlacklineNotice::MayDiffer);
     }
+    let truncated = view.position.shown < view.position.total || view.next.is_some();
+    // stetdoc's count covers every story; a page cut short shows fewer of the body's too.
+    if !truncated && text.counted > text.ids.len() {
+        found.push(BlacklineNotice::ChangesOutsideText);
+    }
     let warnings: Vec<String> = view.warnings.iter().map(|w| code_word(&w.code)).collect();
     found.extend(warnings.iter().filter_map(|code| notice_of(code)));
     let notices = BlacklineNotice::ALL
         .into_iter()
         .filter(|notice| found.contains(notice))
         .collect();
-    let truncated = view.position.shown < view.position.total || view.next.is_some();
     Ok(Read {
         blackline: WordBlackline {
             paragraphs: text.paragraphs,
@@ -197,20 +214,16 @@ fn stet_1(text: &str) -> bool {
 
 /// The notice a warning of stetdoc's (by its code) gives, if any. Warnings about what a view
 /// does not show give [`BlacklineNotice::PartNotShown`]; about hidden text, `HiddenText`; about
-/// numbers, `NumbersMayDiffer`. The codes of edits (`no_change`, `split_at_wrap`, ...), a rewrite
-/// hint and a note no reference points at (the blackline shows no notes) give none. A code this
-/// version does not know gives `MayDiffer`.
+/// numbers, `NumbersMayDiffer`. An edit that found no change or fell at a wrap (`no_change`,
+/// `split_at_wrap`), a rewrite hint and a note no reference points at give none. Any other code,
+/// `own_text_removed` and `property_change_folded` among them, gives `MayDiffer`: when in doubt,
+/// the lawyer is told.
 fn notice_of(code: &str) -> Option<BlacklineNotice> {
     match code {
         "read_anomaly" | "opaque_content" => Some(BlacklineNotice::PartNotShown),
         "hidden_text" | "looks_hidden" => Some(BlacklineNotice::HiddenText),
         "numbering_approximate" | "duplicate_number" => Some(BlacklineNotice::NumbersMayDiffer),
-        "unreferenced_note"
-        | "looks_like_rewrite"
-        | "split_at_wrap"
-        | "no_change"
-        | "own_text_removed"
-        | "property_change_folded" => None,
+        "unreferenced_note" | "looks_like_rewrite" | "split_at_wrap" | "no_change" => None,
         _ => Some(BlacklineNotice::MayDiffer),
     }
 }
@@ -243,15 +256,47 @@ pub(crate) struct Text {
     pub(crate) opaque: bool,
     /// What the paragraphs held that the lawyer should know of.
     pub(crate) seen: Seen,
+    /// How many tracked changes stetdoc's summary counts, in every story.
+    pub(crate) counted: usize,
+    /// The ids of the changes the body's lines name (`count.rs`).
+    pub(crate) ids: BTreeSet<u64>,
+    /// Whether the last block line was left out, so the next one left out shares its place.
+    last_skipped: bool,
 }
 
 impl Text {
-    /// Leaves out the line `at`.
+    /// Leaves out the line `at`, with a paragraph `not_shown` in its place; lines left out one
+    /// after another share one.
     fn skip(&mut self, at: Unreadable) {
         self.skipped += 1;
         self.first_skip.get_or_insert(at);
+        if !self.last_skipped {
+            self.paragraphs.push(BlacklineParagraph {
+                change: ParagraphChange::NotShown,
+                runs: Vec::new(),
+                hidden: false,
+            });
+        }
+        self.last_skipped = true;
     }
 }
+
+/// The view's own lines this reader knows, by how they start: the head block's, the end of a
+/// table, a section's end, the position line and collapsed content (`{opaque …}`).
+const STRUCTURE: [&str; 9] = [
+    "{stet ",
+    "{rules:",
+    "{authors:",
+    "{summary:",
+    "{warning ",
+    "{section ",
+    "{position:",
+    "{opaque ",
+    "{/table}",
+];
+
+/// The head block's lines, whose words are stetdoc's, not the document's changes.
+const HEAD: [&str; 5] = ["{stet ", "{rules:", "{authors:", "{summary:", "{warning "];
 
 /// The paragraphs of a redline view's text, in order, and what was left out.
 pub(crate) fn read_text(text: &str) -> Text {
@@ -267,6 +312,13 @@ pub(crate) fn read_text(text: &str) -> Text {
         if line == "{appendix}" {
             break;
         }
+        if let Some(counted) = count::summary_count(line) {
+            read.counted = counted;
+            continue;
+        }
+        if !HEAD.iter().any(|head| line.starts_with(head)) {
+            count::ids_in(line, &mut read.ids);
+        }
         if line == "{/table}" {
             match depth.checked_sub(1) {
                 Some(outer) => depth = outer,
@@ -279,6 +331,10 @@ pub(crate) fn read_text(text: &str) -> Text {
             continue;
         }
         if line.starts_with('{') {
+            // A line of the view's own this reader does not know: a newer stetdoc's, noted.
+            if !STRUCTURE.iter().any(|known| line.starts_with(known)) {
+                read.seen.unknown = true;
+            }
             continue;
         }
         let Some((letters, content)) = block_ref(line) else {
@@ -290,8 +346,11 @@ pub(crate) fn read_text(text: &str) -> Text {
             depth = depth.saturating_add(1);
             if depth > MAX_TABLE_DEPTH {
                 read.skip(at("a table nested past the depth cap"));
-            } else if let Err(why) = table(content) {
-                read.skip(at(why));
+            } else {
+                match table(content) {
+                    Ok(formatted) => read.seen.unknown |= formatted,
+                    Err(why) => read.skip(at(why)),
+                }
             }
             continue;
         }
@@ -307,6 +366,7 @@ pub(crate) fn read_text(text: &str) -> Text {
                     Ok(paragraph) => {
                         read.seen = seen;
                         read.paragraphs.push(paragraph);
+                        read.last_skipped = false;
                     }
                     Err(why) => read.skip(at(why)),
                 }
@@ -332,7 +392,9 @@ fn logical_lines(text: &str) -> Vec<(usize, String)> {
     for (index, physical) in text.lines().enumerate() {
         let (number, mut line) = open.take().unwrap_or((index + 1, String::new()));
         line.push_str(physical);
-        let slashes = line.bytes().rev().take_while(|&b| b == b'\\').count();
+        // Counted on the physical line, as the format says: on the joined one, a run of lines
+        // of backslashes would cost the square of their number.
+        let slashes = physical.bytes().rev().take_while(|&b| b == b'\\').count();
         if slashes % 2 == 1 {
             line.pop();
             open = Some((number, line));
@@ -346,18 +408,23 @@ fn logical_lines(text: &str) -> Vec<(usize, String)> {
 }
 
 /// Checks a `t` line's content: its cell tags (`{+}` for a table that is a later block of its
-/// cell, or the cell's own tags when it is the first), then `{table …}`.
-fn table(content: &str) -> Result<(), &'static str> {
+/// cell, or the cell's own tags when it is the first), a format change (`{rev table #3 C}`),
+/// then `{table …}`. Whether it has a format change, which no paragraph shows, so the caller
+/// says the blackline may differ.
+fn table(content: &str) -> Result<bool, &'static str> {
     let mut rest = content;
+    let mut formatted = false;
     while !rest.starts_with("{table") {
         let (body, after) =
             marker(rest).map_err(|_no_marker| "a table or row line without its marker")?;
-        if !line::cell_tag(body) {
+        if body.starts_with("rev ") {
+            formatted = true;
+        } else if !line::cell_tag(body) {
             return Err("a table or row line without its marker");
         }
         rest = after.strip_prefix(' ').unwrap_or(after);
     }
-    Ok(())
+    Ok(formatted)
 }
 
 /// A block line's ref letters and its content: `p12 text` is `("p", "text")`, and a bare

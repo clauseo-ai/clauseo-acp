@@ -527,6 +527,11 @@ export type BlacklineNotice =
 /**  Some list or clause numbers may not match the ones Word shows. */
 "numbers_may_differ" | 
 /**
+ *  stetdoc counted more tracked changes than the blackline shows: the others are outside
+ *  the main text (headers, footers, footnotes, endnotes, comments), which it does not show.
+ */
+"changes_outside_text" | 
+/**
  *  stetdoc warned about something else this version does not know: some of the
  *  blackline may not match the document in Word exactly.
  */
@@ -540,9 +545,14 @@ export type BlacklineParagraph = {
 	change: ParagraphChange,
 	/**
 	 *  Its text as runs, in order; two runs next to each other never have the same kind, and
-	 *  no run is empty. An empty paragraph has none.
+	 *  no run is empty. An empty paragraph has none, and so does one `not_shown`.
 	 */
 	runs: BlacklineRun[],
+	/**
+	 *  Whether it holds text that Word hides (or that is hard to see), which its runs show as
+	 *  ordinary text. False is left out, and missing reads as false.
+	 */
+	hidden?: boolean,
 };
 
 /**  A stretch of a paragraph's text with one kind. */
@@ -4498,6 +4508,16 @@ export type ParagraphChange =
 "added" | 
 /**  Only in the older version: the whole paragraph was deleted. */
 "removed" | 
+/**
+ *  In both with the same text, but its formatting changed (a tracked format change,
+ *  such as bold, struck through or hidden): every run is `same`.
+ */
+"formatted" | 
+/**
+ *  A place Clauseo could not show: a line of stetdoc's view it could not read stands
+ *  here, as a paragraph with no runs.
+ */
+"not_shown" | 
 /**  A value from a newer Clauseo that this version does not know. */
 "unknown";
 

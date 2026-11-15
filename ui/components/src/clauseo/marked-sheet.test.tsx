@@ -77,3 +77,21 @@ test("a newer host's kinds: a paragraph changed in a way this version doesn't kn
     { place: 0, kind: "changed", runs: [{ kind: "same", text: "x", mine: false }] },
   ]);
 });
+
+test("a formatting change and a place not shown read as changed with their note; hidden text is kept as a flag", () => {
+  expect(
+    markedDiffs([
+      { change: "formatted", runs: [{ kind: "same", text: "x" }], hidden: true },
+      { change: "not_shown", runs: [] },
+    ]),
+  ).toEqual([
+    {
+      place: 0,
+      kind: "changed",
+      runs: [{ kind: "same", text: "x", mine: false }],
+      note: "formatted",
+      hidden: true,
+    },
+    { place: 1, kind: "changed", runs: [], note: "not_shown" },
+  ]);
+});

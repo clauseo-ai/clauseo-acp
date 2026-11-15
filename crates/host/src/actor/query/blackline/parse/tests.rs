@@ -19,6 +19,7 @@ const VIEW: &str = include_str!(concat!(
 /// A paragraph of `change` with `runs`, each `(kind, text)`.
 pub(super) fn para(change: ParagraphChange, runs: &[(RunKind, &str)]) -> BlacklineParagraph {
     BlacklineParagraph {
+        hidden: false,
         change,
         runs: runs
             .iter()
@@ -30,7 +31,12 @@ pub(super) fn para(change: ParagraphChange, runs: &[(RunKind, &str)]) -> Blackli
     }
 }
 
-use ParagraphChange::{Added, Changed, Removed, Same as Kept};
+use ParagraphChange::{Added, Changed, Formatted, Removed, Same as Kept};
+
+/// The paragraph that stands where a line was left out.
+pub(super) fn gap() -> BlacklineParagraph {
+    para(ParagraphChange::NotShown, &[])
+}
 use RunKind::{Del, Ins, Same};
 
 #[test]
@@ -39,7 +45,8 @@ fn the_fixture_reads_paragraph_by_paragraph() {
     assert_eq!((read.skipped, read.warnings.len()), (0, 0));
     let blackline = read.blackline;
     assert!(!blackline.truncated);
-    assert_eq!(blackline.notices, []);
+    // The footnote changed too, and the view does not mark it.
+    assert_eq!(blackline.notices, [BlacklineNotice::ChangesOutsideText]);
     let expected = vec![
         para(Kept, &[(Same, "Lease Agreement")]),
         para(
@@ -85,7 +92,7 @@ fn the_fixture_reads_paragraph_by_paragraph() {
             ],
         ),
         // A format change only: its text is the same.
-        para(Kept, &[(Same, "This clause is important.")]),
+        para(Formatted, &[(Same, "This clause is important.")]),
         para(Added, &[(Ins, "Notices go by email.")]),
         para(Kept, &[(Same, "Signatures")]),
     ];
@@ -207,6 +214,7 @@ fn a_line_that_breaks_a_rule_is_left_out() {
             read.paragraphs,
             [
                 para(Kept, &[(Same, "before")]),
+                gap(),
                 para(Kept, &[(Same, "after")])
             ],
             "{text}"
@@ -319,19 +327,47 @@ fn a_view_with_a_warning_is_read_with_notices() {
             "story": "body"
         },
         {"code": "Secret Text {x}", "message": "x"},
-        {"code": "unreferenced_note", "message": "x"}
+        {"code": "unreferenced_note", "message": "x"},
+        {"code": "own_text_removed", "message": "x"},
+        {"code": "property_change_folded", "message": "x"}
     ]);
     let read = read_view(&view.to_string()).unwrap();
     assert_eq!(
         read.blackline.paragraphs,
         read_view(VIEW).unwrap().blackline.paragraphs
     );
+    // The fixture's footnote change, outside the main text, is noted as before.
     assert_eq!(
         read.blackline.notices,
-        [BlacklineNotice::PartNotShown, BlacklineNotice::MayDiffer]
+        [
+            BlacklineNotice::PartNotShown,
+            BlacklineNotice::ChangesOutsideText,
+            BlacklineNotice::MayDiffer
+        ]
     );
     assert_eq!(
         read.warnings,
-        ["read_anomaly", "other", "unreferenced_note"]
+        [
+            "read_anomaly",
+            "other",
+            "unreferenced_note",
+            "own_text_removed",
+            "property_change_folded"
+        ]
     );
+    // `own_text_removed` and `property_change_folded` each say the blackline may differ;
+    // `unreferenced_note` says nothing.
+    for (code, may_differ) in [
+        ("own_text_removed", true),
+        ("property_change_folded", true),
+        ("unreferenced_note", false),
+    ] {
+        view["warnings"] = serde_json::json!([{"code": code, "message": "x"}]);
+        let notices = read_view(&view.to_string()).unwrap().blackline.notices;
+        assert_eq!(
+            notices.contains(&BlacklineNotice::MayDiffer),
+            may_differ,
+            "{code}"
+        );
+    }
 }
