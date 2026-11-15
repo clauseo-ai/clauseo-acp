@@ -1,8 +1,10 @@
 //! A Tools change reaching a live agent (`idle/tools.rs`) with a real `fake_agent`: an idle agent
-//! whose servers changed is stopped and its next prompt relaunches it with the new servers (the
-//! agent's `session/new` names them); an agent in a turn, with a permission open and a prompt
-//! queued, is stopped only after both turns; an agent whose servers did not change keeps
-//! running; two quick changes make one stop.
+//! whose servers changed is stopped once idle for the grace (`cap_min_idle`), and its next prompt
+//! relaunches it with the new servers (the agent's `session/new` names them); an agent in a turn,
+//! with a permission open and a prompt queued, is stopped only after both turns and the grace; a
+//! background command's agent-started turn within the grace keeps its agent; output held for a
+//! turn keeps it; an agent whose servers did not change keeps running; two quick changes make one
+//! stop.
 //!
 //! Each scenario's `session/new` is a `one_of`: the first launch gets no server, the relaunch
 //! gets `notes` and answers "With notes.", so a relaunch that sent other servers fails its turn.
@@ -11,13 +13,19 @@ use clauseo_protocol::{AgentChoiceId, DomainEvent, HostCommand, McpCommand, Stop
 use serde_json::{Value, json};
 
 use super::agents::send_prompt;
-use super::idle::{idle_stops, live, until_ended, until_idle};
+use std::cell::Cell;
+
+use clauseo_acp::{AcpEvent, AgentUpdate, Origin};
+use clauseo_protocol::AgentSessionId;
+
+use super::idle::{MS, advance, idle_since, idle_stops, live, pending_of, until_ended, until_idle};
 use super::rig::{HANDSHAKE, Rig};
 use crate::actor::Actor;
 use crate::actor::input::Input;
-use crate::actor::turn::idle::Relaunch;
+use crate::actor::turn::idle::{Pending, Relaunch};
+use crate::actor::turn::own_turn;
 use crate::agent::AgentInput;
-use crate::config::IDLE_LIMIT;
+use crate::config::{CAP_MIN_IDLE, IDLE_LIMIT};
 use crate::pipeline::tests::support::TempDir;
 
 /// The relaunch's branch: `session/new` with `notes` alone, then one prompt answered.
@@ -113,6 +121,40 @@ fn stale(actor: &Actor, thread: ThreadId) -> bool {
     agent.idle.relaunch == Some(Relaunch::ToolsChanged)
 }
 
+/// `thread`'s marked agent, idle since `since`, is live a millisecond before the grace ends and
+/// stopped at it, once.
+fn stopped_after_the_grace(rig: &mut Rig, thread: ThreadId, since: std::time::Duration) {
+    let at = since + CAP_MIN_IDLE;
+    assert_eq!(rig.actor.turn_path.idle.armed_at(), Some(at));
+    let now = rig.actor.now().mono;
+    advance(rig, at.checked_sub(now + MS).unwrap());
+    assert!(live(&rig.actor, thread), "stopped before the grace");
+    // The clock alone moves; the agent's end is held, not drained (#1050).
+    rig.clock.advance(MS);
+    rig.hold_next("the agent's end", agent_end);
+    rig.release_held();
+    until_ended(rig, thread);
+    assert_eq!(idle_stops(rig, thread), 1);
+}
+
+/// Whether `input` is an update the agent sent outside a turn.
+fn idle_update(input: &Input) -> bool {
+    let Input::Agent {
+        input: AgentInput::Event(event),
+        ..
+    } = input
+    else {
+        return false;
+    };
+    matches!(
+        **event,
+        AcpEvent::Update {
+            origin: Origin::Idle,
+            ..
+        }
+    )
+}
+
 /// How many turns of `thread` ended `EndTurn`.
 fn turns_ended(rig: &mut Rig, thread: ThreadId) -> usize {
     rig.log(thread)
@@ -142,13 +184,10 @@ fn an_idle_agent_is_stopped_and_relaunched_with_the_new_servers() {
     let mut rig = rig("tools-live-idle", &one_answer());
     let thread = rig.thread();
     send_prompt(&mut rig, 10, thread);
-    until_idle(&mut rig, thread);
+    let since = until_idle(&mut rig, thread);
     turn_on(&mut rig, 11, "notes");
-    // The tick after the command stopped it; its end was held back.
-    assert!(!live(&rig.actor, thread), "not stopped");
-    rig.release_held();
-    until_ended(&mut rig, thread);
-    assert_eq!(idle_stops(&mut rig, thread), 1);
+    assert!(stale(&rig.actor, thread));
+    stopped_after_the_grace(&mut rig, thread, since);
     relaunches_with_notes(&mut rig, 12, thread);
     assert!(live(&rig.actor, thread));
     assert!(
@@ -197,12 +236,12 @@ fn an_agent_in_a_turn_is_stopped_after_its_queue_and_its_ask() {
         option_id: AgentChoiceId::new("allow-once").unwrap(),
     };
     rig.dispatch(13, answer).unwrap();
-    // Both turns run on the agent launched first, then it stops, once.
-    until_ended(&mut rig, thread);
+    // Both turns run on the agent launched first, then it stops after the grace, once.
+    let since = until_idle(&mut rig, thread);
     assert_eq!(turns_ended(&mut rig, thread), 2);
     let log = format!("{:?}", rig.log(thread));
     assert!(log.contains("Queued answer."), "the queued prompt was lost");
-    assert_eq!(idle_stops(&mut rig, thread), 1);
+    stopped_after_the_grace(&mut rig, thread, since);
     relaunches_with_notes(&mut rig, 14, thread);
     rig.finish();
 }
@@ -234,16 +273,97 @@ fn two_quick_changes_make_one_stop() {
     let mut rig = rig("tools-live-twice", &one_answer());
     let thread = rig.thread();
     send_prompt(&mut rig, 10, thread);
-    until_idle(&mut rig, thread);
-    // The second change comes while the first one's stop is under way.
+    let since = until_idle(&mut rig, thread);
     turn_on(&mut rig, 11, "notes");
     turn_on(&mut rig, 12, "web");
-    rig.release_held();
-    until_ended(&mut rig, thread);
-    assert_eq!(idle_stops(&mut rig, thread), 1);
+    stopped_after_the_grace(&mut rig, thread, since);
     // Nothing relaunched it: the next prompt does, with `notes` alone (no remote server for
     // this agent).
     relaunches_with_notes(&mut rig, 13, thread);
     assert_eq!(idle_stops(&mut rig, thread), 1);
+    rig.finish();
+}
+
+#[test]
+fn a_background_command_s_own_turn_within_the_grace_keeps_its_agent() {
+    // Prompt 1 ends with a command in the background; its result comes as a turn of the
+    // agent's own (`own_turn.rs`), which the test holds back until after the Tools edit.
+    let mut steps = vec![
+        json!({"expect":{"method":"session/prompt","as":"p1","params":{"sessionId":"sess-1"}}}),
+        json!({"respond":{"to":"p1","result":{"stopReason":"end_turn"}}}),
+        json!({"update":{"update":{"sessionUpdate":"tool_call","toolCallId":"tc-bg-1",
+            "title":"Run the build","kind":"execute","status":"completed"}}}),
+        json!({"update":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-bg",
+            "content":{"type":"text","text":"The build finished."}}}}),
+    ];
+    steps.push(
+        json!({"update":{"update":{"sessionUpdate":"usage_update","used":10,
+        "size":200_000,"cost":{"amount":0.01,"currency":"USD"}}}}),
+    );
+    let mut rig = rig("tools-live-background", &steps);
+    let thread = rig.thread();
+    send_prompt(&mut rig, 10, thread);
+    let held = Cell::new(0);
+    rig.run_holding(
+        "the prompt's end, with the background result held",
+        |_, input| {
+            let hold = idle_update(input);
+            held.set(held.get() + usize::from(hold));
+            hold
+        },
+        |actor| {
+            held.get() == 3
+                && actor.work.commits == 0
+                && actor.threads[&thread].turn.current.is_none()
+                && idle_since(actor, thread).is_some()
+        },
+    );
+    turn_on(&mut rig, 11, "notes");
+    assert!(stale(&rig.actor, thread));
+    // The result comes a millisecond before the grace ends: the agent still runs.
+    advance(&mut rig, CAP_MIN_IDLE.checked_sub(MS).unwrap());
+    assert!(live(&rig.actor, thread), "stopped within the grace");
+    rig.release_held();
+    rig.run_until("the agent's own turn", |actor| {
+        actor.threads[&thread].turn.current.is_some()
+    });
+    // Past the grace, its own turn keeps it; it ends (its cost, or its quiet).
+    advance(&mut rig, own_turn::QUIET * 2);
+    rig.run_until("the agent's own turn's end", |actor| {
+        let state = &actor.threads[&thread].turn;
+        state.current.is_none() && state.closing.is_none() && actor.work.commits == 0
+    });
+    assert!(live(&rig.actor, thread), "stopped in its own turn");
+    let log = format!("{:?}", rig.log(thread));
+    assert!(
+        log.contains("The build finished."),
+        "the background result was lost"
+    );
+    assert_eq!(idle_stops(&mut rig, thread), 0);
+    let since = until_idle(&mut rig, thread);
+    stopped_after_the_grace(&mut rig, thread, since);
+    relaunches_with_notes(&mut rig, 12, thread);
+    rig.finish();
+}
+
+#[test]
+fn output_held_for_a_turn_keeps_a_marked_agent() {
+    let mut rig = rig("tools-live-held", &one_answer());
+    let thread = rig.thread();
+    send_prompt(&mut rig, 10, thread);
+    until_idle(&mut rig, thread);
+    turn_on(&mut rig, 11, "notes");
+    // Output (a plan) waits for an agent-started turn to open.
+    let event = AcpEvent::Update {
+        session: AgentSessionId::new("sess-1").unwrap(),
+        origin: Origin::Idle,
+        update: AgentUpdate::Plan(Vec::new()),
+    };
+    own_turn::hold_for_test(&mut rig.actor, thread, event);
+    crate::actor::turn::idle_tick(&mut rig.actor);
+    advance(&mut rig, CAP_MIN_IDLE * 2);
+    assert!(live(&rig.actor, thread), "stopped with output held");
+    assert_eq!(pending_of(&rig.actor, thread), Some(Pending::Turn));
+    assert_eq!(idle_stops(&mut rig, thread), 0);
     rig.finish();
 }

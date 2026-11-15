@@ -22,10 +22,11 @@
 //!   (every one is busy, or went idle less than `cap_min_idle` ago) the launch goes ahead and
 //!   the host logs a warning.
 //! - A relaunch mark ([`Relaunch`], [`mark_relaunch`]): an agent whose launch-time inputs
-//!   changed is idle-stopped as soon as nothing is pending, in the tick after the input that
-//!   marked it or after the one that ended its last pending item ([`stop_marked`]). Its next
-//!   prompt relaunches it with the new inputs. A Tools change marks the agents whose lawyer
-//!   servers would now differ ([`tools`]).
+//!   changed is idle-stopped once its idle clock is `cap_min_idle` (60 s) old ([`stop_marked`]),
+//!   armed on the one deadline: an agent may still work after its turn's end (a command Claude
+//!   put in the background ends in a turn of its own, `own_turn.rs`), and any event of it starts
+//!   its clock again. Its next prompt relaunches it with the new inputs. A Tools change marks
+//!   the agents whose lawyer servers would now differ ([`tools`]).
 
 use std::collections::BTreeSet;
 use std::time::Duration;
@@ -104,9 +105,10 @@ pub(super) fn mark_relaunch(actor: &mut Actor, thread: ThreadId, why: Relaunch) 
     }
 }
 
-/// Stops each marked live agent that has nothing pending ([`stoppable`]); one stopping already
-/// is not stoppable, so a mark makes one stop.
-fn stop_marked(actor: &mut Actor) {
+/// Stops each marked live agent that has nothing pending ([`stoppable`]) and whose idle clock is
+/// `cap_min_idle` old at `now`; one stopping already is not stoppable, so a mark makes one stop.
+fn stop_marked(actor: &mut Actor, now: Duration) {
+    let grace = actor.turn_path.idle.config.cap_min_idle;
     let marked: Vec<(ThreadId, Relaunch)> = actor
         .turn_path
         .idle
@@ -114,7 +116,8 @@ fn stop_marked(actor: &mut Actor) {
         .iter()
         .filter_map(|thread| {
             let agent = actor.threads.get(thread)?.turn.agent.as_deref()?;
-            Some((*thread, agent.idle.relaunch?))
+            let since = agent.idle.since?;
+            (now.saturating_sub(since) >= grace).then_some((*thread, agent.idle.relaunch?))
         })
         .collect();
     for (thread, why) in marked {
@@ -171,7 +174,9 @@ pub(super) fn pending(state: &TurnState) -> Option<Pending> {
     if launching {
         return Some(Pending::Launch);
     }
-    if state.current.is_some() || state.closing.is_some() {
+    // An undo holds the matter's writer; output held for an agent-started turn opens one.
+    let turn = state.current.is_some() || state.closing.is_some() || state.undo.is_some();
+    if turn || super::own_turn::output_waits(&state.own_held) {
         return Some(Pending::Turn);
     }
     if state.stopped_for_sign_in.is_some() {
@@ -263,20 +268,17 @@ pub(crate) fn tick(actor: &mut Actor) {
         None
     } else {
         tools::compare(actor);
-        stop_marked(actor);
+        stop_marked(actor, now);
         refresh(actor, now)
     };
-    let config = actor.turn_path.idle.config;
-    arm(
-        actor,
-        now,
-        earliest.and_then(|since| config.deadline(since)),
-    );
+    arm(actor, now, earliest);
 }
 
-/// Starts or clears each live agent's idle clock at `now`; the earliest start among idle agents.
-/// Forgets a live thread whose agent is gone.
+/// Starts or clears each live agent's idle clock at `now`; the earliest deadline among idle
+/// agents (a marked one's grace, `cap_min_idle`, or the idle limit). Forgets a live thread whose
+/// agent is gone.
 fn refresh(actor: &mut Actor, now: Duration) -> Option<Duration> {
+    let config = actor.turn_path.idle.config;
     let looked: Vec<(ThreadId, Option<bool>)> = actor
         .turn_path
         .idle
@@ -296,7 +298,18 @@ fn refresh(actor: &mut Actor, now: Duration) -> Option<Duration> {
         };
         if idle {
             let since = *agent.idle.since.get_or_insert(now);
-            earliest = Some(earliest.map_or(since, |earliest| earliest.min(since)));
+            let grace = agent
+                .idle
+                .relaunch
+                .and_then(|_| since.checked_add(config.cap_min_idle));
+            let due = match (config.deadline(since), grace) {
+                (Some(limit), Some(grace)) => Some(limit.min(grace)),
+                (limit, grace) => limit.or(grace),
+            };
+            earliest = match (earliest, due) {
+                (Some(earliest), Some(due)) => Some(earliest.min(due)),
+                (earliest, due) => earliest.or(due),
+            };
         } else {
             agent.idle.since = None;
         }
