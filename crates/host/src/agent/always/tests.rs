@@ -5,13 +5,13 @@ use serde_json::{Value, json};
 
 use crate::pipeline::tests::support::TempDir;
 
+use super::store::{read, remove_now, store_now};
 use super::{
-    FILE, MAX_RULES, allow_in_meta, file_beside, matter_roots, read, rule, store_now, well_formed,
-    within,
+    FILE, MAX_RULES, NotKept, file_beside, matter_roots, rule, rule_path, well_formed, within,
 };
 
 fn of(tool: &str, input: &Value) -> Option<String> {
-    rule(tool, Some(input), false)
+    rule(tool, Some(input), false).ok()
 }
 
 #[test]
@@ -37,7 +37,7 @@ fn bash_keeps_the_exact_command() {
     }
     assert_eq!(of("Bash", &json!({"cmd": "npm test"})), None);
     assert_eq!(of("Bash", &json!({"command": 1})), None);
-    assert_eq!(rule("Bash", None, false), None);
+    assert_eq!(rule("Bash", None, false), Err(NotKept::Refused));
     let long = "a".repeat(3_000);
     assert_eq!(of("Bash", &json!({ "command": long })), None);
 }
@@ -114,7 +114,7 @@ fn file_tools_keep_the_exact_path() {
 #[test]
 fn windows_paths_become_posix_ones() {
     let input = |path: &str| json!({ "file_path": path });
-    let windows = |path: &str| rule("Edit", Some(&input(path)), true);
+    let windows = |path: &str| rule("Edit", Some(&input(path)), true).ok();
     assert_eq!(
         windows(r"C:\Users\A\Matter\brief.docx").as_deref(),
         Some("Edit(//c/Users/A/Matter/brief.docx)")
@@ -210,30 +210,6 @@ fn the_data_fence_denies_the_file_to_claude() {
     );
 }
 
-#[test]
-fn rules_go_after_the_allow_rules_already_in_the_settings() {
-    let mut meta = json!({"claudeCode": {"options": {"settings": {
-        "permissions": {"allow": ["Read(//x/**)"], "deny": ["Edit(//d/**)"]}
-    }}}})
-    .as_object()
-    .unwrap()
-    .clone();
-    allow_in_meta(&mut meta, ["Bash(npm test)", "Read(//x/**)"]);
-    assert_eq!(
-        meta["claudeCode"]["options"]["settings"]["permissions"],
-        json!({"allow": ["Read(//x/**)", "Bash(npm test)"], "deny": ["Edit(//d/**)"]})
-    );
-    let mut empty = serde_json::Map::new();
-    allow_in_meta(&mut empty, []);
-    assert!(empty.is_empty(), "no rules, no change");
-    let mut odd = json!({"claudeCode": "x"}).as_object().unwrap().clone();
-    allow_in_meta(&mut odd, ["mcp__s__t"]);
-    assert_eq!(
-        odd["claudeCode"]["options"]["settings"]["permissions"]["allow"],
-        json!(["mcp__s__t"])
-    );
-}
-
 /// A path rule stays within the matter folder, so it never widens past the data fence: not the
 /// data folder, not a sibling folder that only starts with the matter's name, not the matter's
 /// `.clauseo` or a `.claude`; a rule that names no path passes.
@@ -265,4 +241,98 @@ fn a_path_rule_outside_the_matter_is_never_within() {
     assert_eq!(windows, ["//c/Cases/M"]);
     assert!(within("Edit(//c/cases/m/brief.txt)", &windows, true));
     assert!(!within("Edit(//c/cases/m2/brief.txt)", &windows, true));
+}
+
+/// Why nothing was kept: no rule form for the tool, or text that would not stay one exact rule.
+#[test]
+fn a_request_with_no_rule_says_why() {
+    let shell = json!({"command": "Get-ChildItem"});
+    assert_eq!(rule("PowerShell", Some(&shell), true), Err(NotKept::NoRule));
+    let star = json!({"command": "ls *.docx"});
+    assert_eq!(rule("Bash", Some(&star), false), Err(NotKept::Refused));
+    let relative = json!({"file_path": "a.txt"});
+    assert_eq!(rule("Edit", Some(&relative), false), Err(NotKept::Refused));
+}
+
+/// Windows drops a name's trailing dots and spaces, so `.claude.` opens `.claude`: no rule is
+/// made for such a name, and one read back is compared without them.
+#[test]
+fn windows_trailing_dots_never_open_claude() {
+    let input = |path: &str| json!({ "file_path": path });
+    let made = |path: &str| rule("Edit", Some(&input(path)), true).ok();
+    assert_eq!(made(r"C:\Cases\M\.claude.\x"), None);
+    assert_eq!(made(r"C:\Cases\M\a.\x"), None);
+    assert_eq!(made(r"C:\Cases\M\.claude \x"), None);
+    let roots = matter_roots([r"C:\Cases\M"], true);
+    assert!(!within("Edit(//c/Cases/M/.claude./x)", &roots, true));
+    assert!(!within("Edit(//c/Cases/M/.CLAUDE. ./x)", &roots, true));
+    assert!(within("Edit(//c/Cases/M/work/x)", &roots, true));
+    assert_eq!(
+        rule_path("Edit(//c/Cases/M/x)", true),
+        Some(std::path::PathBuf::from("c:/Cases/M/x"))
+    );
+    assert_eq!(rule_path("Bash(ls)", true), None);
+}
+
+/// The real path decides: a folder of the matter swapped for a link to another matter, or to a
+/// `.claude` folder, is outside; a file not made yet is judged by its folder.
+#[cfg(unix)]
+#[test]
+fn a_link_swapped_into_the_matter_is_outside() {
+    use super::real_within;
+    let dir = TempDir::new("always_real");
+    let matter = dir.path().join("m");
+    let other = dir.path().join("other");
+    crate::write::create_dir_all(&matter.join("work")).unwrap();
+    crate::write::create_dir_all(&matter.join(".claude")).unwrap();
+    crate::write::create_dir_all(&other).unwrap();
+    let file = matter.join("work/out.txt");
+    crate::write::write_file(&file, b"x").unwrap();
+    assert!(real_within(&file, &matter, false));
+    assert!(real_within(&matter.join("work/new.txt"), &matter, false));
+    assert!(!real_within(&matter.join("gone/new.txt"), &matter, false));
+    assert!(!real_within(&matter, &matter, false));
+    assert!(!real_within(
+        &matter.join(".claude/settings.json"),
+        &matter,
+        false
+    ));
+    crate::write::remove_dir_all(&matter.join("work")).unwrap();
+    crate::write::symlink(&other, &matter.join("work")).unwrap();
+    assert!(!real_within(&file, &matter, false));
+    crate::write::remove_file(&matter.join("work")).unwrap();
+    crate::write::symlink(&matter.join(".claude"), &matter.join("work")).unwrap();
+    assert!(!real_within(&file, &matter, false));
+}
+
+/// A file this host cannot take is never written over: the next write sets it aside as
+/// `.bad-<n>` and starts empty; a removal leaves it alone.
+#[test]
+fn a_bad_file_is_set_aside_not_overwritten() {
+    let dir = TempDir::new("always_bad");
+    let file = dir.path().join(FILE);
+    crate::write::write_file(&file, b"not json").unwrap();
+    assert_eq!(read(&file), Vec::<String>::new());
+    assert!(!remove_now(&file, "Bash(ls)").unwrap());
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), "not json");
+    store_now(&file, "Bash(ls)".to_owned()).unwrap();
+    let aside = dir.path().join(format!("{FILE}.bad-1"));
+    assert_eq!(std::fs::read_to_string(&aside).unwrap(), "not json");
+    assert_eq!(read(&file), ["Bash(ls)"]);
+    crate::write::write_file(&file, &vec![b' '; (1 << 20) + 1]).unwrap();
+    store_now(&file, "Bash(pwd)".to_owned()).unwrap();
+    assert!(dir.path().join(format!("{FILE}.bad-2")).exists());
+    assert_eq!(read(&file), ["Bash(pwd)"]);
+}
+
+/// The lawyer's removal takes one rule out and keeps the rest.
+#[test]
+fn a_removed_rule_is_gone_and_the_rest_stay() {
+    let dir = TempDir::new("always_remove");
+    let file = dir.path().join(FILE);
+    store_now(&file, "Bash(ls)".to_owned()).unwrap();
+    store_now(&file, "Bash(pwd)".to_owned()).unwrap();
+    assert!(remove_now(&file, "Bash(ls)").unwrap());
+    assert!(!remove_now(&file, "Bash(ls)").unwrap());
+    assert_eq!(read(&file), ["Bash(pwd)"]);
 }

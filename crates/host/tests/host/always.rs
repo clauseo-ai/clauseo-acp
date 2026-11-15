@@ -1,9 +1,10 @@
 //! "Always for this matter" on a Claude request (route A, `agent/always.rs`): the lawyer's
 //! `allow_always` answer reaches claude-agent-acp as `allow_once`, so it writes nothing into the
 //! matter, and the host keeps the rule beside the matter's notes instead; a later request with
-//! the same rule is allowed by the host, logged, and a later launch carries the rule in its flag
-//! settings. Forced ask keeps and applies nothing. Each scenario checks the option the agent got
-//! and the `_meta` it was launched with.
+//! the same rule is allowed by the host, logged, in this session and after a relaunch. No launch
+//! carries a kept rule in its flag settings: Claude Code asks the host, which answers only after
+//! its data fence and held-open checks. Forced ask keeps and applies nothing. Each scenario checks
+//! the option the agent got and the `_meta` it was launched with.
 
 use clauseo_protocol::{
     AgentChoiceId, CommandOutcome, DomainEvent, FolderSupportKind, HostCommand, MatterId,
@@ -114,7 +115,7 @@ fn always_for_this_matter_is_kept_by_the_host_not_in_the_matter() {
     assert_eq!(text, OWN_SETTINGS);
     host.shutdown();
 
-    // The next launch carries the rule, and the host answers the request from it again.
+    // The next launch's settings hold no kept rule, and the host answers the request from it.
     dir.set_agents(&[(CLAUDE, Scenario::Local("claude-always-load"))]);
     let host = dir.start(1);
     let mut events = host.events(StreamId::Thread(thread));
@@ -249,5 +250,112 @@ fn a_rule_outside_the_matter_is_neither_kept_nor_applied() {
     let text = std::fs::read_to_string(&file).unwrap();
     assert_eq!(text.matches("-b/a.txt").count(), 1, "{text}");
     assert!(!folder.join(".claude").exists());
+    host.shutdown();
+}
+
+/// claude-agent-acp 0.89.1's options for a request `id` about tool call `call`, and the answer
+/// the agent must get.
+#[cfg(unix)]
+fn kept_ask(
+    id: &str,
+    tool: &str,
+    input: &serde_json::Value,
+    answer: &str,
+) -> [serde_json::Value; 3] {
+    let call = format!("tc-{id}");
+    let path = input.get("file_path").cloned();
+    let locations: Vec<_> = path
+        .into_iter()
+        .map(|path| serde_json::json!({"path": path}))
+        .collect();
+    let options = serde_json::json!([
+        {"optionId": "allow-once", "name": "Yes", "kind": "allow_once"},
+        {"optionId": "allow-with-updates", "name": "Yes, and don't ask again", "kind": "allow_always"},
+        {"optionId": "reject", "name": "No", "kind": "reject_once"},
+    ]);
+    [
+        serde_json::json!({"update": {"update": {"sessionUpdate": "tool_call", "toolCallId": call,
+            "title": tool, "name": tool, "status": "pending", "rawInput": input,
+            "locations": locations}}}),
+        serde_json::json!({"request": {"id": id, "method": "session/request_permission",
+            "params": {"sessionId": "sess-1", "toolCall": {"toolCallId": call, "title": tool,
+            "rawInput": input, "locations": locations}, "options": options}}}),
+        serde_json::json!({"expect_response": {"id": id,
+            "result": {"outcome": {"outcome": "selected", "optionId": answer}}}}),
+    ]
+}
+
+/// Kept rules answer only the requests Claude Code sends the host, after its checks: neither
+/// rule reaches the launch's settings, a kept command into Clauseo's data folder is still
+/// refused by the data fence (unseen), and a kept Edit whose folder was swapped for a link to
+/// another folder after it was kept reaches the lawyer instead of being allowed.
+#[cfg(unix)]
+#[test]
+fn a_kept_rule_never_passes_the_fence_or_a_swapped_link() {
+    let dir = Dir::new("always_checks", &[]);
+    let data = dir.data().to_owned();
+    crate::write::write(&data.join("update.json"), b"{}\n");
+    let folder = dir.folder("m", &[("a.txt", "x\n")]);
+    let other = dir.folder("other", &[("out.txt", "x\n")]);
+    crate::write::symlink(&other, &folder.join("work"));
+    let cat = format!("cat {}/update.json", data.display());
+    let out = format!("{}/work/out.txt", folder.display());
+    let kept = [format!("Bash({cat})"), format!("Edit(/{out})")];
+    let excludes = serde_json::json!(["{{excludes}}", kept[0], kept[1]]);
+    let mut lines = vec![
+        serde_json::json!({"scenario": "claude-always-checks", "description": "Kept rules reach \
+            no settings; the fence and the real path still decide", "on_stdin_close": "exit"}),
+        serde_json::json!({"expect": {"method": "initialize", "as": "init",
+            "params": {"protocolVersion": 1}}}),
+        serde_json::json!({"respond": {"to": "init", "result": {"protocolVersion": 1,
+            "agentCapabilities": {"loadSession": true}, "authMethods": [],
+            "agentInfo": {"name": "fake_agent", "version": "0.0.0"}}}}),
+        serde_json::json!({"expect": {"method": "session/new", "as": "new", "params": {
+            "cwd": "{{any}}", "_meta": {"claudeCode": {"options": {"settings": {
+            "permissions": {"allow": excludes}}}}}}}}),
+        serde_json::json!({"respond": {"to": "new", "result": {"sessionId": "sess-1",
+            "modes": {"currentModeId": "auto", "availableModes": [
+            {"id": "default", "name": "Manual"}, {"id": "auto", "name": "Auto"}]}}}}),
+        serde_json::json!({"expect": {"method": "session/prompt", "as": "p1",
+            "params": {"sessionId": "sess-1"}}}),
+    ];
+    lines.extend(kept_ask(
+        "fence",
+        "Bash",
+        &serde_json::json!({"command": cat}),
+        "reject",
+    ));
+    let edit = serde_json::json!({"file_path": out, "old_string": "x", "new_string": "y"});
+    lines.extend(kept_ask("link", "Edit", &edit, "reject"));
+    lines.push(serde_json::json!({"respond": {"to": "p1", "result": {"stopReason": "end_turn"}}}));
+    let mut text = String::new();
+    for line in &lines {
+        text.push_str(&line.to_string());
+        text.push('\n');
+    }
+    let file = folder.with_file_name("claude-always-checks.jsonl");
+    crate::write::write(&file, text.as_bytes());
+    dir.set_agents(&[(CLAUDE, Scenario::Written(file))]);
+
+    let host = dir.start(0);
+    let matter = host.create_matter("m", &folder);
+    let thread = host.create_thread(matter, CLAUDE);
+    let rules = serde_json::json!({"version": 1, "allow": kept});
+    crate::write::write(&rules_file(&dir, matter), rules.to_string().as_bytes());
+    let mut events = host.events(StreamId::Thread(thread));
+    let (turn, _) = host.prompt(thread, "Read the update and edit the file.");
+    answer_from(&host, &mut events, thread, 0, &["reject"]);
+    let ended = events.until_turn_ended(turn);
+    events.assert_no_mismatch();
+    assert_eq!(ended.stop, StopReason::EndTurn, "{}", events.dump());
+    // Only the Edit reached the lawyer: the fence refused the command unseen.
+    let chosen = resolutions(&events);
+    assert_eq!(chosen.len(), 1, "{}", events.dump());
+    assert_eq!(
+        chosen[0].1,
+        Some(("reject".to_owned(), PermissionKind::RejectOnce)),
+        "{}",
+        events.dump()
+    );
     host.shutdown();
 }

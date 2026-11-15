@@ -2,21 +2,26 @@
 //! why and the rules). Only for a Claude agent outside forced ask; forced ask
 //! (`agent/forced_ask.rs`) offers no `allow_always` option at all, and keeps and applies nothing.
 //!
-//! - [`ask`]: a request that comes in gets its rule and its first `allow_once` option, unless
-//!   it is a plan exit (an `exit-plan-*` option, or the `ExitPlanMode` tool), which passes
-//!   through unchanged. One with an `allow_always` option but no `allow_once` loses its
-//!   `allow_always` options, so none can reach the adapter.
+//! - [`ask`]: a request that comes in gets its rule (or why none) and its first `allow_once`
+//!   option, unless it is a plan exit (an `exit-plan-*` option, or the `ExitPlanMode` tool),
+//!   which passes through unchanged. One with an `allow_always` option but no `allow_once` loses
+//!   its `allow_always` options, so none can reach the adapter. A path rule's file goes with the
+//!   request's matter-thread check ([`real_path`]), which resolves its real path
+//!   (`agent::always::real_within`).
 //! - [`answer`]: the lawyer's `allow_always` answer is logged as chosen, but the agent gets the
 //!   request's `allow_once` option, so claude-agent-acp writes nothing into the matter; the
-//!   rule, when the request gives one, is kept for the session and in the matter's file, unless
-//!   it is a path rule outside the matter folder (`agent::always::within`), which is never
-//!   kept: the same rule read back at a launch is dropped too ([`Always::in_matter`]).
+//!   rule is kept for the session and in the matter's file, unless it is a path rule outside the
+//!   matter folder by its text (`agent::always::within`) or its real path. What was not kept,
+//!   and why, goes back for the lawyer's notice ([`Answered`]).
 //! - [`auto_allow`]: a later request whose rule is kept is answered `allow_once` by the host,
 //!   after the data-fence and held-open checks, logged as `PermissionRequested` and
-//!   `PermissionResolved` in one commit, as `asks::refuse_held_open` logs its answer. The answer
-//!   is `by: local_desktop`, the only principal there is: it applies the lawyer's own standing
-//!   choice from this desktop app, as the held-open refusal answers for the lawyer.
-//! - [`allow_in`]: a later launch's `_meta` carries the kept rules in `permissions.allow`.
+//!   `PermissionResolved` in one commit, as `asks::refuse_held_open` logs its answer; a path
+//!   rule only when its real path is inside the matter now. The answer is `by: local_desktop`,
+//!   the only principal there is: it applies the lawyer's own standing choice from this desktop
+//!   app, as the held-open refusal answers for the lawyer.
+//!
+//! The kept rules reach no launch settings: Claude Code asks the host for every request, and
+//! only the host answers from them (`agent/always.rs`).
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
@@ -26,7 +31,7 @@ use clauseo_protocol::{
     PermissionOption, PermissionRequestId, PermissionRequested, PermissionResolved, Principal,
     StreamId, ThreadId,
 };
-use serde_json::{Map, Value};
+use serde_json::Value;
 
 use super::super::Actor;
 use super::Then;
@@ -35,15 +40,27 @@ use super::asks::PermissionAsk;
 use super::launch_checks::RunFolders;
 use super::out::Out;
 use super::updates::{agent, known_tool};
-use crate::agent::always;
+use crate::agent::always::{self, NotKept};
 use crate::error::Error;
 use crate::log_file::Cause;
 
 /// What a request needs for route A: its rule, if it gives one, and the option the agent gets.
 #[derive(Debug, Clone)]
 pub(super) struct AlwaysAsk {
-    rule: Option<String>,
+    rule: Result<String, NotKept>,
     once: AgentChoiceId,
+    /// Whether a path rule's file is inside the matter by its real path, as the request's
+    /// matter-thread check found it; none when it was not checked.
+    real: Option<bool>,
+}
+
+/// The lawyer's `allow_always` answer as the agent gets it: the `allow_once` option, and why
+/// nothing was kept, when nothing was.
+#[derive(Debug)]
+pub(super) struct Answered {
+    pub(super) once: AgentChoiceId,
+    #[expect(dead_code, reason = "the lawyer's notice uses it, in the next commit")]
+    pub(super) not_kept: Option<NotKept>,
 }
 
 /// A Claude agent's kept rules for its matter, and its pending requests' [`AlwaysAsk`].
@@ -122,8 +139,17 @@ pub(super) fn ask(
         options.retain(|option| option.kind != PermissionKind::AllowAlways);
         return None;
     };
-    let rule = tool.and_then(|tool| always::rule(&tool, raw_input, cfg!(windows)));
-    Some(AlwaysAsk { rule, once })
+    let rule = tool.map_or(Err(NotKept::NoRule), |tool| {
+        always::rule(&tool, raw_input, cfg!(windows))
+    });
+    let real = None;
+    Some(AlwaysAsk { rule, once, real })
+}
+
+/// The file whose real path the request's matter-thread check resolves: a path rule's.
+pub(super) fn real_path(ask: Option<&AlwaysAsk>) -> Option<PathBuf> {
+    let rule = ask?.rule.as_ref().ok()?;
+    always::rule_path(rule, cfg!(windows))
 }
 
 /// The tool `name` of the call the request is about, as the thread's log (or the replay being
@@ -163,33 +189,65 @@ pub(super) fn answer(
     agent: &mut Agent,
     request: PermissionRequestId,
     option: &PermissionOption,
-) -> Option<AgentChoiceId> {
+) -> Option<Answered> {
     let ask = agent.always.asked.remove(&request)?;
     if option.kind != PermissionKind::AllowAlways {
         return None;
     }
-    if let Some(rule) = ask.rule
-        && always::within(&rule, &agent.always.roots, cfg!(windows))
-        && agent.always.rules.len() < always::MAX_RULES
-        && agent.always.rules.insert(rule.clone())
-        && let Some(file) = &agent.always.file
-    {
-        always::store(file.clone(), rule);
-    }
-    tracing::info!("an \"Always for this matter\" answer goes to the agent as allow once");
-    Some(ask.once)
+    let kept = ask.rule.and_then(|rule| {
+        let path = always::rule_path(&rule, cfg!(windows)).is_some();
+        let inside = always::within(&rule, &agent.always.roots, cfg!(windows))
+            && (!path || ask.real == Some(true));
+        let full = agent.always.rules.len() >= always::MAX_RULES;
+        match (inside, full) {
+            (false, _) => Err(NotKept::OutsideMatter),
+            (true, true) => Err(NotKept::Full),
+            (true, false) => Ok(rule),
+        }
+    });
+    let not_kept = match kept {
+        Ok(rule) => {
+            if agent.always.rules.insert(rule.clone())
+                && let Some(file) = &agent.always.file
+            {
+                always::store(file.clone(), rule);
+            }
+            None
+        }
+        Err(why) => Some(why),
+    };
+    tracing::info!(
+        ?not_kept,
+        "an \"Always for this matter\" answer goes to the agent as allow once"
+    );
+    Some(Answered {
+        once: ask.once,
+        not_kept,
+    })
 }
 
-/// Answers `ask` `allow_once` when its rule is kept, logged as one commit; gives it back when
-/// it is not, for the lawyer.
+/// Answers `ask` `allow_once` when its rule is kept (a path rule only when `real`, its file's
+/// real path inside the matter), logged as one commit; gives it back when it is not, for the
+/// lawyer, with `real` kept for the answer.
 pub(super) fn auto_allow(
     actor: &mut Actor,
     thread: ThreadId,
-    ask: PermissionAsk,
+    mut ask: PermissionAsk,
+    real: Option<bool>,
 ) -> Option<PermissionAsk> {
-    let kept = ask.always.as_ref().and_then(|always| always.rule.as_ref());
+    if let Some(always) = ask.always.as_mut() {
+        always.real = real;
+    }
+    let kept = ask
+        .always
+        .as_ref()
+        .and_then(|always| always.rule.as_ref().ok());
     let agent = agent(actor, thread)?;
-    if !kept.is_some_and(|rule| agent.always.rules.contains(rule)) {
+    let applies = kept.is_some_and(|rule| {
+        agent.always.rules.contains(rule)
+            && (always::rule_path(rule, cfg!(windows)).is_none() || real == Some(true))
+    });
+    if !applies {
         return Some(ask);
     }
     if let Err(error) = allow(actor, thread, ask) {
@@ -253,10 +311,19 @@ fn allow(actor: &mut Actor, thread: ThreadId, ask: PermissionAsk) -> Result<(), 
     Ok(())
 }
 
-/// Adds `thread`'s agent's kept rules to the `_meta` of its session: none in forced ask or for an
-/// agent other than Claude, which keeps none ([`Always::at_launch`]).
-pub(super) fn allow_in(actor: &mut Actor, thread: ThreadId, meta: &mut Map<String, Value>) {
-    if let Some(agent) = agent(actor, thread).filter(|agent| !agent.forced_ask) {
-        always::allow_in_meta(meta, agent.always.rules.iter().map(String::as_str));
+/// The lawyer removed `rule` from `matter`'s kept rules: no agent of the matter applies it any
+/// more.
+#[expect(
+    dead_code,
+    reason = "the lawyer's list of kept rules uses it, in the next commit"
+)]
+pub(crate) fn forget(actor: &mut Actor, matter: clauseo_protocol::MatterId, rule: &str) {
+    for entry in actor.threads.values_mut() {
+        if entry.row.matter != matter {
+            continue;
+        }
+        if let Some(agent) = entry.turn.agent.as_deref_mut() {
+            agent.always.rules.remove(rule);
+        }
     }
 }

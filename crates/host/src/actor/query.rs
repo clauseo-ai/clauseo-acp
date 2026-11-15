@@ -286,7 +286,7 @@ pub(super) fn matter_answer(reply: MatterReply) -> Result<QueryResult, Error> {
         | MatterReply::Undone(_)
         | MatterReply::Restored(_)
         | MatterReply::Located(_)
-        | MatterReply::HeldOpen(_)
+        | MatterReply::HeldOpen(..)
         | MatterReply::StillGone(_)
         | MatterReply::Papers(_)
         | MatterReply::SidesWritten(_)

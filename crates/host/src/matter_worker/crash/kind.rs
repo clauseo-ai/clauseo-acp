@@ -116,7 +116,7 @@ impl Kind {
             Self::Restore => MatterReply::Restored(Err(error)),
             Self::Compare => MatterReply::Compared(Err(error)),
             Self::Preview => MatterReply::Previewed(Err(error)),
-            Self::HeldOpen => MatterReply::HeldOpen(PathsChecked::Held(None)),
+            Self::HeldOpen => MatterReply::HeldOpen(PathsChecked::Held(None), None),
             Self::ListPapers => MatterReply::Papers(Err(error)),
             Self::EditedSince => MatterReply::EditedSince(Err(error)),
             Self::StillGone => MatterReply::StillGone(Err(error)),

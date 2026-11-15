@@ -134,7 +134,7 @@ pub(super) fn answer(
         | MatterReply::Previewed(_)
         | MatterReply::EditedSince(_)
         | MatterReply::Located(_)
-        | MatterReply::HeldOpen(_)
+        | MatterReply::HeldOpen(..)
         | MatterReply::StillGone(_)
         | MatterReply::SidesWritten(_)
         | MatterReply::Revisions(_)

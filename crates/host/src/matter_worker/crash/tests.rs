@@ -331,11 +331,12 @@ fn held_open(case: &Case) -> MatterJob {
         folder: case.folder(),
         paths: vec![case.folder().join("brief.docx")],
         fence: None,
+        real: None,
     }
 }
 
 fn nothing_held(reply: &MatterReply) -> bool {
-    matches!(reply, MatterReply::HeldOpen(PathsChecked::Held(None)))
+    matches!(reply, MatterReply::HeldOpen(PathsChecked::Held(None), _))
 }
 
 #[test]

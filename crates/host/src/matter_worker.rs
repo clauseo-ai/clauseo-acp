@@ -186,11 +186,14 @@ pub(crate) enum MatterJob {
     /// The first of `paths` (as the agent named them: absolute, or relative to `folder`) that
     /// lies in `folder` and that Word or another program holds open, by
     /// `clauseo_matters::held_open_at`, after the data-folder check `fence`
-    /// (`agent/data_fence.rs`), when there is one. Needs no open matter.
+    /// (`agent/data_fence.rs`), when there is one; and whether `real`, a kept path rule's
+    /// file, is inside `folder` by its real path (`agent::always::real_within`). Needs no
+    /// open matter.
     HeldOpen {
         folder: PathBuf,
         paths: Vec<PathBuf>,
         fence: Option<Box<FenceCheck>>,
+        real: Option<PathBuf>,
     },
     /// `Matter::papers`: the folder as it is now, its first `limit` files.
     ListPapers { limit: usize },
@@ -229,8 +232,8 @@ pub(crate) enum MatterReply {
     Restored(Result<Box<RestoreDone>, Error>),
     Compared(Result<Vec<FileChange>, Error>),
     Previewed(Result<Box<RestorePlan>, Error>),
-    /// The first path held open, with what shows it.
-    HeldOpen(PathsChecked),
+    /// The first path held open, with what shows it; whether the kept rule's file is inside.
+    HeldOpen(PathsChecked, Option<bool>),
     /// The folder's listing, with where the folder lives (`clauseo_matters::place`), asked
     /// here beside the listing: it stats the folder, so never on the actor.
     Papers(Result<(PaperList, Place), Error>),
@@ -257,7 +260,7 @@ impl MatterReply {
             Self::Restored(_) => "Restored",
             Self::Compared(_) => "Compared",
             Self::Previewed(_) => "Previewed",
-            Self::HeldOpen(_) => "HeldOpen",
+            Self::HeldOpen(..) => "HeldOpen",
             Self::Papers(_) => "Papers",
             Self::EditedSince(_) => "EditedSince",
             Self::StillGone(_) => "StillGone",
@@ -514,7 +517,12 @@ fn handle(settings: &Settings, slot: &mut Slot, job: MatterJob) -> MatterReply {
             folder,
             paths,
             fence,
-        } => MatterReply::HeldOpen(check_paths(&folder, paths, fence.as_deref())),
+            real,
+        } => {
+            let inside =
+                real.map(|real| crate::agent::always::real_within(&real, &folder, cfg!(windows)));
+            MatterReply::HeldOpen(check_paths(&folder, paths, fence.as_deref()), inside)
+        }
         MatterJob::ListPapers { limit } => {
             MatterReply::Papers(open(settings, slot).and_then(|matter| {
                 let papers = matter.papers(limit)?;
