@@ -24,7 +24,8 @@ const MAIN_TYPE: &str = "/officeDocument";
 /// tracked changes from (0.9.3 calls them the `headers`, `notes` and `comments` stories).
 const STORY_TYPES: &[&str] = &["/header", "/footer", "/footnotes", "/endnotes", "/comments"];
 
-/// The most parts one file's scan reads: Word writes at most six headers and footers a section.
+/// The most story parts one file's scan reads: Word writes at most six headers and footers a
+/// section. A file naming more may have changes in those it does not read.
 pub(super) const MAX_PARTS: usize = 1_024;
 
 /// One `<Relationship>`: its type, its target and whether that target is outside the package.
@@ -51,7 +52,8 @@ pub(super) fn rels_of(name: &str) -> String {
 }
 
 /// The story parts the main document `main`'s relationships `rels` name, in their order, each
-/// once, at most [`MAX_PARTS`], `main` itself not among them.
+/// once, `main` itself not among them; at most one past [`MAX_PARTS`], which tells the caller
+/// there were more than it reads.
 pub(super) fn story_parts(main: &str, rels: &[u8]) -> Vec<String> {
     let (folder, _) = split(main);
     let mut parts: Vec<String> = Vec::new();
@@ -65,7 +67,35 @@ pub(super) fn story_parts(main: &str, rels: &[u8]) -> Vec<String> {
         if name != main && !parts.contains(&name) {
             parts.push(name);
         }
-        if parts.len() >= MAX_PARTS {
+        if parts.len() > MAX_PARTS {
+            break;
+        }
+    }
+    parts
+}
+
+/// The story parts by the names Word gives them, among the zip's entry `names` in their order,
+/// at most one past [`MAX_PARTS`] as [`story_parts`] gives them, for a main document whose
+/// relationships the scan could not read (too large, or not UTF-8): `word/header*.xml`,
+/// `word/footer*.xml`, `word/footnotes.xml`, `word/endnotes.xml` and `word/comments.xml`.
+pub(super) fn usual_story_parts<'a>(names: impl Iterator<Item = &'a str>) -> Vec<String> {
+    let mut parts: Vec<String> = Vec::new();
+    for name in names {
+        let Some(file) = name.strip_prefix("word/") else {
+            continue;
+        };
+        let numbered = ["header", "footer"]
+            .iter()
+            .any(|start| file.starts_with(start))
+            && std::path::Path::new(file)
+                .extension()
+                .is_some_and(|extension| extension.eq_ignore_ascii_case("xml"))
+            && !file.contains('/');
+        let one = matches!(file, "footnotes.xml" | "endnotes.xml" | "comments.xml");
+        if (numbered || one) && !parts.iter().any(|part| part == name) {
+            parts.push(name.to_owned());
+        }
+        if parts.len() > MAX_PARTS {
             break;
         }
     }
@@ -150,8 +180,8 @@ fn relationship(tag: &[u8]) -> Option<Relationship> {
 }
 
 /// The `name="value"` (or `name='value'`) pairs of an element's tag after its name, in one pass,
-/// until one does not read. Also the root element's `xmlns` declarations, for the marks scan.
-pub(super) fn attributes(mut tag: &[u8]) -> impl Iterator<Item = (&[u8], &[u8])> {
+/// until one does not read.
+fn attributes(mut tag: &[u8]) -> impl Iterator<Item = (&[u8], &[u8])> {
     std::iter::from_fn(move || {
         let eq = memchr::memchr(b'=', tag)?;
         let name = tag.get(..eq)?.trim_ascii();
@@ -185,7 +215,9 @@ fn text(value: &[u8]) -> String {
 mod tests {
     use std::time::Duration;
 
-    use super::{Relationship, main_part, relationships, rels_of, resolve, story_parts};
+    use super::{
+        Relationship, main_part, relationships, rels_of, resolve, story_parts, usual_story_parts,
+    };
     use crate::clock::{Clock as _, SystemClock};
 
     const DOC_RELS: &str = concat!(
@@ -276,5 +308,33 @@ mod tests {
             assert_eq!(found[0].target, "h.xml");
             assert!(took < Duration::from_secs(1), "{size} bytes took {took:?}");
         }
+    }
+
+    #[test]
+    fn the_usual_story_parts_are_word_s_names_for_them() {
+        let names = [
+            "[Content_Types].xml",
+            "word/document.xml",
+            "word/header1.xml",
+            "word/footer12.xml",
+            "word/footnotes.xml",
+            "word/endnotes.xml",
+            "word/comments.xml",
+            "word/styles.xml",
+            "word/media/header.png",
+            "word/headers/a.xml",
+            "header1.xml",
+            "word/commentsExtended.xml",
+        ];
+        assert_eq!(
+            usual_story_parts(names.into_iter()),
+            [
+                "word/header1.xml",
+                "word/footer12.xml",
+                "word/footnotes.xml",
+                "word/endnotes.xml",
+                "word/comments.xml",
+            ]
+        );
     }
 }

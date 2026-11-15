@@ -6,13 +6,18 @@
 //! text inserted, deleted or moved, and formatting, section, table, row, cell and numbering
 //! changes), or a comment (`<w:comment `). It is looked for in every part stetdoc reads them
 //! from: the main document and the headers, footers, footnotes, endnotes and comments its
-//! relationships name ([`parts`]). Only bytes are matched, never parsed, in one pass over each
-//! part (`memchr` finds each `<`): a mark is `<`, the prefix the part's root element binds to
-//! Word's main XML namespace (`w` when it binds none), `:`, the name and white space. Marks
-//! inside an XML comment or a CDATA section are text, not changes, and are passed over. The read
-//! stops at the first mark, after
-//! [`MAX_XML_BYTES`] of a part and after [`MAX_SCAN_BYTES`] in all, so a zip bomb or a huge
-//! document costs a bounded read. A file that does not read as a zip, or has no such part, has
+//! relationships name ([`parts`]), or by Word's usual part names when those relationships are
+//! too large or not UTF-8. Each part is read as XML, as it streams (quick-xml's `NsReader`): a
+//! mark is an element in Word's main namespace, whatever prefix the part binds to it, with one
+//! of the marks' names, so comments, CDATA, processing instructions and nested declarations are
+//! read as XML reads them. The scan never answers "no changes" for a part it does not model: a
+//! part that is not well-formed, that uses a prefix it never declares, that holds a doctype (whose
+//! entities could hold markup), or that is not UTF-8 (a UTF-16 byte order mark, a NUL in its first
+//! bytes, or another declared encoding) answers "may have changes", which offers Tracked changes
+//! as a change does. The read stops at the first mark, after [`MAX_XML_BYTES`] of a part and after
+//! [`MAX_SCAN_BYTES`] in all, so a zip bomb or a huge
+//! document costs a bounded read; a part or a file the scan could not read whole answers "may
+//! have changes" too. A file that does not read as a zip, or has no such part, has
 //! none. The file is opened without following a link at its last component.
 //!
 //! [`Kept`] holds each matter's answers by path, with the size and modified time the listing
@@ -20,49 +25,32 @@
 //! failed (a locked file, a sharing violation) is never kept: the next listing tries again.
 
 use std::collections::HashMap;
-use std::io::{BufReader, Read, Seek};
+use std::io::{BufRead as _, BufReader, Read, Seek};
 use std::path::Path;
 
 use clauseo_matters::Paper;
 use clauseo_protocol::{MatterPath, Timestamp};
+use quick_xml::events::Event;
+use quick_xml::name::{Namespace, ResolveResult};
 
 use super::is_docx;
 
 /// The most bytes of one XML part read, decompressed: a document over this is some thousands
-/// of pages; a mark past it is missed and the tile offers no Tracked changes.
+/// of pages. A part past it may have changes: the tile offers Tracked changes.
 pub(crate) const MAX_XML_BYTES: u64 = 16 * 1024 * 1024;
 
-/// The most bytes one file's scan reads, decompressed, over all its parts and relationships.
+/// The most bytes one file's scan reads, decompressed, over all its parts and relationships. A
+/// file with parts left unread past it may have changes, as a part past [`MAX_XML_BYTES`] may.
 pub(crate) const MAX_SCAN_BYTES: u64 = 64 * 1024 * 1024;
 
-/// The most bytes of a relationships part: a few hundred bytes a relationship, so Word's
-/// hundred or so fit many times over. A larger part is taken as one with no relationships.
-const MAX_RELS_BYTES: u64 = 64 * 1024;
+/// The most bytes of a relationships part: about 300 bytes a relationship, so a brief with
+/// thousands of links and images fits. Over it, Word's usual part names are scanned instead.
+const MAX_RELS_BYTES: u64 = 1024 * 1024;
 
-/// Word's main XML namespace: a part's marks carry the prefix its root element binds to it.
+/// Word's main XML namespace: a mark is an element in it.
 const W_NAMESPACE: &[u8] = b"http://schemas.openxmlformats.org/wordprocessingml/2006/main";
 
-/// The prefix of the marks of a part whose root element binds none to [`W_NAMESPACE`].
-const DEFAULT_PREFIX: &[u8] = b"w";
-
-/// The longest prefix taken from a root element: past it, a part's marks are taken to carry
-/// [`DEFAULT_PREFIX`].
-const MAX_PREFIX: usize = 64;
-
-/// The most prefixes taken from a root element: past them, a part's marks are taken to carry
-/// [`DEFAULT_PREFIX`].
-const MAX_PREFIXES: usize = 8;
-
-/// How much of a part is read at a time.
-const BLOCK: usize = 64 * 1024;
-
-/// An XML comment's opening after its `<`, and its end.
-const COMMENT: (&[u8], &[u8]) = (b"!--", b"-->");
-
-/// A CDATA section's opening after its `<`, and its end.
-const CDATA: (&[u8], &[u8]) = (b"![CDATA[", b"]]>");
-
-/// The element names after [`PREFIX`] of the tracked changes stetdoc 0.9.3 lists, accepts and
+/// The local names of the tracked changes stetdoc 0.9.3 lists, accepts and
 /// rejects in every part it reads (each checked with the release binary): text and paragraph
 /// marks, rows and custom XML inserted, deleted or moved, cells inserted, deleted or merged,
 /// and run, paragraph, section, table, table exception, grid, row, cell and numbering changes.
@@ -88,7 +76,7 @@ const CHANGE_MARKS: &[&[u8]] = &[
     b"customXmlDelRangeStart",
 ];
 
-/// The element name of a comment.
+/// The local name of a comment.
 const COMMENT_MARKS: &[&[u8]] = &[b"comment"];
 
 /// One matter's answers: by path, the size and modified time listed when it was read, and
@@ -178,51 +166,86 @@ fn windows_file(path: &Path, file: std::fs::File) -> Option<std::fs::File> {
 }
 
 /// Whether the zip `file` reads as a Word file that holds a tracked change or a comment in any
-/// part stetdoc reads them from (the main document first); `None` when a read failed.
+/// part stetdoc reads them from (the main document first); `None` when a read failed. A part
+/// the scan does not model, or could not read whole, answers `Some(true)`: it may have changes,
+/// so the tile offers Tracked changes, as for a change, and stetdoc decides when they are listed.
 fn zip_has_marks(file: impl Read + Seek) -> Option<bool> {
+    zip_marks(file, MAX_XML_BYTES, MAX_SCAN_BYTES)
+}
+
+/// [`zip_has_marks`] with these caps: at most `part_cap` bytes of a part and `total_cap` in all.
+fn zip_marks(file: impl Read + Seek, part_cap: u64, total_cap: u64) -> Option<bool> {
     let mut zip = match zip::ZipArchive::new(file) {
         Ok(zip) => zip,
         Err(zip::result::ZipError::Io(_)) => return None,
         Err(_) => return Some(false),
     };
-    let mut left = MAX_SCAN_BYTES;
-    let main = parts::main_part(&read_rels(&mut zip, "_rels/.rels", &mut left)?);
-    let rels = read_rels(&mut zip, &parts::rels_of(&main), &mut left)?;
-    let story = parts::story_parts(&main, &rels);
+    let mut left = total_cap;
+    let main = match read_rels(&mut zip, "_rels/.rels", &mut left)? {
+        Rels::Read(rels) => parts::main_part(&rels),
+        Rels::Unread => parts::main_part(b""),
+    };
+    let story = match read_rels(&mut zip, &parts::rels_of(&main), &mut left)? {
+        Rels::Read(rels) => parts::story_parts(&main, &rels),
+        Rels::Unread => {
+            let names: Vec<String> = zip
+                .file_names()
+                .filter_map(Result::ok)
+                .map(std::borrow::Cow::into_owned)
+                .collect();
+            parts::usual_story_parts(names.iter().map(String::as_str))
+        }
+    };
+    // more story parts than the scan reads: it cannot answer that they hold none
+    if story.len() > parts::MAX_PARTS {
+        return Some(true);
+    }
     for name in std::iter::once(&main).chain(&story) {
         if left == 0 {
-            break;
+            // past the total cap with parts left unread: they may have changes
+            return Some(true);
         }
         let part = match zip.by_name(name) {
             Ok(part) => part,
             Err(zip::result::ZipError::Io(_)) => return None,
             Err(_) => continue,
         };
-        let mut part = part.take(MAX_XML_BYTES.min(left));
+        let mut part = part.take(part_cap.min(left));
         let limit = part.limit();
-        let holds = holds_any(&mut part, &[CHANGE_MARKS, COMMENT_MARKS])?;
+        let found = holds_any(&mut part, &[CHANGE_MARKS, COMMENT_MARKS])?;
         left -= limit - part.limit();
-        if holds {
+        // cut by a cap: the scan read to the cap and the part goes on past it, so what is past
+        // the cap may have changes; a read that fails there is a failed read
+        let cut = part.limit() == 0 && part.get_mut().read(&mut [0_u8]).ok()? == 1;
+        if cut || found != Found::Clean {
             return Some(true);
         }
     }
     Some(false)
 }
 
-/// The relationships part `name` (at most `left`, which the read takes from), none when the file
-/// has no such part or it is over [`MAX_RELS_BYTES`]; `None` when a read failed.
+/// A relationships part as the scan takes it.
+enum Rels {
+    /// Its bytes, empty when the file has no such part.
+    Read(Vec<u8>),
+    /// Over [`MAX_RELS_BYTES`] or not UTF-8: not read for its relationships.
+    Unread,
+}
+
+/// The relationships part `name` (at most `left`, which the read takes from); `None` when a read
+/// failed.
 fn read_rels<R: Read + Seek>(
     zip: &mut zip::ZipArchive<R>,
     name: &str,
     left: &mut u64,
-) -> Option<Vec<u8>> {
+) -> Option<Rels> {
     let part = match zip.by_name(name) {
         Ok(part) => part,
         Err(zip::result::ZipError::Io(_)) => return None,
-        Err(_) => return Some(Vec::new()),
+        Err(_) => return Some(Rels::Read(Vec::new())),
     };
     if part.size() > MAX_RELS_BYTES {
-        return Some(Vec::new());
+        return Some(Rels::Unread);
     }
     let limit = MAX_RELS_BYTES.min(*left);
     let mut bytes = Vec::new();
@@ -230,181 +253,83 @@ fn read_rels<R: Read + Seek>(
     part.take(limit + 1).read_to_end(&mut bytes).ok()?;
     let read = u64::try_from(bytes.len()).unwrap_or(u64::MAX);
     *left -= read.min(*left);
-    if read > limit {
-        return Some(Vec::new());
+    if read > limit || !utf8(&bytes) {
+        return Some(Rels::Unread);
     }
-    Some(bytes)
+    Some(Rels::Read(bytes))
 }
 
-/// Whether `bytes` hold a mark with any of `marks`' names, outside comments and CDATA, read a
-/// block at a time in one pass; `None` when a read failed before a mark was found.
-fn holds_any(mut bytes: impl Read, marks: &[&[&[u8]]]) -> Option<bool> {
+/// Whether a part's first bytes read as UTF-8 to the scan: no UTF-16 byte order mark and no NUL
+/// in its first four bytes (UTF-16 or UTF-32 without a mark).
+fn utf8(head: &[u8]) -> bool {
+    !head.starts_with(&[0xFE, 0xFF])
+        && !head.starts_with(&[0xFF, 0xFE])
+        && !head.iter().take(4).any(|&byte| byte == 0)
+}
+
+/// What the scan of a part found.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Found {
+    /// An element in Word's main namespace with one of the marks' names.
+    Mark,
+    /// None, in a part read to its end as the scan models it.
+    Clean,
+    /// Something the scan does not model, or a part cut short: it may have changes.
+    Unmodelled,
+}
+
+/// What `bytes`, one XML part, hold: an element in [`W_NAMESPACE`] with any of `marks`' local
+/// names, read as it streams; `None` when a read failed before a mark was found.
+fn holds_any(bytes: impl Read, marks: &[&[&[u8]]]) -> Option<Found> {
     let marks: Vec<&[u8]> = marks
         .iter()
         .flat_map(|names| names.iter().copied())
         .collect();
-    let mut buffer = vec![0_u8; BLOCK];
-    let (mut filled, mut ended) = fill(&mut bytes, &mut buffer, 0)?;
-    let prefixes = bound_prefixes(buffer.get(..filled)?);
-    // what a `<` needs after it to be told apart: `prefix:`, the name and its white space, or
-    // a CDATA section's opening
-    let longest = marks.iter().map(|mark| mark.len()).max().unwrap_or(0);
-    let widest = prefixes.iter().map(Vec::len).max().unwrap_or(0);
-    let ahead = (1 + widest + 1 + longest + 1).max(1 + CDATA.0.len());
-    // the end of the comment or CDATA section the read is in
-    let mut inside: Option<&[u8]> = None;
+    let mut bytes = BufReader::with_capacity(64 * 1024, bytes);
+    if !utf8(bytes.fill_buf().ok()?) {
+        return Some(Found::Unmodelled);
+    }
+    let mut reader = quick_xml::NsReader::from_reader(bytes);
+    let mut buffer = Vec::new();
     loop {
-        let block = buffer.get(..filled)?;
-        // where a `<` has all it needs after it in the block; the rest waits for the next one
-        let whole = if ended == Ended::No {
-            filled.saturating_sub(ahead)
-        } else {
-            filled
+        buffer.clear();
+        let (resolved, event) = match reader.read_resolved_event_into(&mut buffer) {
+            Ok(read) => read,
+            Err(quick_xml::Error::Io(_)) => return None,
+            Err(_) => return Some(Found::Unmodelled),
         };
-        let mut at = 0;
-        while at < whole {
-            if let Some(end) = inside {
-                let Some(found) = memchr::memmem::find(block.get(at..)?, end) else {
-                    // the block's last bytes may start the end
-                    at = at.max(filled.saturating_sub(end.len() - 1));
-                    break;
-                };
-                at += found + end.len();
-                inside = None;
-                continue;
-            }
-            let Some(open) = memchr::memchr(b'<', block.get(at..whole)?) else {
-                at = whole;
-                break;
-            };
-            at += open;
-            let after = block.get(at + 1..).unwrap_or_default();
-            if let Some((opening, end)) = [COMMENT, CDATA]
-                .into_iter()
-                .find(|(opening, _)| after.starts_with(opening))
-            {
-                at += 1 + opening.len();
-                inside = Some(end);
-            } else if is_mark(after, &prefixes, &marks) {
-                return Some(true);
-            } else {
-                at += 1;
-            }
-        }
-        match ended {
-            Ended::No => {}
-            Ended::Done => return Some(false),
-            Ended::Failed => return None,
-        }
-        buffer.copy_within(at..filled, 0);
-        (filled, ended) = fill(&mut bytes, &mut buffer, filled - at)?;
-    }
-}
-
-/// Whether `after`, the bytes after a `<`, start one of `prefixes` (with its `:`, none for the
-/// default namespace), one of `marks` and then white space.
-fn is_mark(after: &[u8], prefixes: &[Vec<u8>], marks: &[&[u8]]) -> bool {
-    prefixes.iter().any(|prefix| {
-        let named = if prefix.is_empty() {
-            Some(after)
-        } else {
-            after
-                .strip_prefix(prefix.as_slice())
-                .and_then(|rest| rest.strip_prefix(b":"))
-        };
-        named.is_some_and(|named| {
-            marks.iter().any(|mark| {
-                named
-                    .strip_prefix(*mark)
-                    .and_then(|rest| rest.first())
-                    .is_some_and(u8::is_ascii_whitespace)
-            })
-        })
-    })
-}
-
-/// The prefixes the root element in `head`, a part's first bytes, binds to [`W_NAMESPACE`] (an
-/// empty one for the default namespace), or [`DEFAULT_PREFIX`] when it binds none, its tag is
-/// not in `head`, or a prefix is past [`MAX_PREFIX`] or [`MAX_PREFIXES`].
-fn bound_prefixes(head: &[u8]) -> Vec<Vec<u8>> {
-    let fallback = || vec![DEFAULT_PREFIX.to_vec()];
-    // the root's tag: the first `<` not opening a declaration, a comment or a doctype
-    let mut rest = head;
-    let tag = loop {
-        let Some(open) = memchr::memchr(b'<', rest) else {
-            return fallback();
-        };
-        rest = rest.get(open + 1..).unwrap_or_default();
-        let past = if rest.starts_with(COMMENT.0) {
-            memchr::memmem::find(rest, COMMENT.1).map(|end| end + COMMENT.1.len())
-        } else if rest.starts_with(b"?") || rest.starts_with(b"!") {
-            memchr::memchr(b'>', rest).map(|end| end + 1)
-        } else {
-            break memchr::memchr(b'>', rest).and_then(|end| rest.get(..end));
-        };
-        let Some(past) = past else {
-            return fallback();
-        };
-        rest = rest.get(past..).unwrap_or_default();
-    };
-    let Some(tag) = tag else {
-        return fallback();
-    };
-    // the attributes start after the element's name
-    let name = tag
-        .iter()
-        .position(u8::is_ascii_whitespace)
-        .unwrap_or(tag.len());
-    let mut prefixes = Vec::new();
-    for (name, value) in parts::attributes(tag.get(name..).unwrap_or_default()) {
-        if value != W_NAMESPACE {
-            continue;
-        }
-        let prefix = match name.strip_prefix(b"xmlns") {
-            Some(b"") => b"".as_slice(),
-            Some(declared) => match declared.strip_prefix(b":") {
-                Some(prefix) if !prefix.is_empty() => prefix,
-                _ => continue,
+        match event {
+            Event::Start(element) | Event::Empty(element) => match resolved {
+                ResolveResult::Bound(Namespace(namespace))
+                    if namespace.as_bytes() == W_NAMESPACE
+                        && marks.contains(&element.local_name().as_ref().as_bytes()) =>
+                {
+                    return Some(Found::Mark);
+                }
+                ResolveResult::Unknown(_) => return Some(Found::Unmodelled),
+                ResolveResult::Bound(_) | ResolveResult::Unbound => {}
             },
-            None => continue,
-        };
-        if prefix.len() > MAX_PREFIX || prefixes.len() == MAX_PREFIXES {
-            return fallback();
-        }
-        prefixes.push(prefix.to_vec());
-    }
-    if prefixes.is_empty() {
-        return fallback();
-    }
-    prefixes
-}
-
-/// How a [`fill`] stopped: the buffer full, the part at its end, or a read failed.
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Ended {
-    /// The buffer is full; the part may go on.
-    No,
-    /// The part ended.
-    Done,
-    /// A read failed after some bytes were read.
-    Failed,
-}
-
-/// Reads into `buffer` after its first `filled` bytes until it is full, the part ends or a read
-/// fails: how many bytes it then holds, and which stopped it. A read that fails with nothing
-/// read since the last fill is `None`.
-fn fill(bytes: &mut impl Read, buffer: &mut [u8], mut filled: usize) -> Option<(usize, Ended)> {
-    let start = filled;
-    while filled < buffer.len() {
-        match bytes.read(buffer.get_mut(filled..)?) {
-            Ok(0) => return Some((filled, Ended::Done)),
-            Ok(read) => filled += read,
-            Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {}
-            Err(_) if filled > start => return Some((filled, Ended::Failed)),
-            Err(_) => return None,
+            Event::Decl(declaration) => {
+                let other = declaration.encoding().is_some_and(|encoding| {
+                    !encoding.is_ok_and(|encoding| {
+                        encoding.eq_ignore_ascii_case("utf-8")
+                            || encoding.eq_ignore_ascii_case("utf8")
+                    })
+                });
+                if other {
+                    return Some(Found::Unmodelled);
+                }
+            }
+            Event::DocType(_) => return Some(Found::Unmodelled),
+            Event::Eof => return Some(Found::Clean),
+            Event::End(_)
+            | Event::Text(_)
+            | Event::CData(_)
+            | Event::Comment(_)
+            | Event::PI(_)
+            | Event::GeneralRef(_) => {}
         }
     }
-    Some((filled, Ended::No))
 }
 
 /// Tests' stand-ins for [`check`], by folder: a test registers one for its own folder, so tests
@@ -440,3 +365,5 @@ mod parts;
 mod reparse;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod xml_tests;

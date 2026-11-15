@@ -3,9 +3,10 @@ use std::io::{Cursor, Write as _};
 
 use std::time::Duration;
 
+use super::parts::MAX_PARTS;
 use super::{
-    BLOCK, CHANGE_MARKS, COMMENT_MARKS, MAX_RELS_BYTES, MAX_XML_BYTES, check, holds_any,
-    zip_has_marks,
+    CHANGE_MARKS, COMMENT_MARKS, Found, MAX_RELS_BYTES, W_NAMESPACE, check, holds_any,
+    zip_has_marks, zip_marks,
 };
 use crate::clock::{Clock as _, SystemClock};
 use crate::pipeline::tests::support::TempDir;
@@ -42,29 +43,50 @@ impl std::io::Read for Fails<'_> {
     }
 }
 
+/// `xml` with Word's main namespace bound to `w` on its first element, as Word writes every part;
+/// as it is when it binds `w` itself.
+pub(super) fn declared(xml: &str) -> String {
+    let Some((before, rest)) = xml.split_once("<w:").filter(|_| !xml.contains("xmlns:w=")) else {
+        return xml.to_owned();
+    };
+    let end = rest
+        .find(|c: char| c.is_ascii_whitespace() || c == '>' || c == '/')
+        .unwrap_or(rest.len());
+    let (name, after) = rest.split_at_checked(end).unwrap();
+    let namespace = std::str::from_utf8(W_NAMESPACE).unwrap();
+    format!("{before}<w:{name} xmlns:w=\"{namespace}\"{after}")
+}
+
 #[test]
 fn a_mark_is_found_across_reads_and_a_near_miss_is_not() {
-    let xml = b"<w:p><w:ins w:id=\"1\" w:author=\"A\"><w:r/></w:ins></w:p>";
-    assert_eq!(holds_any(Trickle(xml), &[CHANGE_MARKS]), Some(true));
-    assert_eq!(holds_any(&xml[..], &[CHANGE_MARKS]), Some(true));
-    let moved = b"<w:p><w:moveFrom w:id=\"3\"/></w:p>";
-    assert_eq!(holds_any(Trickle(moved), &[CHANGE_MARKS]), Some(true));
-    let plain = b"<w:p><w:r><w:t>w:ins and w:del are words here</w:t></w:r><w:instrText/></w:p>";
-    assert_eq!(holds_any(&plain[..], &[CHANGE_MARKS]), Some(false));
-    assert_eq!(holds_any(Trickle(plain), &[CHANGE_MARKS]), Some(false));
-    let comment = b"<w:comments><w:comment w:id=\"0\">";
-    assert_eq!(holds_any(&comment[..], &[COMMENT_MARKS]), Some(true));
-    let none = b"<w:comments></w:comments>";
-    assert_eq!(holds_any(&none[..], &[COMMENT_MARKS]), Some(false));
+    let found = |xml: &str, marks| {
+        let xml = declared(xml);
+        let whole = holds_any(xml.as_bytes(), &[marks]);
+        assert_eq!(holds_any(Trickle(xml.as_bytes()), &[marks]), whole, "{xml}");
+        whole
+    };
+    let xml = "<w:p><w:ins w:id=\"1\" w:author=\"A\"><w:r/></w:ins></w:p>";
+    assert_eq!(found(xml, CHANGE_MARKS), Some(Found::Mark));
+    let moved = "<w:p><w:moveFrom w:id=\"3\"/></w:p>";
+    assert_eq!(found(moved, CHANGE_MARKS), Some(Found::Mark));
+    let plain = "<w:p><w:r><w:t>w:ins and w:del are words here</w:t></w:r><w:instrText/></w:p>";
+    assert_eq!(found(plain, CHANGE_MARKS), Some(Found::Clean));
+    let comment = "<w:comments><w:comment w:id=\"0\">";
+    assert_eq!(found(comment, COMMENT_MARKS), Some(Found::Mark));
+    let none = "<w:comments></w:comments>";
+    assert_eq!(found(none, COMMENT_MARKS), Some(Found::Clean));
 }
 
 #[test]
 fn a_read_that_fails_is_unknown_not_unmarked() {
-    let clean = b"<w:body><w:p><w:r><w:t>Clause 4</w:t></w:r></w:p>";
-    assert_eq!(holds_any(Fails(clean), &[CHANGE_MARKS]), None);
+    let clean = declared("<w:body><w:p><w:r><w:t>Clause 4</w:t></w:r></w:p>");
+    assert_eq!(holds_any(Fails(clean.as_bytes()), &[CHANGE_MARKS]), None);
     // A mark before the failure still counts.
-    let changed = b"<w:body><w:del w:id=\"2\"/>";
-    assert_eq!(holds_any(Fails(changed), &[CHANGE_MARKS]), Some(true));
+    let changed = declared("<w:body><w:del w:id=\"2\"/>");
+    assert_eq!(
+        holds_any(Fails(changed.as_bytes()), &[CHANGE_MARKS]),
+        Some(Found::Mark)
+    );
 }
 
 /// A main document's relationships part naming these `(type, target)` relationships.
@@ -83,12 +105,20 @@ fn rels(targets: &[(&str, &str)]) -> String {
     xml
 }
 
-/// A `.docx` with these parts, in memory.
-fn docx(parts: &[(&str, &str)]) -> Cursor<Vec<u8>> {
+/// A `.docx` with these parts, in memory, each XML part [`declared`].
+pub(super) fn docx(parts: &[(&str, &str)]) -> Cursor<Vec<u8>> {
     let mut zip = zip::ZipWriter::new(Cursor::new(Vec::new()));
     for (name, text) in parts {
         zip.start_file(*name, zip::write::SimpleFileOptions::default())
             .unwrap();
+        let xml = std::path::Path::new(name)
+            .extension()
+            .is_some_and(|extension| extension.eq_ignore_ascii_case("xml"));
+        let text = if xml {
+            declared(text)
+        } else {
+            (*text).to_owned()
+        };
         zip.write_all(text.as_bytes()).unwrap();
     }
     let mut file = zip.finish().unwrap();
@@ -382,113 +412,73 @@ fn the_main_document_is_where_the_package_says() {
     assert_eq!(zip_has_marks(docx(&parts)), Some(true));
 }
 
-/// Clean parts past the scan's total stop it: a change in the sixth header, after five of 16 MiB,
-/// is never read.
-#[test]
-fn the_scan_stops_after_its_total_read() {
-    let filler = "<w:p/>".repeat(usize::try_from(MAX_XML_BYTES).unwrap() / 6);
-    let change = format!("<w:hdr><w:p><w:ins w:id=\"1\" {AUTHOR}/></w:p></w:hdr>");
-    let targets: Vec<(String, String)> = (1..=6)
-        .map(|n| ("header".to_owned(), format!("header{n}.xml")))
-        .collect();
-    let targets: Vec<(&str, &str)> = targets
+/// A header of exactly `size` bytes, holding no change.
+fn clean_header(size: usize) -> String {
+    let open = declared("<w:hdr>");
+    let close = "</w:hdr>";
+    let room = size - open.len() - close.len();
+    let paragraphs = "<w:p/>".repeat(room / 6);
+    format!("{open}{paragraphs}{}{close}", " ".repeat(room % 6))
+}
+
+/// A file whose document names `headers`, as `(target, text)`.
+fn with_headers(headers: &[(String, String)]) -> Cursor<Vec<u8>> {
+    let targets: Vec<(&str, &str)> = headers
         .iter()
-        .map(|(k, t)| (k.as_str(), t.as_str()))
+        .map(|(t, _)| ("header", t.as_str()))
         .collect();
     let document_rels = rels(&targets);
-    let mut zip = zip::ZipWriter::new(Cursor::new(Vec::new()));
-    let stored = zip::write::SimpleFileOptions::default()
-        .compression_method(zip::CompressionMethod::Stored)
-        .large_file(true);
-    let mut put = |name: &str, text: &str| {
-        zip.start_file(name, stored).unwrap();
-        zip.write_all(text.as_bytes()).unwrap();
-    };
-    put("word/document.xml", BODY);
-    put("word/_rels/document.xml.rels", document_rels.as_str());
-    for n in 1..=5 {
-        put(&format!("word/header{n}.xml"), &filler);
-    }
-    put("word/header6.xml", &change);
-    let mut file = zip.finish().unwrap();
-    file.set_position(0);
-    assert_eq!(zip_has_marks(file), Some(false));
-}
-
-/// A change inside an XML comment or a CDATA section is text, which stetdoc lists no change for;
-/// one after it still counts, wherever the block ends.
-#[test]
-fn a_mark_in_a_comment_or_cdata_is_no_mark() {
-    let hidden = [
-        "<w:body><!-- <w:ins w:id=\"1\"> --><w:p/></w:body>",
-        "<w:body><![CDATA[<w:del w:id=\"2\"> ]]><w:p/></w:body>",
-        "<w:body><!-- <![CDATA[ --><w:p/><!-- ]]> <w:ins w:id=\"3\"> --></w:body>",
+    let mut parts = vec![
+        ("word/document.xml".to_owned(), BODY.to_owned()),
+        ("word/_rels/document.xml.rels".to_owned(), document_rels),
     ];
-    for xml in hidden {
-        assert_eq!(
-            holds_any(xml.as_bytes(), &[CHANGE_MARKS]),
-            Some(false),
-            "{xml}"
-        );
-        assert_eq!(
-            holds_any(Trickle(xml.as_bytes()), &[CHANGE_MARKS]),
-            Some(false)
-        );
-        let then = format!("{xml}<w:moveTo w:id=\"4\"/>");
-        assert_eq!(
-            holds_any(then.as_bytes(), &[CHANGE_MARKS]),
-            Some(true),
-            "{then}"
-        );
-    }
-    // a comment or a mark across the end of a block
-    for shift in 0..40 {
-        let lead = "x".repeat(BLOCK - 20 + shift);
-        let hidden = format!("{lead}<!-- <w:ins w:id=\"1\"> -->");
-        assert_eq!(
-            holds_any(hidden.as_bytes(), &[CHANGE_MARKS]),
-            Some(false),
-            "{shift}"
-        );
-        let after = format!("{hidden}<w:ins w:id=\"1\">");
-        assert_eq!(
-            holds_any(after.as_bytes(), &[CHANGE_MARKS]),
-            Some(true),
-            "{shift}"
-        );
-        let plain = format!("{lead}<w:ins w:id=\"1\">");
-        assert_eq!(
-            holds_any(plain.as_bytes(), &[CHANGE_MARKS]),
-            Some(true),
-            "{shift}"
-        );
-    }
+    parts.extend(
+        headers
+            .iter()
+            .map(|(t, text)| (format!("word/{t}"), text.clone())),
+    );
+    let parts: Vec<(&str, &str)> = parts
+        .iter()
+        .map(|(n, t)| (n.as_str(), t.as_str()))
+        .collect();
+    docx(&parts)
 }
 
-/// A part whose root binds Word's main XML namespace to another prefix, or as the default
-/// namespace, has its marks under that prefix; `w:` there names something else.
+/// The scan never answers "no changes" for what it did not read whole: a part past its cap, parts
+/// left unread past the total cap, or more story parts than it reads. Each may have changes,
+/// which offers Tracked changes; stetdoc decides when they are listed. Read whole, a clean file is
+/// still clean. (The caps here are small stand-ins for the real ones, which are bytes alike.)
 #[test]
-fn a_mark_carries_the_prefix_the_root_binds_to_the_namespace() {
-    const W: &str = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
-    let head = "<?xml version=\"1.0\"?>\n<!-- made by hand -->\n";
-    let x = format!(r#"{head}<x:document xmlns:w="urn:other" xmlns:x="{W}"><x:body>"#);
-    assert_eq!(
-        holds_any(format!("{x}<x:ins x:id=\"1\">").as_bytes(), &[CHANGE_MARKS]),
-        Some(true)
-    );
-    assert_eq!(
-        holds_any(format!("{x}<w:ins w:id=\"1\">").as_bytes(), &[CHANGE_MARKS]),
-        Some(false)
-    );
-    let default = format!(r#"<document xmlns="{W}"><body><del id="2">"#);
-    assert_eq!(holds_any(default.as_bytes(), &[CHANGE_MARKS]), Some(true));
-    // no binding at all, or only `w`: `w:`, as before
-    let w = format!(r#"<w:document xmlns:w="{W}"><w:body><w:ins w:id="1">"#);
-    assert_eq!(holds_any(w.as_bytes(), &[CHANGE_MARKS]), Some(true));
-    assert_eq!(
-        holds_any(format!("{x}<x:p/>").as_bytes(), &[CHANGE_MARKS]),
-        Some(false)
-    );
+fn what_the_scan_could_not_read_whole_may_have_changes() {
+    let header = |n: usize, size: usize| (format!("header{n}.xml"), clean_header(size));
+    let one = with_headers(&[header(1, 4_000)]);
+    // a part over the part cap; exactly at it, read whole
+    assert_eq!(zip_marks(one.clone(), 3_999, u64::MAX), Some(true));
+    assert_eq!(zip_marks(one, 4_000, u64::MAX), Some(false));
+    // the total cap: what is read before the headers, then two headers of 4,000 bytes
+    let two = with_headers(&[header(1, 4_000), header(2, 4_000)]);
+    let mut probe = zip::ZipArchive::new(two.clone()).unwrap();
+    let before: u64 = ["word/document.xml", "word/_rels/document.xml.rels"]
+        .iter()
+        .map(|name| probe.by_name(name).unwrap().size())
+        .sum();
+    assert_eq!(zip_marks(two.clone(), 4_000, before + 8_000), Some(false));
+    // the second header cut short by the total
+    assert_eq!(zip_marks(two.clone(), 4_000, before + 7_999), Some(true));
+    // the total used up at the first header's end, the second never opened
+    assert_eq!(zip_marks(two, 4_000, before + 4_000), Some(true));
+    // more story parts than the scan reads (named, never there)
+    let parts = |n: usize| {
+        let names: Vec<String> = (1..=n).map(|k| format!("h{k}.xml")).collect();
+        let targets: Vec<(&str, &str)> =
+            names.iter().map(|name| ("header", name.as_str())).collect();
+        docx(&[
+            ("word/document.xml", BODY),
+            ("word/_rels/document.xml.rels", rels(&targets).as_str()),
+        ])
+    };
+    assert_eq!(zip_marks(parts(MAX_PARTS), 4_000, u64::MAX), Some(false));
+    assert_eq!(zip_marks(parts(MAX_PARTS + 1), 4_000, u64::MAX), Some(true));
 }
 
 /// `<Relationship ` repeated inside a value, `size` bytes of it, in a relationships part that
@@ -501,18 +491,14 @@ fn hostile_rels(size: usize, target: &str) -> String {
     )
 }
 
-/// Relationships parts shaped to make a scan read ahead from every match cost one pass; one over
-/// the cap is taken as none, so the main document is still read and its headers are not.
+/// Relationships parts shaped to make a scan read ahead from every match cost one pass; over the
+/// cap, the main document is still read, and so are the parts Word's usual names name.
 #[test]
 fn a_hostile_or_oversized_relationships_part_is_read_fast_and_capped() {
     let change = format!("<w:hdr><w:p><w:ins w:id=\"1\" {AUTHOR}/></w:p></w:hdr>");
     let cap = usize::try_from(MAX_RELS_BYTES).unwrap();
     let changed = "<w:body><w:p><w:del w:id=\"2\" w:author=\"A\"/></w:p></w:body>";
-    for (size, header_read) in [
-        (cap - 1024, true),
-        (256 * 1024, false),
-        (1024 * 1024, false),
-    ] {
+    for size in [256 * 1024, cap - 1024, 2 * cap] {
         let document_rels = hostile_rels(size, "header1.xml");
         let package = hostile_rels(size, "word/elsewhere.xml");
         let with_header = docx(&[
@@ -529,8 +515,73 @@ fn a_hostile_or_oversized_relationships_part_is_read_fast_and_capped() {
         let with_header = zip_has_marks(with_header);
         let in_main = zip_has_marks(in_main);
         let took = SystemClock.now().mono.saturating_sub(start);
-        assert_eq!(with_header, Some(header_read), "{size}");
+        assert_eq!(with_header, Some(true), "{size}");
         assert_eq!(in_main, Some(true), "{size}");
         assert!(took < Duration::from_secs(1), "{size} bytes took {took:?}");
     }
+}
+
+/// A brief with 500 cited links has a relationships part past 64 KiB: its header is still
+/// read. Past the cap, or when not UTF-8, the part's usual names are read instead, and a part with
+/// no usual name is missed.
+#[test]
+fn a_large_or_utf_16_relationships_part_still_finds_the_headers() {
+    let change = format!("<w:hdr><w:p><w:ins w:id=\"1\" {AUTHOR}/></w:p></w:hdr>");
+    let with = |links: usize, header: &str| {
+        let mut targets: Vec<(String, String)> = (0..links)
+            .map(|n| {
+                (
+                    "hyperlink".to_owned(),
+                    format!("https://example.com/judgments/{n:06}"),
+                )
+            })
+            .collect();
+        targets.push(("header".to_owned(), header.to_owned()));
+        let targets: Vec<(&str, &str)> = targets
+            .iter()
+            .map(|(kind, target)| (kind.as_str(), target.as_str()))
+            .collect();
+        rels(&targets)
+    };
+    let cap = usize::try_from(MAX_RELS_BYTES).unwrap();
+    for (links, header, found) in [
+        (500, "header3.xml", true),
+        (500, "letterhead.xml", true),
+        (cap / 100, "header3.xml", true),
+        // past the cap, a header Word would not name so is not read
+        (cap / 100, "letterhead.xml", false),
+    ] {
+        let document_rels = with(links, header);
+        assert!(document_rels.len() > 64 * 1024, "{links}");
+        assert_eq!(document_rels.len() > cap, links > 500, "{links}");
+        let header_part = format!("word/{header}");
+        let parts = [
+            ("word/document.xml", BODY),
+            ("word/_rels/document.xml.rels", document_rels.as_str()),
+            (header_part.as_str(), change.as_str()),
+        ];
+        assert_eq!(zip_has_marks(docx(&parts)), Some(found), "{links} {header}");
+    }
+    // relationships saved as UTF-16: the usual names
+    let utf16: Vec<u8> = [0xFF, 0xFE]
+        .into_iter()
+        .chain(
+            with(1, "header3.xml")
+                .encode_utf16()
+                .flat_map(u16::to_le_bytes),
+        )
+        .collect();
+    let mut zip = zip::ZipWriter::new(Cursor::new(Vec::new()));
+    let options = zip::write::SimpleFileOptions::default();
+    for (name, bytes) in [
+        ("word/document.xml", declared(BODY).into_bytes()),
+        ("word/_rels/document.xml.rels", utf16),
+        ("word/header3.xml", declared(&change).into_bytes()),
+    ] {
+        zip.start_file(name, options).unwrap();
+        zip.write_all(&bytes).unwrap();
+    }
+    let mut file = zip.finish().unwrap();
+    file.set_position(0);
+    assert_eq!(zip_has_marks(file), Some(true));
 }
