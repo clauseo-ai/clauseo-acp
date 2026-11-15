@@ -207,7 +207,36 @@ anything the agent starts.
   Clauseo-only paths, every other session's run folder and every other matter's notes, later ones
   included ([0030](decisions/0030-launch-profile.md)). Gaps: `run.old-*` when the data folder's
   path holds a glob character; none of it on Windows, where Codex's unelevated sandbox
-  can't enforce a read deny (until S15)
+  can't enforce a read deny (see the accepted risk below)
+- `built` (macOS, Linux, tier C): Claude's shell commands run in Claude Code's own sandbox
+  (Seatbelt, or bubblewrap on Linux), which denies them the data folder outside the session's
+  own folders ([0030](decisions/0030-launch-profile.md), "Claude's sandbox (macOS)"); where it
+  can't start for a session, the session leaves `auto` and asks before each command
+- Accepted risk (Windows, tier C): no OS-level read fence for either agent. Claude has no
+  sandbox there, and Codex's unelevated sandbox token is write-restricted, so reads are checked
+  as the lawyer. What remains is advisory: Claude's `Read`/`Edit` deny rules and its
+  `Bash(…)`/`PowerShell(…)` deny rules, which match a command's text
+  (`agent/data_fence/shell_deny.rs`), the host's auto-deny on requests the agent sends, and
+  Claude's auto-mode classifier; Codex gets no deny rules there. So an agent's shell, steered by
+  an injection, can read `<data>` (every matter's conversations in `search.sqlite`, the version
+  store, the logs, other sessions' run folders, other matters' notes) through a script or a path
+  built at run time. Other matters' own folders are readable at tier C on every OS. Seen on the
+  Windows VM (packaged RC2, 2026-11-15): Codex in matter A, unprompted, read a file in matter
+  B's folder, listed `<data>\matters` (every matter's id), listed B's `history.git` and ran
+  `git --git-dir` on it. Claude, through its PowerShell tool on the same build, read B's own
+  file but was refused all four `<data>` reads by the shell deny rules ("Permission to use
+  PowerShell with command … has been denied.", no prompt). So on Windows `<data>` is held
+  back for Claude by text-matching rules and for Codex not at all; other matters' folders are
+  open to both.
+  Mitigation, advisory for both agents: the legal instructions tell the agent to stay inside the
+  matter and not to open other matters' files or Clauseo's data unless the lawyer asks
+  (`crates/profile/assets/instructions/legal.md`, "Conduct"); for Codex that line is the only
+  one, since the host's auto-deny sees only what Codex asks about. Cause: the
+  launch runs the agents as the lawyer's own account, like Zed and T3 Code do (Rohan, 11-09),
+  held back by the agents' own protections, with no per-command prompts; the orchestrator
+  accepted the Windows consequence on 11-15, for Claude and then for Codex (Codex's elevated
+  sandbox failed stage E's tests and is out). Closed by: tier B, the sandbox user
+  ([0049](decisions/0049-windows-sandbox-tier-b.md)), for both agents
 
 ## Egress proxy
 

@@ -1030,13 +1030,54 @@ reviewed. Your firm's skills reach Clauseo as skill packs
 
 ### What the fence between matters is not
 
-On a machine without Clauseo's sandbox (tier C), there is no isolation between matters. The
-agent runs as the lawyer and can read any folder the lawyer can, including other matters'
-folders on disk. What Clauseo fences is its own data: other conversations in its search index,
-other sessions' working copies, other matters' notes and the agents' credentials. That is not
-a wall between matters. The agent may read Clauseo's `profile` folder: it holds only the
-built-in plugin, the same for every matter. Run folders and matters created after a session started are not in
-that session's Claude deny rules; Clauseo's own permission check refuses them when Claude asks
+On a machine without Clauseo's sandbox (tier C), there is no isolation between matters, on any
+operating system. The agent runs as the lawyer and can read any folder the lawyer can,
+including other matters' folders on disk.
+
+Clauseo's data folder (`<data>`) holds every matter's conversations (the search index
+`search.sqlite`), the version store, the logs, other sessions' working copies, other matters'
+notes and the agents' credentials. How much of it the agent's shell is kept from depends on
+the operating system:
+
+- **macOS and Linux.** The data folder is fenced at the operating-system level for both
+  agents, outside the session's own folders. Claude's shell commands run in Claude Code's
+  sandbox. Codex's run under Codex's own sandbox with a permission profile that denies the
+  data folder. Where Claude's sandbox can't start for a session, Clauseo takes that session out
+  of auto mode, so Claude asks before each command instead.
+- **Windows.** There is no operating-system read fence for either agent. Claude has no sandbox
+  there. Codex's sandbox there can't enforce a read deny, so Clauseo doesn't give it one. What
+  holds the agent back is Claude's permission rules (deny rules that name the data folder in a
+  command or a file read), Clauseo's own check on the permission requests an agent sends, and
+  the agent's own safeguards. Those are advisory: a script that builds the path while it runs
+  isn't caught by them. A Codex shell gets no deny rules at all. So on Windows a Codex shell
+  can read the data folder (`%LOCALAPPDATA%\ai.clauseo.desktop` by default), other matters'
+  conversations, notes and version stores included, and a Claude shell can too through a
+  script that gets past its deny rules. Clauseo accepts this for now: on Windows the agent can
+  reach what the lawyer's account can, held back by its own protections and an instruction to
+  stay inside the matter, with no extra prompts to the lawyer. That lasts until the Windows
+  Safe workspace (tier B, not in the launch build; see
+  [section 9](#9-windows-protection-a-matter-folder-clauseo-cant-take-back)) ships.
+
+What we saw on a Windows test machine running the release candidate, with each agent working in
+one matter (A) and asked to read another (B), with no prompt to the lawyer either time:
+
+| Read | Claude (PowerShell) | Codex |
+| --- | --- | --- |
+| A file in matter B's own folder | Read | Read |
+| The list of matters in the data folder | Refused by Clauseo's deny rules | Read |
+| Matter B's version store (`history.git`): listing it | Refused by Clauseo's deny rules | Read |
+| Matter B's version history with `git` | Refused by Clauseo's deny rules | Read |
+| A search of matter B's version store's files | Refused by Clauseo's deny rules | Not tried |
+
+So on Windows the data folder is held back for Claude by Clauseo's deny rules, which match the
+command's text (a script that builds the path while it runs still gets through), and not at all
+for Codex. Other matters' own folders are open to both agents, on every operating system at this
+tier.
+
+On every operating system, the data folder fence is not a wall between matters. The agent may
+read Clauseo's `profile` folder: it holds only the built-in plugin, the same for every matter.
+Run folders and matters created after a session started are not in that session's Claude deny
+rules; Clauseo's own permission check refuses them when Claude asks
 ([decision 0030](decisions/0030-launch-profile.md), "The data folder fence").
 
 ## 9. Windows protection: a matter folder Clauseo can't take back
@@ -1380,11 +1421,13 @@ administrator to put the copy back; for unsafe owners, put the folders' permissi
 
 ## Later
 
-Codex on Windows has no data-folder deny. Clauseo runs Codex there in Codex's unelevated
-sandbox, which can't enforce a read deny, so a Codex shell on Windows can read Clauseo's data
-folder, other matters' notes and the search index included. This lasts until Codex runs in the
-elevated sandbox (S15) ([decision 0030](decisions/0030-launch-profile.md), "Codex's data-folder
-deny").
+Codex and Claude on Windows have no read fence around the data folder. Clauseo runs Codex there
+in Codex's unelevated sandbox, which can't enforce a read deny, and Claude with deny rules but no
+sandbox, so either agent's shell on Windows can read Clauseo's data folder (other matters' notes,
+version stores and the search index included) and other matters' folders. This lasts until the
+Windows Safe workspace (tier B) ships ([decision 0030](decisions/0030-launch-profile.md),
+"Codex's data-folder deny"; [section 8](#8-claudes-personal-skills), "What the fence between
+matters is not").
 
 
 ADMX and ADML templates, a firm bundle zip, an MSI and a `.pkg` for Jamf come when a firm asks. Claude

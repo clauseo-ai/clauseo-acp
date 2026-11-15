@@ -797,7 +797,12 @@ after that run, two lines stand in (`crates/host/src/agent/data_fence.rs`).
 folder the user can, other matters' own folders on disk included. The fence protects
 Clauseo's internals: other conversations (every matter's prompts and answers in the search
 index, `search.sqlite`), other sessions' run folders and copies, other matters' notes, the
-store and the agents' credentials. It is not a wall between matters. Its residual: a run
+store and the agents' credentials. It is not a wall between matters. On Windows it is not an
+OS fence at all (2026-11-15, orchestrator): Claude has no sandbox there and Codex's unelevated
+sandbox can't deny reads, so only the permission rules, the host's auto-deny and the agents'
+own protections stand between a shell and `<data>`, and a script that builds the path at run
+time passes them. That is an accepted risk of running the agents as the lawyer (threat model,
+"Sandbox"); tier B (0049) closes it. Its residual: a run
 folder, a matter's notes or another matter's Claude project made after a Claude session
 launched is in none of that session's deny rules (its transcripts are), and a matter registered
 after a Claude session launched is in none of its sandbox's read denies ("Claude's sandbox
