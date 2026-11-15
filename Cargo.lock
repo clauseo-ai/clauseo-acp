@@ -1121,6 +1121,7 @@ dependencies = [
  "libc",
  "nix",
  "notify",
+ "plist",
  "proptest",
  "quick-xml",
  "rusqlite",

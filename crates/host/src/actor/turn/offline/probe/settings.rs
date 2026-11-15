@@ -16,7 +16,8 @@
 //!   - the user source, `<config>/settings.json` (`cowork_settings.json` with cowork
 //!     plugins), `<config>` being `CLAUDE_CONFIG_DIR` (the launch sets the agent's home);
 //!   - the global config: `<config>/.config.json` when present, else
-//!     `<CLAUDE_CONFIG_DIR>/.claude.json`.
+//!     `<CLAUDE_CONFIG_DIR>/.claude.json`;
+//!   - the OS policy tiers ([`os_policy`]): macOS managed preferences and the Windows registry.
 //!
 //!   A key of an `env` object naming a proxy, a base URL or a provider moves it ([`routes`]).
 //!   Clauseo's own `_meta.claudeCode.options` (the `--settings` object, `flagSettings`, and the
@@ -44,6 +45,8 @@ use crate::actor::turn::launch_checks::CodexPrepared;
 
 #[cfg(doc)]
 use super::ReachClass;
+
+mod os_policy;
 
 /// The largest settings file read: a larger one is not read, and counts as moving the agent.
 pub(crate) const MAX_FILE: u64 = 1 << 20;
@@ -79,6 +82,9 @@ pub(crate) struct Reads {
     codex: Vec<PathBuf>,
     /// Whether the agent is Claude Code.
     claude: bool,
+    /// Whether Claude Code's OS policy tiers are read ([`os_policy`]): not in unit tests, so
+    /// a test machine's own policy never reaches them.
+    os_policy: bool,
 }
 
 impl Reads {
@@ -93,6 +99,7 @@ impl Reads {
             managed: managed.unwrap_or_default(),
             codex: actor.turn_path.codex_config_files.clone(),
             claude,
+            os_policy: !cfg!(test),
         }
     }
 
@@ -126,6 +133,7 @@ impl Reads {
             return None;
         }
         claude_moved(&self.managed, claude_home)
+            .or_else(|| (self.os_policy && os_policy::moved()).then_some(Moved::SettingsEnv))
     }
 }
 
@@ -172,11 +180,17 @@ pub(crate) fn claude_moved(managed: &Path, config: Option<&Path>) -> Option<Move
         .iter()
         .any(|file| match read(file) {
             Ok(None) => false,
-            Ok(Some(bytes)) => serde_json::from_slice::<Value>(without_bom(&bytes))
-                .map_or(true, |value| env_routes(value.get("env"))),
+            Ok(Some(bytes)) => json_moves(&bytes),
             Err(()) => true,
         })
         .then_some(Moved::SettingsEnv)
+}
+
+/// Whether a Claude Code settings document moves it: its `env` [`env_routes`], or it is not
+/// JSON at all.
+fn json_moves(bytes: &[u8]) -> bool {
+    serde_json::from_slice::<Value>(without_bom(bytes))
+        .map_or(true, |value| env_routes(value.get("env")))
 }
 
 /// Claude Code's policy files in `managed`: `managed-settings.json`, then the drop-ins;
