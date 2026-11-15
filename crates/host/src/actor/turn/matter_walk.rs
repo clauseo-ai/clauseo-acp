@@ -21,12 +21,30 @@ use clauseo_protocol::{ThreadId, TurnId};
 
 use super::super::Actor;
 use super::super::input::Input;
-use super::agents::{self, Stage};
+use super::agents::{self, Stage, Waiting};
 use super::{TurnInput, TurnPhase, current, matter_of, state, steps};
 use crate::agent::data_fence;
 
+/// An agent with the matter's read rules: the last turn whose start walked the matter's links.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct Walks {
+    /// The turn it was launched for, whose launch walked them, or the last one walked here.
+    pub(super) walked_for: Option<TurnId>,
+}
+
+impl Walks {
+    /// An agent launched for `waiting`: its launch walked for the turn among them.
+    pub(super) fn launched_for(waiting: &[Waiting]) -> Self {
+        let walked_for = waiting.iter().find_map(|waiting| match waiting {
+            Waiting::Turn(turn) => Some(*turn),
+            Waiting::Config(..) | Waiting::Mode(..) => None,
+        });
+        Self { walked_for }
+    }
+}
+
 /// A turn's walk answered.
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub(crate) struct Walked {
     thread: ThreadId,
     turn: TurnId,
@@ -48,10 +66,13 @@ pub(super) fn start(actor: &mut Actor, thread: ThreadId, turn: TurnId) -> bool {
     let Some(agent) = state(actor, thread).and_then(|state| state.agent.as_deref_mut()) else {
         return false;
     };
-    if !agent.matter_rules
-        || agent.stage != Stage::Attached
-        || agent.walked_for.replace(turn) == Some(turn)
-    {
+    if agent.stage != Stage::Attached {
+        return false;
+    }
+    let Some(walks) = agent.matter_rules.as_mut() else {
+        return false;
+    };
+    if walks.walked_for.replace(turn) == Some(turn) {
         return false;
     }
     let (id, stored) = (agent.id, agent.folder.clone());

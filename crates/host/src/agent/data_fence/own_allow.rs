@@ -161,8 +161,8 @@ pub(crate) fn own_shell_allow_rules(deny: &LaunchDeny, windows: bool) -> Vec<Str
 /// shape and spellings; and [`PIPE_TAILS`] with any arguments. None at all (the classifier
 /// judges, as before) when the launch has no matter spelling for them (before the launch prep,
 /// a link leads out of the matter or another matter lies in it, `super::matter_links`), when
-/// the matter holds a spelling of `<data>` or lies in one, or when a place Claude may not read lies in it
-/// ([`LaunchDeny::denies_inside`]): Claude Code checks only the folder before a glob, so
+/// the matter holds a spelling of `<data>` or lies in one, or when a place Claude may not read
+/// lies in it ([`LaunchDeny::denies_inside`]): Claude Code checks only the folder before a glob, so
 /// `head <matter>/*/settings.json` would read it (the security review of #1065, H1, H2).
 pub(crate) fn matter_shell_allow_rules(deny: &LaunchDeny, windows: bool) -> Vec<String> {
     let mut rules = Vec::new();

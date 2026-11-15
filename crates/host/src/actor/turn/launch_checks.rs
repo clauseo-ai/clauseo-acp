@@ -336,8 +336,7 @@ pub(super) fn prepare(
         matter: Some(run.key.matter),
         source: actor.folder_check,
     };
-    let clock = std::sync::Arc::clone(&actor.clock);
-    let check_clock = std::sync::Arc::clone(&actor.clock);
+    let (clock, check_clock) = (Arc::clone(&actor.clock), Arc::clone(&actor.clock));
     let block_list_wait = claims.egress.block_list_wait(Arc::clone(&actor.clock));
     let matter = run.key.matter;
     let (mcp, settings) = (McpReads::of(actor), Reads::of(actor, claude));
@@ -356,7 +355,7 @@ pub(super) fn prepare(
             });
         }
         let slot = browser::slot_then_block_list(slot_wait, block_list_wait).await;
-        let readable = folders::walk(Arc::clone(&clock), matter, &stored).await;
+        let walked = folders::walk(Arc::clone(&clock), matter, &stored).await;
         let result = codex::prepare::off_actor_or_undo(
             clock,
             job,
@@ -394,8 +393,7 @@ pub(super) fn prepare(
                 run.make(&data, &sweep)?;
                 let short = run.claude_tmp.take();
                 run.claude_tmp = short.filter(|dir| claude_tmp::make_claude_tmp(&run.root, dir));
-                run.data_deny = launch_deny(&run, &stored, &data, claude_home.as_deref());
-                run.data_deny.matter = readable;
+                run.data_deny = launch_deny(&run, &stored, &data, claude_home.as_deref(), walked);
                 run.codex_listed = crate::agent::codex_fence::list(&data, &run.root, &run.notes);
                 claim(&mut run, &data, claims, slot);
                 run.mcp_secrets = Arc::new(mcp.read());

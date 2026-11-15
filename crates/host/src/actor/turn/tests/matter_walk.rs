@@ -45,13 +45,18 @@ fn until_idle(rig: &mut Rig, thread: ThreadId) {
 /// The attached agent's id, whether it has the matter's rules, and the turn it last walked for.
 fn agent(rig: &Rig, thread: ThreadId) -> (u64, bool, Option<TurnId>) {
     let agent = rig.actor.threads[&thread].turn.agent.as_deref().unwrap();
-    (agent.id, agent.matter_rules, agent.walked_for)
+    let walked = agent.matter_rules.and_then(|walks| walks.walked_for);
+    (agent.id, agent.matter_rules.is_some(), walked)
 }
 
 fn ended(log: &[DomainEvent], turn: TurnId) -> Option<StopReason> {
-    log.iter().find_map(|event| match event {
-        DomainEvent::TurnEnded(ended) if ended.turn == turn => Some(ended.stop),
-        _ => None,
+    log.iter().find_map(|event| {
+        if let DomainEvent::TurnEnded(ended) = event
+            && ended.turn == turn
+        {
+            return Some(ended.stop);
+        }
+        None
     })
 }
 
@@ -86,7 +91,7 @@ fn a_link_out_that_appears_between_turns_takes_the_matter_rules_away_at_the_next
     let (relaunched, rules, walked) = agent(&rig, thread);
     assert_ne!(relaunched, launched, "the agent was started again");
     assert!(!rules, "the new agent has no matter rules");
-    assert_eq!(walked, Some(third));
+    assert_eq!(walked, None, "with no rules, nothing is walked");
     let log = rig.log(thread);
     let kinds = log.iter().map(kind).collect::<Vec<_>>();
     let restarted = log.iter().position(|event| {

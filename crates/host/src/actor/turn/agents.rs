@@ -146,12 +146,10 @@ pub(super) struct Agent {
     pub(super) matter_spellings: Vec<String>,
     /// Its idle clock and config calls in flight (`idle.rs`).
     pub(super) idle: super::idle::Mark,
-    /// Its launch gave it the matter's read allow rules (`data_fence::readable_matter_within`),
-    /// so each turn's start walks the matter's links again (`matter_walk.rs`). Never for Codex.
-    pub(super) matter_rules: bool,
-    /// The last turn whose start walked the matter's links: the turn it was launched for, whose
-    /// launch walked them, or one that `matter_walk.rs` walked.
-    pub(super) walked_for: Option<TurnId>,
+    /// When its launch gave it the matter's read allow rules
+    /// (`data_fence::readable_matter_within`; never for Codex): each turn's start walks the
+    /// matter's links again (`matter_walk.rs`), and this holds the last turn walked for.
+    pub(super) matter_rules: Option<super::matter_walk::Walks>,
 }
 
 impl Agent {
@@ -238,11 +236,8 @@ pub(super) fn launch_now(
     let unprotected = prepared.folder.is_some_and(agent::forced_ask::applies);
     let forced_ask = prepared.codex.is_none() && unprotected;
     let prepared_folder = prepared.folder;
-    let matter_rules = prepared.codex.is_none() && !prepared.run.data_deny.matter.is_empty();
-    let walked_for = waiting.iter().find_map(|waiting| match waiting {
-        Waiting::Turn(turn) => Some(*turn),
-        _ => None,
-    });
+    let matter_rules = (prepared.codex.is_none() && !prepared.run.data_deny.matter.is_empty())
+        .then(|| super::matter_walk::Walks::launched_for(&waiting));
     let shell_start = if prepared.settings.shell_carries {
         crate::sent::ShellStart::Unknown
     } else {
@@ -314,7 +309,6 @@ pub(super) fn launch_now(
         matter_spellings,
         idle: super::idle::Mark::default(),
         matter_rules,
-        walked_for,
     };
     if let Some(state) = state(actor, thread) {
         state.agent = Some(Box::new(agent));

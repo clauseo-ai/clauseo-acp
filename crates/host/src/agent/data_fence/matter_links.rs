@@ -49,8 +49,10 @@ pub(crate) const SCAN_CAP: usize = 50_000;
 
 /// The longest a walk may take, at a launch or a turn's start, before the matter gets no rules:
 /// a matter of tens of thousands of entries on a mapped drive, or a `OneDrive` folder whose
-/// files are not downloaded yet, must not hold every launch and turn.
-pub(crate) const WALK_BUDGET: Duration = Duration::from_secs(2);
+/// files are not downloaded yet, must not hold every launch and turn. Two and a half seconds,
+/// not two: the shutdown ladder's stdin wait is 2 s on the same host clock, and the actor's
+/// tests tell the clock's waits apart by their length.
+pub(crate) const WALK_BUDGET: Duration = Duration::from_millis(2_500);
 
 /// What one entry of a listed folder is, to the walk.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

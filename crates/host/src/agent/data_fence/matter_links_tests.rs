@@ -141,7 +141,7 @@ fn a_matter_nested_past_the_fence_cap_leaves_the_matter_without_rules() {
         std::slice::from_ref(&real),
         "its own marker keeps the rules"
     );
-    assert!(!matter_shell_allow_rules(&deny, false).is_empty());
+    assert_ne!(matter_shell_allow_rules(&deny, false), Vec::<String>::new());
 
     marker(&bulk.join("Appeal (2025)"));
     assert_eq!(links_out(&real, super::SCAN_CAP), Some(true));
@@ -164,8 +164,8 @@ impl<L: Fn(&Path) -> io::Result<Vec<io::Result<Found>>>> WalkFs for Fake<L> {
     }
 }
 
-fn found(path: PathBuf, kind: io::Result<Kind>) -> io::Result<Found> {
-    Ok(Found { path, kind })
+fn found(path: PathBuf, kind: io::Result<Kind>) -> Found {
+    Found { path, kind }
 }
 
 /// A relative matter path no folder is at, so `agent::session_folder` gives it back as it is.
@@ -191,12 +191,14 @@ fn an_entry_or_a_kind_the_walk_cannot_read_gives_no_rules() {
         ("kind", Some(1), None),
     ] {
         let fs = Fake(|folder: &Path| {
-            let mut entries = vec![found(folder.join("memo.txt"), Ok(Kind::File))];
+            let mut entries = vec![Ok(found(folder.join("memo.txt"), Ok(Kind::File)))];
             if folder == root {
-                entries.push(found(root.join("sub"), Ok(Kind::Folder)));
+                entries.push(Ok(found(root.join("sub"), Ok(Kind::Folder))));
                 match bad {
                     Some(0) => entries.push(Err(io::Error::other("unreadable entry"))),
-                    Some(_) => entries.push(found(root.join("x"), Err(io::Error::other("kind")))),
+                    Some(_) => {
+                        entries.push(Ok(found(root.join("x"), Err(io::Error::other("kind")))))
+                    }
                     None => {}
                 }
             }
@@ -219,7 +221,7 @@ fn a_walk_past_its_time_limit_stops_and_gives_no_rules() {
     let fs = Fake(move |folder: &Path| {
         listed.send(()).unwrap();
         ticking.advance(std::time::Duration::from_secs(1));
-        Ok(vec![found(folder.join("deeper"), Ok(Kind::Folder))])
+        Ok(vec![Ok(found(folder.join("deeper"), Ok(Kind::Folder)))])
     });
     let walked = walk_within(Arc::new(clock), matter_id(), fs, PathBuf::from(NOWHERE));
     assert_eq!(futures::executor::block_on(walked), Vec::<PathBuf>::new());
@@ -254,7 +256,7 @@ fn a_walk_the_disk_never_answers_gives_no_rules_at_the_budget() {
 /// The same seam with a quick walk keeps the rules: the budget alone takes nothing away.
 #[test]
 fn a_quick_walk_keeps_the_rules() {
-    let fs = Fake(|folder: &Path| Ok(vec![found(folder.join("memo.txt"), Ok(Kind::File))]));
+    let fs = Fake(|folder: &Path| Ok(vec![Ok(found(folder.join("memo.txt"), Ok(Kind::File)))]));
     let walked = walk_within(Arc::new(clock()), matter_id(), fs, NOWHERE.into());
     assert_eq!(
         futures::executor::block_on(walked),
