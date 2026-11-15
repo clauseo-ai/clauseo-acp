@@ -1,8 +1,18 @@
 //! The matter's link walk (`matter_links.rs`): a link out of the matter, a broken one, a walk
-//! past its cap or a matter that can't be listed leave the matter without read allow rules; a
-//! link that stays inside, or none, keeps them.
+//! past its cap or its time limit, an entry it can't read, or a matter that can't be listed
+//! leave the matter without read allow rules; a link that stays inside, or none, keeps them.
 
-use super::{counts_as_link, links_out, readable_matter};
+use std::io;
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex, mpsc};
+
+use clauseo_protocol::{MatterId, Timestamp};
+
+use super::{
+    Found, Kind, Listing, WALK_BUDGET, WalkFs, counts_as_link, links_out, readable_matter, walk,
+    walk_within,
+};
+use crate::ManualClock;
 use crate::pipeline::tests::support::TempDir;
 
 /// A matter under `dir` with a file and a sub-folder, and a folder beside it.
@@ -103,4 +113,116 @@ fn only_links_and_unknown_reparse_points_count_as_links() {
     ] {
         assert!(!counts_as_link(tag), "{tag:#x}");
     }
+}
+
+/// A stand-in file system: `list` gives each folder's entries, and every path resolves to
+/// itself.
+struct Fake<L>(L);
+
+impl<L: Fn(&Path) -> io::Result<Vec<io::Result<Found>>>> WalkFs for Fake<L> {
+    fn resolve(&self, path: &Path) -> io::Result<PathBuf> {
+        Ok(path.to_owned())
+    }
+
+    fn list(&self, folder: &Path) -> io::Result<Listing<'_>> {
+        Ok(Box::new((self.0)(folder)?.into_iter()))
+    }
+}
+
+fn found(path: PathBuf, kind: io::Result<Kind>) -> io::Result<Found> {
+    Ok(Found { path, kind })
+}
+
+/// A relative matter path no folder is at, so `agent::session_folder` gives it back as it is.
+const NOWHERE: &str = "no-such-matter-folder-for-the-walk";
+
+fn clock() -> ManualClock {
+    ManualClock::new(Timestamp::new(1_790_000_000_000).unwrap())
+}
+
+fn matter_id() -> MatterId {
+    MatterId::new(uuid::Uuid::now_v7()).unwrap()
+}
+
+/// The walk fails closed: an entry the listing could not read, or one whose kind could not be
+/// read, gives no answer (so no rules) where the same folder without it gives `Some(false)`.
+#[test]
+fn an_entry_or_a_kind_the_walk_cannot_read_gives_no_rules() {
+    let root = Path::new("matter");
+    let never = || false;
+    for (name, bad, want) in [
+        ("plain", None, Some(false)),
+        ("entry", Some(0), None),
+        ("kind", Some(1), None),
+    ] {
+        let fs = Fake(|folder: &Path| {
+            let mut entries = vec![found(folder.join("memo.txt"), Ok(Kind::File))];
+            if folder == root {
+                entries.push(found(root.join("sub"), Ok(Kind::Folder)));
+                match bad {
+                    Some(0) => entries.push(Err(io::Error::other("unreadable entry"))),
+                    Some(_) => entries.push(found(root.join("x"), Err(io::Error::other("kind")))),
+                    None => {}
+                }
+            }
+            Ok(entries)
+        });
+        assert_eq!(walk(&fs, root, 100, &never), want, "{name}");
+        let kept = super::readable_in(&fs, root, root, &never);
+        assert_eq!(kept.is_empty(), want.is_none(), "{name}");
+    }
+}
+
+/// A walk slower than [`WALK_BUDGET`] (each listing takes a second on the injected clock, and
+/// the folders never end) stops itself after its second listing and gives no rules: `lists`
+/// ends once the walk's thread has dropped the stand-in.
+#[test]
+fn a_walk_past_its_time_limit_stops_and_gives_no_rules() {
+    let clock = clock();
+    let (listed, lists) = mpsc::channel::<()>();
+    let ticking = clock.clone();
+    let fs = Fake(move |folder: &Path| {
+        listed.send(()).unwrap();
+        ticking.advance(std::time::Duration::from_secs(1));
+        Ok(vec![found(folder.join("deeper"), Ok(Kind::Folder))])
+    });
+    let walked = walk_within(Arc::new(clock), matter_id(), fs, PathBuf::from(NOWHERE));
+    assert_eq!(futures::executor::block_on(walked), Vec::<PathBuf>::new());
+    assert_eq!(lists.iter().count(), 2, "the walk stopped at the budget");
+}
+
+/// A listing the disk never answers (a mapped drive that hangs): the wait gives up at
+/// [`WALK_BUDGET`] on the injected clock and the matter gets no rules, while the listing is
+/// still blocked.
+#[test]
+fn a_walk_the_disk_never_answers_gives_no_rules_at_the_budget() {
+    let clock = clock();
+    let (entered, started) = async_channel::unbounded::<()>();
+    let (release, blocked) = mpsc::channel::<()>();
+    let blocked = Mutex::new(blocked);
+    let fs = Fake(move |_: &Path| {
+        let _told = entered.send_blocking(());
+        let _released = blocked.lock().map(|blocked| blocked.recv());
+        Ok(Vec::new())
+    });
+    let walked = walk_within(Arc::new(clock.clone()), matter_id(), fs, NOWHERE.into());
+    let give_up = async move {
+        started.recv().await.unwrap();
+        assert_eq!(clock.next_armed().await, WALK_BUDGET);
+        clock.advance(WALK_BUDGET);
+    };
+    let (found, ()) = futures::executor::block_on(futures::future::join(walked, give_up));
+    assert_eq!(found, Vec::<PathBuf>::new());
+    drop(release);
+}
+
+/// The same seam with a quick walk keeps the rules: the budget alone takes nothing away.
+#[test]
+fn a_quick_walk_keeps_the_rules() {
+    let fs = Fake(|folder: &Path| Ok(vec![found(folder.join("memo.txt"), Ok(Kind::File))]));
+    let walked = walk_within(Arc::new(clock()), matter_id(), fs, NOWHERE.into());
+    assert_eq!(
+        futures::executor::block_on(walked),
+        [PathBuf::from(NOWHERE)]
+    );
 }

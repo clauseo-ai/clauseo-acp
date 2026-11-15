@@ -96,7 +96,7 @@ pub(crate) struct LaunchDeny {
     /// The matter folder: the real path Claude works in (`agent::session_folder`), then the
     /// path as stored when that differs. Claude may list and read it with no classifier
     /// (`super::matter_shell_allow_rules`). None before the launch prep has it, and none when a
-    /// link leads out of it (`super::readable_matter`).
+    /// link leads out of it (`super::readable_matter_within`).
     pub(crate) matter: Vec<PathBuf>,
 }
 

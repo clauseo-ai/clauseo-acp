@@ -77,7 +77,9 @@ decides what no rule settles in one of two ways:
   (`nTr`, `Hln`). Its verdict comes back with the reply that carried the tool use. A file's
   `"server_verdict": "flagged"` (or `"not_flagged"`) makes the fake API send that verdict
   (`SERVER_VERDICT`). Without one, Claude Code takes the server as not classifying for the rest
-  of the session.
+  of the session. So the fake sends it on every streamed reply, a turn's last one too: a
+  multi-turn session (`--input-format stream-json`) would otherwise run its later turns'
+  commands with no server verdict at all.
 
 A command an allow rule matches skips both. A case's `"ran": true|false` checks the verdict:
 `DENIED` (a deny rule), `REFUSED` (a path check, a safety check, a classifier, or a prompt that

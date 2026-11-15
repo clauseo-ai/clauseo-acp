@@ -693,16 +693,28 @@ change from the settings window as `ui` does. R24 (PR5) adds a third to the patc
     gets no rules at all, the pipe tails included, when (i) it holds `<data>` or lies in it,
     (ii) a place Claude may not read lies in it (`LaunchDeny::denies_inside`; #1085's, with the
     fenced matters, replaces the stand-in that asks only about `<data>`), or (iii) a link,
-    junction or folder link in it leads outside it, or its walk passes 50,000 entries or fails
-    (`data_fence/matter_links.rs`, one walk at the launch that never follows a link). Then the
-    classifier judges, as before. No ask rules for glob characters: they would put a card in
+    junction or folder link in it leads outside it, or its walk passes 50,000 entries or 2 s,
+    or fails to read the matter, an entry or an entry's kind (`data_fence/matter_links.rs`; the
+    walk never follows a link and runs off the actor). Then the classifier judges, as before.
+    No ask rules for glob characters: they would put a card in
     front of the lawyer.
     `permissions.blockReadsOutsideWorkingDirectories` was tried as a second layer and dropped:
     with it on, the H2 lines still ran (4 of 4), and the Read tool was refused a folder outside
     the working folders that a `Read` allow names (the browser's downloads).
-  - **Residual.** A link made in the matter after the launch, which a classifier must pass first
-    (making one is a write no rule allows); on macOS the sandbox's `denyRead` still holds behind
-    it. A hard link to a file outside, which the Read tool reads the same way.
+  - **A link that appears later (2026-11-15).** An unpacked zip (Archive Utility keeps absolute
+    links) or a sync client can make a link with no command of the agent's, and on macOS the
+    sandbox does not keep `~/.ssh` from the reads. Claude Code 2.1.293 reads its `--settings`
+    file once and pins it (`replaceFlagSettingsFilePinnedContent`; its settings watcher skips
+    `flagSettings`), so rewriting the file changes nothing until the process ends: probed, a
+    rewritten file mid-session still let the H2 line print `<data>`. So each turn's start on a
+    running agent with matter rules walks the matter again, within the same 2 s, before its
+    checkpoint (`actor/turn/matter_walk.rs`). A link out, or a walk that fails or runs out,
+    stops the agent and starts a new one for the turn, which resumes the session
+    (`session/load`, `--resume`) with no matter rules: probed, the H2 line was refused there.
+  - **Residual.** A link made in the matter during one turn, after its walk: the agent must make
+    it with a write no rule allows (a classifier passes it first) or another program must; on
+    macOS the sandbox's `denyRead` of `<data>` and the other matters still holds behind it. A
+    hard link to a file outside, which the Read tool reads the same way.
 - **2026-11-10 (Rohan).** Claude should be as frictionless as Codex. Outside forced ask a
   Claude session starts in Claude Code's `acceptEdits`, not `default`
   (`agent/loads.rs` `CLAUDE_MODE`). claude-agent-acp 0.89.1 picks its own starting mode (the

@@ -20,9 +20,9 @@
 //! actor on every way out: by the prep thread when nobody waits for its answer any more
 //! ([`codex::prepare::off_actor_or_undo`]), and otherwise from the actor ([`discard`]) when
 //! the answer is for an earlier launch, the host is stopping, the profile keys or the launch
-//! fail, or the agent ends ([`remove_run`]). No launch
-//! removes another's folder: a prep that came late can only take its own. Shutdown waits for
-//! the actor's removals in flight, so the host answers it with the run folders gone.
+//! fail, or the agent ends ([`remove_run`]). No launch removes another's folder: a prep that
+//! came late can only take its own. Shutdown waits for the actor's removals in flight, so the
+//! host answers it with the run folders gone.
 //!
 //! For a session that can get the browser, the same thread checks that the browser entry's
 //! sidecars (`clauseo-mcp` and agent-browser) exist, finds its Chrome, and claims its ports and,
@@ -129,8 +129,7 @@ pub(crate) struct RunFolders {
     /// get the browser. The one holder is the thread's turn state; clones elsewhere are
     /// short-lived, so the last reference drops in [`discard`]'s off-actor removal, after the
     /// agent's tree was killed. Stage C's R17 builds the session's jail policy from it:
-    /// `PolicyBuilder::browser_socket_dir(&session.socket_dir)` and
-    /// `Loopback::Ports(session.ports.loopback())`.
+    /// `PolicyBuilder::browser_socket_dir(&session.socket_dir)`, `Loopback::Ports(…loopback())`.
     pub(crate) browser_session: Option<Arc<BrowserSession>>,
     /// Why the firm's browser policy left the browser out, if it did (`browser::rd_policy`):
     /// `BrowserBlockedByPolicy` or `BrowserPolicyUnreadable`.
@@ -289,8 +288,7 @@ pub(crate) struct CodexPrepared {
     pub(super) folder: PathBuf,
     /// The agent's home, made and checked, as `CODEX_HOME`.
     pub(super) home: PathBuf,
-    /// The launch profile's `CODEX_CONFIG` keys, filled on the actor
-    /// (`profile_loads::launch_keys`).
+    /// The launch profile's `CODEX_CONFIG` keys, filled on the actor (`profile_loads`).
     pub(super) keys: serde_json::Map<String, serde_json::Value>,
     /// What the sign-in hook found for the home (`agent/login_link.rs`), asked after the
     /// rest succeeded; `None` with no hook set.
@@ -358,6 +356,7 @@ pub(super) fn prepare(
             });
         }
         let slot = browser::slot_then_block_list(slot_wait, block_list_wait).await;
+        let readable = folders::walk(Arc::clone(&clock), matter, &stored).await;
         let result = codex::prepare::off_actor_or_undo(
             clock,
             job,
@@ -396,6 +395,7 @@ pub(super) fn prepare(
                 let short = run.claude_tmp.take();
                 run.claude_tmp = short.filter(|dir| claude_tmp::make_claude_tmp(&run.root, dir));
                 run.data_deny = launch_deny(&run, &stored, &data, claude_home.as_deref());
+                run.data_deny.matter = readable;
                 run.codex_listed = crate::agent::codex_fence::list(&data, &run.root, &run.notes);
                 claim(&mut run, &data, claims, slot);
                 run.mcp_secrets = Arc::new(mcp.read());

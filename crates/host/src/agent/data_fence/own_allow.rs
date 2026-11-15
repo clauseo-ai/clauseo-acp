@@ -70,8 +70,9 @@
 //! before a glob (`head <matter>/*/x`), so the matter gets no rules at all when a glob in it could
 //! reach a place Claude may not read: when it holds `<data>` (or lies in it), when a denied place
 //! lies in it (`LaunchDeny::denies_inside`), or when a link in it leads out
-//! (`super::readable_matter`). The residual: a link made in the matter after the launch, which a
-//! classifier must pass first (making one is a write no rule allows).
+//! (`super::matter_links`, walked at the launch and again at each turn's start). The residual: a
+//! link made in the matter during one turn, after its walk, which a classifier must pass first
+//! (making one is a write no rule allows) unless another program makes it.
 
 use std::path::{Path, PathBuf};
 

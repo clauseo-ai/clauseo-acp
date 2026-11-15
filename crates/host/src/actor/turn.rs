@@ -26,6 +26,7 @@ mod key_retry;
 mod known;
 mod launch_checks;
 mod logout;
+mod matter_walk;
 mod offline;
 pub(crate) use offline::probe::settings::claude_shell_carries;
 mod out;
@@ -398,6 +399,7 @@ pub(crate) fn turn_input(actor: &mut Actor, input: TurnInput) {
         }
         TurnInput::RunRemoved { key, freed } => launch_checks::on_run_removed(actor, key, freed),
         TurnInput::CameBack(check) => came_back::on_due(actor, check),
+        TurnInput::MatterWalked(walked) => matter_walk::on_walked(actor, walked),
         TurnInput::SteerChecked(checked) => queue::on_steer_checked(actor, *checked),
         TurnInput::OfflineProbe {
             thread,

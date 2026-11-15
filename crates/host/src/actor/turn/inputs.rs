@@ -42,6 +42,8 @@ pub(crate) enum TurnInput {
     CameBack(super::came_back::Check),
     /// A read of Claude's transcript for unconfirmed steers answered (`queue/confirm.rs`).
     SteerChecked(Box<super::queue::SteerChecked>),
+    /// A turn's walk of the matter's links answered (`matter_walk.rs`).
+    MatterWalked(super::matter_walk::Walked),
     /// The host's probe of the agent's service for `thread`'s `turn` answered (`offline.rs`).
     OfflineProbe {
         thread: ThreadId,

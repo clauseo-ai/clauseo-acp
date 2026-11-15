@@ -146,6 +146,12 @@ pub(super) struct Agent {
     pub(super) matter_spellings: Vec<String>,
     /// Its idle clock and config calls in flight (`idle.rs`).
     pub(super) idle: super::idle::Mark,
+    /// Its launch gave it the matter's read allow rules (`data_fence::readable_matter_within`),
+    /// so each turn's start walks the matter's links again (`matter_walk.rs`). Never for Codex.
+    pub(super) matter_rules: bool,
+    /// The last turn whose start walked the matter's links: the turn it was launched for, whose
+    /// launch walked them, or one that `matter_walk.rs` walked.
+    pub(super) walked_for: Option<TurnId>,
 }
 
 impl Agent {
@@ -232,6 +238,11 @@ pub(super) fn launch_now(
     let unprotected = prepared.folder.is_some_and(agent::forced_ask::applies);
     let forced_ask = prepared.codex.is_none() && unprotected;
     let prepared_folder = prepared.folder;
+    let matter_rules = prepared.codex.is_none() && !prepared.run.data_deny.matter.is_empty();
+    let walked_for = waiting.iter().find_map(|waiting| match waiting {
+        Waiting::Turn(turn) => Some(*turn),
+        _ => None,
+    });
     let shell_start = if prepared.settings.shell_carries {
         crate::sent::ShellStart::Unknown
     } else {
@@ -302,6 +313,8 @@ pub(super) fn launch_now(
         start_failure: None,
         matter_spellings,
         idle: super::idle::Mark::default(),
+        matter_rules,
+        walked_for,
     };
     if let Some(state) = state(actor, thread) {
         state.agent = Some(Box::new(agent));
@@ -337,6 +350,36 @@ pub(super) fn restart_if_moved(actor: &mut Actor, thread: ThreadId, turn: TurnId
         return false;
     }
     tracing::info!(%thread, "the matter moved; its agent starts again in the new folder");
+    restart(actor, thread, turn);
+    true
+}
+
+/// Step 4 for a turn whose start found a link out of the matter that agent `id`'s launch did
+/// not (`matter_walk.rs`): stops that agent and starts a new one for the turn, as for a moved
+/// matter. The new launch walks the matter again, so it gets no matter rules, and it resumes
+/// the session (`session/load`). `false` when `id` is no longer the attached agent.
+pub(super) fn restart_for_links(
+    actor: &mut Actor,
+    thread: ThreadId,
+    turn: TurnId,
+    id: u64,
+) -> bool {
+    let attached = state(actor, thread)
+        .and_then(|state| state.agent.as_deref())
+        .is_some_and(|agent| agent.id == id && agent.stage == Stage::Attached);
+    if !attached {
+        return false;
+    }
+    tracing::info!(%thread, "a link leads out of the matter now; its agent starts again without the matter's read rules");
+    restart(actor, thread, turn);
+    true
+}
+
+/// Stops `thread`'s agent and hands what waits for it, then `turn`, to the next agent.
+fn restart(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
+    let Some(agent) = state(actor, thread).and_then(|state| state.agent.as_deref_mut()) else {
+        return;
+    };
     agent.link.stop();
     agent.stage = Stage::Stopping;
     agent.stop_cause = StopCause::Restarting;
@@ -346,7 +389,6 @@ pub(super) fn restart_if_moved(actor: &mut Actor, thread: ThreadId, turn: TurnId
     if let Some(current) = current(actor, thread) {
         current.phase = TurnPhase::Launching;
     }
-    true
 }
 
 /// Runs an agent call as a task that posts its result.

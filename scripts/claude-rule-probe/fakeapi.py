@@ -27,7 +27,9 @@ CLASSIFIER_BLOCK = os.environ.get("CLASSIFIER_VERDICT", "allow").lower() == "blo
 # SERVER_VERDICT=flagged|not_flagged: a tool_use response also carries the server-side auto mode
 # classifier's verdict on that call (message_delta.delta.safeguard_results, read by hKt), as the
 # first-party API does when auto mode runs its "server arbiter" (sO). Unset: no verdict, which
-# Claude Code latches as "the server does not classify" for the rest of the session.
+# Claude Code latches as "the server does not classify" for the rest of the session. So every
+# streamed reply carries one, a turn's last reply (no tool use) included: one without it would
+# turn the server off for the next turns of a multi-turn session (`server_no_result`).
 SERVER_VERDICT = os.environ.get("SERVER_VERDICT")
 
 
@@ -93,7 +95,7 @@ def reply(handler, body, blocks, stop):
     if body.get("stream"):
         events = message(blocks, stop)
         uses = [b["id"] for b in blocks if b["type"] == "tool_use"]
-        if SERVER_VERDICT and uses:
+        if SERVER_VERDICT:
             for name, data in events:
                 if name == "message_delta":
                     data["delta"]["safeguard_results"] = [{"type": "dangerous_tool_use", "status": {

@@ -287,7 +287,8 @@ pub(super) fn end_unstarted(
     end::finish(actor, thread);
 }
 
-/// Step 4: the before-turn checkpoint on the matter's thread.
+/// Step 4: the before-turn checkpoint on the matter's thread, once a running agent's matter
+/// rules are walked again (`matter_walk.rs`), which may start the agent again first.
 pub(super) fn before_turn(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
     if agents::restart_if_moved(actor, thread, turn) {
         return;
@@ -295,6 +296,13 @@ pub(super) fn before_turn(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
     if let Some(current) = current(actor, thread) {
         current.phase = TurnPhase::Checkpointing;
     }
+    if !super::matter_walk::start(actor, thread, turn) {
+        checkpoint(actor, thread, turn);
+    }
+}
+
+/// Step 4's checkpoint, sent to the matter's thread.
+pub(super) fn checkpoint(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
     let sent = (|| -> Result<(), Error> {
         let matter = matter_of(actor, thread)?;
         let now = actor.now().wall;
