@@ -369,7 +369,10 @@ pub(super) fn on_mode(
     }
 }
 
-/// A session call's result, or `agent.exited` when the agent that answered is gone.
+/// A session call's result, or `agent.exited` when the agent that answered is gone. An error
+/// the agent answered the lawyer's change with is `agent.setting_refused`, never
+/// `agent.protocol_error`: its answer read fine. Its detail names the code only, never the
+/// agent's text.
 fn answered<T>(same: bool, result: Result<T, clauseo_acp::Error>) -> Result<T, Error> {
     if !same {
         return Err(Error::refused(
@@ -377,5 +380,11 @@ fn answered<T>(same: bool, result: Result<T, clauseo_acp::Error>) -> Result<T, E
             "the agent stopped before it answered",
         ));
     }
-    result.map_err(Error::Acp)
+    result.map_err(|error| match error {
+        clauseo_acp::Error::Rpc { method, code, .. } => Error::refused(
+            ErrorCode::AgentSettingRefused,
+            format!("the agent answered {method} with error {code}"),
+        ),
+        other => Error::Acp(other),
+    })
 }

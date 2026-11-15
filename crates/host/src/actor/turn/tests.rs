@@ -38,6 +38,7 @@ mod repair;
 mod restore;
 mod rig;
 mod skipped;
+mod setting_refused;
 mod start_offline;
 mod start_timeout;
 mod sweep;

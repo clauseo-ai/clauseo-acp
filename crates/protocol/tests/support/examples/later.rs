@@ -170,6 +170,10 @@ fn agent_failures() -> Vec<DomainEvent> {
             ErrorCode::AgentModeMissing,
             "Claude Code reported no modes, so Clauseo cannot run it in its \"default\" mode",
         ),
+        failed(
+            ErrorCode::AgentSettingRefused,
+            "the agent answered session/set_mode with error -32603",
+        ),
     ]
 }
 

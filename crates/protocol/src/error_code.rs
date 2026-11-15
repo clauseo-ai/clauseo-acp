@@ -402,6 +402,9 @@ error_codes! {
     AgentModeMissing = "agent.mode_missing", retryable: false, meaning: "The agent's session \
         offered no mode Clauseo runs it in (Codex's `workspace-write`, Claude's mode or its \
         fallback), so no message was sent: a version of the agent Clauseo does not support.";
+    AgentSettingRefused = "agent.setting_refused", retryable: true, meaning: "The agent \
+        answered the lawyer's own change on a running session (a mode or a setting) with an \
+        error, so the change was not made; nothing else changed.";
     Unknown = "unknown", retryable: false, meaning: "A code from a newer Clauseo that this \
         version does not know. Never produced here.";
 }
