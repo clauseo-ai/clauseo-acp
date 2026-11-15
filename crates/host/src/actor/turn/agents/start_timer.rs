@@ -29,6 +29,10 @@ pub(crate) const START_TIMED_OUT: &str = "the agent did not finish starting with
 
 /// Arms the bound for `thread`'s agent `id`, just launched.
 pub(super) fn arm(actor: &Actor, thread: ThreadId, id: u64) {
+    #[cfg(test)]
+    if actor.turn_path.no_start_bound {
+        return;
+    }
     let timer = TurnTimer {
         thread,
         kind: TimerKind::Start(id),
