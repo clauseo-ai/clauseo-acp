@@ -340,11 +340,13 @@ pub(crate) fn apply_or_partial(
     // Every rename, then each folder synced once: the renames are durable before the
     // checkpoint that follows records them.
     let mut dirs = std::collections::BTreeSet::new();
+    let mut lost = Lost(0);
     for (path, file) in staged {
         match file.rename() {
-            Ok(dir) => {
+            Ok(renamed) => {
                 any_change = true;
-                dirs.insert(dir);
+                lost.0 += renamed.lost;
+                dirs.insert(renamed.dir);
             }
             Err(err) => {
                 // The renames before it stay, made durable as far as the OS lets; the temp files
@@ -374,6 +376,19 @@ pub(crate) fn apply_or_partial(
         paths: deleted,
         removals: removing.removals,
     })
+}
+
+/// How many attributes of the replaced files (permissions, extended attributes, ACLs, Windows
+/// streams) the renames of one write-back did not keep: logged once as it drops, on every way out
+/// of the renames, as a count alone. Never a failure of the write.
+struct Lost(u32);
+
+impl Drop for Lost {
+    fn drop(&mut self) {
+        if self.0 > 0 {
+            tracing::warn!(lost = self.0, "file attributes not kept on a rewrite");
+        }
+    }
 }
 
 /// Steps 1 and 2 of [`apply`]: the staged writes, or an error with every temp file removed;
