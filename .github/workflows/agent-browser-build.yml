@@ -172,13 +172,16 @@ jobs:
             ${{ env.OUT }}/agent-browser-${{ matrix.target }}.json
           if-no-files-found: error
 
-  # Runs no repository code, so the OIDC token that signs never meets the build's code.
+  # Runs no repository code, so the OIDC token that signs never meets the build's code. Behind
+  # the same environment as publish: no attestation naming this workflow exists until the
+  # reviewer has checked the commit (each run asks for two approvals, this one and publish's).
   attest:
     name: attest
     needs: build
     if: inputs.publish && github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
+    environment: agent-browser-publish
     permissions:
       id-token: write # the Sigstore signing certificate of the attestation
       attestations: write # stores the attestation on the repository
