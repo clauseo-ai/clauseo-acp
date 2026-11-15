@@ -7,7 +7,7 @@ use clauseo_protocol::{CheckpointId, MatterPath, Timestamp};
 use crate::connectors::civil_from_days;
 
 mod from_log;
-pub(crate) use from_log::{carried, read, restores_after};
+pub(crate) use from_log::{Floor, carried, kept, read, restores_in};
 
 /// The most files of each list a restore's note names (and its `VersionRestored` logs); the
 /// rest are counted.

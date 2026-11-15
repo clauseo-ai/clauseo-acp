@@ -11,7 +11,7 @@
 use std::collections::HashSet;
 
 use clauseo_protocol::{
-    CheckpointId, DomainEvent, Envelope, MarkerKind, StopReason, TurnId, ViewEntry,
+    CheckpointId, DomainEvent, Envelope, MarkerKind, StopReason, Timestamp, TurnId, ViewEntry,
 };
 
 use super::{NoteInput, RestoreNote};
@@ -21,10 +21,24 @@ pub(crate) struct Read<'a> {
     /// The undos, with a `TurnStarted` for each turn that carried the note, in log order.
     pub(crate) inputs: Vec<NoteInput<'a>>,
     /// The after checkpoint of the last turn that carried the note: the matter's restores
-    /// logged after its `CheckpointRecorded` are the note's too (`restores_after`). `None`
-    /// when no turn carried it, or that turn has no after checkpoint (it failed): the agent then
-    /// hears of no restore from the log, only of those memory holds.
+    /// logged after its `CheckpointRecorded` are the note's too ([`Floor::After`]). `None` when
+    /// no turn carried it, or that turn has no after checkpoint (it failed).
     pub(crate) since: Option<CheckpointId>,
+    /// When that turn ended: without its checkpoint (or the store's row of it), the restores
+    /// logged since are the note's ([`Floor::At`]). `None` when no turn carried the note: then
+    /// those since the conversation was created are.
+    pub(crate) ended: Option<Timestamp>,
+}
+
+/// Where the note's restores start in the matter's log.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Floor {
+    /// After the `CheckpointRecorded` of the last turn that carried the note: the log is read
+    /// from there, and a restore whose checkpoint it is came before that turn.
+    After(CheckpointId),
+    /// Logged at this time or later: the end of that turn, or the conversation's creation when
+    /// no turn carried the note. Nothing logged since was told yet.
+    At(Timestamp),
 }
 
 /// The note's inputs from the thread's view entries, in log order, in one pass.
@@ -33,7 +47,7 @@ pub(crate) fn read<'a>(entries: impl Iterator<Item = &'a ViewEntry>) -> Read<'a>
     let mut acted = HashSet::new();
     let mut asked = false;
     let mut inputs = Vec::new();
-    let mut since = None;
+    let (mut since, mut ended) = (None, None);
     for entry in entries {
         if let ViewEntry::UserMessage(message) = entry {
             prompted.insert(message.turn);
@@ -47,6 +61,7 @@ pub(crate) fn read<'a>(entries: impl Iterator<Item = &'a ViewEntry>) -> Read<'a>
             if prompted.contains(&step.turn) && took {
                 inputs.push(NoteInput::TurnStarted);
                 since = step.checkpoint_after;
+                ended = Some(step.ts);
             }
         } else if let ViewEntry::Marker(marker) = entry
             && let MarkerKind::StepUndone { restored, .. } = &marker.kind
@@ -57,7 +72,11 @@ pub(crate) fn read<'a>(entries: impl Iterator<Item = &'a ViewEntry>) -> Read<'a>
             });
         }
     }
-    Read { inputs, since }
+    Read {
+        inputs,
+        since,
+        ended,
+    }
 }
 
 /// Whether `turn`, whose prompt carried the note, reached the agent: read backwards from the
@@ -86,10 +105,21 @@ pub(crate) fn carried<'a>(
     false
 }
 
-/// The matter's restores in `envelopes`, the matter's log after the `CheckpointRecorded` of
-/// `since`, each as the note tells it. A restore whose checkpoint is `since` itself came before
-/// that turn (it reused the restore's checkpoint) and was told then.
-pub(crate) fn restores_after(envelopes: &[Envelope], since: CheckpointId) -> Vec<RestoreNote> {
+/// Whether `envelope`, read from the matter's log at `floor` or after, is a restore the note
+/// tells.
+pub(crate) fn kept(envelope: &Envelope, floor: Floor) -> bool {
+    let DomainEvent::VersionRestored(restored) = &envelope.event else {
+        return false;
+    };
+    match floor {
+        Floor::After(since) => restored.checkpoint != since,
+        Floor::At(at) => envelope.ts >= at,
+    }
+}
+
+/// The restores in `envelopes` (those [`kept`] keeps), each as the note tells it: one that wrote
+/// or removed no file it names is left out.
+pub(crate) fn restores_in(envelopes: &[Envelope]) -> Vec<RestoreNote> {
     envelopes
         .iter()
         .filter_map(|envelope| {
@@ -98,7 +128,7 @@ pub(crate) fn restores_after(envelopes: &[Envelope], since: CheckpointId) -> Vec
             };
             let more = restored.more.unwrap_or_default();
             let names = !restored.written.is_empty() || !restored.removed.is_empty() || more > 0;
-            (names && restored.checkpoint != since).then(|| RestoreNote {
+            names.then(|| RestoreNote {
                 back: restored.written.clone(),
                 removed: restored.removed.clone(),
                 more,
