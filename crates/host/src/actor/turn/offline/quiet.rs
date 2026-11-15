@@ -45,9 +45,28 @@ pub(in crate::actor::turn) const QUIET_LIMIT: Duration = Duration::from_secs(300
 /// out at 10:00 ends with Claude's report of it, not `agent.quiet` a moment before.
 pub(in crate::actor::turn) const TOOL_LIMIT: Duration = Duration::from_mins(11);
 
-/// The backstop's detail (the event log, never shown).
-const LIMIT_DETAIL: &str =
-    "the agent sent nothing for 5 min with no tool running and no question waiting";
+/// The quiet arm's clock of a live turn: when the agent last sent model output, and whether a
+/// compaction of the turn is in progress.
+#[derive(Debug)]
+pub(in crate::actor::turn) struct QuietClock {
+    /// When the agent last sent model output, or an ask of it ended, on the host's monotonic
+    /// clock: the quiet arm runs from here.
+    last_output: Duration,
+    /// A compaction of the turn started and has not ended: it holds the backstop off, up to
+    /// [`TOOL_LIMIT`] from `last_output`.
+    compacting: bool,
+}
+
+impl QuietClock {
+    /// The clock of a turn that started at `started` (on the host's monotonic clock), with no
+    /// compaction in progress.
+    pub(in crate::actor::turn) fn started(started: Duration) -> Self {
+        Self {
+            last_output: started,
+            compacting: false,
+        }
+    }
+}
 
 /// `thread`'s turn went live: its clock starts, and the quiet timer is armed when the switch is
 /// on and the agent is of a known kind (its launch recorded a probe target, known or not).
@@ -56,7 +75,7 @@ pub(super) fn turn_started(actor: &mut Actor, thread: ThreadId) {
     let Some(current) = current(actor, thread) else {
         return;
     };
-    current.last_output = now;
+    current.quiet.last_output = now;
     let turn = current.turn;
     if actor.turn_path.quiet_watch && probe::target(actor, thread).is_some() {
         arm(actor, thread, turn, QUIET_WAIT);
@@ -69,13 +88,13 @@ pub(super) fn output(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
     if let Some(current) =
         current(actor, thread).filter(|current| current.turn == turn && current.live())
     {
-        current.last_output = now;
+        current.quiet.last_output = now;
     }
 }
 
 /// Whether a compaction of `thread`'s turn is in progress.
 pub(super) fn compacting(actor: &mut Actor, thread: ThreadId) -> bool {
-    current(actor, thread).is_some_and(|current| current.compacting)
+    current(actor, thread).is_some_and(|current| current.quiet.compacting)
 }
 
 /// The agent of `thread`'s live `turn` sent output that leaves a compaction in progress, or
@@ -84,7 +103,7 @@ pub(super) fn set_compacting(actor: &mut Actor, thread: ThreadId, turn: TurnId, 
     if let Some(current) =
         current(actor, thread).filter(|current| current.turn == turn && current.live())
     {
-        current.compacting = on;
+        current.quiet.compacting = on;
     }
 }
 
@@ -93,7 +112,7 @@ pub(super) fn set_compacting(actor: &mut Actor, thread: ThreadId, turn: TurnId, 
 pub(in crate::actor::turn) fn ask_ended(actor: &mut Actor, thread: ThreadId) {
     let now = actor.now().mono;
     if let Some(current) = current(actor, thread).filter(|current| current.live()) {
-        current.last_output = now;
+        current.quiet.last_output = now;
     }
 }
 
@@ -116,11 +135,11 @@ pub(in crate::actor::turn) fn on_timer(actor: &mut Actor, thread: ThreadId, turn
     };
     // Waiting on the lawyer is not quiet; the clock runs again from now.
     if asking {
-        current.last_output = now;
+        current.quiet.last_output = now;
         arm(actor, thread, turn, QUIET_WAIT);
         return;
     }
-    let quiet = now.saturating_sub(current.last_output);
+    let quiet = now.saturating_sub(current.quiet.last_output);
     // Nor is a tool call at work, while the agent sent something (its updates count) within
     // [`TOOL_LIMIT`]: one left open past it no longer keeps the arm or the backstop off.
     if working && quiet < TOOL_LIMIT {
@@ -133,13 +152,13 @@ pub(in crate::actor::turn) fn on_timer(actor: &mut Actor, thread: ThreadId, turn
         return;
     }
     // A compaction in progress holds the backstop (not the probes) off up to the same cap.
-    let limit = if current.compacting && quiet < TOOL_LIMIT {
+    let limit = if current.quiet.compacting {
         TOOL_LIMIT
     } else {
         QUIET_LIMIT
     };
     if quiet >= limit {
-        backstop(actor, thread, quiet);
+        backstop(actor, thread, quiet, limit);
         return;
     }
     if quiet < QUIET_WAIT {
@@ -164,12 +183,14 @@ pub(in crate::actor::turn) fn on_timer(actor: &mut Actor, thread: ThreadId, turn
     arm(actor, thread, turn, next);
 }
 
-/// Cancels `thread`'s live turn with `agent.quiet` as its failure. A watch standing stays for
-/// the end to read (its held lines go back), and a probe's answer after this is ignored.
-fn backstop(actor: &mut Actor, thread: ThreadId, quiet: Duration) {
+/// Cancels `thread`'s live turn with `agent.quiet` as its failure, `limit` being the silence
+/// that ended it. A watch standing stays for the end to read (its held lines go back), and a
+/// probe's answer after this is ignored.
+fn backstop(actor: &mut Actor, thread: ThreadId, quiet: Duration, limit: Duration) {
     let Some(current) = current(actor, thread) else {
         return;
     };
+    let minutes = limit.as_secs() / 60;
     let last = current.offline.as_ref().and_then(|watch| watch.class);
     let reached = current.offline.as_ref().is_some_and(|watch| watch.reached);
     tracing::warn!(
@@ -177,10 +198,17 @@ fn backstop(actor: &mut Actor, thread: ThreadId, quiet: Duration) {
         %thread,
         by = "backstop",
         quiet_s = quiet.as_secs(),
+        limit_s = limit.as_secs(),
         class = last.map_or("none", probe::ReachClass::as_str),
         reached,
-        "the agent sent nothing for 5 min; ending the turn"
+        "the agent sent nothing for {} min; ending the turn",
+        minutes
     );
-    current.failure = Some((ErrorCode::AgentQuiet, Some(LIMIT_DETAIL.to_owned())));
+    current.failure = Some((
+        ErrorCode::AgentQuiet,
+        Some(format!(
+            "the agent sent nothing for {minutes} min with no tool running and no question waiting"
+        )),
+    ));
     cancel::cancel_running(actor, thread, None, cancel::why::FAILURE);
 }
