@@ -8,7 +8,9 @@
 //!   `allow_always` options, so none can reach the adapter.
 //! - [`answer`]: the lawyer's `allow_always` answer is logged as chosen, but the agent gets the
 //!   request's `allow_once` option, so claude-agent-acp writes nothing into the matter; the
-//!   rule, when the request gives one, is kept for the session and in the matter's file.
+//!   rule, when the request gives one, is kept for the session and in the matter's file, unless
+//!   it is a path rule outside the matter folder (`agent::always::within`), which is never
+//!   kept: the same rule read back at a launch is dropped too ([`Always::in_matter`]).
 //! - [`auto_allow`]: a later request whose rule is kept is answered `allow_once` by the host,
 //!   after the data-fence and held-open checks, logged as `PermissionRequested` and
 //!   `PermissionResolved` in one commit, as `asks::refuse_held_open` logs its answer. The answer
@@ -50,6 +52,9 @@ pub(super) struct Always {
     /// The matter's rules file; none for any agent but Claude outside forced ask.
     file: Option<PathBuf>,
     rules: BTreeSet<String>,
+    /// The matter folder's spellings as path rules (`always::matter_roots`): a path rule
+    /// outside them is neither kept nor applied (`always::within`).
+    roots: Vec<String>,
     asked: BTreeMap<PermissionRequestId, AlwaysAsk>,
 }
 
@@ -63,8 +68,24 @@ impl Always {
         Self {
             file: always::file_beside(&run.notes),
             rules: run.always.iter().cloned().collect(),
+            roots: Vec::new(),
             asked: BTreeMap::new(),
         }
+    }
+
+    /// Once the agent is launched in `folder` (spelled `spellings` too): the rules read that do
+    /// not stay within it are dropped (`always::within`), so the data fence's deny rules are
+    /// never the only thing between a kept rule and what lies outside the matter.
+    pub(super) fn in_matter(mut self, folder: &std::path::Path, spellings: &[String]) -> Self {
+        let folder = folder.to_str();
+        let spellings = folder
+            .into_iter()
+            .chain(spellings.iter().map(String::as_str));
+        self.roots = always::matter_roots(spellings, cfg!(windows));
+        let roots = &self.roots;
+        self.rules
+            .retain(|rule| always::within(rule, roots, cfg!(windows)));
+        self
     }
 }
 
@@ -148,6 +169,7 @@ pub(super) fn answer(
         return None;
     }
     if let Some(rule) = ask.rule
+        && always::within(&rule, &agent.always.roots, cfg!(windows))
         && agent.always.rules.len() < always::MAX_RULES
         && agent.always.rules.insert(rule.clone())
         && let Some(file) = &agent.always.file
@@ -231,7 +253,8 @@ fn allow(actor: &mut Actor, thread: ThreadId, ask: PermissionAsk) -> Result<(), 
     Ok(())
 }
 
-/// Adds `thread`'s agent's kept rules to the `_meta` of its session (none in forced ask).
+/// Adds `thread`'s agent's kept rules to the `_meta` of its session: none in forced ask or for an
+/// agent other than Claude, which keeps none ([`Always::at_launch`]).
 pub(super) fn allow_in(actor: &mut Actor, thread: ThreadId, meta: &mut Map<String, Value>) {
     if let Some(agent) = agent(actor, thread).filter(|agent| !agent.forced_ask) {
         always::allow_in_meta(meta, agent.always.rules.iter().map(String::as_str));
