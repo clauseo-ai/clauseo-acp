@@ -17,11 +17,13 @@ import { gzipSync } from "node:zlib";
 import {
   TARGETS,
   buildEnv,
+  checkCommitted,
   checkSha,
   main,
   orderPatches,
   parseArgs,
   pinLines,
+  rustcCommit,
   tarInfo,
   toolchainChannel,
 } from "./agent-browser-build.mjs";
@@ -114,6 +116,7 @@ async function fixture(gz, patches, commit = COMMIT) {
       'patched_tag = "agent-browser-v0.41.1-clauseo.1"',
       `upstream_commit = "${commit}"`,
       `upstream_tarball_sha256 = "${sha(gz)}"`,
+      `rustc_commit = "${"d".repeat(40)}"`,
       "",
     ].join("\n"),
   );
@@ -314,5 +317,27 @@ describe("check", () => {
     const server = serve(gz);
     await assert.rejects(main(["check"], { pinPath, patchDir, fetch: server.fetch, log: quiet }), /NNNN/);
     assert.equal(server.calls.length, 0);
+  });
+});
+
+describe("build's refusals", () => {
+  test("checkCommitted refuses any git status line for the patches folder", () => {
+    checkCommitted("", "patches");
+    checkCommitted("\n", "patches");
+    assert.throws(() => checkCommitted("?? patches/0003-x.patch\n", "patches"), /uncommitted/);
+    assert.throws(() => checkCommitted(" M patches/0001-x.patch\n", "patches"), /0001-x/);
+  });
+
+  test("rustcCommit reads rustc -vV's commit-hash, and nothing else", () => {
+    const hash = "b940084d7eb6a299eb4bfeb8e34901bc051e7ac4";
+    const verbose = `rustc 1.99.0 (b940084d7 2026-10-01)\nbinary: rustc\ncommit-hash: ${hash}\nrelease: 1.99.0\n`;
+    assert.equal(rustcCommit(verbose), hash);
+    assert.equal(rustcCommit(verbose.replace(hash, "unknown")), null);
+    assert.equal(rustcCommit("binary: rustc\n"), null);
+  });
+
+  test("the real pin's rustc_commit is a full commit", async () => {
+    const pin = parsePin(await readFile(new URL("../agent-browser.toml", import.meta.url), "utf8"));
+    assert.match(pin.rustcCommit, /^[0-9a-f]{40}$/);
   });
 });

@@ -61,18 +61,19 @@ const TOP_KEYS = {
   patched_tag: 'patchedTag',
   upstream_commit: 'upstreamCommit',
   upstream_tarball_sha256: 'upstreamTarballSha256',
+  rustc_commit: 'rustcCommit',
 };
 
 
 /**
  * Parses the pin. Its format is exact (see the header of agent-browser.toml): blank lines and
- * whole-line `#` comments, then `version`, `patched_tag`, `upstream_commit` and
- * `upstream_tarball_sha256` strings, each once, then one `[triple]` table per triple with `url`
+ * whole-line `#` comments, then `version`, `patched_tag`, `upstream_commit`,
+ * `upstream_tarball_sha256` and `rustc_commit` strings, each once, then one `[triple]` table per triple with `url`
  * and `sha256` strings, or `none = true`. Anything else throws, with the line number.
  *
  * @param {string} text the file's contents
  * @returns {{ version: string, patchedTag: string, upstreamCommit: string,
- *   upstreamTarballSha256: string,
+ *   upstreamTarballSha256: string, rustcCommit: string,
  *   triples: Map<string, { url: string, sha256: string } | { none: true }> }}
  */
 export function parsePin(text) {
@@ -152,6 +153,9 @@ export function parsePin(text) {
   }
   if (!SHA256.test(top.upstream_tarball_sha256 ?? '')) {
     throw new Error('agent-browser.toml: upstream_tarball_sha256 must be 64 lowercase hex characters');
+  }
+  if (!COMMIT.test(top.rustc_commit ?? '')) {
+    throw new Error('agent-browser.toml: rustc_commit must be 40 lowercase hex characters');
   }
   const pin = { triples };
   for (const [key, field] of Object.entries(TOP_KEYS)) pin[field] = top[key];

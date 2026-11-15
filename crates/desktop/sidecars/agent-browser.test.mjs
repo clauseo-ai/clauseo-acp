@@ -24,11 +24,12 @@ const TAG = `agent-browser-v${VERSION}-clauseo.1`;
 const OURS = `https://github.com/clauseo-ai/clauseo-acp/releases/download/${TAG}`;
 const COMMIT = "5868f7c05020e047c00e68e4abf9253cce864f41";
 const TARBALL = "ca59c4590a5a265d106c494d7726b9cde8575536d31834709dd525da8d778f6f";
-/** The four keys before the first table, as a well-formed pin holds them. */
+/** The five keys before the first table, as a well-formed pin holds them. */
 const TOP = [
   `version = "${VERSION}"`,
   `patched_tag = "${TAG}"`,
   `upstream_commit = "${COMMIT}"`,
+  `rustc_commit = "${"d".repeat(40)}"`,
   `upstream_tarball_sha256 = "${TARBALL}"`,
 ].join("\n");
 const BODY = Buffer.from("#!fake agent-browser binary\n");
@@ -437,6 +438,8 @@ describe("parsePin", () => {
       "short upstream_commit": TOP.replace(COMMIT, COMMIT.slice(1)),
       "upper-case upstream_tarball_sha256": TOP.replace(TARBALL, TARBALL.toUpperCase()),
       "no upstream_tarball_sha256": TOP.replace(/\nupstream_tarball_sha256.*$/, ""),
+      "no rustc_commit": TOP.replace(/^rustc_commit.*\n/m, ""),
+      "short rustc_commit": TOP.replace("d".repeat(40), "d".repeat(39)),
       "a top key twice": `${TOP}\nupstream_commit = "${COMMIT}"\n`,
       "an unknown top key": `${TOP}\nupstream = "x"\n`,
       "a top key inside a table": `${TOP}\n[t]\nnone = true\npatched_tag = "${TAG}"\n`,
