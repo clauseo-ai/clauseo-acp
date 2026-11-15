@@ -490,6 +490,15 @@ pub enum MarkerKind {
         /// The `restore` checkpoint it took back, if it did.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         undoes: Option<CheckpointId>,
+        /// The files it wrote, as the event lists them; missing from older logs.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        written: Vec<MatterPath>,
+        /// The files it removed, as the event lists them; missing from older logs.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        removed: Vec<MatterPath>,
+        /// How many files it wrote or removed past those lists; missing when none.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        more: Option<u32>,
     },
     /// The matter's folder was located after it moved (matter stream): "Found at {folder}".
     MatterRelocated {

@@ -26,6 +26,7 @@ mod key_retry;
 mod known;
 mod launch_checks;
 mod logout;
+mod note;
 mod offline;
 pub(crate) use offline::probe::settings::claude_shell_carries;
 mod out;
@@ -120,12 +121,8 @@ pub(crate) struct TurnState {
     sources: crate::sources::Sources,
     /// Text not durable yet.
     text: ThreadText,
-    /// The undos and restores since the last `TurnStarted`, in order; `None` until first
-    /// needed, then read from the loaded state with [`TurnState::restored`].
-    note: Option<Vec<crate::undo_note::Told>>,
-    /// The restores of the thread's matter while `note` is `None`, held in memory only
-    /// (`restore.rs`); the note takes them when first read.
-    restored: Vec<crate::undo_note::RestoreNote>,
+    /// The undo note the next prompt starts with (`note.rs`).
+    note: note::NoteState,
     /// The offline-shell note did not reach the agent; it goes first in the next prompt.
     offline_owed: bool,
     /// Start-up reconciliation of this thread is in progress.
@@ -420,6 +417,7 @@ pub(crate) fn turn_input(actor: &mut Actor, input: TurnInput) {
             LogFor::PreviewUndo { turn, reply } => {
                 undo_preview::on_log(actor, thread, turn, reply, result);
             }
+            LogFor::Restores(since) => note::on_restores(actor, thread, since, result),
         },
     }
 }
@@ -448,8 +446,10 @@ pub(crate) fn matter_reply(actor: &mut Actor, _matter: MatterId, job: TurnJob, r
     let TurnJob { thread, kind } = job;
     match (kind, reply) {
         (JobKind::Before(turn), MatterReply::BeforeTurn(result)) => {
-            known::when_loaded(actor, thread, result, move |actor, result| {
-                steps::on_before_turn(actor, thread, turn, result);
+            note::read_first(actor, thread, move |actor| {
+                known::when_loaded(actor, thread, result, move |actor, result| {
+                    steps::on_before_turn(actor, thread, turn, result);
+                });
             });
         }
         (JobKind::After(turn), MatterReply::AfterTurn(result)) => {

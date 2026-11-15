@@ -19,7 +19,7 @@ use super::super::{Actor, Tag, counting};
 use super::out::Out;
 use super::{
     Holder, JobKind, LogFor, Then, TurnInput, TurnJob, TurnTag, came_back, end, failure, lost,
-    matter_of, prompt, queue, state,
+    matter_of, queue, state,
 };
 use crate::error::Error;
 use crate::log_file::{Cause, LIFECYCLE};
@@ -401,11 +401,9 @@ pub(super) fn on_logged(actor: &mut Actor, thread: ThreadId) {
         return;
     };
     counting::feature_used(actor, Feature::Undo);
-    prompt::ensure_note(actor, thread);
-    if let Some(note) = state(actor, thread).and_then(|state| state.note.as_mut()) {
-        for path in &log.step.restored {
-            crate::undo_note::add_undone(note, path);
-        }
+    super::note::ensure(actor, thread);
+    if let Some(state) = state(actor, thread) {
+        state.note.add_undone(&log.step.restored);
     }
     came_back::watch(actor, thread, log.matter, log.deleted, &log.resurrected);
     release(actor, log.matter, thread);

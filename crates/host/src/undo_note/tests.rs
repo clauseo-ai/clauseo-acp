@@ -1,6 +1,11 @@
 use clauseo_protocol::{MatterPath, Timestamp};
 
-use super::{NoteInput, RestoreNote, Told, add_undone, note_text, since_last_turn};
+use clauseo_protocol::CheckpointId;
+
+use super::{
+    NoteInput, RESTORE_FILES_CAP, RestoreNote, Told, add_undone, capped, note_text,
+    since_last_turn, with_restores,
+};
 
 fn paths(names: &[&str]) -> Vec<MatterPath> {
     names.iter().map(|n| n.parse().unwrap()).collect()
@@ -15,6 +20,8 @@ fn restore(back: &[&str], removed: &[&str], secs: i64) -> RestoreNote {
     RestoreNote {
         back: paths(back),
         removed: paths(removed),
+        more: 0,
+        checkpoint: None,
         at: at(secs),
     }
 }
@@ -121,5 +128,108 @@ fn a_restore_that_only_removed_says_so() {
         "Note from Clauseo: The lawyer restored an earlier version from Versions as of \
          2026-11-11 14:05 UTC; it removed draft.docx, which that version did not have. Read them \
          again before relying on what you remember about them."
+    );
+}
+
+/// A checkpoint id, distinct per `n`.
+fn checkpoint(n: u8) -> CheckpointId {
+    let id = uuid::Builder::from_unix_timestamp_millis(1_790_000_000_000, &[n; 10]).into_uuid();
+    CheckpointId::new(id).unwrap()
+}
+
+/// A restore the log holds and the host's memory holds too (the note was first read after it)
+/// is told once, from the log; one only memory holds (its commit failed) is told as well.
+#[test]
+fn a_restore_in_the_log_and_in_memory_is_told_once() {
+    let logged = RestoreNote {
+        checkpoint: Some(checkpoint(1)),
+        ..restore(&["a.txt"], &[], 0)
+    };
+    let held = RestoreNote {
+        at: at(1),
+        ..logged.clone()
+    };
+    let failed = RestoreNote {
+        checkpoint: Some(checkpoint(2)),
+        ..restore(&["b.txt"], &[], 5)
+    };
+    let told = since_last_turn([], vec![logged.clone(), held, failed.clone()]);
+    assert_eq!(told, [Told::Restored(logged), Told::Restored(failed)]);
+}
+
+/// Every restore given is after the last turn that carried the note, so one with an earlier
+/// time (a clock that stepped back) is still told, among the undos after that turn only.
+#[test]
+fn a_restore_is_put_only_among_the_undos_after_the_last_turn() {
+    let (before, after) = (paths(&["a.txt"]), paths(&["b.txt"]));
+    let inputs = [
+        NoteInput::Undone {
+            restored: &before,
+            at: at(10),
+        },
+        NoteInput::TurnStarted,
+        NoteInput::Undone {
+            restored: &after,
+            at: at(20),
+        },
+    ];
+    let early = restore(&["c.txt"], &[], 5);
+    let told = since_last_turn(inputs, vec![early.clone()]);
+    assert_eq!(
+        told,
+        [Told::Restored(early), Told::Undone(after[0].clone())]
+    );
+}
+
+/// The note read in full later keeps the partial one's trims and its restores only memory held.
+#[test]
+fn reading_the_note_in_full_keeps_what_memory_changed() {
+    let (a, b) = (paths(&["a.txt"])[0].clone(), paths(&["b.txt"])[0].clone());
+    let logged = RestoreNote {
+        checkpoint: Some(checkpoint(1)),
+        ..restore(&["c.txt"], &[], 0)
+    };
+    let failed = RestoreNote {
+        checkpoint: Some(checkpoint(2)),
+        ..restore(&["d.txt"], &[], 9)
+    };
+    // b.txt came back and was taken out of the partial note.
+    let partial = vec![Told::Undone(a.clone()), Told::Restored(failed.clone())];
+    let full = vec![
+        Told::Restored(logged.clone()),
+        Told::Undone(a.clone()),
+        Told::Undone(b),
+    ];
+    assert_eq!(
+        with_restores(partial, full),
+        [
+            Told::Restored(logged),
+            Told::Undone(a),
+            Told::Restored(failed)
+        ]
+    );
+}
+
+/// Each list is cut at the cap, and the note counts what was cut.
+#[test]
+fn a_large_restore_names_the_first_files_and_counts_the_rest() {
+    let many = |prefix: &str| -> Vec<MatterPath> {
+        (0..RESTORE_FILES_CAP + 2)
+            .map(|n| format!("{prefix}{n}.txt").parse().unwrap())
+            .collect()
+    };
+    let (written, removed, more) = capped(many("w"), many("r"));
+    assert_eq!(
+        (written.len(), removed.len(), more),
+        (RESTORE_FILES_CAP, RESTORE_FILES_CAP, 4)
+    );
+    let note = RestoreNote {
+        more,
+        ..restore(&["a.txt"], &[], 0)
+    };
+    let text = note_text(&[Told::Restored(note)]).unwrap();
+    assert!(
+        text.contains("\nThat restore also changed 4 more files not named here. Read them"),
+        "{text}"
     );
 }

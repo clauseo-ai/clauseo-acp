@@ -3,8 +3,8 @@
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    CheckpointId, CheckpointKind, Error, FileChange, ImportSummary, MatterKind, RestoreScope,
-    ThreadId, TurnId,
+    CheckpointId, CheckpointKind, Error, FileChange, ImportSummary, MatterKind, MatterPath,
+    RestoreScope, ThreadId, TurnId,
 };
 
 /// A matter was created: the first event of a matter's stream.
@@ -175,4 +175,14 @@ pub struct VersionRestored {
     /// The `restore` checkpoint this one took back, if it did. Missing from older logs.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub undoes: Option<CheckpointId>,
+    /// The files it wrote, back as the version had them, for the agent's note; the host keeps
+    /// the first few hundred. Missing from older logs, and empty is left out.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub written: Vec<MatterPath>,
+    /// The files it removed, which the version did not have, kept as `written` is.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub removed: Vec<MatterPath>,
+    /// How many files it wrote or removed past those two lists; missing when none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub more: Option<u32>,
 }

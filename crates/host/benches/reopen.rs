@@ -2,6 +2,7 @@
 //! a copy of the fixture thread's store: 20,000 events, the snapshot at seq 18,001 and the
 //! 1,999-event tail after it. Setup, the copy, `Host::start` and the shutdown are untimed; the
 //! first item must be the view's `Reset`. Wall clock: it reports and never fails a pull request.
+//! `read_after_20k_events` reads the same log raw, as the undo note's restore read does.
 
 #![expect(
     clippy::unwrap_used,
@@ -104,5 +105,37 @@ fn reopen_20k_events(c: &mut Criterion) {
     });
 }
 
-criterion_group!(benches, reopen_20k_events);
+/// `read_after_20k_events`: the worst case of the undo note's read of a matter's restores
+/// (`actor/turn/note.rs`), the whole 20,000-event log read in `READ_PAGE_MAX` pages and
+/// decoded, with no fold, straight from the store.
+fn read_after_20k_events(c: &mut Criterion) {
+    let bench = dir::BenchDir::new("read-after-20k-events").unwrap();
+    let fixture = bench.path().join("fixture");
+    dir::make(&fixture).unwrap();
+    build_fixture(&fixture);
+    let store = block_on(Store::open(StoreOptions::new(&fixture))).unwrap();
+    c.bench_function("read_after_20k_events", |b| {
+        b.iter(|| {
+            block_on(async {
+                let mut after = None;
+                let mut read = 0_usize;
+                loop {
+                    let page = store
+                        .read_after(fixtures::stream(), after, clauseo_store::READ_PAGE_MAX)
+                        .await
+                        .unwrap();
+                    let Some(last) = page.last() else {
+                        break;
+                    };
+                    after = Some(last.seq);
+                    read += page.len();
+                }
+                assert_eq!(read, 20_000);
+            });
+        });
+    });
+    block_on(store.close()).unwrap();
+}
+
+criterion_group!(benches, reopen_20k_events, read_after_20k_events);
 criterion_main!(benches);

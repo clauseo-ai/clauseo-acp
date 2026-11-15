@@ -148,6 +148,9 @@ fn fold_event(state: &mut ThreadState, envelope: &Envelope, out: &mut Applied) {
                 checkpoint: event.checkpoint,
                 scope: event.scope.clone(),
                 undoes: event.undoes,
+                written: event.written.clone(),
+                removed: event.removed.clone(),
+                more: event.more,
             };
             insert_marker(state, seq, event_id, ts, kind, out);
         }
