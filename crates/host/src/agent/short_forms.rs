@@ -12,7 +12,8 @@ use crate::network_paths::NetEnv;
 
 /// `paths`, each followed by its full short form when it has one that differs ([`short_form`]);
 /// none added twice. A network path is never asked (a share can hang the call); off Windows,
-/// and on a volume that makes no short names, nothing is added.
+/// and on a volume that makes no short names (the call gives the path back), nothing is added.
+/// On Windows a short form that can't be read is counted in one warning, naming no path.
 pub(crate) fn with_short_forms(paths: Vec<PathBuf>, net: &NetEnv) -> Vec<PathBuf> {
     with_short_forms_by(paths, net, &short_form)
 }
@@ -24,17 +25,26 @@ pub(crate) fn with_short_forms_by(
     short: &dyn Fn(&Path) -> Option<PathBuf>,
 ) -> Vec<PathBuf> {
     let mut out: Vec<PathBuf> = Vec::with_capacity(paths.len());
+    let mut unread = 0_usize;
     for path in paths {
         let found = if net.is_network(&path) {
             None
         } else {
-            short(&path).filter(|found| *found != path)
+            let asked = short(&path);
+            unread += usize::from(asked.is_none());
+            asked.filter(|found| *found != path)
         };
         for path in std::iter::once(path).chain(found) {
             if !out.contains(&path) {
                 out.push(path);
             }
         }
+    }
+    if unread > 0 && net.windows {
+        tracing::warn!(
+            unread,
+            "short forms could not be read; those paths go long alone"
+        );
     }
     out
 }

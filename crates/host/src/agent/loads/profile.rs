@@ -129,8 +129,8 @@ pub(crate) struct Folders<'a> {
     pub(crate) browser: &'a str,
     /// `{other_matters}`: the other matters' rule, the fenced one
     /// (`clauseo_profile::instructions::OTHER_MATTERS`), which [`Folders::of`] starts with, or,
-    /// for Codex on Windows, the closed matters named
-    /// (`clauseo_profile::instructions::other_matters_closed`).
+    /// for Codex on Windows, the name-free rule
+    /// (`clauseo_profile::instructions::other_matters_unfenced`).
     pub(crate) other_matters: &'a str,
 }
 

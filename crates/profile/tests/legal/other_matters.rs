@@ -1,11 +1,9 @@
 //! The other matters' rule, per agent and platform: the fenced one (Claude everywhere, Codex on
 //! macOS and Linux) may try a file the lawyer asked for and points to the button Clauseo shows;
-//! Codex on Windows, which nothing fences, is told the closed matters' folders and the menu item
-//! that opens one, in the app's own words.
+//! Codex on Windows, which nothing fences, knows a matter by its `.clauseo` folder, with no
+//! other client's matter named, and is told the menu item that opens one, in the app's words.
 
-use clauseo_profile::instructions::{
-    CLOSED_LISTED, LEGAL, OTHER_MATTERS, invite_item, other_matters_closed,
-};
+use clauseo_profile::instructions::{LEGAL, OTHER_MATTERS, invite_item, other_matters_unfenced};
 use clauseo_profile::placeholders;
 
 /// The rule sits once in the legal part, as a line of its conduct list.
@@ -22,31 +20,10 @@ fn the_fenced_rule() {
     insta::assert_snapshot!(OTHER_MATTERS.trim());
 }
 
-/// Codex on Windows: the closed matters' folders, as JSON strings, and the menu item.
+/// Codex on Windows: no matter named; a matter known by its `.clauseo` folder; the menu item.
 #[test]
 fn the_rule_for_codex_on_windows() {
-    let closed = [
-        r"C:\Users\l\Clients\Smith",
-        r#"C:\Users\l\Clients\Jones "Appeal""#,
-    ];
-    insta::assert_snapshot!(other_matters_closed(&closed));
-}
-
-/// Past [`CLOSED_LISTED`] folders the rest are counted; with none, the fenced rule as is.
-#[test]
-fn the_rule_for_codex_on_windows_past_the_list() {
-    let names: Vec<String> = (0..CLOSED_LISTED + 3)
-        .map(|n| format!(r"C:\M{n}"))
-        .collect();
-    let closed: Vec<&str> = names.iter().map(String::as_str).collect();
-    let rule = other_matters_closed(&closed);
-    assert!(
-        rule.contains(&format!("M{}\"", CLOSED_LISTED - 1)),
-        "{rule}"
-    );
-    assert!(!rule.contains(&format!("M{CLOSED_LISTED}\"")), "{rule}");
-    assert!(rule.contains(" and 3 more. "), "{rule}");
-    assert_eq!(other_matters_closed(&[]), OTHER_MATTERS.trim());
+    insta::assert_snapshot!(other_matters_unfenced());
 }
 
 /// The menu item is the app's: read from its copy entries, and a key of its words table.
