@@ -22,7 +22,7 @@ use windows::Win32::Storage::FileSystem::{
 };
 use windows::core::{HSTRING, PCWSTR};
 
-use super::file_ids::{INVALID_PARAMETER, file_id_failure};
+use super::file_ids::{INVALID_PARAMETER, file_id_failure, unc_text};
 use super::windows_names::drive_is_local;
 
 /// Room for a device name (`QueryDosDeviceW` writes each target NUL-terminated, then a NUL).
@@ -88,8 +88,9 @@ pub(crate) fn attribute_tag(file: &std::fs::File) -> std::io::Result<(u32, u32)>
 /// 128-bit file ID, opened with no access, without following a link at it. A UNC path never
 /// counts as having no file IDs ([`handle_identity`]).
 pub(super) fn identity(path: &Path) -> std::io::Result<(u64, u128)> {
-    let text = path.to_string_lossy();
-    let unc = text.starts_with(r"\\") || text.starts_with("//");
+    // A long local name keeps its verbatim `\\?\X:\` form here (`dunce` drops it only under
+    // 260 characters, and `CreateFileW` needs it past that): opened as it is, read as local.
+    let unc = unc_text(&path.to_string_lossy());
     let path = wide(path);
     // SAFETY: `path` is NUL-terminated and outlives the call; no access is asked, every share
     // mode is allowed, and a link at the path is opened itself, never followed.
