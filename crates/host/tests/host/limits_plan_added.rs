@@ -65,8 +65,9 @@ fn a_plan_set_up_after_start_is_read_and_shown() {
     host.settle();
     assert_eq!(reads.count(AgentKind::Claude), 1, "one read");
 
-    // The model now takes `RefreshLimits`: a shown once the read is 5 minutes old reads.
-    host.clock.advance(Duration::from_secs(300));
+    // The model now takes `RefreshLimits`: a shown once the read is 2 minutes old (Claude's
+    // shown age) reads.
+    host.clock.advance(Duration::from_secs(120));
     refresh(&host, RefreshWhy::Shown);
     assert_eq!(reads.count(AgentKind::Claude), 2, "the shown read");
     reads.answer(AgentKind::Claude, usage(AgentKind::Claude, 35.0, None));
