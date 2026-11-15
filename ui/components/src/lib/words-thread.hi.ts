@@ -203,6 +203,9 @@ export const HI = {
   // downloaded-from-the-internet mark; {file} is the file's name, isolated (provisional, UC-520)
   "The browser saved {file} in Clauseo's own folder for this matter, not in the matter's folder: the matter's drive can't mark downloads as coming from the internet.":
     "ब्राउज़र ने {file} को इस मामले के लिए Clauseo के अपने फ़ोल्डर में सहेजा है, मामले के फ़ोल्डर में नहीं: मामले की ड्राइव डाउनलोड को इंटरनेट से आया हुआ चिह्नित नहीं कर सकती।",
+  // Claude's sandbox couldn't start: Claude asks before commands and has no browser (provisional, UC-510)
+  "Clauseo couldn't start Claude's safeguards for this matter, so Claude asks before running commands and has no browser in this conversation.":
+    "Clauseo इस मामले के लिए Claude के सुरक्षा उपाय शुरू नहीं कर सका, इसलिए Claude कमांड चलाने से पहले पूछता है और इस बातचीत में उसके पास ब्राउज़र नहीं है।",
   // the composer
   // in the composer's place while the open conversation is archived (U16a's Find opens one): it takes no question
   "Archived. Read only.": "संग्रहीत। केवल पढ़ने के लिए।",

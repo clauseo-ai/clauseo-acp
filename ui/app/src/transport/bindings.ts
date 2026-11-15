@@ -4412,6 +4412,14 @@ export type NoticeKind =
 	/**  The file's name in that folder: one component, no separator. */
 	name: string,
 } }) & { files_came_back?: never; guard_steps_more?: never; held_open_blocked?: never; skill_pack_not_loaded?: never } | 
+/**
+ *  Claude's sandbox could not be set up for this session on macOS or Linux (a `*` or `?`
+ *  in a path, a path that is not UTF-8, no short temp folder), so Claude runs in
+ *  `acceptEdits` and asks before running commands, and the session has no browser
+ *  (without the sandbox Claude's shell could reach the browser's debugging port). Once a
+ *  thread.
+ */
+"sandbox_off" | 
 /**  A kind from a newer Clauseo; written back as the plain string `kind`. */
 string;
 

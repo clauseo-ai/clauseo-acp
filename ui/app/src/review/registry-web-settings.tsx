@@ -108,7 +108,7 @@ export const WEB_SETTINGS: Entry[] = [
   entry("UEP-18", settingsWords("Search the web and read pages."), { tools: ON }),
   // the browser off: its window slashed, its helper shown (the no-check reason stands only while it is on)
   entry("UEP-10", settingsWords("Browser"), { tools: { ...ON, browser: false } }),
-  entry("UC-213", settingsWords("ChatGPT uses it. Runs on this computer."), {
+  entry("UC-213", settingsWords("Claude and ChatGPT use it. Runs on this computer."), {
     tools: { ...ON, browser: false },
   }),
   // the group's note, the room's words (UET's popover tooltip says them too)

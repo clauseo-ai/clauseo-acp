@@ -149,8 +149,8 @@ fn codex_s_entry_goes_with_the_session_s_proxy_on_each_os() {
 
 /// Codex on Windows has no browser (`no_browser`): its entry is dropped before the fill, so the
 /// session sends none and its header holds no browser state at all, which the app shows as
-/// nothing to act on (no install advice, no switch). Claude has no browser on any OS; Codex
-/// elsewhere is untouched. Runs on every OS: the OS is a parameter.
+/// nothing to act on (no install advice, no switch). Claude has no browser on Windows either and
+/// the entry elsewhere, as Codex does. Runs on every OS: the OS is a parameter.
 #[test]
 fn codex_on_windows_gets_no_entry_and_no_browser_state() {
     use clauseo_protocol::AgentKind;
@@ -158,7 +158,7 @@ fn codex_on_windows_gets_no_entry_and_no_browser_state() {
     let chrome = PathBuf::from("/chrome");
     let ready = inputs(&dir, Some(&chrome));
     for windows in [false, true] {
-        assert!(no_browser(Some(AgentKind::Claude), windows));
+        assert_eq!(no_browser(Some(AgentKind::Claude), windows), windows);
         assert!(!no_browser(None, windows));
         let none_here = no_browser(Some(AgentKind::Codex), windows);
         assert_eq!(none_here, windows);

@@ -119,7 +119,11 @@ fn settings(
         forced_ask,
         data: &NO_DENY,
         case_law: false,
-        browser,
+        browser: if browser {
+            crate::agent::loads::profile::ClaudeBrowser::Shell
+        } else {
+            crate::agent::loads::profile::ClaudeBrowser::None
+        },
         sandbox,
         matter: None,
         trusted_servers: &[],
@@ -168,8 +172,20 @@ fn a_claude_session_runs_its_commands_in_claude_codes_sandbox() {
                     format!("{DATA}/agent-state/m-1/notes"),
                     SHORT,
                 ],
-                "denyWrite": ["/Users/l/Clients/A/.clauseo"],
-                "denyRead": ["~/", "/Volumes", "/Users/Shared", DATA, "/Users/l/Clients/B"],
+                "denyWrite": [
+                    "/Users/l/Clients/A/.clauseo",
+                    "/tmp/clauseo-ab-*",
+                    "/private/tmp/clauseo-ab-*",
+                ],
+                "denyRead": [
+                    "~/",
+                    "/Volumes",
+                    "/Users/Shared",
+                    DATA,
+                    "/Users/l/Clients/B",
+                    "/tmp/clauseo-ab-*",
+                    "/private/tmp/clauseo-ab-*",
+                ],
                 "allowRead": [
                     "/Users/l/Clients/A",
                     format!("{run}/work"),
@@ -311,7 +327,14 @@ fn a_bracket_is_escaped_and_the_sandbox_stays_on() {
                 .any(|p| p.contains("[2024]") && !p.contains("[[]"))
         );
     }
-    assert_eq!(on_mac.deny_write, [format!("{escaped}/.clauseo")]);
+    assert_eq!(
+        on_mac.deny_write,
+        [
+            format!("{escaped}/.clauseo"),
+            "/tmp/clauseo-ab-*".to_owned(),
+            "/private/tmp/clauseo-ab-*".to_owned()
+        ]
+    );
     assert!(
         on_mac
             .deny_read
@@ -343,6 +366,29 @@ fn a_bracket_is_escaped_and_the_sandbox_stays_on() {
     // Without a bracket nothing changes and nothing doubles.
     let plain = mac(&Session::new("s-1").paths()).unwrap();
     assert!(!plain.allow_write.iter().any(|p| p.ends_with("/**")));
+}
+
+/// agent-browser's socket folders, every session's, are denied for reading and, where the write
+/// lists read globs (macOS), for writing; the globs never turn the sandbox off as a `*` in a
+/// session path does.
+#[test]
+fn the_browser_socket_folders_are_denied() {
+    let session = Session::new("s-1");
+    let on_mac = mac(&session.paths()).unwrap();
+    for dir in super::sandbox::SOCKET_DIRS {
+        assert!(on_mac.deny_read.iter().any(|p| p == dir), "{dir}");
+        assert!(on_mac.deny_write.iter().any(|p| p == dir), "{dir}");
+    }
+    let settings = on_mac.settings();
+    let filesystem = &settings["filesystem"];
+    for key in ["denyRead", "denyWrite"] {
+        let list = filesystem[key].as_array().unwrap();
+        assert!(list.iter().any(|p| p == "/tmp/clauseo-ab-*"), "{key}");
+    }
+    let linux = ClaudeSandbox::for_os(SandboxOs::Linux, &session.paths()).unwrap();
+    assert!(linux.deny_read.iter().any(|p| p == "/tmp/clauseo-ab-*"));
+    assert!(!linux.deny_read.iter().any(|p| p.starts_with("/private/")));
+    assert!(!linux.deny_write.iter().any(|p| p.contains("clauseo-ab")));
 }
 
 /// Of Claude's project folder only the tool results of its sessions open, never the transcripts
@@ -490,7 +536,7 @@ fn the_matter_marker_is_denied_to_claudes_edit() {
         forced_ask: false,
         data: &NO_DENY,
         case_law: false,
-        browser: false,
+        browser: crate::agent::loads::profile::ClaudeBrowser::None,
         sandbox: None,
         matter: Some(&session.matter),
         trusted_servers: &[],

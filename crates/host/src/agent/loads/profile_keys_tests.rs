@@ -39,7 +39,7 @@ fn keys(web_search: Switch, login: Login) -> ClaudeKeys<'static> {
         forced_ask: false,
         data: &NO_DENY,
         case_law: false,
-        browser: false,
+        browser: crate::agent::loads::profile::ClaudeBrowser::None,
         sandbox: None,
         matter: None,
         trusted_servers: &[],
@@ -64,7 +64,7 @@ fn strings(value: &Value) -> Vec<&str> {
 #[test]
 fn the_allow_list_is_exactly_the_permissions_list() {
     let hook = json!({"allowedTools": [
-        "mcp__browser",
+        "mcp__docs",
         "Bash(stetdoc view:*)",
         "Bash(stetdoc inspect:*)",
         "Bash(stetdoc check:*)",
@@ -73,7 +73,7 @@ fn the_allow_list_is_exactly_the_permissions_list() {
     ]});
     let options = options(&hook, &keys(ON, Login::FirstParty));
     let mut expected = vec![
-        "mcp__browser".to_owned(),
+        "mcp__docs".to_owned(),
         "Bash(stetdoc view:*)".to_owned(),
         "Bash(stetdoc inspect:*)".to_owned(),
         "Bash(stetdoc check:*)".to_owned(),
@@ -93,7 +93,8 @@ fn the_allow_list_is_exactly_the_permissions_list() {
 
 /// A hook's bare `WebFetch`, any form Claude Code reads as one, or a `WebFetch` rule holding `*`,
 /// would let every host through unasked: dropped while web search is on. A hook's named host
-/// stays.
+/// stays. The hook's `mcp__browser` goes too: this session has no browser (`ClaudeBrowser::None`),
+/// and any hook rule for the `browser` server is dropped then.
 #[test]
 fn a_hooks_open_webfetch_rules_are_dropped() {
     let hook = json!({"allowedTools": [
@@ -128,11 +129,19 @@ fn a_hooks_open_webfetch_rules_are_dropped() {
                     || rule.starts_with("mcp__")),
             "{allowed:?}"
         );
-        assert_eq!(
-            allowed[..2],
-            ["WebFetch(domain:firm.example)", "mcp__browser"]
-        );
-        assert!(allowed.contains(&"WebFetch(domain:www.sci.gov.in)"));
+        // The hook's named host, then `WebSearch` (not on Bedrock) and the seed sites; the
+        // hook's `mcp__browser` is not among them.
+        let head = if login == Login::Bedrock {
+            [
+                "WebFetch(domain:firm.example)",
+                "WebFetch(domain:sci.gov.in)",
+            ]
+        } else {
+            ["WebFetch(domain:firm.example)", "WebSearch"]
+        };
+        assert_eq!(allowed[..2], head);
+        assert!(!allowed.contains(&"mcp__browser"), "{allowed:?}");
+        assert!(allowed.contains(&"WebFetch(domain:sci.gov.in)"));
     }
 }
 
@@ -240,7 +249,7 @@ fn a_hooks_comma_deny_survives_and_a_non_string_deny_is_dropped() {
 #[test]
 fn web_search_off_disallows_both_tools_whatever_the_hook_sent() {
     let hook = json!({
-        "allowedTools": ["mcp__browser", "WebSearch", "WebFetch", "WebFetch(domain:x.in)"],
+        "allowedTools": ["mcp__docs", "WebSearch", "WebFetch", "WebFetch(domain:x.in)"],
         "disallowedTools": ["Task"],
     });
     let options = options(&hook, &keys(LOCKED_OFF, Login::FirstParty));
@@ -248,7 +257,7 @@ fn web_search_off_disallows_both_tools_whatever_the_hook_sent() {
         strings(&options["disallowedTools"]),
         ["Task", "WebSearch", "WebFetch"]
     );
-    assert_eq!(strings(&options["allowedTools"]), ["mcp__browser"]);
+    assert_eq!(strings(&options["allowedTools"]), ["mcp__docs"]);
 }
 
 #[test]

@@ -1,10 +1,10 @@
-//! Codex's browser is the `browser` MCP entry, Claude's the shell tool, on one host wired
-//! with both (as the app is): the Codex session (macOS and Linux) opens one egress proxy, since
-//! its entry asks for one (`{proxy_port}`, ADR 0053), and gets the entry filled with the proxy's
-//! address and its browser listener's password (in a variable, in no argument), no
-//! `AGENT_BROWSER_*` variable of its own, no tools folder on its `PATH` and the entry's line in
-//! its instructions; the Claude session gets no entry, no shell tool and no proxy (no browser at
-//! all on any OS, `servers::no_browser`).
+//! Codex's browser is the `browser` MCP entry, on one host wired with the shell tool too: the
+//! Codex session (macOS and Linux) opens one egress proxy, since its entry asks for one
+//! (`{proxy_port}`, ADR 0053), and gets the entry filled with the proxy's address and its browser
+//! listener's password (in a variable, in no argument), no `AGENT_BROWSER_*` variable of its own,
+//! no tools folder on its `PATH` and the entry's line in its instructions; a Claude session the
+//! hook offers no entry gets no shell tool either (no agent has it, `servers::shell_browser`;
+//! Claude's own entry is `browser_claude.rs`).
 
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
@@ -102,7 +102,7 @@ fn codex_env_has_no_shell_browser_and_no_password(codex_seen: &Seen, tools: &Pat
 }
 
 #[test]
-fn codex_gets_the_entry_with_its_proxy_off_windows_and_claude_no_browser() {
+fn codex_gets_the_entry_with_its_proxy_off_windows_and_claude_no_shell_tool() {
     let dir = Dir::new("browser_codex", &[]);
     // Exactly these arguments and variables (the password in none of them), with
     // `AGENT_BROWSER_PROXY=http://127.0.0.1:8123` (the recording's port) and
@@ -210,8 +210,8 @@ fn codex_gets_the_entry_with_its_proxy_off_windows_and_claude_no_browser() {
     let claude_browser = claude_header
         .iter()
         .find(|state| state.tool == ClauseoTool::Browser);
-    // On every OS, no browser at all (`servers::no_browser`): no `AGENT_BROWSER_*` variable,
-    // no `agent-browser` on its `PATH`, and no browser in its header.
+    // Offered no entry, no browser at all: no `AGENT_BROWSER_*` variable, no `agent-browser` on
+    // its `PATH`, and no browser in its header.
     assert!(
         claude_seen
             .env

@@ -1851,6 +1851,56 @@ Record 0030 has the entry; this is the browser's side of it.
   a guard-local proxy with an open allowlist that refuses private and loopback addresses after
   the DNS lookup, with Chrome's `--proxy-bypass-list=<-loopback>` so loopback goes through it too.
 
+### Claude through the guard (browser PR-1, 2026-11-15)
+
+Approved by the orchestrator (the browser plan's PR-1 and its decision 4). It supersedes, on
+macOS and Linux, the two "No browser for Claude" entries above; on Windows Claude
+stays without a browser until a later change.
+
+- **The entry.** `servers::browser_mcp` is true for Claude off Windows, as for Codex, and
+  `servers::no_browser` is true for Claude on Windows only. Claude gets the same `browser`
+  entry (`clauseo-mcp browser-guard … -- mcp --tools core`), the same filter, the same downloads
+  mover and the same "Saved … to downloads/" note. No agent gets the shell `agent-browser`
+  (`servers::shell_browser` is false on its own now, no longer derived from Claude's gate), so
+  the app still copies nothing into `<data>/tools` and renders the browser's skill for no session.
+- **No prompts.** In a session the entry went to, `claudeCode.options.allowedTools` gains the
+  server-level rule `mcp__browser` (`mcp_trust::claude_rule`; `ClaudeKeys::browser_mcp`, set
+  only when the header shows the browser `Available`). Any hook rule for the server
+  (`mcp__browser`, `mcp__browser__<tool>`) is dropped first. In forced ask there is no
+  `allowedTools`, and the `mcp__*` ask rule gives a card per call, by design. The host answers
+  nothing for Claude: Codex's auto-answer (`codex_auto.rs`) stays Codex's. The dormant shell
+  rules (`ClaudeKeys::browser`) never go with the entry.
+- **The boundary.** Claude Code starts a stdio MCP server itself, outside the sandbox it puts
+  Bash commands in, so the guard and Chrome run unfenced, as Codex's do, and the boundary is
+  Claude's sandboxed shell against them. Loopback is denied directly and through Claude Code's
+  proxy (`DENIED_DOMAINS`), every spelling of `<data>` (the guard's folder, its port file) is
+  unreadable, and now agent-browser's socket folders, every session's, are denied too:
+  `/tmp/clauseo-ab-*` in `denyRead`, and with `/private/tmp/clauseo-ab-*` in `denyRead` and
+  `denyWrite` on macOS (`agent/loads/sandbox.rs` `SOCKET_DIRS`; Linux skips a glob write path,
+  and `/tmp` is not writable there). Codex's fence denies the same folder by exact path.
+- **Sandbox off: no browser, and one notice** (decision 4). When Claude's sandbox falls back
+  off on macOS or Linux (`Off::NoTemp`, `Off::NotUtf8`, `Off::Wildcard`; `Off::drops_browser`),
+  its shell could reach the debugging port and the daemon, so the session gets no entry, no
+  allow rule, no browser in its header and the no-browser sentence
+  (`actor/turn/profile_loads/claude.rs`). The same decision already holds `auto` back
+  (`Off::holds_auto_back`, `Auto::NoSandbox`: Claude runs in `acceptEdits` and asks before
+  commands), which used to say nothing. Both now come with one notice from that one place,
+  `NoticeKind::SandboxOff` at the attach, once per thread for the host's run (UC-510,
+  orchestrator 2026-11-15): "Clauseo couldn't start Claude's safeguards for this matter, so Claude
+  asks before running commands and has no browser in this conversation." The launch prep still
+  claims the browser's ports and socket folder for such a session (the sandbox is decided after
+  it); they go unused and are released at its end.
+- **Instructions.** Claude's part is `browser-claude-mcp.txt`: Codex's rules without "your shell
+  has no internet… never with curl", false for Claude. Both parts now say where a saved file
+  lands: in downloads/ in the matter, by clicking its link (Codex) or clicking or opening it (Claude). The dormant shell part
+  (`browser.txt`, "save a file into the matter with `curl`") reaches no session and is unchanged.
+- **Settings.** The Browser switch's line reads "Claude and ChatGPT use it. Runs on this
+  computer." (UC-213, provisional); the row stays hidden on Windows.
+- **Not verified here (the live Mac check).** That Claude Code 2.1.293 starts the MCP child
+  outside Seatbelt and Chrome starts; 0 prompts in `auto`; and that `curl 127.0.0.1:<cdp>` and
+  `nc -U <socket>` are refused from Claude's shell. Whether Seatbelt refuses an AF_UNIX connect
+  by path deny alone is read from Claude Code's docs, not tried.
+
 ## Consequences
 
 - An agent-browser bump re-reads its `tools/list` schema and `extraArgs` handling: a new typed
@@ -1889,6 +1939,9 @@ Record 0030 has the entry; this is the browser's side of it.
   Chrome failing to start its sandbox; the Windows and macOS messages were read from source, never
   seen. A sandbox error printed after Chrome's endpoint (Windows, at a later child's launch) is
   not watched for.
+- Claude through the guard (above): the MCP child outside Claude Code's sandbox, 0 prompts in
+  `auto`, and `curl` to the debugging port and `nc -U` to the socket refused from Claude's
+  shell were never run on a Mac.
 
 - Windows: compiled with `cargo clippy --target x86_64-pc-windows-gnu`, never run.
   `CREATE_NO_WINDOW`, the case-insensitive pass-through on a real environment block, and the

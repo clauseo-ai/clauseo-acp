@@ -163,8 +163,8 @@ fn lawyer(dir: &Dir, extra: &Value) -> (Value, Value) {
 }
 
 /// Claude's `session/new` or `session/load` params with `servers`, the allow rule of each of the
-/// lawyer's servers among them (`agent/mcp_trust.rs`) and, when it got case law, the pre-allow
-/// and the paragraph.
+/// lawyer's servers among them (`agent/mcp_trust.rs`), when it got case law the pre-allow and
+/// the paragraph, and `mcp__browser` last when it got the browser entry.
 fn claude_params(servers: &[Value], with_case_law: bool) -> Value {
     let mut allowed: Vec<String> = servers
         .iter()
@@ -184,7 +184,12 @@ fn claude_params(servers: &[Value], with_case_law: bool) -> Value {
             .map(|tool| format!("mcp__case-law__{tool}")),
         );
     }
-    json!({"mcpServers": claude_servers(servers), "_meta": {
+    let servers = claude_servers(servers);
+    // The guarded browser entry, where Claude gets it, runs unasked (`ClaudeKeys::browser_mcp`).
+    if servers.iter().any(|server| server["name"] == "browser") {
+        allowed.push("mcp__browser".to_owned());
+    }
+    json!({"mcpServers": servers, "_meta": {
         "systemPrompt": {"append": instructions(with_case_law)},
         "claudeCode": {"options": {"allowedTools": allowed}}}})
 }
@@ -240,9 +245,15 @@ fn both_agents_get_case_law_after_the_other_servers() {
     let thread = host.create_thread(matter, CLAUDE);
     turn(&host, thread);
     turn(&host, host.create_thread(matter, CODEX));
-    // Claude has no browser on any OS (`servers::no_browser`).
+    // Claude has the browser off Windows (`servers::no_browser`).
     let web_search = tool(ClauseoTool::WebSearch, Some(ToolsUnavailableReason::Off));
-    let expected: Vec<ToolState> = vec![web_search, case_law(None)];
+    let browser =
+        (!clauseo_profile::servers::no_browser(Some(clauseo_protocol::AgentKind::Claude)))
+            .then(|| tool(ClauseoTool::Browser, None));
+    let expected: Vec<ToolState> = [Some(web_search), browser, Some(case_law(None))]
+        .into_iter()
+        .flatten()
+        .collect();
     assert_eq!(first_frame_tools(&host, thread), expected);
     let seen = launcher.seen();
     let tokens: Vec<String> = seen.iter().filter_map(token_of).collect();

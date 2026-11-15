@@ -44,6 +44,9 @@ mod blobs;
 #[path = "host/browser.rs"]
 mod browser;
 #[cfg(test)]
+#[path = "host/browser_claude.rs"]
+mod browser_claude;
+#[cfg(test)]
 #[path = "host/browser_codex.rs"]
 mod browser_codex;
 #[cfg(test)]

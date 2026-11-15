@@ -61,7 +61,8 @@ export const HI = {
   "Web search": "वेब खोज",
   "Search the web and read pages.": "वेब पर खोजें और पेज पढ़ें।",
   Browser: "ब्राउज़र",
-  "ChatGPT uses it. Runs on this computer.": "ChatGPT इसका उपयोग करता है। यह इसी कंप्यूटर पर चलता है।",
+  "Claude and ChatGPT use it. Runs on this computer.":
+    "Claude और ChatGPT इसका उपयोग करते हैं। यह इसी कंप्यूटर पर चलता है।",
   // the anonymous counts' switch: after the first run's line, the crash reports with it (0060)
   "If Clauseo crashes, a short crash report goes with them, never anything from your papers.":
     "अगर Clauseo क्रैश हो जाए, तो इनके साथ एक छोटी क्रैश रिपोर्ट जाती है, जिसमें आपके दस्तावेज़ों से कभी कुछ नहीं होता।",

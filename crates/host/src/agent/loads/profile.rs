@@ -10,10 +10,11 @@
 //!   `mcp__case-law__<tool>` per search and read tool (`case_law::UNASKED_TOOLS`) only in a
 //!   session that got the `case-law` entry (any hook rule for that server is dropped
 //!   otherwise), and before it `mcp__<name>` for each of the lawyer's servers that runs
-//!   without asking
-//!   (`agent/mcp_trust.rs`); in forced ask (`agent/forced_ask.rs`) there is no `allowedTools`
-//!   at all, the hook's included. `additionalDirectories` gains the work folder and the matter
-//!   notes folder, after any hook entries. `settings` gains `disableSkillShellExecution: true`
+//!   without asking (`agent/mcp_trust.rs`), and `mcp__browser` in a session that got the
+//!   guarded `browser` entry (any hook rule for that server is dropped otherwise); in forced
+//!   ask (`agent/forced_ask.rs`) there is no `allowedTools` at all, the hook's included.
+//!   `additionalDirectories` gains the work folder and the matter notes folder, after any hook
+//!   entries. `settings` gains `disableSkillShellExecution: true`
 //!   always, and `skipWebFetchPreflight: true` on a Bedrock,
 //!   Vertex or Foundry login, and always `permissions.deny` gains the data folder's rules
 //!   (`agent/data_fence.rs`), after any the hook put there, and on Windows the whole `Bash` tool
@@ -53,6 +54,10 @@ use serde_json::{Map, Value};
 use super::browser::Switch;
 use super::take_object;
 use crate::error::Error;
+
+mod claude_browser;
+pub(crate) use claude_browser::ClaudeBrowser;
+use claude_browser::is_browser_mcp_rule;
 
 /// Claude Code's built-in web tools, which `tools.web_search` turns off.
 pub(crate) const WEB_TOOLS: [&str; 2] = ["WebSearch", "WebFetch"];
@@ -183,13 +188,8 @@ pub(crate) struct ClaudeKeys<'a> {
     /// `mcp__case-law__<tool>` per `case_law::UNASKED_TOOLS` (decision D7), never `recharge`.
     /// Without it, any hook rule for a `case-law` server is dropped.
     pub(crate) case_law: bool,
-    /// The session has the browser as a shell tool: `allowedTools` gains agent-browser's page
-    /// subcommands, `disallowedTools` its denied flags, subcommands and file or JavaScript
-    /// commands, and `permissions.ask` the options that still ask
-    /// (`clauseo_profile::claude::agent_browser_allowed`, `agent_browser_denied`,
-    /// `agent_browser_ask`). Without it, any hook rule naming agent-browser is dropped, so a
-    /// session without the browser has none.
-    pub(crate) browser: bool,
+    /// How the session reaches the browser, if at all ([`ClaudeBrowser`]).
+    pub(crate) browser: ClaudeBrowser,
     /// Claude Code's own sandbox (`agent::loads::sandbox`), on macOS and Linux; none on
     /// Windows, where commands keep asking.
     pub(crate) sandbox: Option<&'a super::sandbox::ClaudeSandbox>,
@@ -235,9 +235,13 @@ pub(crate) fn claude_options(options: &mut Map<String, Value>, keys: &ClaudeKeys
         }
     }
     let names_browser = |rule: &Value| rule.as_str().is_some_and(|r| r.contains("agent-browser"));
-    allowed.retain(|rule| !names_browser(rule));
+    allowed.retain(|rule| !names_browser(rule) && !rule.as_str().is_some_and(is_browser_mcp_rule));
     disallowed.retain(|rule| !names_browser(rule));
-    if keys.browser {
+    if keys.browser == ClaudeBrowser::Entry {
+        let rule = crate::agent::mcp_trust::claude_rule(clauseo_profile::servers::BROWSER);
+        push_new(&mut allowed, &rule);
+    }
+    if keys.browser == ClaudeBrowser::Shell {
         allowed.extend(clauseo_profile::claude::agent_browser_allowed().map(Value::String));
         disallowed.extend(clauseo_profile::claude::agent_browser_denied().map(Value::String));
     }
@@ -262,7 +266,7 @@ pub(crate) fn claude_options(options: &mut Map<String, Value>, keys: &ClaudeKeys
     deny_data_folder(&mut settings, keys.data, keys.sandbox.is_some());
     // Windows: no Bash tool, with Clauseo's PowerShell switch on (`agent/one_shell.rs`).
     crate::agent::one_shell::deny_bash(&mut settings, cfg!(windows));
-    if keys.browser {
+    if keys.browser == ClaudeBrowser::Shell {
         browser_ask_settings(&mut settings);
     }
     if let Some(matter) = keys.matter {
