@@ -47,7 +47,7 @@
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
-import { copyFile, mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises';
+import { copyFile, mkdir, mkdtemp, readFile, readdir, realpath, rename, rm, writeFile } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -281,6 +281,17 @@ function lastLine(command, args) {
 }
 
 /**
+ * Where the temporary folder goes. Upstream's tests bind Unix sockets under
+ * `<source>/cli/target/t/`, and a socket path has at most 104 bytes on macOS, where the
+ * runner's TMPDIR (/var/folders/...) alone is about 50: so /tmp there, and short names
+ * (`ab-XXXXXX/s`). The tests set the socket folder themselves, so AGENT_BROWSER_SOCKET_DIR would
+ * not help.
+ */
+export function workParent(platform = process.platform) {
+  return platform === 'darwin' ? '/tmp' : tmpdir();
+}
+
+/**
  * Downloads, checks and extracts the pinned source, then applies the patches, each after a
  * `git apply --check`. Returns the temporary folder (the caller removes it), the source folder
  * in it, the commit time and the patches with their hashes.
@@ -297,14 +308,16 @@ async function prepare({ pin, patchDir, log, fetch }) {
     throw new Error(`agent-browser: the archive names commit ${info.commit}, the pin ${commit}`);
   }
 
-  const work = await realpath(await mkdtemp(join(tmpdir(), 'agent-browser-src-')));
+  const work = await realpath(await mkdtemp(join(workParent(), 'ab-')));
   try {
     // tar runs in the folder with a relative name: GNU tar reads `C:` in a path as a host.
     await writeFile(join(work, 'upstream.tar.gz'), gz);
     const excludes = info.symlinks.map((name) => `--exclude=${name}`);
     run('tar', ['-xzf', 'upstream.tar.gz', ...excludes], { cwd: work });
     await rm(join(work, 'upstream.tar.gz'));
-    const src = join(work, `agent-browser-${commit}`);
+    // A short name: see workParent.
+    const src = join(work, 's');
+    await rename(join(work, `agent-browser-${commit}`), src);
     if (!existsSync(join(src, 'cli', 'Cargo.toml'))) throw new Error(`${src} has no cli/Cargo.toml`);
 
     // The ceiling keeps git from finding a repository above the temporary folder.

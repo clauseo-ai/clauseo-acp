@@ -33,6 +33,11 @@ only; macOS and Linux behave as upstream (plus 0001).
   descriptors through CreateProcessW, inheriting only their stdio handles.
 - Streaming, `inspect` and the dashboard are always off on Windows (0001's switch forced on).
 - Tests that start a daemon on Windows (tls_cli, obscura_cli) pass a test session key.
+  Upstream's stream server tests (native::stream, and actions' stream enable tests) do not run
+  on Windows; a Windows test checks that `stream enable` is refused there. The Windows probes
+  run under a token as a sandbox gives one (windows_test_token.rs): a write-restricted token
+  with the logon SID among its restricting SIDs (so the probe can open its desktop), or a
+  filtered one without SeDebugPrivilege or Administrators; a failed check prints both tokens.
 
 diff --git a/cli/Cargo.toml b/cli/Cargo.toml
 index c474f89..e9200b0 100644
@@ -446,10 +451,10 @@ index 887dae5..afd3891 100644
  
      // === Daemon Version Mismatch Detection Tests ===
 diff --git a/cli/src/main.rs b/cli/src/main.rs
-index 67d6a1a..b9e09c0 100644
+index 67d6a1a..9c2388c 100644
 --- a/cli/src/main.rs
 +++ b/cli/src/main.rs
-@@ -12,12 +12,21 @@ mod output;
+@@ -12,12 +12,23 @@ mod output;
  mod plugins;
  mod read;
  mod session_files;
@@ -468,10 +473,12 @@ index 67d6a1a..b9e09c0 100644
 +mod windows_security;
 +#[cfg(windows)]
 +mod windows_spawn;
++#[cfg(all(windows, test))]
++mod windows_test_token;
  
  use serde_json::json;
  use sha2::{Digest, Sha256};
-@@ -1436,6 +1445,18 @@ fn run_close_all(flags: &Flags) {
+@@ -1436,6 +1447,18 @@ fn run_close_all(flags: &Flags) {
  }
  
  fn main() {
@@ -490,7 +497,7 @@ index 67d6a1a..b9e09c0 100644
      // Rust ignores SIGPIPE by default, causing println! to panic on broken pipes.
      // Reset to SIG_DFL so the OS terminates the process cleanly instead.
      #[cfg(unix)]
-@@ -1464,7 +1485,16 @@ fn main() {
+@@ -1464,7 +1487,16 @@ fn main() {
              eprintln!("{} {}", color::error_indicator(), msg);
              exit(1);
          }
@@ -531,6 +538,79 @@ index eecc1a7..72e251b 100644
      let mut child = command.spawn().map_err(|e| e.to_string())?;
  
      if let Some(body) = stdin_body {
+diff --git a/cli/src/native/actions.rs b/cli/src/native/actions.rs
+index 037cf27..89c5397 100644
+--- a/cli/src/native/actions.rs
++++ b/cli/src/native/actions.rs
+@@ -16834,6 +16834,9 @@ printf '%s' '{"protocol":"agent-browser.plugin.v1","success":true,"data":{}}'
+         assert!(state.active_iframe_sessions.is_empty());
+     }
+ 
++    // A stream server never starts on Windows in this build:
++    // test_stream_enable_is_refused_on_windows.
++    #[cfg(not(windows))]
+     #[tokio::test]
+     async fn test_stream_enable_disable_and_status_without_browser() {
+         let guard = EnvGuard::new(&["AGENT_BROWSER_SOCKET_DIR", "AGENT_BROWSER_SESSION"]);
+@@ -16907,6 +16910,9 @@ printf '%s' '{"protocol":"agent-browser.plugin.v1","success":true,"data":{}}'
+         let _ = fs::remove_dir_all(&socket_dir);
+     }
+ 
++    // A stream server never starts on Windows in this build:
++    // test_stream_enable_is_refused_on_windows.
++    #[cfg(not(windows))]
+     #[tokio::test]
+     async fn test_stream_disable_preserves_existing_screencast_state() {
+         let guard = EnvGuard::new(&["AGENT_BROWSER_SOCKET_DIR", "AGENT_BROWSER_SESSION"]);
+@@ -16939,6 +16945,9 @@ printf '%s' '{"protocol":"agent-browser.plugin.v1","success":true,"data":{}}'
+         let _ = fs::remove_dir_all(&socket_dir);
+     }
+ 
++    // A stream server never starts on Windows in this build:
++    // test_stream_enable_is_refused_on_windows.
++    #[cfg(not(windows))]
+     #[tokio::test]
+     async fn test_stream_disable_clears_state_when_stream_file_removal_fails() {
+         let guard = EnvGuard::new(&["AGENT_BROWSER_SOCKET_DIR", "AGENT_BROWSER_SESSION"]);
+@@ -16975,6 +16984,38 @@ printf '%s' '{"protocol":"agent-browser.plugin.v1","success":true,"data":{}}'
+         let _ = fs::remove_dir_all(&socket_dir);
+     }
+ 
++    #[cfg(windows)]
++    #[tokio::test]
++    async fn test_stream_enable_is_refused_on_windows() {
++        let guard = EnvGuard::new(&[
++            "AGENT_BROWSER_SOCKET_DIR",
++            "AGENT_BROWSER_SESSION",
++            "AGENT_BROWSER_STREAM_DISABLED",
++        ]);
++        let socket_dir = unique_socket_dir("stream-windows");
++        fs::create_dir_all(&socket_dir).expect("socket dir should be created");
++        guard.set(
++            "AGENT_BROWSER_SOCKET_DIR",
++            socket_dir.to_str().expect("socket dir should be utf-8"),
++        );
++        guard.set("AGENT_BROWSER_SESSION", "stream-windows-session");
++        // Off whatever the variable says.
++        guard.set("AGENT_BROWSER_STREAM_DISABLED", "0");
++
++        let mut state = DaemonState::new();
++        let err = handle_stream_enable(&json!({ "port": 0 }), &mut state)
++            .await
++            .expect_err("stream enable must be refused on Windows");
++        assert!(err.contains("disabled on Windows in this build"), "{err}");
++        assert!(state.stream_server.is_none());
++        assert!(state.stream_client.is_none());
++        assert!(!socket_dir.join("stream-windows-session.stream").exists());
++        let _ = fs::remove_dir_all(&socket_dir);
++    }
++
++    // A stream server never starts on Windows in this build:
++    // test_stream_enable_is_refused_on_windows.
++    #[cfg(not(windows))]
+     #[tokio::test]
+     async fn test_stream_enable_port_conflict_returns_error() {
+         let guard = EnvGuard::new(&["AGENT_BROWSER_SOCKET_DIR", "AGENT_BROWSER_SESSION"]);
 diff --git a/cli/src/native/daemon.rs b/cli/src/native/daemon.rs
 index 4fb9666..3cf8b0d 100644
 --- a/cli/src/native/daemon.rs
@@ -704,7 +784,7 @@ index b428183..bb08f8d 100644
  
      writer
 diff --git a/cli/src/native/stream/mod.rs b/cli/src/native/stream/mod.rs
-index 52dc255..8d363ab 100644
+index 52dc255..1bf6bf2 100644
 --- a/cli/src/native/stream/mod.rs
 +++ b/cli/src/native/stream/mod.rs
 @@ -23,16 +23,23 @@ use super::cdp::client::CdpClient;
@@ -736,6 +816,161 @@ index 52dc255..8d363ab 100644
      format!("{} is disabled (AGENT_BROWSER_STREAM_DISABLED=1)", what)
  }
  
+@@ -776,7 +783,9 @@ mod tests {
+         assert_eq!(meta.page_scale_factor, 1.0);
+     }
+ 
+-    use futures_util::{SinkExt, StreamExt};
++    #[cfg(not(windows))]
++    use futures_util::SinkExt;
++    use futures_util::StreamExt;
+     use tokio_tungstenite::tungstenite::Message;
+ 
+     type WsClient = tokio_tungstenite::WebSocketStream<
+@@ -813,6 +822,8 @@ mod tests {
+         }
+     }
+ 
++    // A stream server never starts on Windows in this build.
++    #[cfg(not(windows))]
+     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+     async fn test_new_client_receives_latest_frame_only() {
+         let (server, _slot) = StreamServer::start_without_client(
+@@ -834,6 +845,8 @@ mod tests {
+         server.shutdown().await;
+     }
+ 
++    // A stream server never starts on Windows in this build.
++    #[cfg(not(windows))]
+     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+     async fn test_session_rebind_does_not_seed_new_client_with_previous_frame() {
+         let (server, _slot) = StreamServer::start_without_client(
+@@ -859,6 +872,8 @@ mod tests {
+         server.shutdown().await;
+     }
+ 
++    // A stream server never starts on Windows in this build.
++    #[cfg(not(windows))]
+     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+     async fn test_viewport_rebind_does_not_seed_new_client_with_previous_frame() {
+         let (server, _slot) = StreamServer::start_without_client(
+@@ -882,6 +897,8 @@ mod tests {
+     /// Guards the `StreamFrame` invariant: the id ack pacing waits on is the id
+     /// the client sees on the wire. No other test reads both, so offsetting one
+     /// of them is invisible to them and wedges ack pacing in production.
++    // A stream server never starts on Windows in this build.
++    #[cfg(not(windows))]
+     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+     async fn test_ack_of_the_wire_id_releases_the_next_frame() {
+         let (server, _slot) = StreamServer::start_without_client(
+@@ -924,6 +941,8 @@ mod tests {
+     /// Not reading is the point: reading un-parks a writer blocked in
+     /// `ws_tx.send()`, which then exits on its own and hides whether anything
+     /// owned it.
++    // A stream server never starts on Windows in this build.
++    #[cfg(not(windows))]
+     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+     async fn test_shutdown_leaves_no_connection_task_alive() {
+         let idle = Arc::new(IdleActivity::new());
+@@ -977,6 +996,8 @@ mod tests {
+     /// The cached opening frame is charged against the cap like any other
+     /// delivery. Asserted on the gap between the first two frames, because a
+     /// rate averaged over seconds absorbs one mistimed frame.
++    // A stream server never starts on Windows in this build.
++    #[cfg(not(windows))]
+     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+     async fn test_url_cap_charges_the_cached_opening_frame() {
+         let (server, _slot) = StreamServer::start_without_client(
+@@ -1005,6 +1026,8 @@ mod tests {
+ 
+     /// A cap may not postpone a delivery that never happened, so a connection
+     /// with no cached frame gets its first frame immediately.
++    // A stream server never starts on Windows in this build.
++    #[cfg(not(windows))]
+     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+     async fn test_cap_does_not_delay_the_first_frame_without_a_cache() {
+         let (server, _slot) = StreamServer::start_without_client(
+@@ -1033,6 +1056,8 @@ mod tests {
+         server.shutdown().await;
+     }
+ 
++    // A stream server never starts on Windows in this build.
++    #[cfg(not(windows))]
+     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+     async fn test_max_fps_cap_skips_stale_frames() {
+         let (server, _slot) = StreamServer::start_without_client(
+@@ -1091,6 +1116,8 @@ mod tests {
+     /// Ack pacing keeps one frame in flight, and frames produced while the
+     /// client owes an ack collapse to the newest. Without it latest-frame-wins
+     /// stops at the socket and a stalled client drains a stale backlog.
++    // A stream server never starts on Windows in this build.
++    #[cfg(not(windows))]
+     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+     async fn test_ack_pacing_holds_one_frame_and_skips_to_newest() {
+         let (server, _slot) = StreamServer::start_without_client(
+@@ -1132,6 +1159,8 @@ mod tests {
+ 
+     /// Ack pacing declared on the URL covers the opening frame. A `config`
+     /// message cannot: the cached frame is written before it arrives.
++    // A stream server never starts on Windows in this build.
++    #[cfg(not(windows))]
+     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+     async fn test_url_ack_pacing_covers_the_opening_frame() {
+         let (server, _slot) = StreamServer::start_without_client(
+@@ -1166,6 +1195,8 @@ mod tests {
+     /// A client that acks an id ahead of the stream must not wedge itself. The
+     /// watermark only moves forward, so a premature high ack would swallow every
+     /// later ack and the writer would wait on a notification that never comes.
++    // A stream server never starts on Windows in this build.
++    #[cfg(not(windows))]
+     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+     async fn test_ack_ahead_of_the_stream_does_not_wedge_the_writer() {
+         let (server, _slot) = StreamServer::start_without_client(
+@@ -1204,6 +1235,8 @@ mod tests {
+ 
+     /// Returning to push pacing must release a frame that is still waiting on
+     /// an acknowledgement the client will now never send.
++    // A stream server never starts on Windows in this build.
++    #[cfg(not(windows))]
+     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+     async fn test_leaving_ack_pacing_releases_the_held_frame() {
+         let (server, _slot) = StreamServer::start_without_client(
+@@ -1244,6 +1277,8 @@ mod tests {
+     /// Frame ids keep climbing across server restarts. A per-server counter
+     /// would restart at 1, and an ack pacing client that banked a higher id
+     /// would treat every later frame as stale and stop receiving.
++    // A stream server never starts on Windows in this build.
++    #[cfg(not(windows))]
+     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+     async fn test_frame_ids_survive_a_stream_server_restart() {
+         let meta = FrameMetadata::default();
+@@ -1294,6 +1329,8 @@ mod tests {
+     /// A config message must not deadlock the reader against its own watch
+     /// channel: a read guard held across `send_replace` silences the connection
+     /// from the first config message onward.
++    // A stream server never starts on Windows in this build.
++    #[cfg(not(windows))]
+     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+     async fn test_repeated_config_messages_keep_the_connection_live() {
+         let (server, _slot) = StreamServer::start_without_client(
+@@ -1325,6 +1362,8 @@ mod tests {
+         server.shutdown().await;
+     }
+ 
++    // A stream server never starts on Windows in this build.
++    #[cfg(not(windows))]
+     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+     async fn test_uncapped_client_receives_consecutive_frames() {
+         let (server, _slot) = StreamServer::start_without_client(
+@@ -1360,6 +1399,8 @@ mod tests {
+ 
+     /// Loosening a cap mid-stream takes effect immediately, rather than leaving
+     /// the writer asleep on the deadline the old, slower rate computed.
++    // A stream server never starts on Windows in this build.
++    #[cfg(not(windows))]
+     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+     async fn test_loosening_cap_midstream_takes_effect_immediately() {
+         let (server, _slot) = StreamServer::start_without_client(
 diff --git a/cli/src/session_files.rs b/cli/src/session_files.rs
 index 18129f6..25e8d4a 100644
 --- a/cli/src/session_files.rs
@@ -1632,19 +1867,19 @@ index 0000000..9709385
 +mod tests;
 diff --git a/cli/src/windows_pipe_tests.rs b/cli/src/windows_pipe_tests.rs
 new file mode 100644
-index 0000000..8ab885d
+index 0000000..b879f50
 --- /dev/null
 +++ b/cli/src/windows_pipe_tests.rs
-@@ -0,0 +1,532 @@
+@@ -0,0 +1,429 @@
 +//! Tests for the daemon pipe. The restricted-token tests start this test binary again, under a
-+//! write-restricted token made with CreateRestrictedToken (as Codex's Windows sandbox runs its
-+//! commands): as a client, which the daemon must disconnect before writing anything (a control
-+//! run with the normal token and the session key must be served), and as a would-be server,
-+//! which a client must refuse. The key tests: a client without the key, or with a wrong one, is
++//! write-restricted token as Codex's Windows sandbox makes one (`windows_test_token`): as a
++//! client, which the daemon must disconnect before writing anything (a control run with the
++//! normal token and the session key must be served), and as a would-be server, which a client
++//! must refuse. A failed check prints the probe's token, the test's and what the probe printed. The key tests: a client without the key, or with a wrong one, is
 +//! never served, and a client refuses a daemon of another session or key.
 +
 +use super::*;
-+use std::os::windows::ffi::OsStrExt;
++use crate::windows_test_token::{Kind, Probe};
 +use std::process::Command;
 +
 +const HELPER_ID: &str = "AB_PIPE_TEST_ID";
@@ -1930,18 +2165,28 @@ index 0000000..8ab885d
 +    command
 +        .args(["--exact", SLEEPER_TEST, "--test-threads=1", "--quiet"])
 +        .env(SLEEPER, "1");
-+    let (process, pid) = restricted::start(&command);
-+    let sandboxed = PipeRecord {
-+        id,
-+        pid,
-+        created: process_creation_time(pid).unwrap(),
-+    };
-+    let restricted_server = check_server(pid, &sandboxed);
-+    unsafe { windows_sys::Win32::System::Threading::TerminateProcess(raw(&process), 1) };
-+    assert!(restricted_server
-+        .unwrap_err()
-+        .to_string()
-+        .contains("restricted"));
++    let probe = Probe::start(&command, Kind::Restricted).unwrap();
++    std::thread::sleep(Duration::from_millis(1500));
++    let running = probe.running();
++    let pid = probe.pid;
++    let restricted_server = running.then(|| {
++        let sandboxed = PipeRecord {
++            id,
++            pid,
++            created: process_creation_time(pid).unwrap(),
++        };
++        check_server(pid, &sandboxed)
++    });
++    let token = probe.token.clone();
++    let (code, printed) = probe.finish(0);
++    let diagnosis = Probe::diagnosis(&token, Some(code), &printed);
++    let refusal = restricted_server
++        .unwrap_or_else(|| panic!("the restricted would-be server did not stay up{diagnosis}"))
++        .expect_err(&format!("a restricted server must be refused{diagnosis}"));
++    assert!(
++        refusal.to_string().contains("restricted"),
++        "{refusal}{diagnosis}"
++    );
 +}
 +
 +#[tokio::test(flavor = "multi_thread")]
@@ -1950,7 +2195,7 @@ index 0000000..8ab885d
 +    let mut listener = bind(&id);
 +    let helper_id = id.clone();
 +    let mut helper = tokio::task::spawn_blocking(move || run_helper(&helper_id, true));
-+    let outcome = tokio::time::timeout(Duration::from_secs(60), async {
++    let outcome = tokio::time::timeout(Duration::from_secs(90), async {
 +        tokio::select! {
 +            accepted = listener.accept() => Err(format!("accepted: {:?}", accepted.map(|_| ()))),
 +            code = &mut helper => Ok(code.unwrap()),
@@ -1958,10 +2203,10 @@ index 0000000..8ab885d
 +    })
 +    .await
 +    .expect("the restricted client neither finished nor was accepted");
++    let (code, diagnosis) = outcome.unwrap();
 +    assert_eq!(
-+        outcome,
-+        Ok(DISCONNECTED),
-+        "1 = could not open, 11 = held open, 20 = given bytes"
++        code, DISCONNECTED,
++        "0 = disconnected, 1 = could not open, 11 = held open, 20 = given bytes{diagnosis}"
 +    );
 +}
 +
@@ -1977,7 +2222,7 @@ index 0000000..8ab885d
 +        .expect("the unrestricted helper never connected")
 +        .expect("accept");
 +    server.write_all(b"ok\n").await.unwrap();
-+    assert_eq!(helper.await.unwrap(), SERVED);
++    assert_eq!(helper.await.unwrap().0, SERVED);
 +}
 +
 +/// Run only as the child of the tests above (which set HELPER_ID); a no-op otherwise. With
@@ -2030,9 +2275,9 @@ index 0000000..8ab885d
 +    }
 +}
 +
-+/// Starts this test binary as the pipe client and returns its exit code: under a restricted
-+/// token without the key, or unrestricted with it.
-+fn run_helper(id: &str, restricted: bool) -> i32 {
++/// Starts this test binary as the pipe client and returns its exit code, with what a failed
++/// check prints: under a restricted token without the key, or unrestricted with it.
++fn run_helper(id: &str, restricted: bool) -> (i32, String) {
 +    let exe = std::env::current_exe().unwrap();
 +    let daemon = this_process(id);
 +    let mut command = Command::new(&exe);
@@ -2048,125 +2293,12 @@ index 0000000..8ab885d
 +            .stderr(std::process::Stdio::null())
 +            .status()
 +            .unwrap();
-+        return status.code().unwrap();
++        return (status.code().unwrap(), String::new());
 +    }
-+    restricted::run(&command)
-+}
-+
-+mod restricted {
-+    use super::*;
-+    use crate::windows_spawn::{command_line, environment_block};
-+    use windows_sys::Win32::Foundation::{CloseHandle, LocalFree, PSID};
-+    use windows_sys::Win32::Security::Authorization::ConvertStringSidToSidW;
-+    use windows_sys::Win32::Security::{
-+        CreateRestrictedToken, SID_AND_ATTRIBUTES, TOKEN_ASSIGN_PRIMARY, TOKEN_DUPLICATE,
-+        TOKEN_QUERY, WRITE_RESTRICTED,
-+    };
-+    use windows_sys::Win32::System::Threading::{
-+        CreateProcessAsUserW, GetCurrentProcess, GetExitCodeProcess, OpenProcessToken,
-+        CREATE_NO_WINDOW, CREATE_UNICODE_ENVIRONMENT, PROCESS_INFORMATION, STARTUPINFOW,
-+    };
-+
-+    /// Runs `command` under a write-restricted copy of this process's token whose restricting
-+    /// SIDs are the user and Everyone, and returns its exit code.
-+    pub fn run(command: &Command) -> i32 {
-+        let (process, _) = start(command);
-+        let mut code = 0u32;
-+        unsafe {
-+            WaitForSingleObject(raw(&process), INFINITE);
-+            GetExitCodeProcess(raw(&process), &mut code);
-+        }
-+        code as i32
-+    }
-+
-+    /// Starts `command` as `run` does and returns its process handle (full access) and pid.
-+    pub fn start(command: &Command) -> (OwnedHandle, u32) {
-+        let token = restricted_token();
-+        let program = command.get_program().to_owned();
-+        let mut line = command_line(&program, command.get_args()).unwrap();
-+        let app: Vec<u16> = program.encode_wide().chain(Some(0)).collect();
-+        let environment = environment_block(command).unwrap();
-+        let mut startup: STARTUPINFOW = unsafe { mem::zeroed() };
-+        startup.cb = mem::size_of::<STARTUPINFOW>() as u32;
-+        let mut info: PROCESS_INFORMATION = unsafe { mem::zeroed() };
-+        let ok = unsafe {
-+            CreateProcessAsUserW(
-+                raw(&token),
-+                app.as_ptr(),
-+                line.as_mut_ptr(),
-+                ptr::null(),
-+                ptr::null(),
-+                0,
-+                CREATE_NO_WINDOW | CREATE_UNICODE_ENVIRONMENT,
-+                environment.as_ptr().cast(),
-+                ptr::null(),
-+                &startup,
-+                &mut info,
-+            )
-+        };
-+        assert_ne!(
-+            ok,
-+            0,
-+            "CreateProcessAsUserW: {}",
-+            io::Error::last_os_error()
-+        );
-+        unsafe { CloseHandle(info.hThread) };
-+        let process = unsafe { OwnedHandle::from_raw_handle(info.hProcess as _) };
-+        (process, info.dwProcessId)
-+    }
-+
-+    fn restricted_token() -> OwnedHandle {
-+        let mut token: HANDLE = 0;
-+        let access = TOKEN_DUPLICATE | TOKEN_QUERY | TOKEN_ASSIGN_PRIMARY;
-+        assert_ne!(
-+            unsafe { OpenProcessToken(GetCurrentProcess(), access, &mut token) },
-+            0
-+        );
-+        let token = unsafe { OwnedHandle::from_raw_handle(token as _) };
-+        let user = crate::windows_security::current_user_sid().unwrap();
-+        let sids: Vec<PSID> = [user.as_str(), "S-1-1-0"].iter().map(|s| sid(s)).collect();
-+        let restricting: Vec<SID_AND_ATTRIBUTES> = sids
-+            .iter()
-+            .map(|&sid| SID_AND_ATTRIBUTES {
-+                Sid: sid,
-+                Attributes: 0,
-+            })
-+            .collect();
-+        let mut restricted: HANDLE = 0;
-+        let ok = unsafe {
-+            CreateRestrictedToken(
-+                raw(&token),
-+                WRITE_RESTRICTED,
-+                0,
-+                ptr::null(),
-+                0,
-+                ptr::null(),
-+                restricting.len() as u32,
-+                restricting.as_ptr(),
-+                &mut restricted,
-+            )
-+        };
-+        for sid in sids {
-+            unsafe { LocalFree(sid) };
-+        }
-+        assert_ne!(
-+            ok,
-+            0,
-+            "CreateRestrictedToken: {}",
-+            io::Error::last_os_error()
-+        );
-+        unsafe { OwnedHandle::from_raw_handle(restricted as _) }
-+    }
-+
-+    fn sid(text: &str) -> PSID {
-+        let wide = to_wide(text);
-+        let mut sid: PSID = ptr::null_mut();
-+        assert_ne!(
-+            unsafe { ConvertStringSidToSidW(wide.as_ptr(), &mut sid) },
-+            0
-+        );
-+        sid
-+    }
++    let probe = Probe::start(&command, Kind::Restricted).unwrap();
++    let token = probe.token.clone();
++    let (code, printed) = probe.finish(60_000);
++    (code as i32, Probe::diagnosis(&token, Some(code), &printed))
 +}
 diff --git a/cli/src/windows_security.rs b/cli/src/windows_security.rs
 new file mode 100644
@@ -2565,10 +2697,10 @@ index 0000000..3f1c066
 +}
 diff --git a/cli/src/windows_spawn.rs b/cli/src/windows_spawn.rs
 new file mode 100644
-index 0000000..4754fea
+index 0000000..685b3b1
 --- /dev/null
 +++ b/cli/src/windows_spawn.rs
-@@ -0,0 +1,527 @@
+@@ -0,0 +1,586 @@
 +//! Starting a child process that is protected from its first instruction.
 +//!
 +//! `std::process::Command` cannot pass a security descriptor to CreateProcess, so a child it
@@ -3062,38 +3194,464 @@ index 0000000..4754fea
 +        assert_eq!(status.code(), Some(3));
 +    }
 +
++    /// The variable that tells `vm_read_probe_child` which pid to probe.
++    const PROBE_PID: &str = "AB_SPAWN_PROBE_PID";
++
++    /// Run only as the probe of the test below (which sets PROBE_PID); a no-op otherwise. Prints
++    /// which rights it got on the pid, and its own token.
 +    #[test]
-+    fn a_hardened_child_cannot_be_opened_for_memory_reads_by_its_own_user() {
++    fn vm_read_probe_child() {
 +        use windows_sys::Win32::System::Threading::{
 +            OpenProcess, PROCESS_DUP_HANDLE, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_VM_READ,
 +        };
++        let Some(pid) = std::env::var(PROBE_PID)
++            .ok()
++            .and_then(|p| p.parse::<u32>().ok())
++        else {
++            return;
++        };
++        let open = |access| {
++            let handle = unsafe { OpenProcess(access, 0, pid) };
++            if handle != 0 {
++                unsafe { CloseHandle(handle) };
++            }
++            if handle != 0 {
++                "granted"
++            } else {
++                "denied"
++            }
++        };
++        println!(
++            "SPAWN-PROBE query={} vm_read={} dup_handle={}",
++            open(PROCESS_QUERY_LIMITED_INFORMATION),
++            open(PROCESS_VM_READ),
++            open(PROCESS_DUP_HANDLE)
++        );
++        println!(
++            "SPAWN-PROBE-TOKEN {}",
++            crate::windows_test_token::describe_own()
++        );
++    }
++
++    /// A same-user probe with a filtered, non-admin token without SeDebugPrivilege
++    /// (`windows_test_token::Kind::Filtered`) is denied PROCESS_VM_READ and PROCESS_DUP_HANDLE
++    /// on a hardened child, and keeps PROCESS_QUERY_LIMITED_INFORMATION. An elevated token with
++    /// SeDebugPrivilege (a CI runner's) opens any process whatever its DACL: not the threat.
++    #[test]
++    fn a_hardened_child_cannot_be_opened_for_memory_reads_by_its_own_user() {
++        use crate::windows_test_token::{Kind, Probe};
 +        let system = std::env::var("SystemRoot").unwrap_or_else(|_| r"C:\Windows".to_string());
 +        let mut command = Command::new(format!(r"{system}\System32\ping.exe"));
-+        command.args(["-n", "30", "127.0.0.1"]);
++        command.args(["-n", "60", "127.0.0.1"]);
 +        let mut child = spawn_hardened(
 +            &command,
 +            [ChildStdio::Null, ChildStdio::Null, ChildStdio::Null],
 +            0,
 +        )
 +        .expect("spawn");
-+        let open = |access| {
-+            let handle = unsafe { OpenProcess(access, 0, child.id()) };
-+            if handle != 0 {
-+                unsafe { CloseHandle(handle) };
-+            }
-+            handle != 0
-+        };
-+        let limited = open(PROCESS_QUERY_LIMITED_INFORMATION);
-+        let vm_read = open(PROCESS_VM_READ);
-+        let dup_handle = open(PROCESS_DUP_HANDLE);
++        let mut probe = Command::new(std::env::current_exe().unwrap());
++        probe
++            .args([
++                "--exact",
++                "windows_spawn::tests::vm_read_probe_child",
++                "--nocapture",
++                "--test-threads=1",
++                "-q",
++            ])
++            .env(PROBE_PID, child.id().to_string());
++        let probe = Probe::start(&probe, Kind::Filtered).expect("start the probe");
++        let token = probe.token.clone();
++        let (code, printed) = probe.finish(120_000);
 +        child.kill().unwrap();
 +        child.wait().unwrap();
++        let diagnosis = Probe::diagnosis(&token, Some(code), &printed);
++        let result = printed
++            .lines()
++            .find_map(|line| line.find("SPAWN-PROBE ").and_then(|at| line.get(at..)))
++            .unwrap_or_else(|| panic!("the probe printed no result{diagnosis}"));
 +        assert!(
-+            limited,
-+            "PROCESS_QUERY_LIMITED_INFORMATION should stay granted"
++            !token.contains("SeDebugPrivilege") && !token.contains("administrators enabled"),
++            "the probe's token is not filtered{diagnosis}"
 +        );
-+        assert!(!vm_read, "PROCESS_VM_READ must be denied");
-+        assert!(!dup_handle, "PROCESS_DUP_HANDLE must be denied");
++        assert!(
++            result.contains("query=granted"),
++            "PROCESS_QUERY_LIMITED_INFORMATION should stay granted{diagnosis}"
++        );
++        assert!(
++            result.contains("vm_read=denied"),
++            "PROCESS_VM_READ must be denied to a filtered same-user token{diagnosis}"
++        );
++        assert!(
++            result.contains("dup_handle=denied"),
++            "PROCESS_DUP_HANDLE must be denied to a filtered same-user token{diagnosis}"
++        );
++    }
++}
+diff --git a/cli/src/windows_test_token.rs b/cli/src/windows_test_token.rs
+new file mode 100644
+index 0000000..1bc5663
+--- /dev/null
++++ b/cli/src/windows_test_token.rs
+@@ -0,0 +1,361 @@
++//! Test-only: probe processes started under the tokens a sandbox gives, and the words a failed
++//! check prints about them. Two tokens, both made from this process's own:
++//!
++//! - `Kind::Filtered`: every privilege but SeChangeNotify deleted (DISABLE_MAX_PRIVILEGE, so no
++//!   SeDebugPrivilege, which opens any process whatever its DACL), BUILTIN\Administrators
++//!   deny-only, LUA_TOKEN. A same-user, non-admin probe, as Clauseo's browser guard tests probe
++//!   (crates/mcp, `job/harden_tests/probe.rs`). CI runners are elevated admins with
++//!   SeDebugPrivilege, which is outside the threat model.
++//! - `Kind::Restricted`: the filtered token, WRITE_RESTRICTED, with restricting SIDs, as Codex's
++//!   unelevated Windows sandbox makes one (its token.rs: restricting SIDs, then the logon SID and
++//!   Everyone). IsTokenRestricted is true for it. The logon SID is among the restricting SIDs so
++//!   the probe can open its window station and desktop: without it user32 fails to initialize
++//!   and the probe dies with STATUS_DLL_INIT_FAILED before running a line.
++
++use std::io::{self, Read};
++use std::mem;
++use std::os::windows::ffi::OsStrExt;
++use std::os::windows::io::{FromRawHandle, OwnedHandle};
++use std::process::Command;
++use std::ptr;
++use std::thread::JoinHandle;
++
++use windows_sys::Win32::Foundation::{
++    LocalFree, SetHandleInformation, HANDLE, HANDLE_FLAG_INHERIT, LUID, PSID, WAIT_OBJECT_0,
++};
++use windows_sys::Win32::Security::Authorization::ConvertSidToStringSidW;
++use windows_sys::Win32::Security::{
++    CreateRestrictedToken, CreateWellKnownSid, EqualSid, GetTokenInformation, IsTokenRestricted,
++    LookupPrivilegeNameW, TokenElevation, TokenGroups, TokenPrivileges, TokenUser,
++    WinBuiltinAdministratorsSid, WinWorldSid, DISABLE_MAX_PRIVILEGE, LUA_TOKEN,
++    LUID_AND_ATTRIBUTES, SECURITY_ATTRIBUTES, SE_PRIVILEGE_ENABLED, SID_AND_ATTRIBUTES,
++    TOKEN_ASSIGN_PRIMARY, TOKEN_DUPLICATE, TOKEN_ELEVATION, TOKEN_GROUPS, TOKEN_INFORMATION_CLASS,
++    TOKEN_PRIVILEGES, TOKEN_QUERY, TOKEN_USER, WRITE_RESTRICTED,
++};
++use windows_sys::Win32::System::Pipes::CreatePipe;
++use windows_sys::Win32::System::Threading::{
++    CreateProcessAsUserW, GetCurrentProcess, GetExitCodeProcess, OpenProcessToken,
++    TerminateProcess, WaitForSingleObject, CREATE_NO_WINDOW, CREATE_UNICODE_ENVIRONMENT,
++    PROCESS_INFORMATION, STARTF_USESTDHANDLES, STARTUPINFOW,
++};
++
++use crate::windows_security::raw;
++use crate::windows_spawn::{command_line, environment_block};
++
++/// `SE_GROUP_LOGON_ID`, `SE_GROUP_ENABLED` and `SE_GROUP_USE_FOR_DENY_ONLY`.
++const GROUP_LOGON_ID: u32 = 0xC000_0000;
++const GROUP_ENABLED: u32 = 0x4;
++const GROUP_DENY_ONLY: u32 = 0x10;
++/// The exit code of a process whose DLLs failed to initialize.
++pub const STATUS_DLL_INIT_FAILED: u32 = 0xC000_0142;
++
++/// Which token a probe runs under (see the module's header).
++#[derive(Clone, Copy, Debug, PartialEq, Eq)]
++pub enum Kind {
++    Filtered,
++    Restricted,
++}
++
++/// This process's token, opened for `access`.
++fn own_token(access: u32) -> io::Result<OwnedHandle> {
++    let mut token: HANDLE = 0;
++    if unsafe { OpenProcessToken(GetCurrentProcess(), access, &mut token) } == 0 {
++        return Err(io::Error::last_os_error());
++    }
++    Ok(unsafe { OwnedHandle::from_raw_handle(token as _) })
++}
++
++/// `class` of `token`, in an 8-aligned buffer.
++fn info(token: HANDLE, class: TOKEN_INFORMATION_CLASS) -> io::Result<Vec<u64>> {
++    let mut size = 0u32;
++    unsafe { GetTokenInformation(token, class, ptr::null_mut(), 0, &mut size) };
++    if size == 0 {
++        return Err(io::Error::last_os_error());
++    }
++    let mut buffer = vec![0u64; (size as usize).div_ceil(8)];
++    if unsafe { GetTokenInformation(token, class, buffer.as_mut_ptr().cast(), size, &mut size) }
++        == 0
++    {
++        return Err(io::Error::last_os_error());
++    }
++    Ok(buffer)
++}
++
++/// A well-known SID, in a buffer of SECURITY_MAX_SID_SIZE bytes.
++fn well_known(kind: i32) -> io::Result<Box<[u64; 9]>> {
++    let mut buffer = Box::new([0u64; 9]);
++    let mut size = mem::size_of::<[u64; 9]>() as u32;
++    if unsafe { CreateWellKnownSid(kind, ptr::null_mut(), buffer.as_mut_ptr().cast(), &mut size) }
++        == 0
++    {
++        return Err(io::Error::last_os_error());
++    }
++    Ok(buffer)
++}
++
++/// The groups of `token`, as SID and attributes; the SIDs point into the returned buffer.
++fn groups(token: HANDLE) -> io::Result<(Vec<u64>, Vec<SID_AND_ATTRIBUTES>)> {
++    let buffer = info(token, TokenGroups)?;
++    let list = buffer.as_ptr().cast::<TOKEN_GROUPS>();
++    let count = unsafe { (*list).GroupCount } as usize;
++    let first = unsafe { ptr::addr_of!((*list).Groups).cast::<SID_AND_ATTRIBUTES>() };
++    let entries = (0..count).map(|i| unsafe { *first.add(i) }).collect();
++    Ok((buffer, entries))
++}
++
++/// A token of `kind` made from this process's own.
++pub fn token(kind: Kind) -> io::Result<OwnedHandle> {
++    let own = own_token(TOKEN_DUPLICATE | TOKEN_ASSIGN_PRIMARY | TOKEN_QUERY)?;
++    let mut admins = well_known(WinBuiltinAdministratorsSid)?;
++    let disable = [SID_AND_ATTRIBUTES {
++        Sid: admins.as_mut_ptr().cast(),
++        Attributes: 0,
++    }];
++    let mut everyone = well_known(WinWorldSid)?;
++    let user = info(raw(&own), TokenUser)?;
++    let user_sid = unsafe { (*user.as_ptr().cast::<TOKEN_USER>()).User.Sid };
++    let (_groups, entries) = groups(raw(&own))?;
++    let mut restricting = vec![
++        SID_AND_ATTRIBUTES {
++            Sid: user_sid,
++            Attributes: 0,
++        },
++        SID_AND_ATTRIBUTES {
++            Sid: everyone.as_mut_ptr().cast(),
++            Attributes: 0,
++        },
++    ];
++    if let Some(logon) = entries
++        .iter()
++        .find(|g| g.Attributes & GROUP_LOGON_ID == GROUP_LOGON_ID)
++    {
++        restricting.push(SID_AND_ATTRIBUTES {
++            Sid: logon.Sid,
++            Attributes: 0,
++        });
++    }
++    let (flags, count, sids) = match kind {
++        Kind::Filtered => (DISABLE_MAX_PRIVILEGE | LUA_TOKEN, 0, ptr::null()),
++        Kind::Restricted => (
++            DISABLE_MAX_PRIVILEGE | LUA_TOKEN | WRITE_RESTRICTED,
++            restricting.len() as u32,
++            restricting.as_ptr(),
++        ),
++    };
++    let mut made: HANDLE = 0;
++    let ok = unsafe {
++        CreateRestrictedToken(
++            raw(&own),
++            flags,
++            disable.len() as u32,
++            disable.as_ptr(),
++            0,
++            ptr::null(),
++            count,
++            sids,
++            &mut made,
++        )
++    };
++    if ok == 0 {
++        return Err(io::Error::last_os_error());
++    }
++    Ok(unsafe { OwnedHandle::from_raw_handle(made as _) })
++}
++
++fn sid_string(sid: PSID) -> String {
++    let mut text: *mut u16 = ptr::null_mut();
++    if unsafe { ConvertSidToStringSidW(sid, &mut text) } == 0 {
++        return "(unreadable SID)".to_string();
++    }
++    let len = (0..).take_while(|&i| unsafe { *text.add(i) } != 0).count();
++    let string = String::from_utf16_lossy(unsafe { std::slice::from_raw_parts(text, len) });
++    unsafe { LocalFree(text as _) };
++    string
++}
++
++/// What a failed check prints about `token`: its user, elevation, whether it is restricted,
++/// BUILTIN\Administrators' state, the logon SID among its groups and its enabled privileges.
++pub fn describe(token: HANDLE) -> String {
++    let report = || -> io::Result<String> {
++        let user = info(token, TokenUser)?;
++        let user = sid_string(unsafe { (*user.as_ptr().cast::<TOKEN_USER>()).User.Sid });
++        let mut elevation = TOKEN_ELEVATION { TokenIsElevated: 0 };
++        let mut size = 0u32;
++        let elevated = (unsafe {
++            GetTokenInformation(
++                token,
++                TokenElevation,
++                ptr::addr_of_mut!(elevation).cast(),
++                mem::size_of::<TOKEN_ELEVATION>() as u32,
++                &mut size,
++            )
++        }) != 0
++            && elevation.TokenIsElevated != 0;
++        let restricted = unsafe { IsTokenRestricted(token) } != 0;
++        let mut admins = well_known(WinBuiltinAdministratorsSid)?;
++        let (_buffer, entries) = groups(token)?;
++        let admins = entries
++            .iter()
++            .find(|g| (unsafe { EqualSid(g.Sid, admins.as_mut_ptr().cast()) }) != 0)
++            .map_or("absent", |g| {
++                if g.Attributes & GROUP_DENY_ONLY != 0 {
++                    "deny-only"
++                } else if g.Attributes & GROUP_ENABLED != 0 {
++                    "enabled"
++                } else {
++                    "disabled"
++                }
++            });
++        let logon = entries
++            .iter()
++            .find(|g| g.Attributes & GROUP_LOGON_ID == GROUP_LOGON_ID)
++            .map_or("none".to_string(), |g| sid_string(g.Sid));
++        Ok(format!(
++            "user {user}, elevated {elevated}, restricted {restricted}, administrators {admins}, \
++             logon SID {logon}, privileges enabled {:?}",
++            enabled_privileges(token)?
++        ))
++    };
++    report().unwrap_or_else(|e| format!("(token unreadable: {e})"))
++}
++
++/// The names of the privileges enabled in `token`.
++pub fn enabled_privileges(token: HANDLE) -> io::Result<Vec<String>> {
++    let buffer = info(token, TokenPrivileges)?;
++    let list = buffer.as_ptr().cast::<TOKEN_PRIVILEGES>();
++    let count = unsafe { (*list).PrivilegeCount } as usize;
++    let first = unsafe { ptr::addr_of!((*list).Privileges).cast::<LUID_AND_ATTRIBUTES>() };
++    let mut names = Vec::new();
++    for i in 0..count {
++        let entry = unsafe { *first.add(i) };
++        if entry.Attributes & SE_PRIVILEGE_ENABLED == 0 {
++            continue;
++        }
++        let luid: LUID = entry.Luid;
++        let mut name = [0u16; 128];
++        let mut len = name.len() as u32;
++        if unsafe { LookupPrivilegeNameW(ptr::null(), &luid, name.as_mut_ptr(), &mut len) } != 0 {
++            names.push(String::from_utf16_lossy(&name[..len as usize]));
++        }
++    }
++    Ok(names)
++}
++
++/// This process's token, described.
++pub fn describe_own() -> String {
++    own_token(TOKEN_QUERY)
++        .map(|t| describe(raw(&t)))
++        .unwrap_or_else(|e| format!("(token unreadable: {e})"))
++}
++
++/// What an exit code says, for a failed check.
++pub fn exit_meaning(code: u32) -> String {
++    match code {
++        STATUS_DLL_INIT_FAILED => format!(
++            "{code:#x} STATUS_DLL_INIT_FAILED: the probe never ran (its token could not open \
++             the window station or desktop)"
++        ),
++        _ => format!("{code:#x}"),
++    }
++}
++
++/// A process started under a probe token, with its stdout and stderr going to one pipe.
++pub struct Probe {
++    pub process: OwnedHandle,
++    pub pid: u32,
++    /// The probe's token as made, for the failure text.
++    pub token: String,
++    output: JoinHandle<String>,
++}
++
++impl Probe {
++    /// Starts `command` (an absolute program) under a token of `kind`.
++    pub fn start(command: &Command, kind: Kind) -> io::Result<Probe> {
++        let token = token(kind)?;
++        let described = describe(raw(&token));
++        let program = command.get_program().to_owned();
++        let mut line = command_line(&program, command.get_args())?;
++        let app: Vec<u16> = program.encode_wide().chain(Some(0)).collect();
++        let environment = environment_block(command)?;
++
++        let mut read: HANDLE = 0;
++        let mut write: HANDLE = 0;
++        let inherit = SECURITY_ATTRIBUTES {
++            nLength: mem::size_of::<SECURITY_ATTRIBUTES>() as u32,
++            lpSecurityDescriptor: ptr::null_mut(),
++            bInheritHandle: 1,
++        };
++        if unsafe { CreatePipe(&mut read, &mut write, &inherit, 0) } == 0 {
++            return Err(io::Error::last_os_error());
++        }
++        let read = unsafe { OwnedHandle::from_raw_handle(read as _) };
++        let write = unsafe { OwnedHandle::from_raw_handle(write as _) };
++        unsafe { SetHandleInformation(raw(&read), HANDLE_FLAG_INHERIT, 0) };
++
++        let mut startup: STARTUPINFOW = unsafe { mem::zeroed() };
++        startup.cb = mem::size_of::<STARTUPINFOW>() as u32;
++        startup.dwFlags = STARTF_USESTDHANDLES;
++        startup.hStdOutput = raw(&write);
++        startup.hStdError = raw(&write);
++        let mut info: PROCESS_INFORMATION = unsafe { mem::zeroed() };
++        let ok = unsafe {
++            CreateProcessAsUserW(
++                raw(&token),
++                app.as_ptr(),
++                line.as_mut_ptr(),
++                ptr::null(),
++                ptr::null(),
++                1,
++                CREATE_NO_WINDOW | CREATE_UNICODE_ENVIRONMENT,
++                environment.as_ptr().cast(),
++                ptr::null(),
++                &startup,
++                &mut info,
++            )
++        };
++        if ok == 0 {
++            return Err(io::Error::last_os_error());
++        }
++        drop(write);
++        unsafe { OwnedHandle::from_raw_handle(info.hThread as _) };
++        let mut reader = std::fs::File::from(read);
++        let output = std::thread::spawn(move || {
++            let mut bytes = Vec::new();
++            let _ = reader.read_to_end(&mut bytes);
++            String::from_utf8_lossy(&bytes).into_owned()
++        });
++        Ok(Probe {
++            process: unsafe { OwnedHandle::from_raw_handle(info.hProcess as _) },
++            pid: info.dwProcessId,
++            token: described,
++            output,
++        })
++    }
++
++    /// Whether the probe is still running.
++    pub fn running(&self) -> bool {
++        (unsafe { WaitForSingleObject(raw(&self.process), 0) }) != WAIT_OBJECT_0
++    }
++
++    /// Waits up to `ms` (ending it after that), and returns its exit code and all it printed.
++    pub fn finish(self, ms: u32) -> (u32, String) {
++        if unsafe { WaitForSingleObject(raw(&self.process), ms) } != WAIT_OBJECT_0 {
++            unsafe { TerminateProcess(raw(&self.process), 1) };
++            unsafe { WaitForSingleObject(raw(&self.process), ms) };
++        }
++        let mut code = 0u32;
++        unsafe { GetExitCodeProcess(raw(&self.process), &mut code) };
++        let printed = self.output.join().unwrap_or_default();
++        (code, printed)
++    }
++
++    /// What a failed check prints: the probe's token, the test's own, and `exit` and `printed`.
++    pub fn diagnosis(token: &str, exit: Option<u32>, printed: &str) -> String {
++        let exit = exit.map_or("still running".to_string(), exit_meaning);
++        format!(
++            "\n  probe's token: {token}\n  test's token: {}\n  probe's exit: {exit}\n  probe \
++             printed:\n{printed}",
++            describe_own()
++        )
 +    }
 +}
 diff --git a/cli/tests/dashboard_cli.rs b/cli/tests/dashboard_cli.rs
