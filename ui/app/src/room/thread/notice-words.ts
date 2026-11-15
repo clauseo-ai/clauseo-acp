@@ -1,7 +1,7 @@
 // The app's own line for a host notice, by its kind (NoticeEntry.kind): the words the lawyer reads in place of the
 // host's text. An agent's notice has no kind; a kind this version doesn't know (a newer host's, arriving as some other
 // string or as an object it doesn't read) gives null, and the row shows the notice's text as the host wrote it.
-import { listOf, namesOf } from "@clauseo/components/lib/words-core.ts";
+import { fileName, listOf, namesOf } from "@clauseo/components/lib/words-core.ts";
 import type { useThreadWords } from "@clauseo/components/lib/words-thread.ts";
 import type { AgentName } from "@clauseo/components/lib/words-errors.ts";
 import type { NoticeKind } from "../../transport/protocol.ts";
@@ -112,6 +112,18 @@ function guardBlocked(kind: NoticeKind, w: NoticeWords, agent?: AgentName): stri
       );
 }
 
+/** The name of the file a download_outside_matter notice is about: one plain file name, as the host sends it; null
+ * for any other kind, or for one whose name is not a non-empty string (a malformed value from a newer host). */
+export function downloadNameOf(kind: NoticeKind | undefined | null): string | null {
+  const download =
+    typeof kind === "object" && kind !== null && "download_outside_matter" in kind
+      ? (kind.download_outside_matter as unknown)
+      : undefined;
+  if (typeof download !== "object" || download === null || !("name" in download)) return null;
+  const { name } = download;
+  return typeof name === "string" && name !== "" ? name : null;
+}
+
 /** The line for a notice's kind in the page's language, its slots filled; null for no kind, or a kind this version
  * does not know, so the notice's own text shows. `agent`: the open conversation's agent
  * (useAgentPlan), named as the outside-matter stop names it (stops.ts). */
@@ -163,6 +175,12 @@ export function noticeLine(
     typeof kind === "object" && kind !== null && "files_came_back" in kind
       ? kind.files_came_back
       : undefined;
+  const download = downloadNameOf(kind);
+  if (download !== null)
+    return w.th(
+      "The browser saved {file} in Clauseo's own folder for this matter, not in the matter's folder: the matter's drive can't mark downloads as coming from the internet.",
+      { file: fileName(download) },
+    );
   if (came !== undefined)
     return came.files.length + came.more === 0 ? null : cameBack(came.files, came.more, w);
   const skipped =

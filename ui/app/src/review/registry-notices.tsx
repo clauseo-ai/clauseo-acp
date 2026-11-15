@@ -98,6 +98,13 @@ const OFFLINE_NO_SEARCH_NOTICE = notice(6, {
   text: "Clauseo stopped a step: ChatGPT tried to go online by running a command.",
   kind: "shell_network_blocked_no_web_search",
 });
+const DOWNLOAD =
+  "The browser saved {file} in Clauseo's own folder for this matter, not in the matter's folder: the matter's drive can't mark downloads as coming from the internet.";
+/** The browser saved a judgment in Clauseo's own folder for the matter, its drive unable to keep the internet mark. */
+const DOWNLOAD_NOTICE = notice(6, {
+  text: "The browser saved Judgment 12-03-2024.pdf in Clauseo's own folder for this matter.",
+  kind: { download_outside_matter: { name: "Judgment 12-03-2024.pdf" } },
+});
 /** One paper a sync client put back after the undo. */
 const ONE_PAPER = notice(6, {
   kind: { files_came_back: { files: ["Pleadings/Reply.docx"], more: 0 } },
@@ -209,5 +216,11 @@ export const TN: Entry[] = [
         <p>{th(lang, OFFLINE_NO_SEARCH_ALONE)}</p>
       </main>
     ),
+  },
+  {
+    id: "TN-13",
+    words: threadWords(DOWNLOAD),
+    screen: "room/thread",
+    render: thread(DOWNLOAD_NOTICE),
   },
 ];

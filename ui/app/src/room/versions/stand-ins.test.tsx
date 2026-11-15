@@ -27,7 +27,12 @@ test("each stand-in has the type of HostTransport's method of the same name, whe
   expectTypeOf<
     Drift<{
       openFile(file: FileRefId): Promise<{ protected_view: boolean }>;
-      reveal(target: { matter: string } | "app_data"): Promise<void>;
+      reveal(
+        target:
+          | ({ matter: string } & { download?: never })
+          | "app_data"
+          | ({ download: { matter: string; name: string } } & { matter?: never }),
+      ): Promise<void>;
     }>
   >().toEqualTypeOf<never>();
   // and a drifted one is caught
