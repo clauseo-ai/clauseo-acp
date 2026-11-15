@@ -10,20 +10,34 @@
 # exe for VC++ runtime imports (pe-crt-imports.mjs). Each leg uploads the binary with its build
 # record (agent-browser-<triple>.json).
 #
-# With `publish`, a last job makes this repository's GitHub release named by the pin's
+# With `publish` (dispatched from main), `attest` signs the build provenance of the binaries and
+# their records, and `publish` makes this repository's GitHub release named by the pin's
 # patched_tag, as a pre-release that is never marked latest (the updater reads releases/latest),
-# holding the four binaries, SHA256SUMS and the records. The release's sidecar fetch
+# holding the four binaries, the records and SHA256SUMS (over both). The release's sidecar fetch
 # (crates/desktop/sidecars/agent-browser.mjs) downloads from it; the pin's sha256 lines are pasted
 # from the build logs or SHA256SUMS in a follow-up commit. Nothing is signed or notarised here:
 # release.yml signs the sidecars as before (sign-windows signs every PE in
 # crates/desktop/binaries/; the macOS build leg codesigns Contents/Helpers/clauseo-agent-browser
 # with the app's identity and the hardened runtime before bundling).
 #
-# Manual only, dispatched from main with the ref whose pin and patches to build:
-#   gh workflow run agent-browser-build.yml --ref main -f ref=<branch or commit> -f publish=true
+# Jobs: resolve -> build (four legs) -> attest -> publish.
+# - `resolve` (contents: read) refuses a `ref` that is not a full 40-hex commit SHA, checks it out,
+#   reads the pin's patched_tag and refuses one not of the form agent-browser-v<X.Y.Z>-clauseo.<n>.
+#   Every later job takes the SHA and the tag from its outputs, so all of them see one commit.
+# - `build` (contents: read) runs the dispatched commit's scripts, with no secret and no write.
+# - `attest` runs no repository code: it downloads the artifacts and attests them (OIDC).
+# - `publish` runs in the environment agent-browser-publish (main only, a required reviewer, who
+#   approves the SHA and the tag `resolve` shows). It checks out nothing and runs only its own
+#   inline shell: it checks the tag's pattern again, each binary's attestation (this workflow,
+#   refs/heads/main), refuses when the release or the tag exists, creates the tag through the API
+#   at the resolved SHA (the ruleset lets only this tag pattern be created; another ruleset forbids
+#   moving or deleting it), then the release with --verify-tag and never --clobber.
+#
+# Manual only, dispatched from main with the commit whose pin and patches to build:
+#   gh workflow run agent-browser-build.yml --ref main -f ref=<40-hex commit SHA> -f publish=true
 # Run it when the pin or a patch changes, with patched_tag counted up first; publishing an
 # existing tag fails. Every action is pinned by commit SHA, with its tag in a comment, copied
-# from release.yml; every job has its own `permissions:`.
+# from release.yml and python-runtime.yml; every job has its own `permissions:`.
 
 name: agent-browser-build
 
@@ -31,11 +45,11 @@ on:
   workflow_dispatch:
     inputs:
       ref:
-        description: The commit, branch or tag of this repository whose pin and patches to build (default, the run's ref).
+        description: The full 40-hex commit SHA of this repository whose pin and patches to build.
         type: string
-        default: ""
+        required: true
       publish:
-        description: Publish the four builds as the pre-release named by the pin's patched_tag.
+        description: Publish the four builds as the pre-release named by the pin's patched_tag (main only).
         type: boolean
         default: false
 
@@ -46,12 +60,62 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # The one commit every job builds, checks out or tags, and the tag its pin names.
+  resolve:
+    name: resolve
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read # checkout
+    outputs:
+      sha: ${{ steps.sha.outputs.sha }}
+      tag: ${{ steps.tag.outputs.tag }}
+    steps:
+      - name: The ref is a full commit SHA
+        id: sha
+        env:
+          REF: ${{ inputs.ref }}
+        run: |
+          set -euo pipefail
+          if ! [[ "$REF" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::ref must be a full 40-hex lowercase commit SHA, not a branch, tag or short SHA"
+            exit 1
+          fi
+          echo "sha=$REF" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ steps.sha.outputs.sha }}
+          persist-credentials: false
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: ui/package.json
+          package-manager-cache: false
+
+      - name: The pin's patched_tag
+        id: tag
+        env:
+          SHA: ${{ steps.sha.outputs.sha }}
+        run: |
+          set -euo pipefail
+          head=$(git rev-parse HEAD)
+          [ "$head" = "$SHA" ] || { echo "::error::checked out $head, not $SHA"; exit 1; }
+          tag=$(node crates/desktop/sidecars/agent-browser-build.mjs tag)
+          if ! [[ "$tag" =~ ^agent-browser-v[0-9]+\.[0-9]+\.[0-9]+-clauseo\.[0-9]+$ ]]; then
+            echo "::error::the pin's patched_tag '$tag' is not agent-browser-v<X.Y.Z>-clauseo.<n>"
+            exit 1
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "### agent-browser $tag from $SHA" >> "$GITHUB_STEP_SUMMARY"
+
   build:
     name: build (${{ matrix.target }})
+    needs: resolve
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 60
     permissions:
-      contents: read
+      contents: read # checkout
     strategy:
       fail-fast: false
       matrix:
@@ -69,7 +133,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ inputs.ref }}
+          ref: ${{ needs.resolve.outputs.sha }}
           persist-credentials: false
 
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
@@ -108,30 +172,54 @@ jobs:
             ${{ env.OUT }}/agent-browser-${{ matrix.target }}.json
           if-no-files-found: error
 
-  # A pre-release, never latest: a latest release would become the updater's releases/latest.
-  publish:
-    name: publish
-    if: inputs.publish
+  # Runs no repository code, so the OIDC token that signs never meets the build's code.
+  attest:
+    name: attest
     needs: build
+    if: inputs.publish && github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 10
     permissions:
-      contents: write
+      id-token: write # the Sigstore signing certificate of the attestation
+      attestations: write # stores the attestation on the repository
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ inputs.ref }}
-          persist-credentials: false
-
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: agent-browser-*
-          path: ${{ runner.temp }}/dist
+          path: dist
+
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: dist/*/agent-browser-*
+
+  # A pre-release, never latest: a latest release would become the updater's releases/latest.
+  # Checks out nothing: every step is an action or this file's own shell.
+  publish:
+    name: publish
+    needs: [resolve, attest]
+    if: inputs.publish && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    environment: agent-browser-publish
+    concurrency:
+      group: agent-browser-publish
+      cancel-in-progress: false
+    permissions:
+      contents: write # creates the tag and the release
+      attestations: read # gh attestation verify reads the binaries' attestations
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: agent-browser-*
+          path: ${{ runner.temp }}/artifacts
           merge-multiple: true
 
-      - name: Create the pre-release
+      - name: Check the tag, the binaries and their attestations
         env:
           GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.resolve.outputs.tag }}
+          SHA: ${{ needs.resolve.outputs.sha }}
+          ARTIFACTS: ${{ runner.temp }}/artifacts
           DIST: ${{ runner.temp }}/dist
         run: |
           set -euo pipefail
@@ -141,17 +229,60 @@ jobs:
             echo "::error::the pin downloads from clauseo-ai/clauseo-acp, not $GITHUB_REPOSITORY"
             exit 1
           fi
-          tag=$(node crates/desktop/sidecars/agent-browser-build.mjs tag)
-          commit=$(git rev-parse HEAD)
-          cd "$DIST"
+          if ! [[ "$TAG" =~ ^agent-browser-v[0-9]+\.[0-9]+\.[0-9]+-clauseo\.[0-9]+$ ]]; then
+            echo "::error::the tag '$TAG' is not agent-browser-v<X.Y.Z>-clauseo.<n>"
+            exit 1
+          fi
+          if ! [[ "$SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::the commit '$SHA' is not a full 40-hex SHA"
+            exit 1
+          fi
+          mkdir -p "$DIST"
           binaries=(agent-browser-x86_64-pc-windows-msvc.exe agent-browser-aarch64-pc-windows-msvc.exe
             agent-browser-aarch64-apple-darwin agent-browser-x86_64-apple-darwin)
           for binary in "${binaries[@]}"; do
-            test -f "$binary" && test -f "${binary%.exe}.json"
+            record="${binary%.exe}.json"
+            for file in "$binary" "$record"; do
+              [ -f "$ARTIFACTS/$file" ] || { echo "::error::$file was not built"; exit 1; }
+              gh attestation verify "$ARTIFACTS/$file" --repo "$GITHUB_REPOSITORY" \
+                --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/agent-browser-build.yml" \
+                --source-ref refs/heads/main
+              cp "$ARTIFACTS/$file" "$DIST/"
+            done
           done
-          sha256sum "${binaries[@]}" > SHA256SUMS
-          cat SHA256SUMS
-          gh release create "$tag" --repo clauseo-ai/clauseo-acp --target "$commit" \
-            --prerelease --latest=false --title "$tag" \
-            --notes "agent-browser for macOS and Windows: upstream vercel-labs/agent-browser plus our patches, built by agent-browser-build.yml from $commit. See crates/desktop/agent-browser/README.md." \
-            "${binaries[@]}" agent-browser-*.json SHA256SUMS
+          (cd "$DIST" && sha256sum -- "${binaries[@]}" agent-browser-*.json > SHA256SUMS)
+          cat "$DIST/SHA256SUMS"
+
+      # Immutable: refuse when the release or the tag exists. Creating the tag through the API at
+      # the resolved commit is the guard against a race, since GitHub refuses a ref that exists
+      # (422); a tag left by a failed run makes the next run refuse too, until an admin removes it.
+      - name: Publish the pre-release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.resolve.outputs.tag }}
+          SHA: ${{ needs.resolve.outputs.sha }}
+          DIST: ${{ runner.temp }}/dist
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            echo "::error::The release $TAG exists; a published build is never replaced. Count up patched_tag in crates/desktop/agent-browser.toml."
+            exit 1
+          fi
+          if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG" > /dev/null 2>&1; then
+            echo "::error::The tag $TAG exists; a published build is never replaced. Count up patched_tag in crates/desktop/agent-browser.toml."
+            exit 1
+          fi
+          gh api "repos/$GITHUB_REPOSITORY/git/refs" -f "ref=refs/tags/$TAG" -f "sha=$SHA" > /dev/null
+          cd "$DIST"
+          {
+            echo "agent-browser for macOS and Windows: upstream vercel-labs/agent-browser plus our patches, built by agent-browser-build.yml from $SHA. See crates/desktop/agent-browser/README.md."
+            echo
+            echo "Each file's build provenance is attested: \`gh attestation verify <file> --repo $GITHUB_REPOSITORY\`."
+            echo
+            echo '```'
+            cat SHA256SUMS
+            echo '```'
+          } > "$RUNNER_TEMP/notes.md"
+          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --verify-tag \
+            --prerelease --latest=false --title "$TAG" --notes-file "$RUNNER_TEMP/notes.md" \
+            agent-browser-*-msvc.exe agent-browser-*-apple-darwin agent-browser-*.json SHA256SUMS
