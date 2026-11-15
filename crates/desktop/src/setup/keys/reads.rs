@@ -7,7 +7,11 @@
 //!   any read is.
 //! - A read's answer: a key goes into memory and ends the mark; no item ends the mark (no key
 //!   is stored: the agent launches without one); the keychain's error marks the key
-//!   unreadable, logged by the agent, "key unreadable" and the error's kind, never "no key".
+//!   unreadable when the "key stored" marker marks the agent, logged by the agent, "key
+//!   unreadable" and the error's kind, never "no key". For an agent it does not mark, the error
+//!   is taken as a read that timed out is: no key Clauseo stored, so no mark, and the agent
+//!   launches without one (M-d, 2026-11-15: a Mac with no login keychain fails every read, and
+//!   the card showed "Sign-in didn't finish." in place of Sign in).
 //!   A write since the read began (a key set or cleared) wins: the read's answer is dropped.
 //! - [`KeyCache::read_again`]: a key marked unreadable, with no read running, is read again.
 //! - Each change of a mark sends a [`KeyNote::Read`].
@@ -110,6 +114,8 @@ impl Marks {
         began: u64,
         read: Result<Option<Zeroizing<String>>, KeyError>,
     ) {
+        // Read before the state's lock: the marker reads its file.
+        let marked = read.is_err() && marker.marked().contains(agent);
         let (changed, stored) = {
             let mut state = lock(&self.state);
             state.reading.remove(agent);
@@ -126,9 +132,19 @@ impl Marks {
                     let gone = lock(keys).remove(agent).is_some();
                     (state.unreadable.remove(agent) || gone, Some(false))
                 }
-                Err(error) => {
+                Err(error) if marked => {
                     tracing::warn!(%agent, kind = error_kind(&error), "key unreadable");
                     (state.unreadable.insert(agent.clone()), None)
+                }
+                Err(error) => {
+                    // As a timed-out read of an unmarked agent (`time_out`): no key Clauseo
+                    // stored, so it launches without one.
+                    tracing::warn!(
+                        %agent,
+                        kind = error_kind(&error),
+                        "key read failed with no key marked stored: launches without one"
+                    );
+                    (state.unreadable.remove(agent), None)
                 }
             }
         };
