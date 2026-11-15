@@ -1,13 +1,15 @@
 //! `PermissionResolved.held_open` (decision record 0021): a matter path when the host refused
 //! the request because a program holds that file open, left out otherwise, and an entry
-//! written before the field existed decodes with `None`.
+//! written before the field existed decodes with `None`. And the notice kinds of a step
+//! Clauseo's pre-write guard stopped: a paper held open, or the matter's `.codex` folder.
 
 use clauseo_protocol::{
-    DomainEvent, MatterPath, PermissionChoice, PermissionKind, PermissionResolved, Principal,
+    DomainEvent, MatterPath, NoticeKind, PermissionChoice, PermissionKind, PermissionResolved,
+    Principal,
 };
 use serde_json::{Value, json};
 
-use crate::fixtures::{permission_request_id, short};
+use crate::fixtures::{decodes_in_both, permission_request_id, round_trips, short};
 
 fn refused(held_open: Option<MatterPath>) -> DomainEvent {
     PermissionResolved {
@@ -58,4 +60,17 @@ fn an_entry_without_held_open_decodes_with_none_and_a_bad_path_is_refused() {
     let old: DomainEvent = serde_json::from_value(entry(None)).unwrap();
     assert_eq!(old, refused(None));
     assert!(serde_json::from_value::<DomainEvent>(entry(Some("../x"))).is_err());
+}
+
+#[test]
+fn the_guards_notice_kinds_decode_and_round_trip() {
+    decodes_in_both(r#""codex_folder_blocked""#, &NoticeKind::CodexFolderBlocked);
+    let held = NoticeKind::HeldOpenBlocked {
+        file: MatterPath::new("Drafts/Lease.docx").unwrap(),
+    };
+    decodes_in_both(
+        r#"{"held_open_blocked":{"file":"Drafts/Lease.docx"}}"#,
+        &held,
+    );
+    round_trips(&held);
 }

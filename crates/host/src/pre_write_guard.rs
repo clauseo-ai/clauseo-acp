@@ -135,10 +135,11 @@
 //! it. Claude Code needs no such rule: its `settingSources` leave out project settings.
 //!
 //! A refusal is exit code 2 with the reason on stderr, which Claude Code and Codex both take as a
-//! block; stdout stays empty, so a login profile's output under Codex's `$SHELL -lc` cannot spoil
-//! it. Only Claude Code's entry in forced ask (`--ask-all`, `ask.rs`) writes stdout: its `ask`
-//! decision for every tool it does not refuse but the local reads. An unknown tool, or a known
-//! one with nothing held, is exit 0 with nothing written.
+//! block, and, with [`RECORD_FLAG`] and a file (Codex's hook), one line in that file for the
+//! host to show the lawyer (`record.rs`); stdout stays empty, so a login profile's output under
+//! Codex's `$SHELL -lc` cannot spoil it. Only Claude Code's entry in forced ask (`--ask-all`,
+//! `ask.rs`) writes stdout: its `ask` decision for every tool it does not refuse but the local
+//! reads. An unknown tool, or a known one with nothing held, is exit 0 with nothing written.
 //!
 //! It fails open, a decision (clauseo-acp-private#162): input it cannot read (empty, cut short,
 //! not JSON), or a shape it does not know (no absolute `cwd` or `--matter`, no `tool_name` or
@@ -156,6 +157,7 @@ mod ask;
 mod codex;
 mod names;
 mod reach;
+pub(crate) mod record;
 mod shell;
 mod timings;
 mod words;
@@ -182,6 +184,10 @@ pub const FLAG: &str = "--pre-write-guard";
 /// The argument after [`FLAG`] that names the matter folder, followed by the folder.
 pub const MATTER_FLAG: &str = "--matter";
 
+/// The argument that names the file each refusal the lawyer is told about is recorded in
+/// (`record.rs`), followed by the file.
+pub const RECORD_FLAG: &str = record::FLAG;
+
 /// How many of a shell command's words are looked at.
 pub const MAX_WORDS: usize = 64;
 
@@ -192,7 +198,8 @@ pub const DENY: i32 = 2;
 /// Anything longer does not parse and fails open.
 const MAX_INPUT: u64 = 16 * 1024 * 1024;
 
-/// The guard. `args` are the arguments after [`FLAG`] (`--matter <folder>`, or none); one hook
+/// The guard. `args` are the arguments after [`FLAG`] (`--matter <folder>`, or none, then
+/// [`RECORD_FLAG`] and its file, or none); one hook
 /// input object comes from `input`. Returns the exit code: [`DENY`], with the reason and a newline
 /// on `errors`, when a target is refused; 0 with an [`IGNORED`] line when the input could not be
 /// read; else 0 with nothing written. With `CLAUSEO_GUARD_TIMINGS` set in the environment (not
@@ -226,7 +233,14 @@ fn run_timed(
     let refused = matches!(found, Ok(Some(_)));
     let (line, code) = match found {
         Ok(None) => (None, 0),
-        Ok(Some(refusal)) => (Some(refusal.reason()), DENY),
+        Ok(Some(refusal)) => {
+            let claude = matter_arg(args).is_some();
+            let file = record::file_arg(args);
+            if let Some((file, record)) = file.zip(record::record_of(&refusal, &bytes, claude)) {
+                record::append(&file, &record);
+            }
+            (Some(refusal.reason()), DENY)
+        }
         Err(ignored) => (Some(ignored.line()), 0),
     };
     if !refused && ask::wanted(args) && ask::asks(&bytes) {

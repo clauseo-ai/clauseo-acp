@@ -24,6 +24,7 @@ use crate::log_file::Cause;
 use crate::rate::{Admitted, RatedUpdate};
 
 pub(super) mod gave_up;
+pub(super) mod guard_blocks;
 mod title;
 mod tools;
 mod warning;
@@ -107,17 +108,18 @@ pub(super) fn on_rate_timer(actor: &mut Actor, thread: ThreadId) {
     }
 }
 
-/// Passes on everything the rate cap holds, before the turn ends or is cancelled.
+/// Passes on everything the rate cap holds, before the turn ends or is cancelled, then the
+/// steps the guard stopped since (`updates/guard_blocks.rs`).
 pub(super) fn flush_rate(actor: &mut Actor, thread: ThreadId) {
     let Some(agent) = agent(actor, thread) else {
         return;
     };
-    if !agent.rate.is_holding() {
-        return;
+    if agent.rate.is_holding() {
+        for item in agent.rate.flush() {
+            handle(actor, thread, *item.0);
+        }
     }
-    for item in agent.rate.flush() {
-        handle(actor, thread, *item.0);
-    }
+    guard_blocks::tell(actor, thread);
 }
 
 /// One event, past the rate cap. A request with no prompt in flight waits for a turn
@@ -265,6 +267,10 @@ fn log_update(
     context: Context,
     update: AgentUpdate,
 ) {
+    // A step the guard stopped came before this update (`updates/guard_blocks.rs`).
+    if matches!(context, Context::Live(_)) {
+        guard_blocks::tell(actor, thread);
+    }
     let done = match update {
         AgentUpdate::MessageChunk {
             role,

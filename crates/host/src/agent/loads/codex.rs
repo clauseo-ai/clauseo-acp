@@ -46,28 +46,42 @@ const SESSION_FLAGS_KEY: &str = "/<session-flags>/config.toml:pre_tool_use:0:0";
 const SESSION_FLAGS_KEY: &str = r"C:\<session-flags>\config.toml:pre_tool_use:0:0";
 
 /// The `hooks` value for Codex's config that runs the pre-write guard, `program` with
-/// [`FLAG`](crate::pre_write_guard::FLAG), before each `apply_patch` and `Bash`, trusted by its
-/// own `state` entry:
+/// [`FLAG`](crate::pre_write_guard::FLAG) and, with `record`, [`RECORD_FLAG`] and that file
+/// (the session's `guard-blocks.jsonl`, `actor/turn/updates/guard_blocks.rs`), before each
+/// `apply_patch` and `Bash`, trusted by its own `state` entry:
 ///
 /// ```json
 /// {"PreToolUse": [{"matcher": "apply_patch|Write|Edit|Bash", "hooks": [{"type": "command",
-///   "command": "'<program>' --pre-write-guard",
-///   "commandWindows": "\"<program>\" --pre-write-guard", "timeout": 10}]}],
+///   "command": "'<program>' --pre-write-guard --record '<record>'",
+///   "commandWindows": "\"<program>\" --pre-write-guard --record \"<record>\"",
+///   "timeout": 10}]}],
 ///  "state": {"/<session-flags>/config.toml:pre_tool_use:0:0": {"trusted_hash": "sha256:…"}}}
 /// ```
 ///
-/// The hash is for the OS this runs on, as Codex computes it on the same machine. `None` when
-/// `program` is no UTF-8 string, or (Windows) holds a `"` or `%`, which `cmd.exe` cannot take
-/// inside quotes: no hook rather than one that runs something else. The codex hooks seam
-/// (`actor::turn::agents`, `codex_hooks`) puts it in each Codex launch's `CODEX_CONFIG`.
-pub fn codex_hook_config(program: &Path) -> Option<Value> {
+/// The hash is for the OS this runs on, as Codex computes it on the same machine, so it changes
+/// with the record file, one per session. `None` when `program` is no UTF-8 string, or (Windows)
+/// holds a `"` or `%`, which `cmd.exe` cannot take inside quotes: no hook rather than one that
+/// runs something else. A record file like that goes out of the command alone: the guard still
+/// runs, and the lawyer is not told of its refusals. The codex hooks seam (`actor::turn::agents`,
+/// `codex_hooks`) puts it in each Codex launch's `CODEX_CONFIG`.
+///
+/// [`RECORD_FLAG`]: crate::pre_write_guard::RECORD_FLAG
+pub fn codex_hook_config(program: &Path, record: Option<&Path>) -> Option<Value> {
     let program = program.to_str()?;
-    let command = format!("{} {}", posix_quoted(program), crate::pre_write_guard::FLAG);
-    let command_windows = format!(
+    let record = record.and_then(Path::to_str);
+    let flag = crate::pre_write_guard::RECORD_FLAG;
+    let mut command = format!("{} {}", posix_quoted(program), crate::pre_write_guard::FLAG);
+    let mut command_windows = format!(
         "{} {}",
         windows_quoted(program)?,
         crate::pre_write_guard::FLAG
     );
+    if let Some(record) = record {
+        command = format!("{command} {flag} {}", posix_quoted(record));
+    }
+    if let Some(record) = record.and_then(windows_quoted) {
+        command_windows = format!("{command_windows} {flag} {record}");
+    }
     let effective = if cfg!(windows) {
         &command_windows
     } else {
@@ -188,7 +202,7 @@ mod tests {
 
     #[test]
     fn the_config_runs_the_guard_and_trusts_itself() {
-        let config = codex_hook_config(Path::new("/opt/clauseo/clauseo-desktop")).unwrap();
+        let config = codex_hook_config(Path::new("/opt/clauseo/clauseo-desktop"), None).unwrap();
         let (key, hash) = if cfg!(windows) {
             (
                 r"C:\<session-flags>\config.toml:pre_tool_use:0:0",
@@ -226,6 +240,54 @@ mod tests {
     #[test]
     fn quoting_keeps_the_path_one_word_and_refuses_what_cmd_would_expand() {
         assert_eq!(posix_quoted("/a b/O'Brien"), r"'/a b/O'\''Brien'");
-        assert_eq!(codex_hook_config(Path::new(r"C:\100%\clauseo.exe")), None);
+        assert_eq!(
+            codex_hook_config(Path::new(r"C:\100%\clauseo.exe"), None),
+            None
+        );
+    }
+
+    /// The session's record file goes after the flag, quoted for each shell, and the trust hash
+    /// is the one Codex computes for that whole command. A record path `cmd.exe` cannot take
+    /// leaves the Windows command without it.
+    #[test]
+    fn the_record_file_goes_in_the_command_and_its_hash() {
+        let program = Path::new("/opt/clauseo/clauseo-desktop");
+        let record = Path::new("/data/run/s 1/guard-blocks.jsonl");
+        let config = codex_hook_config(program, Some(record)).unwrap();
+        let hook = &config["PreToolUse"][0]["hooks"][0];
+        let posix = "'/opt/clauseo/clauseo-desktop' --pre-write-guard --record \
+                     '/data/run/s 1/guard-blocks.jsonl'";
+        let windows = "\"/opt/clauseo/clauseo-desktop\" --pre-write-guard --record \
+                       \"/data/run/s 1/guard-blocks.jsonl\"";
+        assert_eq!(hook["command"], posix);
+        assert_eq!(hook["commandWindows"], windows);
+        let effective = if cfg!(windows) { windows } else { posix };
+        let state = config["state"].as_object().unwrap();
+        let [(_, entry)] = state.iter().collect::<Vec<_>>()[..] else {
+            panic!("one trust entry: {state:?}");
+        };
+        let trusted = &entry["trusted_hash"];
+        assert_eq!(
+            *trusted,
+            hook_hash("pre_tool_use", "apply_patch|Write|Edit|Bash", effective, 10)
+        );
+        if !cfg!(windows) {
+            assert_eq!(
+                *trusted,
+                "sha256:f05de79e79c1c0b756d27ab2d971ef3a51a2925ba6f48a66d8ea7fcd131e7c56"
+            );
+        }
+        let odd = codex_hook_config(program, Some(Path::new("/data/100%/guard-blocks.jsonl")));
+        let odd = &odd.unwrap()["PreToolUse"][0]["hooks"][0];
+        assert_eq!(
+            odd["commandWindows"],
+            "\"/opt/clauseo/clauseo-desktop\" --pre-write-guard"
+        );
+        assert!(
+            odd["command"]
+                .as_str()
+                .unwrap()
+                .ends_with("--record '/data/100%/guard-blocks.jsonl'")
+        );
     }
 }

@@ -4318,7 +4318,7 @@ export type NoticeKind =
 	files: MatterPath[],
 	/**  How many more came back beyond `files`. */
 	more: number,
-} }) & { skill_pack_not_loaded?: never } | 
+} }) & { held_open_blocked?: never; skill_pack_not_loaded?: never } | 
 /**
  *  A skill pack the launch left out: which pack, and why. The app words it by kind; the
  *  notice's `text` is the fallback.
@@ -4328,7 +4328,7 @@ export type NoticeKind =
 	pack: PackId,
 	/**  Why the launch left it out. */
 	reason: PackSkipReason,
-} }) & { files_came_back?: never } | 
+} }) & { files_came_back?: never; held_open_blocked?: never } | 
 /**
  *  Claude Code's `auto` permission mode is not available for this session (the account,
  *  the model or the agent ruled it out), so Claude runs in `acceptEdits` and asks before
@@ -4350,6 +4350,19 @@ export type NoticeKind =
  *  turned it off), so the words offer no web search instead. Once a turn.
  */
 "shell_network_blocked_no_web_search" | 
+/**
+ *  Clauseo's pre-write guard refused a step of the agent's that would change a paper
+ *  Word (or another program) has open. Codex sends no event of its own for it.
+ */
+({ held_open_blocked: {
+	/**  The paper, as the matter lists it. */
+	file: MatterPath,
+} }) & { files_came_back?: never; skill_pack_not_loaded?: never } | 
+/**
+ *  Clauseo's pre-write guard refused a step of the agent's that would change the
+ *  matter's `.codex` folder, the agent's own settings there.
+ */
+"codex_folder_blocked" | 
 /**  A kind from a newer Clauseo; written back as the plain string `kind`. */
 string;
 

@@ -301,6 +301,22 @@ pub(super) fn notices() -> Vec<DomainEvent> {
                 .to_owned(),
             kind: Some(NoticeKind::ShellNetworkBlockedNoWebSearch),
         },
+        Notice {
+            level: NoticeLevel::Warning,
+            text: "Clauseo stopped a step: the AI tried to change Drafts/Lease.docx, which is \
+                   open in Word. Close it in Word, then ask again."
+                .to_owned(),
+            kind: Some(NoticeKind::HeldOpenBlocked {
+                file: MatterPath::new("Drafts/Lease.docx").unwrap(),
+            }),
+        },
+        Notice {
+            level: NoticeLevel::Warning,
+            text: "Clauseo stopped a step: the AI tried to change its own settings in this \
+                   matter's folder."
+                .to_owned(),
+            kind: Some(NoticeKind::CodexFolderBlocked),
+        },
     ];
     notices.extend(
         [
