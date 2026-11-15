@@ -127,9 +127,10 @@ pub(crate) fn stop_then_after_host(
 }
 
 /// The stop sequence, blocking: the agents' installs and sign-ins first, their children killed
-/// (#386), then the host (waits for its start, shuts it down, joins it), then at most 2 s for the
-/// last process start to finish ([`settle::starts`]); then the log, the counts and
-/// `after_host`, in that order (quit.rs).
+/// (#386), then the host (waits for its start, shuts it down, joins it), then the log and the
+/// counts, then at most 2 s for the last process start to finish ([`settle::starts`]), then
+/// `after_host`, in that order (quit.rs). The log and counts go first: a logoff's short budget
+/// must not be spent waiting on a setup job before they are saved.
 pub(crate) fn stop_steps<R: Runtime>(app: &AppHandle<R>, after_host: impl FnOnce(HostExit, bool)) {
     let cell = app.try_state::<Bridge>().map(|bridge| bridge.cell());
     stop_then_after_host(
@@ -137,13 +138,8 @@ pub(crate) fn stop_steps<R: Runtime>(app: &AppHandle<R>, after_host: impl FnOnce
             app.try_state::<SetupStop>()
                 .is_none_or(|setup| setup::SetupBackend::shutdown(&*setup.0, AGENTS_STOP_WAIT))
         },
-        // The host, then any egress proxy still open (`egress.rs`), then the last process
-        // start: none may be caught suspended by the exit (`quit/settle.rs`).
-        || {
-            let ended = crate::egress::stop_host(app, cell.as_deref());
-            settle::starts();
-            ended
-        },
+        // The host, then any egress proxy still open (`egress.rs`).
+        || crate::egress::stop_host(app, cell.as_deref()),
         // The log's queued lines go to the file before the exit skips the drops.
         || host_log::flush_app(app),
         // After the host, whose last counts go in too.
@@ -152,7 +148,12 @@ pub(crate) fn stop_steps<R: Runtime>(app: &AppHandle<R>, after_host: impl FnOnce
                 counts.save();
             }
         },
-        after_host,
+        // The last process start, before an update or relaunch: none may be caught suspended
+        // by the exit (`quit/settle.rs`).
+        |ended, stopped| {
+            settle::starts();
+            after_host(ended, stopped);
+        },
     );
 }
 
