@@ -1,7 +1,13 @@
 use std::fmt::Write as _;
 use std::io::{Cursor, Write as _};
 
-use super::{CHANGE_MARKS, COMMENT_MARKS, MAX_XML_BYTES, check, holds_any, zip_has_marks};
+use std::time::Duration;
+
+use super::{
+    BLOCK, CHANGE_MARKS, COMMENT_MARKS, MAX_RELS_BYTES, MAX_XML_BYTES, check, holds_any,
+    zip_has_marks,
+};
+use crate::clock::{Clock as _, SystemClock};
 use crate::pipeline::tests::support::TempDir;
 
 /// A reader that hands out one byte at a time, so every mark spans two reads.
@@ -399,7 +405,7 @@ fn the_scan_stops_after_its_total_read() {
         zip.write_all(text.as_bytes()).unwrap();
     };
     put("word/document.xml", BODY);
-    put("word/_rels/document.xml.rels", &document_rels);
+    put("word/_rels/document.xml.rels", document_rels.as_str());
     for n in 1..=5 {
         put(&format!("word/header{n}.xml"), &filler);
     }
@@ -407,4 +413,124 @@ fn the_scan_stops_after_its_total_read() {
     let mut file = zip.finish().unwrap();
     file.set_position(0);
     assert_eq!(zip_has_marks(file), Some(false));
+}
+
+/// A change inside an XML comment or a CDATA section is text, which stetdoc lists no change for;
+/// one after it still counts, wherever the block ends.
+#[test]
+fn a_mark_in_a_comment_or_cdata_is_no_mark() {
+    let hidden = [
+        "<w:body><!-- <w:ins w:id=\"1\"> --><w:p/></w:body>",
+        "<w:body><![CDATA[<w:del w:id=\"2\"> ]]><w:p/></w:body>",
+        "<w:body><!-- <![CDATA[ --><w:p/><!-- ]]> <w:ins w:id=\"3\"> --></w:body>",
+    ];
+    for xml in hidden {
+        assert_eq!(
+            holds_any(xml.as_bytes(), &[CHANGE_MARKS]),
+            Some(false),
+            "{xml}"
+        );
+        assert_eq!(
+            holds_any(Trickle(xml.as_bytes()), &[CHANGE_MARKS]),
+            Some(false)
+        );
+        let then = format!("{xml}<w:moveTo w:id=\"4\"/>");
+        assert_eq!(
+            holds_any(then.as_bytes(), &[CHANGE_MARKS]),
+            Some(true),
+            "{then}"
+        );
+    }
+    // a comment or a mark across the end of a block
+    for shift in 0..40 {
+        let lead = "x".repeat(BLOCK - 20 + shift);
+        let hidden = format!("{lead}<!-- <w:ins w:id=\"1\"> -->");
+        assert_eq!(
+            holds_any(hidden.as_bytes(), &[CHANGE_MARKS]),
+            Some(false),
+            "{shift}"
+        );
+        let after = format!("{hidden}<w:ins w:id=\"1\">");
+        assert_eq!(
+            holds_any(after.as_bytes(), &[CHANGE_MARKS]),
+            Some(true),
+            "{shift}"
+        );
+        let plain = format!("{lead}<w:ins w:id=\"1\">");
+        assert_eq!(
+            holds_any(plain.as_bytes(), &[CHANGE_MARKS]),
+            Some(true),
+            "{shift}"
+        );
+    }
+}
+
+/// A part whose root binds Word's main XML namespace to another prefix, or as the default
+/// namespace, has its marks under that prefix; `w:` there names something else.
+#[test]
+fn a_mark_carries_the_prefix_the_root_binds_to_the_namespace() {
+    const W: &str = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
+    let head = "<?xml version=\"1.0\"?>\n<!-- made by hand -->\n";
+    let x = format!(r#"{head}<x:document xmlns:w="urn:other" xmlns:x="{W}"><x:body>"#);
+    assert_eq!(
+        holds_any(format!("{x}<x:ins x:id=\"1\">").as_bytes(), &[CHANGE_MARKS]),
+        Some(true)
+    );
+    assert_eq!(
+        holds_any(format!("{x}<w:ins w:id=\"1\">").as_bytes(), &[CHANGE_MARKS]),
+        Some(false)
+    );
+    let default = format!(r#"<document xmlns="{W}"><body><del id="2">"#);
+    assert_eq!(holds_any(default.as_bytes(), &[CHANGE_MARKS]), Some(true));
+    // no binding at all, or only `w`: `w:`, as before
+    let w = format!(r#"<w:document xmlns:w="{W}"><w:body><w:ins w:id="1">"#);
+    assert_eq!(holds_any(w.as_bytes(), &[CHANGE_MARKS]), Some(true));
+    assert_eq!(
+        holds_any(format!("{x}<x:p/>").as_bytes(), &[CHANGE_MARKS]),
+        Some(false)
+    );
+}
+
+/// `<Relationship ` repeated inside a value, `size` bytes of it, in a relationships part that
+/// names `target` as a header.
+fn hostile_rels(size: usize, target: &str) -> String {
+    let inside = "<Relationship ".repeat(size / "<Relationship ".len());
+    format!(
+        "<Relationships><Relationship Id=\"{inside}\" Target=\"{target}\" \
+         Type=\"http://x/relationships/header\"/></Relationships>"
+    )
+}
+
+/// Relationships parts shaped to make a scan read ahead from every match cost one pass; one over
+/// the cap is taken as none, so the main document is still read and its headers are not.
+#[test]
+fn a_hostile_or_oversized_relationships_part_is_read_fast_and_capped() {
+    let change = format!("<w:hdr><w:p><w:ins w:id=\"1\" {AUTHOR}/></w:p></w:hdr>");
+    let cap = usize::try_from(MAX_RELS_BYTES).unwrap();
+    let changed = "<w:body><w:p><w:del w:id=\"2\" w:author=\"A\"/></w:p></w:body>";
+    for (size, header_read) in [
+        (cap - 1024, true),
+        (256 * 1024, false),
+        (1024 * 1024, false),
+    ] {
+        let document_rels = hostile_rels(size, "header1.xml");
+        let package = hostile_rels(size, "word/elsewhere.xml");
+        let with_header = docx(&[
+            ("_rels/.rels", package.as_str()),
+            ("word/document.xml", BODY),
+            ("word/_rels/document.xml.rels", document_rels.as_str()),
+            ("word/header1.xml", change.as_str()),
+        ]);
+        let in_main = docx(&[
+            ("_rels/.rels", package.as_str()),
+            ("word/document.xml", changed),
+        ]);
+        let start = SystemClock.now().mono;
+        let with_header = zip_has_marks(with_header);
+        let in_main = zip_has_marks(in_main);
+        let took = SystemClock.now().mono.saturating_sub(start);
+        assert_eq!(with_header, Some(header_read), "{size}");
+        assert_eq!(in_main, Some(true), "{size}");
+        assert!(took < Duration::from_secs(1), "{size} bytes took {took:?}");
+    }
 }
