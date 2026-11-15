@@ -3,12 +3,14 @@
 //!
 //! agent-browser holds the relay's URL (`AGENT_BROWSER_CDP`, `devtools.rs`), and an error or a
 //! reply of its that prints the URL would otherwise put the secret in the agent's logs, which a
-//! command in Codex's sandbox may read. The proxy's password never reaches it, but Chrome sends
+//! command in Codex's sandbox may read. On Windows it holds the session key too
+//! (`AGENT_BROWSER_SESSION_KEY`, `env.rs`), which keeps every process without it off its
+//! daemon's pipe. The proxy's password never reaches it, but Chrome sends
 //! it in each request's `Proxy-Authorization` header, which CDP can show. So [`MARK`] takes
 //! the place of:
 //! - the whole URL, its letters in any case;
-//! - the secret (64 hex digits) in any case, wherever it appears;
-//! - a run of [`MIN_PREFIX`] or more characters that is the secret's start, in any case: a
+//! - the secret and the session key (64 hex digits each) in any case, wherever they appear;
+//! - a run of [`MIN_PREFIX`] or more characters that is the start of either, in any case: a
 //!   message cut short;
 //! - the proxy's password, as the URL's secret ([`Secrets::literal`]), and its base64
 //!   `Proxy-Authorization` value, whole or a start of it that runs [`MIN_PREFIX`] characters
@@ -55,13 +57,21 @@ pub(crate) const MARK: &[u8] = b"[secret redacted]";
 /// by chance.
 pub(crate) const MIN_PREFIX: usize = 16;
 
-/// The relay's URL and its secret (the URL's last path segment), or one literal as both.
+/// One secret taken out of the text: its bytes, and the shortest start of them taken out on its
+/// own.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct Entry {
+    bytes: Vec<u8>,
+    min_start: usize,
+}
+
+/// The relay's URL and the secrets taken out with it: its secret (the URL's last path segment)
+/// and, on Windows, the session key; or one literal as both (the proxy's password). The first
+/// entry is the URL's secret (or the literal), and [`Secrets::start_after`] changes only it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct Secrets {
     url: Vec<u8>,
-    secret: Vec<u8>,
-    /// The shortest start of `secret` taken out on its own.
-    min_start: usize,
+    entries: Vec<Entry>,
 }
 
 /// Whether a pattern is at the start of some text.
@@ -74,15 +84,26 @@ enum Found {
 }
 
 impl Secrets {
-    /// The URL in agent-browser's environment `env`; none when it has none (a one-shot
-    /// agent-browser).
+    /// The URL in agent-browser's environment `env`, its secret and, on Windows, the session key;
+    /// none when it has no URL (a one-shot agent-browser, which gets no key either:
+    /// `env::agent_env`).
     pub(crate) fn of(env: &BTreeMap<String, OsString>) -> Option<Secrets> {
         let url = env.get(env::CDP).and_then(|url| url.to_str())?;
         let secret = url.rsplit('/').next().unwrap_or_default();
+        let key = env
+            .get(env::SESSION_KEY)
+            .and_then(|key| key.to_str())
+            .filter(|key| !key.is_empty());
         (!url.is_empty() && !secret.is_empty()).then(|| Secrets {
             url: url.as_bytes().to_vec(),
-            secret: secret.as_bytes().to_vec(),
-            min_start: MIN_PREFIX,
+            entries: [Some(secret), key]
+                .into_iter()
+                .flatten()
+                .map(|hex| Entry {
+                    bytes: hex.as_bytes().to_vec(),
+                    min_start: MIN_PREFIX,
+                })
+                .collect(),
         })
     }
 
@@ -91,24 +112,27 @@ impl Secrets {
     pub(crate) fn literal(bytes: &[u8]) -> Secrets {
         Secrets {
             url: bytes.to_vec(),
-            secret: bytes.to_vec(),
-            min_start: MIN_PREFIX,
+            entries: vec![Entry {
+                bytes: bytes.to_vec(),
+                min_start: MIN_PREFIX,
+            }],
         }
     }
 
-    /// The same, but a start of it is taken out only when it runs [`MIN_PREFIX`] characters
-    /// past its first `fixed`, which are no secret.
-    pub(crate) fn start_after(self, fixed: usize) -> Secrets {
-        Secrets {
-            min_start: fixed.saturating_add(MIN_PREFIX),
-            ..self
+    /// The same, but a start of the secret (the first entry) is taken out only when it runs
+    /// [`MIN_PREFIX`] characters past its first `fixed`, which are no secret. Other entries,
+    /// the session key, keep [`MIN_PREFIX`].
+    pub(crate) fn start_after(mut self, fixed: usize) -> Secrets {
+        if let Some(first) = self.entries.first_mut() {
+            first.min_start = fixed.saturating_add(MIN_PREFIX);
         }
+        self
     }
 
-    /// Whether `text` starts with the URL, the secret or a long enough start of the secret.
+    /// Whether `text` starts with the URL, one of the secrets or a long enough start of one.
     /// Undecided only while `text` may still grow (`more`).
     fn at_start(&self, text: &[u8], more: bool) -> Found {
-        if self.url.is_empty() || self.secret.is_empty() {
+        if self.url.is_empty() {
             return Found::No;
         }
         if text.len() >= self.url.len() {
@@ -126,17 +150,28 @@ impl Secrets {
         {
             return Found::Undecided;
         }
-        let same = text
-            .iter()
-            .zip(&self.secret)
-            .take_while(|(a, b)| a.eq_ignore_ascii_case(b))
-            .count();
-        if same == self.secret.len() {
-            Found::Hit(same)
-        } else if more && same == text.len() {
+        let (mut undecided, mut longest) = (false, None::<usize>);
+        for entry in &self.entries {
+            if entry.bytes.is_empty() {
+                continue;
+            }
+            let same = text
+                .iter()
+                .zip(&entry.bytes)
+                .take_while(|(a, b)| a.eq_ignore_ascii_case(b))
+                .count();
+            if same == entry.bytes.len() {
+                return Found::Hit(same);
+            }
+            undecided |= more && same == text.len();
+            if same >= entry.min_start {
+                longest = longest.max(Some(same));
+            }
+        }
+        if undecided {
             Found::Undecided
-        } else if same >= self.min_start {
-            Found::Hit(same)
+        } else if let Some(len) = longest {
+            Found::Hit(len)
         } else {
             Found::No
         }
@@ -505,5 +540,71 @@ mod tests {
         );
         // An empty literal matches nothing.
         assert_eq!(super::scan(b"abc", &[Secrets::literal(b"")], false).0, None);
+    }
+
+    /// The session key (Windows) is taken out as the secret is, from stderr and from stdout.
+    #[test]
+    fn the_session_key_is_taken_out_wherever_it_appears() {
+        const KEY: &str = "ffeeddccbbaa99887766554433221100ffeeddccbbaa99887766554433221100";
+        let env = BTreeMap::from([
+            ("AGENT_BROWSER_CDP".to_owned(), OsString::from(url())),
+            ("AGENT_BROWSER_SESSION_KEY".to_owned(), OsString::from(KEY)),
+        ]);
+        let with_key = Secrets::of(&env).unwrap();
+        let mark = mark();
+        let input = format!(
+            "key {KEY}\nupper {}\ncut {}\nsecret {SECRET}\n",
+            KEY.to_ascii_uppercase(),
+            &KEY[..20]
+        );
+        let expected = format!("key {mark}\nupper {mark}\ncut {mark}\nsecret {mark}\n");
+        for step in [1, 5, 64, 4096] {
+            let mut redactor = Redactor::new(with_key.clone());
+            let mut out = Vec::new();
+            for chunk in input.as_bytes().chunks(step) {
+                out.extend(redactor.push(chunk));
+            }
+            out.extend(redactor.finish());
+            assert_eq!(
+                String::from_utf8(out).unwrap(),
+                expected,
+                "reads of {step} bytes"
+            );
+        }
+        remember(&with_key);
+        let reply = format!("{{\"text\":\"{KEY}\"}}");
+        let out = line(reply.as_bytes()).expect("the line held the key");
+        assert_eq!(
+            String::from_utf8(out).unwrap(),
+            format!("{{\"text\":\"{mark}\"}}")
+        );
+    }
+
+    /// The session key (Windows) is its own entry: its start is taken out at [`MIN_PREFIX`]
+    /// characters, and a shorter start is no secret.
+    #[test]
+    fn a_session_key_start_is_taken_out_at_min_prefix() {
+        const KEY: &str = "00ffeeddccbbaa998877665544332211ffeeddccbbaa998877665544332211";
+        let env = BTreeMap::from([
+            ("AGENT_BROWSER_CDP".to_owned(), OsString::from(url())),
+            ("AGENT_BROWSER_SESSION_KEY".to_owned(), OsString::from(KEY)),
+        ]);
+        let with_key = Secrets::of(&env).unwrap();
+        let mark = mark();
+        let input = format!("cut {}\nshort {} kept\n", &KEY[..16], &KEY[..15]);
+        let expected = format!("cut {mark}\nshort {} kept\n", &KEY[..15]);
+        for step in [1, 3, 16, 4096] {
+            let mut redactor = Redactor::new(with_key.clone());
+            let mut out = Vec::new();
+            for chunk in input.as_bytes().chunks(step) {
+                out.extend(redactor.push(chunk));
+            }
+            out.extend(redactor.finish());
+            assert_eq!(
+                String::from_utf8(out).unwrap(),
+                expected,
+                "reads of {step} bytes"
+            );
+        }
     }
 }
