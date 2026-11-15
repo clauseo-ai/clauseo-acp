@@ -887,7 +887,10 @@ Clauseo's browser is agent-browser, a command the agents run, which drives the c
 Google Chrome through Chrome's remote debugging, in a fresh profile for each session. When no Chrome
 is installed it takes another Chromium browser: on a Mac, Microsoft Edge, Brave, then Chromium (in
 `/Applications`, then `~/Applications`; not Arc, which agent-browser can't drive); on Windows,
-Microsoft Edge. With none installed, the agents get no browser and the app tells the lawyer what to
+Microsoft Edge. On a Mac it takes an app only from its own bundle, checked by its bundle id. A
+Chromium build that isn't signed and still carries the quarantine flag from its download may be
+blocked by Gatekeeper; the agent then sees that the browser could not start. With none installed,
+the agents get no browser and the app tells the lawyer what to
 install, with a button to Chrome's download page; a browser installed later reaches the agents in the
 next new conversation, with no need to reopen Clauseo. For launch, which conversations have it
 depends on the agent: on a Mac, Codex conversations have the browser and Claude conversations don't
@@ -918,6 +921,11 @@ Chrome does:
   Clauseo reads at most 256 `.json` files in each folder and 16 MiB in each file; a folder or
   file past either limit counts as one it can't read (below). Clauseo skips `recommended/`,
   because Chrome doesn't take this policy as a recommendation either.
+
+On a Mac and on Linux, a policy file's `DeveloperToolsAvailability` of 2 (developer tools off)
+turns remote debugging off too, so it counts as a false in the rule below. On Windows the same
+value under the same registry keys counts as a false for that browser, the `HKLM` value over the
+`HKCU` one, as Chrome merges them.
 
 **What Clauseo doesn't read.** Brave's policy on Windows and Linux, and Chrome or Edge policy pushed from the cloud
 (Chrome Browser Cloud Management, Edge management service) that is not written to the registry,

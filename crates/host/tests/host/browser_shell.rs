@@ -346,16 +346,13 @@ fn a_browser_installed_while_clauseo_runs_reaches_the_next_conversation() {
     turn(&host, first);
     let before = first_frame_tools(&host, first);
 
-    let brave = [
-        "Applications",
-        "Brave Browser.app",
-        "Contents",
-        "MacOS",
-        "Brave Browser",
-    ]
-    .into_iter()
-    .fold(home, |path, part| path.join(part));
+    let bundle = home.join("Applications").join("Brave Browser.app");
+    let brave = bundle.join("Contents").join("MacOS").join("Brave Browser");
     write::write(&brave, b"stand-in");
+    write::write(
+        &bundle.join("Contents").join("Info.plist"),
+        BRAVE_INFO.as_bytes(),
+    );
     let second = host.create_thread(matter, CODEX);
     turn(&host, second);
     let after = first_frame_tools(&host, second);
@@ -382,6 +379,17 @@ fn a_browser_installed_while_clauseo_runs_reaches_the_next_conversation() {
         Some(tool(ClauseoTool::Browser, None))
     );
 }
+
+/// Brave's `Info.plist`, as far as the host reads it: its bundle id.
+const BRAVE_INFO: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+<key>CFBundleIdentifier</key>
+<string>com.brave.Browser</string>
+</dict>
+</plist>
+"#;
 
 /// The header's browser state.
 fn header_browser(tools: &[clauseo_protocol::ToolState]) -> Option<clauseo_protocol::ToolState> {

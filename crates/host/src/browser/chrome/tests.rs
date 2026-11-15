@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use clauseo_settings::chromium_policy::Browser;
 
 use super::{
-    ChromeRoots, EDGE_ALLOWED, Platform, WindowsBrowsers, find, find_with, version,
+    ChromeRoots, EDGE_ALLOWED, MAC_BUNDLE_IDS, Platform, WindowsBrowsers, find, find_with, version,
     windows_installed, windows_installed_with,
 };
 use crate::pipeline::tests::support::TempDir;
@@ -24,14 +24,46 @@ fn roots(dir: &Path, platform: Platform) -> ChromeRoots {
     }
 }
 
-/// Makes an empty file at `dir/relative` and returns its path.
+/// Makes an empty file at `dir/relative` and returns its path. A macOS app's binary
+/// (`<name>.app/Contents/MacOS/...`) gets its bundle's `Info.plist` with the id
+/// [`MAC_BUNDLE_IDS`] expects for `<name>.app` (another app's, `other.app.id`).
 fn touch(dir: &Path, relative: &str) -> PathBuf {
+    let path = bare(dir, relative);
+    if let Some(bundle) = path
+        .ancestors()
+        .nth(3)
+        .filter(|b| b.extension() == Some("app".as_ref()))
+    {
+        let name = bundle.file_name().unwrap();
+        let id = MAC_BUNDLE_IDS
+            .iter()
+            .find(|(app, _)| name == *app)
+            .map_or("other.app.id", |(_, id)| *id);
+        info_plist(bundle, id);
+    }
+    path
+}
+
+/// Makes an empty file at `dir/relative`, with no `Info.plist`, and returns its path.
+fn bare(dir: &Path, relative: &str) -> PathBuf {
     let path = relative
         .split('/')
         .fold(dir.to_owned(), |path, part| path.join(part));
     write::create_dir_all(path.parent().unwrap()).unwrap();
     write::write_file(&path, b"").unwrap();
     path
+}
+
+/// Writes `bundle`'s `Contents/Info.plist` with `id` as its `CFBundleIdentifier`.
+fn info_plist(bundle: &Path, id: &str) {
+    let mut dict = plist::Dictionary::new();
+    dict.insert("CFBundleIdentifier".to_owned(), id.into());
+    dict.insert("CFBundleName".to_owned(), "Browser".into());
+    let mut bytes = Vec::new();
+    plist::Value::Dictionary(dict)
+        .to_writer_xml(&mut bytes)
+        .unwrap();
+    write::write_file(&bundle.join("Contents").join("Info.plist"), &bytes).unwrap();
 }
 
 const MAC_CHROME: &str = "Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
@@ -210,6 +242,43 @@ fn mac_chrome_for_testing_beats_the_other_browsers() {
         &format!("app/browsers/chrome-131.0.1/{CFT_MAC_ARM}"),
     );
     assert_eq!(find(&roots(dir.path(), Platform::MacArm64)), Some(cft));
+}
+
+/// A Mac app is taken only from its own bundle: one with the wrong id, none, or a link to a
+/// real bundle is passed over, and the next place is looked at.
+#[test]
+fn a_mac_app_needs_its_own_bundle_id() {
+    let dir = TempDir::new("chrome-mac-bundle-id");
+    let (root, home) = (dir.path().join("root"), dir.path().join("home"));
+    let mac = || roots(dir.path(), Platform::MacArm64);
+    // Chrome's name on another app's bundle.
+    let chrome = touch(&root, MAC_CHROME);
+    info_plist(chrome.ancestors().nth(3).unwrap(), "com.example.notchrome");
+    // A plain folder: Edge's binary and no Info.plist.
+    bare(&root, MAC_EDGE);
+    // No Info.plist id at all on Chromium.
+    let chromium = touch(&root, MAC_CHROMIUM);
+    info_plist(chromium.ancestors().nth(3).unwrap(), "");
+    assert_eq!(find(&mac()), None);
+    let brave = touch(&home, MAC_BRAVE);
+    assert_eq!(find(&mac()), Some(brave));
+}
+
+/// A bundle that is a link, even to a real Chrome, is not taken.
+#[cfg(unix)]
+#[test]
+fn a_linked_mac_bundle_is_passed_over() {
+    let dir = TempDir::new("chrome-mac-bundle-link");
+    let real = touch(&dir.path().join("elsewhere"), MAC_CHROME);
+    let apps = dir.path().join("root").join("Applications");
+    write::create_dir_all(&apps).unwrap();
+    write::symlink(
+        real.ancestors().nth(3).unwrap(),
+        &apps.join("Google Chrome.app"),
+    )
+    .unwrap();
+    assert!(dir.path().join("root").join(MAC_CHROME).is_file());
+    assert_eq!(find(&roots(dir.path(), Platform::MacArm64)), None);
 }
 
 /// The Mac's list is the Mac's: Windows and Linux never look there, and Arc is not on it.

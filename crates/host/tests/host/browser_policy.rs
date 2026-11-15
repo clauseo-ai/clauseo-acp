@@ -5,6 +5,7 @@
 //! allows Clauseo's browser anyway; a policy that says nothing, or holds a bad value, leaves the
 //! browser on. On Windows the rule goes per browser: Edge's false leaves a Program Files Chrome.
 
+use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -13,7 +14,8 @@ use clauseo_host::browser::chrome::{ChromeRoots, Platform};
 use clauseo_host::{HostConfig, TestProxy};
 use clauseo_protocol::{ClauseoTool, MatterId, ThreadId, ToolsUnavailableReason};
 use clauseo_settings::chromium_policy::{
-    Browser, Found, Place, RemoteDebugging, RemoteDebuggingPolicy, Scope,
+    Browser, Found, Place, PolicyTree, RemoteDebugging, RemoteDebuggingPolicy, Scope,
+    read_managed_prefs,
 };
 use serde_json::json;
 
@@ -42,6 +44,41 @@ impl RemoteDebuggingPolicy for Says {
         }
     }
 }
+
+/// The macOS reader over a computer whose one managed preferences file is Brave's, the
+/// computer's, with `RemoteDebuggingAllowed` false.
+#[derive(Debug)]
+struct BraveOff;
+
+impl RemoteDebuggingPolicy for BraveOff {
+    fn read(&self) -> RemoteDebugging {
+        read_managed_prefs(&BraveTree, Ok(Some("lawyer".to_owned())))
+    }
+}
+
+/// [`BraveOff`]'s files: Brave's computer file directly in the managed preferences folder.
+struct BraveTree;
+
+impl PolicyTree for BraveTree {
+    fn read(&self, path: &Path, _max: u64) -> io::Result<Option<Vec<u8>>> {
+        let brave = path.file_name() == Some("com.brave.Browser.plist".as_ref())
+            && path.parent().and_then(Path::file_name) == Some("Managed Preferences".as_ref());
+        Ok(brave.then(|| BRAVE_OFF.as_bytes().to_vec()))
+    }
+
+    fn json_files(&self, _dir: &Path) -> io::Result<Vec<PathBuf>> {
+        Ok(Vec::new())
+    }
+}
+
+const BRAVE_OFF: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
+<plist version="1.0">
+<dict>
+<key>RemoteDebuggingAllowed</key>
+<false/>
+</dict>
+</plist>
+"#;
 
 /// A firm policy whose first read fails at Edge's user place, and whose later reads find
 /// nothing set.
@@ -261,6 +298,15 @@ fn remote_debugging_off_blocks_chrome_for_testing() {
     assert_eq!(
         reason("rd_off_cft", Found::Disallowed, None, Chrome::ForTesting),
         Some(ToolsUnavailableReason::BrowserBlockedByPolicy)
+    );
+}
+
+/// Brave's own policy, on a Mac, blocks every browser as Chrome's does.
+#[test]
+fn brave_remote_debugging_off_blocks_the_browser() {
+    assert_eq!(
+        reasons("rd_brave_off", Arc::new(BraveOff), None, Chrome::Forced, 1),
+        [Some(ToolsUnavailableReason::BrowserBlockedByPolicy)]
     );
 }
 

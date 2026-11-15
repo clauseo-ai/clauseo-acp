@@ -43,6 +43,10 @@
 //! On Linux (development and CI only) the host takes `/usr/bin/google-chrome`, then
 //! `/usr/bin/chromium`.
 //!
+//! On macOS every app is taken only from a real bundle (no link) whose `Contents/Info.plist`
+//! says the expected `CFBundleIdentifier` ([`MAC_BUNDLE_IDS`]), so a folder or a link dressed up
+//! with a browser's name does not pick another program.
+//!
 //! Every root comes in through [`ChromeRoots`], so the tests use fixture folders.
 
 use std::path::{Path, PathBuf};
@@ -66,6 +70,21 @@ pub const MAC_OTHERS: [(&str, &str); 3] = [
     ("Brave Browser.app", "Brave Browser"),
     ("Chromium.app", "Chromium"),
 ];
+
+/// macOS: the `CFBundleIdentifier` each app the host takes must have, by its bundle's name.
+pub const MAC_BUNDLE_IDS: [(&str, &str); 5] = [
+    ("Google Chrome.app", "com.google.Chrome"),
+    (
+        "Google Chrome for Testing.app",
+        "com.google.chrome.for.testing",
+    ),
+    ("Microsoft Edge.app", "com.microsoft.edgemac"),
+    ("Brave Browser.app", "com.brave.Browser"),
+    ("Chromium.app", "org.chromium.Chromium"),
+];
+
+/// The largest `Info.plist` read for a bundle's id; a larger one is no browser's.
+const MAX_INFO_PLIST: u64 = 1024 * 1024;
 
 /// The folder under the app data folder that holds Chrome for Testing downloads.
 pub const BROWSERS_DIR: &str = "browsers";
@@ -91,6 +110,11 @@ pub enum Platform {
 }
 
 impl Platform {
+    /// Whether this is macOS, where an app must be its expected bundle ([`MAC_BUNDLE_IDS`]).
+    fn is_mac(self) -> bool {
+        matches!(self, Self::MacArm64 | Self::MacX64)
+    }
+
     /// The machine this host was built for.
     pub fn current() -> Self {
         if cfg!(target_os = "macos") {
@@ -281,12 +305,52 @@ fn find_with(roots: &ChromeRoots, edge_allowed: bool) -> Option<PathBuf> {
             .next()
             .map(|(_, path)| path);
     }
+    let usable = |path: &PathBuf| usable(roots.platform, path);
     roots
         .installed()
         .into_iter()
-        .find(|path| is_file(path))
+        .find(usable)
         .or_else(|| chrome_for_testing(roots))
-        .or_else(|| roots.others().into_iter().find(|path| is_file(path)))
+        .or_else(|| roots.others().into_iter().find(usable))
+}
+
+/// Whether `binary` can be taken: a regular file and, on macOS, inside its expected bundle.
+fn usable(platform: Platform, binary: &Path) -> bool {
+    is_file(binary) && (!platform.is_mac() || in_expected_bundle(binary))
+}
+
+/// Whether `binary`, at `<name>.app/Contents/MacOS/<binary>`, sits in a bundle that is a real
+/// folder (a link is passed over: `symlink_metadata` does not follow it) whose `Info.plist`
+/// gives the `CFBundleIdentifier` [`MAC_BUNDLE_IDS`] expects for `<name>.app`.
+fn in_expected_bundle(binary: &Path) -> bool {
+    let Some(bundle) = binary.ancestors().nth(3) else {
+        return false;
+    };
+    let expected = bundle.file_name().and_then(|name| {
+        MAC_BUNDLE_IDS
+            .iter()
+            .find(|(app, _)| name == *app)
+            .map(|(_, id)| *id)
+    });
+    let Some(expected) = expected else {
+        return false;
+    };
+    std::fs::symlink_metadata(bundle).is_ok_and(|meta| meta.is_dir())
+        && bundle_id(&bundle.join("Contents").join("Info.plist")).as_deref() == Some(expected)
+}
+
+/// The `CFBundleIdentifier` of an `Info.plist` (XML or binary), or `None` when it is missing,
+/// larger than [`MAX_INFO_PLIST`], not a property list dictionary, or holds no string id.
+fn bundle_id(info: &Path) -> Option<String> {
+    let meta = std::fs::metadata(info).ok()?;
+    if !meta.is_file() || meta.len() > MAX_INFO_PLIST {
+        return None;
+    }
+    plist::Value::from_file(info)
+        .ok()?
+        .into_dictionary()?
+        .remove("CFBundleIdentifier")?
+        .into_string()
 }
 
 /// What Windows has: the browsers the host can take, and a Chrome it found but cannot use.
@@ -363,7 +427,7 @@ fn chrome_for_testing(roots: &ChromeRoots) -> Option<PathBuf> {
             let path = entry.path().join(&binary);
             let inside =
                 dunce::canonicalize(&path).is_ok_and(|real| real.starts_with(&real_browsers));
-            (inside && is_file(&path)).then_some((version, path))
+            (inside && usable(roots.platform, &path)).then_some((version, path))
         })
         .collect();
     found.sort();
