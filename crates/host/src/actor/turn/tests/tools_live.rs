@@ -1,7 +1,7 @@
 //! A Tools change reaching a live agent (`idle/tools.rs`) with a real `fake_agent`: an idle agent
 //! whose servers changed is stopped once idle for the grace (`cap_min_idle`), and its next prompt
 //! relaunches it with the new servers (the agent's `session/new` names them); an agent in a turn,
-//! with a permission open and a prompt queued, is stopped only after both turns and the grace; a
+//! with a permission open, is stopped only after the turn and the grace; a
 //! background command's agent-started turn within the grace keeps its agent; output held for a
 //! turn keeps it; an agent whose servers did not change keeps running; two quick changes make one
 //! stop.
@@ -29,16 +29,24 @@ use crate::config::{CAP_MIN_IDLE, IDLE_LIMIT};
 use crate::pipeline::tests::support::TempDir;
 
 /// The relaunch's branch: `session/new` with `notes` alone, then one prompt answered.
-fn with_notes() -> Value {
-    json!([
-        {"expect":{"method":"session/new","as":"new2","params":{
-            "mcpServers":[{"name":"notes","command":"{{any}}"}]}}},
-        {"respond":{"to":"new2","result":{"sessionId":"sess-1"}}},
-        {"expect":{"method":"session/prompt","as":"p-notes","params":{"sessionId":"sess-1"}}},
-        {"update":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-n",
-            "content":{"type":"text","text":"With notes."}}}},
-        {"respond":{"to":"p-notes","result":{"stopReason":"end_turn"}}}
-    ])
+pub(super) fn with_notes() -> Value {
+    let mut branch = vec![
+        json!({"expect":{"method":"session/new","as":"new2","params":{
+            "mcpServers":[{"name":"notes","command":"{{any}}"}]}}}),
+        json!({"respond":{"to":"new2","result":{"sessionId":"sess-1"}}}),
+    ];
+    branch.extend(answer_with_notes());
+    Value::Array(branch)
+}
+
+/// The relaunch's prompt, answered "With notes.".
+pub(super) fn answer_with_notes() -> Vec<Value> {
+    vec![
+        json!({"expect":{"method":"session/prompt","as":"p-notes","params":{"sessionId":"sess-1"}}}),
+        json!({"update":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-n",
+            "content":{"type":"text","text":"With notes."}}}}),
+        json!({"respond":{"to":"p-notes","result":{"stopReason":"end_turn"}}}),
+    ]
 }
 
 /// The first launch's branch: `session/new` with no server, then `steps`.
@@ -52,7 +60,7 @@ fn first(steps: &[Value]) -> Value {
 }
 
 /// One prompt answered "First.".
-fn one_answer() -> Vec<Value> {
+pub(super) fn one_answer() -> Vec<Value> {
     vec![
         json!({"expect":{"method":"session/prompt","as":"p1","params":{"sessionId":"sess-1"}}}),
         json!({"update":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-1",
@@ -63,18 +71,27 @@ fn one_answer() -> Vec<Value> {
 
 /// A rig whose settings hold `notes` (a local server, the fake agent's own program) and `web` (a
 /// remote one), both off, with the idle stop at its limit and no cap; the first launch plays
-/// `steps`.
+/// `steps`, the relaunch [`with_notes`].
 fn rig(test: &str, steps: &[Value]) -> Rig {
+    rig_with(test, steps, &with_notes(), false)
+}
+
+/// [`rig`], with the relaunch's branch `relaunch`, and the agent taking `session/load` when
+/// `load`.
+pub(super) fn rig_with(test: &str, steps: &[Value], relaunch: &Value, load: bool) -> Rig {
     let dir = TempDir::new(test);
     let root = dir.path();
-    let one_of = json!({"one_of":[first(steps), with_notes()]});
+    let one_of = json!({"one_of":[first(steps), relaunch]});
     Rig::prepare(root, test, &format!("{one_of}\n"), None);
     // The handshake's own `session/new` gives way to the `one_of`.
     let scenario = root.join(format!("{test}.jsonl"));
     let text = std::fs::read_to_string(&scenario).unwrap();
     let new = HANDSHAKE.lines().skip(2).collect::<Vec<_>>().join("\n") + "\n";
     assert!(text.contains(&new), "the handshake's session/new not found");
-    let text = text.replacen(&new, "", 1);
+    let mut text = text.replacen(&new, "", 1);
+    if load {
+        text = text.replacen(r#""loadSession":false"#, r#""loadSession":true"#, 1);
+    }
     crate::write::write_file(&scenario, text.as_bytes()).unwrap();
     let settings_path = root.join("data").join("settings.json");
     let mut settings: Value =
@@ -96,7 +113,7 @@ fn rig(test: &str, steps: &[Value]) -> Rig {
 }
 
 /// Turns `server` on as command `n`, holding back any agent's end.
-fn turn_on(rig: &mut Rig, n: u128, server: &str) {
+pub(super) fn turn_on(rig: &mut Rig, n: u128, server: &str) {
     let command = HostCommand::Mcp(McpCommand::SetServerEnabled {
         name: server.to_owned(),
         enabled: true,
@@ -105,7 +122,7 @@ fn turn_on(rig: &mut Rig, n: u128, server: &str) {
 }
 
 /// Whether `input` is an agent's end.
-fn agent_end(_: &Actor, input: &Input) -> bool {
+pub(super) fn agent_end(_: &Actor, input: &Input) -> bool {
     matches!(
         input,
         Input::Agent {
@@ -116,14 +133,14 @@ fn agent_end(_: &Actor, input: &Input) -> bool {
 }
 
 /// Whether `thread`'s agent is marked for a Tools change.
-fn stale(actor: &Actor, thread: ThreadId) -> bool {
+pub(super) fn stale(actor: &Actor, thread: ThreadId) -> bool {
     let agent = actor.threads[&thread].turn.agent.as_deref().unwrap();
     agent.idle.relaunch == Some(Relaunch::ToolsChanged)
 }
 
 /// `thread`'s marked agent, idle since `since`, is live a millisecond before the grace ends and
 /// stopped at it, once.
-fn stopped_after_the_grace(rig: &mut Rig, thread: ThreadId, since: std::time::Duration) {
+pub(super) fn stopped_after_the_grace(rig: &mut Rig, thread: ThreadId, since: std::time::Duration) {
     let at = since + CAP_MIN_IDLE;
     assert_eq!(rig.actor.turn_path.idle.armed_at(), Some(at));
     let now = rig.actor.now().mono;
@@ -156,7 +173,7 @@ fn idle_update(input: &Input) -> bool {
 }
 
 /// How many turns of `thread` ended `EndTurn`.
-fn turns_ended(rig: &mut Rig, thread: ThreadId) -> usize {
+pub(super) fn turns_ended(rig: &mut Rig, thread: ThreadId) -> usize {
     rig.log(thread)
         .iter()
         .filter(|event| {
@@ -167,7 +184,7 @@ fn turns_ended(rig: &mut Rig, thread: ThreadId) -> usize {
 
 /// The next prompt relaunches the agent, whose `session/new` names `notes`: its answer is the
 /// relaunch branch's.
-fn relaunches_with_notes(rig: &mut Rig, n: u128, thread: ThreadId) {
+pub(super) fn relaunches_with_notes(rig: &mut Rig, n: u128, thread: ThreadId) {
     let before = turns_ended(rig, thread);
     send_prompt(rig, n, thread);
     rig.run_until("the relaunched turn's end", |actor| {
@@ -198,7 +215,7 @@ fn an_idle_agent_is_stopped_and_relaunched_with_the_new_servers() {
 }
 
 #[test]
-fn an_agent_in_a_turn_is_stopped_after_its_queue_and_its_ask() {
+fn an_agent_in_a_turn_is_stopped_after_its_ask_and_the_grace() {
     let steps = vec![
         json!({"expect":{"method":"session/prompt","as":"p1","params":{"sessionId":"sess-1"}}}),
         json!({"request":{"id":"perm-1","method":"session/request_permission","params":{
@@ -208,10 +225,6 @@ fn an_agent_in_a_turn_is_stopped_after_its_queue_and_its_ask() {
         json!({"expect_response":{"id":"perm-1","result":{"outcome":{"outcome":"selected",
             "optionId":"allow-once"}}}}),
         json!({"respond":{"to":"p1","result":{"stopReason":"end_turn"}}}),
-        json!({"expect":{"method":"session/prompt","as":"p2","params":{"sessionId":"sess-1"}}}),
-        json!({"update":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-2",
-            "content":{"type":"text","text":"Queued answer."}}}}),
-        json!({"respond":{"to":"p2","result":{"stopReason":"end_turn"}}}),
     ];
     let mut rig = rig("tools-live-turn", &steps);
     let thread = rig.thread();
@@ -223,8 +236,7 @@ fn an_agent_in_a_turn_is_stopped_after_its_queue_and_its_ask() {
             .as_deref()
             .is_some_and(|agent| !agent.permissions.is_empty())
     });
-    // A prompt queued behind the turn, then the change: the agent is marked, not stopped.
-    send_prompt(&mut rig, 11, thread);
+    // The change in the turn: the agent is marked, not stopped.
     turn_on(&mut rig, 12, "notes");
     assert!(live(&rig.actor, thread), "stopped in its turn");
     assert!(stale(&rig.actor, thread));
@@ -236,11 +248,10 @@ fn an_agent_in_a_turn_is_stopped_after_its_queue_and_its_ask() {
         option_id: AgentChoiceId::new("allow-once").unwrap(),
     };
     rig.dispatch(13, answer).unwrap();
-    // Both turns run on the agent launched first, then it stops after the grace, once.
+    // The turn ends on the agent launched first, which stops after the grace, once. (A prompt
+    // queued behind it relaunches it at once: `tools_prompt.rs`.)
     let since = until_idle(&mut rig, thread);
-    assert_eq!(turns_ended(&mut rig, thread), 2);
-    let log = format!("{:?}", rig.log(thread));
-    assert!(log.contains("Queued answer."), "the queued prompt was lost");
+    assert_eq!(turns_ended(&mut rig, thread), 1);
     stopped_after_the_grace(&mut rig, thread, since);
     relaunches_with_notes(&mut rig, 14, thread);
     rig.finish();
