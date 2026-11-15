@@ -133,7 +133,8 @@ mod tests {
         let all = matter_rules_within(&deny, &|_| None, 0, 1 << 20).0;
         let budget = super::json_len(&all) / 2;
         let (rules, left_out) = matter_rules_within(&deny, &|_| None, 0, budget);
-        assert!(super::json_len(&rules) <= budget);
+        // Alone, the kept rules' array gains its brackets and loses a comma.
+        assert!(super::json_len(&rules) <= budget + 1);
         assert!(!left_out.is_empty() && left_out.len() < 10, "{left_out:?}");
         let expected: Vec<MatterId> = (11 - u128::try_from(left_out.len()).unwrap()..=10)
             .map(id)

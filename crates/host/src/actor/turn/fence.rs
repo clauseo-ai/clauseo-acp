@@ -95,13 +95,32 @@ pub(crate) fn reads_part(run: &RunFolders) -> String {
     clauseo_profile::instructions::matter_reads_part(&reads)
 }
 
-/// `part` appended to the instructions at `text`, when it is a string and `part` is not empty.
-pub(crate) fn append_part(text: Option<&mut Value>, part: &str) {
-    if let Some(Value::String(text)) = text
+/// `part` appended to the instructions `text`, when it is a string and `part` is not empty.
+pub(crate) fn append_part(text: &mut Value, part: &str) {
+    if let Value::String(text) = text
         && !part.is_empty()
     {
         text.push_str(part);
     }
+}
+
+/// What a Claude session's `meta` gets from the fence after its instructions are filled: the
+/// invited matters' part appended to them, and the lawyer told of matters its Windows shell
+/// rules left out ([`tell_unfenced`]).
+pub(crate) fn after_meta(
+    actor: &mut Actor,
+    thread: ThreadId,
+    run: &RunFolders,
+    meta: &mut serde_json::Map<String, Value>,
+) {
+    let reads = reads_part(run);
+    let prompt = meta.get_mut("systemPrompt");
+    if let Some(text) = prompt.and_then(|prompt| prompt.get_mut("append")) {
+        append_part(text, &reads);
+    }
+    let unfenced =
+        crate::agent::loads::profile::unfenced_matters(meta, &run.data_deny, cfg!(windows));
+    tell_unfenced(actor, thread, unfenced);
 }
 
 /// The words the unfenced notice falls back to, for a view that does not know its kind.

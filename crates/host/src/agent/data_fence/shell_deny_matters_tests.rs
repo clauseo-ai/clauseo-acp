@@ -147,7 +147,7 @@ fn without_variables_the_lists_are_shorter_and_still_deny_the_path() {
 /// as a deny beats an allow; the session's matter itself is not.
 #[test]
 fn a_child_matter_inside_the_own_matter_is_denied_and_the_matter_is_not() {
-    let deny = launch("Acme", &[(r"AcmeChild", &[r"AcmeChild"], false)]);
+    let deny = launch("Acme", &[(r"Acme\Child", &[r"Acme\Child"], false)]);
     let rules = all_rules(&deny);
     assert!(denied(
         &rules,
