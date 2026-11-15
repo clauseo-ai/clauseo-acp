@@ -211,10 +211,11 @@ fn every_agent_with_a_kind_gets_the_author_and_the_case_law_entry() {
         browser.args.get(at + 1).map(String::as_str),
         agent_browser.to_str()
     );
-    // Four variables (no proxy), and the socket folder's on macOS and Linux (decision record
-    // 0030).
+    // Three variables (no proxy, no stream port since route 2), and the socket folder's on macOS
+    // and Linux (decision record 0030).
     assert!(!browser.env.contains_key("AGENT_BROWSER_PROXY"));
-    assert_eq!(browser.env.len(), if cfg!(windows) { 4 } else { 5 });
+    assert!(!browser.env.contains_key("AGENT_BROWSER_STREAM_PORT"));
+    assert_eq!(browser.env.len(), if cfg!(windows) { 3 } else { 4 });
 }
 
 #[test]
