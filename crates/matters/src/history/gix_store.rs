@@ -135,6 +135,12 @@ impl GixStore {
         }
     }
 
+    /// Whether the store holds blob `blob` (its object file is there; not read): published, or
+    /// written since and not yet published.
+    pub(crate) fn has_blob(&self, blob: Oid) -> bool {
+        self.objects.contains(&to_gix(blob))
+    }
+
     /// Sets the size above which files are streamed.
     #[cfg(test)]
     pub(super) fn set_stream_threshold(&mut self, bytes: u64) {
