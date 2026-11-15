@@ -530,13 +530,16 @@ fn send_with<Req, T, F>(
 }
 
 /// An error the agent answered with to `method`, or the SDK's for a connection that closed
-/// first, or for an answer that did not decode. Each but the closed connection is logged
-/// (`diagnose::rpc_error`).
+/// first, or for an answer that did not decode ([`Error::Protocol`]). Each but the closed
+/// connection is logged (`diagnose::rpc_error`).
 fn rpc_error(shared: &Shared, method: &str, error: agent_client_protocol::Error) -> Error {
     if agent_client_protocol::is_incoming_transport_closed(&error) {
         return Error::Closed;
     }
     crate::diagnose::rpc_error(method, &error);
+    if crate::diagnose::is_decode_failure(&error) {
+        return Error::Protocol(format!("the agent's answer to {method} did not decode"));
+    }
     if error.code == acp::ErrorCode::AuthRequired {
         let methods = shared.state().auth_methods.clone();
         return Error::AuthRequired { methods };

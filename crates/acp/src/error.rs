@@ -23,8 +23,9 @@ pub enum Error {
         /// The ways it signs in, from `initialize`.
         methods: Vec<AuthMethod>,
     },
-    /// The agent answered with a JSON-RPC error, or its answer did not decode (the SDK's
-    /// `-32700`). The driver has logged it (`diagnose.rs`).
+    /// The agent answered with a JSON-RPC error. The driver has logged it (`diagnose.rs`). An
+    /// answer that did not decode (the SDK's own `-32700`) is [`Error::Protocol`] instead: the
+    /// agent's error is well formed, so it is never called unreadable.
     #[error("the agent answered {method} with error {code}: {message}")]
     Rpc {
         /// The request's JSON-RPC method, such as `session/new`.
@@ -45,7 +46,8 @@ pub enum Error {
         /// ([`RpcData`]): never the lawyer's words.
         data_fields: RpcData,
     },
-    /// The agent broke the protocol: a line over 8 MiB, or an answer the driver cannot use.
+    /// The agent broke the protocol: a line over 8 MiB, an answer that did not decode, or an
+    /// answer the driver cannot use.
     #[error("the agent broke the protocol: {0}")]
     Protocol(String),
     /// A prompt is in flight on this session; nothing was sent.
@@ -144,6 +146,16 @@ fn is_token(value: &str) -> bool {
             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-' | b'.'))
 }
 
+/// The JSON-RPC methods that start an agent's session: an error answer to one is a failed
+/// launch ([`Error::code`]).
+pub(crate) const START_METHODS: [&str; 5] = [
+    "initialize",
+    "authenticate",
+    "session/new",
+    "session/load",
+    "session/resume",
+];
+
 /// The most of an RPC error's `data` kept.
 pub(crate) const MAX_DATA_BYTES: usize = 4096;
 
@@ -193,12 +205,18 @@ impl Error {
         method == "session/prompt" && crate::map::rpc_says_too_long(data_fields)
     }
 
-    /// The code a client sees.
-    pub const fn code(&self) -> ErrorCode {
+    /// The code a client sees. An error the agent answered a start request with
+    /// ([`START_METHODS`]: `initialize`, `authenticate`, `session/new`, `session/load`,
+    /// `session/resume`) is `agent.launch_failed`: the agent did not start, and its answer read
+    /// fine. Only an answer that broke the protocol is `agent.protocol_error`.
+    pub fn code(&self) -> ErrorCode {
         match self {
             Self::Closed => ErrorCode::AgentExited,
             Self::UnsupportedVersion { .. } => ErrorCode::AgentUnsupportedVersion,
             Self::AuthRequired { .. } => ErrorCode::AgentAuthRequired,
+            Self::Rpc { method, .. } if START_METHODS.contains(&method.as_str()) => {
+                ErrorCode::AgentLaunchFailed
+            }
             Self::Rpc { .. } | Self::Protocol(_) => ErrorCode::AgentProtocolError,
             Self::TurnRunning => ErrorCode::ThreadTurnRunning,
             Self::PermissionNotPending => ErrorCode::PermissionNotPending,
