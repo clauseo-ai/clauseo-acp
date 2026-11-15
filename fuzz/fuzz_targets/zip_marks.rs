@@ -259,6 +259,7 @@ fuzz_target!(|data: &[u8]| {
             panic!("the zip does not open, zip_has_marks said Some(false): {spec}")
         }
         (Verdict::Clean, Some(true)) => count(&OVER_OFFERED),
+        // counted, not asserted: Word never renders [Content_Types].xml
         (Verdict::TypesMarks, Some(false)) => count(&TYPES_MARKS_FALSE),
         _ => {}
     }

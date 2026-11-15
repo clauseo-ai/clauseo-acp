@@ -6,6 +6,10 @@
 //! inner attributes), each `mod name;` gets the absolute path of the file it names (an included
 //! module would look for it beside this crate), and a `fuzz_zip_has_marks` is appended inside the
 //! module, so the private `zip_has_marks` can be called from outside it.
+//!
+//! Before that it checks the host paths the scan reaches (`crate::` and `super::`, comments and
+//! test modules aside) against the ones zip_marks.rs stands in for, and fails the build naming
+//! marks.rs when there is another, so a nightly break points at its cause.
 
 use std::path::Path;
 
@@ -17,6 +21,22 @@ fn main() {
     println!("cargo::rerun-if-changed={}", source.display());
     println!("cargo::rerun-if-changed={}", folder.display());
     let text = std::fs::read_to_string(&source).expect("crates/host/src/revisions/marks.rs");
+    check_host_paths(
+        "marks.rs",
+        &text,
+        &["super::is_docx", "crate::write::open_read_nofollow"],
+    );
+    for file in std::fs::read_dir(&folder)
+        .expect("crates/host/src/revisions/marks/")
+        .flatten()
+    {
+        let name = file.file_name().to_string_lossy().into_owned();
+        if name.ends_with(".rs") && !name.contains("tests") && name != "reparse.rs" {
+            let part = std::fs::read_to_string(file.path()).expect("a marks/ module");
+            // `super::` in marks/x.rs is marks.rs itself, compiled here
+            check_host_paths(&format!("marks/{name}"), &part, &["super::"]);
+        }
+    }
     let mut out = String::new();
     for line in text.lines() {
         let trimmed = line.trim();
@@ -40,4 +60,47 @@ fn main() {
     );
     let dest = Path::new(&std::env::var("OUT_DIR").expect("cargo sets OUT_DIR")).join("marks.rs");
     std::fs::write(dest, out).expect("write OUT_DIR/marks.rs");
+}
+
+/// Fails the build when `text` (`file` under crates/host/src/revisions/, its `cfg(test)` and
+/// `cfg(windows)` code aside) reaches the host through a path that starts with none of `allowed`.
+fn check_host_paths(file: &str, text: &str, allowed: &[&str]) {
+    // a top-level cfg(test) or cfg(windows) item is skipped to its end (a `}` or a `;` line at
+    // the top level); an indented one, its next line
+    let mut skip_item = false;
+    let mut skip_line = false;
+    for (number, line) in text.lines().enumerate() {
+        let trimmed = line.trim();
+        if skip_item {
+            skip_item = !(line.starts_with('}') || !line.starts_with(' ') && line.ends_with(';'));
+            continue;
+        }
+        if std::mem::take(&mut skip_line) || trimmed.starts_with("//") {
+            continue;
+        }
+        if trimmed.starts_with("#[cfg(test)]") || trimmed.starts_with("#[cfg(windows)]") {
+            if line.starts_with('#') {
+                skip_item = true;
+            } else {
+                skip_line = true;
+            }
+            continue;
+        }
+        for start in ["crate::", "super::"] {
+            for (at, _) in line.match_indices(start) {
+                let path = &line[at..];
+                if !allowed.iter().any(|ok| path.starts_with(ok)) {
+                    panic!(
+                        "zip_marks: crates/host/src/revisions/{file}:{} reaches the host through \
+                         `{}`, which fuzz/fuzz_targets/zip_marks.rs has no stand-in for: add one \
+                         there and to the allowed list in fuzz/build.rs",
+                        number + 1,
+                        path.split(|c: char| !(c.is_alphanumeric() || c == '_' || c == ':'))
+                            .next()
+                            .unwrap_or(path),
+                    );
+                }
+            }
+        }
+    }
 }
