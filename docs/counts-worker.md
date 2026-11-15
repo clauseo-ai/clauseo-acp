@@ -90,15 +90,26 @@ in the future is refused):
 1. Without the R2 bucket bound (the deploy leaves the binding out until the bucket exists), the
    Worker answers `503` and stores nothing. The app keeps the report and tries again.
 2. The hourly cap: at most 200 reports in one UTC hour, across all senders, counted in
-   `crash_rate` (one hour and its count; past hours are deleted each time). Past it, `429`.
+   `crash_rate` (one hour and its count; the hour's first report deletes the past hours). The
+   count is the first statement; past the cap it is the only one, it changes nothing, and the
+   answer is `429`.
 3. The report, re-serialised by the crate (compact JSON in the crate's field order, never the
    request's bytes), goes to the R2 bucket `clauseo-crash`, in the EU jurisdiction, as
    `reports/<report id>.json`.
-4. One `crash` row ([below](#what-it-stores)). A report sent again writes the same object and
-   leaves the row as it was.
+   The put is conditional (`onlyIf: { etagDoesNotMatch: "*" }`): it writes only when no object
+   has the key.
+4. One `crash` row ([below](#what-it-stores)), `INSERT OR IGNORE`. A report sent again answers
+   `204` and leaves both the object and the row as first stored.
 
-R2 keeps each object's upload time, which can show when a report arrived. S22's random delay of
-1 to 24 hours before a report is sent is the guard.
+There is no edge rate-limit rule: `t.clauseo.chat` runs with WAF and rate-limiting rules off
+(Rohan's decision), and the hourly cap is the only limit. A flood of valid reports can hold real
+ones back for that hour, but none is lost: the app keeps each report and retries it, on `429`,
+`503` or a network error, for up to 30 days. Forged reports can add a group to `v_crash`, which
+only the owner and his agents read.
+
+R2 keeps each object's exact upload time for the 90 days the object lives, which can show to
+the second when a report arrived. S22's random delay of 1 to 24 hours before a report is sent
+is the guard.
 
 ## How long it keeps them
 
@@ -161,7 +172,10 @@ of the app's events.
 A bucket is named by its lower bound: `questions = 10` means 10 to 99. `cell` is the cell's
 fields without `n`, as compact JSON. The oldest and current periods of `v_active` hold only
 part of their days. The rule hides each small group from direct view; subtracting one view from
-another can still give the size of hidden groups, as decision 0059 says.
+another can still give the size of hidden groups, as decision 0059 says. In `v_crash` this is
+direct: a group's `_all` row minus its visible signature rows is the total of its hidden
+signatures. That is accepted: only the owner and his agents read the views, and no row names a
+report.
 
 ## No logs
 

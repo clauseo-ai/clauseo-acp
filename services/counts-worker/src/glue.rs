@@ -10,7 +10,7 @@
 use futures_util::StreamExt;
 use worker::wasm_bindgen::JsValue;
 use worker::{
-    Context, D1Database, D1PreparedStatement, Date, Env, Method, Request, Response,
+    Conditional, Context, D1Database, D1PreparedStatement, Date, Env, Method, Request, Response,
     ScheduleContext, ScheduledEvent, event,
 };
 
@@ -114,8 +114,10 @@ async fn bump(db: &D1Database, route: Route, now: Time) -> Result<(), Refusal> {
 }
 
 /// A crash report past the parser: `503` while the bucket is unbound, then the hour's count
-/// (`429` at the cap), then the object, then the row. The object goes first: if the row fails,
-/// the sender retries and the same object is written again.
+/// (`429` at the cap; the first report of an hour deletes the past hours' counts), then the
+/// object, then the row. The object is put only if no object has its key, so a report sent
+/// again leaves the first object, as `INSERT OR IGNORE` leaves the first row. The object goes
+/// first: if the row fails, the sender retries, the put is skipped and the row is written.
 async fn store_crash(env: &Env, json: &[u8], now: Time) -> Result<(), Refusal> {
     let upload = crash::accept(json, now)?;
     let Ok(bucket) = env.bucket(BUCKET) else {
@@ -123,15 +125,25 @@ async fn store_crash(env: &Env, json: &[u8], now: Time) -> Result<(), Refusal> {
     };
     let db = env.d1(DB)?;
     let hour = crash::hour(now).ok_or(Refusal::Failed)?;
-    statement(&db, DELETE_PAST_HOURS, &[Param::Text(hour.clone())])?
-        .run()
-        .await?;
-    let values = [Param::Text(hour), Param::Int(HOURLY_CAP)];
+    let values = [Param::Text(hour.clone()), Param::Int(HOURLY_CAP)];
     let count: Option<i64> = statement(&db, BUMP_CRASH_RATE, &values)?
         .first(Some("n"))
         .await?;
-    count.ok_or(Refusal::Busy)?;
-    bucket.put(upload.key, upload.body).execute().await?;
+    if count.ok_or(Refusal::Busy)? == 1 {
+        statement(&db, DELETE_PAST_HOURS, &[Param::Text(hour)])?
+            .run()
+            .await?;
+    }
+    // R2 answers no object (not an error) when the condition fails, i.e. the key exists.
+    let absent = Conditional {
+        etag_does_not_match: Some("*".to_owned()),
+        ..Conditional::default()
+    };
+    bucket
+        .put(upload.key, upload.body)
+        .only_if(absent)
+        .execute()
+        .await?;
     statement(&db, INSERT_CRASH, &upload.row)?.run().await?;
     Ok(())
 }
