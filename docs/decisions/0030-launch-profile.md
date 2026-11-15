@@ -1299,16 +1299,28 @@ stays without a browser until a later change.
   Chrome with any arguments or executable, past the guard's `weakening` check. agent-browser
   0.41.1 has no switch for it: it always starts one (`native/daemon.rs:110-131`; port 0 or no
   port only picks a random one). The guard now sets `AGENT_BROWSER_STREAM_DISABLED=1` on every
-  OS, as W1 does on Windows (decision record 0060), which W2's patched agent-browser honours; the
-  host claims no stream port there either (0060).
-  **Remaining exposure until the patched Mac sidecar ships:** on macOS (and Linux) an unpatched
-  agent-browser's stream server still starts on a port the OS picks, which the guard does not
-  read (0060), as does Chrome's debugging port. Claude's sandboxed shell reaches either only if Claude Code's
-  proxy lets a loopback spelling through: `deniedDomains` matches names, not addresses, so
-  `localhost.`, `localtest.me`, `2130706433` or `[::ffff:127.0.0.1]` in a CONNECT are untested
-  (stage C's live check, `scratch-e/loopback-bypass-check.sh`). Codex's Seatbelt refuses
-  loopback outright. If that check fails, the fix is W1's pipe-plus-relay design on macOS too
-  (no debugging TCP port on any system at launch).
+  OS, as W1 does on Windows (decision record 0060), which W2's patched agent-browser honours; W2
+  builds it for macOS and Linux too, and W1/W2 then drop the claimed stream port.
+  **Remaining exposure until the patched Mac sidecar ships:** on macOS (and Linux) the stream
+  server still starts on a port the OS picks, which the guard does not read (0060), and
+   Chrome on its debugging port. Every browser
+  listener binds `127.0.0.1` or a Unix socket. What keeps Claude's sandboxed shell off them, from
+  the source of @anthropic-ai/sandbox-runtime 0.0.83, which Claude Code 2.1.293 bundles
+  (`scratch-e/pr1-sandbox-evidence.md`):
+  - Seatbelt's profile is `(deny default)`; with `allowedDomains` set, the only outbound TCP it
+    allows is to the HTTP and SOCKS proxy ports (`macos-sandbox-utils.js:756, 981-993`). No
+    Unix-socket create or connect rule is emitted, since Clauseo sets neither `allowUnixSockets`
+    nor `allowAllUnixSockets` nor `allowLocalBinding` (`:951-978`), so the daemon's socket is
+    unreachable whatever its permissions; the `denyRead` above only stops listing the folders.
+  - The proxy normalises each request's host before `deniedDomains` (`127.1`, decimal forms);
+    loopback names are refused after the DNS lookup; an IP literal off the list passes. The URL
+    parser keeps IPv4-mapped IPv6 mapped (`[::ffff:127.0.0.1]` becomes `[::ffff:7f00:1]`), which
+    a dual-stack connect lands on loopback, so `DENIED_DOMAINS` lists the mapped forms too
+    (security re-check of PR-1).
+  - W1 removes the debugging port on every system regardless (pipe plus relay, no DevTools TCP
+    port at launch). A Claude Code bump re-runs this check (`scratch-e/loopback-bypass-check.sh`).
+  - Once the patched agent-browser honours the switch, the guard refuses any stream port file
+    on Windows (`port_file.rs`, `stream_off`) and reads none elsewhere (0060).
 - **Instructions.** Claude's part is `browser-claude-mcp.txt`: Codex's rules without "your shell
   has no internet… never with curl", false for Claude. Both parts now say where a saved file
   lands: in downloads/ in the matter, by clicking its link (Codex) or clicking or opening it (Claude). The dormant shell part
@@ -1317,8 +1329,8 @@ stays without a browser until a later change.
   computer." (UC-213, provisional); the row stays hidden on Windows.
 - **Not verified here (the live Mac check).** That Claude Code 2.1.293 starts the MCP child
   outside Seatbelt and Chrome starts; 0 prompts in `auto`; and that `curl 127.0.0.1:<cdp>` and
-  `nc -U <socket>` are refused from Claude's shell. Whether Seatbelt refuses an AF_UNIX connect
-  by path deny alone is read from Claude Code's docs, not tried.
+  `nc -U <socket>` are refused from Claude's shell. That Seatbelt refuses the AF_UNIX connect is
+  read from sandbox-runtime's source (below), not tried.
 
 ### Claude's sandbox (macOS)
 
