@@ -444,7 +444,26 @@ crates/mcp/src/browser_guard/record/scan/macos.rs - unsafe_code
 crates/mcp/src/browser_guard/record/scan.rs Reader::new clippy::unnecessary_wraps
 crates/mcp/src/browser_guard/record/scan.rs Reader::args_of clippy::unused_self
 crates/mcp/src/browser_guard/record/tests.rs group clippy::disallowed_methods
-crates/mcp/src/browser_guard/chrome.rs spawn clippy::disallowed_methods
+# Route 2 W1: the DevTools pipe, the relay's peer check and the guard's own hardening (OS calls),
+# and the items the next PR's seam uses.
+crates/mcp/examples/chrome_stub.rs pipe unsafe_code
+crates/mcp/examples/chrome_stub.rs pipe::open clippy::unnecessary_wraps
+crates/mcp/src/browser_guard/browsers/policy.rs - unsafe_code
+crates/mcp/src/browser_guard/chrome/pipe.rs unix::spawn clippy::disallowed_methods
+crates/mcp/src/browser_guard/chrome/pipe.rs unix::spawn unsafe_code
+crates/mcp/src/browser_guard/chrome/pipe.rs unix::above unsafe_code
+crates/mcp/src/browser_guard/chrome/pipe.rs win::anonymous_pipe unsafe_code
+crates/mcp/src/browser_guard/devtools.rs PipeLink::0 dead_code
+crates/mcp/src/browser_guard/devtools.rs Devtools::port dead_code
+crates/mcp/src/browser_guard/devtools/handshake.rs sha1 clippy::many_single_char_names
+crates/mcp/src/browser_guard/devtools/listen.rs loopback unsafe_code
+crates/mcp/src/browser_guard/devtools/peer.rs os unsafe_code
+crates/mcp/src/browser_guard/devtools/peer.rs os unsafe_code
+crates/mcp/src/browser_guard/devtools/peer_tests.rs a_child_of_agent_browser_is_let_in_and_another_process_is_not clippy::disallowed_methods
+crates/mcp/src/browser_guard/devtools/seam.rs CdpLink::send dead_code
+crates/mcp/src/browser_guard/harden.rs windows_impl unsafe_code
+crates/mcp/src/browser_guard/job/harden_tests.rs - unsafe_code
+crates/mcp/src/browser_guard/session/browser.rs candidates clippy::unnecessary_wraps
 crates/mcp/src/browser_guard/reaper.rs Reaper::start clippy::disallowed_methods
 crates/mcp/src/browser_guard/parent/windows.rs - unsafe_code
 crates/mcp/src/write/windows.rs - unsafe_code
