@@ -9,47 +9,52 @@
 //! document, so Word's Protected View and Gatekeeper treat it as they treated the original.
 //! Dropping the flag would launder a downloaded file through Clauseo.
 //!
+//! The order lets a read-only original (`0o444`) keep everything: setting an attribute needs a
+//! writable file, so the mode comes after the attributes. macOS: the attributes, then the ACL,
+//! then the mode. Linux: the attributes but the ACL, then the mode, then the ACL attribute
+//! (setting it rewrites the group bits to the ACL's mask, as the original has them).
+//!
 //! Nothing here fails the write: each attribute that could not be read or set counts as one lost,
-//! and the caller logs the total once.
+//! with its errno, and the caller logs the total once.
 
 use std::fs::{File, Permissions};
 use std::os::unix::fs::{MetadataExt as _, PermissionsExt as _};
 use std::path::Path;
+
+use super::Lost;
 
 /// The largest attribute value copied (a resource fork can be large); a larger one counts as
 /// lost. Linux caps values at 64 KiB, so only macOS meets it.
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 const MAX_VALUE: usize = 64 << 20;
 
-/// Copies what the file `original` has to the temp file `temp` (open, at `temp_path`); the
-/// number of things that could not be copied. A missing `original` (a new file, or a restore of
-/// a deleted one: checkpoints record no metadata) or one that is not a plain file leaves the temp
-/// file with the defaults, and is no loss.
-pub(super) fn copy(original: &Path, temp_path: &Path, temp: &File) -> u32 {
+/// The Linux ACL's attribute: copied after the mode.
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+const ACL_ACCESS: &[u8] = b"system.posix_acl_access";
+
+/// Copies what the file `original` has to the open temp file `temp`; what could not be copied.
+/// A missing `original` (a new file, or a restore of a deleted one: checkpoints record no
+/// metadata) or one that is not a plain file leaves the temp file with the defaults, and is no
+/// loss.
+pub(super) fn copy(original: &Path, temp: &File) -> Lost {
     let metadata = match std::fs::symlink_metadata(original) {
         Ok(metadata) if metadata.is_file() => metadata,
-        Ok(_) => return 0,
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return 0,
-        Err(_) => return 1,
+        Ok(_) => return Lost::default(),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Lost::default(),
+        Err(err) => return Lost::one(err.raw_os_error()),
     };
-    let mut lost = 0;
-    // First: setting the Linux ACL attribute below moves the group bits to its mask.
-    if temp
-        .set_permissions(Permissions::from_mode(metadata.mode() & 0o777))
-        .is_err()
-    {
-        lost += 1;
-    }
-    #[cfg(target_os = "macos")]
-    if super::macos::copy_acl(original, temp_path).is_err() {
-        lost += 1;
-    }
-    #[cfg(not(target_os = "macos"))]
-    let _ = temp_path;
+    let mut lost = Lost::default();
     #[cfg(any(target_os = "linux", target_os = "macos"))]
-    {
-        lost += xattrs::copy(original, temp);
+    lost.add(xattrs::copy(original, temp, |name| name != ACL_ACCESS));
+    #[cfg(target_os = "macos")]
+    if let Err(err) = super::macos::copy_acl(original, temp) {
+        lost.add(Lost::one(err.raw_os_error()));
     }
+    if let Err(err) = temp.set_permissions(Permissions::from_mode(metadata.mode() & 0o777)) {
+        lost.add(Lost::one(err.raw_os_error()));
+    }
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    lost.add(xattrs::copy(original, temp, |name| name == ACL_ACCESS));
     lost
 }
 
@@ -60,32 +65,34 @@ mod xattrs {
 
     use rustix::io::Errno;
 
-    use super::MAX_VALUE;
+    use super::{Lost, MAX_VALUE};
 
-    /// Copies every extended attribute of `original` (not through a symlink) to `temp` but the
-    /// system's own ([`system_managed`]); the number not copied. A file system without extended
-    /// attributes has none to copy.
-    pub(super) fn copy(original: &Path, temp: &File) -> u32 {
+    /// Copies each extended attribute of `original` (not through a symlink) that `pick` takes to
+    /// `temp`, but the system's own ([`system_managed`]); what was not copied. A file system
+    /// without extended attributes has none to copy.
+    pub(super) fn copy(original: &Path, temp: &File, pick: impl Fn(&[u8]) -> bool) -> Lost {
         let names = match list(original) {
             Ok(names) => names,
-            Err(err) if err == Errno::NOTSUP || err == Errno::OPNOTSUPP => return 0,
-            Err(_) => return 1,
+            Err(err) if err == Errno::NOTSUP || err == Errno::OPNOTSUPP => {
+                return Lost::default();
+            }
+            Err(err) => return Lost::one(Some(err.raw_os_error())),
         };
-        let mut lost = 0;
+        let mut lost = Lost::default();
         for name in names.split(|&byte| byte == 0) {
-            if name.is_empty() || system_managed(name) {
+            if name.is_empty() || system_managed(name) || !pick(name) {
                 continue;
             }
-            match value(original, name) {
-                Ok(Some(value)) => {
+            let set = value(original, name).and_then(|value| match value {
+                Some(value) => {
                     let flags = rustix::fs::XattrFlags::empty();
-                    if rustix::fs::fsetxattr(temp, name, &value, flags).is_err() {
-                        lost += 1;
-                    }
+                    rustix::fs::fsetxattr(temp, name, &value, flags)
                 }
                 // Removed since the listing.
-                Ok(None) => {}
-                Err(_) => lost += 1,
+                None => Ok(()),
+            });
+            if let Err(err) = set {
+                lost.add(Lost::one(Some(err.raw_os_error())));
             }
         }
         lost

@@ -340,15 +340,18 @@ pub(crate) fn apply_or_partial(
     // Every rename, then each folder synced once: the renames are durable before the
     // checkpoint that follows records them.
     let mut dirs = std::collections::BTreeSet::new();
-    let mut lost = Lost(0);
+    let mut lost = Lost(write::Lost::default());
     for (path, file) in staged {
         match file.rename() {
             Ok(renamed) => {
                 any_change = true;
-                lost.0 += renamed.lost;
+                lost.0.add(renamed.lost);
                 dirs.insert(renamed.dir);
             }
-            Err(err) => {
+            Err(write::RenameFailed {
+                error: err,
+                changed: gone,
+            }) => {
                 // The renames before it stay, made durable as far as the OS lets; the temp files
                 // after it, and its own, are removed as each `Staged` drops.
                 for dir in dirs {
@@ -356,8 +359,13 @@ pub(crate) fn apply_or_partial(
                         tracing::warn!(error = %err, "a renamed file's folder not synced");
                     }
                 }
-                let error = held_or(folder, path, err);
-                return Err(if any_change {
+                // The old file gone: not a file held open, and the folder changed.
+                let error = if gone {
+                    err
+                } else {
+                    held_or(folder, path, err)
+                };
+                return Err(if any_change || gone {
                     changed(error)
                 } else {
                     unchanged(error)
@@ -380,13 +388,18 @@ pub(crate) fn apply_or_partial(
 
 /// How many attributes of the replaced files (permissions, extended attributes, ACLs, Windows
 /// streams) the renames of one write-back did not keep: logged once as it drops, on every way out
-/// of the renames, as a count alone. Never a failure of the write.
-struct Lost(u32);
+/// of the renames, as a count and the last OS error code alone (no path). Never a failure of the
+/// write.
+struct Lost(write::Lost);
 
 impl Drop for Lost {
     fn drop(&mut self) {
-        if self.0 > 0 {
-            tracing::warn!(lost = self.0, "file attributes not kept on a rewrite");
+        if self.0.count > 0 {
+            tracing::warn!(
+                lost = self.0.count,
+                code = ?self.0.code,
+                "file attributes not kept on a rewrite"
+            );
         }
     }
 }

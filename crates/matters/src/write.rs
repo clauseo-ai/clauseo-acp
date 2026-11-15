@@ -208,6 +208,9 @@ mod keep;
 #[cfg(target_os = "macos")]
 mod macos;
 
+#[cfg(any(windows, test))]
+mod replace_keeping;
+
 /// Sets the modification time of the file `path`.
 #[cfg(test)]
 pub(crate) fn set_mtime(path: &Path, mtime: std::time::SystemTime) -> io::Result<()> {
@@ -257,7 +260,40 @@ pub(crate) struct Staged {
     /// Whether the target keeps its metadata: a lawyer's file, staged by [`stage`].
     keep: bool,
     /// The things of the target's metadata the temp file could not take ([`keep::copy`]).
-    lost: u32,
+    lost: Lost,
+}
+
+/// How many things of a replaced file's metadata (its permissions, an extended attribute, its
+/// ACL; on Windows all of them, when `ReplaceFileW` failed) a rewrite did not keep, and the OS
+/// error code (errno, or the Win32 code) of the last one. Never a failure of the write.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Lost {
+    pub(crate) count: u32,
+    pub(crate) code: Option<i32>,
+}
+
+impl Lost {
+    /// One thing lost, with the error's code.
+    pub(crate) const fn one(code: Option<i32>) -> Self {
+        Self { count: 1, code }
+    }
+
+    /// Adds `other` to these; its code, if any, wins.
+    pub(crate) fn add(&mut self, other: Self) {
+        self.count += other.count;
+        if other.code.is_some() {
+            self.code = other.code;
+        }
+    }
+}
+
+/// Why [`Staged::rename`] failed.
+#[derive(Debug)]
+pub(crate) struct RenameFailed {
+    pub(crate) error: Error,
+    /// The target is not there any more: the folder changed. The temp file, which holds the new
+    /// content, is kept (Windows, after a failed `ReplaceFileW` that moved the old file away).
+    pub(crate) changed: bool,
 }
 
 /// A staged file renamed into place ([`Staged::rename`]).
@@ -265,10 +301,8 @@ pub(crate) struct Staged {
 pub(crate) struct Renamed {
     /// The target's folder, which the caller syncs.
     pub(crate) dir: PathBuf,
-    /// How many of the old file's attributes the new one did not keep: its permissions, an
-    /// extended attribute, its ACL (Unix), or all of them when `ReplaceFileW` failed (Windows).
-    /// Never a failure of the write; the caller logs the total once.
-    pub(crate) lost: u32,
+    /// What of the old file's metadata the new one did not keep; the caller logs the total once.
+    pub(crate) lost: Lost,
 }
 
 /// Writes what `fill` writes to a new temp file in `target`'s folder, named `.clauseo-<n>.tmp`
@@ -297,11 +331,11 @@ fn stage_as(
         temp: Some(temp),
         target: target.to_owned(),
         keep,
-        lost: 0,
+        lost: Lost::default(),
     };
     fill(&mut file)?;
     // Before the sync, which then covers the metadata too.
-    staged.lost = kept_metadata(keep, target, staged.temp.as_deref(), &file);
+    staged.lost = kept_metadata(keep, target, &file);
     fsync::sync_file(&file).map_err(|err| Error::io("sync", target, err))?;
     Ok(staged)
 }
@@ -310,13 +344,24 @@ impl Staged {
     /// Renames the temp file over the target, then syncs the folder. Never truncates the
     /// target in place.
     pub(crate) fn commit(self) -> Result<(), Error> {
-        let Renamed { dir, .. } = self.rename()?;
+        let Renamed { dir, .. } = self.rename().map_err(|failed| failed.error)?;
         fsync::sync_dir(&dir).map_err(|err| Error::io("sync", &dir, err))
     }
 
     /// Renames the temp file over the target without syncing the folder; returns the folder,
-    /// which the caller syncs (once for many renames in it) before relying on the rename.
-    pub(crate) fn rename(mut self) -> Result<Renamed, Error> {
+    /// which the caller syncs (once for many renames in it) before relying on the rename. A
+    /// lawyer's file on Windows goes in by `ReplaceFileW` ([`replace_keeping`]).
+    pub(crate) fn rename(self) -> Result<Renamed, RenameFailed> {
+        #[cfg(windows)]
+        let replace: Option<&ReplaceFn> = Some(&windows::replace_file);
+        #[cfg(not(windows))]
+        let replace: Option<&ReplaceFn> = None;
+        self.rename_with(replace)
+    }
+
+    /// [`Self::rename`], with `replace` (`ReplaceFileW`, or a simulation of it in tests) for a
+    /// lawyer's file, or the plain rename.
+    fn rename_with(mut self, replace: Option<&ReplaceFn>) -> Result<Renamed, RenameFailed> {
         let dir = self.target.parent().unwrap_or(&self.target).to_owned();
         let Some(temp) = self.temp.take() else {
             return Ok(Renamed {
@@ -324,60 +369,88 @@ impl Staged {
                 lost: self.lost,
             });
         };
-        let renamed = if self.keep {
-            replace_keeping(&temp, &self.target)
-        } else {
-            rename(&temp, &self.target).map(|()| 0)
+        #[cfg(any(windows, test))]
+        let renamed = match replace {
+            Some(replace) if self.keep => {
+                replace_keeping::replace_keeping(&temp, &self.target, replace)
+            }
+            _ => plain_rename(&temp, &self.target),
+        };
+        #[cfg(not(any(windows, test)))]
+        let renamed = {
+            let _ = replace;
+            plain_rename(&temp, &self.target)
         };
         match renamed {
-            Ok(lost) => Ok(Renamed {
-                dir,
-                lost: self.lost + lost,
-            }),
-            Err(err) => {
+            Ok(lost) => {
+                self.lost.add(lost);
+                Ok(Renamed {
+                    dir,
+                    lost: self.lost,
+                })
+            }
+            #[cfg(any(windows, test))]
+            Err(replace_keeping::Failed::TargetGone(err)) => {
+                // The temp file stays: it holds the new content, and the old file is not there.
+                Err(RenameFailed {
+                    error: Error::io("replace; the folder changed", &self.target, err),
+                    changed: true,
+                })
+            }
+            Err(failed) => {
                 self.temp = Some(temp);
-                Err(Error::io("rename", &self.target, err))
+                Err(RenameFailed {
+                    error: Error::io("rename", &self.target, failed.into_error()),
+                    changed: false,
+                })
             }
         }
     }
 }
 
-/// Unix: when `keep`, the target's metadata copied to the temp file ([`keep::copy`]); the
-/// number of things lost.
+/// `ReplaceFileW`'s shape: `(replaced, replacement, backup)`.
+type ReplaceFn = dyn Fn(&Path, &Path, &Path) -> io::Result<()>;
+
+#[cfg(any(windows, test))]
+use replace_keeping::Failed;
+
+/// Elsewhere a failed rename is the one failure: the target is as it was.
+#[cfg(not(any(windows, test)))]
+#[derive(Debug)]
+struct Failed(io::Error);
+
+#[cfg(not(any(windows, test)))]
+impl Failed {
+    fn into_error(self) -> io::Error {
+        self.0
+    }
+}
+
+/// The plain rename of `temp` over `target`; a failure leaves the target as it was.
+fn plain_rename(temp: &Path, target: &Path) -> Result<Lost, Failed> {
+    #[cfg(any(windows, test))]
+    let failed = Failed::Unchanged;
+    #[cfg(not(any(windows, test)))]
+    let failed = Failed;
+    rename(temp, target)
+        .map(|()| Lost::default())
+        .map_err(failed)
+}
+
+/// Unix: when `keep`, the target's metadata copied to the temp file ([`keep::copy`]).
 #[cfg(unix)]
-fn kept_metadata(keep: bool, target: &Path, temp: Option<&Path>, file: &File) -> u32 {
-    match temp {
-        Some(temp) if keep => keep::copy(target, temp, file),
-        _ => 0,
+fn kept_metadata(keep: bool, target: &Path, file: &File) -> Lost {
+    if keep {
+        keep::copy(target, file)
+    } else {
+        Lost::default()
     }
 }
 
 /// Elsewhere nothing: `ReplaceFileW` keeps the metadata at the rename.
 #[cfg(not(unix))]
-fn kept_metadata(_keep: bool, _target: &Path, _temp: Option<&Path>, _file: &File) -> u32 {
-    0
-}
-
-/// Windows: `temp` in the place of `target` by `ReplaceFileW`, which keeps the target's
-/// attributes, ACL, streams and creation time; 0 lost. A missing target, or a failed
-/// `ReplaceFileW` (a share or drive without it), falls back to the plain rename, whose error is
-/// the one returned: after a failed call the target is either untouched or gone, and the rename
-/// suits both. A fallback over an existing target loses its metadata: 1 lost.
-#[cfg(windows)]
-fn replace_keeping(temp: &Path, target: &Path) -> io::Result<u32> {
-    match windows::replace_file(target, temp) {
-        Ok(()) => Ok(0),
-        Err(err) => {
-            rename(temp, target)?;
-            Ok(u32::from(err.kind() != io::ErrorKind::NotFound))
-        }
-    }
-}
-
-/// Elsewhere the plain rename: [`stage`] gave the temp file the target's metadata already.
-#[cfg(not(windows))]
-fn replace_keeping(temp: &Path, target: &Path) -> io::Result<u32> {
-    rename(temp, target).map(|()| 0)
+fn kept_metadata(_keep: bool, _target: &Path, _file: &File) -> Lost {
+    Lost::default()
 }
 
 impl Drop for Staged {

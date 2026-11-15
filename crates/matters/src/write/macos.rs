@@ -1,23 +1,24 @@
-//! macOS: a file's ACL copied to another through `copyfile(3)` with `COPYFILE_ACL`, for
+//! macOS: a file's ACL copied to another through `fcopyfile(3)` with `COPYFILE_ACL`, for
 //! [`super::keep`]. macOS ACLs are not extended attributes `listxattr` shows, and libSystem's
-//! `copyfile` is the one call that copies them.
-#![expect(unsafe_code, reason = "FFI to copyfile")]
+//! `copyfile` family is the one way to copy them.
+#![expect(unsafe_code, reason = "FFI to fcopyfile")]
 
-use std::ffi::CString;
+use std::fs::File;
 use std::io;
-use std::os::unix::ffi::OsStrExt as _;
+use std::os::fd::AsRawFd as _;
 use std::path::Path;
 
-/// Copies the ACL of `from` to `to`; with none on `from`, `to` keeps its own.
-pub(super) fn copy_acl(from: &Path, to: &Path) -> io::Result<()> {
-    let from = CString::new(from.as_os_str().as_bytes())?;
-    let to = CString::new(to.as_os_str().as_bytes())?;
-    // SAFETY: both are NUL-terminated strings that outlive the call; a null state is allowed and
-    // the call keeps no pointer.
+/// Copies the ACL of the file `from` (opened without following a symlink) to the open file `to`;
+/// with none on `from`, `to` keeps its own. `copyfile` answers 0 even when it could not apply the
+/// ACL to `to`, so that case is not seen and not counted as lost.
+pub(super) fn copy_acl(from: &Path, to: &File) -> io::Result<()> {
+    let from = super::open_read_nofollow(from)?;
+    // SAFETY: both descriptors are open for the whole call (the files outlive it); a null state
+    // is allowed and the call keeps nothing.
     let done = unsafe {
-        libc::copyfile(
-            from.as_ptr(),
-            to.as_ptr(),
+        libc::fcopyfile(
+            from.as_raw_fd(),
+            to.as_raw_fd(),
             std::ptr::null_mut(),
             libc::COPYFILE_ACL,
         )
