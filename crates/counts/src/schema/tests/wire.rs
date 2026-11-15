@@ -11,9 +11,9 @@ use serde_json::{Value, json};
 
 use super::sample::{Sample, Tape};
 use crate::schema::{
-    Arch, Batch, Cell, Channel, Count, DAY_PATTERN, Day, DayCounter, DayReport, Event, InstallId,
-    Language, Platform, SchemaVersion, TallyCounter, TallyId, TallyReport, UUID_V4_PATTERN,
-    VERSION_PATTERN, Version, WEEK_PATTERN, Week,
+    Arch, Batch, Cell, Channel, Count, CrashReport, DAY_PATTERN, Day, DayCounter, DayReport, Event,
+    InstallId, Language, Platform, SOURCE_FILE_PATTERN, SchemaVersion, SourceFile, TallyCounter,
+    TallyId, TallyReport, UUID_V4_PATTERN, VERSION_PATTERN, Version, WEEK_PATTERN, Week,
 };
 
 impl<K: JsonSchema> JsonSchema for Cell<K> {
@@ -58,6 +58,10 @@ fn tally_schema() -> Value {
     schemars::schema_for!(TallyReport).to_value()
 }
 
+pub(super) fn crash_schema() -> Value {
+    schemars::schema_for!(CrashReport).to_value()
+}
+
 #[test]
 fn the_committed_schema_matches() {
     insta::with_settings!({
@@ -67,12 +71,14 @@ fn the_committed_schema_matches() {
     }, {
         insta::assert_json_snapshot!("counts_schema", counts_schema());
         insta::assert_json_snapshot!("tally_schema", tally_schema());
+        insta::assert_json_snapshot!("crash_schema", crash_schema());
     });
 }
 
 /// Every place in `schema` where a string has no fixed values (other than a UUID v4, a day, a
-/// week or a version), an integer has no cap, an object takes other fields, or a float appears.
-fn open_places(schema: &Value, at: &str, found: &mut Vec<String>) {
+/// week, a version or a source file), an integer has no cap, an object takes other fields, or a
+/// float appears.
+pub(super) fn open_places(schema: &Value, at: &str, found: &mut Vec<String>) {
     match schema {
         Value::Object(object) => {
             let types: Vec<&str> = match object.get("type") {
@@ -84,9 +90,14 @@ fn open_places(schema: &Value, at: &str, found: &mut Vec<String>) {
             let fixed = object.contains_key("enum") || object.contains_key("const");
             let uuid_v4 =
                 object.get("format") == Some(&json!("uuid")) && pattern == Some(UUID_V4_PATTERN);
-            let formed = [DAY_PATTERN, WEEK_PATTERN, VERSION_PATTERN]
-                .iter()
-                .any(|known| pattern == Some(*known));
+            let formed = [
+                DAY_PATTERN,
+                WEEK_PATTERN,
+                VERSION_PATTERN,
+                SOURCE_FILE_PATTERN,
+            ]
+            .iter()
+            .any(|known| pattern == Some(*known));
             if types.contains(&"string") && !(fixed || uuid_v4 || formed) {
                 found.push(format!("{at}: a string with no enum"));
             }
@@ -116,7 +127,7 @@ fn open_places(schema: &Value, at: &str, found: &mut Vec<String>) {
 
 #[test]
 fn every_string_has_an_enum_and_every_integer_a_maximum() {
-    for schema in [counts_schema(), tally_schema()] {
+    for schema in [counts_schema(), tally_schema(), crash_schema()] {
         let mut found = Vec::new();
         open_places(&schema, "", &mut found);
         assert_eq!(found, Vec::<String>::new());
@@ -243,7 +254,8 @@ fn breaks(root: &Value, node: &Value, value: &Value, at: &str, found: &mut Vec<S
                 && (text.parse::<InstallId>().is_ok()
                     || text.parse::<Day>().is_ok()
                     || text.parse::<Week>().is_ok()
-                    || text.parse::<Version>().is_ok());
+                    || text.parse::<Version>().is_ok()
+                    || text.parse::<SourceFile>().is_ok());
             if !closed {
                 found.push(format!("{at}: {text:?} has no fixed form"));
             }
@@ -276,7 +288,7 @@ fn breaks(root: &Value, node: &Value, value: &Value, at: &str, found: &mut Vec<S
 }
 
 /// `breaks` from the schema's root.
-fn breaks_schema(schema: &Value, value: &Value) -> Vec<String> {
+pub(super) fn breaks_schema(schema: &Value, value: &Value) -> Vec<String> {
     let mut found = Vec::new();
     breaks(schema, schema, value, "", &mut found);
     found

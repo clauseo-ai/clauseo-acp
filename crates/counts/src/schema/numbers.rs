@@ -144,6 +144,18 @@ impl SchemaVersion {
 }
 
 capped_int! {
+    "A panic's line in its source file: 1 to 999,999."
+    pub struct Line(u32), 1..=999_999;
+}
+
+capped_int! {
+    "A native crash's code: the signal number on macOS and Linux (1 to 64, a rule of"
+    "[`super::CrashReport::check`]), the exception code on Windows (`0xC0000005` is"
+    "3,221,225,477). Never 0, which no crash has."
+    pub struct SignalCode(u32), 1..=4_294_967_295_u32;
+}
+
+capped_int! {
     "The count of an `active_week` cell, always 1."
     pub struct One(u8), 1..=1;
 }

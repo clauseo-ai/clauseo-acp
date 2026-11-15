@@ -1,8 +1,10 @@
 //! The schema's tests: closed on the wire (the committed JSON Schema, the walk over it, and the
-//! property test over arbitrary days), the strict reads, and the agreement with the settings.
+//! property test over arbitrary days), the strict reads, the crash report's own rules, and the
+//! agreement with the settings.
 
 pub(crate) mod sample;
 
+mod crash;
 mod settings;
 mod strict;
 mod wire;

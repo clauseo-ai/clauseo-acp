@@ -107,6 +107,12 @@ v4_id! {
     TallyId, "TallyId"
 }
 
+v4_id! {
+    "A crash report's own random id (S22), made when the crash is found, so the Worker can take a"
+    "report once. It is never the install id or a tally's id."
+    CrashReportId, "CrashReportId"
+}
+
 /// A released version, `major.minor.patch`, each part 0 to 999 with no leading zero.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Version {
