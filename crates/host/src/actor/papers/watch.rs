@@ -15,6 +15,11 @@
 //! rename in a few milliseconds), or 2 s after the burst's first change when it never goes
 //! quiet, then looks at the folder and posts [`FolderChanged`]. Dropping the [`Watch`] stops the
 //! OS's feed, which drops the sender, and the thread ends.
+//!
+//! `FSEvents` tells of the watched folder itself moving, but never of a folder above it moving
+//! (`notify` 8.2.2 does not ask for `kFSEventStreamCreateFlagWatchRoot`, and has no setting for
+//! it): on macOS the same thread also reads the folder's device and inode every 2 s, one `stat`,
+//! and a folder gone or swapped is looked at as after a change.
 
 use std::collections::BTreeSet;
 use std::os::unix::fs::MetadataExt as _;
@@ -43,13 +48,25 @@ struct Timing {
     /// How long after a folder first reads missing it is looked at again: a share that blinks
     /// reads missing for a moment.
     recheck: Duration,
+    /// How often the folder is read for a move the OS's feed does not tell of, if at all.
+    look_every: Option<Duration>,
 }
 
 const TIMING: Timing = Timing {
     quiet: Duration::from_millis(300),
     max_wait: Duration::from_secs(2),
     recheck: Duration::from_secs(2),
+    look_every: LOOK_EVERY,
 };
+
+/// `FSEvents` never tells of a folder above the watched one moving.
+#[cfg(target_os = "macos")]
+const LOOK_EVERY: Option<Duration> = Some(Duration::from_secs(2));
+
+/// Elsewhere none: inotify does not tell of a folder above moving either, but Linux is left as
+/// it was: the listing when the window comes back to the front finds the folder gone.
+#[cfg(not(target_os = "macos"))]
+const LOOK_EVERY: Option<Duration> = None;
 
 /// The name of the thread that waits out each burst.
 const THREAD_NAME: &str = "clauseo-papers";
@@ -302,26 +319,33 @@ fn listed(roots: &[PathBuf], path: &Path, reading: Reading) -> bool {
 }
 
 /// Waits out each burst of `changes`, then posts what became of the folder; ends when the watch
-/// drops or the actor is gone.
+/// drops or the actor is gone. With `timing.look_every`, a wait that long with no change reads the
+/// folder, and one that [`moved`] is looked at at once.
 fn bursts(
     burst: &Burst,
     timing: Timing,
     changes: &Receiver<()>,
     post: &async_channel::Sender<Input>,
 ) {
-    while changes.recv().is_ok() {
-        let first = burst.clock.now().mono;
-        loop {
-            let waited = burst.clock.now().mono.saturating_sub(first);
-            let left = timing.max_wait.saturating_sub(waited);
-            if left.is_zero() {
-                break;
+    loop {
+        let woke = match timing.look_every {
+            Some(every) => changes.recv_timeout(every),
+            None => changes
+                .recv()
+                .map_err(|_gone| RecvTimeoutError::Disconnected),
+        };
+        match woke {
+            Ok(()) => {
+                if !settle(burst, timing, changes) {
+                    return;
+                }
             }
-            match changes.recv_timeout(timing.quiet.min(left)) {
-                Ok(()) => {}
-                Err(RecvTimeoutError::Timeout) => break,
-                Err(RecvTimeoutError::Disconnected) => return,
+            Err(RecvTimeoutError::Timeout) => {
+                if !moved(&burst.folder, burst.root) {
+                    continue;
+                }
             }
+            Err(RecvTimeoutError::Disconnected) => return,
         }
         let Some(look) = look(burst, timing.recheck, changes) else {
             return;
@@ -334,6 +358,37 @@ fn bursts(
         if post.try_send(Input::PapersChanged(changed)).is_err() {
             return;
         }
+    }
+}
+
+/// Waits until `changes` have been quiet for `timing.quiet`, or `timing.max_wait` after the
+/// first; false once the watch has dropped.
+fn settle(burst: &Burst, timing: Timing, changes: &Receiver<()>) -> bool {
+    let first = burst.clock.now().mono;
+    loop {
+        let waited = burst.clock.now().mono.saturating_sub(first);
+        let left = timing.max_wait.saturating_sub(waited);
+        if left.is_zero() {
+            return true;
+        }
+        match changes.recv_timeout(timing.quiet.min(left)) {
+            Ok(()) => {}
+            Err(RecvTimeoutError::Timeout) => return true,
+            Err(RecvTimeoutError::Disconnected) => return false,
+        }
+    }
+}
+
+/// Whether the folder at `folder`, whose device and inode were `root`, has gone or been swapped
+/// for another since: one `stat`. One whose start could not be read, and a stat that fails
+/// otherwise (permissions, an offline share), have not.
+fn moved(folder: &Path, root: Option<(u64, u64)>) -> bool {
+    let Some(root) = root else {
+        return false;
+    };
+    match std::fs::metadata(folder) {
+        Ok(metadata) => !metadata.is_dir() || (metadata.dev(), metadata.ino()) != root,
+        Err(error) => error.kind() == std::io::ErrorKind::NotFound,
     }
 }
 
