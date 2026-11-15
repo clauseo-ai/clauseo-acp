@@ -41,6 +41,9 @@
 //!   running `cap_min_idle` (60 s) after its turn's end: the host sees neither until it
 //!   reports. The tracking of background work, once it lands, closes both in
 //!   [`background_may_run`].
+//! - A change to the other matters' fence ([`fence`]): a live agent whose launch fenced other
+//!   matters than a launch would now (the matter list or an invite changed) is idle-stopped as
+//!   soon as nothing is pending. Its next prompt relaunches it with the new rules.
 
 use std::collections::BTreeSet;
 use std::time::Duration;
@@ -57,6 +60,7 @@ use crate::config::{IdleStop, SessionKey};
 use crate::connectors::RelayCall;
 use crate::log_file::LIFECYCLE;
 
+mod fence;
 mod tools;
 
 /// What keeps an agent from idling.
@@ -351,6 +355,7 @@ pub(crate) fn tick(actor: &mut Actor) {
     } else {
         tools::compare(actor);
         mark_stale(actor);
+        fence::stop_stale(actor);
         stop_marked(actor, now);
         refresh(actor, now)
     };
