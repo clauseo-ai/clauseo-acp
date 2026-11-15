@@ -1,0 +1,5 @@
+{"scenario":"new-session-malformed","description":"An agent whose session/new answer has no sessionId: the one start failure Clauseo cannot read","on_stdin_close":"exit"}
+{"expect":{"method":"initialize","as":"init","params":{"protocolVersion":1}}}
+{"respond":{"to":"init","result":{"protocolVersion":1,"agentCapabilities":{"loadSession":false},"authMethods":[],"agentInfo":{"name":"fake_agent","version":"0.0.0"}}}}
+{"expect":{"method":"session/new","as":"new","params":{"cwd":"{{any}}"}}}
+{"respond":{"to":"new","result":{"notASession":1}}}

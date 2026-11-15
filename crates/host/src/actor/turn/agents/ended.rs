@@ -164,7 +164,15 @@ pub(in super::super) fn on_ended(actor: &mut Actor, thread: ThreadId, ended: End
         denied_data_folder,
         "agent ended"
     );
-    let exited = Error::refused(ErrorCode::AgentExited, "the agent exited");
+    // Before its session was ready the agent did not start; after, the answer stopped.
+    let exited = if session.is_none() {
+        Error::refused(
+            ErrorCode::AgentLaunchFailed,
+            super::start_failure::EXITED_AT_START,
+        )
+    } else {
+        Error::refused(ErrorCode::AgentExited, "the agent exited")
+    };
     for item in waiting {
         fail_waiting(actor, thread, &item, &exited);
     }

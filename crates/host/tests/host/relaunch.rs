@@ -134,19 +134,19 @@ fn relaunch_exiting_on_session_load_ends_the_turn() {
         "relaunch_exiting_on_session_load_ends_the_turn",
         agent.clone(),
         agent,
-        &[ErrorCode::AgentExited],
+        &[ErrorCode::AgentLaunchFailed],
     );
 }
 
 /// No resume: the relaunched agent answers `session/new` with an error, which reaches the turn
-/// as `agent.protocol_error` (the code of any error answer from the agent), as on a first launch.
+/// as `agent.launch_failed` (an error answer to a start request), as on a first launch.
 #[test]
 fn relaunch_whose_session_new_errors_ends_the_turn() {
     relaunch_fails(
         "relaunch_whose_session_new_errors_ends_the_turn",
         Play::Agent(Scenario::Local("exit-mid-turn-no-load")),
         Play::Agent(Scenario::Local("new-session-error")),
-        &[ErrorCode::AgentProtocolError],
+        &[ErrorCode::AgentLaunchFailed],
     );
 }
 
@@ -157,7 +157,7 @@ fn relaunch_exiting_on_session_new_ends_the_turn() {
         "relaunch_exiting_on_session_new_ends_the_turn",
         Play::Agent(Scenario::Local("exit-mid-turn-no-load")),
         Play::Agent(Scenario::Local("new-session-exit")),
-        &[ErrorCode::AgentExited],
+        &[ErrorCode::AgentLaunchFailed],
     );
 }
 
