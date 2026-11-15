@@ -148,6 +148,7 @@ fn writable_folders() {
         ("apps", false),
         ("plugins", false),
         ("skill_mcp_dependency_install", false),
+        ("memories", false),
     ] {
         assert_eq!(config["features"][key], json!(value), "features.{key}");
     }

@@ -23,11 +23,17 @@ fn scratch(test: &str) -> PathBuf {
 /// crate adds fails here until the nesting is checked.
 fn switches() -> Value {
     json!({
-        "features": {"apps": false, "plugins": false, "skill_mcp_dependency_install": false},
+        "features": {
+            "apps": false,
+            "plugins": false,
+            "skill_mcp_dependency_install": false,
+            "memories": false,
+        },
         "cloud": {"skills": {"enabled": false}},
         "skills": {"bundled": {"enabled": false}, "include_instructions": false},
         "cli_auth_credentials_store": "file",
         "shell_environment_policy": {"ignore_default_excludes": false},
+        "memories": {"generate_memories": false, "use_memories": false},
     })
 }
 
@@ -107,7 +113,7 @@ fn merge_add_only_extends_arrays_and_keeps_what_is_there() {
 fn config_nests_every_limits_override() {
     let built = Value::Object(config(&BTreeMap::new(), Map::new(), None));
     assert_eq!(built, pinned());
-    assert_eq!(clauseo_limits::CODEX_OVERRIDES.len(), 8);
+    assert_eq!(clauseo_limits::CODEX_OVERRIDES.len(), 11);
 }
 
 /// On Windows Codex gets the unelevated sandbox, without which codex 0.162.1 makes
@@ -208,6 +214,39 @@ fn launch_env_forces_mode_home_config_and_no_filtering() {
     let parsed: Value = serde_json::from_str(text.to_str().unwrap()).unwrap();
     assert_eq!(parsed, pinned());
     assert_eq!(env.len(), 4);
+}
+
+/// Every Codex session's launch config turns Codex's memories off, reading and writing, and no
+/// settings or profile value turns them back on: every matter shares the one Codex home.
+#[test]
+fn launch_config_turns_memories_off_over_every_source() {
+    let home = Path::new("/data/agents/codex-acp/home");
+    let on = json!({
+        "features": {"memories": true},
+        "memories": {"use_memories": true, "generate_memories": true},
+    });
+    let settings = BTreeMap::from([("CODEX_CONFIG".to_owned(), on.to_string())]);
+    let env = launch_env(home, &settings, object(on), None);
+    let text = env[&OsString::from("CODEX_CONFIG")]
+        .to_str()
+        .unwrap()
+        .to_owned();
+    let parsed: Value = serde_json::from_str(&text).unwrap();
+    assert_eq!(parsed["features"]["memories"], json!(false), "{parsed}");
+    assert_eq!(parsed["memories"]["use_memories"], json!(false), "{parsed}");
+    assert_eq!(
+        parsed["memories"]["generate_memories"],
+        json!(false),
+        "{parsed}"
+    );
+    let config = home_config();
+    for line in [
+        "features.memories = false",
+        "memories.generate_memories = false",
+        "memories.use_memories = false",
+    ] {
+        assert!(config.lines().any(|held| held == line), "{config}");
+    }
 }
 
 #[test]
@@ -443,6 +482,9 @@ fn home_config_holds_only_the_switches() {
             "skills.include_instructions = false",
             "cli_auth_credentials_store = \"file\"",
             "shell_environment_policy.ignore_default_excludes = false",
+            "features.memories = false",
+            "memories.generate_memories = false",
+            "memories.use_memories = false",
         ]
     );
     assert!(!text.contains("hooks"), "{text}");
