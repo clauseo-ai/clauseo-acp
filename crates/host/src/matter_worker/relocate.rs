@@ -64,6 +64,8 @@ pub(super) fn locate(
 ) -> Result<Option<CheckpointId>, Error> {
     registry.check(folder)?;
     *slot = Slot::Empty;
+    #[cfg(test)]
+    super::crash::hook::fire(&settings.matters_root, "Locate:emptied");
     match Matter::locate(settings.clone(), id, folder, &registry.refused) {
         Ok(matter) => {
             let last = matter.last_checkpoint();

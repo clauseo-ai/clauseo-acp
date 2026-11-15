@@ -14,6 +14,12 @@ use crate::actor::turn::{End, end, writer_busy};
 use crate::error::Error;
 use crate::matter_worker::{MatterWorker, hook};
 
+/// Where the rig's matters keep their histories: the key a test's armed panic fires by, so it
+/// never fires in another test's rig.
+fn matters_root(rig: &Rig) -> std::path::PathBuf {
+    rig.actor.effective.data_dir().join("matters")
+}
+
 /// A turn that ended on its own.
 fn done() -> End {
     End {
@@ -31,7 +37,7 @@ fn a_checkpoint_that_panics_fails_its_turn_and_the_next_turn_saves() {
     let matter = rig.matter();
     let _first = rig.running_turn(thread);
     rig.write_file("brief.txt", "The lease ends in May.");
-    hook::panic_next(matter, "AfterTurn", 1);
+    hook::panic_next(&matters_root(&rig), "AfterTurn", 1);
     end::end_turn(&mut rig.actor, thread, done());
     // Waits for no turn and no matter job in flight: the panicking job was answered.
     until_ended(&mut rig, thread);
@@ -85,7 +91,7 @@ fn list_papers(rig: &mut Rig) -> Result<(), Error> {
 #[test]
 fn a_listing_that_panics_is_answered_and_the_next_one_lists() {
     let mut rig = Rig::start("matter-panic-listing", "");
-    hook::panic_next(rig.matter(), "ListPapers", 1);
+    hook::panic_next(&matters_root(&rig), "ListPapers", 1);
     let failed = list_papers(&mut rig).unwrap_err();
     assert_eq!(failed.code(), ErrorCode::Internal);
     assert_eq!(rig.actor.work.matter_jobs, 0);

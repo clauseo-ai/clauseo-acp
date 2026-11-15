@@ -5,36 +5,42 @@
 //! When a job panics, the worker answers that one job with `internal` and drops the matter it
 //! held, since the matter may be half way through a change in memory. Before the next job that
 //! needs the matter, it opens the matter again from the disk, the same open a start-up does
-//! after a crash. The history on disk is crash-safe (see `clauseo_matters`' invariants:
-//! objects, then the ref and the stat cache; temp files beside the papers until their rename),
-//! so this open finds what a restart would find. The job is never tried again, because it may
-//! have written part of its change. Its reply goes back through `post` like any other reply,
-//! so the actor's work count, the writer and the waiting command, turn or query all move on as
-//! they do for an R8 error.
+//! after a crash; a job that had emptied the slot first (a locate) leaves it to be opened from
+//! the folder it had before. The history on disk is crash-safe (see `clauseo_matters`'
+//! invariants: objects, then the ref and the stat cache; temp files beside the papers until
+//! their rename), so this open finds what a restart would find. The job is never tried again,
+//! because it may have written part of its change. Its reply goes back through `post` like any
+//! other reply, so the actor's work count, the writer and the waiting command, turn or query all
+//! move on as they do for an R8 error. The whole step (the job, its log lines, its clean-up and
+//! `post`) runs under a catch, so no panic ends the thread and strands the jobs queued behind.
 //!
 //! After [`LIMIT`] panics within [`WINDOW`] the worker rests for [`REST`]. While it rests,
-//! each job is answered with `internal` at once, without opening the matter. Once the rest is
-//! over, the next job tries the matter again, so no restart is needed. Panics come only from
-//! jobs, and every job comes from a lawyer's action or a paced step (a turn's end, a listing),
-//! so they cannot loop hot. The rest exists so that a matter whose open panics every time is
-//! not read in full (timeline, stat cache, tree check) for each of those jobs.
+//! a job that reads or writes the history is answered with `internal` at once, without opening
+//! the matter ([`runs_while_resting`] names those that still run). Once the rest is over, the
+//! next job tries the matter again, so no restart is needed. Panics come only from jobs, and
+//! every job comes from a lawyer's action or a paced step (a turn's end, a listing), so they
+//! cannot loop hot. The rest exists so that a matter whose open panics every time is not read in
+//! full (timeline, stat cache, tree check) for each of those jobs.
 //!
-//! The log has the matter id and the job's kind and nothing else: a panic's text may hold a
-//! path, so it is dropped unread.
+//! This module's own log lines carry the matter id and the job's kind only, and it never reads
+//! a panic's payload. The host's panic hook (`log_file/panic.rs`) still writes each panic,
+//! caught ones too, to `host.log`: its `file:line`, its thread, and its message only when that
+//! is code text (a `&'static str`); a formatted message is left out.
 
 use std::panic::{self, AssertUnwindSafe};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 use std::time::Duration;
 
 use clauseo_matters::Settings;
-use clauseo_protocol::{ErrorCode, MatterId};
+use clauseo_protocol::MatterId;
 
 use super::{MatterJob, MatterReply, Slot, handle};
-use crate::agent::data_fence::PathsChecked;
 use crate::clock::Clock;
 use crate::error::Error;
-use crate::revisions::{Act, RevisionsDone};
+use crate::revisions::RevisionsDone;
+
+use kind::Kind;
 
 /// How many panics within [`WINDOW`] make the worker rest.
 pub(super) const LIMIT: usize = 3;
@@ -54,50 +60,71 @@ pub(super) fn run<T>(
     let mut slot = Slot::Empty;
     let mut crashes = Crashes::default();
     while let Ok((job, tag)) = jobs.recv() {
-        let reply = guarded((matter, clock), settings, (&mut slot, &mut crashes), job);
-        post(tag, reply);
+        let kind = Kind::of(&job);
+        let before = held(&slot);
+        let stepped = panic::catch_unwind(AssertUnwindSafe(|| {
+            guarded(
+                (matter, clock),
+                settings,
+                (&mut slot, &mut crashes),
+                &kind,
+                job,
+            )
+        }));
+        let reply = stepped.unwrap_or_else(|payload| {
+            // A panic in the step's own log lines or clean-up: the job has its reply still.
+            forget(payload);
+            reopen_later(&mut slot, before, &kind);
+            kind.reply(stopped())
+        });
+        let posted = panic::catch_unwind(AssertUnwindSafe(|| post(tag, reply)));
+        if let Err(payload) = posted {
+            forget(payload);
+        }
     }
 }
 
 /// Runs `job`, catching a panic: then the job is answered with `internal` and `slot` reopens
-/// before the next job. While the worker rests, `job` is answered with `internal` and does not
-/// run.
+/// before the next job. While the worker rests, a job that needs the history is answered with
+/// `internal` and does not run.
 fn guarded(
     (matter, clock): (MatterId, &dyn Clock),
     settings: &Settings,
     (slot, crashes): (&mut Slot, &mut Crashes),
+    kind: &Kind,
     job: MatterJob,
 ) -> MatterReply {
-    let kind = Kind::of(&job);
-    if crashes.resting(clock.now().mono) {
+    if crashes.resting(clock.now().mono) && !runs_while_resting(kind) {
         tracing::debug!(%matter, job = kind.name(), "a matter job was refused: its worker rests");
         drop(job);
-        return kind.failed(Error::Internal(
+        kind.clean_up();
+        return kind.reply(Error::Internal(
             "the matter's worker rests after repeated failures".to_owned(),
         ));
     }
+    let before = held(slot);
     let ran = panic::catch_unwind(AssertUnwindSafe(|| {
         #[cfg(test)]
-        hook::fire(matter, kind.name());
+        hook::fire(&settings.matters_root, kind.name());
         handle(settings, slot, job)
     }));
     let payload = match ran {
         Ok(reply) => {
-            if failed_in_history(&reply) {
+            if failed_in_history(settings, &reply) {
                 tracing::info!(
                     %matter,
                     job = kind.name(),
                     "a matter job failed in its history; the matter opens again"
                 );
-                reopen_later(slot);
+                reopen_later(slot, before, kind);
             }
             return reply;
         }
         Err(payload) => payload,
     };
-    // Dropped unread: its text may hold a path. A payload's drop may panic too.
-    let _dropped = panic::catch_unwind(AssertUnwindSafe(move || drop(payload)));
-    reopen_later(slot);
+    forget(payload);
+    reopen_later(slot, before, kind);
+    kind.clean_up();
     if crashes.crashed(clock.now().mono) {
         tracing::warn!(
             %matter,
@@ -113,17 +140,51 @@ fn guarded(
             "a matter job panicked; the matter opens again before its next job"
         );
     }
-    kind.failed(Error::Internal(
-        "the matter's job stopped unexpectedly".to_owned(),
-    ))
+    kind.reply(stopped())
+}
+
+/// The error of a job that panicked.
+fn stopped() -> Error {
+    Error::Internal("the matter's job stopped unexpectedly".to_owned())
+}
+
+/// Drops a panic's payload unread, catching a panic in its drop too.
+fn forget(payload: Box<dyn std::any::Any + Send>) {
+    let _dropped = panic::catch_unwind(AssertUnwindSafe(move || drop(payload)));
+}
+
+/// The jobs that run while the worker rests, since they read no history or must not be lost:
+/// - `HeldOpen` stats the agent's paths; refused, it would put a permission request to the
+///   lawyer (`turn/asks.rs`);
+/// - `Discard` undoes a create the host could not record; refused, it would leave that folder
+///   behind, and of a matter not open (as after a panic) it is `Ok` with nothing to do;
+/// - `AfterTurn` and `Repair` record what the turn wrote: refused, the turn's edits would land
+///   in the next checkpoint as outside edits, the lawyer's own. Each comes once per turn, so
+///   letting them try the matter costs at most one open per turn.
+fn runs_while_resting(kind: &Kind) -> bool {
+    matches!(
+        kind,
+        Kind::HeldOpen | Kind::Discard | Kind::AfterTurn | Kind::Repair
+    )
+}
+
+/// The matter `slot` holds or will open: its id and folder.
+fn held(slot: &Slot) -> Option<(MatterId, PathBuf)> {
+    match slot {
+        Slot::Open(matter) => Some((matter.id(), matter.folder().to_path_buf())),
+        Slot::Unopened { id, folder, .. } => Some((*id, folder.clone())),
+        Slot::Empty => None,
+    }
 }
 
 /// Whether `reply` is a job that writes (a checkpoint, an undo, a restore, a tracked-changes
-/// decision) failing on the disk or in the history (`matter.checkpoint_failed`). R8 reads its
-/// timeline again after a publish that fails, but if that read fails too, the matter in memory
-/// may no longer match the disk, and every later checkpoint would fail until a restart. Opening
-/// it again from the disk costs one open after such a failure, and is what a restart would do.
-fn failed_in_history(reply: &MatterReply) -> bool {
+/// decision) failing in the history: an R8 `History` error, or an I/O error on a file under
+/// the matters' histories (`Settings::matters_root`). R8 reads its timeline again after a
+/// publish that fails, but if that read fails too, the matter in memory may no longer match the
+/// disk, and every later checkpoint would fail until a restart. Opening it again from the disk
+/// costs one open after such a failure, and is what a restart would do. An I/O error on a paper
+/// (one the lawyer may not write) leaves the history as it was, so it reopens nothing.
+fn failed_in_history(settings: &Settings, reply: &MatterReply) -> bool {
     let error = match reply {
         MatterReply::BeforeTurn(Err(error))
         | MatterReply::AfterTurn(Err(error))
@@ -150,18 +211,37 @@ fn failed_in_history(reply: &MatterReply) -> bool {
         | MatterReply::Discarded(_)
         | MatterReply::SidesWritten(_) => return false,
     };
-    error.code() == ErrorCode::MatterCheckpointFailed
+    in_history(&settings.matters_root, error)
 }
 
-/// After a panic: an open matter is dropped and opened again from its folder before the next
-/// job that needs it. A matter not yet opened stays as it is; with none, nothing is held.
-fn reopen_later(slot: &mut Slot) {
-    let Slot::Open(matter) = slot else {
-        return;
+/// Whether `error` is R8's `History`, or its `Io` on a path under `root`.
+fn in_history(root: &Path, error: &Error) -> bool {
+    matches!(
+        error,
+        Error::Matters(clauseo_matters::Error::History { .. })
+    ) || matches!(
+        error,
+        Error::Matters(clauseo_matters::Error::Io { path, .. }) if path.starts_with(root)
+    )
+}
+
+/// After a panic or a history failure: an open matter is dropped and opened again from its
+/// folder before the next job that needs it. A slot the job emptied (a locate empties it before
+/// `Matter::locate`) is opened again from `before`, the folder it held, which is the one the
+/// actor still records (it records a new folder only on the locate's `Ok`); a discard's empty
+/// slot stays empty. A matter not yet opened stays as it is; with none, nothing is held.
+fn reopen_later(slot: &mut Slot, before: Option<(MatterId, PathBuf)>, kind: &Kind) {
+    let (id, folder) = match slot {
+        Slot::Open(matter) => (matter.id(), matter.folder().to_path_buf()),
+        Slot::Empty if !matches!(kind, Kind::Discard) => match before {
+            Some(before) => before,
+            None => return,
+        },
+        Slot::Empty | Slot::Unopened { .. } => return,
     };
     let next = Slot::Unopened {
-        id: matter.id(),
-        folder: matter.folder().to_path_buf(),
+        id,
+        folder,
         relink: None,
     };
     let old = std::mem::replace(slot, next);
@@ -203,152 +283,38 @@ impl Crashes {
     }
 }
 
-/// A job's kind: its name for the log, and its reply when it cannot run.
-#[derive(Debug)]
-enum Kind {
-    Create,
-    Import,
-    Open,
-    Locate,
-    BeforeTurn,
-    AfterTurn,
-    Repair,
-    Undo,
-    Restore,
-    Compare,
-    Preview,
-    HeldOpen,
-    ListPapers,
-    EditedSince,
-    StillGone,
-    Discard,
-    WriteSides,
-    /// The job's private folder, removed when the job does not finish, as `revisions::run`
-    /// removes it after a job that does.
-    Revisions {
-        decide: bool,
-        work: PathBuf,
-    },
-}
-
-impl Kind {
-    fn of(job: &MatterJob) -> Self {
-        match job {
-            MatterJob::Create { .. } => Self::Create,
-            MatterJob::Import { .. } => Self::Import,
-            MatterJob::Open { .. } => Self::Open,
-            MatterJob::Locate { .. } => Self::Locate,
-            MatterJob::BeforeTurn(_) => Self::BeforeTurn,
-            MatterJob::AfterTurn { .. } => Self::AfterTurn,
-            MatterJob::Repair { .. } => Self::Repair,
-            MatterJob::Undo(_) => Self::Undo,
-            MatterJob::Restore(_) => Self::Restore,
-            MatterJob::Compare { .. } => Self::Compare,
-            MatterJob::Preview { .. } => Self::Preview,
-            MatterJob::HeldOpen { .. } => Self::HeldOpen,
-            MatterJob::ListPapers { .. } => Self::ListPapers,
-            MatterJob::EditedSince { .. } => Self::EditedSince,
-            MatterJob::StillGone { .. } => Self::StillGone,
-            MatterJob::Discard => Self::Discard,
-            MatterJob::WriteSides(_) => Self::WriteSides,
-            MatterJob::Revisions(job) => Self::Revisions {
-                decide: matches!(job.act, Act::Decide { .. }),
-                work: job.work.clone(),
-            },
-        }
-    }
-
-    /// The name for the log: the job's fields hold paths.
-    pub(super) const fn name(&self) -> &'static str {
-        match self {
-            Self::Create => "Create",
-            Self::Import => "Import",
-            Self::Open => "Open",
-            Self::Locate => "Locate",
-            Self::BeforeTurn => "BeforeTurn",
-            Self::AfterTurn => "AfterTurn",
-            Self::Repair => "Repair",
-            Self::Undo => "Undo",
-            Self::Restore => "Restore",
-            Self::Compare => "Compare",
-            Self::Preview => "Preview",
-            Self::HeldOpen => "HeldOpen",
-            Self::ListPapers => "ListPapers",
-            Self::EditedSince => "EditedSince",
-            Self::StillGone => "StillGone",
-            Self::Discard => "Discard",
-            Self::WriteSides => "WriteSides",
-            Self::Revisions { .. } => "Revisions",
-        }
-    }
-
-    /// The job's reply when it panicked or did not run, holding `error`. `HeldOpen` has no
-    /// error to hold: it reads as nothing held, so the permission request goes to the lawyer,
-    /// as it does when the job cannot be sent (`turn/asks.rs`).
-    fn failed(self, error: Error) -> MatterReply {
-        match self {
-            Self::Create => MatterReply::Created(Err(error)),
-            Self::Import => MatterReply::Imported(Err(error)),
-            Self::Open => MatterReply::Opened(Err(error)),
-            Self::Locate => MatterReply::Located(Err(error)),
-            Self::BeforeTurn => MatterReply::BeforeTurn(Err(error)),
-            Self::AfterTurn | Self::Repair => MatterReply::AfterTurn(Err(error)),
-            Self::Undo => MatterReply::Undone(Err(error)),
-            Self::Restore => MatterReply::Restored(Err(error)),
-            Self::Compare => MatterReply::Compared(Err(error)),
-            Self::Preview => MatterReply::Previewed(Err(error)),
-            Self::HeldOpen => MatterReply::HeldOpen(PathsChecked::Held(None)),
-            Self::ListPapers => MatterReply::Papers(Err(error)),
-            Self::EditedSince => MatterReply::EditedSince(Err(error)),
-            Self::StillGone => MatterReply::StillGone(Err(error)),
-            Self::Discard => MatterReply::Discarded(Err(error)),
-            Self::WriteSides => MatterReply::SidesWritten(Err(error)),
-            Self::Revisions { decide, work } => {
-                if let Err(err) = crate::write::remove_tree(&work) {
-                    tracing::warn!(
-                        error = %crate::log_file::Cause(&err),
-                        "a tracked-changes work folder was left behind"
-                    );
-                }
-                MatterReply::Revisions(Box::new(if decide {
-                    RevisionsDone::Decided(Err(error))
-                } else {
-                    RevisionsDone::Listed(Err(error))
-                }))
-            }
-        }
-    }
-}
-
-/// A test's panic in a chosen job of a chosen matter.
+/// A test's panic in a chosen job, or at a chosen point of one, of the matters under a chosen
+/// root (`Settings::matters_root`): each test has its own data folder, so no test fires another's.
 #[cfg(test)]
 pub(crate) mod hook {
+    use std::path::{Path, PathBuf};
     use std::sync::{Mutex, PoisonError};
 
-    use clauseo_protocol::MatterId;
+    /// The panics armed: a matters root, a job kind's name or a point's, and how many of the
+    /// next ones panic.
+    static ARMED: Mutex<Vec<(PathBuf, &'static str, usize)>> = Mutex::new(Vec::new());
 
-    /// The panics armed: a matter, a job kind's name, and how many of its next such jobs panic.
-    static ARMED: Mutex<Vec<(MatterId, &'static str, usize)>> = Mutex::new(Vec::new());
-
-    /// The next `times` jobs of kind `job` (`Kind::name`, such as `"AfterTurn"`) on `matter`'s
-    /// worker panic before they run.
-    pub(crate) fn panic_next(matter: MatterId, job: &'static str, times: usize) {
+    /// The next `times` jobs of kind `job` (`Kind::name`, such as `"AfterTurn"`), or passes
+    /// through the point `job` (such as `"Locate:emptied"`), of a worker whose matters live
+    /// under `root` panic.
+    pub(crate) fn panic_next(root: &Path, job: &'static str, times: usize) {
         let mut armed = ARMED.lock().unwrap_or_else(PoisonError::into_inner);
-        armed.push((matter, job, times));
+        armed.push((root.to_path_buf(), job, times));
     }
 
-    /// Panics when a panic is armed for this job.
-    pub(super) fn fire(matter: MatterId, job: &str) {
+    /// Panics when a panic is armed for this job or point.
+    pub(crate) fn fire(root: &Path, job: &str) {
         let hit = {
             let mut armed = ARMED.lock().unwrap_or_else(PoisonError::into_inner);
             let found = armed
                 .iter_mut()
-                .find(|(at, name, left)| *at == matter && *name == job && *left > 0);
+                .find(|(at, name, left)| at == root && *name == job && *left > 0);
             found.map(|(_, _, left)| *left -= 1).is_some()
         };
         assert!(!hit, "a test's panic in a matter job");
     }
 }
 
+mod kind;
 #[cfg(test)]
 mod tests;
