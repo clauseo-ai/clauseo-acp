@@ -27,6 +27,7 @@ import type {
   TurnId,
   UndoPreview,
 } from "../../transport/protocol.ts";
+import { quietly } from "../open.ts";
 import { queueCountPick } from "../queue-entries.ts";
 import { turnRunning } from "./live.ts";
 import { loadThread, threadLoaded } from "./chunk.ts";
@@ -115,6 +116,10 @@ export type ThreadActions = {
    * host stops (if it still runs) to send the words next. Rejects with the HostError when the host refuses
    * (`thread.turn_not_queued`: the words had already moved). Absent where the rows have no session to send through. */
   sendSteerNow?: ((turn: TurnId) => Promise<void>) | undefined;
+  /** Shows a file the browser saved in Clauseo's own folder for the open matter, selected in Finder or File Explorer
+   * (reveal's download target; the desktop finds the path). A refusal is quiet: a console warning. Absent where no
+   * matter is open or the rows have no transport. */
+  revealDownload?: ((name: string) => void) | undefined;
 };
 
 export const ThreadActionsContext = createContext<ThreadActions | null>(null);
@@ -366,6 +371,15 @@ export function useThreadSession(
     [command],
   );
 
+  const revealDownload = useMemo(
+    () =>
+      matter === null
+        ? undefined
+        : (name: string) =>
+            void quietly("reveal", transport.reveal({ download: { matter, name } })),
+    [transport, matter],
+  );
+
   const stream = thread === null ? null : streamOf(thread);
   const actions = useMemo(
     () => ({
@@ -379,6 +393,7 @@ export function useThreadSession(
       retry,
       resend: ask,
       sendSteerNow,
+      revealDownload,
     }),
     [
       stream,
@@ -391,6 +406,7 @@ export function useThreadSession(
       retry,
       ask,
       sendSteerNow,
+      revealDownload,
     ],
   );
   return { thread, sentTurn, refused: refused ?? link.refused, ask, stop, actions };

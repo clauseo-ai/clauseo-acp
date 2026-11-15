@@ -4,10 +4,13 @@
 // while the conversation was open shows as a quiet line; other markers, versions and compaction show nothing yet. A queued or removed message shows nothing (the queue's strip holds it), a steer taken into the
 // answer shows as its mark, a steer not yet resolved as its words waiting, with Send now, and a steer never sent as its
 // words and that they were not sent (steer.ts, steer-rows.tsx).
-import { memo, useState, useSyncExternalStore } from "react";
+import { memo, use, useState, useSyncExternalStore } from "react";
 import { QuestionLine, Who } from "@clauseo/components/clauseo/answer.tsx";
 import { FoldedQuestion } from "@clauseo/components/clauseo/question-fold.tsx";
 import { Say } from "@clauseo/components/clauseo/say.tsx";
+import { useDisplay } from "@clauseo/components/lib/display.ts";
+import { revealKey } from "@clauseo/components/lib/words-ui.ts";
+import { Button } from "@clauseo/components/ui/button.tsx";
 import { mt } from "@clauseo/components/lib/words-matters.ts";
 import { useThreadWords } from "@clauseo/components/lib/words-thread.ts";
 import { frd } from "@clauseo/components/lib/words-first-read.ts";
@@ -32,8 +35,9 @@ import { firstReadMarks, isFirstReadTurn, subscribeMarks } from "../first-read/m
 import { stamp } from "./clock.ts";
 import { useAgentPlan } from "./agent-plan.ts";
 import { isolated, shownOf } from "./content.ts";
-import { noticeLine } from "./notice-words.ts";
+import { downloadNameOf, noticeLine } from "./notice-words.ts";
 import { questionText, useQuestionText, useStreaming } from "./live.ts";
+import { ThreadActionsContext } from "./session.ts";
 import { askedAs, backgroundOf, outcomeOf } from "./steer.ts";
 import {
   LiveSteerMark,
@@ -253,11 +257,16 @@ function AgentContent({ id, entry }: { id: EntryId; entry: AgentContentEntry }) 
 
 /** A host notice in the app's words for its kind, or its English fallback for a kind this version doesn't know. An
  * agent's notice (no kind) shows nothing: it is the agent's own free text, such as Codex's raw error with its request id
- * and the key's masked ending, and the lawyer reads the app's own line for what went wrong instead. */
+ * and the key's masked ending, and the lawyer reads the app's own line for what went wrong instead. A download the
+ * browser saved in Clauseo's own folder for the matter ends with Show in Finder (File Explorer, folder), which shows
+ * the file selected, where the rows can reveal it. */
 function Notice({ id, entry }: { id: EntryId; entry: NoticeEntry }) {
   const w = useThreadWords();
-  if (entry.kind === undefined || entry.kind === null) return null;
   const agent = useAgentPlan();
+  const { platform } = useDisplay();
+  const reveal = use(ThreadActionsContext)?.revealDownload;
+  if (entry.kind === undefined || entry.kind === null) return null;
+  const download = downloadNameOf(entry.kind);
   return (
     <p
       data-testid="notice"
@@ -267,6 +276,20 @@ function Notice({ id, entry }: { id: EntryId; entry: NoticeEntry }) {
       dir="auto"
     >
       {noticeLine(entry.kind, w, agent) ?? entry.text}
+      {download !== null && reveal !== undefined && (
+        <>
+          {" "}
+          <Button
+            kind="link"
+            size="small"
+            className="min-h-0 px-0 py-0 text-primary align-baseline underline underline-offset-2"
+            data-testid="notice-reveal"
+            onClick={() => reveal(download)}
+          >
+            {w.ui(revealKey(platform))}
+          </Button>
+        </>
+      )}
     </p>
   );
 }

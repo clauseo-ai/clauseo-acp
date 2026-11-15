@@ -4341,7 +4341,7 @@ export type NoticeKind =
 	files: MatterPath[],
 	/**  How many more came back beyond `files`. */
 	more: number,
-} }) & { guard_steps_more?: never; held_open_blocked?: never; skill_pack_not_loaded?: never } | 
+} }) & { download_outside_matter?: never; guard_steps_more?: never; held_open_blocked?: never; skill_pack_not_loaded?: never } | 
 /**
  *  A skill pack the launch left out: which pack, and why. The app words it by kind; the
  *  notice's `text` is the fallback.
@@ -4351,7 +4351,7 @@ export type NoticeKind =
 	pack: PackId,
 	/**  Why the launch left it out. */
 	reason: PackSkipReason,
-} }) & { files_came_back?: never; guard_steps_more?: never; held_open_blocked?: never } | 
+} }) & { download_outside_matter?: never; files_came_back?: never; guard_steps_more?: never; held_open_blocked?: never } | 
 /**
  *  Claude Code's `auto` permission mode is not available for this session (the account,
  *  the model or the agent ruled it out), so Claude runs in `acceptEdits` and asks before
@@ -4383,7 +4383,7 @@ export type NoticeKind =
 	 *  line can show. A newer host sends no folder, an older one the whole path.
 	 */
 	file: MatterPath,
-} }) & { files_came_back?: never; guard_steps_more?: never; skill_pack_not_loaded?: never } | 
+} }) & { download_outside_matter?: never; files_came_back?: never; guard_steps_more?: never; skill_pack_not_loaded?: never } | 
 /**
  *  Clauseo's pre-write guard refused a step of the agent's that would change the
  *  matter's `.codex` folder, the agent's own settings there.
@@ -4401,7 +4401,17 @@ export type NoticeKind =
 ({ guard_steps_more: {
 	/**  How many. */
 	more: number,
-} }) & { files_came_back?: never; held_open_blocked?: never; skill_pack_not_loaded?: never } | 
+} }) & { download_outside_matter?: never; files_came_back?: never; held_open_blocked?: never; skill_pack_not_loaded?: never } | 
+/**
+ *  The browser saved a file outside the matter folder, in Clauseo's own folder for this
+ *  matter (`<data>/agent-state/<matter id>/downloads`): the matter's drive cannot keep
+ *  the "downloaded from the internet" mark. The app shows the file in Finder or File
+ *  Explorer by the thread's matter and `name`, never by a path.
+ */
+({ download_outside_matter: {
+	/**  The file's name in that folder: one component, no separator. */
+	name: string,
+} }) & { files_came_back?: never; guard_steps_more?: never; held_open_blocked?: never; skill_pack_not_loaded?: never } | 
 /**  A kind from a newer Clauseo; written back as the plain string `kind`. */
 string;
 
@@ -5526,9 +5536,20 @@ string;
 /**  What `reveal` shows. */
 export type RevealTarget = 
 /**  The matter's folder. */
-{ matter: MatterId } | 
+({ matter: MatterId }) & { download?: never } | 
 /**  Clauseo's app data folder: the event store, the version store and the settings. */
-"app_data";
+"app_data" | 
+/**
+ *  A file the browser saved in Clauseo's own downloads folder for the matter
+ *  (`<app data>/agent-state/<matter>/downloads`), by its name there
+ *  (`NoticeKind::DownloadOutsideMatter`), never by a path.
+ */
+({ download: {
+	/**  The matter. */
+	matter: MatterId,
+	/**  The file's name: one component, no separator. */
+	name: string,
+} }) & { matter?: never };
 
 /**
  *  One tracked change, as `ListRevisions` lists it. A struct, so later fields are additive; it

@@ -4,7 +4,7 @@ import { t, type Key } from "@clauseo/components/lib/words.ts";
 import { th, type ThreadKey } from "@clauseo/components/lib/words-thread.ts";
 import { expect, test } from "vitest";
 import type { NoticeKind, PackSkipReason } from "../../transport/protocol.ts";
-import { noticeLine, type NoticeWords } from "./notice-words.ts";
+import { downloadNameOf, noticeLine, type NoticeWords } from "./notice-words.ts";
 
 const words = (lang: "en" | "hi"): NoticeWords => ({
   lang,
@@ -263,4 +263,30 @@ test("a skill pack notice with no pack gives null, so the row shows its text", (
   expect(
     noticeLine({ skill_pack_not_loaded: { reason: "changed" } } as unknown as NoticeKind, en),
   ).toBeNull();
+});
+
+test("a download saved outside the matter names the file, isolated, in English and Hindi", () => {
+  const kind: NoticeKind = { download_outside_matter: { name: "Judgment 12-03-2024.pdf" } };
+  expect(noticeLine(kind, en)).toBe(
+    `The browser saved ${iso("Judgment 12-03-2024.pdf")} in Clauseo's own folder for this matter, not in the matter's folder: the matter's drive can't mark downloads as coming from the internet.`,
+  );
+  expect(noticeLine(kind, words("hi"))).toBe(
+    `ब्राउज़र ने ${iso("Judgment 12-03-2024.pdf")} को इस मामले के लिए Clauseo के अपने फ़ोल्डर में सहेजा है, मामले के फ़ोल्डर में नहीं: मामले की ड्राइव डाउनलोड को इंटरनेट से आया हुआ चिह्नित नहीं कर सकती।`,
+  );
+  expect(downloadNameOf(kind)).toBe("Judgment 12-03-2024.pdf");
+});
+
+test("a download notice without a non-empty name gives null, so the row shows the host's text", () => {
+  for (const bad of [
+    { download_outside_matter: { name: "" } },
+    { download_outside_matter: { name: 7 } },
+    { download_outside_matter: {} },
+    { download_outside_matter: null },
+    { download_outside_matter: "judgment.pdf" },
+  ]) {
+    const kind = bad as unknown as NoticeKind;
+    expect(noticeLine(kind, en)).toBeNull();
+    expect(downloadNameOf(kind)).toBeNull();
+  }
+  expect(downloadNameOf("context_not_restored")).toBeNull();
 });
