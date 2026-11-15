@@ -21,6 +21,11 @@
 //!   first, if it has been idle at least `cap_min_idle` (60 s). When no live agent qualifies
 //!   (every one is busy, or went idle less than `cap_min_idle` ago) the launch goes ahead and
 //!   the host logs a warning.
+//! - A relaunch mark ([`Relaunch`], [`mark_relaunch`]): an agent whose launch-time inputs
+//!   changed is idle-stopped as soon as nothing is pending, in the tick after the input that
+//!   marked it or after the one that ended its last pending item ([`stop_marked`]). Its next
+//!   prompt relaunches it with the new inputs. A Tools change marks the agents whose lawyer
+//!   servers would now differ ([`tools`]).
 
 use std::collections::BTreeSet;
 use std::time::Duration;
@@ -36,6 +41,8 @@ use super::{TurnState, host_stopping, queue, state};
 use crate::config::{IdleStop, SessionKey};
 use crate::connectors::RelayCall;
 use crate::log_file::LIFECYCLE;
+
+mod tools;
 
 /// What keeps an agent from idling.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -65,6 +72,57 @@ pub(super) struct Mark {
     pub(super) since: Option<Duration>,
     /// Its config and mode calls, and its case-law relay calls, in flight.
     calls: u32,
+    /// The Tools revision its servers were last compared at ([`tools`]).
+    pub(super) tools_seen: u64,
+    /// Why it is to be stopped once nothing is pending, and relaunched by its next prompt.
+    pub(super) relaunch: Option<Relaunch>,
+}
+
+/// Why an agent is to be stopped once idle and relaunched by its next prompt: what it was
+/// launched with changed. Another trigger adds a variant and calls [`mark_relaunch`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum Relaunch {
+    /// Its lawyer servers would differ now (Settings › Tools, [`tools`]).
+    ToolsChanged,
+}
+
+impl Relaunch {
+    /// For the log.
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::ToolsChanged => "tools_changed",
+        }
+    }
+}
+
+/// Marks `thread`'s live agent to stop once nothing is pending, for `why` (a mark already there
+/// stays); the tick after this input stops it if nothing is pending now. No agent: nothing to do,
+/// its next launch takes the new inputs.
+pub(super) fn mark_relaunch(actor: &mut Actor, thread: ThreadId, why: Relaunch) {
+    if let Some(agent) = state(actor, thread).and_then(|state| state.agent.as_deref_mut()) {
+        agent.idle.relaunch.get_or_insert(why);
+    }
+}
+
+/// Stops each marked live agent that has nothing pending ([`stoppable`]); one stopping already
+/// is not stoppable, so a mark makes one stop.
+fn stop_marked(actor: &mut Actor) {
+    let marked: Vec<(ThreadId, Relaunch)> = actor
+        .turn_path
+        .idle
+        .live
+        .iter()
+        .filter_map(|thread| {
+            let agent = actor.threads.get(thread)?.turn.agent.as_deref()?;
+            Some((*thread, agent.idle.relaunch?))
+        })
+        .collect();
+    for (thread, why) in marked {
+        if stoppable(actor, thread) == Some(true) {
+            tracing::info!(target: LIFECYCLE, %thread, why = why.as_str(), "agent stopped to relaunch");
+            agents::idle_stop(actor, thread);
+        }
+    }
 }
 
 /// The idle stop's host-wide state.
@@ -204,6 +262,8 @@ pub(crate) fn tick(actor: &mut Actor) {
     let earliest = if host_stopping(actor) {
         None
     } else {
+        tools::compare(actor);
+        stop_marked(actor);
         refresh(actor, now)
     };
     let config = actor.turn_path.idle.config;
