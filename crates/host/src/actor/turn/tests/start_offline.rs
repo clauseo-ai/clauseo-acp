@@ -16,26 +16,37 @@ use crate::pipeline::tests::support::TempDir;
 /// Claude Code's line for a refused connection, as claude-agent-sdk 0.3.293 writes it.
 const REFUSED: &str = "API Error: Unable to connect to API (ECONNREFUSED)";
 
-/// A rig whose agent answers `initialize`, then `session/new` with -32603 and `message`; its
-/// kind for the probe `kind`, its probe `probe`.
-fn failing_start(test: &str, message: &str, kind: Option<AgentKind>, probe: ReachProbe) -> Rig {
+/// A rig whose agent plays `steps` (scenario lines, no header, no handshake); its kind for the
+/// probe `kind`, its probe `probe`.
+pub(super) fn start_rig(
+    test: &str,
+    steps: &str,
+    kind: Option<AgentKind>,
+    probe: ReachProbe,
+) -> Rig {
     let dir = TempDir::new(test);
     let root = dir.path();
     Rig::prepare(root, test, "", None);
-    let scenario = format!(
-        r#"{{"scenario":"{test}","description":"a unit test","on_stdin_close":"exit"}}
-{{"expect":{{"method":"initialize","as":"init","params":{{"protocolVersion":1}}}}}}
+    let header =
+        format!(r#"{{"scenario":"{test}","description":"a unit test","on_stdin_close":"exit"}}"#);
+    let path = root.join(format!("{test}.jsonl"));
+    crate::write::write_file(&path, format!("{header}\n{steps}").as_bytes()).unwrap();
+    let mut rig = Rig::open(dir, 0, None);
+    rig.actor.turn_path.probe = probe;
+    rig.actor.turn_path.kind_for_tests = kind;
+    rig
+}
+
+/// A rig whose agent answers `initialize`, then `session/new` with -32603 and `message`.
+fn failing_start(test: &str, message: &str, kind: Option<AgentKind>, probe: ReachProbe) -> Rig {
+    let steps = format!(
+        r#"{{"expect":{{"method":"initialize","as":"init","params":{{"protocolVersion":1}}}}}}
 {{"respond":{{"to":"init","result":{{"protocolVersion":1,"agentCapabilities":{{"loadSession":false}},"authMethods":[],"agentInfo":{{"name":"fake_agent","version":"0.0.0"}}}}}}}}
 {{"expect":{{"method":"session/new","as":"new","params":{{"cwd":"{{{{any}}}}"}}}}}}
 {{"respond":{{"to":"new","error":{{"code":-32603,"message":"{message}"}}}}}}
 "#
     );
-    let path = root.join(format!("{test}.jsonl"));
-    crate::write::write_file(&path, scenario.as_bytes()).unwrap();
-    let mut rig = Rig::open(dir, 0, None);
-    rig.actor.turn_path.probe = probe;
-    rig.actor.turn_path.kind_for_tests = kind;
-    rig
+    start_rig(test, &steps, kind, probe)
 }
 
 /// The code the first turn of `rig` fails with.
