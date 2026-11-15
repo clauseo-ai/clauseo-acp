@@ -41,7 +41,7 @@
     "status": "provisional",
     "at": "2026-11-15",
     "by": "crashnote (closed-unexpectedly-notice; waiting for Rohan's review)",
-    "note": "Room notice after Clauseo closed unexpectedly: One per unfinished action in a named matter; {action} is UC-331..335, UC-365 or UC-366"
+    "note": "Room notice after Clauseo closed unexpectedly: one per unfinished undo or tracked-changes decision in a named matter; {action} is UC-331, UC-332, UC-365 or UC-366"
   },
   "UC-330": {
     "en": "{action} may not have finished.",
@@ -52,7 +52,7 @@
     "status": "provisional",
     "at": "2026-11-15",
     "by": "crashnote (closed-unexpectedly-notice; waiting for Rohan's review)",
-    "note": "Room notice after Clauseo closed unexpectedly: One per unfinished action in the Scratch matter (not named)"
+    "note": "Room notice after Clauseo closed unexpectedly: one per unfinished undo or tracked-changes decision in the Scratch matter (not named)"
   },
   "UC-331": {
     "en": "Undo of 1 file",
@@ -141,5 +141,27 @@
     "at": "2026-11-15",
     "by": "crashnote (closed-unexpectedly-notice; waiting for Rohan's review)",
     "note": "Room notice after Clauseo closed unexpectedly: Last line, when any action is named"
+  },
+  "UC-372": {
+    "en": "{restore} in {matter} may not have finished.",
+    "hi": "{matter} में {restore} शायद पूरी नहीं हुई।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "crashnote (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "crashnote (closed-unexpectedly-notice; waiting for Rohan's review)",
+    "note": "Room notice after Clauseo closed unexpectedly: one per unfinished restore in a named matter; {restore} is UC-333, UC-334 or UC-335; its own key so the Hindi verb agrees with बहाली (feminine)"
+  },
+  "UC-373": {
+    "en": "{restore} may not have finished.",
+    "hi": "{restore} शायद पूरी नहीं हुई।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "crashnote (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "crashnote (closed-unexpectedly-notice; waiting for Rohan's review)",
+    "note": "Room notice after Clauseo closed unexpectedly: one per unfinished restore in the Scratch matter (not named); its own key so the Hindi verb agrees"
   }
 }

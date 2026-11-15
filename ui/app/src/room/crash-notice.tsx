@@ -13,7 +13,7 @@ import { uw } from "@clauseo/components/lib/words-update.ts";
 import { Button } from "@clauseo/components/ui/button.tsx";
 import type { HostTransport } from "../transport/host-transport.ts";
 import type { LastExit, MatterSummary } from "../transport/protocol.ts";
-import { actionLine, carriesLastExit } from "./crash-lines.ts";
+import { actionLine, carriesLastExit, focusBeside } from "./crash-lines.ts";
 import { markCrashSeen, seenCrash } from "./crash-seen.ts";
 
 export function CrashNotice({
@@ -56,6 +56,7 @@ export function CrashNotice({
       label={uw(lang, "Last session")}
       state="closed-unexpectedly"
       className="crash-notice"
+      live
       title={<Say>{uw(lang, "Clauseo closed unexpectedly.")}</Say>}
       line={<Say>{lines.join(" ")}</Say>}
       actions={
@@ -63,7 +64,9 @@ export function CrashNotice({
           kind="quiet"
           size="small"
           data-testid="crash-got-it"
-          onClick={() => {
+          onClick={(event) => {
+            // the card goes: focus stays in the rail's foot or the wall it stood in, not on the page
+            focusBeside(event.currentTarget);
             markCrashSeen(run);
             setSeen(run);
           }}

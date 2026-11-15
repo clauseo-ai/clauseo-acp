@@ -1,13 +1,15 @@
 // @vitest-environment happy-dom
 // The notice after Clauseo closed unexpectedly (crash-notice.tsx), over a transport that answers `last_exit`: the
 // general lines after an unclean exit with nothing recorded, a line per unfinished action by kind and count (with its
-// matter's name, never the Scratch matter's), nothing after a clean quit or a refused query, and Got it once per run,
-// kept across a reload.
+// matter's name, never the Scratch matter's), nothing after a clean quit or a refused query, Got it once per run,
+// kept across a reload, with focus left in the place the card stood, and a restore's Hindi agreeing with बहाली.
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, test } from "vitest";
 import type { HostTransport } from "../transport/host-transport.ts";
 import type { InterruptedAction, LastExit, MatterSummary } from "../transport/protocol.ts";
+import "@clauseo/components/lib/words-hi.ts";
+import { actionLine } from "./crash-lines.ts";
 import { CrashNotice } from "./crash-notice.tsx";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -125,4 +127,38 @@ test("Got it hides it for this run, across a reload; the next unclean exit shows
   host?.remove();
   await mount(exit({ run_started: 1_790_000_100_000 }));
   expect(card()).not.toBeNull();
+});
+
+test("Got it leaves focus in the wall the notice stood in", async () => {
+  const transport = {
+    lastExitWire: true,
+    query: async () => ({ last_exit: exit() }),
+  } as unknown as HostTransport;
+  host = document.createElement("div");
+  document.body.append(host);
+  root = createRoot(host);
+  await act(async () =>
+    root?.render(
+      <aside className="room-pane">
+        <CrashNotice transport={transport} matters={MATTERS} />
+        <button type="button" data-testid="wall-first">
+          A paper
+        </button>
+      </aside>,
+    ),
+  );
+  await settle();
+  expect(card()?.getAttribute("aria-live")).toBe("polite");
+  const button = host.querySelector<HTMLButtonElement>('[data-testid="crash-got-it"]');
+  await act(async () => button?.click());
+  expect(card()).toBeNull();
+  expect(document.activeElement?.getAttribute("data-testid")).toBe("wall-first");
+});
+
+test("a restore's line in Hindi agrees with बहाली", () => {
+  const restore: InterruptedAction = { kind: "restore", matter: MATTER, files: 2 };
+  expect(actionLine("hi", restore, MATTERS)).toBe("Acme lease में 2 फ़ाइलों की बहाली शायद पूरी नहीं हुई।");
+  expect(actionLine("hi", { ...restore, matter: SCRATCH }, MATTERS)).toBe(
+    "2 फ़ाइलों की बहाली शायद पूरी नहीं हुई।",
+  );
 });
