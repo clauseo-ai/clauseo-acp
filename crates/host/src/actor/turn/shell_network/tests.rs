@@ -1,9 +1,9 @@
 //! Which Codex requests count as asking for the network, in codex-acp 2.2.2's shapes.
 
-use clauseo_protocol::{PermissionKind, PermissionOption};
+use clauseo_protocol::{NoticeKind, PermissionKind, PermissionOption};
 use serde_json::{Value, json};
 
-use super::asks_for_network;
+use super::{agent_note, asks_for_network, notice, owed_note};
 
 /// codex-acp's options for a plain command approval (`dist/index.js:32142-32190`).
 fn command_options() -> Vec<PermissionOption> {
@@ -101,4 +101,45 @@ fn network_approvals_and_permissions_ask_for_the_network() {
     assert!(!network(&folders));
     // A url with no command (an MCP tool's input, say) is not a shell's network approval.
     assert!(!network(&json!({ "url": "https://a.in" })));
+}
+
+/// With web search the notice and the notes offer it; without, the notice is its own kind and
+/// no word of the notice or the notes names web search. The owed note says "earlier", never
+/// "last turn": a queued prompt may start before it goes.
+#[test]
+fn the_words_offer_web_search_only_where_the_session_has_it() {
+    let on = notice(true);
+    assert_eq!(on.kind, Some(NoticeKind::ShellNetworkBlocked));
+    assert!(
+        on.text.ends_with("ChatGPT can use web search instead."),
+        "{}",
+        on.text
+    );
+    let off = notice(false);
+    assert_eq!(off.kind, Some(NoticeKind::ShellNetworkBlockedNoWebSearch));
+    assert_eq!(
+        off.text,
+        "Clauseo stopped a step: ChatGPT tried to go online by running a command."
+    );
+    assert_eq!(
+        agent_note(true),
+        "Clauseo declined that command: your shell has no internet. Use your web search or web \
+         fetch tool instead, or, if you have the browser, save a file by clicking its link there."
+    );
+    assert_eq!(
+        agent_note(false),
+        "Clauseo declined that command: your shell has no internet. If you have the browser, \
+         save a file by clicking its link there."
+    );
+    assert_eq!(
+        owed_note(false),
+        "Note from Clauseo: earlier, Clauseo declined a command of yours that needed the \
+         internet, because your shell has no internet. If you have the browser, save a file by \
+         clicking its link there."
+    );
+    assert!(owed_note(true).contains("Use your web search or web fetch tool instead"));
+    for text in [off.text, agent_note(false), owed_note(false)] {
+        assert!(!text.contains("web search"), "{text}");
+    }
+    assert!(!owed_note(true).contains("last turn"));
 }

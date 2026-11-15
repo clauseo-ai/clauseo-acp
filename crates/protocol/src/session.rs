@@ -318,6 +318,9 @@ open_data_enum! {
         /// Clauseo declined, without asking the lawyer, a shell command of the agent's that needed
         /// the internet (curl, wget, a network approval, extra network permissions). Once a turn.
         ShellNetworkBlocked = "shell_network_blocked",
+        /// As `shell_network_blocked`, in a session without web search (the firm or the lawyer
+        /// turned it off), so the words offer no web search instead. Once a turn.
+        ShellNetworkBlockedNoWebSearch = "shell_network_blocked_no_web_search",
         _ =>
         /// A kind from a newer Clauseo; written back as the plain string `kind`.
         Unknown,
@@ -326,6 +329,7 @@ open_data_enum! {
         NoticeKind::ContextNotRestored,
         NoticeKind::OutsideMatterBlocked,
         NoticeKind::ShellNetworkBlocked,
+        NoticeKind::ShellNetworkBlockedNoWebSearch,
         NoticeKind::FilesCameBack {
             files: vec![MatterPath::new("Drafts/memo.docx").unwrap()],
             more: 2,

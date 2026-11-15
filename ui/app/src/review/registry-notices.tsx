@@ -89,6 +89,15 @@ const OFFLINE_NOTICE = notice(6, {
   text: "Clauseo stopped a step: ChatGPT tried to go online by running a command. ChatGPT can use web search instead.",
   kind: "shell_network_blocked",
 });
+const OFFLINE_NO_SEARCH = "Clauseo stopped a step: {name} tried to go online by running a command.";
+const OFFLINE_NO_SEARCH_ALONE =
+  "Clauseo stopped a step: the AI tried to go online by running a command.";
+/** The same, in a session without web search: it offers none. */
+const OFFLINE_NO_SEARCH_NOTICE = notice(6, {
+  level: "warning",
+  text: "Clauseo stopped a step: ChatGPT tried to go online by running a command.",
+  kind: "shell_network_blocked_no_web_search",
+});
 /** One paper a sync client put back after the undo. */
 const ONE_PAPER = notice(6, {
   kind: { files_came_back: { files: ["Pleadings/Reply.docx"], more: 0 } },
@@ -181,6 +190,23 @@ export const TN: Entry[] = [
     render: (lang: Lang) => (
       <main lang={lang} className="review-alone">
         <p>{th(lang, OFFLINE_ALONE)}</p>
+      </main>
+    ),
+  },
+  {
+    id: "UC-570",
+    words: threadWords(OFFLINE_NO_SEARCH),
+    screen: "room/thread",
+    render: thread(OFFLINE_NO_SEARCH_NOTICE),
+  },
+  {
+    // Where the room knows no agent name, as TN-14: rendered alone.
+    id: "UC-571",
+    words: threadWords(OFFLINE_NO_SEARCH_ALONE),
+    screen: "room/thread",
+    render: (lang: Lang) => (
+      <main lang={lang} className="review-alone">
+        <p>{th(lang, OFFLINE_NO_SEARCH_ALONE)}</p>
       </main>
     ),
   },

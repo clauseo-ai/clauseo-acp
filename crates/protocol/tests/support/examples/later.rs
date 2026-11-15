@@ -291,6 +291,12 @@ pub(super) fn notices() -> Vec<DomainEvent> {
                 .to_owned(),
             kind: Some(NoticeKind::ShellNetworkBlocked),
         },
+        Notice {
+            level: NoticeLevel::Warning,
+            text: "Clauseo stopped a step: ChatGPT tried to go online by running a command."
+                .to_owned(),
+            kind: Some(NoticeKind::ShellNetworkBlockedNoWebSearch),
+        },
     ];
     notices.extend(
         [

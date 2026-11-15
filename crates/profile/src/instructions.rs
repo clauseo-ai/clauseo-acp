@@ -82,6 +82,21 @@ pub const CODEX_SHELL_MACOS: &str = include_str!("../assets/instructions/codex-s
 pub const CODEX_SHELL_OFFLINE: &str =
     include_str!("../assets/instructions/codex-shell-offline.txt");
 
+/// The last sentence of [`CODEX_SHELL_OFFLINE`], the way out: the host takes it out of a session
+/// without web search ([`codex_shell_offline`]).
+pub const CODEX_SHELL_SEARCH: &str = "Use your web search and web fetch tools instead.";
+
+/// [`CODEX_SHELL_OFFLINE`] as a session with web search (`web_search`) gets it, else without
+/// its last sentence ([`CODEX_SHELL_SEARCH`]), so Codex is never pointed at a tool it lacks.
+pub fn codex_shell_offline(web_search: bool) -> &'static str {
+    let line = CODEX_SHELL_OFFLINE.trim();
+    if web_search {
+        return line;
+    }
+    line.strip_suffix(CODEX_SHELL_SEARCH)
+        .map_or(line, str::trim_end)
+}
+
 /// The line a Codex session gets after the instructions on macOS (`macos`), and none elsewhere:
 /// the commands it names are macOS's own.
 pub fn codex_shell(macos: bool) -> Option<&'static str> {

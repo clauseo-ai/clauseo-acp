@@ -17,9 +17,18 @@ const NOTE: &str = "Clauseo declined that command: your shell has no internet. U
     link there.";
 
 /// The owed note (`shell_network.rs`'s `OWED_NOTE`).
-const OWED: &str = "Note from Clauseo: in your last turn, Clauseo declined a command of yours \
-    that needed the internet, because your shell has no internet. Use your web search or web \
-    fetch tool instead, or, if you have the browser, save a file by clicking its link there.";
+const OWED: &str = "Note from Clauseo: earlier, Clauseo declined a command of yours that \
+    needed the internet, because your shell has no internet. Use your web search or web fetch \
+    tool instead, or, if you have the browser, save a file by clicking its link there.";
+
+/// The steered note in a session without web search.
+const NOTE_NO_SEARCH: &str = "Clauseo declined that command: your shell has no internet. If you \
+    have the browser, save a file by clicking its link there.";
+
+/// The owed note in a session without web search.
+const OWED_NO_SEARCH: &str = "Note from Clauseo: earlier, Clauseo declined a command of yours \
+    that needed the internet, because your shell has no internet. If you have the browser, save \
+    a file by clicking its link there.";
 
 const CODEX: &str = "codex-acp";
 
@@ -60,8 +69,13 @@ fn prompt(name: &str, texts: &[&str]) -> Value {
 /// The scenario `name`: a codex-acp with native steering when `steering`, whose first turn's
 /// curl is declined (its steer answered `promptRequired` when `steering`), then an `rm -rf` the
 /// lawyer allows (by then the owed note is recorded); the second prompt starts with the owed
-/// note, the third has none.
-fn scenario(name: &str, steering: bool) -> String {
+/// note, the third has none. The notes offer web search only when `search`.
+fn scenario(name: &str, steering: bool, search: bool) -> String {
+    let (note, owed) = if search {
+        (NOTE, OWED)
+    } else {
+        (NOTE_NO_SEARCH, OWED_NO_SEARCH)
+    };
     let meta = if steering {
         json!({"steering": {"supported": true}})
     } else {
@@ -88,7 +102,7 @@ fn scenario(name: &str, steering: bool) -> String {
     if steering {
         lines.push(
             json!({"expect": {"method": "_session/steering", "as": "steer",
-            "params": {"sessionId": "sess-1", "prompt": [{"type": "text", "text": NOTE}]}}}),
+            "params": {"sessionId": "sess-1", "prompt": [{"type": "text", "text": note}]}}}),
         );
         lines.push(answered("curl-1", "decline"));
         lines.push(
@@ -102,7 +116,7 @@ fn scenario(name: &str, steering: bool) -> String {
         request("rm-1", "rm -rf build"),
         answered("rm-1", "allow_once"),
         json!({"respond": {"to": "p1", "result": {"stopReason": "end_turn"}}}),
-        prompt("p2", &[OWED, "And the order."]),
+        prompt("p2", &[owed, "And the order."]),
         json!({"respond": {"to": "p2", "result": {"stopReason": "end_turn"}}}),
         prompt("p3", &["Thanks."]),
         json!({"respond": {"to": "p3", "result": {"stopReason": "end_turn"}}}),
@@ -115,12 +129,14 @@ fn scenario(name: &str, steering: bool) -> String {
     text
 }
 
-/// Runs `scenario(name, steering)`: three prompts, each turn ending `EndTurn`, one notice.
-fn owed_note_reaches_the_next_prompt(name: &str, steering: bool) {
+/// Runs `scenario(name, steering, search)` with `tools.web_search` set to `search`: three
+/// prompts, each turn ending `EndTurn`, one notice of the kind `search` gives.
+fn owed_note_reaches_the_next_prompt(name: &str, steering: bool, search: bool) {
     let dir = Dir::new(name, &[]);
     let file = dir.data().with_file_name(format!("{name}.jsonl"));
-    write::write(&file, scenario(name, steering).as_bytes());
-    dir.set_agents(&[(CODEX, Scenario::Written(file))]);
+    write::write(&file, scenario(name, steering, search).as_bytes());
+    let tools = json!({"tools": {"web_search": search}});
+    dir.set_settings(&[(CODEX, Scenario::Written(file))], tools);
     let host = dir.start(0);
     let (_, thread, _) = matter_with_thread(&dir, &host, "m", &[], CODEX);
     let mut events = host.events(StreamId::Thread(thread));
@@ -143,12 +159,12 @@ fn owed_note_reaches_the_next_prompt(name: &str, steering: bool) {
             _ => None,
         })
         .collect();
-    assert_eq!(
-        kinds,
-        [Some(NoticeKind::ShellNetworkBlocked)],
-        "{}",
-        events.dump()
-    );
+    let kind = if search {
+        NoticeKind::ShellNetworkBlocked
+    } else {
+        NoticeKind::ShellNetworkBlockedNoWebSearch
+    };
+    assert_eq!(kinds, [Some(kind)], "{}", events.dump());
     // The owed note is no lawyer's message.
     let dump = events.dump();
     assert!(!dump.contains("Note from Clauseo"), "{dump}");
@@ -157,10 +173,16 @@ fn owed_note_reaches_the_next_prompt(name: &str, steering: bool) {
 
 #[test]
 fn without_native_steering_the_note_goes_first_in_the_next_prompt() {
-    owed_note_reaches_the_next_prompt("shell_offline_owed_nosteer", false);
+    owed_note_reaches_the_next_prompt("shell_offline_owed_nosteer", false, true);
 }
 
 #[test]
 fn a_steer_that_does_not_land_leaves_the_note_for_the_next_prompt() {
-    owed_note_reaches_the_next_prompt("shell_offline_owed_missed", true);
+    owed_note_reaches_the_next_prompt("shell_offline_owed_missed", true, true);
+}
+
+/// With web search off, the lawyer's notice and both notes to Codex offer no web search.
+#[test]
+fn without_web_search_no_word_offers_it() {
+    owed_note_reaches_the_next_prompt("shell_offline_owed_nosearch", true, false);
 }

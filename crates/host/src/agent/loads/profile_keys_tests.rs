@@ -284,3 +284,26 @@ fn claudes_shell_is_kept_in_the_matters_folder() {
         }
     }
 }
+
+/// Codex's offline-shell line offers web search only to a session that has it: with the switch
+/// off, `codex_keys` takes its last sentence out of `developer_instructions`.
+#[test]
+fn codex_offline_line_offers_web_search_only_with_it() {
+    use clauseo_profile::instructions::{CODEX_SHELL_SEARCH, codex_shell_offline};
+    let line = codex_shell_offline(true);
+    let hook = json!({"developer_instructions": format!("Rules.\n\n{line}")});
+    let instructions = |switch| {
+        let map = hook.as_object().cloned().unwrap();
+        let keys = super::profile::codex_keys(map, switch, folders()).unwrap();
+        keys["developer_instructions"].as_str().unwrap().to_owned()
+    };
+    assert_eq!(instructions(ON), format!("Rules.\n\n{line}"));
+    let off = instructions(OFF);
+    assert_eq!(
+        off,
+        "Rules.\n\nYour shell has no internet: never use curl, wget or another download \
+         command in it."
+    );
+    assert!(!off.contains(CODEX_SHELL_SEARCH) && !off.contains("web search"));
+    assert!(line.ends_with(CODEX_SHELL_SEARCH));
+}
