@@ -191,6 +191,8 @@ pub(crate) enum MatterJob {
         folder: PathBuf,
         paths: Vec<PathBuf>,
         fence: Option<Box<FenceCheck>>,
+        /// The session's other matters and their fence paths (`agent::matter_fence`).
+        matters: crate::agent::data_fence::Fenced,
     },
     /// `Matter::papers`: the folder as it is now, its first `limit` files.
     ListPapers { limit: usize },
@@ -514,7 +516,8 @@ fn handle(settings: &Settings, slot: &mut Slot, job: MatterJob) -> MatterReply {
             folder,
             paths,
             fence,
-        } => MatterReply::HeldOpen(check_paths(&folder, paths, fence.as_deref())),
+            matters,
+        } => MatterReply::HeldOpen(check_paths(&folder, paths, fence.as_deref(), &matters)),
         MatterJob::ListPapers { limit } => {
             MatterReply::Papers(open(settings, slot).and_then(|matter| {
                 let papers = matter.papers(limit)?;
