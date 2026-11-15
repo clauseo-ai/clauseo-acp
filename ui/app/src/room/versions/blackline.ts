@@ -7,6 +7,7 @@
 import type { HostTransport } from "../../transport/host-transport.ts";
 import { toHostError } from "../../transport/host-transport.ts";
 import type {
+  BlacklineNotice,
   BlacklineParagraph,
   CheckpointId,
   FileChange,
@@ -17,11 +18,17 @@ import type {
  * folder now, its content (now: the compare answer's `after`, else its size), so a change to the file asks again. */
 export type MarkAsk = { path: string; from: CheckpointId; to?: CheckpointId; now: string };
 
-/** How a marking up stands: running, done (its paragraphs, and whether the host cut the document short), or failed
- * with the host's code and whether another try may mend it. */
+/** How a marking up stands: running, done (its paragraphs, whether the host cut the document short, and what the
+ * lawyer should know: a part not shown, hidden text), or failed with the host's code and whether another try may mend
+ * it. */
 export type Mark =
   | { kind: "running" }
-  | { kind: "shown"; paragraphs: readonly BlacklineParagraph[]; truncated: boolean }
+  | {
+      kind: "shown";
+      paragraphs: readonly BlacklineParagraph[];
+      truncated: boolean;
+      notices: readonly BlacklineNotice[];
+    }
   | { kind: "failed"; code: string; retryable: boolean };
 
 /** One key per marking up: the file, the version, and the later version or the folder's content now. */
@@ -94,8 +101,8 @@ export class Blacklines {
         },
       });
       if ("word_blackline" in r) {
-        const { paragraphs, truncated } = r.word_blackline;
-        this.#set(key, { kind: "shown", paragraphs, truncated });
+        const { paragraphs, truncated, notices = [] } = r.word_blackline;
+        this.#set(key, { kind: "shown", paragraphs, truncated, notices });
       } else this.#failed(key, "internal", false);
     } catch (e) {
       const { code, retryable } = toHostError(e);

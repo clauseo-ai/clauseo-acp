@@ -120,6 +120,11 @@ export type ErrorCode =
   | "mcp.import_too_large"
   | "matter.folder_backslash"
   | "agent.folder_inaccessible"
+  | "blackline.nested_table"
+  | "blackline.cannot_compare"
+  | "blackline.not_readable"
+  | "blackline.too_large"
+  | "blackline.format_unknown"
   | "unknown";
 
 /** The thread's own sentence for an answer cut short: its Hindi lives in words-thread.ts, once. */
@@ -130,6 +135,11 @@ const STOPPED = "The answer stopped. Your question and the answer so far are kep
 export const MARK_KEYS = [
   "Clauseo's Word tool is missing. Reinstall Clauseo to see the marked-up changes.",
   "The changes in this document couldn't be marked up.",
+  "Clauseo couldn't compare these two versions because of a table inside a table. Open both in Word to compare them.",
+  "Clauseo couldn't compare these two versions. Open both in Word to compare them.",
+  "Clauseo couldn't read one of these versions. It may be damaged, or it may not be a Word document.",
+  "This document is too large to mark up. Open both versions in Word to compare them.",
+  "This version of Clauseo can't mark up these changes. Update Clauseo to see them.",
 ] as const satisfies readonly VersionKey[];
 type MarkKey = (typeof MARK_KEYS)[number];
 const isMark = (key: ErrorKey): key is MarkKey => (MARK_KEYS as readonly string[]).includes(key);
@@ -287,6 +297,17 @@ export const ERROR_WORDS: Record<WordedCode, ErrorKey> = {
     "Clauseo's Word tool is missing. Reinstall Clauseo to see the marked-up changes.",
   "blackline.not_word": "The changes in this document couldn't be marked up.",
   "blackline.failed": "The changes in this document couldn't be marked up.",
+  // provisional: the Word tool's own refusals (stetdoc's error codes), none of which another try mends
+  "blackline.nested_table":
+    "Clauseo couldn't compare these two versions because of a table inside a table. Open both in Word to compare them.",
+  "blackline.cannot_compare":
+    "Clauseo couldn't compare these two versions. Open both in Word to compare them.",
+  "blackline.not_readable":
+    "Clauseo couldn't read one of these versions. It may be damaged, or it may not be a Word document.",
+  "blackline.too_large":
+    "This document is too large to mark up. Open both versions in Word to compare them.",
+  "blackline.format_unknown":
+    "This version of Clauseo can't mark up these changes. Update Clauseo to see them.",
   // provisional (English settled by the orchestrator): a Word file's tracked changes, accepted or rejected from its
   // tile on the wall (room/word/changes-pane.tsx); edit_failed's line stands beside Try again
   "word.stetdoc_missing":

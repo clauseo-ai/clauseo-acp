@@ -89,6 +89,25 @@ const OWN = {
   "The changes in this document couldn't be marked up.": "इस दस्तावेज़ के बदलाव चिह्नित नहीं किए जा सके।",
   "This document is very long, so only part of it is shown.":
     "यह दस्तावेज़ बहुत लंबा है, इसलिए इसका केवल एक हिस्सा दिखाया गया है।",
+  // what to know about a marked-up document shown in part, or with hidden text (the host's notices); provisional
+  "Part of this document couldn't be marked up. The rest is below.":
+    "इस दस्तावेज़ का एक हिस्सा चिह्नित नहीं किया जा सका। बाकी नीचे है।",
+  "This document has text that Word hides. It's shown here like the rest.":
+    "इस दस्तावेज़ में ऐसा पाठ है जिसे Word छिपाता है। यहाँ वह बाकी पाठ की तरह दिखाया गया है।",
+  "Some numbers here may not match the ones Word shows.":
+    "यहाँ कुछ संख्याएँ Word में दिखने वाली संख्याओं से अलग हो सकती हैं।",
+  "Some of this may look different in Word.": "इसका कुछ हिस्सा Word में अलग दिख सकता है।",
+  // why the Word tool refused to mark a document up, each said over the sheet with no Try again; provisional
+  "Clauseo couldn't compare these two versions because of a table inside a table. Open both in Word to compare them.":
+    "तालिका के अंदर एक तालिका होने के कारण Clauseo इन दो संस्करणों की तुलना नहीं कर सका। तुलना के लिए दोनों को Word में खोलें।",
+  "Clauseo couldn't compare these two versions. Open both in Word to compare them.":
+    "Clauseo इन दो संस्करणों की तुलना नहीं कर सका। तुलना के लिए दोनों को Word में खोलें।",
+  "Clauseo couldn't read one of these versions. It may be damaged, or it may not be a Word document.":
+    "Clauseo इनमें से एक संस्करण नहीं पढ़ सका। हो सकता है वह खराब हो, या Word दस्तावेज़ न हो।",
+  "This document is too large to mark up. Open both versions in Word to compare them.":
+    "यह दस्तावेज़ चिह्नित करने के लिए बहुत बड़ा है। तुलना के लिए दोनों संस्करण Word में खोलें।",
+  "This version of Clauseo can't mark up these changes. Update Clauseo to see them.":
+    "Clauseo का यह संस्करण इन बदलावों को चिह्नित नहीं कर सकता। इन्हें देखने के लिए Clauseo अपडेट करें।",
   // over the sheet, and saving it as a new draft
   "{paper}, as it stood at {time} on {date}": "{paper}, जैसा {date} को {time} बजे था",
   "{paper}, as it stood at {time} today": "{paper}, जैसा आज {time} बजे था",

@@ -15,6 +15,7 @@ import { errorWords } from "@clauseo/components/lib/words-errors.ts";
 import { mt } from "@clauseo/components/lib/words-matters.ts";
 import { listOf, vt } from "@clauseo/components/lib/words-versions.ts";
 import type {
+  BlacklineNotice,
   FileChange,
   FileChoice,
   FolderPlace,
@@ -342,11 +343,39 @@ export const failedLine = (lang: Lang, code: string): BandNotice => ({
   text: errorWords(lang, code),
 });
 
+/** What the lawyer should know about a marked-up document, by the host's notice, said over the sheet: a part not
+ * shown (the rest is), hidden text shown like the rest, numbers that may differ from Word's; anything else, and a
+ * notice this version doesn't know, says only that some of it may look different in Word. */
+export function noticeLine(lang: Lang, notice: BlacklineNotice): string {
+  switch (notice) {
+    case "part_not_shown":
+      return vt(lang, "Part of this document couldn't be marked up. The rest is below.");
+    case "hidden_text":
+      return vt(lang, "This document has text that Word hides. It's shown here like the rest.");
+    case "numbers_may_differ":
+      return vt(lang, "Some numbers here may not match the ones Word shows.");
+    case "may_differ":
+    case "unknown":
+      return vt(lang, "Some of this may look different in Word.");
+  }
+}
+
+/** The Word tool's refusals that say why, each with its own sentence (words-errors.ts). */
+const MARK_REFUSALS: readonly string[] = [
+  "blackline.no_word_tool",
+  "blackline.nested_table",
+  "blackline.cannot_compare",
+  "blackline.not_readable",
+  "blackline.too_large",
+  "blackline.format_unknown",
+];
+
 /** Why a Word document's changes couldn't be marked up, by the code (words-errors.ts's sentence): the Word tool
- * missing says to reinstall; any other failure, the host's or the transport's, says only that it couldn't be done
- * (the sheet that says the file changed stands under it). */
+ * missing says to reinstall, and a refusal of the Word tool's own says why (a table inside a table, a version it can't
+ * read, one too large); any other failure, the host's or the transport's, says only that it couldn't be done (the
+ * sheet that says the file changed stands under it). */
 export const markFailedLine = (lang: Lang, code: string): string =>
-  errorWords(lang, code === "blackline.no_word_tool" ? code : "blackline.failed");
+  errorWords(lang, MARK_REFUSALS.includes(code) ? code : "blackline.failed");
 
 /** The not-saved line: which paper Clauseo changed and when, that the change couldn't be kept as a version, and that
  * the paper stands as Clauseo left it. A change on another day says its day. */
