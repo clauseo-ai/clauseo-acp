@@ -374,7 +374,7 @@ pub fn find_candidates(env: &Env<'_>, existing_names: &[String]) -> Vec<ImportCa
 }
 
 /// As [`find_candidates`], with how many servers (or Claude Code projects) the per-source cap
-/// [`MAX_ENTRIES_PER_SOURCE`] left unread.
+/// [`MAX_ENTRIES_PER_SOURCE`] or the total cap [`MAX_ENTRIES_TOTAL`] left unread.
 pub fn find_candidates_counted(
     env: &Env<'_>,
     existing_names: &[String],
@@ -394,6 +394,14 @@ pub fn find_candidates_counted(
 /// never turned into entries.
 pub const MAX_ENTRIES_PER_SOURCE: usize = 500;
 
+/// The most servers read across every source together, in reading order (Claude Desktop, then
+/// Claude Code's user scope and projects, then Codex); the rest are counted with the per-source
+/// cap's. Twice [`MAX_ENTRIES_PER_SOURCE`]: two full sources still read whole, while Claude
+/// Code's up to 500 projects can no longer hold 250,000 entries in memory at once. It never
+/// limits one import: an import's one confirm shows at most about 285 servers (2,000 characters,
+/// at least 7 a server), and the rest go to the next import.
+pub const MAX_ENTRIES_TOTAL: usize = 2 * MAX_ENTRIES_PER_SOURCE;
+
 /// The entries read so far, and how many a cap left unread.
 #[derive(Default)]
 pub(crate) struct Entries {
@@ -402,14 +410,21 @@ pub(crate) struct Entries {
 }
 
 impl Entries {
+    /// Keeps `entry`, or counts it once [`MAX_ENTRIES_TOTAL`] are kept.
     pub(crate) fn push(&mut self, entry: Entry) {
-        self.list.push(entry);
+        if self.list.len() < MAX_ENTRIES_TOTAL {
+            self.list.push(entry);
+        } else {
+            self.left_out += 1;
+        }
     }
 }
 
 impl Extend<Entry> for Entries {
     fn extend<I: IntoIterator<Item = Entry>>(&mut self, iter: I) {
-        self.list.extend(iter);
+        for entry in iter {
+            self.push(entry);
+        }
     }
 }
 
