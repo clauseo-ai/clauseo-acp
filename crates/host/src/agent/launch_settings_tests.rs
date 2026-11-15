@@ -46,6 +46,7 @@ fn claude_meta(deny: &LaunchDeny, run: &Path, notes: &Path, matter: &Path) -> Ma
         program: matter,
         matter,
         ask_all: false,
+        ps_read: None,
     });
     session_meta(None, McpControl::Clauseo, guard, Some(&keys))
 }

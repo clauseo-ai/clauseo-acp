@@ -9,6 +9,7 @@ use clauseo_protocol::MatterId;
 
 use super::RunFolders;
 use crate::agent::data_fence;
+use crate::agent::loads::PsRead;
 
 /// The data folder canonicalised, then as configured when that differs; as configured alone
 /// when it does not resolve (the data-folder refusal has refused that launch already).
@@ -117,5 +118,15 @@ pub(super) fn remove_folders(run: &RunFolders) {
         if crate::write::is_real_dir(folder) {
             remove_tree(folder);
         }
+    }
+}
+
+/// The folders the guard's PowerShell read allowlist takes besides the matter: `run`'s work
+/// and notes folders and the data folder's spellings.
+pub(crate) fn ps_read(run: &RunFolders) -> PsRead<'_> {
+    PsRead {
+        work: &run.work,
+        notes: &run.notes,
+        data: &run.data_deny.spellings,
     }
 }

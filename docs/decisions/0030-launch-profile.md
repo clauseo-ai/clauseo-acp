@@ -752,6 +752,19 @@ change from the settings window as `ui` does. R24 (PR5) adds a third to the patc
   A forced-ask Claude launch with no guard hook to give (no guard program, as when
   `current_exe` failed, or a path that is not UTF-8) is refused with `agent.guard_missing`
   (#402; it was `agent.launch_failed` before).
+- **2026-11-15 (stage D, step 2 of the server-classifier plan): the PowerShell read
+  allowlist.** On Windows, outside forced ask, Claude's guard entry also passes `--ps-read` with
+  the session's work and notes folders and `<data>`'s spellings. For a `PowerShell` line of the
+  small grammar in `pre_write_guard/ps_read/parse.rs` (Get-ChildItem and Get-Content joined by
+  `;`, at most one `| Select-Object` each) whose every path resolves, by the network-safe walk,
+  into the matter folder or those two folders with no link below them (a listed folder's
+  entries, and with `-Recurse` its whole subtree, too), the guard answers `allow` with an
+  `updatedInput` command it writes itself: a fixed `Import-Module` of the Management module from
+  `$PSHOME`, then module-qualified cmdlets with full parameter names and `-LiteralPath
+  '<canonical path>'`. Anything else gets no output, so Claude Code's own path runs. Why: Claude
+  Code allows such lines itself and then hands them to the server classifier, which refuses many;
+  a hook allow skips both classifiers and Claude Code's path check (measured on 2.1.293), so the
+  guard does its own check, and the deny rules still apply to the rewritten text.
 - **2026-11-05 (orchestrator; accepted risk).** A `PermissionRequest` hook already in the
   lawyer's own settings or plugins can still approve in forced ask: Claude Code runs such hooks
   alongside the SDK's permission callback, and whichever decides first applies. The risk is

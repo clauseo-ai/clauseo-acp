@@ -155,6 +155,7 @@ fn the_guard_entry_is_appended_after_the_hooks_entries() {
         program: &program,
         matter: &matter,
         ask_all: false,
+        ps_read: None,
     });
     let entry = json!({
         "matcher": "Edit|Write|MultiEdit|NotebookEdit|Bash|PowerShell",
@@ -218,12 +219,56 @@ fn a_path_that_is_not_utf8_gets_no_entry() {
         program,
         matter,
         ask_all: false,
+        ps_read: None,
     };
     assert_eq!(guard_entry(hook(odd, plain)), None);
     assert_eq!(guard_entry(hook(plain, odd)), None);
     let guard = Some(hook(odd, plain));
     let meta = Value::Object(session_meta(None, McpControl::Clauseo, guard, None));
     assert_eq!(meta["claudeCode"]["options"].get("settings"), None);
+}
+
+/// With the PowerShell read allowlist's folders, the guard gets `--ps-read` and them after the
+/// matter; under forced ask it never does (forced ask answers `ask`, never `allow`).
+#[test]
+fn the_ps_read_folders_follow_the_matter_outside_forced_ask() {
+    let dir = std::env::temp_dir();
+    let (program, matter) = (dir.join("clauseo"), dir.join("Matters").join("Smith"));
+    let (work, notes) = (dir.join("d").join("run"), dir.join("d").join("notes"));
+    let data = [dir.join("d"), dir.join("D")];
+    let text = |path: &std::path::Path| path.to_str().unwrap().to_owned();
+    let hook = |ask_all| GuardHook {
+        program: &program,
+        matter: &matter,
+        ask_all,
+        ps_read: Some(super::PsRead {
+            work: &work,
+            notes: &notes,
+            data: &data,
+        }),
+    };
+    let args = |ask_all| guard_entry(hook(ask_all)).unwrap()["hooks"][0]["args"].clone();
+    assert_eq!(
+        args(false),
+        json!([
+            "--pre-write-guard",
+            "--matter",
+            text(&matter),
+            "--ps-read",
+            "--ps-work",
+            text(&work),
+            "--ps-notes",
+            text(&notes),
+            "--ps-data",
+            text(&data[0]),
+            "--ps-data",
+            text(&data[1]),
+        ])
+    );
+    assert_eq!(
+        args(true),
+        json!(["--pre-write-guard", "--matter", text(&matter), "--ask-all"])
+    );
 }
 
 #[test]

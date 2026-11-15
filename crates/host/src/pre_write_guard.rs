@@ -137,8 +137,11 @@
 //! A refusal is exit code 2 with the reason on stderr, which Claude Code and Codex both take as a
 //! block; stdout stays empty, so a login profile's output under Codex's `$SHELL -lc` cannot spoil
 //! it. Only Claude Code's entry in forced ask (`--ask-all`, `ask.rs`) writes stdout: its `ask`
-//! decision for every tool it does not refuse but the local reads. An unknown tool, or a known
-//! one with nothing held, is exit 0 with nothing written.
+//! decision for every tool it does not refuse but the local reads. Outside forced ask, with
+//! `--ps-read` (Claude Code on Windows), a `PowerShell` line it does not refuse that only lists
+//! or reads the matter's or the session's own files gets an `allow` with a command the guard
+//! writes itself (`ps_read.rs`). An unknown tool, or a known one with nothing held, is exit 0
+//! with nothing written.
 //!
 //! It fails open, a decision (clauseo-acp-private#162): input it cannot read (empty, cut short,
 //! not JSON), or a shape it does not know (no absolute `cwd` or `--matter`, no `tool_name` or
@@ -155,6 +158,7 @@
 mod ask;
 mod codex;
 mod names;
+mod ps_read;
 mod reach;
 mod shell;
 mod timings;
@@ -170,6 +174,10 @@ use serde_json::Value;
 use codex::{has_codex_part, in_codex_folder, patch_targets};
 // The data folder fence reads a command's `sh -c` scripts as this guard does
 // (`agent/data_fence/command.rs`).
+pub(crate) use ps_read::{
+    DATA_FLAG as PS_DATA_FLAG, FLAG as PS_READ_FLAG, NOTES_FLAG as PS_NOTES_FLAG,
+    WORK_FLAG as PS_WORK_FLAG,
+};
 use reach::Reach;
 pub(crate) use shell::script as shell_script;
 use shell::{shell_targets, walked_resolutions};
@@ -224,16 +232,28 @@ fn run_timed(
     };
     timings::mark("decide");
     let refused = matches!(found, Ok(Some(_)));
+    let passed = matches!(found, Ok(None));
     let (line, code) = match found {
         Ok(None) => (None, 0),
         Ok(Some(refusal)) => (Some(refusal.reason()), DENY),
         Err(ignored) => (Some(ignored.line()), 0),
     };
-    if !refused && ask::wanted(args) && ask::asks(&bytes) {
+    // Forced ask's `ask`, or else the PowerShell read allowlist's `allow` (`ps_read.rs`), never
+    // both: the allowlist answers only a tool nothing refused, outside forced ask.
+    let answer = if ask::wanted(args) {
+        (!refused && ask::asks(&bytes)).then(ask::decision)
+    } else if passed && args.iter().any(|arg| arg == ps_read::FLAG) {
+        let allow = ps_read::allow(args, &bytes);
+        timings::mark("allow");
+        allow
+    } else {
+        None
+    };
+    if let Some(answer) = answer {
         // As for `errors` below: when the agent stopped reading, nothing more can be done.
         drop(
             output
-                .write_all(ask::decision().as_bytes())
+                .write_all(answer.as_bytes())
                 .and_then(|()| output.write_all(b"\n"))
                 .and_then(|()| output.flush()),
         );

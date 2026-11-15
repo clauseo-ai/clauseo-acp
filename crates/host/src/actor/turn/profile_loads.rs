@@ -12,6 +12,7 @@ use clauseo_protocol::{AgentId, AgentKind, ErrorCode, ThreadId, ToolAvailability
 use serde_json::{Map, Value};
 
 use super::super::Actor;
+use super::launch_checks::folders::ps_read;
 use super::launch_checks::relay::CaseLaw;
 use super::launch_checks::{Prepared, RunFolders};
 use crate::agent::loads;
@@ -223,6 +224,9 @@ pub(super) fn session_loads(
             program,
             matter,
             ask_all: forced_ask,
+            // The PowerShell tool is Windows' (on by default there for some accounts); the
+            // allowlist answers only outside forced ask, for Claude.
+            ps_read: (cfg!(windows) && !forced_ask && claude.is_some()).then(|| ps_read(&run)),
         });
     // Without the guard's hook, a forced-ask session would rest on the ask rules alone, and a
     // hook that is missing fails open: refuse it.

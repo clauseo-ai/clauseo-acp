@@ -293,6 +293,18 @@ pub(crate) struct GuardHook<'a> {
     /// Forced ask (`agent/forced_ask.rs`): the hook runs before every tool, with
     /// [`ASK_ALL_FLAG`](crate::agent::forced_ask::ASK_ALL_FLAG) after the folder.
     pub(crate) ask_all: bool,
+    /// The PowerShell read allowlist's folders, for a Claude session on Windows outside forced
+    /// ask (`pre_write_guard/ps_read.rs`); `None` leaves it off.
+    pub(crate) ps_read: Option<PsRead<'a>>,
+}
+
+/// The folders the guard's PowerShell read allowlist needs besides the matter: the session's
+/// own work and notes folders, and `<data>`'s spellings (`LaunchDeny::spellings`).
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct PsRead<'a> {
+    pub(crate) work: &'a Path,
+    pub(crate) notes: &'a Path,
+    pub(crate) data: &'a [PathBuf],
 }
 
 /// The tools the pre-write guard's hook runs before: Claude Code's file tools (`MultiEdit` is
@@ -306,7 +318,9 @@ pub(crate) const GUARD_TIMEOUT_SECONDS: u64 = 10;
 
 /// The `PreToolUse` entry that runs `program` with [`pre_write_guard::FLAG`]
 /// (`crate::pre_write_guard`) and `--matter <matter>` before each of [`GUARD_MATCHER`]'s tools;
-/// with `ask_all`, before every tool (MCP tools included) and with `--ask-all` last.
+/// with `ask_all`, before every tool (MCP tools included) and with `--ask-all` last; else, with
+/// `ps_read`, `--ps-read` and its folders after the matter (`--ps-work <w> --ps-notes <n>`,
+/// then `--ps-data <spelling>` for each), left out when one of them is no UTF-8 string.
 /// The matter folder goes as an argument because the hook input's `cwd` follows the agent's
 /// `cd`. `None`, with a warning, when `program` or `matter` is no UTF-8 string: JSON cannot
 /// carry it, and a lossy copy could run another program or guard another folder.
@@ -328,6 +342,7 @@ pub(crate) fn guard_entry(guard: GuardHook<'_>) -> Option<Value> {
         program,
         matter,
         ask_all,
+        ps_read,
     } = guard;
     let (Some(command), Some(matter)) = (program.to_str(), matter.to_str()) else {
         tracing::warn!(
@@ -345,6 +360,7 @@ pub(crate) fn guard_entry(guard: GuardHook<'_>) -> Option<Value> {
         args.push(crate::agent::forced_ask::ASK_ALL_FLAG);
         crate::agent::forced_ask::EVERY_TOOL
     } else {
+        args.extend(ps_read.and_then(ps_read_args).unwrap_or_default());
         GUARD_MATCHER
     };
     Some(serde_json::json!({
@@ -356,6 +372,23 @@ pub(crate) fn guard_entry(guard: GuardHook<'_>) -> Option<Value> {
             "timeout": GUARD_TIMEOUT_SECONDS,
         }],
     }))
+}
+
+/// The guard's arguments for `ps_read` (`guard_entry`); `None` when a folder is no UTF-8
+/// string.
+fn ps_read_args(ps_read: PsRead<'_>) -> Option<Vec<&str>> {
+    use crate::pre_write_guard::{PS_DATA_FLAG, PS_NOTES_FLAG, PS_READ_FLAG, PS_WORK_FLAG};
+    let mut args = vec![
+        PS_READ_FLAG,
+        PS_WORK_FLAG,
+        ps_read.work.to_str()?,
+        PS_NOTES_FLAG,
+        ps_read.notes.to_str()?,
+    ];
+    for spelling in ps_read.data {
+        args.extend([PS_DATA_FLAG, spelling.to_str()?]);
+    }
+    Some(args)
 }
 
 /// Why `guard` gives no [`guard_entry`], as a kind fit for a log line (no path): `no_program`

@@ -591,7 +591,7 @@ mod packs;
 pub use packs::PackRequest;
 use packs::PackSkip;
 pub(super) use packs::{PackNotices, pack_notices};
-mod folders;
+pub(super) mod folders;
 use folders::{browser_run_dir, launch_deny, notes_dir, remove_tree, run_dir};
 mod paths;
 use paths::{LaunchPaths, launch_paths};
