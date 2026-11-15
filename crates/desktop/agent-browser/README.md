@@ -33,7 +33,7 @@ daemon started with streaming on is not reused by a CLI that has it off. This is
 upstream; if upstream takes it, macOS can go back to upstream's binary (the pin accepts an
 upstream url for any triple).
 
-`patches/0002-windows-pipe-and-hardening.patch` (Windows code paths only; 18 files, +2950/-151,
+`patches/0002-windows-pipe-and-hardening.patch` (Windows code paths only; 19 files, +2968/-155,
 most of it five new modules and their tests):
 - the CLI reaches the daemon over the named pipe `\\.\pipe\clauseo-ab-<128-bit random hex>`
   instead of loopback TCP, with four instances listening at once. `<session>.pipe` in the socket
