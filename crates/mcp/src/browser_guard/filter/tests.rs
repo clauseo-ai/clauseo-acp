@@ -1,10 +1,12 @@
 use serde_json::{Value, json};
 
+use super::keys::{TOOL_KEYS, UNSUPPORTED};
 use super::{
     BATCH_MESSAGE, EXTRA_ARGS_ALLOWED, MUST_BE_FALSE, READ_FETCH, READ_FETCH_KEYS, REFUSED_KEYS,
-    SCREENSHOT_PATH, TIMEOUT, Verdict, check, refusal_text,
+    SCREENSHOT_PATH, TIME_KEYS, Verdict, check, refusal_text, time_refusal,
 };
 
+mod keys;
 mod tools;
 
 fn call_tool(tool: &str, arguments: &Value) -> Value {
@@ -20,7 +22,8 @@ fn verdict(message: &Value) -> Verdict {
     check(message.to_string().as_bytes())
 }
 
-/// The refusal's name, or `None` when the line is forwarded unchanged.
+/// The refusal's name (its whole text when it is not "Clauseo does not allow <name> in the
+/// browser."), or `None` when the line is forwarded unchanged.
 fn refused(arguments: &Value) -> Option<String> {
     refused_on("agent_browser_open", arguments)
 }
@@ -40,7 +43,7 @@ fn refused_on(tool: &str, arguments: &Value) -> Option<String> {
             let name = words
                 .strip_prefix("Clauseo does not allow ")
                 .and_then(|rest| rest.strip_suffix(" in the browser."))
-                .unwrap();
+                .unwrap_or(words);
             Some(name.to_owned())
         }
         Verdict::Drop => panic!("a request is never dropped"),
@@ -81,6 +84,7 @@ fn every_refused_key_is_refused_whatever_its_value() {
     }
 }
 
+/// Keys match exactly: a near miss of a refused key is no refused key, and is off the pass list.
 #[test]
 fn keys_match_exactly() {
     for near in [
@@ -91,7 +95,11 @@ fn keys_match_exactly() {
         "screenshot_dir",
         "Headed",
     ] {
-        assert_eq!(refused(&json!({ near: "x" })), None, "{near}");
+        assert_eq!(
+            refused(&json!({ near: "x" })),
+            Some(UNSUPPORTED.to_owned()),
+            "{near}"
+        );
     }
 }
 
@@ -161,9 +169,24 @@ fn extra_args_take_only_the_short_list() {
         assert_eq!(refused(&json!({ "extraArgs": [token] })), None, "{token}");
     }
     assert_eq!(
-        refused(&json!({ "extraArgs": ["--json", "-i", "--full"] })),
+        refused(&json!({ "extraArgs": ["--json", "-q", "--quiet"] })),
         None
     );
+    // Not global flags: a positional on a command that does not read them (a screenshot file
+    // named `-i`, a read of `https://-i`); the typed keys do their work.
+    for token in ["-i", "--full", "--annotate", "--interactive", "-f"] {
+        for tool in [
+            "agent_browser_screenshot",
+            "agent_browser_read",
+            "agent_browser_snapshot",
+        ] {
+            assert_eq!(
+                refused_on(tool, &json!({"selector": "#a", "extraArgs": [token]})).as_deref(),
+                Some(token),
+                "{tool} {token}"
+            );
+        }
+    }
     for (tokens, name) in [
         (json!(["--headed"]), "--headed"),
         (json!(["--engine=lightpanda"]), "--engine"),
@@ -193,7 +216,7 @@ fn typed_strings_that_read_as_flags_are_refused() {
         (json!({"url": "--session"}), "--session"),
         (json!({"text": "--restore=saved"}), "--restore"),
         (json!({"values": ["ok", "-p"]}), "-p"),
-        (json!({"allowedDomains": ["--engine"]}), "--engine"),
+        (json!({"filter": ["--engine"]}), "--engine"),
         (
             json!({"deep": {"x": ["--screenshot-dir"]}}),
             "--screenshot-dir",
@@ -217,8 +240,16 @@ fn typed_strings_that_read_as_flags_are_refused() {
         "-a_b",
         "-é",
     ] {
-        assert_eq!(refused(&json!({ "text": fine })), None, "{fine:?}");
-        assert_eq!(refused(&json!({ "values": [fine] })), None, "{fine:?}");
+        assert_eq!(
+            refused_on("agent_browser_fill", &json!({ "text": fine })),
+            None,
+            "{fine:?}"
+        );
+        assert_eq!(
+            refused_on("agent_browser_select", &json!({ "values": [fine] })),
+            None,
+            "{fine:?}"
+        );
     }
     for (bad, name) in [
         ("--headed", "--headed"),
@@ -249,11 +280,14 @@ fn no_script_may_look_like_a_flag() {
 #[test]
 fn new_tab_and_webgpu_pass_only_as_false() {
     assert_eq!(MUST_BE_FALSE, ["newTab", "webgpu"]);
-    for key in ["newTab", "webgpu"] {
-        assert_eq!(refused(&json!({ key: false })), None, "{key}");
+    for (tool, key) in [
+        ("agent_browser_click", "newTab"),
+        ("agent_browser_open", "webgpu"),
+    ] {
+        assert_eq!(refused_on(tool, &json!({ key: false })), None, "{key}");
         for value in [json!(true), json!(null), json!("false"), json!(0)] {
             assert_eq!(
-                refused(&json!({ key: value })).as_deref(),
+                refused_on(tool, &json!({ key: value })).as_deref(),
                 Some(key),
                 "{key}"
             );
@@ -299,24 +333,46 @@ fn read_reads_only_the_open_page() {
     assert_eq!(refused(&json!({"url": "https://example.com/"})), None);
 }
 
+/// `timeoutMs`, and every other time in milliseconds, is capped at five minutes.
 #[test]
-fn timeout_is_capped_at_five_minutes() {
-    for good in [json!(1), json!(30_000), json!(300_000)] {
-        assert_eq!(refused(&json!({ "timeoutMs": good })), None, "{good}");
+fn times_are_capped_at_five_minutes() {
+    assert_eq!(
+        time_refusal("timeoutMs"),
+        "a timeoutMs other than a whole number up to 300000"
+    );
+    for key in TIME_KEYS {
+        for good in [json!(1), json!(30_000), json!(300_000)] {
+            assert_eq!(
+                refused_on(tool_of(key), &json!({ *key: good })),
+                None,
+                "{key} {good}"
+            );
+        }
+        for bad in [
+            json!(300_001),
+            json!(u64::MAX),
+            json!(1e12),
+            json!(-1),
+            json!("5"),
+            json!(1.5),
+        ] {
+            assert_eq!(
+                refused_on(tool_of(key), &json!({ *key: bad })),
+                Some(time_refusal(key)),
+                "{key} {bad}"
+            );
+        }
     }
-    for bad in [
-        json!(300_001),
-        json!(u64::MAX),
-        json!(1e12),
-        json!(-1),
-        json!("5"),
-        json!(1.5),
-    ] {
-        assert_eq!(
-            refused(&json!({ "timeoutMs": bad })).as_deref(),
-            Some(TIMEOUT),
-            "{bad}"
-        );
+}
+
+/// A tool that takes `key`.
+fn tool_of(key: &str) -> &'static str {
+    match key {
+        "waitTimeoutMs" => "agent_browser_wait_for_text",
+        "ms" => "agent_browser_wait_ms",
+        "delayMs" => "agent_browser_type",
+        "readTimeoutMs" => "agent_browser_read",
+        _ => "agent_browser_open",
     }
 }
 
@@ -397,13 +453,19 @@ fn long_names_are_cut() {
 
 #[test]
 fn ordinary_calls_pass() {
-    for arguments in [
-        json!({}),
-        json!({"url": "https://sci.gov.in", "allowedDomains": ["sci.gov.in"], "timeoutMs": 5}),
-        json!({"selector": "#q", "text": "Section 138 -- cheque"}),
-        json!({"key": "-"}),
+    for (tool, arguments) in [
+        ("agent_browser_open", json!({})),
+        (
+            "agent_browser_open",
+            json!({"url": "https://sci.gov.in", "timeoutMs": 5}),
+        ),
+        (
+            "agent_browser_fill",
+            json!({"selector": "#q", "text": "Section 138 -- cheque"}),
+        ),
+        ("agent_browser_press", json!({"key": "-"})),
     ] {
-        assert_eq!(refused(&arguments), None, "{arguments}");
+        assert_eq!(refused_on(tool, &arguments), None, "{arguments}");
     }
 }
 
@@ -520,7 +582,15 @@ fn the_decision_record_lists_the_same_rules() {
         "- **`extraArgs` tokens allowed:** {}",
         listed(EXTRA_ARGS_ALLOWED)
     );
-    for line in [keys, must_be_false, tokens] {
+    let passed = TOOL_KEYS.iter().map(|(tool, keys)| {
+        let keys = if keys.is_empty() {
+            "none.".to_owned()
+        } else {
+            listed(keys)
+        };
+        format!("- `{tool}`: {keys}")
+    });
+    for line in [keys, must_be_false, tokens].into_iter().chain(passed) {
         assert!(
             record.lines().any(|l| l.trim_start() == line),
             "0029-browser.md lacks: {line}"

@@ -3,7 +3,7 @@
 use serde_json::{Value, json};
 
 use super::super::{
-    ALLOWED_TOOLS, LIVE_VIEW_TOOLS, UNAVAILABLE, UNKNOWN_TOOL, only_allowed_tools, without_eval,
+    ALLOWED_TOOLS, LIVE_VIEW_TOOLS, UNAVAILABLE, UNKNOWN_TOOL, advertised_tools, without_eval,
 };
 use super::{Verdict, call_tool, refused_on, verdict};
 
@@ -185,7 +185,7 @@ fn the_tool_list_keeps_only_allowed_tools() {
         {"name": "agent_browser_snapshot"},
         {"title": "no name"},
     ], "nextCursor": null}});
-    let only = only_allowed_tools(reply.to_string().as_bytes()).unwrap();
+    let only = advertised_tools(reply.to_string().as_bytes()).unwrap();
     let only: Value = serde_json::from_slice(&only).unwrap();
     assert_eq!(
         only,
@@ -197,14 +197,14 @@ fn the_tool_list_keeps_only_allowed_tools() {
     );
     let kept =
         json!({"jsonrpc": "2.0", "id": 4, "result": {"tools": [{"name": "agent_browser_open"}]}});
-    assert_eq!(only_allowed_tools(kept.to_string().as_bytes()), None);
+    assert_eq!(advertised_tools(kept.to_string().as_bytes()), None);
     for other in [
         json!({"jsonrpc": "2.0", "id": 5, "result": {"content": []}}),
         json!({"jsonrpc": "2.0", "id": 6, "error": {"code": -1, "message": "x"}}),
     ] {
-        assert_eq!(only_allowed_tools(other.to_string().as_bytes()), None);
+        assert_eq!(advertised_tools(other.to_string().as_bytes()), None);
     }
-    assert_eq!(only_allowed_tools(b"not json"), None);
+    assert_eq!(advertised_tools(b"not json"), None);
 }
 
 /// The profiles' reply loses "JavaScript eval, " wherever it sits, text or structured content;

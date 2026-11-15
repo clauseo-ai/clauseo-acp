@@ -23,6 +23,8 @@
 //!
 //! When Chrome dies the first time, the relay stops agent-browser too, answers each request in
 //! flight with an error, and the next call starts both again; the second time the guard exits 1.
+//! When agent-browser answers a call with its refusal of `--allowed-domains`, which would stick
+//! on its session, its stdout pump stops the browser as the idle stop does (`pumps.rs`).
 //! When the agent closes stdin, the guard asks a running agent-browser to close its browser (one
 //! `agent_browser_close` call, [`CLOSE_REQUEST`], whose reply is not relayed and stops nothing
 //! itself: the final stop follows), waits up to [`CLOSE_WAIT`] for that reply, closes the child's

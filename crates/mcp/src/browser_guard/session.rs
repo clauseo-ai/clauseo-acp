@@ -227,6 +227,7 @@ impl Shared {
                 sent: 0,
                 idle_since: now(),
                 restarted: false,
+                domain_restarts: 0,
                 sandbox_refused: None,
                 closing: false,
                 ended: false,
@@ -256,6 +257,9 @@ pub(crate) struct State {
     idle_since: Instant,
     /// Whether Chrome has died once already; a second death ends the guard.
     pub(crate) restarted: bool,
+    /// How often the guard has stopped the browser for agent-browser's refusal of
+    /// `--allowed-domains` (`relay/pumps.rs`): at most once per run.
+    pub(crate) domain_restarts: u32,
     /// Set once a running Chrome said its sandbox cannot start (`relay.rs`): no browser starts
     /// again, and each later call gets the sandbox's refusal; what Chrome said.
     pub(crate) sandbox_refused: Option<&'static str>,
@@ -279,7 +283,8 @@ pub(crate) enum Request {
     Profiles,
     /// An `agent_browser_close` call: its reply stops the browser (`relay.rs`).
     Close,
-    /// `tools/list`: its reply loses the tools the guard refuses (`filter::only_allowed_tools`).
+    /// `tools/list`: its reply loses the tools and argument keys the guard refuses
+    /// (`filter::advertised_tools`).
     List,
     /// Any other request (`ping`), relayed as read.
     Other,
