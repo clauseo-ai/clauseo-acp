@@ -11,9 +11,7 @@ use clauseo_connectors::MemoryStore;
 use clauseo_host::BlockListSeams;
 use clauseo_protocol::{AllowScope, CommandOutcome, HostCommand};
 
-use crate::egress_block::{
-    FIRST, LISTED, list, next_notice, no_fetch, open_session, real_proxy, start_host,
-};
+use crate::egress_block::{FIRST, LISTED, list, next_notice, no_fetch, real_proxy, start_host};
 
 /// A host with the list naming [`LISTED`], its sessions in matters `a` and then `others`, all
 /// on the real proxy; the matters and the app subscription.
@@ -35,9 +33,15 @@ fn host_with(
     let sites = Arc::clone(seams.allowed());
     let (host, sub) = start_host(dir, &proxy, 0, Some(seams), |_clock| {});
     crate::allowed_sites::wait_loaded(&sites);
-    let mut matters = vec![open_session(dir, &host, "a")];
-    for name in others {
-        matters.push(open_session(dir, &host, name));
+    // Every matter first: a new matter changes the fence between matters, which stops an idle
+    // agent (`actor/turn/idle/fence.rs`) and would close its proxy.
+    let names: Vec<&str> = std::iter::once("a").chain(others.iter().copied()).collect();
+    let matters: Vec<_> = names
+        .iter()
+        .map(|name| host.create_matter(name, &dir.folder(name, &[])))
+        .collect();
+    for matter in &matters {
+        crate::egress_block::session_in(&host, *matter);
     }
     (host, sub, proxy, matters)
 }

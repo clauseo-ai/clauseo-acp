@@ -69,8 +69,13 @@ fn handshake(name: &str) -> Vec<Value> {
     ]
 }
 
-fn text_of(lines: Vec<Value>) -> String {
-    lines.iter().map(|line| format!("{line}\n")).collect()
+fn text_of(lines: &[Value]) -> String {
+    let mut text = String::new();
+    for line in lines {
+        text.push_str(&line.to_string());
+        text.push('\n');
+    }
+    text
 }
 
 /// The thread's notices' kinds.
@@ -101,7 +106,7 @@ fn a_request_into_another_matter_is_rejected_noted_and_named_once() {
     lines.extend(ask("two", &lease));
     lines.push(json!({"respond": {"to": "p1", "result": {"stopReason": "end_turn"}}}));
     let file = folder.with_file_name("other-matter-told.jsonl");
-    write::write(&file, text_of(lines).as_bytes());
+    write::write(&file, text_of(&lines).as_bytes());
     dir.set_agents(&[(FAKE, Scenario::Written(file))]);
 
     let host = dir.start(0);
@@ -137,7 +142,7 @@ fn a_refused_read_in_another_matter_is_named_and_an_invited_one_is_not() {
     lines.extend(refused_read("t2", &deed));
     lines.push(json!({"respond": {"to": "p1", "result": {"stopReason": "end_turn"}}}));
     let file = folder.with_file_name("other-matter-refused-call.jsonl");
-    write::write(&file, text_of(lines).as_bytes());
+    write::write(&file, text_of(&lines).as_bytes());
     dir.set_agents(&[(FAKE, Scenario::Written(file))]);
 
     let host = dir.start(0);

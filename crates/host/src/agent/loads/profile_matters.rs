@@ -122,8 +122,11 @@ mod tests {
     fn every_matter_fits_a_roomy_budget() {
         let deny = launch(3);
         let (rules, left_out) = matter_rules_within(&deny, &|_| None, 0, 1 << 20);
-        assert!(left_out.is_empty());
-        assert!(unfenced_matters(&meta_with(&rules), &deny, true).is_empty());
+        assert_eq!(left_out, Vec::<MatterId>::new());
+        assert_eq!(
+            unfenced_matters(&meta_with(&rules), &deny, true),
+            Vec::<MatterId>::new()
+        );
     }
 
     /// The cap: the matters past the budget are left out, in the fence's order, and named.
@@ -142,6 +145,9 @@ mod tests {
         assert_eq!(left_out, expected);
         assert_eq!(unfenced_matters(&meta_with(&rules), &deny, true), left_out);
         // Off Windows nothing is named.
-        assert!(unfenced_matters(&meta_with(&rules), &deny, false).is_empty());
+        assert_eq!(
+            unfenced_matters(&meta_with(&rules), &deny, false),
+            Vec::<MatterId>::new()
+        );
     }
 }

@@ -1,6 +1,6 @@
 //! Claude's deny rules for a whole launch, matched as Claude Code matches them: every other
 //! matter's folder and every place of `<data>` that is not the session's own are denied, each
-//! spelling; the session's run folder, this matter's notes, its own tool results (a WebFetch's
+//! spelling; the session's run folder, this matter's notes, its own tool results (a `WebFetch`'s
 //! saved PDF among them), the plans folder and the matter folder are not.
 
 use std::path::{Path, PathBuf};
@@ -286,7 +286,7 @@ fn a_child_matter_stays_denied_inside_the_matters_own_allow() {
         &[data.as_path()],
     );
     let deny = LaunchDeny {
-        spellings: vec![data.clone()],
+        spellings: vec![data],
         own_reads: vec!["run/s1/work".to_owned(), "agent-state/m1/notes".to_owned()],
         matters: fence,
         ..LaunchDeny::default()

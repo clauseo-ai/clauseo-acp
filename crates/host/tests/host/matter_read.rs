@@ -66,6 +66,6 @@ fn an_invite_is_checked_logged_shown_and_kept_across_a_restart() {
         matter: other,
     });
     host.settle();
-    assert!(read_matters(&host, thread).is_empty());
+    assert_eq!(read_matters(&host, thread), Vec::<MatterId>::new());
     host.shutdown();
 }

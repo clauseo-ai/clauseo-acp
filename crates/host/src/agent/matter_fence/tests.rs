@@ -40,7 +40,7 @@ fn fence(root: &Path, own: &str, others: &[(&str, bool)]) -> MatterFence {
 }
 
 fn paths(fence: &MatterFence, n: usize) -> Vec<PathBuf> {
-    let mut paths = fence.others.get(n).unwrap().paths.clone();
+    let mut paths = fence.others[n].paths.clone();
     paths.sort();
     paths
 }
