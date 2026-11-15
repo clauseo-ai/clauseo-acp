@@ -54,7 +54,7 @@ pub(super) struct Rig {
     /// Inputs taken off the channel and held back.
     pub(super) held: Vec<Input>,
     pub(super) clock: ManualClock,
-    _dir: TempDir,
+    dir: TempDir,
 }
 
 impl Rig {
@@ -83,8 +83,7 @@ impl Rig {
 
     /// [`Rig::restart`] after a clean quit that never stopped the host (an idle quit, a logoff).
     pub(super) fn restart_unstopped(self, run: u16) -> Self {
-        drop(self.actor);
-        Self::open(self._dir, run, None)
+        Self::open(self.release(), run, None)
     }
 
     /// [`Rig::restart`], with the start-up load of `stream` failing as a corrupt store fails.
@@ -170,7 +169,7 @@ impl Rig {
             internal,
             held: Vec::new(),
             clock,
-            _dir: dir,
+            dir,
         };
         for _ in 0..100_000 {
             let _exit = rig.actor.settle();
@@ -545,14 +544,14 @@ impl Rig {
             let input = self.next("shutdown");
             self.actor.on_input(input);
         }
-        let Self {
-            actor,
-            mut pool,
-            _dir: dir,
-            ..
-        } = self;
-        pool.run_until(shutdown::close(actor)).unwrap();
-        dir
+        self.release()
+    }
+
+    /// Lets go of the threads and the store, as a process's end does, with no stop before it.
+    fn release(self) -> TempDir {
+        let mut pool = self.pool;
+        pool.run_until(shutdown::close(self.actor)).unwrap();
+        self.dir
     }
 }
 
