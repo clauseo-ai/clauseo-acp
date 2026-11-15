@@ -5,17 +5,20 @@
 //! these helpers.
 //!
 //! Inputs: `CLAUSEO_TEST_AGENT_BROWSER`, the agent-browser binary (CI's Linux job downloads the
-//! pinned one); `CLAUSEO_TEST_CHROME`, a Chrome, else `/usr/bin/google-chrome` or
-//! `/usr/bin/chromium`. Without agent-browser or a Chrome the tests say so on stderr and pass;
+//! pinned one); `CLAUSEO_TEST_CHROME`, a Chrome's executable, else `/usr/bin/google-chrome` or
+//! `/usr/bin/chromium` on Linux and `/Applications/Google Chrome.app/Contents/MacOS/Google Chrome`
+//! on macOS. Without agent-browser or a Chrome the tests say so on stderr and pass;
 //! with `CLAUSEO_TEST_AGENT_BROWSER` set, a missing Chrome fails them. With `CI` set Chrome runs
 //! with `--no-sandbox` (a wrapper script adds it): CI runs the tests under `no_new_privs`,
 //! where Chrome's setuid sandbox cannot start. That is this test harness only: the guard never
 //! passes `--no-sandbox` and refuses a Chrome whose sandbox cannot start (`chrome/sandbox.rs`);
 //! it never sees the wrapper's arguments, only the wrapper's path as Chrome's.
 //!
-//! Linux only: the process checks read `/proc`.
+//! Linux and macOS (W1's pipe on fds 3 and 4, and the peer check, against a real Chrome on
+//! each): the process checks read `/proc` on Linux and `ps` on macOS
+//! (`support::process_table`). `--no-sandbox` is Linux's alone: macOS's sandbox starts in CI.
 
-#![cfg(target_os = "linux")]
+#![cfg(any(target_os = "linux", target_os = "macos"))]
 #![expect(
     clippy::disallowed_methods,
     reason = "the real-Chrome test times its steps and waits for Chrome's downloads and exit"
@@ -58,9 +61,14 @@ pub(crate) fn binaries() -> Option<(PathBuf, PathBuf)> {
     let chrome = std::env::var_os("CLAUSEO_TEST_CHROME")
         .map(PathBuf::from)
         .or_else(|| {
-            ["/usr/bin/google-chrome", "/usr/bin/chromium"]
+            let defaults: &[&str] = if cfg!(target_os = "macos") {
+                &["/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"]
+            } else {
+                &["/usr/bin/google-chrome", "/usr/bin/chromium"]
+            };
+            defaults
+                .iter()
                 .map(PathBuf::from)
-                .into_iter()
                 .find(|path| path.is_file())
         })
         .expect("CLAUSEO_TEST_AGENT_BROWSER is set but no Chrome was found");
@@ -68,11 +76,11 @@ pub(crate) fn binaries() -> Option<(PathBuf, PathBuf)> {
 }
 
 /// The Chrome the guard starts: `chrome` itself, or a script that runs it, adding
-/// `--no-sandbox` under `CI`, and with `quiet` giving it a `DevTools` pipe that never brings a
-/// command (so it never answers the guard's `Browser.getVersion` and the guard stays in its wait
-/// for the answer).
+/// `--no-sandbox` under `CI` on Linux, and with `quiet` giving it a `DevTools` pipe that never
+/// brings a command (so it never answers the guard's `Browser.getVersion` and the guard stays in
+/// its wait for the answer).
 fn chrome_for(scratch: &Scratch, chrome: &Path, quiet: bool) -> PathBuf {
-    let ci = std::env::var_os("CI").is_some();
+    let ci = cfg!(target_os = "linux") && std::env::var_os("CI").is_some();
     if !ci && !quiet {
         return chrome.to_owned();
     }
@@ -380,10 +388,7 @@ fn a_guard_killed_while_chrome_starts_leaves_no_chrome() {
         let up = chrome_group(&scratch).is_some_and(|group| {
             session::group_members(group)
                 .iter()
-                .filter(|stat| {
-                    stat.rsplit_once(") ")
-                        .is_some_and(|(_, rest)| !rest.starts_with('Z'))
-                })
+                .filter(|process| !process.zombie)
                 .count()
                 >= 4
         });
@@ -419,13 +424,8 @@ fn chrome_group(scratch: &Scratch) -> Option<i32> {
     );
     processes()
         .into_iter()
-        .find(|pid| {
-            std::fs::read(format!("/proc/{pid}/cmdline")).is_ok_and(|cmd| {
-                cmd.split(|b| *b == 0)
-                    .any(|arg| arg.starts_with(flag.as_bytes()))
-            })
-        })
-        .and_then(group_of)
+        .find(|process| process.has_arg_starting(&flag))
+        .map(|process| process.group)
 }
 
 /// The code owner's repro (M1) with the real agent-browser and Chrome: guard A is killed once its

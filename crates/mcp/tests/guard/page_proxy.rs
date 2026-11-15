@@ -2,9 +2,9 @@
 //! Chrome test gives it to the guard as the session's egress proxy, so Chrome reaches the page
 //! only through it (the guard refuses local hosts, and Chrome uses no proxy bypass). It answers
 //! `GET http://page.test/...` itself, refuses `CONNECT` (Chrome's background hosts) and every
-//! other host with 403, and logs each request's target. Linux only, with `real_chrome.rs`.
+//! other host with 403, and logs each request's target. Linux and macOS, with `real_chrome.rs`.
 
-#![cfg(target_os = "linux")]
+#![cfg(any(target_os = "linux", target_os = "macos"))]
 
 use std::fmt::Write as _;
 use std::io::{BufRead, BufReader, Write};

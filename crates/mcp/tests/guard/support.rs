@@ -241,35 +241,120 @@ pub(crate) fn daemon_pid_file(socket_dir: &Path) -> Option<PathBuf> {
         })
 }
 
-/// Linux: the processes still running (zombies not counted) whose command line contains the
-/// test's scratch folder: the guard, its reaper, agent-browser and Chrome with every helper,
-/// whatever process group each is in. Each as `<pid> <command line>`.
-#[cfg(target_os = "linux")]
+/// The processes still running (zombies not counted) whose command line contains the test's
+/// scratch folder: the guard, its reaper, agent-browser and Chrome with every helper, whatever
+/// process group each is in. Each as `<pid> <command line>`.
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 pub(crate) fn left_in(scratch: &Path) -> Vec<String> {
-    let mut needle = scratch.as_os_str().as_encoded_bytes().to_vec();
-    needle.push(b'/');
+    let needle = format!("{}/", scratch.display());
+    process_table()
+        .into_iter()
+        .filter(|process| !process.zombie && process.mentions(&needle))
+        .map(|process| format!("{} {}", process.pid, process.line))
+        .collect()
+}
+
+/// One process, as the Unix tests read the process table ([`process_table`]).
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[derive(Debug)]
+pub(crate) struct Process {
+    pub(crate) pid: i32,
+    /// Its process group.
+    pub(crate) group: i32,
+    pub(crate) zombie: bool,
+    /// Its arguments, each whole (Linux: `/proc/<pid>/cmdline` split at its NULs); none on
+    /// macOS, where `ps` joins them.
+    args: Option<Vec<Vec<u8>>>,
+    /// Its arguments joined by spaces.
+    pub(crate) line: String,
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+impl Process {
+    /// Whether one of its arguments starts with `prefix`. From `ps`'s line (macOS), an
+    /// argument starts at the line's start or after a space.
+    pub(crate) fn has_arg_starting(&self, prefix: &str) -> bool {
+        match &self.args {
+            Some(args) => args.iter().any(|arg| arg.starts_with(prefix.as_bytes())),
+            None => format!(" {}", self.line).contains(&format!(" {prefix}")),
+        }
+    }
+
+    /// Whether one of its arguments is `arg`. From `ps`'s line (macOS), an argument is
+    /// what lies between spaces or the line's ends.
+    pub(crate) fn has_arg(&self, arg: &str) -> bool {
+        match &self.args {
+            Some(args) => args.iter().any(|each| each == arg.as_bytes()),
+            None => format!(" {} ", self.line).contains(&format!(" {arg} ")),
+        }
+    }
+
+    /// Whether one of its arguments contains `needle` (from `ps`'s line on macOS, the line).
+    pub(crate) fn mentions(&self, needle: &str) -> bool {
+        match &self.args {
+            Some(args) => args.iter().any(|arg| {
+                arg.windows(needle.len())
+                    .any(|window| window == needle.as_bytes())
+            }),
+            None => self.line.contains(needle),
+        }
+    }
+}
+
+/// Linux: every process in `/proc` whose `stat` is readable, zombies too.
+#[cfg(target_os = "linux")]
+pub(crate) fn process_table() -> Vec<Process> {
     let Ok(entries) = std::fs::read_dir("/proc") else {
         return Vec::new();
     };
     entries
         .flatten()
-        .filter_map(|entry| entry.file_name().to_str()?.parse::<u32>().ok())
+        .filter_map(|entry| entry.file_name().to_str()?.parse::<i32>().ok())
         .filter_map(|pid| {
             let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
             let (_, rest) = stat.rsplit_once(") ")?;
-            if rest.starts_with('Z') {
-                return None;
+            let fields: Vec<&str> = rest.split(' ').collect();
+            let cmdline = std::fs::read(format!("/proc/{pid}/cmdline")).unwrap_or_default();
+            Some(Process {
+                pid,
+                group: fields.get(2)?.parse().ok()?,
+                zombie: fields.first() == Some(&"Z"),
+                line: String::from_utf8_lossy(&cmdline).replace('\0', " "),
+                args: Some(cmdline.split(|b| *b == 0).map(<[u8]>::to_vec).collect()),
+            })
+        })
+        .collect()
+}
+
+/// macOS: every process `ps -ax` lists, zombies too, with its whole command line.
+#[cfg(target_os = "macos")]
+pub(crate) fn process_table() -> Vec<Process> {
+    let mut ps = Command::new("/bin/ps");
+    ps.args(["-axww", "-o", "pid=,pgid=,stat=,command="]);
+    let output = run(ps);
+    assert!(
+        output.status.success(),
+        "ps failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .filter_map(|line| {
+            let mut fields = [""; 3];
+            let mut rest = line.trim_start();
+            for field in &mut fields {
+                let (value, tail) = rest.split_once(char::is_whitespace).unwrap_or((rest, ""));
+                *field = value;
+                rest = tail.trim_start();
             }
-            let cmdline = std::fs::read(format!("/proc/{pid}/cmdline")).ok()?;
-            cmdline
-                .windows(needle.len())
-                .any(|window| window == needle.as_slice())
-                .then(|| {
-                    format!(
-                        "{pid} {}",
-                        String::from_utf8_lossy(&cmdline).replace('\0', " ")
-                    )
-                })
+            let [pid, group, stat] = fields;
+            Some(Process {
+                pid: pid.parse().ok()?,
+                group: group.parse().ok()?,
+                zombie: stat.starts_with('Z'),
+                args: None,
+                line: rest.to_owned(),
+            })
         })
         .collect()
 }
@@ -363,7 +448,7 @@ impl Guard {
     /// Writes the messages `make` gives (the n-th for `n`) as fast as the guard takes them,
     /// throwing its stdout away meanwhile, until a write fails or the guard has exited; then
     /// closes stdin and returns the exit status.
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
     pub(crate) fn flood(&mut self, mut make: impl FnMut(u64) -> Value) -> ExitStatus {
         let Self {
             child,
@@ -442,7 +527,7 @@ impl Guard {
     /// What the guard's stderr holds read but unused, and a second handle to it, for a failure's
     /// message to read the rest from on a thread of its own: a process the guard started may hold
     /// stderr open past the guard's exit.
-    #[cfg(target_os = "linux")]
+    #[cfg(unix)]
     pub(crate) fn stderr_handle(&mut self) -> (String, Option<std::fs::File>) {
         use std::os::fd::AsFd;
         let read = String::from_utf8_lossy(self.stderr.buffer()).into_owned();

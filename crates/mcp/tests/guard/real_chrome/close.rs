@@ -20,16 +20,10 @@ fn chrome_runs(scratch: &Scratch) -> (bool, bool) {
         scratch.cwd().join("chrome-profile-").display()
     );
     let mut piped = None;
-    for pid in processes() {
-        let Ok(cmd) = std::fs::read(format!("/proc/{pid}/cmdline")) else {
-            continue;
-        };
-        let args: Vec<&[u8]> = cmd.split(|b| *b == 0).collect();
-        if args.iter().any(|arg| arg.starts_with(flag.as_bytes())) {
-            let pipe = args.contains(&b"--remote-debugging-pipe".as_slice())
-                && !args
-                    .iter()
-                    .any(|arg| arg.starts_with(b"--remote-debugging-port"));
+    for process in processes() {
+        if process.has_arg_starting(&flag) {
+            let pipe = process.has_arg("--remote-debugging-pipe")
+                && !process.has_arg_starting("--remote-debugging-port");
             piped = piped.or(Some(pipe));
         }
     }
