@@ -232,7 +232,7 @@ pub(crate) fn claude_options(options: &mut Map<String, Value>, keys: &ClaudeKeys
         allowed.extend(clauseo_profile::claude::agent_browser_allowed().map(Value::String));
         disallowed.extend(clauseo_profile::claude::agent_browser_denied().map(Value::String));
     }
-    researcher_browser_tools(options, keys.browser);
+    super::subagents::subagent_options(options, keys.login, keys.web_search.on);
     if !disallowed.is_empty() {
         options.insert("disallowedTools".to_owned(), Value::Array(disallowed));
     }
@@ -266,24 +266,6 @@ pub(crate) fn claude_options(options: &mut Map<String, Value>, keys: &ClaudeKeys
         forced_ask_settings(&mut settings);
     }
     options.insert("settings".to_owned(), Value::Object(settings));
-}
-
-/// The researcher subagent's `tools` (`clauseo_profile::subagents::RESEARCHER`, under
-/// `options.agents`) lose any rule naming agent-browser, then gain agent-browser's allow rules
-/// when the session has the browser (`browser`). Without the agent or its `tools` list, nothing
-/// changes.
-fn researcher_browser_tools(options: &mut Map<String, Value>, browser: bool) {
-    let Some(Value::Array(tools)) = options
-        .get_mut("agents")
-        .and_then(|agents| agents.get_mut(clauseo_profile::subagents::RESEARCHER))
-        .and_then(|agent| agent.get_mut("tools"))
-    else {
-        return;
-    };
-    tools.retain(|rule| !rule.as_str().is_some_and(|r| r.contains("agent-browser")));
-    if browser {
-        tools.extend(clauseo_profile::claude::agent_browser_allowed().map(Value::String));
-    }
 }
 
 /// The size past which a launch's settings shed the data folder's variable forms from its shell
