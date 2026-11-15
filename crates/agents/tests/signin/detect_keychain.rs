@@ -25,6 +25,7 @@ use crate::support::{Fixture, claude, now};
 fn mac(label: &str, code: i32) -> (Fixture, PathBuf) {
     let mut fx = Fixture::new(label, "ok-after:0");
     fx.config.platform.os = Os::Darwin;
+    fx.config.signin.keychain_locked = Some(false);
     let record = fx.data.path().join("security-called");
     let program = fx.data.path().join("fake-security");
     fx.config.signin.security_program = Some(program);
