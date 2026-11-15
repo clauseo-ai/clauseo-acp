@@ -1,13 +1,14 @@
 // A Word document's comparison on the desk: the host's Word tool marks up its changes (blackline.ts), set as the
 // blackline sheet under the two times. While it runs the times stand with a line saying so; if it fails, a line says
-// why (with Try again where another try may mend it) over the sheet that says only that the file changed.
+// why (with Try again where another try may mend it) over the sheet that says only that the file changed. Shown, a
+// line over it for each thing the host says to know: a part not shown, hidden text, numbers that may differ.
 import { useEffect, useMemo, useSyncExternalStore, type ReactNode } from "react";
 import { MarkedHead, MarkedSheet, MarkLine } from "@clauseo/components/clauseo/version-page.tsx";
 import { markedDiffs } from "@clauseo/components/clauseo/versions-diff.ts";
 import { useVersionWords } from "@clauseo/components/lib/words-versions.ts";
 import { Button } from "@clauseo/components/ui/button.tsx";
 import { keyOf, type Blacklines, type MarkAsk } from "./blackline.ts";
-import { markFailedLine } from "./words.ts";
+import { markFailedLine, noticeLine } from "./words.ts";
 
 export function MarkedDesk({
   blacklines: b,
@@ -73,6 +74,9 @@ export function MarkedDesk({
       {mark.truncated && (
         <MarkLine text={w.v("This document is very long, so only part of it is shown.")} />
       )}
+      {mark.notices.map((n) => (
+        <MarkLine key={n} text={noticeLine(w.lang, n)} />
+      ))}
       <MarkedSheet title={title} diffs={diffs ?? []} />
     </>
   );

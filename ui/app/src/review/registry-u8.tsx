@@ -15,6 +15,7 @@ import {
 } from "../testing/stream-script.ts";
 import { FakeTransport } from "../transport/fake-transport.ts";
 import type {
+  BlacklineNotice,
   BlacklineParagraph,
   CheckpointKind,
   FileChange,
@@ -135,9 +136,13 @@ export type Matter = {
   openable?: boolean;
   /** preview_restore names these as locked, and the restore is refused with matter.file_locked (U9). */
   locked?: string[];
-  /** word_blackline's answer for a Word document compared with now: marked up (by default, whole), left unanswered,
-   * or refused with a code. */
-  mark?: "hold" | { truncated: boolean } | { refused: string; retryable: boolean };
+  /** word_blackline's answer for a Word document compared with now: marked up (by default, whole), with notices, left
+   * unanswered, or refused with a code. */
+  mark?:
+    | "hold"
+    | { truncated: boolean }
+    | { notices: BlacklineNotice[] }
+    | { refused: string; retryable: boolean };
   /** The lawyer accepted or rejected tracked changes in these files after the next turn: version cp6 (UC). */
   revisions?: FileChange[];
   /** The newest version is a restore to the turn's version three days ago, cp7, marked by the host. */
@@ -180,7 +185,9 @@ function marking(mark: Matter["mark"]): QueryResult | Promise<QueryResult> {
   if (mark === "hold") return new Promise<QueryResult>(() => {});
   if (mark !== undefined && "refused" in mark)
     return Promise.reject({ code: mark.refused, message: "", retryable: mark.retryable });
-  return { word_blackline: { paragraphs: MARKED_NOTICE, truncated: mark?.truncated ?? false } };
+  const truncated = mark !== undefined && "truncated" in mark && mark.truncated;
+  const notices = mark !== undefined && "notices" in mark ? mark.notices : [];
+  return { word_blackline: { paragraphs: MARKED_NOTICE, truncated, notices } };
 }
 
 /** The matter's history: its papers brought in three days ago, a turn of the conversation's that morning, the

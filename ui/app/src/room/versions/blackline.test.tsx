@@ -1,7 +1,8 @@
 // @vitest-environment happy-dom
 // A Word document compared with now: the host's Word tool marks up its changes (word_blackline), set as the blackline
 // sheet under the two times; a line while it runs; why it failed, over the sheet that says only that it changed, with
-// Try again only where another try may mend it; a line when the host cut the document short; a marking up kept for
+// Try again only where another try may mend it, and the Word tool's own refusals saying why; a line when the host cut
+// the document short, and one for each notice (a part not shown, hidden text); a marking up kept for
 // the same file and version, so coming back asks nothing; an answer that comes after the lawyer moved on, not shown;
 // and every other file on the sheet it had.
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
@@ -160,6 +161,55 @@ test("a document the host cut short says only part of it is shown, over the shee
   expect(lines()).toEqual([CUT]);
   expect(page()).not.toBeNull();
 });
+
+test("a document shown in part, or with hidden text, says so, a line for each notice, over the sheet", async () => {
+  h = await comparing(() => ({
+    word_blackline: {
+      ...MARKED.word_blackline!,
+      notices: ["part_not_shown", "hidden_text", "numbers_may_differ", "may_differ", "unknown"],
+    },
+  }));
+  expect(lines()).toEqual([
+    "Part of this document couldn't be marked up. The rest is below.",
+    "This document has text that Word hides. It's shown here like the rest.",
+    "Some numbers here may not match the ones Word shows.",
+    "Some of this may look different in Word.",
+    "Some of this may look different in Word.",
+  ]);
+  expect(page()?.querySelectorAll("[data-change]")).toHaveLength(2);
+  expect(fallback()).toBeNull();
+});
+
+test.each([
+  [
+    "blackline.nested_table",
+    "Clauseo couldn't compare these two versions because of a table inside a table. Open both in Word to compare them.",
+  ],
+  [
+    "blackline.cannot_compare",
+    "Clauseo couldn't compare these two versions. Open both in Word to compare them.",
+  ],
+  [
+    "blackline.not_readable",
+    "Clauseo couldn't read one of these versions. It may be damaged, or it may not be a Word document.",
+  ],
+  [
+    "blackline.too_large",
+    "This document is too large to mark up. Open both versions in Word to compare them.",
+  ],
+  [
+    "blackline.format_unknown",
+    "This version of Clauseo can't mark up these changes. Update Clauseo to see them.",
+  ],
+])(
+  "the Word tool's own refusal %s says why, with no Try again, over the sheet that says it changed",
+  async (code, line) => {
+    h = await comparing(() => Promise.reject(refusal(code, false)));
+    expect(lines()).toEqual([line]);
+    expect(h.button("Try again")).toBeNull();
+    expect(fallback()).not.toBeNull();
+  },
+);
 
 test("coming back to the same file and version shows the blackline kept, asking the host nothing again", async () => {
   // cp1's comparison names another file, so the sheet in view there is not the Word document's
