@@ -206,6 +206,35 @@ test("the list shows each change's author as recorded, its kind's label, its wor
   expect(panel()?.textContent).toContain("Accepting here accepts the change in the Word file too.");
 });
 
+test("a change in a header, a footer or a note says where it is, and a formatting change says so; Accept sends its ids", async () => {
+  // what the host lists for a file whose changes are all outside the body or formatting (stetdoc 0.9.3's ids)
+  const outside: Revision[] = [
+    rev([2], "format", "Reviewer"),
+    { ...rev([11], "insert", "Reviewer", "inserted"), place: "header_footer" },
+    { ...rev([12], "delete", "Reviewer", "deleted"), place: "header_footer" },
+    { ...rev([13], "insert", "Reviewer", "added"), place: "note" },
+    {
+      ...rev([14], "insert", "Reviewer", "added"),
+      place: "text_box" as Revision["place"] & string,
+    },
+  ];
+  h = await mount({ list: () => listOf(outside) });
+  await openChanges();
+  const place = (r: HTMLElement) => r.querySelector(".rd-change-place")?.textContent ?? null;
+  expect(rows().map(place)).toEqual([
+    null,
+    "In a header or footer",
+    "In a header or footer",
+    "In a footnote or endnote",
+    // a place from a newer host says nothing
+    null,
+  ]);
+  expect(rows()[0]?.querySelector(".rd-change-kind")?.textContent).toBe("Formatting changed");
+  expect(rows()[1]?.querySelector("ins")?.textContent).toBe("inserted");
+  await press(acceptOf(1));
+  expect(decisionsSent().map((c) => c.command.command.decide_revisions?.ids)).toEqual([[11]]);
+});
+
 test("Accept on one change sends its ids with the list's version, reads the list again, and says Accepted with Undo", async () => {
   h = await mount({
     list: (n) => (n === 1 ? listOf(FIRST) : listOf(FIRST.slice(0, 1).concat(FIRST.slice(2)), "v2")),

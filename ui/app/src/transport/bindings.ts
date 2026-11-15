@@ -5329,6 +5329,11 @@ export type Revision = {
 	/**  The paragraph it is in, as stetdoc names blocks (`p3` is the third paragraph). */
 	block: string,
 	/**
+	 *  Where it is when that is not the main text: a header or footer, a note or a comment.
+	 *  Missing for a change in the main text.
+	 */
+	place?: RevisionPlace,
+	/**
 	 *  The text inserted, deleted or moved, at most [`MAX_REVISION_TEXT_CHARS`] characters;
 	 *  missing for a change with no text (formatting).
 	 */
@@ -5374,6 +5379,17 @@ export type RevisionList = {
 	/**  How many changes the file holds, `revisions` and any past the cut. */
 	total: number,
 };
+
+/**  Where in a Word file a tracked change is, when it is not in the document's main text. */
+export type RevisionPlace = 
+/**  A header or a footer: stetdoc reports the two as one place. */
+"header_footer" | 
+/**  A footnote or an endnote. */
+"note" | 
+/**  The text of a comment. */
+"comment" | 
+/**  A value from a newer Clauseo that this version does not know. */
+"unknown";
 
 /**  What a run of a blackline paragraph is. */
 export type RunKind = 
