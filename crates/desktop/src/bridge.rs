@@ -271,6 +271,8 @@ impl Bridge {
             | HostQuery::GetSettings
             // The updater's state (0037): both windows show it.
             | HostQuery::GetUpdate
+            // How the last run ended (the room's notice): a flag, kinds, ids and counts.
+            | HostQuery::LastExit
             | HostQuery::ListAgents
             // H8's wall (#131): reads the folder's stats, and names files by refs.
             | HostQuery::ListPapers { .. }

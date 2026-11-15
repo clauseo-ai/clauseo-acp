@@ -140,8 +140,12 @@ pub(crate) fn stop_steps<R: Runtime>(app: &AppHandle<R>, after_host: impl FnOnce
         },
         // The host, then any egress proxy still open (`egress.rs`).
         || crate::egress::stop_host(app, cell.as_deref()),
-        // The log's queued lines go to the file before the exit skips the drops.
-        || host_log::flush_app(app),
+        // The log's queued lines go to the file before the exit skips the drops; then this run
+        // is marked closed, before any install or restart (`last_run.rs`).
+        || {
+            host_log::flush_app(app);
+            crate::last_run::closed(app);
+        },
         // After the host, whose last counts go in too.
         || {
             if let Some(counts) = app.try_state::<counts::CountsState>() {
@@ -287,7 +291,11 @@ pub(crate) fn stop_on_exit<R: Runtime>(app: &AppHandle<R>, exit: &Arc<Exit>) -> 
                 })
                 .is_ok()
         },
-        || host_log::flush_app(app),
+        // The OS ends the app now, a quit all the same (`last_run.rs`).
+        || {
+            host_log::flush_app(app);
+            crate::last_run::closed(app);
+        },
     )
 }
 
