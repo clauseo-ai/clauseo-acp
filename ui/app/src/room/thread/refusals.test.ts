@@ -26,7 +26,7 @@ const refused = (text: string, status: ToolCallStatus = "failed"): ToolCallEntry
 });
 
 const CHECK = "Claude's built-in safety check stopped this";
-const CARRY = "Nothing was changed, and Claude carries on another way.";
+const CARRY = "Nothing was changed.";
 
 test("a safety check block reads its rule's name in plain words, never the raw text", () => {
   const why = refusalWhy(

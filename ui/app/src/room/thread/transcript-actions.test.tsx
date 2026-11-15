@@ -137,7 +137,7 @@ test("a step Claude's safety check refused says why in plain words under its row
   const why = h.all("tool-call")[0]!.querySelector("[data-testid=tool-call-why]")?.textContent;
   expect(why).toBe(
     "Claude's built-in safety check stopped this: it looked like reaching files or systems Claude wasn't asked " +
-      "to use. Nothing was changed, and Claude carries on another way.",
+      "to use. Nothing was changed.",
   );
   expect(h.all("tool-call")[0]!.textContent).not.toMatch(/classifier|auto mode|Unauthorized/);
 });

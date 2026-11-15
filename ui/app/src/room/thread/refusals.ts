@@ -111,7 +111,7 @@ export function refusalOf(entry: ToolCallEntry): Refusal | null {
   return null;
 }
 
-const M = "Nothing was changed, and Claude carries on another way.";
+const M = "Nothing was changed.";
 const LINE: Readonly<Record<Looked, RefusalKey>> = {
   access: `Claude's built-in safety check stopped this: it looked like reaching files or systems Claude wasn't asked to use. ${M}`,
   outside_data: `Claude's built-in safety check stopped this: it looked like sending matter information somewhere outside. ${M}`,
