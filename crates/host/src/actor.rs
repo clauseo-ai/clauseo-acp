@@ -46,6 +46,7 @@ pub(crate) mod documents;
 mod folder_state;
 pub(crate) mod header_tools;
 pub(crate) mod input;
+pub(crate) mod last_exit;
 pub(crate) mod limits;
 mod locate;
 mod main_loop;
@@ -119,6 +120,8 @@ pub(crate) struct Actor {
     pub(crate) counts: Option<clauseo_counts::Counts>,
     /// The updater's machine, its tasks, timer and file thread (`update.rs`).
     pub(crate) update: update::UpdateHost,
+    /// How the last run ended, and the file actions recorded now (`last_exit.rs`).
+    pub(crate) last_exit: last_exit::LastExitHost,
     /// What to count once a command's commit is durable, by command (`counting.rs`).
     pub(crate) count_on_commit: BTreeMap<clauseo_protocol::CommandId, counting::OnCommit>,
     pub(crate) launcher: Arc<dyn Launcher>,
@@ -523,6 +526,7 @@ impl Actor {
             Input::BrowserPolicy(input) => browser_policy::on_input(self, input),
             Input::SkillPack(read) => settings::packs::on_read(self, *read),
             Input::Update(input) => update::on_input(self, input),
+            Input::Recorded(recorded) => last_exit::on_recorded(self, *recorded),
             Input::Connector(input) => connectors::on_input(self, *input),
             Input::Mcp(input) => mcp::on_input(self, *input),
             Input::Protection(done) => protection::work::on_done(self, *done),

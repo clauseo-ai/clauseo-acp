@@ -50,6 +50,8 @@ pub(crate) struct ConfigParts {
     pub(crate) idle: IdleStop,
     /// The sandbox seam (`with_sandbox`), if any.
     pub(crate) sandbox: Option<Sandbox>,
+    /// The last run did not quit through its own quit (`with_last_run_unclean`).
+    pub(crate) last_run_unclean: bool,
 }
 
 /// Tests: the cloud-only probe of every matter walk (`clauseo_matters::Settings::probe`;
@@ -121,6 +123,8 @@ impl From<HostConfig> for ConfigParts {
             folder_probes: config.folder_probes,
             counts: config.counts,
             search: config.search,
+            // Before `update` moves.
+            last_run_unclean: config.update.last_run_unclean,
             update: config.update,
             idle: config.idle,
             sandbox: config.sandbox,
@@ -138,4 +142,17 @@ pub(crate) struct UpdateSeams {
     /// The store's close reports a failure once it has closed (`with_failing_close`).
     #[cfg(feature = "test-support")]
     pub(crate) fail_close: bool,
+    /// The last run did not quit through its own quit (`HostConfig::with_last_run_unclean`).
+    pub(crate) last_run_unclean: bool,
+}
+
+impl HostConfig {
+    /// The run before this one did not quit through its own quit (default: it did): the desktop's
+    /// mark in the data folder was still there. `LastExit` says so, for the room's notice, with
+    /// the file actions the store says that run left unfinished.
+    #[must_use]
+    pub fn with_last_run_unclean(mut self, unclean: bool) -> Self {
+        self.update.last_run_unclean = unclean;
+        self
+    }
 }

@@ -9,13 +9,13 @@ use clauseo_counts::schema::Feature;
 use clauseo_matters::{Checkpoint, CheckpointOutcome, Undone};
 use clauseo_protocol::{
     CheckpointId, CheckpointKind, CheckpointRecorded, CommandOutcome, DomainEvent, Envelope,
-    ErrorCode, FileChoice, FileDecision, MatterId, MatterPath, OutsideEdits, StepUndone, StreamId,
-    ThreadId, TurnId,
+    ErrorCode, FileChoice, FileDecision, InterruptedKind, MatterId, MatterPath, OutsideEdits,
+    StepUndone, StreamId, ThreadId, TurnId,
 };
 
 use super::super::commands::{AfterCommand, CommandCtx};
 use super::super::input::{Input, MatterTag};
-use super::super::{Actor, Tag, counting};
+use super::super::{Actor, Tag, counting, last_exit};
 use super::out::Out;
 use super::{
     Holder, JobKind, LogFor, Then, TurnInput, TurnJob, TurnTag, came_back, end, failure, lost,
@@ -182,9 +182,35 @@ pub(super) fn on_log(
             Ok(())
         });
     match sent {
-        Ok(()) => send_undo(actor, thread, ask),
+        Ok(()) => record_then_send(actor, thread, ask),
         Err(error) => give_up(actor, thread, &ask, error),
     }
+}
+
+/// Records the undo with the files it puts back (`last_exit.rs`), then sends it once the record
+/// is durable. One that only keeps files touches none and is sent at once.
+fn record_then_send(actor: &mut Actor, thread: ThreadId, ask: UndoAsk) {
+    let files = ask.job.as_ref().map_or(0, |job| {
+        job.decisions
+            .iter()
+            .filter(|decision| decision.choice == FileChoice::Undo)
+            .count()
+    });
+    if files == 0 {
+        send_undo(actor, thread, ask);
+        return;
+    }
+    let files = u64::try_from(files).unwrap_or(u64::MAX);
+    let at = actor.now().wall;
+    let action = last_exit::action(
+        ask.matter,
+        InterruptedKind::Undo,
+        Some(files),
+        Some(thread),
+        at,
+    );
+    let then = move |actor: &mut Actor, _recorded: Result<(), Error>| send_undo(actor, thread, ask);
+    last_exit::record(actor, action, Box::new(then));
 }
 
 fn send_undo(actor: &mut Actor, thread: ThreadId, ask: UndoAsk) {

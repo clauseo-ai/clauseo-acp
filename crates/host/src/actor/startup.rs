@@ -70,6 +70,8 @@ pub(super) async fn open(
         super::limits::default_reader(&parts.effective, &parts.launcher, &parts.clock)
     });
     let browser_install = super::browser_install::BrowserInstall::for_wiring(&parts.wiring);
+    let last_exit =
+        super::last_exit::at_start(&store, parts.last_run_unclean, parts.clock.now().wall).await;
     let update = super::update::start(
         parts.update,
         parts.effective.locations().clone(),
@@ -98,6 +100,7 @@ pub(super) async fn open(
         wiring: parts.wiring,
         counts: parts.counts,
         update,
+        last_exit,
         count_on_commit: BTreeMap::new(),
         browser_install,
         browser_policy: super::browser_policy::PolicyCheck::default(),

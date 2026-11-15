@@ -9,6 +9,7 @@ mod idle_busy;
 mod idle_cap;
 mod idle_checks;
 mod idle_work;
+mod interrupted;
 mod last_chunk;
 mod leading;
 mod limit_read;
