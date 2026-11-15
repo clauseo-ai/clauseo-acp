@@ -109,6 +109,12 @@ export function askOf(lang: Lang, cal: Calendar, s: Snapshot, ask: Ask | null): 
               papers: quoted(kept),
             }),
     ].filter((x) => x !== null);
+    if (ask.file !== null)
+      return {
+        ...fileAskOf(lang, cal, v, name(ask.file), changes[0]?.change, kept.length > 0),
+        stays: stays.length === 0 ? null : stays.join(" "),
+        failed,
+      };
     // undoing a restore names the restore it takes back, by when it was made
     const undone = ask.undoes === null ? undefined : versionOf(s, ask.undoes);
     return {
@@ -154,6 +160,50 @@ export function askOf(lang: Lang, cal: Calendar, s: Snapshot, ask: Ask | null): 
     edited: ask.edited ?? new Set<string>(),
     failed,
   });
+}
+
+/** The restore dialog's words for putting one file back as it was at a version (Versions' per-file Restore): a copy
+ * there now is replaced and stays in Versions; a file gone comes back. change: what the preview says writing it does
+ * (modified: replaced, added: back), undefined when it writes nothing; kept: the file can't be restored. */
+function fileAskOf(
+  lang: Lang,
+  cal: Calendar,
+  v: Version,
+  paper: string,
+  change: FileChange["change"] | undefined,
+  kept: boolean,
+): RestoreAsk & { kind: "confirm" } {
+  return {
+    kind: "confirm",
+    act: "restore",
+    title:
+      v.day === cal.today
+        ? vt(lang, "Restore '{paper}' to how it was at {time} today?", {
+            paper,
+            time: timeOf(lang, v),
+          })
+        : vt(lang, "Restore '{paper}' to how it was at {time} on {date}?", {
+            paper,
+            time: timeOf(lang, v),
+            date: cal.words(lang, v.day, "date"),
+          }),
+    body:
+      change === "modified"
+        ? vt(
+            lang,
+            "This replaces '{paper}' as it is now. The copy you have now stays in Versions, so you can undo this.",
+            { paper },
+          )
+        : change !== undefined
+          ? vt(lang, "'{paper}' comes back as it was then. You can undo this.", { paper })
+          : kept
+            ? vt(lang, "Nothing will change.")
+            : vt(lang, "Nothing will change. '{paper}' already stands as it did then.", { paper }),
+    stays: null,
+    edited: [],
+    editedHead: null,
+    failed: null,
+  };
 }
 
 /** What an undo dialog asks about one turn's step: Versions' (askOf), and the thread's Undo for a step with a file
@@ -265,6 +315,18 @@ export function doneLine(lang: Lang, cal: Calendar, s: Snapshot, done: Done): st
             time,
             date,
             n: done.n,
+          });
+    }
+    case "restoredFile": {
+      const to = versionOf(s, done.to);
+      const time = to === undefined ? "" : timeOf(lang, to);
+      const paper = fileName(done.file);
+      return to === undefined || to.day === cal.today
+        ? vt(lang, "Restored {paper} to how it was at {time} today.", { paper, time })
+        : vt(lang, "Restored {paper} to how it was at {time} on {date}.", {
+            paper,
+            time,
+            date: cal.words(lang, to.day, "date"),
           });
     }
     case "undidRestore":

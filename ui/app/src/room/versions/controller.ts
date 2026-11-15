@@ -1,8 +1,8 @@
 // Versions' state for one open matter: the timeline, read from the matter's stream with the conversations' titles and
 // statuses (conversations.ts), and the lawyer's acts on it, each through the host: undo_step for one turn's change,
-// restore_version for a whole version, after preview_restore has said what it would write (undoing a restore too: the
-// dialog restores the version just before it and removes what the restore added), compare_versions for what differs
-// from the folder now. A small store the parts read with useSyncExternalStore: every change makes a new snapshot, and
+// restore_version for a whole version or one file of it, after preview_restore has said what it would write (undoing a
+// restore too: the dialog restores the version just before it and removes what the restore added), compare_versions
+// for what differs from the folder now. A small store the parts read with useSyncExternalStore: every change makes a new snapshot, and
 // only the host's answers, the view store's flushes and the lawyer's acts change it: no timer, no clock at rest.
 import type { ViewStore } from "../../store/store.ts";
 import type { StreamView } from "../../store/view.ts";
@@ -28,6 +28,7 @@ import {
   pageBack,
   previewRestore,
   refusedPreview,
+  scopeOf,
   unsavedOf,
   type Own,
   type Undid,
@@ -51,7 +52,7 @@ import {
   type Unsaved,
 } from "./state.ts";
 import { StepSeeker } from "./seeking.ts";
-import { newestUndo, timelineOf, undoable, undoesAsRestore, type VersionMeta } from "./timeline.ts";
+import { lookAt, newestUndo, timelineOf, undoable, type VersionMeta } from "./timeline.ts";
 
 export type { Ask, Done, Look, Snapshot, Unsaved };
 
@@ -252,28 +253,8 @@ export class VersionsController {
 
   /** Choosing a turn's version holds its conversation and pages back to its step, so Undo has its files. */
   #look(id: string | null): void {
-    const { history } = this.#snap.timeline;
-    const last = history.at(-1)?.id;
-    const at = id === null || id === last ? null : id;
-    // the newest version is now; a turn's, or a restore the host marked, stays picked, so the band can offer its Undo
-    const kind = id === null ? undefined : this.meta(id)?.kind;
-    const newest =
-      id !== null &&
-      id === last &&
-      (kind === "after_turn" || undoesAsRestore(this.#snap.timeline, this.#snap.restores, id))
-        ? id
-        : null;
-    const look: Look =
-      at === null
-        ? newest === null
-          ? { kind: "now" }
-          : { kind: "now", id: newest }
-        : {
-            kind: "back",
-            id: at,
-            comparing: this.#snap.look.kind === "back" && this.#snap.look.comparing,
-          };
-    this.#steps.hold(this.meta(at ?? newest ?? ""));
+    const look = lookAt(this.#snap.timeline, this.#snap.restores, this.#snap.look, id);
+    this.#steps.hold(this.meta(look.id ?? ""));
     this.#set({ look, done: null, failed: null, compare: null });
     if (look.kind === "back" && look.comparing) void this.#compare(look.id);
   }
@@ -370,23 +351,32 @@ export class VersionsController {
     this.#set({ ask: { ...ask, choices } });
   }
 
-  #preview = (id: string, undoes: string | null): Promise<RestorePreview | null> =>
-    previewRestore(this.#transport, this.matter, id, undoes);
+  #preview = (
+    id: string,
+    undoes: string | null,
+    file: string | null,
+  ): Promise<RestorePreview | null> =>
+    previewRestore(this.#transport, this.matter, id, undoes, file);
 
   /** Opens the restore dialog for a version, with what restoring it would write now; undoes: the restore this one
-   * takes back. Only the newest ask opens it. */
-  async askRestore(id: string, undoes: string | null = null): Promise<void> {
+   * takes back; file: the one file to put back (Versions' per-file Restore). Only the newest ask opens it. */
+  async askRestore(
+    id: string,
+    undoes: string | null = null,
+    file: string | null = null,
+  ): Promise<void> {
     this.#asked += 1;
     const asked = this.#asked;
+    const again = (p: string) => this.#preview(p, undoes, file);
     try {
-      const preview = await this.#preview(id, undoes);
+      const preview = await again(id);
       if (asked !== this.#asked || preview === null) return;
       this.#set({
-        ask: { act: "restore", id, preview, undoes, stage: "confirm", failed: null },
+        ask: { act: "restore", id, preview, undoes, file, stage: "confirm", failed: null },
         failed: null,
       });
     } catch (e) {
-      const ask = await refusedPreview(id, undoes, toHostError(e), (p) => this.#preview(p, undoes));
+      const ask = await refusedPreview(id, undoes, file, toHostError(e), again);
       if (asked === this.#asked) await this.#refused(toHostError(e).code, () => ask);
     }
   }
@@ -397,7 +387,7 @@ export class VersionsController {
     if (ask?.act !== "restore" || ask.stage !== "confirm" || this.#acting) return;
     this.#asked += 1;
     const asked = this.#asked;
-    this.#preview(ask.id, ask.undoes).then(
+    this.#preview(ask.id, ask.undoes, ask.file).then(
       (preview) => {
         const now = this.#snap.ask;
         if (asked !== this.#asked || preview === null) return;
@@ -490,20 +480,20 @@ export class VersionsController {
   }
 
   async #restore(ask: RestoreAsk): Promise<void> {
-    const { id, preview, undoes } = ask;
+    const { id, preview, undoes, file } = ask;
     // the conversation the lawyer is in records the restore too; a draft has none yet
     const thread = this.#thread;
     const outcome = await this.#act({
       restore_version: {
         matter: this.matter,
         checkpoint: id,
-        scope: "matter",
+        scope: scopeOf(file),
         ...(undoes === null ? {} : { undoes }),
         ...(thread === null ? {} : { thread }),
       },
     });
     if (outcome.kind === "refused") {
-      const again = (p: string) => this.#preview(p, undoes);
+      const again = (p: string) => this.#preview(p, undoes, file);
       await this.#refused(
         outcome.code,
         outcome.current ? () => lockedRestore(ask, outcome, again) : undefined,
@@ -511,9 +501,11 @@ export class VersionsController {
       return;
     }
     this.#finish(
-      undoes === null
-        ? { kind: "restored", to: id, n: preview.changes.length, outcome }
-        : { kind: "undidRestore", at: this.meta(id)?.ts ?? this.#snap.now },
+      undoes !== null
+        ? { kind: "undidRestore", at: this.meta(id)?.ts ?? this.#snap.now }
+        : file === null
+          ? { kind: "restored", to: id, n: preview.changes.length, outcome }
+          : { kind: "restoredFile", to: id, file, outcome },
       { checkpoint: outcome.kind === "wrote" ? outcome.checkpoint : null, turn: null },
     );
   }
@@ -586,14 +578,14 @@ export class VersionsController {
     const asked = this.#asked;
     let preview: RestorePreview | null;
     try {
-      preview = await this.#preview(ask.id, ask.undoes);
+      preview = await this.#preview(ask.id, ask.undoes, ask.file);
     } catch (e) {
       if (asked === this.#asked) await this.#refused(toHostError(e).code, () => ask);
       return;
     }
     if (asked !== this.#asked || preview === null) return;
-    const { act, id, undoes } = ask;
-    const next: RestoreAsk = { act, id, preview, undoes, stage: "confirm", failed: null };
+    const { act, id, undoes, file } = ask;
+    const next: RestoreAsk = { act, id, preview, undoes, file, stage: "confirm", failed: null };
     if (sameChanges(ask.preview, preview)) await this.#restore(next);
     else this.#set({ ask: next, failed: null });
   }

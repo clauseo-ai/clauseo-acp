@@ -27,8 +27,15 @@ type UndoAsk = {
   /** The host hasn't answered yet: Undo waits. */
   checking?: boolean;
 };
-/** A restore of the matter to a version, with what restoring it writes now; undoes: the restore it takes back. */
-type RestoreAsk = { act: "restore"; id: string; preview: RestorePreview; undoes: string | null };
+/** A restore of the matter to a version, with what restoring it writes now; undoes: the restore it takes back; file:
+ * the one file Versions' per-file Restore puts back, null for the whole matter. */
+type RestoreAsk = {
+  act: "restore";
+  id: string;
+  preview: RestorePreview;
+  undoes: string | null;
+  file: string | null;
+};
 
 /** What the restore dialog asks: to go ahead (failed: the code of a refusal that named no file, with Try again), or,
  * where a program holds a file, to close it and try again. */
@@ -61,6 +68,8 @@ export function inRowOrder(t: Timeline, id: string, paths: readonly string[]): s
 /** What the room last did, said under the band at now. */
 export type Done =
   | { kind: "restored"; to: string; n: number; outcome: Outcome }
+  /** One file put back as it was at a version, by Versions' per-file Restore. */
+  | { kind: "restoredFile"; to: string; file: string; outcome: Outcome }
   | { kind: "undidRestore"; at: Timestamp }
   | {
       kind: "undidChange";
@@ -74,11 +83,19 @@ export type Done =
 /** The restore a restored line's Undo takes back: only one the host wrote and marked on the matter's stream. A restore
  * that found nothing to write answers with a version that was already there, and has no marker. */
 export const restoreOf = (s: Snapshot, done: Done): string | null =>
-  done.kind === "restored" &&
+  (done.kind === "restored" || done.kind === "restoredFile") &&
   done.outcome.kind === "wrote" &&
   s.restores.has(done.outcome.checkpoint)
     ? done.outcome.checkpoint
     : null;
+
+/** The file a compared document's Restore this document puts back: a changed or removed one by its path, one moved or
+ * renamed since by its old path (it comes back there, and the new one stays). One added since wasn't there to bring
+ * back, and a change from a newer Clauseo isn't known: null. */
+export function restorable(f: FileChange): string | null {
+  if (f.change === "modified" || f.change === "deleted") return f.path;
+  return typeof f.change === "object" && "renamed" in f.change ? f.change.renamed.from : null;
+}
 
 /** Whether two previews would write the same: the same files, each changed the same way, and the same files removed. */
 export const sameChanges = (a: RestorePreview, b: RestorePreview): boolean =>

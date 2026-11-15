@@ -257,19 +257,23 @@ export function VersionBand({
   );
 }
 
-/** While comparing: which document, among those that differ from now, and how to read the marks. */
+/** While comparing: which document, among those that differ from now, what can be done with it, and how to read the
+ * marks. */
 export function CompareBar({
   docs,
   doc,
   onDoc,
   legend,
   unchanged,
+  action,
 }: {
   docs: readonly { id: string; label: string }[];
   doc: string;
   onDoc: (d: string) => void;
   legend: string;
   unchanged: string;
+  /** Optional: the act on the document chosen, beside the documents: Restore this document. */
+  action?: ReactNode;
 }) {
   const w = useVersionWords();
   return (
@@ -282,6 +286,7 @@ export function CompareBar({
           options={docs.map((d) => ({ value: d.id, label: d.label }))}
         />
       )}
+      {action}
       <p className="ver-legend">
         {legend !== "" && <Say>{legend}</Say>}
         <span className="ver-unchanged">
