@@ -18,7 +18,8 @@
 //! refused the same way.
 //!
 //! Websocket text frames from the client become NUL-ended messages on the pipe, and NUL-ended
-//! messages from the pipe become text frames (`devtools/frames.rs`, `devtools/nul.rs`), through
+//! messages from the pipe become text frames (`devtools/frames.rs`,
+//! `devtools/nul_framing.rs`), through
 //! [`routes::Routes`], which also carries the guard's own CDP traffic: the relay's commands
 //! ([`Devtools::command`]) and the guard's clients (`devtools/seam.rs`, the contract stage D's
 //! proxy-auth answer plugs into), attached and given their start commands before agent-browser
@@ -30,7 +31,7 @@
 mod frames;
 mod handshake;
 mod listen;
-mod nul;
+mod nul_framing;
 mod peer;
 #[cfg(any(target_os = "macos", test))]
 mod proc_info;
@@ -94,7 +95,7 @@ struct PipeLink(Arc<Core>);
 
 impl CdpLink for PipeLink {
     fn send(&self, message: &Value) -> io::Result<()> {
-        nul::write(
+        nul_framing::write(
             &mut *lock(&self.0.to_browser),
             message.to_string().as_bytes(),
         )
@@ -301,7 +302,7 @@ impl Core {
 
 /// Reads the browser's messages until its pipe ends, routing each.
 fn pump_browser(core: &Core, from_browser: Box<dyn Read + Send>) {
-    let mut reader = nul::Reader::new(from_browser);
+    let mut reader = nul_framing::Reader::new(from_browser);
     while let Ok(Some(message)) = reader.next() {
         let routed = lock(&core.routes).browser_message(&message);
         if routed.forward {
@@ -430,7 +431,9 @@ fn relay_client(
                 let routed = lock(&core.routes).client_message(&text);
                 match routed {
                     FromClient::Forward(text) => {
-                        if nul::write(&mut *lock(&core.to_browser), text.as_bytes()).is_err() {
+                        if nul_framing::write(&mut *lock(&core.to_browser), text.as_bytes())
+                            .is_err()
+                        {
                             return;
                         }
                     }

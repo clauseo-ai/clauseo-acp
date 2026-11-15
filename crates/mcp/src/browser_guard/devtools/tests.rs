@@ -13,7 +13,7 @@ use super::frames::{self, Message};
 use super::handshake::{self, Verdict};
 use super::routes::{FromBrowser, FromClient, Routes, ToGuard};
 use super::seam::{FIRST_ID, is_guard_id, next_guard_id};
-use super::{Devtools, nul};
+use super::{Devtools, nul_framing};
 
 const SECRET: &str = "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff";
 /// RFC 6455 section 1.3's example key and its accept value.
@@ -245,7 +245,7 @@ fn read_server_frame(bytes: &[u8]) -> (Vec<u8>, &[u8]) {
 fn nul_messages_come_whole_from_partial_reads() {
     let bytes = b"{\"id\":1}\0{\"method\":\"A.b\"}\0{\"id\":2,\"result\":{}}\0tail".to_vec();
     for step in [1, 3, 7, 100] {
-        let mut reader = nul::Reader::new(trickle(bytes.clone(), step));
+        let mut reader = nul_framing::Reader::new(trickle(bytes.clone(), step));
         assert_eq!(reader.next().unwrap().unwrap(), b"{\"id\":1}");
         assert_eq!(reader.next().unwrap().unwrap(), b"{\"method\":\"A.b\"}");
         assert_eq!(reader.next().unwrap().unwrap(), b"{\"id\":2,\"result\":{}}");
@@ -255,10 +255,10 @@ fn nul_messages_come_whole_from_partial_reads() {
             "bytes past the last NUL are no message"
         );
     }
-    let mut over = nul::Reader::with_max(trickle(vec![b'a'; 100], 10), 32);
+    let mut over = nul_framing::Reader::with_max(trickle(vec![b'a'; 100], 10), 32);
     assert!(over.next().is_err());
     let mut out = Vec::new();
-    nul::write(&mut out, b"{}").unwrap();
+    nul_framing::write(&mut out, b"{}").unwrap();
     assert_eq!(out, b"{}\0");
 }
 
@@ -377,13 +377,21 @@ fn a_root_fetch_event_goes_to_the_guard_and_to_agent_browser_only_after_its_own_
 
 /// The relay over a real loopback socket, with an in-memory browser. Returns the relay, the
 /// browser's view of what the guard writes, and the browser's writer.
-pub(super) fn relay() -> (Devtools, nul::Reader<io::PipeReader>, io::PipeWriter) {
+pub(super) fn relay() -> (
+    Devtools,
+    nul_framing::Reader<io::PipeReader>,
+    io::PipeWriter,
+) {
     let (browser_reads, guard_writes) = io::pipe().unwrap();
     let (guard_reads, browser_writes) = io::pipe().unwrap();
     let devtools = Devtools::start(Box::new(guard_writes), Box::new(guard_reads)).unwrap();
     // This test process stands in for agent-browser: it is let in as its own descendant.
     devtools.allow_descendants_of(std::process::id());
-    (devtools, nul::Reader::new(browser_reads), browser_writes)
+    (
+        devtools,
+        nul_framing::Reader::new(browser_reads),
+        browser_writes,
+    )
 }
 
 /// Sends `request` to the relay and returns its reply's first line, and the stream.
