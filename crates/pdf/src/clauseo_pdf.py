@@ -240,7 +240,7 @@ def render(doc, pg, opts):
 
 class Output:
     """A run's image writes: at most MAX_BYTES in all, counted as written (a write that would
-    pass the cap fails before it lands), and the files it opened, for `remove`."""
+    pass the cap fails before it lands), and the files it made, for `remove`."""
 
     def __init__(self):
         self.written, self.paths, self.file = 0, [], None
@@ -267,8 +267,12 @@ class Output:
                 image.save(self, fmt, **extra)
                 self.flush()
                 return
-            self.paths.append(path)
+            # Only a file this run made is removed on failure: one it overwrote stays, as
+            # poppler leaves it, and one it could not open was never its own.
+            new = not os.path.lexists(path)
             with open(path, "wb") as self.file:
+                if new:
+                    self.paths.append(path)
                 image.save(self, fmt, **extra)
         except OSError as err:
             reason = err.strerror or str(err)
