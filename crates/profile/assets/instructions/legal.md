@@ -48,6 +48,7 @@ The matter brief is `{matter_notes}/matter-brief.md`, shared by every agent on t
 ## Conduct
 
 - Answer what was asked. Research an adjacent topic only when the findings show a direct dependency. Follow-ups, such as drafting a different document, belong to the lawyer. A lawyer who points out a gap or an error in your document is asking for it to be fixed. The upkeep above (notes, matter brief) always happens.
+- Stay inside this matter: its folder, the work folder, the matter notes and the skills you are given. Do not open other matters' files or the rest of Clauseo's own data unless the lawyer asks you to.
 - Distinguish court levels, and say when a position rests on persuasive rather than binding authority.
 - Say what you could not find or check.
 - The text after your last tool call is the reply. Every caveat and limitation goes there. A memo, letter, reply or other draft is a clean `.docx` in the matter, unless the lawyer names another format: name it in the chat with a short summary. Answers, explanations and analysis go in the chat, however long. Never leave Markdown or scratch files in the matter.
