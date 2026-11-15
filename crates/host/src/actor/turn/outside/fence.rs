@@ -145,20 +145,21 @@ pub(crate) fn after_meta(
 }
 
 /// The words the limited notice falls back to, for a view that does not know its kind.
-const LIMITED_TEXT: &str =
-    "Claude's commands can't open this matter's files right now; it can still read and edit them.";
+const LIMITED_TEXT: &str = "Claude's commands can't reach some folders right now; it can still read and \
+    edit this matter's files.";
 
-/// Tells the lawyer, once while it lasts, that Claude's sandboxed commands can't open the
-/// matter (`MatterFence::own_shut`: the sandbox re-opens none of it), or that a deny was
-/// widened to a folder above the matter (`agent::loads::sandbox::deny_form`).
-fn tell_limited(actor: &mut Actor, thread: ThreadId, limited: bool) {
+/// Tells the lawyer, once while it lasts, that Claude's sandboxed commands can't reach some
+/// folders: the matter (`MatterFence::own_shut`: the sandbox re-opens none of it), or a folder
+/// above another matter's that its deny was widened to (`agent::loads::sandbox::deny_form`).
+/// Any other agent's launch passes `false`: it ends what Claude's last launch told.
+pub(crate) fn tell_limited(actor: &mut Actor, thread: ThreadId, limited: bool) {
     let Some(state) = actor.threads.get_mut(&thread).map(|entry| &mut entry.turn) else {
         return;
     };
     if std::mem::replace(&mut state.told_once.shell_limited, limited) || !limited {
         return;
     }
-    tracing::warn!(%thread, "Claude's commands can't open the matter this session");
+    tracing::warn!(%thread, "Claude's commands are kept out of some folders this session");
     let notice = Notice {
         level: NoticeLevel::Info,
         text: LIMITED_TEXT.to_owned(),

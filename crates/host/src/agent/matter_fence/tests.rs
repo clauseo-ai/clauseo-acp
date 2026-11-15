@@ -134,6 +134,21 @@ fn a_refused_path_names_the_innermost_other_matter_but_never_the_own() {
     assert_eq!(named("shelf/top.docx").as_deref(), Some("M1"));
     assert_eq!(named("shelf/own/draft.docx"), None);
     assert_eq!(named("elsewhere/x"), None);
+    // A name that only starts with a matter's is no part of it.
+    assert_eq!(named("shelf/bob/memo.docx").as_deref(), Some("M1"));
+}
+
+/// A path that only ends in a matter's spelling (`/mnt/<matter>/…`) is no part of it: names
+/// match whole from the root.
+#[cfg(unix)]
+#[test]
+fn a_path_ending_in_a_matters_spelling_is_not_in_it() {
+    let (_dir, root) = tree("mfence-suffix", &["own", "b", "data"]);
+    let fence = fence(&root, "own", &[("b", false)]);
+    let b = root.join("b/memo.docx");
+    assert!(innermost(&fence, &b).is_some());
+    let mounted = PathBuf::from(format!("/mnt{}", b.display()));
+    assert!(innermost(&fence, &mounted).is_none());
 }
 
 /// Names compare folded, the drive letter too, so another matter stored as `c:\clients` is the

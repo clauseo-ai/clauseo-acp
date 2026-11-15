@@ -359,10 +359,10 @@ open_data_enum! {
             /// How many more beyond `matters`.
             more: u32,
         },
-        /// Claude's sandboxed commands can't open this matter's files this session: another
-        /// matter this conversation is not invited into lies inside it, or another matter's
+        /// Claude's sandboxed commands can't reach some folders this session: another matter
+        /// this conversation is not invited into lies inside this one, or another matter's
         /// folder could only be denied through a folder above it. Claude's file tools still
-        /// read and edit them. Once a launch.
+        /// read and edit the matter. Once a launch.
         ShellLimited = "shell_limited",
         _ =>
         /// A kind from a newer Clauseo; written back as the plain string `kind`.
