@@ -208,7 +208,9 @@ wire_types! {
         Deliverable, ElicitationOutcome, ElicitationRequest, ElicitationResponse, ExpiryReason,
         PermissionAbout, PermissionChoice, PermissionKind, PermissionOption, Principal,
     },
-    blackline::{BlacklineParagraph, BlacklineRun, ParagraphChange, RunKind, WordBlackline},
+    blackline::{
+        BlacklineNotice, BlacklineParagraph, BlacklineRun, ParagraphChange, RunKind, WordBlackline,
+    },
     browser_install::{BrowserInstallFailure, BrowserInstallState},
     browser_policy::{BrowserPolicyState},
     command::{

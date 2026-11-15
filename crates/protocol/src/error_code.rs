@@ -363,6 +363,22 @@ error_codes! {
         Code's \"Can't access working directory\" in its answer to a startup request), though \
         the host found the folder there just before. Asking again can work once the folder is \
         back where the matter expects it.";
+    BlacklineNestedTable = "blackline.nested_table", retryable: false, meaning: "stetdoc could \
+        not compare the two versions because of a table inside a table cell (its compare \
+        refused the redline it made, `validation_failed`, over a cell), so nothing is shown; \
+        trying again gives the same answer.";
+    BlacklineCannotCompare = "blackline.cannot_compare", retryable: false, meaning: "stetdoc \
+        refused to compare the two versions (`validation_failed` or `unsupported`) for a reason \
+        other than a table inside a table, so nothing is shown; trying again gives the same \
+        answer.";
+    BlacklineNotReadable = "blackline.not_readable", retryable: false, meaning: "stetdoc could \
+        not read one of the two versions as a Word document (`malformed_input`, \
+        `corrupt_complement` or `unsupported_version`), so nothing is shown.";
+    BlacklineTooLarge = "blackline.too_large", retryable: false, meaning: "One of the two \
+        versions is past a size limit of stetdoc's (`limit_exceeded`), so nothing is shown.";
+    BlacklineFormatUnknown = "blackline.format_unknown", retryable: false, meaning: "stetdoc's \
+        view of the blackline is in a format this Clauseo does not know (a header other than \
+        `stet 1`, or none), so nothing is shown rather than a guess.";
     Unknown = "unknown", retryable: false, meaning: "A code from a newer Clauseo that this \
         version does not know. Never produced here.";
 }

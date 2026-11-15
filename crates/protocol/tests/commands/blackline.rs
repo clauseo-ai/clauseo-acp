@@ -2,8 +2,8 @@
 //! missing or `null` for the folder now, as for `CompareVersions`.
 
 use clauseo_protocol::{
-    BlacklineParagraph, BlacklineRun, HostQuery, ParagraphChange, QueryResult, RunKind,
-    WordBlackline,
+    BlacklineNotice, BlacklineParagraph, BlacklineRun, HostQuery, ParagraphChange, QueryResult,
+    RunKind, WordBlackline,
 };
 
 use super::fixtures::{checkpoint_id, matter_id, path, round_trips, v7_text};
@@ -70,6 +70,7 @@ fn a_word_blackline_answer_on_the_wire() {
             },
         ],
         truncated: false,
+        notices: Vec::new(),
     });
     round_trips(&answer);
     assert_eq!(
@@ -92,6 +93,43 @@ fn a_word_blackline_answer_on_the_wire() {
     assert!(read.truncated);
     assert_eq!(read.paragraphs[0].change, ParagraphChange::Unknown);
     assert_eq!(read.paragraphs[0].runs[0].kind, RunKind::Unknown);
+}
+
+/// The notices go on the wire by their snake-case names, left out when there are none (above); a
+/// notice from a newer Clauseo reads as `unknown`, and an answer without the field as none.
+#[test]
+fn a_word_blackline_answer_with_notices_on_the_wire() {
+    let answer = QueryResult::WordBlackline(WordBlackline {
+        paragraphs: Vec::new(),
+        truncated: false,
+        notices: vec![
+            BlacklineNotice::PartNotShown,
+            BlacklineNotice::HiddenText,
+            BlacklineNotice::NumbersMayDiffer,
+            BlacklineNotice::MayDiffer,
+        ],
+    });
+    round_trips(&answer);
+    assert_eq!(
+        serde_json::to_string(&answer).unwrap(),
+        concat!(
+            r#"{"word_blackline":{"paragraphs":[],"truncated":false,"notices":["#,
+            r#""part_not_shown","hidden_text","numbers_may_differ","may_differ"]}}"#
+        )
+    );
+    let later = r#"{"word_blackline":{"paragraphs":[],"truncated":false,"notices":["zz_later"]}}"#;
+    let QueryResult::WordBlackline(read) = serde_json::from_str::<QueryResult>(later).unwrap()
+    else {
+        panic!("not a word_blackline answer");
+    };
+    assert_eq!(read.notices, [BlacklineNotice::Unknown]);
+    let QueryResult::WordBlackline(none) = serde_json::from_str::<QueryResult>(
+        r#"{"word_blackline":{"paragraphs":[],"truncated":false}}"#,
+    )
+    .unwrap() else {
+        panic!("not a word_blackline answer");
+    };
+    assert_eq!(none.notices, []);
 }
 
 /// A run of `kind` with `text`.
