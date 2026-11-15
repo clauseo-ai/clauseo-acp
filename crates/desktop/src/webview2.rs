@@ -14,7 +14,9 @@
 //!   is too old) opens Microsoft's bootstrapper page ([`DOWNLOAD_URL`]) in the default browser,
 //!   then the app exits; "Close" (W7) exits.
 //! - If the task dialog fails, a plain message box (`MessageBoxW`) says the title, the main line
-//!   and the body, with OK, and the app exits as after "Close" (`dialog.rs` holds the choices).
+//!   and the body. When the runtime is missing its OK and Cancel take the task dialog's labels,
+//!   the download button (W6) and "Close" (W7), and OK opens the same page (#858); when it is
+//!   too old it has OK alone. The app then exits (`dialog.rs` holds the choices).
 //! - A version the runtime reports in a form we do not read lets the app start: Tauri tries the
 //!   runtime as it is, rather than this check refusing one that may work.
 //! - The installer fetches the runtime itself (`webviewInstallMode`, `downloadBootstrapper`), so

@@ -1,5 +1,8 @@
 use super::DOWNLOAD_URL;
-use super::dialog::{APP_ICON, CLOSE, DOWNLOAD, Next, buttons, main_icon, message_box_text, next};
+use super::dialog::{
+    APP_ICON, CLOSE, DOWNLOAD, MESSAGE_BOX_OK, Next, after_message_box, buttons, main_icon,
+    message_box_labels, message_box_text, next,
+};
 use super::version::{MINIMUM, Verdict, Version, verdict};
 use super::words::{MISSING_EN, MISSING_HI, TOO_OLD_EN, TOO_OLD_HI, Words, fits, words};
 use clauseo_protocol::Language;
@@ -304,6 +307,32 @@ fn the_icon_is_named_only_when_the_exe_holds_it() {
     assert_eq!(main_icon(false), None);
     // tauri-build's id, IDI_APPLICATION's value.
     assert_eq!(APP_ICON, 32512);
+}
+
+#[test]
+fn the_message_box_offers_the_download_with_the_task_dialogs_labels() {
+    // #858: the fallback offers the download too, in the words the task dialog uses.
+    assert_eq!(
+        message_box_labels(&MISSING_EN),
+        Some(("Download WebView2", "Close"))
+    );
+    assert_eq!(
+        message_box_labels(&MISSING_HI),
+        Some(("WebView2 डाउनलोड करें", "बंद करें"))
+    );
+    assert_eq!(message_box_labels(&TOO_OLD_EN), None);
+    assert_eq!(message_box_labels(&TOO_OLD_HI), None);
+    // IDOK's value.
+    assert_eq!(MESSAGE_BOX_OK, 1);
+    assert_eq!(
+        after_message_box(&MISSING_EN, MESSAGE_BOX_OK),
+        Next::Download
+    );
+    // IDCANCEL (Close, Esc, the title bar), or 0 for a box that failed.
+    assert_eq!(after_message_box(&MISSING_EN, 2), Next::Close);
+    assert_eq!(after_message_box(&MISSING_EN, 0), Next::Close);
+    // Too old: OK only closes.
+    assert_eq!(after_message_box(&TOO_OLD_EN, MESSAGE_BOX_OK), Next::Close);
 }
 
 #[test]
