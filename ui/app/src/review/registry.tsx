@@ -37,6 +37,7 @@ import { UD2_PLANS } from "./registry-ud2-plans.tsx";
 import { UC_ALL } from "./registry-uc-word.tsx";
 import { UC_TOOLNAMES } from "./registry-uc-toolnames.tsx";
 import { UC_TOOL_ROWS } from "./registry-uc-tool-rows.tsx";
+import { PLAIN_REFUSAL } from "./registry-plain-refusal.tsx";
 import { UC_CONVERSATION_SMALL_FIXES } from "./registry-uc-conversation-small-fixes.tsx";
 import { SAC } from "./registry-sac.tsx";
 import { NM } from "./registry-nm.tsx";
@@ -406,6 +407,7 @@ export const REGISTRY: readonly Entry[] = [
   ...UC_ALL,
   ...UC_TOOLNAMES,
   ...UC_TOOL_ROWS,
+  ...PLAIN_REFUSAL,
   ...UC_CONVERSATION_SMALL_FIXES,
   ...UC_MCP_CONFIRM,
   ...UC_MCP_IMPORT,
