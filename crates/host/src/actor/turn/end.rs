@@ -134,9 +134,7 @@ pub(super) fn on_prompt_done(
             if fallback {
                 current.limit_read = Some(LimitRead::default());
             }
-            let text = error.to_string();
-            let code = went_offline
-                .unwrap_or_else(|| sign_in::code_of(actor, error.code(), &text, error.rpc_data()));
+            let (code, text) = offline::failed_with(actor, went_offline, &error);
             End::failed(code, Some(text), None)
         }
     };

@@ -503,7 +503,7 @@ const UC_UNREACHABLE: Entry[] = [
   {
     id: "UC-534",
     words: firstLaunchWords(
-      "Setting up can't reach the download right now. It tries again by itself.",
+      "Clauseo can't reach the download right now. It tries again by itself.",
     ),
     screen: "first-launch/dl-offline",
     render: render({ first: true, events: [offline], online: true }),

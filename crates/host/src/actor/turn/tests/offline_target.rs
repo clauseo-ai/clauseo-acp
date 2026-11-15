@@ -39,10 +39,10 @@ const LOOPBACK: &str = "localhost,127.0.0.1,::1";
 
 /// A profile hook whose launch env is whatever the test put in it last.
 #[derive(Clone, Default)]
-struct EnvHook(Arc<Mutex<BTreeMap<OsString, OsString>>>);
+pub(super) struct EnvHook(Arc<Mutex<BTreeMap<OsString, OsString>>>);
 
 impl EnvHook {
-    fn set(&self, vars: &[(&str, String)]) {
+    pub(super) fn set(&self, vars: &[(&str, String)]) {
         let mut env = self.0.lock().unwrap();
         env.clear();
         env.extend(

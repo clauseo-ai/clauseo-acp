@@ -100,7 +100,9 @@ const QUIET: Entry[] = [
 const UNREACHABLE: Entry[] = [
   {
     id: "UC-530",
-    words: errorWords("Clauseo couldn't reach Claude. Try again."),
+    words: errorWords(
+      "Clauseo couldn't reach Claude. The answer so far is kept. Try again. If this keeps happening, ask your firm's IT.",
+    ),
     screen: "room/thread",
     render: () => (
       <RoomOver

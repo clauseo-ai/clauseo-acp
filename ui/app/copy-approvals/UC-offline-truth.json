@@ -1,7 +1,7 @@
 {
   "UC-530": {
-    "en": "Clauseo couldn't reach Claude. Try again.",
-    "hi": "Clauseo, Claude तक नहीं पहुँच सका। फिर से प्रयास करें।",
+    "en": "Clauseo couldn't reach Claude. The answer so far is kept. Try again. If this keeps happening, ask your firm's IT.",
+    "hi": "Clauseo, Claude तक नहीं पहुँच सका। अब तक का उत्तर रखा गया है। फिर से कोशिश करें। अगर ऐसा बार-बार हो, तो अपनी फ़र्म की IT टीम से पूछें।",
     "hi_status": "provisional",
     "hi_at": "2026-11-15",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
@@ -11,8 +11,8 @@
     "note": "agent.unreachable (offline truth): the agent couldn't get through to its service while the computer seemed online, so the turn failed; Try again under the answer, never Restart; Claude's, as U3-err-agent.quiet names Claude; ChatGPT's is UC-531"
   },
   "UC-531": {
-    "en": "Clauseo couldn't reach ChatGPT. Try again.",
-    "hi": "Clauseo, ChatGPT तक नहीं पहुँच सका। फिर से प्रयास करें।",
+    "en": "Clauseo couldn't reach ChatGPT. The answer so far is kept. Try again. If this keeps happening, ask your firm's IT.",
+    "hi": "Clauseo, ChatGPT तक नहीं पहुँच सका। अब तक का उत्तर रखा गया है। फिर से कोशिश करें। अगर ऐसा बार-बार हो, तो अपनी फ़र्म की IT टीम से पूछें।",
     "hi_status": "provisional",
     "hi_at": "2026-11-15",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
@@ -22,8 +22,8 @@
     "note": "agent.unreachable (offline truth): the agent couldn't get through to its service while the computer seemed online; Try again under the answer, never Restart"
   },
   "UC-532": {
-    "en": "Clauseo couldn't reach {name}. Try again.",
-    "hi": "Clauseo, {name} तक नहीं पहुँच सका। फिर से प्रयास करें।",
+    "en": "Clauseo couldn't reach {name}. The answer so far is kept. Try again. If this keeps happening, ask your firm's IT.",
+    "hi": "Clauseo, {name} तक नहीं पहुँच सका। अब तक का उत्तर रखा गया है। फिर से कोशिश करें। अगर ऐसा बार-बार हो, तो अपनी फ़र्म की IT टीम से पूछें।",
     "hi_status": "provisional",
     "hi_at": "2026-11-15",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
@@ -33,8 +33,8 @@
     "note": "agent.unreachable (offline truth): an agent of no kind by its name, as U6F-23 (agent.quiet's); Try again under the answer, never Restart"
   },
   "UC-533": {
-    "en": "Clauseo couldn't reach the AI. Try again.",
-    "hi": "Clauseo, AI तक नहीं पहुँच सका। फिर से प्रयास करें।",
+    "en": "Clauseo couldn't reach the AI. The answer so far is kept. Try again. If this keeps happening, ask your firm's IT.",
+    "hi": "Clauseo, AI तक नहीं पहुँच सका। अब तक का उत्तर रखा गया है। फिर से कोशिश करें। अगर ऐसा बार-बार हो, तो अपनी फ़र्म की IT टीम से पूछें।",
     "hi_status": "provisional",
     "hi_at": "2026-11-15",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
@@ -44,8 +44,8 @@
     "note": "agent.unreachable (offline truth): no name at all, as U6F-24 (agent.quiet's); Try again under the answer, never Restart"
   },
   "UC-534": {
-    "en": "Setting up can't reach the download right now. It tries again by itself.",
-    "hi": "सेटअप अभी डाउनलोड तक नहीं पहुँच पा रहा। यह अपने-आप फिर से कोशिश करेगा।",
+    "en": "Clauseo can't reach the download right now. It tries again by itself.",
+    "hi": "Clauseo अभी डाउनलोड तक नहीं पहुँच पा रहा। यह अपने-आप फिर से कोशिश करेगा।",
     "hi_status": "provisional",
     "hi_at": "2026-11-15",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",

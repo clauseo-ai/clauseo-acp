@@ -2,6 +2,7 @@
 // Plans (UD2) with Clauseo's document tools: one quiet line under the plan cards, as the first screen has it. The size
 // once under the cards while a plan is still to add; a failure's Try again through a ready plan, and none with none
 // ready; nothing from an older host. A failure leaves every card as it was.
+import { act } from "react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { stubFonts } from "../../room/thread/testing.ts";
 import type { PythonProgress, SetupEvent } from "../../transport/protocol.ts";
@@ -13,6 +14,7 @@ import {
   install,
   mountPlans,
   press,
+  settle,
   signIn,
   signed,
   unmount,
@@ -22,9 +24,24 @@ vi.mock("../../transport/window-title.ts", () => ({ setWindowTitle: () => {} }))
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 stubFonts();
 
+/** The window's network as online.ts reads it: the page's navigator.onLine, changed with its online / offline
+ * event. */
+const pageOnline = (online: boolean) =>
+  Object.defineProperty(navigator, "onLine", { configurable: true, get: () => online });
+const flip = async (online: boolean) => {
+  await act(async () => {
+    pageOnline(online);
+    window.dispatchEvent(new Event(online ? "online" : "offline"));
+  });
+  await settle();
+};
+const OFFLINE_WORDS = "You're offline. Setting up waits for the connection.";
+const UNREACHABLE = "Clauseo can't reach the download right now. It tries again by itself.";
+
 beforeEach(() => localStorage.clear());
 afterEach(async () => {
   await unmount();
+  Reflect.deleteProperty(navigator, "onLine");
 });
 
 const tools = (python: PythonProgress): SetupEvent => ({
@@ -78,4 +95,33 @@ test("failed with no plan ready: no Try again", async () => {
   });
   expect(line()).not.toBeNull();
   expect(document.querySelector('[data-testid="plans-tools-retry"]')).toBeNull();
+});
+
+test("document tools waiting with the window offline: the offline words, and nothing to press", async () => {
+  pageOnline(false);
+  await mountPlans({
+    first: [
+      ...CLAUDE_SIGNED,
+      tools({ waiting: { code: "agent.install_offline", hosts: [], log: [] } }),
+    ],
+  });
+  expect(line()?.dataset["state"]).toBe("waiting");
+  expect(line()?.textContent).toBe(OFFLINE_WORDS);
+  expect(line()?.querySelector("button")).toBeNull();
+});
+
+test("document tools waiting with the window online: the download can't be reached; the window's events flip the line both ways", async () => {
+  pageOnline(true);
+  await mountPlans({
+    first: [
+      ...CLAUDE_SIGNED,
+      tools({ waiting: { code: "agent.install_offline", hosts: [], log: [] } }),
+    ],
+  });
+  expect(line()?.textContent).toBe(UNREACHABLE);
+  expect(line()?.querySelector("button")).toBeNull();
+  await flip(false);
+  expect(line()?.textContent).toBe(OFFLINE_WORDS);
+  await flip(true);
+  expect(line()?.textContent).toBe(UNREACHABLE);
 });

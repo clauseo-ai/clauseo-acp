@@ -134,7 +134,7 @@ test("waiting with the window online: the line says the download can't be reache
   });
   expect(line()?.dataset["state"]).toBe("waiting");
   expect(line()?.textContent).toBe(
-    "Setting up can't reach the download right now. It tries again by itself.",
+    "Clauseo can't reach the download right now. It tries again by itself.",
   );
   expect(line()?.querySelector("button")).toBeNull();
   await setOnline(false);

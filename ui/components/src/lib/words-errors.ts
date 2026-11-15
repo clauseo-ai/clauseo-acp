@@ -349,7 +349,8 @@ export const ERROR_WORDS: Record<WordedCode, ErrorKey> = {
   "agent.quiet": "Claude stopped answering. Try again.",
   // the agent couldn't get through to its service while the computer seemed online (offline truth): Try again under
   // the answer, never Restart; provisional
-  "agent.unreachable": "Clauseo couldn't reach Claude. Try again.",
+  "agent.unreachable":
+    "Clauseo couldn't reach Claude. The answer so far is kept. Try again. If this keeps happening, ask your firm's IT.",
   // an import whose servers are too long to show whole in one confirm: nothing was added
   "mcp.import_too_large":
     "There are too many tools to import at once, so nothing was imported. Add them one at a time.",
@@ -446,9 +447,12 @@ const PLANNED: Partial<
   // the agent couldn't get through to its service while the computer seemed online (offline truth; see ERROR_WORDS):
   // Try again, never Restart; provisional
   "agent.unreachable": {
-    chatgpt: "Clauseo couldn't reach ChatGPT. Try again.",
-    named: "Clauseo couldn't reach {name}. Try again.",
-    nameless: "Clauseo couldn't reach the AI. Try again.",
+    chatgpt:
+      "Clauseo couldn't reach ChatGPT. The answer so far is kept. Try again. If this keeps happening, ask your firm's IT.",
+    named:
+      "Clauseo couldn't reach {name}. The answer so far is kept. Try again. If this keeps happening, ask your firm's IT.",
+    nameless:
+      "Clauseo couldn't reach the AI. The answer so far is kept. Try again. If this keeps happening, ask your firm's IT.",
   },
 };
 

@@ -52,8 +52,8 @@ export const HI = {
   "Setting up {name}…": "{name} सेट अप हो रहा है…",
   // agent.install_offline while the window says it is online: the download's address can't be reached, so not
   // "You're offline" (new; the plans' line and the document tools' line)
-  "Setting up can't reach the download right now. It tries again by itself.":
-    "सेटअप अभी डाउनलोड तक नहीं पहुँच पा रहा। यह अपने-आप फिर से कोशिश करेगा।",
+  "Clauseo can't reach the download right now. It tries again by itself.":
+    "Clauseo अभी डाउनलोड तक नहीं पहुँच पा रहा। यह अपने-आप फिर से कोशिश करेगा।",
 
   // the fine print, up front (design)
   "Your papers stay on this computer. {name} sees the parts it reads to answer you.":

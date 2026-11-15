@@ -63,7 +63,7 @@ export function ToolsLine({
     case "waiting":
       words =
         view.online === true
-          ? w("Setting up can't reach the download right now. It tries again by itself.")
+          ? w("Clauseo can't reach the download right now. It tries again by itself.")
           : errorWords(lang, "agent.install_offline");
       break;
     case "failed":

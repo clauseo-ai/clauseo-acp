@@ -314,19 +314,25 @@ export const U6F: Entry[] = [
   },
   {
     id: "UC-531",
-    words: errorWords("Clauseo couldn't reach ChatGPT. Try again."),
+    words: errorWords(
+      "Clauseo couldn't reach ChatGPT. The answer so far is kept. Try again. If this keeps happening, ask your firm's IT.",
+    ),
     screen: "room/thread",
     render: unreachableFailed("codex-acp"),
   },
   {
     id: "UC-532",
-    words: errorWords("Clauseo couldn't reach {name}. Try again."),
+    words: errorWords(
+      "Clauseo couldn't reach {name}. The answer so far is kept. Try again. If this keeps happening, ask your firm's IT.",
+    ),
     screen: "room/thread",
     render: unreachableFailed("gemini"),
   },
   {
     id: "UC-533",
-    words: errorWords("Clauseo couldn't reach the AI. Try again."),
+    words: errorWords(
+      "Clauseo couldn't reach the AI. The answer so far is kept. Try again. If this keeps happening, ask your firm's IT.",
+    ),
     screen: "room/thread",
     render: nameless("agent.unreachable"),
   },

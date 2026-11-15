@@ -23,6 +23,7 @@ mod offline_network;
 mod offline_quiet;
 mod offline_target;
 mod offline_truth;
+mod offline_truth_wait;
 mod order;
 mod own_cancel;
 mod own_restart;

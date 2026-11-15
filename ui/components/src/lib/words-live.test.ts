@@ -237,12 +237,12 @@ const PLANNED_LINES = [
   ],
   [
     "agent.unreachable",
-    "Clauseo couldn't reach ChatGPT. Try again.",
-    "Clauseo, ChatGPT तक नहीं पहुँच सका। फिर से प्रयास करें।",
-    "Clauseo couldn't reach gemini. Try again.",
-    "Clauseo, gemini तक नहीं पहुँच सका। फिर से प्रयास करें।",
-    "Clauseo couldn't reach the AI. Try again.",
-    "Clauseo, AI तक नहीं पहुँच सका। फिर से प्रयास करें।",
+    "Clauseo couldn't reach ChatGPT. The answer so far is kept. Try again. If this keeps happening, ask your firm's IT.",
+    "Clauseo, ChatGPT तक नहीं पहुँच सका। अब तक का उत्तर रखा गया है। फिर से कोशिश करें। अगर ऐसा बार-बार हो, तो अपनी फ़र्म की IT टीम से पूछें।",
+    "Clauseo couldn't reach gemini. The answer so far is kept. Try again. If this keeps happening, ask your firm's IT.",
+    "Clauseo, gemini तक नहीं पहुँच सका। अब तक का उत्तर रखा गया है। फिर से कोशिश करें। अगर ऐसा बार-बार हो, तो अपनी फ़र्म की IT टीम से पूछें।",
+    "Clauseo couldn't reach the AI. The answer so far is kept. Try again. If this keeps happening, ask your firm's IT.",
+    "Clauseo, AI तक नहीं पहुँच सका। अब तक का उत्तर रखा गया है। फिर से कोशिश करें। अगर ऐसा बार-बार हो, तो अपनी फ़र्म की IT टीम से पूछें।",
   ],
 ] as const;
 

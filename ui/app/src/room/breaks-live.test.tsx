@@ -339,7 +339,9 @@ test("a Codex turn failed with agent.unreachable: ChatGPT's line and Try again, 
   await h.settle();
   const row = h.one("turn-stopped");
   expect(row?.dataset["failure"]).toBe("agent.unreachable");
-  expect(row?.textContent).toBe("Clauseo couldn't reach ChatGPT. Try again.");
+  expect(row?.textContent).toBe(
+    "Clauseo couldn't reach ChatGPT. The answer so far is kept. Try again. If this keeps happening, ask your firm's IT.",
+  );
   expect(h.one("answer-try-again")).not.toBeNull();
   expect(h.one("restart")).toBeNull();
   expect(h.one("agent-stopped")).toBeNull();
@@ -472,7 +474,10 @@ test.each([
     "agent.folder_inaccessible",
     "ChatGPT couldn't open the matter's folder. Check that it's still there and hasn't been renamed, then Try again.",
   ],
-  ["agent.unreachable", "Clauseo couldn't reach ChatGPT. Try again."],
+  [
+    "agent.unreachable",
+    "Clauseo couldn't reach ChatGPT. The answer so far is kept. Try again. If this keeps happening, ask your firm's IT.",
+  ],
 ] as const)("a Codex thread's %s names ChatGPT on the step's row", async (code, said) => {
   const agent = "codex-acp";
   // on the Mac, where matter.folder_backslash's line says Finder

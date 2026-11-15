@@ -227,10 +227,10 @@ test("agent.unreachable (offline truth): no Restart, no time mark, no working li
   ] as const;
   for (const [agent, en, hi] of lines) {
     expect(errorWords("en", "agent.unreachable", agent)).toBe(
-      `Clauseo couldn't reach ${en}. Try again.`,
+      `Clauseo couldn't reach ${en}. The answer so far is kept. Try again. If this keeps happening, ask your firm's IT.`,
     );
     expect(errorWords("hi", "agent.unreachable", agent)).toBe(
-      `Clauseo, ${hi} तक नहीं पहुँच सका। फिर से प्रयास करें।`,
+      `Clauseo, ${hi} तक नहीं पहुँच सका। अब तक का उत्तर रखा गया है। फिर से कोशिश करें। अगर ऐसा बार-बार हो, तो अपनी फ़र्म की IT टीम से पूछें।`,
     );
   }
 });

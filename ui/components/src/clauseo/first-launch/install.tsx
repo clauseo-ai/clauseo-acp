@@ -209,7 +209,7 @@ export function installLine(
         kind: "wait",
         words:
           view.online === true
-            ? w("Setting up can't reach the download right now. It tries again by itself.")
+            ? w("Clauseo can't reach the download right now. It tries again by itself.")
             : errorWords(lang, "agent.install_offline"),
         pill: null,
         code: "agent.install_offline",
