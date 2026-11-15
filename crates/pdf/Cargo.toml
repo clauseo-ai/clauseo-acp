@@ -20,6 +20,11 @@ path = "src/bin/pdftoppm.rs"
 name = "pdfinfo"
 path = "src/bin/pdfinfo.rs"
 
-# No dependencies: std only. The rendering is the Python script's (src/clauseo_pdf.py), on the
-# runtime's pypdfium2 and Pillow.
+# No dependencies but `windows` on Windows. The rendering is the Python script's
+# (src/clauseo_pdf.py), on the runtime's pypdfium2 and Pillow.
 [dependencies]
+
+# Windows only: the interpreter in a kill-on-close Job Object (src/job.rs), with the workspace
+# line's features (Win32_Foundation, Win32_System_JobObjects).
+[target.'cfg(windows)'.dependencies]
+windows = { workspace = true }

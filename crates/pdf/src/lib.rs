@@ -17,13 +17,17 @@
 //! arguments as given. With no runtime it exits [`NOT_FOUND`], as a shell does for a missing
 //! command, so Claude Code's check finds no `pdftoppm` and says so.
 //!
-//! On Unix the program becomes the interpreter (`exec`); on Windows it waits for it and exits
-//! with its code.
+//! On Unix the program becomes the interpreter (`exec`): one process, so a signal sent to it
+//! (Claude Code's SIGTERM at its timeout) reaches Python itself. On Windows it waits for it in
+//! a Job Object that ends it when the launcher is killed (`job.rs`), and exits with its code.
 
 use std::ffi::{OsStr, OsString};
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
+
+#[cfg(windows)]
+mod job;
 
 /// The Python script both programs run: `pdftoppm` and `pdfinfo` over `pypdfium2` and Pillow.
 pub const SCRIPT: &str = include_str!("clauseo_pdf.py");
@@ -167,21 +171,47 @@ fn start(tool: Tool, command: &mut Command) -> ExitCode {
     ExitCode::from(NOT_FOUND)
 }
 
-/// Runs the interpreter and exits with its code ([`exit_byte`]).
-#[cfg(not(unix))]
+/// Runs the interpreter in a kill-on-close job (`job.rs`), held until it exits, and exits with
+/// its code ([`exit_byte`]). A job that cannot be made or joined is said on stderr; the
+/// interpreter still runs.
+#[cfg(windows)]
 #[expect(
     clippy::disallowed_methods,
     reason = "the launcher's one job is to run the interpreter and pass on its code"
 )]
 fn start(tool: Tool, command: &mut Command) -> ExitCode {
-    match command.status() {
-        Ok(status) => ExitCode::from(exit_byte(status.code())),
+    let job = job::Job::new();
+    let mut child = match command.spawn() {
+        Ok(child) => child,
         Err(error) => {
             say(&format!(
                 "{}: Clauseo's Python runtime did not start: {error}",
                 tool.name()
             ));
-            ExitCode::from(NOT_FOUND)
+            return ExitCode::from(NOT_FOUND);
+        }
+    };
+    let joined = match &job {
+        Ok(job) => job.assign(&child),
+        Err(error) => Err(std::io::Error::other(error.to_string())),
+    };
+    if let Err(error) = joined {
+        say(&format!(
+            "{}: Python runs outside a job: {error}",
+            tool.name()
+        ));
+    }
+    let status = child.wait();
+    // The job's handle closes only now, after the interpreter has exited.
+    drop(job);
+    match status {
+        Ok(status) => ExitCode::from(exit_byte(status.code())),
+        Err(error) => {
+            say(&format!(
+                "{}: Python's exit was not read: {error}",
+                tool.name()
+            ));
+            ExitCode::from(99)
         }
     }
 }
