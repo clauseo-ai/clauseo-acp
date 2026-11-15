@@ -115,7 +115,9 @@ pub(crate) fn append_part(text: &mut Value, part: &str) {
 /// invited matters' part appended to them, and the lawyer told of the matters the launch could
 /// not fence and those its Windows shell rules left out ([`tell_unfenced`]), and that Claude's
 /// sandboxed commands can't open the matter when a fenced matter lies inside it or `limited`
-/// (a deny widened to a folder above, `agent::loads::sandbox::deny_form`).
+/// (a deny widened to a folder above, `agent::loads::sandbox::deny_form`). Claude's alone:
+/// Codex's instructions and unfenced line go with its keys (`profile_loads::launch_keys`), and
+/// on Windows it has no shell rules to report.
 pub(crate) fn after_meta(
     actor: &mut Actor,
     thread: ThreadId,

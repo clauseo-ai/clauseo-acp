@@ -11,28 +11,39 @@
 //! A call's paths are kept from its start (its locations, `rawInput`'s paths and its command's
 //! path words, `data_fence::candidates`), since a failed update often names none. Paths and
 //! text are never logged.
+//!
+//! Claude Code's words drift between releases (a directory deny reads "File is in a directory
+//! that is denied by your permission settings."), so the words are not the only sign: a failed
+//! Read or Edit (a Write is one) on a path in a matter the conversation is not invited into is
+//! a refusal whatever it says (the deny is what stops it there; a missing file there offering
+//! the invite is harmless), and so is any failed call whose text names such a matter's folder.
+//! The words still count for the rest (a shell call's paths can't all be read).
 
 use std::path::{Path, PathBuf};
 
 use clauseo_protocol::{
-    ContentBlock, TextOrBlob, ThreadId, ToolCallContent, ToolCallStatus, ToolLocation,
+    ContentBlock, MatterId, TextOrBlob, ThreadId, ToolCallContent, ToolCallStatus, ToolKind,
+    ToolLocation,
 };
 
 use super::super::super::Actor;
 use super::super::current;
-use crate::agent::matter_fence::innermost;
+use crate::agent::matter_fence::{MatterFence, innermost};
 use crate::sent::CallFields;
 
 /// Words in a failed call's output that say it was refused: the OS's (`access is denied`,
 /// `permission denied`, `operation not permitted`) and Claude Code's permission rules'
-/// (`Permission to read … has been denied`).
-const PHRASES: [&str; 6] = [
+/// (`Permission to read … has been denied`, `File is in a directory that is denied by your
+/// permission settings.`, `File is covered by a Read deny rule in your permission settings
+/// and cannot be edited.`, Claude Code 0.3.293).
+const PHRASES: [&str; 7] = [
     "access is denied",
     "access denied",
     "permission denied",
     "operation not permitted",
     "has been denied",
     "was denied",
+    "your permission settings",
 ];
 
 /// Error codes that say the same, as whole words.
@@ -60,11 +71,20 @@ pub(in crate::actor::turn) fn seen(
     }
     let own = fence.own.first().cloned().unwrap_or_default();
     let found = paths(fields, &own);
-    let refused =
-        fields.status == Some(ToolCallStatus::Failed) && says_refused(fields.content, raw_output);
+    let failed = fields.status == Some(ToolCallStatus::Failed);
+    let refused = failed && says_refused(fields.content, raw_output);
+    let named_in_text = if failed {
+        names_fenced(fence, fields.content, raw_output)
+    } else {
+        None
+    };
     let Some(current) = current(actor, thread) else {
         return;
     };
+    if matches!(fields.kind, Some(ToolKind::Read | ToolKind::Edit)) {
+        current.told.file_calls.insert(acp_id.to_owned());
+    }
+    let file_call = current.told.file_calls.contains(acp_id);
     let kept = current
         .told
         .call_paths
@@ -75,10 +95,11 @@ pub(in crate::actor::turn) fn seen(
             kept.push(path);
         }
     }
-    if !refused {
+    if !failed {
         return;
     }
     let named = current.told.call_paths.remove(acp_id).unwrap_or_default();
+    current.told.file_calls.remove(acp_id);
     let Some(run) = actor
         .threads
         .get(&thread)
@@ -87,12 +108,60 @@ pub(in crate::actor::turn) fn seen(
         return;
     };
     let fence = &run.data_deny.matters;
-    let matter = named
-        .iter()
-        .find_map(|path| innermost(fence, path).map(|other| other.id));
+    let hit = named.iter().find_map(|path| innermost(fence, path));
+    let matter = match hit {
+        Some(other) if refused || (file_call && !other.invited) => Some(other.id),
+        _ => named_in_text,
+    };
     if let Some(matter) = matter {
         super::tell_other_matter(actor, thread, matter);
     }
+}
+
+/// The matter the conversation is not invited into whose folder (a spelling of it) a failed
+/// call's text or `rawOutput` names, followed by a separator or the end of a word; case folded,
+/// and on Windows `/` read as `\`.
+fn names_fenced(
+    fence: &MatterFence,
+    content: &[ToolCallContent],
+    raw_output: Option<&TextOrBlob>,
+) -> Option<MatterId> {
+    let fold = |text: &str| {
+        let text = text.to_lowercase();
+        if cfg!(windows) {
+            text.replace('/', "\\")
+        } else {
+            text
+        }
+    };
+    let texts: Vec<String> = texts(content, raw_output).map(|text| fold(&text)).collect();
+    // A name goes on past the folder with a letter, a digit, `_`, `-`, or a `.` before more.
+    let holds = |text: &str, folder: &str| {
+        text.match_indices(folder).any(|(at, _)| {
+            let mut rest = text.get(at + folder.len()..).unwrap_or_default().chars();
+            let goes_on = |c: char| c.is_alphanumeric() || matches!(c, '_' | '-');
+            match rest.next() {
+                None => true,
+                Some('.') => !rest.next().is_some_and(goes_on),
+                Some(c) => !goes_on(c),
+            }
+        })
+    };
+    fence
+        .others
+        .iter()
+        .filter(|other| !other.invited)
+        .find(|other| {
+            other
+                .spellings
+                .iter()
+                .filter_map(|s| s.to_str())
+                .any(|folder| {
+                    let folder = fold(folder);
+                    folder.len() > 3 && texts.iter().any(|text| holds(text, &folder))
+                })
+        })
+        .map(|other| other.id)
 }
 
 /// The paths `fields` name: each location (a matter path taken from `own`, the matter
@@ -126,11 +195,19 @@ fn paths(fields: &CallFields<'_>, own: &Path) -> Vec<PathBuf> {
 /// Whether a failed call's text content or `rawOutput` says it was refused ([`PHRASES`],
 /// [`CODES`]). A blob is not read.
 fn says_refused(content: &[ToolCallContent], raw_output: Option<&TextOrBlob>) -> bool {
+    texts(content, raw_output).any(|text| says(&text))
+}
+
+/// A call's text content and its inline `rawOutput`; a blob is not read.
+fn texts<'a>(
+    content: &'a [ToolCallContent],
+    raw_output: Option<&'a TextOrBlob>,
+) -> impl Iterator<Item = String> + 'a {
     let inline = |text: &TextOrBlob| match text {
         TextOrBlob::Inline(text) => Some(text.as_str().to_owned()),
         TextOrBlob::Blob(_) => None,
     };
-    let texts = content.iter().filter_map(|item| match item {
+    let texts = content.iter().filter_map(move |item| match item {
         ToolCallContent::Text { text } => inline(text),
         ToolCallContent::Content {
             content: ContentBlock::Text { text },
@@ -139,9 +216,7 @@ fn says_refused(content: &[ToolCallContent], raw_output: Option<&TextOrBlob>) ->
         | ToolCallContent::Diff { .. }
         | ToolCallContent::Unknown { .. } => None,
     });
-    texts
-        .chain(raw_output.and_then(inline))
-        .any(|text| says(&text))
+    texts.chain(raw_output.and_then(inline))
 }
 
 /// Whether `text` holds one of [`PHRASES`], or one of [`CODES`] as a whole word.
