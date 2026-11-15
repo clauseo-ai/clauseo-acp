@@ -7,7 +7,7 @@ use clauseo_protocol::{
     TextKind, Timestamp, TurnId, UserMessageEntry, UserMessageStatus, VersionRestored, ViewEntry,
 };
 
-use super::{carried, read, restores_after};
+use super::{Floor, carried, kept, read, restores_in};
 use crate::undo_note::NoteInput;
 
 fn v7(n: u8) -> uuid::Uuid {
@@ -87,7 +87,7 @@ fn step(n: u64, turn: TurnId, stop: StopReason, after: Option<CheckpointId>) -> 
         checkpoint_after: after,
         undone: false,
         usage: None,
-        ts: at(0),
+        ts: at(i64::try_from(n).unwrap()),
     })
 }
 
@@ -140,8 +140,10 @@ fn a_turn_counts_when_the_agent_answered_spoke_or_asked() {
     ];
     let (inputs, since) = told(&entries);
     assert_eq!(inputs, ["a.txt", "|", "b.txt", "|", "c.txt", "|", "d.txt"]);
-    // The last turn that carried it failed: no after checkpoint to read restores from.
+    // The last turn that carried it failed: no after checkpoint, so restores are read from the
+    // time it ended.
     assert_eq!(since, None);
+    assert_eq!(read(entries.iter()).ended, Some(at(11)));
     assert!(carried(entries.iter(), one));
     assert!(carried(entries.iter(), two));
     assert!(carried(entries.iter(), three));
@@ -166,6 +168,9 @@ fn a_turn_the_agent_never_took_leaves_the_note() {
     let (inputs, since) = told(&entries);
     assert_eq!(inputs, ["|", "a.txt"]);
     assert_eq!(since, Some(checkpoint(1)));
+    assert_eq!(read(entries.iter()).ended, Some(at(3)));
+    // No turn carried it yet: restores since the conversation was created are read.
+    assert_eq!(read(entries[3..].iter()).ended, None);
     assert!(!carried(entries.iter(), refused));
     assert!(!carried(entries.iter(), cancelled));
     // A turn whose step is not there yet did not.
@@ -213,19 +218,30 @@ fn restored(n: u64, checkpoint: CheckpointId, written: &[&str]) -> Envelope {
     )
 }
 
-/// A restore whose checkpoint the turn reused came before it; one that wrote nothing named is
-/// not told; the rest are, with the time they were logged.
+/// After the turn's checkpoint, a restore whose checkpoint the turn reused came before it; from a
+/// time, those logged earlier are left out. A restore that wrote nothing named is not told.
 #[test]
-fn restores_after_the_turn_s_checkpoint_are_told() {
+fn restores_from_the_floor_on_are_told() {
     let since = checkpoint(1);
     let log = [
         restored(1, since, &["a.txt"]),
         restored(2, checkpoint(2), &[]),
         restored(3, checkpoint(3), &["b.txt"]),
     ];
-    let restores = restores_after(&log, since);
+    let after: Vec<_> = log
+        .iter()
+        .filter(|envelope| kept(envelope, Floor::After(since)))
+        .cloned()
+        .collect();
+    let restores = restores_in(&after);
     assert_eq!(restores.len(), 1);
     assert_eq!(restores[0].checkpoint, Some(checkpoint(3)));
     assert_eq!(restores[0].back, [MatterPath::new("b.txt").unwrap()]);
     assert_eq!(restores[0].at, at(3));
+    let from_time: Vec<_> = log
+        .iter()
+        .filter(|envelope| kept(envelope, Floor::At(at(2))))
+        .map(|envelope| envelope.seq.get())
+        .collect();
+    assert_eq!(from_time, [2, 3]);
 }

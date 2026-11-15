@@ -92,6 +92,48 @@ fn a_restore_told_by_a_prompt_is_told_once_and_not_after_a_restart() {
     finish(host, events);
 }
 
+/// A new conversation, no prompt yet: brief.txt is changed outside Clauseo and restored, then
+/// the host restarts. No turn has carried the note, so the restores since the conversation was
+/// created are read from the matter's log: its first prompt tells the restore once.
+#[test]
+fn a_restore_before_a_new_conversation_s_first_prompt_survives_a_restart() {
+    let dir = Dir::new("undo_note_restore_new", &[]);
+    let idle = written(&dir, "restore-new-0", "claude-handshake.jsonl", Vec::new());
+    dir.set_agents(&[(CLAUDE, idle)]);
+    let host = dir.start(0);
+    let files = [("brief.txt", "draft\n")];
+    let (matter, thread, folder) = matter_with_thread(&dir, &host, "m", &files, CLAUDE);
+    crate::write::write(&folder.join("brief.txt"), b"changed\n");
+    let import = matter_events(&host, matter)
+        .checkpoint(CheckpointKind::Import)
+        .unwrap();
+    host.ok(HostCommand::RestoreVersion {
+        thread: None,
+        undoes: None,
+        matter,
+        checkpoint: import,
+        scope: RestoreRequest::Files {
+            paths: vec![MatterPath::new("brief.txt").unwrap()],
+        },
+    });
+    let brief = std::fs::read_to_string(folder.join("brief.txt")).unwrap();
+    assert_eq!(brief, "draft\n", "the restore put brief.txt back");
+    host.shutdown();
+
+    // Run 0's clock stands at its start (`Dir::clock`).
+    let restored = "Note from Clauseo: The lawyer restored brief.txt from Versions; it's back as \
+        of 2026-09-21 14:13 UTC. Read them again before relying on what you remember about them.";
+    let mut steps = answered("p1", &[restored, NEXT]).to_vec();
+    steps.extend(answered("p2", &[AFTER]));
+    let first = written(&dir, "restore-new-1", "claude-handshake.jsonl", steps);
+    dir.set_agents(&[(CLAUDE, first)]);
+    let host = dir.start(1);
+    let mut events = host.events(StreamId::Thread(thread));
+    ends(&host, &mut events, thread, NEXT);
+    ends(&host, &mut events, thread, AFTER);
+    finish(host, events);
+}
+
 /// Run 0: a turn edits brief.txt and is undone; the next prompt carries the note, the agent
 /// sends `update` and the lawyer cancels. The prompt after carries the note again unless
 /// `acted`, and so does the first prompt after a restart, by the rule the log is read by.
