@@ -16,7 +16,11 @@
 #   jurisdiction fails the job), the guard on the deploy copy, the migrations and the deploy.
 # - Secrets: CLOUDFLARE_API_TOKEN, and optionally CLOUDFLARE_ACCOUNT_ID (unset: wrangler uses the
 #   one account the token can see). Both are set only on the steps that call Cloudflare, and
-#   GitHub masks them. No env value carries any other id.
+#   GitHub masks them. The deploy step also gets the variable ACCESS_TEAM and the secret
+#   ACCESS_DASH_EMAIL for the Access step (scripts/access.mjs), which finds or creates the two
+#   Access applications and passes the team and their AUD tags as `wrangler deploy --var`,
+#   masked. Without ACCESS_TEAM, or a token without the Access scopes, it deploys anyway and
+#   /dash and /v1/query stay 404. No env value carries any other id.
 # - Run logs on this public repo are public. Every wrangler call goes through
 #   scripts/deploy.mjs, which prints wrangler's output only through a redactor (UUIDs, 32-hex ids,
 #   emails, account names) and masks the database id once found. `check` prints only the canary's
@@ -154,4 +158,6 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          ACCESS_TEAM: ${{ vars.ACCESS_TEAM }}
+          ACCESS_DASH_EMAIL: ${{ secrets.ACCESS_DASH_EMAIL }}
         run: node scripts/deploy.mjs deploy

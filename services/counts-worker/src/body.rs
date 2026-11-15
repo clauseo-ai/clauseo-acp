@@ -19,6 +19,23 @@ pub(crate) fn check_headers(
     if !encoding.is_some_and(|value| value.eq_ignore_ascii_case("gzip")) {
         return Err(Refusal::Bad);
     }
+    check_length(length, cap)
+}
+
+/// `/v1/query`'s body: plain JSON (no `Content-Encoding`, or `identity`), within `cap` when its
+/// length is given.
+pub(crate) fn check_plain(
+    encoding: Option<&str>,
+    length: Option<&str>,
+    cap: usize,
+) -> Result<(), Refusal> {
+    if encoding.is_some_and(|value| !value.eq_ignore_ascii_case("identity")) {
+        return Err(Refusal::Bad);
+    }
+    check_length(length, cap)
+}
+
+fn check_length(length: Option<&str>, cap: usize) -> Result<(), Refusal> {
     if let Some(length) = length {
         let length: u64 = length.parse()?;
         if length > u64::try_from(cap)? {
@@ -150,5 +167,14 @@ mod tests {
         let mut cut = gzip(b"{\"days\":[]}");
         cut.truncate(cut.len() - 4);
         assert_eq!(inflate(&cut, 64_000), Err(Refusal::Bad));
+    }
+
+    #[test]
+    fn a_query_body_is_plain_and_fits_its_length() {
+        assert_eq!(check_plain(None, None, 16_000), Ok(()));
+        assert_eq!(check_plain(Some("identity"), Some("40"), 16_000), Ok(()));
+        assert_eq!(check_plain(Some("gzip"), None, 16_000), Err(Refusal::Bad));
+        assert_eq!(check_plain(None, Some("16001"), 16_000), Err(Refusal::Bad));
+        assert_eq!(check_plain(None, Some("x"), 16_000), Err(Refusal::Bad));
     }
 }

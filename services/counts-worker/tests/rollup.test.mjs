@@ -1,6 +1,7 @@
 // pnpm test (tests/rollup.test.mjs): the daily cron's fills under `wrangler dev --test-scheduled`,
 // against a fresh local D1, with rows dated from today's UTC clock. It fills only final, whole
-// weeks and months, a second run changes nothing, and the deletes run after the fills.
+// weeks and months, a second run changes nothing, the deletes run first and still run when a
+// fill fails, and each run's health lands in cron_status.
 
 import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
@@ -19,7 +20,15 @@ const quote = (value) => (value === null ? "NULL" : typeof value === "number" ? 
 const values = (rows) => rows.map((row) => `(${row.map(quote).join(", ")})`).join(", ");
 const report = (install, dayText, version, cells) =>
   [install, dayText, version, "stable", "macos", 15, "aarch64", "en", JSON.stringify(cells)];
-const cron = async () => assert.equal((await worker.send("/__scheduled?cron=0+3+*+*+*")).status, 200);
+const cron = async () => {
+  let response;
+  try {
+    response = await worker.send("/__scheduled?cron=0+3+*+*+*");
+  } catch (error) {
+    throw new Error(`the cron request failed (${error.message}); wrangler dev said:\n${worker.tail()}`);
+  }
+  assert.equal(response.status, 200);
+};
 const list = (installs) => installs.map((id) => `'${id}'`).join(", ");
 const snapshot = () => ({
   weeks: worker.sql("SELECT * FROM install_week ORDER BY install, week"),
@@ -148,4 +157,37 @@ test("a second run changes nothing, even if a report appeared in a filled week",
   worker.sql(`INSERT INTO report VALUES ${values([late])}`);
   await cron();
   assert.deepEqual(snapshot(), first);
+});
+
+test("a failing fill is counted in cron_status, and the deletes still run", async () => {
+  const health = () =>
+    Object.fromEntries(worker.sql(`SELECT step, ok, failed FROM cron_status WHERE day = '${day(0)}'`).map((row) => [row.step, row]));
+  const before = health();
+  assert.ok(before.delete.ok >= 1 && before.fill_week.ok >= 1 && before.fill_month.ok >= 1, "earlier runs were recorded");
+  assert.deepEqual(Object.keys(worker.sql("SELECT * FROM cron_status LIMIT 1")[0]).sort(), ["day", "failed", "ok", "step"]);
+  const old = uuid();
+  const fresh = uuid();
+  // A trigger makes the week fill fail as it inserts the new install's week; the month fill and
+  // the deletes are untouched.
+  worker.sql(
+    [
+      "CREATE TRIGGER no_fill BEFORE INSERT ON install_week BEGIN SELECT RAISE(ABORT, 'test'); END",
+      `INSERT INTO report VALUES ${values([
+        report(old, day(91), "8.0.3", { app_opened: [{ launch: "cold", n: 1 }] }),
+        report(fresh, day(monday), "8.0.3", { app_opened: [{ launch: "cold", n: 1 }] }),
+      ])}`,
+    ].join("; "),
+  );
+  try {
+    await cron();
+  } finally {
+    worker.sql("DROP TRIGGER no_fill");
+  }
+  assert.equal(worker.sql(`SELECT COUNT(*) AS n FROM install_week WHERE install = '${fresh}'`)[0].n, 0);
+  const after = health();
+  assert.equal(after.fill_week.failed, before.fill_week.failed + 1);
+  assert.equal(after.fill_week.ok, before.fill_week.ok);
+  assert.equal(after.fill_month.ok, before.fill_month.ok + 1);
+  assert.equal(after.delete.ok, before.delete.ok + 1);
+  assert.equal(worker.sql(`SELECT COUNT(*) AS n FROM report WHERE install = '${old}'`)[0].n, 0, "the expired report went");
 });

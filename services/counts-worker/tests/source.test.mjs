@@ -1,6 +1,6 @@
 // node --test tests/source.test.mjs (no wrangler needed): the Worker's source reads no request
-// header but Content-Encoding and Content-Length, and names no client address, no request
-// metadata and no logging, in any case.
+// header but Content-Encoding, Content-Length and Cf-Access-Jwt-Assertion, and names no client
+// address, no request metadata and no logging, in any case.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -19,7 +19,8 @@ function files(dir) {
 }
 
 const rust = files(join(root, "src")).filter((path) => path.endsWith(".rs"));
-const scanned = [...rust, ...files(join(root, "migrations")), join(root, "wrangler.toml"), join(root, "Cargo.toml")];
+const sql = files(join(root, "src")).filter((path) => path.endsWith(".sql"));
+const scanned = [...rust, ...sql, ...files(join(root, "migrations")), join(root, "wrangler.toml"), join(root, "Cargo.toml")];
 
 /** Strings the Worker's files must never hold, matched in any case. */
 export const FORBIDDEN = [
@@ -44,9 +45,16 @@ function forbiddenIn(text) {
   return FORBIDDEN.filter((word) => lower.includes(word.toLowerCase()));
 }
 
+/** The only request headers the source may name in `RequestHeader`, sorted. */
+export const ALLOWED_HEADERS = ["Cf-Access-Jwt-Assertion", "Content-Encoding", "Content-Length"];
+
+/** The one js_sys mention allowed, in webcrypto.rs's wasm_bindgen attribute. */
+const JS_SYS_PATH = "js_sys = worker::js_sys\n)]\nextern \"C\" {";
+
 /** Code that could reach a header, the request's metadata or the raw JS request another way. */
 const BANNED = [
-  [/\bcf\b/i, "the cf object or the Cf type"],
+  // The one allowed header's name starts with Cf-.
+  [/\bcf\b(?!-access-jwt-assertion\b)/i, "the cf object or the Cf type"],
   [/\.keys\s*\(/, ".keys()"],
   [/\.values\s*\(/, ".values()"],
   [/\.entries\s*\(/, ".entries()"],
@@ -67,7 +75,7 @@ const BANNED = [
 /**
  * Every way the Rust in `sources` ({ path: text }) could read a request header or the request's
  * metadata, outside comments, other than the one allowed: `glue.rs`'s `fn header`, which calls
- * `.headers().get(which.name())`, and `RequestHeader`, whose names are the two allowed.
+ * `.headers().get(which.name())`, and `RequestHeader`, whose names are the three allowed.
  */
 export function headerReads(sources) {
   const found = [];
@@ -88,19 +96,22 @@ export function headerReads(sources) {
     for (const impl of text.matchAll(/impl RequestHeader \{([\s\S]*?)\n\}/g)) {
       impls += 1;
       const names = [...impl[1].matchAll(/"([^"]*)"/g)].map((m) => m[1]).sort();
-      if (JSON.stringify(names) !== JSON.stringify(["Content-Encoding", "Content-Length"])) {
+      if (JSON.stringify(names) !== JSON.stringify(ALLOWED_HEADERS)) {
         found.push(`${path}: RequestHeader names ${JSON.stringify(names)}`);
       }
     }
+    // wasm-bindgen's path to js_sys in webcrypto.rs's extern block, which worker-build's
+    // WASM_BINDGEN_USE_JS_SYS needs, is the one js_sys allowed.
+    const scannedText = path.endsWith("webcrypto.rs") ? text.replace(JS_SYS_PATH, "") : text;
     for (const [pattern, what] of BANNED) {
-      if (pattern.test(text)) found.push(`${path}: ${what}`);
+      if (pattern.test(scannedText)) found.push(`${path}: ${what}`);
     }
   }
   if (impls !== 1) found.push(`${impls} impl RequestHeader blocks; there must be one`);
   return found;
 }
 
-test("the source reads only Content-Encoding and Content-Length", () => {
+test("the source reads only Content-Encoding, Content-Length and Cf-Access-Jwt-Assertion", () => {
   const sources = Object.fromEntries(rust.map((path) => [relative(root, path), readFileSync(path, "utf8")]));
   assert.deepEqual(headerReads(sources), []);
 });
@@ -123,6 +134,7 @@ test("the header check finds each planted way round it", () => {
     "the raw request": append("fn all(r: &Request) { r.inner(); }"),
     "the url": append("fn url(r: &Request) { r.url(); }"),
     "a JS cast": append("use worker::wasm_bindgen::JsCast;"),
+    "js_sys outside webcrypto.rs's attribute": append("use worker::js_sys::Reflect as R;"),
     "a glob import": append("use worker::*;"),
     "headers in another file": null,
     "no RequestHeader": good.replace("impl RequestHeader {", "impl Header {"),

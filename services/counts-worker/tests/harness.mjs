@@ -138,17 +138,21 @@ async function freePort() {
 
 /**
  * The Worker under `wrangler dev --local --test-scheduled`, with a fresh local D1 that has the
- * migrations applied, from `config` (a wrangler config in this folder). `post`, `send`, `sql` and
- * `object` (an R2 object's text) talk to it; `stop` ends it and deletes its D1 and R2.
+ * migrations applied, from `config` (a wrangler config in this folder), and `vars` passed as
+ * `--var` (the Access settings, for the read routes). `post`, `send`, `sql`, `object` (an R2
+ * object's text) and `rowsRead` talk to it; `stop` ends it and deletes its D1 and R2.
  */
-export async function startWorker({ config = "wrangler.toml" } = {}) {
+export async function startWorker({ config = "wrangler.toml", vars = {} } = {}) {
   mkdirSync(join(root, ".wrangler"), { recursive: true });
   const persist = mkdtempSync(join(root, ".wrangler", "test-"));
   wrangler(["d1", "migrations", "apply", "clauseo-counts", "--local"], persist, config);
   const port = await freePort();
   const dev = spawn(
     "pnpm",
-    ["exec", "wrangler", "dev", "--local", "--test-scheduled", "--ip", "127.0.0.1", "--port", String(port), "--persist-to", persist, "--config", config],
+    [
+      "exec", "wrangler", "dev", "--local", "--test-scheduled", "--ip", "127.0.0.1", "--port", String(port), "--persist-to", persist, "--config", config,
+      ...Object.entries(vars).flatMap(([name, value]) => ["--var", `${name}:${value}`]),
+    ],
     { cwd: root, env: ENV, stdio: ["ignore", "pipe", "pipe"] },
   );
   let output = "";
@@ -192,11 +196,20 @@ export async function startWorker({ config = "wrangler.toml" } = {}) {
     return found === null ? null : await found.text();
   };
 
+  // `wrangler d1 execute --local` reports no rows_read; the D1 binding (the same proxy) does.
+  /** D1's rows_read for one statement on the local D1, through the binding. */
+  const rowsRead = async (statement) => {
+    proxy ??= await getPlatformProxy({ configPath: join(root, config), persist: { path: join(persist, "v3") } });
+    return (await proxy.env.DB.prepare(statement).all()).meta.rows_read;
+  };
+
   const stop = async () => {
     await proxy?.dispose();
     dev.kill("SIGTERM");
     await new Promise((resolve) => (dev.exitCode === null ? dev.on("exit", resolve) : resolve()));
     rmSync(persist, { recursive: true, force: true });
   };
-  return { send, post, sql, object, stop };
+  /** The end of wrangler dev's output, for a failure message (it holds no id). */
+  const tail = () => output.slice(-4_000);
+  return { send, post, sql, object, rowsRead, stop, tail };
 }
