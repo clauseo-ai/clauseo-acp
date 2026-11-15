@@ -319,11 +319,20 @@ fn the_browser_entry_runs_the_guard_with_its_ports_and_variables() {
             "AGENT_BROWSER_EXECUTABLE_PATH",
             "{browser_executable}".to_owned(),
         ),
+        (
+            "AGENT_BROWSER_PROXY",
+            "http://127.0.0.1:{proxy_port}".to_owned(),
+        ),
         ("AGENT_BROWSER_SESSION", "{session_id}".to_owned()),
     ];
     if cfg!(unix) {
         expected.push(("AGENT_BROWSER_SOCKET_DIR", "{socket_dir}".to_owned()));
     }
+    // The session proxy's password (ADR 0053): the path of its file, never the password.
+    expected.push((
+        "CLAUSEO_PROXY_SECRET_FILE",
+        "{proxy_secret_file}".to_owned(),
+    ));
     assert_eq!(env, expected);
 }
 

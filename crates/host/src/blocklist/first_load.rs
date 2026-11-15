@@ -15,8 +15,10 @@ use futures::future::{Either, FutureExt as _, Shared, select};
 use crate::clock::Clock;
 
 /// The most a launch waits for the first load: about the bundled snapshot's read and verify on
-/// a slow disk. Past it the launch goes on with the list in use (ADR 0053 accepts the window),
-/// with one warning. 4 s, so no other host timer has its delay (the tests find it by delay).
+/// a slow disk. Past it the launch goes on with the list in use, with one warning; with none
+/// loaded, its open-mode proxy does not start and the browser is left out
+/// (`BlockListNotLoaded`) until a later launch finds a list. 4 s, so no other host timer has
+/// its delay (the tests find it by delay).
 pub(crate) const FIRST_LOAD_WAIT: Duration = Duration::from_secs(4);
 
 /// The first load's signal: launches wait on `done`; the updater takes `tell` once.
@@ -53,7 +55,7 @@ impl FirstLoad {
         if timed_out || current.get().is_unloaded() {
             tracing::warn!(
                 timed_out,
-                "egress: the block list was not loaded yet; the session starts with the list in use"
+                "egress: the block list was not loaded yet; without one the session has no browser"
             );
         }
     }

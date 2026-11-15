@@ -3,8 +3,9 @@
 //! published pair every interval over the host's own network, verifies it, applies the rollback
 //! rule, stores it and swaps it into the shared [`Current`] the egress proxy reads.
 //!
-//! - Only when something enforces the list ([`needed`]): the guarded browser entry or the Safe
-//!   workspace. The plain build has neither, so it starts no thread and makes no request.
+//! - Only when something enforces the list ([`needed`]): the guarded browser entry's proxy or
+//!   the Safe workspace. A host where no session can get the guarded browser (no egress proxy,
+//!   or an OS where no agent has the browser) starts no thread and makes no request.
 //! - The thread is its own `std::thread`, never the actor's pool. It starts once the host
 //!   serves (`actor.rs`'s `run`) and stops when the host thread ends: the [`Running`] guard's
 //!   drop disconnects its stop channel, and every wait is a `recv_timeout` on that channel, so
@@ -40,7 +41,7 @@ use std::time::Duration;
 
 use clauseo_blocklist::{Current, MAX_SIGNATURE, PUBLIC_KEYS};
 use clauseo_connectors::SecretStore;
-use clauseo_protocol::Timestamp;
+use clauseo_protocol::{AgentKind, Timestamp};
 use clauseo_sandbox::Upstream;
 
 use crate::clock::Clock;
@@ -250,12 +251,23 @@ pub(crate) fn allowed_sites(
 }
 
 /// Whether the host fetches the list: only when something enforces it. Only a session's egress
-/// proxy reads it, and a proxy opens only for the Safe workspace (`HostConfig::with_sandbox`),
-/// once it returns: Codex's guarded browser entry (`clauseo_profile::servers::browser_mcp`)
-/// runs with no proxy. The plain build has none: no fetch at start and none every interval
-/// (stage E, 2026-11-10). The fetch code stays for when a proxy returns.
+/// proxy reads it, and a proxy opens for a session that can get the guarded browser
+/// (`launch_checks/egress.rs`): so when an egress proxy is set (`HostConfig::with_egress_proxy`)
+/// and some agent has the browser on this OS (`clauseo_profile::servers::no_browser`: Codex on
+/// macOS and Linux today), or for the Safe workspace (`HostConfig::with_sandbox`). The
+/// `tools.browser` switch is not asked: the lawyer may turn it on at any time, and the list must
+/// be loaded by then. A host with none of these makes no fetch at start and none every interval.
 pub(crate) fn needed(config: &crate::HostConfig) -> bool {
-    config.sandbox().is_some()
+    needed_on(config, cfg!(windows))
+}
+
+/// [`needed`] as it is on Windows when `windows` is true, and elsewhere when it is false.
+pub(crate) fn needed_on(config: &crate::HostConfig, windows: bool) -> bool {
+    let guarded_browser = [AgentKind::Codex, AgentKind::Claude]
+        .into_iter()
+        .any(|kind| !clauseo_profile::servers::no_browser_on(Some(kind), windows));
+    (config.wiring.proxy.is_some() && guarded_browser)
+        || config.sandbox().is_some()
         || config
             .wiring
             .blocklist

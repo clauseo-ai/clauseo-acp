@@ -131,6 +131,7 @@ pub(crate) fn listen(rest: &[String]) -> Result<(), Box<dyn Error>> {
 /// A proxy allowing `example.com`, and its agent credential (`base64("clauseo:<token>")`).
 fn proxy() -> Result<(ProxyHandle, String), Box<dyn Error>> {
     let handle = start_proxy(ProxyConfig {
+        mode: clauseo_sandbox::ProxyMode::Allowlist,
         allow: Allowlist::exact("example.com")?,
         silent: Allowlist::default(),
         block: Arc::default(),

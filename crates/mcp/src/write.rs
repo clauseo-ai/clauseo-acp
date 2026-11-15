@@ -102,6 +102,16 @@ pub(crate) fn remove_file(path: &Path) -> io::Result<()> {
     std::fs::remove_file(path)
 }
 
+/// Empties `file` in place, never creating it: opened for writing (`OpenOptions`, without
+/// `create`), then `File::set_len(0)`. The proxy's secret file when it cannot be deleted
+/// (`browser_guard/env.rs`).
+pub(crate) fn empty_file(file: &Path) -> io::Result<()> {
+    std::fs::OpenOptions::new()
+        .write(true)
+        .open(file)?
+        .set_len(0)
+}
+
 /// `fs::remove_dir`: a link to a folder (a Windows junction) where Chrome's profile needs a real
 /// folder (`browser_guard/chrome/profile.rs`); it removes the link, never what it points at.
 pub(crate) fn remove_dir(path: &Path) -> io::Result<()> {

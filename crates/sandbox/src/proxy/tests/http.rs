@@ -266,3 +266,59 @@ fn a_forwarded_request_idle_past_the_limit_is_closed() {
     );
     assert_eq!(rig.records(1)[0].verdict, Verdict::Forward);
 }
+
+/// An origin's 407 never reaches the client: a browser would answer the challenge with the
+/// proxy's credential. The client gets the proxy's own 502, with no challenge.
+#[test]
+fn an_origin_s_407_on_a_forwarded_request_becomes_a_502() {
+    let rig = rig_allowing(&["allowed.test"]);
+    let (address, _received) = origin(
+        "HTTP/1.1 407 Proxy Authentication Required\r\n\
+         Proxy-Authenticate: Basic realm=\"phish\"\r\nContent-Length: 0\r\n\r\n",
+    );
+    rig.net.name("allowed.test", &["192.0.2.20"]);
+    rig.net.route("192.0.2.20:80", address);
+    for browser in [false, true] {
+        let request = "GET http://allowed.test/ HTTP/1.1\r\nHost: allowed.test\r\n\r\n";
+        let answer = if browser {
+            rig.browser_exchange(request)
+        } else {
+            rig.exchange(request)
+        };
+        assert!(answer.starts_with("HTTP/1.1 502 "), "{answer}");
+        assert!(!answer.contains("phish"), "{answer}");
+        assert!(!answer.contains("Proxy-Authenticate"), "{answer}");
+    }
+    assert_eq!(rig.denials(), Vec::<Denial>::new());
+    let records = rig.records(2);
+    assert!(
+        records.iter().all(|r| r.verdict == Verdict::Failed),
+        "{records:?}"
+    );
+}
+
+/// A response whose status line is not strictly `HTTP/1.[01] NNN` never reaches the client,
+/// since Chrome reads looser forms and could take a 407 among them for this proxy's challenge:
+/// the client gets the proxy's own 502, with no challenge.
+#[test]
+fn a_loose_status_line_on_a_forwarded_request_becomes_a_502() {
+    let rig = rig_allowing(&["allowed.test"]);
+    rig.net.name("allowed.test", &["192.0.2.20"]);
+    for line in [
+        "HTTP/1.1  407 Proxy Authentication Required",
+        "http/1.1 407 Proxy Authentication Required",
+        "HTTP/1.2 407 Proxy Authentication Required",
+        " HTTP/1.1 407 Proxy Authentication Required",
+    ] {
+        let response = format!(
+            "{line}\r\nProxy-Authenticate: Basic realm=\"phish\"\r\nContent-Length: 0\r\n\r\n"
+        );
+        let (address, _received) = origin(Box::leak(response.into_boxed_str()));
+        rig.net.route("192.0.2.20:80", address);
+        let request = "GET http://allowed.test/ HTTP/1.1\r\nHost: allowed.test\r\n\r\n";
+        let answer = rig.browser_exchange(request);
+        assert!(answer.starts_with("HTTP/1.1 502 "), "{line:?}: {answer}");
+        assert!(!answer.contains("phish"), "{line:?}: {answer}");
+    }
+    assert_eq!(rig.denials(), Vec::<Denial>::new());
+}

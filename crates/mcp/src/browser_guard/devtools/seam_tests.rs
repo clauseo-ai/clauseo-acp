@@ -6,7 +6,8 @@ use std::sync::mpsc;
 
 use serde_json::{Value, json};
 
-use super::seam::{CdpLink, GuardClient, next_guard_id};
+use super::super::proxy_auth::Password;
+use super::seam::{CdpLink, GuardClient, clients, next_guard_id};
 use super::tests::{client_frame, read_frame, relay, right_path, upgrade};
 
 /// A fake guard client: records what it gets, answers each root event through its link, and
@@ -149,9 +150,9 @@ fn agent_browsers_root_commands_in_a_taken_domain_are_refused_and_its_page_ones_
 #[test]
 fn with_no_client_the_seam_refuses_nothing() {
     let (devtools, mut browser_reads, _browser_writes) = relay();
-    // W1's hook: no client, so no domain is the guard's.
+    // No proxy and no password: no client, so no domain is the guard's.
     devtools
-        .start_guard(&std::collections::BTreeMap::new())
+        .start_guard(&std::collections::BTreeMap::new(), None)
         .unwrap();
     let (_, mut agent) = upgrade(&devtools, &right_path(&devtools));
     let root = json!({"id": 5, "method": "Fetch.enable", "params": {}});
@@ -160,4 +161,28 @@ fn with_no_client_the_seam_refuses_nothing() {
         .unwrap();
     let forwarded: Value = serde_json::from_slice(&browser_reads.next().unwrap().unwrap()).unwrap();
     assert_eq!(forwarded, root);
+}
+
+/// The proxy's answer is a client only when agent-browser's environment has the proxy and the
+/// guard read a password.
+#[test]
+fn the_proxy_answer_is_a_client_only_with_a_proxy_and_a_password() {
+    let (devtools, _browser_reads, _browser_writes) = relay();
+    let link = devtools.link();
+    // An obviously fake password.
+    let password = Password::parse(&"0f".repeat(32)).unwrap();
+    let proxy = std::collections::BTreeMap::from([(
+        "AGENT_BROWSER_PROXY".to_owned(),
+        std::ffi::OsString::from("http://127.0.0.1:61200"),
+    )]);
+    let none = std::collections::BTreeMap::new();
+    assert!(clients(&link, &proxy, None).is_empty());
+    assert!(clients(&link, &none, Some(&password)).is_empty());
+    let found = clients(&link, &proxy, Some(&password));
+    assert_eq!(found.len(), 1);
+    assert_eq!(
+        found[0].events(),
+        ["Fetch.requestPaused", "Fetch.authRequired"]
+    );
+    assert_eq!(found[0].start_commands().len(), 1);
 }

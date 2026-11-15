@@ -9,8 +9,8 @@ use clauseo_protocol::AgentKind;
 
 use crate::paths::ProfilePaths;
 use crate::placeholders::{
-    BROWSER_DIR, BROWSER_EXECUTABLE, CDP_PORT, DAEMON_PORT, MATTER_DOWNLOADS, RELAY_PORT,
-    RELAY_TOKEN_FILE, SESSION_ID, SOCKET_DIR,
+    BROWSER_DIR, BROWSER_EXECUTABLE, CDP_PORT, DAEMON_PORT, MATTER_DOWNLOADS, PROXY_PORT,
+    PROXY_SECRET_FILE, RELAY_PORT, RELAY_TOKEN_FILE, SESSION_ID, SOCKET_DIR,
 };
 
 /// The reserved server name: a `mcp.servers.browser` entry in the settings is dropped.
@@ -112,12 +112,16 @@ pub struct ProfileServer {
 /// `--cdp-port {cdp_port}`, plus `--daemon-port {daemon_port}` on Windows. It derives from
 /// `--cwd` every other folder agent-browser needs (screenshots, its run profile, Chrome's
 /// download staging, `HOME`, `TMPDIR` or `TEMP`, and the Windows socket folder), and fixes the
-/// idle timeout. The entry carries four variables, five on macOS and Linux with the host's
-/// socket folder (`{socket_dir}`): no proxy, so Chrome goes direct, as Claude's shell browser
-/// does; the egress allowlist belongs to the parked Safe workspace (an entry holding
-/// `{proxy_port}` would get the session's proxy, and the host opens one only then). A sidecar
-/// path that is no UTF-8 is written lossily: the host's launch would then fail, which is no
-/// worse than a missing browser.
+/// idle timeout. The entry carries five variables, six on macOS and Linux with the host's
+/// socket folder (`{socket_dir}`). Two are the session's egress proxy (ADR 0053): the
+/// browser listener's address, `AGENT_BROWSER_PROXY=http://127.0.0.1:{proxy_port}`, which
+/// makes the host open the session a proxy in open mode (any public host, minus the unsafe-site
+/// block list and every private address), and the file holding its password,
+/// `CLAUSEO_PROXY_SECRET_FILE={proxy_secret_file}`, which the guard reads once and deletes, and
+/// whose password it gives Chrome over CDP and to no child. The password itself is in no
+/// argument and no variable: the Claude Agent SDK puts an entry's variables on a command line.
+/// A sidecar path that is no UTF-8 is written lossily: the host's launch would then fail, which
+/// is no worse than a missing browser.
 pub fn browser(paths: &ProfilePaths) -> ProfileServer {
     browser_for(paths, cfg!(windows))
 }
@@ -149,6 +153,14 @@ fn browser_for(paths: &ProfilePaths, windows: bool) -> ProfileServer {
         (
             "AGENT_BROWSER_EXECUTABLE_PATH".to_owned(),
             BROWSER_EXECUTABLE.to_owned(),
+        ),
+        (
+            "AGENT_BROWSER_PROXY".to_owned(),
+            format!("http://127.0.0.1:{PROXY_PORT}"),
+        ),
+        (
+            "CLAUSEO_PROXY_SECRET_FILE".to_owned(),
+            PROXY_SECRET_FILE.to_owned(),
         ),
     ]);
     if !windows {

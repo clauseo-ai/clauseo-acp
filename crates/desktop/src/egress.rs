@@ -15,7 +15,7 @@ use std::sync::{Arc, Mutex, mpsc};
 use std::time::Duration;
 
 use clauseo_host::{EgressProxy, HostConfig, HostExit, SessionKey};
-use clauseo_sandbox::{ProxyConfig, ProxyHandle};
+use clauseo_sandbox::{ProxyConfig, ProxyCredential, ProxyHandle};
 use tauri::{App, AppHandle, Manager as _, Runtime};
 
 use crate::bridge::lock;
@@ -83,6 +83,12 @@ impl EgressProxy for DesktopProxies {
         lock(&self.open)
             .get(&session)
             .and_then(ProxyHandle::browser_port)
+    }
+
+    fn credential_for(&self, session: SessionKey) -> Option<ProxyCredential> {
+        lock(&self.open)
+            .get(&session)
+            .and_then(ProxyHandle::browser_credential)
     }
 
     fn close(&self, session: SessionKey) {

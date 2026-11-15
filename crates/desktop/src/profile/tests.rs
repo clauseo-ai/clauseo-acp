@@ -211,11 +211,22 @@ fn every_agent_with_a_kind_gets_the_author_and_the_case_law_entry() {
         browser.args.get(at + 1).map(String::as_str),
         agent_browser.to_str()
     );
-    // Three variables (no proxy, no stream port since route 2), and the socket folder's on macOS
-    // and Linux (decision record 0030).
-    assert!(!browser.env.contains_key("AGENT_BROWSER_PROXY"));
+    // Five variables (no stream port since route 2), the session's proxy address and its
+    // password's file among them (ADR 0053), and the socket folder's on macOS and Linux (decision
+    // record 0030).
     assert!(!browser.env.contains_key("AGENT_BROWSER_STREAM_PORT"));
-    assert_eq!(browser.env.len(), if cfg!(windows) { 3 } else { 4 });
+    assert_eq!(
+        browser.env.get("AGENT_BROWSER_PROXY").map(String::as_str),
+        Some("http://127.0.0.1:{proxy_port}")
+    );
+    assert_eq!(
+        browser
+            .env
+            .get("CLAUSEO_PROXY_SECRET_FILE")
+            .map(String::as_str),
+        Some("{proxy_secret_file}")
+    );
+    assert_eq!(browser.env.len(), if cfg!(windows) { 5 } else { 6 });
 }
 
 #[test]

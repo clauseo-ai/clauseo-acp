@@ -1,11 +1,12 @@
 //! The proxy thread: the executor, the two accept loops, the rate cap's tick, and each request's
-//! checks up to the connect. The block list's check, the lawyer's allowed sites first, is in
-//! `server/blocked.rs`.
+//! checks up to the connect. The listener's credential check is in `server/auth.rs`, and the
+//! block list's, the lawyer's allowed sites first, in `server/blocked.rs`.
 
+mod auth;
 mod route;
 
 use std::cell::{Cell, RefCell};
-use std::net::{SocketAddr, TcpListener};
+use std::net::{IpAddr, SocketAddr, TcpListener};
 use std::pin::pin;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -21,10 +22,10 @@ use crate::proxy::address::is_public;
 use crate::proxy::allowlist::Name;
 use crate::proxy::head::{self, Head, HeadError, ParseError, Request, within};
 use crate::proxy::load::{Load, PendingSlot, SocketSlot};
+use crate::proxy::local_net::LocalNets;
 use crate::proxy::net::Network;
 use crate::proxy::relay::{Idle, Stream, linger};
 use crate::proxy::target::{Kind, Target, classify};
-use crate::proxy::token::Token;
 use crate::proxy::upstream::{Lookup, Route};
 use crate::proxy::{
     Allowlist, Exchange, Limits, Listener, Record, Shared, SharedClock, Unopened, Verdict, connect,
@@ -34,6 +35,7 @@ use crate::{CappedSink, Denial, DenialSink, HostRefusal, Reachability};
 
 mod blocked;
 
+pub(crate) use auth::Tokens;
 pub(crate) use blocked::listed;
 
 /// Failures in a row before the proxy reports the network unreachable.
@@ -47,13 +49,14 @@ pub(crate) struct Parts {
     pub(crate) silent: Allowlist,
     pub(crate) block: Arc<clauseo_blocklist::Current>,
     pub(crate) allowed: Arc<clauseo_blocklist::Allowed>,
-    pub(crate) token: Token,
+    pub(crate) tokens: Tokens,
     pub(crate) denials: Arc<dyn DenialSink>,
     pub(crate) clock: SharedClock,
     pub(crate) net: Arc<dyn Network>,
     pub(crate) lookup: Arc<Lookup>,
     pub(crate) record: Option<Record>,
     pub(crate) limits: Limits,
+    pub(crate) local: LocalNets,
 }
 
 /// One proxy's state on its thread.
@@ -62,7 +65,7 @@ pub(crate) struct Ctx {
     silent: Allowlist,
     block: Arc<clauseo_blocklist::Current>,
     allowed: Arc<clauseo_blocklist::Allowed>,
-    token: Token,
+    tokens: Tokens,
     sink: CappedSink<Arc<dyn DenialSink>, SharedClock>,
     pub(crate) net: Arc<dyn Network>,
     lookup: Arc<Lookup>,
@@ -72,6 +75,8 @@ pub(crate) struct Ctx {
     pub(crate) load: Rc<Load>,
     /// Each host's last good route, for a failed lookup.
     remembered: route::Remembered,
+    /// The machine's own networks, read at start, which no connection may reach.
+    local: LocalNets,
 }
 
 /// The connectivity count: no state until the first connect.
@@ -94,7 +99,7 @@ pub(crate) fn run(
         silent: parts.silent,
         block: parts.block,
         allowed: parts.allowed,
-        token: parts.token,
+        tokens: parts.tokens,
         sink: CappedSink::with_clock(parts.denials, parts.clock),
         net: parts.net,
         lookup: parts.lookup,
@@ -103,6 +108,7 @@ pub(crate) fn run(
         reach: RefCell::new(Reach::default()),
         load: Rc::new(Load::default()),
         remembered: route::Remembered::default(),
+        local: parts.local,
     });
     let executor = LocalExecutor::new();
     async_io::block_on(executor.run(async {
@@ -241,23 +247,7 @@ async fn handle(ctx: &Ctx, client: &Stream, exchange: &mut Exchange, pending: Pe
             return true;
         }
     };
-    if exchange.listener == Listener::Agent
-        && !ctx.token.admits(&request.values("proxy-authorization"))
-    {
-        // The log names the host asked for; nothing is checked or reported for it.
-        match classify(&request) {
-            Ok(target) => {
-                exchange.host = target.name.text();
-                exchange.port = target.port;
-            }
-            Err(refusal) => {
-                exchange.host = refusal.host;
-                exchange.port = refusal.port;
-            }
-        }
-        let challenge = "Proxy-Authenticate: Basic realm=\"clauseo\"\r\n";
-        ctx.answer(client, exchange, 407, Verdict::AuthRequired, challenge)
-            .await;
+    if !auth::admitted(ctx, client, &request, exchange).await {
         return true;
     }
     match ctx.check(&request, exchange) {
@@ -275,9 +265,10 @@ async fn handle(ctx: &Ctx, client: &Stream, exchange: &mut Exchange, pending: Pe
 
 impl Ctx {
     /// The checks that need no network: form and scheme, the silent list, the block list, port,
-    /// a private IP literal or `localhost` name, and the allowlist. Fills the exchange's host,
-    /// port and verdict; `Err` is the status to answer and its extra header lines. `Ok` carries
-    /// the allowed set's generation the block list was asked under, for the tunnel's opening.
+    /// a private IP literal or `localhost` name, and the allowlist (any host passes it on the
+    /// browser listener in open mode). Fills the exchange's host, port and verdict; `Err` is
+    /// the status to answer and its extra header lines. `Ok` carries the allowed set's
+    /// generation the block list was asked under, for the tunnel's opening.
     fn check(
         &self,
         request: &Request,
@@ -319,7 +310,7 @@ impl Ctx {
             self.refuse(exchange, HostRefusal::PrivateAddress, false);
             return Err((403, String::new()));
         }
-        if !self.shared.live().allow.contains_name(&target.name) {
+        if !self.shared.admits(&target.name, exchange.listener) {
             let shared = target.name.is_shared_hosting();
             self.refuse(exchange, HostRefusal::NotAllowed, shared);
             return Err((403, String::new()));
@@ -362,7 +353,10 @@ impl Ctx {
             }
         };
         let still = |name: &Name| blocked::still_open(self, name, generation);
-        let (id, registration) = match self.shared.open(&target.name, self.limits.tunnels, still) {
+        let opened = self
+            .shared
+            .open(&target.name, exchange.listener, self.limits.tunnels, still);
+        let (id, registration) = match opened {
             Ok(opened) => opened,
             Err(Unopened::Blocked) => {
                 if let Some(extra) = blocked::blocked(self, &request, &target, exchange) {
@@ -421,8 +415,10 @@ impl Ctx {
         }
     }
 
-    /// The addresses for a direct connect, all public; never resolved again. `Err` is the
-    /// status to answer, with the exchange's verdict set.
+    /// The addresses for a direct connect, all public; never resolved again: `Way::Direct`
+    /// carries these, and `connect::dial` dials only them, in both modes. A name with any
+    /// answer that is not public is refused whole, before any dial. `Err` is the status to
+    /// answer, with the exchange's verdict set.
     async fn resolve(&self, target: &Target, exchange: &mut Exchange) -> Result<Way, u16> {
         let addresses = match &target.name {
             Name::Ip(ip) => vec![SocketAddr::new(*ip, target.port)],
@@ -444,7 +440,7 @@ impl Ctx {
                 }
             }
         };
-        if addresses.iter().any(|a| !is_public(a.ip())) {
+        if addresses.iter().any(|a| !self.reachable(a.ip())) {
             self.refuse(exchange, HostRefusal::PrivateAddress, false);
             return Err(403);
         }
@@ -453,34 +449,54 @@ impl Ctx {
 
     /// The address check before an upstream, which gets the name unresolved: an IP literal must
     /// be public, and a name is resolved here too, under the connect timeout, and refused if
-    /// any local answer is not public. When local DNS fails or times out the name still goes
-    /// upstream (a desktop that resolves only through the proxy), unchecked: a known gap.
-    /// `Err` means refused, with the denial sent.
+    /// any local answer is not public (`PrivateAddress`). When local DNS fails, times out or
+    /// answers nothing, a request that met the allowlist still goes upstream (a desktop that
+    /// resolves only through the proxy), unchecked: a known gap. One let in without the list
+    /// (open mode's browser listener) is refused instead, as `DnsUnavailable`: its address
+    /// could not be checked. `Err` means refused, with the denial sent.
     async fn screen(&self, target: &Target, exchange: &mut Exchange) -> Result<(), ()> {
-        let public = match &target.name {
-            Name::Ip(ip) => is_public(*ip),
+        // Unchecked names go upstream only when the list vouched for them.
+        let unchecked = !self.shared.listless(exchange.listener);
+        let refusal = match &target.name {
+            Name::Ip(ip) => (!self.reachable(*ip)).then_some(HostRefusal::PrivateAddress),
             Name::Domain(domain) => {
-                match within(self.limits.connect, self.net.resolve(domain, target.port)).await {
-                    Some(Ok(found)) => found.iter().all(|a| is_public(a.ip())),
+                let host = &target.name;
+                let found = match within(self.limits.connect, self.net.resolve(domain, target.port))
+                    .await
+                {
+                    Some(Ok(found)) => found,
                     Some(Err(error)) => {
-                        let host = &target.name;
-                        tracing::debug!(%host, %error, "egress: local DNS failed; sent upstream");
-                        true
+                        tracing::debug!(%host, %error, unchecked, "egress: local DNS failed");
+                        Vec::new()
                     }
                     None => {
-                        let host = &target.name;
-                        tracing::debug!(%host, "egress: local DNS timed out; upstream resolves it");
-                        true
+                        tracing::debug!(%host, unchecked, "egress: local DNS timed out");
+                        Vec::new()
                     }
+                };
+                if found.iter().any(|address| !self.reachable(address.ip())) {
+                    Some(HostRefusal::PrivateAddress)
+                } else if found.is_empty() && !unchecked {
+                    // No answer at all is no check either.
+                    Some(HostRefusal::DnsUnavailable)
+                } else {
+                    None
                 }
             }
         };
-        if public {
-            Ok(())
-        } else {
-            self.refuse(exchange, HostRefusal::PrivateAddress, false);
-            Err(())
+        match refusal {
+            None => Ok(()),
+            Some(why) => {
+                self.refuse(exchange, why, false);
+                Err(())
+            }
         }
+    }
+
+    /// Whether a connection may go to `ip`: a public address on none of the machine's own
+    /// networks (`local_net`), which can be public too (refused as `PrivateAddress`).
+    fn reachable(&self, ip: IpAddr) -> bool {
+        is_public(ip) && !self.local.contains(ip)
     }
 
     /// Reports a refusal: the denial through the capped sink, and a log line by host only.

@@ -1,26 +1,37 @@
-//! agent-browser's output on its way out of the guard, with the relay's URL and secret taken out.
+//! agent-browser's output on its way out of the guard, and the guard's own notes, with the
+//! relay's URL and secret and the proxy's password taken out.
 //!
 //! agent-browser holds the relay's URL (`AGENT_BROWSER_CDP`, `devtools.rs`), and an error or a
 //! reply of its that prints the URL would otherwise put the secret in the agent's logs, which a
-//! command in Codex's sandbox may read. So [`MARK`] takes the place of:
+//! command in Codex's sandbox may read. The proxy's password never reaches it, but Chrome sends
+//! it in each request's `Proxy-Authorization` header, which CDP can show. So [`MARK`] takes
+//! the place of:
 //! - the whole URL, its letters in any case;
 //! - the secret (64 hex digits) in any case, wherever it appears;
 //! - a run of [`MIN_PREFIX`] or more characters that is the secret's start, in any case: a
-//!   message cut short.
+//!   message cut short;
+//! - the proxy's password, as the URL's secret ([`Secrets::literal`]), and its base64
+//!   `Proxy-Authorization` value, whole or a start of it that runs [`MIN_PREFIX`] characters
+//!   past the user name's part ([`Secrets::start_after`], `proxy_auth::hide`): that part
+//!   starts every Basic value for the same user, so a shorter start is no secret, and another
+//!   Basic value is left as it is.
 //!
 //! Two streams carry it. agent-browser's stderr is a pipe, and [`forward`] copies it to the
 //! guard's stderr through a [`Redactor`]: reads may split a match anywhere, so it holds back the
 //! bytes that may still begin one, and gives them out once they cannot (a line end always
 //! decides). Its stdout, the MCP stream, goes out whole line by whole line (`pumps.rs`), each
-//! through [`line`], with every URL agent-browser was given in this guard ([`remember`]). A line
-//! with no match goes out byte for byte as it came; in one with a match, the mark (no quote, no
-//! backslash, no control character) stands in a JSON string where the hex stood, so the line
-//! stays the same valid JSON.
+//! through [`line`]. Both look for every secret [`remember`]ed in this guard: each URL
+//! agent-browser was given and the password's two forms. A line with no match goes out byte for
+//! byte as it came; in one with a match, the mark (no quote, no backslash, no control character)
+//! stands in a JSON string where the hex stood, so the line stays the same valid JSON. The
+//! guard's own notes and failures go through [`redacted`] too, since some quote Chrome's
+//! stderr or its CDP errors.
 //!
 //! Each stderr copy runs on a thread of its own ([`start`]); the guard waits a little for them on
 //! its way out ([`drain`]), once agent-browser and its daemon are ended, so their last lines are
 //! not lost with the guard.
 
+use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::ffi::OsString;
 use std::io::{self, Read, Write};
@@ -34,21 +45,23 @@ use super::lines::lock;
 /// The copies still running or not yet waited for.
 static COPIES: Mutex<Vec<JoinHandle<()>>> = Mutex::new(Vec::new());
 
-/// Every relay URL handed to an agent-browser in this guard, for its stdout.
+/// Every relay URL handed to an agent-browser in this guard, and the proxy's password's forms.
 static KNOWN: Mutex<Vec<Secrets>> = Mutex::new(Vec::new());
 
-/// What stands in for the URL or the secret.
-pub(crate) const MARK: &[u8] = b"[relay url redacted]";
+/// What stands in for a URL, a secret or the password.
+pub(crate) const MARK: &[u8] = b"[secret redacted]";
 
 /// The shortest start of the secret taken out on its own: 64 bits, which no other text matches
 /// by chance.
 pub(crate) const MIN_PREFIX: usize = 16;
 
-/// The relay's URL and its secret (the URL's last path segment).
+/// The relay's URL and its secret (the URL's last path segment), or one literal as both.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct Secrets {
     url: Vec<u8>,
     secret: Vec<u8>,
+    /// The shortest start of `secret` taken out on its own.
+    min_start: usize,
 }
 
 /// Whether a pattern is at the start of some text.
@@ -69,12 +82,35 @@ impl Secrets {
         (!url.is_empty() && !secret.is_empty()).then(|| Secrets {
             url: url.as_bytes().to_vec(),
             secret: secret.as_bytes().to_vec(),
+            min_start: MIN_PREFIX,
         })
+    }
+
+    /// `bytes` as both the URL and the secret: taken out whole, or a start of it of
+    /// [`MIN_PREFIX`] or more characters.
+    pub(crate) fn literal(bytes: &[u8]) -> Secrets {
+        Secrets {
+            url: bytes.to_vec(),
+            secret: bytes.to_vec(),
+            min_start: MIN_PREFIX,
+        }
+    }
+
+    /// The same, but a start of it is taken out only when it runs [`MIN_PREFIX`] characters
+    /// past its first `fixed`, which are no secret.
+    pub(crate) fn start_after(self, fixed: usize) -> Secrets {
+        Secrets {
+            min_start: fixed.saturating_add(MIN_PREFIX),
+            ..self
+        }
     }
 
     /// Whether `text` starts with the URL, the secret or a long enough start of the secret.
     /// Undecided only while `text` may still grow (`more`).
     fn at_start(&self, text: &[u8], more: bool) -> Found {
+        if self.url.is_empty() || self.secret.is_empty() {
+            return Found::No;
+        }
         if text.len() >= self.url.len() {
             if text
                 .get(..self.url.len())
@@ -99,7 +135,7 @@ impl Secrets {
             Found::Hit(same)
         } else if more && same == text.len() {
             Found::Undecided
-        } else if same >= MIN_PREFIX {
+        } else if same >= self.min_start {
             Found::Hit(same)
         } else {
             Found::No
@@ -137,7 +173,8 @@ fn scan(text: &[u8], all: &[Secrets], more: bool) -> (Option<Vec<u8>>, usize) {
     (out, at)
 }
 
-/// Notes the URL agent-browser was given, for [`line`].
+/// Notes a URL agent-browser was given, or a form of the proxy's password, for [`line`] and
+/// every [`Redactor`].
 pub(crate) fn remember(secrets: &Secrets) {
     let mut known = lock(&KNOWN);
     if !known.contains(secrets) {
@@ -145,10 +182,18 @@ pub(crate) fn remember(secrets: &Secrets) {
     }
 }
 
-/// A whole line of agent-browser's stdout redacted with every URL [`remember`]ed; none when
+/// A whole line of agent-browser's stdout redacted with every secret [`remember`]ed; none when
 /// nothing in it matched, so it goes out as it is.
 pub(crate) fn line(line: &[u8]) -> Option<Vec<u8>> {
     scan(line, &lock(&KNOWN), false).0
+}
+
+/// One of the guard's own notes or failures, redacted as [`line`] does.
+pub(crate) fn redacted(text: &str) -> Cow<'_, str> {
+    match line(text.as_bytes()) {
+        Some(changed) => Cow::Owned(String::from_utf8_lossy(&changed).into_owned()),
+        None => Cow::Borrowed(text),
+    }
 }
 
 /// Starts [`forward`] on a thread of its own. It ends when the last holder of the pipe's other
@@ -172,8 +217,9 @@ pub(crate) fn drain(wait: Duration) {
     }
 }
 
-/// Copies `from` to the guard's stderr until it ends, redacting `secrets`. A failed write to
-/// the guard's stderr drops the bytes and keeps reading, so agent-browser never blocks on it.
+/// Copies `from` to the guard's stderr until it ends, redacting `secrets` and every secret
+/// [`remember`]ed. A failed write to the guard's stderr drops the bytes and keeps reading, so
+/// agent-browser never blocks on it.
 fn forward(mut from: impl Read, secrets: Secrets) {
     let mut redactor = Redactor::new(secrets);
     let mut chunk = [0_u8; 4096];
@@ -187,7 +233,7 @@ fn forward(mut from: impl Read, secrets: Secrets) {
     drop(io::stderr().lock().write_all(&redactor.finish()));
 }
 
-/// A streaming search and replace of the secrets.
+/// A streaming search and replace of its own secrets and every one [`remember`]ed.
 pub(crate) struct Redactor {
     secrets: Secrets,
     /// Bytes read and not yet given out: a tail that may still begin a match.
@@ -205,7 +251,7 @@ impl Redactor {
     /// Takes `bytes` and returns what may be written now, redacted.
     pub(crate) fn push(&mut self, bytes: &[u8]) -> Vec<u8> {
         self.held.extend_from_slice(bytes);
-        let (out, decided) = scan(&self.held, std::slice::from_ref(&self.secrets), true);
+        let (out, decided) = scan(&self.held, &self.all(), true);
         let rest = self.held.split_off(decided);
         let plain = std::mem::replace(&mut self.held, rest);
         out.unwrap_or(plain)
@@ -213,8 +259,15 @@ impl Redactor {
 
     /// What is left once the input has ended.
     pub(crate) fn finish(self) -> Vec<u8> {
-        let (out, _) = scan(&self.held, std::slice::from_ref(&self.secrets), false);
+        let (out, _) = scan(&self.held, &self.all(), false);
         out.unwrap_or(self.held)
+    }
+
+    /// Its own secrets, then every one [`remember`]ed now.
+    fn all(&self) -> Vec<Secrets> {
+        let mut all = vec![self.secrets.clone()];
+        all.extend(lock(&KNOWN).iter().cloned());
+        all
     }
 }
 
@@ -224,8 +277,19 @@ mod tests {
     use std::ffi::OsString;
 
     use super::{MARK, Redactor, Secrets, line, remember};
+    use crate::browser_guard::devtools::base64;
+    use crate::browser_guard::proxy_auth::{self, Password};
 
     const SECRET: &str = "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff";
+    /// An obviously fake proxy password.
+    const PASSWORD: &str = "feedfacefeedfacefeedfacefeedfacefeedfacefeedfacefeedfacefeedface";
+
+    /// Remembers the fake password's two forms, as the guard's start does, and returns its
+    /// `Proxy-Authorization` value.
+    fn hide_password() -> String {
+        proxy_auth::hide(&Password::parse(PASSWORD).unwrap());
+        base64(format!("clauseo:{PASSWORD}").as_bytes())
+    }
 
     fn url() -> String {
         format!("ws://127.0.0.1:50123/devtools/browser/{SECRET}")
@@ -329,5 +393,117 @@ mod tests {
         let plain: &[u8] =
             b"{\"jsonrpc\":\"2.0\",\"id\":4,\"result\":{\"text\":\"00112233445566 \xff\"}}";
         assert_eq!(line(plain), None);
+    }
+
+    #[test]
+    fn the_password_is_hidden_on_stdout_on_stderr_and_in_the_guards_notes() {
+        hide_password();
+        let mark = mark();
+        let text = format!(
+            "proxy said {PASSWORD} and {}",
+            PASSWORD.to_ascii_uppercase()
+        );
+        let expected = format!("proxy said {mark} and {mark}");
+        let out = line(text.as_bytes()).expect("the line held the password");
+        assert_eq!(String::from_utf8(out).unwrap(), expected);
+        assert_eq!(
+            redacted(&format!("{text}\n"), 4096),
+            format!("{expected}\n")
+        );
+        assert_eq!(super::redacted(&text), expected);
+    }
+
+    #[test]
+    fn the_proxy_authorization_value_is_hidden_whole_however_the_reads_split() {
+        let basic = hide_password();
+        let mark = mark();
+        let header = format!("Proxy-Authorization: Basic {basic}\nnext\n");
+        for step in [1, 5, 16, 95, 96, 97, 4096] {
+            assert_eq!(
+                redacted(&header, step),
+                format!("Proxy-Authorization: Basic {mark}\nnext\n"),
+                "reads of {step} bytes"
+            );
+        }
+        let reply =
+            serde_json::json!({"headers": {"Proxy-Authorization": format!("Basic {basic}")}})
+                .to_string();
+        let out = String::from_utf8(line(reply.as_bytes()).unwrap()).unwrap();
+        assert!(out.contains(&format!("Basic {mark}")) && !out.contains(&basic));
+    }
+
+    /// Every Basic value for the user `clauseo` starts the same 12 characters, so a start of
+    /// the credential is taken out only past them: another value sharing its first 16 (and so
+    /// the password's first 4 hex digits) is left as it is, and a cut-short real one is not.
+    #[test]
+    fn another_basic_value_with_the_same_start_is_not_hidden() {
+        let basic = hide_password();
+        let mark = mark();
+        let other = base64(format!("clauseo:feed{}", &SECRET[..60]).as_bytes());
+        assert_eq!(other[..16], basic[..16]);
+        assert_ne!(other[..17], basic[..17]);
+        let header = format!("Proxy-Authorization: Basic {other}\n");
+        assert_eq!(line(header.as_bytes()), None);
+        for step in [1, 16, 17, 4096] {
+            assert_eq!(redacted(&header, step), header, "reads of {step} bytes");
+        }
+        // 27 characters: the user's 12 and 15 more, too short to tell.
+        let short = format!("Basic {}...", &basic[..27]);
+        assert_eq!(line(short.as_bytes()), None);
+        let cut = format!("Basic {}...", &basic[..28]);
+        assert_eq!(
+            String::from_utf8(line(cut.as_bytes()).unwrap()).unwrap(),
+            format!("Basic {mark}...")
+        );
+    }
+
+    #[test]
+    fn the_password_split_across_reads_is_still_hidden() {
+        hide_password();
+        let mark = mark();
+        let input = format!("a {PASSWORD} b\nc {}\u{2026}\n", &PASSWORD[..20]);
+        for step in [1, 2, 7, 16, 63, 64, 65] {
+            let out = redacted(&input, step);
+            assert_eq!(
+                out,
+                format!("a {mark} b\nc {mark}\u{2026}\n"),
+                "reads of {step} bytes"
+            );
+            assert!(!out.contains(&PASSWORD[..16]), "reads of {step} bytes");
+        }
+    }
+
+    #[test]
+    fn a_literal_is_taken_out_with_a_long_enough_start() {
+        let hex = Secrets::literal(SECRET.as_bytes());
+        assert_eq!(
+            super::scan(&SECRET.as_bytes()[..16], std::slice::from_ref(&hex), false).1,
+            16
+        );
+        let found = super::scan(&SECRET.as_bytes()[..16], &[hex], false).0;
+        assert_eq!(found, Some(MARK.to_vec()));
+        let later = Secrets::literal(SECRET.as_bytes()).start_after(40);
+        assert_eq!(
+            super::scan(
+                &SECRET.as_bytes()[..55],
+                std::slice::from_ref(&later),
+                false
+            )
+            .0,
+            None
+        );
+        let found = super::scan(
+            &SECRET.as_bytes()[..56],
+            std::slice::from_ref(&later),
+            false,
+        )
+        .0;
+        assert_eq!(found, Some(MARK.to_vec()));
+        assert_eq!(
+            super::scan(SECRET.as_bytes(), &[later], false).0,
+            Some(MARK.to_vec())
+        );
+        // An empty literal matches nothing.
+        assert_eq!(super::scan(b"abc", &[Secrets::literal(b"")], false).0, None);
     }
 }

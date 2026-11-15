@@ -2,20 +2,38 @@
 //! out in every tier. It listens on loopback for the agent, and for the browser too when the
 //! launch has one ([`ProxyConfig::browser`]; never on tier B, decision D10).
 //!
-//! It allows a CONNECT to port 443 of a host on the launch's allowlist and a plain `http://`
-//! request to port 80 of one, chains to the firm's proxy when there is one, never looks inside
-//! TLS (it holds no CA), refuses loopback and private addresses, and turns each refusal into a
+//! It allows a CONNECT to port 443 and a plain `http://` request to port 80 of a host on the
+//! launch's allowlist, or of any public host on the browser listener in open mode
+//! ([`ProxyMode::Open`]; the agent listener keeps the allowlist in both modes), chains to the
+//! firm's proxy when there is one, never looks inside TLS (it holds no CA), refuses loopback
+//! and private addresses and the machine's own networks (`local_net`: each interface address
+//! and its on-link prefix, read at start, public or not), and turns each refusal into a
 //! [`Denial`](crate::Denial) through the launch's sink, behind S14's rate cap.
 //!
-//! Each request passes these checks in order: the head, the token (agent listener only), the
-//! form and scheme (405, `Scheme`; 400 when there is no host to name), the silent list (403, no
-//! denial), the block list (403, `Blocked`, by name or IP literal, no DNS; it beats every
-//! allowlist entry; a host the lawyer allowed, exactly, skips it), the port (403, `Port`), an
-//! IP literal that is not public or a `localhost` name
-//! (403, `PrivateAddress`; no allowlist entry lets one through), the allowlist (403,
-//! `NotAllowed`), the route, the address check (403, `PrivateAddress`: every resolved address
-//! on a direct connection; through an upstream, an IP literal, or a name's local answers when
-//! local DNS gives any), then the connect.
+//! Each request passes these checks in order: the head, the listener's credential (407; the
+//! agent listener and the browser listener each have their own token, and neither takes the
+//! other's), the form and scheme (405, `Scheme`; 400 when there is no host to name), the silent
+//! list (403, no denial), the block list (403, `Blocked`, by name or IP literal, no DNS; it
+//! beats every allowlist entry; a host the lawyer allowed, exactly, skips it), the port (403,
+//! `Port`), an IP literal that is not public or a `localhost` name (403, `PrivateAddress`; no
+//! allowlist entry lets one through), the allowlist (403, `NotAllowed`; skipped on the browser
+//! listener in open mode), the route, the address check (403, `PrivateAddress`, or through an
+//! upstream `DnsUnavailable` when local DNS could not check a name), then the
+//! connect. Open mode moves the allowlist check only, and only on the browser listener; every
+//! other check holds in both modes. An origin's 407 to a forwarded `http://` request becomes a
+//! 502, so no site can make the browser answer a proxy challenge with its credential.
+//!
+//! The address check is made on the addresses connected to. On a direct connection a name is
+//! resolved once, refused if any answer is not public, and only those checked addresses are
+//! dialled, never the name again, so a second DNS answer cannot slip in between. Through an
+//! upstream proxy, which gets the name unresolved, an IP literal must be public and a name is
+//! resolved locally too and refused if any local answer is not. When local DNS fails, times out
+//! or finds nothing, a name the allowlist passed goes upstream unchecked (a desktop that
+//! resolves only through its proxy): a known gap, limited to listed names. A name let in without
+//! the list (open mode's browser listener) is refused then instead (`DnsUnavailable`). Either
+//! way the upstream resolves the name again itself, so a DNS answer that changes between the
+//! proxy's lookup and the upstream's (rebinding) can still reach an address the proxy did not
+//! check; the firm's proxy decides what it reaches.
 //!
 //! A sink or record callback runs on the proxy thread and must not block: one that blocks stalls
 //! every connection of the launch, and `ProxyHandle`'s drop, which joins the thread.
@@ -23,31 +41,40 @@
 mod address;
 mod allowlist;
 mod connect;
+mod credential;
+#[cfg(feature = "test-support")]
+mod fixed_names;
 mod head;
 mod http;
 mod load;
+mod local_net;
+mod mode;
 mod net;
 mod relay;
 mod server;
+mod shared;
 mod shared_hosts;
 mod target;
 mod token;
 pub mod upstream;
 
 use crate::ports::ListenerFor;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 use std::ffi::OsString;
 use std::fmt;
-use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::sync::Arc;
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
 use async_io::Async;
 use futures::channel::oneshot;
-use futures::future::{AbortHandle, AbortRegistration};
 use serde::Serialize;
 
 pub use allowlist::{Allowlist, LoginKind, builtin_allowlist};
+pub use credential::ProxyCredential;
+#[cfg(feature = "test-support")]
+pub use fixed_names::start_proxy_with_names;
+pub use mode::ProxyMode;
 pub use upstream::{
     FailKind, Route, UnusableProxy, Upstream, UpstreamAnswer, launch_route, upstream_answer,
     upstream_for,
@@ -55,25 +82,36 @@ pub use upstream::{
 
 use crate::{Clock, DenialSink, Error, HostRefusal, SystemClock};
 use allowlist::Name;
+use local_net::LocalNets;
 use net::{Network, SystemNetwork};
+pub(crate) use shared::{Shared, Unopened};
 use token::Token;
 use upstream::{Env, Intent, Lookup, OsAnswer, Reach};
 
 /// What a launch's proxy allows, where it sends traffic, and where its refusals go.
 pub struct ProxyConfig {
-    /// The hosts the launch may reach. `allow` and `revoke` change it live.
+    /// Which hosts pass: those on `allow` ([`ProxyMode::Allowlist`], from
+    /// [`ProxyConfig::new`]), or on the browser listener any public host ([`ProxyMode::Open`]);
+    /// the agent listener asks `allow` in both modes. Every other check (the credential, silent
+    /// list, block list, port and private addresses) holds in both.
+    pub mode: ProxyMode,
+    /// The hosts the launch may reach: on both listeners in allowlist mode, on the agent
+    /// listener only in open mode. `allow` and `revoke` change it live.
     pub allow: Allowlist,
     /// Hosts refused with no denial and no card (stage E's S27).
     pub silent: Allowlist,
     /// The unsafe-site block list (ADR 0053), shared with the host's updater: each request
     /// reads the list in use then, so an update reaches the next request and closes nothing.
     /// Hosts on it are refused with `Denial::Blocked` whatever the allowlist says. Unloaded,
-    /// nothing is blocked.
+    /// nothing is blocked, so open mode with the browser listener refuses to start then
+    /// ([`Error::BlockListNotLoaded`]). A loaded list never goes back to unloaded
+    /// (`Current::offer` takes only a list with a time), so the check at start holds for the
+    /// proxy's life.
     pub block: Arc<clauseo_blocklist::Current>,
     /// The hosts the lawyer allowed despite the block list (ADR 0053, PR 2): the host's live
     /// view for this launch's matter, its `Matter` allows and the `Always` ones, empty while
     /// policy forbids overrides. Asked before the list, exactly by host; an allowed host is
-    /// then checked as any other (silent list, port, private address, allowlist). A change
+    /// then checked as any other (port, private address, allowlist in its mode). A change
     /// reaches the next request, and a revoke closes the open tunnels and forwarded requests to
     /// a host it removed that the list still names. Empty by default.
     pub allowed: Arc<clauseo_blocklist::Allowed>,
@@ -87,20 +125,22 @@ pub struct ProxyConfig {
     /// Whether to bind the browser listener; false from [`ProxyConfig::new`]. The host sets it
     /// from whether this session has the browser (the browser entry it loads as available),
     /// never from the policy's [`Loopback`](crate::Loopback), which also carries non-browser
-    /// ports such as the case-law relay's. That listener takes no token, so a launch without
-    /// the browser (tier B, decision D10) must not open one: another matter's agent could send
-    /// traffic through it under this launch's list.
+    /// ports such as the case-law relay's. That listener checks its own credential
+    /// ([`ProxyHandle::browser_credential`], never the agent's token); a launch without the
+    /// browser (tier B, decision D10) opens none all the same, so nothing gets a second way out
+    /// under this launch's list.
     pub browser: bool,
     /// Who the agent listener is for: [`ListenerFor::TierB`] for a tier-B launch, whose agent
     /// reaches only `ports::TIER_B_PORTS` on Windows; [`ListenerFor::Other`] (from
-    /// [`ProxyConfig::new`]) for any other. The browser listener, which takes no token, is
-    /// always bound as `Other`, outside the range every pool user reaches (S15 PR7).
+    /// [`ProxyConfig::new`]) for any other. The browser listener is always bound as `Other`,
+    /// outside the range every pool user reaches (S15 PR7).
     pub listener: ListenerFor,
 }
 
 impl ProxyConfig {
-    /// A config with no record callback, no browser listener, an unloaded block list, no
-    /// allowed site, and its agent listener outside tier B's range ([`ListenerFor::Other`]).
+    /// A config in allowlist mode with no record callback, no browser listener, an unloaded
+    /// block list, no allowed site, and its agent listener outside tier B's range
+    /// ([`ListenerFor::Other`]).
     pub fn new(
         allow: Allowlist,
         silent: Allowlist,
@@ -108,6 +148,7 @@ impl ProxyConfig {
         denials: Arc<dyn DenialSink>,
     ) -> ProxyConfig {
         ProxyConfig {
+            mode: ProxyMode::Allowlist,
             allow,
             silent,
             block: Arc::default(),
@@ -124,6 +165,7 @@ impl ProxyConfig {
 impl fmt::Debug for ProxyConfig {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("ProxyConfig")
+            .field("mode", &self.mode)
             .field("allow", &self.allow)
             .field("silent", &self.silent)
             .field("upstream", &self.upstream)
@@ -141,9 +183,9 @@ pub type Record = Arc<dyn Fn(&Exchange) + Send + Sync>;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Listener {
-    /// The agent's, which checks the token.
+    /// The agent's, which checks the agent's token.
     Agent,
-    /// The browser's, which takes requests without one.
+    /// The browser's, which checks its own token, never the agent's.
     Browser,
 }
 
@@ -159,7 +201,7 @@ pub enum Verdict {
     Refused,
     /// On the silent list: refused with no denial.
     Silent,
-    /// No valid token on the agent listener: 407.
+    /// No valid credential for the listener the request came in on: 407.
     AuthRequired,
     /// A head the proxy could not read: too large, too slow or malformed.
     BadRequest,
@@ -244,6 +286,8 @@ pub(crate) struct Options {
     pub(crate) limits: Limits,
     pub(crate) system: Option<(Env, Box<OsAnswer>, Box<Intent>)>,
     pub(crate) reach: Option<Box<Reach>>,
+    /// The machine's own networks in place of the OS's list (the test seam).
+    pub(crate) local: Option<LocalNets>,
 }
 
 impl Default for Options {
@@ -253,6 +297,7 @@ impl Default for Options {
             limits: Limits::default(),
             system: None,
             reach: None,
+            local: None,
         }
     }
 }
@@ -268,9 +313,14 @@ impl Clock for SharedClock {
 
 /// Starts a launch's proxy on its own thread (`clauseo-proxy`). It runs until the handle drops.
 pub fn start_proxy(config: ProxyConfig) -> Result<ProxyHandle, Error> {
+    start_with(config, Arc::new(SystemNetwork), system_options())
+}
+
+/// The options a shipped proxy runs with: the process's open-file cap.
+fn system_options() -> Options {
     let mut options = Options::default();
     options.limits.process = load::process_cap(load::soft_open_files());
-    start_with(config, Arc::new(SystemNetwork), options)
+    options
 }
 
 pub(crate) fn start_with(
@@ -278,6 +328,12 @@ pub(crate) fn start_with(
     net: Arc<dyn Network>,
     options: Options,
 ) -> Result<ProxyHandle, Error> {
+    // Open mode lets any public site through the browser listener but the listed ones: with no
+    // list it would let every site through, so it does not start (fail closed). The agent
+    // listener keeps its allowlist in both modes.
+    if config.mode == ProxyMode::Open && config.browser && config.block.get().is_unloaded() {
+        return Err(Error::BlockListNotLoaded);
+    }
     let lookup = match options.system {
         Some((env, os, intent)) => {
             let clock = SharedClock(Arc::clone(&options.clock));
@@ -290,6 +346,17 @@ pub(crate) fn start_with(
         None => lookup,
     });
     let token = Token::generate()?;
+    // Its own token, so neither listener takes the other's credential.
+    let browser_token = if config.browser {
+        let browser = Token::generate()?;
+        if browser.hex() == token.hex() {
+            let same = std::io::Error::other("the OS gave the same random token twice");
+            return Err(Error::ProxyStart(same));
+        }
+        Some(browser)
+    } else {
+        None
+    };
     let bind = |whom: ListenerFor| -> Result<(Async<std::net::TcpListener>, u16), Error> {
         let listener = crate::ports::bind_loopback(whom).map_err(Error::ProxyStart)?;
         let port = listener.local_addr().map_err(Error::ProxyStart)?.port();
@@ -297,16 +364,20 @@ pub(crate) fn start_with(
     };
     let (agent, port) = bind(config.listener)?;
     let (browser, browser_port) = if config.browser {
-        // No token on this one, so never where a pool user's static permit reaches.
+        // The browser's, so never where a pool user's static permit reaches.
         let (listener, port) = bind(ListenerFor::Other)?;
         (Some(listener), Some(port))
     } else {
         (None, None)
     };
+    let local = match options.local {
+        Some(local) => local,
+        None => local_nets(config.mode == ProxyMode::Open && config.browser)?,
+    };
     if config.block.first_unloaded_notice() {
         tracing::warn!("egress: the block list is not loaded; no site is blocked");
     }
-    let shared = Arc::new(Shared::new(config.allow));
+    let shared = Arc::new(Shared::new(config.allow, config.mode));
     let watcher = revoke_watcher(&shared, &config.block, &config.allowed);
     config.allowed.watch(&watcher);
     let parts = server::Parts {
@@ -314,13 +385,17 @@ pub(crate) fn start_with(
         silent: config.silent,
         block: config.block,
         allowed: config.allowed,
-        token: token.clone(),
+        tokens: server::Tokens {
+            agent: token.clone(),
+            browser: browser_token.clone(),
+        },
         denials: config.denials,
         clock: SharedClock(options.clock),
         net,
         lookup,
         record: config.record,
         limits: options.limits,
+        local,
     };
     let (stop, stopped) = oneshot::channel();
     let thread = thread::Builder::new()
@@ -331,6 +406,7 @@ pub(crate) fn start_with(
         port,
         browser_port,
         token,
+        browser_token,
         shared,
         _watcher: watcher,
         stop: Some(stop),
@@ -338,9 +414,32 @@ pub(crate) fn start_with(
     })
 }
 
+/// The machine's own networks (`local_net`), which the proxy never connects to. When the OS's
+/// list cannot be read, open mode with the browser listener does not start: that listener lets
+/// any public address through, and the machine's networks can be public. Any other proxy goes
+/// on with none, with a warning: its allowlist names the hosts it reaches. `open_browser`: the
+/// proxy runs in open mode with the browser listener.
+fn local_nets(open_browser: bool) -> Result<LocalNets, Error> {
+    match LocalNets::read() {
+        Ok(local) => {
+            tracing::debug!(
+                networks = local.len(),
+                "egress: the machine's networks read"
+            );
+            Ok(local)
+        }
+        Err(error) if open_browser => Err(Error::ProxyStart(error)),
+        Err(error) => {
+            tracing::warn!(%error, "egress: the machine's networks could not be read");
+            Ok(LocalNets::default())
+        }
+    }
+}
+
 /// The watcher on the launch's allowed set: when a revoke removes hosts, it closes every open
 /// tunnel and forwarded request whose host is among them, is not allowed again, and is still on
-/// the block list. It runs on the revoking thread, after the swap, and does no I/O.
+/// the block list. It runs on the revoking thread, after the swap, and does no I/O. The same in
+/// both modes: the block list holds in open mode too.
 fn revoke_watcher(
     shared: &Arc<Shared>,
     block: &Arc<clauseo_blocklist::Current>,
@@ -367,6 +466,8 @@ pub struct ProxyHandle {
     port: u16,
     browser_port: Option<u16>,
     token: Token,
+    /// The browser listener's own token, when there is one.
+    browser_token: Option<Token>,
     shared: Arc<Shared>,
     /// Closes open tunnels to a host whose allow (`ProxyConfig::allowed`) is revoked; held so
     /// it lives as long as the proxy.
@@ -381,6 +482,7 @@ impl fmt::Debug for ProxyHandle {
             .field("port", &self.port)
             .field("browser_port", &self.browser_port)
             .field("token", &"<redacted>")
+            .field("browser_token", &"<redacted>")
             .finish_non_exhaustive()
     }
 }
@@ -391,10 +493,18 @@ impl ProxyHandle {
         self.port
     }
 
-    /// The browser listener's port (no token; held to its matter by the jail's port rule), or
-    /// `None` when [`ProxyConfig::browser`] was false and no browser listener was bound.
+    /// The browser listener's port (checks [`ProxyHandle::browser_credential`]), or `None` when
+    /// [`ProxyConfig::browser`] was false and no browser listener was bound.
     pub fn browser_port(&self) -> Option<u16> {
         self.browser_port
+    }
+
+    /// The browser listener's own credential, which the browser sends as
+    /// `Proxy-Authorization: Basic`, or `None` when no browser listener was bound. Not the
+    /// agent's token: the agent listener refuses it, and the browser listener refuses the
+    /// agent's. A secret: keep it out of logs.
+    pub fn browser_credential(&self) -> Option<ProxyCredential> {
+        self.browser_token.as_ref().map(ProxyCredential::of)
     }
 
     /// The agent's proxy variables: `Some` to set, `None` to remove. Sets `HTTPS_PROXY`,
@@ -421,7 +531,8 @@ impl ProxyHandle {
     }
 
     /// Adds an exact host to the live list (R18: a site the lawyer allowed); the next request
-    /// to it passes. A host that is not a valid name is ignored.
+    /// to it passes. A host that is not a valid name is ignored. In open mode it reaches the
+    /// agent listener only, as the browser listener does not ask the list.
     pub fn allow(&self, host: &str) {
         if let Some(name) = Name::parse(host) {
             self.shared.live().allow.insert_exact(name);
@@ -432,7 +543,10 @@ impl ProxyHandle {
 
     /// Removes that exact host from the live list, whether it came from the start list or from
     /// `allow`, and closes every open tunnel whose host the list no longer allows. A `*.domain`
-    /// entry that still covers the host keeps it allowed, and its tunnels open.
+    /// entry that still covers the host keeps it allowed, and its tunnels open. In open mode it
+    /// closes the agent listener's tunnels only, never the browser listener's; a revoke of the
+    /// lawyer's allow (`ProxyConfig::allowed`) for a host the block list names still closes that
+    /// host's on both listeners, in both modes.
     pub fn revoke(&self, host: &str) {
         if let Some(name) = Name::parse(host) {
             self.shared.revoke(&name);
@@ -452,100 +566,6 @@ impl Drop for ProxyHandle {
                 tracing::warn!("egress: the proxy thread panicked");
             }
         }
-    }
-}
-
-/// What the handle and the proxy thread share: the live list and the open tunnels, under one
-/// lock so a `revoke` cannot miss a tunnel being opened.
-pub(crate) struct Shared {
-    live: Mutex<Live>,
-}
-
-pub(crate) struct Live {
-    pub(crate) allow: Allowlist,
-    tunnels: BTreeMap<u64, (Name, AbortHandle)>,
-    next: u64,
-}
-
-/// Why a tunnel was not opened.
-pub(crate) enum Unopened {
-    /// The list no longer allows the host (a `revoke` came during the connect).
-    NotAllowed,
-    /// The launch has its most tunnels open.
-    Busy,
-    /// The lawyer's allow for the host was revoked since the block list was asked, and the
-    /// list still names it.
-    Blocked,
-}
-
-impl Shared {
-    fn new(allow: Allowlist) -> Shared {
-        Shared {
-            live: Mutex::new(Live {
-                allow,
-                tunnels: BTreeMap::new(),
-                next: 0,
-            }),
-        }
-    }
-
-    pub(crate) fn live(&self) -> MutexGuard<'_, Live> {
-        // The list and the tunnel table stay valid whatever a panicking thread left.
-        self.live.lock().unwrap_or_else(PoisonError::into_inner)
-    }
-
-    /// Opens a tunnel to `name` if the list still allows it, `still` (asked under the lock,
-    /// so a revoke's watcher cannot miss the tunnel; it must do no I/O) says the block list
-    /// still lets it through, and there is room.
-    pub(crate) fn open(
-        &self,
-        name: &Name,
-        most: usize,
-        still: impl FnOnce(&Name) -> bool,
-    ) -> Result<(u64, AbortRegistration), Unopened> {
-        let mut live = self.live();
-        if !live.allow.contains_name(name) {
-            return Err(Unopened::NotAllowed);
-        }
-        if !still(name) {
-            return Err(Unopened::Blocked);
-        }
-        if live.tunnels.len() >= most {
-            return Err(Unopened::Busy);
-        }
-        let (handle, registration) = AbortHandle::new_pair();
-        let id = live.next;
-        live.next += 1;
-        live.tunnels.insert(id, (name.clone(), handle));
-        Ok((id, registration))
-    }
-
-    pub(crate) fn close(&self, id: u64) {
-        self.live().tunnels.remove(&id);
-    }
-
-    /// Closes every open tunnel whose host `close` names.
-    fn close_where(&self, close: impl Fn(&Name) -> bool) {
-        self.live().tunnels.retain(|_, (host, handle)| {
-            let shut = close(host);
-            if shut {
-                handle.abort();
-            }
-            !shut
-        });
-    }
-
-    fn revoke(&self, name: &Name) {
-        let mut live = self.live();
-        live.allow.remove_exact(name);
-        let Live { allow, tunnels, .. } = &mut *live;
-        tunnels.retain(|_, (host, handle)| {
-            let keep = allow.contains_name(host);
-            if !keep {
-                handle.abort();
-            }
-            keep
-        });
     }
 }
 

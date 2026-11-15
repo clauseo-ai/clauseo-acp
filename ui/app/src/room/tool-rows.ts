@@ -1,7 +1,7 @@
 // Each row of the tool line's popover, in the fewest words (DESIGN.md §Icons): the tool's glyph and name, an On or
 // Off chip, the reason in a few words only when off; under the browser with no Chrome (or Edge, on Windows), what to
-// install and that a new conversation then finds it; under the browser the firm's policy blocks, or whose policy
-// Clauseo couldn't check, the reason in full, and for the policy not checked, Try again (browser-policy.ts). Pure, so
+// install and that a new conversation then finds it; under the browser the firm's policy blocks, whose policy
+// Clauseo couldn't check, or whose safe connection or unsafe-site list didn't start, the reason in full, and for the policy not checked, Try again (browser-policy.ts). Pure, so
 // the tests can read every state; loaded with the popover only.
 import type { Lang, Platform } from "@clauseo/components/lib/display.ts";
 import { tw, type ToolsKey } from "@clauseo/components/lib/words-tools.ts";
@@ -28,7 +28,8 @@ export type ToolRowWords = {
    * null. */
   reasonTip: string | null;
   /** A muted line under the reason saying it in full: what to install and that a new conversation then finds it, the
-   * firm's policy blocks the browser, or Clauseo couldn't check it; else null. */
+   * firm's policy blocks the browser, Clauseo couldn't check it, or its safe connection or unsafe-site list didn't
+   * start; else null. */
   note: string | null;
   /** Off in Settings, with the settings window to turn it on: the popover's foot offers Open Settings. */
   settings: boolean;
@@ -61,6 +62,10 @@ const PER_USER: ToolsKey =
   "Clauseo can't use a copy of Google Chrome installed just for you. Install Microsoft Edge, or ask your firm's IT to install Google Chrome for everyone on this computer. Then start a new conversation.";
 const UNREADABLE: ToolsKey =
   "Clauseo couldn't check this computer's browser settings, so it won't use a browser for now. It checks again the next time it needs one.";
+const NO_CONNECTION: ToolsKey =
+  "Clauseo couldn't start its safe connection for the browser, so it won't use one for now. It tries again when a new conversation starts.";
+const NO_LIST: ToolsKey =
+  "Clauseo's unsafe-site list didn't load, so it won't use a browser for now. It tries again when a new conversation starts.";
 
 /** What to install, in full: the browser's skill loads as each conversation starts, so a browser installed later
  * is there in the next new conversation. Windows takes Edge too. */
@@ -68,7 +73,8 @@ const INSTALL_MAC: ToolsKey = "Install Google Chrome, then start a new conversat
 const INSTALL_WINDOWS: ToolsKey =
   "Install Google Chrome or Microsoft Edge, then start a new conversation.";
 
-/** The browser's reason in full: what to install with none on the computer, or its policy keeping it off; else null. */
+/** The browser's reason in full: what to install with none on the computer, its policy keeping it off, or its safe
+ * connection or unsafe-site list not started; else null. */
 function browserNote(lang: Lang, platform: Platform, state: BrowserState): string | null {
   if (state === "browser_not_installed")
     return tw(lang, platform === "windows" ? INSTALL_WINDOWS : INSTALL_MAC);
@@ -78,6 +84,8 @@ function browserNote(lang: Lang, platform: Platform, state: BrowserState): strin
   if (state === "browser_blocked_chrome") return tw(lang, POLICY_CHROME);
   if (state === "browser_per_user_chrome_only") return tw(lang, PER_USER);
   if (state === "browser_policy_unreadable") return tw(lang, UNREADABLE);
+  if (state === "no_proxy") return tw(lang, NO_CONNECTION);
+  if (state === "block_list_not_loaded") return tw(lang, NO_LIST);
   return null;
 }
 

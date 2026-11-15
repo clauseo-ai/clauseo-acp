@@ -6,6 +6,7 @@ use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::Arc;
 
+use base64::Engine as _;
 use clauseo_process::TreeWatch;
 use clauseo_protocol::{AgentKind, ErrorCode, ThreadId};
 
@@ -51,10 +52,27 @@ pub(super) fn launch(
             format!("no agent {} in the settings", row.agent),
         )
     })?;
-    // The relay token reaches the agent in a file; its stderr tail hides it all the same. So
-    // are the lawyer's MCP values and remote URLs, which reach it in `session/new`.
+    // The relay token and the browser proxy's password reach the agent's tree in files; its
+    // stderr tail hides them all the same. So are the lawyer's MCP values and remote URLs, which
+    // reach it in `session/new`.
     let mut redacted = super::super::launch_checks::relay::redacted(&prepared.run);
     redacted.extend(agent::loads::lawyer::redacted(&prepared.run.lawyer.servers));
+    redacted.extend(
+        prepared
+            .run
+            .egress
+            .as_ref()
+            .and_then(|egress| egress.secret())
+            .into_iter()
+            .flat_map(|credential| {
+                // The password, and the `Proxy-Authorization: Basic` value it makes.
+                let basic = format!("{}:{}", credential.user(), credential.password());
+                [
+                    credential.password().to_owned(),
+                    base64::engine::general_purpose::STANDARD.encode(basic),
+                ]
+            }),
+    );
     let folder = prepared.stored;
     let claude_home = prepared.claude_home.clone();
     let record = prepared

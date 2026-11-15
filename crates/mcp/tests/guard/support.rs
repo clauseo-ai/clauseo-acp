@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 use std::process::{
     Child, ChildStderr, ChildStdin, ChildStdout, Command, ExitStatus, Output, Stdio,
 };
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use serde_json::{Value, json};
 
@@ -16,6 +17,12 @@ pub(crate) const GUARD: &str = env!("CARGO_BIN_EXE_clauseo-mcp");
 
 /// The proxy the tests give the guard.
 pub(crate) const PROXY: &str = "http://127.0.0.1:9";
+/// The proxy's password the tests' host gives every guard: obviously fake, 64 of `0-9 a-f`.
+pub(crate) const PROXY_SECRET: &str =
+    "0f1e2d3c4b5a69780f1e2d3c4b5a69780f1e2d3c4b5a69780f1e2d3c4b5a6978";
+/// How many password files [`host_env`] has written in this process, so each has a name of
+/// its own: the guard deletes its file at its start, and two guards may start at once.
+static SECRET_FILES: AtomicU64 = AtomicU64::new(0);
 /// The Chrome stand-in's name in the scratch folder.
 pub(crate) const CHROME: &str = if cfg!(windows) {
     "chrome.exe"
@@ -134,15 +141,23 @@ pub(crate) fn example(name: &str) -> PathBuf {
     path
 }
 
-/// The variables the host sets, valid: the socket folder on Unix only.
+/// The variables the host sets, valid: the socket folder on Unix only. Like the host, it writes
+/// a fresh password file for each guard (`CLAUSEO_PROXY_SECRET_FILE`, in the scratch folder),
+/// which the guard deletes at its start: call it once per guard started.
 pub(crate) fn host_env(scratch: &Scratch) -> Vec<(String, String)> {
     let path = |name: &str| scratch.path().join(name).to_str().unwrap().to_owned();
+    let secret = format!(
+        "proxy-secret-{}",
+        SECRET_FILES.fetch_add(1, Ordering::Relaxed)
+    );
+    write::write(scratch.path().join(&secret), format!("{PROXY_SECRET}\n")).unwrap();
     let mut vars = vec![
         (
             "AGENT_BROWSER_CONFIG".to_owned(),
             path("agent-browser.json"),
         ),
         ("AGENT_BROWSER_PROXY".to_owned(), PROXY.to_owned()),
+        ("CLAUSEO_PROXY_SECRET_FILE".to_owned(), path(&secret)),
         ("AGENT_BROWSER_EXECUTABLE_PATH".to_owned(), path(CHROME)),
         (
             "AGENT_BROWSER_SESSION".to_owned(),

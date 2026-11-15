@@ -8,10 +8,10 @@ use std::path::{Path, PathBuf};
 use serde_json::{Map, Value, json};
 
 use super::tests::{
-    NODE, PYTHON, Turn, access, access_in, codex_home, data, fence, fence_with, listed, notes,
-    readable, run_root, runtime,
+    NODE, PYTHON, Turn, access, access_in, codex_home, data, escalated_access, fence, fence_with,
+    listed, notes, readable, run_root, runtime,
 };
-use super::{Listed, PROFILE, list};
+use super::{Listed, PROFILE, PROXY_SECRET_FILE, SECRET_GLOB, list};
 
 /// An approved escalated command's access to `path`.
 fn escalated(keys: &Map<String, Value>, path: &Path) -> String {
@@ -287,4 +287,27 @@ fn the_launch_list_names_siblings_only() {
         );
         assert_eq!((got.run, got.agent_state, got.runtime), (None, None, None));
     }
+}
+
+/// The session proxy's password file in the own run folder (`<run>/proxy-secret`, ADR 0053)
+/// is denied, read and write, in every kind of turn, escalated included, though the run folder
+/// around it stays writable: only the unfenced browser guard reads it. So is a later session's,
+/// in a run folder no listing named, by [`SECRET_GLOB`].
+#[test]
+fn the_own_proxy_secret_file_is_denied_in_a_writable_run_folder() {
+    let keys = fence_with(&listed());
+    let secret = run_root().join(PROXY_SECRET_FILE);
+    assert_eq!(access(&keys, &secret), "deny");
+    assert_eq!(escalated_access(&keys, &secret), "deny");
+    let beside = run_root().join("work").join("a.md");
+    assert_eq!(access_in(&keys, Turn::Profile, &beside), "write");
+    let scoped = &keys["permissions"][PROFILE]["filesystem"][data().to_str().unwrap()];
+    assert_eq!(scoped[SECRET_GLOB], json!("deny"));
+    let later = data().join("run").join("s9").join(PROXY_SECRET_FILE);
+    assert_eq!(access(&keys, &later), "deny");
+    assert_eq!(escalated_access(&keys, &later), "deny");
+    assert_eq!(
+        access(&keys, &data().join("run").join("s9").join("x")),
+        "read"
+    );
 }

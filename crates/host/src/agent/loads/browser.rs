@@ -11,8 +11,9 @@
 //! 2. The firm's `managed-mcp.json` ([`McpControl::Managed`]): no Clauseo server at all goes,
 //!    so `ManagedByFirm`.
 //! 3. No free browser slot: `TooManyBrowsers`.
-//! 4. An entry that asks for the session's proxy (it holds `{proxy_port}`: the parked Safe
-//!    workspace's, never the plain client's Codex entry) with no proxy set: `NoProxy`.
+//! 4. An entry that asks for the session's proxy (it holds `{proxy_port}`: Codex's entry,
+//!    whose proxy runs in open mode and enforces the unsafe-site block list, ADR 0053) with no
+//!    proxy set: `NoProxy`.
 //! 5. The firm's Chrome or Edge policy turns remote debugging off and its Clauseo policy does
 //!    not allow Clauseo's browser anyway (`browser::rd_policy`): `BrowserBlockedByPolicy`; or,
 //!    with no false, a place of that policy could not be read: `BrowserPolicyUnreadable`. On
@@ -21,9 +22,12 @@
 //!    only Chrome a per-user one the guard cannot start: `BrowserPerUserChromeOnly`.
 //! 6. No Chrome picked, a sidecar (`clauseo-mcp` or agent-browser) missing, or the session's
 //!    ports or socket folder not claimed (`browser::session`): `BrowserNotInstalled`.
-//! 7. For an entry that asks for it, the session's proxy did not open, so it has no port:
-//!    `NoProxy`. The proxy opens only after 6 found everything, and only for such an entry
-//!    (`actor/turn/launch_checks/egress.rs`).
+//! 7. For an entry that asks for it, the session's proxy did not open, so it has no port and
+//!    no password file (`{proxy_secret_file}`, the browser listener's, which the launch prep
+//!    writes once the proxy opened; a file not written counts as no proxy): `NoProxy`, or
+//!    `BlockListNotLoaded` when it refused to start because no block list is loaded (its open
+//!    mode would let every site through). The proxy opens only after 6 found everything, and
+//!    only for such an entry (`actor/turn/launch_checks/egress.rs`).
 //!
 //! Each value is filled into one decoded string (one argument, one variable's value) in one
 //! pass, so a folder whose name holds a token stays literal; MCP arguments go as a list with no
@@ -37,7 +41,7 @@ use clauseo_acp::McpServer;
 use clauseo_profile::instructions::BrowserPart;
 use clauseo_profile::placeholders::{
     self, BROWSER_DIR, BROWSER_EXECUTABLE, CDP_PORT, DAEMON_PORT, IN_SERVERS, MATTER_DOWNLOADS,
-    PROXY_PORT, SESSION_ID, SOCKET_DIR,
+    PROXY_PORT, PROXY_SECRET_FILE, SESSION_ID, SOCKET_DIR,
 };
 use clauseo_profile::servers::BROWSER;
 use clauseo_protocol::{ClauseoTool, ToolAvailability, ToolState, ToolsUnavailableReason};
@@ -81,6 +85,13 @@ pub(crate) struct BrowserInputs<'a> {
     pub(crate) proxy_set: bool,
     /// The port of this session's proxy, if it opened.
     pub(crate) port: Option<u16>,
+    /// The file holding that proxy's browser listener password, `<run>/proxy-secret`
+    /// (`{proxy_secret_file}`), once the launch prep wrote it: none when the proxy did not open
+    /// or the file was not written. The password itself never reaches the entry.
+    pub(crate) secret_file: Option<&'a Path>,
+    /// Why that proxy did not open, when it gave the browser its own reason in place of
+    /// `NoProxy` (`BlockListNotLoaded`: open mode with no block list loaded).
+    pub(crate) proxy_refused: Option<ToolsUnavailableReason>,
     /// Why the firm's browser policy left the browser out, if it did (`browser::rd_policy`).
     pub(crate) blocked_by_policy: Option<ToolsUnavailableReason>,
     /// The Chrome picked for this session, if any.
@@ -185,11 +196,19 @@ fn browser_entry(
     let claims = inputs
         .claims
         .ok_or(ToolsUnavailableReason::BrowserNotInstalled)?;
-    let port = if wants_proxy {
-        let port = inputs.port.ok_or(ToolsUnavailableReason::NoProxy)?;
-        Some(port.to_string())
+    let (port, secret_file) = if wants_proxy {
+        let not_open = inputs
+            .proxy_refused
+            .unwrap_or(ToolsUnavailableReason::NoProxy);
+        let port = inputs.port.ok_or(not_open)?;
+        let file = inputs.secret_file.ok_or(not_open)?;
+        let Some(file) = dunce::simplified(file).to_str() else {
+            tracing::warn!("the proxy's secret file is not UTF-8: the browser is left out");
+            return Err(ToolsUnavailableReason::BrowserNotInstalled);
+        };
+        (Some(port.to_string()), Some(file))
     } else {
-        None
+        (None, None)
     };
     let (Some(executable), Some(browser_dir), Some(matter_downloads)) = (
         executable.to_str(),
@@ -222,6 +241,7 @@ fn browser_entry(
         (CDP_PORT, cdp_port.as_str()),
     ];
     values.extend(port.as_deref().map(|port| (PROXY_PORT, port)));
+    values.extend(secret_file.map(|file| (PROXY_SECRET_FILE, file)));
     values.extend(daemon_port.as_deref().map(|port| (DAEMON_PORT, port)));
     values.extend(socket_dir.map(|dir| (SOCKET_DIR, dir)));
     let fill = |text: &str| placeholders::fill(text, &IN_SERVERS, &values);
@@ -288,8 +308,8 @@ pub(crate) fn offered(mut servers: Vec<McpServer>, none_here: bool) -> Vec<McpSe
 }
 
 /// Whether `server` asks for the session's egress proxy: an argument or a variable holds
-/// `{proxy_port}`. The plain client's Codex entry does not (Chrome goes direct, as Claude's shell
-/// browser does); the parked Safe workspace's would.
+/// `{proxy_port}`. Codex's entry does (`clauseo_profile::servers::browser`), so its Chrome goes
+/// through the session's proxy in open mode, which enforces the unsafe-site block list.
 pub(crate) fn asks_for_proxy(server: &McpServer) -> bool {
     let McpServer::Stdio { args, env, .. } = server else {
         return false;

@@ -208,6 +208,7 @@ fn http_proxy_from_the_host_env_carries_plain_http_and_https_proxy_does_not() {
 #[test]
 fn debug_of_a_config_never_shows_the_upstream_password_or_path() {
     let config = ProxyConfig {
+        mode: crate::ProxyMode::Allowlist,
         allow: crate::Allowlist::default(),
         silent: crate::Allowlist::default(),
         block: std::sync::Arc::default(),
@@ -238,6 +239,7 @@ fn a_fixed_upstream_must_be_a_bare_http_url() {
         "socks5://proxy.test:1080",
     ] {
         let config = ProxyConfig {
+            mode: crate::ProxyMode::Allowlist,
             allow: crate::Allowlist::default(),
             silent: crate::Allowlist::default(),
             block: std::sync::Arc::default(),

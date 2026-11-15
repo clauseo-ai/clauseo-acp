@@ -28,6 +28,12 @@ export const HI = {
   // Windows: the only Chrome is a copy installed for this user alone, which Clauseo's browser can't start
   // (UC-554; provisional Hindi, app track final)
   "Can't use your Chrome": "आपका Chrome इस्तेमाल नहीं हो सकता",
+  // Clauseo couldn't start the browser's safe connection for this conversation, so no browser starts in it
+  // (provisional Hindi, app track final)
+  "Couldn't start a safe connection": "सुरक्षित कनेक्शन शुरू नहीं हो सका",
+  // Clauseo's unsafe-site list didn't load as the conversation started, so no browser starts in it
+  // (provisional Hindi, app track final)
+  "Couldn't load the unsafe-site list": "असुरक्षित वेबसाइटों की सूची लोड नहीं हो सकी",
 } as const;
 
 /** Every string, English and Hindi, for the tests that hold the voice. */

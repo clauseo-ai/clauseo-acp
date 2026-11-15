@@ -58,7 +58,7 @@ fn ask(rig: &Rig, via: Via, form: Form, host: &str) -> u16 {
     };
     let (mut stream, request) = match via {
         Via::Agent => (rig.agent(), format!("{line}{}\r\n", rig.auth())),
-        Via::Browser => (rig.browser(), format!("{line}\r\n")),
+        Via::Browser => (rig.browser(), format!("{line}{}\r\n", rig.browser_auth())),
     };
     stream.write_all(request.as_bytes()).unwrap();
     let code = status(&read_head(&mut stream));

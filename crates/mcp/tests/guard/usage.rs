@@ -167,8 +167,9 @@ fn a_missing_or_invalid_host_variable_is_named_and_nothing_starts() {
     let stub = example("echo_stub");
     let log = scratch.log();
     let args = [log.as_os_str()];
-    // `AGENT_BROWSER_PROXY` is optional (the plain client's Codex entry sends none:
-    // `env.rs`'s no-proxy test), but one that is set must be valid (below).
+    // `AGENT_BROWSER_PROXY` and `CLAUSEO_PROXY_SECRET_FILE` go together: neither is required
+    // (`env.rs`'s no-proxy test), but one without the other is refused, and a proxy that is set
+    // must be valid (below).
     let mut required = vec![
         "AGENT_BROWSER_CONFIG",
         "AGENT_BROWSER_EXECUTABLE_PATH",
@@ -185,6 +186,28 @@ fn a_missing_or_invalid_host_variable_is_named_and_nothing_starts() {
         assert_eq!(
             stderr(&output),
             format!("clauseo-mcp browser-guard: {name} is not set; the host sets it\n")
+        );
+    }
+    for (name, other, words) in [
+        (
+            "CLAUSEO_PROXY_SECRET_FILE",
+            "AGENT_BROWSER_PROXY",
+            "AGENT_BROWSER_PROXY is set without CLAUSEO_PROXY_SECRET_FILE, the file of its \
+             password; the host sets both",
+        ),
+        (
+            "AGENT_BROWSER_PROXY",
+            "CLAUSEO_PROXY_SECRET_FILE",
+            "CLAUSEO_PROXY_SECRET_FILE is set without AGENT_BROWSER_PROXY, whose password it is",
+        ),
+    ] {
+        let mut command = guard_command(&scratch, &stub, &args);
+        command.env_remove(name);
+        let output = run(command);
+        assert_eq!(output.status.code(), Some(2), "{other} without {name}");
+        assert_eq!(
+            stderr(&output),
+            format!("clauseo-mcp browser-guard: {words}\n")
         );
     }
     for (name, value) in [

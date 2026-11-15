@@ -117,10 +117,11 @@ jobs:
       features: ${{ steps.mode.outputs.features }}
       release_date: ${{ steps.mode.outputs.release_date }}
       version_suffix: ${{ steps.mode.outputs.version_suffix }}
-      # The block-list switch, 'false' for launch: `blocklist` a no-op, no snapshot download and no
-      # blocklist.conf.json in any build. The Safe workspace sets it to 'true', which brings all
-      # three back as they were. Exactly 'true' or 'false'.
-      bundle_blocklist: 'false'
+      # The block-list switch, 'true' since the guarded browser's session proxy enforces the list
+      # (ADR 0053): `blocklist` downloads the snapshot, checks its signature and every build
+      # bundles it with blocklist.conf.json. 'false' makes `blocklist` a no-op, with no snapshot
+      # download and no blocklist.conf.json in any build. Exactly 'true' or 'false'.
+      bundle_blocklist: 'true'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

@@ -43,6 +43,8 @@ fn expected(scratch: &Scratch) -> BTreeMap<String, String> {
     let cwd = scratch.cwd();
     let under = |name: &str| cwd.join(name).to_str().unwrap().to_owned();
     let mut map: BTreeMap<String, String> = host_env(scratch).into_iter().collect();
+    // The guard's alone: read and deleted at its start, never passed on.
+    map.remove("CLAUSEO_PROXY_SECRET_FILE");
     // The test's own knob for the guard, never agent-browser's.
     map.remove("CLAUSEO_TEST_GUARD_PROGRAM_FILES");
     // agent-browser's stream server is off on every system, and it gets no port for it.
@@ -125,7 +127,7 @@ const RELAY: &str = "<the guard's relay>";
 /// its form, `ws://127.0.0.1:<port>/devtools/browser/<64 lowercase hex>`, is checked by the
 /// relay's own tests (`src/browser_guard/devtools/tests.rs`).
 fn is_relay(value: &str) -> bool {
-    value == "[relay url redacted]"
+    value == "[secret redacted]"
 }
 
 /// Variables Windows itself puts in a new process's environment whatever block it is given:
@@ -209,7 +211,9 @@ fn without_a_proxy_the_guard_starts_and_the_child_gets_no_proxy_variable() {
     let scratch = Scratch::new("env-no-proxy");
     let args = ["mcp", "--tools", "core"].map(OsStr::new);
     let mut command = guard_command(&scratch, &example("env_stub"), &args);
-    command.env_remove("AGENT_BROWSER_PROXY");
+    command
+        .env_remove("AGENT_BROWSER_PROXY")
+        .env_remove("CLAUSEO_PROXY_SECRET_FILE");
     command.envs(HOSTILE.iter().copied());
     if cfg!(windows) {
         command.env("PROCESSOR_ARCHITECTURE", OS_SET_HOSTILE);
@@ -229,6 +233,49 @@ fn without_a_proxy_the_guard_starts_and_the_child_gets_no_proxy_variable() {
     let (status, rest) = guard.finish();
     assert_eq!(status.code(), Some(0), "{rest}");
     assert_eq!(child_env(&report, scratch.session()), wanted);
+}
+
+/// The proxy's password comes by file (`CLAUSEO_PROXY_SECRET_FILE`): the guard reads it at its
+/// start and deletes it, and neither the one-shot agent-browser nor the one given the relay sees
+/// the variable or the password. The browser's start, whose `Fetch.enable` the Chrome stand-in
+/// answers, goes on as without it.
+#[test]
+fn the_proxy_secret_file_is_read_deleted_and_never_passed_on() {
+    let scratch = Scratch::new("env-secret");
+    // An obviously fake password.
+    let secret = "feedface".repeat(8);
+    let file = scratch.path().join("proxy-secret");
+    write::write(&file, format!("{secret}\n")).unwrap();
+    let args = ["mcp", "--tools", "core"].map(OsStr::new);
+    let mut command = guard_command(&scratch, &example("env_stub"), &args);
+    command.envs(HOSTILE.iter().copied());
+    command.env("CLAUSEO_PROXY_SECRET_FILE", &file);
+    if cfg!(windows) {
+        command.env("PROCESSOR_ARCHITECTURE", OS_SET_HOSTILE);
+    } else {
+        command.env("LANG", "en_IN.UTF-8").env("lang", "xx");
+    }
+    let mut guard = Guard::start(command);
+    guard.send(&serde_json::json!({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}));
+    let oneshot = guard.read();
+    assert!(!file.exists(), "the guard deletes the file at its start");
+    let mut without_cdp = expected(&scratch);
+    without_cdp.remove("AGENT_BROWSER_CDP");
+    assert_eq!(child_env(&oneshot, scratch.session()), without_cdp);
+    guard.send_call("open");
+    let report = guard.read();
+    let (status, rest) = guard.finish();
+    assert_eq!(status.code(), Some(0), "{rest}");
+    assert_eq!(child_env(&report, scratch.session()), expected(&scratch));
+    for seen in [&oneshot, &report] {
+        let text = seen.to_string();
+        assert!(
+            !text.contains("CLAUSEO_PROXY_SECRET"),
+            "the child saw the variable"
+        );
+        assert!(!text.contains(&secret[..16]), "the child saw the password");
+    }
+    assert!(!rest.contains(&secret[..16]), "the password reached stdout");
 }
 
 /// The environment in an `env_stub` report, with the run's own session name

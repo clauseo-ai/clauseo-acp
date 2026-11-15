@@ -14,9 +14,10 @@ use clauseo_blocklist::Current;
 use futures::channel::oneshot;
 use futures::future::BoxFuture;
 
+use crate::proxy::local_net::{LocalNets, OnLink};
 use crate::proxy::net::Network;
 use crate::proxy::upstream::{Answer, Env, Failure, Intent, OsAnswer, OsRoute, Reach, Scheme};
-use crate::proxy::{Exchange, Limits, Options, ProxyConfig, ProxyHandle, start_with};
+use crate::proxy::{Exchange, Limits, Options, ProxyConfig, ProxyHandle, ProxyMode, start_with};
 use crate::{Allowlist, Clock, Denial, DenialSink, Reachability, Route, Upstream};
 
 /// How long a client waits for any one read before the test fails.
@@ -211,6 +212,11 @@ pub(crate) struct Setup {
     pub(crate) reach: Option<Box<Reach>>,
     /// [`ProxyConfig::browser`]: whether the browser listener is bound (true by default).
     pub(crate) browser: bool,
+    /// [`ProxyConfig::mode`] (allowlist by default).
+    pub(crate) mode: ProxyMode,
+    /// The machine's own networks, each an address and its prefix length (none by default, so
+    /// no test depends on this machine's interfaces).
+    pub(crate) local: Vec<(&'static str, u8)>,
 }
 
 impl Default for Setup {
@@ -228,6 +234,8 @@ impl Default for Setup {
             intent: None,
             reach: None,
             browser: true,
+            mode: ProxyMode::Allowlist,
+            local: Vec::new(),
         }
     }
 }
@@ -266,10 +274,19 @@ pub(crate) fn rig(setup: Setup) -> Rig {
     let clock = Arc::new(TestClock::default());
     let records = Arc::new(Records::default());
     let kept = Arc::clone(&records);
+    // Open mode with the browser listener needs a loaded list (`Error::BlockListNotLoaded`): a
+    // rig given none gets one naming a host no test asks for.
+    let unloaded = setup.block.get().is_unloaded();
+    let block = if setup.mode == ProxyMode::Open && setup.browser && unloaded {
+        super::blocked::placeholder()
+    } else {
+        setup.block
+    };
     let config = ProxyConfig {
+        mode: setup.mode,
         allow: list(&setup.allow),
         silent: list(&setup.silent),
-        block: setup.block,
+        block,
         allowed: setup.allowed,
         upstream: setup.upstream,
         denials: Arc::clone(&sink) as Arc<dyn DenialSink>,
@@ -299,6 +316,13 @@ pub(crate) fn rig(setup: Setup) -> Rig {
             }
         },
         reach: setup.reach,
+        local: Some(LocalNets::new(
+            setup
+                .local
+                .iter()
+                .map(|(ip, prefix)| OnLink::new(ip.parse().unwrap(), *prefix))
+                .collect(),
+        )),
     };
     let handle = start_with(config, Arc::clone(&net) as Arc<dyn Network>, options).unwrap();
     Rig {
@@ -339,6 +363,16 @@ impl Rig {
         auth_line(&token_of(&self.handle))
     }
 
+    /// The `Proxy-Authorization` line for the browser listener's own credential.
+    pub(crate) fn browser_auth(&self) -> String {
+        let credential = self
+            .handle
+            .browser_credential()
+            .expect("a browser listener");
+        assert_eq!(credential.user(), "clauseo");
+        auth_line(credential.password())
+    }
+
     pub(crate) fn agent(&self) -> TcpStream {
         client(self.handle.port())
     }
@@ -349,22 +383,22 @@ impl Rig {
 
     /// Sends a CONNECT with the token on the agent listener; the stream and the status.
     pub(crate) fn connect(&self, target: &str) -> (TcpStream, u16) {
-        let mut stream = self.agent();
-        let request = format!(
-            "CONNECT {target} HTTP/1.1\r\nHost: {target}\r\n{}\r\n",
-            self.auth()
-        );
-        stream.write_all(request.as_bytes()).unwrap();
-        let status = status(&read_head(&mut stream));
-        (stream, status)
+        connect_on(self.agent(), &self.auth(), target)
     }
 
     /// Sends `request` on the agent listener after adding the token; returns the whole answer.
     pub(crate) fn exchange(&self, request: &str) -> String {
-        let mut stream = self.agent();
-        let with_token = request.replacen("\r\n", &format!("\r\n{}", self.auth()), 1);
-        stream.write_all(with_token.as_bytes()).unwrap();
-        String::from_utf8_lossy(&read_all(&mut stream)).into_owned()
+        exchange_on(self.agent(), &self.auth(), request)
+    }
+
+    /// [`Rig::connect`] on the browser listener, with its own credential.
+    pub(crate) fn browser_connect(&self, target: &str) -> (TcpStream, u16) {
+        connect_on(self.browser(), &self.browser_auth(), target)
+    }
+
+    /// [`Rig::exchange`] on the browser listener, with its own credential.
+    pub(crate) fn browser_exchange(&self, request: &str) -> String {
+        exchange_on(self.browser(), &self.browser_auth(), request)
     }
 
     pub(crate) fn denials(&self) -> Vec<Denial> {
@@ -385,6 +419,21 @@ impl Rig {
             .unwrap();
         kept.clone()
     }
+}
+
+/// Sends a CONNECT to `target` with the `auth` line on `stream`; the stream and the status.
+fn connect_on(mut stream: TcpStream, auth: &str, target: &str) -> (TcpStream, u16) {
+    let request = format!("CONNECT {target} HTTP/1.1\r\nHost: {target}\r\n{auth}\r\n");
+    stream.write_all(request.as_bytes()).unwrap();
+    let status = status(&read_head(&mut stream));
+    (stream, status)
+}
+
+/// Sends `request` on `stream` with the `auth` line after its first line; the whole answer.
+fn exchange_on(mut stream: TcpStream, auth: &str, request: &str) -> String {
+    let with_token = request.replacen("\r\n", &format!("\r\n{auth}"), 1);
+    stream.write_all(with_token.as_bytes()).unwrap();
+    String::from_utf8_lossy(&read_all(&mut stream)).into_owned()
 }
 
 pub(crate) fn client(port: u16) -> TcpStream {

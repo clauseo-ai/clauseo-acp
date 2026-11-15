@@ -24,6 +24,8 @@ const BROWSER: BrowserState[] = [
   "browser_blocked_edge",
   "browser_blocked_chrome",
   "browser_per_user_chrome_only",
+  "no_proxy",
+  "block_list_not_loaded",
 ];
 const avail = (state: string): ToolState["availability"] =>
   state === "available" ? "available" : ({ unavailable: { reason: state } } as never);
@@ -52,8 +54,8 @@ test("knownTools keeps the tools and states it has words for, web search first, 
 });
 
 test("a tool, an availability or a reason it doesn't know, or a reason with no words on that tool, says nothing", () => {
-  // the guarded browser's reasons never come for #870's shell browser, so they have no words
-  for (const gone of ["managed_by_firm", "no_proxy", "too_many_browsers"])
+  // the guarded browser's other reasons never come for #870's shell browser, so they have no words
+  for (const gone of ["managed_by_firm", "too_many_browsers"])
     expect(knownTools([{ tool: "browser", availability: avail(gone) }])).toEqual([]);
   expect(
     knownTools([
@@ -63,6 +65,7 @@ test("a tool, an availability or a reason it doesn't know, or a reason with no w
       { tool: "browser", availability: avail("unknown") },
       { tool: "browser", availability: avail("no_search_on_this_login") },
       { tool: "web_search", availability: avail("no_proxy") },
+      { tool: "web_search", availability: avail("block_list_not_loaded") },
       { tool: "browser", availability: avail("a_newer_reason") },
     ]),
   ).toEqual([]);
@@ -93,6 +96,9 @@ test("each glyph's state: on as drawn, the firm's lock for locked off and its po
     // not read is no firm's lock, nor a per-user Chrome
     browser_policy_unreadable: "off",
     browser_per_user_chrome_only: "off",
+    // a safe connection or unsafe-site list that didn't start is no firm's lock either
+    no_proxy: "off",
+    block_list_not_loaded: "off",
   };
   for (const w of WEB) expect(glyphState({ tool: "web_search", state: w })).toBe(web[w]);
   for (const b of BROWSER) expect(glyphState({ tool: "browser", state: b })).toBe(browser[b]);
@@ -127,6 +133,12 @@ test("the line's name and tooltip: one sentence per tool, web search first, its 
   );
   expect(label(null, "browser_blocked_edge")).toBe("Browser: off, blocked by a browser policy.");
   expect(label(null, "browser_per_user_chrome_only")).toBe("Browser: off, can't use your Chrome.");
+  expect(label("available", "no_proxy")).toBe(
+    "Web search: on. Browser: off, couldn't start a safe connection.",
+  );
+  expect(label(null, "block_list_not_loaded")).toBe(
+    "Browser: off, couldn't load the unsafe-site list.",
+  );
 });
 
 test("sameTools reads two lists the same only when every tool and state match", () => {
@@ -141,6 +153,12 @@ const POLICY =
 const UNREADABLE =
   "Clauseo couldn't check this computer's browser settings, so it won't use a browser for now. " +
   "It checks again the next time it needs one.";
+const NO_CONNECTION =
+  "Clauseo couldn't start its safe connection for the browser, so it won't use one for now. " +
+  "It tries again when a new conversation starts.";
+const NO_LIST =
+  "Clauseo's unsafe-site list didn't load, so it won't use a browser for now. " +
+  "It tries again when a new conversation starts.";
 const INSTALL_MAC = "Install Google Chrome, then start a new conversation.";
 const INSTALL_WINDOWS = "Install Google Chrome or Microsoft Edge, then start a new conversation.";
 
@@ -173,6 +191,8 @@ test("each row: its glyph, name, an On or Off chip, and the reason in a few word
     browser_blocked_edge: "Blocked by a browser policy",
     browser_blocked_chrome: "Blocked by a browser policy",
     browser_per_user_chrome_only: "Can't use your Chrome",
+    no_proxy: "Couldn't start a safe connection",
+    block_list_not_loaded: "Couldn't load the unsafe-site list",
   };
   const notes: Record<string, string> = {
     browser_not_installed: INSTALL_MAC,
@@ -181,6 +201,8 @@ test("each row: its glyph, name, an On or Off chip, and the reason in a few word
     browser_blocked_edge: POLICY_EDGE,
     browser_blocked_chrome: POLICY_CHROME,
     browser_per_user_chrome_only: PER_USER,
+    no_proxy: NO_CONNECTION,
+    block_list_not_loaded: NO_LIST,
   };
   const rows: KnownTool[] = [
     ...WEB.map((state): KnownTool => ({ tool: "web_search", state })),
@@ -321,6 +343,49 @@ test("a browser policy Clauseo couldn't check says it checks again", () => {
       "Clauseo इस कंप्यूटर की ब्राउज़र सेटिंग्स की जाँच नहीं कर सका, इसलिए वह अभी ब्राउज़र का उपयोग नहीं करेगा। " +
       "अगली बार ब्राउज़र की ज़रूरत होने पर वह फिर से जाँच करेगा।",
   });
+});
+
+test("a safe connection or unsafe-site list that didn't start keeps the browser off until a new conversation", () => {
+  const cases = [
+    {
+      state: "no_proxy",
+      reason: "Couldn't start a safe connection",
+      note: NO_CONNECTION,
+      hiReason: "सुरक्षित कनेक्शन शुरू नहीं हो सका",
+      hiNote:
+        "Clauseo ब्राउज़र के लिए अपना सुरक्षित कनेक्शन शुरू नहीं कर सका, इसलिए वह अभी ब्राउज़र का उपयोग नहीं करेगा। " +
+        "नई बातचीत शुरू होने पर वह फिर से प्रयास करेगा।",
+    },
+    {
+      state: "block_list_not_loaded",
+      reason: "Couldn't load the unsafe-site list",
+      note: NO_LIST,
+      hiReason: "असुरक्षित वेबसाइटों की सूची लोड नहीं हो सकी",
+      hiNote:
+        "Clauseo की असुरक्षित वेबसाइटों की सूची लोड नहीं हुई, इसलिए वह अभी ब्राउज़र का उपयोग नहीं करेगा। " +
+        "नई बातचीत शुरू होने पर वह फिर से प्रयास करेगा।",
+    },
+  ] as const;
+  for (const c of cases) {
+    const tool: KnownTool = { tool: "browser", state: c.state };
+    for (const platform of ["mac", "windows"] as const)
+      expect(words(tool, { platform })).toMatchObject({
+        glyph: "off",
+        reason: c.reason,
+        reasonTip: null,
+        note: c.note,
+        settings: false,
+        recheck: null,
+      });
+    // a policy read has nothing to say to it
+    expect(words(tool, { policy: { state: "clear" } })).toMatchObject({
+      reason: c.reason,
+      note: c.note,
+      recheck: null,
+    });
+    expect(toolRow("hi", tool, ROOM)).toMatchObject({ reason: c.hiReason, note: c.hiNote });
+    expect(toolsLabel("hi", "mac", [tool])).toBe(`ब्राउज़र: बंद, ${c.hiReason}।`);
+  }
 });
 
 test("in Hindi, the tools' words say their Hindi, and a reason keeps its brand name's capital", () => {

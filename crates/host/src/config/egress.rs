@@ -33,14 +33,26 @@ pub trait EgressProxy: Send + Sync {
     ) -> Result<(), clauseo_sandbox::Error>;
     /// The port of `session`'s browser listener, or none.
     fn port_for(&self, session: SessionKey) -> Option<u16>;
+    /// The password `session`'s browser listener requires (`ProxyHandle::browser_credential`),
+    /// or none. The host hands it to the browser guard only, in the run folder's
+    /// `proxy-secret` file the `browser` entry's `CLAUSEO_PROXY_SECRET_FILE` names; never in an
+    /// argument, a variable or a log.
+    fn credential_for(&self, session: SessionKey) -> Option<clauseo_sandbox::ProxyCredential>;
     /// Stops `session`'s proxy, if it has one: a session it never opened is a no-op.
     fn close(&self, session: SessionKey);
 }
 
-/// A proxy stand-in for tests: the same port for every session; `open` and `close` do nothing.
+/// A proxy stand-in for tests: the same port and password ([`TestProxy::PASSWORD`]) for every
+/// session; `open` and `close` do nothing.
 #[cfg(feature = "test-support")]
 #[derive(Debug, Clone, Copy)]
 pub struct TestProxy(pub u16);
+
+#[cfg(feature = "test-support")]
+impl TestProxy {
+    /// The browser listener's password every session gets.
+    pub const PASSWORD: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+}
 
 #[cfg(feature = "test-support")]
 impl EgressProxy for TestProxy {
@@ -54,6 +66,12 @@ impl EgressProxy for TestProxy {
 
     fn port_for(&self, _session: SessionKey) -> Option<u16> {
         Some(self.0)
+    }
+
+    fn credential_for(&self, _session: SessionKey) -> Option<clauseo_sandbox::ProxyCredential> {
+        Some(clauseo_sandbox::ProxyCredential::new(
+            Self::PASSWORD.to_owned(),
+        ))
     }
 
     fn close(&self, _session: SessionKey) {}

@@ -81,10 +81,10 @@ CARGO_PROFILE_RELEASE_SPLIT_DEBUGINFO=$(wf_env CARGO_PROFILE_RELEASE_SPLIT_DEBUG
 export SAFE_WORKSPACE TARGET MODE=dry CLAUSEO_RELEASE_MODE=dry VERSION FEATURES="" RUSTFLAGS
 SAFE_WORKSPACE=$(wf_env SAFE_WORKSPACE)
 RUSTFLAGS=$(wf_matrix rustflags)
-# The block-list switch: release.yml's check output bundle_blocklist, 'false' for launch (the Safe
-# workspace sets it to 'true'), read from there so a local DMG matches the release. On, the
-# blocklist step downloads and verifies the snapshot and every build passes blocklist.conf.json;
-# off, neither, and minisign is not needed.
+# The block-list switch: release.yml's check output bundle_blocklist, 'true' for launch (the
+# guarded browser's session proxy enforces the list, ADR 0053), read from there so a local DMG
+# matches the release. On, the blocklist step downloads and verifies the snapshot and every build
+# passes blocklist.conf.json; off, neither, and minisign is not needed.
 BUNDLE_BLOCKLIST=$(wf_output bundle_blocklist)
 case $BUNDLE_BLOCKLIST in
   true) BLOCKLIST_OVERLAY=release/blocklist.conf.json ;;

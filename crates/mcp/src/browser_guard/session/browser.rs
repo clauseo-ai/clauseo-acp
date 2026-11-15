@@ -173,8 +173,8 @@ fn start_one(
             parent,
             (Arc::clone(&shared.held), Arc::clone(&shared.saved)),
         )?;
-        // The guard's own CDP commands (PR-3's proxy answer), before agent-browser exists.
-        browser.start_guard(&launcher.env)?;
+        // The guard's own CDP clients (the proxy's credential), before agent-browser exists.
+        browser.start_guard(&launcher.env, launcher.proxy_secret.as_ref())?;
         Ok((browser, endpoint))
     });
     if started.is_err() {

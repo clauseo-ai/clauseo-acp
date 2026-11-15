@@ -1,5 +1,5 @@
-//! Codex's `browser` entry (`clauseo_profile::servers::browser_mcp`): no proxy, filled per
-//! session on each OS.
+//! Codex's `browser` entry (`clauseo_profile::servers::browser_mcp`): the session's proxy and
+//! its password (ADR 0053), filled per session on each OS.
 
 use std::path::{Path, PathBuf};
 
@@ -7,10 +7,10 @@ use clauseo_acp::McpServer;
 use clauseo_protocol::ToolsUnavailableReason;
 
 use super::browser::{BrowserInputs, Claims, asks_for_proxy, hook_servers, no_browser, offered};
-use super::profile_tests::{browser_server, claims, inputs, reason};
+use super::profile_tests::{PASSWORD, SECRET_FILE, claims, inputs, reason};
 
 /// Codex's `browser` entry exactly as `clauseo_profile::servers::browser` builds it on Windows
-/// (`windows`) or on macOS and Linux: no proxy.
+/// (`windows`) or on macOS and Linux: the proxy's address and password as variables.
 fn codex_server(windows: bool) -> McpServer {
     let mut args = vec![
         "browser-guard",
@@ -35,6 +35,8 @@ fn codex_server(windows: bool) -> McpServer {
     if !windows {
         env.push(("AGENT_BROWSER_SOCKET_DIR", "{socket_dir}"));
     }
+    env.push(("AGENT_BROWSER_PROXY", "http://127.0.0.1:{proxy_port}"));
+    env.push(("CLAUSEO_PROXY_SECRET_FILE", "{proxy_secret_file}"));
     McpServer::Stdio {
         name: "browser".to_owned(),
         command: PathBuf::from("/app/clauseo-mcp"),
@@ -46,12 +48,14 @@ fn codex_server(windows: bool) -> McpServer {
     }
 }
 
-/// Codex's entry needs no proxy: with none set and none opened it goes, filled per session, on
-/// Windows (the daemon port, no socket folder) and on macOS and Linux (the socket folder), and
-/// carries no proxy variable. Every `AGENT_BROWSER_*` value reaches the guard through the entry,
-/// since Codex starts it with codex-acp's `HOME`, not Clauseo's.
+/// Codex's entry asks for the session's proxy (ADR 0053): with one opened it goes, filled per
+/// session, on Windows (the daemon port, no socket folder) and on macOS and Linux (the socket
+/// folder), with the proxy's address and its browser listener's password as variables, the
+/// password in no argument. Every `AGENT_BROWSER_*` value reaches the guard through the entry,
+/// since Codex starts it with codex-acp's `HOME`, not Clauseo's. With no proxy set, or one that
+/// did not open, it is left out (`NoProxy`, or `BlockListNotLoaded` when that was why).
 #[test]
-fn codex_s_entry_goes_without_a_proxy_on_each_os() {
+fn codex_s_entry_goes_with_the_session_s_proxy_on_each_os() {
     let dir = PathBuf::from("/data/run/t-1/browser");
     let chrome = PathBuf::from("/chrome/msedge.exe");
     for windows in [false, true] {
@@ -60,15 +64,41 @@ fn codex_s_entry_goes_without_a_proxy_on_each_os() {
             socket_dir: (!windows).then(|| Path::new("/tmp/clauseo-ab-0123456789abcdef")),
             ..claims()
         };
-        let no_proxy = BrowserInputs {
-            proxy_set: false,
-            port: None,
+        let opened = BrowserInputs {
             claims: Some(claims),
             ..inputs(&dir, Some(&chrome))
         };
         let server = codex_server(windows);
-        assert!(!asks_for_proxy(&server));
-        let (servers, state) = hook_servers(vec![server], &no_proxy);
+        assert!(asks_for_proxy(&server));
+        for unopened in [
+            BrowserInputs {
+                proxy_set: false,
+                port: None,
+                secret_file: None,
+                ..opened
+            },
+            BrowserInputs {
+                port: None,
+                secret_file: None,
+                ..opened
+            },
+        ] {
+            let (sent, state) = hook_servers(vec![server.clone()], &unopened);
+            assert_eq!(sent, Vec::<McpServer>::new());
+            assert_eq!(reason(state), Some(ToolsUnavailableReason::NoProxy));
+        }
+        // A proxy that refused to start with no block list loaded says so.
+        let no_list = BrowserInputs {
+            port: None,
+            secret_file: None,
+            proxy_refused: Some(ToolsUnavailableReason::BlockListNotLoaded),
+            ..opened
+        };
+        let (sent, state) = hook_servers(vec![server.clone()], &no_list);
+        assert_eq!(sent, Vec::<McpServer>::new());
+        let want = Some(ToolsUnavailableReason::BlockListNotLoaded);
+        assert_eq!(reason(state), want);
+        let (servers, state) = hook_servers(vec![server], &opened);
         assert_eq!(reason(state.clone()), None, "windows {windows}: {state:?}");
         let McpServer::Stdio { args, env, .. } = &servers[0] else {
             panic!("expected a stdio server");
@@ -89,6 +119,9 @@ fn codex_s_entry_goes_without_a_proxy_on_each_os() {
         }
         want_args.extend(["--", "mcp", "--tools", "core"]);
         assert_eq!(args, &want_args);
+        // The password is in no argument and no variable: only its file's path is.
+        assert!(args.iter().all(|arg| !arg.contains(PASSWORD)));
+        assert!(env.iter().all(|(_, value)| !value.contains(PASSWORD)));
         let mut want_env = vec![
             ("AGENT_BROWSER_CONFIG", "/data/browser/agent-browser.json"),
             ("AGENT_BROWSER_EXECUTABLE_PATH", "/chrome/msedge.exe"),
@@ -100,21 +133,14 @@ fn codex_s_entry_goes_without_a_proxy_on_each_os() {
                 "/tmp/clauseo-ab-0123456789abcdef",
             ));
         }
+        want_env.push(("AGENT_BROWSER_PROXY", "http://127.0.0.1:8123"));
+        want_env.push(("CLAUSEO_PROXY_SECRET_FILE", SECRET_FILE));
         let got: Vec<(&str, &str)> = env
             .iter()
             .map(|(name, value)| (name.as_str(), value.as_str()))
             .collect();
         assert_eq!(got, want_env, "windows {windows}");
     }
-    // The proxy-asking entry still needs one.
-    assert!(asks_for_proxy(&browser_server()));
-    let no_proxy = BrowserInputs {
-        proxy_set: false,
-        port: None,
-        ..inputs(&dir, Some(&chrome))
-    };
-    let (_, state) = hook_servers(vec![browser_server()], &no_proxy);
-    assert_eq!(reason(state), Some(ToolsUnavailableReason::NoProxy));
 }
 
 /// Codex on Windows has no browser (`no_browser`): its entry is dropped before the fill, so the

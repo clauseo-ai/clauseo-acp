@@ -22,7 +22,7 @@ const ENTRIES: &[&str] = &[
 ];
 
 /// A list made at `made` with `entries` (`<host> <tag>` lines, in any order).
-fn list(made: &str, entries: &[&str]) -> BlockList {
+pub(super) fn list(made: &str, entries: &[&str]) -> BlockList {
     let mut lines = entries.to_vec();
     lines.sort_unstable();
     let mut text = lines.join("\n");
@@ -36,6 +36,11 @@ fn list(made: &str, entries: &[&str]) -> BlockList {
 
 pub(super) fn current() -> Arc<Current> {
     Arc::new(Current::new(list(MADE, ENTRIES)))
+}
+
+/// A loaded list naming one host no test asks for, for an open-mode rig given no list.
+pub(super) fn placeholder() -> Arc<Current> {
+    Arc::new(Current::new(list(MADE, &["listed-nowhere.test p"])))
 }
 
 /// A rig with the list loaded, allowing `allow`, each resolving to 192.0.2.10, where an echo
@@ -302,9 +307,9 @@ fn the_block_list_is_asked_before_the_private_address_rule_and_the_allowlist() {
 fn the_browser_listener_refuses_a_listed_host_too() {
     let rig = block_rig(&["evil.example"], &[]);
     let mut stream = rig.browser();
-    stream
-        .write_all(b"CONNECT evil.example:443 HTTP/1.1\r\nHost: evil.example\r\n\r\n")
-        .unwrap();
+    let auth = rig.browser_auth();
+    let request = format!("CONNECT evil.example:443 HTTP/1.1\r\nHost: evil.example\r\n{auth}\r\n");
+    stream.write_all(request.as_bytes()).unwrap();
     assert_eq!(status(&read_head(&mut stream)), 403);
     no_network(&rig);
     let denial = blocked("evil.example", 443, "evil.example", Tag::Phishing);

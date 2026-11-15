@@ -10,8 +10,9 @@ use std::sync::mpsc::{Receiver, Sender, channel};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use clauseo_host::{EgressProxy, HostConfig, SessionKey};
+use clauseo_host::{EgressProxy, HostConfig, SessionKey, TestProxy};
 use clauseo_protocol::ToolsUnavailableReason;
+use clauseo_sandbox::{ProxyCredential, ProxyMode};
 use serde_json::json;
 
 use crate::profile_rig::{
@@ -33,7 +34,8 @@ const PROXY_VARS: [&str; 8] = [
 ];
 
 /// A proxy that records each call, in order, beside the run folder removals; `open` fails when
-/// `refuse` is set. Each close is also sent on `closed`.
+/// `refuse` is set. Each close is also sent on `closed`. Every session's browser listener
+/// password is `TestProxy::PASSWORD`.
 pub(crate) struct Recording {
     calls: Arc<Mutex<Vec<String>>>,
     refuse: bool,
@@ -62,9 +64,12 @@ impl EgressProxy for Recording {
         // The agent's own API host is checked in `launch_checks/egress/tests.rs`: these tests
         // launch a kind-less agent (`BROWSING`), whose list holds the seed sites alone.
         assert!(config.allow.contains("sci.gov.in"), "{config:?}");
+        // ADR 0053: open mode, any public host but the listed and private ones.
+        assert_eq!(config.mode, ProxyMode::Open, "{config:?}");
         // Stage C's rule: the host opens a proxy only for a launch that offers the browser, and
-        // binds its token-free browser listener; a launch without one opens none (the tests
-        // `no_proxy_opens_*` and `the_browser_slot_stays_taken_during_the_wait`).
+        // binds its browser listener (which takes [`Recording::credential_for`]'s password); a
+        // launch without one opens none (the tests `no_proxy_opens_*` and
+        // `the_browser_slot_stays_taken_during_the_wait`).
         assert!(
             config.browser,
             "a proxy opened without its browser listener"
@@ -83,6 +88,10 @@ impl EgressProxy for Recording {
 
     fn port_for(&self, _session: SessionKey) -> Option<u16> {
         Some(8123)
+    }
+
+    fn credential_for(&self, _session: SessionKey) -> Option<ProxyCredential> {
+        Some(ProxyCredential::new(TestProxy::PASSWORD.to_owned()))
     }
 
     fn close(&self, session: SessionKey) {
@@ -321,4 +330,70 @@ fn no_proxy_opens_without_chrome() {
     );
     host.shutdown();
     assert_eq!(calls(&log), ["removal"]);
+}
+
+/// Under the firm's `managed-mcp.json` no entry goes (`ManagedByFirm`), so no proxy opens and
+/// no password file is written for a browser entry that never reaches the agent.
+#[test]
+fn no_proxy_opens_under_managed_mcp() {
+    let dir = Dir::new("egress_managed", &[]);
+    dir.set_managed_mcp();
+    claude(&dir, &json!([]));
+    let (proxy, log, _closes) = Recording::new(false);
+    let removals = Arc::clone(&log);
+    let launcher = Wired::new(&dir);
+    let host = dir.start_launching(0, Arc::<Wired>::clone(&launcher), move |config| {
+        wired(config, proxy, removals)
+    });
+    let matter = host.create_matter("m", &dir.folder("m", &[]));
+    let thread = host.create_thread(matter, BROWSING);
+    turn(&host, thread);
+    let browser = first_frame_tools(&host, thread)
+        .into_iter()
+        .find(|state| state.tool == clauseo_protocol::ClauseoTool::Browser)
+        .expect("the header shows the browser");
+    assert_eq!(
+        browser.availability,
+        clauseo_protocol::ToolAvailability::Unavailable {
+            reason: ToolsUnavailableReason::ManagedByFirm
+        }
+    );
+    let run = launcher.seen()[0].run.clone().unwrap();
+    assert!(!run.join("proxy-secret").exists());
+    host.shutdown();
+    assert_eq!(calls(&log), ["removal"]);
+}
+
+/// A browser entry left out after the proxy opened (here a Chrome path that is not UTF-8, which
+/// only the fill checks) leaves no password file behind: it is removed off the actor, while the
+/// proxy stays open until the session ends.
+#[cfg(unix)]
+#[test]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "polls the off-actor removal against a real clock; the core takes time as input"
+)]
+fn an_entry_left_out_after_the_proxy_opened_leaves_no_password_file() {
+    use std::os::unix::ffi::OsStringExt;
+    let dir = Dir::new("egress_unread_secret", &[]);
+    claude(&dir, &json!([]));
+    let (proxy, log, _closes) = Recording::new(false);
+    let removals = Arc::clone(&log);
+    let launcher = Wired::new(&dir);
+    let chrome = PathBuf::from(OsString::from_vec(b"/chr\xffome".to_vec()));
+    let host = dir.start_launching(0, Arc::<Wired>::clone(&launcher), move |config| {
+        wired(config, proxy, removals).with_browser_executable(Some(chrome))
+    });
+    let matter = host.create_matter("m", &dir.folder("m", &[]));
+    let thread = host.create_thread(matter, BROWSING);
+    turn(&host, thread);
+    assert_eq!(calls(&log), ["open 1"], "the proxy opened before the fill");
+    let file = launcher.seen()[0].run.clone().unwrap().join("proxy-secret");
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    while file.exists() && std::time::Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert!(!file.exists(), "the unread password file is still there");
+    host.shutdown();
+    assert_eq!(calls(&log), ["open 1", "removal", "close 1"]);
 }

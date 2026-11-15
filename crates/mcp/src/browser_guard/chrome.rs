@@ -13,6 +13,11 @@
 //! (`browsers.rs`). The start is two steps, [`launch`] and [`Chrome::endpoint`], so the
 //! reaper knows Chrome before the wait for its answer on the pipe (at most [`START_WAIT`]).
 //!
+//! The proxy (`--proxy-server`, with no credential: Chrome ignores one there) is in every entry
+//! the host makes, the plain client's Codex entry included (decision record 0053). The proxy
+//! asks for its password, which the guard supplies as its own client on the browser's `DevTools`
+//! pipe ([`Chrome::start_guard`], `proxy_auth.rs`), before agent-browser connects.
+//!
 //! The profile is the run's own, `<cwd>/chrome-profile-<run id>` (`runs.rs`), made at the first
 //! start and kept by every later one, so tabs, cookies and storage outlive an idle stop or a
 //! crash; the guard deletes it when it exits. Its `Default/Preferences` sends Chrome's own
@@ -36,6 +41,7 @@ use std::time::Duration;
 
 use super::downloads::{Held, Mover, Saved};
 use super::parent::Parent;
+use super::proxy_auth::Password;
 use super::session::StartError;
 use super::{Child, env, pause, quiet};
 use crate::write;
@@ -232,9 +238,14 @@ impl Chrome {
     }
 
     /// Attaches the guard's own CDP clients and sends their start commands
-    /// (`devtools/seam.rs`), before agent-browser starts; `env` is agent-browser's.
-    pub(crate) fn start_guard(&self, env: &BTreeMap<String, OsString>) -> Result<(), String> {
-        self.devtools.start_guard(env)
+    /// (`devtools/seam.rs`), before agent-browser starts; `env` is agent-browser's, and
+    /// `password` the proxy's, if the guard read one (`proxy_auth.rs`).
+    pub(crate) fn start_guard(
+        &self,
+        env: &BTreeMap<String, OsString>,
+        password: Option<&Password>,
+    ) -> Result<(), String> {
+        self.devtools.start_guard(env, password)
     }
 
     /// Lets agent-browser, the guard's child `pid`, and its descendants connect to the relay
@@ -420,7 +431,8 @@ pub(crate) fn chrome_args(
             .chain(quiet::ARGS)
             .map(OsString::from),
     );
-    // With no proxy given (the plain client's Codex entry), Chrome goes direct.
+    // Every host entry gives the proxy now; a guard started without one (an older host) lets
+    // Chrome go direct.
     if let Some(given) = spec.proxy {
         let mut proxy = OsString::from("--proxy-server=");
         proxy.push(given);

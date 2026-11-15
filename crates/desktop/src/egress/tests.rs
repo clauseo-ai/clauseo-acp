@@ -11,10 +11,13 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use clauseo_host::{EgressProxy, HostConfig, McpServer, ProfileHook, SessionKey};
+use clauseo_blocklist::{Current, Generated, Header, parse_plain};
+use clauseo_host::{
+    BlockListSeams, BlockListUpdate, EgressProxy, HostConfig, McpServer, ProfileHook, SessionKey,
+};
 use clauseo_protocol::{AgentId, DeliveryRequest, HostCommand, MatterId, PromptBlock, ThreadId};
 use clauseo_sandbox::ports::ListenerFor;
-use clauseo_sandbox::{Allowlist, Denial, DenialSink, ProxyConfig, Upstream};
+use clauseo_sandbox::{Allowlist, Denial, DenialSink, ProxyConfig, ProxyMode, Upstream};
 use serde_json::{Map, Value, json};
 
 use super::{DesktopProxies, with_proxies};
@@ -39,6 +42,7 @@ fn config() -> ProxyConfig {
         record: None,
         // The host opens a session's proxy only when it has the browser.
         browser: true,
+        mode: ProxyMode::Allowlist,
         listener: ListenerFor::Other,
     }
 }
@@ -181,16 +185,23 @@ impl ProfileHook for BrowserOnly {
                 "--cwd".to_owned(),
                 "{browser_dir}".to_owned(),
             ],
-            env: vec![(
-                "AGENT_BROWSER_PROXY".to_owned(),
-                "http://127.0.0.1:{proxy_port}".to_owned(),
-            )],
+            env: vec![
+                (
+                    "AGENT_BROWSER_PROXY".to_owned(),
+                    "http://127.0.0.1:{proxy_port}".to_owned(),
+                ),
+                (
+                    "CLAUSEO_PROXY_SECRET_FILE".to_owned(),
+                    "{proxy_secret_file}".to_owned(),
+                ),
+            ],
         }]
     }
 }
 
 /// `fake_agent` lines: `initialize`, a `session/new` that must carry exactly one MCP server,
-/// the `browser` entry with its proxy filled in, then one prompt answered `Done.`.
+/// the `browser` entry with its proxy and its browser listener's password (random, so any
+/// value) filled in, then one prompt answered `Done.`.
 fn lines() -> String {
     let modes = json!({"currentModeId": "default", "availableModes": [
         {"id": "default", "name": "Manual"}]});
@@ -201,7 +212,10 @@ fn lines() -> String {
             "agentCapabilities": {"loadSession": true}, "authMethods": [],
             "agentInfo": {"name": "fake_agent", "version": "0.0.0"}}}}),
         json!({"expect": {"method": "session/new", "as": "new", "params": {"mcpServers": [
-            {"name": "browser", "env": [{"name": "AGENT_BROWSER_PROXY", "value": "{{any}}"}]}
+            {"name": "browser", "env": [
+                {"name": "AGENT_BROWSER_PROXY", "value": "{{any}}"},
+                {"name": "CLAUSEO_PROXY_SECRET_FILE", "value": "{{any}}"}
+            ]}
         ]}}}),
         json!({"respond": {"to": "new", "result": {"sessionId": "sess-1", "modes": modes}}}),
         json!({"expect": {"method": "session/prompt", "as": "p", "params": {"sessionId": "sess-1"}}}),
@@ -243,7 +257,7 @@ fn wired_host(
     #[cfg(unix)]
     let sockets = scratch.dir("sockets");
     scratch.start_with(move |config| {
-        let config = wire(config)
+        let config = with_list(wire(config))
             .with_profile_hook(Box::new(BrowserOnly))
             .with_browser_executable(Some(PathBuf::from("/chrome")))
             .with_managed_mcp_path(managed);
@@ -251,6 +265,24 @@ fn wired_host(
         let config = config.with_browser_socket_root(sockets);
         config
     })
+}
+
+/// `config` with a block list already loaded, as a release's bundled snapshot gives one: the
+/// session's proxy runs in open mode, which starts only with a list
+/// (`clauseo_sandbox::Error::BlockListNotLoaded`). Its updates go to a closed local port.
+fn with_list(config: HostConfig) -> HostConfig {
+    let header = Header {
+        generated: Generated::parse("2026-11-07T06:00:00Z").unwrap(),
+        entries: 1,
+    };
+    let list = parse_plain(b"evil.example p\n", header).unwrap();
+    let mut update = BlockListUpdate::release();
+    update.list_url = "http://127.0.0.1:9/list.gz".to_owned();
+    update.signature_url = "http://127.0.0.1:9/list.gz.minisig".to_owned();
+    update.allowed_hosts = vec!["127.0.0.1".to_owned()];
+    update.https_only = false;
+    update.upstream = Upstream::Direct;
+    BlockListSeams::new(Arc::new(Current::new(list)), None, update).apply(config)
 }
 
 /// Sends a prompt on `thread` and reads `messages` until the agent's `Done.`, which it sends
@@ -353,6 +385,10 @@ impl EgressProxy for Logged {
 
     fn port_for(&self, session: SessionKey) -> Option<u16> {
         self.inner.port_for(session)
+    }
+
+    fn credential_for(&self, session: SessionKey) -> Option<clauseo_sandbox::ProxyCredential> {
+        self.inner.credential_for(session)
     }
 
     fn close(&self, session: SessionKey) {

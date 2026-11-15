@@ -2,14 +2,20 @@
 //!
 //! ```text
 //! cargo run -p clauseo-sandbox --example proxy -- --allow api.anthropic.com \
-//!     --allow-file <path> --log <file.jsonl> [--upstream http://host:port]
+//!     --allow-file <path> --log <file.jsonl> [--upstream http://host:port] [--open] \
+//!     [--block <host>]
 //! ```
 //!
-//! Prints `{"port":..,"browser_port":..,"token":..}` on stdout, then logs every request as one
-//! JSON line (listener, host, port, verdict, why, bytes each way) to `--log`, or to stderr
-//! without it, and every denial as a JSON line on stderr. The token is never logged. Runs until
-//! killed. `--allow` and `--allow-file` may repeat; an allow file has one host per line, a
-//! `*.domain` line is a firm wildcard, and `#` starts a comment.
+//! Prints `{"port":..,"browser_port":..,"token":..,"browser_token":..}` on stdout (each
+//! listener's own password; the user is `clauseo`), then logs every request as one JSON line
+//! (listener, host, port, verdict, why, bytes each way) to `--log`, or to stderr without it,
+//! and every denial as a JSON line on stderr. Neither token is ever logged. `--open` admits
+//! any public host (`ProxyMode::Open`) in place of the allowlist. `--block` (may repeat) loads
+//! a block list naming those hosts as phishing; without it no list is loaded, the proxy logs
+//! once that nothing is blocked, and `--open` does not start (open mode needs a list). Runs
+//! until killed. `--allow` and `--allow-file` may repeat;
+//! an allow file has one host per line, a `*.domain` line is a firm wildcard, and `#` starts a
+//! comment.
 
 use std::error::Error;
 use std::fs::File;
@@ -47,6 +53,8 @@ struct Args {
     allow: Allowlist,
     log: Option<String>,
     upstream: Option<url::Url>,
+    open: bool,
+    block: Vec<String>,
 }
 
 fn args() -> Result<Args, Box<dyn Error>> {
@@ -77,11 +85,32 @@ fn args() -> Result<Args, Box<dyn Error>> {
                 }
             }
             "--log" => parsed.log = Some(value()?),
+            "--open" => parsed.open = true,
+            "--block" => parsed.block.push(value()?.to_ascii_lowercase()),
             "--upstream" => parsed.upstream = Some(url::Url::parse(&value()?)?),
             other => return Err(format!("unknown argument {other:?}").into()),
         }
     }
     Ok(parsed)
+}
+
+/// The block list in use: none loaded without `--block`, else one naming those hosts as
+/// phishing (tag `p`), made now as far as the list's freshness rules care.
+fn block_list(hosts: &[String]) -> Result<clauseo_blocklist::Current, Box<dyn Error>> {
+    if hosts.is_empty() {
+        return Ok(clauseo_blocklist::Current::default());
+    }
+    let mut lines: Vec<String> = hosts.iter().map(|host| format!("{host} p")).collect();
+    lines.sort_unstable();
+    lines.dedup();
+    let text = format!("{}\n", lines.join("\n"));
+    let header = clauseo_blocklist::Header {
+        generated: clauseo_blocklist::Generated::parse("2026-11-15T00:00:00Z")
+            .ok_or("a bad generated time")?,
+        entries: u32::try_from(lines.len())?,
+    };
+    let list = clauseo_blocklist::parse_plain(text.as_bytes(), header)?;
+    Ok(clauseo_blocklist::Current::new(list))
 }
 
 #[expect(
@@ -107,10 +136,16 @@ fn main() -> Result<(), Box<dyn Error>> {
         line(&mut **out, &value);
     };
     let config = ProxyConfig {
+        mode: if args.open {
+            clauseo_sandbox::ProxyMode::Open
+        } else {
+            clauseo_sandbox::ProxyMode::Allowlist
+        },
         allow: args.allow,
         silent: Allowlist::default(),
-        // No list loaded: the proxy logs once that nothing is blocked.
-        block: Arc::new(clauseo_blocklist::Current::default()),
+        // No list loaded without --block: the proxy logs once that nothing is blocked, and open
+        // mode refuses to start (`Error::BlockListNotLoaded`).
+        block: Arc::new(block_list(&args.block)?),
         allowed: Arc::default(),
         upstream: args.upstream.map_or(Upstream::System, Upstream::Fixed),
         denials: Arc::new(StderrSink),
@@ -130,6 +165,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         "port": handle.port(),
         "browser_port": handle.browser_port(),
         "token": token,
+        "browser_token": handle.browser_credential().map(|c| c.password().to_owned()),
     });
     line(&mut io::stdout(), &ready);
     io::stdout().flush()?;

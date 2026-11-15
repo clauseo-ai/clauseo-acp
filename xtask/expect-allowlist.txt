@@ -188,6 +188,9 @@ crates/sandbox/build.rs key unreachable_pub
 crates/sandbox/src/windows/refresh/source.rs - unsafe_code
 crates/sandbox/src/windows/refresh/staging.rs - unsafe_code
 crates/sandbox/src/windows/refresh/task.rs - unsafe_code
+# The proxy's own-network check: the OS's interface list (getifaddrs, GetAdaptersAddresses).
+crates/sandbox/src/proxy/local_net/unix.rs - unsafe_code
+crates/sandbox/src/proxy/local_net/win.rs - unsafe_code
 # The tasks' elevated test: its Task Scheduler calls, the test user's cmd, and its bounded waits.
 crates/sandbox/src/windows/refresh/windows_tests.rs - unsafe_code
 crates/sandbox/src/windows/refresh/windows_tests.rs pause clippy::disallowed_methods
@@ -360,6 +363,9 @@ crates/host/src/write.rs - clippy::disallowed_methods
 crates/host/src/write.rs sync_dir clippy::unnecessary_wraps
 crates/host/tests/host/write.rs - clippy::disallowed_methods
 crates/host/tests/host/packs_timing.rs now clippy::disallowed_methods
+# The block list tests poll the off-actor removal and the updater against a real clock.
+crates/host/tests/host/egress.rs an_entry_left_out_after_the_proxy_opened_leaves_no_password_file clippy::disallowed_methods
+crates/host/tests/host/egress_block.rs until_loaded clippy::disallowed_methods
 crates/host/benches/reopen.rs - clippy::unwrap_used
 crates/host/benches/reopen.rs timed_first_item clippy::disallowed_methods
 crates/host/benches/common/dir.rs - clippy::disallowed_methods

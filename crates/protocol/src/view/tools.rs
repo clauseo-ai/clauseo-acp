@@ -99,6 +99,11 @@ open_unit_enum! {
         /// Google Chrome installed for this user (`%LOCALAPPDATA%`), which cannot start under
         /// Clauseo's browser guard.
         BrowserPerUserChromeOnly,
+        /// The browser only: its connection lets any public site through but the unsafe-site
+        /// block list, and no block list was loaded when the session started (the bundled
+        /// snapshot failed its check, or none was bundled and the fetch failed), so the browser
+        /// is left out rather than let every site through. Checked again at the next launch.
+        BlockListNotLoaded,
     }
     test mod tools_unavailable_reason;
 }

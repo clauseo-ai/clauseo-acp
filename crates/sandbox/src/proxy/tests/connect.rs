@@ -98,18 +98,17 @@ fn the_agent_listener_refuses_a_missing_or_wrong_token_and_another_launches_toke
 }
 
 #[test]
-fn the_browser_listener_needs_no_token_under_the_same_list_and_sink() {
+fn the_browser_listener_takes_its_own_credential_under_the_same_list_and_sink() {
     let rig = echo_rig(&["api.anthropic.com"], "api.anthropic.com");
+    let auth = rig.browser_auth();
     let mut stream = rig.browser();
-    stream
-        .write_all(b"CONNECT api.anthropic.com:443 HTTP/1.1\r\n\r\n")
-        .unwrap();
+    let request = format!("CONNECT api.anthropic.com:443 HTTP/1.1\r\n{auth}\r\n");
+    stream.write_all(request.as_bytes()).unwrap();
     assert_eq!(status(&read_head(&mut stream)), 200);
     assert_eq!(round_trip(&mut stream, b"hello"), b"hello");
     let mut refused = rig.browser();
-    refused
-        .write_all(b"CONNECT example.com:443 HTTP/1.1\r\n\r\n")
-        .unwrap();
+    let request = format!("CONNECT example.com:443 HTTP/1.1\r\n{auth}\r\n");
+    refused.write_all(request.as_bytes()).unwrap();
     assert_eq!(status(&read_head(&mut refused)), 403);
     drop(read_all(&mut refused));
     assert_eq!(

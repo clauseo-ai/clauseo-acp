@@ -3,11 +3,15 @@
 
 use std::sync::Arc;
 
+use clauseo_blocklist::{Current, Generated, Header, parse_plain};
 use clauseo_protocol::AgentId;
 use clauseo_sandbox::ports::{ListenerFor, TIER_B_PORTS};
-use clauseo_sandbox::{Denial, DenialSink as _, HostRefusal, ProxyConfig, Upstream, start_proxy};
+use clauseo_sandbox::{
+    Denial, DenialSink as _, Error, HostRefusal, ProxyConfig, ProxyMode, Upstream, start_proxy,
+};
 
-use super::{CountDenials, proxy_config};
+use super::super::{RunFolders, RunSweep};
+use super::{CountDenials, EgressGuard, proxy_config, write_secret};
 use crate::actor::input::Input;
 use crate::config::SessionKey;
 
@@ -24,28 +28,48 @@ fn config(name: &str) -> ProxyConfig {
     )
 }
 
-/// The browser listener is asked for only by a launch that offers the browser.
+/// A loaded list naming one host: open mode starts only with one.
+fn loaded() -> Arc<Current> {
+    let header = Header {
+        generated: Generated::parse("2026-11-07T06:00:00Z").unwrap(),
+        entries: 1,
+    };
+    Arc::new(Current::new(
+        parse_plain(b"evil.example p\n", header).unwrap(),
+    ))
+}
+
+/// With no block list loaded the session's proxy, open mode with the browser listener, does not
+/// start (fail closed), so the launch leaves the browser out (`BlockListNotLoaded`).
 #[test]
-fn the_browser_listener_follows_the_launch() {
-    let denials = || Arc::new(CountDenials::default());
-    assert!(
-        proxy_config(
-            &agent("claude-acp"),
-            denials(),
+fn the_session_proxy_does_not_start_without_a_block_list() {
+    assert!(matches!(
+        start_proxy(config("codex-acp")),
+        Err(Error::BlockListNotLoaded)
+    ));
+    let mut with_list = config("codex-acp");
+    with_list.block = loaded();
+    assert!(start_proxy(with_list).is_ok());
+}
+
+/// The browser listener is asked for only by a launch that offers the browser; either way the
+/// proxy runs in open mode (ADR 0053): any public host but the listed and private ones.
+#[test]
+fn the_browser_listener_follows_the_launch_in_open_mode() {
+    for (name, browser) in [
+        ("claude-acp", true),
+        ("claude-acp", false),
+        ("codex-acp", true),
+    ] {
+        let config = proxy_config(
+            &agent(name),
+            Arc::new(CountDenials::default()),
             (None, Arc::default()),
-            true
-        )
-        .browser
-    );
-    assert!(
-        !proxy_config(
-            &agent("claude-acp"),
-            denials(),
-            (None, Arc::default()),
-            false
-        )
-        .browser
-    );
+            browser,
+        );
+        assert_eq!(config.browser, browser, "{name}");
+        assert_eq!(config.mode, ProxyMode::Open, "{name}");
+    }
 }
 
 /// A session's proxy is a tier-C launch's until R17 PR-E passes `ListenerFor::TierB` for a
@@ -53,8 +77,9 @@ fn the_browser_listener_follows_the_launch() {
 /// every pool user's static permit reaches (S15 PR7).
 #[test]
 fn the_session_proxy_listens_outside_the_tier_b_ports() {
-    let config = config("claude-acp");
+    let mut config = config("claude-acp");
     assert_eq!(config.listener, ListenerFor::Other);
+    config.block = loaded();
     let proxy = start_proxy(config).unwrap();
     assert!(!TIER_B_PORTS.contains(&proxy.port()), "{}", proxy.port());
     let browser = proxy.browser_port().unwrap();
@@ -166,4 +191,75 @@ fn the_sink_posts_each_blocked_site_and_nothing_else() {
         posted.push(site);
     }
     assert_eq!(posted.len(), 2, "once per refusal");
+}
+
+/// `run`'s key, with a fresh proxy guard on `TestProxy`, whose password is
+/// `TestProxy::PASSWORD`.
+fn with_proxy(run: &mut RunFolders) {
+    let proxy: Arc<dyn crate::config::EgressProxy> = Arc::new(crate::TestProxy(8123));
+    let credential = proxy.credential_for(run.key);
+    run.egress = Some(Arc::new(EgressGuard {
+        proxy,
+        key: run.key,
+        denials: Arc::new(CountDenials::default()),
+        credential,
+    }));
+}
+
+fn key() -> SessionKey {
+    SessionKey {
+        matter: clauseo_protocol::MatterId::new(uuid::Uuid::now_v7()).unwrap(),
+        thread: clauseo_protocol::ThreadId::new(uuid::Uuid::now_v7()).unwrap(),
+        launch: 1,
+    }
+}
+
+/// The password goes to `<run>/proxy-secret`, its 64 hex characters and a line end, private to
+/// the user; the proxy stays open.
+#[test]
+fn the_password_goes_to_a_private_file_in_the_run_folder() {
+    let scratch = clauseo_connectors::fake::ScratchDir::new("proxy-secret").unwrap();
+    let data = scratch.path().join("data");
+    crate::write::create_dir_all(&data).unwrap();
+    let mut run = RunFolders::new(&data, key());
+    run.make(&data, &RunSweep::default()).unwrap();
+    with_proxy(&mut run);
+    write_secret(&mut run);
+    assert!(run.egress.is_some());
+    assert_eq!(run.proxy_secret, run.root.join("proxy-secret"));
+    let text = std::fs::read_to_string(&run.proxy_secret).unwrap();
+    assert_eq!(text, format!("{}\n", crate::TestProxy::PASSWORD));
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = std::fs::metadata(&run.proxy_secret)
+            .unwrap()
+            .permissions()
+            .mode();
+        assert_eq!(mode & 0o777, 0o600, "{mode:o}");
+    }
+}
+
+/// A file that cannot be written closes the proxy again: the browser is then left out with
+/// `NoProxy` (`agent::loads::browser`). No proxy, no file.
+#[test]
+fn a_password_file_not_written_closes_the_proxy() {
+    let scratch = clauseo_connectors::fake::ScratchDir::new("proxy-secret-fails").unwrap();
+    let data = scratch.path().join("data");
+    crate::write::create_dir_all(&data).unwrap();
+    let mut run = RunFolders::new(&data, key());
+    run.make(&data, &RunSweep::default()).unwrap();
+    // Its folder is a file: nothing can be written under it.
+    let blocker = run.root.join("not-a-folder");
+    crate::write::write_file(&blocker, b"x").unwrap();
+    run.proxy_secret = blocker.join("proxy-secret");
+    with_proxy(&mut run);
+    write_secret(&mut run);
+    assert!(run.egress.is_none());
+    assert!(!run.proxy_secret.exists());
+
+    let mut none = RunFolders::new(&data, key());
+    write_secret(&mut none);
+    assert!(none.egress.is_none());
+    assert!(!none.proxy_secret.exists());
 }
