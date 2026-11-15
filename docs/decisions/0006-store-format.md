@@ -147,6 +147,29 @@ not an event: like the other matter details, the reducer's view does not show it
 ALTER TABLE matters ADD COLUMN agent_prefs TEXT /* JSON object: agent kind -> {option id: value id}; NULL = none, each agent's own defaults */;
 ```
 
+### Schema version 7
+
+`crates/store/src/migrations/0007_pending_actions.sql`, verbatim (the same test checks this
+copy too). An undo, a restore or a tracked-changes decision writes files one by one, so a crash
+part way leaves some files old and some new, and the next checkpoint would only see outside
+edits. The host keeps one row per matter for the action holding its writer: put, and synced,
+before the matter's thread touches a file, and deleted when the writer passes on. At the next
+start, the rows still there are the actions that did not finish, which the room's notice names
+(`HostQuery::LastExit`); the host then deletes them. A row, not an event: nothing folds it, and
+no stream's history should carry it. `kind` is protocol's `InterruptedKind` JSON name; a kind
+this build does not know is skipped on read.
+
+```sql
+-- Schema version 7: the file action a matter's writer runs, from before it touches a file until
+-- the writer passes on, so the next start can say which one a crash left unfinished.
+-- docs/decisions/0006-store-format.md gives the reason for the table and its columns.
+-- Frozen: a later change is a new numbered file in this folder, never an edit here.
+
+CREATE TABLE pending_actions (matter TEXT PRIMARY KEY NOT NULL /* MatterId: one writer per matter */,
+  kind TEXT NOT NULL /* InterruptedKind's JSON name */, files INTEGER /* files it set out to change; NULL unknown */,
+  thread TEXT /* ThreadId it was asked from; NULL none */, at INTEGER NOT NULL /* ms since the epoch */) WITHOUT ROWID;
+```
+
 In the table columns, ids are stored as lowercase hyphenated UUID text and times as milliseconds
 since the Unix epoch. Inside `events.envelope`, the envelope's own encoding applies: ids are
 16-byte MessagePack bin, as `docs/decisions/0002-event-schema.md` says, and `stream` is its text.

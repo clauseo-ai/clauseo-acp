@@ -41,6 +41,9 @@ mod log_model;
 #[path = "store/matters.rs"]
 mod matters;
 #[cfg(test)]
+#[path = "store/pending_actions.rs"]
+mod pending_actions;
+#[cfg(test)]
 #[path = "store/reopen.rs"]
 mod reopen;
 #[cfg(test)]

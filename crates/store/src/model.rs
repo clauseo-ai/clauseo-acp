@@ -4,8 +4,8 @@ use std::path::PathBuf;
 
 use clauseo_protocol::{
     AgentId, AgentPrefs, AgentSessionId, BlobHash, BlobRef, CheckpointId, ClientName, CommandId,
-    CommandOutcome, Count, Date, Envelope, MatterId, MatterKind, PackList, RenameSource, Seq,
-    StreamId, ThreadId, Timestamp,
+    CommandOutcome, Count, Date, Envelope, InterruptedKind, MatterId, MatterKind, PackList,
+    RenameSource, Seq, StreamId, ThreadId, Timestamp,
 };
 
 use crate::blob::preview;
@@ -288,4 +288,20 @@ pub struct Reopen {
     pub tail: Vec<Envelope>,
     /// The stream's last `seq`; `None` for a stream with no events.
     pub head: Option<Seq>,
+}
+
+/// A row of `pending_actions` (schema 7): the file action holding a matter's writer, kept from
+/// before it touches a file until the writer passes on. One per matter.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PendingAction {
+    /// The matter whose files it changes.
+    pub matter: MatterId,
+    /// What it is.
+    pub kind: InterruptedKind,
+    /// How many files it sets out to change, when known before it begins.
+    pub files: Option<Count>,
+    /// The conversation it was asked from, if any.
+    pub thread: Option<ThreadId>,
+    /// When it was recorded.
+    pub at: Timestamp,
 }

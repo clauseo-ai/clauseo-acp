@@ -4,13 +4,13 @@
 use std::collections::HashMap;
 
 use clauseo_protocol::{
-    AccountLimits, CheckpointId, CommandId, CommandOutcome, Envelope, MatterId, Seq, StreamId,
-    Timestamp,
+    AccountLimits, CheckpointId, CommandId, CommandOutcome, Count, Envelope, InterruptedKind,
+    MatterId, Seq, StreamId, Timestamp,
 };
 use rusqlite::{Connection, OptionalExtension, Row};
 
 use crate::codec::{self, first_key, key_seq};
-use crate::{CheckpointRow, Error, MatterRow, Receipt, Reopen, Snapshot, ThreadRow};
+use crate::{CheckpointRow, Error, MatterRow, PendingAction, Receipt, Reopen, Snapshot, ThreadRow};
 
 /// The most envelopes one `read_after` returns.
 pub const READ_PAGE_MAX: u32 = 500;
@@ -395,6 +395,36 @@ pub(crate) fn account_limits(conn: &Connection) -> Result<Vec<AccountLimits>, Er
         if let Ok(limits) = serde_json::from_slice(row.get_ref(0)?.as_bytes()?) {
             out.push(limits);
         }
+    }
+    Ok(out)
+}
+
+/// Every pending action, oldest first. A row whose kind this build does not know (a newer
+/// build's) is skipped.
+pub(crate) fn pending_actions(conn: &Connection) -> Result<Vec<PendingAction>, Error> {
+    let mut statement = conn.prepare_cached(
+        "SELECT matter, kind, files, thread, at FROM pending_actions ORDER BY at, matter",
+    )?;
+    let mut rows = statement.query([])?;
+    let mut out = Vec::new();
+    while let Some(row) = rows.next()? {
+        let Some(kind) = InterruptedKind::from_name(row.get_ref(1)?.as_str()?) else {
+            continue;
+        };
+        let files: Option<i64> = row.get(2)?;
+        out.push(PendingAction {
+            matter: codec::parse(row.get_ref(0)?.as_str()?, "a matter id")?,
+            kind,
+            files: files
+                .and_then(|files| u64::try_from(files).ok())
+                .and_then(|files| Count::new(files).ok()),
+            thread: row
+                .get_ref(3)?
+                .as_str_or_null()?
+                .map(|text| codec::parse(text, "a thread id"))
+                .transpose()?,
+            at: timestamp(row, 4)?,
+        });
     }
     Ok(out)
 }
