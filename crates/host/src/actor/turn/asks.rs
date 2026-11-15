@@ -132,6 +132,7 @@ pub(super) fn on_permission(actor: &mut Actor, thread: ThreadId, event: AcpEvent
             folder,
             paths,
             fence,
+            matters: fenced(actor, thread),
         };
         let check = HeldOpenCheck {
             ask: ask.clone(),
@@ -202,6 +203,21 @@ fn fence_check(
     }))
 }
 
+/// Each other matter the live session's launch fenced and its fence paths, invited ones too
+/// (`agent::matter_fence`); none without a run.
+fn fenced(actor: &Actor, thread: ThreadId) -> crate::agent::data_fence::Fenced {
+    let run = actor
+        .threads
+        .get(&thread)
+        .and_then(|entry| entry.turn.run.as_ref());
+    run.map_or_else(Vec::new, |run| {
+        let others = run.data_deny.matters.others.iter();
+        others
+            .map(|other| (other.id, other.paths.clone()))
+            .collect()
+    })
+}
+
 /// The matter paths the host has logged for the request's tool call (its in-matter locations
 /// and diffs), as paths relative to the matter folder: Codex's adapter may send a request whose
 /// `locations` are still empty.
@@ -248,7 +264,11 @@ pub(super) fn on_held_open(
     }
     let held = match checked {
         PathsChecked::DataFolder => {
-            super::outside::refuse_data_folder(actor, thread, &ask);
+            super::outside::refuse_data_folder(actor, thread, &ask, None);
+            return;
+        }
+        PathsChecked::OtherMatter(matter) => {
+            super::outside::refuse_data_folder(actor, thread, &ask, Some(matter));
             return;
         }
         PathsChecked::Held(held) => held,

@@ -45,17 +45,17 @@
 use std::ffi::OsString;
 use std::path::{Component, Path, PathBuf};
 
-use clauseo_matters::{HeldOpen, held_open_resolved};
-use clauseo_protocol::MatterPath;
 use identity::DataIdentity;
 use resolve::{Disk, Found};
 
 use crate::network_paths::resolve::Entry;
-use crate::network_paths::{FOLD_CASE, NetEnv, fold_name, refused_windows_name, touchable};
+use crate::network_paths::{NetEnv, fold_name, refused_windows_name};
+pub(crate) use check::{PathsChecked, check_paths};
 pub(crate) use command::ShellKind;
 pub(crate) use health::DataFenceHealth;
 pub(crate) use input::{candidates, candidates_roots, candidates_words, command_names};
 pub(crate) use launch::{LaunchDeny, claude_project_key, claude_projects, launch_deny, own_reads};
+pub(crate) use matters::Fenced;
 pub(crate) use shell_deny::{
     own_shell_allow_rules, windows_matter_shell_rules, windows_shell_deny_rules,
     windows_shell_deny_rules_without_variables,
@@ -332,7 +332,7 @@ impl FenceCheck {
     /// case on Windows and macOS, whose file systems do. Stats the file system.
     #[cfg(test)]
     pub(crate) fn touches_data(&self) -> bool {
-        self.touches_data_as(FOLD_CASE)
+        self.touches_data_as(crate::network_paths::FOLD_CASE)
     }
 
     /// [`Self::touches_data`], ignoring case when `insensitive`. A path that passes through a
@@ -501,38 +501,6 @@ impl FenceCheck {
     }
 }
 
-/// What the matter thread found for a permission request's paths.
-#[derive(Debug)]
-pub(crate) enum PathsChecked {
-    /// One resolves into Clauseo's data folder, outside the session's own folders.
-    DataFolder,
-    /// The first that a program holds open, if any (`clauseo_matters::held_open_at`).
-    Held(Option<(MatterPath, HeldOpen)>),
-}
-
-/// The data-folder check, then the held-open check of `paths` in the matter `folder`. A path
-/// that is or leads to a network location, or lies by its text in a matter folder on a share,
-/// is never looked at for being held; one that may be is looked at by the path the network-safe
-/// walk resolved, never by its text again ([`touchable`]).
-pub(crate) fn check_paths(
-    folder: &Path,
-    paths: Vec<PathBuf>,
-    fence: Option<&FenceCheck>,
-) -> PathsChecked {
-    let net = NetEnv::current();
-    let disk = Disk::real(&net);
-    if fence.is_some_and(|fence| fence.touches_data_on(FOLD_CASE, &disk)) {
-        return PathsChecked::DataFolder;
-    }
-    let walk = Disk::resolved(&net);
-    PathsChecked::Held(
-        paths
-            .into_iter()
-            .filter_map(|path| touchable(&path, folder, &walk))
-            .find_map(|walked| held_open_resolved(folder, &walked)),
-    )
-}
-
 /// `path`'s parts for a prefix comparison, folded when `insensitive` ([`fold_name`]: a deny
 /// folds at least as broadly as the file system, `ſ` and the Kelvin sign included), a long
 /// path's verbatim `\\?\C:\` read as `C:\` ([`resolve::comparable`]).
@@ -554,6 +522,7 @@ fn key(path: &Path, insensitive: bool) -> Vec<OsString> {
 pub(crate) mod big_folder;
 #[cfg(test)]
 mod bypass_tests;
+mod check;
 mod claude_home;
 mod command;
 #[cfg(test)]
@@ -566,6 +535,7 @@ mod input;
 mod launch;
 #[cfg(test)]
 mod launch_tests;
+mod matters;
 #[cfg(test)]
 mod matters_tests;
 #[cfg(test)]

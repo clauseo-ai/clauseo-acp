@@ -299,4 +299,9 @@ pub(super) struct Told {
     pub(super) offline: bool,
     /// A data-fence refusal of the turn was told to the lawyer and the agent (`outside.rs`).
     pub(super) outside: bool,
+    /// The other matters a refusal of the turn was told for (`outside.rs`), each once.
+    pub(super) other_matters: Vec<clauseo_protocol::MatterId>,
+    /// The paths each tool call of the turn named, by ACP's id, kept only while the launch
+    /// fenced other matters: a refusal names the matter it hit (`refused_call.rs`).
+    pub(super) call_paths: std::collections::BTreeMap<String, Vec<std::path::PathBuf>>,
 }

@@ -27,6 +27,10 @@
 //!   put in the background ends in a turn of its own, `own_turn.rs`), and any event of it starts
 //!   its clock again. Its next prompt relaunches it with the new inputs. A Tools change marks
 //!   the agents whose lawyer servers would now differ ([`tools`]).
+//! - A change to the other matters' fence ([`fence`]): a live agent whose launch fenced other
+//!   matters than a launch would now (the matter list changed, or the lawyer let its
+//!   conversation read another matter, or withdrew that) is idle-stopped as soon as nothing is
+//!   pending. Its next prompt relaunches it with the new rules.
 
 use std::collections::BTreeSet;
 use std::time::Duration;
@@ -43,6 +47,7 @@ use crate::config::{IdleStop, SessionKey};
 use crate::connectors::RelayCall;
 use crate::log_file::LIFECYCLE;
 
+mod fence;
 mod tools;
 
 /// What keeps an agent from idling.
@@ -285,6 +290,7 @@ pub(crate) fn tick(actor: &mut Actor) {
         None
     } else {
         tools::compare(actor);
+        fence::stop_stale(actor);
         stop_marked(actor, now);
         refresh(actor, now)
     };

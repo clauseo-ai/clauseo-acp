@@ -31,6 +31,14 @@ pub(super) fn tool_call(
     // The session's launch read whether Claude Code's policy settings may keep its shell's
     // folder across calls: then no shell call's starting folder is known.
     let start = agent(actor, thread).map(|agent| agent.shell_start.clone());
+    let fields = crate::sent::CallFields::of_call(&call);
+    super::super::refused_call::seen(
+        actor,
+        thread,
+        &call.acp_id,
+        &fields,
+        call.raw_output.as_ref(),
+    );
     if let Some(current) = current(actor, thread) {
         if let Some(start) = start {
             current.tool_paths.set_start(start);
@@ -115,6 +123,10 @@ pub(super) fn tool_update(
     // The turn's paths stay in memory, so they take the patch as the agent sent it. The
     // elicitation values withheld from this call (`withheld.rs`) then go before anything
     // logged reads it: the sources, and `build.rs`'s inline or blob decision.
+    if matches!(context, Context::Live(_)) {
+        let fields = crate::sent::CallFields::of_patch(&patch);
+        super::super::refused_call::seen(actor, thread, acp_id, &fields, patch.raw_output.as_ref());
+    }
     if let Some(current) = current(actor, thread) {
         if matches!(context, Context::Live(_)) {
             let fields = crate::sent::CallFields::of_patch(&patch);
