@@ -115,6 +115,41 @@ fn only_links_and_unknown_reparse_points_count_as_links() {
     }
 }
 
+/// A matter nested inside the session's matter, past #1085's 2,000-path fence cap (2,001
+/// entries sit beside it), leaves the session's matter with no rules at all; the session matter's
+/// own `.clauseo` does not. #1085's `denies_inside` answers for the nested matters its fence
+/// listed; this holds for the rest, with the stand-in and with the real method.
+#[test]
+fn a_matter_nested_past_the_fence_cap_leaves_the_matter_without_rules() {
+    use crate::agent::data_fence::{LaunchDeny, matter_shell_allow_rules};
+    let dir = TempDir::new("matter-links-nested");
+    let (real, _) = matter(&dir);
+    let marker = |folder: &Path| {
+        crate::write::create_dir_all(&folder.join(".clauseo")).unwrap();
+        crate::write::write_file(&folder.join(".clauseo").join("matter.json"), b"{}").unwrap();
+    };
+    marker(&real);
+    let bulk = real.join("bulk");
+    crate::write::create_dir_all(&bulk).unwrap();
+    for n in 0..2_001 {
+        crate::write::write_file(&bulk.join(format!("f{n}.txt")), b"x").unwrap();
+    }
+    let mut deny = LaunchDeny::fixed(vec![dir.path().join("clauseo-data")]);
+    deny.matter = readable_matter(&real, &real);
+    assert_eq!(
+        deny.matter,
+        std::slice::from_ref(&real),
+        "its own marker keeps the rules"
+    );
+    assert!(!matter_shell_allow_rules(&deny, false).is_empty());
+
+    marker(&bulk.join("Appeal (2025)"));
+    assert_eq!(links_out(&real, super::SCAN_CAP), Some(true));
+    deny.matter = readable_matter(&real, &real);
+    assert_eq!(deny.matter, Vec::<PathBuf>::new());
+    assert_eq!(matter_shell_allow_rules(&deny, false), Vec::<String>::new());
+}
+
 /// A stand-in file system: `list` gives each folder's entries, and every path resolves to
 /// itself.
 struct Fake<L>(L);

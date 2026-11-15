@@ -12,6 +12,12 @@
 //! or Azure File Sync point does not. A `.lnk` shortcut is a plain file to the file system and
 //! to Claude Code's tools: not a link.
 //!
+//! Another matter inside this one (a `.clauseo` marker folder below the matter's own) gives no
+//! rules either, however deep and however many entries come before it: #1085 denies reading a
+//! matter the conversation is not invited into, its fence lists only so many paths, and a glob
+//! from this matter's folder would reach past that deny (`LaunchDeny::denies_inside` asks the
+//! same for the matters the fence did list).
+//!
 //! The walk fails closed: a matter that can't be resolved or listed, an entry that can't be read
 //! or whose kind can't be read, a walk past [`SCAN_CAP`] entries or past [`WALK_BUDGET`] all
 //! give no rules, and the classifier judges, as before. Only a sub-folder that can't be listed at
@@ -171,7 +177,7 @@ fn readable_in(
             .collect(),
         found => {
             let reason = if found.is_some() {
-                "a link leads out of it"
+                "a link leads out of it, or another matter lies in it"
             } else {
                 "it could not be walked within the cap and the time limit"
             };
@@ -181,7 +187,8 @@ fn readable_in(
     }
 }
 
-/// Whether a link in `matter` leads outside it (`Some(true)`), none does (`Some(false)`), or
+/// Whether a link in `matter` leads outside it or another matter lies in it (`Some(true)`),
+/// neither (`Some(false)`), or
 /// the walk could not tell: `matter` can't be resolved or listed, or it holds more than `cap`
 /// entries (`None`). With no time limit; the tests' form.
 #[cfg(test)]
@@ -231,12 +238,20 @@ pub(crate) fn walk(
                         return Some(true);
                     }
                 }
+                Kind::Folder if folder != root && is_marker(&path) => return Some(true),
                 Kind::Folder => folders.push(path),
                 Kind::File => {}
             }
         }
     }
     Some(false)
+}
+
+/// Whether `path` is named as a matter's marker folder (`.clauseo`, any letter case).
+fn is_marker(path: &Path) -> bool {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| name.eq_ignore_ascii_case(crate::agent::loads::sandbox::MATTER_MARKER))
 }
 
 /// Whether a reparse point with `tag` counts as a link that may lead out of the matter: a

@@ -695,7 +695,8 @@ change from the settings window as `ui` does. R24 (PR5) adds a third to the patc
     fenced matters, replaces the stand-in that asks only about `<data>`), or (iii) a link,
     junction or folder link in it leads outside it, or its walk passes 50,000 entries or 2 s,
     or fails to read the matter, an entry or an entry's kind (`data_fence/matter_links.rs`; the
-    walk never follows a link and runs off the actor). Then the classifier judges, as before.
+    walk never follows a link and runs off the actor), or (iv) the walk finds another matter's
+    `.clauseo` in it, at any depth, past #1085's fence cap too. Then the classifier judges.
     No ask rules for glob characters: they would put a card in
     front of the lawyer.
     `permissions.blockReadsOutsideWorkingDirectories` was tried as a second layer and dropped:
