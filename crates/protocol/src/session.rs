@@ -321,6 +321,15 @@ open_data_enum! {
         /// As `shell_network_blocked`, in a session without web search (the firm or the lawyer
         /// turned it off), so the words offer no web search instead. Once a turn.
         ShellNetworkBlockedNoWebSearch = "shell_network_blocked_no_web_search",
+        /// Clauseo's pre-write guard refused a step of the agent's that would change a paper
+        /// Word (or another program) has open. Codex sends no event of its own for it.
+        HeldOpenBlocked = "held_open_blocked" {
+            /// The paper, as the matter lists it.
+            file: MatterPath,
+        },
+        /// Clauseo's pre-write guard refused a step of the agent's that would change the
+        /// matter's `.codex` folder, the agent's own settings there.
+        CodexFolderBlocked = "codex_folder_blocked",
         _ =>
         /// A kind from a newer Clauseo; written back as the plain string `kind`.
         Unknown,
@@ -330,6 +339,10 @@ open_data_enum! {
         NoticeKind::OutsideMatterBlocked,
         NoticeKind::ShellNetworkBlocked,
         NoticeKind::ShellNetworkBlockedNoWebSearch,
+        NoticeKind::HeldOpenBlocked {
+            file: MatterPath::new("Drafts/Lease.docx").unwrap(),
+        },
+        NoticeKind::CodexFolderBlocked,
         NoticeKind::FilesCameBack {
             files: vec![MatterPath::new("Drafts/memo.docx").unwrap()],
             more: 2,

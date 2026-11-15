@@ -525,4 +525,5 @@ mod codex;
 mod devanagari;
 mod fixtures;
 mod gaps;
+mod record;
 mod timings;

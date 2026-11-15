@@ -67,6 +67,39 @@ function packSkipped(pack: string, reason: string, w: NoticeWords): string | nul
   }
 }
 
+/** The line for a step Clauseo's pre-write guard stopped (the host's held_open_blocked with its paper, or
+ * codex_folder_blocked): the agent named as the outside-matter line names it, the AI where none is known; the paper
+ * named as Versions names it. A kind of another shape gives null. */
+function guardBlocked(kind: NoticeKind, w: NoticeWords, agent?: AgentName): string | null {
+  const name = agentNameOf(agent);
+  if (kind === "codex_folder_blocked")
+    return name === null
+      ? w.th(
+          "Clauseo stopped a step: the AI tried to change its own settings in this matter's folder.",
+        )
+      : w.th(
+          "Clauseo stopped a step: {name} tried to change its own settings in this matter's folder.",
+          {
+            name,
+          },
+        );
+  const held =
+    typeof kind === "object" && kind !== null && "held_open_blocked" in kind
+      ? kind.held_open_blocked
+      : undefined;
+  if (held === undefined || typeof held.file !== "string") return null;
+  const file = namesOf([held.file])(held.file);
+  return name === null
+    ? w.th(
+        "Clauseo stopped a step: the AI tried to change {file}, which is open in Word. Close it in Word, then ask again.",
+        { file },
+      )
+    : w.th(
+        "Clauseo stopped a step: {name} tried to change {file}, which is open in Word. Close it in Word, then ask again.",
+        { name, file },
+      );
+}
+
 /** The line for a notice's kind in the page's language, its slots filled; null for no kind, or a kind this version
  * does not know, so the notice's own text shows. `agent`: the open conversation's agent
  * (useAgentPlan), named as the outside-matter stop names it (stops.ts). */
@@ -99,6 +132,8 @@ export function noticeLine(
       ? w.th("Clauseo stopped a step: the AI tried to go online by running a command.")
       : w.th("Clauseo stopped a step: {name} tried to go online by running a command.", { name });
   }
+  const guard = kind === undefined ? null : guardBlocked(kind, w, agent);
+  if (guard !== null) return guard;
   if (typeof kind === "string") {
     if (kind === "context_not_restored")
       return w.th(

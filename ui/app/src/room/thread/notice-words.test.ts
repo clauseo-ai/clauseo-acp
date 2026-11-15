@@ -92,6 +92,43 @@ test("without web search, the declined download's line offers none, in English a
   expect(noticeLine("shell_network_blocked", en, codex)).toMatch(/can use web search instead\.$/);
 });
 
+test("a step the guard stopped on a paper open in Word names the agent and the paper, in English and Hindi", () => {
+  const kind: NoticeKind = { held_open_blocked: { file: "Drafts/Lease.docx" } };
+  const codex = { kind: "codex", name: "codex-acp" } as const;
+  expect(noticeLine(kind, en, codex)).toBe(
+    `Clauseo stopped a step: ChatGPT tried to change ${iso("Lease.docx")}, which is open in Word. Close it in Word, then ask again.`,
+  );
+  expect(noticeLine(kind, words("hi"), codex)).toBe(
+    `Clauseo ने एक काम रोक दिया: ChatGPT ने ${iso("Lease.docx")} बदलने की कोशिश की, जो Word में खुला है। इसे Word में बंद करें, फिर दोबारा पूछें।`,
+  );
+  expect(noticeLine(kind, en)).toBe(
+    `Clauseo stopped a step: the AI tried to change ${iso("Lease.docx")}, which is open in Word. Close it in Word, then ask again.`,
+  );
+  expect(noticeLine(kind, words("hi"))).toBe(
+    `Clauseo ने एक काम रोक दिया: AI ने ${iso("Lease.docx")} बदलने की कोशिश की, जो Word में खुला है। इसे Word में बंद करें, फिर दोबारा पूछें।`,
+  );
+});
+
+test("a step the guard stopped in the .codex folder names the agent's own settings, in English and Hindi", () => {
+  const codex = { kind: "codex", name: "codex-acp" } as const;
+  expect(noticeLine("codex_folder_blocked", en, codex)).toBe(
+    "Clauseo stopped a step: ChatGPT tried to change its own settings in this matter's folder.",
+  );
+  expect(noticeLine("codex_folder_blocked", words("hi"), codex)).toBe(
+    "Clauseo ने एक काम रोक दिया: ChatGPT ने इस मामले के फ़ोल्डर में अपनी सेटिंग्स बदलने की कोशिश की।",
+  );
+  expect(noticeLine("codex_folder_blocked", en)).toBe(
+    "Clauseo stopped a step: the AI tried to change its own settings in this matter's folder.",
+  );
+  expect(noticeLine("codex_folder_blocked", words("hi"))).toBe(
+    "Clauseo ने एक काम रोक दिया: AI ने इस मामले के फ़ोल्डर में अपनी सेटिंग्स बदलने की कोशिश की।",
+  );
+});
+
+test("a guard notice with no paper gives null, so the row shows its text", () => {
+  expect(noticeLine({ held_open_blocked: {} } as unknown as NoticeKind, en)).toBeNull();
+});
+
 test("no kind (an agent's notice) gives null, so the row shows its own text", () => {
   expect(noticeLine(undefined, en)).toBeNull();
 });

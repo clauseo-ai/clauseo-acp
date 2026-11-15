@@ -182,6 +182,18 @@ export const HI = {
     "Clauseo ने एक काम रोक दिया: {name} ने कमांड चलाकर इंटरनेट से जुड़ने की कोशिश की।",
   "Clauseo stopped a step: the AI tried to go online by running a command.":
     "Clauseo ने एक काम रोक दिया: AI ने कमांड चलाकर इंटरनेट से जुड़ने की कोशिश की।",
+  // Clauseo's pre-write guard refused a step of the agent's (ChatGPT: it shows no step of its own
+  // for it): a paper open in Word, named as Versions names it ({file}), or the agent's own
+  // settings in the matter's .codex folder; {name} as above, the AI where none is known
+  // (provisional, UC-700 to UC-703)
+  "Clauseo stopped a step: {name} tried to change {file}, which is open in Word. Close it in Word, then ask again.":
+    "Clauseo ने एक काम रोक दिया: {name} ने {file} बदलने की कोशिश की, जो Word में खुला है। इसे Word में बंद करें, फिर दोबारा पूछें।",
+  "Clauseo stopped a step: the AI tried to change {file}, which is open in Word. Close it in Word, then ask again.":
+    "Clauseo ने एक काम रोक दिया: AI ने {file} बदलने की कोशिश की, जो Word में खुला है। इसे Word में बंद करें, फिर दोबारा पूछें।",
+  "Clauseo stopped a step: {name} tried to change its own settings in this matter's folder.":
+    "Clauseo ने एक काम रोक दिया: {name} ने इस मामले के फ़ोल्डर में अपनी सेटिंग्स बदलने की कोशिश की।",
+  "Clauseo stopped a step: the AI tried to change its own settings in this matter's folder.":
+    "Clauseo ने एक काम रोक दिया: AI ने इस मामले के फ़ोल्डर में अपनी सेटिंग्स बदलने की कोशिश की।",
   // the composer
   // in the composer's place while the open conversation is archived (U16a's Find opens one): it takes no question
   "Archived. Read only.": "संग्रहीत। केवल पढ़ने के लिए।",

@@ -84,6 +84,37 @@ pub(crate) fn open_append(path: &Path) -> io::Result<std::fs::File> {
     options.open(path)
 }
 
+/// Opens the regular file `path` for appending, creating it (0600 on Unix), never through a link
+/// at its last component and never waiting on a pipe (`O_NOFOLLOW | O_NONBLOCK` on Unix,
+/// `FILE_FLAG_OPEN_REPARSE_POINT` on Windows); anything but a regular file fails. The pre-write
+/// guard's record of its refusals (`pre_write_guard/record.rs`), in a folder the agent can write.
+pub(crate) fn open_append_regular(path: &Path) -> io::Result<std::fs::File> {
+    let mut options = std::fs::OpenOptions::new();
+    options.append(true).create(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options
+            .mode(0o600)
+            .custom_flags(nix::libc::O_NOFOLLOW | nix::libc::O_NONBLOCK);
+    }
+    #[cfg(windows)]
+    std::os::windows::fs::OpenOptionsExt::custom_flags(
+        &mut options,
+        windows::Win32::Storage::FileSystem::FILE_FLAG_OPEN_REPARSE_POINT.0,
+    );
+    regular(options.open(path)?)
+}
+
+/// `file` when it is a regular file, else an error.
+fn regular(file: std::fs::File) -> io::Result<std::fs::File> {
+    if file.metadata()?.is_file() {
+        Ok(file)
+    } else {
+        Err(io::Error::other("not a regular file"))
+    }
+}
+
 /// Renames the file `from` to `to`, replacing a file at `to`: the log file's rotation, and a
 /// rejected `allowed.json` set aside (`blocklist/allowed/integrity.rs`).
 pub(crate) fn rename_file(from: &Path, to: &Path) -> io::Result<()> {
@@ -312,6 +343,25 @@ pub(crate) fn open_read_nofollow(path: &Path) -> io::Result<std::fs::File> {
         windows::Win32::Storage::FileSystem::FILE_FLAG_OPEN_REPARSE_POINT.0,
     );
     options.open(path)
+}
+
+/// [`open_read_nofollow`] for a regular file only, never waiting on a pipe (`O_NONBLOCK` on
+/// Unix): the host's read of the guard's record (`actor/turn/updates/guard_blocks.rs`), which the
+/// agent could swap for a link or a FIFO.
+pub(crate) fn open_read_regular(path: &Path) -> io::Result<std::fs::File> {
+    let mut options = std::fs::OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    std::os::unix::fs::OpenOptionsExt::custom_flags(
+        &mut options,
+        nix::libc::O_NOFOLLOW | nix::libc::O_NONBLOCK,
+    );
+    #[cfg(windows)]
+    std::os::windows::fs::OpenOptionsExt::custom_flags(
+        &mut options,
+        windows::Win32::Storage::FileSystem::FILE_FLAG_OPEN_REPARSE_POINT.0,
+    );
+    regular(options.open(path)?)
 }
 
 /// Opens `path` for reading with a share mode that lets others read but not write or delete

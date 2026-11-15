@@ -544,15 +544,21 @@ fn codex_launch_carries_the_real_guard_hook_and_passes_the_trust_check() {
         panic!("one launch, not {}", envs.len());
     };
     let config: Value = serde_json::from_str(&var(codex, "CODEX_CONFIG").unwrap()).unwrap();
-    let expected = clauseo_host::codex_hook_config(std::path::Path::new(PROGRAM)).unwrap();
-    assert_eq!(config["hooks"], expected);
     let groups = config["hooks"]["PreToolUse"].as_array().unwrap();
     assert_eq!(groups.len(), 1, "{groups:?}");
     assert_eq!(groups[0]["matcher"], "apply_patch|Write|Edit|Bash");
-    assert_eq!(
-        groups[0]["hooks"][0]["command"],
-        format!("'{PROGRAM}' --pre-write-guard")
-    );
+    // The guard records its refusals in the session's run folder, beside its temp folder.
+    let command = groups[0]["hooks"][0]["command"].as_str().unwrap();
+    let record = command
+        .strip_prefix(&format!("'{PROGRAM}' --pre-write-guard --record '"))
+        .and_then(|rest| rest.strip_suffix('\''))
+        .map_or_else(|| panic!("{command}"), std::path::PathBuf::from);
+    assert!(record.ends_with("guard-blocks.jsonl"), "{command}");
+    let tmp = std::path::PathBuf::from(var(codex, "TMPDIR").unwrap());
+    assert_eq!(record.parent(), tmp.parent(), "{command}");
+    let program = std::path::Path::new(PROGRAM);
+    let expected = clauseo_host::codex_hook_config(program, Some(&record)).unwrap();
+    assert_eq!(config["hooks"], expected);
 }
 
 #[test]
