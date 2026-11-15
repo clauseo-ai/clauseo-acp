@@ -160,10 +160,10 @@ pub(super) fn refusal_code(code: &str) -> ErrorCode {
     match code {
         // A change id that is gone, or a file that moved under stetdoc.
         "not_found" | "stale_ref" | "stale_target" | "stale_files" => ErrorCode::WordRevisionsStale,
+        // A file over one of stetdoc's limits (exit 6): size, entries, ratio, XML size or depth.
+        "limit_exceeded" => ErrorCode::WordTooLarge,
         // A file stetdoc cannot read as a Word document (exit 6).
-        "malformed_input" | "limit_exceeded" | "corrupt_complement" | "unsupported_version" => {
-            ErrorCode::WordNotDocx
-        }
+        "malformed_input" | "corrupt_complement" | "unsupported_version" => ErrorCode::WordNotDocx,
         _ => ErrorCode::WordEditFailed,
     }
 }

@@ -1,0 +1,35 @@
+{
+  "UC-280": {
+    "en": "This file is too large for Clauseo to show its tracked changes.",
+    "hi": "यह फ़ाइल इतनी बड़ी है कि Clauseo इसके ट्रैक किए गए बदलाव नहीं दिखा सकता।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "app track (provisional)",
+    "note": "Tracked changes pane: word.too_large in place of the list, for a file over Clauseo's 512,000,000-byte cap or one of stetdoc's limits (limit_exceeded); a damaged or non-Word file keeps UC-125"
+  },
+  "UC-281": {
+    "en": "This file is too large for Clauseo to show its tracked changes.",
+    "hi": "यह फ़ाइल इतनी बड़ी है कि Clauseo इसके ट्रैक किए गए बदलाव नहीं दिखा सकता।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "app track (provisional)",
+    "note": "Tracked changes pane: word.too_large refusing an accept or reject, under the list"
+  },
+  "U3-err-word.too_large": {
+    "en": "This file is too large for Clauseo to show its tracked changes.",
+    "hi": "यह फ़ाइल इतनी बड़ी है कि Clauseo इसके ट्रैक किए गए बदलाव नहीं दिखा सकता।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "app track (provisional)",
+    "note": "The send-refusal entry every error code gets (registry.tsx's ERRORS); the panel's own states are UC-280 and UC-281"
+  }
+}

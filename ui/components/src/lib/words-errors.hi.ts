@@ -260,6 +260,9 @@ export const HI = {
     "{name} मामले का फ़ोल्डर नहीं खोल सका। जाँचें कि वह अब भी वहीं है और उसका नाम नहीं बदला गया है, उसके बाद फिर से प्रयास करें।",
   "The AI couldn't open the matter's folder. Check that it's still there and hasn't been renamed, then Try again.":
     "AI मामले का फ़ोल्डर नहीं खोल सका। जाँचें कि वह अब भी वहीं है और उसका नाम नहीं बदला गया है, उसके बाद फिर से प्रयास करें।",
+  // word.too_large: a file over a size limit, in place of its tracked changes (provisional Hindi)
+  "This file is too large for Clauseo to show its tracked changes.":
+    "यह फ़ाइल इतनी बड़ी है कि Clauseo इसके ट्रैक किए गए बदलाव नहीं दिखा सकता।",
 } as const;
 
 /** The sentences' Hindi, for the copy review to tell hi: later from Hindi. */

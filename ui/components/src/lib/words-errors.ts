@@ -126,6 +126,7 @@ export type ErrorCode =
   | "blackline.not_readable"
   | "blackline.too_large"
   | "blackline.format_unknown"
+  | "word.too_large"
   | "unknown";
 
 /** The thread's own sentence for an answer cut short: its Hindi lives in words-thread.ts, once. */
@@ -318,6 +319,9 @@ export const ERROR_WORDS: Record<WordedCode, ErrorKey> = {
   "word.not_docx":
     "Clauseo can't read the tracked changes in this file. It may be damaged, or it may not be a Word document.",
   "word.edit_failed": "Clauseo couldn't save your decision. The file is as it was.",
+  // provisional (UC-280, UC-281): a file over Clauseo's size cap or one of the Word tool's limits; never the damaged
+  // or not-Word line, which stays for files the tool can't read
+  "word.too_large": "This file is too large for Clauseo to show its tracked changes.",
   // the connection dropped mid-answer (D-050); provisional, with Try again under the answer
   "agent.offline":
     "You're offline, so the answer stopped. The answer so far is kept. Try again when you're back online.",

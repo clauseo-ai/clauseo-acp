@@ -197,6 +197,18 @@ export const UC_WORD: Entry[] = [
     readerWords("The first {shown} are listed here. Accept all and Reject all decide all {n}."),
     wordHost({ ...LIST, truncated: true, total: 600 }),
   ),
+  // a file over a size limit (word.too_large): in place of the list, and after a decision the host refused for it
+  panel(
+    "UC-280",
+    errorWords("This file is too large for Clauseo to show its tracked changes."),
+    wordHost("word.too_large"),
+  ),
+  panel(
+    "UC-281",
+    errorWords("This file is too large for Clauseo to show its tracked changes."),
+    wordHost(LIST, "word.too_large"),
+    [TRACKED, ACCEPT],
+  ),
 ];
 
 /** registry-uc-blackline.tsx's UC_ALL (registry-uc.tsx's UC, then the Word blackline's scenes), then these. */
