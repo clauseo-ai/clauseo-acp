@@ -139,7 +139,7 @@ fn a_line_that_does_not_read_leaves_the_rest() {
     let whole = read(fixture!("view-nested-inner.json"))
         .blackline
         .paragraphs;
-    let view = with_text(&fixture!("view-nested-inner.json"), |text| {
+    let view = with_text(fixture!("view-nested-inner.json"), |text| {
         text.replace("p3 Inner cell ", "p3 Inner } cell ")
     });
     let read = read_view(&view).unwrap();
@@ -159,7 +159,7 @@ fn a_line_that_does_not_read_leaves_the_rest() {
 /// Content stetdoc collapses (`{opaque …}`) is not shown, and says so.
 #[test]
 fn an_opaque_line_is_a_part_not_shown() {
-    let view = with_text(&fixture!("view-nested.json"), |text| {
+    let view = with_text(fixture!("view-nested.json"), |text| {
         text.replace("p6 Last", "{opaque toc p7..p9 3 paragraphs}\np6 Last")
     });
     let read = read_view(&view).unwrap();
@@ -171,7 +171,7 @@ fn an_opaque_line_is_a_part_not_shown() {
 /// empty blackline.
 #[test]
 fn a_view_with_nothing_readable_fails() {
-    let view = |text: &str| with_text(&fixture!("view-nested.json"), |_| text.to_owned());
+    let view = |text: &str| with_text(fixture!("view-nested.json"), |_| text.to_owned());
     let failure = read_view(&view("{stet 1 mode=redline}\np1 a } b\nzz")).unwrap_err();
     assert!(
         matches!(failure, ViewFailure::NothingRead { skipped: 2, .. }),
@@ -185,7 +185,7 @@ fn a_view_with_nothing_readable_fails() {
 /// A header with another format id, or none, is refused: its lines may mean something else.
 #[test]
 fn a_format_other_than_stet_1_is_refused() {
-    let view = |text: &str| with_text(&fixture!("view-nested.json"), |_| text.to_owned());
+    let view = |text: &str| with_text(fixture!("view-nested.json"), |_| text.to_owned());
     for text in [
         "{stet 2 view=body mode=redline}\np1 a",
         "p1 a",
@@ -202,13 +202,10 @@ fn a_format_other_than_stet_1_is_refused() {
 
 /// `depth` tables, one inside the other, each with a paragraph, and a paragraph after them.
 fn nested(depth: usize) -> String {
-    let mut text = String::new();
-    for level in 1..=depth {
-        text.push_str(&format!(
-            "t{level} {{+}} {{table cols=1}}\nr{level} {{row}}\n"
-        ));
-        text.push_str(&format!("p{level} Level {level}.\n"));
-    }
+    let opens = (1..=depth).map(|level| {
+        format!("t{level} {{+}} {{table cols=1}}\nr{level} {{row}}\np{level} Level {level}.\n")
+    });
+    let mut text: String = opens.collect();
     text.push_str(&"{/table}\n".repeat(depth));
     text.push_str("p0 After.");
     text
