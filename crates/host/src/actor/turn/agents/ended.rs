@@ -164,15 +164,7 @@ pub(in super::super) fn on_ended(actor: &mut Actor, thread: ThreadId, ended: End
         denied_data_folder,
         "agent ended"
     );
-    // Before its session was ready the agent did not start; after, the answer stopped.
-    let exited = if session.is_none() {
-        Error::refused(
-            ErrorCode::AgentLaunchFailed,
-            super::start_failure::EXITED_AT_START,
-        )
-    } else {
-        Error::refused(ErrorCode::AgentExited, "the agent exited")
-    };
+    let exited = exited(session.is_none());
     for item in waiting {
         fail_waiting(actor, thread, &item, &exited);
     }
@@ -244,5 +236,18 @@ pub(in super::super) fn log_detach(actor: &mut Actor, thread: ThreadId, reason: 
     });
     if let Err(error) = sent {
         tracing::warn!(%thread, error = %Cause(&error), "the detach was not logged");
+    }
+}
+
+/// What the work waiting for an agent that ended fails with: before its session was ready the
+/// agent did not start (`agent.launch_failed`); after, the answer stopped (`agent.exited`).
+fn exited(before_session: bool) -> Error {
+    if before_session {
+        Error::refused(
+            ErrorCode::AgentLaunchFailed,
+            super::start_failure::EXITED_AT_START,
+        )
+    } else {
+        Error::refused(ErrorCode::AgentExited, "the agent exited")
     }
 }

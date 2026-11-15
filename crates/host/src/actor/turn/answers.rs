@@ -380,11 +380,13 @@ fn answered<T>(same: bool, result: Result<T, clauseo_acp::Error>) -> Result<T, E
             "the agent stopped before it answered",
         ));
     }
-    result.map_err(|error| match error {
-        clauseo_acp::Error::Rpc { method, code, .. } => Error::refused(
-            ErrorCode::AgentSettingRefused,
-            format!("the agent answered {method} with error {code}"),
-        ),
-        other => Error::Acp(other),
+    result.map_err(|error| {
+        if let clauseo_acp::Error::Rpc { method, code, .. } = &error {
+            return Error::refused(
+                ErrorCode::AgentSettingRefused,
+                format!("the agent answered {method} with error {code}"),
+            );
+        }
+        Error::Acp(error)
     })
 }

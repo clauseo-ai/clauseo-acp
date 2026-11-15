@@ -11,11 +11,10 @@ use super::failures::until_ended;
 use super::offline::ended;
 use super::rig::Rig;
 use super::start_offline::start_rig;
-use crate::actor::input::{AgentInput, Input};
-use crate::actor::turn::agents::Stage;
-use crate::actor::turn::agents::start_timer::START_WAIT;
+use crate::actor::input::Input;
+use crate::actor::turn::agents::{START_WAIT, Stage};
 use crate::actor::turn::offline::probe::ReachProbe;
-use crate::agent::Ended;
+use crate::agent::{AgentInput, Ended};
 
 /// Reads `initialize` and never answers it; waits on stdin, and exits once it closes.
 const SILENT: &str = r#"{"expect":{"method":"initialize","as":"init","params":{"protocolVersion":1}}}
@@ -48,7 +47,7 @@ fn timed_out(rig: &mut Rig) -> Option<ErrorCode> {
     assert_eq!(stage, Some(Stage::Initializing), "stopped before the bound");
     // The clock alone moves: `hold_next` handles the deadline and holds the agent's end.
     rig.clock.advance(std::time::Duration::from_millis(1));
-    let ended = |_: &crate::actor::Actor, input: &Input| {
+    let agent_end = |_: &crate::actor::Actor, input: &Input| {
         matches!(
             input,
             Input::Agent {
@@ -57,7 +56,7 @@ fn timed_out(rig: &mut Rig) -> Option<ErrorCode> {
             }
         )
     };
-    rig.hold_next("the agent's end", ended);
+    rig.hold_next("the agent's end", agent_end);
     assert!(
         matches!(
             rig.held.last(),

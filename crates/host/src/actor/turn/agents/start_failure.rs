@@ -70,17 +70,18 @@ pub(in super::super) fn launch_failed(actor: &mut Actor, thread: ThreadId, error
     let refusal = crate::agent::folder_access::session_refusal(error);
     // A connection that closed before the session was ready, or an error the agent answered a
     // call of its start with (a mode switch before the attach): the agent did not start.
-    let restated = match (&refusal, error.code()) {
-        (None, ErrorCode::AgentExited) => Some(Error::refused(
+    let rpc = matches!(error, Error::Acp(clauseo_acp::Error::Rpc { .. }));
+    let restated = if refusal.is_some() {
+        None
+    } else if error.code() == ErrorCode::AgentExited {
+        Some(Error::refused(
             ErrorCode::AgentLaunchFailed,
             EXITED_AT_START,
-        )),
-        (None, ErrorCode::AgentProtocolError)
-            if matches!(error, Error::Acp(clauseo_acp::Error::Rpc { .. })) =>
-        {
-            Some(Error::refused(ErrorCode::AgentLaunchFailed, error.detail()))
-        }
-        _ => None,
+        ))
+    } else if rpc && error.code() == ErrorCode::AgentProtocolError {
+        Some(Error::refused(ErrorCode::AgentLaunchFailed, error.detail()))
+    } else {
+        None
     };
     let error = refusal.as_ref().or(restated.as_ref()).unwrap_or(error);
     agent.link.stop();
