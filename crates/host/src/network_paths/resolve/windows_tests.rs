@@ -171,7 +171,8 @@ fn long_matter(prefix: &str) -> String {
 /// verbatim form and a device path stay as they are, and nothing network turns local.
 #[test]
 fn a_long_verbatim_drive_path_compares_as_its_plain_form() {
-    let (verbatim, plain) = (long_matter(r"\\?\C:\"), long_matter(r"C:\"));
+    let plain = long_matter(r"C:\");
+    let verbatim = format!(r"\\?\{plain}");
     assert!(plain.len() >= 260);
     assert_eq!(comparable(Path::new(&verbatim)), Path::new(&plain));
     assert_eq!(comparable(Path::new(&plain)), Path::new(&plain));
